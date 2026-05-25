@@ -1,0 +1,9 @@
+{
+  "$schema": "https://oxc.rs/schema/oxfmt.json",
+  "lineWidth": 100,
+  "useTabs": false,
+  "tabWidth": 2,
+  "semicolons": true,
+  "quoteStyle": "double",
+  "trailingComma": "all"
+}

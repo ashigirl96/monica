@@ -1,0 +1,28 @@
+[package]
+name = "monica"
+version = "0.1.0"
+description = "monica desktop app"
+authors = ["ashigirl96"]
+edition = "2021"
+
+[lib]
+name = "monica_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", default-features = false, features = [] }
+
+[dependencies]
+tauri = { version = "2", default-features = false, features = ["wry"] }
+serde = { version = "1", default-features = false, features = ["derive"] }
+serde_json = { version = "1", default-features = false, features = ["std"] }
+
+[profile.dev]
+incremental = true
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = "s"
+panic = "abort"
+strip = true
