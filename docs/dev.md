@@ -237,6 +237,16 @@ bunx shadcn@latest add dialog
 
 現状（依存ゼロ）: `.github/workflows/ci.yml` でサイズを echo するだけ。**重い依存を入れ始めたら閾値ゲートを足す**こと。
 
+### 7.5 Git フック（pre-push で `just check`）
+
+`.githooks/pre-push` が `just check` (= oxlint + oxfmt --check + cargo clippy) を実行する。これを通らないと push できない。仕組み:
+
+- `package.json` の `prepare` script が `bun install` 時に `git config core.hooksPath .githooks` を自動セット
+- 既存 clone で hookPath が未設定なら手動で `git config core.hooksPath .githooks` を一度撃つ
+- フックを一時的に無効化したいときだけ `git push --no-verify`（ただし CLAUDE.md の方針上、原則使わない）
+
+Husky/lefthook は **入れない**。依存ゼロを保つために `prepare` script + 素の git フックで完結させている。
+
 ---
 
 ## 8. 計測 — サイズが本当に減ったかを確認する

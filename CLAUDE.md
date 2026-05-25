@@ -31,6 +31,10 @@ just size          # dist/ と bundle/ のサイズ表示
 
 レシピ一覧は `justfile` または @docs/dev.md §11。
 
+## Git フック
+
+`bun install` が `package.json` の `prepare` で `git config core.hooksPath .githooks` を自動設定する。`.githooks/pre-push` が `just check` を走らせるので、push のたびに lint + fmt-check + clippy が通る必要がある。手動で再設定するなら `git config core.hooksPath .githooks`。
+
 ## 即落ちする地雷
 
 1. **Rust クレート追加時に `default-features = false` を忘れる** → `tokio` や `reqwest` がフル feature で入ってサイズが跳ねる
