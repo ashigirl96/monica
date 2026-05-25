@@ -11,6 +11,9 @@ stats.html
 src-tauri/target/
 src-tauri/gen/schemas/
 
+# librarian local cache
+src-tauri/docs/
+
 # logs / OS
 *.log
 .DS_Store
