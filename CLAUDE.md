@@ -35,6 +35,19 @@ just size          # dist/ と bundle/ のサイズ表示
 
 `bun install` が `package.json` の `prepare` で `git config core.hooksPath .githooks` を自動設定する。`.githooks/pre-push` が `just check` を走らせるので、push のたびに lint + fmt-check + clippy が通る必要がある。手動で再設定するなら `git config core.hooksPath .githooks`。
 
+## Linear 連携
+
+team は `DAW` (workspace `dawkinsuke`)。設定は `.linear.toml` にコミット済み、API キーは OS keyring。
+
+```bash
+linear issue start DAW-123   # issue 起点ブランチを切って "In Progress" に
+linear issue view            # 現ブランチの issue を表示
+linear issue pr              # gh CLI 経由で issue タイトル/本文付き PR を作成
+linear issue create          # 新規 issue (対話)
+```
+
+Claude エージェントから operate するときはグローバル登録済の `linear-cli` skill を使う（issue 作成・更新は `--description-file` / `--body-file` 経由で markdown を渡す）。
+
 ## 即落ちする地雷
 
 1. **Rust クレート追加時に `default-features = false` を忘れる** → `tokio` や `reqwest` がフル feature で入ってサイズが跳ねる
