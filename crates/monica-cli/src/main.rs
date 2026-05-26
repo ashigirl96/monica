@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use monica_core::start::{self, StartOutcome};
 
 #[derive(Parser)]
 #[command(name = "monica", version, about = "Monica Issue Runner")]
@@ -22,12 +23,31 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Start { .. }
-        | Commands::Status
-        | Commands::Review { .. }
-        | Commands::Pr { .. } => {
+        Commands::Start { target } => {
+            if let Err(e) = start::start(&target).map(print_outcome) {
+                eprintln!("monica: {e}");
+                std::process::exit(1);
+            }
+        }
+        Commands::Status | Commands::Review { .. } | Commands::Pr { .. } => {
             eprintln!("monica: not yet implemented (see issue #11)");
             std::process::exit(1);
         }
     }
+}
+
+fn print_outcome(outcome: StartOutcome) {
+    let m = &outcome.manifest;
+    println!("Started session {}", m.id);
+    println!("  repo:     {}", m.repo);
+    println!("  issue:    #{} {}", m.issue_number, m.issue_url);
+    println!("  branch:   {}", m.branch);
+    println!("  worktree: {}", m.worktree_path);
+    println!("  manifest: {}", outcome.manifest_path.display());
+    println!("  prompt:   {}", outcome.prompt_path.display());
+    println!();
+    println!("Next: cd {} && claude", m.worktree_path);
+    println!();
+    println!("--- prompt ---");
+    print!("{}", outcome.prompt);
 }

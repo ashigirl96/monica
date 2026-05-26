@@ -8,7 +8,8 @@ Issue Runner → Session Tracker → Status Dashboard → Kanban → Terminal/AD
 
 ## Todo
 
-- [ ] #11 `monica start <repo>#<issue>` を実装する（ロジックを `monica-core` に書き `monica-cli` から呼ぶ）
+- [ ] `monica status` / `review` / `pr` を実装（contract §8 の優先順位 2→3→4）
+- [ ] repo registry（`~/.monica/config.yaml`）を実装し、対象 repo 外からの `monica start` を可能にする
 
 ## Timeline
 
@@ -17,3 +18,4 @@ Issue Runner → Session Tracker → Status Dashboard → Kanban → Terminal/AD
 - 2026-05-27 Cargo workspace 化。src-tauri を crates/monica-app へ移し、profile を root に集約（将来の monica-core/monica-cli と並べる構成にするため）。
 - 2026-05-27 monica-core（空 lib）と monica-cli（clap で M0 コマンドの枠）の skeleton を追加。以後は機能追加だけで進められる土台にした。
 - 2026-05-27 just dev で monica CLI を debug ビルドして repo 直下 ./monica に作成、just install-local で release CLI を ~/.local/bin にも配置するようにした。
+- 2026-05-27 #11 monica start を実装。owner/repo#issue から worktree/branch/manifest/prompt を生成（git/gh は shell out、ロジックは monica-core）。

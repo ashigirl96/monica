@@ -254,6 +254,8 @@ binary 名は `monica`。
 
 M0 では Claude Code の完全自動制御はしない。「prompt を生成して起動しやすくする」だけでもよい。
 
+**M0 実装メモ**: repo registry（§7）は未実装のため、`monica start` は**対象 repo の中で**実行する（worktree は cwd の `git rev-parse --show-toplevel` 配下の `.worktrees/` に作る）。target は `#123` / `123`（current repo）、または current repo と一致する `owner/repo#123`。base branch は `origin/<default>` → `<default>` → `HEAD` の順で解決。prompt は `~/.monica/sessions/<id>.prompt.md` にも保存する。`monica#123`（registry 名）の解決は registry 実装後。
+
 ### 8.2 `monica status`
 
 全 manifest を読み、一覧する。
