@@ -53,6 +53,11 @@ export default defineConfig(({ mode }) => ({
           if (!id.includes("node_modules")) return;
           if (id.includes("@radix-ui/")) return "radix";
           if (id.includes("react-dom")) return "react-dom";
+          if (id.includes("@milkdown/") || id.includes("prosemirror-")) return "milkdown";
+          if (id.includes("@codemirror/") || id.includes("codemirror") || id.includes("@lezer/"))
+            return "codemirror";
+          if (id.includes("katex") || id.includes("remark-math") || id.includes("dompurify"))
+            return "milkdown-extras";
         },
       },
     },
