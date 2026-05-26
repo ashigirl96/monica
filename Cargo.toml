@@ -1,0 +1,15 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+# profile はワークスペース root にのみ効く。メンバー crate 側に書いても無視される。
+# "Five Aces"（docs/dev.md §1）を崩さないこと。
+[profile.dev]
+incremental = true
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = "s"
+panic = "abort"
+strip = true

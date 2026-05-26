@@ -1,0 +1,12 @@
+[package]
+name = "monica-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "monica"
+path = "src/main.rs"
+
+[dependencies]
+monica-core = { path = "../monica-core" }
+clap = { version = "4", features = ["derive"] }
