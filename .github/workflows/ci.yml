@@ -24,13 +24,9 @@ jobs:
       - run: bunx oxfmt --check
 
   build:
-    name: tauri build (${{ matrix.platform }})
+    name: tauri build (macos)
     needs: lint
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [macos-latest, ubuntu-22.04, windows-latest]
-    runs-on: ${{ matrix.platform }}
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
 
@@ -39,16 +35,6 @@ jobs:
           bun-version: latest
 
       - uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Linux WebKit dependencies
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf
 
       - uses: Swatinem/rust-cache@v2
         with:
