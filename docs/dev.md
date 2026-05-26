@@ -21,7 +21,7 @@
 
 ---
 
-## 1. Rust release profile — "Five Aces"（`src-tauri/Cargo.toml`）
+## 1. Rust release profile — "Five Aces"（ワークスペース root の `Cargo.toml`）
 
 `[profile.release]` の **5 項目すべて** が入っていることが前提。1 つでも欠けると目に見えてサイズが増える。
 
@@ -44,7 +44,7 @@ strip = true        # デバッグシンボル除去
 
 トレードオフ: release ビルド時間とインクリメンタル性が悪化する。**`[profile.dev]` 側は `incremental = true` のまま**にしておくこと。
 
-実装: `src-tauri/Cargo.toml`
+実装: ワークスペース root の `Cargo.toml`。profile はメンバー crate（`crates/monica-app` など）側に書いても Cargo に無視されるため、必ず root に置く。
 
 ---
 
@@ -78,7 +78,7 @@ serde_json = { version = "1", default-features = false, features = ["std"] }
 
 ---
 
-## 3. Tauri 設定（`src-tauri/tauri.conf.json`）
+## 3. Tauri 設定（`crates/monica-app/tauri.conf.json`）
 
 ### 3.1 `removeUnusedCommands` は **必ず ON**
 
@@ -346,18 +346,18 @@ just size                                 # dist/ と bundle/ をまとめて表
 
 ## 12. 関連ファイル早見表
 
-| 役割                   | パス                                                       |
-| ---------------------- | ---------------------------------------------------------- |
-| Rust release profile   | `src-tauri/Cargo.toml` `[profile.release]`                 |
-| Rust 依存 features     | `src-tauri/Cargo.toml` `[dependencies]`                    |
-| `removeUnusedCommands` | `src-tauri/tauri.conf.json` `build.removeUnusedCommands`   |
-| Tauri capabilities     | `src-tauri/capabilities/default.json`                      |
-| Tauri commands         | `src-tauri/src/lib.rs`                                     |
-| Vite manualChunks      | `vite.config.ts` `build.rollupOptions.output.manualChunks` |
-| esbuild drop/pure      | `vite.config.ts` `esbuild`                                 |
-| build.target           | `vite.config.ts` `build.target`                            |
-| Tailwind / CSS変数     | `src/styles/globals.css`                                   |
-| shadcn 設定            | `components.json`                                          |
-| oxlint 設定            | `.oxlintrc.json`                                           |
-| oxfmt 設定             | `.oxfmtrc.json`                                            |
-| CI                     | `.github/workflows/ci.yml`                                 |
+| 役割                   | パス                                                             |
+| ---------------------- | ---------------------------------------------------------------- |
+| Rust release profile   | ワークスペース root `Cargo.toml` `[profile.release]`             |
+| Rust 依存 features     | `crates/monica-app/Cargo.toml` `[dependencies]`                  |
+| `removeUnusedCommands` | `crates/monica-app/tauri.conf.json` `build.removeUnusedCommands` |
+| Tauri capabilities     | `crates/monica-app/capabilities/default.json`                    |
+| Tauri commands         | `crates/monica-app/src/lib.rs`                                   |
+| Vite manualChunks      | `vite.config.ts` `build.rollupOptions.output.manualChunks`       |
+| esbuild drop/pure      | `vite.config.ts` `esbuild`                                       |
+| build.target           | `vite.config.ts` `build.target`                                  |
+| Tailwind / CSS変数     | `src/styles/globals.css`                                         |
+| shadcn 設定            | `components.json`                                                |
+| oxlint 設定            | `.oxlintrc.json`                                                 |
+| oxfmt 設定             | `.oxfmtrc.json`                                                  |
+| CI                     | `.github/workflows/ci.yml`                                       |

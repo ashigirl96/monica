@@ -1,18 +1,18 @@
-# src-tauri 固有の罠
+# monica-app（Tauri）固有の罠
 
-`src-tauri/` 配下で作業するときに気をつける点だけをまとめる。
+`crates/monica-app/` 配下で作業するときに気をつける点だけをまとめる。
 全体方針 (Tauri 2 + Bun + Vite + サイズ最優先) はリポジトリルートの
-[CLAUDE.md](../CLAUDE.md) と [docs/dev.md](../docs/dev.md) を参照すること。
+[CLAUDE.md](../../CLAUDE.md) と [docs/dev.md](../../docs/dev.md) を参照すること。
 
 ## 絶対に崩さないもの
 
-1. **`[profile.release]` の Five Aces** (`Cargo.toml`)
+1. **`[profile.release]` の Five Aces**（**ワークスペース root の `Cargo.toml`**）
    `codegen-units = 1` / `lto = "fat"` / `opt-level = "s"` / `panic = "abort"` / `strip = true`
-   どれか 1 つでも欠けると配布バイナリが目に見えて膨らむ。`docs/dev.md §1` 参照。
+   どれか 1 つでも欠けると配布バイナリが目に見えて膨らむ。profile はメンバー crate 側に書いても Cargo に無視されるので、必ず root に置く。`docs/dev.md §1` 参照。
 2. **`removeUnusedCommands: true`** (`tauri.conf.json` の `build`)
    フロントが `invoke()` していない `#[tauri::command]` をビルド時に削除する。
    これを切ると Tauri 内蔵コマンドが 70 個近く残って肥大化する。
-3. **`[profile.dev].incremental = true`**
+3. **`[profile.dev].incremental = true`**（ワークスペース root の `Cargo.toml`）
    release 側の重い最適化を dev に持ち込まないため必要。
 
 ## 依存クレート追加時のチェック

@@ -38,13 +38,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: .
 
       - run: bun install --frozen-lockfile
 
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_APP_PATH: crates/monica-app
 
       - name: Report bundle size
         if: always()
@@ -53,4 +54,4 @@ jobs:
           echo "=== dist/ size ==="
           du -sh dist 2>/dev/null || true
           echo "=== Tauri bundle ==="
-          ls -lhR src-tauri/target/release/bundle 2>/dev/null || true
+          ls -lhR target/release/bundle 2>/dev/null || true
