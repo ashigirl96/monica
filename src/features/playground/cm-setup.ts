@@ -19,6 +19,8 @@ import {
   lineNumbers,
   type ViewUpdate,
 } from "@codemirror/view";
+import { vim } from "@replit/codemirror-vim";
+
 export type CmFocusListener = (focused: boolean) => void;
 export type CmChangeListener = (doc: string) => void;
 
@@ -30,7 +32,9 @@ export interface CreateCmStateOptions {
   onChange: CmChangeListener;
 }
 
+// vim() must come first so its keymap takes precedence over defaultKeymap.
 const baseExtensions: Extension[] = [
+  vim(),
   lineNumbers(),
   highlightActiveLineGutter(),
   highlightSpecialChars(),
