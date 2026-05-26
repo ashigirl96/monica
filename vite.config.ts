@@ -38,17 +38,19 @@ export default defineConfig(({ mode }) => ({
 
   envPrefix: ["VITE_", "TAURI_ENV_*"],
 
-  esbuild: {
-    drop: mode === "production" ? ["debugger"] : [],
-    pure: mode === "production" ? ["console.debug", "console.info", "console.trace"] : [],
-  },
-
   build: {
     target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome120" : "es2022",
-    minify: process.env.TAURI_ENV_DEBUG ? false : "esbuild",
+    minify: process.env.TAURI_ENV_DEBUG ? false : "oxc",
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
+        minify: {
+          compress: {
+            treeshake: {
+              manualPureFunctions: ["console.debug", "console.info", "console.trace"],
+            },
+          },
+        },
         manualChunks(id) {
           if (!id.includes("node_modules")) return;
           if (id.includes("@radix-ui/")) return "radix";
