@@ -7,6 +7,10 @@ dist-ssr/
 stats.html
 *.tsbuildinfo
 
+# librarian-cached external repos (read-only references for skills)
+docs/repos/
+docs/sources.json
+
 # tauri
 src-tauri/target/
 src-tauri/gen/schemas/

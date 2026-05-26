@@ -25,13 +25,13 @@ preview:
     bun --bun vite preview
 
 lint:
-    bunx oxlint
+    bunx oxlint src
 
 fmt:
-    bunx oxfmt
+    bunx oxfmt src
 
 fmt-check:
-    bunx oxfmt --check
+    bunx oxfmt --check src
 
 check: lint fmt-check
     cd src-tauri && cargo clippy --all-targets -- -D warnings
