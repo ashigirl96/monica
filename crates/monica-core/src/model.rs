@@ -289,6 +289,33 @@ pub struct Run {
     pub updated_at: String,
 }
 
+impl Run {
+    pub(crate) fn from_row(row: &Row) -> Result<Self> {
+        let status: String = row.get("status")?;
+        Ok(Run {
+            id: row.get("id")?,
+            work_item_id: row.get("work_item_id")?,
+            agent: row.get("agent")?,
+            branch: row.get("branch")?,
+            worktree_path: row.get("worktree_path")?,
+            status: status.parse()?,
+            settings_path: row.get("settings_path")?,
+            created_at: row.get("created_at")?,
+            updated_at: row.get("updated_at")?,
+        })
+    }
+}
+
+/// Input for starting a run attempt. The `id`, status, and timestamps are assigned by the store:
+/// [`crate::Db::start_run`] always inserts at [`Status::SettingUp`].
+#[derive(Debug, Clone)]
+pub struct NewRun {
+    pub work_item_id: String,
+    pub agent: Option<Agent>,
+    pub branch: Option<String>,
+    pub worktree_path: Option<String>,
+}
+
 /// A status/hook event recorded against a work item or run. Persisted from issue G onward.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Event {

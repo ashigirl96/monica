@@ -21,3 +21,25 @@ pub fn db_path() -> Result<PathBuf> {
 pub fn runs_dir() -> Result<PathBuf> {
     Ok(base_dir()?.join("runs"))
 }
+
+/// Per-run artifact directory: `<base>/runs/<run_id>/` (holds `setup.log`, later session output).
+pub fn run_dir(run_id: &str) -> Result<PathBuf> {
+    Ok(runs_dir()?.join(run_id))
+}
+
+/// Default root under which `issue run` creates git worktrees when a project has no
+/// `worktree_root` set: `<base>/worktrees/`.
+pub fn worktrees_dir() -> Result<PathBuf> {
+    Ok(base_dir()?.join("worktrees"))
+}
+
+/// Serializes tests that mutate process-global `MONICA_HOME` / `HOME`. Cargo runs tests in
+/// threads within one process, so without this they race. Poisoning is ignored: a panic in one
+/// env test must not cascade-fail the others.
+#[cfg(test)]
+pub(crate) fn test_env_guard() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}

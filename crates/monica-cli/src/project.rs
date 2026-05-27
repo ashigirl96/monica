@@ -220,7 +220,7 @@ const SETUP_SH_TEMPLATE: &str = r#"#!/usr/bin/env bash
 set -euo pipefail
 
 # Monica runs this in the worktree before launching the agent. Keep it idempotent.
-# Available env: MONICA_ID, MONICA_RUN_ID, MONICA_PROJECT_ID (branch / worktree path も渡される)
+# Available env: MONICA_ID, MONICA_RUN_ID, MONICA_PROJECT_ID, MONICA_BRANCH, MONICA_WORKTREE
 # 例:
 #   corepack enable
 #   pnpm install --frozen-lockfile
