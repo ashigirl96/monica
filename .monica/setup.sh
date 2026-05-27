@@ -6,3 +6,4 @@ set -euo pipefail
 # 例:
 #   corepack enable
 #   pnpm install --frozen-lockfile
+direnv allow .
