@@ -1,11 +1,16 @@
 use anyhow::{Context, Result};
 use rusqlite::Connection;
+use rusqlite_migration::{Migrations, M};
 
-/// Schema migrations applied in order. The index + 1 is the resulting `user_version`,
-/// so a new schema change is added by appending one batch to this slice.
-const MIGRATIONS: &[&str] = &[
-    // v1: storage foundation (work items, runs, events, external refs) + MON-id counter.
-    r#"
+/// Ordered schema migrations, tracked by `PRAGMA user_version` (rusqlite_migration
+/// uses the list position as the version). Append an `M::up(...)` to add a version;
+/// never reorder or remove existing entries, or already-migrated databases diverge.
+fn migrations() -> Migrations<'static> {
+    Migrations::new(vec![M::up(V1)])
+}
+
+/// v1: storage foundation (work items, runs, events, external refs) + MON-id counter.
+const V1: &str = r#"
     CREATE TABLE mon_counter (n INTEGER PRIMARY KEY AUTOINCREMENT);
 
     CREATE TABLE work_items (
@@ -53,21 +58,21 @@ const MIGRATIONS: &[&str] = &[
       url          TEXT,
       created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
     );
-    "#,
-];
+"#;
 
-/// Apply any migrations newer than the connection's `user_version`. Idempotent: a
-/// fully-migrated database is a no-op. Each batch + version bump commits atomically.
+/// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
-    let mut version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    while (version as usize) < MIGRATIONS.len() {
-        let batch = MIGRATIONS[version as usize];
-        let tx = conn.transaction()?;
-        tx.execute_batch(batch)
-            .with_context(|| format!("failed to apply migration v{}", version + 1))?;
-        version += 1;
-        tx.pragma_update(None, "user_version", version)?;
-        tx.commit()?;
+    migrations()
+        .to_latest(conn)
+        .context("failed to apply database migrations")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migration_set_is_valid() {
+        migrations().validate().expect("migrations should validate");
     }
-    Ok(())
 }
