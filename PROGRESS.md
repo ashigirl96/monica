@@ -28,3 +28,4 @@ Issue Runner → Session Tracker → Status Dashboard → Kanban → Terminal/AD
 - 2026-05-28 `just build`/`install-local` でも `RUSTC_WRAPPER` を空にして、wrapper 付き環境でも Tauri ビルドが落ちないようにした。
 - 2026-05-28 #17 monica issue status を実装。core で WorkItem+最新 run を一覧化し、CLI で status/project filter と `gh pr list` 補完による BRANCH/PR 表示を追加した（D 完了）。
 - 2026-05-28 monica に `completions` サブコマンド(clap_complete)を追加。`.envrc`(direnv)で repo 内だけ ./monica を `monica` として PATH に乗せ、dev-cli が ~/.zsh/completions/\_monica を再生成して補完を効かせる。
+- 2026-05-28 `.claude/skills/codex` を追加し、`codex-rpc` ではなくローカル `codex exec` を直接使う設計/レビュー用スキルを整備した（このリポジトリ運用に合わせるため）。
