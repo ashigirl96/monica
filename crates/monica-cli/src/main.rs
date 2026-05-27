@@ -1,7 +1,8 @@
 mod issue;
 mod project;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::Shell;
 
 #[derive(Parser)]
 #[command(name = "monica", version, about = "Monica Issue Runner")]
@@ -26,6 +27,8 @@ enum Commands {
     Review { target: String },
     /// Push the branch and open a PR for an issue
     Pr { target: String },
+    /// Print a shell completion script (e.g. `monica completions zsh`)
+    Completions { shell: Shell },
 }
 
 fn main() {
@@ -39,6 +42,12 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
         Commands::Project(cmd) => project::run(cmd),
         Commands::Issue(cmd) => issue::run(cmd),
+        Commands::Completions { shell } => {
+            let mut cmd = Cli::command();
+            let name = cmd.get_name().to_string();
+            clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
+            Ok(())
+        }
         Commands::Start { .. }
         | Commands::Status
         | Commands::Review { .. }

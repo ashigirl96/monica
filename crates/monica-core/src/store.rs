@@ -3,7 +3,8 @@ use rusqlite::params;
 
 use crate::db::Db;
 use crate::model::{
-    Agent, ExternalRef, NewWorkItem, PermissionMode, Project, Provider, Status, WorkItem,
+    Agent, ExternalRef, IssueStatusRow, NewWorkItem, PermissionMode, Project, Provider, Status,
+    WorkItem,
 };
 
 const WORK_ITEM_COLUMNS: &str = "id, kind, status, phase, title, body, project_id, \
@@ -111,6 +112,57 @@ impl Db {
         let mut items = Vec::new();
         while let Some(row) = rows.next()? {
             items.push(WorkItem::from_row(row)?);
+        }
+        Ok(items)
+    }
+
+    pub fn list_issue_statuses(
+        &self,
+        status: Option<Status>,
+        project: Option<&str>,
+    ) -> Result<Vec<IssueStatusRow>> {
+        let status = status.map(Status::as_str);
+        let mut stmt = self.conn().prepare(
+            "SELECT
+               wi.id AS work_item_id,
+               coalesce(project.repo, issue_ref.repo, wi.project_id) AS project,
+               issue_ref.number AS github_issue_number,
+               wi.status AS work_item_status,
+               latest_run.branch AS branch
+             FROM work_items wi
+             LEFT JOIN projects project
+               ON project.id = wi.project_id
+             LEFT JOIN external_refs issue_ref
+               ON issue_ref.id = (
+                 SELECT er.id
+                 FROM external_refs er
+                 WHERE er.work_item_id = wi.id AND er.ref_type = 'github_issue'
+                 ORDER BY er.id DESC
+                 LIMIT 1
+               )
+             LEFT JOIN runs latest_run
+               ON latest_run.id = (
+                 SELECT r.id
+                 FROM runs r
+                 WHERE r.work_item_id = wi.id
+                 ORDER BY r.created_at DESC, r.id DESC
+                 LIMIT 1
+               )
+             WHERE (?1 IS NULL OR wi.status = ?1)
+               AND (?2 IS NULL OR coalesce(project.repo, issue_ref.repo, wi.project_id) = ?2)
+             ORDER BY wi.created_at, wi.id",
+        )?;
+        let mut rows = stmt.query(params![status, project])?;
+        let mut items = Vec::new();
+        while let Some(row) = rows.next()? {
+            let status: String = row.get("work_item_status")?;
+            items.push(IssueStatusRow {
+                id: row.get("work_item_id")?,
+                project: row.get("project")?,
+                github_issue_number: row.get("github_issue_number")?,
+                status: status.parse()?,
+                branch: row.get("branch")?,
+            });
         }
         Ok(items)
     }
@@ -295,6 +347,23 @@ mod tests {
         NewWorkItem::new(WorkItemKind::Development, title)
     }
 
+    fn insert_run(db: &Db, id: &str, work_item_id: &str, branch: Option<&str>, created_at: &str) {
+        db.conn()
+            .execute(
+                "INSERT INTO runs
+                   (id, work_item_id, branch, status, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+                params![
+                    id,
+                    work_item_id,
+                    branch,
+                    Status::Running.as_str(),
+                    created_at
+                ],
+            )
+            .unwrap();
+    }
+
     #[test]
     fn migrate_is_idempotent() {
         let mut conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -361,6 +430,153 @@ mod tests {
     fn get_missing_work_item_is_none() {
         let db = Db::open_in_memory().unwrap();
         assert!(db.get_work_item("MON-1").unwrap().is_none());
+    }
+
+    #[test]
+    fn list_issue_statuses_uses_effective_repo_and_filters() {
+        let mut db = Db::open_in_memory().unwrap();
+        let mut project = sample_project();
+        project.repo = "ashigirl96/monica-renamed".to_string();
+        db.upsert_project(&project).unwrap();
+
+        let linked = db
+            .insert_work_item_with_ref(
+                {
+                    let mut item = dev_item("linked");
+                    item.status = Status::Ready;
+                    item.project_id = Some("ashigirl96/monica".to_string());
+                    item
+                },
+                ExternalRef::new(
+                    String::new(),
+                    RefType::GithubIssue,
+                    Some("ashigirl96/monica-stale".to_string()),
+                    Some(17),
+                    None,
+                ),
+            )
+            .unwrap();
+        let unlinked = db
+            .insert_work_item_with_ref(
+                {
+                    let mut item = dev_item("unlinked");
+                    item.status = Status::NeedApproval;
+                    item
+                },
+                ExternalRef::new(
+                    String::new(),
+                    RefType::GithubIssue,
+                    Some("ashigirl96/other".to_string()),
+                    Some(18),
+                    None,
+                ),
+            )
+            .unwrap();
+
+        let all = db.list_issue_statuses(None, None).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].id, linked.id);
+        assert_eq!(all[0].project.as_deref(), Some("ashigirl96/monica-renamed"));
+        assert_eq!(all[0].github_issue_number, Some(17));
+        assert_eq!(all[1].id, unlinked.id);
+        assert_eq!(all[1].project.as_deref(), Some("ashigirl96/other"));
+
+        let ready = db.list_issue_statuses(Some(Status::Ready), None).unwrap();
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].id, linked.id);
+
+        let filtered = db
+            .list_issue_statuses(None, Some("ashigirl96/monica-renamed"))
+            .unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, linked.id);
+        assert!(db
+            .list_issue_statuses(None, Some("ashigirl96/monica-stale"))
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn list_issue_statuses_picks_latest_run_deterministically() {
+        let mut db = Db::open_in_memory().unwrap();
+        let item = db
+            .insert_work_item_with_ref(
+                dev_item("tracked"),
+                ExternalRef::new(
+                    String::new(),
+                    RefType::GithubIssue,
+                    Some("ashigirl96/monica".to_string()),
+                    Some(17),
+                    None,
+                ),
+            )
+            .unwrap();
+
+        insert_run(
+            &db,
+            "run_1",
+            &item.id,
+            Some("monica/old"),
+            "2026-05-28T01:00:00.000Z",
+        );
+        insert_run(
+            &db,
+            "run_2",
+            &item.id,
+            Some("monica/newer"),
+            "2026-05-28T02:00:00.000Z",
+        );
+        insert_run(
+            &db,
+            "run_3",
+            &item.id,
+            Some("monica/tiebreak"),
+            "2026-05-28T02:00:00.000Z",
+        );
+
+        let rows = db.list_issue_statuses(None, None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].branch.as_deref(), Some("monica/tiebreak"));
+    }
+
+    #[test]
+    fn list_issue_statuses_handles_missing_ref_and_run() {
+        let mut db = Db::open_in_memory().unwrap();
+        let item = db.insert_work_item(dev_item("plain")).unwrap();
+
+        let rows = db.list_issue_statuses(None, None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, item.id);
+        assert_eq!(rows[0].project, None);
+        assert_eq!(rows[0].github_issue_number, None);
+        assert_eq!(rows[0].branch, None);
+    }
+
+    #[test]
+    fn list_issue_statuses_uses_latest_issue_ref() {
+        let mut db = Db::open_in_memory().unwrap();
+        let item = db.insert_work_item(dev_item("tracked")).unwrap();
+        db.save_external_ref(&ExternalRef::new(
+            item.id.clone(),
+            RefType::GithubIssue,
+            Some("ashigirl96/first".to_string()),
+            Some(17),
+            None,
+        ))
+        .unwrap();
+        db.save_external_ref(&ExternalRef::new(
+            item.id.clone(),
+            RefType::GithubIssue,
+            Some("ashigirl96/second".to_string()),
+            Some(18),
+            None,
+        ))
+        .unwrap();
+
+        let rows = db.list_issue_statuses(None, None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].project.as_deref(), Some("ashigirl96/second"));
+        assert_eq!(rows[0].github_issue_number, Some(18));
     }
 
     #[test]

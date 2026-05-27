@@ -236,6 +236,15 @@ impl WorkItem {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssueStatusRow {
+    pub id: String,
+    pub project: Option<String>,
+    pub github_issue_number: Option<i64>,
+    pub status: Status,
+    pub branch: Option<String>,
+}
+
 /// Input for inserting a [`WorkItem`]. The `id` and timestamps are assigned by the store.
 #[derive(Debug, Clone)]
 pub struct NewWorkItem {
