@@ -8,5 +8,8 @@ mod paths;
 mod store;
 
 pub use db::Db;
-pub use model::{Event, ExternalRef, NewWorkItem, RefType, Run, Status, WorkItem, WorkItemKind};
+pub use model::{
+    Agent, Event, ExternalRef, NewWorkItem, PermissionMode, Project, Provider, RefType, Run, Status,
+    WorkItem, WorkItemKind, DEFAULT_BRANCH_TEMPLATE,
+};
 pub use paths::{base_dir, db_path, runs_dir};

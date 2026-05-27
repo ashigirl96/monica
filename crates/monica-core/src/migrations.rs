@@ -6,7 +6,7 @@ use rusqlite_migration::{Migrations, M};
 /// uses the list position as the version). Append an `M::up(...)` to add a version;
 /// never reorder or remove existing entries, or already-migrated databases diverge.
 fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![M::up(V1)])
+    Migrations::new(vec![M::up(V1), M::up(V2)])
 }
 
 /// v1: storage foundation (work items, runs, events, external refs) + MON-id counter.
@@ -57,6 +57,27 @@ const V1: &str = r#"
       number       INTEGER,
       url          TEXT,
       created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    );
+"#;
+
+/// v2: project registry. One row per repo, holding the execution-environment definition
+/// that `issue run` resolves (worktree layout, branch naming, agent settings).
+const V2: &str = r#"
+    CREATE TABLE projects (
+      id                    TEXT PRIMARY KEY,
+      name                  TEXT NOT NULL,
+      provider              TEXT NOT NULL DEFAULT 'github',
+      repo                  TEXT NOT NULL,
+      path                  TEXT,
+      default_branch        TEXT NOT NULL DEFAULT 'main',
+      worktree_root         TEXT,
+      branch_template       TEXT NOT NULL DEFAULT 'monica/gh-{github_issue_number}-mon-{monica_number}-{slug}',
+      setup_timeout_sec     INTEGER NOT NULL DEFAULT 600,
+      agent_default         TEXT NOT NULL DEFAULT 'claude',
+      agent_permission_mode TEXT NOT NULL DEFAULT 'plan',
+      hooks_claude          INTEGER NOT NULL DEFAULT 1,
+      created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      updated_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
     );
 "#;
 
