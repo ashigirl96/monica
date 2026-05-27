@@ -10,7 +10,6 @@ Issue Runner → Session Tracker → Status Dashboard → Kanban → Terminal/AD
 
 着手順 A→G（依存順）。詳細は ISSUES.md。
 
-- [ ] #17 issue status（一覧表示）
 - [ ] #18 issue run（worktree + .monica/setup.sh）
 - [ ] #19 issue run --claude（.monica/prompt.md で起動）
 - [ ] #20 Claude Hook Bridge（hook claude + issue mark）
@@ -27,3 +26,4 @@ Issue Runner → Session Tracker → Status Dashboard → Kanban → Terminal/AD
 - 2026-05-27 #15 project registry を実装。projects テーブル(v2) + monica project init/set/list/show（B 完了）。init は git remote 検出・path 補完・.monica/ 雛形生成と DB 登録を兼ねる（add から改名）。
 - 2026-05-27 #16 monica issue track を実装。owner/repo#123 をパースし gh issue view から WorkItem(ready)+ExternalRef(github_issue) を作成、registry に project があれば project_id を紐付け（C 完了）。gh/パースは CLI 層、DB は core API を再利用。
 - 2026-05-28 `just build`/`install-local` でも `RUSTC_WRAPPER` を空にして、wrapper 付き環境でも Tauri ビルドが落ちないようにした。
+- 2026-05-28 #17 monica issue status を実装。core で WorkItem+最新 run を一覧化し、CLI で status/project filter と `gh pr list` 補完による BRANCH/PR 表示を追加した（D 完了）。
