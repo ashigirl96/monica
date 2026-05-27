@@ -1,6 +1,5 @@
 mod issue;
 mod project;
-mod repo;
 
 use clap::{Parser, Subcommand};
 
@@ -40,7 +39,10 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
         Commands::Project(cmd) => project::run(cmd),
         Commands::Issue(cmd) => issue::run(cmd),
-        Commands::Start { .. } | Commands::Status | Commands::Review { .. } | Commands::Pr { .. } => {
+        Commands::Start { .. }
+        | Commands::Status
+        | Commands::Review { .. }
+        | Commands::Pr { .. } => {
             eprintln!("monica: not yet implemented (see issue #11)");
             std::process::exit(1);
         }

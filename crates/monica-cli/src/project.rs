@@ -4,9 +4,7 @@ use std::process::Command;
 
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
-use monica_core::{Db, Project};
-
-use crate::repo::parse_owner_repo;
+use monica_core::{register_project, Db};
 
 #[derive(Subcommand)]
 pub enum ProjectCommand {
@@ -45,18 +43,12 @@ pub fn run(cmd: ProjectCommand) -> Result<()> {
 }
 
 fn init(db: &Db, repo_arg: Option<String>) -> Result<()> {
+    let cwd = std::env::current_dir().context("failed to read current directory")?;
     let repo = match repo_arg {
-        Some(repo) => parse_owner_repo(&repo)?,
+        Some(repo) => repo,
         None => detect_repo()?,
     };
-    let cwd = std::env::current_dir().context("failed to read current directory")?;
-    let path = cwd
-        .to_str()
-        .ok_or_else(|| anyhow!("current directory path is not valid UTF-8: {}", cwd.display()))?;
-
-    let mut project = Project::from_repo(&repo);
-    project.path = Some(path.to_string());
-    let saved = db.upsert_project(&project)?;
+    let saved = register_project(db, &repo, &cwd)?;
 
     println!(
         "Registered project {} (path: {})",
@@ -64,7 +56,11 @@ fn init(db: &Db, repo_arg: Option<String>) -> Result<()> {
         saved.path.as_deref().unwrap_or("-")
     );
     for (file, created) in scaffold_monica(&cwd)? {
-        let status = if created { "created" } else { "skipped (exists)" };
+        let status = if created {
+            "created"
+        } else {
+            "skipped (exists)"
+        };
         println!("  {file:<19}{status}");
     }
     Ok(())
@@ -125,7 +121,10 @@ fn show(db: &Db, repo: &str, json: bool) -> Result<()> {
         ("branch_template", project.branch_template.clone()),
         ("setup_timeout_sec", project.setup_timeout_sec.to_string()),
         ("agent_default", project.agent_default.as_str().to_string()),
-        ("agent_permission_mode", project.agent_permission_mode.as_str().to_string()),
+        (
+            "agent_permission_mode",
+            project.agent_permission_mode.as_str().to_string(),
+        ),
         ("hooks_claude", project.hooks_claude.to_string()),
         ("created_at", project.created_at.clone()),
         ("updated_at", project.updated_at.clone()),
@@ -149,7 +148,7 @@ fn detect_repo() -> Result<String> {
         ));
     }
     let url = String::from_utf8(output.stdout).context("git remote url was not valid UTF-8")?;
-    parse_owner_repo(&url)
+    monica_core::parse_owner_repo(&url)
 }
 
 fn scaffold_monica(dir: &Path) -> Result<Vec<(String, bool)>> {
@@ -164,7 +163,12 @@ fn scaffold_monica(dir: &Path) -> Result<Vec<(String, bool)>> {
 
 /// Write `name` under `dir` only if it does not already exist. Returns `(.monica/<name>, created?)`
 /// so a pre-existing file (a user's committed convention) is never clobbered.
-fn write_if_absent(dir: &Path, name: &str, contents: &str, executable: bool) -> Result<(String, bool)> {
+fn write_if_absent(
+    dir: &Path,
+    name: &str,
+    contents: &str,
+    executable: bool,
+) -> Result<(String, bool)> {
     let path = dir.join(name);
     let rel = format!(".monica/{name}");
     if path.exists() {
@@ -182,8 +186,7 @@ fn set_executable(path: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let mut perms = fs::metadata(path)?.permissions();
     perms.set_mode(0o755);
-    fs::set_permissions(path, perms)
-        .with_context(|| format!("failed to chmod {}", path.display()))
+    fs::set_permissions(path, perms).with_context(|| format!("failed to chmod {}", path.display()))
 }
 
 #[cfg(not(unix))]

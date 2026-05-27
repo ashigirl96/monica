@@ -183,9 +183,9 @@ impl Db {
     }
 
     pub fn get_project(&self, id: &str) -> Result<Option<Project>> {
-        let mut stmt = self
-            .conn()
-            .prepare(&format!("SELECT {PROJECT_COLUMNS} FROM projects WHERE id = ?1"))?;
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {PROJECT_COLUMNS} FROM projects WHERE id = ?1"
+        ))?;
         let mut rows = stmt.query(params![id])?;
         match rows.next()? {
             Some(row) => Ok(Some(Project::from_row(row)?)),
@@ -194,9 +194,9 @@ impl Db {
     }
 
     pub fn list_projects(&self) -> Result<Vec<Project>> {
-        let mut stmt = self
-            .conn()
-            .prepare(&format!("SELECT {PROJECT_COLUMNS} FROM projects ORDER BY id"))?;
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {PROJECT_COLUMNS} FROM projects ORDER BY id"
+        ))?;
         let mut rows = stmt.query([])?;
         let mut projects = Vec::new();
         while let Some(row) = rows.next()? {
@@ -210,9 +210,7 @@ impl Db {
     /// `value` is always bound as `?1` — so this cannot be an injection vector. Enum and numeric
     /// fields are validated/coerced before being written.
     pub fn set_project_field(&self, id: &str, key: &str, value: &str) -> Result<()> {
-        let text_value = |value: &str| -> Result<()> {
-            self.update_project_column(id, key, value)
-        };
+        let text_value = |value: &str| -> Result<()> { self.update_project_column(id, key, value) };
         match key {
             "name" | "repo" | "default_branch" | "branch_template" => text_value(value)?,
             "path" | "worktree_root" => {
@@ -234,11 +232,13 @@ impl Db {
                 self.update_project_column(id, "agent_permission_mode", v.as_str())?;
             }
             "setup_timeout_sec" => {
-                let n: i64 = value
-                    .parse()
-                    .with_context(|| format!("setup_timeout_sec must be an integer, got {value:?}"))?;
+                let n: i64 = value.parse().with_context(|| {
+                    format!("setup_timeout_sec must be an integer, got {value:?}")
+                })?;
                 if n <= 0 {
-                    return Err(anyhow!("setup_timeout_sec must be a positive integer, got {n}"));
+                    return Err(anyhow!(
+                        "setup_timeout_sec must be a positive integer, got {n}"
+                    ));
                 }
                 self.update_project_column(id, "setup_timeout_sec", n)?;
             }
@@ -275,7 +275,9 @@ fn parse_bool(value: &str) -> Result<bool> {
     match value {
         "true" | "1" => Ok(true),
         "false" | "0" => Ok(false),
-        other => Err(anyhow!("expected a boolean (true/false/1/0), got {other:?}")),
+        other => Err(anyhow!(
+            "expected a boolean (true/false/1/0), got {other:?}"
+        )),
     }
 }
 
@@ -367,7 +369,10 @@ mod tests {
         let a = db.insert_work_item(dev_item("a")).unwrap();
         let b = db.insert_work_item(dev_item("b")).unwrap();
         let c = db.insert_work_item(dev_item("c")).unwrap();
-        assert_eq!((a.id.as_str(), b.id.as_str(), c.id.as_str()), ("MON-1", "MON-2", "MON-3"));
+        assert_eq!(
+            (a.id.as_str(), b.id.as_str(), c.id.as_str()),
+            ("MON-1", "MON-2", "MON-3")
+        );
     }
 
     #[test]
@@ -400,7 +405,10 @@ mod tests {
 
         let refs = db.list_external_refs("MON-1").unwrap();
         assert_eq!(refs.len(), 1);
-        assert_eq!(refs[0].work_item_id, "MON-1", "ref must adopt the allocated id");
+        assert_eq!(
+            refs[0].work_item_id, "MON-1",
+            "ref must adopt the allocated id"
+        );
         assert_eq!(refs[0].ref_type, RefType::GithubIssue);
         assert_eq!(refs[0].repo.as_deref(), Some("ashigirl96/monica"));
         assert_eq!(refs[0].number, Some(9));
@@ -448,8 +456,14 @@ mod tests {
         assert_eq!(created.setup_timeout_sec, 600);
         assert!(created.hooks_claude);
         assert_eq!(created.path.as_deref(), Some("/Users/dev/monica"));
-        assert!(!created.created_at.is_empty(), "created_at should be filled by the DB default");
-        assert!(!created.updated_at.is_empty(), "updated_at should be filled by the DB default");
+        assert!(
+            !created.created_at.is_empty(),
+            "created_at should be filled by the DB default"
+        );
+        assert!(
+            !created.updated_at.is_empty(),
+            "updated_at should be filled by the DB default"
+        );
 
         let fetched = db.get_project("ashigirl96/monica").unwrap().unwrap();
         assert_eq!(fetched, created);
@@ -472,21 +486,32 @@ mod tests {
         db.upsert_project(&sample_project()).unwrap();
         let id = "ashigirl96/monica";
 
-        db.set_project_field(id, "branch_template", "monica/{slug}").unwrap();
-        db.set_project_field(id, "agent_permission_mode", "acceptEdits").unwrap();
-        db.set_project_field(id, "setup_timeout_sec", "900").unwrap();
+        db.set_project_field(id, "branch_template", "monica/{slug}")
+            .unwrap();
+        db.set_project_field(id, "agent_permission_mode", "acceptEdits")
+            .unwrap();
+        db.set_project_field(id, "setup_timeout_sec", "900")
+            .unwrap();
         db.set_project_field(id, "hooks_claude", "false").unwrap();
-        db.set_project_field(id, "worktree_root", "/Users/dev/.worktrees/monica").unwrap();
+        db.set_project_field(id, "worktree_root", "/Users/dev/.worktrees/monica")
+            .unwrap();
 
         let p = db.get_project(id).unwrap().unwrap();
         assert_eq!(p.branch_template, "monica/{slug}");
         assert_eq!(p.agent_permission_mode, PermissionMode::AcceptEdits);
         assert_eq!(p.setup_timeout_sec, 900);
         assert!(!p.hooks_claude);
-        assert_eq!(p.worktree_root.as_deref(), Some("/Users/dev/.worktrees/monica"));
+        assert_eq!(
+            p.worktree_root.as_deref(),
+            Some("/Users/dev/.worktrees/monica")
+        );
 
-        assert!(db.set_project_field(id, "agent_permission_mode", "bogus").is_err());
-        assert!(db.set_project_field(id, "setup_timeout_sec", "abc").is_err());
+        assert!(db
+            .set_project_field(id, "agent_permission_mode", "bogus")
+            .is_err());
+        assert!(db
+            .set_project_field(id, "setup_timeout_sec", "abc")
+            .is_err());
         assert!(db.set_project_field(id, "setup_timeout_sec", "-5").is_err());
         assert!(db.set_project_field(id, "setup_timeout_sec", "0").is_err());
         assert!(db.set_project_field(id, "hooks_claude", "maybe").is_err());
@@ -504,18 +529,31 @@ mod tests {
         p.path = Some("/Users/dev/monica".to_string());
         db.upsert_project(&p).unwrap();
 
-        db.set_project_field("ashigirl96/monica", "name", "Custom").unwrap();
-        db.set_project_field("ashigirl96/monica", "setup_timeout_sec", "900").unwrap();
-        db.set_project_field("ashigirl96/monica", "branch_template", "monica/{slug}").unwrap();
+        db.set_project_field("ashigirl96/monica", "name", "Custom")
+            .unwrap();
+        db.set_project_field("ashigirl96/monica", "setup_timeout_sec", "900")
+            .unwrap();
+        db.set_project_field("ashigirl96/monica", "branch_template", "monica/{slug}")
+            .unwrap();
 
         let mut reinit = Project::from_repo("ashigirl96/monica");
         reinit.path = Some("/Users/dev/monica-moved".to_string());
         let after = db.upsert_project(&reinit).unwrap();
 
         assert_eq!(after.name, "Custom", "set value must survive re-init");
-        assert_eq!(after.setup_timeout_sec, 900, "set value must survive re-init");
-        assert_eq!(after.branch_template, "monica/{slug}", "set value must survive re-init");
-        assert_eq!(after.path.as_deref(), Some("/Users/dev/monica-moved"), "path tracks the new checkout");
+        assert_eq!(
+            after.setup_timeout_sec, 900,
+            "set value must survive re-init"
+        );
+        assert_eq!(
+            after.branch_template, "monica/{slug}",
+            "set value must survive re-init"
+        );
+        assert_eq!(
+            after.path.as_deref(),
+            Some("/Users/dev/monica-moved"),
+            "path tracks the new checkout"
+        );
     }
 
     #[test]
@@ -542,9 +580,15 @@ mod tests {
 
     #[test]
     fn provider_and_agent_round_trip() {
-        assert_eq!(Provider::Github.as_str().parse::<Provider>().unwrap(), Provider::Github);
+        assert_eq!(
+            Provider::Github.as_str().parse::<Provider>().unwrap(),
+            Provider::Github
+        );
         assert!("gitlab".parse::<Provider>().is_err());
-        assert_eq!(Agent::Claude.as_str().parse::<Agent>().unwrap(), Agent::Claude);
+        assert_eq!(
+            Agent::Claude.as_str().parse::<Agent>().unwrap(),
+            Agent::Claude
+        );
         assert!("codex".parse::<Agent>().is_err());
     }
 
@@ -566,9 +610,18 @@ mod tests {
             assert_eq!(s.as_str().parse::<Status>().unwrap(), s);
         }
         assert!("bogus".parse::<Status>().is_err());
-        assert_eq!(WorkItemKind::Development.as_str().parse::<WorkItemKind>().unwrap(), WorkItemKind::Development);
+        assert_eq!(
+            WorkItemKind::Development
+                .as_str()
+                .parse::<WorkItemKind>()
+                .unwrap(),
+            WorkItemKind::Development
+        );
         assert!("nope".parse::<WorkItemKind>().is_err());
-        assert_eq!(RefType::GithubIssue.as_str().parse::<RefType>().unwrap(), RefType::GithubIssue);
+        assert_eq!(
+            RefType::GithubIssue.as_str().parse::<RefType>().unwrap(),
+            RefType::GithubIssue
+        );
         assert!("nope".parse::<RefType>().is_err());
     }
 

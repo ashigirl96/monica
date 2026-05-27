@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 /// providers are out of scope); only the last two path segments matter. The result is lowercased
 /// because GitHub repo names are case-insensitive, so the registry key must match regardless of
 /// the casing the caller typed.
-pub(crate) fn parse_owner_repo(url: &str) -> Result<String> {
+pub fn parse_owner_repo(url: &str) -> Result<String> {
     let s = url.trim();
     let s = ["ssh://", "https://", "http://", "git://"]
         .iter()
@@ -17,14 +17,16 @@ pub(crate) fn parse_owner_repo(url: &str) -> Result<String> {
 
     let parts: Vec<&str> = s.split('/').filter(|p| !p.is_empty()).collect();
     if parts.len() < 2 {
-        return Err(anyhow!("could not parse owner/repo from git remote {url:?}"));
+        return Err(anyhow!(
+            "could not parse owner/repo from git remote {url:?}"
+        ));
     }
     Ok(format!("{}/{}", parts[parts.len() - 2], parts[parts.len() - 1]).to_lowercase())
 }
 
 /// Parse an issue reference `owner/repo#123`. The left side is normalized with
 /// [`parse_owner_repo`]; the right side must be a positive integer issue number.
-pub(crate) fn parse_issue_ref(target: &str) -> Result<(String, i64)> {
+pub fn parse_issue_ref(target: &str) -> Result<(String, i64)> {
     let (repo_part, number_part) = target
         .trim()
         .split_once('#')
@@ -35,7 +37,9 @@ pub(crate) fn parse_issue_ref(target: &str) -> Result<(String, i64)> {
         .parse()
         .map_err(|_| anyhow!("issue number must be a positive integer, got {number_part:?}"))?;
     if number <= 0 {
-        return Err(anyhow!("issue number must be a positive integer, got {number}"));
+        return Err(anyhow!(
+            "issue number must be a positive integer, got {number}"
+        ));
     }
     Ok((repo, number))
 }
@@ -54,13 +58,15 @@ mod tests {
             "https://github.com/ashigirl96/monica/",
             "ssh://git@github.com/ashigirl96/monica.git",
             "  https://github.com/ashigirl96/monica.git\n",
-            // bare owner/repo (the explicit `init <repo>` arg) must normalize idempotently,
-            // including a trailing slash.
             "ashigirl96/monica",
             "ashigirl96/monica/",
         ];
         for case in cases {
-            assert_eq!(parse_owner_repo(case).unwrap(), "ashigirl96/monica", "{case}");
+            assert_eq!(
+                parse_owner_repo(case).unwrap(),
+                "ashigirl96/monica",
+                "{case}"
+            );
         }
     }
 
@@ -72,7 +78,10 @@ mod tests {
 
     #[test]
     fn parse_owner_repo_lowercases_case_insensitive_names() {
-        assert_eq!(parse_owner_repo("AshiGirl96/Monica").unwrap(), "ashigirl96/monica");
+        assert_eq!(
+            parse_owner_repo("AshiGirl96/Monica").unwrap(),
+            "ashigirl96/monica"
+        );
         assert_eq!(
             parse_owner_repo("git@github.com:AshiGirl96/Monica.git").unwrap(),
             "ashigirl96/monica"
@@ -85,12 +94,10 @@ mod tests {
             parse_issue_ref("ashigirl96/monica#9").unwrap(),
             ("ashigirl96/monica".to_string(), 9)
         );
-        // Surrounding whitespace and a full https form on the left both normalize.
         assert_eq!(
             parse_issue_ref("  https://github.com/ashigirl96/monica#42  ").unwrap(),
             ("ashigirl96/monica".to_string(), 42)
         );
-        // Casing is normalized so the repo matches a registered project regardless of input.
         assert_eq!(
             parse_issue_ref("AshiGirl96/Monica#9").unwrap(),
             ("ashigirl96/monica".to_string(), 9)
@@ -100,7 +107,10 @@ mod tests {
     #[test]
     fn rejects_bad_issue_ref() {
         assert!(parse_issue_ref("ashigirl96/monica").is_err(), "missing #");
-        assert!(parse_issue_ref("ashigirl96/monica#abc").is_err(), "non-numeric");
+        assert!(
+            parse_issue_ref("ashigirl96/monica#abc").is_err(),
+            "non-numeric"
+        );
         assert!(parse_issue_ref("ashigirl96/monica#0").is_err(), "zero");
         assert!(parse_issue_ref("ashigirl96/monica#-3").is_err(), "negative");
         assert!(parse_issue_ref("#5").is_err(), "missing owner/repo");
