@@ -6,7 +6,7 @@ use rusqlite_migration::{Migrations, M};
 /// uses the list position as the version). Append an `M::up(...)` to add a version;
 /// never reorder or remove existing entries, or already-migrated databases diverge.
 fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![M::up(V1), M::up(V2)])
+    Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3)])
 }
 
 /// v1: storage foundation (work items, runs, events, external refs) + MON-id counter.
@@ -79,6 +79,12 @@ const V2: &str = r#"
       created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
       updated_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
     );
+"#;
+
+/// v3: run-id counter. Mirrors `mon_counter` so each run gets a monotonic `run-<n>` id that is
+/// never reused, keeping the `runs/<run_id>/` artifact directories collision-free.
+const V3: &str = r#"
+    CREATE TABLE run_counter (n INTEGER PRIMARY KEY AUTOINCREMENT);
 "#;
 
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.

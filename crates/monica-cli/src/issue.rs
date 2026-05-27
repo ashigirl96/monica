@@ -5,7 +5,8 @@ use std::str::FromStr;
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_core::{
-    parse_issue_ref, parse_owner_repo, track_github_issue, Db, GithubIssue, IssueStatusRow, Status,
+    parse_issue_ref, parse_owner_repo, track_github_issue, Db, GithubIssue, IssueStatusRow,
+    SetupOutcome, Status,
 };
 use serde::Deserialize;
 
@@ -23,6 +24,11 @@ pub enum IssueCommand {
         #[arg(long)]
         project: Option<String>,
     },
+    /// Create a worktree and run .monica/setup.sh for a work item (MON-<id>)
+    Run {
+        /// MON-<id>
+        id: String,
+    },
 }
 
 pub fn run(cmd: IssueCommand) -> Result<()> {
@@ -30,6 +36,7 @@ pub fn run(cmd: IssueCommand) -> Result<()> {
     match cmd {
         IssueCommand::Track { target } => track_command(&mut db, &target),
         IssueCommand::Status { status, project } => status_command(&db, status, project),
+        IssueCommand::Run { id } => run_command(&mut db, &id),
     }
 }
 
@@ -70,6 +77,34 @@ fn status_command(db: &Db, status: Option<String>, project: Option<String>) -> R
     let pr_by_branch = fetch_pull_request_numbers(&rows)?;
     print!("{}", render_status_table(&rows, &pr_by_branch));
     Ok(())
+}
+
+fn run_command(db: &mut Db, id: &str) -> Result<()> {
+    let report = monica_core::run_issue(db, id)?;
+    println!("Run {} for {}", report.run_id, report.work_item_id);
+    println!("Branch:   {}", report.branch);
+    println!("Worktree: {}", report.worktree_path);
+    println!("Setup:    {}", describe_setup(&report.setup));
+    println!("Log:      {}", report.log_path);
+    println!("Status:   {}", report.status.as_str());
+    if report.status == Status::Failed {
+        anyhow::bail!("run {} failed; see {}", report.run_id, report.log_path);
+    }
+    Ok(())
+}
+
+fn describe_setup(outcome: &SetupOutcome) -> String {
+    match outcome {
+        SetupOutcome::Skipped => "skipped (no .monica/setup.sh)".to_string(),
+        SetupOutcome::Succeeded => "ok".to_string(),
+        SetupOutcome::Failed {
+            timed_out: true, ..
+        } => "failed (timed out)".to_string(),
+        SetupOutcome::Failed {
+            code: Some(code), ..
+        } => format!("failed (exit {code})"),
+        SetupOutcome::Failed { code: None, .. } => "failed".to_string(),
+    }
 }
 
 fn fetch_issue(repo: &str, number: i64) -> Result<GhIssue> {
@@ -429,6 +464,36 @@ mod tests {
         assert!(rendered.lines().any(|line| line.contains("MON-2")
             && line.contains("ashigirl96/other")
             && line.contains("#96")));
+    }
+
+    #[test]
+    fn describe_setup_covers_outcomes() {
+        assert_eq!(
+            describe_setup(&SetupOutcome::Skipped),
+            "skipped (no .monica/setup.sh)"
+        );
+        assert_eq!(describe_setup(&SetupOutcome::Succeeded), "ok");
+        assert_eq!(
+            describe_setup(&SetupOutcome::Failed {
+                code: Some(2),
+                timed_out: false
+            }),
+            "failed (exit 2)"
+        );
+        assert_eq!(
+            describe_setup(&SetupOutcome::Failed {
+                code: None,
+                timed_out: true
+            }),
+            "failed (timed out)"
+        );
+        assert_eq!(
+            describe_setup(&SetupOutcome::Failed {
+                code: None,
+                timed_out: false
+            }),
+            "failed"
+        );
     }
 
     #[test]

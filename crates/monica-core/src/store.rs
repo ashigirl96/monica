@@ -3,12 +3,15 @@ use rusqlite::params;
 
 use crate::db::Db;
 use crate::model::{
-    Agent, ExternalRef, IssueStatusRow, NewWorkItem, PermissionMode, Project, Provider, Status,
-    WorkItem,
+    Agent, ExternalRef, IssueStatusRow, NewRun, NewWorkItem, PermissionMode, Project, Provider,
+    Run, Status, WorkItem,
 };
 
 const WORK_ITEM_COLUMNS: &str = "id, kind, status, phase, title, body, project_id, \
      labels, details_json, source_json, created_at, updated_at";
+
+const RUN_COLUMNS: &str = "id, work_item_id, agent, branch, worktree_path, status, \
+     settings_path, created_at, updated_at";
 
 const PROJECT_COLUMNS: &str = "id, name, provider, repo, path, default_branch, worktree_root, \
      branch_template, setup_timeout_sec, agent_default, agent_permission_mode, hooks_claude, \
@@ -140,12 +143,13 @@ impl Db {
                  ORDER BY er.id DESC
                  LIMIT 1
                )
-             LEFT JOIN runs latest_run
+            LEFT JOIN runs latest_run
                ON latest_run.id = (
                  SELECT r.id
                  FROM runs r
                  WHERE r.work_item_id = wi.id
-                 ORDER BY r.created_at DESC, r.id DESC
+                 ORDER BY r.created_at DESC,
+                          CAST(SUBSTR(r.id, 5) AS INTEGER) DESC
                  LIMIT 1
                )
              WHERE (?1 IS NULL OR wi.status = ?1)
@@ -178,6 +182,88 @@ impl Db {
             return Err(anyhow!("work item not found: {id}"));
         }
         Ok(())
+    }
+
+    /// Begin a run attempt: allocate a `run-<n>` id, insert the run at [`Status::SettingUp`], and
+    /// move its work item to `setting_up` — all in one transaction, so `issue status` never sees a
+    /// run whose work item disagrees with it.
+    pub fn start_run(&mut self, new: NewRun) -> Result<Run> {
+        let agent = new.agent.map(|a| a.as_str());
+        let setting_up = Status::SettingUp.as_str();
+
+        let tx = self.conn_mut().transaction()?;
+        tx.execute("INSERT INTO run_counter DEFAULT VALUES", [])?;
+        let id = format!("run-{}", tx.last_insert_rowid());
+        tx.execute(
+            "INSERT INTO runs (id, work_item_id, agent, branch, worktree_path, status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                id,
+                new.work_item_id,
+                agent,
+                new.branch,
+                new.worktree_path,
+                setting_up,
+            ],
+        )?;
+        let affected = tx.execute(
+            "UPDATE work_items
+               SET status = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+             WHERE id = ?2",
+            params![setting_up, new.work_item_id],
+        )?;
+        if affected == 0 {
+            return Err(anyhow!("work item not found: {}", new.work_item_id));
+        }
+
+        let run = {
+            let mut stmt = tx.prepare(&format!("SELECT {RUN_COLUMNS} FROM runs WHERE id = ?1"))?;
+            let mut rows = stmt.query(params![id])?;
+            match rows.next()? {
+                Some(row) => Run::from_row(row)?,
+                None => return Err(anyhow!("inserted run {id} not found")),
+            }
+        };
+        tx.commit()?;
+        Ok(run)
+    }
+
+    /// Settle a run attempt to a terminal status (`running` / `failed`), updating both the run and
+    /// its work item in one transaction so the pair can never drift.
+    pub fn finish_run(&mut self, run_id: &str, work_item_id: &str, status: Status) -> Result<()> {
+        let status = status.as_str();
+        let tx = self.conn_mut().transaction()?;
+        let run_affected = tx.execute(
+            "UPDATE runs
+               SET status = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+             WHERE id = ?2",
+            params![status, run_id],
+        )?;
+        if run_affected == 0 {
+            return Err(anyhow!("run not found: {run_id}"));
+        }
+        let item_affected = tx.execute(
+            "UPDATE work_items
+               SET status = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+             WHERE id = ?2",
+            params![status, work_item_id],
+        )?;
+        if item_affected == 0 {
+            return Err(anyhow!("work item not found: {work_item_id}"));
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn get_run(&self, id: &str) -> Result<Option<Run>> {
+        let mut stmt = self
+            .conn()
+            .prepare(&format!("SELECT {RUN_COLUMNS} FROM runs WHERE id = ?1"))?;
+        let mut rows = stmt.query(params![id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(Run::from_row(row)?)),
+            None => Ok(None),
+        }
     }
 
     pub fn save_external_ref(&self, r: &ExternalRef) -> Result<i64> {
@@ -347,7 +433,22 @@ mod tests {
         NewWorkItem::new(WorkItemKind::Development, title)
     }
 
-    fn insert_run(db: &Db, id: &str, work_item_id: &str, branch: Option<&str>, created_at: &str) {
+    fn new_run(work_item_id: &str) -> NewRun {
+        NewRun {
+            work_item_id: work_item_id.to_string(),
+            agent: Some(Agent::Claude),
+            branch: Some("monica/mon-1-foo".to_string()),
+            worktree_path: Some("/tmp/wt".to_string()),
+        }
+    }
+
+    fn insert_run_at(
+        db: &Db,
+        id: &str,
+        work_item_id: &str,
+        branch: Option<&str>,
+        created_at: &str,
+    ) {
         db.conn()
             .execute(
                 "INSERT INTO runs
@@ -373,17 +474,17 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
 
         let tables: i64 = conn
             .query_row(
                 "SELECT count(*) FROM sqlite_master WHERE type = 'table'
-                 AND name IN ('mon_counter','work_items','runs','events','external_refs','projects')",
+                 AND name IN ('mon_counter','run_counter','work_items','runs','events','external_refs','projects')",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(tables, 6);
+        assert_eq!(tables, 7);
     }
 
     #[test]
@@ -424,6 +525,89 @@ mod tests {
     fn update_status_unknown_id_errors() {
         let db = Db::open_in_memory().unwrap();
         assert!(db.update_status("MON-999", Status::Done).is_err());
+    }
+
+    #[test]
+    fn start_run_sets_run_and_work_item_to_setting_up() {
+        let mut db = Db::open_in_memory().unwrap();
+        let item = db
+            .insert_work_item({
+                let mut i = dev_item("runnable");
+                i.status = Status::Ready;
+                i
+            })
+            .unwrap();
+
+        let run = db.start_run(new_run(&item.id)).unwrap();
+        assert_eq!(run.id, "run-1");
+        assert_eq!(run.status, Status::SettingUp);
+        assert_eq!(run.agent.as_deref(), Some("claude"));
+        assert_eq!(run.branch.as_deref(), Some("monica/mon-1-foo"));
+        assert_eq!(run.worktree_path.as_deref(), Some("/tmp/wt"));
+
+        assert_eq!(db.get_run("run-1").unwrap().unwrap(), run);
+        assert_eq!(
+            db.get_work_item(&item.id).unwrap().unwrap().status,
+            Status::SettingUp,
+            "start_run must move the work item to setting_up in the same transaction"
+        );
+    }
+
+    #[test]
+    fn run_ids_increase_monotonically() {
+        let mut db = Db::open_in_memory().unwrap();
+        let item = db.insert_work_item(dev_item("a")).unwrap();
+        let r1 = db.start_run(new_run(&item.id)).unwrap();
+        let r2 = db.start_run(new_run(&item.id)).unwrap();
+        assert_eq!((r1.id.as_str(), r2.id.as_str()), ("run-1", "run-2"));
+    }
+
+    #[test]
+    fn finish_run_updates_run_and_work_item_together() {
+        let mut db = Db::open_in_memory().unwrap();
+        let item = db.insert_work_item(dev_item("a")).unwrap();
+        let run = db.start_run(new_run(&item.id)).unwrap();
+
+        db.finish_run(&run.id, &item.id, Status::Running).unwrap();
+        assert_eq!(
+            db.get_run(&run.id).unwrap().unwrap().status,
+            Status::Running
+        );
+        assert_eq!(
+            db.get_work_item(&item.id).unwrap().unwrap().status,
+            Status::Running
+        );
+
+        assert!(db.finish_run("run-999", &item.id, Status::Failed).is_err());
+    }
+
+    #[test]
+    fn finish_run_unknown_work_item_rolls_back() {
+        let mut db = Db::open_in_memory().unwrap();
+        let item = db.insert_work_item(dev_item("a")).unwrap();
+        let run = db.start_run(new_run(&item.id)).unwrap();
+
+        // Valid run id, wrong work item: the work item update finds nothing and the whole tx must
+        // roll back, so the run must not drift to `running` on its own.
+        assert!(db.finish_run(&run.id, "MON-999", Status::Running).is_err());
+        assert_eq!(
+            db.get_run(&run.id).unwrap().unwrap().status,
+            Status::SettingUp
+        );
+        assert_eq!(
+            db.get_work_item(&item.id).unwrap().unwrap().status,
+            Status::SettingUp
+        );
+    }
+
+    #[test]
+    fn start_run_unknown_work_item_leaves_no_phantom_run() {
+        let mut db = Db::open_in_memory().unwrap();
+        assert!(db.start_run(new_run("MON-999")).is_err());
+        assert!(
+            db.get_run("run-1").unwrap().is_none(),
+            "a rolled-back start_run must not leak a run row"
+        );
     }
 
     #[test]
@@ -512,23 +696,23 @@ mod tests {
             )
             .unwrap();
 
-        insert_run(
+        insert_run_at(
             &db,
-            "run_1",
+            "run-9",
             &item.id,
             Some("monica/old"),
             "2026-05-28T01:00:00.000Z",
         );
-        insert_run(
+        insert_run_at(
             &db,
-            "run_2",
+            "run-10",
             &item.id,
             Some("monica/newer"),
             "2026-05-28T02:00:00.000Z",
         );
-        insert_run(
+        insert_run_at(
             &db,
-            "run_3",
+            "run-11",
             &item.id,
             Some("monica/tiebreak"),
             "2026-05-28T02:00:00.000Z",
@@ -843,6 +1027,7 @@ mod tests {
 
     #[test]
     fn db_path_respects_monica_home() {
+        let _env = crate::paths::test_env_guard();
         std::env::remove_var("MONICA_HOME");
         std::env::set_var("HOME", "/tmp/monica-home-test");
         assert_eq!(
