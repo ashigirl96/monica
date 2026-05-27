@@ -2,5 +2,14 @@
 name = "monica-core"
 version = "0.1.0"
 edition = "2021"
+# Deps allow lower, but we standardize on the dev/CI stable toolchain.
+rust-version = "1.95"
 
 [dependencies]
+anyhow = "1.0.102"
+# rusqlite pinned to 0.39 to share one libsqlite3-sys with rusqlite_migration
+# (which requires rusqlite ^0.39); mismatched versions double-link `sqlite3`.
+rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite_migration = "2.5.0"
+serde = { version = "1.0.228", default-features = false, features = ["derive"] }
+serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
