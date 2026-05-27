@@ -10,3 +10,5 @@ path = "src/main.rs"
 [dependencies]
 monica-core = { path = "../monica-core" }
 clap = { version = "4", features = ["derive"] }
+anyhow = "1.0.102"
+serde_json = { version = "1.0.150", default-features = false, features = ["std"] }

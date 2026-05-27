@@ -107,6 +107,92 @@ impl FromStr for RefType {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Provider {
+    Github,
+}
+
+impl Provider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Provider::Github => "github",
+        }
+    }
+}
+
+impl FromStr for Provider {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Ok(match s {
+            "github" => Provider::Github,
+            other => return Err(anyhow!("unknown provider: {other}")),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Agent {
+    Claude,
+}
+
+impl Agent {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Agent::Claude => "claude",
+        }
+    }
+}
+
+impl FromStr for Agent {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Ok(match s {
+            "claude" => Agent::Claude,
+            other => return Err(anyhow!("unknown agent: {other}")),
+        })
+    }
+}
+
+/// Claude Code permission mode. M0 carries the values the project design uses; Claude also
+/// accepts `auto`/`dontAsk`, which can be added later without a schema change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PermissionMode {
+    Default,
+    Plan,
+    AcceptEdits,
+    BypassPermissions,
+}
+
+impl PermissionMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PermissionMode::Default => "default",
+            PermissionMode::Plan => "plan",
+            PermissionMode::AcceptEdits => "acceptEdits",
+            PermissionMode::BypassPermissions => "bypassPermissions",
+        }
+    }
+}
+
+impl FromStr for PermissionMode {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Ok(match s {
+            "default" => PermissionMode::Default,
+            "plan" => PermissionMode::Plan,
+            "acceptEdits" => PermissionMode::AcceptEdits,
+            "bypassPermissions" => PermissionMode::BypassPermissions,
+            other => return Err(anyhow!("unknown permission mode: {other}")),
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkItem {
     pub id: String,
@@ -246,6 +332,79 @@ impl ExternalRef {
             number: row.get("number")?,
             url: row.get("url")?,
             created_at: row.get("created_at")?,
+        })
+    }
+}
+
+/// Default git branch template. Must stay in sync with the `branch_template` column default
+/// in migration v2.
+pub const DEFAULT_BRANCH_TEMPLATE: &str =
+    "monica/gh-{github_issue_number}-mon-{monica_number}-{slug}";
+
+/// A repo's execution-environment definition, resolved by `issue run`. One row per repo,
+/// keyed by `owner/repo`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Project {
+    pub id: String,
+    pub name: String,
+    pub provider: Provider,
+    pub repo: String,
+    pub path: Option<String>,
+    pub default_branch: String,
+    pub worktree_root: Option<String>,
+    pub branch_template: String,
+    pub setup_timeout_sec: i64,
+    pub agent_default: Agent,
+    pub agent_permission_mode: PermissionMode,
+    pub hooks_claude: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl Project {
+    /// Build a project from `owner/repo` with defaults matching the migration v2 column defaults.
+    /// `name` is the repo segment after the last `/`. Timestamps stay empty until the store
+    /// fills them via column defaults and they are read back by [`Project::from_row`].
+    pub fn from_repo(repo: impl Into<String>) -> Self {
+        let repo = repo.into();
+        let name = repo.rsplit('/').next().unwrap_or(&repo).to_string();
+        Self {
+            id: repo.clone(),
+            name,
+            provider: Provider::Github,
+            repo,
+            path: None,
+            default_branch: "main".to_string(),
+            worktree_root: None,
+            branch_template: DEFAULT_BRANCH_TEMPLATE.to_string(),
+            setup_timeout_sec: 600,
+            agent_default: Agent::Claude,
+            agent_permission_mode: PermissionMode::Plan,
+            hooks_claude: true,
+            created_at: String::new(),
+            updated_at: String::new(),
+        }
+    }
+
+    pub(crate) fn from_row(row: &Row) -> Result<Self> {
+        let provider: String = row.get("provider")?;
+        let agent_default: String = row.get("agent_default")?;
+        let agent_permission_mode: String = row.get("agent_permission_mode")?;
+        Ok(Project {
+            id: row.get("id")?,
+            name: row.get("name")?,
+            provider: provider.parse()?,
+            repo: row.get("repo")?,
+            path: row.get("path")?,
+            default_branch: row.get("default_branch")?,
+            worktree_root: row.get("worktree_root")?,
+            branch_template: row.get("branch_template")?,
+            setup_timeout_sec: row.get("setup_timeout_sec")?,
+            agent_default: agent_default.parse()?,
+            agent_permission_mode: agent_permission_mode.parse()?,
+            hooks_claude: row.get::<_, i64>("hooks_claude")? != 0,
+            created_at: row.get("created_at")?,
+            updated_at: row.get("updated_at")?,
         })
     }
 }

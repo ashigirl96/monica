@@ -1,11 +1,19 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use rusqlite::params;
 
 use crate::db::Db;
-use crate::model::{ExternalRef, NewWorkItem, Status, WorkItem};
+use crate::model::{
+    Agent, ExternalRef, NewWorkItem, PermissionMode, Project, Provider, Status, WorkItem,
+};
 
 const WORK_ITEM_COLUMNS: &str = "id, kind, status, phase, title, body, project_id, \
      labels, details_json, source_json, created_at, updated_at";
+
+const PROJECT_COLUMNS: &str = "id, name, provider, repo, path, default_branch, worktree_root, \
+     branch_template, setup_timeout_sec, agent_default, agent_permission_mode, hooks_claude, \
+     created_at, updated_at";
+
+const SET_NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
 impl Db {
     pub fn insert_work_item(&mut self, new: NewWorkItem) -> Result<WorkItem> {
@@ -108,6 +116,134 @@ impl Db {
         }
         Ok(refs)
     }
+
+    /// Insert a project, or update an existing one keyed by `id`. On conflict only the fields
+    /// derived from `owner/repo` plus `path` are refreshed; fields tweaked via
+    /// [`Db::set_project_field`] (timeout, branch template, worktree root, agent) are preserved.
+    /// `path` is intentionally refreshed so re-running `init` tracks the current checkout.
+    pub fn upsert_project(&self, p: &Project) -> Result<Project> {
+        self.conn().execute(
+            "INSERT INTO projects
+               (id, name, provider, repo, path, default_branch, worktree_root, branch_template,
+                setup_timeout_sec, agent_default, agent_permission_mode, hooks_claude)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+             ON CONFLICT(id) DO UPDATE SET
+               name = excluded.name,
+               provider = excluded.provider,
+               repo = excluded.repo,
+               path = excluded.path,
+               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')",
+            params![
+                p.id,
+                p.name,
+                p.provider.as_str(),
+                p.repo,
+                p.path,
+                p.default_branch,
+                p.worktree_root,
+                p.branch_template,
+                p.setup_timeout_sec,
+                p.agent_default.as_str(),
+                p.agent_permission_mode.as_str(),
+                p.hooks_claude as i64,
+            ],
+        )?;
+        self.get_project(&p.id)?
+            .ok_or_else(|| anyhow!("project {} not found after upsert", p.id))
+    }
+
+    pub fn get_project(&self, id: &str) -> Result<Option<Project>> {
+        let mut stmt = self
+            .conn()
+            .prepare(&format!("SELECT {PROJECT_COLUMNS} FROM projects WHERE id = ?1"))?;
+        let mut rows = stmt.query(params![id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(Project::from_row(row)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn list_projects(&self) -> Result<Vec<Project>> {
+        let mut stmt = self
+            .conn()
+            .prepare(&format!("SELECT {PROJECT_COLUMNS} FROM projects ORDER BY id"))?;
+        let mut rows = stmt.query([])?;
+        let mut projects = Vec::new();
+        while let Some(row) = rows.next()? {
+            projects.push(Project::from_row(row)?);
+        }
+        Ok(projects)
+    }
+
+    /// Update a single project field. `key` is matched against a whitelist; the column name fed to
+    /// `format!` is therefore always a static literal from a match arm, and the user-supplied
+    /// `value` is always bound as `?1` — so this cannot be an injection vector. Enum and numeric
+    /// fields are validated/coerced before being written.
+    pub fn set_project_field(&self, id: &str, key: &str, value: &str) -> Result<()> {
+        let text_value = |value: &str| -> Result<()> {
+            self.update_project_column(id, key, value)
+        };
+        match key {
+            "name" | "repo" | "default_branch" | "branch_template" => text_value(value)?,
+            "path" | "worktree_root" => {
+                if value.is_empty() {
+                    return Err(anyhow!("{key} cannot be set to an empty string"));
+                }
+                text_value(value)?;
+            }
+            "provider" => {
+                let v: Provider = value.parse()?;
+                self.update_project_column(id, "provider", v.as_str())?;
+            }
+            "agent_default" => {
+                let v: Agent = value.parse()?;
+                self.update_project_column(id, "agent_default", v.as_str())?;
+            }
+            "agent_permission_mode" => {
+                let v: PermissionMode = value.parse()?;
+                self.update_project_column(id, "agent_permission_mode", v.as_str())?;
+            }
+            "setup_timeout_sec" => {
+                let n: i64 = value
+                    .parse()
+                    .with_context(|| format!("setup_timeout_sec must be an integer, got {value:?}"))?;
+                self.update_project_column(id, "setup_timeout_sec", n)?;
+            }
+            "hooks_claude" => {
+                let b = parse_bool(value)?;
+                self.update_project_column(id, "hooks_claude", b as i64)?;
+            }
+            "id" => return Err(anyhow!("id is the project key and cannot be changed")),
+            other => return Err(anyhow!("unknown project field: {other}")),
+        }
+        Ok(())
+    }
+
+    /// Run `UPDATE projects SET <column> = ?1 ...`. `column` must be a static literal supplied by
+    /// [`Db::set_project_field`]; callers never pass user input here.
+    fn update_project_column(
+        &self,
+        id: &str,
+        column: &str,
+        value: impl rusqlite::ToSql,
+    ) -> Result<()> {
+        let affected = self.conn().execute(
+            &format!("UPDATE projects SET {column} = ?1, updated_at = {SET_NOW} WHERE id = ?2"),
+            params![value, id],
+        )?;
+        if affected == 0 {
+            return Err(anyhow!("project not found: {id}"));
+        }
+        Ok(())
+    }
+}
+
+fn parse_bool(value: &str) -> Result<bool> {
+    match value {
+        "true" | "1" => Ok(true),
+        "false" | "0" => Ok(false),
+        other => Err(anyhow!("expected a boolean (true/false/1/0), got {other:?}")),
+    }
 }
 
 #[cfg(test)]
@@ -115,6 +251,10 @@ mod tests {
     use super::*;
     use crate::model::{RefType, WorkItemKind};
     use serde_json::json;
+
+    fn sample_project() -> Project {
+        Project::from_repo("ashigirl96/monica")
+    }
 
     fn dev_item(title: &str) -> NewWorkItem {
         NewWorkItem::new(WorkItemKind::Development, title)
@@ -129,17 +269,17 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
 
         let tables: i64 = conn
             .query_row(
                 "SELECT count(*) FROM sqlite_master WHERE type = 'table'
-                 AND name IN ('mon_counter','work_items','runs','events','external_refs')",
+                 AND name IN ('mon_counter','work_items','runs','events','external_refs','projects')",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(tables, 5);
+        assert_eq!(tables, 6);
     }
 
     #[test]
@@ -234,6 +374,111 @@ mod tests {
             refs[0].url.as_deref(),
             Some("https://github.com/ashigirl96/monica/issues/9")
         );
+    }
+
+    #[test]
+    fn project_round_trip() {
+        let db = Db::open_in_memory().unwrap();
+
+        let mut p = sample_project();
+        p.path = Some("/Users/dev/monica".to_string());
+
+        let created = db.upsert_project(&p).unwrap();
+        assert_eq!(created.id, "ashigirl96/monica");
+        assert_eq!(created.name, "monica");
+        assert_eq!(created.provider, Provider::Github);
+        assert_eq!(created.agent_default, Agent::Claude);
+        assert_eq!(created.agent_permission_mode, PermissionMode::Plan);
+        assert_eq!(created.setup_timeout_sec, 600);
+        assert!(created.hooks_claude);
+        assert_eq!(created.path.as_deref(), Some("/Users/dev/monica"));
+        assert!(!created.created_at.is_empty(), "created_at should be filled by the DB default");
+        assert!(!created.updated_at.is_empty(), "updated_at should be filled by the DB default");
+
+        let fetched = db.get_project("ashigirl96/monica").unwrap().unwrap();
+        assert_eq!(fetched, created);
+
+        let listed = db.list_projects().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0], created);
+    }
+
+    #[test]
+    fn list_projects_empty_is_ok() {
+        let db = Db::open_in_memory().unwrap();
+        assert!(db.list_projects().unwrap().is_empty());
+        assert!(db.get_project("nobody/nothing").unwrap().is_none());
+    }
+
+    #[test]
+    fn set_project_field_coerces_and_validates() {
+        let db = Db::open_in_memory().unwrap();
+        db.upsert_project(&sample_project()).unwrap();
+        let id = "ashigirl96/monica";
+
+        db.set_project_field(id, "branch_template", "monica/{slug}").unwrap();
+        db.set_project_field(id, "agent_permission_mode", "acceptEdits").unwrap();
+        db.set_project_field(id, "setup_timeout_sec", "900").unwrap();
+        db.set_project_field(id, "hooks_claude", "false").unwrap();
+        db.set_project_field(id, "worktree_root", "/Users/dev/.worktrees/monica").unwrap();
+
+        let p = db.get_project(id).unwrap().unwrap();
+        assert_eq!(p.branch_template, "monica/{slug}");
+        assert_eq!(p.agent_permission_mode, PermissionMode::AcceptEdits);
+        assert_eq!(p.setup_timeout_sec, 900);
+        assert!(!p.hooks_claude);
+        assert_eq!(p.worktree_root.as_deref(), Some("/Users/dev/.worktrees/monica"));
+
+        assert!(db.set_project_field(id, "agent_permission_mode", "bogus").is_err());
+        assert!(db.set_project_field(id, "setup_timeout_sec", "abc").is_err());
+        assert!(db.set_project_field(id, "hooks_claude", "maybe").is_err());
+        assert!(db.set_project_field(id, "path", "").is_err());
+        assert!(db.set_project_field(id, "worktree_root", "").is_err());
+        assert!(db.set_project_field(id, "id", "other/repo").is_err());
+        assert!(db.set_project_field(id, "nonexistent", "x").is_err());
+        assert!(db.set_project_field("missing/repo", "name", "x").is_err());
+    }
+
+    #[test]
+    fn reinit_preserves_tweaked_config_and_tracks_path() {
+        let db = Db::open_in_memory().unwrap();
+        let mut p = sample_project();
+        p.path = Some("/Users/dev/monica".to_string());
+        db.upsert_project(&p).unwrap();
+
+        db.set_project_field("ashigirl96/monica", "setup_timeout_sec", "900").unwrap();
+        db.set_project_field("ashigirl96/monica", "branch_template", "monica/{slug}").unwrap();
+
+        let mut reinit = Project::from_repo("ashigirl96/monica");
+        reinit.path = Some("/Users/dev/monica-moved".to_string());
+        let after = db.upsert_project(&reinit).unwrap();
+
+        assert_eq!(after.setup_timeout_sec, 900, "set value must survive re-init");
+        assert_eq!(after.branch_template, "monica/{slug}", "set value must survive re-init");
+        assert_eq!(after.path.as_deref(), Some("/Users/dev/monica-moved"), "path tracks the new checkout");
+    }
+
+    #[test]
+    fn permission_mode_as_str_matches_serde() {
+        for mode in [
+            PermissionMode::Default,
+            PermissionMode::Plan,
+            PermissionMode::AcceptEdits,
+            PermissionMode::BypassPermissions,
+        ] {
+            assert_eq!(mode.as_str().parse::<PermissionMode>().unwrap(), mode);
+            let json = serde_json::to_string(&mode).unwrap();
+            assert_eq!(json, format!("\"{}\"", mode.as_str()));
+        }
+        assert!("dontAsk".parse::<PermissionMode>().is_err());
+    }
+
+    #[test]
+    fn provider_and_agent_round_trip() {
+        assert_eq!(Provider::Github.as_str().parse::<Provider>().unwrap(), Provider::Github);
+        assert!("gitlab".parse::<Provider>().is_err());
+        assert_eq!(Agent::Claude.as_str().parse::<Agent>().unwrap(), Agent::Claude);
+        assert!("codex".parse::<Agent>().is_err());
     }
 
     #[test]

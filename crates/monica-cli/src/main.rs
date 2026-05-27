@@ -1,3 +1,5 @@
+mod project;
+
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -9,6 +11,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Manage the project registry (execution-environment definitions)
+    #[command(subcommand)]
+    Project(project::ProjectCommand),
     /// Start a worktree + session for an issue (owner/repo#123)
     Start { target: String },
     /// Show the status of all sessions
@@ -20,12 +25,16 @@ enum Commands {
 }
 
 fn main() {
-    let cli = Cli::parse();
+    if let Err(err) = run(Cli::parse()) {
+        eprintln!("monica: {err:#}");
+        std::process::exit(1);
+    }
+}
+
+fn run(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
-        Commands::Start { .. }
-        | Commands::Status
-        | Commands::Review { .. }
-        | Commands::Pr { .. } => {
+        Commands::Project(cmd) => project::run(cmd),
+        Commands::Start { .. } | Commands::Status | Commands::Review { .. } | Commands::Pr { .. } => {
             eprintln!("monica: not yet implemented (see issue #11)");
             std::process::exit(1);
         }

@@ -1792,8 +1792,10 @@ dependencies = [
 name = "monica-cli"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clap",
  "monica-core",
+ "serde_json",
 ]
 
 [[package]]
