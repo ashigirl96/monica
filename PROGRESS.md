@@ -4,11 +4,11 @@ GitHub Issue を起点に worktree → Claude Code session → 状態追跡 → 
 
 ## 向かう先
 
-Issue Runner → Session Tracker → Status Dashboard → Kanban → Terminal/ADE → Multi-repo → Slack/Wiki/RSS の順に広げる。実装形態は共有 Rust core + `monica` CLI で、GUI は後で同じ core を Tauri command 経由で利用する。詳細は [`docs/workflow-contract.md`](./docs/workflow-contract.md)。
+Issue Runner → Session Tracker → Status Dashboard → Kanban → Terminal/ADE → Multi-repo → Slack/Wiki/RSS の順に広げる。実装形態は共有 Rust core + `monica` CLI で、GUI は後で同じ core を Tauri command 経由で利用する。
 
 ## Todo
 
-- [ ] #11 `monica start <repo>#<issue>` を実装する（ロジックを `monica-core` に書き `monica-cli` から呼ぶ）
+- [ ]
 
 ## Timeline
 

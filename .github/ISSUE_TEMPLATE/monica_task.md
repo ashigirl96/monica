@@ -20,9 +20,7 @@ assignees: []
 
 ## Acceptance Criteria
 
-- [ ]
-- [ ]
-- [ ]
+- [ ] ...
 
 ## Verification
 
@@ -32,22 +30,7 @@ assignees: []
 # commands to run, if any
 ```
 
-## Agent Instructions
-
-- 変更はこの Issue の scope に限定する。
-- 関連しないコードを refactor しない。
-- public な振る舞いを変える場合は承認を求める。
-- 終了前に変更ファイルを要約する。
-
 ## Links
 
 <!-- 関連 Issue / PR / docs / Slack thread など。 -->
 
-## Monica Metadata
-
-```yaml
-kind: task # task | research | proposal
-agent: claude-code
-requires_approval: true
-status: ready # ready | running | need-review | need-intervention | pr-open | done
-```
