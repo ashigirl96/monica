@@ -6,6 +6,7 @@
  */
 
 import { dirname, join } from "@std/path";
+import { stripAnsiCode } from "@std/fmt/colors";
 
 const SCRIPT_DIR = dirname(new URL(import.meta.url).pathname);
 const SKILL_DIR = join(SCRIPT_DIR, "..");
@@ -43,8 +44,7 @@ async function run(cmd: string[]): Promise<{ success: boolean; stdout: string; s
 
 function stripAnsi(str: string): string {
   // Remove ANSI escape codes (in case NO_COLOR doesn't work)
-  // deno-lint-ignore no-control-regex
-  return str.replace(/\x1b\[[0-9;]*m/g, "");
+  return stripAnsiCode(str);
 }
 
 function stripVersion(str: string): string {
@@ -108,26 +108,6 @@ async function discoverCommand(cmdPath: string[]): Promise<CommandInfo> {
   }
 
   return { name, description, help, subcommands };
-}
-
-function formatCommandMarkdown(cmd: CommandInfo, depth = 0): string {
-  const lines: string[] = [];
-  const cmdName = cmd.name.replace(/^linear /, "");
-  const heading = depth === 0 ? "#" : "##";
-
-  lines.push(`${heading} linear ${cmdName}`);
-  lines.push("");
-  lines.push("```");
-  lines.push(cmd.help);
-  lines.push("```");
-  lines.push("");
-
-  // Add subcommands as separate sections
-  for (const sub of cmd.subcommands) {
-    lines.push(formatCommandMarkdown(sub, depth + 1));
-  }
-
-  return lines.join("\n");
 }
 
 function generateCommandDoc(cmd: CommandInfo): string {
