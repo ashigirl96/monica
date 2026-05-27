@@ -4,6 +4,7 @@
 
 ```bash
 just dev           # 開発: Tauri ウィンドウ + Vite
+just dev-cli       # CLI ビルドして ./monica に配置
 just build         # release ビルド (.app のみ。配布物は CI で生成)
 just install-local # .app をビルドして /Applications/Monica.app に配置
 just check         # lint + fmt-check + cargo clippy (PR 前必須)
