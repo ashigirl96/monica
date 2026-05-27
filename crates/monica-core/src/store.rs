@@ -17,6 +17,25 @@ const SET_NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
 impl Db {
     pub fn insert_work_item(&mut self, new: NewWorkItem) -> Result<WorkItem> {
+        self.insert_work_item_inner(new, None)
+    }
+
+    /// Insert a work item and its external ref in one transaction, so a failure to record the
+    /// external link can never leave an orphan work item behind. The ref's `work_item_id` is
+    /// replaced with the freshly allocated `MON-<n>` id.
+    pub fn insert_work_item_with_ref(
+        &mut self,
+        new: NewWorkItem,
+        external: ExternalRef,
+    ) -> Result<WorkItem> {
+        self.insert_work_item_inner(new, Some(external))
+    }
+
+    fn insert_work_item_inner(
+        &mut self,
+        new: NewWorkItem,
+        external: Option<ExternalRef>,
+    ) -> Result<WorkItem> {
         let labels = serde_json::to_string(&new.labels)?;
         let details = serde_json::to_string(&new.details)?;
         let source = match &new.source {
@@ -44,6 +63,20 @@ impl Db {
                 source,
             ],
         )?;
+
+        if let Some(external) = external {
+            tx.execute(
+                "INSERT INTO external_refs (work_item_id, ref_type, repo, number, url)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    id,
+                    external.ref_type.as_str(),
+                    external.repo,
+                    external.number,
+                    external.url
+                ],
+            )?;
+        }
 
         let item = {
             let mut stmt = tx.prepare(&format!(
@@ -348,6 +381,29 @@ mod tests {
 
         let next = db.insert_work_item(dev_item("c")).unwrap();
         assert_eq!(next.id, "MON-3");
+    }
+
+    #[test]
+    fn insert_work_item_with_ref_links_atomically() {
+        let mut db = Db::open_in_memory().unwrap();
+        let external = ExternalRef::new(
+            String::new(),
+            RefType::GithubIssue,
+            Some("ashigirl96/monica".to_string()),
+            Some(9),
+            Some("https://github.com/ashigirl96/monica/issues/9".to_string()),
+        );
+        let item = db
+            .insert_work_item_with_ref(dev_item("tracked"), external)
+            .unwrap();
+        assert_eq!(item.id, "MON-1");
+
+        let refs = db.list_external_refs("MON-1").unwrap();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].work_item_id, "MON-1", "ref must adopt the allocated id");
+        assert_eq!(refs[0].ref_type, RefType::GithubIssue);
+        assert_eq!(refs[0].repo.as_deref(), Some("ashigirl96/monica"));
+        assert_eq!(refs[0].number, Some(9));
     }
 
     #[test]

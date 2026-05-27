@@ -86,25 +86,15 @@ fn track(db: &mut Db, repo: &str, issue: &GhIssue) -> Result<WorkItem> {
     new.status = Status::Ready;
     new.body = issue.body.clone().unwrap_or_default();
     new.project_id = project_id;
-    let item = db.insert_work_item(new)?;
 
     let external = ExternalRef::new(
-        item.id.clone(),
+        String::new(),
         RefType::GithubIssue,
         Some(repo.to_string()),
         Some(issue.number),
         Some(issue.url.clone()),
     );
-    // The work item is already committed; a failure here would leave it without its GitHub link,
-    // so surface the id rather than swallowing it behind a bare `?`.
-    db.save_external_ref(&external).with_context(|| {
-        format!(
-            "created {} but failed to link {repo}#{}; remove it or retry",
-            item.id, issue.number
-        )
-    })?;
-
-    Ok(item)
+    db.insert_work_item_with_ref(new, external)
 }
 
 #[cfg(test)]

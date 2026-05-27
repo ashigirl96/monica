@@ -2,7 +2,9 @@ use anyhow::{anyhow, Result};
 
 /// Extract `owner/repo` from a git remote URL. Handles scp-like (`git@github.com:owner/repo.git`),
 /// https, and ssh:// forms, plus trailing `.git` / `/`. Host is not validated (non-GitHub
-/// providers are out of scope); only the last two path segments matter.
+/// providers are out of scope); only the last two path segments matter. The result is lowercased
+/// because GitHub repo names are case-insensitive, so the registry key must match regardless of
+/// the casing the caller typed.
 pub(crate) fn parse_owner_repo(url: &str) -> Result<String> {
     let s = url.trim();
     let s = ["ssh://", "https://", "http://", "git://"]
@@ -17,7 +19,7 @@ pub(crate) fn parse_owner_repo(url: &str) -> Result<String> {
     if parts.len() < 2 {
         return Err(anyhow!("could not parse owner/repo from git remote {url:?}"));
     }
-    Ok(format!("{}/{}", parts[parts.len() - 2], parts[parts.len() - 1]))
+    Ok(format!("{}/{}", parts[parts.len() - 2], parts[parts.len() - 1]).to_lowercase())
 }
 
 /// Parse an issue reference `owner/repo#123`. The left side is normalized with
@@ -69,6 +71,15 @@ mod tests {
     }
 
     #[test]
+    fn parse_owner_repo_lowercases_case_insensitive_names() {
+        assert_eq!(parse_owner_repo("AshiGirl96/Monica").unwrap(), "ashigirl96/monica");
+        assert_eq!(
+            parse_owner_repo("git@github.com:AshiGirl96/Monica.git").unwrap(),
+            "ashigirl96/monica"
+        );
+    }
+
+    #[test]
     fn parses_issue_ref_forms() {
         assert_eq!(
             parse_issue_ref("ashigirl96/monica#9").unwrap(),
@@ -78,6 +89,11 @@ mod tests {
         assert_eq!(
             parse_issue_ref("  https://github.com/ashigirl96/monica#42  ").unwrap(),
             ("ashigirl96/monica".to_string(), 42)
+        );
+        // Casing is normalized so the repo matches a registered project regardless of input.
+        assert_eq!(
+            parse_issue_ref("AshiGirl96/Monica#9").unwrap(),
+            ("ashigirl96/monica".to_string(), 9)
         );
     }
 
