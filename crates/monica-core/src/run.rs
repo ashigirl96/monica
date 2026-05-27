@@ -107,10 +107,22 @@ fn collapse_dashes(segment: &str) -> String {
 
 /// Where `issue run` places a worktree. The directory name is the full branch with `/` and any
 /// non-`[A-Za-z0-9._-]` char replaced by `-`, so distinct branches never collapse to the same path.
+/// Resolution order is: explicit `project.worktree_root`, otherwise `<project.path>/.worktrees`.
+/// A project with neither cannot run until one of those is configured.
 fn worktree_path_for(project: &Project, branch: &str) -> Result<PathBuf> {
     let root = match &project.worktree_root {
         Some(root) => PathBuf::from(root),
-        None => paths::worktrees_dir()?.join(sanitize_path_component(&project.id)),
+        None => {
+            let path = project.path.as_deref().ok_or_else(|| {
+                anyhow!(
+                    "project {} has neither path nor worktree_root; run `monica project init` \
+                     in the repo or set `monica project set {} worktree_root <path>`",
+                    project.id,
+                    project.id
+                )
+            })?;
+            PathBuf::from(path).join(".worktrees")
+        }
     };
     Ok(root.join(sanitize_path_component(branch)))
 }
@@ -603,6 +615,27 @@ mod tests {
             path,
             Path::new("/custom/root/monica-gh-9-mon-1-foo"),
             "the full branch must be sanitized, not collapsed to its last segment"
+        );
+    }
+
+    #[test]
+    fn worktree_path_defaults_under_project_path() {
+        let mut project = Project::from_repo("ashigirl96/monica");
+        project.path = Some("/tmp/monica".to_string());
+        let path = worktree_path_for(&project, "monica/gh-9-mon-1-foo").unwrap();
+        assert_eq!(
+            path,
+            Path::new("/tmp/monica/.worktrees/monica-gh-9-mon-1-foo")
+        );
+    }
+
+    #[test]
+    fn worktree_path_requires_project_path_or_explicit_root() {
+        let project = Project::from_repo("ashigirl96/monica");
+        let err = worktree_path_for(&project, "monica/gh-9-mon-1-foo").unwrap_err();
+        assert!(
+            format!("{err:#}").contains("has neither path nor worktree_root"),
+            "{err:#}"
         );
     }
 
