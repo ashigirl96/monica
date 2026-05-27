@@ -1,5 +1,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -132,7 +134,10 @@ pub enum SetupOutcome {
     /// No `.monica/setup.sh` in the worktree; setup was skipped.
     Skipped,
     Succeeded,
-    Failed { code: Option<i32>, timed_out: bool },
+    Failed {
+        code: Option<i32>,
+        timed_out: bool,
+    },
 }
 
 impl SetupOutcome {
@@ -161,7 +166,10 @@ pub fn run_setup_script(
 ) -> Result<SetupOutcome> {
     let script = worktree.join(SETUP_SCRIPT_REL);
     if !script.is_file() {
-        write_log(log_path, &format!("monica: no {SETUP_SCRIPT_REL}; setup skipped\n"))?;
+        write_log(
+            log_path,
+            &format!("monica: no {SETUP_SCRIPT_REL}; setup skipped\n"),
+        )?;
         return Ok(SetupOutcome::Skipped);
     }
 
@@ -169,7 +177,11 @@ pub fn run_setup_script(
         .with_context(|| format!("failed to create {}", log_path.display()))?;
     let log_err = log.try_clone()?;
 
-    let spawned = Command::new(&script)
+    let mut command = Command::new(&script);
+    #[cfg(unix)]
+    command.process_group(0);
+
+    let spawned = command
         .current_dir(worktree)
         .env("MONICA_ID", &env.monica_id)
         .env("MONICA_RUN_ID", &env.run_id)
@@ -184,7 +196,10 @@ pub fn run_setup_script(
     let mut child = match spawned {
         Ok(child) => child,
         Err(e) => {
-            append_log(log_path, &format!("monica: failed to spawn {SETUP_SCRIPT_REL}: {e}\n"))?;
+            append_log(
+                log_path,
+                &format!("monica: failed to spawn {SETUP_SCRIPT_REL}: {e}\n"),
+            )?;
             return Ok(SetupOutcome::Failed {
                 code: None,
                 timed_out: false,
@@ -205,7 +220,7 @@ pub fn run_setup_script(
             });
         }
         if start.elapsed() >= timeout {
-            let _ = child.kill();
+            terminate_setup_process_tree(child.id())?;
             // The script may have exited on its own between the `try_wait` above and now; if so,
             // honor its real status rather than reporting a spurious timeout.
             if let Ok(status) = child.wait() {
@@ -213,13 +228,48 @@ pub fn run_setup_script(
                     return Ok(SetupOutcome::Succeeded);
                 }
             }
-            append_log(log_path, &format!("monica: setup timed out after {timeout:?}; killed\n"))?;
+            append_log(
+                log_path,
+                &format!("monica: setup timed out after {timeout:?}; killed\n"),
+            )?;
             return Ok(SetupOutcome::Failed {
                 code: None,
                 timed_out: true,
             });
         }
         thread::sleep(SETUP_POLL_INTERVAL);
+    }
+}
+
+fn terminate_setup_process_tree(pid: u32) -> Result<()> {
+    #[cfg(unix)]
+    {
+        let pgid = format!("-{pid}");
+        let _ = Command::new("kill")
+            .arg("-TERM")
+            .arg(&pgid)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        let _ = Command::new("kill")
+            .arg("-KILL")
+            .arg(&pgid)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    {
+        let pid = pid.to_string();
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID"])
+            .arg(&pid)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        Ok(())
     }
 }
 
@@ -415,7 +465,10 @@ mod tests {
             .unwrap()
             .as_nanos();
         let mut p = std::env::temp_dir();
-        p.push(format!("monica-test-{tag}-{}-{nanos}-{n}", std::process::id()));
+        p.push(format!(
+            "monica-test-{tag}-{}-{nanos}-{n}",
+            std::process::id()
+        ));
         fs::create_dir_all(&p).unwrap();
         p
     }
@@ -559,7 +612,8 @@ mod tests {
     fn setup_skipped_when_no_script() {
         let wt = Tmp::new("setup-skip");
         let log = wt.path().join("setup.log");
-        let outcome = run_setup_script(wt.path(), &log, &sample_env(), Duration::from_secs(5)).unwrap();
+        let outcome =
+            run_setup_script(wt.path(), &log, &sample_env(), Duration::from_secs(5)).unwrap();
         assert_eq!(outcome, SetupOutcome::Skipped);
         assert!(fs::read_to_string(&log).unwrap().contains("skipped"));
     }
@@ -572,11 +626,15 @@ mod tests {
             "#!/usr/bin/env bash\necho \"id=$MONICA_ID branch=$MONICA_BRANCH run=$MONICA_RUN_ID\"\n",
         );
         let log = wt.path().join("setup.log");
-        let outcome = run_setup_script(wt.path(), &log, &sample_env(), Duration::from_secs(5)).unwrap();
+        let outcome =
+            run_setup_script(wt.path(), &log, &sample_env(), Duration::from_secs(5)).unwrap();
         assert_eq!(outcome, SetupOutcome::Succeeded);
         let captured = fs::read_to_string(&log).unwrap();
         assert!(captured.contains("id=MON-1"), "{captured}");
-        assert!(captured.contains("branch=monica/gh-9-mon-1-foo"), "{captured}");
+        assert!(
+            captured.contains("branch=monica/gh-9-mon-1-foo"),
+            "{captured}"
+        );
         assert!(captured.contains("run=run-1"), "{captured}");
     }
 
@@ -585,7 +643,8 @@ mod tests {
         let wt = Tmp::new("setup-fail");
         write_setup(wt.path(), "#!/usr/bin/env bash\nexit 3\n");
         let log = wt.path().join("setup.log");
-        let outcome = run_setup_script(wt.path(), &log, &sample_env(), Duration::from_secs(5)).unwrap();
+        let outcome =
+            run_setup_script(wt.path(), &log, &sample_env(), Duration::from_secs(5)).unwrap();
         assert_eq!(
             outcome,
             SetupOutcome::Failed {
@@ -617,10 +676,74 @@ mod tests {
         assert!(fs::read_to_string(&log).unwrap().contains("timed out"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn setup_timeout_kills_descendant_processes() {
+        let wt = Tmp::new("setup-timeout-tree");
+        let marker = "monica_descendant_group_kill_test";
+        write_setup(
+            wt.path(),
+            &format!("#!/usr/bin/env bash\n(\n  exec -a {marker} sleep 9999\n) &\nsleep 5\n"),
+        );
+        let mut child = {
+            let mut command = Command::new(wt.path().join(".monica/setup.sh"));
+            command.process_group(0);
+            command
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap()
+        };
+
+        let mut saw_descendant = false;
+        for _ in 0..20 {
+            if Command::new("pgrep")
+                .args(["-q", "-f", marker])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+            {
+                saw_descendant = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        assert!(saw_descendant, "setup should spawn descendant process");
+        let running = Command::new("pgrep")
+            .args(["-q", "-f", marker])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if running {
+            terminate_setup_process_tree(child.id()).unwrap();
+        } else {
+            panic!("descendant did not persist long enough to assert termination behavior");
+        }
+        thread::sleep(Duration::from_millis(200));
+        let running = Command::new("pgrep")
+            .args(["-q", "-f", marker])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        assert!(
+            !running,
+            "background process should be terminated by process-group kill"
+        );
+        assert!(
+            !child.wait().unwrap().success(),
+            "killing the process group should terminate setup helper"
+        );
+    }
+
     // ---- run_issue integration (real git + temp MONICA_HOME) ----
 
     fn run_git(dir: &Path, args: &[&str]) {
-        let out = Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .unwrap();
         assert!(
             out.status.success(),
             "git {args:?} failed: {}",
@@ -681,10 +804,15 @@ mod tests {
         assert_eq!(report.status, Status::Running);
         assert_eq!(report.setup, SetupOutcome::Succeeded);
         assert_eq!(report.branch, "monica/gh-9-mon-1-add-feature-x");
-        assert!(Path::new(&report.worktree_path).join(".monica/setup.sh").exists());
+        assert!(Path::new(&report.worktree_path)
+            .join(".monica/setup.sh")
+            .exists());
 
         let log = fs::read_to_string(&report.log_path).unwrap();
-        assert!(log.contains("hello MON-1 monica/gh-9-mon-1-add-feature-x"), "{log}");
+        assert!(
+            log.contains("hello MON-1 monica/gh-9-mon-1-add-feature-x"),
+            "{log}"
+        );
 
         assert_eq!(
             db.get_work_item(&id).unwrap().unwrap().status,

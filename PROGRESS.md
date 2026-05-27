@@ -31,3 +31,4 @@ Issue Runner → Session Tracker → Status Dashboard → Kanban → Terminal/AD
 - 2026-05-28 `narrative.md` の CLI メモを現行実装に合わせて更新。`project add`/`issue new`/`issue run` 案を `project init`/`issue track`/未実装の `start` 系へ整理した。
 - 2026-05-28 `.claude/skills/codex` と `tackle` の Codex 呼び出しを `--output-last-message` 前提へ更新。Claude Code に中間 session を返さず、最終レビュー結果だけ返す運用に寄せた。
 - 2026-05-28 #18 monica issue run を実装。core に Run CRUD(run_counter v3 採番)+branch 生成+setup.sh 実行(timeout/log)+run_issue orchestration を置き、status を setting_up→running/failed と原子的に遷移、CLI は表示のみ（E 完了）。
+- 2026-05-28 #18 のリリース安定化: setup timeout で setup.sh の子プロセスを process group 単位で kill するようにしてリークを防止し、run_id の latest 取得を数値ソートで安定化（`run-9`/`run-10` 逆転を回避）。

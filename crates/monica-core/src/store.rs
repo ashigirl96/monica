@@ -3,8 +3,8 @@ use rusqlite::params;
 
 use crate::db::Db;
 use crate::model::{
-    Agent, ExternalRef, IssueStatusRow, NewRun, NewWorkItem, PermissionMode, Project, Provider, Run,
-    Status, WorkItem,
+    Agent, ExternalRef, IssueStatusRow, NewRun, NewWorkItem, PermissionMode, Project, Provider,
+    Run, Status, WorkItem,
 };
 
 const WORK_ITEM_COLUMNS: &str = "id, kind, status, phase, title, body, project_id, \
@@ -143,12 +143,13 @@ impl Db {
                  ORDER BY er.id DESC
                  LIMIT 1
                )
-             LEFT JOIN runs latest_run
+            LEFT JOIN runs latest_run
                ON latest_run.id = (
                  SELECT r.id
                  FROM runs r
                  WHERE r.work_item_id = wi.id
-                 ORDER BY r.created_at DESC, r.id DESC
+                 ORDER BY r.created_at DESC,
+                          CAST(SUBSTR(r.id, 5) AS INTEGER) DESC
                  LIMIT 1
                )
              WHERE (?1 IS NULL OR wi.status = ?1)
@@ -441,7 +442,13 @@ mod tests {
         }
     }
 
-    fn insert_run_at(db: &Db, id: &str, work_item_id: &str, branch: Option<&str>, created_at: &str) {
+    fn insert_run_at(
+        db: &Db,
+        id: &str,
+        work_item_id: &str,
+        branch: Option<&str>,
+        created_at: &str,
+    ) {
         db.conn()
             .execute(
                 "INSERT INTO runs
@@ -562,7 +569,10 @@ mod tests {
         let run = db.start_run(new_run(&item.id)).unwrap();
 
         db.finish_run(&run.id, &item.id, Status::Running).unwrap();
-        assert_eq!(db.get_run(&run.id).unwrap().unwrap().status, Status::Running);
+        assert_eq!(
+            db.get_run(&run.id).unwrap().unwrap().status,
+            Status::Running
+        );
         assert_eq!(
             db.get_work_item(&item.id).unwrap().unwrap().status,
             Status::Running
@@ -688,21 +698,21 @@ mod tests {
 
         insert_run_at(
             &db,
-            "run_1",
+            "run-9",
             &item.id,
             Some("monica/old"),
             "2026-05-28T01:00:00.000Z",
         );
         insert_run_at(
             &db,
-            "run_2",
+            "run-10",
             &item.id,
             Some("monica/newer"),
             "2026-05-28T02:00:00.000Z",
         );
         insert_run_at(
             &db,
-            "run_3",
+            "run-11",
             &item.id,
             Some("monica/tiebreak"),
             "2026-05-28T02:00:00.000Z",
