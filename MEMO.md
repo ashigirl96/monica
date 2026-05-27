@@ -1283,7 +1283,7 @@ claude "/tackle"
 または将来的にSDK化するなら、
 
 ```ts
-prompt: "/tackle"
+prompt: "/tackle";
 ```
 
 でよいです。
@@ -1432,7 +1432,7 @@ monica issue run MON-12 --claude
 内部的には、
 
 ```ts
-agent = "claude"
+agent = "claude";
 ```
 
 に変換すればいい。

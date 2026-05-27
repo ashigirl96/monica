@@ -322,4 +322,3 @@ just size                                 # dist/ と bundle/ をまとめて表
 
 - [ ] 不要になった `#[tauri::command]` は削除したか（`removeUnusedCommands` は自動だがソースに死荷物を残さない）
 - [ ] 新規 plugin を入れたら `capabilities/default.json` を更新したか
-
