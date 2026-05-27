@@ -6,6 +6,8 @@ use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_core::{Db, Project};
 
+use crate::repo::parse_owner_repo;
+
 #[derive(Subcommand)]
 pub enum ProjectCommand {
     /// Register a repo (from owner/repo or the current git remote) and scaffold .monica/
@@ -150,30 +152,6 @@ fn detect_repo() -> Result<String> {
     parse_owner_repo(&url)
 }
 
-/// Extract `owner/repo` from a git remote URL. Handles scp-like (`git@github.com:owner/repo.git`),
-/// https, and ssh:// forms, plus trailing `.git` / `/`. Host is not validated (non-GitHub
-/// providers are out of scope); only the last two path segments matter.
-fn parse_owner_repo(url: &str) -> Result<String> {
-    let s = url.trim();
-    let s = ["ssh://", "https://", "http://", "git://"]
-        .iter()
-        .find_map(|scheme| s.strip_prefix(scheme))
-        .unwrap_or(s);
-    let s = s.replace(':', "/");
-    let s = s.trim_end_matches('/');
-    let s = s.strip_suffix(".git").unwrap_or(s);
-
-    let parts: Vec<&str> = s.split('/').filter(|p| !p.is_empty()).collect();
-    if parts.len() < 2 {
-        return Err(anyhow!("could not parse owner/repo from git remote {url:?}"));
-    }
-    Ok(format!(
-        "{}/{}",
-        parts[parts.len() - 2],
-        parts[parts.len() - 1]
-    ))
-}
-
 fn scaffold_monica(dir: &Path) -> Result<Vec<(String, bool)>> {
     let monica_dir = dir.join(".monica");
     fs::create_dir_all(&monica_dir)
@@ -248,34 +226,3 @@ set -euo pipefail
 const PROMPT_MD_TEMPLATE: &str = r#"<!-- Monica passes this file's contents as the initial prompt to the agent. -->
 /tackle
 "#;
-
-#[cfg(test)]
-mod tests {
-    use super::parse_owner_repo;
-
-    #[test]
-    fn parses_common_remote_forms() {
-        let cases = [
-            "git@github.com:ashigirl96/monica.git",
-            "git@github.com:ashigirl96/monica",
-            "https://github.com/ashigirl96/monica.git",
-            "https://github.com/ashigirl96/monica",
-            "https://github.com/ashigirl96/monica/",
-            "ssh://git@github.com/ashigirl96/monica.git",
-            "  https://github.com/ashigirl96/monica.git\n",
-            // bare owner/repo (the explicit `init <repo>` arg) must normalize idempotently,
-            // including a trailing slash.
-            "ashigirl96/monica",
-            "ashigirl96/monica/",
-        ];
-        for case in cases {
-            assert_eq!(parse_owner_repo(case).unwrap(), "ashigirl96/monica", "{case}");
-        }
-    }
-
-    #[test]
-    fn rejects_unparseable_remote() {
-        assert!(parse_owner_repo("not-a-url").is_err());
-        assert!(parse_owner_repo("").is_err());
-    }
-}
