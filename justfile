@@ -7,9 +7,11 @@ install:
     bun install
 
 dev:
+    bun run tauri dev
+
+dev-cli:
     cargo build -p monica-cli
     cp target/debug/monica ./monica
-    bun run tauri dev
 
 build:
     bun run tauri build --bundles app
