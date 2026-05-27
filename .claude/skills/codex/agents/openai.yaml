@@ -1,4 +1,4 @@
 interface:
   display_name: "Codex CLI"
   short_description: "Run Codex CLI with structured prompts for design/review"
-  default_prompt: "Use codex CLI with a structured prompt and return concise actionable output."
+  default_prompt: "Use codex CLI with a structured prompt, capture the final answer via --output-last-message, and return only concise actionable output."
