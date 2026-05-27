@@ -42,6 +42,9 @@ fmt-check:
 check: lint fmt-check
     cargo clippy --workspace --all-targets -- -D warnings
 
+test:
+    cargo test --workspace
+
 analyze:
     bun --bun vite build --mode analyze
     @echo "open dist/stats.html"

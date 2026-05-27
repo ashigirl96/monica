@@ -1,4 +1,6 @@
+mod issue;
 mod project;
+mod repo;
 
 use clap::{Parser, Subcommand};
 
@@ -14,6 +16,9 @@ enum Commands {
     /// Manage the project registry (execution-environment definitions)
     #[command(subcommand)]
     Project(project::ProjectCommand),
+    /// Track GitHub issues as Monica work items
+    #[command(subcommand)]
+    Issue(issue::IssueCommand),
     /// Start a worktree + session for an issue (owner/repo#123)
     Start { target: String },
     /// Show the status of all sessions
@@ -34,6 +39,7 @@ fn main() {
 fn run(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
         Commands::Project(cmd) => project::run(cmd),
+        Commands::Issue(cmd) => issue::run(cmd),
         Commands::Start { .. } | Commands::Status | Commands::Review { .. } | Commands::Pr { .. } => {
             eprintln!("monica: not yet implemented (see issue #11)");
             std::process::exit(1);
