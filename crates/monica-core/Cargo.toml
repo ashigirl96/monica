@@ -2,5 +2,11 @@
 name = "monica-core"
 version = "0.1.0"
 edition = "2021"
+# rusqlite 0.40 -> libsqlite3-sys 0.38 builds with `cfg_select!`, stabilized in Rust 1.95.
+rust-version = "1.95"
 
 [dependencies]
+anyhow = "1.0.102"
+rusqlite = { version = "0.40.0", features = ["bundled"] }
+serde = { version = "1.0.228", default-features = false, features = ["derive"] }
+serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
