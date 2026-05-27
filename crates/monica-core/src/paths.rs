@@ -9,7 +9,8 @@ pub fn base_dir() -> Result<PathBuf> {
     if let Some(home) = std::env::var_os("MONICA_HOME") {
         return Ok(PathBuf::from(home));
     }
-    let home = std::env::var_os("HOME").ok_or_else(|| anyhow!("neither MONICA_HOME nor HOME is set"))?;
+    let home =
+        std::env::var_os("HOME").ok_or_else(|| anyhow!("neither MONICA_HOME nor HOME is set"))?;
     Ok(PathBuf::from(home).join(HOME_SUBDIR))
 }
 

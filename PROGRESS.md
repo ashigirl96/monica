@@ -26,3 +26,4 @@ Issue Runner → Session Tracker → Status Dashboard → Kanban → Terminal/AD
 - 2026-05-27 #14 monica-core にストレージ基盤を実装。rusqlite(bundled)+rusqlite_migration+WorkItem/Run/Event/ExternalRefモデル+MON-ID採番+repository API（A 完了、B 以降の土台）。
 - 2026-05-27 #15 project registry を実装。projects テーブル(v2) + monica project init/set/list/show（B 完了）。init は git remote 検出・path 補完・.monica/ 雛形生成と DB 登録を兼ねる（add から改名）。
 - 2026-05-27 #16 monica issue track を実装。owner/repo#123 をパースし gh issue view から WorkItem(ready)+ExternalRef(github_issue) を作成、registry に project があれば project_id を紐付け（C 完了）。gh/パースは CLI 層、DB は core API を再利用。
+- 2026-05-28 `just build`/`install-local` でも `RUSTC_WRAPPER` を空にして、wrapper 付き環境でも Tauri ビルドが落ちないようにした。
