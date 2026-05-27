@@ -367,7 +367,12 @@ impl Project {
     /// fills them via column defaults and they are read back by [`Project::from_row`].
     pub fn from_repo(repo: impl Into<String>) -> Self {
         let repo = repo.into();
-        let name = repo.rsplit('/').next().unwrap_or(&repo).to_string();
+        // Last non-empty path segment, so a trailing slash ("owner/repo/") still yields "repo".
+        let name = repo
+            .rsplit('/')
+            .find(|seg| !seg.is_empty())
+            .unwrap_or(&repo)
+            .to_string();
         Self {
             id: repo.clone(),
             name,

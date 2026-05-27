@@ -44,13 +44,16 @@ pub fn run(cmd: ProjectCommand) -> Result<()> {
 
 fn init(db: &Db, repo_arg: Option<String>) -> Result<()> {
     let repo = match repo_arg {
-        Some(repo) => repo,
+        Some(repo) => parse_owner_repo(&repo)?,
         None => detect_repo()?,
     };
     let cwd = std::env::current_dir().context("failed to read current directory")?;
+    let path = cwd
+        .to_str()
+        .ok_or_else(|| anyhow!("current directory path is not valid UTF-8: {}", cwd.display()))?;
 
     let mut project = Project::from_repo(&repo);
-    project.path = Some(cwd.to_string_lossy().into_owned());
+    project.path = Some(path.to_string());
     let saved = db.upsert_project(&project)?;
 
     println!(
@@ -211,10 +214,10 @@ fn set_executable(_path: &Path) -> Result<()> {
 }
 
 fn print_table(rows: &[Vec<String>]) {
-    let cols = match rows.first() {
-        Some(first) => first.len(),
-        None => return,
-    };
+    let cols = rows.iter().map(|row| row.len()).max().unwrap_or(0);
+    if cols == 0 {
+        return;
+    }
     let mut widths = vec![0usize; cols];
     for row in rows {
         for (i, cell) in row.iter().enumerate() {
@@ -260,6 +263,10 @@ mod tests {
             "https://github.com/ashigirl96/monica/",
             "ssh://git@github.com/ashigirl96/monica.git",
             "  https://github.com/ashigirl96/monica.git\n",
+            // bare owner/repo (the explicit `init <repo>` arg) must normalize idempotently,
+            // including a trailing slash.
+            "ashigirl96/monica",
+            "ashigirl96/monica/",
         ];
         for case in cases {
             assert_eq!(parse_owner_repo(case).unwrap(), "ashigirl96/monica", "{case}");

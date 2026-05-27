@@ -207,6 +207,9 @@ impl Db {
                 let n: i64 = value
                     .parse()
                     .with_context(|| format!("setup_timeout_sec must be an integer, got {value:?}"))?;
+                if n <= 0 {
+                    return Err(anyhow!("setup_timeout_sec must be a positive integer, got {n}"));
+                }
                 self.update_project_column(id, "setup_timeout_sec", n)?;
             }
             "hooks_claude" => {
@@ -431,6 +434,8 @@ mod tests {
 
         assert!(db.set_project_field(id, "agent_permission_mode", "bogus").is_err());
         assert!(db.set_project_field(id, "setup_timeout_sec", "abc").is_err());
+        assert!(db.set_project_field(id, "setup_timeout_sec", "-5").is_err());
+        assert!(db.set_project_field(id, "setup_timeout_sec", "0").is_err());
         assert!(db.set_project_field(id, "hooks_claude", "maybe").is_err());
         assert!(db.set_project_field(id, "path", "").is_err());
         assert!(db.set_project_field(id, "worktree_root", "").is_err());
@@ -471,6 +476,13 @@ mod tests {
             assert_eq!(json, format!("\"{}\"", mode.as_str()));
         }
         assert!("dontAsk".parse::<PermissionMode>().is_err());
+    }
+
+    #[test]
+    fn from_repo_derives_name_from_last_segment() {
+        assert_eq!(Project::from_repo("ashigirl96/monica").name, "monica");
+        // A trailing slash must not produce an empty name.
+        assert_eq!(Project::from_repo("ashigirl96/monica/").name, "monica");
     }
 
     #[test]
