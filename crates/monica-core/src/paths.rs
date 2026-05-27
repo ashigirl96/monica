@@ -27,8 +27,9 @@ pub fn run_dir(run_id: &str) -> Result<PathBuf> {
     Ok(runs_dir()?.join(run_id))
 }
 
-/// Default root under which `issue run` creates git worktrees when a project has no
-/// `worktree_root` set: `<base>/worktrees/`.
+/// Legacy shared worktree root under Monica's base dir. New `issue run` callers should prefer a
+/// project-local default (`<project.path>/.worktrees`) and use this only when they explicitly want
+/// a Monica-managed shared location.
 pub fn worktrees_dir() -> Result<PathBuf> {
     Ok(base_dir()?.join("worktrees"))
 }
