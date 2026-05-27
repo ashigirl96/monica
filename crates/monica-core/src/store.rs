@@ -117,10 +117,10 @@ impl Db {
         Ok(refs)
     }
 
-    /// Insert a project, or update an existing one keyed by `id`. On conflict only the fields
-    /// derived from `owner/repo` plus `path` are refreshed; fields tweaked via
-    /// [`Db::set_project_field`] (timeout, branch template, worktree root, agent) are preserved.
-    /// `path` is intentionally refreshed so re-running `init` tracks the current checkout.
+    /// Insert a project, or update an existing one keyed by `id`. On conflict only `path` is
+    /// refreshed (so re-running `init` tracks the current checkout) plus `updated_at`; every other
+    /// field is preserved, including ones tweaked via [`Db::set_project_field`] such as `name`,
+    /// timeout, branch template, worktree root, or agent.
     pub fn upsert_project(&self, p: &Project) -> Result<Project> {
         self.conn().execute(
             "INSERT INTO projects
@@ -128,9 +128,6 @@ impl Db {
                 setup_timeout_sec, agent_default, agent_permission_mode, hooks_claude)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
              ON CONFLICT(id) DO UPDATE SET
-               name = excluded.name,
-               provider = excluded.provider,
-               repo = excluded.repo,
                path = excluded.path,
                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')",
             params![
@@ -451,6 +448,7 @@ mod tests {
         p.path = Some("/Users/dev/monica".to_string());
         db.upsert_project(&p).unwrap();
 
+        db.set_project_field("ashigirl96/monica", "name", "Custom").unwrap();
         db.set_project_field("ashigirl96/monica", "setup_timeout_sec", "900").unwrap();
         db.set_project_field("ashigirl96/monica", "branch_template", "monica/{slug}").unwrap();
 
@@ -458,6 +456,7 @@ mod tests {
         reinit.path = Some("/Users/dev/monica-moved".to_string());
         let after = db.upsert_project(&reinit).unwrap();
 
+        assert_eq!(after.name, "Custom", "set value must survive re-init");
         assert_eq!(after.setup_timeout_sec, 900, "set value must survive re-init");
         assert_eq!(after.branch_template, "monica/{slug}", "set value must survive re-init");
         assert_eq!(after.path.as_deref(), Some("/Users/dev/monica-moved"), "path tracks the new checkout");
