@@ -12,6 +12,8 @@ dev:
 dev-cli:
     RUSTC_WRAPPER= cargo build -p monica-cli
     cp target/debug/monica ./monica
+    mkdir -p ~/.zsh/completions
+    ./monica completions zsh > ~/.zsh/completions/_monica
 
 build:
     RUSTC_WRAPPER= bun run tauri build --bundles app
