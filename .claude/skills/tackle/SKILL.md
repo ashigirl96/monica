@@ -102,8 +102,13 @@ Issue の Acceptance Criteria / Verification から「操作 → 期待結果」
 
 `/codex` を使って、実装プランを monica のコードベースに照らして審査する。プラン審査は「設計上クリティカルな問題の早期発見」が目的。
 
+ここで Claude Code に返すのは **Codex の最終レビュー結果だけ**。`codex exec` の生 stdout や途中イベントは会話に返さない。
+`--output-last-message` でレビュー本文を別ファイルへ保存し、stdout / stderr はログへ逃がして必要時だけ確認する。
+
 ```
-cat <<'EOF' | codex exec -
+tmp="$(mktemp)"
+log="$(mktemp)"
+cat <<'EOF' | codex exec -o "$tmp" - >"$log" 2>&1
   以下の実装プランを monica のコードベースに照らしてレビューせよ。
   nitpick は無視し、設計上クリティカルな問題だけを指摘せよ。
   特に: crates 間の責務分担（core / cli / app）、WorkItem/Run/Event モデルとの整合、
@@ -113,6 +118,7 @@ cat <<'EOF' | codex exec -
   $(EnterPlanMode が生成したプラン)
   </plan>
 EOF
+cat "$tmp"
 ```
 
 クリティカルな指摘が返ったらプランを直し、前回のレビュー要約を添えて再度 `/codex` に投げ、各修正を検証する。LGTM か残課題なしまで繰り返す。クリティカルな指摘を取り込んでから、ユーザーにプランを提示して承認を得る。
@@ -202,6 +208,8 @@ monica の CLAUDE.md は「機能を追加・変更したら必ず `PROGRESS.md`
 ### `/codex` レビューの load-bearing な主張は鵜呑みにせず該当コードを自分で読む
 
 Step 3 の `/codex` レビューでは `file:line` を指して既存コードの性質を主張することがある（*「この関数は X を保証しない」*等）。その主張は **load-bearing** — 外すと提案された修正が不要・有害になる。取り込む前に該当箇所を自分で開いて確認する。正しければ反映、過剰主張なら次の投げで実コードを添えて反論し、存在しないリスクへの補償を発明しない。判断できなければプランの Open Questions に書き、実装前に検証する。
+
+また、Claude Code に見せるのは `cat "$tmp"` で得た最終メッセージだけに限定する。session の軌跡や進捗イベントまで返すと、プラン審査の要点が埋もれてしまう。
 
 ### 計画修正時は checklist を本文と同期させる
 
