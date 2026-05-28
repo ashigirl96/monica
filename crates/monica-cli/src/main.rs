@@ -20,7 +20,7 @@ enum Commands {
     /// Track GitHub issues as Monica work items
     #[command(subcommand)]
     Issue(issue::IssueCommand),
-    /// Receive an agent hook callback (used by generated agent settings)
+    /// Receive agent lifecycle hooks (e.g. `monica hook claude`)
     #[command(subcommand)]
     Hook(hook::HookCommand),
     /// Start a worktree + session for an issue (owner/repo#123)

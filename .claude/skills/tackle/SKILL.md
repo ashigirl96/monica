@@ -60,7 +60,7 @@ Issue template（`Context / Goal / Out of Scope / Acceptance Criteria / Verifica
 
 ### Step 2: 計画
 
-`EnterPlanMode` ツールで実装計画を作る。
+**まだ plan mode でなければ、最初に `EnterPlanMode` を呼んで plan mode に入る**（`/tackle` 起動時点で plan mode とは限らない。飛ばすと Step 3 の `/codex` 審査や末尾の `ExitPlanMode` が plan mode 前提で噛み合わず、`ExitPlanMode` が "not in plan mode" で弾かれる）。そのうえで実装計画を作る。
 
 **計画に必ず含めるもの:**
 

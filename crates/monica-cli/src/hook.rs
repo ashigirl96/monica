@@ -1,11 +1,12 @@
-use std::io::{self, Read};
+use std::io::Read;
 
 use anyhow::Result;
 use clap::Subcommand;
+use monica_core::{record_claude_hook, Db};
 
 #[derive(Subcommand)]
 pub enum HookCommand {
-    /// Receive a Claude Code hook event on stdin (no-op until #20 wires the bridge)
+    /// Receive a Claude Code hook callback (event JSON on stdin, `MONICA_*` in env)
     Claude,
 }
 
@@ -15,10 +16,42 @@ pub fn run(cmd: HookCommand) -> Result<()> {
     }
 }
 
+/// A hook must never disrupt the agent session, so this always returns `Ok(())` (exit 0) and routes
+/// every diagnostic to stderr. Claude Code feeds a `SessionStart` hook's stdout back into its own
+/// context, so stdout is kept empty on success — there is intentionally no `println!` here.
 fn claude() -> Result<()> {
-    // Drain stdin so Claude's hook payload doesn't trigger SIGPIPE on its side. #20 will replace
-    // this with a real receiver that parses the JSON event and updates work-item/run state.
-    let mut buf = Vec::new();
-    let _ = io::stdin().lock().read_to_end(&mut buf);
+    if let Err(e) = handle_claude() {
+        eprintln!("monica hook claude: {e:#}");
+    }
     Ok(())
+}
+
+fn handle_claude() -> Result<()> {
+    let mut raw = String::new();
+    std::io::stdin().read_to_string(&mut raw)?;
+
+    let work_item_id = env_opt("MONICA_ID");
+    let run_id = env_opt("MONICA_RUN_ID");
+
+    let mut db = Db::open()?;
+    let report = record_claude_hook(&mut db, work_item_id.as_deref(), run_id.as_deref(), &raw)?;
+
+    // Surface notable degradations on stderr so a misconfigured launch shows up in the hook debug
+    // log without ever reaching Claude's context.
+    if let Some(id) = &work_item_id {
+        if !report.work_item_found {
+            eprintln!("monica hook claude: MONICA_ID={id:?} not found; recorded event only");
+        }
+    }
+    if report.unsafe_run_id {
+        eprintln!(
+            "monica hook claude: MONICA_RUN_ID is not a safe run id; skipped hook-events.jsonl"
+        );
+    }
+    Ok(())
+}
+
+/// Read an env var, treating unset and empty-string the same (an empty `MONICA_*` is "absent").
+fn env_opt(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|v| !v.is_empty())
 }
