@@ -12,6 +12,7 @@ dev:
 dev-cli:
     cargo build -p monica-cli
     cp target/debug/monica ./monica
+    [ "$(uname)" = Darwin ] && codesign --force --sign - ./monica || true
     mkdir -p ~/.zsh/completions
     ./monica completions zsh > ~/.zsh/completions/_monica
 
