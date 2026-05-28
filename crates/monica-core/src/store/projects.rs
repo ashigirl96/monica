@@ -15,6 +15,11 @@ impl Db {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
              ON CONFLICT(id) DO UPDATE SET
                path = excluded.path,
+               default_branch = CASE
+                 WHEN projects.default_branch = 'main' AND excluded.default_branch != 'main'
+                 THEN excluded.default_branch
+                 ELSE projects.default_branch
+               END,
                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')",
             params![
                 p.id,
@@ -62,6 +67,7 @@ impl Db {
     /// `value` is always bound as `?1` — so this cannot be an injection vector. Enum and numeric
     /// fields are validated/coerced before being written.
     pub fn set_project_field(&self, id: &str, key: &str, value: &str) -> Result<()> {
+        let key = normalize_project_field_key(key);
         let text_value = |value: &str| -> Result<()> { self.update_project_column(id, key, value) };
         match key {
             "name" | "repo" | "default_branch" => text_value(value)?,
@@ -120,6 +126,13 @@ impl Db {
             return Err(anyhow!("project not found: {id}"));
         }
         Ok(())
+    }
+}
+
+fn normalize_project_field_key(key: &str) -> &str {
+    match key {
+        "branch" => "default_branch",
+        other => other,
     }
 }
 

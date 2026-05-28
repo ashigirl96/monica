@@ -16,6 +16,15 @@ pub struct GithubIssue {
 }
 
 pub fn register_project(db: &Db, repo_input: &str, path: &Path) -> Result<Project> {
+    register_project_with_default_branch(db, repo_input, path, None)
+}
+
+pub fn register_project_with_default_branch(
+    db: &Db,
+    repo_input: &str,
+    path: &Path,
+    default_branch: Option<&str>,
+) -> Result<Project> {
     let repo = parse_owner_repo(repo_input)?;
     let path = path.to_str().ok_or_else(|| {
         anyhow!(
@@ -26,6 +35,9 @@ pub fn register_project(db: &Db, repo_input: &str, path: &Path) -> Result<Projec
 
     let mut project = Project::from_repo(repo);
     project.path = Some(path.to_string());
+    if let Some(default_branch) = default_branch {
+        project.default_branch = default_branch.to_string();
+    }
     db.upsert_project(&project)
 }
 
@@ -67,6 +79,19 @@ mod tests {
         let project = register_project(&db, "AshiGirl96/Monica", Path::new("/tmp/monica")).unwrap();
         assert_eq!(project.id, "ashigirl96/monica");
         assert_eq!(project.path.as_deref(), Some("/tmp/monica"));
+    }
+
+    #[test]
+    fn register_project_can_take_detected_default_branch() {
+        let db = Db::open_in_memory().unwrap();
+        let project = register_project_with_default_branch(
+            &db,
+            "AshiGirl96/Monica",
+            Path::new("/tmp/monica"),
+            Some("master"),
+        )
+        .unwrap();
+        assert_eq!(project.default_branch, "master");
     }
 
     #[test]

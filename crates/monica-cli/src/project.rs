@@ -4,7 +4,7 @@ use std::process::Command;
 
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
-use monica_core::{register_project, Db};
+use monica_core::{register_project_with_default_branch, Db};
 
 #[derive(Subcommand)]
 pub enum ProjectCommand {
@@ -48,12 +48,14 @@ fn init(db: &Db, repo_arg: Option<String>) -> Result<()> {
         Some(repo) => repo,
         None => detect_repo()?,
     };
-    let saved = register_project(db, &repo, &cwd)?;
+    let default_branch = detect_default_branch(&repo);
+    let saved = register_project_with_default_branch(db, &repo, &cwd, default_branch.as_deref())?;
 
     println!(
-        "Registered project {} (path: {})",
+        "Registered project {} (path: {}, default_branch: {})",
         saved.id,
-        saved.path.as_deref().unwrap_or("-")
+        saved.path.as_deref().unwrap_or("-"),
+        saved.default_branch
     );
     for (file, created) in scaffold_monica(&cwd)? {
         let status = if created {
@@ -150,6 +152,55 @@ fn detect_repo() -> Result<String> {
     monica_core::parse_owner_repo(&url)
 }
 
+fn detect_default_branch(repo: &str) -> Option<String> {
+    detect_git_default_branch(repo).or_else(|| detect_gh_default_branch(repo))
+}
+
+fn detect_git_default_branch(repo: &str) -> Option<String> {
+    if detect_repo().ok().as_deref() != Some(repo) {
+        return None;
+    }
+
+    let output = Command::new("git")
+        .args(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let branch = String::from_utf8(output.stdout).ok()?;
+    parse_origin_head_branch(&branch)
+}
+
+fn detect_gh_default_branch(repo: &str) -> Option<String> {
+    let output = Command::new("gh")
+        .args([
+            "repo",
+            "view",
+            repo,
+            "--json",
+            "defaultBranchRef",
+            "--jq",
+            ".defaultBranchRef.name",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let branch = String::from_utf8(output.stdout).ok()?;
+    let branch = branch.trim();
+    (!branch.is_empty()).then(|| branch.to_string())
+}
+
+fn parse_origin_head_branch(value: &str) -> Option<String> {
+    value
+        .trim()
+        .strip_prefix("origin/")
+        .filter(|branch| !branch.is_empty())
+        .map(ToString::to_string)
+}
+
 fn scaffold_monica(dir: &Path) -> Result<Vec<(String, bool)>> {
     let monica_dir = dir.join(".monica");
     fs::create_dir_all(&monica_dir)
@@ -228,3 +279,27 @@ set -euo pipefail
 const PROMPT_MD_TEMPLATE: &str = r#"<!-- Monica passes this file's contents as the initial prompt to the agent. -->
 /tackle
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_origin_head_branch_strips_origin_prefix() {
+        assert_eq!(
+            parse_origin_head_branch("origin/master\n"),
+            Some("master".to_string())
+        );
+        assert_eq!(
+            parse_origin_head_branch("origin/main"),
+            Some("main".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_origin_head_branch_rejects_unexpected_output() {
+        assert_eq!(parse_origin_head_branch("main"), None);
+        assert_eq!(parse_origin_head_branch("origin/"), None);
+        assert_eq!(parse_origin_head_branch(""), None);
+    }
+}

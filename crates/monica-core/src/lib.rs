@@ -14,7 +14,9 @@ mod store;
 #[cfg(test)]
 mod test_support;
 
-pub use app::{register_project, track_github_issue, GithubIssue};
+pub use app::{
+    register_project, register_project_with_default_branch, track_github_issue, GithubIssue,
+};
 pub use claude::AgentLaunch;
 pub use db::Db;
 pub use hook::{is_safe_run_id, record_claude_hook, status_for_claude_event, HookReport};
