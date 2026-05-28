@@ -230,6 +230,25 @@ impl Db {
         Ok(events)
     }
 
+    /// Update only a run's status, scoped by `work_item_id` so a mismatched id never crosses
+    /// ownership. Silent no-op when the row does not exist or is owned by a different work item;
+    /// the caller is the hook receiver, which must never raise on a missing run.
+    pub fn update_run_status(
+        &self,
+        run_id: &str,
+        work_item_id: &str,
+        status: Status,
+    ) -> Result<()> {
+        self.conn().execute(
+            &format!(
+                "UPDATE runs SET status = ?1, updated_at = {SET_NOW} \
+                 WHERE id = ?2 AND work_item_id = ?3"
+            ),
+            params![status.as_str(), run_id, work_item_id],
+        )?;
+        Ok(())
+    }
+
     /// Apply a hook-driven status to a work item, and — when `run_id` is given — to its run, in one
     /// transaction. The run update is additionally scoped by `work_item_id`, so a run that does not
     /// belong to this work item (e.g. a mismatched env var) is never touched even if the id exists.

@@ -136,17 +136,30 @@ pub fn record_claude_hook(
         false
     };
 
-    // Apply the implied status only when the work item exists and its current status is not an
-    // explicit signal a lifecycle hook must preserve.
-    let status = match (
-        event_name.as_deref().and_then(status_for_claude_event),
-        current_status,
-    ) {
-        (Some(implied), Some(current)) if !explicit_status_wins(current) => Some(implied),
+    // Apply the implied status to the work item only when the current status is not an explicit
+    // signal a lifecycle hook must preserve. The work-item + run pair updates atomically here.
+    let implied = event_name.as_deref().and_then(status_for_claude_event);
+    let work_item_protected = current_status.map(explicit_status_wins).unwrap_or(false);
+    let status = match (implied, current_status) {
+        (Some(implied), Some(_)) if !work_item_protected => Some(implied),
         _ => None,
     };
     if let (Some(status), Some(work_item_id)) = (status, work_item_id) {
         db.apply_hook_status(work_item_id, linked_run_id, status)?;
+    } else if work_item_protected {
+        // The work item is protected (explicit mark or terminal Failed), but the linked run must
+        // still reflect the session lifecycle — otherwise `runs.status` strands as `running` after
+        // the agent session has actually ended. The run is itself gated by `explicit_status_wins`
+        // so a previously-`failed` run is not downgraded to `stopped` by a trailing SessionEnd.
+        if let (Some(implied), Some(rid), Some(wid)) = (implied, linked_run_id, work_item_id) {
+            let run_protected = run_row
+                .as_ref()
+                .map(|r| explicit_status_wins(r.status))
+                .unwrap_or(false);
+            if !run_protected {
+                db.update_run_status(rid, wid, implied)?;
+            }
+        }
     }
 
     Ok(HookReport {
@@ -583,6 +596,86 @@ mod tests {
         assert_eq!(
             db.get_work_item(&id).unwrap().unwrap().status,
             Status::PrOpen
+        );
+    }
+
+    /// When Claude marks the work item explicitly (e.g. `need_approval`) and the session then ends,
+    /// the work item must stay at the explicit status but the linked run must still transition out
+    /// of `running` — otherwise `runs.status` strands and `monica issue status` shows a session
+    /// that is over as still running.
+    #[test]
+    fn stop_transitions_linked_run_even_when_work_item_is_marked() {
+        let (_g, _home) = temp_home("marked-run");
+        let mut db = Db::open_in_memory().unwrap();
+        let id = dev_item(&mut db, Status::Ready);
+        let run = db.start_run(new_run(&id)).unwrap();
+        // Drive both rows to `running` (start_run leaves them at setting_up), then mark the work
+        // item explicitly — mark_work_item touches only the work item, leaving run at `running`.
+        db.finish_run(&run.id, &id, Status::Running).unwrap();
+        db.mark_work_item(&id, Status::NeedApproval, Some("Plan ready"), None)
+            .unwrap();
+        assert_eq!(
+            db.get_work_item(&id).unwrap().unwrap().status,
+            Status::NeedApproval
+        );
+        assert_eq!(db.get_run(&run.id).unwrap().unwrap().status, Status::Running);
+
+        let report = record_claude_hook(
+            &mut db,
+            Some(&id),
+            Some(&run.id),
+            r#"{"hook_event_name":"Stop"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            report.status, None,
+            "work item is protected so the report records no work-item status change"
+        );
+        assert!(report.event_recorded);
+        assert_eq!(
+            db.get_work_item(&id).unwrap().unwrap().status,
+            Status::NeedApproval,
+            "the explicit mark must survive the lifecycle hook"
+        );
+        assert_eq!(
+            db.get_run(&run.id).unwrap().unwrap().status,
+            Status::Stopped,
+            "the run must follow the session lifecycle even when the work item is protected"
+        );
+    }
+
+    /// Inverse of the above: when the run itself is already at a terminal/protected status
+    /// (`failed` from a prior `StopFailure`), the run-only path must not downgrade it. Without the
+    /// run-side protection check, a trailing `SessionEnd` would silently overwrite `failed` with
+    /// `stopped` on the run row.
+    #[test]
+    fn session_end_does_not_downgrade_failed_run() {
+        let (_g, _home) = temp_home("failed-run");
+        let mut db = Db::open_in_memory().unwrap();
+        let id = dev_item(&mut db, Status::Ready);
+        let run = db.start_run(new_run(&id)).unwrap();
+        // Settle both to `failed` the same way StopFailure would.
+        db.finish_run(&run.id, &id, Status::Failed).unwrap();
+
+        let report = record_claude_hook(
+            &mut db,
+            Some(&id),
+            Some(&run.id),
+            r#"{"hook_event_name":"SessionEnd"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(report.status, None);
+        assert_eq!(
+            db.get_work_item(&id).unwrap().unwrap().status,
+            Status::Failed,
+            "work item Failed survives (covered by explicit_status_wins)"
+        );
+        assert_eq!(
+            db.get_run(&run.id).unwrap().unwrap().status,
+            Status::Failed,
+            "run Failed must not be downgraded to stopped by the run-only path"
         );
     }
 
