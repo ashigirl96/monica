@@ -497,6 +497,7 @@ fn set_project_field_coerces_and_validates() {
 
     db.set_project_field(id, "default_branch", "develop")
         .unwrap();
+    db.set_project_field(id, "branch", "master").unwrap();
     db.set_project_field(id, "agent_permission_mode", "acceptEdits")
         .unwrap();
     db.set_project_field(id, "setup_timeout_sec", "900")
@@ -506,7 +507,7 @@ fn set_project_field_coerces_and_validates() {
         .unwrap();
 
     let p = db.get_project(id).unwrap().unwrap();
-    assert_eq!(p.default_branch, "develop");
+    assert_eq!(p.default_branch, "master");
     assert_eq!(p.agent_permission_mode, PermissionMode::AcceptEdits);
     assert_eq!(p.setup_timeout_sec, 900);
     assert!(!p.hooks_claude);
@@ -563,6 +564,23 @@ fn reinit_preserves_tweaked_config_and_tracks_path() {
         Some("/Users/dev/monica-moved"),
         "path tracks the new checkout"
     );
+}
+
+#[test]
+fn reinit_replaces_untouched_main_with_detected_default_branch() {
+    let db = Db::open_in_memory().unwrap();
+    let mut p = sample_project();
+    p.path = Some("/Users/dev/monica".to_string());
+    assert_eq!(p.default_branch, "main");
+    db.upsert_project(&p).unwrap();
+
+    let mut reinit = Project::from_repo("ashigirl96/monica");
+    reinit.path = Some("/Users/dev/monica-moved".to_string());
+    reinit.default_branch = "master".to_string();
+    let after = db.upsert_project(&reinit).unwrap();
+
+    assert_eq!(after.default_branch, "master");
+    assert_eq!(after.path.as_deref(), Some("/Users/dev/monica-moved"));
 }
 
 #[test]

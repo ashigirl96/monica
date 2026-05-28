@@ -34,3 +34,4 @@ Issue Runner → Session Tracker → Status Dashboard → Kanban → Terminal/AD
 - 2026-05-28 #19 monica issue run --claude を実装。setup 成功後に runs/<run_id>/claude-settings.json（SessionStart/Stop/StopFailure/SessionEnd の command hook）を生成し、.monica/prompt.md を初期 prompt に claude --settings を worktree で foreground 起動、settings_path 記録・status=running（F 完了）。
 - 2026-05-28 #20 Claude Hook Bridge を実装。core に hook receiver(`record_claude_hook`)＋events/`hook-events.jsonl` 記録＋status 遷移(SessionStart→running 等)、`monica issue mark`(status/phase/PR ref) を置き、CLI は stdin/env 読取と exit 0 保証のみ。env 由来の run_id は path 安全性と work item 所有を検証して誤更新と FK 違反を防止（G 完了、migration なし）。
 - 2026-05-28 monica-core の大型ファイルを責務別モジュールへ分割した（保守性向上）
+- 2026-05-28 `project init` が git/gh から default branch を検出して登録するようにし、`project set ... branch` を `default_branch` の alias として扱うようにした。
