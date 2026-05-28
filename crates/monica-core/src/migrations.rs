@@ -6,7 +6,7 @@ use rusqlite_migration::{Migrations, M};
 /// uses the list position as the version). Append an `M::up(...)` to add a version;
 /// never reorder or remove existing entries, or already-migrated databases diverge.
 fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3)])
+    Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3), M::up(V4)])
 }
 
 /// v1: storage foundation (work items, runs, events, external refs) + MON-id counter.
@@ -87,6 +87,12 @@ const V3: &str = r#"
     CREATE TABLE run_counter (n INTEGER PRIMARY KEY AUTOINCREMENT);
 "#;
 
+/// v4: drop the per-project branch-name template. Branch names are now derived directly from the
+/// run (`issue-<n>` for a linked GitHub issue, else `mon-<n>`), so the configurable rule is gone.
+const V4: &str = r#"
+    ALTER TABLE projects DROP COLUMN branch_template;
+"#;
+
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
     migrations()
@@ -101,5 +107,60 @@ mod tests {
     #[test]
     fn migration_set_is_valid() {
         migrations().validate().expect("migrations should validate");
+    }
+
+    /// A project row written under the v3 schema (which still has `branch_template`) must survive
+    /// the v4 `DROP COLUMN` and stay readable through `Db`/`Project::from_row` afterwards. `Db` has
+    /// no constructor from an existing connection, so the v3 state is staged on disk and reopened
+    /// via `Db::open_at`, which runs the pending v4 migration on that existing data.
+    #[test]
+    fn v4_drops_branch_template_and_preserves_v3_rows() {
+        let dir = std::env::temp_dir().join(format!(
+            "monica-mig-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("v3.db");
+        let _ = std::fs::remove_file(&path);
+
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3)])
+                .to_latest(&mut conn)
+                .unwrap();
+            conn.execute(
+                "INSERT INTO projects (id, name, repo, path, branch_template)
+                 VALUES ('o/r', 'r', 'o/r', '/tmp/r', 'monica/{slug}')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let db = crate::Db::open_at(&path).unwrap();
+        let project = db
+            .get_project("o/r")
+            .unwrap()
+            .expect("v3 row must survive the v4 migration and read back via Project::from_row");
+        assert_eq!(project.id, "o/r");
+        assert_eq!(project.path.as_deref(), Some("/tmp/r"));
+
+        let has_column: i64 = db
+            .conn()
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('projects') WHERE name = 'branch_template'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_column, 0, "branch_template column must be dropped");
+
+        let version: i64 = db
+            .conn()
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 4);
+
+        std::fs::remove_file(&path).ok();
     }
 }

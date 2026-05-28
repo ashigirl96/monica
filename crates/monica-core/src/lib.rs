@@ -14,7 +14,7 @@ pub use app::{register_project, track_github_issue, GithubIssue};
 pub use db::Db;
 pub use model::{
     Agent, Event, ExternalRef, IssueStatusRow, NewRun, NewWorkItem, PermissionMode, Project,
-    Provider, RefType, Run, Status, WorkItem, WorkItemKind, DEFAULT_BRANCH_TEMPLATE,
+    Provider, RefType, Run, Status, WorkItem, WorkItemKind,
 };
 pub use paths::{base_dir, db_path, run_dir, runs_dir, worktrees_dir};
 pub use repo::{parse_issue_ref, parse_owner_repo};

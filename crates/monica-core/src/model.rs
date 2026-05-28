@@ -372,11 +372,6 @@ impl ExternalRef {
     }
 }
 
-/// Default git branch template. Must stay in sync with the `branch_template` column default
-/// in migration v2.
-pub const DEFAULT_BRANCH_TEMPLATE: &str =
-    "monica/gh-{github_issue_number}-mon-{monica_number}-{slug}";
-
 /// A repo's execution-environment definition, resolved by `issue run`. One row per repo,
 /// keyed by `owner/repo`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -388,7 +383,6 @@ pub struct Project {
     pub path: Option<String>,
     pub default_branch: String,
     pub worktree_root: Option<String>,
-    pub branch_template: String,
     pub setup_timeout_sec: i64,
     pub agent_default: Agent,
     pub agent_permission_mode: PermissionMode,
@@ -417,7 +411,6 @@ impl Project {
             path: None,
             default_branch: "main".to_string(),
             worktree_root: None,
-            branch_template: DEFAULT_BRANCH_TEMPLATE.to_string(),
             setup_timeout_sec: 600,
             agent_default: Agent::Claude,
             agent_permission_mode: PermissionMode::Plan,
@@ -439,7 +432,6 @@ impl Project {
             path: row.get("path")?,
             default_branch: row.get("default_branch")?,
             worktree_root: row.get("worktree_root")?,
-            branch_template: row.get("branch_template")?,
             setup_timeout_sec: row.get("setup_timeout_sec")?,
             agent_default: agent_default.parse()?,
             agent_permission_mode: agent_permission_mode.parse()?,

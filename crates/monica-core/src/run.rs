@@ -13,35 +13,7 @@ use crate::model::NewRun;
 use crate::{paths, Db, Project, RefType, Status};
 
 const SETUP_SCRIPT_REL: &str = ".monica/setup.sh";
-const SLUG_MAX_LEN: usize = 50;
-const SLUG_FALLBACK: &str = "issue";
 const SETUP_POLL_INTERVAL: Duration = Duration::from_millis(50);
-
-/// Derive an ASCII, git-ref-safe slug from a work item title: lowercase alphanumerics, every other
-/// run of characters collapsed to a single `-`, trimmed, capped at [`SLUG_MAX_LEN`]. Titles with no
-/// ASCII alphanumerics (e.g. all-Japanese) collapse to nothing and fall back to [`SLUG_FALLBACK`],
-/// keeping the branch name ASCII-safe.
-pub fn slugify(title: &str) -> String {
-    let mut out = String::with_capacity(title.len());
-    let mut prev_dash = false;
-    for ch in title.chars() {
-        if ch.is_ascii_alphanumeric() {
-            out.push(ch.to_ascii_lowercase());
-            prev_dash = false;
-        } else if !prev_dash {
-            out.push('-');
-            prev_dash = true;
-        }
-    }
-    // `out` is pure ASCII, so a byte truncation is always on a char boundary.
-    out.truncate(SLUG_MAX_LEN);
-    let trimmed = out.trim_matches('-');
-    if trimmed.is_empty() {
-        SLUG_FALLBACK.to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
 
 /// Extract the numeric part of a `MON-<n>` work item id.
 pub fn monica_number(work_item_id: &str) -> Result<i64> {
@@ -52,57 +24,14 @@ pub fn monica_number(work_item_id: &str) -> Result<i64> {
         .ok_or_else(|| anyhow!("invalid work item id (expected MON-<n>): {work_item_id:?}"))
 }
 
-/// Render a git branch name from a project's `branch_template`.
-///
-/// Supported placeholders are `{github_issue_number}`, `{monica_number}`, and `{slug}` — this is a
-/// small, fixed contract, not a general template engine. Only two forms are guaranteed: with a
-/// linked GitHub issue `monica/gh-9-mon-1-slug`, without one `monica/mon-1-slug` (the
-/// `gh-{github_issue_number}-` segment is dropped). When there is no
-/// GitHub issue the segment is removed and any stray `{github_issue_number}` blanked; the result is
-/// then normalized per path segment so no empty segments or doubled `-` survive (a custom
-/// `feat/{github_issue_number}/{slug}` yields `feat/slug`, never `feat//slug`).
-pub fn render_branch_name(
-    template: &str,
-    monica_number: i64,
-    github_issue_number: Option<i64>,
-    slug: &str,
-) -> String {
-    let mut s = template.to_string();
+/// The git branch a run works on: the linked GitHub issue number (`issue-9`), or the work item's
+/// MON number when no issue is linked (`mon-1`). Both forms are already git-ref- and path-safe,
+/// so no further sanitization is needed before they reach a branch ref or worktree directory.
+pub fn branch_name(github_issue_number: Option<i64>, monica_number: i64) -> String {
     match github_issue_number {
-        Some(n) => s = s.replace("{github_issue_number}", &n.to_string()),
-        None => {
-            s = s.replace("gh-{github_issue_number}-", "");
-            s = s.replace("{github_issue_number}", "");
-        }
+        Some(n) => format!("issue-{n}"),
+        None => format!("mon-{monica_number}"),
     }
-    s = s.replace("{monica_number}", &monica_number.to_string());
-    s = s.replace("{slug}", slug);
-    normalize_ref(&s)
-}
-
-fn normalize_ref(s: &str) -> String {
-    s.split('/')
-        .map(collapse_dashes)
-        .filter(|seg| !seg.is_empty())
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
-fn collapse_dashes(segment: &str) -> String {
-    let mut out = String::with_capacity(segment.len());
-    let mut prev_dash = false;
-    for ch in segment.chars() {
-        if ch == '-' {
-            if !prev_dash {
-                out.push('-');
-            }
-            prev_dash = true;
-        } else {
-            out.push(ch);
-            prev_dash = false;
-        }
-    }
-    out.trim_matches('-').to_string()
 }
 
 /// Where `issue run` places a worktree. The directory name is the full branch with `/` and any
@@ -336,9 +265,8 @@ pub fn run_issue(db: &mut Db, work_item_id: &str) -> Result<RunReport> {
     })?;
 
     let github_issue_number = latest_github_issue_number(db, work_item_id)?;
-    let slug = slugify(&item.title);
     let mon = monica_number(work_item_id)?;
-    let branch = render_branch_name(&project.branch_template, mon, github_issue_number, &slug);
+    let branch = branch_name(github_issue_number, mon);
     let worktree_path = worktree_path_for(&project, &branch)?;
 
     if worktree_path.exists() {
@@ -524,35 +452,9 @@ mod tests {
             monica_id: "MON-1".to_string(),
             run_id: "run-1".to_string(),
             project_id: "ashigirl96/monica".to_string(),
-            branch: "monica/gh-9-mon-1-foo".to_string(),
+            branch: "issue-9".to_string(),
             worktree: "/tmp/wt".to_string(),
         }
-    }
-
-    // ---- slugify ----
-
-    #[test]
-    fn slugify_basic_and_collapsing() {
-        assert_eq!(slugify("Add feature X"), "add-feature-x");
-        assert_eq!(slugify("Fix:  the   bug!!!"), "fix-the-bug");
-        assert_eq!(slugify("  leading/trailing  "), "leading-trailing");
-    }
-
-    #[test]
-    fn slugify_truncates_and_trims_trailing_dash() {
-        let long = "a".repeat(80);
-        let slug = slugify(&long);
-        assert_eq!(slug.len(), SLUG_MAX_LEN);
-        // A title that would truncate onto a separator must not keep a trailing dash.
-        let s = slugify(&format!("{} !", "x".repeat(SLUG_MAX_LEN - 1)));
-        assert!(!s.ends_with('-'));
-    }
-
-    #[test]
-    fn slugify_non_ascii_and_empty_fall_back() {
-        assert_eq!(slugify("日本語のタイトル"), SLUG_FALLBACK);
-        assert_eq!(slugify(""), SLUG_FALLBACK);
-        assert_eq!(slugify("---"), SLUG_FALLBACK);
     }
 
     // ---- monica_number ----
@@ -567,72 +469,51 @@ mod tests {
         assert!(monica_number("").is_err());
     }
 
-    // ---- render_branch_name ----
+    // ---- branch_name ----
 
     #[test]
-    fn render_branch_name_default_template_both_forms() {
-        let t = crate::DEFAULT_BRANCH_TEMPLATE;
-        assert_eq!(
-            render_branch_name(t, 1, Some(9), "foo"),
-            "monica/gh-9-mon-1-foo"
-        );
-        assert_eq!(render_branch_name(t, 1, None, "foo"), "monica/mon-1-foo");
+    fn branch_name_uses_issue_number_or_falls_back_to_mon() {
+        assert_eq!(branch_name(Some(9), 1), "issue-9");
+        assert_eq!(branch_name(Some(18), 42), "issue-18");
+        assert_eq!(branch_name(None, 1), "mon-1");
+        assert_eq!(branch_name(None, 42), "mon-42");
     }
 
-    #[test]
-    fn render_branch_name_custom_templates() {
-        assert_eq!(
-            render_branch_name("feat/{slug}-mon-{monica_number}", 3, Some(9), "x"),
-            "feat/x-mon-3"
-        );
-        // A custom template placing {github_issue_number} mid-path must not yield `feat//foo`.
-        assert_eq!(
-            render_branch_name("feat/{github_issue_number}/{slug}", 1, None, "foo"),
-            "feat/foo"
-        );
-        assert_eq!(
-            render_branch_name("feat/{github_issue_number}/{slug}", 1, Some(9), "foo"),
-            "feat/9/foo"
-        );
-    }
+    // ---- sanitize_path_component ----
 
     #[test]
-    fn render_branch_name_empty_slug_has_no_trailing_dash() {
+    fn sanitize_path_component_replaces_slashes_and_odd_chars() {
+        assert_eq!(sanitize_path_component("issue-9"), "issue-9");
+        assert_eq!(sanitize_path_component("a/b"), "a-b");
+        assert_eq!(sanitize_path_component("feat/x y#9"), "feat-x-y-9");
         assert_eq!(
-            render_branch_name(crate::DEFAULT_BRANCH_TEMPLATE, 1, None, ""),
-            "monica/mon-1"
+            sanitize_path_component("keep.dot_under-dash"),
+            "keep.dot_under-dash"
         );
     }
 
     // ---- worktree_path_for ----
 
     #[test]
-    fn worktree_path_uses_full_sanitized_branch() {
+    fn worktree_path_uses_explicit_root() {
         let mut project = Project::from_repo("ashigirl96/monica");
         project.worktree_root = Some("/custom/root".to_string());
-        let path = worktree_path_for(&project, "monica/gh-9-mon-1-foo").unwrap();
-        assert_eq!(
-            path,
-            Path::new("/custom/root/monica-gh-9-mon-1-foo"),
-            "the full branch must be sanitized, not collapsed to its last segment"
-        );
+        let path = worktree_path_for(&project, "issue-9").unwrap();
+        assert_eq!(path, Path::new("/custom/root/issue-9"));
     }
 
     #[test]
     fn worktree_path_defaults_under_project_path() {
         let mut project = Project::from_repo("ashigirl96/monica");
         project.path = Some("/tmp/monica".to_string());
-        let path = worktree_path_for(&project, "monica/gh-9-mon-1-foo").unwrap();
-        assert_eq!(
-            path,
-            Path::new("/tmp/monica/.worktrees/monica-gh-9-mon-1-foo")
-        );
+        let path = worktree_path_for(&project, "issue-9").unwrap();
+        assert_eq!(path, Path::new("/tmp/monica/.worktrees/issue-9"));
     }
 
     #[test]
     fn worktree_path_requires_project_path_or_explicit_root() {
         let project = Project::from_repo("ashigirl96/monica");
-        let err = worktree_path_for(&project, "monica/gh-9-mon-1-foo").unwrap_err();
+        let err = worktree_path_for(&project, "issue-9").unwrap_err();
         assert!(
             format!("{err:#}").contains("has neither path nor worktree_root"),
             "{err:#}"
@@ -664,10 +545,7 @@ mod tests {
         assert_eq!(outcome, SetupOutcome::Succeeded);
         let captured = fs::read_to_string(&log).unwrap();
         assert!(captured.contains("id=MON-1"), "{captured}");
-        assert!(
-            captured.contains("branch=monica/gh-9-mon-1-foo"),
-            "{captured}"
-        );
+        assert!(captured.contains("branch=issue-9"), "{captured}");
         assert!(captured.contains("run=run-1"), "{captured}");
     }
 
@@ -712,16 +590,24 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn setup_timeout_kills_descendant_processes() {
+        // Observe the descendant through sentinel files in the test's own tmp dir rather than by
+        // name via `pgrep`: a global, name-keyed process search cannot tell this run's descendant
+        // from one leaked by an earlier run, so a single stray orphan would fail every later run.
+        // `ready` proves the descendant launched; `survived` is written only if it outlives the
+        // grace period, so a process-group kill that reaches it leaves `survived` absent.
         let wt = Tmp::new("setup-timeout-tree");
-        let marker = "monica_descendant_group_kill_test";
+        let ready = wt.path().join("ready");
+        let survived = wt.path().join("survived");
         write_setup(
             wt.path(),
-            &format!("#!/usr/bin/env bash\n(\n  exec -a {marker} sleep 9999\n) &\nsleep 5\n"),
+            "#!/usr/bin/env bash\n(\n  touch \"$MONICA_READY\"\n  sleep 1\n  touch \"$MONICA_SURVIVED\"\n) &\nsleep 5\n",
         );
         let mut child = {
             let mut command = Command::new(wt.path().join(".monica/setup.sh"));
             command.process_group(0);
             command
+                .env("MONICA_READY", &ready)
+                .env("MONICA_SURVIVED", &survived)
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
@@ -729,42 +615,27 @@ mod tests {
         };
 
         let mut saw_descendant = false;
-        for _ in 0..20 {
-            if Command::new("pgrep")
-                .args(["-q", "-f", marker])
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
-            {
+        for _ in 0..40 {
+            if ready.exists() {
                 saw_descendant = true;
                 break;
             }
             thread::sleep(Duration::from_millis(25));
         }
         assert!(saw_descendant, "setup should spawn descendant process");
-        let running = Command::new("pgrep")
-            .args(["-q", "-f", marker])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if running {
-            terminate_setup_process_tree(child.id()).unwrap();
-        } else {
-            panic!("descendant did not persist long enough to assert termination behavior");
-        }
-        thread::sleep(Duration::from_millis(200));
-        let running = Command::new("pgrep")
-            .args(["-q", "-f", marker])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        assert!(
-            !running,
-            "background process should be terminated by process-group kill"
-        );
+
+        terminate_setup_process_tree(child.id()).unwrap();
         assert!(
             !child.wait().unwrap().success(),
             "killing the process group should terminate setup helper"
+        );
+
+        // Wait past the descendant's grace period (`sleep 1`); a survivor would have written
+        // `survived` by now, so its absence is what proves the group kill reached the descendant.
+        thread::sleep(Duration::from_millis(1200));
+        assert!(
+            !survived.exists(),
+            "descendant must be terminated by the process-group kill before it touches survived"
         );
     }
 
@@ -836,16 +707,13 @@ mod tests {
 
         assert_eq!(report.status, Status::Running);
         assert_eq!(report.setup, SetupOutcome::Succeeded);
-        assert_eq!(report.branch, "monica/gh-9-mon-1-add-feature-x");
+        assert_eq!(report.branch, "issue-9");
         assert!(Path::new(&report.worktree_path)
             .join(".monica/setup.sh")
             .exists());
 
         let log = fs::read_to_string(&report.log_path).unwrap();
-        assert!(
-            log.contains("hello MON-1 monica/gh-9-mon-1-add-feature-x"),
-            "{log}"
-        );
+        assert!(log.contains("hello MON-1 issue-9"), "{log}");
 
         assert_eq!(
             db.get_work_item(&id).unwrap().unwrap().status,
@@ -873,7 +741,7 @@ mod tests {
         let report = run_issue(&mut db, &id).unwrap();
         assert_eq!(report.setup, SetupOutcome::Skipped);
         assert_eq!(report.status, Status::Running);
-        assert_eq!(report.branch, "monica/mon-1-no-setup");
+        assert_eq!(report.branch, "mon-1");
 
         std::env::remove_var("MONICA_HOME");
     }
