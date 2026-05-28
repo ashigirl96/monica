@@ -9,11 +9,34 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 
-use crate::model::NewRun;
+use crate::claude::{self, AgentLaunch};
+use crate::model::{Agent, NewRun};
 use crate::{paths, Db, Project, RefType, Status};
 
 const SETUP_SCRIPT_REL: &str = ".monica/setup.sh";
 const SETUP_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const CLAUDE_PROGRAM: &str = "claude";
+
+/// The shell command the four generated hooks invoke. Uses the absolute path of *this* monica
+/// executable via [`std::env::current_exe`] so the hook resolves no matter how the user launched
+/// monica (e.g. `./monica` from a checkout, or an install location that isn't on `PATH`) — claude
+/// runs the command via `sh -c`, which would otherwise PATH-lookup a bare `monica` and silently
+/// fail, leaving runs stranded as `running`. The path is single-quoted for safety against spaces;
+/// `monica` is the last-ditch fallback when the platform refuses to report the running exe.
+fn hook_command() -> String {
+    let exe = std::env::current_exe()
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "monica".to_string());
+    format!("{} hook claude", shell_quote_single(&exe))
+}
+
+/// Wrap `s` in single quotes for `/bin/sh`, escaping any embedded single quote as `'\''` (close,
+/// literal quote, reopen). Survives paths containing spaces or apostrophes intact.
+fn shell_quote_single(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
 
 /// Extract the numeric part of a `MON-<n>` work item id.
 pub fn monica_number(work_item_id: &str) -> Result<i64> {
@@ -226,7 +249,12 @@ fn append_log(log_path: &Path, note: &str) -> Result<()> {
         .with_context(|| format!("failed to append to {}", log_path.display()))
 }
 
-/// What `run_issue` did, for the caller to render.
+/// What `run_issue` did, for the caller to render and (optionally) hand to [`launch_agent`].
+/// `settings_path` and `agent_launch` are both `Some` exactly when an agent was prepared (i.e.
+/// `run_issue` was called with a non-`None` `agent` and setup did not fail). When both are
+/// `Some`, `settings_path` is also the value at `agent_launch.args[1]` — both are written together
+/// by `build_claude_launch` from the same string, kept side-by-side because one is canonical for
+/// display/persistence and the other is structural for the spawn invocation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunReport {
     pub work_item_id: String,
@@ -236,17 +264,27 @@ pub struct RunReport {
     pub status: Status,
     pub setup: SetupOutcome,
     pub log_path: String,
+    pub settings_path: Option<String>,
+    pub agent_launch: Option<AgentLaunch>,
 }
 
 /// Connect a work item to its repo's execution environment: resolve the project, generate the
 /// branch, create the git worktree, record a [`crate::Run`] (`setting_up`), run `.monica/setup.sh`,
-/// and settle the run + work item to `running` / `failed`.
+/// optionally prepare an agent launch spec, and settle the run + work item to `running` / `failed`.
+///
+/// `agent` selects which agent (if any) to prepare for `launch_agent`. `None` keeps the M0
+/// "setup only" behavior (worktree + setup, settle to `running`, no agent launch).
 ///
 /// The worktree is created first; only once it exists is a run recorded. A failure before the run
 /// is recorded leaves the work item untouched (`ready`). Once the run is recorded, every subsequent
 /// failure is converted to a best-effort `failed` settle so neither the run nor the work item is
-/// left stranded in `setting_up`.
-pub fn run_issue(db: &mut Db, work_item_id: &str) -> Result<RunReport> {
+/// left stranded in `setting_up`. **This function never spawns the agent process** — that is
+/// [`launch_agent`]'s job, so tests can verify the prepared spec without a real `claude` binary.
+pub fn run_issue(
+    db: &mut Db,
+    work_item_id: &str,
+    agent: Option<Agent>,
+) -> Result<RunReport> {
     let item = db
         .get_work_item(work_item_id)?
         .ok_or_else(|| anyhow!("work item not found: {work_item_id}"))?;
@@ -287,7 +325,9 @@ pub fn run_issue(db: &mut Db, work_item_id: &str) -> Result<RunReport> {
     let worktree_str = worktree_path.to_string_lossy().into_owned();
     let run = db.start_run(NewRun {
         work_item_id: work_item_id.to_string(),
-        agent: Some(project.agent_default),
+        // Record the agent the caller actually asked for — `None` means "no launch requested",
+        // not "default to claude" — so the persisted Run is honest about what happened.
+        agent,
         branch: Some(branch.clone()),
         worktree_path: Some(worktree_str.clone()),
     })?;
@@ -297,28 +337,139 @@ pub fn run_issue(db: &mut Db, work_item_id: &str) -> Result<RunReport> {
     let setup = match setup_phase(&run.id, work_item_id, &worktree_path, &project, &branch) {
         Ok(setup) => setup,
         Err(e) => {
-            // Best effort: if this settle also fails there is nothing more we can do.
             let _ = db.finish_run(&run.id, work_item_id, Status::Failed);
             return Err(e);
         }
     };
 
-    let status = if setup.outcome.is_failure() {
-        Status::Failed
-    } else {
-        Status::Running
+    let setup_outcome = setup.outcome;
+    let log_path = setup.log_path;
+
+    if setup_outcome.is_failure() {
+        db.finish_run(&run.id, work_item_id, Status::Failed)?;
+        return Ok(RunReport {
+            work_item_id: work_item_id.to_string(),
+            run_id: run.id,
+            branch,
+            worktree_path: worktree_str,
+            status: Status::Failed,
+            setup: setup_outcome,
+            log_path,
+            settings_path: None,
+            agent_launch: None,
+        });
+    }
+
+    // setup ok/skipped → prepare the agent's launch spec (if requested), then settle running.
+    let (agent_launch, settings_path) = match agent {
+        None => (None, None),
+        Some(Agent::Claude) => {
+            match build_claude_launch(db, &run.id, work_item_id, &project, &worktree_path) {
+                Ok((launch, path)) => (Some(launch), Some(path)),
+                Err(e) => {
+                    let _ = db.finish_run(&run.id, work_item_id, Status::Failed);
+                    return Err(e);
+                }
+            }
+        }
     };
-    db.finish_run(&run.id, work_item_id, status)?;
+    if let Err(e) = db.finish_run(&run.id, work_item_id, Status::Running) {
+        // Even the final settle must not leave the pair stranded in setting_up: re-settle to
+        // failed before surfacing the original DB error.
+        let _ = db.finish_run(&run.id, work_item_id, Status::Failed);
+        return Err(e);
+    }
 
     Ok(RunReport {
         work_item_id: work_item_id.to_string(),
         run_id: run.id,
         branch,
         worktree_path: worktree_str,
-        status,
-        setup: setup.outcome,
-        log_path: setup.log_path,
+        status: Status::Running,
+        setup: setup_outcome,
+        log_path,
+        settings_path,
+        agent_launch,
     })
+}
+
+/// Prepare the per-run Claude Code launch artifacts and the [`AgentLaunch`] spec the caller can
+/// hand to [`launch_agent`]. Writes `claude-settings.json` and `prompt.txt` into the existing
+/// `runs/<run_id>/` directory (created by `setup_phase`) and records `run.settings_path` in the DB.
+/// Does **not** spawn `claude`.
+fn build_claude_launch(
+    db: &Db,
+    run_id: &str,
+    work_item_id: &str,
+    project: &Project,
+    worktree: &Path,
+) -> Result<(AgentLaunch, String)> {
+    let run_dir = paths::run_dir(run_id)?;
+    let settings_path = run_dir.join("claude-settings.json");
+    let settings_body = claude::claude_settings_json(&hook_command())?;
+    fs::write(&settings_path, settings_body)
+        .with_context(|| format!("failed to write {}", settings_path.display()))?;
+
+    let prompt = claude::read_prompt(worktree)?;
+    // Always write prompt.txt — the verification step (`cat runs/<run_id>/prompt.txt`) needs the
+    // file to exist whether or not a prompt was provided.
+    let prompt_path = run_dir.join("prompt.txt");
+    fs::write(&prompt_path, prompt.as_deref().unwrap_or(""))
+        .with_context(|| format!("failed to write {}", prompt_path.display()))?;
+
+    let settings_path_str = settings_path.to_string_lossy().into_owned();
+    db.set_run_settings_path(run_id, &settings_path_str)?;
+
+    let mut args = vec!["--settings".to_string(), settings_path_str.clone()];
+    if let Some(p) = prompt {
+        args.push(p);
+    }
+    let launch = AgentLaunch {
+        program: CLAUDE_PROGRAM.to_string(),
+        args,
+        cwd: worktree.to_string_lossy().into_owned(),
+        env: vec![
+            ("MONICA_ID".to_string(), work_item_id.to_string()),
+            ("MONICA_RUN_ID".to_string(), run_id.to_string()),
+            ("MONICA_PROJECT_ID".to_string(), project.id.clone()),
+        ],
+    };
+    Ok((launch, settings_path_str))
+}
+
+/// Spawn the agent described by `report.agent_launch` in the foreground (inherited stdio, so the
+/// agent's TUI takes over the terminal) and block until it exits. A `None` `agent_launch` is a
+/// no-op so CLI callers can call this unconditionally.
+///
+/// On spawn failure (e.g. `claude` is not on `PATH`) this settles the run + work item to `failed`
+/// — keeping the `start_run`-onward invariant that nothing is stranded in `setting_up`/`running`
+/// when the agent never actually started. A non-zero *exit* from a successfully-spawned agent is
+/// not treated as a monica failure (interactive sessions exit non-zero on Ctrl-C); session-state
+/// reconciliation is the hook receiver's job (see issue #20).
+pub fn launch_agent(db: &mut Db, report: &RunReport) -> Result<()> {
+    let Some(launch) = report.agent_launch.as_ref() else {
+        return Ok(());
+    };
+
+    // NEVER call `env_clear()` here: the inherited PATH is what lets the agent's own hook
+    // commands (e.g. `monica hook claude`) resolve. We only *add* the MONICA_* vars.
+    let result = Command::new(&launch.program)
+        .args(&launch.args)
+        .current_dir(&launch.cwd)
+        .envs(launch.env.iter().map(|(k, v)| (k, v)))
+        .status();
+
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            let _ = db.finish_run(&report.run_id, &report.work_item_id, Status::Failed);
+            Err(anyhow!(
+                "failed to launch {}: {e}; install Claude Code and ensure `{}` is on PATH",
+                launch.program,
+                launch.program
+            ))
+        }
+    }
 }
 
 struct SetupResult {
@@ -395,39 +546,7 @@ fn create_worktree(repo: &Path, worktree: &Path, branch: &str, base: &str) -> Re
 mod tests {
     use super::*;
     use crate::model::{ExternalRef, NewWorkItem, RefType, WorkItemKind};
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    fn unique_tmp(tag: &str) -> PathBuf {
-        static N: AtomicU64 = AtomicU64::new(0);
-        let n = N.fetch_add(1, Ordering::Relaxed);
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let mut p = std::env::temp_dir();
-        p.push(format!(
-            "monica-test-{tag}-{}-{nanos}-{n}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&p).unwrap();
-        p
-    }
-
-    /// A temp directory cleaned up on drop.
-    struct Tmp(PathBuf);
-    impl Tmp {
-        fn new(tag: &str) -> Self {
-            Tmp(unique_tmp(tag))
-        }
-        fn path(&self) -> &Path {
-            &self.0
-        }
-    }
-    impl Drop for Tmp {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
+    use crate::test_support::Tmp;
 
     #[cfg(unix)]
     fn set_exec(path: &Path) {
@@ -477,6 +596,40 @@ mod tests {
         assert_eq!(branch_name(Some(18), 42), "issue-18");
         assert_eq!(branch_name(None, 1), "mon-1");
         assert_eq!(branch_name(None, 42), "mon-42");
+    }
+
+    // ---- shell_quote_single / hook_command ----
+
+    #[test]
+    fn shell_quote_single_wraps_and_escapes() {
+        assert_eq!(shell_quote_single("foo"), "'foo'");
+        assert_eq!(shell_quote_single("/Users/me/bin/monica"), "'/Users/me/bin/monica'");
+        // Spaces survive intact because the whole token is single-quoted.
+        assert_eq!(shell_quote_single("/My Apps/monica"), "'/My Apps/monica'");
+        // An embedded single quote is closed, escaped, and reopened — this is the standard
+        // sh-safe form because single-quoted strings cannot contain `'` directly.
+        assert_eq!(shell_quote_single("o'malley"), "'o'\\''malley'");
+        assert_eq!(shell_quote_single(""), "''");
+    }
+
+    #[test]
+    fn hook_command_uses_current_exe_and_is_resolvable_without_path() {
+        let cmd = hook_command();
+        // The exe path must be embedded as a single-quoted token so claude's `sh -c` does not
+        // depend on PATH lookup; the subcommand is always `hook claude`.
+        assert!(
+            cmd.ends_with("' hook claude"),
+            "must end with single-quoted exe + ` hook claude`, got {cmd}"
+        );
+        assert!(cmd.starts_with('\''), "must start with `'`, got {cmd}");
+        // Strip the suffix and the outer quotes to get the path token. It must be non-empty —
+        // either the test binary's path or the bare-`monica` fallback. Empty would mean a hook
+        // command of `'' hook claude`, which would silently expand to nothing useful.
+        let path = cmd
+            .strip_suffix("' hook claude")
+            .and_then(|s| s.strip_prefix('\''))
+            .expect("shape already asserted");
+        assert!(!path.is_empty(), "exe path token must be non-empty in {cmd}");
     }
 
     // ---- sanitize_path_component ----
@@ -655,13 +808,18 @@ mod tests {
         );
     }
 
-    fn init_repo(dir: &Path, setup_sh: Option<&str>) {
+    fn init_repo(dir: &Path, setup_sh: Option<&str>, prompt_md: Option<&str>) {
         run_git(dir, &["init", "-b", "main"]);
         run_git(dir, &["config", "user.email", "test@example.com"]);
         run_git(dir, &["config", "user.name", "Monica Test"]);
         fs::write(dir.join("README.md"), "# test\n").unwrap();
         if let Some(body) = setup_sh {
             write_setup(dir, body);
+        }
+        if let Some(body) = prompt_md {
+            let monica = dir.join(".monica");
+            fs::create_dir_all(&monica).unwrap();
+            fs::write(monica.join("prompt.md"), body).unwrap();
         }
         run_git(dir, &["add", "-A"]);
         run_git(dir, &["commit", "-m", "init"]);
@@ -698,12 +856,13 @@ mod tests {
         init_repo(
             repo.path(),
             Some("#!/usr/bin/env bash\necho \"hello $MONICA_ID $MONICA_BRANCH\"\n"),
+            None,
         );
 
         let mut db = db_with_project(repo.path());
         let id = tracked_item(&mut db, "Add feature X", Some(9));
 
-        let report = run_issue(&mut db, &id).unwrap();
+        let report = run_issue(&mut db, &id, None).unwrap();
 
         assert_eq!(report.status, Status::Running);
         assert_eq!(report.setup, SetupOutcome::Succeeded);
@@ -733,12 +892,12 @@ mod tests {
         let home = Tmp::new("home");
         std::env::set_var("MONICA_HOME", home.path());
         let repo = Tmp::new("repo");
-        init_repo(repo.path(), None);
+        init_repo(repo.path(), None, None);
 
         let mut db = db_with_project(repo.path());
         let id = tracked_item(&mut db, "no setup", None);
 
-        let report = run_issue(&mut db, &id).unwrap();
+        let report = run_issue(&mut db, &id, None).unwrap();
         assert_eq!(report.setup, SetupOutcome::Skipped);
         assert_eq!(report.status, Status::Running);
         assert_eq!(report.branch, "mon-1");
@@ -752,12 +911,12 @@ mod tests {
         let home = Tmp::new("home");
         std::env::set_var("MONICA_HOME", home.path());
         let repo = Tmp::new("repo");
-        init_repo(repo.path(), Some("#!/usr/bin/env bash\nexit 1\n"));
+        init_repo(repo.path(), Some("#!/usr/bin/env bash\nexit 1\n"), None);
 
         let mut db = db_with_project(repo.path());
         let id = tracked_item(&mut db, "failing setup", Some(7));
 
-        let report = run_issue(&mut db, &id).unwrap();
+        let report = run_issue(&mut db, &id, None).unwrap();
         assert_eq!(report.status, Status::Failed);
         assert!(report.setup.is_failure());
         assert_eq!(
@@ -778,13 +937,13 @@ mod tests {
         let home = Tmp::new("home");
         std::env::set_var("MONICA_HOME", home.path());
         let repo = Tmp::new("repo");
-        init_repo(repo.path(), Some("#!/usr/bin/env bash\ntrue\n"));
+        init_repo(repo.path(), Some("#!/usr/bin/env bash\ntrue\n"), None);
 
         let mut db = db_with_project(repo.path());
         let id = tracked_item(&mut db, "once", Some(9));
 
-        run_issue(&mut db, &id).unwrap();
-        let err = run_issue(&mut db, &id).unwrap_err();
+        run_issue(&mut db, &id, None).unwrap();
+        let err = run_issue(&mut db, &id, None).unwrap_err();
         assert!(
             format!("{err:#}").contains("worktree already exists"),
             "{err:#}"
@@ -806,7 +965,7 @@ mod tests {
         let home = Tmp::new("home");
         std::env::set_var("MONICA_HOME", home.path());
         let repo = Tmp::new("repo");
-        init_repo(repo.path(), Some("#!/usr/bin/env bash\ntrue\n"));
+        init_repo(repo.path(), Some("#!/usr/bin/env bash\ntrue\n"), None);
 
         let mut db = db_with_project(repo.path());
         let id = tracked_item(&mut db, "stuck guard", Some(9));
@@ -817,7 +976,7 @@ mod tests {
         fs::create_dir_all(&runs).unwrap();
         fs::write(runs.join("run-1"), "x").unwrap();
 
-        let result = run_issue(&mut db, &id);
+        let result = run_issue(&mut db, &id, None);
         assert!(result.is_err(), "internal failure must propagate");
         assert_eq!(
             db.get_work_item(&id).unwrap().unwrap().status,
@@ -840,8 +999,8 @@ mod tests {
             .insert_work_item(NewWorkItem::new(WorkItemKind::Development, "orphan"))
             .unwrap()
             .id;
-        assert!(run_issue(&mut db, &id).is_err());
-        assert!(run_issue(&mut db, "MON-999").is_err());
+        assert!(run_issue(&mut db, &id, None).is_err());
+        assert!(run_issue(&mut db, "MON-999", None).is_err());
     }
 
     #[test]
@@ -851,7 +1010,319 @@ mod tests {
         db.upsert_project(&Project::from_repo("ashigirl96/monica"))
             .unwrap();
         let id = tracked_item(&mut db, "no path", None);
-        let err = run_issue(&mut db, &id).unwrap_err();
+        let err = run_issue(&mut db, &id, None).unwrap_err();
         assert!(format!("{err:#}").contains("no checkout path"), "{err:#}");
+    }
+
+    // ---- agent launch preparation (run_issue with Some(Agent::Claude) — no spawn) ----
+
+    fn env_value<'a>(launch: &'a AgentLaunch, key: &str) -> Option<&'a str> {
+        launch
+            .env
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    }
+
+    #[test]
+    fn run_issue_with_claude_builds_launch_spec_and_records_settings_path() {
+        let _env = paths::test_env_guard();
+        let home = Tmp::new("home");
+        std::env::set_var("MONICA_HOME", home.path());
+        let repo = Tmp::new("repo");
+        init_repo(
+            repo.path(),
+            Some("#!/usr/bin/env bash\ntrue\n"),
+            Some("hello prompt body\n"),
+        );
+
+        let mut db = db_with_project(repo.path());
+        let id = tracked_item(&mut db, "Add feature X", Some(9));
+
+        let report = run_issue(&mut db, &id, Some(Agent::Claude)).unwrap();
+
+        assert_eq!(report.status, Status::Running);
+        let launch = report
+            .agent_launch
+            .as_ref()
+            .expect("agent_launch must be Some when --claude is requested");
+        let settings_path = report
+            .settings_path
+            .as_deref()
+            .expect("settings_path must be Some when an agent launch is prepared");
+
+        assert_eq!(launch.program, "claude");
+        assert!(
+            Path::new(settings_path).is_file(),
+            "claude-settings.json must exist at {settings_path}"
+        );
+        assert_eq!(launch.args.first().map(String::as_str), Some("--settings"));
+        assert_eq!(launch.args.get(1).map(String::as_str), Some(settings_path));
+        assert_eq!(
+            launch.args.get(2).map(String::as_str),
+            Some("hello prompt body"),
+            "non-empty prompt must be appended as a positional arg"
+        );
+        assert_eq!(launch.cwd, report.worktree_path);
+
+        assert_eq!(env_value(launch, "MONICA_ID"), Some(id.as_str()));
+        assert_eq!(
+            env_value(launch, "MONICA_RUN_ID"),
+            Some(report.run_id.as_str())
+        );
+        assert_eq!(
+            env_value(launch, "MONICA_PROJECT_ID"),
+            Some("ashigirl96/monica")
+        );
+
+        let prompt_txt = home
+            .path()
+            .join("runs")
+            .join(&report.run_id)
+            .join("prompt.txt");
+        assert_eq!(
+            fs::read_to_string(&prompt_txt).unwrap(),
+            "hello prompt body"
+        );
+
+        let settings_body = fs::read_to_string(settings_path).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&settings_body).unwrap();
+        for event in ["SessionStart", "Stop", "StopFailure", "SessionEnd"] {
+            let cmd = parsed
+                .pointer(&format!("/hooks/{event}/0/hooks/0/command"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_else(|| panic!("{event}: command missing"));
+            // The command embeds `current_exe()` (the test binary here) for PATH-independence —
+            // assert the shape rather than the exact path so the test is location-agnostic.
+            assert!(
+                cmd.starts_with('\''),
+                "{event}: command must single-quote the exe path, got {cmd}"
+            );
+            assert!(
+                cmd.ends_with("' hook claude"),
+                "{event}: command must end with `' hook claude`, got {cmd}"
+            );
+        }
+
+        let run = db.get_run(&report.run_id).unwrap().unwrap();
+        assert_eq!(run.status, Status::Running);
+        assert_eq!(run.settings_path.as_deref(), Some(settings_path));
+        assert_eq!(
+            run.agent.as_deref(),
+            Some("claude"),
+            "run.agent must reflect the agent the caller asked for"
+        );
+
+        std::env::remove_var("MONICA_HOME");
+    }
+
+    #[test]
+    fn run_issue_with_claude_handles_missing_prompt() {
+        let _env = paths::test_env_guard();
+        let home = Tmp::new("home");
+        std::env::set_var("MONICA_HOME", home.path());
+        let repo = Tmp::new("repo");
+        init_repo(repo.path(), Some("#!/usr/bin/env bash\ntrue\n"), None);
+
+        let mut db = db_with_project(repo.path());
+        let id = tracked_item(&mut db, "no prompt", Some(9));
+
+        let report = run_issue(&mut db, &id, Some(Agent::Claude)).unwrap();
+        let launch = report.agent_launch.as_ref().unwrap();
+        // No positional prompt — args end at the settings path so claude starts in plain
+        // interactive mode rather than receiving an empty turn.
+        assert_eq!(launch.args.len(), 2, "{:?}", launch.args);
+        assert_eq!(launch.args[0], "--settings");
+
+        let prompt_txt = home
+            .path()
+            .join("runs")
+            .join(&report.run_id)
+            .join("prompt.txt");
+        assert_eq!(fs::read_to_string(&prompt_txt).unwrap(), "");
+
+        std::env::remove_var("MONICA_HOME");
+    }
+
+    #[test]
+    fn run_issue_with_claude_skips_launch_when_setup_fails() {
+        let _env = paths::test_env_guard();
+        let home = Tmp::new("home");
+        std::env::set_var("MONICA_HOME", home.path());
+        let repo = Tmp::new("repo");
+        init_repo(
+            repo.path(),
+            Some("#!/usr/bin/env bash\nexit 1\n"),
+            Some("/tackle\n"),
+        );
+
+        let mut db = db_with_project(repo.path());
+        let id = tracked_item(&mut db, "broken setup", Some(9));
+
+        let report = run_issue(&mut db, &id, Some(Agent::Claude)).unwrap();
+        assert_eq!(report.status, Status::Failed);
+        assert!(report.agent_launch.is_none());
+        assert!(report.settings_path.is_none());
+
+        let run_dir = home.path().join("runs").join(&report.run_id);
+        assert!(
+            !run_dir.join("claude-settings.json").exists(),
+            "no settings file may be left behind when setup fails"
+        );
+        assert!(
+            !run_dir.join("prompt.txt").exists(),
+            "no prompt.txt may be left behind when setup fails"
+        );
+
+        std::env::remove_var("MONICA_HOME");
+    }
+
+    #[test]
+    fn run_issue_with_claude_settles_failed_when_settings_write_fails() {
+        let _env = paths::test_env_guard();
+        let home = Tmp::new("home");
+        std::env::set_var("MONICA_HOME", home.path());
+        let repo = Tmp::new("repo");
+        init_repo(repo.path(), Some("#!/usr/bin/env bash\ntrue\n"), None);
+
+        let mut db = db_with_project(repo.path());
+        let id = tracked_item(&mut db, "claude settings write fail", Some(9));
+
+        // Place a directory where build_claude_launch wants to write claude-settings.json, so
+        // the write fails *after* start_run has moved the work item to setting_up. This exercises
+        // the failed-settle guard inside the agent prep arm (run.rs:348-354), distinct from the
+        // setup_phase guard already covered above.
+        let settings_blocker = home
+            .path()
+            .join("runs")
+            .join("run-1")
+            .join("claude-settings.json");
+        fs::create_dir_all(&settings_blocker).unwrap();
+
+        let result = run_issue(&mut db, &id, Some(Agent::Claude));
+        assert!(result.is_err(), "build_claude_launch failure must propagate");
+        assert_eq!(
+            db.get_work_item(&id).unwrap().unwrap().status,
+            Status::Failed,
+            "work item must not be stranded in setting_up when agent prep fails"
+        );
+        assert_eq!(
+            db.get_run("run-1").unwrap().unwrap().status,
+            Status::Failed,
+            "run must be settled to failed when agent prep fails"
+        );
+
+        std::env::remove_var("MONICA_HOME");
+    }
+
+    #[test]
+    fn run_issue_without_agent_records_none_for_run_agent() {
+        let _env = paths::test_env_guard();
+        let home = Tmp::new("home");
+        std::env::set_var("MONICA_HOME", home.path());
+        let repo = Tmp::new("repo");
+        init_repo(repo.path(), Some("#!/usr/bin/env bash\ntrue\n"), None);
+
+        let mut db = db_with_project(repo.path());
+        let id = tracked_item(&mut db, "no flag", None);
+
+        let report = run_issue(&mut db, &id, None).unwrap();
+        assert!(report.agent_launch.is_none());
+        let run = db.get_run(&report.run_id).unwrap().unwrap();
+        assert_eq!(
+            run.agent, None,
+            "a no-flag run must not record an agent it never launched"
+        );
+
+        std::env::remove_var("MONICA_HOME");
+    }
+
+    // ---- launch_agent (no real claude needed — failure path uses a bogus program) ----
+
+    fn run_report_stub(work_item_id: &str, run_id: &str, launch: Option<AgentLaunch>) -> RunReport {
+        RunReport {
+            work_item_id: work_item_id.to_string(),
+            run_id: run_id.to_string(),
+            branch: "issue-1".to_string(),
+            worktree_path: "/tmp/wt".to_string(),
+            status: Status::Running,
+            setup: SetupOutcome::Skipped,
+            log_path: "/tmp/setup.log".to_string(),
+            settings_path: launch
+                .as_ref()
+                .and_then(|l| l.args.get(1).cloned()),
+            agent_launch: launch,
+        }
+    }
+
+    #[test]
+    fn launch_agent_is_noop_when_report_has_no_launch() {
+        let mut db = Db::open_in_memory().unwrap();
+        let item = db
+            .insert_work_item(NewWorkItem::new(WorkItemKind::Development, "no-op"))
+            .unwrap();
+        let run = db
+            .start_run(NewRun {
+                work_item_id: item.id.clone(),
+                agent: None,
+                branch: Some("issue-1".to_string()),
+                worktree_path: Some("/tmp/wt".to_string()),
+            })
+            .unwrap();
+
+        let report = run_report_stub(&item.id, &run.id, None);
+        launch_agent(&mut db, &report).unwrap();
+
+        // The run must be untouched: no agent_launch means no spawn and no settle.
+        assert_eq!(
+            db.get_run(&run.id).unwrap().unwrap().status,
+            Status::SettingUp
+        );
+    }
+
+    #[test]
+    fn launch_agent_settles_failed_when_spawn_fails() {
+        let mut db = Db::open_in_memory().unwrap();
+        let item = db
+            .insert_work_item({
+                let mut i = NewWorkItem::new(WorkItemKind::Development, "spawn fail");
+                i.status = Status::Ready;
+                i
+            })
+            .unwrap();
+        let run = db
+            .start_run(NewRun {
+                work_item_id: item.id.clone(),
+                agent: Some(Agent::Claude),
+                branch: Some("issue-1".to_string()),
+                worktree_path: Some("/tmp/wt".to_string()),
+            })
+            .unwrap();
+
+        // A program name no system will resolve. We only need spawn() to error; we never check
+        // exit status, so a hypothetical name collision still wouldn't ruin the assertion.
+        let launch = AgentLaunch {
+            program: "monica-launch-agent-test-nonexistent-xyz".to_string(),
+            args: vec!["--settings".to_string(), "/tmp/x.json".to_string()],
+            cwd: "/tmp".to_string(),
+            env: vec![],
+        };
+        let report = run_report_stub(&item.id, &run.id, Some(launch));
+
+        let err = launch_agent(&mut db, &report).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("failed to launch"),
+            "{err:#}"
+        );
+        assert_eq!(
+            db.get_run(&run.id).unwrap().unwrap().status,
+            Status::Failed,
+            "spawn failure must settle the run to failed, not leave it stranded"
+        );
+        assert_eq!(
+            db.get_work_item(&item.id).unwrap().unwrap().status,
+            Status::Failed,
+            "the work item must move in lockstep with the run"
+        );
     }
 }

@@ -1,10 +1,11 @@
 use anyhow::{anyhow, Context, Result};
 use rusqlite::params;
+use serde_json::Value;
 
 use crate::db::Db;
 use crate::model::{
-    Agent, ExternalRef, IssueStatusRow, NewRun, NewWorkItem, PermissionMode, Project, Provider,
-    Run, Status, WorkItem,
+    Agent, Event, ExternalRef, IssueStatusRow, NewRun, NewWorkItem, PermissionMode, Project,
+    Provider, RefType, Run, Status, WorkItem,
 };
 
 const WORK_ITEM_COLUMNS: &str = "id, kind, status, phase, title, body, project_id, \
@@ -16,6 +17,8 @@ const RUN_COLUMNS: &str = "id, work_item_id, agent, branch, worktree_path, statu
 const PROJECT_COLUMNS: &str = "id, name, provider, repo, path, default_branch, worktree_root, \
      setup_timeout_sec, agent_default, agent_permission_mode, hooks_claude, \
      created_at, updated_at";
+
+const EVENT_COLUMNS: &str = "id, work_item_id, run_id, kind, payload_json, created_at";
 
 const SET_NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
@@ -184,6 +187,154 @@ impl Db {
         Ok(())
     }
 
+    /// Record an event row. The `events` schema foreign-keys both `work_item_id` and `run_id`, so
+    /// callers must pass only ids they have verified to exist (and `None` otherwise) — the columns
+    /// stay NULL rather than violating the constraint. Returns the inserted [`Event`] with its
+    /// DB-assigned id and timestamp.
+    pub fn insert_event(
+        &self,
+        work_item_id: Option<&str>,
+        run_id: Option<&str>,
+        kind: &str,
+        payload: &Value,
+    ) -> Result<Event> {
+        let payload = serde_json::to_string(payload)?;
+        self.conn().execute(
+            "INSERT INTO events (work_item_id, run_id, kind, payload_json)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![work_item_id, run_id, kind, payload],
+        )?;
+        let id = self.conn().last_insert_rowid();
+        let mut stmt = self
+            .conn()
+            .prepare(&format!("SELECT {EVENT_COLUMNS} FROM events WHERE id = ?1"))?;
+        let mut rows = stmt.query(params![id])?;
+        match rows.next()? {
+            Some(row) => Event::from_row(row),
+            None => Err(anyhow!("inserted event {id} not found")),
+        }
+    }
+
+    /// List events, optionally filtered to one work item. Ordered by insertion (`id`).
+    pub fn list_events(&self, work_item_id: Option<&str>) -> Result<Vec<Event>> {
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {EVENT_COLUMNS} FROM events
+             WHERE (?1 IS NULL OR work_item_id = ?1)
+             ORDER BY id"
+        ))?;
+        let mut rows = stmt.query(params![work_item_id])?;
+        let mut events = Vec::new();
+        while let Some(row) = rows.next()? {
+            events.push(Event::from_row(row)?);
+        }
+        Ok(events)
+    }
+
+    /// Update only a run's status, scoped by `work_item_id` so a mismatched id never crosses
+    /// ownership. Silent no-op when the row does not exist or is owned by a different work item;
+    /// the caller is the hook receiver, which must never raise on a missing run.
+    pub fn update_run_status(
+        &self,
+        run_id: &str,
+        work_item_id: &str,
+        status: Status,
+    ) -> Result<()> {
+        self.conn().execute(
+            &format!(
+                "UPDATE runs SET status = ?1, updated_at = {SET_NOW} \
+                 WHERE id = ?2 AND work_item_id = ?3"
+            ),
+            params![status.as_str(), run_id, work_item_id],
+        )?;
+        Ok(())
+    }
+
+    /// Apply a hook-driven status to a work item, and — when `run_id` is given — to its run, in one
+    /// transaction. The run update is additionally scoped by `work_item_id`, so a run that does not
+    /// belong to this work item (e.g. a mismatched env var) is never touched even if the id exists.
+    pub fn apply_hook_status(
+        &mut self,
+        work_item_id: &str,
+        run_id: Option<&str>,
+        status: Status,
+    ) -> Result<()> {
+        let status = status.as_str();
+        let tx = self.conn_mut().transaction()?;
+        let affected = tx.execute(
+            &format!("UPDATE work_items SET status = ?1, updated_at = {SET_NOW} WHERE id = ?2"),
+            params![status, work_item_id],
+        )?;
+        if affected == 0 {
+            return Err(anyhow!("work item not found: {work_item_id}"));
+        }
+        if let Some(run_id) = run_id {
+            tx.execute(
+                &format!(
+                    "UPDATE runs SET status = ?1, updated_at = {SET_NOW} \
+                     WHERE id = ?2 AND work_item_id = ?3"
+                ),
+                params![status, run_id, work_item_id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Set a work item's status, overwrite its phase with `note` when given (otherwise keep it),
+    /// record a PR reference when `pr_url` is given, and log a `mark` event — all in one
+    /// transaction so the four effects can never partially land.
+    pub fn mark_work_item(
+        &mut self,
+        id: &str,
+        status: Status,
+        note: Option<&str>,
+        pr_url: Option<&str>,
+    ) -> Result<()> {
+        let status_str = status.as_str();
+        let pr_number = pr_url.and_then(parse_pr_number);
+        let payload = serde_json::to_string(&serde_json::json!({
+            "status": status_str,
+            "note": note,
+            "pr_url": pr_url,
+        }))?;
+
+        let tx = self.conn_mut().transaction()?;
+        let affected = tx.execute(
+            &format!(
+                "UPDATE work_items
+                   SET status = ?1, phase = COALESCE(?2, phase), updated_at = {SET_NOW}
+                 WHERE id = ?3"
+            ),
+            params![status_str, note, id],
+        )?;
+        if affected == 0 {
+            return Err(anyhow!("work item not found: {id}"));
+        }
+        if let Some(pr_url) = pr_url {
+            tx.execute(
+                "INSERT INTO external_refs (work_item_id, ref_type, repo, number, url)
+                 VALUES (?1, ?2, NULL, ?3, ?4)",
+                params![id, RefType::GithubPullRequest.as_str(), pr_number, pr_url],
+            )?;
+        }
+        tx.execute(
+            "INSERT INTO events (work_item_id, kind, payload_json) VALUES (?1, 'mark', ?2)",
+            params![id, payload],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Current UTC timestamp in the same ISO-8601 form the schema's column defaults use. Lets
+    /// non-DB artifacts (e.g. `hook-events.jsonl`) share one timestamp format without pulling in a
+    /// date/time crate.
+    pub(crate) fn now_iso(&self) -> Result<String> {
+        let ts: String = self
+            .conn()
+            .query_row(&format!("SELECT {SET_NOW}"), [], |r| r.get(0))?;
+        Ok(ts)
+    }
+
     /// Begin a run attempt: allocate a `run-<n>` id, insert the run at [`Status::SettingUp`], and
     /// move its work item to `setting_up` — all in one transaction, so `issue status` never sees a
     /// run whose work item disagrees with it.
@@ -252,6 +403,21 @@ impl Db {
             return Err(anyhow!("work item not found: {work_item_id}"));
         }
         tx.commit()?;
+        Ok(())
+    }
+
+    /// Recording `settings_path` is not a status transition, so it stays out of `finish_run` and
+    /// runs as a single UPDATE on its own.
+    pub fn set_run_settings_path(&self, run_id: &str, settings_path: &str) -> Result<()> {
+        let affected = self.conn().execute(
+            "UPDATE runs
+               SET settings_path = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+             WHERE id = ?2",
+            params![settings_path, run_id],
+        )?;
+        if affected == 0 {
+            return Err(anyhow!("run not found: {run_id}"));
+        }
         Ok(())
     }
 
@@ -416,6 +582,15 @@ fn parse_bool(value: &str) -> Result<bool> {
             "expected a boolean (true/false/1/0), got {other:?}"
         )),
     }
+}
+
+/// Best-effort PR number from a GitHub PR URL: the positive integer segment right after `pull`
+/// (or `pulls`), so `.../pull/99` and `.../pull/99/files` both yield 99. The URL is always stored
+/// regardless; a miss just means the ref has no numeric handle.
+fn parse_pr_number(url: &str) -> Option<i64> {
+    let segs: Vec<&str> = url.split('/').filter(|s| !s.is_empty()).collect();
+    let idx = segs.iter().position(|s| *s == "pull" || *s == "pulls")?;
+    segs.get(idx + 1)?.parse::<i64>().ok().filter(|n| *n > 0)
 }
 
 #[cfg(test)]
@@ -597,6 +772,39 @@ mod tests {
             db.get_work_item(&item.id).unwrap().unwrap().status,
             Status::SettingUp
         );
+    }
+
+    #[test]
+    fn set_run_settings_path_records_and_bumps_updated_at() {
+        let mut db = Db::open_in_memory().unwrap();
+        let item = db.insert_work_item(dev_item("settings target")).unwrap();
+        let run = db.start_run(new_run(&item.id)).unwrap();
+
+        // Force a measurable gap so updated_at must move past start_run's timestamp.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        db.set_run_settings_path(&run.id, "/abs/runs/run-1/claude-settings.json")
+            .unwrap();
+
+        let fetched = db.get_run(&run.id).unwrap().unwrap();
+        assert_eq!(
+            fetched.settings_path.as_deref(),
+            Some("/abs/runs/run-1/claude-settings.json")
+        );
+        assert!(
+            fetched.updated_at > run.updated_at,
+            "settings_path update must bump updated_at"
+        );
+        assert_eq!(
+            fetched.status, run.status,
+            "set_run_settings_path is not a status transition"
+        );
+    }
+
+    #[test]
+    fn set_run_settings_path_errors_on_unknown_run() {
+        let db = Db::open_in_memory().unwrap();
+        let err = db.set_run_settings_path("run-999", "/x").unwrap_err();
+        assert!(format!("{err:#}").contains("run not found"), "{err:#}");
     }
 
     #[test]
@@ -1022,6 +1230,249 @@ mod tests {
             RefType::GithubIssue
         );
         assert!("nope".parse::<RefType>().is_err());
+    }
+
+    #[test]
+    fn status_parse_token_accepts_dashes_and_underscores() {
+        assert_eq!(
+            Status::parse_token("need-approval").unwrap(),
+            Status::NeedApproval
+        );
+        assert_eq!(
+            Status::parse_token("need_approval").unwrap(),
+            Status::NeedApproval
+        );
+        assert_eq!(Status::parse_token("pr-open").unwrap(), Status::PrOpen);
+        assert_eq!(Status::parse_token("running").unwrap(), Status::Running);
+        assert!(Status::parse_token("bogus").is_err());
+    }
+
+    #[test]
+    fn ref_type_pull_request_round_trips() {
+        assert_eq!(RefType::GithubPullRequest.as_str(), "github_pull_request");
+        assert_eq!(
+            "github_pull_request".parse::<RefType>().unwrap(),
+            RefType::GithubPullRequest
+        );
+    }
+
+    #[test]
+    fn parse_pr_number_extracts_after_pull_segment() {
+        assert_eq!(parse_pr_number("https://github.com/o/r/pull/99"), Some(99));
+        assert_eq!(
+            parse_pr_number("https://github.com/o/r/pull/99/files"),
+            Some(99)
+        );
+        assert_eq!(parse_pr_number("https://github.com/o/r/pulls/12"), Some(12));
+        assert_eq!(parse_pr_number("https://github.com/o/r/issues/99"), None);
+        assert_eq!(parse_pr_number("not a url"), None);
+        assert_eq!(parse_pr_number("https://github.com/o/r/pull/abc"), None);
+        assert_eq!(parse_pr_number("https://github.com/o/r/pull/0"), None);
+    }
+
+    #[test]
+    fn insert_event_round_trips_and_filters_by_work_item() {
+        let mut db = Db::open_in_memory().unwrap();
+        let a = db.insert_work_item(dev_item("a")).unwrap();
+        let b = db.insert_work_item(dev_item("b")).unwrap();
+
+        let ev = db
+            .insert_event(
+                Some(&a.id),
+                None,
+                "claude_hook",
+                &json!({ "hook_event_name": "Stop" }),
+            )
+            .unwrap();
+        assert!(ev.id > 0);
+        assert_eq!(ev.work_item_id.as_deref(), Some(a.id.as_str()));
+        assert_eq!(ev.run_id, None);
+        assert_eq!(ev.kind, "claude_hook");
+        assert_eq!(ev.payload, json!({ "hook_event_name": "Stop" }));
+        assert!(!ev.created_at.is_empty());
+
+        db.insert_event(Some(&b.id), None, "mark", &json!({ "x": 1 }))
+            .unwrap();
+
+        assert_eq!(db.list_events(None).unwrap().len(), 2);
+        let a_events = db.list_events(Some(&a.id)).unwrap();
+        assert_eq!(a_events.len(), 1);
+        assert_eq!(a_events[0].kind, "claude_hook");
+    }
+
+    #[test]
+    fn insert_event_allows_null_work_item_and_run() {
+        let db = Db::open_in_memory().unwrap();
+        let ev = db
+            .insert_event(None, None, "claude_hook", &json!({ "raw": "x" }))
+            .unwrap();
+        assert_eq!(ev.work_item_id, None);
+        assert_eq!(ev.run_id, None);
+    }
+
+    #[test]
+    fn apply_hook_status_updates_work_item_and_matching_run() {
+        let mut db = Db::open_in_memory().unwrap();
+        let item = db
+            .insert_work_item({
+                let mut i = dev_item("a");
+                i.status = Status::Ready;
+                i
+            })
+            .unwrap();
+        let run = db.start_run(new_run(&item.id)).unwrap();
+
+        db.apply_hook_status(&item.id, Some(&run.id), Status::Running)
+            .unwrap();
+        assert_eq!(
+            db.get_work_item(&item.id).unwrap().unwrap().status,
+            Status::Running
+        );
+        assert_eq!(db.get_run(&run.id).unwrap().unwrap().status, Status::Running);
+    }
+
+    #[test]
+    fn apply_hook_status_ignores_run_of_another_work_item() {
+        let mut db = Db::open_in_memory().unwrap();
+        let a = db
+            .insert_work_item({
+                let mut i = dev_item("a");
+                i.status = Status::Ready;
+                i
+            })
+            .unwrap();
+        let run_a = db.start_run(new_run(&a.id)).unwrap();
+        let b = db
+            .insert_work_item({
+                let mut i = dev_item("b");
+                i.status = Status::Ready;
+                i
+            })
+            .unwrap();
+
+        // Mark b but pass run_a: the `AND work_item_id` guard must leave run_a (and a) untouched.
+        db.apply_hook_status(&b.id, Some(&run_a.id), Status::Stopped)
+            .unwrap();
+        assert_eq!(
+            db.get_work_item(&b.id).unwrap().unwrap().status,
+            Status::Stopped
+        );
+        assert_eq!(
+            db.get_run(&run_a.id).unwrap().unwrap().status,
+            Status::SettingUp
+        );
+        assert_eq!(
+            db.get_work_item(&a.id).unwrap().unwrap().status,
+            Status::SettingUp
+        );
+    }
+
+    #[test]
+    fn apply_hook_status_unknown_work_item_errors_but_unknown_run_is_harmless() {
+        let mut db = Db::open_in_memory().unwrap();
+        assert!(db
+            .apply_hook_status("MON-999", None, Status::Stopped)
+            .is_err());
+
+        let item = db.insert_work_item(dev_item("a")).unwrap();
+        db.apply_hook_status(&item.id, Some("run-nope"), Status::Stopped)
+            .unwrap();
+        assert_eq!(
+            db.get_work_item(&item.id).unwrap().unwrap().status,
+            Status::Stopped
+        );
+    }
+
+    #[test]
+    fn mark_work_item_sets_status_phase_pr_ref_and_event() {
+        let mut db = Db::open_in_memory().unwrap();
+        let item = db.insert_work_item(dev_item("a")).unwrap();
+
+        db.mark_work_item(&item.id, Status::NeedApproval, Some("Plan ready"), None)
+            .unwrap();
+        let after = db.get_work_item(&item.id).unwrap().unwrap();
+        assert_eq!(after.status, Status::NeedApproval);
+        assert_eq!(after.phase.as_deref(), Some("Plan ready"));
+
+        db.mark_work_item(
+            &item.id,
+            Status::PrOpen,
+            None,
+            Some("https://github.com/o/r/pull/99"),
+        )
+        .unwrap();
+        let after = db.get_work_item(&item.id).unwrap().unwrap();
+        assert_eq!(after.status, Status::PrOpen);
+        assert_eq!(
+            after.phase.as_deref(),
+            Some("Plan ready"),
+            "note=None keeps the prior phase"
+        );
+
+        let refs = db.list_external_refs(&item.id).unwrap();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].ref_type, RefType::GithubPullRequest);
+        assert_eq!(refs[0].number, Some(99));
+        assert_eq!(
+            refs[0].url.as_deref(),
+            Some("https://github.com/o/r/pull/99")
+        );
+
+        let events = db.list_events(Some(&item.id)).unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(events.iter().all(|e| e.kind == "mark"));
+    }
+
+    #[test]
+    fn mark_work_item_pr_ref_does_not_pollute_issue_status_query() {
+        let mut db = Db::open_in_memory().unwrap();
+        let item = db
+            .insert_work_item_with_ref(
+                dev_item("tracked"),
+                ExternalRef::new(
+                    String::new(),
+                    RefType::GithubIssue,
+                    Some("o/r".to_string()),
+                    Some(7),
+                    None,
+                ),
+            )
+            .unwrap();
+        db.mark_work_item(
+            &item.id,
+            Status::PrOpen,
+            None,
+            Some("https://github.com/o/r/pull/99"),
+        )
+        .unwrap();
+
+        let rows = db.list_issue_statuses(None, None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].github_issue_number,
+            Some(7),
+            "the PR ref must not shadow the github_issue number"
+        );
+        assert_eq!(rows[0].status, Status::PrOpen);
+    }
+
+    #[test]
+    fn mark_work_item_unknown_id_errors() {
+        let mut db = Db::open_in_memory().unwrap();
+        assert!(db
+            .mark_work_item("MON-999", Status::PrOpen, None, None)
+            .is_err());
+    }
+
+    #[test]
+    fn now_iso_returns_utc_millisecond_timestamp() {
+        let db = Db::open_in_memory().unwrap();
+        let ts = db.now_iso().unwrap();
+        // Same shape as the schema column defaults: `YYYY-MM-DDTHH:MM:SS.mmmZ`.
+        assert!(ts.ends_with('Z'), "must end in Z: {ts}");
+        assert_eq!(ts.len(), 24, "must be 24 chars: {ts}");
+        assert_eq!(&ts[4..5], "-");
+        assert_eq!(&ts[10..11], "T");
     }
 
     #[test]

@@ -35,6 +35,13 @@ impl Status {
             Status::Archived => "archived",
         }
     }
+
+    /// Parse a status the way a CLI user types it: dashes are accepted in place of the stored
+    /// snake_case underscores, so `need-approval` resolves to [`Status::NeedApproval`]. Kept in
+    /// core so the CLI and any future GUI share one acceptance rule.
+    pub fn parse_token(s: &str) -> Result<Self> {
+        s.replace('-', "_").parse()
+    }
 }
 
 impl FromStr for Status {
@@ -86,12 +93,14 @@ impl FromStr for WorkItemKind {
 #[serde(rename_all = "snake_case")]
 pub enum RefType {
     GithubIssue,
+    GithubPullRequest,
 }
 
 impl RefType {
     pub fn as_str(self) -> &'static str {
         match self {
             RefType::GithubIssue => "github_issue",
+            RefType::GithubPullRequest => "github_pull_request",
         }
     }
 }
@@ -102,6 +111,7 @@ impl FromStr for RefType {
     fn from_str(s: &str) -> Result<Self> {
         Ok(match s {
             "github_issue" => RefType::GithubIssue,
+            "github_pull_request" => RefType::GithubPullRequest,
             other => return Err(anyhow!("unknown external ref type: {other}")),
         })
     }
@@ -325,6 +335,20 @@ pub struct Event {
     pub kind: String,
     pub payload: Value,
     pub created_at: String,
+}
+
+impl Event {
+    pub(crate) fn from_row(row: &Row) -> Result<Self> {
+        let payload: String = row.get("payload_json")?;
+        Ok(Event {
+            id: row.get("id")?,
+            work_item_id: row.get("work_item_id")?,
+            run_id: row.get("run_id")?,
+            kind: row.get("kind")?,
+            payload: serde_json::from_str(&payload)?,
+            created_at: row.get("created_at")?,
+        })
+    }
 }
 
 /// A reference to an item living in an external system (e.g. a GitHub issue).
