@@ -16,9 +16,27 @@ use crate::{paths, Db, Project, RefType, Status};
 const SETUP_SCRIPT_REL: &str = ".monica/setup.sh";
 const SETUP_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const CLAUDE_PROGRAM: &str = "claude";
-/// What the four generated hooks invoke. Kept as a literal so the on-disk settings stay
-/// reproducible and grep-friendly; PATH resolution is the deployment's responsibility.
-const HOOK_COMMAND: &str = "monica hook claude";
+
+/// The shell command the four generated hooks invoke. Uses the absolute path of *this* monica
+/// executable via [`std::env::current_exe`] so the hook resolves no matter how the user launched
+/// monica (e.g. `./monica` from a checkout, or an install location that isn't on `PATH`) — claude
+/// runs the command via `sh -c`, which would otherwise PATH-lookup a bare `monica` and silently
+/// fail, leaving runs stranded as `running`. The path is single-quoted for safety against spaces;
+/// `monica` is the last-ditch fallback when the platform refuses to report the running exe.
+fn hook_command() -> String {
+    let exe = std::env::current_exe()
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "monica".to_string());
+    format!("{} hook claude", shell_quote_single(&exe))
+}
+
+/// Wrap `s` in single quotes for `/bin/sh`, escaping any embedded single quote as `'\''` (close,
+/// literal quote, reopen). Survives paths containing spaces or apostrophes intact.
+fn shell_quote_single(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
 
 /// Extract the numeric part of a `MON-<n>` work item id.
 pub fn monica_number(work_item_id: &str) -> Result<i64> {
@@ -388,7 +406,7 @@ fn build_claude_launch(
 ) -> Result<(AgentLaunch, String)> {
     let run_dir = paths::run_dir(run_id)?;
     let settings_path = run_dir.join("claude-settings.json");
-    let settings_body = claude::claude_settings_json(HOOK_COMMAND)?;
+    let settings_body = claude::claude_settings_json(&hook_command())?;
     fs::write(&settings_path, settings_body)
         .with_context(|| format!("failed to write {}", settings_path.display()))?;
 
@@ -578,6 +596,40 @@ mod tests {
         assert_eq!(branch_name(Some(18), 42), "issue-18");
         assert_eq!(branch_name(None, 1), "mon-1");
         assert_eq!(branch_name(None, 42), "mon-42");
+    }
+
+    // ---- shell_quote_single / hook_command ----
+
+    #[test]
+    fn shell_quote_single_wraps_and_escapes() {
+        assert_eq!(shell_quote_single("foo"), "'foo'");
+        assert_eq!(shell_quote_single("/Users/me/bin/monica"), "'/Users/me/bin/monica'");
+        // Spaces survive intact because the whole token is single-quoted.
+        assert_eq!(shell_quote_single("/My Apps/monica"), "'/My Apps/monica'");
+        // An embedded single quote is closed, escaped, and reopened — this is the standard
+        // sh-safe form because single-quoted strings cannot contain `'` directly.
+        assert_eq!(shell_quote_single("o'malley"), "'o'\\''malley'");
+        assert_eq!(shell_quote_single(""), "''");
+    }
+
+    #[test]
+    fn hook_command_uses_current_exe_and_is_resolvable_without_path() {
+        let cmd = hook_command();
+        // The exe path must be embedded as a single-quoted token so claude's `sh -c` does not
+        // depend on PATH lookup; the subcommand is always `hook claude`.
+        assert!(
+            cmd.ends_with("' hook claude"),
+            "must end with single-quoted exe + ` hook claude`, got {cmd}"
+        );
+        assert!(cmd.starts_with('\''), "must start with `'`, got {cmd}");
+        // Strip the suffix and the outer quotes to get the path token. It must be non-empty —
+        // either the test binary's path or the bare-`monica` fallback. Empty would mean a hook
+        // command of `'' hook claude`, which would silently expand to nothing useful.
+        let path = cmd
+            .strip_suffix("' hook claude")
+            .and_then(|s| s.strip_prefix('\''))
+            .expect("shape already asserted");
+        assert!(!path.is_empty(), "exe path token must be non-empty in {cmd}");
     }
 
     // ---- sanitize_path_component ----
@@ -1038,8 +1090,18 @@ mod tests {
         for event in ["SessionStart", "Stop", "StopFailure", "SessionEnd"] {
             let cmd = parsed
                 .pointer(&format!("/hooks/{event}/0/hooks/0/command"))
-                .and_then(|v| v.as_str());
-            assert_eq!(cmd, Some("monica hook claude"), "{event}: command");
+                .and_then(|v| v.as_str())
+                .unwrap_or_else(|| panic!("{event}: command missing"));
+            // The command embeds `current_exe()` (the test binary here) for PATH-independence —
+            // assert the shape rather than the exact path so the test is location-agnostic.
+            assert!(
+                cmd.starts_with('\''),
+                "{event}: command must single-quote the exe path, got {cmd}"
+            );
+            assert!(
+                cmd.ends_with("' hook claude"),
+                "{event}: command must end with `' hook claude`, got {cmd}"
+            );
         }
 
         let run = db.get_run(&report.run_id).unwrap().unwrap();
