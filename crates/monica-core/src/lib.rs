@@ -15,7 +15,8 @@ mod store;
 mod test_support;
 
 pub use app::{
-    register_project, register_project_with_default_branch, track_github_issue, GithubIssue,
+    delete_issue, register_project, register_project_with_default_branch, track_github_issue,
+    DeleteIssueReport, GithubIssue,
 };
 pub use claude::AgentLaunch;
 pub use db::Db;

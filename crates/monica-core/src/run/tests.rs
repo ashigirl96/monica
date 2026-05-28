@@ -13,7 +13,7 @@ use super::setup::{run_setup_script, terminate_setup_process_tree, SetupEnv, Set
 use crate::model::{ExternalRef, NewRun, NewWorkItem, RefType, WorkItemKind};
 use crate::paths;
 use crate::test_support::Tmp;
-use crate::{launch_agent, Agent, AgentLaunch, Db, Project, Status};
+use crate::{delete_issue, launch_agent, Agent, AgentLaunch, Db, Project, Status};
 
 #[cfg(unix)]
 fn set_exec(path: &Path) {
@@ -295,6 +295,17 @@ fn init_repo(dir: &Path, setup_sh: Option<&str>, prompt_md: Option<&str>) {
     run_git(dir, &["commit", "-m", "init"]);
 }
 
+fn branch_exists(repo: &Path, branch: &str) -> bool {
+    Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["show-ref", "--verify", "--quiet"])
+        .arg(format!("refs/heads/{branch}"))
+        .status()
+        .unwrap()
+        .success()
+}
+
 fn tracked_item(db: &mut Db, title: &str, gh: Option<i64>) -> String {
     let mut item = NewWorkItem::new(WorkItemKind::Development, title);
     item.status = Status::Ready;
@@ -425,6 +436,42 @@ fn run_issue_rejects_rerun_when_worktree_exists() {
         Status::Running
     );
     assert!(db.get_run("run-2").unwrap().is_none());
+
+    std::env::remove_var("MONICA_HOME");
+}
+
+#[test]
+fn delete_issue_cleans_worktree_preserves_branch_and_allows_retrack_rerun() {
+    let _env = paths::test_env_guard();
+    let home = Tmp::new("home");
+    std::env::set_var("MONICA_HOME", home.path());
+    let repo = Tmp::new("repo");
+    init_repo(repo.path(), Some("#!/usr/bin/env bash\ntrue\n"), None);
+
+    let mut db = db_with_project(repo.path());
+    let first_id = tracked_item(&mut db, "delete after run", Some(9));
+    let first = run_issue(&mut db, &first_id, None).unwrap();
+    assert!(Path::new(&first.worktree_path).exists());
+    assert!(branch_exists(repo.path(), "issue-9"));
+    let first_worktree = Path::new(&first.worktree_path);
+    fs::write(first_worktree.join("local-work.txt"), "keep me\n").unwrap();
+    run_git(first_worktree, &["add", "local-work.txt"]);
+    run_git(first_worktree, &["commit", "-m", "local work"]);
+
+    let deleted = delete_issue(&mut db, &first_id).unwrap();
+    assert_eq!(deleted.item.id, first_id);
+    assert_eq!(deleted.removed_runs, vec![first.run_id]);
+    assert!(db.get_work_item(&first_id).unwrap().is_none());
+    assert!(!Path::new(&first.worktree_path).exists());
+    assert!(branch_exists(repo.path(), "issue-9"));
+
+    let second_id = tracked_item(&mut db, "delete after run again", Some(9));
+    let second = run_issue(&mut db, &second_id, None).unwrap();
+    assert_eq!(second.branch, "issue-9");
+    assert!(Path::new(&second.worktree_path).exists());
+    assert!(Path::new(&second.worktree_path)
+        .join("local-work.txt")
+        .exists());
 
     std::env::remove_var("MONICA_HOME");
 }

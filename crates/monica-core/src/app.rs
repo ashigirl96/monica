@@ -1,9 +1,9 @@
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 
 use crate::{
-    parse_owner_repo, Db, ExternalRef, NewWorkItem, Project, RefType, Status, WorkItem,
+    parse_owner_repo, Db, ExternalRef, NewWorkItem, Project, RefType, Run, Status, WorkItem,
     WorkItemKind,
 };
 
@@ -58,6 +58,97 @@ pub fn track_github_issue(db: &mut Db, repo_input: &str, issue: &GithubIssue) ->
         Some(issue.url.clone()),
     );
     db.insert_work_item_with_ref(new, external)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeleteIssueReport {
+    pub item: WorkItem,
+    pub removed_runs: Vec<String>,
+}
+
+pub fn delete_issue(db: &mut Db, id: &str) -> Result<DeleteIssueReport> {
+    let item = db
+        .get_work_item(id)?
+        .ok_or_else(|| anyhow!("work item not found: {id}"))?;
+    let runs = db.list_runs_for_work_item(id)?;
+    cleanup_runs(db, &item, &runs)?;
+    let item = db.delete_work_item_cascade(id)?;
+    Ok(DeleteIssueReport {
+        item,
+        removed_runs: runs.into_iter().map(|run| run.id).collect(),
+    })
+}
+
+fn cleanup_runs(db: &Db, item: &WorkItem, runs: &[Run]) -> Result<()> {
+    if runs.is_empty() {
+        return Ok(());
+    }
+
+    let project_id = item.project_id.as_deref().ok_or_else(|| {
+        anyhow!(
+            "{} has run records but is not linked to a project; refusing to delete so run cleanup \
+             metadata is preserved",
+            item.id
+        )
+    })?;
+    let project = db
+        .get_project(project_id)?
+        .ok_or_else(|| anyhow!("project not found: {project_id}"))?;
+    let repo_path = project.path.as_deref().ok_or_else(|| {
+        anyhow!(
+            "project {project_id} has no checkout path; refusing to delete {} so run cleanup \
+             metadata is preserved",
+            item.id
+        )
+    })?;
+    let repo = Path::new(repo_path);
+
+    for run in runs {
+        if let Some(worktree_path) = run.worktree_path.as_deref() {
+            let worktree = Path::new(worktree_path);
+            if worktree.exists() {
+                git(repo, ["worktree", "remove"].as_slice(), Some(worktree)).with_context(
+                    || {
+                        format!(
+                            "failed to remove worktree for {} at {}",
+                            run.id,
+                            worktree.display()
+                        )
+                    },
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn git(repo: &Path, args: &[&str], path_arg: Option<&Path>) -> Result<()> {
+    let mut command = std::process::Command::new("git");
+    command.arg("-C").arg(repo).args(args);
+    if let Some(path) = path_arg {
+        command.arg(path);
+    }
+    let output = command
+        .output()
+        .context("failed to run git; install git or check the project path")?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "git {} failed: {}",
+            args.join(" "),
+            command_stderr(&output.stderr)
+        ));
+    }
+    Ok(())
+}
+
+fn command_stderr(stderr: &[u8]) -> String {
+    let stderr = String::from_utf8_lossy(stderr);
+    let stderr = stderr.trim();
+    if stderr.is_empty() {
+        "no error output".to_string()
+    } else {
+        stderr.to_string()
+    }
 }
 
 #[cfg(test)]
