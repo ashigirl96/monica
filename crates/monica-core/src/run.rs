@@ -590,16 +590,24 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn setup_timeout_kills_descendant_processes() {
+        // Observe the descendant through sentinel files in the test's own tmp dir rather than by
+        // name via `pgrep`: a global, name-keyed process search cannot tell this run's descendant
+        // from one leaked by an earlier run, so a single stray orphan would fail every later run.
+        // `ready` proves the descendant launched; `survived` is written only if it outlives the
+        // grace period, so a process-group kill that reaches it leaves `survived` absent.
         let wt = Tmp::new("setup-timeout-tree");
-        let marker = "monica_descendant_group_kill_test";
+        let ready = wt.path().join("ready");
+        let survived = wt.path().join("survived");
         write_setup(
             wt.path(),
-            &format!("#!/usr/bin/env bash\n(\n  exec -a {marker} sleep 9999\n) &\nsleep 5\n"),
+            "#!/usr/bin/env bash\n(\n  touch \"$MONICA_READY\"\n  sleep 1\n  touch \"$MONICA_SURVIVED\"\n) &\nsleep 5\n",
         );
         let mut child = {
             let mut command = Command::new(wt.path().join(".monica/setup.sh"));
             command.process_group(0);
             command
+                .env("MONICA_READY", &ready)
+                .env("MONICA_SURVIVED", &survived)
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
@@ -607,42 +615,27 @@ mod tests {
         };
 
         let mut saw_descendant = false;
-        for _ in 0..20 {
-            if Command::new("pgrep")
-                .args(["-q", "-f", marker])
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
-            {
+        for _ in 0..40 {
+            if ready.exists() {
                 saw_descendant = true;
                 break;
             }
             thread::sleep(Duration::from_millis(25));
         }
         assert!(saw_descendant, "setup should spawn descendant process");
-        let running = Command::new("pgrep")
-            .args(["-q", "-f", marker])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if running {
-            terminate_setup_process_tree(child.id()).unwrap();
-        } else {
-            panic!("descendant did not persist long enough to assert termination behavior");
-        }
-        thread::sleep(Duration::from_millis(200));
-        let running = Command::new("pgrep")
-            .args(["-q", "-f", marker])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        assert!(
-            !running,
-            "background process should be terminated by process-group kill"
-        );
+
+        terminate_setup_process_tree(child.id()).unwrap();
         assert!(
             !child.wait().unwrap().success(),
             "killing the process group should terminate setup helper"
+        );
+
+        // Wait past the descendant's grace period (`sleep 1`); a survivor would have written
+        // `survived` by now, so its absence is what proves the group kill reached the descendant.
+        thread::sleep(Duration::from_millis(1200));
+        assert!(
+            !survived.exists(),
+            "descendant must be terminated by the process-group kill before it touches survived"
         );
     }
 
