@@ -91,9 +91,10 @@ mod tests {
     fn settings_json_omits_matcher_for_match_all() {
         let body = claude_settings_json("monica hook claude").unwrap();
         let parsed: Value = serde_json::from_str(&body).unwrap();
-        assert!(parsed
-            .pointer("/hooks/SessionStart/0/matcher")
-            .is_none(), "matcher must be absent so the hook fires on every event");
+        assert!(
+            parsed.pointer("/hooks/SessionStart/0/matcher").is_none(),
+            "matcher must be absent so the hook fires on every event"
+        );
     }
 
     #[test]
