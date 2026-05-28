@@ -14,7 +14,7 @@ const RUN_COLUMNS: &str = "id, work_item_id, agent, branch, worktree_path, statu
      settings_path, created_at, updated_at";
 
 const PROJECT_COLUMNS: &str = "id, name, provider, repo, path, default_branch, worktree_root, \
-     branch_template, setup_timeout_sec, agent_default, agent_permission_mode, hooks_claude, \
+     setup_timeout_sec, agent_default, agent_permission_mode, hooks_claude, \
      created_at, updated_at";
 
 const SET_NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
@@ -291,13 +291,13 @@ impl Db {
     /// Insert a project, or update an existing one keyed by `id`. On conflict only `path` is
     /// refreshed (so re-running `init` tracks the current checkout) plus `updated_at`; every other
     /// field is preserved, including ones tweaked via [`Db::set_project_field`] such as `name`,
-    /// timeout, branch template, worktree root, or agent.
+    /// timeout, worktree root, or agent.
     pub fn upsert_project(&self, p: &Project) -> Result<Project> {
         self.conn().execute(
             "INSERT INTO projects
-               (id, name, provider, repo, path, default_branch, worktree_root, branch_template,
+               (id, name, provider, repo, path, default_branch, worktree_root,
                 setup_timeout_sec, agent_default, agent_permission_mode, hooks_claude)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
              ON CONFLICT(id) DO UPDATE SET
                path = excluded.path,
                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')",
@@ -309,7 +309,6 @@ impl Db {
                 p.path,
                 p.default_branch,
                 p.worktree_root,
-                p.branch_template,
                 p.setup_timeout_sec,
                 p.agent_default.as_str(),
                 p.agent_permission_mode.as_str(),
@@ -350,7 +349,7 @@ impl Db {
     pub fn set_project_field(&self, id: &str, key: &str, value: &str) -> Result<()> {
         let text_value = |value: &str| -> Result<()> { self.update_project_column(id, key, value) };
         match key {
-            "name" | "repo" | "default_branch" | "branch_template" => text_value(value)?,
+            "name" | "repo" | "default_branch" => text_value(value)?,
             "path" | "worktree_root" => {
                 if value.is_empty() {
                     return Err(anyhow!("{key} cannot be set to an empty string"));
@@ -437,7 +436,7 @@ mod tests {
         NewRun {
             work_item_id: work_item_id.to_string(),
             agent: Some(Agent::Claude),
-            branch: Some("monica/mon-1-foo".to_string()),
+            branch: Some("mon-1".to_string()),
             worktree_path: Some("/tmp/wt".to_string()),
         }
     }
@@ -474,7 +473,7 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
 
         let tables: i64 = conn
             .query_row(
@@ -542,7 +541,7 @@ mod tests {
         assert_eq!(run.id, "run-1");
         assert_eq!(run.status, Status::SettingUp);
         assert_eq!(run.agent.as_deref(), Some("claude"));
-        assert_eq!(run.branch.as_deref(), Some("monica/mon-1-foo"));
+        assert_eq!(run.branch.as_deref(), Some("mon-1"));
         assert_eq!(run.worktree_path.as_deref(), Some("/tmp/wt"));
 
         assert_eq!(db.get_run("run-1").unwrap().unwrap(), run);
@@ -886,7 +885,7 @@ mod tests {
         db.upsert_project(&sample_project()).unwrap();
         let id = "ashigirl96/monica";
 
-        db.set_project_field(id, "branch_template", "monica/{slug}")
+        db.set_project_field(id, "default_branch", "develop")
             .unwrap();
         db.set_project_field(id, "agent_permission_mode", "acceptEdits")
             .unwrap();
@@ -897,7 +896,7 @@ mod tests {
             .unwrap();
 
         let p = db.get_project(id).unwrap().unwrap();
-        assert_eq!(p.branch_template, "monica/{slug}");
+        assert_eq!(p.default_branch, "develop");
         assert_eq!(p.agent_permission_mode, PermissionMode::AcceptEdits);
         assert_eq!(p.setup_timeout_sec, 900);
         assert!(!p.hooks_claude);
@@ -933,7 +932,7 @@ mod tests {
             .unwrap();
         db.set_project_field("ashigirl96/monica", "setup_timeout_sec", "900")
             .unwrap();
-        db.set_project_field("ashigirl96/monica", "branch_template", "monica/{slug}")
+        db.set_project_field("ashigirl96/monica", "default_branch", "develop")
             .unwrap();
 
         let mut reinit = Project::from_repo("ashigirl96/monica");
@@ -946,7 +945,7 @@ mod tests {
             "set value must survive re-init"
         );
         assert_eq!(
-            after.branch_template, "monica/{slug}",
+            after.default_branch, "develop",
             "set value must survive re-init"
         );
         assert_eq!(

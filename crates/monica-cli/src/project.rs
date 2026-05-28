@@ -118,7 +118,6 @@ fn show(db: &Db, repo: &str, json: bool) -> Result<()> {
         ("path", opt(&project.path)),
         ("default_branch", project.default_branch.clone()),
         ("worktree_root", opt(&project.worktree_root)),
-        ("branch_template", project.branch_template.clone()),
         ("setup_timeout_sec", project.setup_timeout_sec.to_string()),
         ("agent_default", project.agent_default.as_str().to_string()),
         (

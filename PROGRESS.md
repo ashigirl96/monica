@@ -33,3 +33,4 @@ Issue Runner → Session Tracker → Status Dashboard → Kanban → Terminal/AD
 - 2026-05-28 #18 monica issue run を実装。core に Run CRUD(run_counter v3 採番)+branch 生成+setup.sh 実行(timeout/log)+run_issue orchestration を置き、status を setting_up→running/failed と原子的に遷移、CLI は表示のみ（E 完了）。
 - 2026-05-28 #18 のリリース安定化: setup timeout で setup.sh の子プロセスを process group 単位で kill するようにしてリークを防止し、run_id の latest 取得を数値ソートで安定化（`run-9`/`run-10` 逆転を回避）。
 - 2026-05-28 `issue run` の既定 worktree 生成先を `MONICA_HOME/worktrees` から `project.path/.worktrees` へ変更。Claude Code などが main checkout と同じ設定/メモリ文脈を見つけやすくするため。
+- 2026-05-28 #35 branch 名の命名規則を撤廃。projects.branch_template とテンプレート機構を migration v4 で削除し、run が issue 紐づけ有→`issue-<n>`／無→`mon-<n>` を直接生成するようにした（`monica issue status` 等での視認性向上）。
