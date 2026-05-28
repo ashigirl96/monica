@@ -116,10 +116,49 @@ fn cleanup_runs(db: &Db, item: &WorkItem, runs: &[Run]) -> Result<()> {
                         )
                     },
                 )?;
+            } else if worktree_registered(repo, worktree)? {
+                git(
+                    repo,
+                    ["worktree", "remove", "--force"].as_slice(),
+                    Some(worktree),
+                )
+                .with_context(|| {
+                    format!(
+                        "failed to remove stale worktree metadata for {} at {}",
+                        run.id,
+                        worktree.display()
+                    )
+                })?;
             }
         }
     }
     Ok(())
+}
+
+fn worktree_registered(repo: &Path, worktree: &Path) -> Result<bool> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["worktree", "list", "--porcelain"])
+        .output()
+        .context("failed to run git; install git or check the project path")?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "git worktree list failed: {}",
+            command_stderr(&output.stderr)
+        ));
+    }
+
+    let path = worktree.display().to_string();
+    let mut needles = vec![format!("worktree {path}")];
+    if let Some(rest) = path.strip_prefix("/var/") {
+        needles.push(format!("worktree /private/var/{rest}"));
+    } else if let Some(rest) = path.strip_prefix("/private/var/") {
+        needles.push(format!("worktree /var/{rest}"));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .any(|line| needles.iter().any(|needle| line == needle)))
 }
 
 fn git(repo: &Path, args: &[&str], path_arg: Option<&Path>) -> Result<()> {
