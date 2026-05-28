@@ -31,11 +31,7 @@ pub fn status_for_claude_event(event_name: &str) -> Option<Status> {
 fn explicit_status_wins(current: Status) -> bool {
     matches!(
         current,
-        Status::NeedApproval
-            | Status::PrOpen
-            | Status::Done
-            | Status::Archived
-            | Status::Failed
+        Status::NeedApproval | Status::PrOpen | Status::Done | Status::Archived | Status::Failed
     )
 }
 
@@ -338,10 +334,16 @@ mod tests {
             db.get_work_item(&id).unwrap().unwrap().status,
             Status::Running
         );
-        assert_eq!(db.get_run(&run.id).unwrap().unwrap().status, Status::Running);
+        assert_eq!(
+            db.get_run(&run.id).unwrap().unwrap().status,
+            Status::Running
+        );
 
         let events = db.list_events(Some(&id)).unwrap();
-        assert_eq!(events.last().unwrap().run_id.as_deref(), Some(run.id.as_str()));
+        assert_eq!(
+            events.last().unwrap().run_id.as_deref(),
+            Some(run.id.as_str())
+        );
 
         std::env::remove_var("MONICA_HOME");
     }
@@ -363,7 +365,10 @@ mod tests {
         .unwrap();
 
         assert!(!report.run_linked, "run_a belongs to a, not b");
-        assert_eq!(db.get_work_item(&b).unwrap().unwrap().status, Status::Stopped);
+        assert_eq!(
+            db.get_work_item(&b).unwrap().unwrap().status,
+            Status::Stopped
+        );
         assert_eq!(
             db.get_run(&run_a.id).unwrap().unwrap().status,
             Status::SettingUp,
@@ -428,7 +433,8 @@ mod tests {
         let mut db = Db::open_in_memory().unwrap();
         let id = dev_item(&mut db, Status::Running);
 
-        let report = record_claude_hook(&mut db, Some(&id), Some("run_x"), "not json at all").unwrap();
+        let report =
+            record_claude_hook(&mut db, Some(&id), Some("run_x"), "not json at all").unwrap();
 
         assert_eq!(report.event_name, None);
         assert_eq!(report.status, None);
@@ -483,7 +489,10 @@ mod tests {
         .unwrap();
 
         assert!(!report.work_item_found);
-        assert!(!report.event_recorded, "no work item & no linked run -> no event row");
+        assert!(
+            !report.event_recorded,
+            "no work item & no linked run -> no event row"
+        );
         assert!(report.jsonl_written, "jsonl still records the raw event");
         assert_eq!(report.status, None);
         assert!(db.list_events(None).unwrap().is_empty());
@@ -618,7 +627,10 @@ mod tests {
             db.get_work_item(&id).unwrap().unwrap().status,
             Status::NeedApproval
         );
-        assert_eq!(db.get_run(&run.id).unwrap().unwrap().status, Status::Running);
+        assert_eq!(
+            db.get_run(&run.id).unwrap().unwrap().status,
+            Status::Running
+        );
 
         let report = record_claude_hook(
             &mut db,

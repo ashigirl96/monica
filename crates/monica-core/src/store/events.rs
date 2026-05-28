@@ -1,0 +1,59 @@
+use anyhow::{anyhow, Result};
+use rusqlite::params;
+use serde_json::Value;
+
+use crate::db::Db;
+use crate::model::Event;
+
+use super::{EVENT_COLUMNS, SET_NOW};
+
+impl Db {
+    pub fn insert_event(
+        &self,
+        work_item_id: Option<&str>,
+        run_id: Option<&str>,
+        kind: &str,
+        payload: &Value,
+    ) -> Result<Event> {
+        let payload = serde_json::to_string(payload)?;
+        self.conn().execute(
+            "INSERT INTO events (work_item_id, run_id, kind, payload_json)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![work_item_id, run_id, kind, payload],
+        )?;
+        let id = self.conn().last_insert_rowid();
+        let mut stmt = self
+            .conn()
+            .prepare(&format!("SELECT {EVENT_COLUMNS} FROM events WHERE id = ?1"))?;
+        let mut rows = stmt.query(params![id])?;
+        match rows.next()? {
+            Some(row) => Event::from_row(row),
+            None => Err(anyhow!("inserted event {id} not found")),
+        }
+    }
+
+    /// List events, optionally filtered to one work item. Ordered by insertion (`id`).
+    pub fn list_events(&self, work_item_id: Option<&str>) -> Result<Vec<Event>> {
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {EVENT_COLUMNS} FROM events
+             WHERE (?1 IS NULL OR work_item_id = ?1)
+             ORDER BY id"
+        ))?;
+        let mut rows = stmt.query(params![work_item_id])?;
+        let mut events = Vec::new();
+        while let Some(row) = rows.next()? {
+            events.push(Event::from_row(row)?);
+        }
+        Ok(events)
+    }
+
+    /// Current UTC timestamp in the same ISO-8601 form the schema's column defaults use. Lets
+    /// non-DB artifacts (e.g. `hook-events.jsonl`) share one timestamp format without pulling in a
+    /// date/time crate.
+    pub(crate) fn now_iso(&self) -> Result<String> {
+        let ts: String = self
+            .conn()
+            .query_row(&format!("SELECT {SET_NOW}"), [], |r| r.get(0))?;
+        Ok(ts)
+    }
+}
