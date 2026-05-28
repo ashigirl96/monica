@@ -21,6 +21,16 @@ pub fn status_for_claude_event(event_name: &str) -> Option<Status> {
     }
 }
 
+/// Statuses that carry an explicit `monica issue mark` signal (or a terminal state) which a generic
+/// lifecycle hook must never overwrite: explicit signals win over hook inference, so a
+/// `Stop`/`SessionEnd` firing after Claude marked `need_approval` or `pr_open` leaves it intact.
+fn explicit_status_wins(current: Status) -> bool {
+    matches!(
+        current,
+        Status::NeedApproval | Status::PrOpen | Status::Done | Status::Archived
+    )
+}
+
 /// Whether `run_id` is safe to use as a path component under `runs/`. Run ids are minted as
 /// `run-<n>`; anything outside `[A-Za-z0-9_.-]`, or `.`/`..`, is rejected so a hostile env var
 /// (e.g. `../../etc`) cannot escape the runs directory via [`paths::run_dir`]'s plain join.
@@ -53,10 +63,11 @@ pub struct HookReport {
 /// erroring, so the caller can always exit 0 and never disrupt the Claude session.
 ///
 /// `work_item_id` and `run_id` come from `MONICA_*` env vars and are treated as untrusted input:
-/// - `run_id` becomes a path component only when [`is_safe_run_id`]; otherwise the jsonl is skipped
-///   and the id is treated as absent everywhere.
-/// - the run is "linked" (its status updated, and `events.run_id` set) only when it exists *and*
-///   belongs to `work_item_id`, so a stale/mismatched id can never touch another work item's run.
+/// - `run_id` becomes a path component only when [`is_safe_run_id`]; an id that resolves to a run
+///   owned by a *different* work item is a mismatch and is excluded from every run artifact (its
+///   jsonl, its status, the `events.run_id` link), so one session cannot pollute another run.
+/// - a status implied by the event is applied only when it would not overwrite an explicit
+///   `monica issue mark` signal ([`explicit_status_wins`]) — explicit signals win over inference.
 pub fn record_claude_hook(
     db: &mut Db,
     work_item_id: Option<&str>,
@@ -73,27 +84,34 @@ pub fn record_claude_hook(
     let safe_run_id = run_id.filter(|&r| is_safe_run_id(r));
     let unsafe_run_id = run_id.is_some() && safe_run_id.is_none();
 
-    // jsonl is keyed purely by the run_id directory with no DB/FK involvement, so it records even
-    // for a run that has no DB row yet.
-    let mut jsonl_written = false;
-    if let Some(run_id) = safe_run_id {
-        append_jsonl(db, run_id, event_name.as_deref(), &parsed, raw_stdin)?;
-        jsonl_written = true;
-    }
-
-    let work_item_found = match work_item_id {
-        Some(id) => db.get_work_item(id)?.is_some(),
-        None => false,
+    let current_status = match work_item_id {
+        Some(id) => db.get_work_item(id)?.map(|w| w.status),
+        None => None,
     };
+    let work_item_found = current_status.is_some();
 
-    // A run is trusted only when it exists AND belongs to this work item.
-    let run_linked = match (safe_run_id, work_item_id) {
-        (Some(run_id), Some(work_item_id)) => db
-            .get_run(run_id)?
-            .is_some_and(|r| r.work_item_id == work_item_id),
+    // Resolve the run once. It is "linked" only when it exists and belongs to this work item; a
+    // path-safe id that resolves to a *different* work item's run is a mismatch and is kept out of
+    // every run artifact below.
+    let run_row = match safe_run_id {
+        Some(r) => db.get_run(r)?,
+        None => None,
+    };
+    let run_linked = match (run_row.as_ref(), work_item_id) {
+        (Some(run), Some(wid)) => run.work_item_id == wid,
         _ => false,
     };
+    let run_mismatch = run_row.is_some() && !run_linked;
     let linked_run_id = if run_linked { safe_run_id } else { None };
+
+    // jsonl is FK-free and records even a run with no DB row yet, but never a mismatched run's log.
+    let mut jsonl_written = false;
+    if let Some(run_id) = safe_run_id {
+        if !run_mismatch {
+            append_jsonl(db, run_id, event_name.as_deref(), &parsed, raw_stdin)?;
+            jsonl_written = true;
+        }
+    }
 
     let event_recorded = if work_item_found || run_linked {
         let payload = parsed
@@ -110,10 +128,15 @@ pub fn record_claude_hook(
         false
     };
 
-    let status = event_name
-        .as_deref()
-        .and_then(status_for_claude_event)
-        .filter(|_| work_item_found);
+    // Apply the implied status only when the work item exists and its current status is not an
+    // explicit signal a lifecycle hook must preserve.
+    let status = match (
+        event_name.as_deref().and_then(status_for_claude_event),
+        current_status,
+    ) {
+        (Some(implied), Some(current)) if !explicit_status_wins(current) => Some(implied),
+        _ => None,
+    };
     if let (Some(status), Some(work_item_id)) = (status, work_item_id) {
         db.apply_hook_status(work_item_id, linked_run_id, status)?;
     }
@@ -330,6 +353,18 @@ mod tests {
             Status::SettingUp
         );
 
+        assert!(
+            !report.jsonl_written,
+            "a mismatched run's event log must not be written"
+        );
+        assert!(
+            !paths::run_dir(&run_a.id)
+                .unwrap()
+                .join(HOOK_EVENTS_FILE)
+                .exists(),
+            "another work item's run log must stay untouched"
+        );
+
         let events = db.list_events(Some(&b)).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].run_id, None, "mismatched run must not be linked");
@@ -468,5 +503,77 @@ mod tests {
         );
         let events = db.list_events(Some(&id)).unwrap();
         assert_eq!(events[0].payload, json!({ "some_other_key": 1 }));
+    }
+
+    #[test]
+    fn explicit_and_terminal_statuses_resist_hook_overwrite() {
+        for s in [
+            Status::NeedApproval,
+            Status::PrOpen,
+            Status::Done,
+            Status::Archived,
+        ] {
+            assert!(explicit_status_wins(s), "{s:?} must be protected");
+        }
+        for s in [
+            Status::Inbox,
+            Status::Ready,
+            Status::SettingUp,
+            Status::Running,
+            Status::Stopped,
+            Status::Failed,
+        ] {
+            assert!(!explicit_status_wins(s), "{s:?} must stay hook-writable");
+        }
+    }
+
+    /// The core of the explicit-signal contract: a `Stop` firing after Claude marked `need_approval`
+    /// must record the event but leave the status at `need_approval`, not downgrade it to stopped.
+    #[test]
+    fn stop_does_not_overwrite_an_explicit_mark() {
+        let (_g, _home) = temp_home("explicit");
+        let mut db = Db::open_in_memory().unwrap();
+        let id = dev_item(&mut db, Status::NeedApproval);
+
+        let report = record_claude_hook(
+            &mut db,
+            Some(&id),
+            Some("run_x"),
+            r#"{"hook_event_name":"Stop"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(report.status, None, "the hook must not apply a status here");
+        assert!(report.event_recorded, "the event is still recorded");
+        assert!(report.jsonl_written);
+        assert_eq!(
+            db.get_work_item(&id).unwrap().unwrap().status,
+            Status::NeedApproval,
+            "an explicit mark must survive the Stop hook"
+        );
+
+        std::env::remove_var("MONICA_HOME");
+    }
+
+    #[test]
+    fn session_end_does_not_overwrite_pr_open() {
+        let mut db = Db::open_in_memory().unwrap();
+        let id = dev_item(&mut db, Status::PrOpen);
+
+        // No run_id, so no jsonl/path access and no MONICA_HOME needed.
+        let report = record_claude_hook(
+            &mut db,
+            Some(&id),
+            None,
+            r#"{"hook_event_name":"SessionEnd"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(report.status, None);
+        assert!(report.event_recorded);
+        assert_eq!(
+            db.get_work_item(&id).unwrap().unwrap().status,
+            Status::PrOpen
+        );
     }
 }
