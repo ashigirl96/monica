@@ -36,3 +36,4 @@ Issue Runner → Session Tracker → Status Dashboard → Kanban → Terminal/AD
 - 2026-05-28 monica-core の大型ファイルを責務別モジュールへ分割した（保守性向上）
 - 2026-05-28 `project init` が git/gh から default branch を検出して登録するようにし、`project set ... branch` を `default_branch` の alias として扱うようにした。
 - 2026-05-28 `monica issue status` を DB のみで表示する fast path に戻し、PR 補完の `gh pr list` を外した（status をネットワーク待ちから切り離すため）。
+- 2026-05-28 #44 `monica issue delete <id>` を追加。対象表示と確認プロンプト、`--yes/-y`、関連 rows の transaction 削除で tracked issue を安全に消せるようにした。

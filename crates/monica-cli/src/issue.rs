@@ -1,3 +1,4 @@
+use std::io::{self, Write};
 use std::process::Command;
 use std::str::FromStr;
 
@@ -5,7 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_core::{
     parse_issue_ref, parse_owner_repo, track_github_issue, Agent, Db, GithubIssue, IssueStatusRow,
-    SetupOutcome, Status,
+    SetupOutcome, Status, WorkItem,
 };
 use serde::Deserialize;
 
@@ -34,6 +35,14 @@ pub enum IssueCommand {
         #[arg(long, value_name = "AGENT")]
         agent: Option<String>,
     },
+    /// Delete a tracked Monica issue (MON-<id>)
+    Delete {
+        /// MON-<id>
+        id: String,
+        /// Skip the confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
     /// Explicitly set a work item's status/phase (e.g. `monica issue mark MON-1 need-approval`)
     Mark {
         /// MON-<id>
@@ -57,6 +66,7 @@ pub fn run(cmd: IssueCommand) -> Result<()> {
         IssueCommand::Run { id, claude, agent } => {
             run_command(&mut db, &id, claude, agent.as_deref())
         }
+        IssueCommand::Delete { id, yes } => delete_command(&mut db, &id, yes),
         IssueCommand::Mark {
             id,
             status,
@@ -113,6 +123,53 @@ fn run_command(db: &mut Db, id: &str, claude: bool, agent: Option<&str>) -> Resu
     // this call is unconditional. Spawn failure settles the run to failed inside core, so we just
     // propagate.
     monica_core::launch_agent(db, &report)
+}
+
+fn delete_command(db: &mut Db, id: &str, yes: bool) -> Result<()> {
+    let item = db
+        .get_work_item(id)?
+        .ok_or_else(|| anyhow!("Issue not found: {id}"))?;
+    let project = db
+        .list_issue_statuses(None, None)?
+        .into_iter()
+        .find(|row| row.id == item.id)
+        .and_then(|row| row.project);
+
+    print_delete_summary(&item, project.as_deref());
+    if !yes && !confirm_delete()? {
+        println!("Canceled.");
+        return Ok(());
+    }
+
+    let report = monica_core::delete_issue(db, id)?;
+    println!("Deleted issue {}.", report.item.id);
+    if !report.removed_runs.is_empty() {
+        println!("Removed runs: {}.", report.removed_runs.join(", "));
+    }
+    Ok(())
+}
+
+fn print_delete_summary(item: &WorkItem, project: Option<&str>) {
+    println!("Delete issue?");
+    println!();
+    println!("  ID:      {}", item.id);
+    println!("  Title:   {}", item.title);
+    println!("  Status:  {}", item.status.as_str());
+    println!("  Project: {}", project.unwrap_or("-"));
+    println!();
+    println!("This cannot be undone.");
+}
+
+fn confirm_delete() -> Result<bool> {
+    print!("Continue? [y/N] ");
+    io::stdout().flush()?;
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer)?;
+    Ok(is_yes(answer.trim()))
+}
+
+fn is_yes(answer: &str) -> bool {
+    answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes")
 }
 
 /// Map the two CLI flags (`--claude` shorthand and `--agent <name>`) to an `Option<Agent>`.
@@ -378,6 +435,17 @@ mod tests {
             Some(Agent::Claude)
         );
         assert!(resolve_agent(false, Some("bogus")).is_err());
+    }
+
+    #[test]
+    fn is_yes_accepts_only_explicit_yes() {
+        assert!(is_yes("y"));
+        assert!(is_yes("Y"));
+        assert!(is_yes("yes"));
+        assert!(is_yes("YES"));
+        assert!(!is_yes(""));
+        assert!(!is_yes("n"));
+        assert!(!is_yes("yeah"));
     }
 
     #[test]

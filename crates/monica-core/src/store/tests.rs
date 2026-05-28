@@ -226,6 +226,83 @@ fn get_missing_work_item_is_none() {
 }
 
 #[test]
+fn delete_work_item_refuses_owned_runs() {
+    let mut db = Db::open_in_memory().unwrap();
+    let item = db
+        .insert_work_item_with_ref(
+            dev_item("delete me"),
+            ExternalRef::new(
+                String::new(),
+                RefType::GithubIssue,
+                Some("ashigirl96/monica".to_string()),
+                Some(44),
+                Some("https://github.com/ashigirl96/monica/issues/44".to_string()),
+            ),
+        )
+        .unwrap();
+    let run = db.start_run(new_run(&item.id)).unwrap();
+    db.insert_event(Some(&item.id), None, "mark", &json!({ "via": "test" }))
+        .unwrap();
+    db.insert_event(None, Some(&run.id), "hook", &json!({ "via": "test" }))
+        .unwrap();
+
+    let err = db.delete_work_item(&item.id).unwrap_err();
+    assert!(
+        format!("{err:#}").contains("cleanup-aware issue delete path"),
+        "{err:#}"
+    );
+    assert!(db.get_work_item(&item.id).unwrap().is_some());
+    assert!(db.get_run(&run.id).unwrap().is_some());
+    assert_eq!(db.list_external_refs(&item.id).unwrap().len(), 1);
+
+    let event_count: i64 = db
+        .conn()
+        .query_row("SELECT count(*) FROM events", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(event_count, 2);
+}
+
+#[test]
+fn delete_work_item_removes_unrun_item_rows() {
+    let mut db = Db::open_in_memory().unwrap();
+    let item = db
+        .insert_work_item_with_ref(
+            dev_item("delete me"),
+            ExternalRef::new(
+                String::new(),
+                RefType::GithubIssue,
+                Some("ashigirl96/monica".to_string()),
+                Some(44),
+                Some("https://github.com/ashigirl96/monica/issues/44".to_string()),
+            ),
+        )
+        .unwrap();
+    db.insert_event(Some(&item.id), None, "mark", &json!({ "via": "test" }))
+        .unwrap();
+
+    let deleted = db.delete_work_item(&item.id).unwrap();
+    assert_eq!(deleted.id, item.id);
+    assert!(db.get_work_item(&item.id).unwrap().is_none());
+    assert!(db.list_external_refs(&item.id).unwrap().is_empty());
+
+    let event_count: i64 = db
+        .conn()
+        .query_row("SELECT count(*) FROM events", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(event_count, 0);
+}
+
+#[test]
+fn delete_work_item_errors_on_unknown_id() {
+    let mut db = Db::open_in_memory().unwrap();
+    let err = db.delete_work_item("MON-999").unwrap_err();
+    assert!(
+        format!("{err:#}").contains("work item not found: MON-999"),
+        "{err:#}"
+    );
+}
+
+#[test]
 fn list_issue_statuses_uses_effective_repo_and_filters() {
     let mut db = Db::open_in_memory().unwrap();
     let mut project = sample_project();

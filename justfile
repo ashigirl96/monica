@@ -22,15 +22,20 @@ build:
 build-debug:
     bun run tauri build --debug --bundles app
 
-install-local: build
+install-local: build install-cli
     rm -rf /Applications/Monica.app
     cp -R target/release/bundle/macos/Monica.app /Applications/Monica.app
     xattr -dr com.apple.quarantine /Applications/Monica.app 2>/dev/null || true
     @echo "Installed: /Applications/Monica.app"
+
+install-cli:
     cargo build --release -p monica-cli
     mkdir -p ~/.local/bin
     cp target/release/monica ~/.local/bin/monica
     @echo "Installed: ~/.local/bin/monica"
+    mkdir -p ~/.zsh/completions
+    ~/.local/bin/monica completions zsh > ~/.zsh/completions/_monica
+    @echo "Installed: ~/.zsh/completions/_monica"
 
 preview:
     bun --bun vite preview

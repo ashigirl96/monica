@@ -147,4 +147,18 @@ impl Db {
             None => Ok(None),
         }
     }
+
+    pub fn list_runs_for_work_item(&self, work_item_id: &str) -> Result<Vec<Run>> {
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {RUN_COLUMNS} FROM runs
+             WHERE work_item_id = ?1
+             ORDER BY created_at, CAST(SUBSTR(id, 5) AS INTEGER)"
+        ))?;
+        let mut rows = stmt.query(params![work_item_id])?;
+        let mut runs = Vec::new();
+        while let Some(row) = rows.next()? {
+            runs.push(Run::from_row(row)?);
+        }
+        Ok(runs)
+    }
 }

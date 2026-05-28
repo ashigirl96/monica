@@ -94,6 +94,48 @@ impl Db {
         }
     }
 
+    pub fn delete_work_item(&mut self, id: &str) -> Result<WorkItem> {
+        let run_count: i64 = self.conn().query_row(
+            "SELECT count(*) FROM runs WHERE work_item_id = ?1",
+            params![id],
+            |row| row.get(0),
+        )?;
+        if run_count > 0 {
+            return Err(anyhow!(
+                "work item {id} has {run_count} run(s); use the cleanup-aware issue delete path"
+            ));
+        }
+        self.delete_work_item_cascade(id)
+    }
+
+    pub(crate) fn delete_work_item_cascade(&mut self, id: &str) -> Result<WorkItem> {
+        let tx = self.conn_mut().transaction()?;
+        let item = {
+            let mut stmt = tx.prepare(&format!(
+                "SELECT {WORK_ITEM_COLUMNS} FROM work_items WHERE id = ?1"
+            ))?;
+            let mut rows = stmt.query(params![id])?;
+            match rows.next()? {
+                Some(row) => WorkItem::from_row(row)?,
+                None => return Err(anyhow!("work item not found: {id}")),
+            }
+        };
+
+        tx.execute(
+            "DELETE FROM events WHERE work_item_id = ?1
+               OR run_id IN (SELECT id FROM runs WHERE work_item_id = ?1)",
+            params![id],
+        )?;
+        tx.execute(
+            "DELETE FROM external_refs WHERE work_item_id = ?1",
+            params![id],
+        )?;
+        tx.execute("DELETE FROM runs WHERE work_item_id = ?1", params![id])?;
+        tx.execute("DELETE FROM work_items WHERE id = ?1", params![id])?;
+        tx.commit()?;
+        Ok(item)
+    }
+
     pub fn list_work_items(&self) -> Result<Vec<WorkItem>> {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {WORK_ITEM_COLUMNS} FROM work_items ORDER BY created_at, id"
