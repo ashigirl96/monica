@@ -21,13 +21,21 @@ pub fn status_for_claude_event(event_name: &str) -> Option<Status> {
     }
 }
 
-/// Statuses that carry an explicit `monica issue mark` signal (or a terminal state) which a generic
-/// lifecycle hook must never overwrite: explicit signals win over hook inference, so a
-/// `Stop`/`SessionEnd` firing after Claude marked `need_approval` or `pr_open` leaves it intact.
+/// Statuses a generic lifecycle hook must never downgrade. Two reasons cohabit here:
+/// - explicit `monica issue mark` signals (`need_approval`, `pr_open`, `done`, `archived`) — a
+///   `Stop`/`SessionEnd` firing afterward records the event but leaves the user-declared state
+///   intact.
+/// - `failed` set by an earlier `StopFailure` hook in the same session — Claude often emits
+///   `SessionEnd` right after `StopFailure`, and `SessionEnd→stopped` would otherwise silently
+///   downgrade the failure signal we just recorded.
 fn explicit_status_wins(current: Status) -> bool {
     matches!(
         current,
-        Status::NeedApproval | Status::PrOpen | Status::Done | Status::Archived
+        Status::NeedApproval
+            | Status::PrOpen
+            | Status::Done
+            | Status::Archived
+            | Status::Failed
     )
 }
 
@@ -512,6 +520,8 @@ mod tests {
             Status::PrOpen,
             Status::Done,
             Status::Archived,
+            // Failed protects StopFailure→failed from being downgraded by a later SessionEnd.
+            Status::Failed,
         ] {
             assert!(explicit_status_wins(s), "{s:?} must be protected");
         }
@@ -521,7 +531,6 @@ mod tests {
             Status::SettingUp,
             Status::Running,
             Status::Stopped,
-            Status::Failed,
         ] {
             assert!(!explicit_status_wins(s), "{s:?} must stay hook-writable");
         }
@@ -574,6 +583,49 @@ mod tests {
         assert_eq!(
             db.get_work_item(&id).unwrap().unwrap().status,
             Status::PrOpen
+        );
+    }
+
+    /// Claude routinely fires `SessionEnd` immediately after `StopFailure`. The mapping table sends
+    /// `SessionEnd→stopped`, so without protecting `failed` the recorded failure would be silently
+    /// downgraded to `stopped` and lost.
+    #[test]
+    fn session_end_after_stop_failure_preserves_failed() {
+        let mut db = Db::open_in_memory().unwrap();
+        let id = dev_item(&mut db, Status::Running);
+
+        let r1 = record_claude_hook(
+            &mut db,
+            Some(&id),
+            None,
+            r#"{"hook_event_name":"StopFailure"}"#,
+        )
+        .unwrap();
+        assert_eq!(r1.status, Some(Status::Failed));
+        assert_eq!(
+            db.get_work_item(&id).unwrap().unwrap().status,
+            Status::Failed
+        );
+
+        let r2 = record_claude_hook(
+            &mut db,
+            Some(&id),
+            None,
+            r#"{"hook_event_name":"SessionEnd"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            r2.status, None,
+            "SessionEnd must not apply stopped over a recorded failure"
+        );
+        assert!(
+            r2.event_recorded,
+            "the SessionEnd event is still recorded even when its status is suppressed"
+        );
+        assert_eq!(
+            db.get_work_item(&id).unwrap().unwrap().status,
+            Status::Failed,
+            "the StopFailure→failed signal must survive a trailing SessionEnd"
         );
     }
 }
