@@ -3,6 +3,7 @@
 
 mod app;
 mod db;
+mod hook;
 mod migrations;
 mod model;
 mod paths;
@@ -12,6 +13,7 @@ mod store;
 
 pub use app::{register_project, track_github_issue, GithubIssue};
 pub use db::Db;
+pub use hook::{is_safe_run_id, record_claude_hook, status_for_claude_event, HookReport};
 pub use model::{
     Agent, Event, ExternalRef, IssueStatusRow, NewRun, NewWorkItem, PermissionMode, Project,
     Provider, RefType, Run, Status, WorkItem, WorkItemKind,

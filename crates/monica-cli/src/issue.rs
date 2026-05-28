@@ -29,6 +29,19 @@ pub enum IssueCommand {
         /// MON-<id>
         id: String,
     },
+    /// Explicitly set a work item's status/phase (e.g. `monica issue mark MON-1 need-approval`)
+    Mark {
+        /// MON-<id>
+        id: String,
+        /// Status token, e.g. need-approval / pr-open / running (dashes or underscores)
+        status: String,
+        /// Free-text note, stored as the work item's phase
+        #[arg(long)]
+        note: Option<String>,
+        /// PR URL to record as a github_pull_request reference
+        #[arg(long = "pr-url")]
+        pr_url: Option<String>,
+    },
 }
 
 pub fn run(cmd: IssueCommand) -> Result<()> {
@@ -37,6 +50,12 @@ pub fn run(cmd: IssueCommand) -> Result<()> {
         IssueCommand::Track { target } => track_command(&mut db, &target),
         IssueCommand::Status { status, project } => status_command(&db, status, project),
         IssueCommand::Run { id } => run_command(&mut db, &id),
+        IssueCommand::Mark {
+            id,
+            status,
+            note,
+            pr_url,
+        } => mark_command(&mut db, &id, &status, note.as_deref(), pr_url.as_deref()),
     }
 }
 
@@ -89,6 +108,25 @@ fn run_command(db: &mut Db, id: &str) -> Result<()> {
     println!("Status:   {}", report.status.as_str());
     if report.status == Status::Failed {
         anyhow::bail!("run {} failed; see {}", report.run_id, report.log_path);
+    }
+    Ok(())
+}
+
+fn mark_command(
+    db: &mut Db,
+    id: &str,
+    status: &str,
+    note: Option<&str>,
+    pr_url: Option<&str>,
+) -> Result<()> {
+    let status = Status::parse_token(status)?;
+    db.mark_work_item(id, status, note, pr_url)?;
+    println!("Marked {id} as {}", status.as_str());
+    if let Some(note) = note {
+        println!("Note: {note}");
+    }
+    if let Some(pr_url) = pr_url {
+        println!("PR:   {pr_url}");
     }
     Ok(())
 }
