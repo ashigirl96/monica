@@ -116,6 +116,14 @@ fn cleanup_runs(db: &Db, item: &WorkItem, runs: &[Run]) -> Result<()> {
                         )
                     },
                 )?;
+            } else {
+                git(repo, ["worktree", "prune"].as_slice(), None).with_context(|| {
+                    format!(
+                        "failed to prune stale worktree metadata for {} at {}",
+                        run.id,
+                        worktree.display()
+                    )
+                })?;
             }
         }
     }

@@ -477,6 +477,34 @@ fn delete_issue_cleans_worktree_preserves_branch_and_allows_retrack_rerun() {
 }
 
 #[test]
+fn delete_issue_prunes_stale_worktree_metadata_after_manual_directory_removal() {
+    let _env = paths::test_env_guard();
+    let home = Tmp::new("home");
+    std::env::set_var("MONICA_HOME", home.path());
+    let repo = Tmp::new("repo");
+    init_repo(repo.path(), Some("#!/usr/bin/env bash\ntrue\n"), None);
+
+    let mut db = db_with_project(repo.path());
+    let first_id = tracked_item(&mut db, "manual cleanup", Some(9));
+    let first = run_issue(&mut db, &first_id, None).unwrap();
+    assert!(Path::new(&first.worktree_path).exists());
+    fs::remove_dir_all(&first.worktree_path).unwrap();
+
+    let deleted = delete_issue(&mut db, &first_id).unwrap();
+    assert_eq!(deleted.item.id, first_id);
+    assert_eq!(deleted.removed_runs, vec![first.run_id]);
+    assert!(db.get_work_item(&first_id).unwrap().is_none());
+    assert!(branch_exists(repo.path(), "issue-9"));
+
+    let second_id = tracked_item(&mut db, "manual cleanup again", Some(9));
+    let second = run_issue(&mut db, &second_id, None).unwrap();
+    assert_eq!(second.branch, "issue-9");
+    assert!(Path::new(&second.worktree_path).exists());
+
+    std::env::remove_var("MONICA_HOME");
+}
+
+#[test]
 fn run_issue_failure_after_start_run_settles_failed() {
     let _env = paths::test_env_guard();
     let home = Tmp::new("home");
