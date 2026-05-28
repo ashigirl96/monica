@@ -5,7 +5,7 @@ use std::str::FromStr;
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_core::{
-    parse_issue_ref, parse_owner_repo, track_github_issue, Db, GithubIssue, IssueStatusRow,
+    parse_issue_ref, parse_owner_repo, track_github_issue, Agent, Db, GithubIssue, IssueStatusRow,
     SetupOutcome, Status,
 };
 use serde::Deserialize;
@@ -28,6 +28,12 @@ pub enum IssueCommand {
     Run {
         /// MON-<id>
         id: String,
+        /// Launch Claude Code after setup (shorthand for --agent claude)
+        #[arg(long, conflicts_with = "agent")]
+        claude: bool,
+        /// Launch a specific agent after setup (e.g. claude)
+        #[arg(long, value_name = "AGENT")]
+        agent: Option<String>,
     },
 }
 
@@ -36,7 +42,9 @@ pub fn run(cmd: IssueCommand) -> Result<()> {
     match cmd {
         IssueCommand::Track { target } => track_command(&mut db, &target),
         IssueCommand::Status { status, project } => status_command(&db, status, project),
-        IssueCommand::Run { id } => run_command(&mut db, &id),
+        IssueCommand::Run { id, claude, agent } => {
+            run_command(&mut db, &id, claude, agent.as_deref())
+        }
     }
 }
 
@@ -79,18 +87,36 @@ fn status_command(db: &Db, status: Option<String>, project: Option<String>) -> R
     Ok(())
 }
 
-fn run_command(db: &mut Db, id: &str) -> Result<()> {
-    let report = monica_core::run_issue(db, id)?;
+fn run_command(db: &mut Db, id: &str, claude: bool, agent: Option<&str>) -> Result<()> {
+    let agent = resolve_agent(claude, agent)?;
+    let report = monica_core::run_issue(db, id, agent)?;
     println!("Run {} for {}", report.run_id, report.work_item_id);
     println!("Branch:   {}", report.branch);
     println!("Worktree: {}", report.worktree_path);
     println!("Setup:    {}", describe_setup(&report.setup));
     println!("Log:      {}", report.log_path);
     println!("Status:   {}", report.status.as_str());
+    if let Some(path) = report.settings_path.as_deref() {
+        println!("Settings: {path}");
+    }
     if report.status == Status::Failed {
         anyhow::bail!("run {} failed; see {}", report.run_id, report.log_path);
     }
-    Ok(())
+    // Hand the terminal to the agent. `launch_agent` is a no-op when no agent was requested, so
+    // this call is unconditional. Spawn failure settles the run to failed inside core, so we just
+    // propagate.
+    monica_core::launch_agent(db, &report)
+}
+
+/// Map the two CLI flags (`--claude` shorthand and `--agent <name>`) to an `Option<Agent>`.
+/// `conflicts_with` on the clap side guarantees they are never both set, so this only handles the
+/// remaining three combinations.
+fn resolve_agent(claude: bool, agent: Option<&str>) -> Result<Option<Agent>> {
+    match (claude, agent) {
+        (false, None) => Ok(None),
+        (true, _) => Ok(Some(Agent::Claude)),
+        (false, Some(name)) => Ok(Some(Agent::from_str(name)?)),
+    }
 }
 
 fn describe_setup(outcome: &SetupOutcome) -> String {
@@ -513,6 +539,17 @@ mod tests {
             Some("ashigirl96/monica".to_string())
         );
         assert!(normalize_project_filter(Some("bad")).is_err());
+    }
+
+    #[test]
+    fn resolve_agent_maps_flags_to_optional_agent() {
+        assert_eq!(resolve_agent(false, None).unwrap(), None);
+        assert_eq!(resolve_agent(true, None).unwrap(), Some(Agent::Claude));
+        assert_eq!(
+            resolve_agent(false, Some("claude")).unwrap(),
+            Some(Agent::Claude)
+        );
+        assert!(resolve_agent(false, Some("bogus")).is_err());
     }
 
     #[test]

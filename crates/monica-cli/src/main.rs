@@ -1,3 +1,4 @@
+mod hook;
 mod issue;
 mod project;
 
@@ -19,6 +20,9 @@ enum Commands {
     /// Track GitHub issues as Monica work items
     #[command(subcommand)]
     Issue(issue::IssueCommand),
+    /// Receive an agent hook callback (used by generated agent settings)
+    #[command(subcommand)]
+    Hook(hook::HookCommand),
     /// Start a worktree + session for an issue (owner/repo#123)
     Start { target: String },
     /// Show the status of all sessions
@@ -42,6 +46,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
         Commands::Project(cmd) => project::run(cmd),
         Commands::Issue(cmd) => issue::run(cmd),
+        Commands::Hook(cmd) => hook::run(cmd),
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();
             let name = cmd.get_name().to_string();

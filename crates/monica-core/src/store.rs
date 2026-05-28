@@ -255,6 +255,21 @@ impl Db {
         Ok(())
     }
 
+    /// Recording `settings_path` is not a status transition, so it stays out of `finish_run` and
+    /// runs as a single UPDATE on its own.
+    pub fn set_run_settings_path(&self, run_id: &str, settings_path: &str) -> Result<()> {
+        let affected = self.conn().execute(
+            "UPDATE runs
+               SET settings_path = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+             WHERE id = ?2",
+            params![settings_path, run_id],
+        )?;
+        if affected == 0 {
+            return Err(anyhow!("run not found: {run_id}"));
+        }
+        Ok(())
+    }
+
     pub fn get_run(&self, id: &str) -> Result<Option<Run>> {
         let mut stmt = self
             .conn()
@@ -597,6 +612,39 @@ mod tests {
             db.get_work_item(&item.id).unwrap().unwrap().status,
             Status::SettingUp
         );
+    }
+
+    #[test]
+    fn set_run_settings_path_records_and_bumps_updated_at() {
+        let mut db = Db::open_in_memory().unwrap();
+        let item = db.insert_work_item(dev_item("settings target")).unwrap();
+        let run = db.start_run(new_run(&item.id)).unwrap();
+
+        // Force a measurable gap so updated_at must move past start_run's timestamp.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        db.set_run_settings_path(&run.id, "/abs/runs/run-1/claude-settings.json")
+            .unwrap();
+
+        let fetched = db.get_run(&run.id).unwrap().unwrap();
+        assert_eq!(
+            fetched.settings_path.as_deref(),
+            Some("/abs/runs/run-1/claude-settings.json")
+        );
+        assert!(
+            fetched.updated_at > run.updated_at,
+            "settings_path update must bump updated_at"
+        );
+        assert_eq!(
+            fetched.status, run.status,
+            "set_run_settings_path is not a status transition"
+        );
+    }
+
+    #[test]
+    fn set_run_settings_path_errors_on_unknown_run() {
+        let db = Db::open_in_memory().unwrap();
+        let err = db.set_run_settings_path("run-999", "/x").unwrap_err();
+        assert!(format!("{err:#}").contains("run not found"), "{err:#}");
     }
 
     #[test]
