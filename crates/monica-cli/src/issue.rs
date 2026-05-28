@@ -146,6 +146,9 @@ fn delete_command(db: &mut Db, id: &str, yes: bool) -> Result<()> {
     if !report.removed_runs.is_empty() {
         println!("Removed runs: {}.", report.removed_runs.join(", "));
     }
+    if !report.removed_branches.is_empty() {
+        println!("Removed branches: {}.", report.removed_branches.join(", "));
+    }
     Ok(())
 }
 
