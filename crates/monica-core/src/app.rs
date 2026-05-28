@@ -64,6 +64,7 @@ pub fn track_github_issue(db: &mut Db, repo_input: &str, issue: &GithubIssue) ->
 pub struct DeleteIssueReport {
     pub item: WorkItem,
     pub removed_runs: Vec<String>,
+    pub removed_branches: Vec<String>,
 }
 
 pub fn delete_issue(db: &mut Db, id: &str) -> Result<DeleteIssueReport> {
@@ -71,17 +72,18 @@ pub fn delete_issue(db: &mut Db, id: &str) -> Result<DeleteIssueReport> {
         .get_work_item(id)?
         .ok_or_else(|| anyhow!("work item not found: {id}"))?;
     let runs = db.list_runs_for_work_item(id)?;
-    cleanup_runs(db, &item, &runs)?;
+    let removed_branches = cleanup_runs(db, &item, &runs)?;
     let item = db.delete_work_item_cascade(id)?;
     Ok(DeleteIssueReport {
         item,
         removed_runs: runs.into_iter().map(|run| run.id).collect(),
+        removed_branches,
     })
 }
 
-fn cleanup_runs(db: &Db, item: &WorkItem, runs: &[Run]) -> Result<()> {
+fn cleanup_runs(db: &Db, item: &WorkItem, runs: &[Run]) -> Result<Vec<String>> {
     if runs.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     let project_id = item.project_id.as_deref().ok_or_else(|| {
@@ -102,6 +104,7 @@ fn cleanup_runs(db: &Db, item: &WorkItem, runs: &[Run]) -> Result<()> {
         )
     })?;
     let repo = Path::new(repo_path);
+    let mut removed_branches = Vec::new();
 
     for run in runs {
         if let Some(worktree_path) = run.worktree_path.as_deref() {
@@ -131,8 +134,33 @@ fn cleanup_runs(db: &Db, item: &WorkItem, runs: &[Run]) -> Result<()> {
                 })?;
             }
         }
+        if let Some(branch) = run.branch.as_deref() {
+            if !removed_branches.iter().any(|b| b == branch) && branch_exists(repo, branch)? {
+                git(repo, ["branch", "-D", branch].as_slice(), None)
+                    .with_context(|| format!("failed to delete branch {branch} for {}", run.id))?;
+                removed_branches.push(branch.to_string());
+            }
+        }
     }
-    Ok(())
+    Ok(removed_branches)
+}
+
+fn branch_exists(repo: &Path, branch: &str) -> Result<bool> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["show-ref", "--verify", "--quiet"])
+        .arg(format!("refs/heads/{branch}"))
+        .output()
+        .context("failed to run git; install git or check the project path")?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(anyhow!(
+            "git show-ref failed: {}",
+            command_stderr(&output.stderr)
+        )),
+    }
 }
 
 fn worktree_registered(repo: &Path, worktree: &Path) -> Result<bool> {

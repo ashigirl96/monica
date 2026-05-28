@@ -465,7 +465,7 @@ fn run_issue_rejects_rerun_when_worktree_exists() {
 }
 
 #[test]
-fn delete_issue_cleans_worktree_preserves_branch_and_allows_retrack_rerun() {
+fn delete_issue_cleans_worktree_and_branch_then_allows_retrack_rerun() {
     let _env = paths::test_env_guard();
     let home = Tmp::new("home");
     std::env::set_var("MONICA_HOME", home.path());
@@ -485,15 +485,16 @@ fn delete_issue_cleans_worktree_preserves_branch_and_allows_retrack_rerun() {
     let deleted = delete_issue(&mut db, &first_id).unwrap();
     assert_eq!(deleted.item.id, first_id);
     assert_eq!(deleted.removed_runs, vec![first.run_id]);
+    assert_eq!(deleted.removed_branches, vec!["issue-9".to_string()]);
     assert!(db.get_work_item(&first_id).unwrap().is_none());
     assert!(!Path::new(&first.worktree_path).exists());
-    assert!(branch_exists(repo.path(), "issue-9"));
+    assert!(!branch_exists(repo.path(), "issue-9"));
 
     let second_id = tracked_item(&mut db, "delete after run again", Some(9));
     let second = run_issue(&mut db, &second_id, None).unwrap();
     assert_eq!(second.branch, "issue-9");
     assert!(Path::new(&second.worktree_path).exists());
-    assert!(Path::new(&second.worktree_path)
+    assert!(!Path::new(&second.worktree_path)
         .join("local-work.txt")
         .exists());
 
@@ -517,8 +518,9 @@ fn delete_issue_prunes_stale_worktree_metadata_after_manual_directory_removal() 
     let deleted = delete_issue(&mut db, &first_id).unwrap();
     assert_eq!(deleted.item.id, first_id);
     assert_eq!(deleted.removed_runs, vec![first.run_id]);
+    assert_eq!(deleted.removed_branches, vec!["issue-9".to_string()]);
     assert!(db.get_work_item(&first_id).unwrap().is_none());
-    assert!(branch_exists(repo.path(), "issue-9"));
+    assert!(!branch_exists(repo.path(), "issue-9"));
 
     let second_id = tracked_item(&mut db, "manual cleanup again", Some(9));
     let second = run_issue(&mut db, &second_id, None).unwrap();
@@ -549,8 +551,9 @@ fn delete_issue_tolerates_worktree_already_removed_by_git() {
     let deleted = delete_issue(&mut db, &first_id).unwrap();
     assert_eq!(deleted.item.id, first_id);
     assert_eq!(deleted.removed_runs, vec![first.run_id]);
+    assert_eq!(deleted.removed_branches, vec!["issue-9".to_string()]);
     assert!(db.get_work_item(&first_id).unwrap().is_none());
-    assert!(branch_exists(repo.path(), "issue-9"));
+    assert!(!branch_exists(repo.path(), "issue-9"));
 
     std::env::remove_var("MONICA_HOME");
 }
