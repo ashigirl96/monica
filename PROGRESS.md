@@ -40,3 +40,4 @@ Issue Runner → Session Tracker → Status Dashboard → Kanban → Terminal/AD
 - 2026-05-28 `issue delete` の worktree cleanup で、ディレクトリが手動削除されていた場合に `git worktree prune` を流して `.git/worktrees/` の stale メタデータを掃除し、同じ issue 番号で再 track→run できるようにした。
 - 2026-05-29 Claude hook に `UserPromptSubmit` を追加し、停止後の次プロンプトで status が running に戻るようにした（同一セッション再開を拾うため）。
 - 2026-05-29 #49 `monica issue run --claude --continue/--fork <session-id>` を追加し、既存 worktree に新しい Monica run として再接続できるようにした。
+- 2026-05-30 WorkItem 観測ダッシュボード(Mission Control)を Tauri に追加。monica-app に monica-core を依存させ list_work_items/list_issue_statuses/list_events の read-only コマンドを生やし、status LED 一覧＋event timeline drawer を実装（CLI automation を "workspace" の入口に変えるため。Run は概念として未露出）。
