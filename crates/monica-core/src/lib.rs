@@ -27,4 +27,6 @@ pub use model::{
 };
 pub use paths::{base_dir, db_path, run_dir, runs_dir, worktrees_dir};
 pub use repo::{parse_issue_ref, parse_owner_repo};
-pub use run::{launch_agent, run_issue, RunReport, SetupOutcome};
+pub use run::{
+    launch_agent, run_issue, run_issue_with_session_mode, AgentSessionMode, RunReport, SetupOutcome,
+};

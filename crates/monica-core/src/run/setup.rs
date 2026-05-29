@@ -16,6 +16,8 @@ const SETUP_POLL_INTERVAL: Duration = Duration::from_millis(50);
 pub enum SetupOutcome {
     /// No `.monica/setup.sh` in the worktree; setup was skipped.
     Skipped,
+    /// An existing worktree was reused, so setup was intentionally not run.
+    ReusedWorktree,
     Succeeded,
     Failed {
         code: Option<i32>,

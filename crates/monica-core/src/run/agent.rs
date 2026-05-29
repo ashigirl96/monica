@@ -11,6 +11,19 @@ use super::setup::SetupOutcome;
 
 const CLAUDE_PROGRAM: &str = "claude";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentSessionMode {
+    New,
+    Continue,
+    Fork { session_id: String },
+}
+
+impl AgentSessionMode {
+    pub fn is_reconnect(&self) -> bool {
+        !matches!(self, AgentSessionMode::New)
+    }
+}
+
 pub(super) fn hook_command() -> String {
     let exe = std::env::current_exe()
         .ok()
@@ -45,14 +58,20 @@ pub(super) fn build_claude_launch(
     work_item_id: &str,
     project: &Project,
     worktree: &Path,
+    session_mode: &AgentSessionMode,
 ) -> Result<(AgentLaunch, String)> {
     let run_dir = paths::run_dir(run_id)?;
+    fs::create_dir_all(&run_dir)
+        .with_context(|| format!("failed to create {}", run_dir.display()))?;
     let settings_path = run_dir.join("claude-settings.json");
     let settings_body = claude::claude_settings_json(&hook_command())?;
     fs::write(&settings_path, settings_body)
         .with_context(|| format!("failed to write {}", settings_path.display()))?;
 
-    let prompt = claude::read_prompt(worktree)?;
+    let prompt = match session_mode {
+        AgentSessionMode::New => claude::read_prompt(worktree)?,
+        AgentSessionMode::Continue | AgentSessionMode::Fork { .. } => None,
+    };
     // Always write prompt.txt — the verification step (`cat runs/<run_id>/prompt.txt`) needs the
     // file to exist whether or not a prompt was provided.
     let prompt_path = run_dir.join("prompt.txt");
@@ -63,8 +82,18 @@ pub(super) fn build_claude_launch(
     db.set_run_settings_path(run_id, &settings_path_str)?;
 
     let mut args = vec!["--settings".to_string(), settings_path_str.clone()];
-    if let Some(p) = prompt {
-        args.push(p);
+    match session_mode {
+        AgentSessionMode::New => {
+            if let Some(p) = prompt {
+                args.push(p);
+            }
+        }
+        AgentSessionMode::Continue => args.push("--continue".to_string()),
+        AgentSessionMode::Fork { session_id } => {
+            args.push("--fork-session".to_string());
+            args.push("--resume".to_string());
+            args.push(session_id.clone());
+        }
     }
     let launch = AgentLaunch {
         program: CLAUDE_PROGRAM.to_string(),

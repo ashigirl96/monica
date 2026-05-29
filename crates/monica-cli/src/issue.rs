@@ -5,8 +5,8 @@ use std::str::FromStr;
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_core::{
-    parse_issue_ref, parse_owner_repo, track_github_issue, Agent, Db, GithubIssue, IssueStatusRow,
-    SetupOutcome, Status, WorkItem,
+    parse_issue_ref, parse_owner_repo, track_github_issue, Agent, AgentSessionMode, Db,
+    GithubIssue, IssueStatusRow, SetupOutcome, Status, WorkItem,
 };
 use serde::Deserialize;
 
@@ -34,6 +34,12 @@ pub enum IssueCommand {
         /// Launch a specific agent after setup (e.g. claude)
         #[arg(long, value_name = "AGENT")]
         agent: Option<String>,
+        /// Re-enter the most recent Claude Code conversation for this worktree
+        #[arg(long = "continue", conflicts_with = "fork")]
+        continue_session: bool,
+        /// Fork a Claude Code conversation by session id and run it in this worktree
+        #[arg(long, value_name = "SESSION_ID", conflicts_with = "continue_session")]
+        fork: Option<String>,
     },
     /// Delete a tracked Monica issue (MON-<id>)
     Delete {
@@ -63,9 +69,20 @@ pub fn run(cmd: IssueCommand) -> Result<()> {
     match cmd {
         IssueCommand::Track { target } => track_command(&mut db, &target),
         IssueCommand::Status { status, project } => status_command(&db, status, project),
-        IssueCommand::Run { id, claude, agent } => {
-            run_command(&mut db, &id, claude, agent.as_deref())
-        }
+        IssueCommand::Run {
+            id,
+            claude,
+            agent,
+            continue_session,
+            fork,
+        } => run_command(
+            &mut db,
+            &id,
+            claude,
+            agent.as_deref(),
+            continue_session,
+            fork.as_deref(),
+        ),
         IssueCommand::Delete { id, yes } => delete_command(&mut db, &id, yes),
         IssueCommand::Mark {
             id,
@@ -104,9 +121,20 @@ fn status_command(db: &Db, status: Option<String>, project: Option<String>) -> R
     Ok(())
 }
 
-fn run_command(db: &mut Db, id: &str, claude: bool, agent: Option<&str>) -> Result<()> {
+fn run_command(
+    db: &mut Db,
+    id: &str,
+    claude: bool,
+    agent: Option<&str>,
+    continue_session: bool,
+    fork: Option<&str>,
+) -> Result<()> {
     let agent = resolve_agent(claude, agent)?;
-    let report = monica_core::run_issue(db, id, agent)?;
+    let session_mode = resolve_session_mode(continue_session, fork)?;
+    if session_mode.is_reconnect() && agent != Some(Agent::Claude) {
+        anyhow::bail!("--continue/--fork require --claude or --agent claude");
+    }
+    let report = monica_core::run_issue_with_session_mode(db, id, agent, session_mode)?;
     println!("Run {} for {}", report.run_id, report.work_item_id);
     println!("Branch:   {}", report.branch);
     println!("Worktree: {}", report.worktree_path);
@@ -186,6 +214,18 @@ fn resolve_agent(claude: bool, agent: Option<&str>) -> Result<Option<Agent>> {
     }
 }
 
+fn resolve_session_mode(continue_session: bool, fork: Option<&str>) -> Result<AgentSessionMode> {
+    match (continue_session, fork) {
+        (false, None) => Ok(AgentSessionMode::New),
+        (true, None) => Ok(AgentSessionMode::Continue),
+        (false, Some(session_id)) if !session_id.trim().is_empty() => Ok(AgentSessionMode::Fork {
+            session_id: session_id.trim().to_string(),
+        }),
+        (false, Some(_)) => Err(anyhow!("--fork requires a non-empty session id")),
+        (true, Some(_)) => Err(anyhow!("--continue and --fork cannot be used together")),
+    }
+}
+
 fn mark_command(
     db: &mut Db,
     id: &str,
@@ -208,6 +248,7 @@ fn mark_command(
 fn describe_setup(outcome: &SetupOutcome) -> String {
     match outcome {
         SetupOutcome::Skipped => "skipped (no .monica/setup.sh)".to_string(),
+        SetupOutcome::ReusedWorktree => "skipped (reusing existing worktree)".to_string(),
         SetupOutcome::Succeeded => "ok".to_string(),
         SetupOutcome::Failed {
             timed_out: true, ..
@@ -386,6 +427,10 @@ mod tests {
             describe_setup(&SetupOutcome::Skipped),
             "skipped (no .monica/setup.sh)"
         );
+        assert_eq!(
+            describe_setup(&SetupOutcome::ReusedWorktree),
+            "skipped (reusing existing worktree)"
+        );
         assert_eq!(describe_setup(&SetupOutcome::Succeeded), "ok");
         assert_eq!(
             describe_setup(&SetupOutcome::Failed {
@@ -438,6 +483,26 @@ mod tests {
             Some(Agent::Claude)
         );
         assert!(resolve_agent(false, Some("bogus")).is_err());
+    }
+
+    #[test]
+    fn resolve_session_mode_maps_continue_and_fork() {
+        assert_eq!(
+            resolve_session_mode(false, None).unwrap(),
+            AgentSessionMode::New
+        );
+        assert_eq!(
+            resolve_session_mode(true, None).unwrap(),
+            AgentSessionMode::Continue
+        );
+        assert_eq!(
+            resolve_session_mode(false, Some("abc-123")).unwrap(),
+            AgentSessionMode::Fork {
+                session_id: "abc-123".to_string()
+            }
+        );
+        assert!(resolve_session_mode(false, Some("")).is_err());
+        assert!(resolve_session_mode(true, Some("abc-123")).is_err());
     }
 
     #[test]
