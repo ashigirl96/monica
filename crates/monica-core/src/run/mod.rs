@@ -6,6 +6,6 @@ mod setup;
 mod tests;
 mod worktree;
 
-pub use agent::{launch_agent, RunReport};
-pub use issue::run_issue;
+pub use agent::{launch_agent, AgentSessionMode, RunReport};
+pub use issue::{run_issue, run_issue_with_session_mode};
 pub use setup::SetupOutcome;

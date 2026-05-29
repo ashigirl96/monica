@@ -39,3 +39,4 @@ Issue Runner → Session Tracker → Status Dashboard → Kanban → Terminal/AD
 - 2026-05-28 #44 `monica issue delete <id>` を追加。対象表示と確認プロンプト、`--yes/-y`、関連 rows の transaction 削除で tracked issue を安全に消せるようにした。
 - 2026-05-28 `issue delete` の worktree cleanup で、ディレクトリが手動削除されていた場合に `git worktree prune` を流して `.git/worktrees/` の stale メタデータを掃除し、同じ issue 番号で再 track→run できるようにした。
 - 2026-05-29 Claude hook に `UserPromptSubmit` を追加し、停止後の次プロンプトで status が running に戻るようにした（同一セッション再開を拾うため）。
+- 2026-05-29 #49 `monica issue run --claude --continue/--fork <session-id>` を追加し、既存 worktree に新しい Monica run として再接続できるようにした。

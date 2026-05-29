@@ -6,9 +6,9 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use super::agent::{hook_command, shell_quote_single, RunReport};
+use super::agent::{hook_command, shell_quote_single, AgentSessionMode, RunReport};
 use super::branch::{branch_name, monica_number, sanitize_path_component, worktree_path_for};
-use super::issue::run_issue;
+use super::issue::{run_issue, run_issue_with_session_mode};
 use super::setup::{run_setup_script, terminate_setup_process_tree, SetupEnv, SetupOutcome};
 use crate::model::{ExternalRef, NewRun, NewWorkItem, RefType, WorkItemKind};
 use crate::paths;
@@ -460,6 +460,198 @@ fn run_issue_rejects_rerun_when_worktree_exists() {
         Status::Running
     );
     assert!(db.get_run("run-2").unwrap().is_none());
+
+    std::env::remove_var("MONICA_HOME");
+}
+
+#[test]
+fn run_issue_continue_reuses_existing_worktree_with_new_run() {
+    let _env = paths::test_env_guard();
+    let home = Tmp::new("home");
+    std::env::set_var("MONICA_HOME", home.path());
+    let repo = Tmp::new("repo");
+    init_repo(
+        repo.path(),
+        Some("#!/usr/bin/env bash\nprintf 'setup %s\\n' \"$MONICA_RUN_ID\" >> setup-count.txt\n"),
+        Some("hello prompt body\n"),
+    );
+
+    let mut db = db_with_project(repo.path());
+    let id = tracked_item(&mut db, "continue session", Some(9));
+
+    let first = run_issue(&mut db, &id, None).unwrap();
+    assert_eq!(first.run_id, "run-1");
+    assert_eq!(
+        fs::read_to_string(Path::new(&first.worktree_path).join("setup-count.txt")).unwrap(),
+        "setup run-1\n"
+    );
+    db.finish_run(&first.run_id, &id, Status::Stopped).unwrap();
+
+    let report = run_issue_with_session_mode(
+        &mut db,
+        &id,
+        Some(Agent::Claude),
+        AgentSessionMode::Continue,
+    )
+    .unwrap();
+
+    assert_eq!(report.run_id, "run-2");
+    assert_eq!(report.setup, SetupOutcome::ReusedWorktree);
+    assert_eq!(report.worktree_path, first.worktree_path);
+    assert_eq!(
+        fs::read_to_string(Path::new(&report.worktree_path).join("setup-count.txt")).unwrap(),
+        "setup run-1\n",
+        "reconnect must not run .monica/setup.sh again"
+    );
+    assert!(fs::read_to_string(&report.log_path)
+        .unwrap()
+        .contains("reusing existing worktree"));
+
+    let launch = report.agent_launch.as_ref().unwrap();
+    let settings_path = report.settings_path.as_deref().unwrap();
+    assert_eq!(launch.args[0], "--settings");
+    assert_eq!(launch.args[1], settings_path);
+    assert_eq!(launch.args[2], "--continue");
+    assert_eq!(
+        launch.args.len(),
+        3,
+        "reconnect must not pass the initial prompt as a positional arg"
+    );
+    assert_eq!(env_value(launch, "MONICA_ID"), Some(id.as_str()));
+    assert_eq!(env_value(launch, "MONICA_RUN_ID"), Some("run-2"));
+
+    let prompt_txt = home.path().join("runs").join("run-2").join("prompt.txt");
+    assert_eq!(fs::read_to_string(&prompt_txt).unwrap(), "");
+    assert_eq!(
+        db.get_run(&first.run_id).unwrap().unwrap().status,
+        Status::Stopped
+    );
+    assert_eq!(
+        db.get_run(&report.run_id).unwrap().unwrap().status,
+        Status::Running
+    );
+
+    std::env::remove_var("MONICA_HOME");
+}
+
+#[test]
+fn run_issue_continue_uses_recorded_worktree_after_project_config_changes() {
+    let _env = paths::test_env_guard();
+    let home = Tmp::new("home");
+    std::env::set_var("MONICA_HOME", home.path());
+    let repo = Tmp::new("repo");
+    init_repo(repo.path(), Some("#!/usr/bin/env bash\ntrue\n"), None);
+
+    let mut db = db_with_project(repo.path());
+    let id = tracked_item(&mut db, "continue after config change", Some(9));
+    let first = run_issue(&mut db, &id, None).unwrap();
+    db.finish_run(&first.run_id, &id, Status::Stopped).unwrap();
+
+    let changed_root = home.path().join("changed-root");
+    db.set_project_field(
+        "ashigirl96/monica",
+        "worktree_root",
+        &changed_root.to_string_lossy(),
+    )
+    .unwrap();
+    let changed_project = db.get_project("ashigirl96/monica").unwrap().unwrap();
+    let recomputed = worktree_path_for(&changed_project, "issue-9").unwrap();
+    assert_ne!(
+        recomputed,
+        Path::new(&first.worktree_path),
+        "test must exercise a config change that would recompute a different worktree path"
+    );
+
+    let report = run_issue_with_session_mode(
+        &mut db,
+        &id,
+        Some(Agent::Claude),
+        AgentSessionMode::Continue,
+    )
+    .unwrap();
+
+    assert_eq!(report.worktree_path, first.worktree_path);
+    assert_eq!(
+        report.agent_launch.as_ref().unwrap().cwd,
+        first.worktree_path
+    );
+    assert_eq!(
+        db.get_run(&report.run_id)
+            .unwrap()
+            .unwrap()
+            .worktree_path
+            .as_deref(),
+        Some(first.worktree_path.as_str())
+    );
+
+    std::env::remove_var("MONICA_HOME");
+}
+
+#[test]
+fn run_issue_fork_resumes_parent_session_in_existing_worktree() {
+    let _env = paths::test_env_guard();
+    let home = Tmp::new("home");
+    std::env::set_var("MONICA_HOME", home.path());
+    let repo = Tmp::new("repo");
+    init_repo(repo.path(), None, Some("initial prompt\n"));
+
+    let mut db = db_with_project(repo.path());
+    let id = tracked_item(&mut db, "fork session", Some(9));
+    let first = run_issue(&mut db, &id, None).unwrap();
+    db.finish_run(&first.run_id, &id, Status::Stopped).unwrap();
+
+    let report = run_issue_with_session_mode(
+        &mut db,
+        &id,
+        Some(Agent::Claude),
+        AgentSessionMode::Fork {
+            session_id: "session-123".to_string(),
+        },
+    )
+    .unwrap();
+    let launch = report.agent_launch.as_ref().unwrap();
+    let settings_path = report.settings_path.as_deref().unwrap();
+
+    assert_eq!(
+        launch.args,
+        vec![
+            "--settings".to_string(),
+            settings_path.to_string(),
+            "--fork-session".to_string(),
+            "--resume".to_string(),
+            "session-123".to_string(),
+        ]
+    );
+    assert_eq!(launch.cwd, first.worktree_path);
+    assert_eq!(env_value(launch, "MONICA_RUN_ID"), Some("run-2"));
+
+    std::env::remove_var("MONICA_HOME");
+}
+
+#[test]
+fn run_issue_reconnect_requires_existing_worktree_and_claude() {
+    let _env = paths::test_env_guard();
+    let home = Tmp::new("home");
+    std::env::set_var("MONICA_HOME", home.path());
+    let repo = Tmp::new("repo");
+    init_repo(repo.path(), None, None);
+
+    let mut db = db_with_project(repo.path());
+    let id = tracked_item(&mut db, "missing worktree", Some(9));
+
+    let err = run_issue_with_session_mode(
+        &mut db,
+        &id,
+        Some(Agent::Claude),
+        AgentSessionMode::Continue,
+    )
+    .unwrap_err();
+    assert!(format!("{err:#}").contains("no recorded worktree"));
+    assert!(db.get_run("run-1").unwrap().is_none());
+
+    let err =
+        run_issue_with_session_mode(&mut db, &id, None, AgentSessionMode::Continue).unwrap_err();
+    assert!(format!("{err:#}").contains("require"), "{err:#}");
 
     std::env::remove_var("MONICA_HOME");
 }
