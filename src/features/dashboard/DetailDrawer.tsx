@@ -1,11 +1,10 @@
 import { cn } from "@/lib/utils";
 import { GitBranch, X } from "lucide-react";
-import { useEffect, useState } from "react";
-import { listEvents } from "./api";
 import { EventTimeline } from "./EventTimeline";
 import { StatusLed } from "./StatusLed";
 import { STATUS_META, statusColor } from "./statusMeta";
-import type { Event, WorkItemView } from "./types";
+import type { WorkItemView } from "./types";
+import { useEvents } from "./useEvents";
 
 interface DetailDrawerProps {
   item: WorkItemView | null;
@@ -13,27 +12,7 @@ interface DetailDrawerProps {
 }
 
 export function DetailDrawer({ item, onClose }: DetailDrawerProps) {
-  const [events, setEvents] = useState<Event[]>([]);
-  const [loading, setLoading] = useState(false);
-  const id = item?.id ?? null;
-
-  useEffect(() => {
-    if (!id) return;
-    let cancelled = false;
-    setEvents([]);
-    setLoading(true);
-    listEvents(id)
-      .then((e) => {
-        if (!cancelled) setEvents(e);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
+  const { events, loading } = useEvents(item?.id ?? null);
 
   if (!item) return null;
 
