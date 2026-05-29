@@ -726,7 +726,13 @@ fn run_issue_with_claude_builds_launch_spec_and_records_settings_path() {
 
     let settings_body = fs::read_to_string(settings_path).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&settings_body).unwrap();
-    for event in ["SessionStart", "Stop", "StopFailure", "SessionEnd"] {
+    for event in [
+        "SessionStart",
+        "UserPromptSubmit",
+        "Stop",
+        "StopFailure",
+        "SessionEnd",
+    ] {
         let cmd = parsed
             .pointer(&format!("/hooks/{event}/0/hooks/0/command"))
             .and_then(|v| v.as_str())

@@ -17,8 +17,8 @@ pub fn run(cmd: HookCommand) -> Result<()> {
 }
 
 /// A hook must never disrupt the agent session, so this always returns `Ok(())` (exit 0) and routes
-/// every diagnostic to stderr. Claude Code feeds a `SessionStart` hook's stdout back into its own
-/// context, so stdout is kept empty on success — there is intentionally no `println!` here.
+/// every diagnostic to stderr. Claude Code feeds some hook stdout back into its own context, so
+/// stdout is kept empty on success — there is intentionally no `println!` here.
 fn claude() -> Result<()> {
     if let Err(e) = handle_claude() {
         eprintln!("monica hook claude: {e:#}");

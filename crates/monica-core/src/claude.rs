@@ -24,6 +24,7 @@ pub(crate) fn claude_settings_json(hook_command: &str) -> Result<String> {
     let value = json!({
         "hooks": {
             "SessionStart": group(),
+            "UserPromptSubmit": group(),
             "Stop": group(),
             "StopFailure": group(),
             "SessionEnd": group(),
@@ -62,10 +63,16 @@ mod tests {
     }
 
     #[test]
-    fn settings_json_contains_four_events_with_command_hook() {
+    fn settings_json_contains_tracked_events_with_command_hook() {
         let body = claude_settings_json("monica hook claude").unwrap();
         let parsed: Value = serde_json::from_str(&body).unwrap();
-        for event in ["SessionStart", "Stop", "StopFailure", "SessionEnd"] {
+        for event in [
+            "SessionStart",
+            "UserPromptSubmit",
+            "Stop",
+            "StopFailure",
+            "SessionEnd",
+        ] {
             let cmd = parsed
                 .pointer(&format!("/hooks/{event}/0/hooks/0/command"))
                 .and_then(Value::as_str);
