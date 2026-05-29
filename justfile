@@ -11,7 +11,8 @@ dev:
 
 dev-cli:
     cargo build -p monica-cli
-    cp target/debug/monica ./monica
+    cp target/debug/monica ./.monica-bin.tmp
+    mv -f ./.monica-bin.tmp ./monica
     [ "$(uname)" = Darwin ] && codesign --force --sign - ./monica || true
     mkdir -p ~/.zsh/completions
     ./monica completions zsh > ~/.zsh/completions/_monica
@@ -31,7 +32,9 @@ install-local: build install-cli
 install-cli:
     cargo build --release -p monica-cli
     mkdir -p ~/.local/bin
-    cp target/release/monica ~/.local/bin/monica
+    cp target/release/monica ~/.local/bin/.monica.tmp
+    chmod 755 ~/.local/bin/.monica.tmp
+    mv -f ~/.local/bin/.monica.tmp ~/.local/bin/monica
     @echo "Installed: ~/.local/bin/monica"
     mkdir -p ~/.zsh/completions
     ~/.local/bin/monica completions zsh > ~/.zsh/completions/_monica

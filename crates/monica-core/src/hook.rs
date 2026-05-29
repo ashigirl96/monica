@@ -9,11 +9,13 @@ use crate::{paths, Db, Status};
 const HOOK_EVENTS_FILE: &str = "hook-events.jsonl";
 
 /// Map a Claude Code hook event name to the work-item status it implies:
-/// `SessionStart`→running, `Stop`→stopped, `StopFailure`→failed, `SessionEnd`→stopped. Events
-/// Monica does not act on return `None` (they are still recorded, never an error).
+/// `SessionStart`/`UserPromptSubmit`→running, `Stop`→stopped, `StopFailure`→failed,
+/// `SessionEnd`→stopped. Events Monica does not act on return `None` (they are still recorded,
+/// never an error).
 pub fn status_for_claude_event(event_name: &str) -> Option<Status> {
     match event_name {
         "SessionStart" => Some(Status::Running),
+        "UserPromptSubmit" => Some(Status::Running),
         "Stop" => Some(Status::Stopped),
         "StopFailure" => Some(Status::Failed),
         "SessionEnd" => Some(Status::Stopped),
@@ -243,9 +245,13 @@ mod tests {
     // ---- pure helpers ----
 
     #[test]
-    fn status_mapping_covers_the_four_lifecycle_events() {
+    fn status_mapping_covers_the_lifecycle_events_monica_tracks() {
         assert_eq!(
             status_for_claude_event("SessionStart"),
+            Some(Status::Running)
+        );
+        assert_eq!(
+            status_for_claude_event("UserPromptSubmit"),
             Some(Status::Running)
         );
         assert_eq!(status_for_claude_event("Stop"), Some(Status::Stopped));
@@ -343,6 +349,53 @@ mod tests {
         assert_eq!(
             events.last().unwrap().run_id.as_deref(),
             Some(run.id.as_str())
+        );
+
+        std::env::remove_var("MONICA_HOME");
+    }
+
+    #[test]
+    fn user_prompt_submit_restores_stopped_item_and_run_to_running() {
+        let (_g, _home) = temp_home("prompt-resume");
+        let mut db = Db::open_in_memory().unwrap();
+        let id = dev_item(&mut db, Status::Ready);
+        let run = db.start_run(new_run(&id)).unwrap();
+        db.finish_run(&run.id, &id, Status::Running).unwrap();
+
+        record_claude_hook(
+            &mut db,
+            Some(&id),
+            Some(&run.id),
+            r#"{"hook_event_name":"Stop"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            db.get_work_item(&id).unwrap().unwrap().status,
+            Status::Stopped
+        );
+        assert_eq!(
+            db.get_run(&run.id).unwrap().unwrap().status,
+            Status::Stopped
+        );
+
+        let report = record_claude_hook(
+            &mut db,
+            Some(&id),
+            Some(&run.id),
+            r#"{"hook_event_name":"UserPromptSubmit","prompt":"continue"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(report.status, Some(Status::Running));
+        assert!(report.event_recorded);
+        assert!(report.jsonl_written);
+        assert_eq!(
+            db.get_work_item(&id).unwrap().unwrap().status,
+            Status::Running
+        );
+        assert_eq!(
+            db.get_run(&run.id).unwrap().unwrap().status,
+            Status::Running
         );
 
         std::env::remove_var("MONICA_HOME");
