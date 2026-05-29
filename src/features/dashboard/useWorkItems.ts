@@ -1,0 +1,66 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { listIssueStatuses, listWorkItems } from "./api";
+import { STATUS_META } from "./statusMeta";
+import type { IssueStatusRow, WorkItem, WorkItemView } from "./types";
+
+const POLL_MS = 3000;
+
+function merge(items: WorkItem[], statuses: IssueStatusRow[]): WorkItemView[] {
+  const byId = new Map<string, IssueStatusRow>();
+  for (const s of statuses) byId.set(s.id, s);
+  return items
+    .map((item) => {
+      const s = byId.get(item.id);
+      return {
+        ...item,
+        project: s?.project ?? item.project_id ?? null,
+        githubIssueNumber: s?.github_issue_number ?? null,
+        branch: s?.branch ?? null,
+      } satisfies WorkItemView;
+    })
+    .sort((a, b) => {
+      const o = STATUS_META[a.status].order - STATUS_META[b.status].order;
+      if (o !== 0) return o;
+      return b.updated_at.localeCompare(a.updated_at);
+    });
+}
+
+export interface UseWorkItems {
+  items: WorkItemView[];
+  loading: boolean;
+  error: string | null;
+  lastSync: Date | null;
+  refresh: () => void;
+}
+
+export function useWorkItems(): UseWorkItems {
+  const [items, setItems] = useState<WorkItemView[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [lastSync, setLastSync] = useState<Date | null>(null);
+  const inFlight = useRef(false);
+
+  const load = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      const [workItems, statuses] = await Promise.all([listWorkItems(), listIssueStatuses()]);
+      setItems(merge(workItems, statuses));
+      setError(null);
+      setLastSync(new Date());
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+      inFlight.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+    const id = setInterval(() => void load(), POLL_MS);
+    return () => clearInterval(id);
+  }, [load]);
+
+  return { items, loading, error, lastSync, refresh: () => void load() };
+}

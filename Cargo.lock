@@ -1791,6 +1791,7 @@ dependencies = [
 name = "monica-app"
 version = "0.1.0"
 dependencies = [
+ "monica-core",
  "serde",
  "serde_json",
  "tauri",
