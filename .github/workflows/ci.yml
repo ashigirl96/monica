@@ -26,6 +26,8 @@ jobs:
   build:
     name: tauri build (macos)
     needs: lint
+    # Temporarily disable the macOS Tauri build for pull requests.
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6

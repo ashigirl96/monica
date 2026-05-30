@@ -12,40 +12,9 @@ Issue Runner → Task/TaskRun Tracker → Status Dashboard → Kanban → Termin
 
 ## Timeline
 
-- 2026-05-27 PROGRESS.md を新設。開発環境が整い、ここを機能追加の起点とする。
-- 2026-05-27 最初の機能を Monica Issue Runner に決定（narrative の核）。docs/workflow-contract.md と issue template を作成し、M0 Issue #9/#10/#11 を起票。
-- 2026-05-27 Cargo workspace 化。src-tauri を crates/monica-app へ移し、profile を root に集約（将来の monica-core/monica-cli と並べる構成にするため）。
-- 2026-05-27 monica-core（空 lib）と monica-cli（clap で M0 コマンドの枠）の skeleton を追加。以後は機能追加だけで進められる土台にした。
-- 2026-05-27 just dev で monica CLI を debug ビルドして repo 直下 ./monica に作成、just install-local で release CLI を ~/.local/bin にも配置するようにした。
-- 2026-05-27 M0 vertical slice を ISSUES.md に整理し A〜G を Issue #14-#20 として起票（DB=rusqlite/SQLite、設定も DB 統合、setup/prompt は .monica/ 規約）。
-- 2026-05-27 #14 monica-core にストレージ基盤を実装。rusqlite(bundled)+rusqlite_migration+WorkItem/Run/Event/ExternalRefモデル+MON-ID採番+repository API（A 完了、B 以降の土台）。
-- 2026-05-27 #15 project registry を実装。projects テーブル(v2) + monica project init/set/list/show（B 完了）。init は git remote 検出・path 補完・.monica/ 雛形生成と DB 登録を兼ねる（add から改名）。
-- 2026-05-27 #16 monica issue track を実装。owner/repo#123 をパースし gh issue view から WorkItem(ready)+ExternalRef(github_issue) を作成、registry に project があれば project_id を紐付け（C 完了）。gh/パースは CLI 層、DB は core API を再利用。
-- 2026-05-28 `just build`/`install-local` でも `RUSTC_WRAPPER` を空にして、wrapper 付き環境でも Tauri ビルドが落ちないようにした。
-- 2026-05-28 #17 monica issue status を実装。core で WorkItem+最新 run を一覧化し、CLI で status/project filter と `gh pr list` 補完による BRANCH/PR 表示を追加した（D 完了）。
-- 2026-05-28 monica に `completions` サブコマンド(clap_complete)を追加。`.envrc`(direnv)で repo 内だけ ./monica を `monica` として PATH に乗せ、dev-cli が ~/.zsh/completions/\_monica を再生成して補完を効かせる。
-- 2026-05-28 `.claude/skills/codex` を追加し、`codex-rpc` ではなくローカル `codex exec` を直接使う設計/レビュー用スキルを整備した（このリポジトリ運用に合わせるため）。
-- 2026-05-28 `narrative.md` の CLI メモを現行実装に合わせて更新。`project add`/`issue new`/`issue run` 案を `project init`/`issue track`/未実装の `start` 系へ整理した。
-- 2026-05-28 `.claude/skills/codex` と `tackle` の Codex 呼び出しを `--output-last-message` 前提へ更新。Claude Code に中間 session を返さず、最終レビュー結果だけ返す運用に寄せた。
-- 2026-05-28 #18 monica issue run を実装。core に Run CRUD(run_counter v3 採番)+branch 生成+setup.sh 実行(timeout/log)+run_issue orchestration を置き、status を setting_up→running/failed と原子的に遷移、CLI は表示のみ（E 完了）。
-- 2026-05-28 #18 のリリース安定化: setup timeout で setup.sh の子プロセスを process group 単位で kill するようにしてリークを防止し、run_id の latest 取得を数値ソートで安定化（`run-9`/`run-10` 逆転を回避）。
-- 2026-05-28 `issue run` の既定 worktree 生成先を `MONICA_HOME/worktrees` から `project.path/.worktrees` へ変更。Claude Code などが main checkout と同じ設定/メモリ文脈を見つけやすくするため。
-- 2026-05-28 #35 branch 名の命名規則を撤廃。projects.branch_template とテンプレート機構を migration v4 で削除し、run が issue 紐づけ有→`issue-<n>`／無→`mon-<n>` を直接生成するようにした（`monica issue status` 等での視認性向上）。
-- 2026-05-28 #19 monica issue run --claude を実装。setup 成功後に runs/<run_id>/claude-settings.json（SessionStart/Stop/StopFailure/SessionEnd の command hook）を生成し、.monica/prompt.md を初期 prompt に claude --settings を worktree で foreground 起動、settings_path 記録・status=running（F 完了）。
-- 2026-05-28 #20 Claude Hook Bridge を実装。core に hook receiver(`record_claude_hook`)＋events/`hook-events.jsonl` 記録＋status 遷移(SessionStart→running 等)、`monica issue mark`(status/phase/PR ref) を置き、CLI は stdin/env 読取と exit 0 保証のみ。env 由来の run_id は path 安全性と work item 所有を検証して誤更新と FK 違反を防止（G 完了、migration なし）。
-- 2026-05-28 monica-core の大型ファイルを責務別モジュールへ分割した（保守性向上）
-- 2026-05-28 `project init` が git/gh から default branch を検出して登録するようにし、`project set ... branch` を `default_branch` の alias として扱うようにした。
-- 2026-05-28 `monica issue status` を DB のみで表示する fast path に戻し、PR 補完の `gh pr list` を外した（status をネットワーク待ちから切り離すため）。
-- 2026-05-28 #44 `monica issue delete <id>` を追加。対象表示と確認プロンプト、`--yes/-y`、関連 rows の transaction 削除で tracked issue を安全に消せるようにした。
-- 2026-05-28 `issue delete` の worktree cleanup で、ディレクトリが手動削除されていた場合に `git worktree prune` を流して `.git/worktrees/` の stale メタデータを掃除し、同じ issue 番号で再 track→run できるようにした。
-- 2026-05-29 Claude hook に `UserPromptSubmit` を追加し、停止後の次プロンプトで status が running に戻るようにした（同一セッション再開を拾うため）。
-- 2026-05-29 #49 `monica issue run --claude --continue/--fork <session-id>` を追加し、既存 worktree に新しい Monica run として再接続できるようにした。
-- 2026-05-30 WorkItem 観測ダッシュボード(Mission Control)を Tauri に追加。monica-app に monica-core を依存させ list_work_items/list_issue_statuses/list_events の read-only コマンドを生やし、status LED 一覧＋event timeline drawer を実装（CLI automation を "workspace" の入口に変えるため。Run は概念として未露出）。
-- 2026-05-30 WorkItem/Run を Task/TaskRun に改名し、TaskStatus と TaskRunStatus を分離。AgentSession 永続化と task 系 Tauri API を追加（CLI は issue workflow のまま）。
-- 2026-05-30 Task/TaskRun/AgentSession 移行の整合性を補強。旧 stopped 表示の保持、AgentSession 所有権検証、起動失敗時の failed settle を追加した。
-- 2026-05-30 Task/TaskRun の状態責務を整理。TaskStatus を inbox/ready/in_progress/done に絞り、AgentSession を TaskRun に統合して waiting_for_user と soft delete を追加した。
-- 2026-05-30 Task/TaskRun 状態移行の data integrity を補強。旧 need_approval/failed を legacy TaskRun に保存し、soft-deleted Task への run 作成を拒否した。
-- 2026-05-30 Claude hook の PreToolUse 記録を waiting tools に限定。AskUserQuestion/ExitPlanMode だけを matcher で起動し、receiver 側でも通常 tool の PreToolUse を無視するようにした。
-- 2026-05-30 Monica-managed Claude 起動から NORI\_\* env を除外。Nori の inline --settings 注入で Monica の hook settings が無効化され、hook-events.jsonl が作られない問題を避けるため。
-- 2026-05-30 Dashboard の waiting_for_user 表示を整理。状態は waiting for you に統一し、ExitPlanMode/AskUserQuestion は next action として分けた。
-- 2026-05-31 Claude hook に waiting tools の PostToolUse を追加し、AskUserQuestion/ExitPlanMode 回答後に TaskRun が running へ戻るようにした。
+- 2026-05-27〜28 M0 縦串を完走。Cargo workspace 化と monica-core/monica-cli skeleton を土台に、rusqlite ストレージ・project registry・`issue track/status/run/--claude`・Claude Hook Bridge を A〜G として実装し、setup.sh 実行から hook 経由の status 遷移まで CLI で一通り回るようにした。
+- 2026-05-29〜30 観測 UI と状態モデルを整備。Mission Control ダッシュボードを Tauri に追加し、WorkItem/Run を Task/TaskRun へ改名・状態責務を分離（inbox/ready/in_progress/done＋TaskRun に waiting_for_user/soft delete）、AgentSession を統合して data integrity を補強した。
+- 2026-05-31 Claude hook に waiting tools の PostToolUse を追加して回答後に running へ復帰させ、Dashboard に矢印/Ctrl+N/P の focus 移動・Enter/Esc の details 開閉・⌘D 削除確認のキーボード操作を実装した。
+- 2026-05-31 Dashboard keyboard review を反映。Enter が通常ボタン操作を奪わないようにし、削除確認に worktree/branch cleanup の警告を追加した。
+- 2026-05-31 削除確認 modal に focus trap を追加。Tab/Shift+Tab が Cancel/Delete の間だけを移動するようにした。
+- 2026-05-31 Modal primitive を追加。dialog の focus restore/initial focus/Tab trap を共通化し、個別 modal が中身だけを書けるようにした。

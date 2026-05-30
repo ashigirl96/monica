@@ -1,29 +1,43 @@
 import { cn } from "@/lib/utils";
 import { GitBranch } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { StatusLed } from "./StatusLed";
 import { statusColor, statusLabel, waitActionLabel } from "./statusMeta";
 import type { TaskView } from "./types";
 
 interface TaskRowProps {
   item: TaskView;
-  selected: boolean;
-  onSelect: (item: TaskView) => void;
+  focused: boolean;
+  detailsOpen: boolean;
+  onOpen: (item: TaskView) => void;
 }
 
-export function TaskRow({ item, selected, onSelect }: TaskRowProps) {
+export function TaskRow({ item, focused, detailsOpen, onOpen }: TaskRowProps) {
+  const rowRef = useRef<HTMLButtonElement>(null);
   const waitAction =
     item.status === "waiting_for_user" ? waitActionLabel(item.task_run_wait_reason) : null;
 
+  useEffect(() => {
+    if (!focused) return;
+    rowRef.current?.focus({ preventScroll: true });
+    rowRef.current?.scrollIntoView({ block: "nearest" });
+  }, [focused]);
+
   return (
     <button
+      ref={rowRef}
       type="button"
-      onClick={() => onSelect(item)}
+      data-task-row="true"
+      onClick={() => onOpen(item)}
+      aria-current={detailsOpen ? "true" : undefined}
       className={cn(
         "group relative flex w-full flex-col gap-1.5 border-b border-border/40 px-6 py-4 text-left transition-colors",
-        selected ? "bg-foreground/[0.06]" : "hover:bg-foreground/[0.03]",
+        detailsOpen && "bg-foreground/[0.06]",
+        focused && "bg-foreground/[0.04] ring-1 ring-inset ring-foreground/20",
+        !detailsOpen && !focused && "hover:bg-foreground/[0.03]",
       )}
     >
-      {selected && (
+      {detailsOpen && (
         <span
           className="absolute inset-y-0 left-0 w-0.5"
           style={{ backgroundColor: statusColor(item.status) }}
