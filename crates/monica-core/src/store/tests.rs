@@ -1,4 +1,3 @@
-use super::tasks::{parse_pr_number, parse_pr_ref};
 use crate::model::{
     Agent, DisplayStatus, ExternalRef, GithubPullRequest, NewTask, NewTaskRun, PermissionMode,
     Project, Provider, RefType, TaskKind, TaskRunObservation, TaskRunStatus, TaskRunWaitReason,
@@ -51,20 +50,20 @@ fn migrate_is_idempotent() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
 
     let tables: i64 = conn
         .query_row(
             "SELECT count(*) FROM sqlite_master WHERE type = 'table'
                  AND name IN (
                    'mon_counter','task_run_counter','tasks','task_runs','events',
-                   'external_refs','external_ref_syncs','projects'
+                   'external_refs','external_ref_syncs','github_pull_request_ref_states','projects'
                  )",
             [],
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(tables, 8);
+    assert_eq!(tables, 9);
 }
 
 #[test]
@@ -591,6 +590,7 @@ fn pull_request_sync_candidate_stops_after_pr_is_found() {
             repo: "o/r".to_string(),
             number: 99,
             url: "https://github.com/o/r/pull/99".to_string(),
+            status: "open".to_string(),
         }],
     )
     .unwrap();
@@ -599,6 +599,140 @@ fn pull_request_sync_candidate_stops_after_pr_is_found() {
         "once a PR is found, the automatic first-discovery sync can stop"
     );
     assert_eq!(db.list_github_pull_request_refs(&item.id).unwrap().len(), 1);
+}
+
+#[test]
+fn pull_request_status_sync_failure_backs_off_until_retry_time() {
+    let mut db = Db::open_in_memory().unwrap();
+    let item = db
+        .insert_task_with_ref(
+            dev_item("tracked"),
+            ExternalRef::new(
+                String::new(),
+                RefType::GithubIssue,
+                Some("o/r".to_string()),
+                Some(7),
+                None,
+            ),
+        )
+        .unwrap();
+    let issue_candidate = db.next_pull_request_sync_candidate().unwrap().unwrap();
+    db.record_pull_request_sync_success(
+        &issue_candidate,
+        &[GithubPullRequest {
+            repo: "o/r".to_string(),
+            number: 99,
+            url: "https://github.com/o/r/pull/99".to_string(),
+            status: "open".to_string(),
+        }],
+    )
+    .unwrap();
+    db.conn()
+        .execute(
+            "UPDATE github_pull_request_ref_states
+                SET synced_at = '2000-01-01T00:00:00.000Z'",
+            [],
+        )
+        .unwrap();
+    let candidate = db
+        .next_pull_request_status_sync_candidate()
+        .unwrap()
+        .unwrap();
+    assert_eq!(candidate.task_id, item.id);
+
+    db.record_pull_request_status_sync_failure(&candidate, "not found")
+        .unwrap();
+    assert!(
+        db.next_pull_request_status_sync_candidate()
+            .unwrap()
+            .is_none(),
+        "fresh PR status failures should not retry every worker tick"
+    );
+    db.conn()
+        .execute(
+            "UPDATE github_pull_request_ref_states
+                SET next_retry_at = '2000-01-01T00:00:00.000Z'
+              WHERE external_ref_id = ?1",
+            params![candidate.external_ref_id],
+        )
+        .unwrap();
+    assert_eq!(
+        db.next_pull_request_status_sync_candidate()
+            .unwrap()
+            .unwrap()
+            .external_ref_id,
+        candidate.external_ref_id
+    );
+}
+
+#[test]
+fn pull_request_status_sync_candidate_refreshes_open_pr_after_delay() {
+    let mut db = Db::open_in_memory().unwrap();
+    let item = db
+        .insert_task_with_ref(
+            dev_item("tracked"),
+            ExternalRef::new(
+                String::new(),
+                RefType::GithubIssue,
+                Some("o/r".to_string()),
+                Some(7),
+                None,
+            ),
+        )
+        .unwrap();
+    let candidate = db.next_pull_request_sync_candidate().unwrap().unwrap();
+
+    db.record_pull_request_sync_success(
+        &candidate,
+        &[GithubPullRequest {
+            repo: "o/r".to_string(),
+            number: 99,
+            url: "https://github.com/o/r/pull/99".to_string(),
+            status: "open".to_string(),
+        }],
+    )
+    .unwrap();
+    assert!(db
+        .next_pull_request_status_sync_candidate()
+        .unwrap()
+        .is_none());
+
+    db.conn()
+        .execute(
+            "UPDATE github_pull_request_ref_states
+                SET synced_at = '2000-01-01T00:00:00.000Z'",
+            [],
+        )
+        .unwrap();
+    let refresh = db
+        .next_pull_request_status_sync_candidate()
+        .unwrap()
+        .unwrap();
+    assert_eq!(refresh.task_id, item.id);
+
+    db.record_pull_request_status_sync_success(
+        &refresh,
+        &GithubPullRequest {
+            repo: "o/r".to_string(),
+            number: 99,
+            url: "https://github.com/o/r/pull/99".to_string(),
+            status: "merged".to_string(),
+        },
+    )
+    .unwrap();
+    db.conn()
+        .execute(
+            "UPDATE github_pull_request_ref_states
+                SET synced_at = '2000-01-01T00:00:00.000Z'",
+            [],
+        )
+        .unwrap();
+    assert!(
+        db.next_pull_request_status_sync_candidate()
+            .unwrap()
+            .is_none(),
+        "terminal PR statuses do not need periodic refresh"
+    );
 }
 
 #[test]
@@ -624,6 +758,7 @@ fn pull_request_sync_upserts_refs_and_summary_reads_them() {
             repo: "o/r".to_string(),
             number: 99,
             url: "https://github.com/o/r/pull/99".to_string(),
+            status: "open".to_string(),
         }],
     )
     .unwrap();
@@ -633,6 +768,7 @@ fn pull_request_sync_upserts_refs_and_summary_reads_them() {
             repo: "o/r".to_string(),
             number: 99,
             url: "https://github.com/o/r/pull/99/files".to_string(),
+            status: "merged".to_string(),
         }],
     )
     .unwrap();
@@ -645,12 +781,17 @@ fn pull_request_sync_upserts_refs_and_summary_reads_them() {
         prs[0].url.as_deref(),
         Some("https://github.com/o/r/pull/99/files")
     );
+    assert_eq!(prs[0].status.as_deref(), Some("merged"));
 
     let rows = db.list_task_summaries(None, None).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].github_issue_number, Some(7));
     assert_eq!(rows[0].github_pull_requests.len(), 1);
     assert_eq!(rows[0].github_pull_requests[0].number, Some(99));
+    assert_eq!(
+        rows[0].github_pull_requests[0].status.as_deref(),
+        Some("merged")
+    );
 }
 
 #[test]
@@ -1017,24 +1158,6 @@ fn ref_type_pull_request_round_trips() {
 }
 
 #[test]
-fn parse_pr_number_extracts_after_pull_segment() {
-    assert_eq!(parse_pr_number("https://github.com/o/r/pull/99"), Some(99));
-    assert_eq!(
-        parse_pr_number("https://github.com/o/r/pull/99/files"),
-        Some(99)
-    );
-    assert_eq!(parse_pr_number("https://github.com/o/r/pulls/12"), Some(12));
-    assert_eq!(parse_pr_number("https://github.com/o/r/issues/99"), None);
-    assert_eq!(parse_pr_number("not a url"), None);
-    assert_eq!(parse_pr_number("https://github.com/o/r/pull/abc"), None);
-    assert_eq!(parse_pr_number("https://github.com/o/r/pull/0"), None);
-    assert_eq!(
-        parse_pr_ref("https://github.com/O/R/pull/99"),
-        (Some("o/r".to_string()), Some(99))
-    );
-}
-
-#[test]
 fn insert_event_round_trips_and_filters_by_task() {
     let mut db = Db::open_in_memory().unwrap();
     let a = db.insert_task(dev_item("a")).unwrap();
@@ -1157,23 +1280,17 @@ fn record_task_run_observation_unknown_run_errors() {
 }
 
 #[test]
-fn mark_task_sets_status_phase_pr_ref_and_event() {
+fn mark_task_sets_status_phase_and_event() {
     let mut db = Db::open_in_memory().unwrap();
     let item = db.insert_task(dev_item("a")).unwrap();
 
-    db.mark_task(&item.id, TaskStatus::InProgress, Some("Plan ready"), None)
+    db.mark_task(&item.id, TaskStatus::InProgress, Some("Plan ready"))
         .unwrap();
     let after = db.get_task(&item.id).unwrap().unwrap();
     assert_eq!(after.status, TaskStatus::InProgress);
     assert_eq!(after.phase.as_deref(), Some("Plan ready"));
 
-    db.mark_task(
-        &item.id,
-        TaskStatus::Done,
-        None,
-        Some("https://github.com/o/r/pull/99"),
-    )
-    .unwrap();
+    db.mark_task(&item.id, TaskStatus::Done, None).unwrap();
     let after = db.get_task(&item.id).unwrap().unwrap();
     assert_eq!(after.status, TaskStatus::Done);
     assert_eq!(
@@ -1182,74 +1299,17 @@ fn mark_task_sets_status_phase_pr_ref_and_event() {
         "note=None keeps the prior phase"
     );
 
-    let refs = db.list_external_refs(&item.id).unwrap();
-    assert_eq!(refs.len(), 1);
-    assert_eq!(refs[0].ref_type, RefType::GithubPullRequest);
-    assert_eq!(refs[0].repo.as_deref(), Some("o/r"));
-    assert_eq!(refs[0].number, Some(99));
-    assert_eq!(
-        refs[0].url.as_deref(),
-        Some("https://github.com/o/r/pull/99")
-    );
-
-    db.mark_task(
-        &item.id,
-        TaskStatus::Done,
-        None,
-        Some("https://github.com/o/r/pull/99/files"),
-    )
-    .unwrap();
-    let refs = db.list_external_refs(&item.id).unwrap();
-    assert_eq!(refs.len(), 1);
-    assert_eq!(
-        refs[0].url.as_deref(),
-        Some("https://github.com/o/r/pull/99/files"),
-        "repeat marks for the same PR update the stored dashboard link"
-    );
-
     let events = db.list_events(Some(&item.id)).unwrap();
-    assert_eq!(events.len(), 3);
+    assert_eq!(events.len(), 2);
     assert!(events.iter().all(|e| e.kind == "mark"));
-}
-
-#[test]
-fn mark_task_pr_ref_does_not_pollute_issue_status_query() {
-    let mut db = Db::open_in_memory().unwrap();
-    let item = db
-        .insert_task_with_ref(
-            dev_item("tracked"),
-            ExternalRef::new(
-                String::new(),
-                RefType::GithubIssue,
-                Some("o/r".to_string()),
-                Some(7),
-                None,
-            ),
-        )
-        .unwrap();
-    db.mark_task(
-        &item.id,
-        TaskStatus::InProgress,
-        None,
-        Some("https://github.com/o/r/pull/99"),
-    )
-    .unwrap();
-
-    let rows = db.list_task_summaries(None, None).unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(
-        rows[0].github_issue_number,
-        Some(7),
-        "the PR ref must not shadow the github_issue number"
-    );
-    assert_eq!(rows[0].status, DisplayStatus::InProgress);
+    assert_eq!(db.list_external_refs(&item.id).unwrap().len(), 0);
 }
 
 #[test]
 fn mark_task_unknown_id_errors() {
     let mut db = Db::open_in_memory().unwrap();
     assert!(db
-        .mark_task("MON-999", TaskStatus::InProgress, None, None)
+        .mark_task("MON-999", TaskStatus::InProgress, None)
         .is_err());
 }
 

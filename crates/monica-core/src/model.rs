@@ -369,6 +369,7 @@ pub struct GithubPullRequestRef {
     pub repo: Option<String>,
     pub number: Option<i64>,
     pub url: Option<String>,
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -376,6 +377,7 @@ pub struct GithubPullRequest {
     pub repo: String,
     pub number: i64,
     pub url: String,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -384,6 +386,14 @@ pub struct PullRequestSyncCandidate {
     pub source_ref_id: i64,
     pub repo: String,
     pub issue_number: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestStatusSyncCandidate {
+    pub task_id: String,
+    pub external_ref_id: i64,
+    pub repo: String,
+    pub number: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -14,6 +14,7 @@ fn migrations() -> Migrations<'static> {
         M::up(V5),
         M::up(V6),
         M::up(V7),
+        M::up(V8),
     ])
 }
 
@@ -322,6 +323,35 @@ const V7: &str = r#"
        AND number IS NOT NULL;
 "#;
 
+/// v8: store lightweight GitHub PR state for dashboard display.
+const V8: &str = r#"
+    CREATE TABLE github_pull_request_ref_states (
+      external_ref_id INTEGER PRIMARY KEY REFERENCES external_refs(id) ON DELETE CASCADE,
+      status          TEXT CHECK(status IN ('draft', 'open', 'closed', 'merged')),
+      synced_at       TEXT,
+      last_error      TEXT,
+      next_retry_at   TEXT,
+      created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    );
+
+    CREATE INDEX github_pr_ref_states_refresh_idx
+      ON github_pull_request_ref_states(status, synced_at, next_retry_at);
+
+    UPDATE external_ref_syncs
+       SET last_synced_at = NULL,
+           last_error = NULL,
+           next_retry_at = NULL,
+           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+     WHERE target_ref_type = 'github_pull_request'
+       AND EXISTS (
+             SELECT 1
+               FROM external_refs pr
+              WHERE pr.task_id = external_ref_syncs.task_id
+                AND pr.ref_type = 'github_pull_request'
+           );
+"#;
+
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
     migrations()
@@ -395,7 +425,7 @@ mod tests {
             .conn()
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
 
         std::fs::remove_file(&path).ok();
     }

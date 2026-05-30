@@ -32,10 +32,12 @@ impl Db {
         task_id: &str,
     ) -> Result<Vec<GithubPullRequestRef>> {
         let mut stmt = self.conn().prepare(
-            "SELECT repo, number, url
-             FROM external_refs
-             WHERE task_id = ?1 AND ref_type = 'github_pull_request'
-             ORDER BY id",
+            "SELECT pr.repo, pr.number, pr.url, state.status
+             FROM external_refs pr
+             LEFT JOIN github_pull_request_ref_states state
+               ON state.external_ref_id = pr.id
+             WHERE pr.task_id = ?1 AND pr.ref_type = 'github_pull_request'
+             ORDER BY pr.id",
         )?;
         let mut rows = stmt.query(params![task_id])?;
         let mut refs = Vec::new();
@@ -44,6 +46,7 @@ impl Db {
                 repo: row.get("repo")?,
                 number: row.get("number")?,
                 url: row.get("url")?,
+                status: row.get("status")?,
             });
         }
         Ok(refs)
