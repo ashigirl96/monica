@@ -7,9 +7,97 @@ use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Status {
+pub enum TaskStatus {
     Inbox,
     Ready,
+    Active,
+    NeedApproval,
+    Failed,
+    PrOpen,
+    Done,
+    Archived,
+}
+
+impl TaskStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TaskStatus::Inbox => "inbox",
+            TaskStatus::Ready => "ready",
+            TaskStatus::Active => "active",
+            TaskStatus::NeedApproval => "need_approval",
+            TaskStatus::Failed => "failed",
+            TaskStatus::PrOpen => "pr_open",
+            TaskStatus::Done => "done",
+            TaskStatus::Archived => "archived",
+        }
+    }
+
+    /// Parse a status the way a CLI user types it: dashes are accepted in place of the stored
+    /// snake_case underscores, so `need-approval` resolves to [`TaskStatus::NeedApproval`]. Kept in
+    /// core so the CLI and any future GUI share one acceptance rule.
+    pub fn parse_token(s: &str) -> Result<Self> {
+        s.replace('-', "_").parse()
+    }
+}
+
+impl FromStr for TaskStatus {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Ok(match s {
+            "inbox" => TaskStatus::Inbox,
+            "ready" => TaskStatus::Ready,
+            "active" => TaskStatus::Active,
+            "need_approval" => TaskStatus::NeedApproval,
+            "failed" => TaskStatus::Failed,
+            "pr_open" => TaskStatus::PrOpen,
+            "done" => TaskStatus::Done,
+            "archived" => TaskStatus::Archived,
+            other => return Err(anyhow!("unknown task status: {other}")),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskRunStatus {
+    SettingUp,
+    Running,
+    Stopped,
+    Failed,
+}
+
+impl TaskRunStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TaskRunStatus::SettingUp => "setting_up",
+            TaskRunStatus::Running => "running",
+            TaskRunStatus::Stopped => "stopped",
+            TaskRunStatus::Failed => "failed",
+        }
+    }
+}
+
+impl FromStr for TaskRunStatus {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Ok(match s {
+            "setting_up" => TaskRunStatus::SettingUp,
+            "running" => TaskRunStatus::Running,
+            "stopped" => TaskRunStatus::Stopped,
+            "failed" => TaskRunStatus::Failed,
+            other => return Err(anyhow!("unknown task run status: {other}")),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DisplayStatus {
+    Inbox,
+    Ready,
+    Active,
     SettingUp,
     Running,
     NeedApproval,
@@ -20,71 +108,89 @@ pub enum Status {
     Archived,
 }
 
-impl Status {
+impl DisplayStatus {
     pub fn as_str(self) -> &'static str {
         match self {
-            Status::Inbox => "inbox",
-            Status::Ready => "ready",
-            Status::SettingUp => "setting_up",
-            Status::Running => "running",
-            Status::NeedApproval => "need_approval",
-            Status::Stopped => "stopped",
-            Status::Failed => "failed",
-            Status::PrOpen => "pr_open",
-            Status::Done => "done",
-            Status::Archived => "archived",
+            DisplayStatus::Inbox => "inbox",
+            DisplayStatus::Ready => "ready",
+            DisplayStatus::Active => "active",
+            DisplayStatus::SettingUp => "setting_up",
+            DisplayStatus::Running => "running",
+            DisplayStatus::NeedApproval => "need_approval",
+            DisplayStatus::Stopped => "stopped",
+            DisplayStatus::Failed => "failed",
+            DisplayStatus::PrOpen => "pr_open",
+            DisplayStatus::Done => "done",
+            DisplayStatus::Archived => "archived",
         }
     }
 
-    /// Parse a status the way a CLI user types it: dashes are accepted in place of the stored
-    /// snake_case underscores, so `need-approval` resolves to [`Status::NeedApproval`]. Kept in
-    /// core so the CLI and any future GUI share one acceptance rule.
     pub fn parse_token(s: &str) -> Result<Self> {
         s.replace('-', "_").parse()
     }
+
+    pub fn from_task_and_run(task: TaskStatus, run: Option<TaskRunStatus>) -> Self {
+        match task {
+            TaskStatus::Inbox => DisplayStatus::Inbox,
+            TaskStatus::Ready => DisplayStatus::Ready,
+            TaskStatus::Active => match run {
+                Some(TaskRunStatus::SettingUp) => DisplayStatus::SettingUp,
+                Some(TaskRunStatus::Running) => DisplayStatus::Running,
+                Some(TaskRunStatus::Stopped) => DisplayStatus::Stopped,
+                Some(TaskRunStatus::Failed) => DisplayStatus::Failed,
+                None => DisplayStatus::Active,
+            },
+            TaskStatus::NeedApproval => DisplayStatus::NeedApproval,
+            TaskStatus::Failed => DisplayStatus::Failed,
+            TaskStatus::PrOpen => DisplayStatus::PrOpen,
+            TaskStatus::Done => DisplayStatus::Done,
+            TaskStatus::Archived => DisplayStatus::Archived,
+        }
+    }
 }
 
-impl FromStr for Status {
+impl FromStr for DisplayStatus {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self> {
         Ok(match s {
-            "inbox" => Status::Inbox,
-            "ready" => Status::Ready,
-            "setting_up" => Status::SettingUp,
-            "running" => Status::Running,
-            "need_approval" => Status::NeedApproval,
-            "stopped" => Status::Stopped,
-            "failed" => Status::Failed,
-            "pr_open" => Status::PrOpen,
-            "done" => Status::Done,
-            "archived" => Status::Archived,
-            other => return Err(anyhow!("unknown work item status: {other}")),
+            "inbox" => DisplayStatus::Inbox,
+            "ready" => DisplayStatus::Ready,
+            "active" => DisplayStatus::Active,
+            "setting_up" => DisplayStatus::SettingUp,
+            "running" => DisplayStatus::Running,
+            "need_approval" => DisplayStatus::NeedApproval,
+            "stopped" => DisplayStatus::Stopped,
+            "failed" => DisplayStatus::Failed,
+            "pr_open" => DisplayStatus::PrOpen,
+            "done" => DisplayStatus::Done,
+            "archived" => DisplayStatus::Archived,
+            other => return Err(anyhow!("unknown display status: {other}")),
         })
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum WorkItemKind {
+pub enum TaskKind {
     Development,
 }
 
-impl WorkItemKind {
+impl TaskKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            WorkItemKind::Development => "development",
+            TaskKind::Development => "development",
         }
     }
 }
 
-impl FromStr for WorkItemKind {
+impl FromStr for TaskKind {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self> {
         Ok(match s {
-            "development" => WorkItemKind::Development,
-            other => return Err(anyhow!("unknown work item kind: {other}")),
+            "development" => TaskKind::Development,
+            other => return Err(anyhow!("unknown task kind: {other}")),
         })
     }
 }
@@ -204,10 +310,10 @@ impl FromStr for PermissionMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct WorkItem {
+pub struct Task {
     pub id: String,
-    pub kind: WorkItemKind,
-    pub status: Status,
+    pub kind: TaskKind,
+    pub status: TaskStatus,
     pub phase: Option<String>,
     pub title: String,
     pub body: String,
@@ -219,14 +325,14 @@ pub struct WorkItem {
     pub updated_at: String,
 }
 
-impl WorkItem {
+impl Task {
     pub(crate) fn from_row(row: &Row) -> Result<Self> {
         let labels: String = row.get("labels")?;
         let details: String = row.get("details_json")?;
         let source: Option<String> = row.get("source_json")?;
         let kind: String = row.get("kind")?;
         let status: String = row.get("status")?;
-        Ok(WorkItem {
+        Ok(Task {
             id: row.get("id")?,
             kind: kind.parse()?,
             status: status.parse()?,
@@ -247,19 +353,21 @@ impl WorkItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IssueStatusRow {
+pub struct TaskSummaryRow {
     pub id: String,
     pub project: Option<String>,
     pub github_issue_number: Option<i64>,
-    pub status: Status,
+    pub task_status: TaskStatus,
+    pub task_run_status: Option<TaskRunStatus>,
+    pub status: DisplayStatus,
     pub branch: Option<String>,
 }
 
-/// Input for inserting a [`WorkItem`]. The `id` and timestamps are assigned by the store.
+/// Input for inserting a [`Task`]. The `id` and timestamps are assigned by the store.
 #[derive(Debug, Clone)]
-pub struct NewWorkItem {
-    pub kind: WorkItemKind,
-    pub status: Status,
+pub struct NewTask {
+    pub kind: TaskKind,
+    pub status: TaskStatus,
     pub title: String,
     pub body: String,
     pub phase: Option<String>,
@@ -269,11 +377,11 @@ pub struct NewWorkItem {
     pub source: Option<Value>,
 }
 
-impl NewWorkItem {
-    pub fn new(kind: WorkItemKind, title: impl Into<String>) -> Self {
+impl NewTask {
+    pub fn new(kind: TaskKind, title: impl Into<String>) -> Self {
         Self {
             kind,
-            status: Status::Inbox,
+            status: TaskStatus::Inbox,
             title: title.into(),
             body: String::new(),
             phase: None,
@@ -285,26 +393,26 @@ impl NewWorkItem {
     }
 }
 
-/// An execution attempt against a [`WorkItem`]. Persisted from issue E onward.
+/// An execution attempt against a [`Task`]. Persisted from issue E onward.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Run {
+pub struct TaskRun {
     pub id: String,
-    pub work_item_id: String,
+    pub task_id: String,
     pub agent: Option<String>,
     pub branch: Option<String>,
     pub worktree_path: Option<String>,
-    pub status: Status,
+    pub status: TaskRunStatus,
     pub settings_path: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
 
-impl Run {
+impl TaskRun {
     pub(crate) fn from_row(row: &Row) -> Result<Self> {
         let status: String = row.get("status")?;
-        Ok(Run {
+        Ok(TaskRun {
             id: row.get("id")?,
-            work_item_id: row.get("work_item_id")?,
+            task_id: row.get("task_id")?,
             agent: row.get("agent")?,
             branch: row.get("branch")?,
             worktree_path: row.get("worktree_path")?,
@@ -316,22 +424,22 @@ impl Run {
     }
 }
 
-/// Input for starting a run attempt. The `id`, status, and timestamps are assigned by the store:
-/// [`crate::Db::start_run`] always inserts at [`Status::SettingUp`].
+/// Input for starting a task run. The `id`, status, and timestamps are assigned by the store:
+/// [`crate::Db::start_task_run`] always inserts at [`TaskRunStatus::SettingUp`].
 #[derive(Debug, Clone)]
-pub struct NewRun {
-    pub work_item_id: String,
+pub struct NewTaskRun {
+    pub task_id: String,
     pub agent: Option<Agent>,
     pub branch: Option<String>,
     pub worktree_path: Option<String>,
 }
 
-/// A status/hook event recorded against a work item or run. Persisted from issue G onward.
+/// A status/hook event recorded against a task or run. Persisted from issue G onward.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Event {
     pub id: i64,
-    pub work_item_id: Option<String>,
-    pub run_id: Option<String>,
+    pub task_id: Option<String>,
+    pub task_run_id: Option<String>,
     pub kind: String,
     pub payload: Value,
     pub created_at: String,
@@ -342,8 +450,8 @@ impl Event {
         let payload: String = row.get("payload_json")?;
         Ok(Event {
             id: row.get("id")?,
-            work_item_id: row.get("work_item_id")?,
-            run_id: row.get("run_id")?,
+            task_id: row.get("task_id")?,
+            task_run_id: row.get("task_run_id")?,
             kind: row.get("kind")?,
             payload: serde_json::from_str(&payload)?,
             created_at: row.get("created_at")?,
@@ -351,11 +459,95 @@ impl Event {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentSessionStatus {
+    Starting,
+    Running,
+    Stopped,
+    Failed,
+}
+
+impl AgentSessionStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AgentSessionStatus::Starting => "starting",
+            AgentSessionStatus::Running => "running",
+            AgentSessionStatus::Stopped => "stopped",
+            AgentSessionStatus::Failed => "failed",
+        }
+    }
+}
+
+impl FromStr for AgentSessionStatus {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Ok(match s {
+            "starting" => AgentSessionStatus::Starting,
+            "running" => AgentSessionStatus::Running,
+            "stopped" => AgentSessionStatus::Stopped,
+            "failed" => AgentSessionStatus::Failed,
+            other => return Err(anyhow!("unknown agent session status: {other}")),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentSession {
+    pub id: String,
+    pub task_id: String,
+    pub task_run_id: String,
+    pub agent: String,
+    pub mode: String,
+    pub status: AgentSessionStatus,
+    pub provider_session_id: Option<String>,
+    pub parent_session_id: Option<String>,
+    pub last_event_name: Option<String>,
+    pub last_event_at: Option<String>,
+    pub metadata: Value,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl AgentSession {
+    pub(crate) fn from_row(row: &Row) -> Result<Self> {
+        let status: String = row.get("status")?;
+        let metadata: String = row.get("metadata_json")?;
+        Ok(Self {
+            id: row.get("id")?,
+            task_id: row.get("task_id")?,
+            task_run_id: row.get("task_run_id")?,
+            agent: row.get("agent")?,
+            mode: row.get("mode")?,
+            status: status.parse()?,
+            provider_session_id: row.get("provider_session_id")?,
+            parent_session_id: row.get("parent_session_id")?,
+            last_event_name: row.get("last_event_name")?,
+            last_event_at: row.get("last_event_at")?,
+            metadata: serde_json::from_str(&metadata)?,
+            created_at: row.get("created_at")?,
+            updated_at: row.get("updated_at")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct NewAgentSession {
+    pub task_id: String,
+    pub task_run_id: String,
+    pub agent: Agent,
+    pub mode: String,
+    pub provider_session_id: Option<String>,
+    pub parent_session_id: Option<String>,
+    pub metadata: Value,
+}
+
 /// A reference to an item living in an external system (e.g. a GitHub issue).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExternalRef {
     pub id: i64,
-    pub work_item_id: String,
+    pub task_id: String,
     pub ref_type: RefType,
     pub repo: Option<String>,
     pub number: Option<i64>,
@@ -365,7 +557,7 @@ pub struct ExternalRef {
 
 impl ExternalRef {
     pub fn new(
-        work_item_id: impl Into<String>,
+        task_id: impl Into<String>,
         ref_type: RefType,
         repo: Option<String>,
         number: Option<i64>,
@@ -373,7 +565,7 @@ impl ExternalRef {
     ) -> Self {
         Self {
             id: 0,
-            work_item_id: work_item_id.into(),
+            task_id: task_id.into(),
             ref_type,
             repo,
             number,
@@ -386,7 +578,7 @@ impl ExternalRef {
         let ref_type: String = row.get("ref_type")?;
         Ok(ExternalRef {
             id: row.get("id")?,
-            work_item_id: row.get("work_item_id")?,
+            task_id: row.get("task_id")?,
             ref_type: ref_type.parse()?,
             repo: row.get("repo")?,
             number: row.get("number")?,

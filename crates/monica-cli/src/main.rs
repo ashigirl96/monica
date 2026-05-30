@@ -17,7 +17,7 @@ enum Commands {
     /// Manage the project registry (execution-environment definitions)
     #[command(subcommand)]
     Project(project::ProjectCommand),
-    /// Track GitHub issues as Monica work items
+    /// Track GitHub issues as Monica tasks
     #[command(subcommand)]
     Issue(issue::IssueCommand),
     /// Receive agent lifecycle hooks (e.g. `monica hook claude`)

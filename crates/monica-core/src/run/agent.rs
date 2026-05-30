@@ -5,7 +5,7 @@ use std::process::Command;
 use anyhow::{anyhow, Context, Result};
 
 use crate::claude::{self, AgentLaunch};
-use crate::{paths, Db, Project, Status};
+use crate::{paths, AgentSessionStatus, Db, Project, TaskRunStatus};
 
 use super::setup::SetupOutcome;
 
@@ -21,6 +21,21 @@ pub enum AgentSessionMode {
 impl AgentSessionMode {
     pub fn is_reconnect(&self) -> bool {
         !matches!(self, AgentSessionMode::New)
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AgentSessionMode::New => "new",
+            AgentSessionMode::Continue => "continue",
+            AgentSessionMode::Fork { .. } => "fork",
+        }
+    }
+
+    pub fn parent_session_id(&self) -> Option<&str> {
+        match self {
+            AgentSessionMode::Fork { session_id } => Some(session_id.as_str()),
+            AgentSessionMode::New | AgentSessionMode::Continue => None,
+        }
     }
 }
 
@@ -40,30 +55,32 @@ pub(super) fn shell_quote_single(s: &str) -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RunReport {
-    pub work_item_id: String,
-    pub run_id: String,
+pub struct TaskRunReport {
+    pub task_id: String,
+    pub task_run_id: String,
     pub branch: String,
     pub worktree_path: String,
-    pub status: Status,
+    pub status: TaskRunStatus,
     pub setup: SetupOutcome,
     pub log_path: String,
     pub settings_path: Option<String>,
+    pub agent_session_id: Option<String>,
     pub agent_launch: Option<AgentLaunch>,
 }
 
 pub(super) fn build_claude_launch(
     db: &Db,
-    run_id: &str,
-    work_item_id: &str,
+    task_run_id: &str,
+    task_id: &str,
+    agent_session_id: &str,
     project: &Project,
     worktree: &Path,
     session_mode: &AgentSessionMode,
 ) -> Result<(AgentLaunch, String)> {
-    let run_dir = paths::run_dir(run_id)?;
-    fs::create_dir_all(&run_dir)
-        .with_context(|| format!("failed to create {}", run_dir.display()))?;
-    let settings_path = run_dir.join("claude-settings.json");
+    let task_run_dir = paths::task_run_dir(task_run_id)?;
+    fs::create_dir_all(&task_run_dir)
+        .with_context(|| format!("failed to create {}", task_run_dir.display()))?;
+    let settings_path = task_run_dir.join("claude-settings.json");
     let settings_body = claude::claude_settings_json(&hook_command())?;
     fs::write(&settings_path, settings_body)
         .with_context(|| format!("failed to write {}", settings_path.display()))?;
@@ -72,14 +89,14 @@ pub(super) fn build_claude_launch(
         AgentSessionMode::New => claude::read_prompt(worktree)?,
         AgentSessionMode::Continue | AgentSessionMode::Fork { .. } => None,
     };
-    // Always write prompt.txt — the verification step (`cat runs/<run_id>/prompt.txt`) needs the
+    // Always write prompt.txt — the verification step (`cat runs/<task_run_id>/prompt.txt`) needs the
     // file to exist whether or not a prompt was provided.
-    let prompt_path = run_dir.join("prompt.txt");
+    let prompt_path = task_run_dir.join("prompt.txt");
     fs::write(&prompt_path, prompt.as_deref().unwrap_or(""))
         .with_context(|| format!("failed to write {}", prompt_path.display()))?;
 
     let settings_path_str = settings_path.to_string_lossy().into_owned();
-    db.set_run_settings_path(run_id, &settings_path_str)?;
+    db.set_task_run_settings_path(task_run_id, &settings_path_str)?;
 
     let mut args = vec!["--settings".to_string(), settings_path_str.clone()];
     match session_mode {
@@ -100,8 +117,14 @@ pub(super) fn build_claude_launch(
         args,
         cwd: worktree.to_string_lossy().into_owned(),
         env: vec![
-            ("MONICA_ID".to_string(), work_item_id.to_string()),
-            ("MONICA_RUN_ID".to_string(), run_id.to_string()),
+            ("MONICA_TASK_ID".to_string(), task_id.to_string()),
+            ("MONICA_TASK_RUN_ID".to_string(), task_run_id.to_string()),
+            (
+                "MONICA_AGENT_SESSION_ID".to_string(),
+                agent_session_id.to_string(),
+            ),
+            ("MONICA_ID".to_string(), task_id.to_string()),
+            ("MONICA_RUN_ID".to_string(), task_run_id.to_string()),
             ("MONICA_PROJECT_ID".to_string(), project.id.clone()),
         ],
     };
@@ -112,12 +135,12 @@ pub(super) fn build_claude_launch(
 /// agent's TUI takes over the terminal) and block until it exits. A `None` `agent_launch` is a
 /// no-op so CLI callers can call this unconditionally.
 ///
-/// On spawn failure (e.g. `claude` is not on `PATH`) this settles the run + work item to `failed`
-/// — keeping the `start_run`-onward invariant that nothing is stranded in `setting_up`/`running`
+/// On spawn failure (e.g. `claude` is not on `PATH`) this settles the run + task to `failed`
+/// — keeping the `start_task_run`-onward invariant that nothing is stranded in `setting_up`/`running`
 /// when the agent never actually started. A non-zero *exit* from a successfully-spawned agent is
 /// not treated as a monica failure (interactive sessions exit non-zero on Ctrl-C); session-state
 /// reconciliation is the hook receiver's job (see issue #20).
-pub fn launch_agent(db: &mut Db, report: &RunReport) -> Result<()> {
+pub fn launch_agent(db: &mut Db, report: &TaskRunReport) -> Result<()> {
     let Some(launch) = report.agent_launch.as_ref() else {
         return Ok(());
     };
@@ -133,7 +156,11 @@ pub fn launch_agent(db: &mut Db, report: &RunReport) -> Result<()> {
     match result {
         Ok(_) => Ok(()),
         Err(e) => {
-            let _ = db.finish_run(&report.run_id, &report.work_item_id, Status::Failed);
+            let _ = db.finish_task_run(&report.task_run_id, &report.task_id, TaskRunStatus::Failed);
+            if let Some(agent_session_id) = report.agent_session_id.as_deref() {
+                let _ =
+                    db.update_agent_session_status(agent_session_id, AgentSessionStatus::Failed);
+            }
             Err(anyhow!(
                 "failed to launch {}: {e}; install Claude Code and ensure `{}` is on PATH",
                 launch.program,

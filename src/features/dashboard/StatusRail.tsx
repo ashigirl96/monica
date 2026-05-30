@@ -2,12 +2,12 @@ import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
 import { StatusLed } from "./StatusLed";
 import { STATUS_META, STATUS_ORDER } from "./statusMeta";
-import type { Status, WorkItemView } from "./types";
+import type { DisplayStatus, TaskView } from "./types";
 
-export type StatusFilter = Status | "all";
+export type StatusFilter = DisplayStatus | "all";
 
 interface StatusRailProps {
-  items: WorkItemView[];
+  items: TaskView[];
   active: StatusFilter;
   onSelect: (filter: StatusFilter) => void;
   onRefresh: () => void;
@@ -32,7 +32,7 @@ export function StatusRail({
   healthy,
   lastSync,
 }: StatusRailProps) {
-  const counts = new Map<Status, number>();
+  const counts = new Map<DisplayStatus, number>();
   for (const item of items) {
     counts.set(item.status, (counts.get(item.status) ?? 0) + 1);
   }

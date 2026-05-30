@@ -34,7 +34,7 @@ impl SetupOutcome {
 /// Environment handed to `.monica/setup.sh`.
 pub struct SetupEnv {
     pub monica_id: String,
-    pub run_id: String,
+    pub task_run_id: String,
     pub project_id: String,
     pub branch: String,
     pub worktree: String,
@@ -68,8 +68,10 @@ pub fn run_setup_script(
 
     let spawned = command
         .current_dir(worktree)
+        .env("MONICA_TASK_ID", &env.monica_id)
+        .env("MONICA_TASK_RUN_ID", &env.task_run_id)
         .env("MONICA_ID", &env.monica_id)
-        .env("MONICA_RUN_ID", &env.run_id)
+        .env("MONICA_RUN_ID", &env.task_run_id)
         .env("MONICA_PROJECT_ID", &env.project_id)
         .env("MONICA_BRANCH", &env.branch)
         .env("MONICA_WORKTREE", &env.worktree)

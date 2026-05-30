@@ -3,8 +3,8 @@ use std::path::Path;
 use anyhow::{anyhow, Context, Result};
 
 use crate::{
-    parse_owner_repo, Db, ExternalRef, NewWorkItem, Project, RefType, Run, Status, WorkItem,
-    WorkItemKind,
+    parse_owner_repo, Db, ExternalRef, NewTask, Project, RefType, Task, TaskKind, TaskRun,
+    TaskStatus,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,12 +41,12 @@ pub fn register_project_with_default_branch(
     db.upsert_project(&project)
 }
 
-pub fn track_github_issue(db: &mut Db, repo_input: &str, issue: &GithubIssue) -> Result<WorkItem> {
+pub fn track_github_issue(db: &mut Db, repo_input: &str, issue: &GithubIssue) -> Result<Task> {
     let repo = parse_owner_repo(repo_input)?;
     let project_id = db.get_project(&repo)?.map(|p| p.id);
 
-    let mut new = NewWorkItem::new(WorkItemKind::Development, &issue.title);
-    new.status = Status::Ready;
+    let mut new = NewTask::new(TaskKind::Development, &issue.title);
+    new.status = TaskStatus::Ready;
     new.body = issue.body.clone().unwrap_or_default();
     new.project_id = project_id;
 
@@ -57,31 +57,31 @@ pub fn track_github_issue(db: &mut Db, repo_input: &str, issue: &GithubIssue) ->
         Some(issue.number),
         Some(issue.url.clone()),
     );
-    db.insert_work_item_with_ref(new, external)
+    db.insert_task_with_ref(new, external)
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeleteIssueReport {
-    pub item: WorkItem,
-    pub removed_runs: Vec<String>,
+    pub item: Task,
+    pub removed_task_runs: Vec<String>,
     pub removed_branches: Vec<String>,
 }
 
 pub fn delete_issue(db: &mut Db, id: &str) -> Result<DeleteIssueReport> {
     let item = db
-        .get_work_item(id)?
-        .ok_or_else(|| anyhow!("work item not found: {id}"))?;
-    let runs = db.list_runs_for_work_item(id)?;
+        .get_task(id)?
+        .ok_or_else(|| anyhow!("task not found: {id}"))?;
+    let runs = db.list_task_runs_for_task(id)?;
     let removed_branches = cleanup_runs(db, &item, &runs)?;
-    let item = db.delete_work_item_cascade(id)?;
+    let item = db.delete_task_cascade(id)?;
     Ok(DeleteIssueReport {
         item,
-        removed_runs: runs.into_iter().map(|run| run.id).collect(),
+        removed_task_runs: runs.into_iter().map(|run| run.id).collect(),
         removed_branches,
     })
 }
 
-fn cleanup_runs(db: &Db, item: &WorkItem, runs: &[Run]) -> Result<Vec<String>> {
+fn cleanup_runs(db: &Db, item: &Task, runs: &[TaskRun]) -> Result<Vec<String>> {
     if runs.is_empty() {
         return Ok(Vec::new());
     }
@@ -253,13 +253,13 @@ mod tests {
     }
 
     #[test]
-    fn track_without_project_creates_unlinked_work_item() {
+    fn track_without_project_creates_unlinked_task() {
         let mut db = Db::open_in_memory().unwrap();
         let item = track_github_issue(&mut db, "ashigirl96/monica", &gh_issue()).unwrap();
 
         assert_eq!(item.id, "MON-1");
-        assert_eq!(item.kind, WorkItemKind::Development);
-        assert_eq!(item.status, Status::Ready);
+        assert_eq!(item.kind, TaskKind::Development);
+        assert_eq!(item.status, TaskStatus::Ready);
         assert_eq!(item.title, "tracked issue");
         assert_eq!(item.body, "issue body");
         assert_eq!(item.project_id, None);

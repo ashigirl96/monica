@@ -6,25 +6,25 @@ use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_core::{
     parse_issue_ref, parse_owner_repo, track_github_issue, Agent, AgentSessionMode, Db,
-    GithubIssue, IssueStatusRow, SetupOutcome, Status, WorkItem,
+    DisplayStatus, GithubIssue, SetupOutcome, Task, TaskRunStatus, TaskStatus, TaskSummaryRow,
 };
 use serde::Deserialize;
 
 #[derive(Subcommand)]
 pub enum IssueCommand {
-    /// Track an existing GitHub issue (owner/repo#123) as a Monica work item
+    /// Track an existing GitHub issue (owner/repo#123) as a Monica task
     Track {
         /// owner/repo#123
         target: String,
     },
-    /// Show tracked work items and their latest run state
+    /// Show tracked tasks and their latest run state
     Status {
         #[arg(long)]
         status: Option<String>,
         #[arg(long)]
         project: Option<String>,
     },
-    /// Create a worktree and run .monica/setup.sh for a work item (MON-<id>)
+    /// Create a worktree and run .monica/setup.sh for a task (MON-<id>)
     Run {
         /// MON-<id>
         id: String,
@@ -49,13 +49,13 @@ pub enum IssueCommand {
         #[arg(short = 'y', long)]
         yes: bool,
     },
-    /// Explicitly set a work item's status/phase (e.g. `monica issue mark MON-1 need-approval`)
+    /// Explicitly set a task's status/phase (e.g. `monica issue mark MON-1 need-approval`)
     Mark {
         /// MON-<id>
         id: String,
-        /// Status token, e.g. need-approval / pr-open / running (dashes or underscores)
+        /// Task status token, e.g. need-approval / pr-open / done (dashes or underscores)
         status: String,
-        /// Free-text note, stored as the work item's phase
+        /// Free-text note, stored as the task's phase
         #[arg(long)]
         note: Option<String>,
         /// PR URL to record as a github_pull_request reference
@@ -116,7 +116,7 @@ fn track_command(db: &mut Db, target: &str) -> Result<()> {
 fn status_command(db: &Db, status: Option<String>, project: Option<String>) -> Result<()> {
     let status = parse_status_filter(status.as_deref())?;
     let project = normalize_project_filter(project.as_deref())?;
-    let rows = db.list_issue_statuses(status, project.as_deref())?;
+    let rows = db.list_task_summaries(status, project.as_deref())?;
     print!("{}", render_status_table(&rows));
     Ok(())
 }
@@ -135,7 +135,7 @@ fn run_command(
         anyhow::bail!("--continue/--fork require --claude or --agent claude");
     }
     let report = monica_core::run_issue_with_session_mode(db, id, agent, session_mode)?;
-    println!("Run {} for {}", report.run_id, report.work_item_id);
+    println!("Task run {} for {}", report.task_run_id, report.task_id);
     println!("Branch:   {}", report.branch);
     println!("Worktree: {}", report.worktree_path);
     println!("Setup:    {}", describe_setup(&report.setup));
@@ -144,8 +144,15 @@ fn run_command(
     if let Some(path) = report.settings_path.as_deref() {
         println!("Settings: {path}");
     }
-    if report.status == Status::Failed {
-        anyhow::bail!("run {} failed; see {}", report.run_id, report.log_path);
+    if let Some(id) = report.agent_session_id.as_deref() {
+        println!("Session:  {id}");
+    }
+    if report.status == TaskRunStatus::Failed {
+        anyhow::bail!(
+            "task run {} failed; see {}",
+            report.task_run_id,
+            report.log_path
+        );
     }
     // Hand the terminal to the agent. `launch_agent` is a no-op when no agent was requested, so
     // this call is unconditional. Spawn failure settles the run to failed inside core, so we just
@@ -155,10 +162,10 @@ fn run_command(
 
 fn delete_command(db: &mut Db, id: &str, yes: bool) -> Result<()> {
     let item = db
-        .get_work_item(id)?
+        .get_task(id)?
         .ok_or_else(|| anyhow!("Issue not found: {id}"))?;
     let project = db
-        .list_issue_statuses(None, None)?
+        .list_task_summaries(None, None)?
         .into_iter()
         .find(|row| row.id == item.id)
         .and_then(|row| row.project);
@@ -171,8 +178,11 @@ fn delete_command(db: &mut Db, id: &str, yes: bool) -> Result<()> {
 
     let report = monica_core::delete_issue(db, id)?;
     println!("Deleted issue {}.", report.item.id);
-    if !report.removed_runs.is_empty() {
-        println!("Removed runs: {}.", report.removed_runs.join(", "));
+    if !report.removed_task_runs.is_empty() {
+        println!(
+            "Removed task runs: {}.",
+            report.removed_task_runs.join(", ")
+        );
     }
     if !report.removed_branches.is_empty() {
         println!("Removed branches: {}.", report.removed_branches.join(", "));
@@ -180,7 +190,7 @@ fn delete_command(db: &mut Db, id: &str, yes: bool) -> Result<()> {
     Ok(())
 }
 
-fn print_delete_summary(item: &WorkItem, project: Option<&str>) {
+fn print_delete_summary(item: &Task, project: Option<&str>) {
     println!("Delete issue?");
     println!();
     println!("  ID:      {}", item.id);
@@ -233,8 +243,8 @@ fn mark_command(
     note: Option<&str>,
     pr_url: Option<&str>,
 ) -> Result<()> {
-    let status = Status::parse_token(status)?;
-    db.mark_work_item(id, status, note, pr_url)?;
+    let status = TaskStatus::parse_token(status)?;
+    db.mark_task(id, status, note, pr_url)?;
     println!("Marked {id} as {}", status.as_str());
     if let Some(note) = note {
         println!("Note: {note}");
@@ -305,15 +315,15 @@ fn build_issue(requested: i64, success: bool, stdout: &[u8], stderr: &[u8]) -> R
     Ok(issue)
 }
 
-fn parse_status_filter(status: Option<&str>) -> Result<Option<Status>> {
-    status.map(Status::from_str).transpose()
+fn parse_status_filter(status: Option<&str>) -> Result<Option<DisplayStatus>> {
+    status.map(DisplayStatus::parse_token).transpose()
 }
 
 fn normalize_project_filter(project: Option<&str>) -> Result<Option<String>> {
     project.map(parse_owner_repo).transpose()
 }
 
-fn render_status_table(rows: &[IssueStatusRow]) -> String {
+fn render_status_table(rows: &[TaskSummaryRow]) -> String {
     if rows.is_empty() {
         return "No tracked issues found.\n".to_string();
     }
@@ -383,7 +393,6 @@ impl GhIssue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use monica_core::Status;
 
     #[test]
     fn build_issue_parses_valid_json() {
@@ -459,7 +468,7 @@ mod tests {
     fn parse_status_filter_validates_enum() {
         assert_eq!(
             parse_status_filter(Some("ready")).unwrap(),
-            Some(Status::Ready)
+            Some(DisplayStatus::Ready)
         );
         assert!(parse_status_filter(Some("bogus")).is_err());
         assert_eq!(parse_status_filter(None).unwrap(), None);
@@ -518,11 +527,13 @@ mod tests {
 
     #[test]
     fn render_status_table_formats_rows_and_empty_state() {
-        let rows = vec![IssueStatusRow {
+        let rows = vec![TaskSummaryRow {
             id: "MON-1".to_string(),
             project: Some("ashigirl96/monica".to_string()),
             github_issue_number: Some(17),
-            status: Status::Ready,
+            task_status: TaskStatus::Ready,
+            task_run_status: None,
+            status: DisplayStatus::Ready,
             branch: Some("monica/gh-17".to_string()),
         }];
         let rendered = render_status_table(&rows);

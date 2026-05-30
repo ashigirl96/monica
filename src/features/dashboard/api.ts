@@ -1,14 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Event, IssueStatusRow, WorkItem } from "./types";
+import type { Event, TaskSummaryRow, Task } from "./types";
 
-export function listWorkItems(): Promise<WorkItem[]> {
-  return invoke<WorkItem[]>("list_work_items");
+export function listTasks(): Promise<Task[]> {
+  return invoke<Task[]>("list_tasks");
 }
 
-export function listIssueStatuses(): Promise<IssueStatusRow[]> {
-  return invoke<IssueStatusRow[]>("list_issue_statuses");
+export function listTaskSummaries(): Promise<TaskSummaryRow[]> {
+  return invoke<TaskSummaryRow[]>("list_task_summaries");
 }
 
-export function listEvents(workItemId: string): Promise<Event[]> {
-  return invoke<Event[]>("list_events", { workItemId });
+export function listEvents(taskId: string): Promise<Event[]> {
+  return invoke<Event[]>("list_events", { taskId });
 }

@@ -2,15 +2,15 @@ import { cn } from "@/lib/utils";
 import { GitBranch } from "lucide-react";
 import { StatusLed } from "./StatusLed";
 import { STATUS_META, statusColor } from "./statusMeta";
-import type { WorkItemView } from "./types";
+import type { TaskView } from "./types";
 
-interface WorkItemRowProps {
-  item: WorkItemView;
+interface TaskRowProps {
+  item: TaskView;
   selected: boolean;
-  onSelect: (item: WorkItemView) => void;
+  onSelect: (item: TaskView) => void;
 }
 
-export function WorkItemRow({ item, selected, onSelect }: WorkItemRowProps) {
+export function TaskRow({ item, selected, onSelect }: TaskRowProps) {
   const meta = STATUS_META[item.status];
   return (
     <button

@@ -10,16 +10,16 @@ use super::{EVENT_COLUMNS, SET_NOW};
 impl Db {
     pub fn insert_event(
         &self,
-        work_item_id: Option<&str>,
-        run_id: Option<&str>,
+        task_id: Option<&str>,
+        task_run_id: Option<&str>,
         kind: &str,
         payload: &Value,
     ) -> Result<Event> {
         let payload = serde_json::to_string(payload)?;
         self.conn().execute(
-            "INSERT INTO events (work_item_id, run_id, kind, payload_json)
+            "INSERT INTO events (task_id, task_run_id, kind, payload_json)
              VALUES (?1, ?2, ?3, ?4)",
-            params![work_item_id, run_id, kind, payload],
+            params![task_id, task_run_id, kind, payload],
         )?;
         let id = self.conn().last_insert_rowid();
         let mut stmt = self
@@ -32,14 +32,14 @@ impl Db {
         }
     }
 
-    /// List events, optionally filtered to one work item. Ordered by insertion (`id`).
-    pub fn list_events(&self, work_item_id: Option<&str>) -> Result<Vec<Event>> {
+    /// List events, optionally filtered to one task. Ordered by insertion (`id`).
+    pub fn list_events(&self, task_id: Option<&str>) -> Result<Vec<Event>> {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {EVENT_COLUMNS} FROM events
-             WHERE (?1 IS NULL OR work_item_id = ?1)
+             WHERE (?1 IS NULL OR task_id = ?1)
              ORDER BY id"
         ))?;
-        let mut rows = stmt.query(params![work_item_id])?;
+        let mut rows = stmt.query(params![task_id])?;
         let mut events = Vec::new();
         while let Some(row) = rows.next()? {
             events.push(Event::from_row(row)?);

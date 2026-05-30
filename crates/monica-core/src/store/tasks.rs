@@ -2,31 +2,25 @@ use anyhow::{anyhow, Result};
 use rusqlite::params;
 
 use crate::db::Db;
-use crate::model::{ExternalRef, IssueStatusRow, NewWorkItem, RefType, Status, WorkItem};
+use crate::model::{
+    DisplayStatus, ExternalRef, NewTask, RefType, Task, TaskRunStatus, TaskStatus, TaskSummaryRow,
+};
 
-use super::{SET_NOW, WORK_ITEM_COLUMNS};
+use super::{SET_NOW, TASK_COLUMNS};
 
 impl Db {
-    pub fn insert_work_item(&mut self, new: NewWorkItem) -> Result<WorkItem> {
-        self.insert_work_item_inner(new, None)
+    pub fn insert_task(&mut self, new: NewTask) -> Result<Task> {
+        self.insert_task_inner(new, None)
     }
 
-    /// Insert a work item and its external ref in one transaction, so a failure to record the
-    /// external link can never leave an orphan work item behind. The ref's `work_item_id` is
+    /// Insert a task and its external ref in one transaction, so a failure to record the
+    /// external link can never leave an orphan task behind. The ref's `task_id` is
     /// replaced with the freshly allocated `MON-<n>` id.
-    pub fn insert_work_item_with_ref(
-        &mut self,
-        new: NewWorkItem,
-        external: ExternalRef,
-    ) -> Result<WorkItem> {
-        self.insert_work_item_inner(new, Some(external))
+    pub fn insert_task_with_ref(&mut self, new: NewTask, external: ExternalRef) -> Result<Task> {
+        self.insert_task_inner(new, Some(external))
     }
 
-    fn insert_work_item_inner(
-        &mut self,
-        new: NewWorkItem,
-        external: Option<ExternalRef>,
-    ) -> Result<WorkItem> {
+    fn insert_task_inner(&mut self, new: NewTask, external: Option<ExternalRef>) -> Result<Task> {
         let labels = serde_json::to_string(&new.labels)?;
         let details = serde_json::to_string(&new.details)?;
         let source = match &new.source {
@@ -38,7 +32,7 @@ impl Db {
         tx.execute("INSERT INTO mon_counter DEFAULT VALUES", [])?;
         let id = format!("MON-{}", tx.last_insert_rowid());
         tx.execute(
-            "INSERT INTO work_items
+            "INSERT INTO tasks
                (id, kind, status, phase, title, body, project_id, labels, details_json, source_json)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
@@ -57,7 +51,7 @@ impl Db {
 
         if let Some(external) = external {
             tx.execute(
-                "INSERT INTO external_refs (work_item_id, ref_type, repo, number, url)
+                "INSERT INTO external_refs (task_id, ref_type, repo, number, url)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
                     id,
@@ -70,153 +64,158 @@ impl Db {
         }
 
         let item = {
-            let mut stmt = tx.prepare(&format!(
-                "SELECT {WORK_ITEM_COLUMNS} FROM work_items WHERE id = ?1"
-            ))?;
+            let mut stmt =
+                tx.prepare(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"))?;
             let mut rows = stmt.query(params![id])?;
             match rows.next()? {
-                Some(row) => WorkItem::from_row(row)?,
-                None => return Err(anyhow!("inserted work item {id} not found")),
+                Some(row) => Task::from_row(row)?,
+                None => return Err(anyhow!("inserted task {id} not found")),
             }
         };
         tx.commit()?;
         Ok(item)
     }
 
-    pub fn get_work_item(&self, id: &str) -> Result<Option<WorkItem>> {
-        let mut stmt = self.conn().prepare(&format!(
-            "SELECT {WORK_ITEM_COLUMNS} FROM work_items WHERE id = ?1"
-        ))?;
+    pub fn get_task(&self, id: &str) -> Result<Option<Task>> {
+        let mut stmt = self
+            .conn()
+            .prepare(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"))?;
         let mut rows = stmt.query(params![id])?;
         match rows.next()? {
-            Some(row) => Ok(Some(WorkItem::from_row(row)?)),
+            Some(row) => Ok(Some(Task::from_row(row)?)),
             None => Ok(None),
         }
     }
 
-    pub fn delete_work_item(&mut self, id: &str) -> Result<WorkItem> {
+    pub fn delete_task(&mut self, id: &str) -> Result<Task> {
         let run_count: i64 = self.conn().query_row(
-            "SELECT count(*) FROM runs WHERE work_item_id = ?1",
+            "SELECT count(*) FROM task_runs WHERE task_id = ?1",
             params![id],
             |row| row.get(0),
         )?;
         if run_count > 0 {
             return Err(anyhow!(
-                "work item {id} has {run_count} run(s); use the cleanup-aware issue delete path"
+                "task {id} has {run_count} run(s); use the cleanup-aware issue delete path"
             ));
         }
-        self.delete_work_item_cascade(id)
+        self.delete_task_cascade(id)
     }
 
-    pub(crate) fn delete_work_item_cascade(&mut self, id: &str) -> Result<WorkItem> {
+    pub(crate) fn delete_task_cascade(&mut self, id: &str) -> Result<Task> {
         let tx = self.conn_mut().transaction()?;
         let item = {
-            let mut stmt = tx.prepare(&format!(
-                "SELECT {WORK_ITEM_COLUMNS} FROM work_items WHERE id = ?1"
-            ))?;
+            let mut stmt =
+                tx.prepare(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"))?;
             let mut rows = stmt.query(params![id])?;
             match rows.next()? {
-                Some(row) => WorkItem::from_row(row)?,
-                None => return Err(anyhow!("work item not found: {id}")),
+                Some(row) => Task::from_row(row)?,
+                None => return Err(anyhow!("task not found: {id}")),
             }
         };
 
         tx.execute(
-            "DELETE FROM events WHERE work_item_id = ?1
-               OR run_id IN (SELECT id FROM runs WHERE work_item_id = ?1)",
+            "DELETE FROM events WHERE task_id = ?1
+               OR task_run_id IN (SELECT id FROM task_runs WHERE task_id = ?1)",
             params![id],
         )?;
-        tx.execute(
-            "DELETE FROM external_refs WHERE work_item_id = ?1",
-            params![id],
-        )?;
-        tx.execute("DELETE FROM runs WHERE work_item_id = ?1", params![id])?;
-        tx.execute("DELETE FROM work_items WHERE id = ?1", params![id])?;
+        tx.execute("DELETE FROM agent_sessions WHERE task_id = ?1", params![id])?;
+        tx.execute("DELETE FROM external_refs WHERE task_id = ?1", params![id])?;
+        tx.execute("DELETE FROM task_runs WHERE task_id = ?1", params![id])?;
+        tx.execute("DELETE FROM tasks WHERE id = ?1", params![id])?;
         tx.commit()?;
         Ok(item)
     }
 
-    pub fn list_work_items(&self) -> Result<Vec<WorkItem>> {
+    pub fn list_tasks(&self) -> Result<Vec<Task>> {
         let mut stmt = self.conn().prepare(&format!(
-            "SELECT {WORK_ITEM_COLUMNS} FROM work_items ORDER BY created_at, id"
+            "SELECT {TASK_COLUMNS} FROM tasks ORDER BY created_at, id"
         ))?;
         let mut rows = stmt.query([])?;
         let mut items = Vec::new();
         while let Some(row) = rows.next()? {
-            items.push(WorkItem::from_row(row)?);
+            items.push(Task::from_row(row)?);
         }
         Ok(items)
     }
 
-    pub fn list_issue_statuses(
+    pub fn list_task_summaries(
         &self,
-        status: Option<Status>,
+        status: Option<DisplayStatus>,
         project: Option<&str>,
-    ) -> Result<Vec<IssueStatusRow>> {
-        let status = status.map(Status::as_str);
+    ) -> Result<Vec<TaskSummaryRow>> {
         let mut stmt = self.conn().prepare(
             "SELECT
-               wi.id AS work_item_id,
-               coalesce(project.repo, issue_ref.repo, wi.project_id) AS project,
+               t.id AS task_id,
+               coalesce(project.repo, issue_ref.repo, t.project_id) AS project,
                issue_ref.number AS github_issue_number,
-               wi.status AS work_item_status,
+               t.status AS task_status,
+               latest_run.status AS task_run_status,
                latest_run.branch AS branch
-             FROM work_items wi
+             FROM tasks t
              LEFT JOIN projects project
-               ON project.id = wi.project_id
+               ON project.id = t.project_id
              LEFT JOIN external_refs issue_ref
                ON issue_ref.id = (
                  SELECT er.id
                  FROM external_refs er
-                 WHERE er.work_item_id = wi.id AND er.ref_type = 'github_issue'
+                 WHERE er.task_id = t.id AND er.ref_type = 'github_issue'
                  ORDER BY er.id DESC
                  LIMIT 1
                )
-            LEFT JOIN runs latest_run
+            LEFT JOIN task_runs latest_run
                ON latest_run.id = (
                  SELECT r.id
-                 FROM runs r
-                 WHERE r.work_item_id = wi.id
+                 FROM task_runs r
+                 WHERE r.task_id = t.id
                  ORDER BY r.created_at DESC,
                           CAST(SUBSTR(r.id, 5) AS INTEGER) DESC
                  LIMIT 1
                )
-             WHERE (?1 IS NULL OR wi.status = ?1)
-               AND (?2 IS NULL OR coalesce(project.repo, issue_ref.repo, wi.project_id) = ?2)
-             ORDER BY wi.created_at, wi.id",
+             WHERE (?1 IS NULL OR coalesce(project.repo, issue_ref.repo, t.project_id) = ?1)
+             ORDER BY t.created_at, t.id",
         )?;
-        let mut rows = stmt.query(params![status, project])?;
+        let mut rows = stmt.query(params![project])?;
         let mut items = Vec::new();
         while let Some(row) = rows.next()? {
-            let status: String = row.get("work_item_status")?;
-            items.push(IssueStatusRow {
-                id: row.get("work_item_id")?,
+            let task_status: TaskStatus = row.get::<_, String>("task_status")?.parse()?;
+            let task_run_status: Option<TaskRunStatus> = row
+                .get::<_, Option<String>>("task_run_status")?
+                .map(|s| s.parse())
+                .transpose()?;
+            let display_status = DisplayStatus::from_task_and_run(task_status, task_run_status);
+            let item = TaskSummaryRow {
+                id: row.get("task_id")?,
                 project: row.get("project")?,
                 github_issue_number: row.get("github_issue_number")?,
-                status: status.parse()?,
+                task_status,
+                task_run_status,
+                status: display_status,
                 branch: row.get("branch")?,
-            });
+            };
+            if status.is_none_or(|status| status == item.status) {
+                items.push(item);
+            }
         }
         Ok(items)
     }
 
-    pub fn update_status(&self, id: &str, status: Status) -> Result<()> {
+    pub fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()> {
         let affected = self.conn().execute(
-            "UPDATE work_items
+            "UPDATE tasks
                SET status = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
              WHERE id = ?2",
             params![status.as_str(), id],
         )?;
         if affected == 0 {
-            return Err(anyhow!("work item not found: {id}"));
+            return Err(anyhow!("task not found: {id}"));
         }
         Ok(())
     }
 
-    pub fn mark_work_item(
+    pub fn mark_task(
         &mut self,
         id: &str,
-        status: Status,
+        status: TaskStatus,
         note: Option<&str>,
         pr_url: Option<&str>,
     ) -> Result<()> {
@@ -231,24 +230,24 @@ impl Db {
         let tx = self.conn_mut().transaction()?;
         let affected = tx.execute(
             &format!(
-                "UPDATE work_items
+                "UPDATE tasks
                    SET status = ?1, phase = COALESCE(?2, phase), updated_at = {SET_NOW}
                  WHERE id = ?3"
             ),
             params![status_str, note, id],
         )?;
         if affected == 0 {
-            return Err(anyhow!("work item not found: {id}"));
+            return Err(anyhow!("task not found: {id}"));
         }
         if let Some(pr_url) = pr_url {
             tx.execute(
-                "INSERT INTO external_refs (work_item_id, ref_type, repo, number, url)
+                "INSERT INTO external_refs (task_id, ref_type, repo, number, url)
                  VALUES (?1, ?2, NULL, ?3, ?4)",
                 params![id, RefType::GithubPullRequest.as_str(), pr_number, pr_url],
             )?;
         }
         tx.execute(
-            "INSERT INTO events (work_item_id, kind, payload_json) VALUES (?1, 'mark', ?2)",
+            "INSERT INTO events (task_id, kind, payload_json) VALUES (?1, 'mark', ?2)",
             params![id, payload],
         )?;
         tx.commit()?;
