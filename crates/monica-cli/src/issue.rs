@@ -525,6 +525,7 @@ mod tests {
             id: "MON-1".to_string(),
             project: Some("ashigirl96/monica".to_string()),
             github_issue_number: Some(17),
+            github_pull_requests: Vec::new(),
             task_status: TaskStatus::Ready,
             task_run_status: None,
             task_run_wait_reason: None,

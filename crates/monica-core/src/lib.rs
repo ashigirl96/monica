@@ -4,6 +4,7 @@
 mod app;
 mod claude;
 mod db;
+mod github;
 mod hook;
 mod migrations;
 mod model;
@@ -20,10 +21,12 @@ pub use app::{
 };
 pub use claude::AgentLaunch;
 pub use db::Db;
+pub use github::sync_next_linked_pull_request;
 pub use hook::{is_safe_task_run_id, record_claude_hook, status_for_claude_event, HookReport};
 pub use model::{
-    Agent, DisplayStatus, Event, ExternalRef, NewTask, NewTaskRun, PermissionMode, Project,
-    Provider, RefType, Task, TaskKind, TaskRun, TaskRunObservation, TaskRunStatus,
+    Agent, DisplayStatus, Event, ExternalRef, GithubPullRequest, GithubPullRequestRef, NewTask,
+    NewTaskRun, PermissionMode, Project, Provider, PullRequestSyncCandidate, PullRequestSyncResult,
+    PullRequestSyncStatus, RefType, Task, TaskKind, TaskRun, TaskRunObservation, TaskRunStatus,
     TaskRunWaitReason, TaskStatus, TaskSummaryRow,
 };
 pub use paths::{base_dir, db_path, task_run_dir, task_runs_dir, worktrees_dir};

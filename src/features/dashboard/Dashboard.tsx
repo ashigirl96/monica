@@ -6,6 +6,7 @@ import { deleteTask } from "./api";
 import { DeleteTaskModal } from "./DeleteTaskModal";
 import { DetailDrawer } from "./DetailDrawer";
 import { StatusRail, type StatusFilter } from "./StatusRail";
+import { usePullRequestSyncWorker } from "./usePullRequestSyncWorker";
 import { useTasks } from "./useTasks";
 import { TaskList } from "./TaskList";
 import type { TaskView } from "./types";
@@ -24,6 +25,11 @@ export function Dashboard() {
   const [railOpen, setRailOpen] = useState(true);
   const [railWidth, setRailWidth] = useState(240);
   const [resizing, setResizing] = useState(false);
+
+  usePullRequestSyncWorker({
+    enabled: !loading && !error,
+    onSynced: refresh,
+  });
 
   const visible = useMemo(
     () => (filter === "all" ? items : items.filter((i) => i.status === filter)),

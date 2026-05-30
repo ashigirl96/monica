@@ -18,3 +18,5 @@ Issue Runner → Task/TaskRun Tracker → Status Dashboard → Kanban → Termin
 - 2026-05-31 Dashboard keyboard review を反映。Enter が通常ボタン操作を奪わないようにし、削除確認に worktree/branch cleanup の警告を追加した。
 - 2026-05-31 削除確認 modal に focus trap を追加。Tab/Shift+Tab が Cancel/Delete の間だけを移動するようにした。
 - 2026-05-31 Modal primitive を追加。dialog の focus restore/initial focus/Tab trap を共通化し、個別 modal が中身だけを書けるようにした。
+- 2026-05-31 PR lazy sync worker を追加。Dashboard の一覧取得から GitHub 通信を切り離し、保存済み PR を一覧と詳細に表示できるようにした。
+- 2026-05-31 GitHub token lookup を gh config/macOS Keychain 対応に変更。GUI app でも octocrab が認証済みで PR sync できるようにした。

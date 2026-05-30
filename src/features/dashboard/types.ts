@@ -29,11 +29,25 @@ export interface TaskSummaryRow {
   id: string;
   project: string | null;
   github_issue_number: number | null;
+  github_pull_requests: GithubPullRequestRef[];
   task_status: TaskStatus;
   task_run_status: TaskRunStatus | null;
   task_run_wait_reason: TaskRunWaitReason | null;
   status: DisplayStatus;
   branch: string | null;
+}
+
+export interface GithubPullRequestRef {
+  repo: string | null;
+  number: number | null;
+  url: string | null;
+}
+
+export interface PullRequestSyncResult {
+  status: "idle" | "synced" | "failed";
+  task_id: string | null;
+  pull_request_count: number;
+  error: string | null;
 }
 
 export interface Event {
@@ -52,6 +66,7 @@ export interface TaskView extends Omit<Task, "status"> {
   task_run_wait_reason: TaskRunWaitReason | null;
   project: string | null;
   githubIssueNumber: number | null;
+  githubPullRequests: GithubPullRequestRef[];
   branch: string | null;
 }
 

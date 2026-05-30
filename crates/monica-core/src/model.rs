@@ -365,10 +365,78 @@ impl Task {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GithubPullRequestRef {
+    pub repo: Option<String>,
+    pub number: Option<i64>,
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubPullRequest {
+    pub repo: String,
+    pub number: i64,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestSyncCandidate {
+    pub task_id: String,
+    pub source_ref_id: i64,
+    pub repo: String,
+    pub issue_number: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PullRequestSyncStatus {
+    Idle,
+    Synced,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PullRequestSyncResult {
+    pub status: PullRequestSyncStatus,
+    pub task_id: Option<String>,
+    pub pull_request_count: usize,
+    pub error: Option<String>,
+}
+
+impl PullRequestSyncResult {
+    pub fn idle() -> Self {
+        Self {
+            status: PullRequestSyncStatus::Idle,
+            task_id: None,
+            pull_request_count: 0,
+            error: None,
+        }
+    }
+
+    pub fn synced(task_id: impl Into<String>, pull_request_count: usize) -> Self {
+        Self {
+            status: PullRequestSyncStatus::Synced,
+            task_id: Some(task_id.into()),
+            pull_request_count,
+            error: None,
+        }
+    }
+
+    pub fn failed(task_id: impl Into<String>, error: impl Into<String>) -> Self {
+        Self {
+            status: PullRequestSyncStatus::Failed,
+            task_id: Some(task_id.into()),
+            pull_request_count: 0,
+            error: Some(error.into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskSummaryRow {
     pub id: String,
     pub project: Option<String>,
     pub github_issue_number: Option<i64>,
+    pub github_pull_requests: Vec<GithubPullRequestRef>,
     pub task_status: TaskStatus,
     pub task_run_status: Option<TaskRunStatus>,
     pub task_run_wait_reason: Option<TaskRunWaitReason>,

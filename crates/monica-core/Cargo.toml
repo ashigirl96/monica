@@ -11,5 +11,11 @@ anyhow = "1.0.102"
 # (which requires rusqlite ^0.39); mismatched versions double-link `sqlite3`.
 rusqlite = { version = "0.39", features = ["bundled"] }
 rusqlite_migration = "2.5.0"
+octocrab = { version = "0.51.0", default-features = false, features = [
+  "default-client",
+  "jwt-rust-crypto",
+  "rustls",
+  "rustls-ring",
+] }
 serde = { version = "1.0.228", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
