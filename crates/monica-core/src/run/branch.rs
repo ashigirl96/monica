@@ -4,15 +4,15 @@ use anyhow::{anyhow, Result};
 
 use crate::Project;
 
-pub fn monica_number(work_item_id: &str) -> Result<i64> {
-    work_item_id
+pub fn monica_number(task_id: &str) -> Result<i64> {
+    task_id
         .strip_prefix("MON-")
         .and_then(|n| n.parse::<i64>().ok())
         .filter(|n| *n > 0)
-        .ok_or_else(|| anyhow!("invalid work item id (expected MON-<n>): {work_item_id:?}"))
+        .ok_or_else(|| anyhow!("invalid task id (expected MON-<n>): {task_id:?}"))
 }
 
-/// The git branch a run works on: the linked GitHub issue number (`issue-9`), or the work item's
+/// The git branch a run works on: the linked GitHub issue number (`issue-9`), or the task's
 /// MON number when no issue is linked (`mon-1`). Both forms are already git-ref- and path-safe,
 /// so no further sanitization is needed before they reach a branch ref or worktree directory.
 pub fn branch_name(github_issue_number: Option<i64>, monica_number: i64) -> String {

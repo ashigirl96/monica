@@ -1,9 +1,9 @@
 import { cn } from "@/lib/utils";
 import { STATUS_META, statusColor } from "./statusMeta";
-import type { Status } from "./types";
+import type { DisplayStatus } from "./types";
 
 interface StatusLedProps {
-  status: Status;
+  status: DisplayStatus;
   size?: number;
   className?: string;
 }

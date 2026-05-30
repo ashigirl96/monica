@@ -6,14 +6,19 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use super::agent::{hook_command, shell_quote_single, AgentSessionMode, RunReport};
+use serde_json::json;
+
+use super::agent::{hook_command, shell_quote_single, AgentSessionMode, TaskRunReport};
 use super::branch::{branch_name, monica_number, sanitize_path_component, worktree_path_for};
 use super::issue::{run_issue, run_issue_with_session_mode};
 use super::setup::{run_setup_script, terminate_setup_process_tree, SetupEnv, SetupOutcome};
-use crate::model::{ExternalRef, NewRun, NewWorkItem, RefType, WorkItemKind};
+use crate::model::{
+    AgentSessionStatus, ExternalRef, NewAgentSession, NewTask, NewTaskRun, RefType, TaskKind,
+    TaskRunStatus, TaskStatus,
+};
 use crate::paths;
 use crate::test_support::Tmp;
-use crate::{delete_issue, launch_agent, Agent, AgentLaunch, Db, Project, Status};
+use crate::{delete_issue, launch_agent, Agent, AgentLaunch, Db, Project};
 
 #[cfg(unix)]
 fn set_exec(path: &Path) {
@@ -36,7 +41,7 @@ fn write_setup(worktree: &Path, body: &str) {
 fn sample_env() -> SetupEnv {
     SetupEnv {
         monica_id: "MON-1".to_string(),
-        run_id: "run-1".to_string(),
+        task_run_id: "run-1".to_string(),
         project_id: "ashigirl96/monica".to_string(),
         branch: "issue-9".to_string(),
         worktree: "/tmp/wt".to_string(),
@@ -331,8 +336,8 @@ fn worktree_registered(repo: &Path, worktree: &Path) -> bool {
 }
 
 fn tracked_item(db: &mut Db, title: &str, gh: Option<i64>) -> String {
-    let mut item = NewWorkItem::new(WorkItemKind::Development, title);
-    item.status = Status::Ready;
+    let mut item = NewTask::new(TaskKind::Development, title);
+    item.status = TaskStatus::Ready;
     item.project_id = Some("ashigirl96/monica".to_string());
     let external = ExternalRef::new(
         String::new(),
@@ -341,7 +346,7 @@ fn tracked_item(db: &mut Db, title: &str, gh: Option<i64>) -> String {
         gh,
         None,
     );
-    db.insert_work_item_with_ref(item, external).unwrap().id
+    db.insert_task_with_ref(item, external).unwrap().id
 }
 
 fn db_with_project(repo: &Path) -> Db {
@@ -369,7 +374,7 @@ fn run_issue_happy_path() {
 
     let report = run_issue(&mut db, &id, None).unwrap();
 
-    assert_eq!(report.status, Status::Running);
+    assert_eq!(report.status, TaskRunStatus::Running);
     assert_eq!(report.setup, SetupOutcome::Succeeded);
     assert_eq!(report.branch, "issue-9");
     assert!(Path::new(&report.worktree_path)
@@ -380,12 +385,15 @@ fn run_issue_happy_path() {
     assert!(log.contains("hello MON-1 issue-9"), "{log}");
 
     assert_eq!(
-        db.get_work_item(&id).unwrap().unwrap().status,
-        Status::Running
+        db.get_task(&id).unwrap().unwrap().status,
+        TaskStatus::Active
     );
     assert_eq!(
-        db.get_run(&report.run_id).unwrap().unwrap().status,
-        Status::Running
+        db.get_task_run(&report.task_run_id)
+            .unwrap()
+            .unwrap()
+            .status,
+        TaskRunStatus::Running
     );
 
     std::env::remove_var("MONICA_HOME");
@@ -404,7 +412,7 @@ fn run_issue_skips_setup_when_absent() {
 
     let report = run_issue(&mut db, &id, None).unwrap();
     assert_eq!(report.setup, SetupOutcome::Skipped);
-    assert_eq!(report.status, Status::Running);
+    assert_eq!(report.status, TaskRunStatus::Running);
     assert_eq!(report.branch, "mon-1");
 
     std::env::remove_var("MONICA_HOME");
@@ -422,15 +430,18 @@ fn run_issue_marks_failed_when_setup_fails() {
     let id = tracked_item(&mut db, "failing setup", Some(7));
 
     let report = run_issue(&mut db, &id, None).unwrap();
-    assert_eq!(report.status, Status::Failed);
+    assert_eq!(report.status, TaskRunStatus::Failed);
     assert!(report.setup.is_failure());
     assert_eq!(
-        db.get_work_item(&id).unwrap().unwrap().status,
-        Status::Failed
+        db.get_task(&id).unwrap().unwrap().status,
+        TaskStatus::Failed
     );
     assert_eq!(
-        db.get_run(&report.run_id).unwrap().unwrap().status,
-        Status::Failed
+        db.get_task_run(&report.task_run_id)
+            .unwrap()
+            .unwrap()
+            .status,
+        TaskRunStatus::Failed
     );
 
     std::env::remove_var("MONICA_HOME");
@@ -454,12 +465,12 @@ fn run_issue_rejects_rerun_when_worktree_exists() {
         "{err:#}"
     );
     // The first run's terminal state must survive the rejected rerun, and no phantom second
-    // run may be recorded (the guard fires before `start_run`).
+    // run may be recorded (the guard fires before `start_task_run`).
     assert_eq!(
-        db.get_work_item(&id).unwrap().unwrap().status,
-        Status::Running
+        db.get_task(&id).unwrap().unwrap().status,
+        TaskStatus::Active
     );
-    assert!(db.get_run("run-2").unwrap().is_none());
+    assert!(db.get_task_run("run-2").unwrap().is_none());
 
     std::env::remove_var("MONICA_HOME");
 }
@@ -480,12 +491,13 @@ fn run_issue_continue_reuses_existing_worktree_with_new_run() {
     let id = tracked_item(&mut db, "continue session", Some(9));
 
     let first = run_issue(&mut db, &id, None).unwrap();
-    assert_eq!(first.run_id, "run-1");
+    assert_eq!(first.task_run_id, "run-1");
     assert_eq!(
         fs::read_to_string(Path::new(&first.worktree_path).join("setup-count.txt")).unwrap(),
         "setup run-1\n"
     );
-    db.finish_run(&first.run_id, &id, Status::Stopped).unwrap();
+    db.finish_task_run(&first.task_run_id, &id, TaskRunStatus::Stopped)
+        .unwrap();
 
     let report = run_issue_with_session_mode(
         &mut db,
@@ -495,7 +507,7 @@ fn run_issue_continue_reuses_existing_worktree_with_new_run() {
     )
     .unwrap();
 
-    assert_eq!(report.run_id, "run-2");
+    assert_eq!(report.task_run_id, "run-2");
     assert_eq!(report.setup, SetupOutcome::ReusedWorktree);
     assert_eq!(report.worktree_path, first.worktree_path);
     assert_eq!(
@@ -523,12 +535,15 @@ fn run_issue_continue_reuses_existing_worktree_with_new_run() {
     let prompt_txt = home.path().join("runs").join("run-2").join("prompt.txt");
     assert_eq!(fs::read_to_string(&prompt_txt).unwrap(), "");
     assert_eq!(
-        db.get_run(&first.run_id).unwrap().unwrap().status,
-        Status::Stopped
+        db.get_task_run(&first.task_run_id).unwrap().unwrap().status,
+        TaskRunStatus::Stopped
     );
     assert_eq!(
-        db.get_run(&report.run_id).unwrap().unwrap().status,
-        Status::Running
+        db.get_task_run(&report.task_run_id)
+            .unwrap()
+            .unwrap()
+            .status,
+        TaskRunStatus::Running
     );
 
     std::env::remove_var("MONICA_HOME");
@@ -545,7 +560,8 @@ fn run_issue_continue_uses_recorded_worktree_after_project_config_changes() {
     let mut db = db_with_project(repo.path());
     let id = tracked_item(&mut db, "continue after config change", Some(9));
     let first = run_issue(&mut db, &id, None).unwrap();
-    db.finish_run(&first.run_id, &id, Status::Stopped).unwrap();
+    db.finish_task_run(&first.task_run_id, &id, TaskRunStatus::Stopped)
+        .unwrap();
 
     let changed_root = home.path().join("changed-root");
     db.set_project_field(
@@ -576,7 +592,7 @@ fn run_issue_continue_uses_recorded_worktree_after_project_config_changes() {
         first.worktree_path
     );
     assert_eq!(
-        db.get_run(&report.run_id)
+        db.get_task_run(&report.task_run_id)
             .unwrap()
             .unwrap()
             .worktree_path
@@ -598,7 +614,8 @@ fn run_issue_fork_resumes_parent_session_in_existing_worktree() {
     let mut db = db_with_project(repo.path());
     let id = tracked_item(&mut db, "fork session", Some(9));
     let first = run_issue(&mut db, &id, None).unwrap();
-    db.finish_run(&first.run_id, &id, Status::Stopped).unwrap();
+    db.finish_task_run(&first.task_run_id, &id, TaskRunStatus::Stopped)
+        .unwrap();
 
     let report = run_issue_with_session_mode(
         &mut db,
@@ -647,7 +664,7 @@ fn run_issue_reconnect_requires_existing_worktree_and_claude() {
     )
     .unwrap_err();
     assert!(format!("{err:#}").contains("no recorded worktree"));
-    assert!(db.get_run("run-1").unwrap().is_none());
+    assert!(db.get_task_run("run-1").unwrap().is_none());
 
     let err =
         run_issue_with_session_mode(&mut db, &id, None, AgentSessionMode::Continue).unwrap_err();
@@ -676,9 +693,9 @@ fn delete_issue_cleans_worktree_and_branch_then_allows_retrack_rerun() {
 
     let deleted = delete_issue(&mut db, &first_id).unwrap();
     assert_eq!(deleted.item.id, first_id);
-    assert_eq!(deleted.removed_runs, vec![first.run_id]);
+    assert_eq!(deleted.removed_task_runs, vec![first.task_run_id]);
     assert_eq!(deleted.removed_branches, vec!["issue-9".to_string()]);
-    assert!(db.get_work_item(&first_id).unwrap().is_none());
+    assert!(db.get_task(&first_id).unwrap().is_none());
     assert!(!Path::new(&first.worktree_path).exists());
     assert!(!branch_exists(repo.path(), "issue-9"));
 
@@ -709,9 +726,9 @@ fn delete_issue_prunes_stale_worktree_metadata_after_manual_directory_removal() 
 
     let deleted = delete_issue(&mut db, &first_id).unwrap();
     assert_eq!(deleted.item.id, first_id);
-    assert_eq!(deleted.removed_runs, vec![first.run_id]);
+    assert_eq!(deleted.removed_task_runs, vec![first.task_run_id]);
     assert_eq!(deleted.removed_branches, vec!["issue-9".to_string()]);
-    assert!(db.get_work_item(&first_id).unwrap().is_none());
+    assert!(db.get_task(&first_id).unwrap().is_none());
     assert!(!branch_exists(repo.path(), "issue-9"));
 
     let second_id = tracked_item(&mut db, "manual cleanup again", Some(9));
@@ -742,9 +759,9 @@ fn delete_issue_tolerates_worktree_already_removed_by_git() {
 
     let deleted = delete_issue(&mut db, &first_id).unwrap();
     assert_eq!(deleted.item.id, first_id);
-    assert_eq!(deleted.removed_runs, vec![first.run_id]);
+    assert_eq!(deleted.removed_task_runs, vec![first.task_run_id]);
     assert_eq!(deleted.removed_branches, vec!["issue-9".to_string()]);
-    assert!(db.get_work_item(&first_id).unwrap().is_none());
+    assert!(db.get_task(&first_id).unwrap().is_none());
     assert!(!branch_exists(repo.path(), "issue-9"));
 
     std::env::remove_var("MONICA_HOME");
@@ -802,7 +819,7 @@ fn run_issue_failure_after_start_run_settles_failed() {
     let id = tracked_item(&mut db, "stuck guard", Some(9));
 
     // Block `runs/run-1` creation: place a regular file where the run dir must go, so
-    // create_dir_all fails *after* start_run has moved the work item to setting_up.
+    // create_dir_all fails *after* start_task_run has moved the task to setting_up.
     let runs = home.path().join("runs");
     fs::create_dir_all(&runs).unwrap();
     fs::write(runs.join("run-1"), "x").unwrap();
@@ -810,13 +827,13 @@ fn run_issue_failure_after_start_run_settles_failed() {
     let result = run_issue(&mut db, &id, None);
     assert!(result.is_err(), "internal failure must propagate");
     assert_eq!(
-        db.get_work_item(&id).unwrap().unwrap().status,
-        Status::Failed,
-        "work item must not be stranded in setting_up"
+        db.get_task(&id).unwrap().unwrap().status,
+        TaskStatus::Failed,
+        "task must not be stranded in setting_up"
     );
     assert_eq!(
-        db.get_run("run-1").unwrap().unwrap().status,
-        Status::Failed,
+        db.get_task_run("run-1").unwrap().unwrap().status,
+        TaskRunStatus::Failed,
         "run must be settled to failed"
     );
 
@@ -827,7 +844,7 @@ fn run_issue_failure_after_start_run_settles_failed() {
 fn run_issue_errors_without_project() {
     let mut db = Db::open_in_memory().unwrap();
     let id = db
-        .insert_work_item(NewWorkItem::new(WorkItemKind::Development, "orphan"))
+        .insert_task(NewTask::new(TaskKind::Development, "orphan"))
         .unwrap()
         .id;
     assert!(run_issue(&mut db, &id, None).is_err());
@@ -872,7 +889,7 @@ fn run_issue_with_claude_builds_launch_spec_and_records_settings_path() {
 
     let report = run_issue(&mut db, &id, Some(Agent::Claude)).unwrap();
 
-    assert_eq!(report.status, Status::Running);
+    assert_eq!(report.status, TaskRunStatus::Running);
     let launch = report
         .agent_launch
         .as_ref()
@@ -899,7 +916,7 @@ fn run_issue_with_claude_builds_launch_spec_and_records_settings_path() {
     assert_eq!(env_value(launch, "MONICA_ID"), Some(id.as_str()));
     assert_eq!(
         env_value(launch, "MONICA_RUN_ID"),
-        Some(report.run_id.as_str())
+        Some(report.task_run_id.as_str())
     );
     assert_eq!(
         env_value(launch, "MONICA_PROJECT_ID"),
@@ -909,7 +926,7 @@ fn run_issue_with_claude_builds_launch_spec_and_records_settings_path() {
     let prompt_txt = home
         .path()
         .join("runs")
-        .join(&report.run_id)
+        .join(&report.task_run_id)
         .join("prompt.txt");
     assert_eq!(
         fs::read_to_string(&prompt_txt).unwrap(),
@@ -941,8 +958,8 @@ fn run_issue_with_claude_builds_launch_spec_and_records_settings_path() {
         );
     }
 
-    let run = db.get_run(&report.run_id).unwrap().unwrap();
-    assert_eq!(run.status, Status::Running);
+    let run = db.get_task_run(&report.task_run_id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::Running);
     assert_eq!(run.settings_path.as_deref(), Some(settings_path));
     assert_eq!(
         run.agent.as_deref(),
@@ -974,7 +991,7 @@ fn run_issue_with_claude_handles_missing_prompt() {
     let prompt_txt = home
         .path()
         .join("runs")
-        .join(&report.run_id)
+        .join(&report.task_run_id)
         .join("prompt.txt");
     assert_eq!(fs::read_to_string(&prompt_txt).unwrap(), "");
 
@@ -997,17 +1014,17 @@ fn run_issue_with_claude_skips_launch_when_setup_fails() {
     let id = tracked_item(&mut db, "broken setup", Some(9));
 
     let report = run_issue(&mut db, &id, Some(Agent::Claude)).unwrap();
-    assert_eq!(report.status, Status::Failed);
+    assert_eq!(report.status, TaskRunStatus::Failed);
     assert!(report.agent_launch.is_none());
     assert!(report.settings_path.is_none());
 
-    let run_dir = home.path().join("runs").join(&report.run_id);
+    let task_run_dir = home.path().join("runs").join(&report.task_run_id);
     assert!(
-        !run_dir.join("claude-settings.json").exists(),
+        !task_run_dir.join("claude-settings.json").exists(),
         "no settings file may be left behind when setup fails"
     );
     assert!(
-        !run_dir.join("prompt.txt").exists(),
+        !task_run_dir.join("prompt.txt").exists(),
         "no prompt.txt may be left behind when setup fails"
     );
 
@@ -1026,7 +1043,7 @@ fn run_issue_with_claude_settles_failed_when_settings_write_fails() {
     let id = tracked_item(&mut db, "claude settings write fail", Some(9));
 
     // Place a directory where build_claude_launch wants to write claude-settings.json, so
-    // the write fails *after* start_run has moved the work item to setting_up. This exercises
+    // the write fails *after* start_task_run has moved the task to setting_up. This exercises
     // the failed-settle guard inside the agent prep arm (run.rs:348-354), distinct from the
     // setup_phase guard already covered above.
     let settings_blocker = home
@@ -1042,14 +1059,19 @@ fn run_issue_with_claude_settles_failed_when_settings_write_fails() {
         "build_claude_launch failure must propagate"
     );
     assert_eq!(
-        db.get_work_item(&id).unwrap().unwrap().status,
-        Status::Failed,
-        "work item must not be stranded in setting_up when agent prep fails"
+        db.get_task(&id).unwrap().unwrap().status,
+        TaskStatus::Failed,
+        "task must not be stranded in setting_up when agent prep fails"
     );
     assert_eq!(
-        db.get_run("run-1").unwrap().unwrap().status,
-        Status::Failed,
+        db.get_task_run("run-1").unwrap().unwrap().status,
+        TaskRunStatus::Failed,
         "run must be settled to failed when agent prep fails"
+    );
+    assert_eq!(
+        db.get_agent_session("session-1").unwrap().unwrap().status,
+        AgentSessionStatus::Failed,
+        "agent session must not remain starting when agent prep fails"
     );
 
     std::env::remove_var("MONICA_HOME");
@@ -1068,7 +1090,7 @@ fn run_issue_without_agent_records_none_for_run_agent() {
 
     let report = run_issue(&mut db, &id, None).unwrap();
     assert!(report.agent_launch.is_none());
-    let run = db.get_run(&report.run_id).unwrap().unwrap();
+    let run = db.get_task_run(&report.task_run_id).unwrap().unwrap();
     assert_eq!(
         run.agent, None,
         "a no-flag run must not record an agent it never launched"
@@ -1079,16 +1101,17 @@ fn run_issue_without_agent_records_none_for_run_agent() {
 
 // ---- launch_agent (no real claude needed — failure path uses a bogus program) ----
 
-fn run_report_stub(work_item_id: &str, run_id: &str, launch: Option<AgentLaunch>) -> RunReport {
-    RunReport {
-        work_item_id: work_item_id.to_string(),
-        run_id: run_id.to_string(),
+fn run_report_stub(task_id: &str, task_run_id: &str, launch: Option<AgentLaunch>) -> TaskRunReport {
+    TaskRunReport {
+        task_id: task_id.to_string(),
+        task_run_id: task_run_id.to_string(),
         branch: "issue-1".to_string(),
         worktree_path: "/tmp/wt".to_string(),
-        status: Status::Running,
+        status: TaskRunStatus::Running,
         setup: SetupOutcome::Skipped,
         log_path: "/tmp/setup.log".to_string(),
         settings_path: launch.as_ref().and_then(|l| l.args.get(1).cloned()),
+        agent_session_id: None,
         agent_launch: launch,
     }
 }
@@ -1097,11 +1120,11 @@ fn run_report_stub(work_item_id: &str, run_id: &str, launch: Option<AgentLaunch>
 fn launch_agent_is_noop_when_report_has_no_launch() {
     let mut db = Db::open_in_memory().unwrap();
     let item = db
-        .insert_work_item(NewWorkItem::new(WorkItemKind::Development, "no-op"))
+        .insert_task(NewTask::new(TaskKind::Development, "no-op"))
         .unwrap();
     let run = db
-        .start_run(NewRun {
-            work_item_id: item.id.clone(),
+        .start_task_run(NewTaskRun {
+            task_id: item.id.clone(),
             agent: None,
             branch: Some("issue-1".to_string()),
             worktree_path: Some("/tmp/wt".to_string()),
@@ -1113,8 +1136,8 @@ fn launch_agent_is_noop_when_report_has_no_launch() {
 
     // The run must be untouched: no agent_launch means no spawn and no settle.
     assert_eq!(
-        db.get_run(&run.id).unwrap().unwrap().status,
-        Status::SettingUp
+        db.get_task_run(&run.id).unwrap().unwrap().status,
+        TaskRunStatus::SettingUp
     );
 }
 
@@ -1122,18 +1145,29 @@ fn launch_agent_is_noop_when_report_has_no_launch() {
 fn launch_agent_settles_failed_when_spawn_fails() {
     let mut db = Db::open_in_memory().unwrap();
     let item = db
-        .insert_work_item({
-            let mut i = NewWorkItem::new(WorkItemKind::Development, "spawn fail");
-            i.status = Status::Ready;
+        .insert_task({
+            let mut i = NewTask::new(TaskKind::Development, "spawn fail");
+            i.status = TaskStatus::Ready;
             i
         })
         .unwrap();
     let run = db
-        .start_run(NewRun {
-            work_item_id: item.id.clone(),
+        .start_task_run(NewTaskRun {
+            task_id: item.id.clone(),
             agent: Some(Agent::Claude),
             branch: Some("issue-1".to_string()),
             worktree_path: Some("/tmp/wt".to_string()),
+        })
+        .unwrap();
+    let session = db
+        .create_agent_session(NewAgentSession {
+            task_id: item.id.clone(),
+            task_run_id: run.id.clone(),
+            agent: Agent::Claude,
+            mode: "new".to_string(),
+            provider_session_id: None,
+            parent_session_id: None,
+            metadata: json!({}),
         })
         .unwrap();
 
@@ -1145,18 +1179,24 @@ fn launch_agent_settles_failed_when_spawn_fails() {
         cwd: "/tmp".to_string(),
         env: vec![],
     };
-    let report = run_report_stub(&item.id, &run.id, Some(launch));
+    let mut report = run_report_stub(&item.id, &run.id, Some(launch));
+    report.agent_session_id = Some(session.id.clone());
 
     let err = launch_agent(&mut db, &report).unwrap_err();
     assert!(format!("{err:#}").contains("failed to launch"), "{err:#}");
     assert_eq!(
-        db.get_run(&run.id).unwrap().unwrap().status,
-        Status::Failed,
+        db.get_task_run(&run.id).unwrap().unwrap().status,
+        TaskRunStatus::Failed,
         "spawn failure must settle the run to failed, not leave it stranded"
     );
     assert_eq!(
-        db.get_work_item(&item.id).unwrap().unwrap().status,
-        Status::Failed,
-        "the work item must move in lockstep with the run"
+        db.get_task(&item.id).unwrap().unwrap().status,
+        TaskStatus::Failed,
+        "the task must move in lockstep with the run"
+    );
+    assert_eq!(
+        db.get_agent_session(&session.id).unwrap().unwrap().status,
+        AgentSessionStatus::Failed,
+        "spawn failure must settle the agent session too"
     );
 }

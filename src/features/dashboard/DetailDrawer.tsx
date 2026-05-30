@@ -3,11 +3,11 @@ import { GitBranch, X } from "lucide-react";
 import { EventTimeline } from "./EventTimeline";
 import { StatusLed } from "./StatusLed";
 import { STATUS_META, statusColor } from "./statusMeta";
-import type { WorkItemView } from "./types";
+import type { TaskView } from "./types";
 import { useEvents } from "./useEvents";
 
 interface DetailDrawerProps {
-  item: WorkItemView | null;
+  item: TaskView | null;
   onClose: () => void;
 }
 

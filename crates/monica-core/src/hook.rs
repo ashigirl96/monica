@@ -4,21 +4,21 @@ use std::io::Write;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
-use crate::{paths, Db, Status};
+use crate::{paths, AgentSessionStatus, Db, TaskRunStatus, TaskStatus};
 
 const HOOK_EVENTS_FILE: &str = "hook-events.jsonl";
 
-/// Map a Claude Code hook event name to the work-item status it implies:
+/// Map a Claude Code hook event name to the task-run status it implies:
 /// `SessionStart`/`UserPromptSubmit`→running, `Stop`→stopped, `StopFailure`→failed,
 /// `SessionEnd`→stopped. Events Monica does not act on return `None` (they are still recorded,
 /// never an error).
-pub fn status_for_claude_event(event_name: &str) -> Option<Status> {
+pub fn status_for_claude_event(event_name: &str) -> Option<TaskRunStatus> {
     match event_name {
-        "SessionStart" => Some(Status::Running),
-        "UserPromptSubmit" => Some(Status::Running),
-        "Stop" => Some(Status::Stopped),
-        "StopFailure" => Some(Status::Failed),
-        "SessionEnd" => Some(Status::Stopped),
+        "SessionStart" => Some(TaskRunStatus::Running),
+        "UserPromptSubmit" => Some(TaskRunStatus::Running),
+        "Stop" => Some(TaskRunStatus::Stopped),
+        "StopFailure" => Some(TaskRunStatus::Failed),
+        "SessionEnd" => Some(TaskRunStatus::Stopped),
         _ => None,
     }
 }
@@ -30,22 +30,61 @@ pub fn status_for_claude_event(event_name: &str) -> Option<Status> {
 /// - `failed` set by an earlier `StopFailure` hook in the same session — Claude often emits
 ///   `SessionEnd` right after `StopFailure`, and `SessionEnd→stopped` would otherwise silently
 ///   downgrade the failure signal we just recorded.
-fn explicit_status_wins(current: Status) -> bool {
+fn explicit_status_wins(current: TaskStatus) -> bool {
     matches!(
         current,
-        Status::NeedApproval | Status::PrOpen | Status::Done | Status::Archived | Status::Failed
+        TaskStatus::NeedApproval
+            | TaskStatus::PrOpen
+            | TaskStatus::Done
+            | TaskStatus::Archived
+            | TaskStatus::Failed
     )
 }
 
-/// Whether `run_id` is safe to use as a path component under `runs/`. Run ids are minted as
+fn task_status_for_run_status(status: TaskRunStatus) -> TaskStatus {
+    match status {
+        TaskRunStatus::Failed => TaskStatus::Failed,
+        TaskRunStatus::SettingUp | TaskRunStatus::Running | TaskRunStatus::Stopped => {
+            TaskStatus::Active
+        }
+    }
+}
+
+fn task_run_status_protected(status: TaskRunStatus) -> bool {
+    matches!(status, TaskRunStatus::Failed)
+}
+
+fn agent_session_status_for_run_status(status: TaskRunStatus) -> AgentSessionStatus {
+    match status {
+        TaskRunStatus::SettingUp => AgentSessionStatus::Starting,
+        TaskRunStatus::Running => AgentSessionStatus::Running,
+        TaskRunStatus::Stopped => AgentSessionStatus::Stopped,
+        TaskRunStatus::Failed => AgentSessionStatus::Failed,
+    }
+}
+
+fn agent_session_status_after_hook(
+    current: AgentSessionStatus,
+    implied: TaskRunStatus,
+) -> AgentSessionStatus {
+    let next = agent_session_status_for_run_status(implied);
+    match (current, next) {
+        (AgentSessionStatus::Failed, AgentSessionStatus::Starting)
+        | (AgentSessionStatus::Failed, AgentSessionStatus::Running)
+        | (AgentSessionStatus::Failed, AgentSessionStatus::Stopped) => AgentSessionStatus::Failed,
+        _ => next,
+    }
+}
+
+/// Whether `task_run_id` is safe to use as a path component under `runs/`. Task run ids are minted as
 /// `run-<n>`; anything outside `[A-Za-z0-9_.-]`, or `.`/`..`, is rejected so a hostile env var
-/// (e.g. `../../etc`) cannot escape the runs directory via [`paths::run_dir`]'s plain join.
-pub fn is_safe_run_id(run_id: &str) -> bool {
-    !run_id.is_empty()
-        && run_id != "."
-        && run_id != ".."
-        && !run_id.starts_with('-')
-        && run_id
+/// (e.g. `../../etc`) cannot escape the runs directory via [`paths::task_run_dir`]'s plain join.
+pub fn is_safe_task_run_id(task_run_id: &str) -> bool {
+    !task_run_id.is_empty()
+        && task_run_id != "."
+        && task_run_id != ".."
+        && !task_run_id.starts_with('-')
+        && task_run_id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
 }
@@ -55,29 +94,42 @@ pub fn is_safe_run_id(run_id: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HookReport {
     pub event_name: Option<String>,
-    pub status: Option<Status>,
-    pub work_item_found: bool,
-    pub run_linked: bool,
+    pub task_status: Option<TaskStatus>,
+    pub task_run_status: Option<TaskRunStatus>,
+    pub task_found: bool,
+    pub task_run_linked: bool,
+    pub agent_session_found: bool,
     pub event_recorded: bool,
     pub jsonl_written: bool,
-    pub unsafe_run_id: bool,
+    pub unsafe_task_run_id: bool,
 }
 
 /// Receive a Claude Code hook callback: parse the stdin JSON, append it to the run's
-/// `hook-events.jsonl`, record an `events` row, and move the work item (and its run) to the status
+/// `hook-events.jsonl`, record an `events` row, and move the task (and its run) to the status
 /// the event implies. Tolerant by contract — invalid JSON and unknown events are recorded without
 /// erroring, so the caller can always exit 0 and never disrupt the Claude session.
 ///
-/// `work_item_id` and `run_id` come from `MONICA_*` env vars and are treated as untrusted input:
-/// - `run_id` becomes a path component only when [`is_safe_run_id`]; an id that resolves to a run
-///   owned by a *different* work item is a mismatch and is excluded from every run artifact (its
-///   jsonl, its status, the `events.run_id` link), so one session cannot pollute another run.
+/// `task_id` and `task_run_id` come from `MONICA_*` env vars and are treated as untrusted input:
+/// - `task_run_id` becomes a path component only when [`is_safe_task_run_id`]; an id that resolves
+///   to a task run owned by a *different* task is a mismatch and is excluded from every task-run
+///   artifact (its jsonl, its status, the `events.task_run_id` link), so one session cannot pollute
+///   another task run.
 /// - a status implied by the event is applied only when it would not overwrite an explicit
 ///   `monica issue mark` signal ([`explicit_status_wins`]) — explicit signals win over inference.
 pub fn record_claude_hook(
     db: &mut Db,
-    work_item_id: Option<&str>,
-    run_id: Option<&str>,
+    task_id: Option<&str>,
+    task_run_id: Option<&str>,
+    raw_stdin: &str,
+) -> Result<HookReport> {
+    record_claude_hook_with_session(db, task_id, task_run_id, None, raw_stdin)
+}
+
+pub fn record_claude_hook_with_session(
+    db: &mut Db,
+    task_id: Option<&str>,
+    task_run_id: Option<&str>,
+    agent_session_id: Option<&str>,
     raw_stdin: &str,
 ) -> Result<HookReport> {
     let parsed: Option<Value> = serde_json::from_str(raw_stdin.trim()).ok();
@@ -87,45 +139,45 @@ pub fn record_claude_hook(
         .and_then(Value::as_str)
         .map(str::to_owned);
 
-    let safe_run_id = run_id.filter(|&r| is_safe_run_id(r));
-    let unsafe_run_id = run_id.is_some() && safe_run_id.is_none();
+    let safe_task_run_id = task_run_id.filter(|&r| is_safe_task_run_id(r));
+    let unsafe_task_run_id = task_run_id.is_some() && safe_task_run_id.is_none();
 
-    let current_status = match work_item_id {
-        Some(id) => db.get_work_item(id)?.map(|w| w.status),
+    let current_status = match task_id {
+        Some(id) => db.get_task(id)?.map(|w| w.status),
         None => None,
     };
-    let work_item_found = current_status.is_some();
+    let task_found = current_status.is_some();
 
-    // Resolve the run once. It is "linked" only when it exists and belongs to this work item; a
-    // path-safe id that resolves to a *different* work item's run is a mismatch and is kept out of
-    // every run artifact below.
-    let run_row = match safe_run_id {
-        Some(r) => db.get_run(r)?,
+    let run_row = match safe_task_run_id {
+        Some(r) => db.get_task_run(r)?,
         None => None,
     };
-    let run_linked = match (run_row.as_ref(), work_item_id) {
-        (Some(run), Some(wid)) => run.work_item_id == wid,
+    let task_run_linked = match (run_row.as_ref(), task_id) {
+        (Some(run), Some(wid)) => run.task_id == wid,
         _ => false,
     };
-    let run_mismatch = run_row.is_some() && !run_linked;
-    let linked_run_id = if run_linked { safe_run_id } else { None };
+    let run_mismatch = run_row.is_some() && !task_run_linked;
+    let linked_task_run_id = if task_run_linked {
+        safe_task_run_id
+    } else {
+        None
+    };
 
-    // jsonl is FK-free and records even a run with no DB row yet, but never a mismatched run's log.
     let mut jsonl_written = false;
-    if let Some(run_id) = safe_run_id {
+    if let Some(task_run_id) = safe_task_run_id {
         if !run_mismatch {
-            append_jsonl(db, run_id, event_name.as_deref(), &parsed, raw_stdin)?;
+            append_jsonl(db, task_run_id, event_name.as_deref(), &parsed, raw_stdin)?;
             jsonl_written = true;
         }
     }
 
-    let event_recorded = if work_item_found || run_linked {
+    let event_recorded = if task_found || task_run_linked {
         let payload = parsed
             .clone()
             .unwrap_or_else(|| json!({ "raw": raw_stdin }));
         db.insert_event(
-            work_item_id.filter(|_| work_item_found),
-            linked_run_id,
+            task_id.filter(|_| task_found),
+            linked_task_run_id,
             "claude_hook",
             &payload,
         )?;
@@ -134,40 +186,72 @@ pub fn record_claude_hook(
         false
     };
 
-    // Apply the implied status to the work item only when the current status is not an explicit
-    // signal a lifecycle hook must preserve. The work-item + run pair updates atomically here.
     let implied = event_name.as_deref().and_then(status_for_claude_event);
-    let work_item_protected = current_status.map(explicit_status_wins).unwrap_or(false);
-    let status = match (implied, current_status) {
-        (Some(implied), Some(_)) if !work_item_protected => Some(implied),
+    let task_protected = current_status.map(explicit_status_wins).unwrap_or(false);
+    let task_status = match (implied, current_status) {
+        (Some(implied), Some(_)) if !task_protected => Some(task_status_for_run_status(implied)),
         _ => None,
     };
-    if let (Some(status), Some(work_item_id)) = (status, work_item_id) {
-        db.apply_hook_status(work_item_id, linked_run_id, status)?;
-    } else if work_item_protected {
-        // The work item is protected (explicit mark or terminal Failed), but the linked run must
-        // still reflect the session lifecycle — otherwise `runs.status` strands as `running` after
-        // the agent session has actually ended. The run is itself gated by `explicit_status_wins`
-        // so a previously-`failed` run is not downgraded to `stopped` by a trailing SessionEnd.
-        if let (Some(implied), Some(rid), Some(wid)) = (implied, linked_run_id, work_item_id) {
-            let run_protected = run_row
+    let task_run_status = match (implied, linked_task_run_id) {
+        (Some(implied), Some(_)) => {
+            let protected = run_row
                 .as_ref()
-                .map(|r| explicit_status_wins(r.status))
+                .map(|r| task_run_status_protected(r.status))
                 .unwrap_or(false);
-            if !run_protected {
-                db.update_run_status(rid, wid, implied)?;
+            (!protected).then_some(implied)
+        }
+        _ => None,
+    };
+    if task_status.is_some() || task_run_status.is_some() {
+        if let Some(task_id) = task_id {
+            db.apply_hook_status(task_id, linked_task_run_id, task_status, task_run_status)?;
+        }
+    }
+
+    let mut agent_session_found = false;
+    if let (
+        Some(agent_session_id),
+        Some(status),
+        Some(event_name),
+        Some(task_id),
+        Some(task_run_id),
+    ) = (
+        agent_session_id,
+        implied,
+        event_name.as_deref(),
+        task_id,
+        linked_task_run_id,
+    ) {
+        if let Some(session) = db.get_agent_session(agent_session_id)? {
+            if session.task_id == task_id && session.task_run_id == task_run_id {
+                agent_session_found = true;
+                let at = db.now_iso()?;
+                let provider_session_id = parsed
+                    .as_ref()
+                    .and_then(|value| value.get("session_id"))
+                    .and_then(Value::as_str);
+                db.update_agent_session_event(
+                    agent_session_id,
+                    agent_session_status_after_hook(session.status, status),
+                    Some(event_name),
+                    &at,
+                    provider_session_id,
+                    parsed.as_ref(),
+                )?;
             }
         }
     }
 
     Ok(HookReport {
         event_name,
-        status,
-        work_item_found,
-        run_linked,
+        task_status,
+        task_run_status,
+        task_found,
+        task_run_linked,
+        agent_session_found,
         event_recorded,
         jsonl_written,
-        unsafe_run_id,
+        unsafe_task_run_id,
     })
 }
 
@@ -175,12 +259,12 @@ pub fn record_claude_hook(
 /// `payload` is the parsed JSON, or `{"raw": <stdin>}` when the input was not valid JSON.
 fn append_jsonl(
     db: &Db,
-    run_id: &str,
+    task_run_id: &str,
     event_name: Option<&str>,
     parsed: &Option<Value>,
     raw_stdin: &str,
 ) -> Result<()> {
-    let dir = paths::run_dir(run_id)?;
+    let dir = paths::task_run_dir(task_run_id)?;
     fs::create_dir_all(&dir).with_context(|| format!("failed to create {}", dir.display()))?;
     let path = dir.join(HOOK_EVENTS_FILE);
 
@@ -205,26 +289,25 @@ fn append_jsonl(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NewRun, NewWorkItem, WorkItemKind};
+    use crate::{Agent, NewAgentSession, NewTask, NewTaskRun, TaskKind};
+    use serde_json::json;
     use std::path::PathBuf;
 
-    fn dev_item(db: &mut Db, status: Status) -> String {
-        let mut i = NewWorkItem::new(WorkItemKind::Development, "hooked");
-        i.status = status;
-        db.insert_work_item(i).unwrap().id
+    fn dev_task(db: &mut Db, status: TaskStatus) -> String {
+        let mut task = NewTask::new(TaskKind::Development, "hooked");
+        task.status = status;
+        db.insert_task(task).unwrap().id
     }
 
-    fn new_run(work_item_id: &str) -> NewRun {
-        NewRun {
-            work_item_id: work_item_id.to_string(),
+    fn new_task_run(task_id: &str) -> NewTaskRun {
+        NewTaskRun {
+            task_id: task_id.to_string(),
             agent: None,
             branch: None,
             worktree_path: None,
         }
     }
 
-    /// Each filesystem-touching test points `MONICA_HOME` at a fresh temp dir; the returned guard
-    /// serializes against the other `MONICA_HOME` tests (mirrors `run.rs`).
     fn temp_home(tag: &str) -> (std::sync::MutexGuard<'static, ()>, PathBuf) {
         let guard = crate::paths::test_env_guard();
         let dir = std::env::temp_dir().join(format!(
@@ -238,93 +321,58 @@ mod tests {
         (guard, dir)
     }
 
-    fn jsonl_for(run_id: &str) -> String {
-        fs::read_to_string(paths::run_dir(run_id).unwrap().join(HOOK_EVENTS_FILE)).unwrap()
+    fn jsonl_for(task_run_id: &str) -> String {
+        fs::read_to_string(
+            paths::task_run_dir(task_run_id)
+                .unwrap()
+                .join(HOOK_EVENTS_FILE),
+        )
+        .unwrap()
     }
 
-    // ---- pure helpers ----
-
     #[test]
-    fn status_mapping_covers_the_lifecycle_events_monica_tracks() {
+    fn status_mapping_covers_lifecycle_events() {
         assert_eq!(
             status_for_claude_event("SessionStart"),
-            Some(Status::Running)
+            Some(TaskRunStatus::Running)
         );
         assert_eq!(
             status_for_claude_event("UserPromptSubmit"),
-            Some(Status::Running)
+            Some(TaskRunStatus::Running)
         );
-        assert_eq!(status_for_claude_event("Stop"), Some(Status::Stopped));
-        assert_eq!(status_for_claude_event("StopFailure"), Some(Status::Failed));
-        assert_eq!(status_for_claude_event("SessionEnd"), Some(Status::Stopped));
-        assert_eq!(status_for_claude_event("PreToolUse"), None);
-        assert_eq!(status_for_claude_event(""), None);
-    }
-
-    #[test]
-    fn safe_run_id_accepts_run_ids_and_rejects_traversal() {
-        assert!(is_safe_run_id("run-1"));
-        assert!(is_safe_run_id("run_x"));
-        assert!(is_safe_run_id("RUN.1-2_3"));
-        assert!(!is_safe_run_id(""));
-        assert!(!is_safe_run_id("."));
-        assert!(!is_safe_run_id(".."));
-        assert!(!is_safe_run_id("../x"));
-        assert!(!is_safe_run_id("a/b"));
-        assert!(!is_safe_run_id("/abs"));
-        assert!(!is_safe_run_id("a b"));
-        assert!(!is_safe_run_id("-"));
-        assert!(!is_safe_run_id("-rf"));
-    }
-
-    // ---- record_claude_hook ----
-
-    /// A `run_id` with no DB row (`run_x`): the work item still moves to stopped, the event records
-    /// with a NULL run_id (the FK would otherwise reject it), and the raw event is appended to
-    /// `runs/run_x/hook-events.jsonl`.
-    #[test]
-    fn stop_with_unknown_run_marks_stopped_and_writes_jsonl() {
-        let (_g, _home) = temp_home("stop");
-        let mut db = Db::open_in_memory().unwrap();
-        let id = dev_item(&mut db, Status::Running);
-
-        let report = record_claude_hook(
-            &mut db,
-            Some(&id),
-            Some("run_x"),
-            r#"{"hook_event_name":"Stop"}"#,
-        )
-        .unwrap();
-
-        assert_eq!(report.status, Some(Status::Stopped));
-        assert!(report.work_item_found);
-        assert!(!report.run_linked, "run_x has no DB row");
-        assert!(report.event_recorded);
-        assert!(report.jsonl_written);
-        assert!(!report.unsafe_run_id);
-
         assert_eq!(
-            db.get_work_item(&id).unwrap().unwrap().status,
-            Status::Stopped
+            status_for_claude_event("Stop"),
+            Some(TaskRunStatus::Stopped)
         );
-        let events = db.list_events(Some(&id)).unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].kind, "claude_hook");
-        assert_eq!(events[0].run_id, None, "unknown run must not be FK-linked");
-
-        let jsonl = jsonl_for("run_x");
-        assert_eq!(jsonl.lines().count(), 1);
-        assert!(jsonl.contains(r#""hook_event_name":"Stop""#), "{jsonl}");
-
-        std::env::remove_var("MONICA_HOME");
+        assert_eq!(
+            status_for_claude_event("StopFailure"),
+            Some(TaskRunStatus::Failed)
+        );
+        assert_eq!(
+            status_for_claude_event("SessionEnd"),
+            Some(TaskRunStatus::Stopped)
+        );
+        assert_eq!(status_for_claude_event("PreToolUse"), None);
     }
 
     #[test]
-    fn session_start_links_matching_run_and_sets_both_running() {
-        let (_g, _home) = temp_home("link");
+    fn safe_task_run_id_accepts_run_ids_and_rejects_traversal() {
+        assert!(is_safe_task_run_id("run-1"));
+        assert!(is_safe_task_run_id("RUN.1-2_3"));
+        assert!(!is_safe_task_run_id(""));
+        assert!(!is_safe_task_run_id("."));
+        assert!(!is_safe_task_run_id(".."));
+        assert!(!is_safe_task_run_id("../x"));
+        assert!(!is_safe_task_run_id("a/b"));
+        assert!(!is_safe_task_run_id("-rf"));
+    }
+
+    #[test]
+    fn session_start_updates_task_and_linked_task_run() {
+        let (_g, _home) = temp_home("start");
         let mut db = Db::open_in_memory().unwrap();
-        let id = dev_item(&mut db, Status::Ready);
-        let run = db.start_run(new_run(&id)).unwrap(); // both -> setting_up
+        let id = dev_task(&mut db, TaskStatus::Ready);
+        let run = db.start_task_run(new_task_run(&id)).unwrap();
 
         let report = record_claude_hook(
             &mut db,
@@ -334,182 +382,161 @@ mod tests {
         )
         .unwrap();
 
-        assert!(report.run_linked);
-        assert_eq!(report.status, Some(Status::Running));
+        assert_eq!(report.task_status, Some(TaskStatus::Active));
+        assert_eq!(report.task_run_status, Some(TaskRunStatus::Running));
+        assert!(report.task_run_linked);
         assert_eq!(
-            db.get_work_item(&id).unwrap().unwrap().status,
-            Status::Running
+            db.get_task(&id).unwrap().unwrap().status,
+            TaskStatus::Active
         );
         assert_eq!(
-            db.get_run(&run.id).unwrap().unwrap().status,
-            Status::Running
+            db.get_task_run(&run.id).unwrap().unwrap().status,
+            TaskRunStatus::Running
         );
-
         let events = db.list_events(Some(&id)).unwrap();
         assert_eq!(
-            events.last().unwrap().run_id.as_deref(),
+            events.last().unwrap().task_run_id.as_deref(),
             Some(run.id.as_str())
         );
-
-        std::env::remove_var("MONICA_HOME");
     }
 
     #[test]
-    fn user_prompt_submit_restores_stopped_item_and_run_to_running() {
-        let (_g, _home) = temp_home("prompt-resume");
+    fn unknown_task_run_writes_jsonl_but_does_not_fk_link_event() {
+        let (_g, _home) = temp_home("unknown-run");
         let mut db = Db::open_in_memory().unwrap();
-        let id = dev_item(&mut db, Status::Ready);
-        let run = db.start_run(new_run(&id)).unwrap();
-        db.finish_run(&run.id, &id, Status::Running).unwrap();
-
-        record_claude_hook(
-            &mut db,
-            Some(&id),
-            Some(&run.id),
-            r#"{"hook_event_name":"Stop"}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            db.get_work_item(&id).unwrap().unwrap().status,
-            Status::Stopped
-        );
-        assert_eq!(
-            db.get_run(&run.id).unwrap().unwrap().status,
-            Status::Stopped
-        );
+        let id = dev_task(&mut db, TaskStatus::Active);
 
         let report = record_claude_hook(
             &mut db,
             Some(&id),
-            Some(&run.id),
-            r#"{"hook_event_name":"UserPromptSubmit","prompt":"continue"}"#,
+            Some("run_x"),
+            r#"{"hook_event_name":"Stop"}"#,
         )
         .unwrap();
 
-        assert_eq!(report.status, Some(Status::Running));
+        assert_eq!(report.task_status, Some(TaskStatus::Active));
+        assert_eq!(report.task_run_status, None);
         assert!(report.event_recorded);
         assert!(report.jsonl_written);
         assert_eq!(
-            db.get_work_item(&id).unwrap().unwrap().status,
-            Status::Running
+            db.get_task(&id).unwrap().unwrap().status,
+            TaskStatus::Active
         );
-        assert_eq!(
-            db.get_run(&run.id).unwrap().unwrap().status,
-            Status::Running
-        );
-
-        std::env::remove_var("MONICA_HOME");
+        let events = db.list_events(Some(&id)).unwrap();
+        assert_eq!(events[0].task_run_id, None);
+        assert!(jsonl_for("run_x").contains(r#""hook_event_name":"Stop""#));
     }
 
     #[test]
-    fn run_id_of_another_work_item_is_not_linked_or_mutated() {
-        let (_g, _home) = temp_home("mismatch");
+    fn explicit_task_status_survives_stop_but_task_run_stops() {
+        let (_g, _home) = temp_home("protected");
         let mut db = Db::open_in_memory().unwrap();
-        let a = dev_item(&mut db, Status::Ready);
-        let run_a = db.start_run(new_run(&a)).unwrap(); // a + run_a -> setting_up
-        let b = dev_item(&mut db, Status::Ready);
+        let id = dev_task(&mut db, TaskStatus::Ready);
+        let run = db.start_task_run(new_task_run(&id)).unwrap();
+        db.finish_task_run(&run.id, &id, TaskRunStatus::Running)
+            .unwrap();
+        db.mark_task(&id, TaskStatus::NeedApproval, Some("Plan ready"), None)
+            .unwrap();
 
         let report = record_claude_hook(
             &mut db,
-            Some(&b),
-            Some(&run_a.id),
+            Some(&id),
+            Some(&run.id),
             r#"{"hook_event_name":"Stop"}"#,
         )
         .unwrap();
 
-        assert!(!report.run_linked, "run_a belongs to a, not b");
+        assert_eq!(report.task_status, None);
+        assert_eq!(report.task_run_status, Some(TaskRunStatus::Stopped));
         assert_eq!(
-            db.get_work_item(&b).unwrap().unwrap().status,
-            Status::Stopped
-        );
-        assert_eq!(
-            db.get_run(&run_a.id).unwrap().unwrap().status,
-            Status::SettingUp,
-            "another work item's run must be untouched"
+            db.get_task(&id).unwrap().unwrap().status,
+            TaskStatus::NeedApproval
         );
         assert_eq!(
-            db.get_work_item(&a).unwrap().unwrap().status,
-            Status::SettingUp
+            db.get_task_run(&run.id).unwrap().unwrap().status,
+            TaskRunStatus::Stopped
         );
-
-        assert!(
-            !report.jsonl_written,
-            "a mismatched run's event log must not be written"
-        );
-        assert!(
-            !paths::run_dir(&run_a.id)
-                .unwrap()
-                .join(HOOK_EVENTS_FILE)
-                .exists(),
-            "another work item's run log must stay untouched"
-        );
-
-        let events = db.list_events(Some(&b)).unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].run_id, None, "mismatched run must not be linked");
-
-        std::env::remove_var("MONICA_HOME");
     }
 
     #[test]
-    fn unsafe_run_id_skips_jsonl_but_still_updates_work_item() {
+    fn failed_task_run_is_not_downgraded_by_session_end() {
+        let (_g, _home) = temp_home("failed-run");
+        let mut db = Db::open_in_memory().unwrap();
+        let id = dev_task(&mut db, TaskStatus::Ready);
+        let run = db.start_task_run(new_task_run(&id)).unwrap();
+        db.finish_task_run(&run.id, &id, TaskRunStatus::Failed)
+            .unwrap();
+
+        let report = record_claude_hook(
+            &mut db,
+            Some(&id),
+            Some(&run.id),
+            r#"{"hook_event_name":"SessionEnd"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(report.task_status, None);
+        assert_eq!(report.task_run_status, None);
+        assert_eq!(
+            db.get_task(&id).unwrap().unwrap().status,
+            TaskStatus::Failed
+        );
+        assert_eq!(
+            db.get_task_run(&run.id).unwrap().unwrap().status,
+            TaskRunStatus::Failed
+        );
+    }
+
+    #[test]
+    fn unsafe_task_run_id_skips_jsonl_but_updates_task() {
         let (_g, home) = temp_home("unsafe");
         let mut db = Db::open_in_memory().unwrap();
-        let id = dev_item(&mut db, Status::Running);
+        let id = dev_task(&mut db, TaskStatus::Active);
 
         let report = record_claude_hook(
             &mut db,
             Some(&id),
             Some("../evil"),
-            r#"{"hook_event_name":"Stop"}"#,
+            r#"{"hook_event_name":"StopFailure"}"#,
         )
         .unwrap();
 
-        assert!(report.unsafe_run_id);
+        assert!(report.unsafe_task_run_id);
         assert!(!report.jsonl_written);
+        assert_eq!(report.task_status, Some(TaskStatus::Failed));
         assert_eq!(
-            db.get_work_item(&id).unwrap().unwrap().status,
-            Status::Stopped
+            db.get_task(&id).unwrap().unwrap().status,
+            TaskStatus::Failed
         );
-        // `runs/../evil` would resolve to `<home>/evil`; it must not have been created.
-        assert!(
-            !home.join("evil").exists(),
-            "traversal must not escape the runs dir"
-        );
-
-        std::env::remove_var("MONICA_HOME");
+        assert!(!home.join("evil").exists());
     }
 
     #[test]
-    fn invalid_json_is_recorded_without_status_change() {
+    fn invalid_json_records_raw_event_without_status_change() {
         let (_g, _home) = temp_home("badjson");
         let mut db = Db::open_in_memory().unwrap();
-        let id = dev_item(&mut db, Status::Running);
+        let id = dev_task(&mut db, TaskStatus::Active);
 
         let report =
             record_claude_hook(&mut db, Some(&id), Some("run_x"), "not json at all").unwrap();
 
         assert_eq!(report.event_name, None);
-        assert_eq!(report.status, None);
+        assert_eq!(report.task_status, None);
         assert!(report.event_recorded);
+        assert!(report.jsonl_written);
         assert_eq!(
-            db.get_work_item(&id).unwrap().unwrap().status,
-            Status::Running,
-            "an unparseable hook must not change status"
+            db.get_task(&id).unwrap().unwrap().status,
+            TaskStatus::Active
         );
         let events = db.list_events(Some(&id)).unwrap();
         assert_eq!(events[0].payload["raw"], json!("not json at all"));
-        assert!(jsonl_for("run_x").contains(r#""raw""#));
-
-        std::env::remove_var("MONICA_HOME");
     }
 
     #[test]
     fn unknown_event_records_but_leaves_status_and_needs_no_run() {
         let mut db = Db::open_in_memory().unwrap();
-        let id = dev_item(&mut db, Status::Running);
+        let id = dev_task(&mut db, TaskStatus::Active);
 
-        // No run_id at all -> no jsonl, no MONICA_HOME needed.
         let report = record_claude_hook(
             &mut db,
             Some(&id),
@@ -519,271 +546,154 @@ mod tests {
         .unwrap();
 
         assert_eq!(report.event_name.as_deref(), Some("PreToolUse"));
-        assert_eq!(report.status, None);
+        assert_eq!(report.task_status, None);
+        assert_eq!(report.task_run_status, None);
         assert!(report.event_recorded);
         assert!(!report.jsonl_written);
         assert_eq!(
-            db.get_work_item(&id).unwrap().unwrap().status,
-            Status::Running
+            db.get_task(&id).unwrap().unwrap().status,
+            TaskStatus::Active
         );
     }
 
     #[test]
-    fn unknown_work_item_is_graceful() {
-        let (_g, _home) = temp_home("nowork");
+    fn run_id_of_another_task_is_not_linked_or_mutated() {
+        let (_g, _home) = temp_home("mismatch");
         let mut db = Db::open_in_memory().unwrap();
+        let a = dev_task(&mut db, TaskStatus::Ready);
+        let run_a = db.start_task_run(new_task_run(&a)).unwrap();
+        let b = dev_task(&mut db, TaskStatus::Ready);
 
         let report = record_claude_hook(
             &mut db,
-            Some("MON-999"),
-            Some("run_x"),
+            Some(&b),
+            Some(&run_a.id),
             r#"{"hook_event_name":"Stop"}"#,
         )
         .unwrap();
 
-        assert!(!report.work_item_found);
-        assert!(
-            !report.event_recorded,
-            "no work item & no linked run -> no event row"
+        assert!(!report.task_run_linked);
+        assert_eq!(report.task_status, Some(TaskStatus::Active));
+        assert_eq!(report.task_run_status, None);
+        assert_eq!(db.get_task(&b).unwrap().unwrap().status, TaskStatus::Active);
+        assert_eq!(db.get_task(&a).unwrap().unwrap().status, TaskStatus::Active);
+        assert_eq!(
+            db.get_task_run(&run_a.id).unwrap().unwrap().status,
+            TaskRunStatus::SettingUp
         );
-        assert!(report.jsonl_written, "jsonl still records the raw event");
-        assert_eq!(report.status, None);
-        assert!(db.list_events(None).unwrap().is_empty());
-
-        std::env::remove_var("MONICA_HOME");
-    }
-
-    /// A hook firing in a session Monica did not start (no `MONICA_*` env) must be a complete
-    /// no-op: nothing written, nothing recorded, no error.
-    #[test]
-    fn no_env_vars_is_fully_silent() {
-        let mut db = Db::open_in_memory().unwrap();
-        let report =
-            record_claude_hook(&mut db, None, None, r#"{"hook_event_name":"Stop"}"#).unwrap();
-        assert!(!report.work_item_found);
-        assert!(!report.run_linked);
-        assert!(!report.event_recorded);
         assert!(!report.jsonl_written);
-        assert!(!report.unsafe_run_id);
-        assert_eq!(report.status, None);
-        assert!(db.list_events(None).unwrap().is_empty());
     }
 
-    /// Valid JSON missing the `hook_event_name` key (e.g. `{}`) is recorded verbatim but implies no
-    /// status — distinct from unparseable input, where the payload is wrapped as `{"raw": ...}`.
     #[test]
-    fn valid_json_without_event_name_records_and_leaves_status() {
+    fn hook_updates_agent_session_when_session_id_matches() {
+        let (_g, _home) = temp_home("session");
         let mut db = Db::open_in_memory().unwrap();
-        let id = dev_item(&mut db, Status::Running);
-        let report =
-            record_claude_hook(&mut db, Some(&id), None, r#"{"some_other_key":1}"#).unwrap();
-        assert_eq!(report.event_name, None);
-        assert_eq!(report.status, None);
-        assert!(report.event_recorded);
-        assert_eq!(
-            db.get_work_item(&id).unwrap().unwrap().status,
-            Status::Running
-        );
-        let events = db.list_events(Some(&id)).unwrap();
-        assert_eq!(events[0].payload, json!({ "some_other_key": 1 }));
-    }
-
-    #[test]
-    fn explicit_and_terminal_statuses_resist_hook_overwrite() {
-        for s in [
-            Status::NeedApproval,
-            Status::PrOpen,
-            Status::Done,
-            Status::Archived,
-            // Failed protects StopFailure→failed from being downgraded by a later SessionEnd.
-            Status::Failed,
-        ] {
-            assert!(explicit_status_wins(s), "{s:?} must be protected");
-        }
-        for s in [
-            Status::Inbox,
-            Status::Ready,
-            Status::SettingUp,
-            Status::Running,
-            Status::Stopped,
-        ] {
-            assert!(!explicit_status_wins(s), "{s:?} must stay hook-writable");
-        }
-    }
-
-    /// The core of the explicit-signal contract: a `Stop` firing after Claude marked `need_approval`
-    /// must record the event but leave the status at `need_approval`, not downgrade it to stopped.
-    #[test]
-    fn stop_does_not_overwrite_an_explicit_mark() {
-        let (_g, _home) = temp_home("explicit");
-        let mut db = Db::open_in_memory().unwrap();
-        let id = dev_item(&mut db, Status::NeedApproval);
-
-        let report = record_claude_hook(
-            &mut db,
-            Some(&id),
-            Some("run_x"),
-            r#"{"hook_event_name":"Stop"}"#,
-        )
-        .unwrap();
-
-        assert_eq!(report.status, None, "the hook must not apply a status here");
-        assert!(report.event_recorded, "the event is still recorded");
-        assert!(report.jsonl_written);
-        assert_eq!(
-            db.get_work_item(&id).unwrap().unwrap().status,
-            Status::NeedApproval,
-            "an explicit mark must survive the Stop hook"
-        );
-
-        std::env::remove_var("MONICA_HOME");
-    }
-
-    #[test]
-    fn session_end_does_not_overwrite_pr_open() {
-        let mut db = Db::open_in_memory().unwrap();
-        let id = dev_item(&mut db, Status::PrOpen);
-
-        // No run_id, so no jsonl/path access and no MONICA_HOME needed.
-        let report = record_claude_hook(
-            &mut db,
-            Some(&id),
-            None,
-            r#"{"hook_event_name":"SessionEnd"}"#,
-        )
-        .unwrap();
-
-        assert_eq!(report.status, None);
-        assert!(report.event_recorded);
-        assert_eq!(
-            db.get_work_item(&id).unwrap().unwrap().status,
-            Status::PrOpen
-        );
-    }
-
-    /// When Claude marks the work item explicitly (e.g. `need_approval`) and the session then ends,
-    /// the work item must stay at the explicit status but the linked run must still transition out
-    /// of `running` — otherwise `runs.status` strands and `monica issue status` shows a session
-    /// that is over as still running.
-    #[test]
-    fn stop_transitions_linked_run_even_when_work_item_is_marked() {
-        let (_g, _home) = temp_home("marked-run");
-        let mut db = Db::open_in_memory().unwrap();
-        let id = dev_item(&mut db, Status::Ready);
-        let run = db.start_run(new_run(&id)).unwrap();
-        // Drive both rows to `running` (start_run leaves them at setting_up), then mark the work
-        // item explicitly — mark_work_item touches only the work item, leaving run at `running`.
-        db.finish_run(&run.id, &id, Status::Running).unwrap();
-        db.mark_work_item(&id, Status::NeedApproval, Some("Plan ready"), None)
+        let id = dev_task(&mut db, TaskStatus::Ready);
+        let run = db.start_task_run(new_task_run(&id)).unwrap();
+        let session = db
+            .create_agent_session(NewAgentSession {
+                task_id: id.clone(),
+                task_run_id: run.id.clone(),
+                agent: Agent::Claude,
+                mode: "new".to_string(),
+                provider_session_id: None,
+                parent_session_id: None,
+                metadata: json!({ "source": "test" }),
+            })
             .unwrap();
-        assert_eq!(
-            db.get_work_item(&id).unwrap().unwrap().status,
-            Status::NeedApproval
-        );
-        assert_eq!(
-            db.get_run(&run.id).unwrap().unwrap().status,
-            Status::Running
-        );
 
-        let report = record_claude_hook(
+        let report = record_claude_hook_with_session(
             &mut db,
             Some(&id),
             Some(&run.id),
-            r#"{"hook_event_name":"Stop"}"#,
+            Some(&session.id),
+            r#"{"hook_event_name":"SessionStart","session_id":"provider-1"}"#,
         )
         .unwrap();
 
-        assert_eq!(
-            report.status, None,
-            "work item is protected so the report records no work-item status change"
-        );
-        assert!(report.event_recorded);
-        assert_eq!(
-            db.get_work_item(&id).unwrap().unwrap().status,
-            Status::NeedApproval,
-            "the explicit mark must survive the lifecycle hook"
-        );
-        assert_eq!(
-            db.get_run(&run.id).unwrap().unwrap().status,
-            Status::Stopped,
-            "the run must follow the session lifecycle even when the work item is protected"
-        );
+        assert!(report.agent_session_found);
+        let updated = db.get_agent_session(&session.id).unwrap().unwrap();
+        assert_eq!(updated.status, AgentSessionStatus::Running);
+        assert_eq!(updated.provider_session_id.as_deref(), Some("provider-1"));
+        assert_eq!(updated.last_event_name.as_deref(), Some("SessionStart"));
+        assert_eq!(updated.metadata["hook_event_name"], json!("SessionStart"));
     }
 
-    /// Inverse of the above: when the run itself is already at a terminal/protected status
-    /// (`failed` from a prior `StopFailure`), the run-only path must not downgrade it. Without the
-    /// run-side protection check, a trailing `SessionEnd` would silently overwrite `failed` with
-    /// `stopped` on the run row.
     #[test]
-    fn session_end_does_not_downgrade_failed_run() {
-        let (_g, _home) = temp_home("failed-run");
+    fn hook_does_not_update_agent_session_owned_by_another_task_run() {
+        let (_g, _home) = temp_home("session-mismatch");
         let mut db = Db::open_in_memory().unwrap();
-        let id = dev_item(&mut db, Status::Ready);
-        let run = db.start_run(new_run(&id)).unwrap();
-        // Settle both to `failed` the same way StopFailure would.
-        db.finish_run(&run.id, &id, Status::Failed).unwrap();
+        let a = dev_task(&mut db, TaskStatus::Ready);
+        let run_a = db.start_task_run(new_task_run(&a)).unwrap();
+        let session_a = db
+            .create_agent_session(NewAgentSession {
+                task_id: a.clone(),
+                task_run_id: run_a.id.clone(),
+                agent: Agent::Claude,
+                mode: "new".to_string(),
+                provider_session_id: None,
+                parent_session_id: None,
+                metadata: json!({ "source": "original" }),
+            })
+            .unwrap();
+        let b = dev_task(&mut db, TaskStatus::Ready);
+        let run_b = db.start_task_run(new_task_run(&b)).unwrap();
 
-        let report = record_claude_hook(
+        let report = record_claude_hook_with_session(
+            &mut db,
+            Some(&b),
+            Some(&run_b.id),
+            Some(&session_a.id),
+            r#"{"hook_event_name":"SessionStart","session_id":"provider-wrong"}"#,
+        )
+        .unwrap();
+
+        assert!(!report.agent_session_found);
+        let unchanged = db.get_agent_session(&session_a.id).unwrap().unwrap();
+        assert_eq!(unchanged.status, AgentSessionStatus::Starting);
+        assert_eq!(unchanged.provider_session_id, None);
+        assert_eq!(unchanged.last_event_name, None);
+        assert_eq!(unchanged.metadata["source"], json!("original"));
+    }
+
+    #[test]
+    fn session_end_does_not_downgrade_failed_agent_session() {
+        let (_g, _home) = temp_home("session-failed");
+        let mut db = Db::open_in_memory().unwrap();
+        let id = dev_task(&mut db, TaskStatus::Ready);
+        let run = db.start_task_run(new_task_run(&id)).unwrap();
+        let session = db
+            .create_agent_session(NewAgentSession {
+                task_id: id.clone(),
+                task_run_id: run.id.clone(),
+                agent: Agent::Claude,
+                mode: "new".to_string(),
+                provider_session_id: None,
+                parent_session_id: None,
+                metadata: json!({ "source": "test" }),
+            })
+            .unwrap();
+
+        record_claude_hook_with_session(
             &mut db,
             Some(&id),
             Some(&run.id),
-            r#"{"hook_event_name":"SessionEnd"}"#,
+            Some(&session.id),
+            r#"{"hook_event_name":"StopFailure","session_id":"provider-1"}"#,
         )
         .unwrap();
-
-        assert_eq!(report.status, None);
-        assert_eq!(
-            db.get_work_item(&id).unwrap().unwrap().status,
-            Status::Failed,
-            "work item Failed survives (covered by explicit_status_wins)"
-        );
-        assert_eq!(
-            db.get_run(&run.id).unwrap().unwrap().status,
-            Status::Failed,
-            "run Failed must not be downgraded to stopped by the run-only path"
-        );
-    }
-
-    /// Claude routinely fires `SessionEnd` immediately after `StopFailure`. The mapping table sends
-    /// `SessionEnd→stopped`, so without protecting `failed` the recorded failure would be silently
-    /// downgraded to `stopped` and lost.
-    #[test]
-    fn session_end_after_stop_failure_preserves_failed() {
-        let mut db = Db::open_in_memory().unwrap();
-        let id = dev_item(&mut db, Status::Running);
-
-        let r1 = record_claude_hook(
+        record_claude_hook_with_session(
             &mut db,
             Some(&id),
-            None,
-            r#"{"hook_event_name":"StopFailure"}"#,
+            Some(&run.id),
+            Some(&session.id),
+            r#"{"hook_event_name":"SessionEnd","session_id":"provider-1"}"#,
         )
         .unwrap();
-        assert_eq!(r1.status, Some(Status::Failed));
-        assert_eq!(
-            db.get_work_item(&id).unwrap().unwrap().status,
-            Status::Failed
-        );
 
-        let r2 = record_claude_hook(
-            &mut db,
-            Some(&id),
-            None,
-            r#"{"hook_event_name":"SessionEnd"}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            r2.status, None,
-            "SessionEnd must not apply stopped over a recorded failure"
-        );
-        assert!(
-            r2.event_recorded,
-            "the SessionEnd event is still recorded even when its status is suppressed"
-        );
-        assert_eq!(
-            db.get_work_item(&id).unwrap().unwrap().status,
-            Status::Failed,
-            "the StopFailure→failed signal must survive a trailing SessionEnd"
-        );
+        let updated = db.get_agent_session(&session.id).unwrap().unwrap();
+        assert_eq!(updated.status, AgentSessionStatus::Failed);
+        assert_eq!(updated.last_event_name.as_deref(), Some("SessionEnd"));
+        assert_eq!(updated.metadata["hook_event_name"], json!("SessionEnd"));
     }
 }

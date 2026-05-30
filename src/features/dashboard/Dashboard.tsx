@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
 import { DetailDrawer } from "./DetailDrawer";
 import { StatusRail, type StatusFilter } from "./StatusRail";
-import { useWorkItems } from "./useWorkItems";
-import { WorkItemList } from "./WorkItemList";
-import type { WorkItemView } from "./types";
+import { useTasks } from "./useTasks";
+import { TaskList } from "./TaskList";
+import type { TaskView } from "./types";
 
 export function Dashboard() {
-  const { items, loading, error, lastSync, refresh } = useWorkItems();
+  const { items, loading, error, lastSync, refresh } = useTasks();
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -39,10 +39,10 @@ export function Dashboard() {
           lastSync={lastSync}
         />
         <main className="flex min-w-0 flex-1 flex-col">
-          <WorkItemList
+          <TaskList
             items={visible}
             selectedId={selectedId}
-            onSelect={(item: WorkItemView) =>
+            onSelect={(item: TaskView) =>
               setSelectedId((prev) => (prev === item.id ? null : item.id))
             }
           />

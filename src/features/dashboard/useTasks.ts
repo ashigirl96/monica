@@ -1,22 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listIssueStatuses, listWorkItems } from "./api";
+import { listTaskSummaries, listTasks } from "./api";
 import { STATUS_META } from "./statusMeta";
-import type { IssueStatusRow, WorkItem, WorkItemView } from "./types";
+import type { TaskSummaryRow, Task, TaskView } from "./types";
 
 const POLL_MS = 3000;
 
-function merge(items: WorkItem[], statuses: IssueStatusRow[]): WorkItemView[] {
-  const byId = new Map<string, IssueStatusRow>();
+function merge(items: Task[], statuses: TaskSummaryRow[]): TaskView[] {
+  const byId = new Map<string, TaskSummaryRow>();
   for (const s of statuses) byId.set(s.id, s);
   return items
     .map((item) => {
       const s = byId.get(item.id);
       return {
         ...item,
+        status: s?.status ?? item.status,
+        task_status: s?.task_status ?? item.status,
+        task_run_status: s?.task_run_status ?? null,
         project: s?.project ?? item.project_id ?? null,
         githubIssueNumber: s?.github_issue_number ?? null,
         branch: s?.branch ?? null,
-      } satisfies WorkItemView;
+      } satisfies TaskView;
     })
     .sort((a, b) => {
       const o = STATUS_META[a.status].order - STATUS_META[b.status].order;
@@ -25,16 +28,16 @@ function merge(items: WorkItem[], statuses: IssueStatusRow[]): WorkItemView[] {
     });
 }
 
-export interface UseWorkItems {
-  items: WorkItemView[];
+export interface UseTasks {
+  items: TaskView[];
   loading: boolean;
   error: string | null;
   lastSync: Date | null;
   refresh: () => void;
 }
 
-export function useWorkItems(): UseWorkItems {
-  const [items, setItems] = useState<WorkItemView[]>([]);
+export function useTasks(): UseTasks {
+  const [items, setItems] = useState<TaskView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<Date | null>(null);
@@ -44,8 +47,8 @@ export function useWorkItems(): UseWorkItems {
     if (inFlight.current) return;
     inFlight.current = true;
     try {
-      const [workItems, statuses] = await Promise.all([listWorkItems(), listIssueStatuses()]);
-      setItems(merge(workItems, statuses));
+      const [tasks, statuses] = await Promise.all([listTasks(), listTaskSummaries()]);
+      setItems(merge(tasks, statuses));
       setError(null);
       setLastSync(new Date());
     } catch (e) {

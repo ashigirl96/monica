@@ -18,13 +18,13 @@ pub fn db_path() -> Result<PathBuf> {
     Ok(base_dir()?.join("db").join("monica.db"))
 }
 
-pub fn runs_dir() -> Result<PathBuf> {
+pub fn task_runs_dir() -> Result<PathBuf> {
     Ok(base_dir()?.join("runs"))
 }
 
-/// Per-run artifact directory: `<base>/runs/<run_id>/` (holds `setup.log`, later session output).
-pub fn run_dir(run_id: &str) -> Result<PathBuf> {
-    Ok(runs_dir()?.join(run_id))
+/// Per-task-run artifact directory: `<base>/runs/<task_run_id>/` (holds `setup.log`, later session output).
+pub fn task_run_dir(task_run_id: &str) -> Result<PathBuf> {
+    Ok(task_runs_dir()?.join(task_run_id))
 }
 
 /// Legacy shared worktree root under Monica's base dir. New `issue run` callers should prefer a
