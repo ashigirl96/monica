@@ -27,6 +27,7 @@ export function TaskRow({ item, focused, detailsOpen, onOpen }: TaskRowProps) {
     <button
       ref={rowRef}
       type="button"
+      data-task-row="true"
       onClick={() => onOpen(item)}
       aria-current={detailsOpen ? "true" : undefined}
       className={cn(

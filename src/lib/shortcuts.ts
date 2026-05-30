@@ -34,9 +34,31 @@ function matchesAny(keys: string | readonly string[], e: KeyboardEvent): boolean
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName.toLowerCase();
-  return target.isContentEditable || tag === "input" || tag === "textarea" || tag === "select";
+  if (!(target instanceof Element)) return false;
+  return Boolean(
+    target.closest("input, textarea, select, [contenteditable='true'], [contenteditable='']"),
+  );
+}
+
+function isInteractiveTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return Boolean(
+    target.closest(
+      "button, a[href], summary, [role='button'], [role='link'], [role='menuitem'], [role='tab'], [role='checkbox'], [role='radio'], [role='switch'], [role='option']",
+    ),
+  );
+}
+
+function isTaskRowTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest("[data-task-row='true']"));
+}
+
+function shouldIgnoreShortcut(id: ShortcutId, target: EventTarget | null): boolean {
+  if (isEditableTarget(target)) return true;
+  if (id === "openFocusedTask" && isInteractiveTarget(target) && !isTaskRowTarget(target)) {
+    return true;
+  }
+  return false;
 }
 
 export function useShortcuts(handlers: Handlers): void {
@@ -48,7 +70,7 @@ export function useShortcuts(handlers: Handlers): void {
       if (isEditableTarget(e.target)) return;
       for (const id of Object.keys(latest.current) as ShortcutId[]) {
         const run = latest.current[id];
-        if (run && matchesAny(KEYMAP[id].keys, e)) {
+        if (run && matchesAny(KEYMAP[id].keys, e) && !shouldIgnoreShortcut(id, e.target)) {
           e.preventDefault();
           run();
           return;
