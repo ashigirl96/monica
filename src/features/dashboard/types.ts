@@ -1,15 +1,13 @@
 export type DisplayStatus =
   | "inbox"
   | "ready"
-  | "active"
+  | "in_progress"
   | "setting_up"
   | "running"
-  | "need_approval"
+  | "waiting_for_user"
   | "stopped"
   | "failed"
-  | "pr_open"
-  | "done"
-  | "archived";
+  | "done";
 
 export interface Task {
   id: string;
@@ -22,6 +20,7 @@ export interface Task {
   labels: string[];
   details: unknown;
   source: unknown;
+  deleted_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -32,6 +31,7 @@ export interface TaskSummaryRow {
   github_issue_number: number | null;
   task_status: TaskStatus;
   task_run_status: TaskRunStatus | null;
+  task_run_wait_reason: TaskRunWaitReason | null;
   status: DisplayStatus;
   branch: string | null;
 }
@@ -49,19 +49,14 @@ export interface TaskView extends Omit<Task, "status"> {
   status: DisplayStatus;
   task_status: TaskStatus;
   task_run_status: TaskRunStatus | null;
+  task_run_wait_reason: TaskRunWaitReason | null;
   project: string | null;
   githubIssueNumber: number | null;
   branch: string | null;
 }
 
-export type TaskStatus =
-  | "inbox"
-  | "ready"
-  | "active"
-  | "need_approval"
-  | "failed"
-  | "pr_open"
-  | "done"
-  | "archived";
+export type TaskStatus = "inbox" | "ready" | "in_progress" | "done";
 
-export type TaskRunStatus = "setting_up" | "running" | "stopped" | "failed";
+export type TaskRunStatus = "setting_up" | "running" | "waiting_for_user" | "stopped" | "failed";
+
+export type TaskRunWaitReason = "ask_user_question" | "exit_plan_mode";

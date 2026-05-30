@@ -6,7 +6,14 @@ use rusqlite_migration::{Migrations, M};
 /// uses the list position as the version). Append an `M::up(...)` to add a version;
 /// never reorder or remove existing entries, or already-migrated databases diverge.
 fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3), M::up(V4), M::up(V5)])
+    Migrations::new(vec![
+        M::up(V1),
+        M::up(V2),
+        M::up(V3),
+        M::up(V4),
+        M::up(V5),
+        M::up(V6),
+    ])
 }
 
 /// v1: storage foundation (work items, runs, events, external refs) + MON-id counter.
@@ -150,6 +157,146 @@ const V5: &str = r#"
       created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
       updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
     );
+	"#;
+
+/// v6: make Task status product-level only, collapse AgentSession observation fields into
+/// TaskRun, add waiting-for-user run state, and replace archived with soft deletion.
+const V6: &str = r#"
+    ALTER TABLE tasks ADD COLUMN deleted_at TEXT;
+
+    ALTER TABLE task_runs ADD COLUMN wait_reason TEXT;
+    ALTER TABLE task_runs ADD COLUMN provider_session_id TEXT;
+    ALTER TABLE task_runs ADD COLUMN last_event_name TEXT;
+    ALTER TABLE task_runs ADD COLUMN last_event_at TEXT;
+    ALTER TABLE task_runs ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}';
+
+    UPDATE task_runs
+       SET provider_session_id = (
+             SELECT s.provider_session_id
+               FROM agent_sessions s
+              WHERE s.task_run_id = task_runs.id
+              ORDER BY s.updated_at DESC,
+                       CAST(SUBSTR(s.id, 9) AS INTEGER) DESC
+              LIMIT 1
+           ),
+           last_event_name = (
+             SELECT s.last_event_name
+               FROM agent_sessions s
+              WHERE s.task_run_id = task_runs.id
+              ORDER BY s.updated_at DESC,
+                       CAST(SUBSTR(s.id, 9) AS INTEGER) DESC
+              LIMIT 1
+           ),
+           last_event_at = (
+             SELECT s.last_event_at
+               FROM agent_sessions s
+              WHERE s.task_run_id = task_runs.id
+              ORDER BY s.updated_at DESC,
+                       CAST(SUBSTR(s.id, 9) AS INTEGER) DESC
+              LIMIT 1
+           ),
+           metadata_json = COALESCE((
+             SELECT s.metadata_json
+               FROM agent_sessions s
+              WHERE s.task_run_id = task_runs.id
+              ORDER BY s.updated_at DESC,
+                       CAST(SUBSTR(s.id, 9) AS INTEGER) DESC
+              LIMIT 1
+           ), metadata_json)
+     WHERE EXISTS (
+             SELECT 1
+               FROM agent_sessions s
+              WHERE s.task_run_id = task_runs.id
+           );
+
+    INSERT INTO task_runs (id, task_id, status, wait_reason, created_at, updated_at)
+    SELECT 'legacy-' || t.id,
+           t.id,
+           CASE
+             WHEN t.status = 'need_approval' THEN 'waiting_for_user'
+             ELSE 'failed'
+           END,
+           CASE
+             WHEN t.status = 'need_approval' THEN 'exit_plan_mode'
+             ELSE NULL
+           END,
+           strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+           strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      FROM tasks t
+     WHERE t.status IN ('need_approval', 'failed')
+       AND NOT EXISTS (
+             SELECT 1
+               FROM task_runs r
+              WHERE r.task_id = t.id
+           );
+
+    UPDATE task_runs
+       SET status = 'waiting_for_user',
+           wait_reason = 'exit_plan_mode',
+           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+     WHERE id IN (
+       SELECT latest.id
+         FROM tasks t
+         JOIN task_runs latest
+           ON latest.id = (
+             SELECT r.id
+               FROM task_runs r
+              WHERE r.task_id = t.id
+              ORDER BY r.created_at DESC,
+                       CAST(SUBSTR(r.id, 5) AS INTEGER) DESC
+              LIMIT 1
+           )
+        WHERE t.status = 'need_approval'
+     );
+
+    UPDATE task_runs
+       SET status = 'failed',
+           wait_reason = NULL,
+           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+     WHERE id IN (
+       SELECT latest.id
+         FROM tasks t
+         JOIN task_runs latest
+           ON latest.id = (
+             SELECT r.id
+               FROM task_runs r
+              WHERE r.task_id = t.id
+              ORDER BY r.created_at DESC,
+                       CASE
+                         WHEN r.id GLOB 'run-[0-9]*' THEN CAST(SUBSTR(r.id, 5) AS INTEGER)
+                         ELSE -1
+                       END DESC,
+                       r.id DESC
+              LIMIT 1
+           )
+        WHERE t.status = 'failed'
+     );
+
+    UPDATE tasks
+       SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+     WHERE status = 'archived'
+       AND deleted_at IS NULL;
+
+    UPDATE tasks
+       SET status = CASE
+         WHEN status = 'inbox' THEN 'inbox'
+         WHEN status = 'ready' THEN 'ready'
+         WHEN status = 'done' THEN 'done'
+         ELSE 'in_progress'
+       END
+     WHERE status IN (
+       'active',
+       'need_approval',
+       'failed',
+       'pr_open',
+       'archived',
+       'setting_up',
+       'running',
+       'stopped'
+     );
+
+    DROP TABLE agent_sessions;
+    DROP TABLE agent_session_counter;
 "#;
 
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
@@ -162,7 +309,7 @@ pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DisplayStatus, NewTaskRun, TaskRunStatus, TaskStatus};
+    use crate::{DisplayStatus, NewTaskRun, TaskRunStatus, TaskRunWaitReason, TaskStatus};
     use rusqlite::params;
 
     fn temp_db_path(name: &str) -> std::path::PathBuf {
@@ -225,13 +372,13 @@ mod tests {
             .conn()
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
 
         std::fs::remove_file(&path).ok();
     }
 
     #[test]
-    fn v5_renames_task_schema_and_preserves_old_rows() {
+    fn v5_v6_renames_task_schema_and_preserves_old_rows() {
         let path = temp_db_path("v5");
 
         {
@@ -295,19 +442,19 @@ mod tests {
 
         assert_eq!(
             db.get_task("MON-setting-up").unwrap().unwrap().status,
-            TaskStatus::Active
+            TaskStatus::InProgress
         );
         assert_eq!(
             db.get_task("MON-running").unwrap().unwrap().status,
-            TaskStatus::Active
+            TaskStatus::InProgress
         );
         assert_eq!(
             db.get_task("MON-stopped").unwrap().unwrap().status,
-            TaskStatus::Active
+            TaskStatus::InProgress
         );
         assert_eq!(
             db.get_task("MON-failed").unwrap().unwrap().status,
-            TaskStatus::Failed
+            TaskStatus::InProgress
         );
         assert_eq!(
             db.get_task("MON-ready").unwrap().unwrap().status,
@@ -372,8 +519,148 @@ mod tests {
                     |r| r.get(0),
                 )
                 .unwrap();
-            assert_eq!(count, 1, "{table} must exist");
+            assert_eq!(count, 0, "{table} must be collapsed into task_runs");
         }
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn v6_collapses_agent_sessions_and_soft_deletes_archived_tasks() {
+        let path = temp_db_path("v6-agent-sessions");
+
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3), M::up(V4), M::up(V5)])
+                .to_latest(&mut conn)
+                .unwrap();
+
+            for (id, status) in [
+                ("MON-wait", "need_approval"),
+                ("MON-wait-no-run", "need_approval"),
+                ("MON-failed-no-run", "failed"),
+                ("MON-failed-run", "failed"),
+                ("MON-archived", "archived"),
+                ("MON-pr", "pr_open"),
+            ] {
+                conn.execute(
+                    "INSERT INTO tasks (id, kind, status, title)
+                     VALUES (?1, 'development', ?2, ?1)",
+                    params![id, status],
+                )
+                .unwrap();
+            }
+            conn.execute(
+                "INSERT INTO task_runs
+                   (id, task_id, status, created_at, updated_at)
+                 VALUES
+                   ('run-10', 'MON-wait', 'stopped',
+                    '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'),
+                   ('run-11', 'MON-wait', 'running',
+                    '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z'),
+                   ('run-12', 'MON-failed-run', 'running',
+                    '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO agent_sessions
+                   (id, task_id, task_run_id, agent, mode, status, provider_session_id,
+                    last_event_name, last_event_at, metadata_json, updated_at)
+                 VALUES
+                   ('session-1', 'MON-wait', 'run-11', 'claude', 'new', 'running',
+                    'provider-old', 'SessionStart', '2026-01-02T00:00:01.000Z',
+                    '{\"version\":1}', '2026-01-02T00:00:01.000Z'),
+                   ('session-2', 'MON-wait', 'run-11', 'claude', 'new', 'running',
+                    'provider-new', 'PreToolUse', '2026-01-02T00:00:02.000Z',
+                    '{\"version\":2}', '2026-01-02T00:00:02.000Z')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let db = crate::Db::open_at(&path).unwrap();
+
+        assert_eq!(
+            db.get_task("MON-wait").unwrap().unwrap().status,
+            TaskStatus::InProgress
+        );
+        assert_eq!(
+            db.get_task("MON-pr").unwrap().unwrap().status,
+            TaskStatus::InProgress
+        );
+        assert!(
+            db.get_task("MON-archived").unwrap().is_none(),
+            "soft-deleted archived tasks should be hidden from normal reads"
+        );
+
+        let archived: (String, Option<String>) = db
+            .conn()
+            .query_row(
+                "SELECT status, deleted_at FROM tasks WHERE id = 'MON-archived'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(archived.0, TaskStatus::InProgress.as_str());
+        assert!(archived.1.is_some());
+
+        let wait_run = db.get_task_run("run-11").unwrap().unwrap();
+        assert_eq!(wait_run.status, TaskRunStatus::WaitingForUser);
+        assert_eq!(wait_run.wait_reason, Some(TaskRunWaitReason::ExitPlanMode));
+        assert_eq!(
+            wait_run.provider_session_id.as_deref(),
+            Some("provider-new")
+        );
+        assert_eq!(wait_run.last_event_name.as_deref(), Some("PreToolUse"));
+        assert_eq!(wait_run.metadata["version"].as_i64(), Some(2));
+
+        let legacy_wait = db.get_task_run("legacy-MON-wait-no-run").unwrap().unwrap();
+        assert_eq!(legacy_wait.status, TaskRunStatus::WaitingForUser);
+        assert_eq!(
+            legacy_wait.wait_reason,
+            Some(TaskRunWaitReason::ExitPlanMode)
+        );
+        let legacy_failed = db
+            .get_task_run("legacy-MON-failed-no-run")
+            .unwrap()
+            .unwrap();
+        assert_eq!(legacy_failed.status, TaskRunStatus::Failed);
+        assert_eq!(legacy_failed.wait_reason, None);
+        let failed_run = db.get_task_run("run-12").unwrap().unwrap();
+        assert_eq!(failed_run.status, TaskRunStatus::Failed);
+
+        let visible = db.list_task_summaries(None, None).unwrap();
+        assert!(
+            visible.iter().all(|row| row.id != "MON-archived"),
+            "soft-deleted tasks should not appear in dashboard/list summaries"
+        );
+        assert_eq!(
+            visible
+                .iter()
+                .find(|row| row.id == "MON-wait-no-run")
+                .unwrap()
+                .status,
+            DisplayStatus::WaitingForUser
+        );
+        assert_eq!(
+            visible
+                .iter()
+                .find(|row| row.id == "MON-failed-no-run")
+                .unwrap()
+                .status,
+            DisplayStatus::Failed
+        );
+
+        let dropped: i64 = db
+            .conn()
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'agent_sessions'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(dropped, 0);
 
         std::fs::remove_file(&path).ok();
     }

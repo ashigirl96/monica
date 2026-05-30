@@ -4,7 +4,7 @@ GitHub Issue を起点に worktree → Claude Code session → 状態追跡 → 
 
 ## 向かう先
 
-Issue Runner → Task/TaskRun/AgentSession Tracker → Status Dashboard → Kanban → Terminal/ADE → Multi-repo → Slack/Wiki/RSS の順に広げる。実装形態は共有 Rust core + `monica` CLI で、GUI も同じ core を Tauri command 経由で利用する。
+Issue Runner → Task/TaskRun Tracker → Status Dashboard → Kanban → Terminal/ADE → Multi-repo → Slack/Wiki/RSS の順に広げる。実装形態は共有 Rust core + `monica` CLI で、GUI も同じ core を Tauri command 経由で利用する。
 
 ## Todo
 
@@ -43,3 +43,8 @@ Issue Runner → Task/TaskRun/AgentSession Tracker → Status Dashboard → Kanb
 - 2026-05-30 WorkItem 観測ダッシュボード(Mission Control)を Tauri に追加。monica-app に monica-core を依存させ list_work_items/list_issue_statuses/list_events の read-only コマンドを生やし、status LED 一覧＋event timeline drawer を実装（CLI automation を "workspace" の入口に変えるため。Run は概念として未露出）。
 - 2026-05-30 WorkItem/Run を Task/TaskRun に改名し、TaskStatus と TaskRunStatus を分離。AgentSession 永続化と task 系 Tauri API を追加（CLI は issue workflow のまま）。
 - 2026-05-30 Task/TaskRun/AgentSession 移行の整合性を補強。旧 stopped 表示の保持、AgentSession 所有権検証、起動失敗時の failed settle を追加した。
+- 2026-05-30 Task/TaskRun の状態責務を整理。TaskStatus を inbox/ready/in_progress/done に絞り、AgentSession を TaskRun に統合して waiting_for_user と soft delete を追加した。
+- 2026-05-30 Task/TaskRun 状態移行の data integrity を補強。旧 need_approval/failed を legacy TaskRun に保存し、soft-deleted Task への run 作成を拒否した。
+- 2026-05-30 Claude hook の PreToolUse 記録を waiting tools に限定。AskUserQuestion/ExitPlanMode だけを matcher で起動し、receiver 側でも通常 tool の PreToolUse を無視するようにした。
+- 2026-05-30 Monica-managed Claude 起動から NORI\_\* env を除外。Nori の inline --settings 注入で Monica の hook settings が無効化され、hook-events.jsonl が作られない問題を避けるため。
+- 2026-05-30 Dashboard の waiting_for_user 表示を整理。状態は waiting for you に統一し、ExitPlanMode/AskUserQuestion は next action として分けた。

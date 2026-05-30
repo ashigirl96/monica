@@ -16,6 +16,7 @@ function merge(items: Task[], statuses: TaskSummaryRow[]): TaskView[] {
         status: s?.status ?? item.status,
         task_status: s?.task_status ?? item.status,
         task_run_status: s?.task_run_status ?? null,
+        task_run_wait_reason: s?.task_run_wait_reason ?? null,
         project: s?.project ?? item.project_id ?? null,
         githubIssueNumber: s?.github_issue_number ?? null,
         branch: s?.branch ?? null,

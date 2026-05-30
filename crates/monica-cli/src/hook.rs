@@ -2,7 +2,7 @@ use std::io::Read;
 
 use anyhow::Result;
 use clap::Subcommand;
-use monica_core::{record_claude_hook_with_session, Db};
+use monica_core::{record_claude_hook, Db};
 
 #[derive(Subcommand)]
 pub enum HookCommand {
@@ -32,21 +32,14 @@ fn handle_claude() -> Result<()> {
 
     let task_id = env_opt("MONICA_TASK_ID").or_else(|| env_opt("MONICA_ID"));
     let task_run_id = env_opt("MONICA_TASK_RUN_ID").or_else(|| env_opt("MONICA_RUN_ID"));
-    let agent_session_id = env_opt("MONICA_AGENT_SESSION_ID");
 
     let mut db = Db::open()?;
-    let report = record_claude_hook_with_session(
-        &mut db,
-        task_id.as_deref(),
-        task_run_id.as_deref(),
-        agent_session_id.as_deref(),
-        &raw,
-    )?;
+    let report = record_claude_hook(&mut db, task_id.as_deref(), task_run_id.as_deref(), &raw)?;
 
     // Surface notable degradations on stderr so a misconfigured launch shows up in the hook debug
     // log without ever reaching Claude's context.
     if let Some(id) = &task_id {
-        if !report.task_found {
+        if !report.ignored && !report.task_found {
             eprintln!("monica hook claude: MONICA_ID={id:?} not found; recorded event only");
         }
     }

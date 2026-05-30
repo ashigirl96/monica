@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 import { GitBranch } from "lucide-react";
 import { StatusLed } from "./StatusLed";
-import { STATUS_META, statusColor } from "./statusMeta";
+import { statusColor, statusLabel, waitActionLabel } from "./statusMeta";
 import type { TaskView } from "./types";
 
 interface TaskRowProps {
@@ -11,13 +11,15 @@ interface TaskRowProps {
 }
 
 export function TaskRow({ item, selected, onSelect }: TaskRowProps) {
-  const meta = STATUS_META[item.status];
+  const waitAction =
+    item.status === "waiting_for_user" ? waitActionLabel(item.task_run_wait_reason) : null;
+
   return (
     <button
       type="button"
       onClick={() => onSelect(item)}
       className={cn(
-        "group relative flex w-full flex-col gap-1.5 border-b border-border/40 px-5 py-3.5 text-left transition-colors",
+        "group relative flex w-full flex-col gap-1.5 border-b border-border/40 px-6 py-4 text-left transition-colors",
         selected ? "bg-foreground/[0.06]" : "hover:bg-foreground/[0.03]",
       )}
     >
@@ -38,7 +40,7 @@ export function TaskRow({ item, selected, onSelect }: TaskRowProps) {
           className="font-mono text-[11px] uppercase tracking-wide"
           style={{ color: statusColor(item.status) }}
         >
-          {meta.label}
+          {statusLabel(item.status)}
         </span>
       </div>
 
@@ -55,6 +57,9 @@ export function TaskRow({ item, selected, onSelect }: TaskRowProps) {
         )}
         {item.phase && (
           <span className="truncate text-muted-foreground/60 italic">· {item.phase}</span>
+        )}
+        {waitAction && (
+          <span className="truncate text-muted-foreground/70">next: {waitAction}</span>
         )}
       </div>
     </button>
