@@ -1,3 +1,5 @@
+use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -78,30 +80,151 @@ fn github_token() -> Result<String> {
         return Err(anyhow!(message));
     }
 
-    let output = Command::new("gh")
-        .args(["auth", "token"])
-        .output()
-        .context("failed to run `gh auth token`; set GH_TOKEN or GITHUB_TOKEN")?;
-    if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr);
-        let detail = detail.trim();
-        let message = format!(
-            "gh auth token failed: {}; run `gh auth login` or set GH_TOKEN/GITHUB_TOKEN",
-            if detail.is_empty() {
-                "no error output"
-            } else {
-                detail
-            }
+    if let Some(token) = github_token_from_gh_config()? {
+        let _ = GH_AUTH_TOKEN.set(token.clone());
+        return Ok(token);
+    }
+
+    if let Some(token) = github_token_from_macos_keychain(gh_config_user()?.as_deref())? {
+        let _ = GH_AUTH_TOKEN.set(token.clone());
+        return Ok(token);
+    }
+
+    let message = "GitHub token not found in GH_TOKEN/GITHUB_TOKEN, gh hosts.yml, or macOS Keychain item gh:github.com; run `gh auth login` or set GH_TOKEN/GITHUB_TOKEN";
+    cache_auth_failure(message)?;
+    Err(anyhow!(message))
+}
+
+fn github_token_from_gh_config() -> Result<Option<String>> {
+    for path in gh_hosts_paths()? {
+        let contents = match fs::read_to_string(&path) {
+            Ok(contents) => contents,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e).with_context(|| format!("failed to read {}", path.display())),
+        };
+        if let Some(token) = extract_gh_hosts_token(&contents, "github.com") {
+            return Ok(Some(token));
+        }
+    }
+    Ok(None)
+}
+
+fn gh_config_user() -> Result<Option<String>> {
+    for path in gh_hosts_paths()? {
+        let contents = match fs::read_to_string(&path) {
+            Ok(contents) => contents,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e).with_context(|| format!("failed to read {}", path.display())),
+        };
+        if let Some(user) = extract_gh_hosts_user(&contents, "github.com") {
+            return Ok(Some(user));
+        }
+    }
+    Ok(None)
+}
+
+fn gh_hosts_paths() -> Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+    if let Some(dir) = std::env::var_os("GH_CONFIG_DIR") {
+        paths.push(PathBuf::from(dir).join("hosts.yml"));
+    }
+    if let Some(dir) = std::env::var_os("XDG_CONFIG_HOME") {
+        paths.push(PathBuf::from(dir).join("gh").join("hosts.yml"));
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        paths.push(
+            PathBuf::from(home)
+                .join(".config")
+                .join("gh")
+                .join("hosts.yml"),
         );
-        cache_auth_failure(&message)?;
-        return Err(anyhow!(message));
+    }
+    if paths.is_empty() {
+        return Err(anyhow!(
+            "neither GH_CONFIG_DIR, XDG_CONFIG_HOME, nor HOME is set"
+        ));
+    }
+    Ok(paths)
+}
+
+fn extract_gh_hosts_token(contents: &str, host: &str) -> Option<String> {
+    extract_gh_hosts_value(contents, host, &["oauth_token", "token"])
+}
+
+fn extract_gh_hosts_user(contents: &str, host: &str) -> Option<String> {
+    extract_gh_hosts_value(contents, host, &["user"])
+}
+
+fn extract_gh_hosts_value(contents: &str, host: &str, keys: &[&str]) -> Option<String> {
+    let mut in_host = false;
+    for line in contents.lines() {
+        if !line.starts_with(char::is_whitespace) && line.trim_end().ends_with(':') {
+            in_host = line.trim_end_matches(':') == host;
+            continue;
+        }
+        if !in_host {
+            continue;
+        }
+        let trimmed = line.trim();
+        for key in keys {
+            let Some(value) = trimmed.strip_prefix(&format!("{key}:")) else {
+                continue;
+            };
+            let value = clean_yaml_scalar(value)?;
+            if !value.is_empty() {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
+fn clean_yaml_scalar(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    let value = value
+        .strip_prefix('"')
+        .and_then(|v| v.strip_suffix('"'))
+        .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+        .unwrap_or(value);
+    Some(value.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn github_token_from_macos_keychain(user: Option<&str>) -> Result<Option<String>> {
+    if let Some(user) = user {
+        if let Some(token) = find_macos_keychain_password(&[
+            "find-generic-password",
+            "-s",
+            "gh:github.com",
+            "-a",
+            user,
+            "-w",
+        ])? {
+            return Ok(Some(token));
+        }
+    }
+    find_macos_keychain_password(&["find-generic-password", "-s", "gh:github.com", "-w"])
+}
+
+#[cfg(not(target_os = "macos"))]
+fn github_token_from_macos_keychain(_user: Option<&str>) -> Result<Option<String>> {
+    Ok(None)
+}
+
+#[cfg(target_os = "macos")]
+fn find_macos_keychain_password(args: &[&str]) -> Result<Option<String>> {
+    let output = Command::new("/usr/bin/security")
+        .args(args)
+        .output()
+        .context("failed to run /usr/bin/security for GitHub token lookup")?;
+    if !output.status.success() {
+        return Ok(None);
     }
     let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if token.is_empty() {
-        return Err(anyhow!("gh auth token returned an empty token"));
-    }
-    let _ = GH_AUTH_TOKEN.set(token.clone());
-    Ok(token)
+    Ok((!token.is_empty()).then_some(token))
 }
 
 fn cached_auth_failure() -> Result<Option<String>> {
@@ -217,7 +340,10 @@ struct PullRequestRepository {
 
 #[cfg(test)]
 mod tests {
-    use super::{linked_pull_requests_from_response, LinkedPullRequestsResponse};
+    use super::{
+        extract_gh_hosts_token, extract_gh_hosts_user, linked_pull_requests_from_response,
+        LinkedPullRequestsResponse,
+    };
 
     #[test]
     fn extracts_linked_pull_requests_from_graphql_response() {
@@ -246,6 +372,44 @@ mod tests {
         assert_eq!(
             pull_requests[0].url,
             "https://github.com/O/R/pull/99".to_string()
+        );
+    }
+
+    #[test]
+    fn extracts_token_and_user_from_gh_hosts_config() {
+        let hosts = r#"
+github.com:
+    git_protocol: ssh
+    oauth_token: "gho_secret"
+    user: ashigirl96
+example.com:
+    oauth_token: wrong
+"#;
+
+        assert_eq!(
+            extract_gh_hosts_token(hosts, "github.com").as_deref(),
+            Some("gho_secret")
+        );
+        assert_eq!(
+            extract_gh_hosts_user(hosts, "github.com").as_deref(),
+            Some("ashigirl96")
+        );
+    }
+
+    #[test]
+    fn extracts_nested_user_token_from_gh_hosts_config() {
+        let hosts = r#"
+github.com:
+    users:
+        ashigirl96:
+            oauth_token: gho_nested
+    git_protocol: ssh
+    user: ashigirl96
+"#;
+
+        assert_eq!(
+            extract_gh_hosts_token(hosts, "github.com").as_deref(),
+            Some("gho_nested")
         );
     }
 }
