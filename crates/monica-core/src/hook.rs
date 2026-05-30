@@ -4,14 +4,14 @@ use std::io::Write;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
-use crate::{paths, AgentSessionStatus, Db, TaskRunStatus, TaskStatus};
+use crate::{paths, Db, TaskRunObservation, TaskRunStatus, TaskRunWaitReason};
 
 const HOOK_EVENTS_FILE: &str = "hook-events.jsonl";
 
 /// Map a Claude Code hook event name to the task-run status it implies:
-/// `SessionStart`/`UserPromptSubmit`→running, `Stop`→stopped, `StopFailure`→failed,
-/// `SessionEnd`→stopped. Events Monica does not act on return `None` (they are still recorded,
-/// never an error).
+/// `SessionStart`/`UserPromptSubmit` -> running, `Stop` -> stopped, `StopFailure` -> failed,
+/// `SessionEnd` -> stopped. Events Monica does not act on return `None` (they are still recorded,
+/// never an error, except non-waiting `PreToolUse` events which are intentionally ignored).
 pub fn status_for_claude_event(event_name: &str) -> Option<TaskRunStatus> {
     match event_name {
         "SessionStart" => Some(TaskRunStatus::Running),
@@ -23,57 +23,45 @@ pub fn status_for_claude_event(event_name: &str) -> Option<TaskRunStatus> {
     }
 }
 
-/// Statuses a generic lifecycle hook must never downgrade. Two reasons cohabit here:
-/// - explicit `monica issue mark` signals (`need_approval`, `pr_open`, `done`, `archived`) — a
-///   `Stop`/`SessionEnd` firing afterward records the event but leaves the user-declared state
-///   intact.
-/// - `failed` set by an earlier `StopFailure` hook in the same session — Claude often emits
-///   `SessionEnd` right after `StopFailure`, and `SessionEnd→stopped` would otherwise silently
-///   downgrade the failure signal we just recorded.
-fn explicit_status_wins(current: TaskStatus) -> bool {
-    matches!(
-        current,
-        TaskStatus::NeedApproval
-            | TaskStatus::PrOpen
-            | TaskStatus::Done
-            | TaskStatus::Archived
-            | TaskStatus::Failed
-    )
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct HookTransition {
+    status: TaskRunStatus,
+    wait_reason: Option<TaskRunWaitReason>,
 }
 
-fn task_status_for_run_status(status: TaskRunStatus) -> TaskStatus {
-    match status {
-        TaskRunStatus::Failed => TaskStatus::Failed,
-        TaskRunStatus::SettingUp | TaskRunStatus::Running | TaskRunStatus::Stopped => {
-            TaskStatus::Active
-        }
+fn wait_reason_for_tool(tool_name: &str) -> Option<TaskRunWaitReason> {
+    match tool_name {
+        "AskUserQuestion" => Some(TaskRunWaitReason::AskUserQuestion),
+        "ExitPlanMode" => Some(TaskRunWaitReason::ExitPlanMode),
+        _ => None,
     }
 }
 
-fn task_run_status_protected(status: TaskRunStatus) -> bool {
-    matches!(status, TaskRunStatus::Failed)
+fn transition_for_claude_event(
+    event_name: &str,
+    payload: Option<&Value>,
+) -> Option<HookTransition> {
+    if event_name == "PreToolUse" {
+        let wait_reason = payload
+            .and_then(|value| value.get("tool_name"))
+            .and_then(Value::as_str)
+            .and_then(wait_reason_for_tool)?;
+        return Some(HookTransition {
+            status: TaskRunStatus::WaitingForUser,
+            wait_reason: Some(wait_reason),
+        });
+    }
+
+    status_for_claude_event(event_name).map(|status| HookTransition {
+        status,
+        wait_reason: None,
+    })
 }
 
-fn agent_session_status_for_run_status(status: TaskRunStatus) -> AgentSessionStatus {
-    match status {
-        TaskRunStatus::SettingUp => AgentSessionStatus::Starting,
-        TaskRunStatus::Running => AgentSessionStatus::Running,
-        TaskRunStatus::Stopped => AgentSessionStatus::Stopped,
-        TaskRunStatus::Failed => AgentSessionStatus::Failed,
-    }
-}
-
-fn agent_session_status_after_hook(
-    current: AgentSessionStatus,
-    implied: TaskRunStatus,
-) -> AgentSessionStatus {
-    let next = agent_session_status_for_run_status(implied);
-    match (current, next) {
-        (AgentSessionStatus::Failed, AgentSessionStatus::Starting)
-        | (AgentSessionStatus::Failed, AgentSessionStatus::Running)
-        | (AgentSessionStatus::Failed, AgentSessionStatus::Stopped) => AgentSessionStatus::Failed,
-        _ => next,
-    }
+fn transition_is_protected(current: TaskRunStatus, next: TaskRunStatus) -> bool {
+    matches!(current, TaskRunStatus::Failed)
+        || (matches!(current, TaskRunStatus::WaitingForUser)
+            && matches!(next, TaskRunStatus::Stopped))
 }
 
 /// Whether `task_run_id` is safe to use as a path component under `runs/`. Task run ids are minted as
@@ -94,42 +82,29 @@ pub fn is_safe_task_run_id(task_run_id: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HookReport {
     pub event_name: Option<String>,
-    pub task_status: Option<TaskStatus>,
     pub task_run_status: Option<TaskRunStatus>,
+    pub task_run_wait_reason: Option<TaskRunWaitReason>,
+    pub ignored: bool,
     pub task_found: bool,
     pub task_run_linked: bool,
-    pub agent_session_found: bool,
     pub event_recorded: bool,
     pub jsonl_written: bool,
     pub unsafe_task_run_id: bool,
 }
 
 /// Receive a Claude Code hook callback: parse the stdin JSON, append it to the run's
-/// `hook-events.jsonl`, record an `events` row, and move the task (and its run) to the status
-/// the event implies. Tolerant by contract — invalid JSON and unknown events are recorded without
+/// `hook-events.jsonl`, record an `events` row, and move the task run to the status
+/// the event implies. Tolerant by contract: invalid JSON and unknown events are recorded without
 /// erroring, so the caller can always exit 0 and never disrupt the Claude session.
 ///
 /// `task_id` and `task_run_id` come from `MONICA_*` env vars and are treated as untrusted input:
 /// - `task_run_id` becomes a path component only when [`is_safe_task_run_id`]; an id that resolves
-///   to a task run owned by a *different* task is a mismatch and is excluded from every task-run
-///   artifact (its jsonl, its status, the `events.task_run_id` link), so one session cannot pollute
-///   another task run.
-/// - a status implied by the event is applied only when it would not overwrite an explicit
-///   `monica issue mark` signal ([`explicit_status_wins`]) — explicit signals win over inference.
+///   to a task run is the source of truth for the owning task.
+/// - `failed` and `waiting_for_user` are protected from later `Stop`/`SessionEnd` downgrades.
 pub fn record_claude_hook(
     db: &mut Db,
     task_id: Option<&str>,
     task_run_id: Option<&str>,
-    raw_stdin: &str,
-) -> Result<HookReport> {
-    record_claude_hook_with_session(db, task_id, task_run_id, None, raw_stdin)
-}
-
-pub fn record_claude_hook_with_session(
-    db: &mut Db,
-    task_id: Option<&str>,
-    task_run_id: Option<&str>,
-    agent_session_id: Option<&str>,
     raw_stdin: &str,
 ) -> Result<HookReport> {
     let parsed: Option<Value> = serde_json::from_str(raw_stdin.trim()).ok();
@@ -142,33 +117,41 @@ pub fn record_claude_hook_with_session(
     let safe_task_run_id = task_run_id.filter(|&r| is_safe_task_run_id(r));
     let unsafe_task_run_id = task_run_id.is_some() && safe_task_run_id.is_none();
 
-    let current_status = match task_id {
-        Some(id) => db.get_task(id)?.map(|w| w.status),
-        None => None,
-    };
-    let task_found = current_status.is_some();
+    if should_ignore_claude_event(event_name.as_deref(), parsed.as_ref()) {
+        return Ok(HookReport {
+            event_name,
+            task_run_status: None,
+            task_run_wait_reason: None,
+            ignored: true,
+            task_found: false,
+            task_run_linked: false,
+            event_recorded: false,
+            jsonl_written: false,
+            unsafe_task_run_id,
+        });
+    }
 
     let run_row = match safe_task_run_id {
         Some(r) => db.get_task_run(r)?,
         None => None,
     };
-    let task_run_linked = match (run_row.as_ref(), task_id) {
-        (Some(run), Some(wid)) => run.task_id == wid,
-        _ => false,
-    };
-    let run_mismatch = run_row.is_some() && !task_run_linked;
+    let task_run_linked = run_row.is_some();
     let linked_task_run_id = if task_run_linked {
         safe_task_run_id
     } else {
         None
     };
+    let linked_task_id = run_row.as_ref().map(|run| run.task_id.as_str()).or(task_id);
+    let task_found = match linked_task_id {
+        Some(id) if run_row.is_some() => db.get_task(id)?.is_some() || run_row.is_some(),
+        Some(id) => db.get_task(id)?.is_some(),
+        None => false,
+    };
 
     let mut jsonl_written = false;
-    if let Some(task_run_id) = safe_task_run_id {
-        if !run_mismatch {
-            append_jsonl(db, task_run_id, event_name.as_deref(), &parsed, raw_stdin)?;
-            jsonl_written = true;
-        }
+    if let Some(task_run_id) = linked_task_run_id {
+        append_jsonl(db, task_run_id, event_name.as_deref(), &parsed, raw_stdin)?;
+        jsonl_written = true;
     }
 
     let event_recorded = if task_found || task_run_linked {
@@ -176,7 +159,7 @@ pub fn record_claude_hook_with_session(
             .clone()
             .unwrap_or_else(|| json!({ "raw": raw_stdin }));
         db.insert_event(
-            task_id.filter(|_| task_found),
+            linked_task_id.filter(|_| task_found || task_run_linked),
             linked_task_run_id,
             "claude_hook",
             &payload,
@@ -186,73 +169,64 @@ pub fn record_claude_hook_with_session(
         false
     };
 
-    let implied = event_name.as_deref().and_then(status_for_claude_event);
-    let task_protected = current_status.map(explicit_status_wins).unwrap_or(false);
-    let task_status = match (implied, current_status) {
-        (Some(implied), Some(_)) if !task_protected => Some(task_status_for_run_status(implied)),
-        _ => None,
-    };
-    let task_run_status = match (implied, linked_task_run_id) {
-        (Some(implied), Some(_)) => {
-            let protected = run_row
-                .as_ref()
-                .map(|r| task_run_status_protected(r.status))
-                .unwrap_or(false);
-            (!protected).then_some(implied)
+    let transition = event_name
+        .as_deref()
+        .and_then(|event| transition_for_claude_event(event, parsed.as_ref()));
+    let transition = match (transition, run_row.as_ref()) {
+        (Some(transition), Some(run))
+            if !transition_is_protected(run.status, transition.status) =>
+        {
+            Some(transition)
         }
         _ => None,
     };
-    if task_status.is_some() || task_run_status.is_some() {
-        if let Some(task_id) = task_id {
-            db.apply_hook_status(task_id, linked_task_run_id, task_status, task_run_status)?;
-        }
-    }
 
-    let mut agent_session_found = false;
-    if let (
-        Some(agent_session_id),
-        Some(status),
-        Some(event_name),
-        Some(task_id),
-        Some(task_run_id),
-    ) = (
-        agent_session_id,
-        implied,
-        event_name.as_deref(),
-        task_id,
-        linked_task_run_id,
-    ) {
-        if let Some(session) = db.get_agent_session(agent_session_id)? {
-            if session.task_id == task_id && session.task_run_id == task_run_id {
-                agent_session_found = true;
-                let at = db.now_iso()?;
-                let provider_session_id = parsed
-                    .as_ref()
-                    .and_then(|value| value.get("session_id"))
-                    .and_then(Value::as_str);
-                db.update_agent_session_event(
-                    agent_session_id,
-                    agent_session_status_after_hook(session.status, status),
-                    Some(event_name),
-                    &at,
-                    provider_session_id,
-                    parsed.as_ref(),
-                )?;
+    let at = db.now_iso()?;
+    let provider_session_id = parsed
+        .as_ref()
+        .and_then(|value| value.get("session_id"))
+        .and_then(Value::as_str);
+    if let Some(task_run_id) = linked_task_run_id {
+        let wait_update = transition.map(|t| {
+            if t.status == TaskRunStatus::WaitingForUser {
+                t.wait_reason
+            } else {
+                None
             }
-        }
+        });
+        db.record_task_run_observation(
+            task_run_id,
+            TaskRunObservation {
+                status: transition.map(|t| t.status),
+                wait_reason: wait_update,
+                event_name: event_name.as_deref(),
+                at: &at,
+                provider_session_id,
+                metadata: parsed.as_ref(),
+            },
+        )?;
     }
 
     Ok(HookReport {
         event_name,
-        task_status,
-        task_run_status,
+        task_run_status: transition.map(|t| t.status),
+        task_run_wait_reason: transition.and_then(|t| t.wait_reason),
+        ignored: false,
         task_found,
         task_run_linked,
-        agent_session_found,
         event_recorded,
         jsonl_written,
         unsafe_task_run_id,
     })
+}
+
+fn should_ignore_claude_event(event_name: Option<&str>, payload: Option<&Value>) -> bool {
+    event_name == Some("PreToolUse")
+        && payload
+            .and_then(|value| value.get("tool_name"))
+            .and_then(Value::as_str)
+            .and_then(wait_reason_for_tool)
+            .is_none()
 }
 
 /// Append one self-describing line `{at, hook_event_name, payload}` to the run's hook-event log.
@@ -289,7 +263,7 @@ fn append_jsonl(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Agent, NewAgentSession, NewTask, NewTaskRun, TaskKind};
+    use crate::{NewTask, NewTaskRun, TaskKind, TaskStatus};
     use serde_json::json;
     use std::path::PathBuf;
 
@@ -321,15 +295,6 @@ mod tests {
         (guard, dir)
     }
 
-    fn jsonl_for(task_run_id: &str) -> String {
-        fs::read_to_string(
-            paths::task_run_dir(task_run_id)
-                .unwrap()
-                .join(HOOK_EVENTS_FILE),
-        )
-        .unwrap()
-    }
-
     #[test]
     fn status_mapping_covers_lifecycle_events() {
         assert_eq!(
@@ -356,6 +321,30 @@ mod tests {
     }
 
     #[test]
+    fn pre_tool_use_wait_reasons_are_detected_from_tool_name() {
+        assert_eq!(
+            transition_for_claude_event(
+                "PreToolUse",
+                Some(&json!({"tool_name": "AskUserQuestion"}))
+            ),
+            Some(HookTransition {
+                status: TaskRunStatus::WaitingForUser,
+                wait_reason: Some(TaskRunWaitReason::AskUserQuestion),
+            })
+        );
+        assert_eq!(
+            transition_for_claude_event("PreToolUse", Some(&json!({"tool_name": "ExitPlanMode"})))
+                .unwrap()
+                .wait_reason,
+            Some(TaskRunWaitReason::ExitPlanMode)
+        );
+        assert!(
+            transition_for_claude_event("PreToolUse", Some(&json!({"tool_name": "Read"})))
+                .is_none()
+        );
+    }
+
+    #[test]
     fn safe_task_run_id_accepts_run_ids_and_rejects_traversal() {
         assert!(is_safe_task_run_id("run-1"));
         assert!(is_safe_task_run_id("RUN.1-2_3"));
@@ -368,7 +357,7 @@ mod tests {
     }
 
     #[test]
-    fn session_start_updates_task_and_linked_task_run() {
+    fn session_start_updates_linked_task_run_and_provider_fields() {
         let (_g, _home) = temp_home("start");
         let mut db = Db::open_in_memory().unwrap();
         let id = dev_task(&mut db, TaskStatus::Ready);
@@ -376,23 +365,24 @@ mod tests {
 
         let report = record_claude_hook(
             &mut db,
-            Some(&id),
+            None,
             Some(&run.id),
-            r#"{"hook_event_name":"SessionStart"}"#,
+            r#"{"hook_event_name":"SessionStart","session_id":"provider-1"}"#,
         )
         .unwrap();
 
-        assert_eq!(report.task_status, Some(TaskStatus::Active));
         assert_eq!(report.task_run_status, Some(TaskRunStatus::Running));
         assert!(report.task_run_linked);
         assert_eq!(
             db.get_task(&id).unwrap().unwrap().status,
-            TaskStatus::Active
+            TaskStatus::InProgress
         );
-        assert_eq!(
-            db.get_task_run(&run.id).unwrap().unwrap().status,
-            TaskRunStatus::Running
-        );
+        let updated = db.get_task_run(&run.id).unwrap().unwrap();
+        assert_eq!(updated.status, TaskRunStatus::Running);
+        assert_eq!(updated.wait_reason, None);
+        assert_eq!(updated.provider_session_id.as_deref(), Some("provider-1"));
+        assert_eq!(updated.last_event_name.as_deref(), Some("SessionStart"));
+        assert_eq!(updated.metadata["hook_event_name"], json!("SessionStart"));
         let events = db.list_events(Some(&id)).unwrap();
         assert_eq!(
             events.last().unwrap().task_run_id.as_deref(),
@@ -401,10 +391,10 @@ mod tests {
     }
 
     #[test]
-    fn unknown_task_run_writes_jsonl_but_does_not_fk_link_event() {
+    fn unknown_task_run_does_not_write_jsonl_or_link_event() {
         let (_g, _home) = temp_home("unknown-run");
         let mut db = Db::open_in_memory().unwrap();
-        let id = dev_task(&mut db, TaskStatus::Active);
+        let id = dev_task(&mut db, TaskStatus::InProgress);
 
         let report = record_claude_hook(
             &mut db,
@@ -414,30 +404,30 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(report.task_status, Some(TaskStatus::Active));
         assert_eq!(report.task_run_status, None);
         assert!(report.event_recorded);
-        assert!(report.jsonl_written);
+        assert!(!report.jsonl_written);
         assert_eq!(
             db.get_task(&id).unwrap().unwrap().status,
-            TaskStatus::Active
+            TaskStatus::InProgress
         );
         let events = db.list_events(Some(&id)).unwrap();
         assert_eq!(events[0].task_run_id, None);
-        assert!(jsonl_for("run_x").contains(r#""hook_event_name":"Stop""#));
     }
 
     #[test]
-    fn explicit_task_status_survives_stop_but_task_run_stops() {
-        let (_g, _home) = temp_home("protected");
+    fn waiting_for_user_is_not_downgraded_by_stop() {
+        let (_g, _home) = temp_home("wait-stop");
         let mut db = Db::open_in_memory().unwrap();
         let id = dev_task(&mut db, TaskStatus::Ready);
         let run = db.start_task_run(new_task_run(&id)).unwrap();
-        db.finish_task_run(&run.id, &id, TaskRunStatus::Running)
-            .unwrap();
-        db.mark_task(&id, TaskStatus::NeedApproval, Some("Plan ready"), None)
-            .unwrap();
-
+        record_claude_hook(
+            &mut db,
+            Some(&id),
+            Some(&run.id),
+            r#"{"hook_event_name":"PreToolUse","tool_name":"ExitPlanMode"}"#,
+        )
+        .unwrap();
         let report = record_claude_hook(
             &mut db,
             Some(&id),
@@ -446,16 +436,37 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(report.task_status, None);
-        assert_eq!(report.task_run_status, Some(TaskRunStatus::Stopped));
-        assert_eq!(
-            db.get_task(&id).unwrap().unwrap().status,
-            TaskStatus::NeedApproval
-        );
-        assert_eq!(
-            db.get_task_run(&run.id).unwrap().unwrap().status,
-            TaskRunStatus::Stopped
-        );
+        assert_eq!(report.task_run_status, None);
+        let updated = db.get_task_run(&run.id).unwrap().unwrap();
+        assert_eq!(updated.status, TaskRunStatus::WaitingForUser);
+        assert_eq!(updated.wait_reason, Some(TaskRunWaitReason::ExitPlanMode));
+    }
+
+    #[test]
+    fn user_prompt_submit_resumes_waiting_run_and_clears_reason() {
+        let (_g, _home) = temp_home("wait-resume");
+        let mut db = Db::open_in_memory().unwrap();
+        let id = dev_task(&mut db, TaskStatus::Ready);
+        let run = db.start_task_run(new_task_run(&id)).unwrap();
+        record_claude_hook(
+            &mut db,
+            Some(&id),
+            Some(&run.id),
+            r#"{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion"}"#,
+        )
+        .unwrap();
+        let report = record_claude_hook(
+            &mut db,
+            Some(&id),
+            Some(&run.id),
+            r#"{"hook_event_name":"UserPromptSubmit"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(report.task_run_status, Some(TaskRunStatus::Running));
+        let updated = db.get_task_run(&run.id).unwrap().unwrap();
+        assert_eq!(updated.status, TaskRunStatus::Running);
+        assert_eq!(updated.wait_reason, None);
     }
 
     #[test]
@@ -475,12 +486,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(report.task_status, None);
         assert_eq!(report.task_run_status, None);
-        assert_eq!(
-            db.get_task(&id).unwrap().unwrap().status,
-            TaskStatus::Failed
-        );
         assert_eq!(
             db.get_task_run(&run.id).unwrap().unwrap().status,
             TaskRunStatus::Failed
@@ -488,10 +494,10 @@ mod tests {
     }
 
     #[test]
-    fn unsafe_task_run_id_skips_jsonl_but_updates_task() {
+    fn unsafe_task_run_id_skips_jsonl_and_status_update() {
         let (_g, home) = temp_home("unsafe");
         let mut db = Db::open_in_memory().unwrap();
-        let id = dev_task(&mut db, TaskStatus::Active);
+        let id = dev_task(&mut db, TaskStatus::InProgress);
 
         let report = record_claude_hook(
             &mut db,
@@ -503,10 +509,10 @@ mod tests {
 
         assert!(report.unsafe_task_run_id);
         assert!(!report.jsonl_written);
-        assert_eq!(report.task_status, Some(TaskStatus::Failed));
+        assert_eq!(report.task_run_status, None);
         assert_eq!(
             db.get_task(&id).unwrap().unwrap().status,
-            TaskStatus::Failed
+            TaskStatus::InProgress
         );
         assert!(!home.join("evil").exists());
     }
@@ -515,50 +521,66 @@ mod tests {
     fn invalid_json_records_raw_event_without_status_change() {
         let (_g, _home) = temp_home("badjson");
         let mut db = Db::open_in_memory().unwrap();
-        let id = dev_task(&mut db, TaskStatus::Active);
+        let id = dev_task(&mut db, TaskStatus::InProgress);
+        let run = db.start_task_run(new_task_run(&id)).unwrap();
 
         let report =
-            record_claude_hook(&mut db, Some(&id), Some("run_x"), "not json at all").unwrap();
+            record_claude_hook(&mut db, Some(&id), Some(&run.id), "not json at all").unwrap();
 
         assert_eq!(report.event_name, None);
-        assert_eq!(report.task_status, None);
+        assert_eq!(report.task_run_status, None);
         assert!(report.event_recorded);
         assert!(report.jsonl_written);
         assert_eq!(
             db.get_task(&id).unwrap().unwrap().status,
-            TaskStatus::Active
+            TaskStatus::InProgress
         );
         let events = db.list_events(Some(&id)).unwrap();
         assert_eq!(events[0].payload["raw"], json!("not json at all"));
     }
 
     #[test]
-    fn unknown_event_records_but_leaves_status_and_needs_no_run() {
+    fn non_waiting_pre_tool_use_is_ignored_without_db_noise() {
+        let (_g, home) = temp_home("ignored-pretool");
         let mut db = Db::open_in_memory().unwrap();
-        let id = dev_task(&mut db, TaskStatus::Active);
+        let id = dev_task(&mut db, TaskStatus::InProgress);
+        let run = db.start_task_run(new_task_run(&id)).unwrap();
 
         let report = record_claude_hook(
             &mut db,
             Some(&id),
-            None,
-            r#"{"hook_event_name":"PreToolUse"}"#,
+            Some(&run.id),
+            r#"{"hook_event_name":"PreToolUse","tool_name":"Read"}"#,
         )
         .unwrap();
 
         assert_eq!(report.event_name.as_deref(), Some("PreToolUse"));
-        assert_eq!(report.task_status, None);
+        assert!(report.ignored);
         assert_eq!(report.task_run_status, None);
-        assert!(report.event_recorded);
+        assert!(!report.event_recorded);
         assert!(!report.jsonl_written);
+        assert!(db.list_events(Some(&id)).unwrap().is_empty());
+        assert!(
+            !home
+                .join("runs")
+                .join(&run.id)
+                .join("hook-events.jsonl")
+                .exists(),
+            "ignored PreToolUse should not create hook artifacts"
+        );
         assert_eq!(
             db.get_task(&id).unwrap().unwrap().status,
-            TaskStatus::Active
+            TaskStatus::InProgress
+        );
+        assert_eq!(
+            db.get_task_run(&run.id).unwrap().unwrap().last_event_name,
+            None
         );
     }
 
     #[test]
-    fn run_id_of_another_task_is_not_linked_or_mutated() {
-        let (_g, _home) = temp_home("mismatch");
+    fn task_run_id_is_source_of_truth_when_task_id_mismatches() {
+        let (_g, _home) = temp_home("source-truth");
         let mut db = Db::open_in_memory().unwrap();
         let a = dev_task(&mut db, TaskStatus::Ready);
         let run_a = db.start_task_run(new_task_run(&a)).unwrap();
@@ -572,128 +594,17 @@ mod tests {
         )
         .unwrap();
 
-        assert!(!report.task_run_linked);
-        assert_eq!(report.task_status, Some(TaskStatus::Active));
-        assert_eq!(report.task_run_status, None);
-        assert_eq!(db.get_task(&b).unwrap().unwrap().status, TaskStatus::Active);
-        assert_eq!(db.get_task(&a).unwrap().unwrap().status, TaskStatus::Active);
+        assert!(report.task_run_linked);
+        assert_eq!(report.task_run_status, Some(TaskRunStatus::Stopped));
+        assert_eq!(db.get_task(&b).unwrap().unwrap().status, TaskStatus::Ready);
+        assert_eq!(
+            db.get_task(&a).unwrap().unwrap().status,
+            TaskStatus::InProgress
+        );
         assert_eq!(
             db.get_task_run(&run_a.id).unwrap().unwrap().status,
-            TaskRunStatus::SettingUp
+            TaskRunStatus::Stopped
         );
-        assert!(!report.jsonl_written);
-    }
-
-    #[test]
-    fn hook_updates_agent_session_when_session_id_matches() {
-        let (_g, _home) = temp_home("session");
-        let mut db = Db::open_in_memory().unwrap();
-        let id = dev_task(&mut db, TaskStatus::Ready);
-        let run = db.start_task_run(new_task_run(&id)).unwrap();
-        let session = db
-            .create_agent_session(NewAgentSession {
-                task_id: id.clone(),
-                task_run_id: run.id.clone(),
-                agent: Agent::Claude,
-                mode: "new".to_string(),
-                provider_session_id: None,
-                parent_session_id: None,
-                metadata: json!({ "source": "test" }),
-            })
-            .unwrap();
-
-        let report = record_claude_hook_with_session(
-            &mut db,
-            Some(&id),
-            Some(&run.id),
-            Some(&session.id),
-            r#"{"hook_event_name":"SessionStart","session_id":"provider-1"}"#,
-        )
-        .unwrap();
-
-        assert!(report.agent_session_found);
-        let updated = db.get_agent_session(&session.id).unwrap().unwrap();
-        assert_eq!(updated.status, AgentSessionStatus::Running);
-        assert_eq!(updated.provider_session_id.as_deref(), Some("provider-1"));
-        assert_eq!(updated.last_event_name.as_deref(), Some("SessionStart"));
-        assert_eq!(updated.metadata["hook_event_name"], json!("SessionStart"));
-    }
-
-    #[test]
-    fn hook_does_not_update_agent_session_owned_by_another_task_run() {
-        let (_g, _home) = temp_home("session-mismatch");
-        let mut db = Db::open_in_memory().unwrap();
-        let a = dev_task(&mut db, TaskStatus::Ready);
-        let run_a = db.start_task_run(new_task_run(&a)).unwrap();
-        let session_a = db
-            .create_agent_session(NewAgentSession {
-                task_id: a.clone(),
-                task_run_id: run_a.id.clone(),
-                agent: Agent::Claude,
-                mode: "new".to_string(),
-                provider_session_id: None,
-                parent_session_id: None,
-                metadata: json!({ "source": "original" }),
-            })
-            .unwrap();
-        let b = dev_task(&mut db, TaskStatus::Ready);
-        let run_b = db.start_task_run(new_task_run(&b)).unwrap();
-
-        let report = record_claude_hook_with_session(
-            &mut db,
-            Some(&b),
-            Some(&run_b.id),
-            Some(&session_a.id),
-            r#"{"hook_event_name":"SessionStart","session_id":"provider-wrong"}"#,
-        )
-        .unwrap();
-
-        assert!(!report.agent_session_found);
-        let unchanged = db.get_agent_session(&session_a.id).unwrap().unwrap();
-        assert_eq!(unchanged.status, AgentSessionStatus::Starting);
-        assert_eq!(unchanged.provider_session_id, None);
-        assert_eq!(unchanged.last_event_name, None);
-        assert_eq!(unchanged.metadata["source"], json!("original"));
-    }
-
-    #[test]
-    fn session_end_does_not_downgrade_failed_agent_session() {
-        let (_g, _home) = temp_home("session-failed");
-        let mut db = Db::open_in_memory().unwrap();
-        let id = dev_task(&mut db, TaskStatus::Ready);
-        let run = db.start_task_run(new_task_run(&id)).unwrap();
-        let session = db
-            .create_agent_session(NewAgentSession {
-                task_id: id.clone(),
-                task_run_id: run.id.clone(),
-                agent: Agent::Claude,
-                mode: "new".to_string(),
-                provider_session_id: None,
-                parent_session_id: None,
-                metadata: json!({ "source": "test" }),
-            })
-            .unwrap();
-
-        record_claude_hook_with_session(
-            &mut db,
-            Some(&id),
-            Some(&run.id),
-            Some(&session.id),
-            r#"{"hook_event_name":"StopFailure","session_id":"provider-1"}"#,
-        )
-        .unwrap();
-        record_claude_hook_with_session(
-            &mut db,
-            Some(&id),
-            Some(&run.id),
-            Some(&session.id),
-            r#"{"hook_event_name":"SessionEnd","session_id":"provider-1"}"#,
-        )
-        .unwrap();
-
-        let updated = db.get_agent_session(&session.id).unwrap().unwrap();
-        assert_eq!(updated.status, AgentSessionStatus::Failed);
-        assert_eq!(updated.last_event_name.as_deref(), Some("SessionEnd"));
-        assert_eq!(updated.metadata["hook_event_name"], json!("SessionEnd"));
+        assert!(report.jsonl_written);
     }
 }

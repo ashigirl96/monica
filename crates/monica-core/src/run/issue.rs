@@ -3,27 +3,26 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use serde_json::json;
 
-use crate::model::{Agent, NewAgentSession, NewTaskRun};
-use crate::{paths, AgentSessionStatus, Db, Project, RefType, TaskRunStatus};
+use crate::model::{Agent, NewTaskRun};
+use crate::{paths, Db, Project, RefType, TaskRunStatus};
 
-use super::agent::{build_claude_launch, AgentSessionMode, TaskRunReport};
+use super::agent::{build_claude_launch, AgentLaunchMode, TaskRunReport};
 use super::branch::{branch_name, monica_number, worktree_path_for};
 use super::setup::{run_setup_script, SetupEnv, SetupOutcome};
 use super::worktree::create_worktree;
 
 pub fn run_issue(db: &mut Db, task_id: &str, agent: Option<Agent>) -> Result<TaskRunReport> {
-    run_issue_with_session_mode(db, task_id, agent, AgentSessionMode::New)
+    run_issue_with_launch_mode(db, task_id, agent, AgentLaunchMode::New)
 }
 
-pub fn run_issue_with_session_mode(
+pub fn run_issue_with_launch_mode(
     db: &mut Db,
     task_id: &str,
     agent: Option<Agent>,
-    session_mode: AgentSessionMode,
+    launch_mode: AgentLaunchMode,
 ) -> Result<TaskRunReport> {
-    if session_mode.is_reconnect() && agent != Some(Agent::Claude) {
+    if launch_mode.is_reconnect() && agent != Some(Agent::Claude) {
         return Err(anyhow!(
             "Claude session reconnect options require `--claude` or `--agent claude`"
         ));
@@ -47,7 +46,7 @@ pub fn run_issue_with_session_mode(
     let mon = monica_number(task_id)?;
     let branch = branch_name(github_issue_number, mon);
 
-    if session_mode.is_reconnect() {
+    if launch_mode.is_reconnect() {
         let target = reconnect_target(db, task_id, &branch)?;
         if !target.worktree_path.exists() {
             return Err(anyhow!(
@@ -62,7 +61,7 @@ pub fn run_issue_with_session_mode(
             &project,
             &target.branch,
             &target.worktree_path,
-            session_mode,
+            launch_mode,
         );
     }
 
@@ -120,36 +119,19 @@ pub fn run_issue_with_session_mode(
             setup: setup_outcome,
             log_path,
             settings_path: None,
-            agent_session_id: None,
             agent_launch: None,
         });
     }
 
     // setup ok/skipped → prepare the agent's launch spec (if requested), then settle running.
-    let (agent_launch, settings_path, agent_session_id) = match agent {
-        None => (None, None, None),
+    let (agent_launch, settings_path) = match agent {
+        None => (None, None),
         Some(Agent::Claude) => {
-            let session =
-                match create_agent_session(db, &run.id, task_id, Agent::Claude, &session_mode) {
-                    Ok(session) => session,
-                    Err(e) => {
-                        let _ = db.finish_task_run(&run.id, task_id, TaskRunStatus::Failed);
-                        return Err(e);
-                    }
-                };
-            match build_claude_launch(
-                db,
-                &run.id,
-                task_id,
-                &session.id,
-                &project,
-                &worktree_path,
-                &session_mode,
-            ) {
-                Ok((launch, path)) => (Some(launch), Some(path), Some(session.id)),
+            match build_claude_launch(db, &run.id, task_id, &project, &worktree_path, &launch_mode)
+            {
+                Ok((launch, path)) => (Some(launch), Some(path)),
                 Err(e) => {
                     let _ = db.finish_task_run(&run.id, task_id, TaskRunStatus::Failed);
-                    mark_agent_session_failed(db, &session.id);
                     return Err(e);
                 }
             }
@@ -159,7 +141,6 @@ pub fn run_issue_with_session_mode(
         // Even the final settle must not leave the pair stranded in setting_up: re-settle to
         // failed before surfacing the original DB error.
         let _ = db.finish_task_run(&run.id, task_id, TaskRunStatus::Failed);
-        mark_agent_session_failed_if_present(db, agent_session_id.as_deref());
         return Err(e);
     }
 
@@ -172,7 +153,6 @@ pub fn run_issue_with_session_mode(
         setup: setup_outcome,
         log_path,
         settings_path,
-        agent_session_id,
         agent_launch,
     })
 }
@@ -212,7 +192,7 @@ fn run_existing_worktree(
     project: &Project,
     branch: &str,
     worktree_path: &Path,
-    session_mode: AgentSessionMode,
+    launch_mode: AgentLaunchMode,
 ) -> Result<TaskRunReport> {
     let worktree_str = worktree_path.to_string_lossy().into_owned();
     let run = db.start_task_run(NewTaskRun {
@@ -240,33 +220,17 @@ fn run_existing_worktree(
         return Err(e);
     }
 
-    let session = match create_agent_session(db, &run.id, task_id, Agent::Claude, &session_mode) {
-        Ok(session) => session,
-        Err(e) => {
-            let _ = db.finish_task_run(&run.id, task_id, TaskRunStatus::Failed);
-            return Err(e);
-        }
-    };
-    let (agent_launch, settings_path) = match build_claude_launch(
-        db,
-        &run.id,
-        task_id,
-        &session.id,
-        project,
-        worktree_path,
-        &session_mode,
-    ) {
-        Ok((launch, path)) => (Some(launch), Some(path)),
-        Err(e) => {
-            let _ = db.finish_task_run(&run.id, task_id, TaskRunStatus::Failed);
-            mark_agent_session_failed(db, &session.id);
-            return Err(e);
-        }
-    };
+    let (agent_launch, settings_path) =
+        match build_claude_launch(db, &run.id, task_id, project, worktree_path, &launch_mode) {
+            Ok((launch, path)) => (Some(launch), Some(path)),
+            Err(e) => {
+                let _ = db.finish_task_run(&run.id, task_id, TaskRunStatus::Failed);
+                return Err(e);
+            }
+        };
 
     if let Err(e) = db.finish_task_run(&run.id, task_id, TaskRunStatus::Running) {
         let _ = db.finish_task_run(&run.id, task_id, TaskRunStatus::Failed);
-        mark_agent_session_failed(db, &session.id);
         return Err(e);
     }
 
@@ -279,37 +243,8 @@ fn run_existing_worktree(
         setup: SetupOutcome::ReusedWorktree,
         log_path: log_path.to_string_lossy().into_owned(),
         settings_path,
-        agent_session_id: Some(session.id),
         agent_launch,
     })
-}
-
-fn create_agent_session(
-    db: &mut Db,
-    task_run_id: &str,
-    task_id: &str,
-    agent: Agent,
-    session_mode: &AgentSessionMode,
-) -> Result<crate::AgentSession> {
-    db.create_agent_session(NewAgentSession {
-        task_id: task_id.to_string(),
-        task_run_id: task_run_id.to_string(),
-        agent,
-        mode: session_mode.as_str().to_string(),
-        provider_session_id: None,
-        parent_session_id: session_mode.parent_session_id().map(str::to_string),
-        metadata: json!({ "session_mode": session_mode.as_str() }),
-    })
-}
-
-fn mark_agent_session_failed(db: &Db, agent_session_id: &str) {
-    mark_agent_session_failed_if_present(db, Some(agent_session_id));
-}
-
-fn mark_agent_session_failed_if_present(db: &Db, agent_session_id: Option<&str>) {
-    if let Some(agent_session_id) = agent_session_id {
-        let _ = db.update_agent_session_status(agent_session_id, AgentSessionStatus::Failed);
-    }
 }
 
 struct SetupResult {

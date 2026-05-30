@@ -14,6 +14,7 @@ interface StatusRailProps {
   refreshing: boolean;
   healthy: boolean;
   lastSync: Date | null;
+  width: number;
 }
 
 function syncTooltip(healthy: boolean, lastSync: Date | null): string {
@@ -31,6 +32,7 @@ export function StatusRail({
   refreshing,
   healthy,
   lastSync,
+  width,
 }: StatusRailProps) {
   const counts = new Map<DisplayStatus, number>();
   for (const item of items) {
@@ -39,7 +41,8 @@ export function StatusRail({
   const present = STATUS_ORDER.filter((s) => (counts.get(s) ?? 0) > 0);
 
   return (
-    <nav className="flex w-52 shrink-0 flex-col gap-px border-r border-border/60 bg-card/30 py-3">
+    <nav className="flex h-full shrink-0 flex-col gap-px bg-card/20 pb-3" style={{ width }}>
+      <div data-tauri-drag-region className="h-14 shrink-0" />
       <div className="flex items-center justify-between px-4 pb-2">
         <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
           status

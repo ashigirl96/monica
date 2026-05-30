@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use rusqlite::params;
 
 use crate::db::Db;
-use crate::model::{NewTaskRun, TaskRun, TaskRunStatus, TaskStatus};
+use crate::model::{NewTaskRun, TaskRun, TaskRunObservation, TaskRunStatus, TaskStatus};
 
 use super::{SET_NOW, TASK_RUN_COLUMNS};
 
@@ -15,7 +15,7 @@ impl Db {
     ) -> Result<()> {
         self.conn().execute(
             &format!(
-                "UPDATE task_runs SET status = ?1, updated_at = {SET_NOW} \
+                "UPDATE task_runs SET status = ?1, wait_reason = NULL, updated_at = {SET_NOW} \
                  WHERE id = ?2 AND task_id = ?3"
             ),
             params![status.as_str(), task_run_id, task_id],
@@ -23,33 +23,62 @@ impl Db {
         Ok(())
     }
 
-    /// Apply hook-driven task and task-run status changes in one transaction. The task-run update
-    /// is additionally scoped by `task_id`, so a task run that does not
-    /// belong to this task (e.g. a mismatched env var) is never touched even if the id exists.
-    pub fn apply_hook_status(
+    /// Apply a hook observation to a task run. TaskRun is the lifecycle source of truth; the owning
+    /// task is only kept in `in_progress` while a non-deleted, non-done run is being observed.
+    pub fn record_task_run_observation(
         &mut self,
-        task_id: &str,
-        task_run_id: Option<&str>,
-        task_status: Option<TaskStatus>,
-        task_run_status: Option<TaskRunStatus>,
+        task_run_id: &str,
+        observation: TaskRunObservation<'_>,
     ) -> Result<()> {
+        let metadata = observation
+            .metadata
+            .map(serde_json::to_string)
+            .transpose()?;
+        let status = observation.status.map(|s| s.as_str());
+        let update_wait_reason = observation.wait_reason.is_some();
+        let wait_reason = observation.wait_reason.flatten().map(|r| r.as_str());
         let tx = self.conn_mut().transaction()?;
-        if let Some(status) = task_status {
-            let affected = tx.execute(
-                &format!("UPDATE tasks SET status = ?1, updated_at = {SET_NOW} WHERE id = ?2"),
-                params![status.as_str(), task_id],
-            )?;
-            if affected == 0 {
-                return Err(anyhow!("task not found: {task_id}"));
-            }
+        let affected = tx.execute(
+            &format!(
+                "UPDATE task_runs
+                    SET status = COALESCE(?1, status),
+                        wait_reason = CASE WHEN ?2 THEN ?3 ELSE wait_reason END,
+                        last_event_name = COALESCE(?4, last_event_name),
+                        last_event_at = ?5,
+                        provider_session_id = COALESCE(?6, provider_session_id),
+                        metadata_json = COALESCE(?7, metadata_json),
+                        updated_at = {SET_NOW}
+                  WHERE id = ?8"
+            ),
+            params![
+                status,
+                update_wait_reason,
+                wait_reason,
+                observation.event_name,
+                observation.at,
+                observation.provider_session_id,
+                metadata,
+                task_run_id
+            ],
+        )?;
+        if affected == 0 {
+            return Err(anyhow!("task run not found: {task_run_id}"));
         }
-        if let (Some(task_run_id), Some(status)) = (task_run_id, task_run_status) {
+        if status.is_some() {
             tx.execute(
                 &format!(
-                    "UPDATE task_runs SET status = ?1, updated_at = {SET_NOW} \
-                     WHERE id = ?2 AND task_id = ?3"
+                    "UPDATE tasks
+                        SET status = ?1,
+                            updated_at = {SET_NOW}
+                      WHERE id = (SELECT task_id FROM task_runs WHERE id = ?2)
+                        AND status != ?3
+                        AND deleted_at IS NULL"
                 ),
-                params![status.as_str(), task_run_id, task_id],
+                params![
+                    TaskStatus::InProgress.as_str(),
+                    task_run_id,
+                    TaskStatus::Done.as_str()
+                ],
             )?;
         }
         tx.commit()?;
@@ -78,8 +107,8 @@ impl Db {
         let affected = tx.execute(
             "UPDATE tasks
                SET status = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-             WHERE id = ?2",
-            params![TaskStatus::Active.as_str(), new.task_id],
+             WHERE id = ?2 AND deleted_at IS NULL",
+            params![TaskStatus::InProgress.as_str(), new.task_id],
         )?;
         if affected == 0 {
             return Err(anyhow!("task not found: {}", new.task_id));
@@ -99,27 +128,23 @@ impl Db {
         Ok(run)
     }
 
-    /// Settle a task run to a terminal status (`running` / `failed`), updating both the run and
-    /// its task in one transaction so the pair can never drift.
+    /// Settle a task run, updating both the run and its task in one transaction so the pair can
+    /// never drift. Run failures stay at the run layer; the task remains `in_progress`.
     pub fn finish_task_run(
         &mut self,
         task_run_id: &str,
         task_id: &str,
         status: TaskRunStatus,
     ) -> Result<()> {
-        let task_status = match status {
-            TaskRunStatus::Failed => TaskStatus::Failed,
-            TaskRunStatus::SettingUp | TaskRunStatus::Running | TaskRunStatus::Stopped => {
-                TaskStatus::Active
-            }
-        };
         let status = status.as_str();
         let tx = self.conn_mut().transaction()?;
         let run_affected = tx.execute(
             "UPDATE task_runs
-               SET status = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-             WHERE id = ?2",
-            params![status, task_run_id],
+               SET status = ?1,
+                   wait_reason = NULL,
+                   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+             WHERE id = ?2 AND task_id = ?3",
+            params![status, task_run_id, task_id],
         )?;
         if run_affected == 0 {
             return Err(anyhow!("task run not found: {task_run_id}"));
@@ -127,8 +152,8 @@ impl Db {
         let item_affected = tx.execute(
             "UPDATE tasks
                SET status = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-             WHERE id = ?2",
-            params![task_status.as_str(), task_id],
+             WHERE id = ?2 AND deleted_at IS NULL",
+            params![TaskStatus::InProgress.as_str(), task_id],
         )?;
         if item_affected == 0 {
             return Err(anyhow!("task not found: {task_id}"));

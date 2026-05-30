@@ -17,14 +17,18 @@ pub struct AgentLaunch {
     pub env: Vec<(String, String)>,
 }
 
-/// The matcher is omitted so each hook fires unconditionally; the `command` string is a parameter
-/// so the JSON body is pure and unit-testable with a fixed input.
+/// The command string is a parameter so the JSON body is pure and unit-testable with a fixed input.
 pub(crate) fn claude_settings_json(hook_command: &str) -> Result<String> {
-    let group = || json!([{ "hooks": [{ "type": "command", "command": hook_command }] }]);
+    let hook_group = |matcher: &str| json!({ "matcher": matcher, "hooks": [{ "type": "command", "command": hook_command }] });
+    let group = || json!([hook_group("")]);
     let value = json!({
         "hooks": {
             "SessionStart": group(),
             "UserPromptSubmit": group(),
+            "PreToolUse": [
+                hook_group("AskUserQuestion"),
+                hook_group("ExitPlanMode"),
+            ],
             "Stop": group(),
             "StopFailure": group(),
             "SessionEnd": group(),
@@ -69,6 +73,7 @@ mod tests {
         for event in [
             "SessionStart",
             "UserPromptSubmit",
+            "PreToolUse",
             "Stop",
             "StopFailure",
             "SessionEnd",
@@ -95,12 +100,27 @@ mod tests {
     }
 
     #[test]
-    fn settings_json_omits_matcher_for_match_all() {
+    fn settings_json_sets_matchers() {
         let body = claude_settings_json("monica hook claude").unwrap();
         let parsed: Value = serde_json::from_str(&body).unwrap();
-        assert!(
-            parsed.pointer("/hooks/SessionStart/0/matcher").is_none(),
-            "matcher must be absent so the hook fires on every event"
+        assert_eq!(
+            parsed
+                .pointer("/hooks/SessionStart/0/matcher")
+                .and_then(Value::as_str),
+            Some(""),
+            "lifecycle hooks should match every event of their kind"
+        );
+        assert_eq!(
+            parsed
+                .pointer("/hooks/PreToolUse/0/matcher")
+                .and_then(Value::as_str),
+            Some("AskUserQuestion")
+        );
+        assert_eq!(
+            parsed
+                .pointer("/hooks/PreToolUse/1/matcher")
+                .and_then(Value::as_str),
+            Some("ExitPlanMode")
         );
     }
 

@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 import { GitBranch, X } from "lucide-react";
 import { EventTimeline } from "./EventTimeline";
 import { StatusLed } from "./StatusLed";
-import { STATUS_META, statusColor } from "./statusMeta";
+import { statusColor, statusLabel, waitActionLabel } from "./statusMeta";
 import type { TaskView } from "./types";
 import { useEvents } from "./useEvents";
 
@@ -15,6 +15,9 @@ export function DetailDrawer({ item, onClose }: DetailDrawerProps) {
   const { events, loading } = useEvents(item?.id ?? null);
 
   if (!item) return null;
+
+  const waitAction =
+    item.status === "waiting_for_user" ? waitActionLabel(item.task_run_wait_reason) : null;
 
   return (
     <aside
@@ -30,7 +33,7 @@ export function DetailDrawer({ item, onClose }: DetailDrawerProps) {
               className="font-mono text-[11px] uppercase tracking-wide"
               style={{ color: statusColor(item.status) }}
             >
-              {STATUS_META[item.status].label}
+              {statusLabel(item.status)}
             </span>
           </div>
           <h2 className="mt-1 text-[15px] leading-snug text-foreground">{item.title}</h2>
@@ -62,6 +65,7 @@ export function DetailDrawer({ item, onClose }: DetailDrawerProps) {
             }
           />
           {item.phase && <Field label="phase" value={item.phase} />}
+          {waitAction && <Field label="next" value={waitAction} />}
           <Field label="created" value={item.created_at.replace("T", " ").slice(0, 19)} />
           <Field label="updated" value={item.updated_at.replace("T", " ").slice(0, 19)} />
         </dl>

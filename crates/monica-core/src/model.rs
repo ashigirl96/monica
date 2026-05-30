@@ -10,12 +10,8 @@ use serde_json::Value;
 pub enum TaskStatus {
     Inbox,
     Ready,
-    Active,
-    NeedApproval,
-    Failed,
-    PrOpen,
+    InProgress,
     Done,
-    Archived,
 }
 
 impl TaskStatus {
@@ -23,17 +19,13 @@ impl TaskStatus {
         match self {
             TaskStatus::Inbox => "inbox",
             TaskStatus::Ready => "ready",
-            TaskStatus::Active => "active",
-            TaskStatus::NeedApproval => "need_approval",
-            TaskStatus::Failed => "failed",
-            TaskStatus::PrOpen => "pr_open",
+            TaskStatus::InProgress => "in_progress",
             TaskStatus::Done => "done",
-            TaskStatus::Archived => "archived",
         }
     }
 
     /// Parse a status the way a CLI user types it: dashes are accepted in place of the stored
-    /// snake_case underscores, so `need-approval` resolves to [`TaskStatus::NeedApproval`]. Kept in
+    /// snake_case underscores, so `in-progress` resolves to [`TaskStatus::InProgress`]. Kept in
     /// core so the CLI and any future GUI share one acceptance rule.
     pub fn parse_token(s: &str) -> Result<Self> {
         s.replace('-', "_").parse()
@@ -47,12 +39,8 @@ impl FromStr for TaskStatus {
         Ok(match s {
             "inbox" => TaskStatus::Inbox,
             "ready" => TaskStatus::Ready,
-            "active" => TaskStatus::Active,
-            "need_approval" => TaskStatus::NeedApproval,
-            "failed" => TaskStatus::Failed,
-            "pr_open" => TaskStatus::PrOpen,
+            "in_progress" => TaskStatus::InProgress,
             "done" => TaskStatus::Done,
-            "archived" => TaskStatus::Archived,
             other => return Err(anyhow!("unknown task status: {other}")),
         })
     }
@@ -63,6 +51,7 @@ impl FromStr for TaskStatus {
 pub enum TaskRunStatus {
     SettingUp,
     Running,
+    WaitingForUser,
     Stopped,
     Failed,
 }
@@ -72,6 +61,7 @@ impl TaskRunStatus {
         match self {
             TaskRunStatus::SettingUp => "setting_up",
             TaskRunStatus::Running => "running",
+            TaskRunStatus::WaitingForUser => "waiting_for_user",
             TaskRunStatus::Stopped => "stopped",
             TaskRunStatus::Failed => "failed",
         }
@@ -85,6 +75,7 @@ impl FromStr for TaskRunStatus {
         Ok(match s {
             "setting_up" => TaskRunStatus::SettingUp,
             "running" => TaskRunStatus::Running,
+            "waiting_for_user" => TaskRunStatus::WaitingForUser,
             "stopped" => TaskRunStatus::Stopped,
             "failed" => TaskRunStatus::Failed,
             other => return Err(anyhow!("unknown task run status: {other}")),
@@ -94,18 +85,44 @@ impl FromStr for TaskRunStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum TaskRunWaitReason {
+    AskUserQuestion,
+    ExitPlanMode,
+}
+
+impl TaskRunWaitReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TaskRunWaitReason::AskUserQuestion => "ask_user_question",
+            TaskRunWaitReason::ExitPlanMode => "exit_plan_mode",
+        }
+    }
+}
+
+impl FromStr for TaskRunWaitReason {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Ok(match s {
+            "ask_user_question" => TaskRunWaitReason::AskUserQuestion,
+            "exit_plan_mode" => TaskRunWaitReason::ExitPlanMode,
+            other => return Err(anyhow!("unknown task run wait reason: {other}")),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DisplayStatus {
     Inbox,
     Ready,
-    Active,
+    InProgress,
     SettingUp,
     Running,
-    NeedApproval,
+    WaitingForUser,
     Stopped,
     Failed,
-    PrOpen,
     Done,
-    Archived,
 }
 
 impl DisplayStatus {
@@ -113,15 +130,13 @@ impl DisplayStatus {
         match self {
             DisplayStatus::Inbox => "inbox",
             DisplayStatus::Ready => "ready",
-            DisplayStatus::Active => "active",
+            DisplayStatus::InProgress => "in_progress",
             DisplayStatus::SettingUp => "setting_up",
             DisplayStatus::Running => "running",
-            DisplayStatus::NeedApproval => "need_approval",
+            DisplayStatus::WaitingForUser => "waiting_for_user",
             DisplayStatus::Stopped => "stopped",
             DisplayStatus::Failed => "failed",
-            DisplayStatus::PrOpen => "pr_open",
             DisplayStatus::Done => "done",
-            DisplayStatus::Archived => "archived",
         }
     }
 
@@ -133,18 +148,15 @@ impl DisplayStatus {
         match task {
             TaskStatus::Inbox => DisplayStatus::Inbox,
             TaskStatus::Ready => DisplayStatus::Ready,
-            TaskStatus::Active => match run {
+            TaskStatus::InProgress => match run {
                 Some(TaskRunStatus::SettingUp) => DisplayStatus::SettingUp,
                 Some(TaskRunStatus::Running) => DisplayStatus::Running,
+                Some(TaskRunStatus::WaitingForUser) => DisplayStatus::WaitingForUser,
                 Some(TaskRunStatus::Stopped) => DisplayStatus::Stopped,
                 Some(TaskRunStatus::Failed) => DisplayStatus::Failed,
-                None => DisplayStatus::Active,
+                None => DisplayStatus::InProgress,
             },
-            TaskStatus::NeedApproval => DisplayStatus::NeedApproval,
-            TaskStatus::Failed => DisplayStatus::Failed,
-            TaskStatus::PrOpen => DisplayStatus::PrOpen,
             TaskStatus::Done => DisplayStatus::Done,
-            TaskStatus::Archived => DisplayStatus::Archived,
         }
     }
 }
@@ -156,15 +168,13 @@ impl FromStr for DisplayStatus {
         Ok(match s {
             "inbox" => DisplayStatus::Inbox,
             "ready" => DisplayStatus::Ready,
-            "active" => DisplayStatus::Active,
+            "in_progress" => DisplayStatus::InProgress,
             "setting_up" => DisplayStatus::SettingUp,
             "running" => DisplayStatus::Running,
-            "need_approval" => DisplayStatus::NeedApproval,
+            "waiting_for_user" => DisplayStatus::WaitingForUser,
             "stopped" => DisplayStatus::Stopped,
             "failed" => DisplayStatus::Failed,
-            "pr_open" => DisplayStatus::PrOpen,
             "done" => DisplayStatus::Done,
-            "archived" => DisplayStatus::Archived,
             other => return Err(anyhow!("unknown display status: {other}")),
         })
     }
@@ -321,6 +331,7 @@ pub struct Task {
     pub labels: Vec<String>,
     pub details: Value,
     pub source: Option<Value>,
+    pub deleted_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -346,6 +357,7 @@ impl Task {
                 Some(s) => Some(serde_json::from_str(&s)?),
                 None => None,
             },
+            deleted_at: row.get("deleted_at")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
         })
@@ -359,6 +371,7 @@ pub struct TaskSummaryRow {
     pub github_issue_number: Option<i64>,
     pub task_status: TaskStatus,
     pub task_run_status: Option<TaskRunStatus>,
+    pub task_run_wait_reason: Option<TaskRunWaitReason>,
     pub status: DisplayStatus,
     pub branch: Option<String>,
 }
@@ -402,14 +415,32 @@ pub struct TaskRun {
     pub branch: Option<String>,
     pub worktree_path: Option<String>,
     pub status: TaskRunStatus,
+    pub wait_reason: Option<TaskRunWaitReason>,
     pub settings_path: Option<String>,
+    pub provider_session_id: Option<String>,
+    pub last_event_name: Option<String>,
+    pub last_event_at: Option<String>,
+    pub metadata: Value,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// A provider/hook observation applied to an existing [`TaskRun`].
+#[derive(Debug, Clone, Copy)]
+pub struct TaskRunObservation<'a> {
+    pub status: Option<TaskRunStatus>,
+    pub wait_reason: Option<Option<TaskRunWaitReason>>,
+    pub event_name: Option<&'a str>,
+    pub at: &'a str,
+    pub provider_session_id: Option<&'a str>,
+    pub metadata: Option<&'a Value>,
 }
 
 impl TaskRun {
     pub(crate) fn from_row(row: &Row) -> Result<Self> {
         let status: String = row.get("status")?;
+        let wait_reason: Option<String> = row.get("wait_reason")?;
+        let metadata: String = row.get("metadata_json")?;
         Ok(TaskRun {
             id: row.get("id")?,
             task_id: row.get("task_id")?,
@@ -417,7 +448,12 @@ impl TaskRun {
             branch: row.get("branch")?,
             worktree_path: row.get("worktree_path")?,
             status: status.parse()?,
+            wait_reason: wait_reason.map(|s| s.parse()).transpose()?,
             settings_path: row.get("settings_path")?,
+            provider_session_id: row.get("provider_session_id")?,
+            last_event_name: row.get("last_event_name")?,
+            last_event_at: row.get("last_event_at")?,
+            metadata: serde_json::from_str(&metadata)?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
         })
@@ -457,90 +493,6 @@ impl Event {
             created_at: row.get("created_at")?,
         })
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentSessionStatus {
-    Starting,
-    Running,
-    Stopped,
-    Failed,
-}
-
-impl AgentSessionStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            AgentSessionStatus::Starting => "starting",
-            AgentSessionStatus::Running => "running",
-            AgentSessionStatus::Stopped => "stopped",
-            AgentSessionStatus::Failed => "failed",
-        }
-    }
-}
-
-impl FromStr for AgentSessionStatus {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        Ok(match s {
-            "starting" => AgentSessionStatus::Starting,
-            "running" => AgentSessionStatus::Running,
-            "stopped" => AgentSessionStatus::Stopped,
-            "failed" => AgentSessionStatus::Failed,
-            other => return Err(anyhow!("unknown agent session status: {other}")),
-        })
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AgentSession {
-    pub id: String,
-    pub task_id: String,
-    pub task_run_id: String,
-    pub agent: String,
-    pub mode: String,
-    pub status: AgentSessionStatus,
-    pub provider_session_id: Option<String>,
-    pub parent_session_id: Option<String>,
-    pub last_event_name: Option<String>,
-    pub last_event_at: Option<String>,
-    pub metadata: Value,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-impl AgentSession {
-    pub(crate) fn from_row(row: &Row) -> Result<Self> {
-        let status: String = row.get("status")?;
-        let metadata: String = row.get("metadata_json")?;
-        Ok(Self {
-            id: row.get("id")?,
-            task_id: row.get("task_id")?,
-            task_run_id: row.get("task_run_id")?,
-            agent: row.get("agent")?,
-            mode: row.get("mode")?,
-            status: status.parse()?,
-            provider_session_id: row.get("provider_session_id")?,
-            parent_session_id: row.get("parent_session_id")?,
-            last_event_name: row.get("last_event_name")?,
-            last_event_at: row.get("last_event_at")?,
-            metadata: serde_json::from_str(&metadata)?,
-            created_at: row.get("created_at")?,
-            updated_at: row.get("updated_at")?,
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct NewAgentSession {
-    pub task_id: String,
-    pub task_run_id: String,
-    pub agent: Agent,
-    pub mode: String,
-    pub provider_session_id: Option<String>,
-    pub parent_session_id: Option<String>,
-    pub metadata: Value,
 }
 
 /// A reference to an item living in an external system (e.g. a GitHub issue).

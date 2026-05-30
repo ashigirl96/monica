@@ -5,7 +5,7 @@ use std::str::FromStr;
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_core::{
-    parse_issue_ref, parse_owner_repo, track_github_issue, Agent, AgentSessionMode, Db,
+    parse_issue_ref, parse_owner_repo, track_github_issue, Agent, AgentLaunchMode, Db,
     DisplayStatus, GithubIssue, SetupOutcome, Task, TaskRunStatus, TaskStatus, TaskSummaryRow,
 };
 use serde::Deserialize;
@@ -49,11 +49,11 @@ pub enum IssueCommand {
         #[arg(short = 'y', long)]
         yes: bool,
     },
-    /// Explicitly set a task's status/phase (e.g. `monica issue mark MON-1 need-approval`)
+    /// Explicitly set a task's status/phase (e.g. `monica issue mark MON-1 in-progress`)
     Mark {
         /// MON-<id>
         id: String,
-        /// Task status token, e.g. need-approval / pr-open / done (dashes or underscores)
+        /// Task status token: inbox / ready / in-progress / done
         status: String,
         /// Free-text note, stored as the task's phase
         #[arg(long)]
@@ -130,11 +130,11 @@ fn run_command(
     fork: Option<&str>,
 ) -> Result<()> {
     let agent = resolve_agent(claude, agent)?;
-    let session_mode = resolve_session_mode(continue_session, fork)?;
-    if session_mode.is_reconnect() && agent != Some(Agent::Claude) {
+    let launch_mode = resolve_launch_mode(continue_session, fork)?;
+    if launch_mode.is_reconnect() && agent != Some(Agent::Claude) {
         anyhow::bail!("--continue/--fork require --claude or --agent claude");
     }
-    let report = monica_core::run_issue_with_session_mode(db, id, agent, session_mode)?;
+    let report = monica_core::run_issue_with_launch_mode(db, id, agent, launch_mode)?;
     println!("Task run {} for {}", report.task_run_id, report.task_id);
     println!("Branch:   {}", report.branch);
     println!("Worktree: {}", report.worktree_path);
@@ -143,9 +143,6 @@ fn run_command(
     println!("Status:   {}", report.status.as_str());
     if let Some(path) = report.settings_path.as_deref() {
         println!("Settings: {path}");
-    }
-    if let Some(id) = report.agent_session_id.as_deref() {
-        println!("Session:  {id}");
     }
     if report.status == TaskRunStatus::Failed {
         anyhow::bail!(
@@ -178,11 +175,8 @@ fn delete_command(db: &mut Db, id: &str, yes: bool) -> Result<()> {
 
     let report = monica_core::delete_issue(db, id)?;
     println!("Deleted issue {}.", report.item.id);
-    if !report.removed_task_runs.is_empty() {
-        println!(
-            "Removed task runs: {}.",
-            report.removed_task_runs.join(", ")
-        );
+    if !report.task_runs.is_empty() {
+        println!("Preserved task runs: {}.", report.task_runs.join(", "));
     }
     if !report.removed_branches.is_empty() {
         println!("Removed branches: {}.", report.removed_branches.join(", "));
@@ -224,11 +218,11 @@ fn resolve_agent(claude: bool, agent: Option<&str>) -> Result<Option<Agent>> {
     }
 }
 
-fn resolve_session_mode(continue_session: bool, fork: Option<&str>) -> Result<AgentSessionMode> {
+fn resolve_launch_mode(continue_session: bool, fork: Option<&str>) -> Result<AgentLaunchMode> {
     match (continue_session, fork) {
-        (false, None) => Ok(AgentSessionMode::New),
-        (true, None) => Ok(AgentSessionMode::Continue),
-        (false, Some(session_id)) if !session_id.trim().is_empty() => Ok(AgentSessionMode::Fork {
+        (false, None) => Ok(AgentLaunchMode::New),
+        (true, None) => Ok(AgentLaunchMode::Continue),
+        (false, Some(session_id)) if !session_id.trim().is_empty() => Ok(AgentLaunchMode::Fork {
             session_id: session_id.trim().to_string(),
         }),
         (false, Some(_)) => Err(anyhow!("--fork requires a non-empty session id")),
@@ -495,23 +489,23 @@ mod tests {
     }
 
     #[test]
-    fn resolve_session_mode_maps_continue_and_fork() {
+    fn resolve_launch_mode_maps_continue_and_fork() {
         assert_eq!(
-            resolve_session_mode(false, None).unwrap(),
-            AgentSessionMode::New
+            resolve_launch_mode(false, None).unwrap(),
+            AgentLaunchMode::New
         );
         assert_eq!(
-            resolve_session_mode(true, None).unwrap(),
-            AgentSessionMode::Continue
+            resolve_launch_mode(true, None).unwrap(),
+            AgentLaunchMode::Continue
         );
         assert_eq!(
-            resolve_session_mode(false, Some("abc-123")).unwrap(),
-            AgentSessionMode::Fork {
+            resolve_launch_mode(false, Some("abc-123")).unwrap(),
+            AgentLaunchMode::Fork {
                 session_id: "abc-123".to_string()
             }
         );
-        assert!(resolve_session_mode(false, Some("")).is_err());
-        assert!(resolve_session_mode(true, Some("abc-123")).is_err());
+        assert!(resolve_launch_mode(false, Some("")).is_err());
+        assert!(resolve_launch_mode(true, Some("abc-123")).is_err());
     }
 
     #[test]
@@ -533,6 +527,7 @@ mod tests {
             github_issue_number: Some(17),
             task_status: TaskStatus::Ready,
             task_run_status: None,
+            task_run_wait_reason: None,
             status: DisplayStatus::Ready,
             branch: Some("monica/gh-17".to_string()),
         }];

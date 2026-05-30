@@ -63,7 +63,7 @@ pub fn track_github_issue(db: &mut Db, repo_input: &str, issue: &GithubIssue) ->
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeleteIssueReport {
     pub item: Task,
-    pub removed_task_runs: Vec<String>,
+    pub task_runs: Vec<String>,
     pub removed_branches: Vec<String>,
 }
 
@@ -73,10 +73,10 @@ pub fn delete_issue(db: &mut Db, id: &str) -> Result<DeleteIssueReport> {
         .ok_or_else(|| anyhow!("task not found: {id}"))?;
     let runs = db.list_task_runs_for_task(id)?;
     let removed_branches = cleanup_runs(db, &item, &runs)?;
-    let item = db.delete_task_cascade(id)?;
+    let item = db.mark_task_deleted(id)?;
     Ok(DeleteIssueReport {
         item,
-        removed_task_runs: runs.into_iter().map(|run| run.id).collect(),
+        task_runs: runs.into_iter().map(|run| run.id).collect(),
         removed_branches,
     })
 }

@@ -1,7 +1,7 @@
 use super::tasks::parse_pr_number;
 use crate::model::{
     Agent, DisplayStatus, ExternalRef, NewTask, NewTaskRun, PermissionMode, Project, Provider,
-    RefType, TaskKind, TaskRunStatus, TaskStatus,
+    RefType, TaskKind, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus,
 };
 use crate::Db;
 use rusqlite::params;
@@ -50,20 +50,20 @@ fn migrate_is_idempotent() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
 
     let tables: i64 = conn
         .query_row(
             "SELECT count(*) FROM sqlite_master WHERE type = 'table'
                  AND name IN (
                    'mon_counter','task_run_counter','tasks','task_runs','events',
-                   'external_refs','projects','agent_session_counter','agent_sessions'
+	                   'external_refs','projects'
                  )",
             [],
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(tables, 9);
+    assert_eq!(tables, 7);
 }
 
 #[test]
@@ -93,9 +93,10 @@ fn task_round_trip() {
     assert_eq!(listed[0], created);
 
     std::thread::sleep(std::time::Duration::from_millis(5));
-    db.update_task_status("MON-1", TaskStatus::Active).unwrap();
+    db.update_task_status("MON-1", TaskStatus::InProgress)
+        .unwrap();
     let updated = db.get_task("MON-1").unwrap().unwrap();
-    assert_eq!(updated.status, TaskStatus::Active);
+    assert_eq!(updated.status, TaskStatus::InProgress);
     assert!(updated.updated_at > created.updated_at);
     assert_eq!(updated.created_at, created.created_at);
 }
@@ -127,8 +128,8 @@ fn start_run_sets_run_and_task_to_setting_up() {
     assert_eq!(db.get_task_run("run-1").unwrap().unwrap(), run);
     assert_eq!(
         db.get_task(&item.id).unwrap().unwrap().status,
-        TaskStatus::Active,
-        "start_task_run must move the task to active in the same transaction"
+        TaskStatus::InProgress,
+        "start_task_run must move the task to in_progress in the same transaction"
     );
 }
 
@@ -155,7 +156,7 @@ fn finish_run_updates_run_and_task_together() {
     );
     assert_eq!(
         db.get_task(&item.id).unwrap().unwrap().status,
-        TaskStatus::Active
+        TaskStatus::InProgress
     );
 
     assert!(db
@@ -180,7 +181,7 @@ fn finish_run_unknown_task_rolls_back() {
     );
     assert_eq!(
         db.get_task(&item.id).unwrap().unwrap().status,
-        TaskStatus::Active
+        TaskStatus::InProgress
     );
 }
 
@@ -228,13 +229,27 @@ fn start_run_unknown_task_leaves_no_phantom_run() {
 }
 
 #[test]
+fn start_run_deleted_task_leaves_no_phantom_run() {
+    let mut db = Db::open_in_memory().unwrap();
+    let item = db.insert_task(dev_item("deleted")).unwrap();
+    db.delete_task(&item.id).unwrap();
+
+    let err = db.start_task_run(new_run(&item.id)).unwrap_err();
+    assert!(format!("{err:#}").contains("task not found"), "{err:#}");
+    assert!(
+        db.list_task_runs_for_task(&item.id).unwrap().is_empty(),
+        "a rolled-back start_task_run must not attach runs to soft-deleted tasks"
+    );
+}
+
+#[test]
 fn get_missing_task_is_none() {
     let db = Db::open_in_memory().unwrap();
     assert!(db.get_task("MON-1").unwrap().is_none());
 }
 
 #[test]
-fn delete_task_refuses_owned_runs() {
+fn delete_task_soft_deletes_and_preserves_owned_rows() {
     let mut db = Db::open_in_memory().unwrap();
     let item = db
         .insert_task_with_ref(
@@ -254,12 +269,9 @@ fn delete_task_refuses_owned_runs() {
     db.insert_event(None, Some(&run.id), "hook", &json!({ "via": "test" }))
         .unwrap();
 
-    let err = db.delete_task(&item.id).unwrap_err();
-    assert!(
-        format!("{err:#}").contains("cleanup-aware issue delete path"),
-        "{err:#}"
-    );
-    assert!(db.get_task(&item.id).unwrap().is_some());
+    let deleted = db.delete_task(&item.id).unwrap();
+    assert_eq!(deleted.id, item.id);
+    assert!(db.get_task(&item.id).unwrap().is_none());
     assert!(db.get_task_run(&run.id).unwrap().is_some());
     assert_eq!(db.list_external_refs(&item.id).unwrap().len(), 1);
 
@@ -271,7 +283,7 @@ fn delete_task_refuses_owned_runs() {
 }
 
 #[test]
-fn delete_task_removes_unrun_item_rows() {
+fn delete_task_soft_deletes_unrun_item_and_preserves_history() {
     let mut db = Db::open_in_memory().unwrap();
     let item = db
         .insert_task_with_ref(
@@ -291,13 +303,13 @@ fn delete_task_removes_unrun_item_rows() {
     let deleted = db.delete_task(&item.id).unwrap();
     assert_eq!(deleted.id, item.id);
     assert!(db.get_task(&item.id).unwrap().is_none());
-    assert!(db.list_external_refs(&item.id).unwrap().is_empty());
+    assert_eq!(db.list_external_refs(&item.id).unwrap().len(), 1);
 
     let event_count: i64 = db
         .conn()
         .query_row("SELECT count(*) FROM events", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(event_count, 0);
+    assert_eq!(event_count, 1);
 }
 
 #[test]
@@ -338,7 +350,7 @@ fn list_task_summaries_uses_effective_repo_and_filters() {
         .insert_task_with_ref(
             {
                 let mut item = dev_item("unlinked");
-                item.status = TaskStatus::NeedApproval;
+                item.status = TaskStatus::InProgress;
                 item
             },
             ExternalRef::new(
@@ -451,15 +463,19 @@ fn list_task_summaries_derives_display_status_from_task_and_run_state() {
     let stopped_run = db.start_task_run(new_run(&stopped.id)).unwrap();
     db.finish_task_run(&stopped_run.id, &stopped.id, TaskRunStatus::Stopped)
         .unwrap();
-    let approval = db.insert_task(dev_item("approval")).unwrap();
-    let approval_run = db.start_task_run(new_run(&approval.id)).unwrap();
-    db.finish_task_run(&approval_run.id, &approval.id, TaskRunStatus::Stopped)
-        .unwrap();
-    db.mark_task(
-        &approval.id,
-        TaskStatus::NeedApproval,
-        Some("Plan ready"),
-        None,
+    let waiting = db.insert_task(dev_item("waiting")).unwrap();
+    let waiting_run = db.start_task_run(new_run(&waiting.id)).unwrap();
+    let at = db.now_iso().unwrap();
+    db.record_task_run_observation(
+        &waiting_run.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::WaitingForUser),
+            wait_reason: Some(Some(crate::TaskRunWaitReason::ExitPlanMode)),
+            event_name: Some("PreToolUse"),
+            at: &at,
+            provider_session_id: None,
+            metadata: Some(&json!({"hook_event_name": "PreToolUse", "tool_name": "ExitPlanMode"})),
+        },
     )
     .unwrap();
 
@@ -470,22 +486,26 @@ fn list_task_summaries_derives_display_status_from_task_and_run_state() {
     assert_eq!(find(&ready.id).task_status, TaskStatus::Ready);
     assert_eq!(find(&ready.id).task_run_status, None);
     assert_eq!(find(&running.id).status, DisplayStatus::Running);
-    assert_eq!(find(&running.id).task_status, TaskStatus::Active);
+    assert_eq!(find(&running.id).task_status, TaskStatus::InProgress);
     assert_eq!(
         find(&running.id).task_run_status,
         Some(TaskRunStatus::Running)
     );
     assert_eq!(find(&stopped.id).status, DisplayStatus::Stopped);
-    assert_eq!(find(&stopped.id).task_status, TaskStatus::Active);
+    assert_eq!(find(&stopped.id).task_status, TaskStatus::InProgress);
     assert_eq!(
         find(&stopped.id).task_run_status,
         Some(TaskRunStatus::Stopped)
     );
-    assert_eq!(find(&approval.id).status, DisplayStatus::NeedApproval);
-    assert_eq!(find(&approval.id).task_status, TaskStatus::NeedApproval);
+    assert_eq!(find(&waiting.id).status, DisplayStatus::WaitingForUser);
+    assert_eq!(find(&waiting.id).task_status, TaskStatus::InProgress);
     assert_eq!(
-        find(&approval.id).task_run_status,
-        Some(TaskRunStatus::Stopped)
+        find(&waiting.id).task_run_status,
+        Some(TaskRunStatus::WaitingForUser)
+    );
+    assert_eq!(
+        find(&waiting.id).task_run_wait_reason,
+        Some(crate::TaskRunWaitReason::ExitPlanMode)
     );
 }
 
@@ -765,12 +785,8 @@ fn status_string_conversion_round_trips() {
     let task_statuses = [
         TaskStatus::Inbox,
         TaskStatus::Ready,
-        TaskStatus::Active,
-        TaskStatus::NeedApproval,
-        TaskStatus::Failed,
-        TaskStatus::PrOpen,
+        TaskStatus::InProgress,
         TaskStatus::Done,
-        TaskStatus::Archived,
     ];
     for s in task_statuses {
         assert_eq!(s.as_str().parse::<TaskStatus>().unwrap(), s);
@@ -781,6 +797,7 @@ fn status_string_conversion_round_trips() {
     let task_run_statuses = [
         TaskRunStatus::SettingUp,
         TaskRunStatus::Running,
+        TaskRunStatus::WaitingForUser,
         TaskRunStatus::Stopped,
         TaskRunStatus::Failed,
     ];
@@ -788,19 +805,26 @@ fn status_string_conversion_round_trips() {
         assert_eq!(s.as_str().parse::<TaskRunStatus>().unwrap(), s);
     }
     assert!("active".parse::<TaskRunStatus>().is_err());
+    for reason in [
+        TaskRunWaitReason::AskUserQuestion,
+        TaskRunWaitReason::ExitPlanMode,
+    ] {
+        assert_eq!(
+            reason.as_str().parse::<TaskRunWaitReason>().unwrap(),
+            reason
+        );
+    }
 
     let display_statuses = [
         DisplayStatus::Inbox,
         DisplayStatus::Ready,
-        DisplayStatus::Active,
+        DisplayStatus::InProgress,
         DisplayStatus::SettingUp,
         DisplayStatus::Running,
-        DisplayStatus::NeedApproval,
+        DisplayStatus::WaitingForUser,
         DisplayStatus::Stopped,
         DisplayStatus::Failed,
-        DisplayStatus::PrOpen,
         DisplayStatus::Done,
-        DisplayStatus::Archived,
     ];
     for s in display_statuses {
         assert_eq!(s.as_str().parse::<DisplayStatus>().unwrap(), s);
@@ -820,18 +844,11 @@ fn status_string_conversion_round_trips() {
 #[test]
 fn status_parse_token_accepts_dashes_and_underscores() {
     assert_eq!(
-        TaskStatus::parse_token("need-approval").unwrap(),
-        TaskStatus::NeedApproval
-    );
-    assert_eq!(
-        TaskStatus::parse_token("need_approval").unwrap(),
-        TaskStatus::NeedApproval
-    );
-    assert_eq!(
-        TaskStatus::parse_token("pr-open").unwrap(),
-        TaskStatus::PrOpen
+        TaskStatus::parse_token("in-progress").unwrap(),
+        TaskStatus::InProgress
     );
     assert!(TaskStatus::parse_token("running").is_err());
+    assert!(TaskStatus::parse_token("need-approval").is_err());
     assert_eq!(
         DisplayStatus::parse_token("running").unwrap(),
         DisplayStatus::Running
@@ -903,7 +920,7 @@ fn insert_event_allows_null_task_and_run() {
 }
 
 #[test]
-fn apply_hook_status_updates_task_and_matching_run() {
+fn record_task_run_observation_updates_run_and_task() {
     let mut db = Db::open_in_memory().unwrap();
     let item = db
         .insert_task({
@@ -913,84 +930,75 @@ fn apply_hook_status_updates_task_and_matching_run() {
         })
         .unwrap();
     let run = db.start_task_run(new_run(&item.id)).unwrap();
+    let at = db.now_iso().unwrap();
 
-    db.apply_hook_status(
-        &item.id,
-        Some(&run.id),
-        Some(TaskStatus::Active),
-        Some(TaskRunStatus::Running),
+    db.record_task_run_observation(
+        &run.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::Running),
+            wait_reason: Some(None),
+            event_name: Some("SessionStart"),
+            at: &at,
+            provider_session_id: Some("provider-1"),
+            metadata: Some(&json!({"hook_event_name": "SessionStart"})),
+        },
     )
     .unwrap();
     assert_eq!(
         db.get_task(&item.id).unwrap().unwrap().status,
-        TaskStatus::Active
+        TaskStatus::InProgress
     );
-    assert_eq!(
-        db.get_task_run(&run.id).unwrap().unwrap().status,
-        TaskRunStatus::Running
-    );
+    let updated = db.get_task_run(&run.id).unwrap().unwrap();
+    assert_eq!(updated.status, TaskRunStatus::Running);
+    assert_eq!(updated.wait_reason, None);
+    assert_eq!(updated.provider_session_id.as_deref(), Some("provider-1"));
+    assert_eq!(updated.last_event_name.as_deref(), Some("SessionStart"));
+    assert_eq!(updated.metadata["hook_event_name"], json!("SessionStart"));
 }
 
 #[test]
-fn apply_hook_status_ignores_run_of_another_task() {
+fn record_task_run_observation_sets_wait_reason() {
     let mut db = Db::open_in_memory().unwrap();
-    let a = db
-        .insert_task({
-            let mut i = dev_item("a");
-            i.status = TaskStatus::Ready;
-            i
-        })
-        .unwrap();
-    let run_a = db.start_task_run(new_run(&a.id)).unwrap();
-    let b = db
-        .insert_task({
-            let mut i = dev_item("b");
-            i.status = TaskStatus::Ready;
-            i
-        })
-        .unwrap();
-
-    // Mark b but pass run_a: the `AND task_id` guard must leave run_a (and a) untouched.
-    db.apply_hook_status(
-        &b.id,
-        Some(&run_a.id),
-        Some(TaskStatus::Active),
-        Some(TaskRunStatus::Stopped),
-    )
-    .unwrap();
-    assert_eq!(
-        db.get_task(&b.id).unwrap().unwrap().status,
-        TaskStatus::Active
-    );
-    assert_eq!(
-        db.get_task_run(&run_a.id).unwrap().unwrap().status,
-        TaskRunStatus::SettingUp
-    );
-    assert_eq!(
-        db.get_task(&a.id).unwrap().unwrap().status,
-        TaskStatus::Active
-    );
-}
-
-#[test]
-fn apply_hook_status_unknown_task_errors_but_unknown_run_is_harmless() {
-    let mut db = Db::open_in_memory().unwrap();
-    assert!(db
-        .apply_hook_status("MON-999", None, Some(TaskStatus::Active), None)
-        .is_err());
-
     let item = db.insert_task(dev_item("a")).unwrap();
-    db.apply_hook_status(
-        &item.id,
-        Some("run-nope"),
-        Some(TaskStatus::Active),
-        Some(TaskRunStatus::Stopped),
+    let run = db.start_task_run(new_run(&item.id)).unwrap();
+    let at = db.now_iso().unwrap();
+    db.record_task_run_observation(
+        &run.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::WaitingForUser),
+            wait_reason: Some(Some(TaskRunWaitReason::AskUserQuestion)),
+            event_name: Some("PreToolUse"),
+            at: &at,
+            provider_session_id: None,
+            metadata: None,
+        },
     )
     .unwrap();
+    let updated = db.get_task_run(&run.id).unwrap().unwrap();
+    assert_eq!(updated.status, TaskRunStatus::WaitingForUser);
     assert_eq!(
-        db.get_task(&item.id).unwrap().unwrap().status,
-        TaskStatus::Active
+        updated.wait_reason,
+        Some(TaskRunWaitReason::AskUserQuestion)
     );
+}
+
+#[test]
+fn record_task_run_observation_unknown_run_errors() {
+    let mut db = Db::open_in_memory().unwrap();
+    let at = db.now_iso().unwrap();
+    assert!(db
+        .record_task_run_observation(
+            "run-nope",
+            TaskRunObservation {
+                status: Some(TaskRunStatus::Stopped),
+                wait_reason: Some(None),
+                event_name: Some("Stop"),
+                at: &at,
+                provider_session_id: None,
+                metadata: None,
+            },
+        )
+        .is_err());
 }
 
 #[test]
@@ -998,21 +1006,21 @@ fn mark_task_sets_status_phase_pr_ref_and_event() {
     let mut db = Db::open_in_memory().unwrap();
     let item = db.insert_task(dev_item("a")).unwrap();
 
-    db.mark_task(&item.id, TaskStatus::NeedApproval, Some("Plan ready"), None)
+    db.mark_task(&item.id, TaskStatus::InProgress, Some("Plan ready"), None)
         .unwrap();
     let after = db.get_task(&item.id).unwrap().unwrap();
-    assert_eq!(after.status, TaskStatus::NeedApproval);
+    assert_eq!(after.status, TaskStatus::InProgress);
     assert_eq!(after.phase.as_deref(), Some("Plan ready"));
 
     db.mark_task(
         &item.id,
-        TaskStatus::PrOpen,
+        TaskStatus::Done,
         None,
         Some("https://github.com/o/r/pull/99"),
     )
     .unwrap();
     let after = db.get_task(&item.id).unwrap().unwrap();
-    assert_eq!(after.status, TaskStatus::PrOpen);
+    assert_eq!(after.status, TaskStatus::Done);
     assert_eq!(
         after.phase.as_deref(),
         Some("Plan ready"),
@@ -1050,7 +1058,7 @@ fn mark_task_pr_ref_does_not_pollute_issue_status_query() {
         .unwrap();
     db.mark_task(
         &item.id,
-        TaskStatus::PrOpen,
+        TaskStatus::InProgress,
         None,
         Some("https://github.com/o/r/pull/99"),
     )
@@ -1063,14 +1071,14 @@ fn mark_task_pr_ref_does_not_pollute_issue_status_query() {
         Some(7),
         "the PR ref must not shadow the github_issue number"
     );
-    assert_eq!(rows[0].status, DisplayStatus::PrOpen);
+    assert_eq!(rows[0].status, DisplayStatus::InProgress);
 }
 
 #[test]
 fn mark_task_unknown_id_errors() {
     let mut db = Db::open_in_memory().unwrap();
     assert!(db
-        .mark_task("MON-999", TaskStatus::PrOpen, None, None)
+        .mark_task("MON-999", TaskStatus::InProgress, None, None)
         .is_err());
 }
 
