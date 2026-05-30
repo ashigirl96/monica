@@ -48,3 +48,4 @@ Issue Runner → Task/TaskRun Tracker → Status Dashboard → Kanban → Termin
 - 2026-05-30 Claude hook の PreToolUse 記録を waiting tools に限定。AskUserQuestion/ExitPlanMode だけを matcher で起動し、receiver 側でも通常 tool の PreToolUse を無視するようにした。
 - 2026-05-30 Monica-managed Claude 起動から NORI\_\* env を除外。Nori の inline --settings 注入で Monica の hook settings が無効化され、hook-events.jsonl が作られない問題を避けるため。
 - 2026-05-30 Dashboard の waiting_for_user 表示を整理。状態は waiting for you に統一し、ExitPlanMode/AskUserQuestion は next action として分けた。
+- 2026-05-31 Claude hook に waiting tools の PostToolUse を追加し、AskUserQuestion/ExitPlanMode 回答後に TaskRun が running へ戻るようにした。

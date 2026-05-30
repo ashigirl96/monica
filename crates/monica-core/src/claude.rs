@@ -29,6 +29,10 @@ pub(crate) fn claude_settings_json(hook_command: &str) -> Result<String> {
                 hook_group("AskUserQuestion"),
                 hook_group("ExitPlanMode"),
             ],
+            "PostToolUse": [
+                hook_group("AskUserQuestion"),
+                hook_group("ExitPlanMode"),
+            ],
             "Stop": group(),
             "StopFailure": group(),
             "SessionEnd": group(),
@@ -74,6 +78,7 @@ mod tests {
             "SessionStart",
             "UserPromptSubmit",
             "PreToolUse",
+            "PostToolUse",
             "Stop",
             "StopFailure",
             "SessionEnd",
@@ -119,6 +124,18 @@ mod tests {
         assert_eq!(
             parsed
                 .pointer("/hooks/PreToolUse/1/matcher")
+                .and_then(Value::as_str),
+            Some("ExitPlanMode")
+        );
+        assert_eq!(
+            parsed
+                .pointer("/hooks/PostToolUse/0/matcher")
+                .and_then(Value::as_str),
+            Some("AskUserQuestion")
+        );
+        assert_eq!(
+            parsed
+                .pointer("/hooks/PostToolUse/1/matcher")
                 .and_then(Value::as_str),
             Some("ExitPlanMode")
         );
