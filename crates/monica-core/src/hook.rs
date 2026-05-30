@@ -11,7 +11,7 @@ const HOOK_EVENTS_FILE: &str = "hook-events.jsonl";
 /// Map a Claude Code hook event name to the task-run status it implies:
 /// `SessionStart`/`UserPromptSubmit` -> running, `Stop` -> stopped, `StopFailure` -> failed,
 /// `SessionEnd` -> stopped. Events Monica does not act on return `None` (they are still recorded,
-/// never an error, except non-waiting `PreToolUse` events which are intentionally ignored).
+/// never an error, except non-waiting tool hooks which are intentionally ignored).
 pub fn status_for_claude_event(event_name: &str) -> Option<TaskRunStatus> {
     match event_name {
         "SessionStart" => Some(TaskRunStatus::Running),
@@ -49,6 +49,16 @@ fn transition_for_claude_event(
         return Some(HookTransition {
             status: TaskRunStatus::WaitingForUser,
             wait_reason: Some(wait_reason),
+        });
+    }
+    if event_name == "PostToolUse" {
+        payload
+            .and_then(|value| value.get("tool_name"))
+            .and_then(Value::as_str)
+            .and_then(wait_reason_for_tool)?;
+        return Some(HookTransition {
+            status: TaskRunStatus::Running,
+            wait_reason: None,
         });
     }
 
@@ -221,7 +231,7 @@ pub fn record_claude_hook(
 }
 
 fn should_ignore_claude_event(event_name: Option<&str>, payload: Option<&Value>) -> bool {
-    event_name == Some("PreToolUse")
+    matches!(event_name, Some("PreToolUse" | "PostToolUse"))
         && payload
             .and_then(|value| value.get("tool_name"))
             .and_then(Value::as_str)
@@ -318,10 +328,11 @@ mod tests {
             Some(TaskRunStatus::Stopped)
         );
         assert_eq!(status_for_claude_event("PreToolUse"), None);
+        assert_eq!(status_for_claude_event("PostToolUse"), None);
     }
 
     #[test]
-    fn pre_tool_use_wait_reasons_are_detected_from_tool_name() {
+    fn tool_use_wait_transitions_are_detected_from_tool_name() {
         assert_eq!(
             transition_for_claude_event(
                 "PreToolUse",
@@ -340,6 +351,20 @@ mod tests {
         );
         assert!(
             transition_for_claude_event("PreToolUse", Some(&json!({"tool_name": "Read"})))
+                .is_none()
+        );
+        assert_eq!(
+            transition_for_claude_event(
+                "PostToolUse",
+                Some(&json!({"tool_name": "AskUserQuestion"}))
+            ),
+            Some(HookTransition {
+                status: TaskRunStatus::Running,
+                wait_reason: None,
+            })
+        );
+        assert!(
+            transition_for_claude_event("PostToolUse", Some(&json!({"tool_name": "Read"})))
                 .is_none()
         );
     }
@@ -470,6 +495,34 @@ mod tests {
     }
 
     #[test]
+    fn post_tool_use_resumes_waiting_run_and_clears_reason() {
+        let (_g, _home) = temp_home("wait-posttool");
+        let mut db = Db::open_in_memory().unwrap();
+        let id = dev_task(&mut db, TaskStatus::Ready);
+        let run = db.start_task_run(new_task_run(&id)).unwrap();
+        record_claude_hook(
+            &mut db,
+            Some(&id),
+            Some(&run.id),
+            r#"{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion"}"#,
+        )
+        .unwrap();
+        let report = record_claude_hook(
+            &mut db,
+            Some(&id),
+            Some(&run.id),
+            r#"{"hook_event_name":"PostToolUse","tool_name":"AskUserQuestion"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(report.task_run_status, Some(TaskRunStatus::Running));
+        let updated = db.get_task_run(&run.id).unwrap().unwrap();
+        assert_eq!(updated.status, TaskRunStatus::Running);
+        assert_eq!(updated.wait_reason, None);
+        assert_eq!(updated.last_event_name.as_deref(), Some("PostToolUse"));
+    }
+
+    #[test]
     fn failed_task_run_is_not_downgraded_by_session_end() {
         let (_g, _home) = temp_home("failed-run");
         let mut db = Db::open_in_memory().unwrap();
@@ -540,25 +593,27 @@ mod tests {
     }
 
     #[test]
-    fn non_waiting_pre_tool_use_is_ignored_without_db_noise() {
-        let (_g, home) = temp_home("ignored-pretool");
+    fn non_waiting_tool_hooks_are_ignored_without_db_noise() {
+        let (_g, home) = temp_home("ignored-toolhook");
         let mut db = Db::open_in_memory().unwrap();
         let id = dev_task(&mut db, TaskStatus::InProgress);
         let run = db.start_task_run(new_task_run(&id)).unwrap();
 
-        let report = record_claude_hook(
-            &mut db,
-            Some(&id),
-            Some(&run.id),
-            r#"{"hook_event_name":"PreToolUse","tool_name":"Read"}"#,
-        )
-        .unwrap();
+        for event_name in ["PreToolUse", "PostToolUse"] {
+            let report = record_claude_hook(
+                &mut db,
+                Some(&id),
+                Some(&run.id),
+                &format!(r#"{{"hook_event_name":"{event_name}","tool_name":"Read"}}"#),
+            )
+            .unwrap();
 
-        assert_eq!(report.event_name.as_deref(), Some("PreToolUse"));
-        assert!(report.ignored);
-        assert_eq!(report.task_run_status, None);
-        assert!(!report.event_recorded);
-        assert!(!report.jsonl_written);
+            assert_eq!(report.event_name.as_deref(), Some(event_name));
+            assert!(report.ignored);
+            assert_eq!(report.task_run_status, None);
+            assert!(!report.event_recorded);
+            assert!(!report.jsonl_written);
+        }
         assert!(db.list_events(Some(&id)).unwrap().is_empty());
         assert!(
             !home
@@ -566,7 +621,7 @@ mod tests {
                 .join(&run.id)
                 .join("hook-events.jsonl")
                 .exists(),
-            "ignored PreToolUse should not create hook artifacts"
+            "ignored tool hooks should not create hook artifacts"
         );
         assert_eq!(
             db.get_task(&id).unwrap().unwrap().status,
