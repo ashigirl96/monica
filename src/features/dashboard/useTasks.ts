@@ -19,6 +19,7 @@ function merge(items: Task[], statuses: TaskSummaryRow[]): TaskView[] {
         task_run_wait_reason: s?.task_run_wait_reason ?? null,
         project: s?.project ?? item.project_id ?? null,
         githubIssueNumber: s?.github_issue_number ?? null,
+        githubPullRequests: s?.github_pull_requests ?? [],
         branch: s?.branch ?? null,
       } satisfies TaskView;
     })
@@ -66,5 +67,7 @@ export function useTasks(): UseTasks {
     return () => clearInterval(id);
   }, [load]);
 
-  return { items, loading, error, lastSync, refresh: () => void load() };
+  const refresh = useCallback(() => void load(), [load]);
+
+  return { items, loading, error, lastSync, refresh };
 }

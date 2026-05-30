@@ -1,4 +1,4 @@
-use monica_core::{delete_issue, Db, Event, Task, TaskSummaryRow};
+use monica_core::{delete_issue, Db, Event, PullRequestSyncResult, Task, TaskSummaryRow};
 
 #[tauri::command]
 fn list_tasks() -> Result<Vec<Task>, String> {
@@ -27,6 +27,14 @@ fn delete_task(id: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn sync_next_linked_pull_request() -> Result<PullRequestSyncResult, String> {
+    let mut db = Db::open().map_err(|e| e.to_string())?;
+    monica_core::sync_next_linked_pull_request(&mut db)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -34,7 +42,8 @@ pub fn run() {
             list_tasks,
             list_task_summaries,
             list_events,
-            delete_task
+            delete_task,
+            sync_next_linked_pull_request
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

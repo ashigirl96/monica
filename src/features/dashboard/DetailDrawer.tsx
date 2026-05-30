@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { GitBranch, X } from "lucide-react";
+import { GitBranch, GitPullRequest, X } from "lucide-react";
 import { EventTimeline } from "./EventTimeline";
 import { StatusLed } from "./StatusLed";
 import { statusColor, statusLabel, waitActionLabel } from "./statusMeta";
@@ -64,6 +64,9 @@ export function DetailDrawer({ item, onClose }: DetailDrawerProps) {
               ) : null
             }
           />
+          {item.githubPullRequests.length > 0 && (
+            <Field label="pr" value={<PullRequestLinks item={item} />} />
+          )}
           {item.phase && <Field label="phase" value={item.phase} />}
           {waitAction && <Field label="next" value={waitAction} />}
           <Field label="created" value={item.created_at.replace("T", " ").slice(0, 19)} />
@@ -100,6 +103,38 @@ export function DetailDrawer({ item, onClose }: DetailDrawerProps) {
         </div>
       </div>
     </aside>
+  );
+}
+
+function PullRequestLinks({ item }: { item: TaskView }) {
+  if (item.githubPullRequests.length === 0) return null;
+  return (
+    <span className="flex flex-wrap gap-x-2 gap-y-1">
+      {item.githubPullRequests.map((pr, index) => {
+        const label = pr.number === null || pr.number === undefined ? "PR" : `#${pr.number}`;
+        const key = `${pr.repo ?? "repo"}-${pr.number ?? index}-${pr.url ?? "url"}`;
+        if (!pr.url) {
+          return (
+            <span key={key} className="inline-flex items-center gap-1">
+              <GitPullRequest className="size-3" />
+              {label}
+            </span>
+          );
+        }
+        return (
+          <a
+            key={key}
+            href={pr.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground"
+          >
+            <GitPullRequest className="size-3" />
+            {label}
+          </a>
+        );
+      })}
+    </span>
   );
 }
 

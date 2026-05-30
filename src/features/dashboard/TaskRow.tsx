@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { GitBranch } from "lucide-react";
+import { GitBranch, GitPullRequest } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { StatusLed } from "./StatusLed";
 import { statusColor, statusLabel, waitActionLabel } from "./statusMeta";
@@ -16,6 +16,7 @@ export function TaskRow({ item, focused, detailsOpen, onOpen }: TaskRowProps) {
   const rowRef = useRef<HTMLButtonElement>(null);
   const waitAction =
     item.status === "waiting_for_user" ? waitActionLabel(item.task_run_wait_reason) : null;
+  const prLabel = pullRequestLabel(item.githubPullRequests);
 
   useEffect(() => {
     if (!focused) return;
@@ -63,6 +64,12 @@ export function TaskRow({ item, focused, detailsOpen, onOpen }: TaskRowProps) {
         {item.githubIssueNumber !== null && (
           <span className="text-muted-foreground/70">#{item.githubIssueNumber}</span>
         )}
+        {prLabel && (
+          <span className="flex items-center gap-1 text-muted-foreground/80">
+            <GitPullRequest className="size-3 shrink-0" />
+            {prLabel}
+          </span>
+        )}
         {item.branch && (
           <span className="flex items-center gap-1 truncate text-muted-foreground/80">
             <GitBranch className="size-3 shrink-0" />
@@ -78,4 +85,13 @@ export function TaskRow({ item, focused, detailsOpen, onOpen }: TaskRowProps) {
       </div>
     </button>
   );
+}
+
+function pullRequestLabel(pullRequests: TaskView["githubPullRequests"]): string | null {
+  if (pullRequests.length === 0) return null;
+  if (pullRequests.length === 1) {
+    const number = pullRequests[0]?.number;
+    return number === null || number === undefined ? "PR" : `#${number}`;
+  }
+  return `PR x${pullRequests.length}`;
 }

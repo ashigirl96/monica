@@ -1,6 +1,7 @@
 mod events;
 mod external_refs;
 mod projects;
+mod pull_request_sync;
 mod task_runs;
 mod tasks;
 #[cfg(test)]

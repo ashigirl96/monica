@@ -13,6 +13,7 @@ fn migrations() -> Migrations<'static> {
         M::up(V4),
         M::up(V5),
         M::up(V6),
+        M::up(V7),
     ])
 }
 
@@ -299,6 +300,28 @@ const V6: &str = r#"
     DROP TABLE agent_session_counter;
 "#;
 
+/// v7: persist linked GitHub PR sync state so the dashboard can show PR refs without polling
+/// GitHub from the task list path.
+const V7: &str = r#"
+    CREATE TABLE external_ref_syncs (
+      task_id         TEXT NOT NULL REFERENCES tasks(id),
+      source_ref_id   INTEGER NOT NULL REFERENCES external_refs(id),
+      target_ref_type TEXT NOT NULL,
+      last_synced_at  TEXT,
+      last_error      TEXT,
+      next_retry_at   TEXT,
+      created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      PRIMARY KEY (task_id, source_ref_id, target_ref_type)
+    );
+
+    CREATE UNIQUE INDEX external_refs_github_pr_unique
+      ON external_refs(task_id, ref_type, repo, number)
+     WHERE ref_type = 'github_pull_request'
+       AND repo IS NOT NULL
+       AND number IS NOT NULL;
+"#;
+
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
     migrations()
@@ -372,7 +395,7 @@ mod tests {
             .conn()
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, 7);
 
         std::fs::remove_file(&path).ok();
     }

@@ -2,7 +2,7 @@ use anyhow::Result;
 use rusqlite::params;
 
 use crate::db::Db;
-use crate::model::ExternalRef;
+use crate::model::{ExternalRef, GithubPullRequestRef};
 
 impl Db {
     pub fn save_external_ref(&self, r: &ExternalRef) -> Result<i64> {
@@ -23,6 +23,28 @@ impl Db {
         let mut refs = Vec::new();
         while let Some(row) = rows.next()? {
             refs.push(ExternalRef::from_row(row)?);
+        }
+        Ok(refs)
+    }
+
+    pub fn list_github_pull_request_refs(
+        &self,
+        task_id: &str,
+    ) -> Result<Vec<GithubPullRequestRef>> {
+        let mut stmt = self.conn().prepare(
+            "SELECT repo, number, url
+             FROM external_refs
+             WHERE task_id = ?1 AND ref_type = 'github_pull_request'
+             ORDER BY id",
+        )?;
+        let mut rows = stmt.query(params![task_id])?;
+        let mut refs = Vec::new();
+        while let Some(row) = rows.next()? {
+            refs.push(GithubPullRequestRef {
+                repo: row.get("repo")?,
+                number: row.get("number")?,
+                url: row.get("url")?,
+            });
         }
         Ok(refs)
     }
