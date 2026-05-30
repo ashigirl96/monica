@@ -12,3 +12,7 @@ export function listTaskSummaries(): Promise<TaskSummaryRow[]> {
 export function listEvents(taskId: string): Promise<Event[]> {
   return invoke<Event[]>("list_events", { taskId });
 }
+
+export function deleteTask(id: string): Promise<void> {
+  return invoke<void>("delete_task", { id });
+}

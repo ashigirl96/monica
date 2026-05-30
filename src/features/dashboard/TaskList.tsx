@@ -4,11 +4,12 @@ import type { TaskView } from "./types";
 
 interface TaskListProps {
   items: TaskView[];
-  selectedId: string | null;
-  onSelect: (item: TaskView) => void;
+  focusedId: string | null;
+  openDetailId: string | null;
+  onOpen: (item: TaskView) => void;
 }
 
-export function TaskList({ items, selectedId, onSelect }: TaskListProps) {
+export function TaskList({ items, focusedId, openDetailId, onOpen }: TaskListProps) {
   if (items.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
@@ -26,7 +27,13 @@ export function TaskList({ items, selectedId, onSelect }: TaskListProps) {
   return (
     <div className="flex-1 overflow-y-auto">
       {items.map((item) => (
-        <TaskRow key={item.id} item={item} selected={item.id === selectedId} onSelect={onSelect} />
+        <TaskRow
+          key={item.id}
+          item={item}
+          focused={item.id === focusedId}
+          detailsOpen={item.id === openDetailId}
+          onOpen={onOpen}
+        />
       ))}
     </div>
   );
