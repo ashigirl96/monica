@@ -21,3 +21,4 @@ Issue Runner → Task/TaskRun Tracker → Status Dashboard → Kanban → Termin
 - 2026-05-31 PR lazy sync worker を追加。Dashboard の一覧取得から GitHub 通信を切り離し、保存済み PR を一覧と詳細に表示できるようにした。
 - 2026-05-31 GitHub token lookup を gh config/macOS Keychain 対応に変更。GUI app でも octocrab が認証済みで PR sync できるようにした。
 - 2026-05-31 PR state table を追加。Dashboard の PR 表示に draft/open/closed/merged を出せるようにした。
+- 2026-06-02 PR sync を Monica 専用 GitHub token に切り替え。gh フォールバック（gh config/`gh:github.com` Keychain）を廃し、Dashboard で登録した PAT を `MONICA_HOME/auth/github_token`（0600）に保存して使い、未設定/無効時は auth_required を出すようにした（stale な gh token で sync が失敗する問題の解消）。

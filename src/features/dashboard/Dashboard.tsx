@@ -1,15 +1,16 @@
 import { cn } from "@/lib/utils";
 import { useShortcuts } from "@/lib/shortcuts";
 import { PanelLeft } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { deleteTask } from "./api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { deleteTask, githubAuthStatus } from "./api";
 import { DeleteTaskModal } from "./DeleteTaskModal";
 import { DetailDrawer } from "./DetailDrawer";
+import { GithubAuthPanel } from "./GithubAuthPanel";
 import { StatusRail, type StatusFilter } from "./StatusRail";
 import { usePullRequestSyncWorker } from "./usePullRequestSyncWorker";
 import { useTasks } from "./useTasks";
 import { TaskList } from "./TaskList";
-import type { TaskView } from "./types";
+import type { GithubAuthStatus, TaskView } from "./types";
 
 const RAIL_MIN = 180;
 const RAIL_MAX = 420;
@@ -25,11 +26,32 @@ export function Dashboard() {
   const [railOpen, setRailOpen] = useState(true);
   const [railWidth, setRailWidth] = useState(240);
   const [resizing, setResizing] = useState(false);
+  const [authStatus, setAuthStatus] = useState<GithubAuthStatus | null>(null);
+  const [reauthRequired, setReauthRequired] = useState(false);
+
+  const refreshAuth = useCallback(async () => {
+    try {
+      const status = await githubAuthStatus();
+      setAuthStatus(status);
+      if (status.authenticated) setReauthRequired(false);
+    } catch (e) {
+      console.warn("github auth status failed", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshAuth();
+  }, [refreshAuth]);
+
+  const onAuthRequired = useCallback(() => setReauthRequired(true), []);
 
   usePullRequestSyncWorker({
-    enabled: !loading && !error,
+    enabled: !loading && !error && !reauthRequired,
     onSynced: refresh,
+    onAuthRequired,
   });
+
+  const showAuthPanel = reauthRequired || authStatus !== null;
 
   const visible = useMemo(
     () => (filter === "all" ? items : items.filter((i) => i.status === filter)),
@@ -212,6 +234,18 @@ export function Dashboard() {
             {openDetail ? openDetail.title : (focused?.title ?? "monica")}
           </span>
         </header>
+
+        {showAuthPanel && (
+          <GithubAuthPanel
+            status={authStatus}
+            reauthRequired={reauthRequired}
+            onChanged={() => {
+              setReauthRequired(false);
+              void refreshAuth();
+              refresh();
+            }}
+          />
+        )}
 
         {error && (
           <div className="border-b border-destructive/40 bg-destructive/10 px-5 py-2 font-mono text-[11px] text-destructive">

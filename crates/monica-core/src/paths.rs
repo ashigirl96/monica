@@ -18,6 +18,11 @@ pub fn db_path() -> Result<PathBuf> {
     Ok(base_dir()?.join("db").join("monica.db"))
 }
 
+/// File holding Monica's own GitHub token: `<base>/auth/github_token` (written `0600`).
+pub fn github_token_path() -> Result<PathBuf> {
+    Ok(base_dir()?.join("auth").join("github_token"))
+}
+
 pub fn task_runs_dir() -> Result<PathBuf> {
     Ok(base_dir()?.join("runs"))
 }

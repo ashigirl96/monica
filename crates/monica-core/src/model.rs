@@ -402,6 +402,7 @@ pub enum PullRequestSyncStatus {
     Idle,
     Synced,
     Failed,
+    AuthRequired,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -437,6 +438,15 @@ impl PullRequestSyncResult {
             task_id: Some(task_id.into()),
             pull_request_count: 0,
             error: Some(error.into()),
+        }
+    }
+
+    pub fn auth_required() -> Self {
+        Self {
+            status: PullRequestSyncStatus::AuthRequired,
+            task_id: None,
+            pull_request_count: 0,
+            error: None,
         }
     }
 }

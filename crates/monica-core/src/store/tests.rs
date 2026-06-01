@@ -1341,3 +1341,33 @@ fn db_path_respects_monica_home() {
     );
     std::env::remove_var("MONICA_HOME");
 }
+
+#[tokio::test]
+async fn sync_returns_auth_required_without_recording_failure_when_token_missing() {
+    use crate::model::PullRequestSyncStatus;
+
+    let mut db = Db::open_in_memory().unwrap();
+    let item = db
+        .insert_task_with_ref(
+            dev_item("tracked"),
+            ExternalRef::new(
+                String::new(),
+                RefType::GithubIssue,
+                Some("o/r".to_string()),
+                Some(7),
+                None,
+            ),
+        )
+        .unwrap();
+
+    let result = crate::github::sync_next_linked_pull_request_inner(&mut db, None)
+        .await
+        .unwrap();
+    assert_eq!(result.status, PullRequestSyncStatus::AuthRequired);
+
+    let candidate = db.next_pull_request_sync_candidate().unwrap().unwrap();
+    assert_eq!(
+        candidate.task_id, item.id,
+        "a missing token must not consume a sync attempt or back the candidate off"
+    );
+}

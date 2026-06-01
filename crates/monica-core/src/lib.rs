@@ -5,6 +5,7 @@ mod app;
 mod claude;
 mod db;
 mod github;
+mod github_auth;
 mod hook;
 mod migrations;
 mod model;
@@ -22,6 +23,7 @@ pub use app::{
 pub use claude::AgentLaunch;
 pub use db::Db;
 pub use github::sync_next_linked_pull_request;
+pub use github_auth::{github_auth_status, github_sign_out, save_github_token, GithubAuthStatus};
 pub use hook::{is_safe_task_run_id, record_claude_hook, status_for_claude_event, HookReport};
 pub use model::{
     Agent, DisplayStatus, Event, ExternalRef, GithubPullRequest, GithubPullRequestRef, NewTask,

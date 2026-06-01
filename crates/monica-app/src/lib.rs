@@ -1,4 +1,6 @@
-use monica_core::{delete_issue, Db, Event, PullRequestSyncResult, Task, TaskSummaryRow};
+use monica_core::{
+    delete_issue, Db, Event, GithubAuthStatus, PullRequestSyncResult, Task, TaskSummaryRow,
+};
 
 #[tauri::command]
 fn list_tasks() -> Result<Vec<Task>, String> {
@@ -35,6 +37,40 @@ async fn sync_next_linked_pull_request() -> Result<PullRequestSyncResult, String
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn save_github_token(token: String) -> Result<GithubAuthStatus, String> {
+    monica_core::save_github_token(token)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn github_auth_status() -> Result<GithubAuthStatus, String> {
+    monica_core::github_auth_status().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn github_sign_out() -> Result<(), String> {
+    monica_core::github_sign_out().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("/usr/bin/open")
+            .arg(&url)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = url;
+        Err("opening URLs is only supported on macOS".to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -43,7 +79,11 @@ pub fn run() {
             list_task_summaries,
             list_events,
             delete_task,
-            sync_next_linked_pull_request
+            sync_next_linked_pull_request,
+            save_github_token,
+            github_auth_status,
+            github_sign_out,
+            open_external
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
