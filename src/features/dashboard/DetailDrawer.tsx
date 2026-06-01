@@ -109,31 +109,57 @@ export function DetailDrawer({ item, onClose }: DetailDrawerProps) {
 function PullRequestLinks({ item }: { item: TaskView }) {
   if (item.githubPullRequests.length === 0) return null;
   return (
-    <span className="flex flex-wrap gap-x-2 gap-y-1">
+    <span className="flex w-full flex-col gap-1">
       {item.githubPullRequests.map((pr, index) => {
         const label = pr.number === null || pr.number === undefined ? "PR" : `#${pr.number}`;
         const key = `${pr.repo ?? "repo"}-${pr.number ?? index}-${pr.url ?? "url"}`;
-        if (!pr.url) {
-          return (
-            <span key={key} className="inline-flex items-center gap-1">
-              <GitPullRequest className="size-3" />
-              {label}
-            </span>
-          );
-        }
-        return (
+        const content = !pr.url ? (
+          <span className="inline-flex min-w-0 items-center gap-1">
+            <GitPullRequest className="size-3 shrink-0" />
+            <span className="truncate">{label}</span>
+          </span>
+        ) : (
           <a
-            key={key}
             href={pr.url}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1 text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground"
+            className="inline-flex min-w-0 items-center gap-1 text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground"
           >
-            <GitPullRequest className="size-3" />
-            {label}
+            <GitPullRequest className="size-3 shrink-0" />
+            <span className="truncate">{label}</span>
           </a>
         );
+        return (
+          <span key={key} className="flex items-center justify-between gap-3">
+            {content}
+            <PullRequestStatusBadge status={pr.status} />
+          </span>
+        );
       })}
+    </span>
+  );
+}
+
+function PullRequestStatusBadge({
+  status,
+}: {
+  status: TaskView["githubPullRequests"][number]["status"];
+}) {
+  if (!status) return null;
+  const className = {
+    draft: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+    open: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+    closed: "border-muted-foreground/30 bg-foreground/5 text-muted-foreground",
+    merged: "border-violet-500/30 bg-violet-500/10 text-violet-300",
+  }[status];
+  return (
+    <span
+      className={cn(
+        "shrink-0 rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase leading-none tracking-wide",
+        className,
+      )}
+    >
+      {status}
     </span>
   );
 }

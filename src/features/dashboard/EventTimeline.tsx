@@ -11,7 +11,6 @@ function summarize(payload: unknown): string | null {
   const parts: string[] = [];
   if (typeof p.status === "string") parts.push(p.status);
   if (typeof p.note === "string" && p.note) parts.push(`"${p.note}"`);
-  if (typeof p.pr_url === "string" && p.pr_url) parts.push(p.pr_url);
   if (parts.length > 0) return parts.join(" · ");
   const json = JSON.stringify(payload);
   return json === "{}" ? null : json;

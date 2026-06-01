@@ -58,9 +58,6 @@ pub enum IssueCommand {
         /// Free-text note, stored as the task's phase
         #[arg(long)]
         note: Option<String>,
-        /// PR URL to record as a github_pull_request reference
-        #[arg(long = "pr-url")]
-        pr_url: Option<String>,
     },
 }
 
@@ -84,12 +81,9 @@ pub fn run(cmd: IssueCommand) -> Result<()> {
             fork.as_deref(),
         ),
         IssueCommand::Delete { id, yes } => delete_command(&mut db, &id, yes),
-        IssueCommand::Mark {
-            id,
-            status,
-            note,
-            pr_url,
-        } => mark_command(&mut db, &id, &status, note.as_deref(), pr_url.as_deref()),
+        IssueCommand::Mark { id, status, note } => {
+            mark_command(&mut db, &id, &status, note.as_deref())
+        }
     }
 }
 
@@ -230,21 +224,12 @@ fn resolve_launch_mode(continue_session: bool, fork: Option<&str>) -> Result<Age
     }
 }
 
-fn mark_command(
-    db: &mut Db,
-    id: &str,
-    status: &str,
-    note: Option<&str>,
-    pr_url: Option<&str>,
-) -> Result<()> {
+fn mark_command(db: &mut Db, id: &str, status: &str, note: Option<&str>) -> Result<()> {
     let status = TaskStatus::parse_token(status)?;
-    db.mark_task(id, status, note, pr_url)?;
+    db.mark_task(id, status, note)?;
     println!("Marked {id} as {}", status.as_str());
     if let Some(note) = note {
         println!("Note: {note}");
-    }
-    if let Some(pr_url) = pr_url {
-        println!("PR:   {pr_url}");
     }
     Ok(())
 }

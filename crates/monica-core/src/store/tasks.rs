@@ -1,12 +1,11 @@
 use anyhow::{anyhow, Result};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::params;
 
 use crate::db::Db;
 use crate::model::{
-    DisplayStatus, ExternalRef, NewTask, RefType, Task, TaskRunStatus, TaskRunWaitReason,
-    TaskStatus, TaskSummaryRow,
+    DisplayStatus, ExternalRef, NewTask, Task, TaskRunStatus, TaskRunWaitReason, TaskStatus,
+    TaskSummaryRow,
 };
-use crate::parse_owner_repo;
 
 use super::{SET_NOW, TASK_COLUMNS};
 
@@ -218,19 +217,11 @@ impl Db {
         Ok(())
     }
 
-    pub fn mark_task(
-        &mut self,
-        id: &str,
-        status: TaskStatus,
-        note: Option<&str>,
-        pr_url: Option<&str>,
-    ) -> Result<()> {
+    pub fn mark_task(&mut self, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()> {
         let status_str = status.as_str();
-        let (pr_repo, pr_number) = pr_url.map(parse_pr_ref).unwrap_or((None, None));
         let payload = serde_json::to_string(&serde_json::json!({
             "status": status_str,
             "note": note,
-            "pr_url": pr_url,
         }))?;
 
         let tx = self.conn_mut().transaction()?;
@@ -245,44 +236,6 @@ impl Db {
         if affected == 0 {
             return Err(anyhow!("task not found: {id}"));
         }
-        if let Some(pr_url) = pr_url {
-            let existing = match (&pr_repo, pr_number) {
-                (Some(repo), Some(number)) => tx
-                    .query_row(
-                        "SELECT id
-                         FROM external_refs
-                         WHERE task_id = ?1
-                           AND ref_type = ?2
-                           AND repo = ?3
-                           AND number = ?4
-                         LIMIT 1",
-                        params![id, RefType::GithubPullRequest.as_str(), repo, number],
-                        |row| row.get::<_, i64>(0),
-                    )
-                    .optional()?,
-                _ => None,
-            };
-            if let Some(ref_id) = existing {
-                tx.execute(
-                    "UPDATE external_refs
-                        SET url = ?1
-                      WHERE id = ?2",
-                    params![pr_url, ref_id],
-                )?;
-            } else {
-                tx.execute(
-                    "INSERT INTO external_refs (task_id, ref_type, repo, number, url)
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![
-                        id,
-                        RefType::GithubPullRequest.as_str(),
-                        pr_repo,
-                        pr_number,
-                        pr_url
-                    ],
-                )?;
-            }
-        }
         tx.execute(
             "INSERT INTO events (task_id, kind, payload_json) VALUES (?1, 'mark', ?2)",
             params![id, payload],
@@ -290,26 +243,4 @@ impl Db {
         tx.commit()?;
         Ok(())
     }
-}
-
-#[cfg(test)]
-pub(super) fn parse_pr_number(url: &str) -> Option<i64> {
-    parse_pr_ref(url).1
-}
-
-pub(super) fn parse_pr_ref(url: &str) -> (Option<String>, Option<i64>) {
-    let segs: Vec<&str> = url.split('/').filter(|s| !s.is_empty()).collect();
-    let Some(idx) = segs.iter().position(|s| *s == "pull" || *s == "pulls") else {
-        return (None, None);
-    };
-    let number = segs
-        .get(idx + 1)
-        .and_then(|s| s.parse::<i64>().ok())
-        .filter(|n| *n > 0);
-    let repo = if idx >= 2 {
-        parse_owner_repo(&format!("{}/{}", segs[idx - 2], segs[idx - 1])).ok()
-    } else {
-        None
-    };
-    (repo, number)
 }

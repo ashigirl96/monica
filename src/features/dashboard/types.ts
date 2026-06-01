@@ -41,7 +41,10 @@ export interface GithubPullRequestRef {
   repo: string | null;
   number: number | null;
   url: string | null;
+  status: GithubPullRequestStatus | null;
 }
+
+export type GithubPullRequestStatus = "draft" | "open" | "closed" | "merged";
 
 export interface PullRequestSyncResult {
   status: "idle" | "synced" | "failed";

@@ -91,7 +91,16 @@ function pullRequestLabel(pullRequests: TaskView["githubPullRequests"]): string 
   if (pullRequests.length === 0) return null;
   if (pullRequests.length === 1) {
     const number = pullRequests[0]?.number;
-    return number === null || number === undefined ? "PR" : `#${number}`;
+    const status = pullRequestStatusLabel(pullRequests[0]?.status ?? null);
+    const label = number === null || number === undefined ? "PR" : `#${number}`;
+    return status ? `${label} · ${status}` : label;
   }
   return `PR x${pullRequests.length}`;
+}
+
+function pullRequestStatusLabel(
+  status: TaskView["githubPullRequests"][number]["status"],
+): string | null {
+  if (!status) return null;
+  return status;
 }
