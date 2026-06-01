@@ -1,4 +1,7 @@
-use monica_core::{delete_issue, Db, Event, PullRequestSyncResult, Task, TaskSummaryRow};
+use monica_core::{
+    delete_issue, Db, Event, GithubAuthStatus, GithubTokenProvider, PullRequestSyncResult, Task,
+    TaskSummaryRow,
+};
 
 #[tauri::command]
 fn list_tasks() -> Result<Vec<Task>, String> {
@@ -35,6 +38,11 @@ async fn sync_next_linked_pull_request() -> Result<PullRequestSyncResult, String
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn github_auth_status() -> Result<GithubAuthStatus, String> {
+    Ok(GithubTokenProvider::new().status())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -43,6 +51,7 @@ pub fn run() {
             list_task_summaries,
             list_events,
             delete_task,
+            github_auth_status,
             sync_next_linked_pull_request
         ])
         .run(tauri::generate_context!())

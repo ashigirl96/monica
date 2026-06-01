@@ -2,14 +2,14 @@ import { cn } from "@/lib/utils";
 import { useShortcuts } from "@/lib/shortcuts";
 import { PanelLeft } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { deleteTask } from "./api";
+import { deleteTask, githubAuthStatus } from "./api";
 import { DeleteTaskModal } from "./DeleteTaskModal";
 import { DetailDrawer } from "./DetailDrawer";
 import { StatusRail, type StatusFilter } from "./StatusRail";
 import { usePullRequestSyncWorker } from "./usePullRequestSyncWorker";
 import { useTasks } from "./useTasks";
 import { TaskList } from "./TaskList";
-import type { TaskView } from "./types";
+import type { GithubAuthStatus, TaskView } from "./types";
 
 const RAIL_MIN = 180;
 const RAIL_MAX = 420;
@@ -25,11 +25,42 @@ export function Dashboard() {
   const [railOpen, setRailOpen] = useState(true);
   const [railWidth, setRailWidth] = useState(240);
   const [resizing, setResizing] = useState(false);
+  const [githubAuth, setGithubAuth] = useState<GithubAuthStatus | null>(null);
 
   usePullRequestSyncWorker({
-    enabled: !loading && !error,
+    enabled: !loading && !error && githubAuth?.authenticated === true,
     onSynced: refresh,
   });
+
+  useEffect(() => {
+    let alive = true;
+    // Re-read on focus so a `monica auth github login`/`logout` run in a terminal
+    // is reflected without restarting the app.
+    const load = () => {
+      githubAuthStatus()
+        .then((status) => {
+          if (alive) setGithubAuth(status);
+        })
+        .catch((e) => {
+          if (!alive) return;
+          setGithubAuth({
+            authenticated: false,
+            source: "error",
+            login: null,
+            access_expires_at: null,
+            refresh_expires_at: null,
+            reauth_required: false,
+            message: String(e),
+          });
+        });
+    };
+    load();
+    window.addEventListener("focus", load);
+    return () => {
+      alive = false;
+      window.removeEventListener("focus", load);
+    };
+  }, []);
 
   const visible = useMemo(
     () => (filter === "all" ? items : items.filter((i) => i.status === filter)),
@@ -216,6 +247,11 @@ export function Dashboard() {
         {error && (
           <div className="border-b border-destructive/40 bg-destructive/10 px-5 py-2 font-mono text-[11px] text-destructive">
             {error}
+          </div>
+        )}
+        {githubAuth && !githubAuth.authenticated && (
+          <div className="border-b border-amber-500/30 bg-amber-500/10 px-5 py-2 text-[12px] text-amber-200">
+            GitHub disconnected: {githubAuth.message ?? "run monica auth github login"}
           </div>
         )}
 

@@ -4,7 +4,7 @@ use std::process::Command;
 
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
-use monica_core::{register_project_with_default_branch, Db};
+use monica_core::{register_project_with_default_branch, Db, GithubApiClient};
 
 #[derive(Subcommand)]
 pub enum ProjectCommand {
@@ -32,23 +32,23 @@ pub enum ProjectCommand {
     },
 }
 
-pub fn run(cmd: ProjectCommand) -> Result<()> {
+pub async fn run(cmd: ProjectCommand) -> Result<()> {
     let db = Db::open()?;
     match cmd {
-        ProjectCommand::Init { repo } => init(&db, repo),
+        ProjectCommand::Init { repo } => init(&db, repo).await,
         ProjectCommand::Set { repo, key, value } => set(&db, &repo, &key, &value),
         ProjectCommand::List => list(&db),
         ProjectCommand::Show { repo, json } => show(&db, &repo, json),
     }
 }
 
-fn init(db: &Db, repo_arg: Option<String>) -> Result<()> {
+async fn init(db: &Db, repo_arg: Option<String>) -> Result<()> {
     let cwd = std::env::current_dir().context("failed to read current directory")?;
     let repo = match repo_arg {
         Some(repo) => repo,
         None => detect_repo()?,
     };
-    let default_branch = detect_default_branch(&repo);
+    let default_branch = detect_default_branch(&repo).await;
     let saved = register_project_with_default_branch(db, &repo, &cwd, default_branch.as_deref())?;
 
     println!(
@@ -152,8 +152,15 @@ fn detect_repo() -> Result<String> {
     monica_core::parse_owner_repo(&url)
 }
 
-fn detect_default_branch(repo: &str) -> Option<String> {
-    detect_git_default_branch(repo).or_else(|| detect_gh_default_branch(repo))
+async fn detect_default_branch(repo: &str) -> Option<String> {
+    if let Some(branch) = detect_git_default_branch(repo) {
+        return Some(branch);
+    }
+    GithubApiClient::new()
+        .fetch_default_branch(repo)
+        .await
+        .ok()
+        .flatten()
 }
 
 fn detect_git_default_branch(repo: &str) -> Option<String> {
@@ -170,27 +177,6 @@ fn detect_git_default_branch(repo: &str) -> Option<String> {
     }
     let branch = String::from_utf8(output.stdout).ok()?;
     parse_origin_head_branch(&branch)
-}
-
-fn detect_gh_default_branch(repo: &str) -> Option<String> {
-    let output = Command::new("gh")
-        .args([
-            "repo",
-            "view",
-            repo,
-            "--json",
-            "defaultBranchRef",
-            "--jq",
-            ".defaultBranchRef.name",
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let branch = String::from_utf8(output.stdout).ok()?;
-    let branch = branch.trim();
-    (!branch.is_empty()).then(|| branch.to_string())
 }
 
 fn parse_origin_head_branch(value: &str) -> Option<String> {

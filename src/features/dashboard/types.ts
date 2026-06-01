@@ -53,6 +53,16 @@ export interface PullRequestSyncResult {
   error: string | null;
 }
 
+export interface GithubAuthStatus {
+  authenticated: boolean;
+  source: string;
+  login: string | null;
+  access_expires_at: number | null;
+  refresh_expires_at: number | null;
+  reauth_required: boolean;
+  message: string | null;
+}
+
 export interface Event {
   id: number;
   task_id: string | null;

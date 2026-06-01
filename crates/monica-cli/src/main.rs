@@ -1,3 +1,4 @@
+mod auth;
 mod hook;
 mod issue;
 mod project;
@@ -23,6 +24,9 @@ enum Commands {
     /// Receive agent lifecycle hooks (e.g. `monica hook claude`)
     #[command(subcommand)]
     Hook(hook::HookCommand),
+    /// Manage Monica authorization
+    #[command(subcommand)]
+    Auth(auth::AuthCommand),
     /// Start a worktree + session for an issue (owner/repo#123)
     Start { target: String },
     /// Show the status of all sessions
@@ -43,22 +47,29 @@ fn main() {
 }
 
 fn run(cli: Cli) -> anyhow::Result<()> {
-    match cli.command {
-        Commands::Project(cmd) => project::run(cmd),
-        Commands::Issue(cmd) => issue::run(cmd),
-        Commands::Hook(cmd) => hook::run(cmd),
-        Commands::Completions { shell } => {
-            let mut cmd = Cli::command();
-            let name = cmd.get_name().to_string();
-            clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
-            Ok(())
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .enable_io()
+        .build()?;
+    runtime.block_on(async move {
+        match cli.command {
+            Commands::Project(cmd) => project::run(cmd).await,
+            Commands::Issue(cmd) => issue::run(cmd).await,
+            Commands::Auth(cmd) => auth::run(cmd).await,
+            Commands::Hook(cmd) => hook::run(cmd),
+            Commands::Completions { shell } => {
+                let mut cmd = Cli::command();
+                let name = cmd.get_name().to_string();
+                clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
+                Ok(())
+            }
+            Commands::Start { .. }
+            | Commands::Status
+            | Commands::Review { .. }
+            | Commands::Pr { .. } => {
+                eprintln!("monica: not yet implemented (see issue #11)");
+                std::process::exit(1);
+            }
         }
-        Commands::Start { .. }
-        | Commands::Status
-        | Commands::Review { .. }
-        | Commands::Pr { .. } => {
-            eprintln!("monica: not yet implemented (see issue #11)");
-            std::process::exit(1);
-        }
-    }
+    })
 }

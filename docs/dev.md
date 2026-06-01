@@ -21,6 +21,20 @@
 
 ---
 
+## GitHub 認証
+
+Monica は GitHub CLI の token storage を読まない。GitHub App device flow で Monica 専用 token を取得し、macOS では `monica.github` / `github.com` の Keychain item に保存する。
+
+```bash
+monica auth github login
+monica auth github status
+monica auth github logout
+```
+
+開発時の一時 override は `MONICA_GITHUB_TOKEN` を使う。GitHub App client id は既定値を持つが、別 app で試すときは `MONICA_GITHUB_CLIENT_ID` で上書きできる。Dashboard は未ログイン時に PR sync worker を起動しない。
+
+---
+
 ## 1. Rust release profile — "Five Aces"（ワークスペース root の `Cargo.toml`）
 
 `[profile.release]` の **5 項目すべて** が入っていることが前提。1 つでも欠けると目に見えてサイズが増える。

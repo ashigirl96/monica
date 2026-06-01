@@ -21,7 +21,10 @@ pub use app::{
 };
 pub use claude::AgentLaunch;
 pub use db::Db;
-pub use github::sync_next_linked_pull_request;
+pub use github::{
+    github_app_install_url, sync_next_linked_pull_request, GithubApiClient, GithubAuthStatus,
+    GithubDeviceFlow, GithubTokenProvider,
+};
 pub use hook::{is_safe_task_run_id, record_claude_hook, status_for_claude_event, HookReport};
 pub use model::{
     Agent, DisplayStatus, Event, ExternalRef, GithubPullRequest, GithubPullRequestRef, NewTask,
@@ -30,7 +33,9 @@ pub use model::{
     TaskKind, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus,
     TaskSummaryRow,
 };
-pub use paths::{base_dir, db_path, task_run_dir, task_runs_dir, worktrees_dir};
+pub use paths::{
+    base_dir, db_path, github_auth_metadata_path, task_run_dir, task_runs_dir, worktrees_dir,
+};
 pub use repo::{parse_issue_ref, parse_owner_repo};
 pub use run::{
     launch_agent, run_issue, run_issue_with_launch_mode, AgentLaunchMode, SetupOutcome,

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Event, PullRequestSyncResult, TaskSummaryRow, Task } from "./types";
+import type { Event, GithubAuthStatus, PullRequestSyncResult, TaskSummaryRow, Task } from "./types";
 
 export function listTasks(): Promise<Task[]> {
   return invoke<Task[]>("list_tasks");
@@ -19,4 +19,8 @@ export function deleteTask(id: string): Promise<void> {
 
 export function syncNextLinkedPullRequest(): Promise<PullRequestSyncResult> {
   return invoke<PullRequestSyncResult>("sync_next_linked_pull_request");
+}
+
+export function githubAuthStatus(): Promise<GithubAuthStatus> {
+  return invoke<GithubAuthStatus>("github_auth_status");
 }
