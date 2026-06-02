@@ -33,10 +33,3 @@ where
 {
     auth.logout().await
 }
-
-pub fn github_app_install_url<A>(auth: &A) -> String
-where
-    A: AuthGateway,
-{
-    auth.github_app_install_url()
-}

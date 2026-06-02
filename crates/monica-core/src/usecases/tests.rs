@@ -12,8 +12,8 @@ use crate::interfaces::{
     TaskRunRepository,
 };
 use crate::{
-    begin_github_device_flow, delete_issue, github_app_install_url, github_auth_status,
-    launch_agent, logout_github, record_claude_hook, register_project_with_default_branch,
+    begin_github_device_flow, delete_issue, github_auth_status, launch_agent, logout_github,
+    record_claude_hook, register_project_with_default_branch,
     run_issue, sync_next_linked_pull_request, track_github_issue, wait_for_github_device_flow,
     Agent, AgentLaunch, AgentLaunchMode, DisplayStatus, Event, ExternalRef, GithubAuthStatus,
     GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef,
@@ -571,10 +571,6 @@ impl AuthGateway for FakeAuth {
     fn logout<'a>(&'a self) -> BoxFuture<'a, Result<()>> {
         Box::pin(async { Ok(()) })
     }
-
-    fn github_app_install_url(&self) -> String {
-        "https://github.com/apps/monica-local/installations/new".to_string()
-    }
 }
 
 fn task_from_new(id: String, new: NewTask) -> Task {
@@ -743,5 +739,4 @@ async fn github_auth_flow_usecases_delegate_to_auth_gateway() {
     let status = wait_for_github_device_flow(&auth, &flow).await.unwrap();
     assert_eq!(status.login.as_deref(), Some("user"));
     logout_github(&auth).await.unwrap();
-    assert!(github_app_install_url(&auth).contains("monica-local"));
 }

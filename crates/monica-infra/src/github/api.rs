@@ -4,7 +4,7 @@ use octocrab::Octocrab;
 use serde::Deserialize;
 use serde_json::json;
 
-use super::auth::{github_app_install_url, GithubTokenProvider};
+use super::auth::GithubTokenProvider;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GithubApiClient {
@@ -103,7 +103,6 @@ fn split_repo(repo: &str) -> Result<(&str, &str)> {
 }
 
 fn map_github_error(error: octocrab::Error, action: &str) -> anyhow::Error {
-    let install_url = github_app_install_url();
     match error {
         octocrab::Error::GitHub { source, .. } => {
             let status = source.status_code.as_u16();
@@ -113,18 +112,18 @@ fn map_github_error(error: octocrab::Error, action: &str) -> anyhow::Error {
                     source.message
                 ),
                 403 => anyhow!(
-                    "GitHub denied access while trying to {action}: {}. Confirm the Monica GitHub App has Issues/Pull requests read permission and is installed for this repository: {install_url}",
+                    "GitHub denied access while trying to {action}: {}. Your token may lack the `repo` scope, or an organization may restrict Monica's OAuth app — re-run `monica auth github login` and, for organization repositories, ask an org owner to approve Monica (and authorize SSO) in the organization's third-party access settings.",
                     source.message
                 ),
                 404 => anyhow!(
-                    "GitHub repository or item was not found while trying to {action}: {}. The Monica GitHub App may not be installed for this repository or the repository may not be selected: {install_url}",
+                    "GitHub repository or item was not found while trying to {action}: {}. Confirm you have access to the repository; for organization repositories an org owner may need to approve Monica's OAuth app or grant SSO authorization.",
                     source.message
                 ),
                 _ => anyhow!("GitHub API error while trying to {action}: {source}"),
             }
         }
         octocrab::Error::Graphql { source, .. } => anyhow!(
-            "GitHub GraphQL error while trying to {action}: {source}. Confirm the Monica GitHub App has Issues/Pull requests read permission and is installed for this repository: {install_url}"
+            "GitHub GraphQL error while trying to {action}: {source}. Confirm you have access to the repository and that Monica's OAuth app is authorized (re-run `monica auth github login`; org repositories may require org owner approval)."
         ),
         other => anyhow!("GitHub API error while trying to {action}: {other}"),
     }
@@ -135,10 +134,10 @@ fn linked_pull_requests_from_response(
 ) -> Result<Vec<GithubPullRequest>> {
     let repository = response
         .repository
-        .ok_or_else(|| anyhow!("GitHub repository was not found; check GitHub App installation"))?;
+        .ok_or_else(|| anyhow!("GitHub repository was not found; confirm you have access to it"))?;
     let issue = repository
         .issue
-        .ok_or_else(|| anyhow!("GitHub issue was not found; check GitHub App repository access"))?;
+        .ok_or_else(|| anyhow!("GitHub issue was not found; confirm you have access to the repository"))?;
     let mut pull_requests = Vec::new();
     for node in issue.closed_by_pull_requests_references.nodes {
         let Some(node) = node else {
@@ -160,9 +159,9 @@ fn linked_pull_requests_from_response(
 fn pull_request_from_response(response: PullRequestResponse) -> Result<GithubPullRequest> {
     let repository = response
         .repository
-        .ok_or_else(|| anyhow!("GitHub repository was not found; check GitHub App installation"))?;
+        .ok_or_else(|| anyhow!("GitHub repository was not found; confirm you have access to it"))?;
     let node = repository.pull_request.ok_or_else(|| {
-        anyhow!("GitHub pull request was not found; check GitHub App repository access")
+        anyhow!("GitHub pull request was not found; confirm you have access to the repository")
     })?;
     if node.number <= 0 {
         return Err(anyhow!("GitHub pull request returned invalid number"));

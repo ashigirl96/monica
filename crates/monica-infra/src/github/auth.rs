@@ -1,4 +1,4 @@
-use std::sync::OnceLock;
+use std::sync::{Once, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
@@ -9,8 +9,8 @@ use tokio::sync::Mutex;
 
 use super::store::{GithubTokenStore, StoredGithubToken};
 
-const DEFAULT_CLIENT_ID: &str = "Iv23lip6aQoaNUDT12Ej";
-const DEFAULT_APP_SLUG: &str = "monica-local";
+const DEFAULT_CLIENT_ID: &str = "Ov23li1kTGsVVhQftGso";
+const DEFAULT_SCOPES: &str = "repo";
 const DEVICE_CODE_URL: &str = "https://github.com/login/device/code";
 const ACCESS_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
 const USER_URL: &str = "https://api.github.com/user";
@@ -20,6 +20,7 @@ const ACCESS_TOKEN_SKEW_SECONDS: i64 = 60;
 
 static TOKEN_CACHE: OnceLock<Mutex<Option<StoredGithubToken>>> = OnceLock::new();
 static REFRESH_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static CRYPTO_PROVIDER_INIT: Once = Once::new();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DevicePoll {
@@ -156,7 +157,7 @@ impl GithubTokenProvider {
             .post(DEVICE_CODE_URL)
             .header(ACCEPT, "application/json")
             .header(USER_AGENT, "Monica")
-            .form(&[("client_id", client_id())])
+            .form(&[("client_id", client_id()), ("scope", scopes())])
             .send()
             .await
             .context("failed to start GitHub device flow")?
@@ -237,18 +238,6 @@ impl AuthGateway for GithubTokenProvider {
     fn logout<'a>(&'a self) -> monica_core::interfaces::BoxFuture<'a, Result<()>> {
         Box::pin(async move { GithubTokenProvider::logout(self).await })
     }
-
-    fn github_app_install_url(&self) -> String {
-        github_app_install_url()
-    }
-}
-
-pub fn github_app_install_url() -> String {
-    let slug = std::env::var("MONICA_GITHUB_APP_SLUG")
-        .ok()
-        .filter(|slug| !slug.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_APP_SLUG.to_string());
-    format!("https://github.com/apps/{slug}/installations/new")
 }
 
 fn client_id() -> String {
@@ -259,6 +248,14 @@ fn client_id() -> String {
         .unwrap_or_else(|| DEFAULT_CLIENT_ID.to_string())
 }
 
+fn scopes() -> String {
+    std::env::var("MONICA_GITHUB_SCOPES")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_SCOPES.to_string())
+}
+
 fn env_token() -> Option<String> {
     std::env::var("MONICA_GITHUB_TOKEN")
         .ok()
@@ -267,10 +264,20 @@ fn env_token() -> Option<String> {
 }
 
 fn http_client() -> reqwest::Client {
+    install_crypto_provider();
     reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new())
+}
+
+// reqwest is built with `rustls-no-provider`, so the single rustls instance has
+// no default CryptoProvider and would panic on first TLS use. Install ring to
+// match octocrab's `rustls-ring`; ignore the error if another caller won the race.
+fn install_crypto_provider() {
+    CRYPTO_PROVIDER_INIT.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
 }
 
 async fn cached_valid_access_token() -> Option<String> {

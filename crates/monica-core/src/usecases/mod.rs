@@ -10,8 +10,7 @@ pub mod track_github_issue;
 mod tests;
 
 pub use auth::{
-    begin_github_device_flow, github_app_install_url, github_auth_status, logout_github,
-    wait_for_github_device_flow,
+    begin_github_device_flow, github_auth_status, logout_github, wait_for_github_device_flow,
 };
 pub use delete_issue::{delete_issue, DeleteIssueReport};
 pub use query::{

@@ -5,7 +5,7 @@ use monica_infra::Runtime;
 
 #[derive(Subcommand)]
 pub enum AuthCommand {
-    /// Manage Monica's GitHub App authorization
+    /// Manage Monica's GitHub authorization
     #[command(subcommand)]
     Github(GithubAuthCommand),
 }
@@ -58,8 +58,7 @@ async fn login(runtime: &Runtime) -> Result<()> {
     println!();
     println!("GitHub authorization saved.");
     print_status(&status);
-    println!("Install or update repository access here if needed:");
-    println!("{}", monica_core::github_app_install_url(&runtime.auth));
+    println!("For organization repositories, an org owner may need to approve Monica's OAuth app in the organization's third-party access settings.");
     Ok(())
 }
 

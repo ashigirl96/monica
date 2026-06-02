@@ -12,5 +12,4 @@ pub trait AuthGateway {
         flow: &'a GithubDeviceFlow,
     ) -> BoxFuture<'a, Result<GithubAuthStatus>>;
     fn logout<'a>(&'a self) -> BoxFuture<'a, Result<()>>;
-    fn github_app_install_url(&self) -> String;
 }
