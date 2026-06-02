@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use clap::Subcommand;
-use monica_core::{github_app_install_url, GithubAuthStatus, GithubTokenProvider};
+use monica_core::GithubAuthStatus;
+use monica_infra::Runtime;
 
 #[derive(Subcommand)]
 pub enum AuthCommand {
@@ -26,23 +27,23 @@ pub async fn run(cmd: AuthCommand) -> Result<()> {
 }
 
 async fn run_github(cmd: GithubAuthCommand) -> Result<()> {
-    let provider = GithubTokenProvider::new();
+    let runtime = Runtime::open_default()?;
     match cmd {
-        GithubAuthCommand::Login => login(&provider).await,
+        GithubAuthCommand::Login => login(&runtime).await,
         GithubAuthCommand::Status => {
-            print_status(&provider.status());
+            print_status(&monica_core::github_auth_status(&runtime.auth));
             Ok(())
         }
         GithubAuthCommand::Logout => {
-            provider.logout().await?;
+            monica_core::logout_github(&runtime.auth).await?;
             println!("GitHub authorization removed.");
             Ok(())
         }
     }
 }
 
-async fn login(provider: &GithubTokenProvider) -> Result<()> {
-    let flow = provider.begin_device_flow().await?;
+async fn login(runtime: &Runtime) -> Result<()> {
+    let flow = monica_core::begin_github_device_flow(&runtime.auth).await?;
     println!("Open this URL in your browser:");
     println!("{}", flow.verification_uri);
     println!();
@@ -51,15 +52,14 @@ async fn login(provider: &GithubTokenProvider) -> Result<()> {
     println!();
     println!("Waiting for GitHub authorization...");
 
-    let status = provider
-        .wait_for_device_flow(&flow)
+    let status = monica_core::wait_for_github_device_flow(&runtime.auth, &flow)
         .await
         .context("GitHub authorization did not complete")?;
     println!();
     println!("GitHub authorization saved.");
     print_status(&status);
     println!("Install or update repository access here if needed:");
-    println!("{}", github_app_install_url());
+    println!("{}", monica_core::github_app_install_url(&runtime.auth));
     Ok(())
 }
 
