@@ -16,5 +16,3 @@ tauri-build = { version = "2", default-features = false, features = [] }
 monica-core = { path = "../monica-core" }
 monica-infra = { path = "../monica-infra" }
 tauri = { version = "2", default-features = false, features = ["wry", "macos-private-api"] }
-serde = { version = "1", default-features = false, features = ["derive"] }
-serde_json = { version = "1", default-features = false, features = ["std"] }

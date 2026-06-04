@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use clap::Subcommand;
 use monica_core::GitGateway;
 use monica_infra::Runtime;
@@ -104,8 +104,7 @@ fn list(runtime: &Runtime) -> Result<()> {
 }
 
 fn show(runtime: &Runtime, repo: &str, json: bool) -> Result<()> {
-    let project = monica_core::get_project(&runtime.repositories, repo)
-        .map_err(|_| anyhow!("project not found: {repo}"))?;
+    let project = monica_core::get_project(&runtime.repositories, repo)?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&project)?);
