@@ -24,3 +24,4 @@ Issue Runner → Task/TaskRun Tracker → Status Dashboard → Kanban → Termin
 - 2026-06-02 GitHub App device flow auth に移行。gh 依存を外し、Monica 専用 Keychain token と未ログイン時の PR sync 停止を入れた。
 - 2026-06-02 Rust workspace を Clean Architecture 構成へ再編。domain/usecases/interfaces と infra Runtime/SQLite/GitHub/Git/process/filesystem/auth を分離した。
 - 2026-06-02 domain/mod.rs を re-export 目次化。domain 型を status/task/task_run/project/external_ref/github に分割した。
+- 2026-06-05 `monica issue run` の Claude 起動に `--dangerously-skip-permissions` を付与（worktree 隔離下で permission prompt を出さず自走させるため）。

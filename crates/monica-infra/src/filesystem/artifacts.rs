@@ -101,7 +101,11 @@ fn build_claude_launch(
         .with_context(|| format!("failed to write {}", prompt_path.display()))?;
 
     let settings_path_str = settings_path.to_string_lossy().into_owned();
-    let mut args = vec!["--settings".to_string(), settings_path_str.clone()];
+    let mut args = vec![
+        "--dangerously-skip-permissions".to_string(),
+        "--settings".to_string(),
+        settings_path_str.clone(),
+    ];
     match launch_mode {
         AgentLaunchMode::New => {
             if let Some(p) = prompt {
