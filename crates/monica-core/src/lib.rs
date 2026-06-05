@@ -1,43 +1,33 @@
-//! Monica core: domain logic shared by the CLI (`monica-cli`) and the Tauri app (`monica-app`).
-//! Provides the SQLite-backed store, the `Task` domain model, and `MON-<n>` id allocation.
+//! Monica core: domain models, use cases, and interface traits.
+//!
+//! Concrete SQLite, GitHub, Git, filesystem, process, keychain, and runtime wiring live in
+//! `monica-infra`.
 
-mod app;
-mod claude;
-mod db;
-mod github;
-mod hook;
-mod migrations;
-mod model;
-mod paths;
-mod repo;
-mod run;
-mod store;
-#[cfg(test)]
-mod test_support;
+pub mod domain;
+pub mod interfaces;
+pub mod usecases;
 
-pub use app::{
-    delete_issue, register_project, register_project_with_default_branch, track_github_issue,
-    DeleteIssueReport, GithubIssue,
+pub use domain::{
+    branch_name, is_safe_task_run_id, monica_number, parse_issue_ref, parse_owner_repo,
+    should_ignore_claude_event, status_for_claude_event, transition_for_claude_event,
+    transition_is_protected, wait_reason_for_tool, worktree_path_for, Agent, DisplayStatus, Event,
+    ExternalRef, GithubAuthStatus, GithubDeviceFlow, GithubIssue, GithubPullRequest,
+    GithubPullRequestRef, GithubPullRequestStatus, HookTransition, NewTask, NewTaskRun,
+    PermissionMode, Project, Provider, PullRequestStatusSyncCandidate, PullRequestSyncCandidate,
+    PullRequestSyncResult, PullRequestSyncStatus, RefType, Task, TaskKind, TaskRun,
+    TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus, TaskSummaryRow,
 };
-pub use claude::AgentLaunch;
-pub use db::Db;
-pub use github::{
-    github_app_install_url, sync_next_linked_pull_request, GithubApiClient, GithubAuthStatus,
-    GithubDeviceFlow, GithubTokenProvider,
+pub use interfaces::{
+    AgentLaunch, AgentLaunchMode, AgentLauncher, AuthGateway, Clock, EventRepository, GitGateway,
+    GithubGateway, ProjectRepository, RunArtifacts, SetupEnv, SetupOutcome, SetupRunner,
+    TaskRepository, TaskRunRepository,
 };
-pub use hook::{is_safe_task_run_id, record_claude_hook, status_for_claude_event, HookReport};
-pub use model::{
-    Agent, DisplayStatus, Event, ExternalRef, GithubPullRequest, GithubPullRequestRef, NewTask,
-    NewTaskRun, PermissionMode, Project, Provider, PullRequestStatusSyncCandidate,
-    PullRequestSyncCandidate, PullRequestSyncResult, PullRequestSyncStatus, RefType, Task,
-    TaskKind, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus,
-    TaskSummaryRow,
-};
-pub use paths::{
-    base_dir, db_path, github_auth_metadata_path, task_run_dir, task_runs_dir, worktrees_dir,
-};
-pub use repo::{parse_issue_ref, parse_owner_repo};
-pub use run::{
-    launch_agent, run_issue, run_issue_with_launch_mode, AgentLaunchMode, SetupOutcome,
-    TaskRunReport,
+pub use usecases::{
+    begin_github_device_flow, delete_issue, get_project, github_auth_status, launch_agent,
+    list_events, list_projects, list_task_summaries, list_tasks, logout_github, mark_issue,
+    record_claude_hook, register_project,
+    register_project_with_default_branch, run_issue, run_issue_with_launch_mode, set_project_field,
+    sync_next_linked_pull_request, track_github_issue, track_github_issue_from_fetched,
+    wait_for_github_device_flow, DeleteIssueReport, HookReport, TaskRunReport,
+    TrackGithubIssueInput, TrackGithubIssueReport,
 };

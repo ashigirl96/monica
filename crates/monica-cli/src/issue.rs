@@ -4,9 +4,10 @@ use std::str::FromStr;
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_core::{
-    parse_issue_ref, parse_owner_repo, track_github_issue, Agent, AgentLaunchMode, Db,
-    DisplayStatus, GithubApiClient, SetupOutcome, Task, TaskRunStatus, TaskStatus, TaskSummaryRow,
+    parse_issue_ref, parse_owner_repo, Agent, AgentLaunchMode, DisplayStatus, SetupOutcome, Task,
+    TaskRunStatus, TaskStatus, TaskSummaryRow, TrackGithubIssueInput,
 };
+use monica_infra::Runtime;
 
 #[derive(Subcommand)]
 pub enum IssueCommand {
@@ -60,10 +61,10 @@ pub enum IssueCommand {
 }
 
 pub async fn run(cmd: IssueCommand) -> Result<()> {
-    let mut db = Db::open()?;
+    let mut runtime = Runtime::open_default()?;
     match cmd {
-        IssueCommand::Track { target } => track_command(&mut db, &target).await,
-        IssueCommand::Status { status, project } => status_command(&db, status, project),
+        IssueCommand::Track { target } => track_command(&mut runtime, &target).await,
+        IssueCommand::Status { status, project } => status_command(&runtime, status, project),
         IssueCommand::Run {
             id,
             claude,
@@ -71,43 +72,54 @@ pub async fn run(cmd: IssueCommand) -> Result<()> {
             continue_session,
             fork,
         } => run_command(
-            &mut db,
+            &mut runtime,
             &id,
             claude,
             agent.as_deref(),
             continue_session,
             fork.as_deref(),
         ),
-        IssueCommand::Delete { id, yes } => delete_command(&mut db, &id, yes),
+        IssueCommand::Delete { id, yes } => delete_command(&mut runtime, &id, yes),
         IssueCommand::Mark { id, status, note } => {
-            mark_command(&mut db, &id, &status, note.as_deref())
+            mark_command(&mut runtime, &id, &status, note.as_deref())
         }
     }
 }
 
-async fn track_command(db: &mut Db, target: &str) -> Result<()> {
+async fn track_command(runtime: &mut Runtime, target: &str) -> Result<()> {
     let (repo, number) = parse_issue_ref(target)?;
-    let issue = GithubApiClient::new()
-        .fetch_issue(&repo, number)
-        .await
-        .with_context(|| format!("failed to fetch GitHub issue {repo}#{number}"))?;
-    let item = track_github_issue(db, &repo, &issue)?;
+    let report = monica_core::track_github_issue(
+        &mut runtime.repositories,
+        &runtime.github,
+        TrackGithubIssueInput {
+            repo: repo.clone(),
+            number,
+        },
+    )
+    .await
+    .with_context(|| format!("failed to fetch GitHub issue {repo}#{number}"))?;
+    let item = report.task;
+    let issue = report.issue;
     println!("Created {} from {}#{}", item.id, repo, issue.number);
     println!("Status: {}", item.status.as_str());
     println!("Title: {}", item.title);
     Ok(())
 }
 
-fn status_command(db: &Db, status: Option<String>, project: Option<String>) -> Result<()> {
+fn status_command(
+    runtime: &Runtime,
+    status: Option<String>,
+    project: Option<String>,
+) -> Result<()> {
     let status = parse_status_filter(status.as_deref())?;
     let project = normalize_project_filter(project.as_deref())?;
-    let rows = db.list_task_summaries(status, project.as_deref())?;
+    let rows = monica_core::list_task_summaries(&runtime.repositories, status, project.as_deref())?;
     print!("{}", render_status_table(&rows));
     Ok(())
 }
 
 fn run_command(
-    db: &mut Db,
+    runtime: &mut Runtime,
     id: &str,
     claude: bool,
     agent: Option<&str>,
@@ -119,7 +131,15 @@ fn run_command(
     if launch_mode.is_reconnect() && agent != Some(Agent::Claude) {
         anyhow::bail!("--continue/--fork require --claude or --agent claude");
     }
-    let report = monica_core::run_issue_with_launch_mode(db, id, agent, launch_mode)?;
+    let report = monica_core::run_issue_with_launch_mode(
+        &mut runtime.repositories,
+        &runtime.git,
+        &runtime.setup_runner,
+        &runtime.run_artifacts,
+        id,
+        agent,
+        launch_mode,
+    )?;
     println!("Task run {} for {}", report.task_run_id, report.task_id);
     println!("Branch:   {}", report.branch);
     println!("Worktree: {}", report.worktree_path);
@@ -139,15 +159,15 @@ fn run_command(
     // Hand the terminal to the agent. `launch_agent` is a no-op when no agent was requested, so
     // this call is unconditional. Spawn failure settles the run to failed inside core, so we just
     // propagate.
-    monica_core::launch_agent(db, &report)
+    monica_core::launch_agent(&mut runtime.repositories, &runtime.agent_launcher, &report)
 }
 
-fn delete_command(db: &mut Db, id: &str, yes: bool) -> Result<()> {
-    let item = db
-        .get_task(id)?
+fn delete_command(runtime: &mut Runtime, id: &str, yes: bool) -> Result<()> {
+    let item = monica_core::list_tasks(&runtime.repositories)?
+        .into_iter()
+        .find(|task| task.id == id)
         .ok_or_else(|| anyhow!("Issue not found: {id}"))?;
-    let project = db
-        .list_task_summaries(None, None)?
+    let project = monica_core::list_task_summaries(&runtime.repositories, None, None)?
         .into_iter()
         .find(|row| row.id == item.id)
         .and_then(|row| row.project);
@@ -158,7 +178,7 @@ fn delete_command(db: &mut Db, id: &str, yes: bool) -> Result<()> {
         return Ok(());
     }
 
-    let report = monica_core::delete_issue(db, id)?;
+    let report = monica_core::delete_issue(&mut runtime.repositories, &runtime.git, id)?;
     println!("Deleted issue {}.", report.item.id);
     if !report.task_runs.is_empty() {
         println!("Preserved task runs: {}.", report.task_runs.join(", "));
@@ -215,9 +235,9 @@ fn resolve_launch_mode(continue_session: bool, fork: Option<&str>) -> Result<Age
     }
 }
 
-fn mark_command(db: &mut Db, id: &str, status: &str, note: Option<&str>) -> Result<()> {
+fn mark_command(runtime: &mut Runtime, id: &str, status: &str, note: Option<&str>) -> Result<()> {
     let status = TaskStatus::parse_token(status)?;
-    db.mark_task(id, status, note)?;
+    monica_core::mark_issue(&mut runtime.repositories, id, status, note)?;
     println!("Marked {id} as {}", status.as_str());
     if let Some(note) = note {
         println!("Note: {note}");

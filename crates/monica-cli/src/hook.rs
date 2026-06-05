@@ -2,7 +2,7 @@ use std::io::Read;
 
 use anyhow::Result;
 use clap::Subcommand;
-use monica_core::{record_claude_hook, Db};
+use monica_infra::Runtime;
 
 #[derive(Subcommand)]
 pub enum HookCommand {
@@ -33,8 +33,14 @@ fn handle_claude() -> Result<()> {
     let task_id = env_opt("MONICA_TASK_ID").or_else(|| env_opt("MONICA_ID"));
     let task_run_id = env_opt("MONICA_TASK_RUN_ID").or_else(|| env_opt("MONICA_RUN_ID"));
 
-    let mut db = Db::open()?;
-    let report = record_claude_hook(&mut db, task_id.as_deref(), task_run_id.as_deref(), &raw)?;
+    let mut runtime = Runtime::open_default()?;
+    let report = monica_core::record_claude_hook(
+        &mut runtime.repositories,
+        &runtime.run_artifacts,
+        task_id.as_deref(),
+        task_run_id.as_deref(),
+        &raw,
+    )?;
 
     // Surface notable degradations on stderr so a misconfigured launch shows up in the hook debug
     // log without ever reaching Claude's context.

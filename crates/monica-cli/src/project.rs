@@ -1,10 +1,7 @@
-use std::fs;
-use std::path::Path;
-use std::process::Command;
-
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use clap::Subcommand;
-use monica_core::{register_project_with_default_branch, Db, GithubApiClient};
+use monica_core::GitGateway;
+use monica_infra::Runtime;
 
 #[derive(Subcommand)]
 pub enum ProjectCommand {
@@ -33,23 +30,28 @@ pub enum ProjectCommand {
 }
 
 pub async fn run(cmd: ProjectCommand) -> Result<()> {
-    let db = Db::open()?;
+    let mut runtime = Runtime::open_default()?;
     match cmd {
-        ProjectCommand::Init { repo } => init(&db, repo).await,
-        ProjectCommand::Set { repo, key, value } => set(&db, &repo, &key, &value),
-        ProjectCommand::List => list(&db),
-        ProjectCommand::Show { repo, json } => show(&db, &repo, json),
+        ProjectCommand::Init { repo } => init(&mut runtime, repo).await,
+        ProjectCommand::Set { repo, key, value } => set(&runtime, &repo, &key, &value),
+        ProjectCommand::List => list(&runtime),
+        ProjectCommand::Show { repo, json } => show(&runtime, &repo, json),
     }
 }
 
-async fn init(db: &Db, repo_arg: Option<String>) -> Result<()> {
+async fn init(runtime: &mut Runtime, repo_arg: Option<String>) -> Result<()> {
     let cwd = std::env::current_dir().context("failed to read current directory")?;
     let repo = match repo_arg {
         Some(repo) => repo,
-        None => detect_repo()?,
+        None => runtime.git.detect_repo()?,
     };
-    let default_branch = detect_default_branch(&repo).await;
-    let saved = register_project_with_default_branch(db, &repo, &cwd, default_branch.as_deref())?;
+    let default_branch = detect_default_branch(runtime, &repo).await;
+    let saved = monica_core::register_project_with_default_branch(
+        &runtime.repositories,
+        &repo,
+        &cwd,
+        default_branch.as_deref(),
+    )?;
 
     println!(
         "Registered project {} (path: {}, default_branch: {})",
@@ -57,7 +59,7 @@ async fn init(db: &Db, repo_arg: Option<String>) -> Result<()> {
         saved.path.as_deref().unwrap_or("-"),
         saved.default_branch
     );
-    for (file, created) in scaffold_monica(&cwd)? {
+    for (file, created) in runtime.scaffold_monica(&cwd)? {
         let status = if created {
             "created"
         } else {
@@ -68,14 +70,14 @@ async fn init(db: &Db, repo_arg: Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn set(db: &Db, repo: &str, key: &str, value: &str) -> Result<()> {
-    db.set_project_field(repo, key, value)?;
+fn set(runtime: &Runtime, repo: &str, key: &str, value: &str) -> Result<()> {
+    monica_core::set_project_field(&runtime.repositories, repo, key, value)?;
     println!("Set {repo}.{key} = {value}");
     Ok(())
 }
 
-fn list(db: &Db) -> Result<()> {
-    let projects = db.list_projects()?;
+fn list(runtime: &Runtime) -> Result<()> {
+    let projects = monica_core::list_projects(&runtime.repositories)?;
     if projects.is_empty() {
         println!("No projects registered. Run `monica project init` inside a repo.");
         return Ok(());
@@ -101,10 +103,8 @@ fn list(db: &Db) -> Result<()> {
     Ok(())
 }
 
-fn show(db: &Db, repo: &str, json: bool) -> Result<()> {
-    let project = db
-        .get_project(repo)?
-        .ok_or_else(|| anyhow!("project not found: {repo}"))?;
+fn show(runtime: &Runtime, repo: &str, json: bool) -> Result<()> {
+    let project = monica_core::get_project(&runtime.repositories, repo)?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&project)?);
@@ -137,97 +137,16 @@ fn show(db: &Db, repo: &str, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Read `git remote get-url origin` in the current directory and extract `owner/repo`.
-fn detect_repo() -> Result<String> {
-    let output = Command::new("git")
-        .args(["remote", "get-url", "origin"])
-        .output()
-        .context("failed to run git; install git or pass owner/repo explicitly")?;
-    if !output.status.success() {
-        return Err(anyhow!(
-            "could not read `git remote get-url origin`; run inside a repo or pass owner/repo explicitly"
-        ));
-    }
-    let url = String::from_utf8(output.stdout).context("git remote url was not valid UTF-8")?;
-    monica_core::parse_owner_repo(&url)
-}
-
-async fn detect_default_branch(repo: &str) -> Option<String> {
-    if let Some(branch) = detect_git_default_branch(repo) {
+async fn detect_default_branch(runtime: &Runtime, repo: &str) -> Option<String> {
+    if let Some(branch) = runtime.git.detect_default_branch(repo) {
         return Some(branch);
     }
-    GithubApiClient::new()
+    runtime
+        .github
         .fetch_default_branch(repo)
         .await
         .ok()
         .flatten()
-}
-
-fn detect_git_default_branch(repo: &str) -> Option<String> {
-    if detect_repo().ok().as_deref() != Some(repo) {
-        return None;
-    }
-
-    let output = Command::new("git")
-        .args(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let branch = String::from_utf8(output.stdout).ok()?;
-    parse_origin_head_branch(&branch)
-}
-
-fn parse_origin_head_branch(value: &str) -> Option<String> {
-    value
-        .trim()
-        .strip_prefix("origin/")
-        .filter(|branch| !branch.is_empty())
-        .map(ToString::to_string)
-}
-
-fn scaffold_monica(dir: &Path) -> Result<Vec<(String, bool)>> {
-    let monica_dir = dir.join(".monica");
-    fs::create_dir_all(&monica_dir)
-        .with_context(|| format!("failed to create {}", monica_dir.display()))?;
-    Ok(vec![
-        write_if_absent(&monica_dir, "setup.sh", SETUP_SH_TEMPLATE, true)?,
-        write_if_absent(&monica_dir, "prompt.md", PROMPT_MD_TEMPLATE, false)?,
-    ])
-}
-
-/// Write `name` under `dir` only if it does not already exist. Returns `(.monica/<name>, created?)`
-/// so a pre-existing file (a user's committed convention) is never clobbered.
-fn write_if_absent(
-    dir: &Path,
-    name: &str,
-    contents: &str,
-    executable: bool,
-) -> Result<(String, bool)> {
-    let path = dir.join(name);
-    let rel = format!(".monica/{name}");
-    if path.exists() {
-        return Ok((rel, false));
-    }
-    fs::write(&path, contents).with_context(|| format!("failed to write {}", path.display()))?;
-    if executable {
-        set_executable(&path)?;
-    }
-    Ok((rel, true))
-}
-
-#[cfg(unix)]
-fn set_executable(path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let mut perms = fs::metadata(path)?.permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(path, perms).with_context(|| format!("failed to chmod {}", path.display()))
-}
-
-#[cfg(not(unix))]
-fn set_executable(_path: &Path) -> Result<()> {
-    Ok(())
 }
 
 fn print_table(rows: &[Vec<String>]) {
@@ -249,43 +168,5 @@ fn print_table(rows: &[Vec<String>]) {
             .collect::<Vec<_>>()
             .join("  ");
         println!("{}", line.trim_end());
-    }
-}
-
-const SETUP_SH_TEMPLATE: &str = r#"#!/usr/bin/env bash
-set -euo pipefail
-
-# Monica runs this in the worktree before launching the agent. Keep it idempotent.
-# Available env: MONICA_ID, MONICA_RUN_ID, MONICA_PROJECT_ID, MONICA_BRANCH, MONICA_WORKTREE
-# 例:
-#   corepack enable
-#   pnpm install --frozen-lockfile
-"#;
-
-const PROMPT_MD_TEMPLATE: &str = r#"<!-- Monica passes this file's contents as the initial prompt to the agent. -->
-/tackle
-"#;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_origin_head_branch_strips_origin_prefix() {
-        assert_eq!(
-            parse_origin_head_branch("origin/master\n"),
-            Some("master".to_string())
-        );
-        assert_eq!(
-            parse_origin_head_branch("origin/main"),
-            Some("main".to_string())
-        );
-    }
-
-    #[test]
-    fn parse_origin_head_branch_rejects_unexpected_output() {
-        assert_eq!(parse_origin_head_branch("main"), None);
-        assert_eq!(parse_origin_head_branch("origin/"), None);
-        assert_eq!(parse_origin_head_branch(""), None);
     }
 }

@@ -1,0 +1,72 @@
+use std::str::FromStr;
+
+use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use super::status::{TaskRunStatus, TaskRunWaitReason};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Agent {
+    Claude,
+}
+
+impl Agent {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Agent::Claude => "claude",
+        }
+    }
+}
+
+impl FromStr for Agent {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Ok(match s {
+            "claude" => Agent::Claude,
+            other => return Err(anyhow!("unknown agent: {other}")),
+        })
+    }
+}
+
+/// An execution attempt against a task. Persisted from issue E onward.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskRun {
+    pub id: String,
+    pub task_id: String,
+    pub agent: Option<Agent>,
+    pub branch: Option<String>,
+    pub worktree_path: Option<String>,
+    pub status: TaskRunStatus,
+    pub wait_reason: Option<TaskRunWaitReason>,
+    pub settings_path: Option<String>,
+    pub provider_session_id: Option<String>,
+    pub last_event_name: Option<String>,
+    pub last_event_at: Option<String>,
+    pub metadata: Value,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// A provider/hook observation applied to an existing [`TaskRun`].
+#[derive(Debug, Clone, Copy)]
+pub struct TaskRunObservation<'a> {
+    pub status: Option<TaskRunStatus>,
+    pub wait_reason: Option<Option<TaskRunWaitReason>>,
+    pub event_name: Option<&'a str>,
+    pub at: &'a str,
+    pub provider_session_id: Option<&'a str>,
+    pub metadata: Option<&'a Value>,
+}
+
+/// Input for starting a task run. The `id`, status, and timestamps are assigned by the store:
+/// repository implementations always insert at [`TaskRunStatus::SettingUp`].
+#[derive(Debug, Clone)]
+pub struct NewTaskRun {
+    pub task_id: String,
+    pub agent: Option<Agent>,
+    pub branch: Option<String>,
+    pub worktree_path: Option<String>,
+}

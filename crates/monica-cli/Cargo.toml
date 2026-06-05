@@ -9,9 +9,9 @@ path = "src/main.rs"
 
 [dependencies]
 monica-core = { path = "../monica-core" }
+monica-infra = { path = "../monica-infra" }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 anyhow = "1.0.102"
-serde = { version = "1.0.228", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
 tokio = { version = "1.52.3", default-features = false, features = ["net", "rt", "time"] }
