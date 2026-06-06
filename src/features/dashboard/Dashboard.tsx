@@ -1,12 +1,13 @@
 import { cn } from "@/lib/utils";
 import { useShortcuts } from "@/lib/shortcuts";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { PanelLeft } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { deleteTask, githubAuthStatus } from "./api";
 import { DeleteTaskModal } from "./DeleteTaskModal";
 import { DetailDrawer } from "./DetailDrawer";
 import { StatusRail, type StatusFilter } from "./StatusRail";
-import { usePullRequestSyncWorker } from "./usePullRequestSyncWorker";
+import { TaskContextMenu } from "./TaskContextMenu";
 import { useTasks } from "./useTasks";
 import { TaskList } from "./TaskList";
 import type { GithubAuthStatus, TaskView } from "./types";
@@ -22,15 +23,11 @@ export function Dashboard() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [contextMenuTaskId, setContextMenuTaskId] = useState<string | null>(null);
   const [railOpen, setRailOpen] = useState(true);
   const [railWidth, setRailWidth] = useState(240);
   const [resizing, setResizing] = useState(false);
   const [githubAuth, setGithubAuth] = useState<GithubAuthStatus | null>(null);
-
-  usePullRequestSyncWorker({
-    enabled: !loading && !error && githubAuth?.authenticated === true,
-    onSynced: refresh,
-  });
 
   useEffect(() => {
     let alive = true;
@@ -82,6 +79,11 @@ export function Dashboard() {
     [items, pendingDeleteId],
   );
 
+  const contextMenuTask = useMemo(
+    () => items.find((i) => i.id === contextMenuTaskId) ?? null,
+    [contextMenuTaskId, items],
+  );
+
   const focusRelative = (direction: 1 | -1) => {
     if (visible.length === 0) return;
     setFocusedId((current) => {
@@ -121,15 +123,20 @@ export function Dashboard() {
     }
   };
 
+  const closeContextMenu = () => {
+    setContextMenuTaskId(null);
+  };
+
   useShortcuts({
     toggleSidebar: () => setRailOpen((open) => !open),
     focusNextTask: () => {
-      if (!pendingDeleteId) focusRelative(1);
+      if (!pendingDeleteId && !contextMenuTaskId) focusRelative(1);
     },
     focusPreviousTask: () => {
-      if (!pendingDeleteId) focusRelative(-1);
+      if (!pendingDeleteId && !contextMenuTaskId) focusRelative(-1);
     },
     openFocusedTask: () => {
+      if (contextMenuTaskId) return;
       if (pendingDeleteId) {
         void confirmDelete();
         return;
@@ -137,6 +144,10 @@ export function Dashboard() {
       if (focused) setOpenDetailId(focused.id);
     },
     closePanel: () => {
+      if (contextMenuTaskId) {
+        closeContextMenu();
+        return;
+      }
       if (pendingDeleteId) {
         closeDeleteModal();
         return;
@@ -144,9 +155,13 @@ export function Dashboard() {
       setOpenDetailId(null);
     },
     deleteFocusedTask: () => {
-      if (!focused || pendingDeleteId) return;
+      if (!focused || pendingDeleteId || contextMenuTaskId) return;
       setPendingDeleteId(focused.id);
       setDeleteError(null);
+    },
+    openContextMenu: () => {
+      if (pendingDeleteId || contextMenuTaskId || !focused) return;
+      setContextMenuTaskId(focused.id);
     },
   });
 
@@ -164,7 +179,10 @@ export function Dashboard() {
       setPendingDeleteId(null);
       setDeleteError(null);
     }
-  }, [items, openDetailId, pendingDeleteId]);
+    if (contextMenuTaskId && !items.some((item) => item.id === contextMenuTaskId)) {
+      closeContextMenu();
+    }
+  }, [items, openDetailId, pendingDeleteId, contextMenuTaskId]);
 
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -277,6 +295,30 @@ export function Dashboard() {
         onCancel={closeDeleteModal}
         onConfirm={() => void confirmDelete()}
       />
+      {contextMenuTask && (
+        <TaskContextMenu
+          item={contextMenuTask}
+          onClose={closeContextMenu}
+          onOpenIssue={() => {
+            if (contextMenuTask.project && contextMenuTask.githubIssueNumber !== null) {
+              void openUrl(
+                `https://github.com/${contextMenuTask.project}/issues/${contextMenuTask.githubIssueNumber}`,
+              );
+            }
+            closeContextMenu();
+          }}
+          onOpenPR={() => {
+            const pr = contextMenuTask.githubPullRequests[0];
+            if (pr?.url) void openUrl(pr.url);
+            closeContextMenu();
+          }}
+          onDelete={() => {
+            closeContextMenu();
+            setPendingDeleteId(contextMenuTask.id);
+            setDeleteError(null);
+          }}
+        />
+      )}
     </div>
   );
 }

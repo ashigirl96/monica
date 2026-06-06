@@ -13,14 +13,13 @@ use crate::interfaces::{
 };
 use crate::{
     begin_github_device_flow, delete_issue, github_auth_status, launch_agent, logout_github,
-    record_claude_hook, register_project_with_default_branch,
-    run_issue, sync_next_linked_pull_request, track_github_issue, wait_for_github_device_flow,
-    Agent, AgentLaunch, AgentLaunchMode, DisplayStatus, Event, ExternalRef, GithubAuthStatus,
-    GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef,
-    GithubPullRequestStatus, NewTask, NewTaskRun, Project, PullRequestStatusSyncCandidate,
-    PullRequestSyncCandidate, PullRequestSyncStatus, RefType, Task, TaskKind, TaskRun,
-    TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus, TaskSummaryRow,
-    TrackGithubIssueInput,
+    record_claude_hook, register_project_with_default_branch, run_issue, sync_next_pull_request,
+    track_github_issue, wait_for_github_device_flow, Agent, AgentLaunch, AgentLaunchMode,
+    DisplayStatus, Event, ExternalRef, GithubAuthStatus, GithubDeviceFlow, GithubIssue,
+    GithubPullRequest, GithubPullRequestRef, GithubPullRequestStatus, NewTask, NewTaskRun, Project,
+    PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate, PullRequestSyncCandidate,
+    PullRequestSyncStatus, RefType, Task, TaskKind, TaskRun, TaskRunObservation, TaskRunStatus,
+    TaskRunWaitReason, TaskStatus, TaskSummaryRow, TrackGithubIssueInput,
 };
 
 #[derive(Default)]
@@ -37,9 +36,12 @@ struct FakeState {
     events: Vec<Event>,
     next_task: i64,
     next_run: i64,
+    pr_branch_candidate: Option<PullRequestBranchSyncCandidate>,
     pr_candidate: Option<PullRequestSyncCandidate>,
     pr_status_candidate: Option<PullRequestStatusSyncCandidate>,
+    pr_branch_success_count: usize,
     pr_success_count: usize,
+    issue_sync_candidate_lookups: usize,
 }
 
 impl FakeRepos {
@@ -178,7 +180,14 @@ impl TaskRepository for FakeRepos {
             .unwrap_or_default())
     }
 
+    fn next_pull_request_branch_sync_candidate(
+        &self,
+    ) -> Result<Option<PullRequestBranchSyncCandidate>> {
+        Ok(self.state.borrow().pr_branch_candidate.clone())
+    }
+
     fn next_pull_request_sync_candidate(&self) -> Result<Option<PullRequestSyncCandidate>> {
+        self.state.borrow_mut().issue_sync_candidate_lookups += 1;
         Ok(self.state.borrow().pr_candidate.clone())
     }
 
@@ -186,6 +195,26 @@ impl TaskRepository for FakeRepos {
         &self,
     ) -> Result<Option<PullRequestStatusSyncCandidate>> {
         Ok(self.state.borrow().pr_status_candidate.clone())
+    }
+
+    fn record_pull_request_branch_sync_success(
+        &mut self,
+        _candidate: &PullRequestBranchSyncCandidate,
+        pull_requests: &[GithubPullRequest],
+    ) -> Result<()> {
+        let mut state = self.state.borrow_mut();
+        state.pr_branch_success_count = pull_requests.len();
+        state.pr_branch_candidate = None;
+        Ok(())
+    }
+
+    fn record_pull_request_branch_sync_failure(
+        &mut self,
+        _candidate: &PullRequestBranchSyncCandidate,
+        _error: &str,
+    ) -> Result<()> {
+        self.state.borrow_mut().pr_branch_candidate = None;
+        Ok(())
     }
 
     fn record_pull_request_sync_success(
@@ -413,6 +442,21 @@ impl GithubGateway for FakeGithub {
         })
     }
 
+    fn fetch_pull_requests_by_branch<'a>(
+        &'a self,
+        repo: &'a str,
+        _branch: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<GithubPullRequest>>> {
+        Box::pin(async move {
+            Ok(vec![GithubPullRequest {
+                repo: repo.to_string(),
+                number: 8,
+                url: format!("https://github.com/{repo}/pull/8"),
+                status: GithubPullRequestStatus::Open,
+            }])
+        })
+    }
+
     fn fetch_pull_request<'a>(
         &'a self,
         repo: &'a str,
@@ -632,13 +676,14 @@ fn delete_issue_delegates_run_cleanup_to_git_gateway() {
     project.path = Some("/repo".to_string());
     repos.insert_project(project);
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
-    repos.start_task_run(NewTaskRun {
-        task_id: task_id.clone(),
-        agent: None,
-        branch: Some("issue-42".to_string()),
-        worktree_path: Some("/tmp/wt".to_string()),
-    })
-    .unwrap();
+    repos
+        .start_task_run(NewTaskRun {
+            task_id: task_id.clone(),
+            agent: None,
+            branch: Some("issue-42".to_string()),
+            worktree_path: Some("/tmp/wt".to_string()),
+        })
+        .unwrap();
     let git = FakeGit::default();
     let report = delete_issue(&mut repos, &git, &task_id).unwrap();
     assert_eq!(report.removed_branches, vec!["issue-42"]);
@@ -677,20 +722,24 @@ fn run_issue_uses_boundaries_and_preserves_done_task_on_settlement() {
 
     repos.mark_task(&task_id, TaskStatus::Done, None).unwrap();
     launch_agent(&mut repos, &FakeLauncher, &report).unwrap();
-    assert_eq!(repos.get_task(&task_id).unwrap().unwrap().status, TaskStatus::Done);
+    assert_eq!(
+        repos.get_task(&task_id).unwrap().unwrap().status,
+        TaskStatus::Done
+    );
 }
 
 #[test]
 fn record_claude_hook_records_waiting_transition_and_artifact() {
     let mut repos = FakeRepos::default();
     let task_id = repos.insert_task_for_run(None);
-    let run = repos.start_task_run(NewTaskRun {
-        task_id: task_id.clone(),
-        agent: Some(Agent::Claude),
-        branch: None,
-        worktree_path: None,
-    })
-    .unwrap();
+    let run = repos
+        .start_task_run(NewTaskRun {
+            task_id: task_id.clone(),
+            agent: Some(Agent::Claude),
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
     let artifacts = FakeArtifacts::default();
     let report = record_claude_hook(
         &mut repos,
@@ -709,19 +758,26 @@ fn record_claude_hook_records_waiting_transition_and_artifact() {
 }
 
 #[tokio::test]
-async fn sync_pull_requests_records_gateway_result() {
+async fn sync_pull_requests_records_branch_gateway_result_without_issue_lookup() {
     let mut repos = FakeRepos::default();
+    repos.state.borrow_mut().pr_branch_candidate = Some(PullRequestBranchSyncCandidate {
+        task_id: "MON-1".to_string(),
+        repo: "owner/repo".to_string(),
+        branch: "issue-42".to_string(),
+    });
     repos.state.borrow_mut().pr_candidate = Some(PullRequestSyncCandidate {
         task_id: "MON-1".to_string(),
         source_ref_id: 1,
         repo: "owner/repo".to_string(),
         issue_number: 42,
     });
-    let result = sync_next_linked_pull_request(&mut repos, &FakeGithub)
+    let result = sync_next_pull_request(&mut repos, &FakeGithub)
         .await
         .unwrap();
     assert_eq!(result.status, PullRequestSyncStatus::Synced);
-    assert_eq!(repos.state.borrow().pr_success_count, 1);
+    assert_eq!(repos.state.borrow().pr_branch_success_count, 1);
+    assert_eq!(repos.state.borrow().pr_success_count, 0);
+    assert_eq!(repos.state.borrow().issue_sync_candidate_lookups, 0);
 }
 
 #[test]

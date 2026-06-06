@@ -1,14 +1,56 @@
 use monica_core::{
     Agent, DisplayStatus, ExternalRef, GithubPullRequest, GithubPullRequestStatus, NewTask,
-    NewTaskRun, Project, PullRequestSyncCandidate, RefType, TaskKind, TaskRunObservation,
+    NewTaskRun, Project, PullRequestBranchSyncCandidate, RefType, TaskKind, TaskRunObservation,
     TaskRunStatus, TaskRunWaitReason, TaskStatus,
 };
+use rusqlite::params;
 use serde_json::json;
 
 use super::SqliteStore;
 
 fn dev_task(title: &str) -> NewTask {
     NewTask::new(TaskKind::Development, title)
+}
+
+fn project_task_with_branch(
+    db: &mut SqliteStore,
+    repo: &str,
+    default_branch: &str,
+    branch: &str,
+) -> (String, PullRequestBranchSyncCandidate) {
+    let mut project = Project::from_repo(repo);
+    project.default_branch = default_branch.to_string();
+    db.upsert_project(&project).unwrap();
+    let mut task = dev_task("branch backed");
+    task.project_id = Some(project.id.clone());
+    let item = db.insert_task(task).unwrap();
+    db.start_task_run(NewTaskRun {
+        task_id: item.id.clone(),
+        agent: None,
+        branch: Some(branch.to_string()),
+        worktree_path: None,
+    })
+    .unwrap();
+    (
+        item.id.clone(),
+        PullRequestBranchSyncCandidate {
+            task_id: item.id,
+            repo: repo.to_string(),
+            branch: branch.to_string(),
+        },
+    )
+}
+
+fn branch_retry_delay_seconds(db: &SqliteStore, task_id: &str) -> i64 {
+    db.conn()
+        .query_row(
+            "SELECT CAST(round((julianday(next_retry_at) - julianday(COALESCE(last_synced_at, created_at))) * 86400.0) AS INTEGER)
+             FROM github_pull_request_branch_syncs
+             WHERE task_id = ?1",
+            params![task_id],
+            |row| row.get(0),
+        )
+        .unwrap()
 }
 
 #[test]
@@ -54,7 +96,10 @@ fn task_run_agent_is_typed_and_done_task_is_not_regressed_by_finish() {
     db.mark_task(&task.id, TaskStatus::Done, None).unwrap();
     db.finish_task_run(&run.id, &task.id, TaskRunStatus::Running)
         .unwrap();
-    assert_eq!(db.get_task(&task.id).unwrap().unwrap().status, TaskStatus::Done);
+    assert_eq!(
+        db.get_task(&task.id).unwrap().unwrap().status,
+        TaskStatus::Done
+    );
 }
 
 #[test]
@@ -90,6 +135,20 @@ fn task_run_observation_records_wait_reason_and_event_metadata() {
 }
 
 #[test]
+fn migration_creates_pull_request_branch_sync_state_table() {
+    let db = SqliteStore::open_in_memory().unwrap();
+    let count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'github_pull_request_branch_syncs'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 1);
+}
+
+#[test]
 fn project_round_trip_and_summary_pr_status_stay_wire_compatible() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let mut project = Project::from_repo("owner/repo");
@@ -99,21 +158,12 @@ fn project_round_trip_and_summary_pr_status_stay_wire_compatible() {
     let mut task = dev_task("with pr");
     task.project_id = Some(project.id.clone());
     let item = db.insert_task(task).unwrap();
-    let candidate = PullRequestSyncCandidate {
+    let candidate = PullRequestBranchSyncCandidate {
         task_id: item.id.clone(),
-        source_ref_id: db
-            .save_external_ref(&ExternalRef::new(
-                &item.id,
-                RefType::GithubIssue,
-                Some("owner/repo".to_string()),
-                Some(42),
-                None,
-            ))
-            .unwrap(),
         repo: "owner/repo".to_string(),
-        issue_number: 42,
+        branch: "issue-42".to_string(),
     };
-    db.record_pull_request_sync_success(
+    db.record_pull_request_branch_sync_success(
         &candidate,
         &[GithubPullRequest {
             repo: "owner/repo".to_string(),
@@ -128,5 +178,140 @@ fn project_round_trip_and_summary_pr_status_stay_wire_compatible() {
         .list_task_summaries(Some(DisplayStatus::Inbox), Some("owner/repo"))
         .unwrap();
     assert_eq!(summaries.len(), 1);
-    assert_eq!(summaries[0].github_pull_requests[0].status.as_deref(), Some("open"));
+    assert_eq!(
+        summaries[0].github_pull_requests[0].status.as_deref(),
+        Some("open")
+    );
+}
+
+#[test]
+fn branch_pull_request_candidate_uses_latest_run_branch_and_project_repo() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let mut project = Project::from_repo("owner/repo");
+    project.default_branch = "main".to_string();
+    db.upsert_project(&project).unwrap();
+    let mut task = dev_task("latest branch");
+    task.project_id = Some(project.id.clone());
+    let item = db.insert_task(task).unwrap();
+    db.start_task_run(NewTaskRun {
+        task_id: item.id.clone(),
+        agent: None,
+        branch: Some("old-branch".to_string()),
+        worktree_path: None,
+    })
+    .unwrap();
+    db.start_task_run(NewTaskRun {
+        task_id: item.id.clone(),
+        agent: None,
+        branch: Some("feature/new-branch".to_string()),
+        worktree_path: None,
+    })
+    .unwrap();
+
+    let candidate = db
+        .next_pull_request_branch_sync_candidate()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        candidate,
+        PullRequestBranchSyncCandidate {
+            task_id: item.id,
+            repo: "owner/repo".to_string(),
+            branch: "feature/new-branch".to_string(),
+        }
+    );
+}
+
+#[test]
+fn branch_pull_request_candidate_skips_main_master_and_default_branch() {
+    for branch in ["main", "master", "trunk"] {
+        let mut db = SqliteStore::open_in_memory().unwrap();
+        project_task_with_branch(&mut db, "owner/repo", "trunk", branch);
+        assert!(db
+            .next_pull_request_branch_sync_candidate()
+            .unwrap()
+            .is_none());
+    }
+}
+
+#[test]
+fn empty_branch_pr_sync_result_defers_candidate_so_queue_can_advance() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let (first_id, first_candidate) =
+        project_task_with_branch(&mut db, "owner/repo", "main", "feature/first");
+    let (second_id, _) = project_task_with_branch(&mut db, "owner/repo", "main", "feature/second");
+
+    db.record_pull_request_branch_sync_success(&first_candidate, &[])
+        .unwrap();
+
+    let (next_retry_at, last_error) = db
+        .conn()
+        .query_row(
+            "SELECT next_retry_at, last_error FROM github_pull_request_branch_syncs WHERE task_id = ?1",
+            params![&first_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert!(next_retry_at.is_some());
+    assert_eq!(last_error, None);
+    assert!((55..=65).contains(&branch_retry_delay_seconds(&db, &first_id)));
+
+    let next = db
+        .next_pull_request_branch_sync_candidate()
+        .unwrap()
+        .unwrap();
+    assert_eq!(next.task_id, second_id);
+}
+
+#[test]
+fn branch_pr_sync_retry_policy_depends_on_result() {
+    for (status, expected_range) in [
+        (GithubPullRequestStatus::Open, 55..=65),
+        (GithubPullRequestStatus::Draft, 55..=65),
+        (GithubPullRequestStatus::Merged, 895..=905),
+        (GithubPullRequestStatus::Closed, 895..=905),
+    ] {
+        let mut db = SqliteStore::open_in_memory().unwrap();
+        let (task_id, candidate) =
+            project_task_with_branch(&mut db, "owner/repo", "main", "feature/retry");
+        db.record_pull_request_branch_sync_success(
+            &candidate,
+            &[GithubPullRequest {
+                repo: "owner/repo".to_string(),
+                number: 7,
+                url: "https://github.com/owner/repo/pull/7".to_string(),
+                status,
+            }],
+        )
+        .unwrap();
+        assert!(expected_range.contains(&branch_retry_delay_seconds(&db, &task_id)));
+    }
+}
+
+#[test]
+fn branch_pr_sync_failure_retries_after_five_minutes() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let (task_id, candidate) =
+        project_task_with_branch(&mut db, "owner/repo", "main", "feature/fails");
+    db.record_pull_request_branch_sync_failure(&candidate, "temporary GitHub failure")
+        .unwrap();
+
+    let (last_error, delay): (Option<String>, i64) = db
+        .conn()
+        .query_row(
+            "SELECT last_error,
+                    CAST(round((julianday(next_retry_at) - julianday(created_at)) * 86400.0) AS INTEGER)
+             FROM github_pull_request_branch_syncs
+             WHERE task_id = ?1",
+            params![&task_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(last_error.as_deref(), Some("temporary GitHub failure"));
+    assert!((295..=305).contains(&delay));
 }

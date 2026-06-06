@@ -12,8 +12,8 @@ pub use branch::{branch_name, monica_number, worktree_path_for};
 pub use external_ref::{ExternalRef, RefType};
 pub use github::{
     GithubAuthStatus, GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef,
-    GithubPullRequestStatus, PullRequestStatusSyncCandidate, PullRequestSyncCandidate,
-    PullRequestSyncResult, PullRequestSyncStatus,
+    GithubPullRequestStatus, PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate,
+    PullRequestSyncCandidate, PullRequestSyncResult, PullRequestSyncStatus,
 };
 pub use lifecycle::{
     is_safe_task_run_id, should_ignore_claude_event, status_for_claude_event,

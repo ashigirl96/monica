@@ -12,6 +12,11 @@ pub trait GithubGateway {
         repo: &'a str,
         issue_number: i64,
     ) -> BoxFuture<'a, Result<Vec<GithubPullRequest>>>;
+    fn fetch_pull_requests_by_branch<'a>(
+        &'a self,
+        repo: &'a str,
+        branch: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<GithubPullRequest>>>;
     fn fetch_pull_request<'a>(
         &'a self,
         repo: &'a str,

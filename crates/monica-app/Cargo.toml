@@ -13,6 +13,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", default-features = false, features = [] }
 
 [dependencies]
+log = "0.4"
 monica-core = { path = "../monica-core" }
 monica-infra = { path = "../monica-infra" }
 tauri = { version = "2", default-features = false, features = ["wry", "macos-private-api"] }
+tauri-plugin-log = "2"
+tauri-plugin-opener = { version = "2", default-features = false }

@@ -15,6 +15,7 @@ fn migrations() -> Migrations<'static> {
         M::up(V6),
         M::up(V7),
         M::up(V8),
+        M::up(V9),
     ])
 }
 
@@ -352,6 +353,24 @@ const V8: &str = r#"
            );
 "#;
 
+/// v9: track branch-driven GitHub PR discovery independently from issue-linked sync state.
+const V9: &str = r#"
+    CREATE TABLE github_pull_request_branch_syncs (
+      task_id        TEXT NOT NULL REFERENCES tasks(id),
+      repo           TEXT NOT NULL,
+      branch         TEXT NOT NULL,
+      last_synced_at TEXT,
+      last_error     TEXT,
+      next_retry_at  TEXT,
+      created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      updated_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      PRIMARY KEY (task_id, repo, branch)
+    );
+
+    CREATE INDEX github_pr_branch_syncs_retry_idx
+      ON github_pull_request_branch_syncs(next_retry_at);
+"#;
+
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
     migrations()
@@ -425,7 +444,7 @@ mod tests {
             .conn()
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
 
         std::fs::remove_file(&path).ok();
     }

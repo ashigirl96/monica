@@ -46,13 +46,6 @@ export interface GithubPullRequestRef {
 
 export type GithubPullRequestStatus = "draft" | "open" | "closed" | "merged";
 
-export interface PullRequestSyncResult {
-  status: "idle" | "synced" | "failed";
-  task_id: string | null;
-  pull_request_count: number;
-  error: string | null;
-}
-
 export interface GithubAuthStatus {
   authenticated: boolean;
   source: string;
