@@ -65,7 +65,7 @@ Issue template（`Context / Goal / Out of Scope / Acceptance Criteria / Verifica
 **計画に必ず含めるもの:**
 
 - ロジックを変更するときはテスト — 必須・例外なし
-- schema を変更するなら `migrations.rs` にマイグレーションを 1 ステップ追加（既存 migration の改変ではなく追記）。`PROGRESS.md` の M0 設計（DB=rusqlite/SQLite）と整合させる
+- schema を変更するなら `migrations.rs` にマイグレーションを 1 ステップ追加（既存 migration の改変ではなく追記）。DB=rusqlite/SQLite の設計と整合させる
 
 **計画は必ず checklist セクションで終わる**（これが実装エージェントへの契約）:
 
@@ -76,14 +76,11 @@ Issue template（`Context / Goal / Out of Scope / Acceptance Criteria / Verifica
 - [ ] テスト通過（`just test`）
 - [ ] `just check` 通過（oxlint + oxfmt --check + clippy -D warnings）— PR 前必須
 - [ ] `feature-dev:code-reviewer` でコードレビュー — 指摘を全て解消 - **monica-core 変更時:** 新規/変更した公開関数の unit test + 回帰テストを 100% 確認
-- [ ] PROGRESS.md 更新（Timeline に 1 行追記 / Todo を更新）
 - [ ] UI 動作確認（フロント変更がある場合）— `verify` skill / Tauri MCP で
 - [ ] `/create-pr` skill で PR 作成
 ```
 
 状況に応じて項目を足し引きするが、上記の該当項目は常に入れる。実装エージェントは全項目を完了してチェックを付ける義務がある。
-
-**`PROGRESS.md` 更新は monica の契約**: CLAUDE.md が「機能を追加・変更したら必ず `PROGRESS.md` を更新」と明記している。Timeline は `- YYYY-MM-DD 何をしたか（なぜ）` 形式で 1〜2 行、末尾に追記。完了した Todo は Timeline へ 1 行で移す。これを checklist から落とさない。
 
 **動作確認シナリオ（フロント変更がある場合）:**
 
@@ -186,20 +183,15 @@ Agent(subagent_type="feature-dev:code-reviewer"):
 3. `just check` 通過（PR 前必須）
 4. **コードレビュー**（`feature-dev:code-reviewer`）— 指摘を全て解消
 5. **動作確認**（フロント変更があれば）— push / PR の前に必ず
-6. **PROGRESS.md 更新**（Timeline 1 行 / Todo）
-7. commit & push → `/create-pr` skill で PR 作成
+6. commit & push → `/create-pr` skill で PR 作成
 
-動作確認・`PROGRESS.md` 更新の前に push / PR を作らない。`/create-pr` はブランチ名が純数値なら body に `close #<番号>` を自動で入れるので、ブランチ名を Issue 番号にしておけば merge 時に Issue が自動クローズされる。
+動作確認の前に push / PR を作らない。`/create-pr` はブランチ名が純数値なら body に `close #<番号>` を自動で入れるので、ブランチ名を Issue 番号にしておけば merge 時に Issue が自動クローズされる。
 
 ---
 
 ## Gotchas
 
 苦労して得た教訓。各 `/tackle` 実行前に読む — どれも見落としやすい。
-
-### `PROGRESS.md` 更新を checklist から落とさない
-
-monica の CLAUDE.md は「機能を追加・変更したら必ず `PROGRESS.md` を更新」を契約にしている。hello_pay には無い monica 固有の要求なので、プランの checklist に明示しないと実装エージェントが必ず取りこぼす。Timeline 追記は `- YYYY-MM-DD 何をしたか（なぜ）` 1 行、完了 Todo は `## Todo` から消して Timeline に移す。方向性が変わったら `## 向かう先` も直す。
 
 ### `just check` は PR 前必須
 

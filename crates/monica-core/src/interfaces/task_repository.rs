@@ -1,8 +1,8 @@
 use anyhow::Result;
 
 use crate::domain::{
-    DisplayStatus, ExternalRef, GithubPullRequest, PullRequestStatusSyncCandidate,
-    PullRequestSyncCandidate, Task, TaskStatus, TaskSummaryRow,
+    DisplayStatus, ExternalRef, GithubPullRequest, PullRequestBranchSyncCandidate,
+    PullRequestStatusSyncCandidate, PullRequestSyncCandidate, Task, TaskStatus, TaskSummaryRow,
 };
 use crate::NewTask;
 
@@ -20,10 +20,23 @@ pub trait TaskRepository {
     fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()>;
     fn mark_task(&mut self, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()>;
     fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalRef>>;
+    fn next_pull_request_branch_sync_candidate(
+        &self,
+    ) -> Result<Option<PullRequestBranchSyncCandidate>>;
     fn next_pull_request_sync_candidate(&self) -> Result<Option<PullRequestSyncCandidate>>;
     fn next_pull_request_status_sync_candidate(
         &self,
     ) -> Result<Option<PullRequestStatusSyncCandidate>>;
+    fn record_pull_request_branch_sync_success(
+        &mut self,
+        candidate: &PullRequestBranchSyncCandidate,
+        pull_requests: &[GithubPullRequest],
+    ) -> Result<()>;
+    fn record_pull_request_branch_sync_failure(
+        &mut self,
+        candidate: &PullRequestBranchSyncCandidate,
+        error: &str,
+    ) -> Result<()>;
     fn record_pull_request_sync_success(
         &mut self,
         candidate: &PullRequestSyncCandidate,

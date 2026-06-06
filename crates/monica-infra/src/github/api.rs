@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use monica_core::{GithubGateway, GithubIssue, GithubPullRequest, GithubPullRequestStatus};
 use octocrab::Octocrab;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::auth::GithubTokenProvider;
@@ -67,6 +67,34 @@ impl GithubApiClient {
                 )
             })?;
         linked_pull_requests_from_response(response)
+    }
+
+    pub async fn fetch_pull_requests_by_branch(
+        &self,
+        repo: &str,
+        branch: &str,
+    ) -> Result<Vec<GithubPullRequest>> {
+        let (owner, name) = split_repo(repo)?;
+        let route = format!("/repos/{owner}/{name}/pulls");
+        let params = PullRequestsByBranchParams {
+            state: "all",
+            head: format!("{owner}:{branch}"),
+            sort: "updated",
+            direction: "desc",
+            per_page: 100,
+        };
+        let response: Vec<BranchPullRequestResponse> = self
+            .crab()
+            .await?
+            .get(route, Some(&params))
+            .await
+            .map_err(|e| {
+                map_github_error(
+                    e,
+                    &format!("fetch pull requests for branch {repo}@{branch}"),
+                )
+            })?;
+        branch_pull_requests_from_response(repo, response)
     }
 
     pub async fn fetch_pull_request(&self, repo: &str, number: i64) -> Result<GithubPullRequest> {
@@ -135,9 +163,9 @@ fn linked_pull_requests_from_response(
     let repository = response
         .repository
         .ok_or_else(|| anyhow!("GitHub repository was not found; confirm you have access to it"))?;
-    let issue = repository
-        .issue
-        .ok_or_else(|| anyhow!("GitHub issue was not found; confirm you have access to the repository"))?;
+    let issue = repository.issue.ok_or_else(|| {
+        anyhow!("GitHub issue was not found; confirm you have access to the repository")
+    })?;
     let mut pull_requests = Vec::new();
     for node in issue.closed_by_pull_requests_references.nodes {
         let Some(node) = node else {
@@ -179,11 +207,65 @@ fn pull_request_repo(node: &PullRequestNode) -> String {
 }
 
 fn pull_request_status(state: &str, is_draft: bool) -> Result<GithubPullRequestStatus> {
+    resolve_pull_request_status(state, is_draft, None)
+}
+
+fn resolve_pull_request_status(
+    state: &str,
+    is_draft: bool,
+    merged_at: Option<&str>,
+) -> Result<GithubPullRequestStatus> {
     let state = state.to_ascii_lowercase();
     if state == "open" && is_draft {
         Ok(GithubPullRequestStatus::Draft)
+    } else if state == "closed" && merged_at.is_some_and(|value| !value.trim().is_empty()) {
+        Ok(GithubPullRequestStatus::Merged)
     } else {
         state.parse()
+    }
+}
+
+fn branch_pull_requests_from_response(
+    repo: &str,
+    response: Vec<BranchPullRequestResponse>,
+) -> Result<Vec<GithubPullRequest>> {
+    let mut candidates: Vec<(String, GithubPullRequest)> = Vec::new();
+    for node in response {
+        if node.number <= 0 {
+            continue;
+        }
+        candidates.push((
+            node.updated_at,
+            GithubPullRequest {
+                repo: repo.to_ascii_lowercase(),
+                number: node.number,
+                url: node.html_url,
+                status: resolve_pull_request_status(
+                    &node.state,
+                    node.draft,
+                    node.merged_at.as_deref(),
+                )?,
+            },
+        ));
+    }
+    Ok(candidates
+        .into_iter()
+        .max_by(|(updated_a, pr_a), (updated_b, pr_b)| {
+            branch_pull_request_rank(pr_a.status)
+                .cmp(&branch_pull_request_rank(pr_b.status))
+                .then_with(|| updated_a.cmp(updated_b))
+                .then_with(|| pr_a.number.cmp(&pr_b.number))
+        })
+        .map(|(_, pr)| pr)
+        .into_iter()
+        .collect())
+}
+
+fn branch_pull_request_rank(status: GithubPullRequestStatus) -> u8 {
+    match status {
+        GithubPullRequestStatus::Draft | GithubPullRequestStatus::Open => 3,
+        GithubPullRequestStatus::Merged => 2,
+        GithubPullRequestStatus::Closed => 1,
     }
 }
 
@@ -211,6 +293,16 @@ impl GithubGateway for GithubApiClient {
         Box::pin(async move {
             GithubApiClient::fetch_linked_pull_requests(self, repo, issue_number).await
         })
+    }
+
+    fn fetch_pull_requests_by_branch<'a>(
+        &'a self,
+        repo: &'a str,
+        branch: &'a str,
+    ) -> monica_core::interfaces::BoxFuture<'a, Result<Vec<GithubPullRequest>>> {
+        Box::pin(
+            async move { GithubApiClient::fetch_pull_requests_by_branch(self, repo, branch).await },
+        )
     }
 
     fn fetch_pull_request<'a>(
@@ -258,6 +350,26 @@ struct IssueResponse {
 #[derive(Debug, Deserialize)]
 struct RepoResponse {
     default_branch: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PullRequestsByBranchParams {
+    state: &'static str,
+    head: String,
+    sort: &'static str,
+    direction: &'static str,
+    per_page: u8,
+}
+
+#[derive(Debug, Deserialize)]
+struct BranchPullRequestResponse {
+    number: i64,
+    html_url: String,
+    state: String,
+    #[serde(default)]
+    draft: bool,
+    updated_at: String,
+    merged_at: Option<String>,
 }
 
 const LINKED_PULL_REQUESTS_QUERY: &str = r#"
@@ -354,11 +466,18 @@ mod tests {
     use monica_core::GithubPullRequestStatus;
 
     use super::{
-        issue_from_response, linked_pull_requests_from_response, pull_request_from_response,
+        branch_pull_requests_from_response, issue_from_response,
+        linked_pull_requests_from_response, pull_request_from_response,
     };
-    use super::{IssueResponse, LinkedPullRequestsResponse, PullRequestResponse};
+    use super::{
+        BranchPullRequestResponse, IssueResponse, LinkedPullRequestsResponse, PullRequestResponse,
+    };
 
     fn issue_response(value: serde_json::Value) -> IssueResponse {
+        serde_json::from_value(value).unwrap()
+    }
+
+    fn branch_pr_response(value: serde_json::Value) -> BranchPullRequestResponse {
         serde_json::from_value(value).unwrap()
     }
 
@@ -476,5 +595,108 @@ mod tests {
         assert_eq!(pull_request.repo, "o/r");
         assert_eq!(pull_request.number, 57);
         assert_eq!(pull_request.status, GithubPullRequestStatus::Open);
+    }
+
+    #[test]
+    fn extracts_branch_pull_request_status_from_rest_response() {
+        for (value, expected) in [
+            (
+                serde_json::json!({
+                    "number": 1,
+                    "html_url": "https://github.com/O/R/pull/1",
+                    "state": "open",
+                    "draft": true,
+                    "updated_at": "2026-01-01T00:00:00Z",
+                    "merged_at": null
+                }),
+                GithubPullRequestStatus::Draft,
+            ),
+            (
+                serde_json::json!({
+                    "number": 2,
+                    "html_url": "https://github.com/O/R/pull/2",
+                    "state": "open",
+                    "draft": false,
+                    "updated_at": "2026-01-01T00:00:00Z",
+                    "merged_at": null
+                }),
+                GithubPullRequestStatus::Open,
+            ),
+            (
+                serde_json::json!({
+                    "number": 3,
+                    "html_url": "https://github.com/O/R/pull/3",
+                    "state": "closed",
+                    "draft": false,
+                    "updated_at": "2026-01-01T00:00:00Z",
+                    "merged_at": "2026-01-01T00:00:00Z"
+                }),
+                GithubPullRequestStatus::Merged,
+            ),
+            (
+                serde_json::json!({
+                    "number": 4,
+                    "html_url": "https://github.com/O/R/pull/4",
+                    "state": "closed",
+                    "draft": false,
+                    "updated_at": "2026-01-01T00:00:00Z",
+                    "merged_at": null
+                }),
+                GithubPullRequestStatus::Closed,
+            ),
+        ] {
+            let pull_requests =
+                branch_pull_requests_from_response("Owner/Repo", vec![branch_pr_response(value)])
+                    .unwrap();
+            assert_eq!(pull_requests.len(), 1);
+            assert_eq!(pull_requests[0].repo, "owner/repo");
+            assert_eq!(pull_requests[0].status, expected);
+        }
+    }
+
+    #[test]
+    fn branch_pull_request_selection_prefers_active_then_recent_then_number() {
+        let pull_requests = branch_pull_requests_from_response(
+            "owner/repo",
+            vec![
+                branch_pr_response(serde_json::json!({
+                    "number": 90,
+                    "html_url": "https://github.com/owner/repo/pull/90",
+                    "state": "closed",
+                    "draft": false,
+                    "updated_at": "2030-01-01T00:00:00Z",
+                    "merged_at": null
+                })),
+                branch_pr_response(serde_json::json!({
+                    "number": 80,
+                    "html_url": "https://github.com/owner/repo/pull/80",
+                    "state": "closed",
+                    "draft": false,
+                    "updated_at": "2029-01-01T00:00:00Z",
+                    "merged_at": "2029-01-01T00:00:00Z"
+                })),
+                branch_pr_response(serde_json::json!({
+                    "number": 12,
+                    "html_url": "https://github.com/owner/repo/pull/12",
+                    "state": "open",
+                    "draft": false,
+                    "updated_at": "2026-01-01T00:00:00Z",
+                    "merged_at": null
+                })),
+                branch_pr_response(serde_json::json!({
+                    "number": 13,
+                    "html_url": "https://github.com/owner/repo/pull/13",
+                    "state": "open",
+                    "draft": true,
+                    "updated_at": "2026-01-01T00:00:00Z",
+                    "merged_at": null
+                })),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(pull_requests.len(), 1);
+        assert_eq!(pull_requests[0].number, 13);
+        assert_eq!(pull_requests[0].status, GithubPullRequestStatus::Draft);
     }
 }

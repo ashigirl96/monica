@@ -70,6 +70,13 @@ pub struct PullRequestSyncCandidate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestBranchSyncCandidate {
+    pub task_id: String,
+    pub repo: String,
+    pub branch: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullRequestStatusSyncCandidate {
     pub task_id: String,
     pub external_ref_id: i64,

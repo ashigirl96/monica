@@ -6,7 +6,6 @@ import { deleteTask, githubAuthStatus } from "./api";
 import { DeleteTaskModal } from "./DeleteTaskModal";
 import { DetailDrawer } from "./DetailDrawer";
 import { StatusRail, type StatusFilter } from "./StatusRail";
-import { usePullRequestSyncWorker } from "./usePullRequestSyncWorker";
 import { useTasks } from "./useTasks";
 import { TaskList } from "./TaskList";
 import type { GithubAuthStatus, TaskView } from "./types";
@@ -26,11 +25,6 @@ export function Dashboard() {
   const [railWidth, setRailWidth] = useState(240);
   const [resizing, setResizing] = useState(false);
   const [githubAuth, setGithubAuth] = useState<GithubAuthStatus | null>(null);
-
-  usePullRequestSyncWorker({
-    enabled: !loading && !error && githubAuth?.authenticated === true,
-    onSynced: refresh,
-  });
 
   useEffect(() => {
     let alive = true;

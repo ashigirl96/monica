@@ -26,6 +26,7 @@ build-debug:
 install-local: build install-cli
     rm -rf /Applications/Monica.app
     cp -R target/release/bundle/macos/Monica.app /Applications/Monica.app
+    codesign --force --sign "Monica" /Applications/Monica.app
     xattr -dr com.apple.quarantine /Applications/Monica.app 2>/dev/null || true
     @echo "Installed: /Applications/Monica.app"
 

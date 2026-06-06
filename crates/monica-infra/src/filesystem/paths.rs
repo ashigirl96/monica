@@ -26,6 +26,10 @@ pub fn github_auth_metadata_path() -> Result<PathBuf> {
     Ok(base_dir()?.join("auth").join("github.json"))
 }
 
+pub fn logs_dir() -> Result<PathBuf> {
+    Ok(base_dir()?.join("logs"))
+}
+
 /// Per-task-run artifact directory: `<base>/runs/<task_run_id>/` (holds `setup.log`, later session output).
 pub fn task_run_dir(task_run_id: &str) -> Result<PathBuf> {
     Ok(task_runs_dir()?.join(task_run_id))
