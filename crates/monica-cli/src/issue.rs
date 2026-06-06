@@ -44,9 +44,6 @@ pub enum IssueCommand {
     Delete {
         /// MON-<id>
         id: String,
-        /// Skip the confirmation prompt
-        #[arg(short = 'y', long)]
-        yes: bool,
     },
     /// Explicitly set a task's status/phase (e.g. `monica issue mark MON-1 in-progress`)
     Mark {
@@ -79,7 +76,7 @@ pub async fn run(cmd: IssueCommand) -> Result<()> {
             continue_session,
             fork.as_deref(),
         ),
-        IssueCommand::Delete { id, yes } => delete_command(&mut runtime, &id, yes),
+        IssueCommand::Delete { id } => delete_command(&mut runtime, &id),
         IssueCommand::Mark { id, status, note } => {
             mark_command(&mut runtime, &id, &status, note.as_deref())
         }
@@ -162,7 +159,7 @@ fn run_command(
     monica_core::launch_agent(&mut runtime.repositories, &runtime.agent_launcher, &report)
 }
 
-fn delete_command(runtime: &mut Runtime, id: &str, yes: bool) -> Result<()> {
+fn delete_command(runtime: &mut Runtime, id: &str) -> Result<()> {
     let item = monica_core::list_tasks(&runtime.repositories)?
         .into_iter()
         .find(|task| task.id == id)
@@ -173,7 +170,7 @@ fn delete_command(runtime: &mut Runtime, id: &str, yes: bool) -> Result<()> {
         .and_then(|row| row.project);
 
     print_delete_summary(&item, project.as_deref());
-    if !yes && !confirm_delete()? {
+    if !confirm_delete()? {
         println!("Canceled.");
         return Ok(());
     }

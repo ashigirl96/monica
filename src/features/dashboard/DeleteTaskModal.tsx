@@ -33,7 +33,8 @@ export function DeleteTaskModal({
         </p>
         <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
           This uses the same cleanup as <span className="font-mono">monica issue delete</span>. Run
-          worktrees may be removed, and associated local branches may be force-deleted.
+          worktrees may be moved to the rip graveyard, and associated local branches may be
+          force-deleted.
         </p>
       </header>
 
