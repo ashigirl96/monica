@@ -65,6 +65,7 @@ pub fn run() {
     let builder = builder.plugin(release_log_plugin());
 
     builder
+        .plugin(tauri_plugin_opener::init())
         .setup(|_| {
             start_pull_request_sync_scheduler();
             #[cfg(not(debug_assertions))]

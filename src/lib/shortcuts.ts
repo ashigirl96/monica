@@ -7,6 +7,7 @@ export const KEYMAP = {
   openFocusedTask: { keys: "enter", label: "タスク詳細を開く" },
   closePanel: { keys: "escape", label: "パネルを閉じる" },
   deleteFocusedTask: { keys: "mod+d", label: "タスクを削除" },
+  openContextMenu: { keys: " ", label: "コンテキストメニューを開く" },
 } as const satisfies Record<string, { keys: string | readonly string[]; label: string }>;
 
 export type ShortcutId = keyof typeof KEYMAP;
@@ -55,7 +56,11 @@ function isTaskRowTarget(target: EventTarget | null): boolean {
 
 function shouldIgnoreShortcut(id: ShortcutId, target: EventTarget | null): boolean {
   if (isEditableTarget(target)) return true;
-  if (id === "openFocusedTask" && isInteractiveTarget(target) && !isTaskRowTarget(target)) {
+  if (
+    (id === "openFocusedTask" || id === "openContextMenu") &&
+    isInteractiveTarget(target) &&
+    !isTaskRowTarget(target)
+  ) {
     return true;
   }
   return false;

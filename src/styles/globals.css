@@ -84,6 +84,17 @@
   }
 }
 
+@keyframes menu-in {
+  from {
+    transform: translateY(4px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 @keyframes scan-sweep {
   from {
     transform: translateX(-100%);
