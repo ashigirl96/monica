@@ -12,7 +12,7 @@ mod tests {
     use crate::filesystem::{paths, FsRunArtifacts};
     use crate::process::ProcessSetupRunner;
     use crate::sqlite::SqliteStore;
-    use crate::test_support::Tmp;
+    use crate::test_support::{init_repo, Tmp};
 
     use super::GitCliGateway;
 
@@ -62,15 +62,6 @@ mod tests {
         assert!(branch_exists(repo.path(), "issue-42"));
     }
 
-    fn init_repo(dir: &Path) {
-        run_git(dir, &["init", "-b", "main"]);
-        run_git(dir, &["config", "user.email", "monica@example.com"]);
-        run_git(dir, &["config", "user.name", "Monica"]);
-        std::fs::write(dir.join("README.md"), "hello\n").unwrap();
-        run_git(dir, &["add", "README.md"]);
-        run_git(dir, &["commit", "-m", "initial"]);
-    }
-
     fn branch_exists(repo: &Path, branch: &str) -> bool {
         Command::new("git")
             .arg("-C")
@@ -82,18 +73,4 @@ mod tests {
             .success()
     }
 
-    fn run_git(dir: &Path, args: &[&str]) {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "git {:?} failed: {}",
-            args,
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
 }

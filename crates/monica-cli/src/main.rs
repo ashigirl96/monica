@@ -73,3 +73,14 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn issue_delete_rejects_yes_flag() {
+        assert!(Cli::try_parse_from(["monica", "issue", "delete", "MON-1", "-y"]).is_err());
+        assert!(Cli::try_parse_from(["monica", "issue", "delete", "MON-1", "--yes"]).is_err());
+    }
+}
