@@ -700,17 +700,3 @@ Issue Runner
 この時点で owner/repo に紐づく WorkItem が作られて、Monica の ID が採番される。
 一覧は `monica issue status` で見える。
 
-まだ未実装だけど、次の段階では `monica start <...>` が worktree 作成と agent 起動の入口になる想定。
-CLI には `start` / `status` / `review` / `pr` の枠はもうあるが、現状はプレースホルダで、実体はこれから入れていく。
-
-さっきも話したけど、`/tackle` のような flow でユーザー承認待ちまで来たら、そこで Monica 側の status を `need-approval` 系へ遷移させたい。
-そのため、Claude Code hook と issue status 更新の橋渡しも早い段階で仕込みたい。
-
-1. <concept>で話していたけど、issue trackerって概念になってるけど、issueであってる？intentとかの方がいい？このあと、schedulerとか、Slackから来たメッセージで作られたりするこのデータモデルが本当にissueであってるのか不安になった。kind: "issue" でもいいかもしれないけど
-2. 上のユースケースを考えているけど、合ってそう？ repo registryを最初に作る予定だけど、その後のはMVPとして一気に作っちゃおうかなって思う
-
-## 2026-05-29
-
-Issue Runner の M0 は、SQLite storage、project registry、GitHub Issue 取り込み、status 表示、worktree 作成、setup 実行、Claude Code 起動まで実装済み。
-Claude hook bridge により SessionStart/Stop/StopFailure/UserPromptSubmit を Monica の status/event に記録でき、`issue mark`、`issue delete`、既存 Claude session の continue/fork も入った。
-次は、DB の状態を人間が見て判断できる Session Tracker / Status Dashboard を作る段階。
