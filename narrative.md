@@ -1,4 +1,7 @@
-# 2026-05-27
+# 2026-06-06
+
+この文書は、Monicaの最終的なビジョンと、現時点の実装状況の両方を残すためのもの。
+大きな構想は消さず、現在どこまでできているかは末尾の「15. 現在地」にまとめる。
 
 ## Personal Agentic Workspace for My Work, Learning, and Development
 
@@ -674,8 +677,163 @@ Monicaの本質は、
 
 ---
 
-Monicaを“全部入りアプリ”として作るのではなく、GitHub Issueを実行可能なagent taskに変換するIssue Runnerとして作る。
+## 15. 現在地: Issue RunnerとしてのMonica
 
+Monicaを最初から“全部入りアプリ”として作るのではなく、まずは **GitHub Issueを実行可能なagent taskに変換するIssue Runner** として作る。
+
+この方針はすでにコードにも反映されている。
+現時点のMonicaは、最終ビジョン全体のうち、以下の核が実装済みである。
+
+```text
+GitHub Issue
+  → Monica Task
+  → Project Registry
+  → Worktree
+  → Setup Script
+  → Claude Code Run
+  → Hook / Event Log
+  → Status Dashboard
+```
+
+つまり今できているのは、SlackやRSSやKnowledge Baseを含むPersonal Agentic Workspace全体ではなく、**GitHub Issueを起点に、repoごとの実行環境を用意し、Claude Codeに渡し、状態をMonica側で追跡するところまで**である。
+
+### 15.1 実装済みのもの
+
+Rust側は `monica-core`、`monica-infra`、`monica-cli`、`monica-app` に分かれている。
+`monica-core` はドメインモデル、ユースケース、interface traitを持ち、SQLite、GitHub、Git、filesystem、process、Keychainなどの具体実装は `monica-infra` に寄せている。
+
+永続化はSQLiteで動いている。
+現在のDBには、project registry、task、task run、event、external ref、GitHub Pull Request同期状態が保存される。
+task本体のstatusは `inbox`、`ready`、`in_progress`、`done`。
+run側のstatusは `setting_up`、`running`、`waiting_for_user`、`stopped`、`failed`。
+DashboardやCLIの表示では、task statusとrun statusを合成して現在の作業状態を見せる。
+
+CLIでは以下が実装済み。
+
+- `monica project init [owner/repo]`
+- `monica project list`
+- `monica project show <owner/repo> [--json]`
+- `monica project set <owner/repo> <key> <value>`
+- `monica auth github login`
+- `monica auth github status`
+- `monica auth github logout`
+- `monica issue track <owner/repo#123>`
+- `monica issue status [--status <status>] [--project <owner/repo>]`
+- `monica issue run <MON-id> [--claude | --agent claude]`
+- `monica issue run <MON-id> --claude --continue`
+- `monica issue run <MON-id> --claude --fork <session-id>`
+- `monica issue mark <MON-id> <status> [--note <text>]`
+- `monica issue delete <MON-id>`
+- `monica hook claude`
+- `monica completions zsh`
+
+GitHub認証はGitHub App device flowで実装されている。
+GitHub CLIのtoken storageは読まず、Monica専用のtokenをKeychainに保存する。
+開発用には `MONICA_GITHUB_TOKEN` の一時overrideも使える。
+DashboardはGitHub未認証状態を表示し、未認証時はPR同期処理を行わない。
+
+`monica project init` はrepo registryを作る。
+owner/repoは引数で渡せるし、未指定なら `git remote get-url origin` から検出する。
+default branchもローカルの `origin/HEAD` またはGitHub APIから拾う。
+さらにrepo直下に `.monica/setup.sh` と `.monica/prompt.md` を雛形として作る。
+
+`.monica/setup.sh` はworktree起動時の初期化用で、例えば `pnpm install` のようなidempotentなセットアップを想定している。
+`MONICA_TASK_ID`、`MONICA_TASK_RUN_ID`、`MONICA_PROJECT_ID`、`MONICA_BRANCH`、`MONICA_WORKTREE` などのenvを受け取れる。
+実行ログはrun artifactとして保存され、timeoutやexit codeもrun statusに反映される。
+
+`.monica/prompt.md` はagentの初回プロンプト置き場で、現状の雛形は `/tackle` を入れている。
+`monica issue run --claude` ではこのpromptをClaude Codeに渡す。
+
+`monica issue track <owner/repo#123>` はGitHub Issueを取得し、Monicaのtaskとして保存する。
+taskには `MON-<n>` のIDが採番され、GitHub Issueのtitle/body/urlと外部参照が保存される。
+該当repoがproject registryに登録済みなら、そのprojectにも紐づく。
+取り込まれたtaskは `ready` から始まる。
+
+`monica issue run <MON-id>` は、project registryからrepoの実行環境を解決し、Git worktreeを作る。
+GitHub Issueに紐づくtaskならbranchは `issue-<issue-number>`、issueがないtaskなら `mon-<MON-number>` になる。
+worktreeは通常 `<repo>/.worktrees/<branch>` に作られる。
+その後 `.monica/setup.sh` を実行し、run artifactを作り、必要ならClaude Codeを起動する。
+
+Claude Code起動時には、hook設定入りの `claude-settings.json` と `prompt.txt` がrun artifactとして生成される。
+`monica hook claude` はClaude Codeのhook callbackを受け取り、SQLiteのevent timelineと `hook-events.jsonl` に保存する。
+`SessionStart`、`UserPromptSubmit`、`Stop`、`StopFailure`、`SessionEnd` などでrun statusを更新する。
+また `AskUserQuestion` や `ExitPlanMode` の `PreToolUse` を `waiting_for_user` として検出できる。
+
+Tauri app側には、Status Dashboardが実装されている。
+現在のUIは、完全なKanban boardではなく、status rail付きのtask listである。
+taskの一覧、status別filter、詳細drawer、event timeline、GitHub Issue/PRリンク、PR status badge、削除modal、GitHub auth警告がある。
+task一覧は3秒ごとにpollingされ、Tauri command経由でSQLiteを読む。
+
+Dashboard上の操作としては、以下ができる。
+
+- statusごとの件数を見る
+- task listを開く
+- task詳細でproject、issue、branch、PR、phase、created/updated、body、event timelineを見る
+- GitHub Issueをブラウザで開く
+- linked PRをブラウザで開く
+- taskを削除する
+- GitHub未認証状態を確認する
+- `mod+1`、上下移動、`enter`、`escape`、`mod+d`、spaceなどの基本キーボード操作を使う
+
+PR同期も一部実装済みである。
+Tauri app起動中、GitHub認証がある場合は定期的にPR同期workerが動く。
+runのbranchからGitHub PRを探し、PR番号、URL、`draft` / `open` / `closed` / `merged` の軽量状態をSQLiteに保存し、Dashboardに表示する。
+
+### 15.2 まだ実装していないもの
+
+以下は、ビジョンとしては残すが、現時点では未実装または部分実装である。
+
+- 完全なKanban board
+- command palette
+- `/` での全体検索
+- `g b`、`g i`、`g t`、`g w`、`g r` のような画面遷移keybinding
+- Tauri UIからの `project init` / `issue track` / `issue run`
+- Dashboard上でのClaude Code session起動・停止・再接続
+- app内terminal
+- app内editor
+- diff viewer
+- test result viewer
+- agent summary表示
+- PR作成flow
+- review画面
+- top-levelの `monica start`、`monica status`、`monica review`、`monica pr`
+- multi-repo dashboard
+- Slack / conversation intake
+- Web / RSS / article intake
+- GitHub repo recommendation
+- Note
+- Source
+- Proposal
+- Knowledge Base / LLM Wiki
+- IntentからNote/Research/Proposal/Ticketへ分類するinbox
+- 保存された知識をrepoやtaskへ自動で関連づける仕組み
+- 朝見るべきものをまとめるdaily dashboard
+
+特に、現在のMonicaはまだ「情報収集アプリ」ではない。
+Slack、RSS、Web記事、GitHub repo recommendation、Knowledge Baseはまだ実装の中心には入っていない。
+これらは、Issue RunnerとStatus Dashboardが安定した後に拡張していく。
+
+### 15.3 今の基本フロー
+
+現時点で想定している実際の使い方はこうである。
+
+```bash
+cd /path/to/repo
+monica project init owner/repo
+monica auth github login
+monica issue track owner/repo#123
+monica issue status
+monica issue run MON-1 --claude
+```
+
+この流れで、GitHub IssueがMonica taskになり、repo registryに基づいてworktreeが作られ、setup scriptが実行され、Claude Codeが起動し、hookによってrun statusとeventがMonica側に残る。
+Tauri appを開けば、そのtaskとrunの状態をDashboardで確認できる。
+
+### 15.4 次に伸ばす順序
+
+当面のロードマップは、引き続き以下の順序で考える。
+
+```text
 Issue Runner
 → Session Tracker
 → Status Dashboard
@@ -685,18 +843,7 @@ Issue Runner
 → Slack Intake
 → Knowledge Base
 → RSS / Repo Recommendation
+```
 
-私のユースケースに合うように考え直してみた。
-最初に、repo registryの作成は必須。
-今は `monica project init [owner/repo]` で repo registry を作りつつ、その repo 直下に `.monica/setup.sh` と `.monica/prompt.md` を雛形として置く形になっている。
-`setup.sh` は worktree 起動時の初期化用で、例えば `pnpm install` のような idempotent なセットアップを想定している。
-`prompt.md` は agent の初回プロンプト置き場で、現状の雛形は `/tackle` を入れている。
-
-次にあるのは、
-
-`monica issue track <owner/repo#123>`
-
-で GitHub Issue を Monica の work item として取り込む流れ。
-この時点で owner/repo に紐づく WorkItem が作られて、Monica の ID が採番される。
-一覧は `monica issue status` で見える。
-
+ただし、すでにIssue Runner、Session Tracker、Status Dashboardの一部は実装済みである。
+次は、Dashboardから実行に介入できる範囲を増やし、CLIに残っている未実装の `review` / `pr` 系flowを具体化するのが自然である。
