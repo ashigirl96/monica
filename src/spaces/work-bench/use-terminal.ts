@@ -7,7 +7,7 @@ import "@xterm/xterm/css/xterm.css";
 import { getDefaultStore } from "jotai";
 import { ptySpawn, ptyWrite, ptyResize, onPtyOutput, onPtyExit } from "@/commands/pty";
 import { prefixActiveAtom } from "@/stores/space";
-import { terminalFontSizeAtom, zoomTerminalAtom, resetTerminalZoomAtom } from "@/stores/terminal";
+import { terminalFontSizeAtom, zoomTerminalAtom } from "@/stores/terminal";
 
 const aliveSessions = new Set<string>();
 
@@ -99,8 +99,7 @@ export function useTerminal(
     const cleanups: (() => void)[] = [];
 
     term.onData((data) => {
-      const encoded = toBase64(encoder.encode(data));
-      ptyWrite(options.tabId, encoded);
+      ptyWrite(options.tabId, toBase64(encoder.encode(data)));
     });
 
     term.onBinary((data) => {
@@ -115,6 +114,14 @@ export function useTerminal(
       optionsRef.current.onTitleChange?.(title);
     });
 
+    // Kitty keyboard protocol: respond to query (CSI ? u) and absorb push/pop
+    term.parser.registerCsiHandler({ final: "u", prefix: "?" }, () => {
+      ptyWrite(options.tabId, toBase64(encoder.encode("\x1b[?1u")));
+      return true;
+    });
+    term.parser.registerCsiHandler({ final: "u", prefix: ">" }, () => true);
+    term.parser.registerCsiHandler({ final: "u", prefix: "<" }, () => true);
+
     term.parser.registerOscHandler(7, (data: string) => {
       try {
         const url = new URL(data);
@@ -128,10 +135,16 @@ export function useTerminal(
     });
 
     term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+      if (e.shiftKey && e.key === "Enter") {
+        if (e.type === "keydown") {
+          ptyWrite(options.tabId, toBase64(encoder.encode("\x1b[13;2u")));
+        }
+        return false;
+      }
       if (store.get(prefixActiveAtom)) return false;
       if (e.altKey) return false;
       if (e.ctrlKey && e.key === "t") return false;
-      if (e.metaKey && e.key === "1") return false;
+      if (e.metaKey && /^[0-4]$/.test(e.key)) return false;
       if (e.metaKey && e.type === "keydown") {
         if (e.key === "=" || e.key === "+") {
           e.preventDefault();
@@ -141,11 +154,6 @@ export function useTerminal(
         if (e.key === "-") {
           e.preventDefault();
           store.set(zoomTerminalAtom, -1);
-          return false;
-        }
-        if (e.key === "0") {
-          e.preventDefault();
-          store.set(resetTerminalZoomAtom);
           return false;
         }
       }

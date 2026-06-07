@@ -43,6 +43,7 @@ impl PtyManager {
         let mut cmd = CommandBuilder::new("/usr/bin/env");
         cmd.arg("TERM=xterm-256color");
         cmd.arg("COLORTERM=truecolor");
+        cmd.arg("TERM_PROGRAM=WezTerm");
         cmd.arg(&shell);
         let cwd = if let Some(rest) = req.cwd.strip_prefix("~/") {
             let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
