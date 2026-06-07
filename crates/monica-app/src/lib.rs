@@ -6,6 +6,9 @@ use std::time::Duration;
 
 use monica_core::{Event, GithubAuthStatus, PullRequestSyncStatus, Task, TaskSummaryRow};
 use monica_infra::Runtime;
+use monica_pty::PtyManager;
+
+mod pty_commands;
 
 const PR_SYNC_INTERVAL: Duration = Duration::from_secs(10);
 const PR_SYNC_BATCH_LIMIT: usize = 3;
@@ -68,6 +71,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_opener::init())
+        .manage(PtyManager::new())
         .setup(|_| {
             start_pull_request_sync_scheduler();
             #[cfg(not(debug_assertions))]
@@ -83,7 +87,13 @@ pub fn run() {
             list_task_summaries,
             list_events,
             delete_task,
-            github_auth_status
+            github_auth_status,
+            pty_commands::pty_spawn,
+            pty_commands::pty_write,
+            pty_commands::pty_resize,
+            pty_commands::pty_kill,
+            pty_commands::terminal_load_state,
+            pty_commands::terminal_save_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -24,6 +24,7 @@
         "hiddenTitle": true,
         "transparent": true,
         "trafficLightPosition": { "x": 16, "y": 22 },
+        "dragDropEnabled": false,
         "windowEffects": {
           "effects": ["sidebar"],
           "state": "active"
