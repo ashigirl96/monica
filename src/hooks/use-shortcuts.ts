@@ -11,10 +11,10 @@ import {
 } from "@/stores/terminal";
 
 const META_KEY_SPACE_MAP: Record<string, SpaceId> = {
-  "2": "dashboard",
-  "3": "project",
-  "4": "work-board",
-  "0": "work-bench",
+  "1": "dashboard",
+  "2": "project",
+  "3": "work-board",
+  "4": "work-bench",
 };
 
 const PREFIX_TIMEOUT = 2000;
@@ -63,7 +63,7 @@ export function useShortcuts() {
         return;
       }
 
-      if (e.metaKey && e.key === "1") {
+      if (e.metaKey && e.key === "0") {
         e.preventDefault();
         setSidebarOpen((v) => !v);
         return;
