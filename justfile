@@ -7,7 +7,7 @@ install:
     bun install
 
 dev:
-    bun run tauri dev
+    MONICA_HOME="$HOME/monica/dev" bun run tauri dev
 
 dev-cli:
     cargo build -p monica-cli
