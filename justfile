@@ -70,5 +70,14 @@ size:
     @du -sh dist 2>/dev/null || true
     @ls -lh target/release/bundle/*/ 2>/dev/null || true
 
+kill-dev:
+    #!/usr/bin/env bash
+    pattern='(tauri dev|vite|cargo).*monica|target/debug/monica'
+    pids=$(pgrep -f "$pattern" 2>/dev/null) || { echo "no dev processes found"; exit 0; }
+    while read -r pid; do
+        cmd=$(ps -p "$pid" -o command= 2>/dev/null) && printf "  kill %s  %s\n" "$pid" "$cmd"
+    done <<< "$pids"
+    echo "$pids" | xargs kill 2>/dev/null || true
+
 clean:
     rm -rf dist node_modules target monica
