@@ -1,6 +1,6 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import { useEffect, useRef } from "react";
-import { activeSpaceAtom, prefixActiveAtom, sidebarOpenAtom } from "@/stores/space";
+import { type SpaceId, activeSpaceAtom, prefixActiveAtom, sidebarOpenAtom } from "@/stores/space";
 import { createTabAtom, closeTabAtom, cycleTabAtom } from "@/stores/tabs";
 import {
   createWorkspaceAtom,
@@ -9,6 +9,13 @@ import {
   cycleTerminalTabAtom,
   cycleWorkspaceAtom,
 } from "@/stores/terminal";
+
+const META_KEY_SPACE_MAP: Record<string, SpaceId> = {
+  "2": "dashboard",
+  "3": "project",
+  "4": "work-board",
+  "0": "work-bench",
+};
 
 const PREFIX_TIMEOUT = 2000;
 
@@ -21,6 +28,7 @@ function isEditable(e: KeyboardEvent): boolean {
 
 export function useShortcuts() {
   const activeSpace = useAtomValue(activeSpaceAtom);
+  const setActiveSpace = useSetAtom(activeSpaceAtom);
   const setSidebarOpen = useSetAtom(sidebarOpenAtom);
   const setPrefixActive = useSetAtom(prefixActiveAtom);
   const createTab = useSetAtom(createTabAtom);
@@ -58,6 +66,12 @@ export function useShortcuts() {
       if (e.metaKey && e.key === "1") {
         e.preventDefault();
         setSidebarOpen((v) => !v);
+        return;
+      }
+
+      if (e.metaKey && e.key in META_KEY_SPACE_MAP) {
+        e.preventDefault();
+        setActiveSpace(META_KEY_SPACE_MAP[e.key]);
         return;
       }
 
@@ -127,6 +141,7 @@ export function useShortcuts() {
     };
   }, [
     activeSpace,
+    setActiveSpace,
     setSidebarOpen,
     setPrefixActive,
     createTab,
