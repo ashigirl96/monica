@@ -24,7 +24,7 @@ export function WorkBenchHeader() {
   const sorted = [...ws.tabs].sort((a, b) => a.order - b.order);
 
   return (
-    <div className="flex h-full items-center gap-1" data-tauri-drag-region>
+    <div className="flex h-full items-center gap-1">
       {sorted.map((tab) => {
         const isActive = tab.id === ws.activeTabId;
         const label = tab.title || tab.cwd.split("/").pop() || "Terminal";
@@ -52,7 +52,7 @@ export function WorkBenchHeader() {
               }
               dragIdRef.current = null;
             }}
-            onClick={() => activateTab(tab.id)}
+            onPointerDown={() => activateTab(tab.id)}
             className={cn(
               "group flex h-7 w-[220px] min-w-[220px] max-w-[220px] cursor-pointer items-center rounded-lg px-3 text-xs",
               "transition-colors duration-100",

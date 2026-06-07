@@ -177,12 +177,13 @@ export const createTerminalTabAtom = atom(null, (get, set) => {
 
   const activeTab = ws.tabs.find((t) => t.id === ws.activeTabId);
   const cwd = resolveTabCwd(activeTab);
-  const maxOrder = Math.max(0, ...ws.tabs.map((t) => t.order));
-  const tab = createTab(cwd, maxOrder + 1);
+  const insertOrder = (activeTab?.order ?? -1) + 1;
+  const shifted = ws.tabs.map((t) => (t.order >= insertOrder ? { ...t, order: t.order + 1 } : t));
+  const tab = createTab(cwd, insertOrder);
 
   const updatedWs: TerminalWorkspace = {
     ...ws,
-    tabs: [...ws.tabs, tab],
+    tabs: [...shifted, tab],
     activeTabId: tab.id,
   };
 

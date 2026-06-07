@@ -166,12 +166,15 @@ export function useTerminal(
         e.preventDefault();
       }
     }
-    document.addEventListener("mousedown", blockPhantom, true);
-    document.addEventListener("pointerdown", blockPhantom, true);
-    cleanups.push(() => {
-      document.removeEventListener("mousedown", blockPhantom, true);
-      document.removeEventListener("pointerdown", blockPhantom, true);
-    });
+    const container = containerRef.current;
+    if (container) {
+      container.addEventListener("mousedown", blockPhantom, true);
+      container.addEventListener("pointerdown", blockPhantom, true);
+      cleanups.push(() => {
+        container.removeEventListener("mousedown", blockPhantom, true);
+        container.removeEventListener("pointerdown", blockPhantom, true);
+      });
+    }
 
     onPtyOutput(options.tabId, (data) => {
       term.write(fromBase64(data));

@@ -8,6 +8,7 @@ use monica_core::{Event, GithubAuthStatus, PullRequestSyncStatus, Task, TaskSumm
 use monica_infra::Runtime;
 use monica_pty::PtyManager;
 
+mod clipboard_commands;
 mod pty_commands;
 
 const PR_SYNC_INTERVAL: Duration = Duration::from_secs(10);
@@ -88,6 +89,7 @@ pub fn run() {
             list_events,
             delete_task,
             github_auth_status,
+            clipboard_commands::clipboard_write_image,
             pty_commands::pty_spawn,
             pty_commands::pty_write,
             pty_commands::pty_resize,

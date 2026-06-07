@@ -40,11 +40,15 @@ impl PtyManager {
             .context("failed to open pty")?;
 
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-        let mut cmd = CommandBuilder::new("/usr/bin/env");
-        cmd.arg("TERM=xterm-256color");
-        cmd.arg("COLORTERM=truecolor");
-        cmd.arg("TERM_PROGRAM=WezTerm");
-        cmd.arg(&shell);
+        let mut cmd = CommandBuilder::new(&shell);
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
+        cmd.env("TERM_PROGRAM", "WezTerm");
+        cmd.env(
+            "LANG",
+            std::env::var("LANG").unwrap_or_else(|_| "en_US.UTF-8".to_string()),
+        );
+        cmd.arg("--login");
         let cwd = if let Some(rest) = req.cwd.strip_prefix("~/") {
             let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
             format!("{home}/{rest}")

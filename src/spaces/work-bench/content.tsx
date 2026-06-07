@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   terminalStateAtom,
   terminalReadyAtom,
@@ -9,7 +10,22 @@ import {
   loadTerminalStateAtom,
   saveTerminalStateAtom,
 } from "@/stores/terminal";
+import { clipboardWriteImage } from "@/commands/clipboard";
+import { ptyWrite } from "@/commands/pty";
 import { useTerminal } from "./use-terminal";
+
+const IMAGE_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".heic",
+  ".tiff",
+  ".bmp",
+]);
+
+const CTRL_V_BASE64 = btoa(String.fromCharCode(0x16));
 
 function TerminalPane({ tabId, cwd, active }: { tabId: string; cwd: string; active: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -69,6 +85,30 @@ export default function WorkBenchContent() {
       saveState();
     }
   }, [ready, state, saveState]);
+
+  const activeTabIdRef = useRef<string | undefined>(undefined);
+  activeTabIdRef.current = state?.workspaces.find(
+    (ws) => ws.id === state.activeWorkspaceId,
+  )?.activeTabId;
+
+  useEffect(() => {
+    const unlisten = getCurrentWebview().onDragDropEvent((event) => {
+      if (event.payload.type !== "drop") return;
+      const tabId = activeTabIdRef.current;
+      if (!tabId) return;
+      const imagePath = event.payload.paths.find((p) => {
+        const ext = p.slice(p.lastIndexOf(".")).toLowerCase();
+        return IMAGE_EXTENSIONS.has(ext);
+      });
+      if (!imagePath) return;
+      clipboardWriteImage(imagePath).then(() => {
+        ptyWrite(tabId, CTRL_V_BASE64);
+      });
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   if (!ready || !state) return null;
 

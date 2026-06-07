@@ -35,13 +35,13 @@ export const createTabAtom = atom(null, (get, set) => {
   const state = all[space];
   const counter = state.counter + 1;
   const id = crypto.randomUUID();
+  const activeIdx = state.tabs.findIndex((t) => t.id === state.activeTabId);
+  const insertIdx = activeIdx === -1 ? state.tabs.length : activeIdx + 1;
+  const tabs = [...state.tabs];
+  tabs.splice(insertIdx, 0, { id, label: `Tab ${counter}` });
   set(tabsBySpaceAtom, {
     ...all,
-    [space]: {
-      tabs: [...state.tabs, { id, label: `Tab ${counter}` }],
-      activeTabId: id,
-      counter,
-    },
+    [space]: { tabs, activeTabId: id, counter },
   });
 });
 
