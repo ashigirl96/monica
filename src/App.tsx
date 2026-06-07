@@ -1,7 +1,7 @@
-import { Dashboard } from "@/features/dashboard/Dashboard";
+import { AppLayout } from "@/app/layout";
 
 function App() {
-  return <Dashboard />;
+  return <AppLayout />;
 }
 
 export default App;

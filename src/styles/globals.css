@@ -4,6 +4,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  --content-bg: oklch(0.95 0 0);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -27,6 +28,7 @@
 }
 
 .dark {
+  --content-bg: oklch(0.16 0 0 / 0.92);
   --background: oklch(0.209 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -46,62 +48,6 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
-}
-
-/* Mission Control status accents. Tuned for the dark base; live states sit at higher chroma. */
-:root {
-  --st-running: oklch(0.78 0.18 150);
-  --st-waiting: oklch(0.82 0.16 80);
-  --st-setup: oklch(0.74 0.15 240);
-  --st-progress: oklch(0.7 0.1 150);
-  --st-ready: oklch(0.72 0.07 240);
-  --st-inbox: oklch(0.65 0.03 240);
-  --st-failed: oklch(0.7 0.2 22);
-  --st-stopped: oklch(0.6 0.02 0);
-  --st-done: oklch(0.72 0.12 180);
-}
-
-@keyframes led-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    box-shadow: 0 0 0 0 var(--led-glow, transparent);
-  }
-  50% {
-    opacity: 0.55;
-    box-shadow: 0 0 6px 1px var(--led-glow, transparent);
-  }
-}
-
-@keyframes drawer-in {
-  from {
-    transform: translateX(16px);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-
-@keyframes menu-in {
-  from {
-    transform: translateY(4px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-@keyframes scan-sweep {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(100%);
-  }
 }
 
 @theme inline {
@@ -142,4 +88,12 @@
       -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans",
       "Helvetica Neue", sans-serif;
   }
+}
+
+.content-panel {
+  background: var(--content-bg);
+  box-shadow:
+    0 0 0 1px oklch(1 0 0 / 0.06),
+    0 2px 8px oklch(0 0 0 / 0.3),
+    0 8px 24px oklch(0 0 0 / 0.15);
 }

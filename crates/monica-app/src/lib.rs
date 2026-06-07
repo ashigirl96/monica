@@ -61,6 +61,8 @@ fn github_auth_status() -> Result<GithubAuthStatus, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
+    #[cfg(debug_assertions)]
+    let builder = builder.plugin(tauri_plugin_mcp_bridge::init());
     #[cfg(not(debug_assertions))]
     let builder = builder.plugin(release_log_plugin());
 

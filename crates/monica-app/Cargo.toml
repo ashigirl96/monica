@@ -18,4 +18,5 @@ monica-core = { path = "../monica-core" }
 monica-infra = { path = "../monica-infra" }
 tauri = { version = "2", default-features = false, features = ["wry", "macos-private-api"] }
 tauri-plugin-log = "2"
+tauri-plugin-mcp-bridge = { version = "0.11", default-features = false }
 tauri-plugin-opener = { version = "2", default-features = false }
