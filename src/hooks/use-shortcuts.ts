@@ -1,0 +1,141 @@
+import { useAtomValue, useSetAtom } from "jotai";
+import { useEffect, useRef } from "react";
+import { activeSpaceAtom, prefixActiveAtom, sidebarOpenAtom } from "@/stores/space";
+import { createTabAtom, closeTabAtom, cycleTabAtom } from "@/stores/tabs";
+import {
+  createWorkspaceAtom,
+  createTerminalTabAtom,
+  closeTerminalTabAtom,
+  cycleTerminalTabAtom,
+  cycleWorkspaceAtom,
+} from "@/stores/terminal";
+
+const PREFIX_TIMEOUT = 2000;
+
+const EDITABLE_SELECTOR = "input, textarea, select, [contenteditable='true'], [contenteditable='']";
+
+function isEditable(e: KeyboardEvent): boolean {
+  const el = e.target;
+  return el instanceof HTMLElement && el.closest(EDITABLE_SELECTOR) !== null;
+}
+
+export function useShortcuts() {
+  const activeSpace = useAtomValue(activeSpaceAtom);
+  const setSidebarOpen = useSetAtom(sidebarOpenAtom);
+  const setPrefixActive = useSetAtom(prefixActiveAtom);
+  const createTab = useSetAtom(createTabAtom);
+  const closeTab = useSetAtom(closeTabAtom);
+  const cycleTab = useSetAtom(cycleTabAtom);
+  const createWorkspace = useSetAtom(createWorkspaceAtom);
+  const createTerminalTab = useSetAtom(createTerminalTabAtom);
+  const closeTerminalTab = useSetAtom(closeTerminalTabAtom);
+  const cycleTerminalTab = useSetAtom(cycleTerminalTabAtom);
+  const cycleWorkspace = useSetAtom(cycleWorkspaceAtom);
+
+  const prefixRef = useRef(false);
+  const timeoutRef = useRef<number>(0);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const isWorkBench = activeSpace === "work-bench";
+      const editable = isEditable(e);
+
+      if (prefixRef.current) {
+        prefixRef.current = false;
+        setPrefixActive(false);
+        clearTimeout(timeoutRef.current);
+        if (e.key === "c") {
+          e.preventDefault();
+          if (isWorkBench) {
+            createTerminalTab();
+          } else {
+            createTab();
+          }
+        }
+        return;
+      }
+
+      if (e.metaKey && e.key === "1") {
+        e.preventDefault();
+        setSidebarOpen((v) => !v);
+        return;
+      }
+
+      if (e.altKey && e.code === "KeyP") {
+        e.preventDefault();
+        if (isWorkBench) createWorkspace();
+        return;
+      }
+
+      if (e.altKey && e.code === "KeyJ") {
+        e.preventDefault();
+        if (isWorkBench) cycleWorkspace("down");
+        return;
+      }
+
+      if (e.altKey && e.code === "KeyK") {
+        e.preventDefault();
+        if (isWorkBench) cycleWorkspace("up");
+        return;
+      }
+
+      if (e.ctrlKey && e.key === "t") {
+        e.preventDefault();
+        prefixRef.current = true;
+        setPrefixActive(true);
+        timeoutRef.current = window.setTimeout(() => {
+          prefixRef.current = false;
+          setPrefixActive(false);
+        }, PREFIX_TIMEOUT);
+        return;
+      }
+
+      if (editable && !e.altKey) return;
+
+      if (e.ctrlKey && e.key === "d") {
+        if (isWorkBench) return;
+        e.preventDefault();
+        closeTab();
+        return;
+      }
+
+      if (e.altKey && e.code === "KeyH") {
+        e.preventDefault();
+        if (isWorkBench) {
+          cycleTerminalTab("left");
+        } else {
+          cycleTab("left");
+        }
+        return;
+      }
+
+      if (e.altKey && e.code === "KeyL") {
+        e.preventDefault();
+        if (isWorkBench) {
+          cycleTerminalTab("right");
+        } else {
+          cycleTab("right");
+        }
+        return;
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      clearTimeout(timeoutRef.current);
+    };
+  }, [
+    activeSpace,
+    setSidebarOpen,
+    setPrefixActive,
+    createTab,
+    closeTab,
+    cycleTab,
+    createWorkspace,
+    createTerminalTab,
+    closeTerminalTab,
+    cycleTerminalTab,
+    cycleWorkspace,
+  ]);
+}

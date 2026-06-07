@@ -16,6 +16,7 @@ fn migrations() -> Migrations<'static> {
         M::up(V7),
         M::up(V8),
         M::up(V9),
+        M::up(V10),
     ])
 }
 
@@ -371,6 +372,28 @@ const V9: &str = r#"
       ON github_pull_request_branch_syncs(next_retry_at);
 "#;
 
+/// v10: terminal workspace/tab persistence for Work Bench.
+const V10: &str = r#"
+    CREATE TABLE terminal_workspaces (
+      id         TEXT PRIMARY KEY,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      is_active  INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    );
+
+    CREATE TABLE terminal_tabs (
+      id           TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES terminal_workspaces(id) ON DELETE CASCADE,
+      cwd          TEXT NOT NULL,
+      title        TEXT NOT NULL DEFAULT '',
+      sort_order   INTEGER NOT NULL DEFAULT 0,
+      is_active    INTEGER NOT NULL DEFAULT 0,
+      created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    );
+
+    CREATE INDEX terminal_tabs_workspace_idx ON terminal_tabs(workspace_id, sort_order);
+"#;
+
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
     migrations()
@@ -444,7 +467,7 @@ mod tests {
             .conn()
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
 
         std::fs::remove_file(&path).ok();
     }

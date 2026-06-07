@@ -12,6 +12,8 @@ mod store;
 #[cfg(test)]
 mod tests;
 
+pub use store::terminal::{TerminalStateSnapshot, TerminalTabRow, TerminalWorkspaceRow};
+
 /// A handle to Monica's SQLite store. Opening always runs pending migrations.
 pub struct SqliteStore {
     conn: Connection,
