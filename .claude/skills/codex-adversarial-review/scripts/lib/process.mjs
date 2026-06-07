@@ -9,8 +9,8 @@ export function runCommand(command, args = [], options = {}) {
     input: options.input,
     maxBuffer: options.maxBuffer,
     stdio: options.stdio ?? "pipe",
-    shell: process.platform === "win32" ? (process.env.SHELL || true) : false,
-    windowsHide: true
+    shell: process.platform === "win32" ? process.env.SHELL || true : false,
+    windowsHide: true,
   });
 
   return {
@@ -20,7 +20,7 @@ export function runCommand(command, args = [], options = {}) {
     signal: result.signal ?? null,
     stdout: result.stdout ?? "",
     stderr: result.stderr ?? "",
-    error: result.error ?? null
+    error: result.error ?? null,
   };
 }
 
@@ -66,7 +66,7 @@ export function terminateProcessTree(pid, options = {}) {
   if (platform === "win32") {
     const result = runCommandImpl("taskkill", ["/PID", String(pid), "/T", "/F"], {
       cwd: options.cwd,
-      env: options.env
+      env: options.env,
     });
 
     if (!result.error && result.status === 0) {

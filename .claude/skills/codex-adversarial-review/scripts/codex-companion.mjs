@@ -18,7 +18,7 @@ const REVIEW_SCHEMA = path.join(ROOT_DIR, "schemas", "review-output.schema.json"
 function printUsage() {
   console.log(
     "Usage:\n" +
-      "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <model>] [focus text]"
+      "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <model>] [focus text]",
   );
 }
 
@@ -36,8 +36,8 @@ function parseCommandInput(argv) {
     booleanOptions: ["background", "wait"],
     aliasMap: {
       C: "cwd",
-      m: "model"
-    }
+      m: "model",
+    },
   });
 }
 
@@ -58,7 +58,7 @@ function buildAdversarialReviewPrompt(context, focusText) {
     TARGET_LABEL: context.target.label,
     USER_FOCUS: focusText || "No extra focus provided.",
     REVIEW_COLLECTION_GUIDANCE: context.collectionGuidance,
-    REVIEW_INPUT: context.content
+    REVIEW_INPUT: context.content,
   });
 }
 
@@ -74,7 +74,7 @@ function runCodexReview(repoRoot, prompt, options = {}) {
     "--output-schema",
     REVIEW_SCHEMA,
     "--output-last-message",
-    outputPath
+    outputPath,
   ];
 
   if (options.model) {
@@ -88,7 +88,7 @@ function runCodexReview(repoRoot, prompt, options = {}) {
     encoding: "utf8",
     input: prompt,
     maxBuffer: 64 * 1024 * 1024,
-    stdio: ["pipe", "pipe", "pipe"]
+    stdio: ["pipe", "pipe", "pipe"],
   });
 
   const finalMessage = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, "utf8").trim() : "";
@@ -98,21 +98,23 @@ function runCodexReview(repoRoot, prompt, options = {}) {
     throw result.error;
   }
   if (result.status !== 0 && !finalMessage) {
-    throw new Error(formatCommandFailure({
-      command: "codex",
-      args,
-      status: result.status ?? 1,
-      signal: result.signal ?? null,
-      stdout: result.stdout ?? "",
-      stderr: result.stderr ?? "",
-      error: null
-    }));
+    throw new Error(
+      formatCommandFailure({
+        command: "codex",
+        args,
+        status: result.status ?? 1,
+        signal: result.signal ?? null,
+        stdout: result.stdout ?? "",
+        stderr: result.stderr ?? "",
+        error: null,
+      }),
+    );
   }
 
   return {
     status: result.status ?? 0,
     stderr: result.stderr ?? "",
-    finalMessage
+    finalMessage,
   };
 }
 
@@ -128,7 +130,7 @@ function parseStructuredOutput(finalMessage) {
     return {
       parsed: null,
       rawOutput,
-      parseError: error instanceof Error ? error.message : String(error)
+      parseError: error instanceof Error ? error.message : String(error),
     };
   }
 }
@@ -153,7 +155,7 @@ function renderReviewResult(parsedResult, targetLabel) {
       "",
       "Codex did not return valid structured JSON.",
       "",
-      `- Parse error: ${parsedResult.parseError}`
+      `- Parse error: ${parsedResult.parseError}`,
     ];
 
     if (parsedResult.rawOutput) {
@@ -165,7 +167,9 @@ function renderReviewResult(parsedResult, targetLabel) {
 
   const data = parsedResult.parsed;
   const findings = Array.isArray(data.findings)
-    ? [...data.findings].sort((left, right) => severityRank(left.severity) - severityRank(right.severity))
+    ? [...data.findings].sort(
+        (left, right) => severityRank(left.severity) - severityRank(right.severity),
+      )
     : [];
   const lines = [
     "# Codex Adversarial Review",
@@ -174,7 +178,7 @@ function renderReviewResult(parsedResult, targetLabel) {
     `Verdict: ${data.verdict ?? "unknown"}`,
     "",
     String(data.summary ?? "").trim() || "(no summary)",
-    ""
+    "",
   ];
 
   if (findings.length === 0) {
@@ -183,7 +187,9 @@ function renderReviewResult(parsedResult, targetLabel) {
     lines.push("Findings:");
     for (const finding of findings) {
       const lineSuffix = formatLineRange(finding);
-      lines.push(`- [${finding.severity ?? "unknown"}] ${finding.title ?? "(untitled)"} (${finding.file ?? "unknown"}${lineSuffix})`);
+      lines.push(
+        `- [${finding.severity ?? "unknown"}] ${finding.title ?? "(untitled)"} (${finding.file ?? "unknown"}${lineSuffix})`,
+      );
       if (finding.body) {
         lines.push(`  ${finding.body}`);
       }
@@ -212,13 +218,13 @@ async function handleAdversarialReview(argv) {
 
   const target = resolveReviewTarget(cwd, {
     base: options.base,
-    scope: options.scope
+    scope: options.scope,
   });
   const context = collectReviewContext(cwd, target);
   const focusText = positionals.join(" ").trim();
   const prompt = buildAdversarialReviewPrompt(context, focusText);
   const result = runCodexReview(context.repoRoot, prompt, {
-    model: options.model
+    model: options.model,
   });
   const parsed = parseStructuredOutput(result.finalMessage);
 
