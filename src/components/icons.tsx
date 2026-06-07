@@ -20,7 +20,10 @@ function Icon({ size = 18, ...props }: IconProps) {
 export function DashboardIcon(props: IconProps) {
   return (
     <Icon {...props}>
-      <path d="M3 10.5L12 3L21 10.5V20C21 20.6 20.6 21 20 21H4C3.4 21 3 20.6 3 20V10.5Z" strokeWidth="1.5" />
+      <path
+        d="M3 10.5L12 3L21 10.5V20C21 20.6 20.6 21 20 21H4C3.4 21 3 20.6 3 20V10.5Z"
+        strokeWidth="1.5"
+      />
       <path d="M9 21V14H15V21" strokeWidth="1.5" />
     </Icon>
   );

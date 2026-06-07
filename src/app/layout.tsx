@@ -1,3 +1,4 @@
+import { Suspense, useRef } from "react";
 import { useAtomValue } from "jotai";
 import {
   activeSpaceAtom,
@@ -6,10 +7,9 @@ import {
   sidebarResizingAtom,
   SPACE_NAV_WIDTH,
 } from "@/stores/space";
-import { getSpaceConfig } from "@/spaces/registry";
+import { getSpaceConfig, spaces } from "@/spaces/registry";
 import { SpaceNav } from "@/components/space-nav";
 import { ResizeHandle } from "@/components/resize-handle";
-import { TabBar } from "@/components/tab-bar";
 import { useShortcuts } from "@/hooks/use-shortcuts";
 import { TRAFFIC_LIGHT_ZONE_HEIGHT, TRAFFIC_LIGHT_ZONE_WIDTH } from "@/lib/layout";
 import { cn } from "@/lib/utils";
@@ -24,7 +24,14 @@ export function AppLayout() {
   const space = getSpaceConfig(activeSpace);
 
   const Sidebar = space.sidebar;
+  const Header = space.header;
   const Content = space.content;
+
+  const visitedRef = useRef(new Set<string>());
+  visitedRef.current.add(activeSpace);
+
+  const activePersistent = space.persistent;
+  const persistentSpaces = spaces.filter((s) => s.persistent && visitedRef.current.has(s.id));
 
   const hasSidebar = sidebarOpen && !!Sidebar;
   const leftPanelWidth = !sidebarOpen
@@ -45,9 +52,7 @@ export function AppLayout() {
         <div
           className="flex h-full"
           style={{
-            minWidth: Sidebar
-              ? SPACE_NAV_WIDTH + sidebarWidth
-              : SPACE_NAV_WIDTH,
+            minWidth: Sidebar ? SPACE_NAV_WIDTH + sidebarWidth : SPACE_NAV_WIDTH,
           }}
         >
           <SpaceNav />
@@ -72,18 +77,40 @@ export function AppLayout() {
         <div
           className="flex h-10 flex-shrink-0 items-center transition-[padding] duration-200 ease-out"
           style={{
-            paddingLeft: Math.max(16, TRAFFIC_LIGHT_ZONE_WIDTH - leftPanelWidth),
-            paddingRight: 16,
+            paddingLeft: Math.max(8, TRAFFIC_LIGHT_ZONE_WIDTH - leftPanelWidth),
+            paddingRight: 8,
           }}
           data-tauri-drag-region
         >
-          <TabBar />
+          <Header />
         </div>
 
-        <div className="min-h-0 flex-1 p-2 pt-0">
-          <div className="content-panel h-full select-text overflow-auto rounded-xl">
-            <Content />
-          </div>
+        <div className="relative min-h-0 flex-1 p-2 pt-0">
+          {!activePersistent && (
+            <div className="content-panel h-full select-text overflow-auto rounded-xl">
+              <Suspense>
+                <Content />
+              </Suspense>
+            </div>
+          )}
+
+          {persistentSpaces.map((s) => {
+            const isActive = s.id === activeSpace;
+            return (
+              <div
+                key={s.id}
+                className={isActive ? "h-full" : "absolute inset-x-2 bottom-2 top-0"}
+                style={isActive ? undefined : { opacity: 0, pointerEvents: "none" }}
+                {...(isActive ? {} : { inert: true })}
+              >
+                <div className="content-panel h-full overflow-hidden">
+                  <Suspense>
+                    <s.content />
+                  </Suspense>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

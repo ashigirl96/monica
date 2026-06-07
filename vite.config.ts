@@ -53,6 +53,7 @@ export default defineConfig(({ mode }) => ({
         },
         manualChunks(id) {
           if (!id.includes("node_modules")) return;
+          if (id.includes("@xterm/")) return "xterm";
           if (id.includes("@radix-ui/")) return "radix";
           if (id.includes("react-dom")) return "react-dom";
         },

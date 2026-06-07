@@ -1,10 +1,5 @@
 import { useAtomValue, useSetAtom } from "jotai";
-import {
-  activeTabsAtom,
-  activateTabAtom,
-  closeTabAtom,
-  createTabAtom,
-} from "@/stores/tabs";
+import { activeTabsAtom, activateTabAtom, closeTabAtom, createTabAtom } from "@/stores/tabs";
 import { PlusIcon, XIcon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 

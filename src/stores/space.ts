@@ -11,3 +11,4 @@ export const activeSpaceAtom = atom<SpaceId>("dashboard");
 export const sidebarOpenAtom = atom(true);
 export const sidebarWidthAtom = atom(SIDEBAR_DEFAULT_WIDTH);
 export const sidebarResizingAtom = atom(false);
+export const prefixActiveAtom = atom(false);
