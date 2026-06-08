@@ -5,6 +5,9 @@ pre-commit:
       run: bunx oxlint
     fmt-check:
       run: bunx oxfmt --check
+    db-validate:
+      glob: "crates/monica-infra/src/sqlite/{schema.sql,migrations/*}"
+      run: just db-validate
 
 pre-push:
   commands:

@@ -6,7 +6,7 @@ default:
 install:
     bun install
 
-dev:
+dev: db-validate
     MONICA_HOME="$HOME/monica/dev" bun run tauri dev
 
 dev-cli:
@@ -17,7 +17,7 @@ dev-cli:
     mkdir -p ~/.zsh/completions
     ./monica completions zsh > ~/.zsh/completions/_monica
 
-build:
+build: db-validate
     bun run tauri build --bundles app
 
 build-debug:
@@ -78,6 +78,29 @@ kill-dev:
         cmd=$(ps -p "$pid" -o command= 2>/dev/null) && printf "  kill %s  %s\n" "$pid" "$cmd"
     done <<< "$pids"
     echo "$pids" | xargs kill 2>/dev/null || true
+
+db-diff name:
+    atlas migrate diff {{name}} --env local
+
+# Atlas Pro required. Run `atlas login` first.
+db-lint:
+    atlas migrate lint --env local --latest 1
+
+db-validate:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    atlas migrate validate --env local
+    fmt="$(printf '{%s sql . "  " %s}' '{' '}')"
+    diff=$(atlas schema diff --from "file://crates/monica-infra/src/sqlite/migrations" --to "file://crates/monica-infra/src/sqlite/schema.sql" --dev-url "sqlite://dev?mode=memory&_fk=1" --format "$fmt" 2>&1) || true
+    if [ -n "$diff" ]; then
+      echo "ERROR: schema.sql and migrations are out of sync. Run 'just db-diff <name>'."
+      echo "$diff"
+      exit 1
+    fi
+    echo "OK: schema.sql and migrations are in sync."
+
+db-hash:
+    atlas migrate hash --dir "file://crates/monica-infra/src/sqlite/migrations"
 
 clean:
     rm -rf dist node_modules target monica

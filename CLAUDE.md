@@ -15,6 +15,9 @@ just build         # release ビルド (.app のみ。配布物は CI で生成)
 just install-app   # .app をビルドして /Applications/Monica.app に配置
 just check         # lint + fmt-check + cargo clippy (PR 前必須)
 just test          # cargo test --workspace
+just db-diff <name> # schema.sql からマイグレーション生成
+just db-validate   # マイグレーション整合性 + schema.sql 同期検証
+just db-hash       # atlas.sum 再計算（マイグレーション手動編集後）
 just analyze       # dist/stats.html で chunk を可視化
 just bloat         # Rust 依存サイズ内訳
 just size          # dist/ と bundle/ のサイズ表示
@@ -23,3 +26,5 @@ just size          # dist/ と bundle/ のサイズ表示
 ## コード規約
 
 - コメントは「なぜ」が非自明な場合のみ。
+- SQLite スキーマの Source of Truth は `crates/monica-infra/src/sqlite/schema.sql`。
+  変更後は `just db-diff <name>` でマイグレーション生成、`just db-validate` で検証を通す。
