@@ -11,6 +11,14 @@ import { terminalFontSizeAtom, zoomTerminalAtom } from "@/stores/terminal";
 
 const aliveSessions = new Set<string>();
 
+const PIXELS_PER_LINE = 20;
+
+function buildSgrWheelSequence(lines: number, down: boolean, col: number, row: number): string {
+  const code = down ? 65 : 64;
+  const event = `\x1b[<${code};${col};${row}M`;
+  return event.repeat(lines);
+}
+
 export function markSessionDead(tabId: string) {
   aliveSessions.delete(tabId);
 }
@@ -59,7 +67,7 @@ export function useTerminal(
       lineHeight: 1.2,
       cursorBlink: true,
       cursorStyle: "bar",
-      allowTransparency: true,
+      allowTransparency: false,
       allowProposedApi: true,
       scrollback: 5000,
       theme: {
@@ -166,13 +174,43 @@ export function useTerminal(
         e.preventDefault();
       }
     }
+
+    let scrollAccumulator = 0;
+
+    function onWheel(e: WheelEvent) {
+      if (term.buffer.active.type !== "alternate") return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const delta = e.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? e.deltaY * PIXELS_PER_LINE
+        : e.deltaY;
+
+      scrollAccumulator += delta;
+
+      const lines = Math.trunc(scrollAccumulator / PIXELS_PER_LINE);
+      if (lines === 0) return;
+
+      scrollAccumulator -= lines * PIXELS_PER_LINE;
+
+      const absLines = Math.min(Math.abs(lines), term.rows);
+      const down = lines > 0;
+      const col = Math.floor(term.cols / 2);
+      const row = Math.floor(term.rows / 2);
+      const seq = buildSgrWheelSequence(absLines, down, col, row);
+      ptyWrite(options.tabId, toBase64(encoder.encode(seq)));
+    }
+
     const container = containerRef.current;
     if (container) {
       container.addEventListener("mousedown", blockPhantom, true);
       container.addEventListener("pointerdown", blockPhantom, true);
+      container.addEventListener("wheel", onWheel, { capture: true });
       cleanups.push(() => {
         container.removeEventListener("mousedown", blockPhantom, true);
         container.removeEventListener("pointerdown", blockPhantom, true);
+        container.removeEventListener("wheel", onWheel, { capture: true } as EventListenerOptions);
       });
     }
 
