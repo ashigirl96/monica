@@ -9,13 +9,13 @@ monica-core = { path = "../monica-core" }
 anyhow = "1.0.102"
 rusqlite = { version = "0.39", features = ["bundled"] }
 rusqlite_migration = "2.5.0"
-octocrab = { version = "0.51.0", default-features = false, features = [
+octocrab = { version = "0.53.0", default-features = false, features = [
   "default-client",
   "jwt-rust-crypto",
   "rustls",
   "rustls-ring",
 ] }
-reqwest = { version = "0.13.3", default-features = false, features = [
+reqwest = { version = "0.13.4", default-features = false, features = [
   "form",
   "json",
   "rustls-no-provider",
