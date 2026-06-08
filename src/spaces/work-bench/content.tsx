@@ -59,7 +59,7 @@ function TerminalPane({ tabId, cwd, active }: { tabId: string; cwd: string; acti
       ref={containerRef}
       className="absolute inset-0"
       style={{
-        background: "#222436",
+        background: "#1d1f21",
         visibility: active ? "visible" : "hidden",
         pointerEvents: active ? "auto" : "none",
       }}

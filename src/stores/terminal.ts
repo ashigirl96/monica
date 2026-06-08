@@ -7,7 +7,7 @@ import {
 } from "@/commands/pty";
 import { markSessionDead } from "@/spaces/work-bench/use-terminal";
 
-const FONT_SIZE_DEFAULT = 13;
+const FONT_SIZE_DEFAULT = 15;
 const FONT_SIZE_MIN = 10;
 const FONT_SIZE_MAX = 28;
 
