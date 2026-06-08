@@ -8,5 +8,7 @@ pre-commit:
 
 pre-push:
   commands:
+    db-validate:
+      run: just db-validate
     clippy:
       run: cargo clippy --workspace --all-targets -- -D warnings

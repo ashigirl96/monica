@@ -59,6 +59,16 @@ check: lint fmt-check
 test:
     cargo test --workspace
 
+db-validate:
+    atlas schema validate --env local
+    atlas migrate validate --env local --dev-url "sqlite://dev?mode=memory&_fk=1"
+
+db-migrate-diff name:
+    atlas migrate diff {{name}} --env local --to env://src
+
+db-inspect-schema:
+    atlas schema inspect --env local --url env://src --format "$(printf '{%s sql . %s}' '{' '}')"
+
 analyze:
     bun --bun vite build --mode analyze
     @echo "open dist/stats.html"

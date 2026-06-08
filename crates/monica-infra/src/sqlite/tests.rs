@@ -135,7 +135,7 @@ fn task_run_observation_records_wait_reason_and_event_metadata() {
 }
 
 #[test]
-fn migration_creates_pull_request_branch_sync_state_table() {
+fn schema_bootstrap_creates_pull_request_branch_sync_state_table() {
     let db = SqliteStore::open_in_memory().unwrap();
     let count: i64 = db
         .conn()

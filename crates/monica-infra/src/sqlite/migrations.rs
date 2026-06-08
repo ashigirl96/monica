@@ -1,771 +1,496 @@
-use anyhow::{Context, Result};
-use rusqlite::Connection;
-use rusqlite_migration::{Migrations, M};
+use std::collections::{HashMap, HashSet};
 
-/// Ordered schema migrations, tracked by `PRAGMA user_version` (rusqlite_migration
-/// uses the list position as the version). Append an `M::up(...)` to add a version;
-/// never reorder or remove existing entries, or already-migrated databases diverge.
-fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![
-        M::up(V1),
-        M::up(V2),
-        M::up(V3),
-        M::up(V4),
-        M::up(V5),
-        M::up(V6),
-        M::up(V7),
-        M::up(V8),
-        M::up(V9),
-        M::up(V10),
-        M::up(V11),
-    ])
+use anyhow::{bail, Context, Result};
+use rusqlite::{Connection, OptionalExtension, Transaction};
+
+const LEGACY_SQUASHED_SCHEMA_VERSION: i64 = 1;
+const MIGRATION_HISTORY_TABLE: &str = "monica_schema_migrations";
+const MIGRATION_HISTORY_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS monica_schema_migrations (
+  version    INTEGER PRIMARY KEY,
+  name       TEXT NOT NULL,
+  checksum   TEXT NOT NULL,
+  applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+"#;
+
+struct Migration {
+    version: i64,
+    name: &'static str,
+    sql: &'static str,
 }
 
-/// v1: storage foundation (work items, runs, events, external refs) + MON-id counter.
-const V1: &str = r#"
-    CREATE TABLE mon_counter (n INTEGER PRIMARY KEY AUTOINCREMENT);
+include!(concat!(env!("OUT_DIR"), "/sqlite_migrations.rs"));
 
-    CREATE TABLE work_items (
-      id           TEXT PRIMARY KEY,
-      kind         TEXT NOT NULL,
-      status       TEXT NOT NULL,
-      phase        TEXT,
-      title        TEXT NOT NULL,
-      body         TEXT NOT NULL DEFAULT '',
-      project_id   TEXT,
-      labels       TEXT NOT NULL DEFAULT '[]',
-      details_json TEXT NOT NULL DEFAULT '{}',
-      source_json  TEXT,
-      created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-      updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-    );
+const MONICA_INDEXES: &[&str] = &[
+    "terminal_tabs_runspace_idx",
+    "terminal_tabs_workspace_idx",
+    "github_pr_branch_syncs_retry_idx",
+    "github_pr_ref_states_refresh_idx",
+    "external_refs_github_pr_unique",
+];
 
-    CREATE TABLE runs (
-      id            TEXT PRIMARY KEY,
-      work_item_id  TEXT NOT NULL REFERENCES work_items(id),
-      agent         TEXT,
-      branch        TEXT,
-      worktree_path TEXT,
-      status        TEXT NOT NULL,
-      settings_path TEXT,
-      created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-      updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-    );
+const CURRENT_SCHEMA_INDEXES: &[&str] = &[
+    "terminal_tabs_runspace_idx",
+    "github_pr_branch_syncs_retry_idx",
+    "github_pr_ref_states_refresh_idx",
+    "external_refs_github_pr_unique",
+];
 
-    CREATE TABLE events (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      work_item_id TEXT REFERENCES work_items(id),
-      run_id       TEXT REFERENCES runs(id),
-      kind         TEXT NOT NULL,
-      payload_json TEXT NOT NULL DEFAULT '{}',
-      created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-    );
+const MONICA_TABLES: &[&str] = &[
+    MIGRATION_HISTORY_TABLE,
+    "terminal_tabs",
+    "terminal_runspaces",
+    "terminal_workspaces",
+    "github_pull_request_branch_syncs",
+    "github_pull_request_ref_states",
+    "external_ref_syncs",
+    "agent_sessions",
+    "events",
+    "external_refs",
+    "task_runs",
+    "runs",
+    "tasks",
+    "work_items",
+    "projects",
+    "agent_session_counter",
+    "task_run_counter",
+    "run_counter",
+    "mon_counter",
+    "monica_schema",
+];
 
-    CREATE TABLE external_refs (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      work_item_id TEXT NOT NULL REFERENCES work_items(id),
-      ref_type     TEXT NOT NULL,
-      repo         TEXT,
-      number       INTEGER,
-      url          TEXT,
-      created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-    );
-"#;
+const CURRENT_SCHEMA_SMOKE_QUERIES: &[&str] = &[
+    "SELECT version, applied_at FROM monica_schema LIMIT 0",
+    "SELECT n FROM mon_counter LIMIT 0",
+    "SELECT n FROM task_run_counter LIMIT 0",
+    "SELECT id, kind, status, phase, title, body, project_id, labels, details_json, source_json, deleted_at, created_at, updated_at FROM tasks LIMIT 0",
+    "SELECT id, task_id, agent, branch, worktree_path, status, wait_reason, settings_path, provider_session_id, last_event_name, last_event_at, metadata_json, created_at, updated_at FROM task_runs LIMIT 0",
+    "SELECT id, task_id, task_run_id, kind, payload_json, created_at FROM events LIMIT 0",
+    "SELECT id, task_id, ref_type, repo, number, url, created_at FROM external_refs LIMIT 0",
+    "SELECT id, name, provider, repo, path, default_branch, worktree_root, setup_timeout_sec, agent_default, agent_permission_mode, hooks_claude, created_at, updated_at FROM projects LIMIT 0",
+    "SELECT task_id, source_ref_id, target_ref_type, last_synced_at, last_error, next_retry_at, created_at, updated_at FROM external_ref_syncs LIMIT 0",
+    "SELECT external_ref_id, status, synced_at, last_error, next_retry_at, created_at, updated_at FROM github_pull_request_ref_states LIMIT 0",
+    "SELECT task_id, repo, branch, last_synced_at, last_error, next_retry_at, created_at, updated_at FROM github_pull_request_branch_syncs LIMIT 0",
+    "SELECT id, sort_order, is_active, created_at FROM terminal_runspaces LIMIT 0",
+    "SELECT id, runspace_id, cwd, title, sort_order, is_active, created_at FROM terminal_tabs LIMIT 0",
+];
 
-/// v2: project registry. One row per repo, holding the execution-environment definition
-/// that `issue run` resolves (worktree layout, branch naming, agent settings).
-const V2: &str = r#"
-    CREATE TABLE projects (
-      id                    TEXT PRIMARY KEY,
-      name                  TEXT NOT NULL,
-      provider              TEXT NOT NULL DEFAULT 'github',
-      repo                  TEXT NOT NULL,
-      path                  TEXT,
-      default_branch        TEXT NOT NULL DEFAULT 'main',
-      worktree_root         TEXT,
-      branch_template       TEXT NOT NULL DEFAULT 'monica/gh-{github_issue_number}-mon-{monica_number}-{slug}',
-      setup_timeout_sec     INTEGER NOT NULL DEFAULT 600,
-      agent_default         TEXT NOT NULL DEFAULT 'claude',
-      agent_permission_mode TEXT NOT NULL DEFAULT 'plan',
-      hooks_claude          INTEGER NOT NULL DEFAULT 1,
-      created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-      updated_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-    );
-"#;
-
-/// v3: run-id counter. Mirrors `mon_counter` so each run gets a monotonic `run-<n>` id that is
-/// never reused, keeping the `runs/<task_run_id>/` artifact directories collision-free.
-const V3: &str = r#"
-    CREATE TABLE run_counter (n INTEGER PRIMARY KEY AUTOINCREMENT);
-"#;
-
-/// v4: drop the per-project branch-name template. Branch names are now derived directly from the
-/// run (`issue-<n>` for a linked GitHub issue, else `mon-<n>`), so the configurable rule is gone.
-const V4: &str = r#"
-    ALTER TABLE projects DROP COLUMN branch_template;
-"#;
-
-/// v5: rename the internal domain from WorkItem/Run to Task/TaskRun, split task state from run
-/// state, and add minimal agent-session persistence. Existing MON ids and run-<n> ids stay stable.
-const V5: &str = r#"
-    ALTER TABLE work_items RENAME TO tasks;
-    ALTER TABLE runs RENAME TO task_runs;
-    ALTER TABLE run_counter RENAME TO task_run_counter;
-
-    ALTER TABLE task_runs RENAME COLUMN work_item_id TO task_id;
-    ALTER TABLE events RENAME COLUMN work_item_id TO task_id;
-    ALTER TABLE events RENAME COLUMN run_id TO task_run_id;
-    ALTER TABLE external_refs RENAME COLUMN work_item_id TO task_id;
-
-    INSERT INTO task_runs (id, task_id, status, created_at, updated_at)
-    SELECT 'legacy-' || t.id,
-           t.id,
-           t.status,
-           strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-           strftime('%Y-%m-%dT%H:%M:%fZ','now')
-      FROM tasks t
-     WHERE t.status IN ('setting_up', 'running', 'stopped')
-       AND (
-             NOT EXISTS (
-               SELECT 1
-                 FROM task_runs r
-                WHERE r.task_id = t.id
-             )
-             OR (
-               SELECT r.status
-                 FROM task_runs r
-                WHERE r.task_id = t.id
-                ORDER BY r.created_at DESC,
-                         CAST(SUBSTR(r.id, 5) AS INTEGER) DESC
-                LIMIT 1
-             ) != t.status
-           );
-
-    UPDATE tasks
-       SET status = 'active'
-     WHERE status IN ('setting_up', 'running', 'stopped');
-
-    CREATE TABLE agent_session_counter (n INTEGER PRIMARY KEY AUTOINCREMENT);
-
-    CREATE TABLE agent_sessions (
-      id                  TEXT PRIMARY KEY,
-      task_id             TEXT NOT NULL REFERENCES tasks(id),
-      task_run_id         TEXT NOT NULL REFERENCES task_runs(id),
-      agent               TEXT NOT NULL,
-      mode                TEXT NOT NULL,
-      status              TEXT NOT NULL,
-      provider_session_id TEXT,
-      parent_session_id   TEXT,
-      last_event_name     TEXT,
-      last_event_at       TEXT,
-      metadata_json       TEXT NOT NULL DEFAULT '{}',
-      created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-      updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-    );
-	"#;
-
-/// v6: make Task status product-level only, collapse AgentSession observation fields into
-/// TaskRun, add waiting-for-user run state, and replace archived with soft deletion.
-const V6: &str = r#"
-    ALTER TABLE tasks ADD COLUMN deleted_at TEXT;
-
-    ALTER TABLE task_runs ADD COLUMN wait_reason TEXT;
-    ALTER TABLE task_runs ADD COLUMN provider_session_id TEXT;
-    ALTER TABLE task_runs ADD COLUMN last_event_name TEXT;
-    ALTER TABLE task_runs ADD COLUMN last_event_at TEXT;
-    ALTER TABLE task_runs ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}';
-
-    UPDATE task_runs
-       SET provider_session_id = (
-             SELECT s.provider_session_id
-               FROM agent_sessions s
-              WHERE s.task_run_id = task_runs.id
-              ORDER BY s.updated_at DESC,
-                       CAST(SUBSTR(s.id, 9) AS INTEGER) DESC
-              LIMIT 1
-           ),
-           last_event_name = (
-             SELECT s.last_event_name
-               FROM agent_sessions s
-              WHERE s.task_run_id = task_runs.id
-              ORDER BY s.updated_at DESC,
-                       CAST(SUBSTR(s.id, 9) AS INTEGER) DESC
-              LIMIT 1
-           ),
-           last_event_at = (
-             SELECT s.last_event_at
-               FROM agent_sessions s
-              WHERE s.task_run_id = task_runs.id
-              ORDER BY s.updated_at DESC,
-                       CAST(SUBSTR(s.id, 9) AS INTEGER) DESC
-              LIMIT 1
-           ),
-           metadata_json = COALESCE((
-             SELECT s.metadata_json
-               FROM agent_sessions s
-              WHERE s.task_run_id = task_runs.id
-              ORDER BY s.updated_at DESC,
-                       CAST(SUBSTR(s.id, 9) AS INTEGER) DESC
-              LIMIT 1
-           ), metadata_json)
-     WHERE EXISTS (
-             SELECT 1
-               FROM agent_sessions s
-              WHERE s.task_run_id = task_runs.id
-           );
-
-    INSERT INTO task_runs (id, task_id, status, wait_reason, created_at, updated_at)
-    SELECT 'legacy-' || t.id,
-           t.id,
-           CASE
-             WHEN t.status = 'need_approval' THEN 'waiting_for_user'
-             ELSE 'failed'
-           END,
-           CASE
-             WHEN t.status = 'need_approval' THEN 'exit_plan_mode'
-             ELSE NULL
-           END,
-           strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-           strftime('%Y-%m-%dT%H:%M:%fZ','now')
-      FROM tasks t
-     WHERE t.status IN ('need_approval', 'failed')
-       AND NOT EXISTS (
-             SELECT 1
-               FROM task_runs r
-              WHERE r.task_id = t.id
-           );
-
-    UPDATE task_runs
-       SET status = 'waiting_for_user',
-           wait_reason = 'exit_plan_mode',
-           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-     WHERE id IN (
-       SELECT latest.id
-         FROM tasks t
-         JOIN task_runs latest
-           ON latest.id = (
-             SELECT r.id
-               FROM task_runs r
-              WHERE r.task_id = t.id
-              ORDER BY r.created_at DESC,
-                       CAST(SUBSTR(r.id, 5) AS INTEGER) DESC
-              LIMIT 1
-           )
-        WHERE t.status = 'need_approval'
-     );
-
-    UPDATE task_runs
-       SET status = 'failed',
-           wait_reason = NULL,
-           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-     WHERE id IN (
-       SELECT latest.id
-         FROM tasks t
-         JOIN task_runs latest
-           ON latest.id = (
-             SELECT r.id
-               FROM task_runs r
-              WHERE r.task_id = t.id
-              ORDER BY r.created_at DESC,
-                       CASE
-                         WHEN r.id GLOB 'run-[0-9]*' THEN CAST(SUBSTR(r.id, 5) AS INTEGER)
-                         ELSE -1
-                       END DESC,
-                       r.id DESC
-              LIMIT 1
-           )
-        WHERE t.status = 'failed'
-     );
-
-    UPDATE tasks
-       SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-     WHERE status = 'archived'
-       AND deleted_at IS NULL;
-
-    UPDATE tasks
-       SET status = CASE
-         WHEN status = 'inbox' THEN 'inbox'
-         WHEN status = 'ready' THEN 'ready'
-         WHEN status = 'done' THEN 'done'
-         ELSE 'in_progress'
-       END
-     WHERE status IN (
-       'active',
-       'need_approval',
-       'failed',
-       'pr_open',
-       'archived',
-       'setting_up',
-       'running',
-       'stopped'
-     );
-
-    DROP TABLE agent_sessions;
-    DROP TABLE agent_session_counter;
-"#;
-
-/// v7: persist linked GitHub PR sync state so the dashboard can show PR refs without polling
-/// GitHub from the task list path.
-const V7: &str = r#"
-    CREATE TABLE external_ref_syncs (
-      task_id         TEXT NOT NULL REFERENCES tasks(id),
-      source_ref_id   INTEGER NOT NULL REFERENCES external_refs(id),
-      target_ref_type TEXT NOT NULL,
-      last_synced_at  TEXT,
-      last_error      TEXT,
-      next_retry_at   TEXT,
-      created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-      updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-      PRIMARY KEY (task_id, source_ref_id, target_ref_type)
-    );
-
-    CREATE UNIQUE INDEX external_refs_github_pr_unique
-      ON external_refs(task_id, ref_type, repo, number)
-     WHERE ref_type = 'github_pull_request'
-       AND repo IS NOT NULL
-       AND number IS NOT NULL;
-"#;
-
-/// v8: store lightweight GitHub PR state for dashboard display.
-const V8: &str = r#"
-    CREATE TABLE github_pull_request_ref_states (
-      external_ref_id INTEGER PRIMARY KEY REFERENCES external_refs(id) ON DELETE CASCADE,
-      status          TEXT CHECK(status IN ('draft', 'open', 'closed', 'merged')),
-      synced_at       TEXT,
-      last_error      TEXT,
-      next_retry_at   TEXT,
-      created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-      updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-    );
-
-    CREATE INDEX github_pr_ref_states_refresh_idx
-      ON github_pull_request_ref_states(status, synced_at, next_retry_at);
-
-    UPDATE external_ref_syncs
-       SET last_synced_at = NULL,
-           last_error = NULL,
-           next_retry_at = NULL,
-           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-     WHERE target_ref_type = 'github_pull_request'
-       AND EXISTS (
-             SELECT 1
-               FROM external_refs pr
-              WHERE pr.task_id = external_ref_syncs.task_id
-                AND pr.ref_type = 'github_pull_request'
-           );
-"#;
-
-/// v9: track branch-driven GitHub PR discovery independently from issue-linked sync state.
-const V9: &str = r#"
-    CREATE TABLE github_pull_request_branch_syncs (
-      task_id        TEXT NOT NULL REFERENCES tasks(id),
-      repo           TEXT NOT NULL,
-      branch         TEXT NOT NULL,
-      last_synced_at TEXT,
-      last_error     TEXT,
-      next_retry_at  TEXT,
-      created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-      updated_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-      PRIMARY KEY (task_id, repo, branch)
-    );
-
-    CREATE INDEX github_pr_branch_syncs_retry_idx
-      ON github_pull_request_branch_syncs(next_retry_at);
-"#;
-
-/// v10: terminal workspace/tab persistence for Work Bench.
-const V10: &str = r#"
-    CREATE TABLE terminal_workspaces (
-      id         TEXT PRIMARY KEY,
-      sort_order INTEGER NOT NULL DEFAULT 0,
-      is_active  INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-    );
-
-    CREATE TABLE terminal_tabs (
-      id           TEXT PRIMARY KEY,
-      workspace_id TEXT NOT NULL REFERENCES terminal_workspaces(id) ON DELETE CASCADE,
-      cwd          TEXT NOT NULL,
-      title        TEXT NOT NULL DEFAULT '',
-      sort_order   INTEGER NOT NULL DEFAULT 0,
-      is_active    INTEGER NOT NULL DEFAULT 0,
-      created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-    );
-
-    CREATE INDEX terminal_tabs_workspace_idx ON terminal_tabs(workspace_id, sort_order);
-"#;
-
-/// v11: rename workspace → runspace (tables, columns, indexes).
-const V11: &str = r#"
-    ALTER TABLE terminal_workspaces RENAME TO terminal_runspaces;
-    ALTER TABLE terminal_tabs RENAME COLUMN workspace_id TO runspace_id;
-    DROP INDEX terminal_tabs_workspace_idx;
-    CREATE INDEX terminal_tabs_runspace_idx ON terminal_tabs(runspace_id, sort_order);
-"#;
-
-/// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
+/// Apply embedded Atlas-generated SQL migrations. `monica_schema` is retained only as a
+/// compatibility marker for databases created by the one-shot squashed schema bootstrap.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
-    migrations()
-        .to_latest(conn)
-        .context("failed to apply database migrations")
+    if migration_history_exists(conn)? {
+        apply_pending_migrations(conn)?;
+        return validate_current_schema(conn);
+    }
+
+    match marker_version(conn)? {
+        Some(LEGACY_SQUASHED_SCHEMA_VERSION) => {
+            baseline_legacy_squashed_schema(conn)?;
+            apply_pending_migrations(conn)?;
+            validate_current_schema(conn)
+        }
+        Some(version) => {
+            bail!("database schema version {version} is not supported by this Monica build")
+        }
+        None if has_monica_owned_objects(conn)? => reset_monica_schema(conn),
+        None => {
+            apply_pending_migrations(conn)?;
+            validate_current_schema(conn)
+        }
+    }
+}
+
+fn apply_pending_migrations(conn: &mut Connection) -> Result<()> {
+    if MIGRATIONS.is_empty() {
+        bail!("no SQLite migrations are embedded in this Monica build");
+    }
+
+    ensure_migration_history_table(conn)?;
+    let applied = applied_migrations(conn)?;
+    validate_applied_migrations(&applied)?;
+    let pending = MIGRATIONS
+        .iter()
+        .filter(|migration| !applied.contains_key(&migration.version))
+        .collect::<Vec<_>>();
+    if pending.is_empty() {
+        return Ok(());
+    }
+
+    let tx = conn.transaction()?;
+    for migration in pending {
+        tx.execute_batch(migration.sql)
+            .with_context(|| format!("failed to apply SQLite migration {}", migration.name))?;
+        record_migration(&tx, migration)?;
+        write_marker_version(&tx, migration.version)?;
+    }
+    validate_current_schema(&tx)?;
+    tx.commit().context("failed to commit SQLite migrations")
+}
+
+fn baseline_legacy_squashed_schema(conn: &mut Connection) -> Result<()> {
+    let initial = initial_migration()?;
+    ensure_migration_history_table(conn)?;
+    let tx = conn.transaction()?;
+    record_migration(&tx, initial)?;
+    write_marker_version(&tx, initial.version)?;
+    tx.commit()
+        .context("failed to mark legacy SQLite schema baseline")
+}
+
+fn reset_monica_schema(conn: &mut Connection) -> Result<()> {
+    let tx = conn.transaction()?;
+    for index in MONICA_INDEXES {
+        tx.execute(&format!("DROP INDEX IF EXISTS {index}"), [])?;
+    }
+    for table in MONICA_TABLES {
+        tx.execute(&format!("DROP TABLE IF EXISTS {table}"), [])?;
+    }
+    tx.commit()
+        .context("failed to commit recreated database schema")?;
+    apply_pending_migrations(conn)?;
+    validate_current_schema(conn)
+}
+
+fn ensure_migration_history_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(MIGRATION_HISTORY_TABLE_SQL)
+        .context("failed to create SQLite migration history table")
+}
+
+fn migration_history_exists(conn: &Connection) -> Result<bool> {
+    table_exists(conn, MIGRATION_HISTORY_TABLE)
+}
+
+fn applied_migrations(conn: &Connection) -> Result<HashMap<i64, String>> {
+    let mut stmt = conn
+        .prepare("SELECT version, checksum FROM monica_schema_migrations")
+        .context("failed to prepare SQLite migration history query")?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .context("failed to read SQLite migration history")?;
+    let mut applied = HashMap::new();
+    for row in rows {
+        let (version, checksum) = row.context("failed to read SQLite migration history row")?;
+        applied.insert(version, checksum);
+    }
+    Ok(applied)
+}
+
+fn validate_applied_migrations(applied: &HashMap<i64, String>) -> Result<()> {
+    let known_versions = MIGRATIONS
+        .iter()
+        .map(|migration| migration.version)
+        .collect::<HashSet<_>>();
+    for version in applied.keys() {
+        if !known_versions.contains(version) {
+            bail!("database migration version {version} is not known by this Monica build");
+        }
+    }
+    for migration in MIGRATIONS {
+        if let Some(checksum) = applied.get(&migration.version) {
+            let expected = migration_checksum(migration.sql);
+            if checksum != &expected {
+                bail!(
+                    "database migration {} checksum changed after it was applied",
+                    migration.name
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn record_migration(tx: &Transaction<'_>, migration: &Migration) -> Result<()> {
+    tx.execute(
+        "INSERT INTO monica_schema_migrations (version, name, checksum) VALUES (?1, ?2, ?3)",
+        (
+            migration.version,
+            migration.name,
+            migration_checksum(migration.sql),
+        ),
+    )
+    .with_context(|| format!("failed to record SQLite migration {}", migration.name))?;
+    Ok(())
+}
+
+fn write_marker_version(tx: &Transaction<'_>, version: i64) -> Result<()> {
+    tx.execute(
+        "INSERT OR REPLACE INTO monica_schema (version) VALUES (?1)",
+        [version],
+    )?;
+    Ok(())
+}
+
+fn marker_version(conn: &Connection) -> Result<Option<i64>> {
+    if !table_exists(conn, "monica_schema")? {
+        return Ok(None);
+    }
+    conn.query_row(
+        "SELECT version FROM monica_schema ORDER BY version DESC LIMIT 1",
+        [],
+        |row| row.get(0),
+    )
+    .optional()
+    .context("failed to read Monica schema marker")
+}
+
+fn has_monica_owned_objects(conn: &Connection) -> Result<bool> {
+    for name in MONICA_TABLES.iter().chain(MONICA_INDEXES.iter()) {
+        if object_exists(conn, name)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn object_exists(conn: &Connection, name: &str) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_schema WHERE name = ?1 AND type IN ('table', 'index')",
+        [name],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+fn table_exists(conn: &Connection, name: &str) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table' AND name = ?1",
+        [name],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+fn validate_current_schema(conn: &Connection) -> Result<()> {
+    for query in CURRENT_SCHEMA_SMOKE_QUERIES {
+        conn.prepare(query)
+            .with_context(|| format!("current Monica schema is missing required shape: {query}"))?;
+    }
+    for index in CURRENT_SCHEMA_INDEXES {
+        if !object_exists(conn, index)? {
+            bail!("current Monica schema is missing required index: {index}");
+        }
+    }
+    Ok(())
+}
+
+fn initial_migration() -> Result<&'static Migration> {
+    MIGRATIONS
+        .first()
+        .context("no initial SQLite migration is embedded in this Monica build")
+}
+
+#[cfg(test)]
+fn latest_migration_version() -> Result<i64> {
+    MIGRATIONS
+        .last()
+        .map(|migration| migration.version)
+        .context("no SQLite migrations are embedded in this Monica build")
+}
+
+fn migration_checksum(sql: &str) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in sql.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use monica_core::{DisplayStatus, NewTaskRun, TaskRunStatus, TaskRunWaitReason, TaskStatus};
-    use rusqlite::params;
 
-    fn temp_db_path(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "monica-mig-{name}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("test.db");
-        let _ = std::fs::remove_file(&path);
-        path
+    fn count_table_rows(conn: &Connection, table: &str) -> i64 {
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+            row.get(0)
+        })
+        .unwrap()
+    }
+
+    fn migration_history_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM monica_schema_migrations", [], |row| {
+            row.get(0)
+        })
+        .unwrap()
+    }
+
+    fn seed_legacy_squashed_schema(conn: &mut Connection) {
+        conn.execute_batch(initial_migration().unwrap().sql)
+            .unwrap();
+        let tx = conn.transaction().unwrap();
+        write_marker_version(&tx, LEGACY_SQUASHED_SCHEMA_VERSION).unwrap();
+        tx.commit().unwrap();
     }
 
     #[test]
-    fn migration_set_is_valid() {
-        migrations().validate().expect("migrations should validate");
-    }
+    fn fresh_database_applies_embedded_migrations() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate(&mut conn).unwrap();
 
-    /// A project row written under the v3 schema (which still has `branch_template`) must survive
-    /// the v4 `DROP COLUMN` and stay readable through `Db`/`Project::from_row` afterwards. `Db` has
-    /// no constructor from an existing connection, so the v3 state is staged on disk and reopened
-    /// via `Db::open_at`, which runs the pending v4 migration on that existing data.
-    #[test]
-    fn v4_drops_branch_template_and_preserves_v3_rows() {
-        let path = temp_db_path("v4");
-
-        {
-            let mut conn = Connection::open(&path).unwrap();
-            Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3)])
-                .to_latest(&mut conn)
-                .unwrap();
-            conn.execute(
-                "INSERT INTO projects (id, name, repo, path, branch_template)
-                 VALUES ('o/r', 'r', 'o/r', '/tmp/r', 'monica/{slug}')",
-                [],
-            )
-            .unwrap();
+        for table in [
+            "monica_schema",
+            "mon_counter",
+            "task_run_counter",
+            "tasks",
+            "task_runs",
+            "events",
+            "external_refs",
+            "projects",
+            "external_ref_syncs",
+            "github_pull_request_ref_states",
+            "github_pull_request_branch_syncs",
+            "terminal_runspaces",
+            "terminal_tabs",
+            "monica_schema_migrations",
+        ] {
+            assert!(table_exists(&conn, table).unwrap(), "{table} should exist");
+        }
+        for index in [
+            "external_refs_github_pr_unique",
+            "github_pr_ref_states_refresh_idx",
+            "github_pr_branch_syncs_retry_idx",
+            "terminal_tabs_runspace_idx",
+        ] {
+            assert!(object_exists(&conn, index).unwrap(), "{index} should exist");
         }
 
-        let db = crate::sqlite::SqliteStore::open_at(&path).unwrap();
-        let project = db
-            .get_project("o/r")
-            .unwrap()
-            .expect("v3 row must survive the v4 migration and read back via Project::from_row");
-        assert_eq!(project.id, "o/r");
-        assert_eq!(project.path.as_deref(), Some("/tmp/r"));
-
-        let has_column: i64 = db
-            .conn()
-            .query_row(
-                "SELECT count(*) FROM pragma_table_info('projects') WHERE name = 'branch_template'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(has_column, 0, "branch_template column must be dropped");
-
-        let version: i64 = db
-            .conn()
-            .pragma_query_value(None, "user_version", |r| r.get(0))
-            .unwrap();
-        assert_eq!(version, 11);
-
-        std::fs::remove_file(&path).ok();
+        assert_eq!(migration_history_count(&conn), MIGRATIONS.len() as i64);
+        assert_eq!(
+            marker_version(&conn).unwrap(),
+            Some(latest_migration_version().unwrap())
+        );
+        validate_current_schema(&conn).unwrap();
     }
 
     #[test]
-    fn v5_v6_renames_task_schema_and_preserves_old_rows() {
-        let path = temp_db_path("v5");
+    fn legacy_database_without_marker_is_recreated() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE mon_counter (n INTEGER PRIMARY KEY AUTOINCREMENT);
+            CREATE TABLE work_items (
+              id TEXT PRIMARY KEY,
+              kind TEXT NOT NULL,
+              status TEXT NOT NULL,
+              title TEXT NOT NULL
+            );
+            INSERT INTO work_items (id, kind, status, title)
+            VALUES ('MON-legacy', 'development', 'active', 'legacy');
+            "#,
+        )
+        .unwrap();
 
-        {
-            let mut conn = Connection::open(&path).unwrap();
-            Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3), M::up(V4)])
-                .to_latest(&mut conn)
-                .unwrap();
+        migrate(&mut conn).unwrap();
 
-            for status in ["setting_up", "running", "stopped", "failed", "ready"] {
-                let id = format!("MON-{}", status.replace('_', "-"));
-                conn.execute(
-                    "INSERT INTO work_items (id, kind, status, title, body)
-                     VALUES (?1, 'development', ?2, ?3, '')",
-                    params![id, status, status],
-                )
-                .unwrap();
-            }
-            conn.execute("INSERT INTO run_counter DEFAULT VALUES", [])
-                .unwrap();
-            conn.execute(
-                "INSERT INTO runs (id, work_item_id, agent, branch, worktree_path, status)
-                 VALUES ('run-1', 'MON-running', 'claude', 'issue-9', '/tmp/wt', 'running')",
-                [],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO runs
-                   (id, work_item_id, agent, branch, worktree_path, status, created_at, updated_at)
-                 VALUES
-                   ('run-99', 'MON-stopped', 'claude', 'issue-99', '/tmp/stale', 'running',
-                    '2000-01-01T00:00:00.000Z', '2000-01-01T00:00:00.000Z')",
-                [],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO events (work_item_id, run_id, kind, payload_json)
-                 VALUES ('MON-running', 'run-1', 'claude_hook', '{\"hook_event_name\":\"Stop\"}')",
-                [],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO external_refs (work_item_id, ref_type, repo, number, url)
-                 VALUES ('MON-running', 'github_issue', 'o/r', 9, 'https://example.com/9')",
-                [],
-            )
-            .unwrap();
-        }
-
-        let mut db = crate::sqlite::SqliteStore::open_at(&path).unwrap();
-        for old in ["work_items", "runs", "run_counter"] {
-            let count: i64 = db
-                .conn()
-                .query_row(
-                    "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-                    params![old],
-                    |r| r.get(0),
-                )
-                .unwrap();
-            assert_eq!(count, 0, "{old} must be renamed away");
-        }
-
+        assert!(!table_exists(&conn, "work_items").unwrap());
+        assert!(table_exists(&conn, "tasks").unwrap());
+        assert_eq!(count_table_rows(&conn, "tasks"), 0);
+        assert_eq!(migration_history_count(&conn), MIGRATIONS.len() as i64);
         assert_eq!(
-            db.get_task("MON-setting-up").unwrap().unwrap().status,
-            TaskStatus::InProgress
+            marker_version(&conn).unwrap(),
+            Some(latest_migration_version().unwrap())
         );
-        assert_eq!(
-            db.get_task("MON-running").unwrap().unwrap().status,
-            TaskStatus::InProgress
-        );
-        assert_eq!(
-            db.get_task("MON-stopped").unwrap().unwrap().status,
-            TaskStatus::InProgress
-        );
-        assert_eq!(
-            db.get_task("MON-failed").unwrap().unwrap().status,
-            TaskStatus::InProgress
-        );
-        assert_eq!(
-            db.get_task("MON-ready").unwrap().unwrap().status,
-            TaskStatus::Ready
-        );
+    }
 
-        let run = db.get_task_run("run-1").unwrap().unwrap();
-        assert_eq!(run.task_id, "MON-running");
-        assert_eq!(run.status, TaskRunStatus::Running);
-        assert!(
-            db.get_task_run("legacy-MON-running").unwrap().is_none(),
-            "tasks with an existing matching run do not need a synthetic lifecycle run"
-        );
-        let stale_run = db.get_task_run("run-99").unwrap().unwrap();
-        assert_eq!(stale_run.task_id, "MON-stopped");
-        assert_eq!(stale_run.status, TaskRunStatus::Running);
+    #[test]
+    fn legacy_squashed_schema_is_baselined_and_keeps_existing_rows() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        seed_legacy_squashed_schema(&mut conn);
+        conn.execute(
+            "INSERT INTO tasks (id, kind, status, title)
+             VALUES ('MON-keep', 'development', 'inbox', 'keep')",
+            [],
+        )
+        .unwrap();
 
-        let setup_run = db.get_task_run("legacy-MON-setting-up").unwrap().unwrap();
-        assert_eq!(setup_run.task_id, "MON-setting-up");
-        assert_eq!(setup_run.status, TaskRunStatus::SettingUp);
-        let stopped_run = db.get_task_run("legacy-MON-stopped").unwrap().unwrap();
-        assert_eq!(stopped_run.task_id, "MON-stopped");
-        assert_eq!(stopped_run.status, TaskRunStatus::Stopped);
+        migrate(&mut conn).unwrap();
 
-        let stopped_rows = db
-            .list_task_summaries(Some(DisplayStatus::Stopped), None)
-            .unwrap();
-        assert_eq!(
-            stopped_rows
-                .iter()
-                .map(|row| row.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["MON-stopped"],
-            "legacy stopped tasks without runs must survive display-status filters"
-        );
-
-        let events = db.list_events(Some("MON-running")).unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].task_id.as_deref(), Some("MON-running"));
-        assert_eq!(events[0].task_run_id.as_deref(), Some("run-1"));
-
-        let refs = db.list_external_refs("MON-running").unwrap();
-        assert_eq!(refs.len(), 1);
-        assert_eq!(refs[0].task_id, "MON-running");
-
-        let next = db
-            .start_task_run(NewTaskRun {
-                task_id: "MON-ready".to_string(),
-                agent: None,
-                branch: None,
-                worktree_path: None,
+        let title: String = conn
+            .query_row("SELECT title FROM tasks WHERE id = 'MON-keep'", [], |row| {
+                row.get(0)
             })
             .unwrap();
-        assert_eq!(next.id, "run-2");
-
-        for table in ["agent_session_counter", "agent_sessions"] {
-            let count: i64 = db
-                .conn()
-                .query_row(
-                    "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-                    params![table],
-                    |r| r.get(0),
-                )
-                .unwrap();
-            assert_eq!(count, 0, "{table} must be collapsed into task_runs");
-        }
-
-        std::fs::remove_file(&path).ok();
+        assert_eq!(title, "keep");
+        assert_eq!(migration_history_count(&conn), MIGRATIONS.len() as i64);
+        assert_eq!(
+            marker_version(&conn).unwrap(),
+            Some(latest_migration_version().unwrap())
+        );
     }
 
     #[test]
-    fn v6_collapses_agent_sessions_and_soft_deletes_archived_tasks() {
-        let path = temp_db_path("v6-agent-sessions");
-
-        {
-            let mut conn = Connection::open(&path).unwrap();
-            Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3), M::up(V4), M::up(V5)])
-                .to_latest(&mut conn)
-                .unwrap();
-
-            for (id, status) in [
-                ("MON-wait", "need_approval"),
-                ("MON-wait-no-run", "need_approval"),
-                ("MON-failed-no-run", "failed"),
-                ("MON-failed-run", "failed"),
-                ("MON-archived", "archived"),
-                ("MON-pr", "pr_open"),
-            ] {
-                conn.execute(
-                    "INSERT INTO tasks (id, kind, status, title)
-                     VALUES (?1, 'development', ?2, ?1)",
-                    params![id, status],
-                )
-                .unwrap();
-            }
-            conn.execute(
-                "INSERT INTO task_runs
-                   (id, task_id, status, created_at, updated_at)
-                 VALUES
-                   ('run-10', 'MON-wait', 'stopped',
-                    '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'),
-                   ('run-11', 'MON-wait', 'running',
-                    '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z'),
-                   ('run-12', 'MON-failed-run', 'running',
-                    '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z')",
-                [],
-            )
+    fn unsupported_marker_fails_without_resetting_rows() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        seed_legacy_squashed_schema(&mut conn);
+        conn.execute(
+            "INSERT INTO tasks (id, kind, status, title)
+             VALUES ('MON-keep', 'development', 'inbox', 'keep')",
+            [],
+        )
+        .unwrap();
+        conn.execute("UPDATE monica_schema SET version = 999", [])
             .unwrap();
-            conn.execute(
-                "INSERT INTO agent_sessions
-                   (id, task_id, task_run_id, agent, mode, status, provider_session_id,
-                    last_event_name, last_event_at, metadata_json, updated_at)
-                 VALUES
-                   ('session-1', 'MON-wait', 'run-11', 'claude', 'new', 'running',
-                    'provider-old', 'SessionStart', '2026-01-02T00:00:01.000Z',
-                    '{\"version\":1}', '2026-01-02T00:00:01.000Z'),
-                   ('session-2', 'MON-wait', 'run-11', 'claude', 'new', 'running',
-                    'provider-new', 'PreToolUse', '2026-01-02T00:00:02.000Z',
-                    '{\"version\":2}', '2026-01-02T00:00:02.000Z')",
-                [],
-            )
+
+        let err = migrate(&mut conn).unwrap_err();
+
+        assert!(format!("{err:#}").contains("database schema version 999 is not supported"));
+        assert_eq!(count_table_rows(&conn, "tasks"), 1);
+        assert_eq!(marker_version(&conn).unwrap(), Some(999));
+    }
+
+    #[test]
+    fn current_marker_validates_required_schema_shape() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE monica_schema (
+              version    INTEGER PRIMARY KEY,
+              applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            );
+            INSERT INTO monica_schema (version, applied_at)
+            VALUES (1, '2026-06-08T00:00:00.000Z');
+            "#,
+        )
+        .unwrap();
+
+        let err = migrate(&mut conn).unwrap_err();
+
+        assert!(format!("{err:#}").contains("current Monica schema is missing required shape"));
+    }
+
+    #[test]
+    fn changed_applied_migration_checksum_is_rejected() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate(&mut conn).unwrap();
+        conn.execute(
+            "UPDATE monica_schema_migrations SET checksum = 'changed' WHERE version = ?1",
+            [initial_migration().unwrap().version],
+        )
+        .unwrap();
+
+        let err = migrate(&mut conn).unwrap_err();
+
+        assert!(format!("{err:#}").contains("checksum changed after it was applied"));
+    }
+
+    #[test]
+    fn non_monica_tables_are_left_alone() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT NOT NULL);
+            INSERT INTO notes (body) VALUES ('keep me');
+            "#,
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+
+        let body: String = conn
+            .query_row("SELECT body FROM notes", [], |row| row.get(0))
             .unwrap();
-        }
-
-        let db = crate::sqlite::SqliteStore::open_at(&path).unwrap();
-
-        assert_eq!(
-            db.get_task("MON-wait").unwrap().unwrap().status,
-            TaskStatus::InProgress
-        );
-        assert_eq!(
-            db.get_task("MON-pr").unwrap().unwrap().status,
-            TaskStatus::InProgress
-        );
-        assert!(
-            db.get_task("MON-archived").unwrap().is_none(),
-            "soft-deleted archived tasks should be hidden from normal reads"
-        );
-
-        let archived: (String, Option<String>) = db
-            .conn()
-            .query_row(
-                "SELECT status, deleted_at FROM tasks WHERE id = 'MON-archived'",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(archived.0, TaskStatus::InProgress.as_str());
-        assert!(archived.1.is_some());
-
-        let wait_run = db.get_task_run("run-11").unwrap().unwrap();
-        assert_eq!(wait_run.status, TaskRunStatus::WaitingForUser);
-        assert_eq!(wait_run.wait_reason, Some(TaskRunWaitReason::ExitPlanMode));
-        assert_eq!(
-            wait_run.provider_session_id.as_deref(),
-            Some("provider-new")
-        );
-        assert_eq!(wait_run.last_event_name.as_deref(), Some("PreToolUse"));
-        assert_eq!(wait_run.metadata["version"].as_i64(), Some(2));
-
-        let legacy_wait = db.get_task_run("legacy-MON-wait-no-run").unwrap().unwrap();
-        assert_eq!(legacy_wait.status, TaskRunStatus::WaitingForUser);
-        assert_eq!(
-            legacy_wait.wait_reason,
-            Some(TaskRunWaitReason::ExitPlanMode)
-        );
-        let legacy_failed = db
-            .get_task_run("legacy-MON-failed-no-run")
-            .unwrap()
-            .unwrap();
-        assert_eq!(legacy_failed.status, TaskRunStatus::Failed);
-        assert_eq!(legacy_failed.wait_reason, None);
-        let failed_run = db.get_task_run("run-12").unwrap().unwrap();
-        assert_eq!(failed_run.status, TaskRunStatus::Failed);
-
-        let visible = db.list_task_summaries(None, None).unwrap();
-        assert!(
-            visible.iter().all(|row| row.id != "MON-archived"),
-            "soft-deleted tasks should not appear in dashboard/list summaries"
-        );
-        assert_eq!(
-            visible
-                .iter()
-                .find(|row| row.id == "MON-wait-no-run")
-                .unwrap()
-                .status,
-            DisplayStatus::WaitingForUser
-        );
-        assert_eq!(
-            visible
-                .iter()
-                .find(|row| row.id == "MON-failed-no-run")
-                .unwrap()
-                .status,
-            DisplayStatus::Failed
-        );
-
-        let dropped: i64 = db
-            .conn()
-            .query_row(
-                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'agent_sessions'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(dropped, 0);
-
-        std::fs::remove_file(&path).ok();
+        assert_eq!(body, "keep me");
+        assert!(table_exists(&conn, "tasks").unwrap());
     }
 }
