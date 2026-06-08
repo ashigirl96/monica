@@ -183,9 +183,8 @@ export function useTerminal(
       e.preventDefault();
       e.stopPropagation();
 
-      const delta = e.deltaMode === WheelEvent.DOM_DELTA_LINE
-        ? e.deltaY * PIXELS_PER_LINE
-        : e.deltaY;
+      const delta =
+        e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * PIXELS_PER_LINE : e.deltaY;
 
       scrollAccumulator += delta;
 
@@ -240,7 +239,7 @@ export function useTerminal(
       fitRef.current = null;
       openedRef.current = false;
     };
-  }, [options.tabId]);
+  }, [options.tabId, containerRef]);
 
   useEffect(() => {
     const term = termRef.current;
