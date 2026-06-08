@@ -1,16 +1,16 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import {
-  workspaceSummariesAtom,
-  activateWorkspaceAtom,
-  reorderWorkspacesAtom,
+  runspaceSummariesAtom,
+  activateRunspaceAtom,
+  reorderRunspacesAtom,
 } from "@/stores/terminal";
 import { cn } from "@/lib/utils";
 import { useRef, useState } from "react";
 
 export function WorkBenchSidebar() {
-  const summaries = useAtomValue(workspaceSummariesAtom);
-  const activate = useSetAtom(activateWorkspaceAtom);
-  const reorder = useSetAtom(reorderWorkspacesAtom);
+  const summaries = useAtomValue(runspaceSummariesAtom);
+  const activate = useSetAtom(activateRunspaceAtom);
+  const reorder = useSetAtom(reorderRunspacesAtom);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const dragIdRef = useRef<string | null>(null);
 

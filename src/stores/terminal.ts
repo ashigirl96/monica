@@ -29,7 +29,7 @@ export type TerminalTab = {
   order: number;
 };
 
-export type TerminalWorkspace = {
+export type TerminalRunspace = {
   id: string;
   tabs: TerminalTab[];
   activeTabId: string;
@@ -37,8 +37,8 @@ export type TerminalWorkspace = {
 };
 
 export type TerminalState = {
-  workspaces: TerminalWorkspace[];
-  activeWorkspaceId: string;
+  runspaces: TerminalRunspace[];
+  activeRunspaceId: string;
 };
 
 function defaultCwd(): string {
@@ -57,7 +57,7 @@ function createTab(cwd: string, order: number): TerminalTab {
   return { id, title: "", cwd, order };
 }
 
-function createWorkspace(order: number, cwd?: string): TerminalWorkspace {
+function createRunspace(order: number, cwd?: string): TerminalRunspace {
   const id = crypto.randomUUID();
   const tab = createTab(cwd ?? defaultCwd(), 0);
   return { id, tabs: [tab], activeTabId: tab.id, order };
@@ -69,21 +69,21 @@ function extractShortPath(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
-function deriveWorkspaceTitle(ws: TerminalWorkspace): string {
-  const tab = ws.tabs.find((t) => t.id === ws.activeTabId) ?? ws.tabs[0];
+function deriveRunspaceTitle(rs: TerminalRunspace): string {
+  const tab = rs.tabs.find((t) => t.id === rs.activeTabId) ?? rs.tabs[0];
   if (!tab) return "";
   const path = tab.cwd !== "~" ? tab.cwd : tab.title || tab.cwd;
   return extractShortPath(path);
 }
 
-function deriveWorkspaceDescription(ws: TerminalWorkspace): string {
-  const tab = ws.tabs.find((t) => t.id === ws.activeTabId) ?? ws.tabs[0];
+function deriveRunspaceDescription(rs: TerminalRunspace): string {
+  const tab = rs.tabs.find((t) => t.id === rs.activeTabId) ?? rs.tabs[0];
   return tab?.title ?? "";
 }
 
 function initialState(): TerminalState {
-  const ws = createWorkspace(0);
-  return { workspaces: [ws], activeWorkspaceId: ws.id };
+  const rs = createRunspace(0);
+  return { runspaces: [rs], activeRunspaceId: rs.id };
 }
 
 export const terminalStateAtom = atom<TerminalState | null>(null);
@@ -92,164 +92,164 @@ export const terminalReadyAtom = atom((get) => get(terminalStateAtom) !== null);
 
 const resolvedStateAtom = atom((get) => get(terminalStateAtom) ?? initialState());
 
-export const activeWorkspaceAtom = atom((get) => {
+export const activeRunspaceAtom = atom((get) => {
   const state = get(resolvedStateAtom);
-  return state.workspaces.find((ws) => ws.id === state.activeWorkspaceId) ?? state.workspaces[0];
+  return state.runspaces.find((rs) => rs.id === state.activeRunspaceId) ?? state.runspaces[0];
 });
 
 export const activeTerminalTabAtom = atom((get) => {
-  const ws = get(activeWorkspaceAtom);
-  if (!ws) return null;
-  return ws.tabs.find((t) => t.id === ws.activeTabId) ?? ws.tabs[0] ?? null;
+  const rs = get(activeRunspaceAtom);
+  if (!rs) return null;
+  return rs.tabs.find((t) => t.id === rs.activeTabId) ?? rs.tabs[0] ?? null;
 });
 
-export const workspaceSummariesAtom = atom((get) => {
+export const runspaceSummariesAtom = atom((get) => {
   const state = get(resolvedStateAtom);
-  return state.workspaces
+  return state.runspaces
     .sort((a, b) => a.order - b.order)
-    .map((ws) => ({
-      id: ws.id,
-      title: deriveWorkspaceTitle(ws),
-      description: deriveWorkspaceDescription(ws),
-      tabCount: ws.tabs.length,
-      isActive: ws.id === state.activeWorkspaceId,
+    .map((rs) => ({
+      id: rs.id,
+      title: deriveRunspaceTitle(rs),
+      description: deriveRunspaceDescription(rs),
+      tabCount: rs.tabs.length,
+      isActive: rs.id === state.activeRunspaceId,
     }));
 });
 
-export const createWorkspaceAtom = atom(null, (get, set) => {
+export const createRunspaceAtom = atom(null, (get, set) => {
   const state = get(resolvedStateAtom);
   const activeTab = get(activeTerminalTabAtom);
   const cwd = resolveTabCwd(activeTab);
-  const activeWs = state.workspaces.find((w) => w.id === state.activeWorkspaceId);
-  const insertOrder = (activeWs?.order ?? -1) + 1;
-  const shifted = state.workspaces.map((w) =>
-    w.order >= insertOrder ? { ...w, order: w.order + 1 } : w,
+  const activeRs = state.runspaces.find((r) => r.id === state.activeRunspaceId);
+  const insertOrder = (activeRs?.order ?? -1) + 1;
+  const shifted = state.runspaces.map((r) =>
+    r.order >= insertOrder ? { ...r, order: r.order + 1 } : r,
   );
-  const ws = createWorkspace(insertOrder, cwd);
+  const rs = createRunspace(insertOrder, cwd);
   set(terminalStateAtom, {
-    workspaces: [...shifted, ws],
-    activeWorkspaceId: ws.id,
+    runspaces: [...shifted, rs],
+    activeRunspaceId: rs.id,
   });
 });
 
-export const removeWorkspaceAtom = atom(null, (get, set, wsId: string) => {
+export const removeRunspaceAtom = atom(null, (get, set, rsId: string) => {
   const state = get(resolvedStateAtom);
-  const ws = state.workspaces.find((w) => w.id === wsId);
-  if (!ws) return;
+  const rs = state.runspaces.find((r) => r.id === rsId);
+  if (!rs) return;
 
-  for (const tab of ws.tabs) {
+  for (const tab of rs.tabs) {
     markSessionDead(tab.id);
     ptyKill(tab.id);
   }
 
-  const remaining = state.workspaces.filter((w) => w.id !== wsId);
+  const remaining = state.runspaces.filter((r) => r.id !== rsId);
   if (remaining.length === 0) {
     set(terminalStateAtom, initialState());
     return;
   }
 
-  const newActive = state.activeWorkspaceId === wsId ? remaining[0].id : state.activeWorkspaceId;
+  const newActive = state.activeRunspaceId === rsId ? remaining[0].id : state.activeRunspaceId;
 
-  set(terminalStateAtom, { workspaces: remaining, activeWorkspaceId: newActive });
+  set(terminalStateAtom, { runspaces: remaining, activeRunspaceId: newActive });
 });
 
-export const activateWorkspaceAtom = atom(null, (get, set, wsId: string) => {
+export const activateRunspaceAtom = atom(null, (get, set, rsId: string) => {
   const state = get(resolvedStateAtom);
-  set(terminalStateAtom, { ...state, activeWorkspaceId: wsId });
+  set(terminalStateAtom, { ...state, activeRunspaceId: rsId });
 });
 
-export const cycleWorkspaceAtom = atom(null, (get, set, direction: "up" | "down") => {
+export const cycleRunspaceAtom = atom(null, (get, set, direction: "up" | "down") => {
   const state = get(resolvedStateAtom);
-  const sorted = [...state.workspaces].sort((a, b) => a.order - b.order);
+  const sorted = [...state.runspaces].sort((a, b) => a.order - b.order);
   if (sorted.length <= 1) return;
 
-  const idx = sorted.findIndex((ws) => ws.id === state.activeWorkspaceId);
+  const idx = sorted.findIndex((rs) => rs.id === state.activeRunspaceId);
   const newIdx =
     direction === "up" ? (idx - 1 + sorted.length) % sorted.length : (idx + 1) % sorted.length;
 
-  set(terminalStateAtom, { ...state, activeWorkspaceId: sorted[newIdx].id });
+  set(terminalStateAtom, { ...state, activeRunspaceId: sorted[newIdx].id });
 });
 
 export const createTerminalTabAtom = atom(null, (get, set) => {
   const state = get(resolvedStateAtom);
-  const ws = state.workspaces.find((w) => w.id === state.activeWorkspaceId);
-  if (!ws) return;
+  const rs = state.runspaces.find((r) => r.id === state.activeRunspaceId);
+  if (!rs) return;
 
-  const activeTab = ws.tabs.find((t) => t.id === ws.activeTabId);
+  const activeTab = rs.tabs.find((t) => t.id === rs.activeTabId);
   const cwd = resolveTabCwd(activeTab);
   const insertOrder = (activeTab?.order ?? -1) + 1;
-  const shifted = ws.tabs.map((t) => (t.order >= insertOrder ? { ...t, order: t.order + 1 } : t));
+  const shifted = rs.tabs.map((t) => (t.order >= insertOrder ? { ...t, order: t.order + 1 } : t));
   const tab = createTab(cwd, insertOrder);
 
-  const updatedWs: TerminalWorkspace = {
-    ...ws,
+  const updatedRs: TerminalRunspace = {
+    ...rs,
     tabs: [...shifted, tab],
     activeTabId: tab.id,
   };
 
   set(terminalStateAtom, {
     ...state,
-    workspaces: state.workspaces.map((w) => (w.id === ws.id ? updatedWs : w)),
+    runspaces: state.runspaces.map((r) => (r.id === rs.id ? updatedRs : r)),
   });
 });
 
 export const closeTerminalTabAtom = atom(null, (get, set, tabId?: string) => {
   const state = get(resolvedStateAtom);
-  const wsId = tabId
-    ? state.workspaces.find((w) => w.tabs.some((t) => t.id === tabId))?.id
-    : state.activeWorkspaceId;
-  const ws = wsId ? state.workspaces.find((w) => w.id === wsId) : undefined;
-  if (!ws) return;
+  const rsId = tabId
+    ? state.runspaces.find((r) => r.tabs.some((t) => t.id === tabId))?.id
+    : state.activeRunspaceId;
+  const rs = rsId ? state.runspaces.find((r) => r.id === rsId) : undefined;
+  if (!rs) return;
 
-  const targetId = tabId ?? ws.activeTabId;
-  if (!ws.tabs.some((t) => t.id === targetId)) return;
+  const targetId = tabId ?? rs.activeTabId;
+  if (!rs.tabs.some((t) => t.id === targetId)) return;
 
   markSessionDead(targetId);
   ptyKill(targetId);
 
-  if (ws.tabs.length <= 1) {
-    set(removeWorkspaceAtom, ws.id);
+  if (rs.tabs.length <= 1) {
+    set(removeRunspaceAtom, rs.id);
     return;
   }
 
-  const idx = ws.tabs.findIndex((t) => t.id === targetId);
-  const newTabs = ws.tabs.filter((t) => t.id !== targetId);
+  const idx = rs.tabs.findIndex((t) => t.id === targetId);
+  const newTabs = rs.tabs.filter((t) => t.id !== targetId);
   const newActiveId =
-    targetId === ws.activeTabId ? newTabs[Math.min(idx, newTabs.length - 1)].id : ws.activeTabId;
+    targetId === rs.activeTabId ? newTabs[Math.min(idx, newTabs.length - 1)].id : rs.activeTabId;
 
   set(terminalStateAtom, {
     ...state,
-    workspaces: state.workspaces.map((w) =>
-      w.id === ws.id ? { ...ws, tabs: newTabs, activeTabId: newActiveId } : w,
+    runspaces: state.runspaces.map((r) =>
+      r.id === rs.id ? { ...rs, tabs: newTabs, activeTabId: newActiveId } : r,
     ),
   });
 });
 
 export const activateTerminalTabAtom = atom(null, (get, set, tabId: string) => {
   const state = get(resolvedStateAtom);
-  const ws = state.workspaces.find((w) => w.id === state.activeWorkspaceId);
-  if (!ws) return;
+  const rs = state.runspaces.find((r) => r.id === state.activeRunspaceId);
+  if (!rs) return;
 
   set(terminalStateAtom, {
     ...state,
-    workspaces: state.workspaces.map((w) => (w.id === ws.id ? { ...ws, activeTabId: tabId } : w)),
+    runspaces: state.runspaces.map((r) => (r.id === rs.id ? { ...rs, activeTabId: tabId } : r)),
   });
 });
 
 export const cycleTerminalTabAtom = atom(null, (get, set, direction: "left" | "right") => {
   const state = get(resolvedStateAtom);
-  const ws = state.workspaces.find((w) => w.id === state.activeWorkspaceId);
-  if (!ws || ws.tabs.length <= 1) return;
+  const rs = state.runspaces.find((r) => r.id === state.activeRunspaceId);
+  if (!rs || rs.tabs.length <= 1) return;
 
-  const sorted = [...ws.tabs].sort((a, b) => a.order - b.order);
-  const idx = sorted.findIndex((t) => t.id === ws.activeTabId);
+  const sorted = [...rs.tabs].sort((a, b) => a.order - b.order);
+  const idx = sorted.findIndex((t) => t.id === rs.activeTabId);
   const newIdx =
     direction === "left" ? (idx - 1 + sorted.length) % sorted.length : (idx + 1) % sorted.length;
 
   set(terminalStateAtom, {
     ...state,
-    workspaces: state.workspaces.map((w) =>
-      w.id === ws.id ? { ...ws, activeTabId: sorted[newIdx].id } : w,
+    runspaces: state.runspaces.map((r) =>
+      r.id === rs.id ? { ...rs, activeTabId: sorted[newIdx].id } : r,
     ),
   });
 });
@@ -258,9 +258,9 @@ export const updateTabTitleAtom = atom(null, (get, set, tabId: string, title: st
   const state = get(resolvedStateAtom);
   set(terminalStateAtom, {
     ...state,
-    workspaces: state.workspaces.map((ws) => ({
-      ...ws,
-      tabs: ws.tabs.map((t) => (t.id === tabId ? { ...t, title } : t)),
+    runspaces: state.runspaces.map((rs) => ({
+      ...rs,
+      tabs: rs.tabs.map((t) => (t.id === tabId ? { ...t, title } : t)),
     })),
   });
 });
@@ -269,18 +269,18 @@ export const updateTabCwdAtom = atom(null, (get, set, tabId: string, cwd: string
   const state = get(resolvedStateAtom);
   set(terminalStateAtom, {
     ...state,
-    workspaces: state.workspaces.map((ws) => ({
-      ...ws,
-      tabs: ws.tabs.map((t) => (t.id === tabId ? { ...t, cwd } : t)),
+    runspaces: state.runspaces.map((rs) => ({
+      ...rs,
+      tabs: rs.tabs.map((t) => (t.id === tabId ? { ...t, cwd } : t)),
     })),
   });
 });
 
-export const reorderWorkspacesAtom = atom(null, (get, set, fromId: string, toId: string) => {
+export const reorderRunspacesAtom = atom(null, (get, set, fromId: string, toId: string) => {
   const state = get(resolvedStateAtom);
-  const sorted = [...state.workspaces].sort((a, b) => a.order - b.order);
-  const fromIdx = sorted.findIndex((ws) => ws.id === fromId);
-  const toIdx = sorted.findIndex((ws) => ws.id === toId);
+  const sorted = [...state.runspaces].sort((a, b) => a.order - b.order);
+  const fromIdx = sorted.findIndex((rs) => rs.id === fromId);
+  const toIdx = sorted.findIndex((rs) => rs.id === toId);
   if (fromIdx === -1 || toIdx === -1) return;
 
   const [moved] = sorted.splice(fromIdx, 1);
@@ -288,16 +288,16 @@ export const reorderWorkspacesAtom = atom(null, (get, set, fromId: string, toId:
 
   set(terminalStateAtom, {
     ...state,
-    workspaces: sorted.map((ws, i) => ({ ...ws, order: i })),
+    runspaces: sorted.map((rs, i) => ({ ...rs, order: i })),
   });
 });
 
 export const reorderTabsAtom = atom(null, (get, set, fromId: string, toId: string) => {
   const state = get(resolvedStateAtom);
-  const ws = state.workspaces.find((w) => w.id === state.activeWorkspaceId);
-  if (!ws) return;
+  const rs = state.runspaces.find((r) => r.id === state.activeRunspaceId);
+  if (!rs) return;
 
-  const sorted = [...ws.tabs].sort((a, b) => a.order - b.order);
+  const sorted = [...rs.tabs].sort((a, b) => a.order - b.order);
   const fromIdx = sorted.findIndex((t) => t.id === fromId);
   const toIdx = sorted.findIndex((t) => t.id === toId);
   if (fromIdx === -1 || toIdx === -1) return;
@@ -307,46 +307,46 @@ export const reorderTabsAtom = atom(null, (get, set, fromId: string, toId: strin
 
   set(terminalStateAtom, {
     ...state,
-    workspaces: state.workspaces.map((w) =>
-      w.id === ws.id ? { ...ws, tabs: sorted.map((t, i) => ({ ...t, order: i })) } : w,
+    runspaces: state.runspaces.map((r) =>
+      r.id === rs.id ? { ...rs, tabs: sorted.map((t, i) => ({ ...t, order: i })) } : r,
     ),
   });
 });
 
 function stateToSnapshot(state: TerminalState): TerminalStateSnapshot {
   return {
-    workspaces: state.workspaces.map((ws) => ({
-      id: ws.id,
-      sort_order: ws.order,
-      is_active: ws.id === state.activeWorkspaceId,
-      tabs: ws.tabs.map((t) => ({
+    runspaces: state.runspaces.map((rs) => ({
+      id: rs.id,
+      sort_order: rs.order,
+      is_active: rs.id === state.activeRunspaceId,
+      tabs: rs.tabs.map((t) => ({
         id: t.id,
         cwd: t.cwd !== "~" ? t.cwd : t.title || t.cwd,
         title: t.title,
         sort_order: t.order,
-        is_active: t.id === ws.activeTabId,
+        is_active: t.id === rs.activeTabId,
       })),
     })),
   };
 }
 
 function snapshotToState(snap: TerminalStateSnapshot): TerminalState | null {
-  if (snap.workspaces.length === 0) return null;
-  const workspaces: TerminalWorkspace[] = snap.workspaces.map((ws) => ({
-    id: ws.id,
-    order: ws.sort_order,
-    activeTabId: ws.tabs.find((t) => t.is_active)?.id ?? ws.tabs[0]?.id ?? "",
-    tabs: ws.tabs.map((t) => ({
+  if (snap.runspaces.length === 0) return null;
+  const runspaces: TerminalRunspace[] = snap.runspaces.map((rs) => ({
+    id: rs.id,
+    order: rs.sort_order,
+    activeTabId: rs.tabs.find((t) => t.is_active)?.id ?? rs.tabs[0]?.id ?? "",
+    tabs: rs.tabs.map((t) => ({
       id: t.id,
       title: t.title,
       cwd: t.cwd,
       order: t.sort_order,
     })),
   }));
-  const activeWs = snap.workspaces.find((ws) => ws.is_active);
+  const activeRs = snap.runspaces.find((rs) => rs.is_active);
   return {
-    workspaces: workspaces.filter((ws) => ws.tabs.length > 0),
-    activeWorkspaceId: activeWs?.id ?? workspaces[0]?.id ?? "",
+    runspaces: runspaces.filter((rs) => rs.tabs.length > 0),
+    activeRunspaceId: activeRs?.id ?? runspaces[0]?.id ?? "",
   };
 }
 
@@ -354,7 +354,7 @@ export const loadTerminalStateAtom = atom(null, async (_get, set) => {
   try {
     const snap = await terminalLoadState();
     const state = snapshotToState(snap);
-    if (state && state.workspaces.length > 0) {
+    if (state && state.runspaces.length > 0) {
       set(terminalStateAtom, state);
       return;
     }

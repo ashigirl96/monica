@@ -87,8 +87,8 @@ export default function WorkBenchContent() {
   }, [ready, state, saveState]);
 
   const activeTabIdRef = useRef<string | undefined>(undefined);
-  activeTabIdRef.current = state?.workspaces.find(
-    (ws) => ws.id === state.activeWorkspaceId,
+  activeTabIdRef.current = state?.runspaces.find(
+    (rs) => rs.id === state.activeRunspaceId,
   )?.activeTabId;
 
   useEffect(() => {
@@ -114,13 +114,13 @@ export default function WorkBenchContent() {
 
   return (
     <div className="relative h-full">
-      {state.workspaces.flatMap((ws) =>
-        ws.tabs.map((tab) => (
+      {state.runspaces.flatMap((rs) =>
+        rs.tabs.map((tab) => (
           <TerminalPane
             key={tab.id}
             tabId={tab.id}
             cwd={tab.cwd}
-            active={ws.id === state.activeWorkspaceId && tab.id === ws.activeTabId}
+            active={rs.id === state.activeRunspaceId && tab.id === rs.activeTabId}
           />
         )),
       )}

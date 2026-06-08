@@ -17,6 +17,7 @@ fn migrations() -> Migrations<'static> {
         M::up(V8),
         M::up(V9),
         M::up(V10),
+        M::up(V11),
     ])
 }
 
@@ -394,6 +395,14 @@ const V10: &str = r#"
     CREATE INDEX terminal_tabs_workspace_idx ON terminal_tabs(workspace_id, sort_order);
 "#;
 
+/// v11: rename workspace → runspace (tables, columns, indexes).
+const V11: &str = r#"
+    ALTER TABLE terminal_workspaces RENAME TO terminal_runspaces;
+    ALTER TABLE terminal_tabs RENAME COLUMN workspace_id TO runspace_id;
+    DROP INDEX terminal_tabs_workspace_idx;
+    CREATE INDEX terminal_tabs_runspace_idx ON terminal_tabs(runspace_id, sort_order);
+"#;
+
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
     migrations()
@@ -467,7 +476,7 @@ mod tests {
             .conn()
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 10);
+        assert_eq!(version, 11);
 
         std::fs::remove_file(&path).ok();
     }

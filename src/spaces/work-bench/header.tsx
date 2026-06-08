@@ -1,6 +1,6 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import {
-  activeWorkspaceAtom,
+  activeRunspaceAtom,
   activateTerminalTabAtom,
   closeTerminalTabAtom,
   createTerminalTabAtom,
@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { useEffect, useRef, useState } from "react";
 
 export function WorkBenchHeader() {
-  const ws = useAtomValue(activeWorkspaceAtom);
+  const rs = useAtomValue(activeRunspaceAtom);
   const activateTab = useSetAtom(activateTerminalTabAtom);
   const closeTab = useSetAtom(closeTerminalTabAtom);
   const createTab = useSetAtom(createTerminalTabAtom);
@@ -27,16 +27,16 @@ export function WorkBenchHeader() {
       block: "nearest",
       inline: "nearest",
     });
-  }, [ws?.activeTabId]);
+  }, [rs?.activeTabId]);
 
-  if (!ws) return null;
+  if (!rs) return null;
 
-  const sorted = [...ws.tabs].sort((a, b) => a.order - b.order);
+  const sorted = [...rs.tabs].sort((a, b) => a.order - b.order);
 
   return (
     <div className="scrollbar-hide flex h-full items-center gap-1 overflow-x-auto">
       {sorted.map((tab) => {
-        const isActive = tab.id === ws.activeTabId;
+        const isActive = tab.id === rs.activeTabId;
         const label = tab.title || tab.cwd.split("/").pop() || "Terminal";
         return (
           <button

@@ -29,7 +29,7 @@ export type TerminalTabRow = {
   is_active: boolean;
 };
 
-export type TerminalWorkspaceRow = {
+export type TerminalRunspaceRow = {
   id: string;
   sort_order: number;
   is_active: boolean;
@@ -37,7 +37,7 @@ export type TerminalWorkspaceRow = {
 };
 
 export type TerminalStateSnapshot = {
-  workspaces: TerminalWorkspaceRow[];
+  runspaces: TerminalRunspaceRow[];
 };
 
 export async function terminalLoadState(): Promise<TerminalStateSnapshot> {

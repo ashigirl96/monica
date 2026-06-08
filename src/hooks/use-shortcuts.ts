@@ -3,11 +3,11 @@ import { useEffect, useRef } from "react";
 import { type SpaceId, activeSpaceAtom, prefixActiveAtom, sidebarOpenAtom } from "@/stores/space";
 import { createTabAtom, closeTabAtom, cycleTabAtom } from "@/stores/tabs";
 import {
-  createWorkspaceAtom,
+  createRunspaceAtom,
   createTerminalTabAtom,
   closeTerminalTabAtom,
   cycleTerminalTabAtom,
-  cycleWorkspaceAtom,
+  cycleRunspaceAtom,
 } from "@/stores/terminal";
 
 const META_KEY_SPACE_MAP: Record<string, SpaceId> = {
@@ -34,11 +34,11 @@ export function useShortcuts() {
   const createTab = useSetAtom(createTabAtom);
   const closeTab = useSetAtom(closeTabAtom);
   const cycleTab = useSetAtom(cycleTabAtom);
-  const createWorkspace = useSetAtom(createWorkspaceAtom);
+  const createRunspace = useSetAtom(createRunspaceAtom);
   const createTerminalTab = useSetAtom(createTerminalTabAtom);
   const closeTerminalTab = useSetAtom(closeTerminalTabAtom);
   const cycleTerminalTab = useSetAtom(cycleTerminalTabAtom);
-  const cycleWorkspace = useSetAtom(cycleWorkspaceAtom);
+  const cycleRunspace = useSetAtom(cycleRunspaceAtom);
 
   const prefixRef = useRef(false);
   const timeoutRef = useRef<number>(0);
@@ -77,19 +77,19 @@ export function useShortcuts() {
 
       if (e.altKey && e.code === "KeyP") {
         e.preventDefault();
-        if (isWorkBench) createWorkspace();
+        if (isWorkBench) createRunspace();
         return;
       }
 
       if (e.altKey && e.code === "KeyJ") {
         e.preventDefault();
-        if (isWorkBench) cycleWorkspace("down");
+        if (isWorkBench) cycleRunspace("down");
         return;
       }
 
       if (e.altKey && e.code === "KeyK") {
         e.preventDefault();
-        if (isWorkBench) cycleWorkspace("up");
+        if (isWorkBench) cycleRunspace("up");
         return;
       }
 
@@ -147,10 +147,10 @@ export function useShortcuts() {
     createTab,
     closeTab,
     cycleTab,
-    createWorkspace,
+    createRunspace,
     createTerminalTab,
     closeTerminalTab,
     cycleTerminalTab,
-    cycleWorkspace,
+    cycleRunspace,
   ]);
 }
