@@ -23,7 +23,7 @@ build:
 build-debug:
     bun run tauri build --debug --bundles app
 
-install-local: build install-cli
+install-app: build
     rm -rf /Applications/Monica.app
     cp -R target/release/bundle/macos/Monica.app /Applications/Monica.app
     codesign --force --sign "Monica" /Applications/Monica.app
