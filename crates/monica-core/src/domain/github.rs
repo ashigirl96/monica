@@ -4,8 +4,10 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct GithubPullRequestRef {
     pub repo: Option<String>,
+    #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
     pub number: Option<i64>,
     pub url: Option<String>,
     pub status: Option<String>,
@@ -101,11 +103,14 @@ pub struct PullRequestSyncResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct GithubAuthStatus {
     pub authenticated: bool,
     pub source: String,
     pub login: Option<String>,
+    #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
     pub access_expires_at: Option<i64>,
+    #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
     pub refresh_expires_at: Option<i64>,
     pub reauth_required: bool,
     pub message: Option<String>,

@@ -53,7 +53,25 @@ fmt:
 fmt-check:
     bunx oxfmt --check
 
-check: lint fmt-check
+knip:
+    bunx knip
+
+unused-commands:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bindings="src/commands/bindings.ts"
+    cmds=$(sed -n '/^export const commands/,/^};/p' "$bindings" | grep -oE '^\s+[a-zA-Z]+:' | sed 's/[: ]//g')
+    found=0
+    for cmd in $cmds; do
+        if ! grep -rq "commands\.$cmd" src/ --include='*.ts' --include='*.tsx' --exclude="$bindings"; then
+            echo "unused command: $cmd"
+            found=1
+        fi
+    done
+    if [ "$found" -eq 0 ]; then echo "all commands used"; fi
+    exit "$found"
+
+check: lint fmt-check knip unused-commands
     cargo clippy --workspace --all-targets -- -D warnings
 
 test:

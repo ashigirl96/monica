@@ -25,8 +25,26 @@
 
 ## `#[tauri::command]` を増やす/減らすとき
 
+コマンドは tauri-specta で管理される。Rust 側で定義したコマンドから
+`src/commands/bindings.ts` に型付きバインディングが自動生成される。
+
+**コマンド追加の手順:**
+
+1. `#[tauri::command]` + `#[specta::specta]` を関数に付ける
+2. `lib.rs` の `tauri_specta::collect_commands![]` に登録する
+3. 戻り値/引数の型に `#[cfg_attr(feature = "specta", derive(specta::Type))]` を付ける
+   - `i64` フィールドには `#[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]`
+   - `serde_json::Value` フィールドには `#[cfg_attr(feature = "specta", specta(type = specta_typescript::Any))]`
+4. `just dev` で bindings.ts を再生成
+5. `src/commands/` 配下のラッパーファイルから `commands.xxx` を呼ぶ
+
+**未使用コマンドの検知:**
+
+- `just unused-commands` — bindings.ts のコマンドがフロントで `commands.xxx` として使われているか照合する。使われていなければ fail。
+- `just knip --fix` → `just unused-commands` の順で実行すると、フロントの不要コードを削除したうえで孤立コマンドを検出できる。
 - 不要になったコマンドはソースからも削除する (`removeUnusedCommands` は
   自動で消してくれるが、死荷物をソースに残さない)。
+
 - 新規 plugin (`tauri-plugin-*`) を入れたら `capabilities/default.json` の
   `permissions` を更新する。現状は `["core:default"]` のみ。
 
@@ -35,4 +53,4 @@
 - `unwrap()` / `expect()` / `let _ = fallible()` は避け、`?` で伝播する。
 - パニックしうるインデックスアクセスに注意。
 - コメントは「なぜ」が非自明なときだけ書く (ルート CLAUDE.md と同じ規約)。
-- PR 前は `just check` (= oxlint + oxfmt --check + `cargo clippy --all-targets -- -D warnings`)。
+- PR 前は `just check` (= oxlint + oxfmt --check + knip + unused-commands + `cargo clippy --all-targets -- -D warnings`)。

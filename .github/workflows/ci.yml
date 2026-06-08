@@ -22,6 +22,21 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bunx oxlint
       - run: bunx oxfmt --check
+      - run: bunx knip
+      - name: Check unused Tauri commands
+        shell: bash
+        run: |
+          bindings="src/commands/bindings.ts"
+          cmds=$(sed -n '/^export const commands/,/^};/p' "$bindings" | grep -oE '^\s+[a-zA-Z]+:' | sed 's/[: ]//g')
+          found=0
+          for cmd in $cmds; do
+            if ! grep -rq "commands\.$cmd" src/ --include='*.ts' --include='*.tsx' --exclude="$bindings"; then
+              echo "unused command: $cmd"
+              found=1
+            fi
+          done
+          if [ "$found" -eq 0 ]; then echo "all commands used"; fi
+          exit "$found"
 
   build:
     name: tauri build (macos)

@@ -1,12 +1,12 @@
 import { atom } from "jotai";
 import { activeSpaceAtom, type SpaceId } from "./space";
 
-export type Tab = {
+type Tab = {
   id: string;
   label: string;
 };
 
-export type TabState = {
+type TabState = {
   tabs: Tab[];
   activeTabId: string | null;
   counter: number;

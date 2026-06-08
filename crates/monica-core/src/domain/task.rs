@@ -8,6 +8,7 @@ use super::github::GithubPullRequestRef;
 use super::status::{DisplayStatus, TaskRunStatus, TaskRunWaitReason, TaskStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 pub enum TaskKind {
     Development,
@@ -33,6 +34,7 @@ impl FromStr for TaskKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct Task {
     pub id: String,
     pub kind: TaskKind,
@@ -42,7 +44,9 @@ pub struct Task {
     pub body: String,
     pub project_id: Option<String>,
     pub labels: Vec<String>,
+    #[cfg_attr(feature = "specta", specta(type = specta_typescript::Any))]
     pub details: Value,
+    #[cfg_attr(feature = "specta", specta(type = specta_typescript::Any))]
     pub source: Option<Value>,
     pub deleted_at: Option<String>,
     pub created_at: String,
@@ -50,9 +54,11 @@ pub struct Task {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct TaskSummaryRow {
     pub id: String,
     pub project: Option<String>,
+    #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
     pub github_issue_number: Option<i64>,
     pub github_pull_requests: Vec<GithubPullRequestRef>,
     pub task_status: TaskStatus,
@@ -94,11 +100,14 @@ impl NewTask {
 
 /// A status/hook event recorded against a task or run. Persisted from issue G onward.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct Event {
+    #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
     pub id: i64,
     pub task_id: Option<String>,
     pub task_run_id: Option<String>,
     pub kind: String,
+    #[cfg_attr(feature = "specta", specta(type = specta_typescript::Any))]
     pub payload: Value,
     pub created_at: String,
 }

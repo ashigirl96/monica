@@ -5,23 +5,28 @@ use serde::{Deserialize, Serialize};
 use crate::sqlite::SqliteStore;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct TerminalTabRow {
     pub id: String,
     pub cwd: String,
     pub title: String,
+    #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
     pub sort_order: i64,
     pub is_active: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct TerminalRunspaceRow {
     pub id: String,
+    #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
     pub sort_order: i64,
     pub is_active: bool,
     pub tabs: Vec<TerminalTabRow>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct TerminalStateSnapshot {
     pub runspaces: Vec<TerminalRunspaceRow>,
 }

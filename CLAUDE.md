@@ -13,7 +13,9 @@ just dev           # 開発: Tauri ウィンドウ + Vite
 just dev-cli       # CLI ビルドして ./monica に配置
 just build         # release ビルド (.app のみ。配布物は CI で生成)
 just install-app   # .app をビルドして /Applications/Monica.app に配置
-just check         # lint + fmt-check + cargo clippy (PR 前必須)
+just check         # lint + fmt-check + knip + unused-commands + cargo clippy (PR 前必須)
+just knip          # 未使用 export/依存の検出 (--fix で自動削除)
+just unused-commands  # bindings.ts のコマンドがフロントで使われているか照合
 just test          # cargo test --workspace
 just analyze       # dist/stats.html で chunk を可視化
 just bloat         # Rust 依存サイズ内訳

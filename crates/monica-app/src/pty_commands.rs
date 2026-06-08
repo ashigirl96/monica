@@ -5,6 +5,7 @@ use monica_pty::{PtyManager, PtyOutput, PtySize, SpawnRequest};
 use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
+#[specta::specta]
 pub fn pty_spawn(
     state: State<'_, PtyManager>,
     app: AppHandle,
@@ -37,6 +38,7 @@ pub fn pty_spawn(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn pty_write(state: State<'_, PtyManager>, id: String, data: String) -> Result<(), String> {
     let engine = base64::engine::general_purpose::STANDARD;
     let bytes = engine.decode(&data).map_err(|e| e.to_string())?;
@@ -44,6 +46,7 @@ pub fn pty_write(state: State<'_, PtyManager>, id: String, data: String) -> Resu
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn pty_resize(
     state: State<'_, PtyManager>,
     id: String,
@@ -56,11 +59,13 @@ pub fn pty_resize(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn pty_kill(state: State<'_, PtyManager>, id: String) -> Result<(), String> {
     state.kill(&id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn terminal_load_state() -> Result<TerminalStateSnapshot, String> {
     let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
     runtime
@@ -70,6 +75,7 @@ pub fn terminal_load_state() -> Result<TerminalStateSnapshot, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn terminal_save_state(state: TerminalStateSnapshot) -> Result<(), String> {
     let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
     runtime

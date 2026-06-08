@@ -1,5 +1,6 @@
 #[cfg(target_os = "macos")]
 #[tauri::command]
+#[specta::specta]
 pub fn clipboard_write_image(path: String) -> Result<(), String> {
     use objc2::runtime::ProtocolObject;
     use objc2::AnyThread;
@@ -26,6 +27,7 @@ pub fn clipboard_write_image(path: String) -> Result<(), String> {
 
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
+#[specta::specta]
 pub fn clipboard_write_image(_path: String) -> Result<(), String> {
     Err("clipboard_write_image is only supported on macOS".to_string())
 }

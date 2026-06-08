@@ -18,10 +18,6 @@ export const zoomTerminalAtom = atom(null, (get, set, delta: 1 | -1) => {
   set(terminalFontSizeAtom, Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, current + delta)));
 });
 
-export const resetTerminalZoomAtom = atom(null, (_get, set) => {
-  set(terminalFontSizeAtom, FONT_SIZE_DEFAULT);
-});
-
 export type TerminalTab = {
   id: string;
   title: string;

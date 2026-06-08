@@ -4,7 +4,7 @@ use std::sync::{
 };
 use std::time::Duration;
 
-use monica_core::{Event, GithubAuthStatus, PullRequestSyncStatus, Task, TaskSummaryRow};
+use monica_core::PullRequestSyncStatus;
 use monica_infra::Runtime;
 use monica_pty::PtyManager;
 
@@ -14,56 +14,28 @@ mod pty_commands;
 const PR_SYNC_INTERVAL: Duration = Duration::from_secs(10);
 const PR_SYNC_BATCH_LIMIT: usize = 3;
 
-#[tauri::command]
-fn list_tasks() -> Result<Vec<Task>, String> {
-    let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_core::list_tasks(&runtime.repositories).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn list_task_summaries() -> Result<Vec<TaskSummaryRow>, String> {
-    let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_core::list_task_summaries(&runtime.repositories, None, None).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn list_events(task_id: String) -> Result<Vec<Event>, String> {
-    let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_core::list_events(&runtime.repositories, Some(&task_id)).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn delete_task(id: String) -> Result<(), String> {
-    let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_core::delete_issue(&mut runtime.repositories, &runtime.git, &id)
-        .map(|_| ())
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn github_auth_status() -> Result<GithubAuthStatus, String> {
-    let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    let status = monica_core::github_auth_status(&runtime.auth);
-    if status.authenticated {
-        log::info!(
-            target: "monica_app::github_auth",
-            "GitHub auth available source={} login={}",
-            status.source,
-            status.login.as_deref().unwrap_or("-")
-        );
-    } else {
-        log::warn!(
-            target: "monica_app::github_auth",
-            "GitHub auth unavailable source={} message={}",
-            status.source,
-            status.message.as_deref().unwrap_or("-")
-        );
-    }
-    Ok(status)
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let specta_builder = tauri_specta::Builder::new()
+        .commands(tauri_specta::collect_commands![
+            clipboard_commands::clipboard_write_image,
+            pty_commands::pty_spawn,
+            pty_commands::pty_write,
+            pty_commands::pty_resize,
+            pty_commands::pty_kill,
+            pty_commands::terminal_load_state,
+            pty_commands::terminal_save_state,
+        ]);
+
+    #[cfg(debug_assertions)]
+    {
+        let bindings_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../src/commands/bindings.ts");
+        specta_builder
+            .export(specta_typescript::Typescript::default(), &bindings_path)
+            .expect("failed to export typescript bindings");
+    }
+
     let builder = tauri::Builder::default();
     #[cfg(debug_assertions)]
     let builder = builder.plugin(tauri_plugin_mcp_bridge::init());
@@ -83,20 +55,7 @@ pub fn run() {
             );
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            list_tasks,
-            list_task_summaries,
-            list_events,
-            delete_task,
-            github_auth_status,
-            clipboard_commands::clipboard_write_image,
-            pty_commands::pty_spawn,
-            pty_commands::pty_write,
-            pty_commands::pty_resize,
-            pty_commands::pty_kill,
-            pty_commands::terminal_load_state,
-            pty_commands::terminal_save_state,
-        ])
+        .invoke_handler(specta_builder.invoke_handler())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

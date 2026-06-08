@@ -1,5 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
+import { commands } from "./bindings";
 
 export async function clipboardWriteImage(path: string): Promise<void> {
-  return invoke("clipboard_write_image", { path });
+  const result = await commands.clipboardWriteImage(path);
+  if (result.status === "error") throw new Error(result.error);
 }
