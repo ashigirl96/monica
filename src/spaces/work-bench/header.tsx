@@ -8,7 +8,7 @@ import {
 } from "@/stores/terminal";
 import { PlusIcon, XIcon } from "@/components/icons";
 import { cn } from "@/lib/utils";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export function WorkBenchHeader() {
   const ws = useAtomValue(activeWorkspaceAtom);
@@ -18,19 +18,30 @@ export function WorkBenchHeader() {
   const reorder = useSetAtom(reorderTabsAtom);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const dragIdRef = useRef<string | null>(null);
+  const activeTabRef = useRef<HTMLButtonElement>(null);
+
+  // CSS cannot trigger scroll-to-element on class change; JS is required
+  useEffect(() => {
+    activeTabRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+      inline: "nearest",
+    });
+  }, [ws?.activeTabId]);
 
   if (!ws) return null;
 
   const sorted = [...ws.tabs].sort((a, b) => a.order - b.order);
 
   return (
-    <div className="flex h-full items-center gap-1">
+    <div className="scrollbar-hide flex h-full items-center gap-1 overflow-x-auto">
       {sorted.map((tab) => {
         const isActive = tab.id === ws.activeTabId;
         const label = tab.title || tab.cwd.split("/").pop() || "Terminal";
         return (
           <button
             key={tab.id}
+            ref={isActive ? activeTabRef : undefined}
             draggable
             onDragStart={() => {
               dragIdRef.current = tab.id;
