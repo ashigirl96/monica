@@ -53,8 +53,9 @@ function RunspaceItem({
       className={cn(
         "flex w-full cursor-pointer flex-col rounded-lg px-2.5 py-1.5 text-left",
         "transition-colors duration-100",
+        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/30",
         ws.isActive
-          ? "bg-white/[0.1] text-foreground"
+          ? "bg-white/[0.1] text-foreground focus-visible:ring-white/50"
           : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground",
         dragState.dragOverId === ws.id && "ring-1 ring-white/20",
       )}

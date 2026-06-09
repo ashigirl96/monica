@@ -70,8 +70,9 @@ export function WorkBenchHeader() {
             className={cn(
               "group flex h-7 w-[220px] min-w-[220px] max-w-[220px] cursor-pointer items-center rounded-lg px-3 text-xs",
               "transition-colors duration-100",
+              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/30",
               isActive
-                ? "bg-[var(--content-bg)] text-foreground shadow-sm"
+                ? "bg-[var(--content-bg)] text-foreground shadow-sm focus-visible:ring-white/50"
                 : "bg-white/[0.06] text-muted-foreground hover:bg-white/[0.1] hover:text-foreground",
               dragOverId === tab.id && "ring-1 ring-white/20",
             )}
