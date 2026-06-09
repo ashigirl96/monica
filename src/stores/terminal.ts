@@ -381,7 +381,11 @@ export const loadTerminalStateAtom = atom(null, async (get, set) => {
 
 export const createTaskRunspaceAtom = atom(
   null,
-  (get, set, params: { runspaceId: string; taskId: string; cwd: string }) => {
+  async (get, set, params: { runspaceId: string; taskId: string; cwd: string }) => {
+    if (get(terminalStateAtom) === null) {
+      await set(loadTerminalStateAtom);
+    }
+
     const state = get(resolvedStateAtom);
 
     const existing = state.runspaces.find((r) => r.id === params.runspaceId);

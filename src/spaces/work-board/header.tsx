@@ -85,7 +85,7 @@ function TrackIssueButton() {
             setError(null);
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") handleSubmit();
+            if (e.key === "Enter" && !loading) handleSubmit();
             if (e.key === "Escape") {
               setOpen(false);
               setValue("");
