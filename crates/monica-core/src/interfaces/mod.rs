@@ -3,9 +3,9 @@ use std::pin::Pin;
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-mod bench_repository;
 mod agent_launcher;
 mod auth_gateway;
+mod bench_repository;
 mod clock;
 mod event_repository;
 mod git_gateway;
@@ -16,9 +16,9 @@ mod setup_runner;
 mod task_repository;
 mod task_run_repository;
 
-pub use bench_repository::BenchRepository;
 pub use agent_launcher::{AgentLaunch, AgentLaunchMode, AgentLauncher};
 pub use auth_gateway::AuthGateway;
+pub use bench_repository::BenchRepository;
 pub use clock::Clock;
 pub use event_repository::EventRepository;
 pub use git_gateway::GitGateway;

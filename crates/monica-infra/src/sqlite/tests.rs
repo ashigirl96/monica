@@ -223,6 +223,92 @@ fn branch_pull_request_candidate_uses_latest_run_branch_and_project_repo() {
 }
 
 #[test]
+fn task_summary_uses_active_run_before_latest_run() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("active run")).unwrap();
+    let active = db
+        .start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: Some("active-branch".to_string()),
+            worktree_path: None,
+        })
+        .unwrap();
+    db.finish_task_run(&active.id, &task.id, TaskRunStatus::Running)
+        .unwrap();
+    let latest = db
+        .start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: Some("latest-branch".to_string()),
+            worktree_path: None,
+        })
+        .unwrap();
+    db.finish_task_run(&latest.id, &task.id, TaskRunStatus::Failed)
+        .unwrap();
+
+    db.set_active_task_run(&task.id, &active.id).unwrap();
+
+    let summary = db.list_task_summaries(None, None).unwrap().remove(0);
+    assert_eq!(
+        summary.active_task_run_id.as_deref(),
+        Some(active.id.as_str())
+    );
+    assert_eq!(summary.task_run_id.as_deref(), Some(active.id.as_str()));
+    assert_eq!(summary.branch.as_deref(), Some("active-branch"));
+    assert_eq!(summary.task_run_status, Some(TaskRunStatus::Running));
+    assert_eq!(summary.status, DisplayStatus::Running);
+}
+
+#[test]
+fn task_summary_falls_back_to_latest_run_without_active_run() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("latest run")).unwrap();
+    db.start_task_run(NewTaskRun {
+        task_id: task.id.clone(),
+        agent: None,
+        branch: Some("old-branch".to_string()),
+        worktree_path: None,
+    })
+    .unwrap();
+    let latest = db
+        .start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: Some("latest-branch".to_string()),
+            worktree_path: None,
+        })
+        .unwrap();
+
+    let summary = db.list_task_summaries(None, None).unwrap().remove(0);
+    assert_eq!(summary.active_task_run_id, None);
+    assert_eq!(summary.task_run_id.as_deref(), Some(latest.id.as_str()));
+    assert_eq!(summary.branch.as_deref(), Some("latest-branch"));
+}
+
+#[test]
+fn set_active_task_run_rejects_run_from_another_task() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("task")).unwrap();
+    let other = db.insert_task(dev_task("other")).unwrap();
+    let other_run = db
+        .start_task_run(NewTaskRun {
+            task_id: other.id,
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
+
+    let err = db.set_active_task_run(&task.id, &other_run.id).unwrap_err();
+    assert!(err.to_string().contains("is not linked"));
+    assert_eq!(
+        db.get_task(&task.id).unwrap().unwrap().active_task_run_id,
+        None
+    );
+}
+
+#[test]
 fn branch_pull_request_candidate_skips_main_master_and_default_branch() {
     for branch in ["main", "master", "trunk"] {
         let mut db = SqliteStore::open_in_memory().unwrap();

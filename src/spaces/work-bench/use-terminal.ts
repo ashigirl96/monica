@@ -47,6 +47,7 @@ function fromBase64(b64: string): Uint8Array {
 type UseTerminalOptions = {
   tabId: string;
   cwd: string;
+  env?: [string, string][];
   active: boolean;
   onTitleChange?: (title: string) => void;
   onCwdChange?: (cwd: string) => void;
@@ -267,7 +268,7 @@ export function useTerminal(
 
     if (!aliveSessions.has(options.tabId)) {
       aliveSessions.add(options.tabId);
-      ptySpawn(options.tabId, options.cwd, term.rows, term.cols).catch(() => {
+      ptySpawn(options.tabId, options.cwd, term.rows, term.cols, options.env ?? []).catch(() => {
         aliveSessions.delete(options.tabId);
         term.writeln("\r\n\x1b[31mFailed to spawn shell. Press any key to retry.\x1b[0m");
       });
@@ -291,7 +292,7 @@ export function useTerminal(
       observer.disconnect();
       if (fitDebounce) clearTimeout(fitDebounce);
     };
-  }, [options.active, options.tabId, options.cwd, containerRef]);
+  }, [options.active, options.tabId, options.cwd, options.env, containerRef]);
 
   useEffect(() => {
     if (!options.active) return;

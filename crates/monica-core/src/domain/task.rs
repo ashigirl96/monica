@@ -48,6 +48,7 @@ pub struct Task {
     pub details: Value,
     #[cfg_attr(feature = "specta", specta(type = specta_typescript::Any))]
     pub source: Option<Value>,
+    pub active_task_run_id: Option<String>,
     pub deleted_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -63,6 +64,8 @@ pub struct TaskSummaryRow {
     pub github_issue_number: Option<i64>,
     pub github_pull_requests: Vec<GithubPullRequestRef>,
     pub task_status: TaskStatus,
+    pub active_task_run_id: Option<String>,
+    pub task_run_id: Option<String>,
     pub task_run_status: Option<TaskRunStatus>,
     pub task_run_wait_reason: Option<TaskRunWaitReason>,
     pub status: DisplayStatus,

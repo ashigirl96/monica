@@ -1,21 +1,26 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   activeRunspaceAtom,
+  activeTerminalTabAtom,
   activateTerminalTabAtom,
   closeTerminalTabAtom,
   createTerminalTabAtom,
   reorderTabsAtom,
 } from "@/stores/terminal";
+import { loadBoardAtom, taskSummariesAtom } from "@/stores/workboard";
 import { PlusIcon, XIcon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import { useEffect, useRef, useState } from "react";
 
 export function WorkBenchHeader() {
   const rs = useAtomValue(activeRunspaceAtom);
+  const activeTab = useAtomValue(activeTerminalTabAtom);
+  const tasks = useAtomValue(taskSummariesAtom);
   const activateTab = useSetAtom(activateTerminalTabAtom);
   const closeTab = useSetAtom(closeTerminalTabAtom);
   const createTab = useSetAtom(createTerminalTabAtom);
   const reorder = useSetAtom(reorderTabsAtom);
+  const loadBoard = useSetAtom(loadBoardAtom);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const dragIdRef = useRef<string | null>(null);
   const activeTabRef = useRef<HTMLButtonElement>(null);
@@ -29,15 +34,38 @@ export function WorkBenchHeader() {
     });
   }, [rs?.activeTabId]);
 
+  useEffect(() => {
+    if (rs?.taskId) loadBoard();
+  }, [rs?.taskId, loadBoard]);
+
   if (!rs) return null;
 
   const sorted = [...rs.tabs].sort((a, b) => a.order - b.order);
+  const task = rs.taskId ? tasks.find((t) => t.id === rs.taskId) : undefined;
 
   return (
     <div className="scrollbar-hide flex h-full items-center gap-1 overflow-x-auto">
+      {rs.taskId && (
+        <div className="mr-1 flex h-7 shrink-0 items-center gap-1 rounded-md bg-white/[0.06] px-2 text-[11px] text-muted-foreground">
+          <span className="font-mono text-emerald-400">{rs.taskId}</span>
+          {activeTab?.taskRunId && (
+            <>
+              <span className="text-muted-foreground/40">/</span>
+              <span className="font-mono">{activeTab.taskRunId}</span>
+            </>
+          )}
+          {task && (
+            <>
+              <span className="text-muted-foreground/40">/</span>
+              <span>{task.status.replaceAll("_", " ")}</span>
+            </>
+          )}
+        </div>
+      )}
       {sorted.map((tab) => {
         const isActive = tab.id === rs.activeTabId;
-        const label = tab.title || tab.cwd.split("/").pop() || "Terminal";
+        const label =
+          tab.kind === "setup_log" ? "Setup" : tab.title || tab.cwd.split("/").pop() || "Terminal";
         return (
           <button
             key={tab.id}

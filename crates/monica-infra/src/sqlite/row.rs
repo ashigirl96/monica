@@ -25,6 +25,7 @@ pub(super) fn task_from_row(row: &Row<'_>) -> Result<Task> {
             Some(s) => Some(serde_json::from_str(&s)?),
             None => None,
         },
+        active_task_run_id: row.get("active_task_run_id")?,
         deleted_at: row.get("deleted_at")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,

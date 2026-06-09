@@ -23,6 +23,9 @@ export const zoomTerminalAtom = atom(null, (get, set, delta: 1 | -1) => {
 
 export type TerminalTab = {
   id: string;
+  kind: "terminal" | "setup_log";
+  taskRunId?: string;
+  setupLogPath?: string;
   title: string;
   cwd: string;
   order: number;
@@ -52,9 +55,26 @@ function resolveTabCwd(tab: TerminalTab | null | undefined): string {
   return defaultCwd();
 }
 
-function createTab(cwd: string, order: number): TerminalTab {
+function createTab(
+  cwd: string,
+  order: number,
+  options?: {
+    kind?: TerminalTab["kind"];
+    title?: string;
+    taskRunId?: string;
+    setupLogPath?: string;
+  },
+): TerminalTab {
   const id = crypto.randomUUID();
-  return { id, title: "", cwd, order };
+  return {
+    id,
+    kind: options?.kind ?? "terminal",
+    taskRunId: options?.taskRunId,
+    setupLogPath: options?.setupLogPath,
+    title: options?.title ?? "",
+    cwd,
+    order,
+  };
 }
 
 function createRunspace(order: number, cwd?: string): TerminalRunspace {
@@ -78,6 +98,7 @@ function deriveRunspaceTitle(rs: TerminalRunspace): string {
 
 function deriveRunspaceDescription(rs: TerminalRunspace): string {
   const tab = rs.tabs.find((t) => t.id === rs.activeTabId) ?? rs.tabs[0];
+  if (tab?.taskRunId) return tab.taskRunId;
   return tab?.title ?? "";
 }
 
@@ -194,7 +215,13 @@ export const createTerminalTabAtom = atom(null, (get, set) => {
 
   const updatedRs: TerminalRunspace = {
     ...rs,
-    tabs: [...shifted, tab],
+    tabs: [
+      ...shifted,
+      {
+        ...tab,
+        taskRunId: activeTab?.taskRunId,
+      },
+    ],
     activeTabId: tab.id,
   };
 
@@ -333,6 +360,9 @@ function stateToSnapshot(state: TerminalState): TerminalStateSnapshot {
       is_active: rs.id === state.activeRunspaceId,
       tabs: rs.tabs.map((t) => ({
         id: t.id,
+        kind: t.kind,
+        task_run_id: t.taskRunId ?? null,
+        setup_log_path: t.setupLogPath ?? null,
         cwd: t.cwd !== "~" ? t.cwd : t.title || t.cwd,
         title: t.title,
         sort_order: t.order,
@@ -350,6 +380,9 @@ function snapshotToState(snap: TerminalStateSnapshot): TerminalState | null {
     activeTabId: rs.tabs.find((t) => t.is_active)?.id ?? rs.tabs[0]?.id ?? "",
     tabs: rs.tabs.map((t) => ({
       id: t.id,
+      kind: t.kind === "setup_log" ? "setup_log" : "terminal",
+      taskRunId: t.task_run_id ?? undefined,
+      setupLogPath: t.setup_log_path ?? undefined,
       title: t.title,
       cwd: t.cwd,
       order: t.sort_order,
@@ -385,21 +418,76 @@ export const loadTerminalStateAtom = atom(null, async (get, set) => {
 
 export const createTaskRunspaceAtom = atom(
   null,
-  async (get, set, params: { runspaceId: string; taskId: string; cwd: string }) => {
+  async (
+    get,
+    set,
+    params: {
+      runspaceId: string;
+      taskId: string;
+      cwd: string;
+      taskRunId?: string;
+      setupLogPath?: string;
+      kind?: TerminalTab["kind"];
+    },
+  ) => {
     if (get(terminalStateAtom) === null) {
       await set(loadTerminalStateAtom);
     }
 
     const state = get(resolvedStateAtom);
+    const kind = params.kind ?? "terminal";
 
     const existing = state.runspaces.find((r) => r.id === params.runspaceId);
     if (existing) {
-      set(terminalStateAtom, { ...state, activeRunspaceId: existing.id });
+      if (!params.taskRunId) {
+        set(terminalStateAtom, { ...state, activeRunspaceId: existing.id });
+        return;
+      }
+
+      const existingTab = existing.tabs.find(
+        (t) => t.taskRunId === params.taskRunId && t.kind === kind,
+      );
+      if (existingTab) {
+        set(terminalStateAtom, {
+          ...state,
+          activeRunspaceId: existing.id,
+          runspaces: state.runspaces.map((r) =>
+            r.id === existing.id ? { ...existing, activeTabId: existingTab.id } : r,
+          ),
+        });
+        return;
+      }
+
+      const maxTabOrder = existing.tabs.reduce((m, t) => Math.max(m, t.order), -1);
+      const tab = createTab(params.cwd, maxTabOrder + 1, {
+        kind,
+        taskRunId: params.taskRunId,
+        setupLogPath: params.setupLogPath,
+        title: kind === "setup_log" ? "Setup" : "",
+      });
+      set(terminalStateAtom, {
+        ...state,
+        activeRunspaceId: existing.id,
+        runspaces: state.runspaces.map((r) =>
+          r.id === existing.id
+            ? {
+                ...existing,
+                tabs: [...existing.tabs, tab],
+                activeTabId: tab.id,
+              }
+            : r,
+        ),
+      });
       return;
     }
 
     const maxOrder = state.runspaces.reduce((m, r) => Math.max(m, r.order), -1);
-    const tab = createTab(params.cwd, 0);
+    const tab = createTab(params.cwd, 0, {
+      kind,
+      taskRunId: params.taskRunId,
+      setupLogPath: params.setupLogPath,
+      title: kind === "setup_log" ? "Setup" : "",
+    });
     const rs: TerminalRunspace = {
       id: params.runspaceId,
       taskId: params.taskId,

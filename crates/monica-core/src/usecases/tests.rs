@@ -12,11 +12,12 @@ use crate::interfaces::{
     TaskRunRepository,
 };
 use crate::{
-    begin_github_device_flow, delete_issue, github_auth_status, launch_agent, logout_github,
-    record_claude_hook, register_project_with_default_branch, run_issue, sync_next_pull_request,
-    track_github_issue, wait_for_github_device_flow, Agent, AgentLaunch, AgentLaunchMode,
-    DisplayStatus, Event, ExternalRef, GithubAuthStatus, GithubDeviceFlow, GithubIssue,
-    GithubPullRequest, GithubPullRequestRef, GithubPullRequestStatus, NewTask, NewTaskRun, Project,
+    begin_github_device_flow, delete_issue, finish_issue_run_setup, github_auth_status,
+    launch_agent, logout_github, record_claude_hook, register_project_with_default_branch,
+    run_issue, start_issue_run_setup, sync_next_pull_request, track_github_issue,
+    wait_for_github_device_flow, Agent, AgentLaunch, AgentLaunchMode, DisplayStatus, Event,
+    ExternalRef, GithubAuthStatus, GithubDeviceFlow, GithubIssue, GithubPullRequest,
+    GithubPullRequestRef, GithubPullRequestStatus, NewTask, NewTaskRun, Project,
     PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate, PullRequestSyncCandidate,
     PullRequestSyncStatus, RefType, Task, TaskKind, TaskRun, TaskRunObservation, TaskRunStatus,
     TaskRunWaitReason, TaskStatus, TaskSummaryRow, TrackGithubIssueInput,
@@ -140,6 +141,8 @@ impl TaskRepository for FakeRepos {
                 github_issue_number: None,
                 github_pull_requests: Vec::<GithubPullRequestRef>::new(),
                 task_status: task.status,
+                active_task_run_id: task.active_task_run_id.clone(),
+                task_run_id: task.active_task_run_id.clone(),
                 task_run_status: None,
                 task_run_wait_reason: None,
                 status: DisplayStatus::from_task_and_run(task.status, None),
@@ -148,6 +151,25 @@ impl TaskRepository for FakeRepos {
             .filter(|row| status.is_none_or(|status| status == row.status))
             .collect();
         Ok(rows)
+    }
+
+    fn set_active_task_run(&self, task_id: &str, task_run_id: &str) -> Result<()> {
+        let mut state = self.state.borrow_mut();
+        let run_matches = state
+            .runs
+            .get(task_run_id)
+            .is_some_and(|run| run.task_id == task_id);
+        if !run_matches {
+            return Err(anyhow!(
+                "task run {task_run_id} is not linked to task {task_id}"
+            ));
+        }
+        state
+            .tasks
+            .get_mut(task_id)
+            .ok_or_else(|| anyhow!("task not found: {task_id}"))?
+            .active_task_run_id = Some(task_run_id.to_string());
+        Ok(())
     }
 
     fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()> {
@@ -518,6 +540,23 @@ impl SetupRunner for FakeSetup {
     }
 }
 
+struct FakeFailingSetup;
+
+impl SetupRunner for FakeFailingSetup {
+    fn run_setup_script(
+        &self,
+        _worktree: &Path,
+        _log_path: &Path,
+        _env: &SetupEnv,
+        _timeout: Duration,
+    ) -> Result<SetupOutcome> {
+        Ok(SetupOutcome::Failed {
+            code: Some(2),
+            timed_out: false,
+        })
+    }
+}
+
 #[derive(Default)]
 struct FakeArtifacts {
     appended: RefCell<bool>,
@@ -630,6 +669,7 @@ fn task_from_new(id: String, new: NewTask) -> Task {
         labels: new.labels,
         details: new.details,
         source: new.source,
+        active_task_run_id: None,
         deleted_at: None,
         created_at: "2026-06-02T00:00:00.000Z".to_string(),
         updated_at: "2026-06-02T00:00:00.000Z".to_string(),
@@ -726,6 +766,110 @@ fn run_issue_uses_boundaries_and_preserves_done_task_on_settlement() {
     assert_eq!(
         repos.get_task(&task_id).unwrap().unwrap().status,
         TaskStatus::Done
+    );
+}
+
+#[test]
+fn start_issue_run_setup_sets_active_once_and_finish_updates_status() {
+    let mut repos = FakeRepos::default();
+    let mut project = Project::from_repo("owner/repo");
+    project.path = Some("/repo".to_string());
+    repos.insert_project(project);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+
+    let first = start_issue_run_setup(
+        &mut repos,
+        &FakeGit::default(),
+        &FakeArtifacts::default(),
+        &task_id,
+    )
+    .unwrap();
+
+    assert_eq!(
+        repos
+            .get_task(&task_id)
+            .unwrap()
+            .unwrap()
+            .active_task_run_id
+            .as_deref(),
+        Some(first.task_run_id.as_str())
+    );
+    assert_eq!(
+        repos
+            .get_task_run(&first.task_run_id)
+            .unwrap()
+            .unwrap()
+            .status,
+        TaskRunStatus::SettingUp
+    );
+
+    let outcome = finish_issue_run_setup(
+        &mut repos,
+        &FakeSetup,
+        &FakeArtifacts::default(),
+        &first.task_run_id,
+    )
+    .unwrap();
+    assert_eq!(outcome, SetupOutcome::Succeeded);
+    assert_eq!(
+        repos
+            .get_task_run(&first.task_run_id)
+            .unwrap()
+            .unwrap()
+            .status,
+        TaskRunStatus::Running
+    );
+
+    let second = start_issue_run_setup(
+        &mut repos,
+        &FakeGit::default(),
+        &FakeArtifacts::default(),
+        &task_id,
+    )
+    .unwrap();
+    assert_ne!(first.task_run_id, second.task_run_id);
+    assert_eq!(
+        repos
+            .get_task(&task_id)
+            .unwrap()
+            .unwrap()
+            .active_task_run_id
+            .as_deref(),
+        Some(first.task_run_id.as_str())
+    );
+}
+
+#[test]
+fn finish_issue_run_setup_marks_run_failed_when_setup_fails() {
+    let mut repos = FakeRepos::default();
+    let mut project = Project::from_repo("owner/repo");
+    project.path = Some("/repo".to_string());
+    repos.insert_project(project);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let started = start_issue_run_setup(
+        &mut repos,
+        &FakeGit::default(),
+        &FakeArtifacts::default(),
+        &task_id,
+    )
+    .unwrap();
+
+    let outcome = finish_issue_run_setup(
+        &mut repos,
+        &FakeFailingSetup,
+        &FakeArtifacts::default(),
+        &started.task_run_id,
+    )
+    .unwrap();
+
+    assert!(outcome.is_failure());
+    assert_eq!(
+        repos
+            .get_task_run(&started.task_run_id)
+            .unwrap()
+            .unwrap()
+            .status,
+        TaskRunStatus::Failed
     );
 }
 

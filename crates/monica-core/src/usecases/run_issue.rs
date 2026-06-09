@@ -23,6 +23,15 @@ pub struct TaskRunReport {
     pub agent_launch: Option<AgentLaunch>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskRunSetupStartReport {
+    pub task_id: String,
+    pub task_run_id: String,
+    pub branch: String,
+    pub worktree_path: String,
+    pub setup_log_path: String,
+}
+
 pub fn run_issue<R, G, S, A>(
     repos: &mut R,
     git: &G,
@@ -46,6 +55,144 @@ where
         agent,
         AgentLaunchMode::New,
     )
+}
+
+pub fn start_issue_run_setup<R, G, A>(
+    repos: &mut R,
+    git: &G,
+    artifacts: &A,
+    task_id: &str,
+) -> Result<TaskRunSetupStartReport>
+where
+    R: TaskRepository + TaskRunRepository + ProjectRepository,
+    G: GitGateway,
+    A: RunArtifacts,
+{
+    let item = repos
+        .get_task(task_id)?
+        .ok_or_else(|| anyhow!("task not found: {task_id}"))?;
+
+    let project_id = item.project_id.clone().ok_or_else(|| {
+        anyhow!(
+            "{task_id} is not linked to a project; run `monica project init` in the repo, \
+             then re-track the issue"
+        )
+    })?;
+    let project = repos
+        .get_project(&project_id)?
+        .ok_or_else(|| anyhow!("project not found: {project_id}"))?;
+
+    let repo_path = project.path.clone().ok_or_else(|| {
+        anyhow!("project {project_id} has no checkout path; run `monica project init` in the repo")
+    })?;
+    let github_issue_number = latest_github_issue_number(repos, task_id)?;
+    let mon = monica_number(task_id)?;
+    let branch = branch_name(github_issue_number, mon);
+    let worktree_path = worktree_path_for(&project, &branch)?;
+
+    if worktree_path.exists() {
+        return Err(anyhow!(
+            "worktree already exists at {}; {task_id} appears to have been run already \
+             (remove it with `git worktree remove` to re-run)",
+            worktree_path.display()
+        ));
+    }
+
+    git.create_worktree(
+        Path::new(&repo_path),
+        &worktree_path,
+        &branch,
+        &project.default_branch,
+    )?;
+
+    let worktree_str = worktree_path.to_string_lossy().into_owned();
+    let run = repos.start_task_run(NewTaskRun {
+        task_id: task_id.to_string(),
+        agent: None,
+        branch: Some(branch.clone()),
+        worktree_path: Some(worktree_str.clone()),
+    })?;
+
+    if item.active_task_run_id.is_none() {
+        repos.set_active_task_run(task_id, &run.id)?;
+    }
+
+    let setup_log_path = match artifacts.setup_log_path(&run.id) {
+        Ok(path) => path.to_string_lossy().into_owned(),
+        Err(e) => {
+            let _ = repos.finish_task_run(&run.id, task_id, TaskRunStatus::Failed);
+            return Err(e);
+        }
+    };
+
+    Ok(TaskRunSetupStartReport {
+        task_id: task_id.to_string(),
+        task_run_id: run.id,
+        branch,
+        worktree_path: worktree_str,
+        setup_log_path,
+    })
+}
+
+pub fn finish_issue_run_setup<R, S, A>(
+    repos: &mut R,
+    setup_runner: &S,
+    artifacts: &A,
+    task_run_id: &str,
+) -> Result<SetupOutcome>
+where
+    R: TaskRepository + TaskRunRepository + ProjectRepository,
+    S: SetupRunner,
+    A: RunArtifacts,
+{
+    let run = repos
+        .get_task_run(task_run_id)?
+        .ok_or_else(|| anyhow!("task run not found: {task_run_id}"))?;
+    let task = repos
+        .get_task(&run.task_id)?
+        .ok_or_else(|| anyhow!("task not found: {}", run.task_id))?;
+    let project_id = task.project_id.clone().ok_or_else(|| {
+        anyhow!(
+            "{} is not linked to a project; cannot finish setup for {task_run_id}",
+            run.task_id
+        )
+    })?;
+    let project = repos
+        .get_project(&project_id)?
+        .ok_or_else(|| anyhow!("project not found: {project_id}"))?;
+    let branch = run
+        .branch
+        .clone()
+        .ok_or_else(|| anyhow!("task run {task_run_id} has no branch"))?;
+    let worktree_path = run
+        .worktree_path
+        .as_deref()
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow!("task run {task_run_id} has no worktree path"))?;
+
+    let setup = match setup_phase(
+        setup_runner,
+        artifacts,
+        &run.id,
+        &run.task_id,
+        &worktree_path,
+        &project,
+        &branch,
+    ) {
+        Ok(setup) => setup,
+        Err(e) => {
+            let _ = repos.finish_task_run(&run.id, &run.task_id, TaskRunStatus::Failed);
+            return Err(e);
+        }
+    };
+
+    let status = if setup.outcome.is_failure() {
+        TaskRunStatus::Failed
+    } else {
+        TaskRunStatus::Running
+    };
+    repos.finish_task_run(&run.id, &run.task_id, status)?;
+    Ok(setup.outcome)
 }
 
 pub fn run_issue_with_launch_mode<R, G, S, A>(

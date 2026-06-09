@@ -10,6 +10,7 @@ pub struct PtySize {
 pub struct SpawnRequest {
     pub id: String,
     pub cwd: String,
+    pub env: Vec<(String, String)>,
     pub rows: u16,
     pub cols: u16,
 }

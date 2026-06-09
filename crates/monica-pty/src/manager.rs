@@ -48,6 +48,9 @@ impl PtyManager {
             "LANG",
             std::env::var("LANG").unwrap_or_else(|_| "en_US.UTF-8".to_string()),
         );
+        for (key, value) in req.env {
+            cmd.env(key, value);
+        }
         cmd.arg("--login");
         let cwd = if let Some(rest) = req.cwd.strip_prefix("~/") {
             let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
@@ -244,6 +247,7 @@ mod tests {
                 SpawnRequest {
                     id: id.clone(),
                     cwd: std::env::temp_dir().to_string_lossy().to_string(),
+                    env: Vec::new(),
                     rows: 24,
                     cols: 80,
                 },
@@ -301,6 +305,7 @@ mod tests {
                 SpawnRequest {
                     id: id.clone(),
                     cwd: std::env::temp_dir().to_string_lossy().to_string(),
+                    env: Vec::new(),
                     rows: 24,
                     cols: 80,
                 },
@@ -310,7 +315,13 @@ mod tests {
             .expect("spawn should succeed");
 
         manager
-            .resize(&id, PtySize { rows: 40, cols: 120 })
+            .resize(
+                &id,
+                PtySize {
+                    rows: 40,
+                    cols: 120,
+                },
+            )
             .expect("resize should succeed");
 
         manager.kill(&id).expect("kill should succeed");
@@ -327,6 +338,7 @@ mod tests {
                 SpawnRequest {
                     id: id.clone(),
                     cwd: std::env::temp_dir().to_string_lossy().to_string(),
+                    env: Vec::new(),
                     rows: 24,
                     cols: 80,
                 },

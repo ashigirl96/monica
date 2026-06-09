@@ -6,8 +6,8 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 export const commands = {
   clipboardWriteImage: (path: string) =>
     typedError<null, string>(__TAURI_INVOKE("clipboard_write_image", { path })),
-  ptySpawn: (id: string, cwd: string, rows: number, cols: number) =>
-    typedError<null, string>(__TAURI_INVOKE("pty_spawn", { id, cwd, rows, cols })),
+  ptySpawn: (id: string, cwd: string, env: [string, string][], rows: number, cols: number) =>
+    typedError<null, string>(__TAURI_INVOKE("pty_spawn", { id, cwd, env, rows, cols })),
   ptyWrite: (id: string, data: string) =>
     typedError<null, string>(__TAURI_INVOKE("pty_write", { id, data })),
   ptyResize: (id: string, rows: number, cols: number) =>
@@ -27,6 +27,10 @@ export const commands = {
     typedError<[string, string][], string>(__TAURI_INVOKE("list_bench_runspace_map")),
   openBench: (taskId: string) =>
     typedError<TaskBench, string>(__TAURI_INVOKE("open_bench", { taskId })),
+  runTaskAndOpen: (taskId: string) =>
+    typedError<RunTaskAndOpenResult, string>(__TAURI_INVOKE("run_task_and_open", { taskId })),
+  readSetupLog: (taskRunId: string) =>
+    typedError<string, string>(__TAURI_INVOKE("read_setup_log", { taskRunId })),
 };
 
 /* Types */
@@ -59,6 +63,15 @@ export type ProjectEntry = {
   name: string;
 };
 
+export type RunTaskAndOpenResult = {
+  task_id: string;
+  task_run_id: string;
+  runspace_id: string;
+  worktree_path: string;
+  branch: string;
+  setup_log_path: string;
+};
+
 export type TaskBench = {
   task_id: string;
   runspace_id: string;
@@ -79,6 +92,8 @@ export type TaskSummaryRow = {
   github_issue_number: number;
   github_pull_requests: GithubPullRequestRef[];
   task_status: TaskStatus;
+  active_task_run_id: string | null;
+  task_run_id: string | null;
   task_run_status: TaskRunStatus | null;
   task_run_wait_reason: TaskRunWaitReason | null;
   status: DisplayStatus;
@@ -98,6 +113,9 @@ export type TerminalStateSnapshot = {
 
 export type TerminalTabRow = {
   id: string;
+  kind: string;
+  task_run_id: string | null;
+  setup_log_path: string | null;
   cwd: string;
   title: string;
   sort_order: number;

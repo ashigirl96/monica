@@ -1,8 +1,9 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { useState } from "react";
 import { useSetAtom } from "jotai";
 import type { DisplayStatus, TaskSummaryRow } from "@/commands/task";
 import { cn } from "@/lib/utils";
-import { openBenchAtom } from "@/stores/workboard";
+import { openBenchAtom, runTaskAndOpenAtom } from "@/stores/workboard";
 
 const STATUS_COLORS: Record<DisplayStatus, string> = {
   inbox: "bg-muted-foreground/40",
@@ -112,11 +113,33 @@ function issueUrl(project: string | null, number: number): string | null {
 
 export function TaskCard({ task }: { task: TaskSummaryRow }) {
   const doOpenBench = useSetAtom(openBenchAtom);
+  const doRunTaskAndOpen = useSetAtom(runTaskAndOpenAtom);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const hasIssue = task.github_issue_number > 0;
   const hasPrs = task.github_pull_requests.length > 0;
   const hasBranch = task.branch !== null;
   const hasMetadata = hasIssue || hasPrs || hasBranch;
   const isActive = task.status === "running" || task.status === "setting_up";
+  const hasActiveRun = task.active_task_run_id !== null;
+  const actionLabel = hasActiveRun ? "Bench" : "Run & Open";
+
+  async function handlePrimaryAction() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      if (hasActiveRun) {
+        await doOpenBench(task.id);
+      } else {
+        await doRunTaskAndOpen(task.id);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Action failed");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div
@@ -180,16 +203,19 @@ export function TaskCard({ task }: { task: TaskSummaryRow }) {
           </span>
           <button
             type="button"
-            onClick={() => doOpenBench(task.id)}
+            onClick={handlePrimaryAction}
+            disabled={busy}
             className={cn(
               "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] transition-opacity",
               "text-muted-foreground opacity-0 group-hover:opacity-70 hover:!opacity-100",
+              busy && "opacity-70",
             )}
           >
             <BenchIcon />
-            <span>Bench</span>
+            <span>{busy ? "..." : actionLabel}</span>
           </button>
         </div>
+        {error && <p className="line-clamp-2 text-[10px] text-red-400">{error}</p>}
       </div>
     </div>
   );

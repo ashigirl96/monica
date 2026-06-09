@@ -11,8 +11,14 @@ async function unwrap<T>(
   return r.data;
 }
 
-export function ptySpawn(id: string, cwd: string, rows: number, cols: number): Promise<void> {
-  return unwrap(commands.ptySpawn(id, cwd, rows, cols)).then(() => {});
+export function ptySpawn(
+  id: string,
+  cwd: string,
+  rows: number,
+  cols: number,
+  env: [string, string][] = [],
+): Promise<void> {
+  return unwrap(commands.ptySpawn(id, cwd, env, rows, cols)).then(() => {});
 }
 
 export function ptyWrite(id: string, data: string): Promise<void> {

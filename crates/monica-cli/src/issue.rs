@@ -429,6 +429,8 @@ mod tests {
             github_issue_number: Some(17),
             github_pull_requests: Vec::new(),
             task_status: TaskStatus::Ready,
+            active_task_run_id: None,
+            task_run_id: None,
             task_run_status: None,
             task_run_wait_reason: None,
             status: DisplayStatus::Ready,

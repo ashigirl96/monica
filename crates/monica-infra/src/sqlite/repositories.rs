@@ -40,6 +40,10 @@ impl TaskRepository for SqliteStore {
         SqliteStore::list_task_summaries(self, status, project)
     }
 
+    fn set_active_task_run(&self, task_id: &str, task_run_id: &str) -> Result<()> {
+        SqliteStore::set_active_task_run(self, task_id, task_run_id)
+    }
+
     fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()> {
         SqliteStore::update_task_status(self, id, status)
     }

@@ -143,11 +143,13 @@ impl SqliteStore {
                t.title AS title,
                coalesce(project.repo, issue_ref.repo, t.project_id) AS project,
                issue_ref.number AS github_issue_number,
-	               t.status AS task_status,
-	               latest_run.status AS task_run_status,
-	               latest_run.wait_reason AS task_run_wait_reason,
-	               latest_run.branch AS branch
-	             FROM tasks t
+               t.status AS task_status,
+               t.active_task_run_id AS active_task_run_id,
+               coalesce(active_run.id, latest_run.id) AS task_run_id,
+               CASE WHEN active_run.id IS NOT NULL THEN active_run.status ELSE latest_run.status END AS task_run_status,
+               CASE WHEN active_run.id IS NOT NULL THEN active_run.wait_reason ELSE latest_run.wait_reason END AS task_run_wait_reason,
+               CASE WHEN active_run.id IS NOT NULL THEN active_run.branch ELSE latest_run.branch END AS branch
+             FROM tasks t
              LEFT JOIN projects project
                ON project.id = t.project_id
              LEFT JOIN external_refs issue_ref
@@ -158,6 +160,9 @@ impl SqliteStore {
                  ORDER BY er.id DESC
                  LIMIT 1
                )
+            LEFT JOIN task_runs active_run
+               ON active_run.id = t.active_task_run_id
+              AND active_run.task_id = t.id
             LEFT JOIN task_runs latest_run
                ON latest_run.id = (
                  SELECT r.id
@@ -191,6 +196,8 @@ impl SqliteStore {
                 github_issue_number: row.get("github_issue_number")?,
                 github_pull_requests: Vec::new(),
                 task_status,
+                active_task_run_id: row.get("active_task_run_id")?,
+                task_run_id: row.get("task_run_id")?,
                 task_run_status,
                 task_run_wait_reason,
                 status: display_status,
@@ -204,6 +211,30 @@ impl SqliteStore {
             item.github_pull_requests = self.list_github_pull_request_refs(&item.id)?;
         }
         Ok(items)
+    }
+
+    pub fn set_active_task_run(&self, task_id: &str, task_run_id: &str) -> Result<()> {
+        let affected = self.conn().execute(
+            &format!(
+                "UPDATE tasks
+                    SET active_task_run_id = ?1,
+                        updated_at = {SET_NOW}
+                  WHERE id = ?2
+                    AND deleted_at IS NULL
+                    AND EXISTS (
+                      SELECT 1
+                        FROM task_runs
+                       WHERE id = ?1 AND task_id = ?2
+                    )"
+            ),
+            params![task_run_id, task_id],
+        )?;
+        if affected == 0 {
+            return Err(anyhow!(
+                "task run {task_run_id} is not linked to task {task_id}"
+            ));
+        }
+        Ok(())
     }
 
     pub fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()> {

@@ -8,6 +8,7 @@ export type {
   ProjectEntry,
   TrackIssueResult,
   TaskBench,
+  RunTaskAndOpenResult,
 } from "./bindings";
 
 async function unwrap<T>(
@@ -40,4 +41,12 @@ export function listBenchRunspaceMap() {
 
 export function openBench(taskId: string) {
   return unwrap(commands.openBench(taskId));
+}
+
+export function runTaskAndOpen(taskId: string) {
+  return unwrap(commands.runTaskAndOpen(taskId));
+}
+
+export function readSetupLog(taskRunId: string) {
+  return unwrap(commands.readSetupLog(taskRunId));
 }

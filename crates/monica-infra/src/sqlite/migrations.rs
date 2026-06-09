@@ -19,6 +19,7 @@ fn migrations() -> Migrations<'static> {
         M::up(V10),
         M::up(V11),
         M::up(V12),
+        M::up(V13),
     ])
 }
 
@@ -414,6 +415,18 @@ const V12: &str = r#"
     );
 "#;
 
+/// v13: remember the TaskRun the board should treat as the task's main run and persist
+/// task-run-bound Workbench tabs.
+const V13: &str = r#"
+    ALTER TABLE tasks ADD COLUMN active_task_run_id TEXT REFERENCES task_runs(id);
+    CREATE INDEX tasks_active_task_run_idx ON tasks(active_task_run_id);
+
+    ALTER TABLE terminal_tabs ADD COLUMN kind TEXT NOT NULL DEFAULT 'terminal';
+    ALTER TABLE terminal_tabs ADD COLUMN task_run_id TEXT REFERENCES task_runs(id);
+    ALTER TABLE terminal_tabs ADD COLUMN setup_log_path TEXT;
+    CREATE INDEX terminal_tabs_task_run_idx ON terminal_tabs(task_run_id);
+"#;
+
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
     migrations()
@@ -487,7 +500,7 @@ mod tests {
             .conn()
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 12);
+        assert_eq!(version, 13);
 
         std::fs::remove_file(&path).ok();
     }

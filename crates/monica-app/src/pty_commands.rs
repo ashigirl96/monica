@@ -11,6 +11,7 @@ pub fn pty_spawn(
     app: AppHandle,
     id: String,
     cwd: String,
+    env: Vec<(String, String)>,
     rows: u16,
     cols: u16,
 ) -> Result<(), String> {
@@ -22,6 +23,7 @@ pub fn pty_spawn(
             SpawnRequest {
                 id: id.clone(),
                 cwd,
+                env,
                 rows,
                 cols,
             },

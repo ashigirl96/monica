@@ -5,9 +5,9 @@ use crate::sqlite::SqliteStore;
 
 impl SqliteStore {
     pub fn get_bench_for_task(&self, task_id: &str) -> Result<Option<(String, String)>> {
-        let mut stmt = self.conn().prepare(
-            "SELECT runspace_id, cwd FROM \"_TaskToRunspace\" WHERE task_id = ?1",
-        )?;
+        let mut stmt = self
+            .conn()
+            .prepare("SELECT runspace_id, cwd FROM \"_TaskToRunspace\" WHERE task_id = ?1")?;
         let mut rows = stmt.query(params![task_id])?;
         match rows.next()? {
             Some(row) => Ok(Some((row.get(0)?, row.get(1)?))),
@@ -16,9 +16,9 @@ impl SqliteStore {
     }
 
     pub fn list_bench_runspace_map(&self) -> Result<Vec<(String, String)>> {
-        let mut stmt = self.conn().prepare(
-            "SELECT runspace_id, task_id FROM \"_TaskToRunspace\"",
-        )?;
+        let mut stmt = self
+            .conn()
+            .prepare("SELECT runspace_id, task_id FROM \"_TaskToRunspace\"")?;
         let mut rows = stmt.query([])?;
         let mut items = Vec::new();
         while let Some(row) = rows.next()? {

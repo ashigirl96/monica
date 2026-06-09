@@ -72,5 +72,4 @@ mod tests {
             .unwrap()
             .success()
     }
-
 }

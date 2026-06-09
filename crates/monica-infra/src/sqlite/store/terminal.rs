@@ -8,6 +8,9 @@ use crate::sqlite::SqliteStore;
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct TerminalTabRow {
     pub id: String,
+    pub kind: String,
+    pub task_run_id: Option<String>,
+    pub setup_log_path: Option<String>,
     pub cwd: String,
     pub title: String,
     #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
@@ -38,7 +41,7 @@ impl SqliteStore {
         )?;
 
         let mut tab_stmt = self.conn().prepare(
-            "SELECT id, cwd, title, sort_order, is_active
+            "SELECT id, kind, task_run_id, setup_log_path, cwd, title, sort_order, is_active
                FROM terminal_tabs
               WHERE runspace_id = ?1
               ORDER BY sort_order",
@@ -60,10 +63,13 @@ impl SqliteStore {
                 .query_map(params![rs_id], |row| {
                     Ok(TerminalTabRow {
                         id: row.get(0)?,
-                        cwd: row.get(1)?,
-                        title: row.get(2)?,
-                        sort_order: row.get(3)?,
-                        is_active: row.get(4)?,
+                        kind: row.get(1)?,
+                        task_run_id: row.get(2)?,
+                        setup_log_path: row.get(3)?,
+                        cwd: row.get(4)?,
+                        title: row.get(5)?,
+                        sort_order: row.get(6)?,
+                        is_active: row.get(7)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -76,9 +82,7 @@ impl SqliteStore {
             });
         }
 
-        Ok(TerminalStateSnapshot {
-            runspaces: result,
-        })
+        Ok(TerminalStateSnapshot { runspaces: result })
     }
 
     pub fn save_terminal_state(&mut self, snapshot: &TerminalStateSnapshot) -> Result<()> {
@@ -96,9 +100,20 @@ impl SqliteStore {
 
             for tab in &rs.tabs {
                 tx.execute(
-                    "INSERT INTO terminal_tabs (id, runspace_id, cwd, title, sort_order, is_active)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![tab.id, rs.id, tab.cwd, tab.title, tab.sort_order, tab.is_active],
+                    "INSERT INTO terminal_tabs
+                       (id, runspace_id, kind, task_run_id, setup_log_path, cwd, title, sort_order, is_active)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![
+                        tab.id,
+                        rs.id,
+                        tab.kind,
+                        tab.task_run_id,
+                        tab.setup_log_path,
+                        tab.cwd,
+                        tab.title,
+                        tab.sort_order,
+                        tab.is_active
+                    ],
                 )?;
             }
         }
