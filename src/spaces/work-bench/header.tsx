@@ -6,7 +6,8 @@ import {
   createTerminalTabAtom,
   reorderTabsAtom,
 } from "@/stores/terminal";
-import { PlusIcon, XIcon } from "@/components/icons";
+import { PlusIcon, WorkBoardIcon, XIcon } from "@/components/icons";
+import { activeSpaceAtom } from "@/stores/space";
 import { cn } from "@/lib/utils";
 import { useEffect, useRef, useState } from "react";
 
@@ -16,6 +17,7 @@ export function WorkBenchHeader() {
   const closeTab = useSetAtom(closeTerminalTabAtom);
   const createTab = useSetAtom(createTerminalTabAtom);
   const reorder = useSetAtom(reorderTabsAtom);
+  const setActiveSpace = useSetAtom(activeSpaceAtom);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const dragIdRef = useRef<string | null>(null);
   const activeTabRef = useRef<HTMLButtonElement>(null);
@@ -35,6 +37,13 @@ export function WorkBenchHeader() {
 
   return (
     <div className="scrollbar-hide flex h-full items-center gap-1 overflow-x-auto">
+      <button
+        onClick={() => setActiveSpace("work-board")}
+        className="mr-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.08] hover:text-foreground"
+        title="Work Board"
+      >
+        <WorkBoardIcon size={14} />
+      </button>
       {sorted.map((tab) => {
         const isActive = tab.id === rs.activeTabId;
         const label = tab.title || tab.cwd.split("/").pop() || "Terminal";

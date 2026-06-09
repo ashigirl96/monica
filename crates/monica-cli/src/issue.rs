@@ -424,14 +424,19 @@ mod tests {
     fn render_status_table_formats_rows_and_empty_state() {
         let rows = vec![TaskSummaryRow {
             id: "MON-1".to_string(),
+            title: "tracked issue".to_string(),
+            body: String::new(),
             project: Some("ashigirl96/monica".to_string()),
             github_issue_number: Some(17),
             github_pull_requests: Vec::new(),
             task_status: TaskStatus::Ready,
+            task_run_id: None,
             task_run_status: None,
             task_run_wait_reason: None,
             status: DisplayStatus::Ready,
             branch: Some("monica/gh-17".to_string()),
+            worktree_path: None,
+            updated_at: "2026-06-08T00:00:00.000Z".to_string(),
         }];
         let rendered = render_status_table(&rows);
         assert!(rendered.contains("ID"));

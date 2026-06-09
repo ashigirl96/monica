@@ -74,3 +74,23 @@ export function XIcon(props: IconProps) {
     </Icon>
   );
 }
+
+export function RefreshIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M20 6V11H15" strokeWidth="1.5" />
+      <path d="M4 18V13H9" strokeWidth="1.5" />
+      <path d="M18 9A7 7 0 0 0 6.7 6.8L4 9" strokeWidth="1.5" />
+      <path d="M6 15A7 7 0 0 0 17.3 17.2L20 15" strokeWidth="1.5" />
+    </Icon>
+  );
+}
+
+export function ArrowRightIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M5 12H19" strokeWidth="1.5" />
+      <path d="M13 6L19 12L13 18" strokeWidth="1.5" />
+    </Icon>
+  );
+}

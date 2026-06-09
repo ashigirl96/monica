@@ -2,6 +2,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { commands } from "./bindings";
 
 export type { TerminalStateSnapshot } from "./bindings";
+export type { PtySpawnCommand } from "./bindings";
 
 async function unwrap<T>(
   result: Promise<{ status: "ok"; data: T } | { status: "error"; error: string }>,
@@ -11,8 +12,14 @@ async function unwrap<T>(
   return r.data;
 }
 
-export function ptySpawn(id: string, cwd: string, rows: number, cols: number): Promise<void> {
-  return unwrap(commands.ptySpawn(id, cwd, rows, cols)).then(() => {});
+export function ptySpawn(
+  id: string,
+  cwd: string,
+  rows: number,
+  cols: number,
+  command?: Parameters<typeof commands.ptySpawn>[4],
+): Promise<void> {
+  return unwrap(commands.ptySpawn(id, cwd, rows, cols, command ?? null)).then(() => {});
 }
 
 export function ptyWrite(id: string, data: string): Promise<void> {

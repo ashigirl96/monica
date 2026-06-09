@@ -135,14 +135,19 @@ impl TaskRepository for FakeRepos {
             .values()
             .map(|task| TaskSummaryRow {
                 id: task.id.clone(),
+                title: task.title.clone(),
+                body: task.body.clone(),
                 project: task.project_id.clone(),
                 github_issue_number: None,
                 github_pull_requests: Vec::<GithubPullRequestRef>::new(),
                 task_status: task.status,
+                task_run_id: None,
                 task_run_status: None,
                 task_run_wait_reason: None,
                 status: DisplayStatus::from_task_and_run(task.status, None),
                 branch: None,
+                worktree_path: None,
+                updated_at: task.updated_at.clone(),
             })
             .filter(|row| status.is_none_or(|status| status == row.status))
             .collect();

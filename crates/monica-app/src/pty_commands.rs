@@ -1,8 +1,23 @@
 use base64::Engine;
 use monica_infra::sqlite::TerminalStateSnapshot;
 use monica_infra::Runtime;
-use monica_pty::{PtyManager, PtyOutput, PtySize, SpawnRequest};
+use monica_pty::{PtyManager, PtyOutput, PtySize, SpawnCommand, SpawnRequest};
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct PtySpawnEnv {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct PtySpawnCommand {
+    pub program: String,
+    pub args: Vec<String>,
+    pub cwd: String,
+    pub env: Vec<PtySpawnEnv>,
+}
 
 #[tauri::command]
 #[specta::specta]
@@ -13,6 +28,7 @@ pub fn pty_spawn(
     cwd: String,
     rows: u16,
     cols: u16,
+    command: Option<PtySpawnCommand>,
 ) -> Result<(), String> {
     let output_app = app.clone();
     let exit_app = app;
@@ -24,6 +40,15 @@ pub fn pty_spawn(
                 cwd,
                 rows,
                 cols,
+                command: command.map(|command| SpawnCommand {
+                    program: command.program,
+                    args: command.args,
+                    env: command
+                        .env
+                        .into_iter()
+                        .map(|env| (env.key, env.value))
+                        .collect(),
+                }),
             },
             move |output: PtyOutput| {
                 let event = format!("pty:output:{}", output.id);

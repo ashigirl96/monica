@@ -5,7 +5,14 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import "@xterm/xterm/css/xterm.css";
 import { getDefaultStore } from "jotai";
-import { ptySpawn, ptyWrite, ptyResize, onPtyOutput, onPtyExit } from "@/commands/pty";
+import {
+  ptySpawn,
+  ptyWrite,
+  ptyResize,
+  onPtyOutput,
+  onPtyExit,
+  type PtySpawnCommand,
+} from "@/commands/pty";
 import { prefixActiveAtom } from "@/stores/space";
 import { terminalFontSizeAtom, zoomTerminalAtom } from "@/stores/terminal";
 
@@ -44,6 +51,7 @@ type UseTerminalOptions = {
   tabId: string;
   cwd: string;
   active: boolean;
+  launch?: PtySpawnCommand | null;
   onTitleChange?: (title: string) => void;
   onCwdChange?: (cwd: string) => void;
   onExit?: () => void;
@@ -263,7 +271,7 @@ export function useTerminal(
 
     if (!aliveSessions.has(options.tabId)) {
       aliveSessions.add(options.tabId);
-      ptySpawn(options.tabId, options.cwd, term.rows, term.cols).catch(() => {
+      ptySpawn(options.tabId, options.cwd, term.rows, term.cols, options.launch).catch(() => {
         aliveSessions.delete(options.tabId);
         term.writeln("\r\n\x1b[31mFailed to spawn shell. Press any key to retry.\x1b[0m");
       });
@@ -287,7 +295,7 @@ export function useTerminal(
       observer.disconnect();
       if (fitDebounce) clearTimeout(fitDebounce);
     };
-  }, [options.active, options.tabId, options.cwd, containerRef]);
+  }, [options.active, options.tabId, options.cwd, options.launch, containerRef]);
 
   return termRef;
 }

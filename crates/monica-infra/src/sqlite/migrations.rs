@@ -17,7 +17,8 @@ fn migrations() -> Migrations<'static> {
         M::up(V8),
         M::up(V9),
         M::up(V10),
-        M::up(V11),
+        M::up_with_hook("", migrate_v11_rename_runspaces),
+        M::up(V12),
     ])
 }
 
@@ -396,11 +397,83 @@ const V10: &str = r#"
 "#;
 
 /// v11: rename workspace → runspace (tables, columns, indexes).
-const V11: &str = r#"
-    ALTER TABLE terminal_workspaces RENAME TO terminal_runspaces;
-    ALTER TABLE terminal_tabs RENAME COLUMN workspace_id TO runspace_id;
-    DROP INDEX terminal_tabs_workspace_idx;
-    CREATE INDEX terminal_tabs_runspace_idx ON terminal_tabs(runspace_id, sort_order);
+fn migrate_v11_rename_runspaces(tx: &rusqlite::Transaction<'_>) -> rusqlite_migration::HookResult {
+    let has_workspaces = schema_object_exists(tx, "table", "terminal_workspaces")?;
+    let has_runspaces = schema_object_exists(tx, "table", "terminal_runspaces")?;
+
+    match (has_workspaces, has_runspaces) {
+        (true, false) => {
+            tx.execute_batch("ALTER TABLE terminal_workspaces RENAME TO terminal_runspaces;")?;
+        }
+        (false, true) => {}
+        (false, false) => {
+            return Err(rusqlite_migration::HookError::Hook(
+                "neither terminal_workspaces nor terminal_runspaces exists".to_string(),
+            ));
+        }
+        (true, true) => {
+            return Err(rusqlite_migration::HookError::Hook(
+                "both terminal_workspaces and terminal_runspaces exist".to_string(),
+            ));
+        }
+    }
+
+    if table_has_column(tx, "terminal_tabs", "workspace_id")?
+        && !table_has_column(tx, "terminal_tabs", "runspace_id")?
+    {
+        tx.execute_batch("ALTER TABLE terminal_tabs RENAME COLUMN workspace_id TO runspace_id;")?;
+    }
+
+    if schema_object_exists(tx, "index", "terminal_tabs_workspace_idx")? {
+        tx.execute_batch("DROP INDEX terminal_tabs_workspace_idx;")?;
+    }
+    if !schema_object_exists(tx, "index", "terminal_tabs_runspace_idx")? {
+        tx.execute_batch(
+            "CREATE INDEX terminal_tabs_runspace_idx ON terminal_tabs(runspace_id, sort_order);",
+        )?;
+    }
+
+    Ok(())
+}
+
+fn schema_object_exists(
+    tx: &rusqlite::Transaction<'_>,
+    object_type: &str,
+    name: &str,
+) -> std::result::Result<bool, rusqlite::Error> {
+    tx.query_row(
+        "SELECT EXISTS(
+           SELECT 1
+             FROM sqlite_master
+            WHERE type = ?1 AND name = ?2
+         )",
+        rusqlite::params![object_type, name],
+        |row| row.get::<_, bool>(0),
+    )
+}
+
+fn table_has_column(
+    tx: &rusqlite::Transaction<'_>,
+    table: &str,
+    column: &str,
+) -> std::result::Result<bool, rusqlite::Error> {
+    let mut stmt = tx.prepare(&format!("PRAGMA table_info('{table}')"))?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get("name")?;
+        if name == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// v12: add optional TaskRun binding metadata to Workbench Runspaces.
+const V12: &str = r#"
+    ALTER TABLE terminal_runspaces ADD COLUMN kind TEXT NOT NULL DEFAULT 'shell';
+    ALTER TABLE terminal_runspaces ADD COLUMN task_id TEXT;
+    ALTER TABLE terminal_runspaces ADD COLUMN task_run_id TEXT;
+    ALTER TABLE terminal_runspaces ADD COLUMN task_title TEXT;
 "#;
 
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
@@ -476,7 +549,59 @@ mod tests {
             .conn()
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 11);
+        assert_eq!(version, 12);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn v11_recovers_when_runspace_schema_was_renamed_but_user_version_stayed_at_ten() {
+        let path = temp_db_path("v11-partial");
+
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            Migrations::new(vec![
+                M::up(V1),
+                M::up(V2),
+                M::up(V3),
+                M::up(V4),
+                M::up(V5),
+                M::up(V6),
+                M::up(V7),
+                M::up(V8),
+                M::up(V9),
+                M::up(V10),
+            ])
+            .to_latest(&mut conn)
+            .unwrap();
+
+            conn.execute_batch(
+                r#"
+                ALTER TABLE terminal_workspaces RENAME TO terminal_runspaces;
+                ALTER TABLE terminal_tabs RENAME COLUMN workspace_id TO runspace_id;
+                DROP INDEX terminal_tabs_workspace_idx;
+                CREATE INDEX terminal_tabs_runspace_idx ON terminal_tabs(runspace_id, sort_order);
+                "#,
+            )
+            .unwrap();
+        }
+
+        let db = crate::sqlite::SqliteStore::open_at(&path).unwrap();
+        let version: i64 = db
+            .conn()
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 12);
+
+        let has_kind_column: i64 = db
+            .conn()
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('terminal_runspaces') WHERE name = 'kind'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_kind_column, 1);
 
         std::fs::remove_file(&path).ok();
     }

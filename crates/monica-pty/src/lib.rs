@@ -3,4 +3,4 @@ mod session;
 mod types;
 
 pub use manager::PtyManager;
-pub use types::{PtyOutput, PtySize, SpawnRequest};
+pub use types::{PtyOutput, PtySize, SpawnCommand, SpawnRequest};

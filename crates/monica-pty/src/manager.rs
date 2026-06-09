@@ -29,6 +29,10 @@ impl PtyManager {
         output_sink: impl Fn(PtyOutput) + Send + 'static,
         exit_sink: impl Fn(String, Option<u32>) + Send + 'static,
     ) -> anyhow::Result<()> {
+        if self.is_alive(&req.id) {
+            return Ok(());
+        }
+
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(portable_pty::PtySize {
@@ -39,8 +43,24 @@ impl PtyManager {
             })
             .context("failed to open pty")?;
 
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-        let mut cmd = CommandBuilder::new(&shell);
+        let mut cmd = match req.command {
+            Some(command) => {
+                let mut cmd = CommandBuilder::new(&command.program);
+                for arg in command.args {
+                    cmd.arg(arg);
+                }
+                for (key, value) in command.env {
+                    cmd.env(key, value);
+                }
+                cmd
+            }
+            None => {
+                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+                let mut cmd = CommandBuilder::new(&shell);
+                cmd.arg("--login");
+                cmd
+            }
+        };
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "WezTerm");
@@ -48,7 +68,6 @@ impl PtyManager {
             "LANG",
             std::env::var("LANG").unwrap_or_else(|_| "en_US.UTF-8".to_string()),
         );
-        cmd.arg("--login");
         let cwd = if let Some(rest) = req.cwd.strip_prefix("~/") {
             let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
             format!("{home}/{rest}")
@@ -228,6 +247,7 @@ fn wait_for_child(mut child: Box<dyn portable_pty::Child + Send + Sync>) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::SpawnCommand;
     use std::sync::mpsc as std_mpsc;
     use std::time::Duration;
 
@@ -246,6 +266,7 @@ mod tests {
                     cwd: std::env::temp_dir().to_string_lossy().to_string(),
                     rows: 24,
                     cols: 80,
+                    command: None,
                 },
                 move |output| {
                     let _ = output_tx.send(output);
@@ -303,6 +324,7 @@ mod tests {
                     cwd: std::env::temp_dir().to_string_lossy().to_string(),
                     rows: 24,
                     cols: 80,
+                    command: None,
                 },
                 |_| {},
                 |_, _| {},
@@ -310,7 +332,13 @@ mod tests {
             .expect("spawn should succeed");
 
         manager
-            .resize(&id, PtySize { rows: 40, cols: 120 })
+            .resize(
+                &id,
+                PtySize {
+                    rows: 40,
+                    cols: 120,
+                },
+            )
             .expect("resize should succeed");
 
         manager.kill(&id).expect("kill should succeed");
@@ -329,6 +357,7 @@ mod tests {
                     cwd: std::env::temp_dir().to_string_lossy().to_string(),
                     rows: 24,
                     cols: 80,
+                    command: None,
                 },
                 |_| {},
                 move |id, code| {
@@ -341,6 +370,58 @@ mod tests {
         manager.kill(&id).expect("kill should succeed");
 
         let _ = exit_rx.recv_timeout(Duration::from_secs(3));
+    }
+
+    #[test]
+    fn spawn_existing_session_is_noop() {
+        let manager = PtyManager::new();
+
+        let id = "test-duplicate".to_string();
+        manager
+            .spawn(
+                SpawnRequest {
+                    id: id.clone(),
+                    cwd: std::env::temp_dir().to_string_lossy().to_string(),
+                    rows: 24,
+                    cols: 80,
+                    command: Some(SpawnCommand {
+                        program: "/bin/sh".to_string(),
+                        args: vec!["-c".to_string(), "sleep 2".to_string()],
+                        env: vec![],
+                    }),
+                },
+                |_| {},
+                |_, _| {},
+            )
+            .expect("spawn should succeed");
+
+        let (duplicate_tx, duplicate_rx) = std_mpsc::channel::<PtyOutput>();
+        manager
+            .spawn(
+                SpawnRequest {
+                    id: id.clone(),
+                    cwd: std::env::temp_dir().to_string_lossy().to_string(),
+                    rows: 24,
+                    cols: 80,
+                    command: Some(SpawnCommand {
+                        program: "/bin/sh".to_string(),
+                        args: vec!["-c".to_string(), "printf duplicate".to_string()],
+                        env: vec![],
+                    }),
+                },
+                move |output| {
+                    let _ = duplicate_tx.send(output);
+                },
+                |_, _| {},
+            )
+            .expect("duplicate spawn should be accepted as an attach no-op");
+
+        assert!(manager.is_alive(&id));
+        assert!(duplicate_rx
+            .recv_timeout(Duration::from_millis(300))
+            .is_err());
+
+        manager.kill(&id).expect("kill should succeed");
     }
 
     #[test]

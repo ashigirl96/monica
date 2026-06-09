@@ -2,9 +2,11 @@ import { lazy, type ComponentType } from "react";
 import { DashboardIcon, ProjectHomeIcon, WorkBoardIcon, WorkBenchIcon } from "@/components/icons";
 import type { SpaceId } from "@/stores/space";
 import { TabBar } from "@/components/tab-bar";
+import { WorkBoardHeader } from "@/spaces/work-board/header";
 import { WorkBenchSidebar } from "@/spaces/work-bench/sidebar";
 import { WorkBenchHeader } from "@/spaces/work-bench/header";
 
+const LazyWorkBoardContent = lazy(() => import("@/spaces/work-board/content"));
 const LazyWorkBenchContent = lazy(() => import("@/spaces/work-bench/content"));
 
 type SpaceIcon = ComponentType<{ size?: number; strokeWidth?: number }>;
@@ -36,12 +38,6 @@ function ProjectSidebar() {
 function ProjectContent() {
   return <Placeholder name="Project" />;
 }
-function WorkBoardSidebar() {
-  return <Placeholder name="Board Sidebar" />;
-}
-function WorkBoardContent() {
-  return <Placeholder name="Work Board" />;
-}
 export const spaces: SpaceConfig[] = [
   {
     id: "dashboard",
@@ -62,9 +58,8 @@ export const spaces: SpaceConfig[] = [
     id: "work-board",
     icon: WorkBoardIcon,
     label: "Work Board",
-    sidebar: WorkBoardSidebar,
-    header: TabBar,
-    content: WorkBoardContent,
+    header: WorkBoardHeader,
+    content: LazyWorkBoardContent,
   },
   {
     id: "work-bench",

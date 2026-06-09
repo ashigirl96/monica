@@ -19,6 +19,10 @@ pub struct TerminalTabRow {
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct TerminalRunspaceRow {
     pub id: String,
+    pub kind: String,
+    pub task_id: Option<String>,
+    pub task_run_id: Option<String>,
+    pub task_title: Option<String>,
     #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
     pub sort_order: i64,
     pub is_active: bool,
@@ -34,7 +38,9 @@ pub struct TerminalStateSnapshot {
 impl SqliteStore {
     pub fn load_terminal_state(&self) -> Result<TerminalStateSnapshot> {
         let mut rs_stmt = self.conn().prepare(
-            "SELECT id, sort_order, is_active FROM terminal_runspaces ORDER BY sort_order",
+            "SELECT id, kind, task_id, task_run_id, task_title, sort_order, is_active
+               FROM terminal_runspaces
+              ORDER BY sort_order",
         )?;
 
         let mut tab_stmt = self.conn().prepare(
@@ -48,14 +54,18 @@ impl SqliteStore {
             .query_map([], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, bool>(2)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, bool>(6)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut result = Vec::with_capacity(runspaces.len());
-        for (rs_id, sort_order, is_active) in runspaces {
+        for (rs_id, kind, task_id, task_run_id, task_title, sort_order, is_active) in runspaces {
             let tabs = tab_stmt
                 .query_map(params![rs_id], |row| {
                     Ok(TerminalTabRow {
@@ -70,15 +80,17 @@ impl SqliteStore {
 
             result.push(TerminalRunspaceRow {
                 id: rs_id,
+                kind,
+                task_id,
+                task_run_id,
+                task_title,
                 sort_order,
                 is_active,
                 tabs,
             });
         }
 
-        Ok(TerminalStateSnapshot {
-            runspaces: result,
-        })
+        Ok(TerminalStateSnapshot { runspaces: result })
     }
 
     pub fn save_terminal_state(&mut self, snapshot: &TerminalStateSnapshot) -> Result<()> {
@@ -89,16 +101,32 @@ impl SqliteStore {
 
         for rs in &snapshot.runspaces {
             tx.execute(
-                "INSERT INTO terminal_runspaces (id, sort_order, is_active)
-                 VALUES (?1, ?2, ?3)",
-                params![rs.id, rs.sort_order, rs.is_active],
+                "INSERT INTO terminal_runspaces
+                   (id, kind, task_id, task_run_id, task_title, sort_order, is_active)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    rs.id,
+                    rs.kind,
+                    rs.task_id,
+                    rs.task_run_id,
+                    rs.task_title,
+                    rs.sort_order,
+                    rs.is_active
+                ],
             )?;
 
             for tab in &rs.tabs {
                 tx.execute(
                     "INSERT INTO terminal_tabs (id, runspace_id, cwd, title, sort_order, is_active)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![tab.id, rs.id, tab.cwd, tab.title, tab.sort_order, tab.is_active],
+                    params![
+                        tab.id,
+                        rs.id,
+                        tab.cwd,
+                        tab.title,
+                        tab.sort_order,
+                        tab.is_active
+                    ],
                 )?;
             }
         }

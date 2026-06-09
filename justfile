@@ -60,7 +60,7 @@ unused-commands:
     #!/usr/bin/env bash
     set -euo pipefail
     bindings="src/commands/bindings.ts"
-    cmds=$(sed -n '/^export const commands/,/^};/p' "$bindings" | grep -oE '^\s+[a-zA-Z]+:' | sed 's/[: ]//g')
+    cmds=$(sed -n '/^export const commands/,/^};/p' "$bindings" | grep -oE '^  [a-zA-Z][a-zA-Z0-9]*:' | sed 's/[: ]//g')
     found=0
     for cmd in $cmds; do
         if ! grep -rq "commands\.$cmd" src/ --include='*.ts' --include='*.tsx' --exclude="$bindings"; then

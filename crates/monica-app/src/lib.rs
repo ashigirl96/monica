@@ -10,27 +10,30 @@ use monica_pty::PtyManager;
 
 mod clipboard_commands;
 mod pty_commands;
+mod workboard_commands;
 
 const PR_SYNC_INTERVAL: Duration = Duration::from_secs(10);
 const PR_SYNC_BATCH_LIMIT: usize = 3;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let specta_builder = tauri_specta::Builder::new()
-        .commands(tauri_specta::collect_commands![
-            clipboard_commands::clipboard_write_image,
-            pty_commands::pty_spawn,
-            pty_commands::pty_write,
-            pty_commands::pty_resize,
-            pty_commands::pty_kill,
-            pty_commands::terminal_load_state,
-            pty_commands::terminal_save_state,
-        ]);
+    let specta_builder = tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
+        clipboard_commands::clipboard_write_image,
+        pty_commands::pty_spawn,
+        pty_commands::pty_write,
+        pty_commands::pty_resize,
+        pty_commands::pty_kill,
+        pty_commands::terminal_load_state,
+        pty_commands::terminal_save_state,
+        workboard_commands::workboard_list_tasks,
+        workboard_commands::workboard_track_issue,
+        workboard_commands::workboard_run_task,
+    ]);
 
     #[cfg(debug_assertions)]
     {
-        let bindings_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../src/commands/bindings.ts");
+        let bindings_path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src/commands/bindings.ts");
         specta_builder
             .export(specta_typescript::Typescript::default(), &bindings_path)
             .expect("failed to export typescript bindings");

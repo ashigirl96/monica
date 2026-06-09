@@ -57,15 +57,20 @@ pub struct Task {
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct TaskSummaryRow {
     pub id: String,
+    pub title: String,
+    pub body: String,
     pub project: Option<String>,
     #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
     pub github_issue_number: Option<i64>,
     pub github_pull_requests: Vec<GithubPullRequestRef>,
     pub task_status: TaskStatus,
+    pub task_run_id: Option<String>,
     pub task_run_status: Option<TaskRunStatus>,
     pub task_run_wait_reason: Option<TaskRunWaitReason>,
     pub status: DisplayStatus,
     pub branch: Option<String>,
+    pub worktree_path: Option<String>,
+    pub updated_at: String,
 }
 
 /// Input for inserting a [`Task`]. The `id` and timestamps are assigned by the store.

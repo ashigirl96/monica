@@ -140,12 +140,17 @@ impl SqliteStore {
         let mut stmt = self.conn().prepare(
             "SELECT
                t.id AS task_id,
+               t.title AS title,
+               t.body AS body,
+               t.updated_at AS updated_at,
                coalesce(project.repo, issue_ref.repo, t.project_id) AS project,
                issue_ref.number AS github_issue_number,
 	               t.status AS task_status,
+               latest_run.id AS task_run_id,
 	               latest_run.status AS task_run_status,
 	               latest_run.wait_reason AS task_run_wait_reason,
-	               latest_run.branch AS branch
+	               latest_run.branch AS branch,
+               latest_run.worktree_path AS worktree_path
 	             FROM tasks t
              LEFT JOIN projects project
                ON project.id = t.project_id
@@ -185,14 +190,19 @@ impl SqliteStore {
             let display_status = DisplayStatus::from_task_and_run(task_status, task_run_status);
             let item = TaskSummaryRow {
                 id: row.get("task_id")?,
+                title: row.get("title")?,
+                body: row.get("body")?,
                 project: row.get("project")?,
                 github_issue_number: row.get("github_issue_number")?,
                 github_pull_requests: Vec::new(),
                 task_status,
+                task_run_id: row.get("task_run_id")?,
                 task_run_status,
                 task_run_wait_reason,
                 status: display_status,
                 branch: row.get("branch")?,
+                worktree_path: row.get("worktree_path")?,
+                updated_at: row.get("updated_at")?,
             };
             if status.is_none_or(|status| status == item.status) {
                 items.push(item);

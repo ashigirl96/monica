@@ -1,3 +1,4 @@
+use crate::sqlite::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTabRow};
 use monica_core::{
     Agent, DisplayStatus, ExternalRef, GithubPullRequest, GithubPullRequestStatus, NewTask,
     NewTaskRun, Project, PullRequestBranchSyncCandidate, RefType, TaskKind, TaskRunObservation,
@@ -146,6 +147,40 @@ fn migration_creates_pull_request_branch_sync_state_table() {
         )
         .unwrap();
     assert_eq!(count, 1);
+}
+
+#[test]
+fn terminal_state_preserves_task_runspace_metadata() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    db.save_terminal_state(&TerminalStateSnapshot {
+        runspaces: vec![TerminalRunspaceRow {
+            id: "rs-1".to_string(),
+            kind: "task_run".to_string(),
+            task_id: Some("MON-1".to_string()),
+            task_run_id: Some("run-1".to_string()),
+            task_title: Some("Workboard bridge".to_string()),
+            sort_order: 0,
+            is_active: true,
+            tabs: vec![TerminalTabRow {
+                id: "tab-1".to_string(),
+                cwd: "/tmp/worktree".to_string(),
+                title: "run-1".to_string(),
+                sort_order: 0,
+                is_active: true,
+            }],
+        }],
+    })
+    .unwrap();
+
+    let loaded = db.load_terminal_state().unwrap();
+    assert_eq!(loaded.runspaces.len(), 1);
+    assert_eq!(loaded.runspaces[0].kind, "task_run");
+    assert_eq!(loaded.runspaces[0].task_id.as_deref(), Some("MON-1"));
+    assert_eq!(loaded.runspaces[0].task_run_id.as_deref(), Some("run-1"));
+    assert_eq!(
+        loaded.runspaces[0].task_title.as_deref(),
+        Some("Workboard bridge")
+    );
 }
 
 #[test]

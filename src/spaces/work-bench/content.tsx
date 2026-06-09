@@ -27,7 +27,17 @@ const IMAGE_EXTENSIONS = new Set([
 
 const CTRL_V_BASE64 = btoa(String.fromCharCode(0x16));
 
-function TerminalPane({ tabId, cwd, active }: { tabId: string; cwd: string; active: boolean }) {
+function TerminalPane({
+  tabId,
+  cwd,
+  active,
+  launch,
+}: {
+  tabId: string;
+  cwd: string;
+  active: boolean;
+  launch?: Parameters<typeof useTerminal>[1]["launch"];
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const closeTab = useSetAtom(closeTerminalTabAtom);
   const updateTitle = useSetAtom(updateTabTitleAtom);
@@ -49,6 +59,7 @@ function TerminalPane({ tabId, cwd, active }: { tabId: string; cwd: string; acti
     tabId,
     cwd,
     active,
+    launch,
     onTitleChange,
     onCwdChange,
     onExit,
@@ -120,6 +131,7 @@ export default function WorkBenchContent() {
             key={tab.id}
             tabId={tab.id}
             cwd={tab.cwd}
+            launch={tab.launch}
             active={rs.id === state.activeRunspaceId && tab.id === rs.activeTabId}
           />
         )),

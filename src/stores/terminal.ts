@@ -3,6 +3,7 @@ import {
   ptyKill,
   terminalLoadState,
   terminalSaveState,
+  type PtySpawnCommand,
   type TerminalStateSnapshot,
 } from "@/commands/pty";
 import { markSessionDead } from "@/spaces/work-bench/use-terminal";
@@ -23,10 +24,15 @@ export type TerminalTab = {
   title: string;
   cwd: string;
   order: number;
+  launch?: PtySpawnCommand | null;
 };
 
 export type TerminalRunspace = {
   id: string;
+  kind: "shell" | "task_run";
+  taskId?: string | null;
+  taskRunId?: string | null;
+  taskTitle?: string | null;
   tabs: TerminalTab[];
   activeTabId: string;
   order: number;
@@ -48,15 +54,20 @@ function resolveTabCwd(tab: TerminalTab | null | undefined): string {
   return defaultCwd();
 }
 
-function createTab(cwd: string, order: number): TerminalTab {
+function createTab(
+  cwd: string,
+  order: number,
+  title = "",
+  launch?: PtySpawnCommand | null,
+): TerminalTab {
   const id = crypto.randomUUID();
-  return { id, title: "", cwd, order };
+  return { id, title, cwd, order, launch };
 }
 
 function createRunspace(order: number, cwd?: string): TerminalRunspace {
   const id = crypto.randomUUID();
   const tab = createTab(cwd ?? defaultCwd(), 0);
-  return { id, tabs: [tab], activeTabId: tab.id, order };
+  return { id, kind: "shell", tabs: [tab], activeTabId: tab.id, order };
 }
 
 function extractShortPath(path: string): string {
@@ -66,6 +77,7 @@ function extractShortPath(path: string): string {
 }
 
 function deriveRunspaceTitle(rs: TerminalRunspace): string {
+  if (rs.kind === "task_run" && rs.taskId) return rs.taskId;
   const tab = rs.tabs.find((t) => t.id === rs.activeTabId) ?? rs.tabs[0];
   if (!tab) return "";
   const path = tab.cwd !== "~" ? tab.cwd : tab.title || tab.cwd;
@@ -73,6 +85,7 @@ function deriveRunspaceTitle(rs: TerminalRunspace): string {
 }
 
 function deriveRunspaceDescription(rs: TerminalRunspace): string {
+  if (rs.kind === "task_run") return rs.taskTitle ?? rs.taskRunId ?? "";
   const tab = rs.tabs.find((t) => t.id === rs.activeTabId) ?? rs.tabs[0];
   return tab?.title ?? "";
 }
@@ -108,9 +121,74 @@ export const runspaceSummariesAtom = atom((get) => {
       title: deriveRunspaceTitle(rs),
       description: deriveRunspaceDescription(rs),
       tabCount: rs.tabs.length,
+      kind: rs.kind,
+      taskId: rs.taskId,
+      taskRunId: rs.taskRunId,
       isActive: rs.id === state.activeRunspaceId,
     }));
 });
+
+export const taskRunspaceMapAtom = atom((get) => {
+  const state = get(resolvedStateAtom);
+  return new Map(
+    state.runspaces
+      .filter((rs) => rs.kind === "task_run" && rs.taskRunId)
+      .map((rs) => [rs.taskRunId!, rs]),
+  );
+});
+
+export type CreateTaskRunspaceInput = {
+  taskId: string;
+  taskRunId: string;
+  taskTitle: string;
+  worktreePath: string;
+  launch?: PtySpawnCommand | null;
+  activate?: boolean;
+};
+
+export const createTaskRunspaceAtom = atom(null, (get, set, input: CreateTaskRunspaceInput) => {
+  const state = get(resolvedStateAtom);
+  const existing = state.runspaces.find((rs) => rs.taskRunId === input.taskRunId);
+  if (existing) {
+    if (input.activate) {
+      set(terminalStateAtom, { ...state, activeRunspaceId: existing.id });
+    }
+    return existing.id;
+  }
+
+  const tab = createTab(input.worktreePath, 0, "Agent", input.launch ?? null);
+  const rs: TerminalRunspace = {
+    id: crypto.randomUUID(),
+    kind: "task_run",
+    taskId: input.taskId,
+    taskRunId: input.taskRunId,
+    taskTitle: input.taskTitle,
+    tabs: [tab],
+    activeTabId: tab.id,
+    order: 0,
+  };
+  const shifted = state.runspaces.map((r) => ({ ...r, order: r.order + 1 }));
+  set(terminalStateAtom, {
+    runspaces: [rs, ...shifted],
+    activeRunspaceId: input.activate ? rs.id : state.activeRunspaceId,
+  });
+  return rs.id;
+});
+
+export const activateTaskRunspaceAtom = atom(
+  null,
+  (get, set, input: { taskRunId?: string | null; taskId?: string | null }) => {
+    const state = get(resolvedStateAtom);
+    const existing = state.runspaces.find(
+      (rs) =>
+        (input.taskRunId && rs.taskRunId === input.taskRunId) ||
+        (input.taskId && rs.taskId === input.taskId),
+    );
+    if (!existing) return null;
+    set(terminalStateAtom, { ...state, activeRunspaceId: existing.id });
+    return existing.id;
+  },
+);
 
 export const createRunspaceAtom = atom(null, (get, set) => {
   const state = get(resolvedStateAtom);
@@ -313,11 +391,15 @@ function stateToSnapshot(state: TerminalState): TerminalStateSnapshot {
   return {
     runspaces: state.runspaces.map((rs) => ({
       id: rs.id,
+      kind: rs.kind,
+      task_id: rs.taskId ?? null,
+      task_run_id: rs.taskRunId ?? null,
+      task_title: rs.taskTitle ?? null,
       sort_order: rs.order,
       is_active: rs.id === state.activeRunspaceId,
       tabs: rs.tabs.map((t) => ({
         id: t.id,
-        cwd: t.cwd !== "~" ? t.cwd : t.title || t.cwd,
+        cwd: t.cwd || defaultCwd(),
         title: t.title,
         sort_order: t.order,
         is_active: t.id === rs.activeTabId,
@@ -330,6 +412,10 @@ function snapshotToState(snap: TerminalStateSnapshot): TerminalState | null {
   if (snap.runspaces.length === 0) return null;
   const runspaces: TerminalRunspace[] = snap.runspaces.map((rs) => ({
     id: rs.id,
+    kind: rs.kind === "task_run" ? "task_run" : "shell",
+    taskId: rs.task_id,
+    taskRunId: rs.task_run_id,
+    taskTitle: rs.task_title,
     order: rs.sort_order,
     activeTabId: rs.tabs.find((t) => t.is_active)?.id ?? rs.tabs[0]?.id ?? "",
     tabs: rs.tabs.map((t) => ({
@@ -337,6 +423,7 @@ function snapshotToState(snap: TerminalStateSnapshot): TerminalState | null {
       title: t.title,
       cwd: t.cwd,
       order: t.sort_order,
+      launch: null,
     })),
   }));
   const activeRs = snap.runspaces.find((rs) => rs.is_active);
@@ -346,9 +433,11 @@ function snapshotToState(snap: TerminalStateSnapshot): TerminalState | null {
   };
 }
 
-export const loadTerminalStateAtom = atom(null, async (_get, set) => {
+export const loadTerminalStateAtom = atom(null, async (get, set) => {
+  if (get(terminalStateAtom)) return;
   try {
     const snap = await terminalLoadState();
+    if (get(terminalStateAtom)) return;
     const state = snapshotToState(snap);
     if (state && state.runspaces.length > 0) {
       set(terminalStateAtom, state);
@@ -357,6 +446,7 @@ export const loadTerminalStateAtom = atom(null, async (_get, set) => {
   } catch {
     // first launch or empty DB
   }
+  if (get(terminalStateAtom)) return;
   set(terminalStateAtom, initialState());
 });
 
