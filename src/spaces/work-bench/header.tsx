@@ -63,7 +63,10 @@ export function WorkBenchHeader() {
               }
               dragIdRef.current = null;
             }}
-            onPointerDown={() => activateTab(tab.id)}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              activateTab(tab.id);
+            }}
             className={cn(
               "group flex h-7 w-[220px] min-w-[220px] max-w-[220px] cursor-pointer items-center rounded-lg px-3 text-xs",
               "transition-colors duration-100",

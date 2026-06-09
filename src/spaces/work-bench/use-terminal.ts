@@ -7,7 +7,11 @@ import "@xterm/xterm/css/xterm.css";
 import { getDefaultStore } from "jotai";
 import { ptySpawn, ptyWrite, ptyResize, onPtyOutput, onPtyExit } from "@/commands/pty";
 import { prefixActiveAtom } from "@/stores/space";
-import { terminalFontSizeAtom, zoomTerminalAtom } from "@/stores/terminal";
+import {
+  terminalFontSizeAtom,
+  terminalFocusRequestAtom,
+  zoomTerminalAtom,
+} from "@/stores/terminal";
 
 const aliveSessions = new Set<string>();
 
@@ -288,6 +292,14 @@ export function useTerminal(
       if (fitDebounce) clearTimeout(fitDebounce);
     };
   }, [options.active, options.tabId, options.cwd, containerRef]);
+
+  useEffect(() => {
+    if (!options.active) return;
+    const store = getDefaultStore();
+    return store.sub(terminalFocusRequestAtom, () => {
+      termRef.current?.focus();
+    });
+  }, [options.active, options.tabId]);
 
   return termRef;
 }

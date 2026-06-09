@@ -46,7 +46,10 @@ function RunspaceItem({
         }
         dragState.dragIdRef.current = null;
       }}
-      onPointerDown={onActivate}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        onActivate();
+      }}
       className={cn(
         "flex w-full flex-col rounded-lg px-2.5 py-1.5 text-left",
         "transition-colors duration-100",

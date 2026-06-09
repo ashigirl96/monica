@@ -14,6 +14,8 @@ const FONT_SIZE_MAX = 28;
 
 export const terminalFontSizeAtom = atom(FONT_SIZE_DEFAULT);
 
+export const terminalFocusRequestAtom = atom(0);
+
 export const zoomTerminalAtom = atom(null, (get, set, delta: 1 | -1) => {
   const current = get(terminalFontSizeAtom);
   set(terminalFontSizeAtom, Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, current + delta)));
@@ -164,6 +166,7 @@ export const removeRunspaceAtom = atom(null, (get, set, rsId: string) => {
 export const activateRunspaceAtom = atom(null, (get, set, rsId: string) => {
   const state = get(resolvedStateAtom);
   set(terminalStateAtom, { ...state, activeRunspaceId: rsId });
+  set(terminalFocusRequestAtom, (c) => c + 1);
 });
 
 export const cycleRunspaceAtom = atom(null, (get, set, direction: "up" | "down") => {
@@ -242,6 +245,7 @@ export const activateTerminalTabAtom = atom(null, (get, set, tabId: string) => {
     ...state,
     runspaces: state.runspaces.map((r) => (r.id === rs.id ? { ...rs, activeTabId: tabId } : r)),
   });
+  set(terminalFocusRequestAtom, (c) => c + 1);
 });
 
 export const cycleTerminalTabAtom = atom(null, (get, set, direction: "left" | "right") => {
