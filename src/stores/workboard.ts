@@ -44,11 +44,14 @@ export const columnTasksAtom = atom((get) => {
   }));
 });
 
-export const trackIssueAtom = atom(null, async (_get, set, input: { repo: string; number: number }) => {
-  await trackGithubIssue(input.repo, input.number);
-  const summaries = await listTaskSummaries();
-  set(taskSummariesAtom, summaries);
-});
+export const trackIssueAtom = atom(
+  null,
+  async (_get, set, input: { repo: string; number: number }) => {
+    await trackGithubIssue(input.repo, input.number);
+    const summaries = await listTaskSummaries();
+    set(taskSummariesAtom, summaries);
+  },
+);
 
 export const openBenchAtom = atom(null, async (_get, set, taskId: string) => {
   const bench = await openBench(taskId);

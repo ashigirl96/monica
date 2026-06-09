@@ -30,9 +30,7 @@ function WorkBoardContent() {
           </div>
           <div className="flex flex-1 flex-col gap-1.5 overflow-y-auto px-1.5 pb-3 scrollbar-hide">
             {col.tasks.length > 0 ? (
-              col.tasks.map((task) => (
-                <TaskCard key={task.id} task={task} />
-              ))
+              col.tasks.map((task) => <TaskCard key={task.id} task={task} />)
             ) : (
               <div className="flex flex-1 items-start justify-center pt-12">
                 <span className="text-[11px] text-muted-foreground/30">No tasks</span>

@@ -2,8 +2,10 @@ pre-commit:
   parallel: true
   commands:
     lint:
+      glob: "*.{ts,tsx,js,jsx}"
       run: bunx oxlint
     fmt-check:
+      glob: "*.{ts,tsx,js,jsx}"
       run: bunx oxfmt --check
 
 pre-push:

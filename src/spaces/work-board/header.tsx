@@ -1,18 +1,12 @@
 import { useCallback, useRef, useState } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import {
-  projectsAtom,
-  selectedProjectAtom,
-  trackIssueAtom,
-} from "@/stores/workboard";
+import { projectsAtom, selectedProjectAtom, trackIssueAtom } from "@/stores/workboard";
 import { cn } from "@/lib/utils";
 
 function parseIssueInput(raw: string): { repo: string; number: number } | null {
   const trimmed = raw.trim();
 
-  const urlMatch = trimmed.match(
-    /github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)/,
-  );
+  const urlMatch = trimmed.match(/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)/);
   if (urlMatch) {
     return { repo: urlMatch[1], number: Number(urlMatch[2]) };
   }
@@ -62,7 +56,15 @@ function TrackIssueButton() {
         }}
         className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
-        <svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          className="size-3"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <line x1="12" y1="5" x2="12" y2="19" />
           <line x1="5" y1="12" x2="19" y2="12" />
         </svg>
@@ -96,11 +98,7 @@ function TrackIssueButton() {
             error ? "border-red-400/60" : "border-border focus:border-muted-foreground/40",
           )}
         />
-        {error && (
-          <p className="absolute top-full left-0 mt-1 text-[10px] text-red-400">
-            {error}
-          </p>
-        )}
+        {error && <p className="absolute top-full left-0 mt-1 text-[10px] text-red-400">{error}</p>}
       </div>
       <button
         type="button"
@@ -119,7 +117,15 @@ function TrackIssueButton() {
         }}
         className="inline-flex h-7 items-center rounded-md px-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
       >
-        <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          className="size-3.5"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <line x1="18" y1="6" x2="6" y2="18" />
           <line x1="6" y1="6" x2="18" y2="18" />
         </svg>

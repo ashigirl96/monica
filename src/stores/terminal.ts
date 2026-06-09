@@ -358,12 +358,11 @@ function snapshotToState(snap: TerminalStateSnapshot): TerminalState | null {
   };
 }
 
-export const loadTerminalStateAtom = atom(null, async (_get, set) => {
+export const loadTerminalStateAtom = atom(null, async (get, set) => {
+  if (get(terminalStateAtom) !== null) return;
+
   try {
-    const [snap, benchMap] = await Promise.all([
-      terminalLoadState(),
-      listBenchRunspaceMap(),
-    ]);
+    const [snap, benchMap] = await Promise.all([terminalLoadState(), listBenchRunspaceMap()]);
     const runspaceToTask = new Map(benchMap.map(([rsId, taskId]) => [rsId, taskId]));
     const state = snapshotToState(snap);
     if (state && state.runspaces.length > 0) {
