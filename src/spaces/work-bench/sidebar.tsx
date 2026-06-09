@@ -51,7 +51,7 @@ function RunspaceItem({
         onActivate();
       }}
       className={cn(
-        "flex w-full flex-col rounded-lg px-2.5 py-1.5 text-left",
+        "flex w-full cursor-pointer flex-col rounded-lg px-2.5 py-1.5 text-left",
         "transition-colors duration-100",
         ws.isActive
           ? "bg-white/[0.1] text-foreground"
