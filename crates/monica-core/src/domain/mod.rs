@@ -21,6 +21,6 @@ pub use lifecycle::{
 };
 pub use project::{PermissionMode, Project, Provider};
 pub use refs::{parse_issue_ref, parse_owner_repo};
-pub use status::{DisplayStatus, TaskRunStatus, TaskRunWaitReason, TaskStatus};
+pub use status::{board_columns, BoardColumn, DisplayStatus, TaskRunStatus, TaskRunWaitReason, TaskStatus};
 pub use task::{Event, NewTask, Task, TaskKind, TaskSummaryRow};
 pub use task_run::{Agent, NewTaskRun, TaskRun, TaskRunObservation};

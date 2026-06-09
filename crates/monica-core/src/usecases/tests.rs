@@ -135,6 +135,7 @@ impl TaskRepository for FakeRepos {
             .values()
             .map(|task| TaskSummaryRow {
                 id: task.id.clone(),
+                title: task.title.clone(),
                 project: task.project_id.clone(),
                 github_issue_number: None,
                 github_pull_requests: Vec::<GithubPullRequestRef>::new(),

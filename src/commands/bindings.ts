@@ -4,49 +4,78 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
-  clipboardWriteImage: (path: string) =>
-    typedError<null, string>(__TAURI_INVOKE("clipboard_write_image", { path })),
-  ptySpawn: (id: string, cwd: string, rows: number, cols: number) =>
-    typedError<null, string>(__TAURI_INVOKE("pty_spawn", { id, cwd, rows, cols })),
-  ptyWrite: (id: string, data: string) =>
-    typedError<null, string>(__TAURI_INVOKE("pty_write", { id, data })),
-  ptyResize: (id: string, rows: number, cols: number) =>
-    typedError<null, string>(__TAURI_INVOKE("pty_resize", { id, rows, cols })),
-  ptyKill: (id: string) => typedError<null, string>(__TAURI_INVOKE("pty_kill", { id })),
-  terminalLoadState: () =>
-    typedError<TerminalStateSnapshot, string>(__TAURI_INVOKE("terminal_load_state")),
-  terminalSaveState: (state: TerminalStateSnapshot) =>
-    typedError<null, string>(__TAURI_INVOKE("terminal_save_state", { state })),
+	clipboardWriteImage: (path: string) => typedError<null, string>(__TAURI_INVOKE("clipboard_write_image", { path })),
+	ptySpawn: (id: string, cwd: string, rows: number, cols: number) => typedError<null, string>(__TAURI_INVOKE("pty_spawn", { id, cwd, rows, cols })),
+	ptyWrite: (id: string, data: string) => typedError<null, string>(__TAURI_INVOKE("pty_write", { id, data })),
+	ptyResize: (id: string, rows: number, cols: number) => typedError<null, string>(__TAURI_INVOKE("pty_resize", { id, rows, cols })),
+	ptyKill: (id: string) => typedError<null, string>(__TAURI_INVOKE("pty_kill", { id })),
+	terminalLoadState: () => typedError<TerminalStateSnapshot, string>(__TAURI_INVOKE("terminal_load_state")),
+	terminalSaveState: (state: TerminalStateSnapshot) => typedError<null, string>(__TAURI_INVOKE("terminal_save_state", { state })),
+	listTaskSummaries: () => typedError<TaskSummaryRow[], string>(__TAURI_INVOKE("list_task_summaries")),
+	getBoardColumns: () => __TAURI_INVOKE<BoardColumn[]>("get_board_columns"),
 };
 
 /* Types */
+export type BoardColumn = {
+	key: string,
+	label: string,
+	statuses: DisplayStatus[],
+};
+
+export type DisplayStatus = "inbox" | "ready" | "in_progress" | "setting_up" | "running" | "waiting_for_user" | "stopped" | "failed" | "done";
+
+export type GithubPullRequestRef = {
+	repo: string | null,
+	number: number,
+	url: string | null,
+	status: string | null,
+};
+
+export type TaskRunStatus = "setting_up" | "running" | "waiting_for_user" | "stopped" | "failed";
+
+export type TaskRunWaitReason = "ask_user_question" | "exit_plan_mode";
+
+export type TaskStatus = "inbox" | "ready" | "in_progress" | "done";
+
+export type TaskSummaryRow = {
+	id: string,
+	title: string,
+	project: string | null,
+	github_issue_number: number,
+	github_pull_requests: GithubPullRequestRef[],
+	task_status: TaskStatus,
+	task_run_status: TaskRunStatus | null,
+	task_run_wait_reason: TaskRunWaitReason | null,
+	status: DisplayStatus,
+	branch: string | null,
+};
+
 export type TerminalRunspaceRow = {
-  id: string;
-  sort_order: number;
-  is_active: boolean;
-  tabs: TerminalTabRow[];
+	id: string,
+	sort_order: number,
+	is_active: boolean,
+	tabs: TerminalTabRow[],
 };
 
 export type TerminalStateSnapshot = {
-  runspaces: TerminalRunspaceRow[];
+	runspaces: TerminalRunspaceRow[],
 };
 
 export type TerminalTabRow = {
-  id: string;
-  cwd: string;
-  title: string;
-  sort_order: number;
-  is_active: boolean;
+	id: string,
+	cwd: string,
+	title: string,
+	sort_order: number,
+	is_active: boolean,
 };
 
 /* Tauri Specta runtime */
-async function typedError<T, E>(
-  result: Promise<T>,
-): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
-  try {
-    return { status: "ok", data: await result };
-  } catch (e) {
-    if (e instanceof Error) throw e;
-    return { status: "error", error: e as any };
-  }
+async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
+    try {
+        return { status: "ok", data: await result };
+    } catch (e) {
+        if (e instanceof Error) throw e;
+        return { status: "error", error: e as any };
+    }
 }
+

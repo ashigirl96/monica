@@ -11,12 +11,12 @@ pub use domain::{
     branch_name, is_safe_task_run_id, monica_number, parse_issue_ref, parse_owner_repo,
     should_ignore_claude_event, status_for_claude_event, transition_for_claude_event,
     transition_is_protected, wait_reason_for_tool, worktree_path_for, Agent, DisplayStatus, Event,
-    ExternalRef, GithubAuthStatus, GithubDeviceFlow, GithubIssue, GithubPullRequest,
+    BoardColumn, ExternalRef, GithubAuthStatus, GithubDeviceFlow, GithubIssue, GithubPullRequest,
     GithubPullRequestRef, GithubPullRequestStatus, HookTransition, NewTask, NewTaskRun,
     PermissionMode, Project, Provider, PullRequestBranchSyncCandidate,
     PullRequestStatusSyncCandidate, PullRequestSyncCandidate, PullRequestSyncResult,
     PullRequestSyncStatus, RefType, Task, TaskKind, TaskRun, TaskRunObservation, TaskRunStatus,
-    TaskRunWaitReason, TaskStatus, TaskSummaryRow,
+    TaskRunWaitReason, TaskStatus, TaskSummaryRow, board_columns,
 };
 pub use interfaces::{
     AgentLaunch, AgentLaunchMode, AgentLauncher, AuthGateway, Clock, EventRepository, GitGateway,

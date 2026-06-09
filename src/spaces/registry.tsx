@@ -6,6 +6,7 @@ import { WorkBenchSidebar } from "@/spaces/work-bench/sidebar";
 import { WorkBenchHeader } from "@/spaces/work-bench/header";
 
 const LazyWorkBenchContent = lazy(() => import("@/spaces/work-bench/content"));
+const LazyWorkBoardContent = lazy(() => import("@/spaces/work-board/content"));
 
 type SpaceIcon = ComponentType<{ size?: number; strokeWidth?: number }>;
 
@@ -36,12 +37,6 @@ function ProjectSidebar() {
 function ProjectContent() {
   return <Placeholder name="Project" />;
 }
-function WorkBoardSidebar() {
-  return <Placeholder name="Board Sidebar" />;
-}
-function WorkBoardContent() {
-  return <Placeholder name="Work Board" />;
-}
 export const spaces: SpaceConfig[] = [
   {
     id: "dashboard",
@@ -62,9 +57,8 @@ export const spaces: SpaceConfig[] = [
     id: "work-board",
     icon: WorkBoardIcon,
     label: "Work Board",
-    sidebar: WorkBoardSidebar,
     header: TabBar,
-    content: WorkBoardContent,
+    content: LazyWorkBoardContent,
   },
   {
     id: "work-bench",

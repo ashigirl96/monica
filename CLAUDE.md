@@ -16,11 +16,20 @@ just install-app   # .app をビルドして /Applications/Monica.app に配置
 just check         # lint + fmt-check + knip + unused-commands + cargo clippy (PR 前必須)
 just knip          # 未使用 export/依存の検出 (--fix で自動削除)
 just unused-commands  # bindings.ts のコマンドがフロントで使われているか照合
+just generate-bindings  # Rust の型・コマンドから bindings.ts を再生成
 just test          # cargo test --workspace
 just analyze       # dist/stats.html で chunk を可視化
 just bloat         # Rust 依存サイズ内訳
 just size          # dist/ と bundle/ のサイズ表示
 ```
+
+## 型の管理原則
+
+enum・struct・定数は Rust (backend) を single source of truth とし、フロントでは二重定義しない。
+`just generate-bindings` で `src/commands/bindings.ts` に TypeScript 型が自動生成される。
+
+- Rust 側で型やコマンドを追加・変更したら `just generate-bindings` を実行する。
+- `bindings.ts` は手動編集しない（`just dev` 起動時にも上書きされる）。
 
 ## コード規約
 
