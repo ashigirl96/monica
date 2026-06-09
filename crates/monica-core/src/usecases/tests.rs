@@ -150,6 +150,16 @@ impl TaskRepository for FakeRepos {
         Ok(rows)
     }
 
+    fn set_primary_task_run(&self, task_id: &str, task_run_id: &str) -> Result<()> {
+        self.state
+            .borrow_mut()
+            .tasks
+            .get_mut(task_id)
+            .ok_or_else(|| anyhow!("task not found: {task_id}"))?
+            .primary_task_run_id = Some(task_run_id.to_string());
+        Ok(())
+    }
+
     fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()> {
         self.state
             .borrow_mut()
@@ -331,6 +341,16 @@ impl TaskRunRepository for FakeRepos {
             .get_mut(task_run_id)
             .ok_or_else(|| anyhow!("task run not found: {task_run_id}"))?
             .settings_path = Some(settings_path.to_string());
+        Ok(())
+    }
+
+    fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()> {
+        self.state
+            .borrow_mut()
+            .runs
+            .get_mut(task_run_id)
+            .ok_or_else(|| anyhow!("task run not found: {task_run_id}"))?
+            .worktree_path = Some(worktree_path.to_string());
         Ok(())
     }
 
@@ -630,6 +650,7 @@ fn task_from_new(id: String, new: NewTask) -> Task {
         labels: new.labels,
         details: new.details,
         source: new.source,
+        primary_task_run_id: None,
         deleted_at: None,
         created_at: "2026-06-02T00:00:00.000Z".to_string(),
         updated_at: "2026-06-02T00:00:00.000Z".to_string(),

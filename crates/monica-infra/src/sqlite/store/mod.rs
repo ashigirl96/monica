@@ -7,7 +7,7 @@ mod task_runs;
 mod tasks;
 pub(crate) mod terminal;
 
-pub(super) const TASK_COLUMNS: &str = "id, kind, status, phase, title, body, project_id,      labels, details_json, source_json, deleted_at, created_at, updated_at";
+pub(super) const TASK_COLUMNS: &str = "id, kind, status, phase, title, body, project_id,      labels, details_json, source_json, primary_task_run_id, deleted_at, created_at, updated_at";
 
 pub(super) const TASK_RUN_COLUMNS: &str =
     "id, task_id, agent, branch, worktree_path, status, wait_reason,      settings_path, provider_session_id, last_event_name, last_event_at, metadata_json,      created_at, updated_at";

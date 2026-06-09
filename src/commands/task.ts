@@ -1,3 +1,4 @@
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { commands } from "./bindings";
 
 export type {
@@ -8,6 +9,7 @@ export type {
   ProjectEntry,
   TrackIssueResult,
   TaskBench,
+  RunTaskResult,
 } from "./bindings";
 
 async function unwrap<T>(
@@ -40,4 +42,17 @@ export function listBenchRunspaceMap() {
 
 export function openBench(taskId: string) {
   return unwrap(commands.openBench(taskId));
+}
+
+export function runTask(taskId: string) {
+  return unwrap(commands.runTask(taskId));
+}
+
+export function onTaskRunStatusChanged(
+  cb: (payload: { task_id: string; task_run_id: string; status: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ task_id: string; task_run_id: string; status: string }>(
+    "task-run:status-changed",
+    (event) => cb(event.payload),
+  );
 }

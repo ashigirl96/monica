@@ -394,7 +394,20 @@ export const createTaskRunspaceAtom = atom(
 
     const existing = state.runspaces.find((r) => r.id === params.runspaceId);
     if (existing) {
-      set(terminalStateAtom, { ...state, activeRunspaceId: existing.id });
+      const needsCwdUpdate = params.cwd && existing.tabs[0]?.cwd !== params.cwd;
+      const updated = needsCwdUpdate
+        ? {
+            ...existing,
+            tabs: existing.tabs.map((t) => ({ ...t, cwd: params.cwd })),
+          }
+        : existing;
+      set(terminalStateAtom, {
+        ...state,
+        activeRunspaceId: existing.id,
+        runspaces: needsCwdUpdate
+          ? state.runspaces.map((r) => (r.id === existing.id ? updated : r))
+          : state.runspaces,
+      });
       return;
     }
 

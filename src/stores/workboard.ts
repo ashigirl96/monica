@@ -5,6 +5,7 @@ import {
   listProjects,
   trackGithubIssue,
   openBench,
+  runTask,
   type TaskSummaryRow,
   type BoardColumn,
   type ProjectEntry,
@@ -61,4 +62,15 @@ export const openBenchAtom = atom(null, async (_get, set, taskId: string) => {
     cwd: bench.cwd,
   });
   set(activeSpaceAtom, "work-bench");
+});
+
+export const runTaskAtom = atom(null, async (_get, set, taskId: string) => {
+  await runTask(taskId);
+  const summaries = await listTaskSummaries();
+  set(taskSummariesAtom, summaries);
+});
+
+export const refreshTaskSummariesAtom = atom(null, async (_get, set) => {
+  const summaries = await listTaskSummaries();
+  set(taskSummariesAtom, summaries);
 });

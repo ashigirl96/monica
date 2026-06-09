@@ -40,6 +40,10 @@ impl TaskRepository for SqliteStore {
         SqliteStore::list_task_summaries(self, status, project)
     }
 
+    fn set_primary_task_run(&self, task_id: &str, task_run_id: &str) -> Result<()> {
+        SqliteStore::set_primary_task_run(self, task_id, task_run_id)
+    }
+
     fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()> {
         SqliteStore::update_task_status(self, id, status)
     }
@@ -153,6 +157,10 @@ impl TaskRunRepository for SqliteStore {
         SqliteStore::set_task_run_settings_path(self, task_run_id, settings_path)
     }
 
+    fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()> {
+        SqliteStore::set_task_run_worktree_path(self, task_run_id, worktree_path)
+    }
+
     fn get_task_run(&self, id: &str) -> Result<Option<TaskRun>> {
         SqliteStore::get_task_run(self, id)
     }
@@ -197,6 +205,10 @@ impl BenchRepository for SqliteStore {
 
     fn create_bench(&mut self, task_id: &str, runspace_id: &str, cwd: &str) -> Result<()> {
         SqliteStore::create_bench(self, task_id, runspace_id, cwd)
+    }
+
+    fn update_bench_cwd(&self, task_id: &str, cwd: &str) -> Result<()> {
+        SqliteStore::update_bench_cwd(self, task_id, cwd)
     }
 }
 

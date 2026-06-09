@@ -34,4 +34,12 @@ impl SqliteStore {
         )?;
         Ok(())
     }
+
+    pub fn update_bench_cwd(&self, task_id: &str, cwd: &str) -> Result<()> {
+        self.conn().execute(
+            "UPDATE \"_TaskToRunspace\" SET cwd = ?1 WHERE task_id = ?2",
+            params![cwd, task_id],
+        )?;
+        Ok(())
+    }
 }

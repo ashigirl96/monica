@@ -2,7 +2,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSetAtom } from "jotai";
 import type { DisplayStatus, TaskSummaryRow } from "@/commands/task";
 import { cn } from "@/lib/utils";
-import { openBenchAtom } from "@/stores/workboard";
+import { openBenchAtom, runTaskAtom } from "@/stores/workboard";
 
 const STATUS_COLORS: Record<DisplayStatus, string> = {
   inbox: "bg-muted-foreground/40",
@@ -110,8 +110,19 @@ function issueUrl(project: string | null, number: number): string | null {
   return `https://github.com/${project}/issues/${number}`;
 }
 
+const RUN_ELIGIBLE: Set<DisplayStatus> = new Set(["inbox", "ready", "stopped", "failed"]);
+
+function RunIcon() {
+  return (
+    <svg className="size-3" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+      <polygon points="5,3 19,12 5,21" />
+    </svg>
+  );
+}
+
 export function TaskCard({ task }: { task: TaskSummaryRow }) {
   const doOpenBench = useSetAtom(openBenchAtom);
+  const doRunTask = useSetAtom(runTaskAtom);
   const hasIssue = task.github_issue_number > 0;
   const hasPrs = task.github_pull_requests.length > 0;
   const hasBranch = task.branch !== null;
@@ -178,17 +189,32 @@ export function TaskCard({ task }: { task: TaskSummaryRow }) {
           <span className="text-[10px] tracking-wide text-muted-foreground/50 uppercase">
             {STATUS_LABELS[task.status]}
           </span>
-          <button
-            type="button"
-            onClick={() => doOpenBench(task.id)}
-            className={cn(
-              "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] transition-opacity",
-              "text-muted-foreground opacity-0 group-hover:opacity-70 hover:!opacity-100",
+          <div className="flex items-center gap-1">
+            {RUN_ELIGIBLE.has(task.status) && (
+              <button
+                type="button"
+                onClick={() => doRunTask(task.id)}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] transition-opacity",
+                  "text-muted-foreground opacity-0 group-hover:opacity-70 hover:!opacity-100",
+                )}
+              >
+                <RunIcon />
+                <span>Run</span>
+              </button>
             )}
-          >
-            <BenchIcon />
-            <span>Bench</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => doOpenBench(task.id)}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] transition-opacity",
+                "text-muted-foreground opacity-0 group-hover:opacity-70 hover:!opacity-100",
+              )}
+            >
+              <BenchIcon />
+              <span>Bench</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

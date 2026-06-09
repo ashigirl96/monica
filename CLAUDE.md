@@ -34,3 +34,4 @@ enum・struct・定数は Rust (backend) を single source of truth とし、フ
 ## コード規約
 
 - コメントは「なぜ」が非自明な場合のみ。
+- フォーマットは `just fmt` を使う。biome や cargo fmt を直接呼ばない。

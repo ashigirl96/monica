@@ -27,6 +27,8 @@ export const commands = {
     typedError<[string, string][], string>(__TAURI_INVOKE("list_bench_runspace_map")),
   openBench: (taskId: string) =>
     typedError<TaskBench, string>(__TAURI_INVOKE("open_bench", { taskId })),
+  runTask: (taskId: string) =>
+    typedError<RunTaskResult, string>(__TAURI_INVOKE("run_task", { taskId })),
 };
 
 /* Types */
@@ -57,6 +59,12 @@ export type GithubPullRequestRef = {
 export type ProjectEntry = {
   repo: string;
   name: string;
+};
+
+export type RunTaskResult = {
+  task_id: string;
+  task_run_id: string;
+  branch: string;
 };
 
 export type TaskBench = {

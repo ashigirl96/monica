@@ -1,6 +1,7 @@
-use monica_core::{BoardColumn, TaskBench, TaskSummaryRow, TrackGithubIssueInput};
+use monica_core::{BoardColumn, RunTaskResult, TaskBench, TaskSummaryRow, TrackGithubIssueInput};
 use monica_infra::Runtime;
 use serde::Serialize;
+use tauri::{AppHandle, Emitter};
 
 #[derive(Serialize, specta::Type)]
 pub struct ProjectEntry {
@@ -12,6 +13,13 @@ pub struct ProjectEntry {
 pub struct TrackIssueResult {
     pub task_id: String,
     pub title: String,
+}
+
+#[derive(Clone, Serialize)]
+struct TaskRunStatusChanged {
+    task_id: String,
+    task_run_id: String,
+    status: String,
 }
 
 #[tauri::command]
@@ -73,4 +81,52 @@ pub fn list_bench_runspace_map() -> Result<Vec<(String, String)>, String> {
 pub fn open_bench(task_id: String) -> Result<TaskBench, String> {
     let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
     monica_core::open_bench(&mut runtime.repositories, &task_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn run_task(app: AppHandle, task_id: String) -> Result<RunTaskResult, String> {
+    let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
+    let result =
+        monica_core::start_run(&mut runtime.repositories, &task_id).map_err(|e| e.to_string())?;
+
+    let run_id = result.task_run_id.clone();
+    let tid = result.task_id.clone();
+
+    std::thread::Builder::new()
+        .name(format!("run-{run_id}"))
+        .spawn(move || {
+            let mut rt = match Runtime::open_default() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    log::error!(target: "monica_app::run_task", "background runtime open failed: {e:#}");
+                    return;
+                }
+            };
+            let final_status = match monica_core::execute_run(
+                &mut rt.repositories,
+                &rt.git,
+                &rt.setup_runner,
+                &rt.run_artifacts,
+                &tid,
+                &run_id,
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    log::error!(target: "monica_app::run_task", "execute_run failed: {e:#}");
+                    "failed".to_string()
+                }
+            };
+            let _ = app.emit(
+                "task-run:status-changed",
+                TaskRunStatusChanged {
+                    task_id: tid,
+                    task_run_id: run_id,
+                    status: final_status,
+                },
+            );
+        })
+        .map_err(|e| e.to_string())?;
+
+    Ok(result)
 }

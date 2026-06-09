@@ -48,6 +48,7 @@ pub struct Task {
     pub details: Value,
     #[cfg_attr(feature = "specta", specta(type = specta_typescript::Any))]
     pub source: Option<Value>,
+    pub primary_task_run_id: Option<String>,
     pub deleted_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,

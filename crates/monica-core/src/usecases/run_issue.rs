@@ -336,12 +336,12 @@ where
     })
 }
 
-struct SetupResult {
-    outcome: SetupOutcome,
-    log_path: String,
+pub(crate) struct SetupResult {
+    pub(crate) outcome: SetupOutcome,
+    pub(crate) log_path: String,
 }
 
-fn setup_phase<S, A>(
+pub(crate) fn setup_phase<S, A>(
     setup_runner: &S,
     artifacts: &A,
     task_run_id: &str,
@@ -370,7 +370,7 @@ where
     })
 }
 
-fn latest_github_issue_number<R>(repos: &R, task_id: &str) -> Result<Option<i64>>
+pub(crate) fn latest_github_issue_number<R>(repos: &R, task_id: &str) -> Result<Option<i64>>
 where
     R: TaskRepository,
 {

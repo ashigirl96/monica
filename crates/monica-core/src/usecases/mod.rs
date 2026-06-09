@@ -5,6 +5,7 @@ pub mod query;
 pub mod record_claude_hook;
 pub mod register_project;
 pub mod run_issue;
+pub mod run_task;
 pub mod sync_pull_requests;
 #[cfg(test)]
 mod tests;
@@ -22,6 +23,7 @@ pub use query::{
 pub use record_claude_hook::{record_claude_hook, HookReport};
 pub use register_project::{register_project, register_project_with_default_branch};
 pub use run_issue::{launch_agent, run_issue, run_issue_with_launch_mode, TaskRunReport};
+pub use run_task::{execute_run, start_run};
 pub use sync_pull_requests::sync_next_pull_request;
 pub use track_github_issue::{
     track_github_issue, track_github_issue_from_fetched, TrackGithubIssueInput,

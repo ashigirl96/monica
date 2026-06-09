@@ -19,6 +19,7 @@ fn migrations() -> Migrations<'static> {
         M::up(V10),
         M::up(V11),
         M::up(V12),
+        M::up(V13),
     ])
 }
 
@@ -414,6 +415,11 @@ const V12: &str = r#"
     );
 "#;
 
+/// v13: add primary_task_run_id to tasks for explicit "Main Run" designation.
+const V13: &str = r#"
+    ALTER TABLE tasks ADD COLUMN primary_task_run_id TEXT;
+"#;
+
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
     migrations()
@@ -487,7 +493,7 @@ mod tests {
             .conn()
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 12);
+        assert_eq!(version, 13);
 
         std::fs::remove_file(&path).ok();
     }
