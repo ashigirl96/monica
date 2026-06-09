@@ -109,12 +109,76 @@ fn write_metadata(metadata: &GithubAuthMetadata) -> Result<()> {
 }
 
 #[cfg(target_os = "macos")]
+fn protected_options() -> security_framework::passwords::PasswordOptions {
+    let mut opts = security_framework::passwords::PasswordOptions::new_generic_password(
+        KEYCHAIN_SERVICE,
+        KEYCHAIN_ACCOUNT,
+    );
+    opts.use_protected_keychain();
+    opts
+}
+
+#[cfg(target_os = "macos")]
 fn read_keychain_password() -> Result<Option<Vec<u8>>> {
-    match security_framework::passwords::get_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
-        Ok(bytes) => Ok(Some(bytes)),
-        Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(None),
-        Err(e) => Err(e).context("failed to read Monica GitHub token from macOS Keychain"),
+    use security_framework::passwords;
+
+    match passwords::generic_password(protected_options()) {
+        Ok(bytes) => return Ok(Some(bytes)),
+        Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => {}
+        Err(e) => {
+            return Err(e).context("failed to read GitHub token from data protection keychain")
+        }
     }
+    migrate_legacy_keychain_item()
+}
+
+/// Read the token from the legacy keychain via `security` CLI (Apple-signed,
+/// so it bypasses per-app ACL prompts) and move it to the data protection
+/// keychain.  Returns the token bytes on success, `None` if no legacy item
+/// exists.
+#[cfg(target_os = "macos")]
+fn migrate_legacy_keychain_item() -> Result<Option<Vec<u8>>> {
+    use std::process::Command;
+
+    use security_framework::passwords;
+
+    let output = Command::new("security")
+        .args([
+            "find-generic-password",
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-a",
+            KEYCHAIN_ACCOUNT,
+            "-w",
+        ])
+        .output()
+        .context("failed to run `security` CLI for keychain migration")?;
+
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let mut bytes = output.stdout;
+    if bytes.last() == Some(&b'\n') {
+        bytes.pop();
+    }
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+
+    let _ = passwords::set_generic_password_options(&bytes, protected_options());
+
+    let _ = Command::new("security")
+        .args([
+            "delete-generic-password",
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-a",
+            KEYCHAIN_ACCOUNT,
+        ])
+        .output();
+
+    Ok(Some(bytes))
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -126,7 +190,7 @@ fn read_keychain_password() -> Result<Option<Vec<u8>>> {
 
 #[cfg(target_os = "macos")]
 fn write_keychain_password(bytes: &[u8]) -> Result<()> {
-    security_framework::passwords::set_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, bytes)
+    security_framework::passwords::set_generic_password_options(bytes, protected_options())
         .context("failed to save Monica GitHub token to macOS Keychain")
 }
 
@@ -139,12 +203,22 @@ fn write_keychain_password(_bytes: &[u8]) -> Result<()> {
 
 #[cfg(target_os = "macos")]
 fn delete_keychain_password() -> Result<()> {
-    match security_framework::passwords::delete_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
-    {
-        Ok(()) => Ok(()),
-        Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(()),
-        Err(e) => Err(e).context("failed to delete Monica GitHub token from macOS Keychain"),
+    use security_framework::passwords;
+
+    match passwords::delete_generic_password_options(protected_options()) {
+        Ok(()) => {}
+        Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => {}
+        Err(e) => {
+            return Err(e)
+                .context("failed to delete Monica GitHub token from data protection keychain")
+        }
     }
+    match passwords::delete_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
+        Ok(()) => {}
+        Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => {}
+        Err(e) => Err(e).context("failed to delete Monica GitHub token from macOS Keychain")?,
+    }
+    Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]

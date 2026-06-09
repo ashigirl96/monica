@@ -31,4 +31,7 @@ specta-typescript = { version = "=0.0.12", default-features = false, optional = 
 specta = ["dep:specta", "dep:specta-typescript", "monica-core/specta"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
-security-framework = { version = "3.7.0", default-features = false, features = ["OSX_10_14"] }
+security-framework = { version = "3.7.0", default-features = false, features = [
+  "OSX_10_14",
+  "OSX_10_15",
+] }
