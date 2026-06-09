@@ -140,6 +140,7 @@ impl SqliteStore {
         let mut stmt = self.conn().prepare(
             "SELECT
                t.id AS task_id,
+               t.title AS title,
                coalesce(project.repo, issue_ref.repo, t.project_id) AS project,
                issue_ref.number AS github_issue_number,
 	               t.status AS task_status,
@@ -185,6 +186,7 @@ impl SqliteStore {
             let display_status = DisplayStatus::from_task_and_run(task_status, task_run_status);
             let item = TaskSummaryRow {
                 id: row.get("task_id")?,
+                title: row.get("title")?,
                 project: row.get("project")?,
                 github_issue_number: row.get("github_issue_number")?,
                 github_pull_requests: Vec::new(),

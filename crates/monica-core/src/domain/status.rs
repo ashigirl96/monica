@@ -182,6 +182,53 @@ impl FromStr for DisplayStatus {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct BoardColumn {
+    pub key: String,
+    pub label: String,
+    pub statuses: Vec<DisplayStatus>,
+}
+
+pub fn board_columns() -> Vec<BoardColumn> {
+    vec![
+        BoardColumn {
+            key: "inbox".into(),
+            label: "Inbox".into(),
+            statuses: vec![DisplayStatus::Inbox],
+        },
+        BoardColumn {
+            key: "ready".into(),
+            label: "Ready".into(),
+            statuses: vec![DisplayStatus::Ready],
+        },
+        BoardColumn {
+            key: "running".into(),
+            label: "Running".into(),
+            statuses: vec![
+                DisplayStatus::InProgress,
+                DisplayStatus::SettingUp,
+                DisplayStatus::Running,
+            ],
+        },
+        BoardColumn {
+            key: "needs-you".into(),
+            label: "Needs You".into(),
+            statuses: vec![DisplayStatus::WaitingForUser],
+        },
+        BoardColumn {
+            key: "interrupted".into(),
+            label: "Interrupted".into(),
+            statuses: vec![DisplayStatus::Stopped, DisplayStatus::Failed],
+        },
+        BoardColumn {
+            key: "done".into(),
+            label: "Done".into(),
+            statuses: vec![DisplayStatus::Done],
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

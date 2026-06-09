@@ -57,6 +57,7 @@ pub struct Task {
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct TaskSummaryRow {
     pub id: String,
+    pub title: String,
     pub project: Option<String>,
     #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
     pub github_issue_number: Option<i64>,

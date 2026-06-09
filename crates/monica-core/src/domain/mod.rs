@@ -1,3 +1,4 @@
+mod bench;
 mod branch;
 mod external_ref;
 mod github;
@@ -8,6 +9,7 @@ mod status;
 mod task;
 mod task_run;
 
+pub use bench::TaskBench;
 pub use branch::{branch_name, monica_number, worktree_path_for};
 pub use external_ref::{ExternalRef, RefType};
 pub use github::{
@@ -21,6 +23,6 @@ pub use lifecycle::{
 };
 pub use project::{PermissionMode, Project, Provider};
 pub use refs::{parse_issue_ref, parse_owner_repo};
-pub use status::{DisplayStatus, TaskRunStatus, TaskRunWaitReason, TaskStatus};
+pub use status::{board_columns, BoardColumn, DisplayStatus, TaskRunStatus, TaskRunWaitReason, TaskStatus};
 pub use task::{Event, NewTask, Task, TaskKind, TaskSummaryRow};
 pub use task_run::{Agent, NewTaskRun, TaskRun, TaskRunObservation};

@@ -1,53 +1,43 @@
 # Monica Frontend Rebuild TODO
 
-## レイアウト基盤 ✅
+## Workboard v0
 
-- [x] ディレクトリ構成（app / spaces / components / commands / hooks / stores / lib）
-- [x] SpaceNav（アイコン列、Space切り替え）
-- [x] Sidebar / Header の Space 依存レンダリング
-- [x] Content パネル（角丸）
-- [x] Cmd+1 で LeftPanel 開閉
-- [x] traffic light 不可侵領域
-- [x] MCP Bridge プラグイン導入（dev時スクリーンショット）
+### Done
 
-## レイアウト磨き込み ✅
+- [x] Kanban 6列レイアウト (Inbox / Ready / Running / Needs You / Interrupted / Done)
+- [x] カラム定義をRust側 `BoardColumn` から取得
+- [x] Task Card: タイトル + ID + ステータスストライプ + issue/PR/branchバッジ
+- [x] Tauri コマンド `list_task_summaries` / `get_board_columns`
+- [x] Jotai store (`workboard.ts`)
+- [x] サイドバー非表示 (v0 non-goal)
+- [x] issue/PRバッジをクリックでGitHubへ遷移 (`tauri-plugin-opener`)
+- [x] カードの空カラム表示: empty state
+- [x] Track Issue フロー: GitHub Issue URL を貼って Task を作成
+- [x] Project filter: プロジェクトで絞り込み
+- [x] Open Bench: Task → `_TaskToRunspace` → Workbench Runspace 遷移
+- [x] `_TaskToRunspace` テーブル (V12 migration)
+- [x] `open_bench` usecase + Tauri コマンド
+- [x] `TerminalRunspace.taskId` でtask-bound runspace識別
 
-- [x] LeftPanel 開閉アニメーション（width transition, 200ms ease-out）
-- [x] Content パネルの視覚調整（多層 shadow + ring border、--content-bg CSS変数）
-- [x] vibrancy とのバランス調整（sidebar 透過 vs content 不透明パネル）
-- [x] SpaceNav アイコンの hover / active 状態改善（strokeWidth 変化、bg-white/0.12）
-- [x] サイドバーリサイズ（ドラッグで幅変更、jotai で管理、ダブルクリックでリセット）
-- [x] traffic light 不可侵領域を定数化（TRAFFIC_LIGHT_ZONE_HEIGHT / WIDTH）
-- [x] LeftPanel幅に応じたヘッダー左パディング自動計算
+### Card & Board の磨き込み
 
-## タブシステム ✅
+- [ ] ボードのデータ自動更新 (polling or Tauri event)
+- [ ] specta `Option<i64>` → `number | null` の型生成修正
 
-- [x] `stores/tabs.ts` — Space ごとのタブ状態管理（tabs + activeTabId + counter per SpaceId）
-- [x] Header 内のタブ UI（TabBar、アクティブタブは --content-bg、非アクティブは bg-white/0.06）
-- [x] Space 切り替え時のタブ状態復元（tabsBySpaceAtom で自動保持）
-- [x] タブ追加（Ctrl+T → C / +ボタン）、閉じる（Cmd+W / Ctrl+D / ×ボタン）
-- [x] タブ移動（Alt+H 左 / Alt+L 右）
-- [x] ショートカット集約（hooks/use-shortcuts.ts、prefix key 方式）
+### Header
 
-## 各 Space の実装
+- [ ] Search: タイトル/ID で検索
 
-- [ ] Dashboard — メイン画面（タスク概要？フィード？）
-- [ ] Project — サイドバーにプロジェクト一覧、メインにイシュー/タスク
-- [ ] Work Board — カンバン的なボード UI
-- [ ] Work Bench — エージェント実行・開発作業用
+### Workbench 接続（残り）
 
-## コマンド層（commands/）
+- [ ] Workbench sidebar に Task-bound group を表示（Task Runs / Shells の分離）
+- [ ] Back to Board 導線 (Workbench → Workboard)
+- [ ] Run & Open: TaskRun を開始し Runspace を作成して Workbench へ遷移
+- [ ] Run in Background: TaskRun を開始するが Workbench には遷移しない
 
-- [ ] 既存 Tauri コマンドの型安全ラッパー（list_tasks, list_task_summaries, list_events, delete_task, github_auth_status）
-- [ ] コマンド呼び出しのエラーハンドリング共通化
+### v0 Non-goals (意図的にやらない)
 
-## 共有コンポーネント（components/）
-
-- [ ] shadcn 再導入（必要なものだけ）
-- [ ] ボタン / 入力 / モーダル等の基本 UI
-
-## その他
-
-- [x] キーボードショートカット体系（Cmd+1, Ctrl+T→C, Cmd+W, Ctrl+D, Alt+H/L）
-- [ ] ダークモード / ライトモード切り替え（現状はダーク固定）
-- [ ] 状態永続化（jotai + localStorage or Tauri store）
+- 複数 Board view
+- drag-and-drop による status 変更
+- file diff / editor / test result の Board 内表示
+- TaskRun lineage の複雑な表現

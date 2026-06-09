@@ -1,3 +1,4 @@
+mod bench;
 mod events;
 mod external_refs;
 mod projects;

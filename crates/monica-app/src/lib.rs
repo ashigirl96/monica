@@ -10,31 +10,45 @@ use monica_pty::PtyManager;
 
 mod clipboard_commands;
 mod pty_commands;
+mod task_commands;
 
 const PR_SYNC_INTERVAL: Duration = Duration::from_secs(10);
 const PR_SYNC_BATCH_LIMIT: usize = 3;
 
+fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
+    tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
+        clipboard_commands::clipboard_write_image,
+        pty_commands::pty_spawn,
+        pty_commands::pty_write,
+        pty_commands::pty_resize,
+        pty_commands::pty_kill,
+        pty_commands::terminal_load_state,
+        pty_commands::terminal_save_state,
+        task_commands::list_task_summaries,
+        task_commands::get_board_columns,
+        task_commands::list_projects,
+        task_commands::track_github_issue,
+        task_commands::list_bench_runspace_map,
+        task_commands::open_bench,
+    ])
+}
+
+fn bindings_path() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src/commands/bindings.ts")
+}
+
+pub fn export_bindings() {
+    specta_builder()
+        .export(specta_typescript::Typescript::default(), bindings_path())
+        .expect("failed to export typescript bindings");
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let specta_builder = tauri_specta::Builder::new()
-        .commands(tauri_specta::collect_commands![
-            clipboard_commands::clipboard_write_image,
-            pty_commands::pty_spawn,
-            pty_commands::pty_write,
-            pty_commands::pty_resize,
-            pty_commands::pty_kill,
-            pty_commands::terminal_load_state,
-            pty_commands::terminal_save_state,
-        ]);
+    let specta_builder = specta_builder();
 
     #[cfg(debug_assertions)]
-    {
-        let bindings_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../src/commands/bindings.ts");
-        specta_builder
-            .export(specta_typescript::Typescript::default(), &bindings_path)
-            .expect("failed to export typescript bindings");
-    }
+    export_bindings();
 
     let builder = tauri::Builder::default();
     #[cfg(debug_assertions)]
@@ -161,4 +175,14 @@ fn release_log_dir() -> std::path::PathBuf {
 #[cfg(not(debug_assertions))]
 fn release_log_path() -> std::path::PathBuf {
     release_log_dir().join("monica.log")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn export_typescript_bindings() {
+        export_bindings();
+    }
 }

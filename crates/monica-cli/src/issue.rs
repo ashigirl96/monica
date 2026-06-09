@@ -424,6 +424,7 @@ mod tests {
     fn render_status_table_formats_rows_and_empty_state() {
         let rows = vec![TaskSummaryRow {
             id: "MON-1".to_string(),
+            title: "Test issue".to_string(),
             project: Some("ashigirl96/monica".to_string()),
             github_issue_number: Some(17),
             github_pull_requests: Vec::new(),

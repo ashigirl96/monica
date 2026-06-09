@@ -74,6 +74,9 @@ unused-commands:
 check: lint fmt-check knip unused-commands
     cargo clippy --workspace --all-targets -- -D warnings
 
+generate-bindings:
+    cargo test -p monica-app --lib tests::export_typescript_bindings -- --exact
+
 test:
     cargo test --workspace
 

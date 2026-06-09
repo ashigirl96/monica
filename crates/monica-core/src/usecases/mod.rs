@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod open_bench;
 pub mod delete_issue;
 pub mod query;
 pub mod record_claude_hook;
@@ -12,6 +13,7 @@ pub mod track_github_issue;
 pub use auth::{
     begin_github_device_flow, github_auth_status, logout_github, wait_for_github_device_flow,
 };
+pub use open_bench::open_bench;
 pub use delete_issue::{delete_issue, DeleteIssueReport};
 pub use query::{
     get_project, list_events, list_projects, list_task_summaries, list_tasks, mark_issue,

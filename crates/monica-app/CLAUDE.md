@@ -31,11 +31,11 @@
 **コマンド追加の手順:**
 
 1. `#[tauri::command]` + `#[specta::specta]` を関数に付ける
-2. `lib.rs` の `tauri_specta::collect_commands![]` に登録する
+2. `lib.rs` の `specta_builder()` 内の `tauri_specta::collect_commands![]` に登録する
 3. 戻り値/引数の型に `#[cfg_attr(feature = "specta", derive(specta::Type))]` を付ける
    - `i64` フィールドには `#[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]`
    - `serde_json::Value` フィールドには `#[cfg_attr(feature = "specta", specta(type = specta_typescript::Any))]`
-4. `just dev` で bindings.ts を再生成
+4. `just generate-bindings` で bindings.ts を再生成（アプリ起動不要）
 5. `src/commands/` 配下のラッパーファイルから `commands.xxx` を呼ぶ
 
 **未使用コマンドの検知:**

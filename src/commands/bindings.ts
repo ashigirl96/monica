@@ -17,9 +17,74 @@ export const commands = {
     typedError<TerminalStateSnapshot, string>(__TAURI_INVOKE("terminal_load_state")),
   terminalSaveState: (state: TerminalStateSnapshot) =>
     typedError<null, string>(__TAURI_INVOKE("terminal_save_state", { state })),
+  listTaskSummaries: () =>
+    typedError<TaskSummaryRow[], string>(__TAURI_INVOKE("list_task_summaries")),
+  getBoardColumns: () => __TAURI_INVOKE<BoardColumn[]>("get_board_columns"),
+  listProjects: () => typedError<ProjectEntry[], string>(__TAURI_INVOKE("list_projects")),
+  trackGithubIssue: (repo: string, number: number) =>
+    typedError<TrackIssueResult, string>(__TAURI_INVOKE("track_github_issue", { repo, number })),
+  listBenchRunspaceMap: () =>
+    typedError<[string, string][], string>(__TAURI_INVOKE("list_bench_runspace_map")),
+  openBench: (taskId: string) =>
+    typedError<TaskBench, string>(__TAURI_INVOKE("open_bench", { taskId })),
 };
 
 /* Types */
+export type BoardColumn = {
+  key: string;
+  label: string;
+  statuses: DisplayStatus[];
+};
+
+export type DisplayStatus =
+  | "inbox"
+  | "ready"
+  | "in_progress"
+  | "setting_up"
+  | "running"
+  | "waiting_for_user"
+  | "stopped"
+  | "failed"
+  | "done";
+
+export type GithubPullRequestRef = {
+  repo: string | null;
+  number: number;
+  url: string | null;
+  status: string | null;
+};
+
+export type ProjectEntry = {
+  repo: string;
+  name: string;
+};
+
+export type TaskBench = {
+  task_id: string;
+  runspace_id: string;
+  cwd: string;
+  created: boolean;
+};
+
+export type TaskRunStatus = "setting_up" | "running" | "waiting_for_user" | "stopped" | "failed";
+
+export type TaskRunWaitReason = "ask_user_question" | "exit_plan_mode";
+
+export type TaskStatus = "inbox" | "ready" | "in_progress" | "done";
+
+export type TaskSummaryRow = {
+  id: string;
+  title: string;
+  project: string | null;
+  github_issue_number: number;
+  github_pull_requests: GithubPullRequestRef[];
+  task_status: TaskStatus;
+  task_run_status: TaskRunStatus | null;
+  task_run_wait_reason: TaskRunWaitReason | null;
+  status: DisplayStatus;
+  branch: string | null;
+};
+
 export type TerminalRunspaceRow = {
   id: string;
   sort_order: number;
@@ -37,6 +102,11 @@ export type TerminalTabRow = {
   title: string;
   sort_order: number;
   is_active: boolean;
+};
+
+export type TrackIssueResult = {
+  task_id: string;
+  title: string;
 };
 
 /* Tauri Specta runtime */
