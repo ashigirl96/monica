@@ -5,6 +5,7 @@ import {
   terminalSaveState,
   type TerminalStateSnapshot,
 } from "@/commands/pty";
+import { listBenchRunspaceMap } from "@/commands/task";
 import { markSessionDead } from "@/spaces/work-bench/use-terminal";
 
 const FONT_SIZE_DEFAULT = 15;
@@ -27,6 +28,7 @@ export type TerminalTab = {
 
 export type TerminalRunspace = {
   id: string;
+  taskId?: string;
   tabs: TerminalTab[];
   activeTabId: string;
   order: number;
@@ -99,12 +101,22 @@ export const activeTerminalTabAtom = atom((get) => {
   return rs.tabs.find((t) => t.id === rs.activeTabId) ?? rs.tabs[0] ?? null;
 });
 
-export const runspaceSummariesAtom = atom((get) => {
+export type RunspaceSummary = {
+  id: string;
+  taskId: string | undefined;
+  title: string;
+  description: string;
+  tabCount: number;
+  isActive: boolean;
+};
+
+export const runspaceSummariesAtom = atom<RunspaceSummary[]>((get) => {
   const state = get(resolvedStateAtom);
   return state.runspaces
     .sort((a, b) => a.order - b.order)
     .map((rs) => ({
       id: rs.id,
+      taskId: rs.taskId,
       title: deriveRunspaceTitle(rs),
       description: deriveRunspaceDescription(rs),
       tabCount: rs.tabs.length,
@@ -348,9 +360,17 @@ function snapshotToState(snap: TerminalStateSnapshot): TerminalState | null {
 
 export const loadTerminalStateAtom = atom(null, async (_get, set) => {
   try {
-    const snap = await terminalLoadState();
+    const [snap, benchMap] = await Promise.all([
+      terminalLoadState(),
+      listBenchRunspaceMap(),
+    ]);
+    const runspaceToTask = new Map(benchMap.map(([rsId, taskId]) => [rsId, taskId]));
     const state = snapshotToState(snap);
     if (state && state.runspaces.length > 0) {
+      state.runspaces = state.runspaces.map((rs) => ({
+        ...rs,
+        taskId: runspaceToTask.get(rs.id),
+      }));
       set(terminalStateAtom, state);
       return;
     }
@@ -359,6 +379,33 @@ export const loadTerminalStateAtom = atom(null, async (_get, set) => {
   }
   set(terminalStateAtom, initialState());
 });
+
+export const createTaskRunspaceAtom = atom(
+  null,
+  (get, set, params: { runspaceId: string; taskId: string; cwd: string }) => {
+    const state = get(resolvedStateAtom);
+
+    const existing = state.runspaces.find((r) => r.id === params.runspaceId);
+    if (existing) {
+      set(terminalStateAtom, { ...state, activeRunspaceId: existing.id });
+      return;
+    }
+
+    const maxOrder = state.runspaces.reduce((m, r) => Math.max(m, r.order), -1);
+    const tab = createTab(params.cwd, 0);
+    const rs: TerminalRunspace = {
+      id: params.runspaceId,
+      taskId: params.taskId,
+      tabs: [tab],
+      activeTabId: tab.id,
+      order: maxOrder + 1,
+    };
+    set(terminalStateAtom, {
+      runspaces: [...state.runspaces, rs],
+      activeRunspaceId: rs.id,
+    });
+  },
+);
 
 let saveTimer: number | undefined;
 

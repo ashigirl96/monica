@@ -28,6 +28,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         task_commands::get_board_columns,
         task_commands::list_projects,
         task_commands::track_github_issue,
+        task_commands::list_bench_runspace_map,
+        task_commands::open_bench,
     ])
 }
 

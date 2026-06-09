@@ -11,7 +11,7 @@ pub use domain::{
     branch_name, is_safe_task_run_id, monica_number, parse_issue_ref, parse_owner_repo,
     should_ignore_claude_event, status_for_claude_event, transition_for_claude_event,
     transition_is_protected, wait_reason_for_tool, worktree_path_for, Agent, DisplayStatus, Event,
-    BoardColumn, ExternalRef, GithubAuthStatus, GithubDeviceFlow, GithubIssue, GithubPullRequest,
+    BoardColumn, ExternalRef, TaskBench, GithubAuthStatus, GithubDeviceFlow, GithubIssue, GithubPullRequest,
     GithubPullRequestRef, GithubPullRequestStatus, HookTransition, NewTask, NewTaskRun,
     PermissionMode, Project, Provider, PullRequestBranchSyncCandidate,
     PullRequestStatusSyncCandidate, PullRequestSyncCandidate, PullRequestSyncResult,
@@ -19,12 +19,12 @@ pub use domain::{
     TaskRunWaitReason, TaskStatus, TaskSummaryRow, board_columns,
 };
 pub use interfaces::{
-    AgentLaunch, AgentLaunchMode, AgentLauncher, AuthGateway, Clock, EventRepository, GitGateway,
-    GithubGateway, ProjectRepository, RunArtifacts, SetupEnv, SetupOutcome, SetupRunner,
-    TaskRepository, TaskRunRepository,
+    AgentLaunch, AgentLaunchMode, AgentLauncher, AuthGateway, BenchRepository, Clock,
+    EventRepository, GitGateway, GithubGateway, ProjectRepository, RunArtifacts, SetupEnv,
+    SetupOutcome, SetupRunner, TaskRepository, TaskRunRepository,
 };
 pub use usecases::{
-    begin_github_device_flow, delete_issue, get_project, github_auth_status, launch_agent,
+    begin_github_device_flow, delete_issue, open_bench, get_project, github_auth_status, launch_agent,
     list_events, list_projects, list_task_summaries, list_tasks, logout_github, mark_issue,
     record_claude_hook, register_project, register_project_with_default_branch, run_issue,
     run_issue_with_launch_mode, set_project_field, sync_next_pull_request, track_github_issue,

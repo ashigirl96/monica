@@ -2,8 +2,8 @@ use anyhow::Result;
 use monica_core::NewTask;
 use monica_core::NewTaskRun;
 use monica_core::{
-    Clock, DisplayStatus, Event, EventRepository, ExternalRef, GithubPullRequest, Project,
-    ProjectRepository, PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate,
+    BenchRepository, Clock, DisplayStatus, Event, EventRepository, ExternalRef, GithubPullRequest,
+    Project, ProjectRepository, PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate,
     PullRequestSyncCandidate, Task, TaskRepository, TaskRun, TaskRunObservation, TaskRunRepository,
     TaskRunStatus, TaskStatus, TaskSummaryRow,
 };
@@ -183,6 +183,20 @@ impl EventRepository for SqliteStore {
 
     fn list_events(&self, task_id: Option<&str>) -> Result<Vec<Event>> {
         SqliteStore::list_events(self, task_id)
+    }
+}
+
+impl BenchRepository for SqliteStore {
+    fn get_bench_for_task(&self, task_id: &str) -> Result<Option<(String, String)>> {
+        SqliteStore::get_bench_for_task(self, task_id)
+    }
+
+    fn list_bench_runspace_map(&self) -> Result<Vec<(String, String)>> {
+        SqliteStore::list_bench_runspace_map(self)
+    }
+
+    fn create_bench(&mut self, task_id: &str, runspace_id: &str, cwd: &str) -> Result<()> {
+        SqliteStore::create_bench(self, task_id, runspace_id, cwd)
     }
 }
 

@@ -18,6 +18,7 @@ fn migrations() -> Migrations<'static> {
         M::up(V9),
         M::up(V10),
         M::up(V11),
+        M::up(V12),
     ])
 }
 
@@ -403,6 +404,16 @@ const V11: &str = r#"
     CREATE INDEX terminal_tabs_runspace_idx ON terminal_tabs(runspace_id, sort_order);
 "#;
 
+/// v12: junction table linking a Task to its Workbench Runspace.
+const V12: &str = r#"
+    CREATE TABLE "_TaskToRunspace" (
+      task_id    TEXT PRIMARY KEY NOT NULL,
+      runspace_id TEXT NOT NULL UNIQUE,
+      cwd        TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    );
+"#;
+
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
     migrations()
@@ -476,7 +487,7 @@ mod tests {
             .conn()
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 11);
+        assert_eq!(version, 12);
 
         std::fs::remove_file(&path).ok();
     }

@@ -7,6 +7,7 @@ export type {
   BoardColumn,
   ProjectEntry,
   TrackIssueResult,
+  TaskBench,
 } from "./bindings";
 
 async function unwrap<T>(
@@ -31,4 +32,12 @@ export function listProjects() {
 
 export function trackGithubIssue(repo: string, number: number) {
   return unwrap(commands.trackGithubIssue(repo, number));
+}
+
+export function listBenchRunspaceMap() {
+  return unwrap(commands.listBenchRunspaceMap());
+}
+
+export function openBench(taskId: string) {
+  return unwrap(commands.openBench(taskId));
 }

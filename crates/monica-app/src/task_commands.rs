@@ -1,4 +1,4 @@
-use monica_core::{BoardColumn, TaskSummaryRow, TrackGithubIssueInput};
+use monica_core::{BoardColumn, TaskBench, TaskSummaryRow, TrackGithubIssueInput};
 use monica_infra::Runtime;
 use serde::Serialize;
 
@@ -58,4 +58,19 @@ pub async fn track_github_issue(repo: String, number: i32) -> Result<TrackIssueR
         task_id: report.task.id,
         title: report.task.title,
     })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn list_bench_runspace_map() -> Result<Vec<(String, String)>, String> {
+    let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
+    monica_core::BenchRepository::list_bench_runspace_map(&runtime.repositories)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn open_bench(task_id: String) -> Result<TaskBench, String> {
+    let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
+    monica_core::open_bench(&mut runtime.repositories, &task_id).map_err(|e| e.to_string())
 }

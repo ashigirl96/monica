@@ -1,3 +1,4 @@
+mod bench;
 mod branch;
 mod external_ref;
 mod github;
@@ -8,6 +9,7 @@ mod status;
 mod task;
 mod task_run;
 
+pub use bench::TaskBench;
 pub use branch::{branch_name, monica_number, worktree_path_for};
 pub use external_ref::{ExternalRef, RefType};
 pub use github::{

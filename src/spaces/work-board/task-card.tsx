@@ -1,6 +1,8 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { useSetAtom } from "jotai";
 import type { DisplayStatus, TaskSummaryRow } from "@/commands/task";
 import { cn } from "@/lib/utils";
+import { openBenchAtom } from "@/stores/workboard";
 
 const STATUS_COLORS: Record<DisplayStatus, string> = {
   inbox: "bg-muted-foreground/40",
@@ -96,6 +98,7 @@ function issueUrl(project: string | null, number: number): string | null {
 }
 
 export function TaskCard({ task }: { task: TaskSummaryRow }) {
+  const doOpenBench = useSetAtom(openBenchAtom);
   const hasIssue = task.github_issue_number > 0;
   const hasPrs = task.github_pull_requests.length > 0;
   const hasBranch = task.branch !== null;
@@ -164,11 +167,10 @@ export function TaskCard({ task }: { task: TaskSummaryRow }) {
           </span>
           <button
             type="button"
-            disabled
+            onClick={() => doOpenBench(task.id)}
             className={cn(
               "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] transition-opacity",
-              "text-muted-foreground opacity-0 group-hover:opacity-60",
-              "disabled:cursor-not-allowed",
+              "text-muted-foreground opacity-0 group-hover:opacity-70 hover:!opacity-100",
             )}
           >
             <BenchIcon />
