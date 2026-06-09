@@ -1,3 +1,4 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { DisplayStatus, TaskSummaryRow } from "@/commands/task";
 import { cn } from "@/lib/utils";
 
@@ -59,6 +60,41 @@ function BenchIcon() {
   );
 }
 
+function BadgeLink({
+  url,
+  className,
+  children,
+}: {
+  url: string | null;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  if (url) {
+    return (
+      <button
+        type="button"
+        onClick={() => openUrl(url)}
+        className={cn(
+          "inline-flex cursor-pointer items-center gap-0.5 rounded-sm px-1.5 py-px text-[11px] transition-opacity hover:opacity-80",
+          className,
+        )}
+      >
+        {children}
+      </button>
+    );
+  }
+  return (
+    <span className={cn("inline-flex items-center gap-0.5 rounded-sm px-1.5 py-px text-[11px]", className)}>
+      {children}
+    </span>
+  );
+}
+
+function issueUrl(project: string | null, number: number): string | null {
+  if (!project) return null;
+  return `https://github.com/${project}/issues/${number}`;
+}
+
 export function TaskCard({ task }: { task: TaskSummaryRow }) {
   const hasIssue = task.github_issue_number > 0;
   const hasPrs = task.github_pull_requests.length > 0;
@@ -89,16 +125,19 @@ export function TaskCard({ task }: { task: TaskSummaryRow }) {
         {hasMetadata && (
           <div className="flex flex-wrap items-center gap-1.5">
             {hasIssue && (
-              <span className="inline-flex items-center gap-0.5 rounded-sm bg-secondary px-1.5 py-px text-[11px] text-muted-foreground">
+              <BadgeLink
+                url={issueUrl(task.project, task.github_issue_number)}
+                className="bg-secondary text-muted-foreground"
+              >
                 <IssueIcon />
                 <span>{task.github_issue_number}</span>
-              </span>
+              </BadgeLink>
             )}
             {task.github_pull_requests.map((pr) => (
-              <span
+              <BadgeLink
                 key={pr.number}
+                url={pr.url}
                 className={cn(
-                  "inline-flex items-center gap-0.5 rounded-sm px-1.5 py-px text-[11px]",
                   pr.status === "merged"
                     ? "bg-purple-500/15 text-purple-400"
                     : pr.status === "open" || pr.status === "draft"
@@ -108,7 +147,7 @@ export function TaskCard({ task }: { task: TaskSummaryRow }) {
               >
                 <PrIcon />
                 <span>{pr.number}</span>
-              </span>
+              </BadgeLink>
             ))}
             {hasBranch && (
               <span className="inline-flex items-center gap-0.5 rounded-sm bg-secondary px-1.5 py-px text-[11px] text-muted-foreground">

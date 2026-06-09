@@ -5,6 +5,8 @@ export type {
   DisplayStatus,
   GithubPullRequestRef,
   BoardColumn,
+  ProjectEntry,
+  TrackIssueResult,
 } from "./bindings";
 
 async function unwrap<T>(
@@ -21,4 +23,12 @@ export function listTaskSummaries() {
 
 export function getBoardColumns() {
   return commands.getBoardColumns();
+}
+
+export function listProjects() {
+  return unwrap(commands.listProjects());
+}
+
+export function trackGithubIssue(repo: string, number: number) {
+  return unwrap(commands.trackGithubIssue(repo, number));
 }

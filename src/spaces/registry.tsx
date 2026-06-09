@@ -4,6 +4,7 @@ import type { SpaceId } from "@/stores/space";
 import { TabBar } from "@/components/tab-bar";
 import { WorkBenchSidebar } from "@/spaces/work-bench/sidebar";
 import { WorkBenchHeader } from "@/spaces/work-bench/header";
+import { WorkBoardHeader } from "@/spaces/work-board/header";
 
 const LazyWorkBenchContent = lazy(() => import("@/spaces/work-bench/content"));
 const LazyWorkBoardContent = lazy(() => import("@/spaces/work-board/content"));
@@ -57,7 +58,7 @@ export const spaces: SpaceConfig[] = [
     id: "work-board",
     icon: WorkBoardIcon,
     label: "Work Board",
-    header: TabBar,
+    header: WorkBoardHeader,
     content: LazyWorkBoardContent,
   },
   {

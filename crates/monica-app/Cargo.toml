@@ -16,6 +16,7 @@ tauri-build = { version = "2", default-features = false, features = [] }
 base64 = { version = "0.22", default-features = false, features = ["std"] }
 log = "0.4"
 monica-core = { path = "../monica-core", features = ["specta"] }
+serde = { version = "1", default-features = false, features = ["derive"] }
 monica-infra = { path = "../monica-infra", features = ["specta"] }
 monica-pty = { path = "../monica-pty" }
 specta = { version = "=2.0.0-rc.25", default-features = false, features = ["serde_json"] }

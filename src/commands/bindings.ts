@@ -13,6 +13,8 @@ export const commands = {
 	terminalSaveState: (state: TerminalStateSnapshot) => typedError<null, string>(__TAURI_INVOKE("terminal_save_state", { state })),
 	listTaskSummaries: () => typedError<TaskSummaryRow[], string>(__TAURI_INVOKE("list_task_summaries")),
 	getBoardColumns: () => __TAURI_INVOKE<BoardColumn[]>("get_board_columns"),
+	listProjects: () => typedError<ProjectEntry[], string>(__TAURI_INVOKE("list_projects")),
+	trackGithubIssue: (repo: string, number: number) => typedError<TrackIssueResult, string>(__TAURI_INVOKE("track_github_issue", { repo, number })),
 };
 
 /* Types */
@@ -29,6 +31,11 @@ export type GithubPullRequestRef = {
 	number: number,
 	url: string | null,
 	status: string | null,
+};
+
+export type ProjectEntry = {
+	repo: string,
+	name: string,
 };
 
 export type TaskRunStatus = "setting_up" | "running" | "waiting_for_user" | "stopped" | "failed";
@@ -67,6 +74,11 @@ export type TerminalTabRow = {
 	title: string,
 	sort_order: number,
 	is_active: boolean,
+};
+
+export type TrackIssueResult = {
+	task_id: string,
+	title: string,
 };
 
 /* Tauri Specta runtime */
