@@ -6,7 +6,7 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import "@xterm/xterm/css/xterm.css";
 import { getDefaultStore } from "jotai";
 import { ptySpawn, ptyWrite, ptyResize, onPtyOutput, onPtyExit } from "@/commands/pty";
-import { prefixActiveAtom } from "@/stores/space";
+import { activeSpaceAtom, prefixActiveAtom } from "@/stores/space";
 import {
   terminalFontSizeAtom,
   terminalFocusRequestAtom,
@@ -296,9 +296,17 @@ export function useTerminal(
   useEffect(() => {
     if (!options.active) return;
     const store = getDefaultStore();
-    return store.sub(terminalFocusRequestAtom, () => {
-      termRef.current?.focus();
-    });
+    const unsubs = [
+      store.sub(terminalFocusRequestAtom, () => {
+        termRef.current?.focus();
+      }),
+      store.sub(activeSpaceAtom, () => {
+        if (store.get(activeSpaceAtom) === "work-bench") {
+          requestAnimationFrame(() => termRef.current?.focus());
+        }
+      }),
+    ];
+    return () => unsubs.forEach((fn) => fn());
   }, [options.active, options.tabId]);
 
   return termRef;
