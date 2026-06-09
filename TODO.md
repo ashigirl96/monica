@@ -1,116 +1,89 @@
 # Monica Frontend Rebuild TODO
 
-## Workboard / Workbench: TaskRun-aware Run & Open
+## Workboard / Workbench: TaskRun-aware Prepare & Open
 
 この TODO は、Workboard の TaskCard から Workbench / Runspace / TaskRun / Claude Code を段階的に統合していくための修正単位です。
 
 前提方針:
 
-- `Open Bench` と `Run & Open` を分ける。
-  - `Open Bench`: 既存 Runspace を開く。新しい TaskRun は作らない。
-  - `Run & Open`: TaskRun を作り、worktree/setup/agent 起動へ進む。
+- `Open` と `Prepare` は独立した操作。
+  - `Open` (Bench): 既存 Runspace を開く。新しい TaskRun は作らない。Workbench へ遷移。
+  - `Prepare`: TaskRun を作り、worktree/setup を非同期実行。**Workboard に留まる。** agent は起動しない。
 - TaskCard の表示 status は「最新 TaskRun」ではなく「Main Run」を優先して決める。
 - UI 上の呼び名は `Active Run` より **Main Run** を使う。
+- TaskRunStatus は段階を正確に表現する。
+  - `setting_up`: worktree 作成 + setup.sh 実行中。
+  - `prepared`: worktree + setup 完了、agent 未起動。
+  - `running`: agent (Claude Code) が実行中。
 - `setup script` は Claude Code なしでも実行できる。
 - `template prompt` / `continue` / `fork` / Claude settings は Claude Code 起動時だけ有効にする。
 - 最初は plain `claude` の自動 wrap はしない。明示的な `monica claude` / UI 起動を優先する。
 
 ---
 
-## MVP 0: Run & Open = worktree + setup + Workbench logs
+## MVP 0: Prepare (async) + Open (独立)
 
-まずは Claude Code 起動なしで、Task を実行開始し、Workbench で setup の進行とログを見られる状態を作る。
+Claude Code 起動なしで、Workboard から Task の worktree/setup を非同期実行し、TaskCard でリアルタイムに status を追える状態を作る。
 
 ### 0-1. Main Run 概念をデータモデルに追加する
 
-- [ ] Task ごとに Main Run を参照できる永続データを追加する。
-  - 推奨: `tasks.primary_task_run_id`
-  - 代替: `task_primary_runs(task_id, task_run_id, selected_at)`
-- [ ] 既存データでは Main Run が未設定でも動くようにする。
-- [ ] Main Run 未設定時は従来どおり latest TaskRun を fallback として扱う。
-- [ ] Main Run 設定/変更用の repository API を追加する。
+- [x] Task ごとに Main Run を参照できる永続データを追加する。
+  - `tasks.primary_task_run_id` (V13 migration)
+- [x] 既存データでは Main Run が未設定でも動くようにする。
+- [x] Main Run 未設定時は従来どおり latest TaskRun を fallback として扱う。
+- [x] Main Run 設定/変更用の repository API を追加する (`set_primary_task_run`)。
 
 Acceptance:
 
-- [ ] Main Run がある Task は、その TaskRun を status source にできる。
-- [ ] Main Run がない既存 Task は壊れない。
+- [x] Main Run がある Task は、その TaskRun を status source にできる。
+- [x] Main Run がない既存 Task は壊れない。
 
 ### 0-2. TaskCard / TaskSummary の status source を Main Run 優先に変更する
 
-- [ ] `list_task_summaries` の latest run join を Main Run 優先に変更する。
-- [ ] `TaskSummaryRow` の `task_run_status`, `task_run_wait_reason`, `branch` は Main Run 由来にする。
-- [ ] Main Run 未設定時だけ latest run を fallback にする。
-- [ ] `DisplayStatus::from_task_and_run` の既存ルールは維持する。
+- [x] `list_task_summaries` の latest run join を `COALESCE(primary_task_run_id, latest)` に変更する。
+- [x] `TaskSummaryRow` の `task_run_status`, `task_run_wait_reason`, `branch` は Main Run 由来にする。
+- [x] Main Run 未設定時だけ latest run を fallback にする。
+- [x] `DisplayStatus::from_task_and_run` の既存ルールは維持する。
 
 Acceptance:
 
-- [ ] side/future run が追加されても、Main Run がある限り TaskCard の列は変わらない。
+- [x] side/future run が追加されても、Main Run がある限り TaskCard の列は変わらない。
 - [ ] Main Run を切り替えると TaskCard の表示 status / branch が切り替わる。
 
-### 0-3. `Open Bench` と `Run & Open` の UX/API を分離する
+### 0-3. `Prepare` ボタンと非同期実行 flow を追加する
 
-- [ ] 現在の `openBench` は「開くだけ」の責務として維持する。
-- [ ] 新しい `runAndOpen` 系 command/usecase を追加する。
-- [ ] TaskCard のアクションを最低限以下に分ける。
-  - `Open Bench`
-  - `Run & Open`
-- [ ] `Run & Open` は実行開始後すぐ Workbench に移動する。
-
-Acceptance:
-
-- [ ] `Open Bench` では TaskRun が増えない。
-- [ ] `Run & Open` では TaskRun が作成される。
-- [ ] `Run & Open` 後、該当 Runspace が active になる。
-
-### 0-4. Run & Open の prepare-only backend flow を作る
-
-- [ ] `RunIntent` / `RunOptions` 相当の入力を定義する。
-  - `task_id`
-  - `run_role = main`
-  - `create_worktree = true`
-  - `run_setup = true`
-  - `agent = none`
-  - `open_workbench = true`
-- [ ] `Run & Open` で TaskRun を `setting_up` として作成する。
-- [ ] 作成された TaskRun をその Task の Main Run に設定する。
-- [ ] project / branch / worktree path を CLI の `issue run` と同じルールで解決する。
-- [ ] worktree を作成する。
-- [ ] `.monica/setup.sh` を実行する。
-- [ ] setup 結果に応じて TaskRun を `running` または `failed` に更新する。
+- [x] 現在の `openBench` は「開くだけ」の責務として維持する。
+- [x] 新しい `prepare_task` Tauri command を追加する。
+- [x] TaskCard に `Prepare` ボタンと `Bench` ボタンを独立して表示する。
+- [x] `Prepare` は Workboard に留まり、Workbench に遷移しない。
+- [x] Backend を2段階に分割する。
+  - `start_run`: 即座に TaskRun (SettingUp) 作成 + Main Run 設定 → UI に即返却。
+  - `execute_run`: バックグラウンドスレッドで worktree 作成 + setup 実行 → status 更新。
+- [x] `run_issue.rs` の `setup_phase` / `latest_github_issue_number` を `pub(crate)` に昇格して再利用する。
+- [x] `execute_run` 完了時に `app.emit("task-run:status-changed", ...)` で Tauri イベントを発行する。
+- [x] Workboard content でイベントを購読し、`listTaskSummaries` をリフレッシュする。
+- [x] setup 結果に応じて TaskRun を `prepared` または `failed` に更新する。
+- [x] bench レコードを作成/更新し、cwd を worktree path にする。
+- [x] `TaskRunStatus::Prepared` / `DisplayStatus::Prepared` を追加する。
 
 Acceptance:
 
-- [ ] setup success/skipped なら TaskRun は `running` になる。
-- [ ] setup failed/timeout なら TaskRun は `failed` になる。
-- [ ] TaskCard は Main Run の status に従って Running / Interrupted に移動する。
+- [x] `Prepare` クリック後、TaskCard が即座に `setting_up` (pulse) に変わる。
+- [x] 数秒後、バックグラウンド完了で `prepared` / `failed` に自動遷移する。
+- [x] `Open Bench` では TaskRun が増えない。
+- [ ] `Prepare` 後に `Open` すると、worktree cwd のターミナルが開く。
 
-### 0-5. Workbench で setup log を見られるようにする
+### 0-4. Open Bench の cwd を worktree に合わせる
 
-- [ ] `Run & Open` の戻り値に `task_run_id`, `runspace_id`, `worktree_path`, `branch`, `setup_log_path` を含める。
-- [ ] Runspace に TaskRun context を持たせる。
-  - `taskId`
-  - `mainTaskRunId`
-  - `worktreePath`
-  - `branch`
-  - `setupLogPath`
-- [ ] Workbench に Logs/Timeline 相当の表示を追加する。
-- [ ] setup log file を tail/poll して表示する。
-- [ ] setup が終わったら最終 outcome を表示する。
+- [x] `BenchRepository` に `update_bench_cwd` を追加する。
+- [x] `execute_run` で worktree 完成後に bench の cwd を更新する。
+- [x] `createTaskRunspaceAtom` で既存 runspace の cwd が変わっていたら tab cwd を更新する。
+- [x] Open Bench だけの場合は既存 cwd を尊重する。
+- [x] `open_bench` で bench 新規作成時に、既存 TaskRun の worktree_path があればそれを cwd にする。
 
 Acceptance:
 
-- [ ] Run & Open 直後に Workbench へ移動し、setup 実行中のログが見える。
-- [ ] setup 失敗時、Workbench 上で失敗理由のログを読める。
-
-### 0-6. Runspace の cwd を worktree に更新する
-
-- [ ] Run & Open で作成/更新される Runspace の初期 cwd を worktree path にする。
-- [ ] setup 完了後、Shell tab を開いた場合は worktree で shell が起動する。
-- [ ] Open Bench だけの場合は既存 cwd を尊重する。
-
-Acceptance:
-
-- [ ] Run & Open 後の terminal は対象 worktree で起動する。
+- [ ] Prepare 後に Open すると terminal は対象 worktree で起動する。
 - [ ] 既存 Bench を開くだけなら cwd が意図せず変わらない。
 
 ---
@@ -119,9 +92,9 @@ Acceptance:
 
 worktree/setup の flow が安定してから、Claude Code 起動を option として追加する。
 
-### 1-1. Run & Open launch sheet を追加する
+### 1-1. Run launch sheet を追加する
 
-- [ ] TaskCard の `Run & Open` から簡易 launch sheet を開く。
+- [ ] TaskCard の `Prepare` から簡易 launch sheet を開く（または別途 `Run` ボタンを追加する）。
 - [ ] 最初の options は以下に絞る。
   - `Run setup script`
   - `Start Claude Code`
@@ -134,7 +107,7 @@ Acceptance:
 - [ ] Claude off の状態で prompt option を選べない。
 - [ ] setup only / setup + Claude の両方を選べる。
 
-### 1-2. Claude launch artifact を Run & Open flow に接続する
+### 1-2. Claude launch artifact を Prepare/Run flow に接続する
 
 - [ ] Claude enabled のときだけ `claude-settings.json` と `prompt.txt` を生成する。
 - [ ] Claude process env に以下を注入する。
@@ -145,6 +118,7 @@ Acceptance:
   - `MONICA_PROJECT_ID`
 - [ ] setup failed の場合は Claude を起動しない。
 - [ ] settings path を TaskRun に保存する。
+- [ ] Claude 起動時に TaskRunStatus を `prepared` → `running` に遷移する。
 
 Acceptance:
 
@@ -161,7 +135,7 @@ Acceptance:
 
 Acceptance:
 
-- [ ] Run & Open 後、Claude enabled なら Workbench 上で Claude Code が見える。
+- [ ] Prepare 後、Claude enabled なら Workbench 上で Claude Code が見える。
 - [ ] Claude の hook によって TaskRun が `running` / `waiting_for_user` / `stopped` / `failed` に遷移する。
 
 ---

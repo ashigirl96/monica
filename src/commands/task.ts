@@ -9,7 +9,7 @@ export type {
   ProjectEntry,
   TrackIssueResult,
   TaskBench,
-  RunTaskResult,
+  PrepareTaskResult,
 } from "./bindings";
 
 async function unwrap<T>(
@@ -44,8 +44,8 @@ export function openBench(taskId: string) {
   return unwrap(commands.openBench(taskId));
 }
 
-export function runTask(taskId: string) {
-  return unwrap(commands.runTask(taskId));
+export function prepareTask(taskId: string) {
+  return unwrap(commands.prepareTask(taskId));
 }
 
 export function onTaskRunStatusChanged(

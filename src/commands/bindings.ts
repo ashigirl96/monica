@@ -27,8 +27,8 @@ export const commands = {
     typedError<[string, string][], string>(__TAURI_INVOKE("list_bench_runspace_map")),
   openBench: (taskId: string) =>
     typedError<TaskBench, string>(__TAURI_INVOKE("open_bench", { taskId })),
-  runTask: (taskId: string) =>
-    typedError<RunTaskResult, string>(__TAURI_INVOKE("run_task", { taskId })),
+  prepareTask: (taskId: string) =>
+    typedError<PrepareTaskResult, string>(__TAURI_INVOKE("prepare_task", { taskId })),
 };
 
 /* Types */
@@ -43,6 +43,7 @@ export type DisplayStatus =
   | "ready"
   | "in_progress"
   | "setting_up"
+  | "prepared"
   | "running"
   | "waiting_for_user"
   | "stopped"
@@ -56,15 +57,15 @@ export type GithubPullRequestRef = {
   status: string | null;
 };
 
-export type ProjectEntry = {
-  repo: string;
-  name: string;
-};
-
-export type RunTaskResult = {
+export type PrepareTaskResult = {
   task_id: string;
   task_run_id: string;
   branch: string;
+};
+
+export type ProjectEntry = {
+  repo: string;
+  name: string;
 };
 
 export type TaskBench = {
@@ -74,7 +75,13 @@ export type TaskBench = {
   created: boolean;
 };
 
-export type TaskRunStatus = "setting_up" | "running" | "waiting_for_user" | "stopped" | "failed";
+export type TaskRunStatus =
+  | "setting_up"
+  | "prepared"
+  | "running"
+  | "waiting_for_user"
+  | "stopped"
+  | "failed";
 
 export type TaskRunWaitReason = "ask_user_question" | "exit_plan_mode";
 

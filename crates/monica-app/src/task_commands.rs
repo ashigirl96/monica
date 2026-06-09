@@ -1,4 +1,4 @@
-use monica_core::{BoardColumn, RunTaskResult, TaskBench, TaskSummaryRow, TrackGithubIssueInput};
+use monica_core::{BoardColumn, PrepareTaskResult, TaskBench, TaskSummaryRow, TrackGithubIssueInput};
 use monica_infra::Runtime;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -85,7 +85,7 @@ pub fn open_bench(task_id: String) -> Result<TaskBench, String> {
 
 #[tauri::command]
 #[specta::specta]
-pub fn run_task(app: AppHandle, task_id: String) -> Result<RunTaskResult, String> {
+pub fn prepare_task(app: AppHandle, task_id: String) -> Result<PrepareTaskResult, String> {
     let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
     let result =
         monica_core::start_run(&mut runtime.repositories, &task_id).map_err(|e| e.to_string())?;
@@ -99,7 +99,7 @@ pub fn run_task(app: AppHandle, task_id: String) -> Result<RunTaskResult, String
             let mut rt = match Runtime::open_default() {
                 Ok(rt) => rt,
                 Err(e) => {
-                    log::error!(target: "monica_app::run_task", "background runtime open failed: {e:#}");
+                    log::error!(target: "monica_app::prepare_task", "background runtime open failed: {e:#}");
                     return;
                 }
             };
@@ -113,7 +113,7 @@ pub fn run_task(app: AppHandle, task_id: String) -> Result<RunTaskResult, String
             ) {
                 Ok(s) => s,
                 Err(e) => {
-                    log::error!(target: "monica_app::run_task", "execute_run failed: {e:#}");
+                    log::error!(target: "monica_app::prepare_task", "execute_run failed: {e:#}");
                     "failed".to_string()
                 }
             };

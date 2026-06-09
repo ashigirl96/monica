@@ -5,13 +5,13 @@ use crate::interfaces::{
     BenchRepository, GitGateway, ProjectRepository, RunArtifacts, SetupRunner, TaskRepository,
     TaskRunRepository,
 };
-use crate::{NewTaskRun, RunTaskResult, TaskRunStatus};
+use crate::{NewTaskRun, PrepareTaskResult, TaskRunStatus};
 
 use super::run_issue::{latest_github_issue_number, setup_phase};
 
 /// Phase 1: Create TaskRun (SettingUp) + set as Main Run + ensure bench exists.
 /// Returns immediately so the UI can reflect `setting_up` without blocking.
-pub fn start_run<R>(repos: &mut R, task_id: &str) -> Result<RunTaskResult>
+pub fn start_run<R>(repos: &mut R, task_id: &str) -> Result<PrepareTaskResult>
 where
     R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
 {
@@ -51,7 +51,7 @@ where
         }
     }
 
-    Ok(RunTaskResult {
+    Ok(PrepareTaskResult {
         task_id: task_id.to_string(),
         task_run_id: run.id,
         branch,
@@ -127,8 +127,8 @@ where
         repos.finish_task_run(task_run_id, task_id, TaskRunStatus::Failed)?;
         TaskRunStatus::Failed
     } else {
-        repos.finish_task_run(task_run_id, task_id, TaskRunStatus::Running)?;
-        TaskRunStatus::Running
+        repos.finish_task_run(task_run_id, task_id, TaskRunStatus::Prepared)?;
+        TaskRunStatus::Prepared
     };
 
     repos.update_bench_cwd(task_id, &worktree_str)?;
