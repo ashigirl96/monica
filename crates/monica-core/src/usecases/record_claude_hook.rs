@@ -2,8 +2,8 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use crate::domain::{
-    is_safe_task_run_id, is_session_starting_event, should_ignore_claude_event,
-    transition_for_claude_event, transition_is_protected, Agent,
+    is_resume_session_start, is_safe_task_run_id, is_session_starting_event,
+    should_ignore_claude_event, transition_for_claude_event, transition_is_protected, Agent,
 };
 use crate::interfaces::{Clock, EventRepository, RunArtifacts, TaskRepository, TaskRunRepository};
 use crate::{NewTaskRun, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus};
@@ -134,6 +134,9 @@ where
                 None
             }
         });
+        let terminal_tab_id = ctx
+            .terminal_tab_id
+            .filter(|_| !is_resume_session_start(event_name.as_deref(), parsed.as_ref()));
         repos.record_task_run_observation(
             task_run_id,
             TaskRunObservation {
@@ -142,7 +145,7 @@ where
                 event_name: event_name.as_deref(),
                 at: &at,
                 provider_session_id,
-                terminal_tab_id: ctx.terminal_tab_id,
+                terminal_tab_id,
                 metadata: parsed.as_ref(),
             },
         )?;
