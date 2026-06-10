@@ -1,9 +1,16 @@
 use anyhow::{anyhow, Result};
 
+use crate::domain::bench_runspace_id;
 use crate::interfaces::{
     BenchRepository, ProjectRepository, RunArtifacts, TaskRepository, TaskRunRepository,
 };
-use crate::TaskBench;
+use crate::{Project, Task, TaskBench};
+
+pub(crate) fn default_bench_cwd(project: Option<&Project>) -> String {
+    project
+        .and_then(|p| p.path.clone())
+        .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()))
+}
 
 /// Recompute the shell env for a task-connected runspace. Fails soft (empty vec) when the task
 /// has no project or artifact generation fails, so terminals still open without Monica context.
@@ -16,17 +23,35 @@ where
     R: TaskRepository + ProjectRepository,
     A: RunArtifacts,
 {
+    let (task, project) = load_task_and_optional_project(repos, task_id)?;
+    Ok(shell_env_for(artifacts, &task, project.as_ref()))
+}
+
+fn load_task_and_optional_project<R>(
+    repos: &R,
+    task_id: &str,
+) -> Result<(Task, Option<Project>)>
+where
+    R: TaskRepository + ProjectRepository,
+{
     let task = repos
         .get_task(task_id)?
         .ok_or_else(|| anyhow!("task not found: {task_id}"))?;
-
-    Ok(task
+    let project = task
         .project_id
         .as_deref()
-        .and_then(|pid| repos.get_project(pid).ok().flatten())
-        .and_then(|project| artifacts.prepare_task_shell_env(task_id, &project).ok())
+        .and_then(|pid| repos.get_project(pid).ok().flatten());
+    Ok((task, project))
+}
+
+fn shell_env_for<A>(artifacts: &A, task: &Task, project: Option<&Project>) -> Vec<(String, String)>
+where
+    A: RunArtifacts,
+{
+    project
+        .and_then(|p| artifacts.prepare_task_shell_env(&task.id, p, None).ok())
         .map(|shell| shell.env)
-        .unwrap_or_default())
+        .unwrap_or_default()
 }
 
 pub fn open_bench<R, A>(repos: &mut R, artifacts: &A, task_id: &str) -> Result<TaskBench>
@@ -34,11 +59,8 @@ where
     R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
     A: RunArtifacts,
 {
-    let task = repos
-        .get_task(task_id)?
-        .ok_or_else(|| anyhow!("task not found: {task_id}"))?;
-
-    let env = task_shell_env(repos, artifacts, task_id)?;
+    let (task, project) = load_task_and_optional_project(repos, task_id)?;
+    let env = shell_env_for(artifacts, &task, project.as_ref());
 
     if let Some((runspace_id, cwd)) = repos.get_bench_for_task(task_id)? {
         return Ok(TaskBench {
@@ -50,17 +72,10 @@ where
         });
     }
 
-    let worktree_cwd = resolve_worktree_cwd(repos, &task);
+    let cwd = resolve_worktree_cwd(repos, &task)
+        .unwrap_or_else(|| default_bench_cwd(project.as_ref()));
 
-    let cwd = worktree_cwd.unwrap_or_else(|| {
-        task.project_id
-            .as_deref()
-            .and_then(|pid| repos.get_project(pid).ok().flatten())
-            .and_then(|p| p.path)
-            .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()))
-    });
-
-    let runspace_id = format!("bench-{task_id}");
+    let runspace_id = bench_runspace_id(task_id);
     repos.create_bench(task_id, &runspace_id, &cwd)?;
 
     Ok(TaskBench {
@@ -72,24 +87,22 @@ where
     })
 }
 
-fn resolve_worktree_cwd<R>(repos: &R, task: &crate::Task) -> Option<String>
+fn is_usable_worktree(path: &str) -> bool {
+    !path.is_empty() && std::path::Path::new(path).exists()
+}
+
+fn resolve_worktree_cwd<R>(repos: &R, task: &Task) -> Option<String>
 where
     R: TaskRunRepository,
 {
-    if let Some(ref run_id) = task.primary_task_run_id {
-        if let Ok(Some(run)) = repos.get_task_run(run_id) {
-            if let Some(ref path) = run.worktree_path {
-                if !path.is_empty() && std::path::Path::new(path).exists() {
-                    return Some(path.clone());
-                }
-            }
-        }
-    }
-
-    let runs = repos.list_task_runs_for_task(&task.id).ok()?;
-    runs.into_iter()
-        .rev()
-        .find_map(|run| {
-            run.worktree_path.filter(|p| !p.is_empty() && std::path::Path::new(p).exists())
+    task.primary_task_run_id
+        .as_ref()
+        .and_then(|run_id| repos.get_task_run(run_id).ok().flatten())
+        .and_then(|run| run.worktree_path.filter(|p| is_usable_worktree(p)))
+        .or_else(|| {
+            let runs = repos.list_task_runs_for_task(&task.id).ok()?;
+            runs.into_iter()
+                .rev()
+                .find_map(|run| run.worktree_path.filter(|p| is_usable_worktree(p)))
         })
 }

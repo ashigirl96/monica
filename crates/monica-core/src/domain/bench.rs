@@ -1,5 +1,9 @@
 use serde::Serialize;
 
+pub fn bench_runspace_id(task_id: &str) -> String {
+    format!("bench-{task_id}")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct TaskBench {

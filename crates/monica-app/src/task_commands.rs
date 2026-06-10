@@ -1,9 +1,11 @@
 use monica_core::{
-    BoardColumn, PrepareTaskResult, RunTaskResult, TaskBench, TaskSummaryRow, TrackGithubIssueInput,
+    BoardColumn, PrepareTaskResult, RunTaskResult, TaskBench, TaskRunStatus, TaskSummaryRow,
+    TrackGithubIssueInput,
 };
 use monica_infra::Runtime;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
+use tauri_specta::Event;
 
 #[derive(Serialize, specta::Type)]
 pub struct ProjectEntry {
@@ -17,11 +19,12 @@ pub struct TrackIssueResult {
     pub title: String,
 }
 
-#[derive(Clone, Serialize)]
-struct TaskRunStatusChanged {
+#[derive(Clone, Serialize, specta::Type, Event)]
+#[tauri_specta(event_name = "task-run:status-changed")]
+pub struct TaskRunStatusChanged {
     task_id: String,
     task_run_id: String,
-    status: String,
+    status: TaskRunStatus,
 }
 
 #[tauri::command]
@@ -125,17 +128,15 @@ pub fn prepare_task(app: AppHandle, task_id: String) -> Result<PrepareTaskResult
                 Ok(s) => s,
                 Err(e) => {
                     log::error!(target: "monica_app::prepare_task", "execute_run failed: {e:#}");
-                    "failed".to_string()
+                    TaskRunStatus::Failed
                 }
             };
-            let _ = app.emit(
-                "task-run:status-changed",
-                TaskRunStatusChanged {
-                    task_id: tid,
-                    task_run_id: run_id,
-                    status: final_status,
-                },
-            );
+            let _ = TaskRunStatusChanged {
+                task_id: tid,
+                task_run_id: run_id,
+                status: final_status,
+            }
+            .emit(&app);
         })
         .map_err(|e| e.to_string())?;
 

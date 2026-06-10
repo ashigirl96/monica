@@ -2,7 +2,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSetAtom } from "jotai";
 import type { DisplayStatus, TaskSummaryRow } from "@/commands/task";
 import { cn } from "@/lib/utils";
-import { openBenchAtom, prepareTaskAtom, runTaskAtom } from "@/stores/workboard";
+import { openBenchAtom, prepareTaskAtom, runTaskAtom, PREPARE_ELIGIBLE } from "@/stores/workboard";
 
 const STATUS_COLORS: Record<DisplayStatus, string> = {
   inbox: "bg-muted-foreground/40",
@@ -125,14 +125,7 @@ function issueUrl(project: string | null, number: number): string | null {
   return `https://github.com/${project}/issues/${number}`;
 }
 
-const PREPARE_ELIGIBLE: Set<DisplayStatus> = new Set(["inbox", "ready", "stopped", "failed"]);
-const RUN_ELIGIBLE: Set<DisplayStatus> = new Set([
-  "inbox",
-  "ready",
-  "prepared",
-  "stopped",
-  "failed",
-]);
+const RUN_ELIGIBLE: Set<DisplayStatus> = new Set([...PREPARE_ELIGIBLE, "prepared"]);
 
 function RunIcon() {
   return (

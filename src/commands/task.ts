@@ -1,5 +1,5 @@
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { commands } from "./bindings";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import { commands, events, type TaskRunStatusChanged } from "./bindings";
 
 export type {
   TaskSummaryRow,
@@ -58,10 +58,7 @@ export function runTask(taskId: string) {
 }
 
 export function onTaskRunStatusChanged(
-  cb: (payload: { task_id: string; task_run_id: string; status: string }) => void,
+  cb: (payload: TaskRunStatusChanged) => void,
 ): Promise<UnlistenFn> {
-  return listen<{ task_id: string; task_run_id: string; status: string }>(
-    "task-run:status-changed",
-    (event) => cb(event.payload),
-  );
+  return events.taskRunStatusChanged.listen((event) => cb(event.payload));
 }

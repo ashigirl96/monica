@@ -3,12 +3,12 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 
-use crate::domain::{branch_name, monica_number, worktree_path_for};
+use crate::domain::{bench_runspace_id, branch_name, monica_number, worktree_path_for};
 use crate::interfaces::{
     BenchRepository, GitGateway, ProjectRepository, RunArtifacts, SetupEnv, SetupOutcome,
     SetupRunner, TaskRepository, TaskRunRepository,
 };
-use crate::{NewTaskRun, PrepareTaskResult, Project, RefType, TaskRunStatus, TaskStatus};
+use crate::{NewTaskRun, PrepareTaskResult, Project, RefType, Task, TaskRunStatus, TaskStatus};
 
 fn is_active_run_status(status: TaskRunStatus) -> bool {
     matches!(
@@ -17,15 +17,30 @@ fn is_active_run_status(status: TaskRunStatus) -> bool {
     )
 }
 
+fn load_task_and_project<R>(repos: &R, task_id: &str) -> Result<(Task, Project)>
+where
+    R: TaskRepository + ProjectRepository,
+{
+    let task = repos
+        .get_task(task_id)?
+        .ok_or_else(|| anyhow!("task not found: {task_id}"))?;
+    let project_id = task
+        .project_id
+        .as_deref()
+        .ok_or_else(|| anyhow!("{task_id} is not linked to a project"))?;
+    let project = repos
+        .get_project(project_id)?
+        .ok_or_else(|| anyhow!("project not found: {project_id}"))?;
+    Ok((task, project))
+}
+
 /// Phase 1: Create TaskRun (SettingUp) + set as Main Run + ensure bench exists.
 /// Returns immediately so the UI can reflect `setting_up` without blocking.
 pub fn start_run<R>(repos: &mut R, task_id: &str) -> Result<PrepareTaskResult>
 where
     R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
 {
-    let task = repos
-        .get_task(task_id)?
-        .ok_or_else(|| anyhow!("task not found: {task_id}"))?;
+    let (task, project) = load_task_and_project(repos, task_id)?;
 
     if task.status == TaskStatus::Done {
         return Err(anyhow!("task {task_id} is done; reopen it before preparing"));
@@ -47,13 +62,6 @@ where
         }
     }
 
-    let project_id = task.project_id.as_deref().ok_or_else(|| {
-        anyhow!("{task_id} is not linked to a project")
-    })?;
-    let project = repos
-        .get_project(project_id)?
-        .ok_or_else(|| anyhow!("project not found: {project_id}"))?;
-
     let github_issue_number = latest_github_issue_number(repos, task_id)?;
     let mon = monica_number(task_id)?;
     let branch = branch_name(github_issue_number, mon);
@@ -67,16 +75,9 @@ where
 
     repos.set_primary_task_run(task_id, &run.id)?;
 
-    let cwd = project
-        .path
-        .clone()
-        .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()));
-    let runspace_id = format!("bench-{task_id}");
-    match repos.get_bench_for_task(task_id)? {
-        Some(_) => {}
-        None => {
-            repos.create_bench(task_id, &runspace_id, &cwd)?;
-        }
+    if repos.get_bench_for_task(task_id)?.is_none() {
+        let cwd = super::open_bench::default_bench_cwd(Some(&project));
+        repos.create_bench(task_id, &bench_runspace_id(task_id), &cwd)?;
     }
 
     Ok(PrepareTaskResult {
@@ -87,7 +88,7 @@ where
 }
 
 /// Phase 2: Create worktree, run setup script, update TaskRun status, update bench cwd.
-/// Intended to run on a background thread. Returns the final status as a string.
+/// Intended to run on a background thread.
 pub fn execute_run<R, G, S, A>(
     repos: &mut R,
     git: &G,
@@ -95,38 +96,48 @@ pub fn execute_run<R, G, S, A>(
     artifacts: &A,
     task_id: &str,
     task_run_id: &str,
-) -> Result<String>
+) -> Result<TaskRunStatus>
 where
     R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
     G: GitGateway,
     S: SetupRunner,
     A: RunArtifacts,
 {
-    let task = repos
-        .get_task(task_id)?
-        .ok_or_else(|| anyhow!("task not found: {task_id}"))?;
+    execute_run_inner(repos, git, setup_runner, artifacts, task_id, task_run_id).inspect_err(
+        |_| {
+            let _ = repos.finish_task_run(task_run_id, task_id, TaskRunStatus::Failed);
+        },
+    )
+}
 
-    let project_id = task.project_id.as_deref().ok_or_else(|| {
-        anyhow!("{task_id} is not linked to a project")
-    })?;
-    let project = repos
-        .get_project(project_id)?
-        .ok_or_else(|| anyhow!("project not found: {project_id}"))?;
+fn execute_run_inner<R, G, S, A>(
+    repos: &mut R,
+    git: &G,
+    setup_runner: &S,
+    artifacts: &A,
+    task_id: &str,
+    task_run_id: &str,
+) -> Result<TaskRunStatus>
+where
+    R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
+    G: GitGateway,
+    S: SetupRunner,
+    A: RunArtifacts,
+{
+    let (_, project) = load_task_and_project(repos, task_id)?;
 
-    let github_issue_number = latest_github_issue_number(repos, task_id)?;
-    let mon = monica_number(task_id)?;
-    let branch = branch_name(github_issue_number, mon);
+    let run = repos
+        .get_task_run(task_run_id)?
+        .ok_or_else(|| anyhow!("task run not found: {task_run_id}"))?;
+    let branch = run
+        .branch
+        .ok_or_else(|| anyhow!("task run {task_run_id} has no branch"))?;
 
-    let fail = |repos: &mut R, e: anyhow::Error| -> anyhow::Error {
-        let _ = repos.finish_task_run(task_run_id, task_id, TaskRunStatus::Failed);
-        e
-    };
-
-    let repo_path = project.path.clone().ok_or_else(|| {
-        fail(repos, anyhow!("project {project_id} has no checkout path"))
-    })?;
-    let worktree_path = worktree_path_for(&project, &branch)
-        .map_err(|e| fail(repos, e))?;
+    let repo_path = project
+        .path
+        .clone()
+        .ok_or_else(|| anyhow!("project {} has no checkout path", project.id))?;
+    let worktree_path = worktree_path_for(&project, &branch)?;
     let worktree_str = worktree_path.to_string_lossy().into_owned();
 
     if !worktree_path.exists() {
@@ -135,13 +146,10 @@ where
             &worktree_path,
             &branch,
             &project.default_branch,
-        )
-        .map_err(|e| fail(repos, e))?;
+        )?;
     }
 
-    repos
-        .set_task_run_worktree_path(task_run_id, &worktree_str)
-        .map_err(|e| fail(repos, e))?;
+    repos.set_task_run_worktree_path(task_run_id, &worktree_str)?;
 
     let setup = setup_phase(
         setup_runner,
@@ -151,24 +159,21 @@ where
         &worktree_path,
         &project,
         &branch,
-    )
-    .map_err(|e| fail(repos, e))?;
+    )?;
 
     if setup.is_failure() {
         repos.finish_task_run(task_run_id, task_id, TaskRunStatus::Failed)?;
-        return Ok(TaskRunStatus::Failed.as_str().to_string());
+        return Ok(TaskRunStatus::Failed);
     }
 
-    repos
-        .update_bench_cwd(task_id, &worktree_str)
-        .map_err(|e| fail(repos, e))?;
+    repos.update_bench_cwd(task_id, &worktree_str)?;
 
     repos.finish_task_run(task_run_id, task_id, TaskRunStatus::Prepared)?;
 
-    Ok(TaskRunStatus::Prepared.as_str().to_string())
+    Ok(TaskRunStatus::Prepared)
 }
 
-pub(crate) fn setup_phase<S, A>(
+fn setup_phase<S, A>(
     setup_runner: &S,
     artifacts: &A,
     task_run_id: &str,
@@ -193,7 +198,7 @@ where
     setup_runner.run_setup_script(worktree_path, &log_path, &env, timeout)
 }
 
-pub(crate) fn latest_github_issue_number<R>(repos: &R, task_id: &str) -> Result<Option<i64>>
+fn latest_github_issue_number<R>(repos: &R, task_id: &str) -> Result<Option<i64>>
 where
     R: TaskRepository,
 {
@@ -215,9 +220,7 @@ where
     R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
     A: RunArtifacts,
 {
-    let task = repos
-        .get_task(task_id)?
-        .ok_or_else(|| anyhow!("task not found: {task_id}"))?;
+    let (task, project) = load_task_and_project(repos, task_id)?;
 
     let primary_id = task
         .primary_task_run_id
@@ -243,36 +246,27 @@ where
         ));
     }
 
-    let project_id = task.project_id.as_deref().ok_or_else(|| {
-        anyhow!("{task_id} is not linked to a project")
-    })?;
-    let project = repos
-        .get_project(project_id)?
-        .ok_or_else(|| anyhow!("project not found: {project_id}"))?;
-
-    let shell = artifacts.prepare_task_shell_env(task_id, &project)?;
+    let shell = artifacts.prepare_task_shell_env(task_id, &project, Some(&primary_id))?;
     repos.set_task_run_settings_path(&primary_id, &shell.settings_path)?;
 
-    let runspace_id = format!("bench-{task_id}");
-    match repos.get_bench_for_task(task_id)? {
-        Some(_) => {
+    let runspace_id = match repos.get_bench_for_task(task_id)? {
+        Some((runspace_id, _)) => {
             repos.update_bench_cwd(task_id, &worktree_str)?;
+            runspace_id
         }
         None => {
+            let runspace_id = bench_runspace_id(task_id);
             repos.create_bench(task_id, &runspace_id, &worktree_str)?;
+            runspace_id
         }
-    }
-
-    let mut env = shell.env;
-    env.push(("MONICA_TASK_RUN_ID".to_string(), primary_id.clone()));
-    env.push(("MONICA_RUN_ID".to_string(), primary_id.clone()));
+    };
 
     Ok(crate::RunTaskResult {
         task_id: task_id.to_string(),
         task_run_id: primary_id,
         runspace_id,
         cwd: worktree_str,
-        env,
+        env: shell.env,
         initial_command: "claude".to_string(),
     })
 }

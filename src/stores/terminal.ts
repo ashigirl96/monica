@@ -439,33 +439,19 @@ export const createTaskRunspaceAtom = atom(
 
     const existing = state.runspaces.find((r) => r.id === params.runspaceId);
     if (existing) {
-      const updatedEnv = params.env ?? existing.env;
+      const base: TerminalRunspace = { ...existing, env: params.env ?? existing.env };
 
+      let updated: TerminalRunspace;
       if (params.launch) {
         const newTab = createTab(params.cwd, existing.tabs.length);
         newTab.launch = params.launch;
-        const updated: TerminalRunspace = {
-          ...existing,
-          env: updatedEnv,
-          tabs: [...existing.tabs, newTab],
-          activeTabId: newTab.id,
-        };
-        set(terminalStateAtom, {
-          ...state,
-          activeRunspaceId: existing.id,
-          runspaces: state.runspaces.map((r) => (r.id === existing.id ? updated : r)),
-        });
-        return;
+        updated = { ...base, tabs: [...existing.tabs, newTab], activeTabId: newTab.id };
+      } else if (params.cwd && existing.tabs[0]?.cwd !== params.cwd) {
+        updated = { ...base, tabs: existing.tabs.map((t) => ({ ...t, cwd: params.cwd })) };
+      } else {
+        updated = base;
       }
 
-      const needsCwdUpdate = params.cwd && existing.tabs[0]?.cwd !== params.cwd;
-      const updated = needsCwdUpdate
-        ? {
-            ...existing,
-            env: updatedEnv,
-            tabs: existing.tabs.map((t) => ({ ...t, cwd: params.cwd })),
-          }
-        : { ...existing, env: updatedEnv };
       set(terminalStateAtom, {
         ...state,
         activeRunspaceId: existing.id,

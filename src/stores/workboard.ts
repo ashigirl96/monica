@@ -52,8 +52,7 @@ export const trackIssueAtom = atom(
   null,
   async (_get, set, input: { repo: string; number: number }) => {
     await trackGithubIssue(input.repo, input.number);
-    const summaries = await listTaskSummaries();
-    set(taskSummariesAtom, summaries);
+    await set(refreshTaskSummariesAtom);
   },
 );
 
@@ -70,26 +69,31 @@ export const openBenchAtom = atom(null, async (_get, set, taskId: string) => {
 
 export const prepareTaskAtom = atom(null, async (_get, set, taskId: string) => {
   await prepareTask(taskId);
-  const summaries = await listTaskSummaries();
-  set(taskSummariesAtom, summaries);
+  await set(refreshTaskSummariesAtom);
 });
 
 export const refreshTaskSummariesAtom = atom(null, async (_get, set) => {
   const summaries = await listTaskSummaries();
   set(taskSummariesAtom, summaries);
+  return summaries;
 });
 
-const NEEDS_PREPARE: Set<DisplayStatus> = new Set(["inbox", "ready", "stopped", "failed"]);
+export const PREPARE_ELIGIBLE: Set<DisplayStatus> = new Set([
+  "inbox",
+  "ready",
+  "stopped",
+  "failed",
+]);
 
+// prepare_task always emits task-run:status-changed from its background thread
+// (on both success and failure), so an event listener plus a timeout suffices.
 function waitForPreparedOrFailed(taskId: string): { promise: Promise<void>; cancel: () => void } {
   let settled = false;
-  let pollTimer: ReturnType<typeof setInterval> | undefined;
   let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
   let unlistenPromise: Promise<() => void> | undefined;
 
   const cleanup = () => {
     settled = true;
-    if (pollTimer) clearInterval(pollTimer);
     if (timeoutTimer) clearTimeout(timeoutTimer);
     unlistenPromise?.then((fn) => fn());
   };
@@ -105,24 +109,6 @@ function waitForPreparedOrFailed(taskId: string): { promise: Promise<void>; canc
         reject(new Error("prepare failed"));
       }
     });
-
-    pollTimer = setInterval(async () => {
-      if (settled) return;
-      try {
-        const summaries = await listTaskSummaries();
-        const task = summaries.find((t) => t.id === taskId);
-        if (!task) return;
-        if (task.status === "prepared") {
-          cleanup();
-          resolve();
-        } else if (task.status === "failed") {
-          cleanup();
-          reject(new Error("prepare failed"));
-        }
-      } catch {
-        // ignore polling errors
-      }
-    }, 3000);
 
     timeoutTimer = setTimeout(() => {
       if (!settled) {
@@ -143,11 +129,10 @@ export const runTaskAtom = atom(null, async (_get, set, taskId: string) => {
   try {
     // The cached summaries can lag behind hook-driven status changes by a
     // polling interval; decide prepare-vs-run from a fresh read.
-    const summaries = await listTaskSummaries();
-    set(taskSummariesAtom, summaries);
+    const summaries = await set(refreshTaskSummariesAtom);
     const task = summaries.find((t) => t.id === taskId);
 
-    if (task && NEEDS_PREPARE.has(task.status)) {
+    if (task && PREPARE_ELIGIBLE.has(task.status)) {
       const waiter = waitForPreparedOrFailed(taskId);
       try {
         await prepareTask(taskId);
@@ -171,7 +156,7 @@ export const runTaskAtom = atom(null, async (_get, set, taskId: string) => {
     });
     set(activeSpaceAtom, "work-bench");
 
-    set(taskSummariesAtom, await listTaskSummaries());
+    await set(refreshTaskSummariesAtom);
   } finally {
     runTaskInFlight.delete(taskId);
   }

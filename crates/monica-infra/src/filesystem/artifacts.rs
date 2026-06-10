@@ -29,6 +29,7 @@ impl RunArtifacts for FsRunArtifacts {
         &self,
         task_id: &str,
         project: &Project,
+        task_run_id: Option<&str>,
     ) -> Result<TaskShellEnv> {
         let task_dir = paths::task_shell_dir(task_id)?;
         fs::create_dir_all(&task_dir)
@@ -37,8 +38,7 @@ impl RunArtifacts for FsRunArtifacts {
         let hook_cmd = resolve_hook_command()?;
         let settings_body = claude_settings_json(&hook_cmd)?;
         let settings_path = task_dir.join("claude-settings.json");
-        fs::write(&settings_path, &settings_body)
-            .with_context(|| format!("failed to write {}", settings_path.display()))?;
+        write_if_changed(&settings_path, &settings_body)?;
         let settings_path_str = settings_path.to_string_lossy().into_owned();
 
         let bin_dir = task_dir.join("bin");
@@ -67,6 +67,10 @@ impl RunArtifacts for FsRunArtifacts {
         // so zsh falls back to $HOME like vanilla.
         if let Ok(original) = std::env::var("ZDOTDIR") {
             env.push(("MONICA_ORIGINAL_ZDOTDIR".to_string(), original));
+        }
+        if let Some(run_id) = task_run_id {
+            env.push(("MONICA_TASK_RUN_ID".to_string(), run_id.to_string()));
+            env.push(("MONICA_RUN_ID".to_string(), run_id.to_string()));
         }
         // Best-effort fallback for non-zsh shells, which ignore ZDOTDIR. The
         // user's rc files may still reorder PATH; zsh users get the reliable
@@ -113,6 +117,13 @@ impl RunArtifacts for FsRunArtifacts {
             .and_then(|mut f| f.write_all(line.as_bytes()))
             .with_context(|| format!("failed to append to {}", path.display()))
     }
+}
+
+fn write_if_changed(path: &Path, contents: &str) -> Result<()> {
+    if fs::read_to_string(path).is_ok_and(|current| current == contents) {
+        return Ok(());
+    }
+    fs::write(path, contents).with_context(|| format!("failed to write {}", path.display()))
 }
 
 fn resolve_hook_command() -> Result<String> {
@@ -210,8 +221,7 @@ fn write_claude_wrapper(bin_dir: &Path) -> Result<()> {
     fs::create_dir_all(bin_dir)
         .with_context(|| format!("failed to create {}", bin_dir.display()))?;
     let wrapper_path = bin_dir.join("claude");
-    fs::write(&wrapper_path, CLAUDE_WRAPPER)
-        .with_context(|| format!("failed to write {}", wrapper_path.display()))?;
+    write_if_changed(&wrapper_path, CLAUDE_WRAPPER)?;
     fs::set_permissions(&wrapper_path, fs::Permissions::from_mode(0o755))
         .with_context(|| format!("failed to chmod {}", wrapper_path.display()))?;
     Ok(())
@@ -262,9 +272,9 @@ builtin unset _monica_file
 fn write_zdotdir(zdotdir: &Path) -> Result<()> {
     fs::create_dir_all(zdotdir)
         .with_context(|| format!("failed to create {}", zdotdir.display()))?;
-    fs::write(zdotdir.join(".zshenv"), ZDOTDIR_ZSHENV)?;
+    write_if_changed(&zdotdir.join(".zshenv"), ZDOTDIR_ZSHENV)?;
     for file in [".zprofile", ".zshrc", ".zlogin"] {
-        fs::write(zdotdir.join(file), zdotdir_shim(file))?;
+        write_if_changed(&zdotdir.join(file), &zdotdir_shim(file))?;
     }
     Ok(())
 }

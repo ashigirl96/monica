@@ -19,6 +19,7 @@ pub trait RunArtifacts {
         &self,
         task_id: &str,
         project: &Project,
+        task_run_id: Option<&str>,
     ) -> Result<TaskShellEnv>;
     fn append_hook_event(
         &self,

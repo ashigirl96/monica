@@ -543,6 +543,7 @@ impl RunArtifacts for FakeArtifacts {
         &self,
         task_id: &str,
         _project: &crate::Project,
+        _task_run_id: Option<&str>,
     ) -> Result<crate::TaskShellEnv> {
         Ok(crate::TaskShellEnv {
             env: vec![

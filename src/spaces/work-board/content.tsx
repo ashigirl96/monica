@@ -26,7 +26,7 @@ function WorkBoardContent() {
   // Tauri events, so poll while the board is visible.
   useEffect(() => {
     const timer = setInterval(() => {
-      refreshSummaries();
+      if (!document.hidden) refreshSummaries();
     }, 3000);
     return () => clearInterval(timer);
   }, [refreshSummaries]);
