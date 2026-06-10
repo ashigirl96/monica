@@ -2740,7 +2740,6 @@ dependencies = [
  "rusqlite",
  "rusqlite_migration",
  "rustls",
- "security-framework",
  "serde",
  "serde_json",
  "specta",

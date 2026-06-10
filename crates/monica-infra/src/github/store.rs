@@ -1,15 +1,12 @@
 use std::fs;
 
-#[cfg(not(target_os = "macos"))]
-use anyhow::anyhow;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::filesystem::paths;
 
 const KEYCHAIN_SERVICE: &str = "monica.github";
 const KEYCHAIN_ACCOUNT: &str = "github.com";
-const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoredGithubToken {
@@ -108,41 +105,23 @@ fn write_metadata(metadata: &GithubAuthMetadata) -> Result<()> {
     fs::write(&path, contents).with_context(|| format!("failed to write {}", path.display()))
 }
 
+// Keychain access goes through the Apple-signed `security` CLI instead of
+// security-framework. The keychain sees `security` as the client, so items it
+// creates stay readable from every Monica binary — the ad-hoc CLI, the
+// self-signed app bundle, and freshly rebuilt dev binaries — without ACL
+// prompts. Direct framework access ties items to each binary's code signature:
+// the legacy keychain re-prompts on every rebuild, and the data protection
+// keychain cannot be shared across differently-signed binaries at all.
 #[cfg(target_os = "macos")]
-fn protected_options() -> security_framework::passwords::PasswordOptions {
-    let mut opts = security_framework::passwords::PasswordOptions::new_generic_password(
-        KEYCHAIN_SERVICE,
-        KEYCHAIN_ACCOUNT,
-    );
-    opts.use_protected_keychain();
-    opts
-}
+const SECURITY_BIN: &str = "/usr/bin/security";
+
+/// `security` exit code for errSecItemNotFound.
+#[cfg(target_os = "macos")]
+const EXIT_ITEM_NOT_FOUND: i32 = 44;
 
 #[cfg(target_os = "macos")]
 fn read_keychain_password() -> Result<Option<Vec<u8>>> {
-    use security_framework::passwords;
-
-    match passwords::generic_password(protected_options()) {
-        Ok(bytes) => return Ok(Some(bytes)),
-        Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => {}
-        Err(e) => {
-            return Err(e).context("failed to read GitHub token from data protection keychain")
-        }
-    }
-    migrate_legacy_keychain_item()
-}
-
-/// Read the token from the legacy keychain via `security` CLI (Apple-signed,
-/// so it bypasses per-app ACL prompts) and move it to the data protection
-/// keychain.  Returns the token bytes on success, `None` if no legacy item
-/// exists.
-#[cfg(target_os = "macos")]
-fn migrate_legacy_keychain_item() -> Result<Option<Vec<u8>>> {
-    use std::process::Command;
-
-    use security_framework::passwords;
-
-    let output = Command::new("security")
+    let output = std::process::Command::new(SECURITY_BIN)
         .args([
             "find-generic-password",
             "-s",
@@ -152,10 +131,13 @@ fn migrate_legacy_keychain_item() -> Result<Option<Vec<u8>>> {
             "-w",
         ])
         .output()
-        .context("failed to run `security` CLI for keychain migration")?;
+        .context("failed to run `security find-generic-password`")?;
 
     if !output.status.success() {
-        return Ok(None);
+        if output.status.code() == Some(EXIT_ITEM_NOT_FOUND) {
+            return Ok(None);
+        }
+        return Err(security_error("find-generic-password", &output));
     }
 
     let mut bytes = output.stdout;
@@ -165,20 +147,17 @@ fn migrate_legacy_keychain_item() -> Result<Option<Vec<u8>>> {
     if bytes.is_empty() {
         return Ok(None);
     }
-
-    let _ = passwords::set_generic_password_options(&bytes, protected_options());
-
-    let _ = Command::new("security")
-        .args([
-            "delete-generic-password",
-            "-s",
-            KEYCHAIN_SERVICE,
-            "-a",
-            KEYCHAIN_ACCOUNT,
-        ])
-        .output();
-
     Ok(Some(bytes))
+}
+
+#[cfg(target_os = "macos")]
+fn security_error(subcommand: &str, output: &std::process::Output) -> anyhow::Error {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    anyhow!(
+        "`security {subcommand}` failed ({}): {}",
+        output.status,
+        stderr.trim()
+    )
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -190,8 +169,25 @@ fn read_keychain_password() -> Result<Option<Vec<u8>>> {
 
 #[cfg(target_os = "macos")]
 fn write_keychain_password(bytes: &[u8]) -> Result<()> {
-    security_framework::passwords::set_generic_password_options(bytes, protected_options())
-        .context("failed to save Monica GitHub token to macOS Keychain")
+    let payload =
+        std::str::from_utf8(bytes).context("GitHub token keychain payload is not valid UTF-8")?;
+    let output = std::process::Command::new(SECURITY_BIN)
+        .args([
+            "add-generic-password",
+            "-U",
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-a",
+            KEYCHAIN_ACCOUNT,
+            "-w",
+            payload,
+        ])
+        .output()
+        .context("failed to run `security add-generic-password`")?;
+    if !output.status.success() {
+        return Err(security_error("add-generic-password", &output));
+    }
+    Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -203,20 +199,18 @@ fn write_keychain_password(_bytes: &[u8]) -> Result<()> {
 
 #[cfg(target_os = "macos")]
 fn delete_keychain_password() -> Result<()> {
-    use security_framework::passwords;
-
-    match passwords::delete_generic_password_options(protected_options()) {
-        Ok(()) => {}
-        Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => {}
-        Err(e) => {
-            return Err(e)
-                .context("failed to delete Monica GitHub token from data protection keychain")
-        }
-    }
-    match passwords::delete_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
-        Ok(()) => {}
-        Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => {}
-        Err(e) => Err(e).context("failed to delete Monica GitHub token from macOS Keychain")?,
+    let output = std::process::Command::new(SECURITY_BIN)
+        .args([
+            "delete-generic-password",
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-a",
+            KEYCHAIN_ACCOUNT,
+        ])
+        .output()
+        .context("failed to run `security delete-generic-password`")?;
+    if !output.status.success() && output.status.code() != Some(EXIT_ITEM_NOT_FOUND) {
+        return Err(security_error("delete-generic-password", &output));
     }
     Ok(())
 }
