@@ -1,13 +1,58 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   runspaceSummariesAtom,
   activateRunspaceAtom,
+  detachedSessionsAtom,
+  reattachSessionAtom,
+  refreshSessionsAtom,
   reorderRunspacesAtom,
   type RunspaceSummary,
 } from "@/stores/terminal";
+import { terminalTerminate, type TerminalSession } from "@/commands/terminal";
 import { activeSpaceAtom } from "@/stores/space";
 import { cn } from "@/lib/utils";
+
+function shortPath(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length >= 2) return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
+  return parts[parts.length - 1] ?? path;
+}
+
+function DetachedSessionItem({
+  session,
+  onReattach,
+  onTerminate,
+}: {
+  session: TerminalSession;
+  onReattach: () => void;
+  onTerminate: () => void;
+}) {
+  return (
+    <div className="group flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-muted-foreground">
+      <div className="min-w-0 flex-1">
+        <span className="block truncate text-xs font-medium">{shortPath(session.cwd)}</span>
+        <span className="block truncate font-mono text-[10px] text-muted-foreground/60">
+          {session.id}
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={onReattach}
+        className="rounded px-1.5 py-0.5 text-[10px] opacity-0 transition-opacity group-hover:opacity-100 hover:bg-white/[0.1] hover:text-foreground"
+      >
+        Reattach
+      </button>
+      <button
+        type="button"
+        onClick={onTerminate}
+        className="rounded px-1.5 py-0.5 text-[10px] text-destructive opacity-0 transition-opacity group-hover:opacity-100 hover:bg-destructive/15"
+      >
+        Kill
+      </button>
+    </div>
+  );
+}
 
 function RunspaceItem({
   ws,
@@ -87,11 +132,24 @@ function GroupHeader({ label }: { label: string }) {
 
 export function WorkBenchSidebar() {
   const summaries = useAtomValue(runspaceSummariesAtom);
+  const detachedSessions = useAtomValue(detachedSessionsAtom);
   const activate = useSetAtom(activateRunspaceAtom);
+  const reattach = useSetAtom(reattachSessionAtom);
+  const refreshSessions = useSetAtom(refreshSessionsAtom);
   const reorder = useSetAtom(reorderRunspacesAtom);
   const setSpace = useSetAtom(activeSpaceAtom);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const dragIdRef = useRef<string | null>(null);
+
+  // Session status lives in the DB and the daemon; like the primary-tab indicator it has
+  // no push channel for every change, so poll while visible.
+  useEffect(() => {
+    void refreshSessions();
+    const timer = setInterval(() => {
+      if (!document.hidden) void refreshSessions();
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [refreshSessions]);
 
   const { taskBound, shells } = useMemo(() => {
     const taskBound = summaries.filter((s) => s.taskId);
@@ -131,6 +189,26 @@ export function WorkBenchSidebar() {
             />
           ))}
         </div>
+
+        {detachedSessions.length > 0 && (
+          <>
+            <GroupHeader label="Detached" />
+            <div className="flex flex-col gap-0.5 px-0.5">
+              {detachedSessions.map((session) => (
+                <DetachedSessionItem
+                  key={session.id}
+                  session={session}
+                  onReattach={() => reattach(session)}
+                  onTerminate={() => {
+                    terminalTerminate(session.id)
+                      .catch((e) => console.warn("terminate failed:", e))
+                      .finally(() => void refreshSessions());
+                  }}
+                />
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       {taskBound.some((s) => s.isActive) && (

@@ -13,6 +13,7 @@ pub struct TerminalTabRow {
     #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
     pub sort_order: i64,
     pub is_active: bool,
+    pub terminal_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,7 +39,7 @@ impl SqliteStore {
         )?;
 
         let mut tab_stmt = self.conn().prepare(
-            "SELECT id, cwd, title, sort_order, is_active
+            "SELECT id, cwd, title, sort_order, is_active, terminal_session_id
                FROM terminal_tabs
               WHERE runspace_id = ?1
               ORDER BY sort_order",
@@ -64,6 +65,7 @@ impl SqliteStore {
                         title: row.get(2)?,
                         sort_order: row.get(3)?,
                         is_active: row.get(4)?,
+                        terminal_session_id: row.get(5)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -96,9 +98,18 @@ impl SqliteStore {
 
             for tab in &rs.tabs {
                 tx.execute(
-                    "INSERT INTO terminal_tabs (id, runspace_id, cwd, title, sort_order, is_active)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![tab.id, rs.id, tab.cwd, tab.title, tab.sort_order, tab.is_active],
+                    "INSERT INTO terminal_tabs
+                       (id, runspace_id, cwd, title, sort_order, is_active, terminal_session_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![
+                        tab.id,
+                        rs.id,
+                        tab.cwd,
+                        tab.title,
+                        tab.sort_order,
+                        tab.is_active,
+                        tab.terminal_session_id
+                    ],
                 )?;
             }
         }

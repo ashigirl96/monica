@@ -2684,7 +2684,7 @@ dependencies = [
 name = "monica-app"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "anyhow",
  "log",
  "monica-core",
  "monica-infra",
@@ -2756,6 +2756,18 @@ dependencies = [
  "log",
  "portable-pty",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "monica-ptyd"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "libc",
+ "log",
+ "monica-pty",
 ]
 
 [[package]]

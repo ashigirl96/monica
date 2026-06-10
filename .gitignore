@@ -31,3 +31,4 @@ Thumbs.db
 
 # vendored external repos fetched locally for reference
 docs/repos/
+crates/monica-app/binaries/

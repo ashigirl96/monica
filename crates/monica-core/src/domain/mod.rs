@@ -8,6 +8,7 @@ mod refs;
 mod status;
 mod task;
 mod task_run;
+mod terminal_session;
 
 pub use bench::{bench_runspace_id, PrepareTaskResult, RunTaskResult, TaskBench};
 pub use branch::{branch_name, monica_number, worktree_path_for};
@@ -27,3 +28,6 @@ pub use refs::{parse_issue_ref, parse_owner_repo};
 pub use status::{board_columns, BoardColumn, DisplayStatus, TaskRunStatus, TaskRunWaitReason, TaskStatus};
 pub use task::{Event, NewTask, Task, TaskKind, TaskSummaryRow};
 pub use task_run::{Agent, NewTaskRun, TaskRun, TaskRunObservation};
+pub use terminal_session::{
+    NewTerminalSession, TerminalSession, TerminalSessionKind, TerminalSessionStatus,
+};

@@ -3,14 +3,14 @@ use std::io::Read;
 use std::sync::{mpsc, Arc, Mutex};
 
 use anyhow::{bail, Context};
-use base64::Engine;
 use portable_pty::{native_pty_system, CommandBuilder};
 
 use crate::session::PtySession;
-use crate::types::{PtyOutput, PtySize, SpawnRequest};
+use crate::types::{PtySize, SpawnRequest};
 
 const READ_BUF_SIZE: usize = 16384;
 const BATCH_QUEUE_CAP: usize = 32;
+const EXIT_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
 
 pub struct PtyManager {
     sessions: Arc<Mutex<HashMap<String, PtySession>>>,
@@ -23,12 +23,13 @@ impl PtyManager {
         }
     }
 
+    /// Spawn a shell in a new PTY. Returns the child pid when the platform exposes one.
     pub fn spawn(
         &self,
         req: SpawnRequest,
-        output_sink: impl Fn(PtyOutput) + Send + 'static,
+        output_sink: impl Fn(&str, &[u8]) + Send + 'static,
         exit_sink: impl Fn(String, Option<u32>) + Send + 'static,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Option<u32>> {
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(portable_pty::PtySize {
@@ -39,7 +40,11 @@ impl PtyManager {
             })
             .context("failed to open pty")?;
 
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        let shell = req
+            .shell
+            .clone()
+            .or_else(|| std::env::var("SHELL").ok())
+            .unwrap_or_else(|| "/bin/zsh".to_string());
         let mut cmd = CommandBuilder::new(&shell);
         // Drop direnv state inherited from the shell that launched the app. With a stale
         // DIRENV_DIFF, direnv in the new tab "reverts" vars recorded there (e.g. MONICA_HOME
@@ -74,6 +79,7 @@ impl PtyManager {
             .slave
             .spawn_command(cmd)
             .context("failed to spawn shell")?;
+        let pid = child.process_id();
 
         let reader = pair
             .master
@@ -107,20 +113,31 @@ impl PtyManager {
             return Err(e).context("failed to spawn reader thread");
         }
 
-        let emitter_handle = std::thread::Builder::new()
+        let emitter_handle = match std::thread::Builder::new()
             .name(format!("pty-emitter-{}", &id_for_reader))
             .spawn(move || {
                 emitter_loop(&id_for_reader, rx, &output_sink);
-            });
-        if let Err(e) = emitter_handle {
-            cleanup(&mut *killer);
-            return Err(e).context("failed to spawn emitter thread");
-        }
+            }) {
+            Ok(handle) => handle,
+            Err(e) => {
+                cleanup(&mut *killer);
+                return Err(e).context("failed to spawn emitter thread");
+            }
+        };
 
         let wait_handle = std::thread::Builder::new()
             .name(format!("pty-wait-{}", &id_for_exit))
             .spawn(move || {
                 let exit_code = wait_for_child(child);
+                // The final output burst may still be in the reader→emitter pipeline when
+                // wait() returns; report the exit only once it has drained so the sink
+                // (e.g. a transcript) doesn't lose the process's last words. Bounded, not
+                // a join: a grandchild holding the pty open stalls reader EOF forever.
+                let drain_deadline = std::time::Instant::now() + EXIT_DRAIN_TIMEOUT;
+                while !emitter_handle.is_finished() && std::time::Instant::now() < drain_deadline
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
                 {
                     if let Ok(mut sessions) = sessions_for_exit.lock() {
                         sessions.remove(&id_for_exit);
@@ -139,7 +156,7 @@ impl PtyManager {
             sessions.insert(req.id.clone(), session);
         }
 
-        Ok(())
+        Ok(pid)
     }
 
     pub fn write(&self, id: &str, data: &[u8]) -> anyhow::Result<()> {
@@ -208,27 +225,15 @@ fn reader_loop(mut reader: Box<dyn Read + Send>, tx: mpsc::SyncSender<Vec<u8>>) 
     }
 }
 
-fn emitter_loop(id: &str, rx: mpsc::Receiver<Vec<u8>>, sink: &impl Fn(PtyOutput)) {
-    let engine = base64::engine::general_purpose::STANDARD;
+fn emitter_loop(id: &str, rx: mpsc::Receiver<Vec<u8>>, sink: &impl Fn(&str, &[u8])) {
     for chunk in rx {
-        let data = engine.encode(&chunk);
-        sink(PtyOutput {
-            id: id.to_string(),
-            data,
-        });
+        sink(id, &chunk);
     }
 }
 
 fn wait_for_child(mut child: Box<dyn portable_pty::Child + Send + Sync>) -> Option<u32> {
     match child.wait() {
-        Ok(status) => {
-            if status.success() {
-                Some(0)
-            } else {
-                // portable-pty ExitStatus doesn't expose the code directly on all platforms
-                Some(1)
-            }
-        }
+        Ok(status) => Some(status.exit_code()),
         Err(e) => {
             log::warn!("error waiting for pty child: {e}");
             None
@@ -242,11 +247,13 @@ mod tests {
     use std::sync::mpsc as std_mpsc;
     use std::time::Duration;
 
+    use base64::Engine;
+
     #[test]
     fn spawn_echo_and_read_output() {
         let manager = PtyManager::new();
 
-        let (output_tx, output_rx) = std_mpsc::channel::<PtyOutput>();
+        let (output_tx, output_rx) = std_mpsc::channel::<Vec<u8>>();
         let (exit_tx, exit_rx) = std_mpsc::channel::<(String, Option<u32>)>();
 
         let id = "test-session-1".to_string();
@@ -257,10 +264,11 @@ mod tests {
                     cwd: std::env::temp_dir().to_string_lossy().to_string(),
                     rows: 24,
                     cols: 80,
+                    shell: None,
                     env: None,
                 },
-                move |output| {
-                    let _ = output_tx.send(output);
+                move |_, bytes| {
+                    let _ = output_tx.send(bytes.to_vec());
                 },
                 move |id, code| {
                     let _ = exit_tx.send((id, code));
@@ -279,8 +287,7 @@ mod tests {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while std::time::Instant::now() < deadline {
             match output_rx.recv_timeout(Duration::from_millis(200)) {
-                Ok(output) => {
-                    let bytes = engine.decode(&output.data).unwrap();
+                Ok(bytes) => {
                     combined.push_str(&String::from_utf8_lossy(&bytes));
                     if combined.contains("hello-monica") {
                         break;
@@ -315,9 +322,10 @@ mod tests {
                     cwd: std::env::temp_dir().to_string_lossy().to_string(),
                     rows: 24,
                     cols: 80,
+                    shell: None,
                     env: None,
                 },
-                |_| {},
+                |_, _| {},
                 |_, _| {},
             )
             .expect("spawn should succeed");
@@ -342,9 +350,10 @@ mod tests {
                     cwd: std::env::temp_dir().to_string_lossy().to_string(),
                     rows: 24,
                     cols: 80,
+                    shell: None,
                     env: None,
                 },
-                |_| {},
+                |_, _| {},
                 move |id, code| {
                     let _ = exit_tx.send((id, code));
                 },
@@ -355,6 +364,52 @@ mod tests {
         manager.kill(&id).expect("kill should succeed");
 
         let _ = exit_rx.recv_timeout(Duration::from_secs(3));
+    }
+
+    /// Regression: wait() can return while the final output burst is still in the
+    /// reader→emitter pipeline; the exit must not be reported before it drains, or the
+    /// sink (daemon transcript) loses the process's last words.
+    #[test]
+    fn exit_sink_fires_after_output_drained() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let manager = PtyManager::new();
+        let chunks = Arc::new(AtomicUsize::new(0));
+        let chunks_for_sink = Arc::clone(&chunks);
+        let (exit_tx, exit_rx) = std_mpsc::channel::<usize>();
+
+        manager
+            .spawn(
+                SpawnRequest {
+                    id: "test-drain".to_string(),
+                    cwd: std::env::temp_dir().to_string_lossy().to_string(),
+                    rows: 24,
+                    cols: 80,
+                    // /bin/echo prints its --login arg and exits immediately, racing the
+                    // exit against the output pipeline.
+                    shell: Some("/bin/echo".to_string()),
+                    env: None,
+                },
+                move |_, _| {
+                    std::thread::sleep(Duration::from_millis(50));
+                    chunks_for_sink.fetch_add(1, Ordering::SeqCst);
+                },
+                {
+                    let chunks = Arc::clone(&chunks);
+                    move |_, _| {
+                        let _ = exit_tx.send(chunks.load(Ordering::SeqCst));
+                    }
+                },
+            )
+            .expect("spawn should succeed");
+
+        let seen_at_exit = exit_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("exit should be reported");
+        assert!(
+            seen_at_exit >= 1,
+            "exit was reported before any output drained"
+        );
     }
 
     #[test]

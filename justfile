@@ -6,8 +6,8 @@ default:
 install:
     bun install
 
-dev: dev-cli
-    MONICA_HOME="$HOME/monica/dev" MONICA_CLI_PATH="{{justfile_directory()}}/monica" bun run tauri dev
+dev: dev-cli ptyd-bin
+    MONICA_HOME="$HOME/monica/dev" MONICA_CLI_PATH="{{justfile_directory()}}/monica" MONICA_PTYD_PATH="{{justfile_directory()}}/target/debug/monica-ptyd" bun run tauri dev
 
 dev-cli:
     cargo build -p monica-cli
@@ -16,6 +16,14 @@ dev-cli:
     [ "$(uname)" = Darwin ] && codesign --force --sign - ./monica || true
     mkdir -p ~/.zsh/completions
     ./monica completions zsh > ~/.zsh/completions/_monica
+
+# tauri.conf.json's externalBin makes every monica-app compile (dev, clippy, tests)
+# require binaries/monica-ptyd-<host-triple>; this provides it. Release builds overwrite
+# it with a release binary via beforeBuildCommand.
+ptyd-bin:
+    cargo build -p monica-ptyd
+    mkdir -p crates/monica-app/binaries
+    cp target/debug/monica-ptyd "crates/monica-app/binaries/monica-ptyd-$(rustc -vV | sed -n 's/host: //p')"
 
 build:
     bun run tauri build --bundles app
@@ -73,13 +81,13 @@ unused-commands:
     if [ "$found" -eq 0 ]; then echo "all commands used"; fi
     exit "$found"
 
-check: lint fmt-check knip unused-commands
+check: lint fmt-check knip unused-commands ptyd-bin
     cargo clippy --workspace --all-targets -- -D warnings
 
-generate-bindings:
+generate-bindings: ptyd-bin
     cargo test -p monica-app --lib tests::export_typescript_bindings -- --exact
 
-test:
+test: ptyd-bin
     cargo test --workspace
 
 analyze:

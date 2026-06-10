@@ -1,7 +1,8 @@
 use monica_core::{
     Agent, DisplayStatus, ExternalRef, GithubPullRequest, GithubPullRequestStatus, NewTask,
-    NewTaskRun, Project, PullRequestBranchSyncCandidate, RefType, TaskKind, TaskRunObservation,
-    TaskRunStatus, TaskRunWaitReason, TaskStatus,
+    NewTaskRun, NewTerminalSession, Project, PullRequestBranchSyncCandidate, RefType, TaskKind,
+    TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus, TerminalSessionKind,
+    TerminalSessionStatus, TerminalSessionUpdate,
 };
 use rusqlite::params;
 use serde_json::json;
@@ -552,4 +553,192 @@ fn branch_pr_sync_failure_retries_after_five_minutes() {
         .unwrap();
     assert_eq!(last_error.as_deref(), Some("temporary GitHub failure"));
     assert!((295..=305).contains(&delay));
+}
+
+fn new_shell_session(runspace: Option<&str>, tab: Option<&str>) -> NewTerminalSession {
+    NewTerminalSession {
+        runspace_id: runspace.map(str::to_string),
+        tab_id: tab.map(str::to_string),
+        kind: TerminalSessionKind::Shell,
+        cwd: "/tmp".into(),
+        shell: "/bin/zsh".into(),
+        rows: 24,
+        cols: 80,
+    }
+}
+
+#[test]
+fn terminal_session_create_and_get_round_trip() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let session = db
+        .create_terminal_session(new_shell_session(Some("rs-1"), Some("tab-1")))
+        .unwrap();
+
+    assert_eq!(session.id, "ts-1");
+    assert_eq!(session.status, TerminalSessionStatus::Starting);
+    assert_eq!(session.runspace_id.as_deref(), Some("rs-1"));
+    assert_eq!(session.tab_id.as_deref(), Some("tab-1"));
+    assert_eq!(session.kind, TerminalSessionKind::Shell);
+    assert_eq!((session.rows, session.cols), (24, 80));
+    assert!(session.pid.is_none());
+
+    let fetched = db.get_terminal_session("ts-1").unwrap().unwrap();
+    assert_eq!(fetched, session);
+    assert!(db.get_terminal_session("ts-404").unwrap().is_none());
+
+    let second = db.create_terminal_session(new_shell_session(None, None)).unwrap();
+    assert_eq!(second.id, "ts-2");
+}
+
+#[test]
+fn terminal_session_started_records_pid_and_running() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let session = db.create_terminal_session(new_shell_session(None, None)).unwrap();
+
+    db.mark_terminal_session_started(&session.id, Some(4242), Some("/tmp/ts-1.log"))
+        .unwrap();
+
+    let session = db.get_terminal_session(&session.id).unwrap().unwrap();
+    assert_eq!(session.status, TerminalSessionStatus::Running);
+    assert_eq!(session.pid, Some(4242));
+    assert_eq!(session.transcript_path.as_deref(), Some("/tmp/ts-1.log"));
+    assert!(session.started_at.is_some());
+    assert!(session.last_seen_at.is_some());
+    assert!(session.exited_at.is_none());
+}
+
+#[test]
+fn terminal_session_updates_stamp_exited_at_once() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let session = db.create_terminal_session(new_shell_session(None, None)).unwrap();
+    db.mark_terminal_session_started(&session.id, Some(1), None).unwrap();
+
+    db.apply_terminal_session_updates(&[TerminalSessionUpdate {
+        session_id: session.id.clone(),
+        status: TerminalSessionStatus::Detached,
+        pid: Some(7),
+        exit_code: None,
+    }])
+    .unwrap();
+    let detached = db.get_terminal_session(&session.id).unwrap().unwrap();
+    assert_eq!(detached.status, TerminalSessionStatus::Detached);
+    assert_eq!(detached.pid, Some(7));
+    assert!(detached.exited_at.is_none());
+
+    db.update_terminal_session_status(&session.id, TerminalSessionStatus::Exited, Some(130))
+        .unwrap();
+    let exited = db.get_terminal_session(&session.id).unwrap().unwrap();
+    assert_eq!(exited.status, TerminalSessionStatus::Exited);
+    assert_eq!(exited.exit_code, Some(130));
+    let first_exited_at = exited.exited_at.clone().expect("exited_at must be stamped");
+    // pid is preserved for post-mortem inspection.
+    assert_eq!(exited.pid, Some(7));
+
+    db.update_terminal_session_status(&session.id, TerminalSessionStatus::Exited, None)
+        .unwrap();
+    let again = db.get_terminal_session(&session.id).unwrap().unwrap();
+    assert_eq!(again.exited_at, Some(first_exited_at));
+    assert_eq!(again.exit_code, Some(130));
+}
+
+#[test]
+fn terminal_session_settled_row_is_never_resurrected() {
+    // A late attach response racing the daemon's Exit broadcast must not flip an exited
+    // session back to running.
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let session = db.create_terminal_session(new_shell_session(None, None)).unwrap();
+    db.mark_terminal_session_started(&session.id, Some(1), None).unwrap();
+    db.update_terminal_session_status(&session.id, TerminalSessionStatus::Exited, Some(0))
+        .unwrap();
+
+    db.update_terminal_session_status(&session.id, TerminalSessionStatus::Running, None)
+        .unwrap();
+
+    let settled = db.get_terminal_session(&session.id).unwrap().unwrap();
+    assert_eq!(settled.status, TerminalSessionStatus::Exited);
+    assert_eq!(settled.exit_code, Some(0));
+}
+
+#[test]
+fn terminal_session_terminal_statuses_stamp_exited_at_and_freeze_last_seen() {
+    for status in [TerminalSessionStatus::Lost, TerminalSessionStatus::Failed] {
+        let mut db = SqliteStore::open_in_memory().unwrap();
+        let session = db.create_terminal_session(new_shell_session(None, None)).unwrap();
+        db.mark_terminal_session_started(&session.id, Some(9), None).unwrap();
+        let last_seen = db
+            .get_terminal_session(&session.id)
+            .unwrap()
+            .unwrap()
+            .last_seen_at
+            .expect("started session must have last_seen_at");
+
+        db.apply_terminal_session_updates(&[TerminalSessionUpdate {
+            session_id: session.id.clone(),
+            status,
+            pid: None,
+            exit_code: None,
+        }])
+        .unwrap();
+
+        let settled = db.get_terminal_session(&session.id).unwrap().unwrap();
+        assert_eq!(settled.status, status);
+        assert!(settled.exited_at.is_some(), "{status:?} must stamp exited_at");
+        assert_eq!(
+            settled.last_seen_at.as_deref(),
+            Some(last_seen.as_str()),
+            "{status:?} must not refresh last_seen_at"
+        );
+        assert_eq!(settled.pid, Some(9), "COALESCE must keep the pid");
+    }
+}
+
+#[test]
+fn terminal_session_list_filters_by_runspace() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    db.create_terminal_session(new_shell_session(Some("rs-1"), None)).unwrap();
+    db.create_terminal_session(new_shell_session(Some("rs-2"), None)).unwrap();
+    db.create_terminal_session(new_shell_session(None, None)).unwrap();
+
+    assert_eq!(db.list_terminal_sessions(None).unwrap().len(), 3);
+    let scoped = db.list_terminal_sessions(Some("rs-1")).unwrap();
+    assert_eq!(scoped.len(), 1);
+    assert_eq!(scoped[0].runspace_id.as_deref(), Some("rs-1"));
+}
+
+#[test]
+fn terminal_state_snapshot_round_trips_session_id() {
+    use crate::sqlite::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTabRow};
+
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let snapshot = TerminalStateSnapshot {
+        runspaces: vec![TerminalRunspaceRow {
+            id: "rs-1".into(),
+            sort_order: 0,
+            is_active: true,
+            tabs: vec![
+                TerminalTabRow {
+                    id: "tab-1".into(),
+                    cwd: "/tmp".into(),
+                    title: "one".into(),
+                    sort_order: 0,
+                    is_active: true,
+                    terminal_session_id: Some("ts-1".into()),
+                },
+                TerminalTabRow {
+                    id: "tab-2".into(),
+                    cwd: "/tmp".into(),
+                    title: "two".into(),
+                    sort_order: 1,
+                    is_active: false,
+                    terminal_session_id: None,
+                },
+            ],
+        }],
+    };
+    db.save_terminal_state(&snapshot).unwrap();
+
+    let loaded = db.load_terminal_state().unwrap();
+    let tabs = &loaded.runspaces[0].tabs;
+    assert_eq!(tabs[0].terminal_session_id.as_deref(), Some("ts-1"));
+    assert_eq!(tabs[1].terminal_session_id, None);
 }

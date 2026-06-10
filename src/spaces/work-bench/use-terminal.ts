@@ -7,15 +7,32 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getDefaultStore } from "jotai";
-import { ptySpawn, ptyWrite, ptyResize, onPtyOutput, onPtyExit } from "@/commands/pty";
+import {
+  onTerminalExit,
+  onTerminalOutput,
+  terminalAttach,
+  terminalCreateSession,
+  terminalResize,
+  terminalWrite,
+  type TerminalSessionStatus,
+} from "@/commands/terminal";
 import { activeSpaceAtom, prefixActiveAtom } from "@/stores/space";
 import {
+  setSessionStatusAtom,
   terminalFontSizeAtom,
   terminalFocusRequestAtom,
   zoomTerminalAtom,
+  type TerminalLaunchIntent,
 } from "@/stores/terminal";
-
-const aliveSessions = new Set<string>();
+import {
+  clearTabTerminal,
+  getTabConnection,
+  getTabTerminal,
+  openTabConnection,
+  releaseTabConnection,
+  setTabTerminal,
+  type TabConnection,
+} from "./terminal-connections";
 
 const PIXELS_PER_LINE = 20;
 
@@ -23,10 +40,6 @@ function buildSgrWheelSequence(lines: number, down: boolean, col: number, row: n
   const code = down ? 65 : 64;
   const event = `\x1b[<${code};${col};${row}M`;
   return event.repeat(lines);
-}
-
-export function markSessionDead(tabId: string) {
-  aliveSessions.delete(tabId);
 }
 
 function toBase64(input: Uint8Array): string {
@@ -48,23 +61,130 @@ function fromBase64(b64: string): Uint8Array {
 
 const encoder = new TextEncoder();
 
-function writeText(tabId: string, text: string) {
-  ptyWrite(tabId, toBase64(encoder.encode(text)));
+function isDeadStatus(status: TerminalSessionStatus | undefined): boolean {
+  return status === "exited" || status === "lost" || status === "failed";
 }
-
-import type { TerminalLaunchIntent } from "@/stores/terminal";
 
 type UseTerminalOptions = {
   tabId: string;
+  runspaceId: string;
+  sessionId?: string;
+  sessionStatus?: TerminalSessionStatus;
   cwd: string;
   active: boolean;
   env?: [string, string][];
   launch?: TerminalLaunchIntent;
   onTitleChange?: (title: string) => void;
   onCwdChange?: (cwd: string) => void;
+  onSessionCreated?: (sessionId: string) => void;
   onLaunchConsumed?: () => void;
   onExit?: () => void;
 };
+
+/// Create the tab's session if needed, then attach: subscribe → attach → replay → flush.
+/// Output arriving between subscribe and replay-write is buffered, and the daemon only
+/// emits post-attach output, so the stream is gapless without sequence numbers.
+/// Synchronous wrapper: inFlight must be set before the first await, or a re-render
+/// mid-connect (e.g. the shell's first OSC7 cwd report) starts a second connect.
+function connectTab(
+  optionsRef: React.RefObject<UseTerminalOptions>,
+  sessionIdRef: React.RefObject<string | null>,
+) {
+  const { tabId } = optionsRef.current;
+  const conn = openTabConnection(tabId);
+  conn.inFlight = runConnect(optionsRef, sessionIdRef, conn);
+}
+
+async function runConnect(
+  optionsRef: React.RefObject<UseTerminalOptions>,
+  sessionIdRef: React.RefObject<string | null>,
+  conn: TabConnection,
+) {
+  const store = getDefaultStore();
+  const { tabId } = optionsRef.current;
+  let sessionId = optionsRef.current.sessionId;
+  const isNew = !sessionId;
+  try {
+    if (!sessionId) {
+      const options = optionsRef.current;
+      const term = getTabTerminal(tabId);
+      const session = await terminalCreateSession({
+        runspaceId: options.runspaceId,
+        tabId,
+        kind: options.launch ? "agent" : "shell",
+        cwd: options.cwd,
+        rows: term?.rows ?? 24,
+        cols: term?.cols ?? 80,
+        // A launch intent carries the complete shell env (runspace env + run ids), so it
+        // supersedes the runspace env rather than being merged with it. The tab and
+        // session ids are injected backend-side.
+        env: options.launch?.env ?? options.env,
+      });
+      sessionId = session.id;
+      options.onSessionCreated?.(session.id);
+      if (session.status === "failed") {
+        store.set(setSessionStatusAtom, session.id, { status: "failed" });
+        conn.state = "dead";
+        return;
+      }
+    }
+    conn.sessionId = sessionId;
+    sessionIdRef.current = sessionId;
+
+    let live = false;
+    const pending: string[] = [];
+    conn.unlisteners.push(
+      await onTerminalOutput(sessionId, (data) => {
+        if (live) getTabTerminal(tabId)?.write(fromBase64(data));
+        else pending.push(data);
+      }),
+    );
+    const sid = sessionId;
+    conn.unlisteners.push(
+      await onTerminalExit(sid, (code) => {
+        store.set(setSessionStatusAtom, sid, { status: "exited", exitCode: code });
+        releaseTabConnection(tabId);
+        optionsRef.current.onExit?.();
+      }),
+    );
+
+    const attach = await terminalAttach(sessionId);
+    // No reset before the replay: the terminal here is always a freshly mounted (empty)
+    // instance — the connection guard prevents double-attach — and Terminal.reset()
+    // corrupts the WebGL renderer (blank canvas, "this._renderer.value.dimensions"
+    // TypeErrors) once WebglAddon is loaded.
+    const term = getTabTerminal(tabId);
+    if (term) {
+      if (attach.replay) term.write(fromBase64(attach.replay));
+      live = true;
+      for (const data of pending) term.write(fromBase64(data));
+      pending.length = 0;
+    } else {
+      live = true;
+    }
+    conn.state = "attached";
+    store.set(setSessionStatusAtom, sessionId, { status: "running" });
+
+    const initialCommand = isNew ? optionsRef.current.launch?.initialCommand : undefined;
+    if (initialCommand) {
+      setTimeout(() => {
+        terminalWrite(sid, toBase64(encoder.encode(initialCommand + "\r")));
+        optionsRef.current.onLaunchConsumed?.();
+      }, 500);
+    }
+  } catch (e) {
+    console.warn(`terminal connect failed for tab ${tabId}:`, e);
+    conn.state = "dead";
+    for (const unlisten of conn.unlisteners) unlisten();
+    conn.unlisteners = [];
+    // No pretend-reconnect: a session we cannot attach to is honestly lost.
+    if (sessionId) {
+      store.set(setSessionStatusAtom, sessionId, { status: "lost" });
+    }
+  } finally {
+    conn.inFlight = undefined;
+  }
+}
 
 export function useTerminal(
   containerRef: React.RefObject<HTMLDivElement | null>,
@@ -73,6 +193,8 @@ export function useTerminal(
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const openedRef = useRef(false);
+  const sessionIdRef = useRef<string | null>(options.sessionId ?? null);
+  sessionIdRef.current = options.sessionId ?? sessionIdRef.current;
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
@@ -129,19 +251,26 @@ export function useTerminal(
 
     termRef.current = term;
     fitRef.current = fitAddon;
+    setTabTerminal(options.tabId, term);
 
     const cleanups: (() => void)[] = [];
 
-    term.onData((data) => {
-      writeText(options.tabId, data);
-    });
+    const writeText = (text: string) => {
+      const sessionId = sessionIdRef.current;
+      if (!sessionId) return;
+      terminalWrite(sessionId, toBase64(encoder.encode(text)));
+    };
+
+    term.onData(writeText);
 
     term.onBinary((data) => {
+      const sessionId = sessionIdRef.current;
+      if (!sessionId) return;
       const bytes = new Uint8Array(data.length);
       for (let i = 0; i < data.length; i++) {
         bytes[i] = data.charCodeAt(i);
       }
-      ptyWrite(options.tabId, toBase64(bytes));
+      terminalWrite(sessionId, toBase64(bytes));
     });
 
     term.onTitleChange((title) => {
@@ -150,7 +279,7 @@ export function useTerminal(
 
     // Kitty keyboard protocol: respond to query (CSI ? u) and absorb push/pop
     term.parser.registerCsiHandler({ final: "u", prefix: "?" }, () => {
-      writeText(options.tabId, "\x1b[?1u");
+      writeText("\x1b[?1u");
       return true;
     });
     term.parser.registerCsiHandler({ final: "u", prefix: ">" }, () => true);
@@ -171,7 +300,7 @@ export function useTerminal(
     term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
       if (e.shiftKey && e.key === "Enter") {
         if (e.type === "keydown") {
-          writeText(options.tabId, "\x1b[13;2u");
+          writeText("\x1b[13;2u");
         }
         return false;
       }
@@ -225,7 +354,7 @@ export function useTerminal(
       const col = Math.floor(term.cols / 2);
       const row = Math.floor(term.rows / 2);
       const seq = buildSgrWheelSequence(absLines, down, col, row);
-      writeText(options.tabId, seq);
+      writeText(seq);
     }
 
     const container = containerRef.current;
@@ -240,26 +369,24 @@ export function useTerminal(
       });
     }
 
-    onPtyOutput(options.tabId, (data) => {
-      term.write(fromBase64(data));
-    }).then((unlisten) => cleanups.push(unlisten));
-
-    onPtyExit(options.tabId, () => {
-      aliveSessions.delete(options.tabId);
-      optionsRef.current.onExit?.();
-    }).then((unlisten) => cleanups.push(unlisten));
-
     const unsubFontSize = store.sub(terminalFontSizeAtom, () => {
       const size = store.get(terminalFontSizeAtom);
       term.options.fontSize = size;
       if (openedRef.current && fitRef.current) {
         fitRef.current.fit();
-        ptyResize(options.tabId, term.rows, term.cols);
+        if (sessionIdRef.current) {
+          terminalResize(sessionIdRef.current, term.rows, term.cols);
+        }
       }
     });
     cleanups.push(unsubFontSize);
 
     return () => {
+      // The tab connection (session listeners) deliberately survives unmount/remount;
+      // it is released by the store when the tab closes or starts a new shell. The
+      // terminal registry entry must go first so in-flight writes stop resolving to a
+      // disposed instance.
+      clearTabTerminal(options.tabId, term);
       for (const fn of cleanups) fn();
       term.dispose();
       termRef.current = null;
@@ -288,36 +415,24 @@ export function useTerminal(
 
     fit.fit();
 
-    if (!aliveSessions.has(options.tabId)) {
-      aliveSessions.add(options.tabId);
-      // A launch intent carries the complete shell env (runspace env + run ids),
-      // so it supersedes the runspace env rather than being merged with it.
-      // MONICA_TERMINAL_TAB_ID is injected backend-side in pty_spawn.
-      const env = optionsRef.current.launch?.env ?? optionsRef.current.env;
-      const initialCommand = optionsRef.current.launch?.initialCommand;
-      ptySpawn(options.tabId, options.cwd, term.rows, term.cols, env)
-        .then(() => {
-          if (initialCommand) {
-            setTimeout(() => {
-              writeText(options.tabId, initialCommand + "\r");
-              optionsRef.current.onLaunchConsumed?.();
-            }, 500);
-          }
-        })
-        .catch(() => {
-          aliveSessions.delete(options.tabId);
-          term.writeln("\r\n\x1b[31mFailed to spawn shell. Press any key to retry.\x1b[0m");
-        });
+    // A dead session never reconnects; the pane overlay offers a fresh shell instead.
+    const conn = getTabConnection(options.tabId);
+    if (!conn?.inFlight && conn?.state !== "attached" && !isDeadStatus(options.sessionStatus)) {
+      connectTab(optionsRef, sessionIdRef);
     }
 
-    ptyResize(options.tabId, term.rows, term.cols);
+    if (sessionIdRef.current && conn?.state === "attached") {
+      terminalResize(sessionIdRef.current, term.rows, term.cols);
+    }
     term.focus();
 
     const observer = new ResizeObserver(() => {
       if (fitDebounce) clearTimeout(fitDebounce);
       fitDebounce = window.setTimeout(() => {
         fit.fit();
-        ptyResize(options.tabId, term.rows, term.cols);
+        if (sessionIdRef.current) {
+          terminalResize(sessionIdRef.current, term.rows, term.cols);
+        }
       }, 100);
     });
 
@@ -328,7 +443,14 @@ export function useTerminal(
       observer.disconnect();
       if (fitDebounce) clearTimeout(fitDebounce);
     };
-  }, [options.active, options.tabId, options.cwd, containerRef]);
+  }, [
+    options.active,
+    options.tabId,
+    options.sessionId,
+    options.sessionStatus,
+    options.cwd,
+    containerRef,
+  ]);
 
   useEffect(() => {
     if (!options.active) return;
