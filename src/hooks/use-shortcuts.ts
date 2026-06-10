@@ -9,6 +9,7 @@ import {
   cycleTerminalTabAtom,
   cycleRunspaceAtom,
 } from "@/stores/terminal";
+import { promoteActiveTabRunAtom } from "@/stores/workboard";
 
 const META_KEY_SPACE_MAP: Record<string, SpaceId> = {
   "1": "dashboard",
@@ -39,6 +40,7 @@ export function useShortcuts() {
   const closeTerminalTab = useSetAtom(closeTerminalTabAtom);
   const cycleTerminalTab = useSetAtom(cycleTerminalTabAtom);
   const cycleRunspace = useSetAtom(cycleRunspaceAtom);
+  const promoteActiveTabRun = useSetAtom(promoteActiveTabRunAtom);
 
   const prefixRef = useRef(false);
   const timeoutRef = useRef<number>(0);
@@ -72,6 +74,13 @@ export function useShortcuts() {
       if (e.metaKey && e.key in META_KEY_SPACE_MAP) {
         e.preventDefault();
         setActiveSpace(META_KEY_SPACE_MAP[e.key]);
+        return;
+      }
+
+      // Stays above the editable guard: the terminal focuses xterm's hidden textarea.
+      if (e.metaKey && e.key === "g") {
+        e.preventDefault();
+        if (isWorkBench) void promoteActiveTabRun();
         return;
       }
 
@@ -152,5 +161,6 @@ export function useShortcuts() {
     closeTerminalTab,
     cycleTerminalTab,
     cycleRunspace,
+    promoteActiveTabRun,
   ]);
 }

@@ -165,6 +165,18 @@ impl TaskRunRepository for SqliteStore {
         SqliteStore::get_task_run(self, id)
     }
 
+    fn find_task_run_by_session(
+        &self,
+        task_id: &str,
+        provider_session_id: &str,
+    ) -> Result<Option<TaskRun>> {
+        SqliteStore::find_task_run_by_session(self, task_id, provider_session_id)
+    }
+
+    fn find_task_run_by_terminal_tab(&self, terminal_tab_id: &str) -> Result<Option<TaskRun>> {
+        SqliteStore::find_task_run_by_terminal_tab(self, terminal_tab_id)
+    }
+
     fn list_task_runs_for_task(&self, task_id: &str) -> Result<Vec<TaskRun>> {
         SqliteStore::list_task_runs_for_task(self, task_id)
     }

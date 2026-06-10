@@ -48,6 +48,10 @@ impl SqliteStore {
 
     fn init(mut conn: Connection) -> Result<Self> {
         conn.pragma_update(None, "foreign_keys", true)?;
+        // Every hook event runs in its own `monica hook claude` process while the app polls and
+        // writes concurrently; without a timeout a colliding write fails hard with SQLITE_BUSY
+        // and the observation (e.g. a side run's SessionEnd) is lost.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         self::migrations::migrate(&mut conn)?;
         Ok(Self { conn })
     }

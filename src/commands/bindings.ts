@@ -34,6 +34,15 @@ export const commands = {
     typedError<PrepareTaskResult, string>(__TAURI_INVOKE("prepare_task", { taskId })),
   runTask: (taskId: string) =>
     typedError<RunTaskResult, string>(__TAURI_INVOKE("run_task", { taskId })),
+  /**
+   *  Promote the run living in the given Workbench tab to its task's Main Run. Returns whether the
+   *  primary actually changed; `false` covers "no run in this tab", "already main" and "primary is
+   *  mid-prepare" so the shortcut can stay a silent no-op.
+   */
+  makeMainTaskRun: (tabId: string) =>
+    typedError<boolean, string>(__TAURI_INVOKE("make_main_task_run", { tabId })),
+  primaryTabId: (taskId: string) =>
+    typedError<string | null, string>(__TAURI_INVOKE("primary_tab_id", { taskId })),
 };
 
 /** Events */
@@ -124,6 +133,9 @@ export type TaskSummaryRow = {
   task_run_wait_reason: TaskRunWaitReason | null;
   status: DisplayStatus;
   branch: string | null;
+  side_runs_running: number;
+  side_runs_waiting_for_user: number;
+  side_runs_failed: number;
 };
 
 export type TerminalRunspaceRow = {

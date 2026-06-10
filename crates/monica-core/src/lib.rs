@@ -26,10 +26,11 @@ pub use interfaces::{
 };
 pub use usecases::{
     begin_github_device_flow, delete_issue, execute_run, get_project, github_auth_status,
-    list_events, list_projects, list_task_summaries, list_tasks, logout_github, mark_issue,
+    list_events, list_projects, list_task_summaries, list_tasks, logout_github,
+    make_main_by_terminal_tab, mark_issue, primary_terminal_tab, MakeMainOutcome,
     open_bench, prepare_claude_for_run, record_claude_hook, register_project, task_shell_env,
     register_project_with_default_branch, set_project_field, start_run, sync_next_pull_request,
     track_github_issue,
-    track_github_issue_from_fetched, wait_for_github_device_flow, DeleteIssueReport, HookReport,
-    TrackGithubIssueInput, TrackGithubIssueReport,
+    track_github_issue_from_fetched, wait_for_github_device_flow, DeleteIssueReport, HookContext,
+    HookReport, TrackGithubIssueInput, TrackGithubIssueReport,
 };

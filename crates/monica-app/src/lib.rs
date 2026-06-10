@@ -34,6 +34,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             task_commands::open_bench,
             task_commands::prepare_task,
             task_commands::run_task,
+            task_commands::make_main_task_run,
+            task_commands::primary_tab_id,
         ])
         .events(tauri_specta::collect_events![
             task_commands::TaskRunStatusChanged
@@ -48,6 +50,16 @@ pub fn export_bindings() {
     specta_builder()
         .export(specta_typescript::Typescript::default(), bindings_path())
         .expect("failed to export typescript bindings");
+    // Best-effort: specta's raw output fails `just check`'s fmt-check, so format at the source
+    // (every writer: `just generate-bindings` and the dev-startup export). Environments
+    // without bun still get valid bindings; `just fmt` remains the fallback. The path is
+    // canonicalized because oxfmt rejects paths containing "..".
+    if let Ok(path) = bindings_path().canonicalize() {
+        let _ = std::process::Command::new("bunx")
+            .arg("oxfmt")
+            .arg(path)
+            .status();
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

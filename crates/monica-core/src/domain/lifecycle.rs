@@ -64,6 +64,13 @@ pub fn transition_is_protected(current: TaskRunStatus, next: TaskRunStatus) -> b
             && matches!(next, TaskRunStatus::Stopped))
 }
 
+/// Events that prove a user is actively driving a session in this shell. Only these may claim
+/// or create runs; anything else (a stray `Stop` from an untracked session, a broken payload)
+/// must never mutate the run set.
+pub fn is_session_starting_event(event_name: Option<&str>) -> bool {
+    matches!(event_name, Some("SessionStart" | "UserPromptSubmit"))
+}
+
 pub fn should_ignore_claude_event(event_name: Option<&str>, payload: Option<&Value>) -> bool {
     matches!(event_name, Some("PreToolUse" | "PostToolUse"))
         && payload

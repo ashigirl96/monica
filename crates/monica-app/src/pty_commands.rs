@@ -18,6 +18,11 @@ pub fn pty_spawn(
     let output_app = app.clone();
     let exit_app = app;
 
+    // The hook chain (shell → claude → monica hook claude) inherits this, letting hooks stamp
+    // the tab onto the TaskRun for tab-based Make Main; injected here so every tab gets it.
+    let mut env = env.unwrap_or_default();
+    env.push(("MONICA_TERMINAL_TAB_ID".to_string(), id.clone()));
+
     state
         .spawn(
             SpawnRequest {
@@ -25,7 +30,7 @@ pub fn pty_spawn(
                 cwd,
                 rows,
                 cols,
-                env,
+                env: Some(env),
             },
             move |output: PtyOutput| {
                 let event = format!("pty:output:{}", output.id);

@@ -105,6 +105,12 @@ fn cleanup_task_runs_with_rip(repo: &Path, runs: &[TaskRun], rip: &Path) -> Resu
 }
 
 fn cleanup_worktree(repo: &Path, run: &TaskRun, worktree: &Path, rip: &Path) -> Result<()> {
+    // `git worktree list` includes the main working tree, so a run whose worktree_path points at
+    // the checkout itself (e.g. legacy rows stamped from a session's cwd) would pass the
+    // registered check and get ripped; never touch it.
+    if is_same_path(repo, worktree) {
+        return Ok(());
+    }
     let registered = worktree_registered(repo, worktree)?;
     let needs_prune = if worktree.exists() {
         if !registered {
@@ -136,6 +142,13 @@ fn cleanup_worktree(repo: &Path, run: &TaskRun, worktree: &Path, rip: &Path) -> 
         ensure_worktree_unregistered(repo, run, worktree)?;
     }
     Ok(())
+}
+
+fn is_same_path(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
 }
 
 fn rip_worktree(rip: &Path, worktree: &Path) -> Result<()> {
@@ -322,6 +335,24 @@ mod tests {
         assert_eq!(report.removed_branches, vec!["issue-42"]);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn cleanup_never_rips_the_main_checkout() {
+        let root = Tmp::new("main-checkout-guard");
+        let repo = root.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        init_repo(&repo);
+        // A legacy lazily-created run could have recorded the main checkout as its
+        // worktree_path; cleanup must leave it untouched.
+        let mut run = task_run("run-1", "unused-branch", &repo);
+        run.branch = None;
+
+        cleanup_task_runs_with_rip(&repo, &[run], &write_fake_rip(root.path())).unwrap();
+
+        assert!(repo.exists());
+        assert!(repo.join(".git").exists());
+    }
+
     #[test]
     fn cleanup_fails_before_mutating_when_rip_is_missing() {
         let root = Tmp::new("missing-rip");
@@ -399,6 +430,7 @@ mod tests {
             wait_reason: None,
             settings_path: None,
             provider_session_id: None,
+            terminal_tab_id: None,
             last_event_name: None,
             last_event_at: None,
             metadata: serde_json::json!({}),

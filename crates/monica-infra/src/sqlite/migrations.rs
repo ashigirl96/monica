@@ -20,6 +20,8 @@ fn migrations() -> Migrations<'static> {
         M::up(V11),
         M::up(V12),
         M::up(V13),
+        M::up(V14),
+        M::up(V15),
     ])
 }
 
@@ -420,6 +422,18 @@ const V13: &str = r#"
     ALTER TABLE tasks ADD COLUMN primary_task_run_id TEXT;
 "#;
 
+/// v14: record which Workbench terminal tab a run's Claude session lives in.
+const V14: &str = r#"
+    ALTER TABLE task_runs ADD COLUMN terminal_tab_id TEXT;
+"#;
+
+/// v15: indexes for the hook-path lookups that now run on every Claude hook event
+/// (session resolution) and on cmd+g / the tab indicator (tab resolution).
+const V15: &str = r#"
+    CREATE INDEX task_runs_task_session_idx ON task_runs(task_id, provider_session_id);
+    CREATE INDEX task_runs_terminal_tab_idx ON task_runs(terminal_tab_id);
+"#;
+
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
     migrations()
@@ -493,7 +507,7 @@ mod tests {
             .conn()
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 13);
+        assert_eq!(version, 15);
 
         std::fs::remove_file(&path).ok();
     }

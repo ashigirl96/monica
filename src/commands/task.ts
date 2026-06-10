@@ -57,6 +57,14 @@ export function runTask(taskId: string) {
   return unwrap(commands.runTask(taskId));
 }
 
+export function makeMainTaskRun(tabId: string) {
+  return unwrap(commands.makeMainTaskRun(tabId));
+}
+
+export function primaryTabId(taskId: string) {
+  return unwrap(commands.primaryTabId(taskId));
+}
+
 export function onTaskRunStatusChanged(
   cb: (payload: TaskRunStatusChanged) => void,
 ): Promise<UnlistenFn> {

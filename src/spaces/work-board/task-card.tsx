@@ -151,6 +151,50 @@ function PrepareIcon() {
   );
 }
 
+// Side runs never drive the card's column; they only get a quiet attention
+// cluster next to the main status badge.
+function SideRunBadges({ task }: { task: TaskSummaryRow }) {
+  const entries = [
+    {
+      count: task.side_runs_waiting_for_user,
+      title: (n: number) => `${n} side run${n > 1 ? "s" : ""} waiting for you`,
+      className: STATUS_BADGE_STYLES.waiting_for_user,
+      dot: STATUS_COLORS.waiting_for_user,
+    },
+    {
+      count: task.side_runs_failed,
+      title: (n: number) => `${n} side run${n > 1 ? "s" : ""} failed`,
+      className: STATUS_BADGE_STYLES.failed,
+      dot: STATUS_COLORS.failed,
+    },
+    // running stays deliberately subdued: a healthy side run is not an attention item
+    {
+      count: task.side_runs_running,
+      title: (n: number) => `${n} side run${n > 1 ? "s" : ""} running`,
+      className: "bg-white/[0.04] text-muted-foreground",
+      dot: "bg-emerald-400/70",
+    },
+  ].filter((e) => e.count > 0);
+  if (entries.length === 0) return null;
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      {entries.map((e) => (
+        <span
+          key={e.dot}
+          title={e.title(e.count)}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-sm px-1.5 py-px text-[10px] font-medium",
+            e.className,
+          )}
+        >
+          <span className={cn("size-1 rounded-full", e.dot)} />+{e.count}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 export function TaskCard({ task }: { task: TaskSummaryRow }) {
   const doOpenBench = useSetAtom(openBenchAtom);
   const doPrepareTask = useSetAtom(prepareTaskAtom);
@@ -219,13 +263,16 @@ export function TaskCard({ task }: { task: TaskSummaryRow }) {
         )}
 
         <div className="flex items-center justify-between">
-          <span
-            className={cn(
-              "inline-flex items-center rounded-sm px-1.5 py-px text-[10px] font-medium",
-              STATUS_BADGE_STYLES[task.status],
-            )}
-          >
-            {STATUS_LABELS[task.status]}
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              className={cn(
+                "inline-flex items-center rounded-sm px-1.5 py-px text-[10px] font-medium",
+                STATUS_BADGE_STYLES[task.status],
+              )}
+            >
+              {STATUS_LABELS[task.status]}
+            </span>
+            <SideRunBadges task={task} />
           </span>
           <div className="flex items-center gap-1">
             {PREPARE_ELIGIBLE.has(task.status) && (

@@ -43,6 +43,7 @@ pub struct TaskRun {
     pub wait_reason: Option<TaskRunWaitReason>,
     pub settings_path: Option<String>,
     pub provider_session_id: Option<String>,
+    pub terminal_tab_id: Option<String>,
     pub last_event_name: Option<String>,
     pub last_event_at: Option<String>,
     pub metadata: Value,
@@ -58,6 +59,7 @@ pub struct TaskRunObservation<'a> {
     pub event_name: Option<&'a str>,
     pub at: &'a str,
     pub provider_session_id: Option<&'a str>,
+    pub terminal_tab_id: Option<&'a str>,
     pub metadata: Option<&'a Value>,
 }
 

@@ -123,6 +123,7 @@ fn task_run_observation_records_wait_reason_and_event_metadata() {
             event_name: Some("PreToolUse"),
             at: "2026-06-02T00:00:00.000Z",
             provider_session_id: Some("provider-session"),
+            terminal_tab_id: Some("tab-1"),
             metadata: Some(&metadata),
         },
     )
@@ -132,6 +133,243 @@ fn task_run_observation_records_wait_reason_and_event_metadata() {
     assert_eq!(run.status, TaskRunStatus::WaitingForUser);
     assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AskUserQuestion));
     assert_eq!(run.provider_session_id.as_deref(), Some("provider-session"));
+    assert_eq!(run.terminal_tab_id.as_deref(), Some("tab-1"));
+}
+
+#[test]
+fn task_run_observation_keeps_existing_tab_and_session_on_none() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("keep tab")).unwrap();
+    let run = db
+        .start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
+    db.record_task_run_observation(
+        &run.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::Running),
+            wait_reason: None,
+            event_name: Some("SessionStart"),
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: Some("sess-1"),
+            terminal_tab_id: Some("tab-1"),
+            metadata: None,
+        },
+    )
+    .unwrap();
+    db.record_task_run_observation(
+        &run.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::Stopped),
+            wait_reason: None,
+            event_name: Some("Stop"),
+            at: "2026-06-02T00:00:01.000Z",
+            provider_session_id: None,
+            terminal_tab_id: None,
+            metadata: None,
+        },
+    )
+    .unwrap();
+
+    let run = db.get_task_run(&run.id).unwrap().unwrap();
+    assert_eq!(run.provider_session_id.as_deref(), Some("sess-1"));
+    assert_eq!(run.terminal_tab_id.as_deref(), Some("tab-1"));
+}
+
+#[test]
+fn find_task_run_by_terminal_tab_returns_latest_observed_run_in_tab() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("tab lookup")).unwrap();
+    let observe = |db: &mut SqliteStore, run_id: &str, session: &str, at: &str| {
+        db.record_task_run_observation(
+            run_id,
+            TaskRunObservation {
+                status: Some(TaskRunStatus::Running),
+                wait_reason: None,
+                event_name: Some("SessionStart"),
+                at,
+                provider_session_id: Some(session),
+                terminal_tab_id: Some("tab-1"),
+                metadata: None,
+            },
+        )
+        .unwrap();
+    };
+    let new_run = NewTaskRun {
+        task_id: task.id.clone(),
+        agent: None,
+        branch: None,
+        worktree_path: None,
+    };
+    let first = db.start_task_run(new_run.clone()).unwrap();
+    observe(&mut db, &first.id, "sess-1", "2026-06-02T00:00:00.000Z");
+    let second = db.start_task_run(new_run).unwrap();
+    observe(&mut db, &second.id, "sess-2", "2026-06-02T00:00:00.000Z");
+
+    let found = db.find_task_run_by_terminal_tab("tab-1").unwrap().unwrap();
+    assert_eq!(found.id, second.id);
+    assert!(db.find_task_run_by_terminal_tab("tab-x").unwrap().is_none());
+
+    // Resuming the older run's session in the tab makes it the latest observed there.
+    observe(&mut db, &first.id, "sess-1", "2026-06-02T00:00:05.000Z");
+    let found = db.find_task_run_by_terminal_tab("tab-1").unwrap().unwrap();
+    assert_eq!(found.id, first.id);
+}
+
+#[test]
+fn start_task_run_never_reopens_a_done_task() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("done stays done")).unwrap();
+    db.update_task_status(&task.id, TaskStatus::Done).unwrap();
+
+    db.start_task_run(NewTaskRun {
+        task_id: task.id.clone(),
+        agent: None,
+        branch: None,
+        worktree_path: None,
+    })
+    .unwrap();
+
+    assert_eq!(
+        db.get_task(&task.id).unwrap().unwrap().status,
+        TaskStatus::Done
+    );
+}
+
+#[test]
+fn find_task_run_by_session_is_scoped_to_task() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task_a = db.insert_task(dev_task("task a")).unwrap();
+    let task_b = db.insert_task(dev_task("task b")).unwrap();
+    let run_a = db
+        .start_task_run(NewTaskRun {
+            task_id: task_a.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
+    db.record_task_run_observation(
+        &run_a.id,
+        TaskRunObservation {
+            status: None,
+            wait_reason: None,
+            event_name: Some("SessionStart"),
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: Some("sess-shared"),
+            terminal_tab_id: None,
+            metadata: None,
+        },
+    )
+    .unwrap();
+
+    let found = db
+        .find_task_run_by_session(&task_a.id, "sess-shared")
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.id, run_a.id);
+    assert!(db
+        .find_task_run_by_session(&task_b.id, "sess-shared")
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn task_summaries_count_side_runs_excluding_primary_and_sessionless_failures() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("side runs")).unwrap();
+    let bare_task = db.insert_task(dev_task("no runs")).unwrap();
+    let new_run = |task_id: &str| NewTaskRun {
+        task_id: task_id.to_string(),
+        agent: None,
+        branch: None,
+        worktree_path: None,
+    };
+    let observe = |db: &mut SqliteStore, run_id: &str, status: TaskRunStatus, session: &str| {
+        db.record_task_run_observation(
+            run_id,
+            TaskRunObservation {
+                status: Some(status),
+                wait_reason: None,
+                event_name: None,
+                at: "2026-06-02T00:00:00.000Z",
+                provider_session_id: Some(session),
+                terminal_tab_id: None,
+                metadata: None,
+            },
+        )
+        .unwrap();
+    };
+
+    let primary = db.start_task_run(new_run(&task.id)).unwrap();
+    observe(&mut db, &primary.id, TaskRunStatus::Running, "sess-main");
+    db.set_primary_task_run(&task.id, &primary.id).unwrap();
+
+    let side_running = db.start_task_run(new_run(&task.id)).unwrap();
+    observe(&mut db, &side_running.id, TaskRunStatus::Running, "sess-2");
+    let side_waiting = db.start_task_run(new_run(&task.id)).unwrap();
+    observe(
+        &mut db,
+        &side_waiting.id,
+        TaskRunStatus::WaitingForUser,
+        "sess-3",
+    );
+    let side_failed = db.start_task_run(new_run(&task.id)).unwrap();
+    observe(&mut db, &side_failed.id, TaskRunStatus::Failed, "sess-4");
+    // A failed run with no Claude session is an old prepare failure, not a side run.
+    let prepare_failed = db.start_task_run(new_run(&task.id)).unwrap();
+    db.finish_task_run(&prepare_failed.id, &task.id, TaskRunStatus::Failed)
+        .unwrap();
+
+    let summaries = db.list_task_summaries(None, None).unwrap();
+    let summary = summaries.iter().find(|s| s.id == task.id).unwrap();
+    assert_eq!(summary.task_run_status, Some(TaskRunStatus::Running));
+    assert_eq!(summary.side_runs_running, 1);
+    assert_eq!(summary.side_runs_waiting_for_user, 1);
+    assert_eq!(summary.side_runs_failed, 1);
+
+    let bare = summaries.iter().find(|s| s.id == bare_task.id).unwrap();
+    assert_eq!(bare.side_runs_running, 0);
+    assert_eq!(bare.side_runs_waiting_for_user, 0);
+    assert_eq!(bare.side_runs_failed, 0);
+}
+
+#[test]
+fn task_summaries_fall_back_to_latest_run_when_primary_pointer_dangles() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("dangling primary")).unwrap();
+    let run = db
+        .start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
+    db.record_task_run_observation(
+        &run.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::Running),
+            wait_reason: None,
+            event_name: Some("SessionStart"),
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: Some("sess-1"),
+            terminal_tab_id: None,
+            metadata: None,
+        },
+    )
+    .unwrap();
+    db.set_primary_task_run(&task.id, "run-999").unwrap();
+
+    let summaries = db.list_task_summaries(None, None).unwrap();
+    let summary = summaries.iter().find(|s| s.id == task.id).unwrap();
+    // The task's only run is its de-facto main run, not a side run.
+    assert_eq!(summary.task_run_status, Some(TaskRunStatus::Running));
+    assert_eq!(summary.side_runs_running, 0);
 }
 
 #[test]
