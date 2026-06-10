@@ -102,6 +102,18 @@ export function useShortcuts() {
         return;
       }
 
+      // Stays above the editable guard: the terminal focuses xterm's hidden textarea.
+      if (e.ctrlKey && e.key === "Tab") {
+        e.preventDefault();
+        const direction = e.shiftKey ? "left" : "right";
+        if (isWorkBench) {
+          cycleTerminalTab(direction);
+        } else {
+          cycleTab(direction);
+        }
+        return;
+      }
+
       if (e.ctrlKey && e.key === "t") {
         e.preventDefault();
         prefixRef.current = true;

@@ -166,6 +166,7 @@ export function useTerminal(
       if (store.get(prefixActiveAtom)) return false;
       if (e.altKey) return false;
       if (e.ctrlKey && e.key === "t") return false;
+      if (e.ctrlKey && e.key === "Tab") return false;
       if (e.metaKey && /^[0-4]$/.test(e.key)) return false;
       if (e.metaKey && e.type === "keydown") {
         if (e.key === "=" || e.key === "+") {
