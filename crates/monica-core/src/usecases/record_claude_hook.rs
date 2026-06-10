@@ -2,8 +2,8 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use crate::domain::{
-    is_safe_task_run_id, should_ignore_claude_event, transition_for_claude_event,
-    transition_is_protected, Agent,
+    is_safe_task_run_id, is_session_starting_event, should_ignore_claude_event,
+    transition_for_claude_event, transition_is_protected, Agent,
 };
 use crate::interfaces::{Clock, EventRepository, RunArtifacts, TaskRepository, TaskRunRepository};
 use crate::{NewTaskRun, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus};
@@ -75,9 +75,9 @@ where
         repos,
         ctx.task_id,
         safe_task_run_id,
+        unsafe_task_run_id,
         provider_session_id,
         event_name.as_deref(),
-        parsed.as_ref(),
     )?;
     let run_row = resolved.run;
     let task_run_linked = run_row.is_some();
@@ -87,7 +87,7 @@ where
         .map(|run| run.task_id.as_str())
         .or(ctx.task_id);
     let task_found = match linked_task_id {
-        Some(id) if run_row.is_some() => repos.get_task(id)?.is_some() || run_row.is_some(),
+        Some(_) if run_row.is_some() => true,
         Some(id) => repos.get_task(id)?.is_some(),
         None => false,
     };
@@ -177,21 +177,18 @@ impl ResolvedRun {
     }
 }
 
-/// Session-starting events may create a run when nothing else matches; anything else (a stray
-/// `Stop` from an untracked session, a broken payload) must never grow the run set.
-fn is_session_starting_event(event_name: Option<&str>) -> bool {
-    matches!(event_name, Some("SessionStart" | "UserPromptSubmit"))
-}
-
 /// Resolve which task run a hook belongs to. Rules are evaluated top-down, first match wins:
 ///
 /// 1. An explicit run id (wrapper launch) always wins; no session lookup.
 /// 2. A run already carrying this Claude session id is followed — this covers both a claimed
 ///    primary and an existing side run.
-/// 3. A still-`Prepared` primary run is claimed (the Run-button flow before its first hook).
+/// 3. A still-`Prepared` primary run is claimed by a session-starting event (the Run-button
+///    flow before its first hook, or plain `claude` consuming a Prepare); stray mid-session
+///    events from an unknown session must not take it over.
 /// 4. Otherwise a session-starting event from a live task lazily creates a run: it becomes the
 ///    primary when none is set (or the pointer dangles), and a side run when a primary already
-///    exists — a run actively driven by another session is never stolen.
+///    exists — a run actively driven by another session is never stolen. A rejected explicit
+///    run id means a wrapper launch with corrupted env, not a plain session; it never creates.
 ///
 /// TODO: two near-simultaneous SessionStarts can both pass rule 3 (or both reach rule 4) before
 /// either observation lands; an atomic `UPDATE ... WHERE status = 'prepared'` claim would close
@@ -200,9 +197,9 @@ fn resolve_hook_run<R>(
     repos: &mut R,
     task_id: Option<&str>,
     explicit_run_id: Option<&str>,
+    explicit_run_id_rejected: bool,
     provider_session_id: Option<&str>,
     event_name: Option<&str>,
-    payload: Option<&Value>,
 ) -> Result<ResolvedRun>
 where
     R: TaskRepository + TaskRunRepository,
@@ -228,26 +225,26 @@ where
         None => None,
     };
     if let Some(run) = &primary_run {
-        if run.status == TaskRunStatus::Prepared {
+        if run.status == TaskRunStatus::Prepared && is_session_starting_event(event_name) {
             return Ok(ResolvedRun::linked(primary_run));
         }
     }
 
     if provider_session_id.is_none()
         || !is_session_starting_event(event_name)
+        || explicit_run_id_rejected
         || task.status == TaskStatus::Done
     {
         return Ok(ResolvedRun::none());
     }
 
-    let cwd = payload
-        .and_then(|value| value.get("cwd"))
-        .and_then(Value::as_str);
+    // The session's cwd is arbitrary user space (often the project's main checkout, where
+    // delete-time worktree cleanup would rip it); it stays in metadata_json, never here.
     let run = repos.start_task_run(NewTaskRun {
         task_id: task_id.to_string(),
         agent: Some(Agent::Claude),
         branch: None,
-        worktree_path: cwd.map(str::to_owned),
+        worktree_path: None,
     })?;
     if primary_run.is_none() {
         repos.set_primary_task_run(task_id, &run.id)?;

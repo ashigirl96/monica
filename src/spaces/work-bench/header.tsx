@@ -36,6 +36,8 @@ export function WorkBenchHeader() {
 
   // Hook-driven primary claims land in the DB without a Tauri event, so the
   // indicator follows the same listen-plus-poll pattern as the Workboard.
+  // taskId is a dep because the restore flow attaches it to an already-rendered
+  // runspace; without it the first refresh no-ops and the dot waits for the poll.
   useEffect(() => {
     void refreshPrimaryTab();
     const unlisten = onTaskRunStatusChanged(() => {
@@ -48,7 +50,7 @@ export function WorkBenchHeader() {
       clearInterval(timer);
       unlisten.then((fn) => fn());
     };
-  }, [refreshPrimaryTab, rs?.id]);
+  }, [refreshPrimaryTab, rs?.id, rs?.taskId]);
 
   if (!rs) return null;
 

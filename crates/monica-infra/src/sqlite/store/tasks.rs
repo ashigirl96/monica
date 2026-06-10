@@ -149,14 +149,14 @@ impl SqliteStore {
 	               latest_run.branch AS branch,
                (SELECT COUNT(*) FROM task_runs r
                  WHERE r.task_id = t.id AND r.id IS NOT latest_run.id
-                   AND r.status = 'running') AS side_runs_running,
+                   AND r.status = ?2) AS side_runs_running,
                (SELECT COUNT(*) FROM task_runs r
                  WHERE r.task_id = t.id AND r.id IS NOT latest_run.id
-                   AND r.status = 'waiting_for_user') AS side_runs_waiting_for_user,
+                   AND r.status = ?3) AS side_runs_waiting_for_user,
                -- a run without a Claude session is an old prepare failure, not a side run
                (SELECT COUNT(*) FROM task_runs r
                  WHERE r.task_id = t.id AND r.id IS NOT latest_run.id
-                   AND r.status = 'failed'
+                   AND r.status = ?4
                    AND r.provider_session_id IS NOT NULL) AS side_runs_failed
 	             FROM tasks t
              LEFT JOIN projects project
@@ -169,9 +169,12 @@ impl SqliteStore {
                  ORDER BY er.id DESC
                  LIMIT 1
                )
+            -- resolve the primary pointer through an existence check: a dangling pointer must
+            -- fall back to the latest run instead of matching nothing (which would also count
+            -- every run as a side run via `r.id IS NOT latest_run.id`)
             LEFT JOIN task_runs latest_run
                ON latest_run.id = COALESCE(
-                 t.primary_task_run_id,
+                 (SELECT id FROM task_runs WHERE id = t.primary_task_run_id),
                  (
                    SELECT r.id
                    FROM task_runs r
@@ -185,7 +188,12 @@ impl SqliteStore {
 	               AND (?1 IS NULL OR coalesce(project.repo, issue_ref.repo, t.project_id) = ?1)
 	             ORDER BY t.created_at, t.id",
         )?;
-        let mut rows = stmt.query(params![project])?;
+        let mut rows = stmt.query(params![
+            project,
+            TaskRunStatus::Running.as_str(),
+            TaskRunStatus::WaitingForUser.as_str(),
+            TaskRunStatus::Failed.as_str()
+        ])?;
         let mut items = Vec::new();
         while let Some(row) = rows.next()? {
             let task_status: TaskStatus = row.get::<_, String>("task_status")?.parse()?;

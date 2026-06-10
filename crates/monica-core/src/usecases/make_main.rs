@@ -11,6 +11,9 @@ pub enum MakeMainOutcome {
         status: TaskRunStatus,
     },
     AlreadyMain,
+    /// The current primary is mid-prepare; displacing it would orphan the prepared run and break
+    /// `prepare_claude_for_run`'s prepared-primary contract.
+    PrimaryBusy,
     NotFound,
 }
 
@@ -29,6 +32,16 @@ where
     };
     if task.primary_task_run_id.as_deref() == Some(run.id.as_str()) {
         return Ok(MakeMainOutcome::AlreadyMain);
+    }
+    if let Some(current_id) = task.primary_task_run_id.as_deref() {
+        if let Some(current) = repos.get_task_run(current_id)? {
+            if matches!(
+                current.status,
+                TaskRunStatus::SettingUp | TaskRunStatus::Prepared
+            ) {
+                return Ok(MakeMainOutcome::PrimaryBusy);
+            }
+        }
     }
     repos.set_primary_task_run(&task.id, &run.id)?;
     Ok(MakeMainOutcome::Changed {

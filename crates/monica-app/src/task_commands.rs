@@ -144,8 +144,8 @@ pub fn prepare_task(app: AppHandle, task_id: String) -> Result<PrepareTaskResult
 }
 
 /// Promote the run living in the given Workbench tab to its task's Main Run. Returns whether the
-/// primary actually changed; `false` covers both "no run in this tab" and "already main" so the
-/// shortcut can stay a silent no-op.
+/// primary actually changed; `false` covers "no run in this tab", "already main" and "primary is
+/// mid-prepare" so the shortcut can stay a silent no-op.
 #[tauri::command]
 #[specta::specta]
 pub fn make_main_task_run(app: AppHandle, tab_id: String) -> Result<bool, String> {
@@ -166,9 +166,9 @@ pub fn make_main_task_run(app: AppHandle, tab_id: String) -> Result<bool, String
             .emit(&app);
             Ok(true)
         }
-        monica_core::MakeMainOutcome::AlreadyMain | monica_core::MakeMainOutcome::NotFound => {
-            Ok(false)
-        }
+        monica_core::MakeMainOutcome::AlreadyMain
+        | monica_core::MakeMainOutcome::PrimaryBusy
+        | monica_core::MakeMainOutcome::NotFound => Ok(false),
     }
 }
 

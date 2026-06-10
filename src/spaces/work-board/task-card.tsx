@@ -158,15 +158,16 @@ function SideRunBadges({ task }: { task: TaskSummaryRow }) {
     {
       count: task.side_runs_waiting_for_user,
       title: (n: number) => `${n} side run${n > 1 ? "s" : ""} waiting for you`,
-      className: "bg-amber-500/15 text-amber-400",
-      dot: "bg-amber-400",
+      className: STATUS_BADGE_STYLES.waiting_for_user,
+      dot: STATUS_COLORS.waiting_for_user,
     },
     {
       count: task.side_runs_failed,
       title: (n: number) => `${n} side run${n > 1 ? "s" : ""} failed`,
-      className: "bg-red-500/15 text-red-400",
-      dot: "bg-red-400",
+      className: STATUS_BADGE_STYLES.failed,
+      dot: STATUS_COLORS.failed,
     },
+    // running stays deliberately subdued: a healthy side run is not an attention item
     {
       count: task.side_runs_running,
       title: (n: number) => `${n} side run${n > 1 ? "s" : ""} running`,

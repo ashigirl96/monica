@@ -279,10 +279,8 @@ export function useTerminal(
       aliveSessions.add(options.tabId);
       // A launch intent carries the complete shell env (runspace env + run ids),
       // so it supersedes the runspace env rather than being merged with it.
-      const baseEnv = optionsRef.current.launch?.env ?? optionsRef.current.env ?? [];
-      // The hook chain (shell → claude → monica hook claude) inherits this, letting
-      // hooks stamp the tab onto the TaskRun for tab-based Make Main.
-      const env: [string, string][] = [...baseEnv, ["MONICA_TERMINAL_TAB_ID", options.tabId]];
+      // MONICA_TERMINAL_TAB_ID is injected backend-side in pty_spawn.
+      const env = optionsRef.current.launch?.env ?? optionsRef.current.env;
       const initialCommand = optionsRef.current.launch?.initialCommand;
       ptySpawn(options.tabId, options.cwd, term.rows, term.cols, env)
         .then(() => {

@@ -9,6 +9,7 @@ import {
   runTask,
   makeMainTaskRun,
   onTaskRunStatusChanged,
+  taskShellEnv,
   type TaskSummaryRow,
   type BoardColumn,
   type ProjectEntry,
@@ -103,8 +104,16 @@ export const PREPARE_ELIGIBLE: Set<DisplayStatus> = new Set([
 
 // prepare_task always emits task-run:status-changed from its background thread
 // (on both success and failure), so an event listener plus a timeout suffices.
-function waitForPreparedOrFailed(taskId: string): { promise: Promise<void>; cancel: () => void } {
+// Other emitters reuse the same event for the same task (e.g. cmd+g re-emits the
+// promoted run's current status), so once the prepared run's id is known the
+// listener must match on it, not just the task.
+function waitForPreparedOrFailed(taskId: string): {
+  promise: Promise<void>;
+  cancel: () => void;
+  bindRun: (runId: string) => void;
+} {
   let settled = false;
+  let runId: string | null = null;
   let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
   let unlistenPromise: Promise<() => void> | undefined;
 
@@ -117,6 +126,7 @@ function waitForPreparedOrFailed(taskId: string): { promise: Promise<void>; canc
   const promise = new Promise<void>((resolve, reject) => {
     unlistenPromise = onTaskRunStatusChanged((payload) => {
       if (settled || payload.task_id !== taskId) return;
+      if (runId && payload.task_run_id !== runId) return;
       if (payload.status === "prepared") {
         cleanup();
         resolve();
@@ -134,7 +144,13 @@ function waitForPreparedOrFailed(taskId: string): { promise: Promise<void>; canc
     }, 120_000);
   });
 
-  return { promise, cancel: cleanup };
+  return {
+    promise,
+    cancel: cleanup,
+    bindRun: (id) => {
+      runId = id;
+    },
+  };
 }
 
 const runTaskInFlight = new Set<string>();
@@ -151,7 +167,8 @@ export const runTaskAtom = atom(null, async (_get, set, taskId: string) => {
     if (task && PREPARE_ELIGIBLE.has(task.status)) {
       const waiter = waitForPreparedOrFailed(taskId);
       try {
-        await prepareTask(taskId);
+        const prep = await prepareTask(taskId);
+        waiter.bindRun(prep.task_run_id);
       } catch (e) {
         waiter.cancel();
         throw e;
@@ -161,10 +178,16 @@ export const runTaskAtom = atom(null, async (_get, set, taskId: string) => {
 
     const launch = await runTask(taskId);
 
+    // The launch env (with run ids) is consumed by the first tab only; the runspace
+    // needs the plain task shell env so later tabs still get the Monica context +
+    // claude wrapper and plain `claude` keeps being tracked as a side run.
+    const shellEnv = await taskShellEnv(launch.task_id).catch(() => [] as [string, string][]);
+
     await set(createTaskRunspaceAtom, {
       runspaceId: launch.runspace_id,
       taskId: launch.task_id,
       cwd: launch.cwd,
+      env: shellEnv.length > 0 ? shellEnv : undefined,
       launch: {
         env: launch.env,
         initialCommand: launch.initial_command,

@@ -109,11 +109,22 @@ impl SqliteStore {
         let affected = tx.execute(
             "UPDATE tasks
                SET status = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-             WHERE id = ?2 AND deleted_at IS NULL",
-            params![TaskStatus::InProgress.as_str(), new.task_id],
+             WHERE id = ?2 AND deleted_at IS NULL AND status != ?3",
+            params![
+                TaskStatus::InProgress.as_str(),
+                new.task_id,
+                TaskStatus::Done.as_str()
+            ],
         )?;
         if affected == 0 {
-            return Err(anyhow!("task not found: {}", new.task_id));
+            let exists: i64 = tx.query_row(
+                "SELECT count(*) FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
+                params![new.task_id],
+                |row| row.get(0),
+            )?;
+            if exists == 0 {
+                return Err(anyhow!("task not found: {}", new.task_id));
+            }
         }
 
         let run = {
@@ -223,29 +234,35 @@ impl SqliteStore {
         task_id: &str,
         provider_session_id: &str,
     ) -> Result<Option<TaskRun>> {
-        let mut stmt = self.conn().prepare(&format!(
-            "SELECT {TASK_RUN_COLUMNS} FROM task_runs
-             WHERE task_id = ?1 AND provider_session_id = ?2
-             ORDER BY created_at DESC, CAST(SUBSTR(id, 5) AS INTEGER) DESC
-             LIMIT 1"
-        ))?;
-        let mut rows = stmt.query(params![task_id, provider_session_id])?;
-        match rows.next()? {
-            Some(row) => Ok(Some(crate::sqlite::row::task_run_from_row(row)?)),
-            None => Ok(None),
-        }
+        self.find_latest_observed_task_run(
+            "task_id = ?1 AND provider_session_id = ?2",
+            params![task_id, provider_session_id],
+        )
     }
 
     /// Latest run whose Claude session was observed in the given Workbench tab. Restarting
-    /// `claude` in the same tab leaves stale tab ids on older runs, so newest wins.
+    /// `claude` in the same tab leaves stale tab ids on older runs, so the most recently
+    /// observed run wins.
     pub fn find_task_run_by_terminal_tab(&self, terminal_tab_id: &str) -> Result<Option<TaskRun>> {
+        self.find_latest_observed_task_run("terminal_tab_id = ?1", params![terminal_tab_id])
+    }
+
+    /// Sessions and tabs are pinned to runs by hook observations, so "latest" means the most
+    /// recent observation, not creation order: resuming an old session in a tab must beat a
+    /// newer-created run whose stamp is stale.
+    fn find_latest_observed_task_run(
+        &self,
+        filter: &str,
+        params: &[&dyn rusqlite::ToSql],
+    ) -> Result<Option<TaskRun>> {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {TASK_RUN_COLUMNS} FROM task_runs
-             WHERE terminal_tab_id = ?1
-             ORDER BY created_at DESC, CAST(SUBSTR(id, 5) AS INTEGER) DESC
+             WHERE {filter}
+             ORDER BY last_event_at DESC, created_at DESC,
+                      CAST(SUBSTR(id, 5) AS INTEGER) DESC
              LIMIT 1"
         ))?;
-        let mut rows = stmt.query(params![terminal_tab_id])?;
+        let mut rows = stmt.query(params)?;
         match rows.next()? {
             Some(row) => Ok(Some(crate::sqlite::row::task_run_from_row(row)?)),
             None => Ok(None),

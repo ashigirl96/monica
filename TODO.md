@@ -49,8 +49,8 @@ Acceptance:
 Acceptance:
 
 - [x] side/future run が追加されても、Main Run がある限り TaskCard の列は変わらない。
-- [ ] Main Run を切り替えると TaskCard の表示 status / branch が切り替わる。
-  - backend の `set_primary_task_run` は実装済みだが Tauri command 未公開のため、切り替え手段がまだない（MVP 3 で対応）。
+- [x] Main Run を切り替えると TaskCard の表示 status / branch が切り替わる。
+  - MVP 3 の `make_main_task_run` (cmd+g) で切り替え可能。
 
 ### 0-3. `Prepare` ボタンと非同期実行 flow を追加する
 
