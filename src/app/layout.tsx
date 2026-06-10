@@ -10,6 +10,7 @@ import {
 import { getSpaceConfig, spaces } from "@/spaces/registry";
 import { SpaceNav } from "@/components/space-nav";
 import { ResizeHandle } from "@/components/resize-handle";
+import { Toaster } from "@/components/toaster";
 import { useShortcuts } from "@/hooks/use-shortcuts";
 import { TRAFFIC_LIGHT_ZONE_HEIGHT, TRAFFIC_LIGHT_ZONE_WIDTH } from "@/lib/layout";
 import { cn } from "@/lib/utils";
@@ -113,6 +114,8 @@ export function AppLayout() {
           })}
         </div>
       </div>
+
+      <Toaster />
     </div>
   );
 }

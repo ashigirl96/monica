@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { projectsAtom, selectedProjectAtom, trackIssueAtom } from "@/stores/workboard";
+import { pushErrorToast } from "@/stores/toast";
 import { cn } from "@/lib/utils";
 
 function parseIssueInput(raw: string): { repo: string; number: number } | null {
@@ -40,7 +41,7 @@ function TrackIssueButton() {
       setValue("");
       setOpen(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to track issue");
+      pushErrorToast(e instanceof Error ? e.message : "Failed to track issue");
     } finally {
       setLoading(false);
     }
