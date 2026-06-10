@@ -18,9 +18,9 @@ pub use github::{
     PullRequestSyncCandidate, PullRequestSyncResult, PullRequestSyncStatus,
 };
 pub use lifecycle::{
-    is_safe_task_run_id, is_session_starting_event, should_ignore_claude_event,
-    status_for_claude_event, transition_for_claude_event, transition_is_protected,
-    wait_reason_for_tool, HookTransition,
+    is_resume_session_start, is_safe_task_run_id, is_session_starting_event,
+    should_ignore_claude_event, status_for_claude_event, transition_for_claude_event,
+    transition_is_protected, wait_reason_for_tool, HookTransition,
 };
 pub use project::{PermissionMode, Project, Provider};
 pub use refs::{parse_issue_ref, parse_owner_repo};

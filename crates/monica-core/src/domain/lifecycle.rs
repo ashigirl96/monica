@@ -71,6 +71,18 @@ pub fn is_session_starting_event(event_name: Option<&str>) -> bool {
     matches!(event_name, Some("SessionStart" | "UserPromptSubmit"))
 }
 
+/// A resumed session's `SessionStart` still carries the *source* session's id — under
+/// `--fork-session` the new id only appears on the first prompt. Letting it move bindings would
+/// hand a fork the source run's tab, so tab claims wait for the first activity event, which
+/// proves where the session actually lives.
+pub fn is_resume_session_start(event_name: Option<&str>, payload: Option<&Value>) -> bool {
+    event_name == Some("SessionStart")
+        && payload
+            .and_then(|value| value.get("source"))
+            .and_then(Value::as_str)
+            == Some("resume")
+}
+
 pub fn should_ignore_claude_event(event_name: Option<&str>, payload: Option<&Value>) -> bool {
     matches!(event_name, Some("PreToolUse" | "PostToolUse"))
         && payload
@@ -178,6 +190,23 @@ mod tests {
             TaskRunStatus::WaitingForUser,
             TaskRunStatus::Running
         ));
+    }
+
+    #[test]
+    fn resume_session_start_requires_both_event_and_source() {
+        assert!(is_resume_session_start(
+            Some("SessionStart"),
+            Some(&json!({"source": "resume"}))
+        ));
+        assert!(!is_resume_session_start(
+            Some("SessionStart"),
+            Some(&json!({"source": "startup"}))
+        ));
+        assert!(!is_resume_session_start(
+            Some("UserPromptSubmit"),
+            Some(&json!({"source": "resume"}))
+        ));
+        assert!(!is_resume_session_start(Some("SessionStart"), None));
     }
 
     #[test]

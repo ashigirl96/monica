@@ -736,6 +736,18 @@ fn hook_ctx<'a>(task_id: &'a str, task_run_id: Option<&'a str>) -> HookContext<'
     }
 }
 
+fn hook_ctx_in_tab<'a>(
+    task_id: &'a str,
+    task_run_id: Option<&'a str>,
+    terminal_tab_id: &'a str,
+) -> HookContext<'a> {
+    HookContext {
+        task_id: Some(task_id),
+        task_run_id,
+        terminal_tab_id: Some(terminal_tab_id),
+    }
+}
+
 /// A task with a primary run claimed by `sess-1` (the post-Run-button steady state).
 fn task_with_running_primary(repos: &mut FakeRepos, artifacts: &FakeArtifacts) -> (String, String) {
     let task_id = repos.insert_task_for_run(None);
@@ -919,6 +931,95 @@ fn record_claude_hook_creates_side_run_instead_of_stealing_active_primary() {
     assert_eq!(side.agent, Some(Agent::Claude));
     // the session's cwd must never become a worktree_path (delete-time cleanup rips those)
     assert_eq!(side.worktree_path, None);
+}
+
+#[test]
+fn record_claude_hook_fork_session_start_does_not_steal_primary_tab() {
+    let mut repos = FakeRepos::default();
+    let artifacts = FakeArtifacts::default();
+    let (task_id, primary_id) = task_with_running_primary(&mut repos, &artifacts);
+    record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx_in_tab(&task_id, Some(&primary_id), "tab-main"),
+        r#"{"hook_event_name":"UserPromptSubmit","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+
+    // A fork's SessionStart fires from the new tab while still carrying the source session's id.
+    let report = record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx_in_tab(&task_id, None, "tab-fork"),
+        r#"{"hook_event_name":"SessionStart","session_id":"sess-1","source":"resume"}"#,
+    )
+    .unwrap();
+    assert!(report.task_run_linked);
+    assert!(!report.task_run_created);
+    let primary = repos.get_task_run(&primary_id).unwrap().unwrap();
+    assert_eq!(primary.terminal_tab_id.as_deref(), Some("tab-main"));
+
+    // The fork's first prompt arrives under its own id and becomes a side run in the fork tab.
+    let report = record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx_in_tab(&task_id, None, "tab-fork"),
+        r#"{"hook_event_name":"UserPromptSubmit","session_id":"sess-2"}"#,
+    )
+    .unwrap();
+    assert!(report.task_run_created);
+    let side = repos
+        .find_task_run_by_session(&task_id, "sess-2")
+        .unwrap()
+        .unwrap();
+    assert_eq!(side.terminal_tab_id.as_deref(), Some("tab-fork"));
+    let primary = repos.get_task_run(&primary_id).unwrap().unwrap();
+    assert_eq!(primary.terminal_tab_id.as_deref(), Some("tab-main"));
+    assert_eq!(
+        repos
+            .find_task_run_by_terminal_tab("tab-main")
+            .unwrap()
+            .unwrap()
+            .id,
+        primary_id
+    );
+}
+
+#[test]
+fn record_claude_hook_resumed_session_rebinds_tab_on_first_prompt() {
+    let mut repos = FakeRepos::default();
+    let artifacts = FakeArtifacts::default();
+    let (task_id, primary_id) = task_with_running_primary(&mut repos, &artifacts);
+    record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx_in_tab(&task_id, Some(&primary_id), "tab-main"),
+        r#"{"hook_event_name":"UserPromptSubmit","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+
+    // Resuming in another tab proves nothing yet (it could be a fork)...
+    record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx_in_tab(&task_id, None, "tab-new"),
+        r#"{"hook_event_name":"SessionStart","session_id":"sess-1","source":"resume"}"#,
+    )
+    .unwrap();
+    let primary = repos.get_task_run(&primary_id).unwrap().unwrap();
+    assert_eq!(primary.terminal_tab_id.as_deref(), Some("tab-main"));
+
+    // ...the first prompt under the same session id is what moves the binding.
+    let report = record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx_in_tab(&task_id, None, "tab-new"),
+        r#"{"hook_event_name":"UserPromptSubmit","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    assert!(!report.task_run_created);
+    let primary = repos.get_task_run(&primary_id).unwrap().unwrap();
+    assert_eq!(primary.terminal_tab_id.as_deref(), Some("tab-new"));
 }
 
 #[test]
