@@ -10,6 +10,7 @@ import {
   cycleRunspaceAtom,
 } from "@/stores/terminal";
 import { promoteActiveTabRunAtom } from "@/stores/workboard";
+import { isEditable } from "@/lib/keyboard";
 
 const META_KEY_SPACE_MAP: Record<string, SpaceId> = {
   "1": "dashboard",
@@ -19,13 +20,6 @@ const META_KEY_SPACE_MAP: Record<string, SpaceId> = {
 };
 
 const PREFIX_TIMEOUT = 2000;
-
-const EDITABLE_SELECTOR = "input, textarea, select, [contenteditable='true'], [contenteditable='']";
-
-function isEditable(e: KeyboardEvent): boolean {
-  const el = e.target;
-  return el instanceof HTMLElement && el.closest(EDITABLE_SELECTOR) !== null;
-}
 
 export function useShortcuts() {
   const activeSpace = useAtomValue(activeSpaceAtom);

@@ -42,6 +42,8 @@ export const commands = {
     typedError<PrepareTaskResult, string>(__TAURI_INVOKE("prepare_task", { taskId })),
   runTask: (taskId: string) =>
     typedError<RunTaskResult, string>(__TAURI_INVOKE("run_task", { taskId })),
+  deleteTask: (taskId: string) =>
+    typedError<null, string>(__TAURI_INVOKE("delete_task", { taskId })),
   /**
    *  Promote the run living in the given Workbench tab to its task's Main Run. Returns whether the
    *  primary actually changed; `false` covers "no run in this tab", "already main" and "primary is

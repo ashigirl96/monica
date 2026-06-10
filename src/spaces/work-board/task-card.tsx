@@ -2,7 +2,13 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSetAtom } from "jotai";
 import type { DisplayStatus, TaskSummaryRow } from "@/commands/task";
 import { cn } from "@/lib/utils";
-import { openBenchAtom, prepareTaskAtom, runTaskAtom, PREPARE_ELIGIBLE } from "@/stores/workboard";
+import {
+  openBenchAtom,
+  prepareTaskAtom,
+  runTaskAtom,
+  PREPARE_ELIGIBLE,
+  RUN_ELIGIBLE,
+} from "@/stores/workboard";
 
 const STATUS_COLORS: Record<DisplayStatus, string> = {
   inbox: "bg-muted-foreground/40",
@@ -125,8 +131,6 @@ function issueUrl(project: string | null, number: number): string | null {
   return `https://github.com/${project}/issues/${number}`;
 }
 
-const RUN_ELIGIBLE: Set<DisplayStatus> = new Set([...PREPARE_ELIGIBLE, "prepared"]);
-
 function RunIcon() {
   return (
     <svg className="size-3" viewBox="0 0 24 24" fill="currentColor" stroke="none">
@@ -195,7 +199,7 @@ function SideRunBadges({ task }: { task: TaskSummaryRow }) {
   );
 }
 
-export function TaskCard({ task }: { task: TaskSummaryRow }) {
+export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boolean }) {
   const doOpenBench = useSetAtom(openBenchAtom);
   const doPrepareTask = useSetAtom(prepareTaskAtom);
   const doRunTask = useSetAtom(runTaskAtom);
@@ -208,13 +212,23 @@ export function TaskCard({ task }: { task: TaskSummaryRow }) {
 
   return (
     <div
+      data-task-id={task.id}
+      data-focused={focused || undefined}
+      tabIndex={-1}
       className={cn(
-        "group relative flex overflow-hidden rounded-lg border border-border bg-card transition-colors",
+        "group relative flex overflow-hidden rounded-lg border border-border bg-card transition-colors outline-none",
         isActive && "border-emerald-500/20",
         "hover:border-muted-foreground/30",
+        focused && "border-muted-foreground/30 ring-1 ring-foreground/40",
       )}
     >
-      <div className={cn("w-1 shrink-0 rounded-l-lg", STATUS_COLORS[task.status])} />
+      <div
+        className={cn(
+          "shrink-0 rounded-l-lg transition-[width]",
+          focused ? "w-1.5" : "w-1",
+          STATUS_COLORS[task.status],
+        )}
+      />
 
       <div className="flex min-w-0 flex-1 flex-col gap-1.5 px-3 py-2.5">
         <div className="flex items-start justify-between gap-2">
@@ -281,7 +295,8 @@ export function TaskCard({ task }: { task: TaskSummaryRow }) {
                 onClick={() => doPrepareTask(task.id)}
                 className={cn(
                   "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] transition-opacity",
-                  "text-muted-foreground opacity-0 group-hover:opacity-70 hover:!opacity-100",
+                  "text-muted-foreground hover:!opacity-100",
+                  focused ? "opacity-70" : "opacity-0 group-hover:opacity-70",
                 )}
               >
                 <PrepareIcon />
@@ -294,7 +309,8 @@ export function TaskCard({ task }: { task: TaskSummaryRow }) {
                 onClick={() => doRunTask(task.id)}
                 className={cn(
                   "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] transition-opacity",
-                  "text-emerald-400 opacity-0 group-hover:opacity-70 hover:!opacity-100",
+                  "text-emerald-400 hover:!opacity-100",
+                  focused ? "opacity-70" : "opacity-0 group-hover:opacity-70",
                 )}
               >
                 <RunIcon />

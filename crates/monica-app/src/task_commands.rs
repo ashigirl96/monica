@@ -179,6 +179,21 @@ pub fn primary_tab_id(task_id: String) -> Result<Option<String>, String> {
     monica_core::primary_terminal_tab(&runtime.repositories, &task_id).map_err(|e| e.to_string())
 }
 
+// Worktree removal and branch deletion shell out to git and can take seconds;
+// spawn_blocking keeps that sync work off the async runtime's workers.
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_task(task_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
+        monica_core::delete_issue(&mut runtime.repositories, &runtime.git, &task_id)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn run_task(task_id: String) -> Result<RunTaskResult, String> {
