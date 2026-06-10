@@ -188,6 +188,21 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()> {
+        let affected = self.conn().execute(
+            &format!(
+                "UPDATE task_runs
+                   SET worktree_path = ?1, updated_at = {SET_NOW}
+                 WHERE id = ?2"
+            ),
+            params![worktree_path, task_run_id],
+        )?;
+        if affected == 0 {
+            return Err(anyhow!("task run not found: {task_run_id}"));
+        }
+        Ok(())
+    }
+
     pub fn get_task_run(&self, id: &str) -> Result<Option<TaskRun>> {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {TASK_RUN_COLUMNS} FROM task_runs WHERE id = ?1"

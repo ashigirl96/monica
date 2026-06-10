@@ -44,12 +44,23 @@ function fromBase64(b64: string): Uint8Array {
   return bytes;
 }
 
+const encoder = new TextEncoder();
+
+function writeText(tabId: string, text: string) {
+  ptyWrite(tabId, toBase64(encoder.encode(text)));
+}
+
+import type { TerminalLaunchIntent } from "@/stores/terminal";
+
 type UseTerminalOptions = {
   tabId: string;
   cwd: string;
   active: boolean;
+  env?: [string, string][];
+  launch?: TerminalLaunchIntent;
   onTitleChange?: (title: string) => void;
   onCwdChange?: (cwd: string) => void;
+  onLaunchConsumed?: () => void;
   onExit?: () => void;
 };
 
@@ -107,11 +118,10 @@ export function useTerminal(
     termRef.current = term;
     fitRef.current = fitAddon;
 
-    const encoder = new TextEncoder();
     const cleanups: (() => void)[] = [];
 
     term.onData((data) => {
-      ptyWrite(options.tabId, toBase64(encoder.encode(data)));
+      writeText(options.tabId, data);
     });
 
     term.onBinary((data) => {
@@ -128,7 +138,7 @@ export function useTerminal(
 
     // Kitty keyboard protocol: respond to query (CSI ? u) and absorb push/pop
     term.parser.registerCsiHandler({ final: "u", prefix: "?" }, () => {
-      ptyWrite(options.tabId, toBase64(encoder.encode("\x1b[?1u")));
+      writeText(options.tabId, "\x1b[?1u");
       return true;
     });
     term.parser.registerCsiHandler({ final: "u", prefix: ">" }, () => true);
@@ -149,7 +159,7 @@ export function useTerminal(
     term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
       if (e.shiftKey && e.key === "Enter") {
         if (e.type === "keydown") {
-          ptyWrite(options.tabId, toBase64(encoder.encode("\x1b[13;2u")));
+          writeText(options.tabId, "\x1b[13;2u");
         }
         return false;
       }
@@ -202,7 +212,7 @@ export function useTerminal(
       const col = Math.floor(term.cols / 2);
       const row = Math.floor(term.rows / 2);
       const seq = buildSgrWheelSequence(absLines, down, col, row);
-      ptyWrite(options.tabId, toBase64(encoder.encode(seq)));
+      writeText(options.tabId, seq);
     }
 
     const container = containerRef.current;
@@ -267,10 +277,23 @@ export function useTerminal(
 
     if (!aliveSessions.has(options.tabId)) {
       aliveSessions.add(options.tabId);
-      ptySpawn(options.tabId, options.cwd, term.rows, term.cols).catch(() => {
-        aliveSessions.delete(options.tabId);
-        term.writeln("\r\n\x1b[31mFailed to spawn shell. Press any key to retry.\x1b[0m");
-      });
+      // A launch intent carries the complete shell env (runspace env + run ids),
+      // so it supersedes the runspace env rather than being merged with it.
+      const env = optionsRef.current.launch?.env ?? optionsRef.current.env;
+      const initialCommand = optionsRef.current.launch?.initialCommand;
+      ptySpawn(options.tabId, options.cwd, term.rows, term.cols, env)
+        .then(() => {
+          if (initialCommand) {
+            setTimeout(() => {
+              writeText(options.tabId, initialCommand + "\r");
+              optionsRef.current.onLaunchConsumed?.();
+            }, 500);
+          }
+        })
+        .catch(() => {
+          aliveSessions.delete(options.tabId);
+          term.writeln("\r\n\x1b[31mFailed to spawn shell. Press any key to retry.\x1b[0m");
+        });
     }
 
     ptyResize(options.tabId, term.rows, term.cols);

@@ -16,21 +16,28 @@ const PR_SYNC_INTERVAL: Duration = Duration::from_secs(10);
 const PR_SYNC_BATCH_LIMIT: usize = 3;
 
 fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
-    tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
-        clipboard_commands::clipboard_write_image,
-        pty_commands::pty_spawn,
-        pty_commands::pty_write,
-        pty_commands::pty_resize,
-        pty_commands::pty_kill,
-        pty_commands::terminal_load_state,
-        pty_commands::terminal_save_state,
-        task_commands::list_task_summaries,
-        task_commands::get_board_columns,
-        task_commands::list_projects,
-        task_commands::track_github_issue,
-        task_commands::list_bench_runspace_map,
-        task_commands::open_bench,
-    ])
+    tauri_specta::Builder::new()
+        .commands(tauri_specta::collect_commands![
+            clipboard_commands::clipboard_write_image,
+            pty_commands::pty_spawn,
+            pty_commands::pty_write,
+            pty_commands::pty_resize,
+            pty_commands::pty_kill,
+            pty_commands::terminal_load_state,
+            pty_commands::terminal_save_state,
+            task_commands::list_task_summaries,
+            task_commands::get_board_columns,
+            task_commands::list_projects,
+            task_commands::track_github_issue,
+            task_commands::list_bench_runspace_map,
+            task_commands::task_shell_env,
+            task_commands::open_bench,
+            task_commands::prepare_task,
+            task_commands::run_task,
+        ])
+        .events(tauri_specta::collect_events![
+            task_commands::TaskRunStatusChanged
+        ])
 }
 
 fn bindings_path() -> std::path::PathBuf {
@@ -59,7 +66,9 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_opener::init())
         .manage(PtyManager::new())
-        .setup(|_| {
+        .invoke_handler(specta_builder.invoke_handler())
+        .setup(move |app| {
+            specta_builder.mount_events(app);
             start_pull_request_sync_scheduler();
             #[cfg(not(debug_assertions))]
             log::info!(
@@ -69,7 +78,6 @@ pub fn run() {
             );
             Ok(())
         })
-        .invoke_handler(specta_builder.invoke_handler())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -1,24 +1,26 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::{AgentLaunch, Project};
+use crate::Project;
 
-use super::AgentLaunchMode;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskShellEnv {
+    pub env: Vec<(String, String)>,
+    pub settings_path: String,
+    pub wrapper_path: String,
+}
 
 pub trait RunArtifacts {
     fn task_run_dir(&self, task_run_id: &str) -> Result<PathBuf>;
     fn setup_log_path(&self, task_run_id: &str) -> Result<PathBuf>;
-    fn write_reused_worktree_setup_log(&self, task_run_id: &str) -> Result<String>;
-    fn prepare_claude_launch(
+    fn prepare_task_shell_env(
         &self,
-        task_run_id: &str,
         task_id: &str,
         project: &Project,
-        worktree: &Path,
-        launch_mode: &AgentLaunchMode,
-    ) -> Result<(AgentLaunch, String)>;
+        task_run_id: Option<&str>,
+    ) -> Result<TaskShellEnv>;
     fn append_hook_event(
         &self,
         task_run_id: &str,

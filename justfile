@@ -6,8 +6,8 @@ default:
 install:
     bun install
 
-dev:
-    MONICA_HOME="$HOME/monica/dev" bun run tauri dev
+dev: dev-cli
+    MONICA_HOME="$HOME/monica/dev" MONICA_CLI_PATH="{{justfile_directory()}}/monica" bun run tauri dev
 
 dev-cli:
     cargo build -p monica-cli

@@ -1,4 +1,6 @@
-use std::io::Read;
+use std::fs::OpenOptions;
+use std::io::{Read, Write};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use clap::Subcommand;
@@ -22,8 +24,31 @@ pub fn run(cmd: HookCommand) -> Result<()> {
 fn claude() -> Result<()> {
     if let Err(e) = handle_claude() {
         eprintln!("monica hook claude: {e:#}");
+        debug_log(&format!("error: {e:#}"));
     }
     Ok(())
+}
+
+/// Append a diagnostic line to `<base>/logs/hook-claude.log`. Hooks run as silent children of
+/// Claude (stderr is invisible, exit is always 0), so this file is the only way to see whether a
+/// hook fired and what it decided. Never fails: logging must not disrupt the hook.
+fn debug_log(msg: &str) {
+    let Ok(dir) = monica_infra::filesystem::paths::logs_dir() else {
+        return;
+    };
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let line = format!("{ms} pid={} {msg}\n", std::process::id());
+    let _ = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("hook-claude.log"))
+        .and_then(|mut f| f.write_all(line.as_bytes()));
 }
 
 fn handle_claude() -> Result<()> {
@@ -33,6 +58,13 @@ fn handle_claude() -> Result<()> {
     let task_id = env_opt("MONICA_TASK_ID").or_else(|| env_opt("MONICA_ID"));
     let task_run_id = env_opt("MONICA_TASK_RUN_ID").or_else(|| env_opt("MONICA_RUN_ID"));
 
+    debug_log(&format!(
+        "invoked task_id={task_id:?} task_run_id={task_run_id:?} monica_home={:?} cwd={:?} stdin_bytes={}",
+        env_opt("MONICA_HOME"),
+        std::env::current_dir().ok(),
+        raw.len(),
+    ));
+
     let mut runtime = Runtime::open_default()?;
     let report = monica_core::record_claude_hook(
         &mut runtime.repositories,
@@ -41,6 +73,16 @@ fn handle_claude() -> Result<()> {
         task_run_id.as_deref(),
         &raw,
     )?;
+
+    debug_log(&format!(
+        "event={:?} ignored={} task_found={} run_linked={} status={:?} jsonl={}",
+        report.event_name,
+        report.ignored,
+        report.task_found,
+        report.task_run_linked,
+        report.task_run_status,
+        report.jsonl_written,
+    ));
 
     // Surface notable degradations on stderr so a misconfigured launch shows up in the hook debug
     // log without ever reaching Claude's context.

@@ -159,13 +159,16 @@ impl SqliteStore {
                  LIMIT 1
                )
             LEFT JOIN task_runs latest_run
-               ON latest_run.id = (
-                 SELECT r.id
-                 FROM task_runs r
-                 WHERE r.task_id = t.id
-                 ORDER BY r.created_at DESC,
-                          CAST(SUBSTR(r.id, 5) AS INTEGER) DESC
-                 LIMIT 1
+               ON latest_run.id = COALESCE(
+                 t.primary_task_run_id,
+                 (
+                   SELECT r.id
+                   FROM task_runs r
+                   WHERE r.task_id = t.id
+                   ORDER BY r.created_at DESC,
+                            CAST(SUBSTR(r.id, 5) AS INTEGER) DESC
+                   LIMIT 1
+                 )
                )
 	             WHERE t.deleted_at IS NULL
 	               AND (?1 IS NULL OR coalesce(project.repo, issue_ref.repo, t.project_id) = ?1)
@@ -204,6 +207,20 @@ impl SqliteStore {
             item.github_pull_requests = self.list_github_pull_request_refs(&item.id)?;
         }
         Ok(items)
+    }
+
+    pub fn set_primary_task_run(&self, task_id: &str, task_run_id: &str) -> Result<()> {
+        let affected = self.conn().execute(
+            &format!(
+                "UPDATE tasks SET primary_task_run_id = ?1, updated_at = {SET_NOW}
+                 WHERE id = ?2 AND deleted_at IS NULL"
+            ),
+            params![task_run_id, task_id],
+        )?;
+        if affected == 0 {
+            return Err(anyhow!("task not found: {task_id}"));
+        }
+        Ok(())
     }
 
     pub fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()> {

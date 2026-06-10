@@ -12,6 +12,8 @@ pub struct SpawnRequest {
     pub cwd: String,
     pub rows: u16,
     pub cols: u16,
+    #[serde(default)]
+    pub env: Option<Vec<(String, String)>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

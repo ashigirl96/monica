@@ -2,13 +2,14 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSetAtom } from "jotai";
 import type { DisplayStatus, TaskSummaryRow } from "@/commands/task";
 import { cn } from "@/lib/utils";
-import { openBenchAtom } from "@/stores/workboard";
+import { openBenchAtom, prepareTaskAtom, runTaskAtom, PREPARE_ELIGIBLE } from "@/stores/workboard";
 
 const STATUS_COLORS: Record<DisplayStatus, string> = {
   inbox: "bg-muted-foreground/40",
   ready: "bg-sky-400",
   in_progress: "bg-blue-500",
   setting_up: "bg-blue-400 animate-pulse",
+  prepared: "bg-cyan-400",
   running: "bg-emerald-400 animate-pulse",
   waiting_for_user: "bg-amber-400",
   stopped: "bg-muted-foreground/50",
@@ -21,11 +22,25 @@ const STATUS_LABELS: Record<DisplayStatus, string> = {
   ready: "ready",
   in_progress: "in progress",
   setting_up: "setting up",
+  prepared: "prepared",
   running: "running",
   waiting_for_user: "needs you",
   stopped: "stopped",
   failed: "failed",
   done: "done",
+};
+
+const STATUS_BADGE_STYLES: Record<DisplayStatus, string> = {
+  inbox: "bg-muted text-muted-foreground",
+  ready: "bg-sky-500/15 text-sky-400",
+  in_progress: "bg-blue-500/15 text-blue-400",
+  setting_up: "bg-blue-500/15 text-blue-400 animate-pulse",
+  prepared: "bg-cyan-500/15 text-cyan-400",
+  running: "bg-emerald-500/15 text-emerald-400 animate-pulse",
+  waiting_for_user: "bg-amber-500/15 text-amber-400",
+  stopped: "bg-muted text-muted-foreground",
+  failed: "bg-red-500/15 text-red-400",
+  done: "bg-muted text-muted-foreground/60",
 };
 
 function IssueIcon() {
@@ -110,13 +125,42 @@ function issueUrl(project: string | null, number: number): string | null {
   return `https://github.com/${project}/issues/${number}`;
 }
 
+const RUN_ELIGIBLE: Set<DisplayStatus> = new Set([...PREPARE_ELIGIBLE, "prepared"]);
+
+function RunIcon() {
+  return (
+    <svg className="size-3" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+      <polygon points="5,3 19,12 5,21" />
+    </svg>
+  );
+}
+
+function PrepareIcon() {
+  return (
+    <svg
+      className="size-3"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+    </svg>
+  );
+}
+
 export function TaskCard({ task }: { task: TaskSummaryRow }) {
   const doOpenBench = useSetAtom(openBenchAtom);
+  const doPrepareTask = useSetAtom(prepareTaskAtom);
+  const doRunTask = useSetAtom(runTaskAtom);
   const hasIssue = task.github_issue_number > 0;
   const hasPrs = task.github_pull_requests.length > 0;
   const hasBranch = task.branch !== null;
   const hasMetadata = hasIssue || hasPrs || hasBranch;
-  const isActive = task.status === "running" || task.status === "setting_up";
+  const isActive =
+    task.status === "running" || task.status === "setting_up" || task.status === "prepared";
 
   return (
     <div
@@ -175,20 +219,53 @@ export function TaskCard({ task }: { task: TaskSummaryRow }) {
         )}
 
         <div className="flex items-center justify-between">
-          <span className="text-[10px] tracking-wide text-muted-foreground/50 uppercase">
-            {STATUS_LABELS[task.status]}
-          </span>
-          <button
-            type="button"
-            onClick={() => doOpenBench(task.id)}
+          <span
             className={cn(
-              "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] transition-opacity",
-              "text-muted-foreground opacity-0 group-hover:opacity-70 hover:!opacity-100",
+              "inline-flex items-center rounded-sm px-1.5 py-px text-[10px] font-medium",
+              STATUS_BADGE_STYLES[task.status],
             )}
           >
-            <BenchIcon />
-            <span>Bench</span>
-          </button>
+            {STATUS_LABELS[task.status]}
+          </span>
+          <div className="flex items-center gap-1">
+            {PREPARE_ELIGIBLE.has(task.status) && (
+              <button
+                type="button"
+                onClick={() => doPrepareTask(task.id)}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] transition-opacity",
+                  "text-muted-foreground opacity-0 group-hover:opacity-70 hover:!opacity-100",
+                )}
+              >
+                <PrepareIcon />
+                <span>Prepare</span>
+              </button>
+            )}
+            {RUN_ELIGIBLE.has(task.status) && (
+              <button
+                type="button"
+                onClick={() => doRunTask(task.id)}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] transition-opacity",
+                  "text-emerald-400 opacity-0 group-hover:opacity-70 hover:!opacity-100",
+                )}
+              >
+                <RunIcon />
+                <span>Run</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => doOpenBench(task.id)}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] transition-opacity",
+                "text-muted-foreground opacity-0 group-hover:opacity-70 hover:!opacity-100",
+              )}
+            >
+              <BenchIcon />
+              <span>Bench</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

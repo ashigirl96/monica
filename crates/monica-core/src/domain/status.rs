@@ -50,6 +50,7 @@ impl FromStr for TaskStatus {
 #[serde(rename_all = "snake_case")]
 pub enum TaskRunStatus {
     SettingUp,
+    Prepared,
     Running,
     WaitingForUser,
     Stopped,
@@ -60,6 +61,7 @@ impl TaskRunStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             TaskRunStatus::SettingUp => "setting_up",
+            TaskRunStatus::Prepared => "prepared",
             TaskRunStatus::Running => "running",
             TaskRunStatus::WaitingForUser => "waiting_for_user",
             TaskRunStatus::Stopped => "stopped",
@@ -74,6 +76,7 @@ impl FromStr for TaskRunStatus {
     fn from_str(s: &str) -> Result<Self> {
         Ok(match s {
             "setting_up" => TaskRunStatus::SettingUp,
+            "prepared" => TaskRunStatus::Prepared,
             "running" => TaskRunStatus::Running,
             "waiting_for_user" => TaskRunStatus::WaitingForUser,
             "stopped" => TaskRunStatus::Stopped,
@@ -120,6 +123,7 @@ pub enum DisplayStatus {
     Ready,
     InProgress,
     SettingUp,
+    Prepared,
     Running,
     WaitingForUser,
     Stopped,
@@ -134,6 +138,7 @@ impl DisplayStatus {
             DisplayStatus::Ready => "ready",
             DisplayStatus::InProgress => "in_progress",
             DisplayStatus::SettingUp => "setting_up",
+            DisplayStatus::Prepared => "prepared",
             DisplayStatus::Running => "running",
             DisplayStatus::WaitingForUser => "waiting_for_user",
             DisplayStatus::Stopped => "stopped",
@@ -152,6 +157,7 @@ impl DisplayStatus {
             TaskStatus::Ready => DisplayStatus::Ready,
             TaskStatus::InProgress => match run {
                 Some(TaskRunStatus::SettingUp) => DisplayStatus::SettingUp,
+                Some(TaskRunStatus::Prepared) => DisplayStatus::Prepared,
                 Some(TaskRunStatus::Running) => DisplayStatus::Running,
                 Some(TaskRunStatus::WaitingForUser) => DisplayStatus::WaitingForUser,
                 Some(TaskRunStatus::Stopped) => DisplayStatus::Stopped,
@@ -172,6 +178,7 @@ impl FromStr for DisplayStatus {
             "ready" => DisplayStatus::Ready,
             "in_progress" => DisplayStatus::InProgress,
             "setting_up" => DisplayStatus::SettingUp,
+            "prepared" => DisplayStatus::Prepared,
             "running" => DisplayStatus::Running,
             "waiting_for_user" => DisplayStatus::WaitingForUser,
             "stopped" => DisplayStatus::Stopped,
@@ -208,6 +215,7 @@ pub fn board_columns() -> Vec<BoardColumn> {
             statuses: vec![
                 DisplayStatus::InProgress,
                 DisplayStatus::SettingUp,
+                DisplayStatus::Prepared,
                 DisplayStatus::Running,
             ],
         },

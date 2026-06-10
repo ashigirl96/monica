@@ -41,6 +41,12 @@ impl PtyManager {
 
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
         let mut cmd = CommandBuilder::new(&shell);
+        // Drop direnv state inherited from the shell that launched the app. With a stale
+        // DIRENV_DIFF, direnv in the new tab "reverts" vars recorded there (e.g. MONICA_HOME
+        // exported by a repo .envrc) and silently strips them from the session env.
+        for key in ["DIRENV_DIFF", "DIRENV_DIR", "DIRENV_FILE", "DIRENV_WATCHES"] {
+            cmd.env_remove(key);
+        }
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "WezTerm");
@@ -48,6 +54,11 @@ impl PtyManager {
             "LANG",
             std::env::var("LANG").unwrap_or_else(|_| "en_US.UTF-8".to_string()),
         );
+        if let Some(ref extra_env) = req.env {
+            for (key, value) in extra_env {
+                cmd.env(key, value);
+            }
+        }
         cmd.arg("--login");
         let cwd = if let Some(rest) = req.cwd.strip_prefix("~/") {
             let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
@@ -246,6 +257,7 @@ mod tests {
                     cwd: std::env::temp_dir().to_string_lossy().to_string(),
                     rows: 24,
                     cols: 80,
+                    env: None,
                 },
                 move |output| {
                     let _ = output_tx.send(output);
@@ -303,6 +315,7 @@ mod tests {
                     cwd: std::env::temp_dir().to_string_lossy().to_string(),
                     rows: 24,
                     cols: 80,
+                    env: None,
                 },
                 |_| {},
                 |_, _| {},
@@ -329,6 +342,7 @@ mod tests {
                     cwd: std::env::temp_dir().to_string_lossy().to_string(),
                     rows: 24,
                     cols: 80,
+                    env: None,
                 },
                 |_| {},
                 move |id, code| {

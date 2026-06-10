@@ -7,8 +7,10 @@ import {
   closeTerminalTabAtom,
   updateTabTitleAtom,
   updateTabCwdAtom,
+  consumeTerminalLaunchAtom,
   loadTerminalStateAtom,
   saveTerminalStateAtom,
+  type TerminalLaunchIntent,
 } from "@/stores/terminal";
 import { clipboardWriteImage } from "@/commands/clipboard";
 import { ptyWrite } from "@/commands/pty";
@@ -27,7 +29,21 @@ const IMAGE_EXTENSIONS = new Set([
 
 const CTRL_V_BASE64 = btoa(String.fromCharCode(0x16));
 
-function TerminalPane({ tabId, cwd, active }: { tabId: string; cwd: string; active: boolean }) {
+function TerminalPane({
+  tabId,
+  cwd,
+  active,
+  env,
+  launch,
+  onLaunchConsumed,
+}: {
+  tabId: string;
+  cwd: string;
+  active: boolean;
+  env?: [string, string][];
+  launch?: TerminalLaunchIntent;
+  onLaunchConsumed?: () => void;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const closeTab = useSetAtom(closeTerminalTabAtom);
   const updateTitle = useSetAtom(updateTabTitleAtom);
@@ -49,8 +65,11 @@ function TerminalPane({ tabId, cwd, active }: { tabId: string; cwd: string; acti
     tabId,
     cwd,
     active,
+    env,
+    launch,
     onTitleChange,
     onCwdChange,
+    onLaunchConsumed,
     onExit,
   });
 
@@ -110,6 +129,8 @@ export default function WorkBenchContent() {
     };
   }, []);
 
+  const consumeLaunch = useSetAtom(consumeTerminalLaunchAtom);
+
   if (!ready || !state) return null;
 
   return (
@@ -121,6 +142,9 @@ export default function WorkBenchContent() {
             tabId={tab.id}
             cwd={tab.cwd}
             active={rs.id === state.activeRunspaceId && tab.id === rs.activeTabId}
+            env={rs.env}
+            launch={tab.launch}
+            onLaunchConsumed={() => consumeLaunch(tab.id)}
           />
         )),
       )}

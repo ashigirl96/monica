@@ -6,7 +6,7 @@ use crate::domain::{
     transition_is_protected,
 };
 use crate::interfaces::{Clock, EventRepository, RunArtifacts, TaskRepository, TaskRunRepository};
-use crate::{TaskRunObservation, TaskRunStatus, TaskRunWaitReason};
+use crate::{TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HookReport {
@@ -56,16 +56,17 @@ where
         });
     }
 
+    let provider_session_id = parsed
+        .as_ref()
+        .and_then(|value| value.get("session_id"))
+        .and_then(Value::as_str);
+
     let run_row = match safe_task_run_id {
         Some(r) => repos.get_task_run(r)?,
-        None => None,
+        None => claim_primary_run(repos, task_id, provider_session_id)?,
     };
     let task_run_linked = run_row.is_some();
-    let linked_task_run_id = if task_run_linked {
-        safe_task_run_id
-    } else {
-        None
-    };
+    let linked_task_run_id = run_row.as_ref().map(|run| run.id.as_str());
     let linked_task_id = run_row.as_ref().map(|run| run.task_id.as_str()).or(task_id);
     let task_found = match linked_task_id {
         Some(id) if run_row.is_some() => repos.get_task(id)?.is_some() || run_row.is_some(),
@@ -107,10 +108,6 @@ where
         _ => None,
     };
 
-    let provider_session_id = parsed
-        .as_ref()
-        .and_then(|value| value.get("session_id"))
-        .and_then(Value::as_str);
     if let Some(task_run_id) = linked_task_run_id {
         let wait_update = transition.map(|t| {
             if t.status == TaskRunStatus::WaitingForUser {
@@ -143,4 +140,38 @@ where
         jsonl_written,
         unsafe_task_run_id,
     })
+}
+
+/// Resolve a hook that carries task context but no run id (e.g. `claude` launched manually in a
+/// Bench tab) to the task's primary run. The primary run is claimed while still `Prepared`; once
+/// claimed, later hooks from the same Claude session keep following it via the recorded provider
+/// session id. A run actively driven by another session is never stolen.
+fn claim_primary_run<R>(
+    repos: &R,
+    task_id: Option<&str>,
+    provider_session_id: Option<&str>,
+) -> Result<Option<TaskRun>>
+where
+    R: TaskRepository + TaskRunRepository,
+{
+    let Some(task_id) = task_id else {
+        return Ok(None);
+    };
+    let Some(task) = repos.get_task(task_id)? else {
+        return Ok(None);
+    };
+    let Some(primary_id) = task.primary_task_run_id else {
+        return Ok(None);
+    };
+    let Some(run) = repos.get_task_run(&primary_id)? else {
+        return Ok(None);
+    };
+
+    let same_session = provider_session_id.is_some()
+        && run.provider_session_id.as_deref() == provider_session_id;
+    if run.status == TaskRunStatus::Prepared || same_session {
+        Ok(Some(run))
+    } else {
+        Ok(None)
+    }
 }

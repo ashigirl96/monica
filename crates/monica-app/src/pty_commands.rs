@@ -13,6 +13,7 @@ pub fn pty_spawn(
     cwd: String,
     rows: u16,
     cols: u16,
+    env: Option<Vec<(String, String)>>,
 ) -> Result<(), String> {
     let output_app = app.clone();
     let exit_app = app;
@@ -24,6 +25,7 @@ pub fn pty_spawn(
                 cwd,
                 rows,
                 cols,
+                env,
             },
             move |output: PtyOutput| {
                 let event = format!("pty:output:{}", output.id);
