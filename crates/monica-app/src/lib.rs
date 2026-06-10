@@ -10,6 +10,8 @@ use monica_pty::PtyManager;
 
 mod clipboard_commands;
 mod pty_commands;
+#[cfg(all(unix, not(debug_assertions)))]
+mod shell_path;
 mod task_commands;
 
 const PR_SYNC_INTERVAL: Duration = Duration::from_secs(10);
@@ -64,6 +66,9 @@ pub fn export_bindings() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(all(unix, not(debug_assertions)))]
+    let path_fix = shell_path::fix_path_from_login_shell();
+
     let specta_builder = specta_builder();
 
     #[cfg(debug_assertions)]
@@ -88,6 +93,17 @@ pub fn run() {
                 "release file logging enabled path={}",
                 release_log_path().display()
             );
+            #[cfg(all(unix, not(debug_assertions)))]
+            match &path_fix {
+                Ok(()) => log::info!(
+                    target: "monica_app::startup",
+                    "PATH resolved from login shell"
+                ),
+                Err(e) => log::warn!(
+                    target: "monica_app::startup",
+                    "failed to resolve PATH from login shell: {e}"
+                ),
+            }
             Ok(())
         })
         .run(tauri::generate_context!())
