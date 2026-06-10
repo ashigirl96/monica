@@ -34,8 +34,10 @@ export const MENU_ITEMS: ReadonlyArray<{ id: MenuItemId; label: string; hint: st
   { id: "prepare", label: "Prepare", hint: "p" },
   { id: "run", label: "Run", hint: "r" },
   { id: "bench", label: "Bench", hint: "b" },
-  { id: "delete", label: "Delete", hint: "" },
+  { id: "delete", label: "Delete", hint: "d" },
 ];
+
+const DELETE_INDEX = MENU_ITEMS.findIndex((item) => item.id === "delete");
 
 export function isItemDisabled(id: MenuItemId, status: DisplayStatus): boolean {
   if (id === "prepare") return !PREPARE_ELIGIBLE.has(status);
@@ -156,6 +158,25 @@ export const runDirectActionAtom = atom(null, (get, set, id: Exclude<MenuItemId,
   if (id === "prepare") void set(prepareTaskAtom, taskId);
   else if (id === "run") void set(runTaskAtom, taskId);
   else void set(openBenchAtom, taskId);
+});
+
+// Delete is two-step everywhere: the first press opens (or re-targets) the menu
+// in confirming state, the second press executes. The anchor is only needed when
+// the menu is not open yet.
+export const requestDeleteAtom = atom(null, (get, set, anchor: MenuAnchor | null) => {
+  const menu = get(menuAtom);
+  if (menu === null) {
+    const focused = get(focusedTaskIdAtom);
+    if (focused === null || anchor === null || !taskById(get, focused)) return;
+    set(menuAtom, { taskId: focused, anchor, itemIndex: DELETE_INDEX, confirmingDelete: true });
+    return;
+  }
+  if (MENU_ITEMS[menu.itemIndex].id === "delete" && menu.confirmingDelete) {
+    set(menuAtom, null);
+    void set(deleteFocusedTaskAtom, menu.taskId);
+  } else {
+    set(menuAtom, { ...menu, itemIndex: DELETE_INDEX, confirmingDelete: true });
+  }
 });
 
 export const executeMenuItemAtom = atom(null, (get, set) => {
