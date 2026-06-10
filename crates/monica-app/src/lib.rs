@@ -14,6 +14,7 @@ mod pty_commands;
 #[cfg(all(unix, not(debug_assertions)))]
 mod shell_path;
 mod task_commands;
+mod window_commands;
 
 const PR_SYNC_INTERVAL: Duration = Duration::from_secs(10);
 const PR_SYNC_BATCH_LIMIT: usize = 3;
@@ -40,6 +41,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             task_commands::run_task,
             task_commands::make_main_task_run,
             task_commands::primary_tab_id,
+            window_commands::open_runspace_window,
         ])
         .events(tauri_specta::collect_events![
             task_commands::TaskRunStatusChanged

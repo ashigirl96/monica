@@ -1,12 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability for the main window",
-  "windows": ["main"],
+  "description": "Default capability for the main window and runspace satellites",
+  "windows": ["main", "runspace-*"],
   "permissions": [
     "core:default",
     "core:event:default",
     "core:window:allow-start-dragging",
+    "core:window:allow-destroy",
     "opener:default",
     "mcp-bridge:default"
   ]

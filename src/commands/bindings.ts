@@ -51,6 +51,8 @@ export const commands = {
     typedError<boolean, string>(__TAURI_INVOKE("make_main_task_run", { tabId })),
   primaryTabId: (taskId: string) =>
     typedError<string | null, string>(__TAURI_INVOKE("primary_tab_id", { taskId })),
+  openRunspaceWindow: (cwd: string) =>
+    typedError<null, string>(__TAURI_INVOKE("open_runspace_window", { cwd })),
 };
 
 /** Events */

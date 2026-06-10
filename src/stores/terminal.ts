@@ -1,4 +1,5 @@
 import { atom } from "jotai";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   ptyKill,
   terminalLoadState,
@@ -7,6 +8,8 @@ import {
 } from "@/commands/pty";
 import { listBenchRunspaceMap, primaryTabId, taskShellEnv } from "@/commands/task";
 import { worktreeInfo, type WorktreeInfo } from "@/commands/git";
+import { openRunspaceWindow } from "@/commands/window";
+import { isRunspaceWindow, runspaceWindowCwd } from "@/lib/runspace-window";
 import { markSessionDead } from "@/spaces/work-bench/use-terminal";
 
 const FONT_SIZE_DEFAULT = 15;
@@ -198,6 +201,10 @@ export const runspaceSummariesAtom = atom<RunspaceSummary[]>((get) => {
     }));
 });
 
+export const openRunspaceWindowAtom = atom(null, (get) => {
+  void openRunspaceWindow(resolveTabCwd(get(activeTerminalTabAtom)));
+});
+
 export const createRunspaceAtom = atom(null, (get, set) => {
   const state = get(resolvedStateAtom);
   const activeTab = get(activeTerminalTabAtom);
@@ -226,6 +233,10 @@ export const removeRunspaceAtom = atom(null, (get, set, rsId: string) => {
 
   const remaining = state.runspaces.filter((r) => r.id !== rsId);
   if (remaining.length === 0) {
+    if (isRunspaceWindow()) {
+      void getCurrentWindow().destroy();
+      return;
+    }
     set(terminalStateAtom, initialState());
     return;
   }
@@ -446,6 +457,13 @@ let loadTerminalStateInFlight: Promise<void> | null = null;
 
 export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
   if (get(terminalStateAtom) !== null) return Promise.resolve();
+  // Satellite windows are ephemeral: they start from the cwd handed over at
+  // creation instead of the persisted snapshot.
+  if (isRunspaceWindow()) {
+    const rs = createRunspace(0, runspaceWindowCwd());
+    set(terminalStateAtom, { runspaces: [rs], activeRunspaceId: rs.id });
+    return Promise.resolve();
+  }
   if (loadTerminalStateInFlight) return loadTerminalStateInFlight;
 
   loadTerminalStateInFlight = (async () => {
@@ -568,7 +586,9 @@ let saveTimer: number | undefined;
 
 export const saveTerminalStateAtom = atom(null, (get) => {
   const current = get(terminalStateAtom);
-  if (!current) return;
+  // Persistence is a whole-state snapshot, so a satellite window saving its
+  // single runspace would clobber the main window's runspaces.
+  if (!current || isRunspaceWindow()) return;
   if (saveTimer) clearTimeout(saveTimer);
   const snapshot = stateToSnapshot(current);
   saveTimer = window.setTimeout(() => {

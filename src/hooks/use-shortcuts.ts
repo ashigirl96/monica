@@ -8,8 +8,10 @@ import {
   closeTerminalTabAtom,
   cycleTerminalTabAtom,
   cycleRunspaceAtom,
+  openRunspaceWindowAtom,
 } from "@/stores/terminal";
 import { promoteActiveTabRunAtom } from "@/stores/workboard";
+import { isRunspaceWindow } from "@/lib/runspace-window";
 
 const META_KEY_SPACE_MAP: Record<string, SpaceId> = {
   "1": "dashboard",
@@ -40,7 +42,9 @@ export function useShortcuts() {
   const closeTerminalTab = useSetAtom(closeTerminalTabAtom);
   const cycleTerminalTab = useSetAtom(cycleTerminalTabAtom);
   const cycleRunspace = useSetAtom(cycleRunspaceAtom);
+  const openRunspaceWindow = useSetAtom(openRunspaceWindowAtom);
   const promoteActiveTabRun = useSetAtom(promoteActiveTabRunAtom);
+  const satellite = isRunspaceWindow();
 
   const prefixRef = useRef(false);
   const timeoutRef = useRef<number>(0);
@@ -65,15 +69,22 @@ export function useShortcuts() {
         return;
       }
 
-      if (e.metaKey && e.key === "0") {
+      if (!satellite && e.metaKey && e.key === "0") {
         e.preventDefault();
         setSidebarOpen((v) => !v);
         return;
       }
 
-      if (e.metaKey && e.key in META_KEY_SPACE_MAP) {
+      if (!satellite && e.metaKey && e.key in META_KEY_SPACE_MAP) {
         e.preventDefault();
         setActiveSpace(META_KEY_SPACE_MAP[e.key]);
+        return;
+      }
+
+      // Stays above the editable guard: the terminal focuses xterm's hidden textarea.
+      if (e.metaKey && e.shiftKey && e.code === "KeyN") {
+        e.preventDefault();
+        if (isWorkBench) openRunspaceWindow();
         return;
       }
 
@@ -162,6 +173,7 @@ export function useShortcuts() {
     };
   }, [
     activeSpace,
+    satellite,
     setActiveSpace,
     setSidebarOpen,
     setPrefixActive,
@@ -173,6 +185,7 @@ export function useShortcuts() {
     closeTerminalTab,
     cycleTerminalTab,
     cycleRunspace,
+    openRunspaceWindow,
     promoteActiveTabRun,
   ]);
 }
