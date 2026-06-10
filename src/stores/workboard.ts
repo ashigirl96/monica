@@ -7,13 +7,18 @@ import {
   openBench,
   prepareTask,
   runTask,
+  makeMainTaskRun,
   onTaskRunStatusChanged,
   type TaskSummaryRow,
   type BoardColumn,
   type ProjectEntry,
   type DisplayStatus,
 } from "@/commands/task";
-import { createTaskRunspaceAtom } from "@/stores/terminal";
+import {
+  activeTerminalTabAtom,
+  createTaskRunspaceAtom,
+  refreshPrimaryTabAtom,
+} from "@/stores/terminal";
 import { activeSpaceAtom } from "@/stores/space";
 
 export const boardColumnsAtom = atom<BoardColumn[]>([]);
@@ -76,6 +81,17 @@ export const refreshTaskSummariesAtom = atom(null, async (_get, set) => {
   const summaries = await listTaskSummaries();
   set(taskSummariesAtom, summaries);
   return summaries;
+});
+
+// cmd+g: promote the run living in the focused tab to Main Run. Backend returns
+// false for both "no run in this tab" and "already main", keeping this a silent no-op.
+export const promoteActiveTabRunAtom = atom(null, async (get, set) => {
+  const tab = get(activeTerminalTabAtom);
+  if (!tab) return;
+  const changed = await makeMainTaskRun(tab.id);
+  if (changed) {
+    await Promise.all([set(refreshTaskSummariesAtom), set(refreshPrimaryTabAtom)]);
+  }
 });
 
 export const PREPARE_ELIGIBLE: Set<DisplayStatus> = new Set([

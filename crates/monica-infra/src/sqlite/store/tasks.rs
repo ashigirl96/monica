@@ -146,7 +146,18 @@ impl SqliteStore {
 	               t.status AS task_status,
 	               latest_run.status AS task_run_status,
 	               latest_run.wait_reason AS task_run_wait_reason,
-	               latest_run.branch AS branch
+	               latest_run.branch AS branch,
+               (SELECT COUNT(*) FROM task_runs r
+                 WHERE r.task_id = t.id AND r.id IS NOT latest_run.id
+                   AND r.status = 'running') AS side_runs_running,
+               (SELECT COUNT(*) FROM task_runs r
+                 WHERE r.task_id = t.id AND r.id IS NOT latest_run.id
+                   AND r.status = 'waiting_for_user') AS side_runs_waiting_for_user,
+               -- a run without a Claude session is an old prepare failure, not a side run
+               (SELECT COUNT(*) FROM task_runs r
+                 WHERE r.task_id = t.id AND r.id IS NOT latest_run.id
+                   AND r.status = 'failed'
+                   AND r.provider_session_id IS NOT NULL) AS side_runs_failed
 	             FROM tasks t
              LEFT JOIN projects project
                ON project.id = t.project_id
@@ -198,6 +209,9 @@ impl SqliteStore {
                 task_run_wait_reason,
                 status: display_status,
                 branch: row.get("branch")?,
+                side_runs_running: row.get("side_runs_running")?,
+                side_runs_waiting_for_user: row.get("side_runs_waiting_for_user")?,
+                side_runs_failed: row.get("side_runs_failed")?,
             };
             if status.is_none_or(|status| status == item.status) {
                 items.push(item);

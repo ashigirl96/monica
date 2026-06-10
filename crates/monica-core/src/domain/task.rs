@@ -68,6 +68,12 @@ pub struct TaskSummaryRow {
     pub task_run_wait_reason: Option<TaskRunWaitReason>,
     pub status: DisplayStatus,
     pub branch: Option<String>,
+    #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
+    pub side_runs_running: i64,
+    #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
+    pub side_runs_waiting_for_user: i64,
+    #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
+    pub side_runs_failed: i64,
 }
 
 /// Input for inserting a [`Task`]. The `id` and timestamps are assigned by the store.

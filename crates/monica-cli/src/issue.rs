@@ -254,6 +254,9 @@ mod tests {
             task_run_wait_reason: None,
             status: DisplayStatus::Ready,
             branch: Some("monica/gh-17".to_string()),
+            side_runs_running: 0,
+            side_runs_waiting_for_user: 0,
+            side_runs_failed: 0,
         }];
         let rendered = render_status_table(&rows);
         assert!(rendered.contains("ID"));

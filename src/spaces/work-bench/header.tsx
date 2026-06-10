@@ -4,14 +4,19 @@ import {
   activateTerminalTabAtom,
   closeTerminalTabAtom,
   createTerminalTabAtom,
+  primaryTabByTaskAtom,
+  refreshPrimaryTabAtom,
   reorderTabsAtom,
 } from "@/stores/terminal";
+import { onTaskRunStatusChanged } from "@/commands/task";
 import { PlusIcon, XIcon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import { useEffect, useRef, useState } from "react";
 
 export function WorkBenchHeader() {
   const rs = useAtomValue(activeRunspaceAtom);
+  const primaryTabs = useAtomValue(primaryTabByTaskAtom);
+  const refreshPrimaryTab = useSetAtom(refreshPrimaryTabAtom);
   const activateTab = useSetAtom(activateTerminalTabAtom);
   const closeTab = useSetAtom(closeTerminalTabAtom);
   const createTab = useSetAtom(createTerminalTabAtom);
@@ -29,7 +34,25 @@ export function WorkBenchHeader() {
     });
   }, [rs?.activeTabId]);
 
+  // Hook-driven primary claims land in the DB without a Tauri event, so the
+  // indicator follows the same listen-plus-poll pattern as the Workboard.
+  useEffect(() => {
+    void refreshPrimaryTab();
+    const unlisten = onTaskRunStatusChanged(() => {
+      void refreshPrimaryTab();
+    });
+    const timer = setInterval(() => {
+      if (!document.hidden) void refreshPrimaryTab();
+    }, 3000);
+    return () => {
+      clearInterval(timer);
+      unlisten.then((fn) => fn());
+    };
+  }, [refreshPrimaryTab, rs?.id]);
+
   if (!rs) return null;
+
+  const primaryTabId = rs.taskId ? (primaryTabs[rs.taskId] ?? null) : null;
 
   const sorted = [...rs.tabs].sort((a, b) => a.order - b.order);
 
@@ -37,6 +60,7 @@ export function WorkBenchHeader() {
     <div className="scrollbar-hide flex h-full items-center gap-1 overflow-x-auto">
       {sorted.map((tab) => {
         const isActive = tab.id === rs.activeTabId;
+        const isMain = tab.id === primaryTabId;
         const label = tab.title || tab.cwd.split("/").pop() || "Terminal";
         return (
           <button
@@ -77,6 +101,12 @@ export function WorkBenchHeader() {
               dragOverId === tab.id && "ring-1 ring-white/20",
             )}
           >
+            {isMain && (
+              <span
+                title="Main Run (⌘G elsewhere to promote)"
+                className="mr-1.5 size-1.5 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_4px] shadow-emerald-400/60"
+              />
+            )}
             <span className="flex-1 truncate">{label}</span>
             <span
               role="button"

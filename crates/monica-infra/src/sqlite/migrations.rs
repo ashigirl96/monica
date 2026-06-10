@@ -20,6 +20,7 @@ fn migrations() -> Migrations<'static> {
         M::up(V11),
         M::up(V12),
         M::up(V13),
+        M::up(V14),
     ])
 }
 
@@ -420,6 +421,11 @@ const V13: &str = r#"
     ALTER TABLE tasks ADD COLUMN primary_task_run_id TEXT;
 "#;
 
+/// v14: record which Workbench terminal tab a run's Claude session lives in.
+const V14: &str = r#"
+    ALTER TABLE task_runs ADD COLUMN terminal_tab_id TEXT;
+"#;
+
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
     migrations()
@@ -493,7 +499,7 @@ mod tests {
             .conn()
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 13);
+        assert_eq!(version, 14);
 
         std::fs::remove_file(&path).ok();
     }

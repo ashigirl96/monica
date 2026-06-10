@@ -57,9 +57,10 @@ fn handle_claude() -> Result<()> {
 
     let task_id = env_opt("MONICA_TASK_ID").or_else(|| env_opt("MONICA_ID"));
     let task_run_id = env_opt("MONICA_TASK_RUN_ID").or_else(|| env_opt("MONICA_RUN_ID"));
+    let terminal_tab_id = env_opt("MONICA_TERMINAL_TAB_ID");
 
     debug_log(&format!(
-        "invoked task_id={task_id:?} task_run_id={task_run_id:?} monica_home={:?} cwd={:?} stdin_bytes={}",
+        "invoked task_id={task_id:?} task_run_id={task_run_id:?} tab_id={terminal_tab_id:?} monica_home={:?} cwd={:?} stdin_bytes={}",
         env_opt("MONICA_HOME"),
         std::env::current_dir().ok(),
         raw.len(),
@@ -69,17 +70,21 @@ fn handle_claude() -> Result<()> {
     let report = monica_core::record_claude_hook(
         &mut runtime.repositories,
         &runtime.run_artifacts,
-        task_id.as_deref(),
-        task_run_id.as_deref(),
+        monica_core::HookContext {
+            task_id: task_id.as_deref(),
+            task_run_id: task_run_id.as_deref(),
+            terminal_tab_id: terminal_tab_id.as_deref(),
+        },
         &raw,
     )?;
 
     debug_log(&format!(
-        "event={:?} ignored={} task_found={} run_linked={} status={:?} jsonl={}",
+        "event={:?} ignored={} task_found={} run_linked={} run_created={} status={:?} jsonl={}",
         report.event_name,
         report.ignored,
         report.task_found,
         report.task_run_linked,
+        report.task_run_created,
         report.task_run_status,
         report.jsonl_written,
     ));

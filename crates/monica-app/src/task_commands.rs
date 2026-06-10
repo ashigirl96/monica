@@ -143,6 +143,42 @@ pub fn prepare_task(app: AppHandle, task_id: String) -> Result<PrepareTaskResult
     Ok(result)
 }
 
+/// Promote the run living in the given Workbench tab to its task's Main Run. Returns whether the
+/// primary actually changed; `false` covers both "no run in this tab" and "already main" so the
+/// shortcut can stay a silent no-op.
+#[tauri::command]
+#[specta::specta]
+pub fn make_main_task_run(app: AppHandle, tab_id: String) -> Result<bool, String> {
+    let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
+    let outcome = monica_core::make_main_by_terminal_tab(&runtime.repositories, &tab_id)
+        .map_err(|e| e.to_string())?;
+    match outcome {
+        monica_core::MakeMainOutcome::Changed {
+            task_id,
+            task_run_id,
+            status,
+        } => {
+            let _ = TaskRunStatusChanged {
+                task_id,
+                task_run_id,
+                status,
+            }
+            .emit(&app);
+            Ok(true)
+        }
+        monica_core::MakeMainOutcome::AlreadyMain | monica_core::MakeMainOutcome::NotFound => {
+            Ok(false)
+        }
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn primary_tab_id(task_id: String) -> Result<Option<String>, String> {
+    let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
+    monica_core::primary_terminal_tab(&runtime.repositories, &task_id).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn run_task(task_id: String) -> Result<RunTaskResult, String> {

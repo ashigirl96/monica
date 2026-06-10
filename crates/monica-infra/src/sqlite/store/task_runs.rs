@@ -46,9 +46,10 @@ impl SqliteStore {
                         last_event_name = COALESCE(?4, last_event_name),
                         last_event_at = ?5,
                         provider_session_id = COALESCE(?6, provider_session_id),
-                        metadata_json = COALESCE(?7, metadata_json),
+                        terminal_tab_id = COALESCE(?7, terminal_tab_id),
+                        metadata_json = COALESCE(?8, metadata_json),
                         updated_at = {SET_NOW}
-                  WHERE id = ?8"
+                  WHERE id = ?9"
             ),
             params![
                 status,
@@ -57,6 +58,7 @@ impl SqliteStore {
                 observation.event_name,
                 observation.at,
                 observation.provider_session_id,
+                observation.terminal_tab_id,
                 metadata,
                 task_run_id
             ],
@@ -208,6 +210,42 @@ impl SqliteStore {
             "SELECT {TASK_RUN_COLUMNS} FROM task_runs WHERE id = ?1"
         ))?;
         let mut rows = stmt.query(params![id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(crate::sqlite::row::task_run_from_row(row)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Latest run observed for a Claude session. Scoped to a task so an (unlikely) session id
+    /// collision across tasks cannot cross-link runs.
+    pub fn find_task_run_by_session(
+        &self,
+        task_id: &str,
+        provider_session_id: &str,
+    ) -> Result<Option<TaskRun>> {
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {TASK_RUN_COLUMNS} FROM task_runs
+             WHERE task_id = ?1 AND provider_session_id = ?2
+             ORDER BY created_at DESC, CAST(SUBSTR(id, 5) AS INTEGER) DESC
+             LIMIT 1"
+        ))?;
+        let mut rows = stmt.query(params![task_id, provider_session_id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(crate::sqlite::row::task_run_from_row(row)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Latest run whose Claude session was observed in the given Workbench tab. Restarting
+    /// `claude` in the same tab leaves stale tab ids on older runs, so newest wins.
+    pub fn find_task_run_by_terminal_tab(&self, terminal_tab_id: &str) -> Result<Option<TaskRun>> {
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {TASK_RUN_COLUMNS} FROM task_runs
+             WHERE terminal_tab_id = ?1
+             ORDER BY created_at DESC, CAST(SUBSTR(id, 5) AS INTEGER) DESC
+             LIMIT 1"
+        ))?;
+        let mut rows = stmt.query(params![terminal_tab_id])?;
         match rows.next()? {
             Some(row) => Ok(Some(crate::sqlite::row::task_run_from_row(row)?)),
             None => Ok(None),

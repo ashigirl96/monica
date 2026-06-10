@@ -47,6 +47,7 @@ pub(super) fn task_run_from_row(row: &Row<'_>) -> Result<TaskRun> {
         wait_reason: wait_reason.map(|s| s.parse()).transpose()?,
         settings_path: row.get("settings_path")?,
         provider_session_id: row.get("provider_session_id")?,
+        terminal_tab_id: row.get("terminal_tab_id")?,
         last_event_name: row.get("last_event_name")?,
         last_event_at: row.get("last_event_at")?,
         metadata: serde_json::from_str(&metadata)?,

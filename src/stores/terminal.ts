@@ -5,7 +5,7 @@ import {
   terminalSaveState,
   type TerminalStateSnapshot,
 } from "@/commands/pty";
-import { listBenchRunspaceMap, taskShellEnv } from "@/commands/task";
+import { listBenchRunspaceMap, primaryTabId, taskShellEnv } from "@/commands/task";
 import { markSessionDead } from "@/spaces/work-bench/use-terminal";
 
 const FONT_SIZE_DEFAULT = 15;
@@ -108,6 +108,20 @@ export const activeTerminalTabAtom = atom((get) => {
   const rs = get(activeRunspaceAtom);
   if (!rs) return null;
   return rs.tabs.find((t) => t.id === rs.activeTabId) ?? rs.tabs[0] ?? null;
+});
+
+// taskId → tab hosting the task's Main Run. Hook-driven claims write straight to the
+// DB without a Tauri event, so this is refreshed by polling alongside the summaries.
+export const primaryTabByTaskAtom = atom<Record<string, string | null>>({});
+
+export const refreshPrimaryTabAtom = atom(null, async (get, set) => {
+  const rs = get(activeRunspaceAtom);
+  const taskId = rs?.taskId;
+  if (!taskId) return;
+  const tabId = await primaryTabId(taskId);
+  set(primaryTabByTaskAtom, (prev) =>
+    prev[taskId] === tabId ? prev : { ...prev, [taskId]: tabId },
+  );
 });
 
 export type RunspaceSummary = {

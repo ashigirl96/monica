@@ -399,6 +399,7 @@ mod tests {
             wait_reason: None,
             settings_path: None,
             provider_session_id: None,
+            terminal_tab_id: None,
             last_event_name: None,
             last_event_at: None,
             metadata: serde_json::json!({}),
