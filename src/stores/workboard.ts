@@ -59,7 +59,7 @@ export const trackIssueAtom = atom(
 
 export const openBenchAtom = atom(null, async (_get, set, taskId: string) => {
   const bench = await openBench(taskId);
-  set(createTaskRunspaceAtom, {
+  await set(createTaskRunspaceAtom, {
     runspaceId: bench.runspace_id,
     taskId: bench.task_id,
     cwd: bench.cwd,
@@ -81,18 +81,21 @@ export const refreshTaskSummariesAtom = atom(null, async (_get, set) => {
 
 const NEEDS_PREPARE: Set<DisplayStatus> = new Set(["inbox", "ready", "stopped", "failed"]);
 
-function waitForPreparedOrFailed(taskId: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let pollTimer: ReturnType<typeof setInterval> | undefined;
+function waitForPreparedOrFailed(taskId: string): { promise: Promise<void>; cancel: () => void } {
+  let settled = false;
+  let pollTimer: ReturnType<typeof setInterval> | undefined;
+  let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+  let unlistenPromise: Promise<() => void> | undefined;
 
-    const cleanup = () => {
-      settled = true;
-      if (pollTimer) clearInterval(pollTimer);
-      unlistenPromise.then((fn) => fn());
-    };
+  const cleanup = () => {
+    settled = true;
+    if (pollTimer) clearInterval(pollTimer);
+    if (timeoutTimer) clearTimeout(timeoutTimer);
+    unlistenPromise?.then((fn) => fn());
+  };
 
-    const unlistenPromise = onTaskRunStatusChanged((payload) => {
+  const promise = new Promise<void>((resolve, reject) => {
+    unlistenPromise = onTaskRunStatusChanged((payload) => {
       if (settled || payload.task_id !== taskId) return;
       if (payload.status === "prepared") {
         cleanup();
@@ -121,37 +124,55 @@ function waitForPreparedOrFailed(taskId: string): Promise<void> {
       }
     }, 3000);
 
-    setTimeout(() => {
+    timeoutTimer = setTimeout(() => {
       if (!settled) {
         cleanup();
         reject(new Error("prepare timed out"));
       }
     }, 120_000);
   });
+
+  return { promise, cancel: cleanup };
 }
 
-export const runTaskAtom = atom(null, async (get, set, taskId: string) => {
-  const summaries = get(taskSummariesAtom);
-  const task = summaries.find((t) => t.id === taskId);
+const runTaskInFlight = new Set<string>();
 
-  if (task && NEEDS_PREPARE.has(task.status)) {
-    const wait = waitForPreparedOrFailed(taskId);
-    await prepareTask(taskId);
-    await wait;
+export const runTaskAtom = atom(null, async (_get, set, taskId: string) => {
+  if (runTaskInFlight.has(taskId)) return;
+  runTaskInFlight.add(taskId);
+  try {
+    // The cached summaries can lag behind hook-driven status changes by a
+    // polling interval; decide prepare-vs-run from a fresh read.
+    const summaries = await listTaskSummaries();
+    set(taskSummariesAtom, summaries);
+    const task = summaries.find((t) => t.id === taskId);
+
+    if (task && NEEDS_PREPARE.has(task.status)) {
+      const waiter = waitForPreparedOrFailed(taskId);
+      try {
+        await prepareTask(taskId);
+      } catch (e) {
+        waiter.cancel();
+        throw e;
+      }
+      await waiter.promise;
+    }
+
+    const launch = await runTask(taskId);
+
+    await set(createTaskRunspaceAtom, {
+      runspaceId: launch.runspace_id,
+      taskId: launch.task_id,
+      cwd: launch.cwd,
+      launch: {
+        env: launch.env,
+        initialCommand: launch.initial_command,
+      },
+    });
+    set(activeSpaceAtom, "work-bench");
+
+    set(taskSummariesAtom, await listTaskSummaries());
+  } finally {
+    runTaskInFlight.delete(taskId);
   }
-
-  const launch = await runTask(taskId);
-
-  set(createTaskRunspaceAtom, {
-    runspaceId: launch.runspace_id,
-    taskId: launch.task_id,
-    cwd: launch.cwd,
-    launch: {
-      env: launch.env,
-      initialCommand: launch.initial_command,
-    },
-  });
-  set(activeSpaceAtom, "work-bench");
-
-  set(taskSummariesAtom, await listTaskSummaries());
 });

@@ -198,7 +198,10 @@ for arg in "$@"; do
 done
 EXTRA_ARGS=(--dangerously-skip-permissions --settings "$MONICA_CLAUDE_SETTINGS_PATH")
 if [[ "$SKIP_SESSION" != true ]]; then
-    EXTRA_ARGS+=(--session-id "$(uuidgen | tr '[:upper:]' '[:lower:]')")
+    SESSION_ID="$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+    if [[ -n "$SESSION_ID" ]]; then
+        EXTRA_ARGS+=(--session-id "$SESSION_ID")
+    fi
 fi
 exec "$REAL_CLAUDE" "${EXTRA_ARGS[@]}" "$@"
 "#;

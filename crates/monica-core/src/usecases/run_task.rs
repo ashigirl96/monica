@@ -154,7 +154,7 @@ where
     )
     .map_err(|e| fail(repos, e))?;
 
-    if setup.outcome.is_failure() {
+    if setup.is_failure() {
         repos.finish_task_run(task_run_id, task_id, TaskRunStatus::Failed)?;
         return Ok(TaskRunStatus::Failed.as_str().to_string());
     }
@@ -168,10 +168,6 @@ where
     Ok(TaskRunStatus::Prepared.as_str().to_string())
 }
 
-pub(crate) struct SetupResult {
-    pub(crate) outcome: SetupOutcome,
-}
-
 pub(crate) fn setup_phase<S, A>(
     setup_runner: &S,
     artifacts: &A,
@@ -180,7 +176,7 @@ pub(crate) fn setup_phase<S, A>(
     worktree_path: &Path,
     project: &Project,
     branch: &str,
-) -> Result<SetupResult>
+) -> Result<SetupOutcome>
 where
     S: SetupRunner,
     A: RunArtifacts,
@@ -194,8 +190,7 @@ where
         worktree: worktree_path.to_string_lossy().into_owned(),
     };
     let timeout = Duration::from_secs(project.setup_timeout_sec.max(0) as u64);
-    let outcome = setup_runner.run_setup_script(worktree_path, &log_path, &env, timeout)?;
-    Ok(SetupResult { outcome })
+    setup_runner.run_setup_script(worktree_path, &log_path, &env, timeout)
 }
 
 pub(crate) fn latest_github_issue_number<R>(repos: &R, task_id: &str) -> Result<Option<i64>>

@@ -369,41 +369,53 @@ function snapshotToState(snap: TerminalStateSnapshot): TerminalState | null {
   };
 }
 
-export const loadTerminalStateAtom = atom(null, async (get, set) => {
-  if (get(terminalStateAtom) !== null) return;
+// Concurrent loads (e.g. WorkBench mount racing createTaskRunspaceAtom) must share
+// one promise: the null check alone lets the slower load overwrite state mutated in
+// between, dropping freshly created tabs.
+let loadTerminalStateInFlight: Promise<void> | null = null;
 
-  try {
-    const [snap, benchMap] = await Promise.all([terminalLoadState(), listBenchRunspaceMap()]);
-    const runspaceToTask = new Map(benchMap.map(([rsId, taskId]) => [rsId, taskId]));
-    const state = snapshotToState(snap);
-    if (state && state.runspaces.length > 0) {
-      // Runspace env is never persisted; recompute it from the task so tabs
-      // restored after a restart still get the Monica context + claude wrapper.
-      const taskIds = [
-        ...new Set(
-          state.runspaces.map((rs) => runspaceToTask.get(rs.id)).filter((t): t is string => !!t),
-        ),
-      ];
-      const envByTask = new Map(
-        await Promise.all(
-          taskIds.map(
-            async (tid) =>
-              [tid, await taskShellEnv(tid).catch(() => [])] as [string, [string, string][]],
+export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
+  if (get(terminalStateAtom) !== null) return Promise.resolve();
+  if (loadTerminalStateInFlight) return loadTerminalStateInFlight;
+
+  loadTerminalStateInFlight = (async () => {
+    try {
+      const [snap, benchMap] = await Promise.all([terminalLoadState(), listBenchRunspaceMap()]);
+      const runspaceToTask = new Map(benchMap.map(([rsId, taskId]) => [rsId, taskId]));
+      const state = snapshotToState(snap);
+      if (state && state.runspaces.length > 0) {
+        // Runspace env is never persisted; recompute it from the task so tabs
+        // restored after a restart still get the Monica context + claude wrapper.
+        const taskIds = [
+          ...new Set(
+            state.runspaces.map((rs) => runspaceToTask.get(rs.id)).filter((t): t is string => !!t),
           ),
-        ),
-      );
-      state.runspaces = state.runspaces.map((rs) => {
-        const taskId = runspaceToTask.get(rs.id);
-        const env = taskId ? envByTask.get(taskId) : undefined;
-        return { ...rs, taskId, env: env && env.length > 0 ? env : undefined };
-      });
-      set(terminalStateAtom, state);
-      return;
+        ];
+        const envByTask = new Map(
+          await Promise.all(
+            taskIds.map(
+              async (tid) =>
+                [tid, await taskShellEnv(tid).catch(() => [])] as [string, [string, string][]],
+            ),
+          ),
+        );
+        state.runspaces = state.runspaces.map((rs) => {
+          const taskId = runspaceToTask.get(rs.id);
+          const env = taskId ? envByTask.get(taskId) : undefined;
+          return { ...rs, taskId, env: env && env.length > 0 ? env : undefined };
+        });
+        set(terminalStateAtom, state);
+        return;
+      }
+    } catch {
+      // first launch or empty DB
     }
-  } catch {
-    // first launch or empty DB
-  }
-  set(terminalStateAtom, initialState());
+    set(terminalStateAtom, initialState());
+  })().finally(() => {
+    loadTerminalStateInFlight = null;
+  });
+
+  return loadTerminalStateInFlight;
 });
 
 export const createTaskRunspaceAtom = atom(
