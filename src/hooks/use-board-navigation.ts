@@ -7,10 +7,12 @@ import {
   focusedPositionAtom,
   focusedTaskIdAtom,
   menuAtom,
+  type MenuAnchor,
   moveFocusAtom,
   moveMenuItemAtom,
   openMenuAtom,
   reconcileFocusAtom,
+  requestDeleteAtom,
   runDirectActionAtom,
 } from "@/stores/workboard-nav";
 
@@ -19,6 +21,11 @@ const ACTION_KEYS = { p: "prepare", r: "run", b: "bench" } as const;
 
 function focusedCardElement(taskId: string): HTMLElement | null {
   return document.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(taskId)}"]`);
+}
+
+function focusedCardAnchor(taskId: string | null): MenuAnchor | null {
+  const rect = taskId ? focusedCardElement(taskId)?.getBoundingClientRect() : undefined;
+  return rect ? { top: rect.top, left: rect.left, bottom: rect.bottom } : null;
 }
 
 // Mounted by WorkBoardContent, which unmounts on space switch, so the listener
@@ -37,6 +44,7 @@ export function useBoardNavigation() {
         else if (e.key === "k" || e.key === "ArrowUp") store.set(moveMenuItemAtom, "up");
         else if (e.key === "Enter") store.set(executeMenuItemAtom);
         else if (e.key === "Escape" || e.key === " ") store.set(menuAtom, null);
+        else if (e.key === "d") store.set(requestDeleteAtom, null);
         else if (e.key in ACTION_KEYS)
           store.set(runDirectActionAtom, ACTION_KEYS[e.key as keyof typeof ACTION_KEYS]);
         else return;
@@ -58,9 +66,12 @@ export function useBoardNavigation() {
       } else if (e.key === " ") {
         // preventDefault also stops Space from scrolling the column.
         e.preventDefault();
-        const focused = store.get(focusedTaskIdAtom);
-        const rect = focused ? focusedCardElement(focused)?.getBoundingClientRect() : undefined;
-        if (rect) store.set(openMenuAtom, { top: rect.top, left: rect.left, bottom: rect.bottom });
+        const anchor = focusedCardAnchor(store.get(focusedTaskIdAtom));
+        if (anchor) store.set(openMenuAtom, anchor);
+      } else if (e.key === "d") {
+        e.preventDefault();
+        const anchor = focusedCardAnchor(store.get(focusedTaskIdAtom));
+        if (anchor) store.set(requestDeleteAtom, anchor);
       } else if (e.key in ACTION_KEYS) {
         e.preventDefault();
         store.set(runDirectActionAtom, ACTION_KEYS[e.key as keyof typeof ACTION_KEYS]);
