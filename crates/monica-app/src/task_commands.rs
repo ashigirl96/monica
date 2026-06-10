@@ -1,4 +1,6 @@
-use monica_core::{BoardColumn, PrepareTaskResult, TaskBench, TaskSummaryRow, TrackGithubIssueInput};
+use monica_core::{
+    BoardColumn, PrepareTaskResult, RunTaskResult, TaskBench, TaskSummaryRow, TrackGithubIssueInput,
+};
 use monica_infra::Runtime;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -78,9 +80,18 @@ pub fn list_bench_runspace_map() -> Result<Vec<(String, String)>, String> {
 
 #[tauri::command]
 #[specta::specta]
+pub fn task_shell_env(task_id: String) -> Result<Vec<(String, String)>, String> {
+    let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
+    monica_core::task_shell_env(&runtime.repositories, &runtime.run_artifacts, &task_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn open_bench(task_id: String) -> Result<TaskBench, String> {
     let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_core::open_bench(&mut runtime.repositories, &task_id).map_err(|e| e.to_string())
+    monica_core::open_bench(&mut runtime.repositories, &runtime.run_artifacts, &task_id)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -129,4 +140,16 @@ pub fn prepare_task(app: AppHandle, task_id: String) -> Result<PrepareTaskResult
         .map_err(|e| e.to_string())?;
 
     Ok(result)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn run_task(task_id: String) -> Result<RunTaskResult, String> {
+    let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
+    monica_core::prepare_claude_for_run(
+        &mut runtime.repositories,
+        &runtime.run_artifacts,
+        &task_id,
+    )
+    .map_err(|e| e.to_string())
 }

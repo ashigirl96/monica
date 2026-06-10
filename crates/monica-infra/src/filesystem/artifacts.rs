@@ -1,16 +1,15 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
-use monica_core::{AgentLaunch, AgentLaunchMode, Project, RunArtifacts};
+use anyhow::{anyhow, Context, Result};
+use monica_core::{Project, RunArtifacts, TaskShellEnv};
 use serde_json::{json, Value};
 
 use crate::filesystem::paths;
-use crate::process::claude;
 
 const HOOK_EVENTS_FILE: &str = "hook-events.jsonl";
-const CLAUDE_PROGRAM: &str = "claude";
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct FsRunArtifacts;
@@ -26,25 +25,64 @@ impl RunArtifacts for FsRunArtifacts {
         Ok(dir.join("setup.log"))
     }
 
-    fn write_reused_worktree_setup_log(&self, task_run_id: &str) -> Result<String> {
-        let log_path = self.setup_log_path(task_run_id)?;
-        fs::write(
-            &log_path,
-            "monica: reusing existing worktree; setup skipped\n",
-        )
-        .with_context(|| format!("failed to write {}", log_path.display()))?;
-        Ok(log_path.to_string_lossy().into_owned())
-    }
-
-    fn prepare_claude_launch(
+    fn prepare_task_shell_env(
         &self,
-        task_run_id: &str,
         task_id: &str,
         project: &Project,
-        worktree: &Path,
-        launch_mode: &AgentLaunchMode,
-    ) -> Result<(AgentLaunch, String)> {
-        build_claude_launch(task_run_id, task_id, project, worktree, launch_mode)
+    ) -> Result<TaskShellEnv> {
+        let task_dir = paths::task_shell_dir(task_id)?;
+        fs::create_dir_all(&task_dir)
+            .with_context(|| format!("failed to create {}", task_dir.display()))?;
+
+        let hook_cmd = resolve_hook_command()?;
+        let settings_body = claude_settings_json(&hook_cmd)?;
+        let settings_path = task_dir.join("claude-settings.json");
+        fs::write(&settings_path, &settings_body)
+            .with_context(|| format!("failed to write {}", settings_path.display()))?;
+        let settings_path_str = settings_path.to_string_lossy().into_owned();
+
+        let bin_dir = task_dir.join("bin");
+        write_claude_wrapper(&bin_dir)?;
+        let wrapper_path = bin_dir.join("claude").to_string_lossy().into_owned();
+
+        let zdotdir = task_dir.join("zdotdir");
+        write_zdotdir(&zdotdir)?;
+        let zdotdir_str = zdotdir.to_string_lossy().into_owned();
+
+        // The hook CLI runs as a child of Claude inside the PTY, which does not
+        // inherit the app's environment — pass the resolved base dir explicitly
+        // so hooks write to the same DB the app reads (e.g. ~/monica/dev in dev).
+        let monica_home = paths::base_dir()?.to_string_lossy().into_owned();
+
+        let mut env = vec![
+            ("MONICA_HOME".to_string(), monica_home),
+            ("MONICA_TASK_ID".to_string(), task_id.to_string()),
+            ("MONICA_ID".to_string(), task_id.to_string()),
+            ("MONICA_PROJECT_ID".to_string(), project.id.clone()),
+            ("MONICA_CLAUDE_SETTINGS_PATH".to_string(), settings_path_str.clone()),
+            ("MONICA_CLAUDE_WRAPPER".to_string(), wrapper_path.clone()),
+            ("ZDOTDIR".to_string(), zdotdir_str),
+        ];
+        // Set only when the user actually had ZDOTDIR; .zshenv unsets it otherwise
+        // so zsh falls back to $HOME like vanilla.
+        if let Ok(original) = std::env::var("ZDOTDIR") {
+            env.push(("MONICA_ORIGINAL_ZDOTDIR".to_string(), original));
+        }
+        // Best-effort fallback for non-zsh shells, which ignore ZDOTDIR. The
+        // user's rc files may still reorder PATH; zsh users get the reliable
+        // shell-function wrapper instead.
+        let bin_dir_str = bin_dir.to_string_lossy().into_owned();
+        let path_value = match std::env::var("PATH") {
+            Ok(path) if !path.is_empty() => format!("{bin_dir_str}:{path}"),
+            _ => bin_dir_str,
+        };
+        env.push(("PATH".to_string(), path_value));
+
+        Ok(TaskShellEnv {
+            env,
+            settings_path: settings_path_str,
+            wrapper_path,
+        })
     }
 
     fn append_hook_event(
@@ -77,72 +115,207 @@ impl RunArtifacts for FsRunArtifacts {
     }
 }
 
-fn build_claude_launch(
-    task_run_id: &str,
-    task_id: &str,
-    project: &Project,
-    worktree: &Path,
-    launch_mode: &AgentLaunchMode,
-) -> Result<(AgentLaunch, String)> {
-    let task_run_dir = paths::task_run_dir(task_run_id)?;
-    fs::create_dir_all(&task_run_dir)
-        .with_context(|| format!("failed to create {}", task_run_dir.display()))?;
-    let settings_path = task_run_dir.join("claude-settings.json");
-    let settings_body = claude::claude_settings_json(&hook_command())?;
-    fs::write(&settings_path, settings_body)
-        .with_context(|| format!("failed to write {}", settings_path.display()))?;
-
-    let prompt = match launch_mode {
-        AgentLaunchMode::New => claude::read_prompt(worktree)?,
-        AgentLaunchMode::Continue | AgentLaunchMode::Fork { .. } => None,
-    };
-    let prompt_path = task_run_dir.join("prompt.txt");
-    fs::write(&prompt_path, prompt.as_deref().unwrap_or(""))
-        .with_context(|| format!("failed to write {}", prompt_path.display()))?;
-
-    let settings_path_str = settings_path.to_string_lossy().into_owned();
-    let mut args = vec![
-        "--dangerously-skip-permissions".to_string(),
-        "--settings".to_string(),
-        settings_path_str.clone(),
-    ];
-    match launch_mode {
-        AgentLaunchMode::New => {
-            if let Some(p) = prompt {
-                args.push(p);
-            }
-        }
-        AgentLaunchMode::Continue => args.push("--continue".to_string()),
-        AgentLaunchMode::Fork { session_id } => {
-            args.push("--fork-session".to_string());
-            args.push("--resume".to_string());
-            args.push(session_id.clone());
+fn resolve_hook_command() -> Result<String> {
+    if let Ok(cmd) = std::env::var("MONICA_HOOK_COMMAND") {
+        if !cmd.is_empty() {
+            return Ok(cmd);
         }
     }
-    let launch = AgentLaunch {
-        program: CLAUDE_PROGRAM.to_string(),
-        args,
-        cwd: worktree.to_string_lossy().into_owned(),
-        env: vec![
-            ("MONICA_TASK_ID".to_string(), task_id.to_string()),
-            ("MONICA_TASK_RUN_ID".to_string(), task_run_id.to_string()),
-            ("MONICA_ID".to_string(), task_id.to_string()),
-            ("MONICA_RUN_ID".to_string(), task_run_id.to_string()),
-            ("MONICA_PROJECT_ID".to_string(), project.id.clone()),
-        ],
-    };
-    Ok((launch, settings_path_str))
+    if let Ok(cli) = std::env::var("MONICA_CLI_PATH") {
+        if !cli.is_empty() && Path::new(&cli).is_file() {
+            return Ok(format!("{} hook claude", shell_quote_single(&cli)));
+        }
+    }
+    if let Some(cli) = which_monica() {
+        return Ok(format!("{} hook claude", shell_quote_single(&cli)));
+    }
+    Err(anyhow!(
+        "cannot resolve monica CLI for hook command; \
+         set MONICA_CLI_PATH or ensure `monica` is on PATH"
+    ))
 }
 
-fn hook_command() -> String {
-    let exe = std::env::current_exe()
-        .ok()
-        .map(|p| p.to_string_lossy().into_owned())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "monica".to_string());
-    format!("{} hook claude", shell_quote_single(&exe))
+fn which_monica() -> Option<String> {
+    let path = std::env::var("PATH").ok()?;
+    for dir in path.split(':') {
+        let candidate = Path::new(dir).join("monica");
+        if candidate.is_file() {
+            return Some(candidate.to_string_lossy().into_owned());
+        }
+    }
+    None
 }
 
 fn shell_quote_single(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+fn claude_settings_json(hook_command: &str) -> Result<String> {
+    let hook_group = |matcher: &str| {
+        json!({ "matcher": matcher, "hooks": [{ "type": "command", "command": hook_command }] })
+    };
+    let group = || json!([hook_group("")]);
+    let value = json!({
+        "hooks": {
+            "SessionStart": group(),
+            "UserPromptSubmit": group(),
+            "PreToolUse": [
+                hook_group("AskUserQuestion"),
+                hook_group("ExitPlanMode"),
+            ],
+            "PostToolUse": [
+                hook_group("AskUserQuestion"),
+                hook_group("ExitPlanMode"),
+            ],
+            "Stop": group(),
+            "StopFailure": group(),
+            "SessionEnd": group(),
+        }
+    });
+    serde_json::to_string_pretty(&value).context("failed to serialize claude settings")
+}
+
+const CLAUDE_WRAPPER: &str = r#"#!/usr/bin/env bash
+find_real_claude() {
+    local self_dir
+    self_dir="$(cd "$(dirname "$0")" && pwd)"
+    local IFS=:
+    for d in $PATH; do
+        [[ "$d" == "$self_dir" ]] && continue
+        [[ -x "$d/claude" ]] && printf '%s' "$d/claude" && return 0
+    done
+    return 1
+}
+REAL_CLAUDE="$(find_real_claude)" || { echo "Error: claude not found in PATH" >&2; exit 127; }
+if [[ -z "${MONICA_CLAUDE_SETTINGS_PATH:-}" ]]; then
+    exec "$REAL_CLAUDE" "$@"
+fi
+case "${1:-}" in mcp|config|api-key) exec "$REAL_CLAUDE" "$@" ;; esac
+unset CLAUDECODE
+SKIP_SESSION=false
+for arg in "$@"; do
+    case "$arg" in --resume|--resume=*|-r|--session-id|--session-id=*|--continue|-c) SKIP_SESSION=true; break ;; esac
+done
+EXTRA_ARGS=(--dangerously-skip-permissions --settings "$MONICA_CLAUDE_SETTINGS_PATH")
+if [[ "$SKIP_SESSION" != true ]]; then
+    EXTRA_ARGS+=(--session-id "$(uuidgen | tr '[:upper:]' '[:lower:]')")
+fi
+exec "$REAL_CLAUDE" "${EXTRA_ARGS[@]}" "$@"
+"#;
+
+fn write_claude_wrapper(bin_dir: &Path) -> Result<()> {
+    fs::create_dir_all(bin_dir)
+        .with_context(|| format!("failed to create {}", bin_dir.display()))?;
+    let wrapper_path = bin_dir.join("claude");
+    fs::write(&wrapper_path, CLAUDE_WRAPPER)
+        .with_context(|| format!("failed to write {}", wrapper_path.display()))?;
+    fs::set_permissions(&wrapper_path, fs::Permissions::from_mode(0o755))
+        .with_context(|| format!("failed to chmod {}", wrapper_path.display()))?;
+    Ok(())
+}
+
+// zsh resolves each startup file against ZDOTDIR at the moment it reads it, so
+// once .zshenv restores the user's ZDOTDIR, zsh loads the user's real
+// .zprofile/.zshrc next and the other files in this directory are never read.
+// The claude() wrapper must therefore be installed here in .zshenv — a shell
+// function survives the user's rc files, unlike PATH which path_helper,
+// .zshrc, and direnv all rewrite.
+const ZDOTDIR_ZSHENV: &str = r#"# Monica ZDOTDIR bootstrap for zsh.
+if [[ -n "${MONICA_ORIGINAL_ZDOTDIR+X}" ]]; then
+    builtin export ZDOTDIR="$MONICA_ORIGINAL_ZDOTDIR"
+    builtin unset MONICA_ORIGINAL_ZDOTDIR
+else
+    builtin unset ZDOTDIR
+fi
+
+builtin typeset _monica_file="${ZDOTDIR-$HOME}/.zshenv"
+[[ ! -r "$_monica_file" ]] || builtin source -- "$_monica_file"
+builtin unset _monica_file
+
+if [[ -o interactive && -x "${MONICA_CLAUDE_WRAPPER:-}" ]]; then
+    builtin unalias claude >/dev/null 2>&1 || true
+    # eval so an existing `alias claude=...` cannot break parsing.
+    eval 'claude() { "$MONICA_CLAUDE_WRAPPER" "$@"; }'
+fi
+"#;
+
+fn zdotdir_shim(file: &str) -> String {
+    format!(
+        r#"# Compatibility shim: .zshenv restores ZDOTDIR so this should never be reached.
+if [[ -n "${{MONICA_ORIGINAL_ZDOTDIR+X}}" ]]; then
+    builtin export ZDOTDIR="$MONICA_ORIGINAL_ZDOTDIR"
+    builtin unset MONICA_ORIGINAL_ZDOTDIR
+else
+    builtin unset ZDOTDIR
+fi
+
+builtin typeset _monica_file="${{ZDOTDIR-$HOME}}/{file}"
+[[ ! -r "$_monica_file" ]] || builtin source -- "$_monica_file"
+builtin unset _monica_file
+"#
+    )
+}
+
+fn write_zdotdir(zdotdir: &Path) -> Result<()> {
+    fs::create_dir_all(zdotdir)
+        .with_context(|| format!("failed to create {}", zdotdir.display()))?;
+    fs::write(zdotdir.join(".zshenv"), ZDOTDIR_ZSHENV)?;
+    for file in [".zprofile", ".zshrc", ".zlogin"] {
+        fs::write(zdotdir.join(file), zdotdir_shim(file))?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn claude_settings_json_contains_tracked_events() {
+        let body = claude_settings_json("monica hook claude").unwrap();
+        let parsed: Value = serde_json::from_str(&body).unwrap();
+        for event in [
+            "SessionStart",
+            "UserPromptSubmit",
+            "PreToolUse",
+            "PostToolUse",
+            "Stop",
+            "StopFailure",
+            "SessionEnd",
+        ] {
+            let cmd = parsed
+                .pointer(&format!("/hooks/{event}/0/hooks/0/command"))
+                .and_then(Value::as_str);
+            assert_eq!(cmd, Some("monica hook claude"), "{event}: command");
+        }
+    }
+
+    #[test]
+    fn shell_quote_handles_single_quotes() {
+        assert_eq!(shell_quote_single("a'b"), "'a'\\''b'");
+    }
+
+    #[test]
+    fn wrapper_script_is_valid_bash() {
+        assert!(CLAUDE_WRAPPER.starts_with("#!/usr/bin/env bash"));
+        assert!(CLAUDE_WRAPPER.contains("find_real_claude"));
+        assert!(CLAUDE_WRAPPER.contains("MONICA_CLAUDE_SETTINGS_PATH"));
+    }
+
+    #[test]
+    fn zshenv_restores_zdotdir_and_installs_claude_function() {
+        assert!(ZDOTDIR_ZSHENV.contains(r#"builtin export ZDOTDIR="$MONICA_ORIGINAL_ZDOTDIR""#));
+        assert!(ZDOTDIR_ZSHENV.contains("builtin unset ZDOTDIR"));
+        assert!(ZDOTDIR_ZSHENV.contains(r#"claude() { "$MONICA_CLAUDE_WRAPPER" "$@"; }"#));
+        let restore_pos = ZDOTDIR_ZSHENV.find("builtin unset ZDOTDIR").unwrap();
+        let install_pos = ZDOTDIR_ZSHENV.find("claude()").unwrap();
+        assert!(restore_pos < install_pos, "function must be installed after ZDOTDIR restore");
+    }
+
+    #[test]
+    fn zdotdir_shim_sources_matching_user_file() {
+        let shim = zdotdir_shim(".zshrc");
+        assert!(shim.contains(r#""${ZDOTDIR-$HOME}/.zshrc""#));
+        assert!(shim.contains("builtin unset ZDOTDIR"));
+    }
 }

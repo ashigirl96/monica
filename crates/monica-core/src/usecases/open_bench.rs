@@ -1,15 +1,44 @@
 use anyhow::{anyhow, Result};
 
-use crate::interfaces::{BenchRepository, ProjectRepository, TaskRepository, TaskRunRepository};
+use crate::interfaces::{
+    BenchRepository, ProjectRepository, RunArtifacts, TaskRepository, TaskRunRepository,
+};
 use crate::TaskBench;
 
-pub fn open_bench<R>(repos: &mut R, task_id: &str) -> Result<TaskBench>
+/// Recompute the shell env for a task-connected runspace. Fails soft (empty vec) when the task
+/// has no project or artifact generation fails, so terminals still open without Monica context.
+pub fn task_shell_env<R, A>(
+    repos: &R,
+    artifacts: &A,
+    task_id: &str,
+) -> Result<Vec<(String, String)>>
 where
-    R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
+    R: TaskRepository + ProjectRepository,
+    A: RunArtifacts,
 {
     let task = repos
         .get_task(task_id)?
         .ok_or_else(|| anyhow!("task not found: {task_id}"))?;
+
+    Ok(task
+        .project_id
+        .as_deref()
+        .and_then(|pid| repos.get_project(pid).ok().flatten())
+        .and_then(|project| artifacts.prepare_task_shell_env(task_id, &project).ok())
+        .map(|shell| shell.env)
+        .unwrap_or_default())
+}
+
+pub fn open_bench<R, A>(repos: &mut R, artifacts: &A, task_id: &str) -> Result<TaskBench>
+where
+    R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
+    A: RunArtifacts,
+{
+    let task = repos
+        .get_task(task_id)?
+        .ok_or_else(|| anyhow!("task not found: {task_id}"))?;
+
+    let env = task_shell_env(repos, artifacts, task_id)?;
 
     if let Some((runspace_id, cwd)) = repos.get_bench_for_task(task_id)? {
         return Ok(TaskBench {
@@ -17,6 +46,7 @@ where
             runspace_id,
             cwd,
             created: false,
+            env,
         });
     }
 
@@ -38,6 +68,7 @@ where
         runspace_id,
         cwd,
         created: true,
+        env,
     })
 }
 

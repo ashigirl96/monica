@@ -44,12 +44,17 @@ function fromBase64(b64: string): Uint8Array {
   return bytes;
 }
 
+import type { TerminalLaunchIntent } from "@/stores/terminal";
+
 type UseTerminalOptions = {
   tabId: string;
   cwd: string;
   active: boolean;
+  env?: [string, string][];
+  launch?: TerminalLaunchIntent;
   onTitleChange?: (title: string) => void;
   onCwdChange?: (cwd: string) => void;
+  onLaunchConsumed?: () => void;
   onExit?: () => void;
 };
 
@@ -267,10 +272,31 @@ export function useTerminal(
 
     if (!aliveSessions.has(options.tabId)) {
       aliveSessions.add(options.tabId);
-      ptySpawn(options.tabId, options.cwd, term.rows, term.cols).catch(() => {
-        aliveSessions.delete(options.tabId);
-        term.writeln("\r\n\x1b[31mFailed to spawn shell. Press any key to retry.\x1b[0m");
-      });
+      const runspaceEnv = optionsRef.current.env;
+      const launchEnv = optionsRef.current.launch?.env;
+      const mergedEnv =
+        runspaceEnv || launchEnv
+          ? ([...(runspaceEnv ?? []), ...(launchEnv ?? [])] as [string, string][])
+          : undefined;
+      const initialCommand = optionsRef.current.launch?.initialCommand;
+      ptySpawn(options.tabId, options.cwd, term.rows, term.cols, mergedEnv)
+        .then(() => {
+          if (initialCommand) {
+            let sent = false;
+            const send = () => {
+              if (sent) return;
+              sent = true;
+              const enc = new TextEncoder();
+              ptyWrite(options.tabId, toBase64(enc.encode(initialCommand + "\r")));
+              optionsRef.current.onLaunchConsumed?.();
+            };
+            setTimeout(send, 500);
+          }
+        })
+        .catch(() => {
+          aliveSessions.delete(options.tabId);
+          term.writeln("\r\n\x1b[31mFailed to spawn shell. Press any key to retry.\x1b[0m");
+        });
     }
 
     ptyResize(options.tabId, term.rows, term.cols);

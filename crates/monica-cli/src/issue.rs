@@ -1,11 +1,10 @@
 use std::io::{self, Write};
-use std::str::FromStr;
 
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_core::{
-    parse_issue_ref, parse_owner_repo, Agent, AgentLaunchMode, DisplayStatus, SetupOutcome, Task,
-    TaskRunStatus, TaskStatus, TaskSummaryRow, TrackGithubIssueInput,
+    parse_issue_ref, parse_owner_repo, DisplayStatus, Task, TaskStatus, TaskSummaryRow,
+    TrackGithubIssueInput,
 };
 use monica_infra::Runtime;
 
@@ -22,23 +21,6 @@ pub enum IssueCommand {
         status: Option<String>,
         #[arg(long)]
         project: Option<String>,
-    },
-    /// Create a worktree and run .monica/setup.sh for a task (MON-<id>)
-    Run {
-        /// MON-<id>
-        id: String,
-        /// Launch Claude Code after setup (shorthand for --agent claude)
-        #[arg(long, conflicts_with = "agent")]
-        claude: bool,
-        /// Launch a specific agent after setup (e.g. claude)
-        #[arg(long, value_name = "AGENT")]
-        agent: Option<String>,
-        /// Re-enter the most recent Claude Code conversation for this worktree
-        #[arg(long = "continue", conflicts_with = "fork")]
-        continue_session: bool,
-        /// Fork a Claude Code conversation by session id and run it in this worktree
-        #[arg(long, value_name = "SESSION_ID", conflicts_with = "continue_session")]
-        fork: Option<String>,
     },
     /// Delete a tracked Monica issue (MON-<id>)
     Delete {
@@ -62,20 +44,6 @@ pub async fn run(cmd: IssueCommand) -> Result<()> {
     match cmd {
         IssueCommand::Track { target } => track_command(&mut runtime, &target).await,
         IssueCommand::Status { status, project } => status_command(&runtime, status, project),
-        IssueCommand::Run {
-            id,
-            claude,
-            agent,
-            continue_session,
-            fork,
-        } => run_command(
-            &mut runtime,
-            &id,
-            claude,
-            agent.as_deref(),
-            continue_session,
-            fork.as_deref(),
-        ),
         IssueCommand::Delete { id } => delete_command(&mut runtime, &id),
         IssueCommand::Mark { id, status, note } => {
             mark_command(&mut runtime, &id, &status, note.as_deref())
@@ -113,50 +81,6 @@ fn status_command(
     let rows = monica_core::list_task_summaries(&runtime.repositories, status, project.as_deref())?;
     print!("{}", render_status_table(&rows));
     Ok(())
-}
-
-fn run_command(
-    runtime: &mut Runtime,
-    id: &str,
-    claude: bool,
-    agent: Option<&str>,
-    continue_session: bool,
-    fork: Option<&str>,
-) -> Result<()> {
-    let agent = resolve_agent(claude, agent)?;
-    let launch_mode = resolve_launch_mode(continue_session, fork)?;
-    if launch_mode.is_reconnect() && agent != Some(Agent::Claude) {
-        anyhow::bail!("--continue/--fork require --claude or --agent claude");
-    }
-    let report = monica_core::run_issue_with_launch_mode(
-        &mut runtime.repositories,
-        &runtime.git,
-        &runtime.setup_runner,
-        &runtime.run_artifacts,
-        id,
-        agent,
-        launch_mode,
-    )?;
-    println!("Task run {} for {}", report.task_run_id, report.task_id);
-    println!("Branch:   {}", report.branch);
-    println!("Worktree: {}", report.worktree_path);
-    println!("Setup:    {}", describe_setup(&report.setup));
-    println!("Log:      {}", report.log_path);
-    println!("Status:   {}", report.status.as_str());
-    if let Some(path) = report.settings_path.as_deref() {
-        println!("Settings: {path}");
-    }
-    if report.status == TaskRunStatus::Failed {
-        anyhow::bail!(
-            "task run {} failed; see {}",
-            report.task_run_id,
-            report.log_path
-        );
-    }
-    // Hand the terminal to the agent. `launch_agent` is a no-op when no agent was requested, so
-    // this call is unconditional. Spawn failure settles the run to failed inside core, so we just
-    // propagate.
-    monica_core::launch_agent(&mut runtime.repositories, &runtime.agent_launcher, &report)
 }
 
 fn delete_command(runtime: &mut Runtime, id: &str) -> Result<()> {
@@ -209,29 +133,6 @@ fn is_yes(answer: &str) -> bool {
     answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes")
 }
 
-/// Map the two CLI flags (`--claude` shorthand and `--agent <name>`) to an `Option<Agent>`.
-/// `conflicts_with` on the clap side guarantees they are never both set, so this only handles the
-/// remaining three combinations.
-fn resolve_agent(claude: bool, agent: Option<&str>) -> Result<Option<Agent>> {
-    match (claude, agent) {
-        (false, None) => Ok(None),
-        (true, _) => Ok(Some(Agent::Claude)),
-        (false, Some(name)) => Ok(Some(Agent::from_str(name)?)),
-    }
-}
-
-fn resolve_launch_mode(continue_session: bool, fork: Option<&str>) -> Result<AgentLaunchMode> {
-    match (continue_session, fork) {
-        (false, None) => Ok(AgentLaunchMode::New),
-        (true, None) => Ok(AgentLaunchMode::Continue),
-        (false, Some(session_id)) if !session_id.trim().is_empty() => Ok(AgentLaunchMode::Fork {
-            session_id: session_id.trim().to_string(),
-        }),
-        (false, Some(_)) => Err(anyhow!("--fork requires a non-empty session id")),
-        (true, Some(_)) => Err(anyhow!("--continue and --fork cannot be used together")),
-    }
-}
-
 fn mark_command(runtime: &mut Runtime, id: &str, status: &str, note: Option<&str>) -> Result<()> {
     let status = TaskStatus::parse_token(status)?;
     monica_core::mark_issue(&mut runtime.repositories, id, status, note)?;
@@ -240,21 +141,6 @@ fn mark_command(runtime: &mut Runtime, id: &str, status: &str, note: Option<&str
         println!("Note: {note}");
     }
     Ok(())
-}
-
-fn describe_setup(outcome: &SetupOutcome) -> String {
-    match outcome {
-        SetupOutcome::Skipped => "skipped (no .monica/setup.sh)".to_string(),
-        SetupOutcome::ReusedWorktree => "skipped (reusing existing worktree)".to_string(),
-        SetupOutcome::Succeeded => "ok".to_string(),
-        SetupOutcome::Failed {
-            timed_out: true, ..
-        } => "failed (timed out)".to_string(),
-        SetupOutcome::Failed {
-            code: Some(code), ..
-        } => format!("failed (exit {code})"),
-        SetupOutcome::Failed { code: None, .. } => "failed".to_string(),
-    }
 }
 
 fn parse_status_filter(status: Option<&str>) -> Result<Option<DisplayStatus>> {
@@ -326,40 +212,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn describe_setup_covers_outcomes() {
-        assert_eq!(
-            describe_setup(&SetupOutcome::Skipped),
-            "skipped (no .monica/setup.sh)"
-        );
-        assert_eq!(
-            describe_setup(&SetupOutcome::ReusedWorktree),
-            "skipped (reusing existing worktree)"
-        );
-        assert_eq!(describe_setup(&SetupOutcome::Succeeded), "ok");
-        assert_eq!(
-            describe_setup(&SetupOutcome::Failed {
-                code: Some(2),
-                timed_out: false
-            }),
-            "failed (exit 2)"
-        );
-        assert_eq!(
-            describe_setup(&SetupOutcome::Failed {
-                code: None,
-                timed_out: true
-            }),
-            "failed (timed out)"
-        );
-        assert_eq!(
-            describe_setup(&SetupOutcome::Failed {
-                code: None,
-                timed_out: false
-            }),
-            "failed"
-        );
-    }
-
-    #[test]
     fn parse_status_filter_validates_enum() {
         assert_eq!(
             parse_status_filter(Some("ready")).unwrap(),
@@ -376,37 +228,6 @@ mod tests {
             Some("ashigirl96/monica".to_string())
         );
         assert!(normalize_project_filter(Some("bad")).is_err());
-    }
-
-    #[test]
-    fn resolve_agent_maps_flags_to_optional_agent() {
-        assert_eq!(resolve_agent(false, None).unwrap(), None);
-        assert_eq!(resolve_agent(true, None).unwrap(), Some(Agent::Claude));
-        assert_eq!(
-            resolve_agent(false, Some("claude")).unwrap(),
-            Some(Agent::Claude)
-        );
-        assert!(resolve_agent(false, Some("bogus")).is_err());
-    }
-
-    #[test]
-    fn resolve_launch_mode_maps_continue_and_fork() {
-        assert_eq!(
-            resolve_launch_mode(false, None).unwrap(),
-            AgentLaunchMode::New
-        );
-        assert_eq!(
-            resolve_launch_mode(true, None).unwrap(),
-            AgentLaunchMode::Continue
-        );
-        assert_eq!(
-            resolve_launch_mode(false, Some("abc-123")).unwrap(),
-            AgentLaunchMode::Fork {
-                session_id: "abc-123".to_string()
-            }
-        );
-        assert!(resolve_launch_mode(false, Some("")).is_err());
-        assert!(resolve_launch_mode(true, Some("abc-123")).is_err());
     }
 
     #[test]

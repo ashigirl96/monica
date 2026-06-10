@@ -1,13 +1,21 @@
+use std::path::Path;
+use std::time::Duration;
+
 use anyhow::{anyhow, Result};
 
 use crate::domain::{branch_name, monica_number, worktree_path_for};
 use crate::interfaces::{
-    BenchRepository, GitGateway, ProjectRepository, RunArtifacts, SetupRunner, TaskRepository,
-    TaskRunRepository,
+    BenchRepository, GitGateway, ProjectRepository, RunArtifacts, SetupEnv, SetupOutcome,
+    SetupRunner, TaskRepository, TaskRunRepository,
 };
-use crate::{NewTaskRun, PrepareTaskResult, TaskRunStatus};
+use crate::{NewTaskRun, PrepareTaskResult, Project, RefType, TaskRunStatus, TaskStatus};
 
-use super::run_issue::{latest_github_issue_number, setup_phase};
+fn is_active_run_status(status: TaskRunStatus) -> bool {
+    matches!(
+        status,
+        TaskRunStatus::SettingUp | TaskRunStatus::Running | TaskRunStatus::WaitingForUser
+    )
+}
 
 /// Phase 1: Create TaskRun (SettingUp) + set as Main Run + ensure bench exists.
 /// Returns immediately so the UI can reflect `setting_up` without blocking.
@@ -18,6 +26,26 @@ where
     let task = repos
         .get_task(task_id)?
         .ok_or_else(|| anyhow!("task not found: {task_id}"))?;
+
+    if task.status == TaskStatus::Done {
+        return Err(anyhow!("task {task_id} is done; reopen it before preparing"));
+    }
+
+    if let Some(ref primary_id) = task.primary_task_run_id {
+        if let Some(primary_run) = repos.get_task_run(primary_id)? {
+            if is_active_run_status(primary_run.status) {
+                return Err(anyhow!(
+                    "task {task_id} already has an active run ({primary_id}, status: {})",
+                    primary_run.status.as_str()
+                ));
+            }
+            if primary_run.status == TaskRunStatus::Prepared {
+                return Err(anyhow!(
+                    "task {task_id} is already prepared (run {primary_id}); use Run to launch Claude"
+                ));
+            }
+        }
+    }
 
     let project_id = task.project_id.as_deref().ok_or_else(|| {
         anyhow!("{task_id} is not linked to a project")
@@ -89,10 +117,16 @@ where
     let mon = monica_number(task_id)?;
     let branch = branch_name(github_issue_number, mon);
 
+    let fail = |repos: &mut R, e: anyhow::Error| -> anyhow::Error {
+        let _ = repos.finish_task_run(task_run_id, task_id, TaskRunStatus::Failed);
+        e
+    };
+
     let repo_path = project.path.clone().ok_or_else(|| {
-        anyhow!("project {project_id} has no checkout path")
+        fail(repos, anyhow!("project {project_id} has no checkout path"))
     })?;
-    let worktree_path = worktree_path_for(&project, &branch)?;
+    let worktree_path = worktree_path_for(&project, &branch)
+        .map_err(|e| fail(repos, e))?;
     let worktree_str = worktree_path.to_string_lossy().into_owned();
 
     if !worktree_path.exists() {
@@ -101,13 +135,15 @@ where
             &worktree_path,
             &branch,
             &project.default_branch,
-        )?;
+        )
+        .map_err(|e| fail(repos, e))?;
     }
 
-    // Update the TaskRun with the resolved worktree path
-    repos.set_task_run_worktree_path(task_run_id, &worktree_str)?;
+    repos
+        .set_task_run_worktree_path(task_run_id, &worktree_str)
+        .map_err(|e| fail(repos, e))?;
 
-    let setup = match setup_phase(
+    let setup = setup_phase(
         setup_runner,
         artifacts,
         task_run_id,
@@ -115,23 +151,133 @@ where
         &worktree_path,
         &project,
         &branch,
-    ) {
-        Ok(setup) => setup,
-        Err(e) => {
-            let _ = repos.finish_task_run(task_run_id, task_id, TaskRunStatus::Failed);
-            return Err(e);
-        }
-    };
+    )
+    .map_err(|e| fail(repos, e))?;
 
-    let final_status = if setup.outcome.is_failure() {
+    if setup.outcome.is_failure() {
         repos.finish_task_run(task_run_id, task_id, TaskRunStatus::Failed)?;
-        TaskRunStatus::Failed
-    } else {
-        repos.finish_task_run(task_run_id, task_id, TaskRunStatus::Prepared)?;
-        TaskRunStatus::Prepared
+        return Ok(TaskRunStatus::Failed.as_str().to_string());
+    }
+
+    repos
+        .update_bench_cwd(task_id, &worktree_str)
+        .map_err(|e| fail(repos, e))?;
+
+    repos.finish_task_run(task_run_id, task_id, TaskRunStatus::Prepared)?;
+
+    Ok(TaskRunStatus::Prepared.as_str().to_string())
+}
+
+pub(crate) struct SetupResult {
+    pub(crate) outcome: SetupOutcome,
+}
+
+pub(crate) fn setup_phase<S, A>(
+    setup_runner: &S,
+    artifacts: &A,
+    task_run_id: &str,
+    task_id: &str,
+    worktree_path: &Path,
+    project: &Project,
+    branch: &str,
+) -> Result<SetupResult>
+where
+    S: SetupRunner,
+    A: RunArtifacts,
+{
+    let log_path = artifacts.setup_log_path(task_run_id)?;
+    let env = SetupEnv {
+        monica_id: task_id.to_string(),
+        task_run_id: task_run_id.to_string(),
+        project_id: project.id.clone(),
+        branch: branch.to_string(),
+        worktree: worktree_path.to_string_lossy().into_owned(),
     };
+    let timeout = Duration::from_secs(project.setup_timeout_sec.max(0) as u64);
+    let outcome = setup_runner.run_setup_script(worktree_path, &log_path, &env, timeout)?;
+    Ok(SetupResult { outcome })
+}
 
-    repos.update_bench_cwd(task_id, &worktree_str)?;
+pub(crate) fn latest_github_issue_number<R>(repos: &R, task_id: &str) -> Result<Option<i64>>
+where
+    R: TaskRepository,
+{
+    let refs = repos.list_external_refs(task_id)?;
+    Ok(refs
+        .into_iter()
+        .rfind(|r| r.ref_type == RefType::GithubIssue)
+        .and_then(|r| r.number))
+}
 
-    Ok(final_status.as_str().to_string())
+/// Generate claude-settings.json + wrapper script + PTY env for a prepared run.
+/// Does NOT transition the TaskRun to Running — that happens via the SessionStart hook.
+pub fn prepare_claude_for_run<R, A>(
+    repos: &mut R,
+    artifacts: &A,
+    task_id: &str,
+) -> Result<crate::RunTaskResult>
+where
+    R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
+    A: RunArtifacts,
+{
+    let task = repos
+        .get_task(task_id)?
+        .ok_or_else(|| anyhow!("task not found: {task_id}"))?;
+
+    let primary_id = task
+        .primary_task_run_id
+        .ok_or_else(|| anyhow!("task {task_id} has no primary run; prepare it first"))?;
+    let primary_run = repos
+        .get_task_run(&primary_id)?
+        .ok_or_else(|| anyhow!("primary run {primary_id} not found"))?;
+
+    if primary_run.status != TaskRunStatus::Prepared {
+        return Err(anyhow!(
+            "primary run {primary_id} is {} (expected prepared)",
+            primary_run.status.as_str()
+        ));
+    }
+
+    let worktree_str = primary_run.worktree_path.ok_or_else(|| {
+        anyhow!("primary run {primary_id} has no worktree path")
+    })?;
+    let worktree_path = std::path::PathBuf::from(&worktree_str);
+    if !worktree_path.exists() {
+        return Err(anyhow!(
+            "worktree does not exist at {worktree_str}"
+        ));
+    }
+
+    let project_id = task.project_id.as_deref().ok_or_else(|| {
+        anyhow!("{task_id} is not linked to a project")
+    })?;
+    let project = repos
+        .get_project(project_id)?
+        .ok_or_else(|| anyhow!("project not found: {project_id}"))?;
+
+    let shell = artifacts.prepare_task_shell_env(task_id, &project)?;
+    repos.set_task_run_settings_path(&primary_id, &shell.settings_path)?;
+
+    let runspace_id = format!("bench-{task_id}");
+    match repos.get_bench_for_task(task_id)? {
+        Some(_) => {
+            repos.update_bench_cwd(task_id, &worktree_str)?;
+        }
+        None => {
+            repos.create_bench(task_id, &runspace_id, &worktree_str)?;
+        }
+    }
+
+    let mut env = shell.env;
+    env.push(("MONICA_TASK_RUN_ID".to_string(), primary_id.clone()));
+    env.push(("MONICA_RUN_ID".to_string(), primary_id.clone()));
+
+    Ok(crate::RunTaskResult {
+        task_id: task_id.to_string(),
+        task_run_id: primary_id,
+        runspace_id,
+        cwd: worktree_str,
+        env,
+        initial_command: "claude".to_string(),
+    })
 }

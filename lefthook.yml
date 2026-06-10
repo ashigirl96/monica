@@ -4,9 +4,10 @@ pre-commit:
     lint:
       glob: "*.{ts,tsx,js,jsx}"
       run: bunx oxlint
-    fmt-check:
+    fmt:
       glob: "*.{ts,tsx,js,jsx}"
-      run: bunx oxfmt --check
+      run: just fmt && git add {staged_files}
+      stage_fixed: true
 
 pre-push:
   commands:

@@ -6,18 +6,19 @@
 
 前提方針:
 
-- `Open` と `Prepare` は独立した操作。
+- `Open` / `Prepare` / `Run` は独立した操作。
   - `Open` (Bench): 既存 Runspace を開く。新しい TaskRun は作らない。Workbench へ遷移。
   - `Prepare`: TaskRun を作り、worktree/setup を非同期実行。**Workboard に留まる。** agent は起動しない。
+  - `Run`: Prepare（必要なら）+ Workbench 遷移 + Claude Code 自動起動を一連で行う。
 - TaskCard の表示 status は「最新 TaskRun」ではなく「Main Run」を優先して決める。
 - UI 上の呼び名は `Active Run` より **Main Run** を使う。
 - TaskRunStatus は段階を正確に表現する。
   - `setting_up`: worktree 作成 + setup.sh 実行中。
   - `prepared`: worktree + setup 完了、agent 未起動。
-  - `running`: agent (Claude Code) が実行中。
+  - `running`: agent (Claude Code) が実行中（hook の `SessionStart` で確定）。
 - `setup script` は Claude Code なしでも実行できる。
 - `template prompt` / `continue` / `fork` / Claude settings は Claude Code 起動時だけ有効にする。
-- 最初は plain `claude` の自動 wrap はしない。明示的な `monica claude` / UI 起動を優先する。
+- Run 経由の PTY では、nori 方式の `claude` wrapper script で hook 設定を自動注入する。
 
 ---
 
@@ -88,55 +89,120 @@ Acceptance:
 
 ---
 
-## MVP 1: Claude Code launch option
+## MVP 1: Run ボタン + Claude Code 自動フック注入
 
-worktree/setup の flow が安定してから、Claude Code 起動を option として追加する。
+Workboard の TaskCard から **Run** を押すと、Prepare（必要なら）+ Workbench 遷移 + Claude Code 自動起動を行う。
+PTY 内で `claude` を打った場合も、nori 方式の wrapper script で Monica の hook 設定が自動注入される。
 
-### 1-1. Run launch sheet を追加する
+方針:
 
-- [ ] TaskCard の `Prepare` から簡易 launch sheet を開く（または別途 `Run` ボタンを追加する）。
-- [ ] 最初の options は以下に絞る。
-  - `Run setup script`
-  - `Start Claude Code`
-  - `Use template prompt`
-- [ ] `Use template prompt` は `Start Claude Code` が off のとき disabled にする。
-- [ ] `Use template prompt` は Claude launch mode が `new` のときだけ有効にする。
+- `Run` は `Prepare` + `Open` + Claude 起動を一連で行う操作。`Prepare` / `Open` は引き続き独立して使える。
+- `run_task` backend command は Prepare を背負わない。prepared の primary run に対する launch env 生成だけ。
+- `TaskRunStatus::Running` への遷移は Claude hook の `SessionStart` が source of truth。backend で推測しない。
+- hook command は Tauri app 実行ファイルではなく、`monica hook claude` を処理できる CLI を明示的に解決する。
+- 既存 alive PTY には env を後入れできない。Run は launch env 付きの新規 terminal tab を作る。
+- `initialCommand` / `env` は永続化しない。一回限りの launch intent として消費する。
 
-Acceptance:
+### 1-0. Prepare 側の状態遷移を固める
 
-- [ ] Claude off の状態で prompt option を選べない。
-- [ ] setup only / setup + Claude の両方を選べる。
-
-### 1-2. Claude launch artifact を Prepare/Run flow に接続する
-
-- [ ] Claude enabled のときだけ `claude-settings.json` と `prompt.txt` を生成する。
-- [ ] Claude process env に以下を注入する。
-  - `MONICA_TASK_ID`
-  - `MONICA_TASK_RUN_ID`
-  - `MONICA_ID`
-  - `MONICA_RUN_ID`
-  - `MONICA_PROJECT_ID`
-- [ ] setup failed の場合は Claude を起動しない。
-- [ ] settings path を TaskRun に保存する。
-- [ ] Claude 起動時に TaskRunStatus を `prepared` → `running` に遷移する。
+- [ ] `start_run()` に active run guard を追加する。
+  - `done` タスクは reject。
+  - primary run が `setting_up` / `running` / `waiting_for_user` の場合は reject。
+  - primary run が `prepared` の場合は新規 run を作らず、既存 prepared run を誘導。
+  - `stopped` / `failed` は新規 Prepare を許可する。
+- [ ] `execute_run()` の失敗時に DB が `setting_up` に残らないようにする。
+  - worktree 作成失敗、setup 失敗、bench cwd 更新失敗のすべてで `Failed` にする。
+  - `update_bench_cwd()` は `Prepared` 遷移前に実行する。
 
 Acceptance:
 
-- [ ] Claude hook event が対象 TaskRun に記録される。
-- [ ] setup failed では Claude 起動が発生しない。
+- [ ] 二重 Prepare / active run 中の Prepare が backend で拒否される。
+- [ ] setup 前の失敗でも TaskRun が `failed` になる。
 
-### 1-3. Claude を Workbench 内で見える形で起動する
+### 1-1. PTY に env 注入機能を追加する
 
-- [ ] 短期方針を選ぶ。
-  - Option A: shell tab に command を queue/write する。
-  - Option B: PTY が program/args/env を直接 spawn できるようにする。
-- [ ] MVP では実装が軽い方を採用してよいが、TaskRun lifecycle の source of truth は backend に置く。
-- [ ] Agent tab / terminal tab 上で Claude 起動状態を見られるようにする。
+- [ ] `SpawnRequest` に `env: Option<Vec<(String, String)>>` を追加する。
+- [ ] `PtyManager::spawn()` で `req.env` を `CommandBuilder::env()` に適用する。
+- [ ] `pty_spawn` Tauri command に `env` パラメータを追加する。
+- [ ] `ptySpawn` TS wrapper に `env` 引数を追加する。
 
 Acceptance:
 
-- [ ] Prepare 後、Claude enabled なら Workbench 上で Claude Code が見える。
-- [ ] Claude の hook によって TaskRun が `running` / `waiting_for_user` / `stopped` / `failed` に遷移する。
+- [ ] 既存 PTY テストが `env: None` で通る。
+- [ ] env 付き spawn で `MONICA_TASK_RUN_ID` が shell から見える。
+
+### 1-2. Claude wrapper と hook command 解決を実装する
+
+- [ ] `RunArtifacts` trait に `prepare_run_env()` を追加する。
+- [ ] `<task_run_dir>/bin/claude` wrapper script を生成する。
+  - real `claude` を PATH から探す（自身の directory を除外）。
+  - `MONICA_CLAUDE_SETTINGS_PATH` がなければ pass-through。
+  - `claude mcp` / `config` / `api-key` は pass-through。
+  - `--settings` は常に注入する（Claude Code はアディティブにマージする）。
+  - `--dangerously-skip-permissions` を注入する。
+- [ ] hook command 解決: `MONICA_HOOK_COMMAND` → `MONICA_CLI_PATH` → PATH 上の `monica` → error。
+- [ ] 返す env: `MONICA_TASK_ID`, `MONICA_TASK_RUN_ID`, `MONICA_ID`, `MONICA_RUN_ID`, `MONICA_PROJECT_ID`, `MONICA_CLAUDE_SETTINGS_PATH`, `PATH`（wrapper bin を prepend）。
+
+Acceptance:
+
+- [ ] wrapper が実行可能で、real `claude` を再帰的に自分へ解決しない。
+- [ ] `monica` CLI が PATH になく `MONICA_CLI_PATH` も未設定の場合、Run が明示的に失敗する。
+
+### 1-3. `run_task` Tauri command を追加する
+
+- [ ] `prepare_claude_for_run()` usecase: prepared primary run から launch env + bench open を行う。
+  - TaskRun が `Prepared` でなければ error。
+  - `prepare_run_env()` で settings + wrapper + env を生成。
+  - `set_task_run_settings_path()` を実行。
+  - bench を open/create し、cwd を worktree に更新。
+  - `Running` にはしない（hook の `SessionStart` に任せる）。
+- [ ] `RunTaskResult { task_id, task_run_id, runspace_id, cwd, env, initial_command }` を返す。
+- [ ] `run_task` Tauri command を `collect_commands!` に登録。
+
+Acceptance:
+
+- [ ] non-prepared primary run では `runTask` が error。
+- [ ] `runTask` 後も DB status は `prepared` のまま。
+- [ ] env に `PATH` / `MONICA_*` / settings path が含まれる。
+
+### 1-4. Workboard の Run flow と TaskCard に Run ボタンを追加する
+
+- [ ] `runTaskAtom`: 未 prepared なら `prepareTask` → 完了待ち → `runTask` → Workbench 遷移。
+- [ ] `waitForPreparedOrFailed()`: event listener + polling のハイブリッド。timeout 120 秒。
+- [ ] TaskCard に Run ボタン追加。表示: `inbox`, `ready`, `prepared`, `stopped`, `failed`。
+- [ ] Run ボタンは `setting_up`, `running`, `waiting_for_user`, `done` で非表示。
+
+Acceptance:
+
+- [ ] ready タスクで Run → prepare 完了後に Workbench へ遷移。
+- [ ] failed prepare は Workbench を開かず error。
+
+### 1-5. Terminal launch intent を一回限りで消費する
+
+- [ ] `TerminalLaunchIntent { env, initialCommand }` 型を追加する。
+- [ ] `TerminalTab` に `launch?: TerminalLaunchIntent` を追加する（永続化しない）。
+- [ ] `createTaskRunspaceAtom` に `launch` が渡された場合は、既存 runspace 内に新規 tab を作る。
+- [ ] `useTerminal` で env 付き `ptySpawn` + spawn 後に `initialCommand + "\r"` を一度だけ書き込む。
+- [ ] command 書き込み後に launch intent を消す。
+
+Acceptance:
+
+- [ ] prepared タスクで Run → 新規 tab が作られ、env 付き shell で `claude` が起動する。
+- [ ] 同じタスクで再度 Run → 既存 tab に割り込まず新規 tab が作られる。
+- [ ] Bench ボタン → 既存挙動のまま。
+- [ ] app restart 後に launch intent が残らない。
+
+### 1-6. Hook による lifecycle 確認
+
+- [ ] wrapper 経由で起動した Claude の hook event が `hook-events.jsonl` に追記される。
+- [ ] `record_claude_hook()` が TaskRun status を `prepared` → `running`（SessionStart）に更新する。
+- [ ] `PreToolUse AskUserQuestion` / `ExitPlanMode` で `waiting_for_user` になる。
+- [ ] `Stop` / `SessionEnd` で `stopped` になる。
+
+Acceptance:
+
+- [ ] Run → Claude 起動 → TaskCard が `running` → `waiting_for_user` → `stopped` と hook 経由で遷移する。
+- [ ] Workboard reload でも表示が追従する。
 
 ---
 

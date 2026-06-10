@@ -1,25 +1,23 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 
 use crate::interfaces::{
-    AgentLauncher, AuthGateway, BoxFuture, Clock, EventRepository, GitGateway, GithubGateway,
-    ProjectRepository, RunArtifacts, SetupEnv, SetupOutcome, SetupRunner, TaskRepository,
-    TaskRunRepository,
+    AuthGateway, BoxFuture, Clock, EventRepository, GitGateway, GithubGateway, ProjectRepository,
+    RunArtifacts, TaskRepository, TaskRunRepository,
 };
 use crate::{
-    begin_github_device_flow, delete_issue, github_auth_status, launch_agent, logout_github,
-    record_claude_hook, register_project_with_default_branch, run_issue, sync_next_pull_request,
-    track_github_issue, wait_for_github_device_flow, Agent, AgentLaunch, AgentLaunchMode,
-    DisplayStatus, Event, ExternalRef, GithubAuthStatus, GithubDeviceFlow, GithubIssue,
-    GithubPullRequest, GithubPullRequestRef, GithubPullRequestStatus, NewTask, NewTaskRun, Project,
-    PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate, PullRequestSyncCandidate,
-    PullRequestSyncStatus, RefType, Task, TaskKind, TaskRun, TaskRunObservation, TaskRunStatus,
-    TaskRunWaitReason, TaskStatus, TaskSummaryRow, TrackGithubIssueInput,
+    begin_github_device_flow, delete_issue, github_auth_status, logout_github, record_claude_hook,
+    register_project_with_default_branch, sync_next_pull_request, track_github_issue,
+    wait_for_github_device_flow, Agent, DisplayStatus, Event, ExternalRef, GithubAuthStatus,
+    GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef,
+    GithubPullRequestStatus, NewTask, NewTaskRun, Project, PullRequestBranchSyncCandidate,
+    PullRequestStatusSyncCandidate, PullRequestSyncCandidate, PullRequestSyncStatus, Task,
+    TaskKind, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus,
+    TaskSummaryRow, TrackGithubIssueInput,
 };
 
 #[derive(Default)]
@@ -385,6 +383,9 @@ impl TaskRunRepository for FakeRepos {
         if let Some(wait_reason) = observation.wait_reason {
             run.wait_reason = wait_reason;
         }
+        if let Some(session) = observation.provider_session_id {
+            run.provider_session_id = Some(session.to_string());
+        }
         run.last_event_name = observation.event_name.map(ToString::to_string);
         run.last_event_at = Some(observation.at.to_string());
         Ok(())
@@ -524,20 +525,6 @@ impl GitGateway for FakeGit {
     }
 }
 
-struct FakeSetup;
-
-impl SetupRunner for FakeSetup {
-    fn run_setup_script(
-        &self,
-        _worktree: &Path,
-        _log_path: &Path,
-        _env: &SetupEnv,
-        _timeout: Duration,
-    ) -> Result<SetupOutcome> {
-        Ok(SetupOutcome::Succeeded)
-    }
-}
-
 #[derive(Default)]
 struct FakeArtifacts {
     appended: RefCell<bool>,
@@ -552,30 +539,18 @@ impl RunArtifacts for FakeArtifacts {
         Ok(self.task_run_dir(task_run_id)?.join("setup.log"))
     }
 
-    fn write_reused_worktree_setup_log(&self, task_run_id: &str) -> Result<String> {
-        Ok(self
-            .setup_log_path(task_run_id)?
-            .to_string_lossy()
-            .into_owned())
-    }
-
-    fn prepare_claude_launch(
+    fn prepare_task_shell_env(
         &self,
-        task_run_id: &str,
         task_id: &str,
-        _project: &Project,
-        worktree: &Path,
-        _launch_mode: &AgentLaunchMode,
-    ) -> Result<(AgentLaunch, String)> {
-        Ok((
-            AgentLaunch {
-                program: "claude".to_string(),
-                args: vec![],
-                cwd: worktree.to_string_lossy().into_owned(),
-                env: vec![("MONICA_TASK_RUN_ID".to_string(), task_run_id.to_string())],
-            },
-            format!("/tmp/{task_id}/settings.json"),
-        ))
+        _project: &crate::Project,
+    ) -> Result<crate::TaskShellEnv> {
+        Ok(crate::TaskShellEnv {
+            env: vec![
+                ("MONICA_TASK_ID".to_string(), task_id.to_string()),
+            ],
+            settings_path: format!("/tmp/tasks/{task_id}/claude-settings.json"),
+            wrapper_path: format!("/tmp/tasks/{task_id}/bin/claude"),
+        })
     }
 
     fn append_hook_event(
@@ -587,14 +562,6 @@ impl RunArtifacts for FakeArtifacts {
         _raw_stdin: &str,
     ) -> Result<()> {
         *self.appended.borrow_mut() = true;
-        Ok(())
-    }
-}
-
-struct FakeLauncher;
-
-impl AgentLauncher for FakeLauncher {
-    fn launch(&self, _launch: &AgentLaunch) -> Result<()> {
         Ok(())
     }
 }
@@ -713,44 +680,6 @@ fn delete_issue_delegates_run_cleanup_to_git_gateway() {
 }
 
 #[test]
-fn run_issue_uses_boundaries_and_preserves_done_task_on_settlement() {
-    let mut repos = FakeRepos::default();
-    let mut project = Project::from_repo("owner/repo");
-    project.path = Some("/repo".to_string());
-    repos.insert_project(project);
-    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
-    repos.state.borrow_mut().refs.insert(
-        task_id.clone(),
-        vec![ExternalRef::new(
-            task_id.clone(),
-            RefType::GithubIssue,
-            Some("owner/repo".to_string()),
-            Some(42),
-            None,
-        )],
-    );
-
-    let report = run_issue(
-        &mut repos,
-        &FakeGit::default(),
-        &FakeSetup,
-        &FakeArtifacts::default(),
-        &task_id,
-        Some(Agent::Claude),
-    )
-    .unwrap();
-    assert_eq!(report.branch, "issue-42");
-    assert_eq!(report.status, TaskRunStatus::Running);
-
-    repos.mark_task(&task_id, TaskStatus::Done, None).unwrap();
-    launch_agent(&mut repos, &FakeLauncher, &report).unwrap();
-    assert_eq!(
-        repos.get_task(&task_id).unwrap().unwrap().status,
-        TaskStatus::Done
-    );
-}
-
-#[test]
 fn record_claude_hook_records_waiting_transition_and_artifact() {
     let mut repos = FakeRepos::default();
     let task_id = repos.insert_task_for_run(None);
@@ -777,6 +706,96 @@ fn record_claude_hook_records_waiting_transition_and_artifact() {
         Some(TaskRunWaitReason::AskUserQuestion)
     );
     assert!(*artifacts.appended.borrow());
+}
+
+#[test]
+fn record_claude_hook_claims_prepared_primary_run_without_run_id() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    let run = repos
+        .start_task_run(NewTaskRun {
+            task_id: task_id.clone(),
+            agent: Some(Agent::Claude),
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
+    repos
+        .finish_task_run(&run.id, &task_id, TaskRunStatus::Prepared)
+        .unwrap();
+    repos.set_primary_task_run(&task_id, &run.id).unwrap();
+    let artifacts = FakeArtifacts::default();
+
+    let report = record_claude_hook(
+        &mut repos,
+        &artifacts,
+        Some(&task_id),
+        None,
+        r#"{"hook_event_name":"SessionStart","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    assert!(report.task_run_linked);
+    assert_eq!(report.task_run_status, Some(TaskRunStatus::Running));
+    assert_eq!(
+        repos.get_task_run(&run.id).unwrap().unwrap().status,
+        TaskRunStatus::Running
+    );
+
+    // The claimed run is no longer prepared; the same session keeps driving it.
+    let report = record_claude_hook(
+        &mut repos,
+        &artifacts,
+        Some(&task_id),
+        None,
+        r#"{"hook_event_name":"Stop","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    assert!(report.task_run_linked);
+    assert_eq!(report.task_run_status, Some(TaskRunStatus::Stopped));
+}
+
+#[test]
+fn record_claude_hook_does_not_steal_active_primary_run_from_another_session() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    let run = repos
+        .start_task_run(NewTaskRun {
+            task_id: task_id.clone(),
+            agent: Some(Agent::Claude),
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
+    repos
+        .finish_task_run(&run.id, &task_id, TaskRunStatus::Prepared)
+        .unwrap();
+    repos.set_primary_task_run(&task_id, &run.id).unwrap();
+    let artifacts = FakeArtifacts::default();
+
+    record_claude_hook(
+        &mut repos,
+        &artifacts,
+        Some(&task_id),
+        Some(&run.id),
+        r#"{"hook_event_name":"SessionStart","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+
+    let report = record_claude_hook(
+        &mut repos,
+        &artifacts,
+        Some(&task_id),
+        None,
+        r#"{"hook_event_name":"SessionStart","session_id":"sess-2"}"#,
+    )
+    .unwrap();
+    assert!(!report.task_run_linked);
+    assert_eq!(report.task_run_status, None);
+    assert!(report.event_recorded);
+    assert_eq!(
+        repos.get_task_run(&run.id).unwrap().unwrap().status,
+        TaskRunStatus::Running
+    );
 }
 
 #[tokio::test]

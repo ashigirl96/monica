@@ -3,7 +3,7 @@ use anyhow::Result;
 use crate::filesystem::{scaffold_monica, FsRunArtifacts};
 use crate::git::GitCliGateway;
 use crate::github::{KeychainAuthGateway, OctocrabGithubGateway};
-use crate::process::{ProcessAgentLauncher, ProcessSetupRunner};
+use crate::process::ProcessSetupRunner;
 use crate::sqlite::SqliteStore;
 
 pub struct Runtime {
@@ -11,7 +11,6 @@ pub struct Runtime {
     pub github: OctocrabGithubGateway,
     pub git: GitCliGateway,
     pub setup_runner: ProcessSetupRunner,
-    pub agent_launcher: ProcessAgentLauncher,
     pub run_artifacts: FsRunArtifacts,
     pub auth: KeychainAuthGateway,
 }
@@ -23,7 +22,6 @@ impl Runtime {
             github: OctocrabGithubGateway::new(),
             git: GitCliGateway,
             setup_runner: ProcessSetupRunner,
-            agent_launcher: ProcessAgentLauncher,
             run_artifacts: FsRunArtifacts,
             auth: KeychainAuthGateway::new(),
         })

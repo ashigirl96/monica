@@ -6,8 +6,8 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 export const commands = {
   clipboardWriteImage: (path: string) =>
     typedError<null, string>(__TAURI_INVOKE("clipboard_write_image", { path })),
-  ptySpawn: (id: string, cwd: string, rows: number, cols: number) =>
-    typedError<null, string>(__TAURI_INVOKE("pty_spawn", { id, cwd, rows, cols })),
+  ptySpawn: (id: string, cwd: string, rows: number, cols: number, env: [string, string][] | null) =>
+    typedError<null, string>(__TAURI_INVOKE("pty_spawn", { id, cwd, rows, cols, env })),
   ptyWrite: (id: string, data: string) =>
     typedError<null, string>(__TAURI_INVOKE("pty_write", { id, data })),
   ptyResize: (id: string, rows: number, cols: number) =>
@@ -25,10 +25,14 @@ export const commands = {
     typedError<TrackIssueResult, string>(__TAURI_INVOKE("track_github_issue", { repo, number })),
   listBenchRunspaceMap: () =>
     typedError<[string, string][], string>(__TAURI_INVOKE("list_bench_runspace_map")),
+  taskShellEnv: (taskId: string) =>
+    typedError<[string, string][], string>(__TAURI_INVOKE("task_shell_env", { taskId })),
   openBench: (taskId: string) =>
     typedError<TaskBench, string>(__TAURI_INVOKE("open_bench", { taskId })),
   prepareTask: (taskId: string) =>
     typedError<PrepareTaskResult, string>(__TAURI_INVOKE("prepare_task", { taskId })),
+  runTask: (taskId: string) =>
+    typedError<RunTaskResult, string>(__TAURI_INVOKE("run_task", { taskId })),
 };
 
 /* Types */
@@ -68,11 +72,21 @@ export type ProjectEntry = {
   name: string;
 };
 
+export type RunTaskResult = {
+  task_id: string;
+  task_run_id: string;
+  runspace_id: string;
+  cwd: string;
+  env: [string, string][];
+  initial_command: string;
+};
+
 export type TaskBench = {
   task_id: string;
   runspace_id: string;
   cwd: string;
   created: boolean;
+  env: [string, string][];
 };
 
 export type TaskRunStatus =

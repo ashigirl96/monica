@@ -35,17 +35,14 @@ pub fn task_run_dir(task_run_id: &str) -> Result<PathBuf> {
     Ok(task_runs_dir()?.join(task_run_id))
 }
 
+/// Per-task shell artifact directory: `<base>/tasks/<task_id>/` (holds wrapper, settings, zdotdir).
+pub fn task_shell_dir(task_id: &str) -> Result<PathBuf> {
+    Ok(base_dir()?.join("tasks").join(task_id))
+}
+
 /// Legacy shared worktree root under Monica's base dir. New `issue run` callers should prefer a
 /// project-local default (`<project.path>/.worktrees`) and use this only when they explicitly want
 /// a Monica-managed shared location.
 pub fn worktrees_dir() -> Result<PathBuf> {
     Ok(base_dir()?.join("worktrees"))
-}
-
-#[cfg(test)]
-pub(crate) fn test_env_guard() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    LOCK.get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }

@@ -10,6 +10,7 @@ export type {
   TrackIssueResult,
   TaskBench,
   PrepareTaskResult,
+  RunTaskResult,
 } from "./bindings";
 
 async function unwrap<T>(
@@ -40,12 +41,20 @@ export function listBenchRunspaceMap() {
   return unwrap(commands.listBenchRunspaceMap());
 }
 
+export function taskShellEnv(taskId: string) {
+  return unwrap(commands.taskShellEnv(taskId));
+}
+
 export function openBench(taskId: string) {
   return unwrap(commands.openBench(taskId));
 }
 
 export function prepareTask(taskId: string) {
   return unwrap(commands.prepareTask(taskId));
+}
+
+export function runTask(taskId: string) {
+  return unwrap(commands.runTask(taskId));
 }
 
 export function onTaskRunStatusChanged(

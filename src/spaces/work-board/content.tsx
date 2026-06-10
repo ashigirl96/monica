@@ -22,6 +22,15 @@ function WorkBoardContent() {
     };
   }, [refreshSummaries]);
 
+  // Hook CLI (separate process) writes status to the DB without emitting
+  // Tauri events, so poll while the board is visible.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      refreshSummaries();
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [refreshSummaries]);
+
   return (
     <div className="flex h-full gap-px overflow-x-auto bg-border/30">
       {columns.map((col) => (
