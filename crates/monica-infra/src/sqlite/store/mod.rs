@@ -6,6 +6,7 @@ mod pull_request_sync;
 mod task_runs;
 mod tasks;
 pub(crate) mod terminal;
+mod terminal_sessions;
 
 pub(super) const TASK_COLUMNS: &str = "id, kind, status, phase, title, body, project_id,      labels, details_json, source_json, primary_task_run_id, deleted_at, created_at, updated_at";
 

@@ -22,6 +22,7 @@ fn migrations() -> Migrations<'static> {
         M::up(V13),
         M::up(V14),
         M::up(V15),
+        M::up(V16),
     ])
 }
 
@@ -434,6 +435,37 @@ const V15: &str = r#"
     CREATE INDEX task_runs_terminal_tab_idx ON task_runs(terminal_tab_id);
 "#;
 
+/// v16: durable terminal sessions owned by the PTY daemon. Tabs reference a session via
+/// `terminal_tabs.terminal_session_id` instead of doubling as the PTY id. No FKs:
+/// `save_terminal_state` rewrites runspaces/tabs wholesale (DELETE + reinsert), so hard
+/// references would break on every layout save; reconcile owns consistency instead.
+const V16: &str = r#"
+    CREATE TABLE terminal_session_counter (n INTEGER PRIMARY KEY AUTOINCREMENT);
+
+    CREATE TABLE terminal_sessions (
+      id              TEXT PRIMARY KEY,
+      runspace_id     TEXT,
+      tab_id          TEXT,
+      kind            TEXT NOT NULL DEFAULT 'shell',
+      cwd             TEXT NOT NULL,
+      shell           TEXT NOT NULL,
+      status          TEXT NOT NULL,
+      pid             INTEGER,
+      rows            INTEGER NOT NULL,
+      cols            INTEGER NOT NULL,
+      transcript_path TEXT,
+      exit_code       INTEGER,
+      started_at      TEXT,
+      last_seen_at    TEXT,
+      exited_at       TEXT,
+      created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    );
+    CREATE INDEX terminal_sessions_runspace_idx ON terminal_sessions(runspace_id, status);
+
+    ALTER TABLE terminal_tabs ADD COLUMN terminal_session_id TEXT;
+"#;
+
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
     migrations()
@@ -507,7 +539,68 @@ mod tests {
             .conn()
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 15);
+        assert_eq!(version, 16);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// Tab rows written under the v15 schema must survive the v16 ALTER TABLE and read back
+    /// with a NULL `terminal_session_id`, and the new session tables must exist.
+    #[test]
+    fn v16_adds_terminal_sessions_and_preserves_v15_tabs() {
+        let path = temp_db_path("v16");
+
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            Migrations::new(vec![
+                M::up(V1),
+                M::up(V2),
+                M::up(V3),
+                M::up(V4),
+                M::up(V5),
+                M::up(V6),
+                M::up(V7),
+                M::up(V8),
+                M::up(V9),
+                M::up(V10),
+                M::up(V11),
+                M::up(V12),
+                M::up(V13),
+                M::up(V14),
+                M::up(V15),
+            ])
+            .to_latest(&mut conn)
+            .unwrap();
+            conn.execute(
+                "INSERT INTO terminal_runspaces (id, sort_order, is_active)
+                 VALUES ('rs-1', 0, 1)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO terminal_tabs (id, runspace_id, cwd, title, sort_order, is_active)
+                 VALUES ('tab-1', 'rs-1', '/tmp', 'tab', 0, 1)",
+                [],
+            )
+            .unwrap();
+        }
+
+        let db = crate::sqlite::SqliteStore::open_at(&path).unwrap();
+        let snapshot = db.load_terminal_state().unwrap();
+        assert_eq!(snapshot.runspaces.len(), 1);
+        assert_eq!(snapshot.runspaces[0].tabs[0].id, "tab-1");
+        assert_eq!(snapshot.runspaces[0].tabs[0].terminal_session_id, None);
+
+        let session_table: i64 = db
+            .conn()
+            .query_row(
+                "SELECT count(*) FROM sqlite_master
+                  WHERE type = 'table' AND name = 'terminal_sessions'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(session_table, 1);
 
         std::fs::remove_file(&path).ok();
     }

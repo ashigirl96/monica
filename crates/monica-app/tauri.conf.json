@@ -5,7 +5,7 @@
   "identifier": "com.ashigirl96.monica",
   "build": {
     "beforeDevCommand": "bun run dev",
-    "beforeBuildCommand": "bun run build",
+    "beforeBuildCommand": "bun run build && cargo build --release -p monica-ptyd && mkdir -p crates/monica-app/binaries && cp target/release/monica-ptyd \"crates/monica-app/binaries/monica-ptyd-$(rustc -vV | sed -n 's/host: //p')\"",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../../dist",
     "removeUnusedCommands": true
@@ -24,7 +24,10 @@
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "transparent": true,
-        "trafficLightPosition": { "x": 16, "y": 22 },
+        "trafficLightPosition": {
+          "x": 16,
+          "y": 22
+        },
         "dragDropEnabled": true,
         "windowEffects": {
           "effects": ["sidebar"],
@@ -45,6 +48,7 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "externalBin": ["binaries/monica-ptyd"]
   }
 }

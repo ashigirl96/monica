@@ -1,13 +1,17 @@
-import { atom } from "jotai";
+import { atom, type Getter, type Setter } from "jotai";
 import {
-  ptyKill,
+  terminalDetach,
+  terminalListSessions,
   terminalLoadState,
   terminalSaveState,
+  terminalTerminate,
+  type TerminalSession,
+  type TerminalSessionStatus,
   type TerminalStateSnapshot,
-} from "@/commands/pty";
+} from "@/commands/terminal";
 import { listBenchRunspaceMap, primaryTabId, taskShellEnv } from "@/commands/task";
 import { worktreeInfo, type WorktreeInfo } from "@/commands/git";
-import { markSessionDead } from "@/spaces/work-bench/use-terminal";
+import { releaseTabConnection } from "@/spaces/work-bench/terminal-connections";
 
 const FONT_SIZE_DEFAULT = 15;
 const FONT_SIZE_MIN = 10;
@@ -32,6 +36,9 @@ export type TerminalTab = {
   title: string;
   cwd: string;
   order: number;
+  /// The durable TerminalSession this tab is attached to. Tab identity (UI) and session
+  /// identity (process) are separate: closing the tab detaches, never kills.
+  sessionId?: string;
   launch?: TerminalLaunchIntent;
 };
 
@@ -214,14 +221,22 @@ export const createRunspaceAtom = atom(null, (get, set) => {
   });
 });
 
+// Closing a tab or runspace detaches the session (the process keeps running under the
+// daemon and shows up in the Detached group); only an explicit Terminate kills it.
+function detachTab(tab: TerminalTab) {
+  const sessionId = releaseTabConnection(tab.id) ?? tab.sessionId;
+  if (sessionId) {
+    terminalDetach(sessionId).catch((e) => console.warn("terminal detach failed:", e));
+  }
+}
+
 export const removeRunspaceAtom = atom(null, (get, set, rsId: string) => {
   const state = get(resolvedStateAtom);
   const rs = state.runspaces.find((r) => r.id === rsId);
   if (!rs) return;
 
   for (const tab of rs.tabs) {
-    markSessionDead(tab.id);
-    ptyKill(tab.id);
+    detachTab(tab);
   }
 
   const remaining = state.runspaces.filter((r) => r.id !== rsId);
@@ -285,15 +300,15 @@ export const closeTerminalTabAtom = atom(null, (get, set, tabId?: string) => {
   if (!rs) return;
 
   const targetId = tabId ?? rs.activeTabId;
-  if (!rs.tabs.some((t) => t.id === targetId)) return;
-
-  markSessionDead(targetId);
-  ptyKill(targetId);
+  const target = rs.tabs.find((t) => t.id === targetId);
+  if (!target) return;
 
   if (rs.tabs.length <= 1) {
     set(removeRunspaceAtom, rs.id);
     return;
   }
+
+  detachTab(target);
 
   const idx = rs.tabs.findIndex((t) => t.id === targetId);
   const newTabs = rs.tabs.filter((t) => t.id !== targetId);
@@ -414,6 +429,7 @@ function stateToSnapshot(state: TerminalState): TerminalStateSnapshot {
         title: t.title,
         sort_order: t.order,
         is_active: t.id === rs.activeTabId,
+        terminal_session_id: t.sessionId ?? null,
       })),
     })),
   };
@@ -430,6 +446,7 @@ function snapshotToState(snap: TerminalStateSnapshot): TerminalState | null {
       title: t.title,
       cwd: t.cwd,
       order: t.sort_order,
+      sessionId: t.terminal_session_id ?? undefined,
     })),
   }));
   const activeRs = snap.runspaces.find((rs) => rs.is_active);
@@ -438,6 +455,145 @@ function snapshotToState(snap: TerminalStateSnapshot): TerminalState | null {
     activeRunspaceId: activeRs?.id ?? runspaces[0]?.id ?? "",
   };
 }
+
+export type SessionStatusEntry = {
+  status: TerminalSessionStatus;
+  exitCode?: number | null;
+};
+
+// sessionId → last known status. Seeded by the startup reconcile, kept fresh by the
+// sidebar poll, and overridden optimistically by attach/exit handling in use-terminal.
+// A session missing from the map is "unknown": panes still try to attach (the daemon may
+// simply not have been reachable yet) and only an attach failure demotes it to lost.
+export const sessionStatusAtom = atom<Record<string, SessionStatusEntry>>({});
+
+export const setSessionStatusAtom = atom(
+  null,
+  (_get, set, sessionId: string, entry: SessionStatusEntry) => {
+    set(sessionStatusAtom, (prev) => ({ ...prev, [sessionId]: entry }));
+  },
+);
+
+// Live sessions (running/detached in the daemon) not bound to any tab — what the
+// "Detached" sidebar group lists for reattach/terminate.
+export const detachedSessionsAtom = atom<TerminalSession[]>([]);
+
+function applySessionList(get: Getter, set: Setter, sessions: TerminalSession[]) {
+  const statusMap: Record<string, SessionStatusEntry> = {};
+  for (const s of sessions) {
+    statusMap[s.id] = { status: s.status, exitCode: s.exit_code };
+  }
+  set(sessionStatusAtom, statusMap);
+
+  const state = get(terminalStateAtom);
+  const boundIds = new Set(
+    (state?.runspaces ?? []).flatMap((rs) => rs.tabs.map((t) => t.sessionId)).filter(Boolean),
+  );
+  const detached = sessions.filter(
+    (s) => (s.status === "running" || s.status === "detached") && !boundIds.has(s.id),
+  );
+  set(detachedSessionsAtom, detached);
+}
+
+// terminal_list_sessions reconciles DB rows against the daemon backend-side, so this is
+// both the status poll and the startup reconcile. Failures are non-fatal: keep the last
+// known state and let attach failures surface as lost.
+export const refreshSessionsAtom = atom(null, async (get, set) => {
+  let sessions: TerminalSession[];
+  try {
+    sessions = await terminalListSessions();
+  } catch (e) {
+    console.warn("terminal session refresh failed:", e);
+    return;
+  }
+  applySessionList(get, set, sessions);
+});
+
+export const bindTabSessionAtom = atom(null, (get, set, tabId: string, sessionId: string) => {
+  const state = get(resolvedStateAtom);
+  set(terminalStateAtom, {
+    ...state,
+    runspaces: state.runspaces.map((rs) => ({
+      ...rs,
+      tabs: rs.tabs.map((t) => (t.id === tabId ? { ...t, sessionId } : t)),
+    })),
+  });
+});
+
+export const terminateTabSessionAtom = atom(null, async (get, set, tabId: string) => {
+  const state = get(resolvedStateAtom);
+  const tab = state.runspaces.flatMap((rs) => rs.tabs).find((t) => t.id === tabId);
+  const sessionId = tab?.sessionId;
+  if (sessionId) {
+    try {
+      await terminalTerminate(sessionId);
+    } catch (e) {
+      console.warn("terminal terminate failed:", e);
+    }
+  }
+  set(closeTerminalTabAtom, tabId);
+});
+
+// For lost/exited/failed tabs: keep the tab (and its cwd) but start a fresh session in
+// it. Clearing sessionId makes the pane's connection effect create a new one.
+export const startNewShellForTabAtom = atom(null, (get, set, tabId: string) => {
+  releaseTabConnection(tabId);
+  const state = get(resolvedStateAtom);
+  set(terminalStateAtom, {
+    ...state,
+    runspaces: state.runspaces.map((rs) => ({
+      ...rs,
+      tabs: rs.tabs.map((t) => (t.id === tabId ? { ...t, sessionId: undefined } : t)),
+    })),
+  });
+});
+
+// Reattach a detached session into a tab. Prefers its original runspace and tab id (the
+// tab id is burned into the child env as MONICA_TERMINAL_TAB_ID, so reusing it keeps
+// hook-driven tab claims valid); falls back to the active runspace / a fresh id.
+export const reattachSessionAtom = atom(null, (get, set, session: TerminalSession) => {
+  const state = get(resolvedStateAtom);
+  const allTabs = state.runspaces.flatMap((rs) => rs.tabs);
+  if (allTabs.some((t) => t.sessionId === session.id)) return;
+
+  const targetRs =
+    state.runspaces.find((rs) => rs.id === session.runspace_id) ??
+    state.runspaces.find((rs) => rs.id === state.activeRunspaceId) ??
+    state.runspaces[0];
+  if (!targetRs) return;
+
+  const tabIdFree = session.tab_id && !allTabs.some((t) => t.id === session.tab_id);
+  const tab: TerminalTab = {
+    id: tabIdFree && session.tab_id ? session.tab_id : crypto.randomUUID(),
+    title: "",
+    cwd: session.cwd,
+    order: targetRs.tabs.length,
+    sessionId: session.id,
+  };
+
+  set(terminalStateAtom, {
+    ...state,
+    activeRunspaceId: targetRs.id,
+    runspaces: state.runspaces.map((rs) =>
+      rs.id === targetRs.id ? { ...rs, tabs: [...rs.tabs, tab], activeTabId: tab.id } : rs,
+    ),
+  });
+  set(detachedSessionsAtom, (prev) => prev.filter((s) => s.id !== session.id));
+  set(terminalFocusRequestAtom, (c) => c + 1);
+});
+
+export type TabMenuState = {
+  tabId: string;
+  anchor: { top: number; bottom: number; left: number };
+  confirmingTerminate: boolean;
+};
+
+export const tabMenuAtom = atom<TabMenuState | null>(null);
+
+export const tabByIdAtom = atom((get) => {
+  const state = get(resolvedStateAtom);
+  return new Map(state.runspaces.flatMap((rs) => rs.tabs).map((t) => [t.id, t]));
+});
 
 // Concurrent loads (e.g. WorkBench mount racing createTaskRunspaceAtom) must share
 // one promise: the null check alone lets the slower load overwrite state mutated in
@@ -450,7 +606,18 @@ export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
 
   loadTerminalStateInFlight = (async () => {
     try {
-      const [snap, benchMap] = await Promise.all([terminalLoadState(), listBenchRunspaceMap()]);
+      // The session list is fetched with its own catch: it triggers the backend's daemon
+      // reconcile, and a daemon failure must not fall into the catch below, which would
+      // replace (and then persist) the saved layout with an empty one. Unknown statuses
+      // just mean panes attempt to attach and demote themselves to lost on failure.
+      const [snap, benchMap, sessions] = await Promise.all([
+        terminalLoadState(),
+        listBenchRunspaceMap(),
+        terminalListSessions().catch((e) => {
+          console.warn("terminal session reconcile failed:", e);
+          return null;
+        }),
+      ]);
       const runspaceToTask = new Map(benchMap.map(([rsId, taskId]) => [rsId, taskId]));
       const state = snapshotToState(snap);
       if (state && state.runspaces.length > 0) {
@@ -475,9 +642,11 @@ export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
           return { ...rs, taskId, env: env && env.length > 0 ? env : undefined };
         });
         set(terminalStateAtom, state);
+        if (sessions) applySessionList(get, set, sessions);
         void set(resolveWorktreeInfoAtom);
         return;
       }
+      if (sessions) applySessionList(get, set, sessions);
     } catch {
       // first launch or empty DB
     }

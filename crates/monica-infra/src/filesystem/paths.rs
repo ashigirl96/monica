@@ -36,6 +36,21 @@ pub fn task_shell_dir(task_id: &str) -> Result<PathBuf> {
     Ok(base_dir()?.join("tasks").join(task_id))
 }
 
+/// Unix domain socket the PTY daemon (`monica-ptyd`) listens on.
+pub fn ptyd_socket_path() -> Result<PathBuf> {
+    Ok(base_dir()?.join("ptyd.sock"))
+}
+
+/// Pid/lock file guaranteeing a single daemon instance per base dir.
+pub fn ptyd_pid_path() -> Result<PathBuf> {
+    Ok(base_dir()?.join("ptyd.pid"))
+}
+
+/// Bounded transcript files for terminal sessions: `<base>/terminal-sessions/<session_id>.log`.
+pub fn terminal_sessions_dir() -> Result<PathBuf> {
+    Ok(base_dir()?.join("terminal-sessions"))
+}
+
 /// Legacy shared worktree root under Monica's base dir. New `issue run` callers should prefer a
 /// project-local default (`<project.path>/.worktrees`) and use this only when they explicitly want
 /// a Monica-managed shared location.

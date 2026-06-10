@@ -15,13 +15,30 @@ export const commands = {
       } | null,
       string
     >(__TAURI_INVOKE("worktree_info", { cwd })),
-  ptySpawn: (id: string, cwd: string, rows: number, cols: number, env: [string, string][] | null) =>
-    typedError<null, string>(__TAURI_INVOKE("pty_spawn", { id, cwd, rows, cols, env })),
-  ptyWrite: (id: string, data: string) =>
-    typedError<null, string>(__TAURI_INVOKE("pty_write", { id, data })),
-  ptyResize: (id: string, rows: number, cols: number) =>
-    typedError<null, string>(__TAURI_INVOKE("pty_resize", { id, rows, cols })),
-  ptyKill: (id: string) => typedError<null, string>(__TAURI_INVOKE("pty_kill", { id })),
+  terminalCreateSession: (
+    runspaceId: string,
+    tabId: string,
+    kind: TerminalSessionKind,
+    cwd: string,
+    rows: number,
+    cols: number,
+    env: [string, string][] | null,
+  ) =>
+    typedError<TerminalSession, string>(
+      __TAURI_INVOKE("terminal_create_session", { runspaceId, tabId, kind, cwd, rows, cols, env }),
+    ),
+  terminalAttach: (sessionId: string, replayBytes: number | null) =>
+    typedError<AttachResult, string>(__TAURI_INVOKE("terminal_attach", { sessionId, replayBytes })),
+  terminalDetach: (sessionId: string) =>
+    typedError<null, string>(__TAURI_INVOKE("terminal_detach", { sessionId })),
+  terminalWrite: (sessionId: string, data: string) =>
+    typedError<null, string>(__TAURI_INVOKE("terminal_write", { sessionId, data })),
+  terminalResize: (sessionId: string, rows: number, cols: number) =>
+    typedError<null, string>(__TAURI_INVOKE("terminal_resize", { sessionId, rows, cols })),
+  terminalTerminate: (sessionId: string) =>
+    typedError<null, string>(__TAURI_INVOKE("terminal_terminate", { sessionId })),
+  terminalListSessions: (runspaceId: string | null) =>
+    typedError<TerminalSession[], string>(__TAURI_INVOKE("terminal_list_sessions", { runspaceId })),
   terminalLoadState: () =>
     typedError<TerminalStateSnapshot, string>(__TAURI_INVOKE("terminal_load_state")),
   terminalSaveState: (state: TerminalStateSnapshot) =>
@@ -61,6 +78,13 @@ export const events = {
 };
 
 /* Types */
+export type AttachResult = {
+  /**  Base64 transcript tail to write into xterm before streaming live output. */
+  replay: string;
+  rows: number;
+  cols: number;
+};
+
 export type BoardColumn = {
   key: string;
   label: string;
@@ -155,6 +179,44 @@ export type TerminalRunspaceRow = {
   tabs: TerminalTabRow[];
 };
 
+/**
+ *  A durable shell/agent process session owned by the PTY daemon. UI tabs attach to and
+ *  detach from sessions; only an explicit terminate kills the underlying process.
+ */
+export type TerminalSession = {
+  id: string;
+  runspace_id: string | null;
+  /**
+   *  The Workbench tab this session was created for. Burned into the child env as
+   *  MONICA_TERMINAL_TAB_ID, so reattach prefers reusing it to keep hook claims valid.
+   */
+  tab_id: string | null;
+  kind: TerminalSessionKind;
+  cwd: string;
+  shell: string;
+  status: TerminalSessionStatus;
+  pid: number | null;
+  rows: number;
+  cols: number;
+  transcript_path: string | null;
+  exit_code: number | null;
+  started_at: string | null;
+  last_seen_at: string | null;
+  exited_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TerminalSessionKind = "shell" | "agent" | "task" | "scratch";
+
+export type TerminalSessionStatus =
+  | "starting"
+  | "running"
+  | "detached"
+  | "exited"
+  | "lost"
+  | "failed";
+
 export type TerminalStateSnapshot = {
   runspaces: TerminalRunspaceRow[];
 };
@@ -165,6 +227,7 @@ export type TerminalTabRow = {
   title: string;
   sort_order: number;
   is_active: boolean;
+  terminal_session_id: string | null;
 };
 
 export type TrackIssueResult = {

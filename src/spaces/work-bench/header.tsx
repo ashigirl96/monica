@@ -7,15 +7,25 @@ import {
   primaryTabByTaskAtom,
   refreshPrimaryTabAtom,
   reorderTabsAtom,
+  sessionStatusAtom,
+  tabMenuAtom,
 } from "@/stores/terminal";
 import { onTaskRunStatusChanged } from "@/commands/task";
 import { PlusIcon, XIcon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import { useEffect, useRef, useState } from "react";
 
+const STATUS_DOT: Record<string, string> = {
+  exited: "bg-zinc-500",
+  lost: "bg-amber-400",
+  failed: "bg-red-400",
+};
+
 export function WorkBenchHeader() {
   const rs = useAtomValue(activeRunspaceAtom);
   const primaryTabs = useAtomValue(primaryTabByTaskAtom);
+  const sessionStatus = useAtomValue(sessionStatusAtom);
+  const setTabMenu = useSetAtom(tabMenuAtom);
   const refreshPrimaryTab = useSetAtom(refreshPrimaryTabAtom);
   const activateTab = useSetAtom(activateTerminalTabAtom);
   const closeTab = useSetAtom(closeTerminalTabAtom);
@@ -64,6 +74,8 @@ export function WorkBenchHeader() {
         const isActive = tab.id === rs.activeTabId;
         const isMain = tab.id === primaryTabId;
         const label = tab.title || tab.cwd.split("/").pop() || "Terminal";
+        const status = tab.sessionId ? sessionStatus[tab.sessionId]?.status : undefined;
+        const statusDot = status ? STATUS_DOT[status] : undefined;
         return (
           <button
             key={tab.id}
@@ -93,6 +105,15 @@ export function WorkBenchHeader() {
               e.preventDefault();
               activateTab(tab.id);
             }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              const rect = e.currentTarget.getBoundingClientRect();
+              setTabMenu({
+                tabId: tab.id,
+                anchor: { top: rect.top, bottom: rect.bottom, left: e.clientX },
+                confirmingTerminate: false,
+              });
+            }}
             className={cn(
               "group flex h-7 w-[220px] min-w-[220px] max-w-[220px] cursor-pointer items-center rounded-lg px-3 text-xs",
               "transition-colors duration-100",
@@ -110,6 +131,12 @@ export function WorkBenchHeader() {
               />
             )}
             <span className="flex-1 truncate">{label}</span>
+            {statusDot && (
+              <span
+                title={status}
+                className={cn("ml-1.5 size-1.5 shrink-0 rounded-full", statusDot)}
+              />
+            )}
             <span
               role="button"
               onClick={(e) => {

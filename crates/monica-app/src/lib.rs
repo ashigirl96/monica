@@ -6,14 +6,14 @@ use std::time::Duration;
 
 use monica_core::PullRequestSyncStatus;
 use monica_infra::Runtime;
-use monica_pty::PtyManager;
 
 mod clipboard_commands;
 mod git_commands;
-mod pty_commands;
+mod ptyd;
 #[cfg(all(unix, not(debug_assertions)))]
 mod shell_path;
 mod task_commands;
+mod terminal_commands;
 
 const PR_SYNC_INTERVAL: Duration = Duration::from_secs(10);
 const PR_SYNC_BATCH_LIMIT: usize = 3;
@@ -23,12 +23,15 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         .commands(tauri_specta::collect_commands![
             clipboard_commands::clipboard_write_image,
             git_commands::worktree_info,
-            pty_commands::pty_spawn,
-            pty_commands::pty_write,
-            pty_commands::pty_resize,
-            pty_commands::pty_kill,
-            pty_commands::terminal_load_state,
-            pty_commands::terminal_save_state,
+            terminal_commands::terminal_create_session,
+            terminal_commands::terminal_attach,
+            terminal_commands::terminal_detach,
+            terminal_commands::terminal_write,
+            terminal_commands::terminal_resize,
+            terminal_commands::terminal_terminate,
+            terminal_commands::terminal_list_sessions,
+            terminal_commands::terminal_load_state,
+            terminal_commands::terminal_save_state,
             task_commands::list_task_summaries,
             task_commands::get_board_columns,
             task_commands::list_projects,
@@ -85,11 +88,12 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_opener::init())
-        .manage(PtyManager::new())
+        .manage(ptyd::PtydHandle::new())
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             specta_builder.mount_events(app);
             start_pull_request_sync_scheduler();
+            start_ptyd_warmup(app.handle().clone());
             #[cfg(not(debug_assertions))]
             log::info!(
                 target: "monica_app::startup",
@@ -111,6 +115,23 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+// Warm up the daemon connection (and its event pump) off-thread so window startup never
+// blocks on a daemon spawn. Reconciliation is NOT done here: the frontend's first
+// terminal_list_sessions call owns it, after this connection (or its own) is up.
+fn start_ptyd_warmup(app: tauri::AppHandle) {
+    use tauri::Manager;
+    let spawned = std::thread::Builder::new()
+        .name("monica-ptyd-warmup".to_string())
+        .spawn(move || {
+            if let Err(e) = app.state::<ptyd::PtydHandle>().ensure_connected(&app) {
+                log::warn!(target: "monica_app::ptyd", "daemon warmup failed: {e:#}");
+            }
+        });
+    if let Err(e) = spawned {
+        log::error!(target: "monica_app::ptyd", "failed to start ptyd warmup thread: {e}");
+    }
 }
 
 fn start_pull_request_sync_scheduler() {
