@@ -56,21 +56,20 @@ impl GithubTokenProvider {
             };
         }
 
-        match self.store.load_metadata() {
-            Ok(Some(metadata)) => {
+        match self.store.load() {
+            Ok(Some(token)) => {
                 let now = now_epoch_seconds();
-                let refresh_expired = metadata
-                    .refresh_expires_at
-                    .is_some_and(|expires| expires <= now);
+                let usable = token.access_token_valid_at(now, ACCESS_TOKEN_SKEW_SECONDS)
+                    || token.refresh_token_valid_at(now);
                 GithubAuthStatus {
-                    authenticated: !refresh_expired,
+                    authenticated: usable,
                     source: "keychain".to_string(),
-                    login: metadata.login,
-                    access_expires_at: metadata.access_expires_at,
-                    refresh_expires_at: metadata.refresh_expires_at,
-                    reauth_required: refresh_expired,
-                    message: refresh_expired.then(|| {
-                        "GitHub refresh token expired; run `monica auth github login`".to_string()
+                    login: token.login,
+                    access_expires_at: token.access_expires_at,
+                    refresh_expires_at: token.refresh_expires_at,
+                    reauth_required: !usable,
+                    message: (!usable).then(|| {
+                        "GitHub token expired; run `monica auth github login`".to_string()
                     }),
                 }
             }
@@ -85,7 +84,7 @@ impl GithubTokenProvider {
             },
             Err(e) => GithubAuthStatus {
                 authenticated: false,
-                source: "metadata".to_string(),
+                source: "keychain".to_string(),
                 login: None,
                 access_expires_at: None,
                 refresh_expires_at: None,

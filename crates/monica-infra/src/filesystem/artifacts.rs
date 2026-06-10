@@ -35,7 +35,12 @@ impl RunArtifacts for FsRunArtifacts {
         fs::create_dir_all(&task_dir)
             .with_context(|| format!("failed to create {}", task_dir.display()))?;
 
-        let hook_cmd = resolve_hook_command()?;
+        // The hook must write to the DB this app instance reads, but the tab's
+        // MONICA_HOME can be rewritten after spawn (direnv applying a repo
+        // .envrc that exports another base) — so the command pins the base
+        // itself instead of trusting the environment it inherits.
+        let monica_home = paths::base_dir()?.to_string_lossy().into_owned();
+        let hook_cmd = pin_hook_command_base(&resolve_hook_command()?, &monica_home);
         let settings_body = claude_settings_json(&hook_cmd)?;
         let settings_path = task_dir.join("claude-settings.json");
         write_if_changed(&settings_path, &settings_body)?;
@@ -49,12 +54,9 @@ impl RunArtifacts for FsRunArtifacts {
         write_zdotdir(&zdotdir)?;
         let zdotdir_str = zdotdir.to_string_lossy().into_owned();
 
-        // The hook CLI runs as a child of Claude inside the PTY, which does not
-        // inherit the app's environment — pass the resolved base dir explicitly
-        // so hooks write to the same DB the app reads (e.g. ~/monica/dev in dev).
-        let monica_home = paths::base_dir()?.to_string_lossy().into_owned();
-
         let mut env = vec![
+            // The tab's shell and any `monica` CLI calls in it should use the
+            // same base dir as the app (e.g. ~/monica/dev in dev).
             ("MONICA_HOME".to_string(), monica_home),
             ("MONICA_TASK_ID".to_string(), task_id.to_string()),
             ("MONICA_ID".to_string(), task_id.to_string()),
@@ -159,6 +161,10 @@ fn which_monica() -> Option<String> {
 
 fn shell_quote_single(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+fn pin_hook_command_base(hook_command: &str, monica_home: &str) -> String {
+    format!("MONICA_HOME={} {hook_command}", shell_quote_single(monica_home))
 }
 
 fn claude_settings_json(hook_command: &str) -> Result<String> {
@@ -306,6 +312,14 @@ mod tests {
     #[test]
     fn shell_quote_handles_single_quotes() {
         assert_eq!(shell_quote_single("a'b"), "'a'\\''b'");
+    }
+
+    #[test]
+    fn pinned_hook_command_carries_its_own_monica_home() {
+        assert_eq!(
+            pin_hook_command_base("'/usr/local/bin/monica' hook claude", "/Users/x/monica"),
+            "MONICA_HOME='/Users/x/monica' '/usr/local/bin/monica' hook claude"
+        );
     }
 
     #[test]
