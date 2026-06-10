@@ -38,6 +38,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             task_commands::open_bench,
             task_commands::prepare_task,
             task_commands::run_task,
+            task_commands::delete_task,
             task_commands::make_main_task_run,
             task_commands::primary_tab_id,
         ])

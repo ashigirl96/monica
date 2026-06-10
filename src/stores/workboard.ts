@@ -7,6 +7,7 @@ import {
   openBench,
   prepareTask,
   runTask,
+  deleteTask,
   makeMainTaskRun,
   onTaskRunStatusChanged,
   taskShellEnv,
@@ -101,6 +102,13 @@ export const PREPARE_ELIGIBLE: Set<DisplayStatus> = new Set([
   "stopped",
   "failed",
 ]);
+
+export const RUN_ELIGIBLE: Set<DisplayStatus> = new Set([...PREPARE_ELIGIBLE, "prepared"]);
+
+export const deleteTaskAtom = atom(null, async (_get, set, taskId: string) => {
+  await deleteTask(taskId);
+  await set(refreshTaskSummariesAtom);
+});
 
 // prepare_task always emits task-run:status-changed from its background thread
 // (on both success and failure), so an event listener plus a timeout suffices.

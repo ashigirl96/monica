@@ -57,6 +57,10 @@ export function runTask(taskId: string) {
   return unwrap(commands.runTask(taskId));
 }
 
+export function deleteTask(taskId: string) {
+  return unwrap(commands.deleteTask(taskId));
+}
+
 export function makeMainTaskRun(tabId: string) {
   return unwrap(commands.makeMainTaskRun(tabId));
 }
