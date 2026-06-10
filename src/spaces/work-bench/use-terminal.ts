@@ -3,7 +3,9 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { getDefaultStore } from "jotai";
 import { ptySpawn, ptyWrite, ptyResize, onPtyOutput, onPtyExit } from "@/commands/pty";
 import { activeSpaceAtom, prefixActiveAtom } from "@/stores/space";
@@ -85,6 +87,11 @@ export function useTerminal(
       allowTransparency: false,
       allowProposedApi: true,
       scrollback: 5000,
+      linkHandler: {
+        activate: (_event, uri) => {
+          openUrl(uri);
+        },
+      },
       theme: {
         background: "#1d1f21",
         foreground: "#c5c8c6",
@@ -114,6 +121,11 @@ export function useTerminal(
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.loadAddon(new Unicode11Addon());
+    term.loadAddon(
+      new WebLinksAddon((_event, uri) => {
+        openUrl(uri);
+      }),
+    );
 
     termRef.current = term;
     fitRef.current = fitAddon;
