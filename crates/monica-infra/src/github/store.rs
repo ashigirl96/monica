@@ -1,9 +1,5 @@
-use std::fs;
-
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
-
-use crate::filesystem::paths;
 
 const KEYCHAIN_SERVICE: &str = "monica.github";
 const KEYCHAIN_ACCOUNT: &str = "github.com";
@@ -34,23 +30,6 @@ impl StoredGithubToken {
                 .refresh_expires_at
                 .is_none_or(|expires_at| expires_at > now)
     }
-
-    pub fn metadata(&self) -> GithubAuthMetadata {
-        GithubAuthMetadata {
-            login: self.login.clone(),
-            access_expires_at: self.access_expires_at,
-            refresh_expires_at: self.refresh_expires_at,
-            saved_at: self.saved_at,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GithubAuthMetadata {
-    pub login: Option<String>,
-    pub access_expires_at: Option<i64>,
-    pub refresh_expires_at: Option<i64>,
-    pub saved_at: i64,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -68,41 +47,12 @@ impl GithubTokenStore {
 
     pub fn save(&self, token: &StoredGithubToken) -> Result<()> {
         let bytes = serde_json::to_vec(token)?;
-        write_keychain_password(&bytes)?;
-        write_metadata(&token.metadata())
+        write_keychain_password(&bytes)
     }
 
     pub fn delete(&self) -> Result<()> {
-        delete_keychain_password()?;
-        let path = paths::github_auth_metadata_path()?;
-        match fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e).with_context(|| format!("failed to remove {}", path.display())),
-        }
+        delete_keychain_password()
     }
-
-    pub fn load_metadata(&self) -> Result<Option<GithubAuthMetadata>> {
-        let path = paths::github_auth_metadata_path()?;
-        let contents = match fs::read_to_string(&path) {
-            Ok(contents) => contents,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(e).with_context(|| format!("failed to read {}", path.display())),
-        };
-        serde_json::from_str(&contents)
-            .map(Some)
-            .with_context(|| format!("failed to parse {}", path.display()))
-    }
-}
-
-fn write_metadata(metadata: &GithubAuthMetadata) -> Result<()> {
-    let path = paths::github_auth_metadata_path()?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    let contents = serde_json::to_string_pretty(metadata)?;
-    fs::write(&path, contents).with_context(|| format!("failed to write {}", path.display()))
 }
 
 // Keychain access goes through the Apple-signed `security` CLI instead of
