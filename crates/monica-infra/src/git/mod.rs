@@ -1,3 +1,3 @@
 mod worktree;
 
-pub use worktree::GitCliGateway;
+pub use worktree::{worktree_info, GitCliGateway, WorktreeInfo};

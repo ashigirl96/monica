@@ -6,6 +6,7 @@ import {
   type TerminalStateSnapshot,
 } from "@/commands/pty";
 import { listBenchRunspaceMap, primaryTabId, taskShellEnv } from "@/commands/task";
+import { worktreeInfo, type WorktreeInfo } from "@/commands/git";
 import { markSessionDead } from "@/spaces/work-bench/use-terminal";
 
 const FONT_SIZE_DEFAULT = 15;
@@ -76,10 +77,19 @@ function extractShortPath(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
-function deriveRunspaceTitle(rs: TerminalRunspace): string {
+function tabDisplayPath(tab: TerminalTab): string {
+  return tab.cwd !== "~" ? tab.cwd : tab.title || tab.cwd;
+}
+
+function deriveRunspaceTitle(
+  rs: TerminalRunspace,
+  worktrees: Record<string, WorktreeInfo | null>,
+): string {
   const tab = rs.tabs.find((t) => t.id === rs.activeTabId) ?? rs.tabs[0];
   if (!tab) return "";
-  const path = tab.cwd !== "~" ? tab.cwd : tab.title || tab.cwd;
+  const path = tabDisplayPath(tab);
+  const worktree = worktrees[path];
+  if (worktree) return `${worktree.repo}:${worktree.branch}`;
   return extractShortPath(path);
 }
 
@@ -110,6 +120,46 @@ export const activeTerminalTabAtom = atom((get) => {
   return rs.tabs.find((t) => t.id === rs.activeTabId) ?? rs.tabs[0] ?? null;
 });
 
+// path → linked-worktree identity (null = not a worktree). The branch can change
+// without a cwd change (`git switch` in place), so title updates re-resolve known
+// paths instead of trusting the cache forever; the timestamp map throttles that
+// against apps that rewrite the terminal title continuously.
+const worktreeInfoByPathAtom = atom<Record<string, WorktreeInfo | null>>({});
+
+const WORKTREE_REVALIDATE_MS = 5000;
+const worktreeResolvedAt: Record<string, number> = {};
+
+const resolveWorktreeInfoAtom = atom(null, async (get, set, revalidate?: string[]) => {
+  const state = get(terminalStateAtom);
+  if (!state) return;
+  const cache = get(worktreeInfoByPathAtom);
+  const now = Date.now();
+
+  const paths = new Set<string>();
+  for (const path of revalidate ?? []) {
+    if (path.startsWith("/") && now - (worktreeResolvedAt[path] ?? 0) >= WORKTREE_REVALIDATE_MS) {
+      paths.add(path);
+    }
+  }
+  for (const rs of state.runspaces) {
+    for (const tab of rs.tabs) {
+      const path = tabDisplayPath(tab);
+      if (path.startsWith("/") && !(path in cache)) paths.add(path);
+    }
+  }
+  if (paths.size === 0) return;
+  for (const path of paths) worktreeResolvedAt[path] = now;
+
+  const entries = await Promise.all(
+    [...paths].map(async (path) => [path, await worktreeInfo(path).catch(() => null)] as const),
+  );
+  set(worktreeInfoByPathAtom, (prev) => {
+    const next = { ...prev };
+    for (const [path, info] of entries) next[path] = info;
+    return next;
+  });
+});
+
 // taskId → tab hosting the task's Main Run. Hook-driven claims write straight to the
 // DB without a Tauri event, so this is refreshed by polling alongside the summaries.
 export const primaryTabByTaskAtom = atom<Record<string, string | null>>({});
@@ -135,12 +185,13 @@ export type RunspaceSummary = {
 
 export const runspaceSummariesAtom = atom<RunspaceSummary[]>((get) => {
   const state = get(resolvedStateAtom);
+  const worktrees = get(worktreeInfoByPathAtom);
   return state.runspaces
     .sort((a, b) => a.order - b.order)
     .map((rs) => ({
       id: rs.id,
       taskId: rs.taskId,
-      title: deriveRunspaceTitle(rs),
+      title: deriveRunspaceTitle(rs, worktrees),
       description: deriveRunspaceDescription(rs),
       tabCount: rs.tabs.length,
       isActive: rs.id === state.activeRunspaceId,
@@ -296,6 +347,10 @@ export const updateTabTitleAtom = atom(null, (get, set, tabId: string, title: st
       tabs: rs.tabs.map((t) => (t.id === tabId ? { ...t, title } : t)),
     })),
   });
+  // Shells retitle on every prompt, making this the signal that something may have
+  // run in the tab — including a branch switch the cwd watcher cannot see.
+  const tab = state.runspaces.flatMap((rs) => rs.tabs).find((t) => t.id === tabId);
+  if (tab) void set(resolveWorktreeInfoAtom, [tabDisplayPath({ ...tab, title })]);
 });
 
 export const updateTabCwdAtom = atom(null, (get, set, tabId: string, cwd: string) => {
@@ -307,6 +362,7 @@ export const updateTabCwdAtom = atom(null, (get, set, tabId: string, cwd: string
       tabs: rs.tabs.map((t) => (t.id === tabId ? { ...t, cwd } : t)),
     })),
   });
+  void set(resolveWorktreeInfoAtom, [cwd]);
 });
 
 export const reorderRunspacesAtom = atom(null, (get, set, fromId: string, toId: string) => {
@@ -354,7 +410,7 @@ function stateToSnapshot(state: TerminalState): TerminalStateSnapshot {
       is_active: rs.id === state.activeRunspaceId,
       tabs: rs.tabs.map((t) => ({
         id: t.id,
-        cwd: t.cwd !== "~" ? t.cwd : t.title || t.cwd,
+        cwd: tabDisplayPath(t),
         title: t.title,
         sort_order: t.order,
         is_active: t.id === rs.activeTabId,
@@ -419,6 +475,7 @@ export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
           return { ...rs, taskId, env: env && env.length > 0 ? env : undefined };
         });
         set(terminalStateAtom, state);
+        void set(resolveWorktreeInfoAtom);
         return;
       }
     } catch {
@@ -471,6 +528,7 @@ export const createTaskRunspaceAtom = atom(
         activeRunspaceId: existing.id,
         runspaces: state.runspaces.map((r) => (r.id === existing.id ? updated : r)),
       });
+      void set(resolveWorktreeInfoAtom);
       return;
     }
 
@@ -491,6 +549,7 @@ export const createTaskRunspaceAtom = atom(
       runspaces: [...state.runspaces, rs],
       activeRunspaceId: rs.id,
     });
+    void set(resolveWorktreeInfoAtom);
   },
 );
 

@@ -60,7 +60,9 @@ unused-commands:
     #!/usr/bin/env bash
     set -euo pipefail
     bindings="src/commands/bindings.ts"
-    cmds=$(sed -n '/^export const commands/,/^};/p' "$bindings" | grep -oE '^\s+[a-zA-Z]+:' | sed 's/[: ]//g')
+    # Exactly two spaces of indent: deeper-indented lines are fields of inlined
+    # return types (e.g. `Option<Struct>` commands), not command names.
+    cmds=$(sed -n '/^export const commands/,/^};/p' "$bindings" | grep -oE '^  [a-zA-Z]+:' | sed 's/[: ]//g')
     found=0
     for cmd in $cmds; do
         if ! grep -rq "commands\.$cmd" src/ --include='*.ts' --include='*.tsx' --exclude="$bindings"; then

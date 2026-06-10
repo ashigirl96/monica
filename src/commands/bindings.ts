@@ -7,6 +7,14 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 export const commands = {
   clipboardWriteImage: (path: string) =>
     typedError<null, string>(__TAURI_INVOKE("clipboard_write_image", { path })),
+  worktreeInfo: (cwd: string) =>
+    typedError<
+      {
+        repo: string;
+        branch: string;
+      } | null,
+      string
+    >(__TAURI_INVOKE("worktree_info", { cwd })),
   ptySpawn: (id: string, cwd: string, rows: number, cols: number, env: [string, string][] | null) =>
     typedError<null, string>(__TAURI_INVOKE("pty_spawn", { id, cwd, rows, cols, env })),
   ptyWrite: (id: string, data: string) =>
@@ -160,6 +168,11 @@ export type TerminalTabRow = {
 export type TrackIssueResult = {
   task_id: string;
   title: string;
+};
+
+export type WorktreeInfo = {
+  repo: string;
+  branch: string;
 };
 
 /* Tauri Specta runtime */

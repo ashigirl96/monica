@@ -9,6 +9,7 @@ use monica_infra::Runtime;
 use monica_pty::PtyManager;
 
 mod clipboard_commands;
+mod git_commands;
 mod pty_commands;
 #[cfg(all(unix, not(debug_assertions)))]
 mod shell_path;
@@ -21,6 +22,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::new()
         .commands(tauri_specta::collect_commands![
             clipboard_commands::clipboard_write_image,
+            git_commands::worktree_info,
             pty_commands::pty_spawn,
             pty_commands::pty_write,
             pty_commands::pty_resize,

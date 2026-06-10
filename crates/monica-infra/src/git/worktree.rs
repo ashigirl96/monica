@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{anyhow, Context, Result};
@@ -54,6 +54,42 @@ impl GitGateway for GitCliGateway {
         let branch = String::from_utf8(output.stdout).ok()?;
         parse_origin_head_branch(&branch)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeInfo {
+    pub repo: String,
+    pub branch: String,
+}
+
+pub fn worktree_info(cwd: &Path) -> Option<WorktreeInfo> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .args([
+            "rev-parse",
+            "--abbrev-ref",
+            "HEAD",
+            "--path-format=absolute",
+            "--git-dir",
+            "--git-common-dir",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    let mut lines = stdout.lines();
+    let branch = lines.next()?.trim().to_string();
+    let git_dir = PathBuf::from(lines.next()?.trim());
+    let common_dir = PathBuf::from(lines.next()?.trim());
+    // The main checkout reports the same dir for both; only linked worktrees diverge.
+    if git_dir == common_dir {
+        return None;
+    }
+    let repo = common_dir.parent()?.file_name()?.to_str()?.to_string();
+    Some(WorktreeInfo { repo, branch })
 }
 
 fn create_worktree(repo: &Path, worktree: &Path, branch: &str, base: &str) -> Result<()> {
@@ -389,6 +425,27 @@ mod tests {
         assert_eq!(removed, vec!["issue-42"]);
         assert!(!worktree_registered(&repo, &worktree).unwrap());
         assert!(!branch_exists(&repo, "issue-42").unwrap());
+    }
+
+    #[test]
+    fn worktree_info_identifies_linked_worktrees_only() {
+        let root = Tmp::new("worktree-info");
+        let repo = root.path().join("my-repo");
+        fs::create_dir_all(&repo).unwrap();
+        init_repo(&repo);
+        let worktree = root.path().join("wt");
+        add_worktree(&repo, &worktree, "issue-42");
+
+        let info = worktree_info(&worktree).unwrap();
+        assert_eq!(info.repo, "my-repo");
+        assert_eq!(info.branch, "issue-42");
+
+        let nested = worktree.join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        assert_eq!(worktree_info(&nested), Some(info));
+
+        assert_eq!(worktree_info(&repo), None);
+        assert_eq!(worktree_info(root.path()), None);
     }
 
     struct TestGit {
