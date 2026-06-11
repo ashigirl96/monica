@@ -1,42 +1,39 @@
-mod clipboard_commands;
-mod git_commands;
+mod commands;
 mod ptyd;
 mod schedulers;
 mod services;
 #[cfg(all(unix, not(debug_assertions)))]
 mod shell_path;
-mod task_commands;
-mod terminal_commands;
 
 fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::new()
         .commands(tauri_specta::collect_commands![
-            clipboard_commands::clipboard_write_image,
-            git_commands::worktree_info,
-            terminal_commands::terminal_create_session,
-            terminal_commands::terminal_attach,
-            terminal_commands::terminal_detach,
-            terminal_commands::terminal_write,
-            terminal_commands::terminal_resize,
-            terminal_commands::terminal_terminate,
-            terminal_commands::terminal_list_sessions,
-            terminal_commands::terminal_load_state,
-            terminal_commands::terminal_save_state,
-            task_commands::list_task_summaries,
-            task_commands::get_board_columns,
-            task_commands::list_projects,
-            task_commands::track_github_issue,
-            task_commands::list_bench_runspace_map,
-            task_commands::task_shell_env,
-            task_commands::open_bench,
-            task_commands::prepare_task,
-            task_commands::run_task,
-            task_commands::delete_task,
-            task_commands::make_main_task_run,
-            task_commands::primary_tab_id,
+            commands::clipboard::clipboard_write_image,
+            commands::git::worktree_info,
+            commands::terminal::terminal_create_session,
+            commands::terminal::terminal_attach,
+            commands::terminal::terminal_detach,
+            commands::terminal::terminal_write,
+            commands::terminal::terminal_resize,
+            commands::terminal::terminal_terminate,
+            commands::terminal::terminal_list_sessions,
+            commands::terminal::terminal_load_state,
+            commands::terminal::terminal_save_state,
+            commands::task::list_task_summaries,
+            commands::task::get_board_columns,
+            commands::task::list_projects,
+            commands::task::track_github_issue,
+            commands::task::list_bench_runspace_map,
+            commands::task::task_shell_env,
+            commands::task::open_bench,
+            commands::task::prepare_task,
+            commands::task::run_task,
+            commands::task::delete_task,
+            commands::task::make_main_task_run,
+            commands::task::primary_tab_id,
         ])
         .events(tauri_specta::collect_events![
-            task_commands::TaskRunStatusChanged
+            commands::task::TaskRunStatusChanged
         ])
 }
 

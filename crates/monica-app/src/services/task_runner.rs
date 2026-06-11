@@ -3,7 +3,7 @@ use monica_infra::Runtime;
 use tauri::AppHandle;
 use tauri_specta::Event;
 
-use crate::task_commands::TaskRunStatusChanged;
+use crate::commands::task::TaskRunStatusChanged;
 
 pub(crate) fn spawn_execute_run(
     app: AppHandle,
