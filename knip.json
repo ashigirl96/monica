@@ -2,6 +2,6 @@
   "$schema": "https://unpkg.com/knip@latest/schema.json",
   "project": ["src/**/*.{ts,tsx}"],
   "ignoreExportsUsedInFile": true,
-  "ignoreBinaries": ["lefthook"],
-  "ignoreDependencies": ["tailwindcss", "tw-animate-css"]
+  "ignoreBinaries": ["lefthook", "tsc", "tauri"],
+  "ignoreDependencies": ["tailwindcss", "tw-animate-css", "@tauri-apps/cli", "oxfmt", "oxlint"]
 }

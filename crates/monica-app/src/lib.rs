@@ -1,22 +1,12 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
-use std::time::Duration;
-
-use monica_core::PullRequestSyncStatus;
-use monica_infra::Runtime;
-
 mod clipboard_commands;
 mod git_commands;
 mod ptyd;
+mod schedulers;
+mod services;
 #[cfg(all(unix, not(debug_assertions)))]
 mod shell_path;
 mod task_commands;
 mod terminal_commands;
-
-const PR_SYNC_INTERVAL: Duration = Duration::from_secs(10);
-const PR_SYNC_BATCH_LIMIT: usize = 3;
 
 fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::new()
@@ -92,8 +82,8 @@ pub fn run() {
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             specta_builder.mount_events(app);
-            start_pull_request_sync_scheduler();
-            start_ptyd_warmup(app.handle().clone());
+            schedulers::pull_request_sync::start();
+            ptyd::start_warmup(app.handle().clone());
             #[cfg(not(debug_assertions))]
             log::info!(
                 target: "monica_app::startup",
@@ -115,99 +105,6 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-// Warm up the daemon connection (and its event pump) off-thread so window startup never
-// blocks on a daemon spawn. Reconciliation is NOT done here: the frontend's first
-// terminal_list_sessions call owns it, after this connection (or its own) is up.
-fn start_ptyd_warmup(app: tauri::AppHandle) {
-    use tauri::Manager;
-    let spawned = std::thread::Builder::new()
-        .name("monica-ptyd-warmup".to_string())
-        .spawn(move || {
-            if let Err(e) = app.state::<ptyd::PtydHandle>().ensure_connected(&app) {
-                log::warn!(target: "monica_app::ptyd", "daemon warmup failed: {e:#}");
-            }
-        });
-    if let Err(e) = spawned {
-        log::error!(target: "monica_app::ptyd", "failed to start ptyd warmup thread: {e}");
-    }
-}
-
-fn start_pull_request_sync_scheduler() {
-    let in_flight = Arc::new(AtomicBool::new(false));
-    let scheduler_in_flight = Arc::clone(&in_flight);
-    let spawn_result = std::thread::Builder::new()
-        .name("monica-pr-sync".to_string())
-        .spawn(move || loop {
-            std::thread::sleep(PR_SYNC_INTERVAL);
-            if scheduler_in_flight.swap(true, Ordering::AcqRel) {
-                continue;
-            }
-            let _guard = PullRequestSyncGuard(Arc::clone(&scheduler_in_flight));
-            tauri::async_runtime::block_on(sync_pull_request_batch(PR_SYNC_BATCH_LIMIT));
-        });
-    if let Err(e) = spawn_result {
-        log::error!(target: "monica_app::pr_sync", "failed to start PR sync scheduler: {e}");
-    }
-}
-
-struct PullRequestSyncGuard(Arc<AtomicBool>);
-
-impl Drop for PullRequestSyncGuard {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
-    }
-}
-
-async fn sync_pull_request_batch(limit: usize) {
-    let mut runtime = match Runtime::open_default() {
-        Ok(runtime) => runtime,
-        Err(e) => {
-            log::error!(target: "monica_app::pr_sync", "failed to open runtime for PR sync: {e:#}");
-            return;
-        }
-    };
-
-    if !monica_core::github_auth_status(&runtime.auth).authenticated {
-        return;
-    }
-
-    for _ in 0..limit {
-        let result =
-            match monica_core::sync_next_pull_request(&mut runtime.repositories, &runtime.github)
-                .await
-            {
-                Ok(result) => result,
-                Err(e) => {
-                    log::error!(target: "monica_app::pr_sync", "PR sync scheduler failed: {e:#}");
-                    break;
-                }
-            };
-
-        match result.status {
-            PullRequestSyncStatus::Idle => {
-                log::debug!(target: "monica_app::pr_sync", "PR sync scheduler idle");
-                break;
-            }
-            PullRequestSyncStatus::Synced => {
-                log::info!(
-                    target: "monica_app::pr_sync",
-                    "PR sync scheduler synced task_id={} pull_request_count={}",
-                    result.task_id.as_deref().unwrap_or("-"),
-                    result.pull_request_count
-                );
-            }
-            PullRequestSyncStatus::Failed => {
-                log::warn!(
-                    target: "monica_app::pr_sync",
-                    "PR sync scheduler recorded failure task_id={} error={}",
-                    result.task_id.as_deref().unwrap_or("-"),
-                    result.error.as_deref().unwrap_or("-")
-                );
-            }
-        }
-    }
 }
 
 #[cfg(not(debug_assertions))]
