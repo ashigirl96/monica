@@ -1,24 +1,24 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 
 use crate::interfaces::{
-    AuthGateway, BoxFuture, Clock, EventRepository, GitGateway, GithubGateway, ProjectRepository,
-    RunArtifacts, TaskRepository, TaskRunRepository,
+    AuthGateway, BenchRepository, BoxFuture, Clock, EventRepository, GitGateway, GithubGateway,
+    ProjectRepository, RunArtifacts, TaskRepository, TaskRunRepository,
 };
 use crate::{
     begin_github_device_flow, delete_issue, github_auth_status, logout_github,
-    make_main_by_terminal_tab, primary_terminal_tab, record_claude_hook,
+    make_main_by_terminal_tab, open_bench, primary_terminal_tab, record_claude_hook,
     register_project_with_default_branch, sync_next_pull_request, track_github_issue, HookContext,
     MakeMainOutcome,
     wait_for_github_device_flow, Agent, DisplayStatus, Event, ExternalRef, GithubAuthStatus,
     GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef,
     GithubPullRequestStatus, NewTask, NewTaskRun, Project, PullRequestBranchSyncCandidate,
     PullRequestStatusSyncCandidate, PullRequestSyncCandidate, PullRequestSyncStatus, Task,
-    TaskKind, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus,
+    TaskBench, TaskKind, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus,
     TaskSummaryRow, TrackGithubIssueInput,
 };
 
@@ -34,6 +34,7 @@ struct FakeState {
     refs: HashMap<String, Vec<ExternalRef>>,
     runs: HashMap<String, TaskRun>,
     events: Vec<Event>,
+    benches: BTreeMap<String, (String, String)>,
     next_task: i64,
     next_run: i64,
     pr_branch_candidate: Option<PullRequestBranchSyncCandidate>,
@@ -476,6 +477,31 @@ impl EventRepository for FakeRepos {
 impl Clock for FakeRepos {
     fn now_iso(&self) -> Result<String> {
         Ok("2026-06-02T00:00:00.000Z".to_string())
+    }
+}
+
+impl BenchRepository for FakeRepos {
+    fn get_bench_for_task(&self, task_id: &str) -> Result<Option<(String, String)>> {
+        Ok(self.state.borrow().benches.get(task_id).cloned())
+    }
+
+    fn list_bench_runspace_map(&self) -> Result<Vec<(String, String)>> {
+        Ok(self.state.borrow().benches.values().cloned().collect())
+    }
+
+    fn create_bench(&mut self, task_id: &str, runspace_id: &str, cwd: &str) -> Result<()> {
+        self.state
+            .borrow_mut()
+            .benches
+            .insert(task_id.to_string(), (runspace_id.to_string(), cwd.to_string()));
+        Ok(())
+    }
+
+    fn update_bench_cwd(&self, task_id: &str, cwd: &str) -> Result<()> {
+        if let Some(entry) = self.state.borrow_mut().benches.get_mut(task_id) {
+            entry.1 = cwd.to_string();
+        }
+        Ok(())
     }
 }
 
@@ -1410,4 +1436,74 @@ async fn github_auth_flow_usecases_delegate_to_auth_gateway() {
     let status = wait_for_github_device_flow(&auth, &flow).await.unwrap();
     assert_eq!(status.login.as_deref(), Some("user"));
     logout_github(&auth).await.unwrap();
+}
+
+#[test]
+fn default_bench_cwd_prefers_project_path() {
+    let mut project = Project::from_repo("owner/repo");
+    project.path = Some("/test/repo".to_string());
+    assert_eq!(
+        super::open_bench::default_bench_cwd(Some(&project), Some("/home/user")),
+        "/test/repo"
+    );
+}
+
+#[test]
+fn default_bench_cwd_falls_back_to_home_dir_when_no_project_path() {
+    let project = Project::from_repo("owner/repo");
+    assert_eq!(
+        super::open_bench::default_bench_cwd(Some(&project), Some("/home/user")),
+        "/home/user"
+    );
+}
+
+#[test]
+fn default_bench_cwd_falls_back_to_tmp_when_no_project_and_no_home() {
+    assert_eq!(
+        super::open_bench::default_bench_cwd(None, None),
+        "/tmp"
+    );
+}
+
+#[test]
+fn open_bench_falls_back_to_project_path_when_worktree_path_is_empty() {
+    let mut repos = FakeRepos::default();
+    let mut project = Project::from_repo("owner/repo");
+    project.path = Some("/test/repo".to_string());
+    repos.insert_project(project);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+
+    let run = repos
+        .start_task_run(NewTaskRun {
+            task_id: task_id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: Some(String::new()),
+        })
+        .unwrap();
+    repos.set_primary_task_run(&task_id, &run.id).unwrap();
+
+    let artifacts = FakeArtifacts::default();
+    let bench = open_bench(&mut repos, &artifacts, &task_id).unwrap();
+    assert!(bench.created);
+    assert_eq!(bench.cwd, "/test/repo");
+}
+
+#[test]
+fn open_bench_creates_bench_on_first_call_and_reuses_on_second() {
+    let mut repos = FakeRepos::default();
+    let mut project = Project::from_repo("owner/repo");
+    project.path = Some("/test/repo".to_string());
+    repos.insert_project(project);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let artifacts = FakeArtifacts::default();
+
+    let bench: TaskBench = open_bench(&mut repos, &artifacts, &task_id).unwrap();
+    assert!(bench.created);
+    assert_eq!(bench.cwd, "/test/repo");
+    assert_eq!(bench.task_id, task_id);
+
+    let bench2: TaskBench = open_bench(&mut repos, &artifacts, &task_id).unwrap();
+    assert!(!bench2.created);
+    assert_eq!(bench2.runspace_id, bench.runspace_id);
 }
