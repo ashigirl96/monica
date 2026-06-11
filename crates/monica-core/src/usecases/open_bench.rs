@@ -6,10 +6,15 @@ use crate::interfaces::{
 };
 use crate::{Project, Task, TaskBench};
 
-pub(crate) fn default_bench_cwd(project: Option<&Project>) -> String {
+pub(crate) fn default_bench_cwd(project: Option<&Project>, home_dir: Option<&str>) -> String {
     project
         .and_then(|p| p.path.clone())
-        .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()))
+        .or_else(|| home_dir.map(|s| s.to_string()))
+        .unwrap_or_else(|| "/tmp".to_string())
+}
+
+pub(crate) fn home_dir() -> Option<String> {
+    std::env::var("HOME").ok()
 }
 
 /// Recompute the shell env for a task-connected runspace. Fails soft (empty vec) when the task
@@ -73,7 +78,7 @@ where
     }
 
     let cwd = resolve_worktree_cwd(repos, &task)
-        .unwrap_or_else(|| default_bench_cwd(project.as_ref()));
+        .unwrap_or_else(|| default_bench_cwd(project.as_ref(), home_dir().as_deref()));
 
     let runspace_id = bench_runspace_id(task_id);
     repos.create_bench(task_id, &runspace_id, &cwd)?;

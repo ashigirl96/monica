@@ -76,7 +76,10 @@ where
     repos.set_primary_task_run(task_id, &run.id)?;
 
     if repos.get_bench_for_task(task_id)?.is_none() {
-        let cwd = super::open_bench::default_bench_cwd(Some(&project));
+        let cwd = super::open_bench::default_bench_cwd(
+            Some(&project),
+            super::open_bench::home_dir().as_deref(),
+        );
         repos.create_bench(task_id, &bench_runspace_id(task_id), &cwd)?;
     }
 
