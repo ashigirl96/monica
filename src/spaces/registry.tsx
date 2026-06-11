@@ -2,11 +2,11 @@ import { lazy, type ComponentType } from "react";
 import { DashboardIcon, ProjectHomeIcon, WorkBoardIcon, WorkBenchIcon } from "@/components/icons";
 import type { SpaceId } from "@/stores/space";
 import { TabBar } from "@/components/tab-bar";
-import { WorkBenchSidebar } from "@/spaces/work-bench/sidebar";
-import { WorkBenchHeader } from "@/spaces/work-bench/header";
+import { WorkBenchSidebar } from "@/features/work-bench/ui/sidebar";
+import { WorkBenchHeader } from "@/features/work-bench/ui/header";
 import { WorkBoardHeader } from "@/features/work-board/ui/header";
 
-const LazyWorkBenchContent = lazy(() => import("@/spaces/work-bench/content"));
+const LazyWorkBenchContent = lazy(() => import("@/features/work-bench/ui/content"));
 const LazyWorkBoardContent = lazy(() => import("@/features/work-board/ui/content"));
 
 type SpaceIcon = ComponentType<{ size?: number; strokeWidth?: number }>;

@@ -15,7 +15,7 @@ import {
   saveTerminalStateAtom,
   type SessionStatusEntry,
   type TerminalLaunchIntent,
-} from "@/stores/terminal";
+} from "@/features/work-bench/store";
 import { clipboardWriteImage } from "@/commands/clipboard";
 import { terminalWrite } from "@/commands/terminal";
 import { useTerminal } from "./use-terminal";

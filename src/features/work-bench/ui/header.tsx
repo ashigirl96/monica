@@ -9,7 +9,7 @@ import {
   reorderTabsAtom,
   sessionStatusAtom,
   tabMenuAtom,
-} from "@/stores/terminal";
+} from "@/features/work-bench/store";
 import { onTaskRunStatusChanged } from "@/commands/task";
 import { PlusIcon, XIcon } from "@/components/icons";
 import { cn } from "@/lib/utils";
