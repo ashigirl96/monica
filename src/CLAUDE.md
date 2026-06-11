@@ -6,8 +6,8 @@
 ## ディレクトリ構成
 
 - `app/` — アプリ全体のレイアウト
-- `features/` — React 非依存の feature runtime（stores から参照される registry 類）
-- `spaces/` — 各 Space 固有の UI（sidebar / header / content）
+- `features/` — feature slice（UI・状態・ロジックを feature 単位にまとめたもの）
+- `spaces/` — 各 Space の組み立て層（registry とレイアウト）
 - `components/` — 共有 UI コンポーネント
 - `commands/` — Tauri invoke ラッパー
 - `hooks/` — React hooks

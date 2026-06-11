@@ -4,10 +4,10 @@ import type { SpaceId } from "@/stores/space";
 import { TabBar } from "@/components/tab-bar";
 import { WorkBenchSidebar } from "@/spaces/work-bench/sidebar";
 import { WorkBenchHeader } from "@/spaces/work-bench/header";
-import { WorkBoardHeader } from "@/spaces/work-board/header";
+import { WorkBoardHeader } from "@/features/work-board/ui/header";
 
 const LazyWorkBenchContent = lazy(() => import("@/spaces/work-bench/content"));
-const LazyWorkBoardContent = lazy(() => import("@/spaces/work-board/content"));
+const LazyWorkBoardContent = lazy(() => import("@/features/work-board/ui/content"));
 
 type SpaceIcon = ComponentType<{ size?: number; strokeWidth?: number }>;
 
