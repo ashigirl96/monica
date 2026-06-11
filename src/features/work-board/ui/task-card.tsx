@@ -2,13 +2,8 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSetAtom } from "jotai";
 import type { DisplayStatus, TaskSummaryRow } from "@/commands/task";
 import { cn } from "@/lib/utils";
-import {
-  openBenchAtom,
-  prepareTaskAtom,
-  runTaskAtom,
-  PREPARE_ELIGIBLE,
-  RUN_ELIGIBLE,
-} from "@/stores/workboard";
+import { PREPARE_ELIGIBLE, RUN_ELIGIBLE } from "@/features/work-board/model";
+import { openBenchAtom, prepareTaskAtom, runTaskAtom } from "@/stores/workboard";
 
 const STATUS_COLORS: Record<DisplayStatus, string> = {
   inbox: "bg-muted-foreground/40",

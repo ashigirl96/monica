@@ -6,16 +6,14 @@ import {
   trackGithubIssue,
   openBench,
   prepareTask,
-  runTask,
   deleteTask,
   makeMainTaskRun,
-  onTaskRunStatusChanged,
-  taskShellEnv,
   type TaskSummaryRow,
   type BoardColumn,
   type ProjectEntry,
   type DisplayStatus,
 } from "@/commands/task";
+import { runTaskFlow } from "@/features/work-board/run-flow";
 import {
   activeTerminalTabAtom,
   createTaskRunspaceAtom,
@@ -101,115 +99,15 @@ export const promoteActiveTabRunAtom = atom(null, async (get, set) => {
   }
 });
 
-export const PREPARE_ELIGIBLE: Set<DisplayStatus> = new Set([
-  "inbox",
-  "ready",
-  "stopped",
-  "failed",
-]);
-
-export const RUN_ELIGIBLE: Set<DisplayStatus> = new Set([...PREPARE_ELIGIBLE, "prepared"]);
-
 export const deleteTaskAtom = atom(null, async (_get, set, taskId: string) => {
   await deleteTask(taskId);
   await set(refreshTaskSummariesAtom);
 });
 
-// prepare_task always emits task-run:status-changed from its background thread
-// (on both success and failure), so an event listener plus a timeout suffices.
-// Other emitters reuse the same event for the same task (e.g. cmd+g re-emits the
-// promoted run's current status), so once the prepared run's id is known the
-// listener must match on it, not just the task.
-function waitForPreparedOrFailed(taskId: string): {
-  promise: Promise<void>;
-  cancel: () => void;
-  bindRun: (runId: string) => void;
-} {
-  let settled = false;
-  let runId: string | null = null;
-  let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
-  let unlistenPromise: Promise<() => void> | undefined;
-
-  const cleanup = () => {
-    settled = true;
-    if (timeoutTimer) clearTimeout(timeoutTimer);
-    unlistenPromise?.then((fn) => fn());
-  };
-
-  const promise = new Promise<void>((resolve, reject) => {
-    unlistenPromise = onTaskRunStatusChanged((payload) => {
-      if (settled || payload.task_id !== taskId) return;
-      if (runId && payload.task_run_id !== runId) return;
-      if (payload.status === "prepared") {
-        cleanup();
-        resolve();
-      } else if (payload.status === "failed") {
-        cleanup();
-        reject(new Error("prepare failed"));
-      }
-    });
-
-    timeoutTimer = setTimeout(() => {
-      if (!settled) {
-        cleanup();
-        reject(new Error("prepare timed out"));
-      }
-    }, 120_000);
-  });
-
-  return {
-    promise,
-    cancel: cleanup,
-    bindRun: (id) => {
-      runId = id;
-    },
-  };
-}
-
-const runTaskInFlight = new Set<string>();
-
 export const runTaskAtom = atom(null, async (_get, set, taskId: string) => {
-  if (runTaskInFlight.has(taskId)) return;
-  runTaskInFlight.add(taskId);
-  try {
-    // The cached summaries can lag behind hook-driven status changes by a
-    // polling interval; decide prepare-vs-run from a fresh read.
-    const summaries = await set(refreshTaskSummariesAtom);
-    const task = summaries.find((t) => t.id === taskId);
-
-    if (task && PREPARE_ELIGIBLE.has(task.status)) {
-      const waiter = waitForPreparedOrFailed(taskId);
-      try {
-        const prep = await prepareTask(taskId);
-        waiter.bindRun(prep.task_run_id);
-      } catch (e) {
-        waiter.cancel();
-        throw e;
-      }
-      await waiter.promise;
-    }
-
-    const launch = await runTask(taskId);
-
-    // The launch env (with run ids) is consumed by the first tab only; the runspace
-    // needs the plain task shell env so later tabs still get the Monica context +
-    // claude wrapper and plain `claude` keeps being tracked as a side run.
-    const shellEnv = await taskShellEnv(launch.task_id).catch(() => [] as [string, string][]);
-
-    await set(createTaskRunspaceAtom, {
-      runspaceId: launch.runspace_id,
-      taskId: launch.task_id,
-      cwd: launch.cwd,
-      env: shellEnv.length > 0 ? shellEnv : undefined,
-      launch: {
-        env: launch.env,
-        initialCommand: launch.initial_command,
-      },
-    });
-    set(activeSpaceAtom, "work-bench");
-
-    await set(refreshTaskSummariesAtom);
-  } finally {
-    runTaskInFlight.delete(taskId);
-  }
+  const result = await runTaskFlow(taskId);
+  if (!result) return;
+  await set(createTaskRunspaceAtom, result);
+  set(activeSpaceAtom, "work-bench");
+  await set(refreshTaskSummariesAtom);
 });
