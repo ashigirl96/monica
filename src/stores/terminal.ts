@@ -11,7 +11,7 @@ import {
 } from "@/commands/terminal";
 import { listBenchRunspaceMap, primaryTabId, taskShellEnv } from "@/commands/task";
 import { worktreeInfo, type WorktreeInfo } from "@/commands/git";
-import { releaseTabConnection } from "@/spaces/work-bench/terminal-connections";
+import { releaseTabConnection } from "@/features/work-bench/terminal-connections";
 
 const FONT_SIZE_DEFAULT = 15;
 const FONT_SIZE_MIN = 10;
