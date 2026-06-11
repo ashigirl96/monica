@@ -10,7 +10,7 @@ import {
   tabMenuAtom,
   terminateTabSessionAtom,
   type TabMenuState,
-} from "@/stores/terminal";
+} from "@/features/work-bench/store";
 
 const ANCHOR_GAP = 4;
 const VIEWPORT_PADDING = 8;

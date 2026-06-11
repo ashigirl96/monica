@@ -23,7 +23,7 @@ import {
   terminalFocusRequestAtom,
   zoomTerminalAtom,
   type TerminalLaunchIntent,
-} from "@/stores/terminal";
+} from "@/features/work-bench/store";
 import {
   clearTabTerminal,
   getTabConnection,

@@ -8,7 +8,7 @@ import {
   refreshSessionsAtom,
   reorderRunspacesAtom,
   type RunspaceSummary,
-} from "@/stores/terminal";
+} from "@/features/work-bench/store";
 import { terminalTerminate, type TerminalSession } from "@/commands/terminal";
 import { onTaskRunStatusChanged, type DisplayStatus } from "@/commands/task";
 import { taskStatusMapAtom, refreshTaskSummariesAtom } from "@/stores/workboard";

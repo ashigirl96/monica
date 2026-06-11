@@ -7,9 +7,12 @@
 
 - `app/` — アプリ全体のレイアウト
 - `features/` — feature slice（UI・状態・ロジックを feature 単位にまとめたもの）
-- `spaces/` — 各 Space の組み立て層（registry とレイアウト）
+  - `features/work-bench/store.ts` — terminal state（jotai atoms）
+  - `features/work-bench/ui/` — WorkBench UI コンポーネント
+  - `features/work-board/ui/` — WorkBoard UI コンポーネント
+- `spaces/` — 各 Space の組み立て層（registry のみ）
 - `components/` — 共有 UI コンポーネント
 - `commands/` — Tauri invoke ラッパー
 - `hooks/` — React hooks
-- `stores/` — jotai atoms
+- `stores/` — jotai atoms（cross-feature な atoms と re-export スタブ）
 - `lib/` — ユーティリティ
