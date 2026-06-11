@@ -55,6 +55,11 @@ export const columnTasksAtom = atom((get) => {
   }));
 });
 
+export const taskStatusMapAtom = atom<Record<string, DisplayStatus>>((get) => {
+  const summaries = get(taskSummariesAtom);
+  return Object.fromEntries(summaries.map((s) => [s.id, s.status]));
+});
+
 export const trackIssueAtom = atom(
   null,
   async (_get, set, input: { repo: string; number: number }) => {

@@ -10,8 +10,19 @@ import {
   type RunspaceSummary,
 } from "@/stores/terminal";
 import { terminalTerminate, type TerminalSession } from "@/commands/terminal";
+import { onTaskRunStatusChanged, type DisplayStatus } from "@/commands/task";
+import { taskStatusMapAtom, refreshTaskSummariesAtom } from "@/stores/workboard";
 import { activeSpaceAtom } from "@/stores/space";
 import { cn } from "@/lib/utils";
+
+const STATUS_DOT: Partial<Record<DisplayStatus, string>> = {
+  setting_up: "bg-blue-400 animate-pulse",
+  prepared: "bg-cyan-400",
+  running: "bg-emerald-400 animate-pulse",
+  waiting_for_user: "bg-amber-400",
+  stopped: "bg-muted-foreground/50",
+  failed: "bg-red-400",
+};
 
 function shortPath(path: string): string {
   const parts = path.split("/").filter(Boolean);
@@ -58,6 +69,7 @@ function RunspaceItem({
   ws,
   onActivate,
   dragState,
+  status,
 }: {
   ws: RunspaceSummary;
   onActivate: () => void;
@@ -67,6 +79,7 @@ function RunspaceItem({
     setDragOverId: (id: string | null) => void;
     reorder: (from: string, to: string) => void;
   };
+  status?: DisplayStatus;
 }) {
   return (
     <button
@@ -111,7 +124,13 @@ function RunspaceItem({
             {ws.taskId}
           </span>
         )}
-        <span className="truncate text-xs font-medium">{ws.title || "Terminal"}</span>
+        <span className="flex-1 truncate text-xs font-medium">{ws.title || "Terminal"}</span>
+        {status && STATUS_DOT[status] && (
+          <span
+            title={status.replace(/_/g, " ")}
+            className={cn("size-1.5 shrink-0 rounded-full", STATUS_DOT[status])}
+          />
+        )}
       </div>
       {ws.description && (
         <span className="truncate text-[10px] text-muted-foreground">{ws.description}</span>
@@ -133,9 +152,11 @@ function GroupHeader({ label }: { label: string }) {
 export function WorkBenchSidebar() {
   const summaries = useAtomValue(runspaceSummariesAtom);
   const detachedSessions = useAtomValue(detachedSessionsAtom);
+  const taskStatusMap = useAtomValue(taskStatusMapAtom);
   const activate = useSetAtom(activateRunspaceAtom);
   const reattach = useSetAtom(reattachSessionAtom);
   const refreshSessions = useSetAtom(refreshSessionsAtom);
+  const refreshTaskSummaries = useSetAtom(refreshTaskSummariesAtom);
   const reorder = useSetAtom(reorderRunspacesAtom);
   const setSpace = useSetAtom(activeSpaceAtom);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -145,11 +166,21 @@ export function WorkBenchSidebar() {
   // no push channel for every change, so poll while visible.
   useEffect(() => {
     void refreshSessions();
+    void refreshTaskSummaries();
+    const unlisten = onTaskRunStatusChanged(() => {
+      void refreshTaskSummaries();
+    });
     const timer = setInterval(() => {
-      if (!document.hidden) void refreshSessions();
+      if (!document.hidden) {
+        void refreshSessions();
+        void refreshTaskSummaries();
+      }
     }, 3000);
-    return () => clearInterval(timer);
-  }, [refreshSessions]);
+    return () => {
+      clearInterval(timer);
+      unlisten.then((fn) => fn());
+    };
+  }, [refreshSessions, refreshTaskSummaries]);
 
   const { taskBound, shells } = useMemo(() => {
     const taskBound = summaries.filter((s) => s.taskId);
@@ -172,6 +203,7 @@ export function WorkBenchSidebar() {
                   ws={ws}
                   onActivate={() => activate(ws.id)}
                   dragState={dragState}
+                  status={ws.taskId ? taskStatusMap[ws.taskId] : undefined}
                 />
               ))}
             </div>
