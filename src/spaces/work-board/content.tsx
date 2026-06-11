@@ -1,8 +1,8 @@
 import { useEffect } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { onTaskRunStatusChanged } from "@/commands/task";
 import { useBoardNavigation } from "@/hooks/use-board-navigation";
-import { columnTasksAtom, loadBoardAtom, refreshTaskSummariesAtom } from "@/stores/workboard";
+import { useWorkBoardLiveRefresh } from "@/hooks/use-work-board-live-refresh";
+import { columnTasksAtom, loadBoardAtom } from "@/stores/workboard";
 import { focusedTaskIdAtom } from "@/stores/workboard-nav";
 import { BoardContextMenu } from "./board-context-menu";
 import { TaskCard } from "./task-card";
@@ -11,31 +11,13 @@ function WorkBoardContent() {
   const columns = useAtomValue(columnTasksAtom);
   const focusedTaskId = useAtomValue(focusedTaskIdAtom);
   const loadBoard = useSetAtom(loadBoardAtom);
-  const refreshSummaries = useSetAtom(refreshTaskSummariesAtom);
 
   useBoardNavigation();
+  useWorkBoardLiveRefresh();
 
   useEffect(() => {
     loadBoard();
   }, [loadBoard]);
-
-  useEffect(() => {
-    const unlisten = onTaskRunStatusChanged(() => {
-      refreshSummaries();
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [refreshSummaries]);
-
-  // Hook CLI (separate process) writes status to the DB without emitting
-  // Tauri events, so poll while the board is visible.
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (!document.hidden) refreshSummaries();
-    }, 3000);
-    return () => clearInterval(timer);
-  }, [refreshSummaries]);
 
   return (
     <div className="flex h-full flex-col">
