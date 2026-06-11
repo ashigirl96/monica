@@ -18,6 +18,8 @@ import {
   activeTerminalTabAtom,
   createTaskRunspaceAtom,
   refreshPrimaryTabAtom,
+  removeRunspaceAtom,
+  terminalStateAtom,
 } from "@/stores/terminal";
 import { activeSpaceAtom } from "@/stores/space";
 
@@ -99,8 +101,13 @@ export const promoteActiveTabRunAtom = atom(null, async (get, set) => {
   }
 });
 
-export const deleteTaskAtom = atom(null, async (_get, set, taskId: string) => {
+export const deleteTaskAtom = atom(null, async (get, set, taskId: string) => {
+  const state = get(terminalStateAtom);
+  const runspace = state?.runspaces.find((rs) => rs.taskId === taskId);
   await deleteTask(taskId);
+  if (runspace) {
+    set(removeRunspaceAtom, runspace.id);
+  }
   await set(refreshTaskSummariesAtom);
 });
 
