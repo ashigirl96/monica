@@ -4,12 +4,15 @@ import {
   activateTerminalTabAtom,
   closeTerminalTabAtom,
   createTerminalTabAtom,
+  jumpHintsActiveAtom,
+  jumpHintTargetsAtom,
   primaryTabByTaskAtom,
   refreshPrimaryTabAtom,
   reorderTabsAtom,
   sessionStatusAtom,
   tabMenuAtom,
 } from "@/features/work-bench/store";
+import { JumpHint } from "./jump-hint";
 import { onTaskRunStatusChanged } from "@/commands/task";
 import { PlusIcon, XIcon } from "@/components/icons";
 import { cn } from "@/lib/utils";
@@ -31,6 +34,8 @@ export function WorkBenchHeader() {
   const closeTab = useSetAtom(closeTerminalTabAtom);
   const createTab = useSetAtom(createTerminalTabAtom);
   const reorder = useSetAtom(reorderTabsAtom);
+  const jumpActive = useAtomValue(jumpHintsActiveAtom);
+  const jumpHints = useAtomValue(jumpHintTargetsAtom);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const dragIdRef = useRef<string | null>(null);
   const activeTabRef = useRef<HTMLButtonElement>(null);
@@ -76,6 +81,7 @@ export function WorkBenchHeader() {
         const label = tab.title || tab.cwd.split("/").pop() || "Terminal";
         const status = tab.sessionId ? sessionStatus[tab.sessionId]?.status : undefined;
         const statusDot = status ? STATUS_DOT[status] : undefined;
+        const hint = jumpActive ? jumpHints.byTabId[tab.id] : undefined;
         return (
           <button
             key={tab.id}
@@ -124,6 +130,7 @@ export function WorkBenchHeader() {
               dragOverId === tab.id && "ring-1 ring-white/20",
             )}
           >
+            {hint && <JumpHint hint={hint} className="mr-1.5" />}
             {isMain && (
               <span
                 title="Main Run (⌘G elsewhere to promote)"

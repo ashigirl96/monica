@@ -4,11 +4,14 @@ import {
   runspaceSummariesAtom,
   activateRunspaceAtom,
   detachedSessionsAtom,
+  jumpHintsActiveAtom,
+  jumpHintTargetsAtom,
   reattachSessionAtom,
   refreshSessionsAtom,
   reorderRunspacesAtom,
   type RunspaceSummary,
 } from "@/features/work-bench/store";
+import { JumpHint } from "./jump-hint";
 import { terminalTerminate, type TerminalSession } from "@/commands/terminal";
 import { onTaskRunStatusChanged, type DisplayStatus } from "@/commands/task";
 import { taskStatusMapAtom, refreshTaskSummariesAtom } from "@/stores/workboard";
@@ -70,6 +73,7 @@ function RunspaceItem({
   onActivate,
   dragState,
   status,
+  hint,
 }: {
   ws: RunspaceSummary;
   onActivate: () => void;
@@ -80,6 +84,7 @@ function RunspaceItem({
     reorder: (from: string, to: string) => void;
   };
   status?: DisplayStatus;
+  hint?: string;
 }) {
   return (
     <button
@@ -119,6 +124,7 @@ function RunspaceItem({
       )}
     >
       <div className="flex items-center gap-1.5">
+        {hint && <JumpHint hint={hint} ctrl />}
         {ws.taskId && (
           <span className="shrink-0 rounded bg-emerald-500/15 px-1 py-px font-mono text-[9px] text-emerald-400">
             {ws.taskId}
@@ -159,6 +165,8 @@ export function WorkBenchSidebar() {
   const refreshTaskSummaries = useSetAtom(refreshTaskSummariesAtom);
   const reorder = useSetAtom(reorderRunspacesAtom);
   const setSpace = useSetAtom(activeSpaceAtom);
+  const jumpActive = useAtomValue(jumpHintsActiveAtom);
+  const jumpHints = useAtomValue(jumpHintTargetsAtom);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const dragIdRef = useRef<string | null>(null);
 
@@ -204,6 +212,7 @@ export function WorkBenchSidebar() {
                   onActivate={() => activate(ws.id)}
                   dragState={dragState}
                   status={ws.taskId ? taskStatusMap[ws.taskId] : undefined}
+                  hint={jumpActive ? jumpHints.byRunspaceId[ws.id] : undefined}
                 />
               ))}
             </div>
@@ -218,6 +227,7 @@ export function WorkBenchSidebar() {
               ws={ws}
               onActivate={() => activate(ws.id)}
               dragState={dragState}
+              hint={jumpActive ? jumpHints.byRunspaceId[ws.id] : undefined}
             />
           ))}
         </div>

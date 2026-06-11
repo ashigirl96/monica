@@ -1,6 +1,6 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import { useEffect, useRef } from "react";
-import { type SpaceId, activeSpaceAtom, prefixActiveAtom, sidebarOpenAtom } from "@/stores/space";
+import { type SpaceId, activeSpaceAtom, sidebarOpenAtom } from "@/stores/space";
 import { createTabAtom, closeTabAtom, cycleTabAtom } from "@/stores/tabs";
 import {
   createRunspaceAtom,
@@ -8,6 +8,9 @@ import {
   closeTerminalTabAtom,
   cycleTerminalTabAtom,
   cycleRunspaceAtom,
+  jumpHintsActiveAtom,
+  jumpToHintAtom,
+  toggleLastRunspaceAtom,
 } from "@/stores/terminal";
 import { promoteActiveTabRunAtom } from "@/stores/workboard";
 import { isEditable } from "@/lib/keyboard";
@@ -27,7 +30,6 @@ export function useShortcuts() {
   const activeSpace = useAtomValue(activeSpaceAtom);
   const setActiveSpace = useSetAtom(activeSpaceAtom);
   const setSidebarOpen = useSetAtom(sidebarOpenAtom);
-  const setPrefixActive = useSetAtom(prefixActiveAtom);
   const createTab = useSetAtom(createTabAtom);
   const closeTab = useSetAtom(closeTabAtom);
   const cycleTab = useSetAtom(cycleTabAtom);
@@ -37,10 +39,14 @@ export function useShortcuts() {
   const cycleTerminalTab = useSetAtom(cycleTerminalTabAtom);
   const cycleRunspace = useSetAtom(cycleRunspaceAtom);
   const promoteActiveTabRun = useSetAtom(promoteActiveTabRunAtom);
+  const jumpActive = useAtomValue(jumpHintsActiveAtom);
+  const setJumpActive = useSetAtom(jumpHintsActiveAtom);
+  const jumpToHint = useSetAtom(jumpToHintAtom);
+  const toggleLastRunspace = useSetAtom(toggleLastRunspaceAtom);
 
-  const prefixRef = useRef(false);
   const timeoutRef = useRef<number>(0);
   const prSyncInFlightRef = useRef(false);
+  const prevActiveSpaceRef = useRef(activeSpace);
 
   useEffect(() => {
     const unlisten = onPrSyncCompleted(() => {
@@ -52,22 +58,56 @@ export function useShortcuts() {
   }, []);
 
   useEffect(() => {
+    if (prevActiveSpaceRef.current === "work-bench" && activeSpace !== "work-bench") {
+      setJumpActive(false);
+      clearTimeout(timeoutRef.current);
+    }
+    prevActiveSpaceRef.current = activeSpace;
+  }, [activeSpace, setJumpActive]);
+
+  useEffect(() => {
+    if (activeSpace !== "work-bench" || !jumpActive) return;
+
+    function dismissJumpMode() {
+      setJumpActive(false);
+      clearTimeout(timeoutRef.current);
+    }
+
+    window.addEventListener("pointerdown", dismissJumpMode, true);
+    return () => window.removeEventListener("pointerdown", dismissJumpMode, true);
+  }, [activeSpace, jumpActive, setJumpActive]);
+
+  useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const isWorkBench = activeSpace === "work-bench";
       const editable = isEditable(e);
 
-      if (prefixRef.current) {
-        prefixRef.current = false;
-        setPrefixActive(false);
+      if (jumpActive) {
+        if (e.key === "Alt" || e.key === "Control" || e.key === "Meta" || e.key === "Shift") {
+          return;
+        }
+        e.preventDefault();
         clearTimeout(timeoutRef.current);
-        if (e.key === "c") {
-          e.preventDefault();
+        if (e.ctrlKey && e.key === "t") {
+          setJumpActive(false);
+          return;
+        }
+        if (e.key === "c" && !e.ctrlKey) {
+          setJumpActive(false);
           if (isWorkBench) {
             createTerminalTab();
           } else {
             createTab();
           }
+          return;
         }
+        if (!isWorkBench) {
+          setJumpActive(false);
+          return;
+        }
+        // Ctrl+digit → runspace, bare digit → tab. Unmatched keys (Escape included)
+        // just dismiss the hints.
+        jumpToHint({ key: e.key.toLowerCase(), runspace: e.ctrlKey });
         return;
       }
 
@@ -108,6 +148,12 @@ export function useShortcuts() {
         return;
       }
 
+      if (e.altKey && e.code === "KeyO") {
+        e.preventDefault();
+        if (isWorkBench) toggleLastRunspace();
+        return;
+      }
+
       if (e.altKey && e.code === "KeyJ") {
         e.preventDefault();
         if (isWorkBench) cycleRunspace("down");
@@ -134,12 +180,12 @@ export function useShortcuts() {
 
       if (e.ctrlKey && e.key === "t") {
         e.preventDefault();
-        prefixRef.current = true;
-        setPrefixActive(true);
-        timeoutRef.current = window.setTimeout(() => {
-          prefixRef.current = false;
-          setPrefixActive(false);
-        }, PREFIX_TIMEOUT);
+        setJumpActive(true);
+        clearTimeout(timeoutRef.current);
+        // Outside the WorkBench there is no hint UI, so expire the prefix like before.
+        if (!isWorkBench) {
+          timeoutRef.current = window.setTimeout(() => setJumpActive(false), PREFIX_TIMEOUT);
+        }
         return;
       }
 
@@ -182,7 +228,6 @@ export function useShortcuts() {
     activeSpace,
     setActiveSpace,
     setSidebarOpen,
-    setPrefixActive,
     createTab,
     closeTab,
     cycleTab,
@@ -192,5 +237,9 @@ export function useShortcuts() {
     cycleTerminalTab,
     cycleRunspace,
     promoteActiveTabRun,
+    jumpActive,
+    setJumpActive,
+    jumpToHint,
+    toggleLastRunspace,
   ]);
 }

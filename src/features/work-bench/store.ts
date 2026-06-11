@@ -215,6 +215,8 @@ export const createRunspaceAtom = atom(null, (get, set) => {
     r.order >= insertOrder ? { ...r, order: r.order + 1 } : r,
   );
   const rs = createRunspace(insertOrder, cwd);
+  set(jumpHintsActiveAtom, false);
+  rememberRunspaceSwitch(get, set, rs.id);
   set(terminalStateAtom, {
     runspaces: [...shifted, rs],
     activeRunspaceId: rs.id,
@@ -250,10 +252,27 @@ export const removeRunspaceAtom = atom(null, (get, set, rsId: string) => {
   set(terminalStateAtom, { runspaces: remaining, activeRunspaceId: newActive });
 });
 
+export const lastRunspaceIdAtom = atom<string | null>(null);
+
+function rememberRunspaceSwitch(get: Getter, set: Setter, nextId: string) {
+  const current = get(resolvedStateAtom).activeRunspaceId;
+  if (current !== nextId) set(lastRunspaceIdAtom, current);
+}
+
 export const activateRunspaceAtom = atom(null, (get, set, rsId: string) => {
   const state = get(resolvedStateAtom);
+  set(jumpHintsActiveAtom, false);
+  rememberRunspaceSwitch(get, set, rsId);
   set(terminalStateAtom, { ...state, activeRunspaceId: rsId });
   set(terminalFocusRequestAtom, (c) => c + 1);
+});
+
+export const toggleLastRunspaceAtom = atom(null, (get, set) => {
+  const state = get(resolvedStateAtom);
+  const lastId = get(lastRunspaceIdAtom);
+  if (!lastId || lastId === state.activeRunspaceId) return;
+  if (!state.runspaces.some((r) => r.id === lastId)) return;
+  set(activateRunspaceAtom, lastId);
 });
 
 export const cycleRunspaceAtom = atom(null, (get, set, direction: "up" | "down") => {
@@ -265,6 +284,8 @@ export const cycleRunspaceAtom = atom(null, (get, set, direction: "up" | "down")
   const newIdx =
     direction === "up" ? (idx - 1 + sorted.length) % sorted.length : (idx + 1) % sorted.length;
 
+  set(jumpHintsActiveAtom, false);
+  rememberRunspaceSwitch(get, set, sorted[newIdx].id);
   set(terminalStateAtom, { ...state, activeRunspaceId: sorted[newIdx].id });
 });
 
@@ -285,6 +306,7 @@ export const createTerminalTabAtom = atom(null, (get, set) => {
     activeTabId: tab.id,
   };
 
+  set(jumpHintsActiveAtom, false);
   set(terminalStateAtom, {
     ...state,
     runspaces: state.runspaces.map((r) => (r.id === rs.id ? updatedRs : r)),
@@ -315,6 +337,7 @@ export const closeTerminalTabAtom = atom(null, (get, set, tabId?: string) => {
   const newActiveId =
     targetId === rs.activeTabId ? newTabs[Math.min(idx, newTabs.length - 1)].id : rs.activeTabId;
 
+  set(jumpHintsActiveAtom, false);
   set(terminalStateAtom, {
     ...state,
     runspaces: state.runspaces.map((r) =>
@@ -328,6 +351,7 @@ export const activateTerminalTabAtom = atom(null, (get, set, tabId: string) => {
   const rs = state.runspaces.find((r) => r.id === state.activeRunspaceId);
   if (!rs) return;
 
+  set(jumpHintsActiveAtom, false);
   set(terminalStateAtom, {
     ...state,
     runspaces: state.runspaces.map((r) => (r.id === rs.id ? { ...rs, activeTabId: tabId } : r)),
@@ -345,12 +369,52 @@ export const cycleTerminalTabAtom = atom(null, (get, set, direction: "left" | "r
   const newIdx =
     direction === "left" ? (idx - 1 + sorted.length) % sorted.length : (idx + 1) % sorted.length;
 
+  set(jumpHintsActiveAtom, false);
   set(terminalStateAtom, {
     ...state,
     runspaces: state.runspaces.map((r) =>
       r.id === rs.id ? { ...rs, activeTabId: sorted[newIdx].id } : r,
     ),
   });
+});
+
+export const jumpHintsActiveAtom = atom(false);
+
+// Both use digits in visual order; Ctrl disambiguates runspace (⌃1) from tab (1).
+const HINT_KEYS = [..."123456789"];
+
+export const jumpHintTargetsAtom = atom((get) => {
+  const summaries = get(runspaceSummariesAtom);
+  // Hint order must match the sidebar's visual order: task-bound group first, then shells.
+  const ordered = [...summaries.filter((s) => s.taskId), ...summaries.filter((s) => !s.taskId)];
+  const rs = get(activeRunspaceAtom);
+  const tabs = rs ? [...rs.tabs].sort((a, b) => a.order - b.order) : [];
+
+  const byRunspaceId: Record<string, string> = {};
+  const byTabId: Record<string, string> = {};
+  const runspaceByKey: Record<string, string> = {};
+  const tabByKey: Record<string, string> = {};
+  ordered.slice(0, HINT_KEYS.length).forEach((s, i) => {
+    byRunspaceId[s.id] = HINT_KEYS[i];
+    runspaceByKey[HINT_KEYS[i]] = s.id;
+  });
+  tabs.slice(0, HINT_KEYS.length).forEach((t, i) => {
+    byTabId[t.id] = HINT_KEYS[i];
+    tabByKey[HINT_KEYS[i]] = t.id;
+  });
+  return { byRunspaceId, byTabId, runspaceByKey, tabByKey };
+});
+
+export const jumpToHintAtom = atom(null, (get, set, input: { key: string; runspace: boolean }) => {
+  const targets = get(jumpHintTargetsAtom);
+  set(jumpHintsActiveAtom, false);
+  const id = input.runspace ? targets.runspaceByKey[input.key] : targets.tabByKey[input.key];
+  if (!id) return;
+  if (input.runspace) {
+    set(activateRunspaceAtom, id);
+  } else {
+    set(activateTerminalTabAtom, id);
+  }
 });
 
 export const updateTabTitleAtom = atom(null, (get, set, tabId: string, title: string) => {
@@ -571,6 +635,8 @@ export const reattachSessionAtom = atom(null, (get, set, session: TerminalSessio
     sessionId: session.id,
   };
 
+  set(jumpHintsActiveAtom, false);
+  rememberRunspaceSwitch(get, set, targetRs.id);
   set(terminalStateAtom, {
     ...state,
     activeRunspaceId: targetRs.id,
@@ -692,6 +758,7 @@ export const createTaskRunspaceAtom = atom(
         updated = base;
       }
 
+      rememberRunspaceSwitch(get, set, existing.id);
       set(terminalStateAtom, {
         ...state,
         activeRunspaceId: existing.id,
@@ -714,6 +781,7 @@ export const createTaskRunspaceAtom = atom(
       activeTabId: tab.id,
       order: maxOrder + 1,
     };
+    rememberRunspaceSwitch(get, set, rs.id);
     set(terminalStateAtom, {
       runspaces: [...state.runspaces, rs],
       activeRunspaceId: rs.id,

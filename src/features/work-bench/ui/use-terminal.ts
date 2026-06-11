@@ -16,8 +16,9 @@ import {
   terminalWrite,
   type TerminalSessionStatus,
 } from "@/commands/terminal";
-import { activeSpaceAtom, prefixActiveAtom } from "@/stores/space";
+import { activeSpaceAtom } from "@/stores/space";
 import {
+  jumpHintsActiveAtom,
   setSessionStatusAtom,
   terminalFontSizeAtom,
   terminalFocusRequestAtom,
@@ -304,7 +305,7 @@ export function useTerminal(
         }
         return false;
       }
-      if (store.get(prefixActiveAtom)) return false;
+      if (store.get(jumpHintsActiveAtom)) return false;
       if (e.altKey) return false;
       if (e.ctrlKey && e.key === "t") return false;
       if (e.ctrlKey && e.key === "Tab") return false;

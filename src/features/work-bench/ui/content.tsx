@@ -6,6 +6,7 @@ import {
   terminalReadyAtom,
   bindTabSessionAtom,
   closeTerminalTabAtom,
+  jumpHintsActiveAtom,
   sessionStatusAtom,
   startNewShellForTabAtom,
   updateTabTitleAtom,
@@ -77,6 +78,29 @@ function SessionOverlay({
         >
           Close tab
         </button>
+      </div>
+    </div>
+  );
+}
+
+function JumpOverlay() {
+  const active = useAtomValue(jumpHintsActiveAtom);
+  const setActive = useSetAtom(jumpHintsActiveAtom);
+  if (!active) return null;
+
+  return (
+    <div
+      className="animate-in fade-in absolute inset-0 z-20 flex items-end justify-center bg-black/40 pb-6 duration-150"
+      onPointerDown={() => setActive(false)}
+    >
+      <div className="rounded-full border border-white/10 bg-black/70 px-4 py-1.5 font-mono text-[11px] text-foreground/70 shadow-lg">
+        <span className="font-bold text-amber-300">⌃1 ⌃2 …</span> runspace
+        <span className="mx-2 text-foreground/30">·</span>
+        <span className="font-bold text-amber-300">1 2 …</span> tab
+        <span className="mx-2 text-foreground/30">·</span>
+        <span className="font-bold text-amber-300">c</span> new tab
+        <span className="mx-2 text-foreground/30">·</span>
+        esc
       </div>
     </div>
   );
@@ -235,6 +259,7 @@ export default function WorkBenchContent() {
           />
         )),
       )}
+      <JumpOverlay />
       <TabContextMenu />
     </div>
   );
