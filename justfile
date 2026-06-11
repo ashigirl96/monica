@@ -89,6 +89,7 @@ generate-bindings: ptyd-bin
 
 test: ptyd-bin
     cargo test --workspace
+    bun test
 
 analyze:
     bun --bun vite build --mode analyze

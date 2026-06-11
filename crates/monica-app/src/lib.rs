@@ -79,6 +79,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_store::Builder::new().build())
         .manage(ptyd::PtydHandle::new())
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
