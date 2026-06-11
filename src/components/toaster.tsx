@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useAtomValue } from "jotai";
 import { dismissToast, pushErrorToast, toastsAtom } from "@/stores/toast";
+import { cn } from "@/lib/utils";
 
 function errorMessage(reason: unknown): string {
   if (reason instanceof Error) return reason.message;
@@ -31,9 +32,17 @@ export function Toaster() {
       {toasts.map((t) => (
         <div
           key={t.id}
-          className="animate-in fade-in slide-in-from-bottom-2 pointer-events-auto flex items-start gap-2 rounded-lg border border-destructive/40 bg-card px-3 py-2.5 shadow-lg"
+          className={cn(
+            "animate-in fade-in slide-in-from-bottom-2 pointer-events-auto flex items-start gap-2 rounded-lg border bg-card px-3 py-2.5 shadow-lg",
+            t.type === "error" ? "border-destructive/40" : "border-border",
+          )}
         >
-          <span className="mt-1 size-1.5 shrink-0 rounded-full bg-destructive" />
+          <span
+            className={cn(
+              "mt-1 size-1.5 shrink-0 rounded-full",
+              t.type === "error" ? "bg-destructive" : "bg-muted-foreground/60",
+            )}
+          />
           <p className="min-w-0 flex-1 text-[12px] leading-snug break-words text-foreground select-text">
             {t.message}
           </p>
