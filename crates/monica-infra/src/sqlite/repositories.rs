@@ -4,7 +4,7 @@ use monica_core::NewTaskRun;
 use monica_core::{
     BenchRepository, Clock, DisplayStatus, Event, EventRepository, ExternalRef, GithubPullRequest,
     Project, ProjectRepository, PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate,
-    PullRequestSyncCandidate, Task, TaskRepository, TaskRun, TaskRunObservation, TaskRunRepository,
+    Task, TaskRepository, TaskRun, TaskRunObservation, TaskRunRepository,
     TaskRunStatus, TaskStatus, TaskSummaryRow,
 };
 use serde_json::Value;
@@ -62,10 +62,6 @@ impl TaskRepository for SqliteStore {
         SqliteStore::next_pull_request_branch_sync_candidate(self)
     }
 
-    fn next_pull_request_sync_candidate(&self) -> Result<Option<PullRequestSyncCandidate>> {
-        SqliteStore::next_pull_request_sync_candidate(self)
-    }
-
     fn next_pull_request_status_sync_candidate(
         &self,
     ) -> Result<Option<PullRequestStatusSyncCandidate>> {
@@ -86,22 +82,6 @@ impl TaskRepository for SqliteStore {
         error: &str,
     ) -> Result<()> {
         SqliteStore::record_pull_request_branch_sync_failure(self, candidate, error)
-    }
-
-    fn record_pull_request_sync_success(
-        &mut self,
-        candidate: &PullRequestSyncCandidate,
-        pull_requests: &[GithubPullRequest],
-    ) -> Result<()> {
-        SqliteStore::record_pull_request_sync_success(self, candidate, pull_requests)
-    }
-
-    fn record_pull_request_sync_failure(
-        &mut self,
-        candidate: &PullRequestSyncCandidate,
-        error: &str,
-    ) -> Result<()> {
-        SqliteStore::record_pull_request_sync_failure(self, candidate, error)
     }
 
     fn record_pull_request_status_sync_success(

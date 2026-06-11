@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use crate::domain::{
     DisplayStatus, ExternalRef, GithubPullRequest, PullRequestBranchSyncCandidate,
-    PullRequestStatusSyncCandidate, PullRequestSyncCandidate, Task, TaskStatus, TaskSummaryRow,
+    PullRequestStatusSyncCandidate, Task, TaskStatus, TaskSummaryRow,
 };
 use crate::NewTask;
 
@@ -24,7 +24,6 @@ pub trait TaskRepository {
     fn next_pull_request_branch_sync_candidate(
         &self,
     ) -> Result<Option<PullRequestBranchSyncCandidate>>;
-    fn next_pull_request_sync_candidate(&self) -> Result<Option<PullRequestSyncCandidate>>;
     fn next_pull_request_status_sync_candidate(
         &self,
     ) -> Result<Option<PullRequestStatusSyncCandidate>>;
@@ -36,16 +35,6 @@ pub trait TaskRepository {
     fn record_pull_request_branch_sync_failure(
         &mut self,
         candidate: &PullRequestBranchSyncCandidate,
-        error: &str,
-    ) -> Result<()>;
-    fn record_pull_request_sync_success(
-        &mut self,
-        candidate: &PullRequestSyncCandidate,
-        pull_requests: &[GithubPullRequest],
-    ) -> Result<()>;
-    fn record_pull_request_sync_failure(
-        &mut self,
-        candidate: &PullRequestSyncCandidate,
         error: &str,
     ) -> Result<()>;
     fn record_pull_request_status_sync_success(

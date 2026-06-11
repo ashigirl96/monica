@@ -16,7 +16,7 @@ pub use external_ref::{ExternalRef, RefType};
 pub use github::{
     GithubAuthStatus, GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef,
     GithubPullRequestStatus, PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate,
-    PullRequestSyncCandidate, PullRequestSyncResult, PullRequestSyncStatus,
+    PullRequestSyncResult, PullRequestSyncStatus,
 };
 pub use lifecycle::{
     is_resume_session_start, is_safe_task_run_id, is_session_starting_event,

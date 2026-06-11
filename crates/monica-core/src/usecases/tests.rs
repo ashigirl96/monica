@@ -17,7 +17,7 @@ use crate::{
     wait_for_github_device_flow, Agent, DisplayStatus, Event, ExternalRef, GithubAuthStatus,
     GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef,
     GithubPullRequestStatus, NewTask, NewTaskRun, Project, PullRequestBranchSyncCandidate,
-    PullRequestStatusSyncCandidate, PullRequestSyncCandidate, PullRequestSyncStatus, Task,
+    PullRequestStatusSyncCandidate, PullRequestSyncStatus, Task,
     TaskBench, TaskKind, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus,
     TaskSummaryRow, TrackGithubIssueInput,
 };
@@ -38,11 +38,8 @@ struct FakeState {
     next_task: i64,
     next_run: i64,
     pr_branch_candidate: Option<PullRequestBranchSyncCandidate>,
-    pr_candidate: Option<PullRequestSyncCandidate>,
     pr_status_candidate: Option<PullRequestStatusSyncCandidate>,
     pr_branch_success_count: usize,
-    pr_success_count: usize,
-    issue_sync_candidate_lookups: usize,
 }
 
 impl FakeRepos {
@@ -201,11 +198,6 @@ impl TaskRepository for FakeRepos {
         Ok(self.state.borrow().pr_branch_candidate.clone())
     }
 
-    fn next_pull_request_sync_candidate(&self) -> Result<Option<PullRequestSyncCandidate>> {
-        self.state.borrow_mut().issue_sync_candidate_lookups += 1;
-        Ok(self.state.borrow().pr_candidate.clone())
-    }
-
     fn next_pull_request_status_sync_candidate(
         &self,
     ) -> Result<Option<PullRequestStatusSyncCandidate>> {
@@ -229,26 +221,6 @@ impl TaskRepository for FakeRepos {
         _error: &str,
     ) -> Result<()> {
         self.state.borrow_mut().pr_branch_candidate = None;
-        Ok(())
-    }
-
-    fn record_pull_request_sync_success(
-        &mut self,
-        _candidate: &PullRequestSyncCandidate,
-        pull_requests: &[GithubPullRequest],
-    ) -> Result<()> {
-        let mut state = self.state.borrow_mut();
-        state.pr_success_count = pull_requests.len();
-        state.pr_candidate = None;
-        Ok(())
-    }
-
-    fn record_pull_request_sync_failure(
-        &mut self,
-        _candidate: &PullRequestSyncCandidate,
-        _error: &str,
-    ) -> Result<()> {
-        self.state.borrow_mut().pr_candidate = None;
         Ok(())
     }
 
@@ -521,21 +493,6 @@ impl GithubGateway for FakeGithub {
 
     fn fetch_default_branch<'a>(&'a self, _repo: &'a str) -> BoxFuture<'a, Result<Option<String>>> {
         Box::pin(async { Ok(Some("main".to_string())) })
-    }
-
-    fn fetch_linked_pull_requests<'a>(
-        &'a self,
-        repo: &'a str,
-        _issue_number: i64,
-    ) -> BoxFuture<'a, Result<Vec<GithubPullRequest>>> {
-        Box::pin(async move {
-            Ok(vec![GithubPullRequest {
-                repo: repo.to_string(),
-                number: 7,
-                url: format!("https://github.com/{repo}/pull/7"),
-                status: GithubPullRequestStatus::Open,
-            }])
-        })
     }
 
     fn fetch_pull_requests_by_branch<'a>(
@@ -1399,26 +1356,18 @@ fn record_claude_hook_prefers_explicit_run_id_over_session_lookup() {
 }
 
 #[tokio::test]
-async fn sync_pull_requests_records_branch_gateway_result_without_issue_lookup() {
+async fn sync_pull_requests_records_branch_gateway_result() {
     let mut repos = FakeRepos::default();
     repos.state.borrow_mut().pr_branch_candidate = Some(PullRequestBranchSyncCandidate {
         task_id: "MON-1".to_string(),
         repo: "owner/repo".to_string(),
         branch: "issue-42".to_string(),
     });
-    repos.state.borrow_mut().pr_candidate = Some(PullRequestSyncCandidate {
-        task_id: "MON-1".to_string(),
-        source_ref_id: 1,
-        repo: "owner/repo".to_string(),
-        issue_number: 42,
-    });
     let result = sync_next_pull_request(&mut repos, &FakeGithub)
         .await
         .unwrap();
     assert_eq!(result.status, PullRequestSyncStatus::Synced);
     assert_eq!(repos.state.borrow().pr_branch_success_count, 1);
-    assert_eq!(repos.state.borrow().pr_success_count, 0);
-    assert_eq!(repos.state.borrow().issue_sync_candidate_lookups, 0);
 }
 
 #[test]

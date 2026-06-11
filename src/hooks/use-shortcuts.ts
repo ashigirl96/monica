@@ -46,7 +46,6 @@ export function useShortcuts() {
 
   const timeoutRef = useRef<number>(0);
   const prSyncInFlightRef = useRef(false);
-  const prevActiveSpaceRef = useRef(activeSpace);
 
   useEffect(() => {
     const unlisten = onPrSyncCompleted(() => {
@@ -58,11 +57,10 @@ export function useShortcuts() {
   }, []);
 
   useEffect(() => {
-    if (prevActiveSpaceRef.current === "work-bench" && activeSpace !== "work-bench") {
+    if (activeSpace !== "work-bench") {
       setJumpActive(false);
       clearTimeout(timeoutRef.current);
     }
-    prevActiveSpaceRef.current = activeSpace;
   }, [activeSpace, setJumpActive]);
 
   useEffect(() => {

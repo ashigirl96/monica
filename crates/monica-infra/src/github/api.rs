@@ -44,31 +44,6 @@ impl GithubApiClient {
         Ok((!response.default_branch.trim().is_empty()).then_some(response.default_branch))
     }
 
-    pub async fn fetch_linked_pull_requests(
-        &self,
-        repo: &str,
-        issue_number: i64,
-    ) -> Result<Vec<GithubPullRequest>> {
-        let (owner, name) = split_repo(repo)?;
-        let payload = json!({
-            "query": LINKED_PULL_REQUESTS_QUERY,
-            "variables": {
-                "owner": owner,
-                "name": name,
-                "number": issue_number,
-                "first": 20,
-            },
-        });
-        let response: LinkedPullRequestsResponse =
-            self.crab().await?.graphql(&payload).await.map_err(|e| {
-                map_github_error(
-                    e,
-                    &format!("fetch linked pull requests for {repo}#{issue_number}"),
-                )
-            })?;
-        linked_pull_requests_from_response(response)
-    }
-
     pub async fn fetch_pull_requests_by_branch(
         &self,
         repo: &str,
@@ -155,33 +130,6 @@ fn map_github_error(error: octocrab::Error, action: &str) -> anyhow::Error {
         ),
         other => anyhow!("GitHub API error while trying to {action}: {other}"),
     }
-}
-
-fn linked_pull_requests_from_response(
-    response: LinkedPullRequestsResponse,
-) -> Result<Vec<GithubPullRequest>> {
-    let repository = response
-        .repository
-        .ok_or_else(|| anyhow!("GitHub repository was not found; confirm you have access to it"))?;
-    let issue = repository.issue.ok_or_else(|| {
-        anyhow!("GitHub issue was not found; confirm you have access to the repository")
-    })?;
-    let mut pull_requests = Vec::new();
-    for node in issue.closed_by_pull_requests_references.nodes {
-        let Some(node) = node else {
-            continue;
-        };
-        if node.number <= 0 {
-            continue;
-        }
-        pull_requests.push(GithubPullRequest {
-            repo: pull_request_repo(&node),
-            number: node.number,
-            url: node.url,
-            status: pull_request_status(&node.state, node.is_draft)?,
-        });
-    }
-    Ok(pull_requests)
 }
 
 fn pull_request_from_response(response: PullRequestResponse) -> Result<GithubPullRequest> {
@@ -285,16 +233,6 @@ impl GithubGateway for GithubApiClient {
         Box::pin(async move { GithubApiClient::fetch_default_branch(self, repo).await })
     }
 
-    fn fetch_linked_pull_requests<'a>(
-        &'a self,
-        repo: &'a str,
-        issue_number: i64,
-    ) -> monica_core::interfaces::BoxFuture<'a, Result<Vec<GithubPullRequest>>> {
-        Box::pin(async move {
-            GithubApiClient::fetch_linked_pull_requests(self, repo, issue_number).await
-        })
-    }
-
     fn fetch_pull_requests_by_branch<'a>(
         &'a self,
         repo: &'a str,
@@ -372,26 +310,6 @@ struct BranchPullRequestResponse {
     merged_at: Option<String>,
 }
 
-const LINKED_PULL_REQUESTS_QUERY: &str = r#"
-query MonicaLinkedPullRequests($owner: String!, $name: String!, $number: Int!, $first: Int!) {
-  repository(owner: $owner, name: $name) {
-    issue(number: $number) {
-      closedByPullRequestsReferences(first: $first) {
-        nodes {
-          number
-          url
-          state
-          isDraft
-          repository {
-            nameWithOwner
-          }
-        }
-      }
-    }
-  }
-}
-"#;
-
 const PULL_REQUEST_QUERY: &str = r#"
 query MonicaPullRequest($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
@@ -410,18 +328,6 @@ query MonicaPullRequest($owner: String!, $name: String!, $number: Int!) {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct LinkedPullRequestsResponse {
-    repository: Option<LinkedPullRequestsRepository>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LinkedPullRequestsRepository {
-    issue: Option<LinkedPullRequestsIssue>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct PullRequestResponse {
     repository: Option<PullRequestLookupRepository>,
 }
@@ -430,19 +336,6 @@ struct PullRequestResponse {
 #[serde(rename_all = "camelCase")]
 struct PullRequestLookupRepository {
     pull_request: Option<PullRequestNode>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LinkedPullRequestsIssue {
-    closed_by_pull_requests_references: PullRequestConnection,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PullRequestConnection {
-    #[serde(default)]
-    nodes: Vec<Option<PullRequestNode>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -466,12 +359,9 @@ mod tests {
     use monica_core::GithubPullRequestStatus;
 
     use super::{
-        branch_pull_requests_from_response, issue_from_response,
-        linked_pull_requests_from_response, pull_request_from_response,
+        branch_pull_requests_from_response, issue_from_response, pull_request_from_response,
     };
-    use super::{
-        BranchPullRequestResponse, IssueResponse, LinkedPullRequestsResponse, PullRequestResponse,
-    };
+    use super::{BranchPullRequestResponse, IssueResponse, PullRequestResponse};
 
     fn issue_response(value: serde_json::Value) -> IssueResponse {
         serde_json::from_value(value).unwrap()
@@ -532,48 +422,6 @@ mod tests {
         )
         .unwrap_err();
         assert!(format!("{err:#}").contains("#9"), "{err:#}");
-    }
-
-    #[test]
-    fn extracts_linked_pull_requests_from_graphql_response() {
-        let response: LinkedPullRequestsResponse = serde_json::from_value(serde_json::json!({
-            "repository": {
-                "issue": {
-                    "closedByPullRequestsReferences": {
-                        "nodes": [
-                            {
-                                "number": 99,
-                                "url": "https://github.com/O/R/pull/99",
-                                "state": "MERGED",
-                                "isDraft": false,
-                                "repository": { "nameWithOwner": "O/R" }
-                            },
-                            {
-                                "number": 100,
-                                "url": "https://github.com/O/R/pull/100",
-                                "state": "OPEN",
-                                "isDraft": true,
-                                "repository": { "nameWithOwner": "O/R" }
-                            },
-                            null
-                        ]
-                    }
-                }
-            }
-        }))
-        .unwrap();
-
-        let pull_requests = linked_pull_requests_from_response(response).unwrap();
-        assert_eq!(pull_requests.len(), 2);
-        assert_eq!(pull_requests[0].repo, "o/r");
-        assert_eq!(pull_requests[0].number, 99);
-        assert_eq!(
-            pull_requests[0].url,
-            "https://github.com/O/R/pull/99".to_string()
-        );
-        assert_eq!(pull_requests[0].status, GithubPullRequestStatus::Merged);
-        assert_eq!(pull_requests[1].number, 100);
-        assert_eq!(pull_requests[1].status, GithubPullRequestStatus::Draft);
     }
 
     #[test]

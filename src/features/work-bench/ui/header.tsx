@@ -4,7 +4,6 @@ import {
   activateTerminalTabAtom,
   closeTerminalTabAtom,
   createTerminalTabAtom,
-  jumpHintsActiveAtom,
   jumpHintTargetsAtom,
   primaryTabByTaskAtom,
   refreshPrimaryTabAtom,
@@ -34,7 +33,6 @@ export function WorkBenchHeader() {
   const closeTab = useSetAtom(closeTerminalTabAtom);
   const createTab = useSetAtom(createTerminalTabAtom);
   const reorder = useSetAtom(reorderTabsAtom);
-  const jumpActive = useAtomValue(jumpHintsActiveAtom);
   const jumpHints = useAtomValue(jumpHintTargetsAtom);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const dragIdRef = useRef<string | null>(null);
@@ -81,7 +79,7 @@ export function WorkBenchHeader() {
         const label = tab.title || tab.cwd.split("/").pop() || "Terminal";
         const status = tab.sessionId ? sessionStatus[tab.sessionId]?.status : undefined;
         const statusDot = status ? STATUS_DOT[status] : undefined;
-        const hint = jumpActive ? jumpHints.byTabId[tab.id] : undefined;
+        const hint = jumpHints.byTabId[tab.id];
         return (
           <button
             key={tab.id}

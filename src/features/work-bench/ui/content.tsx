@@ -83,16 +83,13 @@ function SessionOverlay({
   );
 }
 
+// Purely visual: dismissal (keys, pointerdown) is owned by useShortcuts.
 function JumpOverlay() {
   const active = useAtomValue(jumpHintsActiveAtom);
-  const setActive = useSetAtom(jumpHintsActiveAtom);
   if (!active) return null;
 
   return (
-    <div
-      className="animate-in fade-in absolute inset-0 z-20 flex items-end justify-center bg-black/40 pb-6 duration-150"
-      onPointerDown={() => setActive(false)}
-    >
+    <div className="animate-in fade-in absolute inset-0 z-20 flex items-end justify-center bg-black/40 pb-6 duration-150">
       <div className="rounded-full border border-white/10 bg-black/70 px-4 py-1.5 font-mono text-[11px] text-foreground/70 shadow-lg">
         <span className="font-bold text-amber-300">⌃1 ⌃2 …</span> runspace
         <span className="mx-2 text-foreground/30">·</span>

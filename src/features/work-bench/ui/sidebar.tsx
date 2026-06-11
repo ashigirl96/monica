@@ -4,7 +4,6 @@ import {
   runspaceSummariesAtom,
   activateRunspaceAtom,
   detachedSessionsAtom,
-  jumpHintsActiveAtom,
   jumpHintTargetsAtom,
   reattachSessionAtom,
   refreshSessionsAtom,
@@ -165,7 +164,6 @@ export function WorkBenchSidebar() {
   const refreshTaskSummaries = useSetAtom(refreshTaskSummariesAtom);
   const reorder = useSetAtom(reorderRunspacesAtom);
   const setSpace = useSetAtom(activeSpaceAtom);
-  const jumpActive = useAtomValue(jumpHintsActiveAtom);
   const jumpHints = useAtomValue(jumpHintTargetsAtom);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const dragIdRef = useRef<string | null>(null);
@@ -212,7 +210,7 @@ export function WorkBenchSidebar() {
                   onActivate={() => activate(ws.id)}
                   dragState={dragState}
                   status={ws.taskId ? taskStatusMap[ws.taskId] : undefined}
-                  hint={jumpActive ? jumpHints.byRunspaceId[ws.id] : undefined}
+                  hint={jumpHints.byRunspaceId[ws.id]}
                 />
               ))}
             </div>
@@ -227,7 +225,7 @@ export function WorkBenchSidebar() {
               ws={ws}
               onActivate={() => activate(ws.id)}
               dragState={dragState}
-              hint={jumpActive ? jumpHints.byRunspaceId[ws.id] : undefined}
+              hint={jumpHints.byRunspaceId[ws.id]}
             />
           ))}
         </div>

@@ -14,7 +14,7 @@ pub use domain::{
     BoardColumn, ExternalRef, TaskBench, PrepareTaskResult, RunTaskResult, GithubAuthStatus, GithubDeviceFlow, GithubIssue, GithubPullRequest,
     GithubPullRequestRef, GithubPullRequestStatus, HookTransition, NewTask, NewTaskRun,
     PermissionMode, Project, Provider, PullRequestBranchSyncCandidate,
-    PullRequestStatusSyncCandidate, PullRequestSyncCandidate, PullRequestSyncResult,
+    PullRequestStatusSyncCandidate, PullRequestSyncResult,
     PullRequestSyncStatus, RefType, Task, TaskKind, TaskRun, TaskRunObservation, TaskRunStatus,
     TaskRunWaitReason, TaskStatus, TaskSummaryRow, board_columns, NewTerminalSession,
     TerminalSession, TerminalSessionKind, TerminalSessionStatus,

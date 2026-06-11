@@ -64,14 +64,6 @@ pub struct GithubPullRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PullRequestSyncCandidate {
-    pub task_id: String,
-    pub source_ref_id: i64,
-    pub repo: String,
-    pub issue_number: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullRequestBranchSyncCandidate {
     pub task_id: String,
     pub repo: String,
