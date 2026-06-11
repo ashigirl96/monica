@@ -248,7 +248,7 @@ export const createRunspaceAtom = atom(null, (get, set) => {
 });
 
 // Closing a tab or runspace detaches the session (the process keeps running under the
-// daemon and shows up in the Detached group); only an explicit Terminate kills it.
+// daemon and shows up in the Detached group); only an explicit terminate kills it.
 function detachTab(tab: TerminalTab) {
   const sessionId = releaseTabConnection(tab.id) ?? tab.sessionId;
   if (sessionId) {
@@ -256,25 +256,44 @@ function detachTab(tab: TerminalTab) {
   }
 }
 
-export const removeRunspaceAtom = atom(null, (get, set, rsId: string) => {
-  const state = get(resolvedStateAtom);
-  const rs = state.runspaces.find((r) => r.id === rsId);
-  if (!rs) return;
-
-  for (const tab of rs.tabs) {
-    detachTab(tab);
+async function terminateTab(tab: TerminalTab): Promise<void> {
+  const sessionId = releaseTabConnection(tab.id) ?? tab.sessionId;
+  if (!sessionId) return;
+  try {
+    await terminalTerminate(sessionId);
+  } catch (e) {
+    console.warn("terminal terminate failed:", e);
   }
+}
 
-  const remaining = state.runspaces.filter((r) => r.id !== rsId);
-  if (remaining.length === 0) {
-    set(terminalStateAtom, initialState());
-    return;
-  }
+export const removeRunspaceAtom = atom(
+  null,
+  (get, set, rsId: string, mode: "detach" | "terminate" = "detach") => {
+    const state = get(resolvedStateAtom);
+    const rs = state.runspaces.find((r) => r.id === rsId);
+    if (!rs) return;
 
-  const newActive = state.activeRunspaceId === rsId ? remaining[0].id : state.activeRunspaceId;
+    if (mode === "terminate") {
+      // A detach racing the Exit broadcast would transiently mark the session Detached
+      // in the DB, and the sidebar poll would surface it as a zombie until the exit lands.
+      void Promise.allSettled(rs.tabs.map(terminateTab)).then(() => set(refreshSessionsAtom));
+    } else {
+      for (const tab of rs.tabs) {
+        detachTab(tab);
+      }
+    }
 
-  set(terminalStateAtom, { runspaces: remaining, activeRunspaceId: newActive });
-});
+    const remaining = state.runspaces.filter((r) => r.id !== rsId);
+    if (remaining.length === 0) {
+      set(terminalStateAtom, initialState());
+      return;
+    }
+
+    const newActive = state.activeRunspaceId === rsId ? remaining[0].id : state.activeRunspaceId;
+
+    set(terminalStateAtom, { runspaces: remaining, activeRunspaceId: newActive });
+  },
+);
 
 export const lastRunspaceIdAtom = atom<string | null>(null);
 
