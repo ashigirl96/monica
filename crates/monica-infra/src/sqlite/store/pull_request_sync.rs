@@ -33,6 +33,8 @@ impl SqliteStore {
                  SELECT r.id
                    FROM task_runs r
                   WHERE r.task_id = t.id
+                    AND r.branch IS NOT NULL
+                    AND trim(r.branch) != ''
                   ORDER BY r.created_at DESC,
                            CASE
                              WHEN r.id GLOB 'run-[0-9]*' THEN CAST(SUBSTR(r.id, 5) AS INTEGER)
