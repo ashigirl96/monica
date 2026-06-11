@@ -106,7 +106,7 @@ export const deleteTaskAtom = atom(null, async (get, set, taskId: string) => {
   const runspace = state?.runspaces.find((rs) => rs.taskId === taskId);
   await deleteTask(taskId);
   if (runspace) {
-    set(removeRunspaceAtom, runspace.id);
+    set(removeRunspaceAtom, runspace.id, "terminate");
   }
   await set(refreshTaskSummariesAtom);
 });
