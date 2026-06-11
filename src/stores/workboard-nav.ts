@@ -1,10 +1,9 @@
 import { atom, type Getter } from "jotai";
 import type { DisplayStatus } from "@/commands/task";
+import { PREPARE_ELIGIBLE, RUN_ELIGIBLE } from "@/features/work-board/model";
 import {
   columnTasksAtom,
   taskSummariesAtom,
-  PREPARE_ELIGIBLE,
-  RUN_ELIGIBLE,
   deleteTaskAtom,
   prepareTaskAtom,
   runTaskAtom,
