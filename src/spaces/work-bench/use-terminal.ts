@@ -32,7 +32,7 @@ import {
   releaseTabConnection,
   setTabTerminal,
   type TabConnection,
-} from "./terminal-connections";
+} from "@/features/work-bench/terminal-connections";
 
 const PIXELS_PER_LINE = 20;
 
