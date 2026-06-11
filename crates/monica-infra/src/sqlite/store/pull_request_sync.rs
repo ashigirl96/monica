@@ -461,6 +461,26 @@ impl SqliteStore {
         )?;
         Ok(())
     }
+
+    pub fn force_clear_pr_sync_state(&mut self) -> Result<()> {
+        self.conn_mut().execute(
+            "UPDATE github_pull_request_branch_syncs SET next_retry_at = NULL",
+            [],
+        )?;
+        self.conn_mut().execute(
+            "UPDATE github_pull_request_ref_states
+             SET next_retry_at = NULL, synced_at = NULL
+             WHERE status IN ('draft', 'open') OR status IS NULL",
+            [],
+        )?;
+        self.conn_mut().execute(
+            "UPDATE external_ref_syncs
+             SET last_synced_at = NULL, next_retry_at = NULL
+             WHERE target_ref_type = 'github_pull_request'",
+            [],
+        )?;
+        Ok(())
+    }
 }
 
 fn branch_success_retry_delay(pull_requests: &[GithubPullRequest]) -> &'static str {

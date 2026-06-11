@@ -11,6 +11,8 @@ import {
 } from "@/stores/terminal";
 import { promoteActiveTabRunAtom } from "@/stores/workboard";
 import { isEditable } from "@/lib/keyboard";
+import { forceSyncPullRequests, onPrSyncCompleted } from "@/commands/pull_request";
+import { pushErrorToast } from "@/stores/toast";
 
 const META_KEY_SPACE_MAP: Record<string, SpaceId> = {
   "1": "dashboard",
@@ -38,6 +40,16 @@ export function useShortcuts() {
 
   const prefixRef = useRef(false);
   const timeoutRef = useRef<number>(0);
+  const prSyncInFlightRef = useRef(false);
+
+  useEffect(() => {
+    const unlisten = onPrSyncCompleted(() => {
+      prSyncInFlightRef.current = false;
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -75,6 +87,18 @@ export function useShortcuts() {
       if (e.metaKey && e.key === "g") {
         e.preventDefault();
         if (isWorkBench) void promoteActiveTabRun();
+        return;
+      }
+
+      if (e.metaKey && e.key === "r") {
+        e.preventDefault();
+        if (activeSpace === "work-board" && !prSyncInFlightRef.current) {
+          prSyncInFlightRef.current = true;
+          void forceSyncPullRequests().catch((err) => {
+            pushErrorToast(err instanceof Error ? err.message : String(err));
+            prSyncInFlightRef.current = false;
+          });
+        }
         return;
       }
 

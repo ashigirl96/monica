@@ -1,8 +1,9 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { projectsAtom, selectedProjectAtom, trackIssueAtom } from "@/stores/workboard";
 import { pushErrorToast } from "@/stores/toast";
 import { cn } from "@/lib/utils";
+import { onPrSyncCompleted } from "@/commands/pull_request";
 
 function parseIssueInput(raw: string): { repo: string; number: number } | null {
   const trimmed = raw.trim();
@@ -157,11 +158,44 @@ function ProjectFilter() {
   );
 }
 
+function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds}s ago`;
+  return `${Math.floor(seconds / 60)}m ago`;
+}
+
+function LastSyncedLabel() {
+  const [lastSyncAt, setLastSyncAt] = useState<Date | null>(null);
+  const [, forceUpdate] = useState(0);
+
+  useEffect(() => {
+    const unlisten = onPrSyncCompleted(() => setLastSyncAt(new Date()));
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!lastSyncAt) return;
+    const timer = setInterval(() => forceUpdate((n) => n + 1), 1000);
+    return () => clearInterval(timer);
+  }, [lastSyncAt]);
+
+  if (!lastSyncAt) return null;
+
+  const elapsed = Math.floor((Date.now() - lastSyncAt.getTime()) / 1000);
+  return (
+    <span className="ml-auto text-[10px] text-muted-foreground/60">
+      Synced {formatElapsed(elapsed)}
+    </span>
+  );
+}
+
 export function WorkBoardHeader() {
   return (
     <div className="flex items-center gap-3 px-3 py-1.5">
       <TrackIssueButton />
       <ProjectFilter />
+      <LastSyncedLabel />
     </div>
   );
 }

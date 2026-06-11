@@ -24,3 +24,12 @@ export function pushErrorToast(message: string) {
   store.set(toastsAtom, [...current.slice(-(MAX_TOASTS - 1)), { id, message }]);
   setTimeout(() => dismissToast(id), TOAST_TTL_MS);
 }
+
+export function pushInfoToast(message: string) {
+  const store = getDefaultStore();
+  const current = store.get(toastsAtom);
+  if (current.some((t) => t.message === message)) return;
+  const id = ++nextId;
+  store.set(toastsAtom, [...current.slice(-(MAX_TOASTS - 1)), { id, message }]);
+  setTimeout(() => dismissToast(id), TOAST_TTL_MS);
+}
