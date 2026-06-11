@@ -211,6 +211,22 @@ fn ptyd_binary() -> PathBuf {
     PathBuf::from("monica-ptyd")
 }
 
+// Warm up the daemon connection (and its event pump) off-thread so window startup never
+// blocks on a daemon spawn. Reconciliation is NOT done here: the frontend's first
+// terminal_list_sessions call owns it, after this connection (or its own) is up.
+pub(crate) fn start_warmup(app: AppHandle) {
+    let spawned = std::thread::Builder::new()
+        .name("monica-ptyd-warmup".to_string())
+        .spawn(move || {
+            if let Err(e) = app.state::<PtydHandle>().ensure_connected(&app) {
+                log::warn!(target: "monica_app::ptyd", "daemon warmup failed: {e:#}");
+            }
+        });
+    if let Err(e) = spawned {
+        log::error!(target: "monica_app::ptyd", "failed to start ptyd warmup thread: {e}");
+    }
+}
+
 fn spawn_daemon() -> Result<()> {
     let base = paths::base_dir()?;
     let binary = ptyd_binary();
