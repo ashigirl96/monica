@@ -96,6 +96,8 @@ Issue template（`Context / Goal / Out of Scope / Acceptance Criteria / Verifica
 
 **まだ plan mode でなければ、最初に `EnterPlanMode` を呼んで plan mode に入る**（`/tackle` 起動時点で plan mode とは限らない。飛ばすと Step 3 のプラン審査や末尾の `ExitPlanMode` が plan mode 前提で噛み合わず、`ExitPlanMode` が "not in plan mode" で弾かれる）。そのうえで実装計画を作る。
 
+plan mode 中に `Plan` subagent を起動して計画を立てる場合は、必ず `model="fable"` を明示する（`Agent(subagent_type="Plan", model="fable")`）。
+
 **計画に必ず含めるもの:**
 
 - ロジックを変更するときはテスト — 必須・例外なし

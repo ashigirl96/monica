@@ -555,6 +555,121 @@ fn branch_pr_sync_failure_retries_after_five_minutes() {
     assert!((295..=305).contains(&delay));
 }
 
+#[test]
+fn force_clear_pr_sync_state_resets_branch_syncs_open_pr_states_and_external_ref_syncs() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+
+    // Set up a branch sync with a future next_retry_at (via failure)
+    let (_, open_candidate) =
+        project_task_with_branch(&mut db, "owner/repo", "main", "feature/open");
+    db.record_pull_request_branch_sync_failure(&open_candidate, "transient error")
+        .unwrap();
+
+    // Set up an open PR state via branch sync success
+    db.record_pull_request_branch_sync_success(
+        &open_candidate,
+        &[GithubPullRequest {
+            repo: "owner/repo".to_string(),
+            number: 1,
+            url: "https://github.com/owner/repo/pull/1".to_string(),
+            status: GithubPullRequestStatus::Open,
+        }],
+    )
+    .unwrap();
+
+    // Set up a merged PR state (should NOT be cleared by force_clear)
+    let (_, merged_candidate) =
+        project_task_with_branch(&mut db, "owner/repo", "main", "feature/merged");
+    db.record_pull_request_branch_sync_success(
+        &merged_candidate,
+        &[GithubPullRequest {
+            repo: "owner/repo".to_string(),
+            number: 2,
+            url: "https://github.com/owner/repo/pull/2".to_string(),
+            status: GithubPullRequestStatus::Merged,
+        }],
+    )
+    .unwrap();
+
+    // Set up an external_ref_syncs record (issue→PR link, already synced)
+    let task = db
+        .insert_task_with_ref(
+            dev_task("issue task"),
+            ExternalRef::new(
+                "",
+                RefType::GithubIssue,
+                Some("owner/repo".to_string()),
+                Some(99),
+                None,
+            ),
+        )
+        .unwrap();
+    let refs = db.list_external_refs(&task.id).unwrap();
+    let ref_id = refs[0].id;
+    db.conn_mut()
+        .execute(
+            "INSERT INTO external_ref_syncs
+               (task_id, source_ref_id, target_ref_type, last_synced_at, next_retry_at, updated_at)
+             VALUES (?1, ?2, 'github_pull_request', strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 minute'), NULL, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+            params![&task.id, ref_id],
+        )
+        .unwrap();
+
+    // Action
+    db.force_clear_pr_sync_state().unwrap();
+
+    // Branch sync: next_retry_at should be NULL for all rows
+    let branch_retry: Option<String> = db
+        .conn()
+        .query_row(
+            "SELECT next_retry_at FROM github_pull_request_branch_syncs WHERE task_id = ?1",
+            params![&open_candidate.task_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(branch_retry, None, "branch next_retry_at should be cleared");
+
+    // Open PR state: synced_at and next_retry_at should be NULL
+    let (open_synced_at, open_retry): (Option<String>, Option<String>) = db
+        .conn()
+        .query_row(
+            "SELECT synced_at, next_retry_at FROM github_pull_request_ref_states WHERE status = 'open'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(open_synced_at, None, "open PR synced_at should be cleared");
+    assert_eq!(open_retry, None, "open PR next_retry_at should be cleared");
+
+    // Merged PR state: synced_at should remain (terminal states not touched)
+    let merged_synced_at: Option<String> = db
+        .conn()
+        .query_row(
+            "SELECT synced_at FROM github_pull_request_ref_states WHERE status = 'merged'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        merged_synced_at.is_some(),
+        "merged PR synced_at should NOT be cleared"
+    );
+
+    // external_ref_syncs: last_synced_at should be NULL after clear
+    let ext_last_synced: Option<String> = db
+        .conn()
+        .query_row(
+            "SELECT last_synced_at FROM external_ref_syncs WHERE target_ref_type = 'github_pull_request'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        ext_last_synced, None,
+        "external_ref_syncs last_synced_at should be cleared"
+    );
+}
+
 fn new_shell_session(runspace: Option<&str>, tab: Option<&str>) -> NewTerminalSession {
     NewTerminalSession {
         runspace_id: runspace.map(str::to_string),

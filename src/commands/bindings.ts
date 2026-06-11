@@ -70,10 +70,12 @@ export const commands = {
     typedError<boolean, string>(__TAURI_INVOKE("make_main_task_run", { tabId })),
   primaryTabId: (taskId: string) =>
     typedError<string | null, string>(__TAURI_INVOKE("primary_tab_id", { taskId })),
+  forceSyncPullRequests: () => typedError<null, string>(__TAURI_INVOKE("force_sync_pull_requests")),
 };
 
 /** Events */
 export const events = {
+  prSyncCompleted: makeEvent<PrSyncCompleted>("pr-sync:completed"),
   taskRunStatusChanged: makeEvent<TaskRunStatusChanged>("task-run:status-changed"),
 };
 
@@ -108,6 +110,10 @@ export type GithubPullRequestRef = {
   number: number;
   url: string | null;
   status: string | null;
+};
+
+export type PrSyncCompleted = {
+  synced_count: number;
 };
 
 export type PrepareTaskResult = {

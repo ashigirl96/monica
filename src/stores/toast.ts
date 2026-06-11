@@ -1,6 +1,6 @@
 import { atom, getDefaultStore } from "jotai";
 
-export type Toast = { id: number; message: string };
+export type Toast = { id: number; message: string; type: "error" | "info" };
 
 export const toastsAtom = atom<Toast[]>([]);
 
@@ -21,6 +21,21 @@ export function pushErrorToast(message: string) {
   const current = store.get(toastsAtom);
   if (current.some((t) => t.message === message)) return;
   const id = ++nextId;
-  store.set(toastsAtom, [...current.slice(-(MAX_TOASTS - 1)), { id, message }]);
+  store.set(toastsAtom, [
+    ...current.slice(-(MAX_TOASTS - 1)),
+    { id, message, type: "error" as const },
+  ]);
+  setTimeout(() => dismissToast(id), TOAST_TTL_MS);
+}
+
+export function pushInfoToast(message: string) {
+  const store = getDefaultStore();
+  const current = store.get(toastsAtom);
+  if (current.some((t) => t.message === message)) return;
+  const id = ++nextId;
+  store.set(toastsAtom, [
+    ...current.slice(-(MAX_TOASTS - 1)),
+    { id, message, type: "info" as const },
+  ]);
   setTimeout(() => dismissToast(id), TOAST_TTL_MS);
 }

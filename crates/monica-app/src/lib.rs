@@ -2,6 +2,8 @@ mod commands;
 mod ptyd;
 mod schedulers;
 mod services;
+
+use tauri::Manager;
 #[cfg(all(unix, not(debug_assertions)))]
 mod shell_path;
 
@@ -31,9 +33,11 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::task::delete_task,
             commands::task::make_main_task_run,
             commands::task::primary_tab_id,
+            commands::pull_request::force_sync_pull_requests,
         ])
         .events(tauri_specta::collect_events![
-            commands::task::TaskRunStatusChanged
+            commands::task::TaskRunStatusChanged,
+            commands::pull_request::PrSyncCompleted,
         ])
 }
 
@@ -79,7 +83,8 @@ pub fn run() {
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             specta_builder.mount_events(app);
-            schedulers::pull_request_sync::start();
+            let waker = schedulers::pull_request_sync::start(app.handle().clone());
+            app.manage(waker);
             ptyd::start_warmup(app.handle().clone());
             #[cfg(not(debug_assertions))]
             log::info!(

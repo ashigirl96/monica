@@ -1,7 +1,9 @@
 import { useEffect } from "react";
 import { useSetAtom } from "jotai";
 import { onTaskRunStatusChanged } from "@/commands/task";
+import { onPrSyncCompleted } from "@/commands/pull_request";
 import { refreshTaskSummariesAtom } from "@/stores/workboard";
+import { pushInfoToast } from "@/stores/toast";
 
 export function useWorkBoardLiveRefresh() {
   const refreshSummaries = useSetAtom(refreshTaskSummariesAtom);
@@ -9,6 +11,16 @@ export function useWorkBoardLiveRefresh() {
   useEffect(() => {
     const unlisten = onTaskRunStatusChanged(() => {
       refreshSummaries();
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [refreshSummaries]);
+
+  useEffect(() => {
+    const unlisten = onPrSyncCompleted(() => {
+      void refreshSummaries();
+      pushInfoToast("PR status refreshed");
     });
     return () => {
       unlisten.then((fn) => fn());
