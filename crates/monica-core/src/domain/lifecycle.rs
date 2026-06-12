@@ -80,15 +80,31 @@ pub fn transition_is_generic_wait(next: HookTransition) -> bool {
 ///   generic awaiting-prompt wait by the Stop that trails every PreToolUse.
 /// - A dead run stays dead: a Stop that lands after SessionEnd (or after terminal-exit
 ///   settlement) must not resurrect a stopped run into "needs you".
+///
+/// The generic-wait rules are scoped to the session the run already saw: late stragglers by
+/// definition come from that session (or arrive anonymous). A generic wait carried by a session
+/// the run has never met — relaunching `claude` in the tab starts a fresh one — is new evidence
+/// of life, so it may revive a stopped run, and it clears a tool wait whose question died with
+/// its session.
 pub fn transition_is_protected(
     current_status: TaskRunStatus,
     current_wait_reason: Option<TaskRunWaitReason>,
+    known_session_id: Option<&str>,
+    event_session_id: Option<&str>,
     next: HookTransition,
 ) -> bool {
     if current_status == TaskRunStatus::Failed {
         return true;
     }
     if !transition_is_generic_wait(next) {
+        return false;
+    }
+    let from_new_session = match (known_session_id, event_session_id) {
+        (_, None) => false,
+        (None, Some(_)) => true,
+        (Some(known), Some(event)) => known != event,
+    };
+    if from_new_session {
         return false;
     }
     match current_status {
@@ -245,51 +261,89 @@ mod tests {
             status: TaskRunStatus::WaitingForUser,
             wait_reason: Some(TaskRunWaitReason::AskUserQuestion),
         };
+        let same = (Some("sess-1"), Some("sess-1"));
 
-        // Failed is sticky against everything.
+        // Failed is sticky against everything, even a brand-new session.
         for next in [generic_wait, to_running, to_stopped] {
-            assert!(transition_is_protected(TaskRunStatus::Failed, None, next));
+            assert!(transition_is_protected(
+                TaskRunStatus::Failed,
+                None,
+                Some("sess-1"),
+                Some("sess-2"),
+                next
+            ));
         }
 
-        // A late Stop must not resurrect a dead run...
-        assert!(transition_is_protected(
-            TaskRunStatus::Stopped,
-            None,
-            generic_wait
-        ));
-        // ...but a real prompt revives it, and SessionEnd still lands.
+        // A late Stop from the dead session must not resurrect the run; an anonymous event is
+        // treated the same way.
+        for event_session in [Some("sess-1"), None] {
+            assert!(transition_is_protected(
+                TaskRunStatus::Stopped,
+                None,
+                Some("sess-1"),
+                event_session,
+                generic_wait
+            ));
+        }
+        // A fresh session's SessionStart is new life: the relaunched run goes back to
+        // "your turn". A real prompt revives it too.
         assert!(!transition_is_protected(
             TaskRunStatus::Stopped,
             None,
+            Some("sess-1"),
+            Some("sess-2"),
+            generic_wait
+        ));
+        assert!(!transition_is_protected(
+            TaskRunStatus::Stopped,
+            None,
+            Some("sess-1"),
+            Some("sess-1"),
             to_running
         ));
 
         // The Stop trailing a PreToolUse must not erase the tool-specific wait...
-        assert!(transition_is_protected(
+        for reason in [
+            TaskRunWaitReason::AskUserQuestion,
+            TaskRunWaitReason::ExitPlanMode,
+        ] {
+            assert!(transition_is_protected(
+                TaskRunStatus::WaitingForUser,
+                Some(reason),
+                same.0,
+                same.1,
+                generic_wait
+            ));
+        }
+        // ...but a question dies with its session: a new session's start clears it.
+        assert!(!transition_is_protected(
             TaskRunStatus::WaitingForUser,
             Some(TaskRunWaitReason::AskUserQuestion),
+            Some("sess-1"),
+            Some("sess-2"),
             generic_wait
         ));
-        assert!(transition_is_protected(
-            TaskRunStatus::WaitingForUser,
-            Some(TaskRunWaitReason::ExitPlanMode),
-            generic_wait
-        ));
-        // ...while a generic wait may be sharpened into a specific one, and a dead session
-        // is allowed to settle a waiting run.
+        // A generic wait may be sharpened into a specific one, and a dead session is allowed
+        // to settle a waiting run.
         assert!(!transition_is_protected(
             TaskRunStatus::WaitingForUser,
             Some(TaskRunWaitReason::AwaitingPrompt),
+            same.0,
+            same.1,
             to_question
         ));
         assert!(!transition_is_protected(
             TaskRunStatus::WaitingForUser,
             Some(TaskRunWaitReason::AwaitingPrompt),
+            same.0,
+            same.1,
             to_stopped
         ));
         assert!(!transition_is_protected(
             TaskRunStatus::WaitingForUser,
             Some(TaskRunWaitReason::AskUserQuestion),
+            same.0,
+            same.1,
             to_stopped
         ));
 
@@ -297,6 +351,17 @@ mod tests {
         assert!(!transition_is_protected(
             TaskRunStatus::Running,
             None,
+            same.0,
+            same.1,
+            generic_wait
+        ));
+
+        // A run that never recorded a session treats any session as new.
+        assert!(!transition_is_protected(
+            TaskRunStatus::Stopped,
+            None,
+            None,
+            Some("sess-1"),
             generic_wait
         ));
     }

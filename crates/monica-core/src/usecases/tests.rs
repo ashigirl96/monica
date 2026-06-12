@@ -1151,6 +1151,35 @@ fn record_claude_hook_late_stop_does_not_resurrect_stopped_run() {
 }
 
 #[test]
+fn record_claude_hook_fresh_session_start_revives_stopped_run() {
+    let mut repos = FakeRepos::default();
+    let artifacts = FakeArtifacts::default();
+    let (task_id, run_id) = task_with_running_primary(&mut repos, &artifacts);
+    record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"SessionEnd","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+
+    // Relaunching claude in the wrapper tab starts a brand-new session under the same
+    // MONICA_TASK_RUN_ID; its SessionStart must bring the run back to "your turn".
+    let report = record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx(&task_id, Some(&run_id)),
+        r#"{"hook_event_name":"SessionStart","session_id":"sess-2","source":"startup"}"#,
+    )
+    .unwrap();
+    assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
+    let run = repos.get_task_run(&run_id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::WaitingForUser);
+    assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
+    assert_eq!(run.provider_session_id.as_deref(), Some("sess-2"));
+}
+
+#[test]
 fn record_claude_hook_session_end_settles_waiting_run() {
     let mut repos = FakeRepos::default();
     let artifacts = FakeArtifacts::default();

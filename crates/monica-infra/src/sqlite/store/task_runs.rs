@@ -125,9 +125,13 @@ impl TaskRunRepository for SqliteStore {
         let waiting = TaskRunStatus::WaitingForUser.as_str();
         let ask_user_question = TaskRunWaitReason::AskUserQuestion.as_str();
         let exit_plan_mode = TaskRunWaitReason::ExitPlanMode.as_str();
+        // `?6 IS NULL OR provider_session_id IS ?6` scopes the generic-wait guards to events
+        // from the run's recorded session (or anonymous ones); a session the run never saw is
+        // fresh evidence of life and passes through.
         let protected = format!(
             "status = '{failed}'
-             OR (?10 AND (status = '{stopped}'
+             OR (?10 AND (?6 IS NULL OR provider_session_id IS ?6)
+                     AND (status = '{stopped}'
                           OR (status = '{waiting}'
                               AND wait_reason IN ('{ask_user_question}', '{exit_plan_mode}'))))"
         );

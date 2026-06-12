@@ -231,6 +231,49 @@ fn task_run_observation_sql_guards_protected_transitions() {
         );
     }
 
+    // The generic-wait guard is session-scoped: the dead session's own late Stop is refused,
+    // while a relaunched (never-seen) session's start revives the run.
+    let relaunched = start_run(&mut db);
+    db.record_task_run_observation(
+        &relaunched.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::Running),
+            wait_reason: None,
+            event_name: Some("UserPromptSubmit"),
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: Some("sess-old"),
+            terminal_tab_id: None,
+            metadata: None,
+        },
+    )
+    .unwrap();
+    db.finish_task_run(&relaunched.id, &task.id, TaskRunStatus::Stopped)
+        .unwrap();
+    let generic_wait_from = |session: &'static str, event: &'static str| TaskRunObservation {
+        status: Some(TaskRunStatus::WaitingForUser),
+        wait_reason: Some(Some(TaskRunWaitReason::AwaitingPrompt)),
+        event_name: Some(event),
+        at: "2026-06-02T00:00:00.000Z",
+        provider_session_id: Some(session),
+        terminal_tab_id: None,
+        metadata: None,
+    };
+    db.record_task_run_observation(&relaunched.id, generic_wait_from("sess-old", "Stop"))
+        .unwrap();
+    assert_eq!(
+        db.get_task_run(&relaunched.id).unwrap().unwrap().status,
+        TaskRunStatus::Stopped
+    );
+    db.record_task_run_observation(
+        &relaunched.id,
+        generic_wait_from("sess-new", "SessionStart"),
+    )
+    .unwrap();
+    let run = db.get_task_run(&relaunched.id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::WaitingForUser);
+    assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
+    assert_eq!(run.provider_session_id.as_deref(), Some("sess-new"));
+
     // A real prompt does revive a stopped run: only the generic wait is refused.
     let revived = start_run(&mut db);
     db.finish_task_run(&revived.id, &task.id, TaskRunStatus::Stopped)

@@ -124,7 +124,13 @@ where
         .filter(|_| !is_continuation_session_start(event_name.as_deref(), parsed.as_ref()));
     let transition = match (transition, run_row.as_ref()) {
         (Some(transition), Some(run))
-            if !transition_is_protected(run.status, run.wait_reason, transition) =>
+            if !transition_is_protected(
+                run.status,
+                run.wait_reason,
+                run.provider_session_id.as_deref(),
+                provider_session_id,
+                transition,
+            ) =>
         {
             Some(transition)
         }
