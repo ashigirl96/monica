@@ -96,7 +96,7 @@ impl NewTask {
     pub fn new(kind: TaskKind, title: impl Into<String>) -> Self {
         Self {
             kind,
-            status: TaskStatus::Inbox,
+            status: TaskStatus::Ready,
             title: title.into(),
             body: String::new(),
             phase: None,

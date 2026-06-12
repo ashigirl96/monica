@@ -551,7 +551,7 @@ fn project_round_trip_and_summary_pr_status_stay_wire_compatible() {
     .unwrap();
 
     let summaries = db
-        .list_task_summaries(Some(DisplayStatus::Inbox), Some("owner/repo"))
+        .list_task_summaries(Some(DisplayStatus::Ready), Some("owner/repo"))
         .unwrap();
     assert_eq!(summaries.len(), 1);
     assert_eq!(

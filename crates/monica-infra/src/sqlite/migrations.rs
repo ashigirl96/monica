@@ -29,6 +29,7 @@ fn migration_steps() -> Vec<M<'static>> {
         M::up(V16),
         M::up(V17),
         M::up(V18),
+        M::up(V19),
     ]
 }
 
@@ -484,6 +485,15 @@ const V18: &str = r#"
     DROP TABLE external_ref_syncs;
 "#;
 
+/// v19: retire the inbox status — tracking an issue creates tasks as ready, so inbox was an
+/// unreachable parking lot. The enum variant is gone, so any surviving row must move or it
+/// would fail to parse.
+const V19: &str = r#"
+    UPDATE tasks
+       SET status = 'ready', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+     WHERE status = 'inbox';
+"#;
+
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
     migrations()
@@ -665,6 +675,45 @@ mod tests {
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
         assert_eq!(version, migration_steps().len() as i64);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// Inbox rows written under the v18 schema must land as `ready` after v19, while every
+    /// other status is left untouched; the Inbox enum variant no longer exists to parse them.
+    #[test]
+    fn v19_moves_inbox_tasks_to_ready() {
+        let path = temp_db_path("v19");
+
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            stage_through(&mut conn, 18);
+            conn.execute_batch(
+                "INSERT INTO tasks (id, kind, status, title) VALUES
+                   ('mon-1', 'development', 'inbox', 'parked'),
+                   ('mon-2', 'development', 'done', 'finished'),
+                   ('mon-3', 'development', 'in_progress', 'active');",
+            )
+            .unwrap();
+        }
+
+        let db = crate::sqlite::SqliteStore::open_at(&path).unwrap();
+        let status_of = |id: &str| -> String {
+            db.conn()
+                .query_row(
+                    "SELECT status FROM tasks WHERE id = ?1",
+                    [id],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(status_of("mon-1"), "ready");
+        assert_eq!(status_of("mon-2"), "done");
+        assert_eq!(status_of("mon-3"), "in_progress");
+
+        // The migrated row must read back through the repository (TaskStatus::Inbox is gone).
+        let task = db.get_task("mon-1").unwrap().unwrap();
+        assert_eq!(task.status, TaskStatus::Ready);
 
         std::fs::remove_file(&path).ok();
     }

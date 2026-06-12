@@ -94,7 +94,6 @@ export type BoardColumn = {
 };
 
 export type DisplayStatus =
-  | "inbox"
   | "ready"
   | "in_progress"
   | "setting_up"
@@ -160,7 +159,7 @@ export type TaskRunStatusChanged = {
 
 export type TaskRunWaitReason = "ask_user_question" | "exit_plan_mode" | "awaiting_prompt";
 
-export type TaskStatus = "inbox" | "ready" | "in_progress" | "done";
+export type TaskStatus = "ready" | "in_progress" | "done";
 
 export type TaskSummaryRow = {
   id: string;

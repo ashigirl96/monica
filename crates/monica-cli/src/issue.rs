@@ -31,7 +31,7 @@ pub enum IssueCommand {
     Mark {
         /// MON-<id>
         id: String,
-        /// Task status token: inbox / ready / in-progress / done
+        /// Task status token: ready / in-progress / done
         status: String,
         /// Free-text note, stored as the task's phase
         #[arg(long)]
