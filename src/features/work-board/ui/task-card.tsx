@@ -1,11 +1,10 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSetAtom } from "jotai";
-import type { DisplayStatus, TaskSummaryRow } from "@/commands/task";
+import type { DisplayStatus, TaskRunWaitReason, TaskSummaryRow } from "@/commands/task";
 import { cn } from "@/lib/utils";
 import { openBenchAtom, prepareTaskAtom, runTaskAtom } from "@/stores/workboard";
 
 const STATUS_COLORS: Record<DisplayStatus, string> = {
-  inbox: "bg-muted-foreground/40",
   ready: "bg-sky-400",
   in_progress: "bg-blue-500",
   setting_up: "bg-blue-400 animate-pulse",
@@ -18,7 +17,6 @@ const STATUS_COLORS: Record<DisplayStatus, string> = {
 };
 
 const STATUS_LABELS: Record<DisplayStatus, string> = {
-  inbox: "inbox",
   ready: "ready",
   in_progress: "in progress",
   setting_up: "setting up",
@@ -31,7 +29,6 @@ const STATUS_LABELS: Record<DisplayStatus, string> = {
 };
 
 const STATUS_BADGE_STYLES: Record<DisplayStatus, string> = {
-  inbox: "bg-muted text-muted-foreground",
   ready: "bg-sky-500/15 text-sky-400",
   in_progress: "bg-blue-500/15 text-blue-400",
   setting_up: "bg-blue-500/15 text-blue-400 animate-pulse",
@@ -41,6 +38,20 @@ const STATUS_BADGE_STYLES: Record<DisplayStatus, string> = {
   stopped: "bg-muted text-muted-foreground",
   failed: "bg-red-500/15 text-red-400",
   done: "bg-muted text-muted-foreground/60",
+};
+
+// waiting_for_user renders by its wait_reason: a tool-blocked wait (question, plan approval)
+// is an attention item, while an idle turn boundary is just "your move" and stays quiet.
+const WAIT_REASON_LABELS: Record<TaskRunWaitReason, string> = {
+  ask_user_question: "needs you",
+  exit_plan_mode: "needs you",
+  awaiting_prompt: "your turn",
+};
+
+const WAIT_REASON_BADGE_STYLES: Record<TaskRunWaitReason, string> = {
+  ask_user_question: "bg-amber-500/15 text-amber-400",
+  exit_plan_mode: "bg-amber-500/15 text-amber-400",
+  awaiting_prompt: "bg-amber-500/10 text-amber-300/80",
 };
 
 function IssueIcon() {
@@ -203,6 +214,12 @@ export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boo
   const hasMetadata = hasIssue || hasPrs || hasBranch;
   const isActive =
     task.status === "running" || task.status === "setting_up" || task.status === "prepared";
+  const waitReason = task.task_run_wait_reason ?? "awaiting_prompt";
+  const isWaiting = task.status === "waiting_for_user";
+  const statusLabel = isWaiting ? WAIT_REASON_LABELS[waitReason] : STATUS_LABELS[task.status];
+  const statusBadgeStyle = isWaiting
+    ? WAIT_REASON_BADGE_STYLES[waitReason]
+    : STATUS_BADGE_STYLES[task.status];
 
   return (
     <div
@@ -275,10 +292,10 @@ export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boo
             <span
               className={cn(
                 "inline-flex items-center rounded-sm px-1.5 py-px text-[10px] font-medium",
-                STATUS_BADGE_STYLES[task.status],
+                statusBadgeStyle,
               )}
             >
-              {STATUS_LABELS[task.status]}
+              {statusLabel}
             </span>
             <SideRunBadges task={task} />
           </span>
@@ -325,6 +342,10 @@ export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boo
           </div>
         </div>
       </div>
+
+      {task.has_open_pull_request && (
+        <div title="open pull request" className="w-1 shrink-0 rounded-r-lg bg-emerald-400/70" />
+      )}
     </div>
   );
 }

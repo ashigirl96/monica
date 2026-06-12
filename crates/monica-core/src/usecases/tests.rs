@@ -146,6 +146,7 @@ impl TaskRepository for FakeRepos {
                     status: display,
                     prepare_eligible: display.prepare_eligible(),
                     run_eligible: display.run_eligible(),
+                    has_open_pull_request: false,
                     branch: None,
                     side_runs_running: 0,
                     side_runs_waiting_for_user: 0,

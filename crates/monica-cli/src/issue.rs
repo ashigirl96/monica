@@ -218,6 +218,7 @@ mod tests {
             status: DisplayStatus::Ready,
             prepare_eligible: true,
             run_eligible: true,
+            has_open_pull_request: false,
             branch: Some("monica/gh-17".to_string()),
             side_runs_running: 0,
             side_runs_waiting_for_user: 0,

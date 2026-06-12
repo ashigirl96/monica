@@ -3,9 +3,9 @@ use rusqlite::params;
 
 use crate::sqlite::SqliteStore;
 use monica_core::{
-    DisplayStatus, ExternalRef, GithubPullRequest, NewTask, PullRequestBranchSyncCandidate,
-    PullRequestStatusSyncCandidate, Task, TaskRepository, TaskRunStatus, TaskRunWaitReason,
-    TaskStatus, TaskSummaryRow,
+    DisplayStatus, ExternalRef, GithubPullRequest, GithubPullRequestStatus, NewTask,
+    PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate, Task, TaskRepository,
+    TaskRunStatus, TaskRunWaitReason, TaskStatus, TaskSummaryRow,
 };
 
 use super::{SET_NOW, TASK_COLUMNS};
@@ -222,6 +222,7 @@ impl TaskRepository for SqliteStore {
                 status: display_status,
                 prepare_eligible: display_status.prepare_eligible(),
                 run_eligible: display_status.run_eligible(),
+                has_open_pull_request: false,
                 branch: row.get("branch")?,
                 side_runs_running: row.get("side_runs_running")?,
                 side_runs_waiting_for_user: row.get("side_runs_waiting_for_user")?,
@@ -233,6 +234,10 @@ impl TaskRepository for SqliteStore {
         }
         for item in &mut items {
             item.github_pull_requests = self.list_github_pull_request_refs(&item.id)?;
+            item.has_open_pull_request = item.github_pull_requests.iter().any(|pr| {
+                pr.status.as_deref() == Some(GithubPullRequestStatus::Open.as_str())
+                    || pr.status.as_deref() == Some(GithubPullRequestStatus::Draft.as_str())
+            });
         }
         Ok(items)
     }
