@@ -755,7 +755,8 @@ fn task_with_prepared_primary(repos: &mut FakeRepos) -> (String, String) {
     (task_id, run.id)
 }
 
-/// A task with a primary run claimed by `sess-1` (the post-Run-button steady state).
+/// A task with a primary run claimed by `sess-1` and actively working (the steady state after
+/// the Run button and the first prompt).
 fn task_with_running_primary(repos: &mut FakeRepos, artifacts: &FakeArtifacts) -> (String, String) {
     let (task_id, run_id) = task_with_prepared_primary(repos);
     record_claude_hook(
@@ -763,6 +764,13 @@ fn task_with_running_primary(repos: &mut FakeRepos, artifacts: &FakeArtifacts) -
         artifacts,
         hook_ctx(&task_id, Some(&run_id)),
         r#"{"hook_event_name":"SessionStart","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    record_claude_hook(
+        repos,
+        artifacts,
+        hook_ctx(&task_id, Some(&run_id)),
+        r#"{"hook_event_name":"UserPromptSubmit","session_id":"sess-1"}"#,
     )
     .unwrap();
     (task_id, run_id)
@@ -802,6 +810,7 @@ fn record_claude_hook_claims_prepared_primary_run_without_run_id() {
     let (task_id, run_id) = task_with_prepared_primary(&mut repos);
     let artifacts = FakeArtifacts::default();
 
+    // The session opens but nothing runs yet: the claim lands as "your turn".
     let report = record_claude_hook(
         &mut repos,
         &artifacts,
@@ -811,13 +820,27 @@ fn record_claude_hook_claims_prepared_primary_run_without_run_id() {
     .unwrap();
     assert!(report.task_run_linked);
     assert!(!report.task_run_created);
+    assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
+    let claimed = repos.get_task_run(&run_id).unwrap().unwrap();
+    assert_eq!(claimed.status, TaskRunStatus::WaitingForUser);
+    assert_eq!(claimed.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
+
+    // The first prompt is what actually puts the agent to work...
+    let report = record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"UserPromptSubmit","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    assert!(report.task_run_linked);
     assert_eq!(report.task_run_status, Some(TaskRunStatus::Running));
     assert_eq!(
-        repos.get_task_run(&run_id).unwrap().unwrap().status,
-        TaskRunStatus::Running
+        repos.get_task_run(&run_id).unwrap().unwrap().wait_reason,
+        None
     );
 
-    // The claimed run is no longer prepared; the same session keeps driving it.
+    // ...and the finished turn hands the ball back to the user, not to the morgue.
     let report = record_claude_hook(
         &mut repos,
         &artifacts,
@@ -826,7 +849,11 @@ fn record_claude_hook_claims_prepared_primary_run_without_run_id() {
     )
     .unwrap();
     assert!(report.task_run_linked);
-    assert_eq!(report.task_run_status, Some(TaskRunStatus::Stopped));
+    assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
+    assert_eq!(
+        repos.get_task_run(&run_id).unwrap().unwrap().wait_reason,
+        Some(TaskRunWaitReason::AwaitingPrompt)
+    );
 }
 
 #[test]
@@ -884,7 +911,7 @@ fn record_claude_hook_creates_side_run_instead_of_stealing_active_primary() {
     .unwrap();
     assert!(report.task_run_linked);
     assert!(report.task_run_created);
-    assert_eq!(report.task_run_status, Some(TaskRunStatus::Running));
+    assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
 
     // The primary is neither stolen nor re-pointed.
     let task = repos.get_task(&task_id).unwrap().unwrap();
@@ -898,7 +925,7 @@ fn record_claude_hook_creates_side_run_instead_of_stealing_active_primary() {
         .unwrap()
         .unwrap();
     assert_ne!(side.id, primary_id);
-    assert_eq!(side.status, TaskRunStatus::Running);
+    assert_eq!(side.status, TaskRunStatus::WaitingForUser);
     assert_eq!(side.agent, Some(Agent::Claude));
     // the session's cwd must never become a worktree_path (delete-time cleanup rips those)
     assert_eq!(side.worktree_path, None);
@@ -927,8 +954,11 @@ fn record_claude_hook_fork_session_start_does_not_steal_primary_tab() {
     .unwrap();
     assert!(report.task_run_linked);
     assert!(!report.task_run_created);
+    assert_eq!(report.task_run_status, None);
     let primary = repos.get_task_run(&primary_id).unwrap().unwrap();
     assert_eq!(primary.terminal_tab_id.as_deref(), Some("tab-main"));
+    // The source run is mid-flight; the fork's start must not demote it to "your turn".
+    assert_eq!(primary.status, TaskRunStatus::Running);
 
     // The fork's first prompt arrives under its own id and becomes a side run in the fork tab.
     let report = record_claude_hook(
@@ -1039,6 +1069,113 @@ fn record_claude_hook_follows_side_run_through_its_lifecycle() {
 }
 
 #[test]
+fn record_claude_hook_compact_session_start_does_not_demote_running_primary() {
+    let mut repos = FakeRepos::default();
+    let artifacts = FakeArtifacts::default();
+    let (task_id, primary_id) = task_with_running_primary(&mut repos, &artifacts);
+
+    // Auto-compact fires SessionStart mid-turn under the same session id.
+    let report = record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"SessionStart","session_id":"sess-1","source":"compact"}"#,
+    )
+    .unwrap();
+    assert!(report.task_run_linked);
+    assert_eq!(report.task_run_status, None);
+    assert_eq!(
+        repos.get_task_run(&primary_id).unwrap().unwrap().status,
+        TaskRunStatus::Running
+    );
+}
+
+#[test]
+fn record_claude_hook_stop_preserves_tool_specific_wait() {
+    let mut repos = FakeRepos::default();
+    let artifacts = FakeArtifacts::default();
+    let (task_id, run_id) = task_with_running_primary(&mut repos, &artifacts);
+    record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+
+    // The Stop that trails the question must not blur "needs you" into "your turn".
+    let report = record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"Stop","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    assert_eq!(report.task_run_status, None);
+    let run = repos.get_task_run(&run_id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::WaitingForUser);
+    assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AskUserQuestion));
+}
+
+#[test]
+fn record_claude_hook_late_stop_does_not_resurrect_stopped_run() {
+    let mut repos = FakeRepos::default();
+    let artifacts = FakeArtifacts::default();
+    let (task_id, run_id) = task_with_running_primary(&mut repos, &artifacts);
+    record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"SessionEnd","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        repos.get_task_run(&run_id).unwrap().unwrap().status,
+        TaskRunStatus::Stopped
+    );
+
+    let report = record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"Stop","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    assert_eq!(report.task_run_status, None);
+    assert_eq!(
+        repos.get_task_run(&run_id).unwrap().unwrap().status,
+        TaskRunStatus::Stopped
+    );
+}
+
+#[test]
+fn record_claude_hook_session_end_settles_waiting_run() {
+    let mut repos = FakeRepos::default();
+    let artifacts = FakeArtifacts::default();
+    let (task_id, run_id) = task_with_running_primary(&mut repos, &artifacts);
+    record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"Stop","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+
+    // A waiting run is still a live session; its death is a fact that must land.
+    let report = record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"SessionEnd","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    assert_eq!(report.task_run_status, Some(TaskRunStatus::Stopped));
+    let run = repos.get_task_run(&run_id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::Stopped);
+    assert_eq!(run.wait_reason, None);
+}
+
+#[test]
 fn record_claude_hook_promotes_created_run_when_no_primary_is_set() {
     let mut repos = FakeRepos::default();
     let task_id = repos.insert_task_for_run(None);
@@ -1057,7 +1194,8 @@ fn record_claude_hook_promotes_created_run_when_no_primary_is_set() {
     let primary_id = task.primary_task_run_id.expect("created run becomes primary");
     let primary = repos.get_task_run(&primary_id).unwrap().unwrap();
     assert_eq!(primary.provider_session_id.as_deref(), Some("sess-1"));
-    assert_eq!(primary.status, TaskRunStatus::Running);
+    assert_eq!(primary.status, TaskRunStatus::WaitingForUser);
+    assert_eq!(primary.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
 }
 
 #[test]
@@ -1236,7 +1374,7 @@ fn make_main_by_terminal_tab_promotes_side_run_and_reports_no_ops() {
         MakeMainOutcome::Changed {
             task_id: task_id.clone(),
             task_run_id: latest_in_tab.id.clone(),
-            status: TaskRunStatus::Running,
+            status: TaskRunStatus::WaitingForUser,
         }
     );
     let task = repos.get_task(&task_id).unwrap().unwrap();
@@ -1338,7 +1476,7 @@ fn record_claude_hook_prefers_explicit_run_id_over_session_lookup() {
     assert!(!report.task_run_created);
     assert_eq!(
         repos.get_task_run(&other.id).unwrap().unwrap().status,
-        TaskRunStatus::Running
+        TaskRunStatus::WaitingForUser
     );
     assert_ne!(other.id, primary_id);
 }

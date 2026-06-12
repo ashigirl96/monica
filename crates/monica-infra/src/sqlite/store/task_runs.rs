@@ -3,7 +3,8 @@ use rusqlite::params;
 
 use crate::sqlite::SqliteStore;
 use monica_core::{
-    NewTaskRun, TaskRun, TaskRunObservation, TaskRunRepository, TaskRunStatus, TaskStatus,
+    transition_is_generic_wait, HookTransition, NewTaskRun, TaskRun, TaskRunObservation,
+    TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus,
 };
 
 use super::{SET_NOW, TASK_RUN_COLUMNS};
@@ -64,6 +65,10 @@ impl SqliteStore {
 impl TaskRunRepository for SqliteStore {
     /// Apply a hook observation to a task run. TaskRun is the lifecycle source of truth; the owning
     /// task is only kept in `in_progress` while a non-deleted, non-done run is being observed.
+    ///
+    /// The status/wait_reason CASE guards re-enforce `transition_is_protected` atomically: hooks
+    /// run in separate processes, so the caller's snapshot check alone cannot stop a late Stop
+    /// from resurrecting a run that SessionEnd (or terminal-exit settlement) just stopped.
     fn record_task_run_observation(
         &mut self,
         task_run_id: &str,
@@ -76,12 +81,30 @@ impl TaskRunRepository for SqliteStore {
         let status = observation.status.map(|s| s.as_str());
         let update_wait_reason = observation.wait_reason.is_some();
         let wait_reason = observation.wait_reason.flatten().map(|r| r.as_str());
+        let generic_wait = match (observation.status, observation.wait_reason) {
+            (Some(status), Some(wait_reason)) => transition_is_generic_wait(HookTransition {
+                status,
+                wait_reason,
+            }),
+            _ => false,
+        };
+        let failed = TaskRunStatus::Failed.as_str();
+        let stopped = TaskRunStatus::Stopped.as_str();
+        let ask_user_question = TaskRunWaitReason::AskUserQuestion.as_str();
+        let exit_plan_mode = TaskRunWaitReason::ExitPlanMode.as_str();
+        let protected = format!(
+            "status = '{failed}'
+             OR (?10 AND (status = '{stopped}'
+                          OR wait_reason IN ('{ask_user_question}', '{exit_plan_mode}')))"
+        );
         let tx = self.conn_mut().transaction()?;
         let affected = tx.execute(
             &format!(
                 "UPDATE task_runs
-                    SET status = COALESCE(?1, status),
-                        wait_reason = CASE WHEN ?2 THEN ?3 ELSE wait_reason END,
+                    SET status = CASE WHEN {protected} THEN status
+                                      ELSE COALESCE(?1, status) END,
+                        wait_reason = CASE WHEN {protected} THEN wait_reason
+                                           WHEN ?2 THEN ?3 ELSE wait_reason END,
                         last_event_name = COALESCE(?4, last_event_name),
                         last_event_at = ?5,
                         provider_session_id = COALESCE(?6, provider_session_id),
@@ -99,7 +122,8 @@ impl TaskRunRepository for SqliteStore {
                 observation.provider_session_id,
                 observation.terminal_tab_id,
                 metadata,
-                task_run_id
+                task_run_id,
+                generic_wait
             ],
         )?;
         if affected == 0 {

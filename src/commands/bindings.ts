@@ -158,7 +158,7 @@ export type TaskRunStatusChanged = {
   status: TaskRunStatus;
 };
 
-export type TaskRunWaitReason = "ask_user_question" | "exit_plan_mode";
+export type TaskRunWaitReason = "ask_user_question" | "exit_plan_mode" | "awaiting_prompt";
 
 export type TaskStatus = "inbox" | "ready" | "in_progress" | "done";
 

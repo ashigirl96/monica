@@ -92,6 +92,7 @@ impl FromStr for TaskRunStatus {
 pub enum TaskRunWaitReason {
     AskUserQuestion,
     ExitPlanMode,
+    AwaitingPrompt,
 }
 
 impl TaskRunWaitReason {
@@ -99,7 +100,17 @@ impl TaskRunWaitReason {
         match self {
             TaskRunWaitReason::AskUserQuestion => "ask_user_question",
             TaskRunWaitReason::ExitPlanMode => "exit_plan_mode",
+            TaskRunWaitReason::AwaitingPrompt => "awaiting_prompt",
         }
+    }
+
+    /// Tool-specific waits (a pending question or plan approval) outrank the generic
+    /// "type a prompt" wait: protection rules and the side-run attention count both key off this.
+    pub fn is_tool_wait(self) -> bool {
+        matches!(
+            self,
+            TaskRunWaitReason::AskUserQuestion | TaskRunWaitReason::ExitPlanMode
+        )
     }
 }
 
@@ -110,6 +121,7 @@ impl FromStr for TaskRunWaitReason {
         Ok(match s {
             "ask_user_question" => TaskRunWaitReason::AskUserQuestion,
             "exit_plan_mode" => TaskRunWaitReason::ExitPlanMode,
+            "awaiting_prompt" => TaskRunWaitReason::AwaitingPrompt,
             other => return Err(anyhow!("unknown task run wait reason: {other}")),
         })
     }

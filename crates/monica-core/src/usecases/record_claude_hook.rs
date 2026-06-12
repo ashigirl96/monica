@@ -2,8 +2,9 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use crate::domain::{
-    is_resume_session_start, is_safe_task_run_id, is_session_starting_event,
-    should_ignore_claude_event, transition_for_claude_event, transition_is_protected, Agent,
+    is_continuation_session_start, is_resume_session_start, is_safe_task_run_id,
+    is_session_starting_event, should_ignore_claude_event, transition_for_claude_event,
+    transition_is_protected, Agent,
 };
 use crate::interfaces::{Clock, EventRepository, RunArtifacts, TaskRepository, TaskRunRepository};
 use crate::{NewTaskRun, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus};
@@ -116,10 +117,14 @@ where
 
     let transition = event_name
         .as_deref()
-        .and_then(|event| transition_for_claude_event(event, parsed.as_ref()));
+        .and_then(|event| transition_for_claude_event(event, parsed.as_ref()))
+        // A resume/fork/compact SessionStart continues an existing conversation and resolves
+        // (via the carried session id) to a run that may be mid-flight; only a fresh start may
+        // drive a transition. The first real activity event catches the status up.
+        .filter(|_| !is_continuation_session_start(event_name.as_deref(), parsed.as_ref()));
     let transition = match (transition, run_row.as_ref()) {
         (Some(transition), Some(run))
-            if !transition_is_protected(run.status, transition.status) =>
+            if !transition_is_protected(run.status, run.wait_reason, transition) =>
         {
             Some(transition)
         }

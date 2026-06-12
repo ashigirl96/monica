@@ -138,6 +138,117 @@ fn task_run_observation_records_wait_reason_and_event_metadata() {
     assert_eq!(run.terminal_tab_id.as_deref(), Some("tab-1"));
 }
 
+/// Hooks run in separate processes, so the snapshot check in `record_claude_hook` cannot be
+/// trusted alone: these cases bypass it and hit the store directly, proving the UPDATE itself
+/// refuses the protected transitions.
+#[test]
+fn task_run_observation_sql_guards_protected_transitions() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("guarded")).unwrap();
+    let start_run = |db: &mut SqliteStore| {
+        db.start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap()
+    };
+    let generic_wait = TaskRunObservation {
+        status: Some(TaskRunStatus::WaitingForUser),
+        wait_reason: Some(Some(TaskRunWaitReason::AwaitingPrompt)),
+        event_name: Some("Stop"),
+        at: "2026-06-02T00:00:00.000Z",
+        provider_session_id: None,
+        terminal_tab_id: None,
+        metadata: None,
+    };
+
+    // A late Stop must not resurrect a stopped run.
+    let stopped = start_run(&mut db);
+    db.finish_task_run(&stopped.id, &task.id, TaskRunStatus::Stopped)
+        .unwrap();
+    db.record_task_run_observation(&stopped.id, generic_wait)
+        .unwrap();
+    let run = db.get_task_run(&stopped.id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::Stopped);
+    assert_eq!(run.wait_reason, None);
+    // The event itself is still recorded.
+    assert_eq!(run.last_event_name.as_deref(), Some("Stop"));
+
+    // A trailing Stop must not blur a pending question into a generic wait.
+    let asking = start_run(&mut db);
+    db.record_task_run_observation(
+        &asking.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::WaitingForUser),
+            wait_reason: Some(Some(TaskRunWaitReason::AskUserQuestion)),
+            event_name: Some("PreToolUse"),
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: None,
+            terminal_tab_id: None,
+            metadata: None,
+        },
+    )
+    .unwrap();
+    db.record_task_run_observation(&asking.id, generic_wait)
+        .unwrap();
+    let run = db.get_task_run(&asking.id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::WaitingForUser);
+    assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AskUserQuestion));
+
+    // Failed is sticky against any transition.
+    let failed = start_run(&mut db);
+    db.finish_task_run(&failed.id, &task.id, TaskRunStatus::Failed)
+        .unwrap();
+    for status in [
+        TaskRunStatus::Running,
+        TaskRunStatus::Stopped,
+        TaskRunStatus::WaitingForUser,
+    ] {
+        db.record_task_run_observation(
+            &failed.id,
+            TaskRunObservation {
+                status: Some(status),
+                wait_reason: Some(None),
+                event_name: None,
+                at: "2026-06-02T00:00:00.000Z",
+                provider_session_id: None,
+                terminal_tab_id: None,
+                metadata: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            db.get_task_run(&failed.id).unwrap().unwrap().status,
+            TaskRunStatus::Failed,
+            "{status:?}"
+        );
+    }
+
+    // A real prompt does revive a stopped run: only the generic wait is refused.
+    let revived = start_run(&mut db);
+    db.finish_task_run(&revived.id, &task.id, TaskRunStatus::Stopped)
+        .unwrap();
+    db.record_task_run_observation(
+        &revived.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::Running),
+            wait_reason: Some(None),
+            event_name: Some("UserPromptSubmit"),
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: None,
+            terminal_tab_id: None,
+            metadata: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        db.get_task_run(&revived.id).unwrap().unwrap().status,
+        TaskRunStatus::Running
+    );
+}
+
 #[test]
 fn task_run_observation_keeps_existing_tab_and_session_on_none() {
     let mut db = SqliteStore::open_in_memory().unwrap();
@@ -311,14 +422,39 @@ fn task_summaries_count_side_runs_excluding_primary_and_sessionless_failures() {
     observe(&mut db, &primary.id, TaskRunStatus::Running, "sess-main");
     db.set_primary_task_run(&task.id, &primary.id).unwrap();
 
+    let observe_waiting =
+        |db: &mut SqliteStore, run_id: &str, reason: TaskRunWaitReason, session: &str| {
+            db.record_task_run_observation(
+                run_id,
+                TaskRunObservation {
+                    status: Some(TaskRunStatus::WaitingForUser),
+                    wait_reason: Some(Some(reason)),
+                    event_name: None,
+                    at: "2026-06-02T00:00:00.000Z",
+                    provider_session_id: Some(session),
+                    terminal_tab_id: None,
+                    metadata: None,
+                },
+            )
+            .unwrap();
+        };
+
     let side_running = db.start_task_run(new_run(&task.id)).unwrap();
     observe(&mut db, &side_running.id, TaskRunStatus::Running, "sess-2");
     let side_waiting = db.start_task_run(new_run(&task.id)).unwrap();
-    observe(
+    observe_waiting(
         &mut db,
         &side_waiting.id,
-        TaskRunStatus::WaitingForUser,
+        TaskRunWaitReason::AskUserQuestion,
         "sess-3",
+    );
+    // A side run idling between turns is healthy, not an attention item.
+    let side_idle = db.start_task_run(new_run(&task.id)).unwrap();
+    observe_waiting(
+        &mut db,
+        &side_idle.id,
+        TaskRunWaitReason::AwaitingPrompt,
+        "sess-5",
     );
     let side_failed = db.start_task_run(new_run(&task.id)).unwrap();
     observe(&mut db, &side_failed.id, TaskRunStatus::Failed, "sess-4");

@@ -149,9 +149,12 @@ impl TaskRepository for SqliteStore {
                (SELECT COUNT(*) FROM task_runs r
                  WHERE r.task_id = t.id AND r.id IS NOT latest_run.id
                    AND r.status = ?2) AS side_runs_running,
+               -- only tool-blocked waits are attention items; a side run idling between turns
+               -- (awaiting_prompt) is healthy and must not light up the board
                (SELECT COUNT(*) FROM task_runs r
                  WHERE r.task_id = t.id AND r.id IS NOT latest_run.id
-                   AND r.status = ?3) AS side_runs_waiting_for_user,
+                   AND r.status = ?3
+                   AND r.wait_reason IN (?5, ?6)) AS side_runs_waiting_for_user,
                -- a run without a Claude session is an old prepare failure, not a side run
                (SELECT COUNT(*) FROM task_runs r
                  WHERE r.task_id = t.id AND r.id IS NOT latest_run.id
@@ -191,7 +194,9 @@ impl TaskRepository for SqliteStore {
             project,
             TaskRunStatus::Running.as_str(),
             TaskRunStatus::WaitingForUser.as_str(),
-            TaskRunStatus::Failed.as_str()
+            TaskRunStatus::Failed.as_str(),
+            TaskRunWaitReason::AskUserQuestion.as_str(),
+            TaskRunWaitReason::ExitPlanMode.as_str()
         ])?;
         let mut items = Vec::new();
         while let Some(row) = rows.next()? {
