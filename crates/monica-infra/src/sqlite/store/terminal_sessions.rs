@@ -71,6 +71,22 @@ impl SqliteStore {
         }
     }
 
+    /// The session most recently created for a tab. A tab respawn always inserts a fresh row,
+    /// so this is the only session that may still be driving the tab's run.
+    pub fn latest_terminal_session_for_tab(&self, tab_id: &str) -> Result<Option<TerminalSession>> {
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {SESSION_COLUMNS} FROM terminal_sessions
+             WHERE tab_id = ?1
+             ORDER BY created_at DESC, CAST(SUBSTR(id, 4) AS INTEGER) DESC
+             LIMIT 1"
+        ))?;
+        let mut rows = stmt.query(params![tab_id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(session_from_row(row)?)),
+            None => Ok(None),
+        }
+    }
+
     pub fn list_terminal_sessions(
         &self,
         runspace_id: Option<&str>,

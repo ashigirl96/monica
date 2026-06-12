@@ -10,6 +10,7 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use crate::ptyd::PtydHandle;
+use crate::services::run_settlement;
 
 #[derive(Serialize, specta::Type)]
 pub struct AttachResult {
@@ -239,6 +240,16 @@ pub fn terminal_list_sessions(
                 .repositories
                 .apply_terminal_session_updates(&outcome.updates)
                 .map_err(|e| e.to_string())?;
+            // Sessions that died while the app was down only surface here: their Exit
+            // broadcast was never delivered, so this reconcile is the only chance to
+            // settle the runs they were driving.
+            let dead_ids: Vec<String> = outcome
+                .updates
+                .iter()
+                .filter(|u| u.status.is_terminal())
+                .map(|u| u.session_id.clone())
+                .collect();
+            run_settlement::settle_runs_for_terminated_sessions(&app, &mut runtime, &dead_ids);
             for session_id in outcome.reap_ids {
                 let _ = client.notify(RequestOp::Reap { session_id });
             }

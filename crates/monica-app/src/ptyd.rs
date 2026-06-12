@@ -16,6 +16,8 @@ use monica_pty::client::{ClientEvent, PtydClient};
 use monica_pty::protocol::{RequestOp, PROTOCOL_VERSION};
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::services::run_settlement;
+
 const CONNECT_RETRY_WINDOW: Duration = Duration::from_secs(2);
 const CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 
@@ -100,15 +102,20 @@ fn handle_event(app: &AppHandle, event: ClientEvent) {
         } => {
             match Runtime::open_default() {
                 Ok(mut runtime) => {
-                    if let Err(e) = runtime.repositories.update_terminal_session_status(
+                    match runtime.repositories.update_terminal_session_status(
                         &session_id,
                         TerminalSessionStatus::Exited,
                         exit_code,
                     ) {
-                        log::error!(
+                        Ok(()) => run_settlement::settle_runs_for_terminated_sessions(
+                            app,
+                            &mut runtime,
+                            std::slice::from_ref(&session_id),
+                        ),
+                        Err(e) => log::error!(
                             target: "monica_app::ptyd",
                             "failed to record exit of {session_id}: {e:#}"
-                        );
+                        ),
                     }
                 }
                 Err(e) => log::error!(
@@ -156,8 +163,19 @@ fn replace_incompatible_daemon(
                     exit_code: None,
                 })
                 .collect();
-            if let Err(e) = runtime.repositories.apply_terminal_session_updates(&updates) {
-                log::error!(target: "monica_app::ptyd", "failed to mark sessions lost: {e:#}");
+            match runtime.repositories.apply_terminal_session_updates(&updates) {
+                Ok(()) => {
+                    let lost_ids: Vec<String> =
+                        updates.iter().map(|u| u.session_id.clone()).collect();
+                    run_settlement::settle_runs_for_terminated_sessions(
+                        app,
+                        &mut runtime,
+                        &lost_ids,
+                    );
+                }
+                Err(e) => {
+                    log::error!(target: "monica_app::ptyd", "failed to mark sessions lost: {e:#}")
+                }
             }
         }
         Err(e) => log::error!(target: "monica_app::ptyd", "failed to open runtime: {e:#}"),

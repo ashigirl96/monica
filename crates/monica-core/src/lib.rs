@@ -33,6 +33,7 @@ pub use usecases::{
     make_main_by_terminal_tab, mark_issue, primary_terminal_tab, MakeMainOutcome,
     open_bench, prepare_claude_for_run, record_claude_hook, register_project, task_shell_env,
     register_project_with_default_branch, set_project_field, start_run, sync_next_pull_request,
+    task_run_settlement_for_terminal_exit, TerminalExitSettlement,
     track_github_issue,
     track_github_issue_from_fetched, wait_for_github_device_flow, DeleteIssueReport, HookContext,
     HookReport, TrackGithubIssueInput, TrackGithubIssueReport,

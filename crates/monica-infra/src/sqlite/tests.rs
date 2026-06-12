@@ -805,6 +805,105 @@ fn terminal_session_create_and_get_round_trip() {
 }
 
 #[test]
+fn latest_terminal_session_for_tab_resolves_numerically_within_same_timestamp() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    // Same created_at for all rows forces the CAST(SUBSTR(id, 4)) tiebreak: ts-10 must beat
+    // ts-2 numerically, not lexicographically.
+    for _ in 0..10 {
+        db.create_terminal_session(new_shell_session(None, Some("tab-1")))
+            .unwrap();
+    }
+    db.conn()
+        .execute_batch("UPDATE terminal_sessions SET created_at = '2026-06-02T00:00:00.000Z'")
+        .unwrap();
+
+    let latest = db.latest_terminal_session_for_tab("tab-1").unwrap().unwrap();
+    assert_eq!(latest.id, "ts-10");
+    assert!(db.latest_terminal_session_for_tab("tab-404").unwrap().is_none());
+}
+
+#[test]
+fn settle_task_run_if_live_only_stops_session_driven_runs() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("settle")).unwrap();
+    let start_run = |db: &mut SqliteStore| {
+        db.start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap()
+    };
+    let observe = |db: &mut SqliteStore, run_id: &str, status: TaskRunStatus| {
+        db.record_task_run_observation(
+            run_id,
+            TaskRunObservation {
+                status: Some(status),
+                wait_reason: None,
+                event_name: None,
+                at: "2026-06-02T00:00:00.000Z",
+                provider_session_id: Some("sess-1"),
+                terminal_tab_id: None,
+                metadata: None,
+            },
+        )
+        .unwrap();
+    };
+
+    // Live runs settle and the wait_reason is cleared with them.
+    for status in [TaskRunStatus::Running, TaskRunStatus::WaitingForUser] {
+        let run = start_run(&mut db);
+        observe(&mut db, &run.id, status);
+        assert!(db.settle_task_run_if_live(&run.id, &task.id).unwrap(), "{status:?}");
+        let run = db.get_task_run(&run.id).unwrap().unwrap();
+        assert_eq!(run.status, TaskRunStatus::Stopped);
+        assert_eq!(run.wait_reason, None);
+    }
+
+    // A hook-created run parked at setting_up settles only once a session was observed on it.
+    let observed = start_run(&mut db);
+    db.record_task_run_observation(
+        &observed.id,
+        TaskRunObservation {
+            status: None,
+            wait_reason: None,
+            event_name: Some("SessionStart"),
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: Some("sess-2"),
+            terminal_tab_id: Some("tab-1"),
+            metadata: None,
+        },
+    )
+    .unwrap();
+    assert!(db.settle_task_run_if_live(&observed.id, &task.id).unwrap());
+
+    // A prepare-flow setting_up run has no session and must survive.
+    let preparing = start_run(&mut db);
+    assert!(!db.settle_task_run_if_live(&preparing.id, &task.id).unwrap());
+    assert_eq!(
+        db.get_task_run(&preparing.id).unwrap().unwrap().status,
+        TaskRunStatus::SettingUp
+    );
+
+    // Already-settled or terminal states are no-ops: a concurrent hook's verdict stands.
+    for status in [
+        TaskRunStatus::Prepared,
+        TaskRunStatus::Stopped,
+        TaskRunStatus::Failed,
+    ] {
+        let run = start_run(&mut db);
+        db.finish_task_run(&run.id, &task.id, status).unwrap();
+        assert!(!db.settle_task_run_if_live(&run.id, &task.id).unwrap(), "{status:?}");
+        assert_eq!(
+            db.get_task_run(&run.id).unwrap().unwrap().status,
+            status,
+            "{status:?}"
+        );
+    }
+}
+
+#[test]
 fn terminal_session_started_records_pid_and_running() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let session = db.create_terminal_session(new_shell_session(None, None)).unwrap();

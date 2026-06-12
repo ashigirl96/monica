@@ -60,6 +60,35 @@ impl SqliteStore {
             None => Ok(None),
         }
     }
+
+    /// Settle a run as Stopped because its terminal died, but only while it is still live.
+    /// The status precondition lives in the WHERE clause so a hook landing concurrently
+    /// (StopFailure → Failed, SessionEnd → Stopped) can never be overwritten; `Ok(false)`
+    /// means someone else settled it first and the caller has nothing to announce.
+    pub fn settle_task_run_if_live(&mut self, task_run_id: &str, task_id: &str) -> Result<bool> {
+        let stopped = TaskRunStatus::Stopped.as_str();
+        let running = TaskRunStatus::Running.as_str();
+        let waiting = TaskRunStatus::WaitingForUser.as_str();
+        let setting_up = TaskRunStatus::SettingUp.as_str();
+        let tx = self.conn_mut().transaction()?;
+        let affected = tx.execute(
+            &format!(
+                "UPDATE task_runs
+                   SET status = '{stopped}',
+                       wait_reason = NULL,
+                       updated_at = {SET_NOW}
+                 WHERE id = ?1 AND task_id = ?2
+                   AND (status IN ('{running}', '{waiting}')
+                        OR (status = '{setting_up}' AND provider_session_id IS NOT NULL))"
+            ),
+            params![task_run_id, task_id],
+        )?;
+        if affected > 0 && !keep_task_in_progress(&tx, task_id)? {
+            require_task_exists(&tx, task_id)?;
+        }
+        tx.commit()?;
+        Ok(affected > 0)
+    }
 }
 
 impl TaskRunRepository for SqliteStore {
