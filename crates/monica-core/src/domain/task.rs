@@ -69,6 +69,7 @@ pub struct TaskSummaryRow {
     pub status: DisplayStatus,
     pub prepare_eligible: bool,
     pub run_eligible: bool,
+    pub is_active: bool,
     pub has_open_pull_request: bool,
     pub branch: Option<String>,
     #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]

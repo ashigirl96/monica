@@ -176,26 +176,31 @@ fn task_run_observation_sql_guards_protected_transitions() {
     // The event itself is still recorded.
     assert_eq!(run.last_event_name.as_deref(), Some("Stop"));
 
-    // A trailing Stop must not blur a pending question into a generic wait.
-    let asking = start_run(&mut db);
-    db.record_task_run_observation(
-        &asking.id,
-        TaskRunObservation {
-            status: Some(TaskRunStatus::WaitingForUser),
-            wait_reason: Some(Some(TaskRunWaitReason::AskUserQuestion)),
-            event_name: Some("PreToolUse"),
-            at: "2026-06-02T00:00:00.000Z",
-            provider_session_id: None,
-            terminal_tab_id: None,
-            metadata: None,
-        },
-    )
-    .unwrap();
-    db.record_task_run_observation(&asking.id, generic_wait)
+    // A trailing Stop must not blur a tool-specific wait into a generic one.
+    for reason in [
+        TaskRunWaitReason::AskUserQuestion,
+        TaskRunWaitReason::ExitPlanMode,
+    ] {
+        let asking = start_run(&mut db);
+        db.record_task_run_observation(
+            &asking.id,
+            TaskRunObservation {
+                status: Some(TaskRunStatus::WaitingForUser),
+                wait_reason: Some(Some(reason)),
+                event_name: Some("PreToolUse"),
+                at: "2026-06-02T00:00:00.000Z",
+                provider_session_id: None,
+                terminal_tab_id: None,
+                metadata: None,
+            },
+        )
         .unwrap();
-    let run = db.get_task_run(&asking.id).unwrap().unwrap();
-    assert_eq!(run.status, TaskRunStatus::WaitingForUser);
-    assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AskUserQuestion));
+        db.record_task_run_observation(&asking.id, generic_wait)
+            .unwrap();
+        let run = db.get_task_run(&asking.id).unwrap().unwrap();
+        assert_eq!(run.status, TaskRunStatus::WaitingForUser, "{reason:?}");
+        assert_eq!(run.wait_reason, Some(reason), "{reason:?}");
+    }
 
     // Failed is sticky against any transition.
     let failed = start_run(&mut db);
@@ -558,6 +563,51 @@ fn project_round_trip_and_summary_pr_status_stay_wire_compatible() {
         summaries[0].github_pull_requests[0].status.as_deref(),
         Some("open")
     );
+    assert!(summaries[0].has_open_pull_request);
+
+    // A merged-only task is settled work: no open-PR accent.
+    let mut merged_task = dev_task("with merged pr");
+    merged_task.project_id = Some(project.id.clone());
+    let merged_item = db.insert_task(merged_task).unwrap();
+    db.record_pull_request_branch_sync_success(
+        &PullRequestBranchSyncCandidate {
+            task_id: merged_item.id.clone(),
+            repo: "owner/repo".to_string(),
+            branch: "issue-43".to_string(),
+        },
+        &[GithubPullRequest {
+            repo: "owner/repo".to_string(),
+            number: 8,
+            url: "https://github.com/owner/repo/pull/8".to_string(),
+            status: GithubPullRequestStatus::Merged,
+        }],
+    )
+    .unwrap();
+    let summaries = db.list_task_summaries(None, Some("owner/repo")).unwrap();
+    let merged_row = summaries.iter().find(|s| s.id == merged_item.id).unwrap();
+    assert!(!merged_row.has_open_pull_request);
+
+    // Draft counts as open work in flight.
+    let mut draft_task = dev_task("with draft pr");
+    draft_task.project_id = Some(project.id.clone());
+    let draft_item = db.insert_task(draft_task).unwrap();
+    db.record_pull_request_branch_sync_success(
+        &PullRequestBranchSyncCandidate {
+            task_id: draft_item.id.clone(),
+            repo: "owner/repo".to_string(),
+            branch: "issue-44".to_string(),
+        },
+        &[GithubPullRequest {
+            repo: "owner/repo".to_string(),
+            number: 9,
+            url: "https://github.com/owner/repo/pull/9".to_string(),
+            status: GithubPullRequestStatus::Draft,
+        }],
+    )
+    .unwrap();
+    let summaries = db.list_task_summaries(None, Some("owner/repo")).unwrap();
+    let draft_row = summaries.iter().find(|s| s.id == draft_item.id).unwrap();
+    assert!(draft_row.has_open_pull_request);
 }
 
 #[test]
@@ -823,6 +873,26 @@ fn latest_terminal_session_for_tab_resolves_numerically_within_same_timestamp() 
 }
 
 #[test]
+fn latest_terminal_session_for_tab_prefers_newer_created_at() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let older = db
+        .create_terminal_session(new_shell_session(None, Some("tab-1")))
+        .unwrap();
+    db.conn()
+        .execute(
+            "UPDATE terminal_sessions SET created_at = '2026-01-01T00:00:00.000Z' WHERE id = ?1",
+            [&older.id],
+        )
+        .unwrap();
+    let newer = db
+        .create_terminal_session(new_shell_session(None, Some("tab-1")))
+        .unwrap();
+
+    let latest = db.latest_terminal_session_for_tab("tab-1").unwrap().unwrap();
+    assert_eq!(latest.id, newer.id);
+}
+
+#[test]
 fn settle_task_run_if_live_only_stops_session_driven_runs() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let task = db.insert_task(dev_task("settle")).unwrap();
@@ -901,6 +971,50 @@ fn settle_task_run_if_live_only_stops_session_driven_runs() {
             "{status:?}"
         );
     }
+
+    // A mismatched task id never settles someone else's run.
+    let run = start_run(&mut db);
+    observe(&mut db, &run.id, TaskRunStatus::Running);
+    assert!(!db.settle_task_run_if_live(&run.id, "MON-404").unwrap());
+    assert_eq!(
+        db.get_task_run(&run.id).unwrap().unwrap().status,
+        TaskRunStatus::Running
+    );
+}
+
+#[test]
+fn settle_task_run_if_live_survives_a_deleted_task() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("doomed")).unwrap();
+    let run = db
+        .start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
+    db.record_task_run_observation(
+        &run.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::Running),
+            wait_reason: None,
+            event_name: None,
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: Some("sess-1"),
+            terminal_tab_id: None,
+            metadata: None,
+        },
+    )
+    .unwrap();
+    db.mark_task_deleted(&task.id).unwrap();
+
+    // The terminal dying after the task was deleted must still tombstone the run.
+    assert!(db.settle_task_run_if_live(&run.id, &task.id).unwrap());
+    assert_eq!(
+        db.get_task_run(&run.id).unwrap().unwrap().status,
+        TaskRunStatus::Stopped
+    );
 }
 
 #[test]

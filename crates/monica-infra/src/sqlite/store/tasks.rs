@@ -222,6 +222,7 @@ impl TaskRepository for SqliteStore {
                 status: display_status,
                 prepare_eligible: display_status.prepare_eligible(),
                 run_eligible: display_status.run_eligible(),
+                is_active: display_status.is_active(),
                 has_open_pull_request: false,
                 branch: row.get("branch")?,
                 side_runs_running: row.get("side_runs_running")?,

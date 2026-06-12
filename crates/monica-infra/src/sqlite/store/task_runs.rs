@@ -83,8 +83,11 @@ impl SqliteStore {
             ),
             params![task_run_id, task_id],
         )?;
-        if affected > 0 && !keep_task_in_progress(&tx, task_id)? {
-            require_task_exists(&tx, task_id)?;
+        if affected > 0 {
+            // A deleted task's runs still deserve their tombstone (same silent no-op as hook
+            // observations); erroring here would roll the settlement back and leave the run
+            // live forever.
+            keep_task_in_progress(&tx, task_id)?;
         }
         tx.commit()?;
         Ok(affected > 0)
@@ -119,12 +122,14 @@ impl TaskRunRepository for SqliteStore {
         };
         let failed = TaskRunStatus::Failed.as_str();
         let stopped = TaskRunStatus::Stopped.as_str();
+        let waiting = TaskRunStatus::WaitingForUser.as_str();
         let ask_user_question = TaskRunWaitReason::AskUserQuestion.as_str();
         let exit_plan_mode = TaskRunWaitReason::ExitPlanMode.as_str();
         let protected = format!(
             "status = '{failed}'
              OR (?10 AND (status = '{stopped}'
-                          OR wait_reason IN ('{ask_user_question}', '{exit_plan_mode}')))"
+                          OR (status = '{waiting}'
+                              AND wait_reason IN ('{ask_user_question}', '{exit_plan_mode}'))))"
         );
         let tx = self.conn_mut().transaction()?;
         let affected = tx.execute(

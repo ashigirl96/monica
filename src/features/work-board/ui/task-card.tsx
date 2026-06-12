@@ -40,8 +40,6 @@ const STATUS_BADGE_STYLES: Record<DisplayStatus, string> = {
   done: "bg-muted text-muted-foreground/60",
 };
 
-// waiting_for_user renders by its wait_reason: a tool-blocked wait (question, plan approval)
-// is an attention item, while an idle turn boundary is just "your move" and stays quiet.
 const WAIT_REASON_LABELS: Record<TaskRunWaitReason, string> = {
   ask_user_question: "needs you",
   exit_plan_mode: "needs you",
@@ -165,12 +163,14 @@ function PrepareIcon() {
 function SideRunBadges({ task }: { task: TaskSummaryRow }) {
   const entries = [
     {
+      kind: "waiting",
       count: task.side_runs_waiting_for_user,
       title: (n: number) => `${n} side run${n > 1 ? "s" : ""} waiting for you`,
       className: STATUS_BADGE_STYLES.waiting_for_user,
       dot: STATUS_COLORS.waiting_for_user,
     },
     {
+      kind: "failed",
       count: task.side_runs_failed,
       title: (n: number) => `${n} side run${n > 1 ? "s" : ""} failed`,
       className: STATUS_BADGE_STYLES.failed,
@@ -178,6 +178,7 @@ function SideRunBadges({ task }: { task: TaskSummaryRow }) {
     },
     // running stays deliberately subdued: a healthy side run is not an attention item
     {
+      kind: "running",
       count: task.side_runs_running,
       title: (n: number) => `${n} side run${n > 1 ? "s" : ""} running`,
       className: "bg-white/[0.04] text-muted-foreground",
@@ -190,7 +191,7 @@ function SideRunBadges({ task }: { task: TaskSummaryRow }) {
     <span className="inline-flex items-center gap-1">
       {entries.map((e) => (
         <span
-          key={e.dot}
+          key={e.kind}
           title={e.title(e.count)}
           className={cn(
             "inline-flex items-center gap-1 rounded-sm px-1.5 py-px text-[10px] font-medium",
@@ -212,8 +213,6 @@ export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boo
   const hasPrs = task.github_pull_requests.length > 0;
   const hasBranch = task.branch !== null;
   const hasMetadata = hasIssue || hasPrs || hasBranch;
-  const isActive =
-    task.status === "running" || task.status === "setting_up" || task.status === "prepared";
   const waitReason = task.task_run_wait_reason ?? "awaiting_prompt";
   const isWaiting = task.status === "waiting_for_user";
   const statusLabel = isWaiting ? WAIT_REASON_LABELS[waitReason] : STATUS_LABELS[task.status];
@@ -228,7 +227,7 @@ export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boo
       tabIndex={-1}
       className={cn(
         "group relative flex overflow-hidden rounded-lg border border-border bg-card transition-colors outline-none",
-        isActive && "border-emerald-500/20",
+        task.is_active && "border-emerald-500/20",
         "hover:border-muted-foreground/30",
         focused && "border-muted-foreground/30 ring-1 ring-foreground/40",
       )}

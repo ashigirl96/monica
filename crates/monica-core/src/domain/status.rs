@@ -172,6 +172,15 @@ impl DisplayStatus {
         self.prepare_eligible() || self == DisplayStatus::Prepared
     }
 
+    /// Something is actively engaged with the task right now — machine prep, a launch waiting
+    /// to be driven, or the agent itself. The board highlights these cards.
+    pub fn is_active(self) -> bool {
+        matches!(
+            self,
+            DisplayStatus::SettingUp | DisplayStatus::Prepared | DisplayStatus::Running
+        )
+    }
+
     pub fn from_task_and_run(task: TaskStatus, run: Option<TaskRunStatus>) -> Self {
         match task {
             TaskStatus::Ready => DisplayStatus::Ready,
@@ -261,19 +270,20 @@ mod tests {
     #[test]
     fn eligibility_follows_display_status() {
         let cases = [
-            (DisplayStatus::Ready, true, true),
-            (DisplayStatus::InProgress, false, false),
-            (DisplayStatus::SettingUp, false, false),
-            (DisplayStatus::Prepared, false, true),
-            (DisplayStatus::Running, false, false),
-            (DisplayStatus::WaitingForUser, false, false),
-            (DisplayStatus::Stopped, true, true),
-            (DisplayStatus::Failed, true, true),
-            (DisplayStatus::Done, false, false),
+            (DisplayStatus::Ready, true, true, false),
+            (DisplayStatus::InProgress, false, false, false),
+            (DisplayStatus::SettingUp, false, false, true),
+            (DisplayStatus::Prepared, false, true, true),
+            (DisplayStatus::Running, false, false, true),
+            (DisplayStatus::WaitingForUser, false, false, false),
+            (DisplayStatus::Stopped, true, true, false),
+            (DisplayStatus::Failed, true, true, false),
+            (DisplayStatus::Done, false, false, false),
         ];
-        for (status, prepare, run) in cases {
+        for (status, prepare, run, active) in cases {
             assert_eq!(status.prepare_eligible(), prepare, "{status:?} prepare");
             assert_eq!(status.run_eligible(), run, "{status:?} run");
+            assert_eq!(status.is_active(), active, "{status:?} active");
         }
     }
 
