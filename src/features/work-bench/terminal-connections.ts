@@ -8,6 +8,9 @@ export type TabConnection = {
   sessionId?: string;
   inFlight?: Promise<void>;
   unlisteners: UnlistenFn[];
+  // While the attach replay is being parsed, xterm answers terminal queries recorded in
+  // the transcript (DA, OSC 10/11, kitty); those responses must not reach the live PTY.
+  replaying?: boolean;
 };
 
 const tabConnections = new Map<string, TabConnection>();
