@@ -66,20 +66,20 @@ impl SqliteStore {
     /// (StopFailure → Failed, SessionEnd → Stopped) can never be overwritten; `Ok(false)`
     /// means someone else settled it first and the caller has nothing to announce.
     pub fn settle_task_run_if_live(&mut self, task_run_id: &str, task_id: &str) -> Result<bool> {
-        let stopped = TaskRunStatus::Stopped.as_str();
-        let running = TaskRunStatus::Running.as_str();
-        let waiting = TaskRunStatus::WaitingForUser.as_str();
-        let setting_up = TaskRunStatus::SettingUp.as_str();
         let tx = self.conn_mut().transaction()?;
         let affected = tx.execute(
             &format!(
                 "UPDATE task_runs
-                   SET status = '{stopped}',
+                   SET status = '{}',
                        wait_reason = NULL,
                        updated_at = {SET_NOW}
                  WHERE id = ?1 AND task_id = ?2
-                   AND (status IN ('{running}', '{waiting}')
-                        OR (status = '{setting_up}' AND provider_session_id IS NOT NULL))"
+                   AND (status IN ('{}', '{}')
+                        OR (status = '{}' AND provider_session_id IS NOT NULL))",
+                TaskRunStatus::Stopped.as_str(),
+                TaskRunStatus::Running.as_str(),
+                TaskRunStatus::WaitingForUser.as_str(),
+                TaskRunStatus::SettingUp.as_str(),
             ),
             params![task_run_id, task_id],
         )?;
@@ -120,20 +120,20 @@ impl TaskRunRepository for SqliteStore {
             }),
             _ => false,
         };
-        let failed = TaskRunStatus::Failed.as_str();
-        let stopped = TaskRunStatus::Stopped.as_str();
-        let waiting = TaskRunStatus::WaitingForUser.as_str();
-        let ask_user_question = TaskRunWaitReason::AskUserQuestion.as_str();
-        let exit_plan_mode = TaskRunWaitReason::ExitPlanMode.as_str();
         // `?6 IS NULL OR provider_session_id IS ?6` scopes the generic-wait guards to events
         // from the run's recorded session (or anonymous ones); a session the run never saw is
         // fresh evidence of life and passes through.
         let protected = format!(
-            "status = '{failed}'
+            "status = '{}'
              OR (?10 AND (?6 IS NULL OR provider_session_id IS ?6)
-                     AND (status = '{stopped}'
-                          OR (status = '{waiting}'
-                              AND wait_reason IN ('{ask_user_question}', '{exit_plan_mode}'))))"
+                     AND (status = '{}'
+                          OR (status = '{}'
+                              AND wait_reason IN ('{}', '{}'))))",
+            TaskRunStatus::Failed.as_str(),
+            TaskRunStatus::Stopped.as_str(),
+            TaskRunStatus::WaitingForUser.as_str(),
+            TaskRunWaitReason::AskUserQuestion.as_str(),
+            TaskRunWaitReason::ExitPlanMode.as_str(),
         );
         let tx = self.conn_mut().transaction()?;
         let affected = tx.execute(

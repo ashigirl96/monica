@@ -40,16 +40,19 @@ const STATUS_BADGE_STYLES: Record<DisplayStatus, string> = {
   done: "bg-muted text-muted-foreground/60",
 };
 
-const WAIT_REASON_LABELS: Record<TaskRunWaitReason, string> = {
-  ask_user_question: "needs you",
-  exit_plan_mode: "needs you",
-  awaiting_prompt: "your turn",
-};
-
-const WAIT_REASON_BADGE_STYLES: Record<TaskRunWaitReason, string> = {
-  ask_user_question: "bg-amber-500/15 text-amber-400",
-  exit_plan_mode: "bg-amber-500/15 text-amber-400",
-  awaiting_prompt: "bg-amber-500/10 text-amber-300/80",
+const WAIT_REASON_CONFIG: Record<TaskRunWaitReason, { label: string; badge: string }> = {
+  ask_user_question: {
+    label: "needs you",
+    badge: "bg-amber-500/15 text-amber-400",
+  },
+  exit_plan_mode: {
+    label: "approve plan",
+    badge: "bg-amber-500/15 text-amber-400",
+  },
+  awaiting_prompt: {
+    label: "your turn",
+    badge: "bg-amber-500/10 text-amber-300/80",
+  },
 };
 
 function IssueIcon() {
@@ -215,9 +218,9 @@ export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boo
   const hasMetadata = hasIssue || hasPrs || hasBranch;
   const waitReason = task.task_run_wait_reason ?? "awaiting_prompt";
   const isWaiting = task.status === "waiting_for_user";
-  const statusLabel = isWaiting ? WAIT_REASON_LABELS[waitReason] : STATUS_LABELS[task.status];
+  const statusLabel = isWaiting ? WAIT_REASON_CONFIG[waitReason].label : STATUS_LABELS[task.status];
   const statusBadgeStyle = isWaiting
-    ? WAIT_REASON_BADGE_STYLES[waitReason]
+    ? WAIT_REASON_CONFIG[waitReason].badge
     : STATUS_BADGE_STYLES[task.status];
 
   return (
