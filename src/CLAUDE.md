@@ -14,5 +14,5 @@
 - `components/` — 共有 UI コンポーネント
 - `commands/` — Tauri invoke ラッパー
 - `hooks/` — React hooks
-- `stores/` — jotai atoms（cross-feature な atoms と re-export スタブ）
+- `stores/` — jotai atoms（cross-feature な atoms）
 - `lib/` — ユーティリティ

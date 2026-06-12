@@ -3,24 +3,14 @@ use rusqlite::params;
 
 use crate::sqlite::SqliteStore;
 use monica_core::{
-    DisplayStatus, ExternalRef, NewTask, Task, TaskRunStatus, TaskRunWaitReason, TaskStatus,
-    TaskSummaryRow,
+    DisplayStatus, ExternalRef, GithubPullRequest, NewTask, PullRequestBranchSyncCandidate,
+    PullRequestStatusSyncCandidate, Task, TaskRepository, TaskRunStatus, TaskRunWaitReason,
+    TaskStatus, TaskSummaryRow,
 };
 
 use super::{SET_NOW, TASK_COLUMNS};
 
 impl SqliteStore {
-    pub fn insert_task(&mut self, new: NewTask) -> Result<Task> {
-        self.insert_task_inner(new, None)
-    }
-
-    /// Insert a task and its external ref in one transaction, so a failure to record the
-    /// external link can never leave an orphan task behind. The ref's `task_id` is
-    /// replaced with the freshly allocated `MON-<n>` id.
-    pub fn insert_task_with_ref(&mut self, new: NewTask, external: ExternalRef) -> Result<Task> {
-        self.insert_task_inner(new, Some(external))
-    }
-
     fn insert_task_inner(&mut self, new: NewTask, external: Option<ExternalRef>) -> Result<Task> {
         let labels = serde_json::to_string(&new.labels)?;
         let details = serde_json::to_string(&new.details)?;
@@ -76,8 +66,21 @@ impl SqliteStore {
         tx.commit()?;
         Ok(item)
     }
+}
 
-    pub fn get_task(&self, id: &str) -> Result<Option<Task>> {
+impl TaskRepository for SqliteStore {
+    fn insert_task(&mut self, new: NewTask) -> Result<Task> {
+        self.insert_task_inner(new, None)
+    }
+
+    /// Insert a task and its external ref in one transaction, so a failure to record the
+    /// external link can never leave an orphan task behind. The ref's `task_id` is
+    /// replaced with the freshly allocated `MON-<n>` id.
+    fn insert_task_with_ref(&mut self, new: NewTask, external: ExternalRef) -> Result<Task> {
+        self.insert_task_inner(new, Some(external))
+    }
+
+    fn get_task(&self, id: &str) -> Result<Option<Task>> {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1 AND deleted_at IS NULL"
         ))?;
@@ -88,11 +91,7 @@ impl SqliteStore {
         }
     }
 
-    pub fn delete_task(&mut self, id: &str) -> Result<Task> {
-        self.mark_task_deleted(id)
-    }
-
-    pub(crate) fn mark_task_deleted(&mut self, id: &str) -> Result<Task> {
+    fn mark_task_deleted(&mut self, id: &str) -> Result<Task> {
         let tx = self.conn_mut().transaction()?;
         let item = {
             let mut stmt = tx.prepare(&format!(
@@ -118,7 +117,7 @@ impl SqliteStore {
         Ok(item)
     }
 
-    pub fn list_tasks(&self) -> Result<Vec<Task>> {
+    fn list_tasks(&self) -> Result<Vec<Task>> {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {TASK_COLUMNS} FROM tasks
              WHERE deleted_at IS NULL
@@ -132,7 +131,7 @@ impl SqliteStore {
         Ok(items)
     }
 
-    pub fn list_task_summaries(
+    fn list_task_summaries(
         &self,
         status: Option<DisplayStatus>,
         project: Option<&str>,
@@ -216,6 +215,8 @@ impl SqliteStore {
                 task_run_status,
                 task_run_wait_reason,
                 status: display_status,
+                prepare_eligible: display_status.prepare_eligible(),
+                run_eligible: display_status.run_eligible(),
                 branch: row.get("branch")?,
                 side_runs_running: row.get("side_runs_running")?,
                 side_runs_waiting_for_user: row.get("side_runs_waiting_for_user")?,
@@ -231,7 +232,7 @@ impl SqliteStore {
         Ok(items)
     }
 
-    pub fn set_primary_task_run(&self, task_id: &str, task_run_id: &str) -> Result<()> {
+    fn set_primary_task_run(&self, task_id: &str, task_run_id: &str) -> Result<()> {
         let affected = self.conn().execute(
             &format!(
                 "UPDATE tasks SET primary_task_run_id = ?1, updated_at = {SET_NOW}
@@ -245,11 +246,13 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()> {
+    fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()> {
         let affected = self.conn().execute(
-            "UPDATE tasks
-	               SET status = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-	             WHERE id = ?2 AND deleted_at IS NULL",
+            &format!(
+                "UPDATE tasks
+                   SET status = ?1, updated_at = {SET_NOW}
+                 WHERE id = ?2 AND deleted_at IS NULL"
+            ),
             params![status.as_str(), id],
         )?;
         if affected == 0 {
@@ -258,7 +261,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn mark_task(&mut self, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()> {
+    fn mark_task(&mut self, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()> {
         let status_str = status.as_str();
         let payload = serde_json::to_string(&serde_json::json!({
             "status": status_str,
@@ -283,5 +286,55 @@ impl SqliteStore {
         )?;
         tx.commit()?;
         Ok(())
+    }
+
+    // A trait impl cannot span files; these bodies live with their tables in
+    // external_refs.rs and pull_request_sync.rs.
+    fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalRef>> {
+        SqliteStore::list_external_refs(self, task_id)
+    }
+
+    fn next_pull_request_branch_sync_candidate(
+        &self,
+    ) -> Result<Option<PullRequestBranchSyncCandidate>> {
+        SqliteStore::next_pull_request_branch_sync_candidate(self)
+    }
+
+    fn next_pull_request_status_sync_candidate(
+        &self,
+    ) -> Result<Option<PullRequestStatusSyncCandidate>> {
+        SqliteStore::next_pull_request_status_sync_candidate(self)
+    }
+
+    fn record_pull_request_branch_sync_success(
+        &mut self,
+        candidate: &PullRequestBranchSyncCandidate,
+        pull_requests: &[GithubPullRequest],
+    ) -> Result<()> {
+        SqliteStore::record_pull_request_branch_sync_success(self, candidate, pull_requests)
+    }
+
+    fn record_pull_request_branch_sync_failure(
+        &mut self,
+        candidate: &PullRequestBranchSyncCandidate,
+        error: &str,
+    ) -> Result<()> {
+        SqliteStore::record_pull_request_branch_sync_failure(self, candidate, error)
+    }
+
+    fn record_pull_request_status_sync_success(
+        &mut self,
+        candidate: &PullRequestStatusSyncCandidate,
+        pull_request: &GithubPullRequest,
+    ) -> Result<()> {
+        SqliteStore::record_pull_request_status_sync_success(self, candidate, pull_request)
+    }
+
+    fn record_pull_request_status_sync_failure(
+        &mut self,
+        candidate: &PullRequestStatusSyncCandidate,
+        error: &str,
+    ) -> Result<()> {
+        SqliteStore::record_pull_request_status_sync_failure(self, candidate, error)
     }
 }

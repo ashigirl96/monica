@@ -2,6 +2,7 @@ mod auth;
 mod hook;
 mod issue;
 mod project;
+mod table;
 
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
@@ -27,14 +28,6 @@ enum Commands {
     /// Manage Monica authorization
     #[command(subcommand)]
     Auth(auth::AuthCommand),
-    /// Start a worktree + session for an issue (owner/repo#123)
-    Start { target: String },
-    /// Show the status of all sessions
-    Status,
-    /// Review the diff and PR status for an issue
-    Review { target: String },
-    /// Push the branch and open a PR for an issue
-    Pr { target: String },
     /// Print a shell completion script (e.g. `monica completions zsh`)
     Completions { shell: Shell },
 }
@@ -62,13 +55,6 @@ fn run(cli: Cli) -> anyhow::Result<()> {
                 let name = cmd.get_name().to_string();
                 clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
                 Ok(())
-            }
-            Commands::Start { .. }
-            | Commands::Status
-            | Commands::Review { .. }
-            | Commands::Pr { .. } => {
-                eprintln!("monica: not yet implemented (see issue #11)");
-                std::process::exit(1);
             }
         }
     })

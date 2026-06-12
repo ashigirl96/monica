@@ -318,7 +318,8 @@ mod tests {
     use std::process::Command;
 
     use monica_core::{
-        GitGateway, NewTask, NewTaskRun, Project, TaskKind, TaskRun, TaskRunStatus, TaskStatus,
+        GitGateway, NewTask, NewTaskRun, Project, ProjectRepository, TaskKind, TaskRepository,
+        TaskRun, TaskRunRepository, TaskRunStatus, TaskStatus,
     };
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;

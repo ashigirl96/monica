@@ -3,12 +3,12 @@ use rusqlite::params;
 use serde_json::Value;
 
 use crate::sqlite::SqliteStore;
-use monica_core::Event;
+use monica_core::{Clock, Event, EventRepository};
 
 use super::{EVENT_COLUMNS, SET_NOW};
 
-impl SqliteStore {
-    pub fn insert_event(
+impl EventRepository for SqliteStore {
+    fn insert_event(
         &self,
         task_id: Option<&str>,
         task_run_id: Option<&str>,
@@ -33,7 +33,7 @@ impl SqliteStore {
     }
 
     /// List events, optionally filtered to one task. Ordered by insertion (`id`).
-    pub fn list_events(&self, task_id: Option<&str>) -> Result<Vec<Event>> {
+    fn list_events(&self, task_id: Option<&str>) -> Result<Vec<Event>> {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {EVENT_COLUMNS} FROM events
              WHERE (?1 IS NULL OR task_id = ?1)
@@ -46,11 +46,13 @@ impl SqliteStore {
         }
         Ok(events)
     }
+}
 
+impl Clock for SqliteStore {
     /// Current UTC timestamp in the same ISO-8601 form the schema's column defaults use. Lets
     /// non-DB artifacts (e.g. `hook-events.jsonl`) share one timestamp format without pulling in a
     /// date/time crate.
-    pub(crate) fn now_iso(&self) -> Result<String> {
+    fn now_iso(&self) -> Result<String> {
         let ts: String = self
             .conn()
             .query_row(&format!("SELECT {SET_NOW}"), [], |r| r.get(0))?;

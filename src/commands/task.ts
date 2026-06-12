@@ -21,8 +21,8 @@ async function unwrap<T>(
   return r.data;
 }
 
-export function listTaskSummaries() {
-  return unwrap(commands.listTaskSummaries());
+export function listTaskSummaries(project: string | null = null) {
+  return unwrap(commands.listTaskSummaries(project));
 }
 
 export function getBoardColumns() {
@@ -33,8 +33,8 @@ export function listProjects() {
   return unwrap(commands.listProjects());
 }
 
-export function trackGithubIssue(repo: string, number: number) {
-  return unwrap(commands.trackGithubIssue(repo, number));
+export function trackGithubIssue(input: string) {
+  return unwrap(commands.trackGithubIssue(input));
 }
 
 export function listBenchRunspaceMap() {

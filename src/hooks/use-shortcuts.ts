@@ -11,7 +11,7 @@ import {
   jumpHintsActiveAtom,
   jumpToHintAtom,
   toggleLastRunspaceAtom,
-} from "@/stores/terminal";
+} from "@/features/work-bench/store";
 import { promoteActiveTabRunAtom } from "@/stores/workboard";
 import { isEditable } from "@/lib/keyboard";
 import { forceSyncPullRequests, onPrSyncCompleted } from "@/commands/pull_request";

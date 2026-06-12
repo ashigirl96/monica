@@ -151,6 +151,23 @@ impl DisplayStatus {
         s.replace('-', "_").parse()
     }
 
+    /// A new run may be prepared from these states: nothing is live and nothing is already
+    /// waiting to launch.
+    pub fn prepare_eligible(self) -> bool {
+        matches!(
+            self,
+            DisplayStatus::Inbox
+                | DisplayStatus::Ready
+                | DisplayStatus::Stopped
+                | DisplayStatus::Failed
+        )
+    }
+
+    /// Run accepts everything prepare does, plus an already-prepared run waiting for launch.
+    pub fn run_eligible(self) -> bool {
+        self.prepare_eligible() || self == DisplayStatus::Prepared
+    }
+
     pub fn from_task_and_run(task: TaskStatus, run: Option<TaskRunStatus>) -> Self {
         match task {
             TaskStatus::Inbox => DisplayStatus::Inbox,
@@ -247,5 +264,25 @@ mod tests {
             DisplayStatus::from_task_and_run(TaskStatus::Done, Some(TaskRunStatus::Running)),
             DisplayStatus::Done
         );
+    }
+
+    #[test]
+    fn eligibility_follows_display_status() {
+        let cases = [
+            (DisplayStatus::Inbox, true, true),
+            (DisplayStatus::Ready, true, true),
+            (DisplayStatus::InProgress, false, false),
+            (DisplayStatus::SettingUp, false, false),
+            (DisplayStatus::Prepared, false, true),
+            (DisplayStatus::Running, false, false),
+            (DisplayStatus::WaitingForUser, false, false),
+            (DisplayStatus::Stopped, true, true),
+            (DisplayStatus::Failed, true, true),
+            (DisplayStatus::Done, false, false),
+        ];
+        for (status, prepare, run) in cases {
+            assert_eq!(status.prepare_eligible(), prepare, "{status:?} prepare");
+            assert_eq!(status.run_eligible(), run, "{status:?} run");
+        }
     }
 }

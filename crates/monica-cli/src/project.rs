@@ -99,7 +99,7 @@ fn list(runtime: &Runtime) -> Result<()> {
             p.setup_timeout_sec.to_string(),
         ]);
     }
-    print_table(&table);
+    print!("{}", crate::table::render_table(&table));
     Ok(())
 }
 
@@ -147,26 +147,4 @@ async fn detect_default_branch(runtime: &Runtime, repo: &str) -> Option<String> 
         .await
         .ok()
         .flatten()
-}
-
-fn print_table(rows: &[Vec<String>]) {
-    let cols = rows.iter().map(|row| row.len()).max().unwrap_or(0);
-    if cols == 0 {
-        return;
-    }
-    let mut widths = vec![0usize; cols];
-    for row in rows {
-        for (i, cell) in row.iter().enumerate() {
-            widths[i] = widths[i].max(cell.chars().count());
-        }
-    }
-    for row in rows {
-        let line = row
-            .iter()
-            .enumerate()
-            .map(|(i, cell)| format!("{cell:<width$}", width = widths[i]))
-            .collect::<Vec<_>>()
-            .join("  ");
-        println!("{}", line.trim_end());
-    }
 }

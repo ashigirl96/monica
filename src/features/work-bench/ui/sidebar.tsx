@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   runspaceSummariesAtom,
@@ -12,12 +12,15 @@ import {
 } from "@/features/work-bench/store";
 import { JumpHint } from "./jump-hint";
 import { terminalTerminate, type TerminalSession } from "@/commands/terminal";
-import { onTaskRunStatusChanged, type DisplayStatus } from "@/commands/task";
-import { taskStatusMapAtom, refreshTaskSummariesAtom } from "@/stores/workboard";
+import type { DisplayStatus } from "@/commands/task";
+import { taskStatusMapAtom, refreshTaskStatusMapAtom } from "@/stores/workboard";
 import { activeSpaceAtom } from "@/stores/space";
+import { useDragReorder } from "@/hooks/use-drag-reorder";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
+import { shortPath } from "@/lib/paths";
 import { cn } from "@/lib/utils";
 
-const STATUS_DOT: Partial<Record<DisplayStatus, string>> = {
+const TASK_STATUS_DOT: Partial<Record<DisplayStatus, string>> = {
   setting_up: "bg-blue-400 animate-pulse",
   prepared: "bg-cyan-400",
   running: "bg-emerald-400 animate-pulse",
@@ -25,12 +28,6 @@ const STATUS_DOT: Partial<Record<DisplayStatus, string>> = {
   stopped: "bg-muted-foreground/50",
   failed: "bg-red-400",
 };
-
-function shortPath(path: string): string {
-  const parts = path.split("/").filter(Boolean);
-  if (parts.length >= 2) return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
-  return parts[parts.length - 1] ?? path;
-}
 
 function DetachedSessionItem({
   session,
@@ -70,44 +67,21 @@ function DetachedSessionItem({
 function RunspaceItem({
   ws,
   onActivate,
-  dragState,
+  dragHandlers,
+  isDragOver,
   status,
   hint,
 }: {
   ws: RunspaceSummary;
   onActivate: () => void;
-  dragState: {
-    dragIdRef: React.RefObject<string | null>;
-    dragOverId: string | null;
-    setDragOverId: (id: string | null) => void;
-    reorder: (from: string, to: string) => void;
-  };
+  dragHandlers: React.HTMLAttributes<HTMLButtonElement> & { draggable: boolean };
+  isDragOver: boolean;
   status?: DisplayStatus;
   hint?: string;
 }) {
   return (
     <button
-      draggable
-      onDragStart={() => {
-        dragState.dragIdRef.current = ws.id;
-      }}
-      onDragEnd={() => {
-        dragState.dragIdRef.current = null;
-        dragState.setDragOverId(null);
-      }}
-      onDragOver={(e) => {
-        e.preventDefault();
-        dragState.setDragOverId(ws.id);
-      }}
-      onDragLeave={() => dragState.setDragOverId(null)}
-      onDrop={(e) => {
-        e.preventDefault();
-        dragState.setDragOverId(null);
-        if (dragState.dragIdRef.current && dragState.dragIdRef.current !== ws.id) {
-          dragState.reorder(dragState.dragIdRef.current, ws.id);
-        }
-        dragState.dragIdRef.current = null;
-      }}
+      {...dragHandlers}
       onPointerDown={(e) => {
         e.preventDefault();
         onActivate();
@@ -119,7 +93,7 @@ function RunspaceItem({
         ws.isActive
           ? "bg-white/[0.1] text-foreground focus-visible:ring-white/50"
           : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground",
-        dragState.dragOverId === ws.id && "ring-1 ring-white/20",
+        isDragOver && "ring-1 ring-white/20",
       )}
     >
       <div className="flex items-center gap-1.5">
@@ -130,10 +104,10 @@ function RunspaceItem({
           </span>
         )}
         <span className="flex-1 truncate text-xs font-medium">{ws.title || "Terminal"}</span>
-        {status && STATUS_DOT[status] && (
+        {status && TASK_STATUS_DOT[status] && (
           <span
             title={status.replace(/_/g, " ")}
-            className={cn("size-1.5 shrink-0 rounded-full", STATUS_DOT[status])}
+            className={cn("size-1.5 shrink-0 rounded-full", TASK_STATUS_DOT[status])}
           />
         )}
       </div>
@@ -161,40 +135,25 @@ export function WorkBenchSidebar() {
   const activate = useSetAtom(activateRunspaceAtom);
   const reattach = useSetAtom(reattachSessionAtom);
   const refreshSessions = useSetAtom(refreshSessionsAtom);
-  const refreshTaskSummaries = useSetAtom(refreshTaskSummariesAtom);
+  const refreshTaskStatusMap = useSetAtom(refreshTaskStatusMapAtom);
   const reorder = useSetAtom(reorderRunspacesAtom);
   const setSpace = useSetAtom(activeSpaceAtom);
   const jumpHints = useAtomValue(jumpHintTargetsAtom);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
-  const dragIdRef = useRef<string | null>(null);
+  const { dragOverId, handlersFor } = useDragReorder(reorder);
 
   // Session status lives in the DB and the daemon; like the primary-tab indicator it has
   // no push channel for every change, so poll while visible.
-  useEffect(() => {
+  const refresh = useCallback(() => {
     void refreshSessions();
-    void refreshTaskSummaries();
-    const unlisten = onTaskRunStatusChanged(() => {
-      void refreshTaskSummaries();
-    });
-    const timer = setInterval(() => {
-      if (!document.hidden) {
-        void refreshSessions();
-        void refreshTaskSummaries();
-      }
-    }, 3000);
-    return () => {
-      clearInterval(timer);
-      unlisten.then((fn) => fn());
-    };
-  }, [refreshSessions, refreshTaskSummaries]);
+    void refreshTaskStatusMap();
+  }, [refreshSessions, refreshTaskStatusMap]);
+  useLiveRefresh(refresh);
 
   const { taskBound, shells } = useMemo(() => {
     const taskBound = summaries.filter((s) => s.taskId);
     const shells = summaries.filter((s) => !s.taskId);
     return { taskBound, shells };
   }, [summaries]);
-
-  const dragState = { dragIdRef, dragOverId, setDragOverId, reorder };
 
   return (
     <div className="flex h-full flex-col">
@@ -208,7 +167,8 @@ export function WorkBenchSidebar() {
                   key={ws.id}
                   ws={ws}
                   onActivate={() => activate(ws.id)}
-                  dragState={dragState}
+                  dragHandlers={handlersFor(ws.id)}
+                  isDragOver={dragOverId === ws.id}
                   status={ws.taskId ? taskStatusMap[ws.taskId] : undefined}
                   hint={jumpHints.byRunspaceId[ws.id]}
                 />
@@ -224,7 +184,8 @@ export function WorkBenchSidebar() {
               key={ws.id}
               ws={ws}
               onActivate={() => activate(ws.id)}
-              dragState={dragState}
+              dragHandlers={handlersFor(ws.id)}
+              isDragOver={dragOverId === ws.id}
               hint={jumpHints.byRunspaceId[ws.id]}
             />
           ))}

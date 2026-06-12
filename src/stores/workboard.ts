@@ -20,18 +20,27 @@ import {
   refreshPrimaryTabAtom,
   removeRunspaceAtom,
   terminalStateAtom,
-} from "@/stores/terminal";
+} from "@/features/work-bench/store";
 import { activeSpaceAtom } from "@/stores/space";
 
 export const boardColumnsAtom = atom<BoardColumn[]>([]);
+// Already filtered by the selected project; the backend query owns the filter.
 export const taskSummariesAtom = atom<TaskSummaryRow[]>([]);
 export const projectsAtom = atom<ProjectEntry[]>([]);
-export const selectedProjectAtom = atom<string | null>(null);
 
-export const loadBoardAtom = atom(null, async (_get, set) => {
+const selectedProjectBaseAtom = atom<string | null>(null);
+export const selectedProjectAtom = atom(
+  (get) => get(selectedProjectBaseAtom),
+  (_get, set, project: string | null) => {
+    set(selectedProjectBaseAtom, project);
+    void set(refreshTaskSummariesAtom);
+  },
+);
+
+export const loadBoardAtom = atom(null, async (get, set) => {
   const [columns, summaries, projects] = await Promise.all([
     getBoardColumns(),
-    listTaskSummaries(),
+    listTaskSummaries(get(selectedProjectAtom)),
     listProjects(),
   ]);
   set(boardColumnsAtom, columns);
@@ -39,34 +48,28 @@ export const loadBoardAtom = atom(null, async (_get, set) => {
   set(projectsAtom, projects);
 });
 
-export const filteredTasksAtom = atom((get) => {
-  const tasks = get(taskSummariesAtom);
-  const project = get(selectedProjectAtom);
-  if (!project) return tasks;
-  return tasks.filter((t) => t.project === project);
-});
-
 export const columnTasksAtom = atom((get) => {
   const columns = get(boardColumnsAtom);
-  const tasks = get(filteredTasksAtom);
+  const tasks = get(taskSummariesAtom);
   return columns.map((col) => ({
     ...col,
     tasks: tasks.filter((t) => col.statuses.includes(t.status)),
   }));
 });
 
-export const taskStatusMapAtom = atom<Record<string, DisplayStatus>>((get) => {
-  const summaries = get(taskSummariesAtom);
-  return Object.fromEntries(summaries.map((s) => [s.id, s.status]));
+// The Work Bench sidebar needs every task's status regardless of the board's
+// project filter, so this map refreshes from an unfiltered query.
+export const taskStatusMapAtom = atom<Record<string, DisplayStatus>>({});
+
+export const refreshTaskStatusMapAtom = atom(null, async (_get, set) => {
+  const summaries = await listTaskSummaries(null);
+  set(taskStatusMapAtom, Object.fromEntries(summaries.map((s) => [s.id, s.status])));
 });
 
-export const trackIssueAtom = atom(
-  null,
-  async (_get, set, input: { repo: string; number: number }) => {
-    await trackGithubIssue(input.repo, input.number);
-    await set(refreshTaskSummariesAtom);
-  },
-);
+export const trackIssueAtom = atom(null, async (_get, set, input: string) => {
+  await trackGithubIssue(input);
+  await set(refreshTaskSummariesAtom);
+});
 
 export const openBenchAtom = atom(null, async (_get, set, taskId: string) => {
   const bench = await openBench(taskId);
@@ -84,8 +87,8 @@ export const prepareTaskAtom = atom(null, async (_get, set, taskId: string) => {
   await set(refreshTaskSummariesAtom);
 });
 
-export const refreshTaskSummariesAtom = atom(null, async (_get, set) => {
-  const summaries = await listTaskSummaries();
+export const refreshTaskSummariesAtom = atom(null, async (get, set) => {
+  const summaries = await listTaskSummaries(get(selectedProjectAtom));
   set(taskSummariesAtom, summaries);
   return summaries;
 });

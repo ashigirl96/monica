@@ -2,7 +2,6 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSetAtom } from "jotai";
 import type { DisplayStatus, TaskSummaryRow } from "@/commands/task";
 import { cn } from "@/lib/utils";
-import { PREPARE_ELIGIBLE, RUN_ELIGIBLE } from "@/features/work-board/model";
 import { openBenchAtom, prepareTaskAtom, runTaskAtom } from "@/stores/workboard";
 
 const STATUS_COLORS: Record<DisplayStatus, string> = {
@@ -121,8 +120,8 @@ function BadgeLink({
   );
 }
 
-function issueUrl(project: string | null, number: number): string | null {
-  if (!project) return null;
+function issueUrl(project: string | null, number: number | null): string | null {
+  if (!project || number === null) return null;
   return `https://github.com/${project}/issues/${number}`;
 }
 
@@ -198,7 +197,7 @@ export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boo
   const doOpenBench = useSetAtom(openBenchAtom);
   const doPrepareTask = useSetAtom(prepareTaskAtom);
   const doRunTask = useSetAtom(runTaskAtom);
-  const hasIssue = task.github_issue_number > 0;
+  const hasIssue = task.github_issue_number !== null;
   const hasPrs = task.github_pull_requests.length > 0;
   const hasBranch = task.branch !== null;
   const hasMetadata = hasIssue || hasPrs || hasBranch;
@@ -284,7 +283,7 @@ export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boo
             <SideRunBadges task={task} />
           </span>
           <div className="flex items-center gap-1">
-            {PREPARE_ELIGIBLE.has(task.status) && (
+            {task.prepare_eligible && (
               <button
                 type="button"
                 onClick={() => doPrepareTask(task.id)}
@@ -298,7 +297,7 @@ export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boo
                 <span>Prepare</span>
               </button>
             )}
-            {RUN_ELIGIBLE.has(task.status) && (
+            {task.run_eligible && (
               <button
                 type="button"
                 onClick={() => doRunTask(task.id)}

@@ -12,12 +12,13 @@ import {
   tabMenuAtom,
 } from "@/features/work-bench/store";
 import { JumpHint } from "./jump-hint";
-import { onTaskRunStatusChanged } from "@/commands/task";
 import { PlusIcon, XIcon } from "@/components/icons";
+import { useDragReorder } from "@/hooks/use-drag-reorder";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import { cn } from "@/lib/utils";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
-const STATUS_DOT: Record<string, string> = {
+const SESSION_STATUS_DOT: Record<string, string> = {
   exited: "bg-zinc-500",
   lost: "bg-amber-400",
   failed: "bg-red-400",
@@ -34,8 +35,7 @@ export function WorkBenchHeader() {
   const createTab = useSetAtom(createTerminalTabAtom);
   const reorder = useSetAtom(reorderTabsAtom);
   const jumpHints = useAtomValue(jumpHintTargetsAtom);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
-  const dragIdRef = useRef<string | null>(null);
+  const { dragOverId, handlersFor } = useDragReorder(reorder);
   const activeTabRef = useRef<HTMLButtonElement>(null);
 
   // CSS cannot trigger scroll-to-element on class change; JS is required
@@ -51,19 +51,11 @@ export function WorkBenchHeader() {
   // indicator follows the same listen-plus-poll pattern as the Workboard.
   // taskId is a dep because the restore flow attaches it to an already-rendered
   // runspace; without it the first refresh no-ops and the dot waits for the poll.
-  useEffect(() => {
-    void refreshPrimaryTab();
-    const unlisten = onTaskRunStatusChanged(() => {
-      void refreshPrimaryTab();
-    });
-    const timer = setInterval(() => {
-      if (!document.hidden) void refreshPrimaryTab();
-    }, 3000);
-    return () => {
-      clearInterval(timer);
-      unlisten.then((fn) => fn());
-    };
-  }, [refreshPrimaryTab, rs?.id, rs?.taskId]);
+  const refresh = useCallback(
+    () => void refreshPrimaryTab(),
+    [refreshPrimaryTab, rs?.id, rs?.taskId],
+  );
+  useLiveRefresh(refresh);
 
   if (!rs) return null;
 
@@ -78,33 +70,13 @@ export function WorkBenchHeader() {
         const isMain = tab.id === primaryTabId;
         const label = tab.title || tab.cwd.split("/").pop() || "Terminal";
         const status = tab.sessionId ? sessionStatus[tab.sessionId]?.status : undefined;
-        const statusDot = status ? STATUS_DOT[status] : undefined;
+        const statusDot = status ? SESSION_STATUS_DOT[status] : undefined;
         const hint = jumpHints.byTabId[tab.id];
         return (
           <button
             key={tab.id}
             ref={isActive ? activeTabRef : undefined}
-            draggable
-            onDragStart={() => {
-              dragIdRef.current = tab.id;
-            }}
-            onDragEnd={() => {
-              dragIdRef.current = null;
-              setDragOverId(null);
-            }}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragOverId(tab.id);
-            }}
-            onDragLeave={() => setDragOverId(null)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDragOverId(null);
-              if (dragIdRef.current && dragIdRef.current !== tab.id) {
-                reorder(dragIdRef.current, tab.id);
-              }
-              dragIdRef.current = null;
-            }}
+            {...handlersFor(tab.id)}
             onPointerDown={(e) => {
               e.preventDefault();
               activateTab(tab.id);

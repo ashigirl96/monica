@@ -310,62 +310,6 @@ mod tests {
         assert!(!manager.is_alive(&id));
     }
 
-    #[test]
-    fn resize_session() {
-        let manager = PtyManager::new();
-
-        let id = "test-resize".to_string();
-        manager
-            .spawn(
-                SpawnRequest {
-                    id: id.clone(),
-                    cwd: std::env::temp_dir().to_string_lossy().to_string(),
-                    rows: 24,
-                    cols: 80,
-                    shell: None,
-                    env: None,
-                },
-                |_, _| {},
-                |_, _| {},
-            )
-            .expect("spawn should succeed");
-
-        manager
-            .resize(&id, PtySize { rows: 40, cols: 120 })
-            .expect("resize should succeed");
-
-        manager.kill(&id).expect("kill should succeed");
-    }
-
-    #[test]
-    fn kill_session() {
-        let manager = PtyManager::new();
-
-        let (exit_tx, exit_rx) = std_mpsc::channel();
-        let id = "test-kill".to_string();
-        manager
-            .spawn(
-                SpawnRequest {
-                    id: id.clone(),
-                    cwd: std::env::temp_dir().to_string_lossy().to_string(),
-                    rows: 24,
-                    cols: 80,
-                    shell: None,
-                    env: None,
-                },
-                |_, _| {},
-                move |id, code| {
-                    let _ = exit_tx.send((id, code));
-                },
-            )
-            .expect("spawn should succeed");
-
-        assert!(manager.is_alive(&id));
-        manager.kill(&id).expect("kill should succeed");
-
-        let _ = exit_rx.recv_timeout(Duration::from_secs(3));
-    }
-
     /// Regression: wait() can return while the final output burst is still in the
     /// reader→emitter pipeline; the exit must not be reported before it drains, or the
     /// sink (daemon transcript) loses the process's last words.

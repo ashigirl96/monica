@@ -1,25 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { projectsAtom, selectedProjectAtom, trackIssueAtom } from "@/stores/workboard";
-import { pushErrorToast } from "@/stores/toast";
 import { cn } from "@/lib/utils";
 import { onPrSyncCompleted } from "@/commands/pull_request";
-
-function parseIssueInput(raw: string): { repo: string; number: number } | null {
-  const trimmed = raw.trim();
-
-  const urlMatch = trimmed.match(/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)/);
-  if (urlMatch) {
-    return { repo: urlMatch[1], number: Number(urlMatch[2]) };
-  }
-
-  const refMatch = trimmed.match(/^([^#]+)#(\d+)$/);
-  if (refMatch) {
-    return { repo: refMatch[1].trim(), number: Number(refMatch[2]) };
-  }
-
-  return null;
-}
 
 function TrackIssueButton() {
   const [open, setOpen] = useState(false);
@@ -30,19 +13,14 @@ function TrackIssueButton() {
   const trackIssue = useSetAtom(trackIssueAtom);
 
   const handleSubmit = useCallback(async () => {
-    const parsed = parseIssueInput(value);
-    if (!parsed) {
-      setError("owner/repo#123 or GitHub issue URL");
-      return;
-    }
     setLoading(true);
     setError(null);
     try {
-      await trackIssue(parsed);
+      await trackIssue(value);
       setValue("");
       setOpen(false);
     } catch (e) {
-      pushErrorToast(e instanceof Error ? e.message : "Failed to track issue");
+      setError(e instanceof Error ? e.message : "Failed to track issue");
     } finally {
       setLoading(false);
     }

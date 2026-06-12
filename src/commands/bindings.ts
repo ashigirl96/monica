@@ -43,12 +43,12 @@ export const commands = {
     typedError<TerminalStateSnapshot, string>(__TAURI_INVOKE("terminal_load_state")),
   terminalSaveState: (state: TerminalStateSnapshot) =>
     typedError<null, string>(__TAURI_INVOKE("terminal_save_state", { state })),
-  listTaskSummaries: () =>
-    typedError<TaskSummaryRow[], string>(__TAURI_INVOKE("list_task_summaries")),
+  listTaskSummaries: (project: string | null) =>
+    typedError<TaskSummaryRow[], string>(__TAURI_INVOKE("list_task_summaries", { project })),
   getBoardColumns: () => __TAURI_INVOKE<BoardColumn[]>("get_board_columns"),
   listProjects: () => typedError<ProjectEntry[], string>(__TAURI_INVOKE("list_projects")),
-  trackGithubIssue: (repo: string, number: number) =>
-    typedError<TrackIssueResult, string>(__TAURI_INVOKE("track_github_issue", { repo, number })),
+  trackGithubIssue: (input: string) =>
+    typedError<TrackIssueResult, string>(__TAURI_INVOKE("track_github_issue", { input })),
   listBenchRunspaceMap: () =>
     typedError<[string, string][], string>(__TAURI_INVOKE("list_bench_runspace_map")),
   taskShellEnv: (taskId: string) =>
@@ -166,12 +166,14 @@ export type TaskSummaryRow = {
   id: string;
   title: string;
   project: string | null;
-  github_issue_number: number;
+  github_issue_number: number | null;
   github_pull_requests: GithubPullRequestRef[];
   task_status: TaskStatus;
   task_run_status: TaskRunStatus | null;
   task_run_wait_reason: TaskRunWaitReason | null;
   status: DisplayStatus;
+  prepare_eligible: boolean;
+  run_eligible: boolean;
   branch: string | null;
   side_runs_running: number;
   side_runs_waiting_for_user: number;

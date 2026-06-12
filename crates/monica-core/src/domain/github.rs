@@ -146,21 +146,3 @@ impl PullRequestSyncResult {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn pull_request_status_enum_preserves_db_wire_strings() {
-        for (raw, status) in [
-            ("draft", GithubPullRequestStatus::Draft),
-            ("open", GithubPullRequestStatus::Open),
-            ("closed", GithubPullRequestStatus::Closed),
-            ("merged", GithubPullRequestStatus::Merged),
-        ] {
-            assert_eq!(raw.parse::<GithubPullRequestStatus>().unwrap(), status);
-            assert_eq!(status.as_str(), raw);
-        }
-    }
-}

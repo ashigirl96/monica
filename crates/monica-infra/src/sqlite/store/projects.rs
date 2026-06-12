@@ -2,25 +2,27 @@ use anyhow::{anyhow, Context, Result};
 use rusqlite::params;
 
 use crate::sqlite::SqliteStore;
-use monica_core::{Agent, PermissionMode, Project, Provider};
+use monica_core::{Agent, PermissionMode, Project, ProjectRepository, Provider};
 
 use super::{PROJECT_COLUMNS, SET_NOW};
 
-impl SqliteStore {
-    pub fn upsert_project(&self, p: &Project) -> Result<Project> {
+impl ProjectRepository for SqliteStore {
+    fn upsert_project(&self, p: &Project) -> Result<Project> {
         self.conn().execute(
-            "INSERT INTO projects
-               (id, name, provider, repo, path, default_branch, worktree_root,
-                setup_timeout_sec, agent_default, agent_permission_mode, hooks_claude)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-             ON CONFLICT(id) DO UPDATE SET
-               path = excluded.path,
-               default_branch = CASE
-                 WHEN projects.default_branch = 'main' AND excluded.default_branch != 'main'
-                 THEN excluded.default_branch
-                 ELSE projects.default_branch
-               END,
-               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')",
+            &format!(
+                "INSERT INTO projects
+                   (id, name, provider, repo, path, default_branch, worktree_root,
+                    setup_timeout_sec, agent_default, agent_permission_mode, hooks_claude)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                 ON CONFLICT(id) DO UPDATE SET
+                   path = excluded.path,
+                   default_branch = CASE
+                     WHEN projects.default_branch = 'main' AND excluded.default_branch != 'main'
+                     THEN excluded.default_branch
+                     ELSE projects.default_branch
+                   END,
+                   updated_at = {SET_NOW}"
+            ),
             params![
                 p.id,
                 p.name,
@@ -39,7 +41,7 @@ impl SqliteStore {
             .ok_or_else(|| anyhow!("project {} not found after upsert", p.id))
     }
 
-    pub fn get_project(&self, id: &str) -> Result<Option<Project>> {
+    fn get_project(&self, id: &str) -> Result<Option<Project>> {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {PROJECT_COLUMNS} FROM projects WHERE id = ?1"
         ))?;
@@ -50,7 +52,7 @@ impl SqliteStore {
         }
     }
 
-    pub fn list_projects(&self) -> Result<Vec<Project>> {
+    fn list_projects(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {PROJECT_COLUMNS} FROM projects ORDER BY id"
         ))?;
@@ -66,7 +68,7 @@ impl SqliteStore {
     /// `format!` is therefore always a static literal from a match arm, and the user-supplied
     /// `value` is always bound as `?1` — so this cannot be an injection vector. Enum and numeric
     /// fields are validated/coerced before being written.
-    pub fn set_project_field(&self, id: &str, key: &str, value: &str) -> Result<()> {
+    fn set_project_field(&self, id: &str, key: &str, value: &str) -> Result<()> {
         let key = normalize_project_field_key(key);
         let text_value = |value: &str| -> Result<()> { self.update_project_column(id, key, value) };
         match key {
@@ -109,9 +111,11 @@ impl SqliteStore {
         }
         Ok(())
     }
+}
 
+impl SqliteStore {
     /// Run `UPDATE projects SET <column> = ?1 ...`. `column` must be a static literal supplied by
-    /// [`Db::set_project_field`]; callers never pass user input here.
+    /// [`ProjectRepository::set_project_field`]; callers never pass user input here.
     fn update_project_column(
         &self,
         id: &str,

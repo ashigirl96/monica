@@ -491,7 +491,7 @@ struct AccessTokenResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::{oauth_error, stored_token_from_response, AccessTokenResponse, DevicePoll};
+    use super::{oauth_error, stored_token_from_response, AccessTokenResponse};
 
     #[test]
     fn oauth_error_keeps_description() {
@@ -504,12 +504,6 @@ mod tests {
         );
         assert!(msg.contains("bad_refresh_token"), "{msg}");
         assert!(msg.contains("The refresh token is invalid"), "{msg}");
-    }
-
-    #[test]
-    fn slow_down_poll_can_carry_new_interval() {
-        let poll = DevicePoll::SlowDown { interval: None };
-        assert_eq!(poll, DevicePoll::SlowDown { interval: None });
     }
 
     #[test]

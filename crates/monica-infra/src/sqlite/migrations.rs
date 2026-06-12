@@ -28,6 +28,7 @@ fn migration_steps() -> Vec<M<'static>> {
         M::up(V15),
         M::up(V16),
         M::up(V17),
+        M::up(V18),
     ]
 }
 
@@ -477,6 +478,12 @@ const V17: &str = r#"
     ALTER TABLE terminal_tabs DROP COLUMN is_active;
 "#;
 
+/// v18: drop external_ref_syncs; PR sync state lives in github_pull_request_ref_states (v8)
+/// and github_pull_request_branch_syncs (v9), and nothing ever read this table back.
+const V18: &str = r#"
+    DROP TABLE external_ref_syncs;
+"#;
+
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
     migrations()
@@ -487,7 +494,10 @@ pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use monica_core::{DisplayStatus, NewTaskRun, TaskRunStatus, TaskRunWaitReason, TaskStatus};
+    use monica_core::{
+        DisplayStatus, EventRepository, NewTaskRun, ProjectRepository, TaskRepository,
+        TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus,
+    };
     use rusqlite::params;
 
     fn temp_db_path(name: &str) -> std::path::PathBuf {
@@ -621,6 +631,56 @@ mod tests {
                 .unwrap();
             assert_eq!(has_column, 0, "{table}.is_active must be dropped");
         }
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// A database carrying v7-era external_ref_syncs rows must migrate through the v18 DROP
+    /// without error and end at the latest user_version.
+    #[test]
+    fn v18_drops_external_ref_syncs() {
+        let path = temp_db_path("v18");
+
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            let steps: Vec<M<'static>> = migration_steps().into_iter().take(17).collect();
+            Migrations::new(steps).to_latest(&mut conn).unwrap();
+            conn.execute(
+                "INSERT INTO tasks (id, kind, status, title) VALUES ('mon-1', 'dev', 'inbox', 't')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO external_refs (task_id, ref_type, repo, number)
+                 VALUES ('mon-1', 'github_issue', 'o/r', 1)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO external_ref_syncs (task_id, source_ref_id, target_ref_type)
+                 VALUES ('mon-1', 1, 'github_pull_request')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let db = crate::sqlite::SqliteStore::open_at(&path).unwrap();
+        let has_table: i64 = db
+            .conn()
+            .query_row(
+                "SELECT count(*) FROM sqlite_master
+                 WHERE type = 'table' AND name = 'external_ref_syncs'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_table, 0, "external_ref_syncs must be dropped");
+
+        let version: i64 = db
+            .conn()
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, migration_steps().len() as i64);
 
         std::fs::remove_file(&path).ok();
     }

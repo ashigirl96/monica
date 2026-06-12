@@ -8,7 +8,8 @@ pub mod interfaces;
 pub mod usecases;
 
 pub use domain::{
-    branch_name, is_safe_task_run_id, monica_number, parse_issue_ref, parse_owner_repo,
+    branch_name, is_safe_task_run_id, monica_number, parse_issue_input, parse_issue_ref,
+    parse_owner_repo,
     should_ignore_claude_event, status_for_claude_event, transition_for_claude_event,
     transition_is_protected, wait_reason_for_tool, worktree_path_for, Agent, DisplayStatus, Event,
     BoardColumn, ExternalRef, TaskBench, PrepareTaskResult, RunTaskResult, GithubAuthStatus, GithubDeviceFlow, GithubIssue, GithubPullRequest,

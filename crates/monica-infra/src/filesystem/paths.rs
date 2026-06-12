@@ -50,10 +50,3 @@ pub fn ptyd_pid_path() -> Result<PathBuf> {
 pub fn terminal_sessions_dir() -> Result<PathBuf> {
     Ok(base_dir()?.join("terminal-sessions"))
 }
-
-/// Legacy shared worktree root under Monica's base dir. New `issue run` callers should prefer a
-/// project-local default (`<project.path>/.worktrees`) and use this only when they explicitly want
-/// a Monica-managed shared location.
-pub fn worktrees_dir() -> Result<PathBuf> {
-    Ok(base_dir()?.join("worktrees"))
-}

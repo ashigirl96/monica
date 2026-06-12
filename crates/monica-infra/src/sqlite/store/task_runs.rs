@@ -2,30 +2,69 @@ use anyhow::{anyhow, Result};
 use rusqlite::params;
 
 use crate::sqlite::SqliteStore;
-use monica_core::{NewTaskRun, TaskRun, TaskRunObservation, TaskRunStatus, TaskStatus};
+use monica_core::{
+    NewTaskRun, TaskRun, TaskRunObservation, TaskRunRepository, TaskRunStatus, TaskStatus,
+};
 
 use super::{SET_NOW, TASK_RUN_COLUMNS};
 
-impl SqliteStore {
-    pub fn update_task_run_status(
-        &self,
-        task_run_id: &str,
-        task_id: &str,
-        status: TaskRunStatus,
-    ) -> Result<()> {
-        self.conn().execute(
-            &format!(
-                "UPDATE task_runs SET status = ?1, wait_reason = NULL, updated_at = {SET_NOW} \
-                 WHERE id = ?2 AND task_id = ?3"
-            ),
-            params![status.as_str(), task_run_id, task_id],
-        )?;
-        Ok(())
-    }
+/// Keep the owning task pinned to in_progress while a run progresses. Returns false when no
+/// row changed (deleted task, done task, or missing id).
+fn keep_task_in_progress(tx: &rusqlite::Transaction<'_>, task_id: &str) -> Result<bool> {
+    let affected = tx.execute(
+        &format!(
+            "UPDATE tasks SET status = ?1, updated_at = {SET_NOW}
+             WHERE id = ?2 AND deleted_at IS NULL AND status != ?3"
+        ),
+        params![
+            TaskStatus::InProgress.as_str(),
+            task_id,
+            TaskStatus::Done.as_str()
+        ],
+    )?;
+    Ok(affected > 0)
+}
 
+fn require_task_exists(tx: &rusqlite::Transaction<'_>, task_id: &str) -> Result<()> {
+    let exists: i64 = tx.query_row(
+        "SELECT count(*) FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
+        params![task_id],
+        |row| row.get(0),
+    )?;
+    if exists == 0 {
+        return Err(anyhow!("task not found: {task_id}"));
+    }
+    Ok(())
+}
+
+impl SqliteStore {
+    /// Sessions and tabs are pinned to runs by hook observations, so "latest" means the most
+    /// recent observation, not creation order: resuming an old session in a tab must beat a
+    /// newer-created run whose stamp is stale.
+    fn find_latest_observed_task_run(
+        &self,
+        filter: &str,
+        params: &[&dyn rusqlite::ToSql],
+    ) -> Result<Option<TaskRun>> {
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {TASK_RUN_COLUMNS} FROM task_runs
+             WHERE {filter}
+             ORDER BY last_event_at DESC, created_at DESC,
+                      CAST(SUBSTR(id, 5) AS INTEGER) DESC
+             LIMIT 1"
+        ))?;
+        let mut rows = stmt.query(params)?;
+        match rows.next()? {
+            Some(row) => Ok(Some(crate::sqlite::row::task_run_from_row(row)?)),
+            None => Ok(None),
+        }
+    }
+}
+
+impl TaskRunRepository for SqliteStore {
     /// Apply a hook observation to a task run. TaskRun is the lifecycle source of truth; the owning
     /// task is only kept in `in_progress` while a non-deleted, non-done run is being observed.
-    pub fn record_task_run_observation(
+    fn record_task_run_observation(
         &mut self,
         task_run_id: &str,
         observation: TaskRunObservation<'_>,
@@ -67,27 +106,19 @@ impl SqliteStore {
             return Err(anyhow!("task run not found: {task_run_id}"));
         }
         if status.is_some() {
-            tx.execute(
-                &format!(
-                    "UPDATE tasks
-                        SET status = ?1,
-                            updated_at = {SET_NOW}
-                      WHERE id = (SELECT task_id FROM task_runs WHERE id = ?2)
-                        AND status != ?3
-                        AND deleted_at IS NULL"
-                ),
-                params![
-                    TaskStatus::InProgress.as_str(),
-                    task_run_id,
-                    TaskStatus::Done.as_str()
-                ],
+            let task_id: String = tx.query_row(
+                "SELECT task_id FROM task_runs WHERE id = ?1",
+                params![task_run_id],
+                |row| row.get(0),
             )?;
+            // Hooks may observe runs of deleted tasks; that stays a silent no-op.
+            keep_task_in_progress(&tx, &task_id)?;
         }
         tx.commit()?;
         Ok(())
     }
 
-    pub fn start_task_run(&mut self, new: NewTaskRun) -> Result<TaskRun> {
+    fn start_task_run(&mut self, new: NewTaskRun) -> Result<TaskRun> {
         let agent = new.agent.map(|a| a.as_str());
         let setting_up = TaskRunStatus::SettingUp.as_str();
 
@@ -106,25 +137,8 @@ impl SqliteStore {
                 setting_up,
             ],
         )?;
-        let affected = tx.execute(
-            "UPDATE tasks
-               SET status = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-             WHERE id = ?2 AND deleted_at IS NULL AND status != ?3",
-            params![
-                TaskStatus::InProgress.as_str(),
-                new.task_id,
-                TaskStatus::Done.as_str()
-            ],
-        )?;
-        if affected == 0 {
-            let exists: i64 = tx.query_row(
-                "SELECT count(*) FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
-                params![new.task_id],
-                |row| row.get(0),
-            )?;
-            if exists == 0 {
-                return Err(anyhow!("task not found: {}", new.task_id));
-            }
+        if !keep_task_in_progress(&tx, &new.task_id)? {
+            require_task_exists(&tx, &new.task_id)?;
         }
 
         let run = {
@@ -143,7 +157,7 @@ impl SqliteStore {
 
     /// Settle a task run, updating both the run and its task in one transaction so the pair can
     /// never drift. Run failures stay at the run layer; the task remains `in_progress`.
-    pub fn finish_task_run(
+    fn finish_task_run(
         &mut self,
         task_run_id: &str,
         task_id: &str,
@@ -152,35 +166,20 @@ impl SqliteStore {
         let status = status.as_str();
         let tx = self.conn_mut().transaction()?;
         let run_affected = tx.execute(
-            "UPDATE task_runs
-               SET status = ?1,
-                   wait_reason = NULL,
-                   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-             WHERE id = ?2 AND task_id = ?3",
+            &format!(
+                "UPDATE task_runs
+                   SET status = ?1,
+                       wait_reason = NULL,
+                       updated_at = {SET_NOW}
+                 WHERE id = ?2 AND task_id = ?3"
+            ),
             params![status, task_run_id, task_id],
         )?;
         if run_affected == 0 {
             return Err(anyhow!("task run not found: {task_run_id}"));
         }
-        let item_affected = tx.execute(
-            "UPDATE tasks
-               SET status = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-             WHERE id = ?2 AND deleted_at IS NULL AND status != ?3",
-            params![
-                TaskStatus::InProgress.as_str(),
-                task_id,
-                TaskStatus::Done.as_str()
-            ],
-        )?;
-        if item_affected == 0 {
-            let exists: i64 = tx.query_row(
-                "SELECT count(*) FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
-                params![task_id],
-                |row| row.get(0),
-            )?;
-            if exists == 0 {
-                return Err(anyhow!("task not found: {task_id}"));
-            }
+        if !keep_task_in_progress(&tx, task_id)? {
+            require_task_exists(&tx, task_id)?;
         }
         tx.commit()?;
         Ok(())
@@ -188,11 +187,13 @@ impl SqliteStore {
 
     /// Recording `settings_path` is not a status transition, so it stays out of `finish_task_run` and
     /// runs as a single UPDATE on its own.
-    pub fn set_task_run_settings_path(&self, task_run_id: &str, settings_path: &str) -> Result<()> {
+    fn set_task_run_settings_path(&self, task_run_id: &str, settings_path: &str) -> Result<()> {
         let affected = self.conn().execute(
-            "UPDATE task_runs
-               SET settings_path = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-             WHERE id = ?2",
+            &format!(
+                "UPDATE task_runs
+                   SET settings_path = ?1, updated_at = {SET_NOW}
+                 WHERE id = ?2"
+            ),
             params![settings_path, task_run_id],
         )?;
         if affected == 0 {
@@ -201,7 +202,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()> {
+    fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()> {
         let affected = self.conn().execute(
             &format!(
                 "UPDATE task_runs
@@ -216,7 +217,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn get_task_run(&self, id: &str) -> Result<Option<TaskRun>> {
+    fn get_task_run(&self, id: &str) -> Result<Option<TaskRun>> {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {TASK_RUN_COLUMNS} FROM task_runs WHERE id = ?1"
         ))?;
@@ -229,7 +230,7 @@ impl SqliteStore {
 
     /// Latest run observed for a Claude session. Scoped to a task so an (unlikely) session id
     /// collision across tasks cannot cross-link runs.
-    pub fn find_task_run_by_session(
+    fn find_task_run_by_session(
         &self,
         task_id: &str,
         provider_session_id: &str,
@@ -243,33 +244,11 @@ impl SqliteStore {
     /// Latest run whose Claude session was observed in the given Workbench tab. Restarting
     /// `claude` in the same tab leaves stale tab ids on older runs, so the most recently
     /// observed run wins.
-    pub fn find_task_run_by_terminal_tab(&self, terminal_tab_id: &str) -> Result<Option<TaskRun>> {
+    fn find_task_run_by_terminal_tab(&self, terminal_tab_id: &str) -> Result<Option<TaskRun>> {
         self.find_latest_observed_task_run("terminal_tab_id = ?1", params![terminal_tab_id])
     }
 
-    /// Sessions and tabs are pinned to runs by hook observations, so "latest" means the most
-    /// recent observation, not creation order: resuming an old session in a tab must beat a
-    /// newer-created run whose stamp is stale.
-    fn find_latest_observed_task_run(
-        &self,
-        filter: &str,
-        params: &[&dyn rusqlite::ToSql],
-    ) -> Result<Option<TaskRun>> {
-        let mut stmt = self.conn().prepare(&format!(
-            "SELECT {TASK_RUN_COLUMNS} FROM task_runs
-             WHERE {filter}
-             ORDER BY last_event_at DESC, created_at DESC,
-                      CAST(SUBSTR(id, 5) AS INTEGER) DESC
-             LIMIT 1"
-        ))?;
-        let mut rows = stmt.query(params)?;
-        match rows.next()? {
-            Some(row) => Ok(Some(crate::sqlite::row::task_run_from_row(row)?)),
-            None => Ok(None),
-        }
-    }
-
-    pub fn list_task_runs_for_task(&self, task_id: &str) -> Result<Vec<TaskRun>> {
+    fn list_task_runs_for_task(&self, task_id: &str) -> Result<Vec<TaskRun>> {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {TASK_RUN_COLUMNS} FROM task_runs
              WHERE task_id = ?1

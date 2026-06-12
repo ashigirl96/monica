@@ -1,6 +1,5 @@
 import { atom, type Getter } from "jotai";
-import type { DisplayStatus } from "@/commands/task";
-import { PREPARE_ELIGIBLE, RUN_ELIGIBLE } from "@/features/work-board/model";
+import type { TaskSummaryRow } from "@/commands/task";
 import {
   columnTasksAtom,
   taskSummariesAtom,
@@ -41,9 +40,9 @@ export const MENU_ITEMS: ReadonlyArray<{ id: MenuItemId; label: string; hint: st
 
 const DELETE_INDEX = MENU_ITEMS.findIndex((item) => item.id === "delete");
 
-export function isItemDisabled(id: MenuItemId, status: DisplayStatus): boolean {
-  if (id === "prepare") return !PREPARE_ELIGIBLE.has(status);
-  if (id === "run") return !RUN_ELIGIBLE.has(status);
+export function isItemDisabled(id: MenuItemId, task: TaskSummaryRow): boolean {
+  if (id === "prepare") return !task.prepare_eligible;
+  if (id === "run") return !task.run_eligible;
   return false;
 }
 
@@ -136,7 +135,7 @@ export const openMenuAtom = atom(null, (get, set, anchor: MenuAnchor) => {
   if (focused === null) return;
   const task = taskById(get, focused);
   if (!task) return;
-  const itemIndex = MENU_ITEMS.findIndex((item) => !isItemDisabled(item.id, task.status));
+  const itemIndex = MENU_ITEMS.findIndex((item) => !isItemDisabled(item.id, task));
   if (itemIndex === -1) return;
   set(menuAtom, { taskId: focused, anchor, itemIndex, confirmingDelete: false });
 });
@@ -148,7 +147,7 @@ export const moveMenuItemAtom = atom(null, (get, set, dir: "up" | "down") => {
   if (!task) return;
   const step = dir === "up" ? -1 : 1;
   for (let i = menu.itemIndex + step; i >= 0 && i < MENU_ITEMS.length; i += step) {
-    if (!isItemDisabled(MENU_ITEMS[i].id, task.status)) {
+    if (!isItemDisabled(MENU_ITEMS[i].id, task)) {
       set(menuAtom, { ...menu, itemIndex: i, confirmingDelete: false });
       return;
     }
@@ -159,7 +158,7 @@ export const setMenuItemIndexAtom = atom(null, (get, set, itemIndex: number) => 
   const menu = get(menuAtom);
   if (menu === null || menu.itemIndex === itemIndex) return;
   const task = taskById(get, menu.taskId);
-  if (!task || isItemDisabled(MENU_ITEMS[itemIndex].id, task.status)) return;
+  if (!task || isItemDisabled(MENU_ITEMS[itemIndex].id, task)) return;
   set(menuAtom, { ...menu, itemIndex, confirmingDelete: false });
 });
 
@@ -171,7 +170,7 @@ export const runDirectActionAtom = atom(null, (get, set, id: Exclude<MenuItemId,
   const taskId = menu?.taskId ?? get(focusedTaskIdAtom);
   if (taskId === null) return;
   const task = taskById(get, taskId);
-  if (!task || isItemDisabled(id, task.status)) return;
+  if (!task || isItemDisabled(id, task)) return;
   set(menuAtom, null);
   if (id === "prepare") void set(prepareTaskAtom, taskId);
   else if (id === "run") void set(runTaskAtom, taskId);

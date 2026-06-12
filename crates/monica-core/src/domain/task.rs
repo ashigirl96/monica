@@ -60,13 +60,15 @@ pub struct TaskSummaryRow {
     pub id: String,
     pub title: String,
     pub project: Option<String>,
-    #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
+    #[cfg_attr(feature = "specta", specta(type = Option<specta_typescript::Number>))]
     pub github_issue_number: Option<i64>,
     pub github_pull_requests: Vec<GithubPullRequestRef>,
     pub task_status: TaskStatus,
     pub task_run_status: Option<TaskRunStatus>,
     pub task_run_wait_reason: Option<TaskRunWaitReason>,
     pub status: DisplayStatus,
+    pub prepare_eligible: bool,
+    pub run_eligible: bool,
     pub branch: Option<String>,
     #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
     pub side_runs_running: i64,

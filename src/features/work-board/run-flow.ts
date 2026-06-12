@@ -5,7 +5,6 @@ import {
   runTask,
   taskShellEnv,
 } from "@/commands/task";
-import { PREPARE_ELIGIBLE } from "./model";
 
 export type RunFlowResult = {
   runspaceId: string;
@@ -80,7 +79,7 @@ export async function runTaskFlow(taskId: string): Promise<RunFlowResult | null>
     const summaries = await listTaskSummaries();
     const task = summaries.find((t) => t.id === taskId);
 
-    if (task && PREPARE_ELIGIBLE.has(task.status)) {
+    if (task?.prepare_eligible) {
       const waiter = waitForPreparedOrFailed(taskId);
       try {
         const prep = await prepareTask(taskId);

@@ -3,16 +3,16 @@ use std::io::{self, Write};
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_core::{
-    parse_issue_ref, parse_owner_repo, DisplayStatus, Task, TaskStatus, TaskSummaryRow,
+    parse_issue_input, parse_owner_repo, DisplayStatus, Task, TaskStatus, TaskSummaryRow,
     TrackGithubIssueInput,
 };
 use monica_infra::Runtime;
 
 #[derive(Subcommand)]
 pub enum IssueCommand {
-    /// Track an existing GitHub issue (owner/repo#123) as a Monica task
+    /// Track an existing GitHub issue (owner/repo#123 or issue URL) as a Monica task
     Track {
-        /// owner/repo#123
+        /// owner/repo#123 or GitHub issue URL
         target: String,
     },
     /// Show tracked tasks and their latest run state
@@ -52,7 +52,7 @@ pub async fn run(cmd: IssueCommand) -> Result<()> {
 }
 
 async fn track_command(runtime: &mut Runtime, target: &str) -> Result<()> {
-    let (repo, number) = parse_issue_ref(target)?;
+    let (repo, number) = parse_issue_input(target)?;
     let report = monica_core::track_github_issue(
         &mut runtime.repositories,
         &runtime.github,
@@ -174,33 +174,7 @@ fn render_status_table(rows: &[TaskSummaryRow]) -> String {
             display_opt(row.branch.as_deref()),
         ]);
     }
-    render_table(&table)
-}
-
-fn render_table(rows: &[Vec<String>]) -> String {
-    let cols = rows.iter().map(|row| row.len()).max().unwrap_or(0);
-    if cols == 0 {
-        return String::new();
-    }
-    let mut widths = vec![0usize; cols];
-    for row in rows {
-        for (i, cell) in row.iter().enumerate() {
-            widths[i] = widths[i].max(cell.chars().count());
-        }
-    }
-
-    let mut out = String::new();
-    for row in rows {
-        let line = row
-            .iter()
-            .enumerate()
-            .map(|(i, cell)| format!("{cell:<width$}", width = widths[i]))
-            .collect::<Vec<_>>()
-            .join("  ");
-        out.push_str(line.trim_end());
-        out.push('\n');
-    }
-    out
+    crate::table::render_table(&table)
 }
 
 fn display_opt(value: Option<&str>) -> String {
@@ -231,17 +205,6 @@ mod tests {
     }
 
     #[test]
-    fn is_yes_accepts_only_explicit_yes() {
-        assert!(is_yes("y"));
-        assert!(is_yes("Y"));
-        assert!(is_yes("yes"));
-        assert!(is_yes("YES"));
-        assert!(!is_yes(""));
-        assert!(!is_yes("n"));
-        assert!(!is_yes("yeah"));
-    }
-
-    #[test]
     fn render_status_table_formats_rows_and_empty_state() {
         let rows = vec![TaskSummaryRow {
             id: "MON-1".to_string(),
@@ -253,6 +216,8 @@ mod tests {
             task_run_status: None,
             task_run_wait_reason: None,
             status: DisplayStatus::Ready,
+            prepare_eligible: true,
+            run_eligible: true,
             branch: Some("monica/gh-17".to_string()),
             side_runs_running: 0,
             side_runs_waiting_for_user: 0,
