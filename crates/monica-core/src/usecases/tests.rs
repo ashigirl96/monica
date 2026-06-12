@@ -737,8 +737,8 @@ fn hook_ctx_in_tab<'a>(
     }
 }
 
-/// A task with a primary run claimed by `sess-1` (the post-Run-button steady state).
-fn task_with_running_primary(repos: &mut FakeRepos, artifacts: &FakeArtifacts) -> (String, String) {
+/// A task whose primary run is Prepared but not yet claimed by any session.
+fn task_with_prepared_primary(repos: &mut FakeRepos) -> (String, String) {
     let task_id = repos.insert_task_for_run(None);
     let run = repos
         .start_task_run(NewTaskRun {
@@ -752,14 +752,20 @@ fn task_with_running_primary(repos: &mut FakeRepos, artifacts: &FakeArtifacts) -
         .finish_task_run(&run.id, &task_id, TaskRunStatus::Prepared)
         .unwrap();
     repos.set_primary_task_run(&task_id, &run.id).unwrap();
+    (task_id, run.id)
+}
+
+/// A task with a primary run claimed by `sess-1` (the post-Run-button steady state).
+fn task_with_running_primary(repos: &mut FakeRepos, artifacts: &FakeArtifacts) -> (String, String) {
+    let (task_id, run_id) = task_with_prepared_primary(repos);
     record_claude_hook(
         repos,
         artifacts,
-        hook_ctx(&task_id, Some(&run.id)),
+        hook_ctx(&task_id, Some(&run_id)),
         r#"{"hook_event_name":"SessionStart","session_id":"sess-1"}"#,
     )
     .unwrap();
-    (task_id, run.id)
+    (task_id, run_id)
 }
 
 #[test]
@@ -793,19 +799,7 @@ fn record_claude_hook_records_waiting_transition_and_artifact() {
 #[test]
 fn record_claude_hook_claims_prepared_primary_run_without_run_id() {
     let mut repos = FakeRepos::default();
-    let task_id = repos.insert_task_for_run(None);
-    let run = repos
-        .start_task_run(NewTaskRun {
-            task_id: task_id.clone(),
-            agent: Some(Agent::Claude),
-            branch: None,
-            worktree_path: None,
-        })
-        .unwrap();
-    repos
-        .finish_task_run(&run.id, &task_id, TaskRunStatus::Prepared)
-        .unwrap();
-    repos.set_primary_task_run(&task_id, &run.id).unwrap();
+    let (task_id, run_id) = task_with_prepared_primary(&mut repos);
     let artifacts = FakeArtifacts::default();
 
     let report = record_claude_hook(
@@ -819,7 +813,7 @@ fn record_claude_hook_claims_prepared_primary_run_without_run_id() {
     assert!(!report.task_run_created);
     assert_eq!(report.task_run_status, Some(TaskRunStatus::Running));
     assert_eq!(
-        repos.get_task_run(&run.id).unwrap().unwrap().status,
+        repos.get_task_run(&run_id).unwrap().unwrap().status,
         TaskRunStatus::Running
     );
 
@@ -838,19 +832,7 @@ fn record_claude_hook_claims_prepared_primary_run_without_run_id() {
 #[test]
 fn record_claude_hook_does_not_claim_prepared_primary_on_stray_stop() {
     let mut repos = FakeRepos::default();
-    let task_id = repos.insert_task_for_run(None);
-    let run = repos
-        .start_task_run(NewTaskRun {
-            task_id: task_id.clone(),
-            agent: Some(Agent::Claude),
-            branch: None,
-            worktree_path: None,
-        })
-        .unwrap();
-    repos
-        .finish_task_run(&run.id, &task_id, TaskRunStatus::Prepared)
-        .unwrap();
-    repos.set_primary_task_run(&task_id, &run.id).unwrap();
+    let (task_id, run_id) = task_with_prepared_primary(&mut repos);
     let artifacts = FakeArtifacts::default();
 
     let report = record_claude_hook(
@@ -863,7 +845,7 @@ fn record_claude_hook_does_not_claim_prepared_primary_on_stray_stop() {
     assert!(!report.task_run_linked);
     assert!(!report.task_run_created);
     assert!(report.event_recorded);
-    let primary = repos.get_task_run(&run.id).unwrap().unwrap();
+    let primary = repos.get_task_run(&run_id).unwrap().unwrap();
     assert_eq!(primary.status, TaskRunStatus::Prepared);
     assert_eq!(primary.provider_session_id, None);
 }

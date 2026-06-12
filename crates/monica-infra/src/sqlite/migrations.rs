@@ -512,6 +512,12 @@ mod tests {
         path
     }
 
+    /// Apply the first `n` migrations, staging the historical schema a compat test starts from.
+    fn stage_through(conn: &mut Connection, n: usize) {
+        let steps: Vec<M<'static>> = migration_steps().into_iter().take(n).collect();
+        Migrations::new(steps).to_latest(conn).unwrap();
+    }
+
     #[test]
     fn migration_set_is_valid() {
         migrations().validate().expect("migrations should validate");
@@ -527,9 +533,7 @@ mod tests {
 
         {
             let mut conn = Connection::open(&path).unwrap();
-            Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3)])
-                .to_latest(&mut conn)
-                .unwrap();
+            stage_through(&mut conn, 3);
             conn.execute(
                 "INSERT INTO projects (id, name, repo, path, branch_template)
                  VALUES ('o/r', 'r', 'o/r', '/tmp/r', 'monica/{slug}')",
@@ -573,26 +577,7 @@ mod tests {
 
         {
             let mut conn = Connection::open(&path).unwrap();
-            Migrations::new(vec![
-                M::up(V1),
-                M::up(V2),
-                M::up(V3),
-                M::up(V4),
-                M::up(V5),
-                M::up(V6),
-                M::up(V7),
-                M::up(V8),
-                M::up(V9),
-                M::up(V10),
-                M::up(V11),
-                M::up(V12),
-                M::up(V13),
-                M::up(V14),
-                M::up(V15),
-                M::up(V16),
-            ])
-            .to_latest(&mut conn)
-            .unwrap();
+            stage_through(&mut conn, 16);
             conn.execute(
                 "INSERT INTO terminal_runspaces (id, sort_order, is_active)
                  VALUES ('rs-1', 0, 1)",
@@ -643,8 +628,7 @@ mod tests {
 
         {
             let mut conn = Connection::open(&path).unwrap();
-            let steps: Vec<M<'static>> = migration_steps().into_iter().take(17).collect();
-            Migrations::new(steps).to_latest(&mut conn).unwrap();
+            stage_through(&mut conn, 17);
             conn.execute(
                 "INSERT INTO tasks (id, kind, status, title) VALUES ('mon-1', 'dev', 'inbox', 't')",
                 [],
@@ -693,25 +677,7 @@ mod tests {
 
         {
             let mut conn = Connection::open(&path).unwrap();
-            Migrations::new(vec![
-                M::up(V1),
-                M::up(V2),
-                M::up(V3),
-                M::up(V4),
-                M::up(V5),
-                M::up(V6),
-                M::up(V7),
-                M::up(V8),
-                M::up(V9),
-                M::up(V10),
-                M::up(V11),
-                M::up(V12),
-                M::up(V13),
-                M::up(V14),
-                M::up(V15),
-            ])
-            .to_latest(&mut conn)
-            .unwrap();
+            stage_through(&mut conn, 15);
             conn.execute(
                 "INSERT INTO terminal_runspaces (id, sort_order, is_active)
                  VALUES ('rs-1', 0, 1)",
@@ -752,9 +718,7 @@ mod tests {
 
         {
             let mut conn = Connection::open(&path).unwrap();
-            Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3), M::up(V4)])
-                .to_latest(&mut conn)
-                .unwrap();
+            stage_through(&mut conn, 4);
 
             for status in ["setting_up", "running", "stopped", "failed", "ready"] {
                 let id = format!("MON-{}", status.replace('_', "-"));
@@ -900,9 +864,7 @@ mod tests {
 
         {
             let mut conn = Connection::open(&path).unwrap();
-            Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3), M::up(V4), M::up(V5)])
-                .to_latest(&mut conn)
-                .unwrap();
+            stage_through(&mut conn, 5);
 
             for (id, status) in [
                 ("MON-wait", "need_approval"),
