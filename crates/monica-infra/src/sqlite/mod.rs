@@ -6,7 +6,6 @@ use rusqlite::Connection;
 use crate::filesystem::paths;
 
 mod migrations;
-mod repositories;
 mod row;
 mod store;
 #[cfg(test)]

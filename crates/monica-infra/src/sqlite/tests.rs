@@ -1,8 +1,9 @@
 use monica_core::{
     Agent, DisplayStatus, ExternalRef, GithubPullRequest, GithubPullRequestStatus, NewTask,
-    NewTaskRun, NewTerminalSession, Project, PullRequestBranchSyncCandidate, RefType, TaskKind,
-    TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus, TerminalSessionKind,
-    TerminalSessionStatus, TerminalSessionUpdate,
+    NewTaskRun, NewTerminalSession, Project, ProjectRepository, PullRequestBranchSyncCandidate,
+    RefType, TaskKind, TaskRepository, TaskRunObservation, TaskRunRepository, TaskRunStatus,
+    TaskRunWaitReason, TaskStatus, TerminalSessionKind, TerminalSessionStatus,
+    TerminalSessionUpdate,
 };
 use rusqlite::params;
 use serde_json::json;

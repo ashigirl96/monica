@@ -17,6 +17,30 @@ pub(crate) fn home_dir() -> Option<String> {
     std::env::var("HOME").ok()
 }
 
+/// Get-or-create the task's bench runspace. Returns `(runspace_id, cwd, created)`. When the
+/// bench already exists its cwd is kept, unless `pin_cwd` forces it to `desired_cwd` (used when
+/// a run's worktree becomes the only sensible working directory).
+pub(crate) fn ensure_bench<R>(
+    repos: &mut R,
+    task_id: &str,
+    desired_cwd: &str,
+    pin_cwd: bool,
+) -> Result<(String, String, bool)>
+where
+    R: BenchRepository,
+{
+    if let Some((runspace_id, cwd)) = repos.get_bench_for_task(task_id)? {
+        if pin_cwd {
+            repos.update_bench_cwd(task_id, desired_cwd)?;
+            return Ok((runspace_id, desired_cwd.to_string(), false));
+        }
+        return Ok((runspace_id, cwd, false));
+    }
+    let runspace_id = bench_runspace_id(task_id);
+    repos.create_bench(task_id, &runspace_id, desired_cwd)?;
+    Ok((runspace_id, desired_cwd.to_string(), true))
+}
+
 /// Recompute the shell env for a task-connected runspace. Fails soft (empty vec) when the task
 /// has no project or artifact generation fails, so terminals still open without Monica context.
 pub fn task_shell_env<R, A>(
@@ -67,27 +91,15 @@ where
     let (task, project) = load_task_and_optional_project(repos, task_id)?;
     let env = shell_env_for(artifacts, &task, project.as_ref());
 
-    if let Some((runspace_id, cwd)) = repos.get_bench_for_task(task_id)? {
-        return Ok(TaskBench {
-            task_id: task_id.to_string(),
-            runspace_id,
-            cwd,
-            created: false,
-            env,
-        });
-    }
-
-    let cwd = resolve_worktree_cwd(repos, &task)
+    let desired_cwd = resolve_worktree_cwd(repos, &task)
         .unwrap_or_else(|| default_bench_cwd(project.as_ref(), home_dir().as_deref()));
-
-    let runspace_id = bench_runspace_id(task_id);
-    repos.create_bench(task_id, &runspace_id, &cwd)?;
+    let (runspace_id, cwd, created) = ensure_bench(repos, task_id, &desired_cwd, false)?;
 
     Ok(TaskBench {
         task_id: task_id.to_string(),
         runspace_id,
         cwd,
-        created: true,
+        created,
         env,
     })
 }

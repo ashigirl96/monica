@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 
-use crate::domain::{bench_runspace_id, branch_name, monica_number, worktree_path_for};
+use crate::domain::{branch_name, monica_number, worktree_path_for};
 use crate::interfaces::{
     BenchRepository, GitGateway, ProjectRepository, RunArtifacts, SetupEnv, SetupOutcome,
     SetupRunner, TaskRepository, TaskRunRepository,
@@ -75,13 +75,11 @@ where
 
     repos.set_primary_task_run(task_id, &run.id)?;
 
-    if repos.get_bench_for_task(task_id)?.is_none() {
-        let cwd = super::open_bench::default_bench_cwd(
-            Some(&project),
-            super::open_bench::home_dir().as_deref(),
-        );
-        repos.create_bench(task_id, &bench_runspace_id(task_id), &cwd)?;
-    }
+    let cwd = super::open_bench::default_bench_cwd(
+        Some(&project),
+        super::open_bench::home_dir().as_deref(),
+    );
+    super::open_bench::ensure_bench(repos, task_id, &cwd, false)?;
 
     Ok(PrepareTaskResult {
         task_id: task_id.to_string(),
@@ -252,17 +250,7 @@ where
     let shell = artifacts.prepare_task_shell_env(task_id, &project, Some(&primary_id))?;
     repos.set_task_run_settings_path(&primary_id, &shell.settings_path)?;
 
-    let runspace_id = match repos.get_bench_for_task(task_id)? {
-        Some((runspace_id, _)) => {
-            repos.update_bench_cwd(task_id, &worktree_str)?;
-            runspace_id
-        }
-        None => {
-            let runspace_id = bench_runspace_id(task_id);
-            repos.create_bench(task_id, &runspace_id, &worktree_str)?;
-            runspace_id
-        }
-    };
+    let (runspace_id, _, _) = super::open_bench::ensure_bench(repos, task_id, &worktree_str, true)?;
 
     Ok(crate::RunTaskResult {
         task_id: task_id.to_string(),

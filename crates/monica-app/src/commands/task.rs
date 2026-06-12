@@ -29,9 +29,10 @@ pub struct TaskRunStatusChanged {
 
 #[tauri::command]
 #[specta::specta]
-pub fn list_task_summaries() -> Result<Vec<TaskSummaryRow>, String> {
+pub fn list_task_summaries(project: Option<String>) -> Result<Vec<TaskSummaryRow>, String> {
     let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_core::list_task_summaries(&runtime.repositories, None, None).map_err(|e| e.to_string())
+    monica_core::list_task_summaries(&runtime.repositories, None, project.as_deref())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -57,12 +58,10 @@ pub fn list_projects() -> Result<Vec<ProjectEntry>, String> {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn track_github_issue(repo: String, number: i32) -> Result<TrackIssueResult, String> {
+pub async fn track_github_issue(input: String) -> Result<TrackIssueResult, String> {
+    let (repo, number) = monica_core::parse_issue_input(&input).map_err(|e| e.to_string())?;
     let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    let input = TrackGithubIssueInput {
-        repo,
-        number: i64::from(number),
-    };
+    let input = TrackGithubIssueInput { repo, number };
     let report =
         monica_core::track_github_issue(&mut runtime.repositories, &runtime.github, input)
             .await

@@ -7,13 +7,14 @@ use serde_json::{json, Value};
 
 use crate::interfaces::{
     AuthGateway, BenchRepository, BoxFuture, Clock, EventRepository, GitGateway, GithubGateway,
-    ProjectRepository, RunArtifacts, TaskRepository, TaskRunRepository,
+    ProjectRepository, RunArtifacts, SetupEnv, SetupOutcome, SetupRunner, TaskRepository,
+    TaskRunRepository,
 };
 use crate::{
-    begin_github_device_flow, delete_issue, github_auth_status, logout_github,
-    make_main_by_terminal_tab, open_bench, primary_terminal_tab, record_claude_hook,
-    register_project_with_default_branch, sync_next_pull_request, track_github_issue, HookContext,
-    MakeMainOutcome,
+    begin_github_device_flow, delete_issue, execute_run, github_auth_status, logout_github,
+    make_main_by_terminal_tab, open_bench, prepare_claude_for_run, primary_terminal_tab,
+    record_claude_hook, register_project_with_default_branch, start_run, sync_next_pull_request,
+    track_github_issue, HookContext, MakeMainOutcome, RefType,
     wait_for_github_device_flow, Agent, DisplayStatus, Event, ExternalRef, GithubAuthStatus,
     GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef,
     GithubPullRequestStatus, NewTask, NewTaskRun, Project, PullRequestBranchSyncCandidate,
@@ -131,20 +132,25 @@ impl TaskRepository for FakeRepos {
             .borrow()
             .tasks
             .values()
-            .map(|task| TaskSummaryRow {
-                id: task.id.clone(),
-                title: task.title.clone(),
-                project: task.project_id.clone(),
-                github_issue_number: None,
-                github_pull_requests: Vec::<GithubPullRequestRef>::new(),
-                task_status: task.status,
-                task_run_status: None,
-                task_run_wait_reason: None,
-                status: DisplayStatus::from_task_and_run(task.status, None),
-                branch: None,
-                side_runs_running: 0,
-                side_runs_waiting_for_user: 0,
-                side_runs_failed: 0,
+            .map(|task| {
+                let display = DisplayStatus::from_task_and_run(task.status, None);
+                TaskSummaryRow {
+                    id: task.id.clone(),
+                    title: task.title.clone(),
+                    project: task.project_id.clone(),
+                    github_issue_number: None,
+                    github_pull_requests: Vec::<GithubPullRequestRef>::new(),
+                    task_status: task.status,
+                    task_run_status: None,
+                    task_run_wait_reason: None,
+                    status: display,
+                    prepare_eligible: display.prepare_eligible(),
+                    run_eligible: display.run_eligible(),
+                    branch: None,
+                    side_runs_running: 0,
+                    side_runs_waiting_for_user: 0,
+                    side_runs_failed: 0,
+                }
             })
             .filter(|row| status.is_none_or(|status| status == row.status))
             .collect();
@@ -731,8 +737,8 @@ fn hook_ctx_in_tab<'a>(
     }
 }
 
-/// A task with a primary run claimed by `sess-1` (the post-Run-button steady state).
-fn task_with_running_primary(repos: &mut FakeRepos, artifacts: &FakeArtifacts) -> (String, String) {
+/// A task whose primary run is Prepared but not yet claimed by any session.
+fn task_with_prepared_primary(repos: &mut FakeRepos) -> (String, String) {
     let task_id = repos.insert_task_for_run(None);
     let run = repos
         .start_task_run(NewTaskRun {
@@ -746,14 +752,20 @@ fn task_with_running_primary(repos: &mut FakeRepos, artifacts: &FakeArtifacts) -
         .finish_task_run(&run.id, &task_id, TaskRunStatus::Prepared)
         .unwrap();
     repos.set_primary_task_run(&task_id, &run.id).unwrap();
+    (task_id, run.id)
+}
+
+/// A task with a primary run claimed by `sess-1` (the post-Run-button steady state).
+fn task_with_running_primary(repos: &mut FakeRepos, artifacts: &FakeArtifacts) -> (String, String) {
+    let (task_id, run_id) = task_with_prepared_primary(repos);
     record_claude_hook(
         repos,
         artifacts,
-        hook_ctx(&task_id, Some(&run.id)),
+        hook_ctx(&task_id, Some(&run_id)),
         r#"{"hook_event_name":"SessionStart","session_id":"sess-1"}"#,
     )
     .unwrap();
-    (task_id, run.id)
+    (task_id, run_id)
 }
 
 #[test]
@@ -787,19 +799,7 @@ fn record_claude_hook_records_waiting_transition_and_artifact() {
 #[test]
 fn record_claude_hook_claims_prepared_primary_run_without_run_id() {
     let mut repos = FakeRepos::default();
-    let task_id = repos.insert_task_for_run(None);
-    let run = repos
-        .start_task_run(NewTaskRun {
-            task_id: task_id.clone(),
-            agent: Some(Agent::Claude),
-            branch: None,
-            worktree_path: None,
-        })
-        .unwrap();
-    repos
-        .finish_task_run(&run.id, &task_id, TaskRunStatus::Prepared)
-        .unwrap();
-    repos.set_primary_task_run(&task_id, &run.id).unwrap();
+    let (task_id, run_id) = task_with_prepared_primary(&mut repos);
     let artifacts = FakeArtifacts::default();
 
     let report = record_claude_hook(
@@ -813,7 +813,7 @@ fn record_claude_hook_claims_prepared_primary_run_without_run_id() {
     assert!(!report.task_run_created);
     assert_eq!(report.task_run_status, Some(TaskRunStatus::Running));
     assert_eq!(
-        repos.get_task_run(&run.id).unwrap().unwrap().status,
+        repos.get_task_run(&run_id).unwrap().unwrap().status,
         TaskRunStatus::Running
     );
 
@@ -832,19 +832,7 @@ fn record_claude_hook_claims_prepared_primary_run_without_run_id() {
 #[test]
 fn record_claude_hook_does_not_claim_prepared_primary_on_stray_stop() {
     let mut repos = FakeRepos::default();
-    let task_id = repos.insert_task_for_run(None);
-    let run = repos
-        .start_task_run(NewTaskRun {
-            task_id: task_id.clone(),
-            agent: Some(Agent::Claude),
-            branch: None,
-            worktree_path: None,
-        })
-        .unwrap();
-    repos
-        .finish_task_run(&run.id, &task_id, TaskRunStatus::Prepared)
-        .unwrap();
-    repos.set_primary_task_run(&task_id, &run.id).unwrap();
+    let (task_id, run_id) = task_with_prepared_primary(&mut repos);
     let artifacts = FakeArtifacts::default();
 
     let report = record_claude_hook(
@@ -857,7 +845,7 @@ fn record_claude_hook_does_not_claim_prepared_primary_on_stray_stop() {
     assert!(!report.task_run_linked);
     assert!(!report.task_run_created);
     assert!(report.event_recorded);
-    let primary = repos.get_task_run(&run.id).unwrap().unwrap();
+    let primary = repos.get_task_run(&run_id).unwrap().unwrap();
     assert_eq!(primary.status, TaskRunStatus::Prepared);
     assert_eq!(primary.provider_session_id, None);
 }
@@ -1455,4 +1443,191 @@ fn open_bench_creates_bench_on_first_call_and_reuses_on_second() {
     let bench2: TaskBench = open_bench(&mut repos, &artifacts, &task_id).unwrap();
     assert!(!bench2.created);
     assert_eq!(bench2.runspace_id, bench.runspace_id);
+}
+
+
+#[derive(Default)]
+struct FakeSetupRunner {
+    outcome: RefCell<Option<SetupOutcome>>,
+}
+
+impl SetupRunner for FakeSetupRunner {
+    fn run_setup_script(
+        &self,
+        _worktree: &Path,
+        _log_path: &Path,
+        _env: &SetupEnv,
+        _timeout: std::time::Duration,
+    ) -> Result<SetupOutcome> {
+        Ok(self
+            .outcome
+            .borrow()
+            .clone()
+            .unwrap_or(SetupOutcome::Succeeded))
+    }
+}
+
+/// The registered project all run tests use; `path` is required by `execute_run`.
+fn insert_runnable_project(repos: &FakeRepos) {
+    let mut project = Project::from_repo("owner/repo");
+    project.path = Some("/repo".to_string());
+    repos.insert_project(project);
+}
+
+#[test]
+fn start_run_names_branch_from_mon_id_and_creates_bench() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+
+    let prep = start_run(&mut repos, &task_id).unwrap();
+
+    assert_eq!(prep.branch, "mon-1");
+    let task = repos.get_task(&task_id).unwrap().unwrap();
+    assert_eq!(task.primary_task_run_id.as_deref(), Some(prep.task_run_id.as_str()));
+    let (_, cwd) = repos.get_bench_for_task(&task_id).unwrap().unwrap();
+    assert_eq!(cwd, "/repo");
+}
+
+#[test]
+fn start_run_prefers_linked_issue_number_for_branch() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task = repos
+        .insert_task_with_ref(
+            NewTask {
+                kind: TaskKind::Development,
+                status: TaskStatus::Ready,
+                title: "tracked".to_string(),
+                body: String::new(),
+                phase: None,
+                project_id: Some("owner/repo".to_string()),
+                labels: Vec::new(),
+                details: json!({}),
+                source: None,
+            },
+            ExternalRef {
+                id: 0,
+                task_id: String::new(),
+                ref_type: RefType::GithubIssue,
+                repo: Some("owner/repo".to_string()),
+                number: Some(9),
+                url: None,
+                created_at: "2026-06-02T00:00:00.000Z".to_string(),
+            },
+        )
+        .unwrap();
+
+    let prep = start_run(&mut repos, &task.id).unwrap();
+    assert_eq!(prep.branch, "issue-9");
+}
+
+#[test]
+fn start_run_rejects_active_primary_run() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    start_run(&mut repos, &task_id).unwrap();
+
+    let err = start_run(&mut repos, &task_id).unwrap_err();
+    assert!(err.to_string().contains("already has an active run"), "{err}");
+}
+
+#[test]
+fn start_run_rejects_done_task() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    repos.update_task_status(&task_id, TaskStatus::Done).unwrap();
+
+    let err = start_run(&mut repos, &task_id).unwrap_err();
+    assert!(err.to_string().contains("is done"), "{err}");
+}
+
+#[test]
+fn execute_run_records_failed_on_setup_failure() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let prep = start_run(&mut repos, &task_id).unwrap();
+    let setup = FakeSetupRunner {
+        outcome: RefCell::new(Some(SetupOutcome::Failed {
+            code: Some(1),
+            timed_out: false,
+        })),
+    };
+
+    let status = execute_run(
+        &mut repos,
+        &FakeGit::default(),
+        &setup,
+        &FakeArtifacts::default(),
+        &task_id,
+        &prep.task_run_id,
+    )
+    .unwrap();
+
+    assert_eq!(status, TaskRunStatus::Failed);
+    let run = repos.get_task_run(&prep.task_run_id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::Failed);
+    assert_eq!(
+        run.worktree_path.as_deref(),
+        Some("/repo/.worktrees/mon-1"),
+        "worktree path is recorded even when setup fails"
+    );
+}
+
+#[test]
+fn execute_run_prepares_run_and_pins_bench_to_worktree() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let prep = start_run(&mut repos, &task_id).unwrap();
+
+    let status = execute_run(
+        &mut repos,
+        &FakeGit::default(),
+        &FakeSetupRunner::default(),
+        &FakeArtifacts::default(),
+        &task_id,
+        &prep.task_run_id,
+    )
+    .unwrap();
+
+    assert_eq!(status, TaskRunStatus::Prepared);
+    let run = repos.get_task_run(&prep.task_run_id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::Prepared);
+    let (_, cwd) = repos.get_bench_for_task(&task_id).unwrap().unwrap();
+    assert_eq!(cwd, "/repo/.worktrees/mon-1");
+}
+
+#[test]
+fn prepare_claude_for_run_rejects_non_prepared_primary() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    start_run(&mut repos, &task_id).unwrap();
+
+    let err = prepare_claude_for_run(&mut repos, &FakeArtifacts::default(), &task_id).unwrap_err();
+    assert!(err.to_string().contains("expected prepared"), "{err}");
+}
+
+#[test]
+fn prepare_claude_for_run_rejects_missing_worktree() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let prep = start_run(&mut repos, &task_id).unwrap();
+    repos
+        .finish_task_run(&prep.task_run_id, &task_id, TaskRunStatus::Prepared)
+        .unwrap();
+
+    let err = prepare_claude_for_run(&mut repos, &FakeArtifacts::default(), &task_id).unwrap_err();
+    assert!(err.to_string().contains("no worktree path"), "{err}");
+
+    repos
+        .set_task_run_worktree_path(&prep.task_run_id, "/nonexistent/worktree")
+        .unwrap();
+    let err = prepare_claude_for_run(&mut repos, &FakeArtifacts::default(), &task_id).unwrap_err();
+    assert!(err.to_string().contains("worktree does not exist"), "{err}");
 }

@@ -56,3 +56,56 @@ pub(super) fn sanitize_path_component(value: &str) -> String {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn monica_number_requires_positive_mon_id() {
+        assert_eq!(monica_number("MON-12").unwrap(), 12);
+        assert!(monica_number("MON-0").is_err());
+        assert!(monica_number("mon-1").is_err());
+        assert!(monica_number("MON-x").is_err());
+        assert!(monica_number("run-1").is_err());
+    }
+
+    #[test]
+    fn branch_name_prefers_issue_number() {
+        assert_eq!(branch_name(Some(9), 1), "issue-9");
+        assert_eq!(branch_name(None, 1), "mon-1");
+    }
+
+    #[test]
+    fn worktree_path_resolution_order() {
+        let mut project = Project::from_repo("owner/repo");
+        project.path = Some("/repo".to_string());
+        assert_eq!(
+            worktree_path_for(&project, "mon-1").unwrap(),
+            PathBuf::from("/repo/.worktrees/mon-1")
+        );
+
+        project.worktree_root = Some("/worktrees".to_string());
+        assert_eq!(
+            worktree_path_for(&project, "mon-1").unwrap(),
+            PathBuf::from("/worktrees/mon-1"),
+            "explicit worktree_root wins over <path>/.worktrees"
+        );
+
+        project.path = None;
+        project.worktree_root = None;
+        assert!(worktree_path_for(&project, "mon-1").is_err());
+    }
+
+    #[test]
+    fn worktree_directory_name_is_sanitized() {
+        let mut project = Project::from_repo("owner/repo");
+        project.path = Some("/repo".to_string());
+        assert_eq!(
+            worktree_path_for(&project, "feature/foo bar").unwrap(),
+            PathBuf::from("/repo/.worktrees/feature-foo-bar"),
+            "slashes and spaces must not create nested or ambiguous paths"
+        );
+        assert_eq!(sanitize_path_component("a.b_c-d"), "a.b_c-d");
+    }
+}

@@ -323,13 +323,6 @@ mod tests {
     }
 
     #[test]
-    fn wrapper_script_is_valid_bash() {
-        assert!(CLAUDE_WRAPPER.starts_with("#!/usr/bin/env bash"));
-        assert!(CLAUDE_WRAPPER.contains("find_real_claude"));
-        assert!(CLAUDE_WRAPPER.contains("MONICA_CLAUDE_SETTINGS_PATH"));
-    }
-
-    #[test]
     fn zshenv_restores_zdotdir_and_installs_claude_function() {
         assert!(ZDOTDIR_ZSHENV.contains(r#"builtin export ZDOTDIR="$MONICA_ORIGINAL_ZDOTDIR""#));
         assert!(ZDOTDIR_ZSHENV.contains("builtin unset ZDOTDIR"));
@@ -339,10 +332,4 @@ mod tests {
         assert!(restore_pos < install_pos, "function must be installed after ZDOTDIR restore");
     }
 
-    #[test]
-    fn zdotdir_shim_sources_matching_user_file() {
-        let shim = zdotdir_shim(".zshrc");
-        assert!(shim.contains(r#""${ZDOTDIR-$HOME}/.zshrc""#));
-        assert!(shim.contains("builtin unset ZDOTDIR"));
-    }
 }

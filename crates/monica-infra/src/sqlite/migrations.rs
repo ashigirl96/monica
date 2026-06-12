@@ -28,6 +28,7 @@ fn migration_steps() -> Vec<M<'static>> {
         M::up(V15),
         M::up(V16),
         M::up(V17),
+        M::up(V18),
     ]
 }
 
@@ -477,6 +478,12 @@ const V17: &str = r#"
     ALTER TABLE terminal_tabs DROP COLUMN is_active;
 "#;
 
+/// v18: drop external_ref_syncs; PR sync state lives in github_pull_request_ref_states (v8)
+/// and github_pull_request_branch_syncs (v9), and nothing ever read this table back.
+const V18: &str = r#"
+    DROP TABLE external_ref_syncs;
+"#;
+
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
     migrations()
@@ -487,7 +494,10 @@ pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use monica_core::{DisplayStatus, NewTaskRun, TaskRunStatus, TaskRunWaitReason, TaskStatus};
+    use monica_core::{
+        DisplayStatus, EventRepository, NewTaskRun, ProjectRepository, TaskRepository,
+        TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus,
+    };
     use rusqlite::params;
 
     fn temp_db_path(name: &str) -> std::path::PathBuf {
@@ -500,6 +510,12 @@ mod tests {
         let path = dir.join("test.db");
         let _ = std::fs::remove_file(&path);
         path
+    }
+
+    /// Apply the first `n` migrations, staging the historical schema a compat test starts from.
+    fn stage_through(conn: &mut Connection, n: usize) {
+        let steps: Vec<M<'static>> = migration_steps().into_iter().take(n).collect();
+        Migrations::new(steps).to_latest(conn).unwrap();
     }
 
     #[test]
@@ -517,9 +533,7 @@ mod tests {
 
         {
             let mut conn = Connection::open(&path).unwrap();
-            Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3)])
-                .to_latest(&mut conn)
-                .unwrap();
+            stage_through(&mut conn, 3);
             conn.execute(
                 "INSERT INTO projects (id, name, repo, path, branch_template)
                  VALUES ('o/r', 'r', 'o/r', '/tmp/r', 'monica/{slug}')",
@@ -563,26 +577,7 @@ mod tests {
 
         {
             let mut conn = Connection::open(&path).unwrap();
-            Migrations::new(vec![
-                M::up(V1),
-                M::up(V2),
-                M::up(V3),
-                M::up(V4),
-                M::up(V5),
-                M::up(V6),
-                M::up(V7),
-                M::up(V8),
-                M::up(V9),
-                M::up(V10),
-                M::up(V11),
-                M::up(V12),
-                M::up(V13),
-                M::up(V14),
-                M::up(V15),
-                M::up(V16),
-            ])
-            .to_latest(&mut conn)
-            .unwrap();
+            stage_through(&mut conn, 16);
             conn.execute(
                 "INSERT INTO terminal_runspaces (id, sort_order, is_active)
                  VALUES ('rs-1', 0, 1)",
@@ -625,6 +620,55 @@ mod tests {
         std::fs::remove_file(&path).ok();
     }
 
+    /// A database carrying v7-era external_ref_syncs rows must migrate through the v18 DROP
+    /// without error and end at the latest user_version.
+    #[test]
+    fn v18_drops_external_ref_syncs() {
+        let path = temp_db_path("v18");
+
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            stage_through(&mut conn, 17);
+            conn.execute(
+                "INSERT INTO tasks (id, kind, status, title) VALUES ('mon-1', 'dev', 'inbox', 't')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO external_refs (task_id, ref_type, repo, number)
+                 VALUES ('mon-1', 'github_issue', 'o/r', 1)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO external_ref_syncs (task_id, source_ref_id, target_ref_type)
+                 VALUES ('mon-1', 1, 'github_pull_request')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let db = crate::sqlite::SqliteStore::open_at(&path).unwrap();
+        let has_table: i64 = db
+            .conn()
+            .query_row(
+                "SELECT count(*) FROM sqlite_master
+                 WHERE type = 'table' AND name = 'external_ref_syncs'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_table, 0, "external_ref_syncs must be dropped");
+
+        let version: i64 = db
+            .conn()
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, migration_steps().len() as i64);
+
+        std::fs::remove_file(&path).ok();
+    }
+
     /// Tab rows written under the v15 schema must survive the v16 ALTER TABLE and read back
     /// with a NULL `terminal_session_id`, and the new session tables must exist.
     #[test]
@@ -633,25 +677,7 @@ mod tests {
 
         {
             let mut conn = Connection::open(&path).unwrap();
-            Migrations::new(vec![
-                M::up(V1),
-                M::up(V2),
-                M::up(V3),
-                M::up(V4),
-                M::up(V5),
-                M::up(V6),
-                M::up(V7),
-                M::up(V8),
-                M::up(V9),
-                M::up(V10),
-                M::up(V11),
-                M::up(V12),
-                M::up(V13),
-                M::up(V14),
-                M::up(V15),
-            ])
-            .to_latest(&mut conn)
-            .unwrap();
+            stage_through(&mut conn, 15);
             conn.execute(
                 "INSERT INTO terminal_runspaces (id, sort_order, is_active)
                  VALUES ('rs-1', 0, 1)",
@@ -692,9 +718,7 @@ mod tests {
 
         {
             let mut conn = Connection::open(&path).unwrap();
-            Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3), M::up(V4)])
-                .to_latest(&mut conn)
-                .unwrap();
+            stage_through(&mut conn, 4);
 
             for status in ["setting_up", "running", "stopped", "failed", "ready"] {
                 let id = format!("MON-{}", status.replace('_', "-"));
@@ -840,9 +864,7 @@ mod tests {
 
         {
             let mut conn = Connection::open(&path).unwrap();
-            Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3), M::up(V4), M::up(V5)])
-                .to_latest(&mut conn)
-                .unwrap();
+            stage_through(&mut conn, 5);
 
             for (id, status) in [
                 ("MON-wait", "need_approval"),

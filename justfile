@@ -81,7 +81,12 @@ unused-commands:
     if [ "$found" -eq 0 ]; then echo "all commands used"; fi
     exit "$found"
 
-check: lint fmt-check knip unused-commands ptyd-bin
+# Fails on any verbatim clone of 100+ tokens. Smaller duplication is reviewed by humans;
+# this gate only blocks the copy-paste class that linters cannot see.
+dup:
+    bunx jscpd src crates --format "typescript,tsx,rust" --ignore "**/bindings.ts" --min-tokens 100 --threshold 0 --silent
+
+check: lint fmt-check knip unused-commands dup ptyd-bin
     cargo clippy --workspace --all-targets -- -D warnings
 
 generate-bindings: ptyd-bin
@@ -90,6 +95,14 @@ generate-bindings: ptyd-bin
 test: ptyd-bin
     cargo test --workspace
     bun test
+
+# Coverage doubles as dead-code detection: a pub fn at 0% that no caller or test reaches
+# is invisible to clippy (rustc has no cross-crate dead_code analysis in a workspace).
+coverage: ptyd-bin
+    cargo llvm-cov --workspace
+
+coverage-html: ptyd-bin
+    cargo llvm-cov --workspace --html --open
 
 analyze:
     bun --bun vite build --mode analyze

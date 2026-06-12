@@ -44,9 +44,29 @@ pub fn parse_issue_ref(target: &str) -> Result<(String, i64)> {
     Ok((repo, number))
 }
 
+/// Accept what a user pastes to track an issue: a GitHub issue URL
+/// (`https://github.com/owner/repo/issues/9`, query/fragment tolerated) or an
+/// `owner/repo#9` ref.
+pub fn parse_issue_input(input: &str) -> Result<(String, i64)> {
+    let s = input.trim();
+    if let Some((repo_part, rest)) = s.split_once("/issues/") {
+        let number_part = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+        let number: i64 = number_part.parse().map_err(|_| {
+            anyhow!("issue number must be a positive integer, got {number_part:?}")
+        })?;
+        if number <= 0 {
+            return Err(anyhow!(
+                "issue number must be a positive integer, got {number}"
+            ));
+        }
+        return Ok((parse_owner_repo(repo_part)?, number));
+    }
+    parse_issue_ref(s)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{parse_issue_ref, parse_owner_repo};
+    use super::{parse_issue_input, parse_issue_ref, parse_owner_repo};
 
     #[test]
     fn parses_common_remote_forms() {
@@ -102,6 +122,33 @@ mod tests {
             parse_issue_ref("AshiGirl96/Monica#9").unwrap(),
             ("ashigirl96/monica".to_string(), 9)
         );
+    }
+
+    #[test]
+    fn parses_issue_input_url_and_ref_forms() {
+        let cases = [
+            "https://github.com/ashigirl96/monica/issues/9",
+            "https://github.com/ashigirl96/monica/issues/9/",
+            "https://github.com/ashigirl96/monica/issues/9?ref=foo",
+            "https://github.com/AshiGirl96/Monica/issues/9#issuecomment-1",
+            "  github.com/ashigirl96/monica/issues/9  ",
+            "ashigirl96/monica#9",
+        ];
+        for case in cases {
+            assert_eq!(
+                parse_issue_input(case).unwrap(),
+                ("ashigirl96/monica".to_string(), 9),
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_bad_issue_input() {
+        assert!(parse_issue_input("https://github.com/a/b/issues/abc").is_err());
+        assert!(parse_issue_input("https://github.com/a/b/issues/0").is_err());
+        assert!(parse_issue_input("ashigirl96/monica").is_err());
+        assert!(parse_issue_input("").is_err());
     }
 
     #[test]

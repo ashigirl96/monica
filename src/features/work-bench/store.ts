@@ -1,3 +1,4 @@
+import { shortPath } from "@/lib/paths";
 import { atom, type Getter, type Setter } from "jotai";
 import {
   terminalDetach,
@@ -79,12 +80,6 @@ function createRunspace(order: number, cwd?: string): TerminalRunspace {
   return { id, tabs: [tab], activeTabId: tab.id, order };
 }
 
-function extractShortPath(path: string): string {
-  const parts = path.split("/").filter(Boolean);
-  if (parts.length >= 2) return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
-  return parts[parts.length - 1] ?? path;
-}
-
 function tabDisplayPath(tab: TerminalTab): string {
   return tab.cwd !== "~" ? tab.cwd : tab.title || tab.cwd;
 }
@@ -98,7 +93,7 @@ function deriveRunspaceTitle(
   const path = tabDisplayPath(tab);
   const worktree = worktrees[path];
   if (worktree) return `${worktree.repo}:${worktree.branch}`;
-  return extractShortPath(path);
+  return shortPath(path);
 }
 
 function deriveRunspaceDescription(rs: TerminalRunspace): string {

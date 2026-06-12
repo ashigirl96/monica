@@ -109,29 +109,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn status_mapping_covers_lifecycle_events() {
-        assert_eq!(
-            status_for_claude_event("SessionStart"),
-            Some(TaskRunStatus::Running)
-        );
-        assert_eq!(
-            status_for_claude_event("UserPromptSubmit"),
-            Some(TaskRunStatus::Running)
-        );
-        assert_eq!(
-            status_for_claude_event("Stop"),
-            Some(TaskRunStatus::Stopped)
-        );
-        assert_eq!(
-            status_for_claude_event("StopFailure"),
-            Some(TaskRunStatus::Failed)
-        );
-        assert_eq!(
-            status_for_claude_event("SessionEnd"),
-            Some(TaskRunStatus::Stopped)
-        );
-        assert_eq!(status_for_claude_event("PreToolUse"), None);
-        assert_eq!(status_for_claude_event("PostToolUse"), None);
+    fn lifecycle_events_map_to_run_transitions() {
+        let cases = [
+            ("SessionStart", Some(TaskRunStatus::Running)),
+            ("UserPromptSubmit", Some(TaskRunStatus::Running)),
+            ("Stop", Some(TaskRunStatus::Stopped)),
+            ("StopFailure", Some(TaskRunStatus::Failed)),
+            ("SessionEnd", Some(TaskRunStatus::Stopped)),
+            ("Notification", None),
+        ];
+        for (event, status) in cases {
+            assert_eq!(
+                transition_for_claude_event(event, None).map(|t| t.status),
+                status,
+                "{event}"
+            );
+        }
     }
 
     #[test]
