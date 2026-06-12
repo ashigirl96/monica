@@ -181,7 +181,6 @@ export type TaskSummaryRow = {
 export type TerminalRunspaceRow = {
   id: string;
   sort_order: number;
-  is_active: boolean;
   tabs: TerminalTabRow[];
 };
 
@@ -232,7 +231,6 @@ export type TerminalTabRow = {
   cwd: string;
   title: string;
   sort_order: number;
-  is_active: boolean;
   terminal_session_id: string | null;
 };
 
