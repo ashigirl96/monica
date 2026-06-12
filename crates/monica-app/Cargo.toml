@@ -29,6 +29,7 @@ tauri-specta = { version = "=2.0.0-rc.25", default-features = false, features = 
 tauri-plugin-log = "2"
 tauri-plugin-mcp-bridge = { version = "0.11", default-features = false }
 tauri-plugin-opener = { version = "2", default-features = false }
+tauri-plugin-store = { version = "2", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", default-features = false }

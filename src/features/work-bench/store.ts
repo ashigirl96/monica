@@ -12,6 +12,7 @@ import {
 import { listBenchRunspaceMap, primaryTabId, taskShellEnv } from "@/commands/task";
 import { worktreeInfo, type WorktreeInfo } from "@/commands/git";
 import { releaseTabConnection } from "@/features/work-bench/terminal-connections";
+import { pendingWorkbenchHintAtom, resolveWorkbenchActive } from "@/stores/ui-state";
 
 const FONT_SIZE_DEFAULT = 15;
 const FONT_SIZE_MIN = 10;
@@ -522,25 +523,28 @@ function stateToSnapshot(state: TerminalState): TerminalStateSnapshot {
     runspaces: state.runspaces.map((rs) => ({
       id: rs.id,
       sort_order: rs.order,
-      is_active: rs.id === state.activeRunspaceId,
+      // Active selection is a view intent owned by the Tauri store, not SQLite topology.
+      is_active: false,
       tabs: rs.tabs.map((t) => ({
         id: t.id,
         cwd: tabDisplayPath(t),
         title: t.title,
         sort_order: t.order,
-        is_active: t.id === rs.activeTabId,
+        is_active: false,
         terminal_session_id: t.sessionId ?? null,
       })),
     })),
   };
 }
 
+// active runspace/tab is resolved from the Tauri store hint in loadTerminalStateAtom;
+// here it just defaults to the first runspace/tab. is_active from the snapshot is ignored.
 function snapshotToState(snap: TerminalStateSnapshot): TerminalState | null {
   if (snap.runspaces.length === 0) return null;
   const runspaces: TerminalRunspace[] = snap.runspaces.map((rs) => ({
     id: rs.id,
     order: rs.sort_order,
-    activeTabId: rs.tabs.find((t) => t.is_active)?.id ?? rs.tabs[0]?.id ?? "",
+    activeTabId: rs.tabs[0]?.id ?? "",
     tabs: rs.tabs.map((t) => ({
       id: t.id,
       title: t.title,
@@ -549,10 +553,10 @@ function snapshotToState(snap: TerminalStateSnapshot): TerminalState | null {
       sessionId: t.terminal_session_id ?? undefined,
     })),
   }));
-  const activeRs = snap.runspaces.find((rs) => rs.is_active);
+  const withTabs = runspaces.filter((rs) => rs.tabs.length > 0);
   return {
-    runspaces: runspaces.filter((rs) => rs.tabs.length > 0),
-    activeRunspaceId: activeRs?.id ?? runspaces[0]?.id ?? "",
+    runspaces: withTabs,
+    activeRunspaceId: withTabs[0]?.id ?? "",
   };
 }
 
@@ -741,6 +745,15 @@ export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
           const env = taskId ? envByTask.get(taskId) : undefined;
           return { ...rs, taskId, env: env && env.length > 0 ? env : undefined };
         });
+        const hint = get(pendingWorkbenchHintAtom);
+        if (hint) {
+          set(pendingWorkbenchHintAtom, null);
+          const resolved = resolveWorkbenchActive(state.runspaces, hint);
+          state.activeRunspaceId = resolved.activeRunspaceId;
+          state.runspaces = state.runspaces.map((rs) =>
+            rs.id === resolved.activeRunspaceId ? { ...rs, activeTabId: resolved.activeTabId } : rs,
+          );
+        }
         set(terminalStateAtom, state);
         if (sessions) applySessionList(get, set, sessions);
         void set(resolveWorktreeInfoAtom);

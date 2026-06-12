@@ -4,11 +4,14 @@ import { PREPARE_ELIGIBLE, RUN_ELIGIBLE } from "@/features/work-board/model";
 import {
   columnTasksAtom,
   taskSummariesAtom,
+  projectsAtom,
+  selectedProjectAtom,
   deleteTaskAtom,
   prepareTaskAtom,
   runTaskAtom,
   openBenchAtom,
 } from "@/stores/workboard";
+import { pendingWorkboardHintAtom, resolveWorkboardSelection } from "@/stores/ui-state";
 
 type MoveDirection = "up" | "down" | "left" | "right";
 type MenuItemId = "prepare" | "run" | "bench" | "delete";
@@ -25,7 +28,7 @@ export type MenuState = {
 // null = navigation inactive. The board unmounts on space switch, so the last
 // position survives in focusMemoryAtom instead and is restored on re-entry.
 export const focusedTaskIdAtom = atom<string | null>(null);
-const focusMemoryAtom = atom<string | null>(null);
+export const focusMemoryAtom = atom<string | null>(null);
 
 export const menuAtom = atom<MenuState | null>(null);
 
@@ -101,6 +104,22 @@ export const exitNavAtom = atom(null, (get, set) => {
   if (focused !== null) set(focusMemoryAtom, focused);
   set(focusedTaskIdAtom, null);
   set(menuAtom, null);
+});
+
+// One-shot restore of the saved Work Board filter/focus, applied after loadBoard so the
+// hint can be validated against the loaded projects/tasks. Lives here (not in workboard.ts)
+// to keep the workboard ⇄ workboard-nav import edge one-directional.
+export const applyRestoredWorkboardAtom = atom(null, (get, set) => {
+  const hint = get(pendingWorkboardHintAtom);
+  if (hint === null) return;
+  set(pendingWorkboardHintAtom, null);
+  const resolved = resolveWorkboardSelection(
+    get(projectsAtom).map((p) => p.repo),
+    get(taskSummariesAtom).map((t) => t.id),
+    hint,
+  );
+  set(selectedProjectAtom, resolved.selectedProject);
+  set(focusedTaskIdAtom, resolved.focusedTaskId);
 });
 
 // The focused card can disappear under the 3s polling (status change, filter,
