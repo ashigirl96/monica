@@ -156,7 +156,16 @@ async function runConnect(
     // TypeErrors) once WebglAddon is loaded.
     const term = getTabTerminal(tabId);
     if (term) {
-      if (attach.replay) term.write(fromBase64(attach.replay));
+      if (attach.replay) {
+        // Queries recorded in the replay were already answered (or abandoned) when they
+        // were live; answering them again would inject the responses into the shell's
+        // stdin as command-line input. The write callback fires after the replay chunk
+        // is parsed and before the pending (live) writes below, which keep responding.
+        conn.replaying = true;
+        term.write(fromBase64(attach.replay), () => {
+          conn.replaying = false;
+        });
+      }
       live = true;
       for (const data of pending) term.write(fromBase64(data));
       pending.length = 0;
@@ -258,7 +267,7 @@ export function useTerminal(
 
     const writeText = (text: string) => {
       const sessionId = sessionIdRef.current;
-      if (!sessionId) return;
+      if (!sessionId || getTabConnection(options.tabId)?.replaying) return;
       terminalWrite(sessionId, toBase64(encoder.encode(text)));
     };
 
@@ -266,7 +275,7 @@ export function useTerminal(
 
     term.onBinary((data) => {
       const sessionId = sessionIdRef.current;
-      if (!sessionId) return;
+      if (!sessionId || getTabConnection(options.tabId)?.replaying) return;
       const bytes = new Uint8Array(data.length);
       for (let i = 0; i < data.length; i++) {
         bytes[i] = data.charCodeAt(i);
@@ -388,6 +397,10 @@ export function useTerminal(
       // terminal registry entry must go first so in-flight writes stop resolving to a
       // disposed instance.
       clearTabTerminal(options.tabId, term);
+      // dispose() drops xterm's write queue, so a replay write callback may never fire;
+      // unstick the mute or the remounted terminal would silently drop all input.
+      const conn = getTabConnection(options.tabId);
+      if (conn) conn.replaying = false;
       for (const fn of cleanups) fn();
       term.dispose();
       termRef.current = null;
