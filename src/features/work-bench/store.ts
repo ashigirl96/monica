@@ -523,14 +523,11 @@ function stateToSnapshot(state: TerminalState): TerminalStateSnapshot {
     runspaces: state.runspaces.map((rs) => ({
       id: rs.id,
       sort_order: rs.order,
-      // Active selection is a view intent owned by the Tauri store, not SQLite topology.
-      is_active: false,
       tabs: rs.tabs.map((t) => ({
         id: t.id,
         cwd: tabDisplayPath(t),
         title: t.title,
         sort_order: t.order,
-        is_active: false,
         terminal_session_id: t.sessionId ?? null,
       })),
     })),
@@ -538,7 +535,7 @@ function stateToSnapshot(state: TerminalState): TerminalStateSnapshot {
 }
 
 // active runspace/tab is resolved from the Tauri store hint in loadTerminalStateAtom;
-// here it just defaults to the first runspace/tab. is_active from the snapshot is ignored.
+// here it just defaults to the first runspace/tab.
 function snapshotToState(snap: TerminalStateSnapshot): TerminalState | null {
   if (snap.runspaces.length === 0) return null;
   const runspaces: TerminalRunspace[] = snap.runspaces.map((rs) => ({

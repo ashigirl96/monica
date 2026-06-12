@@ -791,14 +791,12 @@ fn terminal_state_snapshot_round_trips_session_id() {
         runspaces: vec![TerminalRunspaceRow {
             id: "rs-1".into(),
             sort_order: 0,
-            is_active: true,
             tabs: vec![
                 TerminalTabRow {
                     id: "tab-1".into(),
                     cwd: "/tmp".into(),
                     title: "one".into(),
                     sort_order: 0,
-                    is_active: true,
                     terminal_session_id: Some("ts-1".into()),
                 },
                 TerminalTabRow {
@@ -806,7 +804,6 @@ fn terminal_state_snapshot_round_trips_session_id() {
                     cwd: "/tmp".into(),
                     title: "two".into(),
                     sort_order: 1,
-                    is_active: false,
                     terminal_session_id: None,
                 },
             ],

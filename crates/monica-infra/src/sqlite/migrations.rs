@@ -6,7 +6,11 @@ use rusqlite_migration::{Migrations, M};
 /// uses the list position as the version). Append an `M::up(...)` to add a version;
 /// never reorder or remove existing entries, or already-migrated databases diverge.
 fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![
+    Migrations::new(migration_steps())
+}
+
+fn migration_steps() -> Vec<M<'static>> {
+    vec![
         M::up(V1),
         M::up(V2),
         M::up(V3),
@@ -23,7 +27,8 @@ fn migrations() -> Migrations<'static> {
         M::up(V14),
         M::up(V15),
         M::up(V16),
-    ])
+        M::up(V17),
+    ]
 }
 
 /// v1: storage foundation (work items, runs, events, external refs) + MON-id counter.
@@ -466,6 +471,12 @@ const V16: &str = r#"
     ALTER TABLE terminal_tabs ADD COLUMN terminal_session_id TEXT;
 "#;
 
+/// v17: drop vestigial is_active columns; active selection moved to the Tauri store.
+const V17: &str = r#"
+    ALTER TABLE terminal_runspaces DROP COLUMN is_active;
+    ALTER TABLE terminal_tabs DROP COLUMN is_active;
+"#;
+
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
     migrations()
@@ -539,7 +550,77 @@ mod tests {
             .conn()
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 16);
+        assert_eq!(version, migration_steps().len() as i64);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// Runspace/tab rows written under the v16 schema (which still has `is_active`) must survive
+    /// the v17 `DROP COLUMN` and read back via `load_terminal_state`.
+    #[test]
+    fn v17_drops_is_active_and_preserves_rows() {
+        let path = temp_db_path("v17");
+
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            Migrations::new(vec![
+                M::up(V1),
+                M::up(V2),
+                M::up(V3),
+                M::up(V4),
+                M::up(V5),
+                M::up(V6),
+                M::up(V7),
+                M::up(V8),
+                M::up(V9),
+                M::up(V10),
+                M::up(V11),
+                M::up(V12),
+                M::up(V13),
+                M::up(V14),
+                M::up(V15),
+                M::up(V16),
+            ])
+            .to_latest(&mut conn)
+            .unwrap();
+            conn.execute(
+                "INSERT INTO terminal_runspaces (id, sort_order, is_active)
+                 VALUES ('rs-1', 0, 1)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO terminal_tabs
+                   (id, runspace_id, cwd, title, sort_order, is_active, terminal_session_id)
+                 VALUES ('tab-1', 'rs-1', '/tmp', 'tab', 0, 1, 'ts-1')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let db = crate::sqlite::SqliteStore::open_at(&path).unwrap();
+        let snapshot = db.load_terminal_state().unwrap();
+        assert_eq!(snapshot.runspaces.len(), 1);
+        assert_eq!(snapshot.runspaces[0].id, "rs-1");
+        assert_eq!(snapshot.runspaces[0].tabs[0].id, "tab-1");
+        assert_eq!(
+            snapshot.runspaces[0].tabs[0].terminal_session_id.as_deref(),
+            Some("ts-1")
+        );
+
+        for table in ["terminal_runspaces", "terminal_tabs"] {
+            let has_column: i64 = db
+                .conn()
+                .query_row(
+                    &format!(
+                        "SELECT count(*) FROM pragma_table_info('{table}') WHERE name = 'is_active'"
+                    ),
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(has_column, 0, "{table}.is_active must be dropped");
+        }
 
         std::fs::remove_file(&path).ok();
     }

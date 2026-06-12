@@ -68,8 +68,8 @@ gh issue create --title "<タイトル>" --body "<body>"
   git branch --show-current
   ```
 
-  - ブランチ名が **純数値**（`^[0-9]+$`、例 `15`）なら、それを Issue 番号として使う。monica の作業ブランチは `15`・`14` のように Issue 番号そのものを名前にする規約なので、この前提が成立する。
-  - それ以外（`main`、`feature/15`、`foo` など）は、Issue 番号を明示するよう求めて中断する。`feature/N` 等から数字を抜き出そうとしない — フォールバックは意図的に厳格にする。
+  - ブランチ名が **純数値**（`^[0-9]+$`、例 `15`）または **`issue-<番号>`**（`^issue-[0-9]+$`、例 `issue-116`）なら、その数値部分を Issue 番号として使う。monica の作業ブランチは Issue 番号そのもの（`15`・`14`）か、worktree 運用時の `issue-<番号>` を名前にする規約なので、この前提が成立する。
+  - それ以外（`main`、`feature/15`、`foo` など）は、Issue 番号を明示するよう求めて中断する。`feature/N` 等から数字を抜き出そうとしない — フォールバックは上記 2 形式に意図的に限定する。
 
 判定ルール: 引数が純数値（`^[0-9]+$`）、`#数字`（`^#[0-9]+$`）、または GitHub Issue URL（`https://github.com/.*/issues/[0-9]+`）にマッチすれば Issue 番号/URL。それ以外はすべて機能説明テキストとして扱う。
 
@@ -224,7 +224,7 @@ Agent(subagent_type="feature-dev:code-reviewer"):
 5. **動作確認**（フロント変更があれば）— push / PR の前に必ず
 6. commit & push → `/create-pr` skill で PR 作成
 
-動作確認の前に push / PR を作らない。`/create-pr` はブランチ名が純数値なら body に `close #<番号>` を自動で入れるので、ブランチ名を Issue 番号にしておけば merge 時に Issue が自動クローズされる。
+動作確認の前に push / PR を作らない。`/create-pr` はブランチ名が純数値か `issue-<番号>` なら body に `close #<番号>` を自動で入れるので、ブランチ名を Issue 番号にしておけば merge 時に Issue が自動クローズされる。
 
 ---
 
