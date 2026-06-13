@@ -9,7 +9,7 @@ pub fn scaffold_monica(dir: &Path) -> Result<Vec<(String, bool)>> {
         .with_context(|| format!("failed to create {}", monica_dir.display()))?;
     Ok(vec![
         write_if_absent(&monica_dir, "setup.sh", SETUP_SH_TEMPLATE, true)?,
-        write_if_absent(&monica_dir, "prompt.md", PROMPT_MD_TEMPLATE, false)?,
+        write_if_absent(&monica_dir, "prompt.md", "", false)?,
     ])
 }
 
@@ -52,8 +52,4 @@ set -euo pipefail
 # 例:
 #   corepack enable
 #   pnpm install --frozen-lockfile
-"#;
-
-const PROMPT_MD_TEMPLATE: &str = r#"<!-- Monica passes this file's contents as the initial prompt to the agent. -->
-/tackle
 "#;
