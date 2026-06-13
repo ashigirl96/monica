@@ -39,6 +39,14 @@ impl GithubPullRequestStatus {
             GithubPullRequestStatus::Merged => "merged",
         }
     }
+
+    /// Draft and Open are work still in flight; Merged and Closed are settled history.
+    pub fn is_open_or_draft(self) -> bool {
+        matches!(
+            self,
+            GithubPullRequestStatus::Draft | GithubPullRequestStatus::Open
+        )
+    }
 }
 
 impl FromStr for GithubPullRequestStatus {

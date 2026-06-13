@@ -18,3 +18,13 @@ pub(super) const PROJECT_COLUMNS: &str = "id, name, provider, repo, path, defaul
 pub(super) const EVENT_COLUMNS: &str = "id, task_id, task_run_id, kind, payload_json, created_at";
 
 pub(super) const SET_NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
+
+/// Render enum tokens as a quoted SQL IN-list. Callers pass compile-time `as_str` constants,
+/// so no escaping is needed.
+pub(super) fn sql_literal_list<'a>(values: impl IntoIterator<Item = &'a str>) -> String {
+    values
+        .into_iter()
+        .map(|v| format!("'{v}'"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}

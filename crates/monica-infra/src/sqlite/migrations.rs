@@ -30,6 +30,7 @@ fn migration_steps() -> Vec<M<'static>> {
         M::up(V17),
         M::up(V18),
         M::up(V19),
+        M::up(V20),
     ]
 }
 
@@ -492,6 +493,12 @@ const V19: &str = r#"
     UPDATE tasks
        SET status = 'ready', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
      WHERE status = 'inbox';
+"#;
+
+/// v20: run settlement resolves sessions by tab (latest per tab) on every terminal death and
+/// reconcile sweep; the table only grows (rows are never deleted), so the lookup needs an index.
+const V20: &str = r#"
+    CREATE INDEX terminal_sessions_tab_idx ON terminal_sessions(tab_id, created_at);
 "#;
 
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.

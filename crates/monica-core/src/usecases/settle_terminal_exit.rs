@@ -14,12 +14,8 @@ pub struct TerminalExitSettlement {
 /// tab's latest session, and the tab's latest observed run, then applies the verdict through a
 /// status-guarded UPDATE.
 ///
-/// - The exited session must still be the tab's latest one: a tab respawn always inserts a new
-///   session row, so a stale Exit arriving after the tab was reused must not touch the new run.
-/// - Only a run the session was actually driving is settled: Running, WaitingForUser, or a
-///   SettingUp run that already carries a Claude session (a continuation SessionStart creates
-///   one and its suppressed transition leaves it at SettingUp). A Prepared run survives its
-///   terminal — the worktree is intact and Run stays available.
+/// The exited session must still be the tab's latest one: a tab respawn always inserts a new
+/// session row, so a stale Exit arriving after the tab was reused must not touch the new run.
 pub fn task_run_settlement_for_terminal_exit(
     exited: &TerminalSession,
     latest_session_in_tab: Option<&TerminalSession>,
@@ -30,18 +26,50 @@ pub fn task_run_settlement_for_terminal_exit(
         return None;
     }
     let run = run_in_tab?;
-    let live = match run.status {
-        TaskRunStatus::Running | TaskRunStatus::WaitingForUser => true,
-        TaskRunStatus::SettingUp => run.provider_session_id.is_some(),
-        _ => false,
-    };
-    if !live {
+    if !run_is_session_driven(run) {
         return None;
     }
     Some(TerminalExitSettlement {
         task_id: run.task_id.clone(),
         task_run_id: run.id.clone(),
     })
+}
+
+/// Decide whether a live run was orphaned: the latest session of the tab it is pinned to is
+/// dead, so no shell exists to deliver further hooks or a later Exit broadcast for it.
+///
+/// This is the run-first complement to `task_run_settlement_for_terminal_exit` (which is
+/// session-first and fires per death event). The sweep catches everything the event path can
+/// miss: a crash between recording the exit and settling, sessions already terminal before an
+/// upgrade, and older runs shadowed by a newer run observed in the same tab.
+pub fn task_run_settlement_for_orphaned_run(
+    run: &TaskRun,
+    latest_session_in_tab: Option<&TerminalSession>,
+) -> Option<TerminalExitSettlement> {
+    run.terminal_tab_id.as_ref()?;
+    // A tab with no session rows proves nothing about the run; only a recorded death does.
+    let latest = latest_session_in_tab?;
+    if !latest.status.is_terminal() {
+        return None;
+    }
+    if !run_is_session_driven(run) {
+        return None;
+    }
+    Some(TerminalExitSettlement {
+        task_id: run.task_id.clone(),
+        task_run_id: run.id.clone(),
+    })
+}
+
+/// Only a run a session was actually driving is settled: Running, WaitingForUser, or a
+/// SettingUp run that already carries a Claude session. A Prepared run survives its terminal —
+/// the worktree is intact and Run stays available.
+fn run_is_session_driven(run: &TaskRun) -> bool {
+    match run.status {
+        TaskRunStatus::Running | TaskRunStatus::WaitingForUser => true,
+        TaskRunStatus::SettingUp => run.provider_session_id.is_some(),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -150,5 +178,41 @@ mod tests {
             task_run_settlement_for_terminal_exit(&exited, Some(&exited.clone()), None),
             None
         );
+    }
+
+    #[test]
+    fn orphan_settlement_requires_dead_latest_session_and_driven_run() {
+        let driven = run(TaskRunStatus::Running, Some("sess-1"));
+        let dead = session("ts-1", Some("tab-1"));
+        let mut alive = session("ts-2", Some("tab-1"));
+        alive.status = TerminalSessionStatus::Running;
+
+        assert_eq!(
+            task_run_settlement_for_orphaned_run(&driven, Some(&dead)),
+            Some(TerminalExitSettlement {
+                task_id: "MON-1".to_string(),
+                task_run_id: "run-1".to_string(),
+            })
+        );
+        // A live (or unrecorded) latest session means the tab can still report; hands off.
+        assert_eq!(task_run_settlement_for_orphaned_run(&driven, Some(&alive)), None);
+        assert_eq!(task_run_settlement_for_orphaned_run(&driven, None), None);
+
+        for status in [
+            TaskRunStatus::Prepared,
+            TaskRunStatus::Stopped,
+            TaskRunStatus::Failed,
+        ] {
+            let settled = run(status, Some("sess-1"));
+            assert_eq!(
+                task_run_settlement_for_orphaned_run(&settled, Some(&dead)),
+                None,
+                "{status:?}"
+            );
+        }
+
+        let mut tabless = run(TaskRunStatus::Running, Some("sess-1"));
+        tabless.terminal_tab_id = None;
+        assert_eq!(task_run_settlement_for_orphaned_run(&tabless, Some(&dead)), None);
     }
 }

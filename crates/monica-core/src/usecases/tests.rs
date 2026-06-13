@@ -1207,6 +1207,104 @@ fn record_claude_hook_session_end_settles_waiting_run() {
 }
 
 #[test]
+fn record_claude_hook_stale_terminal_verdict_does_not_kill_revived_run() {
+    let mut repos = FakeRepos::default();
+    let artifacts = FakeArtifacts::default();
+    let (task_id, run_id) = task_with_running_primary(&mut repos, &artifacts);
+    record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"SessionEnd","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx(&task_id, Some(&run_id)),
+        r#"{"hook_event_name":"SessionStart","session_id":"sess-2","source":"startup"}"#,
+    )
+    .unwrap();
+
+    // The dead session's terminal verdicts straggle in through the pinned MONICA_TASK_RUN_ID
+    // after the relaunch: neither may touch the run sess-2 now owns — StopFailure least of
+    // all, since Failed would stick forever.
+    for payload in [
+        r#"{"hook_event_name":"SessionEnd","session_id":"sess-1"}"#,
+        r#"{"hook_event_name":"StopFailure","session_id":"sess-1"}"#,
+    ] {
+        let report =
+            record_claude_hook(&mut repos, &artifacts, hook_ctx(&task_id, Some(&run_id)), payload)
+                .unwrap();
+        assert_eq!(report.task_run_status, None, "{payload}");
+        let run = repos.get_task_run(&run_id).unwrap().unwrap();
+        assert_eq!(run.status, TaskRunStatus::WaitingForUser, "{payload}");
+        assert_eq!(
+            run.wait_reason,
+            Some(TaskRunWaitReason::AwaitingPrompt),
+            "{payload}"
+        );
+    }
+}
+
+#[test]
+fn record_claude_hook_resume_session_start_lands_created_run_as_awaiting_prompt() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    let artifacts = FakeArtifacts::default();
+
+    // Resuming an old conversation in a bench tab of a task with no primary lazily creates a
+    // run; the continuation suppression is scoped to Running, so the new run must land at
+    // "your turn" instead of being parked at setting_up with no way to settle it.
+    let report = record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx_in_tab(&task_id, None, "tab-resume"),
+        r#"{"hook_event_name":"SessionStart","session_id":"sess-9","source":"resume"}"#,
+    )
+    .unwrap();
+    assert!(report.task_run_created);
+    assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
+
+    let task = repos.get_task(&task_id).unwrap().unwrap();
+    let primary_id = task.primary_task_run_id.expect("created run becomes primary");
+    let run = repos.get_task_run(&primary_id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::WaitingForUser);
+    assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
+    // A resume start still carries the source session's id, so the tab claim keeps waiting
+    // for the first activity event.
+    assert_eq!(run.terminal_tab_id, None);
+}
+
+#[test]
+fn record_claude_hook_resume_session_start_revives_stopped_run_it_resolves() {
+    let mut repos = FakeRepos::default();
+    let artifacts = FakeArtifacts::default();
+    let (task_id, run_id) = task_with_running_primary(&mut repos, &artifacts);
+    record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"SessionEnd","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+
+    // `claude --resume` of a brand-new conversation lands through the pinned run id with a
+    // session the run has never seen: that is new life, same as a startup start.
+    let report = record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx(&task_id, Some(&run_id)),
+        r#"{"hook_event_name":"SessionStart","session_id":"sess-3","source":"resume"}"#,
+    )
+    .unwrap();
+    assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
+    let run = repos.get_task_run(&run_id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::WaitingForUser);
+    assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
+}
+
+#[test]
 fn record_claude_hook_promotes_created_run_when_no_primary_is_set() {
     let mut repos = FakeRepos::default();
     let task_id = repos.insert_task_for_run(None);

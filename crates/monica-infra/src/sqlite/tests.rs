@@ -295,6 +295,85 @@ fn task_run_observation_sql_guards_protected_transitions() {
         db.get_task_run(&revived.id).unwrap().unwrap().status,
         TaskRunStatus::Running
     );
+
+    // A terminal verdict is scoped to the session that died: a stale SessionEnd/StopFailure
+    // from the previous session must not kill the run its successor now drives, while the
+    // successor's own verdict (or an anonymous one) still lands.
+    let terminal_verdict_from = |session: Option<&'static str>,
+                                 status: TaskRunStatus,
+                                 event: &'static str| TaskRunObservation {
+        status: Some(status),
+        wait_reason: Some(None),
+        event_name: Some(event),
+        at: "2026-06-02T00:00:00.000Z",
+        provider_session_id: session,
+        terminal_tab_id: None,
+        metadata: None,
+    };
+    for (status, event) in [
+        (TaskRunStatus::Stopped, "SessionEnd"),
+        (TaskRunStatus::Failed, "StopFailure"),
+    ] {
+        let survivor = start_run(&mut db);
+        db.record_task_run_observation(
+            &survivor.id,
+            TaskRunObservation {
+                status: Some(TaskRunStatus::Running),
+                wait_reason: None,
+                event_name: Some("UserPromptSubmit"),
+                at: "2026-06-02T00:00:00.000Z",
+                provider_session_id: Some("sess-new"),
+                terminal_tab_id: None,
+                metadata: None,
+            },
+        )
+        .unwrap();
+        // Two stragglers in a row: the first must not re-stamp sess-old onto the run, or the
+        // second would look same-session and land.
+        for _ in 0..2 {
+            db.record_task_run_observation(
+                &survivor.id,
+                terminal_verdict_from(Some("sess-old"), status, event),
+            )
+            .unwrap();
+            let run = db.get_task_run(&survivor.id).unwrap().unwrap();
+            assert_eq!(run.status, TaskRunStatus::Running, "{event}");
+            assert_eq!(run.provider_session_id.as_deref(), Some("sess-new"), "{event}");
+        }
+        db.record_task_run_observation(
+            &survivor.id,
+            terminal_verdict_from(Some("sess-new"), status, event),
+        )
+        .unwrap();
+        assert_eq!(
+            db.get_task_run(&survivor.id).unwrap().unwrap().status,
+            status,
+            "{event}"
+        );
+    }
+    let anon_settled = start_run(&mut db);
+    db.record_task_run_observation(
+        &anon_settled.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::Running),
+            wait_reason: None,
+            event_name: Some("UserPromptSubmit"),
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: Some("sess-new"),
+            terminal_tab_id: None,
+            metadata: None,
+        },
+    )
+    .unwrap();
+    db.record_task_run_observation(
+        &anon_settled.id,
+        terminal_verdict_from(None, TaskRunStatus::Stopped, "SessionEnd"),
+    )
+    .unwrap();
+    assert_eq!(
+        db.get_task_run(&anon_settled.id).unwrap().unwrap().status,
+        TaskRunStatus::Stopped
+    );
 }
 
 #[test]
@@ -1058,6 +1137,75 @@ fn settle_task_run_if_live_survives_a_deleted_task() {
         db.get_task_run(&run.id).unwrap().unwrap().status,
         TaskRunStatus::Stopped
     );
+}
+
+#[test]
+fn list_driven_task_runs_with_tab_returns_only_tab_pinned_session_driven_runs() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("sweep")).unwrap();
+    let start_run = |db: &mut SqliteStore| {
+        db.start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap()
+    };
+    let observe = |db: &mut SqliteStore,
+                   run_id: &str,
+                   status: Option<TaskRunStatus>,
+                   session: Option<&str>,
+                   tab: Option<&str>| {
+        db.record_task_run_observation(
+            run_id,
+            TaskRunObservation {
+                status,
+                wait_reason: None,
+                event_name: None,
+                at: "2026-06-02T00:00:00.000Z",
+                provider_session_id: session,
+                terminal_tab_id: tab,
+                metadata: None,
+            },
+        )
+        .unwrap();
+    };
+
+    let running = start_run(&mut db);
+    observe(&mut db, &running.id, Some(TaskRunStatus::Running), Some("s1"), Some("tab-1"));
+    let waiting = start_run(&mut db);
+    observe(
+        &mut db,
+        &waiting.id,
+        Some(TaskRunStatus::WaitingForUser),
+        Some("s2"),
+        Some("tab-2"),
+    );
+    let claimed_setting_up = start_run(&mut db);
+    observe(&mut db, &claimed_setting_up.id, None, Some("s3"), Some("tab-3"));
+
+    // Out of scope: a prepare-flow setting_up run (no session), a live run never observed in
+    // a tab, and settled runs.
+    let preparing = start_run(&mut db);
+    observe(&mut db, &preparing.id, None, None, Some("tab-4"));
+    let tabless = start_run(&mut db);
+    observe(&mut db, &tabless.id, Some(TaskRunStatus::Running), Some("s5"), None);
+    let stopped = start_run(&mut db);
+    observe(&mut db, &stopped.id, Some(TaskRunStatus::Running), Some("s6"), Some("tab-6"));
+    db.finish_task_run(&stopped.id, &task.id, TaskRunStatus::Stopped)
+        .unwrap();
+
+    let mut driven: Vec<String> = db
+        .list_driven_task_runs_with_tab()
+        .unwrap()
+        .into_iter()
+        .map(|run| run.id)
+        .collect();
+    driven.sort();
+    let mut expected = vec![running.id, waiting.id, claimed_setting_up.id];
+    expected.sort();
+    assert_eq!(driven, expected);
 }
 
 #[test]

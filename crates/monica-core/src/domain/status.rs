@@ -65,6 +65,12 @@ impl TaskRunStatus {
             TaskRunStatus::Failed => "failed",
         }
     }
+
+    /// The run is settled: only an explicit revival (a fresh session, a new prompt) may move
+    /// it again. Lifecycle protection treats a transition INTO these as a session's verdict.
+    pub fn is_terminal(self) -> bool {
+        matches!(self, TaskRunStatus::Stopped | TaskRunStatus::Failed)
+    }
 }
 
 impl FromStr for TaskRunStatus {
@@ -102,12 +108,15 @@ impl TaskRunWaitReason {
     }
 
     /// Tool-specific waits (a pending question or plan approval) outrank the generic
-    /// "type a prompt" wait: protection rules and the side-run attention count both key off this.
+    /// "type a prompt" wait: protection rules and the side-run attention count both key off
+    /// this set — the stores build their SQL IN-lists from it, so a new variant lands there too.
+    pub const TOOL_WAITS: [TaskRunWaitReason; 2] = [
+        TaskRunWaitReason::AskUserQuestion,
+        TaskRunWaitReason::ExitPlanMode,
+    ];
+
     pub fn is_tool_wait(self) -> bool {
-        matches!(
-            self,
-            TaskRunWaitReason::AskUserQuestion | TaskRunWaitReason::ExitPlanMode
-        )
+        Self::TOOL_WAITS.contains(&self)
     }
 }
 
@@ -229,7 +238,7 @@ pub struct BoardColumn {
 /// action pushes it rightward: Prepare keeps it in Ready (setting_up is machine work, nobody's
 /// turn), the moment it needs the user it enters Needs You, handing it to the agent moves it to
 /// Running, and a turn's end brings it back. Done tasks are archived off the board entirely —
-/// `monica issue list --status done` still reaches them.
+/// `monica issue status --status done` still reaches them.
 pub fn board_columns() -> Vec<BoardColumn> {
     vec![
         BoardColumn {

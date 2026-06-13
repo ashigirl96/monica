@@ -76,6 +76,9 @@ pub fn transition_is_generic_wait(next: HookTransition) -> bool {
 /// separate processes); the same rules are enforced atomically inside the store's UPDATE.
 ///
 /// - Failed is sticky: a failure verdict must not be softened by trailing lifecycle events.
+/// - A terminal verdict (SessionEnd → Stopped, StopFailure → Failed) belongs to the session
+///   that died: arriving from a session that is not the run's current one, it is stale news
+///   and must not kill the live successor that has since claimed the run.
 /// - A tool-specific wait (pending question / plan approval) must not be downgraded to the
 ///   generic awaiting-prompt wait by the Stop that trails every PreToolUse.
 /// - A dead run stays dead: a Stop that lands after SessionEnd (or after terminal-exit
@@ -95,6 +98,12 @@ pub fn transition_is_protected(
 ) -> bool {
     if current_status == TaskRunStatus::Failed {
         return true;
+    }
+    if next.status.is_terminal() {
+        return matches!(
+            (known_session_id, event_session_id),
+            (Some(known), Some(event)) if known != event
+        );
     }
     if !transition_is_generic_wait(next) {
         return false;
@@ -123,30 +132,36 @@ pub fn is_session_starting_event(event_name: Option<&str>) -> bool {
     matches!(event_name, Some("SessionStart" | "UserPromptSubmit"))
 }
 
+fn session_start_source<'a>(
+    event_name: Option<&str>,
+    payload: Option<&'a Value>,
+) -> Option<&'a str> {
+    if event_name != Some("SessionStart") {
+        return None;
+    }
+    payload
+        .and_then(|value| value.get("source"))
+        .and_then(Value::as_str)
+}
+
 /// A resumed session's `SessionStart` still carries the *source* session's id — under
 /// `--fork-session` the new id only appears on the first prompt. Letting it move bindings would
 /// hand a fork the source run's tab, so tab claims wait for the first activity event, which
 /// proves where the session actually lives.
 pub fn is_resume_session_start(event_name: Option<&str>, payload: Option<&Value>) -> bool {
-    event_name == Some("SessionStart")
-        && payload
-            .and_then(|value| value.get("source"))
-            .and_then(Value::as_str)
-            == Some("resume")
+    session_start_source(event_name, payload) == Some("resume")
 }
 
 /// A SessionStart that continues an existing conversation rather than opening a fresh one.
-/// Both variants may resolve (via the carried session id) to a run that is mid-flight, so they
-/// must not drive a status transition: a fork/resume start would demote a Running primary, and
-/// auto-compact fires `source: "compact"` in the middle of a turn under the same session id.
+/// Both variants may resolve (via the carried session id) to a run that is mid-turn — a
+/// fork/resume start would demote a Running primary, and auto-compact fires `source: "compact"`
+/// in the middle of a turn under the same session id — so a Running run's transition is
+/// suppressed for them.
 pub fn is_continuation_session_start(event_name: Option<&str>, payload: Option<&Value>) -> bool {
-    event_name == Some("SessionStart")
-        && matches!(
-            payload
-                .and_then(|value| value.get("source"))
-                .and_then(Value::as_str),
-            Some("resume" | "compact")
-        )
+    matches!(
+        session_start_source(event_name, payload),
+        Some("resume" | "compact")
+    )
 }
 
 pub fn should_ignore_claude_event(event_name: Option<&str>, payload: Option<&Value>) -> bool {
@@ -364,6 +379,39 @@ mod tests {
             Some("sess-1"),
             generic_wait
         ));
+
+        // A terminal verdict from a session the run has moved past is stale: a late SessionEnd
+        // (or StopFailure) from dead sess-1 must not kill the run sess-2 now drives.
+        let to_failed = HookTransition {
+            status: TaskRunStatus::Failed,
+            wait_reason: None,
+        };
+        for current in [TaskRunStatus::Running, TaskRunStatus::WaitingForUser] {
+            for next in [to_stopped, to_failed] {
+                assert!(transition_is_protected(
+                    current,
+                    None,
+                    Some("sess-2"),
+                    Some("sess-1"),
+                    next
+                ));
+            }
+        }
+        // The same verdict from the run's own session (or anonymous, or before any session was
+        // recorded) still lands.
+        for (known, event) in [
+            (Some("sess-1"), Some("sess-1")),
+            (Some("sess-1"), None),
+            (None, Some("sess-1")),
+        ] {
+            assert!(!transition_is_protected(
+                TaskRunStatus::Running,
+                None,
+                known,
+                event,
+                to_stopped
+            ));
+        }
     }
 
     #[test]

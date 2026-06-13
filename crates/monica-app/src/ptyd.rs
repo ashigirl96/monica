@@ -165,12 +165,10 @@ fn replace_incompatible_daemon(
                 .collect();
             match runtime.repositories.apply_terminal_session_updates(&updates) {
                 Ok(()) => {
-                    let lost_ids: Vec<String> =
-                        updates.iter().map(|u| u.session_id.clone()).collect();
                     run_settlement::settle_runs_for_terminated_sessions(
                         app,
                         &mut runtime,
-                        &lost_ids,
+                        &run_settlement::terminated_session_ids(&updates),
                     );
                 }
                 Err(e) => {

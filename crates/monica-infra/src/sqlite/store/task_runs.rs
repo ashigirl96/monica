@@ -7,7 +7,7 @@ use monica_core::{
     TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus,
 };
 
-use super::{SET_NOW, TASK_RUN_COLUMNS};
+use super::{sql_literal_list, SET_NOW, TASK_RUN_COLUMNS};
 
 /// Keep the owning task pinned to in_progress while a run progresses. Returns false when no
 /// row changed (deleted task, done task, or missing id).
@@ -59,6 +59,27 @@ impl SqliteStore {
             Some(row) => Ok(Some(crate::sqlite::row::task_run_from_row(row)?)),
             None => Ok(None),
         }
+    }
+
+    /// Runs that believe a terminal tab is still driving them: Running, WaitingForUser, or a
+    /// SettingUp run already claimed by a Claude session. These feed the orphan sweep — when
+    /// such a run's tab has no live session left, no hook or Exit broadcast is coming for it.
+    pub fn list_driven_task_runs_with_tab(&self) -> Result<Vec<TaskRun>> {
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {TASK_RUN_COLUMNS} FROM task_runs
+             WHERE terminal_tab_id IS NOT NULL
+               AND (status IN ('{}', '{}')
+                    OR (status = '{}' AND provider_session_id IS NOT NULL))",
+            TaskRunStatus::Running.as_str(),
+            TaskRunStatus::WaitingForUser.as_str(),
+            TaskRunStatus::SettingUp.as_str(),
+        ))?;
+        let mut rows = stmt.query([])?;
+        let mut runs = Vec::new();
+        while let Some(row) = rows.next()? {
+            runs.push(crate::sqlite::row::task_run_from_row(row)?);
+        }
+        Ok(runs)
     }
 
     /// Settle a run as Stopped because its terminal died, but only while it is still live.
@@ -120,20 +141,26 @@ impl TaskRunRepository for SqliteStore {
             }),
             _ => false,
         };
+        let terminal_verdict = observation.status.is_some_and(TaskRunStatus::is_terminal);
+        let tool_waits =
+            sql_literal_list(TaskRunWaitReason::TOOL_WAITS.iter().map(|r| r.as_str()));
         // `?6 IS NULL OR provider_session_id IS ?6` scopes the generic-wait guards to events
         // from the run's recorded session (or anonymous ones); a session the run never saw is
-        // fresh evidence of life and passes through.
+        // fresh evidence of life and passes through. A terminal verdict (?11) is scoped the
+        // other way: it belongs to the session that died, so it is refused when it arrives
+        // from a session that is not the run's current one.
         let protected = format!(
             "status = '{}'
+             OR (?11 AND ?6 IS NOT NULL
+                      AND provider_session_id IS NOT NULL
+                      AND provider_session_id != ?6)
              OR (?10 AND (?6 IS NULL OR provider_session_id IS ?6)
                      AND (status = '{}'
                           OR (status = '{}'
-                              AND wait_reason IN ('{}', '{}'))))",
+                              AND wait_reason IN ({tool_waits}))))",
             TaskRunStatus::Failed.as_str(),
             TaskRunStatus::Stopped.as_str(),
             TaskRunStatus::WaitingForUser.as_str(),
-            TaskRunWaitReason::AskUserQuestion.as_str(),
-            TaskRunWaitReason::ExitPlanMode.as_str(),
         );
         let tx = self.conn_mut().transaction()?;
         let affected = tx.execute(
@@ -145,7 +172,10 @@ impl TaskRunRepository for SqliteStore {
                                            WHEN ?2 THEN ?3 ELSE wait_reason END,
                         last_event_name = COALESCE(?4, last_event_name),
                         last_event_at = ?5,
-                        provider_session_id = COALESCE(?6, provider_session_id),
+                        -- a protected straggler must not re-stamp its dead session over the
+                        -- successor's id, or its next straggler would look same-session
+                        provider_session_id = CASE WHEN {protected} THEN provider_session_id
+                                                   ELSE COALESCE(?6, provider_session_id) END,
                         terminal_tab_id = COALESCE(?7, terminal_tab_id),
                         metadata_json = COALESCE(?8, metadata_json),
                         updated_at = {SET_NOW}
@@ -161,7 +191,8 @@ impl TaskRunRepository for SqliteStore {
                 observation.terminal_tab_id,
                 metadata,
                 task_run_id,
-                generic_wait
+                generic_wait,
+                terminal_verdict
             ],
         )?;
         if affected == 0 {

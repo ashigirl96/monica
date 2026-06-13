@@ -3,8 +3,7 @@ use rusqlite::{params, OptionalExtension};
 
 use crate::sqlite::SqliteStore;
 use monica_core::{
-    GithubPullRequest, GithubPullRequestStatus, PullRequestBranchSyncCandidate,
-    PullRequestStatusSyncCandidate, RefType,
+    GithubPullRequest, PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate, RefType,
 };
 
 use super::SET_NOW;
@@ -297,12 +296,7 @@ fn branch_success_retry_delay(pull_requests: &[GithubPullRequest]) -> &'static s
     if pull_requests.is_empty() {
         return PR_BRANCH_EMPTY_REFRESH_DELAY;
     }
-    if pull_requests.iter().any(|pr| {
-        matches!(
-            pr.status,
-            GithubPullRequestStatus::Draft | GithubPullRequestStatus::Open
-        )
-    }) {
+    if pull_requests.iter().any(|pr| pr.status.is_open_or_draft()) {
         PR_BRANCH_OPEN_REFRESH_DELAY
     } else {
         PR_BRANCH_TERMINAL_REFRESH_DELAY

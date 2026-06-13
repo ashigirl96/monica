@@ -104,6 +104,14 @@ pub fn terminal_create_session(
                 TerminalSessionStatus::Failed,
                 None,
             );
+            // The failed spawn is now the tab's latest session, shadowing whichever dead
+            // session a run in this tab was waiting on; settle that run now rather than
+            // leaving it to the sweep.
+            run_settlement::settle_runs_for_terminated_sessions(
+                &app,
+                &mut runtime,
+                std::slice::from_ref(&session.id),
+            );
         }
     }
 
@@ -241,15 +249,10 @@ pub fn terminal_list_sessions(
                 .apply_terminal_session_updates(&outcome.updates)
                 .map_err(|e| e.to_string())?;
             // Sessions that died while the app was down only surface here: their Exit
-            // broadcast was never delivered, so this reconcile is the only chance to
-            // settle the runs they were driving.
-            let dead_ids: Vec<String> = outcome
-                .updates
-                .iter()
-                .filter(|u| u.status.is_terminal())
-                .map(|u| u.session_id.clone())
-                .collect();
-            run_settlement::settle_runs_for_terminated_sessions(&app, &mut runtime, &dead_ids);
+            // broadcast was never delivered. The run-first sweep also re-checks sessions
+            // that were already terminal in the DB, so a settlement lost to a crash (or
+            // predating this build) is retried instead of sticking forever.
+            run_settlement::settle_orphaned_runs(&app, &mut runtime);
             for session_id in outcome.reap_ids {
                 let _ = client.notify(RequestOp::Reap { session_id });
             }

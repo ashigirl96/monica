@@ -8,7 +8,7 @@ use monica_core::{
     TaskRunStatus, TaskRunWaitReason, TaskStatus, TaskSummaryRow,
 };
 
-use super::{SET_NOW, TASK_COLUMNS};
+use super::{sql_literal_list, SET_NOW, TASK_COLUMNS};
 
 impl SqliteStore {
     fn insert_task_inner(&mut self, new: NewTask, external: Option<ExternalRef>) -> Result<Task> {
@@ -136,7 +136,9 @@ impl TaskRepository for SqliteStore {
         status: Option<DisplayStatus>,
         project: Option<&str>,
     ) -> Result<Vec<TaskSummaryRow>> {
-        let mut stmt = self.conn().prepare(
+        let tool_waits =
+            sql_literal_list(TaskRunWaitReason::TOOL_WAITS.iter().map(|r| r.as_str()));
+        let mut stmt = self.conn().prepare(&format!(
             "SELECT
                t.id AS task_id,
                t.title AS title,
@@ -154,7 +156,7 @@ impl TaskRepository for SqliteStore {
                (SELECT COUNT(*) FROM task_runs r
                  WHERE r.task_id = t.id AND r.id IS NOT latest_run.id
                    AND r.status = ?3
-                   AND r.wait_reason IN (?5, ?6)) AS side_runs_waiting_for_user,
+                   AND r.wait_reason IN ({tool_waits})) AS side_runs_waiting_for_user,
                -- a run without a Claude session is an old prepare failure, not a side run
                (SELECT COUNT(*) FROM task_runs r
                  WHERE r.task_id = t.id AND r.id IS NOT latest_run.id
@@ -188,15 +190,13 @@ impl TaskRepository for SqliteStore {
                )
 	             WHERE t.deleted_at IS NULL
 	               AND (?1 IS NULL OR coalesce(project.repo, issue_ref.repo, t.project_id) = ?1)
-	             ORDER BY t.created_at, t.id",
-        )?;
+	             ORDER BY t.created_at, t.id"
+        ))?;
         let mut rows = stmt.query(params![
             project,
             TaskRunStatus::Running.as_str(),
             TaskRunStatus::WaitingForUser.as_str(),
-            TaskRunStatus::Failed.as_str(),
-            TaskRunWaitReason::AskUserQuestion.as_str(),
-            TaskRunWaitReason::ExitPlanMode.as_str()
+            TaskRunStatus::Failed.as_str()
         ])?;
         let mut items = Vec::new();
         while let Some(row) = rows.next()? {
@@ -236,8 +236,10 @@ impl TaskRepository for SqliteStore {
         for item in &mut items {
             item.github_pull_requests = self.list_github_pull_request_refs(&item.id)?;
             item.has_open_pull_request = item.github_pull_requests.iter().any(|pr| {
-                pr.status.as_deref() == Some(GithubPullRequestStatus::Open.as_str())
-                    || pr.status.as_deref() == Some(GithubPullRequestStatus::Draft.as_str())
+                pr.status
+                    .as_deref()
+                    .and_then(|s| s.parse::<GithubPullRequestStatus>().ok())
+                    .is_some_and(GithubPullRequestStatus::is_open_or_draft)
             });
         }
         Ok(items)

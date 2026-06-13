@@ -29,7 +29,10 @@ pub use reconcile_terminal_sessions::{
 pub use record_claude_hook::{record_claude_hook, HookContext, HookReport};
 pub use register_project::{register_project, register_project_with_default_branch};
 pub use run_task::{execute_run, prepare_claude_for_run, start_run};
-pub use settle_terminal_exit::{task_run_settlement_for_terminal_exit, TerminalExitSettlement};
+pub use settle_terminal_exit::{
+    task_run_settlement_for_orphaned_run, task_run_settlement_for_terminal_exit,
+    TerminalExitSettlement,
+};
 pub use sync_pull_requests::sync_next_pull_request;
 pub use track_github_issue::{
     track_github_issue, track_github_issue_from_fetched, TrackGithubIssueInput,
