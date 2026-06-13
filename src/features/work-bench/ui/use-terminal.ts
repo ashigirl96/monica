@@ -5,6 +5,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
+import { attachTapSelection } from "@/features/work-bench/ui/tap-selection";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getDefaultStore } from "jotai";
 import {
@@ -219,6 +220,10 @@ export function useTerminal(
       allowTransparency: false,
       allowProposedApi: true,
       scrollback: 5000,
+      // ghostty の default_word_boundaries に揃えた語境界集合。
+      wordSeparator: " \t'\"│`|:;,()[]{}<>$",
+      // マウスレポート中の TUI でも修飾キーでローカル選択を許可する (mac は Option)。
+      macOptionClickForcesSelection: true,
       linkHandler: {
         activate: (_event, uri) => {
           openUrl(uri);
@@ -372,6 +377,7 @@ export function useTerminal(
       container.addEventListener("mousedown", blockPhantom, true);
       container.addEventListener("pointerdown", blockPhantom, true);
       container.addEventListener("wheel", onWheel, { capture: true });
+      cleanups.push(attachTapSelection(term, container));
       cleanups.push(() => {
         container.removeEventListener("mousedown", blockPhantom, true);
         container.removeEventListener("pointerdown", blockPhantom, true);
