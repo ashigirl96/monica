@@ -94,7 +94,6 @@ export type BoardColumn = {
 };
 
 export type DisplayStatus =
-  | "inbox"
   | "ready"
   | "in_progress"
   | "setting_up"
@@ -158,9 +157,9 @@ export type TaskRunStatusChanged = {
   status: TaskRunStatus;
 };
 
-export type TaskRunWaitReason = "ask_user_question" | "exit_plan_mode";
+export type TaskRunWaitReason = "ask_user_question" | "exit_plan_mode" | "awaiting_prompt";
 
-export type TaskStatus = "inbox" | "ready" | "in_progress" | "done";
+export type TaskStatus = "ready" | "in_progress" | "done";
 
 export type TaskSummaryRow = {
   id: string;
@@ -174,6 +173,8 @@ export type TaskSummaryRow = {
   status: DisplayStatus;
   prepare_eligible: boolean;
   run_eligible: boolean;
+  is_active: boolean;
+  has_open_pull_request: boolean;
   branch: string | null;
   side_runs_running: number;
   side_runs_waiting_for_user: number;

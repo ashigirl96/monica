@@ -138,6 +138,212 @@ fn task_run_observation_records_wait_reason_and_event_metadata() {
     assert_eq!(run.terminal_tab_id.as_deref(), Some("tab-1"));
 }
 
+/// Hooks run in separate processes, so the snapshot check in `record_claude_hook` cannot be
+/// trusted alone: these cases bypass it and hit the store directly, proving the UPDATE itself
+/// refuses the protected transitions.
+#[test]
+fn task_run_observation_sql_guards_protected_transitions() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("guarded")).unwrap();
+    let start_run = |db: &mut SqliteStore| {
+        db.start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap()
+    };
+    let generic_wait = TaskRunObservation {
+        status: Some(TaskRunStatus::WaitingForUser),
+        wait_reason: Some(Some(TaskRunWaitReason::AwaitingPrompt)),
+        event_name: Some("Stop"),
+        at: "2026-06-02T00:00:00.000Z",
+        provider_session_id: None,
+        terminal_tab_id: None,
+        metadata: None,
+    };
+
+    // A late Stop must not resurrect a stopped run.
+    let stopped = start_run(&mut db);
+    db.finish_task_run(&stopped.id, &task.id, TaskRunStatus::Stopped)
+        .unwrap();
+    db.record_task_run_observation(&stopped.id, generic_wait)
+        .unwrap();
+    let run = db.get_task_run(&stopped.id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::Stopped);
+    assert_eq!(run.wait_reason, None);
+    // The event itself is still recorded.
+    assert_eq!(run.last_event_name.as_deref(), Some("Stop"));
+
+    // A trailing Stop must not blur a tool-specific wait into a generic one.
+    for reason in [
+        TaskRunWaitReason::AskUserQuestion,
+        TaskRunWaitReason::ExitPlanMode,
+    ] {
+        let asking = start_run(&mut db);
+        db.record_task_run_observation(
+            &asking.id,
+            TaskRunObservation {
+                status: Some(TaskRunStatus::WaitingForUser),
+                wait_reason: Some(Some(reason)),
+                event_name: Some("PreToolUse"),
+                at: "2026-06-02T00:00:00.000Z",
+                provider_session_id: None,
+                terminal_tab_id: None,
+                metadata: None,
+            },
+        )
+        .unwrap();
+        db.record_task_run_observation(&asking.id, generic_wait)
+            .unwrap();
+        let run = db.get_task_run(&asking.id).unwrap().unwrap();
+        assert_eq!(run.status, TaskRunStatus::WaitingForUser, "{reason:?}");
+        assert_eq!(run.wait_reason, Some(reason), "{reason:?}");
+    }
+
+    // The generic-wait guard is session-scoped: the dead session's own late Stop is refused,
+    // while a relaunched (never-seen) session's start revives the run.
+    let relaunched = start_run(&mut db);
+    db.record_task_run_observation(
+        &relaunched.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::Running),
+            wait_reason: None,
+            event_name: Some("UserPromptSubmit"),
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: Some("sess-old"),
+            terminal_tab_id: None,
+            metadata: None,
+        },
+    )
+    .unwrap();
+    db.finish_task_run(&relaunched.id, &task.id, TaskRunStatus::Stopped)
+        .unwrap();
+    let generic_wait_from = |session: &'static str, event: &'static str| TaskRunObservation {
+        status: Some(TaskRunStatus::WaitingForUser),
+        wait_reason: Some(Some(TaskRunWaitReason::AwaitingPrompt)),
+        event_name: Some(event),
+        at: "2026-06-02T00:00:00.000Z",
+        provider_session_id: Some(session),
+        terminal_tab_id: None,
+        metadata: None,
+    };
+    db.record_task_run_observation(&relaunched.id, generic_wait_from("sess-old", "Stop"))
+        .unwrap();
+    assert_eq!(
+        db.get_task_run(&relaunched.id).unwrap().unwrap().status,
+        TaskRunStatus::Stopped
+    );
+    db.record_task_run_observation(
+        &relaunched.id,
+        generic_wait_from("sess-new", "SessionStart"),
+    )
+    .unwrap();
+    let run = db.get_task_run(&relaunched.id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::WaitingForUser);
+    assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
+    assert_eq!(run.provider_session_id.as_deref(), Some("sess-new"));
+
+    // A real prompt does revive a stopped run: only the generic wait is refused.
+    let revived = start_run(&mut db);
+    db.finish_task_run(&revived.id, &task.id, TaskRunStatus::Stopped)
+        .unwrap();
+    db.record_task_run_observation(
+        &revived.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::Running),
+            wait_reason: Some(None),
+            event_name: Some("UserPromptSubmit"),
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: None,
+            terminal_tab_id: None,
+            metadata: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        db.get_task_run(&revived.id).unwrap().unwrap().status,
+        TaskRunStatus::Running
+    );
+
+    // A terminal verdict is scoped to the session that died: a stale SessionEnd from the
+    // previous session must not kill the run its successor now drives, while the successor's
+    // own verdict (or an anonymous one) still lands.
+    let terminal_verdict_from = |session: Option<&'static str>,
+                                 status: TaskRunStatus,
+                                 event: &'static str| TaskRunObservation {
+        status: Some(status),
+        wait_reason: Some(None),
+        event_name: Some(event),
+        at: "2026-06-02T00:00:00.000Z",
+        provider_session_id: session,
+        terminal_tab_id: None,
+        metadata: None,
+    };
+    for (status, event) in [(TaskRunStatus::Stopped, "SessionEnd")] {
+        let survivor = start_run(&mut db);
+        db.record_task_run_observation(
+            &survivor.id,
+            TaskRunObservation {
+                status: Some(TaskRunStatus::Running),
+                wait_reason: None,
+                event_name: Some("UserPromptSubmit"),
+                at: "2026-06-02T00:00:00.000Z",
+                provider_session_id: Some("sess-new"),
+                terminal_tab_id: None,
+                metadata: None,
+            },
+        )
+        .unwrap();
+        // Two stragglers in a row: the first must not re-stamp sess-old onto the run, or the
+        // second would look same-session and land.
+        for _ in 0..2 {
+            db.record_task_run_observation(
+                &survivor.id,
+                terminal_verdict_from(Some("sess-old"), status, event),
+            )
+            .unwrap();
+            let run = db.get_task_run(&survivor.id).unwrap().unwrap();
+            assert_eq!(run.status, TaskRunStatus::Running, "{event}");
+            assert_eq!(run.provider_session_id.as_deref(), Some("sess-new"), "{event}");
+        }
+        db.record_task_run_observation(
+            &survivor.id,
+            terminal_verdict_from(Some("sess-new"), status, event),
+        )
+        .unwrap();
+        assert_eq!(
+            db.get_task_run(&survivor.id).unwrap().unwrap().status,
+            status,
+            "{event}"
+        );
+    }
+    let anon_settled = start_run(&mut db);
+    db.record_task_run_observation(
+        &anon_settled.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::Running),
+            wait_reason: None,
+            event_name: Some("UserPromptSubmit"),
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: Some("sess-new"),
+            terminal_tab_id: None,
+            metadata: None,
+        },
+    )
+    .unwrap();
+    db.record_task_run_observation(
+        &anon_settled.id,
+        terminal_verdict_from(None, TaskRunStatus::Stopped, "SessionEnd"),
+    )
+    .unwrap();
+    assert_eq!(
+        db.get_task_run(&anon_settled.id).unwrap().unwrap().status,
+        TaskRunStatus::Stopped
+    );
+}
+
 #[test]
 fn task_run_observation_keeps_existing_tab_and_session_on_none() {
     let mut db = SqliteStore::open_in_memory().unwrap();
@@ -311,14 +517,39 @@ fn task_summaries_count_side_runs_excluding_primary_and_sessionless_failures() {
     observe(&mut db, &primary.id, TaskRunStatus::Running, "sess-main");
     db.set_primary_task_run(&task.id, &primary.id).unwrap();
 
+    let observe_waiting =
+        |db: &mut SqliteStore, run_id: &str, reason: TaskRunWaitReason, session: &str| {
+            db.record_task_run_observation(
+                run_id,
+                TaskRunObservation {
+                    status: Some(TaskRunStatus::WaitingForUser),
+                    wait_reason: Some(Some(reason)),
+                    event_name: None,
+                    at: "2026-06-02T00:00:00.000Z",
+                    provider_session_id: Some(session),
+                    terminal_tab_id: None,
+                    metadata: None,
+                },
+            )
+            .unwrap();
+        };
+
     let side_running = db.start_task_run(new_run(&task.id)).unwrap();
     observe(&mut db, &side_running.id, TaskRunStatus::Running, "sess-2");
     let side_waiting = db.start_task_run(new_run(&task.id)).unwrap();
-    observe(
+    observe_waiting(
         &mut db,
         &side_waiting.id,
-        TaskRunStatus::WaitingForUser,
+        TaskRunWaitReason::AskUserQuestion,
         "sess-3",
+    );
+    // A side run idling between turns is healthy, not an attention item.
+    let side_idle = db.start_task_run(new_run(&task.id)).unwrap();
+    observe_waiting(
+        &mut db,
+        &side_idle.id,
+        TaskRunWaitReason::AwaitingPrompt,
+        "sess-5",
     );
     let side_failed = db.start_task_run(new_run(&task.id)).unwrap();
     observe(&mut db, &side_failed.id, TaskRunStatus::Failed, "sess-4");
@@ -415,13 +646,58 @@ fn project_round_trip_and_summary_pr_status_stay_wire_compatible() {
     .unwrap();
 
     let summaries = db
-        .list_task_summaries(Some(DisplayStatus::Inbox), Some("owner/repo"))
+        .list_task_summaries(Some(DisplayStatus::Ready), Some("owner/repo"))
         .unwrap();
     assert_eq!(summaries.len(), 1);
     assert_eq!(
         summaries[0].github_pull_requests[0].status.as_deref(),
         Some("open")
     );
+    assert!(summaries[0].has_open_pull_request);
+
+    // A merged-only task is settled work: no open-PR accent.
+    let mut merged_task = dev_task("with merged pr");
+    merged_task.project_id = Some(project.id.clone());
+    let merged_item = db.insert_task(merged_task).unwrap();
+    db.record_pull_request_branch_sync_success(
+        &PullRequestBranchSyncCandidate {
+            task_id: merged_item.id.clone(),
+            repo: "owner/repo".to_string(),
+            branch: "issue-43".to_string(),
+        },
+        &[GithubPullRequest {
+            repo: "owner/repo".to_string(),
+            number: 8,
+            url: "https://github.com/owner/repo/pull/8".to_string(),
+            status: GithubPullRequestStatus::Merged,
+        }],
+    )
+    .unwrap();
+    let summaries = db.list_task_summaries(None, Some("owner/repo")).unwrap();
+    let merged_row = summaries.iter().find(|s| s.id == merged_item.id).unwrap();
+    assert!(!merged_row.has_open_pull_request);
+
+    // Draft counts as open work in flight.
+    let mut draft_task = dev_task("with draft pr");
+    draft_task.project_id = Some(project.id.clone());
+    let draft_item = db.insert_task(draft_task).unwrap();
+    db.record_pull_request_branch_sync_success(
+        &PullRequestBranchSyncCandidate {
+            task_id: draft_item.id.clone(),
+            repo: "owner/repo".to_string(),
+            branch: "issue-44".to_string(),
+        },
+        &[GithubPullRequest {
+            repo: "owner/repo".to_string(),
+            number: 9,
+            url: "https://github.com/owner/repo/pull/9".to_string(),
+            status: GithubPullRequestStatus::Draft,
+        }],
+    )
+    .unwrap();
+    let summaries = db.list_task_summaries(None, Some("owner/repo")).unwrap();
+    let draft_row = summaries.iter().find(|s| s.id == draft_item.id).unwrap();
+    assert!(draft_row.has_open_pull_request);
 }
 
 #[test]
@@ -666,6 +942,238 @@ fn terminal_session_create_and_get_round_trip() {
 
     let second = db.create_terminal_session(new_shell_session(None, None)).unwrap();
     assert_eq!(second.id, "ts-2");
+}
+
+#[test]
+fn latest_terminal_session_for_tab_resolves_numerically_within_same_timestamp() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    // Same created_at for all rows forces the CAST(SUBSTR(id, 4)) tiebreak: ts-10 must beat
+    // ts-2 numerically, not lexicographically.
+    for _ in 0..10 {
+        db.create_terminal_session(new_shell_session(None, Some("tab-1")))
+            .unwrap();
+    }
+    db.conn()
+        .execute_batch("UPDATE terminal_sessions SET created_at = '2026-06-02T00:00:00.000Z'")
+        .unwrap();
+
+    let latest = db.latest_terminal_session_for_tab("tab-1").unwrap().unwrap();
+    assert_eq!(latest.id, "ts-10");
+    assert!(db.latest_terminal_session_for_tab("tab-404").unwrap().is_none());
+}
+
+#[test]
+fn latest_terminal_session_for_tab_prefers_newer_created_at() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let older = db
+        .create_terminal_session(new_shell_session(None, Some("tab-1")))
+        .unwrap();
+    db.conn()
+        .execute(
+            "UPDATE terminal_sessions SET created_at = '2026-01-01T00:00:00.000Z' WHERE id = ?1",
+            [&older.id],
+        )
+        .unwrap();
+    let newer = db
+        .create_terminal_session(new_shell_session(None, Some("tab-1")))
+        .unwrap();
+
+    let latest = db.latest_terminal_session_for_tab("tab-1").unwrap().unwrap();
+    assert_eq!(latest.id, newer.id);
+}
+
+#[test]
+fn settle_task_run_if_live_only_stops_session_driven_runs() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("settle")).unwrap();
+    let start_run = |db: &mut SqliteStore| {
+        db.start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap()
+    };
+    let observe = |db: &mut SqliteStore, run_id: &str, status: TaskRunStatus| {
+        db.record_task_run_observation(
+            run_id,
+            TaskRunObservation {
+                status: Some(status),
+                wait_reason: None,
+                event_name: None,
+                at: "2026-06-02T00:00:00.000Z",
+                provider_session_id: Some("sess-1"),
+                terminal_tab_id: None,
+                metadata: None,
+            },
+        )
+        .unwrap();
+    };
+
+    // Live runs settle and the wait_reason is cleared with them.
+    for status in [TaskRunStatus::Running, TaskRunStatus::WaitingForUser] {
+        let run = start_run(&mut db);
+        observe(&mut db, &run.id, status);
+        assert!(db.settle_task_run_if_live(&run.id, &task.id).unwrap(), "{status:?}");
+        let run = db.get_task_run(&run.id).unwrap().unwrap();
+        assert_eq!(run.status, TaskRunStatus::Stopped);
+        assert_eq!(run.wait_reason, None);
+    }
+
+    // A hook-created run parked at setting_up settles only once a session was observed on it.
+    let observed = start_run(&mut db);
+    db.record_task_run_observation(
+        &observed.id,
+        TaskRunObservation {
+            status: None,
+            wait_reason: None,
+            event_name: Some("SessionStart"),
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: Some("sess-2"),
+            terminal_tab_id: Some("tab-1"),
+            metadata: None,
+        },
+    )
+    .unwrap();
+    assert!(db.settle_task_run_if_live(&observed.id, &task.id).unwrap());
+
+    // A prepare-flow setting_up run has no session and must survive.
+    let preparing = start_run(&mut db);
+    assert!(!db.settle_task_run_if_live(&preparing.id, &task.id).unwrap());
+    assert_eq!(
+        db.get_task_run(&preparing.id).unwrap().unwrap().status,
+        TaskRunStatus::SettingUp
+    );
+
+    // Already-settled or terminal states are no-ops: a concurrent hook's verdict stands.
+    for status in [
+        TaskRunStatus::Prepared,
+        TaskRunStatus::Stopped,
+        TaskRunStatus::Failed,
+    ] {
+        let run = start_run(&mut db);
+        db.finish_task_run(&run.id, &task.id, status).unwrap();
+        assert!(!db.settle_task_run_if_live(&run.id, &task.id).unwrap(), "{status:?}");
+        assert_eq!(
+            db.get_task_run(&run.id).unwrap().unwrap().status,
+            status,
+            "{status:?}"
+        );
+    }
+
+    // A mismatched task id never settles someone else's run.
+    let run = start_run(&mut db);
+    observe(&mut db, &run.id, TaskRunStatus::Running);
+    assert!(!db.settle_task_run_if_live(&run.id, "MON-404").unwrap());
+    assert_eq!(
+        db.get_task_run(&run.id).unwrap().unwrap().status,
+        TaskRunStatus::Running
+    );
+}
+
+#[test]
+fn settle_task_run_if_live_survives_a_deleted_task() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("doomed")).unwrap();
+    let run = db
+        .start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
+    db.record_task_run_observation(
+        &run.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::Running),
+            wait_reason: None,
+            event_name: None,
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: Some("sess-1"),
+            terminal_tab_id: None,
+            metadata: None,
+        },
+    )
+    .unwrap();
+    db.mark_task_deleted(&task.id).unwrap();
+
+    // The terminal dying after the task was deleted must still tombstone the run.
+    assert!(db.settle_task_run_if_live(&run.id, &task.id).unwrap());
+    assert_eq!(
+        db.get_task_run(&run.id).unwrap().unwrap().status,
+        TaskRunStatus::Stopped
+    );
+}
+
+#[test]
+fn list_driven_task_runs_with_tab_returns_only_tab_pinned_session_driven_runs() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("sweep")).unwrap();
+    let start_run = |db: &mut SqliteStore| {
+        db.start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap()
+    };
+    let observe = |db: &mut SqliteStore,
+                   run_id: &str,
+                   status: Option<TaskRunStatus>,
+                   session: Option<&str>,
+                   tab: Option<&str>| {
+        db.record_task_run_observation(
+            run_id,
+            TaskRunObservation {
+                status,
+                wait_reason: None,
+                event_name: None,
+                at: "2026-06-02T00:00:00.000Z",
+                provider_session_id: session,
+                terminal_tab_id: tab,
+                metadata: None,
+            },
+        )
+        .unwrap();
+    };
+
+    let running = start_run(&mut db);
+    observe(&mut db, &running.id, Some(TaskRunStatus::Running), Some("s1"), Some("tab-1"));
+    let waiting = start_run(&mut db);
+    observe(
+        &mut db,
+        &waiting.id,
+        Some(TaskRunStatus::WaitingForUser),
+        Some("s2"),
+        Some("tab-2"),
+    );
+    let claimed_setting_up = start_run(&mut db);
+    observe(&mut db, &claimed_setting_up.id, None, Some("s3"), Some("tab-3"));
+
+    // Out of scope: a prepare-flow setting_up run (no session), a live run never observed in
+    // a tab, and settled runs.
+    let preparing = start_run(&mut db);
+    observe(&mut db, &preparing.id, None, None, Some("tab-4"));
+    let tabless = start_run(&mut db);
+    observe(&mut db, &tabless.id, Some(TaskRunStatus::Running), Some("s5"), None);
+    let stopped = start_run(&mut db);
+    observe(&mut db, &stopped.id, Some(TaskRunStatus::Running), Some("s6"), Some("tab-6"));
+    db.finish_task_run(&stopped.id, &task.id, TaskRunStatus::Stopped)
+        .unwrap();
+
+    let mut driven: Vec<String> = db
+        .list_driven_task_runs_with_tab()
+        .unwrap()
+        .into_iter()
+        .map(|run| run.id)
+        .collect();
+    driven.sort();
+    let mut expected = vec![running.id, waiting.id, claimed_setting_up.id];
+    expected.sort();
+    assert_eq!(driven, expected);
 }
 
 #[test]

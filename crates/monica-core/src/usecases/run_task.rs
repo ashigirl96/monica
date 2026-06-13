@@ -211,7 +211,8 @@ where
 }
 
 /// Generate claude-settings.json + wrapper script + PTY env for a prepared run.
-/// Does NOT transition the TaskRun to Running — that happens via the SessionStart hook.
+/// Does NOT transition the TaskRun — the SessionStart hook parks it at awaiting-prompt and
+/// the first UserPromptSubmit moves it to Running.
 pub fn prepare_claude_for_run<R, A>(
     repos: &mut R,
     artifacts: &A,

@@ -2,8 +2,9 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use crate::domain::{
-    is_resume_session_start, is_safe_task_run_id, is_session_starting_event,
-    should_ignore_claude_event, transition_for_claude_event, transition_is_protected, Agent,
+    is_continuation_session_start, is_resume_session_start, is_safe_task_run_id,
+    is_session_starting_event, should_ignore_claude_event, transition_for_claude_event,
+    transition_is_protected, Agent,
 };
 use crate::interfaces::{Clock, EventRepository, RunArtifacts, TaskRepository, TaskRunRepository};
 use crate::{NewTaskRun, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus};
@@ -114,15 +115,30 @@ where
         false
     };
 
-    let transition = event_name
+    let requested = event_name
         .as_deref()
         .and_then(|event| transition_for_claude_event(event, parsed.as_ref()));
-    let transition = match (transition, run_row.as_ref()) {
-        (Some(transition), Some(run))
-            if !transition_is_protected(run.status, transition.status) =>
-        {
-            Some(transition)
-        }
+    // A resume/fork/compact SessionStart continues an existing conversation and resolves (via
+    // the carried session id) to a run that may be mid-turn; suppression is scoped to Running
+    // because only a flight in progress can be demoted. Anywhere else the start is new life: a
+    // lazily created run leaves setting_up, a stopped run gets its revival. The first real
+    // activity event catches the status up either way.
+    let suppressed_continuation = run_row
+        .as_ref()
+        .is_some_and(|run| run.status == TaskRunStatus::Running)
+        && is_continuation_session_start(event_name.as_deref(), parsed.as_ref());
+    let protected = match (requested, run_row.as_ref()) {
+        (Some(transition), Some(run)) if !suppressed_continuation => transition_is_protected(
+            run.status,
+            run.wait_reason,
+            run.provider_session_id.as_deref(),
+            provider_session_id,
+            transition,
+        ),
+        _ => false,
+    };
+    let transition = match (requested, run_row.as_ref()) {
+        (Some(transition), Some(_)) if !suppressed_continuation && !protected => Some(transition),
         _ => None,
     };
 
@@ -144,17 +160,32 @@ where
                 wait_reason: wait_update,
                 event_name: event_name.as_deref(),
                 at: &at,
-                provider_session_id,
+                // A protected straggler must not re-stamp its dead session over the
+                // successor's id — the next straggler from that session would then look
+                // same-session and land.
+                provider_session_id: provider_session_id.filter(|_| !protected),
                 terminal_tab_id,
                 metadata: parsed.as_ref(),
             },
         )?;
     }
 
+    // The snapshot check above is advisory; the store's guarded UPDATE is the authority and
+    // may have refused the transition under a concurrent settlement. Report what landed, not
+    // what was intended.
+    let landed = match (transition, linked_task_run_id) {
+        (Some(_), Some(run_id)) => repos.get_task_run(run_id)?,
+        _ => None,
+    };
+    let (task_run_status, task_run_wait_reason) = match landed {
+        Some(run) => (Some(run.status), run.wait_reason),
+        None => (None, None),
+    };
+
     Ok(HookReport {
         event_name,
-        task_run_status: transition.map(|t| t.status),
-        task_run_wait_reason: transition.and_then(|t| t.wait_reason),
+        task_run_status,
+        task_run_wait_reason,
         ignored: false,
         task_found,
         task_run_linked,

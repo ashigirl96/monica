@@ -31,7 +31,7 @@ pub enum IssueCommand {
     Mark {
         /// MON-<id>
         id: String,
-        /// Task status token: inbox / ready / in-progress / done
+        /// Task status token: ready / in-progress / done
         status: String,
         /// Free-text note, stored as the task's phase
         #[arg(long)]
@@ -218,6 +218,8 @@ mod tests {
             status: DisplayStatus::Ready,
             prepare_eligible: true,
             run_eligible: true,
+            is_active: false,
+            has_open_pull_request: false,
             branch: Some("monica/gh-17".to_string()),
             side_runs_running: 0,
             side_runs_waiting_for_user: 0,

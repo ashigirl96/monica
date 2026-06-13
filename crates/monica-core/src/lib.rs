@@ -10,7 +10,7 @@ pub mod usecases;
 pub use domain::{
     branch_name, is_safe_task_run_id, monica_number, parse_issue_input, parse_issue_ref,
     parse_owner_repo,
-    should_ignore_claude_event, status_for_claude_event, transition_for_claude_event,
+    should_ignore_claude_event, transition_for_claude_event, transition_is_generic_wait,
     transition_is_protected, wait_reason_for_tool, worktree_path_for, Agent, DisplayStatus, Event,
     BoardColumn, ExternalRef, TaskBench, PrepareTaskResult, RunTaskResult, GithubAuthStatus, GithubDeviceFlow, GithubIssue, GithubPullRequest,
     GithubPullRequestRef, GithubPullRequestStatus, HookTransition, NewTask, NewTaskRun,
@@ -33,6 +33,7 @@ pub use usecases::{
     make_main_by_terminal_tab, mark_issue, primary_terminal_tab, MakeMainOutcome,
     open_bench, prepare_claude_for_run, record_claude_hook, register_project, task_shell_env,
     register_project_with_default_branch, set_project_field, start_run, sync_next_pull_request,
+    task_run_settlement_for_orphaned_run, task_run_settlement_for_terminal_exit, TerminalExitSettlement,
     track_github_issue,
     track_github_issue_from_fetched, wait_for_github_device_flow, DeleteIssueReport, HookContext,
     HookReport, TrackGithubIssueInput, TrackGithubIssueReport,

@@ -4,6 +4,7 @@ import { commands, events, type TaskRunStatusChanged } from "./bindings";
 export type {
   TaskSummaryRow,
   DisplayStatus,
+  TaskRunWaitReason,
   GithubPullRequestRef,
   BoardColumn,
   ProjectEntry,

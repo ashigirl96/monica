@@ -10,6 +10,7 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use crate::ptyd::PtydHandle;
+use crate::services::run_settlement;
 
 #[derive(Serialize, specta::Type)]
 pub struct AttachResult {
@@ -102,6 +103,14 @@ pub fn terminal_create_session(
                 &session.id,
                 TerminalSessionStatus::Failed,
                 None,
+            );
+            // The failed spawn is now the tab's latest session, shadowing whichever dead
+            // session a run in this tab was waiting on; settle that run now rather than
+            // leaving it to the sweep.
+            run_settlement::settle_runs_for_terminated_sessions(
+                &app,
+                &mut runtime,
+                std::slice::from_ref(&session.id),
             );
         }
     }
@@ -239,6 +248,11 @@ pub fn terminal_list_sessions(
                 .repositories
                 .apply_terminal_session_updates(&outcome.updates)
                 .map_err(|e| e.to_string())?;
+            // Sessions that died while the app was down only surface here: their Exit
+            // broadcast was never delivered. The run-first sweep also re-checks sessions
+            // that were already terminal in the DB, so a settlement lost to a crash (or
+            // predating this build) is retried instead of sticking forever.
+            run_settlement::settle_orphaned_runs(&app, &mut runtime);
             for session_id in outcome.reap_ids {
                 let _ = client.notify(RequestOp::Reap { session_id });
             }
