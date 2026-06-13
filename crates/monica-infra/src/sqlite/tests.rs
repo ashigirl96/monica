@@ -202,35 +202,6 @@ fn task_run_observation_sql_guards_protected_transitions() {
         assert_eq!(run.wait_reason, Some(reason), "{reason:?}");
     }
 
-    // Failed is sticky against any transition.
-    let failed = start_run(&mut db);
-    db.finish_task_run(&failed.id, &task.id, TaskRunStatus::Failed)
-        .unwrap();
-    for status in [
-        TaskRunStatus::Running,
-        TaskRunStatus::Stopped,
-        TaskRunStatus::WaitingForUser,
-    ] {
-        db.record_task_run_observation(
-            &failed.id,
-            TaskRunObservation {
-                status: Some(status),
-                wait_reason: Some(None),
-                event_name: None,
-                at: "2026-06-02T00:00:00.000Z",
-                provider_session_id: None,
-                terminal_tab_id: None,
-                metadata: None,
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            db.get_task_run(&failed.id).unwrap().unwrap().status,
-            TaskRunStatus::Failed,
-            "{status:?}"
-        );
-    }
-
     // The generic-wait guard is session-scoped: the dead session's own late Stop is refused,
     // while a relaunched (never-seen) session's start revives the run.
     let relaunched = start_run(&mut db);
@@ -296,9 +267,9 @@ fn task_run_observation_sql_guards_protected_transitions() {
         TaskRunStatus::Running
     );
 
-    // A terminal verdict is scoped to the session that died: a stale SessionEnd/StopFailure
-    // from the previous session must not kill the run its successor now drives, while the
-    // successor's own verdict (or an anonymous one) still lands.
+    // A terminal verdict is scoped to the session that died: a stale SessionEnd from the
+    // previous session must not kill the run its successor now drives, while the successor's
+    // own verdict (or an anonymous one) still lands.
     let terminal_verdict_from = |session: Option<&'static str>,
                                  status: TaskRunStatus,
                                  event: &'static str| TaskRunObservation {
@@ -310,10 +281,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
         terminal_tab_id: None,
         metadata: None,
     };
-    for (status, event) in [
-        (TaskRunStatus::Stopped, "SessionEnd"),
-        (TaskRunStatus::Failed, "StopFailure"),
-    ] {
+    for (status, event) in [(TaskRunStatus::Stopped, "SessionEnd")] {
         let survivor = start_run(&mut db);
         db.record_task_run_observation(
             &survivor.id,

@@ -60,10 +60,11 @@ pub fn transition_for_claude_event(
             status: TaskRunStatus::Stopped,
             wait_reason: None,
         }),
-        "StopFailure" => Some(HookTransition {
-            status: TaskRunStatus::Failed,
-            wait_reason: None,
-        }),
+        // StopFailure is an API-level turn error (rate limit, model_not_found, …): recoverable,
+        // and it fires for subagents too under the parent's own session id — so it is never the
+        // run's verdict. It stays logged for diagnostics but moves nothing; the only Failed left
+        // is a prepare failure (claude was never launched), and a genuine death arrives as
+        // SessionEnd / orphan settlement → Stopped.
         _ => None,
     }
 }
@@ -75,10 +76,9 @@ pub fn transition_is_generic_wait(next: HookTransition) -> bool {
 /// Protections against late or out-of-order hooks. This snapshot check is advisory (hooks run in
 /// separate processes); the same rules are enforced atomically inside the store's UPDATE.
 ///
-/// - Failed is sticky: a failure verdict must not be softened by trailing lifecycle events.
-/// - A terminal verdict (SessionEnd → Stopped, StopFailure → Failed) belongs to the session
-///   that died: arriving from a session that is not the run's current one, it is stale news
-///   and must not kill the live successor that has since claimed the run.
+/// - A terminal verdict (SessionEnd → Stopped) belongs to the session that died: arriving from a
+///   session that is not the run's current one, it is stale news and must not kill the live
+///   successor that has since claimed the run.
 /// - A tool-specific wait (pending question / plan approval) must not be downgraded to the
 ///   generic awaiting-prompt wait by the Stop that trails every PreToolUse.
 /// - A dead run stays dead: a Stop that lands after SessionEnd (or after terminal-exit
@@ -96,9 +96,6 @@ pub fn transition_is_protected(
     event_session_id: Option<&str>,
     next: HookTransition,
 ) -> bool {
-    if current_status == TaskRunStatus::Failed {
-        return true;
-    }
     if next.status.is_terminal() {
         return matches!(
             (known_session_id, event_session_id),
@@ -207,7 +204,8 @@ mod tests {
                     Some(TaskRunWaitReason::AwaitingPrompt),
                 )),
             ),
-            ("StopFailure", Some((TaskRunStatus::Failed, None))),
+            // StopFailure is a recoverable API error (and fires for subagents too): inert.
+            ("StopFailure", None),
             ("SessionEnd", Some((TaskRunStatus::Stopped, None))),
             ("Notification", None),
         ];
@@ -277,17 +275,6 @@ mod tests {
             wait_reason: Some(TaskRunWaitReason::AskUserQuestion),
         };
         let same = (Some("sess-1"), Some("sess-1"));
-
-        // Failed is sticky against everything, even a brand-new session.
-        for next in [generic_wait, to_running, to_stopped] {
-            assert!(transition_is_protected(
-                TaskRunStatus::Failed,
-                None,
-                Some("sess-1"),
-                Some("sess-2"),
-                next
-            ));
-        }
 
         // A late Stop from the dead session must not resurrect the run; an anonymous event is
         // treated the same way.
@@ -381,21 +368,15 @@ mod tests {
         ));
 
         // A terminal verdict from a session the run has moved past is stale: a late SessionEnd
-        // (or StopFailure) from dead sess-1 must not kill the run sess-2 now drives.
-        let to_failed = HookTransition {
-            status: TaskRunStatus::Failed,
-            wait_reason: None,
-        };
+        // from dead sess-1 must not kill the run sess-2 now drives.
         for current in [TaskRunStatus::Running, TaskRunStatus::WaitingForUser] {
-            for next in [to_stopped, to_failed] {
-                assert!(transition_is_protected(
-                    current,
-                    None,
-                    Some("sess-2"),
-                    Some("sess-1"),
-                    next
-                ));
-            }
+            assert!(transition_is_protected(
+                current,
+                None,
+                Some("sess-2"),
+                Some("sess-1"),
+                to_stopped
+            ));
         }
         // The same verdict from the run's own session (or anonymous, or before any session was
         // recorded) still lands.

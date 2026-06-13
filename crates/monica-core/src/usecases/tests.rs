@@ -1226,9 +1226,9 @@ fn record_claude_hook_stale_terminal_verdict_does_not_kill_revived_run() {
     )
     .unwrap();
 
-    // The dead session's terminal verdicts straggle in through the pinned MONICA_TASK_RUN_ID
-    // after the relaunch: neither may touch the run sess-2 now owns — StopFailure least of
-    // all, since Failed would stick forever.
+    // Stragglers arrive through the pinned MONICA_TASK_RUN_ID after the relaunch, but neither
+    // may touch the run sess-2 now owns: the dead session's SessionEnd is a stale terminal
+    // verdict (session-scoped), and StopFailure is inert by design — never the run's verdict.
     for payload in [
         r#"{"hook_event_name":"SessionEnd","session_id":"sess-1"}"#,
         r#"{"hook_event_name":"StopFailure","session_id":"sess-1"}"#,
