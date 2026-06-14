@@ -253,12 +253,64 @@ where
 
     let (runspace_id, _, _) = super::open_bench::ensure_bench(repos, task_id, &worktree_str, true)?;
 
+    let initial_command = claude_initial_command(read_prompt_file(&worktree_path).as_deref());
+
     Ok(crate::RunTaskResult {
         task_id: task_id.to_string(),
         task_run_id: primary_id,
         runspace_id,
         cwd: worktree_str,
         env: shell.env,
-        initial_command: "claude".to_string(),
+        initial_command,
     })
+}
+
+/// Reads `.monica/prompt.md` from the worktree, returning the trimmed body only
+/// when it carries an actual prompt. An empty or whitespace-only file means
+/// "launch Claude bare".
+fn read_prompt_file(worktree_path: &Path) -> Option<String> {
+    let contents = std::fs::read_to_string(worktree_path.join(".monica/prompt.md")).ok()?;
+    let trimmed = contents.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn claude_initial_command(prompt: Option<&str>) -> String {
+    match prompt {
+        Some(prompt) => format!("claude {}", crate::shell::quote_single(prompt)),
+        None => "claude".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_prompt_launches_claude_bare() {
+        assert_eq!(claude_initial_command(None), "claude");
+    }
+
+    #[test]
+    fn prompt_is_passed_as_single_quoted_argument() {
+        assert_eq!(
+            claude_initial_command(Some("fix the login bug")),
+            "claude 'fix the login bug'"
+        );
+    }
+
+    #[test]
+    fn prompt_with_single_quote_is_escaped() {
+        assert_eq!(
+            claude_initial_command(Some("don't break it")),
+            "claude 'don'\\''t break it'"
+        );
+    }
+
+    #[test]
+    fn multiline_prompt_stays_within_one_quoted_argument() {
+        assert_eq!(
+            claude_initial_command(Some("line one\nline two")),
+            "claude 'line one\nline two'"
+        );
+    }
 }

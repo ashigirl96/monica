@@ -11,6 +11,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::new()
         .commands(tauri_specta::collect_commands![
             commands::clipboard::clipboard_write_image,
+            commands::editor::resolve_editor_paths,
+            commands::editor::open_in_editor,
             commands::git::worktree_info,
             commands::terminal::terminal_create_session,
             commands::terminal::terminal_attach,
