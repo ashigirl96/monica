@@ -3,9 +3,9 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
-import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { attachTapSelection } from "@/features/work-bench/ui/tap-selection";
+import { attachTerminalLinks } from "@/features/work-bench/ui/terminal-links";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getDefaultStore } from "jotai";
 import {
@@ -224,9 +224,10 @@ export function useTerminal(
       wordSeparator: " \t'\"│`|:;,()[]{}<>$",
       // マウスレポート中の TUI でも修飾キーでローカル選択を許可する (mac は Option)。
       macOptionClickForcesSelection: true,
+      // OSC 8 ハイパーリンクも regex リンクと同様 cmd 押下時のみ発火させる (ghostty 準拠)。
       linkHandler: {
-        activate: (_event, uri) => {
-          openUrl(uri);
+        activate: (event, uri) => {
+          if (event.metaKey) openUrl(uri);
         },
       },
       theme: {
@@ -258,11 +259,6 @@ export function useTerminal(
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.loadAddon(new Unicode11Addon());
-    term.loadAddon(
-      new WebLinksAddon((_event, uri) => {
-        openUrl(uri);
-      }),
-    );
 
     termRef.current = term;
     fitRef.current = fitAddon;
@@ -378,6 +374,7 @@ export function useTerminal(
       container.addEventListener("pointerdown", blockPhantom, true);
       container.addEventListener("wheel", onWheel, { capture: true });
       cleanups.push(attachTapSelection(term, container));
+      cleanups.push(attachTerminalLinks(term, container, () => optionsRef.current.cwd));
       cleanups.push(() => {
         container.removeEventListener("mousedown", blockPhantom, true);
         container.removeEventListener("pointerdown", blockPhantom, true);

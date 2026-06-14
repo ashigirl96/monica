@@ -5,6 +5,7 @@
 
 pub mod domain;
 pub mod interfaces;
+pub mod shell;
 pub mod usecases;
 
 pub use domain::{

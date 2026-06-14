@@ -4,6 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
+use monica_core::shell::quote_single;
 use monica_core::{Project, RunArtifacts, TaskShellEnv};
 use serde_json::{json, Value};
 
@@ -136,11 +137,11 @@ fn resolve_hook_command() -> Result<String> {
     }
     if let Ok(cli) = std::env::var("MONICA_CLI_PATH") {
         if !cli.is_empty() && Path::new(&cli).is_file() {
-            return Ok(format!("{} hook claude", shell_quote_single(&cli)));
+            return Ok(format!("{} hook claude", quote_single(&cli)));
         }
     }
     if let Some(cli) = which_monica() {
-        return Ok(format!("{} hook claude", shell_quote_single(&cli)));
+        return Ok(format!("{} hook claude", quote_single(&cli)));
     }
     Err(anyhow!(
         "cannot resolve monica CLI for hook command; \
@@ -159,12 +160,8 @@ fn which_monica() -> Option<String> {
     None
 }
 
-fn shell_quote_single(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
-}
-
 fn pin_hook_command_base(hook_command: &str, monica_home: &str) -> String {
-    format!("MONICA_HOME={} {hook_command}", shell_quote_single(monica_home))
+    format!("MONICA_HOME={} {hook_command}", quote_single(monica_home))
 }
 
 fn claude_settings_json(hook_command: &str) -> Result<String> {
@@ -307,11 +304,6 @@ mod tests {
                 .and_then(Value::as_str);
             assert_eq!(cmd, Some("monica hook claude"), "{event}: command");
         }
-    }
-
-    #[test]
-    fn shell_quote_handles_single_quotes() {
-        assert_eq!(shell_quote_single("a'b"), "'a'\\''b'");
     }
 
     #[test]

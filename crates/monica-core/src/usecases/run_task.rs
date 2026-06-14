@@ -276,13 +276,9 @@ fn read_prompt_file(worktree_path: &Path) -> Option<String> {
 
 fn claude_initial_command(prompt: Option<&str>) -> String {
     match prompt {
-        Some(prompt) => format!("claude {}", shell_quote_single(prompt)),
+        Some(prompt) => format!("claude {}", crate::shell::quote_single(prompt)),
         None => "claude".to_string(),
     }
-}
-
-fn shell_quote_single(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 #[cfg(test)]

@@ -7,6 +7,16 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 export const commands = {
   clipboardWriteImage: (path: string) =>
     typedError<null, string>(__TAURI_INVOKE("clipboard_write_image", { path })),
+  /**
+   *  Resolve each candidate against `cwd` (expanding a leading `~`) and return the
+   *  canonical absolute path when it exists, or `null` otherwise. `canonicalize`
+   *  doubles as the existence check: a path that cannot be resolved on disk is
+   *  dropped, so the frontend only ever highlights real files.
+   */
+  resolveEditorPaths: (cwd: string, candidates: string[]) =>
+    __TAURI_INVOKE<(string | null)[]>("resolve_editor_paths", { cwd, candidates }),
+  openInEditor: (path: string) =>
+    typedError<null, string>(__TAURI_INVOKE("open_in_editor", { path })),
   worktreeInfo: (cwd: string) =>
     typedError<
       {
