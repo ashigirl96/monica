@@ -13,7 +13,7 @@ import {
 import { JumpHint } from "./jump-hint";
 import { terminalTerminate, type TerminalSession } from "@/commands/terminal";
 import type { DisplayStatus } from "@/commands/task";
-import { taskStatusMapAtom, refreshTaskStatusMapAtom } from "@/stores/workboard";
+import { taskStatusMapAtom, refreshTaskSummariesAtom } from "@/stores/workboard";
 import { activeSpaceAtom } from "@/stores/space";
 import { useDragReorder } from "@/hooks/use-drag-reorder";
 import { useLiveRefresh } from "@/hooks/use-live-refresh";
@@ -135,7 +135,7 @@ export function WorkBenchSidebar() {
   const activate = useSetAtom(activateRunspaceAtom);
   const reattach = useSetAtom(reattachSessionAtom);
   const refreshSessions = useSetAtom(refreshSessionsAtom);
-  const refreshTaskStatusMap = useSetAtom(refreshTaskStatusMapAtom);
+  const refreshTaskStatusMap = useSetAtom(refreshTaskSummariesAtom);
   const reorder = useSetAtom(reorderRunspacesAtom);
   const setSpace = useSetAtom(activeSpaceAtom);
   const jumpHints = useAtomValue(jumpHintTargetsAtom);

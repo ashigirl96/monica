@@ -24,6 +24,15 @@ describe("queryKeys", () => {
     expect(queryKeys.tasks.summary(null)).not.toEqual(queryKeys.tasks.summary("owner/repo"));
   });
 
+  test("summaryFamily is the shared prefix of every tasks.summary key", () => {
+    const family = queryKeys.tasks.summaryFamily();
+    expect([...family]).toEqual(["tasks", "summary"]);
+    for (const project of [null, "owner/repo"]) {
+      const key = queryKeys.tasks.summary(project);
+      expect(key.slice(0, family.length)).toEqual([...family]);
+    }
+  });
+
   test("is a pure mapping of arguments (same input, equal output)", () => {
     expect(queryKeys.tasks.summary("owner/repo")).toEqual(queryKeys.tasks.summary("owner/repo"));
     expect(queryKeys.projects.list()).toEqual(queryKeys.projects.list());
