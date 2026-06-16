@@ -1,4 +1,5 @@
 import { atom } from "jotai";
+import { atomWithQuery, queryClientAtom } from "jotai-tanstack-query";
 import {
   listTaskSummaries,
   getBoardColumns,
@@ -10,9 +11,9 @@ import {
   makeMainTaskRun,
   type TaskSummaryRow,
   type BoardColumn,
-  type ProjectEntry,
   type DisplayStatus,
 } from "@/commands/task";
+import { queryKeys } from "@/stores/query-keys";
 import { runTaskFlow } from "@/features/work-board/run-flow";
 import {
   activeTerminalTabAtom,
@@ -26,7 +27,13 @@ import { activeSpaceAtom } from "@/stores/space";
 export const boardColumnsAtom = atom<BoardColumn[]>([]);
 // Already filtered by the selected project; the backend query owns the filter.
 export const taskSummariesAtom = atom<TaskSummaryRow[]>([]);
-export const projectsAtom = atom<ProjectEntry[]>([]);
+
+const projectsQueryOptions = {
+  queryKey: queryKeys.projects.list(),
+  queryFn: () => listProjects(),
+} as const;
+const projectsQueryAtom = atomWithQuery(() => projectsQueryOptions);
+export const projectsAtom = atom((get) => get(projectsQueryAtom).data ?? []);
 
 const selectedProjectBaseAtom = atom<string | null>(null);
 export const selectedProjectAtom = atom(
@@ -38,14 +45,14 @@ export const selectedProjectAtom = atom(
 );
 
 export const loadBoardAtom = atom(null, async (get, set) => {
-  const [columns, summaries, projects] = await Promise.all([
+  // Restore reads the projects snapshot synchronously, so warm its cache before resolving.
+  const [columns, summaries] = await Promise.all([
     getBoardColumns(),
     listTaskSummaries(get(selectedProjectAtom)),
-    listProjects(),
+    get(queryClientAtom).ensureQueryData(projectsQueryOptions),
   ]);
   set(boardColumnsAtom, columns);
   set(taskSummariesAtom, summaries);
-  set(projectsAtom, projects);
 });
 
 export const columnTasksAtom = atom((get) => {
