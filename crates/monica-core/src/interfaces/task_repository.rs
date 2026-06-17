@@ -10,11 +10,11 @@ use crate::NewTask;
 /// parameter, not a domain concept, so it lives beside the port rather than in `domain`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskSummaryFilter {
-    /// Every task, including the Done archive.
+    /// Every task, including the Closed archive.
     All,
-    /// Everything except the Done archive.
+    /// Everything except the Closed archive.
     Active,
-    /// Exactly one display status; Done is reachable only when named here.
+    /// Exactly one display status; Closed is reachable only when named here.
     Status(DisplayStatus),
 }
 
@@ -22,7 +22,7 @@ impl TaskSummaryFilter {
     pub fn matches(self, status: DisplayStatus) -> bool {
         match self {
             TaskSummaryFilter::All => true,
-            TaskSummaryFilter::Active => status != DisplayStatus::Done,
+            TaskSummaryFilter::Active => status != DisplayStatus::Closed,
             TaskSummaryFilter::Status(s) => s == status,
         }
     }
@@ -32,7 +32,7 @@ pub trait TaskRepository {
     fn insert_task(&mut self, new: NewTask) -> Result<Task>;
     fn insert_task_with_ref(&mut self, new: NewTask, external: ExternalRef) -> Result<Task>;
     fn get_task(&self, id: &str) -> Result<Option<Task>>;
-    fn mark_task_deleted(&mut self, id: &str) -> Result<Task>;
+    fn mark_task_closed(&mut self, id: &str) -> Result<Task>;
     fn list_tasks(&self) -> Result<Vec<Task>>;
     fn list_task_summaries(
         &self,
@@ -77,15 +77,15 @@ mod tests {
 
     #[test]
     fn task_summary_filter_matches_by_intent() {
-        assert!(TaskSummaryFilter::All.matches(DisplayStatus::Done));
+        assert!(TaskSummaryFilter::All.matches(DisplayStatus::Closed));
         assert!(TaskSummaryFilter::All.matches(DisplayStatus::Ready));
 
-        assert!(!TaskSummaryFilter::Active.matches(DisplayStatus::Done));
+        assert!(!TaskSummaryFilter::Active.matches(DisplayStatus::Closed));
         assert!(TaskSummaryFilter::Active.matches(DisplayStatus::Ready));
         assert!(TaskSummaryFilter::Active.matches(DisplayStatus::Running));
 
-        let done = TaskSummaryFilter::Status(DisplayStatus::Done);
-        assert!(done.matches(DisplayStatus::Done));
-        assert!(!done.matches(DisplayStatus::Ready));
+        let closed = TaskSummaryFilter::Status(DisplayStatus::Closed);
+        assert!(closed.matches(DisplayStatus::Closed));
+        assert!(!closed.matches(DisplayStatus::Ready));
     }
 }

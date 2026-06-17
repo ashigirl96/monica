@@ -11,7 +11,7 @@ use crate::interfaces::{
     TaskRunRepository, TaskSummaryFilter,
 };
 use crate::{
-    begin_github_device_flow, delete_issue, execute_run, github_auth_status, logout_github,
+    begin_github_device_flow, close_issue, execute_run, github_auth_status, logout_github,
     make_main_by_terminal_tab, open_bench, prepare_claude_for_run, primary_terminal_tab,
     record_claude_hook, register_project_with_default_branch, start_run, sync_next_pull_request,
     track_github_issue, HookContext, MakeMainOutcome, RefType,
@@ -92,34 +92,22 @@ impl TaskRepository for FakeRepos {
     }
 
     fn get_task(&self, id: &str) -> Result<Option<Task>> {
-        Ok(self
-            .state
-            .borrow()
-            .tasks
-            .get(id)
-            .filter(|task| task.deleted_at.is_none())
-            .cloned())
+        Ok(self.state.borrow().tasks.get(id).cloned())
     }
 
-    fn mark_task_deleted(&mut self, id: &str) -> Result<Task> {
+    fn mark_task_closed(&mut self, id: &str) -> Result<Task> {
         let mut state = self.state.borrow_mut();
         let task = state
             .tasks
             .get_mut(id)
             .ok_or_else(|| anyhow!("task not found: {id}"))?;
-        task.deleted_at = Some("2026-06-02T00:00:00.000Z".to_string());
+        task.status = TaskStatus::Closed;
+        task.closed_at = Some("2026-06-02T00:00:00.000Z".to_string());
         Ok(task.clone())
     }
 
     fn list_tasks(&self) -> Result<Vec<Task>> {
-        Ok(self
-            .state
-            .borrow()
-            .tasks
-            .values()
-            .filter(|task| task.deleted_at.is_none())
-            .cloned()
-            .collect())
+        Ok(self.state.borrow().tasks.values().cloned().collect())
     }
 
     fn list_task_summaries(
@@ -301,7 +289,7 @@ impl TaskRunRepository for FakeRepos {
         };
         state.runs.insert(id, run.clone());
         if let Some(task) = state.tasks.get_mut(&new.task_id) {
-            if task.status != TaskStatus::Done {
+            if task.status != TaskStatus::Closed {
                 task.status = TaskStatus::InProgress;
             }
         }
@@ -321,7 +309,7 @@ impl TaskRunRepository for FakeRepos {
             .ok_or_else(|| anyhow!("task run not found: {task_run_id}"))?
             .status = status;
         if let Some(task) = state.tasks.get_mut(task_id) {
-            if task.status != TaskStatus::Done {
+            if task.status != TaskStatus::Closed {
                 task.status = TaskStatus::InProgress;
             }
         }
@@ -658,7 +646,7 @@ fn task_from_new(id: String, new: NewTask) -> Task {
         details: new.details,
         source: new.source,
         primary_task_run_id: None,
-        deleted_at: None,
+        closed_at: None,
         created_at: "2026-06-02T00:00:00.000Z".to_string(),
         updated_at: "2026-06-02T00:00:00.000Z".to_string(),
     }
@@ -699,7 +687,7 @@ async fn track_github_issue_uses_gateway_and_repositories() {
 }
 
 #[test]
-fn delete_issue_delegates_run_cleanup_to_git_gateway() {
+fn close_issue_delegates_run_cleanup_to_git_gateway() {
     let mut repos = FakeRepos::default();
     let mut project = Project::from_repo("owner/repo");
     project.path = Some("/repo".to_string());
@@ -714,7 +702,7 @@ fn delete_issue_delegates_run_cleanup_to_git_gateway() {
         })
         .unwrap();
     let git = FakeGit::default();
-    let report = delete_issue(&mut repos, &git, &task_id).unwrap();
+    let report = close_issue(&mut repos, &git, &task_id).unwrap();
     assert_eq!(report.removed_branches, vec!["issue-42"]);
     assert!(*git.cleaned.borrow());
 }
@@ -1408,7 +1396,7 @@ fn record_claude_hook_does_not_create_runs_for_done_tasks() {
     let mut repos = FakeRepos::default();
     let artifacts = FakeArtifacts::default();
     let (task_id, _) = task_with_running_primary(&mut repos, &artifacts);
-    repos.update_task_status(&task_id, TaskStatus::Done).unwrap();
+    repos.update_task_status(&task_id, TaskStatus::Closed).unwrap();
 
     let report = record_claude_hook(
         &mut repos,
@@ -1421,7 +1409,7 @@ fn record_claude_hook_does_not_create_runs_for_done_tasks() {
     assert!(!report.task_run_linked);
     assert_eq!(
         repos.get_task(&task_id).unwrap().unwrap().status,
-        TaskStatus::Done
+        TaskStatus::Closed
     );
 }
 
@@ -1801,14 +1789,14 @@ fn start_run_rejects_active_primary_run() {
 }
 
 #[test]
-fn start_run_rejects_done_task() {
+fn start_run_rejects_closed_task() {
     let mut repos = FakeRepos::default();
     insert_runnable_project(&repos);
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
-    repos.update_task_status(&task_id, TaskStatus::Done).unwrap();
+    repos.update_task_status(&task_id, TaskStatus::Closed).unwrap();
 
     let err = start_run(&mut repos, &task_id).unwrap_err();
-    assert!(err.to_string().contains("is done"), "{err}");
+    assert!(err.to_string().contains("is closed"), "{err}");
 }
 
 #[test]

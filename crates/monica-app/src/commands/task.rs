@@ -152,10 +152,10 @@ pub fn primary_tab_id(task_id: String) -> Result<Option<String>, String> {
 // spawn_blocking keeps that sync work off the async runtime's workers.
 #[tauri::command]
 #[specta::specta]
-pub async fn delete_task(task_id: String) -> Result<(), String> {
+pub async fn close_task(task_id: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-        monica_core::delete_issue(&mut runtime.repositories, &runtime.git, &task_id)
+        monica_core::close_issue(&mut runtime.repositories, &runtime.git, &task_id)
             .map(|_| ())
             .map_err(|e| e.to_string())
     })

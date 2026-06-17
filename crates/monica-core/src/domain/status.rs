@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub enum TaskStatus {
     Ready,
     InProgress,
-    Done,
+    Closed,
 }
 
 impl TaskStatus {
@@ -17,7 +17,7 @@ impl TaskStatus {
         match self {
             TaskStatus::Ready => "ready",
             TaskStatus::InProgress => "in_progress",
-            TaskStatus::Done => "done",
+            TaskStatus::Closed => "closed",
         }
     }
 
@@ -36,7 +36,7 @@ impl FromStr for TaskStatus {
         Ok(match s {
             "ready" => TaskStatus::Ready,
             "in_progress" => TaskStatus::InProgress,
-            "done" => TaskStatus::Done,
+            "closed" => TaskStatus::Closed,
             other => return Err(anyhow!("unknown task status: {other}")),
         })
     }
@@ -145,7 +145,7 @@ pub enum DisplayStatus {
     WaitingForUser,
     Stopped,
     Failed,
-    Done,
+    Closed,
 }
 
 impl DisplayStatus {
@@ -159,7 +159,7 @@ impl DisplayStatus {
             DisplayStatus::WaitingForUser => "waiting_for_user",
             DisplayStatus::Stopped => "stopped",
             DisplayStatus::Failed => "failed",
-            DisplayStatus::Done => "done",
+            DisplayStatus::Closed => "closed",
         }
     }
 
@@ -202,7 +202,7 @@ impl DisplayStatus {
                 Some(TaskRunStatus::Failed) => DisplayStatus::Failed,
                 None => DisplayStatus::InProgress,
             },
-            TaskStatus::Done => DisplayStatus::Done,
+            TaskStatus::Closed => DisplayStatus::Closed,
         }
     }
 }
@@ -220,7 +220,7 @@ impl FromStr for DisplayStatus {
             "waiting_for_user" => DisplayStatus::WaitingForUser,
             "stopped" => DisplayStatus::Stopped,
             "failed" => DisplayStatus::Failed,
-            "done" => DisplayStatus::Done,
+            "closed" => DisplayStatus::Closed,
             other => return Err(anyhow!("unknown display status: {other}")),
         })
     }
@@ -237,8 +237,8 @@ pub struct BoardColumn {
 /// Columns are ordered so a card only moves when the ball changes hands, and the user's own
 /// action pushes it rightward: Prepare keeps it in Ready (setting_up is machine work, nobody's
 /// turn), the moment it needs the user it enters Needs You, handing it to the agent moves it to
-/// Running, and a turn's end brings it back. Done tasks are archived off the board entirely —
-/// `monica issue status --status done` still reaches them.
+/// Running, and a turn's end brings it back. Closed tasks are archived off the board entirely —
+/// `monica issue status --status closed` still reaches them.
 pub fn board_columns() -> Vec<BoardColumn> {
     vec![
         BoardColumn {
@@ -269,10 +269,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn task_display_status_keeps_done_at_product_level() {
+    fn task_display_status_keeps_closed_at_product_level() {
         assert_eq!(
-            DisplayStatus::from_task_and_run(TaskStatus::Done, Some(TaskRunStatus::Running)),
-            DisplayStatus::Done
+            DisplayStatus::from_task_and_run(TaskStatus::Closed, Some(TaskRunStatus::Running)),
+            DisplayStatus::Closed
         );
     }
 
@@ -287,7 +287,7 @@ mod tests {
             (DisplayStatus::WaitingForUser, false, false, false),
             (DisplayStatus::Stopped, true, true, false),
             (DisplayStatus::Failed, true, true, false),
-            (DisplayStatus::Done, false, false, false),
+            (DisplayStatus::Closed, false, false, false),
         ];
         for (status, prepare, run, active) in cases {
             assert_eq!(status.prepare_eligible(), prepare, "{status:?} prepare");
@@ -317,8 +317,8 @@ mod tests {
             (DisplayStatus::Running, Some("running")),
             (DisplayStatus::Stopped, Some("interrupted")),
             (DisplayStatus::Failed, Some("interrupted")),
-            // Done is the archive: deliberately absent from the board.
-            (DisplayStatus::Done, None),
+            // Closed is the archive: deliberately absent from the board.
+            (DisplayStatus::Closed, None),
         ];
         for (status, column) in expected {
             let found = columns

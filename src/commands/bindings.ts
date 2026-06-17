@@ -69,8 +69,7 @@ export const commands = {
     typedError<PrepareTaskResult, string>(__TAURI_INVOKE("prepare_task", { taskId })),
   runTask: (taskId: string) =>
     typedError<RunTaskResult, string>(__TAURI_INVOKE("run_task", { taskId })),
-  deleteTask: (taskId: string) =>
-    typedError<null, string>(__TAURI_INVOKE("delete_task", { taskId })),
+  closeTask: (taskId: string) => typedError<null, string>(__TAURI_INVOKE("close_task", { taskId })),
   /**
    *  Promote the run living in the given Workbench tab to its task's Main Run. Returns whether the
    *  primary actually changed; `false` covers "no run in this tab", "already main" and "primary is
@@ -112,7 +111,7 @@ export type DisplayStatus =
   | "waiting_for_user"
   | "stopped"
   | "failed"
-  | "done";
+  | "closed";
 
 export type GithubPullRequestRef = {
   repo: string | null;
@@ -169,7 +168,7 @@ export type TaskRunStatusChanged = {
 
 export type TaskRunWaitReason = "ask_user_question" | "exit_plan_mode" | "awaiting_prompt";
 
-export type TaskStatus = "ready" | "in_progress" | "done";
+export type TaskStatus = "ready" | "in_progress" | "closed";
 
 export type TaskSummaryRow = {
   id: string;

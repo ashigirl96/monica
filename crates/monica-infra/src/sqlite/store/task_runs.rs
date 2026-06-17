@@ -10,17 +10,17 @@ use monica_core::{
 use super::{sql_literal_list, SET_NOW, TASK_RUN_COLUMNS};
 
 /// Keep the owning task pinned to in_progress while a run progresses. Returns false when no
-/// row changed (deleted task, done task, or missing id).
+/// row changed (closed task or missing id).
 fn keep_task_in_progress(tx: &rusqlite::Transaction<'_>, task_id: &str) -> Result<bool> {
     let affected = tx.execute(
         &format!(
             "UPDATE tasks SET status = ?1, updated_at = {SET_NOW}
-             WHERE id = ?2 AND deleted_at IS NULL AND status != ?3"
+             WHERE id = ?2 AND status != ?3"
         ),
         params![
             TaskStatus::InProgress.as_str(),
             task_id,
-            TaskStatus::Done.as_str()
+            TaskStatus::Closed.as_str()
         ],
     )?;
     Ok(affected > 0)
@@ -28,7 +28,7 @@ fn keep_task_in_progress(tx: &rusqlite::Transaction<'_>, task_id: &str) -> Resul
 
 fn require_task_exists(tx: &rusqlite::Transaction<'_>, task_id: &str) -> Result<()> {
     let exists: i64 = tx.query_row(
-        "SELECT count(*) FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
+        "SELECT count(*) FROM tasks WHERE id = ?1",
         params![task_id],
         |row| row.get(0),
     )?;
@@ -105,7 +105,7 @@ impl SqliteStore {
             params![task_run_id, task_id],
         )?;
         if affected > 0 {
-            // A deleted task's runs still deserve their tombstone (same silent no-op as hook
+            // A closed task's runs still deserve their tombstone (same silent no-op as hook
             // observations); erroring here would roll the settlement back and leave the run
             // live forever.
             keep_task_in_progress(&tx, task_id)?;
@@ -117,7 +117,7 @@ impl SqliteStore {
 
 impl TaskRunRepository for SqliteStore {
     /// Apply a hook observation to a task run. TaskRun is the lifecycle source of truth; the owning
-    /// task is only kept in `in_progress` while a non-deleted, non-done run is being observed.
+    /// task is only kept in `in_progress` while a non-closed run is being observed.
     ///
     /// The status/wait_reason CASE guards re-enforce `transition_is_protected` atomically: hooks
     /// run in separate processes, so the caller's snapshot check alone cannot stop a late Stop
@@ -202,7 +202,7 @@ impl TaskRunRepository for SqliteStore {
                 params![task_run_id],
                 |row| row.get(0),
             )?;
-            // Hooks may observe runs of deleted tasks; that stays a silent no-op.
+            // Hooks may observe runs of closed tasks; that stays a silent no-op.
             keep_task_in_progress(&tx, &task_id)?;
         }
         tx.commit()?;

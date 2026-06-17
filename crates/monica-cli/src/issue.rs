@@ -22,8 +22,8 @@ pub enum IssueCommand {
         #[arg(long)]
         project: Option<String>,
     },
-    /// Delete a tracked Monica issue (MON-<id>)
-    Delete {
+    /// Close a tracked Monica issue (MON-<id>)
+    Close {
         /// MON-<id>
         id: String,
     },
@@ -34,7 +34,7 @@ pub async fn run(cmd: IssueCommand) -> Result<()> {
     match cmd {
         IssueCommand::Track { target } => track_command(&mut runtime, &target).await,
         IssueCommand::Status { status, project } => status_command(&runtime, status, project),
-        IssueCommand::Delete { id } => delete_command(&mut runtime, &id),
+        IssueCommand::Close { id } => close_command(&mut runtime, &id),
     }
 }
 
@@ -70,7 +70,7 @@ fn status_command(
     Ok(())
 }
 
-fn delete_command(runtime: &mut Runtime, id: &str) -> Result<()> {
+fn close_command(runtime: &mut Runtime, id: &str) -> Result<()> {
     let item = monica_core::list_tasks(&runtime.repositories)?
         .into_iter()
         .find(|task| task.id == id)
@@ -80,14 +80,14 @@ fn delete_command(runtime: &mut Runtime, id: &str) -> Result<()> {
         .find(|row| row.id == item.id)
         .and_then(|row| row.project);
 
-    print_delete_summary(&item, project.as_deref());
-    if !confirm_delete()? {
+    print_close_summary(&item, project.as_deref());
+    if !confirm_close()? {
         println!("Canceled.");
         return Ok(());
     }
 
-    let report = monica_core::delete_issue(&mut runtime.repositories, &runtime.git, id)?;
-    println!("Deleted issue {}.", report.item.id);
+    let report = monica_core::close_issue(&mut runtime.repositories, &runtime.git, id)?;
+    println!("Closed issue {}.", report.item.id);
     if !report.task_runs.is_empty() {
         println!("Preserved task runs: {}.", report.task_runs.join(", "));
     }
@@ -97,8 +97,8 @@ fn delete_command(runtime: &mut Runtime, id: &str) -> Result<()> {
     Ok(())
 }
 
-fn print_delete_summary(item: &Task, project: Option<&str>) {
-    println!("Delete issue?");
+fn print_close_summary(item: &Task, project: Option<&str>) {
+    println!("Close issue?");
     println!();
     println!("  ID:      {}", item.id);
     println!("  Title:   {}", item.title);
@@ -108,7 +108,7 @@ fn print_delete_summary(item: &Task, project: Option<&str>) {
     println!("This cannot be undone.");
 }
 
-fn confirm_delete() -> Result<bool> {
+fn confirm_close() -> Result<bool> {
     print!("Continue? [y/N] ");
     io::stdout().flush()?;
     let mut answer = String::new();
@@ -174,8 +174,8 @@ mod tests {
             TaskSummaryFilter::Status(DisplayStatus::Ready)
         );
         assert_eq!(
-            status_filter(Some("done")).unwrap(),
-            TaskSummaryFilter::Status(DisplayStatus::Done)
+            status_filter(Some("closed")).unwrap(),
+            TaskSummaryFilter::Status(DisplayStatus::Closed)
         );
         assert!(status_filter(Some("bogus")).is_err());
     }

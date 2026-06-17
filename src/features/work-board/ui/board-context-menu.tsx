@@ -31,10 +31,10 @@ function MenuPopover({ menu }: { menu: MenuState }) {
       {MENU_ITEMS.map((item, i) => {
         const disabled = isItemDisabled(item.id, task);
         const selected = i === menu.itemIndex;
-        const isDelete = item.id === "delete";
+        const isClose = item.id === "close";
         return (
           <Fragment key={item.id}>
-            {isDelete && <div className="my-1 h-px bg-border" />}
+            {isClose && <div className="my-1 h-px bg-border" />}
             <button
               type="button"
               disabled={disabled}
@@ -42,12 +42,12 @@ function MenuPopover({ menu }: { menu: MenuState }) {
               onClick={() => executeItem()}
               className={cn(
                 "flex w-full items-center justify-between rounded px-2 py-1 text-left text-[12px]",
-                isDelete ? "text-destructive" : "text-popover-foreground",
-                selected && (isDelete ? "bg-destructive/15" : "bg-accent text-accent-foreground"),
+                isClose ? "text-destructive" : "text-popover-foreground",
+                selected && (isClose ? "bg-destructive/15" : "bg-accent text-accent-foreground"),
                 disabled && "opacity-40",
               )}
             >
-              <span>{isDelete && menu.confirmingDelete ? "Enter to confirm" : item.label}</span>
+              <span>{isClose && menu.confirmingClose ? "Enter to confirm" : item.label}</span>
               {item.hint && (
                 <span className="font-mono text-[10px] text-muted-foreground">{item.hint}</span>
               )}

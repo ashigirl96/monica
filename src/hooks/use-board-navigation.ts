@@ -12,7 +12,7 @@ import {
   moveMenuItemAtom,
   openMenuAtom,
   reconcileFocusAtom,
-  requestDeleteAtom,
+  requestCloseAtom,
   runDirectActionAtom,
 } from "@/stores/workboard-nav";
 
@@ -44,7 +44,7 @@ export function useBoardNavigation() {
         else if (e.key === "k" || e.key === "ArrowUp") store.set(moveMenuItemAtom, "up");
         else if (e.key === "Enter") store.set(executeMenuItemAtom);
         else if (e.key === "Escape" || e.key === " ") store.set(menuAtom, null);
-        else if (e.key === "d") store.set(requestDeleteAtom, null);
+        else if (e.key === "c") store.set(requestCloseAtom, null);
         else if (e.key in ACTION_KEYS)
           store.set(runDirectActionAtom, ACTION_KEYS[e.key as keyof typeof ACTION_KEYS]);
         else return;
@@ -68,10 +68,10 @@ export function useBoardNavigation() {
         e.preventDefault();
         const anchor = focusedCardAnchor(store.get(focusedTaskIdAtom));
         if (anchor) store.set(openMenuAtom, anchor);
-      } else if (e.key === "d") {
+      } else if (e.key === "c") {
         e.preventDefault();
         const anchor = focusedCardAnchor(store.get(focusedTaskIdAtom));
-        if (anchor) store.set(requestDeleteAtom, anchor);
+        if (anchor) store.set(requestCloseAtom, anchor);
       } else if (e.key in ACTION_KEYS) {
         e.preventDefault();
         store.set(runDirectActionAtom, ACTION_KEYS[e.key as keyof typeof ACTION_KEYS]);

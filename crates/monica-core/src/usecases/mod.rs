@@ -1,6 +1,6 @@
 pub mod auth;
 pub mod open_bench;
-pub mod delete_issue;
+pub mod close_issue;
 pub mod make_main;
 pub mod query;
 pub mod reconcile_terminal_sessions;
@@ -17,7 +17,7 @@ pub use auth::{
     begin_github_device_flow, github_auth_status, logout_github, wait_for_github_device_flow,
 };
 pub use open_bench::{open_bench, task_shell_env};
-pub use delete_issue::{delete_issue, DeleteIssueReport};
+pub use close_issue::{close_issue, CloseIssueReport};
 pub use make_main::{make_main_by_terminal_tab, primary_terminal_tab, MakeMainOutcome};
 pub use query::{
     get_project, list_events, list_projects, list_task_summaries, list_tasks, set_project_field,

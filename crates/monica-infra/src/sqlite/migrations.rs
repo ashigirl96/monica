@@ -31,6 +31,7 @@ fn migration_steps() -> Vec<M<'static>> {
         M::up(V18),
         M::up(V19),
         M::up(V20),
+        M::up(V21),
     ]
 }
 
@@ -501,6 +502,21 @@ const V20: &str = r#"
     CREATE INDEX terminal_sessions_tab_idx ON terminal_sessions(tab_id, created_at);
 "#;
 
+/// v21: unify done and soft-delete into a single closed concept. The `deleted_at` column becomes
+/// `closed_at` — a record-only timestamp, no longer a hard filter — and both the old `done` status
+/// and old soft-deleted rows collapse into `status = 'closed'` with a synced `closed_at`.
+const V21: &str = r#"
+    ALTER TABLE tasks RENAME COLUMN deleted_at TO closed_at;
+
+    UPDATE tasks
+       SET status = 'closed'
+     WHERE status = 'done' OR closed_at IS NOT NULL;
+
+    UPDATE tasks
+       SET closed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+     WHERE status = 'closed' AND closed_at IS NULL;
+"#;
+
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
     migrations()
@@ -715,12 +731,63 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(status_of("mon-1"), "ready");
-        assert_eq!(status_of("mon-2"), "done");
+        // v21 (applied by open_at → to_latest) folds the old `done` status into `closed`.
+        assert_eq!(status_of("mon-2"), "closed");
         assert_eq!(status_of("mon-3"), "in_progress");
 
         // The migrated row must read back through the repository (TaskStatus::Inbox is gone).
         let task = db.get_task("mon-1").unwrap().unwrap();
         assert_eq!(task.status, TaskStatus::Ready);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// v21 collapses the old `done` status and old soft-deleted rows into a single `closed`
+    /// status, renames `deleted_at` to `closed_at`, and backfills `closed_at` so it stays in sync.
+    #[test]
+    fn v21_unifies_done_and_soft_delete_into_closed() {
+        let path = temp_db_path("v21");
+
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            stage_through(&mut conn, 20);
+            conn.execute_batch(
+                "INSERT INTO tasks (id, kind, status, title) VALUES
+                   ('mon-done', 'development', 'done', 'finished'),
+                   ('mon-active', 'development', 'in_progress', 'active');
+                 INSERT INTO tasks (id, kind, status, title, deleted_at) VALUES
+                   ('mon-deleted', 'development', 'in_progress', 'removed', '2026-01-02T03:04:05.000Z');",
+            )
+            .unwrap();
+        }
+
+        let db = crate::sqlite::SqliteStore::open_at(&path).unwrap();
+        let row = |id: &str| -> (String, Option<String>) {
+            db.conn()
+                .query_row(
+                    "SELECT status, closed_at FROM tasks WHERE id = ?1",
+                    [id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap()
+        };
+
+        let (done_status, done_closed_at) = row("mon-done");
+        assert_eq!(done_status, "closed");
+        assert!(done_closed_at.is_some(), "old done row must get a closed_at");
+
+        let (deleted_status, deleted_closed_at) = row("mon-deleted");
+        assert_eq!(deleted_status, "closed");
+        assert_eq!(deleted_closed_at.as_deref(), Some("2026-01-02T03:04:05.000Z"));
+
+        let (active_status, active_closed_at) = row("mon-active");
+        assert_eq!(active_status, "in_progress");
+        assert!(active_closed_at.is_none());
+
+        // The closed row must read back through the repository (no hard filter hides it).
+        let task = db.get_task("mon-done").unwrap().unwrap();
+        assert_eq!(task.status, TaskStatus::Closed);
+        assert!(task.closed_at.is_some());
 
         std::fs::remove_file(&path).ok();
     }
@@ -976,20 +1043,22 @@ mod tests {
             db.get_task("MON-pr").unwrap().unwrap().status,
             TaskStatus::InProgress
         );
-        assert!(
-            db.get_task("MON-archived").unwrap().is_none(),
-            "soft-deleted archived tasks should be hidden from normal reads"
+        // v21 (applied by open_at → to_latest) folds the v6 soft-delete into `closed`, which is
+        // a visible archive — the old "hidden from normal reads" guarantee no longer holds.
+        assert_eq!(
+            db.get_task("MON-archived").unwrap().unwrap().status,
+            TaskStatus::Closed
         );
 
         let archived: (String, Option<String>) = db
             .conn()
             .query_row(
-                "SELECT status, deleted_at FROM tasks WHERE id = 'MON-archived'",
+                "SELECT status, closed_at FROM tasks WHERE id = 'MON-archived'",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert_eq!(archived.0, TaskStatus::InProgress.as_str());
+        assert_eq!(archived.0, TaskStatus::Closed.as_str());
         assert!(archived.1.is_some());
 
         let wait_run = db.get_task_run("run-11").unwrap().unwrap();
@@ -1018,9 +1087,14 @@ mod tests {
         assert_eq!(failed_run.status, TaskRunStatus::Failed);
 
         let visible = db.list_task_summaries(TaskSummaryFilter::All, None).unwrap();
-        assert!(
-            visible.iter().all(|row| row.id != "MON-archived"),
-            "soft-deleted tasks should not appear in dashboard/list summaries"
+        assert_eq!(
+            visible
+                .iter()
+                .find(|row| row.id == "MON-archived")
+                .unwrap()
+                .status,
+            DisplayStatus::Closed,
+            "v21 surfaces the closed archive in the All summary"
         );
         assert_eq!(
             visible

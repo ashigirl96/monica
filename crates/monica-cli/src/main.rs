@@ -65,8 +65,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn issue_delete_rejects_yes_flag() {
-        assert!(Cli::try_parse_from(["monica", "issue", "delete", "MON-1", "-y"]).is_err());
-        assert!(Cli::try_parse_from(["monica", "issue", "delete", "MON-1", "--yes"]).is_err());
+    fn issue_close_replaces_delete_and_has_no_yes_bypass() {
+        assert!(Cli::try_parse_from(["monica", "issue", "close", "MON-1"]).is_ok());
+        // close confirms interactively; there is no --yes bypass flag.
+        assert!(Cli::try_parse_from(["monica", "issue", "close", "MON-1", "-y"]).is_err());
+        assert!(Cli::try_parse_from(["monica", "issue", "close", "MON-1", "--yes"]).is_err());
+        // the old `delete` subcommand is gone.
+        assert!(Cli::try_parse_from(["monica", "issue", "delete", "MON-1"]).is_err());
     }
 }
