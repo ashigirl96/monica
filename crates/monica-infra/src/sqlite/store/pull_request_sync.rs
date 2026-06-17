@@ -46,8 +46,7 @@ impl SqliteStore {
                ON sync.task_id = t.id
               AND sync.repo = project.repo
               AND sync.branch = latest_run.branch
-             WHERE t.deleted_at IS NULL
-               AND t.kind = 'development'
+             WHERE t.kind = 'development'
                AND project.repo IS NOT NULL
                AND trim(project.repo) != ''
                AND latest_run.branch IS NOT NULL
@@ -89,8 +88,7 @@ impl SqliteStore {
                ON t.id = pr.task_id
              LEFT JOIN github_pull_request_ref_states state
                ON state.external_ref_id = pr.id
-             WHERE t.deleted_at IS NULL
-               AND pr.ref_type = 'github_pull_request'
+             WHERE pr.ref_type = 'github_pull_request'
                AND pr.repo IS NOT NULL
                AND pr.number IS NOT NULL
                AND pr.number > 0

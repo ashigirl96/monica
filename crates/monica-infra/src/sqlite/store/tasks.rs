@@ -81,9 +81,9 @@ impl TaskRepository for SqliteStore {
     }
 
     fn get_task(&self, id: &str) -> Result<Option<Task>> {
-        let mut stmt = self.conn().prepare(&format!(
-            "SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1 AND deleted_at IS NULL"
-        ))?;
+        let mut stmt = self
+            .conn()
+            .prepare(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"))?;
         let mut rows = stmt.query(params![id])?;
         match rows.next()? {
             Some(row) => Ok(Some(crate::sqlite::row::task_from_row(row)?)),
@@ -91,28 +91,30 @@ impl TaskRepository for SqliteStore {
         }
     }
 
-    fn mark_task_deleted(&mut self, id: &str) -> Result<Task> {
+    fn mark_task_closed(&mut self, id: &str) -> Result<Task> {
         let tx = self.conn_mut().transaction()?;
+        let affected = tx.execute(
+            &format!(
+                "UPDATE tasks
+                    SET status = 'closed',
+                        closed_at = {SET_NOW},
+                        updated_at = {SET_NOW}
+                  WHERE id = ?1"
+            ),
+            params![id],
+        )?;
+        if affected == 0 {
+            return Err(anyhow!("task not found: {id}"));
+        }
         let item = {
-            let mut stmt = tx.prepare(&format!(
-                "SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1 AND deleted_at IS NULL"
-            ))?;
+            let mut stmt =
+                tx.prepare(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"))?;
             let mut rows = stmt.query(params![id])?;
             match rows.next()? {
                 Some(row) => crate::sqlite::row::task_from_row(row)?,
                 None => return Err(anyhow!("task not found: {id}")),
             }
         };
-
-        tx.execute(
-            &format!(
-                "UPDATE tasks
-                    SET deleted_at = {SET_NOW},
-                        updated_at = {SET_NOW}
-                  WHERE id = ?1 AND deleted_at IS NULL"
-            ),
-            params![id],
-        )?;
         tx.commit()?;
         Ok(item)
     }
@@ -120,7 +122,6 @@ impl TaskRepository for SqliteStore {
     fn list_tasks(&self) -> Result<Vec<Task>> {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {TASK_COLUMNS} FROM tasks
-             WHERE deleted_at IS NULL
              ORDER BY created_at, id"
         ))?;
         let mut rows = stmt.query([])?;
@@ -188,8 +189,7 @@ impl TaskRepository for SqliteStore {
                    LIMIT 1
                  )
                )
-	             WHERE t.deleted_at IS NULL
-	               AND (?1 IS NULL OR coalesce(project.repo, issue_ref.repo, t.project_id) = ?1)
+	             WHERE (?1 IS NULL OR coalesce(project.repo, issue_ref.repo, t.project_id) = ?1)
 	             ORDER BY t.created_at, t.id"
         ))?;
         let mut rows = stmt.query(params![
@@ -249,7 +249,7 @@ impl TaskRepository for SqliteStore {
         let affected = self.conn().execute(
             &format!(
                 "UPDATE tasks SET primary_task_run_id = ?1, updated_at = {SET_NOW}
-                 WHERE id = ?2 AND deleted_at IS NULL"
+                 WHERE id = ?2"
             ),
             params![task_run_id, task_id],
         )?;
@@ -264,7 +264,7 @@ impl TaskRepository for SqliteStore {
             &format!(
                 "UPDATE tasks
                    SET status = ?1, updated_at = {SET_NOW}
-                 WHERE id = ?2 AND deleted_at IS NULL"
+                 WHERE id = ?2"
             ),
             params![status.as_str(), id],
         )?;
@@ -286,7 +286,7 @@ impl TaskRepository for SqliteStore {
             &format!(
                 "UPDATE tasks
 	                   SET status = ?1, phase = COALESCE(?2, phase), updated_at = {SET_NOW}
-	                 WHERE id = ?3 AND deleted_at IS NULL"
+	                 WHERE id = ?3"
             ),
             params![status_str, note, id],
         )?;

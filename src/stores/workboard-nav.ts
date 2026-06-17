@@ -5,7 +5,7 @@ import {
   columnTasksAtom,
   taskSummariesAtom,
   selectedProjectAtom,
-  deleteTaskAtom,
+  closeTaskAtom,
   prepareTaskMutationAtom,
   runTaskAtom,
   openBenchAtom,
@@ -14,7 +14,7 @@ import { queryKeys } from "@/stores/query-keys";
 import { pendingWorkboardHintAtom, resolveWorkboardSelection } from "@/stores/ui-state";
 
 type MoveDirection = "up" | "down" | "left" | "right";
-type MenuItemId = "prepare" | "run" | "bench" | "delete";
+type MenuItemId = "prepare" | "run" | "bench" | "close";
 
 export type MenuAnchor = { top: number; left: number; bottom: number };
 
@@ -22,7 +22,7 @@ export type MenuState = {
   taskId: string;
   anchor: MenuAnchor;
   itemIndex: number;
-  confirmingDelete: boolean;
+  confirmingClose: boolean;
 };
 
 // null = navigation inactive. The board unmounts on space switch, so the last
@@ -36,10 +36,10 @@ export const MENU_ITEMS: ReadonlyArray<{ id: MenuItemId; label: string; hint: st
   { id: "prepare", label: "Prepare", hint: "p" },
   { id: "run", label: "Run", hint: "r" },
   { id: "bench", label: "Bench", hint: "b" },
-  { id: "delete", label: "Delete", hint: "d" },
+  { id: "close", label: "Close", hint: "c" },
 ];
 
-const DELETE_INDEX = MENU_ITEMS.findIndex((item) => item.id === "delete");
+const CLOSE_INDEX = MENU_ITEMS.findIndex((item) => item.id === "close");
 
 export function isItemDisabled(id: MenuItemId, task: TaskSummaryRow): boolean {
   if (id === "prepare") return !task.prepare_eligible;
@@ -147,7 +147,7 @@ export const openMenuAtom = atom(null, (get, set, anchor: MenuAnchor) => {
   if (!task) return;
   const itemIndex = MENU_ITEMS.findIndex((item) => !isItemDisabled(item.id, task));
   if (itemIndex === -1) return;
-  set(menuAtom, { taskId: focused, anchor, itemIndex, confirmingDelete: false });
+  set(menuAtom, { taskId: focused, anchor, itemIndex, confirmingClose: false });
 });
 
 export const moveMenuItemAtom = atom(null, (get, set, dir: "up" | "down") => {
@@ -158,7 +158,7 @@ export const moveMenuItemAtom = atom(null, (get, set, dir: "up" | "down") => {
   const step = dir === "up" ? -1 : 1;
   for (let i = menu.itemIndex + step; i >= 0 && i < MENU_ITEMS.length; i += step) {
     if (!isItemDisabled(MENU_ITEMS[i].id, task)) {
-      set(menuAtom, { ...menu, itemIndex: i, confirmingDelete: false });
+      set(menuAtom, { ...menu, itemIndex: i, confirmingClose: false });
       return;
     }
   }
@@ -169,13 +169,13 @@ export const setMenuItemIndexAtom = atom(null, (get, set, itemIndex: number) => 
   if (menu === null || menu.itemIndex === itemIndex) return;
   const task = taskById(get, menu.taskId);
   if (!task || isItemDisabled(MENU_ITEMS[itemIndex].id, task)) return;
-  set(menuAtom, { ...menu, itemIndex, confirmingDelete: false });
+  set(menuAtom, { ...menu, itemIndex, confirmingClose: false });
 });
 
 // Shared by the direct keys (p/r/b) and the menu; re-checks eligibility because
 // polling can change the status between render and keypress. The prepare mutation
 // reports failures through onError; async atoms still bubble to the global toaster.
-export const runDirectActionAtom = atom(null, (get, set, id: Exclude<MenuItemId, "delete">) => {
+export const runDirectActionAtom = atom(null, (get, set, id: Exclude<MenuItemId, "close">) => {
   const menu = get(menuAtom);
   const taskId = menu?.taskId ?? get(focusedTaskIdAtom);
   if (taskId === null) return;
@@ -187,22 +187,22 @@ export const runDirectActionAtom = atom(null, (get, set, id: Exclude<MenuItemId,
   else void set(openBenchAtom, taskId);
 });
 
-// Delete is two-step everywhere: the first press opens (or re-targets) the menu
+// Close is two-step everywhere: the first press opens (or re-targets) the menu
 // in confirming state, the second press executes. The anchor is only needed when
 // the menu is not open yet.
-export const requestDeleteAtom = atom(null, (get, set, anchor: MenuAnchor | null) => {
+export const requestCloseAtom = atom(null, (get, set, anchor: MenuAnchor | null) => {
   const menu = get(menuAtom);
   if (menu === null) {
     const focused = get(focusedTaskIdAtom);
     if (focused === null || anchor === null || !taskById(get, focused)) return;
-    set(menuAtom, { taskId: focused, anchor, itemIndex: DELETE_INDEX, confirmingDelete: true });
+    set(menuAtom, { taskId: focused, anchor, itemIndex: CLOSE_INDEX, confirmingClose: true });
     return;
   }
-  if (MENU_ITEMS[menu.itemIndex].id === "delete" && menu.confirmingDelete) {
+  if (MENU_ITEMS[menu.itemIndex].id === "close" && menu.confirmingClose) {
     set(menuAtom, null);
-    void set(deleteFocusedTaskAtom, menu.taskId);
+    void set(closeFocusedTaskAtom, menu.taskId);
   } else {
-    set(menuAtom, { ...menu, itemIndex: DELETE_INDEX, confirmingDelete: true });
+    set(menuAtom, { ...menu, itemIndex: CLOSE_INDEX, confirmingClose: true });
   }
 });
 
@@ -210,28 +210,28 @@ export const executeMenuItemAtom = atom(null, (get, set) => {
   const menu = get(menuAtom);
   if (menu === null) return;
   const item = MENU_ITEMS[menu.itemIndex];
-  if (item.id !== "delete") {
+  if (item.id !== "close") {
     set(runDirectActionAtom, item.id);
     return;
   }
-  if (!menu.confirmingDelete) {
-    set(menuAtom, { ...menu, confirmingDelete: true });
+  if (!menu.confirmingClose) {
+    set(menuAtom, { ...menu, confirmingClose: true });
     return;
   }
   set(menuAtom, null);
-  void set(deleteFocusedTaskAtom, menu.taskId);
+  void set(closeFocusedTaskAtom, menu.taskId);
 });
 
-const deleteFocusedTaskAtom = atom(null, async (get, set, taskId: string) => {
-  // The menu only opens on the focused card, so its position is the deleted one.
+const closeFocusedTaskAtom = atom(null, async (get, set, taskId: string) => {
+  // The menu only opens on the focused card, so its position is the closed one.
   const pos = get(focusedPositionAtom);
 
-  await set(deleteTaskAtom, taskId);
+  await set(closeTaskAtom, taskId);
 
   if (pos !== null) {
-    // columnTasksAtom can still include the just-deleted card: invalidateQueries refetched
+    // columnTasksAtom can still include the just-closed card: invalidateQueries refetched
     // the cache, but the derived atom only updates on a deferred notify tick. Drop the
-    // deleted id so focus lands on the real neighbour instead of the vanishing card.
+    // closed id so focus lands on the real neighbour instead of the vanishing card.
     const columns = get(columnTasksAtom);
     const focusInColumn = (col: number): boolean => {
       const tasks = (columns[col]?.tasks ?? []).filter((t) => t.id !== taskId);

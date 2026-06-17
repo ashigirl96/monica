@@ -42,8 +42,8 @@ where
 {
     let (task, project) = load_task_and_project(repos, task_id)?;
 
-    if task.status == TaskStatus::Done {
-        return Err(anyhow!("task {task_id} is done; reopen it before preparing"));
+    if task.status == TaskStatus::Closed {
+        return Err(anyhow!("task {task_id} is closed; reopen it before preparing"));
     }
 
     if let Some(ref primary_id) = task.primary_task_run_id {

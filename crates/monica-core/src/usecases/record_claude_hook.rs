@@ -267,7 +267,7 @@ where
     if provider_session_id.is_none()
         || !is_session_starting_event(event_name)
         || explicit_run_id_rejected
-        || task.status == TaskStatus::Done
+        || task.status == TaskStatus::Closed
     {
         return Ok(ResolvedRun::none());
     }

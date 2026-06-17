@@ -7,7 +7,7 @@ import {
   trackGithubIssue,
   openBench,
   prepareTask,
-  deleteTask,
+  closeTask,
   makeMainTaskRun,
   type DisplayStatus,
   type TaskSummaryRow,
@@ -124,10 +124,10 @@ export const promoteActiveTabRunAtom = atom(null, async (get, set) => {
   }
 });
 
-export const deleteTaskAtom = atom(null, async (get, set, taskId: string) => {
+export const closeTaskAtom = atom(null, async (get, set, taskId: string) => {
   const state = get(terminalStateAtom);
   const runspace = state?.runspaces.find((rs) => rs.taskId === taskId);
-  await deleteTask(taskId);
+  await closeTask(taskId);
   if (runspace) {
     set(removeRunspaceAtom, runspace.id, "terminate");
   }

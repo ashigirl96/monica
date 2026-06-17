@@ -6,13 +6,13 @@ use crate::interfaces::{GitGateway, ProjectRepository, TaskRepository, TaskRunRe
 use crate::Task;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DeleteIssueReport {
+pub struct CloseIssueReport {
     pub item: Task,
     pub task_runs: Vec<String>,
     pub removed_branches: Vec<String>,
 }
 
-pub fn delete_issue<R, G>(repos: &mut R, git: &G, id: &str) -> Result<DeleteIssueReport>
+pub fn close_issue<R, G>(repos: &mut R, git: &G, id: &str) -> Result<CloseIssueReport>
 where
     R: TaskRepository + TaskRunRepository + ProjectRepository,
     G: GitGateway,
@@ -22,8 +22,8 @@ where
         .ok_or_else(|| anyhow!("task not found: {id}"))?;
     let runs = repos.list_task_runs_for_task(id)?;
     let removed_branches = cleanup_runs(repos, git, &item, &runs)?;
-    let item = repos.mark_task_deleted(id)?;
-    Ok(DeleteIssueReport {
+    let item = repos.mark_task_closed(id)?;
+    Ok(CloseIssueReport {
         item,
         task_runs: runs.into_iter().map(|run| run.id).collect(),
         removed_branches,
@@ -46,7 +46,7 @@ where
 
     let project_id = item.project_id.as_deref().ok_or_else(|| {
         anyhow!(
-            "{} has run records but is not linked to a project; refusing to delete so run cleanup \
+            "{} has run records but is not linked to a project; refusing to close so run cleanup \
              metadata is preserved",
             item.id
         )
@@ -56,7 +56,7 @@ where
         .ok_or_else(|| anyhow!("project not found: {project_id}"))?;
     let repo_path = project.path.as_deref().ok_or_else(|| {
         anyhow!(
-            "project {project_id} has no checkout path; refusing to delete {} so run cleanup \
+            "project {project_id} has no checkout path; refusing to close {} so run cleanup \
              metadata is preserved",
             item.id
         )

@@ -26,7 +26,7 @@ pub(super) fn task_from_row(row: &Row<'_>) -> Result<Task> {
             None => None,
         },
         primary_task_run_id: row.get("primary_task_run_id")?,
-        deleted_at: row.get("deleted_at")?,
+        closed_at: row.get("closed_at")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
     })

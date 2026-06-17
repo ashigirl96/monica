@@ -331,8 +331,8 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn delete_issue_rips_dirty_worktree_prunes_metadata_and_keeps_run_record() {
-        let root = Tmp::new("rip-delete");
+    fn close_issue_rips_dirty_worktree_prunes_metadata_and_keeps_run_record() {
+        let root = Tmp::new("rip-close");
         let repo = root.path().join("repo");
         fs::create_dir_all(&repo).unwrap();
         init_repo(&repo);
@@ -361,12 +361,14 @@ mod tests {
         let git = TestGit {
             rip: write_fake_rip(root.path()),
         };
-        let report = monica_core::delete_issue(&mut db, &git, &item.id).unwrap();
+        let report = monica_core::close_issue(&mut db, &git, &item.id).unwrap();
 
         assert!(!worktree.exists());
         assert!(!worktree_registered(&repo, &worktree).unwrap());
         assert!(!branch_exists(&repo, "issue-42").unwrap());
-        assert!(db.get_task(&item.id).unwrap().is_none());
+        let closed = db.get_task(&item.id).unwrap().unwrap();
+        assert_eq!(closed.status, TaskStatus::Closed);
+        assert!(closed.closed_at.is_some());
         assert_eq!(db.list_task_runs_for_task(&item.id).unwrap().len(), 1);
         assert_eq!(report.task_runs, vec![run.id]);
         assert_eq!(report.removed_branches, vec!["issue-42"]);

@@ -13,7 +13,7 @@ const STATUS_COLORS: Record<DisplayStatus, string> = {
   waiting_for_user: "bg-amber-400",
   stopped: "bg-muted-foreground/50",
   failed: "bg-red-400",
-  done: "bg-muted-foreground/30",
+  closed: "bg-muted-foreground/30",
 };
 
 const STATUS_LABELS: Record<DisplayStatus, string> = {
@@ -25,7 +25,7 @@ const STATUS_LABELS: Record<DisplayStatus, string> = {
   waiting_for_user: "needs you",
   stopped: "stopped",
   failed: "failed",
-  done: "done",
+  closed: "closed",
 };
 
 const STATUS_BADGE_STYLES: Record<DisplayStatus, string> = {
@@ -37,7 +37,7 @@ const STATUS_BADGE_STYLES: Record<DisplayStatus, string> = {
   waiting_for_user: "bg-amber-500/15 text-amber-400",
   stopped: "bg-muted text-muted-foreground",
   failed: "bg-red-500/15 text-red-400",
-  done: "bg-muted text-muted-foreground/60",
+  closed: "bg-muted text-muted-foreground/60",
 };
 
 const WAIT_REASON_CONFIG: Record<TaskRunWaitReason, { label: string; badge: string }> = {

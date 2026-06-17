@@ -82,7 +82,7 @@ fn task_and_external_ref_round_trip_through_sqlite_repository() {
 }
 
 #[test]
-fn task_run_agent_is_typed_and_done_task_is_not_regressed_by_finish() {
+fn task_run_agent_is_typed_and_closed_task_is_not_regressed_by_finish() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let task = db.insert_task(dev_task("run me")).unwrap();
     let run = db
@@ -95,12 +95,12 @@ fn task_run_agent_is_typed_and_done_task_is_not_regressed_by_finish() {
         .unwrap();
     assert_eq!(run.agent, Some(Agent::Claude));
 
-    db.mark_task(&task.id, TaskStatus::Done, None).unwrap();
+    db.mark_task(&task.id, TaskStatus::Closed, None).unwrap();
     db.finish_task_run(&run.id, &task.id, TaskRunStatus::Running)
         .unwrap();
     assert_eq!(
         db.get_task(&task.id).unwrap().unwrap().status,
-        TaskStatus::Done
+        TaskStatus::Closed
     );
 }
 
@@ -429,10 +429,10 @@ fn find_task_run_by_terminal_tab_returns_latest_observed_run_in_tab() {
 }
 
 #[test]
-fn start_task_run_never_reopens_a_done_task() {
+fn start_task_run_never_reopens_a_closed_task() {
     let mut db = SqliteStore::open_in_memory().unwrap();
-    let task = db.insert_task(dev_task("done stays done")).unwrap();
-    db.update_task_status(&task.id, TaskStatus::Done).unwrap();
+    let task = db.insert_task(dev_task("closed stays closed")).unwrap();
+    db.update_task_status(&task.id, TaskStatus::Closed).unwrap();
 
     db.start_task_run(NewTaskRun {
         task_id: task.id.clone(),
@@ -444,7 +444,7 @@ fn start_task_run_never_reopens_a_done_task() {
 
     assert_eq!(
         db.get_task(&task.id).unwrap().unwrap().status,
-        TaskStatus::Done
+        TaskStatus::Closed
     );
 }
 
@@ -606,11 +606,11 @@ fn task_summaries_fall_back_to_latest_run_when_primary_pointer_dangles() {
 }
 
 #[test]
-fn task_summary_filter_scopes_the_done_archive() {
+fn task_summary_filter_scopes_the_closed_archive() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let active = db.insert_task(dev_task("still working")).unwrap();
     let archived = db.insert_task(dev_task("wrapped up")).unwrap();
-    db.mark_task(&archived.id, TaskStatus::Done, None).unwrap();
+    db.mark_task(&archived.id, TaskStatus::Closed, None).unwrap();
 
     let ids = |rows: Vec<TaskSummaryRow>| -> Vec<String> { rows.into_iter().map(|r| r.id).collect() };
 
@@ -618,14 +618,14 @@ fn task_summary_filter_scopes_the_done_archive() {
     assert!(active_only.contains(&active.id));
     assert!(
         !active_only.contains(&archived.id),
-        "Active must hide the Done archive"
+        "Active must hide the Closed archive"
     );
 
-    let done_only = ids(db
-        .list_task_summaries(TaskSummaryFilter::Status(DisplayStatus::Done), None)
+    let closed_only = ids(db
+        .list_task_summaries(TaskSummaryFilter::Status(DisplayStatus::Closed), None)
         .unwrap());
-    assert!(done_only.contains(&archived.id));
-    assert!(!done_only.contains(&active.id));
+    assert!(closed_only.contains(&archived.id));
+    assert!(!closed_only.contains(&active.id));
 
     let everything = ids(db.list_task_summaries(TaskSummaryFilter::All, None).unwrap());
     assert!(everything.contains(&active.id));
@@ -764,6 +764,57 @@ fn branch_pull_request_candidate_uses_latest_run_branch_and_project_repo() {
             repo: "owner/repo".to_string(),
             branch: "feature/new-branch".to_string(),
         }
+    );
+}
+
+// Closing a task is "done-like": it stays a PR sync candidate just as the old `done` status did,
+// since dropping the `deleted_at IS NULL` guard removes the only thing that hid it.
+#[test]
+fn branch_pull_request_candidate_includes_closed_tasks() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let mut project = Project::from_repo("owner/repo");
+    project.default_branch = "main".to_string();
+    db.upsert_project(&project).unwrap();
+    let mut task = dev_task("closed but synced");
+    task.project_id = Some(project.id.clone());
+    let item = db.insert_task(task).unwrap();
+    db.start_task_run(NewTaskRun {
+        task_id: item.id.clone(),
+        agent: None,
+        branch: Some("feature/keep-syncing".to_string()),
+        worktree_path: None,
+    })
+    .unwrap();
+    db.mark_task_closed(&item.id).unwrap();
+
+    let candidate = db
+        .next_pull_request_branch_sync_candidate()
+        .unwrap()
+        .unwrap();
+    assert_eq!(candidate.task_id, item.id);
+    assert_eq!(candidate.branch, "feature/keep-syncing");
+}
+
+#[test]
+fn mark_task_closed_sets_status_and_closed_at() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("to close")).unwrap();
+    assert!(task.closed_at.is_none());
+
+    let closed = db.mark_task_closed(&task.id).unwrap();
+    assert_eq!(closed.status, TaskStatus::Closed);
+    assert!(
+        closed.closed_at.is_some(),
+        "mark_task_closed must return the post-update row with closed_at set"
+    );
+
+    let refetched = db.get_task(&task.id).unwrap().unwrap();
+    assert_eq!(refetched.status, TaskStatus::Closed);
+    assert!(refetched.closed_at.is_some());
+
+    assert!(
+        db.mark_task_closed("MON-missing").is_err(),
+        "closing a missing task must error"
     );
 }
 
@@ -1102,7 +1153,7 @@ fn settle_task_run_if_live_only_stops_session_driven_runs() {
 }
 
 #[test]
-fn settle_task_run_if_live_survives_a_deleted_task() {
+fn settle_task_run_if_live_survives_a_closed_task() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let task = db.insert_task(dev_task("doomed")).unwrap();
     let run = db
@@ -1126,9 +1177,9 @@ fn settle_task_run_if_live_survives_a_deleted_task() {
         },
     )
     .unwrap();
-    db.mark_task_deleted(&task.id).unwrap();
+    db.mark_task_closed(&task.id).unwrap();
 
-    // The terminal dying after the task was deleted must still tombstone the run.
+    // The terminal dying after the task was closed must still tombstone the run.
     assert!(db.settle_task_run_if_live(&run.id, &task.id).unwrap());
     assert_eq!(
         db.get_task_run(&run.id).unwrap().unwrap().status,

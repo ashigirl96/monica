@@ -32,7 +32,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::task::open_bench,
             commands::task::prepare_task,
             commands::task::run_task,
-            commands::task::delete_task,
+            commands::task::close_task,
             commands::task::make_main_task_run,
             commands::task::primary_tab_id,
             commands::pull_request::force_sync_pull_requests,
