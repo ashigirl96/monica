@@ -17,6 +17,14 @@ export function invalidateTaskSummaries(client: QueryClient) {
   return client.invalidateQueries({ queryKey: queryKeys.tasks.summaryFamily() });
 }
 
+// Force a refetch of the tasks.summary family. A manual sync often finds the DB row already
+// current (the PR merged before an earlier refresh landed), so invalidate's "stale-then-refetch
+// if changed" can be a no-op that never re-pulls. refetchQueries always re-runs the query so the
+// board re-renders from the latest list_task_summaries regardless of whether the value changed.
+export function refetchTaskSummaries(client: QueryClient) {
+  return client.refetchQueries({ queryKey: queryKeys.tasks.summaryFamily() });
+}
+
 // `tasks.summary` family（filtered/unfiltered 両方）に属する query key かを判定する。
 export function isTaskSummaryKey(key: readonly unknown[]): boolean {
   const family = queryKeys.tasks.summaryFamily();

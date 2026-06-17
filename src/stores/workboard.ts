@@ -28,12 +28,14 @@ const taskSummariesQueryAtom = atomWithQuery(() => taskSummariesQueryOptions);
 export const taskSummariesAtom = atom((get) => get(taskSummariesQueryAtom).data ?? []);
 
 export const loadBoardAtom = atom(null, async (get) => {
-  // The query atoms fetch lazily on mount; pre-fetch here so a synchronous read right
-  // after this resolves sees the cached data instead of the empty default.
+  // Runs on every navigation into the board. fetchQuery honours the (zero) staleTime so each
+  // entry re-pulls a fresh snapshot, unlike ensureQueryData which returns the cached snapshot
+  // without refetching. The awaited result repopulates the cache so the synchronous getQueryData
+  // in applyRestored that follows reads fresh data.
   const client = get(queryClientAtom);
   await Promise.all([
-    client.ensureQueryData(boardColumnsQueryOptions),
-    client.ensureQueryData(taskSummariesQueryOptions),
+    client.fetchQuery(boardColumnsQueryOptions),
+    client.fetchQuery(taskSummariesQueryOptions),
   ]);
 });
 
