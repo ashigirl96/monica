@@ -3,36 +3,13 @@ import { atomWithMutation, atomWithQuery, queryClientAtom } from "jotai-tanstack
 import {
   listTaskSummaries,
   getBoardColumns,
-  listProjects,
   trackGithubIssue,
-  openBench,
   prepareTask,
-  closeTask,
-  makeMainTaskRun,
   type DisplayStatus,
   type TaskSummaryRow,
 } from "@/commands/task";
 import { invalidateTaskSummaries, queryKeys } from "@/stores/query-keys";
-import { runTaskFlow } from "@/features/work-board/run-flow";
-import {
-  activeTerminalTabAtom,
-  createTaskRunspaceAtom,
-  refreshPrimaryTabAtom,
-  removeRunspaceAtom,
-  terminalStateAtom,
-} from "@/features/work-bench/store";
-import { activeSpaceAtom } from "@/stores/space";
 import { pushErrorToast } from "@/stores/toast";
-
-// The selected project is local UI state; it only feeds the task-summary query key.
-export const selectedProjectAtom = atom<string | null>(null);
-
-const projectsQueryOptions = {
-  queryKey: queryKeys.projects.list(),
-  queryFn: () => listProjects(),
-} as const;
-const projectsQueryAtom = atomWithQuery(() => projectsQueryOptions);
-export const projectsAtom = atom((get) => get(projectsQueryAtom).data ?? []);
 
 const boardColumnsQueryOptions = {
   queryKey: queryKeys.board.columns(),
@@ -41,14 +18,13 @@ const boardColumnsQueryOptions = {
 const boardColumnsQueryAtom = atomWithQuery(() => boardColumnsQueryOptions);
 export const boardColumnsAtom = atom((get) => get(boardColumnsQueryAtom).data ?? []);
 
-const taskSummariesQueryOptions = (project: string | null) => ({
-  queryKey: queryKeys.tasks.summary(project),
-  queryFn: () => listTaskSummaries(project),
-  placeholderData: (previousData: TaskSummaryRow[] | undefined) => previousData,
-});
-const taskSummariesQueryAtom = atomWithQuery((get) =>
-  taskSummariesQueryOptions(get(selectedProjectAtom)),
-);
+// The board lists every project's tasks, so the summary query always uses the unfiltered
+// (project=null) key. The sidebar's status map shares this same cache entry.
+const taskSummariesQueryOptions = {
+  queryKey: queryKeys.tasks.summary(null),
+  queryFn: () => listTaskSummaries(null),
+} as const;
+const taskSummariesQueryAtom = atomWithQuery(() => taskSummariesQueryOptions);
 export const taskSummariesAtom = atom((get) => get(taskSummariesQueryAtom).data ?? []);
 
 export const loadBoardAtom = atom(null, async (get) => {
@@ -57,8 +33,7 @@ export const loadBoardAtom = atom(null, async (get) => {
   const client = get(queryClientAtom);
   await Promise.all([
     client.ensureQueryData(boardColumnsQueryOptions),
-    client.ensureQueryData(taskSummariesQueryOptions(get(selectedProjectAtom))),
-    client.ensureQueryData(projectsQueryOptions),
+    client.ensureQueryData(taskSummariesQueryOptions),
   ]);
 });
 
@@ -71,11 +46,11 @@ export const columnTasksAtom = atom((get) => {
   }));
 });
 
-// Unfiltered task statuses (project=null), reusing the summary query family so it shares the
-// board's cache entry. The projection lives in `select` so structural sharing keeps a stable
-// identity when no status changed and the sidebar doesn't re-render on every poll.
+// Reuses the summary query so it shares the board's cache entry. The projection lives in
+// `select` so structural sharing keeps a stable identity when no status changed and the
+// sidebar doesn't re-render on every poll.
 const taskStatusMapQueryAtom = atomWithQuery(() => ({
-  ...taskSummariesQueryOptions(null),
+  ...taskSummariesQueryOptions,
   select: (rows: TaskSummaryRow[]) =>
     Object.fromEntries(rows.map((s) => [s.id, s.status])) as Record<string, DisplayStatus>,
 }));
@@ -87,17 +62,6 @@ export const trackIssueMutationAtom = atomWithMutation((get) => ({
   mutationFn: (input: string) => trackGithubIssue(input),
   onSuccess: () => invalidateTaskSummaries(get(queryClientAtom)),
 }));
-
-export const openBenchAtom = atom(null, async (_get, set, taskId: string) => {
-  const bench = await openBench(taskId);
-  await set(createTaskRunspaceAtom, {
-    runspaceId: bench.runspace_id,
-    taskId: bench.task_id,
-    cwd: bench.cwd,
-    env: bench.env.length > 0 ? bench.env : undefined,
-  });
-  set(activeSpaceAtom, "work-bench");
-});
 
 export const prepareTaskMutationAtom = atomWithMutation((get) => ({
   mutationFn: (taskId: string) => prepareTask(taskId),
@@ -112,32 +76,3 @@ export const prepareTaskMutationAtom = atomWithMutation((get) => ({
 export const refreshTaskSummariesAtom = atom(null, (get) =>
   invalidateTaskSummaries(get(queryClientAtom)),
 );
-
-// cmd+g: promote the run living in the focused tab to Main Run. Backend returns
-// false for both "no run in this tab" and "already main", keeping this a silent no-op.
-export const promoteActiveTabRunAtom = atom(null, async (get, set) => {
-  const tab = get(activeTerminalTabAtom);
-  if (!tab) return;
-  const changed = await makeMainTaskRun(tab.id);
-  if (changed) {
-    await Promise.all([set(refreshTaskSummariesAtom), set(refreshPrimaryTabAtom)]);
-  }
-});
-
-export const closeTaskAtom = atom(null, async (get, set, taskId: string) => {
-  const state = get(terminalStateAtom);
-  const runspace = state?.runspaces.find((rs) => rs.taskId === taskId);
-  await closeTask(taskId);
-  if (runspace) {
-    set(removeRunspaceAtom, runspace.id, "terminate");
-  }
-  await set(refreshTaskSummariesAtom);
-});
-
-export const runTaskAtom = atom(null, async (_get, set, taskId: string) => {
-  const result = await runTaskFlow(taskId);
-  if (!result) return;
-  await set(createTaskRunspaceAtom, result);
-  set(activeSpaceAtom, "work-bench");
-  await set(refreshTaskSummariesAtom);
-});

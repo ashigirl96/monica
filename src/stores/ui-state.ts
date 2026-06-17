@@ -13,7 +13,7 @@ import {
 export const UI_STATE_FILE = "ui-state.json";
 
 export type WorkbenchHint = { activeRunspaceId: string | null; activeTabId: string | null };
-export type WorkboardHint = { selectedProject: string | null; focusedTaskId: string | null };
+export type WorkboardHint = { focusedTaskId: string | null };
 
 export type PersistedUiState = {
   activeSpace: SpaceId;
@@ -28,7 +28,7 @@ const DEFAULT_UI_STATE: PersistedUiState = {
   sidebarOpen: true,
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
   workbench: { activeRunspaceId: null, activeTabId: null },
-  workboard: { selectedProject: null, focusedTaskId: null },
+  workboard: { focusedTaskId: null },
 };
 
 // Missing a key here is a compile error when SpaceId gains a variant, so validation
@@ -71,7 +71,6 @@ export function parseUiState(raw: unknown): PersistedUiState {
       activeTabId: asString(wb.activeTabId),
     },
     workboard: {
-      selectedProject: asString(wboard.selectedProject),
       focusedTaskId: asString(wboard.focusedTaskId),
     },
   };
@@ -93,16 +92,11 @@ export function resolveWorkbenchActive(
   return { activeRunspaceId: rs.id, activeTabId: tab?.id ?? "" };
 }
 
-export function resolveWorkboardSelection(
-  validProjects: ReadonlyArray<string>,
+export function resolveWorkboardFocus(
   validTaskIds: ReadonlyArray<string>,
   hint: WorkboardHint,
 ): WorkboardHint {
   return {
-    selectedProject:
-      hint.selectedProject && validProjects.includes(hint.selectedProject)
-        ? hint.selectedProject
-        : null,
     focusedTaskId:
       hint.focusedTaskId && validTaskIds.includes(hint.focusedTaskId) ? hint.focusedTaskId : null,
   };

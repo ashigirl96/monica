@@ -2,7 +2,8 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useAtomValue, useSetAtom } from "jotai";
 import type { DisplayStatus, TaskRunWaitReason, TaskSummaryRow } from "@/commands/task";
 import { cn } from "@/lib/utils";
-import { openBenchAtom, prepareTaskMutationAtom, runTaskAtom } from "@/stores/workboard";
+import { openBenchAtom, runTaskAtom } from "@/features/work-board/store";
+import { prepareTaskMutationAtom } from "@/stores/workboard";
 
 const STATUS_COLORS: Record<DisplayStatus, string> = {
   ready: "bg-sky-400",

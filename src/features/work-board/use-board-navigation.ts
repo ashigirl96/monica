@@ -14,7 +14,7 @@ import {
   reconcileFocusAtom,
   requestCloseAtom,
   runDirectActionAtom,
-} from "@/stores/workboard-nav";
+} from "@/features/work-board/nav";
 
 const NAV_KEYS = { h: "left", j: "down", k: "up", l: "right" } as const;
 const ACTION_KEYS = { p: "prepare", r: "run", b: "bench" } as const;

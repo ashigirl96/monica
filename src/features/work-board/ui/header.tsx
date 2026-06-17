@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useAtom, useAtomValue } from "jotai";
-import { projectsAtom, selectedProjectAtom, trackIssueMutationAtom } from "@/stores/workboard";
+import { useAtomValue } from "jotai";
+import { trackIssueMutationAtom } from "@/stores/workboard";
+import { prSyncLastSyncedAtom } from "@/stores/pr-sync";
 import { cn } from "@/lib/utils";
-import { onPrSyncCompleted } from "@/commands/pull_request";
 
 function TrackIssueButton() {
   const [open, setOpen] = useState(false);
@@ -110,53 +110,24 @@ function TrackIssueButton() {
   );
 }
 
-function ProjectFilter() {
-  const projects = useAtomValue(projectsAtom);
-  const [selected, setSelected] = useAtom(selectedProjectAtom);
-
-  if (projects.length === 0) return null;
-
-  return (
-    <select
-      value={selected ?? ""}
-      onChange={(e) => setSelected(e.target.value || null)}
-      className="h-7 rounded-md border border-border bg-secondary px-2 text-[11px] text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground"
-    >
-      <option value="">All projects</option>
-      {projects.map((p) => (
-        <option key={p.repo} value={p.repo}>
-          {p.name}
-        </option>
-      ))}
-    </select>
-  );
-}
-
 function formatElapsed(seconds: number): string {
   if (seconds < 60) return `${seconds}s ago`;
   return `${Math.floor(seconds / 60)}m ago`;
 }
 
 function LastSyncedLabel() {
-  const [lastSyncAt, setLastSyncAt] = useState<Date | null>(null);
+  const lastSyncAt = useAtomValue(prSyncLastSyncedAtom);
   const [, forceUpdate] = useState(0);
 
   useEffect(() => {
-    const unlisten = onPrSyncCompleted(() => setLastSyncAt(new Date()));
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!lastSyncAt) return;
+    if (lastSyncAt === null) return;
     const timer = setInterval(() => forceUpdate((n) => n + 1), 1000);
     return () => clearInterval(timer);
   }, [lastSyncAt]);
 
-  if (!lastSyncAt) return null;
+  if (lastSyncAt === null) return null;
 
-  const elapsed = Math.floor((Date.now() - lastSyncAt.getTime()) / 1000);
+  const elapsed = Math.floor((Date.now() - lastSyncAt) / 1000);
   return (
     <span className="ml-auto text-[10px] text-muted-foreground/60">
       Synced {formatElapsed(elapsed)}
@@ -168,7 +139,6 @@ export function WorkBoardHeader() {
   return (
     <div className="flex items-center gap-3 px-3 py-1.5">
       <TrackIssueButton />
-      <ProjectFilter />
       <LastSyncedLabel />
     </div>
   );

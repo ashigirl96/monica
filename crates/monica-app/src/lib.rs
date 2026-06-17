@@ -25,7 +25,6 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::terminal::terminal_save_state,
             commands::task::list_task_summaries,
             commands::task::get_board_columns,
-            commands::task::list_projects,
             commands::task::track_github_issue,
             commands::task::list_bench_runspace_map,
             commands::task::task_shell_env,

@@ -7,11 +7,13 @@ import {
 } from "@/features/work-bench/store";
 import { activeSpaceAtom, sidebarOpenAtom, sidebarWidthAtom } from "@/stores/space";
 import { UI_STATE_FILE } from "@/stores/ui-state";
-import { selectedProjectAtom } from "@/stores/workboard";
-import { focusMemoryAtom, focusedTaskIdAtom } from "@/stores/workboard-nav";
+import { focusMemoryAtom, focusedTaskIdAtom } from "@/features/work-board/nav";
 
 const SAVE_DEBOUNCE_MS = 500;
 
+// App-lifetime owner for ui-state persistence. It observes atoms that live in feature slices
+// (work-bench, work-board) because persistence must follow the canonical atom rather than a
+// duplicate in stores/; module init (not a React effect) keeps the subscription single.
 export function initUiStatePersistence(): void {
   const store = getDefaultStore();
   let file: Store | null = null;
@@ -26,10 +28,7 @@ export function initUiStatePersistence(): void {
       file.set("activeSpace", store.get(activeSpaceAtom)),
       file.set("sidebarOpen", store.get(sidebarOpenAtom)),
       file.set("sidebarWidth", store.get(sidebarWidthAtom)),
-      file.set("workboard", {
-        selectedProject: store.get(selectedProjectAtom),
-        focusedTaskId,
-      }),
+      file.set("workboard", { focusedTaskId }),
     ];
     // activeRunspaceAtom synthesizes a throwaway runspace with a random id until the
     // bench has loaded; persisting that would clobber the saved hint, so skip it.
@@ -59,7 +58,6 @@ export function initUiStatePersistence(): void {
     sidebarWidthAtom,
     activeRunspaceAtom,
     activeTerminalTabAtom,
-    selectedProjectAtom,
     focusedTaskIdAtom,
     focusMemoryAtom,
   ];

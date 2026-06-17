@@ -8,12 +8,6 @@ use tauri::AppHandle;
 use tauri_specta::Event;
 
 #[derive(Serialize, specta::Type)]
-pub struct ProjectEntry {
-    pub repo: String,
-    pub name: String,
-}
-
-#[derive(Serialize, specta::Type)]
 pub struct TrackIssueResult {
     pub task_id: String,
     pub title: String,
@@ -39,21 +33,6 @@ pub fn list_task_summaries(project: Option<String>) -> Result<Vec<TaskSummaryRow
 #[specta::specta]
 pub fn get_board_columns() -> Vec<BoardColumn> {
     monica_core::board_columns()
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn list_projects() -> Result<Vec<ProjectEntry>, String> {
-    let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    let projects =
-        monica_core::list_projects(&runtime.repositories).map_err(|e| e.to_string())?;
-    Ok(projects
-        .into_iter()
-        .map(|p| ProjectEntry {
-            name: p.name,
-            repo: p.repo,
-        })
-        .collect())
 }
 
 #[tauri::command]

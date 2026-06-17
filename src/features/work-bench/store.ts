@@ -10,10 +10,11 @@ import {
   type TerminalSessionStatus,
   type TerminalStateSnapshot,
 } from "@/commands/terminal";
-import { listBenchRunspaceMap, primaryTabId, taskShellEnv } from "@/commands/task";
+import { listBenchRunspaceMap, makeMainTaskRun, primaryTabId, taskShellEnv } from "@/commands/task";
 import { worktreeInfo, type WorktreeInfo } from "@/commands/git";
 import { releaseTabConnection } from "@/features/work-bench/terminal-connections";
 import { pendingWorkbenchHintAtom, resolveWorkbenchActive } from "@/stores/ui-state";
+import { refreshTaskSummariesAtom } from "@/stores/workboard";
 
 const FONT_SIZE_DEFAULT = 15;
 const FONT_SIZE_MIN = 10;
@@ -201,6 +202,17 @@ export const refreshPrimaryTabAtom = atom(null, async (get, set) => {
   set(primaryTabByTaskAtom, (prev) =>
     prev[taskId] === tabId ? prev : { ...prev, [taskId]: tabId },
   );
+});
+
+// cmd+g: promote the run living in the focused tab to Main Run. Backend returns
+// false for both "no run in this tab" and "already main", keeping this a silent no-op.
+export const promoteActiveTabRunAtom = atom(null, async (get, set) => {
+  const tab = get(activeTerminalTabAtom);
+  if (!tab) return;
+  const changed = await makeMainTaskRun(tab.id);
+  if (changed) {
+    await Promise.all([set(refreshTaskSummariesAtom), set(refreshPrimaryTabAtom)]);
+  }
 });
 
 export type RunspaceSummary = {

@@ -1,17 +1,10 @@
 import { atom, type Getter } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
-import type { ProjectEntry, TaskSummaryRow } from "@/commands/task";
-import {
-  columnTasksAtom,
-  taskSummariesAtom,
-  selectedProjectAtom,
-  closeTaskAtom,
-  prepareTaskMutationAtom,
-  runTaskAtom,
-  openBenchAtom,
-} from "@/stores/workboard";
+import type { TaskSummaryRow } from "@/commands/task";
+import { closeTaskAtom, openBenchAtom, runTaskAtom } from "@/features/work-board/store";
+import { columnTasksAtom, prepareTaskMutationAtom, taskSummariesAtom } from "@/stores/workboard";
 import { queryKeys } from "@/stores/query-keys";
-import { pendingWorkboardHintAtom, resolveWorkboardSelection } from "@/stores/ui-state";
+import { pendingWorkboardHintAtom, resolveWorkboardFocus } from "@/stores/ui-state";
 
 type MoveDirection = "up" | "down" | "left" | "right";
 type MenuItemId = "prepare" | "run" | "bench" | "close";
@@ -106,9 +99,9 @@ export const exitNavAtom = atom(null, (get, set) => {
   set(menuAtom, null);
 });
 
-// One-shot restore of the saved Work Board filter/focus, applied after loadBoard so the
-// hint can be validated against the loaded projects/tasks. Lives here (not in workboard.ts)
-// to keep the workboard ⇄ workboard-nav import edge one-directional.
+// One-shot restore of the saved Work Board focus, applied after loadBoard so the hint can be
+// validated against the loaded tasks. Lives here (not in workboard.ts) to keep the workboard
+// ⇄ nav import edge one-directional.
 export const applyRestoredWorkboardAtom = atom(null, (get, set) => {
   const hint = get(pendingWorkboardHintAtom);
   if (hint === null) return;
@@ -116,19 +109,12 @@ export const applyRestoredWorkboardAtom = atom(null, (get, set) => {
   // Read the cache loadBoard just warmed, not the derived atoms: ensureQueryData fills the
   // QueryClient synchronously, but the jotai query atoms only catch up on a deferred
   // notifyManager tick, so reading them here would still see the pre-fetch empty default
-  // and drop the saved filter/focus.
+  // and drop the saved focus.
   const client = get(queryClientAtom);
-  const projects = client.getQueryData<ProjectEntry[]>(queryKeys.projects.list()) ?? [];
   const taskIds = (client.getQueryData<TaskSummaryRow[]>(queryKeys.tasks.summary(null)) ?? []).map(
     (t) => t.id,
   );
-  const resolved = resolveWorkboardSelection(
-    projects.map((p) => p.repo),
-    taskIds,
-    hint,
-  );
-  set(selectedProjectAtom, resolved.selectedProject);
-  set(focusedTaskIdAtom, resolved.focusedTaskId);
+  set(focusedTaskIdAtom, resolveWorkboardFocus(taskIds, hint).focusedTaskId);
 });
 
 // The focused card can disappear under the 3s polling (status change, filter,
