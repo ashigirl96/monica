@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import { atomWithQuery, queryClientAtom } from "jotai-tanstack-query";
+import { atomWithMutation, atomWithQuery, queryClientAtom } from "jotai-tanstack-query";
 import {
   listTaskSummaries,
   getBoardColumns,
@@ -9,8 +9,6 @@ import {
   prepareTask,
   deleteTask,
   makeMainTaskRun,
-  type TaskSummaryRow,
-  type BoardColumn,
   type DisplayStatus,
 } from "@/commands/task";
 import { queryKeys } from "@/stores/query-keys";
@@ -24,9 +22,8 @@ import {
 } from "@/features/work-bench/store";
 import { activeSpaceAtom } from "@/stores/space";
 
-export const boardColumnsAtom = atom<BoardColumn[]>([]);
-// Already filtered by the selected project; the backend query owns the filter.
-export const taskSummariesAtom = atom<TaskSummaryRow[]>([]);
+// The selected project is local UI state; it only feeds the task-summary query key.
+export const selectedProjectAtom = atom<string | null>(null);
 
 const projectsQueryOptions = {
   queryKey: queryKeys.projects.list(),
@@ -35,24 +32,31 @@ const projectsQueryOptions = {
 const projectsQueryAtom = atomWithQuery(() => projectsQueryOptions);
 export const projectsAtom = atom((get) => get(projectsQueryAtom).data ?? []);
 
-const selectedProjectBaseAtom = atom<string | null>(null);
-export const selectedProjectAtom = atom(
-  (get) => get(selectedProjectBaseAtom),
-  (_get, set, project: string | null) => {
-    set(selectedProjectBaseAtom, project);
-    void set(refreshTaskSummariesAtom);
-  },
-);
+const boardColumnsQueryOptions = {
+  queryKey: queryKeys.board.columns(),
+  queryFn: () => getBoardColumns(),
+} as const;
+const boardColumnsQueryAtom = atomWithQuery(() => boardColumnsQueryOptions);
+export const boardColumnsAtom = atom((get) => get(boardColumnsQueryAtom).data ?? []);
 
-export const loadBoardAtom = atom(null, async (get, set) => {
-  // Restore reads the projects snapshot synchronously, so warm its cache before resolving.
-  const [columns, summaries] = await Promise.all([
-    getBoardColumns(),
-    listTaskSummaries(get(selectedProjectAtom)),
-    get(queryClientAtom).ensureQueryData(projectsQueryOptions),
+const taskSummariesQueryOptions = (project: string | null) => ({
+  queryKey: queryKeys.tasks.summary(project),
+  queryFn: () => listTaskSummaries(project),
+});
+const taskSummariesQueryAtom = atomWithQuery((get) =>
+  taskSummariesQueryOptions(get(selectedProjectAtom)),
+);
+export const taskSummariesAtom = atom((get) => get(taskSummariesQueryAtom).data ?? []);
+
+export const loadBoardAtom = atom(null, async (get) => {
+  // The query atoms fetch lazily on mount; pre-fetch here so a synchronous read right
+  // after this resolves sees the cached data instead of the empty default.
+  const client = get(queryClientAtom);
+  await Promise.all([
+    client.ensureQueryData(boardColumnsQueryOptions),
+    client.ensureQueryData(taskSummariesQueryOptions(get(selectedProjectAtom))),
+    client.ensureQueryData(projectsQueryOptions),
   ]);
-  set(boardColumnsAtom, columns);
-  set(taskSummariesAtom, summaries);
 });
 
 export const columnTasksAtom = atom((get) => {
@@ -64,19 +68,21 @@ export const columnTasksAtom = atom((get) => {
   }));
 });
 
-// The Work Bench sidebar needs every task's status regardless of the board's
-// project filter, so this map refreshes from an unfiltered query.
-export const taskStatusMapAtom = atom<Record<string, DisplayStatus>>({});
+// Unfiltered task statuses (project=null), independent of the board's project filter.
+const taskStatusMapQueryOptions = {
+  queryKey: queryKeys.tasks.summary(null),
+  queryFn: () => listTaskSummaries(null),
+} as const;
+const taskStatusMapQueryAtom = atomWithQuery(() => taskStatusMapQueryOptions);
+export const taskStatusMapAtom = atom<Record<string, DisplayStatus>>((get) =>
+  Object.fromEntries((get(taskStatusMapQueryAtom).data ?? []).map((s) => [s.id, s.status])),
+);
 
-export const refreshTaskStatusMapAtom = atom(null, async (_get, set) => {
-  const summaries = await listTaskSummaries(null);
-  set(taskStatusMapAtom, Object.fromEntries(summaries.map((s) => [s.id, s.status])));
-});
-
-export const trackIssueAtom = atom(null, async (_get, set, input: string) => {
-  await trackGithubIssue(input);
-  await set(refreshTaskSummariesAtom);
-});
+export const trackIssueMutationAtom = atomWithMutation((get) => ({
+  mutationFn: (input: string) => trackGithubIssue(input),
+  onSuccess: () =>
+    get(queryClientAtom).invalidateQueries({ queryKey: queryKeys.tasks.summaryFamily() }),
+}));
 
 export const openBenchAtom = atom(null, async (_get, set, taskId: string) => {
   const bench = await openBench(taskId);
@@ -89,16 +95,17 @@ export const openBenchAtom = atom(null, async (_get, set, taskId: string) => {
   set(activeSpaceAtom, "work-bench");
 });
 
-export const prepareTaskAtom = atom(null, async (_get, set, taskId: string) => {
-  await prepareTask(taskId);
-  await set(refreshTaskSummariesAtom);
-});
+export const prepareTaskMutationAtom = atomWithMutation((get) => ({
+  mutationFn: (taskId: string) => prepareTask(taskId),
+  onSuccess: () =>
+    get(queryClientAtom).invalidateQueries({ queryKey: queryKeys.tasks.summaryFamily() }),
+}));
 
-export const refreshTaskSummariesAtom = atom(null, async (get, set) => {
-  const summaries = await listTaskSummaries(get(selectedProjectAtom));
-  set(taskSummariesAtom, summaries);
-  return summaries;
-});
+// Invalidate every tasks.summary query (filtered board + unfiltered sidebar) and await
+// the refetch, so callers reading the read model right after see fresh data.
+export const refreshTaskSummariesAtom = atom(null, (get) =>
+  get(queryClientAtom).invalidateQueries({ queryKey: queryKeys.tasks.summaryFamily() }),
+);
 
 // cmd+g: promote the run living in the focused tab to Main Run. Backend returns
 // false for both "no run in this tab" and "already main", keeping this a silent no-op.
