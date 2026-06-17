@@ -6,7 +6,7 @@ import {
   projectsAtom,
   selectedProjectAtom,
   deleteTaskAtom,
-  prepareTaskAtom,
+  prepareTaskMutationAtom,
   runTaskAtom,
   openBenchAtom,
 } from "@/stores/workboard";
@@ -172,7 +172,7 @@ export const runDirectActionAtom = atom(null, (get, set, id: Exclude<MenuItemId,
   const task = taskById(get, taskId);
   if (!task || isItemDisabled(id, task)) return;
   set(menuAtom, null);
-  if (id === "prepare") void set(prepareTaskAtom, taskId);
+  if (id === "prepare") get(prepareTaskMutationAtom).mutate(taskId);
   else if (id === "run") void set(runTaskAtom, taskId);
   else void set(openBenchAtom, taskId);
 });

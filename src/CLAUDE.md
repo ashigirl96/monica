@@ -39,8 +39,12 @@ Do:
 - Work Board 復元は Query 成功後に一度だけ行い、現在の `loadBoard().then(applyRestored)` の順序保証を保つ
 - `tasks.summary(project)` は `project: string | null` を同じ query family として扱い、Sidebar 用の unfiltered read は `null` key に寄せる
 - Query key で再取得する state setter から、手動 refresh 副作用を残さない
+- 純粋な mutation（invoke + invalidate のみ）は `atomWithMutation` にし、onSuccess で query family を invalidate する
+- 楽観更新はしない（invalidate → refetch で表示を更新する）
 
 Don't:
+
+- jotai/terminal を orchestrate する mutation（runspace cleanup・navigate・primaryTab refresh 等）を `atomWithMutation` 化する。`atomWithMutation` の onSuccess からは jotai の `set` を呼べないため、これらは write atom のまま残し既存の invalidate helper を呼ぶ
 
 - TanStack Query を domain state の source of truth にする
 - TaskRun lifecycle を Query cache で進める

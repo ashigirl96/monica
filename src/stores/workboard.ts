@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import { atomWithQuery, queryClientAtom } from "jotai-tanstack-query";
+import { atomWithMutation, atomWithQuery, queryClientAtom } from "jotai-tanstack-query";
 import {
   listTaskSummaries,
   getBoardColumns,
@@ -78,10 +78,11 @@ export const taskStatusMapAtom = atom<Record<string, DisplayStatus>>((get) =>
   Object.fromEntries((get(taskStatusMapQueryAtom).data ?? []).map((s) => [s.id, s.status])),
 );
 
-export const trackIssueAtom = atom(null, async (_get, set, input: string) => {
-  await trackGithubIssue(input);
-  await set(refreshTaskSummariesAtom);
-});
+export const trackIssueMutationAtom = atomWithMutation((get) => ({
+  mutationFn: (input: string) => trackGithubIssue(input),
+  onSuccess: () =>
+    get(queryClientAtom).invalidateQueries({ queryKey: queryKeys.tasks.summaryFamily() }),
+}));
 
 export const openBenchAtom = atom(null, async (_get, set, taskId: string) => {
   const bench = await openBench(taskId);
@@ -94,10 +95,11 @@ export const openBenchAtom = atom(null, async (_get, set, taskId: string) => {
   set(activeSpaceAtom, "work-bench");
 });
 
-export const prepareTaskAtom = atom(null, async (_get, set, taskId: string) => {
-  await prepareTask(taskId);
-  await set(refreshTaskSummariesAtom);
-});
+export const prepareTaskMutationAtom = atomWithMutation((get) => ({
+  mutationFn: (taskId: string) => prepareTask(taskId),
+  onSuccess: () =>
+    get(queryClientAtom).invalidateQueries({ queryKey: queryKeys.tasks.summaryFamily() }),
+}));
 
 // Invalidate every tasks.summary query (filtered board + unfiltered sidebar) and await
 // the refetch, so callers reading the read model right after see fresh data.
