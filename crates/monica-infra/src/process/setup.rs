@@ -58,8 +58,6 @@ pub fn run_setup_script(
         .current_dir(worktree)
         .env("MONICA_TASK_ID", &env.monica_id)
         .env("MONICA_TASK_RUN_ID", &env.task_run_id)
-        .env("MONICA_ID", &env.monica_id)
-        .env("MONICA_RUN_ID", &env.task_run_id)
         .env("MONICA_PROJECT_ID", &env.project_id)
         .env("MONICA_BRANCH", &env.branch)
         .env("MONICA_WORKTREE", &env.worktree)

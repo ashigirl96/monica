@@ -60,7 +60,6 @@ impl RunArtifacts for FsRunArtifacts {
             // same base dir as the app (e.g. ~/monica/dev in dev).
             ("MONICA_HOME".to_string(), monica_home),
             ("MONICA_TASK_ID".to_string(), task_id.to_string()),
-            ("MONICA_ID".to_string(), task_id.to_string()),
             ("MONICA_PROJECT_ID".to_string(), project.id.clone()),
             ("MONICA_CLAUDE_SETTINGS_PATH".to_string(), settings_path_str.clone()),
             ("MONICA_CLAUDE_WRAPPER".to_string(), wrapper_path.clone()),
@@ -73,7 +72,6 @@ impl RunArtifacts for FsRunArtifacts {
         }
         if let Some(run_id) = task_run_id {
             env.push(("MONICA_TASK_RUN_ID".to_string(), run_id.to_string()));
-            env.push(("MONICA_RUN_ID".to_string(), run_id.to_string()));
         }
         // Best-effort fallback for non-zsh shells, which ignore ZDOTDIR. The
         // user's rc files may still reorder PATH; zsh users get the reliable
