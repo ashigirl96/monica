@@ -46,22 +46,29 @@
   - [x] 既存の `<Suspense>` 境界は lazy component 用なので、Query の Suspense 化で表示や restore timing が変わらないか確認する。
   - [x] Work Board restore の success 状態を明示的に扱いやすい方を選ぶ。
 
-## Phase 2: Work Board read model
+## Phase 2: Work Board read model ✅ 完了（Issue #127 / PR #128）
 
-- [ ] `listTaskSummaries(project)` の query atom を作る。
-- [ ] `listProjects()` の query atom を作る。
-- [ ] `getBoardColumns()` の query atom を作る。
-- [ ] `taskSummariesAtom` / `projectsAtom` / `boardColumnsAtom` は「query の data を unwrap する薄い derived atom」として温存する。これで `columnTasksAtom` と nav 系（`workboard-nav.ts` の focus / move / taskById / applyRestored）を無改修のまま移行する。
-- [ ] `src/stores/workboard.ts` の `loadBoardAtom` / `refreshTaskSummariesAtom` を Query 由来に置き換える。
-- [ ] Sidebar 用の `refreshTaskStatusMapAtom`（unfiltered = `tasks.summary(null)`）も同 family で扱い、invalidate は family 全体（`['tasks','summary']` プレフィックス）を倒して filtered/unfiltered 両方を更新する。
-- [ ] `selectedProjectAtom` は UI state として残し、query key の入力にだけ使う。
-- [ ] `selectedProjectAtom` の write 側にある `void set(refreshTaskSummariesAtom)` を削除し、project 変更による再取得は query key 変更だけにする。
-- [ ] `columnTasksAtom` 相当の projection は Rust 由来の column/status 定義を使って維持する。
-- [ ] Work Board 復元処理は、Query のロード完了後に既存の `applyRestoredWorkboardAtom` を一度だけ呼ぶ形へ移す。
-  - [ ] `loadBoard().then(() => applyRestored())` の順序保証を失わない。
-  - [ ] `projects` と `task summaries` の両方が success になってから restore hint を検証する。
-  - [ ] restore 後の `selectedProjectAtom` 変更で query key が変わる場合、focus 検証をどの snapshot に対して行うか PoC で決める。
-  - [ ] restore は冪等に・一度だけ発火させ、StrictMode の effect 二重マウントに耐えるようにする（`set(selectedProjectAtom)` → key 変更 → refetch → restore 判定 の循環を起こさない）。
+確定した設計判断:
+
+- read 3 atom（boardColumns / taskSummaries / taskStatusMap）は `atomWithQuery` + read-only derived。consumer は無改修。
+- `taskSummaries` の query key に `selectedProjectAtom` を使い、filter 変更は query key 変更だけで refetch（手動 refresh 副作用を撤去）。
+- refresh は `tasks.summaryFamily()`（`["tasks","summary"]` 前方一致）の `invalidateQueries` に統一。`refreshTaskStatusMapAtom` は廃止し sidebar を集約。
+- `loadBoard` は `ensureQueryData` ゲートにして restore 順序を維持。`invalidateQueries` は refetch 完了まで await する（`@tanstack/query-core` 実コードで確認）ので mutation 直後の同期 read も fresh。
+
+- [x] `listTaskSummaries(project)` の query atom を作る。
+- [x] `listProjects()` の query atom を作る（Phase 1 で実施済み）。
+- [x] `getBoardColumns()` の query atom を作る。
+- [x] `taskSummariesAtom` / `projectsAtom` / `boardColumnsAtom` は「query の data を unwrap する薄い derived atom」として温存する。これで `columnTasksAtom` と nav 系（`workboard-nav.ts` の focus / move / taskById / applyRestored）を無改修のまま移行する。
+- [x] `src/stores/workboard.ts` の `loadBoardAtom` / `refreshTaskSummariesAtom` を Query 由来に置き換える。
+- [x] Sidebar 用の `refreshTaskStatusMapAtom`（unfiltered = `tasks.summary(null)`）も同 family で扱い、invalidate は family 全体（`['tasks','summary']` プレフィックス）を倒して filtered/unfiltered 両方を更新する。
+- [x] `selectedProjectAtom` は UI state として残し、query key の入力にだけ使う。
+- [x] `selectedProjectAtom` の write 側にある `void set(refreshTaskSummariesAtom)` を削除し、project 変更による再取得は query key 変更だけにする。
+- [x] `columnTasksAtom` 相当の projection は Rust 由来の column/status 定義を使って維持する。
+- [x] Work Board 復元処理は、Query のロード完了後に既存の `applyRestoredWorkboardAtom` を一度だけ呼ぶ形へ移す。
+  - [x] `loadBoard().then(() => applyRestored())` の順序保証を失わない。
+  - [x] `projects` と `task summaries` の両方が success になってから restore hint を検証する。
+  - [x] restore 後の `selectedProjectAtom` 変更で query key が変わる場合、focus 検証をどの snapshot に対して行うか → unfiltered(null) snapshot に対して検証する形で確定。
+  - [x] restore は冪等に・一度だけ発火させ、StrictMode の effect 二重マウントに耐えるようにする（`applyRestored` が hint を読んだ直後に null 化）。
 
 ## Phase 3: Mutation と invalidate
 
