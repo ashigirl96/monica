@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useBoardNavigation } from "@/hooks/use-board-navigation";
-import { useWorkBoardLiveRefresh } from "@/hooks/use-work-board-live-refresh";
 import { columnTasksAtom, loadBoardAtom } from "@/stores/workboard";
 import { applyRestoredWorkboardAtom, focusedTaskIdAtom } from "@/stores/workboard-nav";
 import { BoardContextMenu } from "./board-context-menu";
@@ -14,7 +13,6 @@ function WorkBoardContent() {
   const applyRestored = useSetAtom(applyRestoredWorkboardAtom);
 
   useBoardNavigation();
-  useWorkBoardLiveRefresh();
 
   useEffect(() => {
     loadBoard().then(() => applyRestored());

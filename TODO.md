@@ -70,16 +70,20 @@
   - [x] restore 後の `selectedProjectAtom` 変更で query key が変わる場合、focus 検証をどの snapshot に対して行うか → unfiltered(null) snapshot に対して検証する形で確定。
   - [x] restore は冪等に・一度だけ発火させ、StrictMode の effect 二重マウントに耐えるようにする（`applyRestored` が hint を読んだ直後に null 化）。
 
-## Phase 3: Mutation と invalidate
+## Phase 3: Mutation と invalidate ✅ 完了（Issue #129 / PR #130）
 
-- [ ] `trackGithubIssue` を `atomWithMutation` 化し、成功後に task/project 関連 query を invalidate する。
-- [ ] `prepareTask` を `atomWithMutation` 化し、成功後に task summary を invalidate する。
-- [ ] `deleteTask` を `atomWithMutation` 化し、既存の WorkBench runspace cleanup を維持したまま task summary を invalidate する。
-  - [ ] `removeRunspaceAtom(..., "terminate")` 相当の cleanup を await 可能にし、必要な terminate / session refresh が settle してから invalidate する。
-  - [ ] task summary と terminal/session snapshot の invalidate 順序を分ける必要があるか PoC で確認する。
-- [ ] 楽観更新はしない（invalidate による再取得で表示を更新する）方針を明記する。
-- [ ] `makeMainTaskRun` 後の `taskRuns.primaryTab(taskId)` と task summary invalidate を標準化する。
-- [ ] `runTaskFlow` は lifecycle orchestration として残し、最後の再取得だけ Query invalidate に寄せる。
+確定した設計判断（code-architect opus 検証）:
+
+- `atomWithMutation` の onSuccess からは jotai `set` を呼べない。よって **純粋 mutation（invoke + invalidate のみ）だけ** atomWithMutation 化し、jotai/terminal を orchestrate する mutation（delete/run/promote）は write atom のまま残す。
+- `mutateAsync`(=observer.mutate) は onSuccess の invalidate+refetch 完了まで await するので、mutation 直後の同期 read が fresh。
+- 楽観更新はしない。方針を `src/CLAUDE.md` に明記。
+
+- [x] `trackGithubIssue` を `atomWithMutation` 化し、成功後に task summary family を invalidate する。
+- [x] `prepareTask` を `atomWithMutation` 化し、成功後に task summary family を invalidate する。
+- [~] `deleteTask` は jotai orchestration（runspace cleanup）が必須なので **write atom のまま維持**（既存 `refreshTaskSummariesAtom` で invalidate）。atomWithMutation 化はしない（onSuccess で jotai set 不可のため）。
+- [x] 楽観更新はしない方針を明記。
+- [~] `makeMainTaskRun` 後の `taskRuns.primaryTab(taskId)` 標準化は primaryTab が未 query 化のため Phase 5 へ。task summary invalidate は `promoteActiveTabRunAtom`(write atom) が `refreshTaskSummariesAtom` で実施済み。
+- [x] `runTaskFlow` は lifecycle orchestration として write atom のまま残し、最後の再取得だけ invalidate に寄せた（既存維持）。
 
 ## Phase 4: Events / polling
 
