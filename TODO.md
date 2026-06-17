@@ -85,28 +85,60 @@
 - [~] `makeMainTaskRun` 後の `taskRuns.primaryTab(taskId)` 標準化は primaryTab が未 query 化のため Phase 5 へ。task summary invalidate は `promoteActiveTabRunAtom`(write atom) が `refreshTaskSummariesAtom` で実施済み。
 - [x] `runTaskFlow` は lifecycle orchestration として write atom のまま残し、最後の再取得だけ invalidate に寄せた（既存維持）。
 
-## Phase 4: Events / polling
+## Phase 4: Events / polling ✅ 完了（Issue #131 / PR #132）
 
-- [ ] `task-run:status-changed` を受けたら task summary / primary tab query を invalidate する helper を作る。
-- [ ] `pr-sync:completed` を受けたら task summary / PR snapshot query を invalidate する helper を作る。
-- [ ] `useLiveRefresh` の手動 polling を Query の `refetchInterval` または invalidate helper に寄せる。
-- [ ] Work Board / WorkBench Sidebar / WorkBench Header が同じ event + interval を個別に持たないよう購読を集約する。`layout.tsx` の persistent space で WorkBench は unmount されず常時共存する点に注意する。
-- [ ] event listener は mount 寿命・module singleton QueryClient は全寿命というライフサイクル非対称を踏まえ、listener を app-global な単一 owner に寄せて invalidate の N 重発火を防ぐ。
-- [ ] 同一 query key の重複 invalidate/refetch が実害を出さないか PoC で確認する。
-- [ ] retry を絞ることで一過性 backend エラーが board 空表示になる退行を防ぐため、`isError` → toast 連携の受け皿を用意する。
-- [ ] document hidden 時の扱いを Query 側の設定として明文化する。
-  - [ ] Tauri window blur / focus / minimize で `document.hidden` が期待通り変わるか実機確認する。
-  - [ ] `document.hidden` が使えない場合は Tauri window event か mounted-space 単位の polling に寄せる。
-- [ ] event timeline snapshot を追加する場合は、append-only event stream ではなく snapshot query として扱う。
+確定した設計判断:
 
-## Phase 5: WorkBench 周辺の限定適用
+- `task-run:status-changed` / `pr-sync:completed` の listen と 3s poll を module-singleton の `initQuerySync()`（`src/stores/query-sync.ts`、`main.tsx` で1回 init）に集約。`tasks.summaryFamily()` を invalidate。
+- owner は React effect でなく module init なので StrictMode 二重登録なし。listener は app 寿命で unlisten しない。
+- board 初回ロード失敗（`status==="error" && data===undefined && fetchStatus==="idle"`）のみ error toast。`pushErrorToast` の message dedup と併用。
+- `document.hidden` で poll を gate（既存 `useLiveRefresh` 踏襲）。primary tab は未 query 化のため対象外（Phase 5）。
 
-- [ ] `terminalListSessions()` は detached session/status snapshot としてのみ Query 化できるか検証する。
-- [ ] `terminal:output:*` / `terminal:exit:*` listener は Query 化しない。
-- [ ] `terminalCreateSession` / `terminalAttach` / `terminalWrite` / `terminalResize` / `terminalTerminate` は imperative command のまま維持する。
-- [ ] `loadTerminalStateAtom` の復元順序、daemon reconcile、fallback 挙動は Query cache に移さない。
-- [ ] `worktreeInfo(path)` cache は Query 化してもよいが、既存の 5 秒 throttle と title 更新の意味を保つ。
-  - [ ] Query 化する場合は既存の module-scope throttle と Query `staleTime` のどちらか一方に寄せる。
+- [x] `task-run:status-changed` を受けたら task summary を invalidate（owner に集約）。primary tab は Phase 5。
+- [x] `pr-sync:completed` を受けたら task summary を invalidate + toast（PR は `TaskSummaryRow` 内包で専用 query 不要）。
+- [x] `useLiveRefresh` の手動 polling（query 部分）を owner の単一 interval に寄せた。terminal 用 `useLiveRefresh` は Phase 5。
+- [x] Work Board / Sidebar の query event+interval を owner 単一所有に集約。
+- [x] listener を app-global 単一 owner に寄せ N 重発火を防止。
+- [x] 同一 query key の重複 invalidate は active query のみ refetch で実害なしを確認。
+- [x] `isError`(初回ロード失敗) → toast の受け皿を用意。
+- [x] `document.hidden` の扱いを owner に明文化。
+  - [~] Tauri window minimize での `document.hidden` 実機確認は MCP で困難なため既存挙動踏襲（必要なら Tauri window event 化を将来検討）。
+- [ ] event timeline snapshot は未導入（追加時に snapshot query として扱う）。
+
+## Phase 5: WorkBench 周辺の限定適用 ⏸ 見送り（deferred、Issue #133）
+
+検証の結論として **terminal は imperative 維持**とした。理由:
+
+- `sessionStatusAtom` は純粋 snapshot ではなく、`use-terminal` の attach/exit が `setSessionStatusAtom` で
+  **load-bearing な optimistic 上書き**をする（store.ts:566 / use-terminal.ts:128,147,177,193）。3s poll は
+  全置換で daemon snapshot に戻す。Query 化には baseline + override の merge 層が要り、fragile な terminal を厚く触る。
+- `worktreeInfo(path)` は **local git 実行**で「backend/SQLite/GitHub 由来 snapshot」という `src/CLAUDE.md` の
+  Query 適用範囲外。既存 5s throttle と staleTime の二重時間管理は CLAUDE.md で禁止。throttle 維持が正当。
+- `src/CLAUDE.md` の「WorkBench / TaskRun 実行制御へ横滑りさせない」原則とも整合する。
+
+- [x] `terminalListSessions()` の Query 化可否を検証 → optimistic override の絡みで見送り。
+- [x] `terminal:output:*` / `terminal:exit:*` listener は Query 化しない（維持）。
+- [x] `terminalCreateSession` 等の lifecycle command は imperative 維持。
+- [x] `loadTerminalStateAtom` の復元順序・reconcile・fallback は Query に移さない（維持）。
+- [x] `worktreeInfo(path)` は throttle 維持（Query 適用範囲外と判断）。
+- backlog: 将来 terminal status を Query 化する場合は optimistic override の merge 層を別途設計する。
+
+## Phase 6: Cleanup / verification ✅ 完了（Issue #134）
+
+監査結果:
+
+- 削除すべき manual cache atom は **無し**。旧 `boardColumns/taskSummaries/taskStatusMap` は derived 化されて
+  使用中、`refreshTaskSummariesAtom` も mutation で使用中。各 Phase で `just knip` 通過済み（dead export なし）。
+- `query-keys.ts` は「引数の写像」+ 純粋 predicate（`isTaskSummaryKey`）のみで status/column 判定の複製なし。
+- `src/commands/bindings.ts` は手動編集していない（移行で Rust 変更なし）。
+
+- [x] Query 化後に不要になる manual cache atom を削除 → 対象なし（確認のみ）。
+- [x] query key factory / 純粋 helper を単体テスト（`query-keys.test.ts`）。`just knip` で dead 検出可能。
+- [x] query key factory は引数の写像に留め status/column 判定を複製しない。
+- [x] `src/commands/bindings.ts` は手動編集しない。
+- [x] Work Board の initial load / project filter / track issue / prepare / run / delete を確認。
+- [x] WorkBench の terminal attach / detached sessions / Task status dot / Main Run dot が退行なしを確認。
+- [x] `just fmt` / `just check` / `just test` 通過。
 
 ## Phase 6: Cleanup / verification
 
