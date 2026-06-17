@@ -1039,7 +1039,7 @@ fn branch_pr_sync_failure_retries_after_five_minutes() {
 }
 
 #[test]
-fn force_clear_pr_sync_state_resets_branch_syncs_and_open_pr_states() {
+fn force_clear_pr_sync_state_resets_open_pr_states_but_preserves_branch_syncs() {
     let mut db = SqliteStore::open_in_memory().unwrap();
 
     // Set up a branch sync with a future next_retry_at (via failure)
@@ -1077,7 +1077,8 @@ fn force_clear_pr_sync_state_resets_branch_syncs_and_open_pr_states() {
     // Action
     db.force_clear_pr_sync_state().unwrap();
 
-    // Branch sync: next_retry_at should be NULL for all rows
+    // Branch sync: next_retry_at must be preserved. cmd+r refreshes PR statuses, not branch
+    // discovery; resetting branches here would starve the forced batch's status sync.
     let branch_retry: Option<String> = db
         .conn()
         .query_row(
@@ -1086,7 +1087,10 @@ fn force_clear_pr_sync_state_resets_branch_syncs_and_open_pr_states() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(branch_retry, None, "branch next_retry_at should be cleared");
+    assert!(
+        branch_retry.is_some(),
+        "branch next_retry_at should be preserved, not cleared"
+    );
 
     // Open PR state: synced_at and next_retry_at should be NULL
     let (open_synced_at, open_retry): (Option<String>, Option<String>) = db

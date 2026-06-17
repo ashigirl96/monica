@@ -276,10 +276,12 @@ impl SqliteStore {
     }
 
     pub fn force_clear_pr_sync_state(&mut self) -> Result<()> {
-        self.conn_mut().execute(
-            "UPDATE github_pull_request_branch_syncs SET next_retry_at = NULL",
-            [],
-        )?;
+        // cmd+r asks to refresh PR *statuses* (open→merged/closed), not to re-discover branches.
+        // Branch sync has strict priority over status sync in sync_next_pull_request, so resetting
+        // every branch's next_retry_at here would refill the forced batch budget with branch
+        // discovery and starve the status sync that actually flips a merged PR. Only the open/draft
+        // ref states are made immediately eligible; branches keep their normal retry schedule, and
+        // an undiscovered PR is still picked up by the regular branch candidate (missing sync row).
         self.conn_mut().execute(
             "UPDATE github_pull_request_ref_states
              SET next_retry_at = NULL, synced_at = NULL
