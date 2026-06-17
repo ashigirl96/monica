@@ -55,8 +55,8 @@ fn handle_claude() -> Result<()> {
     let mut raw = String::new();
     std::io::stdin().read_to_string(&mut raw)?;
 
-    let task_id = env_opt("MONICA_TASK_ID").or_else(|| env_opt("MONICA_ID"));
-    let task_run_id = env_opt("MONICA_TASK_RUN_ID").or_else(|| env_opt("MONICA_RUN_ID"));
+    let task_id = env_opt("MONICA_TASK_ID");
+    let task_run_id = env_opt("MONICA_TASK_RUN_ID");
     let terminal_tab_id = env_opt("MONICA_TERMINAL_TAB_ID");
 
     debug_log(&format!(
@@ -93,12 +93,12 @@ fn handle_claude() -> Result<()> {
     // log without ever reaching Claude's context.
     if let Some(id) = &task_id {
         if !report.ignored && !report.task_found {
-            eprintln!("monica hook claude: MONICA_ID={id:?} not found; recorded event only");
+            eprintln!("monica hook claude: MONICA_TASK_ID={id:?} not found; recorded event only");
         }
     }
     if report.unsafe_task_run_id {
         eprintln!(
-            "monica hook claude: MONICA_TASK_RUN_ID/MONICA_RUN_ID is not a safe task run id; skipped hook-events.jsonl"
+            "monica hook claude: MONICA_TASK_RUN_ID is not a safe task run id; skipped hook-events.jsonl"
         );
     }
     Ok(())
