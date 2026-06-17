@@ -49,11 +49,18 @@ pub fn task_shell_env<R, A>(
     task_id: &str,
 ) -> Result<Vec<(String, String)>>
 where
-    R: TaskRepository + ProjectRepository,
+    R: TaskRepository + ProjectRepository + TaskRunRepository + BenchRepository,
     A: RunArtifacts,
 {
     let (task, project) = load_task_and_optional_project(repos, task_id)?;
-    Ok(shell_env_for(artifacts, &task, project.as_ref()))
+    // Where Claude actually runs: the bench tab's own cwd. Fall back to the worktree/default only
+    // when no bench exists yet, so the hook settings land in the directory Claude will read them from.
+    let cwd = repos
+        .get_bench_for_task(task_id)?
+        .map(|(_, cwd)| cwd)
+        .or_else(|| resolve_worktree_cwd(repos, &task))
+        .unwrap_or_else(|| default_bench_cwd(project.as_ref(), home_dir().as_deref()));
+    Ok(shell_env_for(artifacts, &task, project.as_ref(), &cwd))
 }
 
 fn load_task_and_optional_project<R>(
@@ -73,12 +80,21 @@ where
     Ok((task, project))
 }
 
-fn shell_env_for<A>(artifacts: &A, task: &Task, project: Option<&Project>) -> Vec<(String, String)>
+fn shell_env_for<A>(
+    artifacts: &A,
+    task: &Task,
+    project: Option<&Project>,
+    cwd: &str,
+) -> Vec<(String, String)>
 where
     A: RunArtifacts,
 {
     project
-        .and_then(|p| artifacts.prepare_task_shell_env(&task.id, p, None).ok())
+        .and_then(|p| {
+            artifacts
+                .prepare_task_shell_env(&task.id, p, None, std::path::Path::new(cwd))
+                .ok()
+        })
         .map(|shell| shell.env)
         .unwrap_or_default()
 }
@@ -89,11 +105,14 @@ where
     A: RunArtifacts,
 {
     let (task, project) = load_task_and_optional_project(repos, task_id)?;
-    let env = shell_env_for(artifacts, &task, project.as_ref());
 
     let desired_cwd = resolve_worktree_cwd(repos, &task)
         .unwrap_or_else(|| default_bench_cwd(project.as_ref(), home_dir().as_deref()));
     let (runspace_id, cwd, created) = ensure_bench(repos, task_id, &desired_cwd, false)?;
+
+    // Write hook settings into the cwd Claude will actually launch in (the bench's resolved cwd,
+    // which may differ from desired_cwd when the bench already existed).
+    let env = shell_env_for(artifacts, &task, project.as_ref(), &cwd);
 
     Ok(TaskBench {
         task_id: task_id.to_string(),
