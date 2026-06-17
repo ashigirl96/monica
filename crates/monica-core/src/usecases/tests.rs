@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use crate::interfaces::{
     AuthGateway, BenchRepository, BoxFuture, Clock, EventRepository, GitGateway, GithubGateway,
     ProjectRepository, RunArtifacts, SetupEnv, SetupOutcome, SetupRunner, TaskRepository,
-    TaskRunRepository,
+    TaskRunRepository, TaskSummaryFilter,
 };
 use crate::{
     begin_github_device_flow, delete_issue, execute_run, github_auth_status, logout_github,
@@ -124,7 +124,7 @@ impl TaskRepository for FakeRepos {
 
     fn list_task_summaries(
         &self,
-        status: Option<DisplayStatus>,
+        filter: TaskSummaryFilter,
         _project: Option<&str>,
     ) -> Result<Vec<TaskSummaryRow>> {
         let rows = self
@@ -154,7 +154,7 @@ impl TaskRepository for FakeRepos {
                     side_runs_failed: 0,
                 }
             })
-            .filter(|row| status.is_none_or(|status| status == row.status))
+            .filter(|row| filter.matches(row.status))
             .collect();
         Ok(rows)
     }

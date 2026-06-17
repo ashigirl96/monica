@@ -5,7 +5,7 @@ use crate::sqlite::SqliteStore;
 use monica_core::{
     DisplayStatus, ExternalRef, GithubPullRequest, GithubPullRequestStatus, NewTask,
     PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate, Task, TaskRepository,
-    TaskRunStatus, TaskRunWaitReason, TaskStatus, TaskSummaryRow,
+    TaskRunStatus, TaskRunWaitReason, TaskStatus, TaskSummaryFilter, TaskSummaryRow,
 };
 
 use super::{sql_literal_list, SET_NOW, TASK_COLUMNS};
@@ -133,7 +133,7 @@ impl TaskRepository for SqliteStore {
 
     fn list_task_summaries(
         &self,
-        status: Option<DisplayStatus>,
+        filter: TaskSummaryFilter,
         project: Option<&str>,
     ) -> Result<Vec<TaskSummaryRow>> {
         let tool_waits =
@@ -229,7 +229,7 @@ impl TaskRepository for SqliteStore {
                 side_runs_waiting_for_user: row.get("side_runs_waiting_for_user")?,
                 side_runs_failed: row.get("side_runs_failed")?,
             };
-            if status.is_none_or(|status| status == item.status) {
+            if filter.matches(item.status) {
                 items.push(item);
             }
         }

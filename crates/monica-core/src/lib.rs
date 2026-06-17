@@ -25,13 +25,13 @@ pub use interfaces::{
     AuthGateway, BenchRepository, Clock, EventRepository, GitGateway, GithubGateway,
     ProjectRepository, RunArtifacts, SetupEnv, SetupOutcome, SetupRunner, TaskRepository,
     TaskShellEnv,
-    TaskRunRepository,
+    TaskRunRepository, TaskSummaryFilter,
 };
 pub use usecases::{
     begin_github_device_flow, reconcile_terminal_sessions, DaemonSessionView, ReconcileOutcome,
     TerminalSessionUpdate, delete_issue, execute_run, get_project, github_auth_status,
     list_events, list_projects, list_task_summaries, list_tasks, logout_github,
-    make_main_by_terminal_tab, mark_issue, primary_terminal_tab, MakeMainOutcome,
+    make_main_by_terminal_tab, primary_terminal_tab, MakeMainOutcome,
     open_bench, prepare_claude_for_run, record_claude_hook, register_project, task_shell_env,
     register_project_with_default_branch, set_project_field, start_run, sync_next_pull_request,
     task_run_settlement_for_orphaned_run, task_run_settlement_for_terminal_exit, TerminalExitSettlement,
