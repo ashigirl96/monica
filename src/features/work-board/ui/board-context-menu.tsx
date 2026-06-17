@@ -10,7 +10,7 @@ import {
   menuAtom,
   setMenuItemIndexAtom,
   type MenuState,
-} from "@/stores/workboard-nav";
+} from "@/features/work-board/nav";
 
 export function BoardContextMenu() {
   const menu = useAtomValue(menuAtom);

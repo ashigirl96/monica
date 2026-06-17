@@ -1,8 +1,8 @@
 import { useEffect } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { useBoardNavigation } from "@/hooks/use-board-navigation";
+import { useBoardNavigation } from "@/features/work-board/use-board-navigation";
 import { columnTasksAtom, loadBoardAtom } from "@/stores/workboard";
-import { applyRestoredWorkboardAtom, focusedTaskIdAtom } from "@/stores/workboard-nav";
+import { applyRestoredWorkboardAtom, focusedTaskIdAtom } from "@/features/work-board/nav";
 import { BoardContextMenu } from "./board-context-menu";
 import { TaskCard } from "./task-card";
 

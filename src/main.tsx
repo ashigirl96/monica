@@ -4,6 +4,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import "@fontsource-variable/jetbrains-mono";
 import App from "./App";
+import { initPrSync } from "./stores/pr-sync";
 import { queryClient } from "./stores/query-client";
 import { initQuerySync } from "./stores/query-sync";
 import { hydrateUiState } from "./stores/ui-state";
@@ -17,6 +18,7 @@ async function bootstrap() {
   // it without a <Provider>, matching how hydrateUiState seeds the same store.
   getDefaultStore().set(queryClientAtom, queryClient);
   initQuerySync();
+  initPrSync();
   try {
     await hydrateUiState();
     initUiStatePersistence();

@@ -56,7 +56,6 @@ export const commands = {
   listTaskSummaries: (project: string | null) =>
     typedError<TaskSummaryRow[], string>(__TAURI_INVOKE("list_task_summaries", { project })),
   getBoardColumns: () => __TAURI_INVOKE<BoardColumn[]>("get_board_columns"),
-  listProjects: () => typedError<ProjectEntry[], string>(__TAURI_INVOKE("list_projects")),
   trackGithubIssue: (input: string) =>
     typedError<TrackIssueResult, string>(__TAURI_INVOKE("track_github_issue", { input })),
   listBenchRunspaceMap: () =>
@@ -128,11 +127,6 @@ export type PrepareTaskResult = {
   task_id: string;
   task_run_id: string;
   branch: string;
-};
-
-export type ProjectEntry = {
-  repo: string;
-  name: string;
 };
 
 export type RunTaskResult = {

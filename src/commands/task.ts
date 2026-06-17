@@ -7,7 +7,6 @@ export type {
   TaskRunWaitReason,
   GithubPullRequestRef,
   BoardColumn,
-  ProjectEntry,
   TrackIssueResult,
   TaskBench,
   PrepareTaskResult,
@@ -28,10 +27,6 @@ export function listTaskSummaries(project: string | null = null) {
 
 export function getBoardColumns() {
   return commands.getBoardColumns();
-}
-
-export function listProjects() {
-  return unwrap(commands.listProjects());
 }
 
 export function trackGithubIssue(input: string) {

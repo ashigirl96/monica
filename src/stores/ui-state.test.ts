@@ -1,7 +1,7 @@
 /// <reference types="bun" />
 import { describe, expect, test } from "bun:test";
 import { SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "@/stores/space";
-import { parseUiState, resolveWorkbenchActive, resolveWorkboardSelection } from "@/stores/ui-state";
+import { parseUiState, resolveWorkbenchActive, resolveWorkboardFocus } from "@/stores/ui-state";
 
 describe("parseUiState", () => {
   test("passes through a valid object", () => {
@@ -17,7 +17,7 @@ describe("parseUiState", () => {
       sidebarOpen: false,
       sidebarWidth: 220,
       workbench: { activeRunspaceId: "rs1", activeTabId: "tab1" },
-      workboard: { selectedProject: "owner/repo", focusedTaskId: "task1" },
+      workboard: { focusedTaskId: "task1" },
     });
   });
 
@@ -27,7 +27,7 @@ describe("parseUiState", () => {
     expect(parsed.sidebarOpen).toBe(true);
     expect(parsed.sidebarWidth).toBe(SIDEBAR_DEFAULT_WIDTH);
     expect(parsed.workbench).toEqual({ activeRunspaceId: null, activeTabId: null });
-    expect(parsed.workboard).toEqual({ selectedProject: null, focusedTaskId: null });
+    expect(parsed.workboard).toEqual({ focusedTaskId: null });
   });
 
   test("rejects an unknown activeSpace", () => {
@@ -43,7 +43,7 @@ describe("parseUiState", () => {
   test("defaults missing nested hints to null", () => {
     const parsed = parseUiState({ activeSpace: "work-board" });
     expect(parsed.workbench).toEqual({ activeRunspaceId: null, activeTabId: null });
-    expect(parsed.workboard).toEqual({ selectedProject: null, focusedTaskId: null });
+    expect(parsed.workboard).toEqual({ focusedTaskId: null });
   });
 });
 
@@ -94,31 +94,18 @@ describe("resolveWorkbenchActive", () => {
   });
 });
 
-describe("resolveWorkboardSelection", () => {
-  test("keeps project and task that still exist", () => {
-    expect(
-      resolveWorkboardSelection(["owner/repo"], ["task1"], {
-        selectedProject: "owner/repo",
-        focusedTaskId: "task1",
-      }),
-    ).toEqual({ selectedProject: "owner/repo", focusedTaskId: "task1" });
-  });
-
-  test("drops a deleted project", () => {
-    expect(
-      resolveWorkboardSelection(["owner/repo"], ["task1"], {
-        selectedProject: "gone/repo",
-        focusedTaskId: "task1",
-      }).selectedProject,
-    ).toBeNull();
+describe("resolveWorkboardFocus", () => {
+  test("keeps a task that still exists", () => {
+    expect(resolveWorkboardFocus(["task1"], { focusedTaskId: "task1" })).toEqual({
+      focusedTaskId: "task1",
+    });
   });
 
   test("clears focus on a deleted task", () => {
-    expect(
-      resolveWorkboardSelection(["owner/repo"], ["task1"], {
-        selectedProject: "owner/repo",
-        focusedTaskId: "deleted",
-      }).focusedTaskId,
-    ).toBeNull();
+    expect(resolveWorkboardFocus(["task1"], { focusedTaskId: "deleted" }).focusedTaskId).toBeNull();
+  });
+
+  test("clears focus when the hint is empty", () => {
+    expect(resolveWorkboardFocus(["task1"], { focusedTaskId: null }).focusedTaskId).toBeNull();
   });
 });
