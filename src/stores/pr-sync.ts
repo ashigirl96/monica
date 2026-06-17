@@ -1,7 +1,7 @@
 import { atom, getDefaultStore } from "jotai";
 import { forceSyncPullRequests, onPrSyncCompleted } from "@/commands/pull_request";
 import { queryClient } from "@/stores/query-client";
-import { invalidateTaskSummaries } from "@/stores/query-keys";
+import { refetchTaskSummaries } from "@/stores/query-keys";
 import { pushErrorToast, pushInfoToast } from "@/stores/toast";
 
 // The forced sync is debounced while one is genuinely running in the backend; the in-flight
@@ -48,7 +48,7 @@ export function initPrSync(): void {
   const store = getDefaultStore();
   void onPrSyncCompleted(() => {
     clearInFlightTimer();
-    void invalidateTaskSummaries(queryClient);
+    void refetchTaskSummaries(queryClient);
     store.set(prSyncInFlightAtom, false);
     store.set(prSyncLastSyncedAtom, Date.now());
     pushInfoToast("PR status refreshed");
