@@ -10,6 +10,7 @@ mod shell_path;
 fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::new()
         .commands(tauri_specta::collect_commands![
+            commands::debug::debug_log,
             commands::clipboard::clipboard_write_image,
             commands::editor::resolve_editor_paths,
             commands::editor::open_in_editor,

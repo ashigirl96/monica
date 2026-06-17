@@ -1,4 +1,5 @@
 pub mod clipboard;
+pub mod debug;
 pub mod editor;
 pub mod git;
 pub mod pull_request;

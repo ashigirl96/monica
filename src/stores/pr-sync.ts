@@ -2,6 +2,7 @@ import { atom, getDefaultStore } from "jotai";
 import { forceSyncPullRequests, onPrSyncCompleted } from "@/commands/pull_request";
 import { queryClient } from "@/stores/query-client";
 import { refetchTaskSummaries } from "@/stores/query-keys";
+import { debugLog } from "@/commands/debug";
 import { pushErrorToast, pushInfoToast } from "@/stores/toast";
 
 // The forced sync is debounced while one is genuinely running in the backend; the in-flight
@@ -24,10 +25,16 @@ function clearInFlightTimer() {
 }
 
 export const forceSyncPullRequestsAtom = atom(null, async (get, set) => {
-  if (get(prSyncInFlightAtom)) return;
+  debugLog(`[issue-157] forceSyncPullRequestsAtom entered, inFlight=${get(prSyncInFlightAtom)}`);
+  if (get(prSyncInFlightAtom)) {
+    debugLog("[issue-157] forceSyncPullRequestsAtom bailed: in-flight guard");
+    return;
+  }
   set(prSyncInFlightAtom, true);
   try {
+    debugLog("[issue-157] calling forceSyncPullRequests() command");
     await forceSyncPullRequests();
+    debugLog("[issue-157] forceSyncPullRequests() command resolved");
     clearInFlightTimer();
     // A near-instant sync can fire the completion event during the await above, clearing the
     // flag before we get here; only arm the backstop while we're still genuinely waiting.
@@ -35,6 +42,9 @@ export const forceSyncPullRequestsAtom = atom(null, async (get, set) => {
       inFlightTimer = setTimeout(() => set(prSyncInFlightAtom, false), PR_SYNC_INFLIGHT_TIMEOUT_MS);
     }
   } catch (e) {
+    debugLog(
+      `[issue-157] forceSyncPullRequests() command threw: ${e instanceof Error ? e.message : String(e)}`,
+    );
     clearInFlightTimer();
     set(prSyncInFlightAtom, false);
     pushErrorToast(e instanceof Error ? e.message : String(e));
@@ -47,6 +57,7 @@ export const forceSyncPullRequestsAtom = atom(null, async (get, set) => {
 export function initPrSync(): void {
   const store = getDefaultStore();
   void onPrSyncCompleted(() => {
+    debugLog("[issue-157] onPrSyncCompleted event received");
     clearInFlightTimer();
     void refetchTaskSummaries(queryClient);
     store.set(prSyncInFlightAtom, false);

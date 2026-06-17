@@ -5,6 +5,12 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 
 /** Commands */
 export const commands = {
+  /**
+   *  Temporary diagnostic sink so the release webview (which has no devtools) can route
+   *  frontend trace points into ~/monica/logs/monica.log. Tracked in issue #157; remove
+   *  once the cmd+r PR-sync investigation concludes.
+   */
+  debugLog: (message: string) => __TAURI_INVOKE<void>("debug_log", { message }),
   clipboardWriteImage: (path: string) =>
     typedError<null, string>(__TAURI_INVOKE("clipboard_write_image", { path })),
   /**
