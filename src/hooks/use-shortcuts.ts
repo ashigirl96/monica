@@ -14,7 +14,6 @@ import {
   toggleLastRunspaceAtom,
 } from "@/features/work-bench/store";
 import { forceSyncPullRequestsAtom } from "@/stores/pr-sync";
-import { debugLog } from "@/commands/debug";
 import { isEditable } from "@/lib/keyboard";
 
 const META_KEY_SPACE_MAP: Record<string, SpaceId> = {
@@ -121,13 +120,7 @@ export function useShortcuts() {
 
       if (e.metaKey && e.key === "r") {
         e.preventDefault();
-        debugLog(`[issue-157] cmd+r keydown reached use-shortcuts, activeSpace=${activeSpace}`);
-        if (activeSpace === "work-board") {
-          debugLog("[issue-157] activeSpace is work-board, calling forceSyncPullRequests");
-          void forceSyncPullRequests();
-        } else {
-          debugLog(`[issue-157] activeSpace guard skipped forceSync (activeSpace=${activeSpace})`);
-        }
+        if (activeSpace === "work-board") void forceSyncPullRequests();
         return;
       }
 
