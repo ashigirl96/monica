@@ -103,7 +103,8 @@ fn create_worktree(repo: &Path, worktree: &Path, branch: &str, base: &str) -> Re
     if branch_exists(repo, branch)? {
         command.arg(branch);
     } else {
-        command.args(["-b", branch, base]);
+        let start_point = latest_remote_base(repo, base).unwrap_or_else(|| base.to_string());
+        command.args(["-b", branch]).arg(start_point);
     }
     let output = command
         .output()
@@ -230,6 +231,35 @@ fn ensure_worktree_unregistered(repo: &Path, run: &TaskRun, worktree: &Path) -> 
     Ok(())
 }
 
+/// Branch new worktrees off the latest remote default branch so they don't inherit a stale
+/// local base and conflict at merge time. Returns `origin/<base>` only after a successful fetch
+/// that leaves the ref resolvable; otherwise `None`, so the caller falls back to the local base
+/// and a Run is never blocked by an unreachable remote (offline, or a remote-less repo).
+fn latest_remote_base(repo: &Path, base: &str) -> Option<String> {
+    let fetched = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["fetch", "origin", base])
+        .output()
+        .ok()?
+        .status
+        .success();
+    if !fetched {
+        return None;
+    }
+    let remote = format!("origin/{base}");
+    let resolves = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rev-parse", "--verify", "--quiet"])
+        .arg(format!("refs/remotes/{remote}"))
+        .output()
+        .ok()?
+        .status
+        .success();
+    resolves.then_some(remote)
+}
+
 fn branch_exists(repo: &Path, branch: &str) -> Result<bool> {
     let output = Command::new("git")
         .arg("-C")
@@ -325,9 +355,69 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use crate::sqlite::SqliteStore;
-    use crate::test_support::{init_repo, Tmp};
+    use crate::test_support::{init_repo, run_git, Tmp};
 
     use super::*;
+
+    #[test]
+    fn create_worktree_branches_off_latest_remote_base() {
+        let root = Tmp::new("worktree-remote-base");
+        let remote = root.path().join("remote.git");
+        run_git(root.path(), &["init", "--bare", "-b", "main", "remote.git"]);
+
+        let repo = root.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        init_repo(&repo);
+        run_git(&repo, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        run_git(&repo, &["push", "-u", "origin", "main"]);
+        let stale = head_commit(&repo);
+
+        // A second clone advances the remote default branch past the local checkout.
+        let other = root.path().join("other");
+        run_git(
+            root.path(),
+            &["clone", remote.to_str().unwrap(), other.to_str().unwrap()],
+        );
+        run_git(&other, &["config", "user.email", "monica@example.com"]);
+        run_git(&other, &["config", "user.name", "Monica"]);
+        fs::write(other.join("next.txt"), "next\n").unwrap();
+        run_git(&other, &["add", "next.txt"]);
+        run_git(&other, &["commit", "-m", "advance remote"]);
+        run_git(&other, &["push", "origin", "main"]);
+        let latest = head_commit(&other);
+
+        let worktree = root.path().join("wt");
+        create_worktree(&repo, &worktree, "feature", "main").unwrap();
+
+        assert_ne!(latest, stale);
+        assert_eq!(head_commit(&worktree), latest);
+    }
+
+    #[test]
+    fn create_worktree_falls_back_to_local_base_without_remote() {
+        let root = Tmp::new("worktree-no-remote");
+        let repo = root.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        init_repo(&repo);
+        let local = head_commit(&repo);
+
+        let worktree = root.path().join("wt");
+        create_worktree(&repo, &worktree, "feature", "main").unwrap();
+
+        assert!(worktree.exists());
+        assert_eq!(head_commit(&worktree), local);
+    }
+
+    fn head_commit(repo: &Path) -> String {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    }
 
     #[cfg(unix)]
     #[test]
