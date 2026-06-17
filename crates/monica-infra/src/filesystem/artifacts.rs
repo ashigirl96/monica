@@ -183,6 +183,11 @@ fn claude_settings_json(hook_command: &str) -> Result<String> {
             ],
             "Stop": group(),
             "StopFailure": group(),
+            // Observation-only: a subagent (Task) starting/finishing in the parent
+            // session. No status transition is mapped for them (lifecycle leaves them
+            // inert), so they only land in hook-events.jsonl for investigation.
+            "SubagentStart": group(),
+            "SubagentStop": group(),
             "SessionEnd": group(),
         }
     });
@@ -297,6 +302,8 @@ mod tests {
             "PostToolUse",
             "Stop",
             "StopFailure",
+            "SubagentStart",
+            "SubagentStop",
             "SessionEnd",
         ] {
             let cmd = parsed
