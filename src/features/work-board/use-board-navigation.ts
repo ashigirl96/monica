@@ -2,17 +2,22 @@ import { useAtomValue, useStore } from "jotai";
 import { useEffect } from "react";
 import { isEditable } from "@/lib/keyboard";
 import {
+  enterOpenSubmenuAtom,
   executeMenuItemAtom,
   exitNavAtom,
+  exitOpenSubmenuAtom,
   focusedPositionAtom,
   focusedTaskIdAtom,
   menuAtom,
   type MenuAnchor,
   moveFocusAtom,
   moveMenuItemAtom,
+  moveOpenItemAtom,
+  openIssueTargetAtom,
   openMenuAtom,
   reconcileFocusAtom,
   requestCloseAtom,
+  requestOpenAtom,
   runDirectActionAtom,
 } from "@/features/work-board/nav";
 
@@ -39,12 +44,28 @@ export function useBoardNavigation() {
     function onKeyDown(e: KeyboardEvent) {
       if (e.isComposing || e.metaKey || e.ctrlKey || e.altKey || isEditable(e)) return;
 
-      if (store.get(menuAtom) !== null) {
+      const menu = store.get(menuAtom);
+      if (menu !== null) {
+        if (menu.openIndex !== null) {
+          // Open submenu: Enter still flows through executeMenuItemAtom (it routes to the
+          // cursored target); adding a second Enter handler here would open two tabs.
+          if (e.key === "j" || e.key === "ArrowDown") store.set(moveOpenItemAtom, "down");
+          else if (e.key === "k" || e.key === "ArrowUp") store.set(moveOpenItemAtom, "up");
+          else if (e.key === "Enter") store.set(executeMenuItemAtom);
+          else if (e.key === "Escape" || e.key === "h" || e.key === "Backspace")
+            store.set(exitOpenSubmenuAtom);
+          else if (e.key === " ") store.set(menuAtom, null);
+          else if (e.key === "i") store.set(openIssueTargetAtom);
+          else return;
+          e.preventDefault();
+          return;
+        }
         if (e.key === "j" || e.key === "ArrowDown") store.set(moveMenuItemAtom, "down");
         else if (e.key === "k" || e.key === "ArrowUp") store.set(moveMenuItemAtom, "up");
         else if (e.key === "Enter") store.set(executeMenuItemAtom);
         else if (e.key === "Escape" || e.key === " ") store.set(menuAtom, null);
         else if (e.key === "c") store.set(requestCloseAtom, null);
+        else if (e.key === "o") store.set(enterOpenSubmenuAtom);
         else if (e.key in ACTION_KEYS)
           store.set(runDirectActionAtom, ACTION_KEYS[e.key as keyof typeof ACTION_KEYS]);
         else return;
@@ -72,6 +93,10 @@ export function useBoardNavigation() {
         e.preventDefault();
         const anchor = focusedCardAnchor(store.get(focusedTaskIdAtom));
         if (anchor) store.set(requestCloseAtom, anchor);
+      } else if (e.key === "o") {
+        e.preventDefault();
+        const anchor = focusedCardAnchor(store.get(focusedTaskIdAtom));
+        if (anchor) store.set(requestOpenAtom, anchor);
       } else if (e.key in ACTION_KEYS) {
         e.preventDefault();
         store.set(runDirectActionAtom, ACTION_KEYS[e.key as keyof typeof ACTION_KEYS]);

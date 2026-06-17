@@ -1,13 +1,15 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { atom, type Getter } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import type { TaskSummaryRow } from "@/commands/task";
+import { openTargets } from "@/features/work-board/github-urls";
 import { closeTaskAtom, openBenchAtom, runTaskAtom } from "@/features/work-board/store";
 import { columnTasksAtom, prepareTaskMutationAtom, taskSummariesAtom } from "@/stores/workboard";
 import { queryKeys } from "@/stores/query-keys";
 import { pendingWorkboardHintAtom, resolveWorkboardFocus } from "@/stores/ui-state";
 
 type MoveDirection = "up" | "down" | "left" | "right";
-type MenuItemId = "prepare" | "run" | "bench" | "close";
+type MenuItemId = "prepare" | "run" | "bench" | "open" | "close";
 
 export type MenuAnchor = { top: number; left: number; bottom: number };
 
@@ -16,6 +18,8 @@ export type MenuState = {
   anchor: MenuAnchor;
   itemIndex: number;
   confirmingClose: boolean;
+  // null = top level; a number = the Open submenu is showing, cursor on that target.
+  openIndex: number | null;
 };
 
 // null = navigation inactive. The board unmounts on space switch, so the last
@@ -29,14 +33,17 @@ export const MENU_ITEMS: ReadonlyArray<{ id: MenuItemId; label: string; hint: st
   { id: "prepare", label: "Prepare", hint: "p" },
   { id: "run", label: "Run", hint: "r" },
   { id: "bench", label: "Bench", hint: "b" },
+  { id: "open", label: "Open", hint: "o" },
   { id: "close", label: "Close", hint: "c" },
 ];
 
 const CLOSE_INDEX = MENU_ITEMS.findIndex((item) => item.id === "close");
+const OPEN_INDEX = MENU_ITEMS.findIndex((item) => item.id === "open");
 
 export function isItemDisabled(id: MenuItemId, task: TaskSummaryRow): boolean {
   if (id === "prepare") return !task.prepare_eligible;
   if (id === "run") return !task.run_eligible;
+  if (id === "open") return openTargets(task).length === 0;
   return false;
 }
 
@@ -133,12 +140,12 @@ export const openMenuAtom = atom(null, (get, set, anchor: MenuAnchor) => {
   if (!task) return;
   const itemIndex = MENU_ITEMS.findIndex((item) => !isItemDisabled(item.id, task));
   if (itemIndex === -1) return;
-  set(menuAtom, { taskId: focused, anchor, itemIndex, confirmingClose: false });
+  set(menuAtom, { taskId: focused, anchor, itemIndex, confirmingClose: false, openIndex: null });
 });
 
 export const moveMenuItemAtom = atom(null, (get, set, dir: "up" | "down") => {
   const menu = get(menuAtom);
-  if (menu === null) return;
+  if (menu === null || menu.openIndex !== null) return;
   const task = taskById(get, menu.taskId);
   if (!task) return;
   const step = dir === "up" ? -1 : 1;
@@ -152,7 +159,7 @@ export const moveMenuItemAtom = atom(null, (get, set, dir: "up" | "down") => {
 
 export const setMenuItemIndexAtom = atom(null, (get, set, itemIndex: number) => {
   const menu = get(menuAtom);
-  if (menu === null || menu.itemIndex === itemIndex) return;
+  if (menu === null || menu.openIndex !== null || menu.itemIndex === itemIndex) return;
   const task = taskById(get, menu.taskId);
   if (!task || isItemDisabled(MENU_ITEMS[itemIndex].id, task)) return;
   set(menuAtom, { ...menu, itemIndex, confirmingClose: false });
@@ -161,17 +168,20 @@ export const setMenuItemIndexAtom = atom(null, (get, set, itemIndex: number) => 
 // Shared by the direct keys (p/r/b) and the menu; re-checks eligibility because
 // polling can change the status between render and keypress. The prepare mutation
 // reports failures through onError; async atoms still bubble to the global toaster.
-export const runDirectActionAtom = atom(null, (get, set, id: Exclude<MenuItemId, "close">) => {
-  const menu = get(menuAtom);
-  const taskId = menu?.taskId ?? get(focusedTaskIdAtom);
-  if (taskId === null) return;
-  const task = taskById(get, taskId);
-  if (!task || isItemDisabled(id, task)) return;
-  set(menuAtom, null);
-  if (id === "prepare") get(prepareTaskMutationAtom).mutate(taskId);
-  else if (id === "run") void set(runTaskAtom, taskId);
-  else void set(openBenchAtom, taskId);
-});
+export const runDirectActionAtom = atom(
+  null,
+  (get, set, id: Exclude<MenuItemId, "close" | "open">) => {
+    const menu = get(menuAtom);
+    const taskId = menu?.taskId ?? get(focusedTaskIdAtom);
+    if (taskId === null) return;
+    const task = taskById(get, taskId);
+    if (!task || isItemDisabled(id, task)) return;
+    set(menuAtom, null);
+    if (id === "prepare") get(prepareTaskMutationAtom).mutate(taskId);
+    else if (id === "run") void set(runTaskAtom, taskId);
+    else void set(openBenchAtom, taskId);
+  },
+);
 
 // Close is two-step everywhere: the first press opens (or re-targets) the menu
 // in confirming state, the second press executes. The anchor is only needed when
@@ -181,7 +191,13 @@ export const requestCloseAtom = atom(null, (get, set, anchor: MenuAnchor | null)
   if (menu === null) {
     const focused = get(focusedTaskIdAtom);
     if (focused === null || anchor === null || !taskById(get, focused)) return;
-    set(menuAtom, { taskId: focused, anchor, itemIndex: CLOSE_INDEX, confirmingClose: true });
+    set(menuAtom, {
+      taskId: focused,
+      anchor,
+      itemIndex: CLOSE_INDEX,
+      confirmingClose: true,
+      openIndex: null,
+    });
     return;
   }
   if (MENU_ITEMS[menu.itemIndex].id === "close" && menu.confirmingClose) {
@@ -195,7 +211,17 @@ export const requestCloseAtom = atom(null, (get, set, anchor: MenuAnchor | null)
 export const executeMenuItemAtom = atom(null, (get, set) => {
   const menu = get(menuAtom);
   if (menu === null) return;
+  // The submenu's Enter routes here too, not through a separate handler — a second Enter
+  // path would open two tabs.
+  if (menu.openIndex !== null) {
+    set(executeOpenAtom);
+    return;
+  }
   const item = MENU_ITEMS[menu.itemIndex];
+  if (item.id === "open") {
+    set(enterOpenSubmenuAtom);
+    return;
+  }
   if (item.id !== "close") {
     set(runDirectActionAtom, item.id);
     return;
@@ -206,6 +232,77 @@ export const executeMenuItemAtom = atom(null, (get, set) => {
   }
   set(menuAtom, null);
   void set(closeFocusedTaskAtom, menu.taskId);
+});
+
+export const enterOpenSubmenuAtom = atom(null, (get, set) => {
+  const menu = get(menuAtom);
+  if (menu === null) return;
+  const task = taskById(get, menu.taskId);
+  if (!task || openTargets(task).length === 0) return;
+  set(menuAtom, { ...menu, itemIndex: OPEN_INDEX, confirmingClose: false, openIndex: 0 });
+});
+
+// Card-focus entry to the Open submenu: opens the menu straight into it. When the menu is
+// already open the keyboard handler calls enterOpenSubmenuAtom directly instead.
+export const requestOpenAtom = atom(null, (get, set, anchor: MenuAnchor | null) => {
+  const focused = get(focusedTaskIdAtom);
+  if (focused === null || anchor === null) return;
+  const task = taskById(get, focused);
+  if (!task || openTargets(task).length === 0) return;
+  set(menuAtom, {
+    taskId: focused,
+    anchor,
+    itemIndex: OPEN_INDEX,
+    confirmingClose: false,
+    openIndex: 0,
+  });
+});
+
+export const moveOpenItemAtom = atom(null, (get, set, dir: "up" | "down") => {
+  const menu = get(menuAtom);
+  if (menu === null || menu.openIndex === null) return;
+  const task = taskById(get, menu.taskId);
+  if (!task) return;
+  const targets = openTargets(task);
+  const next = menu.openIndex + (dir === "up" ? -1 : 1);
+  if (next < 0 || next >= targets.length) return;
+  set(menuAtom, { ...menu, openIndex: next });
+});
+
+export const setOpenIndexAtom = atom(null, (get, set, openIndex: number) => {
+  const menu = get(menuAtom);
+  if (menu === null || menu.openIndex === null || menu.openIndex === openIndex) return;
+  set(menuAtom, { ...menu, openIndex });
+});
+
+export const exitOpenSubmenuAtom = atom(null, (get, set) => {
+  const menu = get(menuAtom);
+  if (menu === null || menu.openIndex === null) return;
+  set(menuAtom, { ...menu, openIndex: null });
+});
+
+// Bound to "i" in the submenu (PRs get no single key because a task can have several): jumps
+// the cursor to the issue and opens it through the one execute path.
+export const openIssueTargetAtom = atom(null, (get, set) => {
+  const menu = get(menuAtom);
+  if (menu === null || menu.openIndex === null) return;
+  const task = taskById(get, menu.taskId);
+  if (!task) return;
+  const idx = openTargets(task).findIndex((t) => t.kind === "issue");
+  if (idx === -1) return;
+  set(menuAtom, { ...menu, openIndex: idx });
+  set(executeOpenAtom);
+});
+
+const executeOpenAtom = atom(null, (get, set) => {
+  const menu = get(menuAtom);
+  if (menu === null || menu.openIndex === null) return;
+  const task = taskById(get, menu.taskId);
+  if (!task) return;
+  const target = openTargets(task)[menu.openIndex];
+  if (!target) return;
+  set(menuAtom, null);
+  void openUrl(target.url);
 });
 
 const closeFocusedTaskAtom = atom(null, async (get, set, taskId: string) => {
