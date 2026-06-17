@@ -230,7 +230,7 @@ export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boo
       data-focused={focused || undefined}
       tabIndex={-1}
       className={cn(
-        "group relative flex overflow-hidden rounded-lg border border-border bg-card transition-colors outline-none",
+        "group relative flex shrink-0 overflow-hidden rounded-lg border border-border bg-card transition-colors outline-none",
         task.is_active && "border-emerald-500/20",
         "hover:border-muted-foreground/30",
         focused && "border-muted-foreground/30 ring-1 ring-foreground/40",

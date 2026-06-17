@@ -24,7 +24,7 @@ function WorkBoardContent() {
         {columns.map((col) => (
           <div
             key={col.key}
-            className="flex min-w-72 flex-1 flex-col bg-background/50 first:rounded-l-lg last:rounded-r-lg"
+            className="flex min-h-0 min-w-72 flex-1 flex-col bg-background/50 first:rounded-l-lg last:rounded-r-lg"
           >
             <div className="flex items-center gap-2 px-3 py-2.5">
               <span className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
