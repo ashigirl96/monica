@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   runspaceSummariesAtom,
@@ -13,7 +13,7 @@ import {
 import { JumpHint } from "./jump-hint";
 import { terminalTerminate, type TerminalSession } from "@/commands/terminal";
 import type { DisplayStatus } from "@/commands/task";
-import { taskStatusMapAtom, refreshTaskStatusMapAtom } from "@/stores/workboard";
+import { taskStatusMapAtom } from "@/stores/workboard";
 import { activeSpaceAtom } from "@/stores/space";
 import { useDragReorder } from "@/hooks/use-drag-reorder";
 import { useLiveRefresh } from "@/hooks/use-live-refresh";
@@ -135,19 +135,15 @@ export function WorkBenchSidebar() {
   const activate = useSetAtom(activateRunspaceAtom);
   const reattach = useSetAtom(reattachSessionAtom);
   const refreshSessions = useSetAtom(refreshSessionsAtom);
-  const refreshTaskStatusMap = useSetAtom(refreshTaskStatusMapAtom);
   const reorder = useSetAtom(reorderRunspacesAtom);
   const setSpace = useSetAtom(activeSpaceAtom);
   const jumpHints = useAtomValue(jumpHintTargetsAtom);
   const { dragOverId, handlersFor } = useDragReorder(reorder);
 
   // Session status lives in the DB and the daemon; like the primary-tab indicator it has
-  // no push channel for every change, so poll while visible.
-  const refresh = useCallback(() => {
-    void refreshSessions();
-    void refreshTaskStatusMap();
-  }, [refreshSessions, refreshTaskStatusMap]);
-  useLiveRefresh(refresh);
+  // no push channel for every change, so poll while visible. Task status is refreshed
+  // app-wide on backend events, so only sessions need polling here.
+  useLiveRefresh(refreshSessions);
 
   const { taskBound, shells } = useMemo(() => {
     const taskBound = summaries.filter((s) => s.taskId);

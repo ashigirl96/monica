@@ -1,15 +1,16 @@
 import { atom, type Getter } from "jotai";
-import type { TaskSummaryRow } from "@/commands/task";
+import { queryClientAtom } from "jotai-tanstack-query";
+import type { ProjectEntry, TaskSummaryRow } from "@/commands/task";
 import {
   columnTasksAtom,
   taskSummariesAtom,
-  projectsAtom,
   selectedProjectAtom,
   deleteTaskAtom,
-  prepareTaskAtom,
+  prepareTaskMutationAtom,
   runTaskAtom,
   openBenchAtom,
 } from "@/stores/workboard";
+import { queryKeys } from "@/stores/query-keys";
 import { pendingWorkboardHintAtom, resolveWorkboardSelection } from "@/stores/ui-state";
 
 type MoveDirection = "up" | "down" | "left" | "right";
@@ -112,9 +113,18 @@ export const applyRestoredWorkboardAtom = atom(null, (get, set) => {
   const hint = get(pendingWorkboardHintAtom);
   if (hint === null) return;
   set(pendingWorkboardHintAtom, null);
+  // Read the cache loadBoard just warmed, not the derived atoms: ensureQueryData fills the
+  // QueryClient synchronously, but the jotai query atoms only catch up on a deferred
+  // notifyManager tick, so reading them here would still see the pre-fetch empty default
+  // and drop the saved filter/focus.
+  const client = get(queryClientAtom);
+  const projects = client.getQueryData<ProjectEntry[]>(queryKeys.projects.list()) ?? [];
+  const taskIds = (client.getQueryData<TaskSummaryRow[]>(queryKeys.tasks.summary(null)) ?? []).map(
+    (t) => t.id,
+  );
   const resolved = resolveWorkboardSelection(
-    get(projectsAtom).map((p) => p.repo),
-    get(taskSummariesAtom).map((t) => t.id),
+    projects.map((p) => p.repo),
+    taskIds,
     hint,
   );
   set(selectedProjectAtom, resolved.selectedProject);
@@ -163,8 +173,8 @@ export const setMenuItemIndexAtom = atom(null, (get, set, itemIndex: number) => 
 });
 
 // Shared by the direct keys (p/r/b) and the menu; re-checks eligibility because
-// polling can change the status between render and keypress. Rejections are left
-// unhandled on purpose: the global toaster reports them, same as the card buttons.
+// polling can change the status between render and keypress. The prepare mutation
+// reports failures through onError; async atoms still bubble to the global toaster.
 export const runDirectActionAtom = atom(null, (get, set, id: Exclude<MenuItemId, "delete">) => {
   const menu = get(menuAtom);
   const taskId = menu?.taskId ?? get(focusedTaskIdAtom);
@@ -172,7 +182,7 @@ export const runDirectActionAtom = atom(null, (get, set, id: Exclude<MenuItemId,
   const task = taskById(get, taskId);
   if (!task || isItemDisabled(id, task)) return;
   set(menuAtom, null);
-  if (id === "prepare") void set(prepareTaskAtom, taskId);
+  if (id === "prepare") get(prepareTaskMutationAtom).mutate(taskId);
   else if (id === "run") void set(runTaskAtom, taskId);
   else void set(openBenchAtom, taskId);
 });
@@ -219,9 +229,12 @@ const deleteFocusedTaskAtom = atom(null, async (get, set, taskId: string) => {
   await set(deleteTaskAtom, taskId);
 
   if (pos !== null) {
+    // columnTasksAtom can still include the just-deleted card: invalidateQueries refetched
+    // the cache, but the derived atom only updates on a deferred notify tick. Drop the
+    // deleted id so focus lands on the real neighbour instead of the vanishing card.
     const columns = get(columnTasksAtom);
     const focusInColumn = (col: number): boolean => {
-      const tasks = columns[col]?.tasks ?? [];
+      const tasks = (columns[col]?.tasks ?? []).filter((t) => t.id !== taskId);
       if (tasks.length === 0) return false;
       set(focusedTaskIdAtom, tasks[Math.min(pos.rowIdx, tasks.length - 1)].id);
       return true;

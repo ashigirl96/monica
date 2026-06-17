@@ -1,8 +1,8 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useSetAtom } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import type { DisplayStatus, TaskRunWaitReason, TaskSummaryRow } from "@/commands/task";
 import { cn } from "@/lib/utils";
-import { openBenchAtom, prepareTaskAtom, runTaskAtom } from "@/stores/workboard";
+import { openBenchAtom, prepareTaskMutationAtom, runTaskAtom } from "@/stores/workboard";
 
 const STATUS_COLORS: Record<DisplayStatus, string> = {
   ready: "bg-sky-400",
@@ -210,7 +210,7 @@ function SideRunBadges({ task }: { task: TaskSummaryRow }) {
 
 export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boolean }) {
   const doOpenBench = useSetAtom(openBenchAtom);
-  const doPrepareTask = useSetAtom(prepareTaskAtom);
+  const doPrepareTask = useAtomValue(prepareTaskMutationAtom).mutate;
   const doRunTask = useSetAtom(runTaskAtom);
   const hasIssue = task.github_issue_number !== null;
   const hasPrs = task.github_pull_requests.length > 0;

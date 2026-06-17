@@ -1,19 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { projectsAtom, selectedProjectAtom, trackIssueAtom } from "@/stores/workboard";
+import { useAtom, useAtomValue } from "jotai";
+import { projectsAtom, selectedProjectAtom, trackIssueMutationAtom } from "@/stores/workboard";
 import { cn } from "@/lib/utils";
 import { onPrSyncCompleted } from "@/commands/pull_request";
 
 function TrackIssueButton() {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const trackIssue = useSetAtom(trackIssueAtom);
+  const { mutateAsync: trackIssue, isPending } = useAtomValue(trackIssueMutationAtom);
 
   const handleSubmit = useCallback(async () => {
-    setLoading(true);
     setError(null);
     try {
       await trackIssue(value);
@@ -21,8 +19,6 @@ function TrackIssueButton() {
       setOpen(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to track issue");
-    } finally {
-      setLoading(false);
     }
   }, [value, trackIssue]);
 
@@ -65,7 +61,7 @@ function TrackIssueButton() {
             setError(null);
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !loading) handleSubmit();
+            if (e.key === "Enter" && !isPending) handleSubmit();
             if (e.key === "Escape") {
               setOpen(false);
               setValue("");
@@ -83,10 +79,10 @@ function TrackIssueButton() {
       <button
         type="button"
         onClick={handleSubmit}
-        disabled={loading || !value.trim()}
+        disabled={isPending || !value.trim()}
         className="inline-flex h-7 items-center rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground transition-opacity disabled:opacity-40"
       >
-        {loading ? "..." : "Track"}
+        {isPending ? "..." : "Track"}
       </button>
       <button
         type="button"
