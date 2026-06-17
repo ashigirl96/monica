@@ -66,6 +66,13 @@ fn handle_claude() -> Result<()> {
         raw.len(),
     ));
 
+    // Hooks live in the cwd's .claude/settings.local.json, so a plain `claude` started outside a
+    // Monica task (no task identity in the env) still fires this. Such an event resolves to no run,
+    // so bail before touching the DB instead of doing pointless work for unrelated sessions.
+    if task_id.is_none() && task_run_id.is_none() {
+        return Ok(());
+    }
+
     let mut runtime = Runtime::open_default()?;
     let report = monica_core::record_claude_hook(
         &mut runtime.repositories,

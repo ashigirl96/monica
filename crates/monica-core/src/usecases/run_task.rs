@@ -210,7 +210,8 @@ where
         .and_then(|r| r.number))
 }
 
-/// Generate claude-settings.json + wrapper script + PTY env for a prepared run.
+/// Write hook config into the worktree's `.claude/settings.local.json` + wrapper script + PTY env
+/// for a prepared run.
 /// Does NOT transition the TaskRun — the SessionStart hook parks it at awaiting-prompt and
 /// the first UserPromptSubmit moves it to Running.
 pub fn prepare_claude_for_run<R, A>(
@@ -248,7 +249,8 @@ where
         ));
     }
 
-    let shell = artifacts.prepare_task_shell_env(task_id, &project, Some(&primary_id))?;
+    let shell =
+        artifacts.prepare_task_shell_env(task_id, &project, Some(&primary_id), &worktree_path)?;
     repos.set_task_run_settings_path(&primary_id, &shell.settings_path)?;
 
     let (runspace_id, _, _) = super::open_bench::ensure_bench(repos, task_id, &worktree_str, true)?;

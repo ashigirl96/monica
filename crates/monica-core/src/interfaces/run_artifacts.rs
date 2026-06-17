@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use serde_json::Value;
@@ -20,6 +20,7 @@ pub trait RunArtifacts {
         task_id: &str,
         project: &Project,
         task_run_id: Option<&str>,
+        cwd: &Path,
     ) -> Result<TaskShellEnv>;
     fn append_hook_event(
         &self,

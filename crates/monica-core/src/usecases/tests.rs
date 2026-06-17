@@ -555,6 +555,7 @@ impl GitGateway for FakeGit {
 #[derive(Default)]
 struct FakeArtifacts {
     appended: RefCell<bool>,
+    last_cwd: RefCell<Option<String>>,
 }
 
 impl RunArtifacts for FakeArtifacts {
@@ -571,10 +572,13 @@ impl RunArtifacts for FakeArtifacts {
         task_id: &str,
         _project: &crate::Project,
         _task_run_id: Option<&str>,
+        cwd: &std::path::Path,
     ) -> Result<crate::TaskShellEnv> {
+        *self.last_cwd.borrow_mut() = Some(cwd.to_string_lossy().into_owned());
         Ok(crate::TaskShellEnv {
             env: vec![
                 ("MONICA_TASK_ID".to_string(), task_id.to_string()),
+                ("MONICA_CWD".to_string(), cwd.to_string_lossy().into_owned()),
             ],
             settings_path: format!("/tmp/tasks/{task_id}/claude-settings.json"),
             wrapper_path: format!("/tmp/tasks/{task_id}/bin/claude"),
@@ -1698,6 +1702,75 @@ fn open_bench_creates_bench_on_first_call_and_reuses_on_second() {
     let bench2: TaskBench = open_bench(&mut repos, &artifacts, &task_id).unwrap();
     assert!(!bench2.created);
     assert_eq!(bench2.runspace_id, bench.runspace_id);
+}
+
+fn env_value<'a>(env: &'a [(String, String)], key: &str) -> Option<&'a str> {
+    env.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+}
+
+#[test]
+fn open_bench_writes_hook_settings_into_resolved_cwd() {
+    let mut repos = FakeRepos::default();
+    let mut project = Project::from_repo("owner/repo");
+    project.path = Some("/test/repo".to_string());
+    repos.insert_project(project);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let artifacts = FakeArtifacts::default();
+
+    let bench = open_bench(&mut repos, &artifacts, &task_id).unwrap();
+    assert_eq!(env_value(&bench.env, "MONICA_CWD"), Some(bench.cwd.as_str()));
+    assert_eq!(artifacts.last_cwd.borrow().as_deref(), Some(bench.cwd.as_str()));
+}
+
+#[test]
+fn task_shell_env_uses_existing_bench_cwd() {
+    let mut repos = FakeRepos::default();
+    let mut project = Project::from_repo("owner/repo");
+    project.path = Some("/test/repo".to_string());
+    repos.insert_project(project);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let artifacts = FakeArtifacts::default();
+
+    let bench = open_bench(&mut repos, &artifacts, &task_id).unwrap();
+    let env = super::task_shell_env(&repos, &artifacts, &task_id).unwrap();
+    assert_eq!(env_value(&env, "MONICA_CWD"), Some(bench.cwd.as_str()));
+}
+
+#[test]
+fn task_shell_env_falls_back_to_worktree_when_no_bench() {
+    let mut repos = FakeRepos::default();
+    let mut project = Project::from_repo("owner/repo");
+    project.path = Some("/test/repo".to_string());
+    repos.insert_project(project);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+
+    // `/tmp` exists, so it passes the is_usable_worktree existence check.
+    let run = repos
+        .start_task_run(NewTaskRun {
+            task_id: task_id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: Some("/tmp".to_string()),
+        })
+        .unwrap();
+    repos.set_primary_task_run(&task_id, &run.id).unwrap();
+
+    let artifacts = FakeArtifacts::default();
+    let env = super::task_shell_env(&repos, &artifacts, &task_id).unwrap();
+    assert_eq!(env_value(&env, "MONICA_CWD"), Some("/tmp"));
+}
+
+#[test]
+fn task_shell_env_falls_back_to_project_path_when_no_bench_no_worktree() {
+    let mut repos = FakeRepos::default();
+    let mut project = Project::from_repo("owner/repo");
+    project.path = Some("/test/repo".to_string());
+    repos.insert_project(project);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+
+    let artifacts = FakeArtifacts::default();
+    let env = super::task_shell_env(&repos, &artifacts, &task_id).unwrap();
+    assert_eq!(env_value(&env, "MONICA_CWD"), Some("/test/repo"));
 }
 
 
