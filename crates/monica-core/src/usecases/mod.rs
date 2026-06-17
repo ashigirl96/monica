@@ -20,8 +20,7 @@ pub use open_bench::{open_bench, task_shell_env};
 pub use delete_issue::{delete_issue, DeleteIssueReport};
 pub use make_main::{make_main_by_terminal_tab, primary_terminal_tab, MakeMainOutcome};
 pub use query::{
-    get_project, list_events, list_projects, list_task_summaries, list_tasks, mark_issue,
-    set_project_field,
+    get_project, list_events, list_projects, list_task_summaries, list_tasks, set_project_field,
 };
 pub use reconcile_terminal_sessions::{
     reconcile_terminal_sessions, DaemonSessionView, ReconcileOutcome, TerminalSessionUpdate,

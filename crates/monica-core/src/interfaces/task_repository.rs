@@ -6,6 +6,28 @@ use crate::domain::{
 };
 use crate::NewTask;
 
+/// How [`TaskRepository::list_task_summaries`] scopes which tasks come back. This is the query's
+/// parameter, not a domain concept, so it lives beside the port rather than in `domain`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskSummaryFilter {
+    /// Every task, including the Done archive.
+    All,
+    /// Everything except the Done archive.
+    Active,
+    /// Exactly one display status; Done is reachable only when named here.
+    Status(DisplayStatus),
+}
+
+impl TaskSummaryFilter {
+    pub fn matches(self, status: DisplayStatus) -> bool {
+        match self {
+            TaskSummaryFilter::All => true,
+            TaskSummaryFilter::Active => status != DisplayStatus::Done,
+            TaskSummaryFilter::Status(s) => s == status,
+        }
+    }
+}
+
 pub trait TaskRepository {
     fn insert_task(&mut self, new: NewTask) -> Result<Task>;
     fn insert_task_with_ref(&mut self, new: NewTask, external: ExternalRef) -> Result<Task>;
@@ -14,7 +36,7 @@ pub trait TaskRepository {
     fn list_tasks(&self) -> Result<Vec<Task>>;
     fn list_task_summaries(
         &self,
-        status: Option<DisplayStatus>,
+        filter: TaskSummaryFilter,
         project: Option<&str>,
     ) -> Result<Vec<TaskSummaryRow>>;
     fn set_primary_task_run(&self, task_id: &str, task_run_id: &str) -> Result<()>;
@@ -47,4 +69,23 @@ pub trait TaskRepository {
         candidate: &PullRequestStatusSyncCandidate,
         error: &str,
     ) -> Result<()>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn task_summary_filter_matches_by_intent() {
+        assert!(TaskSummaryFilter::All.matches(DisplayStatus::Done));
+        assert!(TaskSummaryFilter::All.matches(DisplayStatus::Ready));
+
+        assert!(!TaskSummaryFilter::Active.matches(DisplayStatus::Done));
+        assert!(TaskSummaryFilter::Active.matches(DisplayStatus::Ready));
+        assert!(TaskSummaryFilter::Active.matches(DisplayStatus::Running));
+
+        let done = TaskSummaryFilter::Status(DisplayStatus::Done);
+        assert!(done.matches(DisplayStatus::Done));
+        assert!(!done.matches(DisplayStatus::Ready));
+    }
 }

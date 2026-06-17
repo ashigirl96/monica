@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 
-use crate::interfaces::{EventRepository, ProjectRepository, TaskRepository};
-use crate::{DisplayStatus, Event, Project, Task, TaskStatus, TaskSummaryRow};
+use crate::interfaces::{EventRepository, ProjectRepository, TaskRepository, TaskSummaryFilter};
+use crate::{Event, Project, Task, TaskSummaryRow};
 
 pub fn list_tasks<R>(repos: &R) -> Result<Vec<Task>>
 where
@@ -12,20 +12,13 @@ where
 
 pub fn list_task_summaries<R>(
     repos: &R,
-    status: Option<DisplayStatus>,
+    filter: TaskSummaryFilter,
     project: Option<&str>,
 ) -> Result<Vec<TaskSummaryRow>>
 where
     R: TaskRepository,
 {
-    repos.list_task_summaries(status, project)
-}
-
-pub fn mark_issue<R>(repos: &mut R, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()>
-where
-    R: TaskRepository,
-{
-    repos.mark_task(id, status, note)
+    repos.list_task_summaries(filter, project)
 }
 
 pub fn list_projects<R>(repos: &R) -> Result<Vec<Project>>

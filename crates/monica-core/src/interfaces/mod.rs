@@ -24,5 +24,5 @@ pub use github_gateway::GithubGateway;
 pub use project_repository::ProjectRepository;
 pub use run_artifacts::{RunArtifacts, TaskShellEnv};
 pub use setup_runner::{SetupEnv, SetupOutcome, SetupRunner};
-pub use task_repository::TaskRepository;
+pub use task_repository::{TaskRepository, TaskSummaryFilter};
 pub use task_run_repository::TaskRunRepository;

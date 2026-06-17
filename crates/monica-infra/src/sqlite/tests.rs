@@ -2,8 +2,8 @@ use monica_core::{
     Agent, DisplayStatus, ExternalRef, GithubPullRequest, GithubPullRequestStatus, NewTask,
     NewTaskRun, NewTerminalSession, Project, ProjectRepository, PullRequestBranchSyncCandidate,
     RefType, TaskKind, TaskRepository, TaskRunObservation, TaskRunRepository, TaskRunStatus,
-    TaskRunWaitReason, TaskStatus, TerminalSessionKind, TerminalSessionStatus,
-    TerminalSessionUpdate,
+    TaskRunWaitReason, TaskStatus, TaskSummaryFilter, TaskSummaryRow, TerminalSessionKind,
+    TerminalSessionStatus, TerminalSessionUpdate,
 };
 use rusqlite::params;
 use serde_json::json;
@@ -558,7 +558,7 @@ fn task_summaries_count_side_runs_excluding_primary_and_sessionless_failures() {
     db.finish_task_run(&prepare_failed.id, &task.id, TaskRunStatus::Failed)
         .unwrap();
 
-    let summaries = db.list_task_summaries(None, None).unwrap();
+    let summaries = db.list_task_summaries(TaskSummaryFilter::All, None).unwrap();
     let summary = summaries.iter().find(|s| s.id == task.id).unwrap();
     assert_eq!(summary.task_run_status, Some(TaskRunStatus::Running));
     assert_eq!(summary.side_runs_running, 1);
@@ -598,11 +598,38 @@ fn task_summaries_fall_back_to_latest_run_when_primary_pointer_dangles() {
     .unwrap();
     db.set_primary_task_run(&task.id, "run-999").unwrap();
 
-    let summaries = db.list_task_summaries(None, None).unwrap();
+    let summaries = db.list_task_summaries(TaskSummaryFilter::All, None).unwrap();
     let summary = summaries.iter().find(|s| s.id == task.id).unwrap();
     // The task's only run is its de-facto main run, not a side run.
     assert_eq!(summary.task_run_status, Some(TaskRunStatus::Running));
     assert_eq!(summary.side_runs_running, 0);
+}
+
+#[test]
+fn task_summary_filter_scopes_the_done_archive() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let active = db.insert_task(dev_task("still working")).unwrap();
+    let archived = db.insert_task(dev_task("wrapped up")).unwrap();
+    db.mark_task(&archived.id, TaskStatus::Done, None).unwrap();
+
+    let ids = |rows: Vec<TaskSummaryRow>| -> Vec<String> { rows.into_iter().map(|r| r.id).collect() };
+
+    let active_only = ids(db.list_task_summaries(TaskSummaryFilter::Active, None).unwrap());
+    assert!(active_only.contains(&active.id));
+    assert!(
+        !active_only.contains(&archived.id),
+        "Active must hide the Done archive"
+    );
+
+    let done_only = ids(db
+        .list_task_summaries(TaskSummaryFilter::Status(DisplayStatus::Done), None)
+        .unwrap());
+    assert!(done_only.contains(&archived.id));
+    assert!(!done_only.contains(&active.id));
+
+    let everything = ids(db.list_task_summaries(TaskSummaryFilter::All, None).unwrap());
+    assert!(everything.contains(&active.id));
+    assert!(everything.contains(&archived.id));
 }
 
 #[test]
@@ -646,7 +673,7 @@ fn project_round_trip_and_summary_pr_status_stay_wire_compatible() {
     .unwrap();
 
     let summaries = db
-        .list_task_summaries(Some(DisplayStatus::Ready), Some("owner/repo"))
+        .list_task_summaries(TaskSummaryFilter::Status(DisplayStatus::Ready), Some("owner/repo"))
         .unwrap();
     assert_eq!(summaries.len(), 1);
     assert_eq!(
@@ -673,7 +700,8 @@ fn project_round_trip_and_summary_pr_status_stay_wire_compatible() {
         }],
     )
     .unwrap();
-    let summaries = db.list_task_summaries(None, Some("owner/repo")).unwrap();
+    let summaries = db.list_task_summaries(TaskSummaryFilter::All, Some("owner/repo"))
+            .unwrap();
     let merged_row = summaries.iter().find(|s| s.id == merged_item.id).unwrap();
     assert!(!merged_row.has_open_pull_request);
 
@@ -695,7 +723,8 @@ fn project_round_trip_and_summary_pr_status_stay_wire_compatible() {
         }],
     )
     .unwrap();
-    let summaries = db.list_task_summaries(None, Some("owner/repo")).unwrap();
+    let summaries = db.list_task_summaries(TaskSummaryFilter::All, Some("owner/repo"))
+            .unwrap();
     let draft_row = summaries.iter().find(|s| s.id == draft_item.id).unwrap();
     assert!(draft_row.has_open_pull_request);
 }

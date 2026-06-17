@@ -513,7 +513,7 @@ mod tests {
     use super::*;
     use monica_core::{
         DisplayStatus, EventRepository, NewTaskRun, ProjectRepository, TaskRepository,
-        TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus,
+        TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus, TaskSummaryFilter,
     };
     use rusqlite::params;
 
@@ -869,7 +869,7 @@ mod tests {
         assert_eq!(stopped_run.status, TaskRunStatus::Stopped);
 
         let stopped_rows = db
-            .list_task_summaries(Some(DisplayStatus::Stopped), None)
+            .list_task_summaries(TaskSummaryFilter::Status(DisplayStatus::Stopped), None)
             .unwrap();
         assert_eq!(
             stopped_rows
@@ -1017,7 +1017,7 @@ mod tests {
         let failed_run = db.get_task_run("run-12").unwrap().unwrap();
         assert_eq!(failed_run.status, TaskRunStatus::Failed);
 
-        let visible = db.list_task_summaries(None, None).unwrap();
+        let visible = db.list_task_summaries(TaskSummaryFilter::All, None).unwrap();
         assert!(
             visible.iter().all(|row| row.id != "MON-archived"),
             "soft-deleted tasks should not appear in dashboard/list summaries"

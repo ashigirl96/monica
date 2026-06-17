@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_core::{
-    parse_issue_input, parse_owner_repo, DisplayStatus, Task, TaskStatus, TaskSummaryRow,
+    parse_issue_input, parse_owner_repo, DisplayStatus, Task, TaskSummaryFilter, TaskSummaryRow,
     TrackGithubIssueInput,
 };
 use monica_infra::Runtime;
@@ -27,16 +27,6 @@ pub enum IssueCommand {
         /// MON-<id>
         id: String,
     },
-    /// Explicitly set a task's status/phase (e.g. `monica issue mark MON-1 in-progress`)
-    Mark {
-        /// MON-<id>
-        id: String,
-        /// Task status token: ready / in-progress / done
-        status: String,
-        /// Free-text note, stored as the task's phase
-        #[arg(long)]
-        note: Option<String>,
-    },
 }
 
 pub async fn run(cmd: IssueCommand) -> Result<()> {
@@ -45,9 +35,6 @@ pub async fn run(cmd: IssueCommand) -> Result<()> {
         IssueCommand::Track { target } => track_command(&mut runtime, &target).await,
         IssueCommand::Status { status, project } => status_command(&runtime, status, project),
         IssueCommand::Delete { id } => delete_command(&mut runtime, &id),
-        IssueCommand::Mark { id, status, note } => {
-            mark_command(&mut runtime, &id, &status, note.as_deref())
-        }
     }
 }
 
@@ -76,9 +63,9 @@ fn status_command(
     status: Option<String>,
     project: Option<String>,
 ) -> Result<()> {
-    let status = parse_status_filter(status.as_deref())?;
+    let filter = status_filter(status.as_deref())?;
     let project = normalize_project_filter(project.as_deref())?;
-    let rows = monica_core::list_task_summaries(&runtime.repositories, status, project.as_deref())?;
+    let rows = monica_core::list_task_summaries(&runtime.repositories, filter, project.as_deref())?;
     print!("{}", render_status_table(&rows));
     Ok(())
 }
@@ -88,7 +75,7 @@ fn delete_command(runtime: &mut Runtime, id: &str) -> Result<()> {
         .into_iter()
         .find(|task| task.id == id)
         .ok_or_else(|| anyhow!("Issue not found: {id}"))?;
-    let project = monica_core::list_task_summaries(&runtime.repositories, None, None)?
+    let project = monica_core::list_task_summaries(&runtime.repositories, TaskSummaryFilter::All, None)?
         .into_iter()
         .find(|row| row.id == item.id)
         .and_then(|row| row.project);
@@ -133,18 +120,11 @@ fn is_yes(answer: &str) -> bool {
     answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes")
 }
 
-fn mark_command(runtime: &mut Runtime, id: &str, status: &str, note: Option<&str>) -> Result<()> {
-    let status = TaskStatus::parse_token(status)?;
-    monica_core::mark_issue(&mut runtime.repositories, id, status, note)?;
-    println!("Marked {id} as {}", status.as_str());
-    if let Some(note) = note {
-        println!("Note: {note}");
+fn status_filter(status: Option<&str>) -> Result<TaskSummaryFilter> {
+    match status {
+        Some(token) => Ok(TaskSummaryFilter::Status(DisplayStatus::parse_token(token)?)),
+        None => Ok(TaskSummaryFilter::Active),
     }
-    Ok(())
-}
-
-fn parse_status_filter(status: Option<&str>) -> Result<Option<DisplayStatus>> {
-    status.map(DisplayStatus::parse_token).transpose()
 }
 
 fn normalize_project_filter(project: Option<&str>) -> Result<Option<String>> {
@@ -184,15 +164,20 @@ fn display_opt(value: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use monica_core::TaskStatus;
 
     #[test]
-    fn parse_status_filter_validates_enum() {
+    fn status_filter_defaults_to_active_and_validates_enum() {
+        assert_eq!(status_filter(None).unwrap(), TaskSummaryFilter::Active);
         assert_eq!(
-            parse_status_filter(Some("ready")).unwrap(),
-            Some(DisplayStatus::Ready)
+            status_filter(Some("ready")).unwrap(),
+            TaskSummaryFilter::Status(DisplayStatus::Ready)
         );
-        assert!(parse_status_filter(Some("bogus")).is_err());
-        assert_eq!(parse_status_filter(None).unwrap(), None);
+        assert_eq!(
+            status_filter(Some("done")).unwrap(),
+            TaskSummaryFilter::Status(DisplayStatus::Done)
+        );
+        assert!(status_filter(Some("bogus")).is_err());
     }
 
     #[test]

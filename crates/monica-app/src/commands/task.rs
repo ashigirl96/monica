@@ -1,6 +1,6 @@
 use monica_core::{
-    BoardColumn, PrepareTaskResult, RunTaskResult, TaskBench, TaskRunStatus, TaskSummaryRow,
-    TrackGithubIssueInput,
+    BoardColumn, PrepareTaskResult, RunTaskResult, TaskBench, TaskRunStatus, TaskSummaryFilter,
+    TaskSummaryRow, TrackGithubIssueInput,
 };
 use monica_infra::Runtime;
 use serde::Serialize;
@@ -31,7 +31,7 @@ pub struct TaskRunStatusChanged {
 #[specta::specta]
 pub fn list_task_summaries(project: Option<String>) -> Result<Vec<TaskSummaryRow>, String> {
     let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_core::list_task_summaries(&runtime.repositories, None, project.as_deref())
+    monica_core::list_task_summaries(&runtime.repositories, TaskSummaryFilter::All, project.as_deref())
         .map_err(|e| e.to_string())
 }
 
