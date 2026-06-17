@@ -42,11 +42,13 @@ impl SqliteStore {
         let mut rows = stmt.query(params![task_id])?;
         let mut refs = Vec::new();
         while let Some(row) = rows.next()? {
+            let status: Option<String> = row.get("status")?;
             refs.push(GithubPullRequestRef {
                 repo: row.get("repo")?,
                 number: row.get("number")?,
                 url: row.get("url")?,
-                status: row.get("status")?,
+                is_open_or_draft: GithubPullRequestRef::status_is_open_or_draft(status.as_deref()),
+                status,
             });
         }
         Ok(refs)

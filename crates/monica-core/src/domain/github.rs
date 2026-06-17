@@ -11,6 +11,15 @@ pub struct GithubPullRequestRef {
     pub number: Option<i64>,
     pub url: Option<String>,
     pub status: Option<String>,
+    pub is_open_or_draft: bool,
+}
+
+impl GithubPullRequestRef {
+    pub fn status_is_open_or_draft(status: Option<&str>) -> bool {
+        status
+            .and_then(|s| GithubPullRequestStatus::from_str(s).ok())
+            .is_some_and(GithubPullRequestStatus::is_open_or_draft)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -117,6 +117,7 @@ export type GithubPullRequestRef = {
   number: number;
   url: string | null;
   status: string | null;
+  is_open_or_draft: boolean;
 };
 
 export type PrSyncCompleted = {
