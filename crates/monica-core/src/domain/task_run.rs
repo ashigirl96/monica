@@ -46,6 +46,9 @@ pub struct TaskRun {
     pub terminal_tab_id: Option<String>,
     pub last_event_name: Option<String>,
     pub last_event_at: Option<String>,
+    /// Subagents (Task tool) currently running under this run's Claude session. Keeps a `Stop`
+    /// hook from demoting the run to "your turn" while a subagent is still in flight.
+    pub active_subagents: i64,
     pub metadata: Value,
     pub created_at: String,
     pub updated_at: String,

@@ -32,6 +32,7 @@ fn migration_steps() -> Vec<M<'static>> {
         M::up(V19),
         M::up(V20),
         M::up(V21),
+        M::up(V22),
     ]
 }
 
@@ -515,6 +516,13 @@ const V21: &str = r#"
     UPDATE tasks
        SET closed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
      WHERE status = 'closed' AND closed_at IS NULL;
+"#;
+
+/// v22: count of subagents (Task tool) running under a run's Claude session. A `Stop` hook fires
+/// at the end of the parent's turn even while a subagent is still working; this counter lets the
+/// lifecycle keep the run `Running` instead of flickering to "your turn" until the subagent ends.
+const V22: &str = r#"
+    ALTER TABLE task_runs ADD COLUMN active_subagents INTEGER NOT NULL DEFAULT 0;
 "#;
 
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.

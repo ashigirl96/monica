@@ -344,6 +344,132 @@ fn task_run_observation_sql_guards_protected_transitions() {
     );
 }
 
+/// A `Stop` fires at the end of the parent's turn even while a subagent (Task tool) is still
+/// running. The store's `active_subagents` counter must hold the run `Running` across that Stop
+/// and only release it once the subagent ends — exercising the SQL guard directly, since hooks
+/// land out-of-process and the caller's snapshot check is advisory.
+#[test]
+fn task_run_observation_holds_stop_while_subagent_runs() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("subagent")).unwrap();
+    let run = db
+        .start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
+
+    let observe = |db: &mut SqliteStore, event: &str, status: Option<TaskRunStatus>, source: Option<&str>| {
+        let metadata = source.map(|s| serde_json::json!({ "source": s }));
+        db.record_task_run_observation(
+            &run.id,
+            TaskRunObservation {
+                status,
+                wait_reason: status.map(|s| match s {
+                    TaskRunStatus::WaitingForUser => Some(TaskRunWaitReason::AwaitingPrompt),
+                    _ => None,
+                }),
+                event_name: Some(event),
+                at: "2026-06-02T00:00:00.000Z",
+                provider_session_id: Some("sess-1"),
+                terminal_tab_id: None,
+                metadata: metadata.as_ref(),
+            },
+        )
+        .unwrap();
+    };
+    let count = |db: &SqliteStore| db.get_task_run(&run.id).unwrap().unwrap().active_subagents;
+
+    // The turn is live, then a subagent starts.
+    observe(&mut db, "UserPromptSubmit", Some(TaskRunStatus::Running), None);
+    assert_eq!(count(&db), 0);
+    observe(&mut db, "SubagentStart", None, None);
+    assert_eq!(count(&db), 1);
+
+    // The trailing Stop is held: the run stays Running rather than dropping to "your turn".
+    observe(&mut db, "Stop", Some(TaskRunStatus::WaitingForUser), None);
+    let after_stop = db.get_task_run(&run.id).unwrap().unwrap();
+    assert_eq!(after_stop.status, TaskRunStatus::Running);
+    assert_eq!(after_stop.wait_reason, None);
+    assert_eq!(after_stop.last_event_name.as_deref(), Some("Stop"));
+
+    // The subagent ends; the count returns to zero and a real final Stop now lands.
+    observe(&mut db, "SubagentStop", None, None);
+    assert_eq!(count(&db), 0);
+    observe(&mut db, "Stop", Some(TaskRunStatus::WaitingForUser), None);
+    let final_stop = db.get_task_run(&run.id).unwrap().unwrap();
+    assert_eq!(final_stop.status, TaskRunStatus::WaitingForUser);
+    assert_eq!(final_stop.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
+}
+
+/// The counter resets only on true turn boundaries. A `UserPromptSubmit` (and a fresh
+/// `SessionStart`) zeroes a stale count so a subagent that died without `SubagentStop` cannot
+/// strand it; a mid-turn continuation `SessionStart` (`compact`) must NOT, or the trailing Stop
+/// would flicker again.
+#[test]
+fn task_run_observation_subagent_count_reset_rules() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("reset")).unwrap();
+    let start = |db: &mut SqliteStore| {
+        db.start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap()
+    };
+    let bump = |db: &mut SqliteStore, id: &str| {
+        db.record_task_run_observation(
+            id,
+            TaskRunObservation {
+                status: None,
+                wait_reason: None,
+                event_name: Some("SubagentStart"),
+                at: "2026-06-02T00:00:00.000Z",
+                provider_session_id: Some("sess-1"),
+                terminal_tab_id: None,
+                metadata: None,
+            },
+        )
+        .unwrap();
+    };
+    let reset_event = |db: &mut SqliteStore, id: &str, event: &str, source: Option<&str>| {
+        let metadata = source.map(|s| serde_json::json!({ "source": s }));
+        db.record_task_run_observation(
+            id,
+            TaskRunObservation {
+                status: None,
+                wait_reason: None,
+                event_name: Some(event),
+                at: "2026-06-02T00:00:00.000Z",
+                provider_session_id: Some("sess-1"),
+                terminal_tab_id: None,
+                metadata: metadata.as_ref(),
+            },
+        )
+        .unwrap();
+        db.get_task_run(id).unwrap().unwrap().active_subagents
+    };
+
+    // UserPromptSubmit resets.
+    let a = start(&mut db);
+    bump(&mut db, &a.id);
+    assert_eq!(reset_event(&mut db, &a.id, "UserPromptSubmit", None), 0);
+
+    // A fresh SessionStart resets.
+    let b = start(&mut db);
+    bump(&mut db, &b.id);
+    assert_eq!(reset_event(&mut db, &b.id, "SessionStart", Some("startup")), 0);
+
+    // A mid-turn compact SessionStart does not — the subagent is still in flight.
+    let c = start(&mut db);
+    bump(&mut db, &c.id);
+    assert_eq!(reset_event(&mut db, &c.id, "SessionStart", Some("compact")), 1);
+}
+
 #[test]
 fn task_run_observation_keeps_existing_tab_and_session_on_none() {
     let mut db = SqliteStore::open_in_memory().unwrap();

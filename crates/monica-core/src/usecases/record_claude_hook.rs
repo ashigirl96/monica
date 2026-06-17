@@ -133,6 +133,8 @@ where
             run.wait_reason,
             run.provider_session_id.as_deref(),
             provider_session_id,
+            run.active_subagents,
+            event_name.as_deref(),
             transition,
         ),
         _ => false,

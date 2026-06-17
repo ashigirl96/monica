@@ -20,8 +20,9 @@ pub use github::{
 };
 pub use lifecycle::{
     is_continuation_session_start, is_resume_session_start, is_safe_task_run_id,
-    is_session_starting_event, should_ignore_claude_event, transition_for_claude_event,
-    transition_is_generic_wait, transition_is_protected, wait_reason_for_tool, HookTransition,
+    is_session_starting_event, should_ignore_claude_event, subagent_count_update,
+    transition_for_claude_event, transition_is_generic_wait, transition_is_protected,
+    wait_reason_for_tool, HookTransition, SubagentCountUpdate,
 };
 pub use project::{PermissionMode, Project, Provider};
 pub use refs::{parse_issue_input, parse_issue_ref, parse_owner_repo};

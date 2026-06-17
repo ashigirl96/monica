@@ -13,8 +13,9 @@ use crate::interfaces::{
 use crate::{
     begin_github_device_flow, close_issue, execute_run, github_auth_status, logout_github,
     make_main_by_terminal_tab, open_bench, prepare_claude_for_run, primary_terminal_tab,
-    record_claude_hook, register_project_with_default_branch, start_run, sync_next_pull_request,
-    track_github_issue, HookContext, MakeMainOutcome, RefType,
+    record_claude_hook, register_project_with_default_branch, start_run, subagent_count_update,
+    sync_next_pull_request,
+    track_github_issue, HookContext, MakeMainOutcome, RefType, SubagentCountUpdate,
     wait_for_github_device_flow, Agent, DisplayStatus, Event, ExternalRef, GithubAuthStatus,
     GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef,
     GithubPullRequestStatus, NewTask, NewTaskRun, Project, PullRequestBranchSyncCandidate,
@@ -283,6 +284,7 @@ impl TaskRunRepository for FakeRepos {
             terminal_tab_id: None,
             last_event_name: None,
             last_event_at: None,
+            active_subagents: 0,
             metadata: json!({}),
             created_at: "2026-06-02T00:00:00.000Z".to_string(),
             updated_at: "2026-06-02T00:00:00.000Z".to_string(),
@@ -402,6 +404,16 @@ impl TaskRunRepository for FakeRepos {
         }
         if let Some(tab) = observation.terminal_tab_id {
             run.terminal_tab_id = Some(tab.to_string());
+        }
+        if let Some(update) = observation
+            .event_name
+            .and_then(|event| subagent_count_update(event, observation.metadata))
+        {
+            run.active_subagents = match update {
+                SubagentCountUpdate::Increment => run.active_subagents + 1,
+                SubagentCountUpdate::Decrement => (run.active_subagents - 1).max(0),
+                SubagentCountUpdate::Reset => 0,
+            };
         }
         run.last_event_name = observation.event_name.map(ToString::to_string);
         run.last_event_at = Some(observation.at.to_string());
@@ -1105,6 +1117,59 @@ fn record_claude_hook_stop_preserves_tool_specific_wait() {
     let run = repos.get_task_run(&run_id).unwrap().unwrap();
     assert_eq!(run.status, TaskRunStatus::WaitingForUser);
     assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AskUserQuestion));
+}
+
+#[test]
+fn record_claude_hook_stop_during_subagent_keeps_run_running() {
+    let mut repos = FakeRepos::default();
+    let artifacts = FakeArtifacts::default();
+    let (task_id, run_id) = task_with_running_primary(&mut repos, &artifacts);
+
+    record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"SubagentStart","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        repos.get_task_run(&run_id).unwrap().unwrap().active_subagents,
+        1
+    );
+
+    // The Stop trailing the parent's turn must not flicker the run to "your turn" while the
+    // subagent is still in flight.
+    let report = record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"Stop","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    assert_eq!(report.task_run_status, None);
+    assert_eq!(
+        repos.get_task_run(&run_id).unwrap().unwrap().status,
+        TaskRunStatus::Running
+    );
+
+    // Once the subagent ends, the trailing Stop settles the turn as usual.
+    record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"SubagentStop","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    record_claude_hook(
+        &mut repos,
+        &artifacts,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"Stop","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    let run = repos.get_task_run(&run_id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::WaitingForUser);
+    assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
 }
 
 #[test]

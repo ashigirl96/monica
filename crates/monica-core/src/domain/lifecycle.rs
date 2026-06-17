@@ -73,6 +73,37 @@ pub fn transition_is_generic_wait(next: HookTransition) -> bool {
     next == AWAITING_PROMPT
 }
 
+/// How a hook event moves a run's `active_subagents` counter. Subagents (the Task tool) run
+/// under the parent's session id, so the counter is per-run, not per-session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubagentCountUpdate {
+    Increment,
+    Decrement,
+    Reset,
+}
+
+/// The counter mutation a hook event implies, or `None` when it leaves the count untouched.
+///
+/// A turn boundary (`UserPromptSubmit`, or a fresh `SessionStart`) resets to zero so a subagent
+/// that died without a `SubagentStop` cannot strand the count above zero forever. A *continuation*
+/// `SessionStart` (`resume`/`compact`) is excluded: auto-compact fires mid-turn under the same
+/// session while a subagent is still running, and zeroing the count there would let the trailing
+/// `Stop` flicker the run back to "your turn".
+pub fn subagent_count_update(
+    event_name: &str,
+    payload: Option<&Value>,
+) -> Option<SubagentCountUpdate> {
+    match event_name {
+        "SubagentStart" => Some(SubagentCountUpdate::Increment),
+        "SubagentStop" => Some(SubagentCountUpdate::Decrement),
+        "UserPromptSubmit" => Some(SubagentCountUpdate::Reset),
+        "SessionStart" if !is_continuation_session_start(Some("SessionStart"), payload) => {
+            Some(SubagentCountUpdate::Reset)
+        }
+        _ => None,
+    }
+}
+
 /// Protections against late or out-of-order hooks. This snapshot check is advisory (hooks run in
 /// separate processes); the same rules are enforced atomically inside the store's UPDATE.
 ///
@@ -94,6 +125,8 @@ pub fn transition_is_protected(
     current_wait_reason: Option<TaskRunWaitReason>,
     known_session_id: Option<&str>,
     event_session_id: Option<&str>,
+    active_subagents: i64,
+    event_name: Option<&str>,
     next: HookTransition,
 ) -> bool {
     if next.status.is_terminal() {
@@ -104,6 +137,12 @@ pub fn transition_is_protected(
     }
     if !transition_is_generic_wait(next) {
         return false;
+    }
+    // A `Stop` fires at the end of the parent's turn even while a subagent is still working; it
+    // must not demote the run to "your turn". `SessionStart` carries the same generic wait but is
+    // new life (and resets the counter), so it is exempt — only `Stop` reaches this guard.
+    if active_subagents > 0 && !is_session_starting_event(event_name) {
+        return true;
     }
     let from_new_session = match (known_session_id, event_session_id) {
         (_, None) => false,
@@ -284,6 +323,8 @@ mod tests {
                 None,
                 Some("sess-1"),
                 event_session,
+                0,
+                Some("Stop"),
                 generic_wait
             ));
         }
@@ -294,6 +335,8 @@ mod tests {
             None,
             Some("sess-1"),
             Some("sess-2"),
+            0,
+            Some("SessionStart"),
             generic_wait
         ));
         assert!(!transition_is_protected(
@@ -301,6 +344,8 @@ mod tests {
             None,
             Some("sess-1"),
             Some("sess-1"),
+            0,
+            Some("UserPromptSubmit"),
             to_running
         ));
 
@@ -314,6 +359,8 @@ mod tests {
                 Some(reason),
                 same.0,
                 same.1,
+                0,
+                Some("Stop"),
                 generic_wait
             ));
         }
@@ -323,6 +370,8 @@ mod tests {
             Some(TaskRunWaitReason::AskUserQuestion),
             Some("sess-1"),
             Some("sess-2"),
+            0,
+            Some("SessionStart"),
             generic_wait
         ));
         // A generic wait may be sharpened into a specific one, and a dead session is allowed
@@ -332,6 +381,8 @@ mod tests {
             Some(TaskRunWaitReason::AwaitingPrompt),
             same.0,
             same.1,
+            0,
+            Some("PreToolUse"),
             to_question
         ));
         assert!(!transition_is_protected(
@@ -339,6 +390,8 @@ mod tests {
             Some(TaskRunWaitReason::AwaitingPrompt),
             same.0,
             same.1,
+            0,
+            Some("SessionEnd"),
             to_stopped
         ));
         assert!(!transition_is_protected(
@@ -346,6 +399,8 @@ mod tests {
             Some(TaskRunWaitReason::AskUserQuestion),
             same.0,
             same.1,
+            0,
+            Some("SessionEnd"),
             to_stopped
         ));
 
@@ -355,6 +410,31 @@ mod tests {
             None,
             same.0,
             same.1,
+            0,
+            Some("Stop"),
+            generic_wait
+        ));
+
+        // ...but while a subagent is in flight, that same `Stop` is held: the run stays Running
+        // instead of flickering to "your turn".
+        assert!(transition_is_protected(
+            TaskRunStatus::Running,
+            None,
+            same.0,
+            same.1,
+            1,
+            Some("Stop"),
+            generic_wait
+        ));
+        // A SessionStart carries the same generic wait but is new life, so the subagent count
+        // never holds it back.
+        assert!(!transition_is_protected(
+            TaskRunStatus::Running,
+            None,
+            same.0,
+            same.1,
+            1,
+            Some("SessionStart"),
             generic_wait
         ));
 
@@ -364,6 +444,8 @@ mod tests {
             None,
             None,
             Some("sess-1"),
+            0,
+            Some("SessionStart"),
             generic_wait
         ));
 
@@ -375,6 +457,8 @@ mod tests {
                 None,
                 Some("sess-2"),
                 Some("sess-1"),
+                0,
+                Some("SessionEnd"),
                 to_stopped
             ));
         }
@@ -390,9 +474,42 @@ mod tests {
                 None,
                 known,
                 event,
+                0,
+                Some("SessionEnd"),
                 to_stopped
             ));
         }
+    }
+
+    #[test]
+    fn subagent_count_update_maps_events_to_counter_ops() {
+        assert_eq!(
+            subagent_count_update("SubagentStart", None),
+            Some(SubagentCountUpdate::Increment)
+        );
+        assert_eq!(
+            subagent_count_update("SubagentStop", None),
+            Some(SubagentCountUpdate::Decrement)
+        );
+        assert_eq!(
+            subagent_count_update("UserPromptSubmit", None),
+            Some(SubagentCountUpdate::Reset)
+        );
+        // A fresh session start (or a source-less one) resets; a mid-turn continuation must not.
+        assert_eq!(
+            subagent_count_update("SessionStart", Some(&json!({"source": "startup"}))),
+            Some(SubagentCountUpdate::Reset)
+        );
+        assert_eq!(subagent_count_update("SessionStart", None), Some(SubagentCountUpdate::Reset));
+        for source in ["resume", "compact"] {
+            assert_eq!(
+                subagent_count_update("SessionStart", Some(&json!({"source": source}))),
+                None,
+                "{source}"
+            );
+        }
+        assert_eq!(subagent_count_update("Stop", None), None);
+        assert_eq!(subagent_count_update("Notification", None), None);
     }
 
     #[test]
