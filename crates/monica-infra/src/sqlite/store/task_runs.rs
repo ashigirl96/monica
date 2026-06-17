@@ -3,8 +3,9 @@ use rusqlite::params;
 
 use crate::sqlite::SqliteStore;
 use monica_core::{
-    transition_is_generic_wait, HookTransition, NewTaskRun, TaskRun, TaskRunObservation,
-    TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus,
+    is_session_starting_event, subagent_count_update, transition_is_generic_wait, HookTransition,
+    NewTaskRun, SubagentCountUpdate, TaskRun, TaskRunObservation, TaskRunRepository, TaskRunStatus,
+    TaskRunWaitReason, TaskStatus,
 };
 
 use super::{sql_literal_list, SET_NOW, TASK_RUN_COLUMNS};
@@ -142,6 +143,16 @@ impl TaskRunRepository for SqliteStore {
             _ => false,
         };
         let terminal_verdict = observation.status.is_some_and(TaskRunStatus::is_terminal);
+        // A `Stop` (generic wait) trailing the parent's turn while a subagent is still running must
+        // not demote the run; `SessionStart` carries the same wait but is new life and is exempt.
+        let subagent_guard =
+            generic_wait && !is_session_starting_event(observation.event_name);
+        let subagent_update = observation
+            .event_name
+            .and_then(|event| subagent_count_update(event, observation.metadata));
+        let subagent_reset = subagent_update == Some(SubagentCountUpdate::Reset);
+        let subagent_inc = subagent_update == Some(SubagentCountUpdate::Increment);
+        let subagent_dec = subagent_update == Some(SubagentCountUpdate::Decrement);
         let tool_waits =
             sql_literal_list(TaskRunWaitReason::TOOL_WAITS.iter().map(|r| r.as_str()));
         // `?6 IS NULL OR provider_session_id IS ?6` scopes the generic-wait guards to events
@@ -156,7 +167,8 @@ impl TaskRunRepository for SqliteStore {
              OR (?10 AND (?6 IS NULL OR provider_session_id IS ?6)
                      AND (status = '{}'
                           OR (status = '{}'
-                              AND wait_reason IN ({tool_waits}))))",
+                              AND wait_reason IN ({tool_waits}))))
+             OR (?12 AND active_subagents > 0)",
             TaskRunStatus::Stopped.as_str(),
             TaskRunStatus::WaitingForUser.as_str(),
         );
@@ -175,6 +187,12 @@ impl TaskRunRepository for SqliteStore {
                         provider_session_id = CASE WHEN {protected} THEN provider_session_id
                                                    ELSE COALESCE(?6, provider_session_id) END,
                         terminal_tab_id = COALESCE(?7, terminal_tab_id),
+                        -- a column self-reference reads the pre-update value, so the protected
+                        -- guard above sees the same active_subagents this clause then mutates
+                        active_subagents = CASE WHEN ?13 THEN 0
+                                                WHEN ?14 THEN active_subagents + 1
+                                                WHEN ?15 THEN MAX(0, active_subagents - 1)
+                                                ELSE active_subagents END,
                         metadata_json = COALESCE(?8, metadata_json),
                         updated_at = {SET_NOW}
                   WHERE id = ?9"
@@ -190,7 +208,11 @@ impl TaskRunRepository for SqliteStore {
                 metadata,
                 task_run_id,
                 generic_wait,
-                terminal_verdict
+                terminal_verdict,
+                subagent_guard,
+                subagent_reset,
+                subagent_inc,
+                subagent_dec
             ],
         )?;
         if affected == 0 {
