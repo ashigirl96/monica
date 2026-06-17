@@ -138,6 +138,5 @@ export const runTaskAtom = atom(null, async (_get, set, taskId: string) => {
   const result = await runTaskFlow(taskId);
   if (!result) return;
   await set(createTaskRunspaceAtom, result);
-  set(activeSpaceAtom, "work-bench");
   await set(refreshTaskSummariesAtom);
 });
