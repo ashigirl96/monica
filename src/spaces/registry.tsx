@@ -1,5 +1,11 @@
 import { lazy, type ComponentType } from "react";
-import { DashboardIcon, ProjectHomeIcon, WorkBoardIcon, WorkBenchIcon } from "@/components/icons";
+import {
+  DashboardIcon,
+  EditorIcon,
+  ProjectHomeIcon,
+  WorkBoardIcon,
+  WorkBenchIcon,
+} from "@/components/icons";
 import type { SpaceId } from "@/stores/space";
 import { TabBar } from "@/components/tab-bar";
 import { WorkBenchSidebar } from "@/features/work-bench/ui/sidebar";
@@ -8,6 +14,7 @@ import { WorkBoardHeader } from "@/features/work-board/ui/header";
 
 const LazyWorkBenchContent = lazy(() => import("@/features/work-bench/ui/content"));
 const LazyWorkBoardContent = lazy(() => import("@/features/work-board/ui/content"));
+const LazyEditorContent = lazy(() => import("@/features/editor/ui/content"));
 
 type SpaceIcon = ComponentType<{ size?: number; strokeWidth?: number }>;
 
@@ -69,6 +76,13 @@ export const spaces: SpaceConfig[] = [
     header: WorkBenchHeader,
     content: LazyWorkBenchContent,
     persistent: true,
+  },
+  {
+    id: "editor",
+    icon: EditorIcon,
+    label: "Editor",
+    header: TabBar,
+    content: LazyEditorContent,
   },
 ];
 

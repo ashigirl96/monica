@@ -34,6 +34,10 @@ describe("parseUiState", () => {
     expect(parseUiState({ activeSpace: "nope" }).activeSpace).toBe("dashboard");
   });
 
+  test("accepts the editor space", () => {
+    expect(parseUiState({ activeSpace: "editor" }).activeSpace).toBe("editor");
+  });
+
   test("clamps sidebarWidth into range", () => {
     expect(parseUiState({ sidebarWidth: 99999 }).sidebarWidth).toBe(SIDEBAR_MAX_WIDTH);
     expect(parseUiState({ sidebarWidth: 1 }).sidebarWidth).toBe(SIDEBAR_MIN_WIDTH);

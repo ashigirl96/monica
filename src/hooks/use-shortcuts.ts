@@ -21,6 +21,7 @@ const META_KEY_SPACE_MAP: Record<string, SpaceId> = {
   "2": "project",
   "3": "work-board",
   "4": "work-bench",
+  "5": "editor",
 };
 
 const PREFIX_TIMEOUT = 2000;

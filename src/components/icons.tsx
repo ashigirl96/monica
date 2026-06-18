@@ -57,6 +57,17 @@ export function WorkBenchIcon(props: IconProps) {
   );
 }
 
+export function EditorIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M6 3.5H15L19 7.5V20.5H6Z" strokeWidth="1.5" />
+      <path d="M15 3.5V8H19" strokeWidth="1.5" />
+      <path d="M9 12H16" strokeWidth="1.5" />
+      <path d="M9 15.5H15" strokeWidth="1.5" />
+    </Icon>
+  );
+}
+
 export function PlusIcon(props: IconProps) {
   return (
     <Icon {...props}>

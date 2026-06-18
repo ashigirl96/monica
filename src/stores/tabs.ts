@@ -22,6 +22,7 @@ export const tabsBySpaceAtom = atom<Record<SpaceId, TabState>>({
   project: createInitialTabState(),
   "work-board": createInitialTabState(),
   "work-bench": createInitialTabState(),
+  editor: createInitialTabState(),
 });
 
 export const activeTabsAtom = atom((get) => {

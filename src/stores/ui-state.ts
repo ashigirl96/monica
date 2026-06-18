@@ -38,6 +38,7 @@ const SPACE_IDS: Record<SpaceId, true> = {
   project: true,
   "work-board": true,
   "work-bench": true,
+  editor: true,
 };
 
 function isSpaceId(v: unknown): v is SpaceId {
