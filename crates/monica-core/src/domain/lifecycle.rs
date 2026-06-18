@@ -16,6 +16,15 @@ pub fn wait_reason_for_tool(tool_name: &str) -> Option<TaskRunWaitReason> {
     }
 }
 
+/// The tool-specific wait a `PreToolUse`/`PostToolUse` payload implies, if its `tool_name` is one
+/// that blocks on the user. `None` means "not a wait tool" — the events that carry it are inert.
+fn payload_tool_wait_reason(payload: Option<&Value>) -> Option<TaskRunWaitReason> {
+    payload
+        .and_then(|value| value.get("tool_name"))
+        .and_then(Value::as_str)
+        .and_then(wait_reason_for_tool)
+}
+
 /// The generic "session is alive, type a prompt" wait that SessionStart and Stop both produce.
 const AWAITING_PROMPT: HookTransition = HookTransition {
     status: TaskRunStatus::WaitingForUser,
@@ -27,20 +36,14 @@ pub fn transition_for_claude_event(
     payload: Option<&Value>,
 ) -> Option<HookTransition> {
     if event_name == "PreToolUse" {
-        let wait_reason = payload
-            .and_then(|value| value.get("tool_name"))
-            .and_then(Value::as_str)
-            .and_then(wait_reason_for_tool)?;
+        let wait_reason = payload_tool_wait_reason(payload)?;
         return Some(HookTransition {
             status: TaskRunStatus::WaitingForUser,
             wait_reason: Some(wait_reason),
         });
     }
     if event_name == "PostToolUse" {
-        payload
-            .and_then(|value| value.get("tool_name"))
-            .and_then(Value::as_str)
-            .and_then(wait_reason_for_tool)?;
+        payload_tool_wait_reason(payload)?;
         return Some(HookTransition {
             status: TaskRunStatus::Running,
             wait_reason: None,
@@ -202,11 +205,7 @@ pub fn is_continuation_session_start(event_name: Option<&str>, payload: Option<&
 
 pub fn should_ignore_claude_event(event_name: Option<&str>, payload: Option<&Value>) -> bool {
     matches!(event_name, Some("PreToolUse" | "PostToolUse"))
-        && payload
-            .and_then(|value| value.get("tool_name"))
-            .and_then(Value::as_str)
-            .and_then(wait_reason_for_tool)
-            .is_none()
+        && payload_tool_wait_reason(payload).is_none()
 }
 
 pub fn is_safe_task_run_id(task_run_id: &str) -> bool {

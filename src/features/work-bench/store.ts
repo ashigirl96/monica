@@ -70,6 +70,34 @@ function resolveTabCwd(tab: TerminalTab | null | undefined): string {
   return defaultCwd();
 }
 
+function patchTabInState(
+  state: TerminalState,
+  tabId: string,
+  patch: Partial<TerminalTab>,
+): TerminalState {
+  return {
+    ...state,
+    runspaces: state.runspaces.map((rs) => ({
+      ...rs,
+      tabs: rs.tabs.map((t) => (t.id === tabId ? { ...t, ...patch } : t)),
+    })),
+  };
+}
+
+function reorderByOrder<T extends { id: string; order: number }>(
+  items: T[],
+  fromId: string,
+  toId: string,
+): T[] | null {
+  const sorted = [...items].sort((a, b) => a.order - b.order);
+  const fromIdx = sorted.findIndex((it) => it.id === fromId);
+  const toIdx = sorted.findIndex((it) => it.id === toId);
+  if (fromIdx === -1 || toIdx === -1) return null;
+  const [moved] = sorted.splice(fromIdx, 1);
+  sorted.splice(toIdx, 0, moved);
+  return sorted.map((it, i) => ({ ...it, order: i }));
+}
+
 function createTab(cwd: string, order: number): TerminalTab {
   const id = crypto.randomUUID();
   return { id, title: "", cwd, order };
@@ -463,13 +491,7 @@ export const jumpToHintAtom = atom(null, (get, set, input: { key: string; runspa
 
 export const updateTabTitleAtom = atom(null, (get, set, tabId: string, title: string) => {
   const state = get(resolvedStateAtom);
-  set(terminalStateAtom, {
-    ...state,
-    runspaces: state.runspaces.map((rs) => ({
-      ...rs,
-      tabs: rs.tabs.map((t) => (t.id === tabId ? { ...t, title } : t)),
-    })),
-  });
+  set(terminalStateAtom, patchTabInState(state, tabId, { title }));
   // Shells retitle on every prompt, making this the signal that something may have
   // run in the tab — including a branch switch the cwd watcher cannot see.
   const tab = state.runspaces.flatMap((rs) => rs.tabs).find((t) => t.id === tabId);
@@ -478,50 +500,26 @@ export const updateTabTitleAtom = atom(null, (get, set, tabId: string, title: st
 
 export const updateTabCwdAtom = atom(null, (get, set, tabId: string, cwd: string) => {
   const state = get(resolvedStateAtom);
-  set(terminalStateAtom, {
-    ...state,
-    runspaces: state.runspaces.map((rs) => ({
-      ...rs,
-      tabs: rs.tabs.map((t) => (t.id === tabId ? { ...t, cwd } : t)),
-    })),
-  });
+  set(terminalStateAtom, patchTabInState(state, tabId, { cwd }));
   void set(resolveWorktreeInfoAtom, [cwd]);
 });
 
 export const reorderRunspacesAtom = atom(null, (get, set, fromId: string, toId: string) => {
   const state = get(resolvedStateAtom);
-  const sorted = [...state.runspaces].sort((a, b) => a.order - b.order);
-  const fromIdx = sorted.findIndex((rs) => rs.id === fromId);
-  const toIdx = sorted.findIndex((rs) => rs.id === toId);
-  if (fromIdx === -1 || toIdx === -1) return;
-
-  const [moved] = sorted.splice(fromIdx, 1);
-  sorted.splice(toIdx, 0, moved);
-
-  set(terminalStateAtom, {
-    ...state,
-    runspaces: sorted.map((rs, i) => ({ ...rs, order: i })),
-  });
+  const runspaces = reorderByOrder(state.runspaces, fromId, toId);
+  if (!runspaces) return;
+  set(terminalStateAtom, { ...state, runspaces });
 });
 
 export const reorderTabsAtom = atom(null, (get, set, fromId: string, toId: string) => {
   const state = get(resolvedStateAtom);
   const rs = state.runspaces.find((r) => r.id === state.activeRunspaceId);
   if (!rs) return;
-
-  const sorted = [...rs.tabs].sort((a, b) => a.order - b.order);
-  const fromIdx = sorted.findIndex((t) => t.id === fromId);
-  const toIdx = sorted.findIndex((t) => t.id === toId);
-  if (fromIdx === -1 || toIdx === -1) return;
-
-  const [moved] = sorted.splice(fromIdx, 1);
-  sorted.splice(toIdx, 0, moved);
-
+  const tabs = reorderByOrder(rs.tabs, fromId, toId);
+  if (!tabs) return;
   set(terminalStateAtom, {
     ...state,
-    runspaces: state.runspaces.map((r) =>
-      r.id === rs.id ? { ...rs, tabs: sorted.map((t, i) => ({ ...t, order: i })) } : r,
-    ),
+    runspaces: state.runspaces.map((r) => (r.id === rs.id ? { ...rs, tabs } : r)),
   });
 });
 
@@ -619,13 +617,7 @@ export const refreshSessionsAtom = atom(null, async (get, set) => {
 
 export const bindTabSessionAtom = atom(null, (get, set, tabId: string, sessionId: string) => {
   const state = get(resolvedStateAtom);
-  set(terminalStateAtom, {
-    ...state,
-    runspaces: state.runspaces.map((rs) => ({
-      ...rs,
-      tabs: rs.tabs.map((t) => (t.id === tabId ? { ...t, sessionId } : t)),
-    })),
-  });
+  set(terminalStateAtom, patchTabInState(state, tabId, { sessionId }));
 });
 
 export const terminateTabSessionAtom = atom(null, async (get, set, tabId: string) => {
@@ -647,13 +639,7 @@ export const terminateTabSessionAtom = atom(null, async (get, set, tabId: string
 export const startNewShellForTabAtom = atom(null, (get, set, tabId: string) => {
   releaseTabConnection(tabId);
   const state = get(resolvedStateAtom);
-  set(terminalStateAtom, {
-    ...state,
-    runspaces: state.runspaces.map((rs) => ({
-      ...rs,
-      tabs: rs.tabs.map((t) => (t.id === tabId ? { ...t, sessionId: undefined } : t)),
-    })),
-  });
+  set(terminalStateAtom, patchTabInState(state, tabId, { sessionId: undefined }));
 });
 
 // Reattach a detached session into a tab. Prefers its original runspace and tab id (the
@@ -841,13 +827,7 @@ export const createTaskRunspaceAtom = atom(
 
 export const consumeTerminalLaunchAtom = atom(null, (get, set, tabId: string) => {
   const state = get(resolvedStateAtom);
-  set(terminalStateAtom, {
-    ...state,
-    runspaces: state.runspaces.map((rs) => ({
-      ...rs,
-      tabs: rs.tabs.map((t) => (t.id === tabId ? { ...t, launch: undefined } : t)),
-    })),
-  });
+  set(terminalStateAtom, patchTabInState(state, tabId, { launch: undefined }));
 });
 
 let saveTimer: number | undefined;
