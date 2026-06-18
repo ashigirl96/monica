@@ -4,7 +4,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use clap::Subcommand;
+use monica_core::TaskRepository;
 use monica_infra::Runtime;
+
+use crate::notify;
 
 #[derive(Subcommand)]
 pub enum HookCommand {
@@ -86,15 +89,32 @@ fn handle_claude() -> Result<()> {
     )?;
 
     debug_log(&format!(
-        "event={:?} ignored={} task_found={} run_linked={} run_created={} status={:?} jsonl={}",
+        "event={:?} ignored={} task_found={} run_linked={} run_created={} status={:?} wait_reason={:?} entered_waiting={} jsonl={}",
         report.event_name,
         report.ignored,
         report.task_found,
         report.task_run_linked,
         report.task_run_created,
         report.task_run_status,
+        report.task_run_wait_reason,
+        report.entered_waiting_for_user,
         report.jsonl_written,
     ));
+
+    // A hook fires exactly when the run enters WaitingForUser, regardless of whether the window is
+    // foregrounded — the one moment frontend polling (gated on document.hidden) goes blind. Only
+    // the entering edge notifies; a later event re-affirming an already-waiting run does not.
+    // Best-effort throughout: a failed lookup or notification must never disrupt the session.
+    if report.entered_waiting_for_user {
+        let task_title = task_id
+            .as_deref()
+            .and_then(|id| runtime.repositories.get_task(id).ok().flatten())
+            .map(|task| task.title);
+        notify::post(&notify::waiting_notification(
+            report.task_run_wait_reason,
+            task_title.as_deref(),
+        ));
+    }
 
     // Surface notable degradations on stderr so a misconfigured launch shows up in the hook debug
     // log without ever reaching Claude's context.

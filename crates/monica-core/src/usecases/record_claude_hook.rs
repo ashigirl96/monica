@@ -23,6 +23,10 @@ pub struct HookReport {
     pub event_name: Option<String>,
     pub task_run_status: Option<TaskRunStatus>,
     pub task_run_wait_reason: Option<TaskRunWaitReason>,
+    /// This hook is the one that moved the run into `WaitingForUser`. Distinct from
+    /// `task_run_status == Some(WaitingForUser)`, which a later event re-affirms while the run is
+    /// already waiting; only the entering edge should fire a notification.
+    pub entered_waiting_for_user: bool,
     pub ignored: bool,
     pub task_found: bool,
     pub task_run_linked: bool,
@@ -57,6 +61,7 @@ where
             event_name,
             task_run_status: None,
             task_run_wait_reason: None,
+            entered_waiting_for_user: false,
             ignored: true,
             task_found: false,
             task_run_linked: false,
@@ -184,10 +189,19 @@ where
         None => (None, None),
     };
 
+    // The entering edge, not the current state: a generic wait re-affirmed by a trailing Stop
+    // would re-land WaitingForUser, but the run was already waiting, so it must not re-notify.
+    let was_waiting = run_row
+        .as_ref()
+        .is_some_and(|run| run.status == TaskRunStatus::WaitingForUser);
+    let entered_waiting_for_user =
+        task_run_status == Some(TaskRunStatus::WaitingForUser) && !was_waiting;
+
     Ok(HookReport {
         event_name,
         task_run_status,
         task_run_wait_reason,
+        entered_waiting_for_user,
         ignored: false,
         task_found,
         task_run_linked,

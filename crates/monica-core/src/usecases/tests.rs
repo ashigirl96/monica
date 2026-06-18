@@ -863,6 +863,54 @@ fn record_claude_hook_claims_prepared_primary_run_without_run_id() {
 }
 
 #[test]
+fn entered_waiting_for_user_marks_only_the_entering_edge() {
+    let mut repos = FakeRepos::default();
+    let outputs = FakeTaskRunOutputs::default();
+    let (task_id, run_id) = task_with_running_primary(&mut repos, &outputs);
+
+    // Running -> WaitingForUser: the entering edge.
+    let report = record_claude_hook(
+        &mut repos,
+        &outputs,
+        hook_ctx(&task_id, Some(&run_id)),
+        r#"{"hook_event_name":"Stop","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
+    assert!(report.entered_waiting_for_user);
+
+    // A trailing Stop re-affirms the generic wait, but the run was already waiting: not an edge,
+    // so it must not notify again.
+    let report = record_claude_hook(
+        &mut repos,
+        &outputs,
+        hook_ctx(&task_id, Some(&run_id)),
+        r#"{"hook_event_name":"Stop","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
+    assert!(!report.entered_waiting_for_user);
+
+    // Back to Running, then a terminal transition: a non-waiting landing is never an edge.
+    record_claude_hook(
+        &mut repos,
+        &outputs,
+        hook_ctx(&task_id, Some(&run_id)),
+        r#"{"hook_event_name":"UserPromptSubmit","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    let report = record_claude_hook(
+        &mut repos,
+        &outputs,
+        hook_ctx(&task_id, Some(&run_id)),
+        r#"{"hook_event_name":"SessionEnd","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    assert_eq!(report.task_run_status, Some(TaskRunStatus::Stopped));
+    assert!(!report.entered_waiting_for_user);
+}
+
+#[test]
 fn record_claude_hook_does_not_claim_prepared_primary_on_stray_stop() {
     let mut repos = FakeRepos::default();
     let (task_id, run_id) = task_with_prepared_primary(&mut repos);
