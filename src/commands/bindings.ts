@@ -135,7 +135,6 @@ export type PrepareTaskResult = {
 
 export type ProjectOption = {
   id: string;
-  name: string;
 };
 
 export type RunTaskResult = {

@@ -16,7 +16,6 @@ pub struct TaskCreated {
 #[derive(Serialize, specta::Type)]
 pub struct ProjectOption {
     pub id: String,
-    pub name: String,
 }
 
 #[derive(Clone, Serialize, specta::Type, Event)]
@@ -64,10 +63,7 @@ pub fn list_projects() -> Result<Vec<ProjectOption>, String> {
     Ok(monica_core::list_projects(&runtime.repositories)
         .map_err(|e| e.to_string())?
         .into_iter()
-        .map(|p| ProjectOption {
-            id: p.id,
-            name: p.name,
-        })
+        .map(|p| ProjectOption { id: p.id })
         .collect())
 }
 
