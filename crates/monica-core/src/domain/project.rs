@@ -1,39 +1,45 @@
-use std::str::FromStr;
-
-use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use super::task_run::Agent;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum Provider {
     Github,
 }
 
 impl Provider {
     pub fn as_str(self) -> &'static str {
-        match self {
-            Provider::Github => "github",
-        }
-    }
-}
-
-impl FromStr for Provider {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        Ok(match s {
-            "github" => Provider::Github,
-            other => return Err(anyhow!("unknown provider: {other}")),
-        })
+        self.into()
     }
 }
 
 /// Claude Code permission mode. M0 carries the values the project design uses; Claude also
 /// accepts `auto`/`dontAsk`, which can be added later without a schema change.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
 #[serde(rename_all = "camelCase")]
+#[strum(serialize_all = "camelCase")]
 pub enum PermissionMode {
     Default,
     Plan,
@@ -43,26 +49,7 @@ pub enum PermissionMode {
 
 impl PermissionMode {
     pub fn as_str(self) -> &'static str {
-        match self {
-            PermissionMode::Default => "default",
-            PermissionMode::Plan => "plan",
-            PermissionMode::AcceptEdits => "acceptEdits",
-            PermissionMode::BypassPermissions => "bypassPermissions",
-        }
-    }
-}
-
-impl FromStr for PermissionMode {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        Ok(match s {
-            "default" => PermissionMode::Default,
-            "plan" => PermissionMode::Plan,
-            "acceptEdits" => PermissionMode::AcceptEdits,
-            "bypassPermissions" => PermissionMode::BypassPermissions,
-            other => return Err(anyhow!("unknown permission mode: {other}")),
-        })
+        self.into()
     }
 }
 

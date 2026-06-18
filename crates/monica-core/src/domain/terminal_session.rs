@@ -1,11 +1,19 @@
-use std::str::FromStr;
-
-use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum TerminalSessionStatus {
     Starting,
     Running,
@@ -17,14 +25,7 @@ pub enum TerminalSessionStatus {
 
 impl TerminalSessionStatus {
     pub fn as_str(self) -> &'static str {
-        match self {
-            TerminalSessionStatus::Starting => "starting",
-            TerminalSessionStatus::Running => "running",
-            TerminalSessionStatus::Detached => "detached",
-            TerminalSessionStatus::Exited => "exited",
-            TerminalSessionStatus::Lost => "lost",
-            TerminalSessionStatus::Failed => "failed",
-        }
+        self.into()
     }
 
     /// Whether the session can never transition again (the process is gone for good).
@@ -38,25 +39,20 @@ impl TerminalSessionStatus {
     }
 }
 
-impl FromStr for TerminalSessionStatus {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        Ok(match s {
-            "starting" => TerminalSessionStatus::Starting,
-            "running" => TerminalSessionStatus::Running,
-            "detached" => TerminalSessionStatus::Detached,
-            "exited" => TerminalSessionStatus::Exited,
-            "lost" => TerminalSessionStatus::Lost,
-            "failed" => TerminalSessionStatus::Failed,
-            other => return Err(anyhow!("unknown terminal session status: {other}")),
-        })
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum TerminalSessionKind {
     Shell,
     Agent,
@@ -66,26 +62,7 @@ pub enum TerminalSessionKind {
 
 impl TerminalSessionKind {
     pub fn as_str(self) -> &'static str {
-        match self {
-            TerminalSessionKind::Shell => "shell",
-            TerminalSessionKind::Agent => "agent",
-            TerminalSessionKind::Task => "task",
-            TerminalSessionKind::Scratch => "scratch",
-        }
-    }
-}
-
-impl FromStr for TerminalSessionKind {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        Ok(match s {
-            "shell" => TerminalSessionKind::Shell,
-            "agent" => TerminalSessionKind::Agent,
-            "task" => TerminalSessionKind::Task,
-            "scratch" => TerminalSessionKind::Scratch,
-            other => return Err(anyhow!("unknown terminal session kind: {other}")),
-        })
+        self.into()
     }
 }
 

@@ -1,6 +1,5 @@
 use std::str::FromStr;
 
-use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,8 +29,19 @@ pub struct GithubIssue {
     pub url: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum GithubPullRequestStatus {
     Draft,
     Open,
@@ -41,12 +51,7 @@ pub enum GithubPullRequestStatus {
 
 impl GithubPullRequestStatus {
     pub fn as_str(self) -> &'static str {
-        match self {
-            GithubPullRequestStatus::Draft => "draft",
-            GithubPullRequestStatus::Open => "open",
-            GithubPullRequestStatus::Closed => "closed",
-            GithubPullRequestStatus::Merged => "merged",
-        }
+        self.into()
     }
 
     /// Draft and Open are work still in flight; Merged and Closed are settled history.
@@ -55,20 +60,6 @@ impl GithubPullRequestStatus {
             self,
             GithubPullRequestStatus::Draft | GithubPullRequestStatus::Open
         )
-    }
-}
-
-impl FromStr for GithubPullRequestStatus {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        Ok(match s {
-            "draft" => GithubPullRequestStatus::Draft,
-            "open" => GithubPullRequestStatus::Open,
-            "closed" => GithubPullRequestStatus::Closed,
-            "merged" => GithubPullRequestStatus::Merged,
-            other => return Err(anyhow!("unknown GitHub pull request status: {other}")),
-        })
     }
 }
 

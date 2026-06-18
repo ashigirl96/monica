@@ -144,21 +144,16 @@ fn render_status_table(rows: &[TaskSummaryRow]) -> String {
         "BRANCH".to_string(),
     ]];
     for row in rows {
+        let github_issue = row.github_issue_number.map(|n| format!("#{n}"));
         table.push(vec![
             row.id.clone(),
-            display_opt(row.project.as_deref()),
-            row.github_issue_number
-                .map(|n| format!("#{n}"))
-                .unwrap_or_else(|| "-".to_string()),
+            crate::table::or_dash(row.project.as_deref()),
+            crate::table::or_dash(github_issue.as_deref()),
             row.status.as_str().to_string(),
-            display_opt(row.branch.as_deref()),
+            crate::table::or_dash(row.branch.as_deref()),
         ]);
     }
     crate::table::render_table(&table)
-}
-
-fn display_opt(value: Option<&str>) -> String {
-    value.unwrap_or("-").to_string()
 }
 
 #[cfg(test)]

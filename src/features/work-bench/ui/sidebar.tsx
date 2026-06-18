@@ -18,16 +18,8 @@ import { activeSpaceAtom } from "@/stores/space";
 import { useDragReorder } from "@/hooks/use-drag-reorder";
 import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import { shortPath } from "@/lib/paths";
+import { TASK_STATUS_DOT } from "@/lib/status-config";
 import { cn } from "@/lib/utils";
-
-const TASK_STATUS_DOT: Partial<Record<DisplayStatus, string>> = {
-  setting_up: "bg-blue-400 animate-pulse",
-  prepared: "bg-cyan-400",
-  running: "bg-emerald-400 animate-pulse",
-  waiting_for_user: "bg-amber-400",
-  stopped: "bg-muted-foreground/50",
-  failed: "bg-red-400",
-};
 
 function DetachedSessionItem({
   session,

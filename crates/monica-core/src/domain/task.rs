@@ -1,35 +1,30 @@
-use std::str::FromStr;
-
-use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::github::GithubPullRequestRef;
 use super::status::{DisplayStatus, TaskRunStatus, TaskRunWaitReason, TaskStatus};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum TaskKind {
     Development,
 }
 
 impl TaskKind {
     pub fn as_str(self) -> &'static str {
-        match self {
-            TaskKind::Development => "development",
-        }
-    }
-}
-
-impl FromStr for TaskKind {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        Ok(match s {
-            "development" => TaskKind::Development,
-            other => return Err(anyhow!("unknown task kind: {other}")),
-        })
+        self.into()
     }
 }
 

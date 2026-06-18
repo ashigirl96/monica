@@ -14,6 +14,7 @@ specta = { version = "=2.0.0-rc.25", default-features = false, features = [
   "serde_json",
 ], optional = true }
 specta-typescript = { version = "=0.0.12", default-features = false, optional = true }
+strum = { version = "0.28", features = ["derive"] }
 
 [features]
 specta = ["dep:specta", "dep:specta-typescript"]

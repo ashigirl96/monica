@@ -93,7 +93,7 @@ fn list(runtime: &Runtime) -> Result<()> {
     for p in &projects {
         table.push(vec![
             p.id.clone(),
-            p.path.clone().unwrap_or_else(|| "-".to_string()),
+            crate::table::or_dash(p.path.as_deref()),
             p.default_branch.clone(),
             p.agent_default.as_str().to_string(),
             p.setup_timeout_sec.to_string(),
@@ -111,15 +111,17 @@ fn show(runtime: &Runtime, repo: &str, json: bool) -> Result<()> {
         return Ok(());
     }
 
-    let opt = |v: &Option<String>| v.clone().unwrap_or_else(|| "-".to_string());
     let fields = [
         ("id", project.id.clone()),
         ("name", project.name.clone()),
         ("provider", project.provider.as_str().to_string()),
         ("repo", project.repo.clone()),
-        ("path", opt(&project.path)),
+        ("path", crate::table::or_dash(project.path.as_deref())),
         ("default_branch", project.default_branch.clone()),
-        ("worktree_root", opt(&project.worktree_root)),
+        (
+            "worktree_root",
+            crate::table::or_dash(project.worktree_root.as_deref()),
+        ),
         ("setup_timeout_sec", project.setup_timeout_sec.to_string()),
         ("agent_default", project.agent_default.as_str().to_string()),
         (
