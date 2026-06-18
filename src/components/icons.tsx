@@ -38,6 +38,20 @@ export function ProjectHomeIcon(props: IconProps) {
   );
 }
 
+export function MemoryIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path
+        d="M5 5.5C5 4.7 5.7 4 6.5 4H18C18.6 4 19 4.4 19 5V20L16 18.2L13 20L10 18.2L7 20L5 18.8V5.5Z"
+        strokeWidth="1.5"
+      />
+      <path d="M8 8H16" strokeWidth="1.5" />
+      <path d="M8 11.5H15" strokeWidth="1.5" />
+      <path d="M8 15H13" strokeWidth="1.5" />
+    </Icon>
+  );
+}
+
 export function WorkBoardIcon(props: IconProps) {
   return (
     <Icon {...props}>
@@ -71,6 +85,34 @@ export function XIcon(props: IconProps) {
     <Icon {...props}>
       <line x1="6" y1="6" x2="18" y2="18" strokeWidth="1.5" />
       <line x1="18" y1="6" x2="6" y2="18" strokeWidth="1.5" />
+    </Icon>
+  );
+}
+
+export function SearchIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="10.5" cy="10.5" r="5.5" strokeWidth="1.5" />
+      <path d="M15 15L20 20" strokeWidth="1.5" />
+    </Icon>
+  );
+}
+
+export function DownloadIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M12 4V15" strokeWidth="1.5" />
+      <path d="M8 11L12 15L16 11" strokeWidth="1.5" />
+      <path d="M5 20H19" strokeWidth="1.5" />
+    </Icon>
+  );
+}
+
+export function ArrowUpRightIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M7 17L17 7" strokeWidth="1.5" />
+      <path d="M9 7H17V15" strokeWidth="1.5" />
     </Icon>
   );
 }

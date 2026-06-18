@@ -9,6 +9,10 @@ pub mod shell;
 pub mod usecases;
 
 pub use domain::{
+    intent_seed_status_options, text_artifact_type_options, Artifact, ArtifactLink,
+    ArtifactLinkKind, ArtifactListFilter, ArtifactSpace, ArtifactSummary, ArtifactType,
+    ArtifactTypeOption, CreateArtifactInput, IntentSeedStatus, IntentSeedStatusOption,
+    PersonalSpaceExport, UpdateArtifactInput,
     branch_name, is_continuation_session_start, is_safe_task_run_id, is_session_starting_event,
     monica_number, parse_issue_input, parse_issue_ref,
     parse_owner_repo, subagent_count_update, SubagentCountUpdate,
@@ -23,7 +27,7 @@ pub use domain::{
     TerminalSession, TerminalSessionKind, TerminalSessionStatus,
 };
 pub use interfaces::{
-    AuthGateway, BenchRepository, Clock, EventRepository, GitGateway, GithubGateway,
+    ArtifactRepository, AuthGateway, BenchRepository, Clock, EventRepository, GitGateway, GithubGateway,
     ProjectRepository, RunArtifacts, SetupEnv, SetupOutcome, SetupRunner, TaskRepository,
     TaskShellEnv,
     TaskRunRepository, TaskSummaryFilter,
@@ -31,12 +35,14 @@ pub use interfaces::{
 pub use usecases::{
     begin_github_device_flow, reconcile_terminal_sessions, DaemonSessionView, ReconcileOutcome,
     TerminalSessionUpdate, close_issue, execute_run, get_project, github_auth_status,
-    list_events, list_projects, list_task_summaries, list_tasks, logout_github,
+    create_artifact, get_artifact, list_artifacts, list_events, list_projects,
+    list_task_summaries, list_tasks, logout_github,
     make_main_by_terminal_tab, primary_terminal_tab, MakeMainOutcome,
-    open_bench, prepare_claude_for_run, record_claude_hook, register_project, task_shell_env,
+    open_bench, personal_space_export, prepare_claude_for_run, promote_record_to_intent_seed,
+    record_claude_hook, register_project, task_shell_env,
     register_project_with_default_branch, set_project_field, start_run, sync_next_pull_request,
     task_run_settlement_for_orphaned_run, task_run_settlement_for_terminal_exit, TerminalExitSettlement,
-    track_github_issue,
+    track_github_issue, update_artifact,
     track_github_issue_from_fetched, wait_for_github_device_flow, CloseIssueReport, HookContext,
     HookReport, TrackGithubIssueInput, TrackGithubIssueReport,
 };

@@ -1,3 +1,4 @@
+mod artifacts;
 mod bench;
 mod events;
 mod external_refs;
@@ -16,6 +17,11 @@ pub(super) const TASK_RUN_COLUMNS: &str =
 pub(super) const PROJECT_COLUMNS: &str = "id, name, provider, repo, path, default_branch, worktree_root,      setup_timeout_sec, agent_default, agent_permission_mode, hooks_claude,      created_at, updated_at";
 
 pub(super) const EVENT_COLUMNS: &str = "id, task_id, task_run_id, kind, payload_json, created_at";
+
+pub(super) const ARTIFACT_COLUMNS: &str = "id, space, artifact_type, title, body, status,      source_artifact_id, created_at, updated_at";
+
+pub(super) const ARTIFACT_LINK_COLUMNS: &str =
+    "id, from_artifact_id, to_artifact_id, kind, created_at";
 
 pub(super) const SET_NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 

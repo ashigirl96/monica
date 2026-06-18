@@ -1,3 +1,4 @@
+mod artifact;
 mod bench;
 mod branch;
 mod external_ref;
@@ -10,6 +11,12 @@ mod task;
 mod task_run;
 mod terminal_session;
 
+pub use artifact::{
+    intent_seed_status_options, text_artifact_type_options, Artifact, ArtifactLink,
+    ArtifactLinkKind, ArtifactListFilter, ArtifactSpace, ArtifactSummary, ArtifactType,
+    ArtifactTypeOption, CreateArtifactInput, IntentSeedStatus, IntentSeedStatusOption,
+    PersonalSpaceExport, UpdateArtifactInput,
+};
 pub use bench::{bench_runspace_id, PrepareTaskResult, RunTaskResult, TaskBench};
 pub use branch::{branch_name, monica_number, worktree_path_for};
 pub use external_ref::{ExternalRef, RefType};

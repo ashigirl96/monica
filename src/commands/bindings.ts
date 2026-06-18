@@ -53,6 +53,42 @@ export const commands = {
     typedError<TerminalStateSnapshot, string>(__TAURI_INVOKE("terminal_load_state")),
   terminalSaveState: (state: TerminalStateSnapshot) =>
     typedError<null, string>(__TAURI_INVOKE("terminal_save_state", { state })),
+  listTextArtifacts: (
+    artifactType: "journal" | "essay" | "record" | "intent_seed" | null,
+    query: string | null,
+  ) =>
+    typedError<ArtifactSummary[], string>(
+      __TAURI_INVOKE("list_text_artifacts", { artifactType, query }),
+    ),
+  getTextArtifact: (id: string) =>
+    typedError<
+      {
+        id: string;
+        space: ArtifactSpace;
+        artifact_type: ArtifactType;
+        title: string | null;
+        body: string;
+        status: string | null;
+        source_artifact_id: string | null;
+        created_at: string;
+        updated_at: string;
+      } | null,
+      string
+    >(__TAURI_INVOKE("get_text_artifact", { id })),
+  createTextArtifact: (input: CreateArtifactInput) =>
+    typedError<Artifact, string>(__TAURI_INVOKE("create_text_artifact", { input })),
+  updateTextArtifact: (input: UpdateArtifactInput) =>
+    typedError<Artifact, string>(__TAURI_INVOKE("update_text_artifact", { input })),
+  promoteTextRecordToIntentSeed: (recordId: string) =>
+    typedError<Artifact, string>(
+      __TAURI_INVOKE("promote_text_record_to_intent_seed", { recordId }),
+    ),
+  textArtifactTypeOptionsCommand: () =>
+    __TAURI_INVOKE<ArtifactTypeOption[]>("text_artifact_type_options_command"),
+  intentSeedStatusOptionsCommand: () =>
+    __TAURI_INVOKE<IntentSeedStatusOption[]>("intent_seed_status_options_command"),
+  exportPersonalSpace: () =>
+    typedError<TextExportResult, string>(__TAURI_INVOKE("export_personal_space")),
   listTaskSummaries: (project: string | null) =>
     typedError<TaskSummaryRow[], string>(__TAURI_INVOKE("list_task_summaries", { project })),
   getBoardColumns: () => __TAURI_INVOKE<BoardColumn[]>("get_board_columns"),
@@ -88,6 +124,38 @@ export const events = {
 };
 
 /* Types */
+export type Artifact = {
+  id: string;
+  space: ArtifactSpace;
+  artifact_type: ArtifactType;
+  title: string | null;
+  body: string;
+  status: string | null;
+  source_artifact_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ArtifactSpace = "personal";
+
+export type ArtifactSummary = {
+  id: string;
+  artifact_type: ArtifactType;
+  title: string | null;
+  preview: string;
+  status: string | null;
+  source_artifact_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ArtifactType = "journal" | "essay" | "record" | "intent_seed";
+
+export type ArtifactTypeOption = {
+  value: ArtifactType;
+  label: string;
+};
+
 export type AttachResult = {
   /**  Base64 transcript tail to write into xterm before streaming live output. */
   replay: string;
@@ -99,6 +167,14 @@ export type BoardColumn = {
   key: string;
   label: string;
   statuses: DisplayStatus[];
+};
+
+export type CreateArtifactInput = {
+  artifact_type: ArtifactType;
+  title: string | null;
+  body: string;
+  status: string | null;
+  source_artifact_id: string | null;
 };
 
 export type DisplayStatus =
@@ -118,6 +194,11 @@ export type GithubPullRequestRef = {
   url: string | null;
   status: string | null;
   is_open_or_draft: boolean;
+};
+
+export type IntentSeedStatusOption = {
+  value: string;
+  label: string;
 };
 
 export type PrSyncCompleted = {
@@ -241,9 +322,23 @@ export type TerminalTabRow = {
   terminal_session_id: string | null;
 };
 
+export type TextExportResult = {
+  path: string;
+  artifact_count: number;
+  link_count: number;
+};
+
 export type TrackIssueResult = {
   task_id: string;
   title: string;
+};
+
+export type UpdateArtifactInput = {
+  id: string;
+  artifact_type: ArtifactType;
+  title: string | null;
+  body: string;
+  status: string | null;
 };
 
 export type WorktreeInfo = {

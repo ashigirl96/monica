@@ -33,6 +33,7 @@ fn migration_steps() -> Vec<M<'static>> {
         M::up(V20),
         M::up(V21),
         M::up(V22),
+        M::up(V23),
     ]
 }
 
@@ -523,6 +524,41 @@ const V21: &str = r#"
 /// lifecycle keep the run `Running` instead of flickering to "your turn" until the subagent ends.
 const V22: &str = r#"
     ALTER TABLE task_runs ADD COLUMN active_subagents INTEGER NOT NULL DEFAULT 0;
+"#;
+
+/// v23: Text & Memory artifact foundation for the first Personal Space vertical slice.
+/// The original text lives in `artifacts`; links and derived relationships are stored separately
+/// so promotion from Record to Intent Seed never overwrites the source record.
+const V23: &str = r#"
+    CREATE TABLE artifact_counter (n INTEGER PRIMARY KEY AUTOINCREMENT);
+
+    CREATE TABLE artifacts (
+      id                 TEXT PRIMARY KEY,
+      space              TEXT NOT NULL CHECK(space IN ('personal')),
+      artifact_type      TEXT NOT NULL CHECK(artifact_type IN ('journal', 'essay', 'record', 'intent_seed')),
+      title              TEXT,
+      body               TEXT NOT NULL DEFAULT '',
+      status             TEXT,
+      source_artifact_id TEXT REFERENCES artifacts(id),
+      created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      updated_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      deleted_at         TEXT
+    );
+
+    CREATE INDEX artifacts_space_type_updated_idx
+      ON artifacts(space, artifact_type, updated_at);
+
+    CREATE TABLE artifact_links (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      from_artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+      to_artifact_id   TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+      kind             TEXT NOT NULL CHECK(kind IN ('derived_from', 'related')),
+      created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      UNIQUE(from_artifact_id, to_artifact_id, kind)
+    );
+
+    CREATE INDEX artifact_links_from_idx ON artifact_links(from_artifact_id);
+    CREATE INDEX artifact_links_to_idx ON artifact_links(to_artifact_id);
 "#;
 
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.

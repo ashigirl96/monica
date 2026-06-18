@@ -11,6 +11,7 @@ import { getSpaceConfig, spaces } from "@/spaces/registry";
 import { SpaceNav } from "@/components/space-nav";
 import { ResizeHandle } from "@/components/resize-handle";
 import { Toaster } from "@/components/toaster";
+import { CaptureModal, GlobalCaptureButton } from "@/features/text-memory/ui/capture-modal";
 import { useShortcuts } from "@/hooks/use-shortcuts";
 import { TRAFFIC_LIGHT_ZONE_HEIGHT, TRAFFIC_LIGHT_ZONE_WIDTH } from "@/lib/layout";
 import { cn } from "@/lib/utils";
@@ -76,14 +77,17 @@ export function AppLayout() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <div
-          className="flex h-10 flex-shrink-0 items-center transition-[padding] duration-200 ease-out"
+          className="flex h-10 flex-shrink-0 items-center gap-2 transition-[padding] duration-200 ease-out"
           style={{
             paddingLeft: Math.max(8, TRAFFIC_LIGHT_ZONE_WIDTH - leftPanelWidth),
             paddingRight: 8,
           }}
           data-tauri-drag-region
         >
-          <Header />
+          <div className="min-w-0 flex-1">
+            <Header />
+          </div>
+          <GlobalCaptureButton />
         </div>
 
         <div className="relative min-h-0 flex-1 p-2 pt-0">
@@ -116,6 +120,7 @@ export function AppLayout() {
       </div>
 
       <Toaster />
+      <CaptureModal />
     </div>
   );
 }

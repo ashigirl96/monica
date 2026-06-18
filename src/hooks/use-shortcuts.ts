@@ -14,13 +14,15 @@ import {
   toggleLastRunspaceAtom,
 } from "@/features/work-bench/store";
 import { forceSyncPullRequestsAtom } from "@/stores/pr-sync";
+import { openCaptureAtom } from "@/features/text-memory/store";
 import { isEditable } from "@/lib/keyboard";
 
 const META_KEY_SPACE_MAP: Record<string, SpaceId> = {
   "1": "dashboard",
-  "2": "project",
-  "3": "work-board",
-  "4": "work-bench",
+  "2": "personal",
+  "3": "project",
+  "4": "work-board",
+  "5": "work-bench",
 };
 
 const PREFIX_TIMEOUT = 2000;
@@ -39,6 +41,7 @@ export function useShortcuts() {
   const cycleRunspace = useSetAtom(cycleRunspaceAtom);
   const promoteActiveTabRun = useSetAtom(promoteActiveTabRunAtom);
   const forceSyncPullRequests = useSetAtom(forceSyncPullRequestsAtom);
+  const openCapture = useSetAtom(openCaptureAtom);
   const jumpActive = useAtomValue(jumpHintsActiveAtom);
   const setJumpActive = useSetAtom(jumpHintsActiveAtom);
   const jumpToHint = useSetAtom(jumpToHintAtom);
@@ -67,6 +70,8 @@ export function useShortcuts() {
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
+      if (e.isComposing) return;
+
       const isWorkBench = activeSpace === "work-bench";
       const editable = isEditable(e);
 
@@ -108,6 +113,12 @@ export function useShortcuts() {
       if (e.metaKey && e.key in META_KEY_SPACE_MAP) {
         e.preventDefault();
         setActiveSpace(META_KEY_SPACE_MAP[e.key]);
+        return;
+      }
+
+      if (e.metaKey && e.shiftKey && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        openCapture();
         return;
       }
 
@@ -220,6 +231,7 @@ export function useShortcuts() {
     cycleRunspace,
     promoteActiveTabRun,
     forceSyncPullRequests,
+    openCapture,
     jumpActive,
     setJumpActive,
     jumpToHint,

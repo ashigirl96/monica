@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 
-export type SpaceId = "dashboard" | "project" | "work-board" | "work-bench";
+export type SpaceId = "dashboard" | "personal" | "project" | "work-board" | "work-bench";
 
 export const SPACE_NAV_WIDTH = 40;
 export const SIDEBAR_DEFAULT_WIDTH = 200;

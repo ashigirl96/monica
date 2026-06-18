@@ -35,6 +35,7 @@ const DEFAULT_UI_STATE: PersistedUiState = {
 // can never silently drift behind the type.
 const SPACE_IDS: Record<SpaceId, true> = {
   dashboard: true,
+  personal: true,
   project: true,
   "work-board": true,
   "work-bench": true,

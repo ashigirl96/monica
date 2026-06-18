@@ -1,6 +1,7 @@
 use anyhow::Result;
 use monica_core::{
-    Agent, Event, ExternalRef, PermissionMode, Project, Provider, RefType, Task, TaskKind, TaskRun,
+    Agent, Artifact, ArtifactLink, ArtifactLinkKind, ArtifactSpace, ArtifactType, Event,
+    ExternalRef, PermissionMode, Project, Provider, RefType, Task, TaskKind, TaskRun,
     TaskRunStatus, TaskStatus,
 };
 use rusqlite::Row;
@@ -78,6 +79,33 @@ pub(super) fn external_ref_from_row(row: &Row<'_>) -> Result<ExternalRef> {
         repo: row.get("repo")?,
         number: row.get("number")?,
         url: row.get("url")?,
+        created_at: row.get("created_at")?,
+    })
+}
+
+pub(super) fn artifact_from_row(row: &Row<'_>) -> Result<Artifact> {
+    let space: String = row.get("space")?;
+    let artifact_type: String = row.get("artifact_type")?;
+    Ok(Artifact {
+        id: row.get("id")?,
+        space: space.parse::<ArtifactSpace>()?,
+        artifact_type: artifact_type.parse::<ArtifactType>()?,
+        title: row.get("title")?,
+        body: row.get("body")?,
+        status: row.get("status")?,
+        source_artifact_id: row.get("source_artifact_id")?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+pub(super) fn artifact_link_from_row(row: &Row<'_>) -> Result<ArtifactLink> {
+    let kind: String = row.get("kind")?;
+    Ok(ArtifactLink {
+        id: row.get("id")?,
+        from_artifact_id: row.get("from_artifact_id")?,
+        to_artifact_id: row.get("to_artifact_id")?,
+        kind: kind.parse::<ArtifactLinkKind>()?,
         created_at: row.get("created_at")?,
     })
 }

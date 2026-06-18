@@ -11,6 +11,7 @@ pub mod settle_terminal_exit;
 pub mod sync_pull_requests;
 #[cfg(test)]
 mod tests;
+pub mod text_memory;
 pub mod track_github_issue;
 
 pub use auth::{
@@ -33,6 +34,10 @@ pub use settle_terminal_exit::{
     TerminalExitSettlement,
 };
 pub use sync_pull_requests::sync_next_pull_request;
+pub use text_memory::{
+    create_artifact, get_artifact, list_artifacts, personal_space_export,
+    promote_record_to_intent_seed, update_artifact,
+};
 pub use track_github_issue::{
     track_github_issue, track_github_issue_from_fetched, TrackGithubIssueInput,
     TrackGithubIssueReport,

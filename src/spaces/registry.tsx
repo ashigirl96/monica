@@ -1,11 +1,19 @@
 import { lazy, type ComponentType } from "react";
-import { DashboardIcon, ProjectHomeIcon, WorkBoardIcon, WorkBenchIcon } from "@/components/icons";
+import {
+  DashboardIcon,
+  MemoryIcon,
+  ProjectHomeIcon,
+  WorkBoardIcon,
+  WorkBenchIcon,
+} from "@/components/icons";
 import type { SpaceId } from "@/stores/space";
 import { TabBar } from "@/components/tab-bar";
+import { TextMemorySidebar } from "@/features/text-memory/ui/sidebar";
 import { WorkBenchSidebar } from "@/features/work-bench/ui/sidebar";
 import { WorkBenchHeader } from "@/features/work-bench/ui/header";
 import { WorkBoardHeader } from "@/features/work-board/ui/header";
 
+const LazyTextMemoryContent = lazy(() => import("@/features/text-memory/ui/content"));
 const LazyWorkBenchContent = lazy(() => import("@/features/work-bench/ui/content"));
 const LazyWorkBoardContent = lazy(() => import("@/features/work-board/ui/content"));
 
@@ -45,6 +53,14 @@ export const spaces: SpaceConfig[] = [
     label: "Dashboard",
     header: TabBar,
     content: DashboardContent,
+  },
+  {
+    id: "personal",
+    icon: MemoryIcon,
+    label: "Personal Space",
+    sidebar: TextMemorySidebar,
+    header: TabBar,
+    content: LazyTextMemoryContent,
   },
   {
     id: "project",
