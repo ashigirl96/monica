@@ -3,8 +3,8 @@ use serde_json::{json, Value};
 
 use crate::domain::{
     is_continuation_session_start, is_resume_session_start, is_safe_task_run_id,
-    is_session_starting_event, should_ignore_claude_event, transition_for_claude_event,
-    transition_is_protected, Agent,
+    is_session_starting_event, payload_has_running_subagents, should_ignore_claude_event,
+    transition_for_claude_event, transition_is_protected, Agent,
 };
 use crate::interfaces::{Clock, EventRepository, TaskRunOutputs, TaskRepository, TaskRunRepository};
 use crate::{NewTaskRun, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus};
@@ -142,7 +142,7 @@ where
             run.wait_reason,
             run.provider_session_id.as_deref(),
             provider_session_id,
-            run.active_subagents,
+            run.active_subagents > 0 || payload_has_running_subagents(parsed.as_ref()),
             event_name.as_deref(),
             transition,
         ),
