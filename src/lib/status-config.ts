@@ -1,4 +1,4 @@
-import type { DisplayStatus } from "@/commands/task";
+import type { DisplayStatus, TaskRunWaitReason } from "@/commands/task";
 
 export const STATUS_COLORS: Record<DisplayStatus, string> = {
   ready: "bg-sky-400",
@@ -12,7 +12,7 @@ export const STATUS_COLORS: Record<DisplayStatus, string> = {
   closed: "bg-muted-foreground/30",
 };
 
-export const STATUS_LABELS: Record<DisplayStatus, string> = {
+const STATUS_LABELS: Record<DisplayStatus, string> = {
   ready: "ready",
   in_progress: "in progress",
   setting_up: "setting up",
@@ -47,6 +47,51 @@ const SIDEBAR_DOT_STATUSES = [
   "failed",
 ] satisfies DisplayStatus[];
 
-export const TASK_STATUS_DOT: Partial<Record<DisplayStatus, string>> = Object.fromEntries(
+const TASK_STATUS_DOT: Partial<Record<DisplayStatus, string>> = Object.fromEntries(
   SIDEBAR_DOT_STATUSES.map((status) => [status, STATUS_COLORS[status]]),
 );
+
+const WAIT_REASON_LABELS: Record<TaskRunWaitReason, string> = {
+  ask_user_question: "needs you",
+  exit_plan_mode: "approve plan",
+  awaiting_prompt: "your turn",
+};
+
+// waiting_for_user is split by wait_reason. Plan approval is the only one that blocks on
+// the user's *decision*, so it gets violet (vs amber) to read as a distinct kind of attention.
+const WAIT_BADGE_STYLES: Record<TaskRunWaitReason, string> = {
+  ask_user_question: "bg-amber-500/15 text-amber-400",
+  exit_plan_mode: "bg-violet-500/15 text-violet-300",
+  awaiting_prompt: "bg-amber-500/10 text-amber-300/80",
+};
+
+const WAIT_STATUS_DOT: Record<TaskRunWaitReason, string> = {
+  ask_user_question: "bg-amber-400 animate-pulse",
+  exit_plan_mode:
+    "bg-violet-400 ring-2 ring-violet-400/40 shadow-[0_0_7px_1px_rgba(167,139,250,0.7)] animate-pulse",
+  awaiting_prompt: "bg-amber-400/40",
+};
+
+export function statusDotClass(
+  status: DisplayStatus,
+  waitReason: TaskRunWaitReason | null,
+): string | undefined {
+  if (status === "waiting_for_user") return WAIT_STATUS_DOT[waitReason ?? "awaiting_prompt"];
+  return TASK_STATUS_DOT[status];
+}
+
+export function statusBadgeClass(
+  status: DisplayStatus,
+  waitReason: TaskRunWaitReason | null,
+): string {
+  if (status === "waiting_for_user") return WAIT_BADGE_STYLES[waitReason ?? "awaiting_prompt"];
+  return STATUS_BADGE_STYLES[status];
+}
+
+export function statusDisplayLabel(
+  status: DisplayStatus,
+  waitReason: TaskRunWaitReason | null,
+): string {
+  if (status === "waiting_for_user") return WAIT_REASON_LABELS[waitReason ?? "awaiting_prompt"];
+  return STATUS_LABELS[status];
+}
