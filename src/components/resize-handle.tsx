@@ -8,6 +8,7 @@ import {
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_DEFAULT_WIDTH,
 } from "@/stores/space";
+import { clamp } from "@/lib/clamp";
 import { cn } from "@/lib/utils";
 
 export function ResizeHandle() {
@@ -45,7 +46,7 @@ export function ResizeHandle() {
           rafRef.current = requestAnimationFrame(() => {
             rafRef.current = 0;
             const width = Math.round(
-              Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, e.clientX - SPACE_NAV_WIDTH)),
+              clamp(e.clientX - SPACE_NAV_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH),
             );
             setSidebarWidth(width);
           });

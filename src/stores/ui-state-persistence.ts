@@ -6,6 +6,7 @@ import {
   terminalStateAtom,
 } from "@/features/work-bench/store";
 import { activeSpaceAtom, sidebarOpenAtom, sidebarWidthAtom } from "@/stores/space";
+import { uiZoomAtom } from "@/stores/zoom";
 import { UI_STATE_FILE } from "@/stores/ui-state";
 import { focusMemoryAtom, focusedTaskIdAtom } from "@/features/work-board/nav";
 
@@ -28,6 +29,7 @@ export function initUiStatePersistence(): void {
       file.set("activeSpace", store.get(activeSpaceAtom)),
       file.set("sidebarOpen", store.get(sidebarOpenAtom)),
       file.set("sidebarWidth", store.get(sidebarWidthAtom)),
+      file.set("uiZoom", store.get(uiZoomAtom)),
       file.set("workboard", { focusedTaskId }),
     ];
     // activeRunspaceAtom synthesizes a throwaway runspace with a random id until the
@@ -56,6 +58,7 @@ export function initUiStatePersistence(): void {
     activeSpaceAtom,
     sidebarOpenAtom,
     sidebarWidthAtom,
+    uiZoomAtom,
     activeRunspaceAtom,
     activeTerminalTabAtom,
     focusedTaskIdAtom,

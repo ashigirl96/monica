@@ -1,6 +1,7 @@
 /// <reference types="bun" />
 import { describe, expect, test } from "bun:test";
 import { SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "@/stores/space";
+import { UI_ZOOM_DEFAULT, UI_ZOOM_MAX, UI_ZOOM_MIN } from "@/stores/zoom";
 import { parseUiState, resolveWorkbenchActive, resolveWorkboardFocus } from "@/stores/ui-state";
 
 describe("parseUiState", () => {
@@ -9,6 +10,7 @@ describe("parseUiState", () => {
       activeSpace: "work-bench",
       sidebarOpen: false,
       sidebarWidth: 220,
+      uiZoom: 1.2,
       workbench: { activeRunspaceId: "rs1", activeTabId: "tab1" },
       workboard: { selectedProject: "owner/repo", focusedTaskId: "task1" },
     });
@@ -16,6 +18,7 @@ describe("parseUiState", () => {
       activeSpace: "work-bench",
       sidebarOpen: false,
       sidebarWidth: 220,
+      uiZoom: 1.2,
       workbench: { activeRunspaceId: "rs1", activeTabId: "tab1" },
       workboard: { focusedTaskId: "task1" },
     });
@@ -26,6 +29,7 @@ describe("parseUiState", () => {
     expect(parsed.activeSpace).toBe("dashboard");
     expect(parsed.sidebarOpen).toBe(true);
     expect(parsed.sidebarWidth).toBe(SIDEBAR_DEFAULT_WIDTH);
+    expect(parsed.uiZoom).toBe(UI_ZOOM_DEFAULT);
     expect(parsed.workbench).toEqual({ activeRunspaceId: null, activeTabId: null });
     expect(parsed.workboard).toEqual({ focusedTaskId: null });
   });
@@ -38,6 +42,13 @@ describe("parseUiState", () => {
     expect(parseUiState({ sidebarWidth: 99999 }).sidebarWidth).toBe(SIDEBAR_MAX_WIDTH);
     expect(parseUiState({ sidebarWidth: 1 }).sidebarWidth).toBe(SIDEBAR_MIN_WIDTH);
     expect(parseUiState({ sidebarWidth: "wide" }).sidebarWidth).toBe(SIDEBAR_DEFAULT_WIDTH);
+  });
+
+  test("clamps uiZoom into range and defaults invalid values", () => {
+    expect(parseUiState({ uiZoom: 99 }).uiZoom).toBe(UI_ZOOM_MAX);
+    expect(parseUiState({ uiZoom: 0.1 }).uiZoom).toBe(UI_ZOOM_MIN);
+    expect(parseUiState({ uiZoom: "big" }).uiZoom).toBe(UI_ZOOM_DEFAULT);
+    expect(parseUiState({}).uiZoom).toBe(UI_ZOOM_DEFAULT);
   });
 
   test("defaults missing nested hints to null", () => {

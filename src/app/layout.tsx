@@ -7,6 +7,7 @@ import {
   sidebarResizingAtom,
   SPACE_NAV_WIDTH,
 } from "@/stores/space";
+import { uiZoomAtom } from "@/stores/zoom";
 import { getSpaceConfig, spaces } from "@/spaces/registry";
 import { SpaceNav } from "@/components/space-nav";
 import { ResizeHandle } from "@/components/resize-handle";
@@ -22,6 +23,7 @@ export function AppLayout() {
   const activeSpace = useAtomValue(activeSpaceAtom);
   const sidebarWidth = useAtomValue(sidebarWidthAtom);
   const resizing = useAtomValue(sidebarResizingAtom);
+  const uiZoom = useAtomValue(uiZoomAtom);
   const space = getSpaceConfig(activeSpace);
 
   const Sidebar = space.sidebar;
@@ -86,7 +88,7 @@ export function AppLayout() {
           <Header />
         </div>
 
-        <div className="relative min-h-0 flex-1 p-2 pt-0">
+        <div className="relative min-h-0 flex-1 p-2 pt-0" style={{ zoom: uiZoom }}>
           {!activePersistent && (
             <div className="content-panel h-full select-text overflow-auto rounded-xl">
               <Suspense>

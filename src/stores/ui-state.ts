@@ -9,6 +9,8 @@ import {
   sidebarOpenAtom,
   sidebarWidthAtom,
 } from "@/stores/space";
+import { clamp } from "@/lib/clamp";
+import { UI_ZOOM_DEFAULT, clampUiZoom, uiZoomAtom } from "@/stores/zoom";
 
 export const UI_STATE_FILE = "ui-state.json";
 
@@ -19,6 +21,7 @@ export type PersistedUiState = {
   activeSpace: SpaceId;
   sidebarOpen: boolean;
   sidebarWidth: number;
+  uiZoom: number;
   workbench: WorkbenchHint;
   workboard: WorkboardHint;
 };
@@ -27,6 +30,7 @@ const DEFAULT_UI_STATE: PersistedUiState = {
   activeSpace: "dashboard",
   sidebarOpen: true,
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
+  uiZoom: UI_ZOOM_DEFAULT,
   workbench: { activeRunspaceId: null, activeTabId: null },
   workboard: { focusedTaskId: null },
 };
@@ -54,7 +58,7 @@ function asObject(v: unknown): Record<string, unknown> {
 
 function clampWidth(v: unknown): number {
   if (typeof v !== "number" || !Number.isFinite(v)) return SIDEBAR_DEFAULT_WIDTH;
-  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, v));
+  return clamp(v, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
 }
 
 export function parseUiState(raw: unknown): PersistedUiState {
@@ -66,6 +70,7 @@ export function parseUiState(raw: unknown): PersistedUiState {
     activeSpace: isSpaceId(r.activeSpace) ? r.activeSpace : DEFAULT_UI_STATE.activeSpace,
     sidebarOpen: typeof r.sidebarOpen === "boolean" ? r.sidebarOpen : DEFAULT_UI_STATE.sidebarOpen,
     sidebarWidth: clampWidth(r.sidebarWidth),
+    uiZoom: clampUiZoom(r.uiZoom),
     workbench: {
       activeRunspaceId: asString(wb.activeRunspaceId),
       activeTabId: asString(wb.activeTabId),
@@ -112,20 +117,23 @@ export async function hydrateUiState(): Promise<void> {
   let parsed = DEFAULT_UI_STATE;
   try {
     const file = await load(UI_STATE_FILE);
-    const [activeSpace, sidebarOpen, sidebarWidth, workbench, workboard] = await Promise.all([
-      file.get("activeSpace"),
-      file.get("sidebarOpen"),
-      file.get("sidebarWidth"),
-      file.get("workbench"),
-      file.get("workboard"),
-    ]);
-    parsed = parseUiState({ activeSpace, sidebarOpen, sidebarWidth, workbench, workboard });
+    const [activeSpace, sidebarOpen, sidebarWidth, uiZoom, workbench, workboard] =
+      await Promise.all([
+        file.get("activeSpace"),
+        file.get("sidebarOpen"),
+        file.get("sidebarWidth"),
+        file.get("uiZoom"),
+        file.get("workbench"),
+        file.get("workboard"),
+      ]);
+    parsed = parseUiState({ activeSpace, sidebarOpen, sidebarWidth, uiZoom, workbench, workboard });
   } catch {
     parsed = DEFAULT_UI_STATE;
   }
   store.set(activeSpaceAtom, parsed.activeSpace);
   store.set(sidebarOpenAtom, parsed.sidebarOpen);
   store.set(sidebarWidthAtom, parsed.sidebarWidth);
+  store.set(uiZoomAtom, parsed.uiZoom);
   store.set(pendingWorkbenchHintAtom, parsed.workbench);
   store.set(pendingWorkboardHintAtom, parsed.workboard);
 }
