@@ -1,6 +1,7 @@
 mod auth;
 mod hook;
 mod issue;
+mod notify;
 mod project;
 mod table;
 

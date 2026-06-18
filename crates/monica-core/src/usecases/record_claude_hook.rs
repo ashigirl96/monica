@@ -23,6 +23,13 @@ pub struct HookReport {
     pub event_name: Option<String>,
     pub task_run_status: Option<TaskRunStatus>,
     pub task_run_wait_reason: Option<TaskRunWaitReason>,
+    /// This hook is the one that moved the run into `WaitingForUser`. Distinct from
+    /// `task_run_status == Some(WaitingForUser)`, which a later event re-affirms while the run is
+    /// already waiting; only the entering edge should fire a notification.
+    pub entered_waiting_for_user: bool,
+    /// The run's task title, carried only on the entering edge so a notification need not reach
+    /// back into the DB for what core already resolved.
+    pub task_title: Option<String>,
     pub ignored: bool,
     pub task_found: bool,
     pub task_run_linked: bool,
@@ -57,6 +64,8 @@ where
             event_name,
             task_run_status: None,
             task_run_wait_reason: None,
+            entered_waiting_for_user: false,
+            task_title: None,
             ignored: true,
             task_found: false,
             task_run_linked: false,
@@ -184,10 +193,23 @@ where
         None => (None, None),
     };
 
+    // The entering edge, not the current state: a generic wait re-affirmed by a trailing Stop
+    // would re-land WaitingForUser, but the run was already waiting, so it must not re-notify.
+    let entered_waiting_for_user = task_run_status == Some(TaskRunStatus::WaitingForUser)
+        && !run_row
+            .as_ref()
+            .is_some_and(|run| run.status == TaskRunStatus::WaitingForUser);
+    let task_title = match linked_task_id.filter(|_| entered_waiting_for_user) {
+        Some(id) => repos.get_task(id)?.map(|task| task.title),
+        None => None,
+    };
+
     Ok(HookReport {
         event_name,
         task_run_status,
         task_run_wait_reason,
+        entered_waiting_for_user,
+        task_title,
         ignored: false,
         task_found,
         task_run_linked,
