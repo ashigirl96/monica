@@ -50,7 +50,7 @@ impl EventRepository for SqliteStore {
 
 impl Clock for SqliteStore {
     /// Current UTC timestamp in the same ISO-8601 form the schema's column defaults use. Lets
-    /// non-DB artifacts (e.g. `hook-events.jsonl`) share one timestamp format without pulling in a
+    /// non-DB run outputs (e.g. `hook-events.jsonl`) share one timestamp format without pulling in a
     /// date/time crate.
     fn now_iso(&self) -> Result<String> {
         let ts: String = self

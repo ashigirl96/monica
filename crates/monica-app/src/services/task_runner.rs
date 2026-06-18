@@ -24,7 +24,7 @@ pub(crate) fn spawn_execute_run(
                 &mut rt.repositories,
                 &rt.git,
                 &rt.setup_runner,
-                &rt.run_artifacts,
+                &rt.task_run_outputs,
                 &task_id,
                 &run_id,
             ) {

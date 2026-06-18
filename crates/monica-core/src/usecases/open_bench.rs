@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 
 use crate::domain::bench_runspace_id;
 use crate::interfaces::{
-    BenchRepository, ProjectRepository, RunArtifacts, TaskRepository, TaskRunRepository,
+    BenchRepository, ProjectRepository, TaskRunOutputs, TaskRepository, TaskRunRepository,
 };
 use crate::{Project, Task, TaskBench};
 
@@ -42,15 +42,15 @@ where
 }
 
 /// Recompute the shell env for a task-connected runspace. Fails soft (empty vec) when the task
-/// has no project or artifact generation fails, so terminals still open without Monica context.
+/// has no project or output generation fails, so terminals still open without Monica context.
 pub fn task_shell_env<R, A>(
     repos: &R,
-    artifacts: &A,
+    outputs: &A,
     task_id: &str,
 ) -> Result<Vec<(String, String)>>
 where
     R: TaskRepository + ProjectRepository + TaskRunRepository + BenchRepository,
-    A: RunArtifacts,
+    A: TaskRunOutputs,
 {
     let (task, project) = load_task_and_optional_project(repos, task_id)?;
     // Where Claude actually runs: the bench tab's own cwd. Fall back to the worktree/default only
@@ -60,7 +60,7 @@ where
         .map(|(_, cwd)| cwd)
         .or_else(|| resolve_worktree_cwd(repos, &task))
         .unwrap_or_else(|| default_bench_cwd(project.as_ref(), home_dir().as_deref()));
-    Ok(shell_env_for(artifacts, &task, project.as_ref(), &cwd))
+    Ok(shell_env_for(outputs, &task, project.as_ref(), &cwd))
 }
 
 fn load_task_and_optional_project<R>(
@@ -81,17 +81,17 @@ where
 }
 
 fn shell_env_for<A>(
-    artifacts: &A,
+    outputs: &A,
     task: &Task,
     project: Option<&Project>,
     cwd: &str,
 ) -> Vec<(String, String)>
 where
-    A: RunArtifacts,
+    A: TaskRunOutputs,
 {
     project
         .and_then(|p| {
-            artifacts
+            outputs
                 .prepare_task_shell_env(&task.id, p, None, std::path::Path::new(cwd))
                 .ok()
         })
@@ -99,10 +99,10 @@ where
         .unwrap_or_default()
 }
 
-pub fn open_bench<R, A>(repos: &mut R, artifacts: &A, task_id: &str) -> Result<TaskBench>
+pub fn open_bench<R, A>(repos: &mut R, outputs: &A, task_id: &str) -> Result<TaskBench>
 where
     R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
-    A: RunArtifacts,
+    A: TaskRunOutputs,
 {
     let (task, project) = load_task_and_optional_project(repos, task_id)?;
 
@@ -112,7 +112,7 @@ where
 
     // Write hook settings into the cwd Claude will actually launch in (the bench's resolved cwd,
     // which may differ from desired_cwd when the bench already existed).
-    let env = shell_env_for(artifacts, &task, project.as_ref(), &cwd);
+    let env = shell_env_for(outputs, &task, project.as_ref(), &cwd);
 
     Ok(TaskBench {
         task_id: task_id.to_string(),

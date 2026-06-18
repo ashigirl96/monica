@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use monica_core::shell::quote_single;
-use monica_core::{Project, RunArtifacts, TaskShellEnv};
+use monica_core::{Project, TaskRunOutputs, TaskShellEnv};
 use serde_json::{json, Value};
 
 use crate::filesystem::paths;
@@ -13,9 +13,9 @@ use crate::filesystem::paths;
 const HOOK_EVENTS_FILE: &str = "hook-events.jsonl";
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct FsRunArtifacts;
+pub struct FsTaskRunOutputs;
 
-impl RunArtifacts for FsRunArtifacts {
+impl TaskRunOutputs for FsTaskRunOutputs {
     fn task_run_dir(&self, task_run_id: &str) -> Result<PathBuf> {
         paths::task_run_dir(task_run_id)
     }
@@ -428,7 +428,7 @@ mod tests {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!(
-            "monica-artifacts-test-{tag}-{}-{n}",
+            "monica-task-run-outputs-test-{tag}-{}-{n}",
             std::process::id()
         ));
         fs::create_dir_all(&dir).unwrap();

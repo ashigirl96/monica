@@ -24,8 +24,8 @@ pub use domain::{
 };
 pub use interfaces::{
     AuthGateway, BenchRepository, Clock, EventRepository, GitGateway, GithubGateway,
-    ProjectRepository, RunArtifacts, SetupEnv, SetupOutcome, SetupRunner, TaskRepository,
-    TaskShellEnv,
+    ProjectRepository, SetupEnv, SetupOutcome, SetupRunner, TaskRepository,
+    TaskRunOutputs, TaskShellEnv,
     TaskRunRepository, TaskSummaryFilter,
 };
 pub use usecases::{

@@ -6,7 +6,7 @@ use crate::domain::{
     is_session_starting_event, should_ignore_claude_event, transition_for_claude_event,
     transition_is_protected, Agent,
 };
-use crate::interfaces::{Clock, EventRepository, RunArtifacts, TaskRepository, TaskRunRepository};
+use crate::interfaces::{Clock, EventRepository, TaskRunOutputs, TaskRepository, TaskRunRepository};
 use crate::{NewTaskRun, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus};
 
 /// Identity carried by a hook invocation via `MONICA_*` env vars. `task_run_id` is only present
@@ -34,13 +34,13 @@ pub struct HookReport {
 
 pub fn record_claude_hook<R, A>(
     repos: &mut R,
-    artifacts: &A,
+    outputs: &A,
     ctx: HookContext<'_>,
     raw_stdin: &str,
 ) -> Result<HookReport>
 where
     R: TaskRepository + TaskRunRepository + EventRepository + Clock,
-    A: RunArtifacts,
+    A: TaskRunOutputs,
 {
     let parsed: Option<Value> = serde_json::from_str(raw_stdin.trim()).ok();
     let event_name = parsed
@@ -96,7 +96,7 @@ where
     let at = repos.now_iso()?;
     let mut jsonl_written = false;
     if let Some(task_run_id) = linked_task_run_id {
-        artifacts.append_hook_event(task_run_id, &at, event_name.as_deref(), &parsed, raw_stdin)?;
+        outputs.append_hook_event(task_run_id, &at, event_name.as_deref(), &parsed, raw_stdin)?;
         jsonl_written = true;
     }
 
