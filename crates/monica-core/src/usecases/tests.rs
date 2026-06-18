@@ -1892,19 +1892,11 @@ fn insert_runnable_project(repos: &FakeRepos) {
 }
 
 fn insert_issue_backed_task(repos: &mut FakeRepos, issue_number: i64) -> String {
+    let mut new = NewTask::new(TaskKind::Development, "tracked");
+    new.project_id = Some("owner/repo".to_string());
     repos
         .insert_task_with_ref(
-            NewTask {
-                kind: TaskKind::Development,
-                status: TaskStatus::Ready,
-                title: "tracked".to_string(),
-                body: String::new(),
-                phase: None,
-                project_id: Some("owner/repo".to_string()),
-                labels: Vec::new(),
-                details: json!({}),
-                source: None,
-            },
+            new,
             ExternalRef {
                 id: 0,
                 task_id: String::new(),

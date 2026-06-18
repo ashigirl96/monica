@@ -117,9 +117,7 @@ function NewTaskModal({ onClose }: { onClose: () => void }) {
               setError(null);
             }}
             placeholder="owner/repo#123 or issue URL"
-            className={cn(
-              "h-8 rounded-md border border-border bg-background px-2.5 font-mono text-[12px] text-foreground placeholder:text-muted-foreground/50 outline-none transition-opacity focus:border-muted-foreground/40 disabled:cursor-not-allowed disabled:opacity-40",
-            )}
+            className="h-8 rounded-md border border-border bg-background px-2.5 font-mono text-[12px] text-foreground placeholder:text-muted-foreground/50 outline-none transition-opacity focus:border-muted-foreground/40 disabled:cursor-not-allowed disabled:opacity-40"
           />
 
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground/40">
