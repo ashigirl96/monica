@@ -30,7 +30,7 @@ pub use interfaces::{
 };
 pub use usecases::{
     begin_github_device_flow, reconcile_terminal_sessions, DaemonSessionView, ReconcileOutcome,
-    TerminalSessionUpdate, close_issue, execute_run, get_project, github_auth_status,
+    TerminalSessionUpdate, close_issue, create_raw_task, execute_run, get_project, github_auth_status,
     list_events, list_projects, list_task_summaries, list_tasks, logout_github,
     make_main_by_terminal_tab, primary_terminal_tab, MakeMainOutcome,
     open_bench, prepare_claude_for_run, record_claude_hook, register_project, task_shell_env,

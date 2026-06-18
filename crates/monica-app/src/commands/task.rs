@@ -8,9 +8,15 @@ use tauri::AppHandle;
 use tauri_specta::Event;
 
 #[derive(Serialize, specta::Type)]
-pub struct TrackIssueResult {
+pub struct TaskCreated {
     pub task_id: String,
     pub title: String,
+}
+
+#[derive(Serialize, specta::Type)]
+pub struct ProjectOption {
+    pub id: String,
+    pub name: String,
 }
 
 #[derive(Clone, Serialize, specta::Type, Event)]
@@ -37,7 +43,7 @@ pub fn get_board_columns() -> Vec<BoardColumn> {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn track_github_issue(input: String) -> Result<TrackIssueResult, String> {
+pub async fn track_github_issue(input: String) -> Result<TaskCreated, String> {
     let (repo, number) = monica_core::parse_issue_input(&input).map_err(|e| e.to_string())?;
     let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
     let input = TrackGithubIssueInput { repo, number };
@@ -45,9 +51,35 @@ pub async fn track_github_issue(input: String) -> Result<TrackIssueResult, Strin
         monica_core::track_github_issue(&mut runtime.repositories, &runtime.github, input)
             .await
             .map_err(|e| e.to_string())?;
-    Ok(TrackIssueResult {
+    Ok(TaskCreated {
         task_id: report.task.id,
         title: report.task.title,
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn list_projects() -> Result<Vec<ProjectOption>, String> {
+    let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
+    Ok(monica_core::list_projects(&runtime.repositories)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|p| ProjectOption {
+            id: p.id,
+            name: p.name,
+        })
+        .collect())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn create_raw_task(title: String, project_id: String) -> Result<TaskCreated, String> {
+    let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
+    let task = monica_core::create_raw_task(&mut runtime.repositories, &title, &project_id)
+        .map_err(|e| e.to_string())?;
+    Ok(TaskCreated {
+        task_id: task.id,
+        title: task.title,
     })
 }
 

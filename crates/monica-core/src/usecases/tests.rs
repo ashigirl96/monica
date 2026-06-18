@@ -11,7 +11,8 @@ use crate::interfaces::{
     TaskRunRepository, TaskSummaryFilter,
 };
 use crate::{
-    begin_github_device_flow, close_issue, execute_run, github_auth_status, logout_github,
+    begin_github_device_flow, close_issue, create_raw_task, execute_run, github_auth_status,
+    logout_github,
     make_main_by_terminal_tab, open_bench, prepare_claude_for_run, primary_terminal_tab,
     record_claude_hook, register_project_with_default_branch, start_run, subagent_count_update,
     sync_next_pull_request,
@@ -700,6 +701,29 @@ async fn track_github_issue_uses_gateway_and_repositories() {
     assert_eq!(report.task.id, "MON-1");
     assert_eq!(report.task.project_id.as_deref(), Some("owner/repo"));
     assert_eq!(report.issue.number, 42);
+}
+
+#[test]
+fn create_raw_task_links_project_and_has_no_issue_ref() {
+    let mut repos = FakeRepos::default();
+    repos.insert_project(Project::from_repo("owner/repo"));
+    let task = create_raw_task(&mut repos, "  explore idea  ", "owner/repo").unwrap();
+    assert_eq!(task.title, "explore idea");
+    assert_eq!(task.project_id.as_deref(), Some("owner/repo"));
+    assert!(repos.list_external_refs(&task.id).unwrap().is_empty());
+}
+
+#[test]
+fn create_raw_task_rejects_blank_title() {
+    let mut repos = FakeRepos::default();
+    repos.insert_project(Project::from_repo("owner/repo"));
+    assert!(create_raw_task(&mut repos, "   ", "owner/repo").is_err());
+}
+
+#[test]
+fn create_raw_task_rejects_unknown_project() {
+    let mut repos = FakeRepos::default();
+    assert!(create_raw_task(&mut repos, "explore", "owner/repo").is_err());
 }
 
 #[test]
@@ -1867,6 +1891,34 @@ fn insert_runnable_project(repos: &FakeRepos) {
     repos.insert_project(project);
 }
 
+fn insert_issue_backed_task(repos: &mut FakeRepos, issue_number: i64) -> String {
+    repos
+        .insert_task_with_ref(
+            NewTask {
+                kind: TaskKind::Development,
+                status: TaskStatus::Ready,
+                title: "tracked".to_string(),
+                body: String::new(),
+                phase: None,
+                project_id: Some("owner/repo".to_string()),
+                labels: Vec::new(),
+                details: json!({}),
+                source: None,
+            },
+            ExternalRef {
+                id: 0,
+                task_id: String::new(),
+                ref_type: RefType::GithubIssue,
+                repo: Some("owner/repo".to_string()),
+                number: Some(issue_number),
+                url: None,
+                created_at: "2026-06-02T00:00:00.000Z".to_string(),
+            },
+        )
+        .unwrap()
+        .id
+}
+
 #[test]
 fn start_run_names_branch_from_mon_id_and_creates_bench() {
     let mut repos = FakeRepos::default();
@@ -1886,32 +1938,9 @@ fn start_run_names_branch_from_mon_id_and_creates_bench() {
 fn start_run_prefers_linked_issue_number_for_branch() {
     let mut repos = FakeRepos::default();
     insert_runnable_project(&repos);
-    let task = repos
-        .insert_task_with_ref(
-            NewTask {
-                kind: TaskKind::Development,
-                status: TaskStatus::Ready,
-                title: "tracked".to_string(),
-                body: String::new(),
-                phase: None,
-                project_id: Some("owner/repo".to_string()),
-                labels: Vec::new(),
-                details: json!({}),
-                source: None,
-            },
-            ExternalRef {
-                id: 0,
-                task_id: String::new(),
-                ref_type: RefType::GithubIssue,
-                repo: Some("owner/repo".to_string()),
-                number: Some(9),
-                url: None,
-                created_at: "2026-06-02T00:00:00.000Z".to_string(),
-            },
-        )
-        .unwrap();
+    let task_id = insert_issue_backed_task(&mut repos, 9);
 
-    let prep = start_run(&mut repos, &task.id).unwrap();
+    let prep = start_run(&mut repos, &task_id).unwrap();
     assert_eq!(prep.branch, "issue-9");
 }
 
@@ -2023,4 +2052,54 @@ fn prepare_claude_for_run_rejects_missing_worktree() {
         .unwrap();
     let err = prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id).unwrap_err();
     assert!(err.to_string().contains("worktree does not exist"), "{err}");
+}
+
+fn prepared_run_with_worktree(repos: &mut FakeRepos, task_id: &str, prompt_body: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    let prep = start_run(repos, task_id).unwrap();
+    repos
+        .finish_task_run(&prep.task_run_id, task_id, TaskRunStatus::Prepared)
+        .unwrap();
+
+    let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let worktree =
+        std::env::temp_dir().join(format!("monica-prep-{}-{unique}", std::process::id()));
+    std::fs::create_dir_all(worktree.join(".monica")).unwrap();
+    std::fs::write(worktree.join(".monica/prompt.md"), prompt_body).unwrap();
+    repos
+        .set_task_run_worktree_path(&prep.task_run_id, &worktree.to_string_lossy())
+        .unwrap();
+    worktree
+}
+
+#[test]
+fn prepare_claude_for_run_seeds_prompt_for_issue_backed_task() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = insert_issue_backed_task(&mut repos, 7);
+
+    let worktree = prepared_run_with_worktree(&mut repos, &task_id, "do the thing");
+    let result =
+        prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id).unwrap();
+    std::fs::remove_dir_all(&worktree).ok();
+
+    assert_eq!(result.initial_command, "claude 'do the thing'");
+}
+
+#[test]
+fn prepare_claude_for_run_ignores_prompt_for_raw_task() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = create_raw_task(&mut repos, "explore idea", "owner/repo")
+        .unwrap()
+        .id;
+
+    let worktree = prepared_run_with_worktree(&mut repos, &task_id, "leftover prompt");
+    let result =
+        prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id).unwrap();
+    std::fs::remove_dir_all(&worktree).ok();
+
+    assert_eq!(result.initial_command, "claude");
 }

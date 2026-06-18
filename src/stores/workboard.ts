@@ -4,6 +4,8 @@ import {
   listTaskSummaries,
   getBoardColumns,
   trackGithubIssue,
+  listProjects,
+  createRawTask,
   prepareTask,
   type DisplayStatus,
   type TaskSummaryRow,
@@ -60,8 +62,20 @@ export const taskStatusMapAtom = atom<Record<string, DisplayStatus>>(
   (get) => get(taskStatusMapQueryAtom).data ?? {},
 );
 
+const projectsQueryAtom = atomWithQuery(() => ({
+  queryKey: queryKeys.projects.list(),
+  queryFn: () => listProjects(),
+}));
+export const projectsAtom = atom((get) => get(projectsQueryAtom).data ?? []);
+
 export const trackIssueMutationAtom = atomWithMutation((get) => ({
   mutationFn: (input: string) => trackGithubIssue(input),
+  onSuccess: () => invalidateTaskSummaries(get(queryClientAtom)),
+}));
+
+export const createRawTaskMutationAtom = atomWithMutation((get) => ({
+  mutationFn: ({ title, projectId }: { title: string; projectId: string }) =>
+    createRawTask(title, projectId),
   onSuccess: () => invalidateTaskSummaries(get(queryClientAtom)),
 }));
 
