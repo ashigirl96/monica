@@ -1,7 +1,7 @@
 pub mod paths;
 
-mod artifacts;
+mod outputs;
 mod scaffold;
 
-pub use artifacts::FsRunArtifacts;
+pub use outputs::FsTaskRunOutputs;
 pub use scaffold::scaffold_monica;

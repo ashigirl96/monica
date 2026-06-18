@@ -63,7 +63,7 @@ pub fn list_bench_runspace_map() -> Result<Vec<(String, String)>, String> {
 #[specta::specta]
 pub fn task_shell_env(task_id: String) -> Result<Vec<(String, String)>, String> {
     let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_core::task_shell_env(&runtime.repositories, &runtime.run_artifacts, &task_id)
+    monica_core::task_shell_env(&runtime.repositories, &runtime.task_run_outputs, &task_id)
         .map_err(|e| e.to_string())
 }
 
@@ -71,7 +71,7 @@ pub fn task_shell_env(task_id: String) -> Result<Vec<(String, String)>, String> 
 #[specta::specta]
 pub fn open_bench(task_id: String) -> Result<TaskBench, String> {
     let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_core::open_bench(&mut runtime.repositories, &runtime.run_artifacts, &task_id)
+    monica_core::open_bench(&mut runtime.repositories, &runtime.task_run_outputs, &task_id)
         .map_err(|e| e.to_string())
 }
 
@@ -148,7 +148,7 @@ pub fn run_task(task_id: String) -> Result<RunTaskResult, String> {
     let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
     monica_core::prepare_claude_for_run(
         &mut runtime.repositories,
-        &runtime.run_artifacts,
+        &runtime.task_run_outputs,
         &task_id,
     )
     .map_err(|e| e.to_string())

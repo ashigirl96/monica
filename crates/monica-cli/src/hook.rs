@@ -76,7 +76,7 @@ fn handle_claude() -> Result<()> {
     let mut runtime = Runtime::open_default()?;
     let report = monica_core::record_claude_hook(
         &mut runtime.repositories,
-        &runtime.run_artifacts,
+        &runtime.task_run_outputs,
         monica_core::HookContext {
             task_id: task_id.as_deref(),
             task_run_id: task_run_id.as_deref(),

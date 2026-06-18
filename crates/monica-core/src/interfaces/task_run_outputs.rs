@@ -12,7 +12,7 @@ pub struct TaskShellEnv {
     pub wrapper_path: String,
 }
 
-pub trait RunArtifacts {
+pub trait TaskRunOutputs {
     fn task_run_dir(&self, task_run_id: &str) -> Result<PathBuf>;
     fn setup_log_path(&self, task_run_id: &str) -> Result<PathBuf>;
     fn prepare_task_shell_env(

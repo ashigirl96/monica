@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 
 use crate::domain::{branch_name, monica_number, worktree_path_for};
 use crate::interfaces::{
-    BenchRepository, GitGateway, ProjectRepository, RunArtifacts, SetupEnv, SetupOutcome,
+    BenchRepository, GitGateway, ProjectRepository, TaskRunOutputs, SetupEnv, SetupOutcome,
     SetupRunner, TaskRepository, TaskRunRepository,
 };
 use crate::{NewTaskRun, PrepareTaskResult, Project, RefType, Task, TaskRunStatus, TaskStatus};
@@ -94,7 +94,7 @@ pub fn execute_run<R, G, S, A>(
     repos: &mut R,
     git: &G,
     setup_runner: &S,
-    artifacts: &A,
+    outputs: &A,
     task_id: &str,
     task_run_id: &str,
 ) -> Result<TaskRunStatus>
@@ -102,9 +102,9 @@ where
     R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
     G: GitGateway,
     S: SetupRunner,
-    A: RunArtifacts,
+    A: TaskRunOutputs,
 {
-    execute_run_inner(repos, git, setup_runner, artifacts, task_id, task_run_id).inspect_err(
+    execute_run_inner(repos, git, setup_runner, outputs, task_id, task_run_id).inspect_err(
         |_| {
             let _ = repos.finish_task_run(task_run_id, task_id, TaskRunStatus::Failed);
         },
@@ -115,7 +115,7 @@ fn execute_run_inner<R, G, S, A>(
     repos: &mut R,
     git: &G,
     setup_runner: &S,
-    artifacts: &A,
+    outputs: &A,
     task_id: &str,
     task_run_id: &str,
 ) -> Result<TaskRunStatus>
@@ -123,7 +123,7 @@ where
     R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
     G: GitGateway,
     S: SetupRunner,
-    A: RunArtifacts,
+    A: TaskRunOutputs,
 {
     let (_, project) = load_task_and_project(repos, task_id)?;
 
@@ -154,7 +154,7 @@ where
 
     let setup = setup_phase(
         setup_runner,
-        artifacts,
+        outputs,
         task_run_id,
         task_id,
         &worktree_path,
@@ -176,7 +176,7 @@ where
 
 fn setup_phase<S, A>(
     setup_runner: &S,
-    artifacts: &A,
+    outputs: &A,
     task_run_id: &str,
     task_id: &str,
     worktree_path: &Path,
@@ -185,9 +185,9 @@ fn setup_phase<S, A>(
 ) -> Result<SetupOutcome>
 where
     S: SetupRunner,
-    A: RunArtifacts,
+    A: TaskRunOutputs,
 {
-    let log_path = artifacts.setup_log_path(task_run_id)?;
+    let log_path = outputs.setup_log_path(task_run_id)?;
     let env = SetupEnv {
         monica_id: task_id.to_string(),
         task_run_id: task_run_id.to_string(),
@@ -216,12 +216,12 @@ where
 /// the first UserPromptSubmit moves it to Running.
 pub fn prepare_claude_for_run<R, A>(
     repos: &mut R,
-    artifacts: &A,
+    outputs: &A,
     task_id: &str,
 ) -> Result<crate::RunTaskResult>
 where
     R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
-    A: RunArtifacts,
+    A: TaskRunOutputs,
 {
     let (task, project) = load_task_and_project(repos, task_id)?;
 
@@ -250,7 +250,7 @@ where
     }
 
     let shell =
-        artifacts.prepare_task_shell_env(task_id, &project, Some(&primary_id), &worktree_path)?;
+        outputs.prepare_task_shell_env(task_id, &project, Some(&primary_id), &worktree_path)?;
     repos.set_task_run_settings_path(&primary_id, &shell.settings_path)?;
 
     let (runspace_id, _, _) = super::open_bench::ensure_bench(repos, task_id, &worktree_str, true)?;

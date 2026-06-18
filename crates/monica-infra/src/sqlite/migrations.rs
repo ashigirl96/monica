@@ -109,7 +109,7 @@ const V2: &str = r#"
 "#;
 
 /// v3: run-id counter. Mirrors `mon_counter` so each run gets a monotonic `run-<n>` id that is
-/// never reused, keeping the `runs/<task_run_id>/` artifact directories collision-free.
+/// never reused, keeping the `runs/<task_run_id>/` run output directories collision-free.
 const V3: &str = r#"
     CREATE TABLE run_counter (n INTEGER PRIMARY KEY AUTOINCREMENT);
 "#;
