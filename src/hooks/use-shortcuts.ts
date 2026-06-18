@@ -15,6 +15,7 @@ import {
 } from "@/features/work-bench/store";
 import { forceSyncPullRequestsAtom } from "@/stores/pr-sync";
 import { newTaskOpenAtom } from "@/stores/workboard";
+import { setUiZoomAtom } from "@/stores/zoom";
 import { isEditable } from "@/lib/keyboard";
 
 const META_KEY_SPACE_MAP: Record<string, SpaceId> = {
@@ -45,6 +46,7 @@ export function useShortcuts() {
   const jumpToHint = useSetAtom(jumpToHintAtom);
   const toggleLastRunspace = useSetAtom(toggleLastRunspaceAtom);
   const setNewTaskOpen = useSetAtom(newTaskOpenAtom);
+  const setUiZoom = useSetAtom(setUiZoomAtom);
 
   const timeoutRef = useRef<number>(0);
 
@@ -101,7 +103,13 @@ export function useShortcuts() {
         return;
       }
 
-      if (e.metaKey && e.key === "0") {
+      if (e.metaKey && e.ctrlKey && e.key === "0") {
+        e.preventDefault();
+        setUiZoom("reset");
+        return;
+      }
+
+      if (e.metaKey && !e.ctrlKey && e.key === "0") {
         e.preventDefault();
         setSidebarOpen((v) => !v);
         return;
@@ -182,6 +190,20 @@ export function useShortcuts() {
 
       if (editable && !e.altKey) return;
 
+      // Below the editable guard: when the terminal (or any input) is focused the guard
+      // returns first, so the terminal keeps its own px font zoom and global zoom is suppressed.
+      if (e.metaKey && (e.key === "=" || e.key === "+")) {
+        e.preventDefault();
+        setUiZoom("in");
+        return;
+      }
+
+      if (e.metaKey && e.key === "-") {
+        e.preventDefault();
+        setUiZoom("out");
+        return;
+      }
+
       if (e.ctrlKey && e.key === "d") {
         if (isWorkBench) return;
         e.preventDefault();
@@ -234,5 +256,6 @@ export function useShortcuts() {
     jumpToHint,
     toggleLastRunspace,
     setNewTaskOpen,
+    setUiZoom,
   ]);
 }

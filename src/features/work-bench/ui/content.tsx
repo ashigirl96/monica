@@ -17,6 +17,7 @@ import {
   type SessionStatusEntry,
   type TerminalLaunchIntent,
 } from "@/features/work-bench/store";
+import { uiZoomAtom } from "@/stores/zoom";
 import { clipboardWriteImage } from "@/commands/clipboard";
 import { terminalWrite } from "@/commands/terminal";
 import { useTerminal } from "./use-terminal";
@@ -235,11 +236,15 @@ export default function WorkBenchContent() {
   }, []);
 
   const consumeLaunch = useSetAtom(consumeTerminalLaunchAtom);
+  const uiZoom = useAtomValue(uiZoomAtom);
 
   if (!ready || !state) return null;
 
+  // Cancel the content region's CSS zoom so the terminal renders at net 1.0 and keeps its
+  // own px font control. The Content slot holds only terminals; the bench's tab bar and
+  // runspace list live in the chrome (space.header / space.sidebar), which is never zoomed.
   return (
-    <div className="relative h-full">
+    <div className="relative h-full" style={{ zoom: 1 / uiZoom }}>
       {state.runspaces.flatMap((rs) =>
         rs.tabs.map((tab) => (
           <TerminalPane
