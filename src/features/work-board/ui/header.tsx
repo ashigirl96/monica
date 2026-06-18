@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useAtomValue } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import {
   createRawTaskMutationAtom,
+  newTaskOpenAtom,
   projectsAtom,
   trackIssueMutationAtom,
 } from "@/stores/workboard";
@@ -110,7 +111,7 @@ function NewTaskPopover({ anchor, onClose }: { anchor: PopoverAnchor; onClose: (
                 setProjectId(e.target.value);
                 setError(null);
               }}
-              className="h-7 rounded-md border border-border bg-background px-2 text-[12px] text-foreground outline-none focus:border-muted-foreground/40"
+              className="h-8 rounded-md border border-border bg-background px-2 text-[12px] text-foreground outline-none focus:border-muted-foreground/40"
             >
               {projects.length === 0 && <option value="">No projects</option>}
               {projects.map((p) => (
@@ -152,8 +153,10 @@ function NewTaskPopover({ anchor, onClose }: { anchor: PopoverAnchor; onClose: (
 
         {error && <p className="text-[10px] text-red-400">{error}</p>}
 
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] text-muted-foreground/50">⏎ create · esc close</span>
+        <div className="flex items-center justify-between border-t border-border/60 pt-2.5">
+          <span className="text-[10px] text-muted-foreground/50">
+            ⇥ switch · ⏎ create · esc close
+          </span>
           <button
             type="button"
             onClick={handleSubmit}
@@ -169,16 +172,25 @@ function NewTaskPopover({ anchor, onClose }: { anchor: PopoverAnchor; onClose: (
 }
 
 function NewTaskButton() {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useAtom(newTaskOpenAtom);
   const [anchor, setAnchor] = useState<PopoverAnchor | null>(null);
+
+  useEffect(() => {
+    if (open && buttonRef.current) {
+      const r = buttonRef.current.getBoundingClientRect();
+      setAnchor({ top: r.top, bottom: r.bottom, left: r.left });
+    } else {
+      setAnchor(null);
+    }
+  }, [open]);
 
   return (
     <>
       <button
+        ref={buttonRef}
         type="button"
-        onClick={(e) => {
-          const r = e.currentTarget.getBoundingClientRect();
-          setAnchor({ top: r.top, bottom: r.bottom, left: r.left });
-        }}
+        onClick={() => setOpen(true)}
         className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
         <svg
@@ -195,7 +207,7 @@ function NewTaskButton() {
         </svg>
         New Task
       </button>
-      {anchor && <NewTaskPopover anchor={anchor} onClose={() => setAnchor(null)} />}
+      {open && anchor && <NewTaskPopover anchor={anchor} onClose={() => setOpen(false)} />}
     </>
   );
 }

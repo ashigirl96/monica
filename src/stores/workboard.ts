@@ -13,6 +13,8 @@ import {
 import { invalidateTaskSummaries, queryKeys } from "@/stores/query-keys";
 import { pushErrorToast } from "@/stores/toast";
 
+export const newTaskOpenAtom = atom(false);
+
 const boardColumnsQueryOptions = {
   queryKey: queryKeys.board.columns(),
   queryFn: () => getBoardColumns(),
