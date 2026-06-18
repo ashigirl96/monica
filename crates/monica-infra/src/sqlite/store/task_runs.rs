@@ -3,9 +3,9 @@ use rusqlite::params;
 
 use crate::sqlite::SqliteStore;
 use monica_core::{
-    is_session_starting_event, subagent_count_update, transition_is_generic_wait, HookTransition,
-    NewTaskRun, SubagentCountUpdate, TaskRun, TaskRunObservation, TaskRunRepository, TaskRunStatus,
-    TaskRunWaitReason, TaskStatus,
+    is_session_starting_event, payload_has_running_subagents, subagent_count_update,
+    transition_is_generic_wait, HookTransition, NewTaskRun, SubagentCountUpdate, TaskRun,
+    TaskRunObservation, TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus,
 };
 
 use super::{sql_literal_list, SET_NOW, TASK_RUN_COLUMNS};
@@ -147,6 +147,9 @@ impl TaskRunRepository for SqliteStore {
         // not demote the run; `SessionStart` carries the same wait but is new life and is exempt.
         let subagent_guard =
             generic_wait && !is_session_starting_event(observation.event_name);
+        // The parent's own `background_tasks` backstops a corrupted `active_subagents` counter:
+        // a `Stop` arriving while a subagent is still in flight is held even when the count is 0.
+        let event_has_running_subagents = payload_has_running_subagents(observation.metadata);
         let subagent_update = observation
             .event_name
             .and_then(|event| subagent_count_update(event, observation.metadata));
@@ -168,7 +171,7 @@ impl TaskRunRepository for SqliteStore {
                      AND (status = '{}'
                           OR (status = '{}'
                               AND wait_reason IN ({tool_waits}))))
-             OR (?12 AND active_subagents > 0)",
+             OR (?12 AND (active_subagents > 0 OR ?16))",
             TaskRunStatus::Stopped.as_str(),
             TaskRunStatus::WaitingForUser.as_str(),
         );
@@ -212,7 +215,8 @@ impl TaskRunRepository for SqliteStore {
                 subagent_guard,
                 subagent_reset,
                 subagent_inc,
-                subagent_dec
+                subagent_dec,
+                event_has_running_subagents
             ],
         )?;
         if affected == 0 {

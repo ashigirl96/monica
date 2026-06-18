@@ -344,6 +344,31 @@ fn task_run_observation_sql_guards_protected_transitions() {
     );
 }
 
+fn record_observation(
+    db: &mut SqliteStore,
+    run_id: &str,
+    event: &str,
+    status: Option<TaskRunStatus>,
+    metadata: Option<&serde_json::Value>,
+) {
+    db.record_task_run_observation(
+        run_id,
+        TaskRunObservation {
+            status,
+            wait_reason: status.map(|s| match s {
+                TaskRunStatus::WaitingForUser => Some(TaskRunWaitReason::AwaitingPrompt),
+                _ => None,
+            }),
+            event_name: Some(event),
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: Some("sess-1"),
+            terminal_tab_id: None,
+            metadata,
+        },
+    )
+    .unwrap();
+}
+
 /// A `Stop` fires at the end of the parent's turn even while a subagent (Task tool) is still
 /// running. The store's `active_subagents` counter must hold the run `Running` across that Stop
 /// and only release it once the subagent ends — exercising the SQL guard directly, since hooks
@@ -363,22 +388,7 @@ fn task_run_observation_holds_stop_while_subagent_runs() {
 
     let observe = |db: &mut SqliteStore, event: &str, status: Option<TaskRunStatus>, source: Option<&str>| {
         let metadata = source.map(|s| serde_json::json!({ "source": s }));
-        db.record_task_run_observation(
-            &run.id,
-            TaskRunObservation {
-                status,
-                wait_reason: status.map(|s| match s {
-                    TaskRunStatus::WaitingForUser => Some(TaskRunWaitReason::AwaitingPrompt),
-                    _ => None,
-                }),
-                event_name: Some(event),
-                at: "2026-06-02T00:00:00.000Z",
-                provider_session_id: Some("sess-1"),
-                terminal_tab_id: None,
-                metadata: metadata.as_ref(),
-            },
-        )
-        .unwrap();
+        record_observation(db, &run.id, event, status, metadata.as_ref());
     };
     let count = |db: &SqliteStore| db.get_task_run(&run.id).unwrap().unwrap().active_subagents;
 
@@ -402,6 +412,65 @@ fn task_run_observation_holds_stop_while_subagent_runs() {
     let final_stop = db.get_task_run(&run.id).unwrap().unwrap();
     assert_eq!(final_stop.status, TaskRunStatus::WaitingForUser);
     assert_eq!(final_stop.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
+}
+
+/// MON-73 regression: a `<task-notification>` `UserPromptSubmit` (Claude re-injecting a finished
+/// background subagent's result) used to reset `active_subagents` to 0 mid-turn, letting the
+/// trailing `Stop` drop the run to "your turn" while siblings still ran. The fix keeps the count
+/// across that re-injection *and* reads the `Stop`'s own `background_tasks` as a backstop, so even
+/// a count of 0 cannot demote a run the parent still reports as having a subagent in flight.
+#[test]
+fn task_run_observation_holds_stop_when_background_tasks_running() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("bg tasks")).unwrap();
+    let run = db
+        .start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
+
+    let observe = |db: &mut SqliteStore, event: &str, status: Option<TaskRunStatus>, metadata: Option<serde_json::Value>| {
+        record_observation(db, &run.id, event, status, metadata.as_ref());
+    };
+    let count = |db: &SqliteStore| db.get_task_run(&run.id).unwrap().unwrap().active_subagents;
+
+    observe(&mut db, "UserPromptSubmit", Some(TaskRunStatus::Running), None);
+
+    // The `<task-notification>` re-injection arrives mid-turn and must NOT zero the count, even
+    // though it is a UserPromptSubmit.
+    observe(
+        &mut db,
+        "UserPromptSubmit",
+        Some(TaskRunStatus::Running),
+        Some(serde_json::json!({"prompt": "<task-notification>\n<task-id>abc</task-id>"})),
+    );
+    assert_eq!(count(&db), 0);
+
+    // A Stop whose payload still lists a running subagent is held even though the count is 0.
+    observe(
+        &mut db,
+        "Stop",
+        Some(TaskRunStatus::WaitingForUser),
+        Some(serde_json::json!({"background_tasks": [{"id": "a", "status": "running"}]})),
+    );
+    let after_held = db.get_task_run(&run.id).unwrap().unwrap();
+    assert_eq!(after_held.status, TaskRunStatus::Running);
+    assert_eq!(after_held.wait_reason, None);
+
+    // The control: a normal turn end (no running background tasks, count 0) still demotes — the
+    // guard does not pin the run open forever.
+    observe(
+        &mut db,
+        "Stop",
+        Some(TaskRunStatus::WaitingForUser),
+        Some(serde_json::json!({"background_tasks": []})),
+    );
+    let after_final = db.get_task_run(&run.id).unwrap().unwrap();
+    assert_eq!(after_final.status, TaskRunStatus::WaitingForUser);
+    assert_eq!(after_final.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
 }
 
 /// The counter resets only on true turn boundaries. A `UserPromptSubmit` (and a fresh

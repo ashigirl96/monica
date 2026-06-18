@@ -85,10 +85,12 @@ pub enum SubagentCountUpdate {
 /// The counter mutation a hook event implies, or `None` when it leaves the count untouched.
 ///
 /// A turn boundary (`UserPromptSubmit`, or a fresh `SessionStart`) resets to zero so a subagent
-/// that died without a `SubagentStop` cannot strand the count above zero forever. A *continuation*
-/// `SessionStart` (`resume`/`compact`) is excluded: auto-compact fires mid-turn under the same
-/// session while a subagent is still running, and zeroing the count there would let the trailing
-/// `Stop` flicker the run back to "your turn".
+/// that died without a `SubagentStop` cannot strand the count above zero forever. Two look-alike
+/// boundaries fire *mid-turn* while a subagent is still running and so are excluded — zeroing the
+/// count there would let the trailing `Stop` flicker the run back to "your turn":
+/// - a *continuation* `SessionStart` (`resume`/`compact`): auto-compact under the same session;
+/// - a `<task-notification>` `UserPromptSubmit`: Claude re-injects each completed background
+///   subagent's result as a `UserPromptSubmit`, but sibling subagents are still in flight.
 pub fn subagent_count_update(
     event_name: &str,
     payload: Option<&Value>,
@@ -96,12 +98,39 @@ pub fn subagent_count_update(
     match event_name {
         "SubagentStart" => Some(SubagentCountUpdate::Increment),
         "SubagentStop" => Some(SubagentCountUpdate::Decrement),
+        "UserPromptSubmit" if is_task_notification_prompt(payload) => None,
         "UserPromptSubmit" => Some(SubagentCountUpdate::Reset),
         "SessionStart" if !is_continuation_session_start(Some("SessionStart"), payload) => {
             Some(SubagentCountUpdate::Reset)
         }
         _ => None,
     }
+}
+
+/// Claude re-injects a completed background subagent's result into the parent as a
+/// `UserPromptSubmit` whose prompt starts with `<task-notification>`. It looks like a turn
+/// boundary but fires while sibling subagents are still running, so — like a continuation
+/// `SessionStart` (see [`is_continuation_session_start`]) — it must not reset the subagent count.
+pub fn is_task_notification_prompt(payload: Option<&Value>) -> bool {
+    payload
+        .and_then(|value| value.get("prompt"))
+        .and_then(Value::as_str)
+        .is_some_and(|prompt| prompt.trim_start().starts_with("<task-notification>"))
+}
+
+/// Whether a `Stop` payload reports background subagents still running. `background_tasks` is the
+/// parent's own authoritative list (it carries only the still-running ones), so reading it backs
+/// up the derived `active_subagents` counter: even if the counter is wrong, a `Stop` that arrives
+/// while the parent says a subagent is in flight must not demote the run.
+pub fn payload_has_running_subagents(payload: Option<&Value>) -> bool {
+    payload
+        .and_then(|value| value.get("background_tasks"))
+        .and_then(Value::as_array)
+        .is_some_and(|tasks| {
+            tasks.iter().any(|task| {
+                task.get("status").and_then(Value::as_str) == Some("running")
+            })
+        })
 }
 
 /// Protections against late or out-of-order hooks. This snapshot check is advisory (hooks run in
@@ -125,7 +154,7 @@ pub fn transition_is_protected(
     current_wait_reason: Option<TaskRunWaitReason>,
     known_session_id: Option<&str>,
     event_session_id: Option<&str>,
-    active_subagents: i64,
+    subagent_in_flight: bool,
     event_name: Option<&str>,
     next: HookTransition,
 ) -> bool {
@@ -139,9 +168,11 @@ pub fn transition_is_protected(
         return false;
     }
     // A `Stop` fires at the end of the parent's turn even while a subagent is still working; it
-    // must not demote the run to "your turn". `SessionStart` carries the same generic wait but is
-    // new life (and resets the counter), so it is exempt — only `Stop` reaches this guard.
-    if active_subagents > 0 && !is_session_starting_event(event_name) {
+    // must not demote the run to "your turn". `subagent_in_flight` folds the `active_subagents`
+    // counter together with the `Stop`'s own `background_tasks` (an authoritative backstop for a
+    // counter zeroed mid-turn). `SessionStart` carries the same generic wait but is new life (and
+    // resets the counter), so it is exempt.
+    if subagent_in_flight && !is_session_starting_event(event_name) {
         return true;
     }
     let from_new_session = match (known_session_id, event_session_id) {
@@ -323,7 +354,7 @@ mod tests {
                 None,
                 Some("sess-1"),
                 event_session,
-                0,
+                false,
                 Some("Stop"),
                 generic_wait
             ));
@@ -335,7 +366,7 @@ mod tests {
             None,
             Some("sess-1"),
             Some("sess-2"),
-            0,
+            false,
             Some("SessionStart"),
             generic_wait
         ));
@@ -344,7 +375,7 @@ mod tests {
             None,
             Some("sess-1"),
             Some("sess-1"),
-            0,
+            false,
             Some("UserPromptSubmit"),
             to_running
         ));
@@ -359,7 +390,7 @@ mod tests {
                 Some(reason),
                 same.0,
                 same.1,
-                0,
+                false,
                 Some("Stop"),
                 generic_wait
             ));
@@ -370,7 +401,7 @@ mod tests {
             Some(TaskRunWaitReason::AskUserQuestion),
             Some("sess-1"),
             Some("sess-2"),
-            0,
+            false,
             Some("SessionStart"),
             generic_wait
         ));
@@ -381,7 +412,7 @@ mod tests {
             Some(TaskRunWaitReason::AwaitingPrompt),
             same.0,
             same.1,
-            0,
+            false,
             Some("PreToolUse"),
             to_question
         ));
@@ -390,7 +421,7 @@ mod tests {
             Some(TaskRunWaitReason::AwaitingPrompt),
             same.0,
             same.1,
-            0,
+            false,
             Some("SessionEnd"),
             to_stopped
         ));
@@ -399,7 +430,7 @@ mod tests {
             Some(TaskRunWaitReason::AskUserQuestion),
             same.0,
             same.1,
-            0,
+            false,
             Some("SessionEnd"),
             to_stopped
         ));
@@ -410,30 +441,31 @@ mod tests {
             None,
             same.0,
             same.1,
-            0,
+            false,
             Some("Stop"),
             generic_wait
         ));
 
-        // ...but while a subagent is in flight, that same `Stop` is held: the run stays Running
-        // instead of flickering to "your turn".
+        // ...but while a subagent is in flight (whether the counter or the `Stop`'s own
+        // `background_tasks` reports it), that same `Stop` is held: the run stays Running instead
+        // of flickering to "your turn".
         assert!(transition_is_protected(
             TaskRunStatus::Running,
             None,
             same.0,
             same.1,
-            1,
+            true,
             Some("Stop"),
             generic_wait
         ));
-        // A SessionStart carries the same generic wait but is new life, so the subagent count
+        // A SessionStart carries the same generic wait but is new life, so an in-flight subagent
         // never holds it back.
         assert!(!transition_is_protected(
             TaskRunStatus::Running,
             None,
             same.0,
             same.1,
-            1,
+            true,
             Some("SessionStart"),
             generic_wait
         ));
@@ -444,7 +476,7 @@ mod tests {
             None,
             None,
             Some("sess-1"),
-            0,
+            false,
             Some("SessionStart"),
             generic_wait
         ));
@@ -457,7 +489,7 @@ mod tests {
                 None,
                 Some("sess-2"),
                 Some("sess-1"),
-                0,
+                false,
                 Some("SessionEnd"),
                 to_stopped
             ));
@@ -474,7 +506,7 @@ mod tests {
                 None,
                 known,
                 event,
-                0,
+                false,
                 Some("SessionEnd"),
                 to_stopped
             ));
@@ -495,6 +527,22 @@ mod tests {
             subagent_count_update("UserPromptSubmit", None),
             Some(SubagentCountUpdate::Reset)
         );
+        // A real prompt is a turn boundary and resets; a `<task-notification>` re-injection fires
+        // mid-turn while sibling subagents run, so it must leave the count alone.
+        assert_eq!(
+            subagent_count_update(
+                "UserPromptSubmit",
+                Some(&json!({"prompt": "do the thing"}))
+            ),
+            Some(SubagentCountUpdate::Reset)
+        );
+        assert_eq!(
+            subagent_count_update(
+                "UserPromptSubmit",
+                Some(&json!({"prompt": "<task-notification>\n<task-id>abc</task-id>"}))
+            ),
+            None
+        );
         // A fresh session start (or a source-less one) resets; a mid-turn continuation must not.
         assert_eq!(
             subagent_count_update("SessionStart", Some(&json!({"source": "startup"}))),
@@ -510,6 +558,40 @@ mod tests {
         }
         assert_eq!(subagent_count_update("Stop", None), None);
         assert_eq!(subagent_count_update("Notification", None), None);
+    }
+
+    #[test]
+    fn task_notification_prompt_detected_by_prefix() {
+        assert!(is_task_notification_prompt(Some(&json!({
+            "prompt": "<task-notification>\n<task-id>abc</task-id>"
+        }))));
+        // Leading whitespace before the marker is still a re-injection.
+        assert!(is_task_notification_prompt(Some(&json!({
+            "prompt": "\n  <task-notification>"
+        }))));
+        assert!(!is_task_notification_prompt(Some(&json!({
+            "prompt": "please <task-notification> later"
+        }))));
+        assert!(!is_task_notification_prompt(Some(&json!({"prompt": "do the thing"}))));
+        assert!(!is_task_notification_prompt(Some(&json!({"other": "x"}))));
+        assert!(!is_task_notification_prompt(None));
+    }
+
+    #[test]
+    fn running_subagents_read_from_background_tasks() {
+        assert!(payload_has_running_subagents(Some(&json!({
+            "background_tasks": [
+                {"id": "a", "status": "completed"},
+                {"id": "b", "status": "running"}
+            ]
+        }))));
+        assert!(!payload_has_running_subagents(Some(&json!({
+            "background_tasks": [{"id": "a", "status": "completed"}]
+        }))));
+        assert!(!payload_has_running_subagents(Some(&json!({"background_tasks": []}))));
+        assert!(!payload_has_running_subagents(Some(&json!({"background_tasks": "nope"}))));
+        assert!(!payload_has_running_subagents(Some(&json!({"other": "x"}))));
+        assert!(!payload_has_running_subagents(None));
     }
 
     #[test]

@@ -1248,6 +1248,77 @@ fn record_claude_hook_stop_during_subagent_keeps_run_running() {
     assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
 }
 
+/// The subagent guard has two independent halves, both wired through this usecase: a
+/// `<task-notification>` `UserPromptSubmit` must not reset the counter (it fires mid-turn), and a
+/// `Stop` is held while the parent's own `background_tasks` reports a running subagent even after
+/// the counter has drained to zero. This covers the advisory `payload_has_running_subagents`
+/// backstop in `record_claude_hook`, which the SQL-layer test alone cannot reach.
+#[test]
+fn record_claude_hook_stop_held_by_background_tasks_after_task_notification() {
+    let mut repos = FakeRepos::default();
+    let outputs = FakeTaskRunOutputs::default();
+    let (task_id, run_id) = task_with_running_primary(&mut repos, &outputs);
+
+    record_claude_hook(
+        &mut repos,
+        &outputs,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"SubagentStart","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    // A `<task-notification>` re-injection looks like a turn boundary but must leave the count
+    // alone, or the trailing Stop would slip through the guard.
+    record_claude_hook(
+        &mut repos,
+        &outputs,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"UserPromptSubmit","session_id":"sess-1","prompt":"<task-notification>\n<task-id>x</task-id>"}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        repos.get_task_run(&run_id).unwrap().unwrap().active_subagents,
+        1
+    );
+
+    // Drain the counter to zero (a stale SubagentStop) while the parent still reports a running
+    // subagent: the Stop is held by `background_tasks`, not the counter.
+    record_claude_hook(
+        &mut repos,
+        &outputs,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"SubagentStop","session_id":"sess-1"}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        repos.get_task_run(&run_id).unwrap().unwrap().active_subagents,
+        0
+    );
+    let report = record_claude_hook(
+        &mut repos,
+        &outputs,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"Stop","session_id":"sess-1","background_tasks":[{"id":"a","status":"running"}]}"#,
+    )
+    .unwrap();
+    assert_eq!(report.task_run_status, None);
+    assert_eq!(
+        repos.get_task_run(&run_id).unwrap().unwrap().status,
+        TaskRunStatus::Running
+    );
+
+    // Once `background_tasks` is empty and the counter is zero, the Stop settles the turn.
+    record_claude_hook(
+        &mut repos,
+        &outputs,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"Stop","session_id":"sess-1","background_tasks":[]}"#,
+    )
+    .unwrap();
+    let run = repos.get_task_run(&run_id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::WaitingForUser);
+    assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
+}
+
 #[test]
 fn record_claude_hook_late_stop_does_not_resurrect_stopped_run() {
     let mut repos = FakeRepos::default();
