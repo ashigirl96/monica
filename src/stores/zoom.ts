@@ -1,4 +1,5 @@
 import { atom } from "jotai";
+import { clamp } from "@/lib/clamp";
 
 export const UI_ZOOM_MIN = 0.8;
 export const UI_ZOOM_MAX = 1.6;
@@ -7,7 +8,7 @@ export const UI_ZOOM_STEP = 0.1;
 
 export function clampUiZoom(v: unknown): number {
   if (typeof v !== "number" || !Number.isFinite(v)) return UI_ZOOM_DEFAULT;
-  return Math.min(UI_ZOOM_MAX, Math.max(UI_ZOOM_MIN, v));
+  return clamp(v, UI_ZOOM_MIN, UI_ZOOM_MAX);
 }
 
 // メインコンテンツ領域だけに CSS zoom として適用する係数。chrome (sidebar/header/space-nav)

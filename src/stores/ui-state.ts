@@ -9,6 +9,7 @@ import {
   sidebarOpenAtom,
   sidebarWidthAtom,
 } from "@/stores/space";
+import { clamp } from "@/lib/clamp";
 import { UI_ZOOM_DEFAULT, clampUiZoom, uiZoomAtom } from "@/stores/zoom";
 
 export const UI_STATE_FILE = "ui-state.json";
@@ -57,7 +58,7 @@ function asObject(v: unknown): Record<string, unknown> {
 
 function clampWidth(v: unknown): number {
   if (typeof v !== "number" || !Number.isFinite(v)) return SIDEBAR_DEFAULT_WIDTH;
-  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, v));
+  return clamp(v, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
 }
 
 export function parseUiState(raw: unknown): PersistedUiState {
