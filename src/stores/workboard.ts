@@ -7,7 +7,6 @@ import {
   listProjects,
   createRawTask,
   prepareTask,
-  type DisplayStatus,
   type TaskSummaryRow,
 } from "@/commands/task";
 import { invalidateTaskSummaries, queryKeys } from "@/stores/query-keys";
@@ -52,16 +51,33 @@ export const columnTasksAtom = atom((get) => {
   }));
 });
 
-// Reuses the summary query so it shares the board's cache entry. The projection lives in
-// `select` so structural sharing keeps a stable identity when no status changed and the
-// sidebar doesn't re-render on every poll.
-const taskStatusMapQueryAtom = atomWithQuery(() => ({
+// Reuses the summary query so it shares the board's cache entry. The sidebar only renders
+// these few fields, so `select` projects down to them: structural sharing then keeps a stable
+// identity unless a displayed field changes, sparing the sidebar a re-render when unrelated
+// row fields (side runs, PRs, branch) churn during a poll.
+export type RunspaceTaskSummary = Pick<
+  TaskSummaryRow,
+  "title" | "project" | "github_issue_number" | "status" | "task_run_wait_reason"
+>;
+
+const taskSummaryByIdQueryAtom = atomWithQuery(() => ({
   ...taskSummariesQueryOptions,
   select: (rows: TaskSummaryRow[]) =>
-    Object.fromEntries(rows.map((s) => [s.id, s.status])) as Record<string, DisplayStatus>,
+    Object.fromEntries(
+      rows.map((s) => [
+        s.id,
+        {
+          title: s.title,
+          project: s.project,
+          github_issue_number: s.github_issue_number,
+          status: s.status,
+          task_run_wait_reason: s.task_run_wait_reason,
+        },
+      ]),
+    ) as Record<string, RunspaceTaskSummary>,
 }));
-export const taskStatusMapAtom = atom<Record<string, DisplayStatus>>(
-  (get) => get(taskStatusMapQueryAtom).data ?? {},
+export const taskSummaryByIdAtom = atom<Record<string, RunspaceTaskSummary>>(
+  (get) => get(taskSummaryByIdQueryAtom).data ?? {},
 );
 
 const projectsQueryAtom = atomWithQuery(() => ({

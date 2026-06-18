@@ -12,13 +12,13 @@ import {
 } from "@/features/work-bench/store";
 import { JumpHint } from "./jump-hint";
 import { terminalTerminate, type TerminalSession } from "@/commands/terminal";
-import type { DisplayStatus } from "@/commands/task";
-import { taskStatusMapAtom } from "@/stores/workboard";
+import { taskSummaryByIdAtom, type RunspaceTaskSummary } from "@/stores/workboard";
 import { activeSpaceAtom } from "@/stores/space";
 import { useDragReorder } from "@/hooks/use-drag-reorder";
 import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import { shortPath } from "@/lib/paths";
-import { TASK_STATUS_DOT } from "@/lib/status-config";
+import { statusDisplayLabel, statusDotClass } from "@/lib/status-config";
+import { IssueIcon } from "@/features/work-board/ui/github-icons";
 import { cn } from "@/lib/utils";
 
 function DetachedSessionItem({
@@ -58,19 +58,22 @@ function DetachedSessionItem({
 
 function RunspaceItem({
   ws,
+  task,
   onActivate,
   dragHandlers,
   isDragOver,
-  status,
   hint,
 }: {
   ws: RunspaceSummary;
+  task?: RunspaceTaskSummary;
   onActivate: () => void;
   dragHandlers: React.HTMLAttributes<HTMLButtonElement> & { draggable: boolean };
   isDragOver: boolean;
-  status?: DisplayStatus;
   hint?: string;
 }) {
+  const title = task?.title || ws.title || "Terminal";
+  const dot = task ? statusDotClass(task.status, task.task_run_wait_reason) : undefined;
+
   return (
     <button
       {...dragHandlers}
@@ -79,7 +82,7 @@ function RunspaceItem({
         onActivate();
       }}
       className={cn(
-        "flex w-full cursor-pointer flex-col rounded-lg px-2.5 py-1.5 text-left",
+        "flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left",
         "transition-colors duration-100",
         "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/30",
         ws.isActive
@@ -88,23 +91,50 @@ function RunspaceItem({
         isDragOver && "ring-1 ring-white/20",
       )}
     >
-      <div className="flex items-center gap-1.5">
-        {hint && <JumpHint hint={hint} ctrl />}
-        {ws.taskId && (
-          <span className="shrink-0 rounded bg-emerald-500/15 px-1 py-px font-mono text-[9px] text-emerald-400">
-            {ws.taskId}
-          </span>
-        )}
-        <span className="flex-1 truncate text-xs font-medium">{ws.title || "Terminal"}</span>
-        {status && TASK_STATUS_DOT[status] && (
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex items-start gap-1.5">
+          {hint && <JumpHint hint={hint} ctrl />}
           <span
-            title={status.replace(/_/g, " ")}
-            className={cn("size-1.5 shrink-0 rounded-full", TASK_STATUS_DOT[status])}
-          />
+            className={cn(
+              "flex-1 text-xs font-medium leading-snug",
+              task ? "line-clamp-2" : "truncate",
+            )}
+          >
+            {title}
+          </span>
+        </div>
+
+        {task ? (
+          <div className="flex items-center gap-1.5">
+            {ws.taskId && (
+              <span className="shrink-0 rounded bg-emerald-500/15 px-1 py-px font-mono text-[9px] text-emerald-400">
+                {ws.taskId}
+              </span>
+            )}
+            {task.github_issue_number !== null && (
+              <span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-sky-500/15 px-1 py-px text-[9px] text-sky-300">
+                <IssueIcon className="size-2.5" />
+                {task.github_issue_number}
+              </span>
+            )}
+            {task.project && (
+              <span className="min-w-0 truncate text-[10px] text-muted-foreground">
+                {task.project}
+              </span>
+            )}
+          </div>
+        ) : (
+          ws.description && (
+            <span className="truncate text-[10px] text-muted-foreground">{ws.description}</span>
+          )
         )}
       </div>
-      {ws.description && (
-        <span className="truncate text-[10px] text-muted-foreground">{ws.description}</span>
+
+      {dot && (
+        <span
+          title={task ? statusDisplayLabel(task.status, task.task_run_wait_reason) : undefined}
+          className={cn("size-1.5 shrink-0 rounded-full", dot)}
+        />
       )}
     </button>
   );
@@ -123,7 +153,7 @@ function GroupHeader({ label }: { label: string }) {
 export function WorkBenchSidebar() {
   const summaries = useAtomValue(runspaceSummariesAtom);
   const detachedSessions = useAtomValue(detachedSessionsAtom);
-  const taskStatusMap = useAtomValue(taskStatusMapAtom);
+  const taskSummaryById = useAtomValue(taskSummaryByIdAtom);
   const activate = useSetAtom(activateRunspaceAtom);
   const reattach = useSetAtom(reattachSessionAtom);
   const refreshSessions = useSetAtom(refreshSessionsAtom);
@@ -157,7 +187,7 @@ export function WorkBenchSidebar() {
                   onActivate={() => activate(ws.id)}
                   dragHandlers={handlersFor(ws.id)}
                   isDragOver={dragOverId === ws.id}
-                  status={ws.taskId ? taskStatusMap[ws.taskId] : undefined}
+                  task={ws.taskId ? taskSummaryById[ws.taskId] : undefined}
                   hint={jumpHints.byRunspaceId[ws.id]}
                 />
               ))}

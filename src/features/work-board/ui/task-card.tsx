@@ -1,49 +1,19 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useAtomValue, useSetAtom } from "jotai";
-import type { TaskRunWaitReason, TaskSummaryRow } from "@/commands/task";
-import { STATUS_BADGE_STYLES, STATUS_COLORS, STATUS_LABELS } from "@/lib/status-config";
+import type { TaskSummaryRow } from "@/commands/task";
+import {
+  STATUS_BADGE_STYLES,
+  STATUS_COLORS,
+  statusBadgeClass,
+  statusDisplayLabel,
+} from "@/lib/status-config";
 import { cn } from "@/lib/utils";
-import { openBenchAtom, runTaskAtom } from "@/features/work-board/store";
 import { issueUrl } from "@/features/work-board/github-urls";
 import { IssueIcon, PrIcon } from "@/features/work-board/ui/github-icons";
-import { prepareTaskMutationAtom } from "@/stores/workboard";
-
-const WAIT_REASON_CONFIG: Record<TaskRunWaitReason, { label: string; badge: string }> = {
-  ask_user_question: {
-    label: "needs you",
-    badge: "bg-amber-500/15 text-amber-400",
-  },
-  exit_plan_mode: {
-    label: "approve plan",
-    badge: "bg-amber-500/15 text-amber-400",
-  },
-  awaiting_prompt: {
-    label: "your turn",
-    badge: "bg-amber-500/10 text-amber-300/80",
-  },
-};
 
 function BranchIcon() {
   return (
     <svg className="size-3" viewBox="0 0 16 16" fill="currentColor">
       <path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z" />
-    </svg>
-  );
-}
-
-function BenchIcon() {
-  return (
-    <svg
-      className="size-3"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polyline points="4 17 10 11 4 5" />
-      <line x1="12" y1="19" x2="20" y2="19" />
     </svg>
   );
 }
@@ -80,30 +50,6 @@ function BadgeLink({
     >
       {children}
     </span>
-  );
-}
-
-function RunIcon() {
-  return (
-    <svg className="size-3" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-      <polygon points="5,3 19,12 5,21" />
-    </svg>
-  );
-}
-
-function PrepareIcon() {
-  return (
-    <svg
-      className="size-3"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-    </svg>
   );
 }
 
@@ -155,19 +101,10 @@ function SideRunBadges({ task }: { task: TaskSummaryRow }) {
 }
 
 export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boolean }) {
-  const doOpenBench = useSetAtom(openBenchAtom);
-  const doPrepareTask = useAtomValue(prepareTaskMutationAtom).mutate;
-  const doRunTask = useSetAtom(runTaskAtom);
   const hasIssue = task.github_issue_number !== null;
-  const hasPrs = task.github_pull_requests.length > 0;
   const hasBranch = task.branch !== null;
-  const hasMetadata = hasIssue || hasPrs || hasBranch;
-  const waitReason = task.task_run_wait_reason ?? "awaiting_prompt";
-  const isWaiting = task.status === "waiting_for_user";
-  const statusLabel = isWaiting ? WAIT_REASON_CONFIG[waitReason].label : STATUS_LABELS[task.status];
-  const statusBadgeStyle = isWaiting
-    ? WAIT_REASON_CONFIG[waitReason].badge
-    : STATUS_BADGE_STYLES[task.status];
+  const statusLabel = statusDisplayLabel(task.status, task.task_run_wait_reason);
+  const statusBadgeStyle = statusBadgeClass(task.status, task.task_run_wait_reason);
 
   return (
     <div
@@ -190,104 +127,58 @@ export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boo
       />
 
       <div className="flex min-w-0 flex-1 flex-col gap-1.5 px-3 py-2.5">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <p className="text-[13px] leading-snug font-medium">{task.title}</p>
-          </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="min-w-0 truncate text-[9px] font-semibold tracking-wider text-muted-foreground/50 uppercase">
+            {task.project}
+          </span>
           <span className="shrink-0 font-mono text-[10px] tracking-tight text-muted-foreground/60">
             {task.id}
           </span>
         </div>
 
-        {hasMetadata && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            {hasIssue && (
-              <BadgeLink
-                url={issueUrl(task.project, task.github_issue_number)}
-                className="bg-secondary text-muted-foreground"
-              >
-                <IssueIcon />
-                <span>{task.github_issue_number}</span>
-              </BadgeLink>
-            )}
-            {task.github_pull_requests.map((pr) => (
-              <BadgeLink
-                key={pr.number}
-                url={pr.url}
-                className={cn(
-                  pr.status === "merged"
-                    ? "bg-purple-500/15 text-purple-400"
-                    : pr.status === "open" || pr.status === "draft"
-                      ? "bg-emerald-500/15 text-emerald-400"
-                      : "bg-secondary text-muted-foreground",
-                )}
-              >
-                <PrIcon />
-                <span>{pr.number}</span>
-              </BadgeLink>
-            ))}
-            {hasBranch && (
-              <span className="inline-flex items-center gap-0.5 rounded-sm bg-secondary px-1.5 py-px text-[11px] text-muted-foreground">
-                <BranchIcon />
-                <span className="max-w-28 truncate">{task.branch}</span>
-              </span>
-            )}
-          </div>
-        )}
+        <p className="text-[13px] leading-snug font-medium">{task.title}</p>
 
-        <div className="flex items-center justify-between">
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              className={cn(
-                "inline-flex items-center rounded-sm px-1.5 py-px text-[10px] font-medium",
-                statusBadgeStyle,
-              )}
-            >
-              {statusLabel}
-            </span>
-            <SideRunBadges task={task} />
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span
+            className={cn(
+              "inline-flex items-center rounded-sm px-1.5 py-px text-[10px] font-medium",
+              statusBadgeStyle,
+            )}
+          >
+            {statusLabel}
           </span>
-          <div className="flex items-center gap-1">
-            {task.prepare_eligible && (
-              <button
-                type="button"
-                onClick={() => doPrepareTask(task.id)}
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] transition-opacity",
-                  "text-muted-foreground hover:!opacity-100",
-                  focused ? "opacity-70" : "opacity-0 group-hover:opacity-70",
-                )}
-              >
-                <PrepareIcon />
-                <span>Prepare</span>
-              </button>
-            )}
-            {task.run_eligible && (
-              <button
-                type="button"
-                onClick={() => doRunTask(task.id)}
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] transition-opacity",
-                  "text-emerald-400 hover:!opacity-100",
-                  focused ? "opacity-70" : "opacity-0 group-hover:opacity-70",
-                )}
-              >
-                <RunIcon />
-                <span>Run</span>
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => doOpenBench(task.id)}
+          {hasIssue && (
+            <BadgeLink
+              url={issueUrl(task.project, task.github_issue_number)}
+              className="bg-secondary text-muted-foreground"
+            >
+              <IssueIcon />
+              <span>{task.github_issue_number}</span>
+            </BadgeLink>
+          )}
+          {task.github_pull_requests.map((pr) => (
+            <BadgeLink
+              key={pr.number}
+              url={pr.url}
               className={cn(
-                "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] transition-opacity",
-                "text-muted-foreground opacity-0 group-hover:opacity-70 hover:!opacity-100",
+                pr.status === "merged"
+                  ? "bg-purple-500/15 text-purple-400"
+                  : pr.status === "open" || pr.status === "draft"
+                    ? "bg-emerald-500/15 text-emerald-400"
+                    : "bg-secondary text-muted-foreground",
               )}
             >
-              <BenchIcon />
-              <span>Bench</span>
-            </button>
-          </div>
+              <PrIcon />
+              <span>{pr.number}</span>
+            </BadgeLink>
+          ))}
+          {hasBranch && (
+            <span className="inline-flex items-center gap-0.5 rounded-sm bg-secondary px-1.5 py-px text-[11px] text-muted-foreground">
+              <BranchIcon />
+              <span className="max-w-28 truncate">{task.branch}</span>
+            </span>
+          )}
+          <SideRunBadges task={task} />
         </div>
       </div>
 
