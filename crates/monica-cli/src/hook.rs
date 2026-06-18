@@ -4,7 +4,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use clap::Subcommand;
-use monica_core::TaskRepository;
 use monica_infra::Runtime;
 
 use crate::notify;
@@ -106,13 +105,9 @@ fn handle_claude() -> Result<()> {
     // the entering edge notifies; a later event re-affirming an already-waiting run does not.
     // Best-effort throughout: a failed lookup or notification must never disrupt the session.
     if report.entered_waiting_for_user {
-        let task_title = task_id
-            .as_deref()
-            .and_then(|id| runtime.repositories.get_task(id).ok().flatten())
-            .map(|task| task.title);
         notify::post(&notify::waiting_notification(
             report.task_run_wait_reason,
-            task_title.as_deref(),
+            report.task_title.as_deref(),
         ));
     }
 
