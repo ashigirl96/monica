@@ -7,7 +7,8 @@ export type {
   TaskRunWaitReason,
   GithubPullRequestRef,
   BoardColumn,
-  TrackIssueResult,
+  TaskCreated,
+  ProjectOption,
   TaskBench,
   PrepareTaskResult,
   RunTaskResult,
@@ -31,6 +32,14 @@ export function getBoardColumns() {
 
 export function trackGithubIssue(input: string) {
   return unwrap(commands.trackGithubIssue(input));
+}
+
+export function listProjects() {
+  return unwrap(commands.listProjects());
+}
+
+export function createRawTask(title: string, projectId: string) {
+  return unwrap(commands.createRawTask(title, projectId));
 }
 
 export function listBenchRunspaceMap() {

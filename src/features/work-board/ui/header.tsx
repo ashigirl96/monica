@@ -1,35 +1,193 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useAtomValue } from "jotai";
-import { trackIssueMutationAtom } from "@/stores/workboard";
+import { createPortal } from "react-dom";
+import { useAtom, useAtomValue } from "jotai";
+import {
+  createRawTaskMutationAtom,
+  newTaskOpenAtom,
+  projectsAtom,
+  trackIssueMutationAtom,
+} from "@/stores/workboard";
 import { prSyncLastSyncedAtom } from "@/stores/pr-sync";
 import { cn } from "@/lib/utils";
 
-function TrackIssueButton() {
-  const [open, setOpen] = useState(false);
-  const [value, setValue] = useState("");
+const FOCUSABLE = "input:not(:disabled), select:not(:disabled), button:not(:disabled)";
+
+function NewTaskModal({ onClose }: { onClose: () => void }) {
+  const projects = useAtomValue(projectsAtom);
+
+  const [issueInput, setIssueInput] = useState("");
+  const [projectId, setProjectId] = useState(() => projects[0]?.id ?? "");
+  const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const { mutateAsync: trackIssue, isPending } = useAtomValue(trackIssueMutationAtom);
+
+  const { mutateAsync: createTask, isPending: creating } = useAtomValue(createRawTaskMutationAtom);
+  const { mutateAsync: trackIssue, isPending: tracking } = useAtomValue(trackIssueMutationAtom);
+  const isPending = creating || tracking;
+
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const issueRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!projectId && projects.length > 0) setProjectId(projects[0].id);
+  }, [projects, projectId]);
+
+  useEffect(() => {
+    requestAnimationFrame(() => issueRef.current?.focus());
+  }, []);
+
+  // The two paths are mutually exclusive: typing an issue link disables the raw fields and vice
+  // versa, so only the relevant inputs stay in the tab order.
+  const issueActive = issueInput.trim().length > 0;
+  const rawActive = title.trim().length > 0;
+  const canSubmit = issueActive || (rawActive && projectId !== "");
 
   const handleSubmit = useCallback(async () => {
+    if (!canSubmit || isPending) return;
     setError(null);
     try {
-      await trackIssue(value);
-      setValue("");
-      setOpen(false);
+      if (issueActive) await trackIssue(issueInput.trim());
+      else await createTask({ title: title.trim(), projectId });
+      onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to track issue");
+      setError(e instanceof Error ? e.message : "Failed to create task");
     }
-  }, [value, trackIssue]);
+  }, [
+    canSubmit,
+    isPending,
+    issueActive,
+    issueInput,
+    title,
+    projectId,
+    trackIssue,
+    createTask,
+    onClose,
+  ]);
 
-  if (!open) {
-    return (
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      onClose();
+      return;
+    }
+    if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      handleSubmit();
+      return;
+    }
+    if (e.key === "Tab") {
+      const items = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []);
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  };
+
+  return createPortal(
+    <div
+      className="animate-in fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/50 duration-150"
+      onClick={onClose}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={onKeyDown}
+        className="animate-in fade-in zoom-in-95 w-96 rounded-lg border border-border bg-popover p-4 shadow-xl duration-150"
+      >
+        <div className="mb-3 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70">
+          New Task
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <input
+            ref={issueRef}
+            type="text"
+            value={issueInput}
+            disabled={rawActive}
+            onChange={(e) => {
+              setIssueInput(e.target.value);
+              setError(null);
+            }}
+            placeholder="owner/repo#123 or issue URL"
+            className="h-8 rounded-md border border-border bg-background px-2.5 font-mono text-[12px] text-foreground placeholder:text-muted-foreground/50 outline-none transition-opacity focus:border-muted-foreground/40 disabled:cursor-not-allowed disabled:opacity-40"
+          />
+
+          <div className="flex items-center gap-2 text-[10px] text-muted-foreground/40">
+            <span className="h-px flex-1 bg-border" />
+            or
+            <span className="h-px flex-1 bg-border" />
+          </div>
+
+          <div
+            className={cn("flex flex-col gap-2 transition-opacity", issueActive && "opacity-40")}
+          >
+            <select
+              value={projectId}
+              disabled={issueActive}
+              onChange={(e) => {
+                setProjectId(e.target.value);
+                setError(null);
+              }}
+              className="h-8 rounded-md border border-border bg-background px-2 text-[12px] text-foreground outline-none focus:border-muted-foreground/40 disabled:cursor-not-allowed"
+            >
+              {projects.length === 0 && <option value="">No projects</option>}
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.id}
+                </option>
+              ))}
+            </select>
+            <input
+              type="text"
+              value={title}
+              disabled={issueActive}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                setError(null);
+              }}
+              placeholder="Task title"
+              className="h-8 rounded-md border border-border bg-background px-2.5 text-[14px] text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-muted-foreground/40 disabled:cursor-not-allowed"
+            />
+          </div>
+
+          {error && <p className="text-[10px] text-red-400">{error}</p>}
+
+          <div className="flex items-center justify-between border-t border-border/60 pt-3">
+            <span className="text-[10px] text-muted-foreground/50">
+              ⇥ move · ⏎ create · esc close
+            </span>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!canSubmit || isPending}
+              className="inline-flex h-7 items-center rounded-md bg-primary px-3 text-[11px] text-primary-foreground transition-opacity disabled:opacity-40"
+            >
+              {isPending ? "..." : "Create"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function NewTaskButton() {
+  const [open, setOpen] = useAtom(newTaskOpenAtom);
+
+  return (
+    <>
       <button
         type="button"
-        onClick={() => {
-          setOpen(true);
-          requestAnimationFrame(() => inputRef.current?.focus());
-        }}
+        onClick={() => setOpen(true)}
         className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
         <svg
@@ -44,69 +202,10 @@ function TrackIssueButton() {
           <line x1="12" y1="5" x2="12" y2="19" />
           <line x1="5" y1="12" x2="19" y2="12" />
         </svg>
-        Track Issue
+        New Task
       </button>
-    );
-  }
-
-  return (
-    <div className="flex items-center gap-1.5">
-      <div className="relative">
-        <input
-          ref={inputRef}
-          type="text"
-          value={value}
-          onChange={(e) => {
-            setValue(e.target.value);
-            setError(null);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !isPending) handleSubmit();
-            if (e.key === "Escape") {
-              setOpen(false);
-              setValue("");
-              setError(null);
-            }
-          }}
-          placeholder="owner/repo#123 or issue URL"
-          className={cn(
-            "h-7 w-64 rounded-md border bg-background px-2.5 text-[12px] text-foreground placeholder:text-muted-foreground/50 outline-none transition-colors",
-            error ? "border-red-400/60" : "border-border focus:border-muted-foreground/40",
-          )}
-        />
-        {error && <p className="absolute top-full left-0 mt-1 text-[10px] text-red-400">{error}</p>}
-      </div>
-      <button
-        type="button"
-        onClick={handleSubmit}
-        disabled={isPending || !value.trim()}
-        className="inline-flex h-7 items-center rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground transition-opacity disabled:opacity-40"
-      >
-        {isPending ? "..." : "Track"}
-      </button>
-      <button
-        type="button"
-        onClick={() => {
-          setOpen(false);
-          setValue("");
-          setError(null);
-        }}
-        className="inline-flex h-7 items-center rounded-md px-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <svg
-          className="size-3.5"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <line x1="18" y1="6" x2="6" y2="18" />
-          <line x1="6" y1="6" x2="18" y2="18" />
-        </svg>
-      </button>
-    </div>
+      {open && <NewTaskModal onClose={() => setOpen(false)} />}
+    </>
   );
 }
 
@@ -138,7 +237,7 @@ function LastSyncedLabel() {
 export function WorkBoardHeader() {
   return (
     <div className="flex items-center gap-3 px-3 py-1.5">
-      <TrackIssueButton />
+      <NewTaskButton />
       <LastSyncedLabel />
     </div>
   );

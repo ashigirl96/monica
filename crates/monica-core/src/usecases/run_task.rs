@@ -8,7 +8,9 @@ use crate::interfaces::{
     BenchRepository, GitGateway, ProjectRepository, TaskRunOutputs, SetupEnv, SetupOutcome,
     SetupRunner, TaskRepository, TaskRunRepository,
 };
-use crate::{NewTaskRun, PrepareTaskResult, Project, RefType, Task, TaskRunStatus, TaskStatus};
+use crate::{
+    ExternalRef, NewTaskRun, PrepareTaskResult, Project, RefType, Task, TaskRunStatus, TaskStatus,
+};
 
 fn is_active_run_status(status: TaskRunStatus) -> bool {
     matches!(
@@ -199,15 +201,21 @@ where
     setup_runner.run_setup_script(worktree_path, &log_path, &env, timeout)
 }
 
+fn latest_github_issue_ref<R>(repos: &R, task_id: &str) -> Result<Option<ExternalRef>>
+where
+    R: TaskRepository,
+{
+    Ok(repos
+        .list_external_refs(task_id)?
+        .into_iter()
+        .rfind(|r| r.ref_type == RefType::GithubIssue))
+}
+
 fn latest_github_issue_number<R>(repos: &R, task_id: &str) -> Result<Option<i64>>
 where
     R: TaskRepository,
 {
-    let refs = repos.list_external_refs(task_id)?;
-    Ok(refs
-        .into_iter()
-        .rfind(|r| r.ref_type == RefType::GithubIssue)
-        .and_then(|r| r.number))
+    Ok(latest_github_issue_ref(repos, task_id)?.and_then(|r| r.number))
 }
 
 /// Write hook config into the worktree's `.claude/settings.local.json` + wrapper script + PTY env
@@ -255,7 +263,9 @@ where
 
     let (runspace_id, _, _) = super::open_bench::ensure_bench(repos, task_id, &worktree_str, true)?;
 
-    let initial_command = claude_initial_command(read_prompt_file(&worktree_path).as_deref());
+    let file_prompt = read_prompt_file(&worktree_path);
+    let prompt = resolve_prompt(latest_github_issue_ref(repos, task_id)?.is_some(), file_prompt);
+    let initial_command = claude_initial_command(prompt.as_deref());
 
     Ok(crate::RunTaskResult {
         task_id: task_id.to_string(),
@@ -274,6 +284,13 @@ fn read_prompt_file(worktree_path: &Path) -> Option<String> {
     let contents = std::fs::read_to_string(worktree_path.join(".monica/prompt.md")).ok()?;
     let trimmed = contents.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+/// `.monica/prompt.md` feeds Claude only for issue-backed tasks. A raw task launches Claude bare
+/// regardless of what the worktree's prompt file happens to hold, so the explorer isn't seeded
+/// with a stale prompt committed to the project repo.
+fn resolve_prompt(has_github_issue: bool, file_prompt: Option<String>) -> Option<String> {
+    has_github_issue.then_some(file_prompt).flatten()
 }
 
 fn claude_initial_command(prompt: Option<&str>) -> String {
@@ -314,5 +331,23 @@ mod tests {
             claude_initial_command(Some("line one\nline two")),
             "claude 'line one\nline two'"
         );
+    }
+
+    #[test]
+    fn raw_task_ignores_prompt_file() {
+        assert_eq!(resolve_prompt(false, Some("seed".to_string())), None);
+    }
+
+    #[test]
+    fn issue_task_uses_prompt_file_when_present() {
+        assert_eq!(
+            resolve_prompt(true, Some("seed".to_string())),
+            Some("seed".to_string())
+        );
+    }
+
+    #[test]
+    fn issue_task_without_prompt_file_launches_bare() {
+        assert_eq!(resolve_prompt(true, None), None);
     }
 }

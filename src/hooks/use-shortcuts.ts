@@ -14,6 +14,7 @@ import {
   toggleLastRunspaceAtom,
 } from "@/features/work-bench/store";
 import { forceSyncPullRequestsAtom } from "@/stores/pr-sync";
+import { newTaskOpenAtom } from "@/stores/workboard";
 import { isEditable } from "@/lib/keyboard";
 
 const META_KEY_SPACE_MAP: Record<string, SpaceId> = {
@@ -43,6 +44,7 @@ export function useShortcuts() {
   const setJumpActive = useSetAtom(jumpHintsActiveAtom);
   const jumpToHint = useSetAtom(jumpToHintAtom);
   const toggleLastRunspace = useSetAtom(toggleLastRunspaceAtom);
+  const setNewTaskOpen = useSetAtom(newTaskOpenAtom);
 
   const timeoutRef = useRef<number>(0);
 
@@ -108,6 +110,13 @@ export function useShortcuts() {
       if (e.metaKey && e.key in META_KEY_SPACE_MAP) {
         e.preventDefault();
         setActiveSpace(META_KEY_SPACE_MAP[e.key]);
+        return;
+      }
+
+      if (e.metaKey && e.key === "n") {
+        e.preventDefault();
+        if (activeSpace !== "work-board") setActiveSpace("work-board");
+        setNewTaskOpen(true);
         return;
       }
 
@@ -224,5 +233,6 @@ export function useShortcuts() {
     setJumpActive,
     jumpToHint,
     toggleLastRunspace,
+    setNewTaskOpen,
   ]);
 }

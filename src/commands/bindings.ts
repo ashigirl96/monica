@@ -57,7 +57,10 @@ export const commands = {
     typedError<TaskSummaryRow[], string>(__TAURI_INVOKE("list_task_summaries", { project })),
   getBoardColumns: () => __TAURI_INVOKE<BoardColumn[]>("get_board_columns"),
   trackGithubIssue: (input: string) =>
-    typedError<TrackIssueResult, string>(__TAURI_INVOKE("track_github_issue", { input })),
+    typedError<TaskCreated, string>(__TAURI_INVOKE("track_github_issue", { input })),
+  listProjects: () => typedError<ProjectOption[], string>(__TAURI_INVOKE("list_projects")),
+  createRawTask: (title: string, projectId: string) =>
+    typedError<TaskCreated, string>(__TAURI_INVOKE("create_raw_task", { title, projectId })),
   listBenchRunspaceMap: () =>
     typedError<[string, string][], string>(__TAURI_INVOKE("list_bench_runspace_map")),
   taskShellEnv: (taskId: string) =>
@@ -130,6 +133,10 @@ export type PrepareTaskResult = {
   branch: string;
 };
 
+export type ProjectOption = {
+  id: string;
+};
+
 export type RunTaskResult = {
   task_id: string;
   task_run_id: string;
@@ -145,6 +152,11 @@ export type TaskBench = {
   cwd: string;
   created: boolean;
   env: [string, string][];
+};
+
+export type TaskCreated = {
+  task_id: string;
+  title: string;
 };
 
 export type TaskRunStatus =
@@ -239,11 +251,6 @@ export type TerminalTabRow = {
   title: string;
   sort_order: number;
   terminal_session_id: string | null;
-};
-
-export type TrackIssueResult = {
-  task_id: string;
-  title: string;
 };
 
 export type WorktreeInfo = {
