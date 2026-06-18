@@ -26,21 +26,26 @@ pub fn parse_owner_repo(url: &str) -> Result<String> {
 
 /// Parse an issue reference `owner/repo#123`. The left side is normalized with
 /// [`parse_owner_repo`]; the right side must be a positive integer issue number.
+fn parse_issue_number(raw: &str) -> Result<i64> {
+    let number: i64 = raw
+        .trim()
+        .parse()
+        .map_err(|_| anyhow!("issue number must be a positive integer, got {raw:?}"))?;
+    if number <= 0 {
+        return Err(anyhow!(
+            "issue number must be a positive integer, got {number}"
+        ));
+    }
+    Ok(number)
+}
+
 pub fn parse_issue_ref(target: &str) -> Result<(String, i64)> {
     let (repo_part, number_part) = target
         .trim()
         .split_once('#')
         .ok_or_else(|| anyhow!("expected owner/repo#number, got {target:?}"))?;
     let repo = parse_owner_repo(repo_part)?;
-    let number: i64 = number_part
-        .trim()
-        .parse()
-        .map_err(|_| anyhow!("issue number must be a positive integer, got {number_part:?}"))?;
-    if number <= 0 {
-        return Err(anyhow!(
-            "issue number must be a positive integer, got {number}"
-        ));
-    }
+    let number = parse_issue_number(number_part)?;
     Ok((repo, number))
 }
 
@@ -51,14 +56,7 @@ pub fn parse_issue_input(input: &str) -> Result<(String, i64)> {
     let s = input.trim();
     if let Some((repo_part, rest)) = s.split_once("/issues/") {
         let number_part = rest.split(['/', '?', '#']).next().unwrap_or(rest);
-        let number: i64 = number_part.parse().map_err(|_| {
-            anyhow!("issue number must be a positive integer, got {number_part:?}")
-        })?;
-        if number <= 0 {
-            return Err(anyhow!(
-                "issue number must be a positive integer, got {number}"
-            ));
-        }
+        let number = parse_issue_number(number_part)?;
         return Ok((parse_owner_repo(repo_part)?, number));
     }
     parse_issue_ref(s)

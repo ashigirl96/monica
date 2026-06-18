@@ -1,10 +1,18 @@
-use std::str::FromStr;
-
-use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum RefType {
     GithubIssue,
     GithubPullRequest,
@@ -12,22 +20,7 @@ pub enum RefType {
 
 impl RefType {
     pub fn as_str(self) -> &'static str {
-        match self {
-            RefType::GithubIssue => "github_issue",
-            RefType::GithubPullRequest => "github_pull_request",
-        }
-    }
-}
-
-impl FromStr for RefType {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        Ok(match s {
-            "github_issue" => RefType::GithubIssue,
-            "github_pull_request" => RefType::GithubPullRequest,
-            other => return Err(anyhow!("unknown external ref type: {other}")),
-        })
+        self.into()
     }
 }
 

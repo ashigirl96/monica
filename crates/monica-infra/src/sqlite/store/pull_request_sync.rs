@@ -162,20 +162,7 @@ impl SqliteStore {
                 )?;
                 tx.last_insert_rowid()
             };
-            tx.execute(
-                &format!(
-                    "INSERT INTO github_pull_request_ref_states
-                       (external_ref_id, status, synced_at, last_error, next_retry_at, updated_at)
-                     VALUES (?1, ?2, {SET_NOW}, NULL, NULL, {SET_NOW})
-                     ON CONFLICT(external_ref_id) DO UPDATE SET
-                       status = excluded.status,
-                       synced_at = {SET_NOW},
-                       last_error = NULL,
-                       next_retry_at = NULL,
-                       updated_at = {SET_NOW}"
-                ),
-                params![ref_id, pr.status.as_str()],
-            )?;
+            upsert_pr_ref_state_success(&tx, ref_id, pr.status.as_str())?;
         }
         tx.execute(
             &format!(
@@ -236,19 +223,10 @@ impl SqliteStore {
               WHERE id = ?2",
             params![&pull_request.url, candidate.external_ref_id],
         )?;
-        self.conn_mut().execute(
-            &format!(
-                "INSERT INTO github_pull_request_ref_states
-                   (external_ref_id, status, synced_at, last_error, next_retry_at, updated_at)
-                 VALUES (?1, ?2, {SET_NOW}, NULL, NULL, {SET_NOW})
-                 ON CONFLICT(external_ref_id) DO UPDATE SET
-                   status = excluded.status,
-                   synced_at = {SET_NOW},
-                   last_error = NULL,
-                   next_retry_at = NULL,
-                   updated_at = {SET_NOW}"
-            ),
-            params![candidate.external_ref_id, pull_request.status.as_str()],
+        upsert_pr_ref_state_success(
+            self.conn_mut(),
+            candidate.external_ref_id,
+            pull_request.status.as_str(),
         )?;
         Ok(())
     }
@@ -290,6 +268,28 @@ impl SqliteStore {
         )?;
         Ok(())
     }
+}
+
+fn upsert_pr_ref_state_success(
+    conn: &rusqlite::Connection,
+    external_ref_id: i64,
+    status: &str,
+) -> Result<()> {
+    conn.execute(
+        &format!(
+            "INSERT INTO github_pull_request_ref_states
+               (external_ref_id, status, synced_at, last_error, next_retry_at, updated_at)
+             VALUES (?1, ?2, {SET_NOW}, NULL, NULL, {SET_NOW})
+             ON CONFLICT(external_ref_id) DO UPDATE SET
+               status = excluded.status,
+               synced_at = {SET_NOW},
+               last_error = NULL,
+               next_retry_at = NULL,
+               updated_at = {SET_NOW}"
+        ),
+        params![external_ref_id, status],
+    )?;
+    Ok(())
 }
 
 fn branch_success_retry_delay(pull_requests: &[GithubPullRequest]) -> &'static str {

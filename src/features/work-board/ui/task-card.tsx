@@ -1,47 +1,12 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useAtomValue, useSetAtom } from "jotai";
-import type { DisplayStatus, TaskRunWaitReason, TaskSummaryRow } from "@/commands/task";
+import type { TaskRunWaitReason, TaskSummaryRow } from "@/commands/task";
+import { STATUS_BADGE_STYLES, STATUS_COLORS, STATUS_LABELS } from "@/lib/status-config";
 import { cn } from "@/lib/utils";
 import { openBenchAtom, runTaskAtom } from "@/features/work-board/store";
 import { issueUrl } from "@/features/work-board/github-urls";
 import { IssueIcon, PrIcon } from "@/features/work-board/ui/github-icons";
 import { prepareTaskMutationAtom } from "@/stores/workboard";
-
-const STATUS_COLORS: Record<DisplayStatus, string> = {
-  ready: "bg-sky-400",
-  in_progress: "bg-blue-500",
-  setting_up: "bg-blue-400 animate-pulse",
-  prepared: "bg-cyan-400",
-  running: "bg-emerald-400 animate-pulse",
-  waiting_for_user: "bg-amber-400",
-  stopped: "bg-muted-foreground/50",
-  failed: "bg-red-400",
-  closed: "bg-muted-foreground/30",
-};
-
-const STATUS_LABELS: Record<DisplayStatus, string> = {
-  ready: "ready",
-  in_progress: "in progress",
-  setting_up: "setting up",
-  prepared: "prepared",
-  running: "running",
-  waiting_for_user: "needs you",
-  stopped: "stopped",
-  failed: "failed",
-  closed: "closed",
-};
-
-const STATUS_BADGE_STYLES: Record<DisplayStatus, string> = {
-  ready: "bg-sky-500/15 text-sky-400",
-  in_progress: "bg-blue-500/15 text-blue-400",
-  setting_up: "bg-blue-500/15 text-blue-400 animate-pulse",
-  prepared: "bg-cyan-500/15 text-cyan-400",
-  running: "bg-emerald-500/15 text-emerald-400 animate-pulse",
-  waiting_for_user: "bg-amber-500/15 text-amber-400",
-  stopped: "bg-muted text-muted-foreground",
-  failed: "bg-red-500/15 text-red-400",
-  closed: "bg-muted text-muted-foreground/60",
-};
 
 const WAIT_REASON_CONFIG: Record<TaskRunWaitReason, { label: string; badge: string }> = {
   ask_user_question: {

@@ -1,33 +1,28 @@
-use std::str::FromStr;
-
-use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::status::{TaskRunStatus, TaskRunWaitReason};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum Agent {
     Claude,
 }
 
 impl Agent {
     pub fn as_str(self) -> &'static str {
-        match self {
-            Agent::Claude => "claude",
-        }
-    }
-}
-
-impl FromStr for Agent {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        Ok(match s {
-            "claude" => Agent::Claude,
-            other => return Err(anyhow!("unknown agent: {other}")),
-        })
+        self.into()
     }
 }
 

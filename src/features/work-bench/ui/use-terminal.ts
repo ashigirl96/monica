@@ -266,22 +266,21 @@ export function useTerminal(
 
     const cleanups: (() => void)[] = [];
 
-    const writeText = (text: string) => {
+    const sendBytes = (bytes: Uint8Array) => {
       const sessionId = sessionIdRef.current;
       if (!sessionId || getTabConnection(options.tabId)?.replaying) return;
-      terminalWrite(sessionId, toBase64(encoder.encode(text)));
+      terminalWrite(sessionId, toBase64(bytes));
     };
+    const writeText = (text: string) => sendBytes(encoder.encode(text));
 
     term.onData(writeText);
 
     term.onBinary((data) => {
-      const sessionId = sessionIdRef.current;
-      if (!sessionId || getTabConnection(options.tabId)?.replaying) return;
       const bytes = new Uint8Array(data.length);
       for (let i = 0; i < data.length; i++) {
         bytes[i] = data.charCodeAt(i);
       }
-      terminalWrite(sessionId, toBase64(bytes));
+      sendBytes(bytes);
     });
 
     term.onTitleChange((title) => {

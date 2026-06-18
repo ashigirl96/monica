@@ -169,7 +169,7 @@ fn resolve_pull_request_status(
     } else if state == "closed" && merged_at.is_some_and(|value| !value.trim().is_empty()) {
         Ok(GithubPullRequestStatus::Merged)
     } else {
-        state.parse()
+        Ok(state.parse()?)
     }
 }
 

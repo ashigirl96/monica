@@ -1,3 +1,7 @@
+pub fn or_dash(value: Option<&str>) -> String {
+    value.unwrap_or("-").to_string()
+}
+
 pub fn render_table(rows: &[Vec<String>]) -> String {
     let cols = rows.iter().map(|row| row.len()).max().unwrap_or(0);
     if cols == 0 {

@@ -151,33 +151,31 @@ impl PtyManager {
         }
 
         let session = PtySession::new(pair.master, writer, killer);
-        {
-            let mut sessions = self.sessions.lock().map_err(|e| anyhow::anyhow!("{e}"))?;
-            sessions.insert(req.id.clone(), session);
-        }
+        self.sessions()?.insert(req.id.clone(), session);
 
         Ok(pid)
     }
 
+    fn sessions(&self) -> anyhow::Result<std::sync::MutexGuard<'_, HashMap<String, PtySession>>> {
+        self.sessions.lock().map_err(|e| anyhow::anyhow!("{e}"))
+    }
+
     pub fn write(&self, id: &str, data: &[u8]) -> anyhow::Result<()> {
-        let sessions = self.sessions.lock().map_err(|e| anyhow::anyhow!("{e}"))?;
-        match sessions.get(id) {
+        match self.sessions()?.get(id) {
             Some(session) => session.write(data),
             None => bail!("no pty session with id: {id}"),
         }
     }
 
     pub fn resize(&self, id: &str, size: PtySize) -> anyhow::Result<()> {
-        let sessions = self.sessions.lock().map_err(|e| anyhow::anyhow!("{e}"))?;
-        match sessions.get(id) {
+        match self.sessions()?.get(id) {
             Some(session) => session.resize(size.rows, size.cols),
             None => bail!("no pty session with id: {id}"),
         }
     }
 
     pub fn kill(&self, id: &str) -> anyhow::Result<()> {
-        let sessions = self.sessions.lock().map_err(|e| anyhow::anyhow!("{e}"))?;
-        match sessions.get(id) {
+        match self.sessions()?.get(id) {
             Some(session) => session.kill(),
             None => Ok(()),
         }
