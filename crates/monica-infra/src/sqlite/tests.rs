@@ -8,6 +8,8 @@ use monica_core::{
 };
 use rusqlite::params;
 use serde_json::json;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::SqliteStore;
 
@@ -56,6 +58,34 @@ fn branch_retry_delay_seconds(db: &SqliteStore, task_id: &str) -> i64 {
         .unwrap()
 }
 
+fn temp_artifact_store(name: &str) -> (PathBuf, SqliteStore) {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("monica-{name}-{}-{nanos}", std::process::id()));
+    let db_dir = root.join("db");
+    std::fs::create_dir_all(&db_dir).unwrap();
+    let db = SqliteStore::open_at(db_dir.join("monica.db")).unwrap();
+    (root, db)
+}
+
+fn attach_file_to_entry(db: &mut SqliteStore, root: &Path, entry_id: &str) -> PathBuf {
+    let entry_dir = root.join("attachments").join(entry_id);
+    std::fs::create_dir_all(&entry_dir).unwrap();
+    std::fs::write(entry_dir.join("image.png"), b"png").unwrap();
+    db.insert_attachment(
+        entry_id,
+        "image.png",
+        Some("image/png"),
+        3,
+        &format!("{entry_id}/image.png"),
+    )
+    .unwrap();
+    assert!(entry_dir.join("image.png").exists());
+    entry_dir
+}
+
 #[test]
 fn drafts_round_trip_with_attachments() {
     let mut db = SqliteStore::open_in_memory().unwrap();
@@ -82,6 +112,45 @@ fn drafts_round_trip_with_attachments() {
     let drafts = db.list_drafts().unwrap();
     assert_eq!(drafts.len(), 1);
     assert_eq!(drafts[0].attachments, vec![attachment]);
+}
+
+#[test]
+fn delete_draft_removes_attachment_directory() {
+    let (root, mut db) = temp_artifact_store("delete-draft-attachments");
+    let draft = db
+        .insert_draft(NewDraft {
+            kind: ArtifactDraftKind::Memo,
+            body: "draft with image".to_string(),
+            occurred_at: None,
+        })
+        .unwrap();
+    let entry_dir = attach_file_to_entry(&mut db, &root, &draft.id);
+
+    db.delete_draft(&draft.id).unwrap();
+
+    assert!(db.get_draft(&draft.id).unwrap().is_none());
+    assert!(!entry_dir.exists());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn delete_artifact_removes_attachment_directory() {
+    let (root, mut db) = temp_artifact_store("delete-artifact-attachments");
+    let draft = db
+        .insert_draft(NewDraft {
+            kind: ArtifactDraftKind::Memo,
+            body: "saved artifact with image".to_string(),
+            occurred_at: None,
+        })
+        .unwrap();
+    let entry_dir = attach_file_to_entry(&mut db, &root, &draft.id);
+    let artifact = monica_core::artifact_ops::save_draft(&mut db, &draft.id).unwrap();
+
+    db.delete_artifact(&artifact.id).unwrap();
+
+    assert!(db.get_artifact(&artifact.id).unwrap().is_none());
+    assert!(!entry_dir.exists());
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
