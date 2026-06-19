@@ -53,14 +53,28 @@ where
     A: TaskRunOutputs,
 {
     let (task, project) = load_task_and_optional_project(repos, task_id)?;
-    // Where Claude actually runs: the bench tab's own cwd. Fall back to the worktree/default only
-    // when no bench exists yet, so the hook settings land in the directory Claude will read them from.
     let cwd = repos
         .get_bench_for_task(task_id)?
         .map(|(_, cwd)| cwd)
         .or_else(|| resolve_worktree_cwd(repos, &task))
         .unwrap_or_else(|| default_bench_cwd(project.as_ref(), home_dir().as_deref()));
+    let project = project.map(|mut p| {
+        if let Some(agent) = primary_run_agent(repos, &task) {
+            p.agent_default = agent;
+        }
+        p
+    });
     Ok(shell_env_for(outputs, &task, project.as_ref(), &cwd))
+}
+
+fn primary_run_agent<R>(repos: &R, task: &Task) -> Option<crate::Agent>
+where
+    R: TaskRunRepository,
+{
+    task.primary_task_run_id
+        .as_ref()
+        .and_then(|id| repos.get_task_run(id).ok().flatten())
+        .and_then(|run| run.agent)
 }
 
 fn load_task_and_optional_project<R>(
