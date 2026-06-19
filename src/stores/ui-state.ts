@@ -27,7 +27,7 @@ export type PersistedUiState = {
 };
 
 const DEFAULT_UI_STATE: PersistedUiState = {
-  activeSpace: "dashboard",
+  activeSpace: "library",
   sidebarOpen: true,
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
   uiZoom: UI_ZOOM_DEFAULT,
@@ -38,8 +38,7 @@ const DEFAULT_UI_STATE: PersistedUiState = {
 // Missing a key here is a compile error when SpaceId gains a variant, so validation
 // can never silently drift behind the type.
 const SPACE_IDS: Record<SpaceId, true> = {
-  dashboard: true,
-  project: true,
+  library: true,
   "work-board": true,
   "work-bench": true,
 };

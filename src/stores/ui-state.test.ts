@@ -24,9 +24,9 @@ describe("parseUiState", () => {
     });
   });
 
-  test("falls back to dashboard defaults for a non-object (e.g. corrupt JSON)", () => {
+  test("falls back to library defaults for a non-object (e.g. corrupt JSON)", () => {
     const parsed = parseUiState("{bad");
-    expect(parsed.activeSpace).toBe("dashboard");
+    expect(parsed.activeSpace).toBe("library");
     expect(parsed.sidebarOpen).toBe(true);
     expect(parsed.sidebarWidth).toBe(SIDEBAR_DEFAULT_WIDTH);
     expect(parsed.uiZoom).toBe(UI_ZOOM_DEFAULT);
@@ -35,7 +35,12 @@ describe("parseUiState", () => {
   });
 
   test("rejects an unknown activeSpace", () => {
-    expect(parseUiState({ activeSpace: "nope" }).activeSpace).toBe("dashboard");
+    expect(parseUiState({ activeSpace: "nope" }).activeSpace).toBe("library");
+  });
+
+  test("migrates retired space ids to library", () => {
+    expect(parseUiState({ activeSpace: "dashboard" }).activeSpace).toBe("library");
+    expect(parseUiState({ activeSpace: "project" }).activeSpace).toBe("library");
   });
 
   test("clamps sidebarWidth into range", () => {

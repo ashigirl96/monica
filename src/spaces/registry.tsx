@@ -1,5 +1,5 @@
 import { lazy, type ComponentType } from "react";
-import { DashboardIcon, ProjectHomeIcon, WorkBoardIcon, WorkBenchIcon } from "@/components/icons";
+import { LibraryIcon, WorkBoardIcon, WorkBenchIcon } from "@/components/icons";
 import type { SpaceId } from "@/stores/space";
 import { TabBar } from "@/components/tab-bar";
 import { WorkBenchSidebar } from "@/features/work-bench/ui/sidebar";
@@ -29,30 +29,16 @@ function Placeholder({ name }: { name: string }) {
   );
 }
 
-function DashboardContent() {
-  return <Placeholder name="Dashboard" />;
-}
-function ProjectSidebar() {
-  return <Placeholder name="Project Sidebar" />;
-}
-function ProjectContent() {
-  return <Placeholder name="Project" />;
+function LibraryContent() {
+  return <Placeholder name="Library" />;
 }
 export const spaces: SpaceConfig[] = [
   {
-    id: "dashboard",
-    icon: DashboardIcon,
-    label: "Dashboard",
+    id: "library",
+    icon: LibraryIcon,
+    label: "Library",
     header: TabBar,
-    content: DashboardContent,
-  },
-  {
-    id: "project",
-    icon: ProjectHomeIcon,
-    label: "Project Home",
-    sidebar: ProjectSidebar,
-    header: TabBar,
-    content: ProjectContent,
+    content: LibraryContent,
   },
   {
     id: "work-board",

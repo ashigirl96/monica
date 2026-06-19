@@ -18,8 +18,7 @@ function createInitialTabState(): TabState {
 }
 
 export const tabsBySpaceAtom = atom<Record<SpaceId, TabState>>({
-  dashboard: createInitialTabState(),
-  project: createInitialTabState(),
+  library: createInitialTabState(),
   "work-board": createInitialTabState(),
   "work-bench": createInitialTabState(),
 });
