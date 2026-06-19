@@ -17,23 +17,18 @@ function Icon({ size = 18, ...props }: IconProps) {
   );
 }
 
-export function DashboardIcon(props: IconProps) {
+export function LibraryIcon(props: IconProps) {
   return (
     <Icon {...props}>
       <path
-        d="M3 10.5L12 3L21 10.5V20C21 20.6 20.6 21 20 21H4C3.4 21 3 20.6 3 20V10.5Z"
+        d="M12 6C10.5 4.8 8.3 4.5 4.5 4.5C4 4.5 3.5 5 3.5 5.5V18C3.5 18.5 4 19 4.5 19C8.3 19 10.5 19.3 12 20.5"
         strokeWidth="1.5"
       />
-      <path d="M9 21V14H15V21" strokeWidth="1.5" />
-    </Icon>
-  );
-}
-
-export function ProjectHomeIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M12 3L20 7.5V16.5L12 21L4 16.5V7.5Z" strokeWidth="1.5" />
-      <path d="M12 12L12 21M12 12L4 7.5M12 12L20 7.5" strokeWidth="1.5" />
+      <path
+        d="M12 6C13.5 4.8 15.7 4.5 19.5 4.5C20 4.5 20.5 5 20.5 5.5V18C20.5 18.5 20 19 19.5 19C15.7 19 13.5 19.3 12 20.5"
+        strokeWidth="1.5"
+      />
+      <path d="M12 6V20.5" strokeWidth="1.5" />
     </Icon>
   );
 }

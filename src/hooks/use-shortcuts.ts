@@ -19,10 +19,9 @@ import { setUiZoomAtom } from "@/stores/zoom";
 import { isEditable } from "@/lib/keyboard";
 
 const META_KEY_SPACE_MAP: Record<string, SpaceId> = {
-  "1": "dashboard",
-  "2": "project",
-  "3": "work-board",
-  "4": "work-bench",
+  "1": "library",
+  "2": "work-board",
+  "3": "work-bench",
 };
 
 const PREFIX_TIMEOUT = 2000;
