@@ -4,10 +4,14 @@ import { useAtom, useAtomValue } from "jotai";
 import {
   createRawTaskMutationAtom,
   newTaskOpenAtom,
+  projectFilterOpenAtom,
   projectsAtom,
+  selectedProjectAtom,
   trackIssueMutationAtom,
 } from "@/stores/workboard";
+import { ProjectFilterModal } from "./project-filter-modal";
 import { prSyncLastSyncedAtom } from "@/stores/pr-sync";
+import { XIcon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 
 const FOCUSABLE = "input:not(:disabled), select:not(:disabled), button:not(:disabled)";
@@ -234,10 +238,40 @@ function LastSyncedLabel() {
   );
 }
 
+function ProjectFilterBadge() {
+  const [open, setOpen] = useAtom(projectFilterOpenAtom);
+  const [selected, setSelected] = useAtom(selectedProjectAtom);
+
+  return (
+    <>
+      {selected !== null && (
+        <span className="inline-flex items-center gap-1.5 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-1 text-[11px] text-cyan-400">
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="transition-colors hover:text-cyan-300"
+          >
+            {selected}
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelected(null)}
+            className="ml-0.5 text-cyan-400/60 transition-colors hover:text-cyan-300"
+          >
+            <XIcon size={12} />
+          </button>
+        </span>
+      )}
+      {open && <ProjectFilterModal onClose={() => setOpen(false)} onSelect={setSelected} />}
+    </>
+  );
+}
+
 export function WorkBoardHeader() {
   return (
     <div className="flex items-center gap-3 px-3 py-1.5">
       <NewTaskButton />
+      <ProjectFilterBadge />
       <LastSyncedLabel />
     </div>
   );

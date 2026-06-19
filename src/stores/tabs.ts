@@ -23,11 +23,6 @@ export const tabsBySpaceAtom = atom<Record<SpaceId, TabState>>({
   "work-bench": createInitialTabState(),
 });
 
-export const activeTabsAtom = atom((get) => {
-  const space = get(activeSpaceAtom);
-  return get(tabsBySpaceAtom)[space];
-});
-
 export const createTabAtom = atom(null, (get, set) => {
   const space = get(activeSpaceAtom);
   const all = get(tabsBySpaceAtom);
@@ -61,15 +56,6 @@ export const closeTabAtom = atom(null, (get, set, tabId?: string) => {
   set(tabsBySpaceAtom, {
     ...all,
     [space]: { ...state, tabs: newTabs, activeTabId: newActiveId },
-  });
-});
-
-export const activateTabAtom = atom(null, (get, set, tabId: string) => {
-  const space = get(activeSpaceAtom);
-  const all = get(tabsBySpaceAtom);
-  set(tabsBySpaceAtom, {
-    ...all,
-    [space]: { ...all[space], activeTabId: tabId },
   });
 });
 

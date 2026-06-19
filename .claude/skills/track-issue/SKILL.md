@@ -2,10 +2,11 @@
 name: track-issue
 description: >-
   GitHub issue を作成し、その issue を Monica に track（取り込み）する。
-  「issue 作って」「○○リポジトリに issue 立てて」のように issue を新規作成する
-  ときは、作成に続けて Monica への track まで行う。track-issue を明示しない依頼でも、
-  会話の中で GitHub issue を作ったら作りっぱなしにせず必ずこの skill で track する。
-  「track して」「monica で track」のように track の語が出たときも使う。
+  `gh issue create` を自分で実行した直後・これから実行する場合も必ずこの skill で
+  track まで行う。issue 作成が会話のメイン目的でなくても（調査や実装の締めくくり
+  として立てる場合でも）、issue を作る以上は track をセットで行うこと。
+  「issue 作って」「issue 作成して」「issue にして」「issue 立てて」「track して」
+  「monica で track」など、issue 作成や track に関する表現すべてでトリガーする。
 ---
 
 # track-issue

@@ -1,9 +1,8 @@
 import { commands } from "./bindings";
+import { unwrap } from "./unwrap";
 
 export type { WorktreeInfo } from "./bindings";
 
-export async function worktreeInfo(cwd: string) {
-  const result = await commands.worktreeInfo(cwd);
-  if (result.status === "error") throw new Error(result.error);
-  return result.data;
+export function worktreeInfo(cwd: string) {
+  return unwrap(commands.worktreeInfo(cwd));
 }

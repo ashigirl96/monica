@@ -10,6 +10,20 @@ mod shell_path;
 fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::new()
         .commands(tauri_specta::collect_commands![
+            commands::artifact::create_draft,
+            commands::artifact::update_draft,
+            commands::artifact::delete_draft,
+            commands::artifact::list_drafts,
+            commands::artifact::save_draft,
+            commands::artifact::get_artifact,
+            commands::artifact::update_artifact,
+            commands::artifact::convert_artifact_kind,
+            commands::artifact::delete_artifact,
+            commands::artifact::list_essays,
+            commands::artifact::list_intents_by_project,
+            commands::artifact::list_timeline_items,
+            commands::artifact::attach_image,
+            commands::artifact::remove_attachment,
             commands::clipboard::clipboard_write_image,
             commands::editor::resolve_editor_paths,
             commands::editor::open_in_editor,

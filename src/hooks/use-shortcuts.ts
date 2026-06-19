@@ -13,8 +13,14 @@ import {
   promoteActiveTabRunAtom,
   toggleLastRunspaceAtom,
 } from "@/features/work-bench/store";
+import {
+  cycleLibraryViewAtom,
+  cycleLibraryTabAtom,
+  closeLibraryTabAtom,
+  createNewDraftAtom,
+} from "@/features/library/store";
 import { forceSyncPullRequestsAtom } from "@/stores/pr-sync";
-import { newTaskOpenAtom } from "@/stores/workboard";
+import { newTaskOpenAtom, projectFilterOpenAtom } from "@/stores/workboard";
 import { setUiZoomAtom } from "@/stores/zoom";
 import { isEditable } from "@/lib/keyboard";
 
@@ -45,7 +51,12 @@ export function useShortcuts() {
   const jumpToHint = useSetAtom(jumpToHintAtom);
   const toggleLastRunspace = useSetAtom(toggleLastRunspaceAtom);
   const setNewTaskOpen = useSetAtom(newTaskOpenAtom);
+  const setProjectFilterOpen = useSetAtom(projectFilterOpenAtom);
   const setUiZoom = useSetAtom(setUiZoomAtom);
+  const cycleLibraryView = useSetAtom(cycleLibraryViewAtom);
+  const cycleLibraryTab = useSetAtom(cycleLibraryTabAtom);
+  const closeLibraryTab = useSetAtom(closeLibraryTabAtom);
+  const createNewDraft = useSetAtom(createNewDraftAtom);
 
   const timeoutRef = useRef<number>(0);
 
@@ -122,8 +133,12 @@ export function useShortcuts() {
 
       if (e.metaKey && e.key === "n") {
         e.preventDefault();
-        if (activeSpace !== "work-board") setActiveSpace("work-board");
-        setNewTaskOpen(true);
+        if (activeSpace === "library") {
+          void createNewDraft();
+        } else {
+          if (activeSpace !== "work-board") setActiveSpace("work-board");
+          setNewTaskOpen(true);
+        }
         return;
       }
 
@@ -155,12 +170,14 @@ export function useShortcuts() {
       if (e.altKey && e.code === "KeyJ") {
         e.preventDefault();
         if (isWorkBench) cycleRunspace("down");
+        else if (activeSpace === "library") cycleLibraryView("down");
         return;
       }
 
       if (e.altKey && e.code === "KeyK") {
         e.preventDefault();
         if (isWorkBench) cycleRunspace("up");
+        else if (activeSpace === "library") cycleLibraryView("up");
         return;
       }
 
@@ -170,6 +187,8 @@ export function useShortcuts() {
         const direction = e.shiftKey ? "left" : "right";
         if (isWorkBench) {
           cycleTerminalTab(direction);
+        } else if (activeSpace === "library") {
+          cycleLibraryTab(direction);
         } else {
           cycleTab(direction);
         }
@@ -184,6 +203,12 @@ export function useShortcuts() {
         if (!isWorkBench) {
           timeoutRef.current = window.setTimeout(() => setJumpActive(false), PREFIX_TIMEOUT);
         }
+        return;
+      }
+
+      if (e.ctrlKey && e.key === "w") {
+        e.preventDefault();
+        if (activeSpace === "work-board") setProjectFilterOpen((v) => !v);
         return;
       }
 
@@ -206,7 +231,11 @@ export function useShortcuts() {
       if (e.ctrlKey && e.key === "d") {
         if (isWorkBench) return;
         e.preventDefault();
-        closeTab();
+        if (activeSpace === "library") {
+          closeLibraryTab();
+        } else {
+          closeTab();
+        }
         return;
       }
 
@@ -214,6 +243,8 @@ export function useShortcuts() {
         e.preventDefault();
         if (isWorkBench) {
           cycleTerminalTab("left");
+        } else if (activeSpace === "library") {
+          cycleLibraryTab("left");
         } else {
           cycleTab("left");
         }
@@ -224,6 +255,8 @@ export function useShortcuts() {
         e.preventDefault();
         if (isWorkBench) {
           cycleTerminalTab("right");
+        } else if (activeSpace === "library") {
+          cycleLibraryTab("right");
         } else {
           cycleTab("right");
         }
@@ -255,6 +288,11 @@ export function useShortcuts() {
     jumpToHint,
     toggleLastRunspace,
     setNewTaskOpen,
+    setProjectFilterOpen,
     setUiZoom,
+    cycleLibraryView,
+    cycleLibraryTab,
+    closeLibraryTab,
+    createNewDraft,
   ]);
 }
