@@ -18,6 +18,7 @@ use super::status::{TaskRunStatus, TaskRunWaitReason};
 #[strum(serialize_all = "snake_case")]
 pub enum Agent {
     Claude,
+    Codex,
 }
 
 impl Agent {

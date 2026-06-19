@@ -42,11 +42,12 @@ impl TaskRunOutputs for FsTaskRunOutputs {
         // .envrc that exports another base) — so the command pins the base
         // itself instead of trusting the environment it inherits.
         let monica_home = paths::base_dir()?.to_string_lossy().into_owned();
-        let hook_cmd = pin_hook_command_base(&resolve_hook_command()?, &monica_home);
-        // Hooks live in the cwd's `.claude/settings.local.json` rather than behind a
-        // `--settings` flag: Claude auto-loads it from disk, so it survives Claude's own
-        // re-exec (clear + bypass permissions launches a bare `claude` that drops every flag).
-        let settings_path_str = write_local_settings(cwd, &hook_cmd)?;
+        let agent = project.agent_default;
+        let hook_cmd = pin_hook_command_base(&resolve_hook_command(agent)?, &monica_home);
+        let settings_path_str = match agent {
+            monica_core::Agent::Claude => write_local_settings(cwd, &hook_cmd)?,
+            monica_core::Agent::Codex => write_codex_hooks(cwd, &hook_cmd)?,
+        };
 
         let bin_dir = task_dir.join("bin");
         write_claude_wrapper(&bin_dir)?;
@@ -127,19 +128,23 @@ fn write_if_changed(path: &Path, contents: &str) -> Result<()> {
     fs::write(path, contents).with_context(|| format!("failed to write {}", path.display()))
 }
 
-fn resolve_hook_command() -> Result<String> {
-    if let Ok(cmd) = std::env::var("MONICA_HOOK_COMMAND") {
-        if !cmd.is_empty() {
-            return Ok(cmd);
+fn resolve_hook_command(agent: monica_core::Agent) -> Result<String> {
+    let subcommand = match agent {
+        monica_core::Agent::Claude => "claude",
+        monica_core::Agent::Codex => "codex",
+    };
+    if let Ok(base) = std::env::var("MONICA_HOOK_COMMAND") {
+        if !base.is_empty() {
+            return Ok(format!("{base} hook {subcommand}"));
         }
     }
     if let Ok(cli) = std::env::var("MONICA_CLI_PATH") {
         if !cli.is_empty() && Path::new(&cli).is_file() {
-            return Ok(format!("{} hook claude", quote_single(&cli)));
+            return Ok(format!("{} hook {subcommand}", quote_single(&cli)));
         }
     }
     if let Some(cli) = which_monica() {
-        return Ok(format!("{} hook claude", quote_single(&cli)));
+        return Ok(format!("{} hook {subcommand}", quote_single(&cli)));
     }
     Err(anyhow!(
         "cannot resolve monica CLI for hook command; \
@@ -204,33 +209,58 @@ fn merge_hooks_into_local_settings(existing: Option<&str>, hook_command: &str) -
     serde_json::to_string_pretty(&root).context("failed to serialize claude settings")
 }
 
-fn hooks_value(hook_command: &str) -> Value {
-    let hook_group = |matcher: &str| {
+fn write_codex_hooks(cwd: &Path, hook_command: &str) -> Result<String> {
+    let hooks_path = cwd.join(".codex").join("hooks.json");
+    let hooks_path_str = hooks_path.to_string_lossy().into_owned();
+
+    if std::env::var_os("HOME").is_some_and(|home| same_path(Path::new(&home), cwd)) {
+        return Ok(hooks_path_str);
+    }
+
+    let codex_dir = cwd.join(".codex");
+    fs::create_dir_all(&codex_dir)
+        .with_context(|| format!("failed to create {}", codex_dir.display()))?;
+    let body = serde_json::to_string_pretty(&codex_hooks_value(hook_command))
+        .context("failed to serialize codex hooks")?;
+    write_if_changed(&hooks_path, &body)?;
+    Ok(hooks_path_str)
+}
+
+fn base_hooks_map(hook_command: &str) -> serde_json::Map<String, Value> {
+    let hook_group = |matcher: &str| -> Value {
         json!({ "matcher": matcher, "hooks": [{ "type": "command", "command": hook_command }] })
     };
     let group = || json!([hook_group("")]);
-    json!({
-        "hooks": {
-            "SessionStart": group(),
-            "UserPromptSubmit": group(),
-            "PreToolUse": [
-                hook_group("AskUserQuestion"),
-                hook_group("ExitPlanMode"),
-            ],
-            "PostToolUse": [
-                hook_group("AskUserQuestion"),
-                hook_group("ExitPlanMode"),
-            ],
-            "Stop": group(),
-            "StopFailure": group(),
-            // Observation-only: a subagent (Task) starting/finishing in the parent
-            // session. No status transition is mapped for them (lifecycle leaves them
-            // inert), so they only land in hook-events.jsonl for investigation.
-            "SubagentStart": group(),
-            "SubagentStop": group(),
-            "SessionEnd": group(),
-        }
-    })
+    let tool_wait_groups = || {
+        json!([
+            hook_group("AskUserQuestion"),
+            hook_group("ExitPlanMode"),
+        ])
+    };
+    let mut map = serde_json::Map::new();
+    map.insert("SessionStart".into(), group());
+    map.insert("UserPromptSubmit".into(), group());
+    map.insert("PreToolUse".into(), tool_wait_groups());
+    map.insert("PostToolUse".into(), tool_wait_groups());
+    map.insert("Stop".into(), group());
+    map.insert("SubagentStart".into(), group());
+    map.insert("SubagentStop".into(), group());
+    map
+}
+
+fn codex_hooks_value(hook_command: &str) -> Value {
+    json!({ "hooks": Value::Object(base_hooks_map(hook_command)) })
+}
+
+fn hooks_value(hook_command: &str) -> Value {
+    let hook_group = |matcher: &str| -> Value {
+        json!({ "matcher": matcher, "hooks": [{ "type": "command", "command": hook_command }] })
+    };
+    let group = || json!([hook_group("")]);
+    let mut map = base_hooks_map(hook_command);
+    map.insert("StopFailure".into(), group());
+    map.insert("SessionEnd".into(), group());
+    json!({ "hooks": Value::Object(map) })
 }
 
 const CLAUDE_WRAPPER: &str = r#"#!/usr/bin/env bash
@@ -352,6 +382,45 @@ mod tests {
                 .and_then(Value::as_str);
             assert_eq!(cmd, Some("monica hook claude"), "{event}: command");
         }
+    }
+
+    #[test]
+    fn codex_hooks_value_contains_supported_events() {
+        let parsed = codex_hooks_value("monica hook codex");
+        for event in [
+            "SessionStart",
+            "UserPromptSubmit",
+            "PreToolUse",
+            "PostToolUse",
+            "Stop",
+            "SubagentStart",
+            "SubagentStop",
+        ] {
+            let cmd = parsed
+                .pointer(&format!("/hooks/{event}/0/hooks/0/command"))
+                .and_then(Value::as_str);
+            assert_eq!(cmd, Some("monica hook codex"), "{event}: command");
+        }
+    }
+
+    #[test]
+    fn codex_hooks_value_excludes_unsupported_events() {
+        let parsed = codex_hooks_value("monica hook codex");
+        assert!(parsed.pointer("/hooks/SessionEnd").is_none());
+        assert!(parsed.pointer("/hooks/StopFailure").is_none());
+    }
+
+    #[test]
+    fn write_codex_hooks_writes_into_cwd_dot_codex() {
+        let cwd = unique_temp_dir("codex-write");
+        let path = write_codex_hooks(&cwd, "monica hook codex").unwrap();
+        let expected = cwd.join(".codex").join("hooks.json");
+        assert_eq!(path, expected.to_string_lossy());
+        let body = fs::read_to_string(&expected).unwrap();
+        assert!(body.contains("monica hook codex"));
+        assert!(body.contains("SessionStart"));
+        assert!(!body.contains("SessionEnd"));
+        fs::remove_dir_all(&cwd).ok();
     }
 
     #[test]

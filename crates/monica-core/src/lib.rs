@@ -33,7 +33,7 @@ pub use usecases::{
     TerminalSessionUpdate, close_issue, create_raw_task, execute_run, get_project, github_auth_status,
     list_events, list_projects, list_task_summaries, list_tasks, logout_github,
     make_main_by_terminal_tab, primary_terminal_tab, MakeMainOutcome,
-    open_bench, prepare_claude_for_run, record_claude_hook, register_project, task_shell_env,
+    open_bench, prepare_claude_for_run, record_claude_hook, record_codex_hook, register_project, task_shell_env,
     register_project_with_default_branch, set_project_field, start_run, sync_next_pull_request,
     task_run_settlement_for_orphaned_run, task_run_settlement_for_terminal_exit, TerminalExitSettlement,
     track_github_issue,
