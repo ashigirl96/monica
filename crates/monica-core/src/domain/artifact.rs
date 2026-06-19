@@ -180,6 +180,9 @@ pub enum TimelineItem {
         body_preview: String,
         timeline_at: String,
         item_key: String,
+        updated_at: String,
+        project_name: Option<String>,
+        thumbnail_paths: Vec<String>,
     },
     TaskCreated {
         task_id: String,

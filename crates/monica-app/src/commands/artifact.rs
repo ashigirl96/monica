@@ -6,6 +6,14 @@ use monica_infra::Runtime;
 
 #[tauri::command]
 #[specta::specta]
+pub fn quick_save_memo(body: String) -> Result<Artifact, String> {
+    let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
+    monica_core::artifact_ops::quick_save_memo(&mut runtime.repositories, &body)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn create_draft(kind: ArtifactDraftKind) -> Result<ArtifactDraft, String> {
     let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
     monica_core::artifact_ops::create_draft(
@@ -140,13 +148,29 @@ pub fn list_timeline_items(
     limit: u32,
 ) -> Result<Vec<TimelineItem>, String> {
     let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_core::artifact_ops::list_timeline_items(
+    let mut items = monica_core::artifact_ops::list_timeline_items(
         &runtime.repositories,
         before.as_ref(),
         since.as_deref(),
         limit as usize,
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+
+    if let Ok(base) = monica_infra::filesystem::paths::base_dir() {
+        let att_base = base.join("attachments");
+        for item in &mut items {
+            if let TimelineItem::Artifact {
+                thumbnail_paths, ..
+            } = item
+            {
+                for path in thumbnail_paths.iter_mut() {
+                    *path = att_base.join(&*path).to_string_lossy().into_owned();
+                }
+            }
+        }
+    }
+
+    Ok(items)
 }
 
 #[tauri::command]

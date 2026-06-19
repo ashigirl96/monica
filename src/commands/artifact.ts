@@ -82,6 +82,10 @@ export function listTimelineItems(
   return unwrap(commands.listTimelineItems(before, since, limit));
 }
 
+export function quickSaveMemo(body: string) {
+  return unwrap(commands.quickSaveMemo(body));
+}
+
 export function attachImage(entryId: string, filePath: string) {
   return unwrap(commands.attachImage(entryId, filePath));
 }

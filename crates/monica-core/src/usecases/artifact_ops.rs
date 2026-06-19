@@ -6,6 +6,13 @@ use crate::domain::{
 };
 use crate::interfaces::ArtifactRepository;
 
+pub fn quick_save_memo(repo: &mut impl ArtifactRepository, body: &str) -> Result<Artifact> {
+    if body.trim().is_empty() {
+        bail!("memo body must not be empty");
+    }
+    repo.insert_saved_memo(body)
+}
+
 pub fn create_draft(repo: &mut impl ArtifactRepository, new: NewDraft) -> Result<ArtifactDraft> {
     repo.insert_draft(new)
 }
