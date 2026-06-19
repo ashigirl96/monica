@@ -56,6 +56,7 @@ pub trait ArtifactRepository {
         byte_size: i64,
         relative_path: &str,
     ) -> Result<Attachment>;
+    fn update_attachment_path(&mut self, id: &str, relative_path: &str) -> Result<Attachment>;
     fn delete_attachment(&mut self, id: &str) -> Result<Option<String>>;
     fn list_attachments(&self, entry_id: &str) -> Result<Vec<Attachment>>;
 }

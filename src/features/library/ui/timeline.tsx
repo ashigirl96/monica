@@ -16,7 +16,6 @@ export function TimelineView() {
   const hasMore = useAtomValue(timelineHasMoreAtom);
   const loading = useAtomValue(timelineLoadingAtom);
   const loadTimeline = useSetAtom(loadTimelineAtom);
-  const loadOlder = useSetAtom(loadTimelineAtom);
   const openArtifact = useSetAtom(openArtifactTabAtom);
   const setActiveSpace = useSetAtom(activeSpaceAtom);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -31,13 +30,13 @@ export function TimelineView() {
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting) loadOlder();
+        if (entries[0].isIntersecting) loadTimeline();
       },
       { rootMargin: "200px" },
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMore, loadOlder]);
+  }, [hasMore, loadTimeline]);
 
   const handleItemClick = useCallback(
     (item: TimelineItem) => {
@@ -57,7 +56,7 @@ export function TimelineView() {
           <div className="flex flex-col items-center gap-3 pt-20">
             <span className="text-[13px] text-muted-foreground/60">No activity yet</span>
             <button
-              onClick={() => loadOlder()}
+              onClick={() => loadTimeline()}
               className="text-[12px] text-muted-foreground/40 underline decoration-dotted underline-offset-4 transition-colors hover:text-muted-foreground"
             >
               Show older activity

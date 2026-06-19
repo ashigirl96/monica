@@ -3,6 +3,7 @@ import { atomWithQuery, queryClientAtom } from "jotai-tanstack-query";
 import { queryKeys } from "@/stores/query-keys";
 import {
   createDraft as createDraftCmd,
+  deleteDraft as deleteDraftCmd,
   listDrafts,
   listEssays,
   listIntentsByProject,
@@ -163,7 +164,7 @@ export const loadTimelineAtom = atom(null, async (get, set, reset?: boolean) => 
 
   try {
     const cursor = reset ? null : get(timelineCursorAtom);
-    const since = !cursor ? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString() : null;
+    const since = reset ? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString() : null;
     const items = await listTimelineItems(cursor, since, 30);
 
     if (reset) {
@@ -209,4 +210,9 @@ export const saveDraftAtom = atom(null, async (_get, set, draftId: string) => {
   set(promoteDraftToArtifactTabAtom, draftId, artifact.id);
   invalidateArtifacts();
   return artifact;
+});
+
+export const deleteDraftAtom = atom(null, async (_get, _set, draftId: string) => {
+  await deleteDraftCmd(draftId);
+  invalidateArtifacts();
 });

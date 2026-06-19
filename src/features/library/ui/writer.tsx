@@ -1,20 +1,28 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSetAtom } from "jotai";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
+  attachImage,
   getArtifact,
+  removeAttachment,
   updateArtifact,
   updateDraft,
   convertArtifactKind,
   deleteArtifact,
-  deleteDraft,
   listDrafts,
 } from "@/commands/artifact";
 import type { Artifact, ArtifactDraft, ArtifactDraftKind, ArtifactKind } from "@/commands/artifact";
-import { saveDraftAtom, closeLibraryTabAtom } from "@/features/library/store";
+import { saveDraftAtom, deleteDraftAtom, closeLibraryTabAtom } from "@/features/library/store";
 
 type WriterProps = { mode: "draft"; draftId: string } | { mode: "artifact"; artifactId: string };
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
+type SaveTarget = {
+  mode: WriterProps["mode"];
+  data: ArtifactDraft | Artifact;
+  entityKey: string;
+  revision: number;
+};
 
 export function Writer(props: WriterProps) {
   const [data, setData] = useState<ArtifactDraft | Artifact | null>(null);
@@ -22,69 +30,133 @@ export function Writer(props: WriterProps) {
   const [title, setTitle] = useState("");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const saveDraft = useSetAtom(saveDraftAtom);
+  const deleteDraft = useSetAtom(deleteDraftAtom);
   const closeTab = useSetAtom(closeLibraryTabAtom);
   const debounceRef = useRef<number>(0);
   const revisionRef = useRef(0);
+  const dataRef = useRef(data);
   const bodyRef = useRef(body);
   const titleRef = useRef(title);
+  dataRef.current = data;
   bodyRef.current = body;
   titleRef.current = title;
 
   const entityId = props.mode === "draft" ? props.draftId : props.artifactId;
+  const entityKey = `${props.mode}:${entityId}`;
+  const entityKeyRef = useRef(entityKey);
+  entityKeyRef.current = entityKey;
 
   useEffect(() => {
+    let cancelled = false;
+
     async function load() {
+      setData(null);
+      setBody("");
+      setTitle("");
+      setSaveStatus("idle");
+
       if (props.mode === "draft") {
         const drafts = await listDrafts();
         const draft = drafts.find((d) => d.id === entityId);
-        if (draft) {
+        if (draft && !cancelled) {
           setData(draft);
           setBody(draft.body);
+          setTitle(titleFromKind(draft.kind));
           revisionRef.current = draft.revision;
-          if (draft.kind.type !== "memo" && draft.kind.title) {
-            setTitle(draft.kind.title);
-          }
         }
       } else {
         const artifact = await getArtifact(entityId);
-        if (artifact) {
+        if (artifact && !cancelled) {
           setData(artifact);
           setBody(artifact.body);
+          setTitle(titleFromKind(artifact.kind));
           revisionRef.current = artifact.revision;
-          if (artifact.kind.type !== "memo" && artifact.kind.title) {
-            setTitle(artifact.kind.title);
-          }
         }
       }
     }
     load();
+    return () => {
+      cancelled = true;
+    };
   }, [props.mode, entityId]);
 
-  const autoSave = useCallback(
-    async (newBody: string, newTitle: string) => {
-      if (!data) return;
-      setSaveStatus("saving");
-      try {
-        if (props.mode === "draft") {
-          const kind = buildDraftKind(data.kind, newTitle);
-          const updated = await updateDraft(data.id, kind, newBody, null, revisionRef.current);
+  const persistTarget = useCallback(
+    async (target: SaveTarget, newBody: string, newTitle: string) => {
+      const isCurrentTarget = entityKeyRef.current === target.entityKey;
+      const expectedRevision = isCurrentTarget ? revisionRef.current : target.revision;
+
+      if (target.mode === "draft") {
+        const kind = buildDraftKind(target.data.kind, newTitle);
+        const updated = await updateDraft(target.data.id, kind, newBody, null, expectedRevision);
+        if (isCurrentTarget) {
           revisionRef.current = updated.revision;
-        } else {
-          const kind = buildArtifactKind(data.kind, newTitle);
-          const updated = await updateArtifact(data.id, kind, newBody, null, revisionRef.current);
-          revisionRef.current = updated.revision;
+          setData(updated);
         }
-        setSaveStatus("saved");
-      } catch {
-        setSaveStatus("error");
+        return;
+      }
+
+      const kind = buildArtifactKind(target.data.kind, newTitle);
+      const updated = await updateArtifact(target.data.id, kind, newBody, null, expectedRevision);
+      if (isCurrentTarget) {
+        revisionRef.current = updated.revision;
+        setData(updated);
       }
     },
-    [data, props.mode],
+    [],
   );
 
-  function scheduleAutoSave(newBody: string, newTitle: string) {
+  const autoSave = useCallback(
+    async (target: SaveTarget, newBody: string, newTitle: string) => {
+      const isCurrentTarget = entityKeyRef.current === target.entityKey;
+      if (isCurrentTarget) setSaveStatus("saving");
+      try {
+        await persistTarget(target, newBody, newTitle);
+        if (isCurrentTarget) setSaveStatus("saved");
+      } catch {
+        if (isCurrentTarget) setSaveStatus("error");
+      }
+    },
+    [persistTarget],
+  );
+
+  const clearPendingAutoSave = useCallback(() => {
     clearTimeout(debounceRef.current);
-    debounceRef.current = window.setTimeout(() => autoSave(newBody, newTitle), 800);
+    debounceRef.current = 0;
+  }, []);
+
+  const flushCurrentEdit = useCallback(async () => {
+    clearPendingAutoSave();
+    const current = dataRef.current;
+    if (!current) return false;
+
+    const target: SaveTarget = {
+      mode: props.mode,
+      data: current,
+      entityKey: entityKeyRef.current,
+      revision: revisionRef.current,
+    };
+
+    setSaveStatus("saving");
+    try {
+      await persistTarget(target, bodyRef.current, titleRef.current);
+      setSaveStatus("saved");
+      return true;
+    } catch {
+      setSaveStatus("error");
+      return false;
+    }
+  }, [clearPendingAutoSave, persistTarget, props.mode]);
+
+  function scheduleAutoSave(newBody: string, newTitle: string) {
+    if (!data) return;
+    const target: SaveTarget = {
+      mode: props.mode,
+      data,
+      entityKey,
+      revision: revisionRef.current,
+    };
+    clearPendingAutoSave();
+    debounceRef.current = window.setTimeout(() => void autoSave(target, newBody, newTitle), 800);
   }
 
   function handleBodyChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
@@ -100,17 +172,22 @@ export function Writer(props: WriterProps) {
   }
 
   const handleSave = useCallback(async () => {
-    if (!data) return;
-    clearTimeout(debounceRef.current);
+    const current = dataRef.current;
+    if (!current) return;
+    const flushed = await flushCurrentEdit();
+    if (!flushed) return;
     if (props.mode === "draft") {
-      await saveDraft(data.id);
-    } else {
-      await autoSave(bodyRef.current, titleRef.current);
+      try {
+        await saveDraft(current.id);
+      } catch {
+        setSaveStatus("error");
+      }
     }
-  }, [data, props.mode, saveDraft, autoSave]);
+  }, [props.mode, saveDraft, flushCurrentEdit]);
 
   async function handleDelete() {
     if (!data) return;
+    clearPendingAutoSave();
     if (props.mode === "draft") {
       await deleteDraft(data.id);
     } else {
@@ -121,6 +198,8 @@ export function Writer(props: WriterProps) {
 
   async function handleConvertKind(targetType: "memo" | "essay" | "intent") {
     if (!data || props.mode === "draft") return;
+    const flushed = await flushCurrentEdit();
+    if (!flushed) return;
     const existingProjectId = data.kind.type === "intent" ? (data.kind.project_id ?? null) : null;
     let target: ArtifactKind;
     switch (targetType) {
@@ -141,8 +220,65 @@ export function Writer(props: WriterProps) {
     const converted = await convertArtifactKind(data.id, target, revisionRef.current);
     revisionRef.current = converted.revision;
     setData(converted);
-    if (converted.kind.type === "memo") setTitle("");
+    setTitle(titleFromKind(converted.kind));
   }
+
+  const handleDroppedFiles = useCallback(async (paths: string[]) => {
+    const current = dataRef.current;
+    if (!current || paths.length === 0) return;
+    const targetId = current.id;
+    setSaveStatus("saving");
+    try {
+      const attachments = await Promise.all(paths.map((path) => attachImage(targetId, path)));
+      setData((prev) =>
+        prev?.id === targetId
+          ? { ...prev, attachments: [...prev.attachments, ...attachments] }
+          : prev,
+      );
+      setSaveStatus("saved");
+    } catch {
+      setSaveStatus("error");
+    }
+  }, []);
+
+  async function handleRemoveAttachment(id: string) {
+    setSaveStatus("saving");
+    try {
+      await removeAttachment(id);
+      setData((current) =>
+        current
+          ? { ...current, attachments: current.attachments.filter((a) => a.id !== id) }
+          : current,
+      );
+      setSaveStatus("saved");
+    } catch {
+      setSaveStatus("error");
+    }
+  }
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+
+    getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (event.payload.type === "drop") {
+          void handleDroppedFiles(event.payload.paths);
+        }
+      })
+      .then((fn) => {
+        if (disposed) {
+          fn();
+        } else {
+          unlisten = fn;
+        }
+      });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [handleDroppedFiles]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -230,6 +366,27 @@ export function Writer(props: WriterProps) {
             placeholder="Write something…"
             className="min-h-[60vh] w-full resize-none border-none bg-transparent text-[14px] leading-relaxed text-foreground/90 placeholder:text-muted-foreground/20 focus:outline-none"
           />
+          {data.attachments.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {data.attachments.map((attachment) => (
+                <div
+                  key={attachment.id}
+                  className="flex max-w-full items-center gap-2 rounded-md bg-white/[0.06] px-2 py-1"
+                >
+                  <span className="truncate text-[11px] text-muted-foreground/70">
+                    {attachment.original_file_name}
+                  </span>
+                  <button
+                    onClick={() => handleRemoveAttachment(attachment.id)}
+                    aria-label={`Remove ${attachment.original_file_name}`}
+                    className="text-[12px] text-muted-foreground/40 transition-colors hover:text-destructive"
+                  >
+                    x
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -249,6 +406,10 @@ function buildDraftKind(
     default:
       return { type: "memo" };
   }
+}
+
+function titleFromKind(kind: ArtifactDraftKind | ArtifactKind): string {
+  return kind.type === "memo" ? "" : (kind.title ?? "");
 }
 
 function buildArtifactKind(

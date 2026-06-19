@@ -363,6 +363,25 @@ impl ArtifactRepository for SqliteStore {
         Ok(attachment)
     }
 
+    fn update_attachment_path(&mut self, id: &str, relative_path: &str) -> Result<Attachment> {
+        let updated = self.conn().execute(
+            "UPDATE library_attachments SET relative_path = ?1 WHERE id = ?2",
+            params![relative_path, id],
+        )?;
+        if updated == 0 {
+            bail!("attachment {id} not found");
+        }
+        let mut stmt = self.conn().prepare(
+            "SELECT id, entry_id, original_file_name, mime_type, byte_size, relative_path, created_at
+             FROM library_attachments WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query(params![id])?;
+        match rows.next()? {
+            Some(row) => Ok(attachment_from_row(row)?),
+            None => Err(anyhow!("attachment {id} not found after update")),
+        }
+    }
+
     fn delete_attachment(&mut self, id: &str) -> Result<Option<String>> {
         let path: Option<String> = self
             .conn()

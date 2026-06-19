@@ -1,9 +1,8 @@
 import { commands, events, type PrSyncCompleted } from "./bindings";
+import { unwrap } from "./unwrap";
 
-export function forceSyncPullRequests(): Promise<void> {
-  return commands.forceSyncPullRequests().then((r) => {
-    if (r.status === "error") throw new Error(r.error);
-  });
+export async function forceSyncPullRequests(): Promise<void> {
+  await unwrap(commands.forceSyncPullRequests());
 }
 
 export function onPrSyncCompleted(cb: (payload: PrSyncCompleted) => void) {

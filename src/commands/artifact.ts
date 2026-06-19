@@ -81,3 +81,11 @@ export function listTimelineItems(
 ) {
   return unwrap(commands.listTimelineItems(before, since, limit));
 }
+
+export function attachImage(entryId: string, filePath: string) {
+  return unwrap(commands.attachImage(entryId, filePath));
+}
+
+export function removeAttachment(id: string) {
+  return unwrap(commands.removeAttachment(id));
+}

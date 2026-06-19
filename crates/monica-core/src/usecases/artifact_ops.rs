@@ -162,18 +162,28 @@ pub fn attach_image_from_path(
         .unwrap_or("image")
         .to_string();
 
-    let ext = source
+    let Some(ext) = source
         .extension()
         .and_then(|e| e.to_str())
-        .unwrap_or("bin");
+        .filter(|e| !e.is_empty())
+    else {
+        bail!("unsupported image extension: {}", source.display());
+    };
+    let Some(mime_type) = mime_from_extension(ext) else {
+        bail!("unsupported image extension: .{ext}");
+    };
 
     let byte_size = fs::metadata(source)?.len() as i64;
-    let mime_type = mime_from_extension(ext);
 
     fs::create_dir_all(attachments_dir)?;
 
-    let temp_att =
-        repo.insert_attachment(entry_id, &original_file_name, mime_type, byte_size, "pending")?;
+    let temp_att = repo.insert_attachment(
+        entry_id,
+        &original_file_name,
+        Some(mime_type),
+        byte_size,
+        "pending",
+    )?;
 
     let dest_name = format!("{}.{}", temp_att.id, ext);
     let relative_path = format!("{entry_id}/{dest_name}");
@@ -184,6 +194,5 @@ pub fn attach_image_from_path(
         bail!("failed to copy image: {e}");
     }
 
-    repo.delete_attachment(&temp_att.id)?;
-    repo.insert_attachment(entry_id, &original_file_name, mime_type, byte_size, &relative_path)
+    repo.update_attachment_path(&temp_att.id, &relative_path)
 }
