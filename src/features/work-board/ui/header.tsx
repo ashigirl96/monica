@@ -5,11 +5,11 @@ import {
   createRawTaskMutationAtom,
   newTaskOpenAtom,
   projectFilterOpenAtom,
-  projectsAtom,
   selectedProjectAtom,
   trackIssueMutationAtom,
 } from "@/stores/workboard";
-import { ProjectFilterModal } from "./project-filter-modal";
+import { projectsAtom } from "@/stores/projects";
+import { ProjectPickerModal } from "@/components/project-picker-modal";
 import { prSyncLastSyncedAtom } from "@/stores/pr-sync";
 import { XIcon } from "@/components/icons";
 import { cn } from "@/lib/utils";
@@ -262,7 +262,7 @@ function ProjectFilterBadge() {
           </button>
         </span>
       )}
-      {open && <ProjectFilterModal onClose={() => setOpen(false)} onSelect={setSelected} />}
+      {open && <ProjectPickerModal onClose={() => setOpen(false)} onSelect={setSelected} />}
     </>
   );
 }

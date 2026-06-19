@@ -4,7 +4,6 @@ import {
   listTaskSummaries,
   getBoardColumns,
   trackGithubIssue,
-  listProjects,
   createRawTask,
   prepareTask,
   type TaskSummaryRow,
@@ -85,12 +84,6 @@ const taskSummaryByIdQueryAtom = atomWithQuery(() => ({
 export const taskSummaryByIdAtom = atom<Record<string, RunspaceTaskSummary>>(
   (get) => get(taskSummaryByIdQueryAtom).data ?? {},
 );
-
-const projectsQueryAtom = atomWithQuery(() => ({
-  queryKey: queryKeys.projects.list(),
-  queryFn: () => listProjects(),
-}));
-export const projectsAtom = atom((get) => get(projectsQueryAtom).data ?? []);
 
 export const trackIssueMutationAtom = atomWithMutation((get) => ({
   mutationFn: (input: string) => trackGithubIssue(input),

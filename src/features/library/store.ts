@@ -1,4 +1,4 @@
-import { atom, getDefaultStore } from "jotai";
+import { atom } from "jotai";
 import { atomWithQuery, queryClientAtom } from "jotai-tanstack-query";
 import { queryKeys } from "@/stores/query-keys";
 import {
@@ -190,14 +190,13 @@ export const loadTimelineAtom = atom(null, async (get, set, reset?: boolean) => 
   }
 });
 
-function invalidateArtifacts() {
-  const client = getDefaultStore().get(queryClientAtom);
-  client.invalidateQueries({ queryKey: queryKeys.artifacts.family() });
-}
+export const invalidateLibraryArtifactsAtom = atom(null, (get) =>
+  get(queryClientAtom).invalidateQueries({ queryKey: queryKeys.artifacts.family() }),
+);
 
 export const quickSaveMemoAtom = atom(null, async (_get, set, body: string) => {
   await quickSaveMemoCmd(body);
-  invalidateArtifacts();
+  set(invalidateLibraryArtifactsAtom);
   set(loadTimelineAtom, true);
 });
 
@@ -212,31 +211,31 @@ export const createNewDraftAtom = atom(null, async (get, set) => {
 
   const draft = await createDraftCmd(kind);
   set(openDraftTabAtom, draft.id);
-  invalidateArtifacts();
+  set(invalidateLibraryArtifactsAtom);
 });
 
 export const saveDraftAtom = atom(null, async (_get, set, draftId: string) => {
   const artifact = await saveDraftCmd(draftId);
   set(promoteDraftToArtifactTabAtom, draftId, artifact.id);
-  invalidateArtifacts();
+  set(invalidateLibraryArtifactsAtom);
   return artifact;
 });
 
-export const deleteDraftAtom = atom(null, async (_get, _set, draftId: string) => {
+export const deleteDraftAtom = atom(null, async (_get, set, draftId: string) => {
   await deleteDraftCmd(draftId);
-  invalidateArtifacts();
+  set(invalidateLibraryArtifactsAtom);
 });
 
-export const deleteArtifactAtom = atom(null, async (_get, _set, id: string) => {
+export const deleteArtifactAtom = atom(null, async (_get, set, id: string) => {
   await deleteArtifactCmd(id);
-  invalidateArtifacts();
+  set(invalidateLibraryArtifactsAtom);
 });
 
 export const convertArtifactKindAtom = atom(
   null,
-  async (_get, _set, args: { id: string; targetKind: ArtifactKind; expectedRevision: number }) => {
+  async (_get, set, args: { id: string; targetKind: ArtifactKind; expectedRevision: number }) => {
     const artifact = await convertArtifactKindCmd(args.id, args.targetKind, args.expectedRevision);
-    invalidateArtifacts();
+    set(invalidateLibraryArtifactsAtom);
     return artifact;
   },
 );
