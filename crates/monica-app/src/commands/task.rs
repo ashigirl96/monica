@@ -172,12 +172,13 @@ pub async fn close_task(task_id: String) -> Result<(), String> {
 
 #[tauri::command]
 #[specta::specta]
-pub fn run_task(task_id: String) -> Result<RunTaskResult, String> {
+pub fn run_task(task_id: String, agent: Option<monica_core::Agent>) -> Result<RunTaskResult, String> {
     let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
     monica_core::prepare_claude_for_run(
         &mut runtime.repositories,
         &runtime.task_run_outputs,
         &task_id,
+        agent,
     )
     .map_err(|e| e.to_string())
 }

@@ -6,7 +6,7 @@ pub mod create_raw_task;
 pub mod make_main;
 pub mod query;
 pub mod reconcile_terminal_sessions;
-pub mod record_claude_hook;
+pub mod record_hook;
 pub mod register_project;
 pub mod run_task;
 pub mod settle_terminal_exit;
@@ -28,7 +28,7 @@ pub use query::{
 pub use reconcile_terminal_sessions::{
     reconcile_terminal_sessions, DaemonSessionView, ReconcileOutcome, TerminalSessionUpdate,
 };
-pub use record_claude_hook::{record_claude_hook, HookContext, HookReport};
+pub use record_hook::{record_claude_hook, record_codex_hook, HookContext, HookReport};
 pub use register_project::{register_project, register_project_with_default_branch};
 pub use run_task::{execute_run, prepare_claude_for_run, start_run};
 pub use settle_terminal_exit::{

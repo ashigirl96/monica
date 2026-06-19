@@ -86,6 +86,7 @@ impl TaskRunStatus {
 pub enum TaskRunWaitReason {
     AskUserQuestion,
     ExitPlanMode,
+    PermissionRequest,
     AwaitingPrompt,
 }
 
@@ -94,12 +95,10 @@ impl TaskRunWaitReason {
         self.into()
     }
 
-    /// Tool-specific waits (a pending question or plan approval) outrank the generic
-    /// "type a prompt" wait: protection rules and the side-run attention count both key off
-    /// this set — the stores build their SQL IN-lists from it, so a new variant lands there too.
-    pub const TOOL_WAITS: [TaskRunWaitReason; 2] = [
+    pub const TOOL_WAITS: [TaskRunWaitReason; 3] = [
         TaskRunWaitReason::AskUserQuestion,
         TaskRunWaitReason::ExitPlanMode,
+        TaskRunWaitReason::PermissionRequest,
     ];
 
     pub fn is_tool_wait(self) -> bool {

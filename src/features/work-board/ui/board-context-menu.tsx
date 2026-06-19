@@ -7,13 +7,17 @@ import { type OpenTarget, openTargets } from "@/features/work-board/github-urls"
 import { IssueIcon, PrIcon } from "@/features/work-board/ui/github-icons";
 import { taskSummariesAtom } from "@/stores/workboard";
 import {
+  AGENT_TARGETS,
   MENU_ITEMS,
   executeMenuItemAtom,
+  executeRunAtom,
   exitOpenSubmenuAtom,
+  exitRunSubmenuAtom,
   isItemDisabled,
   menuAtom,
   setMenuItemIndexAtom,
   setOpenIndexAtom,
+  setRunIndexAtom,
   type MenuState,
 } from "@/features/work-board/nav";
 
@@ -31,10 +35,12 @@ function MenuPopover({ menu }: { menu: MenuState }) {
 
   return (
     <PopoverMenu anchor={menu.anchor} onClose={() => setMenu(null)}>
-      {menu.openIndex === null ? (
-        <ItemList menu={menu} task={task} />
-      ) : (
+      {menu.runIndex !== null ? (
+        <RunSubmenu runIndex={menu.runIndex} />
+      ) : menu.openIndex !== null ? (
         <OpenSubmenu openIndex={menu.openIndex} targets={openTargets(task)} />
+      ) : (
+        <ItemList menu={menu} task={task} />
       )}
     </PopoverMenu>
   );
@@ -140,6 +146,52 @@ function OpenSubmenu({ openIndex, targets }: { openIndex: number; targets: OpenT
             ) : (
               <span className={cn("size-1.5 shrink-0 rounded-full", prStatusDot(target))} />
             )}
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
+function RunSubmenu({ runIndex }: { runIndex: number }) {
+  const setRunIndex = useSetAtom(setRunIndexAtom);
+  const executeRun = useSetAtom(executeRunAtom);
+  const exitSubmenu = useSetAtom(exitRunSubmenuAtom);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => exitSubmenu()}
+        className="group flex w-full items-center justify-between rounded px-2 py-1 text-left text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <span className="flex items-center gap-1">
+          <span aria-hidden className="transition-transform group-hover:-translate-x-0.5">
+            ‹
+          </span>
+          <span className="font-medium tracking-wide uppercase">Run</span>
+        </span>
+        <span className="font-mono text-[10px] opacity-60">esc</span>
+      </button>
+      <div className="my-1 h-px bg-border" />
+      {AGENT_TARGETS.map((target, i) => {
+        const selected = i === runIndex;
+        return (
+          <button
+            key={target.agent}
+            type="button"
+            onMouseEnter={() => setRunIndex(i)}
+            onClick={() => {
+              setRunIndex(i);
+              executeRun();
+            }}
+            className={cn(
+              "flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-[12px] text-popover-foreground",
+              selected && "bg-accent text-accent-foreground",
+            )}
+          >
+            <span>{target.label}</span>
+            <span className="font-mono text-[10px] text-muted-foreground">{target.hint}</span>
           </button>
         );
       })}

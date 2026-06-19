@@ -14,10 +14,12 @@ use super::status::{TaskRunStatus, TaskRunWaitReason};
     strum::IntoStaticStr,
     strum::EnumString,
 )]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum Agent {
     Claude,
+    Codex,
 }
 
 impl Agent {

@@ -1,3 +1,4 @@
+import type { Agent } from "@/commands/bindings";
 import {
   listTaskSummaries,
   onTaskRunStatusChanged,
@@ -70,7 +71,10 @@ function waitForPreparedOrFailed(taskId: string): {
 
 const runTaskInFlight = new Set<string>();
 
-export async function runTaskFlow(taskId: string): Promise<RunFlowResult | null> {
+export async function runTaskFlow(
+  taskId: string,
+  agent: Agent | null = null,
+): Promise<RunFlowResult | null> {
   if (runTaskInFlight.has(taskId)) return null;
   runTaskInFlight.add(taskId);
   try {
@@ -91,7 +95,7 @@ export async function runTaskFlow(taskId: string): Promise<RunFlowResult | null>
       await waiter.promise;
     }
 
-    const launch = await runTask(taskId);
+    const launch = await runTask(taskId, agent);
 
     // The launch env (with run ids) is consumed by the first tab only; the runspace
     // needs the plain task shell env so later tabs still get the Monica context +

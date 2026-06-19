@@ -2141,7 +2141,7 @@ fn prepare_claude_for_run_rejects_non_prepared_primary() {
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
     start_run(&mut repos, &task_id).unwrap();
 
-    let err = prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id).unwrap_err();
+    let err = prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap_err();
     assert!(err.to_string().contains("expected prepared"), "{err}");
 }
 
@@ -2155,13 +2155,13 @@ fn prepare_claude_for_run_rejects_missing_worktree() {
         .finish_task_run(&prep.task_run_id, &task_id, TaskRunStatus::Prepared)
         .unwrap();
 
-    let err = prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id).unwrap_err();
+    let err = prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap_err();
     assert!(err.to_string().contains("no worktree path"), "{err}");
 
     repos
         .set_task_run_worktree_path(&prep.task_run_id, "/nonexistent/worktree")
         .unwrap();
-    let err = prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id).unwrap_err();
+    let err = prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap_err();
     assert!(err.to_string().contains("worktree does not exist"), "{err}");
 }
 
@@ -2193,7 +2193,7 @@ fn prepare_claude_for_run_seeds_prompt_for_issue_backed_task() {
 
     let worktree = prepared_run_with_worktree(&mut repos, &task_id, "do the thing");
     let result =
-        prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id).unwrap();
+        prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap();
     std::fs::remove_dir_all(&worktree).ok();
 
     assert_eq!(result.initial_command, "claude 'do the thing'");
@@ -2209,7 +2209,7 @@ fn prepare_claude_for_run_ignores_prompt_for_raw_task() {
 
     let worktree = prepared_run_with_worktree(&mut repos, &task_id, "leftover prompt");
     let result =
-        prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id).unwrap();
+        prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap();
     std::fs::remove_dir_all(&worktree).ok();
 
     assert_eq!(result.initial_command, "claude");

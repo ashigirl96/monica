@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use super::{TaskRunStatus, TaskRunWaitReason};
+use super::{Agent, TaskRunStatus, TaskRunWaitReason};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HookTransition {
@@ -30,47 +30,6 @@ const AWAITING_PROMPT: HookTransition = HookTransition {
     status: TaskRunStatus::WaitingForUser,
     wait_reason: Some(TaskRunWaitReason::AwaitingPrompt),
 };
-
-pub fn transition_for_claude_event(
-    event_name: &str,
-    payload: Option<&Value>,
-) -> Option<HookTransition> {
-    if event_name == "PreToolUse" {
-        let wait_reason = payload_tool_wait_reason(payload)?;
-        return Some(HookTransition {
-            status: TaskRunStatus::WaitingForUser,
-            wait_reason: Some(wait_reason),
-        });
-    }
-    if event_name == "PostToolUse" {
-        payload_tool_wait_reason(payload)?;
-        return Some(HookTransition {
-            status: TaskRunStatus::Running,
-            wait_reason: None,
-        });
-    }
-
-    match event_name {
-        // A fresh session has not run anything yet; the ball is in the user's court until the
-        // first prompt lands. Stop means the turn finished — same court.
-        "SessionStart" => Some(AWAITING_PROMPT),
-        "Stop" => Some(AWAITING_PROMPT),
-        "UserPromptSubmit" => Some(HookTransition {
-            status: TaskRunStatus::Running,
-            wait_reason: None,
-        }),
-        "SessionEnd" => Some(HookTransition {
-            status: TaskRunStatus::Stopped,
-            wait_reason: None,
-        }),
-        // StopFailure is an API-level turn error (rate limit, model_not_found, …): recoverable,
-        // and it fires for subagents too under the parent's own session id — so it is never the
-        // run's verdict. It stays logged for diagnostics but moves nothing; the only Failed left
-        // is a prepare failure (claude was never launched), and a genuine death arrives as
-        // SessionEnd / orphan settlement → Stopped.
-        _ => None,
-    }
-}
 
 pub fn transition_is_generic_wait(next: HookTransition) -> bool {
     next == AWAITING_PROMPT
@@ -234,7 +193,51 @@ pub fn is_continuation_session_start(event_name: Option<&str>, payload: Option<&
     )
 }
 
-pub fn should_ignore_claude_event(event_name: Option<&str>, payload: Option<&Value>) -> bool {
+pub fn transition_for_event(
+    agent: Agent,
+    event_name: &str,
+    payload: Option<&Value>,
+) -> Option<HookTransition> {
+    if event_name == "PreToolUse" {
+        let wait_reason = payload_tool_wait_reason(payload)?;
+        return Some(HookTransition {
+            status: TaskRunStatus::WaitingForUser,
+            wait_reason: Some(wait_reason),
+        });
+    }
+    if event_name == "PostToolUse" {
+        payload_tool_wait_reason(payload)?;
+        return Some(HookTransition {
+            status: TaskRunStatus::Running,
+            wait_reason: None,
+        });
+    }
+
+    match event_name {
+        "SessionStart" => Some(AWAITING_PROMPT),
+        "Stop" => Some(AWAITING_PROMPT),
+        "UserPromptSubmit" => Some(HookTransition {
+            status: TaskRunStatus::Running,
+            wait_reason: None,
+        }),
+        "PermissionRequest" if agent == Agent::Codex => Some(HookTransition {
+            status: TaskRunStatus::WaitingForUser,
+            wait_reason: Some(TaskRunWaitReason::PermissionRequest),
+        }),
+        // Codex has no SessionEnd hook; termination relies on orphan settlement.
+        "SessionEnd" if agent == Agent::Claude => Some(HookTransition {
+            status: TaskRunStatus::Stopped,
+            wait_reason: None,
+        }),
+        _ => None,
+    }
+}
+
+pub fn should_ignore_event(
+    _agent: Agent,
+    event_name: Option<&str>,
+    payload: Option<&Value>,
+) -> bool {
     matches!(event_name, Some("PreToolUse" | "PostToolUse"))
         && payload_tool_wait_reason(payload).is_none()
 }
@@ -280,7 +283,7 @@ mod tests {
         ];
         for (event, expected) in cases {
             assert_eq!(
-                transition_for_claude_event(event, None).map(|t| (t.status, t.wait_reason)),
+                transition_for_event(Agent::Claude,event, None).map(|t| (t.status, t.wait_reason)),
                 expected,
                 "{event}"
             );
@@ -290,7 +293,7 @@ mod tests {
     #[test]
     fn tool_use_wait_transitions_are_detected_from_tool_name() {
         assert_eq!(
-            transition_for_claude_event(
+            transition_for_event(Agent::Claude,
                 "PreToolUse",
                 Some(&json!({"tool_name": "AskUserQuestion"}))
             ),
@@ -300,17 +303,17 @@ mod tests {
             })
         );
         assert_eq!(
-            transition_for_claude_event("PreToolUse", Some(&json!({"tool_name": "ExitPlanMode"})))
+            transition_for_event(Agent::Claude,"PreToolUse", Some(&json!({"tool_name": "ExitPlanMode"})))
                 .unwrap()
                 .wait_reason,
             Some(TaskRunWaitReason::ExitPlanMode)
         );
         assert!(
-            transition_for_claude_event("PreToolUse", Some(&json!({"tool_name": "Read"})))
+            transition_for_event(Agent::Claude,"PreToolUse", Some(&json!({"tool_name": "Read"})))
                 .is_none()
         );
         assert_eq!(
-            transition_for_claude_event(
+            transition_for_event(Agent::Claude,
                 "PostToolUse",
                 Some(&json!({"tool_name": "AskUserQuestion"}))
             ),
@@ -320,7 +323,7 @@ mod tests {
             })
         );
         assert!(
-            transition_for_claude_event("PostToolUse", Some(&json!({"tool_name": "Read"})))
+            transition_for_event(Agent::Claude,"PostToolUse", Some(&json!({"tool_name": "Read"})))
                 .is_none()
         );
     }
@@ -647,5 +650,105 @@ mod tests {
         assert!(!is_safe_task_run_id("../x"));
         assert!(!is_safe_task_run_id("a/b"));
         assert!(!is_safe_task_run_id("-rf"));
+    }
+
+    #[test]
+    fn codex_lifecycle_events_map_to_run_transitions() {
+        let cases = [
+            (
+                "SessionStart",
+                Some((
+                    TaskRunStatus::WaitingForUser,
+                    Some(TaskRunWaitReason::AwaitingPrompt),
+                )),
+            ),
+            ("UserPromptSubmit", Some((TaskRunStatus::Running, None))),
+            (
+                "Stop",
+                Some((
+                    TaskRunStatus::WaitingForUser,
+                    Some(TaskRunWaitReason::AwaitingPrompt),
+                )),
+            ),
+            (
+                "PermissionRequest",
+                Some((
+                    TaskRunStatus::WaitingForUser,
+                    Some(TaskRunWaitReason::PermissionRequest),
+                )),
+            ),
+            ("PreCompact", None),
+            ("PostCompact", None),
+        ];
+        for (event, expected) in cases {
+            assert_eq!(
+                transition_for_event(Agent::Codex, event, None).map(|t| (t.status, t.wait_reason)),
+                expected,
+                "{event}"
+            );
+        }
+    }
+
+    #[test]
+    fn codex_tool_use_wait_transitions() {
+        assert_eq!(
+            transition_for_event(
+                Agent::Codex,
+                "PreToolUse",
+                Some(&json!({"tool_name": "AskUserQuestion"}))
+            ),
+            Some(HookTransition {
+                status: TaskRunStatus::WaitingForUser,
+                wait_reason: Some(TaskRunWaitReason::AskUserQuestion),
+            })
+        );
+        assert!(
+            transition_for_event(Agent::Codex, "PreToolUse", Some(&json!({"tool_name": "Read"}))).is_none()
+        );
+        assert_eq!(
+            transition_for_event(
+                Agent::Codex,
+                "PostToolUse",
+                Some(&json!({"tool_name": "AskUserQuestion"}))
+            ),
+            Some(HookTransition {
+                status: TaskRunStatus::Running,
+                wait_reason: None,
+            })
+        );
+    }
+
+    #[test]
+    fn codex_has_no_session_end_transition() {
+        assert!(transition_for_event(Agent::Codex, "SessionEnd", None).is_none());
+    }
+
+    #[test]
+    fn should_ignore_event_filters_non_wait_tool_use_for_all_agents() {
+        for agent in [Agent::Claude, Agent::Codex] {
+            assert!(should_ignore_event(
+                agent,
+                Some("PreToolUse"),
+                Some(&json!({"tool_name": "Read"}))
+            ));
+            assert!(!should_ignore_event(
+                agent,
+                Some("PreToolUse"),
+                Some(&json!({"tool_name": "AskUserQuestion"}))
+            ));
+            assert!(!should_ignore_event(agent, Some("SessionStart"), None));
+        }
+    }
+
+    #[test]
+    fn session_end_only_transitions_for_claude() {
+        assert_eq!(
+            transition_for_event(Agent::Claude, "SessionEnd", None),
+            Some(HookTransition {
+                status: TaskRunStatus::Stopped,
+                wait_reason: None,
+            })
+        );
+        assert!(transition_for_event(Agent::Codex, "SessionEnd", None).is_none());
     }
 }

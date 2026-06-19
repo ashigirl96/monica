@@ -1,5 +1,5 @@
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { commands, events, type TaskRunStatusChanged } from "./bindings";
+import { commands, events, type Agent, type TaskRunStatusChanged } from "./bindings";
 
 export type {
   TaskSummaryRow,
@@ -52,8 +52,8 @@ export function prepareTask(taskId: string) {
   return unwrap(commands.prepareTask(taskId));
 }
 
-export function runTask(taskId: string) {
-  return unwrap(commands.runTask(taskId));
+export function runTask(taskId: string, agent: Agent | null = null) {
+  return unwrap(commands.runTask(taskId, agent));
 }
 
 export function closeTask(taskId: string) {
