@@ -137,10 +137,7 @@ where
         jsonl_written = true;
     }
 
-    let event_type = match agent {
-        Agent::Claude => "claude_hook",
-        Agent::Codex => "codex_hook",
-    };
+    let event_type = format!("{}_hook", agent.as_str());
     let event_recorded = if task_found || task_run_linked {
         let payload = parsed
             .clone()
@@ -148,7 +145,7 @@ where
         repos.insert_event(
             linked_task_id.filter(|_| task_found || task_run_linked),
             linked_task_run_id,
-            event_type,
+            &event_type,
             &payload,
         )?;
         true

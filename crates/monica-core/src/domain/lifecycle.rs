@@ -239,7 +239,8 @@ pub fn should_ignore_claude_event(event_name: Option<&str>, payload: Option<&Val
         && payload_tool_wait_reason(payload).is_none()
 }
 
-pub fn transition_for_codex_event(
+pub fn transition_for_event(
+    agent: Agent,
     event_name: &str,
     payload: Option<&Value>,
 ) -> Option<HookTransition> {
@@ -265,35 +266,21 @@ pub fn transition_for_codex_event(
             status: TaskRunStatus::Running,
             wait_reason: None,
         }),
+        "SessionEnd" if agent == Agent::Claude => Some(HookTransition {
+            status: TaskRunStatus::Stopped,
+            wait_reason: None,
+        }),
         _ => None,
     }
 }
 
-pub fn should_ignore_codex_event(event_name: Option<&str>, payload: Option<&Value>) -> bool {
-    matches!(event_name, Some("PreToolUse" | "PostToolUse"))
-        && payload_tool_wait_reason(payload).is_none()
-}
-
-pub fn transition_for_event(
-    agent: Agent,
-    event_name: &str,
-    payload: Option<&Value>,
-) -> Option<HookTransition> {
-    match agent {
-        Agent::Claude => transition_for_claude_event(event_name, payload),
-        Agent::Codex => transition_for_codex_event(event_name, payload),
-    }
-}
-
 pub fn should_ignore_event(
-    agent: Agent,
+    _agent: Agent,
     event_name: Option<&str>,
     payload: Option<&Value>,
 ) -> bool {
-    match agent {
-        Agent::Claude => should_ignore_claude_event(event_name, payload),
-        Agent::Codex => should_ignore_codex_event(event_name, payload),
-    }
+    matches!(event_name, Some("PreToolUse" | "PostToolUse"))
+        && payload_tool_wait_reason(payload).is_none()
 }
 
 pub fn is_safe_task_run_id(task_run_id: &str) -> bool {
@@ -730,7 +717,7 @@ mod tests {
         ];
         for (event, expected) in cases {
             assert_eq!(
-                transition_for_codex_event(event, None).map(|t| (t.status, t.wait_reason)),
+                transition_for_event(Agent::Codex, event, None).map(|t| (t.status, t.wait_reason)),
                 expected,
                 "{event}"
             );
@@ -740,7 +727,8 @@ mod tests {
     #[test]
     fn codex_tool_use_wait_transitions() {
         assert_eq!(
-            transition_for_codex_event(
+            transition_for_event(
+                Agent::Codex,
                 "PreToolUse",
                 Some(&json!({"tool_name": "AskUserQuestion"}))
             ),
@@ -750,10 +738,11 @@ mod tests {
             })
         );
         assert!(
-            transition_for_codex_event("PreToolUse", Some(&json!({"tool_name": "Read"}))).is_none()
+            transition_for_event(Agent::Codex, "PreToolUse", Some(&json!({"tool_name": "Read"}))).is_none()
         );
         assert_eq!(
-            transition_for_codex_event(
+            transition_for_event(
+                Agent::Codex,
                 "PostToolUse",
                 Some(&json!({"tool_name": "AskUserQuestion"}))
             ),
@@ -766,24 +755,28 @@ mod tests {
 
     #[test]
     fn codex_has_no_session_end_transition() {
-        assert!(transition_for_codex_event("SessionEnd", None).is_none());
+        assert!(transition_for_event(Agent::Codex, "SessionEnd", None).is_none());
     }
 
     #[test]
-    fn should_ignore_codex_event_filters_non_wait_tool_use() {
-        assert!(should_ignore_codex_event(
-            Some("PreToolUse"),
-            Some(&json!({"tool_name": "Read"}))
-        ));
-        assert!(!should_ignore_codex_event(
-            Some("PreToolUse"),
-            Some(&json!({"tool_name": "AskUserQuestion"}))
-        ));
-        assert!(!should_ignore_codex_event(Some("SessionStart"), None));
+    fn should_ignore_event_filters_non_wait_tool_use_for_all_agents() {
+        for agent in [Agent::Claude, Agent::Codex] {
+            assert!(should_ignore_event(
+                agent,
+                Some("PreToolUse"),
+                Some(&json!({"tool_name": "Read"}))
+            ));
+            assert!(!should_ignore_event(
+                agent,
+                Some("PreToolUse"),
+                Some(&json!({"tool_name": "AskUserQuestion"}))
+            ));
+            assert!(!should_ignore_event(agent, Some("SessionStart"), None));
+        }
     }
 
     #[test]
-    fn transition_for_event_dispatches_by_agent() {
+    fn session_end_only_transitions_for_claude() {
         assert_eq!(
             transition_for_event(Agent::Claude, "SessionEnd", None),
             Some(HookTransition {
@@ -792,13 +785,5 @@ mod tests {
             })
         );
         assert!(transition_for_event(Agent::Codex, "SessionEnd", None).is_none());
-
-        assert_eq!(
-            transition_for_event(Agent::Codex, "UserPromptSubmit", None),
-            Some(HookTransition {
-                status: TaskRunStatus::Running,
-                wait_reason: None,
-            })
-        );
     }
 }

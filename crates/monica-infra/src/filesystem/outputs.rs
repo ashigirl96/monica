@@ -129,10 +129,7 @@ fn write_if_changed(path: &Path, contents: &str) -> Result<()> {
 }
 
 fn resolve_hook_command(agent: monica_core::Agent) -> Result<String> {
-    let subcommand = match agent {
-        monica_core::Agent::Claude => "claude",
-        monica_core::Agent::Codex => "codex",
-    };
+    let subcommand = agent.as_str();
     if let Ok(base) = std::env::var("MONICA_HOOK_COMMAND") {
         if !base.is_empty() {
             return Ok(format!("{base} hook {subcommand}"));
@@ -226,15 +223,16 @@ fn write_codex_hooks(cwd: &Path, hook_command: &str) -> Result<String> {
     Ok(hooks_path_str)
 }
 
+fn hook_group(hook_command: &str, matcher: &str) -> Value {
+    json!({ "matcher": matcher, "hooks": [{ "type": "command", "command": hook_command }] })
+}
+
 fn base_hooks_map(hook_command: &str) -> serde_json::Map<String, Value> {
-    let hook_group = |matcher: &str| -> Value {
-        json!({ "matcher": matcher, "hooks": [{ "type": "command", "command": hook_command }] })
-    };
-    let group = || json!([hook_group("")]);
+    let group = || json!([hook_group(hook_command, "")]);
     let tool_wait_groups = || {
         json!([
-            hook_group("AskUserQuestion"),
-            hook_group("ExitPlanMode"),
+            hook_group(hook_command, "AskUserQuestion"),
+            hook_group(hook_command, "ExitPlanMode"),
         ])
     };
     let mut map = serde_json::Map::new();
@@ -253,11 +251,8 @@ fn codex_hooks_value(hook_command: &str) -> Value {
 }
 
 fn hooks_value(hook_command: &str) -> Value {
-    let hook_group = |matcher: &str| -> Value {
-        json!({ "matcher": matcher, "hooks": [{ "type": "command", "command": hook_command }] })
-    };
-    let group = || json!([hook_group("")]);
     let mut map = base_hooks_map(hook_command);
+    let group = || json!([hook_group(hook_command, "")]);
     map.insert("StopFailure".into(), group());
     map.insert("SessionEnd".into(), group());
     json!({ "hooks": Value::Object(map) })
