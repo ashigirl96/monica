@@ -9,6 +9,7 @@ import { activeSpaceAtom, sidebarOpenAtom, sidebarWidthAtom } from "@/stores/spa
 import { uiZoomAtom } from "@/stores/zoom";
 import { UI_STATE_FILE } from "@/stores/ui-state";
 import { focusMemoryAtom, focusedTaskIdAtom } from "@/features/work-board/nav";
+import { libraryViewAtom } from "@/features/library/store";
 
 const SAVE_DEBOUNCE_MS = 500;
 
@@ -31,6 +32,7 @@ export function initUiStatePersistence(): void {
       file.set("sidebarWidth", store.get(sidebarWidthAtom)),
       file.set("uiZoom", store.get(uiZoomAtom)),
       file.set("workboard", { focusedTaskId }),
+      file.set("library", { activeView: store.get(libraryViewAtom) }),
     ];
     // activeRunspaceAtom synthesizes a throwaway runspace with a random id until the
     // bench has loaded; persisting that would clobber the saved hint, so skip it.
@@ -63,6 +65,7 @@ export function initUiStatePersistence(): void {
     activeTerminalTabAtom,
     focusedTaskIdAtom,
     focusMemoryAtom,
+    libraryViewAtom,
   ];
   for (const source of sources) store.sub(source, schedule);
 }

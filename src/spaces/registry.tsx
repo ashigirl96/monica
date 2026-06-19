@@ -1,11 +1,13 @@
 import { lazy, type ComponentType } from "react";
 import { LibraryIcon, WorkBoardIcon, WorkBenchIcon } from "@/components/icons";
 import type { SpaceId } from "@/stores/space";
-import { TabBar } from "@/components/tab-bar";
 import { WorkBenchSidebar } from "@/features/work-bench/ui/sidebar";
 import { WorkBenchHeader } from "@/features/work-bench/ui/header";
 import { WorkBoardHeader } from "@/features/work-board/ui/header";
+import { LibrarySidebar } from "@/features/library/ui/sidebar";
+import { LibraryHeader } from "@/features/library/ui/header";
 
+const LazyLibraryContent = lazy(() => import("@/features/library/ui/content"));
 const LazyWorkBenchContent = lazy(() => import("@/features/work-bench/ui/content"));
 const LazyWorkBoardContent = lazy(() => import("@/features/work-board/ui/content"));
 
@@ -21,24 +23,14 @@ export type SpaceConfig = {
   persistent?: boolean;
 };
 
-function Placeholder({ name }: { name: string }) {
-  return (
-    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-      {name}
-    </div>
-  );
-}
-
-function LibraryContent() {
-  return <Placeholder name="Library" />;
-}
 export const spaces: SpaceConfig[] = [
   {
     id: "library",
     icon: LibraryIcon,
     label: "Library",
-    header: TabBar,
-    content: LibraryContent,
+    sidebar: LibrarySidebar,
+    header: LibraryHeader,
+    content: LazyLibraryContent,
   },
   {
     id: "work-board",
