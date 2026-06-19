@@ -20,7 +20,7 @@ import {
   createNewDraftAtom,
 } from "@/features/library/store";
 import { forceSyncPullRequestsAtom } from "@/stores/pr-sync";
-import { newTaskOpenAtom } from "@/stores/workboard";
+import { newTaskOpenAtom, projectFilterOpenAtom } from "@/stores/workboard";
 import { setUiZoomAtom } from "@/stores/zoom";
 import { isEditable } from "@/lib/keyboard";
 
@@ -51,6 +51,7 @@ export function useShortcuts() {
   const jumpToHint = useSetAtom(jumpToHintAtom);
   const toggleLastRunspace = useSetAtom(toggleLastRunspaceAtom);
   const setNewTaskOpen = useSetAtom(newTaskOpenAtom);
+  const setProjectFilterOpen = useSetAtom(projectFilterOpenAtom);
   const setUiZoom = useSetAtom(setUiZoomAtom);
   const cycleLibraryView = useSetAtom(cycleLibraryViewAtom);
   const cycleLibraryTab = useSetAtom(cycleLibraryTabAtom);
@@ -205,6 +206,12 @@ export function useShortcuts() {
         return;
       }
 
+      if (e.ctrlKey && e.key === "w") {
+        e.preventDefault();
+        if (activeSpace === "work-board") setProjectFilterOpen((v) => !v);
+        return;
+      }
+
       if (editable && !e.altKey) return;
 
       // Below the editable guard: when the terminal (or any input) is focused the guard
@@ -281,6 +288,7 @@ export function useShortcuts() {
     jumpToHint,
     toggleLastRunspace,
     setNewTaskOpen,
+    setProjectFilterOpen,
     setUiZoom,
     cycleLibraryView,
     cycleLibraryTab,

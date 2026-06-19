@@ -13,6 +13,8 @@ import { invalidateTaskSummaries, queryKeys } from "@/stores/query-keys";
 import { pushErrorToast } from "@/stores/toast";
 
 export const newTaskOpenAtom = atom(false);
+export const projectFilterOpenAtom = atom(false);
+export const selectedProjectAtom = atom<string | null>(null);
 
 const boardColumnsQueryOptions = {
   queryKey: queryKeys.board.columns(),
@@ -45,9 +47,13 @@ export const loadBoardAtom = atom(null, async (get) => {
 export const columnTasksAtom = atom((get) => {
   const columns = get(boardColumnsAtom);
   const tasks = get(taskSummariesAtom);
+  const projectFilter = get(selectedProjectAtom);
   return columns.map((col) => ({
     ...col,
-    tasks: tasks.filter((t) => col.statuses.includes(t.status)),
+    tasks: tasks.filter(
+      (t) =>
+        col.statuses.includes(t.status) && (projectFilter === null || t.project === projectFilter),
+    ),
   }));
 });
 
