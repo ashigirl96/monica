@@ -69,8 +69,8 @@ export const commands = {
     typedError<TaskBench, string>(__TAURI_INVOKE("open_bench", { taskId })),
   prepareTask: (taskId: string) =>
     typedError<PrepareTaskResult, string>(__TAURI_INVOKE("prepare_task", { taskId })),
-  runTask: (taskId: string) =>
-    typedError<RunTaskResult, string>(__TAURI_INVOKE("run_task", { taskId })),
+  runTask: (taskId: string, agent: "claude" | "codex" | null) =>
+    typedError<RunTaskResult, string>(__TAURI_INVOKE("run_task", { taskId, agent })),
   closeTask: (taskId: string) => typedError<null, string>(__TAURI_INVOKE("close_task", { taskId })),
   /**
    *  Promote the run living in the given Workbench tab to its task's Main Run. Returns whether the
@@ -91,6 +91,8 @@ export const events = {
 };
 
 /* Types */
+export type Agent = "claude" | "codex";
+
 export type AttachResult = {
   /**  Base64 transcript tail to write into xterm before streaming live output. */
   replay: string;
@@ -173,7 +175,11 @@ export type TaskRunStatusChanged = {
   status: TaskRunStatus;
 };
 
-export type TaskRunWaitReason = "ask_user_question" | "exit_plan_mode" | "awaiting_prompt";
+export type TaskRunWaitReason =
+  | "ask_user_question"
+  | "exit_plan_mode"
+  | "permission_request"
+  | "awaiting_prompt";
 
 export type TaskStatus = "ready" | "in_progress" | "closed";
 

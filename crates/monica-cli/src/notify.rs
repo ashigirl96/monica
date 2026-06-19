@@ -9,6 +9,7 @@ pub fn waiting_notification(wait_reason: Option<TaskRunWaitReason>, task_title: 
     let reason = match wait_reason {
         Some(TaskRunWaitReason::ExitPlanMode) => "プラン承認待ち",
         Some(TaskRunWaitReason::AskUserQuestion) => "質問への回答待ち",
+        Some(TaskRunWaitReason::PermissionRequest) => "パーミッション承認待ち",
         Some(TaskRunWaitReason::AwaitingPrompt) | None => "入力待ち",
     };
     match task_title {

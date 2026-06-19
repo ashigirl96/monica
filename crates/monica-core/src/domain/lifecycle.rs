@@ -266,6 +266,10 @@ pub fn transition_for_event(
             status: TaskRunStatus::Running,
             wait_reason: None,
         }),
+        "PermissionRequest" if agent == Agent::Codex => Some(HookTransition {
+            status: TaskRunStatus::WaitingForUser,
+            wait_reason: Some(TaskRunWaitReason::PermissionRequest),
+        }),
         "SessionEnd" if agent == Agent::Claude => Some(HookTransition {
             status: TaskRunStatus::Stopped,
             wait_reason: None,
@@ -711,7 +715,13 @@ mod tests {
                     Some(TaskRunWaitReason::AwaitingPrompt),
                 )),
             ),
-            ("PermissionRequest", None),
+            (
+                "PermissionRequest",
+                Some((
+                    TaskRunStatus::WaitingForUser,
+                    Some(TaskRunWaitReason::PermissionRequest),
+                )),
+            ),
             ("PreCompact", None),
             ("PostCompact", None),
         ];

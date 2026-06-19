@@ -1,12 +1,18 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { atom, type Getter } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
+import type { Agent } from "@/commands/bindings";
 import type { TaskSummaryRow } from "@/commands/task";
 import { openTargets } from "@/features/work-board/github-urls";
 import { closeTaskAtom, openBenchAtom, runTaskAtom } from "@/features/work-board/store";
 import { columnTasksAtom, prepareTaskMutationAtom, taskSummariesAtom } from "@/stores/workboard";
 import { queryKeys } from "@/stores/query-keys";
 import { pendingWorkboardHintAtom, resolveWorkboardFocus } from "@/stores/ui-state";
+
+const AGENT_TARGETS: ReadonlyArray<{ agent: Agent; label: string; hint: string }> = [
+  { agent: "claude", label: "Claude", hint: "c" },
+  { agent: "codex", label: "Codex", hint: "x" },
+];
 
 type MoveDirection = "up" | "down" | "left" | "right";
 type MenuItemId = "prepare" | "run" | "bench" | "open" | "close";
@@ -20,6 +26,8 @@ export type MenuState = {
   confirmingClose: boolean;
   // null = top level; a number = the Open submenu is showing, cursor on that target.
   openIndex: number | null;
+  // null = top level; a number = the Run agent submenu is showing, cursor on that agent.
+  runIndex: number | null;
 };
 
 // null = navigation inactive. The board unmounts on space switch, so the last
@@ -140,7 +148,14 @@ export const openMenuAtom = atom(null, (get, set, anchor: MenuAnchor) => {
   if (!task) return;
   const itemIndex = MENU_ITEMS.findIndex((item) => !isItemDisabled(item.id, task));
   if (itemIndex === -1) return;
-  set(menuAtom, { taskId: focused, anchor, itemIndex, confirmingClose: false, openIndex: null });
+  set(menuAtom, {
+    taskId: focused,
+    anchor,
+    itemIndex,
+    confirmingClose: false,
+    openIndex: null,
+    runIndex: null,
+  });
 });
 
 export const moveMenuItemAtom = atom(null, (get, set, dir: "up" | "down") => {
@@ -176,10 +191,15 @@ export const runDirectActionAtom = atom(
     if (taskId === null) return;
     const task = taskById(get, taskId);
     if (!task || isItemDisabled(id, task)) return;
-    set(menuAtom, null);
-    if (id === "prepare") get(prepareTaskMutationAtom).mutate(taskId);
-    else if (id === "run") void set(runTaskAtom, taskId);
-    else void set(openBenchAtom, taskId);
+    if (id === "prepare") {
+      set(menuAtom, null);
+      get(prepareTaskMutationAtom).mutate(taskId);
+    } else if (id === "run") {
+      set(enterRunSubmenuAtom);
+    } else {
+      set(menuAtom, null);
+      void set(openBenchAtom, taskId);
+    }
   },
 );
 
@@ -197,6 +217,7 @@ export const requestCloseAtom = atom(null, (get, set, anchor: MenuAnchor | null)
       itemIndex: CLOSE_INDEX,
       confirmingClose: true,
       openIndex: null,
+      runIndex: null,
     });
     return;
   }
@@ -217,9 +238,17 @@ export const executeMenuItemAtom = atom(null, (get, set) => {
     set(executeOpenAtom);
     return;
   }
+  if (menu.runIndex !== null) {
+    set(executeRunAtom);
+    return;
+  }
   const item = MENU_ITEMS[menu.itemIndex];
   if (item.id === "open") {
     set(enterOpenSubmenuAtom);
+    return;
+  }
+  if (item.id === "run") {
+    set(enterRunSubmenuAtom);
     return;
   }
   if (item.id !== "close") {
@@ -239,7 +268,13 @@ export const enterOpenSubmenuAtom = atom(null, (get, set) => {
   if (menu === null) return;
   const task = taskById(get, menu.taskId);
   if (!task || openTargets(task).length === 0) return;
-  set(menuAtom, { ...menu, itemIndex: OPEN_INDEX, confirmingClose: false, openIndex: 0 });
+  set(menuAtom, {
+    ...menu,
+    itemIndex: OPEN_INDEX,
+    confirmingClose: false,
+    openIndex: 0,
+    runIndex: null,
+  });
 });
 
 // Card-focus entry to the Open submenu: opens the menu straight into it. When the menu is
@@ -255,6 +290,7 @@ export const requestOpenAtom = atom(null, (get, set, anchor: MenuAnchor | null) 
     itemIndex: OPEN_INDEX,
     confirmingClose: false,
     openIndex: 0,
+    runIndex: null,
   });
 });
 
@@ -279,6 +315,69 @@ export const exitOpenSubmenuAtom = atom(null, (get, set) => {
   const menu = get(menuAtom);
   if (menu === null || menu.openIndex === null) return;
   set(menuAtom, { ...menu, openIndex: null });
+});
+
+const RUN_INDEX = MENU_ITEMS.findIndex((item) => item.id === "run");
+
+export const enterRunSubmenuAtom = atom(null, (get, set) => {
+  const menu = get(menuAtom);
+  const taskId = menu?.taskId ?? get(focusedTaskIdAtom);
+  if (taskId === null) return;
+  const task = taskById(get, taskId);
+  if (!task || !task.run_eligible) return;
+  if (menu) {
+    set(menuAtom, {
+      ...menu,
+      itemIndex: RUN_INDEX,
+      confirmingClose: false,
+      openIndex: null,
+      runIndex: 0,
+    });
+  } else {
+    const el = document.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(taskId)}"]`);
+    const rect = el?.getBoundingClientRect();
+    if (!rect) return;
+    set(menuAtom, {
+      taskId,
+      anchor: { top: rect.top, left: rect.left, bottom: rect.bottom },
+      itemIndex: RUN_INDEX,
+      confirmingClose: false,
+      openIndex: null,
+      runIndex: 0,
+    });
+  }
+});
+
+export { AGENT_TARGETS };
+
+export const moveRunItemAtom = atom(null, (get, set, dir: "up" | "down") => {
+  const menu = get(menuAtom);
+  if (menu === null || menu.runIndex === null) return;
+  const next = menu.runIndex + (dir === "up" ? -1 : 1);
+  if (next < 0 || next >= AGENT_TARGETS.length) return;
+  set(menuAtom, { ...menu, runIndex: next });
+});
+
+export const setRunIndexAtom = atom(null, (get, set, runIndex: number) => {
+  const menu = get(menuAtom);
+  if (menu === null || menu.runIndex === null || menu.runIndex === runIndex) return;
+  set(menuAtom, { ...menu, runIndex });
+});
+
+export const exitRunSubmenuAtom = atom(null, (get, set) => {
+  const menu = get(menuAtom);
+  if (menu === null || menu.runIndex === null) return;
+  set(menuAtom, { ...menu, runIndex: null });
+});
+
+export const executeRunAtom = atom(null, (get, set) => {
+  const menu = get(menuAtom);
+  if (menu === null || menu.runIndex === null) return;
+  const agent = AGENT_TARGETS[menu.runIndex];
+  if (!agent) return;
+  const taskId = menu.taskId;
+  set(menuAtom, null);
+  void set(runTaskAtom, taskId, agent.agent);
 });
 
 // Bound to "i" in the submenu (PRs get no single key because a task can have several): jumps

@@ -50,20 +50,22 @@ impl TaskRunOutputs for FsTaskRunOutputs {
         };
 
         let bin_dir = task_dir.join("bin");
-        write_claude_wrapper(&bin_dir)?;
-        let wrapper_path = bin_dir.join("claude").to_string_lossy().into_owned();
+        let agent_bin = agent.as_str();
+        match agent {
+            monica_core::Agent::Claude => write_claude_wrapper(&bin_dir)?,
+            monica_core::Agent::Codex => write_codex_wrapper(&bin_dir)?,
+        }
+        let wrapper_path = bin_dir.join(agent_bin).to_string_lossy().into_owned();
 
         let zdotdir = task_dir.join("zdotdir");
-        write_zdotdir(&zdotdir)?;
+        write_zdotdir(&zdotdir, agent)?;
         let zdotdir_str = zdotdir.to_string_lossy().into_owned();
 
         let mut env = vec![
-            // The tab's shell and any `monica` CLI calls in it should use the
-            // same base dir as the app (e.g. ~/monica/dev in dev).
             ("MONICA_HOME".to_string(), monica_home),
             ("MONICA_TASK_ID".to_string(), task_id.to_string()),
             ("MONICA_PROJECT_ID".to_string(), project.id.clone()),
-            ("MONICA_CLAUDE_WRAPPER".to_string(), wrapper_path.clone()),
+            ("MONICA_AGENT_WRAPPER".to_string(), wrapper_path.clone()),
             ("ZDOTDIR".to_string(), zdotdir_str),
         ];
         // Set only when the user actually had ZDOTDIR; .zshenv unsets it otherwise
@@ -247,7 +249,10 @@ fn base_hooks_map(hook_command: &str) -> serde_json::Map<String, Value> {
 }
 
 fn codex_hooks_value(hook_command: &str) -> Value {
-    json!({ "hooks": Value::Object(base_hooks_map(hook_command)) })
+    let group = || json!([hook_group(hook_command, "")]);
+    let mut map = base_hooks_map(hook_command);
+    map.insert("PermissionRequest".into(), group());
+    json!({ "hooks": Value::Object(map) })
 }
 
 fn hooks_value(hook_command: &str) -> Value {
@@ -292,14 +297,40 @@ fi
 exec "$REAL_CLAUDE" "${EXTRA_ARGS[@]}" "$@"
 "#;
 
-fn write_claude_wrapper(bin_dir: &Path) -> Result<()> {
+fn write_agent_wrapper(bin_dir: &Path, name: &str, contents: &str) -> Result<()> {
     fs::create_dir_all(bin_dir)
         .with_context(|| format!("failed to create {}", bin_dir.display()))?;
-    let wrapper_path = bin_dir.join("claude");
-    write_if_changed(&wrapper_path, CLAUDE_WRAPPER)?;
+    let wrapper_path = bin_dir.join(name);
+    write_if_changed(&wrapper_path, contents)?;
     fs::set_permissions(&wrapper_path, fs::Permissions::from_mode(0o755))
         .with_context(|| format!("failed to chmod {}", wrapper_path.display()))?;
     Ok(())
+}
+
+fn write_claude_wrapper(bin_dir: &Path) -> Result<()> {
+    write_agent_wrapper(bin_dir, "claude", CLAUDE_WRAPPER)
+}
+
+const CODEX_WRAPPER: &str = r#"#!/usr/bin/env bash
+find_real_codex() {
+    local self_dir
+    self_dir="$(cd "$(dirname "$0")" && pwd)"
+    local IFS=:
+    for d in $PATH; do
+        [[ "$d" == "$self_dir" ]] && continue
+        [[ -x "$d/codex" ]] && printf '%s' "$d/codex" && return 0
+    done
+    return 1
+}
+REAL_CODEX="$(find_real_codex)" || { echo "Error: codex not found in PATH" >&2; exit 127; }
+if [[ -z "${MONICA_TASK_ID:-}" ]]; then
+    exec "$REAL_CODEX" "$@"
+fi
+exec "$REAL_CODEX" --dangerously-bypass-approvals-and-sandbox "$@"
+"#;
+
+fn write_codex_wrapper(bin_dir: &Path) -> Result<()> {
+    write_agent_wrapper(bin_dir, "codex", CODEX_WRAPPER)
 }
 
 // zsh resolves each startup file against ZDOTDIR at the moment it reads it, so
@@ -308,24 +339,28 @@ fn write_claude_wrapper(bin_dir: &Path) -> Result<()> {
 // The claude() wrapper must therefore be installed here in .zshenv — a shell
 // function survives the user's rc files, unlike PATH which path_helper,
 // .zshrc, and direnv all rewrite.
-const ZDOTDIR_ZSHENV: &str = r#"# Monica ZDOTDIR bootstrap for zsh.
-if [[ -n "${MONICA_ORIGINAL_ZDOTDIR+X}" ]]; then
+fn zdotdir_zshenv(agent: monica_core::Agent) -> String {
+    let bin = agent.as_str();
+    format!(
+        r#"# Monica ZDOTDIR bootstrap for zsh.
+if [[ -n "${{MONICA_ORIGINAL_ZDOTDIR+X}}" ]]; then
     builtin export ZDOTDIR="$MONICA_ORIGINAL_ZDOTDIR"
     builtin unset MONICA_ORIGINAL_ZDOTDIR
 else
     builtin unset ZDOTDIR
 fi
 
-builtin typeset _monica_file="${ZDOTDIR-$HOME}/.zshenv"
+builtin typeset _monica_file="${{ZDOTDIR-$HOME}}/.zshenv"
 [[ ! -r "$_monica_file" ]] || builtin source -- "$_monica_file"
 builtin unset _monica_file
 
-if [[ -o interactive && -x "${MONICA_CLAUDE_WRAPPER:-}" ]]; then
-    builtin unalias claude >/dev/null 2>&1 || true
-    # eval so an existing `alias claude=...` cannot break parsing.
-    eval 'claude() { "$MONICA_CLAUDE_WRAPPER" "$@"; }'
+if [[ -o interactive && -x "${{MONICA_AGENT_WRAPPER:-}}" ]]; then
+    builtin unalias {bin} >/dev/null 2>&1 || true
+    eval '{bin}() {{ "$MONICA_AGENT_WRAPPER" "$@"; }}'
 fi
-"#;
+"#
+    )
+}
 
 fn zdotdir_shim(file: &str) -> String {
     format!(
@@ -344,10 +379,10 @@ builtin unset _monica_file
     )
 }
 
-fn write_zdotdir(zdotdir: &Path) -> Result<()> {
+fn write_zdotdir(zdotdir: &Path, agent: monica_core::Agent) -> Result<()> {
     fs::create_dir_all(zdotdir)
         .with_context(|| format!("failed to create {}", zdotdir.display()))?;
-    write_if_changed(&zdotdir.join(".zshenv"), ZDOTDIR_ZSHENV)?;
+    write_if_changed(&zdotdir.join(".zshenv"), &zdotdir_zshenv(agent))?;
     for file in [".zprofile", ".zshrc", ".zlogin"] {
         write_if_changed(&zdotdir.join(file), &zdotdir_shim(file))?;
     }
@@ -528,13 +563,20 @@ mod tests {
     }
 
     #[test]
-    fn zshenv_restores_zdotdir_and_installs_claude_function() {
-        assert!(ZDOTDIR_ZSHENV.contains(r#"builtin export ZDOTDIR="$MONICA_ORIGINAL_ZDOTDIR""#));
-        assert!(ZDOTDIR_ZSHENV.contains("builtin unset ZDOTDIR"));
-        assert!(ZDOTDIR_ZSHENV.contains(r#"claude() { "$MONICA_CLAUDE_WRAPPER" "$@"; }"#));
-        let restore_pos = ZDOTDIR_ZSHENV.find("builtin unset ZDOTDIR").unwrap();
-        let install_pos = ZDOTDIR_ZSHENV.find("claude()").unwrap();
-        assert!(restore_pos < install_pos, "function must be installed after ZDOTDIR restore");
+    fn zshenv_restores_zdotdir_and_installs_agent_function() {
+        for (agent, bin) in [
+            (monica_core::Agent::Claude, "claude"),
+            (monica_core::Agent::Codex, "codex"),
+        ] {
+            let zshenv = zdotdir_zshenv(agent);
+            assert!(zshenv.contains(r#"builtin export ZDOTDIR="$MONICA_ORIGINAL_ZDOTDIR""#), "{bin}");
+            assert!(zshenv.contains("builtin unset ZDOTDIR"), "{bin}");
+            let func = format!("{bin}() {{ \"$MONICA_AGENT_WRAPPER\" \"$@\"; }}");
+            assert!(zshenv.contains(&func), "{bin}: expected {func}");
+            let restore_pos = zshenv.find("builtin unset ZDOTDIR").unwrap();
+            let install_pos = zshenv.find(&format!("{bin}()")).unwrap();
+            assert!(restore_pos < install_pos, "{bin}: function must be installed after ZDOTDIR restore");
+        }
     }
 
 }
