@@ -10,7 +10,6 @@ import {
 } from "@/commands/task";
 import { invalidateTaskSummaries, queryKeys } from "@/stores/query-keys";
 import { pushErrorToast } from "@/stores/toast";
-export { projectsAtom } from "@/stores/projects";
 
 export const newTaskOpenAtom = atom(false);
 export const projectFilterOpenAtom = atom(false);

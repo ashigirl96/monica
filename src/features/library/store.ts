@@ -1,5 +1,4 @@
-import { atom, getDefaultStore } from "jotai";
-import type { QueryClient } from "@tanstack/query-core";
+import { atom } from "jotai";
 import { atomWithQuery, queryClientAtom } from "jotai-tanstack-query";
 import { queryKeys } from "@/stores/query-keys";
 import {
@@ -187,16 +186,8 @@ export const loadTimelineAtom = atom(null, async (get, set, reset?: boolean) => 
   }
 });
 
-function invalidateArtifactQueries(client: QueryClient) {
-  return client.invalidateQueries({ queryKey: queryKeys.artifacts.family() });
-}
-
-function invalidateArtifacts() {
-  void invalidateArtifactQueries(getDefaultStore().get(queryClientAtom));
-}
-
 export const invalidateLibraryArtifactsAtom = atom(null, (get) =>
-  invalidateArtifactQueries(get(queryClientAtom)),
+  get(queryClientAtom).invalidateQueries({ queryKey: queryKeys.artifacts.family() }),
 );
 
 export const createNewDraftAtom = atom(null, async (get, set) => {
@@ -210,17 +201,17 @@ export const createNewDraftAtom = atom(null, async (get, set) => {
 
   const draft = await createDraftCmd(kind);
   set(openDraftTabAtom, draft.id);
-  invalidateArtifacts();
+  set(invalidateLibraryArtifactsAtom);
 });
 
 export const saveDraftAtom = atom(null, async (_get, set, draftId: string) => {
   const artifact = await saveDraftCmd(draftId);
   set(promoteDraftToArtifactTabAtom, draftId, artifact.id);
-  invalidateArtifacts();
+  set(invalidateLibraryArtifactsAtom);
   return artifact;
 });
 
-export const deleteDraftAtom = atom(null, async (_get, _set, draftId: string) => {
+export const deleteDraftAtom = atom(null, async (_get, set, draftId: string) => {
   await deleteDraftCmd(draftId);
-  invalidateArtifacts();
+  set(invalidateLibraryArtifactsAtom);
 });
