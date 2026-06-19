@@ -23,7 +23,7 @@ pub fn run(cmd: HookCommand) -> Result<()> {
         HookCommand::Codex => Agent::Codex,
     };
     let log_file = format!("hook-{}.log", agent.as_str());
-    if let Err(e) = handle_agent(agent) {
+    if let Err(e) = handle_agent(agent, &log_file) {
         eprintln!("monica hook {}: {e:#}", agent.as_str());
         debug_log_to(&log_file, &format!("error: {e:#}"));
     }
@@ -59,14 +59,13 @@ fn env_opt(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.is_empty())
 }
 
-fn handle_agent(agent: Agent) -> Result<()> {
+fn handle_agent(agent: Agent, log_file: &str) -> Result<()> {
     let raw = read_stdin()?;
     let task_id = env_opt("MONICA_TASK_ID");
     let task_run_id = env_opt("MONICA_TASK_RUN_ID");
     let terminal_tab_id = env_opt("MONICA_TERMINAL_TAB_ID");
-    let log_file = format!("hook-{}.log", agent.as_str());
 
-    debug_log_to(&log_file, &format!(
+    debug_log_to(log_file, &format!(
         "invoked task_id={task_id:?} task_run_id={task_run_id:?} tab_id={terminal_tab_id:?} monica_home={:?} cwd={:?} stdin_bytes={}",
         env_opt("MONICA_HOME"),
         std::env::current_dir().ok(),
@@ -93,7 +92,7 @@ fn handle_agent(agent: Agent) -> Result<()> {
         &raw,
     )?;
 
-    debug_log_to(&log_file, &format!(
+    debug_log_to(log_file, &format!(
         "event={:?} ignored={} task_found={} run_linked={} run_created={} status={:?} wait_reason={:?} entered_waiting={} jsonl={}",
         report.event_name,
         report.ignored,

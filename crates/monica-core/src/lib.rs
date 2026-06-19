@@ -12,7 +12,7 @@ pub use domain::{
     branch_name, is_continuation_session_start, is_safe_task_run_id, is_session_starting_event,
     is_task_notification_prompt, monica_number, parse_issue_input, parse_issue_ref,
     parse_owner_repo, payload_has_running_subagents, subagent_count_update, SubagentCountUpdate,
-    should_ignore_claude_event, transition_for_claude_event, transition_is_generic_wait,
+    transition_is_generic_wait,
     transition_is_protected, wait_reason_for_tool, worktree_path_for, Agent, DisplayStatus, Event,
     BoardColumn, ExternalRef, TaskBench, PrepareTaskResult, RunTaskResult, GithubAuthStatus, GithubDeviceFlow, GithubIssue, GithubPullRequest,
     GithubPullRequestRef, GithubPullRequestStatus, HookTransition, NewTask, NewTaskRun,

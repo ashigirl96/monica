@@ -137,15 +137,18 @@ where
         jsonl_written = true;
     }
 
-    let event_type = format!("{}_hook", agent.as_str());
     let event_recorded = if task_found || task_run_linked {
+        let event_type = match agent {
+            Agent::Claude => "claude_hook",
+            Agent::Codex => "codex_hook",
+        };
         let payload = parsed
             .clone()
             .unwrap_or_else(|| json!({ "raw": raw_stdin }));
         repos.insert_event(
             linked_task_id.filter(|_| task_found || task_run_linked),
             linked_task_run_id,
-            &event_type,
+            event_type,
             &payload,
         )?;
         true
@@ -245,10 +248,6 @@ impl ResolvedRun {
     fn linked(run: Option<TaskRun>) -> Self {
         Self { run, created: false }
     }
-
-    fn none() -> Self {
-        Self { run: None, created: false }
-    }
 }
 
 /// Resolve which task run a hook belongs to. Rules are evaluated top-down, first match wins:
@@ -283,10 +282,10 @@ where
         return Ok(ResolvedRun::linked(repos.get_task_run(run_id)?));
     }
     let Some(task_id) = task_id else {
-        return Ok(ResolvedRun::none());
+        return Ok(ResolvedRun::linked(None));
     };
     let Some(task) = repos.get_task(task_id)? else {
-        return Ok(ResolvedRun::none());
+        return Ok(ResolvedRun::linked(None));
     };
 
     if let Some(session_id) = provider_session_id {
@@ -310,7 +309,7 @@ where
         || explicit_run_id_rejected
         || task.status == TaskStatus::Closed
     {
-        return Ok(ResolvedRun::none());
+        return Ok(ResolvedRun::linked(None));
     }
 
     // The session's cwd is arbitrary user space (often the project's main checkout, where
