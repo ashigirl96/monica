@@ -5,6 +5,8 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 
 /** Commands */
 export const commands = {
+  quickSaveMemo: (body: string) =>
+    typedError<Artifact, string>(__TAURI_INVOKE("quick_save_memo", { body })),
   createDraft: (kind: ArtifactDraftKind) =>
     typedError<ArtifactDraft, string>(__TAURI_INVOKE("create_draft", { kind })),
   updateDraft: (
@@ -397,6 +399,9 @@ export type TimelineItem =
       body_preview: string;
       timeline_at: string;
       item_key: string;
+      updated_at: string;
+      project_name: string | null;
+      thumbnail_paths: string[];
     }
   | { kind: "task_created"; task_id: string; title: string; timeline_at: string; item_key: string }
   | { kind: "task_closed"; task_id: string; title: string; timeline_at: string; item_key: string };

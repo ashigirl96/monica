@@ -2051,3 +2051,125 @@ fn timeline_pagination_cursor_and_since() {
         .unwrap();
     assert!(since_items.is_empty(), "future since should return nothing");
 }
+
+#[test]
+fn insert_saved_memo_creates_saved_artifact() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+
+    let artifact = db.insert_saved_memo("Quick memo").unwrap();
+    assert!(artifact.id.starts_with("ART-"));
+    assert_eq!(artifact.kind, monica_core::ArtifactKind::Memo);
+    assert_eq!(artifact.body, "Quick memo");
+
+    let fetched = db.get_artifact(&artifact.id).unwrap().unwrap();
+    assert_eq!(fetched.id, artifact.id);
+    assert_eq!(fetched.body, "Quick memo");
+}
+
+#[test]
+fn quick_save_memo_rejects_empty_body() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let result = monica_core::artifact_ops::quick_save_memo(&mut db, "   ");
+    assert!(result.is_err());
+}
+
+#[test]
+fn timeline_memo_returns_full_body() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+
+    let long_body = "a".repeat(500);
+    db.insert_saved_memo(&long_body).unwrap();
+
+    let d = db
+        .insert_draft(NewDraft {
+            kind: ArtifactDraftKind::Essay {
+                title: Some("Essay title".into()),
+            },
+            body: "b".repeat(500),
+            occurred_at: None,
+        })
+        .unwrap();
+    db.promote_draft(
+        &d.id,
+        monica_core::NewArtifact {
+            kind: monica_core::ArtifactKind::Essay {
+                title: "Essay title".into(),
+            },
+            body: "b".repeat(500),
+            occurred_at: None,
+        },
+    )
+    .unwrap();
+
+    let items = db.list_timeline_items(None, None, 30).unwrap();
+    for item in &items {
+        if let monica_core::TimelineItem::Artifact {
+            artifact_kind,
+            body_preview,
+            ..
+        } = item
+        {
+            match artifact_kind.as_str() {
+                "memo" => assert_eq!(body_preview.len(), 500, "memo should return full body"),
+                "essay" => assert_eq!(body_preview.len(), 200, "essay should truncate to 200"),
+                _ => {}
+            }
+        }
+    }
+}
+
+#[test]
+fn timeline_artifact_includes_project_name_and_thumbnails() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+
+    let proj = monica_core::Project::from_repo("owner/My Project");
+    let project = db.upsert_project(&proj).unwrap();
+
+    let d = db
+        .insert_draft(NewDraft {
+            kind: ArtifactDraftKind::Intent {
+                title: Some("Plan".into()),
+                project_id: Some(project.id.clone()),
+            },
+            body: "intent body".into(),
+            occurred_at: None,
+        })
+        .unwrap();
+    db.promote_draft(
+        &d.id,
+        monica_core::NewArtifact {
+            kind: monica_core::ArtifactKind::Intent {
+                title: "Plan".into(),
+                project_id: Some(project.id.clone()),
+            },
+            body: "intent body".into(),
+            occurred_at: None,
+        },
+    )
+    .unwrap();
+
+    let memo = db.insert_saved_memo("memo with image").unwrap();
+    db.insert_attachment(&memo.id, "photo.jpg", Some("image/jpeg"), 1000, "ART-2/ATT-1.jpg")
+        .unwrap();
+
+    let items = db.list_timeline_items(None, None, 30).unwrap();
+    for item in &items {
+        if let monica_core::TimelineItem::Artifact {
+            artifact_kind,
+            project_name,
+            thumbnail_paths,
+            ..
+        } = item
+        {
+            match artifact_kind.as_str() {
+                "intent" => {
+                    assert_eq!(project_name.as_deref(), Some("My Project"));
+                }
+                "memo" => {
+                    assert_eq!(thumbnail_paths, &["ART-2/ATT-1.jpg"]);
+                }
+                _ => {}
+            }
+        }
+    }
+}

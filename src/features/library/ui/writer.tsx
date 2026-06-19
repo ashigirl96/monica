@@ -7,12 +7,16 @@ import {
   removeAttachment,
   updateArtifact,
   updateDraft,
-  convertArtifactKind,
-  deleteArtifact,
   listDrafts,
 } from "@/commands/artifact";
 import type { Artifact, ArtifactDraft, ArtifactDraftKind, ArtifactKind } from "@/commands/artifact";
-import { saveDraftAtom, deleteDraftAtom, closeLibraryTabAtom } from "@/features/library/store";
+import {
+  saveDraftAtom,
+  deleteDraftAtom,
+  deleteArtifactAtom,
+  convertArtifactKindAtom,
+  closeLibraryTabAtom,
+} from "@/features/library/store";
 
 type WriterProps = { mode: "draft"; draftId: string } | { mode: "artifact"; artifactId: string };
 
@@ -31,6 +35,8 @@ export function Writer(props: WriterProps) {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const saveDraft = useSetAtom(saveDraftAtom);
   const deleteDraft = useSetAtom(deleteDraftAtom);
+  const deleteArtifact = useSetAtom(deleteArtifactAtom);
+  const convertArtifactKind = useSetAtom(convertArtifactKindAtom);
   const closeTab = useSetAtom(closeLibraryTabAtom);
   const debounceRef = useRef<number>(0);
   const revisionRef = useRef(0);
@@ -217,7 +223,11 @@ export function Writer(props: WriterProps) {
         };
         break;
     }
-    const converted = await convertArtifactKind(data.id, target, revisionRef.current);
+    const converted = await convertArtifactKind({
+      id: data.id,
+      targetKind: target,
+      expectedRevision: revisionRef.current,
+    });
     revisionRef.current = converted.revision;
     setData(converted);
     setTitle(titleFromKind(converted.kind));

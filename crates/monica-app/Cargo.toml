@@ -21,7 +21,11 @@ monica-infra = { path = "../monica-infra", features = ["specta"] }
 monica-pty = { path = "../monica-pty" }
 specta = { version = "=2.0.0-rc.25", default-features = false, features = ["serde_json"] }
 specta-typescript = { version = "=0.0.12", default-features = false }
-tauri = { version = "2", default-features = false, features = ["wry", "macos-private-api"] }
+tauri = { version = "2", default-features = false, features = [
+  "wry",
+  "macos-private-api",
+  "protocol-asset",
+] }
 tauri-specta = { version = "=2.0.0-rc.25", default-features = false, features = [
   "derive",
   "typescript",

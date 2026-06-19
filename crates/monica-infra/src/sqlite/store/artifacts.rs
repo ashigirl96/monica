@@ -112,6 +112,31 @@ impl ArtifactRepository for SqliteStore {
         Ok(drafts)
     }
 
+    fn insert_saved_memo(&mut self, body: &str) -> Result<Artifact> {
+        let tx = self.conn_mut().transaction()?;
+        tx.execute("INSERT INTO artifact_counter DEFAULT VALUES", [])?;
+        let id = format!("ART-{}", tx.last_insert_rowid());
+        tx.execute(
+            &format!(
+                "INSERT INTO library_entries (id, state, kind, body_markdown, updated_at)
+                 VALUES (?1, 'saved', 'memo', ?2, {SET_NOW})"
+            ),
+            params![id, body],
+        )?;
+        let artifact = {
+            let mut stmt = tx.prepare(&format!(
+                "SELECT {ENTRY_COLUMNS} FROM library_entries WHERE id = ?1"
+            ))?;
+            let mut rows = stmt.query(params![id])?;
+            match rows.next()? {
+                Some(row) => artifact_from_row(row)?,
+                None => return Err(anyhow!("inserted memo {id} not found")),
+            }
+        };
+        tx.commit()?;
+        Ok(artifact)
+    }
+
     fn promote_draft(&mut self, draft_id: &str, new: NewArtifact) -> Result<Artifact> {
         let updated = self.conn().execute(
             &format!(
@@ -301,18 +326,31 @@ impl ArtifactRepository for SqliteStore {
         param_values.push(Box::new(limit as i64));
 
         let sql = format!(
-            "SELECT item_kind, id, kind, title, body_preview, timeline_at, item_key FROM (
+            "SELECT item_kind, id, kind, title, body_preview, timeline_at, item_key,
+                    updated_at, project_name, thumbnail_paths FROM (
                SELECT 'artifact' AS item_kind,
-                      id, kind, title,
-                      substr(body_markdown, 1, 200) AS body_preview,
-                      COALESCE(occurred_at, created_at) AS timeline_at,
-                      'artifact:' || id AS item_key
-               FROM library_entries WHERE state = 'saved'
+                      le.id, le.kind, le.title,
+                      CASE WHEN le.kind = 'memo' THEN le.body_markdown
+                           ELSE substr(le.body_markdown, 1, 200)
+                      END AS body_preview,
+                      COALESCE(le.occurred_at, le.created_at) AS timeline_at,
+                      'artifact:' || le.id AS item_key,
+                      le.updated_at,
+                      p.name AS project_name,
+                      (SELECT group_concat(la.relative_path, '|')
+                       FROM library_attachments la
+                       WHERE la.entry_id = le.id
+                         AND la.mime_type LIKE 'image/%') AS thumbnail_paths
+               FROM library_entries le
+               LEFT JOIN projects p ON le.project_id = p.id
+               WHERE le.state = 'saved'
                UNION ALL
-               SELECT 'task_created', id, 'task', title, '', created_at, 'task_created:' || id
+               SELECT 'task_created', id, 'task', title, '', created_at, 'task_created:' || id,
+                      '', NULL, NULL
                FROM tasks
                UNION ALL
-               SELECT 'task_closed', id, 'task', title, '', closed_at, 'task_closed:' || id
+               SELECT 'task_closed', id, 'task', title, '', closed_at, 'task_closed:' || id,
+                      '', NULL, NULL
                FROM tasks WHERE closed_at IS NOT NULL
              )
              {where_clause}
@@ -529,6 +567,12 @@ fn timeline_item_from_row(row: &rusqlite::Row<'_>) -> Result<TimelineItem> {
         "artifact" => {
             let kind: String = row.get("kind")?;
             let body_preview: String = row.get("body_preview")?;
+            let updated_at: String = row.get("updated_at")?;
+            let project_name: Option<String> = row.get("project_name")?;
+            let raw_thumbnails: Option<String> = row.get("thumbnail_paths")?;
+            let thumbnail_paths = raw_thumbnails
+                .map(|s| s.split('|').map(String::from).collect())
+                .unwrap_or_default();
             Ok(TimelineItem::Artifact {
                 entry_id: id,
                 artifact_kind: kind,
@@ -536,6 +580,9 @@ fn timeline_item_from_row(row: &rusqlite::Row<'_>) -> Result<TimelineItem> {
                 body_preview,
                 timeline_at,
                 item_key,
+                updated_at,
+                project_name,
+                thumbnail_paths,
             })
         }
         "task_created" => Ok(TimelineItem::TaskCreated {
