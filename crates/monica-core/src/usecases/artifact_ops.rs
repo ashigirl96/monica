@@ -133,3 +133,57 @@ pub fn insert_attachment(
 pub fn remove_attachment(repo: &mut impl ArtifactRepository, id: &str) -> Result<Option<String>> {
     repo.delete_attachment(id)
 }
+
+pub fn mime_from_extension(ext: &str) -> Option<&'static str> {
+    match ext.to_lowercase().as_str() {
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "png" => Some("image/png"),
+        "webp" => Some("image/webp"),
+        "heic" => Some("image/heic"),
+        _ => None,
+    }
+}
+
+pub fn attach_image_from_path(
+    repo: &mut impl ArtifactRepository,
+    entry_id: &str,
+    source: &std::path::Path,
+    attachments_dir: &std::path::Path,
+) -> Result<Attachment> {
+    use std::fs;
+
+    if !source.exists() {
+        bail!("file not found: {}", source.display());
+    }
+
+    let original_file_name = source
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("image")
+        .to_string();
+
+    let ext = source
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("bin");
+
+    let byte_size = fs::metadata(source)?.len() as i64;
+    let mime_type = mime_from_extension(ext);
+
+    fs::create_dir_all(attachments_dir)?;
+
+    let temp_att =
+        repo.insert_attachment(entry_id, &original_file_name, mime_type, byte_size, "pending")?;
+
+    let dest_name = format!("{}.{}", temp_att.id, ext);
+    let relative_path = format!("{entry_id}/{dest_name}");
+    let dest = attachments_dir.join(&dest_name);
+
+    if let Err(e) = fs::copy(source, &dest) {
+        let _ = repo.delete_attachment(&temp_att.id);
+        bail!("failed to copy image: {e}");
+    }
+
+    repo.delete_attachment(&temp_att.id)?;
+    repo.insert_attachment(entry_id, &original_file_name, mime_type, byte_size, &relative_path)
+}

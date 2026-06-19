@@ -545,33 +545,11 @@ const V23: &str = r#"
       updated_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
     );
 
-    CREATE TRIGGER library_entries_saved_check
-    BEFORE UPDATE ON library_entries
-    WHEN NEW.state = 'saved'
-    BEGIN
-      SELECT CASE
-        WHEN NEW.kind = 'essay'  AND (NEW.title IS NULL OR length(trim(NEW.title)) = 0)
-        THEN RAISE(ABORT, 'essay requires non-empty title')
-        WHEN NEW.kind = 'intent' AND (NEW.title IS NULL OR length(trim(NEW.title)) = 0)
-        THEN RAISE(ABORT, 'intent requires non-empty title')
-        WHEN NEW.kind = 'memo'   AND NEW.title IS NOT NULL
-        THEN RAISE(ABORT, 'memo must not have title')
-      END;
-    END;
+    CREATE TRIGGER library_entries_saved_update_check BEFORE UPDATE ON library_entries WHEN NEW.state = 'saved'
+    BEGIN SELECT CASE WHEN NEW.kind = 'essay' AND (NEW.title IS NULL OR length(trim(NEW.title)) = 0) THEN RAISE(ABORT, 'essay requires non-empty title') WHEN NEW.kind = 'intent' AND (NEW.title IS NULL OR length(trim(NEW.title)) = 0) THEN RAISE(ABORT, 'intent requires non-empty title') WHEN NEW.kind = 'memo' AND NEW.title IS NOT NULL THEN RAISE(ABORT, 'memo must not have title') END; END;
 
-    CREATE TRIGGER library_entries_saved_insert_check
-    BEFORE INSERT ON library_entries
-    WHEN NEW.state = 'saved'
-    BEGIN
-      SELECT CASE
-        WHEN NEW.kind = 'essay'  AND (NEW.title IS NULL OR length(trim(NEW.title)) = 0)
-        THEN RAISE(ABORT, 'essay requires non-empty title')
-        WHEN NEW.kind = 'intent' AND (NEW.title IS NULL OR length(trim(NEW.title)) = 0)
-        THEN RAISE(ABORT, 'intent requires non-empty title')
-        WHEN NEW.kind = 'memo'   AND NEW.title IS NOT NULL
-        THEN RAISE(ABORT, 'memo must not have title')
-      END;
-    END;
+    CREATE TRIGGER library_entries_saved_insert_check BEFORE INSERT ON library_entries WHEN NEW.state = 'saved'
+    BEGIN SELECT CASE WHEN NEW.kind IN ('essay','intent') AND (NEW.title IS NULL OR length(trim(NEW.title)) = 0) THEN RAISE(ABORT, 'essay/intent requires non-empty title') WHEN NEW.kind = 'memo' AND NEW.title IS NOT NULL THEN RAISE(ABORT, 'memo must not have title') END; END;
 
     CREATE INDEX library_entries_state_kind_idx
       ON library_entries(state, kind, updated_at DESC);

@@ -9,6 +9,7 @@ import {
   sidebarOpenAtom,
   sidebarWidthAtom,
 } from "@/stores/space";
+import { libraryViewAtom, VIEWS, type LibraryView } from "@/features/library/store";
 import { clamp } from "@/lib/clamp";
 import { UI_ZOOM_DEFAULT, clampUiZoom, uiZoomAtom } from "@/stores/zoom";
 
@@ -17,6 +18,8 @@ export const UI_STATE_FILE = "ui-state.json";
 export type WorkbenchHint = { activeRunspaceId: string | null; activeTabId: string | null };
 export type WorkboardHint = { focusedTaskId: string | null };
 
+export type LibraryHint = { activeView: string | null };
+
 export type PersistedUiState = {
   activeSpace: SpaceId;
   sidebarOpen: boolean;
@@ -24,6 +27,7 @@ export type PersistedUiState = {
   uiZoom: number;
   workbench: WorkbenchHint;
   workboard: WorkboardHint;
+  library: LibraryHint;
 };
 
 const DEFAULT_UI_STATE: PersistedUiState = {
@@ -33,6 +37,7 @@ const DEFAULT_UI_STATE: PersistedUiState = {
   uiZoom: UI_ZOOM_DEFAULT,
   workbench: { activeRunspaceId: null, activeTabId: null },
   workboard: { focusedTaskId: null },
+  library: { activeView: null },
 };
 
 // Missing a key here is a compile error when SpaceId gains a variant, so validation
@@ -65,6 +70,7 @@ export function parseUiState(raw: unknown): PersistedUiState {
   const r = raw as Record<string, unknown>;
   const wb = asObject(r.workbench);
   const wboard = asObject(r.workboard);
+  const lib = asObject(r.library);
   return {
     activeSpace: isSpaceId(r.activeSpace) ? r.activeSpace : DEFAULT_UI_STATE.activeSpace,
     sidebarOpen: typeof r.sidebarOpen === "boolean" ? r.sidebarOpen : DEFAULT_UI_STATE.sidebarOpen,
@@ -76,6 +82,9 @@ export function parseUiState(raw: unknown): PersistedUiState {
     },
     workboard: {
       focusedTaskId: asString(wboard.focusedTaskId),
+    },
+    library: {
+      activeView: asString(lib.activeView),
     },
   };
 }
@@ -116,7 +125,7 @@ export async function hydrateUiState(): Promise<void> {
   let parsed = DEFAULT_UI_STATE;
   try {
     const file = await load(UI_STATE_FILE);
-    const [activeSpace, sidebarOpen, sidebarWidth, uiZoom, workbench, workboard] =
+    const [activeSpace, sidebarOpen, sidebarWidth, uiZoom, workbench, workboard, library] =
       await Promise.all([
         file.get("activeSpace"),
         file.get("sidebarOpen"),
@@ -124,8 +133,17 @@ export async function hydrateUiState(): Promise<void> {
         file.get("uiZoom"),
         file.get("workbench"),
         file.get("workboard"),
+        file.get("library"),
       ]);
-    parsed = parseUiState({ activeSpace, sidebarOpen, sidebarWidth, uiZoom, workbench, workboard });
+    parsed = parseUiState({
+      activeSpace,
+      sidebarOpen,
+      sidebarWidth,
+      uiZoom,
+      workbench,
+      workboard,
+      library,
+    });
   } catch {
     parsed = DEFAULT_UI_STATE;
   }
@@ -135,4 +153,8 @@ export async function hydrateUiState(): Promise<void> {
   store.set(uiZoomAtom, parsed.uiZoom);
   store.set(pendingWorkbenchHintAtom, parsed.workbench);
   store.set(pendingWorkboardHintAtom, parsed.workboard);
+  const view = parsed.library.activeView;
+  if (view && (VIEWS as readonly string[]).includes(view)) {
+    store.set(libraryViewAtom, view as LibraryView);
+  }
 }

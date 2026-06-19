@@ -152,80 +152,17 @@ pub fn list_timeline_items(
 #[tauri::command]
 #[specta::specta]
 pub fn attach_image(entry_id: String, file_path: String) -> Result<Attachment, String> {
-    let source = std::path::Path::new(&file_path);
-    if !source.exists() {
-        return Err(format!("file not found: {file_path}"));
-    }
-
-    let original_file_name = source
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("image")
-        .to_string();
-
-    let ext = source
-        .extension()
-        .and_then(|e| e.to_str())
-        .ok_or_else(|| "unsupported image extension: <none>".to_string())?;
-
-    let byte_size = std::fs::metadata(source)
-        .map_err(|e| e.to_string())?
-        .len() as i64;
-
-    let mime_type =
-        image_mime_type(ext).ok_or_else(|| format!("unsupported image extension: .{ext}"))?;
-
     let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-
+    let source = std::path::Path::new(&file_path);
     let attachments_dir =
         monica_infra::filesystem::paths::attachments_dir(&entry_id).map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&attachments_dir).map_err(|e| e.to_string())?;
-
-    let temp_att = monica_core::artifact_ops::insert_attachment(
+    monica_core::artifact_ops::attach_image_from_path(
         &mut runtime.repositories,
         &entry_id,
-        &original_file_name,
-        Some(mime_type),
-        byte_size,
-        "pending",
-    )
-    .map_err(|e| e.to_string())?;
-
-    let dest_name = format!("{}.{}", temp_att.id, ext);
-    let relative_path = format!("{entry_id}/{dest_name}");
-    let dest = attachments_dir.join(&dest_name);
-
-    if let Err(e) = std::fs::copy(source, &dest) {
-        let _ = monica_core::artifact_ops::remove_attachment(
-            &mut runtime.repositories,
-            &temp_att.id,
-        );
-        return Err(format!("failed to copy image: {e}"));
-    }
-
-    let _ = monica_core::artifact_ops::remove_attachment(
-        &mut runtime.repositories,
-        &temp_att.id,
-    );
-    monica_core::artifact_ops::insert_attachment(
-        &mut runtime.repositories,
-        &entry_id,
-        &original_file_name,
-        Some(mime_type),
-        byte_size,
-        &relative_path,
+        source,
+        &attachments_dir,
     )
     .map_err(|e| e.to_string())
-}
-
-fn image_mime_type(ext: &str) -> Option<&'static str> {
-    match ext.to_lowercase().as_str() {
-        "jpg" | "jpeg" => Some("image/jpeg"),
-        "png" => Some("image/png"),
-        "webp" => Some("image/webp"),
-        "heic" => Some("image/heic"),
-        _ => None,
-    }
 }
 
 #[tauri::command]

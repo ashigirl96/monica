@@ -1702,3 +1702,352 @@ fn terminal_state_snapshot_round_trips_session_id() {
     assert_eq!(tabs[0].terminal_session_id.as_deref(), Some("ts-1"));
     assert_eq!(tabs[1].terminal_session_id, None);
 }
+
+#[test]
+fn artifact_draft_crud_and_promote() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+
+    let draft = db
+        .insert_draft(NewDraft {
+            kind: ArtifactDraftKind::Essay { title: Some("Test Essay".into()) },
+            body: "Hello world".into(),
+            occurred_at: None,
+        })
+        .unwrap();
+    assert!(draft.id.starts_with("ART-"));
+    assert_eq!(draft.kind.kind_str(), "essay");
+    assert_eq!(draft.body, "Hello world");
+    assert_eq!(draft.revision, 0);
+
+    let updated = db
+        .update_draft(
+            &draft.id,
+            &ArtifactDraftKind::Essay { title: Some("Updated".into()) },
+            "New body",
+            None,
+            0,
+        )
+        .unwrap();
+    assert_eq!(updated.revision, 1);
+
+    let stale = db.update_draft(
+        &draft.id,
+        &ArtifactDraftKind::Essay { title: Some("Stale".into()) },
+        "Stale body",
+        None,
+        0,
+    );
+    assert!(stale.is_err(), "stale write should fail");
+
+    let artifact = db
+        .promote_draft(
+            &draft.id,
+            monica_core::NewArtifact {
+                kind: monica_core::ArtifactKind::Essay { title: "Final Title".into() },
+                body: "New body".into(),
+                occurred_at: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(artifact.id, draft.id);
+
+    assert!(db.get_draft(&draft.id).unwrap().is_none());
+    assert!(db.get_artifact(&draft.id).unwrap().is_some());
+
+    let essays = db.list_essays().unwrap();
+    assert_eq!(essays.len(), 1);
+    assert_eq!(essays[0].title, "Final Title");
+}
+
+#[test]
+fn artifact_convert_kind() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+
+    let draft = db
+        .insert_draft(NewDraft {
+            kind: ArtifactDraftKind::Memo,
+            body: "A memo".into(),
+            occurred_at: None,
+        })
+        .unwrap();
+
+    let artifact = db
+        .promote_draft(
+            &draft.id,
+            monica_core::NewArtifact {
+                kind: monica_core::ArtifactKind::Memo,
+                body: "A memo".into(),
+                occurred_at: None,
+            },
+        )
+        .unwrap();
+
+    let converted = db
+        .convert_artifact_kind(
+            &artifact.id,
+            &monica_core::ArtifactKind::Essay { title: "Now an essay".into() },
+            artifact.revision,
+        )
+        .unwrap();
+    assert_eq!(converted.kind.kind_str(), "essay");
+    assert_eq!(converted.kind.title(), Some("Now an essay"));
+    assert_eq!(converted.revision, artifact.revision + 1);
+}
+
+#[test]
+fn artifact_timeline_items() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+
+    let _task = db.insert_task(dev_task("A task")).unwrap();
+
+    let draft = db
+        .insert_draft(NewDraft {
+            kind: ArtifactDraftKind::Memo,
+            body: "Timeline memo".into(),
+            occurred_at: None,
+        })
+        .unwrap();
+    db.promote_draft(
+        &draft.id,
+        monica_core::NewArtifact {
+            kind: monica_core::ArtifactKind::Memo,
+            body: "Timeline memo".into(),
+            occurred_at: None,
+        },
+    )
+    .unwrap();
+
+    let items = db.list_timeline_items(None, None, 30).unwrap();
+    assert!(items.len() >= 2);
+
+    let artifact_items: Vec<_> = items
+        .iter()
+        .filter(|i| matches!(i, monica_core::TimelineItem::Artifact { .. }))
+        .collect();
+    assert_eq!(artifact_items.len(), 1);
+
+    let task_items: Vec<_> = items
+        .iter()
+        .filter(|i| matches!(i, monica_core::TimelineItem::TaskCreated { .. }))
+        .collect();
+    assert_eq!(task_items.len(), 1);
+}
+
+#[test]
+fn artifact_attachment_round_trip() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+
+    let draft = db
+        .insert_draft(NewDraft {
+            kind: ArtifactDraftKind::Memo,
+            body: "With image".into(),
+            occurred_at: None,
+        })
+        .unwrap();
+
+    let att = db
+        .insert_attachment(&draft.id, "photo.jpg", Some("image/jpeg"), 12345, "ART-1/ATT-1.jpg")
+        .unwrap();
+    assert!(att.id.starts_with("ATT-"));
+    assert_eq!(att.entry_id, draft.id);
+    assert_eq!(att.byte_size, 12345);
+
+    let list = db.list_attachments(&draft.id).unwrap();
+    assert_eq!(list.len(), 1);
+
+    let path = db.delete_attachment(&att.id).unwrap();
+    assert_eq!(path, Some("ART-1/ATT-1.jpg".to_string()));
+
+    let list = db.list_attachments(&draft.id).unwrap();
+    assert!(list.is_empty());
+
+    let missing = db.delete_attachment("ATT-999").unwrap();
+    assert_eq!(missing, None, "deleting a non-existent attachment should return None");
+}
+
+#[test]
+fn save_draft_validates_kind_and_body() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+
+    let memo = db
+        .insert_draft(NewDraft {
+            kind: ArtifactDraftKind::Memo,
+            body: String::new(),
+            occurred_at: None,
+        })
+        .unwrap();
+    let err = monica_core::artifact_ops::save_draft(&mut db, &memo.id);
+    assert!(err.is_err(), "empty memo body must be rejected");
+
+    let essay = db
+        .insert_draft(NewDraft {
+            kind: ArtifactDraftKind::Essay { title: None },
+            body: "has body".into(),
+            occurred_at: None,
+        })
+        .unwrap();
+    let err = monica_core::artifact_ops::save_draft(&mut db, &essay.id);
+    assert!(err.is_err(), "essay without title must be rejected");
+
+    let intent = db
+        .insert_draft(NewDraft {
+            kind: ArtifactDraftKind::Intent {
+                title: Some("   ".into()),
+                project_id: None,
+            },
+            body: "has body".into(),
+            occurred_at: None,
+        })
+        .unwrap();
+    let err = monica_core::artifact_ops::save_draft(&mut db, &intent.id);
+    assert!(err.is_err(), "intent with whitespace-only title must be rejected");
+
+    let not_found = monica_core::artifact_ops::save_draft(&mut db, "ART-999");
+    assert!(not_found.is_err(), "non-existent draft must be rejected");
+
+    let valid_memo = db
+        .insert_draft(NewDraft {
+            kind: ArtifactDraftKind::Memo,
+            body: "a real memo".into(),
+            occurred_at: None,
+        })
+        .unwrap();
+    let artifact = monica_core::artifact_ops::save_draft(&mut db, &valid_memo.id).unwrap();
+    assert_eq!(artifact.id, valid_memo.id);
+}
+
+#[test]
+fn list_intents_groups_by_project() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+
+    let project = monica_core::Project::from_repo("owner/repo-a");
+    db.upsert_project(&project).unwrap();
+
+    for (title, project_id) in [
+        ("Intent A1", Some(project.id.as_str())),
+        ("Intent A2", Some(project.id.as_str())),
+        ("Intent U1", None),
+        ("Intent U2", None),
+    ] {
+        let d = db
+            .insert_draft(NewDraft {
+                kind: ArtifactDraftKind::Intent {
+                    title: Some(title.into()),
+                    project_id: project_id.map(String::from),
+                },
+                body: "body".into(),
+                occurred_at: None,
+            })
+            .unwrap();
+        db.promote_draft(
+            &d.id,
+            monica_core::NewArtifact {
+                kind: monica_core::ArtifactKind::Intent {
+                    title: title.into(),
+                    project_id: project_id.map(String::from),
+                },
+                body: "body".into(),
+                occurred_at: None,
+            },
+        )
+        .unwrap();
+    }
+
+    let groups = db.list_intents_by_project().unwrap();
+    assert_eq!(groups.len(), 2, "should have 2 groups (project + unassigned)");
+    assert_eq!(groups[0].project_id, Some(project.id.clone()));
+    assert_eq!(groups[0].items.len(), 2);
+    assert_eq!(groups[1].project_id, None);
+    assert_eq!(groups[1].items.len(), 2);
+}
+
+#[test]
+fn update_artifact_revision_guard() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+
+    let d = db
+        .insert_draft(NewDraft {
+            kind: ArtifactDraftKind::Memo,
+            body: "original".into(),
+            occurred_at: None,
+        })
+        .unwrap();
+    let artifact = db
+        .promote_draft(
+            &d.id,
+            monica_core::NewArtifact {
+                kind: monica_core::ArtifactKind::Memo,
+                body: "original".into(),
+                occurred_at: None,
+            },
+        )
+        .unwrap();
+
+    let updated = db
+        .update_artifact(
+            &artifact.id,
+            &monica_core::ArtifactKind::Memo,
+            "updated body",
+            None,
+            artifact.revision,
+        )
+        .unwrap();
+    assert_eq!(updated.revision, artifact.revision + 1);
+    assert_eq!(updated.body, "updated body");
+
+    let stale = db.update_artifact(
+        &artifact.id,
+        &monica_core::ArtifactKind::Memo,
+        "stale body",
+        None,
+        artifact.revision,
+    );
+    assert!(stale.is_err(), "stale revision must fail");
+}
+
+#[test]
+fn timeline_pagination_cursor_and_since() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+
+    for i in 0..5 {
+        let d = db
+            .insert_draft(NewDraft {
+                kind: ArtifactDraftKind::Memo,
+                body: format!("memo {i}"),
+                occurred_at: None,
+            })
+            .unwrap();
+        db.promote_draft(
+            &d.id,
+            monica_core::NewArtifact {
+                kind: monica_core::ArtifactKind::Memo,
+                body: format!("memo {i}"),
+                occurred_at: None,
+            },
+        )
+        .unwrap();
+    }
+
+    let page1 = db.list_timeline_items(None, None, 3).unwrap();
+    assert_eq!(page1.len(), 3);
+
+    let cursor = monica_core::TimelineCursor {
+        timeline_at: page1[2].timeline_at().to_string(),
+        item_key: page1[2].item_key().to_string(),
+    };
+    let page2 = db.list_timeline_items(Some(&cursor), None, 3).unwrap();
+    assert_eq!(page2.len(), 2);
+
+    let all_keys: Vec<String> = page1
+        .iter()
+        .chain(page2.iter())
+        .map(|i| i.item_key().to_string())
+        .collect();
+    let unique: std::collections::HashSet<&String> = all_keys.iter().collect();
+    assert_eq!(all_keys.len(), unique.len(), "no duplicates across pages");
+
+    let since_items = db
+        .list_timeline_items(None, Some("2099-01-01T00:00:00.000Z"), 30)
+        .unwrap();
+    assert!(since_items.is_empty(), "future since should return nothing");
+}

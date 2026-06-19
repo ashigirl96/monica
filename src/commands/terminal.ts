@@ -14,13 +14,7 @@ export type {
   TerminalStateSnapshot,
 } from "./bindings";
 
-async function unwrap<T>(
-  result: Promise<{ status: "ok"; data: T } | { status: "error"; error: string }>,
-): Promise<T> {
-  const r = await result;
-  if (r.status === "error") throw new Error(r.error);
-  return r.data;
-}
+import { unwrap } from "./unwrap";
 
 export function terminalCreateSession(args: {
   runspaceId: string;
