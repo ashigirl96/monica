@@ -7,14 +7,14 @@ import {
   removeAttachment,
   updateArtifact,
   updateDraft,
-  convertArtifactKind,
-  deleteArtifact,
   listDrafts,
 } from "@/commands/artifact";
 import type { Artifact, ArtifactDraft, ArtifactKind } from "@/commands/artifact";
 import { ProjectPickerModal } from "@/components/project-picker-modal";
 import {
   closeLibraryTabAtom,
+  convertArtifactKindAtom,
+  deleteArtifactAtom,
   deleteDraftAtom,
   invalidateLibraryArtifactsAtom,
   loadTimelineAtom,
@@ -55,6 +55,8 @@ export function Writer(props: WriterProps) {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const saveDraft = useSetAtom(saveDraftAtom);
   const deleteDraft = useSetAtom(deleteDraftAtom);
+  const deleteArtifact = useSetAtom(deleteArtifactAtom);
+  const convertArtifactKind = useSetAtom(convertArtifactKindAtom);
   const closeTab = useSetAtom(closeLibraryTabAtom);
   const invalidateLibraryArtifacts = useSetAtom(invalidateLibraryArtifactsAtom);
   const loadTimeline = useSetAtom(loadTimelineAtom);
@@ -306,7 +308,11 @@ export function Writer(props: WriterProps) {
         };
         break;
     }
-    const converted = await convertArtifactKind(data.id, target, revisionRef.current);
+    const converted = await convertArtifactKind({
+      id: data.id,
+      targetKind: target,
+      expectedRevision: revisionRef.current,
+    });
     revisionRef.current = converted.revision;
     setData(converted);
     setTitle(titleFromKind(converted.kind));

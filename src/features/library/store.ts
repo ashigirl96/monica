@@ -2,17 +2,21 @@ import { atom } from "jotai";
 import { atomWithQuery, queryClientAtom } from "jotai-tanstack-query";
 import { queryKeys } from "@/stores/query-keys";
 import {
+  convertArtifactKind as convertArtifactKindCmd,
   createDraft as createDraftCmd,
+  deleteArtifact as deleteArtifactCmd,
   deleteDraft as deleteDraftCmd,
   listDrafts,
   listEssays,
   listIntentsByProject,
   listTimelineItems,
+  quickSaveMemo as quickSaveMemoCmd,
   saveDraft as saveDraftCmd,
 } from "@/commands/artifact";
 import type {
   ArtifactDraft,
   ArtifactDraftKind,
+  ArtifactKind,
   EssayListItem,
   IntentGroup,
   TimelineCursor,
@@ -190,6 +194,12 @@ export const invalidateLibraryArtifactsAtom = atom(null, (get) =>
   get(queryClientAtom).invalidateQueries({ queryKey: queryKeys.artifacts.family() }),
 );
 
+export const quickSaveMemoAtom = atom(null, async (_get, set, body: string) => {
+  await quickSaveMemoCmd(body);
+  set(invalidateLibraryArtifactsAtom);
+  set(loadTimelineAtom, true);
+});
+
 export const createNewDraftAtom = atom(null, async (get, set) => {
   const view = get(libraryViewAtom);
   const kind: ArtifactDraftKind =
@@ -215,3 +225,17 @@ export const deleteDraftAtom = atom(null, async (_get, set, draftId: string) => 
   await deleteDraftCmd(draftId);
   set(invalidateLibraryArtifactsAtom);
 });
+
+export const deleteArtifactAtom = atom(null, async (_get, set, id: string) => {
+  await deleteArtifactCmd(id);
+  set(invalidateLibraryArtifactsAtom);
+});
+
+export const convertArtifactKindAtom = atom(
+  null,
+  async (_get, set, args: { id: string; targetKind: ArtifactKind; expectedRevision: number }) => {
+    const artifact = await convertArtifactKindCmd(args.id, args.targetKind, args.expectedRevision);
+    set(invalidateLibraryArtifactsAtom);
+    return artifact;
+  },
+);

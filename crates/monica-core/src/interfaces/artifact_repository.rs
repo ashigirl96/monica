@@ -20,6 +20,7 @@ pub trait ArtifactRepository {
     fn list_drafts(&self) -> Result<Vec<ArtifactDraft>>;
 
     fn promote_draft(&mut self, draft_id: &str, new: NewArtifact) -> Result<Artifact>;
+    fn insert_saved_memo(&mut self, body: &str) -> Result<Artifact>;
 
     fn get_artifact(&self, id: &str) -> Result<Option<Artifact>>;
     fn update_artifact(

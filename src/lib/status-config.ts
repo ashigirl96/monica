@@ -54,7 +54,7 @@ const TASK_STATUS_DOT: Partial<Record<DisplayStatus, string>> = Object.fromEntri
 const WAIT_REASON_LABELS: Record<TaskRunWaitReason, string> = {
   ask_user_question: "needs you",
   exit_plan_mode: "approve plan",
-  permission_request: "permission",
+  permission_request: "allow?",
   awaiting_prompt: "your turn",
 };
 
@@ -63,7 +63,7 @@ const WAIT_REASON_LABELS: Record<TaskRunWaitReason, string> = {
 const WAIT_BADGE_STYLES: Record<TaskRunWaitReason, string> = {
   ask_user_question: "bg-amber-500/15 text-amber-400",
   exit_plan_mode: "bg-violet-500/15 text-violet-300",
-  permission_request: "bg-orange-500/15 text-orange-300",
+  permission_request: "bg-amber-500/15 text-amber-400",
   awaiting_prompt: "bg-amber-500/10 text-amber-300/80",
 };
 
@@ -71,7 +71,7 @@ const WAIT_STATUS_DOT: Record<TaskRunWaitReason, string> = {
   ask_user_question: "bg-amber-400 animate-pulse",
   exit_plan_mode:
     "bg-violet-400 ring-2 ring-violet-400/40 shadow-[0_0_7px_1px_rgba(167,139,250,0.7)] animate-pulse",
-  permission_request: "bg-orange-400 animate-pulse",
+  permission_request: "bg-amber-400 animate-pulse",
   awaiting_prompt: "bg-amber-400/40",
 };
 

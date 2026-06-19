@@ -326,7 +326,7 @@ REAL_CODEX="$(find_real_codex)" || { echo "Error: codex not found in PATH" >&2; 
 if [[ -z "${MONICA_TASK_ID:-}" ]]; then
     exec "$REAL_CODEX" "$@"
 fi
-exec "$REAL_CODEX" --dangerously-bypass-approvals-and-sandbox "$@"
+exec "$REAL_CODEX" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust "$@"
 "#;
 
 fn write_codex_wrapper(bin_dir: &Path) -> Result<()> {

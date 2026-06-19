@@ -10,6 +10,7 @@ mod shell_path;
 fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::new()
         .commands(tauri_specta::collect_commands![
+            commands::artifact::quick_save_memo,
             commands::artifact::create_draft,
             commands::artifact::update_draft,
             commands::artifact::delete_draft,
