@@ -1,4 +1,5 @@
 import { atom, getDefaultStore } from "jotai";
+import type { QueryClient } from "@tanstack/query-core";
 import { atomWithQuery, queryClientAtom } from "jotai-tanstack-query";
 import { queryKeys } from "@/stores/query-keys";
 import {
@@ -186,10 +187,17 @@ export const loadTimelineAtom = atom(null, async (get, set, reset?: boolean) => 
   }
 });
 
-function invalidateArtifacts() {
-  const client = getDefaultStore().get(queryClientAtom);
-  client.invalidateQueries({ queryKey: queryKeys.artifacts.family() });
+function invalidateArtifactQueries(client: QueryClient) {
+  return client.invalidateQueries({ queryKey: queryKeys.artifacts.family() });
 }
+
+function invalidateArtifacts() {
+  void invalidateArtifactQueries(getDefaultStore().get(queryClientAtom));
+}
+
+export const invalidateLibraryArtifactsAtom = atom(null, (get) =>
+  invalidateArtifactQueries(get(queryClientAtom)),
+);
 
 export const createNewDraftAtom = atom(null, async (get, set) => {
   const view = get(libraryViewAtom);

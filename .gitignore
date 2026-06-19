@@ -35,3 +35,4 @@ crates/monica-app/binaries/
 
 # Monica writes its Claude hook config here when running a task in this repo's worktrees
 .claude/settings.local.json
+.codex/hooks.json

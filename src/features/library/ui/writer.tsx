@@ -11,8 +11,23 @@ import {
   deleteArtifact,
   listDrafts,
 } from "@/commands/artifact";
-import type { Artifact, ArtifactDraft, ArtifactDraftKind, ArtifactKind } from "@/commands/artifact";
-import { saveDraftAtom, deleteDraftAtom, closeLibraryTabAtom } from "@/features/library/store";
+import type { Artifact, ArtifactDraft, ArtifactKind } from "@/commands/artifact";
+import { ProjectPickerModal } from "@/components/project-picker-modal";
+import {
+  closeLibraryTabAtom,
+  deleteDraftAtom,
+  invalidateLibraryArtifactsAtom,
+  loadTimelineAtom,
+  saveDraftAtom,
+} from "@/features/library/store";
+import {
+  buildArtifactKind,
+  buildDraftKind,
+  dateTimeLocalValueToOccurredAt,
+  occurredAtToDateTimeLocalValue,
+  projectIdFromKind,
+  titleFromKind,
+} from "@/features/library/writer-utils";
 
 type WriterProps = { mode: "draft"; draftId: string } | { mode: "artifact"; artifactId: string };
 
@@ -23,23 +38,38 @@ type SaveTarget = {
   entityKey: string;
   revision: number;
 };
+type WriterEdit = {
+  body: string;
+  title: string;
+  occurredAt: string | null;
+  projectId: string | null;
+};
 
 export function Writer(props: WriterProps) {
   const [data, setData] = useState<ArtifactDraft | Artifact | null>(null);
   const [body, setBody] = useState("");
   const [title, setTitle] = useState("");
+  const [occurredAt, setOccurredAt] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const saveDraft = useSetAtom(saveDraftAtom);
   const deleteDraft = useSetAtom(deleteDraftAtom);
   const closeTab = useSetAtom(closeLibraryTabAtom);
+  const invalidateLibraryArtifacts = useSetAtom(invalidateLibraryArtifactsAtom);
+  const loadTimeline = useSetAtom(loadTimelineAtom);
   const debounceRef = useRef<number>(0);
   const revisionRef = useRef(0);
   const dataRef = useRef(data);
   const bodyRef = useRef(body);
   const titleRef = useRef(title);
+  const occurredAtRef = useRef(occurredAt);
+  const projectIdRef = useRef(projectId);
   dataRef.current = data;
   bodyRef.current = body;
   titleRef.current = title;
+  occurredAtRef.current = occurredAt;
+  projectIdRef.current = projectId;
 
   const entityId = props.mode === "draft" ? props.draftId : props.artifactId;
   const entityKey = `${props.mode}:${entityId}`;
@@ -53,6 +83,9 @@ export function Writer(props: WriterProps) {
       setData(null);
       setBody("");
       setTitle("");
+      setOccurredAt(null);
+      setProjectId(null);
+      setProjectPickerOpen(false);
       setSaveStatus("idle");
 
       if (props.mode === "draft") {
@@ -62,6 +95,8 @@ export function Writer(props: WriterProps) {
           setData(draft);
           setBody(draft.body);
           setTitle(titleFromKind(draft.kind));
+          setOccurredAt(draft.occurred_at);
+          setProjectId(projectIdFromKind(draft.kind));
           revisionRef.current = draft.revision;
         }
       } else {
@@ -70,6 +105,8 @@ export function Writer(props: WriterProps) {
           setData(artifact);
           setBody(artifact.body);
           setTitle(titleFromKind(artifact.kind));
+          setOccurredAt(artifact.occurred_at);
+          setProjectId(projectIdFromKind(artifact.kind));
           revisionRef.current = artifact.revision;
         }
       }
@@ -81,36 +118,51 @@ export function Writer(props: WriterProps) {
   }, [props.mode, entityId]);
 
   const persistTarget = useCallback(
-    async (target: SaveTarget, newBody: string, newTitle: string) => {
+    async (target: SaveTarget, edit: WriterEdit) => {
       const isCurrentTarget = entityKeyRef.current === target.entityKey;
       const expectedRevision = isCurrentTarget ? revisionRef.current : target.revision;
 
       if (target.mode === "draft") {
-        const kind = buildDraftKind(target.data.kind, newTitle);
-        const updated = await updateDraft(target.data.id, kind, newBody, null, expectedRevision);
+        const kind = buildDraftKind(target.data.kind, edit.title, edit.projectId);
+        const updated = await updateDraft(
+          target.data.id,
+          kind,
+          edit.body,
+          edit.occurredAt,
+          expectedRevision,
+        );
         if (isCurrentTarget) {
           revisionRef.current = updated.revision;
           setData(updated);
         }
+        void invalidateLibraryArtifacts();
         return;
       }
 
-      const kind = buildArtifactKind(target.data.kind, newTitle);
-      const updated = await updateArtifact(target.data.id, kind, newBody, null, expectedRevision);
+      const kind = buildArtifactKind(target.data.kind, edit.title, edit.projectId);
+      const updated = await updateArtifact(
+        target.data.id,
+        kind,
+        edit.body,
+        edit.occurredAt,
+        expectedRevision,
+      );
       if (isCurrentTarget) {
         revisionRef.current = updated.revision;
         setData(updated);
       }
+      void invalidateLibraryArtifacts();
+      void loadTimeline(true);
     },
-    [],
+    [invalidateLibraryArtifacts, loadTimeline],
   );
 
   const autoSave = useCallback(
-    async (target: SaveTarget, newBody: string, newTitle: string) => {
+    async (target: SaveTarget, edit: WriterEdit) => {
       const isCurrentTarget = entityKeyRef.current === target.entityKey;
       if (isCurrentTarget) setSaveStatus("saving");
       try {
-        await persistTarget(target, newBody, newTitle);
+        await persistTarget(target, edit);
         if (isCurrentTarget) setSaveStatus("saved");
       } catch {
         if (isCurrentTarget) setSaveStatus("error");
@@ -122,6 +174,16 @@ export function Writer(props: WriterProps) {
   const clearPendingAutoSave = useCallback(() => {
     clearTimeout(debounceRef.current);
     debounceRef.current = 0;
+  }, []);
+
+  const currentEdit = useCallback((overrides: Partial<WriterEdit> = {}): WriterEdit => {
+    return {
+      body: bodyRef.current,
+      title: titleRef.current,
+      occurredAt: occurredAtRef.current,
+      projectId: projectIdRef.current,
+      ...overrides,
+    };
   }, []);
 
   const flushCurrentEdit = useCallback(async () => {
@@ -138,16 +200,16 @@ export function Writer(props: WriterProps) {
 
     setSaveStatus("saving");
     try {
-      await persistTarget(target, bodyRef.current, titleRef.current);
+      await persistTarget(target, currentEdit());
       setSaveStatus("saved");
       return true;
     } catch {
       setSaveStatus("error");
       return false;
     }
-  }, [clearPendingAutoSave, persistTarget, props.mode]);
+  }, [clearPendingAutoSave, currentEdit, persistTarget, props.mode]);
 
-  function scheduleAutoSave(newBody: string, newTitle: string) {
+  function scheduleAutoSave(edit: WriterEdit) {
     if (!data) return;
     const target: SaveTarget = {
       mode: props.mode,
@@ -156,19 +218,44 @@ export function Writer(props: WriterProps) {
       revision: revisionRef.current,
     };
     clearPendingAutoSave();
-    debounceRef.current = window.setTimeout(() => void autoSave(target, newBody, newTitle), 800);
+    debounceRef.current = window.setTimeout(() => void autoSave(target, edit), 800);
   }
 
   function handleBodyChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     const v = e.target.value;
     setBody(v);
-    scheduleAutoSave(v, title);
+    scheduleAutoSave(currentEdit({ body: v }));
   }
 
   function handleTitleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const v = e.target.value;
     setTitle(v);
-    scheduleAutoSave(body, v);
+    scheduleAutoSave(currentEdit({ title: v }));
+  }
+
+  function handleOccurredAtChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const next = dateTimeLocalValueToOccurredAt(e.target.value);
+    setOccurredAt(next);
+    scheduleAutoSave(currentEdit({ occurredAt: next }));
+  }
+
+  function clearOccurredAt() {
+    setOccurredAt(null);
+    scheduleAutoSave(currentEdit({ occurredAt: null }));
+  }
+
+  function handleProjectSelect(nextProjectId: string | null) {
+    setProjectId(nextProjectId);
+    scheduleAutoSave(currentEdit({ projectId: nextProjectId }));
+  }
+
+  function handleWriterKeyDown(e: React.KeyboardEvent) {
+    if (dataRef.current?.kind.type !== "intent") return;
+    if (e.ctrlKey && e.key.toLowerCase() === "w") {
+      e.preventDefault();
+      e.stopPropagation();
+      setProjectPickerOpen(true);
+    }
   }
 
   const handleSave = useCallback(async () => {
@@ -179,11 +266,12 @@ export function Writer(props: WriterProps) {
     if (props.mode === "draft") {
       try {
         await saveDraft(current.id);
+        void loadTimeline(true);
       } catch {
         setSaveStatus("error");
       }
     }
-  }, [props.mode, saveDraft, flushCurrentEdit]);
+  }, [props.mode, saveDraft, flushCurrentEdit, loadTimeline]);
 
   async function handleDelete() {
     if (!data) return;
@@ -200,7 +288,8 @@ export function Writer(props: WriterProps) {
     if (!data || props.mode === "draft") return;
     const flushed = await flushCurrentEdit();
     if (!flushed) return;
-    const existingProjectId = data.kind.type === "intent" ? (data.kind.project_id ?? null) : null;
+    const existingProjectId =
+      data.kind.type === "intent" ? (projectIdRef.current ?? data.kind.project_id ?? null) : null;
     let target: ArtifactKind;
     switch (targetType) {
       case "memo":
@@ -221,6 +310,9 @@ export function Writer(props: WriterProps) {
     revisionRef.current = converted.revision;
     setData(converted);
     setTitle(titleFromKind(converted.kind));
+    setProjectId(projectIdFromKind(converted.kind));
+    void invalidateLibraryArtifacts();
+    void loadTimeline(true);
   }
 
   const handleDroppedFiles = useCallback(async (paths: string[]) => {
@@ -303,11 +395,38 @@ export function Writer(props: WriterProps) {
   const showTitle = kindType === "essay" || kindType === "intent";
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 px-6 py-2">
+    <div className="flex h-full flex-col" onKeyDown={handleWriterKeyDown}>
+      <div className="flex flex-wrap items-center gap-2 px-6 py-2">
         <span className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
           {kindType}
         </span>
+        <input
+          type="datetime-local"
+          aria-label="Occurred at"
+          value={occurredAtToDateTimeLocalValue(occurredAt)}
+          onChange={handleOccurredAtChange}
+          className="h-7 w-[11rem] rounded-md border border-border/50 bg-transparent px-2 text-[11px] text-muted-foreground/70 outline-none [color-scheme:dark] focus:border-muted-foreground/50"
+        />
+        {occurredAt && (
+          <button
+            type="button"
+            aria-label="Clear occurred at"
+            onClick={clearOccurredAt}
+            className="rounded-md px-2 py-1 text-[10px] text-muted-foreground/35 transition-colors hover:bg-white/[0.06] hover:text-muted-foreground"
+          >
+            Clear time
+          </button>
+        )}
+        {kindType === "intent" && (
+          <button
+            type="button"
+            aria-label="Assign project"
+            onClick={() => setProjectPickerOpen(true)}
+            className="max-w-[12rem] truncate rounded-md bg-white/[0.06] px-2 py-1 text-[10px] text-muted-foreground/70 transition-colors hover:bg-white/[0.1] hover:text-foreground/90"
+          >
+            {projectId ?? "Unassigned"}
+          </button>
+        )}
         <span className="ml-auto text-[10px] text-muted-foreground/30">
           {saveStatus === "saving"
             ? "Saving…"
@@ -389,40 +508,13 @@ export function Writer(props: WriterProps) {
           )}
         </div>
       </div>
+      {projectPickerOpen && (
+        <ProjectPickerModal
+          onClose={() => setProjectPickerOpen(false)}
+          onSelect={handleProjectSelect}
+          placeholder="Assign project..."
+        />
+      )}
     </div>
   );
-}
-
-function buildDraftKind(
-  existing: ArtifactDraftKind | ArtifactKind,
-  title: string,
-): ArtifactDraftKind {
-  const existingProjectId = existing.type === "intent" ? (existing.project_id ?? null) : null;
-  switch (existing.type) {
-    case "essay":
-      return { type: "essay", title: title || null };
-    case "intent":
-      return { type: "intent", title: title || null, project_id: existingProjectId };
-    default:
-      return { type: "memo" };
-  }
-}
-
-function titleFromKind(kind: ArtifactDraftKind | ArtifactKind): string {
-  return kind.type === "memo" ? "" : (kind.title ?? "");
-}
-
-function buildArtifactKind(
-  existing: ArtifactDraftKind | ArtifactKind,
-  title: string,
-): ArtifactKind {
-  const existingProjectId = existing.type === "intent" ? (existing.project_id ?? null) : null;
-  switch (existing.type) {
-    case "essay":
-      return { type: "essay", title: title.trim() || "" };
-    case "intent":
-      return { type: "intent", title: title.trim() || "", project_id: existingProjectId };
-    default:
-      return { type: "memo" };
-  }
 }

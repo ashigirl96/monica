@@ -4,13 +4,13 @@ import {
   listTaskSummaries,
   getBoardColumns,
   trackGithubIssue,
-  listProjects,
   createRawTask,
   prepareTask,
   type TaskSummaryRow,
 } from "@/commands/task";
 import { invalidateTaskSummaries, queryKeys } from "@/stores/query-keys";
 import { pushErrorToast } from "@/stores/toast";
+export { projectsAtom } from "@/stores/projects";
 
 export const newTaskOpenAtom = atom(false);
 export const projectFilterOpenAtom = atom(false);
@@ -85,12 +85,6 @@ const taskSummaryByIdQueryAtom = atomWithQuery(() => ({
 export const taskSummaryByIdAtom = atom<Record<string, RunspaceTaskSummary>>(
   (get) => get(taskSummaryByIdQueryAtom).data ?? {},
 );
-
-const projectsQueryAtom = atomWithQuery(() => ({
-  queryKey: queryKeys.projects.list(),
-  queryFn: () => listProjects(),
-}));
-export const projectsAtom = atom((get) => get(projectsQueryAtom).data ?? []);
 
 export const trackIssueMutationAtom = atomWithMutation((get) => ({
   mutationFn: (input: string) => trackGithubIssue(input),

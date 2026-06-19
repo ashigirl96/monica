@@ -26,7 +26,7 @@ export function FuzzyPickerModal({
     requestAnimationFrame(() => inputRef.current?.focus());
   }, []);
 
-  const filtered = items.filter((item) => item.label.toLowerCase().includes(query.toLowerCase()));
+  const filtered = items.filter((item) => fuzzyMatch(item.label, query));
 
   useEffect(() => {
     setHighlightIndex(0);
@@ -56,7 +56,9 @@ export function FuzzyPickerModal({
     if (e.key === "Enter" && !e.nativeEvent.isComposing) {
       e.preventDefault();
       e.stopPropagation();
-      onSelect(filtered.length > 0 ? filtered[highlightIndex].key : null);
+      const selected = filtered[highlightIndex];
+      if (!selected) return;
+      onSelect(selected.key);
       onClose();
       return;
     }
@@ -64,7 +66,7 @@ export function FuzzyPickerModal({
     if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
       e.preventDefault();
       e.stopPropagation();
-      setHighlightIndex((i) => Math.min(i + 1, filtered.length - 1));
+      setHighlightIndex((i) => Math.min(i + 1, Math.max(filtered.length - 1, 0)));
       return;
     }
 
@@ -129,4 +131,17 @@ export function FuzzyPickerModal({
     </div>,
     document.body,
   );
+}
+
+export function fuzzyMatch(label: string, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (needle.length === 0) return true;
+
+  let index = 0;
+  const haystack = label.toLowerCase();
+  for (const char of haystack) {
+    if (char === needle[index]) index += 1;
+    if (index === needle.length) return true;
+  }
+  return false;
 }
