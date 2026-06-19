@@ -1,3 +1,4 @@
+pub mod artifact_ops;
 pub mod auth;
 pub mod open_bench;
 pub mod close_issue;

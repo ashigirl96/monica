@@ -1,9 +1,10 @@
 use monica_core::{
-    Agent, DisplayStatus, ExternalRef, GithubPullRequest, GithubPullRequestStatus, NewTask,
-    NewTaskRun, NewTerminalSession, Project, ProjectRepository, PullRequestBranchSyncCandidate,
-    RefType, TaskKind, TaskRepository, TaskRunObservation, TaskRunRepository, TaskRunStatus,
-    TaskRunWaitReason, TaskStatus, TaskSummaryFilter, TaskSummaryRow, TerminalSessionKind,
-    TerminalSessionStatus, TerminalSessionUpdate,
+    Agent, ArtifactDraftKind, ArtifactRepository, DisplayStatus, ExternalRef, GithubPullRequest,
+    GithubPullRequestStatus, NewDraft, NewTask, NewTaskRun, NewTerminalSession, Project,
+    ProjectRepository, PullRequestBranchSyncCandidate, RefType, TaskKind, TaskRepository,
+    TaskRunObservation, TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus,
+    TaskSummaryFilter, TaskSummaryRow, TerminalSessionKind, TerminalSessionStatus,
+    TerminalSessionUpdate,
 };
 use rusqlite::params;
 use serde_json::json;
@@ -53,6 +54,34 @@ fn branch_retry_delay_seconds(db: &SqliteStore, task_id: &str) -> i64 {
             |row| row.get(0),
         )
         .unwrap()
+}
+
+#[test]
+fn drafts_round_trip_with_attachments() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let draft = db
+        .insert_draft(NewDraft {
+            kind: ArtifactDraftKind::Memo,
+            body: "draft with image".to_string(),
+            occurred_at: None,
+        })
+        .unwrap();
+    let attachment = db
+        .insert_attachment(
+            &draft.id,
+            "image.png",
+            Some("image/png"),
+            123,
+            &format!("{}/ATT-1.png", draft.id),
+        )
+        .unwrap();
+
+    let fetched = db.get_draft(&draft.id).unwrap().unwrap();
+    assert_eq!(fetched.attachments, vec![attachment.clone()]);
+
+    let drafts = db.list_drafts().unwrap();
+    assert_eq!(drafts.len(), 1);
+    assert_eq!(drafts[0].attachments, vec![attachment]);
 }
 
 #[test]
