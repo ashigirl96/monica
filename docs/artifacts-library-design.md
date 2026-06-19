@@ -55,11 +55,11 @@ Artifact は Space には属さない。Space は UI 上の作業場所であり
 
 v1 の type は次の 3 種類。
 
-| Type     | 意味                                                 |
-| -------- | ---------------------------------------------------- |
+| Type     | 意味                                                |
+| -------- | --------------------------------------------------- |
 | `memo`   | AI があとで拾うための軽い生ログ。見返す前提は薄い。 |
-| `essay`  | 読み返す、文章力を上げる、将来投稿するための文章。   |
-| `intent` | 作りたいもの、やりたいこと、実装したいことの種。     |
+| `essay`  | 読み返す、文章力を上げる、将来投稿するための文章。  |
+| `intent` | 作りたいもの、やりたいこと、実装したいことの種。    |
 
 ### Timeline
 
@@ -224,11 +224,11 @@ DB はクエリしやすさを優先し、`kind` / `title` / `project_id` を列
 
 ID は既存 Task の `MON-<n>` と分ける。
 
-| 種別       | ID       |
-| ---------- | -------- |
-| Task       | `MON-1`  |
-| Artifact   | `ART-1`  |
-| Attachment | `ATT-1`  |
+| 種別       | ID      |
+| ---------- | ------- |
+| Task       | `MON-1` |
+| Artifact   | `ART-1` |
+| Attachment | `ATT-1` |
 
 ## Draft
 
@@ -335,7 +335,7 @@ draft / artifact tab:
 Library active 時の `cmd+n` は、現在の Library view に応じて draft tab を作る。
 
 | 現在 view | 新規 draft type |
-| ---------- | --------------- |
+| --------- | --------------- |
 | Timeline  | `memo`          |
 | Essay     | `essay`         |
 | Intent    | `intent`        |
