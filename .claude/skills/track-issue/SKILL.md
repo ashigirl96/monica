@@ -36,7 +36,7 @@ MONICA_HOME=$HOME/monica /Users/1e0nhard96/.local/bin/monica issue track <issue 
 ```
 
 成功すると `Created MON-<id> from <owner/repo>#<number>` のように出力される。
-その MON-ID と元の issue URL をユーザーに報告して完了。
+その MON-ID と元の issue URL をユーザーに報告する。
 
 ### 3. track されたか確認する
 
@@ -54,3 +54,5 @@ MONICA_HOME=$HOME/monica /Users/1e0nhard96/.local/bin/monica issue status
 - `monica issue track` は issue URL（`https://github.com/owner/repo/issues/123`）
   でも `owner/repo#123` 形式でも受け付ける。手元に URL があれば URL をそのまま渡す。
 - 作成に失敗した場合は issue を track せず、エラーをそのまま報告する。
+- track 後は「実装しましょうか」と誘導せず、次にどんな issue を作るかを相談する
+  トーンで締める。実装は「実装して」「tackle して」と言われてから。
