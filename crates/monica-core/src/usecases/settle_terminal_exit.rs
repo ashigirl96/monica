@@ -114,6 +114,7 @@ mod tests {
             last_event_name: None,
             last_event_at: None,
             active_subagents: 0,
+            pending_stop: false,
             metadata: serde_json::Value::Null,
             created_at: "2026-06-02T00:00:00.000Z".to_string(),
             updated_at: "2026-06-02T00:00:00.000Z".to_string(),

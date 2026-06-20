@@ -286,6 +286,7 @@ impl TaskRunRepository for FakeRepos {
             last_event_name: None,
             last_event_at: None,
             active_subagents: 0,
+            pending_stop: false,
             metadata: json!({}),
             created_at: "2026-06-02T00:00:00.000Z".to_string(),
             updated_at: "2026-06-02T00:00:00.000Z".to_string(),
@@ -406,15 +407,33 @@ impl TaskRunRepository for FakeRepos {
         if let Some(tab) = observation.terminal_tab_id {
             run.terminal_tab_id = Some(tab.to_string());
         }
-        if let Some(update) = observation
-            .event_name
-            .and_then(|event| subagent_count_update(event, observation.metadata))
+        if observation.event_name == Some("Stop")
+            && observation.status.is_none()
+            && run.active_subagents > 0
+            && run.status == TaskRunStatus::Running
         {
+            run.pending_stop = true;
+        }
+        let subagent_update = observation
+            .event_name
+            .and_then(|event| subagent_count_update(event, observation.metadata));
+        if let Some(update) = subagent_update {
             run.active_subagents = match update {
                 SubagentCountUpdate::Increment => run.active_subagents + 1,
                 SubagentCountUpdate::Decrement => (run.active_subagents - 1).max(0),
                 SubagentCountUpdate::Reset => 0,
             };
+        }
+        if observation.event_name == Some("SubagentStop")
+            && run.active_subagents == 0
+            && run.pending_stop
+        {
+            run.status = TaskRunStatus::WaitingForUser;
+            run.wait_reason = Some(TaskRunWaitReason::AwaitingPrompt);
+            run.pending_stop = false;
+        }
+        if matches!(subagent_update, Some(SubagentCountUpdate::Reset)) {
+            run.pending_stop = false;
         }
         run.last_event_name = observation.event_name.map(ToString::to_string);
         run.last_event_at = Some(observation.at.to_string());
@@ -1246,6 +1265,40 @@ fn record_claude_hook_stop_during_subagent_keeps_run_running() {
     let run = repos.get_task_run(&run_id).unwrap().unwrap();
     assert_eq!(run.status, TaskRunStatus::WaitingForUser);
     assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
+}
+
+/// Issue #198: when the last `SubagentStop` brings the counter to 0 after a blocked `Stop`, the
+/// deferred transition fires and the entering edge is reported so a notification can be pushed.
+#[test]
+fn record_claude_hook_deferred_stop_fires_on_last_subagent_stop() {
+    let mut repos = FakeRepos::default();
+    let outputs = FakeTaskRunOutputs::default();
+    let (task_id, run_id) = task_with_running_primary(&mut repos, &outputs);
+
+    let fire = |repos: &mut FakeRepos, event: &str| {
+        record_claude_hook(
+            repos,
+            &outputs,
+            hook_ctx(&task_id, None),
+            &format!(r#"{{"hook_event_name":"{event}","session_id":"sess-1"}}"#),
+        )
+        .unwrap()
+    };
+
+    fire(&mut repos, "SubagentStart");
+    fire(&mut repos, "Stop");
+    let run = repos.get_task_run(&run_id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::Running);
+    assert!(run.pending_stop);
+
+    let report = fire(&mut repos, "SubagentStop");
+    assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
+    assert!(report.entered_waiting_for_user);
+    let run = repos.get_task_run(&run_id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::WaitingForUser);
+    assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
+    assert_eq!(run.active_subagents, 0);
+    assert!(!run.pending_stop);
 }
 
 /// The subagent guard has two independent halves, both wired through this usecase: a
