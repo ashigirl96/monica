@@ -26,6 +26,7 @@ mod v21;
 mod v22;
 mod v23;
 mod v24;
+mod v25;
 
 fn migration_steps() -> Vec<M<'static>> {
     vec![
@@ -53,6 +54,7 @@ fn migration_steps() -> Vec<M<'static>> {
         M::up(v22::SQL),
         M::up(v23::SQL),
         M::up(v24::SQL),
+        M::up(v25::SQL),
     ]
 }
 

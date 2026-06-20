@@ -415,6 +415,101 @@ fn task_run_observation_holds_stop_while_subagent_runs() {
     assert_eq!(final_stop.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
 }
 
+/// Issue #198: when a `Stop` is blocked by the subagent guard and the last `SubagentStop` brings
+/// `active_subagents` to 0, the deferred `Stop → WaitingForUser` transition must fire atomically
+/// inside the same UPDATE — without a second `Stop` event.
+#[test]
+fn task_run_observation_deferred_stop_fires_when_last_subagent_ends() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("deferred stop")).unwrap();
+    let run = db
+        .start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
+
+    let observe =
+        |db: &mut SqliteStore, event: &str, status: Option<TaskRunStatus>| {
+            record_observation(db, &run.id, event, status, None);
+        };
+    let snapshot = |db: &SqliteStore| db.get_task_run(&run.id).unwrap().unwrap();
+
+    observe(&mut db, "UserPromptSubmit", Some(TaskRunStatus::Running));
+
+    // Single subagent: SubagentStart → Stop (blocked) → SubagentStop → deferred fires.
+    observe(&mut db, "SubagentStart", None);
+    assert_eq!(snapshot(&db).active_subagents, 1);
+
+    observe(&mut db, "Stop", Some(TaskRunStatus::WaitingForUser));
+    let s = snapshot(&db);
+    assert_eq!(s.status, TaskRunStatus::Running);
+    assert_eq!(s.active_subagents, 1);
+    assert!(s.pending_stop);
+
+    observe(&mut db, "SubagentStop", None);
+    let s = snapshot(&db);
+    assert_eq!(s.status, TaskRunStatus::WaitingForUser);
+    assert_eq!(s.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
+    assert_eq!(s.active_subagents, 0);
+    assert!(!s.pending_stop);
+
+    // Multiple subagents: deferred stop fires only when the LAST one ends.
+    observe(&mut db, "UserPromptSubmit", Some(TaskRunStatus::Running));
+    observe(&mut db, "SubagentStart", None);
+    observe(&mut db, "SubagentStart", None);
+    assert_eq!(snapshot(&db).active_subagents, 2);
+
+    observe(&mut db, "Stop", Some(TaskRunStatus::WaitingForUser));
+    assert_eq!(snapshot(&db).status, TaskRunStatus::Running);
+    assert!(snapshot(&db).pending_stop);
+
+    // First SubagentStop: count 2→1, pending_stop stays, status stays Running.
+    observe(&mut db, "SubagentStop", None);
+    assert_eq!(snapshot(&db).status, TaskRunStatus::Running);
+    assert_eq!(snapshot(&db).active_subagents, 1);
+    assert!(snapshot(&db).pending_stop);
+
+    // Second SubagentStop: count 1→0, deferred stop fires.
+    observe(&mut db, "SubagentStop", None);
+    assert_eq!(snapshot(&db).status, TaskRunStatus::WaitingForUser);
+    assert_eq!(snapshot(&db).active_subagents, 0);
+    assert!(!snapshot(&db).pending_stop);
+
+    // UserPromptSubmit clears a stale pending_stop.
+    observe(&mut db, "UserPromptSubmit", Some(TaskRunStatus::Running));
+    observe(&mut db, "SubagentStart", None);
+    observe(&mut db, "Stop", Some(TaskRunStatus::WaitingForUser));
+    assert!(snapshot(&db).pending_stop);
+
+    observe(&mut db, "UserPromptSubmit", Some(TaskRunStatus::Running));
+    assert!(!snapshot(&db).pending_stop);
+
+    // SessionEnd clears pending_stop (terminal dies before subagent finishes).
+    observe(&mut db, "SubagentStart", None);
+    observe(&mut db, "Stop", Some(TaskRunStatus::WaitingForUser));
+    assert!(snapshot(&db).pending_stop);
+
+    db.record_task_run_observation(
+        &run.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::Stopped),
+            wait_reason: Some(None),
+            event_name: Some("SessionEnd"),
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: Some("sess-1"),
+            terminal_tab_id: None,
+            metadata: None,
+        },
+    )
+    .unwrap();
+    let s = snapshot(&db);
+    assert_eq!(s.status, TaskRunStatus::Stopped);
+    assert!(!s.pending_stop);
+}
+
 /// MON-73 regression: a `<task-notification>` `UserPromptSubmit` (Claude re-injecting a finished
 /// background subagent's result) used to reset `active_subagents` to 0 mid-turn, letting the
 /// trailing `Stop` drop the run to "your turn" while siblings still ran. The fix keeps the count
@@ -1300,6 +1395,23 @@ fn settle_task_run_if_live_only_stops_session_driven_runs() {
         assert_eq!(run.status, TaskRunStatus::Stopped);
         assert_eq!(run.wait_reason, None);
     }
+
+    // A pending_stop flag is cleared when the terminal dies.
+    let pending = start_run(&mut db);
+    observe(&mut db, &pending.id, TaskRunStatus::Running);
+    record_observation(&mut db, &pending.id, "SubagentStart", None, None);
+    record_observation(
+        &mut db,
+        &pending.id,
+        "Stop",
+        Some(TaskRunStatus::WaitingForUser),
+        None,
+    );
+    assert!(db.get_task_run(&pending.id).unwrap().unwrap().pending_stop);
+    assert!(db.settle_task_run_if_live(&pending.id, &task.id).unwrap());
+    let settled = db.get_task_run(&pending.id).unwrap().unwrap();
+    assert_eq!(settled.status, TaskRunStatus::Stopped);
+    assert!(!settled.pending_stop);
 
     // A hook-created run parked at setting_up settles only once a session was observed on it.
     let observed = start_run(&mut db);

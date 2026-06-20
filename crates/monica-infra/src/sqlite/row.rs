@@ -51,6 +51,7 @@ pub(super) fn task_run_from_row(row: &Row<'_>) -> Result<TaskRun> {
         last_event_name: row.get("last_event_name")?,
         last_event_at: row.get("last_event_at")?,
         active_subagents: row.get("active_subagents")?,
+        pending_stop: row.get::<_, i64>("pending_stop")? != 0,
         metadata: serde_json::from_str(&metadata)?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,

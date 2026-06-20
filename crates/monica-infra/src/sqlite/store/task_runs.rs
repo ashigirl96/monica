@@ -94,6 +94,7 @@ impl SqliteStore {
                 "UPDATE task_runs
                    SET status = '{}',
                        wait_reason = NULL,
+                       pending_stop = 0,
                        updated_at = {SET_NOW}
                  WHERE id = ?1 AND task_id = ?2
                    AND (status IN ('{}', '{}')
@@ -163,25 +164,31 @@ impl TaskRunRepository for SqliteStore {
         // fresh evidence of life and passes through. A terminal verdict (?11) is scoped the
         // other way: it belongs to the session that died, so it is refused when it arrives
         // from a session that is not the run's current one.
+        let stopped = TaskRunStatus::Stopped.as_str();
+        let waiting_for_user = TaskRunStatus::WaitingForUser.as_str();
+        let running = TaskRunStatus::Running.as_str();
+        let awaiting_prompt = TaskRunWaitReason::AwaitingPrompt.as_str();
         let protected = format!(
             "(?11 AND ?6 IS NOT NULL
                   AND provider_session_id IS NOT NULL
                   AND provider_session_id != ?6)
              OR (?10 AND (?6 IS NULL OR provider_session_id IS ?6)
-                     AND (status = '{}'
-                          OR (status = '{}'
+                     AND (status = '{stopped}'
+                          OR (status = '{waiting_for_user}'
                               AND wait_reason IN ({tool_waits}))))
              OR (?12 AND (active_subagents > 0 OR ?16))",
-            TaskRunStatus::Stopped.as_str(),
-            TaskRunStatus::WaitingForUser.as_str(),
         );
         let tx = self.conn_mut().transaction()?;
         let affected = tx.execute(
             &format!(
                 "UPDATE task_runs
                     SET status = CASE WHEN {protected} THEN status
+                                      WHEN ?15 AND pending_stop = 1 AND active_subagents <= 1
+                                      THEN '{waiting_for_user}'
                                       ELSE COALESCE(?1, status) END,
                         wait_reason = CASE WHEN {protected} THEN wait_reason
+                                           WHEN ?15 AND pending_stop = 1 AND active_subagents <= 1
+                                           THEN '{awaiting_prompt}'
                                            WHEN ?2 THEN ?3 ELSE wait_reason END,
                         last_event_name = COALESCE(?4, last_event_name),
                         last_event_at = ?5,
@@ -196,6 +203,13 @@ impl TaskRunRepository for SqliteStore {
                                                 WHEN ?14 THEN active_subagents + 1
                                                 WHEN ?15 THEN MAX(0, active_subagents - 1)
                                                 ELSE active_subagents END,
+                        pending_stop = CASE
+                            WHEN ?12 AND (active_subagents > 0 OR ?16)
+                                 AND status = '{running}' THEN 1
+                            WHEN ?15 AND active_subagents <= 1 THEN 0
+                            WHEN ?13 THEN 0
+                            WHEN NOT ({protected}) AND ?1 IS NOT NULL THEN 0
+                            ELSE pending_stop END,
                         metadata_json = COALESCE(?8, metadata_json),
                         updated_at = {SET_NOW}
                   WHERE id = ?9"
@@ -287,6 +301,7 @@ impl TaskRunRepository for SqliteStore {
                 "UPDATE task_runs
                    SET status = ?1,
                        wait_reason = NULL,
+                       pending_stop = 0,
                        updated_at = {SET_NOW}
                  WHERE id = ?2 AND task_id = ?3"
             ),
