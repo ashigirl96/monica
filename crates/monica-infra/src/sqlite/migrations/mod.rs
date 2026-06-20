@@ -27,13 +27,6 @@ mod v22;
 mod v23;
 mod v24;
 
-/// Ordered schema migrations, tracked by `PRAGMA user_version` (rusqlite_migration
-/// uses the list position as the version). Append an `M::up(...)` to add a version;
-/// never reorder or remove existing entries, or already-migrated databases diverge.
-fn migrations() -> Migrations<'static> {
-    Migrations::new(migration_steps())
-}
-
 fn migration_steps() -> Vec<M<'static>> {
     vec![
         M::up(v01::SQL),
@@ -65,7 +58,7 @@ fn migration_steps() -> Vec<M<'static>> {
 
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
-    migrations()
+    Migrations::new(migration_steps())
         .to_latest(conn)
         .context("failed to apply database migrations")
 }
@@ -95,6 +88,65 @@ pub(crate) mod test_support {
     pub fn migration_count() -> usize {
         migration_steps().len()
     }
+
+    pub fn assert_table_exists(conn: &Connection, table: &str) {
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "missing table: {table}");
+    }
+
+    pub fn assert_table_absent(conn: &Connection, table: &str) {
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "table should not exist: {table}");
+    }
+
+    pub fn assert_column_exists(conn: &Connection, table: &str, column: &str) {
+        let count: i64 = conn
+            .query_row(
+                &format!(
+                    "SELECT count(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"
+                ),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "{table}.{column} must exist");
+    }
+
+    pub fn assert_column_absent(conn: &Connection, table: &str, column: &str) {
+        let count: i64 = conn
+            .query_row(
+                &format!(
+                    "SELECT count(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"
+                ),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "{table}.{column} must not exist");
+    }
+
+    pub fn assert_index_exists(conn: &Connection, index: &str) {
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                [index],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "missing index: {index}");
+    }
 }
 
 #[cfg(test)]
@@ -109,7 +161,9 @@ mod tests {
 
     #[test]
     fn migration_set_is_valid() {
-        migrations().validate().expect("migrations should validate");
+        Migrations::new(migration_steps())
+            .validate()
+            .expect("migrations should validate");
     }
 
     #[test]
@@ -135,15 +189,7 @@ mod tests {
         assert_eq!(project.id, "o/r");
         assert_eq!(project.path.as_deref(), Some("/tmp/r"));
 
-        let has_column: i64 = db
-            .conn()
-            .query_row(
-                "SELECT count(*) FROM pragma_table_info('projects') WHERE name = 'branch_template'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(has_column, 0, "branch_template column must be dropped");
+        assert_column_absent(db.conn(), "projects", "branch_template");
 
         let version: i64 = db
             .conn()
@@ -187,17 +233,7 @@ mod tests {
         );
 
         for table in ["terminal_runspaces", "terminal_tabs"] {
-            let has_column: i64 = db
-                .conn()
-                .query_row(
-                    &format!(
-                        "SELECT count(*) FROM pragma_table_info('{table}') WHERE name = 'is_active'"
-                    ),
-                    [],
-                    |r| r.get(0),
-                )
-                .unwrap();
-            assert_eq!(has_column, 0, "{table}.is_active must be dropped");
+            assert_column_absent(db.conn(), table, "is_active");
         }
 
         std::fs::remove_file(&path).ok();
@@ -230,16 +266,7 @@ mod tests {
         }
 
         let db = crate::sqlite::SqliteStore::open_at(&path).unwrap();
-        let has_table: i64 = db
-            .conn()
-            .query_row(
-                "SELECT count(*) FROM sqlite_master
-                 WHERE type = 'table' AND name = 'external_ref_syncs'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(has_table, 0, "external_ref_syncs must be dropped");
+        assert_table_absent(db.conn(), "external_ref_syncs");
 
         let version: i64 = db
             .conn()
@@ -361,16 +388,7 @@ mod tests {
         assert_eq!(snapshot.runspaces[0].tabs[0].id, "tab-1");
         assert_eq!(snapshot.runspaces[0].tabs[0].terminal_session_id, None);
 
-        let session_table: i64 = db
-            .conn()
-            .query_row(
-                "SELECT count(*) FROM sqlite_master
-                  WHERE type = 'table' AND name = 'terminal_sessions'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(session_table, 1);
+        assert_table_exists(db.conn(), "terminal_sessions");
 
         std::fs::remove_file(&path).ok();
     }
@@ -425,15 +443,7 @@ mod tests {
 
         let mut db = crate::sqlite::SqliteStore::open_at(&path).unwrap();
         for old in ["work_items", "runs", "run_counter"] {
-            let count: i64 = db
-                .conn()
-                .query_row(
-                    "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-                    params![old],
-                    |r| r.get(0),
-                )
-                .unwrap();
-            assert_eq!(count, 0, "{old} must be renamed away");
+            assert_table_absent(db.conn(), old);
         }
 
         assert_eq!(
@@ -507,15 +517,7 @@ mod tests {
         assert_eq!(next.id, "run-2");
 
         for table in ["agent_session_counter", "agent_sessions"] {
-            let count: i64 = db
-                .conn()
-                .query_row(
-                    "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-                    params![table],
-                    |r| r.get(0),
-                )
-                .unwrap();
-            assert_eq!(count, 0, "{table} must be collapsed into task_runs");
+            assert_table_absent(db.conn(), table);
         }
 
         std::fs::remove_file(&path).ok();
@@ -653,15 +655,7 @@ mod tests {
             DisplayStatus::Failed
         );
 
-        let dropped: i64 = db
-            .conn()
-            .query_row(
-                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'agent_sessions'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(dropped, 0);
+        assert_table_absent(db.conn(), "agent_sessions");
 
         std::fs::remove_file(&path).ok();
     }
@@ -704,15 +698,7 @@ mod tests {
             "artifact_counter",
             "attachment_counter",
         ] {
-            let count: i64 = db
-                .conn()
-                .query_row(
-                    "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-                    [table],
-                    |r| r.get(0),
-                )
-                .unwrap();
-            assert_eq!(count, 0, "{table} must be dropped by V24");
+            assert_table_absent(db.conn(), table);
         }
 
         std::fs::remove_file(&path).ok();

@@ -31,7 +31,9 @@ pub(super) const SQL: &str = r#"
 
 #[cfg(test)]
 mod tests {
-    use crate::sqlite::migrations::test_support::stage_through;
+    use crate::sqlite::migrations::test_support::{
+        assert_column_exists, assert_table_exists, stage_through,
+    };
     use rusqlite::Connection;
 
     #[test]
@@ -41,23 +43,8 @@ mod tests {
         conn.execute_batch(super::SQL).unwrap();
 
         for table in ["terminal_session_counter", "terminal_sessions"] {
-            let count: i64 = conn
-                .query_row(
-                    "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-                    [table],
-                    |r| r.get(0),
-                )
-                .unwrap();
-            assert_eq!(count, 1, "missing table: {table}");
+            assert_table_exists(&conn, table);
         }
-
-        let has_column: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM pragma_table_info('terminal_tabs') WHERE name = 'terminal_session_id'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(has_column, 1);
+        assert_column_exists(&conn, "terminal_tabs", "terminal_session_id");
     }
 }

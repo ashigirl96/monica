@@ -140,7 +140,9 @@ pub(super) const SQL: &str = r#"
 
 #[cfg(test)]
 mod tests {
-    use crate::sqlite::migrations::test_support::stage_through;
+    use crate::sqlite::migrations::test_support::{
+        assert_column_exists, assert_table_absent, stage_through,
+    };
     use rusqlite::Connection;
 
     #[test]
@@ -148,23 +150,7 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         stage_through(&mut conn, 5);
         conn.execute_batch(super::SQL).unwrap();
-
-        let has_deleted_at: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM pragma_table_info('tasks') WHERE name = 'deleted_at'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(has_deleted_at, 1, "tasks.deleted_at must exist");
-
-        let agent_sessions: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'agent_sessions'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(agent_sessions, 0, "agent_sessions must be dropped");
+        assert_column_exists(&conn, "tasks", "deleted_at");
+        assert_table_absent(&conn, "agent_sessions");
     }
 }

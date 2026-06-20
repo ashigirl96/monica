@@ -8,7 +8,9 @@ pub(super) const SQL: &str = r#"
 
 #[cfg(test)]
 mod tests {
-    use crate::sqlite::migrations::test_support::stage_through;
+    use crate::sqlite::migrations::test_support::{
+        assert_table_absent, assert_table_exists, stage_through,
+    };
     use rusqlite::Connection;
 
     #[test]
@@ -16,23 +18,7 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         stage_through(&mut conn, 10);
         conn.execute_batch(super::SQL).unwrap();
-
-        let runspaces: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'terminal_runspaces'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(runspaces, 1);
-
-        let workspaces: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'terminal_workspaces'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(workspaces, 0, "terminal_workspaces must be renamed");
+        assert_table_exists(&conn, "terminal_runspaces");
+        assert_table_absent(&conn, "terminal_workspaces");
     }
 }

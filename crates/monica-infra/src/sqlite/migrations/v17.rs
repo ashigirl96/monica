@@ -6,7 +6,7 @@ pub(super) const SQL: &str = r#"
 
 #[cfg(test)]
 mod tests {
-    use crate::sqlite::migrations::test_support::stage_through;
+    use crate::sqlite::migrations::test_support::{assert_column_absent, stage_through};
     use rusqlite::Connection;
 
     #[test]
@@ -16,16 +16,7 @@ mod tests {
         conn.execute_batch(super::SQL).unwrap();
 
         for table in ["terminal_runspaces", "terminal_tabs"] {
-            let has_column: i64 = conn
-                .query_row(
-                    &format!(
-                        "SELECT count(*) FROM pragma_table_info('{table}') WHERE name = 'is_active'"
-                    ),
-                    [],
-                    |r| r.get(0),
-                )
-                .unwrap();
-            assert_eq!(has_column, 0, "{table}.is_active must be dropped");
+            assert_column_absent(&conn, table, "is_active");
         }
     }
 }

@@ -59,7 +59,9 @@ pub(super) const SQL: &str = r#"
 
 #[cfg(test)]
 mod tests {
-    use crate::sqlite::migrations::test_support::stage_through;
+    use crate::sqlite::migrations::test_support::{
+        assert_table_absent, assert_table_exists, stage_through,
+    };
     use rusqlite::Connection;
 
     #[test]
@@ -68,19 +70,11 @@ mod tests {
         stage_through(&mut conn, 4);
         conn.execute_batch(super::SQL).unwrap();
 
-        let tables: Vec<String> = conn
-            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
-            .unwrap()
-            .query_map([], |r| r.get(0))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-
         for expected in ["tasks", "task_runs", "task_run_counter"] {
-            assert!(tables.contains(&expected.to_string()), "missing table: {expected}");
+            assert_table_exists(&conn, expected);
         }
         for gone in ["work_items", "runs", "run_counter"] {
-            assert!(!tables.contains(&gone.to_string()), "table should be renamed: {gone}");
+            assert_table_absent(&conn, gone);
         }
     }
 }

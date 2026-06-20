@@ -29,7 +29,7 @@ pub(super) const SQL: &str = r#"
 
 #[cfg(test)]
 mod tests {
-    use crate::sqlite::migrations::test_support::stage_through;
+    use crate::sqlite::migrations::test_support::{assert_table_exists, stage_through};
     use rusqlite::Connection;
 
     #[test]
@@ -37,14 +37,6 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         stage_through(&mut conn, 7);
         conn.execute_batch(super::SQL).unwrap();
-
-        let count: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'github_pull_request_ref_states'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 1);
+        assert_table_exists(&conn, "github_pull_request_ref_states");
     }
 }

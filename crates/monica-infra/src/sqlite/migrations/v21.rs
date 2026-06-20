@@ -15,7 +15,9 @@ pub(super) const SQL: &str = r#"
 
 #[cfg(test)]
 mod tests {
-    use crate::sqlite::migrations::test_support::stage_through;
+    use crate::sqlite::migrations::test_support::{
+        assert_column_absent, assert_column_exists, stage_through,
+    };
     use rusqlite::Connection;
 
     #[test]
@@ -30,23 +32,8 @@ mod tests {
 
         conn.execute_batch(super::SQL).unwrap();
 
-        let has_closed_at: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM pragma_table_info('tasks') WHERE name = 'closed_at'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(has_closed_at, 1);
-
-        let has_deleted_at: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM pragma_table_info('tasks') WHERE name = 'deleted_at'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(has_deleted_at, 0, "deleted_at must be renamed to closed_at");
+        assert_column_exists(&conn, "tasks", "closed_at");
+        assert_column_absent(&conn, "tasks", "deleted_at");
 
         let done_status: String = conn
             .query_row("SELECT status FROM tasks WHERE id = 't-done'", [], |r| {

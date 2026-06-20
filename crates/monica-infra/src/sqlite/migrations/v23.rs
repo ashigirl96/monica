@@ -45,7 +45,7 @@ pub(super) const SQL: &str = r#"
 
 #[cfg(test)]
 mod tests {
-    use crate::sqlite::migrations::test_support::stage_through;
+    use crate::sqlite::migrations::test_support::{assert_table_exists, stage_through};
     use rusqlite::Connection;
 
     #[test]
@@ -60,14 +60,7 @@ mod tests {
             "library_attachments",
             "attachment_counter",
         ] {
-            let count: i64 = conn
-                .query_row(
-                    "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-                    [table],
-                    |r| r.get(0),
-                )
-                .unwrap();
-            assert_eq!(count, 1, "missing table: {table}");
+            assert_table_exists(&conn, table);
         }
     }
 }
