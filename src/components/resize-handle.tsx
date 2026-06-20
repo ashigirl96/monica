@@ -3,7 +3,6 @@ import { useSetAtom } from "jotai";
 import {
   sidebarWidthAtom,
   sidebarResizingAtom,
-  SPACE_NAV_WIDTH,
   SIDEBAR_MIN_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_DEFAULT_WIDTH,
@@ -45,9 +44,7 @@ export function ResizeHandle() {
         if (!rafRef.current) {
           rafRef.current = requestAnimationFrame(() => {
             rafRef.current = 0;
-            const width = Math.round(
-              clamp(e.clientX - SPACE_NAV_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH),
-            );
+            const width = Math.round(clamp(e.clientX, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH));
             setSidebarWidth(width);
           });
         }

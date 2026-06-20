@@ -5,11 +5,9 @@ import {
   sidebarOpenAtom,
   sidebarWidthAtom,
   sidebarResizingAtom,
-  SPACE_NAV_WIDTH,
 } from "@/stores/space";
 import { uiZoomAtom } from "@/stores/zoom";
 import { getSpaceConfig, spaces } from "@/spaces/registry";
-import { SpaceNav } from "@/components/space-nav";
 import { ResizeHandle } from "@/components/resize-handle";
 import { Toaster } from "@/components/toaster";
 import { useShortcuts } from "@/hooks/use-shortcuts";
@@ -26,6 +24,7 @@ export function AppLayout() {
   const uiZoom = useAtomValue(uiZoomAtom);
   const space = getSpaceConfig(activeSpace);
 
+  const Icon = space.icon;
   const Sidebar = space.sidebar;
   const Header = space.header;
   const Content = space.content;
@@ -37,11 +36,7 @@ export function AppLayout() {
   const persistentSpaces = spaces.filter((s) => s.persistent && visitedRef.current.has(s.id));
 
   const hasSidebar = sidebarOpen && !!Sidebar;
-  const leftPanelWidth = !sidebarOpen
-    ? 0
-    : Sidebar
-      ? SPACE_NAV_WIDTH + sidebarWidth
-      : SPACE_NAV_WIDTH;
+  const leftPanelWidth = hasSidebar ? sidebarWidth : 0;
 
   return (
     <div className="flex h-screen w-screen select-none overflow-hidden">
@@ -52,26 +47,28 @@ export function AppLayout() {
         )}
         style={{ width: leftPanelWidth }}
       >
-        <div
-          className="flex h-full"
-          style={{
-            minWidth: Sidebar ? SPACE_NAV_WIDTH + sidebarWidth : SPACE_NAV_WIDTH,
-          }}
-        >
-          <SpaceNav />
-          {Sidebar && (
-            <div className="flex flex-col" style={{ width: sidebarWidth }}>
-              <div
-                className="flex-shrink-0"
-                style={{ height: TRAFFIC_LIGHT_ZONE_HEIGHT }}
-                data-tauri-drag-region
-              />
-              <div className="flex-1 overflow-y-auto px-2">
-                <Sidebar />
+        {Sidebar && (
+          <div className="flex h-full flex-col" style={{ minWidth: sidebarWidth }}>
+            <div
+              className="flex flex-shrink-0 items-center"
+              style={{
+                height: TRAFFIC_LIGHT_ZONE_HEIGHT,
+                paddingLeft: TRAFFIC_LIGHT_ZONE_WIDTH - 8,
+              }}
+              data-tauri-drag-region
+            >
+              <div className="flex items-center gap-1.5 rounded-md bg-white/[0.08] px-2 py-0.5">
+                <Icon size={12} strokeWidth={2} />
+                <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  {space.label}
+                </span>
               </div>
             </div>
-          )}
-        </div>
+            <div className="flex-1 overflow-y-auto px-2">
+              <Sidebar />
+            </div>
+          </div>
+        )}
       </div>
 
       {hasSidebar && <ResizeHandle />}

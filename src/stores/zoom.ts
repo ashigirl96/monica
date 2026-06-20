@@ -11,7 +11,7 @@ export function clampUiZoom(v: unknown): number {
   return clamp(v, UI_ZOOM_MIN, UI_ZOOM_MAX);
 }
 
-// メインコンテンツ領域だけに CSS zoom として適用する係数。chrome (sidebar/header/space-nav)
+// メインコンテンツ領域だけに CSS zoom として適用する係数。chrome (sidebar/header)
 // はこの atom を読まないので固定のまま。ターミナルは WorkBenchContent 側で 1/zoom の逆 zoom を
 // 当てて net 1.0 に戻し、独立した px フォント管理 (terminalFontSizeAtom) を保つ。
 export const uiZoomAtom = atom(UI_ZOOM_DEFAULT);
