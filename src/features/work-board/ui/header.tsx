@@ -18,9 +18,11 @@ const FOCUSABLE = "input:not(:disabled), select:not(:disabled), button:not(:disa
 
 function NewTaskModal({ onClose }: { onClose: () => void }) {
   const projects = useAtomValue(projectsAtom);
+  const selectedProject = useAtomValue(selectedProjectAtom);
+  const projectLocked = selectedProject !== null;
 
   const [issueInput, setIssueInput] = useState("");
-  const [projectId, setProjectId] = useState(() => projects[0]?.id ?? "");
+  const [projectId, setProjectId] = useState(() => selectedProject ?? projects[0]?.id ?? "");
   const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -135,12 +137,12 @@ function NewTaskModal({ onClose }: { onClose: () => void }) {
           >
             <select
               value={projectId}
-              disabled={issueActive}
+              disabled={issueActive || projectLocked}
               onChange={(e) => {
                 setProjectId(e.target.value);
                 setError(null);
               }}
-              className="h-8 rounded-md border border-border bg-background px-2 text-[12px] text-foreground outline-none focus:border-muted-foreground/40 disabled:cursor-not-allowed"
+              className="h-8 rounded-md border border-border bg-background px-2 text-[12px] text-foreground outline-none focus:border-muted-foreground/40 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {projects.length === 0 && <option value="">No projects</option>}
               {projects.map((p) => (
