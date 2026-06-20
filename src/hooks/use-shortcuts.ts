@@ -15,7 +15,7 @@ import {
   toggleLastRunspaceAtom,
 } from "@/features/work-bench/store";
 import { forceSyncPullRequestsAtom } from "@/stores/pr-sync";
-import { newTaskOpenAtom, projectFilterOpenAtom } from "@/stores/workboard";
+import { newTaskOpenAtom, projectFilterOpenAtom, cycleBoardViewAtom } from "@/stores/workboard";
 import { setUiZoomAtom } from "@/stores/zoom";
 import { isEditable } from "@/lib/keyboard";
 
@@ -43,6 +43,7 @@ export function useShortcuts() {
   const toggleLastRunspace = useSetAtom(toggleLastRunspaceAtom);
   const setNewTaskOpen = useSetAtom(newTaskOpenAtom);
   const setProjectFilterOpen = useSetAtom(projectFilterOpenAtom);
+  const cycleBoardView = useSetAtom(cycleBoardViewAtom);
   const setUiZoom = useSetAtom(setUiZoomAtom);
 
   const timeoutRef = useRef<number>(0);
@@ -145,12 +146,14 @@ export function useShortcuts() {
       if (e.altKey && e.code === "KeyJ") {
         e.preventDefault();
         if (isWorkBench) cycleRunspace("down");
+        else if (activeSpace === "work-board") cycleBoardView("down");
         return;
       }
 
       if (e.altKey && e.code === "KeyK") {
         e.preventDefault();
         if (isWorkBench) cycleRunspace("up");
+        else if (activeSpace === "work-board") cycleBoardView("up");
         return;
       }
 
@@ -253,6 +256,7 @@ export function useShortcuts() {
     setJumpActive,
     jumpToHint,
     toggleLastRunspace,
+    cycleBoardView,
     setNewTaskOpen,
     setProjectFilterOpen,
     setUiZoom,
