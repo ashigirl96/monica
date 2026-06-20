@@ -75,7 +75,7 @@ function NewTaskModal({ onClose }: { onClose: () => void }) {
       onClose();
       return;
     }
-    if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+    if (e.key === "Enter" && e.metaKey) {
       e.preventDefault();
       handleSubmit();
       return;
@@ -168,7 +168,7 @@ function NewTaskModal({ onClose }: { onClose: () => void }) {
 
           <div className="flex items-center justify-between border-t border-border/60 pt-3">
             <span className="text-[10px] text-muted-foreground/50">
-              ⇥ move · ⏎ create · esc close
+              ⇥ move · ⌘⏎ create · esc close
             </span>
             <button
               type="button"

@@ -15,7 +15,7 @@ description: >
 
 1. ユーザーが渡した自由テキスト（作りたいもの）のゴールを確認する。
 2. 以下を繰り返す:
-   a. 実装に必要な設計判断について質問する（grill-me 式に 1 つずつ）。
+   a. 実装に必要な設計判断について質問する（like /grill-me）。
    b. 実装できる塊が揃ったと判断したら「ここまでの合意で〇〇を実装できます。実装に入っていいですか？」と提案し、ユーザーの承認を待つ。
    c. 承認されたら、その部分を実装する。
    d. まだ決めることがあれば 2a に戻る。
@@ -27,4 +27,4 @@ description: >
 ユーザーが「完成」と言ったら:
 
 1. 対話で決まった設計判断の全容を `.github/ISSUE_TEMPLATE/design_task.md` の構造で GitHub Issue を作成する。Design セクションには `/tackle` がこれだけ読めば実装できる粒度で書く。
-2. `/create-pr` skill で参考実装 PR を作成する。PR の description に Issue へのリンクを含める。
+2. /create-pr skill で参考実装 PR を作成する。PR の description に Issue へのリンクを含める。
