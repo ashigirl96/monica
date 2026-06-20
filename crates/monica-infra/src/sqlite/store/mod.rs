@@ -1,4 +1,3 @@
-mod artifacts;
 mod bench;
 mod events;
 mod external_refs;

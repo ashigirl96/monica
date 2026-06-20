@@ -1,13 +1,6 @@
 import type { QueryClient } from "@tanstack/query-core";
 
 export const queryKeys = {
-  artifacts: {
-    essays: () => ["artifacts", "essays"] as const,
-    intents: () => ["artifacts", "intents"] as const,
-    drafts: () => ["artifacts", "drafts"] as const,
-    detail: (id: string) => ["artifacts", "detail", id] as const,
-    family: () => ["artifacts"] as const,
-  },
   projects: { list: () => ["projects", "list"] as const },
   tasks: {
     summary: (project: string | null) => ["tasks", "summary", project] as const,

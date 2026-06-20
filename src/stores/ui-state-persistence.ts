@@ -9,13 +9,9 @@ import { activeSpaceAtom, sidebarOpenAtom, sidebarWidthAtom } from "@/stores/spa
 import { uiZoomAtom } from "@/stores/zoom";
 import { UI_STATE_FILE } from "@/stores/ui-state";
 import { focusMemoryAtom, focusedTaskIdAtom } from "@/features/work-board/nav";
-import { libraryViewAtom } from "@/features/library/store";
 
 const SAVE_DEBOUNCE_MS = 500;
 
-// App-lifetime owner for ui-state persistence. It observes atoms that live in feature slices
-// (work-bench, work-board) because persistence must follow the canonical atom rather than a
-// duplicate in stores/; module init (not a React effect) keeps the subscription single.
 export function initUiStatePersistence(): void {
   const store = getDefaultStore();
   let file: Store | null = null;
@@ -23,8 +19,6 @@ export function initUiStatePersistence(): void {
 
   const write = async () => {
     file ??= await load(UI_STATE_FILE);
-    // focusedTaskId is cleared to null on Work Board unmount (the value moves to
-    // focusMemory), so fall back to memory to capture the last focus on quit.
     const focusedTaskId = store.get(focusedTaskIdAtom) ?? store.get(focusMemoryAtom);
     const writes = [
       file.set("activeSpace", store.get(activeSpaceAtom)),
@@ -32,10 +26,7 @@ export function initUiStatePersistence(): void {
       file.set("sidebarWidth", store.get(sidebarWidthAtom)),
       file.set("uiZoom", store.get(uiZoomAtom)),
       file.set("workboard", { focusedTaskId }),
-      file.set("library", { activeView: store.get(libraryViewAtom) }),
     ];
-    // activeRunspaceAtom synthesizes a throwaway runspace with a random id until the
-    // bench has loaded; persisting that would clobber the saved hint, so skip it.
     if (store.get(terminalStateAtom) !== null) {
       const tab = store.get(activeTerminalTabAtom);
       writes.push(
@@ -65,7 +56,6 @@ export function initUiStatePersistence(): void {
     activeTerminalTabAtom,
     focusedTaskIdAtom,
     focusMemoryAtom,
-    libraryViewAtom,
   ];
   for (const source of sources) store.sub(source, schedule);
 }

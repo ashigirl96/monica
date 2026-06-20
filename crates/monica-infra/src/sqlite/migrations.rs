@@ -34,6 +34,7 @@ fn migration_steps() -> Vec<M<'static>> {
         M::up(V21),
         M::up(V22),
         M::up(V23),
+        M::up(V24),
     ]
 }
 
@@ -569,6 +570,13 @@ const V23: &str = r#"
     );
 
     CREATE INDEX library_attachments_entry_idx ON library_attachments(entry_id);
+"#;
+
+const V24: &str = r#"
+    DROP TABLE IF EXISTS library_attachments;
+    DROP TABLE IF EXISTS library_entries;
+    DROP TABLE IF EXISTS attachment_counter;
+    DROP TABLE IF EXISTS artifact_counter;
 "#;
 
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
@@ -1176,6 +1184,58 @@ mod tests {
             )
             .unwrap();
         assert_eq!(dropped, 0);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn v24_drops_library_tables() {
+        let path = temp_db_path("v24");
+
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            stage_through(&mut conn, 23);
+            conn.execute(
+                "INSERT INTO artifact_counter DEFAULT VALUES",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO library_entries (id, state, kind, body_markdown)
+                 VALUES ('ART-1', 'draft', 'memo', 'hello')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO attachment_counter DEFAULT VALUES",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO library_attachments (id, entry_id, original_file_name, byte_size, relative_path)
+                 VALUES ('ATT-1', 'ART-1', 'img.png', 3, 'ART-1/img.png')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let db = crate::sqlite::SqliteStore::open_at(&path).unwrap();
+        for table in [
+            "library_entries",
+            "library_attachments",
+            "artifact_counter",
+            "attachment_counter",
+        ] {
+            let count: i64 = db
+                .conn()
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0, "{table} must be dropped by V24");
+        }
 
         std::fs::remove_file(&path).ok();
     }

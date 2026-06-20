@@ -14,12 +14,6 @@ import {
   promoteActiveTabRunAtom,
   toggleLastRunspaceAtom,
 } from "@/features/work-bench/store";
-import {
-  cycleLibraryViewAtom,
-  cycleLibraryTabAtom,
-  closeLibraryTabAtom,
-  createNewDraftAtom,
-} from "@/features/library/store";
 import { forceSyncPullRequestsAtom } from "@/stores/pr-sync";
 import { newTaskOpenAtom, projectFilterOpenAtom } from "@/stores/workboard";
 import { setUiZoomAtom } from "@/stores/zoom";
@@ -50,10 +44,6 @@ export function useShortcuts() {
   const setNewTaskOpen = useSetAtom(newTaskOpenAtom);
   const setProjectFilterOpen = useSetAtom(projectFilterOpenAtom);
   const setUiZoom = useSetAtom(setUiZoomAtom);
-  const cycleLibraryView = useSetAtom(cycleLibraryViewAtom);
-  const cycleLibraryTab = useSetAtom(cycleLibraryTabAtom);
-  const closeLibraryTab = useSetAtom(closeLibraryTabAtom);
-  const createNewDraft = useSetAtom(createNewDraftAtom);
 
   const timeoutRef = useRef<number>(0);
 
@@ -104,8 +94,6 @@ export function useShortcuts() {
           setJumpActive(false);
           return;
         }
-        // Ctrl+digit → runspace, bare digit → tab. Unmatched keys (Escape included)
-        // just dismiss the hints.
         jumpToHint({ key: e.key.toLowerCase(), runspace: e.ctrlKey });
         return;
       }
@@ -124,12 +112,8 @@ export function useShortcuts() {
 
       if (e.metaKey && e.key === "n") {
         e.preventDefault();
-        if (activeSpace === "library") {
-          void createNewDraft();
-        } else {
-          if (activeSpace !== "work-board") setActiveSpace("work-board");
-          setNewTaskOpen(true);
-        }
+        if (activeSpace !== "work-board") setActiveSpace("work-board");
+        setNewTaskOpen(true);
         return;
       }
 
@@ -161,14 +145,12 @@ export function useShortcuts() {
       if (e.altKey && e.code === "KeyJ") {
         e.preventDefault();
         if (isWorkBench) cycleRunspace("down");
-        else if (activeSpace === "library") cycleLibraryView("down");
         return;
       }
 
       if (e.altKey && e.code === "KeyK") {
         e.preventDefault();
         if (isWorkBench) cycleRunspace("up");
-        else if (activeSpace === "library") cycleLibraryView("up");
         return;
       }
 
@@ -178,8 +160,6 @@ export function useShortcuts() {
         const direction = e.shiftKey ? "left" : "right";
         if (isWorkBench) {
           cycleTerminalTab(direction);
-        } else if (activeSpace === "library") {
-          cycleLibraryTab(direction);
         } else {
           cycleTab(direction);
         }
@@ -190,7 +170,6 @@ export function useShortcuts() {
         e.preventDefault();
         setJumpActive(true);
         clearTimeout(timeoutRef.current);
-        // Outside the WorkBench there is no hint UI, so expire the prefix like before.
         if (!isWorkBench) {
           timeoutRef.current = window.setTimeout(() => setJumpActive(false), PREFIX_TIMEOUT);
         }
@@ -211,8 +190,6 @@ export function useShortcuts() {
         return;
       }
 
-      // Below the editable guard: when the terminal (or any input) is focused the guard
-      // returns first, so the terminal keeps its own px font zoom and global zoom is suppressed.
       if (e.metaKey && (e.key === "=" || e.key === "+")) {
         e.preventDefault();
         setUiZoom("in");
@@ -228,11 +205,7 @@ export function useShortcuts() {
       if (e.ctrlKey && e.key === "d") {
         if (isWorkBench) return;
         e.preventDefault();
-        if (activeSpace === "library") {
-          closeLibraryTab();
-        } else {
-          closeTab();
-        }
+        closeTab();
         return;
       }
 
@@ -240,8 +213,6 @@ export function useShortcuts() {
         e.preventDefault();
         if (isWorkBench) {
           cycleTerminalTab("left");
-        } else if (activeSpace === "library") {
-          cycleLibraryTab("left");
         } else {
           cycleTab("left");
         }
@@ -252,8 +223,6 @@ export function useShortcuts() {
         e.preventDefault();
         if (isWorkBench) {
           cycleTerminalTab("right");
-        } else if (activeSpace === "library") {
-          cycleLibraryTab("right");
         } else {
           cycleTab("right");
         }
@@ -287,9 +256,5 @@ export function useShortcuts() {
     setNewTaskOpen,
     setProjectFilterOpen,
     setUiZoom,
-    cycleLibraryView,
-    cycleLibraryTab,
-    closeLibraryTab,
-    createNewDraft,
   ]);
 }
