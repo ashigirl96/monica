@@ -46,11 +46,6 @@ pub fn ptyd_pid_path() -> Result<PathBuf> {
     Ok(base_dir()?.join("ptyd.pid"))
 }
 
-/// Per-entry attachment directory: `<base>/attachments/<entry_id>/`.
-pub fn attachments_dir(entry_id: &str) -> Result<PathBuf> {
-    Ok(base_dir()?.join("attachments").join(entry_id))
-}
-
 /// Bounded transcript files for terminal sessions: `<base>/terminal-sessions/<session_id>.log`.
 pub fn terminal_sessions_dir() -> Result<PathBuf> {
     Ok(base_dir()?.join("terminal-sessions"))

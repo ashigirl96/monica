@@ -9,7 +9,6 @@ import {
   sidebarOpenAtom,
   sidebarWidthAtom,
 } from "@/stores/space";
-import { libraryViewAtom, VIEWS, type LibraryView } from "@/features/library/store";
 import { clamp } from "@/lib/clamp";
 import { UI_ZOOM_DEFAULT, clampUiZoom, uiZoomAtom } from "@/stores/zoom";
 
@@ -18,8 +17,6 @@ export const UI_STATE_FILE = "ui-state.json";
 export type WorkbenchHint = { activeRunspaceId: string | null; activeTabId: string | null };
 export type WorkboardHint = { focusedTaskId: string | null };
 
-export type LibraryHint = { activeView: string | null };
-
 export type PersistedUiState = {
   activeSpace: SpaceId;
   sidebarOpen: boolean;
@@ -27,7 +24,6 @@ export type PersistedUiState = {
   uiZoom: number;
   workbench: WorkbenchHint;
   workboard: WorkboardHint;
-  library: LibraryHint;
 };
 
 const DEFAULT_UI_STATE: PersistedUiState = {
@@ -37,11 +33,8 @@ const DEFAULT_UI_STATE: PersistedUiState = {
   uiZoom: UI_ZOOM_DEFAULT,
   workbench: { activeRunspaceId: null, activeTabId: null },
   workboard: { focusedTaskId: null },
-  library: { activeView: null },
 };
 
-// Missing a key here is a compile error when SpaceId gains a variant, so validation
-// can never silently drift behind the type.
 const SPACE_IDS: Record<SpaceId, true> = {
   library: true,
   "work-board": true,
@@ -70,7 +63,6 @@ export function parseUiState(raw: unknown): PersistedUiState {
   const r = raw as Record<string, unknown>;
   const wb = asObject(r.workbench);
   const wboard = asObject(r.workboard);
-  const lib = asObject(r.library);
   return {
     activeSpace: isSpaceId(r.activeSpace) ? r.activeSpace : DEFAULT_UI_STATE.activeSpace,
     sidebarOpen: typeof r.sidebarOpen === "boolean" ? r.sidebarOpen : DEFAULT_UI_STATE.sidebarOpen,
@@ -83,15 +75,9 @@ export function parseUiState(raw: unknown): PersistedUiState {
     workboard: {
       focusedTaskId: asString(wboard.focusedTaskId),
     },
-    library: {
-      activeView: asString(lib.activeView),
-    },
   };
 }
 
-// Active selection is a view intent owned by the Tauri store; SQLite only knows which
-// runspaces/tabs exist. Prefer the saved hint, fall back to the first runspace/tab when
-// it points at something that no longer exists (deleted, or another environment's id).
 export function resolveWorkbenchActive(
   runspaces: ReadonlyArray<{ id: string; tabs: ReadonlyArray<{ id: string }> }>,
   hint: WorkbenchHint,
@@ -115,8 +101,6 @@ export function resolveWorkboardFocus(
   };
 }
 
-// One-shot: the consumer clears this after validating the hint against its freshly
-// loaded topology, so stale ids from a deleted/foreign environment never apply.
 export const pendingWorkbenchHintAtom = atom<WorkbenchHint | null>(null);
 export const pendingWorkboardHintAtom = atom<WorkboardHint | null>(null);
 
@@ -125,7 +109,7 @@ export async function hydrateUiState(): Promise<void> {
   let parsed = DEFAULT_UI_STATE;
   try {
     const file = await load(UI_STATE_FILE);
-    const [activeSpace, sidebarOpen, sidebarWidth, uiZoom, workbench, workboard, library] =
+    const [activeSpace, sidebarOpen, sidebarWidth, uiZoom, workbench, workboard] =
       await Promise.all([
         file.get("activeSpace"),
         file.get("sidebarOpen"),
@@ -133,7 +117,6 @@ export async function hydrateUiState(): Promise<void> {
         file.get("uiZoom"),
         file.get("workbench"),
         file.get("workboard"),
-        file.get("library"),
       ]);
     parsed = parseUiState({
       activeSpace,
@@ -142,7 +125,6 @@ export async function hydrateUiState(): Promise<void> {
       uiZoom,
       workbench,
       workboard,
-      library,
     });
   } catch {
     parsed = DEFAULT_UI_STATE;
@@ -153,8 +135,4 @@ export async function hydrateUiState(): Promise<void> {
   store.set(uiZoomAtom, parsed.uiZoom);
   store.set(pendingWorkbenchHintAtom, parsed.workbench);
   store.set(pendingWorkboardHintAtom, parsed.workboard);
-  const view = parsed.library.activeView;
-  if (view && (VIEWS as readonly string[]).includes(view)) {
-    store.set(libraryViewAtom, view as LibraryView);
-  }
 }

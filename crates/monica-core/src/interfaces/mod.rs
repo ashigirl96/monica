@@ -3,7 +3,6 @@ use std::pin::Pin;
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-mod artifact_repository;
 mod bench_repository;
 mod auth_gateway;
 mod clock;
@@ -16,7 +15,6 @@ mod setup_runner;
 mod task_repository;
 mod task_run_repository;
 
-pub use artifact_repository::ArtifactRepository;
 pub use bench_repository::BenchRepository;
 pub use auth_gateway::AuthGateway;
 pub use clock::Clock;

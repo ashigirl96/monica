@@ -5,71 +5,6 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 
 /** Commands */
 export const commands = {
-  quickSaveMemo: (body: string) =>
-    typedError<Artifact, string>(__TAURI_INVOKE("quick_save_memo", { body })),
-  createDraft: (kind: ArtifactDraftKind) =>
-    typedError<ArtifactDraft, string>(__TAURI_INVOKE("create_draft", { kind })),
-  updateDraft: (
-    id: string,
-    kind: ArtifactDraftKind,
-    body: string,
-    occurredAt: string | null,
-    expectedRevision: number,
-  ) =>
-    typedError<ArtifactDraft, string>(
-      __TAURI_INVOKE("update_draft", { id, kind, body, occurredAt, expectedRevision }),
-    ),
-  deleteDraft: (id: string) => typedError<null, string>(__TAURI_INVOKE("delete_draft", { id })),
-  listDrafts: () => typedError<ArtifactDraft[], string>(__TAURI_INVOKE("list_drafts")),
-  saveDraft: (id: string) => typedError<Artifact, string>(__TAURI_INVOKE("save_draft", { id })),
-  getArtifact: (id: string) =>
-    typedError<
-      {
-        id: string;
-        kind: ArtifactKind;
-        body: string;
-        occurred_at: string | null;
-        attachments: Attachment[];
-        revision: number;
-        created_at: string;
-        updated_at: string;
-      } | null,
-      string
-    >(__TAURI_INVOKE("get_artifact", { id })),
-  updateArtifact: (
-    id: string,
-    kind: ArtifactKind,
-    body: string,
-    occurredAt: string | null,
-    expectedRevision: number,
-  ) =>
-    typedError<Artifact, string>(
-      __TAURI_INVOKE("update_artifact", { id, kind, body, occurredAt, expectedRevision }),
-    ),
-  convertArtifactKind: (id: string, targetKind: ArtifactKind, expectedRevision: number) =>
-    typedError<Artifact, string>(
-      __TAURI_INVOKE("convert_artifact_kind", { id, targetKind, expectedRevision }),
-    ),
-  deleteArtifact: (id: string) =>
-    typedError<null, string>(__TAURI_INVOKE("delete_artifact", { id })),
-  listEssays: () => typedError<EssayListItem[], string>(__TAURI_INVOKE("list_essays")),
-  listIntentsByProject: () =>
-    typedError<IntentGroup[], string>(__TAURI_INVOKE("list_intents_by_project")),
-  listTimelineItems: (
-    before: {
-      timeline_at: string;
-      item_key: string;
-    } | null,
-    since: string | null,
-    limit: number,
-  ) =>
-    typedError<TimelineItem[], string>(
-      __TAURI_INVOKE("list_timeline_items", { before, since, limit }),
-    ),
-  attachImage: (entryId: string, filePath: string) =>
-    typedError<Attachment, string>(__TAURI_INVOKE("attach_image", { entryId, filePath })),
-  removeAttachment: (id: string) =>
-    typedError<null, string>(__TAURI_INVOKE("remove_attachment", { id })),
   clipboardWriteImage: (path: string) =>
     typedError<null, string>(__TAURI_INVOKE("clipboard_write_image", { path })),
   /**
@@ -158,53 +93,11 @@ export const events = {
 /* Types */
 export type Agent = "claude" | "codex";
 
-export type Artifact = {
-  id: string;
-  kind: ArtifactKind;
-  body: string;
-  occurred_at: string | null;
-  attachments: Attachment[];
-  revision: number;
-  created_at: string;
-  updated_at: string;
-};
-
-export type ArtifactDraft = {
-  id: string;
-  kind: ArtifactDraftKind;
-  body: string;
-  occurred_at: string | null;
-  attachments: Attachment[];
-  revision: number;
-  created_at: string;
-  updated_at: string;
-};
-
-export type ArtifactDraftKind =
-  | { type: "memo" }
-  | { type: "essay"; title: string | null }
-  | { type: "intent"; title: string | null; project_id: string | null };
-
-export type ArtifactKind =
-  | { type: "memo" }
-  | { type: "essay"; title: string }
-  | { type: "intent"; title: string; project_id: string | null };
-
 export type AttachResult = {
   /**  Base64 transcript tail to write into xterm before streaming live output. */
   replay: string;
   rows: number;
   cols: number;
-};
-
-export type Attachment = {
-  id: string;
-  entry_id: string;
-  original_file_name: string;
-  mime_type: string | null;
-  byte_size: number;
-  relative_path: string;
-  created_at: string;
 };
 
 export type BoardColumn = {
@@ -224,31 +117,12 @@ export type DisplayStatus =
   | "failed"
   | "closed";
 
-export type EssayListItem = {
-  id: string;
-  title: string;
-  body_preview: string;
-  updated_at: string;
-};
-
 export type GithubPullRequestRef = {
   repo: string | null;
   number: number;
   url: string | null;
   status: string | null;
   is_open_or_draft: boolean;
-};
-
-export type IntentGroup = {
-  project_id: string | null;
-  items: IntentListItem[];
-};
-
-export type IntentListItem = {
-  id: string;
-  title: string;
-  body_preview: string;
-  project_id: string | null;
 };
 
 export type PrSyncCompleted = {
@@ -384,27 +258,6 @@ export type TerminalTabRow = {
   sort_order: number;
   terminal_session_id: string | null;
 };
-
-export type TimelineCursor = {
-  timeline_at: string;
-  item_key: string;
-};
-
-export type TimelineItem =
-  | {
-      kind: "artifact";
-      entry_id: string;
-      artifact_kind: string;
-      title: string | null;
-      body_preview: string;
-      timeline_at: string;
-      item_key: string;
-      updated_at: string;
-      project_name: string | null;
-      thumbnail_paths: string[];
-    }
-  | { kind: "task_created"; task_id: string; title: string; timeline_at: string; item_key: string }
-  | { kind: "task_closed"; task_id: string; title: string; timeline_at: string; item_key: string };
 
 export type WorktreeInfo = {
   repo: string;

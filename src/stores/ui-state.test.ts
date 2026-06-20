@@ -21,7 +21,6 @@ describe("parseUiState", () => {
       uiZoom: 1.2,
       workbench: { activeRunspaceId: "rs1", activeTabId: "tab1" },
       workboard: { focusedTaskId: "task1" },
-      library: { activeView: null },
     });
   });
 

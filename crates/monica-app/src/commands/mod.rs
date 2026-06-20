@@ -1,4 +1,3 @@
-pub mod artifact;
 pub mod clipboard;
 pub mod editor;
 pub mod git;
