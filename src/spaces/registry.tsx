@@ -26,14 +26,6 @@ export type SpaceConfig = {
 
 export const spaces: SpaceConfig[] = [
   {
-    id: "library",
-    icon: LibraryIcon,
-    label: "Library",
-    sidebar: LibrarySidebar,
-    header: LibraryHeader,
-    content: LazyLibraryContent,
-  },
-  {
     id: "work-board",
     icon: WorkBoardIcon,
     label: "Work Board",
@@ -49,6 +41,14 @@ export const spaces: SpaceConfig[] = [
     header: WorkBenchHeader,
     content: LazyWorkBenchContent,
     persistent: true,
+  },
+  {
+    id: "library",
+    icon: LibraryIcon,
+    label: "Library",
+    sidebar: LibrarySidebar,
+    header: LibraryHeader,
+    content: LazyLibraryContent,
   },
 ];
 
