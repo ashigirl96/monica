@@ -207,14 +207,17 @@ where
 
     let landed = match (transition, linked_task_run_id) {
         (Some(_), Some(run_id)) => repos.get_task_run(run_id)?,
-        (None, Some(run_id)) if event_name.as_deref() == Some("SubagentStop") => repos
-            .get_task_run(run_id)?
-            .filter(|run| {
+        (None, Some(run_id))
+            if event_name.as_deref() == Some("SubagentStop")
+                && run_row.as_ref().is_some_and(|prev| prev.pending_stop) =>
+        {
+            repos.get_task_run(run_id)?.filter(|run| {
                 run_row
                     .as_ref()
                     .is_some_and(|prev| prev.status == TaskRunStatus::Running)
                     && run.status == TaskRunStatus::WaitingForUser
-            }),
+            })
+        }
         _ => None,
     };
     let (task_run_status, task_run_wait_reason) = match landed {

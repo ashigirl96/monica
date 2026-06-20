@@ -432,7 +432,7 @@ impl TaskRunRepository for FakeRepos {
             run.wait_reason = Some(TaskRunWaitReason::AwaitingPrompt);
             run.pending_stop = false;
         }
-        if matches!(subagent_update, Some(SubagentCountUpdate::Reset)) {
+        if subagent_update == Some(SubagentCountUpdate::Reset) || observation.status.is_some() {
             run.pending_stop = false;
         }
         run.last_event_name = observation.event_name.map(ToString::to_string);
