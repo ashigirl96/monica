@@ -15,6 +15,19 @@ export const newTaskOpenAtom = atom(false);
 export const projectFilterOpenAtom = atom(false);
 export const selectedProjectAtom = atom<string | null>(null);
 
+export type BoardView = "tasks" | "intents";
+const BOARD_VIEWS: BoardView[] = ["tasks", "intents"];
+export const boardViewAtom = atom<BoardView>("tasks");
+export const cycleBoardViewAtom = atom(null, (get, set, direction: "up" | "down") => {
+  const current = get(boardViewAtom);
+  const idx = BOARD_VIEWS.indexOf(current);
+  const newIdx =
+    direction === "up"
+      ? (idx - 1 + BOARD_VIEWS.length) % BOARD_VIEWS.length
+      : (idx + 1) % BOARD_VIEWS.length;
+  set(boardViewAtom, BOARD_VIEWS[newIdx]);
+});
+
 const boardColumnsQueryOptions = {
   queryKey: queryKeys.board.columns(),
   queryFn: () => getBoardColumns(),

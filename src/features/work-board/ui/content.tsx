@@ -1,12 +1,12 @@
 import { useEffect } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useBoardNavigation } from "@/features/work-board/use-board-navigation";
-import { columnTasksAtom, loadBoardAtom } from "@/stores/workboard";
+import { boardViewAtom, columnTasksAtom, loadBoardAtom } from "@/stores/workboard";
 import { applyRestoredWorkboardAtom, focusedTaskIdAtom } from "@/features/work-board/nav";
 import { BoardContextMenu } from "./board-context-menu";
 import { TaskCard } from "./task-card";
 
-function WorkBoardContent() {
+function TasksView() {
   const columns = useAtomValue(columnTasksAtom);
   const focusedTaskId = useAtomValue(focusedTaskIdAtom);
   const loadBoard = useSetAtom(loadBoardAtom);
@@ -56,6 +56,14 @@ function WorkBoardContent() {
   );
 }
 
+function IntentsView() {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <span className="text-sm text-muted-foreground/30">Intents — coming soon</span>
+    </div>
+  );
+}
+
 function HintBar() {
   return (
     <div className="flex h-6 shrink-0 items-center justify-center gap-4 font-mono text-[10px] text-muted-foreground/50">
@@ -68,6 +76,11 @@ function HintBar() {
       <span>esc exit</span>
     </div>
   );
+}
+
+function WorkBoardContent() {
+  const view = useAtomValue(boardViewAtom);
+  return view === "tasks" ? <TasksView /> : <IntentsView />;
 }
 
 export default WorkBoardContent;
