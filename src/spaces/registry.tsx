@@ -4,6 +4,7 @@ import type { SpaceId } from "@/stores/space";
 import { WorkBenchSidebar } from "@/features/work-bench/ui/sidebar";
 import { WorkBenchHeader } from "@/features/work-bench/ui/header";
 import { WorkBoardHeader } from "@/features/work-board/ui/header";
+import { WorkBoardSidebar } from "@/features/work-board/ui/sidebar";
 import { LibrarySidebar } from "@/features/library/ui/sidebar";
 import { LibraryHeader } from "@/features/library/ui/header";
 
@@ -25,17 +26,10 @@ export type SpaceConfig = {
 
 export const spaces: SpaceConfig[] = [
   {
-    id: "library",
-    icon: LibraryIcon,
-    label: "Library",
-    sidebar: LibrarySidebar,
-    header: LibraryHeader,
-    content: LazyLibraryContent,
-  },
-  {
     id: "work-board",
     icon: WorkBoardIcon,
     label: "Work Board",
+    sidebar: WorkBoardSidebar,
     header: WorkBoardHeader,
     content: LazyWorkBoardContent,
   },
@@ -47,6 +41,14 @@ export const spaces: SpaceConfig[] = [
     header: WorkBenchHeader,
     content: LazyWorkBenchContent,
     persistent: true,
+  },
+  {
+    id: "library",
+    icon: LibraryIcon,
+    label: "Library",
+    sidebar: LibrarySidebar,
+    header: LibraryHeader,
+    content: LazyLibraryContent,
   },
 ];
 

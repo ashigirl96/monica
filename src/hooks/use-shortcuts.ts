@@ -1,6 +1,7 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import { useEffect, useRef } from "react";
-import { type SpaceId, activeSpaceAtom, sidebarOpenAtom } from "@/stores/space";
+import { activeSpaceAtom, sidebarOpenAtom } from "@/stores/space";
+import { spaces } from "@/spaces/registry";
 import { createTabAtom, closeTabAtom, cycleTabAtom } from "@/stores/tabs";
 import {
   createRunspaceAtom,
@@ -24,11 +25,7 @@ import { newTaskOpenAtom, projectFilterOpenAtom } from "@/stores/workboard";
 import { setUiZoomAtom } from "@/stores/zoom";
 import { isEditable } from "@/lib/keyboard";
 
-const META_KEY_SPACE_MAP: Record<string, SpaceId> = {
-  "1": "library",
-  "2": "work-board",
-  "3": "work-bench",
-};
+const META_KEY_SPACE_MAP = Object.fromEntries(spaces.map((s, i) => [String(i + 1), s.id]));
 
 const PREFIX_TIMEOUT = 2000;
 
@@ -116,12 +113,6 @@ export function useShortcuts() {
       if (e.metaKey && e.ctrlKey && e.key === "0") {
         e.preventDefault();
         setUiZoom("reset");
-        return;
-      }
-
-      if (e.metaKey && !e.ctrlKey && e.key === "0") {
-        e.preventDefault();
-        setSidebarOpen((v) => !v);
         return;
       }
 
@@ -213,6 +204,12 @@ export function useShortcuts() {
       }
 
       if (editable && !e.altKey) return;
+
+      if (e.metaKey && e.key === "b") {
+        e.preventDefault();
+        setSidebarOpen((v) => !v);
+        return;
+      }
 
       // Below the editable guard: when the terminal (or any input) is focused the guard
       // returns first, so the terminal keeps its own px font zoom and global zoom is suppressed.
