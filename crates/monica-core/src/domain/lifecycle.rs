@@ -198,24 +198,22 @@ pub fn transition_for_event(
     event_name: &str,
     payload: Option<&Value>,
 ) -> Option<HookTransition> {
-    if event_name == "PreToolUse" {
-        let wait_reason = payload_tool_wait_reason(payload)?;
-        return Some(HookTransition {
-            status: TaskRunStatus::WaitingForUser,
-            wait_reason: Some(wait_reason),
-        });
-    }
-    if event_name == "PostToolUse" {
-        payload_tool_wait_reason(payload)?;
-        return Some(HookTransition {
-            status: TaskRunStatus::Running,
-            wait_reason: None,
-        });
-    }
-
     match event_name {
-        "SessionStart" => Some(AWAITING_PROMPT),
-        "Stop" => Some(AWAITING_PROMPT),
+        "PreToolUse" => {
+            let wait_reason = payload_tool_wait_reason(payload)?;
+            Some(HookTransition {
+                status: TaskRunStatus::WaitingForUser,
+                wait_reason: Some(wait_reason),
+            })
+        }
+        "PostToolUse" => {
+            payload_tool_wait_reason(payload)?;
+            Some(HookTransition {
+                status: TaskRunStatus::Running,
+                wait_reason: None,
+            })
+        }
+        "SessionStart" | "Stop" => Some(AWAITING_PROMPT),
         "UserPromptSubmit" => Some(HookTransition {
             status: TaskRunStatus::Running,
             wait_reason: None,
@@ -224,7 +222,6 @@ pub fn transition_for_event(
             status: TaskRunStatus::WaitingForUser,
             wait_reason: Some(TaskRunWaitReason::PermissionRequest),
         }),
-        // Codex has no SessionEnd hook; termination relies on orphan settlement.
         "SessionEnd" if agent == Agent::Claude => Some(HookTransition {
             status: TaskRunStatus::Stopped,
             wait_reason: None,
