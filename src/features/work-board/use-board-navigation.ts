@@ -45,7 +45,7 @@ export function useBoardNavigation() {
 
       const menu = store.get(menuAtom);
       if (menu !== null) {
-        if (menu.runIndex !== null) {
+        if (menu.submenu?.kind === "run") {
           if (e.key === "j" || e.key === "ArrowDown")
             store.set(navigateSubmenuAtom, { type: "move", direction: "down" });
           else if (e.key === "k" || e.key === "ArrowUp")
@@ -62,7 +62,7 @@ export function useBoardNavigation() {
           e.preventDefault();
           return;
         }
-        if (menu.openIndex !== null) {
+        if (menu.submenu?.kind === "open") {
           if (e.key === "j" || e.key === "ArrowDown")
             store.set(navigateSubmenuAtom, { type: "move", direction: "down" });
           else if (e.key === "k" || e.key === "ArrowUp")

@@ -19,15 +19,14 @@ type MenuItemId = "prepare" | "run" | "bench" | "open" | "close";
 
 export type MenuAnchor = { top: number; left: number; bottom: number };
 
+export type Submenu = { kind: "open"; index: number } | { kind: "run"; index: number };
+
 export type MenuState = {
   taskId: string;
   anchor: MenuAnchor;
   itemIndex: number;
   confirmingClose: boolean;
-  // null = top level; a number = the Open submenu is showing, cursor on that target.
-  openIndex: number | null;
-  // null = top level; a number = the Run agent submenu is showing, cursor on that agent.
-  runIndex: number | null;
+  submenu: Submenu | null;
 };
 
 // null = navigation inactive. The board unmounts on space switch, so the last
@@ -58,6 +57,20 @@ export function isItemDisabled(id: MenuItemId, task: TaskSummaryRow): boolean {
 
 function taskById(get: Getter, id: string) {
   return get(taskSummariesAtom).find((t) => t.id === id);
+}
+
+type ColumnTasks = ReadonlyArray<{ tasks: ReadonlyArray<{ id: string }> }>;
+
+export function findNearestTask(
+  columns: ColumnTasks,
+  colIdx: number,
+  rowIdx: number,
+  excludeId?: string,
+): string | null {
+  const raw = columns[colIdx]?.tasks ?? [];
+  const tasks = excludeId ? raw.filter((t) => t.id !== excludeId) : raw;
+  if (tasks.length === 0) return null;
+  return tasks[Math.min(rowIdx, tasks.length - 1)].id;
 }
 
 export const focusedPositionAtom = atom((get) => {
@@ -100,9 +113,9 @@ export const moveFocusAtom = atom(null, (get, set, dir: MoveDirection) => {
 
   const step = dir === "left" ? -1 : 1;
   for (let col = pos.colIdx + step; col >= 0 && col < columns.length; col += step) {
-    const tasks = columns[col].tasks;
-    if (tasks.length > 0) {
-      set(focusedTaskIdAtom, tasks[Math.min(pos.rowIdx, tasks.length - 1)].id);
+    const id = findNearestTask(columns, col, pos.rowIdx);
+    if (id !== null) {
+      set(focusedTaskIdAtom, id);
       return;
     }
   }
@@ -154,14 +167,13 @@ export const openMenuAtom = atom(null, (get, set, anchor: MenuAnchor) => {
     anchor,
     itemIndex,
     confirmingClose: false,
-    openIndex: null,
-    runIndex: null,
+    submenu: null,
   });
 });
 
 export const moveMenuItemAtom = atom(null, (get, set, dir: "up" | "down") => {
   const menu = get(menuAtom);
-  if (menu === null || menu.openIndex !== null) return;
+  if (menu === null || menu.submenu !== null) return;
   const task = taskById(get, menu.taskId);
   if (!task) return;
   const step = dir === "up" ? -1 : 1;
@@ -175,7 +187,7 @@ export const moveMenuItemAtom = atom(null, (get, set, dir: "up" | "down") => {
 
 export const setMenuItemIndexAtom = atom(null, (get, set, itemIndex: number) => {
   const menu = get(menuAtom);
-  if (menu === null || menu.openIndex !== null || menu.itemIndex === itemIndex) return;
+  if (menu === null || menu.submenu !== null || menu.itemIndex === itemIndex) return;
   const task = taskById(get, menu.taskId);
   if (!task || isItemDisabled(MENU_ITEMS[itemIndex].id, task)) return;
   set(menuAtom, { ...menu, itemIndex, confirmingClose: false });
@@ -217,8 +229,7 @@ export const requestCloseAtom = atom(null, (get, set, anchor: MenuAnchor | null)
       anchor,
       itemIndex: CLOSE_INDEX,
       confirmingClose: true,
-      openIndex: null,
-      runIndex: null,
+      submenu: null,
     });
     return;
   }
@@ -235,11 +246,11 @@ export const executeMenuItemAtom = atom(null, (get, set) => {
   if (menu === null) return;
   // The submenu's Enter routes here too, not through a separate handler — a second Enter
   // path would open two tabs.
-  if (menu.openIndex !== null) {
+  if (menu.submenu?.kind === "open") {
     set(executeOpenAtom);
     return;
   }
-  if (menu.runIndex !== null) {
+  if (menu.submenu?.kind === "run") {
     set(executeRunAtom);
     return;
   }
@@ -272,88 +283,79 @@ type SubmenuNavAction =
   | { type: "move"; direction: "up" | "down" }
   | { type: "setIndex"; index: number };
 
-function activeSubmenu(menu: MenuState): SubmenuKind | null {
-  if (menu.runIndex !== null) return "run";
-  if (menu.openIndex !== null) return "open";
-  return null;
-}
-
-export const navigateSubmenuAtom = atom(null, (get, set, action: SubmenuNavAction) => {
-  if (action.type === "enter") {
-    if (action.submenu === "open") {
-      const menu = get(menuAtom);
-      if (menu === null) return;
-      const task = taskById(get, menu.taskId);
-      if (!task || openTargets(task).length === 0) return;
+const enterSubmenuAtom = atom(null, (get, set, submenu: SubmenuKind) => {
+  if (submenu === "open") {
+    const menu = get(menuAtom);
+    if (menu === null) return;
+    const task = taskById(get, menu.taskId);
+    if (!task || openTargets(task).length === 0) return;
+    set(menuAtom, {
+      ...menu,
+      itemIndex: OPEN_INDEX,
+      confirmingClose: false,
+      submenu: { kind: "open", index: 0 },
+    });
+  } else {
+    const menu = get(menuAtom);
+    const taskId = menu?.taskId ?? get(focusedTaskIdAtom);
+    if (taskId === null) return;
+    const task = taskById(get, taskId);
+    if (!task || !task.run_eligible) return;
+    if (menu) {
       set(menuAtom, {
         ...menu,
-        itemIndex: OPEN_INDEX,
+        itemIndex: RUN_INDEX,
         confirmingClose: false,
-        openIndex: 0,
-        runIndex: null,
+        submenu: { kind: "run", index: 0 },
       });
     } else {
-      const menu = get(menuAtom);
-      const taskId = menu?.taskId ?? get(focusedTaskIdAtom);
-      if (taskId === null) return;
-      const task = taskById(get, taskId);
-      if (!task || !task.run_eligible) return;
-      if (menu) {
-        set(menuAtom, {
-          ...menu,
-          itemIndex: RUN_INDEX,
-          confirmingClose: false,
-          openIndex: null,
-          runIndex: 0,
-        });
-      } else {
-        const el = document.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(taskId)}"]`);
-        const rect = el?.getBoundingClientRect();
-        if (!rect) return;
-        set(menuAtom, {
-          taskId,
-          anchor: { top: rect.top, left: rect.left, bottom: rect.bottom },
-          itemIndex: RUN_INDEX,
-          confirmingClose: false,
-          openIndex: null,
-          runIndex: 0,
-        });
-      }
+      const el = document.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(taskId)}"]`);
+      const rect = el?.getBoundingClientRect();
+      if (!rect) return;
+      set(menuAtom, {
+        taskId,
+        anchor: { top: rect.top, left: rect.left, bottom: rect.bottom },
+        itemIndex: RUN_INDEX,
+        confirmingClose: false,
+        submenu: { kind: "run", index: 0 },
+      });
     }
-    return;
   }
+});
 
+const exitSubmenuAtom = atom(null, (get, set) => {
   const menu = get(menuAtom);
-  if (menu === null) return;
-  const kind = activeSubmenu(menu);
-  if (kind === null) return;
+  if (menu === null || menu.submenu === null) return;
+  set(menuAtom, { ...menu, submenu: null });
+});
 
-  if (action.type === "exit") {
-    if (kind === "open") set(menuAtom, { ...menu, openIndex: null });
-    else set(menuAtom, { ...menu, runIndex: null });
-    return;
+const moveSubmenuAtom = atom(null, (get, set, direction: "up" | "down") => {
+  const menu = get(menuAtom);
+  if (menu === null || menu.submenu === null) return;
+  const next = menu.submenu.index + (direction === "up" ? -1 : 1);
+  let maxCount: number;
+  if (menu.submenu.kind === "open") {
+    const task = taskById(get, menu.taskId);
+    if (!task) return;
+    maxCount = openTargets(task).length;
+  } else {
+    maxCount = AGENT_TARGETS.length;
   }
+  if (next < 0 || next >= maxCount) return;
+  set(menuAtom, { ...menu, submenu: { ...menu.submenu, index: next } });
+});
 
-  if (action.type === "move") {
-    const currentIndex = kind === "open" ? menu.openIndex! : menu.runIndex!;
-    const next = currentIndex + (action.direction === "up" ? -1 : 1);
-    let maxCount: number;
-    if (kind === "open") {
-      const task = taskById(get, menu.taskId);
-      if (!task) return;
-      maxCount = openTargets(task).length;
-    } else {
-      maxCount = AGENT_TARGETS.length;
-    }
-    if (next < 0 || next >= maxCount) return;
-    if (kind === "open") set(menuAtom, { ...menu, openIndex: next });
-    else set(menuAtom, { ...menu, runIndex: next });
-    return;
-  }
+const setSubmenuIndexAtom = atom(null, (get, set, index: number) => {
+  const menu = get(menuAtom);
+  if (menu === null || menu.submenu === null || menu.submenu.index === index) return;
+  set(menuAtom, { ...menu, submenu: { ...menu.submenu, index } });
+});
 
-  if ((kind === "open" ? menu.openIndex : menu.runIndex) === action.index) return;
-  if (kind === "open") set(menuAtom, { ...menu, openIndex: action.index });
-  else set(menuAtom, { ...menu, runIndex: action.index });
+export const navigateSubmenuAtom = atom(null, (_get, set, action: SubmenuNavAction) => {
+  if (action.type === "enter") set(enterSubmenuAtom, action.submenu);
+  else if (action.type === "exit") set(exitSubmenuAtom);
+  else if (action.type === "move") set(moveSubmenuAtom, action.direction);
+  else set(setSubmenuIndexAtom, action.index);
 });
 
 export const requestOpenAtom = atom(null, (get, set, anchor: MenuAnchor | null) => {
@@ -366,8 +368,7 @@ export const requestOpenAtom = atom(null, (get, set, anchor: MenuAnchor | null) 
     anchor,
     itemIndex: OPEN_INDEX,
     confirmingClose: false,
-    openIndex: 0,
-    runIndex: null,
+    submenu: { kind: "open", index: 0 },
   });
 });
 
@@ -375,8 +376,8 @@ export { AGENT_TARGETS };
 
 export const executeRunAtom = atom(null, (get, set) => {
   const menu = get(menuAtom);
-  if (menu === null || menu.runIndex === null) return;
-  const agent = AGENT_TARGETS[menu.runIndex];
+  if (menu === null || menu.submenu?.kind !== "run") return;
+  const agent = AGENT_TARGETS[menu.submenu.index];
   if (!agent) return;
   const taskId = menu.taskId;
   set(menuAtom, null);
@@ -387,21 +388,21 @@ export const executeRunAtom = atom(null, (get, set) => {
 // the cursor to the issue and opens it through the one execute path.
 export const openIssueTargetAtom = atom(null, (get, set) => {
   const menu = get(menuAtom);
-  if (menu === null || menu.openIndex === null) return;
+  if (menu === null || menu.submenu?.kind !== "open") return;
   const task = taskById(get, menu.taskId);
   if (!task) return;
   const idx = openTargets(task).findIndex((t) => t.kind === "issue");
   if (idx === -1) return;
-  set(menuAtom, { ...menu, openIndex: idx });
+  set(menuAtom, { ...menu, submenu: { kind: "open", index: idx } });
   set(executeOpenAtom);
 });
 
 const executeOpenAtom = atom(null, (get, set) => {
   const menu = get(menuAtom);
-  if (menu === null || menu.openIndex === null) return;
+  if (menu === null || menu.submenu?.kind !== "open") return;
   const task = taskById(get, menu.taskId);
   if (!task) return;
-  const target = openTargets(task)[menu.openIndex];
+  const target = openTargets(task)[menu.submenu.index];
   if (!target) return;
   set(menuAtom, null);
   void openUrl(target.url);
@@ -418,15 +419,15 @@ const closeFocusedTaskAtom = atom(null, async (get, set, taskId: string) => {
     // the cache, but the derived atom only updates on a deferred notify tick. Drop the
     // closed id so focus lands on the real neighbour instead of the vanishing card.
     const columns = get(columnTasksAtom);
-    const focusInColumn = (col: number): boolean => {
-      const tasks = (columns[col]?.tasks ?? []).filter((t) => t.id !== taskId);
-      if (tasks.length === 0) return false;
-      set(focusedTaskIdAtom, tasks[Math.min(pos.rowIdx, tasks.length - 1)].id);
+    const tryFocus = (col: number): boolean => {
+      const id = findNearestTask(columns, col, pos.rowIdx, taskId);
+      if (id === null) return false;
+      set(focusedTaskIdAtom, id);
       return true;
     };
-    if (focusInColumn(pos.colIdx)) return;
-    for (let col = pos.colIdx + 1; col < columns.length; col++) if (focusInColumn(col)) return;
-    for (let col = pos.colIdx - 1; col >= 0; col--) if (focusInColumn(col)) return;
+    if (tryFocus(pos.colIdx)) return;
+    for (let col = pos.colIdx + 1; col < columns.length; col++) if (tryFocus(col)) return;
+    for (let col = pos.colIdx - 1; col >= 0; col--) if (tryFocus(col)) return;
   }
   set(exitNavAtom);
 });
