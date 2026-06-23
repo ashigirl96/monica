@@ -2,61 +2,23 @@ use anyhow::{Context, Result};
 use rusqlite::Connection;
 use rusqlite_migration::{Migrations, M};
 
-mod v01;
-mod v02;
-mod v03;
-mod v04;
-mod v05;
-mod v06;
-mod v07;
-mod v08;
-mod v09;
-mod v10;
-mod v11;
-mod v12;
-mod v13;
-mod v14;
-mod v15;
-mod v16;
-mod v17;
-mod v18;
-mod v19;
-mod v20;
-mod v21;
-mod v22;
-mod v23;
-mod v24;
-mod v25;
+macro_rules! migrations {
+    ($($v:ident),+ $(,)?) => {
+        $(mod $v;)+
 
-fn migration_steps() -> Vec<M<'static>> {
-    vec![
-        M::up(v01::SQL),
-        M::up(v02::SQL),
-        M::up(v03::SQL),
-        M::up(v04::SQL),
-        M::up(v05::SQL),
-        M::up(v06::SQL),
-        M::up(v07::SQL),
-        M::up(v08::SQL),
-        M::up(v09::SQL),
-        M::up(v10::SQL),
-        M::up(v11::SQL),
-        M::up(v12::SQL),
-        M::up(v13::SQL),
-        M::up(v14::SQL),
-        M::up(v15::SQL),
-        M::up(v16::SQL),
-        M::up(v17::SQL),
-        M::up(v18::SQL),
-        M::up(v19::SQL),
-        M::up(v20::SQL),
-        M::up(v21::SQL),
-        M::up(v22::SQL),
-        M::up(v23::SQL),
-        M::up(v24::SQL),
-        M::up(v25::SQL),
-    ]
+        fn migration_steps() -> Vec<M<'static>> {
+            vec![$(M::up($v::SQL)),+]
+        }
+    };
 }
+
+migrations!(
+    v01, v02, v03, v04, v05,
+    v06, v07, v08, v09, v10,
+    v11, v12, v13, v14, v15,
+    v16, v17, v18, v19, v20,
+    v21, v22, v23, v24, v25,
+);
 
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
