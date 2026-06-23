@@ -13,7 +13,11 @@ import {
 import { listBenchRunspaceMap, makeMainTaskRun, primaryTabId, taskShellEnv } from "@/commands/task";
 import { worktreeInfo, type WorktreeInfo } from "@/commands/git";
 import { releaseTabConnection } from "@/features/work-bench/terminal-connections";
-import { pendingWorkbenchHintAtom, resolveWorkbenchActive } from "@/stores/ui-state";
+import {
+  type WorkbenchHint,
+  pendingWorkbenchHintAtom,
+  resolveWorkbenchActive,
+} from "@/stores/ui-state";
 import { refreshTaskSummariesAtom } from "@/stores/workboard";
 
 const FONT_SIZE_DEFAULT = 15;
@@ -185,17 +189,18 @@ export const activeTerminalTabAtom = atom((get) => {
 const worktreeInfoByPathAtom = atom<Record<string, WorktreeInfo | null>>({});
 
 const WORKTREE_REVALIDATE_MS = 5000;
-const worktreeResolvedAt: Record<string, number> = {};
+const worktreeResolvedAtAtom = atom<Record<string, number>>({});
 
 const resolveWorktreeInfoAtom = atom(null, async (get, set, revalidate?: string[]) => {
   const state = get(terminalStateAtom);
   if (!state) return;
   const cache = get(worktreeInfoByPathAtom);
+  const resolvedAt = get(worktreeResolvedAtAtom);
   const now = Date.now();
 
   const paths = new Set<string>();
   for (const path of revalidate ?? []) {
-    if (path.startsWith("/") && now - (worktreeResolvedAt[path] ?? 0) >= WORKTREE_REVALIDATE_MS) {
+    if (path.startsWith("/") && now - (resolvedAt[path] ?? 0) >= WORKTREE_REVALIDATE_MS) {
       paths.add(path);
     }
   }
@@ -206,7 +211,11 @@ const resolveWorktreeInfoAtom = atom(null, async (get, set, revalidate?: string[
     }
   }
   if (paths.size === 0) return;
-  for (const path of paths) worktreeResolvedAt[path] = now;
+  set(worktreeResolvedAtAtom, (prev) => {
+    const next = { ...prev };
+    for (const path of paths) next[path] = now;
+    return next;
+  });
 
   const entries = await Promise.all(
     [...paths].map(async (path) => [path, await worktreeInfo(path).catch(() => null)] as const),
@@ -689,6 +698,29 @@ export const tabByIdAtom = atom((get) => {
   return new Map(state.runspaces.flatMap((rs) => rs.tabs).map((t) => [t.id, t]));
 });
 
+export function enrichRunspacesWithEnv(
+  runspaces: TerminalRunspace[],
+  runspaceToTask: Map<string, string>,
+  envByTask: Map<string, [string, string][]>,
+): TerminalRunspace[] {
+  return runspaces.map((rs) => {
+    const taskId = runspaceToTask.get(rs.id);
+    const env = taskId ? envByTask.get(taskId) : undefined;
+    return { ...rs, taskId, env: env && env.length > 0 ? env : undefined };
+  });
+}
+
+export function applyHint(state: TerminalState, hint: WorkbenchHint): TerminalState {
+  const resolved = resolveWorkbenchActive(state.runspaces, hint);
+  return {
+    ...state,
+    activeRunspaceId: resolved.activeRunspaceId,
+    runspaces: state.runspaces.map((rs) =>
+      rs.id === resolved.activeRunspaceId ? { ...rs, activeTabId: resolved.activeTabId } : rs,
+    ),
+  };
+}
+
 // Concurrent loads (e.g. WorkBench mount racing createTaskRunspaceAtom) must share
 // one promise so a slower load cannot overwrite state mutated in between.
 const loadInFlightAtom = atom<Promise<void> | null>(null);
@@ -712,11 +744,9 @@ export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
           return null;
         }),
       ]);
-      const runspaceToTask = new Map(benchMap.map(([rsId, taskId]) => [rsId, taskId]));
-      const state = snapshotToState(snap);
+      let state = snapshotToState(snap);
       if (state && state.runspaces.length > 0) {
-        // Runspace env is never persisted; recompute it from the task so tabs
-        // restored after a restart still get the Monica context + claude wrapper.
+        const runspaceToTask = new Map(benchMap.map(([rsId, taskId]) => [rsId, taskId]));
         const taskIds = [
           ...new Set(
             state.runspaces.map((rs) => runspaceToTask.get(rs.id)).filter((t): t is string => !!t),
@@ -730,19 +760,11 @@ export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
             ),
           ),
         );
-        state.runspaces = state.runspaces.map((rs) => {
-          const taskId = runspaceToTask.get(rs.id);
-          const env = taskId ? envByTask.get(taskId) : undefined;
-          return { ...rs, taskId, env: env && env.length > 0 ? env : undefined };
-        });
+        state.runspaces = enrichRunspacesWithEnv(state.runspaces, runspaceToTask, envByTask);
         const hint = get(pendingWorkbenchHintAtom);
         if (hint) {
           set(pendingWorkbenchHintAtom, null);
-          const resolved = resolveWorkbenchActive(state.runspaces, hint);
-          state.activeRunspaceId = resolved.activeRunspaceId;
-          state.runspaces = state.runspaces.map((rs) =>
-            rs.id === resolved.activeRunspaceId ? { ...rs, activeTabId: resolved.activeTabId } : rs,
-          );
+          state = applyHint(state, hint);
         }
         set(terminalStateAtom, state);
         if (sessions) applySessionList(get, set, sessions);
@@ -831,14 +853,16 @@ export const consumeTerminalLaunchAtom = atom(null, (get, set, tabId: string) =>
   set(terminalStateAtom, patchTabInState(state, tabId, { launch: undefined }));
 });
 
-let saveTimer: number | undefined;
+const saveTimerAtom = atom<number | undefined>(undefined);
 
-export const saveTerminalStateAtom = atom(null, (get) => {
+export const saveTerminalStateAtom = atom(null, (get, set) => {
   const current = get(terminalStateAtom);
   if (!current) return;
-  if (saveTimer) clearTimeout(saveTimer);
+  const prev = get(saveTimerAtom);
+  if (prev) clearTimeout(prev);
   const snapshot = stateToSnapshot(current);
-  saveTimer = window.setTimeout(() => {
+  const timer = window.setTimeout(() => {
     terminalSaveState(snapshot).catch((e) => console.warn("terminal save failed:", e));
   }, 500);
+  set(saveTimerAtom, timer);
 });
