@@ -222,12 +222,25 @@ function formatElapsed(seconds: number): string {
 
 function LastSyncedLabel() {
   const lastSyncAt = useAtomValue(prSyncLastSyncedAtom);
-  const [, forceUpdate] = useState(0);
+  const [, setTick] = useState(0);
 
   useEffect(() => {
     if (lastSyncAt === null) return;
-    const timer = setInterval(() => forceUpdate((n) => n + 1), 1000);
-    return () => clearInterval(timer);
+
+    function schedule() {
+      const ms = Date.now() - lastSyncAt!;
+      if (ms >= 600_000) return;
+
+      const delay = ms < 60_000 ? 1000 - (ms % 1000) : 60_000 - (ms % 60_000);
+      timer = setTimeout(() => {
+        setTick((n) => n + 1);
+        schedule();
+      }, delay);
+    }
+
+    let timer: ReturnType<typeof setTimeout>;
+    schedule();
+    return () => clearTimeout(timer);
   }, [lastSyncAt]);
 
   if (lastSyncAt === null) return null;
