@@ -44,17 +44,11 @@ impl TaskRunOutputs for FsTaskRunOutputs {
         let monica_home = paths::base_dir()?.to_string_lossy().into_owned();
         let agent = project.agent_default;
         let hook_cmd = pin_hook_command_base(&resolve_hook_command(agent)?, &monica_home);
-        let settings_path_str = match agent {
-            monica_core::Agent::Claude => write_local_settings(cwd, &hook_cmd)?,
-            monica_core::Agent::Codex => write_codex_hooks(cwd, &hook_cmd)?,
-        };
+        let settings_path_str = write_agent_hooks_config(agent, cwd, &hook_cmd)?;
 
         let bin_dir = task_dir.join("bin");
         let agent_bin = agent.as_str();
-        match agent {
-            monica_core::Agent::Claude => write_claude_wrapper(&bin_dir)?,
-            monica_core::Agent::Codex => write_codex_wrapper(&bin_dir)?,
-        }
+        write_agent_wrapper(&bin_dir, agent_bin, agent_wrapper_script(agent))?;
         let wrapper_path = bin_dir.join(agent_bin).to_string_lossy().into_owned();
 
         let zdotdir = task_dir.join("zdotdir");
@@ -166,25 +160,35 @@ fn pin_hook_command_base(hook_command: &str, monica_home: &str) -> String {
     format!("MONICA_HOME={} {hook_command}", quote_single(monica_home))
 }
 
-/// Write the hook config into `<cwd>/.claude/settings.local.json`, merging into any existing file.
-/// Returns the absolute path even when the write is skipped. Skips when `cwd` resolves to the
-/// user's `$HOME`, so a project without a checkout path can never poison the global
-/// `~/.claude/settings.local.json` shared by every Claude session.
-fn write_local_settings(cwd: &Path, hook_command: &str) -> Result<String> {
-    let settings_path = cwd.join(".claude").join("settings.local.json");
-    let settings_path_str = settings_path.to_string_lossy().into_owned();
+fn write_agent_hooks_config(
+    agent: monica_core::Agent,
+    cwd: &Path,
+    hook_command: &str,
+) -> Result<String> {
+    let config_path = cwd.join(agent.hooks_config_path());
+    let config_path_str = config_path.to_string_lossy().into_owned();
 
     if std::env::var_os("HOME").is_some_and(|home| same_path(Path::new(&home), cwd)) {
-        return Ok(settings_path_str);
+        return Ok(config_path_str);
     }
 
-    let claude_dir = cwd.join(".claude");
-    fs::create_dir_all(&claude_dir)
-        .with_context(|| format!("failed to create {}", claude_dir.display()))?;
-    let existing = fs::read_to_string(&settings_path).ok();
-    let body = merge_hooks_into_local_settings(existing.as_deref(), hook_command)?;
-    write_if_changed(&settings_path, &body)?;
-    Ok(settings_path_str)
+    let parent = config_path
+        .parent()
+        .ok_or_else(|| anyhow!("hooks config path has no parent: {}", config_path.display()))?;
+    fs::create_dir_all(parent)
+        .with_context(|| format!("failed to create {}", parent.display()))?;
+
+    let hooks = agent_hooks_value(agent, hook_command);
+    let body = match agent {
+        monica_core::Agent::Claude => {
+            let existing = fs::read_to_string(&config_path).ok();
+            merge_hooks_into_settings(existing.as_deref(), &hooks)?
+        }
+        monica_core::Agent::Codex => serde_json::to_string_pretty(&hooks)
+            .context("failed to serialize hooks config")?,
+    };
+    write_if_changed(&config_path, &body)?;
+    Ok(config_path_str)
 }
 
 // Compare through symlinks and trailing-slash differences so the HOME guard cannot be bypassed by
@@ -196,40 +200,20 @@ fn same_path(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// Merge Monica's hook block into existing `settings.local.json` content. Monica owns the `hooks`
-/// key (replaced wholesale); every other top-level key the user set is preserved.
-fn merge_hooks_into_local_settings(existing: Option<&str>, hook_command: &str) -> Result<String> {
-    let hooks = hooks_value(hook_command);
+fn merge_hooks_into_settings(existing: Option<&str>, hooks: &Value) -> Result<String> {
     let mut root = existing
         .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
         .filter(Value::is_object)
         .unwrap_or_else(|| json!({}));
     root["hooks"] = hooks["hooks"].clone();
-    serde_json::to_string_pretty(&root).context("failed to serialize claude settings")
-}
-
-fn write_codex_hooks(cwd: &Path, hook_command: &str) -> Result<String> {
-    let hooks_path = cwd.join(".codex").join("hooks.json");
-    let hooks_path_str = hooks_path.to_string_lossy().into_owned();
-
-    if std::env::var_os("HOME").is_some_and(|home| same_path(Path::new(&home), cwd)) {
-        return Ok(hooks_path_str);
-    }
-
-    let codex_dir = cwd.join(".codex");
-    fs::create_dir_all(&codex_dir)
-        .with_context(|| format!("failed to create {}", codex_dir.display()))?;
-    let body = serde_json::to_string_pretty(&codex_hooks_value(hook_command))
-        .context("failed to serialize codex hooks")?;
-    write_if_changed(&hooks_path, &body)?;
-    Ok(hooks_path_str)
+    serde_json::to_string_pretty(&root).context("failed to serialize settings")
 }
 
 fn hook_group(hook_command: &str, matcher: &str) -> Value {
     json!({ "matcher": matcher, "hooks": [{ "type": "command", "command": hook_command }] })
 }
 
-fn base_hooks_map(hook_command: &str) -> serde_json::Map<String, Value> {
+fn agent_hooks_value(agent: monica_core::Agent, hook_command: &str) -> Value {
     let group = || json!([hook_group(hook_command, "")]);
     let tool_wait_groups = || {
         json!([
@@ -245,21 +229,9 @@ fn base_hooks_map(hook_command: &str) -> serde_json::Map<String, Value> {
     map.insert("Stop".into(), group());
     map.insert("SubagentStart".into(), group());
     map.insert("SubagentStop".into(), group());
-    map
-}
-
-fn codex_hooks_value(hook_command: &str) -> Value {
-    let group = || json!([hook_group(hook_command, "")]);
-    let mut map = base_hooks_map(hook_command);
-    map.insert("PermissionRequest".into(), group());
-    json!({ "hooks": Value::Object(map) })
-}
-
-fn hooks_value(hook_command: &str) -> Value {
-    let mut map = base_hooks_map(hook_command);
-    let group = || json!([hook_group(hook_command, "")]);
-    map.insert("StopFailure".into(), group());
-    map.insert("SessionEnd".into(), group());
+    for event in agent.extra_hook_events() {
+        map.insert((*event).into(), group());
+    }
     json!({ "hooks": Value::Object(map) })
 }
 
@@ -307,10 +279,6 @@ fn write_agent_wrapper(bin_dir: &Path, name: &str, contents: &str) -> Result<()>
     Ok(())
 }
 
-fn write_claude_wrapper(bin_dir: &Path) -> Result<()> {
-    write_agent_wrapper(bin_dir, "claude", CLAUDE_WRAPPER)
-}
-
 const CODEX_WRAPPER: &str = r#"#!/usr/bin/env bash
 find_real_codex() {
     local self_dir
@@ -329,8 +297,11 @@ fi
 exec "$REAL_CODEX" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust "$@"
 "#;
 
-fn write_codex_wrapper(bin_dir: &Path) -> Result<()> {
-    write_agent_wrapper(bin_dir, "codex", CODEX_WRAPPER)
+fn agent_wrapper_script(agent: monica_core::Agent) -> &'static str {
+    match agent {
+        monica_core::Agent::Claude => CLAUDE_WRAPPER,
+        monica_core::Agent::Codex => CODEX_WRAPPER,
+    }
 }
 
 // zsh resolves each startup file against ZDOTDIR at the moment it reads it, so
@@ -394,8 +365,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hooks_value_contains_tracked_events() {
-        let parsed = hooks_value("monica hook claude");
+    fn agent_hooks_value_claude_contains_tracked_events() {
+        let parsed = agent_hooks_value(monica_core::Agent::Claude, "monica hook claude");
         for event in [
             "SessionStart",
             "UserPromptSubmit",
@@ -415,8 +386,8 @@ mod tests {
     }
 
     #[test]
-    fn codex_hooks_value_contains_supported_events() {
-        let parsed = codex_hooks_value("monica hook codex");
+    fn agent_hooks_value_codex_contains_supported_events() {
+        let parsed = agent_hooks_value(monica_core::Agent::Codex, "monica hook codex");
         for event in [
             "SessionStart",
             "UserPromptSubmit",
@@ -425,6 +396,7 @@ mod tests {
             "Stop",
             "SubagentStart",
             "SubagentStop",
+            "PermissionRequest",
         ] {
             let cmd = parsed
                 .pointer(&format!("/hooks/{event}/0/hooks/0/command"))
@@ -434,16 +406,18 @@ mod tests {
     }
 
     #[test]
-    fn codex_hooks_value_excludes_unsupported_events() {
-        let parsed = codex_hooks_value("monica hook codex");
+    fn agent_hooks_value_codex_excludes_claude_only_events() {
+        let parsed = agent_hooks_value(monica_core::Agent::Codex, "monica hook codex");
         assert!(parsed.pointer("/hooks/SessionEnd").is_none());
         assert!(parsed.pointer("/hooks/StopFailure").is_none());
     }
 
     #[test]
-    fn write_codex_hooks_writes_into_cwd_dot_codex() {
+    fn write_agent_hooks_config_codex_writes_into_cwd_dot_codex() {
         let cwd = unique_temp_dir("codex-write");
-        let path = write_codex_hooks(&cwd, "monica hook codex").unwrap();
+        let path =
+            write_agent_hooks_config(monica_core::Agent::Codex, &cwd, "monica hook codex")
+                .unwrap();
         let expected = cwd.join(".codex").join("hooks.json");
         assert_eq!(path, expected.to_string_lossy());
         let body = fs::read_to_string(&expected).unwrap();
@@ -462,8 +436,9 @@ mod tests {
     }
 
     #[test]
-    fn merge_hooks_creates_fresh_settings_with_pinned_command() {
-        let body = merge_hooks_into_local_settings(None, "monica hook claude").unwrap();
+    fn merge_hooks_creates_fresh_settings() {
+        let hooks = agent_hooks_value(monica_core::Agent::Claude, "monica hook claude");
+        let body = merge_hooks_into_settings(None, &hooks).unwrap();
         let parsed: Value = serde_json::from_str(&body).unwrap();
         let cmd = parsed
             .pointer("/hooks/SessionStart/0/hooks/0/command")
@@ -474,7 +449,8 @@ mod tests {
     #[test]
     fn merge_hooks_preserves_other_top_level_keys() {
         let existing = r#"{"model":"opus","permissions":{"allow":["Bash"]}}"#;
-        let body = merge_hooks_into_local_settings(Some(existing), "monica hook claude").unwrap();
+        let hooks = agent_hooks_value(monica_core::Agent::Claude, "monica hook claude");
+        let body = merge_hooks_into_settings(Some(existing), &hooks).unwrap();
         let parsed: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(parsed.pointer("/model").and_then(Value::as_str), Some("opus"));
         assert_eq!(
@@ -487,7 +463,8 @@ mod tests {
     #[test]
     fn merge_hooks_replaces_pre_existing_hooks_key() {
         let existing = r#"{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"old"}]}]}}"#;
-        let body = merge_hooks_into_local_settings(Some(existing), "monica hook claude").unwrap();
+        let hooks = agent_hooks_value(monica_core::Agent::Claude, "monica hook claude");
+        let body = merge_hooks_into_settings(Some(existing), &hooks).unwrap();
         let parsed: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(
             parsed
@@ -499,10 +476,9 @@ mod tests {
 
     #[test]
     fn merge_hooks_replaces_non_object_or_malformed_existing() {
-        // A non-object JSON value or unparseable content cannot carry user keys worth preserving,
-        // so it is replaced with a clean hooks-only object rather than propagating broken state.
+        let hooks = agent_hooks_value(monica_core::Agent::Claude, "monica hook claude");
         for existing in [Some("[1,2,3]"), Some("not json"), Some("\"scalar\"")] {
-            let body = merge_hooks_into_local_settings(existing, "monica hook claude").unwrap();
+            let body = merge_hooks_into_settings(existing, &hooks).unwrap();
             let parsed: Value = serde_json::from_str(&body).unwrap();
             assert!(parsed.is_object());
             assert_eq!(
@@ -535,19 +511,23 @@ mod tests {
     }
 
     #[test]
-    fn write_local_settings_writes_into_cwd_dot_claude() {
+    fn write_agent_hooks_config_claude_writes_into_cwd_dot_claude() {
         let cwd = unique_temp_dir("write");
-        let path = write_local_settings(&cwd, "monica hook claude").unwrap();
+        let path =
+            write_agent_hooks_config(monica_core::Agent::Claude, &cwd, "monica hook claude")
+                .unwrap();
         let expected = cwd.join(".claude").join("settings.local.json");
         assert_eq!(path, expected.to_string_lossy());
         let body = fs::read_to_string(&expected).unwrap();
         assert!(body.contains("monica hook claude"));
         assert!(body.contains("SessionStart"));
+        assert!(body.contains("StopFailure"));
+        assert!(body.contains("SessionEnd"));
         fs::remove_dir_all(&cwd).ok();
     }
 
     #[test]
-    fn write_local_settings_skips_home_to_protect_global_config() {
+    fn write_agent_hooks_config_skips_home_to_protect_global_config() {
         let Some(home) = std::env::var_os("HOME") else {
             return;
         };
@@ -555,7 +535,9 @@ mod tests {
         let global = home.join(".claude").join("settings.local.json");
         let before = fs::read_to_string(&global).ok();
 
-        let path = write_local_settings(&home, "monica hook claude").unwrap();
+        let path =
+            write_agent_hooks_config(monica_core::Agent::Claude, &home, "monica hook claude")
+                .unwrap();
         assert_eq!(path, global.to_string_lossy());
 
         let after = fs::read_to_string(&global).ok();
