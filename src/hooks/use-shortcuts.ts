@@ -1,6 +1,7 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import { useEffect, useRef } from "react";
 import { activeSpaceAtom, sidebarOpenAtom } from "@/stores/space";
+import type { SpaceId } from "@/stores/space";
 import { spaces } from "@/spaces/registry";
 import { createTabAtom, closeTabAtom, cycleTabAtom } from "@/stores/tabs";
 import {
@@ -22,6 +23,37 @@ import { isEditable } from "@/lib/keyboard";
 const META_KEY_SPACE_MAP = Object.fromEntries(spaces.map((s, i) => [String(i + 1), s.id]));
 
 const PREFIX_TIMEOUT = 2000;
+
+type ShortcutContext = {
+  e: KeyboardEvent;
+  activeSpace: SpaceId;
+  isWorkBench: boolean;
+};
+
+type KeyBinding = {
+  key?: string;
+  code?: string;
+  meta?: boolean;
+  ctrl?: boolean;
+  alt?: boolean;
+  shift?: boolean;
+  editable?: boolean;
+  action: (ctx: ShortcutContext) => void | false;
+};
+
+function matchBinding(b: KeyBinding, e: KeyboardEvent): boolean {
+  if (b.meta && !e.metaKey) return false;
+  if (b.ctrl && !e.ctrlKey) return false;
+  if (b.alt && !e.altKey) return false;
+  if (b.shift && !e.shiftKey) return false;
+  if (!b.meta && e.metaKey) return false;
+  if (!b.ctrl && e.ctrlKey) return false;
+  if (!b.alt && e.altKey) return false;
+  if (b.shift === false && e.shiftKey) return false;
+  if (b.key !== undefined && e.key !== b.key) return false;
+  if (b.code !== undefined && e.code !== b.code) return false;
+  return true;
+}
 
 export function useShortcuts() {
   const activeSpace = useAtomValue(activeSpaceAtom);
@@ -68,34 +100,181 @@ export function useShortcuts() {
   }, [activeSpace, jumpActive, setJumpActive]);
 
   useEffect(() => {
+    function handleJumpMode(e: KeyboardEvent, isWorkBench: boolean) {
+      if (e.key === "Alt" || e.key === "Control" || e.key === "Meta" || e.key === "Shift") {
+        return;
+      }
+      e.preventDefault();
+      clearTimeout(timeoutRef.current);
+      if (e.ctrlKey && e.key === "t") {
+        setJumpActive(false);
+        return;
+      }
+      if (e.key === "c" && !e.ctrlKey) {
+        setJumpActive(false);
+        if (isWorkBench) {
+          createTerminalTab();
+        } else {
+          createTab();
+        }
+        return;
+      }
+      if (!isWorkBench) {
+        setJumpActive(false);
+        return;
+      }
+      jumpToHint({ key: e.key.toLowerCase(), runspace: e.ctrlKey });
+    }
+
+    const bindings: KeyBinding[] = [
+      {
+        meta: true,
+        key: "n",
+        editable: true,
+        action: ({ activeSpace: space }) => {
+          if (space !== "work-board") setActiveSpace("work-board");
+          setNewTaskOpen(true);
+        },
+      },
+      {
+        meta: true,
+        key: "g",
+        editable: true,
+        action: ({ isWorkBench }) => {
+          if (isWorkBench) void promoteActiveTabRun();
+        },
+      },
+      {
+        meta: true,
+        key: "r",
+        editable: true,
+        action: ({ activeSpace: space }) => {
+          if (space === "work-board") void forceSyncPullRequests();
+        },
+      },
+      {
+        alt: true,
+        code: "KeyP",
+        editable: true,
+        action: ({ isWorkBench }) => {
+          if (isWorkBench) createRunspace();
+        },
+      },
+      {
+        alt: true,
+        code: "KeyO",
+        editable: true,
+        action: ({ isWorkBench }) => {
+          if (isWorkBench) toggleLastRunspace();
+        },
+      },
+      {
+        alt: true,
+        code: "KeyJ",
+        editable: true,
+        action: ({ isWorkBench, activeSpace: space }) => {
+          if (isWorkBench) cycleRunspace("down");
+          else if (space === "work-board") cycleBoardView("down");
+        },
+      },
+      {
+        alt: true,
+        code: "KeyK",
+        editable: true,
+        action: ({ isWorkBench, activeSpace: space }) => {
+          if (isWorkBench) cycleRunspace("up");
+          else if (space === "work-board") cycleBoardView("up");
+        },
+      },
+      {
+        ctrl: true,
+        key: "Tab",
+        editable: true,
+        action: ({ e, isWorkBench }) => {
+          const direction = e.shiftKey ? "left" : "right";
+          if (isWorkBench) cycleTerminalTab(direction);
+          else cycleTab(direction);
+        },
+      },
+      {
+        ctrl: true,
+        key: "t",
+        editable: true,
+        action: ({ isWorkBench }) => {
+          setJumpActive(true);
+          clearTimeout(timeoutRef.current);
+          if (!isWorkBench) {
+            timeoutRef.current = window.setTimeout(() => setJumpActive(false), PREFIX_TIMEOUT);
+          }
+        },
+      },
+      {
+        ctrl: true,
+        key: "w",
+        editable: true,
+        action: ({ activeSpace: space }) => {
+          if (space === "work-board") setProjectFilterOpen((v) => !v);
+        },
+      },
+      {
+        meta: true,
+        key: "b",
+        action: () => {
+          setSidebarOpen((v) => !v);
+        },
+      },
+      {
+        meta: true,
+        key: "=",
+        action: () => {
+          setUiZoom("in");
+        },
+      },
+      {
+        meta: true,
+        key: "+",
+        action: () => {
+          setUiZoom("in");
+        },
+      },
+      {
+        meta: true,
+        key: "-",
+        action: () => {
+          setUiZoom("out");
+        },
+      },
+      {
+        ctrl: true,
+        key: "d",
+        action: ({ isWorkBench }) => {
+          if (isWorkBench) return false;
+          closeTab();
+        },
+      },
+      {
+        alt: true,
+        code: "KeyH",
+        action: ({ isWorkBench }) => {
+          if (isWorkBench) cycleTerminalTab("left");
+          else cycleTab("left");
+        },
+      },
+      {
+        alt: true,
+        code: "KeyL",
+        action: ({ isWorkBench }) => {
+          if (isWorkBench) cycleTerminalTab("right");
+          else cycleTab("right");
+        },
+      },
+    ];
+
     function onKeyDown(e: KeyboardEvent) {
       const isWorkBench = activeSpace === "work-bench";
-      const editable = isEditable(e);
 
       if (jumpActive) {
-        if (e.key === "Alt" || e.key === "Control" || e.key === "Meta" || e.key === "Shift") {
-          return;
-        }
-        e.preventDefault();
-        clearTimeout(timeoutRef.current);
-        if (e.ctrlKey && e.key === "t") {
-          setJumpActive(false);
-          return;
-        }
-        if (e.key === "c" && !e.ctrlKey) {
-          setJumpActive(false);
-          if (isWorkBench) {
-            createTerminalTab();
-          } else {
-            createTab();
-          }
-          return;
-        }
-        if (!isWorkBench) {
-          setJumpActive(false);
-          return;
-        }
-        jumpToHint({ key: e.key.toLowerCase(), runspace: e.ctrlKey });
+        handleJumpMode(e, isWorkBench);
         return;
       }
 
@@ -111,125 +290,15 @@ export function useShortcuts() {
         return;
       }
 
-      if (e.metaKey && e.key === "n") {
-        e.preventDefault();
-        if (activeSpace !== "work-board") setActiveSpace("work-board");
-        setNewTaskOpen(true);
-        return;
-      }
+      const ctx: ShortcutContext = { e, activeSpace, isWorkBench };
+      const skipNonEditable = isEditable(e) && !e.altKey;
 
-      // Stays above the editable guard: the terminal focuses xterm's hidden textarea.
-      if (e.metaKey && e.key === "g") {
-        e.preventDefault();
-        if (isWorkBench) void promoteActiveTabRun();
-        return;
-      }
-
-      if (e.metaKey && e.key === "r") {
-        e.preventDefault();
-        if (activeSpace === "work-board") void forceSyncPullRequests();
-        return;
-      }
-
-      if (e.altKey && e.code === "KeyP") {
-        e.preventDefault();
-        if (isWorkBench) createRunspace();
-        return;
-      }
-
-      if (e.altKey && e.code === "KeyO") {
-        e.preventDefault();
-        if (isWorkBench) toggleLastRunspace();
-        return;
-      }
-
-      if (e.altKey && e.code === "KeyJ") {
-        e.preventDefault();
-        if (isWorkBench) cycleRunspace("down");
-        else if (activeSpace === "work-board") cycleBoardView("down");
-        return;
-      }
-
-      if (e.altKey && e.code === "KeyK") {
-        e.preventDefault();
-        if (isWorkBench) cycleRunspace("up");
-        else if (activeSpace === "work-board") cycleBoardView("up");
-        return;
-      }
-
-      // Stays above the editable guard: the terminal focuses xterm's hidden textarea.
-      if (e.ctrlKey && e.key === "Tab") {
-        e.preventDefault();
-        const direction = e.shiftKey ? "left" : "right";
-        if (isWorkBench) {
-          cycleTerminalTab(direction);
-        } else {
-          cycleTab(direction);
+      for (const binding of bindings) {
+        if (skipNonEditable && !binding.editable) continue;
+        if (matchBinding(binding, e)) {
+          if (binding.action(ctx) !== false) e.preventDefault();
+          return;
         }
-        return;
-      }
-
-      if (e.ctrlKey && e.key === "t") {
-        e.preventDefault();
-        setJumpActive(true);
-        clearTimeout(timeoutRef.current);
-        if (!isWorkBench) {
-          timeoutRef.current = window.setTimeout(() => setJumpActive(false), PREFIX_TIMEOUT);
-        }
-        return;
-      }
-
-      if (e.ctrlKey && e.key === "w") {
-        e.preventDefault();
-        if (activeSpace === "work-board") setProjectFilterOpen((v) => !v);
-        return;
-      }
-
-      if (editable && !e.altKey) return;
-
-      if (e.metaKey && e.key === "b") {
-        e.preventDefault();
-        setSidebarOpen((v) => !v);
-        return;
-      }
-
-      if (e.metaKey && (e.key === "=" || e.key === "+")) {
-        e.preventDefault();
-        setUiZoom("in");
-        return;
-      }
-
-      if (e.metaKey && e.key === "-") {
-        e.preventDefault();
-        setUiZoom("out");
-        return;
-      }
-
-      if (e.ctrlKey && e.key === "d") {
-        if (isWorkBench) return;
-        e.preventDefault();
-        closeTab();
-        return;
-      }
-
-      if (e.altKey && e.code === "KeyH") {
-        e.preventDefault();
-        if (isWorkBench) {
-          cycleTerminalTab("left");
-        } else {
-          cycleTab("left");
-        }
-        return;
-      }
-
-      if (e.altKey && e.code === "KeyL") {
-        e.preventDefault();
-        if (isWorkBench) {
-          cycleTerminalTab("right");
-        } else {
-          cycleTab("right");
-        }
-        return;
       }
     }
 
