@@ -146,16 +146,12 @@ fn pull_request_from_response(response: PullRequestResponse) -> Result<GithubPul
         repo: pull_request_repo(&node),
         number: node.number,
         url: node.url,
-        status: pull_request_status(&node.state, node.is_draft)?,
+        status: resolve_pull_request_status(&node.state, node.is_draft, None)?,
     })
 }
 
 fn pull_request_repo(node: &PullRequestNode) -> String {
     node.repository.name_with_owner.to_lowercase()
-}
-
-fn pull_request_status(state: &str, is_draft: bool) -> Result<GithubPullRequestStatus> {
-    resolve_pull_request_status(state, is_draft, None)
 }
 
 fn resolve_pull_request_status(
