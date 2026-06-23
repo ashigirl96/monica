@@ -20,12 +20,9 @@ pub use github::{
 };
 pub use lifecycle::{
     is_continuation_session_start, is_resume_session_start, is_safe_task_run_id,
-    is_session_starting_event, is_task_notification_prompt, background_tasks_status,
-    payload_confirms_no_running_subagents, payload_has_running_subagents,
-    should_ignore_event, subagent_count_update,
+    is_session_starting_event, should_ignore_event, subagents_in_flight_after,
     transition_for_event, transition_is_generic_wait,
-    transition_is_protected, wait_reason_for_tool,
-    BackgroundTasksStatus, HookTransition, SubagentCountUpdate,
+    transition_is_protected, wait_reason_for_tool, HookTransition,
 };
 pub use project::{PermissionMode, Project, Provider};
 pub use refs::{parse_issue_input, parse_issue_ref, parse_owner_repo};

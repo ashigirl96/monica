@@ -57,11 +57,9 @@ pub struct TaskRun {
     pub terminal_tab_id: Option<String>,
     pub last_event_name: Option<String>,
     pub last_event_at: Option<String>,
-    /// Subagents (Task tool) currently running under this run's Claude session. Keeps a `Stop`
-    /// hook from demoting the run to "your turn" while a subagent is still in flight.
-    pub active_subagents: i64,
-    /// A `Stop` was blocked by the subagent guard while the run was `Running`. When the last
-    /// `SubagentStop` brings `active_subagents` to 0, the deferred transition fires atomically.
+    /// A `Stop` was held by the subagent guard while the run was `Running` (its `background_tasks`
+    /// still listed a running subagent). When a later `SubagentStop` leaves nothing in flight, the
+    /// deferred `Stop → WaitingForUser` transition fires atomically.
     pub pending_stop: bool,
     pub metadata: Value,
     pub created_at: String,
