@@ -80,33 +80,36 @@ pub fn is_task_notification_prompt(payload: Option<&Value>) -> bool {
         .is_some_and(|prompt| prompt.trim_start().starts_with("<task-notification>"))
 }
 
-/// Whether a `Stop` payload reports background subagents still running. `background_tasks` is the
-/// parent's own authoritative list (it carries only the still-running ones), so reading it backs
-/// up the derived `active_subagents` counter: even if the counter is wrong, a `Stop` that arrives
-/// while the parent says a subagent is in flight must not demote the run.
-pub fn payload_has_running_subagents(payload: Option<&Value>) -> bool {
-    payload
-        .and_then(|value| value.get("background_tasks"))
-        .and_then(Value::as_array)
-        .is_some_and(|tasks| {
-            tasks.iter().any(|task| {
-                task.get("status").and_then(Value::as_str) == Some("running")
-            })
-        })
+/// What the payload's `background_tasks` array says about running subagents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackgroundTasksStatus {
+    HasRunning,
+    AllIdle,
+    Absent,
 }
 
-/// Whether the payload's `background_tasks` is present and confirms no subagents are running.
-/// Distinct from `!payload_has_running_subagents`: when the field is absent or malformed this
-/// returns `false` (unknown), not `true` (confirmed empty).
-pub fn payload_confirms_no_running_subagents(payload: Option<&Value>) -> bool {
-    payload
+/// Read the `background_tasks` field from a hook payload. `Absent` means the field is missing or
+/// malformed; `AllIdle` means the array exists but contains no running items (including `[]`);
+/// `HasRunning` means at least one item has `status: "running"`.
+pub fn background_tasks_status(payload: Option<&Value>) -> BackgroundTasksStatus {
+    match payload
         .and_then(|value| value.get("background_tasks"))
         .and_then(Value::as_array)
-        .is_some_and(|tasks| {
-            !tasks
-                .iter()
-                .any(|task| task.get("status").and_then(Value::as_str) == Some("running"))
-        })
+    {
+        None => BackgroundTasksStatus::Absent,
+        Some(tasks) if tasks.iter().any(|t| {
+            t.get("status").and_then(Value::as_str) == Some("running")
+        }) => BackgroundTasksStatus::HasRunning,
+        Some(_) => BackgroundTasksStatus::AllIdle,
+    }
+}
+
+pub fn payload_has_running_subagents(payload: Option<&Value>) -> bool {
+    background_tasks_status(payload) == BackgroundTasksStatus::HasRunning
+}
+
+pub fn payload_confirms_no_running_subagents(payload: Option<&Value>) -> bool {
+    background_tasks_status(payload) == BackgroundTasksStatus::AllIdle
 }
 
 /// Protections against late or out-of-order hooks. This snapshot check is advisory (hooks run in

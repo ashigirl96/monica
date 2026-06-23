@@ -3,8 +3,8 @@ use rusqlite::params;
 
 use crate::sqlite::SqliteStore;
 use monica_core::{
-    is_session_starting_event, payload_confirms_no_running_subagents,
-    payload_has_running_subagents, subagent_count_update,
+    is_session_starting_event, background_tasks_status, BackgroundTasksStatus,
+    subagent_count_update,
     transition_is_generic_wait, HookTransition, NewTaskRun, SubagentCountUpdate, TaskRun,
     TaskRunObservation, TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus,
 };
@@ -152,8 +152,9 @@ impl TaskRunRepository for SqliteStore {
             && !is_session_starting_event(observation.event_name);
         // The parent's own `background_tasks` backstops a corrupted `active_subagents` counter:
         // a `Stop` arriving while a subagent is still in flight is held even when the count is 0.
-        let event_has_running_subagents = payload_has_running_subagents(observation.metadata);
-        let bg_confirms_clear = payload_confirms_no_running_subagents(observation.metadata);
+        let bg_status = background_tasks_status(observation.metadata);
+        let event_has_running_subagents = bg_status == BackgroundTasksStatus::HasRunning;
+        let bg_confirms_clear = bg_status == BackgroundTasksStatus::AllIdle;
         let subagent_update = observation
             .event_name
             .and_then(|event| subagent_count_update(event, observation.metadata));
