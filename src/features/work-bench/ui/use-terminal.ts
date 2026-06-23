@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import "@xterm/xterm/css/xterm.css";
+import { EventCleanupManager } from "@/lib/event-cleanup";
 import { attachTapSelection } from "@/features/work-bench/ui/tap-selection";
 import { attachTerminalLinks } from "@/features/work-bench/ui/terminal-links";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -264,7 +265,7 @@ export function useTerminal(
     fitRef.current = fitAddon;
     setTabTerminal(options.tabId, term);
 
-    const cleanups: (() => void)[] = [];
+    const cleanup = new EventCleanupManager();
 
     const sendBytes = (bytes: Uint8Array) => {
       const sessionId = sessionIdRef.current;
@@ -369,16 +370,11 @@ export function useTerminal(
 
     const container = containerRef.current;
     if (container) {
-      container.addEventListener("mousedown", blockPhantom, true);
-      container.addEventListener("pointerdown", blockPhantom, true);
-      container.addEventListener("wheel", onWheel, { capture: true });
-      cleanups.push(attachTapSelection(term, container));
-      cleanups.push(attachTerminalLinks(term, container, () => optionsRef.current.cwd));
-      cleanups.push(() => {
-        container.removeEventListener("mousedown", blockPhantom, true);
-        container.removeEventListener("pointerdown", blockPhantom, true);
-        container.removeEventListener("wheel", onWheel, { capture: true } as EventListenerOptions);
-      });
+      cleanup.addEventListener(container, "mousedown", blockPhantom, true);
+      cleanup.addEventListener(container, "pointerdown", blockPhantom, true);
+      cleanup.addEventListener(container, "wheel", onWheel, { capture: true });
+      cleanup.add(attachTapSelection(term, container));
+      cleanup.add(attachTerminalLinks(term, container, () => optionsRef.current.cwd));
     }
 
     const unsubFontSize = store.sub(terminalFontSizeAtom, () => {
@@ -391,7 +387,7 @@ export function useTerminal(
         }
       }
     });
-    cleanups.push(unsubFontSize);
+    cleanup.add(unsubFontSize);
 
     return () => {
       // The tab connection (session listeners) deliberately survives unmount/remount;
@@ -403,7 +399,7 @@ export function useTerminal(
       // unstick the mute or the remounted terminal would silently drop all input.
       const conn = getTabConnection(options.tabId);
       if (conn) conn.replaying = false;
-      for (const fn of cleanups) fn();
+      cleanup.disposeAll();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
