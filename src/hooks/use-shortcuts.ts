@@ -7,7 +7,6 @@ import { createTabAtom, closeTabAtom, cycleTabAtom } from "@/stores/tabs";
 import {
   createRunspaceAtom,
   createTerminalTabAtom,
-  closeTerminalTabAtom,
   cycleTerminalTabAtom,
   cycleRunspaceAtom,
   jumpHintsActiveAtom,
@@ -19,6 +18,7 @@ import { forceSyncPullRequestsAtom } from "@/stores/pr-sync";
 import { newTaskOpenAtom, projectFilterOpenAtom, cycleBoardViewAtom } from "@/stores/workboard";
 import { setUiZoomAtom } from "@/stores/zoom";
 import { isEditable } from "@/lib/keyboard";
+import { handleJumpMode, type JumpModeActions } from "@/lib/jump-mode";
 
 const META_KEY_SPACE_MAP = Object.fromEntries(spaces.map((s, i) => [String(i + 1), s.id]));
 
@@ -32,6 +32,7 @@ type ShortcutContext = {
 
 type KeyBinding = {
   key?: string;
+  keys?: string[];
   code?: string;
   meta?: boolean;
   ctrl?: boolean;
@@ -51,6 +52,7 @@ function matchBinding(b: KeyBinding, e: KeyboardEvent): boolean {
   if (!b.alt && e.altKey) return false;
   if (b.shift === false && e.shiftKey) return false;
   if (b.key !== undefined && e.key !== b.key) return false;
+  if (b.keys !== undefined && !b.keys.includes(e.key)) return false;
   if (b.code !== undefined && e.code !== b.code) return false;
   return true;
 }
@@ -64,7 +66,6 @@ export function useShortcuts() {
   const cycleTab = useSetAtom(cycleTabAtom);
   const createRunspace = useSetAtom(createRunspaceAtom);
   const createTerminalTab = useSetAtom(createTerminalTabAtom);
-  const closeTerminalTab = useSetAtom(closeTerminalTabAtom);
   const cycleTerminalTab = useSetAtom(cycleTerminalTabAtom);
   const cycleRunspace = useSetAtom(cycleRunspaceAtom);
   const promoteActiveTabRun = useSetAtom(promoteActiveTabRunAtom);
@@ -100,30 +101,9 @@ export function useShortcuts() {
   }, [activeSpace, jumpActive, setJumpActive]);
 
   useEffect(() => {
-    function handleJumpMode(e: KeyboardEvent, isWorkBench: boolean) {
-      if (e.key === "Alt" || e.key === "Control" || e.key === "Meta" || e.key === "Shift") {
-        return;
-      }
-      e.preventDefault();
-      clearTimeout(timeoutRef.current);
-      if (e.ctrlKey && e.key === "t") {
-        setJumpActive(false);
-        return;
-      }
-      if (e.key === "c" && !e.ctrlKey) {
-        setJumpActive(false);
-        if (isWorkBench) {
-          createTerminalTab();
-        } else {
-          createTab();
-        }
-        return;
-      }
-      if (!isWorkBench) {
-        setJumpActive(false);
-        return;
-      }
-      jumpToHint({ key: e.key.toLowerCase(), runspace: e.ctrlKey });
+    function cycleFocusedTab(direction: "left" | "right", isWorkBench: boolean) {
+      if (isWorkBench) cycleTerminalTab(direction);
+      else cycleTab(direction);
     }
 
     const bindings: KeyBinding[] = [
@@ -191,9 +171,7 @@ export function useShortcuts() {
         key: "Tab",
         editable: true,
         action: ({ e, isWorkBench }) => {
-          const direction = e.shiftKey ? "left" : "right";
-          if (isWorkBench) cycleTerminalTab(direction);
-          else cycleTab(direction);
+          cycleFocusedTab(e.shiftKey ? "left" : "right", isWorkBench);
         },
       },
       {
@@ -225,14 +203,7 @@ export function useShortcuts() {
       },
       {
         meta: true,
-        key: "=",
-        action: () => {
-          setUiZoom("in");
-        },
-      },
-      {
-        meta: true,
-        key: "+",
+        keys: ["=", "+"],
         action: () => {
           setUiZoom("in");
         },
@@ -256,16 +227,14 @@ export function useShortcuts() {
         alt: true,
         code: "KeyH",
         action: ({ isWorkBench }) => {
-          if (isWorkBench) cycleTerminalTab("left");
-          else cycleTab("left");
+          cycleFocusedTab("left", isWorkBench);
         },
       },
       {
         alt: true,
         code: "KeyL",
         action: ({ isWorkBench }) => {
-          if (isWorkBench) cycleTerminalTab("right");
-          else cycleTab("right");
+          cycleFocusedTab("right", isWorkBench);
         },
       },
     ];
@@ -274,7 +243,13 @@ export function useShortcuts() {
       const isWorkBench = activeSpace === "work-bench";
 
       if (jumpActive) {
-        handleJumpMode(e, isWorkBench);
+        const actions: JumpModeActions = {
+          clearTimeout: () => clearTimeout(timeoutRef.current),
+          deactivate: () => setJumpActive(false),
+          createTab: () => (isWorkBench ? createTerminalTab() : createTab()),
+          jumpToHint,
+        };
+        handleJumpMode(e, isWorkBench, actions);
         return;
       }
 
@@ -316,7 +291,6 @@ export function useShortcuts() {
     cycleTab,
     createRunspace,
     createTerminalTab,
-    closeTerminalTab,
     cycleTerminalTab,
     cycleRunspace,
     promoteActiveTabRun,
