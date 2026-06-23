@@ -17,7 +17,9 @@ use crate::{
     begin_github_device_flow, close_issue, create_raw_task, execute_run, github_auth_status,
     logout_github,
     make_main_by_terminal_tab, open_bench, prepare_claude_for_run, primary_terminal_tab,
-    record_claude_hook, register_project_with_default_branch, start_run, subagent_count_update,
+    background_tasks_status, BackgroundTasksStatus, record_claude_hook,
+    register_project_with_default_branch,
+    start_run, subagent_count_update,
     sync_next_pull_request,
     track_github_issue, HookContext, MakeMainOutcome, RefType, SubagentCountUpdate,
     wait_for_github_device_flow, Agent, DisplayStatus, Event, ExternalRef, GithubAuthStatus,
@@ -410,12 +412,18 @@ impl TaskRunRepository for FakeRepos {
         if let Some(tab) = observation.terminal_tab_id {
             run.terminal_tab_id = Some(tab.to_string());
         }
+        let bg_clear =
+            background_tasks_status(observation.metadata) == BackgroundTasksStatus::AllIdle;
         if observation.event_name == Some("Stop")
             && observation.status.is_none()
+            && !bg_clear
             && run.active_subagents > 0
             && run.status == TaskRunStatus::Running
         {
             run.pending_stop = true;
+        }
+        if bg_clear && run.active_subagents > 0 {
+            run.active_subagents = 0;
         }
         let subagent_update = observation
             .event_name
