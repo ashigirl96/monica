@@ -28,10 +28,10 @@ sqlite3 -header -column ~/monica/db/monica.db \
 
 ```bash
 sqlite3 -header -column ~/monica/db/monica.db "
-  SELECT tr.id, tr.task_id, tr.status, tr.last_event_name, 
+  SELECT tr.id, tr.task_id, tr.status, tr.last_event_name,
          tr.active_subagents, tr.pending_stop
-  FROM task_runs tr 
-  WHERE tr.status = 'running' 
+  FROM task_runs tr
+  WHERE tr.status = 'running'
     AND tr.last_event_name IN ('Stop', 'SubagentStop')
   ORDER BY tr.updated_at DESC;"
 ```
