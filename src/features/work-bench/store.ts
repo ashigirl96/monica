@@ -690,15 +690,15 @@ export const tabByIdAtom = atom((get) => {
 });
 
 // Concurrent loads (e.g. WorkBench mount racing createTaskRunspaceAtom) must share
-// one promise: the null check alone lets the slower load overwrite state mutated in
-// between, dropping freshly created tabs.
-let loadTerminalStateInFlight: Promise<void> | null = null;
+// one promise so a slower load cannot overwrite state mutated in between.
+const loadInFlightAtom = atom<Promise<void> | null>(null);
 
 export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
   if (get(terminalStateAtom) !== null) return Promise.resolve();
-  if (loadTerminalStateInFlight) return loadTerminalStateInFlight;
+  const inFlight = get(loadInFlightAtom);
+  if (inFlight) return inFlight;
 
-  loadTerminalStateInFlight = (async () => {
+  const promise = (async () => {
     try {
       // The session list is fetched with its own catch: it triggers the backend's daemon
       // reconcile, and a daemon failure must not fall into the catch below, which would
@@ -755,10 +755,11 @@ export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
     }
     set(terminalStateAtom, initialState());
   })().finally(() => {
-    loadTerminalStateInFlight = null;
+    set(loadInFlightAtom, null);
   });
 
-  return loadTerminalStateInFlight;
+  set(loadInFlightAtom, promise);
+  return promise;
 });
 
 export const createTaskRunspaceAtom = atom(
