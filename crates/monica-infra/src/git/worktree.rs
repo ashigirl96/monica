@@ -63,9 +63,7 @@ pub struct WorktreeInfo {
 }
 
 pub fn worktree_info(cwd: &Path) -> Option<WorktreeInfo> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(cwd)
+    let output = git_command(cwd)
         .args([
             "rev-parse",
             "--abbrev-ref",
@@ -97,8 +95,8 @@ fn create_worktree(repo: &Path, worktree: &Path, branch: &str, base: &str) -> Re
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
-    let mut command = Command::new("git");
-    command.arg("-C").arg(repo).args(["worktree", "add"]);
+    let mut command = git_command(repo);
+    command.args(["worktree", "add"]);
     command.arg(worktree);
     if branch_exists(repo, branch)? {
         command.arg(branch);
@@ -236,9 +234,7 @@ fn ensure_worktree_unregistered(repo: &Path, run: &TaskRun, worktree: &Path) -> 
 /// that leaves the ref resolvable; otherwise `None`, so the caller falls back to the local base
 /// and a Run is never blocked by an unreachable remote (offline, or a remote-less repo).
 fn latest_remote_base(repo: &Path, base: &str) -> Option<String> {
-    let fetched = Command::new("git")
-        .arg("-C")
-        .arg(repo)
+    let fetched = git_command(repo)
         .args(["fetch", "origin", base])
         .output()
         .ok()?
@@ -248,9 +244,7 @@ fn latest_remote_base(repo: &Path, base: &str) -> Option<String> {
         return None;
     }
     let remote = format!("origin/{base}");
-    let resolves = Command::new("git")
-        .arg("-C")
-        .arg(repo)
+    let resolves = git_command(repo)
         .args(["rev-parse", "--verify", "--quiet"])
         .arg(format!("refs/remotes/{remote}"))
         .output()
@@ -261,9 +255,7 @@ fn latest_remote_base(repo: &Path, base: &str) -> Option<String> {
 }
 
 fn branch_exists(repo: &Path, branch: &str) -> Result<bool> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
+    let output = git_command(repo)
         .args(["show-ref", "--verify", "--quiet"])
         .arg(format!("refs/heads/{branch}"))
         .output()
@@ -279,9 +271,7 @@ fn branch_exists(repo: &Path, branch: &str) -> Result<bool> {
 }
 
 fn worktree_registered(repo: &Path, worktree: &Path) -> Result<bool> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
+    let output = git_command(repo)
         .args(["worktree", "list", "--porcelain"])
         .output()
         .context("failed to run git; install git or check the project path")?;
@@ -294,19 +284,28 @@ fn worktree_registered(repo: &Path, worktree: &Path) -> Result<bool> {
 
     let path = worktree.display().to_string();
     let mut needles = vec![format!("worktree {path}")];
-    if let Some(rest) = path.strip_prefix("/var/") {
-        needles.push(format!("worktree /private/var/{rest}"));
-    } else if let Some(rest) = path.strip_prefix("/private/var/") {
-        needles.push(format!("worktree /var/{rest}"));
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(rest) = path.strip_prefix("/var/") {
+            needles.push(format!("worktree /private/var/{rest}"));
+        } else if let Some(rest) = path.strip_prefix("/private/var/") {
+            needles.push(format!("worktree /var/{rest}"));
+        }
     }
     Ok(String::from_utf8_lossy(&output.stdout)
         .lines()
         .any(|line| needles.iter().any(|needle| line == needle)))
 }
 
+fn git_command(dir: &Path) -> Command {
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(dir);
+    cmd
+}
+
 fn git(repo: &Path, args: &[&str], path_arg: Option<&Path>) -> Result<()> {
-    let mut command = Command::new("git");
-    command.arg("-C").arg(repo).args(args);
+    let mut command = git_command(repo);
+    command.args(args);
     if let Some(path) = path_arg {
         command.arg(path);
     }
