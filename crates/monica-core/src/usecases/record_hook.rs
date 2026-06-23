@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use crate::domain::{
     is_continuation_session_start, is_resume_session_start, is_safe_task_run_id,
     is_session_starting_event, payload_has_running_subagents, should_ignore_event,
-    transition_for_event, transition_is_protected, Agent,
+    transition_for_event, transition_is_protected, Agent, Task,
 };
 use crate::interfaces::{Clock, EventRepository, TaskRunOutputs, TaskRepository, TaskRunRepository};
 use crate::{NewTaskRun, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus};
@@ -247,15 +247,27 @@ where
     })
 }
 
-struct ResolvedRun {
-    run: Option<TaskRun>,
-    created: bool,
+pub(super) struct ResolvedRun {
+    pub(super) run: Option<TaskRun>,
+    pub(super) created: bool,
 }
 
 impl ResolvedRun {
     fn linked(run: Option<TaskRun>) -> Self {
         Self { run, created: false }
     }
+}
+
+type ResolveRule<R> = fn(&RunResolveCtx, &mut R) -> Result<Option<ResolvedRun>>;
+
+pub(super) struct RunResolveCtx<'a> {
+    pub(super) task_id: &'a str,
+    pub(super) task: &'a Task,
+    pub(super) explicit_run_id_rejected: bool,
+    pub(super) provider_session_id: Option<&'a str>,
+    pub(super) event_name: Option<&'a str>,
+    pub(super) agent: Agent,
+    pub(super) primary_run: Option<&'a TaskRun>,
 }
 
 /// Resolve which task run a hook belongs to. Rules are evaluated top-down, first match wins:
@@ -296,43 +308,87 @@ where
         return Ok(ResolvedRun::linked(None));
     };
 
-    if let Some(session_id) = provider_session_id {
-        if let Some(run) = repos.find_task_run_by_session(task_id, session_id)? {
-            return Ok(ResolvedRun::linked(Some(run)));
-        }
-    }
-
     let primary_run = match task.primary_task_run_id.as_deref() {
         Some(primary_id) => repos.get_task_run(primary_id)?,
         None => None,
     };
-    if let Some(run) = &primary_run {
-        if run.status == TaskRunStatus::Prepared && is_session_starting_event(event_name) {
-            return Ok(ResolvedRun::linked(primary_run));
+
+    let ctx = RunResolveCtx {
+        task_id,
+        task: &task,
+        explicit_run_id_rejected,
+        provider_session_id,
+        event_name,
+        agent,
+        primary_run: primary_run.as_ref(),
+    };
+
+    let rules: [ResolveRule<R>; 3] = [
+        resolve_by_session,
+        resolve_by_prepared_primary,
+        resolve_by_lazy_create,
+    ];
+    for rule in &rules {
+        if let Some(resolved) = rule(&ctx, repos)? {
+            return Ok(resolved);
         }
     }
+    Ok(ResolvedRun::linked(None))
+}
 
-    if provider_session_id.is_none()
-        || !is_session_starting_event(event_name)
-        || explicit_run_id_rejected
-        || task.status == TaskStatus::Closed
+pub(super) fn resolve_by_session<R>(ctx: &RunResolveCtx, repos: &mut R) -> Result<Option<ResolvedRun>>
+where
+    R: TaskRepository + TaskRunRepository,
+{
+    let Some(session_id) = ctx.provider_session_id else {
+        return Ok(None);
+    };
+    match repos.find_task_run_by_session(ctx.task_id, session_id)? {
+        Some(run) => Ok(Some(ResolvedRun::linked(Some(run)))),
+        None => Ok(None),
+    }
+}
+
+pub(super) fn resolve_by_prepared_primary<R>(
+    ctx: &RunResolveCtx,
+    _repos: &mut R,
+) -> Result<Option<ResolvedRun>>
+where
+    R: TaskRepository + TaskRunRepository,
+{
+    let Some(run) = ctx.primary_run else {
+        return Ok(None);
+    };
+    if run.status == TaskRunStatus::Prepared && is_session_starting_event(ctx.event_name) {
+        Ok(Some(ResolvedRun::linked(Some(run.clone()))))
+    } else {
+        Ok(None)
+    }
+}
+
+pub(super) fn resolve_by_lazy_create<R>(ctx: &RunResolveCtx, repos: &mut R) -> Result<Option<ResolvedRun>>
+where
+    R: TaskRepository + TaskRunRepository,
+{
+    if ctx.provider_session_id.is_none()
+        || !is_session_starting_event(ctx.event_name)
+        || ctx.explicit_run_id_rejected
+        || ctx.task.status == TaskStatus::Closed
     {
-        return Ok(ResolvedRun::linked(None));
+        return Ok(None);
     }
 
-    // The session's cwd is arbitrary user space (often the project's main checkout, where
-    // delete-time worktree cleanup would rip it); it stays in metadata_json, never here.
     let run = repos.start_task_run(NewTaskRun {
-        task_id: task_id.to_string(),
-        agent: Some(agent),
+        task_id: ctx.task_id.to_string(),
+        agent: Some(ctx.agent),
         branch: None,
         worktree_path: None,
     })?;
-    if primary_run.is_none() {
-        repos.set_primary_task_run(task_id, &run.id)?;
+    if ctx.primary_run.is_none() {
+        repos.set_primary_task_run(ctx.task_id, &run.id)?;
     }
-    Ok(ResolvedRun {
+    Ok(Some(ResolvedRun {
         run: Some(run),
         created: true,
-    })
+    }))
 }
