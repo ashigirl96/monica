@@ -84,6 +84,31 @@ function patchTabInState(
   };
 }
 
+function patchRunspaceInState(
+  state: TerminalState,
+  rsId: string,
+  patch: Partial<TerminalRunspace>,
+): TerminalState {
+  return {
+    ...state,
+    runspaces: state.runspaces.map((r) => (r.id === rsId ? { ...r, ...patch } : r)),
+  };
+}
+
+function updateActiveRunspace(
+  get: Getter,
+  set: Setter,
+  updater: (rs: TerminalRunspace) => Partial<TerminalRunspace> | null,
+): boolean {
+  const state = get(resolvedStateAtom);
+  const rs = state.runspaces.find((r) => r.id === state.activeRunspaceId);
+  if (!rs) return false;
+  const patch = updater(rs);
+  if (!patch) return false;
+  set(terminalStateAtom, patchRunspaceInState(state, rs.id, patch));
+  return true;
+}
+
 function reorderByOrder<T extends { id: string; order: number }>(
   items: T[],
   fromId: string,
@@ -360,25 +385,13 @@ export const cycleRunspaceAtom = atom(null, (get, set, direction: "up" | "down")
 });
 
 export const createTerminalTabAtom = atom(null, (get, set) => {
-  const state = get(resolvedStateAtom);
-  const rs = state.runspaces.find((r) => r.id === state.activeRunspaceId);
-  if (!rs) return;
-
-  const activeTab = rs.tabs.find((t) => t.id === rs.activeTabId);
-  const cwd = resolveTabCwd(activeTab);
-  const insertOrder = (activeTab?.order ?? -1) + 1;
-  const shifted = rs.tabs.map((t) => (t.order >= insertOrder ? { ...t, order: t.order + 1 } : t));
-  const tab = createTab(cwd, insertOrder);
-
-  const updatedRs: TerminalRunspace = {
-    ...rs,
-    tabs: [...shifted, tab],
-    activeTabId: tab.id,
-  };
-
-  set(terminalStateAtom, {
-    ...state,
-    runspaces: state.runspaces.map((r) => (r.id === rs.id ? updatedRs : r)),
+  updateActiveRunspace(get, set, (rs) => {
+    const activeTab = rs.tabs.find((t) => t.id === rs.activeTabId);
+    const cwd = resolveTabCwd(activeTab);
+    const insertOrder = (activeTab?.order ?? -1) + 1;
+    const shifted = rs.tabs.map((t) => (t.order >= insertOrder ? { ...t, order: t.order + 1 } : t));
+    const tab = createTab(cwd, insertOrder);
+    return { tabs: [...shifted, tab], activeTabId: tab.id };
   });
 });
 
@@ -406,41 +419,26 @@ export const closeTerminalTabAtom = atom(null, (get, set, tabId?: string) => {
   const newActiveId =
     targetId === rs.activeTabId ? newTabs[Math.min(idx, newTabs.length - 1)].id : rs.activeTabId;
 
-  set(terminalStateAtom, {
-    ...state,
-    runspaces: state.runspaces.map((r) =>
-      r.id === rs.id ? { ...rs, tabs: newTabs, activeTabId: newActiveId } : r,
-    ),
-  });
+  set(
+    terminalStateAtom,
+    patchRunspaceInState(state, rs.id, { tabs: newTabs, activeTabId: newActiveId }),
+  );
 });
 
 export const activateTerminalTabAtom = atom(null, (get, set, tabId: string) => {
-  const state = get(resolvedStateAtom);
-  const rs = state.runspaces.find((r) => r.id === state.activeRunspaceId);
-  if (!rs) return;
-
-  set(terminalStateAtom, {
-    ...state,
-    runspaces: state.runspaces.map((r) => (r.id === rs.id ? { ...rs, activeTabId: tabId } : r)),
-  });
-  set(terminalFocusRequestAtom, (c) => c + 1);
+  if (updateActiveRunspace(get, set, () => ({ activeTabId: tabId }))) {
+    set(terminalFocusRequestAtom, (c) => c + 1);
+  }
 });
 
 export const cycleTerminalTabAtom = atom(null, (get, set, direction: "left" | "right") => {
-  const state = get(resolvedStateAtom);
-  const rs = state.runspaces.find((r) => r.id === state.activeRunspaceId);
-  if (!rs || rs.tabs.length <= 1) return;
-
-  const sorted = [...rs.tabs].sort((a, b) => a.order - b.order);
-  const idx = sorted.findIndex((t) => t.id === rs.activeTabId);
-  const newIdx =
-    direction === "left" ? (idx - 1 + sorted.length) % sorted.length : (idx + 1) % sorted.length;
-
-  set(terminalStateAtom, {
-    ...state,
-    runspaces: state.runspaces.map((r) =>
-      r.id === rs.id ? { ...rs, activeTabId: sorted[newIdx].id } : r,
-    ),
+  updateActiveRunspace(get, set, (rs) => {
+    if (rs.tabs.length <= 1) return null;
+    const sorted = [...rs.tabs].sort((a, b) => a.order - b.order);
+    const idx = sorted.findIndex((t) => t.id === rs.activeTabId);
+    const newIdx =
+      direction === "left" ? (idx - 1 + sorted.length) % sorted.length : (idx + 1) % sorted.length;
+    return { activeTabId: sorted[newIdx].id };
   });
 });
 
@@ -512,14 +510,9 @@ export const reorderRunspacesAtom = atom(null, (get, set, fromId: string, toId: 
 });
 
 export const reorderTabsAtom = atom(null, (get, set, fromId: string, toId: string) => {
-  const state = get(resolvedStateAtom);
-  const rs = state.runspaces.find((r) => r.id === state.activeRunspaceId);
-  if (!rs) return;
-  const tabs = reorderByOrder(rs.tabs, fromId, toId);
-  if (!tabs) return;
-  set(terminalStateAtom, {
-    ...state,
-    runspaces: state.runspaces.map((r) => (r.id === rs.id ? { ...rs, tabs } : r)),
+  updateActiveRunspace(get, set, (rs) => {
+    const tabs = reorderByOrder(rs.tabs, fromId, toId);
+    return tabs ? { tabs } : null;
   });
 });
 
