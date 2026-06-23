@@ -32,10 +32,10 @@ function MenuPopover({ menu }: { menu: MenuState }) {
 
   return (
     <PopoverMenu anchor={menu.anchor} onClose={() => setMenu(null)}>
-      {menu.runIndex !== null ? (
-        <RunSubmenu runIndex={menu.runIndex} />
-      ) : menu.openIndex !== null ? (
-        <OpenSubmenu openIndex={menu.openIndex} targets={openTargets(task)} />
+      {menu.submenu?.kind === "run" ? (
+        <RunSubmenu runIndex={menu.submenu.index} />
+      ) : menu.submenu?.kind === "open" ? (
+        <OpenSubmenu openIndex={menu.submenu.index} targets={openTargets(task)} />
       ) : (
         <ItemList menu={menu} task={task} />
       )}
