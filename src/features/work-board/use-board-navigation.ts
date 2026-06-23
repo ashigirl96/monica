@@ -2,21 +2,16 @@ import { useAtomValue, useStore } from "jotai";
 import { useEffect } from "react";
 import { isEditable } from "@/lib/keyboard";
 import {
-  enterOpenSubmenuAtom,
-  enterRunSubmenuAtom,
   executeMenuItemAtom,
   executeRunAtom,
   exitNavAtom,
-  exitOpenSubmenuAtom,
-  exitRunSubmenuAtom,
   focusedPositionAtom,
   focusedTaskIdAtom,
   menuAtom,
   type MenuAnchor,
   moveFocusAtom,
   moveMenuItemAtom,
-  moveOpenItemAtom,
-  moveRunItemAtom,
+  navigateSubmenuAtom,
   openIssueTargetAtom,
   openMenuAtom,
   reconcileFocusAtom,
@@ -51,27 +46,30 @@ export function useBoardNavigation() {
       const menu = store.get(menuAtom);
       if (menu !== null) {
         if (menu.runIndex !== null) {
-          if (e.key === "j" || e.key === "ArrowDown") store.set(moveRunItemAtom, "down");
-          else if (e.key === "k" || e.key === "ArrowUp") store.set(moveRunItemAtom, "up");
+          if (e.key === "j" || e.key === "ArrowDown")
+            store.set(navigateSubmenuAtom, { type: "move", direction: "down" });
+          else if (e.key === "k" || e.key === "ArrowUp")
+            store.set(navigateSubmenuAtom, { type: "move", direction: "up" });
           else if (e.key === "Enter") store.set(executeRunAtom);
-          else if (e.key === "c")
-            store.set(executeRunAtom); // hint: c for claude when cursor is on it
+          else if (e.key === "c") store.set(executeRunAtom);
           else if (e.key === "x") {
-            store.set(moveRunItemAtom, "down"); // jump to codex
+            store.set(navigateSubmenuAtom, { type: "move", direction: "down" });
             store.set(executeRunAtom);
           } else if (e.key === "Escape" || e.key === "h" || e.key === "Backspace")
-            store.set(exitRunSubmenuAtom);
+            store.set(navigateSubmenuAtom, { type: "exit" });
           else if (e.key === " ") store.set(menuAtom, null);
           else return;
           e.preventDefault();
           return;
         }
         if (menu.openIndex !== null) {
-          if (e.key === "j" || e.key === "ArrowDown") store.set(moveOpenItemAtom, "down");
-          else if (e.key === "k" || e.key === "ArrowUp") store.set(moveOpenItemAtom, "up");
+          if (e.key === "j" || e.key === "ArrowDown")
+            store.set(navigateSubmenuAtom, { type: "move", direction: "down" });
+          else if (e.key === "k" || e.key === "ArrowUp")
+            store.set(navigateSubmenuAtom, { type: "move", direction: "up" });
           else if (e.key === "Enter") store.set(executeMenuItemAtom);
           else if (e.key === "Escape" || e.key === "h" || e.key === "Backspace")
-            store.set(exitOpenSubmenuAtom);
+            store.set(navigateSubmenuAtom, { type: "exit" });
           else if (e.key === " ") store.set(menuAtom, null);
           else if (e.key === "i") store.set(openIssueTargetAtom);
           else return;
@@ -83,8 +81,8 @@ export function useBoardNavigation() {
         else if (e.key === "Enter") store.set(executeMenuItemAtom);
         else if (e.key === "Escape" || e.key === " ") store.set(menuAtom, null);
         else if (e.key === "c") store.set(requestCloseAtom, null);
-        else if (e.key === "o") store.set(enterOpenSubmenuAtom);
-        else if (e.key === "r") store.set(enterRunSubmenuAtom);
+        else if (e.key === "o") store.set(navigateSubmenuAtom, { type: "enter", submenu: "open" });
+        else if (e.key === "r") store.set(navigateSubmenuAtom, { type: "enter", submenu: "run" });
         else if (e.key in ACTION_KEYS)
           store.set(runDirectActionAtom, ACTION_KEYS[e.key as keyof typeof ACTION_KEYS]);
         else return;

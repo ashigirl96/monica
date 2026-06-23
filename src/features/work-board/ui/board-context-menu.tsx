@@ -11,13 +11,10 @@ import {
   MENU_ITEMS,
   executeMenuItemAtom,
   executeRunAtom,
-  exitOpenSubmenuAtom,
-  exitRunSubmenuAtom,
   isItemDisabled,
   menuAtom,
+  navigateSubmenuAtom,
   setMenuItemIndexAtom,
-  setOpenIndexAtom,
-  setRunIndexAtom,
   type MenuState,
 } from "@/features/work-board/nav";
 
@@ -84,15 +81,14 @@ function ItemList({ menu, task }: { menu: MenuState; task: TaskSummaryRow }) {
 }
 
 function OpenSubmenu({ openIndex, targets }: { openIndex: number; targets: OpenTarget[] }) {
-  const setOpenIndex = useSetAtom(setOpenIndexAtom);
+  const navigate = useSetAtom(navigateSubmenuAtom);
   const executeItem = useSetAtom(executeMenuItemAtom);
-  const exitSubmenu = useSetAtom(exitOpenSubmenuAtom);
 
   return (
     <>
       <button
         type="button"
-        onClick={() => exitSubmenu()}
+        onClick={() => navigate({ type: "exit" })}
         className="group flex w-full items-center justify-between rounded px-2 py-1 text-left text-[11px] text-muted-foreground transition-colors hover:text-foreground"
       >
         <span className="flex items-center gap-1">
@@ -110,9 +106,9 @@ function OpenSubmenu({ openIndex, targets }: { openIndex: number; targets: OpenT
           <button
             key={target.id}
             type="button"
-            onMouseEnter={() => setOpenIndex(i)}
+            onMouseEnter={() => navigate({ type: "setIndex", index: i })}
             onClick={() => {
-              setOpenIndex(i);
+              navigate({ type: "setIndex", index: i });
               executeItem();
             }}
             className={cn(
@@ -154,15 +150,14 @@ function OpenSubmenu({ openIndex, targets }: { openIndex: number; targets: OpenT
 }
 
 function RunSubmenu({ runIndex }: { runIndex: number }) {
-  const setRunIndex = useSetAtom(setRunIndexAtom);
+  const navigate = useSetAtom(navigateSubmenuAtom);
   const executeRun = useSetAtom(executeRunAtom);
-  const exitSubmenu = useSetAtom(exitRunSubmenuAtom);
 
   return (
     <>
       <button
         type="button"
-        onClick={() => exitSubmenu()}
+        onClick={() => navigate({ type: "exit" })}
         className="group flex w-full items-center justify-between rounded px-2 py-1 text-left text-[11px] text-muted-foreground transition-colors hover:text-foreground"
       >
         <span className="flex items-center gap-1">
@@ -180,9 +175,9 @@ function RunSubmenu({ runIndex }: { runIndex: number }) {
           <button
             key={target.agent}
             type="button"
-            onMouseEnter={() => setRunIndex(i)}
+            onMouseEnter={() => navigate({ type: "setIndex", index: i })}
             onClick={() => {
-              setRunIndex(i);
+              navigate({ type: "setIndex", index: i });
               executeRun();
             }}
             className={cn(
