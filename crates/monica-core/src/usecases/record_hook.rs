@@ -3,7 +3,8 @@ use serde_json::{json, Value};
 
 use crate::domain::{
     is_continuation_session_start, is_resume_session_start, is_safe_task_run_id,
-    is_session_starting_event, payload_has_running_subagents, should_ignore_event,
+    is_session_starting_event, payload_confirms_no_running_subagents,
+    payload_has_running_subagents, should_ignore_event,
     transition_for_event, transition_is_protected, Agent, Task,
 };
 use crate::interfaces::{Clock, EventRepository, TaskRunOutputs, TaskRepository, TaskRunRepository};
@@ -163,13 +164,16 @@ where
         .as_ref()
         .is_some_and(|run| run.status == TaskRunStatus::Running)
         && is_continuation_session_start(event_name.as_deref(), parsed.as_ref());
+    let bg_confirms_clear = payload_confirms_no_running_subagents(parsed.as_ref());
     let protected = match (requested, run_row.as_ref()) {
         (Some(transition), Some(run)) if !suppressed_continuation => transition_is_protected(
             run.status,
             run.wait_reason,
             run.provider_session_id.as_deref(),
             provider_session_id,
-            run.active_subagents > 0 || payload_has_running_subagents(parsed.as_ref()),
+            !bg_confirms_clear
+                && (run.active_subagents > 0
+                    || payload_has_running_subagents(parsed.as_ref())),
             event_name.as_deref(),
             transition,
         ),

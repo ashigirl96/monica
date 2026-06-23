@@ -2,7 +2,7 @@ use monica_core::{
     Agent, DisplayStatus, ExternalRef, GithubPullRequest,
     GithubPullRequestStatus, NewTask, NewTaskRun, NewTerminalSession, Project,
     ProjectRepository, PullRequestBranchSyncCandidate, RefType, TaskKind, TaskRepository,
-    TaskRunObservation, TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus,
+    TaskRun, TaskRunObservation, TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus,
     TaskSummaryFilter, TaskSummaryRow, TerminalSessionKind, TerminalSessionStatus,
     TerminalSessionUpdate,
 };
@@ -510,14 +510,8 @@ fn task_run_observation_deferred_stop_fires_when_last_subagent_ends() {
     assert!(!s.pending_stop);
 }
 
-/// Regression: when `record_hook` detects the subagent guard and sets `observation.status = None`
-/// (the advisory `transition_is_protected` fires first), the SQL store must still recognise the
-/// Stop and set `pending_stop = 1`. The existing test passes `status: Some(WaitingForUser)` which
-/// bypasses the bug; this test mirrors the real payload the SQL layer receives.
-#[test]
-fn task_run_observation_deferred_stop_fires_when_status_is_none() {
-    let mut db = SqliteStore::open_in_memory().unwrap();
-    let task = db.insert_task(dev_task("protected stop")).unwrap();
+fn running_task_run(db: &mut SqliteStore, title: &str) -> TaskRun {
+    let task = db.insert_task(dev_task(title)).unwrap();
     let run = db
         .start_task_run(NewTaskRun {
             task_id: task.id.clone(),
@@ -526,14 +520,23 @@ fn task_run_observation_deferred_stop_fires_when_status_is_none() {
             worktree_path: None,
         })
         .unwrap();
+    record_observation(db, &run.id, "UserPromptSubmit", Some(TaskRunStatus::Running), None);
+    run
+}
 
+/// Regression: when `record_hook` detects the subagent guard and sets `observation.status = None`
+/// (the advisory `transition_is_protected` fires first), the SQL store must still recognise the
+/// Stop and set `pending_stop = 1`. The existing test passes `status: Some(WaitingForUser)` which
+/// bypasses the bug; this test mirrors the real payload the SQL layer receives.
+#[test]
+fn task_run_observation_deferred_stop_fires_when_status_is_none() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let run = running_task_run(&mut db, "protected stop");
     let snapshot = |db: &SqliteStore| db.get_task_run(&run.id).unwrap().unwrap();
 
-    record_observation(&mut db, &run.id, "UserPromptSubmit", Some(TaskRunStatus::Running), None);
     record_observation(&mut db, &run.id, "SubagentStart", None, None);
     assert_eq!(snapshot(&db).active_subagents, 1);
 
-    // record_hook passes status=None when transition_is_protected blocks the Stop.
     record_observation(&mut db, &run.id, "Stop", None, None);
     let s = snapshot(&db);
     assert_eq!(s.status, TaskRunStatus::Running);
@@ -544,6 +547,38 @@ fn task_run_observation_deferred_stop_fires_when_status_is_none() {
     let s = snapshot(&db);
     assert_eq!(s.status, TaskRunStatus::WaitingForUser);
     assert_eq!(s.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
+    assert_eq!(s.active_subagents, 0);
+    assert!(!s.pending_stop);
+}
+
+/// When a Stop arrives with `background_tasks: []` but the counter is stuck above zero (a
+/// SubagentStop hook was lost), the authoritative payload overrides the derived counter and the
+/// transition goes through normally.
+#[test]
+fn task_run_observation_bg_confirms_clear_overrides_stuck_counter() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let run = running_task_run(&mut db, "bg clear");
+    let snapshot = |db: &SqliteStore| db.get_task_run(&run.id).unwrap().unwrap();
+
+    record_observation(&mut db, &run.id, "SubagentStart", None, None);
+    record_observation(&mut db, &run.id, "SubagentStart", None, None);
+    assert_eq!(snapshot(&db).active_subagents, 2);
+
+    // Only one SubagentStop arrives — the other was lost.
+    record_observation(&mut db, &run.id, "SubagentStop", None, None);
+    assert_eq!(snapshot(&db).active_subagents, 1);
+
+    // Stop with background_tasks: [] — Claude Code says no subagents are running.
+    let bg_empty = json!({"background_tasks": []});
+    record_observation(
+        &mut db,
+        &run.id,
+        "Stop",
+        Some(TaskRunStatus::WaitingForUser),
+        Some(&bg_empty),
+    );
+    let s = snapshot(&db);
+    assert_eq!(s.status, TaskRunStatus::WaitingForUser);
     assert_eq!(s.active_subagents, 0);
     assert!(!s.pending_stop);
 }

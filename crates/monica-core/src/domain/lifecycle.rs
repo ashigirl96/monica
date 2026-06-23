@@ -95,6 +95,20 @@ pub fn payload_has_running_subagents(payload: Option<&Value>) -> bool {
         })
 }
 
+/// Whether the payload's `background_tasks` is present and confirms no subagents are running.
+/// Distinct from `!payload_has_running_subagents`: when the field is absent or malformed this
+/// returns `false` (unknown), not `true` (confirmed empty).
+pub fn payload_confirms_no_running_subagents(payload: Option<&Value>) -> bool {
+    payload
+        .and_then(|value| value.get("background_tasks"))
+        .and_then(Value::as_array)
+        .is_some_and(|tasks| {
+            !tasks
+                .iter()
+                .any(|task| task.get("status").and_then(Value::as_str) == Some("running"))
+        })
+}
+
 /// Protections against late or out-of-order hooks. This snapshot check is advisory (hooks run in
 /// separate processes); the same rules are enforced atomically inside the store's UPDATE.
 ///
@@ -591,6 +605,20 @@ mod tests {
         assert!(!payload_has_running_subagents(Some(&json!({"background_tasks": "nope"}))));
         assert!(!payload_has_running_subagents(Some(&json!({"other": "x"}))));
         assert!(!payload_has_running_subagents(None));
+    }
+
+    #[test]
+    fn confirms_no_running_subagents_requires_present_array() {
+        assert!(payload_confirms_no_running_subagents(Some(&json!({"background_tasks": []}))));
+        assert!(payload_confirms_no_running_subagents(Some(&json!({
+            "background_tasks": [{"id": "a", "status": "completed"}]
+        }))));
+        assert!(!payload_confirms_no_running_subagents(Some(&json!({
+            "background_tasks": [{"id": "b", "status": "running"}]
+        }))));
+        assert!(!payload_confirms_no_running_subagents(Some(&json!({"background_tasks": "nope"}))));
+        assert!(!payload_confirms_no_running_subagents(Some(&json!({"other": "x"}))));
+        assert!(!payload_confirms_no_running_subagents(None));
     }
 
     #[test]
