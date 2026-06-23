@@ -5,8 +5,15 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import "@xterm/xterm/css/xterm.css";
 import { EventCleanupManager } from "@/lib/event-cleanup";
+import { toBase64, fromBase64, encoder } from "@/lib/base64";
 import { attachTapSelection } from "@/features/work-bench/ui/tap-selection";
 import { attachTerminalLinks } from "@/features/work-bench/ui/terminal-links";
+import {
+  TERMINAL_THEME,
+  registerParsers,
+  buildKeyEventHandler,
+  createWheelHandler,
+} from "@/features/work-bench/ui/terminal-setup";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getDefaultStore } from "jotai";
 import {
@@ -37,35 +44,19 @@ import {
   type TabConnection,
 } from "@/features/work-bench/terminal-connections";
 
-const PIXELS_PER_LINE = 20;
-
-function buildSgrWheelSequence(lines: number, down: boolean, col: number, row: number): string {
-  const code = down ? 65 : 64;
-  const event = `\x1b[<${code};${col};${row}M`;
-  return event.repeat(lines);
-}
-
-function toBase64(input: Uint8Array): string {
-  let binary = "";
-  for (let i = 0; i < input.length; i++) {
-    binary += String.fromCharCode(input[i]);
-  }
-  return btoa(binary);
-}
-
-function fromBase64(b64: string): Uint8Array {
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
-const encoder = new TextEncoder();
-
 function isDeadStatus(status: TerminalSessionStatus | undefined): boolean {
   return status === "exited" || status === "lost" || status === "failed";
+}
+
+function fitAndResize(
+  fit: FitAddon,
+  term: Terminal,
+  sessionIdRef: { current: string | null },
+): void {
+  fit.fit();
+  if (sessionIdRef.current) {
+    terminalResize(sessionIdRef.current, term.rows, term.cols);
+  }
 }
 
 type UseTerminalOptions = {
@@ -231,30 +222,7 @@ export function useTerminal(
           if (event.metaKey) openUrl(uri);
         },
       },
-      theme: {
-        background: "#1d1f21",
-        foreground: "#c5c8c6",
-        cursor: "#c5c8c6",
-        cursorAccent: "#1d1f21",
-        selectionBackground: "#c5c8c6",
-        selectionForeground: "#1d1f21",
-        black: "#1d1f21",
-        red: "#cc6666",
-        green: "#b5bd68",
-        yellow: "#f0c674",
-        blue: "#81a2be",
-        magenta: "#b294bb",
-        cyan: "#8abeb7",
-        white: "#c5c8c6",
-        brightBlack: "#666666",
-        brightRed: "#d54e53",
-        brightGreen: "#b9ca4a",
-        brightYellow: "#e7c547",
-        brightBlue: "#7aa6da",
-        brightMagenta: "#c397d8",
-        brightCyan: "#70c0b1",
-        brightWhite: "#eaeaea",
-      },
+      theme: TERMINAL_THEME,
     });
 
     const fitAddon = new FitAddon();
@@ -288,52 +256,15 @@ export function useTerminal(
       optionsRef.current.onTitleChange?.(title);
     });
 
-    // Kitty keyboard protocol: respond to query (CSI ? u) and absorb push/pop
-    term.parser.registerCsiHandler({ final: "u", prefix: "?" }, () => {
-      writeText("\x1b[?1u");
-      return true;
-    });
-    term.parser.registerCsiHandler({ final: "u", prefix: ">" }, () => true);
-    term.parser.registerCsiHandler({ final: "u", prefix: "<" }, () => true);
+    registerParsers(term, writeText, () => optionsRef.current.onCwdChange);
 
-    term.parser.registerOscHandler(7, (data: string) => {
-      try {
-        const url = new URL(data);
-        if (url.protocol !== "file:") return false;
-        const cwd = decodeURIComponent(url.pathname);
-        optionsRef.current.onCwdChange?.(cwd);
-        return true;
-      } catch {
-        return false;
-      }
-    });
-
-    term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
-      if (e.shiftKey && e.key === "Enter") {
-        if (e.type === "keydown") {
-          writeText("\x1b[13;2u");
-        }
-        return false;
-      }
-      if (store.get(jumpHintsActiveAtom)) return false;
-      if (e.altKey) return false;
-      if (e.ctrlKey && e.key === "t") return false;
-      if (e.ctrlKey && e.key === "Tab") return false;
-      if (e.metaKey && /^[0-4]$/.test(e.key)) return false;
-      if (e.metaKey && e.type === "keydown") {
-        if (e.key === "=" || e.key === "+") {
-          e.preventDefault();
-          store.set(zoomTerminalAtom, 1);
-          return false;
-        }
-        if (e.key === "-") {
-          e.preventDefault();
-          store.set(zoomTerminalAtom, -1);
-          return false;
-        }
-      }
-      return true;
-    });
+    term.attachCustomKeyEventHandler(
+      buildKeyEventHandler(
+        () => store.get(jumpHintsActiveAtom),
+        writeText,
+        (delta: 1 | -1) => store.set(zoomTerminalAtom, delta),
+      ),
+    );
 
     function blockPhantom(e: Event) {
       if (e instanceof MouseEvent && e.buttons === 0) {
@@ -342,31 +273,7 @@ export function useTerminal(
       }
     }
 
-    let scrollAccumulator = 0;
-
-    function onWheel(e: WheelEvent) {
-      if (term.buffer.active.type !== "alternate") return;
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      const delta =
-        e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * PIXELS_PER_LINE : e.deltaY;
-
-      scrollAccumulator += delta;
-
-      const lines = Math.trunc(scrollAccumulator / PIXELS_PER_LINE);
-      if (lines === 0) return;
-
-      scrollAccumulator -= lines * PIXELS_PER_LINE;
-
-      const absLines = Math.min(Math.abs(lines), term.rows);
-      const down = lines > 0;
-      const col = Math.floor(term.cols / 2);
-      const row = Math.floor(term.rows / 2);
-      const seq = buildSgrWheelSequence(absLines, down, col, row);
-      writeText(seq);
-    }
+    const onWheel = createWheelHandler(term, writeText);
 
     const container = containerRef.current;
     if (container) {
@@ -381,10 +288,7 @@ export function useTerminal(
       const size = store.get(terminalFontSizeAtom);
       term.options.fontSize = size;
       if (openedRef.current && fitRef.current) {
-        fitRef.current.fit();
-        if (sessionIdRef.current) {
-          terminalResize(sessionIdRef.current, term.rows, term.cols);
-        }
+        fitAndResize(fitRef.current, term, sessionIdRef);
       }
     });
     cleanup.add(unsubFontSize);
@@ -441,10 +345,7 @@ export function useTerminal(
     const observer = new ResizeObserver(() => {
       if (fitDebounce) clearTimeout(fitDebounce);
       fitDebounce = window.setTimeout(() => {
-        fit.fit();
-        if (sessionIdRef.current) {
-          terminalResize(sessionIdRef.current, term.rows, term.cols);
-        }
+        fitAndResize(fit, term, sessionIdRef);
       }, 100);
     });
 
