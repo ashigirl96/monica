@@ -63,6 +63,33 @@ struct TableInner {
     attachments: HashMap<String, HashSet<u64>>,
 }
 
+impl TableInner {
+    fn drop_connection(&mut self, conn_id: u64) {
+        self.connections.remove(&conn_id);
+        for conns in self.attachments.values_mut() {
+            conns.remove(&conn_id);
+        }
+    }
+
+    fn fanout_to_attachments(&mut self, session_id: &str, msg: &ServerMessage) {
+        let Some(conns) = self.attachments.get(session_id) else {
+            return;
+        };
+        if conns.is_empty() {
+            return;
+        }
+        let lagged: Vec<u64> = conns
+            .iter()
+            .filter(|conn_id| !self.connections.get(conn_id).is_some_and(|out| out.send(msg)))
+            .copied()
+            .collect();
+        for conn_id in lagged {
+            log::warn!("dropping lagged connection {conn_id}");
+            self.drop_connection(conn_id);
+        }
+    }
+}
+
 pub struct SessionTable {
     manager: PtyManager,
     sessions_dir: PathBuf,
@@ -91,11 +118,7 @@ impl SessionTable {
     }
 
     pub fn drop_connection(&self, conn_id: u64) {
-        let mut inner = self.lock();
-        inner.connections.remove(&conn_id);
-        for conns in inner.attachments.values_mut() {
-            conns.remove(&conn_id);
-        }
+        self.lock().drop_connection(conn_id);
     }
 
     pub fn create(self: &Arc<Self>, params: CreateParams) -> Result<Option<u32>> {
@@ -147,30 +170,14 @@ impl SessionTable {
         if let Err(e) = entry.transcript.append(bytes) {
             log::warn!("transcript append failed for {session_id}: {e}");
         }
-        let Some(conns) = inner.attachments.get(session_id) else {
-            return;
-        };
-        if conns.is_empty() {
+        if inner.attachments.get(session_id).is_none_or(|c| c.is_empty()) {
             return;
         }
         let msg = ServerMessage::Output {
             session_id: session_id.to_string(),
             data: b64(bytes),
         };
-        let lagged: Vec<u64> = conns
-            .iter()
-            .filter(|conn_id| {
-                !inner.connections.get(conn_id).is_some_and(|out| out.send(&msg))
-            })
-            .copied()
-            .collect();
-        for conn_id in lagged {
-            log::warn!("dropping lagged connection {conn_id}");
-            inner.connections.remove(&conn_id);
-            for conns in inner.attachments.values_mut() {
-                conns.remove(&conn_id);
-            }
-        }
+        inner.fanout_to_attachments(session_id, &msg);
     }
 
     fn on_exit(&self, session_id: &str, exit_code: Option<u32>) {
