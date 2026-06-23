@@ -146,8 +146,9 @@ impl TaskRunRepository for SqliteStore {
         let terminal_verdict = observation.status.is_some_and(TaskRunStatus::is_terminal);
         // A `Stop` (generic wait) trailing the parent's turn while a subagent is still running must
         // not demote the run; `SessionStart` carries the same wait but is new life and is exempt.
-        let subagent_guard =
-            generic_wait && !is_session_starting_event(observation.event_name);
+        let subagent_guard = (generic_wait
+            || (observation.status.is_none() && observation.event_name == Some("Stop")))
+            && !is_session_starting_event(observation.event_name);
         // The parent's own `background_tasks` backstops a corrupted `active_subagents` counter:
         // a `Stop` arriving while a subagent is still in flight is held even when the count is 0.
         let event_has_running_subagents = payload_has_running_subagents(observation.metadata);

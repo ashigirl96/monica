@@ -510,6 +510,44 @@ fn task_run_observation_deferred_stop_fires_when_last_subagent_ends() {
     assert!(!s.pending_stop);
 }
 
+/// Regression: when `record_hook` detects the subagent guard and sets `observation.status = None`
+/// (the advisory `transition_is_protected` fires first), the SQL store must still recognise the
+/// Stop and set `pending_stop = 1`. The existing test passes `status: Some(WaitingForUser)` which
+/// bypasses the bug; this test mirrors the real payload the SQL layer receives.
+#[test]
+fn task_run_observation_deferred_stop_fires_when_status_is_none() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("protected stop")).unwrap();
+    let run = db
+        .start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
+
+    let snapshot = |db: &SqliteStore| db.get_task_run(&run.id).unwrap().unwrap();
+
+    record_observation(&mut db, &run.id, "UserPromptSubmit", Some(TaskRunStatus::Running), None);
+    record_observation(&mut db, &run.id, "SubagentStart", None, None);
+    assert_eq!(snapshot(&db).active_subagents, 1);
+
+    // record_hook passes status=None when transition_is_protected blocks the Stop.
+    record_observation(&mut db, &run.id, "Stop", None, None);
+    let s = snapshot(&db);
+    assert_eq!(s.status, TaskRunStatus::Running);
+    assert_eq!(s.active_subagents, 1);
+    assert!(s.pending_stop);
+
+    record_observation(&mut db, &run.id, "SubagentStop", None, None);
+    let s = snapshot(&db);
+    assert_eq!(s.status, TaskRunStatus::WaitingForUser);
+    assert_eq!(s.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
+    assert_eq!(s.active_subagents, 0);
+    assert!(!s.pending_stop);
+}
+
 /// MON-73 regression: a `<task-notification>` `UserPromptSubmit` (Claude re-injecting a finished
 /// background subagent's result) used to reset `active_subagents` to 0 mid-turn, letting the
 /// trailing `Stop` drop the run to "your turn" while siblings still ran. The fix keeps the count
