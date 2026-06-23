@@ -10,6 +10,9 @@ use crate::interfaces::{
     ProjectRepository, TaskRunOutputs, SetupEnv, SetupOutcome, SetupRunner, TaskRepository,
     TaskRunRepository, TaskSummaryFilter,
 };
+use super::record_hook::{
+    resolve_by_lazy_create, resolve_by_prepared_primary, resolve_by_session, RunResolveCtx,
+};
 use crate::{
     begin_github_device_flow, close_issue, create_raw_task, execute_run, github_auth_status,
     logout_github,
@@ -2266,4 +2269,265 @@ fn prepare_claude_for_run_ignores_prompt_for_raw_task() {
     std::fs::remove_dir_all(&worktree).ok();
 
     assert_eq!(result.initial_command, "claude");
+}
+
+// --- resolve rule unit tests ---
+
+fn make_task(id: &str, status: TaskStatus, primary_run_id: Option<&str>) -> Task {
+    Task {
+        id: id.to_string(),
+        kind: TaskKind::Development,
+        status,
+        phase: None,
+        title: "test".to_string(),
+        body: String::new(),
+        project_id: None,
+        labels: Vec::new(),
+        details: json!({}),
+        source: None,
+        primary_task_run_id: primary_run_id.map(str::to_string),
+        closed_at: None,
+        created_at: "2026-06-02T00:00:00.000Z".to_string(),
+        updated_at: "2026-06-02T00:00:00.000Z".to_string(),
+    }
+}
+
+fn make_run(id: &str, task_id: &str, status: TaskRunStatus) -> TaskRun {
+    TaskRun {
+        id: id.to_string(),
+        task_id: task_id.to_string(),
+        agent: Some(Agent::Claude),
+        branch: None,
+        worktree_path: None,
+        status,
+        wait_reason: None,
+        settings_path: None,
+        provider_session_id: None,
+        terminal_tab_id: None,
+        last_event_name: None,
+        last_event_at: None,
+        active_subagents: 0,
+        pending_stop: false,
+        metadata: json!({}),
+        created_at: "2026-06-02T00:00:00.000Z".to_string(),
+        updated_at: "2026-06-02T00:00:00.000Z".to_string(),
+    }
+}
+
+#[test]
+fn resolve_by_session_returns_none_without_session_id() {
+    let mut repos = FakeRepos::default();
+    let task = make_task("t1", TaskStatus::Ready, None);
+    let ctx = RunResolveCtx {
+        task_id: "t1",
+        task: &task,
+        explicit_run_id_rejected: false,
+        provider_session_id: None,
+        event_name: Some("SessionStart"),
+        agent: Agent::Claude,
+        primary_run: None,
+    };
+    let result = resolve_by_session(&ctx, &mut repos).unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
+fn resolve_by_session_returns_run_when_found() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    let task = repos.get_task(&task_id).unwrap().unwrap();
+
+    let hook = r#"{"hook_event_name":"SessionStart","session_id":"sess-1"}"#.to_string();
+    record_claude_hook(
+        &mut repos,
+        &FakeTaskRunOutputs::default(),
+        HookContext { task_id: Some(&task_id), task_run_id: None, terminal_tab_id: None },
+        &hook,
+    ).unwrap();
+
+    let ctx = RunResolveCtx {
+        task_id: &task_id,
+        task: &task,
+        explicit_run_id_rejected: false,
+        provider_session_id: Some("sess-1"),
+        event_name: Some("Prompt"),
+        agent: Agent::Claude,
+        primary_run: None,
+    };
+    let result = resolve_by_session(&ctx, &mut repos).unwrap();
+    assert!(result.is_some());
+    assert!(!result.unwrap().created);
+}
+
+#[test]
+fn resolve_by_prepared_primary_skips_non_prepared() {
+    let task = make_task("t1", TaskStatus::InProgress, Some("run-1"));
+    let run = make_run("run-1", "t1", TaskRunStatus::Running);
+    let mut repos = FakeRepos::default();
+    let ctx = RunResolveCtx {
+        task_id: "t1",
+        task: &task,
+        explicit_run_id_rejected: false,
+        provider_session_id: Some("sess-1"),
+        event_name: Some("SessionStart"),
+        agent: Agent::Claude,
+        primary_run: Some(&run),
+    };
+    let result = resolve_by_prepared_primary(&ctx, &mut repos).unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
+fn resolve_by_prepared_primary_skips_non_starting_event() {
+    let task = make_task("t1", TaskStatus::Ready, Some("run-1"));
+    let run = make_run("run-1", "t1", TaskRunStatus::Prepared);
+    let mut repos = FakeRepos::default();
+    let ctx = RunResolveCtx {
+        task_id: "t1",
+        task: &task,
+        explicit_run_id_rejected: false,
+        provider_session_id: Some("sess-1"),
+        event_name: Some("Stop"),
+        agent: Agent::Claude,
+        primary_run: Some(&run),
+    };
+    let result = resolve_by_prepared_primary(&ctx, &mut repos).unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
+fn resolve_by_prepared_primary_claims_on_session_start() {
+    let task = make_task("t1", TaskStatus::Ready, Some("run-1"));
+    let run = make_run("run-1", "t1", TaskRunStatus::Prepared);
+    let mut repos = FakeRepos::default();
+    let ctx = RunResolveCtx {
+        task_id: "t1",
+        task: &task,
+        explicit_run_id_rejected: false,
+        provider_session_id: Some("sess-1"),
+        event_name: Some("SessionStart"),
+        agent: Agent::Claude,
+        primary_run: Some(&run),
+    };
+    let result = resolve_by_prepared_primary(&ctx, &mut repos).unwrap();
+    let resolved = result.unwrap();
+    assert!(!resolved.created);
+    assert_eq!(resolved.run.unwrap().id, "run-1");
+}
+
+#[test]
+fn resolve_by_lazy_create_rejects_without_session_id() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    let task = repos.get_task(&task_id).unwrap().unwrap();
+    let ctx = RunResolveCtx {
+        task_id: &task_id,
+        task: &task,
+        explicit_run_id_rejected: false,
+        provider_session_id: None,
+        event_name: Some("SessionStart"),
+        agent: Agent::Claude,
+        primary_run: None,
+    };
+    let result = resolve_by_lazy_create(&ctx, &mut repos).unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
+fn resolve_by_lazy_create_rejects_non_starting_event() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    let task = repos.get_task(&task_id).unwrap().unwrap();
+    let ctx = RunResolveCtx {
+        task_id: &task_id,
+        task: &task,
+        explicit_run_id_rejected: false,
+        provider_session_id: Some("sess-1"),
+        event_name: Some("Stop"),
+        agent: Agent::Claude,
+        primary_run: None,
+    };
+    let result = resolve_by_lazy_create(&ctx, &mut repos).unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
+fn resolve_by_lazy_create_rejects_when_explicit_run_id_rejected() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    let task = repos.get_task(&task_id).unwrap().unwrap();
+    let ctx = RunResolveCtx {
+        task_id: &task_id,
+        task: &task,
+        explicit_run_id_rejected: true,
+        provider_session_id: Some("sess-1"),
+        event_name: Some("SessionStart"),
+        agent: Agent::Claude,
+        primary_run: None,
+    };
+    let result = resolve_by_lazy_create(&ctx, &mut repos).unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
+fn resolve_by_lazy_create_rejects_closed_task() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    repos.mark_task_closed(&task_id).unwrap();
+    let task = repos.get_task(&task_id).unwrap().unwrap();
+    let ctx = RunResolveCtx {
+        task_id: &task_id,
+        task: &task,
+        explicit_run_id_rejected: false,
+        provider_session_id: Some("sess-1"),
+        event_name: Some("SessionStart"),
+        agent: Agent::Claude,
+        primary_run: None,
+    };
+    let result = resolve_by_lazy_create(&ctx, &mut repos).unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
+fn resolve_by_lazy_create_creates_primary_when_none_exists() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    let task = repos.get_task(&task_id).unwrap().unwrap();
+    let ctx = RunResolveCtx {
+        task_id: &task_id,
+        task: &task,
+        explicit_run_id_rejected: false,
+        provider_session_id: Some("sess-1"),
+        event_name: Some("SessionStart"),
+        agent: Agent::Claude,
+        primary_run: None,
+    };
+    let result = resolve_by_lazy_create(&ctx, &mut repos).unwrap();
+    let resolved = result.unwrap();
+    assert!(resolved.created);
+    let run = resolved.run.unwrap();
+    let updated_task = repos.get_task(&task_id).unwrap().unwrap();
+    assert_eq!(updated_task.primary_task_run_id.as_deref(), Some(run.id.as_str()));
+}
+
+#[test]
+fn resolve_by_lazy_create_creates_side_run_when_primary_exists() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    let task = repos.get_task(&task_id).unwrap().unwrap();
+    let existing_primary = make_run("run-existing", &task_id, TaskRunStatus::Running);
+    let ctx = RunResolveCtx {
+        task_id: &task_id,
+        task: &task,
+        explicit_run_id_rejected: false,
+        provider_session_id: Some("sess-1"),
+        event_name: Some("SessionStart"),
+        agent: Agent::Claude,
+        primary_run: Some(&existing_primary),
+    };
+    let result = resolve_by_lazy_create(&ctx, &mut repos).unwrap();
+    let resolved = result.unwrap();
+    assert!(resolved.created);
+    let updated_task = repos.get_task(&task_id).unwrap().unwrap();
+    assert!(updated_task.primary_task_run_id.is_none());
 }
