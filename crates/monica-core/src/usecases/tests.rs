@@ -17,11 +17,10 @@ use crate::{
     begin_github_device_flow, close_issue, create_raw_task, execute_run, github_auth_status,
     logout_github,
     make_main_by_terminal_tab, open_bench, prepare_claude_for_run, primary_terminal_tab,
-    background_tasks_status, BackgroundTasksStatus, record_claude_hook,
-    register_project_with_default_branch,
-    start_run, subagent_count_update,
+    record_claude_hook, register_project_with_default_branch,
+    start_run, subagents_in_flight_after,
     sync_next_pull_request,
-    track_github_issue, HookContext, MakeMainOutcome, RefType, SubagentCountUpdate,
+    track_github_issue, HookContext, MakeMainOutcome, RefType,
     wait_for_github_device_flow, Agent, DisplayStatus, Event, ExternalRef, GithubAuthStatus,
     GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef,
     GithubPullRequestStatus, NewTask, NewTaskRun, Project, PullRequestBranchSyncCandidate,
@@ -290,7 +289,6 @@ impl TaskRunRepository for FakeRepos {
             terminal_tab_id: None,
             last_event_name: None,
             last_event_at: None,
-            active_subagents: 0,
             pending_stop: false,
             metadata: json!({}),
             created_at: "2026-06-02T00:00:00.000Z".to_string(),
@@ -412,40 +410,25 @@ impl TaskRunRepository for FakeRepos {
         if let Some(tab) = observation.terminal_tab_id {
             run.terminal_tab_id = Some(tab.to_string());
         }
-        let bg_clear =
-            background_tasks_status(observation.metadata) == BackgroundTasksStatus::AllIdle;
-        if observation.event_name == Some("Stop")
-            && observation.status.is_none()
-            && !bg_clear
-            && run.active_subagents > 0
-            && run.status == TaskRunStatus::Running
-        {
-            run.pending_stop = true;
-        }
-        if bg_clear && run.active_subagents > 0 {
-            run.active_subagents = 0;
-        }
-        let subagent_update = observation
-            .event_name
-            .and_then(|event| subagent_count_update(event, observation.metadata));
-        if let Some(update) = subagent_update {
-            run.active_subagents = match update {
-                SubagentCountUpdate::Increment => run.active_subagents + 1,
-                SubagentCountUpdate::Decrement => (run.active_subagents - 1).max(0),
-                SubagentCountUpdate::Reset => 0,
-            };
-        }
-        if observation.event_name == Some("SubagentStop")
-            && run.active_subagents == 0
-            && run.pending_stop
-        {
+        // Mirror the store's subagent guard: a Stop with subagents still in flight is held
+        // (pending_stop); the SubagentStop that leaves nothing in flight fires the deferred
+        // transition. `subagents_in_flight_after` excludes a SubagentStop's own listed agent.
+        let hold_stop = observation.event_name == Some("Stop")
+            && subagents_in_flight_after(observation.event_name, observation.metadata);
+        let release_stop = observation.event_name == Some("SubagentStop")
+            && !subagents_in_flight_after(observation.event_name, observation.metadata);
+        let was_pending = run.pending_stop;
+        if release_stop && was_pending {
             run.status = TaskRunStatus::WaitingForUser;
             run.wait_reason = Some(TaskRunWaitReason::AwaitingPrompt);
-            run.pending_stop = false;
         }
-        if matches!(subagent_update, Some(SubagentCountUpdate::Reset)) {
-            run.pending_stop = false;
-        }
+        run.pending_stop = if hold_stop && run.status == TaskRunStatus::Running {
+            true
+        } else if release_stop || observation.status.is_some() {
+            false
+        } else {
+            was_pending
+        };
         run.last_event_name = observation.event_name.map(ToString::to_string);
         run.last_event_at = Some(observation.at.to_string());
         Ok(())
@@ -1231,132 +1214,8 @@ fn record_claude_hook_stop_during_subagent_keeps_run_running() {
     let outputs = FakeTaskRunOutputs::default();
     let (task_id, run_id) = task_with_running_primary(&mut repos, &outputs);
 
-    record_claude_hook(
-        &mut repos,
-        &outputs,
-        hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"SubagentStart","session_id":"sess-1"}"#,
-    )
-    .unwrap();
-    assert_eq!(
-        repos.get_task_run(&run_id).unwrap().unwrap().active_subagents,
-        1
-    );
-
-    // The Stop trailing the parent's turn must not flicker the run to "your turn" while the
-    // subagent is still in flight.
-    let report = record_claude_hook(
-        &mut repos,
-        &outputs,
-        hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"Stop","session_id":"sess-1"}"#,
-    )
-    .unwrap();
-    assert_eq!(report.task_run_status, None);
-    assert_eq!(
-        repos.get_task_run(&run_id).unwrap().unwrap().status,
-        TaskRunStatus::Running
-    );
-
-    // Once the subagent ends, the trailing Stop settles the turn as usual.
-    record_claude_hook(
-        &mut repos,
-        &outputs,
-        hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"SubagentStop","session_id":"sess-1"}"#,
-    )
-    .unwrap();
-    record_claude_hook(
-        &mut repos,
-        &outputs,
-        hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"Stop","session_id":"sess-1"}"#,
-    )
-    .unwrap();
-    let run = repos.get_task_run(&run_id).unwrap().unwrap();
-    assert_eq!(run.status, TaskRunStatus::WaitingForUser);
-    assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
-}
-
-/// Issue #198: when the last `SubagentStop` brings the counter to 0 after a blocked `Stop`, the
-/// deferred transition fires and the entering edge is reported so a notification can be pushed.
-#[test]
-fn record_claude_hook_deferred_stop_fires_on_last_subagent_stop() {
-    let mut repos = FakeRepos::default();
-    let outputs = FakeTaskRunOutputs::default();
-    let (task_id, run_id) = task_with_running_primary(&mut repos, &outputs);
-
-    let fire = |repos: &mut FakeRepos, event: &str| {
-        record_claude_hook(
-            repos,
-            &outputs,
-            hook_ctx(&task_id, None),
-            &format!(r#"{{"hook_event_name":"{event}","session_id":"sess-1"}}"#),
-        )
-        .unwrap()
-    };
-
-    fire(&mut repos, "SubagentStart");
-    fire(&mut repos, "Stop");
-    let run = repos.get_task_run(&run_id).unwrap().unwrap();
-    assert_eq!(run.status, TaskRunStatus::Running);
-    assert!(run.pending_stop);
-
-    let report = fire(&mut repos, "SubagentStop");
-    assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
-    assert!(report.entered_waiting_for_user);
-    let run = repos.get_task_run(&run_id).unwrap().unwrap();
-    assert_eq!(run.status, TaskRunStatus::WaitingForUser);
-    assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
-    assert_eq!(run.active_subagents, 0);
-    assert!(!run.pending_stop);
-}
-
-/// The subagent guard has two independent halves, both wired through this usecase: a
-/// `<task-notification>` `UserPromptSubmit` must not reset the counter (it fires mid-turn), and a
-/// `Stop` is held while the parent's own `background_tasks` reports a running subagent even after
-/// the counter has drained to zero. This covers the advisory `payload_has_running_subagents`
-/// backstop in `record_claude_hook`, which the SQL-layer test alone cannot reach.
-#[test]
-fn record_claude_hook_stop_held_by_background_tasks_after_task_notification() {
-    let mut repos = FakeRepos::default();
-    let outputs = FakeTaskRunOutputs::default();
-    let (task_id, run_id) = task_with_running_primary(&mut repos, &outputs);
-
-    record_claude_hook(
-        &mut repos,
-        &outputs,
-        hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"SubagentStart","session_id":"sess-1"}"#,
-    )
-    .unwrap();
-    // A `<task-notification>` re-injection looks like a turn boundary but must leave the count
-    // alone, or the trailing Stop would slip through the guard.
-    record_claude_hook(
-        &mut repos,
-        &outputs,
-        hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"UserPromptSubmit","session_id":"sess-1","prompt":"<task-notification>\n<task-id>x</task-id>"}"#,
-    )
-    .unwrap();
-    assert_eq!(
-        repos.get_task_run(&run_id).unwrap().unwrap().active_subagents,
-        1
-    );
-
-    // Drain the counter to zero (a stale SubagentStop) while the parent still reports a running
-    // subagent: the Stop is held by `background_tasks`, not the counter.
-    record_claude_hook(
-        &mut repos,
-        &outputs,
-        hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"SubagentStop","session_id":"sess-1"}"#,
-    )
-    .unwrap();
-    assert_eq!(
-        repos.get_task_run(&run_id).unwrap().unwrap().active_subagents,
-        0
-    );
+    // A Stop whose background_tasks still reports a running subagent must not flicker the run to
+    // "your turn".
     let report = record_claude_hook(
         &mut repos,
         &outputs,
@@ -1365,12 +1224,11 @@ fn record_claude_hook_stop_held_by_background_tasks_after_task_notification() {
     )
     .unwrap();
     assert_eq!(report.task_run_status, None);
-    assert_eq!(
-        repos.get_task_run(&run_id).unwrap().unwrap().status,
-        TaskRunStatus::Running
-    );
+    let run = repos.get_task_run(&run_id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::Running);
+    assert!(run.pending_stop);
 
-    // Once `background_tasks` is empty and the counter is zero, the Stop settles the turn.
+    // Once background_tasks is empty, the Stop settles the turn.
     record_claude_hook(
         &mut repos,
         &outputs,
@@ -1378,6 +1236,76 @@ fn record_claude_hook_stop_held_by_background_tasks_after_task_notification() {
         r#"{"hook_event_name":"Stop","session_id":"sess-1","background_tasks":[]}"#,
     )
     .unwrap();
+    let run = repos.get_task_run(&run_id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::WaitingForUser);
+    assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
+}
+
+/// A `Stop` held by a running subagent is released by the `SubagentStop` that leaves nothing in
+/// flight — the deferred transition fires and the entering edge is reported so a notification can
+/// be pushed. The SubagentStop snapshot still lists the stopping agent, so it is excluded by id.
+#[test]
+fn record_claude_hook_deferred_stop_fires_on_last_subagent_stop() {
+    let mut repos = FakeRepos::default();
+    let outputs = FakeTaskRunOutputs::default();
+    let (task_id, run_id) = task_with_running_primary(&mut repos, &outputs);
+
+    record_claude_hook(
+        &mut repos,
+        &outputs,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"Stop","session_id":"sess-1","background_tasks":[{"id":"a","status":"running"}]}"#,
+    )
+    .unwrap();
+    let run = repos.get_task_run(&run_id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::Running);
+    assert!(run.pending_stop);
+
+    let report = record_claude_hook(
+        &mut repos,
+        &outputs,
+        hook_ctx(&task_id, None),
+        r#"{"hook_event_name":"SubagentStop","session_id":"sess-1","agent_id":"a","background_tasks":[{"id":"a","status":"running"}]}"#,
+    )
+    .unwrap();
+    assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
+    assert!(report.entered_waiting_for_user);
+    let run = repos.get_task_run(&run_id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::WaitingForUser);
+    assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
+    assert!(!run.pending_stop);
+}
+
+/// The subagent guard reads `background_tasks` per event, so it self-heals through Claude's
+/// re-injection cycle (a `<task-notification>` UserPromptSubmit then a fresh Stop) and is not
+/// fooled by a start-less `SubagentStop` whose agent is absent from the snapshot — the two
+/// real-world hook glitches behind MON-73 and MON-131.
+#[test]
+fn record_claude_hook_subagent_guard_tracks_background_tasks() {
+    let mut repos = FakeRepos::default();
+    let outputs = FakeTaskRunOutputs::default();
+    let (task_id, run_id) = task_with_running_primary(&mut repos, &outputs);
+
+    let status = |repos: &FakeRepos| repos.get_task_run(&run_id).unwrap().unwrap().status;
+    let fire = |repos: &mut FakeRepos, raw: &str| {
+        record_claude_hook(repos, &outputs, hook_ctx(&task_id, None), raw).unwrap()
+    };
+
+    // Two subagents running: the Stop is held.
+    fire(&mut repos, r#"{"hook_event_name":"Stop","session_id":"sess-1","background_tasks":[{"id":"a","status":"running"},{"id":"b","status":"running"}]}"#);
+    assert_eq!(status(&repos), TaskRunStatus::Running);
+
+    // A start-less SubagentStop whose agent is not in the snapshot must not release the hold.
+    fire(&mut repos, r#"{"hook_event_name":"SubagentStop","session_id":"sess-1","agent_id":"ghost","background_tasks":[{"id":"a","status":"running"},{"id":"b","status":"running"}]}"#);
+    assert_eq!(status(&repos), TaskRunStatus::Running);
+
+    // Claude re-injects a finished subagent's result as a UserPromptSubmit; the parent is working
+    // again, so the run follows to Running.
+    fire(&mut repos, r#"{"hook_event_name":"UserPromptSubmit","session_id":"sess-1","prompt":"<task-notification>\n<task-id>x</task-id>"}"#);
+    assert_eq!(status(&repos), TaskRunStatus::Running);
+
+    // The parent comes to rest with an empty background_tasks: now it settles to "your turn".
+    fire(&mut repos, r#"{"hook_event_name":"Stop","session_id":"sess-1","background_tasks":[]}"#);
     let run = repos.get_task_run(&run_id).unwrap().unwrap();
     assert_eq!(run.status, TaskRunStatus::WaitingForUser);
     assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
@@ -2314,7 +2242,6 @@ fn make_run(id: &str, task_id: &str, status: TaskRunStatus) -> TaskRun {
         terminal_tab_id: None,
         last_event_name: None,
         last_event_at: None,
-        active_subagents: 0,
         pending_stop: false,
         metadata: json!({}),
         created_at: "2026-06-02T00:00:00.000Z".to_string(),

@@ -3,9 +3,7 @@ use rusqlite::params;
 
 use crate::sqlite::SqliteStore;
 use monica_core::{
-    is_session_starting_event, background_tasks_status, BackgroundTasksStatus,
-    subagent_count_update,
-    transition_is_generic_wait, HookTransition, NewTaskRun, SubagentCountUpdate, TaskRun,
+    subagents_in_flight_after, transition_is_generic_wait, HookTransition, NewTaskRun, TaskRun,
     TaskRunObservation, TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus,
 };
 
@@ -145,22 +143,14 @@ impl TaskRunRepository for SqliteStore {
             _ => false,
         };
         let terminal_verdict = observation.status.is_some_and(TaskRunStatus::is_terminal);
-        // A `Stop` (generic wait) trailing the parent's turn while a subagent is still running must
-        // not demote the run; `SessionStart` carries the same wait but is new life and is exempt.
-        let subagent_guard = (generic_wait
-            || (observation.status.is_none() && observation.event_name == Some("Stop")))
-            && !is_session_starting_event(observation.event_name);
-        // The parent's own `background_tasks` backstops a corrupted `active_subagents` counter:
-        // a `Stop` arriving while a subagent is still in flight is held even when the count is 0.
-        let bg_status = background_tasks_status(observation.metadata);
-        let event_has_running_subagents = bg_status == BackgroundTasksStatus::HasRunning;
-        let bg_confirms_clear = bg_status == BackgroundTasksStatus::AllIdle;
-        let subagent_update = observation
-            .event_name
-            .and_then(|event| subagent_count_update(event, observation.metadata));
-        let subagent_reset = subagent_update == Some(SubagentCountUpdate::Reset);
-        let subagent_inc = subagent_update == Some(SubagentCountUpdate::Increment);
-        let subagent_dec = subagent_update == Some(SubagentCountUpdate::Decrement);
+        // `background_tasks` (carried on every Stop/SubagentStop) is the source of truth for the
+        // subagent guard — no derived counter to drift. A `Stop` arriving while a subagent is still
+        // in flight is held; the `SubagentStop` that leaves nothing in flight releases the deferred
+        // transition. `subagents_in_flight_after` excludes a SubagentStop's own (still-listed) agent.
+        let hold_stop = observation.event_name == Some("Stop")
+            && subagents_in_flight_after(observation.event_name, observation.metadata);
+        let release_stop = observation.event_name == Some("SubagentStop")
+            && !subagents_in_flight_after(observation.event_name, observation.metadata);
         let tool_waits =
             sql_literal_list(TaskRunWaitReason::TOOL_WAITS.iter().map(|r| r.as_str()));
         // `?6 IS NULL OR provider_session_id IS ?6` scopes the generic-wait guards to events
@@ -180,18 +170,18 @@ impl TaskRunRepository for SqliteStore {
                      AND (status = '{stopped}'
                           OR (status = '{waiting_for_user}'
                               AND wait_reason IN ({tool_waits}))))
-             OR (?12 AND (active_subagents > 0 OR ?16) AND NOT ?17)",
+             OR ?12",
         );
         let tx = self.conn_mut().transaction()?;
         let affected = tx.execute(
             &format!(
                 "UPDATE task_runs
                     SET status = CASE WHEN {protected} THEN status
-                                      WHEN ?15 AND pending_stop = 1 AND active_subagents <= 1
+                                      WHEN ?13 AND pending_stop = 1
                                       THEN '{waiting_for_user}'
                                       ELSE COALESCE(?1, status) END,
                         wait_reason = CASE WHEN {protected} THEN wait_reason
-                                           WHEN ?15 AND pending_stop = 1 AND active_subagents <= 1
+                                           WHEN ?13 AND pending_stop = 1
                                            THEN '{awaiting_prompt}'
                                            WHEN ?2 THEN ?3 ELSE wait_reason END,
                         last_event_name = COALESCE(?4, last_event_name),
@@ -201,17 +191,8 @@ impl TaskRunRepository for SqliteStore {
                         provider_session_id = CASE WHEN {protected} THEN provider_session_id
                                                    ELSE COALESCE(?6, provider_session_id) END,
                         terminal_tab_id = COALESCE(?7, terminal_tab_id),
-                        -- a column self-reference reads the pre-update value, so the protected
-                        -- guard above sees the same active_subagents this clause then mutates
-                        active_subagents = CASE WHEN ?13 THEN 0
-                                                WHEN ?14 THEN active_subagents + 1
-                                                WHEN ?15 THEN MAX(0, active_subagents - 1)
-                                                WHEN ?17 THEN 0
-                                                ELSE active_subagents END,
                         pending_stop = CASE
-                            WHEN ?12 AND (active_subagents > 0 OR ?16) AND NOT ?17
-                                 AND status = '{running}' THEN 1
-                            WHEN ?15 AND active_subagents <= 1 THEN 0
+                            WHEN ?12 AND status = '{running}' THEN 1
                             WHEN ?13 THEN 0
                             WHEN NOT ({protected}) AND ?1 IS NOT NULL THEN 0
                             ELSE pending_stop END,
@@ -231,12 +212,8 @@ impl TaskRunRepository for SqliteStore {
                 task_run_id,
                 generic_wait,
                 terminal_verdict,
-                subagent_guard,
-                subagent_reset,
-                subagent_inc,
-                subagent_dec,
-                event_has_running_subagents,
-                bg_confirms_clear
+                hold_stop,
+                release_stop
             ],
         )?;
         if affected == 0 {
