@@ -1,6 +1,7 @@
 mod auth;
 mod hook;
 mod issue;
+mod notebooks;
 mod notify;
 mod project;
 mod table;
@@ -26,6 +27,9 @@ enum Commands {
     /// Receive agent lifecycle hooks (e.g. `monica hook claude`)
     #[command(subcommand)]
     Hook(hook::HookCommand),
+    /// Manage notebooks (rendered Markdown page collections under `$MONICA_HOME/notebooks`)
+    #[command(subcommand)]
+    Notebooks(notebooks::NotebooksCommand),
     /// Manage Monica authorization
     #[command(subcommand)]
     Auth(auth::AuthCommand),
@@ -51,6 +55,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             Commands::Issue(cmd) => issue::run(cmd).await,
             Commands::Auth(cmd) => auth::run(cmd).await,
             Commands::Hook(cmd) => hook::run(cmd),
+            Commands::Notebooks(cmd) => notebooks::run(cmd),
             Commands::Completions { shell } => {
                 let mut cmd = Cli::command();
                 let name = cmd.get_name().to_string();
@@ -73,5 +78,20 @@ mod tests {
         assert!(Cli::try_parse_from(["monica", "issue", "close", "MON-1", "--yes"]).is_err());
         // the old `delete` subcommand is gone.
         assert!(Cli::try_parse_from(["monica", "issue", "delete", "MON-1"]).is_err());
+    }
+
+    #[test]
+    fn notebooks_subcommands_parse() {
+        for args in [
+            ["monica", "notebooks", "new", "step-by-step"].as_slice(),
+            ["monica", "notebooks", "list"].as_slice(),
+            ["monica", "notebooks", "show", "step-by-step"].as_slice(),
+            ["monica", "notebooks", "lint", "step-by-step"].as_slice(),
+        ] {
+            assert!(Cli::try_parse_from(args).is_ok(), "{args:?}");
+        }
+        // `new` and `lint` require their positional argument.
+        assert!(Cli::try_parse_from(["monica", "notebooks", "new"]).is_err());
+        assert!(Cli::try_parse_from(["monica", "notebooks", "lint"]).is_err());
     }
 }

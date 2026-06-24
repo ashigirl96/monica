@@ -50,3 +50,13 @@ pub fn ptyd_pid_path() -> Result<PathBuf> {
 pub fn terminal_sessions_dir() -> Result<PathBuf> {
     Ok(base_dir()?.join("terminal-sessions"))
 }
+
+/// Root for notebook page collections: `<base>/notebooks/`.
+pub fn notebooks_dir() -> Result<PathBuf> {
+    Ok(base_dir()?.join("notebooks"))
+}
+
+/// A single notebook's directory: `<base>/notebooks/<slug>/` (holds `step-*.md` pages).
+pub fn notebook_dir(slug: &str) -> Result<PathBuf> {
+    Ok(notebooks_dir()?.join(slug))
+}

@@ -3,6 +3,7 @@ mod branch;
 mod external_ref;
 mod github;
 mod lifecycle;
+mod notebook;
 mod project;
 mod refs;
 mod status;
@@ -23,6 +24,10 @@ pub use lifecycle::{
     is_session_starting_event, should_ignore_event, subagents_in_flight_after,
     transition_for_event, transition_is_generic_wait,
     transition_is_protected, wait_reason_for_tool, HookTransition,
+};
+pub use notebook::{
+    is_valid_slug, mermaid_blocks, outline, pages_from_docs, parse_front_matter, parse_wikilink,
+    structural_lint, LintFinding, NotebookDoc, NotebookPage, OutlineEntry,
 };
 pub use project::{PermissionMode, Project, Provider};
 pub use refs::{parse_issue_input, parse_issue_ref, parse_owner_repo};
