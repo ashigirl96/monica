@@ -197,6 +197,7 @@ export function useShortcuts() {
       {
         meta: true,
         key: "b",
+        editable: true,
         action: () => {
           setSidebarOpen((v) => !v);
         },
