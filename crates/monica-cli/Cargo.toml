@@ -15,3 +15,8 @@ clap_complete = "4"
 anyhow = "1.0.102"
 serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
 tokio = { version = "1.52.3", default-features = false, features = ["net", "rt", "time"] }
+# Notebook lint only: mermaid validation + markdown style. CLI-only — never in core/app
+# (keeps the distribution binary lean). rumdl's default `native`/`parallel` features pull an
+# LSP server, file watcher, and rayon we don't need, so disable them.
+mmdflux = "2"
+rumdl = { version = "0.2", default-features = false }
