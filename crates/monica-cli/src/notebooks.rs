@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use clap::Subcommand;
@@ -60,7 +60,7 @@ fn list() -> Result<()> {
             let entry = entry?;
             if entry.file_type()?.is_dir() {
                 let slug = entry.file_name().to_string_lossy().into_owned();
-                notebooks.push((slug, count_md(&entry.path())?));
+                notebooks.push((slug, md_paths(&entry.path())?.len()));
             }
         }
     }
@@ -119,17 +119,9 @@ fn read_docs(slug: &str) -> Result<(Vec<NotebookDoc>, Vec<LintFinding>)> {
     if !dir.is_dir() {
         return Err(anyhow!("notebook `{slug}` not found at {}", dir.display()));
     }
-    let mut md_files: Vec<_> = fs::read_dir(&dir)?
-        .collect::<std::io::Result<Vec<_>>>()?
-        .into_iter()
-        .map(|e| e.path())
-        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("md"))
-        .collect();
-    md_files.sort();
-
     let mut docs = Vec::new();
     let mut findings = Vec::new();
-    for path in md_files {
+    for path in md_paths(&dir)? {
         let file = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
         let stem = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
         let content = fs::read_to_string(&path)?;
@@ -141,20 +133,24 @@ fn read_docs(slug: &str) -> Result<(Vec<NotebookDoc>, Vec<LintFinding>)> {
     Ok((docs, findings))
 }
 
-fn count_md(dir: &Path) -> Result<usize> {
-    let count = fs::read_dir(dir)?
-        .filter_map(Result::ok)
-        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("md"))
-        .count();
-    Ok(count)
+/// Sorted `*.md` paths in a notebook directory. Per-entry `read_dir` errors are propagated, not
+/// dropped, so a lint never silently skips an unreadable page.
+fn md_paths(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut paths: Vec<_> = fs::read_dir(dir)?
+        .collect::<std::io::Result<Vec<_>>>()?
+        .into_iter()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("md"))
+        .collect();
+    paths.sort();
+    Ok(paths)
 }
 
 fn mermaid_findings(doc: &NotebookDoc) -> Vec<LintFinding> {
     mermaid_blocks(&doc.body)
-        .iter()
-        // Trim: a trailing newline flips mmdflux into lenient mode and masks real syntax errors.
+        .into_iter()
         .filter_map(|block| {
-            mermaid_error(&mmdflux::validate_diagram(block.trim())).map(|message| LintFinding {
+            mermaid_error(&mmdflux::validate_diagram(&block)).map(|message| LintFinding {
                 file: doc.file.clone(),
                 message,
             })

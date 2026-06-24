@@ -51,7 +51,7 @@ pub fn parse_front_matter(content: &str) -> Result<(Vec<(String, String)>, Strin
     let content = content.strip_prefix('\u{feff}').unwrap_or(content);
     let mut front = Vec::new();
     let mut cursor = 0usize;
-    let mut line_no = 0usize;
+    let mut first = true;
     loop {
         let rest = &content[cursor..];
         let (line, next_cursor, had_nl) = match rest.find('\n') {
@@ -61,7 +61,7 @@ pub fn parse_front_matter(content: &str) -> Result<(Vec<(String, String)>, Strin
         let logical = line.strip_suffix('\r').unwrap_or(line);
         let trimmed = logical.trim_end();
 
-        if line_no == 0 {
+        if first {
             if trimmed != "---" {
                 return Ok((Vec::new(), content.to_string()));
             }
@@ -80,7 +80,7 @@ pub fn parse_front_matter(content: &str) -> Result<(Vec<(String, String)>, Strin
             break;
         }
         cursor = next_cursor;
-        line_no += 1;
+        first = false;
     }
     Err("unterminated front matter: missing closing `---`".to_string())
 }
@@ -125,7 +125,7 @@ pub fn mermaid_blocks(body: &str) -> Vec<String> {
                 block.push_str(inner);
                 block.push('\n');
             }
-            blocks.push(block);
+            blocks.push(block.trim().to_string());
         }
     }
     blocks
@@ -137,20 +137,21 @@ pub fn structural_lint(docs: &[NotebookDoc]) -> Vec<LintFinding> {
     let mut findings = Vec::new();
 
     for doc in docs {
-        for key in ["title", "order", "created"] {
-            if front_get(doc, key).is_none() {
+        let title = front_get(doc, "title");
+        let order = front_get(doc, "order");
+        let created = front_get(doc, "created");
+
+        for (key, value) in [("title", title), ("order", order), ("created", created)] {
+            if value.is_none() {
                 findings.push(finding(doc, format!("missing required front matter key `{key}`")));
             }
         }
-        for key in ["title", "created"] {
-            if let Some(v) = front_get(doc, key) {
-                if v.trim().is_empty() {
-                    findings.push(finding(doc, format!("front matter key `{key}` must not be empty")));
-                }
+        for (key, value) in [("title", title), ("created", created)] {
+            if matches!(value, Some(v) if v.trim().is_empty()) {
+                findings.push(finding(doc, format!("front matter key `{key}` must not be empty")));
             }
         }
-        if let Some(v) = front_get(doc, "order") {
-            let v = v.trim();
+        if let Some(v) = order.map(str::trim) {
             if !matches!(v.parse::<i64>(), Ok(n) if n > 0) {
                 findings.push(finding(doc, format!("`order` must be a positive integer, got `{v}`")));
             }
@@ -170,7 +171,7 @@ pub fn structural_lint(docs: &[NotebookDoc]) -> Vec<LintFinding> {
         }
     }
 
-    findings.extend(cycle_findings(docs));
+    findings.extend(cycle_findings(docs, &stems));
     findings
 }
 
@@ -185,11 +186,7 @@ pub fn pages_from_docs(docs: &[NotebookDoc]) -> Vec<NotebookPage> {
             order: front_get(doc, "order")
                 .and_then(|v| v.trim().parse::<i32>().ok())
                 .unwrap_or(0),
-            parent_id: front_get(doc, "parent")
-                .map(str::trim)
-                .filter(|p| !p.is_empty())
-                .and_then(parse_wikilink)
-                .filter(|stem| stems.contains(stem.as_str())),
+            parent_id: resolve_parent(doc, &stems),
         })
         .collect();
     pages.sort_by(|a, b| a.order.cmp(&b.order).then_with(|| a.id.cmp(&b.id)));
@@ -234,14 +231,11 @@ fn push_outline(
     }
 }
 
-fn cycle_findings(docs: &[NotebookDoc]) -> Vec<LintFinding> {
-    let stems: HashSet<&str> = docs.iter().map(|d| d.stem.as_str()).collect();
+fn cycle_findings(docs: &[NotebookDoc], stems: &HashSet<&str>) -> Vec<LintFinding> {
     let mut parent: HashMap<&str, String> = HashMap::new();
     for doc in docs {
-        if let Some(p) = front_get(doc, "parent").map(str::trim).filter(|p| !p.is_empty()) {
-            if let Some(pstem) = parse_wikilink(p).filter(|s| stems.contains(s.as_str())) {
-                parent.insert(doc.stem.as_str(), pstem);
-            }
+        if let Some(pstem) = resolve_parent(doc, stems) {
+            parent.insert(doc.stem.as_str(), pstem);
         }
     }
     let n = docs.len();
@@ -267,6 +261,15 @@ fn node_in_cycle(start: &str, parent: &HashMap<&str, String>, n: usize) -> bool 
         }
     }
     false
+}
+
+/// Resolve a page's `parent` link to an existing stem; empty, malformed, or dangling links → `None`.
+fn resolve_parent(doc: &NotebookDoc, stems: &HashSet<&str>) -> Option<String> {
+    front_get(doc, "parent")
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .and_then(parse_wikilink)
+        .filter(|stem| stems.contains(stem.as_str()))
 }
 
 fn front_get<'a>(doc: &'a NotebookDoc, key: &str) -> Option<&'a str> {
@@ -382,8 +385,8 @@ mod tests {
         let body = "intro\n```mermaid\ngraph TD\nA-->B\n```\nmid\n```rust\nlet x = 1;\n```\n```mermaid\nflowchart LR\nC-->D\n```\n";
         let blocks = mermaid_blocks(body);
         assert_eq!(blocks.len(), 2);
-        assert_eq!(blocks[0], "graph TD\nA-->B\n");
-        assert_eq!(blocks[1], "flowchart LR\nC-->D\n");
+        assert_eq!(blocks[0], "graph TD\nA-->B");
+        assert_eq!(blocks[1], "flowchart LR\nC-->D");
     }
 
     #[test]
