@@ -139,6 +139,114 @@ fn task_run_observation_records_wait_reason_and_event_metadata() {
     assert_eq!(run.terminal_tab_id.as_deref(), Some("tab-1"));
 }
 
+#[test]
+fn task_run_observation_retains_plan_file_path_across_later_hooks() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("plan me")).unwrap();
+    let run = db
+        .start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
+    assert_eq!(db.get_task_run(&run.id).unwrap().unwrap().plan_file_path, None);
+
+    let exit_plan = json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "ExitPlanMode",
+        "tool_input": { "planFilePath": "/Users/me/.claude/plans/hazy-wiggling-salamander.md" }
+    });
+    db.record_task_run_observation(
+        &run.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::WaitingForUser),
+            wait_reason: Some(Some(TaskRunWaitReason::ExitPlanMode)),
+            event_name: Some("PreToolUse"),
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: None,
+            terminal_tab_id: None,
+            metadata: Some(&exit_plan),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        db.get_task_run(&run.id).unwrap().unwrap().plan_file_path.as_deref(),
+        Some("/Users/me/.claude/plans/hazy-wiggling-salamander.md")
+    );
+
+    // Approving the plan fires a payload without a planFilePath; the path must survive it.
+    let approved = json!({ "hook_event_name": "UserPromptSubmit" });
+    db.record_task_run_observation(
+        &run.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::Running),
+            wait_reason: Some(None),
+            event_name: Some("UserPromptSubmit"),
+            at: "2026-06-02T00:01:00.000Z",
+            provider_session_id: None,
+            terminal_tab_id: None,
+            metadata: Some(&approved),
+        },
+    )
+    .unwrap();
+    let run = db.get_task_run(&run.id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::Running);
+    assert_eq!(
+        run.plan_file_path.as_deref(),
+        Some("/Users/me/.claude/plans/hazy-wiggling-salamander.md")
+    );
+
+    // An ExitPlanMode payload carrying an empty planFilePath must not clobber the stored path.
+    let empty_plan = json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "ExitPlanMode",
+        "tool_input": { "planFilePath": "" }
+    });
+    db.record_task_run_observation(
+        &run.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::WaitingForUser),
+            wait_reason: Some(Some(TaskRunWaitReason::ExitPlanMode)),
+            event_name: Some("PreToolUse"),
+            at: "2026-06-02T00:01:30.000Z",
+            provider_session_id: None,
+            terminal_tab_id: None,
+            metadata: Some(&empty_plan),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        db.get_task_run(&run.id).unwrap().unwrap().plan_file_path.as_deref(),
+        Some("/Users/me/.claude/plans/hazy-wiggling-salamander.md")
+    );
+
+    // A fresh plan replaces it with the newer path.
+    let next_plan = json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "ExitPlanMode",
+        "tool_input": { "planFilePath": "/Users/me/.claude/plans/brave-soaring-otter.md" }
+    });
+    db.record_task_run_observation(
+        &run.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::WaitingForUser),
+            wait_reason: Some(Some(TaskRunWaitReason::ExitPlanMode)),
+            event_name: Some("PreToolUse"),
+            at: "2026-06-02T00:02:00.000Z",
+            provider_session_id: None,
+            terminal_tab_id: None,
+            metadata: Some(&next_plan),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        db.get_task_run(&run.id).unwrap().unwrap().plan_file_path.as_deref(),
+        Some("/Users/me/.claude/plans/brave-soaring-otter.md")
+    );
+}
+
 /// Hooks run in separate processes, so the snapshot check in `record_claude_hook` cannot be
 /// trusted alone: these cases bypass it and hit the store directly, proving the UPDATE itself
 /// refuses the protected transitions.
@@ -749,6 +857,70 @@ fn task_summaries_fall_back_to_latest_run_when_primary_pointer_dangles() {
     // The task's only run is its de-facto main run, not a side run.
     assert_eq!(summary.task_run_status, Some(TaskRunStatus::Running));
     assert_eq!(summary.side_runs_running, 0);
+}
+
+#[test]
+fn task_summaries_expose_has_plan_from_the_primary_run() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let planned = db.insert_task(dev_task("has a plan")).unwrap();
+    let unplanned = db.insert_task(dev_task("no plan")).unwrap();
+    let new_run = |task_id: &str| NewTaskRun {
+        task_id: task_id.to_string(),
+        agent: None,
+        branch: None,
+        worktree_path: None,
+    };
+
+    let primary = db.start_task_run(new_run(&planned.id)).unwrap();
+    db.set_primary_task_run(&planned.id, &primary.id).unwrap();
+    let exit_plan = json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "ExitPlanMode",
+        "tool_input": { "planFilePath": "/Users/me/.claude/plans/hazy-wiggling-salamander.md" }
+    });
+    db.record_task_run_observation(
+        &primary.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::WaitingForUser),
+            wait_reason: Some(Some(TaskRunWaitReason::ExitPlanMode)),
+            event_name: Some("PreToolUse"),
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: Some("sess-plan"),
+            terminal_tab_id: None,
+            metadata: Some(&exit_plan),
+        },
+    )
+    .unwrap();
+    // The plain task records a run that never carried a plan.
+    db.start_task_run(new_run(&unplanned.id)).unwrap();
+
+    let has_plan = |db: &SqliteStore, id: &str| {
+        db.list_task_summaries(TaskSummaryFilter::All, None)
+            .unwrap()
+            .into_iter()
+            .find(|s| s.id == id)
+            .unwrap()
+            .has_plan
+    };
+    assert!(has_plan(&db, &planned.id));
+    assert!(!has_plan(&db, &unplanned.id));
+
+    // Approving the plan clears the wait, but the stored path — and so has_plan — must survive.
+    let approved = json!({ "hook_event_name": "UserPromptSubmit" });
+    db.record_task_run_observation(
+        &primary.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::Running),
+            wait_reason: Some(None),
+            event_name: Some("UserPromptSubmit"),
+            at: "2026-06-02T00:01:00.000Z",
+            provider_session_id: None,
+            terminal_tab_id: None,
+            metadata: Some(&approved),
+        },
+    )
+    .unwrap();
+    assert!(has_plan(&db, &planned.id));
 }
 
 #[test]

@@ -56,6 +56,38 @@ function DetachedSessionItem({
   );
 }
 
+function PlanGlyph() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.4}
+      strokeLinejoin="round"
+      className="size-2.5"
+      aria-hidden
+    >
+      <path d="M4 2h5l3 3v9H4z" />
+      <path d="M9 2v3h3" />
+    </svg>
+  );
+}
+
+function PlanBadge({ pending }: { pending: boolean }) {
+  return (
+    <span
+      title={pending ? "プラン承認待ち — ⌘E でプレビュー" : "プランあり — ⌘E でプレビュー"}
+      className={cn(
+        "inline-flex shrink-0 items-center gap-0.5 rounded bg-amber-500/15 px-1 py-px font-mono text-[9px] tracking-wide text-amber-400",
+        pending ? "plan-badge-pending" : "opacity-60",
+      )}
+    >
+      <PlanGlyph />
+      plan
+    </span>
+  );
+}
+
 function RunspaceItem({
   ws,
   task,
@@ -116,6 +148,9 @@ function RunspaceItem({
                 <IssueIcon className="size-2.5" />
                 {task.github_issue_number}
               </span>
+            )}
+            {task.has_plan && (
+              <PlanBadge pending={task.task_run_wait_reason === "exit_plan_mode"} />
             )}
             {task.project && (
               <span className="min-w-0 truncate text-[10px] text-muted-foreground">

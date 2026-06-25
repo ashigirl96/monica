@@ -3,8 +3,9 @@ use rusqlite::params;
 
 use crate::sqlite::SqliteStore;
 use monica_core::{
-    subagents_in_flight_after, transition_is_generic_wait, HookTransition, NewTaskRun, TaskRun,
-    TaskRunObservation, TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus,
+    plan_file_path_from_payload, subagents_in_flight_after, transition_is_generic_wait,
+    HookTransition, NewTaskRun, TaskRun, TaskRunObservation, TaskRunRepository, TaskRunStatus,
+    TaskRunWaitReason, TaskStatus,
 };
 
 use super::{sql_literal_list, SET_NOW, TASK_RUN_COLUMNS};
@@ -132,6 +133,8 @@ impl TaskRunRepository for SqliteStore {
             .metadata
             .map(serde_json::to_string)
             .transpose()?;
+        // Kept sticky via COALESCE in the UPDATE: a later hook yields None and must not wipe the path.
+        let plan_file_path = plan_file_path_from_payload(observation.metadata);
         let status = observation.status.map(|s| s.as_str());
         let update_wait_reason = observation.wait_reason.is_some();
         let wait_reason = observation.wait_reason.flatten().map(|r| r.as_str());
@@ -197,6 +200,7 @@ impl TaskRunRepository for SqliteStore {
                             WHEN NOT ({protected}) AND ?1 IS NOT NULL THEN 0
                             ELSE pending_stop END,
                         metadata_json = COALESCE(?8, metadata_json),
+                        plan_file_path = COALESCE(?14, plan_file_path),
                         updated_at = {SET_NOW}
                   WHERE id = ?9"
             ),
@@ -213,7 +217,8 @@ impl TaskRunRepository for SqliteStore {
                 generic_wait,
                 terminal_verdict,
                 hold_stop,
-                release_stop
+                release_stop,
+                plan_file_path
             ],
         )?;
         if affected == 0 {

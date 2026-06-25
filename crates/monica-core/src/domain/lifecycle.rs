@@ -16,6 +16,21 @@ pub fn wait_reason_for_tool(tool_name: &str) -> Option<TaskRunWaitReason> {
     }
 }
 
+/// The plan file an `ExitPlanMode` payload points at (`tool_input.planFilePath`, written by Claude
+/// under `~/.claude/plans/`). `None` for any other tool or a payload without the field, so the
+/// store leaves a previously recorded path untouched rather than clearing it.
+pub fn plan_file_path_from_payload(payload: Option<&Value>) -> Option<&str> {
+    let payload = payload?;
+    if payload.get("tool_name").and_then(Value::as_str) != Some("ExitPlanMode") {
+        return None;
+    }
+    payload
+        .get("tool_input")
+        .and_then(|input| input.get("planFilePath"))
+        .and_then(Value::as_str)
+        .filter(|path| !path.is_empty())
+}
+
 /// The tool-specific wait a `PreToolUse`/`PostToolUse` payload implies, if its `tool_name` is one
 /// that blocks on the user. `None` means "not a wait tool" — the events that carry it are inert.
 fn payload_tool_wait_reason(payload: Option<&Value>) -> Option<TaskRunWaitReason> {
@@ -681,5 +696,37 @@ mod tests {
             })
         );
         assert!(transition_for_event(Agent::Codex, "SessionEnd", None).is_none());
+    }
+
+    #[test]
+    fn plan_file_path_only_from_exit_plan_mode_payload() {
+        let exit_plan = json!({
+            "tool_name": "ExitPlanMode",
+            "tool_input": { "planFilePath": "/Users/me/.claude/plans/hazy-wiggling-salamander.md" }
+        });
+        assert_eq!(
+            plan_file_path_from_payload(Some(&exit_plan)),
+            Some("/Users/me/.claude/plans/hazy-wiggling-salamander.md")
+        );
+
+        // Other tools, missing field, and absent payload all yield None so the store's COALESCE
+        // leaves any recorded path intact.
+        assert_eq!(
+            plan_file_path_from_payload(Some(&json!({ "tool_name": "Read" }))),
+            None
+        );
+        assert_eq!(
+            plan_file_path_from_payload(Some(&json!({ "tool_name": "ExitPlanMode" }))),
+            None
+        );
+        // An empty-string path is treated as absent so it cannot clobber a stored path.
+        assert_eq!(
+            plan_file_path_from_payload(Some(&json!({
+                "tool_name": "ExitPlanMode",
+                "tool_input": { "planFilePath": "" }
+            }))),
+            None
+        );
+        assert_eq!(plan_file_path_from_payload(None), None);
     }
 }

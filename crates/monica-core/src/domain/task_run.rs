@@ -57,6 +57,9 @@ pub struct TaskRun {
     pub terminal_tab_id: Option<String>,
     pub last_event_name: Option<String>,
     pub last_event_at: Option<String>,
+    /// The Claude plan file (`~/.claude/plans/*.md`) most recently surfaced by an `ExitPlanMode`
+    /// hook. Sticky: later hooks never clear it, so it survives plan approval.
+    pub plan_file_path: Option<String>,
     /// A `Stop` was held by the subagent guard while the run was `Running` (its `background_tasks`
     /// still listed a running subagent). When a later `SubagentStop` leaves nothing in flight, the
     /// deferred `Stop → WaitingForUser` transition fires atomically.

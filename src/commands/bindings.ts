@@ -84,6 +84,22 @@ export const commands = {
   listNotebooks: () => typedError<NotebookSummary[], string>(__TAURI_INVOKE("list_notebooks")),
   getNotebookPages: (notebookId: string) =>
     typedError<NotebookPageRow[], string>(__TAURI_INVOKE("get_notebook_pages", { notebookId })),
+  /**
+   *  Read the plan held by the run driving the given Workbench tab. `Ok(None)` covers a shell tab, a
+   *  run that never planned, and a plan file since deleted — all "nothing to preview" to the caller.
+   */
+  readRunspacePlan: (terminalTabId: string) =>
+    typedError<
+      {
+        /**  Absolute path of the plan file (`~/.claude/plans/<name>.md`). */
+        path: string;
+        /**  File name only, for the preview header. */
+        file_name: string;
+        /**  Markdown source of the plan. */
+        body: string;
+      } | null,
+      string
+    >(__TAURI_INVOKE("read_runspace_plan", { terminalTabId })),
   forceSyncPullRequests: () => typedError<null, string>(__TAURI_INVOKE("force_sync_pull_requests")),
 };
 
@@ -143,6 +159,15 @@ export type NotebookSummary = {
   id: string;
   title: string;
   page_count: number;
+};
+
+export type PlanPreview = {
+  /**  Absolute path of the plan file (`~/.claude/plans/<name>.md`). */
+  path: string;
+  /**  File name only, for the preview header. */
+  file_name: string;
+  /**  Markdown source of the plan. */
+  body: string;
 };
 
 export type PrSyncCompleted = {
@@ -212,6 +237,7 @@ export type TaskSummaryRow = {
   task_status: TaskStatus;
   task_run_status: TaskRunStatus | null;
   task_run_wait_reason: TaskRunWaitReason | null;
+  has_plan: boolean;
   status: DisplayStatus;
   prepare_eligible: boolean;
   run_eligible: boolean;

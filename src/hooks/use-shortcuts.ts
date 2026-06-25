@@ -11,8 +11,10 @@ import {
   cycleRunspaceAtom,
   jumpHintsActiveAtom,
   jumpToHintAtom,
+  planPreviewAtom,
   promoteActiveTabRunAtom,
   toggleLastRunspaceAtom,
+  togglePlanPreviewAtom,
 } from "@/features/work-bench/store";
 import { forceSyncPullRequestsAtom } from "@/stores/pr-sync";
 import { newTaskOpenAtom, projectFilterOpenAtom, cycleBoardViewAtom } from "@/stores/workboard";
@@ -78,6 +80,9 @@ export function useShortcuts() {
   const cycleTerminalTab = useSetAtom(cycleTerminalTabAtom);
   const cycleRunspace = useSetAtom(cycleRunspaceAtom);
   const promoteActiveTabRun = useSetAtom(promoteActiveTabRunAtom);
+  const togglePlanPreview = useSetAtom(togglePlanPreviewAtom);
+  const planPreview = useAtomValue(planPreviewAtom);
+  const setPlanPreview = useSetAtom(planPreviewAtom);
   const forceSyncPullRequests = useSetAtom(forceSyncPullRequestsAtom);
   const jumpActive = useAtomValue(jumpHintsActiveAtom);
   const setJumpActive = useSetAtom(jumpHintsActiveAtom);
@@ -101,8 +106,9 @@ export function useShortcuts() {
     if (activeSpace !== "work-bench") {
       setJumpActive(false);
       clearTimeout(timeoutRef.current);
+      setPlanPreview(null);
     }
-  }, [activeSpace, setJumpActive]);
+  }, [activeSpace, setJumpActive, setPlanPreview]);
 
   useEffect(() => {
     if (activeSpace !== "work-bench" || !jumpActive) return;
@@ -138,6 +144,15 @@ export function useShortcuts() {
         editable: true,
         action: ({ isWorkBench }) => {
           if (isWorkBench) void promoteActiveTabRun();
+        },
+      },
+      {
+        meta: true,
+        key: "e",
+        editable: true,
+        action: ({ isWorkBench }) => {
+          if (!isWorkBench) return false;
+          void togglePlanPreview();
         },
       },
       {
@@ -229,7 +244,11 @@ export function useShortcuts() {
       {
         key: "Escape",
         editable: true,
-        action: ({ activeSpace: space }) => {
+        action: ({ activeSpace: space, isWorkBench }) => {
+          if (isWorkBench && planPreview) {
+            setPlanPreview(null);
+            return;
+          }
           if (space !== "library" || selectedNotebookId === null) return false;
           closeNotebook();
         },
@@ -366,6 +385,9 @@ export function useShortcuts() {
     cycleTerminalTab,
     cycleRunspace,
     promoteActiveTabRun,
+    togglePlanPreview,
+    planPreview,
+    setPlanPreview,
     forceSyncPullRequests,
     jumpActive,
     setJumpActive,

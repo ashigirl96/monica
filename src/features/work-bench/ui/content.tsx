@@ -22,6 +22,7 @@ import { clipboardWriteImage } from "@/commands/clipboard";
 import { terminalWrite } from "@/commands/terminal";
 import { useTerminal } from "./use-terminal";
 import { TabContextMenu } from "./tab-context-menu";
+import { PlanPreview } from "./plan-preview";
 
 const IMAGE_EXTENSIONS = new Set([
   ".png",
@@ -263,6 +264,7 @@ export default function WorkBenchContent() {
       )}
       <JumpOverlay />
       <TabContextMenu />
+      <PlanPreview />
     </div>
   );
 }
