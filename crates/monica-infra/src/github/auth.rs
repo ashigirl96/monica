@@ -2,7 +2,7 @@ use std::sync::{Once, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
-use monica_core::{AuthGateway, GithubAuthStatus, GithubDeviceFlow};
+use monica_application::{AuthGateway, GithubAuthStatus, GithubDeviceFlow};
 use reqwest::header::{ACCEPT, USER_AGENT};
 use serde::Deserialize;
 use tokio::sync::Mutex;
@@ -223,18 +223,18 @@ impl AuthGateway for GithubTokenProvider {
 
     fn begin_device_flow<'a>(
         &'a self,
-    ) -> monica_core::interfaces::BoxFuture<'a, Result<GithubDeviceFlow>> {
+    ) -> monica_application::ports::BoxFuture<'a, Result<GithubDeviceFlow>> {
         Box::pin(async move { GithubTokenProvider::begin_device_flow(self).await })
     }
 
     fn wait_for_device_flow<'a>(
         &'a self,
         flow: &'a GithubDeviceFlow,
-    ) -> monica_core::interfaces::BoxFuture<'a, Result<GithubAuthStatus>> {
+    ) -> monica_application::ports::BoxFuture<'a, Result<GithubAuthStatus>> {
         Box::pin(async move { GithubTokenProvider::wait_for_device_flow(self, flow).await })
     }
 
-    fn logout<'a>(&'a self) -> monica_core::interfaces::BoxFuture<'a, Result<()>> {
+    fn logout<'a>(&'a self) -> monica_application::ports::BoxFuture<'a, Result<()>> {
         Box::pin(async move { GithubTokenProvider::logout(self).await })
     }
 }

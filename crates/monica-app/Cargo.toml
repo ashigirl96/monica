@@ -15,9 +15,10 @@ tauri-build = { version = "2", default-features = false, features = [] }
 [dependencies]
 anyhow = "1.0"
 log = "0.4"
-monica-core = { path = "../monica-core", features = ["specta"] }
+monica-api = { path = "../monica-api" }
+monica-application = { path = "../monica-application" }
 serde = { version = "1", default-features = false, features = ["derive"] }
-monica-infra = { path = "../monica-infra", features = ["specta"] }
+monica-infra = { path = "../monica-infra" }
 monica-pty = { path = "../monica-pty" }
 specta = { version = "=2.0.0-rc.25", default-features = false, features = ["serde_json"] }
 specta-typescript = { version = "=0.0.12", default-features = false }

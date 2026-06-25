@@ -1,7 +1,7 @@
-use monica_core::{
-    Agent, DisplayStatus, ExternalRef, GithubPullRequest,
+use monica_application::{
+    Agent, DisplayStatus, EventRepository, ExternalRef, GithubPullRequest,
     GithubPullRequestStatus, NewTask, NewTaskRun, NewTerminalSession, Project,
-    ProjectRepository, PullRequestBranchSyncCandidate, RefType, TaskKind, TaskRepository,
+    ProjectRepository, PullRequestBranchSyncCandidate, RawJson, RefType, TaskKind, TaskRepository,
     TaskRun, TaskRunObservation, TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus,
     TaskSummaryFilter, TaskSummaryRow, TerminalSessionKind, TerminalSessionStatus,
     TerminalSessionUpdate,
@@ -10,6 +10,59 @@ use rusqlite::params;
 use serde_json::json;
 
 use super::SqliteStore;
+
+/// The domain carries `details`/`source`/`metadata`/`payload` as opaque [`RawJson`] text; the store
+/// must persist and reload that text verbatim (no JSON re-encoding). Guards the read/write path in
+/// `row.rs` and `store/*` against a regression to `serde_json::from_str`/`to_string`, which would
+/// double-encode or fail on a bare JSON object.
+#[test]
+fn raw_json_columns_survive_sqlite_round_trip() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+
+    let mut task = dev_task("with raw json");
+    task.details = RawJson(r#"{"github_url":"https://example.com/x"}"#.to_string());
+    task.source = Some(RawJson(r#"{"ref":"owner/repo#1"}"#.to_string()));
+    let task = db.insert_task(task).unwrap();
+
+    let loaded = db.get_task(&task.id).unwrap().unwrap();
+    assert_eq!(
+        loaded.details.as_str(),
+        r#"{"github_url":"https://example.com/x"}"#
+    );
+    assert_eq!(loaded.source.unwrap().as_str(), r#"{"ref":"owner/repo#1"}"#);
+
+    let run = db
+        .start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
+    let metadata = json!({ "hook_event_name": "PreToolUse", "nested": { "n": 2 } });
+    db.record_task_run_observation(
+        &run.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::Running),
+            wait_reason: Some(None),
+            event_name: Some("PreToolUse"),
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: None,
+            terminal_tab_id: None,
+            metadata: Some(&metadata),
+        },
+    )
+    .unwrap();
+    let loaded_run = db.get_task_run(&run.id).unwrap().unwrap();
+    assert_eq!(loaded_run.metadata.as_str(), metadata.to_string());
+
+    let payload = json!({ "tool_name": "ExitPlanMode" });
+    db.insert_event(Some(&task.id), None, "PreToolUse", &payload)
+        .unwrap();
+    let events = db.list_events(Some(&task.id)).unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].payload.as_str(), payload.to_string());
+}
 
 fn dev_task(title: &str) -> NewTask {
     NewTask::new(TaskKind::Development, title)

@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use rusqlite::params;
 
 use crate::sqlite::SqliteStore;
-use monica_core::{
+use monica_application::{
     DisplayStatus, ExternalRef, GithubPullRequest, GithubPullRequestStatus, NewTask,
     PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate, Task, TaskRepository,
     TaskRunStatus, TaskRunWaitReason, TaskStatus, TaskSummaryFilter, TaskSummaryRow,
@@ -13,11 +13,8 @@ use super::{sql_literal_list, SET_NOW, TASK_COLUMNS};
 impl SqliteStore {
     fn insert_task_inner(&mut self, new: NewTask, external: Option<ExternalRef>) -> Result<Task> {
         let labels = serde_json::to_string(&new.labels)?;
-        let details = serde_json::to_string(&new.details)?;
-        let source = match &new.source {
-            Some(v) => Some(serde_json::to_string(v)?),
-            None => None,
-        };
+        let details = new.details.into_string();
+        let source = new.source.map(|v| v.into_string());
 
         let tx = self.conn_mut().transaction()?;
         tx.execute("INSERT INTO mon_counter DEFAULT VALUES", [])?;

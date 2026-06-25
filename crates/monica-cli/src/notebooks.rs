@@ -3,7 +3,7 @@ use std::fs;
 use anyhow::{anyhow, Result};
 use clap::Subcommand;
 
-use monica_core::{
+use monica_application::{
     mermaid_blocks, outline, pages_from_docs, structural_lint, LintFinding, NotebookDoc,
 };
 use monica_infra::filesystem::{notebook, paths};
@@ -39,7 +39,7 @@ pub fn run(cmd: NotebooksCommand) -> Result<()> {
 }
 
 fn new(slug: &str) -> Result<()> {
-    if !monica_core::is_valid_slug(slug) {
+    if !monica_application::is_valid_slug(slug) {
         return Err(anyhow!(
             "invalid slug `{slug}`: use kebab-case (lowercase a-z, 0-9, single hyphens)"
         ));

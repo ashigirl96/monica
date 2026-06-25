@@ -2,7 +2,7 @@ use anyhow::Result;
 use rusqlite::params;
 
 use crate::sqlite::SqliteStore;
-use monica_core::BenchRepository;
+use monica_application::BenchRepository;
 
 impl BenchRepository for SqliteStore {
     fn get_bench_for_task(&self, task_id: &str) -> Result<Option<(String, String)>> {

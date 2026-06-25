@@ -8,7 +8,7 @@ name = "monica"
 path = "src/main.rs"
 
 [dependencies]
-monica-core = { path = "../monica-core" }
+monica-application = { path = "../monica-application" }
 monica-infra = { path = "../monica-infra" }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::Subcommand;
-use monica_core::GithubAuthStatus;
+use monica_application::GithubAuthStatus;
 use monica_infra::Runtime;
 
 #[derive(Subcommand)]
@@ -31,11 +31,11 @@ async fn run_github(cmd: GithubAuthCommand) -> Result<()> {
     match cmd {
         GithubAuthCommand::Login => login(&runtime).await,
         GithubAuthCommand::Status => {
-            print_status(&monica_core::github_auth_status(&runtime.auth));
+            print_status(&monica_application::github_auth_status(&runtime.auth));
             Ok(())
         }
         GithubAuthCommand::Logout => {
-            monica_core::logout_github(&runtime.auth).await?;
+            monica_application::logout_github(&runtime.auth).await?;
             println!("GitHub authorization removed.");
             Ok(())
         }
@@ -43,7 +43,7 @@ async fn run_github(cmd: GithubAuthCommand) -> Result<()> {
 }
 
 async fn login(runtime: &Runtime) -> Result<()> {
-    let flow = monica_core::begin_github_device_flow(&runtime.auth).await?;
+    let flow = monica_application::begin_github_device_flow(&runtime.auth).await?;
     println!("Open this URL in your browser:");
     println!("{}", flow.verification_uri);
     println!();
@@ -52,7 +52,7 @@ async fn login(runtime: &Runtime) -> Result<()> {
     println!();
     println!("Waiting for GitHub authorization...");
 
-    let status = monica_core::wait_for_github_device_flow(&runtime.auth, &flow)
+    let status = monica_application::wait_for_github_device_flow(&runtime.auth, &flow)
         .await
         .context("GitHub authorization did not complete")?;
     println!();

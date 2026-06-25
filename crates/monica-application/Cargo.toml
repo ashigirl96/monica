@@ -1,0 +1,17 @@
+[package]
+name = "monica-application"
+version = "0.1.0"
+edition = "2021"
+# Deps allow lower, but we standardize on the dev/CI stable toolchain.
+rust-version = "1.95"
+
+[dependencies]
+monica-domain = { path = "../monica-domain" }
+anyhow = "1.0.102"
+log = "0.4"
+serde = { version = "1.0.228", default-features = false, features = ["derive"] }
+serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
+strum = { version = "0.28", features = ["derive"] }
+
+[dev-dependencies]
+tokio = { version = "1.52.3", default-features = false, features = ["macros", "rt"] }

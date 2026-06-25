@@ -2,7 +2,7 @@ use anyhow::Result;
 use rusqlite::{params, OptionalExtension};
 
 use crate::sqlite::SqliteStore;
-use monica_core::{
+use monica_application::{
     GithubPullRequest, PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate, RefType,
 };
 

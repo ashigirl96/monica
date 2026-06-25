@@ -1,7 +1,7 @@
-use monica_core::{
-    BoardColumn, PrepareTaskResult, RunTaskResult, TaskBench, TaskRunStatus, TaskSummaryFilter,
-    TaskSummaryRow, TrackGithubIssueInput,
+use monica_api::{
+    Agent, BoardColumn, PrepareTaskResult, RunTaskResult, TaskBench, TaskRunStatus, TaskSummaryRow,
 };
+use monica_application::{TaskSummaryFilter, TrackGithubIssueInput};
 use monica_infra::Runtime;
 use serde::Serialize;
 use tauri::AppHandle;
@@ -30,24 +30,25 @@ pub struct TaskRunStatusChanged {
 #[specta::specta]
 pub fn list_task_summaries(project: Option<String>) -> Result<Vec<TaskSummaryRow>, String> {
     let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_core::list_task_summaries(&runtime.repositories, TaskSummaryFilter::All, project.as_deref())
+    monica_application::list_task_summaries(&runtime.repositories, TaskSummaryFilter::All, project.as_deref())
+        .map(|rows| rows.into_iter().map(TaskSummaryRow::from).collect())
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn get_board_columns() -> Vec<BoardColumn> {
-    monica_core::board_columns()
+    monica_api::board_columns()
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn track_github_issue(input: String) -> Result<TaskCreated, String> {
-    let (repo, number) = monica_core::parse_issue_input(&input).map_err(|e| e.to_string())?;
+    let (repo, number) = monica_application::parse_issue_input(&input).map_err(|e| e.to_string())?;
     let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
     let input = TrackGithubIssueInput { repo, number };
     let report =
-        monica_core::track_github_issue(&mut runtime.repositories, &runtime.github, input)
+        monica_application::track_github_issue(&mut runtime.repositories, &runtime.github, input)
             .await
             .map_err(|e| e.to_string())?;
     Ok(TaskCreated {
@@ -60,7 +61,7 @@ pub async fn track_github_issue(input: String) -> Result<TaskCreated, String> {
 #[specta::specta]
 pub fn list_projects() -> Result<Vec<ProjectOption>, String> {
     let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    Ok(monica_core::list_projects(&runtime.repositories)
+    Ok(monica_application::list_projects(&runtime.repositories)
         .map_err(|e| e.to_string())?
         .into_iter()
         .map(|p| ProjectOption { id: p.id })
@@ -71,7 +72,7 @@ pub fn list_projects() -> Result<Vec<ProjectOption>, String> {
 #[specta::specta]
 pub fn create_raw_task(title: String, project_id: String) -> Result<TaskCreated, String> {
     let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    let task = monica_core::create_raw_task(&mut runtime.repositories, &title, &project_id)
+    let task = monica_application::create_raw_task(&mut runtime.repositories, &title, &project_id)
         .map_err(|e| e.to_string())?;
     Ok(TaskCreated {
         task_id: task.id,
@@ -83,7 +84,7 @@ pub fn create_raw_task(title: String, project_id: String) -> Result<TaskCreated,
 #[specta::specta]
 pub fn list_bench_runspace_map() -> Result<Vec<(String, String)>, String> {
     let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_core::BenchRepository::list_bench_runspace_map(&runtime.repositories)
+    monica_application::BenchRepository::list_bench_runspace_map(&runtime.repositories)
         .map_err(|e| e.to_string())
 }
 
@@ -91,7 +92,7 @@ pub fn list_bench_runspace_map() -> Result<Vec<(String, String)>, String> {
 #[specta::specta]
 pub fn task_shell_env(task_id: String) -> Result<Vec<(String, String)>, String> {
     let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_core::task_shell_env(&runtime.repositories, &runtime.task_run_outputs, &task_id)
+    monica_application::task_shell_env(&runtime.repositories, &runtime.task_run_outputs, &task_id)
         .map_err(|e| e.to_string())
 }
 
@@ -99,7 +100,8 @@ pub fn task_shell_env(task_id: String) -> Result<Vec<(String, String)>, String> 
 #[specta::specta]
 pub fn open_bench(task_id: String) -> Result<TaskBench, String> {
     let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_core::open_bench(&mut runtime.repositories, &runtime.task_run_outputs, &task_id)
+    monica_application::open_bench(&mut runtime.repositories, &runtime.task_run_outputs, &task_id)
+        .map(TaskBench::from)
         .map_err(|e| e.to_string())
 }
 
@@ -108,7 +110,7 @@ pub fn open_bench(task_id: String) -> Result<TaskBench, String> {
 pub fn prepare_task(app: AppHandle, task_id: String) -> Result<PrepareTaskResult, String> {
     let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
     let result =
-        monica_core::start_run(&mut runtime.repositories, &task_id).map_err(|e| e.to_string())?;
+        monica_application::start_run(&mut runtime.repositories, &task_id).map_err(|e| e.to_string())?;
 
     crate::services::task_runner::spawn_execute_run(
         app,
@@ -116,7 +118,7 @@ pub fn prepare_task(app: AppHandle, task_id: String) -> Result<PrepareTaskResult
         result.task_run_id.clone(),
     )?;
 
-    Ok(result)
+    Ok(result.into())
 }
 
 /// Promote the run living in the given Workbench tab to its task's Main Run. Returns whether the
@@ -126,10 +128,10 @@ pub fn prepare_task(app: AppHandle, task_id: String) -> Result<PrepareTaskResult
 #[specta::specta]
 pub fn make_main_task_run(app: AppHandle, tab_id: String) -> Result<bool, String> {
     let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    let outcome = monica_core::make_main_by_terminal_tab(&runtime.repositories, &tab_id)
+    let outcome = monica_application::make_main_by_terminal_tab(&runtime.repositories, &tab_id)
         .map_err(|e| e.to_string())?;
     match outcome {
-        monica_core::MakeMainOutcome::Changed {
+        monica_application::MakeMainOutcome::Changed {
             task_id,
             task_run_id,
             status,
@@ -137,14 +139,14 @@ pub fn make_main_task_run(app: AppHandle, tab_id: String) -> Result<bool, String
             let _ = TaskRunStatusChanged {
                 task_id,
                 task_run_id,
-                status,
+                status: status.into(),
             }
             .emit(&app);
             Ok(true)
         }
-        monica_core::MakeMainOutcome::AlreadyMain
-        | monica_core::MakeMainOutcome::PrimaryBusy
-        | monica_core::MakeMainOutcome::NotFound => Ok(false),
+        monica_application::MakeMainOutcome::AlreadyMain
+        | monica_application::MakeMainOutcome::PrimaryBusy
+        | monica_application::MakeMainOutcome::NotFound => Ok(false),
     }
 }
 
@@ -152,7 +154,7 @@ pub fn make_main_task_run(app: AppHandle, tab_id: String) -> Result<bool, String
 #[specta::specta]
 pub fn primary_tab_id(task_id: String) -> Result<Option<String>, String> {
     let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_core::primary_terminal_tab(&runtime.repositories, &task_id).map_err(|e| e.to_string())
+    monica_application::primary_terminal_tab(&runtime.repositories, &task_id).map_err(|e| e.to_string())
 }
 
 // Worktree removal and branch deletion shell out to git and can take seconds;
@@ -162,7 +164,7 @@ pub fn primary_tab_id(task_id: String) -> Result<Option<String>, String> {
 pub async fn close_task(task_id: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-        monica_core::close_issue(&mut runtime.repositories, &runtime.git, &task_id)
+        monica_application::close_issue(&mut runtime.repositories, &runtime.git, &task_id)
             .map(|_| ())
             .map_err(|e| e.to_string())
     })
@@ -172,13 +174,14 @@ pub async fn close_task(task_id: String) -> Result<(), String> {
 
 #[tauri::command]
 #[specta::specta]
-pub fn run_task(task_id: String, agent: Option<monica_core::Agent>) -> Result<RunTaskResult, String> {
+pub fn run_task(task_id: String, agent: Option<Agent>) -> Result<RunTaskResult, String> {
     let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_core::prepare_claude_for_run(
+    monica_application::prepare_claude_for_run(
         &mut runtime.repositories,
         &runtime.task_run_outputs,
         &task_id,
-        agent,
+        agent.map(monica_application::Agent::from),
     )
+    .map(RunTaskResult::from)
     .map_err(|e| e.to_string())
 }

@@ -3,7 +3,7 @@ use rusqlite::params;
 use serde_json::Value;
 
 use crate::sqlite::SqliteStore;
-use monica_core::{Clock, Event, EventRepository};
+use monica_application::{Clock, Event, EventRepository};
 
 use super::{EVENT_COLUMNS, SET_NOW};
 
