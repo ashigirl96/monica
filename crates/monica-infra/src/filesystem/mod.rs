@@ -1,3 +1,4 @@
+pub mod notebook;
 pub mod paths;
 
 mod outputs;

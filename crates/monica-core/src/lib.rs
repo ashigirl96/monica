@@ -10,7 +10,8 @@ pub mod usecases;
 
 pub use domain::{
     branch_name, is_continuation_session_start, is_safe_task_run_id, is_session_starting_event,
-    is_valid_slug, mermaid_blocks, monica_number, outline, pages_from_docs, parse_front_matter,
+    front_value, is_valid_slug, mermaid_blocks, monica_number, outline, pages_from_docs,
+    parse_front_matter,
     parse_issue_input, parse_issue_ref, parse_owner_repo, parse_wikilink, structural_lint,
     subagents_in_flight_after, LintFinding, NotebookDoc, NotebookPage, OutlineEntry,
     transition_is_generic_wait,

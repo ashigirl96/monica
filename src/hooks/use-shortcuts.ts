@@ -16,6 +16,15 @@ import {
 } from "@/features/work-bench/store";
 import { forceSyncPullRequestsAtom } from "@/stores/pr-sync";
 import { newTaskOpenAtom, projectFilterOpenAtom, cycleBoardViewAtom } from "@/stores/workboard";
+import { cycleLibraryModeAtom } from "@/stores/library";
+import {
+  closeNotebookAtom,
+  cycleNotebookFocusAtom,
+  cyclePageAtom,
+  openFocusedNotebookAtom,
+  scrollContentByAtom,
+  selectedNotebookIdAtom,
+} from "@/features/library/store";
 import { setUiZoomAtom } from "@/stores/zoom";
 import { isEditable } from "@/lib/keyboard";
 import { handleJumpMode, type JumpModeActions } from "@/lib/jump-mode";
@@ -77,6 +86,13 @@ export function useShortcuts() {
   const setNewTaskOpen = useSetAtom(newTaskOpenAtom);
   const setProjectFilterOpen = useSetAtom(projectFilterOpenAtom);
   const cycleBoardView = useSetAtom(cycleBoardViewAtom);
+  const cycleLibraryMode = useSetAtom(cycleLibraryModeAtom);
+  const cyclePage = useSetAtom(cyclePageAtom);
+  const scrollContent = useSetAtom(scrollContentByAtom);
+  const cycleNotebookFocus = useSetAtom(cycleNotebookFocusAtom);
+  const openFocusedNotebook = useSetAtom(openFocusedNotebookAtom);
+  const closeNotebook = useSetAtom(closeNotebookAtom);
+  const selectedNotebookId = useAtomValue(selectedNotebookIdAtom);
   const setUiZoom = useSetAtom(setUiZoomAtom);
 
   const timeoutRef = useRef<number>(0);
@@ -155,6 +171,10 @@ export function useShortcuts() {
         action: ({ isWorkBench, activeSpace: space }) => {
           if (isWorkBench) cycleRunspace("down");
           else if (space === "work-board") cycleBoardView("down");
+          else if (space === "library") {
+            if (selectedNotebookId === null) cycleNotebookFocus("next");
+            else cyclePage("next");
+          }
         },
       },
       {
@@ -164,6 +184,10 @@ export function useShortcuts() {
         action: ({ isWorkBench, activeSpace: space }) => {
           if (isWorkBench) cycleRunspace("up");
           else if (space === "work-board") cycleBoardView("up");
+          else if (space === "library") {
+            if (selectedNotebookId === null) cycleNotebookFocus("prev");
+            else cyclePage("prev");
+          }
         },
       },
       {
@@ -192,6 +216,29 @@ export function useShortcuts() {
         editable: true,
         action: ({ activeSpace: space }) => {
           if (space === "work-board") setProjectFilterOpen((v) => !v);
+        },
+      },
+      {
+        ctrl: true,
+        key: "q",
+        editable: true,
+        action: ({ activeSpace: space }) => {
+          if (space === "library") cycleLibraryMode("down");
+        },
+      },
+      {
+        key: "Escape",
+        editable: true,
+        action: ({ activeSpace: space }) => {
+          if (space !== "library" || selectedNotebookId === null) return false;
+          closeNotebook();
+        },
+      },
+      {
+        key: "Enter",
+        action: ({ activeSpace: space }) => {
+          if (space !== "library" || selectedNotebookId !== null) return false;
+          openFocusedNotebook();
         },
       },
       {
@@ -227,15 +274,39 @@ export function useShortcuts() {
       {
         alt: true,
         code: "KeyH",
-        action: ({ isWorkBench }) => {
-          cycleFocusedTab("left", isWorkBench);
+        action: ({ isWorkBench, activeSpace: space }) => {
+          if (space === "library") {
+            if (selectedNotebookId === null) return false;
+            closeNotebook();
+          } else {
+            cycleFocusedTab("left", isWorkBench);
+          }
         },
       },
       {
         alt: true,
         code: "KeyL",
-        action: ({ isWorkBench }) => {
-          cycleFocusedTab("right", isWorkBench);
+        action: ({ isWorkBench, activeSpace: space }) => {
+          if (space === "library") {
+            if (selectedNotebookId !== null) return false;
+            openFocusedNotebook();
+          } else {
+            cycleFocusedTab("right", isWorkBench);
+          }
+        },
+      },
+      {
+        key: "j",
+        action: ({ activeSpace: space }) => {
+          if (space !== "library") return false;
+          scrollContent("down");
+        },
+      },
+      {
+        key: "k",
+        action: ({ activeSpace: space }) => {
+          if (space !== "library") return false;
+          scrollContent("up");
         },
       },
     ];
@@ -301,6 +372,13 @@ export function useShortcuts() {
     jumpToHint,
     toggleLastRunspace,
     cycleBoardView,
+    cycleLibraryMode,
+    cyclePage,
+    scrollContent,
+    cycleNotebookFocus,
+    openFocusedNotebook,
+    closeNotebook,
+    selectedNotebookId,
     setNewTaskOpen,
     setProjectFilterOpen,
     setUiZoom,
