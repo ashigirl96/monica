@@ -9,7 +9,7 @@ import {
   selectedPageIdAtom,
 } from "@/features/library/store";
 
-const NotebookMarkdown = lazy(() => import("./notebook-markdown"));
+const MarkdownView = lazy(() => import("@/components/markdown/markdown-view"));
 
 function EmptyState({ text }: { text: string }) {
   return (
@@ -52,7 +52,7 @@ function NotebooksView() {
       {opened ? (
         // Detail: a single page.
         <Suspense fallback={PageFallback}>
-          <NotebookMarkdown body={shownPage.body} />
+          <MarkdownView body={shownPage.body} />
         </Suspense>
       ) : (
         // List preview: the whole notebook stitched together, one page per section.
@@ -60,7 +60,7 @@ function NotebooksView() {
           {pages.map((page) => (
             <section key={page.id} className="notebook-page">
               <Suspense fallback={PageFallback}>
-                <NotebookMarkdown body={page.body} />
+                <MarkdownView body={page.body} />
               </Suspense>
             </section>
           ))}

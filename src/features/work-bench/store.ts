@@ -11,6 +11,7 @@ import {
   type TerminalStateSnapshot,
 } from "@/commands/terminal";
 import { listBenchRunspaceMap, makeMainTaskRun, primaryTabId, taskShellEnv } from "@/commands/task";
+import { readRunspacePlan, type PlanPreview } from "@/commands/plan";
 import { worktreeInfo, type WorktreeInfo } from "@/commands/git";
 import { releaseTabConnection } from "@/features/work-bench/terminal-connections";
 import {
@@ -275,6 +276,22 @@ export const promoteActiveTabRunAtom = atom(null, async (get, set) => {
   if (changed) {
     await Promise.all([set(refreshTaskSummariesAtom), set(refreshPrimaryTabAtom)]);
   }
+});
+
+// Quick Look-style plan preview: null when closed, the resolved plan when open.
+export const planPreviewAtom = atom<PlanPreview | null>(null);
+
+// cmd+E toggles: close if open, else read the active tab's run plan and open it. A shell tab or a
+// run with no plan (or a deleted file) resolves to null and the overlay stays shut.
+export const togglePlanPreviewAtom = atom(null, async (get, set) => {
+  if (get(planPreviewAtom)) {
+    set(planPreviewAtom, null);
+    return;
+  }
+  const tab = get(activeTerminalTabAtom);
+  if (!tab) return;
+  const plan = await readRunspacePlan(tab.id);
+  if (plan) set(planPreviewAtom, plan);
 });
 
 export type RunspaceSummary = {

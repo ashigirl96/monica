@@ -139,6 +139,114 @@ fn task_run_observation_records_wait_reason_and_event_metadata() {
     assert_eq!(run.terminal_tab_id.as_deref(), Some("tab-1"));
 }
 
+#[test]
+fn task_run_observation_retains_plan_file_path_across_later_hooks() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("plan me")).unwrap();
+    let run = db
+        .start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
+    assert_eq!(db.get_task_run(&run.id).unwrap().unwrap().plan_file_path, None);
+
+    let exit_plan = json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "ExitPlanMode",
+        "tool_input": { "planFilePath": "/Users/me/.claude/plans/hazy-wiggling-salamander.md" }
+    });
+    db.record_task_run_observation(
+        &run.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::WaitingForUser),
+            wait_reason: Some(Some(TaskRunWaitReason::ExitPlanMode)),
+            event_name: Some("PreToolUse"),
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: None,
+            terminal_tab_id: None,
+            metadata: Some(&exit_plan),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        db.get_task_run(&run.id).unwrap().unwrap().plan_file_path.as_deref(),
+        Some("/Users/me/.claude/plans/hazy-wiggling-salamander.md")
+    );
+
+    // Approving the plan fires a payload without a planFilePath; the path must survive it.
+    let approved = json!({ "hook_event_name": "UserPromptSubmit" });
+    db.record_task_run_observation(
+        &run.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::Running),
+            wait_reason: Some(None),
+            event_name: Some("UserPromptSubmit"),
+            at: "2026-06-02T00:01:00.000Z",
+            provider_session_id: None,
+            terminal_tab_id: None,
+            metadata: Some(&approved),
+        },
+    )
+    .unwrap();
+    let run = db.get_task_run(&run.id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::Running);
+    assert_eq!(
+        run.plan_file_path.as_deref(),
+        Some("/Users/me/.claude/plans/hazy-wiggling-salamander.md")
+    );
+
+    // An ExitPlanMode payload carrying an empty planFilePath must not clobber the stored path.
+    let empty_plan = json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "ExitPlanMode",
+        "tool_input": { "planFilePath": "" }
+    });
+    db.record_task_run_observation(
+        &run.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::WaitingForUser),
+            wait_reason: Some(Some(TaskRunWaitReason::ExitPlanMode)),
+            event_name: Some("PreToolUse"),
+            at: "2026-06-02T00:01:30.000Z",
+            provider_session_id: None,
+            terminal_tab_id: None,
+            metadata: Some(&empty_plan),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        db.get_task_run(&run.id).unwrap().unwrap().plan_file_path.as_deref(),
+        Some("/Users/me/.claude/plans/hazy-wiggling-salamander.md")
+    );
+
+    // A fresh plan replaces it with the newer path.
+    let next_plan = json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "ExitPlanMode",
+        "tool_input": { "planFilePath": "/Users/me/.claude/plans/brave-soaring-otter.md" }
+    });
+    db.record_task_run_observation(
+        &run.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::WaitingForUser),
+            wait_reason: Some(Some(TaskRunWaitReason::ExitPlanMode)),
+            event_name: Some("PreToolUse"),
+            at: "2026-06-02T00:02:00.000Z",
+            provider_session_id: None,
+            terminal_tab_id: None,
+            metadata: Some(&next_plan),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        db.get_task_run(&run.id).unwrap().unwrap().plan_file_path.as_deref(),
+        Some("/Users/me/.claude/plans/brave-soaring-otter.md")
+    );
+}
+
 /// Hooks run in separate processes, so the snapshot check in `record_claude_hook` cannot be
 /// trusted alone: these cases bypass it and hit the store directly, proving the UPDATE itself
 /// refuses the protected transitions.
