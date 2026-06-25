@@ -6,4 +6,5 @@ set -euo pipefail
 # 例:
 #   corepack enable
 #   pnpm install --frozen-lockfile
+export MONICA_HOME="$HOME/monica/dev"
 direnv allow .

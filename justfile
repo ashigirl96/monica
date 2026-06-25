@@ -7,15 +7,15 @@ install:
     bun install
 
 dev: dev-cli ptyd-bin
-    MONICA_HOME="$HOME/monica/dev" MONICA_CLI_PATH="{{justfile_directory()}}/monica" MONICA_PTYD_PATH="{{justfile_directory()}}/target/debug/monica-ptyd" bun run tauri dev
+    MONICA_HOME="$HOME/monica/dev" MONICA_PTYD_PATH="{{justfile_directory()}}/target/debug/monica-ptyd" bun run tauri dev
 
 dev-cli:
     cargo build -p monica-cli
     cp target/debug/monica ./.monica-bin.tmp
-    mv -f ./.monica-bin.tmp ./monica
-    [ "$(uname)" = Darwin ] && codesign --force --sign - ./monica || true
+    mv -f ./.monica-bin.tmp ./monica-dev
+    [ "$(uname)" = Darwin ] && codesign --force --sign - ./monica-dev || true
     mkdir -p ~/.zsh/completions
-    ./monica completions zsh > ~/.zsh/completions/_monica
+    ./monica-dev completions zsh > ~/.zsh/completions/_monica
 
 # tauri.conf.json's externalBin makes every monica-app compile (dev, clippy, tests)
 # require binaries/monica-ptyd-<host-triple>; this provides it. Release builds overwrite
@@ -125,4 +125,4 @@ kill-dev:
     echo "$pids" | xargs kill 2>/dev/null || true
 
 clean:
-    rm -rf dist node_modules target monica
+    rm -rf dist node_modules target monica-dev

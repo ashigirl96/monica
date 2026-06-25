@@ -11,8 +11,8 @@ stats.html
 /target/
 crates/monica-app/gen/schemas/
 
-# monica CLI dev binary (just dev copies it here)
-/monica
+# monica CLI dev binary (just dev-cli copies it here)
+/monica-dev
 
 # logs / OS
 *.log

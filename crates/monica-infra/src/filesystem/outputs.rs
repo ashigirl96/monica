@@ -131,24 +131,20 @@ fn resolve_hook_command(agent: monica_application::Agent) -> Result<String> {
             return Ok(format!("{base} hook {subcommand}"));
         }
     }
-    if let Ok(cli) = std::env::var("MONICA_CLI_PATH") {
-        if !cli.is_empty() && Path::new(&cli).is_file() {
-            return Ok(format!("{} hook {subcommand}", quote_single(&cli)));
-        }
-    }
     if let Some(cli) = which_monica() {
         return Ok(format!("{} hook {subcommand}", quote_single(&cli)));
     }
     Err(anyhow!(
         "cannot resolve monica CLI for hook command; \
-         set MONICA_CLI_PATH or ensure `monica` is on PATH"
+         set MONICA_BIN or ensure `monica` is on PATH"
     ))
 }
 
 fn which_monica() -> Option<String> {
+    let bin = std::env::var("MONICA_BIN").unwrap_or_else(|_| "monica".to_string());
     let path = std::env::var("PATH").ok()?;
     for dir in path.split(':') {
-        let candidate = Path::new(dir).join("monica");
+        let candidate = Path::new(dir).join(&bin);
         if candidate.is_file() {
             return Some(candidate.to_string_lossy().into_owned());
         }
