@@ -36,6 +36,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::task::close_task,
             commands::task::make_main_task_run,
             commands::task::primary_tab_id,
+            commands::notebook::list_notebooks,
+            commands::notebook::get_notebook_pages,
             commands::pull_request::force_sync_pull_requests,
         ])
         .events(tauri_specta::collect_events![

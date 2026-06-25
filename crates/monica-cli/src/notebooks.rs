@@ -1,14 +1,12 @@
 use std::fs;
-use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use clap::Subcommand;
 
 use monica_core::{
-    mermaid_blocks, outline, pages_from_docs, parse_front_matter, structural_lint, LintFinding,
-    NotebookDoc,
+    mermaid_blocks, outline, pages_from_docs, structural_lint, LintFinding, NotebookDoc,
 };
-use monica_infra::filesystem::paths;
+use monica_infra::filesystem::{notebook, paths};
 
 #[derive(Subcommand)]
 pub enum NotebooksCommand {
@@ -53,22 +51,11 @@ fn new(slug: &str) -> Result<()> {
 }
 
 fn list() -> Result<()> {
-    let root = paths::notebooks_dir()?;
-    let mut notebooks: Vec<(String, usize)> = Vec::new();
-    if root.is_dir() {
-        for entry in fs::read_dir(&root)? {
-            let entry = entry?;
-            if entry.file_type()?.is_dir() {
-                let slug = entry.file_name().to_string_lossy().into_owned();
-                notebooks.push((slug, md_paths(&entry.path())?.len()));
-            }
-        }
-    }
+    let notebooks = notebook::notebook_page_counts(&paths::notebooks_dir()?)?;
     if notebooks.is_empty() {
         println!("No notebooks yet. Create one with `monica notebooks new <slug>`.");
         return Ok(());
     }
-    notebooks.sort();
     let mut rows = vec![vec!["SLUG".to_string(), "PAGES".to_string()]];
     for (slug, pages) in notebooks {
         rows.push(vec![slug, pages.to_string()]);
@@ -112,38 +99,14 @@ fn lint(slug: &str) -> Result<()> {
     }
 }
 
-/// Files whose front matter fails to parse become findings rather than docs, so one malformed
-/// page doesn't abort the whole lint.
+/// Resolves the notebook dir (keeping the not-found message) and delegates the `*.md` read to
+/// `monica-infra`, which the Tauri app shares so the enumeration lives in one place.
 fn read_docs(slug: &str) -> Result<(Vec<NotebookDoc>, Vec<LintFinding>)> {
     let dir = paths::notebook_dir(slug)?;
     if !dir.is_dir() {
         return Err(anyhow!("notebook `{slug}` not found at {}", dir.display()));
     }
-    let mut docs = Vec::new();
-    let mut findings = Vec::new();
-    for path in md_paths(&dir)? {
-        let file = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
-        let stem = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-        let content = fs::read_to_string(&path)?;
-        match parse_front_matter(&content) {
-            Ok((front, body)) => docs.push(NotebookDoc { file, stem, front, body }),
-            Err(message) => findings.push(LintFinding { file, message }),
-        }
-    }
-    Ok((docs, findings))
-}
-
-/// Sorted `*.md` paths in a notebook directory. Per-entry `read_dir` errors are propagated, not
-/// dropped, so a lint never silently skips an unreadable page.
-fn md_paths(dir: &Path) -> Result<Vec<PathBuf>> {
-    let mut paths: Vec<_> = fs::read_dir(dir)?
-        .collect::<std::io::Result<Vec<_>>>()?
-        .into_iter()
-        .map(|e| e.path())
-        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("md"))
-        .collect();
-    paths.sort();
-    Ok(paths)
+    notebook::read_notebook_docs(&dir)
 }
 
 fn mermaid_findings(doc: &NotebookDoc) -> Vec<LintFinding> {

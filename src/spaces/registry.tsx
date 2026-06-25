@@ -5,9 +5,12 @@ import { WorkBenchSidebar } from "@/features/work-bench/ui/sidebar";
 import { WorkBenchHeader } from "@/features/work-bench/ui/header";
 import { WorkBoardHeader } from "@/features/work-board/ui/header";
 import { WorkBoardSidebar } from "@/features/work-board/ui/sidebar";
+import { LibraryHeader } from "@/features/library/ui/header";
+import { LibrarySidebar } from "@/features/library/ui/sidebar";
 
 const LazyWorkBenchContent = lazy(() => import("@/features/work-bench/ui/content"));
 const LazyWorkBoardContent = lazy(() => import("@/features/work-board/ui/content"));
+const LazyLibraryContent = lazy(() => import("@/features/library/ui/content"));
 
 type SpaceIcon = ComponentType<{ size?: number; strokeWidth?: number }>;
 
@@ -20,14 +23,6 @@ export type SpaceConfig = {
   content: ComponentType;
   persistent?: boolean;
 };
-
-function EmptyHeader() {
-  return null;
-}
-
-function EmptyContent() {
-  return null;
-}
 
 export const spaces: SpaceConfig[] = [
   {
@@ -51,8 +46,9 @@ export const spaces: SpaceConfig[] = [
     id: "library",
     icon: LibraryIcon,
     label: "Library",
-    header: EmptyHeader,
-    content: EmptyContent,
+    sidebar: LibrarySidebar,
+    header: LibraryHeader,
+    content: LazyLibraryContent,
   },
 ];
 

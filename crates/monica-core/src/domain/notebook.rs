@@ -265,9 +265,7 @@ fn node_in_cycle(start: &str, parent: &HashMap<&str, String>, n: usize) -> bool 
 
 /// Resolve a page's `parent` link to an existing stem; empty, malformed, or dangling links → `None`.
 fn resolve_parent(doc: &NotebookDoc, stems: &HashSet<&str>) -> Option<String> {
-    front_get(doc, "parent")
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
+    front_value(doc, "parent")
         .and_then(parse_wikilink)
         .filter(|stem| stems.contains(stem.as_str()))
 }
@@ -277,6 +275,11 @@ fn front_get<'a>(doc: &'a NotebookDoc, key: &str) -> Option<&'a str> {
         .iter()
         .find(|(k, _)| k == key)
         .map(|(_, v)| v.as_str())
+}
+
+/// Trimmed, non-empty front matter value for `key` — the form callers almost always want.
+pub fn front_value<'a>(doc: &'a NotebookDoc, key: &str) -> Option<&'a str> {
+    front_get(doc, key).map(str::trim).filter(|v| !v.is_empty())
 }
 
 fn finding(doc: &NotebookDoc, message: String) -> LintFinding {

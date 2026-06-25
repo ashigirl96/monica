@@ -112,3 +112,219 @@
     0 2px 8px oklch(0 0 0 / 0.3),
     0 8px 24px oklch(0 0 0 / 0.15);
 }
+
+/* Notebook markdown. Metrics mirror github-markdown-css (the `mo` reference) verbatim — base
+   16px/1.5, 2/1.5/1.25em headings, 16px block rhythm, 85% code, 6px 13px table cells — while
+   colors use monica's design tokens so it stays on monica's dark chrome. */
+.notebook-md {
+  max-width: 980px;
+  margin: 0 auto;
+  color: var(--foreground);
+  font-size: 19px;
+  line-height: 1.6;
+  word-wrap: break-word;
+}
+
+.notebook-md > :first-child {
+  margin-top: 0 !important;
+}
+
+.notebook-md > :last-child {
+  margin-bottom: 0 !important;
+}
+
+.notebook-md p,
+.notebook-md blockquote,
+.notebook-md ul,
+.notebook-md ol,
+.notebook-md pre,
+.notebook-md table {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+.notebook-md h1,
+.notebook-md h2,
+.notebook-md h3,
+.notebook-md h4,
+.notebook-md h5,
+.notebook-md h6 {
+  margin-top: 24px;
+  margin-bottom: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.notebook-md h1 {
+  font-size: 2em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
+}
+
+.notebook-md h2 {
+  font-size: 1.5em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
+}
+
+.notebook-md h3 {
+  font-size: 1.25em;
+}
+
+.notebook-md h4 {
+  font-size: 1em;
+}
+
+.notebook-md h5 {
+  font-size: 0.875em;
+}
+
+.notebook-md h6 {
+  font-size: 0.85em;
+  color: var(--muted-foreground);
+}
+
+.notebook-md ul {
+  list-style: disc;
+  padding-left: 2em;
+}
+
+.notebook-md ol {
+  list-style: decimal;
+  padding-left: 2em;
+}
+
+.notebook-md li + li {
+  margin-top: 0.25em;
+}
+
+.notebook-md li > ul,
+.notebook-md li > ol {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.notebook-md a {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--muted-foreground);
+}
+
+.notebook-md a:hover {
+  text-decoration-color: var(--foreground);
+}
+
+.notebook-md code {
+  font-family: var(--font-mono);
+  font-size: 85%;
+  white-space: break-spaces;
+  background: var(--muted);
+  border-radius: 6px;
+  padding: 0.2em 0.4em;
+}
+
+.notebook-md pre {
+  font-family: var(--font-mono);
+  font-size: 85%;
+  line-height: 1.45;
+  background: var(--muted);
+  border-radius: 6px;
+  padding: 16px;
+  overflow: auto;
+}
+
+.notebook-md pre code {
+  font-size: 100%;
+  white-space: pre;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+}
+
+.notebook-md blockquote {
+  margin: 0 0 16px;
+  padding: 0 1em;
+  color: var(--muted-foreground);
+  border-left: 0.25em solid var(--border);
+}
+
+.notebook-md table {
+  display: table;
+  width: 100%;
+  border-spacing: 0;
+  border-collapse: collapse;
+}
+
+.notebook-md tr {
+  border-top: 1px solid var(--border);
+}
+
+.notebook-md tr:nth-child(2n) {
+  background: var(--muted);
+}
+
+.notebook-md th,
+.notebook-md td {
+  border: 1px solid var(--border);
+  padding: 6px 13px;
+}
+
+.notebook-md th {
+  font-weight: 600;
+}
+
+.notebook-md img {
+  max-width: 100%;
+}
+
+.notebook-md hr {
+  height: 0.25em;
+  padding: 0;
+  margin: 24px 0;
+  background: var(--border);
+  border: 0;
+}
+
+/* Shiki code blocks (react-shiki). Same box metrics as plain code blocks; the dark background is
+   shiki's own github-dark inline style. */
+.notebook-md .shiki {
+  margin-bottom: 16px;
+  padding: 16px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 85%;
+  line-height: 1.45;
+}
+
+.notebook-md .mermaid-block {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+
+.notebook-md .mermaid-block svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Pages are stitched into one scrolling document; a rule + breathing room separates consecutive
+   pages, and scroll-margin keeps a jumped-to page off the very top edge. */
+.notebook-md .notebook-page {
+  scroll-margin-top: 1rem;
+}
+
+.notebook-md .notebook-page + .notebook-page {
+  margin-top: 2.5rem;
+  padding-top: 2.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.notebook-md .notebook-page > :first-child {
+  margin-top: 0;
+}
+
+.notebook-md .notebook-page > :last-child {
+  margin-bottom: 0;
+}

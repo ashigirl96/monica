@@ -26,8 +26,8 @@ pub use lifecycle::{
     transition_is_protected, wait_reason_for_tool, HookTransition,
 };
 pub use notebook::{
-    is_valid_slug, mermaid_blocks, outline, pages_from_docs, parse_front_matter, parse_wikilink,
-    structural_lint, LintFinding, NotebookDoc, NotebookPage, OutlineEntry,
+    front_value, is_valid_slug, mermaid_blocks, outline, pages_from_docs, parse_front_matter,
+    parse_wikilink, structural_lint, LintFinding, NotebookDoc, NotebookPage, OutlineEntry,
 };
 pub use project::{PermissionMode, Project, Provider};
 pub use refs::{parse_issue_input, parse_issue_ref, parse_owner_repo};

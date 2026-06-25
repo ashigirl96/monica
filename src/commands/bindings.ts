@@ -81,6 +81,9 @@ export const commands = {
     typedError<boolean, string>(__TAURI_INVOKE("make_main_task_run", { tabId })),
   primaryTabId: (taskId: string) =>
     typedError<string | null, string>(__TAURI_INVOKE("primary_tab_id", { taskId })),
+  listNotebooks: () => typedError<NotebookSummary[], string>(__TAURI_INVOKE("list_notebooks")),
+  getNotebookPages: (notebookId: string) =>
+    typedError<NotebookPageRow[], string>(__TAURI_INVOKE("get_notebook_pages", { notebookId })),
   forceSyncPullRequests: () => typedError<null, string>(__TAURI_INVOKE("force_sync_pull_requests")),
 };
 
@@ -123,6 +126,23 @@ export type GithubPullRequestRef = {
   url: string | null;
   status: string | null;
   is_open_or_draft: boolean;
+};
+
+export type NotebookPageRow = {
+  id: string;
+  title: string;
+  /**  Outline number (`1`, `1.1`, …) — the page's place in the document tree. */
+  number: string;
+  /**  Raw `created` front matter value (ISO 8601), if present. */
+  created: string | null;
+  /**  Page body (front matter stripped) — the markdown source. */
+  body: string;
+};
+
+export type NotebookSummary = {
+  id: string;
+  title: string;
+  page_count: number;
 };
 
 export type PrSyncCompleted = {
