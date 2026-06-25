@@ -75,7 +75,7 @@ export const columnTasksAtom = atom((get) => {
 // row fields (side runs, PRs, branch) churn during a poll.
 export type RunspaceTaskSummary = Pick<
   TaskSummaryRow,
-  "title" | "project" | "github_issue_number" | "status" | "task_run_wait_reason"
+  "title" | "project" | "github_issue_number" | "status" | "task_run_wait_reason" | "has_plan"
 >;
 
 const taskSummaryByIdQueryAtom = atomWithQuery(() => ({
@@ -90,6 +90,7 @@ const taskSummaryByIdQueryAtom = atomWithQuery(() => ({
           github_issue_number: s.github_issue_number,
           status: s.status,
           task_run_wait_reason: s.task_run_wait_reason,
+          has_plan: s.has_plan,
         },
       ]),
     ) as Record<string, RunspaceTaskSummary>,

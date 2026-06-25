@@ -237,6 +237,7 @@ export type TaskSummaryRow = {
   task_status: TaskStatus;
   task_run_status: TaskRunStatus | null;
   task_run_wait_reason: TaskRunWaitReason | null;
+  has_plan: boolean;
   status: DisplayStatus;
   prepare_eligible: boolean;
   run_eligible: boolean;

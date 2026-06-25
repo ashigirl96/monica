@@ -148,6 +148,7 @@ impl TaskRepository for SqliteStore {
 	               t.status AS task_status,
 	               latest_run.status AS task_run_status,
 	               latest_run.wait_reason AS task_run_wait_reason,
+	               latest_run.plan_file_path IS NOT NULL AS has_plan,
 	               latest_run.branch AS branch,
                (SELECT COUNT(*) FROM task_runs r
                  WHERE r.task_id = t.id AND r.id IS NOT latest_run.id
@@ -209,6 +210,7 @@ impl TaskRepository for SqliteStore {
                 .get::<_, Option<String>>("task_run_wait_reason")?
                 .map(|s| s.parse())
                 .transpose()?;
+            let has_plan: bool = row.get::<_, i64>("has_plan")? != 0;
             let display_status = DisplayStatus::from_task_and_run(task_status, task_run_status);
             let item = TaskSummaryRow {
                 id: row.get("task_id")?,
@@ -219,6 +221,7 @@ impl TaskRepository for SqliteStore {
                 task_status,
                 task_run_status,
                 task_run_wait_reason,
+                has_plan,
                 status: display_status,
                 prepare_eligible: display_status.prepare_eligible(),
                 run_eligible: display_status.run_eligible(),

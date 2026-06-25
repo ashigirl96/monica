@@ -84,7 +84,8 @@ function stepId(
 // drive it.
 export const contentScrollElAtom = atom<HTMLElement | null>(null);
 
-const SCROLL_STEP = 120;
+// j/k scroll step, shared with the Workbench plan preview so the two readers feel the same.
+export const SCROLL_STEP = 120;
 
 // j / k: nudge the reading pane.
 export const scrollContentByAtom = atom(null, (get, _set, direction: "down" | "up") => {

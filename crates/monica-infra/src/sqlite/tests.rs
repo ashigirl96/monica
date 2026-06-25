@@ -860,6 +860,70 @@ fn task_summaries_fall_back_to_latest_run_when_primary_pointer_dangles() {
 }
 
 #[test]
+fn task_summaries_expose_has_plan_from_the_primary_run() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let planned = db.insert_task(dev_task("has a plan")).unwrap();
+    let unplanned = db.insert_task(dev_task("no plan")).unwrap();
+    let new_run = |task_id: &str| NewTaskRun {
+        task_id: task_id.to_string(),
+        agent: None,
+        branch: None,
+        worktree_path: None,
+    };
+
+    let primary = db.start_task_run(new_run(&planned.id)).unwrap();
+    db.set_primary_task_run(&planned.id, &primary.id).unwrap();
+    let exit_plan = json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "ExitPlanMode",
+        "tool_input": { "planFilePath": "/Users/me/.claude/plans/hazy-wiggling-salamander.md" }
+    });
+    db.record_task_run_observation(
+        &primary.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::WaitingForUser),
+            wait_reason: Some(Some(TaskRunWaitReason::ExitPlanMode)),
+            event_name: Some("PreToolUse"),
+            at: "2026-06-02T00:00:00.000Z",
+            provider_session_id: Some("sess-plan"),
+            terminal_tab_id: None,
+            metadata: Some(&exit_plan),
+        },
+    )
+    .unwrap();
+    // The plain task records a run that never carried a plan.
+    db.start_task_run(new_run(&unplanned.id)).unwrap();
+
+    let has_plan = |db: &SqliteStore, id: &str| {
+        db.list_task_summaries(TaskSummaryFilter::All, None)
+            .unwrap()
+            .into_iter()
+            .find(|s| s.id == id)
+            .unwrap()
+            .has_plan
+    };
+    assert!(has_plan(&db, &planned.id));
+    assert!(!has_plan(&db, &unplanned.id));
+
+    // Approving the plan clears the wait, but the stored path — and so has_plan — must survive.
+    let approved = json!({ "hook_event_name": "UserPromptSubmit" });
+    db.record_task_run_observation(
+        &primary.id,
+        TaskRunObservation {
+            status: Some(TaskRunStatus::Running),
+            wait_reason: Some(None),
+            event_name: Some("UserPromptSubmit"),
+            at: "2026-06-02T00:01:00.000Z",
+            provider_session_id: None,
+            terminal_tab_id: None,
+            metadata: Some(&approved),
+        },
+    )
+    .unwrap();
+    assert!(has_plan(&db, &planned.id));
+}
+
+#[test]
 fn task_summary_filter_scopes_the_closed_archive() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let active = db.insert_task(dev_task("still working")).unwrap();
