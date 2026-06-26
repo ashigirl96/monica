@@ -1,7 +1,5 @@
-use anyhow::Result;
-
 use super::ports::{TaskRepository, TaskRunRepository};
-use crate::TaskRunStatus;
+use crate::{ApplicationResult, TaskRunStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MakeMainOutcome {
@@ -20,7 +18,7 @@ pub enum MakeMainOutcome {
 /// Promote the run whose Claude session lives in the given Workbench tab to its task's Main Run.
 /// Tabs without an observed run (a plain shell, claude never started) resolve to `NotFound` so the
 /// caller can treat the action as a no-op.
-pub fn make_main_by_terminal_tab<R>(repos: &R, terminal_tab_id: &str) -> Result<MakeMainOutcome>
+pub fn make_main_by_terminal_tab<R>(repos: &R, terminal_tab_id: &str) -> ApplicationResult<MakeMainOutcome>
 where
     R: TaskRepository + TaskRunRepository,
 {
@@ -52,7 +50,7 @@ where
 }
 
 /// The tab currently hosting the task's Main Run, if any — drives the Workbench tab indicator.
-pub fn primary_terminal_tab<R>(repos: &R, task_id: &str) -> Result<Option<String>>
+pub fn primary_terminal_tab<R>(repos: &R, task_id: &str) -> ApplicationResult<Option<String>>
 where
     R: TaskRepository + TaskRunRepository,
 {

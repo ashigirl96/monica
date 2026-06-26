@@ -1,10 +1,12 @@
 use anyhow::Result;
+use monica_application::ports::TerminalSessionRepository;
 use monica_application::{
     NewTerminalSession, TerminalSession, TerminalSessionKind, TerminalSessionStatus,
-    TerminalSessionUpdate,
+    TerminalSessionUpdate, TerminalStateSnapshot,
 };
 use rusqlite::{params, Row};
 
+use crate::filesystem::paths;
 use crate::sqlite::SqliteStore;
 
 use super::SET_NOW;
@@ -185,5 +187,57 @@ impl SqliteStore {
         }
         tx.commit()?;
         Ok(())
+    }
+}
+
+impl TerminalSessionRepository for SqliteStore {
+    fn create_terminal_session(&mut self, new: NewTerminalSession) -> Result<TerminalSession> {
+        SqliteStore::create_terminal_session(self, new)
+    }
+
+    fn mark_terminal_session_started(&self, id: &str, pid: Option<u32>) -> Result<()> {
+        // The transcript lives at `<terminal_sessions_dir>/<id>.log`; resolving it here keeps path
+        // layout an infra concern.
+        let transcript_path =
+            paths::terminal_sessions_dir().ok().map(|dir| dir.join(format!("{id}.log")));
+        SqliteStore::mark_terminal_session_started(
+            self,
+            id,
+            pid,
+            transcript_path.as_deref().and_then(|p| p.to_str()),
+        )
+    }
+
+    fn update_terminal_session_status(
+        &mut self,
+        id: &str,
+        status: TerminalSessionStatus,
+        exit_code: Option<i32>,
+    ) -> Result<()> {
+        SqliteStore::update_terminal_session_status(self, id, status, exit_code)
+    }
+
+    fn get_terminal_session(&self, id: &str) -> Result<Option<TerminalSession>> {
+        SqliteStore::get_terminal_session(self, id)
+    }
+
+    fn latest_terminal_session_for_tab(&self, tab_id: &str) -> Result<Option<TerminalSession>> {
+        SqliteStore::latest_terminal_session_for_tab(self, tab_id)
+    }
+
+    fn list_terminal_sessions(&self, runspace_id: Option<&str>) -> Result<Vec<TerminalSession>> {
+        SqliteStore::list_terminal_sessions(self, runspace_id)
+    }
+
+    fn apply_terminal_session_updates(&mut self, updates: &[TerminalSessionUpdate]) -> Result<()> {
+        SqliteStore::apply_terminal_session_updates(self, updates)
+    }
+
+    fn load_terminal_state(&self) -> Result<TerminalStateSnapshot> {
+        SqliteStore::load_terminal_state(self)
+    }
+
+    fn save_terminal_state(&mut self, snapshot: &TerminalStateSnapshot) -> Result<()> {
+        SqliteStore::save_terminal_state(self, snapshot)
     }
 }

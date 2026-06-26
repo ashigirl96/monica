@@ -1,16 +1,14 @@
 mod ports;
 
-use anyhow::{anyhow, Result};
-
 use self::ports::{
     EventRepository, ProjectRepository, TaskRepository, TaskRunRepository, TaskSummaryFilter,
 };
-use crate::{Event, Project, Task, TaskSummaryRow};
+use crate::{ApplicationError, ApplicationResult, Event, Project, Task, TaskSummaryRow};
 
 /// The plan file path retained on the run currently driven by the given Workbench tab — set when
 /// that run surfaced a plan via `ExitPlanMode`. `None` for a shell tab, a run that never planned,
 /// or an unknown tab.
-pub fn plan_path_for_terminal_tab<R>(repos: &R, terminal_tab_id: &str) -> Result<Option<String>>
+pub fn plan_path_for_terminal_tab<R>(repos: &R, terminal_tab_id: &str) -> ApplicationResult<Option<String>>
 where
     R: TaskRunRepository,
 {
@@ -19,50 +17,50 @@ where
         .and_then(|run| run.plan_file_path))
 }
 
-pub fn list_tasks<R>(repos: &R) -> Result<Vec<Task>>
+pub fn list_tasks<R>(repos: &R) -> ApplicationResult<Vec<Task>>
 where
     R: TaskRepository,
 {
-    repos.list_tasks()
+    Ok(repos.list_tasks()?)
 }
 
 pub fn list_task_summaries<R>(
     repos: &R,
     filter: TaskSummaryFilter,
     project: Option<&str>,
-) -> Result<Vec<TaskSummaryRow>>
+) -> ApplicationResult<Vec<TaskSummaryRow>>
 where
     R: TaskRepository,
 {
-    repos.list_task_summaries(filter, project)
+    Ok(repos.list_task_summaries(filter, project)?)
 }
 
-pub fn list_projects<R>(repos: &R) -> Result<Vec<Project>>
+pub fn list_projects<R>(repos: &R) -> ApplicationResult<Vec<Project>>
 where
     R: ProjectRepository,
 {
-    repos.list_projects()
+    Ok(repos.list_projects()?)
 }
 
-pub fn get_project<R>(repos: &R, repo: &str) -> Result<Project>
+pub fn get_project<R>(repos: &R, repo: &str) -> ApplicationResult<Project>
 where
     R: ProjectRepository,
 {
     repos
         .get_project(repo)?
-        .ok_or_else(|| anyhow!("project not found: {repo}"))
+        .ok_or_else(|| ApplicationError::not_found(format!("project not found: {repo}")))
 }
 
-pub fn set_project_field<R>(repos: &R, repo: &str, key: &str, value: &str) -> Result<()>
+pub fn set_project_field<R>(repos: &R, repo: &str, key: &str, value: &str) -> ApplicationResult<()>
 where
     R: ProjectRepository,
 {
-    repos.set_project_field(repo, key, value)
+    Ok(repos.set_project_field(repo, key, value)?)
 }
 
-pub fn list_events<R>(repos: &R, task_id: Option<&str>) -> Result<Vec<Event>>
+pub fn list_events<R>(repos: &R, task_id: Option<&str>) -> ApplicationResult<Vec<Event>>
 where
     R: EventRepository,
 {
-    repos.list_events(task_id)
+    Ok(repos.list_events(task_id)?)
 }

@@ -69,6 +69,8 @@ pub trait TaskRepository {
         candidate: &PullRequestStatusSyncCandidate,
         error: &str,
     ) -> Result<()>;
+    /// Reset PR status-sync retry state so a user-forced sync re-checks open/draft PRs now.
+    fn force_clear_pr_sync_state(&mut self) -> Result<()>;
 }
 
 #[cfg(test)]

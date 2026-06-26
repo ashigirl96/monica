@@ -1,10 +1,10 @@
-use monica_application::TaskRunStatus;
-use monica_infra::Runtime;
 use tauri::AppHandle;
-use tauri_specta::Event;
 
-use crate::commands::task::TaskRunStatusChanged;
+use crate::event_sink::TauriEventSink;
 
+/// Run phase 2 (`execute_run`) off the UI thread. The façade is opened inside the spawned thread
+/// (it owns a `!Send` SQLite connection) and emits the run's resulting status through its sink, so
+/// this driver helper only owns the thread, not any orchestration.
 pub(crate) fn spawn_execute_run(
     app: AppHandle,
     task_id: String,
@@ -13,33 +13,16 @@ pub(crate) fn spawn_execute_run(
     std::thread::Builder::new()
         .name(format!("run-{run_id}"))
         .spawn(move || {
-            let mut rt = match Runtime::open_default() {
-                Ok(rt) => rt,
+            let mut monica = match monica_infra::open_monica(Box::new(TauriEventSink::new(app))) {
+                Ok(monica) => monica,
                 Err(e) => {
-                    log::error!(target: "monica_app::prepare_task", "background runtime open failed: {e:#}");
+                    log::error!(target: "monica_app::prepare_task", "background façade open failed: {e:#}");
                     return;
                 }
             };
-            let final_status = match monica_application::execute_run(
-                &mut rt.repositories,
-                &rt.git,
-                &rt.setup_runner,
-                &rt.task_run_outputs,
-                &task_id,
-                &run_id,
-            ) {
-                Ok(s) => s,
-                Err(e) => {
-                    log::error!(target: "monica_app::prepare_task", "execute_run failed: {e:#}");
-                    TaskRunStatus::Failed
-                }
-            };
-            let _ = TaskRunStatusChanged {
-                task_id,
-                task_run_id: run_id,
-                status: final_status.into(),
+            if let Err(e) = monica.executions().execute_run(&task_id, &run_id) {
+                log::error!(target: "monica_app::prepare_task", "execute_run failed: {e}");
             }
-            .emit(&app);
         })
         .map(|_| ())
         .map_err(|e| e.to_string())

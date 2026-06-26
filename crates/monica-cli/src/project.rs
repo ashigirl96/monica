@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::Subcommand;
-use monica_application::GitGateway;
-use monica_infra::Runtime;
+
+use crate::event_sink::{self, CliFacade};
 
 #[derive(Subcommand)]
 pub enum ProjectCommand {
@@ -30,36 +30,27 @@ pub enum ProjectCommand {
 }
 
 pub async fn run(cmd: ProjectCommand) -> Result<()> {
-    let mut runtime = Runtime::open_default()?;
+    let mut monica = event_sink::open()?;
     match cmd {
-        ProjectCommand::Init { repo } => init(&mut runtime, repo).await,
-        ProjectCommand::Set { repo, key, value } => set(&runtime, &repo, &key, &value),
-        ProjectCommand::List => list(&runtime),
-        ProjectCommand::Show { repo, json } => show(&runtime, &repo, json),
+        ProjectCommand::Init { repo } => init(&mut monica, repo).await,
+        ProjectCommand::Set { repo, key, value } => set(&mut monica, &repo, &key, &value),
+        ProjectCommand::List => list(&mut monica),
+        ProjectCommand::Show { repo, json } => show(&mut monica, &repo, json),
     }
 }
 
-async fn init(runtime: &mut Runtime, repo_arg: Option<String>) -> Result<()> {
+async fn init(monica: &mut CliFacade, repo_arg: Option<String>) -> Result<()> {
     let cwd = std::env::current_dir().context("failed to read current directory")?;
-    let repo = match repo_arg {
-        Some(repo) => repo,
-        None => runtime.git.detect_repo()?,
-    };
-    let default_branch = detect_default_branch(runtime, &repo).await;
-    let saved = monica_application::register_project_with_default_branch(
-        &runtime.repositories,
-        &repo,
-        &cwd,
-        default_branch.as_deref(),
-    )?;
+    let report = monica.projects().init_project(repo_arg, &cwd).await?;
 
+    let saved = report.project;
     println!(
         "Registered project {} (path: {}, default_branch: {})",
         saved.id,
         saved.path.as_deref().unwrap_or("-"),
         saved.default_branch
     );
-    for (file, created) in runtime.scaffold_monica(&cwd)? {
+    for (file, created) in report.scaffold {
         let status = if created {
             "created"
         } else {
@@ -70,14 +61,14 @@ async fn init(runtime: &mut Runtime, repo_arg: Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn set(runtime: &Runtime, repo: &str, key: &str, value: &str) -> Result<()> {
-    monica_application::set_project_field(&runtime.repositories, repo, key, value)?;
+fn set(monica: &mut CliFacade, repo: &str, key: &str, value: &str) -> Result<()> {
+    monica.projects().set_project_field(repo, key, value)?;
     println!("Set {repo}.{key} = {value}");
     Ok(())
 }
 
-fn list(runtime: &Runtime) -> Result<()> {
-    let projects = monica_application::list_projects(&runtime.repositories)?;
+fn list(monica: &mut CliFacade) -> Result<()> {
+    let projects = monica.projects().list_projects()?;
     if projects.is_empty() {
         println!("No projects registered. Run `monica project init` inside a repo.");
         return Ok(());
@@ -103,8 +94,8 @@ fn list(runtime: &Runtime) -> Result<()> {
     Ok(())
 }
 
-fn show(runtime: &Runtime, repo: &str, json: bool) -> Result<()> {
-    let project = monica_application::get_project(&runtime.repositories, repo)?;
+fn show(monica: &mut CliFacade, repo: &str, json: bool) -> Result<()> {
+    let project = monica.projects().get_project(repo)?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&project)?);
@@ -137,16 +128,4 @@ fn show(runtime: &Runtime, repo: &str, json: bool) -> Result<()> {
         println!("{key:<width$}  {value}");
     }
     Ok(())
-}
-
-async fn detect_default_branch(runtime: &Runtime, repo: &str) -> Option<String> {
-    if let Some(branch) = runtime.git.detect_default_branch(repo) {
-        return Some(branch);
-    }
-    runtime
-        .github
-        .fetch_default_branch(repo)
-        .await
-        .ok()
-        .flatten()
 }

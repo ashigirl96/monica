@@ -355,4 +355,8 @@ impl TaskRepository for SqliteStore {
     ) -> Result<()> {
         SqliteStore::record_pull_request_status_sync_failure(self, candidate, error)
     }
+
+    fn force_clear_pr_sync_state(&mut self) -> Result<()> {
+        SqliteStore::force_clear_pr_sync_state(self)
+    }
 }

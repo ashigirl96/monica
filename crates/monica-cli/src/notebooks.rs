@@ -1,12 +1,11 @@
-use std::fs;
-
 use anyhow::{anyhow, Result};
 use clap::Subcommand;
 
 use monica_application::{
     mermaid_blocks, outline, pages_from_docs, structural_lint, LintFinding, NotebookDoc,
 };
-use monica_infra::filesystem::{notebook, paths};
+
+use crate::event_sink::{self, CliFacade};
 
 #[derive(Subcommand)]
 pub enum NotebooksCommand {
@@ -30,28 +29,23 @@ pub enum NotebooksCommand {
 }
 
 pub fn run(cmd: NotebooksCommand) -> Result<()> {
+    let mut monica = event_sink::open()?;
     match cmd {
-        NotebooksCommand::New { slug } => new(&slug),
-        NotebooksCommand::List => list(),
-        NotebooksCommand::Show { slug } => show(&slug),
-        NotebooksCommand::Lint { slug } => lint(&slug),
+        NotebooksCommand::New { slug } => new(&mut monica, &slug),
+        NotebooksCommand::List => list(&mut monica),
+        NotebooksCommand::Show { slug } => show(&mut monica, &slug),
+        NotebooksCommand::Lint { slug } => lint(&mut monica, &slug),
     }
 }
 
-fn new(slug: &str) -> Result<()> {
-    if !monica_application::is_valid_slug(slug) {
-        return Err(anyhow!(
-            "invalid slug `{slug}`: use kebab-case (lowercase a-z, 0-9, single hyphens)"
-        ));
-    }
-    let dir = paths::notebook_dir(slug)?;
-    fs::create_dir_all(&dir)?;
+fn new(monica: &mut CliFacade, slug: &str) -> Result<()> {
+    let dir = monica.notebooks().create_notebook(slug)?;
     println!("{}", dir.display());
     Ok(())
 }
 
-fn list() -> Result<()> {
-    let notebooks = notebook::notebook_page_counts(&paths::notebooks_dir()?)?;
+fn list(monica: &mut CliFacade) -> Result<()> {
+    let notebooks = monica.notebooks().list_notebooks()?;
     if notebooks.is_empty() {
         println!("No notebooks yet. Create one with `monica notebooks new <slug>`.");
         return Ok(());
@@ -64,8 +58,8 @@ fn list() -> Result<()> {
     Ok(())
 }
 
-fn show(slug: &str) -> Result<()> {
-    let (docs, _) = read_docs(slug)?;
+fn show(monica: &mut CliFacade, slug: &str) -> Result<()> {
+    let (docs, _) = monica.notebooks().read_notebook(slug)?;
     let entries = outline(&pages_from_docs(&docs));
     if entries.is_empty() {
         println!("(no pages)");
@@ -78,8 +72,8 @@ fn show(slug: &str) -> Result<()> {
     Ok(())
 }
 
-fn lint(slug: &str) -> Result<()> {
-    let (docs, mut fatal) = read_docs(slug)?;
+fn lint(monica: &mut CliFacade, slug: &str) -> Result<()> {
+    let (docs, mut fatal) = monica.notebooks().read_notebook(slug)?;
     fatal.extend(structural_lint(&docs));
     for doc in &docs {
         fatal.extend(mermaid_findings(doc));
@@ -97,16 +91,6 @@ fn lint(slug: &str) -> Result<()> {
     } else {
         Err(anyhow!("lint failed: {} issue(s)", fatal.len()))
     }
-}
-
-/// Resolves the notebook dir (keeping the not-found message) and delegates the `*.md` read to
-/// `monica-infra`, which the Tauri app shares so the enumeration lives in one place.
-fn read_docs(slug: &str) -> Result<(Vec<NotebookDoc>, Vec<LintFinding>)> {
-    let dir = paths::notebook_dir(slug)?;
-    if !dir.is_dir() {
-        return Err(anyhow!("notebook `{slug}` not found at {}", dir.display()));
-    }
-    notebook::read_notebook_docs(&dir)
 }
 
 fn mermaid_findings(doc: &NotebookDoc) -> Vec<LintFinding> {

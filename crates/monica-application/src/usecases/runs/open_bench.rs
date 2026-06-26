@@ -1,10 +1,10 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 
 use crate::prelude::bench_runspace_id;
 use super::ports::{
     BenchRepository, ProjectRepository, TaskRunOutputs, TaskRepository, TaskRunRepository,
 };
-use crate::{Project, Task, TaskBench};
+use crate::{ApplicationError, ApplicationResult, Project, Task, TaskBench};
 
 pub(crate) fn default_bench_cwd(project: Option<&Project>, home_dir: Option<&str>) -> String {
     project
@@ -47,7 +47,7 @@ pub fn task_shell_env<R, A>(
     repos: &R,
     outputs: &A,
     task_id: &str,
-) -> Result<Vec<(String, String)>>
+) -> ApplicationResult<Vec<(String, String)>>
 where
     R: TaskRepository + ProjectRepository + TaskRunRepository + BenchRepository,
     A: TaskRunOutputs,
@@ -80,13 +80,13 @@ where
 fn load_task_and_optional_project<R>(
     repos: &R,
     task_id: &str,
-) -> Result<(Task, Option<Project>)>
+) -> ApplicationResult<(Task, Option<Project>)>
 where
     R: TaskRepository + ProjectRepository,
 {
     let task = repos
         .get_task(task_id)?
-        .ok_or_else(|| anyhow!("task not found: {task_id}"))?;
+        .ok_or_else(|| ApplicationError::not_found(format!("task not found: {task_id}")))?;
     let project = task
         .project_id
         .as_deref()
@@ -113,7 +113,7 @@ where
         .unwrap_or_default()
 }
 
-pub fn open_bench<R, A>(repos: &mut R, outputs: &A, task_id: &str) -> Result<TaskBench>
+pub fn open_bench<R, A>(repos: &mut R, outputs: &A, task_id: &str) -> ApplicationResult<TaskBench>
 where
     R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
     A: TaskRunOutputs,

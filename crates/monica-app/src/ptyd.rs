@@ -9,14 +9,15 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
-use monica_application::{TerminalSessionStatus, TerminalSessionUpdate};
+use monica_application::{
+    DaemonSessionView, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
+};
 use monica_infra::filesystem::paths;
-use monica_infra::Runtime;
 use monica_pty::client::{ClientEvent, PtydClient};
-use monica_pty::protocol::{RequestOp, PROTOCOL_VERSION};
+use monica_pty::protocol::{CreateParams, RequestOp, ResponseBody, SessionInfo, PROTOCOL_VERSION};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::services::run_settlement;
+use crate::event_sink::{AppMonica, TauriEventSink};
 
 const CONNECT_RETRY_WINDOW: Duration = Duration::from_secs(2);
 const CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(50);
@@ -91,6 +92,12 @@ fn try_connect(app: &AppHandle, socket: &Path) -> Result<Arc<PtydClient>> {
     Ok(Arc::new(client))
 }
 
+/// Open a thread-local façade carrying a Tauri event sink. Used by the reader-thread callbacks,
+/// which run outside any command and must build their own façade.
+fn open_facade(app: &AppHandle) -> Result<AppMonica> {
+    monica_infra::open_monica(Box::new(TauriEventSink::new(app.clone())))
+}
+
 fn handle_event(app: &AppHandle, event: ClientEvent) {
     match event {
         ClientEvent::Output { session_id, data } => {
@@ -100,27 +107,19 @@ fn handle_event(app: &AppHandle, event: ClientEvent) {
             session_id,
             exit_code,
         } => {
-            match Runtime::open_default() {
-                Ok(mut runtime) => {
-                    match runtime.repositories.update_terminal_session_status(
-                        &session_id,
-                        TerminalSessionStatus::Exited,
-                        exit_code,
-                    ) {
-                        Ok(()) => run_settlement::settle_runs_for_terminated_sessions(
-                            app,
-                            &mut runtime,
-                            std::slice::from_ref(&session_id),
-                        ),
-                        Err(e) => log::error!(
+            match open_facade(app) {
+                Ok(mut monica) => {
+                    if let Err(e) = monica.executions().record_terminal_exit(&session_id, exit_code)
+                    {
+                        log::error!(
                             target: "monica_app::ptyd",
-                            "failed to record exit of {session_id}: {e:#}"
-                        ),
+                            "failed to record exit of {session_id}: {e}"
+                        );
                     }
                 }
                 Err(e) => log::error!(
                     target: "monica_app::ptyd",
-                    "failed to open runtime for exit of {session_id}: {e:#}"
+                    "failed to open façade for exit of {session_id}: {e:#}"
                 ),
             }
             let _ = app.emit(&format!("terminal:exit:{session_id}"), &exit_code);
@@ -148,35 +147,13 @@ fn replace_incompatible_daemon(
     );
     // Honest-lost policy: the old daemon's sessions cannot be carried across the protocol
     // break, so settle them as lost before the restart kills their processes.
-    match Runtime::open_default() {
-        Ok(mut runtime) => {
-            let updates: Vec<TerminalSessionUpdate> = runtime
-                .repositories
-                .list_terminal_sessions(None)
-                .unwrap_or_default()
-                .iter()
-                .filter(|row| !row.status.is_terminal())
-                .map(|row| TerminalSessionUpdate {
-                    session_id: row.id.clone(),
-                    status: TerminalSessionStatus::Lost,
-                    pid: None,
-                    exit_code: None,
-                })
-                .collect();
-            match runtime.repositories.apply_terminal_session_updates(&updates) {
-                Ok(()) => {
-                    run_settlement::settle_runs_for_terminated_sessions(
-                        app,
-                        &mut runtime,
-                        &run_settlement::terminated_session_ids(&updates),
-                    );
-                }
-                Err(e) => {
-                    log::error!(target: "monica_app::ptyd", "failed to mark sessions lost: {e:#}")
-                }
+    match open_facade(app) {
+        Ok(mut monica) => {
+            if let Err(e) = monica.executions().mark_all_sessions_lost() {
+                log::error!(target: "monica_app::ptyd", "failed to mark sessions lost: {e}");
             }
         }
-        Err(e) => log::error!(target: "monica_app::ptyd", "failed to open runtime: {e:#}"),
+        Err(e) => log::error!(target: "monica_app::ptyd", "failed to open façade: {e:#}"),
     }
 
     let _ = old.notify(RequestOp::Shutdown);
@@ -240,6 +217,83 @@ pub(crate) fn start_warmup(app: AppHandle) {
         });
     if let Err(e) = spawned {
         log::error!(target: "monica_app::ptyd", "failed to start ptyd warmup thread: {e}");
+    }
+}
+
+/// Adapter over the live daemon connection implementing the application's `TerminalDaemon` port.
+/// Built per command from the managed `PtydHandle` + `AppHandle` (the connection is driver-owned,
+/// so it is injected rather than held in the façade).
+pub(crate) struct PtydTerminalDaemon<'a> {
+    pub(crate) handle: &'a PtydHandle,
+    pub(crate) app: &'a AppHandle,
+}
+
+impl TerminalDaemon for PtydTerminalDaemon<'_> {
+    fn create(&self, request: TerminalCreateRequest) -> Result<Option<u32>> {
+        let client = self.handle.ensure_connected(self.app)?;
+        match client.request(RequestOp::Create(CreateParams {
+            session_id: request.session_id,
+            cwd: request.cwd,
+            shell: Some(request.shell),
+            rows: request.rows,
+            cols: request.cols,
+            env: Some(request.env),
+        }))? {
+            ResponseBody::Created { pid } => Ok(pid),
+            other => bail!("unexpected create response: {other:?}"),
+        }
+    }
+
+    fn attach(&self, session_id: &str, replay_bytes: Option<u32>) -> Result<TerminalAttachment> {
+        let client = self.handle.ensure_connected(self.app)?;
+        let body = client.request(RequestOp::Attach {
+            session_id: session_id.to_string(),
+            replay_bytes,
+        })?;
+        let ResponseBody::Attached { replay, rows, cols } = body else {
+            bail!("unexpected attach response: {body:?}");
+        };
+        Ok(TerminalAttachment { replay, rows, cols })
+    }
+
+    fn detach(&self, session_id: &str) -> Result<()> {
+        let client = self.handle.ensure_connected(self.app)?;
+        client.request(RequestOp::Detach {
+            session_id: session_id.to_string(),
+        })?;
+        Ok(())
+    }
+
+    fn terminate(&self, session_id: &str) -> Result<()> {
+        let client = self.handle.ensure_connected(self.app)?;
+        client.request(RequestOp::Terminate {
+            session_id: session_id.to_string(),
+        })?;
+        Ok(())
+    }
+
+    fn list_views(&self) -> Result<Vec<DaemonSessionView>> {
+        let client = self.handle.ensure_connected(self.app)?;
+        let body = client.request(RequestOp::List)?;
+        let ResponseBody::Sessions { sessions } = body else {
+            bail!("unexpected list response: {body:?}");
+        };
+        Ok(sessions
+            .into_iter()
+            .map(
+                |SessionInfo { session_id, running, attached, pid, exit_code, .. }| {
+                    DaemonSessionView { session_id, pid, running, attached, exit_code }
+                },
+            )
+            .collect())
+    }
+
+    fn reap(&self, session_id: &str) {
+        if let Ok(client) = self.handle.ensure_connected(self.app) {
+            let _ = client.notify(RequestOp::Reap {
+                session_id: session_id.to_string(),
+            });
+        }
     }
 }
 

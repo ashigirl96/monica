@@ -1,4 +1,5 @@
 mod auth;
+mod event_sink;
 mod hook;
 mod issue;
 mod notebooks;

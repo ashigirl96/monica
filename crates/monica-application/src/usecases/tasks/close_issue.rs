@@ -1,9 +1,7 @@
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
-
 use super::ports::{GitGateway, ProjectRepository, TaskRepository, TaskRunRepository};
-use crate::Task;
+use crate::{ApplicationError, ApplicationResult, Task};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CloseIssueReport {
@@ -12,14 +10,14 @@ pub struct CloseIssueReport {
     pub removed_branches: Vec<String>,
 }
 
-pub fn close_issue<R, G>(repos: &mut R, git: &G, id: &str) -> Result<CloseIssueReport>
+pub fn close_issue<R, G>(repos: &mut R, git: &G, id: &str) -> ApplicationResult<CloseIssueReport>
 where
     R: TaskRepository + TaskRunRepository + ProjectRepository,
     G: GitGateway,
 {
     let item = repos
         .get_task(id)?
-        .ok_or_else(|| anyhow!("task not found: {id}"))?;
+        .ok_or_else(|| ApplicationError::not_found(format!("task not found: {id}")))?;
     let runs = repos.list_task_runs_for_task(id)?;
     let removed_branches = cleanup_runs(repos, git, &item, &runs)?;
     let item = repos.mark_task_closed(id)?;
@@ -35,7 +33,7 @@ fn cleanup_runs<R, G>(
     git: &G,
     item: &Task,
     runs: &[crate::TaskRun],
-) -> Result<Vec<String>>
+) -> ApplicationResult<Vec<String>>
 where
     R: ProjectRepository,
     G: GitGateway,
@@ -45,21 +43,21 @@ where
     }
 
     let project_id = item.project_id.as_deref().ok_or_else(|| {
-        anyhow!(
+        ApplicationError::validation(format!(
             "{} has run records but is not linked to a project; refusing to close so run cleanup \
              metadata is preserved",
             item.id
-        )
+        ))
     })?;
     let project = repos
         .get_project(project_id)?
-        .ok_or_else(|| anyhow!("project not found: {project_id}"))?;
+        .ok_or_else(|| ApplicationError::not_found(format!("project not found: {project_id}")))?;
     let repo_path = project.path.as_deref().ok_or_else(|| {
-        anyhow!(
+        ApplicationError::validation(format!(
             "project {project_id} has no checkout path; refusing to close {} so run cleanup \
              metadata is preserved",
             item.id
-        )
+        ))
     })?;
-    git.cleanup_task_runs(Path::new(repo_path), runs)
+    Ok(git.cleanup_task_runs(Path::new(repo_path), runs)?)
 }

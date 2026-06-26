@@ -1,29 +1,9 @@
 use anyhow::Result;
 use rusqlite::params;
-use serde::{Deserialize, Serialize};
+
+use monica_application::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTabRow};
 
 use crate::sqlite::SqliteStore;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TerminalTabRow {
-    pub id: String,
-    pub cwd: String,
-    pub title: String,
-    pub sort_order: i64,
-    pub terminal_session_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TerminalRunspaceRow {
-    pub id: String,
-    pub sort_order: i64,
-    pub tabs: Vec<TerminalTabRow>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TerminalStateSnapshot {
-    pub runspaces: Vec<TerminalRunspaceRow>,
-}
 
 impl SqliteStore {
     pub fn load_terminal_state(&self) -> Result<TerminalStateSnapshot> {

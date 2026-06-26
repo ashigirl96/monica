@@ -4,10 +4,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use clap::Subcommand;
-use monica_application::Agent;
-use monica_infra::Runtime;
+use monica_application::{Agent, HookContext};
 
-use crate::notify;
+use crate::event_sink::CliEventSink;
 
 #[derive(Subcommand)]
 pub enum HookCommand {
@@ -76,15 +75,10 @@ fn handle_agent(agent: Agent, log_file: &str) -> Result<()> {
         return Ok(());
     }
 
-    let mut runtime = Runtime::open_default()?;
-    let record = match agent {
-        Agent::Claude => monica_application::record_claude_hook,
-        Agent::Codex => monica_application::record_codex_hook,
-    };
-    let report = record(
-        &mut runtime.repositories,
-        &runtime.task_run_outputs,
-        monica_application::HookContext {
+    let mut monica = monica_infra::open_monica(Box::new(CliEventSink))?;
+    let report = monica.executions().ingest_agent_hook(
+        agent,
+        HookContext {
             task_id: task_id.as_deref(),
             task_run_id: task_run_id.as_deref(),
             terminal_tab_id: terminal_tab_id.as_deref(),
@@ -104,13 +98,6 @@ fn handle_agent(agent: Agent, log_file: &str) -> Result<()> {
         report.entered_waiting_for_user,
         report.jsonl_written,
     ));
-
-    if report.entered_waiting_for_user {
-        notify::post(&notify::waiting_notification(
-            report.task_run_wait_reason,
-            report.task_title.as_deref(),
-        ));
-    }
 
     if let Some(id) = &task_id {
         if !report.ignored && !report.task_found {

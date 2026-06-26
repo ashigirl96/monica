@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 
+use monica_api::ApiError;
 use serde::Serialize;
+use tauri::AppHandle;
 
-use monica_infra::Runtime;
+use crate::event_sink;
 
 #[derive(Serialize, specta::Type)]
 pub struct PlanPreview {
@@ -18,12 +20,12 @@ pub struct PlanPreview {
 /// run that never planned, and a plan file since deleted — all "nothing to preview" to the caller.
 #[tauri::command]
 #[specta::specta]
-pub fn read_runspace_plan(terminal_tab_id: String) -> Result<Option<PlanPreview>, String> {
-    let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    let Some(path) =
-        monica_application::plan_path_for_terminal_tab(&runtime.repositories, &terminal_tab_id)
-            .map_err(|e| e.to_string())?
-    else {
+pub fn read_runspace_plan(
+    app: AppHandle,
+    terminal_tab_id: String,
+) -> Result<Option<PlanPreview>, ApiError> {
+    let mut monica = event_sink::open(&app)?;
+    let Some(path) = monica.tasks().plan_path_for_terminal_tab(&terminal_tab_id)? else {
         return Ok(None);
     };
     let Ok(body) = std::fs::read_to_string(&path) else {

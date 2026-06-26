@@ -129,3 +129,66 @@ pub struct TerminalRunspaceRow {
 pub struct TerminalStateSnapshot {
     pub runspaces: Vec<TerminalRunspaceRow>,
 }
+
+// The workbench layout is owned by the application (`TerminalStateSnapshot`) but crosses the Tauri
+// boundary as this DTO. The two shapes are intentionally identical; these conversions keep them in
+// lockstep so commands map with `.into()` instead of hand-rolling field copies.
+impl From<monica_application::TerminalStateSnapshot> for TerminalStateSnapshot {
+    fn from(value: monica_application::TerminalStateSnapshot) -> Self {
+        Self {
+            runspaces: value.runspaces.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<monica_application::TerminalRunspaceRow> for TerminalRunspaceRow {
+    fn from(value: monica_application::TerminalRunspaceRow) -> Self {
+        Self {
+            id: value.id,
+            sort_order: value.sort_order,
+            tabs: value.tabs.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<monica_application::TerminalTabRow> for TerminalTabRow {
+    fn from(value: monica_application::TerminalTabRow) -> Self {
+        Self {
+            id: value.id,
+            cwd: value.cwd,
+            title: value.title,
+            sort_order: value.sort_order,
+            terminal_session_id: value.terminal_session_id,
+        }
+    }
+}
+
+impl From<TerminalStateSnapshot> for monica_application::TerminalStateSnapshot {
+    fn from(value: TerminalStateSnapshot) -> Self {
+        Self {
+            runspaces: value.runspaces.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<TerminalRunspaceRow> for monica_application::TerminalRunspaceRow {
+    fn from(value: TerminalRunspaceRow) -> Self {
+        Self {
+            id: value.id,
+            sort_order: value.sort_order,
+            tabs: value.tabs.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<TerminalTabRow> for monica_application::TerminalTabRow {
+    fn from(value: TerminalTabRow) -> Self {
+        Self {
+            id: value.id,
+            cwd: value.cwd,
+            title: value.title,
+            sort_order: value.sort_order,
+            terminal_session_id: value.terminal_session_id,
+        }
+    }
+}

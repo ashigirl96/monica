@@ -1779,7 +1779,7 @@ fn terminal_session_list_filters_by_runspace() {
 
 #[test]
 fn terminal_state_snapshot_round_trips_session_id() {
-    use crate::sqlite::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTabRow};
+    use monica_application::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTabRow};
 
     let mut db = SqliteStore::open_in_memory().unwrap();
     let snapshot = TerminalStateSnapshot {

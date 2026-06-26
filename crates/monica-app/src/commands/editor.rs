@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use monica_api::ApiError;
+
 /// Resolve each candidate against `cwd` (expanding a leading `~`) and return the
 /// canonical absolute path when it exists, or `null` otherwise. `canonicalize`
 /// doubles as the existence check: a path that cannot be resolved on disk is
@@ -15,22 +17,24 @@ pub fn resolve_editor_paths(cwd: String, candidates: Vec<String>) -> Vec<Option<
 
 #[tauri::command]
 #[specta::specta]
-pub fn open_in_editor(path: String) -> Result<(), String> {
+pub fn open_in_editor(path: String) -> Result<(), ApiError> {
     #[cfg(target_os = "macos")]
     {
         let status = std::process::Command::new("/usr/bin/open")
             .args(["-a", "Zed", &path])
             .status()
-            .map_err(|e| format!("failed to launch Zed: {e}"))?;
+            .map_err(|e| ApiError::external(format!("failed to launch Zed: {e}")))?;
         if !status.success() {
-            return Err(format!("`open -a Zed {path}` exited with {status}"));
+            return Err(ApiError::external(format!(
+                "`open -a Zed {path}` exited with {status}"
+            )));
         }
         Ok(())
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = path;
-        Err("open_in_editor is only supported on macOS".to_string())
+        Err(ApiError::external("open_in_editor is only supported on macOS"))
     }
 }
 

@@ -5,6 +5,9 @@
 //! filesystem, process, keychain, and runtime wiring live in `monica-infra`.
 
 mod bench;
+mod error;
+mod events;
+pub mod facade;
 mod github;
 mod lifecycle;
 mod observation;
@@ -12,7 +15,15 @@ pub mod ports;
 pub mod prelude;
 mod queries;
 pub mod shell;
+mod terminal_state;
 pub mod usecases;
+
+pub use error::{ApplicationError, ApplicationResult};
+pub use events::{ApplicationEvent, EventSink};
+pub use facade::{
+    Backend, ExecutionService, Monica, NotebookService, ProjectInit, ProjectService,
+    SynchronizationService, TaskService,
+};
 
 pub use prelude::{
     branch_name, is_continuation_session_start, is_safe_task_run_id, is_session_starting_event,
@@ -33,9 +44,11 @@ pub use prelude::{
     TerminalSession, TerminalSessionKind, TerminalSessionStatus,
 };
 pub use ports::{
-    EventRepository, GitGateway, ProjectRepository, TaskRepository, TaskRunRepository,
-    TaskSummaryFilter,
+    EventRepository, GitGateway, NotebookGateway, ProjectRepository, TaskRepository,
+    TaskRunRepository, TaskSummaryFilter, TerminalAttachment, TerminalCreateRequest,
+    TerminalDaemon, TerminalSessionRepository, Workspace,
 };
+pub use terminal_state::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTabRow};
 pub use usecases::github::ports::{AuthGateway, GithubGateway};
 pub use usecases::runs::ports::{
     BenchRepository, Clock, SetupEnv, SetupOutcome, SetupRunner, TaskRunOutputs, TaskShellEnv,

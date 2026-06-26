@@ -1,12 +1,10 @@
-use anyhow::Result;
-
 use super::ports::{GithubGateway, TaskRepository};
-use crate::PullRequestSyncResult;
+use crate::{ApplicationResult, PullRequestSyncResult};
 
 pub async fn sync_next_pull_request<R, G>(
     repos: &mut R,
     github: &G,
-) -> Result<PullRequestSyncResult>
+) -> ApplicationResult<PullRequestSyncResult>
 where
     R: TaskRepository,
     G: GithubGateway,

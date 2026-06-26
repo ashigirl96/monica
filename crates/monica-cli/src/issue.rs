@@ -6,7 +6,8 @@ use monica_application::{
     parse_issue_input, parse_owner_repo, DisplayStatus, Task, TaskSummaryFilter, TaskSummaryRow,
     TrackGithubIssueInput,
 };
-use monica_infra::Runtime;
+
+use crate::event_sink::{self, CliFacade};
 
 #[derive(Subcommand)]
 pub enum IssueCommand {
@@ -30,26 +31,24 @@ pub enum IssueCommand {
 }
 
 pub async fn run(cmd: IssueCommand) -> Result<()> {
-    let mut runtime = Runtime::open_default()?;
+    let mut monica = event_sink::open()?;
     match cmd {
-        IssueCommand::Track { target } => track_command(&mut runtime, &target).await,
-        IssueCommand::Status { status, project } => status_command(&runtime, status, project),
-        IssueCommand::Close { id } => close_command(&mut runtime, &id),
+        IssueCommand::Track { target } => track_command(&mut monica, &target).await,
+        IssueCommand::Status { status, project } => status_command(&mut monica, status, project),
+        IssueCommand::Close { id } => close_command(&mut monica, &id),
     }
 }
 
-async fn track_command(runtime: &mut Runtime, target: &str) -> Result<()> {
+async fn track_command(monica: &mut CliFacade, target: &str) -> Result<()> {
     let (repo, number) = parse_issue_input(target)?;
-    let report = monica_application::track_github_issue(
-        &mut runtime.repositories,
-        &runtime.github,
-        TrackGithubIssueInput {
+    let report = monica
+        .synchronization()
+        .track_github_issue(TrackGithubIssueInput {
             repo: repo.clone(),
             number,
-        },
-    )
-    .await
-    .with_context(|| format!("failed to fetch GitHub issue {repo}#{number}"))?;
+        })
+        .await
+        .with_context(|| format!("failed to fetch GitHub issue {repo}#{number}"))?;
     let item = report.task;
     let issue = report.issue;
     println!("Created {} from {}#{}", item.id, repo, issue.number);
@@ -59,23 +58,27 @@ async fn track_command(runtime: &mut Runtime, target: &str) -> Result<()> {
 }
 
 fn status_command(
-    runtime: &Runtime,
+    monica: &mut CliFacade,
     status: Option<String>,
     project: Option<String>,
 ) -> Result<()> {
     let filter = status_filter(status.as_deref())?;
     let project = normalize_project_filter(project.as_deref())?;
-    let rows = monica_application::list_task_summaries(&runtime.repositories, filter, project.as_deref())?;
+    let rows = monica.tasks().list_task_summaries(filter, project.as_deref())?;
     print!("{}", render_status_table(&rows));
     Ok(())
 }
 
-fn close_command(runtime: &mut Runtime, id: &str) -> Result<()> {
-    let item = monica_application::list_tasks(&runtime.repositories)?
+fn close_command(monica: &mut CliFacade, id: &str) -> Result<()> {
+    let item = monica
+        .tasks()
+        .list_tasks()?
         .into_iter()
         .find(|task| task.id == id)
         .ok_or_else(|| anyhow!("Issue not found: {id}"))?;
-    let project = monica_application::list_task_summaries(&runtime.repositories, TaskSummaryFilter::All, None)?
+    let project = monica
+        .tasks()
+        .list_task_summaries(TaskSummaryFilter::All, None)?
         .into_iter()
         .find(|row| row.id == item.id)
         .and_then(|row| row.project);
@@ -86,7 +89,7 @@ fn close_command(runtime: &mut Runtime, id: &str) -> Result<()> {
         return Ok(());
     }
 
-    let report = monica_application::close_issue(&mut runtime.repositories, &runtime.git, id)?;
+    let report = monica.tasks().close_issue(id)?;
     println!("Closed issue {}.", report.item.id);
     if !report.task_runs.is_empty() {
         println!("Preserved task runs: {}.", report.task_runs.join(", "));

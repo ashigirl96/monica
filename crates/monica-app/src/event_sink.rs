@@ -1,0 +1,52 @@
+use monica_api::ApiError;
+use monica_application::{ApplicationEvent, EventSink};
+use tauri::AppHandle;
+use tauri_specta::Event;
+
+use crate::commands::pull_request::PrSyncCompleted;
+use crate::commands::task::TaskRunStatusChanged;
+
+/// The application façade wired to the default backend and the Tauri event sink.
+pub type AppMonica = monica_application::Monica<monica_infra::DefaultBackend>;
+
+/// Open the façade for a command/thread. The façade owns a SQLite connection and is `!Send`, so it
+/// must be built per operation on the thread that uses it — never stored in Tauri state.
+pub fn open(app: &AppHandle) -> Result<AppMonica, ApiError> {
+    monica_infra::open_monica(Box::new(TauriEventSink::new(app.clone())))
+        .map_err(|e| ApiError::storage(format!("{e:#}")))
+}
+
+/// Bridges [`ApplicationEvent`]s to the webview as tauri-specta events. Raw PTY byte/exit streams
+/// are not application events — they stay in `ptyd`.
+pub struct TauriEventSink {
+    app: AppHandle,
+}
+
+impl TauriEventSink {
+    pub fn new(app: AppHandle) -> Self {
+        Self { app }
+    }
+}
+
+impl EventSink for TauriEventSink {
+    fn emit(&self, event: ApplicationEvent) {
+        match event {
+            ApplicationEvent::TaskRunStatusChanged { task_id, task_run_id, status } => {
+                let _ = TaskRunStatusChanged {
+                    task_id,
+                    task_run_id,
+                    status: status.into(),
+                }
+                .emit(&self.app);
+            }
+            ApplicationEvent::PullRequestSyncCompleted { synced_count } => {
+                if let Err(e) = (PrSyncCompleted { synced_count }).emit(&self.app) {
+                    log::warn!(target: "monica_app::events", "failed to emit PrSyncCompleted: {e}");
+                }
+            }
+            // The desktop reflects a waiting run via its TaskRunStatusChanged status; no separate
+            // OS notification yet.
+            ApplicationEvent::AwaitingUserInput { .. } => {}
+        }
+    }
+}

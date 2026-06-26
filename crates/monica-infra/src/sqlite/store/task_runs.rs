@@ -118,6 +118,14 @@ impl SqliteStore {
 }
 
 impl TaskRunRepository for SqliteStore {
+    fn list_driven_task_runs_with_tab(&self) -> Result<Vec<TaskRun>> {
+        SqliteStore::list_driven_task_runs_with_tab(self)
+    }
+
+    fn settle_task_run_if_live(&mut self, task_run_id: &str, task_id: &str) -> Result<bool> {
+        SqliteStore::settle_task_run_if_live(self, task_run_id, task_id)
+    }
+
     /// Apply a hook observation to a task run. TaskRun is the lifecycle source of truth; the owning
     /// task is only kept in `in_progress` while a non-closed run is being observed.
     ///
