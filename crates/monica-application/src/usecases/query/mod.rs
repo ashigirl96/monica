@@ -1,6 +1,8 @@
+mod ports;
+
 use anyhow::{anyhow, Result};
 
-use crate::ports::{
+use self::ports::{
     EventRepository, ProjectRepository, TaskRepository, TaskRunRepository, TaskSummaryFilter,
 };
 use crate::{Event, Project, Task, TaskSummaryRow};

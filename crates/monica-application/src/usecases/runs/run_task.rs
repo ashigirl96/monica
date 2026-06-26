@@ -4,7 +4,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Result};
 
 use crate::prelude::{branch_name, monica_number, worktree_path_for};
-use crate::ports::{
+use super::ports::{
     BenchRepository, GitGateway, ProjectRepository, TaskRunOutputs, SetupEnv, SetupOutcome,
     SetupRunner, TaskRepository, TaskRunRepository,
 };

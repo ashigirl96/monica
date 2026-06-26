@@ -7,11 +7,14 @@ use monica_domain::RawJson;
 use serde_json::Value;
 
 use crate::ports::{
-    AuthGateway, BenchRepository, BoxFuture, Clock, EventRepository, GitGateway, GithubGateway,
-    ProjectRepository, TaskRunOutputs, SetupEnv, SetupOutcome, SetupRunner, TaskRepository,
-    TaskRunRepository, TaskSummaryFilter,
+    BoxFuture, EventRepository, GitGateway, ProjectRepository, TaskRepository, TaskRunRepository,
+    TaskSummaryFilter,
 };
-use super::record_hook::{
+use crate::{
+    AuthGateway, BenchRepository, Clock, GithubGateway, SetupEnv, SetupOutcome, SetupRunner,
+    TaskRunOutputs,
+};
+use super::runs::record_hook::{
     resolve_by_lazy_create, resolve_by_prepared_primary, resolve_by_session, RunResolveCtx,
 };
 use crate::{
@@ -1852,7 +1855,7 @@ fn default_bench_cwd_prefers_project_path() {
     let mut project = Project::from_repo("owner/repo");
     project.path = Some("/test/repo".to_string());
     assert_eq!(
-        super::open_bench::default_bench_cwd(Some(&project), Some("/home/user")),
+        super::runs::open_bench::default_bench_cwd(Some(&project), Some("/home/user")),
         "/test/repo"
     );
 }
@@ -1861,7 +1864,7 @@ fn default_bench_cwd_prefers_project_path() {
 fn default_bench_cwd_falls_back_to_home_dir_when_no_project_path() {
     let project = Project::from_repo("owner/repo");
     assert_eq!(
-        super::open_bench::default_bench_cwd(Some(&project), Some("/home/user")),
+        super::runs::open_bench::default_bench_cwd(Some(&project), Some("/home/user")),
         "/home/user"
     );
 }
@@ -1869,7 +1872,7 @@ fn default_bench_cwd_falls_back_to_home_dir_when_no_project_path() {
 #[test]
 fn default_bench_cwd_falls_back_to_tmp_when_no_project_and_no_home() {
     assert_eq!(
-        super::open_bench::default_bench_cwd(None, None),
+        super::runs::open_bench::default_bench_cwd(None, None),
         "/tmp"
     );
 }
@@ -1945,7 +1948,7 @@ fn task_shell_env_uses_existing_bench_cwd() {
     let outputs = FakeTaskRunOutputs::default();
 
     let bench = open_bench(&mut repos, &outputs, &task_id).unwrap();
-    let env = super::task_shell_env(&repos, &outputs, &task_id).unwrap();
+    let env = super::runs::task_shell_env(&repos, &outputs, &task_id).unwrap();
     assert_eq!(env_value(&env, "MONICA_CWD"), Some(bench.cwd.as_str()));
 }
 
@@ -1969,7 +1972,7 @@ fn task_shell_env_falls_back_to_worktree_when_no_bench() {
     repos.set_primary_task_run(&task_id, &run.id).unwrap();
 
     let outputs = FakeTaskRunOutputs::default();
-    let env = super::task_shell_env(&repos, &outputs, &task_id).unwrap();
+    let env = super::runs::task_shell_env(&repos, &outputs, &task_id).unwrap();
     assert_eq!(env_value(&env, "MONICA_CWD"), Some("/tmp"));
 }
 
@@ -1982,7 +1985,7 @@ fn task_shell_env_falls_back_to_project_path_when_no_bench_no_worktree() {
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
 
     let outputs = FakeTaskRunOutputs::default();
-    let env = super::task_shell_env(&repos, &outputs, &task_id).unwrap();
+    let env = super::runs::task_shell_env(&repos, &outputs, &task_id).unwrap();
     assert_eq!(env_value(&env, "MONICA_CWD"), Some("/test/repo"));
 }
 

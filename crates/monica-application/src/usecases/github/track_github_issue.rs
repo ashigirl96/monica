@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::ports::{GithubGateway, ProjectRepository, TaskRepository};
+use super::ports::{GithubGateway, ProjectRepository, TaskRepository};
 use crate::{
     parse_owner_repo, ExternalIssue, ExternalReference, GithubIssue, NewTask, Provider, RefType,
     Task, TaskKind, TaskStatus,
