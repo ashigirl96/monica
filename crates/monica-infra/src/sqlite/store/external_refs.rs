@@ -2,21 +2,28 @@ use anyhow::Result;
 use rusqlite::params;
 
 use crate::sqlite::SqliteStore;
-use monica_application::{ExternalRef, GithubPullRequestRef};
+use monica_application::{ExternalReference, GithubPullRequestRef};
 
 impl SqliteStore {
-    pub fn save_external_ref(&self, r: &ExternalRef) -> Result<i64> {
+    pub fn save_external_ref(&self, r: &ExternalReference) -> Result<i64> {
         self.conn().execute(
-            "INSERT INTO external_refs (task_id, ref_type, repo, number, url)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![r.task_id, r.ref_type.as_str(), r.repo, r.number, r.url],
+            "INSERT INTO external_refs (task_id, provider, ref_type, repo, number, url)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                r.task_id,
+                r.provider.as_str(),
+                r.ref_type.as_str(),
+                r.repo,
+                r.number,
+                r.url
+            ],
         )?;
         Ok(self.conn().last_insert_rowid())
     }
 
-    pub fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalRef>> {
+    pub fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalReference>> {
         let mut stmt = self.conn().prepare(
-            "SELECT id, task_id, ref_type, repo, number, url, created_at
+            "SELECT id, task_id, provider, ref_type, repo, number, url, created_at
              FROM external_refs WHERE task_id = ?1 ORDER BY id",
         )?;
         let mut rows = stmt.query(params![task_id])?;
@@ -36,7 +43,7 @@ impl SqliteStore {
              FROM external_refs pr
              LEFT JOIN github_pull_request_ref_states state
                ON state.external_ref_id = pr.id
-             WHERE pr.task_id = ?1 AND pr.ref_type = 'github_pull_request'
+             WHERE pr.task_id = ?1 AND pr.ref_type = 'pull_request'
              ORDER BY pr.id",
         )?;
         let mut rows = stmt.query(params![task_id])?;

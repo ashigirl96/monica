@@ -18,7 +18,7 @@ migrations!(
     v11, v12, v13, v14, v15,
     v16, v17, v18, v19, v20,
     v21, v22, v23, v24, v25,
-    v26, v27,
+    v26, v27, v28,
 );
 
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
@@ -118,8 +118,9 @@ pub(crate) mod test_support {
 mod tests {
     use super::*;
     use monica_application::{
-        DisplayStatus, EventRepository, NewTaskRun, ProjectRepository, TaskRepository,
-        TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus, TaskSummaryFilter,
+        DisplayStatus, EventRepository, NewTaskRun, ProjectRepository, Provider, RefType,
+        TaskRepository, TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus,
+        TaskSummaryFilter,
     };
     use rusqlite::params;
     use test_support::*;
@@ -667,6 +668,34 @@ mod tests {
         ] {
             assert_table_absent(db.conn(), table);
         }
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn v28_rewrites_legacy_ref_types_and_reads_back_provider_agnostic() {
+        let path = temp_db_path("v28");
+
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            stage_through(&mut conn, 27);
+            conn.execute_batch(
+                "INSERT INTO tasks (id, kind, status, title)
+                   VALUES ('mon-1', 'development', 'ready', 't');
+                 INSERT INTO external_refs (task_id, ref_type, repo, number)
+                   VALUES ('mon-1', 'github_issue', 'o/r', 1),
+                          ('mon-1', 'github_pull_request', 'o/r', 2);",
+            )
+            .unwrap();
+        }
+
+        // open_at applies v28; reading back exercises external_ref_from_row's provider/ref_type parse.
+        let db = crate::sqlite::SqliteStore::open_at(&path).unwrap();
+        let refs = db.list_external_refs("mon-1").unwrap();
+        assert_eq!(refs.len(), 2);
+        assert!(refs.iter().all(|r| r.provider == Provider::Github));
+        assert_eq!(refs[0].ref_type, RefType::Issue);
+        assert_eq!(refs[1].ref_type, RefType::PullRequest);
 
         std::fs::remove_file(&path).ok();
     }

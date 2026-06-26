@@ -6,7 +6,7 @@
 
 mod branch;
 mod error;
-mod external_ref;
+mod external_reference;
 mod json;
 mod notebook;
 mod project;
@@ -18,7 +18,7 @@ mod terminal_session;
 
 pub use branch::{branch_name, monica_number, worktree_path_for};
 pub use error::DomainError;
-pub use external_ref::{ExternalRef, RefType};
+pub use external_reference::{ExternalIssue, ExternalReference, RefType};
 pub use json::RawJson;
 pub use notebook::{
     front_value, is_valid_slug, mermaid_blocks, outline, pages_from_docs, parse_front_matter,

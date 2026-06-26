@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::domain::{
-    DisplayStatus, ExternalRef, GithubPullRequest, PullRequestBranchSyncCandidate,
+    DisplayStatus, ExternalReference, GithubPullRequest, PullRequestBranchSyncCandidate,
     PullRequestStatusSyncCandidate, Task, TaskStatus, TaskSummaryRow,
 };
 use crate::NewTask;
@@ -30,7 +30,7 @@ impl TaskSummaryFilter {
 
 pub trait TaskRepository {
     fn insert_task(&mut self, new: NewTask) -> Result<Task>;
-    fn insert_task_with_ref(&mut self, new: NewTask, external: ExternalRef) -> Result<Task>;
+    fn insert_task_with_ref(&mut self, new: NewTask, external: ExternalReference) -> Result<Task>;
     fn get_task(&self, id: &str) -> Result<Option<Task>>;
     fn mark_task_closed(&mut self, id: &str) -> Result<Task>;
     fn list_tasks(&self) -> Result<Vec<Task>>;
@@ -42,7 +42,7 @@ pub trait TaskRepository {
     fn set_primary_task_run(&self, task_id: &str, task_run_id: &str) -> Result<()>;
     fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()>;
     fn mark_task(&mut self, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()>;
-    fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalRef>>;
+    fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalReference>>;
     fn next_pull_request_branch_sync_candidate(
         &self,
     ) -> Result<Option<PullRequestBranchSyncCandidate>>;
