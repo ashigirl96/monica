@@ -5,16 +5,16 @@
 //! filesystem, process, keychain, and runtime wiring live in `monica-infra`.
 
 mod bench;
-pub mod domain;
 mod github;
 mod lifecycle;
 mod observation;
 pub mod ports;
+pub mod prelude;
 mod queries;
 pub mod shell;
 pub mod usecases;
 
-pub use domain::{
+pub use prelude::{
     branch_name, is_continuation_session_start, is_safe_task_run_id, is_session_starting_event,
     front_value, is_valid_slug, mermaid_blocks, monica_number, outline, pages_from_docs,
     parse_front_matter,

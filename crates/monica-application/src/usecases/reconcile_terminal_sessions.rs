@@ -2,7 +2,7 @@
 //! list poll). Pure: callers fetch both sides, apply the returned updates in one
 //! transaction, then send `Reap` for the listed ids.
 
-use crate::domain::{TerminalSession, TerminalSessionStatus};
+use crate::prelude::{TerminalSession, TerminalSessionStatus};
 
 /// What the daemon reports for one session. Deliberately a local DTO so core does not
 /// depend on the daemon protocol types.
@@ -94,7 +94,7 @@ pub fn reconcile_terminal_sessions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::TerminalSessionKind;
+    use crate::prelude::TerminalSessionKind;
 
     fn session(id: &str, status: TerminalSessionStatus) -> TerminalSession {
         TerminalSession {

@@ -1,9 +1,9 @@
-//! Facade over the domain layer for use-case code.
+//! Import surface for use-case code.
 //!
 //! The pure aggregates and rules live in the `monica-domain` crate; this module re-exports them
-//! alongside the application-resident types that were historically part of `monica_core::domain`
-//! (CQRS query models, GitHub adapter DTOs, hook-lifecycle parsing). Existing `crate::domain::X`
-//! paths keep resolving through here so use cases need no churn.
+//! alongside the application-resident types that sit just outside the domain (CQRS query models,
+//! GitHub adapter DTOs, hook-lifecycle parsing). Use cases import everything they need from
+//! `crate::prelude` regardless of which side a given type lives on.
 
 pub use monica_domain::*;
 

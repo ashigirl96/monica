@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 
-use crate::domain::bench_runspace_id;
+use crate::prelude::bench_runspace_id;
 use crate::ports::{
     BenchRepository, ProjectRepository, TaskRunOutputs, TaskRepository, TaskRunRepository,
 };
