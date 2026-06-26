@@ -3,7 +3,8 @@ use rusqlite::{params, OptionalExtension};
 
 use crate::sqlite::SqliteStore;
 use monica_application::{
-    GithubPullRequest, PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate, RefType,
+    GithubPullRequest, Provider, PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate,
+    RefType,
 };
 
 use super::SET_NOW;
@@ -88,7 +89,7 @@ impl SqliteStore {
                ON t.id = pr.task_id
              LEFT JOIN github_pull_request_ref_states state
                ON state.external_ref_id = pr.id
-             WHERE pr.ref_type = 'github_pull_request'
+             WHERE pr.ref_type = 'pull_request'
                AND pr.repo IS NOT NULL
                AND pr.number IS NOT NULL
                AND pr.number > 0
@@ -133,7 +134,7 @@ impl SqliteStore {
                      LIMIT 1",
                     params![
                         &candidate.task_id,
-                        RefType::GithubPullRequest.as_str(),
+                        RefType::PullRequest.as_str(),
                         &pr.repo,
                         pr.number
                     ],
@@ -150,11 +151,12 @@ impl SqliteStore {
                 id
             } else {
                 tx.execute(
-                    "INSERT INTO external_refs (task_id, ref_type, repo, number, url)
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    "INSERT INTO external_refs (task_id, provider, ref_type, repo, number, url)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     params![
                         &candidate.task_id,
-                        RefType::GithubPullRequest.as_str(),
+                        Provider::Github.as_str(),
+                        RefType::PullRequest.as_str(),
                         &pr.repo,
                         pr.number,
                         &pr.url

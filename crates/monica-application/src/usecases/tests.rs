@@ -21,8 +21,8 @@ use crate::{
     record_claude_hook, register_project_with_default_branch,
     start_run, subagents_in_flight_after,
     sync_next_pull_request,
-    track_github_issue, HookContext, MakeMainOutcome, RefType,
-    wait_for_github_device_flow, Agent, DisplayStatus, Event, ExternalRef, GithubAuthStatus,
+    track_github_issue, HookContext, MakeMainOutcome, Provider, RefType,
+    wait_for_github_device_flow, Agent, DisplayStatus, Event, ExternalReference, GithubAuthStatus,
     GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef,
     GithubPullRequestStatus, NewTask, NewTaskRun, Project, PullRequestBranchSyncCandidate,
     PullRequestStatusSyncCandidate, PullRequestSyncStatus, Task,
@@ -39,7 +39,7 @@ struct FakeRepos {
 struct FakeState {
     projects: HashMap<String, Project>,
     tasks: HashMap<String, Task>,
-    refs: HashMap<String, Vec<ExternalRef>>,
+    refs: HashMap<String, Vec<ExternalReference>>,
     runs: HashMap<String, TaskRun>,
     events: Vec<Event>,
     benches: BTreeMap<String, (String, String)>,
@@ -85,7 +85,11 @@ impl TaskRepository for FakeRepos {
         Ok(task)
     }
 
-    fn insert_task_with_ref(&mut self, new: NewTask, mut external: ExternalRef) -> Result<Task> {
+    fn insert_task_with_ref(
+        &mut self,
+        new: NewTask,
+        mut external: ExternalReference,
+    ) -> Result<Task> {
         let task = self.insert_task(new)?;
         external.id = 1;
         external.task_id = task.id.clone();
@@ -186,7 +190,7 @@ impl TaskRepository for FakeRepos {
         Ok(())
     }
 
-    fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalRef>> {
+    fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalReference>> {
         Ok(self
             .state
             .borrow()
@@ -717,6 +721,12 @@ async fn track_github_issue_uses_gateway_and_repositories() {
     assert_eq!(report.task.id, "MON-1");
     assert_eq!(report.task.project_id.as_deref(), Some("owner/repo"));
     assert_eq!(report.issue.number, 42);
+
+    let refs = repos.list_external_refs(&report.task.id).unwrap();
+    assert_eq!(refs.len(), 1);
+    assert_eq!(refs[0].provider, Provider::Github);
+    assert_eq!(refs[0].ref_type, RefType::Issue);
+    assert_eq!(refs[0].number, Some(42));
 }
 
 #[test]
@@ -2011,10 +2021,11 @@ fn insert_issue_backed_task(repos: &mut FakeRepos, issue_number: i64) -> String 
     repos
         .insert_task_with_ref(
             new,
-            ExternalRef {
+            ExternalReference {
                 id: 0,
                 task_id: String::new(),
-                ref_type: RefType::GithubIssue,
+                provider: Provider::Github,
+                ref_type: RefType::Issue,
                 repo: Some("owner/repo".to_string()),
                 number: Some(issue_number),
                 url: None,

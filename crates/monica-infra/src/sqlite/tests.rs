@@ -1,6 +1,6 @@
 use monica_application::{
-    Agent, DisplayStatus, EventRepository, ExternalRef, GithubPullRequest,
-    GithubPullRequestStatus, NewTask, NewTaskRun, NewTerminalSession, Project,
+    Agent, DisplayStatus, EventRepository, ExternalReference, GithubPullRequest,
+    GithubPullRequestStatus, NewTask, NewTaskRun, NewTerminalSession, Project, Provider,
     ProjectRepository, PullRequestBranchSyncCandidate, RawJson, RefType, TaskKind, TaskRepository,
     TaskRun, TaskRunObservation, TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus,
     TaskSummaryFilter, TaskSummaryRow, TerminalSessionKind, TerminalSessionStatus,
@@ -117,9 +117,10 @@ fn task_and_external_ref_round_trip_through_sqlite_repository() {
     let item = db
         .insert_task_with_ref(
             task,
-            ExternalRef::new(
+            ExternalReference::new(
                 "",
-                RefType::GithubIssue,
+                Provider::Github,
+                RefType::Issue,
                 Some("owner/repo".to_string()),
                 Some(42),
                 Some("https://github.com/owner/repo/issues/42".to_string()),
@@ -131,8 +132,26 @@ fn task_and_external_ref_round_trip_through_sqlite_repository() {
     assert_eq!(item.status, TaskStatus::Ready);
     let refs = db.list_external_refs(&item.id).unwrap();
     assert_eq!(refs.len(), 1);
-    assert_eq!(refs[0].ref_type, RefType::GithubIssue);
+    assert_eq!(refs[0].provider, Provider::Github);
+    assert_eq!(refs[0].ref_type, RefType::Issue);
     assert_eq!(refs[0].number, Some(42));
+}
+
+#[test]
+fn list_external_refs_errors_on_unrecognized_provider() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("t")).unwrap();
+    db.conn()
+        .execute(
+            "INSERT INTO external_refs (task_id, provider, ref_type, repo, number)
+             VALUES (?1, 'gitlab', 'issue', 'o/r', 1)",
+            params![task.id],
+        )
+        .unwrap();
+    assert!(
+        db.list_external_refs(&task.id).is_err(),
+        "an unrecognized provider string must surface as an error, not a silent misread"
+    );
 }
 
 #[test]

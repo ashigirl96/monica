@@ -23,7 +23,7 @@ pub use domain::{
     subagents_in_flight_after, LintFinding, NotebookDoc, NotebookPage, OutlineEntry,
     transition_is_generic_wait,
     transition_is_protected, wait_reason_for_tool, worktree_path_for, Agent, DisplayStatus,
-    Event, ExternalRef, RawJson,
+    Event, ExternalIssue, ExternalReference, RawJson,
     TaskBench, PrepareTaskResult, RunTaskResult, GithubAuthStatus, GithubDeviceFlow,
     GithubIssue, GithubPullRequest, GithubPullRequestRef, GithubPullRequestStatus, HookTransition,
     NewTask, NewTaskRun, PermissionMode, Project, Provider, PullRequestBranchSyncCandidate,

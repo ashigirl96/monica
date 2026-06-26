@@ -3,7 +3,7 @@ use rusqlite::params;
 
 use crate::sqlite::SqliteStore;
 use monica_application::{
-    DisplayStatus, ExternalRef, GithubPullRequest, GithubPullRequestStatus, NewTask,
+    DisplayStatus, ExternalReference, GithubPullRequest, GithubPullRequestStatus, NewTask,
     PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate, Task, TaskRepository,
     TaskRunStatus, TaskRunWaitReason, TaskStatus, TaskSummaryFilter, TaskSummaryRow,
 };
@@ -11,7 +11,11 @@ use monica_application::{
 use super::{sql_literal_list, SET_NOW, TASK_COLUMNS};
 
 impl SqliteStore {
-    fn insert_task_inner(&mut self, new: NewTask, external: Option<ExternalRef>) -> Result<Task> {
+    fn insert_task_inner(
+        &mut self,
+        new: NewTask,
+        external: Option<ExternalReference>,
+    ) -> Result<Task> {
         let labels = serde_json::to_string(&new.labels)?;
         let details = new.details.into_string();
         let source = new.source.map(|v| v.into_string());
@@ -39,10 +43,11 @@ impl SqliteStore {
 
         if let Some(external) = external {
             tx.execute(
-                "INSERT INTO external_refs (task_id, ref_type, repo, number, url)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO external_refs (task_id, provider, ref_type, repo, number, url)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     id,
+                    external.provider.as_str(),
                     external.ref_type.as_str(),
                     external.repo,
                     external.number,
@@ -73,7 +78,7 @@ impl TaskRepository for SqliteStore {
     /// Insert a task and its external ref in one transaction, so a failure to record the
     /// external link can never leave an orphan task behind. The ref's `task_id` is
     /// replaced with the freshly allocated `MON-<n>` id.
-    fn insert_task_with_ref(&mut self, new: NewTask, external: ExternalRef) -> Result<Task> {
+    fn insert_task_with_ref(&mut self, new: NewTask, external: ExternalReference) -> Result<Task> {
         self.insert_task_inner(new, Some(external))
     }
 
@@ -168,7 +173,7 @@ impl TaskRepository for SqliteStore {
                ON issue_ref.id = (
                  SELECT er.id
                  FROM external_refs er
-                 WHERE er.task_id = t.id AND er.ref_type = 'github_issue'
+                 WHERE er.task_id = t.id AND er.ref_type = 'issue'
                  ORDER BY er.id DESC
                  LIMIT 1
                )
@@ -303,7 +308,7 @@ impl TaskRepository for SqliteStore {
 
     // A trait impl cannot span files; these bodies live with their tables in
     // external_refs.rs and pull_request_sync.rs.
-    fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalRef>> {
+    fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalReference>> {
         SqliteStore::list_external_refs(self, task_id)
     }
 

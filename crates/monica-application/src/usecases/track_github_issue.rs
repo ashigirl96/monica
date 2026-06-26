@@ -2,7 +2,8 @@ use anyhow::Result;
 
 use crate::ports::{GithubGateway, ProjectRepository, TaskRepository};
 use crate::{
-    parse_owner_repo, ExternalRef, GithubIssue, NewTask, RefType, Task, TaskKind, TaskStatus,
+    parse_owner_repo, ExternalIssue, ExternalReference, GithubIssue, NewTask, Provider, RefType,
+    Task, TaskKind, TaskStatus,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,7 +15,7 @@ pub struct TrackGithubIssueInput {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TrackGithubIssueReport {
     pub repo: String,
-    pub issue: GithubIssue,
+    pub issue: ExternalIssue,
     pub task: Task,
 }
 
@@ -30,7 +31,20 @@ where
     let repo = parse_owner_repo(&input.repo)?;
     let issue = github.fetch_issue(&repo, input.number).await?;
     let task = track_github_issue_from_fetched(repos, &repo, &issue)?;
-    Ok(TrackGithubIssueReport { repo, issue, task })
+    Ok(TrackGithubIssueReport {
+        repo,
+        issue: external_issue_from(&issue),
+        task,
+    })
+}
+
+fn external_issue_from(issue: &GithubIssue) -> ExternalIssue {
+    ExternalIssue {
+        number: issue.number,
+        title: issue.title.clone(),
+        body: issue.body.clone(),
+        url: issue.url.clone(),
+    }
 }
 
 pub fn track_github_issue_from_fetched<R>(
@@ -49,9 +63,10 @@ where
     new.body = issue.body.clone().unwrap_or_default();
     new.project_id = project_id;
 
-    let external = ExternalRef::new(
+    let external = ExternalReference::new(
         String::new(),
-        RefType::GithubIssue,
+        Provider::Github,
+        RefType::Issue,
         Some(repo),
         Some(issue.number),
         Some(issue.url.clone()),

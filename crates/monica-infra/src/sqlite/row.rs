@@ -1,7 +1,7 @@
 use anyhow::Result;
 use monica_application::{
-    Agent, Event, ExternalRef, PermissionMode, Project, Provider, RawJson, RefType, Task, TaskKind,
-    TaskRun, TaskRunStatus, TaskStatus,
+    Agent, Event, ExternalReference, PermissionMode, Project, Provider, RawJson, RefType, Task,
+    TaskKind, TaskRun, TaskRunStatus, TaskStatus,
 };
 use rusqlite::Row;
 
@@ -67,11 +67,13 @@ pub(super) fn event_from_row(row: &Row<'_>) -> Result<Event> {
     })
 }
 
-pub(super) fn external_ref_from_row(row: &Row<'_>) -> Result<ExternalRef> {
+pub(super) fn external_ref_from_row(row: &Row<'_>) -> Result<ExternalReference> {
+    let provider: String = row.get("provider")?;
     let ref_type: String = row.get("ref_type")?;
-    Ok(ExternalRef {
+    Ok(ExternalReference {
         id: row.get("id")?,
         task_id: row.get("task_id")?,
+        provider: provider.parse::<Provider>()?,
         ref_type: ref_type.parse::<RefType>()?,
         repo: row.get("repo")?,
         number: row.get("number")?,

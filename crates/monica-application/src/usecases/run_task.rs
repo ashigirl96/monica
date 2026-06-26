@@ -9,7 +9,8 @@ use crate::ports::{
     SetupRunner, TaskRepository, TaskRunRepository,
 };
 use crate::{
-    ExternalRef, NewTaskRun, PrepareTaskResult, Project, RefType, Task, TaskRunStatus, TaskStatus,
+    ExternalReference, NewTaskRun, PrepareTaskResult, Project, RefType, Task, TaskRunStatus,
+    TaskStatus,
 };
 
 fn is_active_run_status(status: TaskRunStatus) -> bool {
@@ -201,14 +202,14 @@ where
     setup_runner.run_setup_script(worktree_path, &log_path, &env, timeout)
 }
 
-fn latest_github_issue_ref<R>(repos: &R, task_id: &str) -> Result<Option<ExternalRef>>
+fn latest_github_issue_ref<R>(repos: &R, task_id: &str) -> Result<Option<ExternalReference>>
 where
     R: TaskRepository,
 {
     Ok(repos
         .list_external_refs(task_id)?
         .into_iter()
-        .rfind(|r| r.ref_type == RefType::GithubIssue))
+        .rfind(|r| r.ref_type == RefType::Issue))
 }
 
 fn latest_github_issue_number<R>(repos: &R, task_id: &str) -> Result<Option<i64>>
