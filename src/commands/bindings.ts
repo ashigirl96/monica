@@ -6,7 +6,7 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 /** Commands */
 export const commands = {
   clipboardWriteImage: (path: string) =>
-    typedError<null, string>(__TAURI_INVOKE("clipboard_write_image", { path })),
+    typedError<null, ApiError>(__TAURI_INVOKE("clipboard_write_image", { path })),
   /**
    *  Resolve each candidate against `cwd` (expanding a leading `~`) and return the
    *  canonical absolute path when it exists, or `null` otherwise. `canonicalize`
@@ -16,14 +16,14 @@ export const commands = {
   resolveEditorPaths: (cwd: string, candidates: string[]) =>
     __TAURI_INVOKE<(string | null)[]>("resolve_editor_paths", { cwd, candidates }),
   openInEditor: (path: string) =>
-    typedError<null, string>(__TAURI_INVOKE("open_in_editor", { path })),
+    typedError<null, ApiError>(__TAURI_INVOKE("open_in_editor", { path })),
   worktreeInfo: (cwd: string) =>
     typedError<
       {
         repo: string;
         branch: string;
       } | null,
-      string
+      ApiError
     >(__TAURI_INVOKE("worktree_info", { cwd })),
   terminalCreateSession: (
     runspaceId: string,
@@ -34,56 +34,61 @@ export const commands = {
     cols: number,
     env: [string, string][] | null,
   ) =>
-    typedError<TerminalSession, string>(
+    typedError<TerminalSession, ApiError>(
       __TAURI_INVOKE("terminal_create_session", { runspaceId, tabId, kind, cwd, rows, cols, env }),
     ),
   terminalAttach: (sessionId: string, replayBytes: number | null) =>
-    typedError<AttachResult, string>(__TAURI_INVOKE("terminal_attach", { sessionId, replayBytes })),
+    typedError<AttachResult, ApiError>(
+      __TAURI_INVOKE("terminal_attach", { sessionId, replayBytes }),
+    ),
   terminalDetach: (sessionId: string) =>
-    typedError<null, string>(__TAURI_INVOKE("terminal_detach", { sessionId })),
+    typedError<null, ApiError>(__TAURI_INVOKE("terminal_detach", { sessionId })),
   terminalWrite: (sessionId: string, data: string) =>
-    typedError<null, string>(__TAURI_INVOKE("terminal_write", { sessionId, data })),
+    typedError<null, ApiError>(__TAURI_INVOKE("terminal_write", { sessionId, data })),
   terminalResize: (sessionId: string, rows: number, cols: number) =>
-    typedError<null, string>(__TAURI_INVOKE("terminal_resize", { sessionId, rows, cols })),
+    typedError<null, ApiError>(__TAURI_INVOKE("terminal_resize", { sessionId, rows, cols })),
   terminalTerminate: (sessionId: string) =>
-    typedError<null, string>(__TAURI_INVOKE("terminal_terminate", { sessionId })),
+    typedError<null, ApiError>(__TAURI_INVOKE("terminal_terminate", { sessionId })),
   terminalListSessions: (runspaceId: string | null) =>
-    typedError<TerminalSession[], string>(__TAURI_INVOKE("terminal_list_sessions", { runspaceId })),
+    typedError<TerminalSession[], ApiError>(
+      __TAURI_INVOKE("terminal_list_sessions", { runspaceId }),
+    ),
   terminalLoadState: () =>
-    typedError<TerminalStateSnapshot, string>(__TAURI_INVOKE("terminal_load_state")),
+    typedError<TerminalStateSnapshot, ApiError>(__TAURI_INVOKE("terminal_load_state")),
   terminalSaveState: (state: TerminalStateSnapshot) =>
-    typedError<null, string>(__TAURI_INVOKE("terminal_save_state", { state })),
+    typedError<null, ApiError>(__TAURI_INVOKE("terminal_save_state", { state })),
   listTaskSummaries: (project: string | null) =>
-    typedError<TaskSummaryRow[], string>(__TAURI_INVOKE("list_task_summaries", { project })),
+    typedError<TaskSummaryRow[], ApiError>(__TAURI_INVOKE("list_task_summaries", { project })),
   getBoardColumns: () => __TAURI_INVOKE<BoardColumn[]>("get_board_columns"),
   trackGithubIssue: (input: string) =>
-    typedError<TaskCreated, string>(__TAURI_INVOKE("track_github_issue", { input })),
-  listProjects: () => typedError<ProjectOption[], string>(__TAURI_INVOKE("list_projects")),
+    typedError<TaskCreated, ApiError>(__TAURI_INVOKE("track_github_issue", { input })),
+  listProjects: () => typedError<ProjectOption[], ApiError>(__TAURI_INVOKE("list_projects")),
   createRawTask: (title: string, projectId: string) =>
-    typedError<TaskCreated, string>(__TAURI_INVOKE("create_raw_task", { title, projectId })),
+    typedError<TaskCreated, ApiError>(__TAURI_INVOKE("create_raw_task", { title, projectId })),
   listBenchRunspaceMap: () =>
-    typedError<[string, string][], string>(__TAURI_INVOKE("list_bench_runspace_map")),
+    typedError<[string, string][], ApiError>(__TAURI_INVOKE("list_bench_runspace_map")),
   taskShellEnv: (taskId: string) =>
-    typedError<[string, string][], string>(__TAURI_INVOKE("task_shell_env", { taskId })),
+    typedError<[string, string][], ApiError>(__TAURI_INVOKE("task_shell_env", { taskId })),
   openBench: (taskId: string) =>
-    typedError<TaskBench, string>(__TAURI_INVOKE("open_bench", { taskId })),
+    typedError<TaskBench, ApiError>(__TAURI_INVOKE("open_bench", { taskId })),
   prepareTask: (taskId: string) =>
-    typedError<PrepareTaskResult, string>(__TAURI_INVOKE("prepare_task", { taskId })),
+    typedError<PrepareTaskResult, ApiError>(__TAURI_INVOKE("prepare_task", { taskId })),
   runTask: (taskId: string, agent: "claude" | "codex" | null) =>
-    typedError<RunTaskResult, string>(__TAURI_INVOKE("run_task", { taskId, agent })),
-  closeTask: (taskId: string) => typedError<null, string>(__TAURI_INVOKE("close_task", { taskId })),
+    typedError<RunTaskResult, ApiError>(__TAURI_INVOKE("run_task", { taskId, agent })),
+  closeTask: (taskId: string) =>
+    typedError<null, ApiError>(__TAURI_INVOKE("close_task", { taskId })),
   /**
    *  Promote the run living in the given Workbench tab to its task's Main Run. Returns whether the
    *  primary actually changed; `false` covers "no run in this tab", "already main" and "primary is
    *  mid-prepare" so the shortcut can stay a silent no-op.
    */
   makeMainTaskRun: (tabId: string) =>
-    typedError<boolean, string>(__TAURI_INVOKE("make_main_task_run", { tabId })),
+    typedError<boolean, ApiError>(__TAURI_INVOKE("make_main_task_run", { tabId })),
   primaryTabId: (taskId: string) =>
-    typedError<string | null, string>(__TAURI_INVOKE("primary_tab_id", { taskId })),
-  listNotebooks: () => typedError<NotebookSummary[], string>(__TAURI_INVOKE("list_notebooks")),
+    typedError<string | null, ApiError>(__TAURI_INVOKE("primary_tab_id", { taskId })),
+  listNotebooks: () => typedError<NotebookSummary[], ApiError>(__TAURI_INVOKE("list_notebooks")),
   getNotebookPages: (notebookId: string) =>
-    typedError<NotebookPageRow[], string>(__TAURI_INVOKE("get_notebook_pages", { notebookId })),
+    typedError<NotebookPageRow[], ApiError>(__TAURI_INVOKE("get_notebook_pages", { notebookId })),
   /**
    *  Read the plan held by the run driving the given Workbench tab. `Ok(None)` covers a shell tab, a
    *  run that never planned, and a plan file since deleted — all "nothing to preview" to the caller.
@@ -98,9 +103,10 @@ export const commands = {
         /**  Markdown source of the plan. */
         body: string;
       } | null,
-      string
+      ApiError
     >(__TAURI_INVOKE("read_runspace_plan", { terminalTabId })),
-  forceSyncPullRequests: () => typedError<null, string>(__TAURI_INVOKE("force_sync_pull_requests")),
+  forceSyncPullRequests: () =>
+    typedError<null, ApiError>(__TAURI_INVOKE("force_sync_pull_requests")),
 };
 
 /** Events */
@@ -111,6 +117,27 @@ export const events = {
 
 /* Types */
 export type Agent = "claude" | "codex";
+
+/**
+ *  The error half of every Tauri command result. Replaces the previous `Result<T, String>` so the
+ *  frontend receives a structured `{ code, message }` instead of an opaque string.
+ */
+export type ApiError = {
+  code: ApiErrorCode;
+  message: string;
+};
+
+/**
+ *  Machine-readable category for an error crossing the Tauri boundary. The frontend branches on
+ *  `code` (e.g. show a "not found" vs. "already in progress" surface) instead of string-matching.
+ */
+export type ApiErrorCode =
+  | "not_found"
+  | "conflict"
+  | "validation"
+  | "authentication_required"
+  | "storage"
+  | "external";
 
 export type AttachResult = {
   /**  Base64 transcript tail to write into xterm before streaming live output. */

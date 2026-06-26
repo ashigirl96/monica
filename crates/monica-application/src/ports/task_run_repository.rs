@@ -20,6 +20,12 @@ pub trait TaskRunRepository {
     ) -> Result<Option<TaskRun>>;
     fn find_task_run_by_terminal_tab(&self, terminal_tab_id: &str) -> Result<Option<TaskRun>>;
     fn list_task_runs_for_task(&self, task_id: &str) -> Result<Vec<TaskRun>>;
+    /// Runs still pinned to a terminal tab and not yet in a terminal state — the candidate set for
+    /// the orphaned-run settlement sweep.
+    fn list_driven_task_runs_with_tab(&self) -> Result<Vec<TaskRun>>;
+    /// Settle a still-live run as stopped, returning `true` only if this call moved it (a hook may
+    /// have settled it first, in which case the caller must not re-announce).
+    fn settle_task_run_if_live(&mut self, task_run_id: &str, task_id: &str) -> Result<bool>;
     fn record_task_run_observation(
         &mut self,
         task_run_id: &str,

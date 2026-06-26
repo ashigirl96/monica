@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 
 use crate::prelude::{branch_name, monica_number, worktree_path_for};
 use super::ports::{
@@ -9,8 +9,8 @@ use super::ports::{
     SetupRunner, TaskRepository, TaskRunRepository,
 };
 use crate::{
-    ExternalReference, NewTaskRun, PrepareTaskResult, Project, RefType, Task, TaskRunStatus,
-    TaskStatus,
+    ApplicationError, ApplicationResult, ExternalReference, NewTaskRun, PrepareTaskResult, Project,
+    RefType, Task, TaskRunStatus, TaskStatus,
 };
 
 fn is_active_run_status(status: TaskRunStatus) -> bool {
@@ -20,47 +20,49 @@ fn is_active_run_status(status: TaskRunStatus) -> bool {
     )
 }
 
-fn load_task_and_project<R>(repos: &R, task_id: &str) -> Result<(Task, Project)>
+fn load_task_and_project<R>(repos: &R, task_id: &str) -> ApplicationResult<(Task, Project)>
 where
     R: TaskRepository + ProjectRepository,
 {
     let task = repos
         .get_task(task_id)?
-        .ok_or_else(|| anyhow!("task not found: {task_id}"))?;
+        .ok_or_else(|| ApplicationError::not_found(format!("task not found: {task_id}")))?;
     let project_id = task
         .project_id
         .as_deref()
-        .ok_or_else(|| anyhow!("{task_id} is not linked to a project"))?;
+        .ok_or_else(|| ApplicationError::validation(format!("{task_id} is not linked to a project")))?;
     let project = repos
         .get_project(project_id)?
-        .ok_or_else(|| anyhow!("project not found: {project_id}"))?;
+        .ok_or_else(|| ApplicationError::not_found(format!("project not found: {project_id}")))?;
     Ok((task, project))
 }
 
 /// Phase 1: Create TaskRun (SettingUp) + set as Main Run + ensure bench exists.
 /// Returns immediately so the UI can reflect `setting_up` without blocking.
-pub fn start_run<R>(repos: &mut R, task_id: &str) -> Result<PrepareTaskResult>
+pub fn start_run<R>(repos: &mut R, task_id: &str) -> ApplicationResult<PrepareTaskResult>
 where
     R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
 {
     let (task, project) = load_task_and_project(repos, task_id)?;
 
     if task.status == TaskStatus::Closed {
-        return Err(anyhow!("task {task_id} is closed; reopen it before preparing"));
+        return Err(ApplicationError::validation(format!(
+            "task {task_id} is closed; reopen it before preparing"
+        )));
     }
 
     if let Some(ref primary_id) = task.primary_task_run_id {
         if let Some(primary_run) = repos.get_task_run(primary_id)? {
             if is_active_run_status(primary_run.status) {
-                return Err(anyhow!(
+                return Err(ApplicationError::conflict(format!(
                     "task {task_id} already has an active run ({primary_id}, status: {})",
                     primary_run.status.as_str()
-                ));
+                )));
             }
             if primary_run.status == TaskRunStatus::Prepared {
-                return Err(anyhow!(
+                return Err(ApplicationError::conflict(format!(
                     "task {task_id} is already prepared (run {primary_id}); use Run to launch Claude"
-                ));
+                )));
             }
         }
     }
@@ -100,7 +102,7 @@ pub fn execute_run<R, G, S, A>(
     outputs: &A,
     task_id: &str,
     task_run_id: &str,
-) -> Result<TaskRunStatus>
+) -> ApplicationResult<TaskRunStatus>
 where
     R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
     G: GitGateway,
@@ -121,7 +123,7 @@ fn execute_run_inner<R, G, S, A>(
     outputs: &A,
     task_id: &str,
     task_run_id: &str,
-) -> Result<TaskRunStatus>
+) -> ApplicationResult<TaskRunStatus>
 where
     R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
     G: GitGateway,
@@ -132,15 +134,15 @@ where
 
     let run = repos
         .get_task_run(task_run_id)?
-        .ok_or_else(|| anyhow!("task run not found: {task_run_id}"))?;
+        .ok_or_else(|| ApplicationError::not_found(format!("task run not found: {task_run_id}")))?;
     let branch = run
         .branch
-        .ok_or_else(|| anyhow!("task run {task_run_id} has no branch"))?;
+        .ok_or_else(|| ApplicationError::validation(format!("task run {task_run_id} has no branch")))?;
 
     let repo_path = project
         .path
         .clone()
-        .ok_or_else(|| anyhow!("project {} has no checkout path", project.id))?;
+        .ok_or_else(|| ApplicationError::validation(format!("project {} has no checkout path", project.id)))?;
     let worktree_path = worktree_path_for(&project, &branch)?;
     let worktree_str = worktree_path.to_string_lossy().into_owned();
 
@@ -228,35 +230,35 @@ pub fn prepare_claude_for_run<R, A>(
     outputs: &A,
     task_id: &str,
     agent_override: Option<crate::Agent>,
-) -> Result<crate::RunTaskResult>
+) -> ApplicationResult<crate::RunTaskResult>
 where
     R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
     A: TaskRunOutputs,
 {
     let (task, project) = load_task_and_project(repos, task_id)?;
 
-    let primary_id = task
-        .primary_task_run_id
-        .ok_or_else(|| anyhow!("task {task_id} has no primary run; prepare it first"))?;
+    let primary_id = task.primary_task_run_id.ok_or_else(|| {
+        ApplicationError::validation(format!("task {task_id} has no primary run; prepare it first"))
+    })?;
     let primary_run = repos
         .get_task_run(&primary_id)?
-        .ok_or_else(|| anyhow!("primary run {primary_id} not found"))?;
+        .ok_or_else(|| ApplicationError::not_found(format!("primary run {primary_id} not found")))?;
 
     if primary_run.status != TaskRunStatus::Prepared {
-        return Err(anyhow!(
+        return Err(ApplicationError::conflict(format!(
             "primary run {primary_id} is {} (expected prepared)",
             primary_run.status.as_str()
-        ));
+        )));
     }
 
     let worktree_str = primary_run.worktree_path.ok_or_else(|| {
-        anyhow!("primary run {primary_id} has no worktree path")
+        ApplicationError::validation(format!("primary run {primary_id} has no worktree path"))
     })?;
     let worktree_path = std::path::PathBuf::from(&worktree_str);
     if !worktree_path.exists() {
-        return Err(anyhow!(
+        return Err(ApplicationError::validation(format!(
             "worktree does not exist at {worktree_str}"
-        ));
+        )));
     }
 
     let agent = agent_override.unwrap_or(project.agent_default);

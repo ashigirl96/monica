@@ -4,12 +4,9 @@ use std::sync::{
 };
 use std::time::Duration;
 
-use monica_application::PullRequestSyncStatus;
-use monica_infra::Runtime;
 use tauri::AppHandle;
-use tauri_specta::Event;
 
-use crate::commands::pull_request::PrSyncCompleted;
+use crate::event_sink::TauriEventSink;
 
 const PR_SYNC_INTERVAL: Duration = Duration::from_secs(10);
 const PR_SYNC_BATCH_LIMIT: usize = 3;
@@ -39,13 +36,10 @@ pub(crate) fn start(app_handle: AppHandle) -> PrSyncWaker {
                 continue;
             }
             let _guard = PullRequestSyncGuard(Arc::clone(&scheduler_in_flight));
-            if forced {
-                tauri::async_runtime::block_on(sync_pull_request_batch_forced(
-                    app_handle.clone(),
-                ));
-            } else {
-                tauri::async_runtime::block_on(sync_pull_request_batch_inner(PR_SYNC_BATCH_LIMIT));
-            }
+            let limit = if forced { PR_SYNC_FORCED_BATCH_LIMIT } else { PR_SYNC_BATCH_LIMIT };
+            // Forced syncs announce completion (so the manual action confirms); the periodic sweep
+            // stays quiet to avoid churning the frontend every interval.
+            tauri::async_runtime::block_on(run_batch(app_handle.clone(), limit, forced));
         });
     if let Err(e) = spawn_result {
         log::error!(target: "monica_app::pr_sync", "failed to start PR sync scheduler: {e}");
@@ -61,63 +55,15 @@ impl Drop for PullRequestSyncGuard {
     }
 }
 
-async fn sync_pull_request_batch_forced(app_handle: AppHandle) {
-    let synced_count = sync_pull_request_batch_inner(PR_SYNC_FORCED_BATCH_LIMIT).await;
-    let event = PrSyncCompleted { synced_count };
-    if let Err(e) = event.emit(&app_handle) {
-        log::warn!(target: "monica_app::pr_sync", "failed to emit PrSyncCompleted: {e}");
-    }
-}
-
-async fn sync_pull_request_batch_inner(limit: usize) -> u32 {
-    let mut runtime = match Runtime::open_default() {
-        Ok(runtime) => runtime,
+async fn run_batch(app: AppHandle, limit: usize, announce: bool) {
+    let mut monica = match monica_infra::open_monica(Box::new(TauriEventSink::new(app))) {
+        Ok(monica) => monica,
         Err(e) => {
-            log::error!(target: "monica_app::pr_sync", "failed to open runtime for PR sync: {e:#}");
-            return 0;
+            log::error!(target: "monica_app::pr_sync", "failed to open façade for PR sync: {e:#}");
+            return;
         }
     };
-
-    if !monica_application::github_auth_status(&runtime.auth).authenticated {
-        return 0;
+    if let Err(e) = monica.synchronization().sync_pull_requests(limit, announce).await {
+        log::error!(target: "monica_app::pr_sync", "PR sync batch failed: {e}");
     }
-
-    let mut synced_count = 0u32;
-    for _ in 0..limit {
-        let result =
-            match monica_application::sync_next_pull_request(&mut runtime.repositories, &runtime.github)
-                .await
-            {
-                Ok(result) => result,
-                Err(e) => {
-                    log::error!(target: "monica_app::pr_sync", "PR sync scheduler failed: {e:#}");
-                    break;
-                }
-            };
-
-        match result.status {
-            PullRequestSyncStatus::Idle => {
-                log::debug!(target: "monica_app::pr_sync", "PR sync scheduler idle");
-                break;
-            }
-            PullRequestSyncStatus::Synced => {
-                synced_count += 1;
-                log::info!(
-                    target: "monica_app::pr_sync",
-                    "PR sync scheduler synced task_id={} pull_request_count={}",
-                    result.task_id.as_deref().unwrap_or("-"),
-                    result.pull_request_count
-                );
-            }
-            PullRequestSyncStatus::Failed => {
-                log::warn!(
-                    target: "monica_app::pr_sync",
-                    "PR sync scheduler recorded failure task_id={} error={}",
-                    result.task_id.as_deref().unwrap_or("-"),
-                    result.error.as_deref().unwrap_or("-")
-                );
-            }
-        }
-    }
-    synced_count
 }

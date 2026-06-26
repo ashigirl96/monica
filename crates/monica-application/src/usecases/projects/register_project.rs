@@ -1,11 +1,9 @@
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
-
 use super::ports::ProjectRepository;
-use crate::{parse_owner_repo, Project};
+use crate::{parse_owner_repo, ApplicationError, ApplicationResult, Project};
 
-pub fn register_project<R>(repos: &R, repo_input: &str, path: &Path) -> Result<Project>
+pub fn register_project<R>(repos: &R, repo_input: &str, path: &Path) -> ApplicationResult<Project>
 where
     R: ProjectRepository,
 {
@@ -17,16 +15,16 @@ pub fn register_project_with_default_branch<R>(
     repo_input: &str,
     path: &Path,
     default_branch: Option<&str>,
-) -> Result<Project>
+) -> ApplicationResult<Project>
 where
     R: ProjectRepository,
 {
     let repo = parse_owner_repo(repo_input)?;
     let path = path.to_str().ok_or_else(|| {
-        anyhow!(
+        ApplicationError::validation(format!(
             "current directory path is not valid UTF-8: {}",
             path.display()
-        )
+        ))
     })?;
 
     let mut project = Project::from_repo(repo);
@@ -34,5 +32,5 @@ where
     if let Some(default_branch) = default_branch {
         project.default_branch = default_branch.to_string();
     }
-    repos.upsert_project(&project)
+    Ok(repos.upsert_project(&project)?)
 }

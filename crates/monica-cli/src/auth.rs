@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use clap::Subcommand;
 use monica_application::GithubAuthStatus;
-use monica_infra::Runtime;
+
+use crate::event_sink::{self, CliFacade};
 
 #[derive(Subcommand)]
 pub enum AuthCommand {
@@ -27,23 +28,23 @@ pub async fn run(cmd: AuthCommand) -> Result<()> {
 }
 
 async fn run_github(cmd: GithubAuthCommand) -> Result<()> {
-    let runtime = Runtime::open_default()?;
+    let mut monica = event_sink::open()?;
     match cmd {
-        GithubAuthCommand::Login => login(&runtime).await,
+        GithubAuthCommand::Login => login(&mut monica).await,
         GithubAuthCommand::Status => {
-            print_status(&monica_application::github_auth_status(&runtime.auth));
+            print_status(&monica.synchronization().auth_status());
             Ok(())
         }
         GithubAuthCommand::Logout => {
-            monica_application::logout_github(&runtime.auth).await?;
+            monica.synchronization().logout().await?;
             println!("GitHub authorization removed.");
             Ok(())
         }
     }
 }
 
-async fn login(runtime: &Runtime) -> Result<()> {
-    let flow = monica_application::begin_github_device_flow(&runtime.auth).await?;
+async fn login(monica: &mut CliFacade) -> Result<()> {
+    let flow = monica.synchronization().begin_device_flow().await?;
     println!("Open this URL in your browser:");
     println!("{}", flow.verification_uri);
     println!();
@@ -52,7 +53,9 @@ async fn login(runtime: &Runtime) -> Result<()> {
     println!();
     println!("Waiting for GitHub authorization...");
 
-    let status = monica_application::wait_for_github_device_flow(&runtime.auth, &flow)
+    let status = monica
+        .synchronization()
+        .wait_for_device_flow(&flow)
         .await
         .context("GitHub authorization did not complete")?;
     println!();

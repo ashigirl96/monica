@@ -1,7 +1,8 @@
 #[cfg(target_os = "macos")]
 #[tauri::command]
 #[specta::specta]
-pub fn clipboard_write_image(path: String) -> Result<(), String> {
+pub fn clipboard_write_image(path: String) -> Result<(), monica_api::ApiError> {
+    use monica_api::ApiError;
     use objc2::runtime::ProtocolObject;
     use objc2::AnyThread;
     use objc2_app_kit::{NSImage, NSPasteboard, NSPasteboardWriting};
@@ -9,7 +10,7 @@ pub fn clipboard_write_image(path: String) -> Result<(), String> {
 
     let ns_path = NSString::from_str(&path);
     let image = NSImage::initWithContentsOfFile(NSImage::alloc(), &ns_path)
-        .ok_or_else(|| format!("failed to create NSImage from {path}"))?;
+        .ok_or_else(|| ApiError::external(format!("failed to create NSImage from {path}")))?;
 
     let pasteboard = NSPasteboard::generalPasteboard();
     pasteboard.clearContents();
@@ -19,7 +20,7 @@ pub fn clipboard_write_image(path: String) -> Result<(), String> {
         &NSArray::from_retained_slice(&[obj]);
     let success = pasteboard.writeObjects(objects);
     if !success {
-        return Err("NSPasteboard writeObjects failed".to_string());
+        return Err(ApiError::external("NSPasteboard writeObjects failed"));
     }
 
     Ok(())
@@ -28,6 +29,8 @@ pub fn clipboard_write_image(path: String) -> Result<(), String> {
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
 #[specta::specta]
-pub fn clipboard_write_image(_path: String) -> Result<(), String> {
-    Err("clipboard_write_image is only supported on macOS".to_string())
+pub fn clipboard_write_image(_path: String) -> Result<(), monica_api::ApiError> {
+    Err(monica_api::ApiError::external(
+        "clipboard_write_image is only supported on macOS",
+    ))
 }

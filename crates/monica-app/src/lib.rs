@@ -1,4 +1,5 @@
 mod commands;
+mod event_sink;
 mod ptyd;
 mod schedulers;
 mod services;

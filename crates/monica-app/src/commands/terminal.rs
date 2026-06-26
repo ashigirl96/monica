@@ -1,15 +1,11 @@
-use monica_api::{TerminalSession, TerminalSessionKind, TerminalStateSnapshot};
-use monica_application::{
-    reconcile_terminal_sessions, DaemonSessionView, NewTerminalSession, TerminalSessionStatus,
-};
-use monica_infra::filesystem::paths;
-use monica_infra::Runtime;
-use monica_pty::protocol::{CreateParams, RequestOp, ResponseBody, SessionInfo};
+use monica_api::{ApiError, TerminalSession, TerminalSessionKind, TerminalStateSnapshot};
+use monica_application::NewTerminalSession;
+use monica_pty::protocol::RequestOp;
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
-use crate::ptyd::PtydHandle;
-use crate::services::run_settlement;
+use crate::event_sink;
+use crate::ptyd::{PtydHandle, PtydTerminalDaemon};
 
 #[derive(Serialize, specta::Type)]
 pub struct AttachResult {
@@ -36,90 +32,22 @@ pub fn terminal_create_session(
     rows: u16,
     cols: u16,
     env: Option<Vec<(String, String)>>,
-) -> Result<TerminalSession, String> {
-    let shell = default_shell();
-    let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    let session = runtime
-        .repositories
-        .create_terminal_session(NewTerminalSession {
-            runspace_id: Some(runspace_id),
-            tab_id: Some(tab_id.clone()),
-            kind: kind.into(),
-            cwd: cwd.clone(),
-            shell: shell.clone(),
-            rows,
-            cols,
-        })
-        .map_err(|e| e.to_string())?;
-
-    // The hook chain (shell → claude → monica hook claude) inherits these, letting hooks
-    // stamp the tab onto the TaskRun for tab-based Make Main; the session id is burned in
-    // alongside for future session-scoped lookups.
-    let mut env = env.unwrap_or_default();
-    env.push(("MONICA_TERMINAL_TAB_ID".to_string(), tab_id));
-    env.push((
-        "MONICA_TERMINAL_SESSION_ID".to_string(),
-        session.id.clone(),
-    ));
-
-    let created = state.ensure_connected(&app).and_then(|client| {
-        match client.request(RequestOp::Create(CreateParams {
-            session_id: session.id.clone(),
-            cwd,
-            shell: Some(shell),
-            rows,
-            cols,
-            env: Some(env),
-        }))? {
-            ResponseBody::Created { pid } => Ok(pid),
-            other => anyhow::bail!("unexpected create response: {other:?}"),
-        }
-    });
-
-    match created {
-        Ok(pid) => {
-            let transcript_path = paths::terminal_sessions_dir()
-                .ok()
-                .map(|dir| dir.join(format!("{}.log", session.id)));
-            runtime
-                .repositories
-                .mark_terminal_session_started(
-                    &session.id,
-                    pid,
-                    transcript_path.as_deref().and_then(|p| p.to_str()),
-                )
-                .map_err(|e| e.to_string())?;
-        }
-        Err(e) => {
-            // Settle as failed but still return the session: the frontend needs the id to
-            // bind it to the tab and render the failure overlay keyed on it.
-            log::warn!(
-                target: "monica_app::ptyd",
-                "failed to start terminal session {}: {e:#}",
-                session.id
-            );
-            let _ = runtime.repositories.update_terminal_session_status(
-                &session.id,
-                TerminalSessionStatus::Failed,
-                None,
-            );
-            // The failed spawn is now the tab's latest session, shadowing whichever dead
-            // session a run in this tab was waiting on; settle that run now rather than
-            // leaving it to the sweep.
-            run_settlement::settle_runs_for_terminated_sessions(
-                &app,
-                &mut runtime,
-                std::slice::from_ref(&session.id),
-            );
-        }
-    }
-
-    runtime
-        .repositories
-        .get_terminal_session(&session.id)
-        .map_err(|e| e.to_string())?
-        .map(TerminalSession::from)
-        .ok_or_else(|| format!("terminal session {} vanished", session.id))
+) -> Result<TerminalSession, ApiError> {
+    let daemon = PtydTerminalDaemon { handle: state.inner(), app: &app };
+    let new = NewTerminalSession {
+        runspace_id: Some(runspace_id),
+        tab_id: Some(tab_id),
+        kind: kind.into(),
+        cwd,
+        shell: default_shell(),
+        rows,
+        cols,
+    };
+    let mut monica = event_sink::open(&app)?;
+    let session = monica
+        .executions()
+        .create_terminal_session(&daemon, new, env.unwrap_or_default())?;
+    Ok(TerminalSession::from(session))
 }
 
 #[tauri::command]
@@ -129,23 +57,17 @@ pub fn terminal_attach(
     app: AppHandle,
     session_id: String,
     replay_bytes: Option<u32>,
-) -> Result<AttachResult, String> {
-    let client = state.ensure_connected(&app).map_err(|e| format!("{e:#}"))?;
-    let body = client
-        .request(RequestOp::Attach {
-            session_id: session_id.clone(),
-            replay_bytes,
-        })
-        .map_err(|e| format!("{e:#}"))?;
-    let ResponseBody::Attached { replay, rows, cols } = body else {
-        return Err(format!("unexpected attach response: {body:?}"));
-    };
-    let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    runtime
-        .repositories
-        .update_terminal_session_status(&session_id, TerminalSessionStatus::Running, None)
-        .map_err(|e| e.to_string())?;
-    Ok(AttachResult { replay, rows, cols })
+) -> Result<AttachResult, ApiError> {
+    let daemon = PtydTerminalDaemon { handle: state.inner(), app: &app };
+    let mut monica = event_sink::open(&app)?;
+    let attachment = monica
+        .executions()
+        .attach_terminal_session(&daemon, &session_id, replay_bytes)?;
+    Ok(AttachResult {
+        replay: attachment.replay,
+        rows: attachment.rows,
+        cols: attachment.cols,
+    })
 }
 
 #[tauri::command]
@@ -154,28 +76,14 @@ pub fn terminal_detach(
     state: State<'_, PtydHandle>,
     app: AppHandle,
     session_id: String,
-) -> Result<(), String> {
-    // Daemon-side detach is best-effort (it may be down); the durable fact that the view
-    // went away is recorded regardless.
-    if let Ok(client) = state.ensure_connected(&app) {
-        let _ = client.request(RequestOp::Detach {
-            session_id: session_id.clone(),
-        });
-    }
-    let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    let session = runtime
-        .repositories
-        .get_terminal_session(&session_id)
-        .map_err(|e| e.to_string())?;
-    if session.is_some_and(|s| !s.status.is_terminal()) {
-        runtime
-            .repositories
-            .update_terminal_session_status(&session_id, TerminalSessionStatus::Detached, None)
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
+) -> Result<(), ApiError> {
+    let daemon = PtydTerminalDaemon { handle: state.inner(), app: &app };
+    let mut monica = event_sink::open(&app)?;
+    Ok(monica.executions().detach_terminal_session(&daemon, &session_id)?)
 }
 
+// Write/resize are per-keystroke daemon I/O that never touch SQLite, so they stay a thin daemon
+// notify rather than opening the façade on every keypress.
 #[tauri::command]
 #[specta::specta]
 pub fn terminal_write(
@@ -183,11 +91,13 @@ pub fn terminal_write(
     app: AppHandle,
     session_id: String,
     data: String,
-) -> Result<(), String> {
-    let client = state.ensure_connected(&app).map_err(|e| format!("{e:#}"))?;
+) -> Result<(), ApiError> {
+    let client = state
+        .ensure_connected(&app)
+        .map_err(|e| ApiError::external(format!("{e:#}")))?;
     client
         .notify(RequestOp::Write { session_id, data })
-        .map_err(|e| e.to_string())
+        .map_err(|e| ApiError::external(e.to_string()))
 }
 
 #[tauri::command]
@@ -198,15 +108,13 @@ pub fn terminal_resize(
     session_id: String,
     rows: u16,
     cols: u16,
-) -> Result<(), String> {
-    let client = state.ensure_connected(&app).map_err(|e| format!("{e:#}"))?;
+) -> Result<(), ApiError> {
+    let client = state
+        .ensure_connected(&app)
+        .map_err(|e| ApiError::external(format!("{e:#}")))?;
     client
-        .notify(RequestOp::Resize {
-            session_id,
-            rows,
-            cols,
-        })
-        .map_err(|e| e.to_string())
+        .notify(RequestOp::Resize { session_id, rows, cols })
+        .map_err(|e| ApiError::external(e.to_string()))
 }
 
 #[tauri::command]
@@ -215,13 +123,10 @@ pub fn terminal_terminate(
     state: State<'_, PtydHandle>,
     app: AppHandle,
     session_id: String,
-) -> Result<(), String> {
-    let client = state.ensure_connected(&app).map_err(|e| format!("{e:#}"))?;
-    client
-        .request(RequestOp::Terminate { session_id })
-        .map(|_| ())
-        .map_err(|e| format!("{e:#}"))
-    // The DB transition to exited rides on the daemon's Exit broadcast.
+) -> Result<(), ApiError> {
+    let daemon = PtydTerminalDaemon { handle: state.inner(), app: &app };
+    let mut monica = event_sink::open(&app)?;
+    Ok(monica.executions().terminate_terminal_session(&daemon, &session_id)?)
 }
 
 #[tauri::command]
@@ -230,149 +135,27 @@ pub fn terminal_list_sessions(
     state: State<'_, PtydHandle>,
     app: AppHandle,
     runspace_id: Option<String>,
-) -> Result<Vec<TerminalSession>, String> {
-    let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-
-    // Reconcile against the daemon when reachable; degrade to plain DB reads otherwise.
-    // Surfacing a daemon failure as an error here would feed the frontend's load
-    // catch-all, which falls back to an empty layout and persists it — losing the saved
-    // workbench. Stale running rows are absorbed by attach-failure → lost instead.
-    match daemon_views(&state, &app) {
-        Ok((client, views)) => {
-            let db_rows = runtime
-                .repositories
-                .list_terminal_sessions(None)
-                .map_err(|e| e.to_string())?;
-            let outcome = reconcile_terminal_sessions(&db_rows, &views);
-            runtime
-                .repositories
-                .apply_terminal_session_updates(&outcome.updates)
-                .map_err(|e| e.to_string())?;
-            // Sessions that died while the app was down only surface here: their Exit
-            // broadcast was never delivered. The run-first sweep also re-checks sessions
-            // that were already terminal in the DB, so a settlement lost to a crash (or
-            // predating this build) is retried instead of sticking forever.
-            run_settlement::settle_orphaned_runs(&app, &mut runtime);
-            for session_id in outcome.reap_ids {
-                let _ = client.notify(RequestOp::Reap { session_id });
-            }
-        }
-        Err(e) => {
-            log::warn!(
-                target: "monica_app::ptyd",
-                "daemon unreachable; listing sessions from DB only: {e:#}"
-            );
-        }
-    }
-
-    runtime
-        .repositories
-        .list_terminal_sessions(runspace_id.as_deref())
-        .map(|sessions| sessions.into_iter().map(TerminalSession::from).collect())
-        .map_err(|e| e.to_string())
-}
-
-fn daemon_views(
-    state: &State<'_, PtydHandle>,
-    app: &AppHandle,
-) -> anyhow::Result<(std::sync::Arc<monica_pty::client::PtydClient>, Vec<DaemonSessionView>)> {
-    let client = state.ensure_connected(app)?;
-    let body = client.request(RequestOp::List)?;
-    let ResponseBody::Sessions { sessions } = body else {
-        anyhow::bail!("unexpected list response: {body:?}");
-    };
-    let views = sessions
+) -> Result<Vec<TerminalSession>, ApiError> {
+    let daemon = PtydTerminalDaemon { handle: state.inner(), app: &app };
+    let mut monica = event_sink::open(&app)?;
+    Ok(monica
+        .executions()
+        .list_terminal_sessions(&daemon, runspace_id.as_deref())?
         .into_iter()
-        .map(
-            |SessionInfo {
-                 session_id,
-                 running,
-                 attached,
-                 pid,
-                 exit_code,
-                 ..
-             }| DaemonSessionView {
-                session_id,
-                pid,
-                running,
-                attached,
-                exit_code,
-            },
-        )
-        .collect();
-    Ok((client, views))
+        .map(TerminalSession::from)
+        .collect())
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn terminal_load_state() -> Result<TerminalStateSnapshot, String> {
-    let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    runtime
-        .repositories
-        .load_terminal_state()
-        .map(snapshot_to_api)
-        .map_err(|e| e.to_string())
+pub fn terminal_load_state(app: AppHandle) -> Result<TerminalStateSnapshot, ApiError> {
+    let mut monica = event_sink::open(&app)?;
+    Ok(monica.executions().load_terminal_state()?.into())
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn terminal_save_state(state: TerminalStateSnapshot) -> Result<(), String> {
-    let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    runtime
-        .repositories
-        .save_terminal_state(&snapshot_to_infra(state))
-        .map_err(|e| e.to_string())
-}
-
-// The persisted workbench layout is owned by monica-infra (SQLite rows) but crosses the Tauri
-// boundary as a monica-api DTO. The two row shapes are intentionally identical; this composition
-// root maps between them so neither crate has to depend on the other.
-fn snapshot_to_api(snapshot: monica_infra::sqlite::TerminalStateSnapshot) -> TerminalStateSnapshot {
-    TerminalStateSnapshot {
-        runspaces: snapshot
-            .runspaces
-            .into_iter()
-            .map(|rs| monica_api::TerminalRunspaceRow {
-                id: rs.id,
-                sort_order: rs.sort_order,
-                tabs: rs
-                    .tabs
-                    .into_iter()
-                    .map(|tab| monica_api::TerminalTabRow {
-                        id: tab.id,
-                        cwd: tab.cwd,
-                        title: tab.title,
-                        sort_order: tab.sort_order,
-                        terminal_session_id: tab.terminal_session_id,
-                    })
-                    .collect(),
-            })
-            .collect(),
-    }
-}
-
-fn snapshot_to_infra(
-    snapshot: TerminalStateSnapshot,
-) -> monica_infra::sqlite::TerminalStateSnapshot {
-    monica_infra::sqlite::TerminalStateSnapshot {
-        runspaces: snapshot
-            .runspaces
-            .into_iter()
-            .map(|rs| monica_infra::sqlite::TerminalRunspaceRow {
-                id: rs.id,
-                sort_order: rs.sort_order,
-                tabs: rs
-                    .tabs
-                    .into_iter()
-                    .map(|tab| monica_infra::sqlite::TerminalTabRow {
-                        id: tab.id,
-                        cwd: tab.cwd,
-                        title: tab.title,
-                        sort_order: tab.sort_order,
-                        terminal_session_id: tab.terminal_session_id,
-                    })
-                    .collect(),
-            })
-            .collect(),
-    }
+pub fn terminal_save_state(app: AppHandle, state: TerminalStateSnapshot) -> Result<(), ApiError> {
+    let mut monica = event_sink::open(&app)?;
+    Ok(monica.executions().save_terminal_state(&state.into())?)
 }

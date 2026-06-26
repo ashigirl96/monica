@@ -1,11 +1,13 @@
 use monica_api::{
-    Agent, BoardColumn, PrepareTaskResult, RunTaskResult, TaskBench, TaskRunStatus, TaskSummaryRow,
+    Agent, ApiError, BoardColumn, PrepareTaskResult, RunTaskResult, TaskBench, TaskRunStatus,
+    TaskSummaryRow,
 };
-use monica_application::{TaskSummaryFilter, TrackGithubIssueInput};
-use monica_infra::Runtime;
+use monica_application::{MakeMainOutcome, TaskSummaryFilter, TrackGithubIssueInput};
 use serde::Serialize;
 use tauri::AppHandle;
 use tauri_specta::Event;
+
+use crate::event_sink;
 
 #[derive(Serialize, specta::Type)]
 pub struct TaskCreated {
@@ -28,11 +30,17 @@ pub struct TaskRunStatusChanged {
 
 #[tauri::command]
 #[specta::specta]
-pub fn list_task_summaries(project: Option<String>) -> Result<Vec<TaskSummaryRow>, String> {
-    let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_application::list_task_summaries(&runtime.repositories, TaskSummaryFilter::All, project.as_deref())
-        .map(|rows| rows.into_iter().map(TaskSummaryRow::from).collect())
-        .map_err(|e| e.to_string())
+pub fn list_task_summaries(
+    app: AppHandle,
+    project: Option<String>,
+) -> Result<Vec<TaskSummaryRow>, ApiError> {
+    let mut monica = event_sink::open(&app)?;
+    Ok(monica
+        .tasks()
+        .list_task_summaries(TaskSummaryFilter::All, project.as_deref())?
+        .into_iter()
+        .map(TaskSummaryRow::from)
+        .collect())
 }
 
 #[tauri::command]
@@ -43,14 +51,14 @@ pub fn get_board_columns() -> Vec<BoardColumn> {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn track_github_issue(input: String) -> Result<TaskCreated, String> {
-    let (repo, number) = monica_application::parse_issue_input(&input).map_err(|e| e.to_string())?;
-    let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    let input = TrackGithubIssueInput { repo, number };
-    let report =
-        monica_application::track_github_issue(&mut runtime.repositories, &runtime.github, input)
-            .await
-            .map_err(|e| e.to_string())?;
+pub async fn track_github_issue(app: AppHandle, input: String) -> Result<TaskCreated, ApiError> {
+    let (repo, number) =
+        monica_application::parse_issue_input(&input).map_err(|e| ApiError::validation(e.to_string()))?;
+    let mut monica = event_sink::open(&app)?;
+    let report = monica
+        .synchronization()
+        .track_github_issue(TrackGithubIssueInput { repo, number })
+        .await?;
     Ok(TaskCreated {
         task_id: report.task.id,
         title: report.task.title,
@@ -59,10 +67,11 @@ pub async fn track_github_issue(input: String) -> Result<TaskCreated, String> {
 
 #[tauri::command]
 #[specta::specta]
-pub fn list_projects() -> Result<Vec<ProjectOption>, String> {
-    let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    Ok(monica_application::list_projects(&runtime.repositories)
-        .map_err(|e| e.to_string())?
+pub fn list_projects(app: AppHandle) -> Result<Vec<ProjectOption>, ApiError> {
+    let mut monica = event_sink::open(&app)?;
+    Ok(monica
+        .projects()
+        .list_projects()?
         .into_iter()
         .map(|p| ProjectOption { id: p.id })
         .collect())
@@ -70,10 +79,13 @@ pub fn list_projects() -> Result<Vec<ProjectOption>, String> {
 
 #[tauri::command]
 #[specta::specta]
-pub fn create_raw_task(title: String, project_id: String) -> Result<TaskCreated, String> {
-    let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    let task = monica_application::create_raw_task(&mut runtime.repositories, &title, &project_id)
-        .map_err(|e| e.to_string())?;
+pub fn create_raw_task(
+    app: AppHandle,
+    title: String,
+    project_id: String,
+) -> Result<TaskCreated, ApiError> {
+    let mut monica = event_sink::open(&app)?;
+    let task = monica.tasks().create_raw_task(&title, &project_id)?;
     Ok(TaskCreated {
         task_id: task.id,
         title: task.title,
@@ -82,41 +94,39 @@ pub fn create_raw_task(title: String, project_id: String) -> Result<TaskCreated,
 
 #[tauri::command]
 #[specta::specta]
-pub fn list_bench_runspace_map() -> Result<Vec<(String, String)>, String> {
-    let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_application::BenchRepository::list_bench_runspace_map(&runtime.repositories)
-        .map_err(|e| e.to_string())
+pub fn list_bench_runspace_map(app: AppHandle) -> Result<Vec<(String, String)>, ApiError> {
+    let mut monica = event_sink::open(&app)?;
+    Ok(monica.executions().list_bench_runspace_map()?)
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn task_shell_env(task_id: String) -> Result<Vec<(String, String)>, String> {
-    let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_application::task_shell_env(&runtime.repositories, &runtime.task_run_outputs, &task_id)
-        .map_err(|e| e.to_string())
+pub fn task_shell_env(app: AppHandle, task_id: String) -> Result<Vec<(String, String)>, ApiError> {
+    let mut monica = event_sink::open(&app)?;
+    Ok(monica.executions().task_shell_env(&task_id)?)
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn open_bench(task_id: String) -> Result<TaskBench, String> {
-    let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_application::open_bench(&mut runtime.repositories, &runtime.task_run_outputs, &task_id)
-        .map(TaskBench::from)
-        .map_err(|e| e.to_string())
+pub fn open_bench(app: AppHandle, task_id: String) -> Result<TaskBench, ApiError> {
+    let mut monica = event_sink::open(&app)?;
+    Ok(TaskBench::from(monica.executions().open_bench(&task_id)?))
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn prepare_task(app: AppHandle, task_id: String) -> Result<PrepareTaskResult, String> {
-    let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    let result =
-        monica_application::start_run(&mut runtime.repositories, &task_id).map_err(|e| e.to_string())?;
+pub fn prepare_task(app: AppHandle, task_id: String) -> Result<PrepareTaskResult, ApiError> {
+    let result = {
+        let mut monica = event_sink::open(&app)?;
+        monica.executions().prepare_task(&task_id)?
+    };
 
     crate::services::task_runner::spawn_execute_run(
         app,
         result.task_id.clone(),
         result.task_run_id.clone(),
-    )?;
+    )
+    .map_err(ApiError::external)?;
 
     Ok(result.into())
 }
@@ -126,62 +136,44 @@ pub fn prepare_task(app: AppHandle, task_id: String) -> Result<PrepareTaskResult
 /// mid-prepare" so the shortcut can stay a silent no-op.
 #[tauri::command]
 #[specta::specta]
-pub fn make_main_task_run(app: AppHandle, tab_id: String) -> Result<bool, String> {
-    let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    let outcome = monica_application::make_main_by_terminal_tab(&runtime.repositories, &tab_id)
-        .map_err(|e| e.to_string())?;
-    match outcome {
-        monica_application::MakeMainOutcome::Changed {
-            task_id,
-            task_run_id,
-            status,
-        } => {
-            let _ = TaskRunStatusChanged {
-                task_id,
-                task_run_id,
-                status: status.into(),
-            }
-            .emit(&app);
-            Ok(true)
-        }
-        monica_application::MakeMainOutcome::AlreadyMain
-        | monica_application::MakeMainOutcome::PrimaryBusy
-        | monica_application::MakeMainOutcome::NotFound => Ok(false),
-    }
+pub fn make_main_task_run(app: AppHandle, tab_id: String) -> Result<bool, ApiError> {
+    let mut monica = event_sink::open(&app)?;
+    // The service emits `TaskRunStatusChanged` on a real change; the command only reports whether
+    // the primary moved so the shortcut stays a silent no-op otherwise.
+    let outcome = monica.tasks().make_main_by_terminal_tab(&tab_id)?;
+    Ok(matches!(outcome, MakeMainOutcome::Changed { .. }))
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn primary_tab_id(task_id: String) -> Result<Option<String>, String> {
-    let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_application::primary_terminal_tab(&runtime.repositories, &task_id).map_err(|e| e.to_string())
+pub fn primary_tab_id(app: AppHandle, task_id: String) -> Result<Option<String>, ApiError> {
+    let mut monica = event_sink::open(&app)?;
+    Ok(monica.tasks().primary_terminal_tab(&task_id)?)
 }
 
 // Worktree removal and branch deletion shell out to git and can take seconds;
 // spawn_blocking keeps that sync work off the async runtime's workers.
 #[tauri::command]
 #[specta::specta]
-pub async fn close_task(task_id: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-        monica_application::close_issue(&mut runtime.repositories, &runtime.git, &task_id)
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+pub async fn close_task(app: AppHandle, task_id: String) -> Result<(), ApiError> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), ApiError> {
+        let mut monica = event_sink::open(&app)?;
+        monica.tasks().close_issue(&task_id).map(|_| ()).map_err(ApiError::from)
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| ApiError::external(e.to_string()))?
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn run_task(task_id: String, agent: Option<Agent>) -> Result<RunTaskResult, String> {
-    let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
-    monica_application::prepare_claude_for_run(
-        &mut runtime.repositories,
-        &runtime.task_run_outputs,
-        &task_id,
-        agent.map(monica_application::Agent::from),
-    )
-    .map(RunTaskResult::from)
-    .map_err(|e| e.to_string())
+pub fn run_task(
+    app: AppHandle,
+    task_id: String,
+    agent: Option<Agent>,
+) -> Result<RunTaskResult, ApiError> {
+    let mut monica = event_sink::open(&app)?;
+    let result = monica
+        .executions()
+        .prepare_claude_for_run(&task_id, agent.map(monica_application::Agent::from))?;
+    Ok(RunTaskResult::from(result))
 }

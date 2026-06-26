@@ -11,8 +11,8 @@ use crate::ports::{
     TaskSummaryFilter,
 };
 use crate::{
-    AuthGateway, BenchRepository, Clock, GithubGateway, SetupEnv, SetupOutcome, SetupRunner,
-    TaskRunOutputs,
+    ApplicationError, AuthGateway, BenchRepository, Clock, GithubGateway, SetupEnv, SetupOutcome,
+    SetupRunner, TaskRunOutputs,
 };
 use super::runs::record_hook::{
     resolve_by_lazy_create, resolve_by_prepared_primary, resolve_by_session, RunResolveCtx,
@@ -32,6 +32,16 @@ use crate::{
     TaskBench, TaskKind, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus,
     TaskSummaryRow, TrackGithubIssueInput,
 };
+use crate::ports::{
+    NotebookGateway, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
+    TerminalSessionRepository, Workspace,
+};
+use crate::{
+    ApplicationEvent, Backend, DaemonSessionView, EventSink, LintFinding, Monica, NewTerminalSession,
+    NotebookDoc, TerminalSession, TerminalSessionKind, TerminalSessionStatus, TerminalSessionUpdate,
+    TerminalStateSnapshot,
+};
+use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
 struct FakeRepos {
@@ -46,8 +56,11 @@ struct FakeState {
     runs: HashMap<String, TaskRun>,
     events: Vec<Event>,
     benches: BTreeMap<String, (String, String)>,
+    /// Insertion order is creation order, so the last match for a tab is its latest session.
+    terminal_sessions: Vec<TerminalSession>,
     next_task: i64,
     next_run: i64,
+    next_session: i64,
     pr_branch_candidate: Option<PullRequestBranchSyncCandidate>,
     pr_status_candidate: Option<PullRequestStatusSyncCandidate>,
     pr_branch_success_count: usize,
@@ -252,6 +265,10 @@ impl TaskRepository for FakeRepos {
         self.state.borrow_mut().pr_status_candidate = None;
         Ok(())
     }
+
+    fn force_clear_pr_sync_state(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 impl ProjectRepository for FakeRepos {
@@ -278,6 +295,15 @@ fn run_number(run_id: &str) -> i64 {
         .strip_prefix("run-")
         .and_then(|n| n.parse().ok())
         .unwrap_or(0)
+}
+
+/// Mirrors the SQLite predicate for a tab-driven run still settle-able by terminal death:
+/// Running/WaitingForUser, or SettingUp once a session has been observed.
+fn is_live_driven_run(run: &TaskRun) -> bool {
+    matches!(
+        run.status,
+        TaskRunStatus::Running | TaskRunStatus::WaitingForUser
+    ) || (run.status == TaskRunStatus::SettingUp && run.provider_session_id.is_some())
 }
 
 impl TaskRunRepository for FakeRepos {
@@ -396,6 +422,30 @@ impl TaskRunRepository for FakeRepos {
             .filter(|run| run.task_id == task_id)
             .cloned()
             .collect())
+    }
+
+    fn list_driven_task_runs_with_tab(&self) -> Result<Vec<TaskRun>> {
+        Ok(self
+            .state
+            .borrow()
+            .runs
+            .values()
+            .filter(|run| run.terminal_tab_id.is_some() && is_live_driven_run(run))
+            .cloned()
+            .collect())
+    }
+
+    fn settle_task_run_if_live(&mut self, task_run_id: &str, task_id: &str) -> Result<bool> {
+        let mut state = self.state.borrow_mut();
+        let Some(run) = state.runs.get_mut(task_run_id) else {
+            return Ok(false);
+        };
+        if run.task_id != task_id || !is_live_driven_run(run) {
+            return Ok(false);
+        }
+        run.status = TaskRunStatus::Stopped;
+        run.wait_reason = None;
+        Ok(true)
     }
 
     fn record_task_run_observation(
@@ -746,13 +796,15 @@ fn create_raw_task_links_project_and_has_no_issue_ref() {
 fn create_raw_task_rejects_blank_title() {
     let mut repos = FakeRepos::default();
     repos.insert_project(Project::from_repo("owner/repo"));
-    assert!(create_raw_task(&mut repos, "   ", "owner/repo").is_err());
+    let err = create_raw_task(&mut repos, "   ", "owner/repo").unwrap_err();
+    assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
 }
 
 #[test]
 fn create_raw_task_rejects_unknown_project() {
     let mut repos = FakeRepos::default();
-    assert!(create_raw_task(&mut repos, "explore", "owner/repo").is_err());
+    let err = create_raw_task(&mut repos, "explore", "owner/repo").unwrap_err();
+    assert!(matches!(err, ApplicationError::NotFound(_)), "{err:?}");
 }
 
 #[test]
@@ -2072,6 +2124,7 @@ fn start_run_rejects_active_primary_run() {
     start_run(&mut repos, &task_id).unwrap();
 
     let err = start_run(&mut repos, &task_id).unwrap_err();
+    assert!(matches!(err, ApplicationError::Conflict(_)), "{err:?}");
     assert!(err.to_string().contains("already has an active run"), "{err}");
 }
 
@@ -2083,7 +2136,15 @@ fn start_run_rejects_closed_task() {
     repos.update_task_status(&task_id, TaskStatus::Closed).unwrap();
 
     let err = start_run(&mut repos, &task_id).unwrap_err();
+    assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
     assert!(err.to_string().contains("is closed"), "{err}");
+}
+
+#[test]
+fn start_run_missing_task_is_not_found() {
+    let mut repos = FakeRepos::default();
+    let err = start_run(&mut repos, "MON-404").unwrap_err();
+    assert!(matches!(err, ApplicationError::NotFound(_)), "{err:?}");
 }
 
 #[test]
@@ -2483,4 +2544,443 @@ fn resolve_by_lazy_create_creates_side_run_when_primary_exists() {
     assert!(resolved.created);
     let updated_task = repos.get_task(&task_id).unwrap().unwrap();
     assert!(updated_task.primary_task_run_id.is_none());
+}
+
+// ---------------------------------------------------------------------------
+// Façade orchestration tests
+//
+// The pure decision functions (task_run_settlement_for_*, reconcile_terminal_sessions) and the
+// store CAS guard (settle_task_run_if_live) are tested elsewhere. These exercise the composition
+// the façade adds on top: fetch rows → call the pure verdict → apply → emit, end to end against a
+// fake backend, asserting the emitted ApplicationEvents.
+// ---------------------------------------------------------------------------
+
+impl FakeRepos {
+    fn seed_run(&self, run: TaskRun) {
+        self.state.borrow_mut().runs.insert(run.id.clone(), run);
+    }
+
+    fn seed_session(&self, session: TerminalSession) {
+        self.state.borrow_mut().terminal_sessions.push(session);
+    }
+}
+
+impl TerminalSessionRepository for FakeRepos {
+    fn create_terminal_session(&mut self, new: NewTerminalSession) -> Result<TerminalSession> {
+        let mut state = self.state.borrow_mut();
+        state.next_session += 1;
+        let session = TerminalSession {
+            id: format!("ts-{}", state.next_session),
+            runspace_id: new.runspace_id,
+            tab_id: new.tab_id,
+            kind: new.kind,
+            cwd: new.cwd,
+            shell: new.shell,
+            status: TerminalSessionStatus::Starting,
+            pid: None,
+            rows: new.rows,
+            cols: new.cols,
+            transcript_path: None,
+            exit_code: None,
+            started_at: None,
+            last_seen_at: None,
+            exited_at: None,
+            created_at: "2026-06-02T00:00:00.000Z".to_string(),
+            updated_at: "2026-06-02T00:00:00.000Z".to_string(),
+        };
+        state.terminal_sessions.push(session.clone());
+        Ok(session)
+    }
+
+    fn mark_terminal_session_started(&self, id: &str, pid: Option<u32>) -> Result<()> {
+        if let Some(s) = self.state.borrow_mut().terminal_sessions.iter_mut().find(|s| s.id == id) {
+            s.status = TerminalSessionStatus::Running;
+            s.pid = pid;
+        }
+        Ok(())
+    }
+
+    fn update_terminal_session_status(
+        &mut self,
+        id: &str,
+        status: TerminalSessionStatus,
+        exit_code: Option<i32>,
+    ) -> Result<()> {
+        if let Some(s) = self.state.borrow_mut().terminal_sessions.iter_mut().find(|s| s.id == id) {
+            s.status = status;
+            s.exit_code = exit_code;
+        }
+        Ok(())
+    }
+
+    fn get_terminal_session(&self, id: &str) -> Result<Option<TerminalSession>> {
+        Ok(self.state.borrow().terminal_sessions.iter().find(|s| s.id == id).cloned())
+    }
+
+    fn latest_terminal_session_for_tab(&self, tab_id: &str) -> Result<Option<TerminalSession>> {
+        Ok(self
+            .state
+            .borrow()
+            .terminal_sessions
+            .iter()
+            .rev()
+            .find(|s| s.tab_id.as_deref() == Some(tab_id))
+            .cloned())
+    }
+
+    fn list_terminal_sessions(&self, runspace_id: Option<&str>) -> Result<Vec<TerminalSession>> {
+        Ok(self
+            .state
+            .borrow()
+            .terminal_sessions
+            .iter()
+            .filter(|s| runspace_id.is_none_or(|r| s.runspace_id.as_deref() == Some(r)))
+            .cloned()
+            .collect())
+    }
+
+    fn apply_terminal_session_updates(&mut self, updates: &[TerminalSessionUpdate]) -> Result<()> {
+        let mut state = self.state.borrow_mut();
+        for update in updates {
+            if let Some(s) =
+                state.terminal_sessions.iter_mut().find(|s| s.id == update.session_id)
+            {
+                s.status = update.status;
+                if update.pid.is_some() {
+                    s.pid = update.pid;
+                }
+                if update.exit_code.is_some() {
+                    s.exit_code = update.exit_code;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn load_terminal_state(&self) -> Result<TerminalStateSnapshot> {
+        Ok(TerminalStateSnapshot { runspaces: Vec::new() })
+    }
+
+    fn save_terminal_state(&mut self, _snapshot: &TerminalStateSnapshot) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[derive(Clone, Default)]
+struct RecordingSink(Arc<Mutex<Vec<ApplicationEvent>>>);
+
+impl RecordingSink {
+    fn events(&self) -> Vec<ApplicationEvent> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+impl EventSink for RecordingSink {
+    fn emit(&self, event: ApplicationEvent) {
+        self.0.lock().unwrap().push(event);
+    }
+}
+
+#[derive(Default)]
+struct FakeNotebookGateway;
+
+impl NotebookGateway for FakeNotebookGateway {
+    fn page_counts(&self) -> Result<Vec<(String, usize)>> {
+        Ok(Vec::new())
+    }
+    fn read_docs(&self, _slug: &str) -> Result<Option<(Vec<NotebookDoc>, Vec<LintFinding>)>> {
+        Ok(None)
+    }
+    fn create(&self, slug: &str) -> Result<PathBuf> {
+        Ok(PathBuf::from("/tmp/notebooks").join(slug))
+    }
+}
+
+#[derive(Default)]
+struct FakeWorkspace;
+
+impl Workspace for FakeWorkspace {
+    fn scaffold_monica(&self, _dir: &Path) -> Result<Vec<(String, bool)>> {
+        Ok(vec![(".monica/setup.sh".to_string(), true)])
+    }
+}
+
+struct FakeDaemon {
+    create_fails: bool,
+}
+
+impl TerminalDaemon for FakeDaemon {
+    fn create(&self, _request: TerminalCreateRequest) -> Result<Option<u32>> {
+        if self.create_fails {
+            Err(anyhow!("daemon spawn failed"))
+        } else {
+            Ok(Some(4321))
+        }
+    }
+    fn attach(&self, _session_id: &str, _replay_bytes: Option<u32>) -> Result<TerminalAttachment> {
+        Ok(TerminalAttachment { replay: String::new(), rows: 24, cols: 80 })
+    }
+    fn detach(&self, _session_id: &str) -> Result<()> {
+        Ok(())
+    }
+    fn terminate(&self, _session_id: &str) -> Result<()> {
+        Ok(())
+    }
+    fn list_views(&self) -> Result<Vec<DaemonSessionView>> {
+        Ok(Vec::new())
+    }
+    fn reap(&self, _session_id: &str) {}
+}
+
+struct FakeBackend;
+
+impl Backend for FakeBackend {
+    type Repos = FakeRepos;
+    type Git = FakeGit;
+    type Github = FakeGithub;
+    type Auth = FakeAuth;
+    type Setup = FakeSetupRunner;
+    type Outputs = FakeTaskRunOutputs;
+    type Notebooks = FakeNotebookGateway;
+    type Workspace = FakeWorkspace;
+}
+
+fn facade(repos: FakeRepos, sink: RecordingSink) -> Monica<FakeBackend> {
+    Monica::new(
+        repos,
+        FakeGit::default(),
+        FakeGithub,
+        FakeAuth,
+        FakeSetupRunner { outcome: RefCell::new(None) },
+        FakeTaskRunOutputs::default(),
+        FakeNotebookGateway,
+        FakeWorkspace,
+        Box::new(sink),
+    )
+}
+
+fn driven_run(id: &str, task_id: &str, tab: &str) -> TaskRun {
+    TaskRun {
+        id: id.to_string(),
+        task_id: task_id.to_string(),
+        agent: None,
+        branch: None,
+        worktree_path: None,
+        status: TaskRunStatus::Running,
+        wait_reason: None,
+        settings_path: None,
+        provider_session_id: Some("sess".to_string()),
+        terminal_tab_id: Some(tab.to_string()),
+        last_event_name: None,
+        last_event_at: None,
+        plan_file_path: None,
+        pending_stop: false,
+        metadata: RawJson::empty_object(),
+        created_at: "2026-06-02T00:00:00.000Z".to_string(),
+        updated_at: "2026-06-02T00:00:00.000Z".to_string(),
+    }
+}
+
+fn fake_session(id: &str, tab: Option<&str>, status: TerminalSessionStatus) -> TerminalSession {
+    TerminalSession {
+        id: id.to_string(),
+        runspace_id: None,
+        tab_id: tab.map(str::to_string),
+        kind: TerminalSessionKind::Shell,
+        cwd: "/".to_string(),
+        shell: "/bin/zsh".to_string(),
+        status,
+        pid: None,
+        rows: 24,
+        cols: 80,
+        transcript_path: None,
+        exit_code: None,
+        started_at: None,
+        last_seen_at: None,
+        exited_at: None,
+        created_at: "2026-06-02T00:00:00.000Z".to_string(),
+        updated_at: "2026-06-02T00:00:00.000Z".to_string(),
+    }
+}
+
+fn stopped_runs(events: &[ApplicationEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            ApplicationEvent::TaskRunStatusChanged { task_run_id, status, .. }
+                if *status == TaskRunStatus::Stopped =>
+            {
+                Some(task_run_id.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn facade_settles_run_on_terminal_exit() {
+    let repos = FakeRepos::default();
+    repos.seed_run(driven_run("run-1", "MON-1", "tab-1"));
+    repos.seed_session(fake_session("ts-1", Some("tab-1"), TerminalSessionStatus::Exited));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    monica
+        .executions()
+        .settle_runs_for_terminated_sessions(&["ts-1".to_string()]);
+
+    assert_eq!(stopped_runs(&sink.events()), vec!["run-1".to_string()]);
+}
+
+#[test]
+fn facade_skips_stale_exit_after_tab_respawn() {
+    let repos = FakeRepos::default();
+    repos.seed_run(driven_run("run-1", "MON-1", "tab-1"));
+    repos.seed_session(fake_session("ts-1", Some("tab-1"), TerminalSessionStatus::Exited));
+    // A newer session in the same tab makes ts-1 no longer the latest.
+    repos.seed_session(fake_session("ts-2", Some("tab-1"), TerminalSessionStatus::Running));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    monica
+        .executions()
+        .settle_runs_for_terminated_sessions(&["ts-1".to_string()]);
+
+    assert!(sink.events().is_empty());
+}
+
+#[test]
+fn facade_skips_exit_for_session_without_tab() {
+    let repos = FakeRepos::default();
+    repos.seed_session(fake_session("ts-1", None, TerminalSessionStatus::Exited));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    monica
+        .executions()
+        .settle_runs_for_terminated_sessions(&["ts-1".to_string()]);
+
+    assert!(sink.events().is_empty());
+}
+
+#[test]
+fn facade_does_not_settle_prepared_run_on_exit() {
+    let repos = FakeRepos::default();
+    let mut prepared = driven_run("run-1", "MON-1", "tab-1");
+    prepared.status = TaskRunStatus::Prepared;
+    repos.seed_run(prepared);
+    repos.seed_session(fake_session("ts-1", Some("tab-1"), TerminalSessionStatus::Exited));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    monica
+        .executions()
+        .settle_runs_for_terminated_sessions(&["ts-1".to_string()]);
+
+    assert!(sink.events().is_empty());
+}
+
+#[test]
+fn facade_orphan_sweep_settles_only_dead_tabs() {
+    let repos = FakeRepos::default();
+    repos.seed_run(driven_run("run-dead", "MON-1", "tab-dead"));
+    repos.seed_run(driven_run("run-live", "MON-2", "tab-live"));
+    repos.seed_session(fake_session("ts-dead", Some("tab-dead"), TerminalSessionStatus::Exited));
+    repos.seed_session(fake_session("ts-live", Some("tab-live"), TerminalSessionStatus::Running));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    monica.executions().settle_orphaned_runs();
+
+    assert_eq!(stopped_runs(&sink.events()), vec!["run-dead".to_string()]);
+}
+
+#[test]
+fn facade_mark_all_sessions_lost_settles_live_sessions_only() {
+    let repos = FakeRepos::default();
+    repos.seed_run(driven_run("run-1", "MON-1", "tab-1"));
+    repos.seed_session(fake_session("ts-live", Some("tab-1"), TerminalSessionStatus::Running));
+    // Already terminal: excluded from the lost set and not re-settled.
+    repos.seed_session(fake_session("ts-done", Some("tab-2"), TerminalSessionStatus::Exited));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    monica.executions().mark_all_sessions_lost().unwrap();
+
+    assert_eq!(stopped_runs(&sink.events()), vec!["run-1".to_string()]);
+}
+
+#[test]
+fn facade_create_terminal_session_failure_marks_failed_and_settles() {
+    let repos = FakeRepos::default();
+    repos.seed_run(driven_run("run-1", "MON-1", "tab-1"));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+    let daemon = FakeDaemon { create_fails: true };
+    let new = NewTerminalSession {
+        runspace_id: Some("rs-1".to_string()),
+        tab_id: Some("tab-1".to_string()),
+        kind: TerminalSessionKind::Shell,
+        cwd: "/".to_string(),
+        shell: "/bin/zsh".to_string(),
+        rows: 24,
+        cols: 80,
+    };
+
+    let session = monica.executions().create_terminal_session(&daemon, new, Vec::new()).unwrap();
+
+    assert_eq!(session.status, TerminalSessionStatus::Failed);
+    assert_eq!(stopped_runs(&sink.events()), vec!["run-1".to_string()]);
+}
+
+#[tokio::test]
+async fn facade_sync_pull_requests_counts_and_announces() {
+    let repos = FakeRepos::default();
+    repos.state.borrow_mut().pr_branch_candidate = Some(PullRequestBranchSyncCandidate {
+        task_id: "MON-1".to_string(),
+        repo: "owner/repo".to_string(),
+        branch: "issue-1".to_string(),
+    });
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    let count = monica.synchronization().sync_pull_requests(5, true).await.unwrap();
+
+    assert_eq!(count, 1);
+    assert!(sink
+        .events()
+        .iter()
+        .any(|e| matches!(e, ApplicationEvent::PullRequestSyncCompleted { synced_count: 1 })));
+}
+
+#[tokio::test]
+async fn facade_sync_pull_requests_stays_silent_without_announce() {
+    let repos = FakeRepos::default();
+    repos.state.borrow_mut().pr_branch_candidate = Some(PullRequestBranchSyncCandidate {
+        task_id: "MON-1".to_string(),
+        repo: "owner/repo".to_string(),
+        branch: "issue-1".to_string(),
+    });
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    let count = monica.synchronization().sync_pull_requests(5, false).await.unwrap();
+
+    assert_eq!(count, 1);
+    assert!(sink.events().is_empty());
+}
+
+#[tokio::test]
+async fn facade_init_project_prefers_git_branch_over_github() {
+    let repos = FakeRepos::default();
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+
+    // FakeGit::detect_repo -> "owner/repo", detect_default_branch -> Some("main"): GitHub fallback
+    // is never consulted.
+    let report = monica.projects().init_project(None, Path::new("/repo")).await.unwrap();
+
+    assert_eq!(report.project.repo, "owner/repo");
+    assert_eq!(report.project.default_branch, "main");
+    assert!(!report.scaffold.is_empty());
 }

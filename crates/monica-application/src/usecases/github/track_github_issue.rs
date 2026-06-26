@@ -1,9 +1,7 @@
-use anyhow::Result;
-
 use super::ports::{GithubGateway, ProjectRepository, TaskRepository};
 use crate::{
-    parse_owner_repo, ExternalIssue, ExternalReference, GithubIssue, NewTask, Provider, RefType,
-    Task, TaskKind, TaskStatus,
+    parse_owner_repo, ApplicationError, ApplicationResult, ExternalIssue, ExternalReference,
+    GithubIssue, NewTask, Provider, RefType, Task, TaskKind, TaskStatus,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,13 +21,16 @@ pub async fn track_github_issue<R, G>(
     repos: &mut R,
     github: &G,
     input: TrackGithubIssueInput,
-) -> Result<TrackGithubIssueReport>
+) -> ApplicationResult<TrackGithubIssueReport>
 where
     R: TaskRepository + ProjectRepository,
     G: GithubGateway,
 {
     let repo = parse_owner_repo(&input.repo)?;
-    let issue = github.fetch_issue(&repo, input.number).await?;
+    let issue = github
+        .fetch_issue(&repo, input.number)
+        .await
+        .map_err(|e| ApplicationError::external(format!("{e:#}")))?;
     let task = track_github_issue_from_fetched(repos, &repo, &issue)?;
     Ok(TrackGithubIssueReport {
         repo,
@@ -51,7 +52,7 @@ pub fn track_github_issue_from_fetched<R>(
     repos: &mut R,
     repo_input: &str,
     issue: &GithubIssue,
-) -> Result<Task>
+) -> ApplicationResult<Task>
 where
     R: TaskRepository + ProjectRepository,
 {
@@ -71,5 +72,5 @@ where
         Some(issue.number),
         Some(issue.url.clone()),
     );
-    repos.insert_task_with_ref(new, external)
+    Ok(repos.insert_task_with_ref(new, external)?)
 }

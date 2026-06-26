@@ -5,7 +5,7 @@ pub mod process;
 pub mod runtime;
 pub mod sqlite;
 
-pub use runtime::Runtime;
+pub use runtime::{open_monica, DefaultBackend};
 pub use sqlite::{Db, SqliteStore};
 
 #[cfg(test)]

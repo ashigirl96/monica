@@ -1,7 +1,9 @@
-use monica_infra::Runtime;
+use monica_api::{ApiError, ApiErrorCode};
 use serde::Serialize;
+use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
+use crate::event_sink;
 use crate::schedulers::pull_request_sync::PrSyncWaker;
 
 #[derive(Clone, Serialize, specta::Type, Event)]
@@ -13,17 +15,19 @@ pub struct PrSyncCompleted {
 #[tauri::command]
 #[specta::specta]
 pub async fn force_sync_pull_requests(
-    waker: tauri::State<'_, PrSyncWaker>,
-) -> Result<(), String> {
-    let mut rt = Runtime::open_default().map_err(|e| e.to_string())?;
-    if !monica_application::github_auth_status(&rt.auth).authenticated {
-        return Err("Not authenticated with GitHub".to_string());
+    app: AppHandle,
+    waker: State<'_, PrSyncWaker>,
+) -> Result<(), ApiError> {
+    let mut monica = event_sink::open(&app)?;
+    if !monica.synchronization().auth_status().authenticated {
+        return Err(ApiError::new(
+            ApiErrorCode::AuthenticationRequired,
+            "Not authenticated with GitHub",
+        ));
     }
-    rt.repositories
-        .force_clear_pr_sync_state()
-        .map_err(|e| e.to_string())?;
+    monica.synchronization().reset_pull_request_sync()?;
     if !waker.wake_forced() {
-        return Err("PR sync scheduler is not running".to_string());
+        return Err(ApiError::external("PR sync scheduler is not running"));
     }
     Ok(())
 }

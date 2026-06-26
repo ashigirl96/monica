@@ -1,10 +1,12 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
 
+use monica_api::ApiError;
 use serde::Serialize;
+use tauri::AppHandle;
 
-use monica_application::{front_value, is_valid_slug, outline, pages_from_docs, NotebookDoc, NotebookPage};
-use monica_infra::filesystem::{notebook, paths};
+use monica_application::{front_value, outline, pages_from_docs, NotebookDoc, NotebookPage};
+
+use crate::event_sink;
 
 #[derive(Serialize, specta::Type)]
 pub struct NotebookSummary {
@@ -27,10 +29,11 @@ pub struct NotebookPageRow {
 
 #[tauri::command]
 #[specta::specta]
-pub fn list_notebooks() -> Result<Vec<NotebookSummary>, String> {
-    let root = paths::notebooks_dir().map_err(|e| e.to_string())?;
-    let counts = notebook::notebook_page_counts(&root).map_err(|e| e.to_string())?;
-    Ok(counts
+pub fn list_notebooks(app: AppHandle) -> Result<Vec<NotebookSummary>, ApiError> {
+    let mut monica = event_sink::open(&app)?;
+    Ok(monica
+        .notebooks()
+        .list_notebooks()?
         .into_iter()
         .map(|(slug, count)| {
             let title = deslugify(&slug);
@@ -45,19 +48,13 @@ pub fn list_notebooks() -> Result<Vec<NotebookSummary>, String> {
 
 #[tauri::command]
 #[specta::specta]
-pub fn get_notebook_pages(notebook_id: String) -> Result<Vec<NotebookPageRow>, String> {
-    let dir = notebook_dir_checked(&notebook_id)?;
-    let (docs, _) = notebook::read_notebook_docs(&dir).map_err(|e| e.to_string())?;
+pub fn get_notebook_pages(
+    app: AppHandle,
+    notebook_id: String,
+) -> Result<Vec<NotebookPageRow>, ApiError> {
+    let mut monica = event_sink::open(&app)?;
+    let (docs, _) = monica.notebooks().read_notebook(&notebook_id)?;
     Ok(build_page_rows(&docs))
-}
-
-/// Rejects ids holding `/`, `\`, `..` or anything outside ASCII kebab-case, so a resolved read
-/// can never escape `notebooks_dir()`.
-fn notebook_dir_checked(notebook_id: &str) -> Result<PathBuf, String> {
-    if !is_valid_slug(notebook_id) {
-        return Err(format!("invalid notebook id `{notebook_id}`"));
-    }
-    paths::notebook_dir(notebook_id).map_err(|e| e.to_string())
 }
 
 /// Presentation-only display title from a slug: `rust-async` -> `Rust Async`.
