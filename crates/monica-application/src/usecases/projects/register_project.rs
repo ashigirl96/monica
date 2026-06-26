@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 
-use crate::ports::ProjectRepository;
+use super::ports::ProjectRepository;
 use crate::{parse_owner_repo, Project};
 
 pub fn register_project<R>(repos: &R, repo_input: &str, path: &Path) -> Result<Project>

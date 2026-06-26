@@ -1,10 +1,13 @@
 use anyhow::Result;
+use serde_json::Value;
 
 use crate::domain::{
     DisplayStatus, ExternalRef, GithubPullRequest, PullRequestBranchSyncCandidate,
     PullRequestStatusSyncCandidate, Task, TaskStatus, TaskSummaryRow,
 };
-use crate::NewTask;
+use crate::{Event, NewTask};
+
+pub use crate::usecases::projects::ports::ProjectRepository;
 
 /// How [`TaskRepository::list_task_summaries`] scopes which tasks come back. This is the query's
 /// parameter, not a domain concept, so it lives beside the port rather than in `domain`.
@@ -69,6 +72,17 @@ pub trait TaskRepository {
         candidate: &PullRequestStatusSyncCandidate,
         error: &str,
     ) -> Result<()>;
+}
+
+pub trait EventRepository {
+    fn insert_event(
+        &self,
+        task_id: Option<&str>,
+        task_run_id: Option<&str>,
+        kind: &str,
+        payload: &Value,
+    ) -> Result<Event>;
+    fn list_events(&self, task_id: Option<&str>) -> Result<Vec<Event>>;
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 
-use crate::ports::{ProjectRepository, TaskRepository};
+use super::ports::{ProjectRepository, TaskRepository};
 use crate::{NewTask, Task, TaskKind};
 
 /// Create a task that carries no GitHub issue ref ("raw task"). The title is the sole content;

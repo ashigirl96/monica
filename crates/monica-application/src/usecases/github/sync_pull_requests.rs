@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::ports::{GithubGateway, TaskRepository};
+use super::ports::{GithubGateway, TaskRepository};
 use crate::PullRequestSyncResult;
 
 pub async fn sync_next_pull_request<R, G>(

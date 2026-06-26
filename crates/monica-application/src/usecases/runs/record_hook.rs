@@ -6,7 +6,7 @@ use crate::domain::{
     is_session_starting_event, should_ignore_event, subagents_in_flight_after,
     transition_for_event, transition_is_protected, Agent, Task,
 };
-use crate::ports::{Clock, EventRepository, TaskRunOutputs, TaskRepository, TaskRunRepository};
+use super::ports::{Clock, EventRepository, TaskRunOutputs, TaskRepository, TaskRunRepository};
 use crate::{NewTaskRun, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus};
 
 /// Identity carried by a hook invocation via `MONICA_*` env vars. `task_run_id` is only present
@@ -247,9 +247,9 @@ where
     })
 }
 
-pub(super) struct ResolvedRun {
-    pub(super) run: Option<TaskRun>,
-    pub(super) created: bool,
+pub(crate) struct ResolvedRun {
+    pub(crate) run: Option<TaskRun>,
+    pub(crate) created: bool,
 }
 
 impl ResolvedRun {
@@ -260,14 +260,14 @@ impl ResolvedRun {
 
 type ResolveRule<R> = fn(&RunResolveCtx, &mut R) -> Result<Option<ResolvedRun>>;
 
-pub(super) struct RunResolveCtx<'a> {
-    pub(super) task_id: &'a str,
-    pub(super) task: &'a Task,
-    pub(super) explicit_run_id_rejected: bool,
-    pub(super) provider_session_id: Option<&'a str>,
-    pub(super) event_name: Option<&'a str>,
-    pub(super) agent: Agent,
-    pub(super) primary_run: Option<&'a TaskRun>,
+pub(crate) struct RunResolveCtx<'a> {
+    pub(crate) task_id: &'a str,
+    pub(crate) task: &'a Task,
+    pub(crate) explicit_run_id_rejected: bool,
+    pub(crate) provider_session_id: Option<&'a str>,
+    pub(crate) event_name: Option<&'a str>,
+    pub(crate) agent: Agent,
+    pub(crate) primary_run: Option<&'a TaskRun>,
 }
 
 /// Resolve which task run a hook belongs to. Rules are evaluated top-down, first match wins:
@@ -336,7 +336,7 @@ where
     Ok(ResolvedRun::linked(None))
 }
 
-pub(super) fn resolve_by_session<R>(ctx: &RunResolveCtx, repos: &mut R) -> Result<Option<ResolvedRun>>
+pub(crate) fn resolve_by_session<R>(ctx: &RunResolveCtx, repos: &mut R) -> Result<Option<ResolvedRun>>
 where
     R: TaskRepository + TaskRunRepository,
 {
@@ -349,7 +349,7 @@ where
     }
 }
 
-pub(super) fn resolve_by_prepared_primary<R>(
+pub(crate) fn resolve_by_prepared_primary<R>(
     ctx: &RunResolveCtx,
     _repos: &mut R,
 ) -> Result<Option<ResolvedRun>>
@@ -366,7 +366,7 @@ where
     }
 }
 
-pub(super) fn resolve_by_lazy_create<R>(ctx: &RunResolveCtx, repos: &mut R) -> Result<Option<ResolvedRun>>
+pub(crate) fn resolve_by_lazy_create<R>(ctx: &RunResolveCtx, repos: &mut R) -> Result<Option<ResolvedRun>>
 where
     R: TaskRepository + TaskRunRepository,
 {

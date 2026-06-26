@@ -11,7 +11,7 @@ use crate::ports::{
     ProjectRepository, TaskRunOutputs, SetupEnv, SetupOutcome, SetupRunner, TaskRepository,
     TaskRunRepository, TaskSummaryFilter,
 };
-use super::record_hook::{
+use super::runs::record_hook::{
     resolve_by_lazy_create, resolve_by_prepared_primary, resolve_by_session, RunResolveCtx,
 };
 use crate::{
@@ -1842,7 +1842,7 @@ fn default_bench_cwd_prefers_project_path() {
     let mut project = Project::from_repo("owner/repo");
     project.path = Some("/test/repo".to_string());
     assert_eq!(
-        super::open_bench::default_bench_cwd(Some(&project), Some("/home/user")),
+        super::runs::open_bench::default_bench_cwd(Some(&project), Some("/home/user")),
         "/test/repo"
     );
 }
@@ -1851,7 +1851,7 @@ fn default_bench_cwd_prefers_project_path() {
 fn default_bench_cwd_falls_back_to_home_dir_when_no_project_path() {
     let project = Project::from_repo("owner/repo");
     assert_eq!(
-        super::open_bench::default_bench_cwd(Some(&project), Some("/home/user")),
+        super::runs::open_bench::default_bench_cwd(Some(&project), Some("/home/user")),
         "/home/user"
     );
 }
@@ -1859,7 +1859,7 @@ fn default_bench_cwd_falls_back_to_home_dir_when_no_project_path() {
 #[test]
 fn default_bench_cwd_falls_back_to_tmp_when_no_project_and_no_home() {
     assert_eq!(
-        super::open_bench::default_bench_cwd(None, None),
+        super::runs::open_bench::default_bench_cwd(None, None),
         "/tmp"
     );
 }

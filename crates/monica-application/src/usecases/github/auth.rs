@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::ports::AuthGateway;
+use super::ports::AuthGateway;
 use crate::{GithubAuthStatus, GithubDeviceFlow};
 
 pub fn github_auth_status<A>(auth: &A) -> GithubAuthStatus
