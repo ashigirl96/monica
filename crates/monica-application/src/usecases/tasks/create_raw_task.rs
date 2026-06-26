@@ -1,4 +1,4 @@
-use super::ports::{ProjectRepository, TaskRepository};
+use super::ports::{ProjectRepository, TaskStore};
 use crate::{ApplicationError, ApplicationResult, NewTask, Task, TaskKind};
 
 /// Create a task that carries no GitHub issue ref ("raw task"). The title is the sole content;
@@ -6,7 +6,7 @@ use crate::{ApplicationError, ApplicationResult, NewTask, Task, TaskKind};
 /// `start_run` rejects tasks without a project.
 pub fn create_raw_task<R>(repos: &mut R, title: &str, project_id: &str) -> ApplicationResult<Task>
 where
-    R: TaskRepository + ProjectRepository,
+    R: TaskStore + ProjectRepository,
 {
     let title = title.trim();
     if title.is_empty() {

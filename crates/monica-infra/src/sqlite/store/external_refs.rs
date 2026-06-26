@@ -1,8 +1,21 @@
 use anyhow::Result;
-use rusqlite::params;
+use rusqlite::{params, Connection};
 
 use crate::sqlite::SqliteStore;
 use monica_application::{ExternalReference, GithubPullRequestRef};
+
+pub(super) fn list_external_refs(conn: &Connection, task_id: &str) -> Result<Vec<ExternalReference>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, task_id, provider, ref_type, repo, number, url, created_at
+         FROM external_refs WHERE task_id = ?1 ORDER BY id",
+    )?;
+    let mut rows = stmt.query(params![task_id])?;
+    let mut refs = Vec::new();
+    while let Some(row) = rows.next()? {
+        refs.push(crate::sqlite::row::external_ref_from_row(row)?);
+    }
+    Ok(refs)
+}
 
 impl SqliteStore {
     pub fn save_external_ref(&self, r: &ExternalReference) -> Result<i64> {
@@ -22,16 +35,7 @@ impl SqliteStore {
     }
 
     pub fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalReference>> {
-        let mut stmt = self.conn().prepare(
-            "SELECT id, task_id, provider, ref_type, repo, number, url, created_at
-             FROM external_refs WHERE task_id = ?1 ORDER BY id",
-        )?;
-        let mut rows = stmt.query(params![task_id])?;
-        let mut refs = Vec::new();
-        while let Some(row) = rows.next()? {
-            refs.push(crate::sqlite::row::external_ref_from_row(row)?);
-        }
-        Ok(refs)
+        list_external_refs(self.conn(), task_id)
     }
 
     pub fn list_github_pull_request_refs(

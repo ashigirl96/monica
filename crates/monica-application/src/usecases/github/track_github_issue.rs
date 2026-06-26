@@ -1,4 +1,4 @@
-use super::ports::{GithubGateway, ProjectRepository, TaskRepository};
+use super::ports::{GithubGateway, ProjectRepository, TaskStore};
 use crate::{
     parse_owner_repo, ApplicationError, ApplicationResult, ExternalIssue, ExternalReference,
     GithubIssue, NewTask, Provider, RefType, Task, TaskKind, TaskStatus,
@@ -23,7 +23,7 @@ pub async fn track_github_issue<R, G>(
     input: TrackGithubIssueInput,
 ) -> ApplicationResult<TrackGithubIssueReport>
 where
-    R: TaskRepository + ProjectRepository,
+    R: TaskStore + ProjectRepository,
     G: GithubGateway,
 {
     let repo = parse_owner_repo(&input.repo)?;
@@ -54,7 +54,7 @@ pub fn track_github_issue_from_fetched<R>(
     issue: &GithubIssue,
 ) -> ApplicationResult<Task>
 where
-    R: TaskRepository + ProjectRepository,
+    R: TaskStore + ProjectRepository,
 {
     let repo = parse_owner_repo(repo_input)?;
     let project_id = repos.get_project(&repo)?.map(|p| p.id);

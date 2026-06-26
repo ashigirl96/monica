@@ -7,12 +7,12 @@ use monica_domain::RawJson;
 use serde_json::Value;
 
 use crate::ports::{
-    BoxFuture, EventRepository, GitGateway, ProjectRepository, TaskRepository, TaskRunRepository,
-    TaskSummaryFilter,
+    BoxFuture, EventRepository, GitGateway, ProjectRepository, PullRequestSyncStore, TaskBoardQuery,
+    TaskRunStore, TaskStore, TaskSummaryFilter, UnitOfWork, WorkTransaction, WorkbenchStore,
 };
 use crate::{
-    ApplicationError, AuthGateway, BenchRepository, Clock, GithubGateway, SetupEnv, SetupOutcome,
-    SetupRunner, TaskRunOutputs,
+    ApplicationError, AuthGateway, Clock, GithubGateway, SetupEnv, SetupOutcome, SetupRunner,
+    TaskRunOutputs,
 };
 use super::runs::record_hook::{
     resolve_by_lazy_create, resolve_by_prepared_primary, resolve_by_session, RunResolveCtx,
@@ -91,8 +91,11 @@ impl FakeRepos {
     }
 }
 
-impl TaskRepository for FakeRepos {
-    fn insert_task(&mut self, new: NewTask) -> Result<Task> {
+// Bodies of the mutating TaskStore ops live as `&self` inherent methods (interior mutability via
+// the RefCell), so both `impl TaskStore for FakeRepos` and the `FakeUow` transaction — which only
+// holds a shared `&FakeRepos` — can share them.
+impl FakeRepos {
+    fn do_insert_task(&self, new: NewTask) -> Result<Task> {
         let mut state = self.state.borrow_mut();
         state.next_task += 1;
         let id = format!("MON-{}", state.next_task);
@@ -101,12 +104,12 @@ impl TaskRepository for FakeRepos {
         Ok(task)
     }
 
-    fn insert_task_with_ref(
-        &mut self,
+    fn do_insert_task_with_ref(
+        &self,
         new: NewTask,
         mut external: ExternalReference,
     ) -> Result<Task> {
-        let task = self.insert_task(new)?;
+        let task = self.do_insert_task(new)?;
         external.id = 1;
         external.task_id = task.id.clone();
         self.state
@@ -118,11 +121,7 @@ impl TaskRepository for FakeRepos {
         Ok(task)
     }
 
-    fn get_task(&self, id: &str) -> Result<Option<Task>> {
-        Ok(self.state.borrow().tasks.get(id).cloned())
-    }
-
-    fn mark_task_closed(&mut self, id: &str) -> Result<Task> {
+    fn do_mark_task_closed(&self, id: &str) -> Result<Task> {
         let mut state = self.state.borrow_mut();
         let task = state
             .tasks
@@ -133,10 +132,75 @@ impl TaskRepository for FakeRepos {
         Ok(task.clone())
     }
 
+    fn do_mark_task(&self, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()> {
+        let mut state = self.state.borrow_mut();
+        let task = state
+            .tasks
+            .get_mut(id)
+            .ok_or_else(|| anyhow!("task not found: {id}"))?;
+        task.status = status;
+        task.phase = note.map(ToString::to_string);
+        Ok(())
+    }
+}
+
+impl TaskStore for FakeRepos {
+    fn insert_task(&mut self, new: NewTask) -> Result<Task> {
+        self.do_insert_task(new)
+    }
+
+    fn insert_task_with_ref(&mut self, new: NewTask, external: ExternalReference) -> Result<Task> {
+        self.do_insert_task_with_ref(new, external)
+    }
+
+    fn get_task(&self, id: &str) -> Result<Option<Task>> {
+        Ok(self.state.borrow().tasks.get(id).cloned())
+    }
+
+    fn mark_task_closed(&mut self, id: &str) -> Result<Task> {
+        self.do_mark_task_closed(id)
+    }
+
     fn list_tasks(&self) -> Result<Vec<Task>> {
         Ok(self.state.borrow().tasks.values().cloned().collect())
     }
 
+    fn set_primary_task_run(&self, task_id: &str, task_run_id: &str) -> Result<()> {
+        self.state
+            .borrow_mut()
+            .tasks
+            .get_mut(task_id)
+            .ok_or_else(|| anyhow!("task not found: {task_id}"))?
+            .primary_task_run_id = Some(task_run_id.to_string());
+        Ok(())
+    }
+
+    fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()> {
+        self.state
+            .borrow_mut()
+            .tasks
+            .get_mut(id)
+            .ok_or_else(|| anyhow!("task not found: {id}"))?
+            .status = status;
+        Ok(())
+    }
+
+    fn mark_task(&mut self, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()> {
+        self.do_mark_task(id, status, note)
+    }
+
+    fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalReference>> {
+        Ok(self
+            .state
+            .borrow()
+            .refs
+            .get(task_id)
+            .cloned()
+            .unwrap_or_default())
+    }
+}
+
+impl TaskBoardQuery for FakeRepos {
     fn list_task_summaries(
         &self,
         filter: TaskSummaryFilter,
@@ -174,48 +238,9 @@ impl TaskRepository for FakeRepos {
             .collect();
         Ok(rows)
     }
+}
 
-    fn set_primary_task_run(&self, task_id: &str, task_run_id: &str) -> Result<()> {
-        self.state
-            .borrow_mut()
-            .tasks
-            .get_mut(task_id)
-            .ok_or_else(|| anyhow!("task not found: {task_id}"))?
-            .primary_task_run_id = Some(task_run_id.to_string());
-        Ok(())
-    }
-
-    fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()> {
-        self.state
-            .borrow_mut()
-            .tasks
-            .get_mut(id)
-            .ok_or_else(|| anyhow!("task not found: {id}"))?
-            .status = status;
-        Ok(())
-    }
-
-    fn mark_task(&mut self, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()> {
-        let mut state = self.state.borrow_mut();
-        let task = state
-            .tasks
-            .get_mut(id)
-            .ok_or_else(|| anyhow!("task not found: {id}"))?;
-        task.status = status;
-        task.phase = note.map(ToString::to_string);
-        Ok(())
-    }
-
-    fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalReference>> {
-        Ok(self
-            .state
-            .borrow()
-            .refs
-            .get(task_id)
-            .cloned()
-            .unwrap_or_default())
-    }
-
+impl PullRequestSyncStore for FakeRepos {
     fn next_pull_request_branch_sync_candidate(
         &self,
     ) -> Result<Option<PullRequestBranchSyncCandidate>> {
@@ -306,8 +331,9 @@ fn is_live_driven_run(run: &TaskRun) -> bool {
     ) || (run.status == TaskRunStatus::SettingUp && run.provider_session_id.is_some())
 }
 
-impl TaskRunRepository for FakeRepos {
-    fn start_task_run(&mut self, new: NewTaskRun) -> Result<TaskRun> {
+// Mutating TaskRunStore ops as `&self` inherent helpers, shared by the trait impl and `FakeUow`.
+impl FakeRepos {
+    fn do_start_task_run(&self, new: NewTaskRun) -> Result<TaskRun> {
         let mut state = self.state.borrow_mut();
         state.next_run += 1;
         let id = format!("run-{}", state.next_run);
@@ -339,8 +365,8 @@ impl TaskRunRepository for FakeRepos {
         Ok(run)
     }
 
-    fn finish_task_run(
-        &mut self,
+    fn do_finish_task_run(
+        &self,
         task_run_id: &str,
         task_id: &str,
         status: TaskRunStatus,
@@ -357,6 +383,80 @@ impl TaskRunRepository for FakeRepos {
             }
         }
         Ok(())
+    }
+
+    fn do_settle_task_run_if_live(&self, task_run_id: &str, task_id: &str) -> Result<bool> {
+        let mut state = self.state.borrow_mut();
+        let Some(run) = state.runs.get_mut(task_run_id) else {
+            return Ok(false);
+        };
+        if run.task_id != task_id || !is_live_driven_run(run) {
+            return Ok(false);
+        }
+        run.status = TaskRunStatus::Stopped;
+        run.wait_reason = None;
+        Ok(true)
+    }
+
+    fn do_record_task_run_observation(
+        &self,
+        task_run_id: &str,
+        observation: TaskRunObservation<'_>,
+    ) -> Result<()> {
+        let mut state = self.state.borrow_mut();
+        let run = state
+            .runs
+            .get_mut(task_run_id)
+            .ok_or_else(|| anyhow!("task run not found: {task_run_id}"))?;
+        if let Some(status) = observation.status {
+            run.status = status;
+        }
+        if let Some(wait_reason) = observation.wait_reason {
+            run.wait_reason = wait_reason;
+        }
+        if let Some(session) = observation.provider_session_id {
+            run.provider_session_id = Some(session.to_string());
+        }
+        if let Some(tab) = observation.terminal_tab_id {
+            run.terminal_tab_id = Some(tab.to_string());
+        }
+        // Mirror the store's subagent guard: a Stop with subagents still in flight is held
+        // (pending_stop); the SubagentStop that leaves nothing in flight fires the deferred
+        // transition. `subagents_in_flight_after` excludes a SubagentStop's own listed agent.
+        let hold_stop = observation.event_name == Some("Stop")
+            && subagents_in_flight_after(observation.event_name, observation.metadata);
+        let release_stop = observation.event_name == Some("SubagentStop")
+            && !subagents_in_flight_after(observation.event_name, observation.metadata);
+        let was_pending = run.pending_stop;
+        if release_stop && was_pending {
+            run.status = TaskRunStatus::WaitingForUser;
+            run.wait_reason = Some(TaskRunWaitReason::AwaitingPrompt);
+        }
+        run.pending_stop = if hold_stop && run.status == TaskRunStatus::Running {
+            true
+        } else if release_stop || observation.status.is_some() {
+            false
+        } else {
+            was_pending
+        };
+        run.last_event_name = observation.event_name.map(ToString::to_string);
+        run.last_event_at = Some(observation.at.to_string());
+        Ok(())
+    }
+}
+
+impl TaskRunStore for FakeRepos {
+    fn start_task_run(&mut self, new: NewTaskRun) -> Result<TaskRun> {
+        self.do_start_task_run(new)
+    }
+
+    fn finish_task_run(
+        &mut self,
+        task_run_id: &str,
+        task_id: &str,
+        status: TaskRunStatus,
+    ) -> Result<()> {
+        self.do_finish_task_run(task_run_id, task_id, status)
     }
 
     fn set_task_run_settings_path(&self, task_run_id: &str, settings_path: &str) -> Result<()> {
@@ -436,16 +536,21 @@ impl TaskRunRepository for FakeRepos {
     }
 
     fn settle_task_run_if_live(&mut self, task_run_id: &str, task_id: &str) -> Result<bool> {
+        self.do_settle_task_run_if_live(task_run_id, task_id)
+    }
+
+    fn claim_prepared_run(&self, task_run_id: &str, provider_session_id: &str) -> Result<bool> {
+        // Mirror the SQLite guard: WHERE id=? AND status='prepared' AND provider_session_id IS NULL.
         let mut state = self.state.borrow_mut();
         let Some(run) = state.runs.get_mut(task_run_id) else {
             return Ok(false);
         };
-        if run.task_id != task_id || !is_live_driven_run(run) {
-            return Ok(false);
+        if run.status == TaskRunStatus::Prepared && run.provider_session_id.is_none() {
+            run.provider_session_id = Some(provider_session_id.to_string());
+            Ok(true)
+        } else {
+            Ok(false)
         }
-        run.status = TaskRunStatus::Stopped;
-        run.wait_reason = None;
-        Ok(true)
     }
 
     fn record_task_run_observation(
@@ -453,45 +558,7 @@ impl TaskRunRepository for FakeRepos {
         task_run_id: &str,
         observation: TaskRunObservation<'_>,
     ) -> Result<()> {
-        let mut state = self.state.borrow_mut();
-        let run = state
-            .runs
-            .get_mut(task_run_id)
-            .ok_or_else(|| anyhow!("task run not found: {task_run_id}"))?;
-        if let Some(status) = observation.status {
-            run.status = status;
-        }
-        if let Some(wait_reason) = observation.wait_reason {
-            run.wait_reason = wait_reason;
-        }
-        if let Some(session) = observation.provider_session_id {
-            run.provider_session_id = Some(session.to_string());
-        }
-        if let Some(tab) = observation.terminal_tab_id {
-            run.terminal_tab_id = Some(tab.to_string());
-        }
-        // Mirror the store's subagent guard: a Stop with subagents still in flight is held
-        // (pending_stop); the SubagentStop that leaves nothing in flight fires the deferred
-        // transition. `subagents_in_flight_after` excludes a SubagentStop's own listed agent.
-        let hold_stop = observation.event_name == Some("Stop")
-            && subagents_in_flight_after(observation.event_name, observation.metadata);
-        let release_stop = observation.event_name == Some("SubagentStop")
-            && !subagents_in_flight_after(observation.event_name, observation.metadata);
-        let was_pending = run.pending_stop;
-        if release_stop && was_pending {
-            run.status = TaskRunStatus::WaitingForUser;
-            run.wait_reason = Some(TaskRunWaitReason::AwaitingPrompt);
-        }
-        run.pending_stop = if hold_stop && run.status == TaskRunStatus::Running {
-            true
-        } else if release_stop || observation.status.is_some() {
-            false
-        } else {
-            was_pending
-        };
-        run.last_event_name = observation.event_name.map(ToString::to_string);
-        run.last_event_at = Some(observation.at.to_string());
-        Ok(())
+        self.do_record_task_run_observation(task_run_id, observation)
     }
 }
 
@@ -534,7 +601,17 @@ impl Clock for FakeRepos {
     }
 }
 
-impl BenchRepository for FakeRepos {
+impl FakeRepos {
+    fn do_create_bench(&self, task_id: &str, runspace_id: &str, cwd: &str) -> Result<()> {
+        self.state
+            .borrow_mut()
+            .benches
+            .insert(task_id.to_string(), (runspace_id.to_string(), cwd.to_string()));
+        Ok(())
+    }
+}
+
+impl WorkbenchStore for FakeRepos {
     fn get_bench_for_task(&self, task_id: &str) -> Result<Option<(String, String)>> {
         Ok(self.state.borrow().benches.get(task_id).cloned())
     }
@@ -544,11 +621,7 @@ impl BenchRepository for FakeRepos {
     }
 
     fn create_bench(&mut self, task_id: &str, runspace_id: &str, cwd: &str) -> Result<()> {
-        self.state
-            .borrow_mut()
-            .benches
-            .insert(task_id.to_string(), (runspace_id.to_string(), cwd.to_string()));
-        Ok(())
+        self.do_create_bench(task_id, runspace_id, cwd)
     }
 
     fn update_bench_cwd(&self, task_id: &str, cwd: &str) -> Result<()> {
@@ -556,6 +629,144 @@ impl BenchRepository for FakeRepos {
             entry.1 = cwd.to_string();
         }
         Ok(())
+    }
+}
+
+impl UnitOfWork for FakeRepos {
+    fn begin(&self) -> Result<Box<dyn WorkTransaction + '_>> {
+        Ok(Box::new(FakeUow { inner: self }))
+    }
+}
+
+/// A no-rollback transaction over a shared `&FakeRepos`: every write goes straight to the shared
+/// `RefCell`, and `commit` is a no-op. The SQLite store covers real rollback; the fake only needs
+/// the use-case path (begin → writes → commit) to behave like direct calls.
+struct FakeUow<'a> {
+    inner: &'a FakeRepos,
+}
+
+impl WorkTransaction for FakeUow<'_> {
+    fn commit(self: Box<Self>) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl TaskStore for FakeUow<'_> {
+    fn insert_task(&mut self, new: NewTask) -> Result<Task> {
+        self.inner.do_insert_task(new)
+    }
+
+    fn insert_task_with_ref(&mut self, new: NewTask, external: ExternalReference) -> Result<Task> {
+        self.inner.do_insert_task_with_ref(new, external)
+    }
+
+    fn get_task(&self, id: &str) -> Result<Option<Task>> {
+        self.inner.get_task(id)
+    }
+
+    fn mark_task_closed(&mut self, id: &str) -> Result<Task> {
+        self.inner.do_mark_task_closed(id)
+    }
+
+    fn list_tasks(&self) -> Result<Vec<Task>> {
+        self.inner.list_tasks()
+    }
+
+    fn set_primary_task_run(&self, task_id: &str, task_run_id: &str) -> Result<()> {
+        self.inner.set_primary_task_run(task_id, task_run_id)
+    }
+
+    fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()> {
+        self.inner.update_task_status(id, status)
+    }
+
+    fn mark_task(&mut self, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()> {
+        self.inner.do_mark_task(id, status, note)
+    }
+
+    fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalReference>> {
+        self.inner.list_external_refs(task_id)
+    }
+}
+
+impl TaskRunStore for FakeUow<'_> {
+    fn start_task_run(&mut self, new: NewTaskRun) -> Result<TaskRun> {
+        self.inner.do_start_task_run(new)
+    }
+
+    fn finish_task_run(
+        &mut self,
+        task_run_id: &str,
+        task_id: &str,
+        status: TaskRunStatus,
+    ) -> Result<()> {
+        self.inner.do_finish_task_run(task_run_id, task_id, status)
+    }
+
+    fn set_task_run_settings_path(&self, task_run_id: &str, settings_path: &str) -> Result<()> {
+        self.inner.set_task_run_settings_path(task_run_id, settings_path)
+    }
+
+    fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()> {
+        self.inner.set_task_run_worktree_path(task_run_id, worktree_path)
+    }
+
+    fn get_task_run(&self, id: &str) -> Result<Option<TaskRun>> {
+        self.inner.get_task_run(id)
+    }
+
+    fn find_task_run_by_session(
+        &self,
+        task_id: &str,
+        provider_session_id: &str,
+    ) -> Result<Option<TaskRun>> {
+        self.inner.find_task_run_by_session(task_id, provider_session_id)
+    }
+
+    fn find_task_run_by_terminal_tab(&self, terminal_tab_id: &str) -> Result<Option<TaskRun>> {
+        self.inner.find_task_run_by_terminal_tab(terminal_tab_id)
+    }
+
+    fn list_task_runs_for_task(&self, task_id: &str) -> Result<Vec<TaskRun>> {
+        self.inner.list_task_runs_for_task(task_id)
+    }
+
+    fn list_driven_task_runs_with_tab(&self) -> Result<Vec<TaskRun>> {
+        self.inner.list_driven_task_runs_with_tab()
+    }
+
+    fn settle_task_run_if_live(&mut self, task_run_id: &str, task_id: &str) -> Result<bool> {
+        self.inner.do_settle_task_run_if_live(task_run_id, task_id)
+    }
+
+    fn claim_prepared_run(&self, task_run_id: &str, provider_session_id: &str) -> Result<bool> {
+        self.inner.claim_prepared_run(task_run_id, provider_session_id)
+    }
+
+    fn record_task_run_observation(
+        &mut self,
+        task_run_id: &str,
+        observation: TaskRunObservation<'_>,
+    ) -> Result<()> {
+        self.inner.do_record_task_run_observation(task_run_id, observation)
+    }
+}
+
+impl WorkbenchStore for FakeUow<'_> {
+    fn get_bench_for_task(&self, task_id: &str) -> Result<Option<(String, String)>> {
+        self.inner.get_bench_for_task(task_id)
+    }
+
+    fn list_bench_runspace_map(&self) -> Result<Vec<(String, String)>> {
+        self.inner.list_bench_runspace_map()
+    }
+
+    fn create_bench(&mut self, task_id: &str, runspace_id: &str, cwd: &str) -> Result<()> {
+        self.inner.do_create_bench(task_id, runspace_id, cwd)
+    }
+
+    fn update_bench_cwd(&self, task_id: &str, cwd: &str) -> Result<()> {
+        self.inner.update_bench_cwd(task_id, cwd)
     }
 }
 
@@ -2414,6 +2625,7 @@ fn resolve_by_prepared_primary_claims_on_session_start() {
     let task = make_task("t1", TaskStatus::Ready, Some("run-1"));
     let run = make_run("run-1", "t1", TaskRunStatus::Prepared);
     let mut repos = FakeRepos::default();
+    repos.seed_run(run.clone());
     let ctx = RunResolveCtx {
         task_id: "t1",
         task: &task,
@@ -2426,7 +2638,35 @@ fn resolve_by_prepared_primary_claims_on_session_start() {
     let result = resolve_by_prepared_primary(&ctx, &mut repos).unwrap();
     let resolved = result.unwrap();
     assert!(!resolved.created);
-    assert_eq!(resolved.run.unwrap().id, "run-1");
+    let resolved_run = resolved.run.unwrap();
+    assert_eq!(resolved_run.id, "run-1");
+    // The atomic claim stamped the session, and the returned snapshot reflects the post-claim row.
+    assert_eq!(resolved_run.provider_session_id.as_deref(), Some("sess-1"));
+}
+
+#[test]
+fn resolve_by_prepared_primary_loses_race_when_already_claimed() {
+    let task = make_task("t1", TaskStatus::Ready, Some("run-1"));
+    let mut run = make_run("run-1", "t1", TaskRunStatus::Prepared);
+    // Another SessionStart won the claim first: the run is prepared but already carries a session.
+    run.provider_session_id = Some("sess-winner".to_string());
+    let mut repos = FakeRepos::default();
+    repos.seed_run(run.clone());
+    let ctx = RunResolveCtx {
+        task_id: "t1",
+        task: &task,
+        explicit_run_id_rejected: false,
+        provider_session_id: Some("sess-loser"),
+        event_name: Some("SessionStart"),
+        agent: Agent::Claude,
+        primary_run: Some(&run),
+    };
+    // The loser changes 0 rows and falls through (Ok(None)) so lazy-create makes it a side run.
+    assert!(resolve_by_prepared_primary(&ctx, &mut repos).unwrap().is_none());
+    assert_eq!(
+        repos.get_task_run("run-1").unwrap().unwrap().provider_session_id.as_deref(),
+        Some("sess-winner")
+    );
 }
 
 #[test]

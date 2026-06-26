@@ -1,10 +1,10 @@
 use monica_application::{
     Agent, DisplayStatus, EventRepository, ExternalReference, GithubPullRequest,
     GithubPullRequestStatus, NewTask, NewTaskRun, NewTerminalSession, Project, Provider,
-    ProjectRepository, PullRequestBranchSyncCandidate, RawJson, RefType, TaskKind, TaskRepository,
-    TaskRun, TaskRunObservation, TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus,
-    TaskSummaryFilter, TaskSummaryRow, TerminalSessionKind, TerminalSessionStatus,
-    TerminalSessionUpdate,
+    ProjectRepository, PullRequestBranchSyncCandidate, RawJson, RefType,
+    TaskBoardQuery, TaskKind, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunStore,
+    TaskRunWaitReason, TaskStatus, TaskStore, TaskSummaryFilter, TaskSummaryRow,
+    TerminalSessionKind, TerminalSessionStatus, TerminalSessionUpdate, UnitOfWork, WorkbenchStore,
 };
 use rusqlite::params;
 use serde_json::json;
@@ -1810,4 +1810,195 @@ fn terminal_state_snapshot_round_trips_session_id() {
     let tabs = &loaded.runspaces[0].tabs;
     assert_eq!(tabs[0].terminal_session_id.as_deref(), Some("ts-1"));
     assert_eq!(tabs[1].terminal_session_id, None);
+}
+
+// --- Issue #256: UnitOfWork transaction boundary + prepared-run claim CAS ---
+
+/// A run created inside a [`WorkTransaction`] that is dropped without `commit` must leave no trace.
+/// This is the atomicity `start_run` relies on: a failure midway through (run created, then primary
+/// or bench write fails) rolls the whole thing back instead of stranding an orphan run.
+#[test]
+fn work_transaction_rolls_back_when_dropped_without_commit() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("rollback")).unwrap();
+    let run_id = {
+        let mut tx = db.begin().unwrap();
+        let run = tx
+            .start_task_run(NewTaskRun {
+                task_id: task.id.clone(),
+                agent: None,
+                branch: Some("issue-1".to_string()),
+                worktree_path: None,
+            })
+            .unwrap();
+        run.id
+        // `tx` is dropped here without `commit` -> rollback.
+    };
+    assert!(
+        db.get_task_run(&run_id).unwrap().is_none(),
+        "an uncommitted run must not persist"
+    );
+    assert!(db.list_task_runs_for_task(&task.id).unwrap().is_empty());
+}
+
+/// Committing persists the run, the primary pointer, and the bench together — the three writes
+/// `start_run` performs as one unit.
+#[test]
+fn work_transaction_commit_persists_run_primary_and_bench() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("atomic")).unwrap();
+    let run_id = {
+        let mut tx = db.begin().unwrap();
+        let run = tx
+            .start_task_run(NewTaskRun {
+                task_id: task.id.clone(),
+                agent: None,
+                branch: Some("issue-1".to_string()),
+                worktree_path: None,
+            })
+            .unwrap();
+        tx.set_primary_task_run(&task.id, &run.id).unwrap();
+        tx.create_bench(&task.id, "runspace-1", "/tmp/wt").unwrap();
+        tx.commit().unwrap();
+        run.id
+    };
+    assert_eq!(
+        db.get_task(&task.id).unwrap().unwrap().primary_task_run_id.as_deref(),
+        Some(run_id.as_str())
+    );
+    assert_eq!(
+        db.get_bench_for_task(&task.id).unwrap(),
+        Some(("runspace-1".to_string(), "/tmp/wt".to_string()))
+    );
+    assert_eq!(db.list_task_runs_for_task(&task.id).unwrap().len(), 1);
+}
+
+/// Two near-simultaneous SessionStarts racing for one prepared run: the guarded UPDATE lets exactly
+/// one win, the loser changes 0 rows, and only the winner's session id is recorded. This is the
+/// race the snapshot-based claim could not close.
+#[test]
+fn claim_prepared_run_is_won_by_a_single_session() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("cas")).unwrap();
+    let run = db
+        .start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
+    db.finish_task_run(&run.id, &task.id, TaskRunStatus::Prepared)
+        .unwrap();
+
+    assert!(
+        db.claim_prepared_run(&run.id, "session-A").unwrap(),
+        "the first claim wins"
+    );
+    assert!(
+        !db.claim_prepared_run(&run.id, "session-B").unwrap(),
+        "a second claim on an already-claimed run loses"
+    );
+    assert_eq!(
+        db.get_task_run(&run.id).unwrap().unwrap().provider_session_id.as_deref(),
+        Some("session-A")
+    );
+}
+
+/// The claim only fires for a still-`prepared`, unclaimed run; a `SettingUp` run is refused so a
+/// stray session can't hijack a run that is not waiting to be claimed.
+#[test]
+fn claim_prepared_run_refuses_non_prepared_run() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("cas-guard")).unwrap();
+    let run = db
+        .start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
+
+    // The run is still `SettingUp` (never moved to `Prepared`).
+    assert!(!db.claim_prepared_run(&run.id, "session-A").unwrap());
+    assert!(db
+        .get_task_run(&run.id)
+        .unwrap()
+        .unwrap()
+        .provider_session_id
+        .is_none());
+}
+
+/// A claim against a run that no longer exists changes 0 rows and reports a clean loss rather than
+/// erroring — the caller treats it as "someone else took it" and falls through.
+#[test]
+fn claim_prepared_run_returns_false_for_missing_run() {
+    let db = SqliteStore::open_in_memory().unwrap();
+    assert!(!db.claim_prepared_run("run-does-not-exist", "session-A").unwrap());
+}
+
+/// Exercises a store contract; reused below against both the direct store and a `WorkTransaction`.
+fn workbench_contract<S: WorkbenchStore + ?Sized>(store: &mut S, task_id: &str) {
+    store.create_bench(task_id, "runspace-x", "/a").unwrap();
+    assert_eq!(
+        store.get_bench_for_task(task_id).unwrap(),
+        Some(("runspace-x".to_string(), "/a".to_string()))
+    );
+    store.update_bench_cwd(task_id, "/b").unwrap();
+    assert_eq!(
+        store.get_bench_for_task(task_id).unwrap(),
+        Some(("runspace-x".to_string(), "/b".to_string()))
+    );
+}
+
+fn task_run_contract<S: TaskRunStore + ?Sized>(store: &mut S, task_id: &str) -> String {
+    let run = store
+        .start_task_run(NewTaskRun {
+            task_id: task_id.to_string(),
+            agent: None,
+            branch: Some("br".to_string()),
+            worktree_path: None,
+        })
+        .unwrap();
+    let got = store.get_task_run(&run.id).unwrap().unwrap();
+    assert_eq!(got.branch.as_deref(), Some("br"));
+    assert_eq!(got.status, TaskRunStatus::SettingUp);
+    store.set_task_run_worktree_path(&run.id, "/wt").unwrap();
+    assert_eq!(
+        store.get_task_run(&run.id).unwrap().unwrap().worktree_path.as_deref(),
+        Some("/wt")
+    );
+    run.id
+}
+
+/// The same store operations must behave identically whether a caller drives `SqliteStore`
+/// directly or through a `WorkTransaction` — guarding the shared `*_in` helpers against drift
+/// between the two code paths.
+#[test]
+fn store_contract_holds_for_direct_and_transactional_paths() {
+    // Direct path.
+    let mut direct = SqliteStore::open_in_memory().unwrap();
+    let direct_task = direct.insert_task(dev_task("direct")).unwrap();
+    workbench_contract(&mut direct, &direct_task.id);
+    task_run_contract(&mut direct, &direct_task.id);
+
+    // Transactional path: the same contract, then committed and re-read on the base store.
+    let mut tx_store = SqliteStore::open_in_memory().unwrap();
+    let tx_task = tx_store.insert_task(dev_task("transactional")).unwrap();
+    let run_id = {
+        let mut tx = tx_store.begin().unwrap();
+        workbench_contract(&mut *tx, &tx_task.id);
+        let run_id = task_run_contract(&mut *tx, &tx_task.id);
+        tx.commit().unwrap();
+        run_id
+    };
+    assert_eq!(
+        tx_store.get_bench_for_task(&tx_task.id).unwrap(),
+        Some(("runspace-x".to_string(), "/b".to_string()))
+    );
+    assert_eq!(
+        tx_store.get_task_run(&run_id).unwrap().unwrap().worktree_path.as_deref(),
+        Some("/wt")
+    );
 }

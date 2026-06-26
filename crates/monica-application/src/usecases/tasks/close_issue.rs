@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::ports::{GitGateway, ProjectRepository, TaskRepository, TaskRunRepository};
+use super::ports::{GitGateway, ProjectRepository, TaskRunStore, TaskStore};
 use crate::{ApplicationError, ApplicationResult, Task};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -12,7 +12,7 @@ pub struct CloseIssueReport {
 
 pub fn close_issue<R, G>(repos: &mut R, git: &G, id: &str) -> ApplicationResult<CloseIssueReport>
 where
-    R: TaskRepository + TaskRunRepository + ProjectRepository,
+    R: TaskStore + TaskRunStore + ProjectRepository,
     G: GitGateway,
 {
     let item = repos

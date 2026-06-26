@@ -119,7 +119,7 @@ mod tests {
     use super::*;
     use monica_application::{
         DisplayStatus, EventRepository, NewTaskRun, ProjectRepository, Provider, RefType,
-        TaskRepository, TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus,
+        TaskBoardQuery, TaskRunStatus, TaskRunStore, TaskRunWaitReason, TaskStatus, TaskStore,
         TaskSummaryFilter,
     };
     use rusqlite::params;

@@ -1,5 +1,5 @@
 use super::{Backend, Monica};
-use crate::ports::TaskRepository;
+use crate::ports::PullRequestSyncStore;
 use crate::usecases::github::{TrackGithubIssueInput, TrackGithubIssueReport};
 use crate::{
     ApplicationEvent, ApplicationResult, GithubAuthStatus, GithubDeviceFlow, PullRequestSyncResult,

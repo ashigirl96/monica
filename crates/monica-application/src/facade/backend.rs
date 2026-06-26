@@ -1,22 +1,26 @@
 use crate::ports::{
-    EventRepository, GitGateway, NotebookGateway, ProjectRepository, TaskRepository,
-    TaskRunRepository, TerminalSessionRepository, Workspace,
+    EventRepository, GitGateway, NotebookGateway, ProjectRepository, PullRequestSyncStore,
+    TaskBoardQuery, TaskRunStore, TaskStore, TerminalSessionRepository, UnitOfWork, WorkbenchStore,
+    Workspace,
 };
 use crate::usecases::github::ports::{AuthGateway, GithubGateway};
-use crate::usecases::runs::ports::{BenchRepository, Clock, SetupRunner, TaskRunOutputs};
+use crate::usecases::runs::ports::{Clock, SetupRunner, TaskRunOutputs};
 
 /// The set of concrete adapters the [`Monica`](super::Monica) façade is built over. Keeping this
 /// as one associated-type trait lets `Monica` take a single type parameter while the application
 /// stays free of any infra type (the impl lives in `monica-infra`). A single `Repos` value backs
 /// all repository ports — Monica's SQLite store implements them together.
 pub trait Backend {
-    type Repos: TaskRepository
-        + TaskRunRepository
+    type Repos: TaskStore
+        + TaskBoardQuery
+        + PullRequestSyncStore
+        + TaskRunStore
         + ProjectRepository
         + EventRepository
-        + BenchRepository
+        + WorkbenchStore
         + TerminalSessionRepository
-        + Clock;
+        + Clock
+        + UnitOfWork;
     type Git: GitGateway;
     type Github: GithubGateway;
     type Auth: AuthGateway;

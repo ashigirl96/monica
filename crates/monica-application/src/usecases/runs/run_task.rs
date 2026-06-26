@@ -5,8 +5,8 @@ use anyhow::Result;
 
 use crate::prelude::{branch_name, monica_number, worktree_path_for};
 use super::ports::{
-    BenchRepository, GitGateway, ProjectRepository, TaskRunOutputs, SetupEnv, SetupOutcome,
-    SetupRunner, TaskRepository, TaskRunRepository,
+    GitGateway, ProjectRepository, TaskRunOutputs, SetupEnv, SetupOutcome, SetupRunner,
+    TaskRunStore, TaskStore, UnitOfWork, WorkbenchStore,
 };
 use crate::{
     ApplicationError, ApplicationResult, ExternalReference, NewTaskRun, PrepareTaskResult, Project,
@@ -22,7 +22,7 @@ fn is_active_run_status(status: TaskRunStatus) -> bool {
 
 fn load_task_and_project<R>(repos: &R, task_id: &str) -> ApplicationResult<(Task, Project)>
 where
-    R: TaskRepository + ProjectRepository,
+    R: TaskStore + ProjectRepository,
 {
     let task = repos
         .get_task(task_id)?
@@ -41,7 +41,7 @@ where
 /// Returns immediately so the UI can reflect `setting_up` without blocking.
 pub fn start_run<R>(repos: &mut R, task_id: &str) -> ApplicationResult<PrepareTaskResult>
 where
-    R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
+    R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore + UnitOfWork,
 {
     let (task, project) = load_task_and_project(repos, task_id)?;
 
@@ -70,21 +70,23 @@ where
     let github_issue_number = latest_github_issue_number(repos, task_id)?;
     let mon = monica_number(task_id)?;
     let branch = branch_name(github_issue_number, mon);
+    let cwd = super::open_bench::default_bench_cwd(
+        Some(&project),
+        super::open_bench::home_dir().as_deref(),
+    );
 
-    let run = repos.start_task_run(NewTaskRun {
+    // Run creation, the primary pointer, and the bench land as one transaction: a crash between
+    // these steps would otherwise strand a run that has no primary pointer and no workbench.
+    let mut tx = repos.begin()?;
+    let run = tx.start_task_run(NewTaskRun {
         task_id: task_id.to_string(),
         agent: None,
         branch: Some(branch.clone()),
         worktree_path: None,
     })?;
-
-    repos.set_primary_task_run(task_id, &run.id)?;
-
-    let cwd = super::open_bench::default_bench_cwd(
-        Some(&project),
-        super::open_bench::home_dir().as_deref(),
-    );
-    super::open_bench::ensure_bench(repos, task_id, &cwd, false)?;
+    tx.set_primary_task_run(task_id, &run.id)?;
+    super::open_bench::ensure_bench(&mut *tx, task_id, &cwd, false)?;
+    tx.commit()?;
 
     Ok(PrepareTaskResult {
         task_id: task_id.to_string(),
@@ -104,7 +106,7 @@ pub fn execute_run<R, G, S, A>(
     task_run_id: &str,
 ) -> ApplicationResult<TaskRunStatus>
 where
-    R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
+    R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore,
     G: GitGateway,
     S: SetupRunner,
     A: TaskRunOutputs,
@@ -125,7 +127,7 @@ fn execute_run_inner<R, G, S, A>(
     task_run_id: &str,
 ) -> ApplicationResult<TaskRunStatus>
 where
-    R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
+    R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore,
     G: GitGateway,
     S: SetupRunner,
     A: TaskRunOutputs,
@@ -206,7 +208,7 @@ where
 
 fn latest_github_issue_ref<R>(repos: &R, task_id: &str) -> Result<Option<ExternalReference>>
 where
-    R: TaskRepository,
+    R: TaskStore,
 {
     Ok(repos
         .list_external_refs(task_id)?
@@ -216,7 +218,7 @@ where
 
 fn latest_github_issue_number<R>(repos: &R, task_id: &str) -> Result<Option<i64>>
 where
-    R: TaskRepository,
+    R: TaskStore,
 {
     Ok(latest_github_issue_ref(repos, task_id)?.and_then(|r| r.number))
 }
@@ -232,7 +234,7 @@ pub fn prepare_claude_for_run<R, A>(
     agent_override: Option<crate::Agent>,
 ) -> ApplicationResult<crate::RunTaskResult>
 where
-    R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
+    R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore,
     A: TaskRunOutputs,
 {
     let (task, project) = load_task_and_project(repos, task_id)?;

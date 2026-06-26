@@ -1,4 +1,4 @@
-use super::ports::{GithubGateway, TaskRepository};
+use super::ports::{GithubGateway, PullRequestSyncStore};
 use crate::{ApplicationResult, PullRequestSyncResult};
 
 pub async fn sync_next_pull_request<R, G>(
@@ -6,7 +6,7 @@ pub async fn sync_next_pull_request<R, G>(
     github: &G,
 ) -> ApplicationResult<PullRequestSyncResult>
 where
-    R: TaskRepository,
+    R: PullRequestSyncStore,
     G: GithubGateway,
 {
     if let Some(candidate) = repos.next_pull_request_branch_sync_candidate()? {
