@@ -4,7 +4,7 @@ use std::sync::{
 };
 use std::time::Duration;
 
-use monica_core::PullRequestSyncStatus;
+use monica_application::PullRequestSyncStatus;
 use monica_infra::Runtime;
 use tauri::AppHandle;
 use tauri_specta::Event;
@@ -78,14 +78,14 @@ async fn sync_pull_request_batch_inner(limit: usize) -> u32 {
         }
     };
 
-    if !monica_core::github_auth_status(&runtime.auth).authenticated {
+    if !monica_application::github_auth_status(&runtime.auth).authenticated {
         return 0;
     }
 
     let mut synced_count = 0u32;
     for _ in 0..limit {
         let result =
-            match monica_core::sync_next_pull_request(&mut runtime.repositories, &runtime.github)
+            match monica_application::sync_next_pull_request(&mut runtime.repositories, &runtime.github)
                 .await
             {
                 Ok(result) => result,

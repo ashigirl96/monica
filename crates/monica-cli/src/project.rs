@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::Subcommand;
-use monica_core::GitGateway;
+use monica_application::GitGateway;
 use monica_infra::Runtime;
 
 #[derive(Subcommand)]
@@ -46,7 +46,7 @@ async fn init(runtime: &mut Runtime, repo_arg: Option<String>) -> Result<()> {
         None => runtime.git.detect_repo()?,
     };
     let default_branch = detect_default_branch(runtime, &repo).await;
-    let saved = monica_core::register_project_with_default_branch(
+    let saved = monica_application::register_project_with_default_branch(
         &runtime.repositories,
         &repo,
         &cwd,
@@ -71,13 +71,13 @@ async fn init(runtime: &mut Runtime, repo_arg: Option<String>) -> Result<()> {
 }
 
 fn set(runtime: &Runtime, repo: &str, key: &str, value: &str) -> Result<()> {
-    monica_core::set_project_field(&runtime.repositories, repo, key, value)?;
+    monica_application::set_project_field(&runtime.repositories, repo, key, value)?;
     println!("Set {repo}.{key} = {value}");
     Ok(())
 }
 
 fn list(runtime: &Runtime) -> Result<()> {
-    let projects = monica_core::list_projects(&runtime.repositories)?;
+    let projects = monica_application::list_projects(&runtime.repositories)?;
     if projects.is_empty() {
         println!("No projects registered. Run `monica project init` inside a repo.");
         return Ok(());
@@ -104,7 +104,7 @@ fn list(runtime: &Runtime) -> Result<()> {
 }
 
 fn show(runtime: &Runtime, repo: &str, json: bool) -> Result<()> {
-    let project = monica_core::get_project(&runtime.repositories, repo)?;
+    let project = monica_application::get_project(&runtime.repositories, repo)?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&project)?);

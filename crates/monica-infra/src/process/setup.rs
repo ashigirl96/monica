@@ -8,7 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use monica_core::{SetupEnv, SetupOutcome, SetupRunner};
+use monica_application::{SetupEnv, SetupOutcome, SetupRunner};
 
 const SETUP_SCRIPT_REL: &str = ".monica/setup.sh";
 const SETUP_POLL_INTERVAL: Duration = Duration::from_millis(50);

@@ -1,4 +1,4 @@
-use monica_core::{
+use monica_application::{
     task_run_settlement_for_orphaned_run, task_run_settlement_for_terminal_exit,
     TaskRunRepository, TaskRunStatus, TerminalExitSettlement, TerminalSessionUpdate,
 };
@@ -110,7 +110,7 @@ fn apply_settlement(
         let _ = TaskRunStatusChanged {
             task_id: settlement.task_id,
             task_run_id: settlement.task_run_id,
-            status: TaskRunStatus::Stopped,
+            status: TaskRunStatus::Stopped.into(),
         }
         .emit(app);
     }

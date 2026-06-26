@@ -21,7 +21,7 @@ pub struct PlanPreview {
 pub fn read_runspace_plan(terminal_tab_id: String) -> Result<Option<PlanPreview>, String> {
     let runtime = Runtime::open_default().map_err(|e| e.to_string())?;
     let Some(path) =
-        monica_core::plan_path_for_terminal_tab(&runtime.repositories, &terminal_tab_id)
+        monica_application::plan_path_for_terminal_tab(&runtime.repositories, &terminal_tab_id)
             .map_err(|e| e.to_string())?
     else {
         return Ok(None);

@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
-use monica_core::{
+use monica_application::{
     parse_issue_input, parse_owner_repo, DisplayStatus, Task, TaskSummaryFilter, TaskSummaryRow,
     TrackGithubIssueInput,
 };
@@ -40,7 +40,7 @@ pub async fn run(cmd: IssueCommand) -> Result<()> {
 
 async fn track_command(runtime: &mut Runtime, target: &str) -> Result<()> {
     let (repo, number) = parse_issue_input(target)?;
-    let report = monica_core::track_github_issue(
+    let report = monica_application::track_github_issue(
         &mut runtime.repositories,
         &runtime.github,
         TrackGithubIssueInput {
@@ -65,17 +65,17 @@ fn status_command(
 ) -> Result<()> {
     let filter = status_filter(status.as_deref())?;
     let project = normalize_project_filter(project.as_deref())?;
-    let rows = monica_core::list_task_summaries(&runtime.repositories, filter, project.as_deref())?;
+    let rows = monica_application::list_task_summaries(&runtime.repositories, filter, project.as_deref())?;
     print!("{}", render_status_table(&rows));
     Ok(())
 }
 
 fn close_command(runtime: &mut Runtime, id: &str) -> Result<()> {
-    let item = monica_core::list_tasks(&runtime.repositories)?
+    let item = monica_application::list_tasks(&runtime.repositories)?
         .into_iter()
         .find(|task| task.id == id)
         .ok_or_else(|| anyhow!("Issue not found: {id}"))?;
-    let project = monica_core::list_task_summaries(&runtime.repositories, TaskSummaryFilter::All, None)?
+    let project = monica_application::list_task_summaries(&runtime.repositories, TaskSummaryFilter::All, None)?
         .into_iter()
         .find(|row| row.id == item.id)
         .and_then(|row| row.project);
@@ -86,7 +86,7 @@ fn close_command(runtime: &mut Runtime, id: &str) -> Result<()> {
         return Ok(());
     }
 
-    let report = monica_core::close_issue(&mut runtime.repositories, &runtime.git, id)?;
+    let report = monica_application::close_issue(&mut runtime.repositories, &runtime.git, id)?;
     println!("Closed issue {}.", report.item.id);
     if !report.task_runs.is_empty() {
         println!("Preserved task runs: {}.", report.task_runs.join(", "));
@@ -128,7 +128,7 @@ fn status_filter(status: Option<&str>) -> Result<TaskSummaryFilter> {
 }
 
 fn normalize_project_filter(project: Option<&str>) -> Result<Option<String>> {
-    project.map(parse_owner_repo).transpose()
+    project.map(parse_owner_repo).transpose().map_err(Into::into)
 }
 
 fn render_status_table(rows: &[TaskSummaryRow]) -> String {
@@ -159,7 +159,7 @@ fn render_status_table(rows: &[TaskSummaryRow]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use monica_core::TaskStatus;
+    use monica_application::TaskStatus;
 
     #[test]
     fn status_filter_defaults_to_active_and_validates_enum() {

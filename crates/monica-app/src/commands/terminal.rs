@@ -1,9 +1,8 @@
-use monica_core::{
-    reconcile_terminal_sessions, DaemonSessionView, NewTerminalSession, TerminalSession,
-    TerminalSessionKind, TerminalSessionStatus,
+use monica_api::{TerminalSession, TerminalSessionKind, TerminalStateSnapshot};
+use monica_application::{
+    reconcile_terminal_sessions, DaemonSessionView, NewTerminalSession, TerminalSessionStatus,
 };
 use monica_infra::filesystem::paths;
-use monica_infra::sqlite::TerminalStateSnapshot;
 use monica_infra::Runtime;
 use monica_pty::protocol::{CreateParams, RequestOp, ResponseBody, SessionInfo};
 use serde::Serialize;
@@ -45,7 +44,7 @@ pub fn terminal_create_session(
         .create_terminal_session(NewTerminalSession {
             runspace_id: Some(runspace_id),
             tab_id: Some(tab_id.clone()),
-            kind,
+            kind: kind.into(),
             cwd: cwd.clone(),
             shell: shell.clone(),
             rows,
@@ -119,6 +118,7 @@ pub fn terminal_create_session(
         .repositories
         .get_terminal_session(&session.id)
         .map_err(|e| e.to_string())?
+        .map(TerminalSession::from)
         .ok_or_else(|| format!("terminal session {} vanished", session.id))
 }
 
@@ -268,6 +268,7 @@ pub fn terminal_list_sessions(
     runtime
         .repositories
         .list_terminal_sessions(runspace_id.as_deref())
+        .map(|sessions| sessions.into_iter().map(TerminalSession::from).collect())
         .map_err(|e| e.to_string())
 }
 
@@ -309,6 +310,7 @@ pub fn terminal_load_state() -> Result<TerminalStateSnapshot, String> {
     runtime
         .repositories
         .load_terminal_state()
+        .map(snapshot_to_api)
         .map_err(|e| e.to_string())
 }
 
@@ -318,6 +320,59 @@ pub fn terminal_save_state(state: TerminalStateSnapshot) -> Result<(), String> {
     let mut runtime = Runtime::open_default().map_err(|e| e.to_string())?;
     runtime
         .repositories
-        .save_terminal_state(&state)
+        .save_terminal_state(&snapshot_to_infra(state))
         .map_err(|e| e.to_string())
+}
+
+// The persisted workbench layout is owned by monica-infra (SQLite rows) but crosses the Tauri
+// boundary as a monica-api DTO. The two row shapes are intentionally identical; this composition
+// root maps between them so neither crate has to depend on the other.
+fn snapshot_to_api(snapshot: monica_infra::sqlite::TerminalStateSnapshot) -> TerminalStateSnapshot {
+    TerminalStateSnapshot {
+        runspaces: snapshot
+            .runspaces
+            .into_iter()
+            .map(|rs| monica_api::TerminalRunspaceRow {
+                id: rs.id,
+                sort_order: rs.sort_order,
+                tabs: rs
+                    .tabs
+                    .into_iter()
+                    .map(|tab| monica_api::TerminalTabRow {
+                        id: tab.id,
+                        cwd: tab.cwd,
+                        title: tab.title,
+                        sort_order: tab.sort_order,
+                        terminal_session_id: tab.terminal_session_id,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
+fn snapshot_to_infra(
+    snapshot: TerminalStateSnapshot,
+) -> monica_infra::sqlite::TerminalStateSnapshot {
+    monica_infra::sqlite::TerminalStateSnapshot {
+        runspaces: snapshot
+            .runspaces
+            .into_iter()
+            .map(|rs| monica_infra::sqlite::TerminalRunspaceRow {
+                id: rs.id,
+                sort_order: rs.sort_order,
+                tabs: rs
+                    .tabs
+                    .into_iter()
+                    .map(|tab| monica_infra::sqlite::TerminalTabRow {
+                        id: tab.id,
+                        cwd: tab.cwd,
+                        title: tab.title,
+                        sort_order: tab.sort_order,
+                        terminal_session_id: tab.terminal_session_id,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
 }

@@ -2822,12 +2822,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "monica-api"
+version = "0.1.0"
+dependencies = [
+ "monica-application",
+ "serde",
+ "serde_json",
+ "specta",
+ "specta-typescript",
+]
+
+[[package]]
 name = "monica-app"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "log",
- "monica-core",
+ "monica-api",
+ "monica-application",
  "monica-infra",
  "monica-pty",
  "objc2 0.6.4",
@@ -2846,6 +2858,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "monica-application"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "monica-domain",
+ "serde",
+ "serde_json",
+ "strum",
+ "tokio",
+]
+
+[[package]]
 name = "monica-cli"
 version = "0.1.0"
 dependencies = [
@@ -2853,7 +2878,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "mmdflux",
- "monica-core",
+ "monica-application",
  "monica-infra",
  "rumdl",
  "serde_json",
@@ -2861,17 +2886,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "monica-core"
+name = "monica-domain"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "log",
  "serde",
- "serde_json",
- "specta",
- "specta-typescript",
  "strum",
- "tokio",
 ]
 
 [[package]]
@@ -2879,7 +2898,7 @@ name = "monica-infra"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "monica-core",
+ "monica-application",
  "octocrab",
  "reqwest",
  "rusqlite",
@@ -2887,8 +2906,6 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
- "specta",
- "specta-typescript",
  "tokio",
 ]
 

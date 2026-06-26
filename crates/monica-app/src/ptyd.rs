@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
-use monica_core::{TerminalSessionStatus, TerminalSessionUpdate};
+use monica_application::{TerminalSessionStatus, TerminalSessionUpdate};
 use monica_infra::filesystem::paths;
 use monica_infra::Runtime;
 use monica_pty::client::{ClientEvent, PtydClient};

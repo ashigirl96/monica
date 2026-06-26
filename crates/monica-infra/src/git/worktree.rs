@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{anyhow, Context, Result};
-use monica_core::{parse_owner_repo, GitGateway, TaskRun};
+use monica_application::{parse_owner_repo, GitGateway, TaskRun};
 
 const RIP_COMMAND: &str = "/opt/homebrew/bin/rip";
 
@@ -36,7 +36,7 @@ impl GitGateway for GitCliGateway {
             ));
         }
         let url = String::from_utf8(output.stdout).context("git remote url was not valid UTF-8")?;
-        parse_owner_repo(&url)
+        Ok(parse_owner_repo(&url)?)
     }
 
     fn detect_default_branch(&self, repo: &str) -> Option<String> {
@@ -346,7 +346,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    use monica_core::{
+    use monica_application::{
         GitGateway, NewTask, NewTaskRun, Project, ProjectRepository, TaskKind, TaskRepository,
         TaskRun, TaskRunRepository, TaskRunStatus, TaskStatus,
     };
@@ -450,7 +450,7 @@ mod tests {
         let git = TestGit {
             rip: write_fake_rip(root.path()),
         };
-        let report = monica_core::close_issue(&mut db, &git, &item.id).unwrap();
+        let report = monica_application::close_issue(&mut db, &git, &item.id).unwrap();
 
         assert!(!worktree.exists());
         assert!(!worktree_registered(&repo, &worktree).unwrap());
@@ -584,7 +584,7 @@ mod tests {
             last_event_at: None,
             plan_file_path: None,
             pending_stop: false,
-            metadata: serde_json::json!({}),
+            metadata: monica_application::RawJson::empty_object(),
             created_at: "2026-06-02T00:00:00.000Z".to_string(),
             updated_at: "2026-06-02T00:00:00.000Z".to_string(),
         }

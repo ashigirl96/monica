@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use rusqlite::params;
 
 use crate::sqlite::SqliteStore;
-use monica_core::{
+use monica_application::{
     plan_file_path_from_payload, subagents_in_flight_after, transition_is_generic_wait,
     HookTransition, NewTaskRun, TaskRun, TaskRunObservation, TaskRunRepository, TaskRunStatus,
     TaskRunWaitReason, TaskStatus,

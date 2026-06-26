@@ -16,7 +16,7 @@ pub async fn force_sync_pull_requests(
     waker: tauri::State<'_, PrSyncWaker>,
 ) -> Result<(), String> {
     let mut rt = Runtime::open_default().map_err(|e| e.to_string())?;
-    if !monica_core::github_auth_status(&rt.auth).authenticated {
+    if !monica_application::github_auth_status(&rt.auth).authenticated {
         return Err("Not authenticated with GitHub".to_string());
     }
     rt.repositories

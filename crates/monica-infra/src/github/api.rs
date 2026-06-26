@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use monica_core::{GithubGateway, GithubIssue, GithubPullRequest, GithubPullRequestStatus};
+use monica_application::{GithubGateway, GithubIssue, GithubPullRequest, GithubPullRequestStatus};
 use octocrab::Octocrab;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -218,14 +218,14 @@ impl GithubGateway for GithubApiClient {
         &'a self,
         repo: &'a str,
         number: i64,
-    ) -> monica_core::interfaces::BoxFuture<'a, Result<GithubIssue>> {
+    ) -> monica_application::ports::BoxFuture<'a, Result<GithubIssue>> {
         Box::pin(async move { GithubApiClient::fetch_issue(self, repo, number).await })
     }
 
     fn fetch_default_branch<'a>(
         &'a self,
         repo: &'a str,
-    ) -> monica_core::interfaces::BoxFuture<'a, Result<Option<String>>> {
+    ) -> monica_application::ports::BoxFuture<'a, Result<Option<String>>> {
         Box::pin(async move { GithubApiClient::fetch_default_branch(self, repo).await })
     }
 
@@ -233,7 +233,7 @@ impl GithubGateway for GithubApiClient {
         &'a self,
         repo: &'a str,
         branch: &'a str,
-    ) -> monica_core::interfaces::BoxFuture<'a, Result<Vec<GithubPullRequest>>> {
+    ) -> monica_application::ports::BoxFuture<'a, Result<Vec<GithubPullRequest>>> {
         Box::pin(
             async move { GithubApiClient::fetch_pull_requests_by_branch(self, repo, branch).await },
         )
@@ -243,7 +243,7 @@ impl GithubGateway for GithubApiClient {
         &'a self,
         repo: &'a str,
         number: i64,
-    ) -> monica_core::interfaces::BoxFuture<'a, Result<GithubPullRequest>> {
+    ) -> monica_application::ports::BoxFuture<'a, Result<GithubPullRequest>> {
         Box::pin(async move { GithubApiClient::fetch_pull_request(self, repo, number).await })
     }
 }
@@ -352,7 +352,7 @@ struct PullRequestRepository {
 
 #[cfg(test)]
 mod tests {
-    use monica_core::GithubPullRequestStatus;
+    use monica_application::GithubPullRequestStatus;
 
     use super::{
         branch_pull_requests_from_response, issue_from_response, pull_request_from_response,

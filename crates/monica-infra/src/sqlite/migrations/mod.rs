@@ -117,7 +117,7 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use monica_core::{
+    use monica_application::{
         DisplayStatus, EventRepository, NewTaskRun, ProjectRepository, TaskRepository,
         TaskRunRepository, TaskRunStatus, TaskRunWaitReason, TaskStatus, TaskSummaryFilter,
     };
@@ -576,7 +576,9 @@ mod tests {
             Some("provider-new")
         );
         assert_eq!(wait_run.last_event_name.as_deref(), Some("PreToolUse"));
-        assert_eq!(wait_run.metadata["version"].as_i64(), Some(2));
+        let wait_metadata: serde_json::Value =
+            serde_json::from_str(wait_run.metadata.as_str()).unwrap();
+        assert_eq!(wait_metadata["version"].as_i64(), Some(2));
 
         let legacy_wait = db.get_task_run("legacy-MON-wait-no-run").unwrap().unwrap();
         assert_eq!(legacy_wait.status, TaskRunStatus::WaitingForUser);

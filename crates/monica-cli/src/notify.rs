@@ -1,4 +1,4 @@
-use monica_core::TaskRunWaitReason;
+use monica_application::TaskRunWaitReason;
 
 const TITLE: &str = "Monica";
 const MAX_TITLE_CHARS: usize = 40;

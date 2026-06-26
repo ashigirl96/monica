@@ -2,7 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use rusqlite::params;
 
 use crate::sqlite::SqliteStore;
-use monica_core::{Agent, PermissionMode, Project, ProjectRepository, Provider};
+use monica_application::{Agent, PermissionMode, Project, ProjectRepository, Provider};
 
 use super::{PROJECT_COLUMNS, SET_NOW};
 

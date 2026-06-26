@@ -1,5 +1,5 @@
 use anyhow::Result;
-use monica_core::{
+use monica_application::{
     NewTerminalSession, TerminalSession, TerminalSessionKind, TerminalSessionStatus,
     TerminalSessionUpdate,
 };

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use monica_core::{front_value, is_valid_slug, outline, pages_from_docs, NotebookDoc, NotebookPage};
+use monica_application::{front_value, is_valid_slug, outline, pages_from_docs, NotebookDoc, NotebookPage};
 use monica_infra::filesystem::{notebook, paths};
 
 #[derive(Serialize, specta::Type)]

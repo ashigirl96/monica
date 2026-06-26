@@ -1,0 +1,10 @@
+[package]
+name = "monica-domain"
+version = "0.1.0"
+edition = "2021"
+# Deps allow lower, but we standardize on the dev/CI stable toolchain.
+rust-version = "1.95"
+
+[dependencies]
+serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
+strum = { version = "0.28", features = ["derive"] }

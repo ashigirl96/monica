@@ -2,7 +2,7 @@ use anyhow::Result;
 use rusqlite::params;
 
 use crate::sqlite::SqliteStore;
-use monica_core::{ExternalRef, GithubPullRequestRef};
+use monica_application::{ExternalRef, GithubPullRequestRef};
 
 impl SqliteStore {
     pub fn save_external_ref(&self, r: &ExternalRef) -> Result<i64> {

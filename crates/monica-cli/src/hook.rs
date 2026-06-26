@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use clap::Subcommand;
-use monica_core::Agent;
+use monica_application::Agent;
 use monica_infra::Runtime;
 
 use crate::notify;
@@ -78,13 +78,13 @@ fn handle_agent(agent: Agent, log_file: &str) -> Result<()> {
 
     let mut runtime = Runtime::open_default()?;
     let record = match agent {
-        Agent::Claude => monica_core::record_claude_hook,
-        Agent::Codex => monica_core::record_codex_hook,
+        Agent::Claude => monica_application::record_claude_hook,
+        Agent::Codex => monica_application::record_codex_hook,
     };
     let report = record(
         &mut runtime.repositories,
         &runtime.task_run_outputs,
-        monica_core::HookContext {
+        monica_application::HookContext {
             task_id: task_id.as_deref(),
             task_run_id: task_run_id.as_deref(),
             terminal_tab_id: terminal_tab_id.as_deref(),

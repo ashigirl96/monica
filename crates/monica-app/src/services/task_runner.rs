@@ -1,4 +1,4 @@
-use monica_core::TaskRunStatus;
+use monica_application::TaskRunStatus;
 use monica_infra::Runtime;
 use tauri::AppHandle;
 use tauri_specta::Event;
@@ -20,7 +20,7 @@ pub(crate) fn spawn_execute_run(
                     return;
                 }
             };
-            let final_status = match monica_core::execute_run(
+            let final_status = match monica_application::execute_run(
                 &mut rt.repositories,
                 &rt.git,
                 &rt.setup_runner,
@@ -37,7 +37,7 @@ pub(crate) fn spawn_execute_run(
             let _ = TaskRunStatusChanged {
                 task_id,
                 task_run_id: run_id,
-                status: final_status,
+                status: final_status.into(),
             }
             .emit(&app);
         })

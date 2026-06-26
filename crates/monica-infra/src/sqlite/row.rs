@@ -1,7 +1,7 @@
 use anyhow::Result;
-use monica_core::{
-    Agent, Event, ExternalRef, PermissionMode, Project, Provider, RefType, Task, TaskKind, TaskRun,
-    TaskRunStatus, TaskStatus,
+use monica_application::{
+    Agent, Event, ExternalRef, PermissionMode, Project, Provider, RawJson, RefType, Task, TaskKind,
+    TaskRun, TaskRunStatus, TaskStatus,
 };
 use rusqlite::Row;
 
@@ -20,11 +20,8 @@ pub(super) fn task_from_row(row: &Row<'_>) -> Result<Task> {
         body: row.get("body")?,
         project_id: row.get("project_id")?,
         labels: serde_json::from_str(&labels)?,
-        details: serde_json::from_str(&details)?,
-        source: match source {
-            Some(s) => Some(serde_json::from_str(&s)?),
-            None => None,
-        },
+        details: RawJson(details),
+        source: source.map(RawJson),
         primary_task_run_id: row.get("primary_task_run_id")?,
         closed_at: row.get("closed_at")?,
         created_at: row.get("created_at")?,
@@ -52,7 +49,7 @@ pub(super) fn task_run_from_row(row: &Row<'_>) -> Result<TaskRun> {
         last_event_at: row.get("last_event_at")?,
         plan_file_path: row.get("plan_file_path")?,
         pending_stop: row.get::<_, i64>("pending_stop")? != 0,
-        metadata: serde_json::from_str(&metadata)?,
+        metadata: RawJson(metadata),
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
     })
@@ -65,7 +62,7 @@ pub(super) fn event_from_row(row: &Row<'_>) -> Result<Event> {
         task_id: row.get("task_id")?,
         task_run_id: row.get("task_run_id")?,
         kind: row.get("kind")?,
-        payload: serde_json::from_str(&payload)?,
+        payload: RawJson(payload),
         created_at: row.get("created_at")?,
     })
 }
