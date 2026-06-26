@@ -1,13 +1,13 @@
 use anyhow::Result;
 
-use crate::domain::{
+use crate::prelude::{
     DisplayStatus, ExternalReference, GithubPullRequest, PullRequestBranchSyncCandidate,
     PullRequestStatusSyncCandidate, Task, TaskStatus, TaskSummaryRow,
 };
 use crate::NewTask;
 
 /// How [`TaskRepository::list_task_summaries`] scopes which tasks come back. This is the query's
-/// parameter, not a domain concept, so it lives beside the port rather than in `domain`.
+/// parameter, not a domain concept, so it lives beside the port rather than in `monica-domain`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskSummaryFilter {
     /// Every task, including the Closed archive.
