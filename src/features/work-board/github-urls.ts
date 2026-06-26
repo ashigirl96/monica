@@ -28,7 +28,10 @@ export function openTargets(task: TaskSummaryRow): OpenTarget[] {
   // within each group the newest (highest number) comes first. The open/draft predicate
   // itself lives in Rust (is_open_or_draft).
   const prs = task.github_pull_requests
-    .filter((pr): pr is typeof pr & { url: string } => pr.url !== null)
+    .filter(
+      (pr): pr is typeof pr & { url: string; number: number } =>
+        pr.url !== null && pr.number !== null,
+    )
     .sort((a, b) => Number(b.is_open_or_draft) - Number(a.is_open_or_draft) || b.number - a.number);
   for (const pr of prs) {
     targets.push({

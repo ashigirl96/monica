@@ -86,6 +86,18 @@ describe("openTargets", () => {
     expect(result.map((t) => t.id)).toEqual(["pr:2"]);
   });
 
+  test("prs without a number are excluded", () => {
+    const result = openTargets(
+      task({
+        github_pull_requests: [
+          pr({ number: null, url: "https://github.com/owner/repo/pull/0" }),
+          pr({ number: 2 }),
+        ],
+      }),
+    );
+    expect(result.map((t) => t.id)).toEqual(["pr:2"]);
+  });
+
   test("issue is dropped when the url cannot be built but prs remain", () => {
     const result = openTargets(
       task({ project: null, github_issue_number: 7, github_pull_requests: [pr({ number: 3 })] }),

@@ -138,7 +138,7 @@ export type DisplayStatus =
 
 export type GithubPullRequestRef = {
   repo: string | null;
-  number: number;
+  number: number | null;
   url: string | null;
   status: string | null;
   is_open_or_draft: boolean;

@@ -156,22 +156,24 @@ export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boo
               <span>{task.github_issue_number}</span>
             </BadgeLink>
           )}
-          {task.github_pull_requests.map((pr) => (
-            <BadgeLink
-              key={pr.number}
-              url={pr.url}
-              className={cn(
-                pr.status === "merged"
-                  ? "bg-purple-500/15 text-purple-400"
-                  : pr.status === "open" || pr.status === "draft"
-                    ? "bg-emerald-500/15 text-emerald-400"
-                    : "bg-secondary text-muted-foreground",
-              )}
-            >
-              <PrIcon />
-              <span>{pr.number}</span>
-            </BadgeLink>
-          ))}
+          {task.github_pull_requests
+            .filter((pr) => pr.number !== null)
+            .map((pr) => (
+              <BadgeLink
+                key={pr.number}
+                url={pr.url}
+                className={cn(
+                  pr.status === "merged"
+                    ? "bg-purple-500/15 text-purple-400"
+                    : pr.status === "open" || pr.status === "draft"
+                      ? "bg-emerald-500/15 text-emerald-400"
+                      : "bg-secondary text-muted-foreground",
+                )}
+              >
+                <PrIcon />
+                <span>{pr.number}</span>
+              </BadgeLink>
+            ))}
           {hasBranch && (
             <span className="inline-flex items-center gap-0.5 rounded-sm bg-secondary px-1.5 py-px text-[11px] text-muted-foreground">
               <BranchIcon />
