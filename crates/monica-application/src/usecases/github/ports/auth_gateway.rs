@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use crate::{GithubAuthStatus, GithubDeviceFlow};
 
-use super::BoxFuture;
+use crate::ports::BoxFuture;
 
 pub trait AuthGateway {
     fn status(&self) -> GithubAuthStatus;

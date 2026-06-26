@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use crate::{GithubIssue, GithubPullRequest};
 
-use super::BoxFuture;
+use crate::ports::BoxFuture;
 
 pub trait GithubGateway {
     fn fetch_issue<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, Result<GithubIssue>>;

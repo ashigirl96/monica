@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 
-use crate::ports::{GitGateway, ProjectRepository, TaskRepository, TaskRunRepository};
+use super::ports::{GitGateway, ProjectRepository, TaskRepository, TaskRunRepository};
 use crate::Task;
 
 #[derive(Debug, Clone, PartialEq)]

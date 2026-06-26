@@ -33,9 +33,12 @@ pub use prelude::{
     TerminalSession, TerminalSessionKind, TerminalSessionStatus,
 };
 pub use ports::{
-    AuthGateway, BenchRepository, Clock, EventRepository, GitGateway,
-    GithubGateway, ProjectRepository, SetupEnv, SetupOutcome, SetupRunner, TaskRepository,
-    TaskRunOutputs, TaskShellEnv, TaskRunRepository, TaskSummaryFilter,
+    EventRepository, GitGateway, ProjectRepository, TaskRepository, TaskRunRepository,
+    TaskSummaryFilter,
+};
+pub use usecases::github::ports::{AuthGateway, GithubGateway};
+pub use usecases::runs::ports::{
+    BenchRepository, Clock, SetupEnv, SetupOutcome, SetupRunner, TaskRunOutputs, TaskShellEnv,
 };
 pub use usecases::{
     begin_github_device_flow, reconcile_terminal_sessions, DaemonSessionView, ReconcileOutcome,

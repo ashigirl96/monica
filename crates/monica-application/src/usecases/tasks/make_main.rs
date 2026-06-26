@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::ports::{TaskRepository, TaskRunRepository};
+use super::ports::{TaskRepository, TaskRunRepository};
 use crate::TaskRunStatus;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
