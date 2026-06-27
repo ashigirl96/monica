@@ -20,7 +20,7 @@ use crate::{
     GithubPullRequestStatus, HookContext, LintFinding, Monica, NewTask, NewTaskRun, NewTerminalSession,
     NotebookDoc, Project, Provider, PullRequestBranchSyncCandidate,
     PullRequestStatusSyncCandidate, RefType, SetupEnv, SetupOutcome, SetupRunner, SignalKind,
-    Task, TaskKind, TaskRun, TaskRunObservation, TaskRunOutputs, TaskRunStatus,
+    Task, TaskId, TaskKind, TaskRun, TaskRunId, TaskRunObservation, TaskRunOutputs, TaskRunStatus,
     TaskRunWaitReason, TaskStatus, TaskSummaryRow, TerminalSession,
     TerminalSessionKind, TerminalSessionStatus, TerminalSessionUpdate, TerminalStateSnapshot,
 };
@@ -220,7 +220,7 @@ impl TaskStore for FakeRepos {
             .tasks
             .get_mut(task_id)
             .ok_or_else(|| anyhow!("task not found: {task_id}"))?
-            .primary_task_run_id = Some(task_run_id.into());
+            .primary_task_run_id = Some(TaskRunId::from_store(task_run_id.to_string()));
         Ok(())
     }
 
@@ -387,8 +387,8 @@ impl FakeRepos {
         state.next_run += 1;
         let id = format!("run-{}", state.next_run);
         let run = TaskRun {
-            id: id.clone().into(),
-            task_id: new.task_id.clone().into(),
+            id: TaskRunId::from_store(id.clone()),
+            task_id: TaskId::from_store(new.task_id.clone()),
             agent: new.agent,
             branch: new.branch,
             worktree_path: new.worktree_path,
@@ -1057,7 +1057,7 @@ impl AuthGateway for FakeAuth {
 
 fn task_from_new(id: String, new: NewTask) -> Task {
     Task {
-        id: id.into(),
+        id: TaskId::from_store(id),
         kind: new.kind,
         status: new.status,
         phase: new.phase,
@@ -1203,7 +1203,7 @@ pub(crate) fn insert_issue_backed_task(repos: &mut FakeRepos, issue_number: i64)
 
 pub(crate) fn make_task(id: &str, status: TaskStatus, primary_run_id: Option<&str>) -> Task {
     Task {
-        id: id.into(),
+        id: TaskId::from_store(id.to_string()),
         kind: TaskKind::Development,
         status,
         phase: None,
@@ -1213,7 +1213,7 @@ pub(crate) fn make_task(id: &str, status: TaskStatus, primary_run_id: Option<&st
         labels: Vec::new(),
         details: RawJson::empty_object(),
         source: None,
-        primary_task_run_id: primary_run_id.map(Into::into),
+        primary_task_run_id: primary_run_id.map(|s| TaskRunId::from_store(s.to_string())),
         closed_at: None,
         created_at: "2026-06-02T00:00:00.000Z".to_string(),
         updated_at: "2026-06-02T00:00:00.000Z".to_string(),
@@ -1222,8 +1222,8 @@ pub(crate) fn make_task(id: &str, status: TaskStatus, primary_run_id: Option<&st
 
 pub(crate) fn make_run(id: &str, task_id: &str, status: TaskRunStatus) -> TaskRun {
     TaskRun {
-        id: id.into(),
-        task_id: task_id.into(),
+        id: TaskRunId::from_store(id.to_string()),
+        task_id: TaskId::from_store(task_id.to_string()),
         agent: Some(Agent::Claude),
         branch: None,
         worktree_path: None,
@@ -1500,8 +1500,8 @@ pub(crate) fn facade_with_decoder(
 
 pub(crate) fn driven_run(id: &str, task_id: &str, tab: &str) -> TaskRun {
     TaskRun {
-        id: id.into(),
-        task_id: task_id.into(),
+        id: TaskRunId::from_store(id.to_string()),
+        task_id: TaskId::from_store(task_id.to_string()),
         agent: None,
         branch: None,
         worktree_path: None,

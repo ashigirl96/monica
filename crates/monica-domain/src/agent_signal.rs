@@ -226,13 +226,14 @@ impl TaskRun {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ids::{TaskId, TaskRunId};
     use crate::json::RawJson;
     use crate::task_run::Agent;
 
     fn run(status: TaskRunStatus, wait_reason: Option<TaskRunWaitReason>, session: Option<&str>) -> TaskRun {
         TaskRun {
-            id: "run-1".into(),
-            task_id: "mon-1".into(),
+            id: TaskRunId::from_store("run-1".to_string()),
+            task_id: TaskId::from_store("mon-1".to_string()),
             agent: Some(Agent::Claude),
             branch: None,
             worktree_path: None,

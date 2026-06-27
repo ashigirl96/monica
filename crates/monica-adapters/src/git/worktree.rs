@@ -344,8 +344,8 @@ mod tests {
     use std::process::Command;
 
     use monica_application::{
-        GitGateway, NewTask, NewTaskRun, Project, ProjectRepository, TaskKind, TaskRun,
-        TaskRunStatus, TaskRunStore, TaskStatus, TaskStore,
+        GitGateway, NewTask, NewTaskRun, Project, ProjectRepository, TaskId, TaskKind, TaskRun,
+        TaskRunId, TaskRunStatus, TaskRunStore, TaskStatus, TaskStore,
     };
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
@@ -568,8 +568,8 @@ mod tests {
 
     fn task_run(id: &str, branch: &str, worktree: &Path) -> TaskRun {
         TaskRun {
-            id: id.into(),
-            task_id: "MON-1".into(),
+            id: TaskRunId::from_store(id.to_string()),
+            task_id: TaskId::from_store("MON-1".to_string()),
             agent: None,
             branch: Some(branch.to_string()),
             worktree_path: Some(worktree.to_string_lossy().into_owned()),

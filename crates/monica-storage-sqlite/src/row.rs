@@ -1,7 +1,7 @@
 use anyhow::Result;
 use monica_application::{
     Agent, Event, ExternalReference, PermissionMode, Project, Provider, RawJson, RefType, Task,
-    TaskKind, TaskRun, TaskRunStatus, TaskStatus,
+    TaskId, TaskKind, TaskRun, TaskRunId, TaskRunStatus, TaskStatus,
 };
 use rusqlite::Row;
 
@@ -12,7 +12,7 @@ pub(super) fn task_from_row(row: &Row<'_>) -> Result<Task> {
     let kind: String = row.get("kind")?;
     let status: String = row.get("status")?;
     Ok(Task {
-        id: row.get::<_, String>("id")?.into(),
+        id: TaskId::from_store(row.get("id")?),
         kind: kind.parse::<TaskKind>()?,
         status: status.parse::<TaskStatus>()?,
         phase: row.get("phase")?,
@@ -22,7 +22,7 @@ pub(super) fn task_from_row(row: &Row<'_>) -> Result<Task> {
         labels: serde_json::from_str(&labels)?,
         details: RawJson(details),
         source: source.map(RawJson),
-        primary_task_run_id: row.get::<_, Option<String>>("primary_task_run_id")?.map(Into::into),
+        primary_task_run_id: row.get::<_, Option<String>>("primary_task_run_id")?.map(TaskRunId::from_store),
         closed_at: row.get("closed_at")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
@@ -35,8 +35,8 @@ pub(super) fn task_run_from_row(row: &Row<'_>) -> Result<TaskRun> {
     let agent: Option<String> = row.get("agent")?;
     let metadata: String = row.get("metadata_json")?;
     Ok(TaskRun {
-        id: row.get::<_, String>("id")?.into(),
-        task_id: row.get::<_, String>("task_id")?.into(),
+        id: TaskRunId::from_store(row.get("id")?),
+        task_id: TaskId::from_store(row.get("task_id")?),
         agent: agent.map(|s| s.parse::<Agent>()).transpose()?,
         branch: row.get("branch")?,
         worktree_path: row.get("worktree_path")?,
