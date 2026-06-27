@@ -91,19 +91,17 @@ impl TaskRunOutputs for FsTaskRunOutputs {
         &self,
         task_run_id: &str,
         at: &str,
-        event_name: Option<&str>,
-        parsed: &Option<Value>,
+        event_label: Option<&str>,
         raw_stdin: &str,
     ) -> Result<()> {
         let dir = self.task_run_dir(task_run_id)?;
         fs::create_dir_all(&dir).with_context(|| format!("failed to create {}", dir.display()))?;
         let path = dir.join(HOOK_EVENTS_FILE);
-        let payload = parsed
-            .clone()
-            .unwrap_or_else(|| json!({ "raw": raw_stdin }));
+        let payload: Value =
+            serde_json::from_str(raw_stdin.trim()).unwrap_or_else(|_| json!({ "raw": raw_stdin }));
         let mut line = serde_json::to_string(&json!({
             "at": at,
-            "hook_event_name": event_name,
+            "hook_event_name": event_label,
             "payload": payload,
         }))?;
         line.push('\n');
@@ -161,7 +159,7 @@ fn write_agent_hooks_config(
     cwd: &Path,
     hook_command: &str,
 ) -> Result<String> {
-    let config_path = cwd.join(agent.hooks_config_path());
+    let config_path = cwd.join(crate::agents::hooks_config_path(agent));
     let config_path_str = config_path.to_string_lossy().into_owned();
 
     if std::env::var_os("HOME").is_some_and(|home| same_path(Path::new(&home), cwd)) {
@@ -225,7 +223,7 @@ fn agent_hooks_value(agent: monica_application::Agent, hook_command: &str) -> Va
     map.insert("Stop".into(), group());
     map.insert("SubagentStart".into(), group());
     map.insert("SubagentStop".into(), group());
-    for event in agent.extra_hook_events() {
+    for event in crate::agents::extra_hook_events(agent) {
         map.insert((*event).into(), group());
     }
     json!({ "hooks": Value::Object(map) })

@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use monica_domain::RawJson;
-use serde_json::Value;
 
 use crate::ports::{
     BoxFuture, EventRepository, GitGateway, ProjectRepository, PullRequestSyncStore, TaskBoardQuery,
@@ -21,10 +20,11 @@ use crate::{
     begin_github_device_flow, close_issue, create_raw_task, execute_run, github_auth_status,
     logout_github,
     make_main_by_terminal_tab, open_bench, prepare_claude_for_run, primary_terminal_tab,
-    record_claude_hook, register_project_with_default_branch,
-    start_run, subagents_in_flight_after,
+    record_hook, register_project_with_default_branch,
+    start_run,
     sync_next_pull_request,
-    track_github_issue, HookContext, MakeMainOutcome, Provider, RefType,
+    track_github_issue, AgentSignal, Continuation, HookContext, MakeMainOutcome, Provider, RefType,
+    SignalKind,
     wait_for_github_device_flow, Agent, DisplayStatus, Event, ExternalReference, GithubAuthStatus,
     GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef,
     GithubPullRequestStatus, NewTask, NewTaskRun, Project, PullRequestBranchSyncCandidate,
@@ -42,6 +42,73 @@ use crate::{
     TerminalStateSnapshot,
 };
 use std::sync::{Arc, Mutex};
+
+// --- Agent-signal test builders -------------------------------------------------------------------
+// The use-case tests drive `record_hook` with typed `AgentSignal`s (the provider JSON -> signal
+// decoding is covered by the adapter decoder's own tests in `monica-infra::agents`). `raw_stdin` is
+// irrelevant to these assertions, so the shim feeds a constant.
+
+fn mk_signal(session: Option<&str>, label: &str, kind: SignalKind) -> AgentSignal {
+    AgentSignal {
+        session_id: session.map(str::to_string),
+        event_label: Some(label.to_string()),
+        kind,
+    }
+}
+
+fn started(session: &str, continuation: Continuation) -> AgentSignal {
+    mk_signal(Some(session), "SessionStart", SignalKind::SessionStarted { continuation })
+}
+
+fn started_no_session(continuation: Continuation) -> AgentSignal {
+    mk_signal(None, "SessionStart", SignalKind::SessionStarted { continuation })
+}
+
+fn prompt(session: &str) -> AgentSignal {
+    mk_signal(Some(session), "UserPromptSubmit", SignalKind::PromptSubmitted)
+}
+
+fn turn_completed(session: &str, subagents_running: bool) -> AgentSignal {
+    mk_signal(Some(session), "Stop", SignalKind::TurnCompleted { subagents_running })
+}
+
+fn subagent_finished(session: &str, subagents_running: bool) -> AgentSignal {
+    mk_signal(Some(session), "SubagentStop", SignalKind::SubagentFinished { subagents_running })
+}
+
+fn session_ended(session: &str) -> AgentSignal {
+    mk_signal(Some(session), "SessionEnd", SignalKind::SessionEnded)
+}
+
+fn input_required(session: Option<&str>, reason: TaskRunWaitReason) -> AgentSignal {
+    mk_signal(
+        session,
+        "PreToolUse",
+        SignalKind::UserInputRequired { reason, plan_file_path: None },
+    )
+}
+
+fn input_resolved(session: &str) -> AgentSignal {
+    mk_signal(Some(session), "PostToolUse", SignalKind::UserInputResolved)
+}
+
+fn inert_event(session: &str, label: &str) -> AgentSignal {
+    mk_signal(Some(session), label, SignalKind::Inert)
+}
+
+/// Thin shim mirroring the production boundary: a decoded Claude signal handed to `record_hook`.
+fn record_claude_hook<R, A>(
+    repos: &mut R,
+    outputs: &A,
+    ctx: HookContext<'_>,
+    signal: &AgentSignal,
+) -> Result<crate::HookReport>
+where
+    R: TaskStore + TaskRunStore + EventRepository + Clock,
+    A: TaskRunOutputs,
+{
+    record_hook(repos, outputs, ctx, Agent::Claude, Some(signal), "{}")
+}
 
 #[derive(Default)]
 struct FakeRepos {
@@ -420,26 +487,24 @@ impl FakeRepos {
         if let Some(tab) = observation.terminal_tab_id {
             run.terminal_tab_id = Some(tab.to_string());
         }
-        // Mirror the store's subagent guard: a Stop with subagents still in flight is held
-        // (pending_stop); the SubagentStop that leaves nothing in flight fires the deferred
-        // transition. `subagents_in_flight_after` excludes a SubagentStop's own listed agent.
-        let hold_stop = observation.event_name == Some("Stop")
-            && subagents_in_flight_after(observation.event_name, observation.metadata);
-        let release_stop = observation.event_name == Some("SubagentStop")
-            && !subagents_in_flight_after(observation.event_name, observation.metadata);
+        if let Some(plan) = observation.plan_file_path {
+            run.plan_file_path = Some(plan.to_string());
+        }
+        // Mirror the store's subagent guard from the typed observation: a held turn-complete keeps
+        // pending_stop; the releasing subagent-finish fires the deferred transition.
         let was_pending = run.pending_stop;
-        if release_stop && was_pending {
+        if observation.release_stop && was_pending {
             run.status = TaskRunStatus::WaitingForUser;
             run.wait_reason = Some(TaskRunWaitReason::AwaitingPrompt);
         }
-        run.pending_stop = if hold_stop && run.status == TaskRunStatus::Running {
+        run.pending_stop = if observation.hold_stop && run.status == TaskRunStatus::Running {
             true
-        } else if release_stop || observation.status.is_some() {
+        } else if observation.release_stop || observation.status.is_some() {
             false
         } else {
             was_pending
         };
-        run.last_event_name = observation.event_name.map(ToString::to_string);
+        run.last_event_name = observation.event_label.map(ToString::to_string);
         run.last_event_at = Some(observation.at.to_string());
         Ok(())
     }
@@ -568,7 +633,7 @@ impl EventRepository for FakeRepos {
         task_id: Option<&str>,
         task_run_id: Option<&str>,
         kind: &str,
-        payload: &Value,
+        payload_json: &str,
     ) -> Result<Event> {
         let mut state = self.state.borrow_mut();
         let event = Event {
@@ -576,7 +641,7 @@ impl EventRepository for FakeRepos {
             task_id: task_id.map(ToString::to_string),
             task_run_id: task_run_id.map(ToString::to_string),
             kind: kind.to_string(),
-            payload: RawJson(payload.to_string()),
+            payload: RawJson(payload_json.to_string()),
             created_at: "2026-06-02T00:00:00.000Z".to_string(),
         };
         state.events.push(event.clone());
@@ -886,8 +951,7 @@ impl TaskRunOutputs for FakeTaskRunOutputs {
         &self,
         _task_run_id: &str,
         _at: &str,
-        _event_name: Option<&str>,
-        _parsed: &Option<Value>,
+        _event_label: Option<&str>,
         _raw_stdin: &str,
     ) -> Result<()> {
         *self.appended.borrow_mut() = true;
@@ -1085,14 +1149,14 @@ fn task_with_running_primary(repos: &mut FakeRepos, outputs: &FakeTaskRunOutputs
         repos,
         outputs,
         hook_ctx(&task_id, Some(&run_id)),
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-1"}"#,
+        &started("sess-1", Continuation::Fresh),
     )
     .unwrap();
     record_claude_hook(
         repos,
         outputs,
         hook_ctx(&task_id, Some(&run_id)),
-        r#"{"hook_event_name":"UserPromptSubmit","session_id":"sess-1"}"#,
+        &prompt("sess-1"),
     )
     .unwrap();
     (task_id, run_id)
@@ -1115,7 +1179,7 @@ fn record_claude_hook_records_waiting_transition_and_run_output() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, Some(&run.id)),
-        r#"{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion"}"#,
+        &input_required(None, TaskRunWaitReason::AskUserQuestion),
     )
     .unwrap();
     assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
@@ -1124,6 +1188,27 @@ fn record_claude_hook_records_waiting_transition_and_run_output() {
         Some(TaskRunWaitReason::AskUserQuestion)
     );
     assert!(*outputs.appended.borrow());
+}
+
+#[test]
+fn record_claude_hook_forwards_plan_file_path_from_the_signal() {
+    let mut repos = FakeRepos::default();
+    let outputs = FakeTaskRunOutputs::default();
+    let (task_id, run_id) = task_with_running_primary(&mut repos, &outputs);
+
+    let plan = AgentSignal {
+        session_id: Some("sess-1".to_string()),
+        event_label: Some("PreToolUse".to_string()),
+        kind: SignalKind::UserInputRequired {
+            reason: TaskRunWaitReason::ExitPlanMode,
+            plan_file_path: Some("/Users/me/.claude/plans/x.md".to_string()),
+        },
+    };
+    record_claude_hook(&mut repos, &outputs, hook_ctx(&task_id, Some(&run_id)), &plan).unwrap();
+
+    let run = repos.get_task_run(&run_id).unwrap().unwrap();
+    assert_eq!(run.wait_reason, Some(TaskRunWaitReason::ExitPlanMode));
+    assert_eq!(run.plan_file_path.as_deref(), Some("/Users/me/.claude/plans/x.md"));
 }
 
 #[test]
@@ -1137,7 +1222,7 @@ fn record_claude_hook_claims_prepared_primary_run_without_run_id() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-1"}"#,
+        &started("sess-1", Continuation::Fresh),
     )
     .unwrap();
     assert!(report.task_run_linked);
@@ -1152,7 +1237,7 @@ fn record_claude_hook_claims_prepared_primary_run_without_run_id() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"UserPromptSubmit","session_id":"sess-1"}"#,
+        &prompt("sess-1"),
     )
     .unwrap();
     assert!(report.task_run_linked);
@@ -1167,7 +1252,7 @@ fn record_claude_hook_claims_prepared_primary_run_without_run_id() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"Stop","session_id":"sess-1"}"#,
+        &turn_completed("sess-1", false),
     )
     .unwrap();
     assert!(report.task_run_linked);
@@ -1189,7 +1274,7 @@ fn entered_waiting_for_user_marks_only_the_entering_edge() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, Some(&run_id)),
-        r#"{"hook_event_name":"Stop","session_id":"sess-1"}"#,
+        &turn_completed("sess-1", false),
     )
     .unwrap();
     assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
@@ -1201,7 +1286,7 @@ fn entered_waiting_for_user_marks_only_the_entering_edge() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, Some(&run_id)),
-        r#"{"hook_event_name":"Stop","session_id":"sess-1"}"#,
+        &turn_completed("sess-1", false),
     )
     .unwrap();
     assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
@@ -1212,14 +1297,14 @@ fn entered_waiting_for_user_marks_only_the_entering_edge() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, Some(&run_id)),
-        r#"{"hook_event_name":"UserPromptSubmit","session_id":"sess-1"}"#,
+        &prompt("sess-1"),
     )
     .unwrap();
     let report = record_claude_hook(
         &mut repos,
         &outputs,
         hook_ctx(&task_id, Some(&run_id)),
-        r#"{"hook_event_name":"SessionEnd","session_id":"sess-1"}"#,
+        &session_ended("sess-1"),
     )
     .unwrap();
     assert_eq!(report.task_run_status, Some(TaskRunStatus::Stopped));
@@ -1236,7 +1321,7 @@ fn record_claude_hook_does_not_claim_prepared_primary_on_stray_stop() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"Stop","session_id":"sess-stray"}"#,
+        &turn_completed("sess-stray", false),
     )
     .unwrap();
     assert!(!report.task_run_linked);
@@ -1257,7 +1342,7 @@ fn record_claude_hook_does_not_create_runs_for_rejected_run_id() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, Some("../evil")),
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-1"}"#,
+        &started("sess-1", Continuation::Fresh),
     )
     .unwrap();
     assert!(report.unsafe_task_run_id);
@@ -1276,7 +1361,7 @@ fn record_claude_hook_creates_side_run_instead_of_stealing_active_primary() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-2","cwd":"/work/tree"}"#,
+        &started("sess-2", Continuation::Fresh),
     )
     .unwrap();
     assert!(report.task_run_linked);
@@ -1310,7 +1395,7 @@ fn record_claude_hook_fork_session_start_does_not_steal_primary_tab() {
         &mut repos,
         &outputs,
         hook_ctx_in_tab(&task_id, Some(&primary_id), "tab-main"),
-        r#"{"hook_event_name":"UserPromptSubmit","session_id":"sess-1"}"#,
+        &prompt("sess-1"),
     )
     .unwrap();
 
@@ -1319,7 +1404,7 @@ fn record_claude_hook_fork_session_start_does_not_steal_primary_tab() {
         &mut repos,
         &outputs,
         hook_ctx_in_tab(&task_id, None, "tab-fork"),
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-1","source":"resume"}"#,
+        &started("sess-1", Continuation::Resume),
     )
     .unwrap();
     assert!(report.task_run_linked);
@@ -1335,7 +1420,7 @@ fn record_claude_hook_fork_session_start_does_not_steal_primary_tab() {
         &mut repos,
         &outputs,
         hook_ctx_in_tab(&task_id, None, "tab-fork"),
-        r#"{"hook_event_name":"UserPromptSubmit","session_id":"sess-2"}"#,
+        &prompt("sess-2"),
     )
     .unwrap();
     assert!(report.task_run_created);
@@ -1365,7 +1450,7 @@ fn record_claude_hook_resumed_session_rebinds_tab_on_first_prompt() {
         &mut repos,
         &outputs,
         hook_ctx_in_tab(&task_id, Some(&primary_id), "tab-main"),
-        r#"{"hook_event_name":"UserPromptSubmit","session_id":"sess-1"}"#,
+        &prompt("sess-1"),
     )
     .unwrap();
 
@@ -1374,7 +1459,7 @@ fn record_claude_hook_resumed_session_rebinds_tab_on_first_prompt() {
         &mut repos,
         &outputs,
         hook_ctx_in_tab(&task_id, None, "tab-new"),
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-1","source":"resume"}"#,
+        &started("sess-1", Continuation::Resume),
     )
     .unwrap();
     let primary = repos.get_task_run(&primary_id).unwrap().unwrap();
@@ -1385,7 +1470,7 @@ fn record_claude_hook_resumed_session_rebinds_tab_on_first_prompt() {
         &mut repos,
         &outputs,
         hook_ctx_in_tab(&task_id, None, "tab-new"),
-        r#"{"hook_event_name":"UserPromptSubmit","session_id":"sess-1"}"#,
+        &prompt("sess-1"),
     )
     .unwrap();
     assert!(!report.task_run_created);
@@ -1402,7 +1487,7 @@ fn record_claude_hook_follows_side_run_through_its_lifecycle() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-2"}"#,
+        &started("sess-2", Continuation::Fresh),
     )
     .unwrap();
 
@@ -1410,7 +1495,7 @@ fn record_claude_hook_follows_side_run_through_its_lifecycle() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","session_id":"sess-2"}"#,
+        &input_required(Some("sess-2"), TaskRunWaitReason::AskUserQuestion),
     )
     .unwrap();
     assert!(!report.task_run_created);
@@ -1420,14 +1505,14 @@ fn record_claude_hook_follows_side_run_through_its_lifecycle() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"PostToolUse","tool_name":"AskUserQuestion","session_id":"sess-2"}"#,
+        &input_resolved("sess-2"),
     )
     .unwrap();
     let report = record_claude_hook(
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"SessionEnd","session_id":"sess-2"}"#,
+        &session_ended("sess-2"),
     )
     .unwrap();
     assert!(!report.task_run_created);
@@ -1449,7 +1534,7 @@ fn record_claude_hook_compact_session_start_does_not_demote_running_primary() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-1","source":"compact"}"#,
+        &started("sess-1", Continuation::Compact),
     )
     .unwrap();
     assert!(report.task_run_linked);
@@ -1469,7 +1554,7 @@ fn record_claude_hook_stop_preserves_tool_specific_wait() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","session_id":"sess-1"}"#,
+        &input_required(Some("sess-1"), TaskRunWaitReason::AskUserQuestion),
     )
     .unwrap();
 
@@ -1478,7 +1563,7 @@ fn record_claude_hook_stop_preserves_tool_specific_wait() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"Stop","session_id":"sess-1"}"#,
+        &turn_completed("sess-1", false),
     )
     .unwrap();
     assert_eq!(report.task_run_status, None);
@@ -1499,7 +1584,7 @@ fn record_claude_hook_stop_during_subagent_keeps_run_running() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"Stop","session_id":"sess-1","background_tasks":[{"id":"a","status":"running"}]}"#,
+        &turn_completed("sess-1", true),
     )
     .unwrap();
     assert_eq!(report.task_run_status, None);
@@ -1512,7 +1597,7 @@ fn record_claude_hook_stop_during_subagent_keeps_run_running() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"Stop","session_id":"sess-1","background_tasks":[]}"#,
+        &turn_completed("sess-1", false),
     )
     .unwrap();
     let run = repos.get_task_run(&run_id).unwrap().unwrap();
@@ -1533,7 +1618,7 @@ fn record_claude_hook_deferred_stop_fires_on_last_subagent_stop() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"Stop","session_id":"sess-1","background_tasks":[{"id":"a","status":"running"}]}"#,
+        &turn_completed("sess-1", true),
     )
     .unwrap();
     let run = repos.get_task_run(&run_id).unwrap().unwrap();
@@ -1544,7 +1629,7 @@ fn record_claude_hook_deferred_stop_fires_on_last_subagent_stop() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"SubagentStop","session_id":"sess-1","agent_id":"a","background_tasks":[{"id":"a","status":"running"}]}"#,
+        &subagent_finished("sess-1", false),
     )
     .unwrap();
     assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
@@ -1566,25 +1651,25 @@ fn record_claude_hook_subagent_guard_tracks_background_tasks() {
     let (task_id, run_id) = task_with_running_primary(&mut repos, &outputs);
 
     let status = |repos: &FakeRepos| repos.get_task_run(&run_id).unwrap().unwrap().status;
-    let fire = |repos: &mut FakeRepos, raw: &str| {
-        record_claude_hook(repos, &outputs, hook_ctx(&task_id, None), raw).unwrap()
+    let fire = |repos: &mut FakeRepos, sig: &AgentSignal| {
+        record_claude_hook(repos, &outputs, hook_ctx(&task_id, None), sig).unwrap()
     };
 
     // Two subagents running: the Stop is held.
-    fire(&mut repos, r#"{"hook_event_name":"Stop","session_id":"sess-1","background_tasks":[{"id":"a","status":"running"},{"id":"b","status":"running"}]}"#);
+    fire(&mut repos, &turn_completed("sess-1", true));
     assert_eq!(status(&repos), TaskRunStatus::Running);
 
     // A start-less SubagentStop whose agent is not in the snapshot must not release the hold.
-    fire(&mut repos, r#"{"hook_event_name":"SubagentStop","session_id":"sess-1","agent_id":"ghost","background_tasks":[{"id":"a","status":"running"},{"id":"b","status":"running"}]}"#);
+    fire(&mut repos, &subagent_finished("sess-1", true));
     assert_eq!(status(&repos), TaskRunStatus::Running);
 
     // Claude re-injects a finished subagent's result as a UserPromptSubmit; the parent is working
     // again, so the run follows to Running.
-    fire(&mut repos, r#"{"hook_event_name":"UserPromptSubmit","session_id":"sess-1","prompt":"<task-notification>\n<task-id>x</task-id>"}"#);
+    fire(&mut repos, &prompt("sess-1"));
     assert_eq!(status(&repos), TaskRunStatus::Running);
 
     // The parent comes to rest with an empty background_tasks: now it settles to "your turn".
-    fire(&mut repos, r#"{"hook_event_name":"Stop","session_id":"sess-1","background_tasks":[]}"#);
+    fire(&mut repos, &turn_completed("sess-1", false));
     let run = repos.get_task_run(&run_id).unwrap().unwrap();
     assert_eq!(run.status, TaskRunStatus::WaitingForUser);
     assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
@@ -1599,7 +1684,7 @@ fn record_claude_hook_late_stop_does_not_resurrect_stopped_run() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"SessionEnd","session_id":"sess-1"}"#,
+        &session_ended("sess-1"),
     )
     .unwrap();
     assert_eq!(
@@ -1611,7 +1696,7 @@ fn record_claude_hook_late_stop_does_not_resurrect_stopped_run() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"Stop","session_id":"sess-1"}"#,
+        &turn_completed("sess-1", false),
     )
     .unwrap();
     assert_eq!(report.task_run_status, None);
@@ -1630,7 +1715,7 @@ fn record_claude_hook_fresh_session_start_revives_stopped_run() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"SessionEnd","session_id":"sess-1"}"#,
+        &session_ended("sess-1"),
     )
     .unwrap();
 
@@ -1640,7 +1725,7 @@ fn record_claude_hook_fresh_session_start_revives_stopped_run() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, Some(&run_id)),
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-2","source":"startup"}"#,
+        &started("sess-2", Continuation::Fresh),
     )
     .unwrap();
     assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
@@ -1659,7 +1744,7 @@ fn record_claude_hook_session_end_settles_waiting_run() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"Stop","session_id":"sess-1"}"#,
+        &turn_completed("sess-1", false),
     )
     .unwrap();
 
@@ -1668,7 +1753,7 @@ fn record_claude_hook_session_end_settles_waiting_run() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"SessionEnd","session_id":"sess-1"}"#,
+        &session_ended("sess-1"),
     )
     .unwrap();
     assert_eq!(report.task_run_status, Some(TaskRunStatus::Stopped));
@@ -1686,14 +1771,14 @@ fn record_claude_hook_stale_terminal_verdict_does_not_kill_revived_run() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"SessionEnd","session_id":"sess-1"}"#,
+        &session_ended("sess-1"),
     )
     .unwrap();
     record_claude_hook(
         &mut repos,
         &outputs,
         hook_ctx(&task_id, Some(&run_id)),
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-2","source":"startup"}"#,
+        &started("sess-2", Continuation::Fresh),
     )
     .unwrap();
 
@@ -1701,19 +1786,19 @@ fn record_claude_hook_stale_terminal_verdict_does_not_kill_revived_run() {
     // may touch the run sess-2 now owns: the dead session's SessionEnd is a stale terminal
     // verdict (session-scoped), and StopFailure is inert by design — never the run's verdict.
     for payload in [
-        r#"{"hook_event_name":"SessionEnd","session_id":"sess-1"}"#,
-        r#"{"hook_event_name":"StopFailure","session_id":"sess-1"}"#,
+        &session_ended("sess-1"),
+        &inert_event("sess-1", "StopFailure"),
     ] {
         let report =
             record_claude_hook(&mut repos, &outputs, hook_ctx(&task_id, Some(&run_id)), payload)
                 .unwrap();
-        assert_eq!(report.task_run_status, None, "{payload}");
+        assert_eq!(report.task_run_status, None, "{payload:?}");
         let run = repos.get_task_run(&run_id).unwrap().unwrap();
-        assert_eq!(run.status, TaskRunStatus::WaitingForUser, "{payload}");
+        assert_eq!(run.status, TaskRunStatus::WaitingForUser, "{payload:?}");
         assert_eq!(
             run.wait_reason,
             Some(TaskRunWaitReason::AwaitingPrompt),
-            "{payload}"
+            "{payload:?}"
         );
     }
 }
@@ -1731,7 +1816,7 @@ fn record_claude_hook_resume_session_start_lands_created_run_as_awaiting_prompt(
         &mut repos,
         &outputs,
         hook_ctx_in_tab(&task_id, None, "tab-resume"),
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-9","source":"resume"}"#,
+        &started("sess-9", Continuation::Resume),
     )
     .unwrap();
     assert!(report.task_run_created);
@@ -1756,7 +1841,7 @@ fn record_claude_hook_resume_session_start_revives_stopped_run_it_resolves() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"SessionEnd","session_id":"sess-1"}"#,
+        &session_ended("sess-1"),
     )
     .unwrap();
 
@@ -1766,7 +1851,7 @@ fn record_claude_hook_resume_session_start_revives_stopped_run_it_resolves() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, Some(&run_id)),
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-3","source":"resume"}"#,
+        &started("sess-3", Continuation::Resume),
     )
     .unwrap();
     assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
@@ -1785,7 +1870,7 @@ fn record_claude_hook_promotes_created_run_when_no_primary_is_set() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-1"}"#,
+        &started("sess-1", Continuation::Fresh),
     )
     .unwrap();
     assert!(report.task_run_created);
@@ -1809,7 +1894,7 @@ fn record_claude_hook_repairs_dangling_primary_pointer() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-1"}"#,
+        &started("sess-1", Continuation::Fresh),
     )
     .unwrap();
     assert!(report.task_run_created);
@@ -1830,7 +1915,7 @@ fn record_claude_hook_does_not_create_runs_for_non_session_starting_events() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"Stop","session_id":"sess-unknown"}"#,
+        &turn_completed("sess-unknown", false),
     )
     .unwrap();
     assert!(!report.task_run_linked);
@@ -1850,7 +1935,7 @@ fn record_claude_hook_does_not_create_runs_without_a_session_id() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"SessionStart"}"#,
+        &started_no_session(Continuation::Fresh),
     )
     .unwrap();
     assert!(!report.task_run_linked);
@@ -1867,7 +1952,7 @@ fn record_claude_hook_creates_side_run_on_user_prompt_submit() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"UserPromptSubmit","session_id":"sess-2"}"#,
+        &prompt("sess-2"),
     )
     .unwrap();
     assert!(report.task_run_created);
@@ -1885,7 +1970,7 @@ fn record_claude_hook_does_not_create_runs_for_done_tasks() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, None),
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-2"}"#,
+        &started("sess-2", Continuation::Fresh),
     )
     .unwrap();
     assert!(!report.task_run_created);
@@ -1910,7 +1995,7 @@ fn record_claude_hook_records_terminal_tab_id_from_context() {
             task_run_id: None,
             terminal_tab_id: Some("tab-7"),
         },
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-2"}"#,
+        &started("sess-2", Continuation::Fresh),
     )
     .unwrap();
 
@@ -1949,7 +2034,7 @@ fn make_main_by_terminal_tab_promotes_side_run_and_reports_no_ops() {
             task_run_id: None,
             terminal_tab_id: Some("tab-2"),
         },
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-2"}"#,
+        &started("sess-2", Continuation::Fresh),
     )
     .unwrap();
     record_claude_hook(
@@ -1960,7 +2045,7 @@ fn make_main_by_terminal_tab_promotes_side_run_and_reports_no_ops() {
             task_run_id: None,
             terminal_tab_id: Some("tab-2"),
         },
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-3"}"#,
+        &started("sess-3", Continuation::Fresh),
     )
     .unwrap();
     let latest_in_tab = repos
@@ -2014,7 +2099,7 @@ fn make_main_by_terminal_tab_refuses_while_primary_is_mid_prepare() {
             task_run_id: None,
             terminal_tab_id: Some("tab-2"),
         },
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-2"}"#,
+        &started("sess-2", Continuation::Fresh),
     )
     .unwrap();
 
@@ -2041,7 +2126,7 @@ fn primary_terminal_tab_resolves_through_primary_run() {
             task_run_id: None,
             terminal_tab_id: Some("tab-1"),
         },
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-1"}"#,
+        &started("sess-1", Continuation::Fresh),
     )
     .unwrap();
     assert_eq!(
@@ -2069,7 +2154,7 @@ fn record_claude_hook_prefers_explicit_run_id_over_session_lookup() {
         &mut repos,
         &outputs,
         hook_ctx(&task_id, Some(&other.id)),
-        r#"{"hook_event_name":"SessionStart","session_id":"sess-1"}"#,
+        &started("sess-1", Continuation::Fresh),
     )
     .unwrap();
     assert!(report.task_run_linked);
@@ -2548,7 +2633,7 @@ fn resolve_by_session_returns_none_without_session_id() {
         task: &task,
         explicit_run_id_rejected: false,
         provider_session_id: None,
-        event_name: Some("SessionStart"),
+        starts_session: true,
         agent: Agent::Claude,
         primary_run: None,
     };
@@ -2562,12 +2647,11 @@ fn resolve_by_session_returns_run_when_found() {
     let task_id = repos.insert_task_for_run(None);
     let task = repos.get_task(&task_id).unwrap().unwrap();
 
-    let hook = r#"{"hook_event_name":"SessionStart","session_id":"sess-1"}"#.to_string();
     record_claude_hook(
         &mut repos,
         &FakeTaskRunOutputs::default(),
         HookContext { task_id: Some(&task_id), task_run_id: None, terminal_tab_id: None },
-        &hook,
+        &started("sess-1", Continuation::Fresh),
     ).unwrap();
 
     let ctx = RunResolveCtx {
@@ -2575,7 +2659,7 @@ fn resolve_by_session_returns_run_when_found() {
         task: &task,
         explicit_run_id_rejected: false,
         provider_session_id: Some("sess-1"),
-        event_name: Some("Prompt"),
+        starts_session: false,
         agent: Agent::Claude,
         primary_run: None,
     };
@@ -2594,7 +2678,7 @@ fn resolve_by_prepared_primary_skips_non_prepared() {
         task: &task,
         explicit_run_id_rejected: false,
         provider_session_id: Some("sess-1"),
-        event_name: Some("SessionStart"),
+        starts_session: true,
         agent: Agent::Claude,
         primary_run: Some(&run),
     };
@@ -2612,7 +2696,7 @@ fn resolve_by_prepared_primary_skips_non_starting_event() {
         task: &task,
         explicit_run_id_rejected: false,
         provider_session_id: Some("sess-1"),
-        event_name: Some("Stop"),
+        starts_session: false,
         agent: Agent::Claude,
         primary_run: Some(&run),
     };
@@ -2631,7 +2715,7 @@ fn resolve_by_prepared_primary_claims_on_session_start() {
         task: &task,
         explicit_run_id_rejected: false,
         provider_session_id: Some("sess-1"),
-        event_name: Some("SessionStart"),
+        starts_session: true,
         agent: Agent::Claude,
         primary_run: Some(&run),
     };
@@ -2657,7 +2741,7 @@ fn resolve_by_prepared_primary_loses_race_when_already_claimed() {
         task: &task,
         explicit_run_id_rejected: false,
         provider_session_id: Some("sess-loser"),
-        event_name: Some("SessionStart"),
+        starts_session: true,
         agent: Agent::Claude,
         primary_run: Some(&run),
     };
@@ -2679,7 +2763,7 @@ fn resolve_by_lazy_create_rejects_without_session_id() {
         task: &task,
         explicit_run_id_rejected: false,
         provider_session_id: None,
-        event_name: Some("SessionStart"),
+        starts_session: true,
         agent: Agent::Claude,
         primary_run: None,
     };
@@ -2697,7 +2781,7 @@ fn resolve_by_lazy_create_rejects_non_starting_event() {
         task: &task,
         explicit_run_id_rejected: false,
         provider_session_id: Some("sess-1"),
-        event_name: Some("Stop"),
+        starts_session: false,
         agent: Agent::Claude,
         primary_run: None,
     };
@@ -2715,7 +2799,7 @@ fn resolve_by_lazy_create_rejects_when_explicit_run_id_rejected() {
         task: &task,
         explicit_run_id_rejected: true,
         provider_session_id: Some("sess-1"),
-        event_name: Some("SessionStart"),
+        starts_session: true,
         agent: Agent::Claude,
         primary_run: None,
     };
@@ -2734,7 +2818,7 @@ fn resolve_by_lazy_create_rejects_closed_task() {
         task: &task,
         explicit_run_id_rejected: false,
         provider_session_id: Some("sess-1"),
-        event_name: Some("SessionStart"),
+        starts_session: true,
         agent: Agent::Claude,
         primary_run: None,
     };
@@ -2752,7 +2836,7 @@ fn resolve_by_lazy_create_creates_primary_when_none_exists() {
         task: &task,
         explicit_run_id_rejected: false,
         provider_session_id: Some("sess-1"),
-        event_name: Some("SessionStart"),
+        starts_session: true,
         agent: Agent::Claude,
         primary_run: None,
     };
@@ -2775,7 +2859,7 @@ fn resolve_by_lazy_create_creates_side_run_when_primary_exists() {
         task: &task,
         explicit_run_id_rejected: false,
         provider_session_id: Some("sess-1"),
-        event_name: Some("SessionStart"),
+        starts_session: true,
         agent: Agent::Claude,
         primary_run: Some(&existing_primary),
     };

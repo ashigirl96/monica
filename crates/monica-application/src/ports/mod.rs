@@ -3,6 +3,7 @@ use std::pin::Pin;
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+mod agent_event_decoder;
 mod event_repository;
 mod git_gateway;
 mod notebook_gateway;
@@ -17,6 +18,7 @@ mod unit_of_work;
 mod workbench_store;
 mod workspace;
 
+pub use agent_event_decoder::AgentEventDecoder;
 pub use event_repository::EventRepository;
 pub use git_gateway::GitGateway;
 pub use notebook_gateway::NotebookGateway;

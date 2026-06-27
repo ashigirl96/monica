@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use serde_json::Value;
 
 use crate::Project;
 
@@ -26,8 +25,7 @@ pub trait TaskRunOutputs {
         &self,
         task_run_id: &str,
         at: &str,
-        event_name: Option<&str>,
-        parsed: &Option<Value>,
+        event_label: Option<&str>,
         raw_stdin: &str,
     ) -> Result<()>;
 }

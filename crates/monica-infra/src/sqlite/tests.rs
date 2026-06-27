@@ -39,29 +39,32 @@ fn raw_json_columns_survive_sqlite_round_trip() {
             worktree_path: None,
         })
         .unwrap();
-    let metadata = json!({ "hook_event_name": "PreToolUse", "nested": { "n": 2 } });
+    let metadata = json!({ "hook_event_name": "PreToolUse", "nested": { "n": 2 } }).to_string();
     db.record_task_run_observation(
         &run.id,
         TaskRunObservation {
             status: Some(TaskRunStatus::Running),
             wait_reason: Some(None),
-            event_name: Some("PreToolUse"),
+            event_label: Some("PreToolUse"),
             at: "2026-06-02T00:00:00.000Z",
             provider_session_id: None,
             terminal_tab_id: None,
-            metadata: Some(&metadata),
+            metadata_raw: Some(&metadata),
+            plan_file_path: None,
+            hold_stop: false,
+            release_stop: false,
         },
     )
     .unwrap();
     let loaded_run = db.get_task_run(&run.id).unwrap().unwrap();
-    assert_eq!(loaded_run.metadata.as_str(), metadata.to_string());
+    assert_eq!(loaded_run.metadata.as_str(), metadata);
 
-    let payload = json!({ "tool_name": "ExitPlanMode" });
+    let payload = json!({ "tool_name": "ExitPlanMode" }).to_string();
     db.insert_event(Some(&task.id), None, "PreToolUse", &payload)
         .unwrap();
     let events = db.list_events(Some(&task.id)).unwrap();
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0].payload.as_str(), payload.to_string());
+    assert_eq!(events[0].payload.as_str(), payload);
 }
 
 fn dev_task(title: &str) -> NewTask {
@@ -189,17 +192,20 @@ fn task_run_observation_records_wait_reason_and_event_metadata() {
             worktree_path: None,
         })
         .unwrap();
-    let metadata = json!({ "hook_event_name": "PreToolUse" });
+    let metadata = json!({ "hook_event_name": "PreToolUse" }).to_string();
     db.record_task_run_observation(
         &run.id,
         TaskRunObservation {
             status: Some(TaskRunStatus::WaitingForUser),
             wait_reason: Some(Some(TaskRunWaitReason::AskUserQuestion)),
-            event_name: Some("PreToolUse"),
+            event_label: Some("PreToolUse"),
             at: "2026-06-02T00:00:00.000Z",
             provider_session_id: Some("provider-session"),
             terminal_tab_id: Some("tab-1"),
-            metadata: Some(&metadata),
+            metadata_raw: Some(&metadata),
+            plan_file_path: None,
+            hold_stop: false,
+            release_stop: false,
         },
     )
     .unwrap();
@@ -225,22 +231,23 @@ fn task_run_observation_retains_plan_file_path_across_later_hooks() {
         .unwrap();
     assert_eq!(db.get_task_run(&run.id).unwrap().unwrap().plan_file_path, None);
 
-    let exit_plan = json!({
-        "hook_event_name": "PreToolUse",
-        "tool_name": "ExitPlanMode",
-        "tool_input": { "planFilePath": "/Users/me/.claude/plans/hazy-wiggling-salamander.md" }
-    });
+    // The decoder extracts the plan file from an ExitPlanMode payload; the store records it.
+    let plan_observation = |path: Option<&'static str>, at: &'static str| TaskRunObservation {
+        status: Some(TaskRunStatus::WaitingForUser),
+        wait_reason: Some(Some(TaskRunWaitReason::ExitPlanMode)),
+        event_label: Some("PreToolUse"),
+        at,
+        provider_session_id: None,
+        terminal_tab_id: None,
+        metadata_raw: None,
+        plan_file_path: path,
+        hold_stop: false,
+        release_stop: false,
+    };
+
     db.record_task_run_observation(
         &run.id,
-        TaskRunObservation {
-            status: Some(TaskRunStatus::WaitingForUser),
-            wait_reason: Some(Some(TaskRunWaitReason::ExitPlanMode)),
-            event_name: Some("PreToolUse"),
-            at: "2026-06-02T00:00:00.000Z",
-            provider_session_id: None,
-            terminal_tab_id: None,
-            metadata: Some(&exit_plan),
-        },
+        plan_observation(Some("/Users/me/.claude/plans/hazy-wiggling-salamander.md"), "2026-06-02T00:00:00.000Z"),
     )
     .unwrap();
     assert_eq!(
@@ -248,18 +255,21 @@ fn task_run_observation_retains_plan_file_path_across_later_hooks() {
         Some("/Users/me/.claude/plans/hazy-wiggling-salamander.md")
     );
 
-    // Approving the plan fires a payload without a planFilePath; the path must survive it.
-    let approved = json!({ "hook_event_name": "UserPromptSubmit" });
+    // Approving the plan fires a payload without a planFilePath (decoded `plan_file_path: None`);
+    // the COALESCE must keep the recorded path.
     db.record_task_run_observation(
         &run.id,
         TaskRunObservation {
             status: Some(TaskRunStatus::Running),
             wait_reason: Some(None),
-            event_name: Some("UserPromptSubmit"),
+            event_label: Some("UserPromptSubmit"),
             at: "2026-06-02T00:01:00.000Z",
             provider_session_id: None,
             terminal_tab_id: None,
-            metadata: Some(&approved),
+            metadata_raw: None,
+            plan_file_path: None,
+            hold_stop: false,
+            release_stop: false,
         },
     )
     .unwrap();
@@ -270,47 +280,18 @@ fn task_run_observation_retains_plan_file_path_across_later_hooks() {
         Some("/Users/me/.claude/plans/hazy-wiggling-salamander.md")
     );
 
-    // An ExitPlanMode payload carrying an empty planFilePath must not clobber the stored path.
-    let empty_plan = json!({
-        "hook_event_name": "PreToolUse",
-        "tool_name": "ExitPlanMode",
-        "tool_input": { "planFilePath": "" }
-    });
-    db.record_task_run_observation(
-        &run.id,
-        TaskRunObservation {
-            status: Some(TaskRunStatus::WaitingForUser),
-            wait_reason: Some(Some(TaskRunWaitReason::ExitPlanMode)),
-            event_name: Some("PreToolUse"),
-            at: "2026-06-02T00:01:30.000Z",
-            provider_session_id: None,
-            terminal_tab_id: None,
-            metadata: Some(&empty_plan),
-        },
-    )
-    .unwrap();
+    // An empty planFilePath decodes to `None`, so it must not clobber the stored path.
+    db.record_task_run_observation(&run.id, plan_observation(None, "2026-06-02T00:01:30.000Z"))
+        .unwrap();
     assert_eq!(
         db.get_task_run(&run.id).unwrap().unwrap().plan_file_path.as_deref(),
         Some("/Users/me/.claude/plans/hazy-wiggling-salamander.md")
     );
 
     // A fresh plan replaces it with the newer path.
-    let next_plan = json!({
-        "hook_event_name": "PreToolUse",
-        "tool_name": "ExitPlanMode",
-        "tool_input": { "planFilePath": "/Users/me/.claude/plans/brave-soaring-otter.md" }
-    });
     db.record_task_run_observation(
         &run.id,
-        TaskRunObservation {
-            status: Some(TaskRunStatus::WaitingForUser),
-            wait_reason: Some(Some(TaskRunWaitReason::ExitPlanMode)),
-            event_name: Some("PreToolUse"),
-            at: "2026-06-02T00:02:00.000Z",
-            provider_session_id: None,
-            terminal_tab_id: None,
-            metadata: Some(&next_plan),
-        },
+        plan_observation(Some("/Users/me/.claude/plans/brave-soaring-otter.md"), "2026-06-02T00:02:00.000Z"),
     )
     .unwrap();
     assert_eq!(
@@ -338,11 +319,14 @@ fn task_run_observation_sql_guards_protected_transitions() {
     let generic_wait = TaskRunObservation {
         status: Some(TaskRunStatus::WaitingForUser),
         wait_reason: Some(Some(TaskRunWaitReason::AwaitingPrompt)),
-        event_name: Some("Stop"),
+        event_label: Some("Stop"),
         at: "2026-06-02T00:00:00.000Z",
         provider_session_id: None,
         terminal_tab_id: None,
-        metadata: None,
+        metadata_raw: None,
+        plan_file_path: None,
+        hold_stop: false,
+        release_stop: false,
     };
 
     // A late Stop must not resurrect a stopped run.
@@ -368,11 +352,14 @@ fn task_run_observation_sql_guards_protected_transitions() {
             TaskRunObservation {
                 status: Some(TaskRunStatus::WaitingForUser),
                 wait_reason: Some(Some(reason)),
-                event_name: Some("PreToolUse"),
+                event_label: Some("PreToolUse"),
                 at: "2026-06-02T00:00:00.000Z",
                 provider_session_id: None,
                 terminal_tab_id: None,
-                metadata: None,
+                metadata_raw: None,
+                plan_file_path: None,
+                hold_stop: false,
+                release_stop: false,
             },
         )
         .unwrap();
@@ -391,11 +378,14 @@ fn task_run_observation_sql_guards_protected_transitions() {
         TaskRunObservation {
             status: Some(TaskRunStatus::Running),
             wait_reason: None,
-            event_name: Some("UserPromptSubmit"),
+            event_label: Some("UserPromptSubmit"),
             at: "2026-06-02T00:00:00.000Z",
             provider_session_id: Some("sess-old"),
             terminal_tab_id: None,
-            metadata: None,
+            metadata_raw: None,
+            plan_file_path: None,
+            hold_stop: false,
+            release_stop: false,
         },
     )
     .unwrap();
@@ -404,11 +394,14 @@ fn task_run_observation_sql_guards_protected_transitions() {
     let generic_wait_from = |session: &'static str, event: &'static str| TaskRunObservation {
         status: Some(TaskRunStatus::WaitingForUser),
         wait_reason: Some(Some(TaskRunWaitReason::AwaitingPrompt)),
-        event_name: Some(event),
+        event_label: Some(event),
         at: "2026-06-02T00:00:00.000Z",
         provider_session_id: Some(session),
         terminal_tab_id: None,
-        metadata: None,
+        metadata_raw: None,
+        plan_file_path: None,
+        hold_stop: false,
+        release_stop: false,
     };
     db.record_task_run_observation(&relaunched.id, generic_wait_from("sess-old", "Stop"))
         .unwrap();
@@ -435,11 +428,14 @@ fn task_run_observation_sql_guards_protected_transitions() {
         TaskRunObservation {
             status: Some(TaskRunStatus::Running),
             wait_reason: Some(None),
-            event_name: Some("UserPromptSubmit"),
+            event_label: Some("UserPromptSubmit"),
             at: "2026-06-02T00:00:00.000Z",
             provider_session_id: None,
             terminal_tab_id: None,
-            metadata: None,
+            metadata_raw: None,
+            plan_file_path: None,
+            hold_stop: false,
+            release_stop: false,
         },
     )
     .unwrap();
@@ -456,11 +452,14 @@ fn task_run_observation_sql_guards_protected_transitions() {
                                  event: &'static str| TaskRunObservation {
         status: Some(status),
         wait_reason: Some(None),
-        event_name: Some(event),
+        event_label: Some(event),
         at: "2026-06-02T00:00:00.000Z",
         provider_session_id: session,
         terminal_tab_id: None,
-        metadata: None,
+        metadata_raw: None,
+        plan_file_path: None,
+        hold_stop: false,
+        release_stop: false,
     };
     for (status, event) in [(TaskRunStatus::Stopped, "SessionEnd")] {
         let survivor = start_run(&mut db);
@@ -469,11 +468,14 @@ fn task_run_observation_sql_guards_protected_transitions() {
             TaskRunObservation {
                 status: Some(TaskRunStatus::Running),
                 wait_reason: None,
-                event_name: Some("UserPromptSubmit"),
+                event_label: Some("UserPromptSubmit"),
                 at: "2026-06-02T00:00:00.000Z",
                 provider_session_id: Some("sess-new"),
                 terminal_tab_id: None,
-                metadata: None,
+                metadata_raw: None,
+                plan_file_path: None,
+                hold_stop: false,
+                release_stop: false,
             },
         )
         .unwrap();
@@ -506,11 +508,14 @@ fn task_run_observation_sql_guards_protected_transitions() {
         TaskRunObservation {
             status: Some(TaskRunStatus::Running),
             wait_reason: None,
-            event_name: Some("UserPromptSubmit"),
+            event_label: Some("UserPromptSubmit"),
             at: "2026-06-02T00:00:00.000Z",
             provider_session_id: Some("sess-new"),
             terminal_tab_id: None,
-            metadata: None,
+            metadata_raw: None,
+            plan_file_path: None,
+            hold_stop: false,
+            release_stop: false,
         },
     )
     .unwrap();
@@ -525,12 +530,16 @@ fn task_run_observation_sql_guards_protected_transitions() {
     );
 }
 
+/// Records a typed observation against the store, the way `record_hook` would after the domain has
+/// decided `hold_stop`/`release_stop` (the subagent guard derivation itself is covered by the
+/// decoder's tests). The store still enforces the `pending_stop` SQL CASE from these flags.
 fn record_observation(
     db: &mut SqliteStore,
     run_id: &str,
     event: &str,
     status: Option<TaskRunStatus>,
-    metadata: Option<&serde_json::Value>,
+    hold_stop: bool,
+    release_stop: bool,
 ) {
     db.record_task_run_observation(
         run_id,
@@ -540,11 +549,14 @@ fn record_observation(
                 TaskRunStatus::WaitingForUser => Some(TaskRunWaitReason::AwaitingPrompt),
                 _ => None,
             }),
-            event_name: Some(event),
+            event_label: Some(event),
             at: "2026-06-02T00:00:00.000Z",
             provider_session_id: Some("sess-1"),
             terminal_tab_id: None,
-            metadata,
+            metadata_raw: None,
+            plan_file_path: None,
+            hold_stop,
+            release_stop,
         },
     )
     .unwrap();
@@ -560,7 +572,7 @@ fn running_task_run(db: &mut SqliteStore, title: &str) -> TaskRun {
             worktree_path: None,
         })
         .unwrap();
-    record_observation(db, &run.id, "UserPromptSubmit", Some(TaskRunStatus::Running), None);
+    record_observation(db, &run.id, "UserPromptSubmit", Some(TaskRunStatus::Running), false, false);
     run
 }
 
@@ -575,17 +587,16 @@ fn task_run_observation_holds_stop_while_background_tasks_run() {
     let run = running_task_run(&mut db, "subagent");
     let snapshot = |db: &SqliteStore| db.get_task_run(&run.id).unwrap().unwrap();
 
-    let running = json!({"background_tasks": [{"id": "a", "status": "running"}]});
-    record_observation(&mut db, &run.id, "Stop", None, Some(&running));
+    // A held Stop (subagent in flight) keeps the run Running and sets pending_stop.
+    record_observation(&mut db, &run.id, "Stop", None, true, false);
     let s = snapshot(&db);
     assert_eq!(s.status, TaskRunStatus::Running);
     assert_eq!(s.wait_reason, None);
     assert!(s.pending_stop);
     assert_eq!(s.last_event_name.as_deref(), Some("Stop"));
 
-    // A normal turn end (empty snapshot) demotes — the guard never pins the run open forever.
-    let empty = json!({"background_tasks": []});
-    record_observation(&mut db, &run.id, "Stop", Some(TaskRunStatus::WaitingForUser), Some(&empty));
+    // A normal turn end (no subagent) demotes — the guard never pins the run open forever.
+    record_observation(&mut db, &run.id, "Stop", Some(TaskRunStatus::WaitingForUser), false, false);
     let s = snapshot(&db);
     assert_eq!(s.status, TaskRunStatus::WaitingForUser);
     assert_eq!(s.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
@@ -602,34 +613,23 @@ fn task_run_observation_deferred_stop_fires_on_releasing_subagent_stop() {
     let run = running_task_run(&mut db, "deferred stop");
     let snapshot = |db: &SqliteStore| db.get_task_run(&run.id).unwrap().unwrap();
 
-    let both = json!({"background_tasks": [
-        {"id": "a", "status": "running"},
-        {"id": "b", "status": "running"}
-    ]});
-    record_observation(&mut db, &run.id, "Stop", None, Some(&both));
+    // Two subagents in flight: the Stop is held.
+    record_observation(&mut db, &run.id, "Stop", None, true, false);
     assert_eq!(snapshot(&db).status, TaskRunStatus::Running);
     assert!(snapshot(&db).pending_stop);
 
-    // A start-less SubagentStop whose agent is absent from the snapshot must not release.
-    let phantom = json!({"agent_id": "ghost", "background_tasks": [
-        {"id": "a", "status": "running"},
-        {"id": "b", "status": "running"}
-    ]});
-    record_observation(&mut db, &run.id, "SubagentStop", None, Some(&phantom));
+    // A start-less SubagentStop whose agent is absent from the snapshot leaves others running, so
+    // the decoder reports subagents still in flight: no release.
+    record_observation(&mut db, &run.id, "SubagentStop", None, false, false);
     assert_eq!(snapshot(&db).status, TaskRunStatus::Running);
     assert!(snapshot(&db).pending_stop);
 
-    // `a` stops while `b` still runs: still held.
-    let a_stops = json!({"agent_id": "a", "background_tasks": [
-        {"id": "a", "status": "running"},
-        {"id": "b", "status": "running"}
-    ]});
-    record_observation(&mut db, &run.id, "SubagentStop", None, Some(&a_stops));
+    // `a` stops while `b` still runs: still held (no release).
+    record_observation(&mut db, &run.id, "SubagentStop", None, false, false);
     assert_eq!(snapshot(&db).status, TaskRunStatus::Running);
 
     // `b` stops, leaving nothing in flight: the deferred stop fires.
-    let b_stops = json!({"agent_id": "b", "background_tasks": [{"id": "b", "status": "running"}]});
-    record_observation(&mut db, &run.id, "SubagentStop", None, Some(&b_stops));
+    record_observation(&mut db, &run.id, "SubagentStop", None, false, true);
     let s = snapshot(&db);
     assert_eq!(s.status, TaskRunStatus::WaitingForUser);
     assert_eq!(s.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
@@ -643,25 +643,27 @@ fn task_run_observation_pending_stop_cleared_by_boundary_and_settlement() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let run = running_task_run(&mut db, "pending clear");
     let snapshot = |db: &SqliteStore| db.get_task_run(&run.id).unwrap().unwrap();
-    let running = json!({"background_tasks": [{"id": "a", "status": "running"}]});
 
-    record_observation(&mut db, &run.id, "Stop", None, Some(&running));
+    record_observation(&mut db, &run.id, "Stop", None, true, false);
     assert!(snapshot(&db).pending_stop);
-    record_observation(&mut db, &run.id, "UserPromptSubmit", Some(TaskRunStatus::Running), None);
+    record_observation(&mut db, &run.id, "UserPromptSubmit", Some(TaskRunStatus::Running), false, false);
     assert!(!snapshot(&db).pending_stop);
 
-    record_observation(&mut db, &run.id, "Stop", None, Some(&running));
+    record_observation(&mut db, &run.id, "Stop", None, true, false);
     assert!(snapshot(&db).pending_stop);
     db.record_task_run_observation(
         &run.id,
         TaskRunObservation {
             status: Some(TaskRunStatus::Stopped),
             wait_reason: Some(None),
-            event_name: Some("SessionEnd"),
+            event_label: Some("SessionEnd"),
             at: "2026-06-02T00:00:00.000Z",
             provider_session_id: Some("sess-1"),
             terminal_tab_id: None,
-            metadata: None,
+            metadata_raw: None,
+            plan_file_path: None,
+            hold_stop: false,
+            release_stop: false,
         },
     )
     .unwrap();
@@ -687,11 +689,14 @@ fn task_run_observation_keeps_existing_tab_and_session_on_none() {
         TaskRunObservation {
             status: Some(TaskRunStatus::Running),
             wait_reason: None,
-            event_name: Some("SessionStart"),
+            event_label: Some("SessionStart"),
             at: "2026-06-02T00:00:00.000Z",
             provider_session_id: Some("sess-1"),
             terminal_tab_id: Some("tab-1"),
-            metadata: None,
+            metadata_raw: None,
+            plan_file_path: None,
+            hold_stop: false,
+            release_stop: false,
         },
     )
     .unwrap();
@@ -700,11 +705,14 @@ fn task_run_observation_keeps_existing_tab_and_session_on_none() {
         TaskRunObservation {
             status: Some(TaskRunStatus::Stopped),
             wait_reason: None,
-            event_name: Some("Stop"),
+            event_label: Some("Stop"),
             at: "2026-06-02T00:00:01.000Z",
             provider_session_id: None,
             terminal_tab_id: None,
-            metadata: None,
+            metadata_raw: None,
+            plan_file_path: None,
+            hold_stop: false,
+            release_stop: false,
         },
     )
     .unwrap();
@@ -724,11 +732,14 @@ fn find_task_run_by_terminal_tab_returns_latest_observed_run_in_tab() {
             TaskRunObservation {
                 status: Some(TaskRunStatus::Running),
                 wait_reason: None,
-                event_name: Some("SessionStart"),
+                event_label: Some("SessionStart"),
                 at,
                 provider_session_id: Some(session),
                 terminal_tab_id: Some("tab-1"),
-                metadata: None,
+                metadata_raw: None,
+                plan_file_path: None,
+                hold_stop: false,
+                release_stop: false,
             },
         )
         .unwrap();
@@ -792,11 +803,14 @@ fn find_task_run_by_session_is_scoped_to_task() {
         TaskRunObservation {
             status: None,
             wait_reason: None,
-            event_name: Some("SessionStart"),
+            event_label: Some("SessionStart"),
             at: "2026-06-02T00:00:00.000Z",
             provider_session_id: Some("sess-shared"),
             terminal_tab_id: None,
-            metadata: None,
+            metadata_raw: None,
+            plan_file_path: None,
+            hold_stop: false,
+            release_stop: false,
         },
     )
     .unwrap();
@@ -829,11 +843,14 @@ fn task_summaries_count_side_runs_excluding_primary_and_sessionless_failures() {
             TaskRunObservation {
                 status: Some(status),
                 wait_reason: None,
-                event_name: None,
+                event_label: None,
                 at: "2026-06-02T00:00:00.000Z",
                 provider_session_id: Some(session),
                 terminal_tab_id: None,
-                metadata: None,
+                metadata_raw: None,
+                plan_file_path: None,
+                hold_stop: false,
+                release_stop: false,
             },
         )
         .unwrap();
@@ -850,11 +867,14 @@ fn task_summaries_count_side_runs_excluding_primary_and_sessionless_failures() {
                 TaskRunObservation {
                     status: Some(TaskRunStatus::WaitingForUser),
                     wait_reason: Some(Some(reason)),
-                    event_name: None,
+                    event_label: None,
                     at: "2026-06-02T00:00:00.000Z",
                     provider_session_id: Some(session),
                     terminal_tab_id: None,
-                    metadata: None,
+                    metadata_raw: None,
+                    plan_file_path: None,
+                    hold_stop: false,
+                    release_stop: false,
                 },
             )
             .unwrap();
@@ -914,11 +934,14 @@ fn task_summaries_fall_back_to_latest_run_when_primary_pointer_dangles() {
         TaskRunObservation {
             status: Some(TaskRunStatus::Running),
             wait_reason: None,
-            event_name: Some("SessionStart"),
+            event_label: Some("SessionStart"),
             at: "2026-06-02T00:00:00.000Z",
             provider_session_id: Some("sess-1"),
             terminal_tab_id: None,
-            metadata: None,
+            metadata_raw: None,
+            plan_file_path: None,
+            hold_stop: false,
+            release_stop: false,
         },
     )
     .unwrap();
@@ -945,21 +968,19 @@ fn task_summaries_expose_has_plan_from_the_primary_run() {
 
     let primary = db.start_task_run(new_run(&planned.id)).unwrap();
     db.set_primary_task_run(&planned.id, &primary.id).unwrap();
-    let exit_plan = json!({
-        "hook_event_name": "PreToolUse",
-        "tool_name": "ExitPlanMode",
-        "tool_input": { "planFilePath": "/Users/me/.claude/plans/hazy-wiggling-salamander.md" }
-    });
     db.record_task_run_observation(
         &primary.id,
         TaskRunObservation {
             status: Some(TaskRunStatus::WaitingForUser),
             wait_reason: Some(Some(TaskRunWaitReason::ExitPlanMode)),
-            event_name: Some("PreToolUse"),
+            event_label: Some("PreToolUse"),
             at: "2026-06-02T00:00:00.000Z",
             provider_session_id: Some("sess-plan"),
             terminal_tab_id: None,
-            metadata: Some(&exit_plan),
+            metadata_raw: None,
+            plan_file_path: Some("/Users/me/.claude/plans/hazy-wiggling-salamander.md"),
+            hold_stop: false,
+            release_stop: false,
         },
     )
     .unwrap();
@@ -978,17 +999,19 @@ fn task_summaries_expose_has_plan_from_the_primary_run() {
     assert!(!has_plan(&db, &unplanned.id));
 
     // Approving the plan clears the wait, but the stored path — and so has_plan — must survive.
-    let approved = json!({ "hook_event_name": "UserPromptSubmit" });
     db.record_task_run_observation(
         &primary.id,
         TaskRunObservation {
             status: Some(TaskRunStatus::Running),
             wait_reason: Some(None),
-            event_name: Some("UserPromptSubmit"),
+            event_label: Some("UserPromptSubmit"),
             at: "2026-06-02T00:01:00.000Z",
             provider_session_id: None,
             terminal_tab_id: None,
-            metadata: Some(&approved),
+            metadata_raw: None,
+            plan_file_path: None,
+            hold_stop: false,
+            release_stop: false,
         },
     )
     .unwrap();
@@ -1475,11 +1498,14 @@ fn settle_task_run_if_live_only_stops_session_driven_runs() {
             TaskRunObservation {
                 status: Some(status),
                 wait_reason: None,
-                event_name: None,
+                event_label: None,
                 at: "2026-06-02T00:00:00.000Z",
                 provider_session_id: Some("sess-1"),
                 terminal_tab_id: None,
-                metadata: None,
+                metadata_raw: None,
+                plan_file_path: None,
+                hold_stop: false,
+                release_stop: false,
             },
         )
         .unwrap();
@@ -1498,9 +1524,8 @@ fn settle_task_run_if_live_only_stops_session_driven_runs() {
     // A pending_stop flag is cleared when the terminal dies.
     let pending = start_run(&mut db);
     observe(&mut db, &pending.id, TaskRunStatus::Running);
-    // A Stop held by a running subagent (record_hook suppresses the transition → status None).
-    let running_bg = json!({"background_tasks": [{"id": "a", "status": "running"}]});
-    record_observation(&mut db, &pending.id, "Stop", None, Some(&running_bg));
+    // A Stop held by a running subagent (the suppressed transition lands as status None).
+    record_observation(&mut db, &pending.id, "Stop", None, true, false);
     assert!(db.get_task_run(&pending.id).unwrap().unwrap().pending_stop);
     assert!(db.settle_task_run_if_live(&pending.id, &task.id).unwrap());
     let settled = db.get_task_run(&pending.id).unwrap().unwrap();
@@ -1514,11 +1539,14 @@ fn settle_task_run_if_live_only_stops_session_driven_runs() {
         TaskRunObservation {
             status: None,
             wait_reason: None,
-            event_name: Some("SessionStart"),
+            event_label: Some("SessionStart"),
             at: "2026-06-02T00:00:00.000Z",
             provider_session_id: Some("sess-2"),
             terminal_tab_id: Some("tab-1"),
-            metadata: None,
+            metadata_raw: None,
+            plan_file_path: None,
+            hold_stop: false,
+            release_stop: false,
         },
     )
     .unwrap();
@@ -1575,11 +1603,14 @@ fn settle_task_run_if_live_survives_a_closed_task() {
         TaskRunObservation {
             status: Some(TaskRunStatus::Running),
             wait_reason: None,
-            event_name: None,
+            event_label: None,
             at: "2026-06-02T00:00:00.000Z",
             provider_session_id: Some("sess-1"),
             terminal_tab_id: None,
-            metadata: None,
+            metadata_raw: None,
+            plan_file_path: None,
+            hold_stop: false,
+            release_stop: false,
         },
     )
     .unwrap();
@@ -1616,11 +1647,14 @@ fn list_driven_task_runs_with_tab_returns_only_tab_pinned_session_driven_runs() 
             TaskRunObservation {
                 status,
                 wait_reason: None,
-                event_name: None,
+                event_label: None,
                 at: "2026-06-02T00:00:00.000Z",
                 provider_session_id: session,
                 terminal_tab_id: tab,
-                metadata: None,
+                metadata_raw: None,
+                plan_file_path: None,
+                hold_stop: false,
+                release_stop: false,
             },
         )
         .unwrap();

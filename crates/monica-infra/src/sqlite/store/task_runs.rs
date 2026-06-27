@@ -3,9 +3,8 @@ use rusqlite::{params, Connection};
 
 use crate::sqlite::SqliteStore;
 use monica_application::{
-    plan_file_path_from_payload, subagents_in_flight_after, transition_is_generic_wait,
-    HookTransition, NewTaskRun, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunStore,
-    TaskRunWaitReason, TaskStatus,
+    transition_is_generic_wait, HookTransition, NewTaskRun, TaskRun, TaskRunObservation,
+    TaskRunStatus, TaskRunStore, TaskRunWaitReason, TaskStatus,
 };
 
 use super::{sql_literal_list, SET_NOW, TASK_RUN_COLUMNS};
@@ -128,12 +127,8 @@ pub(super) fn record_task_run_observation_in(
     task_run_id: &str,
     observation: TaskRunObservation<'_>,
 ) -> Result<()> {
-    let metadata = observation
-        .metadata
-        .map(serde_json::to_string)
-        .transpose()?;
     // Kept sticky via COALESCE in the UPDATE: a later hook yields None and must not wipe the path.
-    let plan_file_path = plan_file_path_from_payload(observation.metadata);
+    let plan_file_path = observation.plan_file_path;
     let status = observation.status.map(|s| s.as_str());
     let update_wait_reason = observation.wait_reason.is_some();
     let wait_reason = observation.wait_reason.flatten().map(|r| r.as_str());
@@ -145,14 +140,12 @@ pub(super) fn record_task_run_observation_in(
         _ => false,
     };
     let terminal_verdict = observation.status.is_some_and(TaskRunStatus::is_terminal);
-    // `background_tasks` (carried on every Stop/SubagentStop) is the source of truth for the
-    // subagent guard — no derived counter to drift. A `Stop` arriving while a subagent is still
-    // in flight is held; the `SubagentStop` that leaves nothing in flight releases the deferred
-    // transition. `subagents_in_flight_after` excludes a SubagentStop's own (still-listed) agent.
-    let hold_stop = observation.event_name == Some("Stop")
-        && subagents_in_flight_after(observation.event_name, observation.metadata);
-    let release_stop = observation.event_name == Some("SubagentStop")
-        && !subagents_in_flight_after(observation.event_name, observation.metadata);
+    // The subagent guard is decided upstream by the decoder + domain from the typed signal: a
+    // turn-complete with a subagent still in flight is held (`pending_stop`), and the last subagent
+    // finishing releases the deferred Stop -> WaitingForUser transition, which still fires atomically
+    // in the UPDATE below.
+    let hold_stop = observation.hold_stop;
+    let release_stop = observation.release_stop;
     let tool_waits =
         sql_literal_list(TaskRunWaitReason::TOOL_WAITS.iter().map(|r| r.as_str()));
     // `?6 IS NULL OR provider_session_id IS ?6` scopes the generic-wait guards to events
@@ -206,11 +199,11 @@ pub(super) fn record_task_run_observation_in(
             status,
             update_wait_reason,
             wait_reason,
-            observation.event_name,
+            observation.event_label,
             observation.at,
             observation.provider_session_id,
             observation.terminal_tab_id,
-            metadata,
+            observation.metadata_raw,
             task_run_id,
             generic_wait,
             terminal_verdict,

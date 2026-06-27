@@ -19,8 +19,8 @@ pub use query::{
     plan_path_for_terminal_tab, set_project_field,
 };
 pub use runs::{
-    execute_run, open_bench, prepare_claude_for_run, record_claude_hook, record_codex_hook,
-    start_run, task_shell_env, HookContext, HookReport,
+    execute_run, open_bench, prepare_claude_for_run, record_hook, start_run, task_shell_env,
+    HookContext, HookReport,
 };
 pub use tasks::{
     close_issue, create_raw_task, make_main_by_terminal_tab, primary_terminal_tab,

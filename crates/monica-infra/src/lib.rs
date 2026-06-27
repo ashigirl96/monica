@@ -1,3 +1,4 @@
+pub mod agents;
 pub mod filesystem;
 pub mod git;
 pub mod github;

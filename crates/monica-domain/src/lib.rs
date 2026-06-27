@@ -4,6 +4,7 @@
 //! no `anyhow`, no `specta`. UI projections, GitHub-specific contracts, hook-payload parsing, and
 //! TypeScript bindings all live in the layers above (`monica-application`, `monica-api`).
 
+mod agent_signal;
 mod branch;
 mod error;
 mod external_reference;
@@ -16,6 +17,10 @@ mod task;
 mod task_run;
 mod terminal_session;
 
+pub use agent_signal::{
+    transition_is_generic_wait, AgentSignal, Continuation, HookTransition, RunObservationPlan,
+    SignalKind,
+};
 pub use branch::{branch_name, monica_number, worktree_path_for};
 pub use error::DomainError;
 pub use external_reference::{ExternalIssue, ExternalReference, RefType};

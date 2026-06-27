@@ -25,20 +25,6 @@ impl Agent {
     pub fn as_str(self) -> &'static str {
         self.into()
     }
-
-    pub fn extra_hook_events(self) -> &'static [&'static str] {
-        match self {
-            Self::Claude => &["StopFailure", "SessionEnd"],
-            Self::Codex => &["PermissionRequest"],
-        }
-    }
-
-    pub fn hooks_config_path(self) -> &'static str {
-        match self {
-            Self::Claude => ".claude/settings.local.json",
-            Self::Codex => ".codex/hooks.json",
-        }
-    }
 }
 
 /// An execution attempt against a task. Persisted from issue E onward.
@@ -94,32 +80,6 @@ pub fn is_safe_task_run_id(task_run_id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn claude_extra_hook_events() {
-        let events = Agent::Claude.extra_hook_events();
-        assert!(events.contains(&"StopFailure"));
-        assert!(events.contains(&"SessionEnd"));
-        assert!(!events.contains(&"PermissionRequest"));
-    }
-
-    #[test]
-    fn codex_extra_hook_events() {
-        let events = Agent::Codex.extra_hook_events();
-        assert!(events.contains(&"PermissionRequest"));
-        assert!(!events.contains(&"StopFailure"));
-        assert!(!events.contains(&"SessionEnd"));
-    }
-
-    #[test]
-    fn claude_hooks_config_path() {
-        assert_eq!(Agent::Claude.hooks_config_path(), ".claude/settings.local.json");
-    }
-
-    #[test]
-    fn codex_hooks_config_path() {
-        assert_eq!(Agent::Codex.hooks_config_path(), ".codex/hooks.json");
-    }
 
     #[test]
     fn safe_task_run_id_accepts_run_ids_and_rejects_traversal() {

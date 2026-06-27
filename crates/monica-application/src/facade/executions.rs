@@ -8,9 +8,9 @@ use crate::usecases::terminal::{
     task_run_settlement_for_terminal_exit, TerminalExitSettlement, TerminalSessionUpdate,
 };
 use crate::{
-    Agent, ApplicationError, ApplicationEvent, ApplicationResult, EventSink, HookContext,
-    HookReport, NewTerminalSession, PrepareTaskResult, RunTaskResult, TaskBench, TaskRun,
-    TaskRunStatus, TerminalSession, TerminalSessionStatus, TerminalStateSnapshot,
+    Agent, AgentSignal, ApplicationError, ApplicationEvent, ApplicationResult, EventSink,
+    HookContext, HookReport, NewTerminalSession, PrepareTaskResult, RunTaskResult, TaskBench,
+    TaskRun, TaskRunStatus, TerminalSession, TerminalSessionStatus, TerminalStateSnapshot,
 };
 
 /// Run preparation/execution, agent hooks, and (in a later phase) terminal sessions. Groups the
@@ -69,19 +69,19 @@ impl<B: Backend> ExecutionService<'_, B> {
         Ok(self.m.repos.list_bench_runspace_map()?)
     }
 
-    /// Record an agent hook event and, on the entering edge into `WaitingForUser`, emit
-    /// [`ApplicationEvent::AwaitingUserInput`] so drivers can surface a notification.
-    pub fn ingest_agent_hook(
+    /// Record a decoded agent signal and, on the entering edge into `WaitingForUser`, emit
+    /// [`ApplicationEvent::AwaitingUserInput`] so drivers can surface a notification. The driver
+    /// decodes the raw hook payload into a provider-agnostic [`AgentSignal`] at the boundary
+    /// (`monica_infra::agents`); `raw_stdin` is passed through only for verbatim storage.
+    pub fn ingest_agent_signal(
         &mut self,
         agent: Agent,
         ctx: HookContext<'_>,
+        signal: Option<&AgentSignal>,
         raw_stdin: &str,
     ) -> ApplicationResult<HookReport> {
         let Monica { repos, outputs, events, .. } = &mut *self.m;
-        let report = match agent {
-            Agent::Claude => crate::usecases::runs::record_claude_hook(repos, outputs, ctx, raw_stdin),
-            Agent::Codex => crate::usecases::runs::record_codex_hook(repos, outputs, ctx, raw_stdin),
-        }?;
+        let report = crate::usecases::runs::record_hook(repos, outputs, ctx, agent, signal, raw_stdin)?;
         if report.entered_waiting_for_user {
             events.emit(ApplicationEvent::AwaitingUserInput {
                 task_id: ctx.task_id.map(str::to_string),

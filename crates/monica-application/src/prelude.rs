@@ -13,11 +13,5 @@ pub use crate::github::{
     GithubPullRequestStatus, PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate,
     PullRequestSyncResult, PullRequestSyncStatus,
 };
-pub use crate::lifecycle::{
-    is_continuation_session_start, is_resume_session_start, is_session_starting_event,
-    plan_file_path_from_payload, should_ignore_event, subagents_in_flight_after,
-    transition_for_event, transition_is_generic_wait, transition_is_protected, wait_reason_for_tool,
-    HookTransition,
-};
 pub use crate::observation::TaskRunObservation;
 pub use crate::queries::TaskSummaryRow;
