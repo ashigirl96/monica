@@ -8,10 +8,8 @@ use super::ports::{
     GitGateway, ProjectRepository, TaskRunOutputs, SetupEnv, SetupOutcome, SetupRunner,
     TaskRunStore, TaskStore, UnitOfWork, WorkbenchStore,
 };
-use crate::{
-    ApplicationError, ApplicationResult, ExternalReference, NewTaskRun, PrepareTaskResult, Project,
-    RefType, Task, TaskRunStatus, TaskStatus,
-};
+use crate::prelude::{ExternalReference, NewTaskRun, Project, RefType, Task, TaskRunStatus, TaskStatus};
+use crate::{ApplicationError, ApplicationResult, ExecutionProfile, PrepareTaskResult};
 
 fn is_active_run_status(status: TaskRunStatus) -> bool {
     matches!(
@@ -20,7 +18,10 @@ fn is_active_run_status(status: TaskRunStatus) -> bool {
     )
 }
 
-fn load_task_and_project<R>(repos: &R, task_id: &str) -> ApplicationResult<(Task, Project)>
+fn load_task_and_project<R>(
+    repos: &R,
+    task_id: &str,
+) -> ApplicationResult<(Task, Project)>
 where
     R: TaskStore + ProjectRepository,
 {
@@ -35,6 +36,13 @@ where
         .get_project(project_id)?
         .ok_or_else(|| ApplicationError::not_found(format!("project not found: {project_id}")))?;
     Ok((task, project))
+}
+
+fn load_execution_profile<R>(repos: &R, project_id: &str) -> ApplicationResult<ExecutionProfile>
+where
+    R: ProjectRepository,
+{
+    Ok(repos.get_execution_profile(project_id)?.unwrap_or_default())
 }
 
 /// Phase 1: Create TaskRun (SettingUp) + set as Main Run + ensure bench exists.
@@ -79,7 +87,7 @@ where
     // these steps would otherwise strand a run that has no primary pointer and no workbench.
     let mut tx = repos.begin()?;
     let run = tx.start_task_run(NewTaskRun {
-        task_id: task_id.to_string(),
+        task_id: task.id.clone(),
         agent: None,
         branch: Some(branch.clone()),
         worktree_path: None,
@@ -133,6 +141,7 @@ where
     A: TaskRunOutputs,
 {
     let (_, project) = load_task_and_project(repos, task_id)?;
+    let profile = load_execution_profile(repos, &project.id)?;
 
     let run = repos
         .get_task_run(task_run_id)?
@@ -145,7 +154,7 @@ where
         .path
         .clone()
         .ok_or_else(|| ApplicationError::validation(format!("project {} has no checkout path", project.id)))?;
-    let worktree_path = worktree_path_for(&project, &branch)?;
+    let worktree_path = worktree_path_for(&project, profile.worktree_root.as_deref(), &branch)?;
     let worktree_str = worktree_path.to_string_lossy().into_owned();
 
     if !worktree_path.exists() {
@@ -163,11 +172,14 @@ where
     let setup = setup_phase(
         setup_runner,
         outputs,
-        task_run_id,
-        task_id,
-        &worktree_path,
-        &project,
-        &branch,
+        &SetupContext {
+            task_run_id,
+            task_id,
+            worktree_path: &worktree_path,
+            project: &project,
+            profile: &profile,
+            branch: &branch,
+        },
     )?;
 
     if setup.is_failure() {
@@ -182,30 +194,37 @@ where
     Ok(TaskRunStatus::Prepared)
 }
 
+struct SetupContext<'a> {
+    task_run_id: &'a str,
+    task_id: &'a str,
+    worktree_path: &'a Path,
+    project: &'a Project,
+    profile: &'a ExecutionProfile,
+    branch: &'a str,
+}
+
 fn setup_phase<S, A>(
     setup_runner: &S,
     outputs: &A,
-    task_run_id: &str,
-    task_id: &str,
-    worktree_path: &Path,
-    project: &Project,
-    branch: &str,
+    ctx: &SetupContext<'_>,
 ) -> ApplicationResult<SetupOutcome>
 where
     S: SetupRunner,
     A: TaskRunOutputs,
 {
-    let log_path = outputs.setup_log_path(task_run_id)?;
+    let log_path = outputs
+        .setup_log_path(ctx.task_run_id)
+        .map_err(|e| ApplicationError::external(format!("failed to resolve setup log path: {e:#}")))?;
     let env = SetupEnv {
-        monica_id: task_id.to_string(),
-        task_run_id: task_run_id.to_string(),
-        project_id: project.id.clone(),
-        branch: branch.to_string(),
-        worktree: worktree_path.to_string_lossy().into_owned(),
+        monica_id: ctx.task_id.to_string(),
+        task_run_id: ctx.task_run_id.to_string(),
+        project_id: ctx.project.id.clone(),
+        branch: ctx.branch.to_string(),
+        worktree: ctx.worktree_path.to_string_lossy().into_owned(),
     };
-    let timeout = Duration::from_secs(project.setup_timeout_sec.max(0) as u64);
+    let timeout = Duration::from_secs(ctx.profile.setup_timeout_sec.max(0) as u64);
     setup_runner
-        .run_setup_script(worktree_path, &log_path, &env, timeout)
+        .run_setup_script(ctx.worktree_path, &log_path, &env, timeout)
         .map_err(|e| ApplicationError::external(format!("setup script failed to run: {e:#}")))
 }
 
@@ -234,13 +253,14 @@ pub fn prepare_claude_for_run<R, A>(
     repos: &mut R,
     outputs: &A,
     task_id: &str,
-    agent_override: Option<crate::Agent>,
+    agent_override: Option<crate::prelude::Agent>,
 ) -> ApplicationResult<crate::RunTaskResult>
 where
     R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore,
     A: TaskRunOutputs,
 {
     let (task, project) = load_task_and_project(repos, task_id)?;
+    let profile = load_execution_profile(repos, &project.id)?;
 
     let primary_id = task.primary_task_run_id.ok_or_else(|| {
         ApplicationError::validation(format!("task {task_id} has no primary run; prepare it first"))
@@ -266,12 +286,13 @@ where
         )));
     }
 
-    let agent = agent_override.unwrap_or(project.agent_default);
-    let mut effective_project = project;
-    effective_project.agent_default = agent;
+    let agent = agent_override.unwrap_or(profile.agent_default);
+    let mut effective_profile = profile;
+    effective_profile.agent_default = agent;
 
-    let shell =
-        outputs.prepare_task_shell_env(task_id, &effective_project, Some(&primary_id), &worktree_path)?;
+    let shell = outputs
+        .prepare_task_shell_env(task_id, &project, &effective_profile, Some(&primary_id), &worktree_path)
+        .map_err(|e| ApplicationError::external(format!("failed to prepare shell env: {e:#}")))?;
     repos.set_task_run_settings_path(&primary_id, &shell.settings_path)?;
 
     let (runspace_id, _, _) = super::open_bench::ensure_bench(repos, task_id, &worktree_str, true)?;
@@ -306,7 +327,7 @@ fn resolve_prompt(has_github_issue: bool, file_prompt: Option<String>) -> Option
     has_github_issue.then_some(file_prompt).flatten()
 }
 
-fn agent_initial_command(agent: crate::Agent, prompt: Option<&str>) -> String {
+fn agent_initial_command(agent: crate::prelude::Agent, prompt: Option<&str>) -> String {
     let bin = agent.as_str();
     match prompt {
         Some(prompt) => format!("{bin} {}", crate::shell::quote_single(prompt)),
@@ -320,18 +341,18 @@ mod tests {
 
     #[test]
     fn empty_prompt_launches_agent_bare() {
-        assert_eq!(agent_initial_command(crate::Agent::Claude, None), "claude");
-        assert_eq!(agent_initial_command(crate::Agent::Codex, None), "codex");
+        assert_eq!(agent_initial_command(crate::prelude::Agent::Claude, None), "claude");
+        assert_eq!(agent_initial_command(crate::prelude::Agent::Codex, None), "codex");
     }
 
     #[test]
     fn prompt_is_passed_as_single_quoted_argument() {
         assert_eq!(
-            agent_initial_command(crate::Agent::Claude, Some("fix the login bug")),
+            agent_initial_command(crate::prelude::Agent::Claude, Some("fix the login bug")),
             "claude 'fix the login bug'"
         );
         assert_eq!(
-            agent_initial_command(crate::Agent::Codex, Some("fix the login bug")),
+            agent_initial_command(crate::prelude::Agent::Codex, Some("fix the login bug")),
             "codex 'fix the login bug'"
         );
     }
@@ -339,7 +360,7 @@ mod tests {
     #[test]
     fn prompt_with_single_quote_is_escaped() {
         assert_eq!(
-            agent_initial_command(crate::Agent::Claude, Some("don't break it")),
+            agent_initial_command(crate::prelude::Agent::Claude, Some("don't break it")),
             "claude 'don'\\''t break it'"
         );
     }
@@ -347,7 +368,7 @@ mod tests {
     #[test]
     fn multiline_prompt_stays_within_one_quoted_argument() {
         assert_eq!(
-            agent_initial_command(crate::Agent::Claude, Some("line one\nline two")),
+            agent_initial_command(crate::prelude::Agent::Claude, Some("line one\nline two")),
             "claude 'line one\nline two'"
         );
     }

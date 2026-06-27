@@ -7,16 +7,16 @@ pub enum Agent {
     Codex,
 }
 
-impl From<monica_application::Agent> for Agent {
-    fn from(value: monica_application::Agent) -> Self {
+impl From<monica_domain::Agent> for Agent {
+    fn from(value: monica_domain::Agent) -> Self {
         match value {
-            monica_application::Agent::Claude => Self::Claude,
-            monica_application::Agent::Codex => Self::Codex,
+            monica_domain::Agent::Claude => Self::Claude,
+            monica_domain::Agent::Codex => Self::Codex,
         }
     }
 }
 
-impl From<Agent> for monica_application::Agent {
+impl From<Agent> for monica_domain::Agent {
     fn from(value: Agent) -> Self {
         match value {
             Agent::Claude => Self::Claude,

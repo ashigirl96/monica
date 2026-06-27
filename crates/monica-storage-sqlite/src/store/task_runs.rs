@@ -2,9 +2,10 @@ use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection};
 
 use crate::SqliteStore;
-use monica_application::{
-    transition_is_generic_wait, HookTransition, NewTaskRun, TaskRun, TaskRunObservation,
-    TaskRunStatus, TaskRunStore, TaskRunWaitReason, TaskStatus,
+use monica_application::{TaskRunObservation, TaskRunStore};
+use monica_domain::{
+    transition_is_generic_wait, HookTransition, NewTaskRun, TaskRun, TaskRunStatus,
+    TaskRunWaitReason, TaskStatus,
 };
 
 use super::{sql_literal_list, tasks, SET_NOW, TASK_RUN_COLUMNS};
@@ -233,20 +234,21 @@ pub(super) fn start_task_run_in(conn: &Connection, new: NewTaskRun) -> Result<Ta
 
     conn.execute("INSERT INTO task_run_counter DEFAULT VALUES", [])?;
     let id = format!("run-{}", conn.last_insert_rowid());
+    let task_id = new.task_id.as_str();
     conn.execute(
         "INSERT INTO task_runs (id, task_id, agent, branch, worktree_path, status)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             id,
-            new.task_id,
+            task_id,
             agent,
             new.branch,
             new.worktree_path,
             setting_up,
         ],
     )?;
-    if !keep_task_in_progress(conn, &new.task_id)? {
-        require_task_exists(conn, &new.task_id)?;
+    if !keep_task_in_progress(conn, task_id)? {
+        require_task_exists(conn, task_id)?;
     }
 
     let mut stmt = conn.prepare(&format!(

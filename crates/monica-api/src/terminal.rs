@@ -11,15 +11,15 @@ pub enum TerminalSessionStatus {
     Failed,
 }
 
-impl From<monica_application::TerminalSessionStatus> for TerminalSessionStatus {
-    fn from(value: monica_application::TerminalSessionStatus) -> Self {
+impl From<monica_domain::TerminalSessionStatus> for TerminalSessionStatus {
+    fn from(value: monica_domain::TerminalSessionStatus) -> Self {
         match value {
-            monica_application::TerminalSessionStatus::Starting => Self::Starting,
-            monica_application::TerminalSessionStatus::Running => Self::Running,
-            monica_application::TerminalSessionStatus::Detached => Self::Detached,
-            monica_application::TerminalSessionStatus::Exited => Self::Exited,
-            monica_application::TerminalSessionStatus::Lost => Self::Lost,
-            monica_application::TerminalSessionStatus::Failed => Self::Failed,
+            monica_domain::TerminalSessionStatus::Starting => Self::Starting,
+            monica_domain::TerminalSessionStatus::Running => Self::Running,
+            monica_domain::TerminalSessionStatus::Detached => Self::Detached,
+            monica_domain::TerminalSessionStatus::Exited => Self::Exited,
+            monica_domain::TerminalSessionStatus::Lost => Self::Lost,
+            monica_domain::TerminalSessionStatus::Failed => Self::Failed,
         }
     }
 }
@@ -33,18 +33,18 @@ pub enum TerminalSessionKind {
     Scratch,
 }
 
-impl From<monica_application::TerminalSessionKind> for TerminalSessionKind {
-    fn from(value: monica_application::TerminalSessionKind) -> Self {
+impl From<monica_domain::TerminalSessionKind> for TerminalSessionKind {
+    fn from(value: monica_domain::TerminalSessionKind) -> Self {
         match value {
-            monica_application::TerminalSessionKind::Shell => Self::Shell,
-            monica_application::TerminalSessionKind::Agent => Self::Agent,
-            monica_application::TerminalSessionKind::Task => Self::Task,
-            monica_application::TerminalSessionKind::Scratch => Self::Scratch,
+            monica_domain::TerminalSessionKind::Shell => Self::Shell,
+            monica_domain::TerminalSessionKind::Agent => Self::Agent,
+            monica_domain::TerminalSessionKind::Task => Self::Task,
+            monica_domain::TerminalSessionKind::Scratch => Self::Scratch,
         }
     }
 }
 
-impl From<TerminalSessionKind> for monica_application::TerminalSessionKind {
+impl From<TerminalSessionKind> for monica_domain::TerminalSessionKind {
     fn from(value: TerminalSessionKind) -> Self {
         match value {
             TerminalSessionKind::Shell => Self::Shell,
@@ -83,8 +83,8 @@ pub struct TerminalSession {
 }
 // jscpd:ignore-end
 
-impl From<monica_application::TerminalSession> for TerminalSession {
-    fn from(value: monica_application::TerminalSession) -> Self {
+impl From<monica_domain::TerminalSession> for TerminalSession {
+    fn from(value: monica_domain::TerminalSession) -> Self {
         Self {
             id: value.id,
             runspace_id: value.runspace_id,

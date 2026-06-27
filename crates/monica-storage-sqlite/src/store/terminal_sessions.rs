@@ -1,9 +1,7 @@
 use anyhow::Result;
 use monica_application::ports::TerminalSessionRepository;
-use monica_application::{
-    NewTerminalSession, TerminalSession, TerminalSessionKind, TerminalSessionStatus,
-    TerminalSessionUpdate, TerminalStateSnapshot,
-};
+use monica_application::{TerminalSessionUpdate, TerminalStateSnapshot};
+use monica_domain::{NewTerminalSession, TerminalSession, TerminalSessionKind, TerminalSessionStatus};
 use rusqlite::{params, Row};
 
 use monica_paths as paths;

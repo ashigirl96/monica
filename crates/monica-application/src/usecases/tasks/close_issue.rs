@@ -1,7 +1,8 @@
 use std::path::Path;
 
 use super::ports::{GitGateway, ProjectRepository, TaskRunStore, TaskStore};
-use crate::{ApplicationError, ApplicationResult, Task};
+use crate::prelude::{Task, TaskRun};
+use crate::{ApplicationError, ApplicationResult};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CloseIssueReport {
@@ -32,7 +33,7 @@ fn cleanup_runs<R, G>(
     repos: &R,
     git: &G,
     item: &Task,
-    runs: &[crate::TaskRun],
+    runs: &[TaskRun],
 ) -> ApplicationResult<Vec<String>>
 where
     R: ProjectRepository,
@@ -59,5 +60,7 @@ where
             item.id
         ))
     })?;
-    Ok(git.cleanup_task_runs(Path::new(repo_path), runs)?)
+    git.cleanup_task_runs(Path::new(repo_path), runs)
+        .map_err(|e| ApplicationError::external(format!("failed to clean up git branches: {e:#}")))
+
 }

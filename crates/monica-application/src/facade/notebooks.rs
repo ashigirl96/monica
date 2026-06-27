@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use super::{Backend, Monica};
 use crate::ports::NotebookGateway;
 use crate::prelude::{front_value, mermaid_blocks, outline, pages_from_docs, structural_lint};
-use crate::{is_valid_slug, ApplicationError, ApplicationResult, LintFinding, NotebookDoc};
+use crate::prelude::{is_valid_slug, LintFinding, NotebookDoc};
+use crate::{ApplicationError, ApplicationResult};
 
 /// A notebook page projected for display: outline number plus the page's `created` front-matter and
 /// body. Document order (depth-first); pages the outline omits (e.g. trapped in a `parent` cycle)

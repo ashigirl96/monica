@@ -8,48 +8,53 @@
 mod bench;
 mod error;
 mod events;
+mod execution_profile;
 pub mod facade;
 mod github;
 mod input;
 mod observation;
 pub mod ports;
-pub mod prelude;
+pub(crate) mod prelude;
 mod queries;
 pub mod shell;
 mod terminal_state;
-pub mod usecases;
+pub(crate) mod usecases;
 
 pub use error::{ApplicationError, ApplicationResult};
 pub use events::{ApplicationEvent, EventSink};
+pub use execution_profile::{ExecutionProfile, PermissionMode};
 pub use input::parse_issue_input;
 pub use facade::{
     Backend, ExecutionService, Monica, NotebookLintReport, NotebookPageView, NotebookService,
     ProjectInit, ProjectService, SynchronizationService, TaskService,
 };
 
-pub use prelude::{
-    is_valid_slug, parse_front_matter, parse_owner_repo, transition_is_generic_wait, Agent,
-    AgentSignal, Continuation, DisplayStatus, Event, ExternalReference, GithubAuthStatus,
-    GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef, GithubPullRequestStatus,
-    ExternalIssue, HookTransition, LintFinding, NewTask, NewTaskRun, NewTerminalSession, NotebookDoc,
-    PermissionMode, PrepareTaskResult, Project, Provider, PullRequestBranchSyncCandidate,
-    PullRequestStatusSyncCandidate, PullRequestSyncResult, PullRequestSyncStatus, RawJson, RefType,
-    RunTaskResult, SignalKind, Task, TaskBench, TaskId, TaskKind, TaskRun, TaskRunId,
-    TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus, TaskSummaryRow,
-    TerminalSession, TerminalSessionKind, TerminalSessionStatus,
-};
 pub use ports::{
     AgentDecoders, AgentEventDecoder, EventRepository, GitGateway, NotebookGateway,
     ProjectRepository, PullRequestSyncStore, TaskBoardQuery, TaskRunStore, TaskStore,
     TaskSummaryFilter, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
     TerminalSessionRepository, UnitOfWork, WorkbenchStore, WorkTransaction, Workspace, WorktreeRef,
 };
+
+// Application-owned types (NOT in monica-domain)
+pub use bench::{bench_runspace_id, PrepareTaskResult, RunTaskResult, TaskBench};
+pub use github::{
+    GithubAuthStatus, GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef,
+    GithubPullRequestStatus, PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate,
+    PullRequestSyncResult, PullRequestSyncStatus,
+};
+pub use observation::TaskRunObservation;
+pub use queries::TaskSummaryRow;
 pub use terminal_state::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTabRow};
+
+// Usecase result types (returned by facade methods)
+pub use usecases::{
+    CloseIssueReport, DaemonSessionView, HookContext, HookReport, TerminalSessionUpdate,
+    TrackGithubIssueReport,
+};
+
+// Usecase sub-ports (referenced by Backend trait)
 pub use usecases::github::ports::{AuthGateway, GithubGateway};
 pub use usecases::runs::ports::{
     Clock, SetupEnv, SetupOutcome, SetupRunner, TaskRunOutputs, TaskShellEnv,
-};
-pub use usecases::{
-    CloseIssueReport, DaemonSessionView, HookContext, HookReport, MakeMainOutcome,
-    TerminalSessionUpdate, TrackGithubIssueInput, TrackGithubIssueReport,
 };

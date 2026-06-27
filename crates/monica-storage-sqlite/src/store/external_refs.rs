@@ -2,7 +2,8 @@ use anyhow::Result;
 use rusqlite::{params, Connection};
 
 use crate::SqliteStore;
-use monica_application::{ExternalReference, GithubPullRequestRef};
+use monica_application::GithubPullRequestRef;
+use monica_domain::ExternalReference;
 
 pub(super) fn list_external_refs(conn: &Connection, task_id: &str) -> Result<Vec<ExternalReference>> {
     let mut stmt = conn.prepare(

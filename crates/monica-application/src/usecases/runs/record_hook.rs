@@ -1,8 +1,10 @@
 use anyhow::Result;
 
 use super::ports::{Clock, EventRepository, TaskRunOutputs, TaskRunStore, TaskStore};
+use crate::ports::UnitOfWork;
 use crate::prelude::{is_safe_task_run_id, Agent, AgentSignal, SignalKind, Task};
-use crate::{NewTaskRun, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus};
+use crate::prelude::{NewTaskRun, TaskId, TaskRun, TaskRunStatus, TaskRunWaitReason, TaskStatus};
+use crate::{ApplicationError, TaskRunObservation};
 
 /// Identity carried by a hook invocation via `MONICA_*` env vars. `task_run_id` is only present
 /// for wrapper launches with an explicit run; plain `claude` in a Bench tab has task/tab only.
@@ -67,7 +69,7 @@ pub fn record_hook<R, A>(
     raw_stdin: &str,
 ) -> Result<HookReport>
 where
-    R: TaskStore + TaskRunStore + EventRepository + Clock,
+    R: TaskStore + TaskRunStore + EventRepository + Clock + UnitOfWork,
     A: TaskRunOutputs,
 {
     let safe_task_run_id = ctx.task_run_id.filter(|&r| is_safe_task_run_id(r));
@@ -109,50 +111,64 @@ where
 
     let mut jsonl_written = false;
     if let Some(task_run_id) = linked_task_run_id {
-        outputs.append_hook_event(task_run_id, &at, event_label, raw_stdin)?;
+        outputs
+            .append_hook_event(task_run_id, &at, event_label, raw_stdin)
+            .map_err(|e| ApplicationError::external(format!("failed to write hook event: {e:#}")))?;
         jsonl_written = true;
     }
-
-    let event_recorded = if task_found || task_run_linked {
-        let event_type = format!("{}_hook", agent.as_str());
-        repos.insert_event(
-            linked_task_id.filter(|_| task_found || task_run_linked),
-            linked_task_run_id,
-            &event_type,
-            metadata_raw,
-        )?;
-        true
-    } else {
-        false
-    };
 
     let plan = run_row.as_ref().map(|run| run.decide(signal));
     let transition = plan.and_then(|p| p.transition);
 
-    if let (Some(task_run_id), Some(plan)) = (linked_task_run_id, plan) {
-        let wait_update = plan.transition.map(|t| {
-            if t.status == TaskRunStatus::WaitingForUser {
-                t.wait_reason
-            } else {
-                None
-            }
-        });
-        repos.record_task_run_observation(
-            task_run_id,
-            TaskRunObservation {
-                status: plan.transition.map(|t| t.status),
-                wait_reason: wait_update,
-                event_label,
-                at: &at,
-                provider_session_id: provider_session_id.filter(|_| plan.stamp_session),
-                terminal_tab_id: ctx.terminal_tab_id.filter(|_| plan.stamp_tab),
-                metadata_raw: Some(metadata_raw),
-                plan_file_path: signal.plan_file_path(),
-                hold_stop: plan.hold_stop,
-                release_stop: plan.release_stop,
-            },
-        )?;
-    }
+    let needs_event = task_found || task_run_linked;
+    let needs_observation = linked_task_run_id.is_some() && plan.is_some();
+
+    let event_recorded = if needs_event || needs_observation {
+        let mut tx = repos.begin()?;
+
+        let event_recorded = if needs_event {
+            let event_type = format!("{}_hook", agent.as_str());
+            tx.insert_event(
+                linked_task_id.filter(|_| needs_event),
+                linked_task_run_id,
+                &event_type,
+                metadata_raw,
+            )?;
+            true
+        } else {
+            false
+        };
+
+        if let (Some(task_run_id), Some(plan)) = (linked_task_run_id, plan) {
+            let wait_update = plan.transition.map(|t| {
+                if t.status == TaskRunStatus::WaitingForUser {
+                    t.wait_reason
+                } else {
+                    None
+                }
+            });
+            tx.record_task_run_observation(
+                task_run_id,
+                TaskRunObservation {
+                    status: plan.transition.map(|t| t.status),
+                    wait_reason: wait_update,
+                    event_label,
+                    at: &at,
+                    provider_session_id: provider_session_id.filter(|_| plan.stamp_session),
+                    terminal_tab_id: ctx.terminal_tab_id.filter(|_| plan.stamp_tab),
+                    metadata_raw: Some(metadata_raw),
+                    plan_file_path: signal.plan_file_path(),
+                    hold_stop: plan.hold_stop,
+                    release_stop: plan.release_stop,
+                },
+            )?;
+        }
+
+        tx.commit()?;
+        event_recorded
+    } else {
+        false
+    };
 
     // A `SubagentFinished` produces no direct transition, but it may release a deferred turn-complete
     // in the store (Running → WaitingForUser); detect that so the entering edge still notifies.
@@ -353,7 +369,7 @@ where
     // pointer, which `primary_run` already resolved to `None`; otherwise the new run is a side run.
     let run = repos.create_lazy_run_for_session(
         NewTaskRun {
-            task_id: ctx.task_id.to_string(),
+            task_id: TaskId::from_store(ctx.task_id.to_string()),
             agent: Some(ctx.agent),
             branch: None,
             worktree_path: None,

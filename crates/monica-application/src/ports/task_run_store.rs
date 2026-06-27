@@ -1,6 +1,7 @@
 use anyhow::Result;
 
-use crate::{NewTaskRun, TaskRun, TaskRunObservation, TaskRunStatus};
+use crate::prelude::{NewTaskRun, TaskRun, TaskRunStatus};
+use crate::TaskRunObservation;
 
 pub trait TaskRunStore {
     fn start_task_run(&mut self, new: NewTaskRun) -> Result<TaskRun>;

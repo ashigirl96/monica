@@ -1,8 +1,9 @@
 use super::ports::{GithubGateway, ProjectRepository, TaskStore};
-use crate::{
-    parse_owner_repo, ApplicationError, ApplicationResult, ExternalIssue, ExternalReference,
-    GithubIssue, NewTask, Provider, RefType, Task, TaskKind, TaskStatus,
+use crate::prelude::{
+    parse_owner_repo, ExternalIssue, ExternalReference, NewTask, Provider, RefType, Task, TaskKind,
+    TaskStatus,
 };
+use crate::{ApplicationError, ApplicationResult, GithubIssue};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrackGithubIssueInput {

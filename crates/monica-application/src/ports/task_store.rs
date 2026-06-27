@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::prelude::{ExternalReference, Task, TaskStatus};
-use crate::NewTask;
+use crate::prelude::NewTask;
 
 /// Task aggregate persistence: create, read, status transitions, primary-run pointer, and the
 /// external references attached at creation. Board summaries ([`TaskBoardQuery`]) and pull-request

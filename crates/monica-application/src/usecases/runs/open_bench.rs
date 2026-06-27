@@ -1,10 +1,11 @@
 use anyhow::Result;
 
-use crate::prelude::bench_runspace_id;
+use crate::bench::bench_runspace_id;
 use super::ports::{
     ProjectRepository, TaskRunOutputs, TaskRunStore, TaskStore, WorkbenchStore,
 };
-use crate::{ApplicationError, ApplicationResult, Project, Task, TaskBench};
+use crate::prelude::{Project, Task};
+use crate::{ApplicationError, ApplicationResult, ExecutionProfile, TaskBench};
 
 pub(crate) fn default_bench_cwd(project: Option<&Project>, home_dir: Option<&str>) -> String {
     project
@@ -41,8 +42,6 @@ where
     Ok((runspace_id, desired_cwd.to_string(), true))
 }
 
-/// Recompute the shell env for a task-connected runspace. Fails soft (empty vec) when the task
-/// has no project or output generation fails, so terminals still open without Monica context.
 pub fn task_shell_env<R, A>(
     repos: &R,
     outputs: &A,
@@ -58,16 +57,25 @@ where
         .map(|(_, cwd)| cwd)
         .or_else(|| resolve_worktree_cwd(repos, &task))
         .unwrap_or_else(|| default_bench_cwd(project.as_ref(), home_dir().as_deref()));
-    let project = project.map(|mut p| {
+    let mut profile = load_optional_profile(repos, project.as_ref())?;
+    if let Some(prof) = &mut profile {
         if let Some(agent) = primary_run_agent(repos, &task) {
-            p.agent_default = agent;
+            prof.agent_default = agent;
         }
-        p
-    });
-    Ok(shell_env_for(outputs, &task, project.as_ref(), &cwd))
+    }
+    let env = match (project.as_ref(), profile.as_ref()) {
+        (Some(p), Some(prof)) => {
+            let shell = outputs
+                .prepare_task_shell_env(&task.id, p, prof, None, std::path::Path::new(&cwd))
+                .map_err(|e| ApplicationError::external(format!("failed to prepare shell env: {e:#}")))?;
+            shell.env
+        }
+        _ => Vec::new(),
+    };
+    Ok(env)
 }
 
-fn primary_run_agent<R>(repos: &R, task: &Task) -> Option<crate::Agent>
+fn primary_run_agent<R>(repos: &R, task: &Task) -> Option<crate::prelude::Agent>
 where
     R: TaskRunStore,
 {
@@ -87,26 +95,41 @@ where
     let task = repos
         .get_task(task_id)?
         .ok_or_else(|| ApplicationError::not_found(format!("task not found: {task_id}")))?;
-    let project = task
-        .project_id
-        .as_deref()
-        .and_then(|pid| repos.get_project(pid).ok().flatten());
+    let project = match task.project_id.as_deref() {
+        Some(pid) => repos.get_project(pid)?,
+        None => None,
+    };
     Ok((task, project))
+}
+
+fn load_optional_profile<R>(
+    repos: &R,
+    project: Option<&Project>,
+) -> ApplicationResult<Option<ExecutionProfile>>
+where
+    R: ProjectRepository,
+{
+    match project {
+        Some(p) => Ok(repos.get_execution_profile(&p.id)?),
+        None => Ok(None),
+    }
 }
 
 fn shell_env_for<A>(
     outputs: &A,
     task: &Task,
     project: Option<&Project>,
+    profile: Option<&ExecutionProfile>,
     cwd: &str,
 ) -> Vec<(String, String)>
 where
     A: TaskRunOutputs,
 {
     project
-        .and_then(|p| {
+        .zip(profile)
+        .and_then(|(p, prof)| {
             outputs
-                .prepare_task_shell_env(&task.id, p, None, std::path::Path::new(cwd))
+                .prepare_task_shell_env(&task.id, p, prof, None, std::path::Path::new(cwd))
                 .ok()
         })
         .map(|shell| shell.env)
@@ -126,7 +149,8 @@ where
 
     // Write hook settings into the cwd Claude will actually launch in (the bench's resolved cwd,
     // which may differ from desired_cwd when the bench already existed).
-    let env = shell_env_for(outputs, &task, project.as_ref(), &cwd);
+    let profile = load_optional_profile(repos, project.as_ref())?;
+    let env = shell_env_for(outputs, &task, project.as_ref(), profile.as_ref(), &cwd);
 
     Ok(TaskBench {
         task_id: task_id.to_string(),

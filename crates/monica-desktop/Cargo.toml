@@ -17,6 +17,7 @@ anyhow = "1.0"
 log = "0.4"
 monica-api = { path = "../monica-api" }
 monica-application = { path = "../monica-application" }
+monica-domain = { path = "../monica-domain" }
 serde = { version = "1", default-features = false, features = ["derive"] }
 monica-runtime = { path = "../monica-runtime" }
 monica-paths = { path = "../monica-paths" }

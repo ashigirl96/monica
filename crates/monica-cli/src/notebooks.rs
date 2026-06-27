@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use clap::Subcommand;
 
-use monica_application::{LintFinding, NotebookDoc};
+use monica_domain::{LintFinding, NotebookDoc};
 
 use crate::event_sink::{self, CliFacade};
 

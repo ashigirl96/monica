@@ -1,5 +1,6 @@
 use super::ports::{TaskRunStore, TaskStore};
-use crate::{ApplicationResult, TaskRunStatus};
+use crate::prelude::TaskRunStatus;
+use crate::ApplicationResult;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MakeMainOutcome {

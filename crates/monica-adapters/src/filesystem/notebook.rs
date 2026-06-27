@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use monica_application::{is_valid_slug, parse_front_matter, LintFinding, NotebookDoc};
+use monica_domain::{is_valid_slug, parse_front_matter, LintFinding, NotebookDoc};
 
 /// Sorted `*.md` paths in a notebook directory. Per-entry `read_dir` errors are propagated, not
 /// dropped, so callers never silently skip an unreadable page.

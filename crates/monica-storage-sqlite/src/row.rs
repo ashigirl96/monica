@@ -1,7 +1,8 @@
 use anyhow::Result;
-use monica_application::{
-    Agent, Event, ExternalReference, PermissionMode, Project, Provider, RawJson, RefType, Task,
-    TaskKind, TaskRun, TaskRunStatus, TaskStatus,
+use monica_application::{ExecutionProfile, PermissionMode};
+use monica_domain::{
+    Agent, Event, ExternalReference, Project, Provider, RawJson, RefType, Task, TaskId, TaskKind,
+    TaskRun, TaskRunId, TaskRunStatus, TaskStatus,
 };
 use rusqlite::Row;
 
@@ -12,7 +13,7 @@ pub(super) fn task_from_row(row: &Row<'_>) -> Result<Task> {
     let kind: String = row.get("kind")?;
     let status: String = row.get("status")?;
     Ok(Task {
-        id: row.get::<_, String>("id")?.into(),
+        id: TaskId::from_store(row.get("id")?),
         kind: kind.parse::<TaskKind>()?,
         status: status.parse::<TaskStatus>()?,
         phase: row.get("phase")?,
@@ -22,7 +23,7 @@ pub(super) fn task_from_row(row: &Row<'_>) -> Result<Task> {
         labels: serde_json::from_str(&labels)?,
         details: RawJson(details),
         source: source.map(RawJson),
-        primary_task_run_id: row.get::<_, Option<String>>("primary_task_run_id")?.map(Into::into),
+        primary_task_run_id: row.get::<_, Option<String>>("primary_task_run_id")?.map(TaskRunId::from_store),
         closed_at: row.get("closed_at")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
@@ -35,8 +36,8 @@ pub(super) fn task_run_from_row(row: &Row<'_>) -> Result<TaskRun> {
     let agent: Option<String> = row.get("agent")?;
     let metadata: String = row.get("metadata_json")?;
     Ok(TaskRun {
-        id: row.get::<_, String>("id")?.into(),
-        task_id: row.get::<_, String>("task_id")?.into(),
+        id: TaskRunId::from_store(row.get("id")?),
+        task_id: TaskId::from_store(row.get("task_id")?),
         agent: agent.map(|s| s.parse::<Agent>()).transpose()?,
         branch: row.get("branch")?,
         worktree_path: row.get("worktree_path")?,
@@ -84,8 +85,6 @@ pub(super) fn external_ref_from_row(row: &Row<'_>) -> Result<ExternalReference> 
 
 pub(super) fn project_from_row(row: &Row<'_>) -> Result<Project> {
     let provider: String = row.get("provider")?;
-    let agent_default: String = row.get("agent_default")?;
-    let agent_permission_mode: String = row.get("agent_permission_mode")?;
     Ok(Project {
         id: row.get("id")?,
         name: row.get("name")?,
@@ -93,12 +92,19 @@ pub(super) fn project_from_row(row: &Row<'_>) -> Result<Project> {
         repo: row.get("repo")?,
         path: row.get("path")?,
         default_branch: row.get("default_branch")?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+pub(super) fn execution_profile_from_row(row: &Row<'_>) -> Result<ExecutionProfile> {
+    let agent_default: String = row.get("agent_default")?;
+    let agent_permission_mode: String = row.get("agent_permission_mode")?;
+    Ok(ExecutionProfile {
         worktree_root: row.get("worktree_root")?,
         setup_timeout_sec: row.get("setup_timeout_sec")?,
         agent_default: agent_default.parse::<Agent>()?,
         agent_permission_mode: agent_permission_mode.parse::<PermissionMode>()?,
         hooks_claude: row.get::<_, i64>("hooks_claude")? != 0,
-        created_at: row.get("created_at")?,
-        updated_at: row.get("updated_at")?,
     })
 }

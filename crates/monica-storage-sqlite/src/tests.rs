@@ -1,10 +1,13 @@
 use monica_application::{
-    Agent, DisplayStatus, EventRepository, ExternalReference, GithubPullRequest,
-    GithubPullRequestStatus, NewTask, NewTaskRun, NewTerminalSession, Project, Provider,
-    ProjectRepository, PullRequestBranchSyncCandidate, RawJson, RefType,
-    TaskBoardQuery, TaskKind, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunStore,
-    TaskRunWaitReason, TaskStatus, TaskStore, TaskSummaryFilter, TaskSummaryRow,
-    TerminalSessionKind, TerminalSessionStatus, TerminalSessionUpdate, UnitOfWork, WorkbenchStore,
+    EventRepository, ExecutionProfile, GithubPullRequest, GithubPullRequestStatus,
+    ProjectRepository, PullRequestBranchSyncCandidate, TaskBoardQuery, TaskRunObservation,
+    TaskRunStore, TaskStore, TaskSummaryFilter, TaskSummaryRow, TerminalSessionUpdate, UnitOfWork,
+    WorkbenchStore,
+};
+use monica_domain::{
+    Agent, DisplayStatus, ExternalReference, NewTask, NewTaskRun, NewTerminalSession, Project,
+    Provider, RawJson, RefType, TaskId, TaskKind, TaskRun, TaskRunStatus, TaskRunWaitReason,
+    TaskStatus, TerminalSessionKind, TerminalSessionStatus,
 };
 use rusqlite::params;
 use serde_json::json;
@@ -33,7 +36,7 @@ fn raw_json_columns_survive_sqlite_round_trip() {
 
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.to_string(),
+            task_id: task.id.clone(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -79,12 +82,12 @@ fn project_task_with_branch(
 ) -> (String, PullRequestBranchSyncCandidate) {
     let mut project = Project::from_repo(repo);
     project.default_branch = default_branch.to_string();
-    db.upsert_project(&project).unwrap();
+    db.upsert_project(&project, &ExecutionProfile::default()).unwrap();
     let mut task = dev_task("branch backed");
     task.project_id = Some(project.id.clone());
     let item = db.insert_task(task).unwrap();
     db.start_task_run(NewTaskRun {
-        task_id: item.id.to_string(),
+        task_id: item.id.clone(),
         agent: None,
         branch: Some(branch.to_string()),
         worktree_path: None,
@@ -163,7 +166,7 @@ fn task_run_agent_is_typed_and_closed_task_is_not_regressed_by_finish() {
     let task = db.insert_task(dev_task("run me")).unwrap();
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.to_string(),
+            task_id: task.id.clone(),
             agent: Some(Agent::Claude),
             branch: Some("issue-42".to_string()),
             worktree_path: Some("/tmp/worktree".to_string()),
@@ -186,7 +189,7 @@ fn task_run_observation_records_wait_reason_and_event_metadata() {
     let task = db.insert_task(dev_task("observe me")).unwrap();
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.to_string(),
+            task_id: task.id.clone(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -223,7 +226,7 @@ fn task_run_observation_retains_plan_file_path_across_later_hooks() {
     let task = db.insert_task(dev_task("plan me")).unwrap();
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.to_string(),
+            task_id: task.id.clone(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -309,7 +312,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
     let task = db.insert_task(dev_task("guarded")).unwrap();
     let start_run = |db: &mut SqliteStore| {
         db.start_task_run(NewTaskRun {
-            task_id: task.id.to_string(),
+            task_id: task.id.clone(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -566,7 +569,7 @@ fn running_task_run(db: &mut SqliteStore, title: &str) -> TaskRun {
     let task = db.insert_task(dev_task(title)).unwrap();
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.to_string(),
+            task_id: task.id.clone(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -678,7 +681,7 @@ fn task_run_observation_keeps_existing_tab_and_session_on_none() {
     let task = db.insert_task(dev_task("keep tab")).unwrap();
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.to_string(),
+            task_id: task.id.clone(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -745,7 +748,7 @@ fn find_task_run_by_terminal_tab_returns_latest_observed_run_in_tab() {
         .unwrap();
     };
     let new_run = NewTaskRun {
-        task_id: task.id.to_string(),
+        task_id: task.id.clone(),
         agent: None,
         branch: None,
         worktree_path: None,
@@ -772,7 +775,7 @@ fn start_task_run_never_reopens_a_closed_task() {
     db.update_task_status(&task.id, TaskStatus::Closed).unwrap();
 
     db.start_task_run(NewTaskRun {
-        task_id: task.id.to_string(),
+        task_id: task.id.clone(),
         agent: None,
         branch: None,
         worktree_path: None,
@@ -792,7 +795,7 @@ fn find_task_run_by_session_is_scoped_to_task() {
     let task_b = db.insert_task(dev_task("task b")).unwrap();
     let run_a = db
         .start_task_run(NewTaskRun {
-            task_id: task_a.id.to_string(),
+            task_id: task_a.id.clone(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -832,7 +835,7 @@ fn task_summaries_count_side_runs_excluding_primary_and_sessionless_failures() {
     let task = db.insert_task(dev_task("side runs")).unwrap();
     let bare_task = db.insert_task(dev_task("no runs")).unwrap();
     let new_run = |task_id: &str| NewTaskRun {
-        task_id: task_id.to_string(),
+        task_id: TaskId::from_store(task_id.to_string()),
         agent: None,
         branch: None,
         worktree_path: None,
@@ -923,7 +926,7 @@ fn task_summaries_fall_back_to_latest_run_when_primary_pointer_dangles() {
     let task = db.insert_task(dev_task("dangling primary")).unwrap();
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.to_string(),
+            task_id: task.id.clone(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -960,7 +963,7 @@ fn task_summaries_expose_has_plan_from_the_primary_run() {
     let planned = db.insert_task(dev_task("has a plan")).unwrap();
     let unplanned = db.insert_task(dev_task("no plan")).unwrap();
     let new_run = |task_id: &str| NewTaskRun {
-        task_id: task_id.to_string(),
+        task_id: TaskId::from_store(task_id.to_string()),
         agent: None,
         branch: None,
         worktree_path: None,
@@ -1064,7 +1067,7 @@ fn project_round_trip_and_summary_pr_status_stay_wire_compatible() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let mut project = Project::from_repo("owner/repo");
     project.path = Some("/repo".to_string());
-    db.upsert_project(&project).unwrap();
+    db.upsert_project(&project, &ExecutionProfile::default()).unwrap();
 
     let mut task = dev_task("with pr");
     task.project_id = Some(project.id.clone());
@@ -1147,19 +1150,19 @@ fn branch_pull_request_candidate_uses_latest_run_branch_and_project_repo() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let mut project = Project::from_repo("owner/repo");
     project.default_branch = "main".to_string();
-    db.upsert_project(&project).unwrap();
+    db.upsert_project(&project, &ExecutionProfile::default()).unwrap();
     let mut task = dev_task("latest branch");
     task.project_id = Some(project.id.clone());
     let item = db.insert_task(task).unwrap();
     db.start_task_run(NewTaskRun {
-        task_id: item.id.to_string(),
+        task_id: item.id.clone(),
         agent: None,
         branch: Some("old-branch".to_string()),
         worktree_path: None,
     })
     .unwrap();
     db.start_task_run(NewTaskRun {
-        task_id: item.id.to_string(),
+        task_id: item.id.clone(),
         agent: None,
         branch: Some("feature/new-branch".to_string()),
         worktree_path: None,
@@ -1187,12 +1190,12 @@ fn branch_pull_request_candidate_includes_closed_tasks() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let mut project = Project::from_repo("owner/repo");
     project.default_branch = "main".to_string();
-    db.upsert_project(&project).unwrap();
+    db.upsert_project(&project, &ExecutionProfile::default()).unwrap();
     let mut task = dev_task("closed but synced");
     task.project_id = Some(project.id.clone());
     let item = db.insert_task(task).unwrap();
     db.start_task_run(NewTaskRun {
-        task_id: item.id.to_string(),
+        task_id: item.id.clone(),
         agent: None,
         branch: Some("feature/keep-syncing".to_string()),
         worktree_path: None,
@@ -1485,7 +1488,7 @@ fn settle_task_run_if_live_only_stops_session_driven_runs() {
     let task = db.insert_task(dev_task("settle")).unwrap();
     let start_run = |db: &mut SqliteStore| {
         db.start_task_run(NewTaskRun {
-            task_id: task.id.to_string(),
+            task_id: task.id.clone(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -1592,7 +1595,7 @@ fn settle_task_run_if_live_survives_a_closed_task() {
     let task = db.insert_task(dev_task("doomed")).unwrap();
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.to_string(),
+            task_id: task.id.clone(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -1630,7 +1633,7 @@ fn list_driven_task_runs_with_tab_returns_only_tab_pinned_session_driven_runs() 
     let task = db.insert_task(dev_task("sweep")).unwrap();
     let start_run = |db: &mut SqliteStore| {
         db.start_task_run(NewTaskRun {
-            task_id: task.id.to_string(),
+            task_id: task.id.clone(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -1859,7 +1862,7 @@ fn work_transaction_rolls_back_when_dropped_without_commit() {
         let mut tx = db.begin().unwrap();
         let run = tx
             .start_task_run(NewTaskRun {
-                task_id: task.id.to_string(),
+                task_id: task.id.clone(),
                 agent: None,
                 branch: Some("issue-1".to_string()),
                 worktree_path: None,
@@ -1885,7 +1888,7 @@ fn work_transaction_commit_persists_run_primary_and_bench() {
         let mut tx = db.begin().unwrap();
         let run = tx
             .start_task_run(NewTaskRun {
-                task_id: task.id.to_string(),
+                task_id: task.id.clone(),
                 agent: None,
                 branch: Some("issue-1".to_string()),
                 worktree_path: None,
@@ -1918,7 +1921,7 @@ fn create_lazy_run_for_session_sets_primary_atomically_when_missing() {
     let run = db
         .create_lazy_run_for_session(
             NewTaskRun {
-                task_id: task.id.to_string(),
+                task_id: task.id.clone(),
                 agent: Some(Agent::Claude),
                 branch: None,
                 worktree_path: None,
@@ -1942,7 +1945,7 @@ fn create_lazy_run_for_session_leaves_existing_primary_untouched() {
     let task = db.insert_task(dev_task("lazy-side")).unwrap();
     let primary = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.to_string(),
+            task_id: task.id.clone(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -1953,7 +1956,7 @@ fn create_lazy_run_for_session_leaves_existing_primary_untouched() {
     let side = db
         .create_lazy_run_for_session(
             NewTaskRun {
-                task_id: task.id.to_string(),
+                task_id: task.id.clone(),
                 agent: Some(Agent::Claude),
                 branch: None,
                 worktree_path: None,
@@ -1980,7 +1983,7 @@ fn claim_prepared_run_is_won_by_a_single_session() {
     let task = db.insert_task(dev_task("cas")).unwrap();
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.to_string(),
+            task_id: task.id.clone(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -2011,7 +2014,7 @@ fn claim_prepared_run_refuses_non_prepared_run() {
     let task = db.insert_task(dev_task("cas-guard")).unwrap();
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.to_string(),
+            task_id: task.id.clone(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -2053,7 +2056,7 @@ fn workbench_contract<S: WorkbenchStore + ?Sized>(store: &mut S, task_id: &str) 
 fn task_run_contract<S: TaskRunStore + ?Sized>(store: &mut S, task_id: &str) -> String {
     let run = store
         .start_task_run(NewTaskRun {
-            task_id: task_id.to_string(),
+            task_id: TaskId::from_store(task_id.to_string()),
             agent: None,
             branch: Some("br".to_string()),
             worktree_path: None,

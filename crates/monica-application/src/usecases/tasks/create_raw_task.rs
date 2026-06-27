@@ -1,5 +1,6 @@
 use super::ports::{ProjectRepository, TaskStore};
-use crate::{ApplicationError, ApplicationResult, NewTask, Task, TaskKind};
+use crate::prelude::{NewTask, Task, TaskKind};
+use crate::{ApplicationError, ApplicationResult};
 
 /// Create a task that carries no GitHub issue ref ("raw task"). The title is the sole content;
 /// `project_id` is required because raw tasks are meant to be prepared/run in a worktree, and

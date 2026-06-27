@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 
 use monica_application::ports::NotebookGateway;
-use monica_application::{LintFinding, NotebookDoc};
+use monica_domain::{LintFinding, NotebookDoc};
 
 use super::notebook;
 use monica_paths as paths;

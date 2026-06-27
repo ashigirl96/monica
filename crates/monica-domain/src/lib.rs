@@ -31,7 +31,7 @@ pub use notebook::{
     front_value, is_valid_slug, mermaid_blocks, outline, pages_from_docs, parse_front_matter,
     parse_wikilink, structural_lint, LintFinding, NotebookDoc, NotebookPage, OutlineEntry,
 };
-pub use project::{PermissionMode, Project, Provider};
+pub use project::{Project, Provider};
 pub use refs::{parse_issue_number, parse_issue_ref, parse_owner_repo};
 pub use status::{DisplayStatus, TaskRunStatus, TaskRunWaitReason, TaskStatus};
 pub use task::{Event, NewTask, Task, TaskKind};

@@ -59,7 +59,7 @@ pub struct TaskRun {
 /// repository implementations always insert at [`TaskRunStatus::SettingUp`].
 #[derive(Debug, Clone)]
 pub struct NewTaskRun {
-    pub task_id: String,
+    pub task_id: TaskId,
     pub agent: Option<Agent>,
     pub branch: Option<String>,
     pub worktree_path: Option<String>,

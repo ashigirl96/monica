@@ -1,5 +1,5 @@
 use monica_api::{ApiError, TerminalSession, TerminalSessionKind, TerminalStateSnapshot};
-use monica_application::NewTerminalSession;
+use monica_domain::NewTerminalSession;
 use monica_terminal_protocol::RequestOp;
 use serde::Serialize;
 use tauri::{AppHandle, State};

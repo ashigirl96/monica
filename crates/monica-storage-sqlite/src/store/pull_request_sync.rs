@@ -3,9 +3,10 @@ use rusqlite::{params, OptionalExtension};
 
 use crate::SqliteStore;
 use monica_application::{
-    GithubPullRequest, Provider, PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate,
-    PullRequestSyncStore, RefType,
+    GithubPullRequest, PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate,
+    PullRequestSyncStore,
 };
+use monica_domain::{Provider, RefType};
 
 use super::SET_NOW;
 

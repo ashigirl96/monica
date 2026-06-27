@@ -37,7 +37,7 @@ fn open_bench_falls_back_to_project_path_when_worktree_path_is_empty() {
 
     let run = repos
         .start_task_run(NewTaskRun {
-            task_id: task_id.clone(),
+            task_id: TaskId::from_store(task_id.clone()),
             agent: None,
             branch: None,
             worktree_path: Some(String::new()),
@@ -113,7 +113,7 @@ fn task_shell_env_falls_back_to_worktree_when_no_bench() {
     // `/tmp` exists, so it passes the is_usable_worktree existence check.
     let run = repos
         .start_task_run(NewTaskRun {
-            task_id: task_id.clone(),
+            task_id: TaskId::from_store(task_id.clone()),
             agent: None,
             branch: None,
             worktree_path: Some("/tmp".to_string()),

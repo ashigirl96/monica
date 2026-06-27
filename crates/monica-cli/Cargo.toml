@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 monica-application = { path = "../monica-application" }
+monica-domain = { path = "../monica-domain" }
 monica-runtime = { path = "../monica-runtime" }
 monica-paths = { path = "../monica-paths" }
 clap = { version = "4", features = ["derive"] }

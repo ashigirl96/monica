@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::prelude::{
+use crate::github::{
     GithubPullRequest, PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate,
 };
 

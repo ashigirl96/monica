@@ -2,12 +2,14 @@ use anyhow::{anyhow, Context, Result};
 use rusqlite::params;
 
 use crate::SqliteStore;
-use monica_application::{Agent, PermissionMode, Project, ProjectRepository, Provider};
+use monica_application::{ExecutionProfile, ProjectRepository};
+use monica_application::PermissionMode;
+use monica_domain::{Agent, Project, Provider};
 
 use super::{PROJECT_COLUMNS, SET_NOW};
 
 impl ProjectRepository for SqliteStore {
-    fn upsert_project(&self, p: &Project) -> Result<Project> {
+    fn upsert_project(&self, p: &Project, profile: &ExecutionProfile) -> Result<Project> {
         self.conn().execute(
             &format!(
                 "INSERT INTO projects
@@ -30,11 +32,11 @@ impl ProjectRepository for SqliteStore {
                 p.repo,
                 p.path,
                 p.default_branch,
-                p.worktree_root,
-                p.setup_timeout_sec,
-                p.agent_default.as_str(),
-                p.agent_permission_mode.as_str(),
-                p.hooks_claude as i64,
+                profile.worktree_root,
+                profile.setup_timeout_sec,
+                profile.agent_default.as_str(),
+                profile.agent_permission_mode.as_str(),
+                profile.hooks_claude as i64,
             ],
         )?;
         self.get_project(&p.id)?
@@ -48,6 +50,17 @@ impl ProjectRepository for SqliteStore {
         let mut rows = stmt.query(params![id])?;
         match rows.next()? {
             Some(row) => Ok(Some(crate::row::project_from_row(row)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn get_execution_profile(&self, id: &str) -> Result<Option<ExecutionProfile>> {
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {PROJECT_COLUMNS} FROM projects WHERE id = ?1"
+        ))?;
+        let mut rows = stmt.query(params![id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(crate::row::execution_profile_from_row(row)?)),
             None => Ok(None),
         }
     }

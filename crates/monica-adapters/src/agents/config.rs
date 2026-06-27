@@ -1,4 +1,4 @@
-use monica_application::Agent;
+use monica_domain::Agent;
 
 /// Hook events an agent emits beyond the standard set (SessionStart, UserPromptSubmit,
 /// Pre/PostToolUse, Stop, SubagentStart, SubagentStop). The worktree hook config registers these so

@@ -3,11 +3,14 @@ use rusqlite::Transaction;
 
 use crate::SqliteStore;
 use monica_application::{
-    ExternalReference, NewTask, NewTaskRun, Task, TaskRun, TaskRunObservation, TaskRunStatus,
-    TaskRunStore, TaskStatus, TaskStore, UnitOfWork, WorkTransaction, WorkbenchStore,
+    Clock, EventRepository, TaskRunObservation, TaskRunStore, TaskStore, UnitOfWork,
+    WorkTransaction, WorkbenchStore,
+};
+use monica_domain::{
+    Event, ExternalReference, NewTask, NewTaskRun, Task, TaskRun, TaskRunStatus, TaskStatus,
 };
 
-use super::{bench, external_refs, task_runs, tasks};
+use super::{bench, events, external_refs, task_runs, tasks};
 
 /// A [`WorkTransaction`] backed by one SQLite `Transaction`. Every store method runs on the shared
 /// transaction via the same `*_in` helpers the direct [`SqliteStore`] uses, so the two paths can't
@@ -127,10 +130,10 @@ impl TaskRunStore for SqliteUow<'_> {
         new: NewTaskRun,
         make_primary_if_missing: bool,
     ) -> Result<TaskRun> {
-        let task_id = new.task_id.clone();
+        let task_id_str = new.task_id.to_string();
         let run = task_runs::start_task_run_in(&self.tx, new)?;
         if make_primary_if_missing {
-            tasks::set_primary_task_run(&self.tx, &task_id, &run.id)?;
+            tasks::set_primary_task_run(&self.tx, &task_id_str, &run.id)?;
         }
         Ok(run)
     }
@@ -141,6 +144,28 @@ impl TaskRunStore for SqliteUow<'_> {
         observation: TaskRunObservation<'_>,
     ) -> Result<()> {
         task_runs::record_task_run_observation_in(&self.tx, task_run_id, observation)
+    }
+}
+
+impl EventRepository for SqliteUow<'_> {
+    fn insert_event(
+        &self,
+        task_id: Option<&str>,
+        task_run_id: Option<&str>,
+        kind: &str,
+        payload_json: &str,
+    ) -> Result<Event> {
+        events::insert_event_in(&self.tx, task_id, task_run_id, kind, payload_json)
+    }
+
+    fn list_events(&self, task_id: Option<&str>) -> Result<Vec<Event>> {
+        events::list_events_in(&self.tx, task_id)
+    }
+}
+
+impl Clock for SqliteUow<'_> {
+    fn now_iso(&self) -> Result<String> {
+        events::now_iso_in(&self.tx)
     }
 }
 

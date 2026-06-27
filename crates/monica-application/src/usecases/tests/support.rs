@@ -12,17 +12,20 @@ use crate::ports::{
     TerminalAttachment, TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository,
     UnitOfWork, WorkTransaction, WorkbenchStore, Workspace,
 };
-use crate::usecases::record_hook;
+use crate::usecases::runs::record_hook;
+use crate::prelude::{
+    Agent, AgentSignal, Continuation, DisplayStatus, Event, ExternalReference, LintFinding, NewTask,
+    NewTaskRun, NewTerminalSession, NotebookDoc, Project, Provider, RefType, SignalKind, Task,
+    TaskId, TaskKind, TaskRun, TaskRunId, TaskRunStatus, TaskRunWaitReason, TaskStatus,
+    TerminalSession, TerminalSessionKind, TerminalSessionStatus,
+};
 use crate::{
-    Agent, AgentSignal, ApplicationEvent, AuthGateway, Backend, Clock, Continuation,
-    DaemonSessionView, DisplayStatus, Event, EventSink, ExternalReference, GithubAuthStatus,
-    GithubDeviceFlow, GithubGateway, GithubIssue, GithubPullRequest, GithubPullRequestRef,
-    GithubPullRequestStatus, HookContext, LintFinding, Monica, NewTask, NewTaskRun, NewTerminalSession,
-    NotebookDoc, Project, Provider, PullRequestBranchSyncCandidate,
-    PullRequestStatusSyncCandidate, RefType, SetupEnv, SetupOutcome, SetupRunner, SignalKind,
-    Task, TaskKind, TaskRun, TaskRunObservation, TaskRunOutputs, TaskRunStatus,
-    TaskRunWaitReason, TaskStatus, TaskSummaryRow, TerminalSession,
-    TerminalSessionKind, TerminalSessionStatus, TerminalSessionUpdate, TerminalStateSnapshot,
+    ApplicationEvent, AuthGateway, Backend, Clock, DaemonSessionView, EventSink, ExecutionProfile,
+    GithubAuthStatus, GithubDeviceFlow, GithubGateway, GithubIssue, GithubPullRequest,
+    GithubPullRequestRef, GithubPullRequestStatus, HookContext, Monica,
+    PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate, SetupEnv, SetupOutcome,
+    SetupRunner, TaskRunObservation, TaskRunOutputs, TaskSummaryRow, TerminalSessionUpdate,
+    TerminalStateSnapshot,
 };
 // --- Agent-signal test builders -------------------------------------------------------------------
 // The use-case tests drive `record_hook` with typed `AgentSignal`s (the provider JSON -> signal
@@ -85,7 +88,7 @@ pub(crate) fn record_claude_hook<R, A>(
     signal: &AgentSignal,
 ) -> Result<crate::HookReport>
 where
-    R: TaskStore + TaskRunStore + EventRepository + Clock,
+    R: TaskStore + TaskRunStore + EventRepository + Clock + UnitOfWork,
     A: TaskRunOutputs,
 {
     record_hook(repos, outputs, ctx, Agent::Claude, Some(signal), "{}")
@@ -220,7 +223,7 @@ impl TaskStore for FakeRepos {
             .tasks
             .get_mut(task_id)
             .ok_or_else(|| anyhow!("task not found: {task_id}"))?
-            .primary_task_run_id = Some(task_run_id.into());
+            .primary_task_run_id = Some(TaskRunId::from_store(task_run_id.to_string()));
         Ok(())
     }
 
@@ -346,13 +349,17 @@ impl PullRequestSyncStore for FakeRepos {
 }
 
 impl ProjectRepository for FakeRepos {
-    fn upsert_project(&self, project: &Project) -> Result<Project> {
+    fn upsert_project(&self, project: &Project, _profile: &ExecutionProfile) -> Result<Project> {
         self.insert_project(project.clone());
         Ok(project.clone())
     }
 
     fn get_project(&self, id: &str) -> Result<Option<Project>> {
         Ok(self.state.borrow().projects.get(id).cloned())
+    }
+
+    fn get_execution_profile(&self, _id: &str) -> Result<Option<ExecutionProfile>> {
+        Ok(Some(ExecutionProfile::default()))
     }
 
     fn list_projects(&self) -> Result<Vec<Project>> {
@@ -387,8 +394,8 @@ impl FakeRepos {
         state.next_run += 1;
         let id = format!("run-{}", state.next_run);
         let run = TaskRun {
-            id: id.clone().into(),
-            task_id: new.task_id.clone().into(),
+            id: TaskRunId::from_store(id.clone()),
+            task_id: new.task_id.clone(),
             agent: new.agent,
             branch: new.branch,
             worktree_path: new.worktree_path,
@@ -406,7 +413,7 @@ impl FakeRepos {
             updated_at: "2026-06-02T00:00:00.000Z".to_string(),
         };
         state.runs.insert(id, run.clone());
-        if let Some(task) = state.tasks.get_mut(&new.task_id) {
+        if let Some(task) = state.tasks.get_mut(new.task_id.as_str()) {
             if task.status != TaskStatus::Closed {
                 task.status = TaskStatus::InProgress;
             }
@@ -825,6 +832,28 @@ impl TaskRunStore for FakeUow<'_> {
     }
 }
 
+impl EventRepository for FakeUow<'_> {
+    fn insert_event(
+        &self,
+        task_id: Option<&str>,
+        task_run_id: Option<&str>,
+        kind: &str,
+        payload_json: &str,
+    ) -> Result<Event> {
+        self.inner.insert_event(task_id, task_run_id, kind, payload_json)
+    }
+
+    fn list_events(&self, task_id: Option<&str>) -> Result<Vec<Event>> {
+        self.inner.list_events(task_id)
+    }
+}
+
+impl Clock for FakeUow<'_> {
+    fn now_iso(&self) -> Result<String> {
+        self.inner.now_iso()
+    }
+}
+
 impl WorkbenchStore for FakeUow<'_> {
     fn get_bench_for_task(&self, task_id: &str) -> Result<Option<(String, String)>> {
         self.inner.get_bench_for_task(task_id)
@@ -967,7 +996,8 @@ impl TaskRunOutputs for FakeTaskRunOutputs {
     fn prepare_task_shell_env(
         &self,
         task_id: &str,
-        _project: &crate::Project,
+        _project: &Project,
+        _profile: &crate::ExecutionProfile,
         _task_run_id: Option<&str>,
         cwd: &std::path::Path,
     ) -> Result<crate::TaskShellEnv> {
@@ -1035,7 +1065,7 @@ impl AuthGateway for FakeAuth {
 
 fn task_from_new(id: String, new: NewTask) -> Task {
     Task {
-        id: id.into(),
+        id: TaskId::from_store(id),
         kind: new.kind,
         status: new.status,
         phase: new.phase,
@@ -1078,7 +1108,7 @@ pub(crate) fn task_with_prepared_primary(repos: &mut FakeRepos) -> (String, Stri
     let task_id = repos.insert_task_for_run(None);
     let run = repos
         .start_task_run(NewTaskRun {
-            task_id: task_id.clone(),
+            task_id: TaskId::from_store(task_id.clone()),
             agent: Some(Agent::Claude),
             branch: None,
             worktree_path: None,
@@ -1181,7 +1211,7 @@ pub(crate) fn insert_issue_backed_task(repos: &mut FakeRepos, issue_number: i64)
 
 pub(crate) fn make_task(id: &str, status: TaskStatus, primary_run_id: Option<&str>) -> Task {
     Task {
-        id: id.into(),
+        id: TaskId::from_store(id.to_string()),
         kind: TaskKind::Development,
         status,
         phase: None,
@@ -1191,7 +1221,7 @@ pub(crate) fn make_task(id: &str, status: TaskStatus, primary_run_id: Option<&st
         labels: Vec::new(),
         details: RawJson::empty_object(),
         source: None,
-        primary_task_run_id: primary_run_id.map(Into::into),
+        primary_task_run_id: primary_run_id.map(|s| TaskRunId::from_store(s.to_string())),
         closed_at: None,
         created_at: "2026-06-02T00:00:00.000Z".to_string(),
         updated_at: "2026-06-02T00:00:00.000Z".to_string(),
@@ -1200,8 +1230,8 @@ pub(crate) fn make_task(id: &str, status: TaskStatus, primary_run_id: Option<&st
 
 pub(crate) fn make_run(id: &str, task_id: &str, status: TaskRunStatus) -> TaskRun {
     TaskRun {
-        id: id.into(),
-        task_id: task_id.into(),
+        id: TaskRunId::from_store(id.to_string()),
+        task_id: TaskId::from_store(task_id.to_string()),
         agent: Some(Agent::Claude),
         branch: None,
         worktree_path: None,
@@ -1478,8 +1508,8 @@ pub(crate) fn facade_with_decoder(
 
 pub(crate) fn driven_run(id: &str, task_id: &str, tab: &str) -> TaskRun {
     TaskRun {
-        id: id.into(),
-        task_id: task_id.into(),
+        id: TaskRunId::from_store(id.to_string()),
+        task_id: TaskId::from_store(task_id.to_string()),
         agent: None,
         branch: None,
         worktree_path: None,

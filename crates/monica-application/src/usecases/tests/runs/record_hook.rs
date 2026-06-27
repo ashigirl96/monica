@@ -6,7 +6,7 @@ fn record_claude_hook_records_waiting_transition_and_run_output() {
     let task_id = repos.insert_task_for_run(None);
     let run = repos
         .start_task_run(NewTaskRun {
-            task_id: task_id.clone(),
+            task_id: TaskId::from_store(task_id.clone()),
             agent: Some(Agent::Claude),
             branch: None,
             worktree_path: None,

@@ -118,9 +118,12 @@ pub(crate) mod test_support {
 mod tests {
     use super::*;
     use monica_application::{
-        DisplayStatus, EventRepository, NewTaskRun, ProjectRepository, Provider, RefType,
-        TaskBoardQuery, TaskRunStatus, TaskRunStore, TaskRunWaitReason, TaskStatus, TaskStore,
+        EventRepository, ProjectRepository, TaskBoardQuery, TaskRunStore, TaskStore,
         TaskSummaryFilter,
+    };
+    use monica_domain::{
+        DisplayStatus, NewTaskRun, Provider, RefType, TaskId, TaskRunStatus, TaskRunWaitReason,
+        TaskStatus,
     };
     use rusqlite::params;
     use test_support::*;
@@ -474,7 +477,7 @@ mod tests {
 
         let next = db
             .start_task_run(NewTaskRun {
-                task_id: "MON-ready".to_string(),
+                task_id: TaskId::from_store("MON-ready".to_string()),
                 agent: None,
                 branch: None,
                 worktree_path: None,

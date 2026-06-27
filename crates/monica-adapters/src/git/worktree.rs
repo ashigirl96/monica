@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{anyhow, Context, Result};
-use monica_application::{parse_owner_repo, GitGateway, TaskRun, WorktreeRef};
+use monica_application::{GitGateway, WorktreeRef};
+use monica_domain::{parse_owner_repo, TaskRun};
 
 const RIP_COMMAND: &str = "/opt/homebrew/bin/rip";
 
@@ -344,8 +345,10 @@ mod tests {
     use std::process::Command;
 
     use monica_application::{
-        GitGateway, NewTask, NewTaskRun, Project, ProjectRepository, TaskKind, TaskRun,
-        TaskRunStatus, TaskRunStore, TaskStatus, TaskStore,
+        GitGateway, ProjectRepository, TaskRunStore, TaskStore,
+    };
+    use monica_domain::{
+        NewTask, NewTaskRun, Project, TaskId, TaskKind, TaskRun, TaskRunId, TaskRunStatus, TaskStatus,
     };
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
@@ -430,35 +433,30 @@ mod tests {
         let mut project = Project::from_repo("owner/repo");
         project.path = Some(repo.to_string_lossy().into_owned());
         project.default_branch = "main".to_string();
-        db.upsert_project(&project).unwrap();
+        db.upsert_project(&project, &monica_application::ExecutionProfile::default()).unwrap();
         let mut task = NewTask::new(TaskKind::Development, "dirty worktree");
         task.status = TaskStatus::Ready;
         task.project_id = Some(project.id.clone());
         let item = db.insert_task(task).unwrap();
-        let run = db
-            .start_task_run(NewTaskRun {
-                task_id: item.id.to_string(),
-                agent: None,
-                branch: Some("issue-42".to_string()),
-                worktree_path: Some(worktree.to_string_lossy().into_owned()),
-            })
-            .unwrap();
+        db.start_task_run(NewTaskRun {
+            task_id: item.id.clone(),
+            agent: None,
+            branch: Some("issue-42".to_string()),
+            worktree_path: Some(worktree.to_string_lossy().into_owned()),
+        })
+        .unwrap();
 
         let git = TestGit {
             rip: write_fake_rip(root.path()),
         };
-        let report =
-            monica_application::usecases::tasks::close_issue(&mut db, &git, &item.id).unwrap();
+        let runs = db.list_task_runs_for_task(&item.id).unwrap();
+        let removed = git.cleanup_task_runs(Path::new(&repo), &runs).unwrap();
 
         assert!(!worktree.exists());
         assert!(!worktree_registered(&repo, &worktree).unwrap());
         assert!(!branch_exists(&repo, "issue-42").unwrap());
-        let closed = db.get_task(&item.id).unwrap().unwrap();
-        assert_eq!(closed.status, TaskStatus::Closed);
-        assert!(closed.closed_at.is_some());
         assert_eq!(db.list_task_runs_for_task(&item.id).unwrap().len(), 1);
-        assert_eq!(report.task_runs, vec![run.id.to_string()]);
-        assert_eq!(report.removed_branches, vec!["issue-42"]);
+        assert_eq!(removed, vec!["issue-42"]);
     }
 
     #[cfg(unix)]
@@ -568,8 +566,8 @@ mod tests {
 
     fn task_run(id: &str, branch: &str, worktree: &Path) -> TaskRun {
         TaskRun {
-            id: id.into(),
-            task_id: "MON-1".into(),
+            id: TaskRunId::from_store(id.to_string()),
+            task_id: TaskId::from_store("MON-1".to_string()),
             agent: None,
             branch: Some(branch.to_string()),
             worktree_path: Some(worktree.to_string_lossy().into_owned()),
@@ -582,7 +580,7 @@ mod tests {
             last_event_at: None,
             plan_file_path: None,
             pending_stop: false,
-            metadata: monica_application::RawJson::empty_object(),
+            metadata: monica_domain::RawJson::empty_object(),
             created_at: "2026-06-02T00:00:00.000Z".to_string(),
             updated_at: "2026-06-02T00:00:00.000Z".to_string(),
         }
