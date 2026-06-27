@@ -1,7 +1,8 @@
 use anyhow::Result;
-use monica_application::{
-    Agent, Event, ExecutionProfile, ExternalReference, PermissionMode, Project, Provider, RawJson,
-    RefType, Task, TaskId, TaskKind, TaskRun, TaskRunId, TaskRunStatus, TaskStatus,
+use monica_application::ExecutionProfile;
+use monica_domain::{
+    Agent, Event, ExternalReference, PermissionMode, Project, Provider, RawJson, RefType, Task,
+    TaskId, TaskKind, TaskRun, TaskRunId, TaskRunStatus, TaskStatus,
 };
 use rusqlite::Row;
 

@@ -4,7 +4,7 @@ mod reconcile_terminal_sessions;
 mod settle_terminal_exit;
 
 pub use reconcile_terminal_sessions::{
-    reconcile_terminal_sessions, DaemonSessionView, ReconcileOutcome, TerminalSessionUpdate,
+    reconcile_terminal_sessions, DaemonSessionView, TerminalSessionUpdate,
 };
 pub use settle_terminal_exit::{
     task_run_settlement_for_orphaned_run, task_run_settlement_for_terminal_exit,

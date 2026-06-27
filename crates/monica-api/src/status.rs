@@ -8,12 +8,12 @@ pub enum TaskStatus {
     Closed,
 }
 
-impl From<monica_application::TaskStatus> for TaskStatus {
-    fn from(value: monica_application::TaskStatus) -> Self {
+impl From<monica_domain::TaskStatus> for TaskStatus {
+    fn from(value: monica_domain::TaskStatus) -> Self {
         match value {
-            monica_application::TaskStatus::Ready => Self::Ready,
-            monica_application::TaskStatus::InProgress => Self::InProgress,
-            monica_application::TaskStatus::Closed => Self::Closed,
+            monica_domain::TaskStatus::Ready => Self::Ready,
+            monica_domain::TaskStatus::InProgress => Self::InProgress,
+            monica_domain::TaskStatus::Closed => Self::Closed,
         }
     }
 }
@@ -29,15 +29,15 @@ pub enum TaskRunStatus {
     Failed,
 }
 
-impl From<monica_application::TaskRunStatus> for TaskRunStatus {
-    fn from(value: monica_application::TaskRunStatus) -> Self {
+impl From<monica_domain::TaskRunStatus> for TaskRunStatus {
+    fn from(value: monica_domain::TaskRunStatus) -> Self {
         match value {
-            monica_application::TaskRunStatus::SettingUp => Self::SettingUp,
-            monica_application::TaskRunStatus::Prepared => Self::Prepared,
-            monica_application::TaskRunStatus::Running => Self::Running,
-            monica_application::TaskRunStatus::WaitingForUser => Self::WaitingForUser,
-            monica_application::TaskRunStatus::Stopped => Self::Stopped,
-            monica_application::TaskRunStatus::Failed => Self::Failed,
+            monica_domain::TaskRunStatus::SettingUp => Self::SettingUp,
+            monica_domain::TaskRunStatus::Prepared => Self::Prepared,
+            monica_domain::TaskRunStatus::Running => Self::Running,
+            monica_domain::TaskRunStatus::WaitingForUser => Self::WaitingForUser,
+            monica_domain::TaskRunStatus::Stopped => Self::Stopped,
+            monica_domain::TaskRunStatus::Failed => Self::Failed,
         }
     }
 }
@@ -51,13 +51,13 @@ pub enum TaskRunWaitReason {
     AwaitingPrompt,
 }
 
-impl From<monica_application::TaskRunWaitReason> for TaskRunWaitReason {
-    fn from(value: monica_application::TaskRunWaitReason) -> Self {
+impl From<monica_domain::TaskRunWaitReason> for TaskRunWaitReason {
+    fn from(value: monica_domain::TaskRunWaitReason) -> Self {
         match value {
-            monica_application::TaskRunWaitReason::AskUserQuestion => Self::AskUserQuestion,
-            monica_application::TaskRunWaitReason::ExitPlanMode => Self::ExitPlanMode,
-            monica_application::TaskRunWaitReason::PermissionRequest => Self::PermissionRequest,
-            monica_application::TaskRunWaitReason::AwaitingPrompt => Self::AwaitingPrompt,
+            monica_domain::TaskRunWaitReason::AskUserQuestion => Self::AskUserQuestion,
+            monica_domain::TaskRunWaitReason::ExitPlanMode => Self::ExitPlanMode,
+            monica_domain::TaskRunWaitReason::PermissionRequest => Self::PermissionRequest,
+            monica_domain::TaskRunWaitReason::AwaitingPrompt => Self::AwaitingPrompt,
         }
     }
 }
@@ -76,18 +76,18 @@ pub enum DisplayStatus {
     Closed,
 }
 
-impl From<monica_application::DisplayStatus> for DisplayStatus {
-    fn from(value: monica_application::DisplayStatus) -> Self {
+impl From<monica_domain::DisplayStatus> for DisplayStatus {
+    fn from(value: monica_domain::DisplayStatus) -> Self {
         match value {
-            monica_application::DisplayStatus::Ready => Self::Ready,
-            monica_application::DisplayStatus::InProgress => Self::InProgress,
-            monica_application::DisplayStatus::SettingUp => Self::SettingUp,
-            monica_application::DisplayStatus::Prepared => Self::Prepared,
-            monica_application::DisplayStatus::Running => Self::Running,
-            monica_application::DisplayStatus::WaitingForUser => Self::WaitingForUser,
-            monica_application::DisplayStatus::Stopped => Self::Stopped,
-            monica_application::DisplayStatus::Failed => Self::Failed,
-            monica_application::DisplayStatus::Closed => Self::Closed,
+            monica_domain::DisplayStatus::Ready => Self::Ready,
+            monica_domain::DisplayStatus::InProgress => Self::InProgress,
+            monica_domain::DisplayStatus::SettingUp => Self::SettingUp,
+            monica_domain::DisplayStatus::Prepared => Self::Prepared,
+            monica_domain::DisplayStatus::Running => Self::Running,
+            monica_domain::DisplayStatus::WaitingForUser => Self::WaitingForUser,
+            monica_domain::DisplayStatus::Stopped => Self::Stopped,
+            monica_domain::DisplayStatus::Failed => Self::Failed,
+            monica_domain::DisplayStatus::Closed => Self::Closed,
         }
     }
 }
@@ -173,15 +173,15 @@ mod tests {
     #[test]
     fn display_status_mirror_matches_domain_serde() {
         for (domain, api) in [
-            (monica_application::DisplayStatus::Ready, DisplayStatus::Ready),
-            (monica_application::DisplayStatus::InProgress, DisplayStatus::InProgress),
-            (monica_application::DisplayStatus::SettingUp, DisplayStatus::SettingUp),
-            (monica_application::DisplayStatus::Prepared, DisplayStatus::Prepared),
-            (monica_application::DisplayStatus::Running, DisplayStatus::Running),
-            (monica_application::DisplayStatus::WaitingForUser, DisplayStatus::WaitingForUser),
-            (monica_application::DisplayStatus::Stopped, DisplayStatus::Stopped),
-            (monica_application::DisplayStatus::Failed, DisplayStatus::Failed),
-            (monica_application::DisplayStatus::Closed, DisplayStatus::Closed),
+            (monica_domain::DisplayStatus::Ready, DisplayStatus::Ready),
+            (monica_domain::DisplayStatus::InProgress, DisplayStatus::InProgress),
+            (monica_domain::DisplayStatus::SettingUp, DisplayStatus::SettingUp),
+            (monica_domain::DisplayStatus::Prepared, DisplayStatus::Prepared),
+            (monica_domain::DisplayStatus::Running, DisplayStatus::Running),
+            (monica_domain::DisplayStatus::WaitingForUser, DisplayStatus::WaitingForUser),
+            (monica_domain::DisplayStatus::Stopped, DisplayStatus::Stopped),
+            (monica_domain::DisplayStatus::Failed, DisplayStatus::Failed),
+            (monica_domain::DisplayStatus::Closed, DisplayStatus::Closed),
         ] {
             assert_eq!(DisplayStatus::from(domain), api);
             assert_eq!(

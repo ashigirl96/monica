@@ -12,17 +12,20 @@ use crate::ports::{
     TerminalAttachment, TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository,
     UnitOfWork, WorkTransaction, WorkbenchStore, Workspace,
 };
-use crate::usecases::record_hook;
+use crate::usecases::runs::record_hook;
+use crate::prelude::{
+    Agent, AgentSignal, Continuation, DisplayStatus, Event, ExternalReference, LintFinding, NewTask,
+    NewTaskRun, NewTerminalSession, NotebookDoc, Project, Provider, RefType, SignalKind, Task,
+    TaskId, TaskKind, TaskRun, TaskRunId, TaskRunStatus, TaskRunWaitReason, TaskStatus,
+    TerminalSession, TerminalSessionKind, TerminalSessionStatus,
+};
 use crate::{
-    Agent, AgentSignal, ApplicationEvent, AuthGateway, Backend, Clock, Continuation,
-    DaemonSessionView, DisplayStatus, Event, EventSink, ExecutionProfile, ExternalReference, GithubAuthStatus,
-    GithubDeviceFlow, GithubGateway, GithubIssue, GithubPullRequest, GithubPullRequestRef,
-    GithubPullRequestStatus, HookContext, LintFinding, Monica, NewTask, NewTaskRun, NewTerminalSession,
-    NotebookDoc, Project, Provider, PullRequestBranchSyncCandidate,
-    PullRequestStatusSyncCandidate, RefType, SetupEnv, SetupOutcome, SetupRunner, SignalKind,
-    Task, TaskId, TaskKind, TaskRun, TaskRunId, TaskRunObservation, TaskRunOutputs, TaskRunStatus,
-    TaskRunWaitReason, TaskStatus, TaskSummaryRow, TerminalSession,
-    TerminalSessionKind, TerminalSessionStatus, TerminalSessionUpdate, TerminalStateSnapshot,
+    ApplicationEvent, AuthGateway, Backend, Clock, DaemonSessionView, EventSink, ExecutionProfile,
+    GithubAuthStatus, GithubDeviceFlow, GithubGateway, GithubIssue, GithubPullRequest,
+    GithubPullRequestRef, GithubPullRequestStatus, HookContext, Monica,
+    PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate, SetupEnv, SetupOutcome,
+    SetupRunner, TaskRunObservation, TaskRunOutputs, TaskSummaryRow, TerminalSessionUpdate,
+    TerminalStateSnapshot,
 };
 // --- Agent-signal test builders -------------------------------------------------------------------
 // The use-case tests drive `record_hook` with typed `AgentSignal`s (the provider JSON -> signal
@@ -993,7 +996,7 @@ impl TaskRunOutputs for FakeTaskRunOutputs {
     fn prepare_task_shell_env(
         &self,
         task_id: &str,
-        _project: &crate::Project,
+        _project: &Project,
         _profile: &crate::ExecutionProfile,
         _task_run_id: Option<&str>,
         cwd: &std::path::Path,

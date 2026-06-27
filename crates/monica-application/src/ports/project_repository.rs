@@ -1,6 +1,7 @@
 use anyhow::Result;
 
-use crate::{ExecutionProfile, Project};
+use crate::prelude::Project;
+use crate::ExecutionProfile;
 
 pub trait ProjectRepository {
     fn upsert_project(&self, project: &Project, profile: &ExecutionProfile) -> Result<Project>;

@@ -1,10 +1,13 @@
 use monica_application::{
-    Agent, DisplayStatus, EventRepository, ExecutionProfile, ExternalReference, GithubPullRequest,
-    GithubPullRequestStatus, NewTask, NewTaskRun, NewTerminalSession, Project, Provider,
-    ProjectRepository, PullRequestBranchSyncCandidate, RawJson, RefType, TaskBoardQuery, TaskId,
-    TaskKind, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunStore,
-    TaskRunWaitReason, TaskStatus, TaskStore, TaskSummaryFilter, TaskSummaryRow,
-    TerminalSessionKind, TerminalSessionStatus, TerminalSessionUpdate, UnitOfWork, WorkbenchStore,
+    EventRepository, ExecutionProfile, GithubPullRequest, GithubPullRequestStatus,
+    ProjectRepository, PullRequestBranchSyncCandidate, TaskBoardQuery, TaskRunObservation,
+    TaskRunStore, TaskStore, TaskSummaryFilter, TaskSummaryRow, TerminalSessionUpdate, UnitOfWork,
+    WorkbenchStore,
+};
+use monica_domain::{
+    Agent, DisplayStatus, ExternalReference, NewTask, NewTaskRun, NewTerminalSession, Project,
+    Provider, RawJson, RefType, Task, TaskId, TaskKind, TaskRun, TaskRunStatus, TaskRunWaitReason,
+    TaskStatus, TerminalSessionKind, TerminalSessionStatus,
 };
 use rusqlite::params;
 use serde_json::json;

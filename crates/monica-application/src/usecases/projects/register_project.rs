@@ -1,7 +1,8 @@
 use std::path::Path;
 
 use super::ports::ProjectRepository;
-use crate::{parse_owner_repo, ApplicationError, ApplicationResult, ExecutionProfile, Project};
+use crate::prelude::{parse_owner_repo, Project};
+use crate::{ApplicationError, ApplicationResult, ExecutionProfile};
 
 pub fn register_project<R>(repos: &R, repo_input: &str, path: &Path) -> ApplicationResult<Project>
 where

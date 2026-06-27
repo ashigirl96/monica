@@ -3,6 +3,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
 use monica_application::{AuthGateway, GithubAuthStatus, GithubDeviceFlow};
+
 use reqwest::header::{ACCEPT, USER_AGENT};
 use serde::Deserialize;
 use tokio::sync::Mutex;

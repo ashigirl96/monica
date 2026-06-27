@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::TaskRun;
+use crate::prelude::TaskRun;
 
 /// The repo + branch a linked git worktree belongs to.
 #[derive(Debug, Clone, PartialEq, Eq)]

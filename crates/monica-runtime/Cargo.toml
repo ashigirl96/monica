@@ -6,6 +6,7 @@ rust-version = "1.95"
 
 [dependencies]
 monica-application = { path = "../monica-application" }
+monica-domain = { path = "../monica-domain" }
 monica-adapters = { path = "../monica-adapters" }
 monica-storage-sqlite = { path = "../monica-storage-sqlite" }
 anyhow = "1.0.102"

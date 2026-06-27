@@ -6,6 +6,7 @@ rust-version = "1.95"
 
 [dependencies]
 monica-application = { path = "../monica-application" }
+monica-domain = { path = "../monica-domain" }
 monica-paths = { path = "../monica-paths" }
 anyhow = "1.0.102"
 rusqlite = { version = "0.39", features = ["bundled"] }

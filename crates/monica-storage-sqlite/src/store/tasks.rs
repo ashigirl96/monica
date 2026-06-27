@@ -3,8 +3,10 @@ use rusqlite::{params, Connection};
 
 use crate::SqliteStore;
 use monica_application::{
-    DisplayStatus, ExternalReference, GithubPullRequestStatus, NewTask, Task, TaskBoardQuery,
-    TaskRunStatus, TaskRunWaitReason, TaskStatus, TaskStore, TaskSummaryFilter, TaskSummaryRow,
+    GithubPullRequestStatus, TaskBoardQuery, TaskStore, TaskSummaryFilter, TaskSummaryRow,
+};
+use monica_domain::{
+    DisplayStatus, ExternalReference, NewTask, Task, TaskRunStatus, TaskRunWaitReason, TaskStatus,
 };
 
 use super::{external_refs, sql_literal_list, SET_NOW, TASK_COLUMNS};

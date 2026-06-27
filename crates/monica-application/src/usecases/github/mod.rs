@@ -9,6 +9,5 @@ pub use auth::{
 };
 pub use sync_pull_requests::sync_next_pull_request;
 pub use track_github_issue::{
-    track_github_issue, track_github_issue_from_fetched, TrackGithubIssueInput,
-    TrackGithubIssueReport,
+    track_github_issue, TrackGithubIssueInput, TrackGithubIssueReport,
 };

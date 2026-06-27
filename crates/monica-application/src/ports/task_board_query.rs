@@ -1,6 +1,7 @@
 use anyhow::Result;
 
-use crate::prelude::{DisplayStatus, TaskSummaryRow};
+use crate::prelude::DisplayStatus;
+use crate::queries::TaskSummaryRow;
 
 /// How [`TaskBoardQuery::list_task_summaries`] scopes which tasks come back. This is the query's
 /// parameter, not a domain concept, so it lives beside the port rather than in `monica-domain`.

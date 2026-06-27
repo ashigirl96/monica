@@ -1,10 +1,11 @@
 use anyhow::Result;
 
-use crate::prelude::bench_runspace_id;
+use crate::bench::bench_runspace_id;
 use super::ports::{
     ProjectRepository, TaskRunOutputs, TaskRunStore, TaskStore, WorkbenchStore,
 };
-use crate::{ApplicationError, ApplicationResult, ExecutionProfile, Project, Task, TaskBench};
+use crate::prelude::{Project, Task};
+use crate::{ApplicationError, ApplicationResult, ExecutionProfile, TaskBench};
 
 pub(crate) fn default_bench_cwd(project: Option<&Project>, home_dir: Option<&str>) -> String {
     project
@@ -69,7 +70,7 @@ where
     Ok(shell_env_for(outputs, &task, project.as_ref(), profile.as_ref(), &cwd))
 }
 
-fn primary_run_agent<R>(repos: &R, task: &Task) -> Option<crate::Agent>
+fn primary_run_agent<R>(repos: &R, task: &Task) -> Option<crate::prelude::Agent>
 where
     R: TaskRunStore,
 {

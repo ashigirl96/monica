@@ -1,6 +1,7 @@
 use super::{Backend, Monica};
 use crate::usecases::tasks::{CloseIssueReport, MakeMainOutcome};
-use crate::{ApplicationEvent, ApplicationResult, DisplayStatus, Event, Task, TaskSummaryRow};
+use crate::prelude::{DisplayStatus, Event, Task};
+use crate::{ApplicationEvent, ApplicationResult, TaskSummaryRow};
 use crate::ports::TaskSummaryFilter;
 
 /// Task lifecycle and task/run read models.

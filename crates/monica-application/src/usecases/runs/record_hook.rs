@@ -3,10 +3,8 @@ use anyhow::Result;
 use super::ports::{Clock, EventRepository, TaskRunOutputs, TaskRunStore, TaskStore};
 use crate::ports::UnitOfWork;
 use crate::prelude::{is_safe_task_run_id, Agent, AgentSignal, SignalKind, Task};
-use crate::{
-    ApplicationError, NewTaskRun, TaskId, TaskRun, TaskRunObservation, TaskRunStatus,
-    TaskRunWaitReason, TaskStatus,
-};
+use crate::prelude::{NewTaskRun, TaskId, TaskRun, TaskRunStatus, TaskRunWaitReason, TaskStatus};
+use crate::{ApplicationError, TaskRunObservation};
 
 /// Identity carried by a hook invocation via `MONICA_*` env vars. `task_run_id` is only present
 /// for wrapper launches with an explicit run; plain `claude` in a Bench tab has task/tab only.

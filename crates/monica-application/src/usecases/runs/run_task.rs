@@ -8,10 +8,8 @@ use super::ports::{
     GitGateway, ProjectRepository, TaskRunOutputs, SetupEnv, SetupOutcome, SetupRunner,
     TaskRunStore, TaskStore, UnitOfWork, WorkbenchStore,
 };
-use crate::{
-    ApplicationError, ApplicationResult, ExecutionProfile, ExternalReference, NewTaskRun,
-    PrepareTaskResult, Project, RefType, Task, TaskRunStatus, TaskStatus,
-};
+use crate::prelude::{ExternalReference, NewTaskRun, Project, RefType, Task, TaskRunStatus, TaskStatus};
+use crate::{ApplicationError, ApplicationResult, ExecutionProfile, PrepareTaskResult};
 
 fn is_active_run_status(status: TaskRunStatus) -> bool {
     matches!(
@@ -244,7 +242,7 @@ pub fn prepare_claude_for_run<R, A>(
     repos: &mut R,
     outputs: &A,
     task_id: &str,
-    agent_override: Option<crate::Agent>,
+    agent_override: Option<crate::prelude::Agent>,
 ) -> ApplicationResult<crate::RunTaskResult>
 where
     R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore,
@@ -317,7 +315,7 @@ fn resolve_prompt(has_github_issue: bool, file_prompt: Option<String>) -> Option
     has_github_issue.then_some(file_prompt).flatten()
 }
 
-fn agent_initial_command(agent: crate::Agent, prompt: Option<&str>) -> String {
+fn agent_initial_command(agent: crate::prelude::Agent, prompt: Option<&str>) -> String {
     let bin = agent.as_str();
     match prompt {
         Some(prompt) => format!("{bin} {}", crate::shell::quote_single(prompt)),
@@ -331,18 +329,18 @@ mod tests {
 
     #[test]
     fn empty_prompt_launches_agent_bare() {
-        assert_eq!(agent_initial_command(crate::Agent::Claude, None), "claude");
-        assert_eq!(agent_initial_command(crate::Agent::Codex, None), "codex");
+        assert_eq!(agent_initial_command(crate::prelude::Agent::Claude, None), "claude");
+        assert_eq!(agent_initial_command(crate::prelude::Agent::Codex, None), "codex");
     }
 
     #[test]
     fn prompt_is_passed_as_single_quoted_argument() {
         assert_eq!(
-            agent_initial_command(crate::Agent::Claude, Some("fix the login bug")),
+            agent_initial_command(crate::prelude::Agent::Claude, Some("fix the login bug")),
             "claude 'fix the login bug'"
         );
         assert_eq!(
-            agent_initial_command(crate::Agent::Codex, Some("fix the login bug")),
+            agent_initial_command(crate::prelude::Agent::Codex, Some("fix the login bug")),
             "codex 'fix the login bug'"
         );
     }
@@ -350,7 +348,7 @@ mod tests {
     #[test]
     fn prompt_with_single_quote_is_escaped() {
         assert_eq!(
-            agent_initial_command(crate::Agent::Claude, Some("don't break it")),
+            agent_initial_command(crate::prelude::Agent::Claude, Some("don't break it")),
             "claude 'don'\\''t break it'"
         );
     }
@@ -358,7 +356,7 @@ mod tests {
     #[test]
     fn multiline_prompt_stays_within_one_quoted_argument() {
         assert_eq!(
-            agent_initial_command(crate::Agent::Claude, Some("line one\nline two")),
+            agent_initial_command(crate::prelude::Agent::Claude, Some("line one\nline two")),
             "claude 'line one\nline two'"
         );
     }

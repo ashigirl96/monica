@@ -2,9 +2,10 @@ use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection};
 
 use crate::SqliteStore;
-use monica_application::{
-    transition_is_generic_wait, HookTransition, NewTaskRun, TaskRun, TaskRunObservation,
-    TaskRunStatus, TaskRunStore, TaskRunWaitReason, TaskStatus,
+use monica_application::{TaskRunObservation, TaskRunStore};
+use monica_domain::{
+    transition_is_generic_wait, HookTransition, NewTaskRun, TaskRun, TaskRunStatus,
+    TaskRunWaitReason, TaskStatus,
 };
 
 use super::{sql_literal_list, tasks, SET_NOW, TASK_RUN_COLUMNS};

@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{anyhow, Context, Result};
-use monica_application::{parse_owner_repo, GitGateway, TaskRun, WorktreeRef};
+use monica_application::{GitGateway, WorktreeRef};
+use monica_domain::{parse_owner_repo, TaskRun};
 
 const RIP_COMMAND: &str = "/opt/homebrew/bin/rip";
 
@@ -344,8 +345,10 @@ mod tests {
     use std::process::Command;
 
     use monica_application::{
-        GitGateway, NewTask, NewTaskRun, Project, ProjectRepository, TaskId, TaskKind, TaskRun,
-        TaskRunId, TaskRunStatus, TaskRunStore, TaskStatus, TaskStore,
+        GitGateway, ProjectRepository, TaskRunStore, TaskStore,
+    };
+    use monica_domain::{
+        NewTask, NewTaskRun, Project, TaskId, TaskKind, TaskRun, TaskRunId, TaskRunStatus, TaskStatus,
     };
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
@@ -448,7 +451,7 @@ mod tests {
             rip: write_fake_rip(root.path()),
         };
         let report =
-            monica_application::usecases::tasks::close_issue(&mut db, &git, &item.id).unwrap();
+            monica_application::close_issue(&mut db, &git, &item.id).unwrap();
 
         assert!(!worktree.exists());
         assert!(!worktree_registered(&repo, &worktree).unwrap());
@@ -582,7 +585,7 @@ mod tests {
             last_event_at: None,
             plan_file_path: None,
             pending_stop: false,
-            metadata: monica_application::RawJson::empty_object(),
+            metadata: monica_domain::RawJson::empty_object(),
             created_at: "2026-06-02T00:00:00.000Z".to_string(),
             updated_at: "2026-06-02T00:00:00.000Z".to_string(),
         }

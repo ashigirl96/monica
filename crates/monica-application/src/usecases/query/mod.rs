@@ -3,7 +3,8 @@ mod ports;
 use self::ports::{
     EventRepository, ProjectRepository, TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter,
 };
-use crate::{ApplicationError, ApplicationResult, Event, Project, Task, TaskSummaryRow};
+use crate::prelude::{Event, Project, Task};
+use crate::{ApplicationError, ApplicationResult, TaskSummaryRow};
 
 /// The plan file path retained on the run currently driven by the given Workbench tab — set when
 /// that run surfaced a plan via `ExitPlanMode`. `None` for a shell tab, a run that never planned,

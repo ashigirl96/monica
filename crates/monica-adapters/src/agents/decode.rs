@@ -1,10 +1,8 @@
 use anyhow::Result;
 use serde_json::Value;
 
-use monica_application::{
-    Agent, AgentDecoders, AgentEventDecoder, AgentSignal, Continuation, SignalKind,
-    TaskRunWaitReason,
-};
+use monica_application::{AgentDecoders, AgentEventDecoder};
+use monica_domain::{Agent, AgentSignal, Continuation, SignalKind, TaskRunWaitReason};
 
 /// The default [`AgentDecoders`] factory the runtime wires into the façade: it picks the per-agent
 /// [`AgentEventDecoder`] and exposes the opaque event label, keeping provider knowledge here.

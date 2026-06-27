@@ -2,7 +2,8 @@ use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection};
 
 use crate::SqliteStore;
-use monica_application::{Clock, Event, EventRepository};
+use monica_application::{Clock, EventRepository};
+use monica_domain::Event;
 
 use super::{EVENT_COLUMNS, SET_NOW};
 

@@ -3,9 +3,11 @@ use rusqlite::Transaction;
 
 use crate::SqliteStore;
 use monica_application::{
-    Clock, Event, EventRepository, ExternalReference, NewTask, NewTaskRun, Task, TaskRun,
-    TaskRunObservation, TaskRunStatus, TaskRunStore, TaskStatus, TaskStore, UnitOfWork,
+    Clock, EventRepository, TaskRunObservation, TaskRunStore, TaskStore, UnitOfWork,
     WorkTransaction, WorkbenchStore,
+};
+use monica_domain::{
+    Event, ExternalReference, NewTask, NewTaskRun, Task, TaskRun, TaskRunStatus, TaskStatus,
 };
 
 use super::{bench, events, external_refs, task_runs, tasks};

@@ -1,4 +1,4 @@
-use crate::{TaskRun, TaskRunStatus, TerminalSession};
+use crate::prelude::{TaskRun, TaskRunStatus, TerminalSession};
 
 /// A task run that should be settled as Stopped because its terminal died without the hooks
 /// (SessionEnd) getting a chance to report it.
@@ -75,7 +75,7 @@ fn run_is_session_driven(run: &TaskRun) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{TaskId, TaskRunId, TerminalSessionKind, TerminalSessionStatus};
+    use crate::prelude::{TaskId, TaskRunId, TerminalSessionKind, TerminalSessionStatus};
 
     fn session(id: &str, tab_id: Option<&str>) -> TerminalSession {
         TerminalSession {

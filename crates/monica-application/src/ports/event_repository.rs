@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::Event;
+use crate::prelude::Event;
 
 pub trait EventRepository {
     /// Record an event row. `payload_json` is opaque JSON text stored verbatim (the caller has

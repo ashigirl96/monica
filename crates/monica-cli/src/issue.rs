@@ -2,7 +2,8 @@ use std::io::{self, Write};
 
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
-use monica_application::{parse_issue_input, parse_owner_repo, DisplayStatus, Task, TaskSummaryRow};
+use monica_application::{parse_issue_input, TaskSummaryRow};
+use monica_domain::{parse_owner_repo, DisplayStatus, Task};
 
 use crate::event_sink::{self, CliFacade};
 
@@ -159,7 +160,7 @@ fn render_status_table(rows: &[TaskSummaryRow]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use monica_application::TaskStatus;
+    use monica_domain::TaskStatus;
 
     #[test]
     fn parse_status_filter_defaults_to_none_and_validates_enum() {

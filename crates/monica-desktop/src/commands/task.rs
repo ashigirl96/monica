@@ -162,6 +162,6 @@ pub fn run_task(
     let mut monica = event_sink::open(&app)?;
     let result = monica
         .executions()
-        .prepare_claude_for_run(&task_id, agent.map(monica_application::Agent::from))?;
+        .prepare_claude_for_run(&task_id, agent.map(monica_domain::Agent::from))?;
     Ok(RunTaskResult::from(result))
 }

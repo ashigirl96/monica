@@ -2,7 +2,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::{ExecutionProfile, Project};
+use crate::prelude::Project;
+use crate::ExecutionProfile;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskShellEnv {

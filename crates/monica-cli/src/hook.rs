@@ -4,7 +4,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use clap::Subcommand;
-use monica_application::{Agent, HookContext};
+use monica_application::HookContext;
+use monica_domain::Agent;
 
 #[derive(Subcommand)]
 pub enum HookCommand {

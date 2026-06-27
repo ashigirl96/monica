@@ -118,9 +118,12 @@ pub(crate) mod test_support {
 mod tests {
     use super::*;
     use monica_application::{
-        DisplayStatus, EventRepository, NewTaskRun, ProjectRepository, Provider, RefType,
-        TaskBoardQuery, TaskId, TaskRunStatus, TaskRunStore, TaskRunWaitReason, TaskStatus, TaskStore,
+        EventRepository, ProjectRepository, TaskBoardQuery, TaskRunStore, TaskStore,
         TaskSummaryFilter,
+    };
+    use monica_domain::{
+        DisplayStatus, NewTaskRun, Provider, RefType, TaskId, TaskRunStatus, TaskRunWaitReason,
+        TaskStatus,
     };
     use rusqlite::params;
     use test_support::*;
