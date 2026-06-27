@@ -2,7 +2,10 @@ use anyhow::Result;
 
 use super::ports::{Clock, EventRepository, TaskRunOutputs, TaskRunStore, TaskStore};
 use crate::prelude::{is_safe_task_run_id, Agent, AgentSignal, SignalKind, Task};
-use crate::{NewTaskRun, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus};
+use crate::{
+    ApplicationError, NewTaskRun, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason,
+    TaskStatus,
+};
 
 /// Identity carried by a hook invocation via `MONICA_*` env vars. `task_run_id` is only present
 /// for wrapper launches with an explicit run; plain `claude` in a Bench tab has task/tab only.
@@ -109,7 +112,9 @@ where
 
     let mut jsonl_written = false;
     if let Some(task_run_id) = linked_task_run_id {
-        outputs.append_hook_event(task_run_id, &at, event_label, raw_stdin)?;
+        outputs
+            .append_hook_event(task_run_id, &at, event_label, raw_stdin)
+            .map_err(|e| ApplicationError::external(format!("failed to write hook event: {e:#}")))?;
         jsonl_written = true;
     }
 

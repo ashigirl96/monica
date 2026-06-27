@@ -2,7 +2,7 @@ use monica_api::{
     Agent, ApiError, BoardColumn, PrepareTaskResult, ProjectOption, RunTaskResult, TaskBench,
     TaskCreated, TaskRunStatus, TaskSummaryRow,
 };
-use monica_application::{MakeMainOutcome, TaskSummaryFilter, TrackGithubIssueInput};
+use monica_application::parse_issue_input;
 use serde::Serialize;
 use tauri::AppHandle;
 use tauri_specta::Event;
@@ -26,7 +26,7 @@ pub fn list_task_summaries(
     let mut monica = event_sink::open(&app)?;
     Ok(monica
         .tasks()
-        .list_task_summaries(TaskSummaryFilter::All, project.as_deref())?
+        .list_all_task_summaries(project.as_deref())?
         .into_iter()
         .map(TaskSummaryRow::from)
         .collect())
@@ -42,11 +42,11 @@ pub fn get_board_columns() -> Vec<BoardColumn> {
 #[specta::specta]
 pub async fn track_github_issue(app: AppHandle, input: String) -> Result<TaskCreated, ApiError> {
     let (repo, number) =
-        monica_application::parse_issue_input(&input).map_err(|e| ApiError::validation(e.to_string()))?;
+        parse_issue_input(&input).map_err(|e| ApiError::validation(e.to_string()))?;
     let mut monica = event_sink::open(&app)?;
     let report = monica
         .synchronization()
-        .track_github_issue(TrackGithubIssueInput { repo, number })
+        .track_github_issue(repo, number)
         .await?;
     Ok(TaskCreated {
         task_id: report.task.id.into(),
@@ -129,8 +129,7 @@ pub fn make_main_task_run(app: AppHandle, tab_id: String) -> Result<bool, ApiErr
     let mut monica = event_sink::open(&app)?;
     // The service emits `TaskRunStatusChanged` on a real change; the command only reports whether
     // the primary moved so the shortcut stays a silent no-op otherwise.
-    let outcome = monica.tasks().make_main_by_terminal_tab(&tab_id)?;
-    Ok(matches!(outcome, MakeMainOutcome::Changed { .. }))
+    Ok(monica.tasks().make_main_by_terminal_tab(&tab_id)?)
 }
 
 #[tauri::command]

@@ -38,8 +38,10 @@ impl<B: Backend> SynchronizationService<'_, B> {
 
     pub async fn track_github_issue(
         &mut self,
-        input: TrackGithubIssueInput,
+        repo: String,
+        number: i64,
     ) -> ApplicationResult<TrackGithubIssueReport> {
+        let input = TrackGithubIssueInput { repo, number };
         let Monica { repos, github, .. } = &mut *self.m;
         crate::usecases::github::track_github_issue(repos, github, input).await
     }

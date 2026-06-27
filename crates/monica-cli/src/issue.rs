@@ -2,10 +2,7 @@ use std::io::{self, Write};
 
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
-use monica_application::{
-    parse_issue_input, parse_owner_repo, DisplayStatus, Task, TaskSummaryFilter, TaskSummaryRow,
-    TrackGithubIssueInput,
-};
+use monica_application::{parse_issue_input, parse_owner_repo, DisplayStatus, Task, TaskSummaryRow};
 
 use crate::event_sink::{self, CliFacade};
 
@@ -43,10 +40,7 @@ async fn track_command(monica: &mut CliFacade, target: &str) -> Result<()> {
     let (repo, number) = parse_issue_input(target)?;
     let report = monica
         .synchronization()
-        .track_github_issue(TrackGithubIssueInput {
-            repo: repo.clone(),
-            number,
-        })
+        .track_github_issue(repo.clone(), number)
         .await
         .with_context(|| format!("failed to fetch GitHub issue {repo}#{number}"))?;
     let item = report.task;
@@ -62,9 +56,12 @@ fn status_command(
     status: Option<String>,
     project: Option<String>,
 ) -> Result<()> {
-    let filter = status_filter(status.as_deref())?;
+    let status = parse_status_filter(status.as_deref())?;
     let project = normalize_project_filter(project.as_deref())?;
-    let rows = monica.tasks().list_task_summaries(filter, project.as_deref())?;
+    let rows = match status {
+        Some(s) => monica.tasks().list_task_summaries_by_status(s, project.as_deref())?,
+        None => monica.tasks().list_active_task_summaries(project.as_deref())?,
+    };
     print!("{}", render_status_table(&rows));
     Ok(())
 }
@@ -78,7 +75,7 @@ fn close_command(monica: &mut CliFacade, id: &str) -> Result<()> {
         .ok_or_else(|| anyhow!("Issue not found: {id}"))?;
     let project = monica
         .tasks()
-        .list_task_summaries(TaskSummaryFilter::All, None)?
+        .list_all_task_summaries(None)?
         .into_iter()
         .find(|row| row.id == item.id.as_str())
         .and_then(|row| row.project);
@@ -123,10 +120,10 @@ fn is_yes(answer: &str) -> bool {
     answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes")
 }
 
-fn status_filter(status: Option<&str>) -> Result<TaskSummaryFilter> {
+fn parse_status_filter(status: Option<&str>) -> Result<Option<DisplayStatus>> {
     match status {
-        Some(token) => Ok(TaskSummaryFilter::Status(DisplayStatus::parse_token(token)?)),
-        None => Ok(TaskSummaryFilter::Active),
+        Some(token) => Ok(Some(DisplayStatus::parse_token(token)?)),
+        None => Ok(None),
     }
 }
 
@@ -165,17 +162,17 @@ mod tests {
     use monica_application::TaskStatus;
 
     #[test]
-    fn status_filter_defaults_to_active_and_validates_enum() {
-        assert_eq!(status_filter(None).unwrap(), TaskSummaryFilter::Active);
+    fn parse_status_filter_defaults_to_none_and_validates_enum() {
+        assert_eq!(parse_status_filter(None).unwrap(), None);
         assert_eq!(
-            status_filter(Some("ready")).unwrap(),
-            TaskSummaryFilter::Status(DisplayStatus::Ready)
+            parse_status_filter(Some("ready")).unwrap(),
+            Some(DisplayStatus::Ready)
         );
         assert_eq!(
-            status_filter(Some("closed")).unwrap(),
-            TaskSummaryFilter::Status(DisplayStatus::Closed)
+            parse_status_filter(Some("closed")).unwrap(),
+            Some(DisplayStatus::Closed)
         );
-        assert!(status_filter(Some("bogus")).is_err());
+        assert!(parse_status_filter(Some("bogus")).is_err());
     }
 
     #[test]

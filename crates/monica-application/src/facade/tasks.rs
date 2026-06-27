@@ -1,8 +1,6 @@
 use super::{Backend, Monica};
 use crate::usecases::tasks::{CloseIssueReport, MakeMainOutcome};
-use crate::{
-    ApplicationEvent, ApplicationResult, Event, Task, TaskSummaryRow,
-};
+use crate::{ApplicationEvent, ApplicationResult, DisplayStatus, Event, Task, TaskSummaryRow};
 use crate::ports::TaskSummaryFilter;
 
 /// Task lifecycle and task/run read models.
@@ -21,8 +19,9 @@ impl<B: Backend> TaskService<'_, B> {
     }
 
     /// Promote the run hosted in a Workbench tab to its task's Main Run, emitting the run's new
-    /// status when the promotion actually changes the pointer.
-    pub fn make_main_by_terminal_tab(&mut self, terminal_tab_id: &str) -> ApplicationResult<MakeMainOutcome> {
+    /// status when the promotion actually changes the pointer. Returns whether the primary actually
+    /// changed.
+    pub fn make_main_by_terminal_tab(&mut self, terminal_tab_id: &str) -> ApplicationResult<bool> {
         let Monica { repos, events, .. } = &mut *self.m;
         let outcome = crate::usecases::tasks::make_main_by_terminal_tab(repos, terminal_tab_id)?;
         if let MakeMainOutcome::Changed { task_id, task_run_id, status } = &outcome {
@@ -32,7 +31,7 @@ impl<B: Backend> TaskService<'_, B> {
                 status: *status,
             });
         }
-        Ok(outcome)
+        Ok(matches!(outcome, MakeMainOutcome::Changed { .. }))
     }
 
     pub fn primary_terminal_tab(&self, task_id: &str) -> ApplicationResult<Option<String>> {
@@ -43,7 +42,29 @@ impl<B: Backend> TaskService<'_, B> {
         crate::usecases::query::list_tasks(&self.m.repos)
     }
 
-    pub fn list_task_summaries(
+    pub fn list_all_task_summaries(
+        &self,
+        project: Option<&str>,
+    ) -> ApplicationResult<Vec<TaskSummaryRow>> {
+        self.list_task_summaries(TaskSummaryFilter::All, project)
+    }
+
+    pub fn list_active_task_summaries(
+        &self,
+        project: Option<&str>,
+    ) -> ApplicationResult<Vec<TaskSummaryRow>> {
+        self.list_task_summaries(TaskSummaryFilter::Active, project)
+    }
+
+    pub fn list_task_summaries_by_status(
+        &self,
+        status: DisplayStatus,
+        project: Option<&str>,
+    ) -> ApplicationResult<Vec<TaskSummaryRow>> {
+        self.list_task_summaries(TaskSummaryFilter::Status(status), project)
+    }
+
+    fn list_task_summaries(
         &self,
         filter: TaskSummaryFilter,
         project: Option<&str>,

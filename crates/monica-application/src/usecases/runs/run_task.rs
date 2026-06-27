@@ -195,7 +195,9 @@ where
     S: SetupRunner,
     A: TaskRunOutputs,
 {
-    let log_path = outputs.setup_log_path(task_run_id)?;
+    let log_path = outputs
+        .setup_log_path(task_run_id)
+        .map_err(|e| ApplicationError::external(format!("failed to resolve setup log path: {e:#}")))?;
     let env = SetupEnv {
         monica_id: task_id.to_string(),
         task_run_id: task_run_id.to_string(),
@@ -270,8 +272,9 @@ where
     let mut effective_project = project;
     effective_project.agent_default = agent;
 
-    let shell =
-        outputs.prepare_task_shell_env(task_id, &effective_project, Some(&primary_id), &worktree_path)?;
+    let shell = outputs
+        .prepare_task_shell_env(task_id, &effective_project, Some(&primary_id), &worktree_path)
+        .map_err(|e| ApplicationError::external(format!("failed to prepare shell env: {e:#}")))?;
     repos.set_task_run_settings_path(&primary_id, &shell.settings_path)?;
 
     let (runspace_id, _, _) = super::open_bench::ensure_bench(repos, task_id, &worktree_str, true)?;
