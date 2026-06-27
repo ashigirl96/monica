@@ -7,12 +7,12 @@ use crate::commands::pull_request::PrSyncCompleted;
 use crate::commands::task::TaskRunStatusChanged;
 
 /// The application façade wired to the default backend and the Tauri event sink.
-pub type AppMonica = monica_application::Monica<monica_infra::DefaultBackend>;
+pub type AppMonica = monica_runtime::MonicaFacade;
 
 /// Open the façade for a command/thread. The façade owns a SQLite connection and is `!Send`, so it
 /// must be built per operation on the thread that uses it — never stored in Tauri state.
 pub fn open(app: &AppHandle) -> Result<AppMonica, ApiError> {
-    monica_infra::open_monica(Box::new(TauriEventSink::new(app.clone())))
+    monica_runtime::open_monica(Box::new(TauriEventSink::new(app.clone())))
         .map_err(|e| ApiError::storage(format!("{e:#}")))
 }
 

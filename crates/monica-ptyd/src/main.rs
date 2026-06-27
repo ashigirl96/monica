@@ -6,9 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, bail, Result};
 use monica_terminal_daemon::daemon::{run_daemon, DaemonConfig};
 
-/// Mirrors monica-infra's `paths::base_dir()`. Deliberately not a dependency: the daemon
-/// must stay decoupled from the app's SQLite schema lifecycle so an old daemon binary can
-/// keep serving sessions across app upgrades without ever running migrations.
+/// Mirrors `monica-paths`'s `base_dir()`. Deliberately not a dependency: the daemon must stay a
+/// standalone binary that an old build can keep serving sessions across app upgrades, never coupled
+/// to the rest of the workspace's lifecycle.
 fn base_dir() -> Result<PathBuf> {
     if let Some(home) = std::env::var_os("MONICA_HOME") {
         return Ok(PathBuf::from(home));

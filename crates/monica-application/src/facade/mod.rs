@@ -4,7 +4,7 @@
 //! single SQLite connection backing `Repos` is used strictly serially.
 //!
 //! `Monica` is `!Send` (its SQLite store owns a non-`Send` connection): build a fresh one per
-//! operation / per thread via the infra constructor — never share one across threads.
+//! operation / per thread via the `monica-runtime` constructor — never share one across threads.
 
 mod backend;
 mod executions;
@@ -31,6 +31,7 @@ pub struct Monica<B: Backend> {
     pub(in crate::facade) outputs: B::Outputs,
     pub(in crate::facade) notebooks: B::Notebooks,
     pub(in crate::facade) workspace: B::Workspace,
+    pub(in crate::facade) agents: B::Agents,
     pub(in crate::facade) events: Box<dyn EventSink>,
 }
 
@@ -45,9 +46,10 @@ impl<B: Backend> Monica<B> {
         outputs: B::Outputs,
         notebooks: B::Notebooks,
         workspace: B::Workspace,
+        agents: B::Agents,
         events: Box<dyn EventSink>,
     ) -> Self {
-        Self { repos, git, github, auth, setup, outputs, notebooks, workspace, events }
+        Self { repos, git, github, auth, setup, outputs, notebooks, workspace, agents, events }
     }
 
     pub fn tasks(&mut self) -> TaskService<'_, B> {

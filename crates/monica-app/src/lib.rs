@@ -135,7 +135,7 @@ fn release_log_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
 #[cfg(not(debug_assertions))]
 fn release_log_dir() -> std::path::PathBuf {
-    monica_infra::filesystem::paths::logs_dir()
+    monica_paths::logs_dir()
         .unwrap_or_else(|_| std::env::temp_dir().join("monica").join("logs"))
 }
 

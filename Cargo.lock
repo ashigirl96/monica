@@ -2822,6 +2822,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "monica-adapters"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "monica-application",
+ "monica-paths",
+ "monica-storage-sqlite",
+ "octocrab",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "monica-api"
 version = "0.1.0"
 dependencies = [
@@ -2840,7 +2856,8 @@ dependencies = [
  "log",
  "monica-api",
  "monica-application",
- "monica-infra",
+ "monica-paths",
+ "monica-runtime",
  "monica-terminal-client",
  "monica-terminal-protocol",
  "objc2 0.6.4",
@@ -2880,7 +2897,8 @@ dependencies = [
  "clap_complete",
  "mmdflux",
  "monica-application",
- "monica-infra",
+ "monica-paths",
+ "monica-runtime",
  "rumdl",
  "serde_json",
  "tokio",
@@ -2895,19 +2913,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "monica-infra"
+name = "monica-paths"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "monica-application",
- "octocrab",
- "reqwest",
- "rusqlite",
- "rusqlite_migration",
- "rustls",
- "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -2921,6 +2930,30 @@ dependencies = [
  "monica-terminal-client",
  "monica-terminal-daemon",
  "monica-terminal-protocol",
+]
+
+[[package]]
+name = "monica-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "monica-adapters",
+ "monica-application",
+ "monica-storage-sqlite",
+ "tokio",
+]
+
+[[package]]
+name = "monica-storage-sqlite"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "monica-application",
+ "monica-paths",
+ "rusqlite",
+ "rusqlite_migration",
+ "serde_json",
 ]
 
 [[package]]

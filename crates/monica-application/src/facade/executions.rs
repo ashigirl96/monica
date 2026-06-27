@@ -1,6 +1,6 @@
 use super::{Backend, Monica};
 use crate::ports::{
-    TaskRunStore, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
+    AgentDecoders, TaskRunStore, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
     TerminalSessionRepository, WorkbenchStore,
 };
 use crate::usecases::terminal::{
@@ -8,9 +8,9 @@ use crate::usecases::terminal::{
     task_run_settlement_for_terminal_exit, TerminalExitSettlement, TerminalSessionUpdate,
 };
 use crate::{
-    Agent, AgentSignal, ApplicationError, ApplicationEvent, ApplicationResult, EventSink,
-    HookContext, HookReport, NewTerminalSession, PrepareTaskResult, RunTaskResult, TaskBench,
-    TaskRun, TaskRunStatus, TerminalSession, TerminalSessionStatus, TerminalStateSnapshot,
+    Agent, ApplicationError, ApplicationEvent, ApplicationResult, EventSink, HookContext,
+    HookReport, NewTerminalSession, PrepareTaskResult, RunTaskResult, TaskBench, TaskRun,
+    TaskRunStatus, TerminalSession, TerminalSessionStatus, TerminalStateSnapshot,
 };
 
 /// Run preparation/execution, agent hooks, and (in a later phase) terminal sessions. Groups the
@@ -69,19 +69,25 @@ impl<B: Backend> ExecutionService<'_, B> {
         Ok(self.m.repos.list_bench_runspace_map()?)
     }
 
-    /// Record a decoded agent signal and, on the entering edge into `WaitingForUser`, emit
-    /// [`ApplicationEvent::AwaitingUserInput`] so drivers can surface a notification. The driver
-    /// decodes the raw hook payload into a provider-agnostic [`AgentSignal`] at the boundary
-    /// (`monica_infra::agents`); `raw_stdin` is passed through only for verbatim storage.
-    pub fn ingest_agent_signal(
+    /// Decode a raw agent hook payload, record the resulting signal, and — on the entering edge
+    /// into `WaitingForUser` — emit [`ApplicationEvent::AwaitingUserInput`] so drivers can surface a
+    /// notification. Decoding happens behind the façade via [`Backend::Agents`], so drivers hand in
+    /// raw bytes and never touch the per-agent decoders. `raw_stdin` is also stored verbatim.
+    pub fn ingest_agent_hook(
         &mut self,
         agent: Agent,
         ctx: HookContext<'_>,
-        signal: Option<&AgentSignal>,
         raw_stdin: &str,
     ) -> ApplicationResult<HookReport> {
-        let Monica { repos, outputs, events, .. } = &mut *self.m;
-        let report = crate::usecases::runs::record_hook(repos, outputs, ctx, agent, signal, raw_stdin)?;
+        let Monica { repos, outputs, events, agents, .. } = &mut *self.m;
+        let signal = agents.decode(agent, raw_stdin.as_bytes())?;
+        let mut report =
+            crate::usecases::runs::record_hook(repos, outputs, ctx, agent, signal.as_ref(), raw_stdin)?;
+        // A dropped event (a non-blocking tool call) carries no signal; recover its provider name
+        // here so the driver's debug log need not reach back into the decoders.
+        if report.event_name.is_none() {
+            report.event_name = agents.event_label(raw_stdin.as_bytes());
+        }
         if report.entered_waiting_for_user {
             events.emit(ApplicationEvent::AwaitingUserInput {
                 task_id: ctx.task_id.map(str::to_string),

@@ -12,7 +12,7 @@ use anyhow::{bail, Context, Result};
 use monica_application::{
     DaemonSessionView, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
 };
-use monica_infra::filesystem::paths;
+use monica_paths as paths;
 use monica_terminal_client::{ClientEvent, PtydClient};
 use monica_terminal_protocol::{CreateParams, RequestOp, ResponseBody, SessionInfo, PROTOCOL_VERSION};
 use tauri::{AppHandle, Emitter, Manager};
@@ -95,7 +95,7 @@ fn try_connect(app: &AppHandle, socket: &Path) -> Result<Arc<PtydClient>> {
 /// Open a thread-local façade carrying a Tauri event sink. Used by the reader-thread callbacks,
 /// which run outside any command and must build their own façade.
 fn open_facade(app: &AppHandle) -> Result<AppMonica> {
-    monica_infra::open_monica(Box::new(TauriEventSink::new(app.clone())))
+    monica_runtime::open_monica(Box::new(TauriEventSink::new(app.clone())))
 }
 
 fn handle_event(app: &AppHandle, event: ClientEvent) {
