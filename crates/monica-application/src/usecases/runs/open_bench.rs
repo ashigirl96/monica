@@ -42,8 +42,6 @@ where
     Ok((runspace_id, desired_cwd.to_string(), true))
 }
 
-/// Recompute the shell env for a task-connected runspace. Fails soft (empty vec) when the task
-/// has no project or output generation fails, so terminals still open without Monica context.
 pub fn task_shell_env<R, A>(
     repos: &R,
     outputs: &A,
@@ -59,13 +57,22 @@ where
         .map(|(_, cwd)| cwd)
         .or_else(|| resolve_worktree_cwd(repos, &task))
         .unwrap_or_else(|| default_bench_cwd(project.as_ref(), home_dir().as_deref()));
-    let profile = load_optional_profile(repos, project.as_ref())?.map(|mut prof| {
+    let mut profile = load_optional_profile(repos, project.as_ref())?;
+    if let Some(prof) = &mut profile {
         if let Some(agent) = primary_run_agent(repos, &task) {
             prof.agent_default = agent;
         }
-        prof
-    });
-    Ok(shell_env_for(outputs, &task, project.as_ref(), profile.as_ref(), &cwd))
+    }
+    let env = match (project.as_ref(), profile.as_ref()) {
+        (Some(p), Some(prof)) => {
+            let shell = outputs
+                .prepare_task_shell_env(&task.id, p, prof, None, std::path::Path::new(&cwd))
+                .map_err(|e| ApplicationError::external(format!("failed to prepare shell env: {e:#}")))?;
+            shell.env
+        }
+        _ => Vec::new(),
+    };
+    Ok(env)
 }
 
 fn primary_run_agent<R>(repos: &R, task: &Task) -> Option<crate::prelude::Agent>
