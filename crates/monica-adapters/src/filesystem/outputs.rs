@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use monica_application::shell::quote_single;
 use monica_application::{ExecutionProfile, TaskRunOutputs, TaskShellEnv};
-use monica_domain::Project;
+use monica_domain::{Agent, Project};
 use serde_json::{json, Value};
 
 use monica_paths as paths;
@@ -124,7 +124,7 @@ fn write_if_changed(path: &Path, contents: &str) -> Result<()> {
     fs::write(path, contents).with_context(|| format!("failed to write {}", path.display()))
 }
 
-fn resolve_hook_command(agent: monica_domain::Agent) -> Result<String> {
+fn resolve_hook_command(agent: Agent) -> Result<String> {
     let subcommand = agent.as_str();
     if let Ok(base) = std::env::var("MONICA_HOOK_COMMAND") {
         if !base.is_empty() {
@@ -157,7 +157,7 @@ fn pin_hook_command_base(hook_command: &str, monica_home: &str) -> String {
 }
 
 fn write_agent_hooks_config(
-    agent: monica_domain::Agent,
+    agent: Agent,
     cwd: &Path,
     hook_command: &str,
 ) -> Result<String> {
@@ -176,11 +176,11 @@ fn write_agent_hooks_config(
 
     let hooks = agent_hooks_value(agent, hook_command);
     let body = match agent {
-        monica_domain::Agent::Claude => {
+        Agent::Claude => {
             let existing = fs::read_to_string(&config_path).ok();
             merge_hooks_into_settings(existing.as_deref(), &hooks)?
         }
-        monica_domain::Agent::Codex => serde_json::to_string_pretty(&hooks)
+        Agent::Codex => serde_json::to_string_pretty(&hooks)
             .context("failed to serialize hooks config")?,
     };
     write_if_changed(&config_path, &body)?;
@@ -209,7 +209,7 @@ fn hook_group(hook_command: &str, matcher: &str) -> Value {
     json!({ "matcher": matcher, "hooks": [{ "type": "command", "command": hook_command }] })
 }
 
-fn agent_hooks_value(agent: monica_domain::Agent, hook_command: &str) -> Value {
+fn agent_hooks_value(agent: Agent, hook_command: &str) -> Value {
     let group = || json!([hook_group(hook_command, "")]);
     let tool_wait_groups = || {
         json!([
@@ -293,10 +293,10 @@ fi
 exec "$REAL_CODEX" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust "$@"
 "#;
 
-fn agent_wrapper_script(agent: monica_domain::Agent) -> &'static str {
+fn agent_wrapper_script(agent: Agent) -> &'static str {
     match agent {
-        monica_domain::Agent::Claude => CLAUDE_WRAPPER,
-        monica_domain::Agent::Codex => CODEX_WRAPPER,
+        Agent::Claude => CLAUDE_WRAPPER,
+        Agent::Codex => CODEX_WRAPPER,
     }
 }
 
@@ -306,7 +306,7 @@ fn agent_wrapper_script(agent: monica_domain::Agent) -> &'static str {
 // The claude() wrapper must therefore be installed here in .zshenv — a shell
 // function survives the user's rc files, unlike PATH which path_helper,
 // .zshrc, and direnv all rewrite.
-fn zdotdir_zshenv(agent: monica_domain::Agent) -> String {
+fn zdotdir_zshenv(agent: Agent) -> String {
     let bin = agent.as_str();
     format!(
         r#"# Monica ZDOTDIR bootstrap for zsh.
@@ -346,7 +346,7 @@ builtin unset _monica_file
     )
 }
 
-fn write_zdotdir(zdotdir: &Path, agent: monica_domain::Agent) -> Result<()> {
+fn write_zdotdir(zdotdir: &Path, agent: Agent) -> Result<()> {
     fs::create_dir_all(zdotdir)
         .with_context(|| format!("failed to create {}", zdotdir.display()))?;
     write_if_changed(&zdotdir.join(".zshenv"), &zdotdir_zshenv(agent))?;
@@ -362,7 +362,7 @@ mod tests {
 
     #[test]
     fn agent_hooks_value_claude_contains_tracked_events() {
-        let parsed = agent_hooks_value(monica_domain::Agent::Claude, "monica hook claude");
+        let parsed = agent_hooks_value(Agent::Claude, "monica hook claude");
         for event in [
             "SessionStart",
             "UserPromptSubmit",
@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn agent_hooks_value_codex_contains_supported_events() {
-        let parsed = agent_hooks_value(monica_domain::Agent::Codex, "monica hook codex");
+        let parsed = agent_hooks_value(Agent::Codex, "monica hook codex");
         for event in [
             "SessionStart",
             "UserPromptSubmit",
@@ -403,7 +403,7 @@ mod tests {
 
     #[test]
     fn agent_hooks_value_codex_excludes_claude_only_events() {
-        let parsed = agent_hooks_value(monica_domain::Agent::Codex, "monica hook codex");
+        let parsed = agent_hooks_value(Agent::Codex, "monica hook codex");
         assert!(parsed.pointer("/hooks/SessionEnd").is_none());
         assert!(parsed.pointer("/hooks/StopFailure").is_none());
     }
@@ -412,7 +412,7 @@ mod tests {
     fn write_agent_hooks_config_codex_writes_into_cwd_dot_codex() {
         let cwd = unique_temp_dir("codex-write");
         let path =
-            write_agent_hooks_config(monica_domain::Agent::Codex, &cwd, "monica hook codex")
+            write_agent_hooks_config(Agent::Codex, &cwd, "monica hook codex")
                 .unwrap();
         let expected = cwd.join(".codex").join("hooks.json");
         assert_eq!(path, expected.to_string_lossy());
@@ -433,7 +433,7 @@ mod tests {
 
     #[test]
     fn merge_hooks_creates_fresh_settings() {
-        let hooks = agent_hooks_value(monica_domain::Agent::Claude, "monica hook claude");
+        let hooks = agent_hooks_value(Agent::Claude, "monica hook claude");
         let body = merge_hooks_into_settings(None, &hooks).unwrap();
         let parsed: Value = serde_json::from_str(&body).unwrap();
         let cmd = parsed
@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn merge_hooks_preserves_other_top_level_keys() {
         let existing = r#"{"model":"opus","permissions":{"allow":["Bash"]}}"#;
-        let hooks = agent_hooks_value(monica_domain::Agent::Claude, "monica hook claude");
+        let hooks = agent_hooks_value(Agent::Claude, "monica hook claude");
         let body = merge_hooks_into_settings(Some(existing), &hooks).unwrap();
         let parsed: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(parsed.pointer("/model").and_then(Value::as_str), Some("opus"));
@@ -459,7 +459,7 @@ mod tests {
     #[test]
     fn merge_hooks_replaces_pre_existing_hooks_key() {
         let existing = r#"{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"old"}]}]}}"#;
-        let hooks = agent_hooks_value(monica_domain::Agent::Claude, "monica hook claude");
+        let hooks = agent_hooks_value(Agent::Claude, "monica hook claude");
         let body = merge_hooks_into_settings(Some(existing), &hooks).unwrap();
         let parsed: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(
@@ -472,7 +472,7 @@ mod tests {
 
     #[test]
     fn merge_hooks_replaces_non_object_or_malformed_existing() {
-        let hooks = agent_hooks_value(monica_domain::Agent::Claude, "monica hook claude");
+        let hooks = agent_hooks_value(Agent::Claude, "monica hook claude");
         for existing in [Some("[1,2,3]"), Some("not json"), Some("\"scalar\"")] {
             let body = merge_hooks_into_settings(existing, &hooks).unwrap();
             let parsed: Value = serde_json::from_str(&body).unwrap();
@@ -510,7 +510,7 @@ mod tests {
     fn write_agent_hooks_config_claude_writes_into_cwd_dot_claude() {
         let cwd = unique_temp_dir("write");
         let path =
-            write_agent_hooks_config(monica_domain::Agent::Claude, &cwd, "monica hook claude")
+            write_agent_hooks_config(Agent::Claude, &cwd, "monica hook claude")
                 .unwrap();
         let expected = cwd.join(".claude").join("settings.local.json");
         assert_eq!(path, expected.to_string_lossy());
@@ -532,7 +532,7 @@ mod tests {
         let before = fs::read_to_string(&global).ok();
 
         let path =
-            write_agent_hooks_config(monica_domain::Agent::Claude, &home, "monica hook claude")
+            write_agent_hooks_config(Agent::Claude, &home, "monica hook claude")
                 .unwrap();
         assert_eq!(path, global.to_string_lossy());
 
@@ -543,8 +543,8 @@ mod tests {
     #[test]
     fn zshenv_restores_zdotdir_and_installs_agent_function() {
         for (agent, bin) in [
-            (monica_domain::Agent::Claude, "claude"),
-            (monica_domain::Agent::Codex, "codex"),
+            (Agent::Claude, "claude"),
+            (Agent::Codex, "codex"),
         ] {
             let zshenv = zdotdir_zshenv(agent);
             assert!(zshenv.contains(r#"builtin export ZDOTDIR="$MONICA_ORIGINAL_ZDOTDIR""#), "{bin}");

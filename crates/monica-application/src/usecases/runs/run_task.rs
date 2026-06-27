@@ -21,7 +21,7 @@ fn is_active_run_status(status: TaskRunStatus) -> bool {
 fn load_task_and_project<R>(
     repos: &R,
     task_id: &str,
-) -> ApplicationResult<(Task, Project, ExecutionProfile)>
+) -> ApplicationResult<(Task, Project)>
 where
     R: TaskStore + ProjectRepository,
 {
@@ -35,10 +35,14 @@ where
     let project = repos
         .get_project(project_id)?
         .ok_or_else(|| ApplicationError::not_found(format!("project not found: {project_id}")))?;
-    let profile = repos
-        .get_execution_profile(project_id)?
-        .unwrap_or_default();
-    Ok((task, project, profile))
+    Ok((task, project))
+}
+
+fn load_execution_profile<R>(repos: &R, project_id: &str) -> ApplicationResult<ExecutionProfile>
+where
+    R: ProjectRepository,
+{
+    Ok(repos.get_execution_profile(project_id)?.unwrap_or_default())
 }
 
 /// Phase 1: Create TaskRun (SettingUp) + set as Main Run + ensure bench exists.
@@ -47,7 +51,7 @@ pub fn start_run<R>(repos: &mut R, task_id: &str) -> ApplicationResult<PrepareTa
 where
     R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore + UnitOfWork,
 {
-    let (task, project, _profile) = load_task_and_project(repos, task_id)?;
+    let (task, project) = load_task_and_project(repos, task_id)?;
 
     if task.status == TaskStatus::Closed {
         return Err(ApplicationError::validation(format!(
@@ -136,7 +140,8 @@ where
     S: SetupRunner,
     A: TaskRunOutputs,
 {
-    let (_, project, profile) = load_task_and_project(repos, task_id)?;
+    let (_, project) = load_task_and_project(repos, task_id)?;
+    let profile = load_execution_profile(repos, &project.id)?;
 
     let run = repos
         .get_task_run(task_run_id)?
@@ -254,7 +259,8 @@ where
     R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore,
     A: TaskRunOutputs,
 {
-    let (task, project, profile) = load_task_and_project(repos, task_id)?;
+    let (task, project) = load_task_and_project(repos, task_id)?;
+    let profile = load_execution_profile(repos, &project.id)?;
 
     let primary_id = task.primary_task_run_id.ok_or_else(|| {
         ApplicationError::validation(format!("task {task_id} has no primary run; prepare it first"))
