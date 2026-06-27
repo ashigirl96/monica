@@ -51,7 +51,7 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_APP_PATH: crates/monica-app
+          TAURI_APP_PATH: crates/monica-desktop
 
       - name: Report bundle size
         if: always()

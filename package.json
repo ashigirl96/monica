@@ -7,7 +7,7 @@
     "dev": "bun --bun vite",
     "build": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && bun --bun vite build",
     "preview": "bun --bun vite preview",
-    "tauri": "TAURI_APP_PATH=crates/monica-app tauri",
+    "tauri": "TAURI_APP_PATH=crates/monica-desktop tauri",
     "prepare": "lefthook install 2>/dev/null || true"
   },
   "dependencies": {

@@ -2849,33 +2849,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "monica-app"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "log",
- "monica-api",
- "monica-application",
- "monica-paths",
- "monica-runtime",
- "monica-terminal-client",
- "monica-terminal-protocol",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "serde",
- "specta",
- "specta-typescript",
- "tauri",
- "tauri-build",
- "tauri-plugin-log",
- "tauri-plugin-mcp-bridge",
- "tauri-plugin-opener",
- "tauri-plugin-store",
- "tauri-specta",
-]
-
-[[package]]
 name = "monica-application"
 version = "0.1.0"
 dependencies = [
@@ -2902,6 +2875,33 @@ dependencies = [
  "rumdl",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "monica-desktop"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "monica-api",
+ "monica-application",
+ "monica-paths",
+ "monica-runtime",
+ "monica-terminal-client",
+ "monica-terminal-protocol",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "serde",
+ "specta",
+ "specta-typescript",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-log",
+ "tauri-plugin-mcp-bridge",
+ "tauri-plugin-opener",
+ "tauri-plugin-store",
+ "tauri-specta",
 ]
 
 [[package]]

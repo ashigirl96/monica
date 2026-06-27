@@ -10,7 +10,7 @@
 
 ```bash
 ls -la /Applications/Monica.app/Contents/MacOS/
-# Jun 21 00:25 monica-app
+# Jun 21 00:25 monica-desktop
 ```
 
 ### Step 2: fix コミットの日時を取得

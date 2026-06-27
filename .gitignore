@@ -9,7 +9,7 @@ stats.html
 
 # rust / tauri
 /target/
-crates/monica-app/gen/schemas/
+crates/monica-desktop/gen/schemas/
 
 # monica CLI dev binary (just dev-cli copies it here)
 /monica-dev
@@ -31,7 +31,7 @@ Thumbs.db
 
 # vendored external repos fetched locally for reference
 docs/repos/
-crates/monica-app/binaries/
+crates/monica-desktop/binaries/
 
 # Monica writes its Claude hook config here when running a task in this repo's worktrees
 .claude/settings.local.json

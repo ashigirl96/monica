@@ -17,13 +17,13 @@ dev-cli:
     mkdir -p ~/.zsh/completions
     ./monica-dev completions zsh > ~/.zsh/completions/_monica
 
-# tauri.conf.json's externalBin makes every monica-app compile (dev, clippy, tests)
+# tauri.conf.json's externalBin makes every monica-desktop compile (dev, clippy, tests)
 # require binaries/monica-ptyd-<host-triple>; this provides it. Release builds overwrite
 # it with a release binary via beforeBuildCommand.
 ptyd-bin:
     cargo build -p monica-ptyd
-    mkdir -p crates/monica-app/binaries
-    cp target/debug/monica-ptyd "crates/monica-app/binaries/monica-ptyd-$(rustc -vV | sed -n 's/host: //p')"
+    mkdir -p crates/monica-desktop/binaries
+    cp target/debug/monica-ptyd "crates/monica-desktop/binaries/monica-ptyd-$(rustc -vV | sed -n 's/host: //p')"
 
 build:
     bun run tauri build --bundles app
@@ -90,7 +90,7 @@ check: lint fmt-check knip unused-commands dup ptyd-bin
     cargo clippy --workspace --all-targets -- -D warnings
 
 generate-bindings: ptyd-bin
-    cargo test -p monica-app --lib tests::export_typescript_bindings -- --exact
+    cargo test -p monica-desktop --lib tests::export_typescript_bindings -- --exact
 
 test: ptyd-bin
     cargo test --workspace
@@ -109,7 +109,7 @@ analyze:
     @echo "open dist/stats.html"
 
 bloat:
-    cargo bloat --release --crates -p monica-app
+    cargo bloat --release --crates -p monica-desktop
 
 size:
     @du -sh dist 2>/dev/null || true

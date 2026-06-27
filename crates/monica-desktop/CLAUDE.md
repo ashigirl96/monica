@@ -1,6 +1,6 @@
-# monica-app（Tauri）固有の罠
+# monica-desktop（Tauri）固有の罠
 
-`crates/monica-app/` 配下で作業するときに気をつける点だけをまとめる。
+`crates/monica-desktop/` 配下で作業するときに気をつける点だけをまとめる。
 全体方針 (Tauri 2 + Bun + Vite + サイズ最優先) はリポジトリルートの
 [CLAUDE.md](../../CLAUDE.md) と [docs/dev.md](../../docs/dev.md) を参照すること。
 
