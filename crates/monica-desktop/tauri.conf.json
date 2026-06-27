@@ -19,7 +19,6 @@
         "width": 1024,
         "height": 720,
         "resizable": true,
-        "closable": false,
         "fullscreen": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
