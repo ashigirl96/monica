@@ -8,7 +8,7 @@ pub mod terminal;
 #[cfg(test)]
 mod tests;
 
-pub use github::{TrackGithubIssueInput, TrackGithubIssueReport};
+pub use github::TrackGithubIssueReport;
 pub use runs::{HookContext, HookReport};
-pub use tasks::{close_issue, CloseIssueReport, MakeMainOutcome};
+pub use tasks::{close_issue, CloseIssueReport};
 pub use terminal::{DaemonSessionView, TerminalSessionUpdate};

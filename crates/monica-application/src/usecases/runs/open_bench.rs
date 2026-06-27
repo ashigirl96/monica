@@ -59,7 +59,7 @@ where
         .map(|(_, cwd)| cwd)
         .or_else(|| resolve_worktree_cwd(repos, &task))
         .unwrap_or_else(|| default_bench_cwd(project.as_ref(), home_dir().as_deref()));
-    let profile = load_optional_profile(repos, project.as_ref()).map(|mut prof| {
+    let profile = load_optional_profile(repos, project.as_ref())?.map(|mut prof| {
         if let Some(agent) = primary_run_agent(repos, &task) {
             prof.agent_default = agent;
         }
@@ -88,18 +88,24 @@ where
     let task = repos
         .get_task(task_id)?
         .ok_or_else(|| ApplicationError::not_found(format!("task not found: {task_id}")))?;
-    let project = task
-        .project_id
-        .as_deref()
-        .and_then(|pid| repos.get_project(pid).ok().flatten());
+    let project = match task.project_id.as_deref() {
+        Some(pid) => repos.get_project(pid)?,
+        None => None,
+    };
     Ok((task, project))
 }
 
-fn load_optional_profile<R>(repos: &R, project: Option<&Project>) -> Option<ExecutionProfile>
+fn load_optional_profile<R>(
+    repos: &R,
+    project: Option<&Project>,
+) -> ApplicationResult<Option<ExecutionProfile>>
 where
     R: ProjectRepository,
 {
-    project.and_then(|p| repos.get_execution_profile(&p.id).ok().flatten())
+    match project {
+        Some(p) => Ok(repos.get_execution_profile(&p.id)?),
+        None => Ok(None),
+    }
 }
 
 fn shell_env_for<A>(
@@ -136,7 +142,7 @@ where
 
     // Write hook settings into the cwd Claude will actually launch in (the bench's resolved cwd,
     // which may differ from desired_cwd when the bench already existed).
-    let profile = load_optional_profile(repos, project.as_ref());
+    let profile = load_optional_profile(repos, project.as_ref())?;
     let env = shell_env_for(outputs, &task, project.as_ref(), profile.as_ref(), &cwd);
 
     Ok(TaskBench {

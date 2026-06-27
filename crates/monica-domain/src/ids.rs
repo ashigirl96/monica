@@ -76,8 +76,10 @@ impl TaskId {
     pub fn parse(value: impl Into<String>) -> Result<Self, crate::DomainError> {
         let s = value.into();
         if let Some(num_part) = s.strip_prefix("MON-") {
-            if num_part.parse::<u64>().is_ok() {
-                return Ok(Self(s));
+            if let Ok(n) = num_part.parse::<u64>() {
+                if n > 0 {
+                    return Ok(Self(s));
+                }
             }
         }
         Err(crate::DomainError::InvalidTaskId(s))
@@ -122,6 +124,7 @@ mod tests {
         assert!(TaskId::parse("not-a-task-id").is_err());
         assert!(TaskId::parse("MON-").is_err());
         assert!(TaskId::parse("MON-abc").is_err());
+        assert!(TaskId::parse("MON-0").is_err());
     }
 
     #[test]

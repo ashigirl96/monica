@@ -22,7 +22,7 @@ pub(crate) mod usecases;
 
 pub use error::{ApplicationError, ApplicationResult};
 pub use events::{ApplicationEvent, EventSink};
-pub use execution_profile::ExecutionProfile;
+pub use execution_profile::{ExecutionProfile, PermissionMode};
 pub use input::parse_issue_input;
 pub use facade::{
     Backend, ExecutionService, Monica, NotebookLintReport, NotebookPageView, NotebookService,
@@ -49,8 +49,8 @@ pub use terminal_state::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTab
 
 // Usecase result types (returned by facade methods)
 pub use usecases::{
-    close_issue, CloseIssueReport, DaemonSessionView, HookContext, HookReport, MakeMainOutcome,
-    TerminalSessionUpdate, TrackGithubIssueInput, TrackGithubIssueReport,
+    close_issue, CloseIssueReport, DaemonSessionView, HookContext, HookReport,
+    TerminalSessionUpdate, TrackGithubIssueReport,
 };
 
 // Usecase sub-ports (referenced by Backend trait)

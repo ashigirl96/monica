@@ -1,5 +1,6 @@
 use super::*;
 use super::support::*;
+use crate::usecases::tasks::MakeMainOutcome;
 
 #[test]
 fn create_raw_task_links_project_and_has_no_issue_ref() {

@@ -1,4 +1,33 @@
-use monica_domain::{Agent, PermissionMode};
+use serde::{Deserialize, Serialize};
+
+use monica_domain::Agent;
+
+/// Claude Code permission mode. Execution-specific, not a domain concept.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
+#[serde(rename_all = "camelCase")]
+#[strum(serialize_all = "camelCase")]
+pub enum PermissionMode {
+    Default,
+    Plan,
+    AcceptEdits,
+    BypassPermissions,
+}
+
+impl PermissionMode {
+    pub fn as_str(self) -> &'static str {
+        self.into()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExecutionProfile {

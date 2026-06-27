@@ -3,7 +3,8 @@ use rusqlite::params;
 
 use crate::SqliteStore;
 use monica_application::{ExecutionProfile, ProjectRepository};
-use monica_domain::{Agent, PermissionMode, Project, Provider};
+use monica_application::PermissionMode;
+use monica_domain::{Agent, Project, Provider};
 
 use super::{PROJECT_COLUMNS, SET_NOW};
 

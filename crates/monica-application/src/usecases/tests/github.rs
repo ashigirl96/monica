@@ -1,5 +1,6 @@
 use super::*;
 use super::support::*;
+use crate::usecases::github::TrackGithubIssueInput;
 
 #[tokio::test]
 async fn track_github_issue_uses_gateway_and_repositories() {

@@ -25,7 +25,6 @@ use crate::prelude::{
     TerminalSessionStatus,
 };
 use crate::{
-    ApplicationError, ApplicationEvent, HookContext, MakeMainOutcome,
-    PullRequestBranchSyncCandidate, PullRequestSyncStatus, SetupOutcome, TaskBench,
-    TrackGithubIssueInput,
+    ApplicationError, ApplicationEvent, HookContext, PullRequestBranchSyncCandidate,
+    PullRequestSyncStatus, SetupOutcome, TaskBench,
 };

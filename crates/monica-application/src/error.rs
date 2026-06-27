@@ -65,6 +65,9 @@ impl From<DomainError> for ApplicationError {
 /// constructed as explicit variants so the boundary can distinguish them.
 impl From<anyhow::Error> for ApplicationError {
     fn from(error: anyhow::Error) -> Self {
-        ApplicationError::Storage(format!("{error:#}"))
+        match error.downcast::<ApplicationError>() {
+            Ok(app_error) => app_error,
+            Err(error) => ApplicationError::Storage(format!("{error:#}")),
+        }
     }
 }

@@ -23,34 +23,6 @@ impl Provider {
     }
 }
 
-/// Claude Code permission mode. M0 carries the values the project design uses; Claude also
-/// accepts `auto`/`dontAsk`, which can be added later without a schema change.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    strum::IntoStaticStr,
-    strum::EnumString,
-)]
-#[serde(rename_all = "camelCase")]
-#[strum(serialize_all = "camelCase")]
-pub enum PermissionMode {
-    Default,
-    Plan,
-    AcceptEdits,
-    BypassPermissions,
-}
-
-impl PermissionMode {
-    pub fn as_str(self) -> &'static str {
-        self.into()
-    }
-}
-
 /// A repo's identity and location, keyed by `owner/repo`. Execution-environment settings
 /// (agent, permissions, hooks, worktree layout) live in [`ExecutionProfile`] in the application
 /// layer.
