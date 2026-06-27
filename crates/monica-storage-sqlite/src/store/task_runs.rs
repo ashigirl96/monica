@@ -7,7 +7,7 @@ use monica_application::{
     TaskRunStatus, TaskRunStore, TaskRunWaitReason, TaskStatus,
 };
 
-use super::{sql_literal_list, SET_NOW, TASK_RUN_COLUMNS};
+use super::{sql_literal_list, tasks, SET_NOW, TASK_RUN_COLUMNS};
 
 /// Keep the owning task pinned to in_progress while a run progresses. Returns false when no
 /// row changed (closed task or missing id).
@@ -460,6 +460,21 @@ impl TaskRunStore for SqliteStore {
 
     fn claim_prepared_run(&self, task_run_id: &str, provider_session_id: &str) -> Result<bool> {
         claim_prepared_run(self.conn(), task_run_id, provider_session_id)
+    }
+
+    fn create_lazy_run_for_session(
+        &mut self,
+        new: NewTaskRun,
+        make_primary_if_missing: bool,
+    ) -> Result<TaskRun> {
+        let tx = self.conn_mut().transaction()?;
+        let task_id = new.task_id.clone();
+        let run = start_task_run_in(&tx, new)?;
+        if make_primary_if_missing {
+            tasks::set_primary_task_run(&tx, &task_id, &run.id)?;
+        }
+        tx.commit()?;
+        Ok(run)
     }
 
     fn record_task_run_observation(

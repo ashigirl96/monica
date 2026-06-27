@@ -6,11 +6,11 @@ use super::{TaskRunStore, TaskStore, WorkbenchStore};
 /// unit. The returned [`WorkTransaction`] borrows the backing store for its lifetime; nothing is
 /// persisted until [`WorkTransaction::commit`] — dropping it rolls back.
 ///
-/// `begin` takes `&self` so a transaction can be opened from a shared borrow; the backing store is
-/// used strictly serially (Monica holds one non-`Send` SQLite connection), so no `Send`/`Sync`
-/// bound is required or available.
+/// `begin` takes `&mut self`: the exclusive borrow is what enforces "at most one transaction open
+/// at a time" in the type system — the backing store cannot be touched again until the transaction
+/// commits or is dropped.
 pub trait UnitOfWork {
-    fn begin(&self) -> Result<Box<dyn WorkTransaction + '_>>;
+    fn begin(&mut self) -> Result<Box<dyn WorkTransaction + '_>>;
 }
 
 /// A live transaction exposing the stores a use case writes through. Every write lands in the

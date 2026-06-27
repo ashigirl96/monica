@@ -1907,6 +1907,70 @@ fn work_transaction_commit_persists_run_primary_and_bench() {
     assert_eq!(db.list_task_runs_for_task(&task.id).unwrap().len(), 1);
 }
 
+/// `create_lazy_run_for_session(make_primary_if_missing = true)` lands the new run AND the primary
+/// pointer in one transaction — the atomicity the hook lazy-create path relies on so a hook firing
+/// from a separate process can never strand a run with no primary.
+#[test]
+fn create_lazy_run_for_session_sets_primary_atomically_when_missing() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("lazy-primary")).unwrap();
+
+    let run = db
+        .create_lazy_run_for_session(
+            NewTaskRun {
+                task_id: task.id.clone(),
+                agent: Some(Agent::Claude),
+                branch: None,
+                worktree_path: None,
+            },
+            true,
+        )
+        .unwrap();
+
+    assert_eq!(
+        db.get_task(&task.id).unwrap().unwrap().primary_task_run_id.as_deref(),
+        Some(run.id.as_str()),
+        "the new run becomes the primary in the same transaction"
+    );
+}
+
+/// With a primary already set, `make_primary_if_missing = false` creates a side run and must leave
+/// the existing primary pointer untouched.
+#[test]
+fn create_lazy_run_for_session_leaves_existing_primary_untouched() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("lazy-side")).unwrap();
+    let primary = db
+        .start_task_run(NewTaskRun {
+            task_id: task.id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
+    db.set_primary_task_run(&task.id, &primary.id).unwrap();
+
+    let side = db
+        .create_lazy_run_for_session(
+            NewTaskRun {
+                task_id: task.id.clone(),
+                agent: Some(Agent::Claude),
+                branch: None,
+                worktree_path: None,
+            },
+            false,
+        )
+        .unwrap();
+
+    assert_ne!(side.id, primary.id);
+    assert_eq!(
+        db.get_task(&task.id).unwrap().unwrap().primary_task_run_id.as_deref(),
+        Some(primary.id.as_str()),
+        "an existing primary must not be overwritten by a side run"
+    );
+    assert_eq!(db.list_task_runs_for_task(&task.id).unwrap().len(), 2);
+}
+
 /// Two near-simultaneous SessionStarts racing for one prepared run: the guarded UPDATE lets exactly
 /// one win, the loser changes 0 rows, and only the winner's session id is recorded. This is the
 /// race the snapshot-based claim could not close.

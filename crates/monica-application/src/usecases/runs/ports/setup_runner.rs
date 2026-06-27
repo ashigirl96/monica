@@ -27,6 +27,9 @@ pub struct SetupEnv {
 }
 
 pub trait SetupRunner {
+    /// `Ok(SetupOutcome::Failed { .. })` is a script that ran but exited non-zero or timed out — a
+    /// normal run outcome. `Err` is reserved for failing to *run* the script at all (spawn/IO
+    /// fault), which the caller surfaces as an `External` error rather than a merely-failed run.
     fn run_setup_script(
         &self,
         worktree: &Path,
