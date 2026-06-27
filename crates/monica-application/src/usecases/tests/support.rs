@@ -85,7 +85,7 @@ pub(crate) fn record_claude_hook<R, A>(
     signal: &AgentSignal,
 ) -> Result<crate::HookReport>
 where
-    R: TaskStore + TaskRunStore + EventRepository + Clock,
+    R: TaskStore + TaskRunStore + EventRepository + Clock + UnitOfWork,
     A: TaskRunOutputs,
 {
     record_hook(repos, outputs, ctx, Agent::Claude, Some(signal), "{}")
@@ -822,6 +822,28 @@ impl TaskRunStore for FakeUow<'_> {
         observation: TaskRunObservation<'_>,
     ) -> Result<()> {
         self.inner.do_record_task_run_observation(task_run_id, observation)
+    }
+}
+
+impl EventRepository for FakeUow<'_> {
+    fn insert_event(
+        &self,
+        task_id: Option<&str>,
+        task_run_id: Option<&str>,
+        kind: &str,
+        payload_json: &str,
+    ) -> Result<Event> {
+        self.inner.insert_event(task_id, task_run_id, kind, payload_json)
+    }
+
+    fn list_events(&self, task_id: Option<&str>) -> Result<Vec<Event>> {
+        self.inner.list_events(task_id)
+    }
+}
+
+impl Clock for FakeUow<'_> {
+    fn now_iso(&self) -> Result<String> {
+        self.inner.now_iso()
     }
 }
 

@@ -3,11 +3,12 @@ use rusqlite::Transaction;
 
 use crate::SqliteStore;
 use monica_application::{
-    ExternalReference, NewTask, NewTaskRun, Task, TaskRun, TaskRunObservation, TaskRunStatus,
-    TaskRunStore, TaskStatus, TaskStore, UnitOfWork, WorkTransaction, WorkbenchStore,
+    Clock, Event, EventRepository, ExternalReference, NewTask, NewTaskRun, Task, TaskRun,
+    TaskRunObservation, TaskRunStatus, TaskRunStore, TaskStatus, TaskStore, UnitOfWork,
+    WorkTransaction, WorkbenchStore,
 };
 
-use super::{bench, external_refs, task_runs, tasks};
+use super::{bench, events, external_refs, task_runs, tasks};
 
 /// A [`WorkTransaction`] backed by one SQLite `Transaction`. Every store method runs on the shared
 /// transaction via the same `*_in` helpers the direct [`SqliteStore`] uses, so the two paths can't
@@ -141,6 +142,28 @@ impl TaskRunStore for SqliteUow<'_> {
         observation: TaskRunObservation<'_>,
     ) -> Result<()> {
         task_runs::record_task_run_observation_in(&self.tx, task_run_id, observation)
+    }
+}
+
+impl EventRepository for SqliteUow<'_> {
+    fn insert_event(
+        &self,
+        task_id: Option<&str>,
+        task_run_id: Option<&str>,
+        kind: &str,
+        payload_json: &str,
+    ) -> Result<Event> {
+        events::insert_event_in(&self.tx, task_id, task_run_id, kind, payload_json)
+    }
+
+    fn list_events(&self, task_id: Option<&str>) -> Result<Vec<Event>> {
+        events::list_events_in(&self.tx, task_id)
+    }
+}
+
+impl Clock for SqliteUow<'_> {
+    fn now_iso(&self) -> Result<String> {
+        events::now_iso_in(&self.tx)
     }
 }
 
