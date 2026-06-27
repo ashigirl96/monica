@@ -94,7 +94,7 @@ generate-bindings: ptyd-bin
 
 test: ptyd-bin
     cargo test --workspace
-    bun test
+    bun test src/
 
 # Coverage doubles as dead-code detection: a pub fn at 0% that no caller or test reaches
 # is invisible to clippy (rustc has no cross-crate dead_code analysis in a workspace).

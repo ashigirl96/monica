@@ -1,0 +1,230 @@
+use super::*;
+use super::support::*;
+
+
+// ---------------------------------------------------------------------------
+// Façade orchestration tests
+//
+// The pure decision functions (task_run_settlement_for_*, reconcile_terminal_sessions) and the
+// store CAS guard (settle_task_run_if_live) are tested elsewhere. These exercise the composition
+// the façade adds on top: fetch rows → call the pure verdict → apply → emit, end to end against a
+// fake backend, asserting the emitted ApplicationEvents.
+// ---------------------------------------------------------------------------
+
+
+#[test]
+fn facade_ingest_agent_hook_decodes_records_and_emits() {
+    // The façade owns the decode: raw bytes in, the configured signal lands a transition, and the
+    // entering edge into WaitingForUser emits AwaitingUserInput — all behind Monica.
+    let mut repos = FakeRepos::default();
+    let outputs = FakeTaskRunOutputs::default();
+    let (task_id, run_id) = task_with_running_primary(&mut repos, &outputs);
+    let sink = RecordingSink::default();
+    let decoder =
+        TestAgentDecoders::with_signal(input_required(Some("sess"), TaskRunWaitReason::AskUserQuestion));
+    let mut monica = facade_with_decoder(repos, sink.clone(), decoder);
+
+    let report = monica
+        .executions()
+        .ingest_agent_hook(
+            Agent::Claude,
+            hook_ctx(&task_id, Some(&run_id)),
+            r#"{"hook_event_name":"PreToolUse"}"#,
+        )
+        .unwrap();
+
+    assert!(!report.ignored);
+    // The decoded signal's label is propagated into the report (and on to the CLI's debug log).
+    assert_eq!(report.event_name.as_deref(), Some("PreToolUse"));
+    assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
+    assert!(report.entered_waiting_for_user);
+    assert!(sink
+        .events()
+        .iter()
+        .any(|e| matches!(e, ApplicationEvent::AwaitingUserInput { .. })));
+}
+
+#[test]
+fn facade_ingest_agent_hook_recovers_event_label_for_dropped_event() {
+    // A non-actionable payload decodes to None; the façade still recovers the provider event name
+    // via the decoder's event_label so the driver's debug log keeps it without touching decoders.
+    let sink = RecordingSink::default();
+    let decoder = TestAgentDecoders::with_label("PreToolUse");
+    let mut monica = facade_with_decoder(FakeRepos::default(), sink, decoder);
+
+    let report = monica
+        .executions()
+        .ingest_agent_hook(Agent::Claude, HookContext::default(), r#"{"hook_event_name":"PreToolUse","tool_name":"Read"}"#)
+        .unwrap();
+
+    assert!(report.ignored);
+    assert_eq!(report.event_name.as_deref(), Some("PreToolUse"));
+}
+
+#[test]
+fn facade_settles_run_on_terminal_exit() {
+    let repos = FakeRepos::default();
+    repos.seed_run(driven_run("run-1", "MON-1", "tab-1"));
+    repos.seed_session(fake_session("ts-1", Some("tab-1"), TerminalSessionStatus::Exited));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    monica
+        .executions()
+        .settle_runs_for_terminated_sessions(&["ts-1".to_string()]);
+
+    assert_eq!(stopped_runs(&sink.events()), vec!["run-1".to_string()]);
+}
+
+#[test]
+fn facade_skips_stale_exit_after_tab_respawn() {
+    let repos = FakeRepos::default();
+    repos.seed_run(driven_run("run-1", "MON-1", "tab-1"));
+    repos.seed_session(fake_session("ts-1", Some("tab-1"), TerminalSessionStatus::Exited));
+    // A newer session in the same tab makes ts-1 no longer the latest.
+    repos.seed_session(fake_session("ts-2", Some("tab-1"), TerminalSessionStatus::Running));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    monica
+        .executions()
+        .settle_runs_for_terminated_sessions(&["ts-1".to_string()]);
+
+    assert!(sink.events().is_empty());
+}
+
+#[test]
+fn facade_skips_exit_for_session_without_tab() {
+    let repos = FakeRepos::default();
+    repos.seed_session(fake_session("ts-1", None, TerminalSessionStatus::Exited));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    monica
+        .executions()
+        .settle_runs_for_terminated_sessions(&["ts-1".to_string()]);
+
+    assert!(sink.events().is_empty());
+}
+
+#[test]
+fn facade_does_not_settle_prepared_run_on_exit() {
+    let repos = FakeRepos::default();
+    let mut prepared = driven_run("run-1", "MON-1", "tab-1");
+    prepared.status = TaskRunStatus::Prepared;
+    repos.seed_run(prepared);
+    repos.seed_session(fake_session("ts-1", Some("tab-1"), TerminalSessionStatus::Exited));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    monica
+        .executions()
+        .settle_runs_for_terminated_sessions(&["ts-1".to_string()]);
+
+    assert!(sink.events().is_empty());
+}
+
+#[test]
+fn facade_orphan_sweep_settles_only_dead_tabs() {
+    let repos = FakeRepos::default();
+    repos.seed_run(driven_run("run-dead", "MON-1", "tab-dead"));
+    repos.seed_run(driven_run("run-live", "MON-2", "tab-live"));
+    repos.seed_session(fake_session("ts-dead", Some("tab-dead"), TerminalSessionStatus::Exited));
+    repos.seed_session(fake_session("ts-live", Some("tab-live"), TerminalSessionStatus::Running));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    monica.executions().settle_orphaned_runs();
+
+    assert_eq!(stopped_runs(&sink.events()), vec!["run-dead".to_string()]);
+}
+
+#[test]
+fn facade_mark_all_sessions_lost_settles_live_sessions_only() {
+    let repos = FakeRepos::default();
+    repos.seed_run(driven_run("run-1", "MON-1", "tab-1"));
+    repos.seed_session(fake_session("ts-live", Some("tab-1"), TerminalSessionStatus::Running));
+    // Already terminal: excluded from the lost set and not re-settled.
+    repos.seed_session(fake_session("ts-done", Some("tab-2"), TerminalSessionStatus::Exited));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    monica.executions().mark_all_sessions_lost().unwrap();
+
+    assert_eq!(stopped_runs(&sink.events()), vec!["run-1".to_string()]);
+}
+
+#[test]
+fn facade_create_terminal_session_failure_marks_failed_and_settles() {
+    let repos = FakeRepos::default();
+    repos.seed_run(driven_run("run-1", "MON-1", "tab-1"));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+    let daemon = FakeDaemon::failing_create();
+    let new = NewTerminalSession {
+        runspace_id: Some("rs-1".to_string()),
+        tab_id: Some("tab-1".to_string()),
+        kind: TerminalSessionKind::Shell,
+        cwd: "/".to_string(),
+        shell: "/bin/zsh".to_string(),
+        rows: 24,
+        cols: 80,
+    };
+
+    let session = monica.executions().create_terminal_session(&daemon, new, Vec::new()).unwrap();
+
+    assert_eq!(session.status, TerminalSessionStatus::Failed);
+    assert_eq!(stopped_runs(&sink.events()), vec!["run-1".to_string()]);
+}
+
+#[tokio::test]
+async fn facade_sync_pull_requests_counts_and_announces() {
+    let repos = FakeRepos::default();
+    repos.seed_pr_branch_candidate(PullRequestBranchSyncCandidate {
+        task_id: "MON-1".to_string(),
+        repo: "owner/repo".to_string(),
+        branch: "issue-1".to_string(),
+    });
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    let count = monica.synchronization().sync_pull_requests(5, true).await.unwrap();
+
+    assert_eq!(count, 1);
+    assert!(sink
+        .events()
+        .iter()
+        .any(|e| matches!(e, ApplicationEvent::PullRequestSyncCompleted { synced_count: 1 })));
+}
+
+#[tokio::test]
+async fn facade_sync_pull_requests_stays_silent_without_announce() {
+    let repos = FakeRepos::default();
+    repos.seed_pr_branch_candidate(PullRequestBranchSyncCandidate {
+        task_id: "MON-1".to_string(),
+        repo: "owner/repo".to_string(),
+        branch: "issue-1".to_string(),
+    });
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    let count = monica.synchronization().sync_pull_requests(5, false).await.unwrap();
+
+    assert_eq!(count, 1);
+    assert!(sink.events().is_empty());
+}
+
+#[tokio::test]
+async fn facade_init_project_prefers_git_branch_over_github() {
+    let repos = FakeRepos::default();
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+
+    // FakeGit::detect_repo -> "owner/repo", detect_default_branch -> Some("main"): GitHub fallback
+    // is never consulted.
+    let report = monica.projects().init_project(None, Path::new("/repo")).await.unwrap();
+
+    assert_eq!(report.project.repo, "owner/repo");
+    assert_eq!(report.project.default_branch, "main");
+    assert!(!report.scaffold.is_empty());
+}
