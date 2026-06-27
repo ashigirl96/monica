@@ -154,7 +154,8 @@ where
             &worktree_path,
             &branch,
             &project.default_branch,
-        )?;
+        )
+        .map_err(|e| ApplicationError::external(format!("failed to create git worktree: {e:#}")))?;
     }
 
     repos.set_task_run_worktree_path(task_run_id, &worktree_str)?;
@@ -189,7 +190,7 @@ fn setup_phase<S, A>(
     worktree_path: &Path,
     project: &Project,
     branch: &str,
-) -> Result<SetupOutcome>
+) -> ApplicationResult<SetupOutcome>
 where
     S: SetupRunner,
     A: TaskRunOutputs,
@@ -203,7 +204,9 @@ where
         worktree: worktree_path.to_string_lossy().into_owned(),
     };
     let timeout = Duration::from_secs(project.setup_timeout_sec.max(0) as u64);
-    setup_runner.run_setup_script(worktree_path, &log_path, &env, timeout)
+    setup_runner
+        .run_setup_script(worktree_path, &log_path, &env, timeout)
+        .map_err(|e| ApplicationError::external(format!("setup script failed to run: {e:#}")))
 }
 
 fn latest_github_issue_ref<R>(repos: &R, task_id: &str) -> Result<Option<ExternalReference>>

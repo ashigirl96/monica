@@ -31,6 +31,16 @@ pub trait TaskRunStore {
     /// this call won the claim — closing the concurrent-SessionStart race that a snapshot read
     /// (SELECT then UPDATE) cannot. `last_event_at` is left to the observation that follows.
     fn claim_prepared_run(&self, task_run_id: &str, provider_session_id: &str) -> Result<bool>;
+    /// Lazily create a run for a session-starting hook in one transaction: inserts the run and,
+    /// when `make_primary_if_missing`, points the task's primary at it. Folding both writes into a
+    /// single transaction keeps a hook arriving from a separate process from stranding a run with
+    /// no primary pointer — the intermediate state a two-call (`start_task_run` then
+    /// `set_primary_task_run`) sequence could leave behind.
+    fn create_lazy_run_for_session(
+        &mut self,
+        new: NewTaskRun,
+        make_primary_if_missing: bool,
+    ) -> Result<TaskRun>;
     fn record_task_run_observation(
         &mut self,
         task_run_id: &str,

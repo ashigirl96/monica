@@ -619,6 +619,19 @@ impl TaskRunStore for FakeRepos {
         }
     }
 
+    fn create_lazy_run_for_session(
+        &mut self,
+        new: NewTaskRun,
+        make_primary_if_missing: bool,
+    ) -> Result<TaskRun> {
+        let task_id = new.task_id.clone();
+        let run = self.do_start_task_run(new)?;
+        if make_primary_if_missing {
+            self.set_primary_task_run(&task_id, &run.id)?;
+        }
+        Ok(run)
+    }
+
     fn record_task_run_observation(
         &mut self,
         task_run_id: &str,
@@ -699,7 +712,7 @@ impl WorkbenchStore for FakeRepos {
 }
 
 impl UnitOfWork for FakeRepos {
-    fn begin(&self) -> Result<Box<dyn WorkTransaction + '_>> {
+    fn begin(&mut self) -> Result<Box<dyn WorkTransaction + '_>> {
         Ok(Box::new(FakeUow { inner: self }))
     }
 }
@@ -809,6 +822,19 @@ impl TaskRunStore for FakeUow<'_> {
         self.inner.claim_prepared_run(task_run_id, provider_session_id)
     }
 
+    fn create_lazy_run_for_session(
+        &mut self,
+        new: NewTaskRun,
+        make_primary_if_missing: bool,
+    ) -> Result<TaskRun> {
+        let task_id = new.task_id.clone();
+        let run = self.inner.do_start_task_run(new)?;
+        if make_primary_if_missing {
+            self.inner.set_primary_task_run(&task_id, &run.id)?;
+        }
+        Ok(run)
+    }
+
     fn record_task_run_observation(
         &mut self,
         task_run_id: &str,
@@ -888,6 +914,7 @@ impl GithubGateway for FakeGithub {
 #[derive(Default)]
 struct FakeGit {
     cleaned: RefCell<bool>,
+    create_worktree_error: RefCell<Option<String>>,
 }
 
 impl GitGateway for FakeGit {
@@ -898,6 +925,9 @@ impl GitGateway for FakeGit {
         _branch: &str,
         _base: &str,
     ) -> Result<()> {
+        if let Some(msg) = self.create_worktree_error.borrow().clone() {
+            return Err(anyhow!(msg));
+        }
         Ok(())
     }
 
@@ -2342,6 +2372,7 @@ fn task_shell_env_falls_back_to_project_path_when_no_bench_no_worktree() {
 #[derive(Default)]
 struct FakeSetupRunner {
     outcome: RefCell<Option<SetupOutcome>>,
+    error: RefCell<Option<String>>,
 }
 
 impl SetupRunner for FakeSetupRunner {
@@ -2352,6 +2383,9 @@ impl SetupRunner for FakeSetupRunner {
         _env: &SetupEnv,
         _timeout: std::time::Duration,
     ) -> Result<SetupOutcome> {
+        if let Some(msg) = self.error.borrow().clone() {
+            return Err(anyhow!(msg));
+        }
         Ok(self
             .outcome
             .borrow()
@@ -2455,6 +2489,7 @@ fn execute_run_records_failed_on_setup_failure() {
             code: Some(1),
             timed_out: false,
         })),
+        ..Default::default()
     };
 
     let status = execute_run(
@@ -2499,6 +2534,67 @@ fn execute_run_prepares_run_and_pins_bench_to_worktree() {
     assert_eq!(run.status, TaskRunStatus::Prepared);
     let (_, cwd) = repos.get_bench_for_task(&task_id).unwrap().unwrap();
     assert_eq!(cwd, "/repo/.worktrees/mon-1");
+}
+
+/// A git worktree-creation failure is an external-process fault, not a storage fault: it must
+/// surface as `External` (distinct `ApiErrorCode` for the front end), and the run still settles to
+/// `Failed`.
+#[test]
+fn execute_run_classifies_worktree_failure_as_external() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let prep = start_run(&mut repos, &task_id).unwrap();
+    let git = FakeGit {
+        create_worktree_error: RefCell::new(Some("fatal: worktree add failed".to_string())),
+        ..Default::default()
+    };
+
+    let err = execute_run(
+        &mut repos,
+        &git,
+        &FakeSetupRunner::default(),
+        &FakeTaskRunOutputs::default(),
+        &task_id,
+        &prep.task_run_id,
+    )
+    .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::External(_)), "{err:?}");
+    assert_eq!(
+        repos.get_task_run(&prep.task_run_id).unwrap().unwrap().status,
+        TaskRunStatus::Failed
+    );
+}
+
+/// A failure to *run* the setup script (spawn/timeout infra fault, distinct from the script exiting
+/// non-zero) is also external, not storage.
+#[test]
+fn execute_run_classifies_setup_script_run_failure_as_external() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let prep = start_run(&mut repos, &task_id).unwrap();
+    let setup = FakeSetupRunner {
+        error: RefCell::new(Some("setup runner failed to spawn".to_string())),
+        ..Default::default()
+    };
+
+    let err = execute_run(
+        &mut repos,
+        &FakeGit::default(),
+        &setup,
+        &FakeTaskRunOutputs::default(),
+        &task_id,
+        &prep.task_run_id,
+    )
+    .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::External(_)), "{err:?}");
+    assert_eq!(
+        repos.get_task_run(&prep.task_run_id).unwrap().unwrap().status,
+        TaskRunStatus::Failed
+    );
 }
 
 #[test]
@@ -3102,7 +3198,7 @@ fn facade_with_decoder(
         FakeGit::default(),
         FakeGithub,
         FakeAuth,
-        FakeSetupRunner { outcome: RefCell::new(None) },
+        FakeSetupRunner { outcome: RefCell::new(None), ..Default::default() },
         FakeTaskRunOutputs::default(),
         FakeNotebookGateway,
         FakeWorkspace,

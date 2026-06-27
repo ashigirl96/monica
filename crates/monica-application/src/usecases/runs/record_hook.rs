@@ -349,15 +349,17 @@ where
         return Ok(None);
     }
 
-    let run = repos.start_task_run(NewTaskRun {
-        task_id: ctx.task_id.to_string(),
-        agent: Some(ctx.agent),
-        branch: None,
-        worktree_path: None,
-    })?;
-    if ctx.primary_run.is_none() {
-        repos.set_primary_task_run(ctx.task_id, &run.id)?;
-    }
+    // `make_primary_if_missing` is true exactly when no usable primary exists — including a dangling
+    // pointer, which `primary_run` already resolved to `None`; otherwise the new run is a side run.
+    let run = repos.create_lazy_run_for_session(
+        NewTaskRun {
+            task_id: ctx.task_id.to_string(),
+            agent: Some(ctx.agent),
+            branch: None,
+            worktree_path: None,
+        },
+        ctx.primary_run.is_none(),
+    )?;
     Ok(Some(ResolvedRun {
         run: Some(run),
         created: true,

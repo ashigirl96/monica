@@ -18,10 +18,8 @@ struct SqliteUow<'conn> {
 }
 
 impl UnitOfWork for SqliteStore {
-    fn begin(&self) -> Result<Box<dyn WorkTransaction + '_>> {
-        // `unchecked_transaction` opens a transaction from a shared borrow — sound here because
-        // Monica drives its one connection strictly serially (the façade is `!Send`).
-        Ok(Box::new(SqliteUow { tx: self.conn().unchecked_transaction()? }))
+    fn begin(&mut self) -> Result<Box<dyn WorkTransaction + '_>> {
+        Ok(Box::new(SqliteUow { tx: self.conn_mut().transaction()? }))
     }
 }
 
@@ -122,6 +120,19 @@ impl TaskRunStore for SqliteUow<'_> {
 
     fn claim_prepared_run(&self, task_run_id: &str, provider_session_id: &str) -> Result<bool> {
         task_runs::claim_prepared_run(&self.tx, task_run_id, provider_session_id)
+    }
+
+    fn create_lazy_run_for_session(
+        &mut self,
+        new: NewTaskRun,
+        make_primary_if_missing: bool,
+    ) -> Result<TaskRun> {
+        let task_id = new.task_id.clone();
+        let run = task_runs::start_task_run_in(&self.tx, new)?;
+        if make_primary_if_missing {
+            tasks::set_primary_task_run(&self.tx, &task_id, &run.id)?;
+        }
+        Ok(run)
     }
 
     fn record_task_run_observation(
