@@ -13,7 +13,7 @@ pub(crate) fn spawn_execute_run(
     std::thread::Builder::new()
         .name(format!("run-{run_id}"))
         .spawn(move || {
-            let mut monica = match monica_infra::open_monica(Box::new(TauriEventSink::new(app))) {
+            let mut monica = match monica_runtime::open_monica(Box::new(TauriEventSink::new(app))) {
                 Ok(monica) => monica,
                 Err(e) => {
                     log::error!(target: "monica_app::prepare_task", "background façade open failed: {e:#}");

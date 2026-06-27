@@ -6,8 +6,9 @@ use anyhow::{anyhow, Result};
 use monica_domain::RawJson;
 
 use crate::ports::{
-    BoxFuture, EventRepository, GitGateway, ProjectRepository, PullRequestSyncStore, TaskBoardQuery,
-    TaskRunStore, TaskStore, TaskSummaryFilter, UnitOfWork, WorkTransaction, WorkbenchStore,
+    AgentDecoders, BoxFuture, EventRepository, GitGateway, ProjectRepository, PullRequestSyncStore,
+    TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter, UnitOfWork, WorkTransaction,
+    WorkbenchStore,
 };
 use crate::{
     ApplicationError, AuthGateway, Clock, GithubGateway, SetupEnv, SetupOutcome, SetupRunner,
@@ -45,7 +46,7 @@ use std::sync::{Arc, Mutex};
 
 // --- Agent-signal test builders -------------------------------------------------------------------
 // The use-case tests drive `record_hook` with typed `AgentSignal`s (the provider JSON -> signal
-// decoding is covered by the adapter decoder's own tests in `monica-infra::agents`). `raw_stdin` is
+// decoding is covered by the adapter decoder's own tests in `monica-adapters::agents`). `raw_stdin` is
 // irrelevant to these assertions, so the shim feeds a constant.
 
 fn mk_signal(session: Option<&str>, label: &str, kind: SignalKind) -> AgentSignal {
@@ -3056,6 +3057,23 @@ impl TerminalDaemon for FakeDaemon {
     fn reap(&self, _session_id: &str) {}
 }
 
+/// Test double for the agent-decoder port. Holds the signal/label it should return so a façade
+/// test can drive `ingest_agent_hook` deterministically without the real per-agent decoders.
+#[derive(Default)]
+struct TestAgentDecoders {
+    signal: Option<AgentSignal>,
+    label: Option<String>,
+}
+
+impl AgentDecoders for TestAgentDecoders {
+    fn decode(&self, _agent: Agent, _raw: &[u8]) -> Result<Option<AgentSignal>> {
+        Ok(self.signal.clone())
+    }
+    fn event_label(&self, _raw: &[u8]) -> Option<String> {
+        self.label.clone()
+    }
+}
+
 struct FakeBackend;
 
 impl Backend for FakeBackend {
@@ -3067,9 +3085,18 @@ impl Backend for FakeBackend {
     type Outputs = FakeTaskRunOutputs;
     type Notebooks = FakeNotebookGateway;
     type Workspace = FakeWorkspace;
+    type Agents = TestAgentDecoders;
 }
 
 fn facade(repos: FakeRepos, sink: RecordingSink) -> Monica<FakeBackend> {
+    facade_with_decoder(repos, sink, TestAgentDecoders::default())
+}
+
+fn facade_with_decoder(
+    repos: FakeRepos,
+    sink: RecordingSink,
+    agents: TestAgentDecoders,
+) -> Monica<FakeBackend> {
     Monica::new(
         repos,
         FakeGit::default(),
@@ -3079,6 +3106,7 @@ fn facade(repos: FakeRepos, sink: RecordingSink) -> Monica<FakeBackend> {
         FakeTaskRunOutputs::default(),
         FakeNotebookGateway,
         FakeWorkspace,
+        agents,
         Box::new(sink),
     )
 }
@@ -3139,6 +3167,58 @@ fn stopped_runs(events: &[ApplicationEvent]) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+#[test]
+fn facade_ingest_agent_hook_decodes_records_and_emits() {
+    // The façade owns the decode: raw bytes in, the configured signal lands a transition, and the
+    // entering edge into WaitingForUser emits AwaitingUserInput — all behind Monica.
+    let mut repos = FakeRepos::default();
+    let outputs = FakeTaskRunOutputs::default();
+    let (task_id, run_id) = task_with_running_primary(&mut repos, &outputs);
+    let sink = RecordingSink::default();
+    let decoder = TestAgentDecoders {
+        signal: Some(input_required(Some("sess"), TaskRunWaitReason::AskUserQuestion)),
+        label: None,
+    };
+    let mut monica = facade_with_decoder(repos, sink.clone(), decoder);
+
+    let report = monica
+        .executions()
+        .ingest_agent_hook(
+            Agent::Claude,
+            hook_ctx(&task_id, Some(&run_id)),
+            r#"{"hook_event_name":"PreToolUse"}"#,
+        )
+        .unwrap();
+
+    assert!(!report.ignored);
+    // The decoded signal's label is propagated into the report (and on to the CLI's debug log).
+    assert_eq!(report.event_name.as_deref(), Some("PreToolUse"));
+    assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
+    assert!(report.entered_waiting_for_user);
+    assert!(sink
+        .events()
+        .iter()
+        .any(|e| matches!(e, ApplicationEvent::AwaitingUserInput { .. })));
+}
+
+#[test]
+fn facade_ingest_agent_hook_recovers_event_label_for_dropped_event() {
+    // A non-actionable payload decodes to None; the façade still recovers the provider event name
+    // via the decoder's event_label so the driver's debug log keeps it without touching decoders.
+    let sink = RecordingSink::default();
+    let decoder =
+        TestAgentDecoders { signal: None, label: Some("PreToolUse".to_string()) };
+    let mut monica = facade_with_decoder(FakeRepos::default(), sink, decoder);
+
+    let report = monica
+        .executions()
+        .ingest_agent_hook(Agent::Claude, HookContext::default(), r#"{"hook_event_name":"PreToolUse","tool_name":"Read"}"#)
+        .unwrap();
+
+    assert!(report.ignored);
+    assert_eq!(report.event_name.as_deref(), Some("PreToolUse"));
 }
 
 #[test]

@@ -18,9 +18,9 @@ mod unit_of_work;
 mod workbench_store;
 mod workspace;
 
-pub use agent_event_decoder::AgentEventDecoder;
+pub use agent_event_decoder::{AgentDecoders, AgentEventDecoder};
 pub use event_repository::EventRepository;
-pub use git_gateway::GitGateway;
+pub use git_gateway::{GitGateway, WorktreeRef};
 pub use notebook_gateway::NotebookGateway;
 pub use project_repository::ProjectRepository;
 pub use pull_request_sync::PullRequestSyncStore;

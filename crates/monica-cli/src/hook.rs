@@ -6,8 +6,6 @@ use anyhow::Result;
 use clap::Subcommand;
 use monica_application::{Agent, HookContext};
 
-use crate::event_sink::CliEventSink;
-
 #[derive(Subcommand)]
 pub enum HookCommand {
     /// Receive a Claude Code hook callback (event JSON on stdin, `MONICA_*` in env)
@@ -30,7 +28,7 @@ pub fn run(cmd: HookCommand) -> Result<()> {
 }
 
 fn debug_log_to(log_file: &str, msg: &str) {
-    let Ok(dir) = monica_infra::filesystem::paths::logs_dir() else {
+    let Ok(dir) = monica_paths::logs_dir() else {
         return;
     };
     if std::fs::create_dir_all(&dir).is_err() {
@@ -75,26 +73,18 @@ fn handle_agent(agent: Agent, log_file: &str) -> Result<()> {
         return Ok(());
     }
 
-    let signal = monica_infra::agents::decoder_for(agent).decode(raw.as_bytes())?;
-
-    let mut monica = monica_infra::open_monica(Box::new(CliEventSink))?;
-    let report = monica.executions().ingest_agent_signal(
+    let mut monica = crate::event_sink::open()?;
+    let report = monica.executions().ingest_agent_hook(
         agent,
         HookContext {
             task_id: task_id.as_deref(),
             task_run_id: task_run_id.as_deref(),
             terminal_tab_id: terminal_tab_id.as_deref(),
         },
-        signal.as_ref(),
         &raw,
     )?;
 
-    // A dropped event (a non-blocking tool call) carries no signal, so recover its name from the
-    // payload purely for the debug log.
-    let event_name = report
-        .event_name
-        .clone()
-        .or_else(|| monica_infra::agents::event_label(raw.as_bytes()));
+    let event_name = report.event_name.clone();
     debug_log_to(log_file, &format!(
         "event={:?} ignored={} task_found={} run_linked={} run_created={} status={:?} wait_reason={:?} entered_waiting={} jsonl={}",
         event_name,

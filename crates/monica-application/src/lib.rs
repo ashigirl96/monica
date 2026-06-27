@@ -1,8 +1,9 @@
 //! Monica application: use cases, ports (interface traits), and the contract/query types that sit
 //! just outside the domain — CQRS read models, GitHub adapter DTOs, and hook-lifecycle parsing.
 //!
-//! Pure aggregates and business rules live in `monica-domain`; concrete SQLite, GitHub, Git,
-//! filesystem, process, keychain, and runtime wiring live in `monica-infra`.
+//! Pure aggregates and business rules live in `monica-domain`; concrete SQLite persistence lives in
+//! `monica-storage-sqlite`, the GitHub/Git/filesystem/process/keychain/agent adapters in
+//! `monica-adapters`, and the composition root in `monica-runtime`.
 
 mod bench;
 mod error;
@@ -44,10 +45,10 @@ pub use prelude::{
     TerminalSession, TerminalSessionKind, TerminalSessionStatus,
 };
 pub use ports::{
-    AgentEventDecoder, EventRepository, GitGateway, NotebookGateway, ProjectRepository,
-    PullRequestSyncStore, TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter,
-    TerminalAttachment, TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository,
-    UnitOfWork, WorkbenchStore, WorkTransaction, Workspace,
+    AgentDecoders, AgentEventDecoder, EventRepository, GitGateway, NotebookGateway,
+    ProjectRepository, PullRequestSyncStore, TaskBoardQuery, TaskRunStore, TaskStore,
+    TaskSummaryFilter, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
+    TerminalSessionRepository, UnitOfWork, WorkbenchStore, WorkTransaction, Workspace, WorktreeRef,
 };
 pub use terminal_state::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTabRow};
 pub use usecases::github::ports::{AuthGateway, GithubGateway};

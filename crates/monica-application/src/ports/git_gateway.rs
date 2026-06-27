@@ -4,6 +4,13 @@ use anyhow::Result;
 
 use crate::TaskRun;
 
+/// The repo + branch a linked git worktree belongs to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeRef {
+    pub repo: String,
+    pub branch: String,
+}
+
 pub trait GitGateway {
     fn create_worktree(&self, repo: &Path, worktree: &Path, branch: &str, base: &str)
         -> Result<()>;

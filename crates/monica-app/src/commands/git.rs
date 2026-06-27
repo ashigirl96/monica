@@ -12,10 +12,6 @@ pub struct WorktreeInfo {
 #[tauri::command]
 #[specta::specta]
 pub fn worktree_info(cwd: String) -> Result<Option<WorktreeInfo>, ApiError> {
-    Ok(
-        monica_infra::git::worktree_info(Path::new(&cwd)).map(|info| WorktreeInfo {
-            repo: info.repo,
-            branch: info.branch,
-        }),
-    )
+    Ok(monica_runtime::worktree_info(Path::new(&cwd))
+        .map(|info| WorktreeInfo { repo: info.repo, branch: info.branch }))
 }
