@@ -58,7 +58,7 @@ strip = true        # デバッグシンボル除去
 
 トレードオフ: release ビルド時間とインクリメンタル性が悪化する。**`[profile.dev]` 側は `incremental = true` のまま**にしておくこと。
 
-実装: ワークスペース root の `Cargo.toml`。profile はメンバー crate（`crates/monica-app` など）側に書いても Cargo に無視されるため、必ず root に置く。
+実装: ワークスペース root の `Cargo.toml`。profile はメンバー crate（`crates/monica-desktop` など）側に書いても Cargo に無視されるため、必ず root に置く。
 
 ---
 
@@ -92,7 +92,7 @@ serde_json = { version = "1", default-features = false, features = ["std"] }
 
 ---
 
-## 3. Tauri 設定（`crates/monica-app/tauri.conf.json`）
+## 3. Tauri 設定（`crates/monica-desktop/tauri.conf.json`）
 
 ### 3.1 `removeUnusedCommands` は **必ず ON**
 

@@ -1,12 +1,12 @@
 [package]
-name = "monica-app"
+name = "monica-desktop"
 version = "0.1.0"
 description = "monica desktop app"
 authors = ["ashigirl96"]
 edition = "2021"
 
 [lib]
-name = "monica_app_lib"
+name = "monica_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
