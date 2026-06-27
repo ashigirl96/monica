@@ -75,20 +75,29 @@ fn handle_agent(agent: Agent, log_file: &str) -> Result<()> {
         return Ok(());
     }
 
+    let signal = monica_infra::agents::decoder_for(agent).decode(raw.as_bytes())?;
+
     let mut monica = monica_infra::open_monica(Box::new(CliEventSink))?;
-    let report = monica.executions().ingest_agent_hook(
+    let report = monica.executions().ingest_agent_signal(
         agent,
         HookContext {
             task_id: task_id.as_deref(),
             task_run_id: task_run_id.as_deref(),
             terminal_tab_id: terminal_tab_id.as_deref(),
         },
+        signal.as_ref(),
         &raw,
     )?;
 
+    // A dropped event (a non-blocking tool call) carries no signal, so recover its name from the
+    // payload purely for the debug log.
+    let event_name = report
+        .event_name
+        .clone()
+        .or_else(|| monica_infra::agents::event_label(raw.as_bytes()));
     debug_log_to(log_file, &format!(
         "event={:?} ignored={} task_found={} run_linked={} run_created={} status={:?} wait_reason={:?} entered_waiting={} jsonl={}",
-        report.event_name,
+        event_name,
         report.ignored,
         report.task_found,
         report.task_run_linked,

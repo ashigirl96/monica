@@ -1,12 +1,7 @@
 use anyhow::Result;
-use serde_json::{json, Value};
 
-use crate::prelude::{
-    is_continuation_session_start, is_resume_session_start, is_safe_task_run_id,
-    is_session_starting_event, should_ignore_event, subagents_in_flight_after,
-    transition_for_event, transition_is_protected, Agent, Task,
-};
 use super::ports::{Clock, EventRepository, TaskRunOutputs, TaskRunStore, TaskStore};
+use crate::prelude::{is_safe_task_run_id, Agent, AgentSignal, SignalKind, Task};
 use crate::{NewTaskRun, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus};
 
 /// Identity carried by a hook invocation via `MONICA_*` env vars. `task_run_id` is only present
@@ -39,56 +34,10 @@ pub struct HookReport {
     pub unsafe_task_run_id: bool,
 }
 
-pub fn record_claude_hook<R, A>(
-    repos: &mut R,
-    outputs: &A,
-    ctx: HookContext<'_>,
-    raw_stdin: &str,
-) -> Result<HookReport>
-where
-    R: TaskStore + TaskRunStore + EventRepository + Clock,
-    A: TaskRunOutputs,
-{
-    record_hook(repos, outputs, ctx, raw_stdin, Agent::Claude)
-}
-
-pub fn record_codex_hook<R, A>(
-    repos: &mut R,
-    outputs: &A,
-    ctx: HookContext<'_>,
-    raw_stdin: &str,
-) -> Result<HookReport>
-where
-    R: TaskStore + TaskRunStore + EventRepository + Clock,
-    A: TaskRunOutputs,
-{
-    record_hook(repos, outputs, ctx, raw_stdin, Agent::Codex)
-}
-
-fn record_hook<R, A>(
-    repos: &mut R,
-    outputs: &A,
-    ctx: HookContext<'_>,
-    raw_stdin: &str,
-    agent: Agent,
-) -> Result<HookReport>
-where
-    R: TaskStore + TaskRunStore + EventRepository + Clock,
-    A: TaskRunOutputs,
-{
-    let parsed: Option<Value> = serde_json::from_str(raw_stdin.trim()).ok();
-    let event_name = parsed
-        .as_ref()
-        .and_then(|v| v.get("hook_event_name"))
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-
-    let safe_task_run_id = ctx.task_run_id.filter(|&r| is_safe_task_run_id(r));
-    let unsafe_task_run_id = ctx.task_run_id.is_some() && safe_task_run_id.is_none();
-
-    if should_ignore_event(agent, event_name.as_deref(), parsed.as_ref()) {
-        return Ok(HookReport {
-            event_name,
+impl HookReport {
+    fn ignored(unsafe_task_run_id: bool) -> Self {
+        HookReport {
+            event_name: None,
             task_run_status: None,
             task_run_wait_reason: None,
             entered_waiting_for_user: false,
@@ -100,13 +49,36 @@ where
             event_recorded: false,
             jsonl_written: false,
             unsafe_task_run_id,
-        });
+        }
     }
+}
 
-    let provider_session_id = parsed
-        .as_ref()
-        .and_then(|value| value.get("session_id"))
-        .and_then(Value::as_str);
+/// Apply a decoded agent [`AgentSignal`] to the run it belongs to. The provider payload was already
+/// interpreted by the adapter decoder; this use case only resolves which run the signal targets,
+/// asks the domain ([`TaskRun::decide`](monica_domain::TaskRun::decide)) what to record, and persists
+/// it. `signal == None` means the decoder found nothing actionable (a non-blocking tool call, an
+/// unparseable payload), so the hook is ignored without touching storage.
+pub fn record_hook<R, A>(
+    repos: &mut R,
+    outputs: &A,
+    ctx: HookContext<'_>,
+    agent: Agent,
+    signal: Option<&AgentSignal>,
+    raw_stdin: &str,
+) -> Result<HookReport>
+where
+    R: TaskStore + TaskRunStore + EventRepository + Clock,
+    A: TaskRunOutputs,
+{
+    let safe_task_run_id = ctx.task_run_id.filter(|&r| is_safe_task_run_id(r));
+    let unsafe_task_run_id = ctx.task_run_id.is_some() && safe_task_run_id.is_none();
+
+    let Some(signal) = signal else {
+        return Ok(HookReport::ignored(unsafe_task_run_id));
+    };
+
+    let event_label = signal.event_label.as_deref();
+    let provider_session_id = signal.session_id.as_deref();
 
     let resolved = resolve_hook_run(
         repos,
@@ -114,7 +86,7 @@ where
         safe_task_run_id,
         unsafe_task_run_id,
         provider_session_id,
-        event_name.as_deref(),
+        signal.starts_session(),
         agent,
     )?;
     let run_row = resolved.run;
@@ -131,83 +103,62 @@ where
     };
 
     let at = repos.now_iso()?;
+    // The full hook payload, stored verbatim (opaque RawJson). `signal` is only `Some` when the
+    // decoder parsed valid JSON, so this is always valid JSON text.
+    let metadata_raw = raw_stdin.trim();
+
     let mut jsonl_written = false;
     if let Some(task_run_id) = linked_task_run_id {
-        outputs.append_hook_event(task_run_id, &at, event_name.as_deref(), &parsed, raw_stdin)?;
+        outputs.append_hook_event(task_run_id, &at, event_label, raw_stdin)?;
         jsonl_written = true;
     }
 
     let event_recorded = if task_found || task_run_linked {
-        let event_type = match agent {
-            Agent::Claude => "claude_hook",
-            Agent::Codex => "codex_hook",
-        };
-        let payload = parsed
-            .clone()
-            .unwrap_or_else(|| json!({ "raw": raw_stdin }));
+        let event_type = format!("{}_hook", agent.as_str());
         repos.insert_event(
             linked_task_id.filter(|_| task_found || task_run_linked),
             linked_task_run_id,
-            event_type,
-            &payload,
+            &event_type,
+            metadata_raw,
         )?;
         true
     } else {
         false
     };
 
-    let requested = event_name
-        .as_deref()
-        .and_then(|event| transition_for_event(agent, event, parsed.as_ref()));
-    let suppressed_continuation = run_row
-        .as_ref()
-        .is_some_and(|run| run.status == TaskRunStatus::Running)
-        && is_continuation_session_start(event_name.as_deref(), parsed.as_ref());
-    let protected = match (requested, run_row.as_ref()) {
-        (Some(transition), Some(run)) if !suppressed_continuation => transition_is_protected(
-            run.status,
-            run.wait_reason,
-            run.provider_session_id.as_deref(),
-            provider_session_id,
-            subagents_in_flight_after(event_name.as_deref(), parsed.as_ref()),
-            event_name.as_deref(),
-            transition,
-        ),
-        _ => false,
-    };
-    let transition = match (requested, run_row.as_ref()) {
-        (Some(transition), Some(_)) if !suppressed_continuation && !protected => Some(transition),
-        _ => None,
-    };
+    let plan = run_row.as_ref().map(|run| run.decide(signal));
+    let transition = plan.and_then(|p| p.transition);
 
-    if let Some(task_run_id) = linked_task_run_id {
-        let wait_update = transition.map(|t| {
+    if let (Some(task_run_id), Some(plan)) = (linked_task_run_id, plan) {
+        let wait_update = plan.transition.map(|t| {
             if t.status == TaskRunStatus::WaitingForUser {
                 t.wait_reason
             } else {
                 None
             }
         });
-        let terminal_tab_id = ctx
-            .terminal_tab_id
-            .filter(|_| !is_resume_session_start(event_name.as_deref(), parsed.as_ref()));
         repos.record_task_run_observation(
             task_run_id,
             TaskRunObservation {
-                status: transition.map(|t| t.status),
+                status: plan.transition.map(|t| t.status),
                 wait_reason: wait_update,
-                event_name: event_name.as_deref(),
+                event_label,
                 at: &at,
-                provider_session_id: provider_session_id.filter(|_| !protected),
-                terminal_tab_id,
-                metadata: parsed.as_ref(),
+                provider_session_id: provider_session_id.filter(|_| plan.stamp_session),
+                terminal_tab_id: ctx.terminal_tab_id.filter(|_| plan.stamp_tab),
+                metadata_raw: Some(metadata_raw),
+                plan_file_path: signal.plan_file_path(),
+                hold_stop: plan.hold_stop,
+                release_stop: plan.release_stop,
             },
         )?;
     }
 
+    // A `SubagentFinished` produces no direct transition, but it may release a deferred turn-complete
+    // in the store (Running → WaitingForUser); detect that so the entering edge still notifies.
     let landed = match (transition, linked_task_run_id) {
         (Some(_), Some(run_id)) => repos.get_task_run(run_id)?,
-        (None, Some(run_id)) if event_name.as_deref() == Some("SubagentStop") => repos
+        (None, Some(run_id)) if matches!(signal.kind, SignalKind::SubagentFinished { .. }) => repos
             .get_task_run(run_id)?
             .filter(|run| {
                 run_row
@@ -232,7 +183,7 @@ where
     };
 
     Ok(HookReport {
-        event_name,
+        event_name: signal.event_label.clone(),
         task_run_status,
         task_run_wait_reason,
         entered_waiting_for_user,
@@ -265,7 +216,9 @@ pub(in crate::usecases) struct RunResolveCtx<'a> {
     pub(in crate::usecases) task: &'a Task,
     pub(in crate::usecases) explicit_run_id_rejected: bool,
     pub(in crate::usecases) provider_session_id: Option<&'a str>,
-    pub(in crate::usecases) event_name: Option<&'a str>,
+    /// Whether the signal proves a user is actively driving a session (session start / first
+    /// prompt) — only such signals may claim or create a run.
+    pub(in crate::usecases) starts_session: bool,
     pub(in crate::usecases) agent: Agent,
     pub(in crate::usecases) primary_run: Option<&'a TaskRun>,
 }
@@ -273,24 +226,24 @@ pub(in crate::usecases) struct RunResolveCtx<'a> {
 /// Resolve which task run a hook belongs to. Rules are evaluated top-down, first match wins:
 ///
 /// 1. An explicit run id (wrapper launch) always wins; no session lookup.
-/// 2. A run already carrying this Claude session id is followed — this covers both a claimed
-///    primary and an existing side run.
-/// 3. A still-`Prepared` primary run is claimed by a session-starting event (the Run-button
-///    flow before its first hook, or plain `claude` consuming a Prepare); stray mid-session
-///    events from an unknown session must not take it over. With a session id the claim is an
-///    atomic guarded UPDATE, so two near-simultaneous SessionStarts can't both take the run — the
-///    loser falls through to rule 4 and becomes a side run.
-/// 4. Otherwise a session-starting event from a live task lazily creates a run: it becomes the
+/// 2. A run already carrying this session id is followed — this covers both a claimed primary and an
+///    existing side run.
+/// 3. A still-`Prepared` primary run is claimed by a session-starting signal (the Run-button flow
+///    before its first hook, or plain `claude` consuming a Prepare); stray mid-session events from an
+///    unknown session must not take it over. With a session id the claim is an atomic guarded UPDATE,
+///    so two near-simultaneous starts can't both take the run — the loser falls through to rule 4 and
+///    becomes a side run.
+/// 4. Otherwise a session-starting signal from a live task lazily creates a run: it becomes the
 ///    primary when none is set (or the pointer dangles), and a side run when a primary already
-///    exists — a run actively driven by another session is never stolen. A rejected explicit
-///    run id means a wrapper launch with corrupted env, not a plain session; it never creates.
+///    exists — a run actively driven by another session is never stolen. A rejected explicit run id
+///    means a wrapper launch with corrupted env, not a plain session; it never creates.
 fn resolve_hook_run<R>(
     repos: &mut R,
     task_id: Option<&str>,
     explicit_run_id: Option<&str>,
     explicit_run_id_rejected: bool,
     provider_session_id: Option<&str>,
-    event_name: Option<&str>,
+    starts_session: bool,
     agent: Agent,
 ) -> Result<ResolvedRun>
 where
@@ -316,7 +269,7 @@ where
         task: &task,
         explicit_run_id_rejected,
         provider_session_id,
-        event_name,
+        starts_session,
         agent,
         primary_run: primary_run.as_ref(),
     };
@@ -334,7 +287,10 @@ where
     Ok(ResolvedRun::linked(None))
 }
 
-pub(in crate::usecases) fn resolve_by_session<R>(ctx: &RunResolveCtx, repos: &mut R) -> Result<Option<ResolvedRun>>
+pub(in crate::usecases) fn resolve_by_session<R>(
+    ctx: &RunResolveCtx,
+    repos: &mut R,
+) -> Result<Option<ResolvedRun>>
 where
     R: TaskStore + TaskRunStore,
 {
@@ -357,7 +313,7 @@ where
     let Some(run) = ctx.primary_run else {
         return Ok(None);
     };
-    if run.status != TaskRunStatus::Prepared || !is_session_starting_event(ctx.event_name) {
+    if run.status != TaskRunStatus::Prepared || !ctx.starts_session {
         return Ok(None);
     }
     // No session id to stamp (e.g. the Run-button flow before its first hook): nothing to claim
@@ -365,8 +321,8 @@ where
     let Some(session_id) = ctx.provider_session_id else {
         return Ok(Some(ResolvedRun::linked(Some(run.clone()))));
     };
-    // Atomic claim: only the SessionStart whose guarded UPDATE lands keeps the prepared run. A
-    // loser changes 0 rows and falls through to lazy-create as a side run.
+    // Atomic claim: only the start whose guarded UPDATE lands keeps the prepared run. A loser
+    // changes 0 rows and falls through to lazy-create as a side run.
     if repos.claim_prepared_run(&run.id, session_id)? {
         // The claim only set `provider_session_id`; reflect it on the snapshot we already hold
         // (avoiding a re-read) so the observation that follows sees the claimed session.
@@ -378,12 +334,15 @@ where
     }
 }
 
-pub(in crate::usecases) fn resolve_by_lazy_create<R>(ctx: &RunResolveCtx, repos: &mut R) -> Result<Option<ResolvedRun>>
+pub(in crate::usecases) fn resolve_by_lazy_create<R>(
+    ctx: &RunResolveCtx,
+    repos: &mut R,
+) -> Result<Option<ResolvedRun>>
 where
     R: TaskStore + TaskRunStore,
 {
     if ctx.provider_session_id.is_none()
-        || !is_session_starting_event(ctx.event_name)
+        || !ctx.starts_session
         || ctx.explicit_run_id_rejected
         || ctx.task.status == TaskStatus::Closed
     {

@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Result};
 use rusqlite::params;
-use serde_json::Value;
 
 use crate::sqlite::SqliteStore;
 use monica_application::{Clock, Event, EventRepository};
@@ -13,13 +12,12 @@ impl EventRepository for SqliteStore {
         task_id: Option<&str>,
         task_run_id: Option<&str>,
         kind: &str,
-        payload: &Value,
+        payload_json: &str,
     ) -> Result<Event> {
-        let payload = serde_json::to_string(payload)?;
         self.conn().execute(
             "INSERT INTO events (task_id, task_run_id, kind, payload_json)
              VALUES (?1, ?2, ?3, ?4)",
-            params![task_id, task_run_id, kind, payload],
+            params![task_id, task_run_id, kind, payload_json],
         )?;
         let id = self.conn().last_insert_rowid();
         let mut stmt = self
