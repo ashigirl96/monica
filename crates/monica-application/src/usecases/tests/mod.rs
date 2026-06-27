@@ -23,7 +23,7 @@ use crate::usecases::{
 };
 use crate::{
     Agent, AgentSignal, ApplicationError, ApplicationEvent, Continuation, HookContext,
-    MakeMainOutcome, NewTerminalSession, NewTaskRun, Project, PullRequestBranchSyncCandidate,
+    MakeMainOutcome, NewTerminalSession, NewTaskRun, Project, PullRequestBranchSyncCandidate, TaskId,
     PullRequestSyncStatus, Provider, RefType, SetupOutcome, SignalKind, TaskBench, TaskRunStatus,
     TaskRunWaitReason, TaskStatus, TerminalSessionKind, TerminalSessionStatus, TrackGithubIssueInput,
 };

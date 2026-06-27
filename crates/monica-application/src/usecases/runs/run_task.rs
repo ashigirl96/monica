@@ -79,7 +79,7 @@ where
     // these steps would otherwise strand a run that has no primary pointer and no workbench.
     let mut tx = repos.begin()?;
     let run = tx.start_task_run(NewTaskRun {
-        task_id: task_id.to_string(),
+        task_id: task.id.clone(),
         agent: None,
         branch: Some(branch.clone()),
         worktree_path: None,

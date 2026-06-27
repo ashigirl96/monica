@@ -4,8 +4,8 @@ use super::ports::{Clock, EventRepository, TaskRunOutputs, TaskRunStore, TaskSto
 use crate::ports::UnitOfWork;
 use crate::prelude::{is_safe_task_run_id, Agent, AgentSignal, SignalKind, Task};
 use crate::{
-    ApplicationError, NewTaskRun, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason,
-    TaskStatus,
+    ApplicationError, NewTaskRun, TaskId, TaskRun, TaskRunObservation, TaskRunStatus,
+    TaskRunWaitReason, TaskStatus,
 };
 
 /// Identity carried by a hook invocation via `MONICA_*` env vars. `task_run_id` is only present
@@ -371,7 +371,7 @@ where
     // pointer, which `primary_run` already resolved to `None`; otherwise the new run is a side run.
     let run = repos.create_lazy_run_for_session(
         NewTaskRun {
-            task_id: ctx.task_id.to_string(),
+            task_id: TaskId::from_store(ctx.task_id.to_string()),
             agent: Some(ctx.agent),
             branch: None,
             worktree_path: None,

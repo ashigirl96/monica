@@ -128,10 +128,10 @@ impl TaskRunStore for SqliteUow<'_> {
         new: NewTaskRun,
         make_primary_if_missing: bool,
     ) -> Result<TaskRun> {
-        let task_id = new.task_id.clone();
+        let task_id_str = new.task_id.to_string();
         let run = task_runs::start_task_run_in(&self.tx, new)?;
         if make_primary_if_missing {
-            tasks::set_primary_task_run(&self.tx, &task_id, &run.id)?;
+            tasks::set_primary_task_run(&self.tx, &task_id_str, &run.id)?;
         }
         Ok(run)
     }

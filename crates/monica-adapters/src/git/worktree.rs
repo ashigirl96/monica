@@ -437,7 +437,7 @@ mod tests {
         let item = db.insert_task(task).unwrap();
         let run = db
             .start_task_run(NewTaskRun {
-                task_id: item.id.to_string(),
+                task_id: item.id.clone(),
                 agent: None,
                 branch: Some("issue-42".to_string()),
                 worktree_path: Some(worktree.to_string_lossy().into_owned()),

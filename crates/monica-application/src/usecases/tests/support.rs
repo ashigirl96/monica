@@ -388,7 +388,7 @@ impl FakeRepos {
         let id = format!("run-{}", state.next_run);
         let run = TaskRun {
             id: TaskRunId::from_store(id.clone()),
-            task_id: TaskId::from_store(new.task_id.clone()),
+            task_id: new.task_id.clone(),
             agent: new.agent,
             branch: new.branch,
             worktree_path: new.worktree_path,
@@ -406,7 +406,7 @@ impl FakeRepos {
             updated_at: "2026-06-02T00:00:00.000Z".to_string(),
         };
         state.runs.insert(id, run.clone());
-        if let Some(task) = state.tasks.get_mut(&new.task_id) {
+        if let Some(task) = state.tasks.get_mut(new.task_id.as_str()) {
             if task.status != TaskStatus::Closed {
                 task.status = TaskStatus::InProgress;
             }
@@ -1100,7 +1100,7 @@ pub(crate) fn task_with_prepared_primary(repos: &mut FakeRepos) -> (String, Stri
     let task_id = repos.insert_task_for_run(None);
     let run = repos
         .start_task_run(NewTaskRun {
-            task_id: task_id.clone(),
+            task_id: TaskId::from_store(task_id.clone()),
             agent: Some(Agent::Claude),
             branch: None,
             worktree_path: None,
