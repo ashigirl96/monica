@@ -1,3 +1,3 @@
 pub use crate::ports::{
-    EventRepository, ProjectRepository, TaskRepository, TaskRunRepository, TaskSummaryFilter,
+    EventRepository, ProjectRepository, TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter,
 };

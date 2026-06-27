@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use crate::{NewTaskRun, TaskRun, TaskRunObservation, TaskRunStatus};
 
-pub trait TaskRunRepository {
+pub trait TaskRunStore {
     fn start_task_run(&mut self, new: NewTaskRun) -> Result<TaskRun>;
     fn finish_task_run(
         &mut self,
@@ -26,6 +26,11 @@ pub trait TaskRunRepository {
     /// Settle a still-live run as stopped, returning `true` only if this call moved it (a hook may
     /// have settled it first, in which case the caller must not re-announce).
     fn settle_task_run_if_live(&mut self, task_run_id: &str, task_id: &str) -> Result<bool>;
+    /// Atomically claim a still-`prepared` run for a session: stamps `provider_session_id` only if
+    /// the run is still `prepared` and unclaimed, in a single guarded UPDATE. Returns `true` iff
+    /// this call won the claim — closing the concurrent-SessionStart race that a snapshot read
+    /// (SELECT then UPDATE) cannot. `last_event_at` is left to the observation that follows.
+    fn claim_prepared_run(&self, task_run_id: &str, provider_session_id: &str) -> Result<bool>;
     fn record_task_run_observation(
         &mut self,
         task_run_id: &str,

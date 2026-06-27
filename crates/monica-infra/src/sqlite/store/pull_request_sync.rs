@@ -4,7 +4,7 @@ use rusqlite::{params, OptionalExtension};
 use crate::sqlite::SqliteStore;
 use monica_application::{
     GithubPullRequest, Provider, PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate,
-    RefType,
+    PullRequestSyncStore, RefType,
 };
 
 use super::SET_NOW;
@@ -269,6 +269,58 @@ impl SqliteStore {
             [],
         )?;
         Ok(())
+    }
+}
+
+// PR sync delegates to the inherent methods above; a trait impl cannot span files, so the SQL
+// lives here with its tables while [`SqliteStore`] also exposes them inherently.
+impl PullRequestSyncStore for SqliteStore {
+    fn next_pull_request_branch_sync_candidate(
+        &self,
+    ) -> Result<Option<PullRequestBranchSyncCandidate>> {
+        SqliteStore::next_pull_request_branch_sync_candidate(self)
+    }
+
+    fn next_pull_request_status_sync_candidate(
+        &self,
+    ) -> Result<Option<PullRequestStatusSyncCandidate>> {
+        SqliteStore::next_pull_request_status_sync_candidate(self)
+    }
+
+    fn record_pull_request_branch_sync_success(
+        &mut self,
+        candidate: &PullRequestBranchSyncCandidate,
+        pull_requests: &[GithubPullRequest],
+    ) -> Result<()> {
+        SqliteStore::record_pull_request_branch_sync_success(self, candidate, pull_requests)
+    }
+
+    fn record_pull_request_branch_sync_failure(
+        &mut self,
+        candidate: &PullRequestBranchSyncCandidate,
+        error: &str,
+    ) -> Result<()> {
+        SqliteStore::record_pull_request_branch_sync_failure(self, candidate, error)
+    }
+
+    fn record_pull_request_status_sync_success(
+        &mut self,
+        candidate: &PullRequestStatusSyncCandidate,
+        pull_request: &GithubPullRequest,
+    ) -> Result<()> {
+        SqliteStore::record_pull_request_status_sync_success(self, candidate, pull_request)
+    }
+
+    fn record_pull_request_status_sync_failure(
+        &mut self,
+        candidate: &PullRequestStatusSyncCandidate,
+        error: &str,
+    ) -> Result<()> {
+        SqliteStore::record_pull_request_status_sync_failure(self, candidate, error)
+    }
+
+    fn force_clear_pr_sync_state(&mut self) -> Result<()> {
+        SqliteStore::force_clear_pr_sync_state(self)
     }
 }
 

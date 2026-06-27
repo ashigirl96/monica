@@ -1,7 +1,7 @@
 mod ports;
 
 use self::ports::{
-    EventRepository, ProjectRepository, TaskRepository, TaskRunRepository, TaskSummaryFilter,
+    EventRepository, ProjectRepository, TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter,
 };
 use crate::{ApplicationError, ApplicationResult, Event, Project, Task, TaskSummaryRow};
 
@@ -10,7 +10,7 @@ use crate::{ApplicationError, ApplicationResult, Event, Project, Task, TaskSumma
 /// or an unknown tab.
 pub fn plan_path_for_terminal_tab<R>(repos: &R, terminal_tab_id: &str) -> ApplicationResult<Option<String>>
 where
-    R: TaskRunRepository,
+    R: TaskRunStore,
 {
     Ok(repos
         .find_task_run_by_terminal_tab(terminal_tab_id)?
@@ -19,7 +19,7 @@ where
 
 pub fn list_tasks<R>(repos: &R) -> ApplicationResult<Vec<Task>>
 where
-    R: TaskRepository,
+    R: TaskStore,
 {
     Ok(repos.list_tasks()?)
 }
@@ -30,7 +30,7 @@ pub fn list_task_summaries<R>(
     project: Option<&str>,
 ) -> ApplicationResult<Vec<TaskSummaryRow>>
 where
-    R: TaskRepository,
+    R: TaskBoardQuery,
 {
     Ok(repos.list_task_summaries(filter, project)?)
 }

@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use crate::prelude::bench_runspace_id;
 use super::ports::{
-    BenchRepository, ProjectRepository, TaskRunOutputs, TaskRepository, TaskRunRepository,
+    ProjectRepository, TaskRunOutputs, TaskRunStore, TaskStore, WorkbenchStore,
 };
 use crate::{ApplicationError, ApplicationResult, Project, Task, TaskBench};
 
@@ -27,7 +27,7 @@ pub(crate) fn ensure_bench<R>(
     pin_cwd: bool,
 ) -> Result<(String, String, bool)>
 where
-    R: BenchRepository,
+    R: WorkbenchStore + ?Sized,
 {
     if let Some((runspace_id, cwd)) = repos.get_bench_for_task(task_id)? {
         if pin_cwd {
@@ -49,7 +49,7 @@ pub fn task_shell_env<R, A>(
     task_id: &str,
 ) -> ApplicationResult<Vec<(String, String)>>
 where
-    R: TaskRepository + ProjectRepository + TaskRunRepository + BenchRepository,
+    R: TaskStore + ProjectRepository + TaskRunStore + WorkbenchStore,
     A: TaskRunOutputs,
 {
     let (task, project) = load_task_and_optional_project(repos, task_id)?;
@@ -69,7 +69,7 @@ where
 
 fn primary_run_agent<R>(repos: &R, task: &Task) -> Option<crate::Agent>
 where
-    R: TaskRunRepository,
+    R: TaskRunStore,
 {
     task.primary_task_run_id
         .as_ref()
@@ -82,7 +82,7 @@ fn load_task_and_optional_project<R>(
     task_id: &str,
 ) -> ApplicationResult<(Task, Option<Project>)>
 where
-    R: TaskRepository + ProjectRepository,
+    R: TaskStore + ProjectRepository,
 {
     let task = repos
         .get_task(task_id)?
@@ -115,7 +115,7 @@ where
 
 pub fn open_bench<R, A>(repos: &mut R, outputs: &A, task_id: &str) -> ApplicationResult<TaskBench>
 where
-    R: TaskRepository + TaskRunRepository + ProjectRepository + BenchRepository,
+    R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore,
     A: TaskRunOutputs,
 {
     let (task, project) = load_task_and_optional_project(repos, task_id)?;
@@ -143,7 +143,7 @@ fn is_usable_worktree(path: &str) -> bool {
 
 fn resolve_worktree_cwd<R>(repos: &R, task: &Task) -> Option<String>
 where
-    R: TaskRunRepository,
+    R: TaskRunStore,
 {
     task.primary_task_run_id
         .as_ref()

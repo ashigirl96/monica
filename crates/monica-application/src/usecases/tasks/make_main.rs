@@ -1,4 +1,4 @@
-use super::ports::{TaskRepository, TaskRunRepository};
+use super::ports::{TaskRunStore, TaskStore};
 use crate::{ApplicationResult, TaskRunStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,7 +20,7 @@ pub enum MakeMainOutcome {
 /// caller can treat the action as a no-op.
 pub fn make_main_by_terminal_tab<R>(repos: &R, terminal_tab_id: &str) -> ApplicationResult<MakeMainOutcome>
 where
-    R: TaskRepository + TaskRunRepository,
+    R: TaskStore + TaskRunStore,
 {
     let Some(run) = repos.find_task_run_by_terminal_tab(terminal_tab_id)? else {
         return Ok(MakeMainOutcome::NotFound);
@@ -52,7 +52,7 @@ where
 /// The tab currently hosting the task's Main Run, if any — drives the Workbench tab indicator.
 pub fn primary_terminal_tab<R>(repos: &R, task_id: &str) -> ApplicationResult<Option<String>>
 where
-    R: TaskRepository + TaskRunRepository,
+    R: TaskStore + TaskRunStore,
 {
     let Some(task) = repos.get_task(task_id)? else {
         return Ok(None);

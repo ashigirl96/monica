@@ -6,7 +6,7 @@ use crate::prelude::{
     is_session_starting_event, should_ignore_event, subagents_in_flight_after,
     transition_for_event, transition_is_protected, Agent, Task,
 };
-use super::ports::{Clock, EventRepository, TaskRunOutputs, TaskRepository, TaskRunRepository};
+use super::ports::{Clock, EventRepository, TaskRunOutputs, TaskRunStore, TaskStore};
 use crate::{NewTaskRun, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus};
 
 /// Identity carried by a hook invocation via `MONICA_*` env vars. `task_run_id` is only present
@@ -46,7 +46,7 @@ pub fn record_claude_hook<R, A>(
     raw_stdin: &str,
 ) -> Result<HookReport>
 where
-    R: TaskRepository + TaskRunRepository + EventRepository + Clock,
+    R: TaskStore + TaskRunStore + EventRepository + Clock,
     A: TaskRunOutputs,
 {
     record_hook(repos, outputs, ctx, raw_stdin, Agent::Claude)
@@ -59,7 +59,7 @@ pub fn record_codex_hook<R, A>(
     raw_stdin: &str,
 ) -> Result<HookReport>
 where
-    R: TaskRepository + TaskRunRepository + EventRepository + Clock,
+    R: TaskStore + TaskRunStore + EventRepository + Clock,
     A: TaskRunOutputs,
 {
     record_hook(repos, outputs, ctx, raw_stdin, Agent::Codex)
@@ -73,7 +73,7 @@ fn record_hook<R, A>(
     agent: Agent,
 ) -> Result<HookReport>
 where
-    R: TaskRepository + TaskRunRepository + EventRepository + Clock,
+    R: TaskStore + TaskRunStore + EventRepository + Clock,
     A: TaskRunOutputs,
 {
     let parsed: Option<Value> = serde_json::from_str(raw_stdin.trim()).ok();
@@ -277,15 +277,13 @@ pub(in crate::usecases) struct RunResolveCtx<'a> {
 ///    primary and an existing side run.
 /// 3. A still-`Prepared` primary run is claimed by a session-starting event (the Run-button
 ///    flow before its first hook, or plain `claude` consuming a Prepare); stray mid-session
-///    events from an unknown session must not take it over.
+///    events from an unknown session must not take it over. With a session id the claim is an
+///    atomic guarded UPDATE, so two near-simultaneous SessionStarts can't both take the run — the
+///    loser falls through to rule 4 and becomes a side run.
 /// 4. Otherwise a session-starting event from a live task lazily creates a run: it becomes the
 ///    primary when none is set (or the pointer dangles), and a side run when a primary already
 ///    exists — a run actively driven by another session is never stolen. A rejected explicit
 ///    run id means a wrapper launch with corrupted env, not a plain session; it never creates.
-///
-/// TODO: two near-simultaneous SessionStarts can both pass rule 3 (or both reach rule 4) before
-/// either observation lands; an atomic `UPDATE ... WHERE status = 'prepared'` claim would close
-/// the window. Hooks are human-paced, so this is accepted for now.
 fn resolve_hook_run<R>(
     repos: &mut R,
     task_id: Option<&str>,
@@ -296,7 +294,7 @@ fn resolve_hook_run<R>(
     agent: Agent,
 ) -> Result<ResolvedRun>
 where
-    R: TaskRepository + TaskRunRepository,
+    R: TaskStore + TaskRunStore,
 {
     if let Some(run_id) = explicit_run_id {
         return Ok(ResolvedRun::linked(repos.get_task_run(run_id)?));
@@ -338,7 +336,7 @@ where
 
 pub(in crate::usecases) fn resolve_by_session<R>(ctx: &RunResolveCtx, repos: &mut R) -> Result<Option<ResolvedRun>>
 where
-    R: TaskRepository + TaskRunRepository,
+    R: TaskStore + TaskRunStore,
 {
     let Some(session_id) = ctx.provider_session_id else {
         return Ok(None);
@@ -351,16 +349,30 @@ where
 
 pub(in crate::usecases) fn resolve_by_prepared_primary<R>(
     ctx: &RunResolveCtx,
-    _repos: &mut R,
+    repos: &mut R,
 ) -> Result<Option<ResolvedRun>>
 where
-    R: TaskRepository + TaskRunRepository,
+    R: TaskStore + TaskRunStore,
 {
     let Some(run) = ctx.primary_run else {
         return Ok(None);
     };
-    if run.status == TaskRunStatus::Prepared && is_session_starting_event(ctx.event_name) {
-        Ok(Some(ResolvedRun::linked(Some(run.clone()))))
+    if run.status != TaskRunStatus::Prepared || !is_session_starting_event(ctx.event_name) {
+        return Ok(None);
+    }
+    // No session id to stamp (e.g. the Run-button flow before its first hook): nothing to claim
+    // and nothing another session could clobber, so keep the snapshot behavior.
+    let Some(session_id) = ctx.provider_session_id else {
+        return Ok(Some(ResolvedRun::linked(Some(run.clone()))));
+    };
+    // Atomic claim: only the SessionStart whose guarded UPDATE lands keeps the prepared run. A
+    // loser changes 0 rows and falls through to lazy-create as a side run.
+    if repos.claim_prepared_run(&run.id, session_id)? {
+        // The claim only set `provider_session_id`; reflect it on the snapshot we already hold
+        // (avoiding a re-read) so the observation that follows sees the claimed session.
+        let mut claimed = run.clone();
+        claimed.provider_session_id = Some(session_id.to_string());
+        Ok(Some(ResolvedRun::linked(Some(claimed))))
     } else {
         Ok(None)
     }
@@ -368,7 +380,7 @@ where
 
 pub(in crate::usecases) fn resolve_by_lazy_create<R>(ctx: &RunResolveCtx, repos: &mut R) -> Result<Option<ResolvedRun>>
 where
-    R: TaskRepository + TaskRunRepository,
+    R: TaskStore + TaskRunStore,
 {
     if ctx.provider_session_id.is_none()
         || !is_session_starting_event(ctx.event_name)

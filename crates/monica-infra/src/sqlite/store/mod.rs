@@ -7,6 +7,7 @@ mod task_runs;
 mod tasks;
 pub(crate) mod terminal;
 mod terminal_sessions;
+mod unit_of_work;
 
 pub(super) const TASK_COLUMNS: &str = "id, kind, status, phase, title, body, project_id,      labels, details_json, source_json, primary_task_run_id, closed_at, created_at, updated_at";
 

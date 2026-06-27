@@ -44,14 +44,15 @@ pub use prelude::{
     TerminalSession, TerminalSessionKind, TerminalSessionStatus,
 };
 pub use ports::{
-    EventRepository, GitGateway, NotebookGateway, ProjectRepository, TaskRepository,
-    TaskRunRepository, TaskSummaryFilter, TerminalAttachment, TerminalCreateRequest,
-    TerminalDaemon, TerminalSessionRepository, Workspace,
+    EventRepository, GitGateway, NotebookGateway, ProjectRepository, PullRequestSyncStore,
+    TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter, TerminalAttachment,
+    TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository, UnitOfWork, WorkbenchStore,
+    WorkTransaction, Workspace,
 };
 pub use terminal_state::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTabRow};
 pub use usecases::github::ports::{AuthGateway, GithubGateway};
 pub use usecases::runs::ports::{
-    BenchRepository, Clock, SetupEnv, SetupOutcome, SetupRunner, TaskRunOutputs, TaskShellEnv,
+    Clock, SetupEnv, SetupOutcome, SetupRunner, TaskRunOutputs, TaskShellEnv,
 };
 pub use usecases::{
     begin_github_device_flow, reconcile_terminal_sessions, DaemonSessionView, ReconcileOutcome,
