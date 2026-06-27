@@ -60,8 +60,7 @@ where
             item.id
         ))
     })?;
-    Ok(git
-        .cleanup_task_runs(Path::new(repo_path), runs)
-        .map_err(|e| ApplicationError::external(format!("failed to clean up git branches: {e:#}")))?)
+    git.cleanup_task_runs(Path::new(repo_path), runs)
+        .map_err(|e| ApplicationError::external(format!("failed to clean up git branches: {e:#}")))
 
 }

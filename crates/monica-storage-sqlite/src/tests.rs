@@ -6,7 +6,7 @@ use monica_application::{
 };
 use monica_domain::{
     Agent, DisplayStatus, ExternalReference, NewTask, NewTaskRun, NewTerminalSession, Project,
-    Provider, RawJson, RefType, Task, TaskId, TaskKind, TaskRun, TaskRunStatus, TaskRunWaitReason,
+    Provider, RawJson, RefType, TaskId, TaskKind, TaskRun, TaskRunStatus, TaskRunWaitReason,
     TaskStatus, TerminalSessionKind, TerminalSessionStatus,
 };
 use rusqlite::params;

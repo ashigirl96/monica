@@ -167,12 +167,14 @@ where
     let setup = setup_phase(
         setup_runner,
         outputs,
-        task_run_id,
-        task_id,
-        &worktree_path,
-        &project,
-        &profile,
-        &branch,
+        &SetupContext {
+            task_run_id,
+            task_id,
+            worktree_path: &worktree_path,
+            project: &project,
+            profile: &profile,
+            branch: &branch,
+        },
     )?;
 
     if setup.is_failure() {
@@ -187,33 +189,37 @@ where
     Ok(TaskRunStatus::Prepared)
 }
 
+struct SetupContext<'a> {
+    task_run_id: &'a str,
+    task_id: &'a str,
+    worktree_path: &'a Path,
+    project: &'a Project,
+    profile: &'a ExecutionProfile,
+    branch: &'a str,
+}
+
 fn setup_phase<S, A>(
     setup_runner: &S,
     outputs: &A,
-    task_run_id: &str,
-    task_id: &str,
-    worktree_path: &Path,
-    project: &Project,
-    profile: &ExecutionProfile,
-    branch: &str,
+    ctx: &SetupContext<'_>,
 ) -> ApplicationResult<SetupOutcome>
 where
     S: SetupRunner,
     A: TaskRunOutputs,
 {
     let log_path = outputs
-        .setup_log_path(task_run_id)
+        .setup_log_path(ctx.task_run_id)
         .map_err(|e| ApplicationError::external(format!("failed to resolve setup log path: {e:#}")))?;
     let env = SetupEnv {
-        monica_id: task_id.to_string(),
-        task_run_id: task_run_id.to_string(),
-        project_id: project.id.clone(),
-        branch: branch.to_string(),
-        worktree: worktree_path.to_string_lossy().into_owned(),
+        monica_id: ctx.task_id.to_string(),
+        task_run_id: ctx.task_run_id.to_string(),
+        project_id: ctx.project.id.clone(),
+        branch: ctx.branch.to_string(),
+        worktree: ctx.worktree_path.to_string_lossy().into_owned(),
     };
-    let timeout = Duration::from_secs(profile.setup_timeout_sec.max(0) as u64);
+    let timeout = Duration::from_secs(ctx.profile.setup_timeout_sec.max(0) as u64);
     setup_runner
-        .run_setup_script(worktree_path, &log_path, &env, timeout)
+        .run_setup_script(ctx.worktree_path, &log_path, &env, timeout)
         .map_err(|e| ApplicationError::external(format!("setup script failed to run: {e:#}")))
 }
 
