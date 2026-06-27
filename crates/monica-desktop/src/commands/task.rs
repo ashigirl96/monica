@@ -1,6 +1,6 @@
 use monica_api::{
-    Agent, ApiError, BoardColumn, PrepareTaskResult, RunTaskResult, TaskBench, TaskRunStatus,
-    TaskSummaryRow,
+    Agent, ApiError, BoardColumn, PrepareTaskResult, ProjectOption, RunTaskResult, TaskBench,
+    TaskCreated, TaskRunStatus, TaskSummaryRow,
 };
 use monica_application::{MakeMainOutcome, TaskSummaryFilter, TrackGithubIssueInput};
 use serde::Serialize;
@@ -8,17 +8,6 @@ use tauri::AppHandle;
 use tauri_specta::Event;
 
 use crate::event_sink;
-
-#[derive(Serialize, specta::Type)]
-pub struct TaskCreated {
-    pub task_id: String,
-    pub title: String,
-}
-
-#[derive(Serialize, specta::Type)]
-pub struct ProjectOption {
-    pub id: String,
-}
 
 #[derive(Clone, Serialize, specta::Type, Event)]
 #[tauri_specta(event_name = "task-run:status-changed")]
@@ -60,7 +49,7 @@ pub async fn track_github_issue(app: AppHandle, input: String) -> Result<TaskCre
         .track_github_issue(TrackGithubIssueInput { repo, number })
         .await?;
     Ok(TaskCreated {
-        task_id: report.task.id,
+        task_id: report.task.id.into(),
         title: report.task.title,
     })
 }
@@ -87,7 +76,7 @@ pub fn create_raw_task(
     let mut monica = event_sink::open(&app)?;
     let task = monica.tasks().create_raw_task(&title, &project_id)?;
     Ok(TaskCreated {
-        task_id: task.id,
+        task_id: task.id.into(),
         title: task.title,
     })
 }

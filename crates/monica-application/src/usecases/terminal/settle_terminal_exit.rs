@@ -30,8 +30,8 @@ pub fn task_run_settlement_for_terminal_exit(
         return None;
     }
     Some(TerminalExitSettlement {
-        task_id: run.task_id.clone(),
-        task_run_id: run.id.clone(),
+        task_id: run.task_id.to_string(),
+        task_run_id: run.id.to_string(),
     })
 }
 
@@ -56,8 +56,8 @@ pub fn task_run_settlement_for_orphaned_run(
         return None;
     }
     Some(TerminalExitSettlement {
-        task_id: run.task_id.clone(),
-        task_run_id: run.id.clone(),
+        task_id: run.task_id.to_string(),
+        task_run_id: run.id.to_string(),
     })
 }
 
@@ -101,8 +101,8 @@ mod tests {
 
     fn run(status: TaskRunStatus, provider_session_id: Option<&str>) -> TaskRun {
         TaskRun {
-            id: "run-1".to_string(),
-            task_id: "MON-1".to_string(),
+            id: "run-1".into(),
+            task_id: "MON-1".into(),
             agent: None,
             branch: None,
             worktree_path: None,

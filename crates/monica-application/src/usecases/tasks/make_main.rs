@@ -43,8 +43,8 @@ where
     }
     repos.set_primary_task_run(&task.id, &run.id)?;
     Ok(MakeMainOutcome::Changed {
-        task_id: task.id,
-        task_run_id: run.id,
+        task_id: task.id.into(),
+        task_run_id: run.id.into(),
         status: run.status,
     })
 }

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::ids::{TaskId, TaskRunId};
 use crate::json::RawJson;
 use crate::status::TaskStatus;
 
@@ -28,7 +29,7 @@ impl TaskKind {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Task {
-    pub id: String,
+    pub id: TaskId,
     pub kind: TaskKind,
     pub status: TaskStatus,
     pub phase: Option<String>,
@@ -38,7 +39,7 @@ pub struct Task {
     pub labels: Vec<String>,
     pub details: RawJson,
     pub source: Option<RawJson>,
-    pub primary_task_run_id: Option<String>,
+    pub primary_task_run_id: Option<TaskRunId>,
     pub closed_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,

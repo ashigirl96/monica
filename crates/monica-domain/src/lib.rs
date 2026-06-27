@@ -8,6 +8,7 @@ mod agent_signal;
 mod branch;
 mod error;
 mod external_reference;
+mod ids;
 mod json;
 mod notebook;
 mod project;
@@ -24,13 +25,14 @@ pub use agent_signal::{
 pub use branch::{branch_name, monica_number, worktree_path_for};
 pub use error::DomainError;
 pub use external_reference::{ExternalIssue, ExternalReference, RefType};
+pub use ids::{TaskId, TaskRunId};
 pub use json::RawJson;
 pub use notebook::{
     front_value, is_valid_slug, mermaid_blocks, outline, pages_from_docs, parse_front_matter,
     parse_wikilink, structural_lint, LintFinding, NotebookDoc, NotebookPage, OutlineEntry,
 };
 pub use project::{PermissionMode, Project, Provider};
-pub use refs::{parse_issue_input, parse_issue_ref, parse_owner_repo};
+pub use refs::{parse_issue_number, parse_issue_ref, parse_owner_repo};
 pub use status::{DisplayStatus, TaskRunStatus, TaskRunWaitReason, TaskStatus};
 pub use task::{Event, NewTask, Task, TaskKind};
 pub use task_run::{is_safe_task_run_id, Agent, NewTaskRun, TaskRun};

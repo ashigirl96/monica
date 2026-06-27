@@ -23,7 +23,7 @@ where
     let item = repos.mark_task_closed(id)?;
     Ok(CloseIssueReport {
         item,
-        task_runs: runs.into_iter().map(|run| run.id).collect(),
+        task_runs: runs.into_iter().map(|run| run.id.into()).collect(),
         removed_branches,
     })
 }

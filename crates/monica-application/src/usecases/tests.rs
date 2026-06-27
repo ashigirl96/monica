@@ -17,21 +17,19 @@ use crate::{
 use super::runs::record_hook::{
     resolve_by_lazy_create, resolve_by_prepared_primary, resolve_by_session, RunResolveCtx,
 };
-use crate::{
+use crate::usecases::{
     begin_github_device_flow, close_issue, create_raw_task, execute_run, github_auth_status,
-    logout_github,
-    make_main_by_terminal_tab, open_bench, prepare_claude_for_run, primary_terminal_tab,
-    record_hook, register_project_with_default_branch,
-    start_run,
-    sync_next_pull_request,
-    track_github_issue, AgentSignal, Continuation, HookContext, MakeMainOutcome, Provider, RefType,
-    SignalKind,
-    wait_for_github_device_flow, Agent, DisplayStatus, Event, ExternalReference, GithubAuthStatus,
-    GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef,
-    GithubPullRequestStatus, NewTask, NewTaskRun, Project, PullRequestBranchSyncCandidate,
-    PullRequestStatusSyncCandidate, PullRequestSyncStatus, Task,
-    TaskBench, TaskKind, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunWaitReason, TaskStatus,
-    TaskSummaryRow, TrackGithubIssueInput,
+    logout_github, make_main_by_terminal_tab, open_bench, prepare_claude_for_run,
+    primary_terminal_tab, record_hook, register_project_with_default_branch, start_run,
+    sync_next_pull_request, track_github_issue, wait_for_github_device_flow,
+};
+use crate::{
+    Agent, AgentSignal, Continuation, DisplayStatus, Event, ExternalReference, GithubAuthStatus,
+    GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef, GithubPullRequestStatus,
+    HookContext, MakeMainOutcome, NewTask, NewTaskRun, Project, Provider,
+    PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate, PullRequestSyncStatus, RefType,
+    SignalKind, Task, TaskBench, TaskKind, TaskRun, TaskRunObservation, TaskRunStatus,
+    TaskRunWaitReason, TaskStatus, TaskSummaryRow, TrackGithubIssueInput,
 };
 use crate::ports::{
     NotebookGateway, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
@@ -156,6 +154,7 @@ impl FakeRepos {
         })
         .unwrap()
         .id
+        .into_string()
     }
 }
 
@@ -168,7 +167,7 @@ impl FakeRepos {
         state.next_task += 1;
         let id = format!("MON-{}", state.next_task);
         let task = task_from_new(id, new);
-        state.tasks.insert(task.id.clone(), task.clone());
+        state.tasks.insert(task.id.to_string(), task.clone());
         Ok(task)
     }
 
@@ -179,11 +178,11 @@ impl FakeRepos {
     ) -> Result<Task> {
         let task = self.do_insert_task(new)?;
         external.id = 1;
-        external.task_id = task.id.clone();
+        external.task_id = task.id.to_string();
         self.state
             .borrow_mut()
             .refs
-            .entry(task.id.clone())
+            .entry(task.id.to_string())
             .or_default()
             .push(external);
         Ok(task)
@@ -239,7 +238,7 @@ impl TaskStore for FakeRepos {
             .tasks
             .get_mut(task_id)
             .ok_or_else(|| anyhow!("task not found: {task_id}"))?
-            .primary_task_run_id = Some(task_run_id.to_string());
+            .primary_task_run_id = Some(task_run_id.into());
         Ok(())
     }
 
@@ -282,7 +281,7 @@ impl TaskBoardQuery for FakeRepos {
             .map(|task| {
                 let display = DisplayStatus::from_task_and_run(task.status, None);
                 TaskSummaryRow {
-                    id: task.id.clone(),
+                    id: task.id.to_string(),
                     title: task.title.clone(),
                     project: task.project_id.clone(),
                     github_issue_number: None,
@@ -406,8 +405,8 @@ impl FakeRepos {
         state.next_run += 1;
         let id = format!("run-{}", state.next_run);
         let run = TaskRun {
-            id: id.clone(),
-            task_id: new.task_id.clone(),
+            id: id.clone().into(),
+            task_id: new.task_id.clone().into(),
             agent: new.agent,
             branch: new.branch,
             worktree_path: new.worktree_path,
@@ -1031,7 +1030,7 @@ impl AuthGateway for FakeAuth {
 
 fn task_from_new(id: String, new: NewTask) -> Task {
     Task {
-        id,
+        id: id.into(),
         kind: new.kind,
         status: new.status,
         phase: new.phase,
@@ -1169,7 +1168,7 @@ fn task_with_prepared_primary(repos: &mut FakeRepos) -> (String, String) {
         .finish_task_run(&run.id, &task_id, TaskRunStatus::Prepared)
         .unwrap();
     repos.set_primary_task_run(&task_id, &run.id).unwrap();
-    (task_id, run.id)
+    (task_id, run.id.into_string())
 }
 
 /// A task with a primary run claimed by `sess-1` and actively working (the steady state after
@@ -1410,7 +1409,7 @@ fn record_claude_hook_creates_side_run_instead_of_stealing_active_primary() {
         .find_task_run_by_session(&task_id, "sess-2")
         .unwrap()
         .unwrap();
-    assert_ne!(side.id, primary_id);
+    assert_ne!(side.id.as_str(), primary_id.as_str());
     assert_eq!(side.status, TaskRunStatus::WaitingForUser);
     assert_eq!(side.agent, Some(Agent::Claude));
     // the session's cwd must never become a worktree_path (delete-time cleanup rips those)
@@ -1467,8 +1466,9 @@ fn record_claude_hook_fork_session_start_does_not_steal_primary_tab() {
             .find_task_run_by_terminal_tab("tab-main")
             .unwrap()
             .unwrap()
-            .id,
-        primary_id
+            .id
+            .as_str(),
+        primary_id.as_str()
     );
 }
 
@@ -2089,7 +2089,7 @@ fn make_main_by_terminal_tab_promotes_side_run_and_reports_no_ops() {
         outcome,
         MakeMainOutcome::Changed {
             task_id: task_id.clone(),
-            task_run_id: latest_in_tab.id.clone(),
+            task_run_id: latest_in_tab.id.to_string(),
             status: TaskRunStatus::WaitingForUser,
         }
     );
@@ -2194,7 +2194,7 @@ fn record_claude_hook_prefers_explicit_run_id_over_session_lookup() {
         repos.get_task_run(&other.id).unwrap().unwrap().status,
         TaskRunStatus::WaitingForUser
     );
-    assert_ne!(other.id, primary_id);
+    assert_ne!(other.id.as_str(), primary_id.as_str());
 }
 
 #[tokio::test]
@@ -2420,6 +2420,7 @@ fn insert_issue_backed_task(repos: &mut FakeRepos, issue_number: i64) -> String 
         )
         .unwrap()
         .id
+        .into_string()
 }
 
 #[test]
@@ -2682,7 +2683,7 @@ fn prepare_claude_for_run_ignores_prompt_for_raw_task() {
 
 fn make_task(id: &str, status: TaskStatus, primary_run_id: Option<&str>) -> Task {
     Task {
-        id: id.to_string(),
+        id: id.into(),
         kind: TaskKind::Development,
         status,
         phase: None,
@@ -2692,7 +2693,7 @@ fn make_task(id: &str, status: TaskStatus, primary_run_id: Option<&str>) -> Task
         labels: Vec::new(),
         details: RawJson::empty_object(),
         source: None,
-        primary_task_run_id: primary_run_id.map(str::to_string),
+        primary_task_run_id: primary_run_id.map(Into::into),
         closed_at: None,
         created_at: "2026-06-02T00:00:00.000Z".to_string(),
         updated_at: "2026-06-02T00:00:00.000Z".to_string(),
@@ -2701,8 +2702,8 @@ fn make_task(id: &str, status: TaskStatus, primary_run_id: Option<&str>) -> Task
 
 fn make_run(id: &str, task_id: &str, status: TaskRunStatus) -> TaskRun {
     TaskRun {
-        id: id.to_string(),
-        task_id: task_id.to_string(),
+        id: id.into(),
+        task_id: task_id.into(),
         agent: Some(Agent::Claude),
         branch: None,
         worktree_path: None,
@@ -2978,7 +2979,7 @@ fn resolve_by_lazy_create_creates_side_run_when_primary_exists() {
 
 impl FakeRepos {
     fn seed_run(&self, run: TaskRun) {
-        self.state.borrow_mut().runs.insert(run.id.clone(), run);
+        self.state.borrow_mut().runs.insert(run.id.to_string(), run);
     }
 
     fn seed_session(&self, session: TerminalSession) {
@@ -3209,8 +3210,8 @@ fn facade_with_decoder(
 
 fn driven_run(id: &str, task_id: &str, tab: &str) -> TaskRun {
     TaskRun {
-        id: id.to_string(),
-        task_id: task_id.to_string(),
+        id: id.into(),
+        task_id: task_id.into(),
         agent: None,
         branch: None,
         worktree_path: None,

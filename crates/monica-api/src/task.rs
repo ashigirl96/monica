@@ -3,6 +3,17 @@ use serde::{Deserialize, Serialize};
 use crate::github::GithubPullRequestRef;
 use crate::status::{DisplayStatus, TaskRunStatus, TaskRunWaitReason, TaskStatus};
 
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct TaskCreated {
+    pub task_id: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct ProjectOption {
+    pub id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct TaskSummaryRow {
     pub id: String,

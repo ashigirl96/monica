@@ -1,9 +1,7 @@
 use anyhow::{anyhow, Result};
 use clap::Subcommand;
 
-use monica_application::{
-    mermaid_blocks, outline, pages_from_docs, structural_lint, LintFinding, NotebookDoc,
-};
+use monica_application::{LintFinding, NotebookDoc};
 
 use crate::event_sink::{self, CliFacade};
 
@@ -59,30 +57,29 @@ fn list(monica: &mut CliFacade) -> Result<()> {
 }
 
 fn show(monica: &mut CliFacade, slug: &str) -> Result<()> {
-    let (docs, _) = monica.notebooks().read_notebook(slug)?;
-    let entries = outline(&pages_from_docs(&docs));
-    if entries.is_empty() {
+    let pages = monica.notebooks().page_outline(slug)?;
+    if pages.is_empty() {
         println!("(no pages)");
         return Ok(());
     }
-    for entry in entries {
-        let indent = "  ".repeat(entry.number.matches('.').count());
-        println!("{indent}{} {}", entry.number, entry.title);
+    for page in pages {
+        let indent = "  ".repeat(page.number.matches('.').count());
+        println!("{indent}{} {}", page.number, page.title);
     }
     Ok(())
 }
 
 fn lint(monica: &mut CliFacade, slug: &str) -> Result<()> {
-    let (docs, mut fatal) = monica.notebooks().read_notebook(slug)?;
-    fatal.extend(structural_lint(&docs));
-    for doc in &docs {
-        fatal.extend(mermaid_findings(doc));
+    let report = monica.notebooks().notebook_lint(slug)?;
+    let mut fatal = report.findings;
+    for (file, blocks) in &report.mermaid_blocks_by_file {
+        fatal.extend(mermaid_findings(file, blocks));
     }
 
     for f in &fatal {
         println!("{}: {}", f.file, f.message);
     }
-    for w in style_findings(&docs) {
+    for w in style_findings(&report.docs) {
         println!("warning: {}: {}", w.file, w.message);
     }
 
@@ -93,12 +90,12 @@ fn lint(monica: &mut CliFacade, slug: &str) -> Result<()> {
     }
 }
 
-fn mermaid_findings(doc: &NotebookDoc) -> Vec<LintFinding> {
-    mermaid_blocks(&doc.body)
-        .into_iter()
+fn mermaid_findings(file: &str, blocks: &[String]) -> Vec<LintFinding> {
+    blocks
+        .iter()
         .filter_map(|block| {
-            mermaid_error(&mmdflux::validate_diagram(&block)).map(|message| LintFinding {
-                file: doc.file.clone(),
+            mermaid_error(&mmdflux::validate_diagram(block)).map(|message| LintFinding {
+                file: file.to_string(),
                 message,
             })
         })
@@ -164,13 +161,7 @@ mod tests {
     use super::*;
 
     fn mermaid_findings_for(mermaid: &str) -> Vec<LintFinding> {
-        let doc = NotebookDoc {
-            file: "t.md".to_string(),
-            stem: "t".to_string(),
-            front: Vec::new(),
-            body: format!("```mermaid\n{mermaid}\n```\n"),
-        };
-        mermaid_findings(&doc)
+        mermaid_findings("t.md", &[mermaid.to_string()])
     }
 
     #[test]

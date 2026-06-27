@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::ids::{TaskId, TaskRunId};
 use crate::json::RawJson;
 use crate::status::{TaskRunStatus, TaskRunWaitReason};
 
@@ -30,8 +31,8 @@ impl Agent {
 /// An execution attempt against a task. Persisted from issue E onward.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TaskRun {
-    pub id: String,
-    pub task_id: String,
+    pub id: TaskRunId,
+    pub task_id: TaskId,
     pub agent: Option<Agent>,
     pub branch: Option<String>,
     pub worktree_path: Option<String>,

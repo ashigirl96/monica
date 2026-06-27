@@ -90,7 +90,7 @@ where
 
     Ok(PrepareTaskResult {
         task_id: task_id.to_string(),
-        task_run_id: run.id,
+        task_run_id: run.id.into(),
         branch,
     })
 }
@@ -282,7 +282,7 @@ where
 
     Ok(crate::RunTaskResult {
         task_id: task_id.to_string(),
-        task_run_id: primary_id,
+        task_run_id: primary_id.into(),
         runspace_id,
         cwd: worktree_str,
         env: shell.env,

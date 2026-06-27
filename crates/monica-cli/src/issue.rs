@@ -80,7 +80,7 @@ fn close_command(monica: &mut CliFacade, id: &str) -> Result<()> {
         .tasks()
         .list_task_summaries(TaskSummaryFilter::All, None)?
         .into_iter()
-        .find(|row| row.id == item.id)
+        .find(|row| row.id == item.id.as_str())
         .and_then(|row| row.project);
 
     print_close_summary(&item, project.as_deref());
