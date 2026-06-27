@@ -33,7 +33,7 @@ fn raw_json_columns_survive_sqlite_round_trip() {
 
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.clone(),
+            task_id: task.id.to_string(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -84,16 +84,16 @@ fn project_task_with_branch(
     task.project_id = Some(project.id.clone());
     let item = db.insert_task(task).unwrap();
     db.start_task_run(NewTaskRun {
-        task_id: item.id.clone(),
+        task_id: item.id.to_string(),
         agent: None,
         branch: Some(branch.to_string()),
         worktree_path: None,
     })
     .unwrap();
     (
-        item.id.clone(),
+        item.id.to_string(),
         PullRequestBranchSyncCandidate {
-            task_id: item.id,
+            task_id: item.id.to_string(),
             repo: repo.to_string(),
             branch: branch.to_string(),
         },
@@ -148,7 +148,7 @@ fn list_external_refs_errors_on_unrecognized_provider() {
         .execute(
             "INSERT INTO external_refs (task_id, provider, ref_type, repo, number)
              VALUES (?1, 'gitlab', 'issue', 'o/r', 1)",
-            params![task.id],
+            params![task.id.as_str()],
         )
         .unwrap();
     assert!(
@@ -163,7 +163,7 @@ fn task_run_agent_is_typed_and_closed_task_is_not_regressed_by_finish() {
     let task = db.insert_task(dev_task("run me")).unwrap();
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.clone(),
+            task_id: task.id.to_string(),
             agent: Some(Agent::Claude),
             branch: Some("issue-42".to_string()),
             worktree_path: Some("/tmp/worktree".to_string()),
@@ -186,7 +186,7 @@ fn task_run_observation_records_wait_reason_and_event_metadata() {
     let task = db.insert_task(dev_task("observe me")).unwrap();
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.clone(),
+            task_id: task.id.to_string(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -223,7 +223,7 @@ fn task_run_observation_retains_plan_file_path_across_later_hooks() {
     let task = db.insert_task(dev_task("plan me")).unwrap();
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.clone(),
+            task_id: task.id.to_string(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -309,7 +309,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
     let task = db.insert_task(dev_task("guarded")).unwrap();
     let start_run = |db: &mut SqliteStore| {
         db.start_task_run(NewTaskRun {
-            task_id: task.id.clone(),
+            task_id: task.id.to_string(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -566,7 +566,7 @@ fn running_task_run(db: &mut SqliteStore, title: &str) -> TaskRun {
     let task = db.insert_task(dev_task(title)).unwrap();
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.clone(),
+            task_id: task.id.to_string(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -678,7 +678,7 @@ fn task_run_observation_keeps_existing_tab_and_session_on_none() {
     let task = db.insert_task(dev_task("keep tab")).unwrap();
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.clone(),
+            task_id: task.id.to_string(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -745,7 +745,7 @@ fn find_task_run_by_terminal_tab_returns_latest_observed_run_in_tab() {
         .unwrap();
     };
     let new_run = NewTaskRun {
-        task_id: task.id.clone(),
+        task_id: task.id.to_string(),
         agent: None,
         branch: None,
         worktree_path: None,
@@ -772,7 +772,7 @@ fn start_task_run_never_reopens_a_closed_task() {
     db.update_task_status(&task.id, TaskStatus::Closed).unwrap();
 
     db.start_task_run(NewTaskRun {
-        task_id: task.id.clone(),
+        task_id: task.id.to_string(),
         agent: None,
         branch: None,
         worktree_path: None,
@@ -792,7 +792,7 @@ fn find_task_run_by_session_is_scoped_to_task() {
     let task_b = db.insert_task(dev_task("task b")).unwrap();
     let run_a = db
         .start_task_run(NewTaskRun {
-            task_id: task_a.id.clone(),
+            task_id: task_a.id.to_string(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -905,13 +905,13 @@ fn task_summaries_count_side_runs_excluding_primary_and_sessionless_failures() {
         .unwrap();
 
     let summaries = db.list_task_summaries(TaskSummaryFilter::All, None).unwrap();
-    let summary = summaries.iter().find(|s| s.id == task.id).unwrap();
+    let summary = summaries.iter().find(|s| s.id == task.id.as_str()).unwrap();
     assert_eq!(summary.task_run_status, Some(TaskRunStatus::Running));
     assert_eq!(summary.side_runs_running, 1);
     assert_eq!(summary.side_runs_waiting_for_user, 1);
     assert_eq!(summary.side_runs_failed, 1);
 
-    let bare = summaries.iter().find(|s| s.id == bare_task.id).unwrap();
+    let bare = summaries.iter().find(|s| s.id == bare_task.id.as_str()).unwrap();
     assert_eq!(bare.side_runs_running, 0);
     assert_eq!(bare.side_runs_waiting_for_user, 0);
     assert_eq!(bare.side_runs_failed, 0);
@@ -923,7 +923,7 @@ fn task_summaries_fall_back_to_latest_run_when_primary_pointer_dangles() {
     let task = db.insert_task(dev_task("dangling primary")).unwrap();
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.clone(),
+            task_id: task.id.to_string(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -948,7 +948,7 @@ fn task_summaries_fall_back_to_latest_run_when_primary_pointer_dangles() {
     db.set_primary_task_run(&task.id, "run-999").unwrap();
 
     let summaries = db.list_task_summaries(TaskSummaryFilter::All, None).unwrap();
-    let summary = summaries.iter().find(|s| s.id == task.id).unwrap();
+    let summary = summaries.iter().find(|s| s.id == task.id.as_str()).unwrap();
     // The task's only run is its de-facto main run, not a side run.
     assert_eq!(summary.task_run_status, Some(TaskRunStatus::Running));
     assert_eq!(summary.side_runs_running, 0);
@@ -1028,21 +1028,21 @@ fn task_summary_filter_scopes_the_closed_archive() {
     let ids = |rows: Vec<TaskSummaryRow>| -> Vec<String> { rows.into_iter().map(|r| r.id).collect() };
 
     let active_only = ids(db.list_task_summaries(TaskSummaryFilter::Active, None).unwrap());
-    assert!(active_only.contains(&active.id));
+    assert!(active_only.contains(&active.id.to_string()));
     assert!(
-        !active_only.contains(&archived.id),
+        !active_only.contains(&archived.id.to_string()),
         "Active must hide the Closed archive"
     );
 
     let closed_only = ids(db
         .list_task_summaries(TaskSummaryFilter::Status(DisplayStatus::Closed), None)
         .unwrap());
-    assert!(closed_only.contains(&archived.id));
-    assert!(!closed_only.contains(&active.id));
+    assert!(closed_only.contains(&archived.id.to_string()));
+    assert!(!closed_only.contains(&active.id.to_string()));
 
     let everything = ids(db.list_task_summaries(TaskSummaryFilter::All, None).unwrap());
-    assert!(everything.contains(&active.id));
-    assert!(everything.contains(&archived.id));
+    assert!(everything.contains(&active.id.to_string()));
+    assert!(everything.contains(&archived.id.to_string()));
 }
 
 #[test]
@@ -1070,7 +1070,7 @@ fn project_round_trip_and_summary_pr_status_stay_wire_compatible() {
     task.project_id = Some(project.id.clone());
     let item = db.insert_task(task).unwrap();
     let candidate = PullRequestBranchSyncCandidate {
-        task_id: item.id.clone(),
+        task_id: item.id.to_string(),
         repo: "owner/repo".to_string(),
         branch: "issue-42".to_string(),
     };
@@ -1101,7 +1101,7 @@ fn project_round_trip_and_summary_pr_status_stay_wire_compatible() {
     let merged_item = db.insert_task(merged_task).unwrap();
     db.record_pull_request_branch_sync_success(
         &PullRequestBranchSyncCandidate {
-            task_id: merged_item.id.clone(),
+            task_id: merged_item.id.to_string(),
             repo: "owner/repo".to_string(),
             branch: "issue-43".to_string(),
         },
@@ -1115,7 +1115,7 @@ fn project_round_trip_and_summary_pr_status_stay_wire_compatible() {
     .unwrap();
     let summaries = db.list_task_summaries(TaskSummaryFilter::All, Some("owner/repo"))
             .unwrap();
-    let merged_row = summaries.iter().find(|s| s.id == merged_item.id).unwrap();
+    let merged_row = summaries.iter().find(|s| s.id == merged_item.id.as_str()).unwrap();
     assert!(!merged_row.has_open_pull_request);
 
     // Draft counts as open work in flight.
@@ -1124,7 +1124,7 @@ fn project_round_trip_and_summary_pr_status_stay_wire_compatible() {
     let draft_item = db.insert_task(draft_task).unwrap();
     db.record_pull_request_branch_sync_success(
         &PullRequestBranchSyncCandidate {
-            task_id: draft_item.id.clone(),
+            task_id: draft_item.id.to_string(),
             repo: "owner/repo".to_string(),
             branch: "issue-44".to_string(),
         },
@@ -1138,7 +1138,7 @@ fn project_round_trip_and_summary_pr_status_stay_wire_compatible() {
     .unwrap();
     let summaries = db.list_task_summaries(TaskSummaryFilter::All, Some("owner/repo"))
             .unwrap();
-    let draft_row = summaries.iter().find(|s| s.id == draft_item.id).unwrap();
+    let draft_row = summaries.iter().find(|s| s.id == draft_item.id.as_str()).unwrap();
     assert!(draft_row.has_open_pull_request);
 }
 
@@ -1152,14 +1152,14 @@ fn branch_pull_request_candidate_uses_latest_run_branch_and_project_repo() {
     task.project_id = Some(project.id.clone());
     let item = db.insert_task(task).unwrap();
     db.start_task_run(NewTaskRun {
-        task_id: item.id.clone(),
+        task_id: item.id.to_string(),
         agent: None,
         branch: Some("old-branch".to_string()),
         worktree_path: None,
     })
     .unwrap();
     db.start_task_run(NewTaskRun {
-        task_id: item.id.clone(),
+        task_id: item.id.to_string(),
         agent: None,
         branch: Some("feature/new-branch".to_string()),
         worktree_path: None,
@@ -1173,7 +1173,7 @@ fn branch_pull_request_candidate_uses_latest_run_branch_and_project_repo() {
     assert_eq!(
         candidate,
         PullRequestBranchSyncCandidate {
-            task_id: item.id,
+            task_id: item.id.to_string(),
             repo: "owner/repo".to_string(),
             branch: "feature/new-branch".to_string(),
         }
@@ -1192,7 +1192,7 @@ fn branch_pull_request_candidate_includes_closed_tasks() {
     task.project_id = Some(project.id.clone());
     let item = db.insert_task(task).unwrap();
     db.start_task_run(NewTaskRun {
-        task_id: item.id.clone(),
+        task_id: item.id.to_string(),
         agent: None,
         branch: Some("feature/keep-syncing".to_string()),
         worktree_path: None,
@@ -1204,7 +1204,7 @@ fn branch_pull_request_candidate_includes_closed_tasks() {
         .next_pull_request_branch_sync_candidate()
         .unwrap()
         .unwrap();
-    assert_eq!(candidate.task_id, item.id);
+    assert_eq!(candidate.task_id, item.id.as_str());
     assert_eq!(candidate.branch, "feature/keep-syncing");
 }
 
@@ -1485,7 +1485,7 @@ fn settle_task_run_if_live_only_stops_session_driven_runs() {
     let task = db.insert_task(dev_task("settle")).unwrap();
     let start_run = |db: &mut SqliteStore| {
         db.start_task_run(NewTaskRun {
-            task_id: task.id.clone(),
+            task_id: task.id.to_string(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -1592,7 +1592,7 @@ fn settle_task_run_if_live_survives_a_closed_task() {
     let task = db.insert_task(dev_task("doomed")).unwrap();
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.clone(),
+            task_id: task.id.to_string(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -1630,7 +1630,7 @@ fn list_driven_task_runs_with_tab_returns_only_tab_pinned_session_driven_runs() 
     let task = db.insert_task(dev_task("sweep")).unwrap();
     let start_run = |db: &mut SqliteStore| {
         db.start_task_run(NewTaskRun {
-            task_id: task.id.clone(),
+            task_id: task.id.to_string(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -1688,10 +1688,10 @@ fn list_driven_task_runs_with_tab_returns_only_tab_pinned_session_driven_runs() 
         .list_driven_task_runs_with_tab()
         .unwrap()
         .into_iter()
-        .map(|run| run.id)
+        .map(|run| run.id.into_string())
         .collect();
     driven.sort();
-    let mut expected = vec![running.id, waiting.id, claimed_setting_up.id];
+    let mut expected = vec![running.id.into_string(), waiting.id.into_string(), claimed_setting_up.id.into_string()];
     expected.sort();
     assert_eq!(driven, expected);
 }
@@ -1859,7 +1859,7 @@ fn work_transaction_rolls_back_when_dropped_without_commit() {
         let mut tx = db.begin().unwrap();
         let run = tx
             .start_task_run(NewTaskRun {
-                task_id: task.id.clone(),
+                task_id: task.id.to_string(),
                 agent: None,
                 branch: Some("issue-1".to_string()),
                 worktree_path: None,
@@ -1885,7 +1885,7 @@ fn work_transaction_commit_persists_run_primary_and_bench() {
         let mut tx = db.begin().unwrap();
         let run = tx
             .start_task_run(NewTaskRun {
-                task_id: task.id.clone(),
+                task_id: task.id.to_string(),
                 agent: None,
                 branch: Some("issue-1".to_string()),
                 worktree_path: None,
@@ -1918,7 +1918,7 @@ fn create_lazy_run_for_session_sets_primary_atomically_when_missing() {
     let run = db
         .create_lazy_run_for_session(
             NewTaskRun {
-                task_id: task.id.clone(),
+                task_id: task.id.to_string(),
                 agent: Some(Agent::Claude),
                 branch: None,
                 worktree_path: None,
@@ -1942,7 +1942,7 @@ fn create_lazy_run_for_session_leaves_existing_primary_untouched() {
     let task = db.insert_task(dev_task("lazy-side")).unwrap();
     let primary = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.clone(),
+            task_id: task.id.to_string(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -1953,7 +1953,7 @@ fn create_lazy_run_for_session_leaves_existing_primary_untouched() {
     let side = db
         .create_lazy_run_for_session(
             NewTaskRun {
-                task_id: task.id.clone(),
+                task_id: task.id.to_string(),
                 agent: Some(Agent::Claude),
                 branch: None,
                 worktree_path: None,
@@ -1980,7 +1980,7 @@ fn claim_prepared_run_is_won_by_a_single_session() {
     let task = db.insert_task(dev_task("cas")).unwrap();
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.clone(),
+            task_id: task.id.to_string(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -2011,7 +2011,7 @@ fn claim_prepared_run_refuses_non_prepared_run() {
     let task = db.insert_task(dev_task("cas-guard")).unwrap();
     let run = db
         .start_task_run(NewTaskRun {
-            task_id: task.id.clone(),
+            task_id: task.id.to_string(),
             agent: None,
             branch: None,
             worktree_path: None,
@@ -2067,7 +2067,7 @@ fn task_run_contract<S: TaskRunStore + ?Sized>(store: &mut S, task_id: &str) -> 
         store.get_task_run(&run.id).unwrap().unwrap().worktree_path.as_deref(),
         Some("/wt")
     );
-    run.id
+    run.id.into_string()
 }
 
 /// The same store operations must behave identically whether a caller drives `SqliteStore`

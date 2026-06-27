@@ -22,9 +22,8 @@ pub fn parse_owner_repo(url: &str) -> Result<String, DomainError> {
     Ok(format!("{}/{}", parts[parts.len() - 2], parts[parts.len() - 1]).to_lowercase())
 }
 
-/// Parse an issue reference `owner/repo#123`. The left side is normalized with
-/// [`parse_owner_repo`]; the right side must be a positive integer issue number.
-fn parse_issue_number(raw: &str) -> Result<i64, DomainError> {
+/// Parse and validate a GitHub issue number: the trimmed input must be a positive integer.
+pub fn parse_issue_number(raw: &str) -> Result<i64, DomainError> {
     let number: i64 = raw
         .trim()
         .parse()
@@ -45,22 +44,9 @@ pub fn parse_issue_ref(target: &str) -> Result<(String, i64), DomainError> {
     Ok((repo, number))
 }
 
-/// Accept what a user pastes to track an issue: a GitHub issue URL
-/// (`https://github.com/owner/repo/issues/9`, query/fragment tolerated) or an
-/// `owner/repo#9` ref.
-pub fn parse_issue_input(input: &str) -> Result<(String, i64), DomainError> {
-    let s = input.trim();
-    if let Some((repo_part, rest)) = s.split_once("/issues/") {
-        let number_part = rest.split(['/', '?', '#']).next().unwrap_or(rest);
-        let number = parse_issue_number(number_part)?;
-        return Ok((parse_owner_repo(repo_part)?, number));
-    }
-    parse_issue_ref(s)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{parse_issue_input, parse_issue_ref, parse_owner_repo};
+    use super::{parse_issue_ref, parse_owner_repo};
 
     #[test]
     fn parses_common_remote_forms() {
@@ -116,33 +102,6 @@ mod tests {
             parse_issue_ref("AshiGirl96/Monica#9").unwrap(),
             ("ashigirl96/monica".to_string(), 9)
         );
-    }
-
-    #[test]
-    fn parses_issue_input_url_and_ref_forms() {
-        let cases = [
-            "https://github.com/ashigirl96/monica/issues/9",
-            "https://github.com/ashigirl96/monica/issues/9/",
-            "https://github.com/ashigirl96/monica/issues/9?ref=foo",
-            "https://github.com/AshiGirl96/Monica/issues/9#issuecomment-1",
-            "  github.com/ashigirl96/monica/issues/9  ",
-            "ashigirl96/monica#9",
-        ];
-        for case in cases {
-            assert_eq!(
-                parse_issue_input(case).unwrap(),
-                ("ashigirl96/monica".to_string(), 9),
-                "{case}"
-            );
-        }
-    }
-
-    #[test]
-    fn rejects_bad_issue_input() {
-        assert!(parse_issue_input("https://github.com/a/b/issues/abc").is_err());
-        assert!(parse_issue_input("https://github.com/a/b/issues/0").is_err());
-        assert!(parse_issue_input("ashigirl96/monica").is_err());
-        assert!(parse_issue_input("").is_err());
     }
 
     #[test]

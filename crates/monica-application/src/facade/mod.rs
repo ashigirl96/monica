@@ -15,7 +15,7 @@ mod tasks;
 
 pub use backend::Backend;
 pub use executions::ExecutionService;
-pub use notebooks::NotebookService;
+pub use notebooks::{NotebookLintReport, NotebookPageView, NotebookService};
 pub use projects::{ProjectInit, ProjectService};
 pub use synchronization::SynchronizationService;
 pub use tasks::TaskService;

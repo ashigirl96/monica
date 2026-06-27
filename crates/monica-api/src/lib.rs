@@ -18,7 +18,7 @@ pub use github::GithubPullRequestRef;
 pub use status::{
     board_columns, BoardColumn, DisplayStatus, TaskRunStatus, TaskRunWaitReason, TaskStatus,
 };
-pub use task::TaskSummaryRow;
+pub use task::{ProjectOption, TaskCreated, TaskSummaryRow};
 pub use task_run::Agent;
 pub use terminal::{
     TerminalRunspaceRow, TerminalSession, TerminalSessionKind, TerminalSessionStatus,

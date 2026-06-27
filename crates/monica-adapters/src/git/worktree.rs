@@ -437,7 +437,7 @@ mod tests {
         let item = db.insert_task(task).unwrap();
         let run = db
             .start_task_run(NewTaskRun {
-                task_id: item.id.clone(),
+                task_id: item.id.to_string(),
                 agent: None,
                 branch: Some("issue-42".to_string()),
                 worktree_path: Some(worktree.to_string_lossy().into_owned()),
@@ -447,7 +447,8 @@ mod tests {
         let git = TestGit {
             rip: write_fake_rip(root.path()),
         };
-        let report = monica_application::close_issue(&mut db, &git, &item.id).unwrap();
+        let report =
+            monica_application::usecases::tasks::close_issue(&mut db, &git, &item.id).unwrap();
 
         assert!(!worktree.exists());
         assert!(!worktree_registered(&repo, &worktree).unwrap());
@@ -456,7 +457,7 @@ mod tests {
         assert_eq!(closed.status, TaskStatus::Closed);
         assert!(closed.closed_at.is_some());
         assert_eq!(db.list_task_runs_for_task(&item.id).unwrap().len(), 1);
-        assert_eq!(report.task_runs, vec![run.id]);
+        assert_eq!(report.task_runs, vec![run.id.to_string()]);
         assert_eq!(report.removed_branches, vec!["issue-42"]);
     }
 
@@ -567,8 +568,8 @@ mod tests {
 
     fn task_run(id: &str, branch: &str, worktree: &Path) -> TaskRun {
         TaskRun {
-            id: id.to_string(),
-            task_id: "MON-1".to_string(),
+            id: id.into(),
+            task_id: "MON-1".into(),
             agent: None,
             branch: Some(branch.to_string()),
             worktree_path: Some(worktree.to_string_lossy().into_owned()),

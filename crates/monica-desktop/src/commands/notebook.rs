@@ -1,10 +1,7 @@
-use std::collections::HashMap;
-
 use monica_api::ApiError;
+use monica_application::NotebookPageView;
 use serde::Serialize;
 use tauri::AppHandle;
-
-use monica_application::{front_value, outline, pages_from_docs, NotebookDoc, NotebookPage};
 
 use crate::event_sink;
 
@@ -25,6 +22,18 @@ pub struct NotebookPageRow {
     pub created: Option<String>,
     /// Page body (front matter stripped) — the markdown source.
     pub body: String,
+}
+
+impl From<NotebookPageView> for NotebookPageRow {
+    fn from(view: NotebookPageView) -> Self {
+        Self {
+            id: view.id,
+            title: view.title,
+            number: view.number,
+            created: view.created,
+            body: view.body,
+        }
+    }
 }
 
 #[tauri::command]
@@ -53,8 +62,12 @@ pub fn get_notebook_pages(
     notebook_id: String,
 ) -> Result<Vec<NotebookPageRow>, ApiError> {
     let mut monica = event_sink::open(&app)?;
-    let (docs, _) = monica.notebooks().read_notebook(&notebook_id)?;
-    Ok(build_page_rows(&docs))
+    Ok(monica
+        .notebooks()
+        .page_outline(&notebook_id)?
+        .into_iter()
+        .map(NotebookPageRow::from)
+        .collect())
 }
 
 /// Presentation-only display title from a slug: `rust-async` -> `Rust Async`.
@@ -71,27 +84,6 @@ fn deslugify(slug: &str) -> String {
         }
     }
     title
-}
-
-/// Pages in `outline()` document order (depth-first): each carries its hierarchical number,
-/// `created`, and body. Pages the outline omits (e.g. trapped in a `parent` cycle) are dropped,
-/// matching the CLI's `show`.
-fn build_page_rows(docs: &[NotebookDoc]) -> Vec<NotebookPageRow> {
-    let pages: Vec<NotebookPage> = pages_from_docs(docs);
-    let by_stem: HashMap<&str, &NotebookDoc> = docs.iter().map(|d| (d.stem.as_str(), d)).collect();
-    outline(&pages)
-        .into_iter()
-        .map(|e| {
-            let doc = by_stem.get(e.id.as_str());
-            NotebookPageRow {
-                created: doc.and_then(|d| front_value(d, "created")).map(str::to_string),
-                body: doc.map(|d| d.body.clone()).unwrap_or_default(),
-                id: e.id,
-                title: e.title,
-                number: e.number,
-            }
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -114,46 +106,5 @@ mod tests {
     #[test]
     fn deslugify_empty_is_empty() {
         assert_eq!(deslugify(""), "");
-    }
-
-    fn doc(stem: &str, order: &str, parent: &str, created: &str, body: &str) -> NotebookDoc {
-        let mut front = vec![
-            ("title".to_string(), stem.to_uppercase()),
-            ("order".to_string(), order.to_string()),
-        ];
-        if !parent.is_empty() {
-            front.push(("parent".to_string(), format!("[[{parent}.md]]")));
-        }
-        if !created.is_empty() {
-            front.push(("created".to_string(), created.to_string()));
-        }
-        NotebookDoc {
-            file: format!("{stem}.md"),
-            stem: stem.to_string(),
-            front,
-            body: body.to_string(),
-        }
-    }
-
-    #[test]
-    fn build_page_rows_numbers_in_outline_order_with_created_and_body() {
-        let docs = vec![
-            doc("s1", "2", "", "2026-06-25T10:00:00Z", "body one"),
-            doc("s2", "1", "", "", "body two"),
-            doc("s1c", "1", "s1", "2026-06-25T11:00:00Z", "child body"),
-        ];
-        let rows = build_page_rows(&docs);
-        let got: Vec<(&str, &str, Option<&str>, &str)> = rows
-            .iter()
-            .map(|r| (r.id.as_str(), r.number.as_str(), r.created.as_deref(), r.body.as_str()))
-            .collect();
-        assert_eq!(
-            got,
-            vec![
-                ("s2", "1", None, "body two"),
-                ("s1", "2", Some("2026-06-25T10:00:00Z"), "body one"),
-                ("s1c", "2.1", Some("2026-06-25T11:00:00Z"), "child body"),
-            ]
-        );
     }
 }
