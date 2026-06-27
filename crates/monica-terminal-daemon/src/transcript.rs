@@ -43,10 +43,6 @@ impl Transcript {
         })
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
     pub fn append(&mut self, bytes: &[u8]) -> Result<()> {
         self.file.write_all(bytes)?;
         self.len += bytes.len() as u64;

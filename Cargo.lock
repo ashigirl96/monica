@@ -2841,7 +2841,8 @@ dependencies = [
  "monica-api",
  "monica-application",
  "monica-infra",
- "monica-pty",
+ "monica-terminal-client",
+ "monica-terminal-protocol",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
@@ -2910,18 +2911,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "monica-pty"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "log",
- "portable-pty",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "monica-ptyd"
 version = "0.1.0"
 dependencies = [
@@ -2929,7 +2918,40 @@ dependencies = [
  "base64 0.22.1",
  "libc",
  "log",
- "monica-pty",
+ "monica-terminal-client",
+ "monica-terminal-daemon",
+ "monica-terminal-protocol",
+]
+
+[[package]]
+name = "monica-terminal-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "monica-terminal-protocol",
+ "serde_json",
+]
+
+[[package]]
+name = "monica-terminal-daemon"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "log",
+ "monica-terminal-protocol",
+ "portable-pty",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "monica-terminal-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

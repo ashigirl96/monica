@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::protocol::{Request, RequestOp, ResponseBody, ServerMessage, PROTOCOL_VERSION};
+use monica_terminal_protocol::{Request, RequestOp, ResponseBody, ServerMessage, PROTOCOL_VERSION};
 
 use super::state::{Outbox, SessionTable};
 

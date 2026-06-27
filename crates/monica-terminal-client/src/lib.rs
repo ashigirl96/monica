@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 
-use crate::protocol::{Request, RequestOp, ResponseBody, ServerMessage, PROTOCOL_VERSION};
+use monica_terminal_protocol::{Request, RequestOp, ResponseBody, ServerMessage, PROTOCOL_VERSION};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 

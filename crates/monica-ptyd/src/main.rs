@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Result};
-use monica_pty::daemon::{run_daemon, DaemonConfig};
+use monica_terminal_daemon::daemon::{run_daemon, DaemonConfig};
 
 /// Mirrors monica-infra's `paths::base_dir()`. Deliberately not a dependency: the daemon
 /// must stay decoupled from the app's SQLite schema lifecycle so an old daemon binary can
