@@ -1,13 +1,14 @@
 [package]
-name = "monica-pty"
+name = "monica-terminal-daemon"
 version = "0.1.0"
-description = "PTY session management for Monica terminal"
+description = "PTY session daemon for Monica terminal (portable-pty lives here)"
 edition = "2021"
 
 [dependencies]
 anyhow = "1.0"
 base64 = { version = "0.22", default-features = false, features = ["std"] }
 log = "0.4"
+monica-terminal-protocol = { path = "../monica-terminal-protocol" }
 portable-pty = { version = "0.9", default-features = false }
 serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }

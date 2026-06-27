@@ -1,0 +1,11 @@
+[package]
+name = "monica-terminal-client"
+version = "0.1.0"
+description = "Client transport for the Monica terminal daemon"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+log = "0.4"
+monica-terminal-protocol = { path = "../monica-terminal-protocol" }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }

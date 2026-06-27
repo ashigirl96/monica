@@ -8,8 +8,8 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use base64::Engine;
-use monica_pty::client::{ClientEvent, PtydClient};
-use monica_pty::protocol::{CreateParams, RequestOp, ResponseBody, PROTOCOL_VERSION};
+use monica_terminal_client::{ClientEvent, PtydClient};
+use monica_terminal_protocol::{CreateParams, RequestOp, ResponseBody, PROTOCOL_VERSION};
 
 struct DaemonGuard {
     child: Child,

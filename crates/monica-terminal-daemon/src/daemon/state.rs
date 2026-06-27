@@ -10,10 +10,10 @@ use std::sync::{Arc, Mutex};
 use anyhow::{bail, Context, Result};
 use base64::Engine;
 
-use crate::protocol::{CreateParams, ServerMessage, SessionInfo};
+use crate::manager::PtyManager;
 use crate::transcript::Transcript;
 use crate::types::{PtySize, SpawnRequest};
-use crate::PtyManager;
+use monica_terminal_protocol::{CreateParams, ServerMessage, SessionInfo};
 
 const DEFAULT_REPLAY_BYTES: u32 = 256 * 1024;
 

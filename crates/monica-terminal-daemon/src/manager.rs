@@ -181,6 +181,7 @@ impl PtyManager {
         }
     }
 
+    #[cfg(test)]
     pub fn is_alive(&self, id: &str) -> bool {
         self.sessions
             .lock()

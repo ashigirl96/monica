@@ -8,7 +8,9 @@ edition = "2021"
 anyhow = "1.0"
 libc = { version = "0.2", default-features = false }
 log = { version = "0.4", features = ["std"] }
-monica-pty = { path = "../monica-pty" }
+monica-terminal-daemon = { path = "../monica-terminal-daemon" }
 
 [dev-dependencies]
 base64 = { version = "0.22", default-features = false, features = ["std"] }
+monica-terminal-client = { path = "../monica-terminal-client" }
+monica-terminal-protocol = { path = "../monica-terminal-protocol" }

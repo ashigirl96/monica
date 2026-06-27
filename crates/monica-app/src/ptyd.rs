@@ -13,8 +13,8 @@ use monica_application::{
     DaemonSessionView, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
 };
 use monica_infra::filesystem::paths;
-use monica_pty::client::{ClientEvent, PtydClient};
-use monica_pty::protocol::{CreateParams, RequestOp, ResponseBody, SessionInfo, PROTOCOL_VERSION};
+use monica_terminal_client::{ClientEvent, PtydClient};
+use monica_terminal_protocol::{CreateParams, RequestOp, ResponseBody, SessionInfo, PROTOCOL_VERSION};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::event_sink::{AppMonica, TauriEventSink};
