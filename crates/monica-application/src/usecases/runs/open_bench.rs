@@ -4,7 +4,7 @@ use crate::prelude::bench_runspace_id;
 use super::ports::{
     ProjectRepository, TaskRunOutputs, TaskRunStore, TaskStore, WorkbenchStore,
 };
-use crate::{ApplicationError, ApplicationResult, Project, Task, TaskBench};
+use crate::{ApplicationError, ApplicationResult, ExecutionProfile, Project, Task, TaskBench};
 
 pub(crate) fn default_bench_cwd(project: Option<&Project>, home_dir: Option<&str>) -> String {
     project
@@ -58,13 +58,15 @@ where
         .map(|(_, cwd)| cwd)
         .or_else(|| resolve_worktree_cwd(repos, &task))
         .unwrap_or_else(|| default_bench_cwd(project.as_ref(), home_dir().as_deref()));
-    let project = project.map(|mut p| {
+    let profile = project.as_ref().and_then(|p| {
+        repos.get_execution_profile(&p.id).ok().flatten()
+    }).map(|mut prof| {
         if let Some(agent) = primary_run_agent(repos, &task) {
-            p.agent_default = agent;
+            prof.agent_default = agent;
         }
-        p
+        prof
     });
-    Ok(shell_env_for(outputs, &task, project.as_ref(), &cwd))
+    Ok(shell_env_for(outputs, &task, project.as_ref(), profile.as_ref(), &cwd))
 }
 
 fn primary_run_agent<R>(repos: &R, task: &Task) -> Option<crate::Agent>
@@ -98,15 +100,17 @@ fn shell_env_for<A>(
     outputs: &A,
     task: &Task,
     project: Option<&Project>,
+    profile: Option<&ExecutionProfile>,
     cwd: &str,
 ) -> Vec<(String, String)>
 where
     A: TaskRunOutputs,
 {
     project
-        .and_then(|p| {
+        .zip(profile)
+        .and_then(|(p, prof)| {
             outputs
-                .prepare_task_shell_env(&task.id, p, None, std::path::Path::new(cwd))
+                .prepare_task_shell_env(&task.id, p, prof, None, std::path::Path::new(cwd))
                 .ok()
         })
         .map(|shell| shell.env)
@@ -126,7 +130,10 @@ where
 
     // Write hook settings into the cwd Claude will actually launch in (the bench's resolved cwd,
     // which may differ from desired_cwd when the bench already existed).
-    let env = shell_env_for(outputs, &task, project.as_ref(), &cwd);
+    let profile = project.as_ref().and_then(|p| {
+        repos.get_execution_profile(&p.id).ok().flatten()
+    });
+    let env = shell_env_for(outputs, &task, project.as_ref(), profile.as_ref(), &cwd);
 
     Ok(TaskBench {
         task_id: task_id.to_string(),

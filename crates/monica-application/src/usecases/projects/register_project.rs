@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use super::ports::ProjectRepository;
-use crate::{parse_owner_repo, ApplicationError, ApplicationResult, Project};
+use crate::{parse_owner_repo, ApplicationError, ApplicationResult, ExecutionProfile, Project};
 
 pub fn register_project<R>(repos: &R, repo_input: &str, path: &Path) -> ApplicationResult<Project>
 where
@@ -32,5 +32,5 @@ where
     if let Some(default_branch) = default_branch {
         project.default_branch = default_branch.to_string();
     }
-    Ok(repos.upsert_project(&project)?)
+    Ok(repos.upsert_project(&project, &ExecutionProfile::default())?)
 }

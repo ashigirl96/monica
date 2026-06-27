@@ -82,12 +82,13 @@ fn list(monica: &mut CliFacade) -> Result<()> {
         "TIMEOUT".to_string(),
     ]];
     for p in &projects {
+        let profile = monica.projects().get_execution_profile(&p.id)?;
         table.push(vec![
             p.id.clone(),
             crate::table::or_dash(p.path.as_deref()),
             p.default_branch.clone(),
-            p.agent_default.as_str().to_string(),
-            p.setup_timeout_sec.to_string(),
+            profile.agent_default.as_str().to_string(),
+            profile.setup_timeout_sec.to_string(),
         ]);
     }
     print!("{}", crate::table::render_table(&table));
@@ -96,6 +97,7 @@ fn list(monica: &mut CliFacade) -> Result<()> {
 
 fn show(monica: &mut CliFacade, repo: &str, json: bool) -> Result<()> {
     let project = monica.projects().get_project(repo)?;
+    let profile = monica.projects().get_execution_profile(repo)?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&project)?);
@@ -111,15 +113,15 @@ fn show(monica: &mut CliFacade, repo: &str, json: bool) -> Result<()> {
         ("default_branch", project.default_branch.clone()),
         (
             "worktree_root",
-            crate::table::or_dash(project.worktree_root.as_deref()),
+            crate::table::or_dash(profile.worktree_root.as_deref()),
         ),
-        ("setup_timeout_sec", project.setup_timeout_sec.to_string()),
-        ("agent_default", project.agent_default.as_str().to_string()),
+        ("setup_timeout_sec", profile.setup_timeout_sec.to_string()),
+        ("agent_default", profile.agent_default.as_str().to_string()),
         (
             "agent_permission_mode",
-            project.agent_permission_mode.as_str().to_string(),
+            profile.agent_permission_mode.as_str().to_string(),
         ),
-        ("hooks_claude", project.hooks_claude.to_string()),
+        ("hooks_claude", profile.hooks_claude.to_string()),
         ("created_at", project.created_at.clone()),
         ("updated_at", project.updated_at.clone()),
     ];

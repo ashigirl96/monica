@@ -430,7 +430,7 @@ mod tests {
         let mut project = Project::from_repo("owner/repo");
         project.path = Some(repo.to_string_lossy().into_owned());
         project.default_branch = "main".to_string();
-        db.upsert_project(&project).unwrap();
+        db.upsert_project(&project, &monica_application::ExecutionProfile::default()).unwrap();
         let mut task = NewTask::new(TaskKind::Development, "dirty worktree");
         task.status = TaskStatus::Ready;
         task.project_id = Some(project.id.clone());

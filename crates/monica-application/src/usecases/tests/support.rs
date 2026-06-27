@@ -15,7 +15,7 @@ use crate::ports::{
 use crate::usecases::record_hook;
 use crate::{
     Agent, AgentSignal, ApplicationEvent, AuthGateway, Backend, Clock, Continuation,
-    DaemonSessionView, DisplayStatus, Event, EventSink, ExternalReference, GithubAuthStatus,
+    DaemonSessionView, DisplayStatus, Event, EventSink, ExecutionProfile, ExternalReference, GithubAuthStatus,
     GithubDeviceFlow, GithubGateway, GithubIssue, GithubPullRequest, GithubPullRequestRef,
     GithubPullRequestStatus, HookContext, LintFinding, Monica, NewTask, NewTaskRun, NewTerminalSession,
     NotebookDoc, Project, Provider, PullRequestBranchSyncCandidate,
@@ -346,13 +346,17 @@ impl PullRequestSyncStore for FakeRepos {
 }
 
 impl ProjectRepository for FakeRepos {
-    fn upsert_project(&self, project: &Project) -> Result<Project> {
+    fn upsert_project(&self, project: &Project, _profile: &ExecutionProfile) -> Result<Project> {
         self.insert_project(project.clone());
         Ok(project.clone())
     }
 
     fn get_project(&self, id: &str) -> Result<Option<Project>> {
         Ok(self.state.borrow().projects.get(id).cloned())
+    }
+
+    fn get_execution_profile(&self, _id: &str) -> Result<Option<ExecutionProfile>> {
+        Ok(Some(ExecutionProfile::default()))
     }
 
     fn list_projects(&self) -> Result<Vec<Project>> {
@@ -990,6 +994,7 @@ impl TaskRunOutputs for FakeTaskRunOutputs {
         &self,
         task_id: &str,
         _project: &crate::Project,
+        _profile: &crate::ExecutionProfile,
         _task_run_id: Option<&str>,
         cwd: &std::path::Path,
     ) -> Result<crate::TaskShellEnv> {

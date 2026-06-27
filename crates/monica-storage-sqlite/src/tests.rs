@@ -1,5 +1,5 @@
 use monica_application::{
-    Agent, DisplayStatus, EventRepository, ExternalReference, GithubPullRequest,
+    Agent, DisplayStatus, EventRepository, ExecutionProfile, ExternalReference, GithubPullRequest,
     GithubPullRequestStatus, NewTask, NewTaskRun, NewTerminalSession, Project, Provider,
     ProjectRepository, PullRequestBranchSyncCandidate, RawJson, RefType, TaskBoardQuery, TaskId,
     TaskKind, TaskRun, TaskRunObservation, TaskRunStatus, TaskRunStore,
@@ -79,7 +79,7 @@ fn project_task_with_branch(
 ) -> (String, PullRequestBranchSyncCandidate) {
     let mut project = Project::from_repo(repo);
     project.default_branch = default_branch.to_string();
-    db.upsert_project(&project).unwrap();
+    db.upsert_project(&project, &ExecutionProfile::default()).unwrap();
     let mut task = dev_task("branch backed");
     task.project_id = Some(project.id.clone());
     let item = db.insert_task(task).unwrap();
@@ -1064,7 +1064,7 @@ fn project_round_trip_and_summary_pr_status_stay_wire_compatible() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let mut project = Project::from_repo("owner/repo");
     project.path = Some("/repo".to_string());
-    db.upsert_project(&project).unwrap();
+    db.upsert_project(&project, &ExecutionProfile::default()).unwrap();
 
     let mut task = dev_task("with pr");
     task.project_id = Some(project.id.clone());
@@ -1147,7 +1147,7 @@ fn branch_pull_request_candidate_uses_latest_run_branch_and_project_repo() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let mut project = Project::from_repo("owner/repo");
     project.default_branch = "main".to_string();
-    db.upsert_project(&project).unwrap();
+    db.upsert_project(&project, &ExecutionProfile::default()).unwrap();
     let mut task = dev_task("latest branch");
     task.project_id = Some(project.id.clone());
     let item = db.insert_task(task).unwrap();
@@ -1187,7 +1187,7 @@ fn branch_pull_request_candidate_includes_closed_tasks() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let mut project = Project::from_repo("owner/repo");
     project.default_branch = "main".to_string();
-    db.upsert_project(&project).unwrap();
+    db.upsert_project(&project, &ExecutionProfile::default()).unwrap();
     let mut task = dev_task("closed but synced");
     task.project_id = Some(project.id.clone());
     let item = db.insert_task(task).unwrap();

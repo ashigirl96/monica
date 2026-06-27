@@ -1,7 +1,7 @@
 use anyhow::Result;
 use monica_application::{
-    Agent, Event, ExternalReference, PermissionMode, Project, Provider, RawJson, RefType, Task,
-    TaskId, TaskKind, TaskRun, TaskRunId, TaskRunStatus, TaskStatus,
+    Agent, Event, ExecutionProfile, ExternalReference, PermissionMode, Project, Provider, RawJson,
+    RefType, Task, TaskId, TaskKind, TaskRun, TaskRunId, TaskRunStatus, TaskStatus,
 };
 use rusqlite::Row;
 
@@ -84,8 +84,6 @@ pub(super) fn external_ref_from_row(row: &Row<'_>) -> Result<ExternalReference> 
 
 pub(super) fn project_from_row(row: &Row<'_>) -> Result<Project> {
     let provider: String = row.get("provider")?;
-    let agent_default: String = row.get("agent_default")?;
-    let agent_permission_mode: String = row.get("agent_permission_mode")?;
     Ok(Project {
         id: row.get("id")?,
         name: row.get("name")?,
@@ -93,12 +91,19 @@ pub(super) fn project_from_row(row: &Row<'_>) -> Result<Project> {
         repo: row.get("repo")?,
         path: row.get("path")?,
         default_branch: row.get("default_branch")?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+pub(super) fn execution_profile_from_row(row: &Row<'_>) -> Result<ExecutionProfile> {
+    let agent_default: String = row.get("agent_default")?;
+    let agent_permission_mode: String = row.get("agent_permission_mode")?;
+    Ok(ExecutionProfile {
         worktree_root: row.get("worktree_root")?,
         setup_timeout_sec: row.get("setup_timeout_sec")?,
         agent_default: agent_default.parse::<Agent>()?,
         agent_permission_mode: agent_permission_mode.parse::<PermissionMode>()?,
         hooks_claude: row.get::<_, i64>("hooks_claude")? != 0,
-        created_at: row.get("created_at")?,
-        updated_at: row.get("updated_at")?,
     })
 }

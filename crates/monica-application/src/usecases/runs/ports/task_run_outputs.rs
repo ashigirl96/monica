@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::Project;
+use crate::{ExecutionProfile, Project};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskShellEnv {
@@ -18,6 +18,7 @@ pub trait TaskRunOutputs {
         &self,
         task_id: &str,
         project: &Project,
+        profile: &ExecutionProfile,
         task_run_id: Option<&str>,
         cwd: &Path,
     ) -> Result<TaskShellEnv>;

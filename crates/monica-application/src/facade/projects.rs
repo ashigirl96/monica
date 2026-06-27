@@ -1,9 +1,9 @@
 use std::path::Path;
 
 use super::{Backend, Monica};
-use crate::ports::{GitGateway, Workspace};
+use crate::ports::{GitGateway, ProjectRepository, Workspace};
 use crate::usecases::github::ports::GithubGateway;
-use crate::{ApplicationResult, Project};
+use crate::{ApplicationResult, ExecutionProfile, Project};
 
 /// Outcome of `init_project`: the registered project plus the per-file scaffold result.
 pub struct ProjectInit {
@@ -70,6 +70,12 @@ impl<B: Backend> ProjectService<'_, B> {
 
     pub fn get_project(&self, repo: &str) -> ApplicationResult<Project> {
         crate::usecases::query::get_project(&self.m.repos, repo)
+    }
+
+    pub fn get_execution_profile(&self, repo: &str) -> ApplicationResult<ExecutionProfile> {
+        let repo = crate::parse_owner_repo(repo)?;
+        Ok(self.m.repos.get_execution_profile(&repo)?
+            .unwrap_or_default())
     }
 
     pub fn set_project_field(&self, repo: &str, key: &str, value: &str) -> ApplicationResult<()> {

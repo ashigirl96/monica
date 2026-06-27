@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use monica_application::shell::quote_single;
-use monica_application::{Project, TaskRunOutputs, TaskShellEnv};
+use monica_application::{ExecutionProfile, Project, TaskRunOutputs, TaskShellEnv};
 use serde_json::{json, Value};
 
 use monica_paths as paths;
@@ -30,6 +30,7 @@ impl TaskRunOutputs for FsTaskRunOutputs {
         &self,
         task_id: &str,
         project: &Project,
+        profile: &ExecutionProfile,
         task_run_id: Option<&str>,
         cwd: &Path,
     ) -> Result<TaskShellEnv> {
@@ -42,7 +43,7 @@ impl TaskRunOutputs for FsTaskRunOutputs {
         // .envrc that exports another base) — so the command pins the base
         // itself instead of trusting the environment it inherits.
         let monica_home = paths::base_dir()?.to_string_lossy().into_owned();
-        let agent = project.agent_default;
+        let agent = profile.agent_default;
         let hook_cmd = pin_hook_command_base(&resolve_hook_command(agent)?, &monica_home);
         let settings_path_str = write_agent_hooks_config(agent, cwd, &hook_cmd)?;
 

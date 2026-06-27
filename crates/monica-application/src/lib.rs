@@ -8,6 +8,7 @@
 mod bench;
 mod error;
 mod events;
+mod execution_profile;
 pub mod facade;
 mod github;
 mod input;
@@ -21,6 +22,7 @@ pub mod usecases;
 
 pub use error::{ApplicationError, ApplicationResult};
 pub use events::{ApplicationEvent, EventSink};
+pub use execution_profile::ExecutionProfile;
 pub use input::parse_issue_input;
 pub use facade::{
     Backend, ExecutionService, Monica, NotebookLintReport, NotebookPageView, NotebookService,

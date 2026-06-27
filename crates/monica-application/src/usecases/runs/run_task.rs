@@ -9,8 +9,8 @@ use super::ports::{
     TaskRunStore, TaskStore, UnitOfWork, WorkbenchStore,
 };
 use crate::{
-    ApplicationError, ApplicationResult, ExternalReference, NewTaskRun, PrepareTaskResult, Project,
-    RefType, Task, TaskRunStatus, TaskStatus,
+    ApplicationError, ApplicationResult, ExecutionProfile, ExternalReference, NewTaskRun,
+    PrepareTaskResult, Project, RefType, Task, TaskRunStatus, TaskStatus,
 };
 
 fn is_active_run_status(status: TaskRunStatus) -> bool {
@@ -20,7 +20,10 @@ fn is_active_run_status(status: TaskRunStatus) -> bool {
     )
 }
 
-fn load_task_and_project<R>(repos: &R, task_id: &str) -> ApplicationResult<(Task, Project)>
+fn load_task_and_project<R>(
+    repos: &R,
+    task_id: &str,
+) -> ApplicationResult<(Task, Project, ExecutionProfile)>
 where
     R: TaskStore + ProjectRepository,
 {
@@ -34,7 +37,10 @@ where
     let project = repos
         .get_project(project_id)?
         .ok_or_else(|| ApplicationError::not_found(format!("project not found: {project_id}")))?;
-    Ok((task, project))
+    let profile = repos
+        .get_execution_profile(project_id)?
+        .unwrap_or_default();
+    Ok((task, project, profile))
 }
 
 /// Phase 1: Create TaskRun (SettingUp) + set as Main Run + ensure bench exists.
@@ -43,7 +49,7 @@ pub fn start_run<R>(repos: &mut R, task_id: &str) -> ApplicationResult<PrepareTa
 where
     R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore + UnitOfWork,
 {
-    let (task, project) = load_task_and_project(repos, task_id)?;
+    let (task, project, _profile) = load_task_and_project(repos, task_id)?;
 
     if task.status == TaskStatus::Closed {
         return Err(ApplicationError::validation(format!(
@@ -132,7 +138,7 @@ where
     S: SetupRunner,
     A: TaskRunOutputs,
 {
-    let (_, project) = load_task_and_project(repos, task_id)?;
+    let (_, project, profile) = load_task_and_project(repos, task_id)?;
 
     let run = repos
         .get_task_run(task_run_id)?
@@ -145,7 +151,7 @@ where
         .path
         .clone()
         .ok_or_else(|| ApplicationError::validation(format!("project {} has no checkout path", project.id)))?;
-    let worktree_path = worktree_path_for(&project, &branch)?;
+    let worktree_path = worktree_path_for(&project, profile.worktree_root.as_deref(), &branch)?;
     let worktree_str = worktree_path.to_string_lossy().into_owned();
 
     if !worktree_path.exists() {
@@ -167,6 +173,7 @@ where
         task_id,
         &worktree_path,
         &project,
+        &profile,
         &branch,
     )?;
 
@@ -189,6 +196,7 @@ fn setup_phase<S, A>(
     task_id: &str,
     worktree_path: &Path,
     project: &Project,
+    profile: &ExecutionProfile,
     branch: &str,
 ) -> ApplicationResult<SetupOutcome>
 where
@@ -205,7 +213,7 @@ where
         branch: branch.to_string(),
         worktree: worktree_path.to_string_lossy().into_owned(),
     };
-    let timeout = Duration::from_secs(project.setup_timeout_sec.max(0) as u64);
+    let timeout = Duration::from_secs(profile.setup_timeout_sec.max(0) as u64);
     setup_runner
         .run_setup_script(worktree_path, &log_path, &env, timeout)
         .map_err(|e| ApplicationError::external(format!("setup script failed to run: {e:#}")))
@@ -242,7 +250,7 @@ where
     R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore,
     A: TaskRunOutputs,
 {
-    let (task, project) = load_task_and_project(repos, task_id)?;
+    let (task, project, profile) = load_task_and_project(repos, task_id)?;
 
     let primary_id = task.primary_task_run_id.ok_or_else(|| {
         ApplicationError::validation(format!("task {task_id} has no primary run; prepare it first"))
@@ -268,12 +276,12 @@ where
         )));
     }
 
-    let agent = agent_override.unwrap_or(project.agent_default);
-    let mut effective_project = project;
-    effective_project.agent_default = agent;
+    let agent = agent_override.unwrap_or(profile.agent_default);
+    let mut effective_profile = profile;
+    effective_profile.agent_default = agent;
 
     let shell = outputs
-        .prepare_task_shell_env(task_id, &effective_project, Some(&primary_id), &worktree_path)
+        .prepare_task_shell_env(task_id, &project, &effective_profile, Some(&primary_id), &worktree_path)
         .map_err(|e| ApplicationError::external(format!("failed to prepare shell env: {e:#}")))?;
     repos.set_task_run_settings_path(&primary_id, &shell.settings_path)?;
 

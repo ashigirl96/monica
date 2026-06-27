@@ -23,10 +23,14 @@ pub fn branch_name(github_issue_number: Option<i64>, monica_number: i64) -> Stri
 
 /// Where `issue run` places a worktree. The directory name is the full branch with `/` and any
 /// non-`[A-Za-z0-9._-]` char replaced by `-`, so distinct branches never collapse to the same path.
-/// Resolution order is: explicit `project.worktree_root`, otherwise `<project.path>/.worktrees`.
+/// Resolution order is: explicit `worktree_root`, otherwise `<project.path>/.worktrees`.
 /// A project with neither cannot run until one of those is configured.
-pub fn worktree_path_for(project: &Project, branch: &str) -> Result<PathBuf, DomainError> {
-    let root = match &project.worktree_root {
+pub fn worktree_path_for(
+    project: &Project,
+    worktree_root: Option<&str>,
+    branch: &str,
+) -> Result<PathBuf, DomainError> {
+    let root = match worktree_root {
         Some(root) => PathBuf::from(root),
         None => {
             let path = project.path.as_deref().ok_or_else(|| {
@@ -77,20 +81,18 @@ mod tests {
         let mut project = Project::from_repo("owner/repo");
         project.path = Some("/repo".to_string());
         assert_eq!(
-            worktree_path_for(&project, "mon-1").unwrap(),
+            worktree_path_for(&project, None, "mon-1").unwrap(),
             PathBuf::from("/repo/.worktrees/mon-1")
         );
 
-        project.worktree_root = Some("/worktrees".to_string());
         assert_eq!(
-            worktree_path_for(&project, "mon-1").unwrap(),
+            worktree_path_for(&project, Some("/worktrees"), "mon-1").unwrap(),
             PathBuf::from("/worktrees/mon-1"),
             "explicit worktree_root wins over <path>/.worktrees"
         );
 
         project.path = None;
-        project.worktree_root = None;
-        assert!(worktree_path_for(&project, "mon-1").is_err());
+        assert!(worktree_path_for(&project, None, "mon-1").is_err());
     }
 
     #[test]
@@ -98,7 +100,7 @@ mod tests {
         let mut project = Project::from_repo("owner/repo");
         project.path = Some("/repo".to_string());
         assert_eq!(
-            worktree_path_for(&project, "feature/foo bar").unwrap(),
+            worktree_path_for(&project, None, "feature/foo bar").unwrap(),
             PathBuf::from("/repo/.worktrees/feature-foo-bar"),
             "slashes and spaces must not create nested or ambiguous paths"
         );

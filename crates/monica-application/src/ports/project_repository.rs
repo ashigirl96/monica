@@ -1,10 +1,11 @@
 use anyhow::Result;
 
-use crate::Project;
+use crate::{ExecutionProfile, Project};
 
 pub trait ProjectRepository {
-    fn upsert_project(&self, project: &Project) -> Result<Project>;
+    fn upsert_project(&self, project: &Project, profile: &ExecutionProfile) -> Result<Project>;
     fn get_project(&self, id: &str) -> Result<Option<Project>>;
+    fn get_execution_profile(&self, id: &str) -> Result<Option<ExecutionProfile>>;
     fn list_projects(&self) -> Result<Vec<Project>>;
     fn set_project_field(&self, id: &str, key: &str, value: &str) -> Result<()>;
 }

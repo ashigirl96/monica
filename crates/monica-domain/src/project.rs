@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use super::task_run::Agent;
-
 #[derive(
     Debug,
     Clone,
@@ -53,8 +51,9 @@ impl PermissionMode {
     }
 }
 
-/// A repo's execution-environment definition, resolved by `issue run`. One row per repo,
-/// keyed by `owner/repo`.
+/// A repo's identity and location, keyed by `owner/repo`. Execution-environment settings
+/// (agent, permissions, hooks, worktree layout) live in [`ExecutionProfile`] in the application
+/// layer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Project {
     pub id: String,
@@ -63,11 +62,6 @@ pub struct Project {
     pub repo: String,
     pub path: Option<String>,
     pub default_branch: String,
-    pub worktree_root: Option<String>,
-    pub setup_timeout_sec: i64,
-    pub agent_default: Agent,
-    pub agent_permission_mode: PermissionMode,
-    pub hooks_claude: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -78,7 +72,6 @@ impl Project {
     /// fills them via column defaults and reads them back.
     pub fn from_repo(repo: impl Into<String>) -> Self {
         let repo = repo.into();
-        // Last non-empty path segment, so a trailing slash ("owner/repo/") still yields "repo".
         let name = repo
             .rsplit('/')
             .find(|seg| !seg.is_empty())
@@ -91,11 +84,6 @@ impl Project {
             repo,
             path: None,
             default_branch: "main".to_string(),
-            worktree_root: None,
-            setup_timeout_sec: 600,
-            agent_default: Agent::Claude,
-            agent_permission_mode: PermissionMode::Plan,
-            hooks_claude: true,
             created_at: String::new(),
             updated_at: String::new(),
         }
