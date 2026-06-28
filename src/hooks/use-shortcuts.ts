@@ -12,6 +12,7 @@ import {
   jumpHintsActiveAtom,
   jumpToHintAtom,
   moveActiveTabAtom,
+  moveActiveRunspaceAtom,
   planPreviewAtom,
   promoteActiveTabRunAtom,
   toggleLastRunspaceAtom,
@@ -89,6 +90,7 @@ export function useShortcuts() {
   const setJumpActive = useSetAtom(jumpHintsActiveAtom);
   const jumpToHint = useSetAtom(jumpToHintAtom);
   const moveActiveTab = useSetAtom(moveActiveTabAtom);
+  const moveActiveRunspace = useSetAtom(moveActiveRunspaceAtom);
   const toggleLastRunspace = useSetAtom(toggleLastRunspaceAtom);
   const setNewTaskOpen = useSetAtom(newTaskOpenAtom);
   const setProjectFilterOpen = useSetAtom(projectFilterOpenAtom);
@@ -343,6 +345,7 @@ export function useShortcuts() {
           createTab: () => (isWorkBench ? createTerminalTab() : createTab()),
           jumpToHint,
           moveActiveTab,
+          moveActiveRunspace,
         };
         handleJumpMode(e, isWorkBench, actions);
         return;
@@ -397,6 +400,7 @@ export function useShortcuts() {
     setJumpActive,
     jumpToHint,
     moveActiveTab,
+    moveActiveRunspace,
     toggleLastRunspace,
     cycleBoardView,
     cycleLibraryMode,
