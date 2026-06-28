@@ -700,6 +700,10 @@ impl NotificationOutboxStore for FakeRepos {
     fn mark_notification_failed(&self, _id: i64, _error: &str) -> Result<()> {
         Ok(())
     }
+
+    fn cancel_notifications_for_run(&self, _task_run_id: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
 impl FakeRepos {

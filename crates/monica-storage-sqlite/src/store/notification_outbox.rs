@@ -68,6 +68,17 @@ pub(crate) fn mark_notification_delivered_in(conn: &Connection, id: i64) -> Resu
     Ok(())
 }
 
+pub(crate) fn cancel_notifications_for_run_in(
+    conn: &Connection,
+    task_run_id: &str,
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM notification_outbox WHERE task_run_id = ?1",
+        params![task_run_id],
+    )?;
+    Ok(())
+}
+
 pub(crate) fn mark_notification_failed_in(
     conn: &Connection,
     id: i64,
@@ -169,6 +180,18 @@ mod tests {
 
         let pending = store.list_pending_notifications(10).unwrap();
         assert_eq!(pending.len(), 1);
+    }
+
+    #[test]
+    fn cancel_removes_notifications_for_run() {
+        use monica_application::NotificationOutboxStore;
+        let mut store = test_store();
+        store.enqueue_notification(sample_intent()).unwrap();
+
+        store.cancel_notifications_for_run("run-1").unwrap();
+
+        let pending = store.list_pending_notifications(10).unwrap();
+        assert!(pending.is_empty());
     }
 
     #[test]

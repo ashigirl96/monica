@@ -91,6 +91,13 @@ impl<B: Backend> ExecutionService<'_, B> {
         if report.event_name.is_none() {
             report.event_name = agents.event_label(raw_stdin.as_bytes());
         }
+        if let (Some(ref run_id), Some(status)) =
+            (&report.linked_task_run_id, report.task_run_status)
+        {
+            if status != TaskRunStatus::WaitingForUser {
+                let _ = repos.cancel_notifications_for_run(run_id);
+            }
+        }
         if report.entered_waiting_for_user {
             events.emit(ApplicationEvent::AwaitingUserInput {
                 task_id: report.linked_task_id.clone(),
