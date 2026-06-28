@@ -5,13 +5,23 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import "@fontsource-variable/jetbrains-mono";
 import App from "./App";
+import { commands } from "./commands/bindings";
+import { unwrap } from "./commands/unwrap";
 import { initPrSync } from "./stores/pr-sync";
 import { queryClient } from "./stores/query-client";
 import { initQuerySync } from "./stores/query-sync";
-import { hydrateUiState, windowLabelAtom, MAIN_WINDOW_LABEL } from "./stores/ui-state";
+import {
+  hydrateUiState,
+  windowLabelAtom,
+  MAIN_WINDOW_LABEL,
+  getSecondaryWindowLabels,
+  removeWindowEntry,
+  ensureWindowEntry,
+} from "./stores/ui-state";
 import { initUiStatePersistence } from "./stores/ui-state-persistence";
 import { terminalStateAtom } from "./features/work-bench/store";
-import { detachAllSessions } from "./features/work-bench/window-cleanup";
+import { terminalSaveState } from "./commands/terminal";
+import { terminateAllSessions } from "./features/work-bench/window-cleanup";
 import "./styles/globals.css";
 
 // Restore the saved view before the first paint so the app opens on the last Space
@@ -28,10 +38,22 @@ async function bootstrap() {
     await hydrateUiState({ windowLabel });
     initUiStatePersistence({ windowLabel });
 
-    if (windowLabel !== MAIN_WINDOW_LABEL) {
+    if (windowLabel === MAIN_WINDOW_LABEL) {
+      const secondaryLabels = await getSecondaryWindowLabels();
+      for (const label of secondaryLabels) {
+        try {
+          await unwrap(commands.openNamedWindow(label));
+        } catch (e) {
+          console.warn(`failed to restore window ${label}:`, e);
+        }
+      }
+    } else {
+      await ensureWindowEntry(windowLabel);
       const unlisten = await win.onCloseRequested(async (event) => {
         event.preventDefault();
-        await detachAllSessions(store.get(terminalStateAtom));
+        await terminateAllSessions(store.get(terminalStateAtom));
+        await terminalSaveState(windowLabel, { runspaces: [] });
+        await removeWindowEntry(windowLabel);
         unlisten();
         await win.destroy();
       });

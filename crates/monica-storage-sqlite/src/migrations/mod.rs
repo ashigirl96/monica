@@ -18,7 +18,7 @@ migrations!(
     v11, v12, v13, v14, v15,
     v16, v17, v18, v19, v20,
     v21, v22, v23, v24, v25,
-    v26, v27, v28, v29,
+    v26, v27, v28, v29, v30,
 );
 
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
@@ -192,7 +192,7 @@ mod tests {
         }
 
         let db = crate::SqliteStore::open_at(&path).unwrap();
-        let snapshot = db.load_terminal_state().unwrap();
+        let snapshot = db.load_terminal_state("main").unwrap();
         assert_eq!(snapshot.runspaces.len(), 1);
         assert_eq!(snapshot.runspaces[0].id, "rs-1");
         assert_eq!(snapshot.runspaces[0].tabs[0].id, "tab-1");
@@ -352,7 +352,7 @@ mod tests {
         }
 
         let db = crate::SqliteStore::open_at(&path).unwrap();
-        let snapshot = db.load_terminal_state().unwrap();
+        let snapshot = db.load_terminal_state("main").unwrap();
         assert_eq!(snapshot.runspaces.len(), 1);
         assert_eq!(snapshot.runspaces[0].tabs[0].id, "tab-1");
         assert_eq!(snapshot.runspaces[0].tabs[0].terminal_session_id, None);

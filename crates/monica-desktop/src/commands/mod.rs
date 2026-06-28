@@ -6,3 +6,4 @@ pub mod plan;
 pub mod pull_request;
 pub mod task;
 pub mod terminal;
+pub mod window;

@@ -1399,11 +1399,15 @@ impl TerminalSessionRepository for FakeRepos {
         Ok(())
     }
 
-    fn load_terminal_state(&self) -> Result<TerminalStateSnapshot> {
+    fn load_terminal_state(&self, _window_label: &str) -> Result<TerminalStateSnapshot> {
         Ok(TerminalStateSnapshot { runspaces: Vec::new() })
     }
 
-    fn save_terminal_state(&mut self, _snapshot: &TerminalStateSnapshot) -> Result<()> {
+    fn save_terminal_state(
+        &mut self,
+        _window_label: &str,
+        _snapshot: &TerminalStateSnapshot,
+    ) -> Result<()> {
         Ok(())
     }
 }

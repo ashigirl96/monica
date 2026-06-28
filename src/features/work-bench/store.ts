@@ -346,7 +346,7 @@ export function detachTab(tab: TerminalTab): Promise<void> {
   );
 }
 
-async function terminateTab(tab: TerminalTab): Promise<void> {
+export async function terminateTab(tab: TerminalTab): Promise<void> {
   const sessionId = releaseTabConnection(tab.id) ?? tab.sessionId;
   if (!sessionId) return;
   try {
@@ -426,6 +426,7 @@ export const createTerminalTabAtom = atom(null, (get, set) => {
 
 export const closeTerminalTabAtom = atom(null, (get, set, tabId?: string) => {
   const state = get(resolvedStateAtom);
+  const isSecondary = get(windowLabelAtom) !== MAIN_WINDOW_LABEL;
   const rsId = tabId
     ? state.runspaces.find((r) => r.tabs.some((t) => t.id === tabId))?.id
     : state.activeRunspaceId;
@@ -437,11 +438,15 @@ export const closeTerminalTabAtom = atom(null, (get, set, tabId?: string) => {
   if (!target) return;
 
   if (rs.tabs.length <= 1) {
-    set(removeRunspaceAtom, rs.id);
+    set(removeRunspaceAtom, rs.id, isSecondary ? "terminate" : "detach");
     return;
   }
 
-  detachTab(target);
+  if (isSecondary) {
+    void terminateTab(target);
+  } else {
+    detachTab(target);
+  }
 
   const idx = rs.tabs.findIndex((t) => t.id === targetId);
   const newTabs = rs.tabs.filter((t) => t.id !== targetId);
@@ -641,9 +646,7 @@ function applySessionList(get: Getter, set: Setter, sessions: TerminalSession[])
   const boundIds = new Set(
     (state?.runspaces ?? []).flatMap((rs) => rs.tabs.map((t) => t.sessionId)).filter(Boolean),
   );
-  const detached = sessions.filter(
-    (s) => (s.status === "running" || s.status === "detached") && !boundIds.has(s.id),
-  );
+  const detached = sessions.filter((s) => s.status === "detached" && !boundIds.has(s.id));
   set(detachedSessionsAtom, detached);
 }
 
@@ -766,14 +769,10 @@ const loadInFlightAtom = atom<Promise<void> | null>(null);
 export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
   if (get(terminalStateAtom) !== null) return Promise.resolve();
 
-  if (get(windowLabelAtom) !== MAIN_WINDOW_LABEL) {
-    set(pendingWorkbenchHintAtom, null);
-    set(terminalStateAtom, initialState());
-    return Promise.resolve();
-  }
-
   const inFlight = get(loadInFlightAtom);
   if (inFlight) return inFlight;
+
+  const windowLabel = get(windowLabelAtom);
 
   const promise = (async () => {
     try {
@@ -782,7 +781,7 @@ export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
       // replace (and then persist) the saved layout with an empty one. Unknown statuses
       // just mean panes attempt to attach and demote themselves to lost on failure.
       const [snap, benchMap, sessions] = await Promise.all([
-        terminalLoadState(),
+        terminalLoadState(windowLabel),
         listBenchRunspaceMap(),
         terminalListSessions().catch((e) => {
           console.warn("terminal session reconcile failed:", e);
@@ -812,14 +811,15 @@ export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
           state = applyHint(state, hint);
         }
         set(terminalStateAtom, state);
-        if (sessions) applySessionList(get, set, sessions);
+        if (windowLabel === MAIN_WINDOW_LABEL && sessions) applySessionList(get, set, sessions);
         void set(resolveWorktreeInfoAtom);
         return;
       }
-      if (sessions) applySessionList(get, set, sessions);
+      if (windowLabel === MAIN_WINDOW_LABEL && sessions) applySessionList(get, set, sessions);
     } catch {
       // first launch or empty DB
     }
+    set(pendingWorkbenchHintAtom, null);
     set(terminalStateAtom, initialState());
   })().finally(() => {
     set(loadInFlightAtom, null);
@@ -901,14 +901,14 @@ export const consumeTerminalLaunchAtom = atom(null, (get, set, tabId: string) =>
 const saveTimerAtom = atom<number | undefined>(undefined);
 
 export const saveTerminalStateAtom = atom(null, (get, set) => {
-  if (get(windowLabelAtom) !== MAIN_WINDOW_LABEL) return;
   const current = get(terminalStateAtom);
   if (!current) return;
   const prev = get(saveTimerAtom);
   if (prev) clearTimeout(prev);
+  const windowLabel = get(windowLabelAtom);
   const snapshot = stateToSnapshot(current);
   const timer = window.setTimeout(() => {
-    terminalSaveState(snapshot).catch((e) => console.warn("terminal save failed:", e));
+    terminalSaveState(windowLabel, snapshot).catch((e) => console.warn("terminal save failed:", e));
   }, 500);
   set(saveTimerAtom, timer);
 });
