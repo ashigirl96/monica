@@ -1,6 +1,7 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   activeRunspaceAtom,
+  activeTerminalTabAtom,
   activateTerminalTabAtom,
   closeTerminalTabAtom,
   createTerminalTabAtom,
@@ -35,17 +36,17 @@ export function WorkBenchHeader() {
   const createTab = useSetAtom(createTerminalTabAtom);
   const reorder = useSetAtom(reorderTabsAtom);
   const jumpHints = useAtomValue(jumpHintTargetsAtom);
+  const activeTab = useAtomValue(activeTerminalTabAtom);
   const { dragOverId, handlersFor } = useDragReorder(reorder);
   const activeTabRef = useRef<HTMLButtonElement>(null);
 
-  // CSS cannot trigger scroll-to-element on class change; JS is required
   useEffect(() => {
     activeTabRef.current?.scrollIntoView({
       behavior: "smooth",
       block: "nearest",
       inline: "nearest",
     });
-  }, [rs?.activeTabId]);
+  }, [rs?.activeTabId, activeTab?.order]);
 
   // Hook-driven primary claims land in the DB without a Tauri event, so the
   // indicator follows the same listen-plus-poll pattern as the Workboard.
