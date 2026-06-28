@@ -50,6 +50,8 @@ mod tests {
             label: "main".into(),
             transparent: true,
             hidden_title: true,
+            // The real main window is non-closable; the override must still flip secondaries to closable.
+            closable: false,
             drag_drop_enabled: false,
             title_bar_style: TitleBarStyle::Overlay,
             traffic_light_position: Some(LogicalPosition { x: 16.0, y: 22.0 }),
