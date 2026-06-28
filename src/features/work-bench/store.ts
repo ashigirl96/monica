@@ -338,11 +338,12 @@ export const createRunspaceAtom = atom(null, (get, set) => {
 
 // Closing a tab or runspace detaches the session (the process keeps running under the
 // daemon and shows up in the Detached group); only an explicit terminate kills it.
-function detachTab(tab: TerminalTab) {
+export function detachTab(tab: TerminalTab): Promise<void> {
   const sessionId = releaseTabConnection(tab.id) ?? tab.sessionId;
-  if (sessionId) {
-    terminalDetach(sessionId).catch((e) => console.warn("terminal detach failed:", e));
-  }
+  if (!sessionId) return Promise.resolve();
+  return terminalDetach(sessionId).catch((e: unknown) =>
+    console.warn("terminal detach failed:", e),
+  );
 }
 
 async function terminateTab(tab: TerminalTab): Promise<void> {

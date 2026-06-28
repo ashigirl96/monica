@@ -18,20 +18,25 @@ mock.module("@/features/work-bench/terminal-connections", () => ({
   },
 }));
 
+mock.module("@/stores/workboard", () => {
+  const { atom: a } = require("jotai");
+  return { refreshTaskSummariesAtom: a(null, () => {}) };
+});
+
 const { detachAllSessions } = await import("./window-cleanup");
 
 describe("detachAllSessions", () => {
-  test("no-ops on null state", () => {
+  test("no-ops on null state", async () => {
     detachCalls = [];
     releasedTabs = [];
-    detachAllSessions(null);
+    await detachAllSessions(null);
     expect(detachCalls).toHaveLength(0);
   });
 
-  test("detaches all sessions across runspaces", () => {
+  test("detaches all sessions across runspaces", async () => {
     detachCalls = [];
     releasedTabs = [];
-    detachAllSessions({
+    await detachAllSessions({
       runspaces: [
         {
           id: "rs-1",
@@ -56,10 +61,10 @@ describe("detachAllSessions", () => {
     expect(detachCalls).toEqual(["s-1", "s-3"]);
   });
 
-  test("prefers releaseTabConnection sessionId over tab.sessionId", () => {
+  test("prefers releaseTabConnection sessionId over tab.sessionId", async () => {
     detachCalls = [];
     releasedTabs = [];
-    detachAllSessions({
+    await detachAllSessions({
       runspaces: [
         {
           id: "rs",

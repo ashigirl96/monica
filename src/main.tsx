@@ -22,16 +22,17 @@ async function bootstrap() {
   initQuerySync();
   initPrSync();
   try {
-    const windowLabel = getCurrentWebviewWindow().label;
+    const win = getCurrentWebviewWindow();
+    const windowLabel = win.label;
     store.set(windowLabelAtom, windowLabel);
     await hydrateUiState({ windowLabel });
     initUiStatePersistence({ windowLabel });
 
     if (windowLabel !== MAIN_WINDOW_LABEL) {
-      const win = getCurrentWebviewWindow();
-      win.onCloseRequested(async (event) => {
+      const unlisten = await win.onCloseRequested(async (event) => {
         event.preventDefault();
         await detachAllSessions(store.get(terminalStateAtom));
+        unlisten();
         await win.destroy();
       });
     }
