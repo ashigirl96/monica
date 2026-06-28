@@ -30,7 +30,9 @@ export type PersistedUiState = {
   windows: Record<string, WindowUiState>;
 };
 
-const MAIN_WINDOW_LABEL = "main";
+export const MAIN_WINDOW_LABEL = "main";
+
+export const windowLabelAtom = atom("");
 
 const DEFAULT_WINDOW_STATE: WindowUiState = {
   activeSpace: "library",
