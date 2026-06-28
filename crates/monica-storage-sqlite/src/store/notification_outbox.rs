@@ -3,7 +3,7 @@ use rusqlite::{params, Connection};
 
 use monica_domain::{NewNotificationIntent, NotificationIntent};
 
-use super::{NOTIFICATION_OUTBOX_COLUMNS, SET_NOW};
+use super::NOTIFICATION_OUTBOX_COLUMNS;
 use crate::row::notification_intent_from_row;
 
 const MAX_ATTEMPTS: i64 = 5;
@@ -62,7 +62,7 @@ pub(crate) fn list_pending_notifications_in(
 
 pub(crate) fn mark_notification_delivered_in(conn: &Connection, id: i64) -> Result<()> {
     conn.execute(
-        &format!("UPDATE notification_outbox SET delivered_at = {SET_NOW} WHERE id = ?1"),
+        "DELETE FROM notification_outbox WHERE id = ?1",
         params![id],
     )?;
     Ok(())
@@ -156,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    fn re_enqueue_after_delivery_resets_to_pending() {
+    fn re_enqueue_after_delivery_creates_new_pending() {
         use monica_application::NotificationOutboxStore;
         let mut store = test_store();
         let intent = store.enqueue_notification(sample_intent()).unwrap();
@@ -165,7 +165,6 @@ mod tests {
         assert!(store.list_pending_notifications(10).unwrap().is_empty());
 
         let re_enqueued = store.enqueue_notification(sample_intent()).unwrap();
-        assert!(re_enqueued.delivered_at.is_none());
         assert_eq!(re_enqueued.attempts, 0);
 
         let pending = store.list_pending_notifications(10).unwrap();
