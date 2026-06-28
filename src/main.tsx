@@ -1,3 +1,4 @@
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getDefaultStore } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import React from "react";
@@ -20,8 +21,9 @@ async function bootstrap() {
   initQuerySync();
   initPrSync();
   try {
-    await hydrateUiState();
-    initUiStatePersistence();
+    const windowLabel = getCurrentWebviewWindow().label;
+    await hydrateUiState({ windowLabel });
+    initUiStatePersistence({ windowLabel });
   } finally {
     ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <React.StrictMode>
