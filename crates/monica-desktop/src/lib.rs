@@ -1,5 +1,6 @@
 mod commands;
 mod event_sink;
+mod native_menu;
 mod ptyd;
 mod schedulers;
 mod services;
@@ -78,7 +79,23 @@ pub fn run() {
     #[cfg(debug_assertions)]
     export_bindings();
 
-    let builder = tauri::Builder::default();
+    let builder = tauri::Builder::default()
+        .menu(native_menu::build)
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == native_menu::NEW_WINDOW_ID {
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    match services::window_manager::open_new_window(app).await {
+                        Ok(label) => {
+                            log::info!(target: "monica_app::window", "opened new window {label}")
+                        }
+                        Err(err) => {
+                            log::error!(target: "monica_app::window", "failed to open new window: {err:?}")
+                        }
+                    }
+                });
+            }
+        });
     #[cfg(debug_assertions)]
     let builder = builder.plugin(tauri_plugin_mcp_bridge::init());
     #[cfg(not(debug_assertions))]
