@@ -14,8 +14,10 @@ use monica_adapters::process::ProcessSetupRunner;
 use monica_application::{Backend, EventSink, Monica, WorktreeRef};
 use monica_storage_sqlite::SqliteStore;
 
+pub mod notification_drain;
 pub mod pr_sync;
 
+pub use notification_drain::{start_notification_drain, NotificationDrainHandle};
 pub use pr_sync::{start_pr_sync, PrSyncWaker};
 
 /// The concrete adapter set the desktop and CLI run on: SQLite, octocrab, the git CLI, the process

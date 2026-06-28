@@ -4,5 +4,12 @@
   "entry": ["src/**/*.test.{ts,tsx}"],
   "ignoreExportsUsedInFile": true,
   "ignoreBinaries": ["lefthook", "tsc", "tauri"],
-  "ignoreDependencies": ["tailwindcss", "tw-animate-css", "@tauri-apps/cli", "oxfmt", "oxlint"]
+  "ignoreDependencies": [
+    "tailwindcss",
+    "tw-animate-css",
+    "@tauri-apps/cli",
+    "@tauri-apps/plugin-notification",
+    "oxfmt",
+    "oxlint"
+  ]
 }

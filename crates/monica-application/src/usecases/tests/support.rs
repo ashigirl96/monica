@@ -7,17 +7,18 @@ use anyhow::{anyhow, Result};
 use monica_domain::RawJson;
 
 use crate::ports::{
-    AgentDecoders, BoxFuture, EventRepository, GitGateway, NotebookGateway, ProjectRepository,
-    PullRequestSyncStore, TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter,
-    TerminalAttachment, TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository,
-    UnitOfWork, WorkTransaction, WorkbenchStore, Workspace,
+    AgentDecoders, BoxFuture, EventRepository, GitGateway, NotebookGateway,
+    NotificationOutboxStore, ProjectRepository, PullRequestSyncStore, TaskBoardQuery, TaskRunStore,
+    TaskStore, TaskSummaryFilter, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
+    TerminalSessionRepository, UnitOfWork, WorkTransaction, WorkbenchStore, Workspace,
 };
 use crate::usecases::runs::record_hook;
 use crate::prelude::{
-    Agent, AgentSignal, Continuation, DisplayStatus, Event, ExternalReference, LintFinding, NewTask,
-    NewTaskRun, NewTerminalSession, NotebookDoc, Project, Provider, RefType, SignalKind, Task,
-    TaskId, TaskKind, TaskRun, TaskRunId, TaskRunStatus, TaskRunWaitReason, TaskStatus,
-    TerminalSession, TerminalSessionKind, TerminalSessionStatus,
+    Agent, AgentSignal, Continuation, DisplayStatus, Event, ExternalReference, LintFinding,
+    NewNotificationIntent, NewTask, NewTaskRun, NewTerminalSession, NotebookDoc,
+    NotificationIntent, Project, Provider, RefType, SignalKind, Task, TaskId, TaskKind, TaskRun,
+    TaskRunId, TaskRunStatus, TaskRunWaitReason, TaskStatus, TerminalSession,
+    TerminalSessionKind, TerminalSessionStatus,
 };
 use crate::{
     ApplicationEvent, AuthGateway, Backend, Clock, DaemonSessionView, EventSink, ExecutionProfile,
@@ -665,6 +666,43 @@ impl EventRepository for FakeRepos {
 impl Clock for FakeRepos {
     fn now_iso(&self) -> Result<String> {
         Ok("2026-06-02T00:00:00.000Z".to_string())
+    }
+}
+
+impl NotificationOutboxStore for FakeRepos {
+    fn enqueue_notification(
+        &mut self,
+        _intent: NewNotificationIntent,
+    ) -> Result<NotificationIntent> {
+        Ok(NotificationIntent {
+            id: 1,
+            dedupe_key: _intent.dedupe_key,
+            kind: _intent.kind,
+            title: _intent.title,
+            body: _intent.body,
+            task_id: _intent.task_id,
+            task_run_id: _intent.task_run_id,
+            created_at: "2026-06-02T00:00:00.000Z".to_string(),
+            delivered_at: None,
+            error: None,
+            attempts: 0,
+        })
+    }
+
+    fn list_pending_notifications(&self, _limit: usize) -> Result<Vec<NotificationIntent>> {
+        Ok(Vec::new())
+    }
+
+    fn mark_notification_delivered(&self, _id: i64) -> Result<()> {
+        Ok(())
+    }
+
+    fn mark_notification_failed(&self, _id: i64, _error: &str) -> Result<()> {
+        Ok(())
+    }
+
+    fn cancel_notifications_for_run(&self, _task_run_id: &str) -> Result<()> {
+        Ok(())
     }
 }
 

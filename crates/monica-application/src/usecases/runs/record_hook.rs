@@ -27,6 +27,8 @@ pub struct HookReport {
     /// The run's task title, carried only on the entering edge so a notification need not reach
     /// back into the DB for what core already resolved.
     pub task_title: Option<String>,
+    pub linked_task_run_id: Option<String>,
+    pub linked_task_id: Option<String>,
     pub ignored: bool,
     pub task_found: bool,
     pub task_run_linked: bool,
@@ -44,6 +46,8 @@ impl HookReport {
             task_run_wait_reason: None,
             entered_waiting_for_user: false,
             task_title: None,
+            linked_task_run_id: None,
+            linked_task_id: None,
             ignored: true,
             task_found: false,
             task_run_linked: false,
@@ -204,6 +208,8 @@ where
         task_run_wait_reason,
         entered_waiting_for_user,
         task_title,
+        linked_task_run_id: linked_task_run_id.map(str::to_string),
+        linked_task_id: linked_task_id.map(str::to_string),
         ignored: false,
         task_found,
         task_run_linked,

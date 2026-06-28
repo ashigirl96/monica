@@ -10,6 +10,7 @@ mod error;
 mod external_reference;
 mod ids;
 mod json;
+mod notification;
 mod notebook;
 mod project;
 mod refs;
@@ -27,6 +28,7 @@ pub use error::DomainError;
 pub use external_reference::{ExternalIssue, ExternalReference, RefType};
 pub use ids::{TaskId, TaskRunId};
 pub use json::RawJson;
+pub use notification::{NewNotificationIntent, NotificationIntent, NotificationKind};
 pub use notebook::{
     front_value, is_valid_slug, mermaid_blocks, outline, pages_from_docs, parse_front_matter,
     parse_wikilink, structural_lint, LintFinding, NotebookDoc, NotebookPage, OutlineEntry,

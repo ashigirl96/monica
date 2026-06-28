@@ -55,3 +55,31 @@ impl SqliteStore {
         &mut self.conn
     }
 }
+
+impl monica_application::NotificationOutboxStore for SqliteStore {
+    fn enqueue_notification(
+        &mut self,
+        intent: monica_domain::NewNotificationIntent,
+    ) -> Result<monica_domain::NotificationIntent> {
+        store::notification_outbox::enqueue_notification_in(self.conn(), intent)
+    }
+
+    fn list_pending_notifications(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<monica_domain::NotificationIntent>> {
+        store::notification_outbox::list_pending_notifications_in(self.conn(), limit)
+    }
+
+    fn mark_notification_delivered(&self, id: i64) -> Result<()> {
+        store::notification_outbox::mark_notification_delivered_in(self.conn(), id)
+    }
+
+    fn mark_notification_failed(&self, id: i64, error: &str) -> Result<()> {
+        store::notification_outbox::mark_notification_failed_in(self.conn(), id, error)
+    }
+
+    fn cancel_notifications_for_run(&self, task_run_id: &str) -> Result<()> {
+        store::notification_outbox::cancel_notifications_for_run_in(self.conn(), task_run_id)
+    }
+}

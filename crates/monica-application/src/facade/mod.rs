@@ -9,6 +9,7 @@
 mod backend;
 mod executions;
 mod notebooks;
+mod notifications;
 mod projects;
 mod synchronization;
 mod tasks;
@@ -16,6 +17,7 @@ mod tasks;
 pub use backend::Backend;
 pub use executions::ExecutionService;
 pub use notebooks::{NotebookLintReport, NotebookPageView, NotebookService};
+pub use notifications::NotificationService;
 pub use projects::{ProjectInit, ProjectService};
 pub use synchronization::SynchronizationService;
 pub use tasks::TaskService;
@@ -70,5 +72,9 @@ impl<B: Backend> Monica<B> {
 
     pub fn notebooks(&mut self) -> NotebookService<'_, B> {
         NotebookService { m: self }
+    }
+
+    pub fn notifications(&mut self) -> NotificationService<'_, B> {
+        NotificationService { m: self }
     }
 }

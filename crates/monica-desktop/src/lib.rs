@@ -102,6 +102,7 @@ pub fn run() {
     let builder = builder.plugin(release_log_plugin());
 
     builder
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(ptyd::PtydHandle::new())
@@ -110,6 +111,8 @@ pub fn run() {
             specta_builder.mount_events(app);
             let waker = schedulers::pull_request_sync::start(app.handle().clone());
             app.manage(waker);
+            let drain = schedulers::notification_drain::start(app.handle().clone());
+            app.manage(drain);
             ptyd::start_warmup(app.handle().clone());
             #[cfg(not(debug_assertions))]
             log::info!(

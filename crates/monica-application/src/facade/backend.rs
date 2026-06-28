@@ -1,7 +1,7 @@
 use crate::ports::{
-    AgentDecoders, EventRepository, GitGateway, NotebookGateway, ProjectRepository,
-    PullRequestSyncStore, TaskBoardQuery, TaskRunStore, TaskStore, TerminalSessionRepository,
-    UnitOfWork, WorkbenchStore, Workspace,
+    AgentDecoders, EventRepository, GitGateway, NotebookGateway, NotificationOutboxStore,
+    ProjectRepository, PullRequestSyncStore, TaskBoardQuery, TaskRunStore, TaskStore,
+    TerminalSessionRepository, UnitOfWork, WorkbenchStore, Workspace,
 };
 use crate::usecases::github::ports::{AuthGateway, GithubGateway};
 use crate::usecases::runs::ports::{Clock, SetupRunner, TaskRunOutputs};
@@ -18,6 +18,7 @@ pub trait Backend {
         + ProjectRepository
         + EventRepository
         + WorkbenchStore
+        + NotificationOutboxStore
         + TerminalSessionRepository
         + Clock
         + UnitOfWork;

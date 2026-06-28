@@ -1,4 +1,4 @@
-use monica_application::{ApplicationEvent, EventSink};
+use monica_application::{ApplicationEvent, EventSink, notification};
 
 use crate::notify;
 
@@ -10,15 +10,24 @@ pub fn open() -> anyhow::Result<CliFacade> {
     monica_runtime::open_monica(Box::new(CliEventSink))
 }
 
-/// Routes application events to the CLI's surface: a waiting run fires an OS notification; status
-/// and PR-sync events are conveyed by command output, not here.
+/// Routes application events to the CLI's surface. By default, `AwaitingUserInput` is a no-op
+/// because the Desktop outbox worker handles delivery. Set
+/// `MONICA_CLI_NOTIFICATION_FALLBACK=osascript` to re-enable the legacy macOS notification.
 pub struct CliEventSink;
 
 impl EventSink for CliEventSink {
     fn emit(&self, event: ApplicationEvent) {
         match event {
             ApplicationEvent::AwaitingUserInput { reason, task_title, .. } => {
-                notify::post(&notify::waiting_notification(reason, task_title.as_deref()));
+                if std::env::var("MONICA_CLI_NOTIFICATION_FALLBACK")
+                    .ok()
+                    .as_deref()
+                    == Some("osascript")
+                {
+                    let body =
+                        notification::waiting_notification(reason, task_title.as_deref());
+                    notify::post(notification::TITLE, &body);
+                }
             }
             ApplicationEvent::TaskRunStatusChanged { .. }
             | ApplicationEvent::PullRequestSyncCompleted { .. } => {}
