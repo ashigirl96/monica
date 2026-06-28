@@ -8,6 +8,7 @@ function mockActions(): JumpModeActions {
     deactivate: mock(),
     createTab: mock(),
     jumpToHint: mock(),
+    moveActiveTab: mock(),
   };
 }
 
@@ -94,5 +95,31 @@ describe("handleJumpMode", () => {
     const e = keyEvent({ key: "x" });
     handleJumpMode(e, true, actions);
     expect(e.preventDefault).toHaveBeenCalled();
+  });
+
+  test("'<' moves active tab left without deactivating", () => {
+    const actions = mockActions();
+    const e = keyEvent({ key: "<", shiftKey: true });
+    handleJumpMode(e, true, actions);
+    expect(actions.moveActiveTab).toHaveBeenCalledWith("left");
+    expect(actions.deactivate).not.toHaveBeenCalled();
+    expect(actions.jumpToHint).not.toHaveBeenCalled();
+  });
+
+  test("'>' moves active tab right without deactivating", () => {
+    const actions = mockActions();
+    const e = keyEvent({ key: ">", shiftKey: true });
+    handleJumpMode(e, true, actions);
+    expect(actions.moveActiveTab).toHaveBeenCalledWith("right");
+    expect(actions.deactivate).not.toHaveBeenCalled();
+    expect(actions.jumpToHint).not.toHaveBeenCalled();
+  });
+
+  test("'<' / '>' are ignored outside workBench", () => {
+    const actions = mockActions();
+    const e = keyEvent({ key: "<", shiftKey: true });
+    handleJumpMode(e, false, actions);
+    expect(actions.moveActiveTab).not.toHaveBeenCalled();
+    expect(actions.deactivate).toHaveBeenCalled();
   });
 });

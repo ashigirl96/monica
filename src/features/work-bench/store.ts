@@ -545,6 +545,18 @@ export const reorderTabsAtom = atom(null, (get, set, fromId: string, toId: strin
   });
 });
 
+export const moveActiveTabAtom = atom(null, (get, set, direction: "left" | "right") => {
+  updateActiveRunspace(get, set, (rs) => {
+    const sorted = [...rs.tabs].sort((a, b) => a.order - b.order);
+    const idx = sorted.findIndex((t) => t.id === rs.activeTabId);
+    if (idx === -1) return null;
+    const neighborIdx = direction === "left" ? idx - 1 : idx + 1;
+    if (neighborIdx < 0 || neighborIdx >= sorted.length) return null;
+    const tabs = reorderByOrder(rs.tabs, sorted[idx].id, sorted[neighborIdx].id);
+    return tabs ? { tabs } : null;
+  });
+});
+
 function stateToSnapshot(state: TerminalState): TerminalStateSnapshot {
   return {
     runspaces: state.runspaces.map((rs) => ({

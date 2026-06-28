@@ -5,6 +5,7 @@ export type JumpModeActions = {
   deactivate: () => void;
   createTab: () => void;
   jumpToHint: (params: { key: string; runspace: boolean }) => void;
+  moveActiveTab: (direction: "left" | "right") => void;
 };
 
 export function handleJumpMode(
@@ -30,6 +31,11 @@ export function handleJumpMode(
 
   if (!isWorkBench) {
     actions.deactivate();
+    return;
+  }
+
+  if (e.key === "<" || e.key === ">") {
+    actions.moveActiveTab(e.key === "<" ? "left" : "right");
     return;
   }
 
