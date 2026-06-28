@@ -25,6 +25,10 @@ export function initUiStatePersistence(options: UiStatePersistenceOptions): void
   let timer: ReturnType<typeof setTimeout> | undefined;
   let writing = false;
   let pending = false;
+  // uiZoom is a shared global preference with no live cross-window sync yet, so this window's atom
+  // can be stale. Only push the local zoom to the persisted global when the user changed it *here*;
+  // otherwise a save triggered by an unrelated change would clobber a zoom set by another window.
+  let zoomChangedHere = false;
 
   const write = async () => {
     file ??= await load(UI_STATE_FILE);
@@ -40,8 +44,10 @@ export function initUiStatePersistence(options: UiStatePersistenceOptions): void
           }
         : (existingWindow?.workbench ?? { activeRunspaceId: null, activeTabId: null });
     const focusedTaskId = store.get(focusedTaskIdAtom) ?? store.get(focusMemoryAtom);
+    const globalOverride = zoomChangedHere ? { uiZoom: store.get(uiZoomAtom) } : undefined;
+    zoomChangedHere = false;
     const next = serializeUiStatePatch(
-      { ...current, global: { uiZoom: store.get(uiZoomAtom) } },
+      current,
       options.windowLabel,
       {
         activeSpace: store.get(activeSpaceAtom),
@@ -50,6 +56,7 @@ export function initUiStatePersistence(options: UiStatePersistenceOptions): void
         workbench,
         workboard: { focusedTaskId },
       },
+      globalOverride,
     );
     await writePersistedUiState(file, next);
   };
@@ -82,11 +89,14 @@ export function initUiStatePersistence(options: UiStatePersistenceOptions): void
     activeSpaceAtom,
     sidebarOpenAtom,
     sidebarWidthAtom,
-    uiZoomAtom,
     activeRunspaceAtom,
     activeTerminalTabAtom,
     focusedTaskIdAtom,
     focusMemoryAtom,
   ];
   for (const source of sources) store.sub(source, schedule);
+  store.sub(uiZoomAtom, () => {
+    zoomChangedHere = true;
+    schedule();
+  });
 }

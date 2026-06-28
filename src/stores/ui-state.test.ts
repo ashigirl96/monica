@@ -174,6 +174,13 @@ describe("serializeUiStatePatch", () => {
     const next = serializeUiStatePatch(current, "main", patch);
     expect(next.windows.main).toEqual(patch);
   });
+
+  test("preserves global unless an override is given", () => {
+    expect(serializeUiStatePatch(current, "main", patch).global).toEqual(current.global);
+    expect(serializeUiStatePatch(current, "main", patch, { uiZoom: 1.5 }).global).toEqual({
+      uiZoom: 1.5,
+    });
+  });
 });
 
 describe("resolveWorkbenchActive", () => {

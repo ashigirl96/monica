@@ -104,9 +104,10 @@ export function serializeUiStatePatch(
   current: PersistedUiState,
   windowLabel: string,
   patch: WindowUiState,
+  globalOverride?: PersistedUiState["global"],
 ): PersistedUiState {
   return {
-    global: current.global,
+    global: globalOverride ?? current.global,
     windows: { ...current.windows, [windowLabel]: patch },
   };
 }
