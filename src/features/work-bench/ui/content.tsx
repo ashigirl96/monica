@@ -247,20 +247,22 @@ export default function WorkBenchContent() {
   return (
     <div className="relative h-full" style={{ zoom: 1 / uiZoom }}>
       {state.runspaces.flatMap((rs) =>
-        rs.tabs.map((tab) => (
-          <TerminalPane
-            key={tab.id}
-            tabId={tab.id}
-            runspaceId={rs.id}
-            sessionId={tab.sessionId}
-            sessionEntry={tab.sessionId ? sessionStatus[tab.sessionId] : undefined}
-            cwd={tab.cwd}
-            active={rs.id === state.activeRunspaceId && tab.id === rs.activeTabId}
-            env={rs.env}
-            launch={tab.launch}
-            onLaunchConsumed={() => consumeLaunch(tab.id)}
-          />
-        )),
+        [...rs.tabs]
+          .sort((a, b) => a.id.localeCompare(b.id))
+          .map((tab) => (
+            <TerminalPane
+              key={tab.id}
+              tabId={tab.id}
+              runspaceId={rs.id}
+              sessionId={tab.sessionId}
+              sessionEntry={tab.sessionId ? sessionStatus[tab.sessionId] : undefined}
+              cwd={tab.cwd}
+              active={rs.id === state.activeRunspaceId && tab.id === rs.activeTabId}
+              env={rs.env}
+              launch={tab.launch}
+              onLaunchConsumed={() => consumeLaunch(tab.id)}
+            />
+          )),
       )}
       <JumpOverlay />
       <TabContextMenu />
