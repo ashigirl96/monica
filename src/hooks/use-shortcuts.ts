@@ -131,6 +131,7 @@ export function useShortcuts() {
     const bindings: KeyBinding[] = [
       {
         meta: true,
+        shift: false,
         key: "n",
         editable: true,
         action: ({ activeSpace: space }) => {
