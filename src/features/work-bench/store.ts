@@ -15,9 +15,11 @@ import { readRunspacePlan, type PlanPreview } from "@/commands/plan";
 import { worktreeInfo, type WorktreeInfo } from "@/commands/git";
 import { releaseTabConnection } from "@/features/work-bench/terminal-connections";
 import {
+  MAIN_WINDOW_LABEL,
   type WorkbenchHint,
   pendingWorkbenchHintAtom,
   resolveWorkbenchActive,
+  windowLabelAtom,
 } from "@/stores/ui-state";
 import { refreshTaskSummariesAtom } from "@/stores/workboard";
 
@@ -624,6 +626,7 @@ function applySessionList(get: Getter, set: Setter, sessions: TerminalSession[])
 // both the status poll and the startup reconcile. Failures are non-fatal: keep the last
 // known state and let attach failures surface as lost.
 export const refreshSessionsAtom = atom(null, async (get, set) => {
+  if (get(windowLabelAtom) !== MAIN_WINDOW_LABEL) return;
   let sessions: TerminalSession[];
   try {
     sessions = await terminalListSessions();
@@ -737,6 +740,13 @@ const loadInFlightAtom = atom<Promise<void> | null>(null);
 
 export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
   if (get(terminalStateAtom) !== null) return Promise.resolve();
+
+  if (get(windowLabelAtom) !== MAIN_WINDOW_LABEL) {
+    set(pendingWorkbenchHintAtom, null);
+    set(terminalStateAtom, initialState());
+    return Promise.resolve();
+  }
+
   const inFlight = get(loadInFlightAtom);
   if (inFlight) return inFlight;
 
@@ -866,6 +876,7 @@ export const consumeTerminalLaunchAtom = atom(null, (get, set, tabId: string) =>
 const saveTimerAtom = atom<number | undefined>(undefined);
 
 export const saveTerminalStateAtom = atom(null, (get, set) => {
+  if (get(windowLabelAtom) !== MAIN_WINDOW_LABEL) return;
   const current = get(terminalStateAtom);
   if (!current) return;
   const prev = get(saveTimerAtom);

@@ -169,6 +169,7 @@ if (typeof globalThis.window === "undefined") {
 }
 
 const { createStore } = await import("jotai");
+const { windowLabelAtom } = await import("@/stores/ui-state");
 const { loadTerminalStateAtom, terminalStateAtom } = await import("./store");
 
 beforeEach(() => {
@@ -195,6 +196,7 @@ describe("loadTerminalStateAtom", () => {
     shellEnvResult = new Map([["task-a", [["MONICA", "1"] as [string, string]]]]);
 
     const store = createStore();
+    store.set(windowLabelAtom, "main");
     await store.set(loadTerminalStateAtom);
 
     const state = store.get(terminalStateAtom);
@@ -208,6 +210,7 @@ describe("loadTerminalStateAtom", () => {
     loadStateResult = { runspaces: [] };
 
     const store = createStore();
+    store.set(windowLabelAtom, "main");
     await store.set(loadTerminalStateAtom);
 
     const state = store.get(terminalStateAtom);
@@ -220,6 +223,7 @@ describe("loadTerminalStateAtom", () => {
     loadStateResult = { runspaces: [] };
 
     const store = createStore();
+    store.set(windowLabelAtom, "main");
     const p1 = store.set(loadTerminalStateAtom);
     const p2 = store.set(loadTerminalStateAtom);
 
@@ -228,42 +232,117 @@ describe("loadTerminalStateAtom", () => {
   });
 });
 
+async function setupSaveTest(label: string) {
+  let saveCalls = 0;
+  mock.module("@/commands/terminal", () => ({
+    terminalLoadState: () => Promise.resolve(loadStateResult),
+    terminalListSessions: () => Promise.resolve(sessionsResult ?? []),
+    terminalDetach: () => Promise.resolve(),
+    terminalSaveState: () => {
+      saveCalls++;
+      return Promise.resolve();
+    },
+    terminalTerminate: () => Promise.resolve(),
+  }));
+
+  const { createStore: cs } = await import("jotai");
+  const { windowLabelAtom: wlAtom } = await import("@/stores/ui-state");
+  const { saveTerminalStateAtom: saveAtom, terminalStateAtom: stateAtom } = await import("./store");
+
+  const store = cs();
+  store.set(wlAtom, label);
+  store.set(stateAtom, {
+    runspaces: [
+      {
+        id: "rs",
+        tabs: [{ id: "t", title: "", cwd: "~", order: 0 }],
+        activeTabId: "t",
+        order: 0,
+      },
+    ],
+    activeRunspaceId: "rs",
+  });
+
+  return { store, saveAtom, getSaveCalls: () => saveCalls };
+}
+
 describe("saveTerminalStateAtom", () => {
   test("debounces: only the last call's snapshot is saved", async () => {
-    let saveCalls = 0;
-    mock.module("@/commands/terminal", () => ({
-      terminalLoadState: () => Promise.resolve(loadStateResult),
-      terminalListSessions: () => Promise.resolve(sessionsResult ?? []),
-      terminalDetach: () => Promise.resolve(),
-      terminalSaveState: () => {
-        saveCalls++;
-        return Promise.resolve();
-      },
-      terminalTerminate: () => Promise.resolve(),
-    }));
-
-    const { createStore: cs } = await import("jotai");
-    const { saveTerminalStateAtom: saveAtom, terminalStateAtom: stateAtom } =
-      await import("./store");
-
-    const store = cs();
-    store.set(stateAtom, {
-      runspaces: [
-        {
-          id: "rs",
-          tabs: [{ id: "t", title: "", cwd: "~", order: 0 }],
-          activeTabId: "t",
-          order: 0,
-        },
-      ],
-      activeRunspaceId: "rs",
-    });
+    const { store, saveAtom, getSaveCalls } = await setupSaveTest("main");
 
     store.set(saveAtom);
     store.set(saveAtom);
     store.set(saveAtom);
 
     await new Promise((r) => setTimeout(r, 600));
-    expect(saveCalls).toBe(1);
+    expect(getSaveCalls()).toBe(1);
+  });
+});
+
+describe("window isolation", () => {
+  test("secondary window loads empty state without calling backend", async () => {
+    loadStateResult = {
+      runspaces: [
+        {
+          id: "rs-1",
+          sort_order: 0,
+          tabs: [
+            { id: "tab-1", cwd: "/home", title: "zsh", sort_order: 0, terminal_session_id: null },
+          ],
+        },
+      ],
+    };
+
+    const store = createStore();
+    store.set(windowLabelAtom, "monica-window-1");
+    await store.set(loadTerminalStateAtom);
+
+    const state = store.get(terminalStateAtom);
+    expect(state).not.toBeNull();
+    expect(state!.runspaces).toHaveLength(1);
+    expect(state!.runspaces[0].taskId).toBeUndefined();
+    expect(state!.runspaces[0].id).not.toBe("rs-1");
+  });
+
+  test("secondary window does not save state", async () => {
+    const { store, saveAtom, getSaveCalls } = await setupSaveTest("monica-window-1");
+
+    store.set(saveAtom);
+
+    await new Promise((r) => setTimeout(r, 600));
+    expect(getSaveCalls()).toBe(0);
+  });
+
+  test("secondary window clears pending workbench hint", async () => {
+    const { pendingWorkbenchHintAtom } = await import("@/stores/ui-state");
+    const store = createStore();
+    store.set(windowLabelAtom, "monica-window-1");
+    store.set(pendingWorkbenchHintAtom, { activeRunspaceId: "rs-1", activeTabId: "tab-1" });
+    await store.set(loadTerminalStateAtom);
+
+    expect(store.get(pendingWorkbenchHintAtom)).toBeNull();
+  });
+
+  test("secondary window refresh skips backend call", async () => {
+    let listCalls = 0;
+    mock.module("@/commands/terminal", () => ({
+      terminalLoadState: () => Promise.resolve(loadStateResult),
+      terminalListSessions: () => {
+        listCalls++;
+        return Promise.resolve([]);
+      },
+      terminalDetach: () => Promise.resolve(),
+      terminalSaveState: () => Promise.resolve(),
+      terminalTerminate: () => Promise.resolve(),
+    }));
+
+    const { createStore: cs } = await import("jotai");
+    const { windowLabelAtom: wlAtom } = await import("@/stores/ui-state");
+    const { refreshSessionsAtom: rAtom } = await import("./store");
+    const store = cs();
+    store.set(wlAtom, "monica-window-1");
+    await store.set(rAtom);
+
+    expect(listCalls).toBe(0);
   });
 });
