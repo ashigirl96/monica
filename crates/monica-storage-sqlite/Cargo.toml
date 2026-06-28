@@ -9,6 +9,6 @@ monica-application = { path = "../monica-application" }
 monica-domain = { path = "../monica-domain" }
 monica-paths = { path = "../monica-paths" }
 anyhow = "1.0.102"
-rusqlite = { version = "0.39", features = ["bundled"] }
-rusqlite_migration = "2.5.0"
+rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite_migration = "2.6.0"
 serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
