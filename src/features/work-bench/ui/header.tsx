@@ -78,11 +78,7 @@ export function WorkBenchHeader() {
           <button
             key={tab.id}
             ref={isActive ? activeTabRef : undefined}
-            {...handlersFor(tab.id)}
-            onPointerDown={(e) => {
-              e.preventDefault();
-              activateTab(tab.id);
-            }}
+            {...handlersFor(tab.id, () => activateTab(tab.id))}
             onContextMenu={(e) => {
               e.preventDefault();
               const rect = e.currentTarget.getBoundingClientRect();
@@ -99,7 +95,7 @@ export function WorkBenchHeader() {
               isActive
                 ? "bg-[var(--content-bg)] text-foreground shadow-sm focus-visible:ring-white/50"
                 : "bg-white/[0.06] text-muted-foreground hover:bg-white/[0.1] hover:text-foreground",
-              dragOverId === tab.id && "ring-1 ring-white/20",
+              dragOverId === tab.id && "ring-1 ring-sky-400/60",
             )}
           >
             {hint && <JumpHint hint={hint} className="mr-1.5" />}
