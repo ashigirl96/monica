@@ -9,6 +9,7 @@ mod bench;
 mod error;
 mod events;
 mod execution_profile;
+pub mod notification;
 pub mod facade;
 mod github;
 mod input;
@@ -31,8 +32,8 @@ pub use facade::{
 
 pub use ports::{
     AgentDecoders, AgentEventDecoder, EventRepository, GitGateway, NotebookGateway,
-    ProjectRepository, PullRequestSyncStore, TaskBoardQuery, TaskRunStore, TaskStore,
-    TaskSummaryFilter, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
+    NotificationOutboxStore, ProjectRepository, PullRequestSyncStore, TaskBoardQuery, TaskRunStore,
+    TaskStore, TaskSummaryFilter, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
     TerminalSessionRepository, UnitOfWork, WorkbenchStore, WorkTransaction, Workspace, WorktreeRef,
 };
 

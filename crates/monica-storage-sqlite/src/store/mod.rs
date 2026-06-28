@@ -1,6 +1,7 @@
 mod bench;
 mod events;
 mod external_refs;
+pub(crate) mod notification_outbox;
 mod projects;
 mod pull_request_sync;
 mod task_runs;
@@ -17,6 +18,9 @@ pub(super) const TASK_RUN_COLUMNS: &str =
 pub(super) const PROJECT_COLUMNS: &str = "id, name, provider, repo, path, default_branch, worktree_root,      setup_timeout_sec, agent_default, agent_permission_mode, hooks_claude,      created_at, updated_at";
 
 pub(super) const EVENT_COLUMNS: &str = "id, task_id, task_run_id, kind, payload_json, created_at";
+
+pub(super) const NOTIFICATION_OUTBOX_COLUMNS: &str =
+    "id, dedupe_key, kind, title, body, task_id, task_run_id, created_at, delivered_at, error, attempts";
 
 pub(super) const SET_NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 

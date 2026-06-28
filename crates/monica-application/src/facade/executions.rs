@@ -1,14 +1,15 @@
 use super::{Backend, Monica};
 use crate::ports::{
-    AgentDecoders, TaskRunStore, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
-    TerminalSessionRepository, WorkbenchStore,
+    AgentDecoders, NotificationOutboxStore, TaskRunStore, TerminalAttachment,
+    TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository, WorkbenchStore,
 };
 use crate::usecases::terminal::{
     reconcile_terminal_sessions, task_run_settlement_for_orphaned_run,
     task_run_settlement_for_terminal_exit, TerminalExitSettlement, TerminalSessionUpdate,
 };
 use crate::prelude::{
-    Agent, NewTerminalSession, TaskRun, TaskRunStatus, TerminalSession, TerminalSessionStatus,
+    Agent, NewNotificationIntent, NewTerminalSession, NotificationKind, TaskRun, TaskRunStatus,
+    TerminalSession, TerminalSessionStatus,
 };
 use crate::{
     ApplicationError, ApplicationEvent, ApplicationResult, EventSink, HookContext, HookReport,
@@ -92,11 +93,28 @@ impl<B: Backend> ExecutionService<'_, B> {
         }
         if report.entered_waiting_for_user {
             events.emit(ApplicationEvent::AwaitingUserInput {
-                task_id: ctx.task_id.map(str::to_string),
-                task_run_id: ctx.task_run_id.map(str::to_string),
+                task_id: report.linked_task_id.clone(),
+                task_run_id: report.linked_task_run_id.clone(),
                 reason: report.task_run_wait_reason,
                 task_title: report.task_title.clone(),
             });
+            if let Some(ref run_id) = report.linked_task_run_id {
+                let body = crate::notification::waiting_notification(
+                    report.task_run_wait_reason,
+                    report.task_title.as_deref(),
+                );
+                let intent = NewNotificationIntent {
+                    dedupe_key: format!("awaiting_user_input:{run_id}"),
+                    kind: NotificationKind::AwaitingUserInput,
+                    title: crate::notification::TITLE.to_string(),
+                    body,
+                    task_id: report.linked_task_id.clone(),
+                    task_run_id: Some(run_id.clone()),
+                };
+                if let Err(e) = repos.enqueue_notification(intent) {
+                    log::warn!(target: "monica_app::notify", "failed to enqueue notification: {e}");
+                }
+            }
         }
         Ok(report)
     }

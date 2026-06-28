@@ -1,8 +1,8 @@
 use anyhow::Result;
 use monica_application::{ExecutionProfile, PermissionMode};
 use monica_domain::{
-    Agent, Event, ExternalReference, Project, Provider, RawJson, RefType, Task, TaskId, TaskKind,
-    TaskRun, TaskRunId, TaskRunStatus, TaskStatus,
+    Agent, Event, ExternalReference, NotificationIntent, NotificationKind, Project, Provider,
+    RawJson, RefType, Task, TaskId, TaskKind, TaskRun, TaskRunId, TaskRunStatus, TaskStatus,
 };
 use rusqlite::Row;
 
@@ -94,6 +94,23 @@ pub(super) fn project_from_row(row: &Row<'_>) -> Result<Project> {
         default_branch: row.get("default_branch")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
+    })
+}
+
+pub(super) fn notification_intent_from_row(row: &Row<'_>) -> Result<NotificationIntent> {
+    let kind: String = row.get("kind")?;
+    Ok(NotificationIntent {
+        id: row.get("id")?,
+        dedupe_key: row.get("dedupe_key")?,
+        kind: kind.parse::<NotificationKind>().map_err(|e| anyhow::anyhow!(e))?,
+        title: row.get("title")?,
+        body: row.get("body")?,
+        task_id: row.get("task_id")?,
+        task_run_id: row.get("task_run_id")?,
+        created_at: row.get("created_at")?,
+        delivered_at: row.get("delivered_at")?,
+        error: row.get("error")?,
+        attempts: row.get("attempts")?,
     })
 }
 
