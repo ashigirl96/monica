@@ -137,8 +137,9 @@ describe("selectWindowUiState", () => {
   });
 
   test("falls back to main for an unknown window", () => {
-    expect(selectWindowUiState(state, "monica-window-9").activeSpace).toBe("library");
-    expect(selectWindowUiState(state, "monica-window-9").sidebarWidth).toBe(200);
+    const fallback = selectWindowUiState(state, "monica-window-9");
+    expect(fallback.activeSpace).toBe("library");
+    expect(fallback.sidebarWidth).toBe(200);
   });
 
   test("falls back to defaults when neither the window nor main exist", () => {
