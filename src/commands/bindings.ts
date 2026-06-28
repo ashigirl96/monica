@@ -53,10 +53,12 @@ export const commands = {
     typedError<TerminalSession[], ApiError>(
       __TAURI_INVOKE("terminal_list_sessions", { runspaceId }),
     ),
-  terminalLoadState: () =>
-    typedError<TerminalStateSnapshot, ApiError>(__TAURI_INVOKE("terminal_load_state")),
-  terminalSaveState: (state: TerminalStateSnapshot) =>
-    typedError<null, ApiError>(__TAURI_INVOKE("terminal_save_state", { state })),
+  terminalLoadState: (windowLabel: string) =>
+    typedError<TerminalStateSnapshot, ApiError>(
+      __TAURI_INVOKE("terminal_load_state", { windowLabel }),
+    ),
+  terminalSaveState: (windowLabel: string, state: TerminalStateSnapshot) =>
+    typedError<null, ApiError>(__TAURI_INVOKE("terminal_save_state", { windowLabel, state })),
   listTaskSummaries: (project: string | null) =>
     typedError<TaskSummaryRow[], ApiError>(__TAURI_INVOKE("list_task_summaries", { project })),
   getBoardColumns: () => __TAURI_INVOKE<BoardColumn[]>("get_board_columns"),
@@ -107,6 +109,8 @@ export const commands = {
     >(__TAURI_INVOKE("read_runspace_plan", { terminalTabId })),
   forceSyncPullRequests: () =>
     typedError<null, ApiError>(__TAURI_INVOKE("force_sync_pull_requests")),
+  openNamedWindow: (label: string) =>
+    typedError<null, ApiError>(__TAURI_INVOKE("open_named_window", { label })),
 };
 
 /** Events */

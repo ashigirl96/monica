@@ -62,14 +62,15 @@ export function terminalListSessions(runspaceId?: string): Promise<TerminalSessi
   return unwrap(commands.terminalListSessions(runspaceId ?? null));
 }
 
-export function terminalLoadState() {
-  return unwrap(commands.terminalLoadState());
+export function terminalLoadState(windowLabel: string) {
+  return unwrap(commands.terminalLoadState(windowLabel));
 }
 
 export function terminalSaveState(
-  state: Parameters<typeof commands.terminalSaveState>[0],
+  windowLabel: string,
+  state: Parameters<typeof commands.terminalSaveState>[1],
 ): Promise<void> {
-  return unwrap(commands.terminalSaveState(state)).then(() => {});
+  return unwrap(commands.terminalSaveState(windowLabel, state)).then(() => {});
 }
 
 export function onTerminalOutput(

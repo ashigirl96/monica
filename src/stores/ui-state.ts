@@ -122,6 +122,43 @@ export async function writePersistedUiState(file: Store, state: PersistedUiState
   await file.save();
 }
 
+async function loadUiState(): Promise<{ file: Store; state: PersistedUiState }> {
+  const file = await load(UI_STATE_FILE);
+  const raw = Object.fromEntries(await file.entries());
+  return { file, state: parsePersistedUiState(raw) };
+}
+
+export async function getSecondaryWindowLabels(): Promise<string[]> {
+  try {
+    const { state } = await loadUiState();
+    return Object.keys(state.windows).filter((label) => label !== MAIN_WINDOW_LABEL);
+  } catch {
+    return [];
+  }
+}
+
+export async function removeWindowEntry(windowLabel: string): Promise<void> {
+  try {
+    const { file, state } = await loadUiState();
+    delete state.windows[windowLabel];
+    await writePersistedUiState(file, state);
+  } catch {
+    // best-effort
+  }
+}
+
+export async function ensureWindowEntry(windowLabel: string): Promise<void> {
+  try {
+    const { file, state } = await loadUiState();
+    if (!state.windows[windowLabel]) {
+      state.windows[windowLabel] = selectWindowUiState(state, windowLabel);
+      await writePersistedUiState(file, state);
+    }
+  } catch {
+    // best-effort
+  }
+}
+
 export function resolveWorkbenchActive(
   runspaces: ReadonlyArray<{ id: string; tabs: ReadonlyArray<{ id: string }> }>,
   hint: WorkbenchHint,

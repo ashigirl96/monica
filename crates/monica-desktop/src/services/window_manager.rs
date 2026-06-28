@@ -20,9 +20,7 @@ fn secondary_window_config(template: &WindowConfig, label: String) -> WindowConf
     }
 }
 
-/// Must be driven from an async task rather than a synchronous menu/event handler to avoid
-/// the documented window-creation deadlock on Windows.
-pub(crate) async fn open_new_window(app: AppHandle) -> Result<String, ApiError> {
+fn build_window(app: &AppHandle, label: String) -> Result<(), ApiError> {
     let template = app
         .config()
         .app
@@ -30,13 +28,30 @@ pub(crate) async fn open_new_window(app: AppHandle) -> Result<String, ApiError> 
         .first()
         .ok_or_else(|| ApiError::external("main window config missing"))?
         .clone();
-    let label = window_label(WINDOW_SEQ.fetch_add(1, Ordering::Relaxed));
-    let config = secondary_window_config(&template, label.clone());
-    WebviewWindowBuilder::from_config(&app, &config)
+    let config = secondary_window_config(&template, label);
+    WebviewWindowBuilder::from_config(app, &config)
         .map_err(|e| ApiError::external(e.to_string()))?
         .build()
         .map_err(|e| ApiError::external(e.to_string()))?;
+    Ok(())
+}
+
+/// Must be driven from an async task rather than a synchronous menu/event handler to avoid
+/// the documented window-creation deadlock on Windows.
+pub(crate) async fn open_new_window(app: AppHandle) -> Result<String, ApiError> {
+    let label = window_label(WINDOW_SEQ.fetch_add(1, Ordering::Relaxed));
+    build_window(&app, label.clone())?;
     Ok(label)
+}
+
+pub(crate) async fn open_named_window(app: AppHandle, label: String) -> Result<(), ApiError> {
+    if let Some(seq) = label
+        .strip_prefix("monica-window-")
+        .and_then(|s| s.parse::<u64>().ok())
+    {
+        WINDOW_SEQ.fetch_max(seq + 1, Ordering::Relaxed);
+    }
+    build_window(&app, label)
 }
 
 #[cfg(test)]

@@ -148,14 +148,26 @@ pub fn terminal_list_sessions(
 
 #[tauri::command]
 #[specta::specta]
-pub fn terminal_load_state(app: AppHandle) -> Result<TerminalStateSnapshot, ApiError> {
+pub fn terminal_load_state(
+    app: AppHandle,
+    window_label: String,
+) -> Result<TerminalStateSnapshot, ApiError> {
     let mut monica = event_sink::open(&app)?;
-    Ok(monica.executions().load_terminal_state()?.into())
+    Ok(monica
+        .executions()
+        .load_terminal_state(&window_label)?
+        .into())
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn terminal_save_state(app: AppHandle, state: TerminalStateSnapshot) -> Result<(), ApiError> {
+pub fn terminal_save_state(
+    app: AppHandle,
+    window_label: String,
+    state: TerminalStateSnapshot,
+) -> Result<(), ApiError> {
     let mut monica = event_sink::open(&app)?;
-    Ok(monica.executions().save_terminal_state(&state.into())?)
+    Ok(monica
+        .executions()
+        .save_terminal_state(&window_label, &state.into())?)
 }

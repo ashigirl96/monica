@@ -1,8 +1,8 @@
 use monica_application::{
     EventRepository, ExecutionProfile, GithubPullRequest, GithubPullRequestStatus,
     ProjectRepository, PullRequestBranchSyncCandidate, TaskBoardQuery, TaskRunObservation,
-    TaskRunStore, TaskStore, TaskSummaryFilter, TaskSummaryRow, TerminalSessionUpdate, UnitOfWork,
-    WorkbenchStore,
+    TaskRunStore, TaskStore, TaskSummaryFilter, TaskSummaryRow, TerminalRunspaceRow,
+    TerminalSessionUpdate, TerminalStateSnapshot, TerminalTabRow, UnitOfWork, WorkbenchStore,
 };
 use monica_domain::{
     Agent, DisplayStatus, ExternalReference, NewTask, NewTaskRun, NewTerminalSession, Project,
@@ -1841,12 +1841,134 @@ fn terminal_state_snapshot_round_trips_session_id() {
             ],
         }],
     };
-    db.save_terminal_state(&snapshot).unwrap();
+    db.save_terminal_state("main", &snapshot).unwrap();
 
-    let loaded = db.load_terminal_state().unwrap();
+    let loaded = db.load_terminal_state("main").unwrap();
     let tabs = &loaded.runspaces[0].tabs;
     assert_eq!(tabs[0].terminal_session_id.as_deref(), Some("ts-1"));
     assert_eq!(tabs[1].terminal_session_id, None);
+}
+
+#[test]
+fn terminal_state_is_scoped_by_window_label() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+
+    let main_snap = TerminalStateSnapshot {
+        runspaces: vec![TerminalRunspaceRow {
+            id: "rs-main".into(),
+            sort_order: 0,
+            tabs: vec![TerminalTabRow {
+                id: "tab-m1".into(),
+                cwd: "/home".into(),
+                title: "main-tab".into(),
+                sort_order: 0,
+                terminal_session_id: None,
+            }],
+        }],
+    };
+    let secondary_snap = TerminalStateSnapshot {
+        runspaces: vec![TerminalRunspaceRow {
+            id: "rs-sec".into(),
+            sort_order: 0,
+            tabs: vec![TerminalTabRow {
+                id: "tab-s1".into(),
+                cwd: "/tmp".into(),
+                title: "sec-tab".into(),
+                sort_order: 0,
+                terminal_session_id: Some("ts-99".into()),
+            }],
+        }],
+    };
+
+    db.save_terminal_state("main", &main_snap).unwrap();
+    db.save_terminal_state("monica-window-1", &secondary_snap)
+        .unwrap();
+
+    let loaded_main = db.load_terminal_state("main").unwrap();
+    assert_eq!(loaded_main.runspaces.len(), 1);
+    assert_eq!(loaded_main.runspaces[0].id, "rs-main");
+
+    let loaded_sec = db.load_terminal_state("monica-window-1").unwrap();
+    assert_eq!(loaded_sec.runspaces.len(), 1);
+    assert_eq!(loaded_sec.runspaces[0].id, "rs-sec");
+    assert_eq!(
+        loaded_sec.runspaces[0].tabs[0].terminal_session_id.as_deref(),
+        Some("ts-99")
+    );
+
+    // Saving main again must not destroy the secondary window's data.
+    let updated_main = TerminalStateSnapshot {
+        runspaces: vec![TerminalRunspaceRow {
+            id: "rs-main-v2".into(),
+            sort_order: 0,
+            tabs: vec![],
+        }],
+    };
+    db.save_terminal_state("main", &updated_main).unwrap();
+
+    let reloaded_sec = db.load_terminal_state("monica-window-1").unwrap();
+    assert_eq!(reloaded_sec.runspaces.len(), 1);
+    assert_eq!(reloaded_sec.runspaces[0].id, "rs-sec");
+
+    let reloaded_main = db.load_terminal_state("main").unwrap();
+    assert_eq!(reloaded_main.runspaces[0].id, "rs-main-v2");
+
+    // Empty window returns no runspaces.
+    let empty = db.load_terminal_state("nonexistent").unwrap();
+    assert!(empty.runspaces.is_empty());
+}
+
+#[test]
+fn same_runspace_id_in_two_windows_does_not_leak_tabs() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+
+    let main_snap = TerminalStateSnapshot {
+        runspaces: vec![TerminalRunspaceRow {
+            id: "bench-task-1".into(),
+            sort_order: 0,
+            tabs: vec![TerminalTabRow {
+                id: "tab-main".into(),
+                cwd: "/main".into(),
+                title: "main".into(),
+                sort_order: 0,
+                terminal_session_id: Some("ts-1".into()),
+            }],
+        }],
+    };
+    let sec_snap = TerminalStateSnapshot {
+        runspaces: vec![TerminalRunspaceRow {
+            id: "bench-task-1".into(),
+            sort_order: 0,
+            tabs: vec![TerminalTabRow {
+                id: "tab-sec".into(),
+                cwd: "/secondary".into(),
+                title: "sec".into(),
+                sort_order: 0,
+                terminal_session_id: Some("ts-2".into()),
+            }],
+        }],
+    };
+
+    db.save_terminal_state("main", &main_snap).unwrap();
+    db.save_terminal_state("monica-window-1", &sec_snap)
+        .unwrap();
+
+    let loaded_main = db.load_terminal_state("main").unwrap();
+    assert_eq!(loaded_main.runspaces.len(), 1);
+    assert_eq!(loaded_main.runspaces[0].tabs.len(), 1);
+    assert_eq!(loaded_main.runspaces[0].tabs[0].id, "tab-main");
+    assert_eq!(loaded_main.runspaces[0].tabs[0].cwd, "/main");
+
+    let loaded_sec = db.load_terminal_state("monica-window-1").unwrap();
+    assert_eq!(loaded_sec.runspaces.len(), 1);
+    assert_eq!(loaded_sec.runspaces[0].tabs.len(), 1);
+    assert_eq!(loaded_sec.runspaces[0].tabs[0].id, "tab-sec");
+    assert_eq!(loaded_sec.runspaces[0].tabs[0].cwd, "/secondary");
+
+    // Saving main must not destroy the secondary's tabs.
+    db.save_terminal_state("main", &main_snap).unwrap();
+    let reloaded_sec = db.load_terminal_state("monica-window-1").unwrap();
+    assert_eq!(reloaded_sec.runspaces[0].tabs[0].id, "tab-sec");
 }
 
 // --- Issue #256: UnitOfWork transaction boundary + prepared-run claim CAS ---

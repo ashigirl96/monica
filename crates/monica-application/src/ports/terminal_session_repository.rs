@@ -32,7 +32,11 @@ pub trait TerminalSessionRepository {
     /// to a live status.
     fn apply_terminal_session_updates(&mut self, updates: &[TerminalSessionUpdate]) -> Result<()>;
 
-    fn load_terminal_state(&self) -> Result<TerminalStateSnapshot>;
+    fn load_terminal_state(&self, window_label: &str) -> Result<TerminalStateSnapshot>;
 
-    fn save_terminal_state(&mut self, snapshot: &TerminalStateSnapshot) -> Result<()>;
+    fn save_terminal_state(
+        &mut self,
+        window_label: &str,
+        snapshot: &TerminalStateSnapshot,
+    ) -> Result<()>;
 }

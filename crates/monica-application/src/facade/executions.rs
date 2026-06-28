@@ -307,12 +307,19 @@ impl<B: Backend> ExecutionService<'_, B> {
         Ok(())
     }
 
-    pub fn load_terminal_state(&self) -> ApplicationResult<TerminalStateSnapshot> {
-        Ok(self.m.repos.load_terminal_state()?)
+    pub fn load_terminal_state(
+        &self,
+        window_label: &str,
+    ) -> ApplicationResult<TerminalStateSnapshot> {
+        Ok(self.m.repos.load_terminal_state(window_label)?)
     }
 
-    pub fn save_terminal_state(&mut self, snapshot: &TerminalStateSnapshot) -> ApplicationResult<()> {
-        Ok(self.m.repos.save_terminal_state(snapshot)?)
+    pub fn save_terminal_state(
+        &mut self,
+        window_label: &str,
+        snapshot: &TerminalStateSnapshot,
+    ) -> ApplicationResult<()> {
+        Ok(self.m.repos.save_terminal_state(window_label, snapshot)?)
     }
 
     /// Settle the runs orphaned by dead terminal sessions. A killed terminal is the only signal

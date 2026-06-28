@@ -280,7 +280,7 @@ describe("saveTerminalStateAtom", () => {
 });
 
 describe("window isolation", () => {
-  test("secondary window loads empty state without calling backend", async () => {
+  test("secondary window loads state from backend", async () => {
     loadStateResult = {
       runspaces: [
         {
@@ -300,20 +300,30 @@ describe("window isolation", () => {
     const state = store.get(terminalStateAtom);
     expect(state).not.toBeNull();
     expect(state!.runspaces).toHaveLength(1);
-    expect(state!.runspaces[0].taskId).toBeUndefined();
-    expect(state!.runspaces[0].id).not.toBe("rs-1");
+    expect(state!.runspaces[0].id).toBe("rs-1");
   });
 
-  test("secondary window does not save state", async () => {
+  test("secondary window saves state", async () => {
     const { store, saveAtom, getSaveCalls } = await setupSaveTest("monica-window-1");
 
     store.set(saveAtom);
 
     await new Promise((r) => setTimeout(r, 600));
-    expect(getSaveCalls()).toBe(0);
+    expect(getSaveCalls()).toBe(1);
   });
 
-  test("secondary window clears pending workbench hint", async () => {
+  test("secondary window applies pending workbench hint", async () => {
+    loadStateResult = {
+      runspaces: [
+        {
+          id: "rs-1",
+          sort_order: 0,
+          tabs: [
+            { id: "tab-1", cwd: "/home", title: "zsh", sort_order: 0, terminal_session_id: null },
+          ],
+        },
+      ],
+    };
     const { pendingWorkbenchHintAtom } = await import("@/stores/ui-state");
     const store = createStore();
     store.set(windowLabelAtom, "monica-window-1");

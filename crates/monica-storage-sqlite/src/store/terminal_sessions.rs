@@ -231,11 +231,15 @@ impl TerminalSessionRepository for SqliteStore {
         SqliteStore::apply_terminal_session_updates(self, updates)
     }
 
-    fn load_terminal_state(&self) -> Result<TerminalStateSnapshot> {
-        SqliteStore::load_terminal_state(self)
+    fn load_terminal_state(&self, window_label: &str) -> Result<TerminalStateSnapshot> {
+        SqliteStore::load_terminal_state(self, window_label)
     }
 
-    fn save_terminal_state(&mut self, snapshot: &TerminalStateSnapshot) -> Result<()> {
-        SqliteStore::save_terminal_state(self, snapshot)
+    fn save_terminal_state(
+        &mut self,
+        window_label: &str,
+        snapshot: &TerminalStateSnapshot,
+    ) -> Result<()> {
+        SqliteStore::save_terminal_state(self, window_label, snapshot)
     }
 }

@@ -9,6 +9,7 @@ function mockActions(): JumpModeActions {
     createTab: mock(),
     jumpToHint: mock(),
     moveActiveTab: mock(),
+    moveActiveRunspace: mock(),
   };
 }
 
@@ -97,29 +98,55 @@ describe("handleJumpMode", () => {
     expect(e.preventDefault).toHaveBeenCalled();
   });
 
-  test("'<' moves active tab left without deactivating", () => {
+  test("'H' moves active tab left without deactivating", () => {
     const actions = mockActions();
-    const e = keyEvent({ key: "<", shiftKey: true });
+    const e = keyEvent({ key: "H", shiftKey: true });
     handleJumpMode(e, true, actions);
     expect(actions.moveActiveTab).toHaveBeenCalledWith("left");
     expect(actions.deactivate).not.toHaveBeenCalled();
     expect(actions.jumpToHint).not.toHaveBeenCalled();
   });
 
-  test("'>' moves active tab right without deactivating", () => {
+  test("'L' moves active tab right without deactivating", () => {
     const actions = mockActions();
-    const e = keyEvent({ key: ">", shiftKey: true });
+    const e = keyEvent({ key: "L", shiftKey: true });
     handleJumpMode(e, true, actions);
     expect(actions.moveActiveTab).toHaveBeenCalledWith("right");
     expect(actions.deactivate).not.toHaveBeenCalled();
     expect(actions.jumpToHint).not.toHaveBeenCalled();
   });
 
-  test("'<' / '>' are ignored outside workBench", () => {
+  test("'H' / 'L' are ignored outside workBench", () => {
     const actions = mockActions();
-    const e = keyEvent({ key: "<", shiftKey: true });
+    const e = keyEvent({ key: "H", shiftKey: true });
     handleJumpMode(e, false, actions);
     expect(actions.moveActiveTab).not.toHaveBeenCalled();
+    expect(actions.deactivate).toHaveBeenCalled();
+  });
+
+  test("'K' moves active runspace up without deactivating", () => {
+    const actions = mockActions();
+    const e = keyEvent({ key: "K", shiftKey: true });
+    handleJumpMode(e, true, actions);
+    expect(actions.moveActiveRunspace).toHaveBeenCalledWith("up");
+    expect(actions.deactivate).not.toHaveBeenCalled();
+    expect(actions.jumpToHint).not.toHaveBeenCalled();
+  });
+
+  test("'J' moves active runspace down without deactivating", () => {
+    const actions = mockActions();
+    const e = keyEvent({ key: "J", shiftKey: true });
+    handleJumpMode(e, true, actions);
+    expect(actions.moveActiveRunspace).toHaveBeenCalledWith("down");
+    expect(actions.deactivate).not.toHaveBeenCalled();
+    expect(actions.jumpToHint).not.toHaveBeenCalled();
+  });
+
+  test("'J' / 'K' are ignored outside workBench", () => {
+    const actions = mockActions();
+    const e = keyEvent({ key: "J", shiftKey: true });
+    handleJumpMode(e, false, actions);
+    expect(actions.moveActiveRunspace).not.toHaveBeenCalled();
     expect(actions.deactivate).toHaveBeenCalled();
   });
 });
