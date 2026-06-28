@@ -91,15 +91,13 @@ function PlanBadge({ pending }: { pending: boolean }) {
 function RunspaceItem({
   ws,
   task,
-  onActivate,
   dragHandlers,
   isDragOver,
   hint,
 }: {
   ws: RunspaceSummary;
   task?: RunspaceTaskSummary;
-  onActivate: () => void;
-  dragHandlers: React.HTMLAttributes<HTMLButtonElement> & { draggable: boolean };
+  dragHandlers: React.HTMLAttributes<HTMLButtonElement>;
   isDragOver: boolean;
   hint?: string;
 }) {
@@ -109,10 +107,6 @@ function RunspaceItem({
   return (
     <button
       {...dragHandlers}
-      onPointerDown={(e) => {
-        e.preventDefault();
-        onActivate();
-      }}
       className={cn(
         "flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left",
         "transition-colors duration-100",
@@ -120,7 +114,7 @@ function RunspaceItem({
         ws.isActive
           ? "bg-white/[0.1] text-foreground focus-visible:ring-white/50"
           : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground",
-        isDragOver && "ring-1 ring-white/20",
+        isDragOver && "ring-1 ring-sky-400/60",
       )}
     >
       <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -219,8 +213,7 @@ export function WorkBenchSidebar() {
                 <RunspaceItem
                   key={ws.id}
                   ws={ws}
-                  onActivate={() => activate(ws.id)}
-                  dragHandlers={handlersFor(ws.id)}
+                  dragHandlers={handlersFor(ws.id, () => activate(ws.id))}
                   isDragOver={dragOverId === ws.id}
                   task={ws.taskId ? taskSummaryById[ws.taskId] : undefined}
                   hint={jumpHints.byRunspaceId[ws.id]}
@@ -236,8 +229,7 @@ export function WorkBenchSidebar() {
             <RunspaceItem
               key={ws.id}
               ws={ws}
-              onActivate={() => activate(ws.id)}
-              dragHandlers={handlersFor(ws.id)}
+              dragHandlers={handlersFor(ws.id, () => activate(ws.id))}
               isDragOver={dragOverId === ws.id}
               hint={jumpHints.byRunspaceId[ws.id]}
             />
