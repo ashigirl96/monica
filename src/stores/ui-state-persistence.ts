@@ -8,6 +8,7 @@ import {
 import { activeSpaceAtom, sidebarOpenAtom, sidebarWidthAtom } from "@/stores/space";
 import { uiZoomAtom } from "@/stores/zoom";
 import {
+  MAIN_WINDOW_LABEL,
   UI_STATE_FILE,
   parsePersistedUiState,
   serializeUiStatePatch,
@@ -33,7 +34,8 @@ export function initUiStatePersistence(options: UiStatePersistenceOptions): void
   const write = async () => {
     file ??= await load(UI_STATE_FILE);
     const current = parsePersistedUiState(Object.fromEntries(await file.entries()));
-    const existingWindow = current.windows[options.windowLabel];
+    const existingWindow =
+      current.windows[options.windowLabel] ?? current.windows[MAIN_WINDOW_LABEL];
     // Keep the previously saved workbench hint until the WorkBench has loaded: terminalStateAtom
     // is null before then, and reading the derived runspace atoms would persist an empty hint.
     const workbench =
