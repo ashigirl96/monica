@@ -59,6 +59,15 @@ impl GithubPullRequestStatus {
             GithubPullRequestStatus::Draft | GithubPullRequestStatus::Open
         )
     }
+
+    /// Priority when one branch carries several PRs: prefer an active PR over a settled one.
+    pub fn branch_rank(self) -> u8 {
+        match self {
+            GithubPullRequestStatus::Draft | GithubPullRequestStatus::Open => 3,
+            GithubPullRequestStatus::Merged => 2,
+            GithubPullRequestStatus::Closed => 1,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +76,17 @@ pub struct GithubPullRequest {
     pub number: i64,
     pub url: String,
     pub status: GithubPullRequestStatus,
+}
+
+/// A pull request as returned by a repo-wide listing, carrying the head branch so the bulk sync can
+/// match it back to a task. `updated_at` breaks ties when one branch has several PRs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoPullRequest {
+    pub number: i64,
+    pub url: String,
+    pub status: GithubPullRequestStatus,
+    pub head_branch: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

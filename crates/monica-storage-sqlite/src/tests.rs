@@ -1409,6 +1409,142 @@ fn force_clear_pr_sync_state_resets_open_pr_states_but_preserves_branch_syncs() 
     );
 }
 
+#[test]
+fn all_branch_sync_candidates_returns_every_eligible_branch_ignoring_retry_backoff() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let (id1, c1) = project_task_with_branch(&mut db, "owner/repo", "main", "feature/a");
+    let (id2, _c2) = project_task_with_branch(&mut db, "owner/repo", "main", "feature/b");
+    // feature/a just synced (merged → +15min retry), so the single-candidate query skips it now.
+    db.record_pull_request_branch_sync_success(
+        &c1,
+        &[GithubPullRequest {
+            repo: "owner/repo".to_string(),
+            number: 5,
+            url: "https://github.com/owner/repo/pull/5".to_string(),
+            status: GithubPullRequestStatus::Merged,
+        }],
+    )
+    .unwrap();
+    // A task on the default branch must be excluded.
+    project_task_with_branch(&mut db, "owner/repo", "main", "main");
+
+    let candidates = db.all_branch_sync_candidates().unwrap();
+    let task_ids: Vec<&str> = candidates.iter().map(|c| c.task_id.as_str()).collect();
+
+    assert_eq!(candidates.len(), 2, "default-branch task is excluded");
+    assert!(
+        task_ids.contains(&id1.as_str()),
+        "a recently-synced branch is still returned (bulk ignores the retry backoff)"
+    );
+    assert!(task_ids.contains(&id2.as_str()));
+    // The single-candidate query, by contrast, skips feature/a and returns only feature/b.
+    let next = db
+        .next_pull_request_branch_sync_candidate()
+        .unwrap()
+        .unwrap();
+    assert_eq!(next.task_id, id2);
+}
+
+#[test]
+fn all_branch_sync_candidates_returns_candidates_across_multiple_repos() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    project_task_with_branch(&mut db, "owner/repoA", "main", "feature/a");
+    project_task_with_branch(&mut db, "owner/repoB", "main", "feature/b");
+
+    let candidates = db.all_branch_sync_candidates().unwrap();
+    let repos: std::collections::HashSet<&str> =
+        candidates.iter().map(|c| c.repo.as_str()).collect();
+
+    assert_eq!(candidates.len(), 2);
+    assert!(repos.contains("owner/repoA"));
+    assert!(repos.contains("owner/repoB"));
+}
+
+#[test]
+fn bulk_record_branch_sync_success_with_empty_slice_is_noop() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    db.bulk_record_branch_sync_success(&[]).unwrap();
+    let rows: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM github_pull_request_branch_syncs",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(rows, 0);
+}
+
+#[test]
+fn bulk_record_branch_sync_success_upserts_refs_states_and_branch_syncs() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let (id1, c1) = project_task_with_branch(&mut db, "owner/repo", "main", "feature/a");
+    let (id2, c2) = project_task_with_branch(&mut db, "owner/repo", "main", "feature/b");
+
+    let status_of = |db: &SqliteStore, task_id: &str| -> String {
+        db.conn()
+            .query_row(
+                "SELECT s.status
+                 FROM github_pull_request_ref_states s
+                 JOIN external_refs e ON e.id = s.external_ref_id
+                 WHERE e.task_id = ?1",
+                params![task_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    };
+    let pr_ref_count = |db: &SqliteStore, task_id: &str| -> usize {
+        db.list_external_refs(task_id)
+            .unwrap()
+            .iter()
+            .filter(|r| r.ref_type == RefType::PullRequest)
+            .count()
+    };
+
+    db.bulk_record_branch_sync_success(&[
+        (
+            c1.clone(),
+            vec![GithubPullRequest {
+                repo: "owner/repo".to_string(),
+                number: 11,
+                url: "https://github.com/owner/repo/pull/11".to_string(),
+                status: GithubPullRequestStatus::Open,
+            }],
+        ),
+        // feature/b matched no PR: branch_syncs is still recorded, but no external ref is created.
+        (c2.clone(), Vec::new()),
+    ])
+    .unwrap();
+
+    assert_eq!(pr_ref_count(&db, &id1), 1);
+    assert_eq!(status_of(&db, &id1), "open");
+    assert_eq!(pr_ref_count(&db, &id2), 0);
+
+    let branch_sync_rows: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM github_pull_request_branch_syncs",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(branch_sync_rows, 2, "both branches recorded in one transaction");
+
+    // Re-running with a newer status upserts the same ref in place — no duplicate row.
+    db.bulk_record_branch_sync_success(&[(
+        c1.clone(),
+        vec![GithubPullRequest {
+            repo: "owner/repo".to_string(),
+            number: 11,
+            url: "https://github.com/owner/repo/pull/11".to_string(),
+            status: GithubPullRequestStatus::Merged,
+        }],
+    )])
+    .unwrap();
+    assert_eq!(pr_ref_count(&db, &id1), 1, "re-sync upserts, no duplicate ref");
+    assert_eq!(status_of(&db, &id1), "merged", "status updated in place");
+}
+
 fn new_shell_session(runspace: Option<&str>, tab: Option<&str>) -> NewTerminalSession {
     NewTerminalSession {
         runspace_id: runspace.map(str::to_string),

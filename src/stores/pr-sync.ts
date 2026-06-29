@@ -2,6 +2,7 @@ import { atom, getDefaultStore } from "jotai";
 import { forceSyncPullRequests, onPrSyncCompleted } from "@/commands/pull_request";
 import { queryClient } from "@/stores/query-client";
 import { refetchTaskSummaries } from "@/stores/query-keys";
+import { activeSpaceAtom } from "@/stores/space";
 import { pushErrorToast, pushInfoToast } from "@/stores/toast";
 
 // The forced sync is debounced while one is genuinely running in the backend; the in-flight
@@ -46,6 +47,12 @@ export const forceSyncPullRequestsAtom = atom(null, async (get, set) => {
 // timestamp the header reads, clears the in-flight flag, and toasts.
 export function initPrSync(): void {
   const store = getDefaultStore();
+  store.sub(activeSpaceAtom, () => {
+    if (store.get(activeSpaceAtom) === "work-board") {
+      void store.set(forceSyncPullRequestsAtom);
+    }
+  });
+
   void onPrSyncCompleted(() => {
     clearInFlightTimer();
     void refetchTaskSummaries(queryClient);

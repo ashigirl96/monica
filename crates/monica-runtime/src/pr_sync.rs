@@ -13,7 +13,6 @@ use crate::MonicaFacade;
 
 const PR_SYNC_INTERVAL: Duration = Duration::from_secs(10);
 const PR_SYNC_BATCH_LIMIT: usize = 3;
-const PR_SYNC_FORCED_BATCH_LIMIT: usize = 20;
 
 /// Handle to nudge the scheduler from a command. A forced sync drains a larger batch and announces
 /// completion.
@@ -55,10 +54,9 @@ where
                     continue;
                 }
                 let _guard = InFlightGuard(Arc::clone(&in_flight));
-                let limit = if forced { PR_SYNC_FORCED_BATCH_LIMIT } else { PR_SYNC_BATCH_LIMIT };
-                // Forced syncs announce completion (so the manual action confirms); the periodic
-                // sweep stays quiet to avoid churning the frontend every interval.
-                rt.block_on(run_batch(&make_facade, limit, forced));
+                // Forced syncs take the bulk path (one request per repo) and announce completion;
+                // the periodic sweep drains a few stale candidates and stays quiet.
+                rt.block_on(run_batch(&make_facade, forced));
             }
         });
     if let Err(e) = spawn_result {
@@ -75,7 +73,7 @@ impl Drop for InFlightGuard {
     }
 }
 
-async fn run_batch<F>(make_facade: &F, limit: usize, announce: bool)
+async fn run_batch<F>(make_facade: &F, forced: bool)
 where
     F: Fn() -> anyhow::Result<MonicaFacade>,
 {
@@ -86,7 +84,15 @@ where
             return;
         }
     };
-    if let Err(e) = monica.synchronization().sync_pull_requests(limit, announce).await {
+    let result = if forced {
+        monica.synchronization().force_sync_pull_requests().await
+    } else {
+        monica
+            .synchronization()
+            .sync_pull_requests(PR_SYNC_BATCH_LIMIT, false)
+            .await
+    };
+    if let Err(e) = result {
         log::error!(target: "monica_runtime::pr_sync", "PR sync batch failed: {e}");
     }
 }

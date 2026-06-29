@@ -215,6 +215,28 @@ async fn facade_sync_pull_requests_stays_silent_without_announce() {
 }
 
 #[tokio::test]
+async fn facade_force_sync_pull_requests_announces_completion() {
+    let repos = FakeRepos::default();
+    repos.set_branch_sync_candidates(vec![PullRequestBranchSyncCandidate {
+        task_id: "MON-1".to_string(),
+        repo: "owner/repo".to_string(),
+        branch: "issue-1".to_string(),
+    }]);
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    // FakeGithub lists no recent PRs, so nothing matches; the forced path still announces (unlike
+    // the periodic sweep, which stays silent).
+    let count = monica.synchronization().force_sync_pull_requests().await.unwrap();
+
+    assert_eq!(count, 0);
+    assert!(sink
+        .events()
+        .iter()
+        .any(|e| matches!(e, ApplicationEvent::PullRequestSyncCompleted { synced_count: 0 })));
+}
+
+#[tokio::test]
 async fn facade_init_project_prefers_git_branch_over_github() {
     let repos = FakeRepos::default();
     let sink = RecordingSink::default();

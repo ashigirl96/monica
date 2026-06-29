@@ -24,7 +24,8 @@ use crate::{
     ApplicationEvent, AuthGateway, Backend, Clock, DaemonSessionView, EventSink, ExecutionProfile,
     GithubAuthStatus, GithubDeviceFlow, GithubGateway, GithubIssue, GithubPullRequest,
     GithubPullRequestRef, GithubPullRequestStatus, HookContext, Monica,
-    PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate, SetupEnv, SetupOutcome,
+    PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate, RepoPullRequest, SetupEnv,
+    SetupOutcome,
     SetupRunner, TaskRunObservation, TaskRunOutputs, TaskSummaryRow, TerminalSessionUpdate,
     TerminalStateSnapshot,
 };
@@ -116,6 +117,8 @@ struct FakeState {
     pr_branch_candidate: Option<PullRequestBranchSyncCandidate>,
     pr_status_candidate: Option<PullRequestStatusSyncCandidate>,
     pr_branch_success_count: usize,
+    branch_sync_candidates: Vec<PullRequestBranchSyncCandidate>,
+    bulk_recorded: Vec<(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)>,
 }
 
 impl FakeRepos {
@@ -124,6 +127,19 @@ impl FakeRepos {
             .borrow_mut()
             .projects
             .insert(project.id.clone(), project);
+    }
+
+    pub(crate) fn set_branch_sync_candidates(
+        &self,
+        candidates: Vec<PullRequestBranchSyncCandidate>,
+    ) {
+        self.state.borrow_mut().branch_sync_candidates = candidates;
+    }
+
+    pub(crate) fn bulk_recorded(
+        &self,
+    ) -> Vec<(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)> {
+        self.state.borrow().bulk_recorded.clone()
     }
 
     pub(crate) fn insert_task_for_run(&mut self, project_id: Option<String>) -> String {
@@ -306,6 +322,10 @@ impl PullRequestSyncStore for FakeRepos {
         Ok(self.state.borrow().pr_status_candidate.clone())
     }
 
+    fn all_branch_sync_candidates(&self) -> Result<Vec<PullRequestBranchSyncCandidate>> {
+        Ok(self.state.borrow().branch_sync_candidates.clone())
+    }
+
     fn record_pull_request_branch_sync_success(
         &mut self,
         _candidate: &PullRequestBranchSyncCandidate,
@@ -314,6 +334,17 @@ impl PullRequestSyncStore for FakeRepos {
         let mut state = self.state.borrow_mut();
         state.pr_branch_success_count = pull_requests.len();
         state.pr_branch_candidate = None;
+        Ok(())
+    }
+
+    fn bulk_record_branch_sync_success(
+        &mut self,
+        entries: &[(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)],
+    ) -> Result<()> {
+        self.state
+            .borrow_mut()
+            .bulk_recorded
+            .extend_from_slice(entries);
         Ok(())
     }
 
@@ -955,6 +986,69 @@ impl GithubGateway for FakeGithub {
                 url: format!("https://github.com/{repo}/pull/{number}"),
                 status: GithubPullRequestStatus::Merged,
             })
+        })
+    }
+
+    fn fetch_recent_pull_requests<'a>(
+        &'a self,
+        _repo: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<RepoPullRequest>>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+}
+
+/// A `GithubGateway` whose repo-wide PR listing is scripted per repo, for the bulk-sync usecase.
+/// `None` for a repo yields an error (to exercise per-repo failure isolation).
+pub(crate) struct RecentPrGithub {
+    by_repo: HashMap<String, Option<Vec<RepoPullRequest>>>,
+}
+
+impl RecentPrGithub {
+    pub(crate) fn new(by_repo: HashMap<String, Option<Vec<RepoPullRequest>>>) -> Self {
+        Self { by_repo }
+    }
+}
+
+impl GithubGateway for RecentPrGithub {
+    fn fetch_issue<'a>(
+        &'a self,
+        _repo: &'a str,
+        _number: i64,
+    ) -> BoxFuture<'a, Result<GithubIssue>> {
+        Box::pin(async { Err(anyhow!("unused")) })
+    }
+
+    fn fetch_default_branch<'a>(&'a self, _repo: &'a str) -> BoxFuture<'a, Result<Option<String>>> {
+        Box::pin(async { Err(anyhow!("unused")) })
+    }
+
+    fn fetch_pull_requests_by_branch<'a>(
+        &'a self,
+        _repo: &'a str,
+        _branch: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<GithubPullRequest>>> {
+        Box::pin(async { Err(anyhow!("unused")) })
+    }
+
+    fn fetch_pull_request<'a>(
+        &'a self,
+        _repo: &'a str,
+        _number: i64,
+    ) -> BoxFuture<'a, Result<GithubPullRequest>> {
+        Box::pin(async { Err(anyhow!("unused")) })
+    }
+
+    fn fetch_recent_pull_requests<'a>(
+        &'a self,
+        repo: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<RepoPullRequest>>> {
+        let outcome = self.by_repo.get(repo).cloned();
+        Box::pin(async move {
+            match outcome {
+                Some(Some(pull_requests)) => Ok(pull_requests),
+                Some(None) => Err(anyhow!("fetch failed for {repo}")),
+                None => Ok(Vec::new()),
+            }
         })
     }
 }
