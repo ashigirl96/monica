@@ -7,15 +7,13 @@ install:
     bun install
 
 dev: dev-cli ptyd-bin
-    MONICA_HOME="$HOME/monica/dev" MONICA_PTYD_PATH="{{justfile_directory()}}/target/debug/monica-ptyd" bun run tauri dev
+    MONICA_HOME="$HOME/monica/dev" MONICA_BIN="{{justfile_directory()}}/monica-dev" MONICA_PTYD_PATH="{{justfile_directory()}}/target/debug/monica-ptyd" bun run tauri dev
 
 dev-cli:
     cargo build -p monica-cli
     cp target/debug/monica ./.monica-bin.tmp
     mv -f ./.monica-bin.tmp ./monica-dev
     [ "$(uname)" = Darwin ] && codesign --force --sign - ./monica-dev || true
-    mkdir -p ~/.zsh/completions
-    ./monica-dev completions zsh > ~/.zsh/completions/_monica
 
 # tauri.conf.json's externalBin makes every monica-desktop compile (dev, clippy, tests)
 # require binaries/monica-ptyd-<host-triple>; this provides it. Release builds overwrite
