@@ -14,8 +14,6 @@ dev-cli:
     cp target/debug/monica ./.monica-bin.tmp
     mv -f ./.monica-bin.tmp ./monica-dev
     [ "$(uname)" = Darwin ] && codesign --force --sign - ./monica-dev || true
-    mkdir -p ~/.zsh/completions
-    ./monica-dev completions zsh > ~/.zsh/completions/_monica
 
 # tauri.conf.json's externalBin makes every monica-desktop compile (dev, clippy, tests)
 # require binaries/monica-ptyd-<host-triple>; this provides it. Release builds overwrite

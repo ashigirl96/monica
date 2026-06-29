@@ -143,10 +143,19 @@ fn resolve_hook_command(agent: Agent) -> Result<String> {
 fn which_monica() -> Option<String> {
     let bin = std::env::var("MONICA_BIN").unwrap_or_else(|_| "monica".to_string());
     let path = std::env::var("PATH").ok()?;
-    for dir in path.split(':') {
-        let candidate = Path::new(dir).join(&bin);
+    find_monica_in(&bin, &path)
+}
+
+fn find_monica_in(bin: &str, path_var: &str) -> Option<String> {
+    use std::os::unix::fs::PermissionsExt;
+    for dir in path_var.split(':') {
+        let candidate = Path::new(dir).join(bin);
         if candidate.is_file() {
-            return Some(candidate.to_string_lossy().into_owned());
+            if let Ok(meta) = candidate.metadata() {
+                if meta.permissions().mode() & 0o111 != 0 {
+                    return Some(candidate.to_string_lossy().into_owned());
+                }
+            }
         }
     }
     None
@@ -538,6 +547,53 @@ mod tests {
 
         let after = fs::read_to_string(&global).ok();
         assert_eq!(before, after, "must not create or modify the global settings.local.json");
+    }
+
+    #[test]
+    fn find_monica_in_returns_first_match() {
+        let dir = unique_temp_dir("find-monica");
+        let dummy = dir.join("monica");
+        fs::write(&dummy, "").unwrap();
+        #[cfg(unix)]
+        fs::set_permissions(&dummy, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let result = find_monica_in("monica", &dir.to_string_lossy());
+        assert_eq!(result, Some(dummy.to_string_lossy().into_owned()));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn find_monica_in_returns_none_when_not_found() {
+        assert_eq!(find_monica_in("monica", "/nonexistent/path"), None);
+    }
+
+    #[test]
+    fn find_monica_in_skips_non_executable_file() {
+        let dir = unique_temp_dir("find-noexec");
+        let dummy = dir.join("monica");
+        fs::write(&dummy, "").unwrap();
+        fs::set_permissions(&dummy, fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert_eq!(find_monica_in("monica", &dir.to_string_lossy()), None);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn find_monica_in_picks_first_dir_in_path() {
+        let dir1 = unique_temp_dir("find-first");
+        let dir2 = unique_temp_dir("find-second");
+        let dummy1 = dir1.join("monica");
+        let dummy2 = dir2.join("monica");
+        fs::write(&dummy1, "").unwrap();
+        fs::write(&dummy2, "").unwrap();
+        fs::set_permissions(&dummy1, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&dummy2, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let path_var = format!("{}:{}", dir1.display(), dir2.display());
+        let result = find_monica_in("monica", &path_var);
+        assert_eq!(result, Some(dummy1.to_string_lossy().into_owned()));
+        fs::remove_dir_all(&dir1).ok();
+        fs::remove_dir_all(&dir2).ok();
     }
 
     #[test]
