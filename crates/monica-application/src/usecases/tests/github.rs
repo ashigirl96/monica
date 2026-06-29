@@ -124,7 +124,7 @@ async fn bulk_sync_matches_recent_prs_to_branch_candidates() {
     assert_eq!(synced, 2, "only MON-1 and MON-2 matched a PR");
 
     let recorded = repos.bulk_recorded();
-    assert_eq!(recorded.len(), 4, "every candidate is recorded, matched or empty");
+    assert_eq!(recorded.len(), 3, "failed repo candidates are excluded from the record");
     let by_task: HashMap<String, Vec<GithubPullRequest>> = recorded
         .iter()
         .map(|(c, prs)| (c.task_id.clone(), prs.clone()))
@@ -142,7 +142,7 @@ async fn bulk_sync_matches_recent_prs_to_branch_candidates() {
     assert_eq!(m2[0].status, GithubPullRequestStatus::Open);
 
     assert!(by_task["MON-3"].is_empty(), "no matching branch -> empty");
-    assert!(by_task["MON-4"].is_empty(), "failed repo fetch is isolated -> empty");
+    assert!(!by_task.contains_key("MON-4"), "failed repo candidates are not recorded at all");
 }
 
 #[tokio::test]

@@ -450,8 +450,10 @@ mod tests {
 
     use super::{
         branch_pull_requests_from_response, issue_from_response, pull_request_from_response,
-        recent_pull_requests_from_response, BranchPullRequestResponse, IssueResponse,
-        PullRequestResponse, RecentPullRequestsResponse,
+        recent_pull_requests_from_response,
+    };
+    use super::{
+        BranchPullRequestResponse, IssueResponse, PullRequestResponse, RecentPullRequestsResponse,
     };
 
     fn issue_response(value: serde_json::Value) -> IssueResponse {

@@ -47,13 +47,13 @@ export const forceSyncPullRequestsAtom = atom(null, async (get, set) => {
 // timestamp the header reads, clears the in-flight flag, and toasts.
 export function initPrSync(): void {
   const store = getDefaultStore();
-  let lastSpace: string | null = null;
   store.sub(activeSpaceAtom, () => {
-    const space = store.get(activeSpaceAtom);
-    if (space === "work-board" && lastSpace !== "work-board") {
-      void store.set(forceSyncPullRequestsAtom);
-    }
-    lastSpace = space;
+    if (store.get(activeSpaceAtom) !== "work-board") return;
+    if (store.get(prSyncInFlightAtom)) return;
+    // Call the backend directly instead of going through the atom — the atom's catch path
+    // shows an error toast, which is appropriate for manual cmd+r but not for an automatic
+    // navigation trigger (an unauthenticated install would toast on every board visit).
+    forceSyncPullRequests().catch(() => {});
   });
 
   void onPrSyncCompleted(() => {

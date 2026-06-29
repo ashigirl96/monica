@@ -42,6 +42,7 @@ where
     let fetch_ms = fetch_started.elapsed().as_millis();
 
     let mut by_repo: HashMap<String, HashMap<String, RepoPullRequest>> = HashMap::new();
+    let mut failed_repos: HashSet<String> = HashSet::new();
     for (repo, (elapsed, result)) in distinct_repos.iter().zip(results) {
         let pull_requests = match result {
             Ok(pull_requests) => pull_requests,
@@ -51,6 +52,7 @@ where
                     "bulk PR fetch failed repo={repo} after {}ms error={e:#}",
                     elapsed.as_millis()
                 );
+                failed_repos.insert(repo.to_ascii_lowercase());
                 continue;
             }
         };
@@ -61,15 +63,12 @@ where
             if branch_key.is_empty() {
                 continue;
             }
-            match branch_map.entry(branch_key) {
-                std::collections::hash_map::Entry::Vacant(e) => {
-                    e.insert(pr);
-                }
-                std::collections::hash_map::Entry::Occupied(mut e) => {
-                    if is_better_branch_pr(&pr, e.get()) {
-                        *e.get_mut() = pr;
-                    }
-                }
+            let replace = match branch_map.get(&branch_key) {
+                Some(existing) => is_better_branch_pr(&pr, existing),
+                None => true,
+            };
+            if replace {
+                branch_map.insert(branch_key, pr);
             }
         }
         log::info!(
@@ -84,9 +83,12 @@ where
     let mut entries: Vec<(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)> =
         Vec::with_capacity(candidates.len());
     for candidate in candidates {
-        // external_refs stores repo lowercased (the per-branch path lowercases too), so match and
-        // persist on the lowercased repo to avoid creating a duplicate ref for the same PR.
         let repo_key = candidate.repo.to_ascii_lowercase();
+        // Skip candidates whose repo fetch failed — recording them as empty successful syncs
+        // would hide a transient error and clear any previously-known PR state.
+        if failed_repos.contains(&repo_key) {
+            continue;
+        }
         let branch_key = candidate.branch.trim().to_ascii_lowercase();
         let matched = by_repo
             .get(&repo_key)
