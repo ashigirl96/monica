@@ -2841,6 +2841,7 @@ name = "monica-application"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "futures-util",
  "log",
  "monica-domain",
  "serde",

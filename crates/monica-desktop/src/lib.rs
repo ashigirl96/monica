@@ -99,6 +99,8 @@ pub fn run() {
         });
     #[cfg(debug_assertions)]
     let builder = builder.plugin(tauri_plugin_mcp_bridge::init());
+    #[cfg(debug_assertions)]
+    let builder = builder.plugin(debug_log_plugin());
     #[cfg(not(debug_assertions))]
     let builder = builder.plugin(release_log_plugin());
 
@@ -136,6 +138,21 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(debug_assertions)]
+fn debug_log_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    use tauri_plugin_log::{Target, TargetKind};
+
+    // Dev builds otherwise initialize no logger, so backend `log::*` output is silently dropped.
+    // Route it to stdout (the `just dev` console) and the webview console for parity with the
+    // release Folder target.
+    tauri_plugin_log::Builder::new()
+        .clear_targets()
+        .target(Target::new(TargetKind::Stdout))
+        .target(Target::new(TargetKind::Webview))
+        .level(log::LevelFilter::Info)
+        .build()
 }
 
 #[cfg(not(debug_assertions))]

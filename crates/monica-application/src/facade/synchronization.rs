@@ -98,4 +98,21 @@ impl<B: Backend> SynchronizationService<'_, B> {
         }
         Ok(synced_count)
     }
+
+    /// User-forced refresh (cmd+r). Fetches each tracked repo's PRs once and matches them to
+    /// branches in bulk — far fewer requests than draining the per-branch candidate queue — then
+    /// announces completion. A no-op when GitHub isn't authenticated.
+    pub async fn force_sync_pull_requests(&mut self) -> ApplicationResult<u32> {
+        if !self.auth_status().authenticated {
+            return Ok(0);
+        }
+        let synced_count = {
+            let Monica { repos, github, .. } = &mut *self.m;
+            crate::usecases::github::bulk_sync_pull_requests(repos, github).await?
+        };
+        self.m
+            .events
+            .emit(ApplicationEvent::PullRequestSyncCompleted { synced_count });
+        Ok(synced_count)
+    }
 }

@@ -17,12 +17,9 @@ const PR_BRANCH_OPEN_REFRESH_DELAY: &str = "+60 seconds";
 const PR_BRANCH_TERMINAL_REFRESH_DELAY: &str = "+15 minutes";
 const PR_BRANCH_FAILURE_RETRY_DELAY: &str = "+5 minutes";
 
-impl SqliteStore {
-    pub fn next_pull_request_branch_sync_candidate(
-        &self,
-    ) -> Result<Option<PullRequestBranchSyncCandidate>> {
-        let mut stmt = self.conn().prepare(&format!(
-            "SELECT
+// The latest run's branch per development task, joined to its project repo. Shared by the periodic
+// single-candidate query and the forced bulk query so branch eligibility lives in one place.
+const BRANCH_CANDIDATE_FROM: &str = "SELECT
                t.id AS task_id,
                project.repo AS repo,
                latest_run.branch AS branch
@@ -43,18 +40,27 @@ impl SqliteStore {
                            END DESC,
                            r.id DESC
                   LIMIT 1
-               )
-             LEFT JOIN github_pull_request_branch_syncs sync
-               ON sync.task_id = t.id
-              AND sync.repo = project.repo
-              AND sync.branch = latest_run.branch
-             WHERE t.kind = 'development'
+               )";
+
+const BRANCH_CANDIDATE_WHERE: &str = "t.kind = 'development'
                AND project.repo IS NOT NULL
                AND trim(project.repo) != ''
                AND latest_run.branch IS NOT NULL
                AND trim(latest_run.branch) != ''
                AND lower(trim(latest_run.branch)) NOT IN ('main', 'master')
-               AND lower(trim(latest_run.branch)) != lower(trim(project.default_branch))
+               AND lower(trim(latest_run.branch)) != lower(trim(project.default_branch))";
+
+impl SqliteStore {
+    pub fn next_pull_request_branch_sync_candidate(
+        &self,
+    ) -> Result<Option<PullRequestBranchSyncCandidate>> {
+        let mut stmt = self.conn().prepare(&format!(
+            "{BRANCH_CANDIDATE_FROM}
+             LEFT JOIN github_pull_request_branch_syncs sync
+               ON sync.task_id = t.id
+              AND sync.repo = project.repo
+              AND sync.branch = latest_run.branch
+             WHERE {BRANCH_CANDIDATE_WHERE}
                AND (
                  sync.task_id IS NULL
                  OR sync.next_retry_at IS NULL
@@ -116,73 +122,43 @@ impl SqliteStore {
         }
     }
 
+    pub fn all_branch_sync_candidates(&self) -> Result<Vec<PullRequestBranchSyncCandidate>> {
+        let mut stmt = self.conn().prepare(&format!(
+            "{BRANCH_CANDIDATE_FROM}
+             WHERE {BRANCH_CANDIDATE_WHERE}
+             ORDER BY latest_run.created_at, t.id",
+        ))?;
+        let candidates = stmt
+            .query_map([], |row| {
+                Ok(PullRequestBranchSyncCandidate {
+                    task_id: row.get("task_id")?,
+                    repo: row.get("repo")?,
+                    branch: row.get("branch")?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(candidates)
+    }
+
     pub fn record_pull_request_branch_sync_success(
         &mut self,
         candidate: &PullRequestBranchSyncCandidate,
         pull_requests: &[GithubPullRequest],
     ) -> Result<()> {
-        let retry_delay = branch_success_retry_delay(pull_requests);
         let tx = self.conn_mut().transaction()?;
-        for pr in pull_requests {
-            let existing = tx
-                .query_row(
-                    "SELECT id
-                     FROM external_refs
-                     WHERE task_id = ?1
-                       AND ref_type = ?2
-                       AND repo = ?3
-                       AND number = ?4
-                     LIMIT 1",
-                    params![
-                        &candidate.task_id,
-                        RefType::PullRequest.as_str(),
-                        &pr.repo,
-                        pr.number
-                    ],
-                    |row| row.get::<_, i64>(0),
-                )
-                .optional()?;
-            let ref_id = if let Some(id) = existing {
-                tx.execute(
-                    "UPDATE external_refs
-                        SET url = ?1
-                      WHERE id = ?2",
-                    params![&pr.url, id],
-                )?;
-                id
-            } else {
-                tx.execute(
-                    "INSERT INTO external_refs (task_id, provider, ref_type, repo, number, url)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![
-                        &candidate.task_id,
-                        Provider::Github.as_str(),
-                        RefType::PullRequest.as_str(),
-                        &pr.repo,
-                        pr.number,
-                        &pr.url
-                    ],
-                )?;
-                tx.last_insert_rowid()
-            };
-            upsert_pr_ref_state_success(&tx, ref_id, pr.status.as_str())?;
+        write_branch_sync_success(&tx, candidate, pull_requests)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn bulk_record_branch_sync_success(
+        &mut self,
+        entries: &[(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)],
+    ) -> Result<()> {
+        let tx = self.conn_mut().transaction()?;
+        for (candidate, pull_requests) in entries {
+            write_branch_sync_success(&tx, candidate, pull_requests)?;
         }
-        tx.execute(
-            &format!(
-                "INSERT INTO github_pull_request_branch_syncs
-                   (task_id, repo, branch, last_synced_at, last_error, next_retry_at, updated_at)
-                 VALUES (
-                   ?1, ?2, ?3, {SET_NOW}, NULL,
-                   strftime('%Y-%m-%dT%H:%M:%fZ','now','{retry_delay}'), {SET_NOW}
-                 )
-                 ON CONFLICT(task_id, repo, branch) DO UPDATE SET
-                   last_synced_at = {SET_NOW},
-                   last_error = NULL,
-                   next_retry_at = excluded.next_retry_at,
-                   updated_at = {SET_NOW}"
-            ),
-            params![&candidate.task_id, &candidate.repo, &candidate.branch],
-        )?;
         tx.commit()?;
         Ok(())
     }
@@ -288,12 +264,23 @@ impl PullRequestSyncStore for SqliteStore {
         SqliteStore::next_pull_request_status_sync_candidate(self)
     }
 
+    fn all_branch_sync_candidates(&self) -> Result<Vec<PullRequestBranchSyncCandidate>> {
+        SqliteStore::all_branch_sync_candidates(self)
+    }
+
     fn record_pull_request_branch_sync_success(
         &mut self,
         candidate: &PullRequestBranchSyncCandidate,
         pull_requests: &[GithubPullRequest],
     ) -> Result<()> {
         SqliteStore::record_pull_request_branch_sync_success(self, candidate, pull_requests)
+    }
+
+    fn bulk_record_branch_sync_success(
+        &mut self,
+        entries: &[(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)],
+    ) -> Result<()> {
+        SqliteStore::bulk_record_branch_sync_success(self, entries)
     }
 
     fn record_pull_request_branch_sync_failure(
@@ -323,6 +310,75 @@ impl PullRequestSyncStore for SqliteStore {
     fn force_clear_pr_sync_state(&mut self) -> Result<()> {
         SqliteStore::force_clear_pr_sync_state(self)
     }
+}
+
+fn write_branch_sync_success(
+    tx: &rusqlite::Transaction,
+    candidate: &PullRequestBranchSyncCandidate,
+    pull_requests: &[GithubPullRequest],
+) -> Result<()> {
+    let retry_delay = branch_success_retry_delay(pull_requests);
+    for pr in pull_requests {
+        let existing = tx
+            .query_row(
+                "SELECT id
+                 FROM external_refs
+                 WHERE task_id = ?1
+                   AND ref_type = ?2
+                   AND repo = ?3
+                   AND number = ?4
+                 LIMIT 1",
+                params![
+                    &candidate.task_id,
+                    RefType::PullRequest.as_str(),
+                    &pr.repo,
+                    pr.number
+                ],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?;
+        let ref_id = if let Some(id) = existing {
+            tx.execute(
+                "UPDATE external_refs
+                    SET url = ?1
+                  WHERE id = ?2",
+                params![&pr.url, id],
+            )?;
+            id
+        } else {
+            tx.execute(
+                "INSERT INTO external_refs (task_id, provider, ref_type, repo, number, url)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    &candidate.task_id,
+                    Provider::Github.as_str(),
+                    RefType::PullRequest.as_str(),
+                    &pr.repo,
+                    pr.number,
+                    &pr.url
+                ],
+            )?;
+            tx.last_insert_rowid()
+        };
+        upsert_pr_ref_state_success(tx, ref_id, pr.status.as_str())?;
+    }
+    tx.execute(
+        &format!(
+            "INSERT INTO github_pull_request_branch_syncs
+               (task_id, repo, branch, last_synced_at, last_error, next_retry_at, updated_at)
+             VALUES (
+               ?1, ?2, ?3, {SET_NOW}, NULL,
+               strftime('%Y-%m-%dT%H:%M:%fZ','now','{retry_delay}'), {SET_NOW}
+             )
+             ON CONFLICT(task_id, repo, branch) DO UPDATE SET
+               last_synced_at = {SET_NOW},
+               last_error = NULL,
+               next_retry_at = excluded.next_retry_at,
+               updated_at = {SET_NOW}"
+        ),
+        params![&candidate.task_id, &candidate.repo, &candidate.branch],
+    )?;
+    Ok(())
 }
 
 fn upsert_pr_ref_state_success(

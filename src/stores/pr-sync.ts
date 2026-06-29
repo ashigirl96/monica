@@ -2,6 +2,7 @@ import { atom, getDefaultStore } from "jotai";
 import { forceSyncPullRequests, onPrSyncCompleted } from "@/commands/pull_request";
 import { queryClient } from "@/stores/query-client";
 import { refetchTaskSummaries } from "@/stores/query-keys";
+import { activeSpaceAtom } from "@/stores/space";
 import { pushErrorToast, pushInfoToast } from "@/stores/toast";
 
 // The forced sync is debounced while one is genuinely running in the backend; the in-flight
@@ -46,6 +47,15 @@ export const forceSyncPullRequestsAtom = atom(null, async (get, set) => {
 // timestamp the header reads, clears the in-flight flag, and toasts.
 export function initPrSync(): void {
   const store = getDefaultStore();
+  store.sub(activeSpaceAtom, () => {
+    if (store.get(activeSpaceAtom) !== "work-board") return;
+    if (store.get(prSyncInFlightAtom)) return;
+    // Call the backend directly instead of going through the atom — the atom's catch path
+    // shows an error toast, which is appropriate for manual cmd+r but not for an automatic
+    // navigation trigger (an unauthenticated install would toast on every board visit).
+    forceSyncPullRequests().catch(() => {});
+  });
+
   void onPrSyncCompleted(() => {
     clearInFlightTimer();
     void refetchTaskSummaries(queryClient);
