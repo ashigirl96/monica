@@ -61,12 +61,15 @@ where
             if branch_key.is_empty() {
                 continue;
             }
-            let replace = match branch_map.get(&branch_key) {
-                Some(existing) => is_better_branch_pr(&pr, existing),
-                None => true,
-            };
-            if replace {
-                branch_map.insert(branch_key, pr);
+            match branch_map.entry(branch_key) {
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    e.insert(pr);
+                }
+                std::collections::hash_map::Entry::Occupied(mut e) => {
+                    if is_better_branch_pr(&pr, e.get()) {
+                        *e.get_mut() = pr;
+                    }
+                }
             }
         }
         log::info!(

@@ -47,10 +47,13 @@ export const forceSyncPullRequestsAtom = atom(null, async (get, set) => {
 // timestamp the header reads, clears the in-flight flag, and toasts.
 export function initPrSync(): void {
   const store = getDefaultStore();
+  let lastSpace: string | null = null;
   store.sub(activeSpaceAtom, () => {
-    if (store.get(activeSpaceAtom) === "work-board") {
+    const space = store.get(activeSpaceAtom);
+    if (space === "work-board" && lastSpace !== "work-board") {
       void store.set(forceSyncPullRequestsAtom);
     }
+    lastSpace = space;
   });
 
   void onPrSyncCompleted(() => {
