@@ -7,7 +7,7 @@ install:
     bun install
 
 dev: dev-cli ptyd-bin
-    MONICA_HOME="$HOME/monica/dev" MONICA_PTYD_PATH="{{justfile_directory()}}/target/debug/monica-ptyd" bun run tauri dev
+    MONICA_HOME="$HOME/monica/dev" MONICA_BIN="{{justfile_directory()}}/monica-dev" MONICA_PTYD_PATH="{{justfile_directory()}}/target/debug/monica-ptyd" bun run tauri dev
 
 dev-cli:
     cargo build -p monica-cli

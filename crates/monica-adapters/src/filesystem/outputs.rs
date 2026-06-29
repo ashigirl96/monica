@@ -142,20 +142,23 @@ fn resolve_hook_command(agent: Agent) -> Result<String> {
 
 fn which_monica() -> Option<String> {
     let bin = std::env::var("MONICA_BIN").unwrap_or_else(|_| "monica".to_string());
+    if Path::new(&bin).is_absolute() {
+        return is_executable_file(Path::new(&bin)).then_some(bin);
+    }
     let path = std::env::var("PATH").ok()?;
     find_monica_in(&bin, &path)
 }
 
-fn find_monica_in(bin: &str, path_var: &str) -> Option<String> {
+fn is_executable_file(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
+    path.is_file() && path.metadata().is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
+}
+
+fn find_monica_in(bin: &str, path_var: &str) -> Option<String> {
     for dir in path_var.split(':') {
         let candidate = Path::new(dir).join(bin);
-        if candidate.is_file() {
-            if let Ok(meta) = candidate.metadata() {
-                if meta.permissions().mode() & 0o111 != 0 {
-                    return Some(candidate.to_string_lossy().into_owned());
-                }
-            }
+        if is_executable_file(&candidate) {
+            return Some(candidate.to_string_lossy().into_owned());
         }
     }
     None
