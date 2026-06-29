@@ -5,6 +5,7 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 
 /** Commands */
 export const commands = {
+  /**  Deliberately sync: NSPasteboard requires the main thread. Do NOT wrap in `off_main`. */
   clipboardWriteImage: (path: string) =>
     typedError<null, ApiError>(__TAURI_INVOKE("clipboard_write_image", { path })),
   /**
@@ -14,7 +15,9 @@ export const commands = {
    *  dropped, so the frontend only ever highlights real files.
    */
   resolveEditorPaths: (cwd: string, candidates: string[]) =>
-    __TAURI_INVOKE<(string | null)[]>("resolve_editor_paths", { cwd, candidates }),
+    typedError<(string | null)[], ApiError>(
+      __TAURI_INVOKE("resolve_editor_paths", { cwd, candidates }),
+    ),
   openInEditor: (path: string) =>
     typedError<null, ApiError>(__TAURI_INVOKE("open_in_editor", { path })),
   worktreeInfo: (cwd: string) =>

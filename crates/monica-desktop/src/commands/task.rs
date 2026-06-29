@@ -19,17 +19,20 @@ pub struct TaskRunStatusChanged {
 
 #[tauri::command]
 #[specta::specta]
-pub fn list_task_summaries(
+pub async fn list_task_summaries(
     app: AppHandle,
     project: Option<String>,
 ) -> Result<Vec<TaskSummaryRow>, ApiError> {
-    let mut monica = event_sink::open(&app)?;
-    Ok(monica
-        .tasks()
-        .list_all_task_summaries(project.as_deref())?
-        .into_iter()
-        .map(TaskSummaryRow::from)
-        .collect())
+    event_sink::off_main(move || {
+        let mut monica = event_sink::open(&app)?;
+        Ok(monica
+            .tasks()
+            .list_all_task_summaries(project.as_deref())?
+            .into_iter()
+            .map(TaskSummaryRow::from)
+            .collect())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -56,68 +59,91 @@ pub async fn track_github_issue(app: AppHandle, input: String) -> Result<TaskCre
 
 #[tauri::command]
 #[specta::specta]
-pub fn list_projects(app: AppHandle) -> Result<Vec<ProjectOption>, ApiError> {
-    let mut monica = event_sink::open(&app)?;
-    Ok(monica
-        .projects()
-        .list_projects()?
-        .into_iter()
-        .map(|p| ProjectOption { id: p.id })
-        .collect())
+pub async fn list_projects(app: AppHandle) -> Result<Vec<ProjectOption>, ApiError> {
+    event_sink::off_main(move || {
+        let mut monica = event_sink::open(&app)?;
+        Ok(monica
+            .projects()
+            .list_projects()?
+            .into_iter()
+            .map(|p| ProjectOption { id: p.id })
+            .collect())
+    })
+    .await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn create_raw_task(
+pub async fn create_raw_task(
     app: AppHandle,
     title: String,
     project_id: String,
 ) -> Result<TaskCreated, ApiError> {
-    let mut monica = event_sink::open(&app)?;
-    let task = monica.tasks().create_raw_task(&title, &project_id)?;
-    Ok(TaskCreated {
-        task_id: task.id.into(),
-        title: task.title,
-    })
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn list_bench_runspace_map(app: AppHandle) -> Result<Vec<(String, String)>, ApiError> {
-    let mut monica = event_sink::open(&app)?;
-    Ok(monica.executions().list_bench_runspace_map()?)
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn task_shell_env(app: AppHandle, task_id: String) -> Result<Vec<(String, String)>, ApiError> {
-    let mut monica = event_sink::open(&app)?;
-    Ok(monica.executions().task_shell_env(&task_id)?)
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn open_bench(app: AppHandle, task_id: String) -> Result<TaskBench, ApiError> {
-    let mut monica = event_sink::open(&app)?;
-    Ok(TaskBench::from(monica.executions().open_bench(&task_id)?))
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn prepare_task(app: AppHandle, task_id: String) -> Result<PrepareTaskResult, ApiError> {
-    let result = {
+    event_sink::off_main(move || {
         let mut monica = event_sink::open(&app)?;
-        monica.executions().prepare_task(&task_id)?
-    };
+        let task = monica.tasks().create_raw_task(&title, &project_id)?;
+        Ok(TaskCreated {
+            task_id: task.id.into(),
+            title: task.title,
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_bench_runspace_map(
+    app: AppHandle,
+) -> Result<Vec<(String, String)>, ApiError> {
+    event_sink::off_main(move || {
+        let mut monica = event_sink::open(&app)?;
+        Ok(monica.executions().list_bench_runspace_map()?)
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn task_shell_env(
+    app: AppHandle,
+    task_id: String,
+) -> Result<Vec<(String, String)>, ApiError> {
+    event_sink::off_main(move || {
+        let mut monica = event_sink::open(&app)?;
+        Ok(monica.executions().task_shell_env(&task_id)?)
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn open_bench(app: AppHandle, task_id: String) -> Result<TaskBench, ApiError> {
+    event_sink::off_main(move || {
+        let mut monica = event_sink::open(&app)?;
+        Ok(TaskBench::from(monica.executions().open_bench(&task_id)?))
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn prepare_task(app: AppHandle, task_id: String) -> Result<PrepareTaskResult, ApiError> {
+    let app_spawn = app.clone();
+    let result: PrepareTaskResult = event_sink::off_main(move || {
+        let mut monica = event_sink::open(&app)?;
+        let result = monica.executions().prepare_task(&task_id)?;
+        Ok(result.into())
+    })
+    .await?;
 
     crate::services::task_runner::spawn_execute_run(
-        app,
+        app_spawn,
         result.task_id.clone(),
         result.task_run_id.clone(),
     )
     .map_err(ApiError::external)?;
 
-    Ok(result.into())
+    Ok(result)
 }
 
 /// Promote the run living in the given Workbench tab to its task's Main Run. Returns whether the
@@ -125,43 +151,50 @@ pub fn prepare_task(app: AppHandle, task_id: String) -> Result<PrepareTaskResult
 /// mid-prepare" so the shortcut can stay a silent no-op.
 #[tauri::command]
 #[specta::specta]
-pub fn make_main_task_run(app: AppHandle, tab_id: String) -> Result<bool, ApiError> {
-    let mut monica = event_sink::open(&app)?;
-    // The service emits `TaskRunStatusChanged` on a real change; the command only reports whether
-    // the primary moved so the shortcut stays a silent no-op otherwise.
-    Ok(monica.tasks().make_main_by_terminal_tab(&tab_id)?)
+pub async fn make_main_task_run(app: AppHandle, tab_id: String) -> Result<bool, ApiError> {
+    event_sink::off_main(move || {
+        let mut monica = event_sink::open(&app)?;
+        Ok(monica.tasks().make_main_by_terminal_tab(&tab_id)?)
+    })
+    .await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn primary_tab_id(app: AppHandle, task_id: String) -> Result<Option<String>, ApiError> {
-    let mut monica = event_sink::open(&app)?;
-    Ok(monica.tasks().primary_terminal_tab(&task_id)?)
+pub async fn primary_tab_id(
+    app: AppHandle,
+    task_id: String,
+) -> Result<Option<String>, ApiError> {
+    event_sink::off_main(move || {
+        let mut monica = event_sink::open(&app)?;
+        Ok(monica.tasks().primary_terminal_tab(&task_id)?)
+    })
+    .await
 }
 
-// Worktree removal and branch deletion shell out to git and can take seconds;
-// spawn_blocking keeps that sync work off the async runtime's workers.
 #[tauri::command]
 #[specta::specta]
 pub async fn close_task(app: AppHandle, task_id: String) -> Result<(), ApiError> {
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), ApiError> {
+    event_sink::off_main(move || {
         let mut monica = event_sink::open(&app)?;
         monica.tasks().close_issue(&task_id).map(|_| ()).map_err(ApiError::from)
     })
     .await
-    .map_err(|e| ApiError::external(e.to_string()))?
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn run_task(
+pub async fn run_task(
     app: AppHandle,
     task_id: String,
     agent: Option<Agent>,
 ) -> Result<RunTaskResult, ApiError> {
-    let mut monica = event_sink::open(&app)?;
-    let result = monica
-        .executions()
-        .prepare_claude_for_run(&task_id, agent.map(monica_domain::Agent::from))?;
-    Ok(RunTaskResult::from(result))
+    event_sink::off_main(move || {
+        let mut monica = event_sink::open(&app)?;
+        let result = monica
+            .executions()
+            .prepare_claude_for_run(&task_id, agent.map(monica_domain::Agent::from))?;
+        Ok(RunTaskResult::from(result))
+    })
+    .await
 }

@@ -1,3 +1,4 @@
+/// Deliberately sync: NSPasteboard requires the main thread. Do NOT wrap in `off_main`.
 #[cfg(target_os = "macos")]
 #[tauri::command]
 #[specta::specta]

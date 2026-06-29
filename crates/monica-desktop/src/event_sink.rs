@@ -16,6 +16,19 @@ pub fn open(app: &AppHandle) -> Result<AppMonica, ApiError> {
         .map_err(|e| ApiError::storage(format!("{e:#}")))
 }
 
+/// Run a blocking closure off the main thread. Every `#[tauri::command]` that does I/O
+/// (SQLite, daemon IPC, filesystem) should use this to avoid the WKWebView deadlock where
+/// a URL-scheme handler blocks the main RunLoop while WebKit needs it for `didReceiveData`.
+pub async fn off_main<F, T>(f: F) -> Result<T, ApiError>
+where
+    F: FnOnce() -> Result<T, ApiError> + Send + 'static,
+    T: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| ApiError::external(e.to_string()))?
+}
+
 /// Bridges [`ApplicationEvent`]s to the webview as tauri-specta events. Raw PTY byte/exit streams
 /// are not application events — they stay in `ptyd`.
 pub struct TauriEventSink {

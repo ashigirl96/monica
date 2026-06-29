@@ -2,40 +2,51 @@ use std::path::{Path, PathBuf};
 
 use monica_api::ApiError;
 
+use crate::event_sink;
+
 /// Resolve each candidate against `cwd` (expanding a leading `~`) and return the
 /// canonical absolute path when it exists, or `null` otherwise. `canonicalize`
 /// doubles as the existence check: a path that cannot be resolved on disk is
 /// dropped, so the frontend only ever highlights real files.
 #[tauri::command]
 #[specta::specta]
-pub fn resolve_editor_paths(cwd: String, candidates: Vec<String>) -> Vec<Option<String>> {
-    candidates
-        .iter()
-        .map(|raw| resolve_one(&cwd, raw))
-        .collect()
+pub async fn resolve_editor_paths(
+    cwd: String,
+    candidates: Vec<String>,
+) -> Result<Vec<Option<String>>, ApiError> {
+    event_sink::off_main(move || {
+        Ok(candidates
+            .iter()
+            .map(|raw| resolve_one(&cwd, raw))
+            .collect())
+    })
+    .await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn open_in_editor(path: String) -> Result<(), ApiError> {
-    #[cfg(target_os = "macos")]
-    {
-        let status = std::process::Command::new("/usr/bin/open")
-            .args(["-a", "Zed", &path])
-            .status()
-            .map_err(|e| ApiError::external(format!("failed to launch Zed: {e}")))?;
-        if !status.success() {
-            return Err(ApiError::external(format!(
-                "`open -a Zed {path}` exited with {status}"
-            )));
+pub async fn open_in_editor(path: String) -> Result<(), ApiError> {
+    event_sink::off_main(move || {
+        #[cfg(target_os = "macos")]
+        {
+            let status = std::process::Command::new("/usr/bin/open")
+                .args(["-a", "Zed", &path])
+                .status()
+                .map_err(|e| ApiError::external(format!("failed to launch Zed: {e}")))?;
+            if !status.success() {
+                return Err(ApiError::external(format!(
+                    "`open -a Zed {path}` exited with {status}"
+                )));
+            }
+            Ok(())
         }
-        Ok(())
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = path;
-        Err(ApiError::external("open_in_editor is only supported on macOS"))
-    }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = path;
+            Err(ApiError::external("open_in_editor is only supported on macOS"))
+        }
+    })
+    .await
 }
 
 fn resolve_one(cwd: &str, raw: &str) -> Option<String> {

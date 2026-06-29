@@ -38,36 +38,42 @@ impl From<NotebookPageView> for NotebookPageRow {
 
 #[tauri::command]
 #[specta::specta]
-pub fn list_notebooks(app: AppHandle) -> Result<Vec<NotebookSummary>, ApiError> {
-    let mut monica = event_sink::open(&app)?;
-    Ok(monica
-        .notebooks()
-        .list_notebooks()?
-        .into_iter()
-        .map(|(slug, count)| {
-            let title = deslugify(&slug);
-            NotebookSummary {
-                id: slug,
-                title,
-                page_count: u32::try_from(count).unwrap_or(u32::MAX),
-            }
-        })
-        .collect())
+pub async fn list_notebooks(app: AppHandle) -> Result<Vec<NotebookSummary>, ApiError> {
+    event_sink::off_main(move || {
+        let mut monica = event_sink::open(&app)?;
+        Ok(monica
+            .notebooks()
+            .list_notebooks()?
+            .into_iter()
+            .map(|(slug, count)| {
+                let title = deslugify(&slug);
+                NotebookSummary {
+                    id: slug,
+                    title,
+                    page_count: u32::try_from(count).unwrap_or(u32::MAX),
+                }
+            })
+            .collect())
+    })
+    .await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn get_notebook_pages(
+pub async fn get_notebook_pages(
     app: AppHandle,
     notebook_id: String,
 ) -> Result<Vec<NotebookPageRow>, ApiError> {
-    let mut monica = event_sink::open(&app)?;
-    Ok(monica
-        .notebooks()
-        .page_outline(&notebook_id)?
-        .into_iter()
-        .map(NotebookPageRow::from)
-        .collect())
+    event_sink::off_main(move || {
+        let mut monica = event_sink::open(&app)?;
+        Ok(monica
+            .notebooks()
+            .page_outline(&notebook_id)?
+            .into_iter()
+            .map(NotebookPageRow::from)
+            .collect())
+    })
+    .await
 }
 
 /// Presentation-only display title from a slug: `rust-async` -> `Rust Async`.
