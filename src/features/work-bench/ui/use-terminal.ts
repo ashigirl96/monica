@@ -1,13 +1,13 @@
 import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { WebglAddon } from "@xterm/addon-webgl";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import "@xterm/xterm/css/xterm.css";
 import { EventCleanupManager } from "@/lib/event-cleanup";
 import { toBase64, fromBase64, encoder } from "@/lib/base64";
 import { attachTapSelection } from "@/features/work-bench/ui/tap-selection";
 import { attachTerminalLinks } from "@/features/work-bench/ui/terminal-links";
+import { attachWebglRenderer } from "@/features/work-bench/ui/webgl-renderer";
 import {
   TERMINAL_THEME,
   registerParsers,
@@ -319,13 +319,6 @@ export function useTerminal(
 
     if (!openedRef.current) {
       term.open(container);
-
-      try {
-        term.loadAddon(new WebglAddon());
-      } catch {
-        // canvas renderer fallback
-      }
-
       openedRef.current = true;
     }
 
@@ -364,6 +357,17 @@ export function useTerminal(
     options.cwd,
     containerRef,
   ]);
+
+  // Only the active pane may hold a WebGL context: WKWebView caps them per page and
+  // LRU-evicts the excess, which is what used to blank long-untouched panes. Deps
+  // deliberately exclude session/cwd so those changes don't churn the addon. The open
+  // effect above runs first in the same commit, so the terminal is always opened here.
+  useEffect(() => {
+    if (!options.active) return;
+    const term = termRef.current;
+    if (!term || !openedRef.current) return;
+    return attachWebglRenderer(term);
+  }, [options.active, options.tabId, containerRef]);
 
   useEffect(() => {
     if (!options.active) return;
