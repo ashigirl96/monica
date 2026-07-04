@@ -7,7 +7,7 @@ import { EventCleanupManager } from "@/lib/event-cleanup";
 import { toBase64, fromBase64, encoder } from "@/lib/base64";
 import { attachTapSelection } from "@/features/work-bench/ui/tap-selection";
 import { attachTerminalLinks } from "@/features/work-bench/ui/terminal-links";
-import { attachWebglRenderer } from "@/features/work-bench/ui/webgl-renderer";
+import { webglRendererPool } from "@/features/work-bench/ui/webgl-renderer";
 import {
   TERMINAL_THEME,
   registerParsers,
@@ -304,6 +304,7 @@ export function useTerminal(
       const conn = getTabConnection(options.tabId);
       if (conn) conn.replaying = false;
       cleanup.disposeAll();
+      webglRendererPool.release(term);
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
@@ -358,15 +359,16 @@ export function useTerminal(
     containerRef,
   ]);
 
-  // Only the active pane may hold a WebGL context: WKWebView caps them per page and
-  // LRU-evicts the excess, which is what used to blank long-untouched panes. Deps
-  // deliberately exclude session/cwd so those changes don't churn the addon. The open
-  // effect above runs first in the same commit, so the terminal is always opened here.
+  // Activation only acquires; the pane keeps its WebGL renderer after deactivation
+  // until the pool LRU-evicts it, so hopping between recent tabs skips the expensive
+  // renderer swap. Deps deliberately exclude session/cwd so those changes don't churn
+  // the addon. The open effect above runs first in the same commit, so the terminal is
+  // always opened here.
   useEffect(() => {
     if (!options.active) return;
     const term = termRef.current;
     if (!term || !openedRef.current) return;
-    return attachWebglRenderer(term);
+    webglRendererPool.acquire(term);
   }, [options.active, options.tabId, containerRef]);
 
   useEffect(() => {

@@ -1,7 +1,7 @@
 /// <reference types="bun" />
 import { describe, expect, spyOn, test } from "bun:test";
 import type { WebglAddon } from "@xterm/addon-webgl";
-import { attachWebglRenderer } from "./webgl-renderer";
+import { attachWebglRenderer, createWebglRendererPool } from "./webgl-renderer";
 
 type FakeAddon = {
   disposeCalls: number;
@@ -42,6 +42,7 @@ function makeHarness(opts: { createThrows?: boolean; throwOnDispose?: boolean } 
       refreshes.push([start, end]);
     },
     rows: 24,
+    element: undefined,
   };
   const detach = attachWebglRenderer(
     term,
@@ -128,5 +129,79 @@ describe("attachWebglRenderer", () => {
     h.runScheduled();
     expect(h.addons.length).toBe(1);
     expect(h.loaded.length).toBe(1);
+  });
+});
+
+type FakeTerm = Parameters<typeof attachWebglRenderer>[0];
+
+function makePoolHarness(limit: number) {
+  const attached: FakeTerm[] = [];
+  const detachedTerms: FakeTerm[] = [];
+  const pool = createWebglRendererPool(limit, (term) => {
+    attached.push(term);
+    return () => detachedTerms.push(term);
+  });
+  const makeTerm = (): FakeTerm => ({
+    loadAddon: () => {},
+    refresh: () => {},
+    rows: 24,
+    element: undefined,
+  });
+  return { pool, attached, detachedTerms, makeTerm };
+}
+
+describe("createWebglRendererPool", () => {
+  test("acquire attaches once per terminal", () => {
+    const h = makePoolHarness(2);
+    const term = h.makeTerm();
+    h.pool.acquire(term);
+    h.pool.acquire(term);
+    expect(h.attached).toEqual([term]);
+    expect(h.detachedTerms).toEqual([]);
+  });
+
+  test("evicts the least recently acquired terminal past the limit", () => {
+    const h = makePoolHarness(2);
+    const [a, b, c] = [h.makeTerm(), h.makeTerm(), h.makeTerm()];
+    h.pool.acquire(a);
+    h.pool.acquire(b);
+    h.pool.acquire(c);
+    expect(h.detachedTerms).toEqual([a]);
+  });
+
+  test("re-acquiring refreshes recency", () => {
+    const h = makePoolHarness(2);
+    const [a, b, c] = [h.makeTerm(), h.makeTerm(), h.makeTerm()];
+    h.pool.acquire(a);
+    h.pool.acquire(b);
+    h.pool.acquire(a);
+    h.pool.acquire(c);
+    expect(h.detachedTerms).toEqual([b]);
+  });
+
+  test("release detaches and allows a later re-attach", () => {
+    const h = makePoolHarness(2);
+    const term = h.makeTerm();
+    h.pool.acquire(term);
+    h.pool.release(term);
+    expect(h.detachedTerms).toEqual([term]);
+
+    h.pool.release(term);
+    expect(h.detachedTerms).toEqual([term]);
+
+    h.pool.acquire(term);
+    expect(h.attached).toEqual([term, term]);
+  });
+
+  test("an evicted terminal re-attaches on the next acquire", () => {
+    const h = makePoolHarness(1);
+    const [a, b] = [h.makeTerm(), h.makeTerm()];
+    h.pool.acquire(a);
+    h.pool.acquire(b);
+    expect(h.detachedTerms).toEqual([a]);
+
+    h.pool.acquire(a);
+    expect(h.attached).toEqual([a, b, a]);
+    expect(h.detachedTerms).toEqual([a, b]);
   });
 });
