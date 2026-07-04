@@ -74,7 +74,7 @@ function makeHarness(
     rows: 24,
     element: opts.element,
   };
-  const detach = attachWebglRenderer(
+  const handle = attachWebglRenderer(
     term,
     () => {
       if (opts.createThrows) throw new Error("no webgl");
@@ -90,7 +90,16 @@ function makeHarness(
   const runScheduled = () => {
     for (const cb of scheduled.splice(0)) cb();
   };
-  return { addons, loaded, refreshes, scheduled, cancelled, detach, runScheduled };
+  return {
+    addons,
+    loaded,
+    refreshes,
+    scheduled,
+    cancelled,
+    detach: handle.detach,
+    isAttached: handle.isAttached,
+    runScheduled,
+  };
 }
 
 describe("attachWebglRenderer", () => {
@@ -99,6 +108,7 @@ describe("attachWebglRenderer", () => {
     expect(h.addons.length).toBe(1);
     expect(h.loaded).toEqual([h.addons[0]]);
     expect(h.refreshes).toEqual([[0, 23]]);
+    expect(h.isAttached()).toBe(true);
   });
 
   test("falls back to the DOM renderer when the addon cannot be created", () => {
@@ -107,6 +117,7 @@ describe("attachWebglRenderer", () => {
       const h = makeHarness({ createThrows: true });
       expect(h.loaded.length).toBe(0);
       expect(h.refreshes.length).toBe(0);
+      expect(h.isAttached()).toBe(false);
       expect(() => h.detach()).not.toThrow();
     } finally {
       warn.mockRestore();
@@ -119,6 +130,7 @@ describe("attachWebglRenderer", () => {
     expect(h.addons[0].disposeCalls).toBe(1);
     expect(h.loaded.length).toBe(1);
     expect(h.scheduled.length).toBe(1);
+    expect(h.isAttached()).toBe(true);
 
     h.runScheduled();
     expect(h.addons.length).toBe(2);
@@ -170,20 +182,26 @@ describe("attachWebglRenderer", () => {
     expect(fake.loseCalls.length).toBe(1);
   });
 
-  test("context loss on a hidden pane defers the reload until it is shown", () => {
+  test("context loss on a hidden pane stays detached instead of reloading", () => {
     const fake = makeFakeElement();
     const h = makeHarness({ element: fake.element });
     fake.setVisible(false);
     h.addons[0].fireLoss();
 
-    h.runScheduled();
-    expect(h.addons.length).toBe(1);
+    expect(h.scheduled.length).toBe(0);
+    expect(h.isAttached()).toBe(false);
+  });
+
+  test("a reload scheduled while visible is skipped if the pane hides before it runs", () => {
+    const fake = makeFakeElement();
+    const h = makeHarness({ element: fake.element });
+    h.addons[0].fireLoss();
     expect(h.scheduled.length).toBe(1);
 
-    fake.setVisible(true);
+    fake.setVisible(false);
     h.runScheduled();
-    expect(h.addons.length).toBe(2);
-    expect(h.loaded[1]).toBe(h.addons[1]);
+    expect(h.addons.length).toBe(1);
+    expect(h.isAttached()).toBe(false);
   });
 });
 
@@ -192,9 +210,17 @@ type FakeTerm = Parameters<typeof attachWebglRenderer>[0];
 function makePoolHarness(limit: number) {
   const attached: FakeTerm[] = [];
   const detachedTerms: FakeTerm[] = [];
+  const alive = new Map<FakeTerm, boolean>();
   const pool = createWebglRendererPool(limit, (term) => {
     attached.push(term);
-    return () => detachedTerms.push(term);
+    alive.set(term, true);
+    return {
+      detach: () => {
+        alive.set(term, false);
+        detachedTerms.push(term);
+      },
+      isAttached: () => alive.get(term) === true,
+    };
   });
   const makeTerm = (): FakeTerm => ({
     loadAddon: () => {},
@@ -202,7 +228,7 @@ function makePoolHarness(limit: number) {
     rows: 24,
     element: undefined,
   });
-  return { pool, attached, detachedTerms, makeTerm };
+  return { pool, attached, detachedTerms, alive, makeTerm };
 }
 
 describe("createWebglRendererPool", () => {
@@ -258,5 +284,16 @@ describe("createWebglRendererPool", () => {
     h.pool.acquire(a);
     expect(h.attached).toEqual([a, b, a]);
     expect(h.detachedTerms).toEqual([a, b]);
+  });
+
+  test("acquiring a dead entry retries the attach", () => {
+    const h = makePoolHarness(2);
+    const term = h.makeTerm();
+    h.pool.acquire(term);
+    h.alive.set(term, false);
+
+    h.pool.acquire(term);
+    expect(h.attached).toEqual([term, term]);
+    expect(h.detachedTerms).toEqual([term]);
   });
 });

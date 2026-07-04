@@ -53,10 +53,14 @@ function fitAndResize(
   term: Terminal,
   sessionIdRef: { current: string | null },
 ): void {
+  // A display:none pane has no box to measure — fitting it could clamp the grid to
+  // FitAddon's 2x1 minimum and shrink the PTY under a running TUI. It refits on
+  // activation instead.
+  if (term.element && term.element.getClientRects().length === 0) return;
   const { rows, cols } = term;
   fit.fit();
-  // fit() no-ops for display:none panes (and for size changes too small to move the
-  // grid); the PTY already has these dimensions, so skip the resize round-trip.
+  // fit() also no-ops for size changes too small to move the grid; the PTY already
+  // has these dimensions, so skip the resize round-trip.
   if (sessionIdRef.current && (term.rows !== rows || term.cols !== cols)) {
     terminalResize(sessionIdRef.current, term.rows, term.cols);
   }

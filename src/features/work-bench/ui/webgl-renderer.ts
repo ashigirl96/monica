@@ -3,6 +3,13 @@ import type { Terminal } from "@xterm/xterm";
 
 type WebglHost = Pick<Terminal, "loadAddon" | "refresh" | "rows" | "element">;
 
+export type WebglRendererHandle = {
+  detach: () => void;
+  /// False once the addon is gone with no reload pending (attach failed, or the
+  /// context was lost while the pane was hidden); the pool re-attaches on acquire.
+  isAttached: () => boolean;
+};
+
 // The addon's render layers tag their canvases with `xterm-*-layer`; the WebGL canvas
 // itself is the only unclassed one. WebglAddon never exposes its GL context, and this
 // is the least fragile way to reach it for an explicit release on dispose.
@@ -15,8 +22,8 @@ function findWebglCanvas(root: HTMLElement | undefined): HTMLCanvasElement | nul
   return null;
 }
 
-/// Attach a WebGL renderer to an opened terminal and return its cleanup; on dispose
-/// xterm falls back to the DOM renderer. Disposal also loses the GL context explicitly —
+/// Attach a WebGL renderer to an opened terminal; on detach (and on failure) xterm
+/// falls back to the DOM renderer. Disposal also loses the GL context explicitly —
 /// WebglAddon only drops its references, which would leave the context counting against
 /// WKWebView's per-page cap (~16, LRU-evicted) until GC.
 export function attachWebglRenderer(
@@ -24,7 +31,7 @@ export function attachWebglRenderer(
   createAddon: () => WebglAddon = () => new WebglAddon(),
   schedule: (cb: () => void) => number = (cb) => requestAnimationFrame(cb),
   cancel: (id: number) => void = (id) => cancelAnimationFrame(id),
-): () => void {
+): WebglRendererHandle {
   let addon: WebglAddon | null = null;
   let glCanvas: HTMLCanvasElement | null = null;
   let reloadId: number | null = null;
@@ -58,21 +65,16 @@ export function attachWebglRenderer(
       next.onContextLoss(() => {
         disposeAddon();
         if (detached) return;
-        // rAF defers the reload until the window is drawable again (rAF halts while
-        // occluded), and a repeated loss re-fires this handler, so no retry cap is
-        // needed. A pooled-but-hidden pane keeps deferring: recreating a context the
-        // browser just reclaimed would thrash against the per-page cap for a pane
-        // nobody can see. The loop resumes and reloads when the pane is shown again.
-        const reload = () => {
+        // Recreating a context the browser just reclaimed for a pane nobody can see
+        // would thrash against the per-page cap, so a hidden pane stays detached and
+        // the pool re-attaches it on activation. A visible pane reloads via rAF, which
+        // also defers until the window is drawable again (rAF halts while occluded);
+        // a repeated loss re-fires this handler, so no retry cap is needed.
+        if (!paneVisible()) return;
+        reloadId = schedule(() => {
           reloadId = null;
-          if (detached) return;
-          if (!paneVisible()) {
-            reloadId = schedule(reload);
-            return;
-          }
-          load();
-        };
-        reloadId = schedule(reload);
+          if (!detached && paneVisible()) load();
+        });
       });
       term.loadAddon(next);
     } catch (e) {
@@ -94,14 +96,17 @@ export function attachWebglRenderer(
 
   load();
 
-  return () => {
-    if (detached) return;
-    detached = true;
-    if (reloadId !== null) {
-      cancel(reloadId);
-      reloadId = null;
-    }
-    disposeAddon();
+  return {
+    detach: () => {
+      if (detached) return;
+      detached = true;
+      if (reloadId !== null) {
+        cancel(reloadId);
+        reloadId = null;
+      }
+      disposeAddon();
+    },
+    isAttached: () => addon !== null || reloadId !== null,
   };
 }
 
@@ -116,29 +121,34 @@ const POOL_LIMIT = 8;
 /// the page clear of the context-cap eviction that used to blank long-hidden panes.
 export function createWebglRendererPool(
   limit: number = POOL_LIMIT,
-  attach: (term: WebglHost) => () => void = attachWebglRenderer,
+  attach: (term: WebglHost) => WebglRendererHandle = attachWebglRenderer,
 ) {
-  const pool = new Map<WebglHost, () => void>();
+  const pool = new Map<WebglHost, WebglRendererHandle>();
   return {
     acquire(term: WebglHost): void {
       const existing = pool.get(term);
-      if (existing) {
+      if (existing?.isAttached()) {
         pool.delete(term);
         pool.set(term, existing);
         return;
       }
+      // A dead entry (failed attach, or context lost while hidden) gets a fresh try.
+      if (existing) {
+        pool.delete(term);
+        existing.detach();
+      }
       pool.set(term, attach(term));
-      for (const [oldest, detach] of pool) {
+      for (const [oldest, handle] of pool) {
         if (pool.size <= limit) break;
         pool.delete(oldest);
-        detach();
+        handle.detach();
       }
     },
     release(term: WebglHost): void {
-      const detach = pool.get(term);
-      if (!detach) return;
+      const handle = pool.get(term);
+      if (!handle) return;
       pool.delete(term);
-      detach();
+      handle.detach();
     },
   };
 }
