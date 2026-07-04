@@ -10,7 +10,7 @@ function findWebglCanvas(root: HTMLElement | undefined): HTMLCanvasElement | nul
   const screen = root?.querySelector(".xterm-screen");
   if (!screen) return null;
   for (const canvas of screen.querySelectorAll("canvas")) {
-    if (canvas instanceof HTMLCanvasElement && canvas.className === "") return canvas;
+    if (canvas.className === "") return canvas;
   }
   return null;
 }
@@ -29,6 +29,13 @@ export function attachWebglRenderer(
   let glCanvas: HTMLCanvasElement | null = null;
   let reloadId: number | null = null;
   let detached = false;
+
+  // getClientRects is empty inside a display:none subtree; no element means a test
+  // harness, which we treat as visible.
+  const paneVisible = () => {
+    const el = term.element;
+    return !el || el.getClientRects().length > 0;
+  };
 
   const disposeAddon = () => {
     const current = addon;
@@ -52,11 +59,20 @@ export function attachWebglRenderer(
         disposeAddon();
         if (detached) return;
         // rAF defers the reload until the window is drawable again (rAF halts while
-        // occluded), and a repeated loss re-fires this handler, so no retry cap is needed.
-        reloadId = schedule(() => {
+        // occluded), and a repeated loss re-fires this handler, so no retry cap is
+        // needed. A pooled-but-hidden pane keeps deferring: recreating a context the
+        // browser just reclaimed would thrash against the per-page cap for a pane
+        // nobody can see. The loop resumes and reloads when the pane is shown again.
+        const reload = () => {
           reloadId = null;
-          if (!detached) load();
-        });
+          if (detached) return;
+          if (!paneVisible()) {
+            reloadId = schedule(reload);
+            return;
+          }
+          load();
+        };
+        reloadId = schedule(reload);
       });
       term.loadAddon(next);
     } catch (e) {
@@ -70,6 +86,9 @@ export function attachWebglRenderer(
     }
     addon = next;
     glCanvas = findWebglCanvas(term.element);
+    if (!glCanvas && term.element) {
+      console.warn("WebGL canvas not found; its context will only be released by GC");
+    }
     term.refresh(0, term.rows - 1);
   };
 
@@ -109,11 +128,10 @@ export function createWebglRendererPool(
         return;
       }
       pool.set(term, attach(term));
-      while (pool.size > limit) {
-        const oldest = pool.entries().next().value;
-        if (!oldest) break;
-        pool.delete(oldest[0]);
-        oldest[1]();
+      for (const [oldest, detach] of pool) {
+        if (pool.size <= limit) break;
+        pool.delete(oldest);
+        detach();
       }
     },
     release(term: WebglHost): void {

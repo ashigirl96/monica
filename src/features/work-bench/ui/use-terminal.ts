@@ -53,8 +53,11 @@ function fitAndResize(
   term: Terminal,
   sessionIdRef: { current: string | null },
 ): void {
+  const { rows, cols } = term;
   fit.fit();
-  if (sessionIdRef.current) {
+  // fit() no-ops for display:none panes (and for size changes too small to move the
+  // grid); the PTY already has these dimensions, so skip the resize round-trip.
+  if (sessionIdRef.current && (term.rows !== rows || term.cols !== cols)) {
     terminalResize(sessionIdRef.current, term.rows, term.cols);
   }
 }
@@ -303,8 +306,10 @@ export function useTerminal(
       // unstick the mute or the remounted terminal would silently drop all input.
       const conn = getTabConnection(options.tabId);
       if (conn) conn.replaying = false;
-      cleanup.disposeAll();
+      // Release before disposeAll: the pool must not keep a GL context alive because
+      // an unrelated listener cleanup threw.
       webglRendererPool.release(term);
+      cleanup.disposeAll();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;

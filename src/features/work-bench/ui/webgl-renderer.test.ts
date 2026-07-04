@@ -28,7 +28,37 @@ function makeFakeAddon(throwOnDispose: boolean): FakeAddon {
   };
 }
 
-function makeHarness(opts: { createThrows?: boolean; throwOnDispose?: boolean } = {}) {
+// Mimics the xterm DOM: the WebGL canvas is the only unclassed canvas in .xterm-screen,
+// and it hands back the same webgl2 context it was created with.
+function makeFakeElement() {
+  const loseCalls: number[] = [];
+  let visible = true;
+  const glContext = {
+    getExtension: (name: string) =>
+      name === "WEBGL_lose_context" ? { loseContext: () => loseCalls.push(1) } : null,
+  };
+  const glCanvas = {
+    className: "",
+    getContext: (type: string) => (type === "webgl2" ? glContext : null),
+  };
+  const linkCanvas = { className: "xterm-link-layer", getContext: () => null };
+  const screen = { querySelectorAll: () => [linkCanvas, glCanvas] };
+  const element = {
+    querySelector: (selector: string) => (selector === ".xterm-screen" ? screen : null),
+    getClientRects: () => ({ length: visible ? 1 : 0 }),
+  } as unknown as HTMLElement;
+  return {
+    element,
+    loseCalls,
+    setVisible: (v: boolean) => {
+      visible = v;
+    },
+  };
+}
+
+function makeHarness(
+  opts: { createThrows?: boolean; throwOnDispose?: boolean; element?: HTMLElement } = {},
+) {
   const addons: FakeAddon[] = [];
   const loaded: unknown[] = [];
   const refreshes: [number, number][] = [];
@@ -42,7 +72,7 @@ function makeHarness(opts: { createThrows?: boolean; throwOnDispose?: boolean } 
       refreshes.push([start, end]);
     },
     rows: 24,
-    element: undefined,
+    element: opts.element,
   };
   const detach = attachWebglRenderer(
     term,
@@ -129,6 +159,31 @@ describe("attachWebglRenderer", () => {
     h.runScheduled();
     expect(h.addons.length).toBe(1);
     expect(h.loaded.length).toBe(1);
+  });
+
+  test("detach explicitly loses the GL context of the unclassed canvas", () => {
+    const fake = makeFakeElement();
+    const h = makeHarness({ element: fake.element });
+    expect(fake.loseCalls.length).toBe(0);
+
+    h.detach();
+    expect(fake.loseCalls.length).toBe(1);
+  });
+
+  test("context loss on a hidden pane defers the reload until it is shown", () => {
+    const fake = makeFakeElement();
+    const h = makeHarness({ element: fake.element });
+    fake.setVisible(false);
+    h.addons[0].fireLoss();
+
+    h.runScheduled();
+    expect(h.addons.length).toBe(1);
+    expect(h.scheduled.length).toBe(1);
+
+    fake.setVisible(true);
+    h.runScheduled();
+    expect(h.addons.length).toBe(2);
+    expect(h.loaded[1]).toBe(h.addons[1]);
   });
 });
 
