@@ -176,8 +176,10 @@ function TerminalPane({
       className="absolute inset-0"
       style={{
         background: "#1d1f21",
-        visibility: active ? "visible" : "hidden",
-        pointerEvents: active ? "auto" : "none",
+        // display (not visibility): a hidden box still "intersects", so xterm's
+        // IntersectionObserver pause never kicks in and background panes keep
+        // rendering every write on the main thread. No box = paused renderer.
+        display: active ? undefined : "none",
       }}
     >
       <div ref={containerRef} className="absolute inset-0" />
