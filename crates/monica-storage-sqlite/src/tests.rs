@@ -2382,6 +2382,7 @@ fn claude_session_create_and_get_round_trip() {
     let created = db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
     assert_eq!(created.claude_session_id, "uuid-1");
     assert_eq!(created.status, ClaudeSessionStatus::Pending);
+    assert_eq!(created.launch_phase, monica_domain::ClaudeLaunchPhase::Reserved);
     assert_eq!(created.runspace_id, "sdk");
     assert_eq!(created.tab_id, "tab-sdk-1");
     assert_eq!(created.terminal_session_id, ts.id);
@@ -2393,6 +2394,35 @@ fn claude_session_create_and_get_round_trip() {
     assert_eq!(db.get_claude_session("uuid-1").unwrap().unwrap(), created);
     assert!(db.get_claude_session("uuid-404").unwrap().is_none());
     assert_eq!(db.list_claude_sessions().unwrap(), vec![created]);
+}
+
+#[test]
+fn claude_session_submitting_stamp_flips_reserved_once() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let ts = db.create_terminal_session(new_shell_session(Some("sdk"), None)).unwrap();
+    db.mark_terminal_session_started(&ts.id, Some(1), None).unwrap();
+    db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
+
+    assert!(db.mark_claude_session_submitting("uuid-1").unwrap());
+    let row = db.get_claude_session("uuid-1").unwrap().unwrap();
+    assert_eq!(row.launch_phase, monica_domain::ClaudeLaunchPhase::Submitting);
+    assert_eq!(row.status, ClaudeSessionStatus::Pending, "the stamp must not confirm");
+
+    // Only a pending row still in its reserved phase can be stamped.
+    assert!(!db.mark_claude_session_submitting("uuid-1").unwrap());
+    assert!(!db.mark_claude_session_submitting("uuid-404").unwrap());
+}
+
+#[test]
+fn claude_session_age_is_measured_by_the_stamping_clock() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let ts = db.create_terminal_session(new_shell_session(Some("sdk"), None)).unwrap();
+    db.mark_terminal_session_started(&ts.id, Some(1), None).unwrap();
+    db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
+
+    let age = db.claude_session_age_seconds("uuid-1").unwrap().unwrap();
+    assert!((0..5).contains(&age), "a just-created row must read as fresh, got {age}");
+    assert!(db.claude_session_age_seconds("uuid-404").unwrap().is_none());
 }
 
 #[test]

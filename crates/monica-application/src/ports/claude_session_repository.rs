@@ -15,10 +15,20 @@ use monica_domain::{ClaudeSession, NewClaudeSession};
 ///   `apply_terminal_session_updates`), the mapping rows pointing at it flip to `ended`
 ///   in the same transaction, stamping `ended_at` once.
 pub trait ClaudeSessionRepository {
-    /// Reserve the mapping row (status `pending`). Fails if the referenced terminal
-    /// session row does not exist (the mapping must never point at nothing) or if the id
-    /// is already reserved — the primary key is the idempotency lock.
+    /// Reserve the mapping row (status `pending`, launch_phase `reserved`). Fails if the
+    /// referenced terminal session row does not exist (the mapping must never point at
+    /// nothing) or if the id is already reserved — the primary key is the idempotency lock.
     fn create_claude_session(&mut self, new: NewClaudeSession) -> Result<ClaudeSession>;
+
+    /// Stamp that a launch write is about to go out: launch_phase reserved → submitting.
+    /// Called BEFORE the write, so a pending row still in `reserved` provably never
+    /// received a launch. `false` means the row already left that state.
+    fn mark_claude_session_submitting(&mut self, claude_session_id: &str) -> Result<bool>;
+
+    /// Seconds since the row was created, measured by the same clock that stamped it —
+    /// distinguishes a stale crash-leftover reservation from an in-flight open. `None`
+    /// when the row does not exist.
+    fn claude_session_age_seconds(&self, claude_session_id: &str) -> Result<Option<i64>>;
 
     /// Confirm the launch write: pending → active. `false` means the row left `pending`
     /// (the PTY settled first and the coupled transition ended it) — the open failed.

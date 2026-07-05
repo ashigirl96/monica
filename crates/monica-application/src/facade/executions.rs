@@ -336,6 +336,32 @@ impl<B: Backend> ExecutionService<'_, B> {
             };
         }
 
+        // Stamp the launch attempt BEFORE it goes out: a pending row still in `reserved`
+        // phase provably never received a launch, which is what lets a stale one be
+        // reclaimed automatically instead of stranding the id forever.
+        let stamped = self.m.repos.mark_claude_session_submitting(&claude_session_id);
+        if !matches!(stamped, Ok(true)) {
+            // No launch was attempted, so whatever survives in that PTY is a plain
+            // shell — determinate, and the reservation is freed best-effort (a row left
+            // behind is a reserved-phase pending that later reclaims itself).
+            self.roll_back_live_session(daemon, &session.id);
+            if let Err(e) = self.m.repos.delete_claude_session(&claude_session_id) {
+                log::error!(
+                    target: "monica_application::sdk",
+                    "failed to delete the unstamped reservation {claude_session_id}: {e}"
+                );
+            }
+            let detail = match stamped {
+                Err(e) => format!("{e:#}"),
+                _ => "the reservation was no longer in its reserved phase".to_string(),
+            };
+            return Err(ApplicationError::external(format!(
+                "failed to stamp the launch attempt for session {}: {detail}; the launch \
+                 was never submitted, so retrying is safe",
+                session.id
+            )));
+        }
+
         if let Err(e) = daemon.write_input(&session.id, format!("{initial_command}\r").as_bytes())
         {
             // The write is an acknowledged round trip and the daemon writes into the PTY
@@ -507,16 +533,32 @@ impl<B: Backend> ExecutionService<'_, B> {
     }
 
     /// Resolve a client-supplied claude_session_id to its existing session, if the id is
-    /// already mapped. `Ok(None)` means unmapped — the caller proceeds with a fresh open
-    /// under that id. A mapped id never falls through: it either resolves to the live
-    /// session or errors, so a retry can never stack a second session on the same id.
+    /// already mapped. `Ok(None)` means unmapped (or a stale never-launched reservation
+    /// that was just reclaimed) — the caller proceeds with a fresh open under that id.
+    /// Any other mapped state resolves to the live session or errors, so a retry can
+    /// never stack a second session on the same id. Once a possibly-live mapping is in
+    /// play, every infrastructure failure in here is classified indeterminate: a
+    /// determinate error would read as "nothing exists under this id" and license a
+    /// duplicating fresh-id retry.
     fn recover_sdk_session(
         &mut self,
         daemon: &impl TerminalDaemon,
         claude_session_id: &str,
         model: Option<&str>,
     ) -> ApplicationResult<Option<SdkSessionSpec>> {
-        let Some(row) = self.m.repos.get_claude_session(claude_session_id)? else {
+        let unverified = |what: &str, e: anyhow::Error| {
+            ApplicationError::indeterminate(format!(
+                "cannot verify claude session {claude_session_id} ({what}): {e:#}; the \
+                 session may still be running — retry with this same id or check the \
+                 Workbench"
+            ))
+        };
+        let Some(row) = self
+            .m
+            .repos
+            .get_claude_session(claude_session_id)
+            .map_err(|e| unverified("reading the mapping failed", e))?
+        else {
             return Ok(None);
         };
         if row.status == ClaudeSessionStatus::Ended {
@@ -530,14 +572,15 @@ impl<B: Backend> ExecutionService<'_, B> {
         // stale if the PTY died while nothing reconciled. An unreachable daemon is
         // indeterminate, not a plain failure — Claude may already be running under this
         // id, and a determinate error would license a fresh-id retry that duplicates it.
-        let views = daemon.list_views().map_err(|e| {
-            ApplicationError::indeterminate(format!(
-                "cannot verify claude session {claude_session_id} against the terminal \
-                 daemon: {e:#}; the session may still be running — retry with this same \
-                 id or check the Workbench"
-            ))
-        })?;
-        match self.m.repos.get_terminal_session(&row.terminal_session_id)? {
+        let views = daemon
+            .list_views()
+            .map_err(|e| unverified("the terminal daemon is unreachable", e))?;
+        match self
+            .m
+            .repos
+            .get_terminal_session(&row.terminal_session_id)
+            .map_err(|e| unverified("reading its terminal session failed", e))?
+        {
             Some(ts_row) => {
                 let outcome = reconcile_terminal_sessions(std::slice::from_ref(&ts_row), &views);
                 let terminated: Vec<String> = outcome
@@ -546,7 +589,10 @@ impl<B: Backend> ExecutionService<'_, B> {
                     .filter(|u| u.status.is_terminal())
                     .map(|u| u.session_id.clone())
                     .collect();
-                self.m.repos.apply_terminal_session_updates(&outcome.updates)?;
+                self.m
+                    .repos
+                    .apply_terminal_session_updates(&outcome.updates)
+                    .map_err(|e| unverified("recording its liveness failed", e))?;
                 self.settle_runs_for_terminated_sessions(&terminated);
                 for session_id in outcome.reap_ids {
                     daemon.reap(&session_id);
@@ -555,20 +601,30 @@ impl<B: Backend> ExecutionService<'_, B> {
             None => {
                 // The terminal row is gone; push a Lost update through the funnel so the
                 // coupled transition ends this mapping, then refuse below.
-                self.m.repos.apply_terminal_session_updates(&[TerminalSessionUpdate {
-                    session_id: row.terminal_session_id.clone(),
-                    status: TerminalSessionStatus::Lost,
-                    pid: None,
-                    exit_code: None,
-                }])?;
+                self.m
+                    .repos
+                    .apply_terminal_session_updates(&[TerminalSessionUpdate {
+                        session_id: row.terminal_session_id.clone(),
+                        status: TerminalSessionStatus::Lost,
+                        pid: None,
+                        exit_code: None,
+                    }])
+                    .map_err(|e| unverified("recording its lost terminal failed", e))?;
             }
         }
 
-        let row = self.m.repos.get_claude_session(claude_session_id)?.ok_or_else(|| {
-            ApplicationError::not_found(format!(
-                "claude session {claude_session_id} vanished during recovery"
-            ))
-        })?;
+        let row = self
+            .m
+            .repos
+            .get_claude_session(claude_session_id)
+            .map_err(|e| unverified("re-reading the mapping failed", e))?
+            .ok_or_else(|| {
+                // Deleted concurrently — only rollback paths that proved no launch (or an
+                // observed death) free an id, so nothing runs under it.
+                ApplicationError::not_found(format!(
+                    "claude session {claude_session_id} vanished during recovery"
+                ))
+            })?;
         match row.status {
             ClaudeSessionStatus::Ended => {
                 return Err(ApplicationError::validation(format!(
@@ -576,19 +632,10 @@ impl<B: Backend> ExecutionService<'_, B> {
                      reused; open a new session with a fresh id"
                 )));
             }
-            // A reservation whose launch was never confirmed: the open may still be in
-            // flight on another connection, or was interrupted for good — unknowable
-            // here, so neither resolving to it nor relaunching under the id is safe.
-            // Indeterminate, not a rejection: a determinate error would tell the SDK
-            // "nothing is left behind", and a fresh-id retry could then duplicate the
-            // session an in-flight open is about to confirm.
+            // A reservation whose launch was never confirmed — an open in flight, or a
+            // crash leftover. The launch phase and the row's age decide which.
             ClaudeSessionStatus::Pending => {
-                return Err(ApplicationError::indeterminate(format!(
-                    "claude session {claude_session_id} has an unconfirmed launch (an open \
-                     is in flight or was interrupted); retry with this same id once it \
-                     settles, or check its tab in the Workbench — do not open a fresh id \
-                     for the same logical session"
-                )));
+                return self.resolve_pending_reservation(daemon, &row);
             }
             ClaudeSessionStatus::Active => {}
         }
@@ -614,6 +661,77 @@ impl<B: Backend> ExecutionService<'_, B> {
             title: spec.title.clone(),
         });
         Ok(Some(spec))
+    }
+
+    /// How long an unconfirmed reservation is presumed to belong to an open still in
+    /// flight. A live open spans one launch write (sub-second) inside a connection whose
+    /// client gives up after 10s, so a pending row past this age is a crash leftover and
+    /// eligible for reclamation; under it, retries stay indeterminate rather than risk
+    /// sabotaging the open that owns the row.
+    const PENDING_RESERVATION_LEASE_SECS: i64 = 60;
+
+    /// Bounded recovery for a pending (unconfirmed-launch) reservation, so a crash can
+    /// never strand the idempotency key forever. Within the lease: indeterminate (an open
+    /// may be in flight). Past it, by launch phase: `reserved` provably never received a
+    /// launch — the row is freed and `Ok(None)` lets the caller open fresh under the id;
+    /// `submitting` may have launched — reclaimed only through observed death of its
+    /// terminal, which ends the mapping and makes "use a fresh id" a safe, determinate
+    /// answer.
+    fn resolve_pending_reservation(
+        &mut self,
+        daemon: &impl TerminalDaemon,
+        row: &monica_domain::ClaudeSession,
+    ) -> ApplicationResult<Option<SdkSessionSpec>> {
+        let id = &row.claude_session_id;
+        let indeterminate = |detail: String| {
+            ApplicationError::indeterminate(format!(
+                "claude session {id} has an unconfirmed launch ({detail}); retry with \
+                 this same id, or check its tab in the Workbench — do not open a fresh \
+                 id for the same logical session"
+            ))
+        };
+        let age = self
+            .m
+            .repos
+            .claude_session_age_seconds(id)
+            .map_err(|e| indeterminate(format!("and reading its age failed: {e:#}")))?
+            .unwrap_or(0);
+        if age < Self::PENDING_RESERVATION_LEASE_SECS {
+            return Err(indeterminate(
+                "an open is in flight or was interrupted moments ago".to_string(),
+            ));
+        }
+        match row.launch_phase {
+            // The submitting stamp precedes any launch write, so this stale shell never
+            // received one: nothing runs under the id. Free it and open fresh; the kill
+            // is best-effort tidying of the leftover shell.
+            monica_domain::ClaudeLaunchPhase::Reserved => {
+                self.roll_back_live_session(daemon, &row.terminal_session_id);
+                self.m
+                    .repos
+                    .delete_claude_session(id)
+                    .map_err(|e| indeterminate(format!("and freeing the stale reservation \
+                         failed: {e:#}")))?;
+                Ok(None)
+            }
+            // The launch may have gone out; only an observed death of the terminal makes
+            // the outcome determinate. Pending rows are never announced or adopted, so
+            // no user-visible tab is being killed here.
+            monica_domain::ClaudeLaunchPhase::Submitting => {
+                if self.roll_back_live_session(daemon, &row.terminal_session_id) {
+                    Err(ApplicationError::validation(format!(
+                        "claude session {id} was a stale unconfirmed launch; its terminal \
+                         was terminated and the mapping ended — open a new session with a \
+                         fresh id"
+                    )))
+                } else {
+                    Err(indeterminate(
+                        "a stale launch whose terminal could not be confirmed dead"
+                            .to_string(),
+                    ))
+                }
+            }
+        }
     }
 
     /// The Claude session mappings, with terminal sessions reconciled against the daemon

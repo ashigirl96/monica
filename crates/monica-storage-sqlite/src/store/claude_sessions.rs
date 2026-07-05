@@ -1,16 +1,20 @@
 use anyhow::Result;
 use monica_application::ports::ClaudeSessionRepository;
-use monica_domain::{ClaudeSession, ClaudeSessionStatus, NewClaudeSession, TerminalSessionStatus};
+use monica_domain::{
+    ClaudeLaunchPhase, ClaudeSession, ClaudeSessionStatus, NewClaudeSession,
+    TerminalSessionStatus,
+};
 use rusqlite::{params, Row};
 
 use crate::SqliteStore;
 
 use super::{sql_literal_list, SET_NOW};
 
-const CLAUDE_SESSION_COLUMNS: &str = "claude_session_id, runspace_id, tab_id, terminal_session_id, cwd, name, status,      created_at, ended_at";
+const CLAUDE_SESSION_COLUMNS: &str = "claude_session_id, runspace_id, tab_id, terminal_session_id, cwd, name, status, launch_phase, created_at, ended_at";
 
 fn claude_session_from_row(row: &Row<'_>) -> Result<ClaudeSession> {
     let status: String = row.get("status")?;
+    let launch_phase: String = row.get("launch_phase")?;
     Ok(ClaudeSession {
         claude_session_id: row.get("claude_session_id")?,
         runspace_id: row.get("runspace_id")?,
@@ -19,6 +23,7 @@ fn claude_session_from_row(row: &Row<'_>) -> Result<ClaudeSession> {
         cwd: row.get("cwd")?,
         name: row.get("name")?,
         status: status.parse::<ClaudeSessionStatus>()?,
+        launch_phase: launch_phase.parse::<ClaudeLaunchPhase>()?,
         created_at: row.get("created_at")?,
         ended_at: row.get("ended_at")?,
     })
@@ -38,13 +43,15 @@ impl SqliteStore {
         ]);
         let pending = ClaudeSessionStatus::Pending.as_str();
         let ended = ClaudeSessionStatus::Ended.as_str();
+        let reserved = ClaudeLaunchPhase::Reserved.as_str();
         let inserted = self.conn().execute(
             &format!(
                 "INSERT INTO claude_sessions
                    (claude_session_id, runspace_id, tab_id, terminal_session_id, cwd, name,
-                    status, ended_at)
+                    status, launch_phase, ended_at)
                  SELECT ?1, ?2, ?3, ts.id, ?5, ?6,
                         CASE WHEN ts.status IN ({settled}) THEN '{ended}' ELSE '{pending}' END,
+                        '{reserved}',
                         CASE WHEN ts.status IN ({settled}) THEN {SET_NOW} ELSE NULL END
                    FROM terminal_sessions ts WHERE ts.id = ?4"
             ),
@@ -67,6 +74,40 @@ impl SqliteStore {
         self.get_claude_session(&new.claude_session_id)?.ok_or_else(|| {
             anyhow::anyhow!("claude session {} vanished after insert", new.claude_session_id)
         })
+    }
+
+    /// Stamp that a launch write is about to go out: launch_phase reserved → submitting.
+    /// Written BEFORE the write, so a pending row still in `reserved` provably never
+    /// received a launch. `false` means the row already left that state.
+    pub fn mark_claude_session_submitting(&mut self, claude_session_id: &str) -> Result<bool> {
+        let pending = ClaudeSessionStatus::Pending.as_str();
+        let reserved = ClaudeLaunchPhase::Reserved.as_str();
+        let submitting = ClaudeLaunchPhase::Submitting.as_str();
+        let updated = self.conn().execute(
+            &format!(
+                "UPDATE claude_sessions SET launch_phase = '{submitting}'
+                  WHERE claude_session_id = ?1 AND status = '{pending}'
+                    AND launch_phase = '{reserved}'"
+            ),
+            params![claude_session_id],
+        )?;
+        Ok(updated > 0)
+    }
+
+    /// Seconds since the row was created, from SQLite's own clock (the one that stamped
+    /// `created_at`) — used to tell a stale crash-leftover reservation from an in-flight
+    /// open. `None` when the row does not exist.
+    pub fn claude_session_age_seconds(&self, claude_session_id: &str) -> Result<Option<i64>> {
+        let mut stmt = self.conn().prepare(
+            "SELECT CAST(strftime('%s','now') AS INTEGER)
+                    - CAST(strftime('%s', created_at) AS INTEGER)
+               FROM claude_sessions WHERE claude_session_id = ?1",
+        )?;
+        let mut rows = stmt.query(params![claude_session_id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(row.get(0)?)),
+            None => Ok(None),
+        }
     }
 
     /// Confirm the launch write reached the PTY: pending → active. `false` means the row is
@@ -127,6 +168,14 @@ impl SqliteStore {
 impl ClaudeSessionRepository for SqliteStore {
     fn create_claude_session(&mut self, new: NewClaudeSession) -> Result<ClaudeSession> {
         SqliteStore::create_claude_session(self, new)
+    }
+
+    fn mark_claude_session_submitting(&mut self, claude_session_id: &str) -> Result<bool> {
+        SqliteStore::mark_claude_session_submitting(self, claude_session_id)
+    }
+
+    fn claude_session_age_seconds(&self, claude_session_id: &str) -> Result<Option<i64>> {
+        SqliteStore::claude_session_age_seconds(self, claude_session_id)
     }
 
     fn mark_claude_session_launched(&mut self, claude_session_id: &str) -> Result<bool> {

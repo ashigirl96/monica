@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 #[strum(serialize_all = "snake_case")]
 pub enum ClaudeSessionStatus {
     /// Reserved before the launch command is submitted into the PTY. A row stuck here
-    /// marks an open interrupted mid-flight: whether Claude actually launched is
-    /// unknowable, so the id is never resolved or reused automatically.
+    /// marks an open interrupted mid-flight; [`ClaudeLaunchPhase`] records how far that
+    /// open got, which decides whether a stale row can be reclaimed automatically.
     Pending,
     /// The launch write was acknowledged by the daemon — Claude runs (or ran) under
     /// this id.
@@ -25,6 +25,38 @@ pub enum ClaudeSessionStatus {
 }
 
 impl ClaudeSessionStatus {
+    pub fn as_str(self) -> &'static str {
+        self.into()
+    }
+}
+
+/// How far a pending open got, stamped durably at each step so a crash leaves evidence.
+/// Only meaningful while `status` is `pending`.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum ClaudeLaunchPhase {
+    /// The reservation exists but no launch write was attempted yet (the `submitting`
+    /// stamp precedes any write): provably nothing runs under this id, so a stale row
+    /// in this phase is safe to free automatically.
+    Reserved,
+    /// A launch write was attempted; whether it landed is unknowable if the open died
+    /// here, so a stale row in this phase is reclaimed only through observed death of
+    /// its terminal session.
+    Submitting,
+}
+
+impl ClaudeLaunchPhase {
     pub fn as_str(self) -> &'static str {
         self.into()
     }
@@ -43,6 +75,7 @@ pub struct ClaudeSession {
     pub cwd: String,
     pub name: Option<String>,
     pub status: ClaudeSessionStatus,
+    pub launch_phase: ClaudeLaunchPhase,
     pub created_at: String,
     pub ended_at: Option<String>,
 }
