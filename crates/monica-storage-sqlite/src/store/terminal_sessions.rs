@@ -1,7 +1,10 @@
 use anyhow::Result;
 use monica_application::ports::TerminalSessionRepository;
 use monica_application::{TerminalSessionUpdate, TerminalStateSnapshot};
-use monica_domain::{NewTerminalSession, TerminalSession, TerminalSessionKind, TerminalSessionStatus};
+use monica_domain::{
+    ClaudeSessionStatus, NewTerminalSession, TerminalSession, TerminalSessionKind,
+    TerminalSessionStatus,
+};
 use rusqlite::{params, Row};
 
 use monica_paths as paths;
@@ -182,6 +185,21 @@ impl SqliteStore {
                     update.status.is_terminal(),
                 ],
             )?;
+            // A terminal transition also ends the Claude session mapped to this PTY, in the
+            // same transaction — every path into a terminal status funnels through here, so
+            // this is the single place the coupling can't be missed.
+            if update.status.is_terminal() {
+                let ended = ClaudeSessionStatus::Ended.as_str();
+                tx.execute(
+                    &format!(
+                        "UPDATE claude_sessions
+                            SET status = '{ended}',
+                                ended_at = COALESCE(ended_at, {SET_NOW})
+                          WHERE terminal_session_id = ?1 AND status != '{ended}'"
+                    ),
+                    params![update.session_id],
+                )?;
+            }
         }
         tx.commit()?;
         Ok(())

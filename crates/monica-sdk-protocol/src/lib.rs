@@ -27,6 +27,12 @@ pub enum SdkRequestOp {
         model: Option<String>,
         #[serde(default)]
         title: Option<String>,
+        /// Idempotency key: opening with an id that is already mapped to a live session
+        /// returns that session instead of creating a second one, so a retry after a lost
+        /// response is safe. Servers predating this field silently ignore it — clients
+        /// detect that by comparing the echoed `claude_session_id` in the response.
+        #[serde(default)]
+        claude_session_id: Option<String>,
     },
 }
 
@@ -50,6 +56,10 @@ pub struct SdkSessionInfo {
     pub initial_command: String,
     #[serde(default)]
     pub title: Option<String>,
+    /// Absolute transcript path, resolved server-side so the slug derivation stays in one
+    /// place. `None` only from servers predating this field.
+    #[serde(default)]
+    pub jsonl_path: Option<String>,
 }
 
 #[cfg(test)]
@@ -76,24 +86,42 @@ mod tests {
                 cwd: "/tmp".into(),
                 model: Some("opus".into()),
                 title: None,
+                claude_session_id: Some("5e0f5b0e-9f5c-4a4e-9d6e-000000000000".into()),
             },
         };
         let back = round_trip_request(&req);
         assert_eq!(back.version, PROTOCOL_VERSION);
-        let SdkRequestOp::OpenSdkSession { cwd, model, title } = back.op;
+        let SdkRequestOp::OpenSdkSession { cwd, model, title, claude_session_id } = back.op;
         assert_eq!(cwd, "/tmp");
         assert_eq!(model.as_deref(), Some("opus"));
         assert_eq!(title, None);
+        assert_eq!(
+            claude_session_id.as_deref(),
+            Some("5e0f5b0e-9f5c-4a4e-9d6e-000000000000")
+        );
     }
 
     #[test]
     fn optional_fields_may_be_omitted_on_the_wire() {
+        // A v1 request written before claude_session_id existed must still parse.
         let back: SdkRequest =
             serde_json::from_str(r#"{"version":1,"op":"open_sdk_session","cwd":"/tmp"}"#).unwrap();
-        let SdkRequestOp::OpenSdkSession { cwd, model, title } = back.op;
+        let SdkRequestOp::OpenSdkSession { cwd, model, title, claude_session_id } = back.op;
         assert_eq!(cwd, "/tmp");
         assert_eq!(model, None);
         assert_eq!(title, None);
+        assert_eq!(claude_session_id, None);
+    }
+
+    #[test]
+    fn session_info_without_jsonl_path_still_parses() {
+        // A response from a server predating jsonl_path must still parse client-side.
+        let session: SdkSessionInfo = serde_json::from_str(
+            r#"{"runspace_id":"sdk","tab_id":"t","session_id":"ts-1",
+                "claude_session_id":"u","cwd":"/tmp","initial_command":"claude"}"#,
+        )
+        .unwrap();
+        assert_eq!(session.jsonl_path, None);
     }
 
     #[test]
@@ -107,6 +135,7 @@ mod tests {
                 cwd: "/tmp".into(),
                 initial_command: "claude --session-id x".into(),
                 title: Some("t".into()),
+                jsonl_path: Some("/Users/me/.claude/projects/-tmp/u.jsonl".into()),
             },
         };
         match round_trip_response(&ok) {

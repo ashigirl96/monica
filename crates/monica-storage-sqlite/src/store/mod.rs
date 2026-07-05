@@ -1,4 +1,5 @@
 mod bench;
+mod claude_sessions;
 mod events;
 mod external_refs;
 pub(crate) mod notification_outbox;

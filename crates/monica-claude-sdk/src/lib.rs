@@ -99,6 +99,10 @@ pub struct OpenSessionParams {
     pub cwd: String,
     pub model: Option<String>,
     pub title: Option<String>,
+    /// Idempotency key (a UUID). `None` mints one client-side before the request goes
+    /// out, so every open is retry-safe by construction; supply your own only when the
+    /// caller already persisted an id it wants the session to run under.
+    pub claude_session_id: Option<String>,
 }
 
 /// Control-socket round-trip timeout (mirrors `PtydClient`'s request timeout).
@@ -119,10 +123,11 @@ const OPEN_SESSION_TIMEOUT: Duration = Duration::from_secs(10);
 ///
 /// Retry semantics: a server-reported error means no session is left behind (a failed
 /// launch is torn down), so retrying is safe. A transport failure after the request was
-/// sent (timeout, dropped connection) leaves the outcome unknown — the session may be
-/// running; check the Workbench (or the sidebar's Detached group) before retrying.
-/// Idempotent opens (a client-supplied key resolving to the original session) need the
-/// persistent session mapping and land with MVP3.
+/// sent (timeout, dropped connection) leaves the outcome unknown — but the request
+/// carries a `claude_session_id` minted client-side, so retrying with the *same params
+/// value* (keep the id the first call filled in, or pre-fill your own) resolves to the
+/// original session instead of creating a second one. Retrying with a freshly minted id
+/// opens a second session; check the Workbench first if that matters.
 pub fn open_session(params: OpenSessionParams) -> Result<SdkSessionInfo> {
     open_session_at(&paths::sdk_socket_path()?, params)
 }
@@ -136,6 +141,9 @@ pub fn open_session_at(socket: &Path, params: OpenSessionParams) -> Result<SdkSe
         .with_context(|| format!("failed to resolve cwd {}", params.cwd))?
         .to_string_lossy()
         .into_owned();
+    let claude_session_id = params
+        .claude_session_id
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
     let stream = UnixStream::connect(socket).with_context(|| {
         format!(
@@ -151,6 +159,7 @@ pub fn open_session_at(socket: &Path, params: OpenSessionParams) -> Result<SdkSe
             cwd,
             model: params.model,
             title: params.title,
+            claude_session_id: Some(claude_session_id.clone()),
         },
     };
     let mut payload = serde_json::to_string(&request)?;
@@ -161,19 +170,37 @@ pub fn open_session_at(socket: &Path, params: OpenSessionParams) -> Result<SdkSe
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
     // Past this point a failure no longer implies "nothing happened": the request was
-    // already sent, so a lost response leaves the session possibly running.
-    reader.read_line(&mut line).context(
-        "failed to read a response from the sdk control socket; \
-         the session may still have been created — check the Workbench before retrying",
-    )?;
+    // already sent, so a lost response leaves the session possibly running — but it runs
+    // under the id this call sent, so a retry carrying that id resolves to it.
+    let recovery_hint = || {
+        format!(
+            "the session may still have been created; retry with \
+             claude_session_id={claude_session_id} to resolve to it instead of \
+             opening a second session"
+        )
+    };
+    reader.read_line(&mut line).with_context(|| {
+        format!("failed to read a response from the sdk control socket; {}", recovery_hint())
+    })?;
     if line.trim().is_empty() {
-        bail!(
-            "sdk control socket closed without a response; \
-             the session may still have been created — check the Workbench before retrying"
-        );
+        bail!("sdk control socket closed without a response; {}", recovery_hint());
     }
     match serde_json::from_str::<SdkResponse>(&line)? {
-        SdkResponse::Ok { session } => Ok(session),
+        SdkResponse::Ok { session } => {
+            // An older server ignores unknown request fields, silently minting its own id
+            // — which would make every "safe retry" open another session. The id is echoed
+            // in the response, so a mismatch identifies that server before the caller
+            // relies on idempotency.
+            if session.claude_session_id != claude_session_id {
+                bail!(
+                    "server ignored the client-supplied claude_session_id (an older Monica \
+                     app?): sent {claude_session_id}, got {}; the session IS running under \
+                     the returned id, but retries are not idempotent against this server",
+                    session.claude_session_id
+                );
+            }
+            Ok(session)
+        }
         SdkResponse::Err { error } => bail!("open_session rejected: {error}"),
     }
 }

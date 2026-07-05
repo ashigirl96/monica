@@ -1,7 +1,8 @@
 use super::{Backend, Monica};
 use crate::ports::{
-    AgentDecoders, NotificationOutboxStore, TaskRunStore, TerminalAttachment,
-    TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository, WorkbenchStore,
+    AgentDecoders, ClaudeSessionRepository, NotificationOutboxStore, TaskRunStore,
+    TerminalAttachment, TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository,
+    WorkbenchStore,
 };
 use crate::usecases::terminal::{
     reconcile_terminal_sessions, task_run_settlement_for_orphaned_run,
@@ -11,6 +12,7 @@ use crate::prelude::{
     Agent, NewNotificationIntent, NewTerminalSession, NotificationKind, TaskRun, TaskRunStatus,
     TerminalSession, TerminalSessionKind, TerminalSessionStatus,
 };
+use monica_domain::{ClaudeSession, ClaudeSessionStatus, NewClaudeSession};
 use crate::{
     ApplicationError, ApplicationEvent, ApplicationResult, EventSink, HookContext, HookReport,
     OpenSdkSessionParams, PrepareTaskResult, RunTaskResult, SdkSessionSpec, TaskBench,
@@ -226,6 +228,21 @@ impl<B: Backend> ExecutionService<'_, B> {
         daemon: &impl TerminalDaemon,
         params: OpenSdkSessionParams,
     ) -> ApplicationResult<SdkSessionSpec> {
+        // Idempotent recovery runs before cwd validation: a retry must be able to recover
+        // a running session even if its cwd has since been deleted.
+        if let Some(id) = &params.claude_session_id {
+            if uuid::Uuid::parse_str(id).is_err() {
+                // The id is interpolated into a shell command line; reject anything that
+                // is not literally a UUID.
+                return Err(ApplicationError::validation(format!(
+                    "claude_session_id must be a UUID: {id}"
+                )));
+            }
+            if let Some(spec) = self.recover_sdk_session(daemon, id, params.model.as_deref())? {
+                return Ok(spec);
+            }
+        }
+
         // Relative paths would resolve against the app process, not the SDK caller that
         // sent the request — an IPC boundary must not guess whose cwd "." means.
         let cwd_path = std::path::Path::new(&params.cwd);
@@ -242,7 +259,10 @@ impl<B: Backend> ExecutionService<'_, B> {
             )));
         }
 
-        let claude_session_id = uuid::Uuid::new_v4().to_string();
+        let claude_session_id = params
+            .claude_session_id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let tab_id = uuid::Uuid::new_v4().to_string();
         let initial_command =
             crate::sdk::sdk_initial_command(&claude_session_id, params.model.as_deref());
@@ -276,6 +296,24 @@ impl<B: Backend> ExecutionService<'_, B> {
             self.roll_back_live_session(daemon, &session.id);
             return Err(ApplicationError::external(format!(
                 "failed to submit the claude launch into session {}: {e:#}; \
+                 the session was terminated, so retrying is safe",
+                session.id
+            )));
+        }
+
+        // Persist the mapping only after the launch is in the PTY: every failure path above
+        // returns before this insert, so a rolled-back open never leaves a mapping row.
+        if let Err(e) = self.m.repos.create_claude_session(NewClaudeSession {
+            claude_session_id: claude_session_id.clone(),
+            runspace_id: crate::sdk_runspace_id().to_string(),
+            tab_id: tab_id.clone(),
+            terminal_session_id: session.id.clone(),
+            cwd: params.cwd.clone(),
+            name: params.title.clone(),
+        }) {
+            self.roll_back_live_session(daemon, &session.id);
+            return Err(ApplicationError::external(format!(
+                "failed to persist the claude session mapping for session {}: {e:#}; \
                  the session was terminated, so retrying is safe",
                 session.id
             )));
@@ -324,6 +362,109 @@ impl<B: Backend> ExecutionService<'_, B> {
             );
         }
         self.settle_runs_for_terminated_sessions(&[session_id.to_string()]);
+    }
+
+    /// Resolve a client-supplied claude_session_id to its existing session, if the id is
+    /// already mapped. `Ok(None)` means unmapped — the caller proceeds with a fresh open
+    /// under that id. A mapped id never falls through: it either resolves to the live
+    /// session or errors, so a retry can never stack a second session on the same id.
+    fn recover_sdk_session(
+        &mut self,
+        daemon: &impl TerminalDaemon,
+        claude_session_id: &str,
+        model: Option<&str>,
+    ) -> ApplicationResult<Option<SdkSessionSpec>> {
+        let Some(row) = self.m.repos.get_claude_session(claude_session_id)? else {
+            return Ok(None);
+        };
+        if row.status == ClaudeSessionStatus::Ended {
+            return Err(ApplicationError::validation(format!(
+                "claude session {claude_session_id} already ended and cannot be reused; \
+                 open a new session with a fresh id"
+            )));
+        }
+
+        // Re-verify liveness before answering "already running": an active mapping may be
+        // stale if the PTY died while nothing reconciled. An unreachable daemon is an error
+        // — Claude may already have run under this id, so spawning again blindly could
+        // corrupt its transcript.
+        let views = daemon.list_views().map_err(|e| {
+            ApplicationError::external(format!(
+                "cannot verify claude session {claude_session_id} against the terminal \
+                 daemon: {e:#}; check the Workbench before retrying"
+            ))
+        })?;
+        match self.m.repos.get_terminal_session(&row.terminal_session_id)? {
+            Some(ts_row) => {
+                let outcome = reconcile_terminal_sessions(std::slice::from_ref(&ts_row), &views);
+                let terminated: Vec<String> = outcome
+                    .updates
+                    .iter()
+                    .filter(|u| u.status.is_terminal())
+                    .map(|u| u.session_id.clone())
+                    .collect();
+                self.m.repos.apply_terminal_session_updates(&outcome.updates)?;
+                self.settle_runs_for_terminated_sessions(&terminated);
+                for session_id in outcome.reap_ids {
+                    daemon.reap(&session_id);
+                }
+            }
+            None => {
+                // The terminal row is gone; push a Lost update through the funnel so the
+                // coupled transition ends this mapping, then refuse below.
+                self.m.repos.apply_terminal_session_updates(&[TerminalSessionUpdate {
+                    session_id: row.terminal_session_id.clone(),
+                    status: TerminalSessionStatus::Lost,
+                    pid: None,
+                    exit_code: None,
+                }])?;
+            }
+        }
+
+        let row = self.m.repos.get_claude_session(claude_session_id)?.ok_or_else(|| {
+            ApplicationError::not_found(format!(
+                "claude session {claude_session_id} vanished during recovery"
+            ))
+        })?;
+        if row.status == ClaudeSessionStatus::Ended {
+            return Err(ApplicationError::validation(format!(
+                "claude session {claude_session_id} is no longer running and cannot be \
+                 reused; open a new session with a fresh id"
+            )));
+        }
+
+        let spec = SdkSessionSpec {
+            runspace_id: row.runspace_id,
+            tab_id: row.tab_id,
+            session_id: row.terminal_session_id,
+            claude_session_id: row.claude_session_id,
+            cwd: row.cwd,
+            // Informational only — the original launch already ran; this is not re-executed.
+            initial_command: crate::sdk::sdk_initial_command(claude_session_id, model),
+            title: row.name,
+        };
+        // Re-announce so a Workbench that missed the original event adopts the tab now.
+        // Adoption dedupes on the terminal session id, so a repeat is a no-op there.
+        self.m.events.emit(ApplicationEvent::SdkSessionOpened {
+            runspace_id: spec.runspace_id.clone(),
+            tab_id: spec.tab_id.clone(),
+            session_id: spec.session_id.clone(),
+            claude_session_id: spec.claude_session_id.clone(),
+            cwd: spec.cwd.clone(),
+            title: spec.title.clone(),
+        });
+        Ok(Some(spec))
+    }
+
+    /// The Claude session mappings, with terminal sessions reconciled against the daemon
+    /// first so `status` reflects a fresh liveness check (a mapping whose PTY died flips
+    /// to ended via the coupled transition before this returns).
+    pub fn list_claude_sessions(
+        &mut self,
+        daemon: &impl TerminalDaemon,
+    ) -> ApplicationResult<Vec<ClaudeSession>> {
+        self.list_terminal_sessions(daemon, None)?;
+        Ok(self.m.repos.list_claude_sessions()?)
     }
 
     pub fn attach_terminal_session(

@@ -1,0 +1,54 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum ClaudeSessionStatus {
+    Active,
+    Ended,
+}
+
+impl ClaudeSessionStatus {
+    pub fn as_str(self) -> &'static str {
+        self.into()
+    }
+}
+
+/// The durable mapping for a Claude Code session Monica launched: which Workbench
+/// runspace/tab hosts it, which terminal session drives its PTY, and the cwd its JSONL
+/// transcript path derives from. `claude_session_id` is the pre-minted UUID Claude runs
+/// under (`claude --session-id <uuid>`) — no separate id is issued.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ClaudeSession {
+    pub claude_session_id: String,
+    pub runspace_id: String,
+    pub tab_id: String,
+    pub terminal_session_id: String,
+    pub cwd: String,
+    pub name: Option<String>,
+    pub status: ClaudeSessionStatus,
+    pub created_at: String,
+    pub ended_at: Option<String>,
+}
+
+/// Input for creating a mapping row. Status and timestamps are assigned by the store,
+/// which derives the initial status from the referenced terminal session's state.
+#[derive(Debug, Clone)]
+pub struct NewClaudeSession {
+    pub claude_session_id: String,
+    pub runspace_id: String,
+    pub tab_id: String,
+    pub terminal_session_id: String,
+    pub cwd: String,
+    pub name: Option<String>,
+}

@@ -32,15 +32,19 @@ pub use facade::{
 };
 
 pub use ports::{
-    AgentDecoders, AgentEventDecoder, EventRepository, GitGateway, NotebookGateway,
-    NotificationOutboxStore, ProjectRepository, PullRequestSyncStore, TaskBoardQuery, TaskRunStore,
-    TaskStore, TaskSummaryFilter, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
-    TerminalSessionRepository, UnitOfWork, WorkbenchStore, WorkTransaction, Workspace, WorktreeRef,
+    AgentDecoders, AgentEventDecoder, ClaudeSessionRepository, EventRepository, GitGateway,
+    NotebookGateway, NotificationOutboxStore, ProjectRepository, PullRequestSyncStore,
+    TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter, TerminalAttachment,
+    TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository, UnitOfWork, WorkbenchStore,
+    WorkTransaction, Workspace, WorktreeRef,
 };
 
 // Application-owned types (NOT in monica-domain)
 pub use bench::{bench_runspace_id, PrepareTaskResult, RunTaskResult, TaskBench};
-pub use sdk::{sdk_runspace_id, OpenSdkSessionParams, SdkSessionSpec, MONICA_SDK_SESSION_ID_ENV};
+pub use sdk::{
+    claude_jsonl_path, claude_project_slug, sdk_runspace_id, OpenSdkSessionParams, SdkSessionSpec,
+    MONICA_SDK_SESSION_ID_ENV,
+};
 pub use github::{
     GithubAuthStatus, GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef,
     GithubPullRequestStatus, PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate,

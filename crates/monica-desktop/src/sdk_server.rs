@@ -105,8 +105,8 @@ fn handle_line(app: &AppHandle, line: &str) -> SdkResponse {
         Ok(op) => op,
         Err(error) => return SdkResponse::Err { error },
     };
-    let SdkRequestOp::OpenSdkSession { cwd, model, title } = op;
-    match open_sdk_session(app, cwd, model, title) {
+    let SdkRequestOp::OpenSdkSession { cwd, model, title, claude_session_id } = op;
+    match open_sdk_session(app, cwd, model, title, claude_session_id) {
         Ok(session) => SdkResponse::Ok { session },
         Err(e) => SdkResponse::Err {
             error: format!("{e:#}"),
@@ -131,6 +131,7 @@ fn open_sdk_session(
     cwd: String,
     model: Option<String>,
     title: Option<String>,
+    claude_session_id: Option<String>,
 ) -> Result<SdkSessionInfo> {
     let state = app.state::<PtydHandle>();
     let daemon = PtydTerminalDaemon { handle: state.inner(), app };
@@ -146,8 +147,18 @@ fn open_sdk_session(
             model,
             title,
             shell: default_shell(),
+            claude_session_id,
         },
     )?;
+    let jsonl_path = std::env::var_os("HOME").map(|home| {
+        monica_application::claude_jsonl_path(
+            std::path::Path::new(&home),
+            &spec.cwd,
+            &spec.claude_session_id,
+        )
+        .to_string_lossy()
+        .into_owned()
+    });
     Ok(SdkSessionInfo {
         runspace_id: spec.runspace_id,
         tab_id: spec.tab_id,
@@ -156,6 +167,7 @@ fn open_sdk_session(
         cwd: spec.cwd,
         initial_command: spec.initial_command,
         title: spec.title,
+        jsonl_path,
     })
 }
 
@@ -181,9 +193,10 @@ mod tests {
         let line =
             format!(r#"{{"version":{PROTOCOL_VERSION},"op":"open_sdk_session","cwd":"/tmp"}}"#);
         let op = parse_request(&line).unwrap();
-        let SdkRequestOp::OpenSdkSession { cwd, model, title } = op;
+        let SdkRequestOp::OpenSdkSession { cwd, model, title, claude_session_id } = op;
         assert_eq!(cwd, "/tmp");
         assert_eq!(model, None);
         assert_eq!(title, None);
+        assert_eq!(claude_session_id, None);
     }
 }
