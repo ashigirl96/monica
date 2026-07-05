@@ -1545,23 +1545,40 @@ impl Workspace for FakeWorkspace {
     }
 }
 
+#[derive(Default)]
 pub(crate) struct FakeDaemon {
     create_fails: bool,
+    write_fails: bool,
+    pub(crate) created: Mutex<Vec<TerminalCreateRequest>>,
+    pub(crate) written: Mutex<Vec<(String, Vec<u8>)>>,
+    pub(crate) terminated: Mutex<Vec<String>>,
 }
 
 impl FakeDaemon {
     pub(crate) fn failing_create() -> Self {
-        Self { create_fails: true }
+        Self { create_fails: true, ..Self::default() }
+    }
+
+    pub(crate) fn failing_write() -> Self {
+        Self { write_fails: true, ..Self::default() }
     }
 }
 
 impl TerminalDaemon for FakeDaemon {
-    fn create(&self, _request: TerminalCreateRequest) -> Result<Option<u32>> {
+    fn create(&self, request: TerminalCreateRequest) -> Result<Option<u32>> {
+        self.created.lock().unwrap().push(request);
         if self.create_fails {
             Err(anyhow!("daemon spawn failed"))
         } else {
             Ok(Some(4321))
         }
+    }
+    fn write_input(&self, session_id: &str, data: &[u8]) -> Result<()> {
+        if self.write_fails {
+            return Err(anyhow!("daemon write failed"));
+        }
+        self.written.lock().unwrap().push((session_id.to_string(), data.to_vec()));
+        Ok(())
     }
     fn attach(&self, _session_id: &str, _replay_bytes: Option<u32>) -> Result<TerminalAttachment> {
         Ok(TerminalAttachment { replay: String::new(), rows: 24, cols: 80 })
@@ -1569,7 +1586,8 @@ impl TerminalDaemon for FakeDaemon {
     fn detach(&self, _session_id: &str) -> Result<()> {
         Ok(())
     }
-    fn terminate(&self, _session_id: &str) -> Result<()> {
+    fn terminate(&self, session_id: &str) -> Result<()> {
+        self.terminated.lock().unwrap().push(session_id.to_string());
         Ok(())
     }
     fn list_views(&self) -> Result<Vec<DaemonSessionView>> {

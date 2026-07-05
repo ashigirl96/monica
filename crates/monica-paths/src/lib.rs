@@ -46,6 +46,11 @@ pub fn ptyd_pid_path() -> Result<PathBuf> {
     Ok(base_dir()?.join("ptyd.pid"))
 }
 
+/// Unix domain socket the desktop app's SDK control server listens on.
+pub fn sdk_socket_path() -> Result<PathBuf> {
+    Ok(base_dir()?.join("sdk.sock"))
+}
+
 /// Bounded transcript files for terminal sessions: `<base>/terminal-sessions/<session_id>.log`.
 pub fn terminal_sessions_dir() -> Result<PathBuf> {
     Ok(base_dir()?.join("terminal-sessions"))

@@ -14,13 +14,16 @@ tauri-build = { version = "2", default-features = false, features = [] }
 
 [dependencies]
 anyhow = "1.0"
+base64 = { version = "0.22", default-features = false, features = ["std"] }
 log = "0.4"
 monica-api = { path = "../monica-api" }
 monica-application = { path = "../monica-application" }
 monica-domain = { path = "../monica-domain" }
 serde = { version = "1", default-features = false, features = ["derive"] }
+serde_json = { version = "1", default-features = false, features = ["std"] }
 monica-runtime = { path = "../monica-runtime" }
 monica-paths = { path = "../monica-paths" }
+monica-sdk-protocol = { path = "../monica-sdk-protocol" }
 monica-terminal-client = { path = "../monica-terminal-client" }
 monica-terminal-protocol = { path = "../monica-terminal-protocol" }
 specta = { version = "=2.0.0-rc.25", default-features = false, features = ["serde_json"] }

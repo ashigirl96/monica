@@ -2848,6 +2848,7 @@ dependencies = [
  "serde_json",
  "strum",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -2858,6 +2859,7 @@ dependencies = [
  "base64 0.22.1",
  "monica-domain",
  "monica-paths",
+ "monica-sdk-protocol",
  "monica-storage-sqlite",
  "monica-terminal-client",
  "monica-terminal-protocol",
@@ -2886,18 +2888,21 @@ name = "monica-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "log",
  "monica-api",
  "monica-application",
  "monica-domain",
  "monica-paths",
  "monica-runtime",
+ "monica-sdk-protocol",
  "monica-terminal-client",
  "monica-terminal-protocol",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "serde",
+ "serde_json",
  "specta",
  "specta-typescript",
  "tauri",
@@ -2949,6 +2954,14 @@ dependencies = [
  "monica-domain",
  "monica-storage-sqlite",
  "tokio",
+]
+
+[[package]]
+name = "monica-sdk-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

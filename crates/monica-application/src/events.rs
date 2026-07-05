@@ -16,6 +16,17 @@ pub enum ApplicationEvent {
     PullRequestSyncCompleted {
         synced_count: u32,
     },
+    /// An SDK-created terminal session exists and its Claude launch is underway; the Workbench
+    /// adopts a tab bound to it. Purely observational — missing this event never blocks the
+    /// session (recovery is MVP3's job).
+    SdkSessionOpened {
+        runspace_id: String,
+        tab_id: String,
+        session_id: String,
+        claude_session_id: String,
+        cwd: String,
+        title: Option<String>,
+    },
     AwaitingUserInput {
         task_id: Option<String>,
         task_run_id: Option<String>,

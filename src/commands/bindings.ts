@@ -119,6 +119,7 @@ export const commands = {
 /** Events */
 export const events = {
   prSyncCompleted: makeEvent<PrSyncCompleted>("pr-sync:completed"),
+  sdkSessionOpened: makeEvent<SdkSessionOpened>("sdk-session:opened"),
   taskRunStatusChanged: makeEvent<TaskRunStatusChanged>("task-run:status-changed"),
 };
 
@@ -225,6 +226,19 @@ export type RunTaskResult = {
   cwd: string;
   env: [string, string][];
   initial_command: string;
+};
+
+/**
+ *  Announces an SDK-created terminal session so the Workbench can adopt a tab bound to it.
+ *  Purely observational: the session row, PTY spawn, and Claude launch are already handled
+ *  backend-side by the time this fires.
+ */
+export type SdkSessionOpened = {
+  runspace_id: string;
+  tab_id: string;
+  session_id: string;
+  cwd: string;
+  title: string | null;
 };
 
 export type TaskBench = {

@@ -1,10 +1,15 @@
-//! Drive an interactive Claude Code session in Monica's Workbench by injecting input
-//! into its PTY over the ptyd Unix socket, bypassing the desktop app entirely.
+//! Drive interactive Claude Code sessions in Monica's Workbench without touching the
+//! webview: create sessions through the running app's SDK control socket
+//! ([`open_session`]), and inject input straight into their PTYs over the ptyd Unix
+//! socket ([`send_text`]).
 //!
-//! Send-only for now: text goes in as a bracketed paste followed by a delayed
-//! carriage return, mimicking a human pasting then pressing Enter in a real terminal.
-//! Session creation and response reading are out of scope.
+//! Input goes in as a bracketed paste followed by a delayed carriage return, mimicking
+//! a human pasting then pressing Enter in a real terminal. Response reading is out of
+//! scope (session JSONL / hooks arrive in later MVPs).
 
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::UnixStream;
+use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
@@ -12,9 +17,14 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use monica_domain::TerminalSession;
 use monica_paths as paths;
+use monica_sdk_protocol::{
+    SdkRequest, SdkRequestOp, SdkResponse, PROTOCOL_VERSION as SDK_PROTOCOL_VERSION,
+};
 use monica_storage_sqlite::SqliteStore;
 use monica_terminal_client::PtydClient;
 use monica_terminal_protocol::{RequestOp, ResponseBody, PROTOCOL_VERSION};
+
+pub use monica_sdk_protocol::SdkSessionInfo;
 
 /// Delay between the paste write and the submitting `\r`. Claude Code (Ink) applies
 /// pasted text to its input buffer asynchronously, so the Enter must arrive as a
@@ -79,6 +89,92 @@ pub fn ensure_session_running(client: &PtydClient, session_id: &str) -> Result<(
             info.exit_code
         ),
         None => bail!("session {session_id} is not known to ptyd (tab closed or daemon restarted?)"),
+    }
+}
+
+/// Parameters for [`open_session`]. `cwd` must be an existing directory; `model` and
+/// `title` are optional (`title` is the tab's initial label until the shell retitles it).
+#[derive(Debug, Clone)]
+pub struct OpenSessionParams {
+    pub cwd: String,
+    pub model: Option<String>,
+    pub title: Option<String>,
+}
+
+/// Control-socket round-trip timeout (mirrors `PtydClient`'s request timeout).
+const OPEN_SESSION_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Ask the running Monica app to create a Claude Code session in the Workbench's "sdk"
+/// runspace. The app pre-mints the Claude session id, spawns the shell, and launches
+/// `claude --session-id <uuid>` itself; the returned info carries every id needed to
+/// locate the transcript (`~/.claude/projects/<slug>/<uuid>.jsonl`) or send input later.
+///
+/// Returns only after the daemon has acknowledged the launch command in the session's PTY,
+/// so a follow-up [`send_text`] cannot land at the raw shell prompt while the shell is
+/// still the foreground reader. Claude's own boot is asynchronous and NOT verified here:
+/// if the `claude` binary is missing or exits during startup, the tab is left at a shell
+/// prompt. The reliable readiness signal is the transcript file
+/// (`~/.claude/projects/<slug>/<claude_session_id>.jsonl`) appearing; hook/JSONL-based
+/// readiness APIs are MVP4/MVP5 scope.
+///
+/// Retry semantics: a server-reported error means no session is left behind (a failed
+/// launch is torn down), so retrying is safe. A transport failure after the request was
+/// sent (timeout, dropped connection) leaves the outcome unknown — the session may be
+/// running; check the Workbench (or the sidebar's Detached group) before retrying.
+/// Idempotent opens (a client-supplied key resolving to the original session) need the
+/// persistent session mapping and land with MVP3.
+pub fn open_session(params: OpenSessionParams) -> Result<SdkSessionInfo> {
+    open_session_at(&paths::sdk_socket_path()?, params)
+}
+
+/// [`open_session`] against an explicit control-socket path instead of the one derived
+/// from `MONICA_HOME`.
+pub fn open_session_at(socket: &Path, params: OpenSessionParams) -> Result<SdkSessionInfo> {
+    // Resolved on this side of the IPC boundary: a relative path means the *caller's*
+    // working directory, which the app process has no way to know.
+    let cwd = std::path::absolute(&params.cwd)
+        .with_context(|| format!("failed to resolve cwd {}", params.cwd))?
+        .to_string_lossy()
+        .into_owned();
+
+    let stream = UnixStream::connect(socket).with_context(|| {
+        format!(
+            "failed to connect to {} (is the Monica app running?)",
+            socket.display()
+        )
+    })?;
+    stream.set_read_timeout(Some(OPEN_SESSION_TIMEOUT))?;
+
+    let request = SdkRequest {
+        version: SDK_PROTOCOL_VERSION,
+        op: SdkRequestOp::OpenSdkSession {
+            cwd,
+            model: params.model,
+            title: params.title,
+        },
+    };
+    let mut payload = serde_json::to_string(&request)?;
+    payload.push('\n');
+    let mut writer = stream.try_clone()?;
+    writer.write_all(payload.as_bytes())?;
+
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    // Past this point a failure no longer implies "nothing happened": the request was
+    // already sent, so a lost response leaves the session possibly running.
+    reader.read_line(&mut line).context(
+        "failed to read a response from the sdk control socket; \
+         the session may still have been created — check the Workbench before retrying",
+    )?;
+    if line.trim().is_empty() {
+        bail!(
+            "sdk control socket closed without a response; \
+             the session may still have been created — check the Workbench before retrying"
+        );
+    }
+    match serde_json::from_str::<SdkResponse>(&line)? {
+        SdkResponse::Ok { session } => Ok(session),
+        SdkResponse::Err { error } => bail!("open_session rejected: {error}"),
     }
 }
 
