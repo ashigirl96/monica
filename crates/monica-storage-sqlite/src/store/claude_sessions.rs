@@ -126,7 +126,8 @@ impl SqliteStore {
         Ok(updated > 0)
     }
 
-    /// Remove a reservation whose launch never happened, freeing the id for a clean retry.
+    /// Remove a reservation whose launch was provably never attempted, freeing the id
+    /// for a clean retry (see the port doc for why an attempted launch must keep a row).
     pub fn delete_claude_session(&mut self, claude_session_id: &str) -> Result<()> {
         self.conn().execute(
             "DELETE FROM claude_sessions WHERE claude_session_id = ?1",

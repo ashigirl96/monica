@@ -34,7 +34,12 @@ pub trait ClaudeSessionRepository {
     /// (the PTY settled first and the coupled transition ended it) — the open failed.
     fn mark_claude_session_launched(&mut self, claude_session_id: &str) -> Result<bool>;
 
-    /// Remove a reservation whose launch never happened, freeing the id for a clean retry.
+    /// Remove a reservation, freeing the id for a clean retry. Sound ONLY while the
+    /// launch was provably never attempted (launch_phase still `reserved`, or the
+    /// submitting stamp itself failed): once a write may have gone out, killing the PTY
+    /// does not roll back Claude's external artifacts (the transcript is keyed by this
+    /// id), so the id must keep a row — pending or an ended tombstone — that refuses
+    /// reuse.
     fn delete_claude_session(&mut self, claude_session_id: &str) -> Result<()>;
 
     fn get_claude_session(&self, claude_session_id: &str) -> Result<Option<ClaudeSession>>;

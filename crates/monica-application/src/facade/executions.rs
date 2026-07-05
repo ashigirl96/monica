@@ -369,19 +369,16 @@ impl<B: Backend> ExecutionService<'_, B> {
             // — a timeout or dropped connection can lose only the ack. Whether "nothing
             // runs under this id" is true hinges on the kill being confirmed.
             if self.roll_back_live_session(daemon, &session.id) {
-                // Verifiably dead, so the reservation must not outlive the launch —
-                // freeing the id keeps a same-id retry a clean fresh open. Best-effort:
-                // if this fails, the row was already ended by the rollback's coupled
-                // transition, which still refuses reuse.
-                if let Err(e) = self.m.repos.delete_claude_session(&claude_session_id) {
-                    log::error!(
-                        target: "monica_application::sdk",
-                        "failed to delete the unlaunched reservation {claude_session_id}: {e}"
-                    );
-                }
+                // Verifiably dead — but killing the PTY rolls back the process, not
+                // Claude's external side effects: a transcript keyed by this id may
+                // already exist, so the id is never freed for reuse. The rollback's
+                // coupled transition left an ended tombstone that refuses it, and a
+                // fresh id is the safe way forward.
                 return Err(ApplicationError::external(format!(
-                    "failed to submit the claude launch into session {}: {e:#}; \
-                     the session was terminated, so retrying is safe",
+                    "failed to submit the claude launch into session {}: {e:#}; the \
+                     session was terminated and claude_session_id {claude_session_id} is \
+                     retired (claude may have left artifacts under it) — open a new \
+                     session with a fresh id",
                     session.id
                 )));
             }
@@ -400,18 +397,15 @@ impl<B: Backend> ExecutionService<'_, B> {
         match self.m.repos.mark_claude_session_launched(&claude_session_id) {
             Ok(true) => {}
             // The PTY settled before the launch was confirmed (a write into a dead session
-            // is a silent no-op), so nothing runs under this id — fail the open.
+            // is a silent no-op), so nothing runs under this id — fail the open. The
+            // launch write WAS acknowledged though, so claude may have left artifacts
+            // under the id: the ended tombstone stays, refusing reuse.
             Ok(false) => {
                 self.roll_back_live_session(daemon, &session.id);
-                if let Err(e) = self.m.repos.delete_claude_session(&claude_session_id) {
-                    log::error!(
-                        target: "monica_application::sdk",
-                        "failed to delete the unlaunched reservation {claude_session_id}: {e}"
-                    );
-                }
                 return Err(ApplicationError::external(format!(
                     "terminal session {} exited before the claude launch was confirmed; \
-                     the session was cleaned up, so retrying is safe",
+                     claude_session_id {claude_session_id} is retired — open a new \
+                     session with a fresh id",
                     session.id
                 )));
             }
@@ -421,16 +415,12 @@ impl<B: Backend> ExecutionService<'_, B> {
             // survive and the outcome stays unknown.
             Err(e) => {
                 if self.roll_back_live_session(daemon, &session.id) {
-                    if let Err(e) = self.m.repos.delete_claude_session(&claude_session_id) {
-                        log::error!(
-                            target: "monica_application::sdk",
-                            "failed to delete the reservation {claude_session_id} after a \
-                             failed launch confirmation: {e}"
-                        );
-                    }
+                    // Observed dead, but the acknowledged launch may have left claude
+                    // artifacts under the id: the ended tombstone stays, refusing reuse.
                     return Err(ApplicationError::external(format!(
-                        "failed to confirm the claude launch for session {}: {e:#}; \
-                         the session was terminated, so retrying is safe",
+                        "failed to confirm the claude launch for session {}: {e:#}; the \
+                         session was terminated and claude_session_id {claude_session_id} \
+                         is retired — open a new session with a fresh id",
                         session.id
                     )));
                 }

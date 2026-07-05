@@ -360,7 +360,11 @@ fn facade_open_sdk_session_write_failure_rolls_back_without_announcement() {
         .events()
         .iter()
         .any(|e| matches!(e, ApplicationEvent::SdkSessionOpened { .. })));
-    assert!(monica.executions().list_claude_sessions(&daemon).unwrap().is_empty());
+    // The launch write may have gone out (only the ack path is what failed), so the id
+    // is retired as an ended tombstone, never freed for a corrupting relaunch.
+    let sessions = monica.executions().list_claude_sessions(&daemon).unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].status, monica_domain::ClaudeSessionStatus::Ended);
 }
 
 #[test]
@@ -430,7 +434,7 @@ fn facade_open_sdk_session_reservation_failure_rolls_back_before_any_launch() {
 }
 
 #[test]
-fn facade_open_sdk_session_launch_confirmation_failure_rolls_back_and_frees_the_id() {
+fn facade_open_sdk_session_launch_confirmation_failure_rolls_back_and_retires_the_id() {
     for (repos, expect_written) in [
         {
             let repos = FakeRepos::default();
@@ -458,9 +462,39 @@ fn facade_open_sdk_session_launch_confirmation_failure_rolls_back_and_frees_the_
             .events()
             .iter()
             .any(|e| matches!(e, ApplicationEvent::SdkSessionOpened { .. })));
-        // The reservation is deleted, so the same id is a clean fresh open on retry.
-        assert!(monica.executions().list_claude_sessions(&daemon).unwrap().is_empty());
+        // The launch was acknowledged, so claude may have left artifacts under the id:
+        // it is retired as an ended tombstone, never freed for a corrupting relaunch.
+        let sessions = monica.executions().list_claude_sessions(&daemon).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].status, monica_domain::ClaudeSessionStatus::Ended);
     }
+}
+
+#[test]
+fn facade_open_sdk_session_retired_id_refuses_reuse_after_a_failed_launch() {
+    // Killing the PTY rolls back the process, not Claude's external side effects: a
+    // transcript keyed by the id may already exist, so a same-id retry after a failed
+    // launch must be refused determinately (fresh id) instead of relaunching over it.
+    let sink = RecordingSink::default();
+    let mut monica = facade(FakeRepos::default(), sink.clone());
+    let daemon = FakeDaemon::failing_write();
+    let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+    let id = "5e0f5b0e-9f5c-4a4e-9d6e-000000000309";
+
+    let first = monica
+        .executions()
+        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .unwrap_err();
+    assert!(matches!(first, ApplicationError::External(_)), "got: {first:?}");
+
+    let retry = monica
+        .executions()
+        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .unwrap_err();
+
+    assert!(matches!(retry, ApplicationError::Validation(_)), "got: {retry:?}");
+    assert!(retry.to_string().contains("cannot be reused"), "got: {retry}");
+    assert_eq!(daemon.created.lock().unwrap().len(), 1, "must never respawn under the id");
 }
 
 #[test]
