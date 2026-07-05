@@ -130,6 +130,11 @@ impl<B: Backend> ExecutionService<'_, B> {
     /// Create a terminal session row, then ask the daemon to spawn it. On spawn failure the
     /// session is marked `Failed` and any run waiting on this tab is settled now (rather than left
     /// to the sweep). The session is returned regardless so the frontend can bind it to its tab.
+    ///
+    /// An `Err` never leaves a live PTY behind: failures after a successful spawn (recording the
+    /// start, reloading the row) kill the process before returning. A live row stuck at `Starting`
+    /// would otherwise leak forever — reconcile deliberately skips it, trusting the create call
+    /// that just died here to own that transition.
     pub fn create_terminal_session(
         &mut self,
         daemon: &impl TerminalDaemon,
@@ -160,9 +165,14 @@ impl<B: Backend> ExecutionService<'_, B> {
             cols,
             env,
         };
+        let mut pty_live = false;
         match daemon.create(request) {
             Ok(pid) => {
-                self.m.repos.mark_terminal_session_started(&session.id, pid)?;
+                if let Err(e) = self.m.repos.mark_terminal_session_started(&session.id, pid) {
+                    self.roll_back_live_session(daemon, &session.id);
+                    return Err(e.into());
+                }
+                pty_live = true;
             }
             Err(e) => {
                 log::warn!(
@@ -186,12 +196,24 @@ impl<B: Backend> ExecutionService<'_, B> {
             }
         }
 
-        self.m
-            .repos
-            .get_terminal_session(&session.id)?
-            .ok_or_else(|| {
-                ApplicationError::not_found(format!("terminal session {} vanished", session.id))
-            })
+        match self.m.repos.get_terminal_session(&session.id) {
+            Ok(Some(row)) => Ok(row),
+            Ok(None) => {
+                if pty_live {
+                    self.roll_back_live_session(daemon, &session.id);
+                }
+                Err(ApplicationError::not_found(format!(
+                    "terminal session {} vanished",
+                    session.id
+                )))
+            }
+            Err(e) => {
+                if pty_live {
+                    self.roll_back_live_session(daemon, &session.id);
+                }
+                Err(e.into())
+            }
+        }
     }
 
     /// Create a Claude Code session in the permanent "sdk" runspace: pre-mint the Claude session
@@ -251,7 +273,7 @@ impl<B: Backend> ExecutionService<'_, B> {
 
         if let Err(e) = daemon.write_input(&session.id, format!("{initial_command}\r").as_bytes())
         {
-            self.roll_back_sdk_session(daemon, &session.id);
+            self.roll_back_live_session(daemon, &session.id);
             return Err(ApplicationError::external(format!(
                 "failed to submit the claude launch into session {}: {e:#}; \
                  the session was terminated, so retrying is safe",
@@ -279,13 +301,16 @@ impl<B: Backend> ExecutionService<'_, B> {
         Ok(spec)
     }
 
-    /// Best-effort teardown of an SDK session whose launch never made it into the PTY: kill
-    /// the bare shell and settle the row as Failed so nothing adoptable or retriable lingers.
-    fn roll_back_sdk_session(&mut self, daemon: &impl TerminalDaemon, session_id: &str) {
+    /// Best-effort teardown of a spawned session that its creation flow can no longer vouch for
+    /// (the start couldn't be recorded, or the launch never made it into the PTY): kill the
+    /// process, settle the row as Failed, and settle any run waiting on its tab, so nothing
+    /// adoptable or retriable lingers. The kill must come first — if the DB is the thing failing,
+    /// the Failed write below fails too, and only a dead PTY lets reconcile settle the row later.
+    fn roll_back_live_session(&mut self, daemon: &impl TerminalDaemon, session_id: &str) {
         if let Err(e) = daemon.terminate(session_id) {
             log::warn!(
-                target: "monica_application::sdk",
-                "failed to terminate unlaunched sdk session {session_id}: {e:#}"
+                target: "monica_application::terminal",
+                "failed to terminate rolled-back session {session_id}: {e:#}"
             );
         }
         if let Err(e) = self.m.repos.update_terminal_session_status(
@@ -294,10 +319,11 @@ impl<B: Backend> ExecutionService<'_, B> {
             None,
         ) {
             log::error!(
-                target: "monica_application::sdk",
-                "failed to mark unlaunched sdk session {session_id} failed: {e}"
+                target: "monica_application::terminal",
+                "failed to mark rolled-back session {session_id} failed: {e}"
             );
         }
+        self.settle_runs_for_terminated_sessions(&[session_id.to_string()]);
     }
 
     pub fn attach_terminal_session(

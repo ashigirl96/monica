@@ -117,6 +117,7 @@ struct FakeState {
     pr_branch_candidate: Option<PullRequestBranchSyncCandidate>,
     pr_status_candidate: Option<PullRequestStatusSyncCandidate>,
     pr_branch_success_count: usize,
+    mark_started_fails: bool,
     branch_sync_candidates: Vec<PullRequestBranchSyncCandidate>,
     bulk_recorded: Vec<(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)>,
 }
@@ -1396,6 +1397,10 @@ impl FakeRepos {
         self.state.borrow_mut().pr_branch_candidate = Some(candidate);
     }
 
+    pub(crate) fn fail_mark_started(&self) {
+        self.state.borrow_mut().mark_started_fails = true;
+    }
+
     pub(crate) fn pr_branch_success_count(&self) -> usize {
         self.state.borrow().pr_branch_success_count
     }
@@ -1429,6 +1434,9 @@ impl TerminalSessionRepository for FakeRepos {
     }
 
     fn mark_terminal_session_started(&self, id: &str, pid: Option<u32>) -> Result<()> {
+        if self.state.borrow().mark_started_fails {
+            return Err(anyhow!("mark started failed"));
+        }
         if let Some(s) = self.state.borrow_mut().terminal_sessions.iter_mut().find(|s| s.id == id) {
             s.status = TerminalSessionStatus::Running;
             s.pid = pid;
