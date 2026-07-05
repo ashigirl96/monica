@@ -15,6 +15,10 @@ pub struct OpenSdkSessionParams {
     pub model: Option<String>,
     pub title: Option<String>,
     pub shell: String,
+    /// Client-supplied session id for idempotent opens: a retry after a lost response
+    /// carries the same id, and an id already mapped to a live session returns that
+    /// session instead of spawning a second one. `None` mints a fresh id server-side.
+    pub claude_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -36,6 +40,32 @@ pub(crate) fn sdk_initial_command(claude_session_id: &str, model: Option<&str>) 
         Some(model) => format!("{base} --model {}", crate::shell::quote_single(model)),
         None => base,
     }
+}
+
+/// Claude Code's project-directory slug for a cwd: every character outside ASCII
+/// alphanumerics becomes `-`, with no collapsing (so `/a/.b` → `-a--b`). Claude Code does
+/// this with a JS regex over UTF-16 code units, so mapping per UTF-16 unit — not per
+/// `char` — keeps astral characters (which JS sees as two units) producing two dashes.
+pub fn claude_project_slug(cwd: &str) -> String {
+    cwd.encode_utf16()
+        .map(|u| match char::from_u32(u as u32) {
+            Some(c) if c.is_ascii_alphanumeric() => c,
+            _ => '-',
+        })
+        .collect()
+}
+
+/// Where Claude Code writes the session transcript: derived, never stored — the mapping
+/// row keeps only `cwd` and `claude_session_id`.
+pub fn claude_jsonl_path(
+    home: &std::path::Path,
+    cwd: &str,
+    claude_session_id: &str,
+) -> std::path::PathBuf {
+    home.join(".claude")
+        .join("projects")
+        .join(claude_project_slug(cwd))
+        .join(format!("{claude_session_id}.jsonl"))
 }
 
 #[cfg(test)]
@@ -63,6 +93,32 @@ mod tests {
         assert_eq!(
             sdk_initial_command("uuid", Some("o'pus")),
             "claude --session-id uuid --model 'o'\\''pus'"
+        );
+    }
+
+    #[test]
+    fn slug_replaces_every_non_alphanumeric_without_collapsing() {
+        assert_eq!(claude_project_slug("/private/tmp"), "-private-tmp");
+        // `/` and `.` each become `-`, so `/.worktrees` yields a double dash.
+        assert_eq!(
+            claude_project_slug("/Users/me/.ghq/monica/.worktrees/issue-1"),
+            "-Users-me--ghq-monica--worktrees-issue-1"
+        );
+        assert_eq!(claude_project_slug("/repos/auto_reserve"), "-repos-auto-reserve");
+        assert_eq!(claude_project_slug("/Users/Me/Dir9"), "-Users-Me-Dir9");
+    }
+
+    #[test]
+    fn slug_maps_astral_characters_to_two_dashes_like_js() {
+        // '🦀' is one Rust char but two UTF-16 units; JS's per-unit regex emits two dashes.
+        assert_eq!(claude_project_slug("/a/🦀b"), "-a---b");
+    }
+
+    #[test]
+    fn jsonl_path_is_home_claude_projects_slug_uuid() {
+        assert_eq!(
+            claude_jsonl_path(std::path::Path::new("/Users/me"), "/private/tmp", "uuid-1"),
+            std::path::PathBuf::from("/Users/me/.claude/projects/-private-tmp/uuid-1.jsonl")
         );
     }
 }

@@ -99,7 +99,37 @@ pub struct OpenSessionParams {
     pub cwd: String,
     pub model: Option<String>,
     pub title: Option<String>,
+    /// Idempotency key (a UUID). `None` mints one client-side before the request goes
+    /// out; if the response is then lost, the minted key comes back inside the error as
+    /// a downcastable [`OpenSessionIndeterminate`], so the retry can carry it. Supply
+    /// your own when the caller already persisted an id it wants the session to run
+    /// under.
+    pub claude_session_id: Option<String>,
 }
+
+/// The request left this process but no usable response came back, so the outcome is
+/// unknown: the session may be running under [`Self::claude_session_id`]. Recover this
+/// from the `anyhow` chain (`err.downcast_ref::<OpenSessionIndeterminate>()`) and retry
+/// with that id — a server that did create the session answers with it instead of opening
+/// a second one, a launch interrupted mid-flight is refused explicitly, and if nothing was
+/// created the retry simply launches under that same id.
+#[derive(Debug, Clone)]
+pub struct OpenSessionIndeterminate {
+    pub claude_session_id: String,
+}
+
+impl std::fmt::Display for OpenSessionIndeterminate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the session may still have been created; retry with claude_session_id={} to \
+             resolve to it instead of opening a second session",
+            self.claude_session_id
+        )
+    }
+}
+
+impl std::error::Error for OpenSessionIndeterminate {}
 
 /// Control-socket round-trip timeout (mirrors `PtydClient`'s request timeout).
 const OPEN_SESSION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -117,12 +147,16 @@ const OPEN_SESSION_TIMEOUT: Duration = Duration::from_secs(10);
 /// (`~/.claude/projects/<slug>/<claude_session_id>.jsonl`) appearing; hook/JSONL-based
 /// readiness APIs are MVP4/MVP5 scope.
 ///
-/// Retry semantics: a server-reported error means no session is left behind (a failed
-/// launch is torn down), so retrying is safe. A transport failure after the request was
-/// sent (timeout, dropped connection) leaves the outcome unknown — the session may be
-/// running; check the Workbench (or the sidebar's Detached group) before retrying.
-/// Idempotent opens (a client-supplied key resolving to the original session) need the
-/// persistent session mapping and land with MVP3.
+/// Retry semantics: a determinate server-reported error means no session is left behind
+/// (a failed launch is torn down), so retrying is safe. Every other failure once the
+/// request started going out — a failed write, timeout, dropped connection, truncated or
+/// unparseable response, or the server answering that it cannot resolve the outcome
+/// itself (an unconfirmed launch reservation) — leaves the outcome unknown: that error
+/// carries a downcastable [`OpenSessionIndeterminate`] holding the `claude_session_id`
+/// the request ran under (supplied or client-minted), and retrying with that id resolves
+/// to the original session instead of creating a second one. Retrying with a fresh id
+/// after an indeterminate failure can open a second session; check the Workbench first
+/// if that matters.
 pub fn open_session(params: OpenSessionParams) -> Result<SdkSessionInfo> {
     open_session_at(&paths::sdk_socket_path()?, params)
 }
@@ -136,6 +170,9 @@ pub fn open_session_at(socket: &Path, params: OpenSessionParams) -> Result<SdkSe
         .with_context(|| format!("failed to resolve cwd {}", params.cwd))?
         .to_string_lossy()
         .into_owned();
+    let claude_session_id = params
+        .claude_session_id
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
     let stream = UnixStream::connect(socket).with_context(|| {
         format!(
@@ -151,30 +188,78 @@ pub fn open_session_at(socket: &Path, params: OpenSessionParams) -> Result<SdkSe
             cwd,
             model: params.model,
             title: params.title,
+            claude_session_id: Some(claude_session_id.clone()),
         },
     };
     let mut payload = serde_json::to_string(&request)?;
     payload.push('\n');
     let mut writer = stream.try_clone()?;
-    writer.write_all(payload.as_bytes())?;
+    // From the first write on, a failure no longer implies "nothing happened": even a
+    // partial write can reach the server as a complete request (closing the socket
+    // flushes what was sent, and read_line returns it on EOF), and a lost response
+    // leaves the session possibly running — but it runs under the id this call sent.
+    // That id must survive every such failure in a structured form (not just error
+    // prose), or a caller who minted through us could never retry idempotently: hence
+    // the downcastable OpenSessionIndeterminate in the chain. Only a parsed, determinate
+    // server Err proves no session was left behind.
+    let indeterminate = |context: String| {
+        anyhow::Error::new(OpenSessionIndeterminate {
+            claude_session_id: claude_session_id.clone(),
+        })
+        .context(context)
+    };
+    if let Err(e) = writer.write_all(payload.as_bytes()) {
+        return Err(indeterminate(format!(
+            "failed to send the request to the sdk control socket: {e}"
+        )));
+    }
 
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
-    // Past this point a failure no longer implies "nothing happened": the request was
-    // already sent, so a lost response leaves the session possibly running.
-    reader.read_line(&mut line).context(
-        "failed to read a response from the sdk control socket; \
-         the session may still have been created — check the Workbench before retrying",
-    )?;
-    if line.trim().is_empty() {
-        bail!(
-            "sdk control socket closed without a response; \
-             the session may still have been created — check the Workbench before retrying"
-        );
+    if let Err(e) = reader.read_line(&mut line) {
+        return Err(indeterminate(format!(
+            "failed to read a response from the sdk control socket: {e}"
+        )));
     }
-    match serde_json::from_str::<SdkResponse>(&line)? {
-        SdkResponse::Ok { session } => Ok(session),
-        SdkResponse::Err { error } => bail!("open_session rejected: {error}"),
+    if line.trim().is_empty() {
+        return Err(indeterminate("sdk control socket closed without a response".to_string()));
+    }
+    let response: SdkResponse = match serde_json::from_str(&line) {
+        Ok(response) => response,
+        Err(e) => {
+            // A truncated line still comes back from read_line (EOF ends it), so a server
+            // that died mid-response surfaces here rather than as an I/O error.
+            return Err(indeterminate(format!(
+                "sdk control socket answered with an unparseable response: {e}"
+            )));
+        }
+    };
+    match response {
+        SdkResponse::Ok { session } => {
+            // Version negotiation makes this unreachable against real servers (v1 apps
+            // reject v2 requests before launching), so a mismatch means a server that
+            // claims v2 but broke the idempotency contract — fail loudly rather than let
+            // "safe retries" open another session.
+            if session.claude_session_id != claude_session_id {
+                bail!(
+                    "server ignored the client-supplied claude_session_id: sent \
+                     {claude_session_id}, got {}; the session IS running under the \
+                     returned id, but retries are not idempotent against this server",
+                    session.claude_session_id
+                );
+            }
+            Ok(session)
+        }
+        // The server can be unable to determine the outcome too (the id maps to a launch
+        // reservation still unconfirmed — an open in flight elsewhere, or one that was
+        // interrupted). That is the same "may be running under this id" situation as a
+        // lost response, and it must not read as "rejected, nothing created".
+        SdkResponse::Err { error, indeterminate: true } => {
+            Err(indeterminate(format!("open_session did not resolve: {error}")))
+        }
+        SdkResponse::Err { error, indeterminate: false } => {
+            bail!("open_session rejected: {error}")
+        }
     }
 }
 

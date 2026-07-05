@@ -4,13 +4,16 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
-use monica_domain::RawJson;
+use monica_domain::{
+    ClaudeLaunchPhase, ClaudeSession, ClaudeSessionStatus, NewClaudeSession, RawJson,
+};
 
 use crate::ports::{
-    AgentDecoders, BoxFuture, EventRepository, GitGateway, NotebookGateway,
-    NotificationOutboxStore, ProjectRepository, PullRequestSyncStore, TaskBoardQuery, TaskRunStore,
-    TaskStore, TaskSummaryFilter, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
-    TerminalSessionRepository, UnitOfWork, WorkTransaction, WorkbenchStore, Workspace,
+    AgentDecoders, BoxFuture, ClaudeSessionRepository, EventRepository, GitGateway,
+    NotebookGateway, NotificationOutboxStore, ProjectRepository, PullRequestSyncStore,
+    TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter, TerminalAttachment,
+    TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository, UnitOfWork, WorkTransaction,
+    WorkbenchStore, Workspace,
 };
 use crate::usecases::runs::record_hook;
 use crate::prelude::{
@@ -111,6 +114,7 @@ struct FakeState {
     benches: BTreeMap<String, (String, String)>,
     /// Insertion order is creation order, so the last match for a tab is its latest session.
     terminal_sessions: Vec<TerminalSession>,
+    claude_sessions: Vec<ClaudeSession>,
     next_task: i64,
     next_run: i64,
     next_session: i64,
@@ -118,6 +122,12 @@ struct FakeState {
     pr_status_candidate: Option<PullRequestStatusSyncCandidate>,
     pr_branch_success_count: usize,
     mark_started_fails: bool,
+    get_terminal_session_fails: bool,
+    create_claude_session_fails: bool,
+    claude_insert_race_winner: Option<ClaudeSession>,
+    claude_session_age_secs: i64,
+    mark_claude_launched_fails: bool,
+    mark_claude_launched_returns_false: bool,
     branch_sync_candidates: Vec<PullRequestBranchSyncCandidate>,
     bulk_recorded: Vec<(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)>,
 }
@@ -1401,6 +1411,45 @@ impl FakeRepos {
         self.state.borrow_mut().mark_started_fails = true;
     }
 
+    pub(crate) fn fail_create_claude_session(&self) {
+        self.state.borrow_mut().create_claude_session_fails = true;
+    }
+
+    /// Stage the losing side of a same-id reservation race: the winner's row lands
+    /// exactly when `create_claude_session` is called, which then fails on the
+    /// duplicate — the interleaving where both opens passed recovery first.
+    pub(crate) fn race_claude_session_insert(&self, winner: ClaudeSession) {
+        self.state.borrow_mut().claude_insert_race_winner = Some(winner);
+    }
+
+    /// Age every claude session row reports, for staging stale (crash-leftover)
+    /// reservations against the pending lease.
+    pub(crate) fn set_claude_session_age(&self, seconds: i64) {
+        self.state.borrow_mut().claude_session_age_secs = seconds;
+    }
+
+    pub(crate) fn fail_get_terminal_session(&self) {
+        self.state.borrow_mut().get_terminal_session_fails = true;
+    }
+
+    pub(crate) fn fail_mark_claude_launched(&self) {
+        self.state.borrow_mut().mark_claude_launched_fails = true;
+    }
+
+    /// Simulate the PTY settling between the launch write and its confirmation: the
+    /// coupled transition already ended the row, so the pending→active update matches
+    /// nothing.
+    pub(crate) fn stall_mark_claude_launched(&self) {
+        self.state.borrow_mut().mark_claude_launched_returns_false = true;
+    }
+
+    /// Seed a mapping row directly, bypassing the terminal-row existence check — for
+    /// staging the "mapping survived, terminal row gone" inconsistency that
+    /// `save_terminal_state`-style rewrites can leave behind.
+    pub(crate) fn seed_claude_session(&self, session: ClaudeSession) {
+        self.state.borrow_mut().claude_sessions.push(session);
+    }
+
     pub(crate) fn pr_branch_success_count(&self) -> usize {
         self.state.borrow().pr_branch_success_count
     }
@@ -1450,15 +1499,23 @@ impl TerminalSessionRepository for FakeRepos {
         status: TerminalSessionStatus,
         exit_code: Option<i32>,
     ) -> Result<()> {
-        if let Some(s) = self.state.borrow_mut().terminal_sessions.iter_mut().find(|s| s.id == id) {
+        let mut state = self.state.borrow_mut();
+        if let Some(s) = state.terminal_sessions.iter_mut().find(|s| s.id == id) {
             s.status = status;
             s.exit_code = exit_code;
+        }
+        if status.is_terminal() {
+            end_claude_sessions_for(&mut state, id);
         }
         Ok(())
     }
 
     fn get_terminal_session(&self, id: &str) -> Result<Option<TerminalSession>> {
-        Ok(self.state.borrow().terminal_sessions.iter().find(|s| s.id == id).cloned())
+        let state = self.state.borrow();
+        if state.get_terminal_session_fails {
+            return Err(anyhow!("get terminal session failed"));
+        }
+        Ok(state.terminal_sessions.iter().find(|s| s.id == id).cloned())
     }
 
     fn latest_terminal_session_for_tab(&self, tab_id: &str) -> Result<Option<TerminalSession>> {
@@ -1497,6 +1554,9 @@ impl TerminalSessionRepository for FakeRepos {
                     s.exit_code = update.exit_code;
                 }
             }
+            if update.status.is_terminal() {
+                end_claude_sessions_for(&mut state, &update.session_id);
+            }
         }
         Ok(())
     }
@@ -1511,6 +1571,133 @@ impl TerminalSessionRepository for FakeRepos {
         _snapshot: &TerminalStateSnapshot,
     ) -> Result<()> {
         Ok(())
+    }
+}
+
+/// Mirror of the adapter's coupled transition: a terminal-status write also ends the
+/// Claude sessions mapped to that terminal session, stamping `ended_at` once.
+fn end_claude_sessions_for(state: &mut FakeState, terminal_session_id: &str) {
+    for cs in state
+        .claude_sessions
+        .iter_mut()
+        .filter(|cs| cs.terminal_session_id == terminal_session_id)
+    {
+        if cs.status != ClaudeSessionStatus::Ended {
+            cs.status = ClaudeSessionStatus::Ended;
+            cs.ended_at = Some("2026-06-02T00:00:01.000Z".to_string());
+        }
+    }
+}
+
+impl ClaudeSessionRepository for FakeRepos {
+    fn create_claude_session(&mut self, new: NewClaudeSession) -> Result<ClaudeSession> {
+        let mut state = self.state.borrow_mut();
+        if state.create_claude_session_fails {
+            return Err(anyhow!("create claude session failed"));
+        }
+        if let Some(winner) = state.claude_insert_race_winner.take() {
+            state.claude_sessions.push(winner);
+            return Err(anyhow!("claude session {} already exists", new.claude_session_id));
+        }
+        if state
+            .claude_sessions
+            .iter()
+            .any(|cs| cs.claude_session_id == new.claude_session_id)
+        {
+            return Err(anyhow!("claude session {} already exists", new.claude_session_id));
+        }
+        let ts_status = state
+            .terminal_sessions
+            .iter()
+            .find(|s| s.id == new.terminal_session_id)
+            .map(|s| s.status)
+            .ok_or_else(|| anyhow!("terminal session {} not found", new.terminal_session_id))?;
+        let ended = ts_status.is_terminal();
+        let session = ClaudeSession {
+            claude_session_id: new.claude_session_id,
+            runspace_id: new.runspace_id,
+            tab_id: new.tab_id,
+            terminal_session_id: new.terminal_session_id,
+            cwd: new.cwd,
+            name: new.name,
+            status: if ended { ClaudeSessionStatus::Ended } else { ClaudeSessionStatus::Pending },
+            launch_phase: ClaudeLaunchPhase::Reserved,
+            created_at: "2026-06-02T00:00:00.000Z".to_string(),
+            ended_at: ended.then(|| "2026-06-02T00:00:00.000Z".to_string()),
+        };
+        state.claude_sessions.push(session.clone());
+        Ok(session)
+    }
+
+    fn mark_claude_session_submitting(&mut self, claude_session_id: &str) -> Result<bool> {
+        let mut state = self.state.borrow_mut();
+        let Some(cs) = state
+            .claude_sessions
+            .iter_mut()
+            .find(|cs| cs.claude_session_id == claude_session_id)
+        else {
+            return Ok(false);
+        };
+        if cs.status != ClaudeSessionStatus::Pending
+            || cs.launch_phase != ClaudeLaunchPhase::Reserved
+        {
+            return Ok(false);
+        }
+        cs.launch_phase = ClaudeLaunchPhase::Submitting;
+        Ok(true)
+    }
+
+    fn claude_session_age_seconds(&self, claude_session_id: &str) -> Result<Option<i64>> {
+        let state = self.state.borrow();
+        Ok(state
+            .claude_sessions
+            .iter()
+            .any(|cs| cs.claude_session_id == claude_session_id)
+            .then_some(state.claude_session_age_secs))
+    }
+
+    fn mark_claude_session_launched(&mut self, claude_session_id: &str) -> Result<bool> {
+        let mut state = self.state.borrow_mut();
+        if state.mark_claude_launched_fails {
+            return Err(anyhow!("mark launched failed"));
+        }
+        if state.mark_claude_launched_returns_false {
+            return Ok(false);
+        }
+        let Some(cs) = state
+            .claude_sessions
+            .iter_mut()
+            .find(|cs| cs.claude_session_id == claude_session_id)
+        else {
+            return Ok(false);
+        };
+        if cs.status != ClaudeSessionStatus::Pending {
+            return Ok(false);
+        }
+        cs.status = ClaudeSessionStatus::Active;
+        Ok(true)
+    }
+
+    fn delete_claude_session(&mut self, claude_session_id: &str) -> Result<()> {
+        self.state
+            .borrow_mut()
+            .claude_sessions
+            .retain(|cs| cs.claude_session_id != claude_session_id);
+        Ok(())
+    }
+
+    fn get_claude_session(&self, claude_session_id: &str) -> Result<Option<ClaudeSession>> {
+        Ok(self
+            .state
+            .borrow()
+            .claude_sessions
+            .iter()
+            .find(|cs| cs.claude_session_id == claude_session_id)
+            .cloned())
+    }
+
+    fn list_claude_sessions(&self) -> Result<Vec<ClaudeSession>> {
+        Ok(self.state.borrow().claude_sessions.clone())
     }
 }
 
@@ -1557,9 +1744,16 @@ impl Workspace for FakeWorkspace {
 pub(crate) struct FakeDaemon {
     create_fails: bool,
     write_fails: bool,
+    write_ack_lost: bool,
+    terminate_fails: bool,
+    /// The kill is acked but the session never stops reporting running — a dispatched
+    /// signal whose death is never observed (e.g. a survivor holding the PTY open).
+    kill_never_observed: bool,
+    list_fails: bool,
     pub(crate) created: Mutex<Vec<TerminalCreateRequest>>,
     pub(crate) written: Mutex<Vec<(String, Vec<u8>)>>,
     pub(crate) terminated: Mutex<Vec<String>>,
+    pub(crate) views: Mutex<Vec<DaemonSessionView>>,
 }
 
 impl FakeDaemon {
@@ -1569,6 +1763,43 @@ impl FakeDaemon {
 
     pub(crate) fn failing_write() -> Self {
         Self { write_fails: true, ..Self::default() }
+    }
+
+    /// The connection dies mid-open: the write reaches the PTY but its ack is lost, and
+    /// the follow-up kill cannot be confirmed either.
+    pub(crate) fn losing_write_ack() -> Self {
+        Self { write_ack_lost: true, terminate_fails: true, ..Self::default() }
+    }
+
+    /// The write ack is lost and the follow-up kill IS acknowledged — but the session
+    /// keeps reporting running (seed the view): a dispatched signal whose death is never
+    /// observed, e.g. a survivor holding the PTY open.
+    pub(crate) fn losing_write_ack_kill_unobserved() -> Self {
+        Self { write_ack_lost: true, kill_never_observed: true, ..Self::default() }
+    }
+
+    /// The kill is acked but death is never observed, with writes working normally.
+    pub(crate) fn kill_unobserved() -> Self {
+        Self { kill_never_observed: true, ..Self::default() }
+    }
+
+    pub(crate) fn failing_terminate() -> Self {
+        Self { terminate_fails: true, ..Self::default() }
+    }
+
+    pub(crate) fn failing_list() -> Self {
+        Self { list_fails: true, ..Self::default() }
+    }
+
+    /// Make `list_views` report this session as alive, as if the PTY survived a restart.
+    pub(crate) fn seed_running_view(&self, session_id: &str) {
+        self.views.lock().unwrap().push(DaemonSessionView {
+            session_id: session_id.to_string(),
+            pid: Some(4321),
+            running: true,
+            attached: false,
+            exit_code: None,
+        });
     }
 }
 
@@ -1586,6 +1817,9 @@ impl TerminalDaemon for FakeDaemon {
             return Err(anyhow!("daemon write failed"));
         }
         self.written.lock().unwrap().push((session_id.to_string(), data.to_vec()));
+        if self.write_ack_lost {
+            return Err(anyhow!("daemon write ack lost"));
+        }
         Ok(())
     }
     fn attach(&self, _session_id: &str, _replay_bytes: Option<u32>) -> Result<TerminalAttachment> {
@@ -1595,11 +1829,26 @@ impl TerminalDaemon for FakeDaemon {
         Ok(())
     }
     fn terminate(&self, session_id: &str) -> Result<()> {
+        if self.terminate_fails {
+            return Err(anyhow!("daemon terminate failed"));
+        }
         self.terminated.lock().unwrap().push(session_id.to_string());
+        // Mirror the real daemon's exit bookkeeping: a killed session stops reporting
+        // running, unless the fake is staging an unobservable death.
+        if !self.kill_never_observed {
+            for view in self.views.lock().unwrap().iter_mut() {
+                if view.session_id == session_id {
+                    view.running = false;
+                }
+            }
+        }
         Ok(())
     }
     fn list_views(&self) -> Result<Vec<DaemonSessionView>> {
-        Ok(Vec::new())
+        if self.list_fails {
+            return Err(anyhow!("daemon list failed"));
+        }
+        Ok(self.views.lock().unwrap().clone())
     }
     fn reap(&self, _session_id: &str) {}
 }
