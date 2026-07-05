@@ -121,6 +121,8 @@ struct FakeState {
     pr_branch_success_count: usize,
     mark_started_fails: bool,
     create_claude_session_fails: bool,
+    mark_claude_launched_fails: bool,
+    mark_claude_launched_returns_false: bool,
     branch_sync_candidates: Vec<PullRequestBranchSyncCandidate>,
     bulk_recorded: Vec<(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)>,
 }
@@ -1408,6 +1410,17 @@ impl FakeRepos {
         self.state.borrow_mut().create_claude_session_fails = true;
     }
 
+    pub(crate) fn fail_mark_claude_launched(&self) {
+        self.state.borrow_mut().mark_claude_launched_fails = true;
+    }
+
+    /// Simulate the PTY settling between the launch write and its confirmation: the
+    /// coupled transition already ended the row, so the pending→active update matches
+    /// nothing.
+    pub(crate) fn stall_mark_claude_launched(&self) {
+        self.state.borrow_mut().mark_claude_launched_returns_false = true;
+    }
+
     /// Seed a mapping row directly, bypassing the terminal-row existence check — for
     /// staging the "mapping survived, terminal row gone" inconsistency that
     /// `save_terminal_state`-style rewrites can leave behind.
@@ -1577,12 +1590,42 @@ impl ClaudeSessionRepository for FakeRepos {
             terminal_session_id: new.terminal_session_id,
             cwd: new.cwd,
             name: new.name,
-            status: if ended { ClaudeSessionStatus::Ended } else { ClaudeSessionStatus::Active },
+            status: if ended { ClaudeSessionStatus::Ended } else { ClaudeSessionStatus::Pending },
             created_at: "2026-06-02T00:00:00.000Z".to_string(),
             ended_at: ended.then(|| "2026-06-02T00:00:00.000Z".to_string()),
         };
         state.claude_sessions.push(session.clone());
         Ok(session)
+    }
+
+    fn mark_claude_session_launched(&mut self, claude_session_id: &str) -> Result<bool> {
+        let mut state = self.state.borrow_mut();
+        if state.mark_claude_launched_fails {
+            return Err(anyhow!("mark launched failed"));
+        }
+        if state.mark_claude_launched_returns_false {
+            return Ok(false);
+        }
+        let Some(cs) = state
+            .claude_sessions
+            .iter_mut()
+            .find(|cs| cs.claude_session_id == claude_session_id)
+        else {
+            return Ok(false);
+        };
+        if cs.status != ClaudeSessionStatus::Pending {
+            return Ok(false);
+        }
+        cs.status = ClaudeSessionStatus::Active;
+        Ok(true)
+    }
+
+    fn delete_claude_session(&mut self, claude_session_id: &str) -> Result<()> {
+        self.state
+            .borrow_mut()
+            .claude_sessions
+            .retain(|cs| cs.claude_session_id != claude_session_id);
+        Ok(())
     }
 
     fn get_claude_session(&self, claude_session_id: &str) -> Result<Option<ClaudeSession>> {

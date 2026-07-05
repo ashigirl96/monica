@@ -100,10 +100,35 @@ pub struct OpenSessionParams {
     pub model: Option<String>,
     pub title: Option<String>,
     /// Idempotency key (a UUID). `None` mints one client-side before the request goes
-    /// out, so every open is retry-safe by construction; supply your own only when the
-    /// caller already persisted an id it wants the session to run under.
+    /// out; if the response is then lost, the minted key comes back inside the error as
+    /// a downcastable [`OpenSessionIndeterminate`], so the retry can carry it. Supply
+    /// your own when the caller already persisted an id it wants the session to run
+    /// under.
     pub claude_session_id: Option<String>,
 }
+
+/// The request was sent but no response came back, so the outcome is unknown: the
+/// session may be running under [`Self::claude_session_id`]. Recover this from the
+/// `anyhow` chain (`err.downcast_ref::<OpenSessionIndeterminate>()`) and retry with that
+/// id — a server that did create the session answers with it instead of opening a second
+/// one, and a launch interrupted mid-flight is refused explicitly.
+#[derive(Debug, Clone)]
+pub struct OpenSessionIndeterminate {
+    pub claude_session_id: String,
+}
+
+impl std::fmt::Display for OpenSessionIndeterminate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the session may still have been created; retry with claude_session_id={} to \
+             resolve to it instead of opening a second session",
+            self.claude_session_id
+        )
+    }
+}
+
+impl std::error::Error for OpenSessionIndeterminate {}
 
 /// Control-socket round-trip timeout (mirrors `PtydClient`'s request timeout).
 const OPEN_SESSION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -123,11 +148,12 @@ const OPEN_SESSION_TIMEOUT: Duration = Duration::from_secs(10);
 ///
 /// Retry semantics: a server-reported error means no session is left behind (a failed
 /// launch is torn down), so retrying is safe. A transport failure after the request was
-/// sent (timeout, dropped connection) leaves the outcome unknown — but the request
-/// carries a `claude_session_id` minted client-side, so retrying with the *same params
-/// value* (keep the id the first call filled in, or pre-fill your own) resolves to the
-/// original session instead of creating a second one. Retrying with a freshly minted id
-/// opens a second session; check the Workbench first if that matters.
+/// sent (timeout, dropped connection) leaves the outcome unknown — that error carries a
+/// downcastable [`OpenSessionIndeterminate`] holding the `claude_session_id` the request
+/// ran under (supplied or client-minted), and retrying with that id resolves to the
+/// original session instead of creating a second one. Retrying with a fresh id after an
+/// indeterminate failure can open a second session; check the Workbench first if that
+/// matters.
 pub fn open_session(params: OpenSessionParams) -> Result<SdkSessionInfo> {
     open_session_at(&paths::sdk_socket_path()?, params)
 }
@@ -171,19 +197,22 @@ pub fn open_session_at(socket: &Path, params: OpenSessionParams) -> Result<SdkSe
     let mut line = String::new();
     // Past this point a failure no longer implies "nothing happened": the request was
     // already sent, so a lost response leaves the session possibly running — but it runs
-    // under the id this call sent, so a retry carrying that id resolves to it.
-    let recovery_hint = || {
-        format!(
-            "the session may still have been created; retry with \
-             claude_session_id={claude_session_id} to resolve to it instead of \
-             opening a second session"
-        )
+    // under the id this call sent. That id must survive the failure in a structured form
+    // (not just error prose), or a caller who minted through us could never retry
+    // idempotently: hence the downcastable OpenSessionIndeterminate in the chain.
+    let indeterminate = |context: String| {
+        anyhow::Error::new(OpenSessionIndeterminate {
+            claude_session_id: claude_session_id.clone(),
+        })
+        .context(context)
     };
-    reader.read_line(&mut line).with_context(|| {
-        format!("failed to read a response from the sdk control socket; {}", recovery_hint())
-    })?;
+    if let Err(e) = reader.read_line(&mut line) {
+        return Err(indeterminate(format!(
+            "failed to read a response from the sdk control socket: {e}"
+        )));
+    }
     if line.trim().is_empty() {
-        bail!("sdk control socket closed without a response; {}", recovery_hint());
+        return Err(indeterminate("sdk control socket closed without a response".to_string()));
     }
     match serde_json::from_str::<SdkResponse>(&line)? {
         SdkResponse::Ok { session } => {

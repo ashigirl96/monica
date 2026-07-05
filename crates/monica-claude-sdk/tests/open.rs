@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use monica_claude_sdk::{open_session_at, OpenSessionParams};
+use monica_claude_sdk::{open_session_at, OpenSessionIndeterminate, OpenSessionParams};
 use monica_sdk_protocol::{SdkRequest, SdkResponse, SdkSessionInfo};
 
 const RECV_TIMEOUT: Duration = Duration::from_secs(5);
@@ -153,10 +153,34 @@ fn err_response_surfaces_the_server_message() {
 }
 
 #[test]
-fn server_closing_without_a_response_is_an_error() {
+fn server_closing_without_a_response_is_an_error_carrying_the_retry_key() {
     let mock = start_mock("drop", None);
     let err = open_session_at(&mock.socket, params()).unwrap_err();
     assert!(err.to_string().contains("without a response"), "got: {err}");
+    // The indeterminate outcome must expose the id in a structured form, so retry code
+    // can carry it without parsing error prose.
+    let indeterminate = err
+        .downcast_ref::<OpenSessionIndeterminate>()
+        .expect("an unknown outcome must downcast to OpenSessionIndeterminate");
+    assert_eq!(indeterminate.claude_session_id, CANNED_ID);
+}
+
+#[test]
+fn lost_response_recovers_the_minted_id_through_the_typed_error() {
+    let mock = start_mock("dropmint", None);
+    let mut no_id = params();
+    no_id.claude_session_id = None;
+
+    let err = open_session_at(&mock.socket, no_id).unwrap_err();
+
+    let recovered = err
+        .downcast_ref::<OpenSessionIndeterminate>()
+        .expect("an unknown outcome must downcast to OpenSessionIndeterminate")
+        .claude_session_id
+        .clone();
+    let request = mock.requests.recv_timeout(RECV_TIMEOUT).unwrap();
+    let monica_sdk_protocol::SdkRequestOp::OpenSdkSession { claude_session_id, .. } = request.op;
+    assert_eq!(Some(recovered), claude_session_id, "the error must carry the id that was sent");
 }
 
 #[test]

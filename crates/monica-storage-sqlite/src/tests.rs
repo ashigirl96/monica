@@ -2381,7 +2381,7 @@ fn claude_session_create_and_get_round_trip() {
 
     let created = db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
     assert_eq!(created.claude_session_id, "uuid-1");
-    assert_eq!(created.status, ClaudeSessionStatus::Active);
+    assert_eq!(created.status, ClaudeSessionStatus::Pending);
     assert_eq!(created.runspace_id, "sdk");
     assert_eq!(created.tab_id, "tab-sdk-1");
     assert_eq!(created.terminal_session_id, ts.id);
@@ -2396,9 +2396,54 @@ fn claude_session_create_and_get_round_trip() {
 }
 
 #[test]
+fn claude_session_launch_confirmation_flips_pending_to_active_once() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let ts = db.create_terminal_session(new_shell_session(Some("sdk"), None)).unwrap();
+    db.mark_terminal_session_started(&ts.id, Some(1), None).unwrap();
+    db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
+
+    assert!(db.mark_claude_session_launched("uuid-1").unwrap());
+    let row = db.get_claude_session("uuid-1").unwrap().unwrap();
+    assert_eq!(row.status, ClaudeSessionStatus::Active);
+    assert!(row.ended_at.is_none());
+
+    // Only a pending row can be confirmed: active and unknown ids report false.
+    assert!(!db.mark_claude_session_launched("uuid-1").unwrap());
+    assert!(!db.mark_claude_session_launched("uuid-404").unwrap());
+}
+
+#[test]
+fn claude_session_launch_confirmation_refuses_a_settled_row() {
+    // The PTY can die between the reservation and the launch confirmation; the coupled
+    // transition ends the row, and the confirmation must observe that, not resurrect it.
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let ts = db.create_terminal_session(new_shell_session(Some("sdk"), None)).unwrap();
+    db.mark_terminal_session_started(&ts.id, Some(1), None).unwrap();
+    db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
+    db.update_terminal_session_status(&ts.id, TerminalSessionStatus::Exited, Some(0)).unwrap();
+
+    assert!(!db.mark_claude_session_launched("uuid-1").unwrap());
+    assert_eq!(
+        db.get_claude_session("uuid-1").unwrap().unwrap().status,
+        ClaudeSessionStatus::Ended
+    );
+}
+
+#[test]
+fn claude_session_delete_frees_the_id_for_a_fresh_reservation() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let ts = db.create_terminal_session(new_shell_session(Some("sdk"), None)).unwrap();
+    db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
+
+    db.delete_claude_session("uuid-1").unwrap();
+
+    assert!(db.get_claude_session("uuid-1").unwrap().is_none());
+    db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
+}
+
+#[test]
 fn claude_session_insert_lands_ended_when_terminal_row_already_settled() {
-    // The write_input → insert window can lose to the PTY reader thread's exit write; an
-    // insert against an already-settled terminal row must never produce an active mapping.
+    // A reservation against an already-settled terminal row must never look launchable.
     let mut db = SqliteStore::open_in_memory().unwrap();
     let ts = db.create_terminal_session(new_shell_session(Some("sdk"), None)).unwrap();
     db.update_terminal_session_status(&ts.id, TerminalSessionStatus::Exited, Some(1)).unwrap();
@@ -2407,6 +2452,7 @@ fn claude_session_insert_lands_ended_when_terminal_row_already_settled() {
 
     assert_eq!(created.status, ClaudeSessionStatus::Ended);
     assert!(created.ended_at.is_some());
+    assert!(!db.mark_claude_session_launched("uuid-1").unwrap());
 }
 
 #[test]
@@ -2434,6 +2480,7 @@ fn claude_session_ends_with_its_terminal_session_and_stamps_ended_at_once() {
     let ts = db.create_terminal_session(new_shell_session(Some("sdk"), None)).unwrap();
     db.mark_terminal_session_started(&ts.id, Some(1), None).unwrap();
     db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
+    assert!(db.mark_claude_session_launched("uuid-1").unwrap());
 
     // A live transition must not end the mapping.
     db.update_terminal_session_status(&ts.id, TerminalSessionStatus::Detached, None).unwrap();
@@ -2460,6 +2507,8 @@ fn claude_session_terminal_transition_leaves_other_mappings_alone() {
     db.mark_terminal_session_started(&survivor.id, Some(2), None).unwrap();
     db.create_claude_session(new_claude_session("uuid-doomed", &doomed.id)).unwrap();
     db.create_claude_session(new_claude_session("uuid-survivor", &survivor.id)).unwrap();
+    assert!(db.mark_claude_session_launched("uuid-doomed").unwrap());
+    assert!(db.mark_claude_session_launched("uuid-survivor").unwrap());
 
     db.apply_terminal_session_updates(&[TerminalSessionUpdate {
         session_id: doomed.id.clone(),

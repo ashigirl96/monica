@@ -291,18 +291,13 @@ impl<B: Backend> ExecutionService<'_, B> {
             )));
         }
 
-        if let Err(e) = daemon.write_input(&session.id, format!("{initial_command}\r").as_bytes())
-        {
-            self.roll_back_live_session(daemon, &session.id);
-            return Err(ApplicationError::external(format!(
-                "failed to submit the claude launch into session {}: {e:#}; \
-                 the session was terminated, so retrying is safe",
-                session.id
-            )));
-        }
-
-        // Persist the mapping only after the launch is in the PTY: every failure path above
-        // returns before this insert, so a rolled-back open never leaves a mapping row.
+        // Reserve the mapping BEFORE the launch touches the PTY: the reservation is the
+        // idempotency lock, so it must exist before the side effect it deduplicates. A
+        // crash past this point leaves a pending row that refuses automatic reuse of the
+        // id; a crash before it leaves an unmapped shell that never launched Claude, so a
+        // same-id retry opening fresh is still correct. A concurrent open racing this id
+        // loses here on the primary key — before its own launch write — and only tears
+        // down its Claude-less shell.
         if let Err(e) = self.m.repos.create_claude_session(NewClaudeSession {
             claude_session_id: claude_session_id.clone(),
             runspace_id: crate::sdk_runspace_id().to_string(),
@@ -313,10 +308,66 @@ impl<B: Backend> ExecutionService<'_, B> {
         }) {
             self.roll_back_live_session(daemon, &session.id);
             return Err(ApplicationError::external(format!(
-                "failed to persist the claude session mapping for session {}: {e:#}; \
+                "failed to reserve the claude session mapping for session {}: {e:#}; \
+                 this spawn was terminated (its launch was never submitted); if a \
+                 concurrent open owns this id, a retry resolves to it",
+                session.id
+            )));
+        }
+
+        if let Err(e) = daemon.write_input(&session.id, format!("{initial_command}\r").as_bytes())
+        {
+            self.roll_back_live_session(daemon, &session.id);
+            // The launch never happened, so the reservation must not outlive it — freeing
+            // the id keeps a same-id retry a clean fresh open. Best-effort: if this fails,
+            // the row was already ended by the rollback's coupled transition, which still
+            // refuses reuse.
+            if let Err(e) = self.m.repos.delete_claude_session(&claude_session_id) {
+                log::error!(
+                    target: "monica_application::sdk",
+                    "failed to delete the unlaunched reservation {claude_session_id}: {e}"
+                );
+            }
+            return Err(ApplicationError::external(format!(
+                "failed to submit the claude launch into session {}: {e:#}; \
                  the session was terminated, so retrying is safe",
                 session.id
             )));
+        }
+
+        match self.m.repos.mark_claude_session_launched(&claude_session_id) {
+            Ok(true) => {}
+            // The PTY settled before the launch was confirmed (a write into a dead session
+            // is a silent no-op), so nothing runs under this id — fail the open.
+            Ok(false) => {
+                self.roll_back_live_session(daemon, &session.id);
+                if let Err(e) = self.m.repos.delete_claude_session(&claude_session_id) {
+                    log::error!(
+                        target: "monica_application::sdk",
+                        "failed to delete the unlaunched reservation {claude_session_id}: {e}"
+                    );
+                }
+                return Err(ApplicationError::external(format!(
+                    "terminal session {} exited before the claude launch was confirmed; \
+                     the session was cleaned up, so retrying is safe",
+                    session.id
+                )));
+            }
+            Err(e) => {
+                self.roll_back_live_session(daemon, &session.id);
+                if let Err(e) = self.m.repos.delete_claude_session(&claude_session_id) {
+                    log::error!(
+                        target: "monica_application::sdk",
+                        "failed to delete the reservation {claude_session_id} after a failed \
+                         launch confirmation: {e}"
+                    );
+                }
+                return Err(ApplicationError::external(format!(
+                    "failed to confirm the claude launch for session {}: {e:#}; \
+                     the session was terminated, so retrying is safe",
+                    session.id
+                )));
+            }
         }
 
         let spec = SdkSessionSpec {
@@ -426,11 +477,24 @@ impl<B: Backend> ExecutionService<'_, B> {
                 "claude session {claude_session_id} vanished during recovery"
             ))
         })?;
-        if row.status == ClaudeSessionStatus::Ended {
-            return Err(ApplicationError::validation(format!(
-                "claude session {claude_session_id} is no longer running and cannot be \
-                 reused; open a new session with a fresh id"
-            )));
+        match row.status {
+            ClaudeSessionStatus::Ended => {
+                return Err(ApplicationError::validation(format!(
+                    "claude session {claude_session_id} is no longer running and cannot be \
+                     reused; open a new session with a fresh id"
+                )));
+            }
+            // A reservation whose launch was never confirmed: whether Claude runs in that
+            // PTY is unknowable, so neither resolving to it nor relaunching under the id
+            // is safe. The tab is still in the Workbench for a human to settle.
+            ClaudeSessionStatus::Pending => {
+                return Err(ApplicationError::validation(format!(
+                    "claude session {claude_session_id} has an unconfirmed launch (an open \
+                     was interrupted mid-flight); check its tab in the Workbench and open a \
+                     new session with a fresh id"
+                )));
+            }
+            ClaudeSessionStatus::Active => {}
         }
 
         let spec = SdkSessionSpec {

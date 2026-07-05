@@ -14,6 +14,12 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum ClaudeSessionStatus {
+    /// Reserved before the launch command is submitted into the PTY. A row stuck here
+    /// marks an open interrupted mid-flight: whether Claude actually launched is
+    /// unknowable, so the id is never resolved or reused automatically.
+    Pending,
+    /// The launch write was acknowledged by the daemon — Claude runs (or ran) under
+    /// this id.
     Active,
     Ended,
 }
@@ -41,8 +47,9 @@ pub struct ClaudeSession {
     pub ended_at: Option<String>,
 }
 
-/// Input for creating a mapping row. Status and timestamps are assigned by the store,
-/// which derives the initial status from the referenced terminal session's state.
+/// Input for reserving a mapping row before the launch is submitted. Status and
+/// timestamps are assigned by the store, which derives the initial status from the
+/// referenced terminal session's state (`pending`, or `ended` if it already settled).
 #[derive(Debug, Clone)]
 pub struct NewClaudeSession {
     pub claude_session_id: String,

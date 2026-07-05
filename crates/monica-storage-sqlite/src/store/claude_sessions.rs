@@ -25,18 +25,18 @@ fn claude_session_from_row(row: &Row<'_>) -> Result<ClaudeSession> {
 }
 
 impl SqliteStore {
-    /// The initial status is read from the terminal session's row inside the INSERT itself:
-    /// the PTY reader thread may have already settled the row as exited between the caller's
-    /// launch write and this insert, and SQLite's writer serialization guarantees one of the
-    /// two orders — settled-first lands here as `ended`, settled-after is caught by the
-    /// coupled UPDATE in `apply_terminal_session_updates`.
+    /// Reserve the mapping row before the launch is submitted. The initial status is read
+    /// from the terminal session's row inside the INSERT itself: the PTY reader thread may
+    /// settle the row as exited concurrently, and SQLite's writer serialization guarantees
+    /// one of the two orders — settled-first lands here as `ended`, settled-after is caught
+    /// by the coupled UPDATE in `apply_terminal_session_updates`.
     pub fn create_claude_session(&mut self, new: NewClaudeSession) -> Result<ClaudeSession> {
         let settled = sql_literal_list([
             TerminalSessionStatus::Exited.as_str(),
             TerminalSessionStatus::Lost.as_str(),
             TerminalSessionStatus::Failed.as_str(),
         ]);
-        let active = ClaudeSessionStatus::Active.as_str();
+        let pending = ClaudeSessionStatus::Pending.as_str();
         let ended = ClaudeSessionStatus::Ended.as_str();
         let inserted = self.conn().execute(
             &format!(
@@ -44,7 +44,7 @@ impl SqliteStore {
                    (claude_session_id, runspace_id, tab_id, terminal_session_id, cwd, name,
                     status, ended_at)
                  SELECT ?1, ?2, ?3, ts.id, ?5, ?6,
-                        CASE WHEN ts.status IN ({settled}) THEN '{ended}' ELSE '{active}' END,
+                        CASE WHEN ts.status IN ({settled}) THEN '{ended}' ELSE '{pending}' END,
                         CASE WHEN ts.status IN ({settled}) THEN {SET_NOW} ELSE NULL END
                    FROM terminal_sessions ts WHERE ts.id = ?4"
             ),
@@ -67,6 +67,31 @@ impl SqliteStore {
         self.get_claude_session(&new.claude_session_id)?.ok_or_else(|| {
             anyhow::anyhow!("claude session {} vanished after insert", new.claude_session_id)
         })
+    }
+
+    /// Confirm the launch write reached the PTY: pending → active. `false` means the row is
+    /// no longer pending — the PTY settled (and the coupled transition ended the mapping)
+    /// before the launch was confirmed, so the caller must treat the open as failed.
+    pub fn mark_claude_session_launched(&mut self, claude_session_id: &str) -> Result<bool> {
+        let pending = ClaudeSessionStatus::Pending.as_str();
+        let active = ClaudeSessionStatus::Active.as_str();
+        let updated = self.conn().execute(
+            &format!(
+                "UPDATE claude_sessions SET status = '{active}'
+                  WHERE claude_session_id = ?1 AND status = '{pending}'"
+            ),
+            params![claude_session_id],
+        )?;
+        Ok(updated > 0)
+    }
+
+    /// Remove a reservation whose launch never happened, freeing the id for a clean retry.
+    pub fn delete_claude_session(&mut self, claude_session_id: &str) -> Result<()> {
+        self.conn().execute(
+            "DELETE FROM claude_sessions WHERE claude_session_id = ?1",
+            params![claude_session_id],
+        )?;
+        Ok(())
     }
 
     pub fn get_claude_session(&self, claude_session_id: &str) -> Result<Option<ClaudeSession>> {
@@ -102,6 +127,14 @@ impl SqliteStore {
 impl ClaudeSessionRepository for SqliteStore {
     fn create_claude_session(&mut self, new: NewClaudeSession) -> Result<ClaudeSession> {
         SqliteStore::create_claude_session(self, new)
+    }
+
+    fn mark_claude_session_launched(&mut self, claude_session_id: &str) -> Result<bool> {
+        SqliteStore::mark_claude_session_launched(self, claude_session_id)
+    }
+
+    fn delete_claude_session(&mut self, claude_session_id: &str) -> Result<()> {
+        SqliteStore::delete_claude_session(self, claude_session_id)
     }
 
     fn get_claude_session(&self, claude_session_id: &str) -> Result<Option<ClaudeSession>> {

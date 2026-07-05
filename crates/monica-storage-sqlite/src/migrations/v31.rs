@@ -2,6 +2,9 @@
 /// launched (`claude_session_id`, the pre-minted UUID) to its Workbench runspace/tab, the
 /// terminal session driving its PTY, and the cwd its JSONL transcript path derives from.
 /// The JSONL path itself is not stored: it is a pure function of cwd + claude_session_id.
+/// A row is a reservation first (`pending`, inserted before the launch reaches the PTY —
+/// the idempotency key must exist before the side effect it deduplicates) and becomes
+/// `active` once the daemon acknowledges the launch write.
 /// No FKs, consistent with v16: `save_terminal_state` rewrites runspaces/tabs by
 /// DELETE+reinsert, so hard references would break on every layout save — reconcile and
 /// the adapter's coupled ended-transition own consistency instead.
@@ -13,7 +16,7 @@ pub(super) const SQL: &str = r#"
       terminal_session_id TEXT NOT NULL,
       cwd                 TEXT NOT NULL,
       name                TEXT,
-      status              TEXT NOT NULL DEFAULT 'active',
+      status              TEXT NOT NULL DEFAULT 'pending',
       created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
       ended_at            TEXT
     );
@@ -56,7 +59,7 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert_eq!(status, "active");
+        assert_eq!(status, "pending");
         assert!(created_at.ends_with('Z'));
     }
 }

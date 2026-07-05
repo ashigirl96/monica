@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ClaudeSessionStatus {
+    Pending,
     Active,
     Ended,
 }
@@ -10,6 +11,7 @@ pub enum ClaudeSessionStatus {
 impl From<monica_domain::ClaudeSessionStatus> for ClaudeSessionStatus {
     fn from(value: monica_domain::ClaudeSessionStatus) -> Self {
         match value {
+            monica_domain::ClaudeSessionStatus::Pending => Self::Pending,
             monica_domain::ClaudeSessionStatus::Active => Self::Active,
             monica_domain::ClaudeSessionStatus::Ended => Self::Ended,
         }

@@ -183,7 +183,7 @@ export type ClaudeSession = {
   ended_at: string | null;
 };
 
-export type ClaudeSessionStatus = "active" | "ended";
+export type ClaudeSessionStatus = "pending" | "active" | "ended";
 
 export type DisplayStatus =
   | "ready"
