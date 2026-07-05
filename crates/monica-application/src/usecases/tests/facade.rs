@@ -506,6 +506,44 @@ fn facade_open_sdk_session_unconfirmed_launch_write_is_indeterminate_and_keeps_t
 }
 
 #[test]
+fn facade_open_sdk_session_acked_kill_without_observed_death_stays_indeterminate() {
+    // terminate's ack only proves the signal was dispatched: the daemon flips a session
+    // to not-running after its wait thread reaps the child and the output drain
+    // completes, and a survivor holding the PTY stalls that. Here the kill is acked but
+    // the session never stops reporting running — death was not observed, so the
+    // reservation must survive and the outcome stays unknown.
+    let sink = RecordingSink::default();
+    let mut monica = facade(FakeRepos::default(), sink.clone());
+    let daemon = FakeDaemon::losing_write_ack_kill_unobserved();
+    // A fresh FakeRepos mints ts-1 for the first terminal session.
+    daemon.seed_running_view("ts-1");
+    let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+    let id = "5e0f5b0e-9f5c-4a4e-9d6e-000000000309";
+
+    let err = monica
+        .executions()
+        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Indeterminate(_)), "got: {err:?}");
+    assert!(err.to_string().contains(id), "the retry key must be named: {err}");
+    assert_eq!(daemon.created.lock().unwrap()[0].session_id, "ts-1");
+    assert_eq!(
+        *daemon.terminated.lock().unwrap(),
+        vec!["ts-1".to_string()],
+        "the kill was dispatched and acked"
+    );
+    // The reservation survives as pending and the terminal row was not force-failed, so
+    // a same-id retry stays idempotent instead of opening fresh.
+    let sessions = monica.executions().list_claude_sessions(&daemon).unwrap();
+    let mapping = sessions.iter().find(|cs| cs.claude_session_id == id).unwrap();
+    assert_eq!(mapping.status, monica_domain::ClaudeSessionStatus::Pending);
+    let rows = monica.executions().list_terminal_sessions(&daemon, Some("sdk")).unwrap();
+    let row = rows.iter().find(|s| s.id == "ts-1").unwrap();
+    assert_ne!(row.status, TerminalSessionStatus::Failed);
+}
+
+#[test]
 fn facade_open_sdk_session_unconfirmed_kill_after_confirm_failure_is_indeterminate() {
     // The launch was submitted and acknowledged; only the pending→active confirmation
     // write failed, and the kill could not be confirmed either. Claude is likely

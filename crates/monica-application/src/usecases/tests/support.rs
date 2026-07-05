@@ -1710,6 +1710,13 @@ impl FakeDaemon {
         Self { write_ack_lost: true, terminate_fails: true, ..Self::default() }
     }
 
+    /// The write ack is lost and the follow-up kill IS acknowledged — but the session
+    /// keeps reporting running (seed the view): a dispatched signal whose death is never
+    /// observed, e.g. a survivor holding the PTY open.
+    pub(crate) fn losing_write_ack_kill_unobserved() -> Self {
+        Self { write_ack_lost: true, ..Self::default() }
+    }
+
     pub(crate) fn failing_terminate() -> Self {
         Self { terminate_fails: true, ..Self::default() }
     }

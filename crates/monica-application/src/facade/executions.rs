@@ -427,19 +427,28 @@ impl<B: Backend> ExecutionService<'_, B> {
     /// Best-effort teardown of a spawned session that its creation flow can no longer vouch for
     /// (the start couldn't be recorded, or the launch's fate is unknown): kill the process,
     /// settle the row as Failed, and settle any run waiting on its tab, so nothing adoptable or
-    /// retriable lingers. Returns whether the daemon confirmed the kill (`terminate` is an
-    /// acknowledged round trip). On `false` the process may still be alive and NOTHING is
-    /// written: marking the row Failed would end its Claude mapping via the coupled transition,
-    /// collapsing a genuinely unknown outcome into a determinate "ended" — reconcile settles the
-    /// row once the daemon answers again. The kill still comes before the Failed write — if the
-    /// DB is the thing failing, that write fails too, and only a dead PTY lets reconcile settle
-    /// the row later.
+    /// retriable lingers. Returns whether the death was actually OBSERVED, not merely requested
+    /// — `terminate`'s ack only proves the kill was dispatched, so this re-reads the daemon's
+    /// view until the session stops reporting running. On `false` the process may still be
+    /// alive and NOTHING is written: marking the row Failed would end its Claude mapping via
+    /// the coupled transition, collapsing a genuinely unknown outcome into a determinate
+    /// "ended" — reconcile settles the row once the daemon reports honestly again. The kill
+    /// still comes before the Failed write — if the DB is the thing failing, that write fails
+    /// too, and only a dead PTY lets reconcile settle the row later.
     fn roll_back_live_session(&mut self, daemon: &impl TerminalDaemon, session_id: &str) -> bool {
         if let Err(e) = daemon.terminate(session_id) {
             log::warn!(
                 target: "monica_application::terminal",
                 "failed to terminate rolled-back session {session_id}; leaving it for \
                  reconcile: {e:#}"
+            );
+            return false;
+        }
+        if !Self::kill_observed(daemon, session_id) {
+            log::warn!(
+                target: "monica_application::terminal",
+                "session {session_id} still reported running after terminate; leaving it \
+                 for reconcile"
             );
             return false;
         }
@@ -455,6 +464,32 @@ impl<B: Backend> ExecutionService<'_, B> {
         }
         self.settle_runs_for_terminated_sessions(&[session_id.to_string()]);
         true
+    }
+
+    /// Watch the daemon's own view until `session_id` stops reporting running (absent counts
+    /// as reaped, equally dead). The daemon flips a session to not-running only after its wait
+    /// thread reaps the child and the output pipeline drains — a drain that a survivor holding
+    /// the PTY stalls (`EXIT_DRAIN_TIMEOUT`, 500ms), which is precisely the case that must NOT
+    /// pass as verified. The window is sized past that stall so an ordinary kill converges and
+    /// a survivor times out into `false`.
+    fn kill_observed(daemon: &impl TerminalDaemon, session_id: &str) -> bool {
+        const ATTEMPTS: u32 = 15;
+        const INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+        for attempt in 0..ATTEMPTS {
+            if attempt > 0 {
+                std::thread::sleep(INTERVAL);
+            }
+            match daemon.list_views() {
+                Ok(views) => {
+                    if !views.iter().any(|v| v.session_id == session_id && v.running) {
+                        return true;
+                    }
+                }
+                // Unreachable daemon: death cannot be observed at all.
+                Err(_) => return false,
+            }
+        }
+        false
     }
 
     /// Resolve a client-supplied claude_session_id to its existing session, if the id is

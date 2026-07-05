@@ -11,10 +11,10 @@ use serde::{Deserialize, Serialize};
 /// The server rejects a mismatched version with an `Err` response before doing anything,
 /// so version skew fails with no side effect.
 ///
-/// v2: the server must honor `OpenSdkSession.claude_session_id` (idempotent opens). v1
-/// servers ignored the field and minted their own id, so a v2 client's "safe retry"
-/// against a v1 server would have opened a second session — the bump makes v1 servers
-/// reject the request before launching instead.
+/// v2: `OpenSdkSession.claude_session_id` is required and the server must honor it
+/// (idempotent opens). v1 servers ignored the field and minted their own id, so a v2
+/// client's "safe retry" against a v1 server would have opened a second session — the
+/// bump makes v1 servers reject the request before launching instead.
 pub const PROTOCOL_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,11 +33,14 @@ pub enum SdkRequestOp {
         model: Option<String>,
         #[serde(default)]
         title: Option<String>,
-        /// Idempotency key: opening with an id that is already mapped to a live session
-        /// returns that session instead of creating a second one, so a retry after a lost
-        /// response is safe. Honoring this field is the v2 contract; v1 servers ignored
-        /// it, which is why the version bump — not the echoed id in the response — is
-        /// what protects retries against them.
+        /// Idempotency key, REQUIRED in v2 (the server rejects requests without it
+        /// before creating anything): opening with an id that is already mapped to a
+        /// live session returns that session instead of creating a second one, so a
+        /// retry after a lost response is safe — and because the client minted the key,
+        /// it survives any lost response. `Option` only so a v1-era line still parses
+        /// far enough to be answered with a version-mismatch error. v1 servers ignored
+        /// the field, which is why the version bump — not the echoed id in the response
+        /// — is what protects retries against them.
         #[serde(default)]
         claude_session_id: Option<String>,
     },
