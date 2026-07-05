@@ -168,10 +168,37 @@ fn echoed_id_mismatch_fails_instead_of_breaking_idempotency() {
 fn err_response_surfaces_the_server_message() {
     let mock = start_mock(
         "err",
-        Some(SdkResponse::Err { error: "cwd is not an existing directory: /nope".to_string() }),
+        Some(SdkResponse::Err {
+            error: "cwd is not an existing directory: /nope".to_string(),
+            indeterminate: false,
+        }),
     );
     let err = open_session_at(&mock.socket, params()).unwrap_err();
     assert!(err.to_string().contains("cwd is not an existing directory"), "got: {err}");
+    assert!(
+        err.downcast_ref::<OpenSessionIndeterminate>().is_none(),
+        "a determinate rejection proves no session was left behind"
+    );
+}
+
+#[test]
+fn indeterminate_err_response_downcasts_with_the_sent_id() {
+    // The server itself could not resolve the outcome (e.g. the id maps to a launch
+    // reservation another open holds): same contract as a lost response — the typed
+    // retry key must survive so the caller retries with this id, never a fresh one.
+    let mock = start_mock(
+        "pend",
+        Some(SdkResponse::Err {
+            error: "claude session has an unconfirmed launch".to_string(),
+            indeterminate: true,
+        }),
+    );
+    let err = open_session_at(&mock.socket, params()).unwrap_err();
+    assert!(err.to_string().contains("did not resolve"), "got: {err}");
+    let indeterminate = err
+        .downcast_ref::<OpenSessionIndeterminate>()
+        .expect("a server-side indeterminate outcome must downcast");
+    assert_eq!(indeterminate.claude_session_id, CANNED_ID);
 }
 
 #[test]
@@ -238,6 +265,7 @@ fn v1_server_version_rejection_is_determinate() {
         "v1",
         Some(SdkResponse::Err {
             error: "sdk protocol version mismatch: client=2, server=1".to_string(),
+            indeterminate: false,
         }),
     );
     let err = open_session_at(&mock.socket, params()).unwrap_err();

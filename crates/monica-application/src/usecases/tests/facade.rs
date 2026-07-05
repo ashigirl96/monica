@@ -464,11 +464,14 @@ fn facade_open_sdk_session_launch_confirmation_failure_rolls_back_and_frees_the_
 }
 
 #[test]
-fn facade_open_sdk_session_with_id_refuses_a_pending_reservation() {
+fn facade_open_sdk_session_with_id_pending_reservation_is_indeterminate() {
     let repos = FakeRepos::default();
     let id = "5e0f5b0e-9f5c-4a4e-9d6e-000000000309";
-    // An open interrupted between the reservation and the launch confirmation: whether
-    // claude runs in that PTY is unknowable, so the id must be refused, not resolved.
+    // A reservation between commit and launch confirmation: either a concurrent open is
+    // mid-flight right now (a timeout retry can race it) or one was interrupted. The id
+    // must be refused — but as an indeterminate outcome, because a determinate error
+    // tells the SDK "nothing was created" and licenses a fresh-id retry that would
+    // duplicate the session the in-flight open is about to confirm.
     repos.seed_claude_session(monica_domain::ClaudeSession {
         claude_session_id: id.to_string(),
         runspace_id: "sdk".to_string(),
@@ -504,8 +507,13 @@ fn facade_open_sdk_session_with_id_refuses_a_pending_reservation() {
         .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
         .unwrap_err();
 
-    assert!(matches!(err, ApplicationError::Validation(_)), "got: {err:?}");
+    assert!(matches!(err, ApplicationError::Indeterminate(_)), "got: {err:?}");
     assert_eq!(daemon.created.lock().unwrap().len(), created_before, "must not respawn");
+    // The reservation stays untouched: once the in-flight open confirms the launch, a
+    // same-id retry resolves to that session.
+    let sessions = monica.executions().list_claude_sessions(&daemon).unwrap();
+    let mapping = sessions.iter().find(|cs| cs.claude_session_id == id).unwrap();
+    assert_eq!(mapping.status, monica_domain::ClaudeSessionStatus::Pending);
 }
 
 #[test]
@@ -662,15 +670,41 @@ fn facade_open_sdk_session_with_id_unreachable_daemon_errors_without_respawn() {
     let first = monica.executions().open_sdk_session(&daemon, sdk_params_with_id(&cwd, id)).unwrap();
 
     // Liveness cannot be verified, so the retry must not guess: no error-driven respawn,
-    // no silent success — the caller is told to check the Workbench.
+    // no silent success — and the failure is indeterminate, because the session may well
+    // be running and a determinate error would license a duplicating fresh-id retry.
     let err = monica
         .executions()
         .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
         .unwrap_err();
 
-    assert!(matches!(err, ApplicationError::External(_)), "got: {err:?}");
+    assert!(matches!(err, ApplicationError::Indeterminate(_)), "got: {err:?}");
     assert_eq!(daemon.created.lock().unwrap().len(), 1);
     assert!(!daemon.terminated.lock().unwrap().contains(&first.session_id));
+}
+
+#[test]
+fn facade_list_claude_sessions_fails_closed_when_daemon_unreachable() {
+    let sink = RecordingSink::default();
+    let mut monica = facade(FakeRepos::default(), sink.clone());
+    let daemon = FakeDaemon::default();
+    let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+
+    let spec = monica.executions().open_sdk_session(&daemon, sdk_params(&cwd)).unwrap();
+
+    // Startup recovery adopts rows still `active` as live Workbench tabs, so an
+    // unverifiable daemon must error instead of serving DB-only state as verified —
+    // a stale `active` mapping would otherwise materialize as a tab.
+    let unreachable = FakeDaemon::failing_list();
+    let err = monica.executions().list_claude_sessions(&unreachable).unwrap_err();
+    assert!(matches!(err, ApplicationError::External(_)), "got: {err:?}");
+
+    // Nothing was reconciled blindly either way: with the daemon back, the row still
+    // resolves by a real liveness check.
+    daemon.seed_running_view(&spec.session_id);
+    let sessions = monica.executions().list_claude_sessions(&daemon).unwrap();
+    let mapping =
+        sessions.iter().find(|cs| cs.claude_session_id == spec.claude_session_id).unwrap();
+    assert_eq!(mapping.status, monica_domain::ClaudeSessionStatus::Active);
 }
 
 #[test]

@@ -6,7 +6,8 @@ use crate::ports::{
 };
 use crate::usecases::terminal::{
     reconcile_terminal_sessions, task_run_settlement_for_orphaned_run,
-    task_run_settlement_for_terminal_exit, TerminalExitSettlement, TerminalSessionUpdate,
+    task_run_settlement_for_terminal_exit, DaemonSessionView, TerminalExitSettlement,
+    TerminalSessionUpdate,
 };
 use crate::prelude::{
     Agent, NewNotificationIntent, NewTerminalSession, NotificationKind, TaskRun, TaskRunStatus,
@@ -436,13 +437,14 @@ impl<B: Backend> ExecutionService<'_, B> {
         }
 
         // Re-verify liveness before answering "already running": an active mapping may be
-        // stale if the PTY died while nothing reconciled. An unreachable daemon is an error
-        // — Claude may already have run under this id, so spawning again blindly could
-        // corrupt its transcript.
+        // stale if the PTY died while nothing reconciled. An unreachable daemon is
+        // indeterminate, not a plain failure — Claude may already be running under this
+        // id, and a determinate error would license a fresh-id retry that duplicates it.
         let views = daemon.list_views().map_err(|e| {
-            ApplicationError::external(format!(
+            ApplicationError::indeterminate(format!(
                 "cannot verify claude session {claude_session_id} against the terminal \
-                 daemon: {e:#}; check the Workbench before retrying"
+                 daemon: {e:#}; the session may still be running — retry with this same \
+                 id or check the Workbench"
             ))
         })?;
         match self.m.repos.get_terminal_session(&row.terminal_session_id)? {
@@ -484,14 +486,18 @@ impl<B: Backend> ExecutionService<'_, B> {
                      reused; open a new session with a fresh id"
                 )));
             }
-            // A reservation whose launch was never confirmed: whether Claude runs in that
-            // PTY is unknowable, so neither resolving to it nor relaunching under the id
-            // is safe. The tab is still in the Workbench for a human to settle.
+            // A reservation whose launch was never confirmed: the open may still be in
+            // flight on another connection, or was interrupted for good — unknowable
+            // here, so neither resolving to it nor relaunching under the id is safe.
+            // Indeterminate, not a rejection: a determinate error would tell the SDK
+            // "nothing is left behind", and a fresh-id retry could then duplicate the
+            // session an in-flight open is about to confirm.
             ClaudeSessionStatus::Pending => {
-                return Err(ApplicationError::validation(format!(
+                return Err(ApplicationError::indeterminate(format!(
                     "claude session {claude_session_id} has an unconfirmed launch (an open \
-                     was interrupted mid-flight); check its tab in the Workbench and open a \
-                     new session with a fresh id"
+                     is in flight or was interrupted); retry with this same id once it \
+                     settles, or check its tab in the Workbench — do not open a fresh id \
+                     for the same logical session"
                 )));
             }
             ClaudeSessionStatus::Active => {}
@@ -522,12 +528,19 @@ impl<B: Backend> ExecutionService<'_, B> {
 
     /// The Claude session mappings, with terminal sessions reconciled against the daemon
     /// first so `status` reflects a fresh liveness check (a mapping whose PTY died flips
-    /// to ended via the coupled transition before this returns).
+    /// to ended via the coupled transition before this returns). Fails closed when the
+    /// daemon cannot answer: startup recovery adopts rows still `active` as live Workbench
+    /// tabs, so DB-only state must never be served as if it were verified.
     pub fn list_claude_sessions(
         &mut self,
         daemon: &impl TerminalDaemon,
     ) -> ApplicationResult<Vec<ClaudeSession>> {
-        self.list_terminal_sessions(daemon, None)?;
+        let views = daemon.list_views().map_err(|e| {
+            ApplicationError::external(format!(
+                "cannot verify claude sessions against the terminal daemon: {e:#}"
+            ))
+        })?;
+        self.reconcile_terminal_rows(daemon, &views)?;
         Ok(self.m.repos.list_claude_sessions()?)
     }
 
@@ -585,17 +598,7 @@ impl<B: Backend> ExecutionService<'_, B> {
         runspace_id: Option<&str>,
     ) -> ApplicationResult<Vec<TerminalSession>> {
         match daemon.list_views() {
-            Ok(views) => {
-                let db_rows = self.m.repos.list_terminal_sessions(None)?;
-                let outcome = reconcile_terminal_sessions(&db_rows, &views);
-                self.m.repos.apply_terminal_session_updates(&outcome.updates)?;
-                // Sessions that died while the app was down only surface here; the run-first sweep
-                // also retries settlements lost to a crash.
-                self.settle_orphaned_runs();
-                for session_id in outcome.reap_ids {
-                    daemon.reap(&session_id);
-                }
-            }
+            Ok(views) => self.reconcile_terminal_rows(daemon, &views)?,
             Err(e) => {
                 log::warn!(
                     target: "monica_application::terminal",
@@ -604,6 +607,25 @@ impl<B: Backend> ExecutionService<'_, B> {
             }
         }
         Ok(self.m.repos.list_terminal_sessions(runspace_id)?)
+    }
+
+    /// Apply a live daemon view to every DB row: demote dead sessions, settle the runs
+    /// they drove, and reap what the daemon should forget. Sessions that died while the
+    /// app was down only surface here; the run-first sweep also retries settlements lost
+    /// to a crash.
+    fn reconcile_terminal_rows(
+        &mut self,
+        daemon: &impl TerminalDaemon,
+        views: &[DaemonSessionView],
+    ) -> ApplicationResult<()> {
+        let db_rows = self.m.repos.list_terminal_sessions(None)?;
+        let outcome = reconcile_terminal_sessions(&db_rows, views);
+        self.m.repos.apply_terminal_session_updates(&outcome.updates)?;
+        self.settle_orphaned_runs();
+        for session_id in outcome.reap_ids {
+            daemon.reap(&session_id);
+        }
+        Ok(())
     }
 
     /// Record a daemon-reported session exit (status → exited) and settle the run it was driving.

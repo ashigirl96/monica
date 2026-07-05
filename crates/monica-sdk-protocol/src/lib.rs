@@ -46,8 +46,19 @@ pub enum SdkRequestOp {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SdkResponse {
-    Ok { session: SdkSessionInfo },
-    Err { error: String },
+    Ok {
+        session: SdkSessionInfo,
+    },
+    Err {
+        error: String,
+        /// The server could not determine the outcome either (e.g. the id maps to a
+        /// launch reservation that is still unconfirmed, or liveness could not be
+        /// verified): a session may exist under the requested id, so the client must
+        /// retry with the same id, never a fresh one. `false` — the default, so
+        /// determinate errors parse unchanged — proves no session was left behind.
+        #[serde(default)]
+        indeterminate: bool,
+    },
 }
 
 /// The created session as the app reports it back to the SDK client. `claude_session_id`
@@ -156,9 +167,28 @@ mod tests {
             other => panic!("unexpected response: {other:?}"),
         }
 
-        let err = SdkResponse::Err { error: "nope".into() };
+        let err = SdkResponse::Err { error: "nope".into(), indeterminate: false };
         match round_trip_response(&err) {
-            SdkResponse::Err { error } => assert_eq!(error, "nope"),
+            SdkResponse::Err { error, indeterminate } => {
+                assert_eq!(error, "nope");
+                assert!(!indeterminate);
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
+
+        let unresolved = SdkResponse::Err { error: "unconfirmed".into(), indeterminate: true };
+        match round_trip_response(&unresolved) {
+            SdkResponse::Err { indeterminate, .. } => assert!(indeterminate),
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn err_without_the_indeterminate_field_parses_as_determinate() {
+        // A v1-era error line carries no flag; it must keep meaning "nothing was created".
+        let back: SdkResponse = serde_json::from_str(r#"{"type":"err","error":"nope"}"#).unwrap();
+        match back {
+            SdkResponse::Err { indeterminate, .. } => assert!(!indeterminate),
             other => panic!("unexpected response: {other:?}"),
         }
     }

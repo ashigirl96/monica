@@ -11,6 +11,7 @@ pub enum ApiErrorCode {
     AuthenticationRequired,
     Storage,
     External,
+    Indeterminate,
 }
 
 /// The error half of every Tauri command result. Replaces the previous `Result<T, String>` so the
@@ -48,6 +49,7 @@ impl From<monica_application::ApplicationError> for ApiError {
             E::AuthenticationRequired(m) => (ApiErrorCode::AuthenticationRequired, m),
             E::Storage(m) => (ApiErrorCode::Storage, m),
             E::External(m) => (ApiErrorCode::External, m),
+            E::Indeterminate(m) => (ApiErrorCode::Indeterminate, m),
         };
         Self { code, message }
     }

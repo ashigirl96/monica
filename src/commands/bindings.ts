@@ -151,7 +151,8 @@ export type ApiErrorCode =
   | "validation"
   | "authentication_required"
   | "storage"
-  | "external";
+  | "external"
+  | "indeterminate";
 
 export type AttachResult = {
   /**  Base64 transcript tail to write into xterm before streaming live output. */

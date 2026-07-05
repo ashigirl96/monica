@@ -147,15 +147,16 @@ const OPEN_SESSION_TIMEOUT: Duration = Duration::from_secs(10);
 /// (`~/.claude/projects/<slug>/<claude_session_id>.jsonl`) appearing; hook/JSONL-based
 /// readiness APIs are MVP4/MVP5 scope.
 ///
-/// Retry semantics: a server-reported error means no session is left behind (a failed
-/// launch is torn down), so retrying is safe. Any other failure once the request started
-/// going out — a failed write, timeout, dropped connection, truncated or unparseable
-/// response — leaves the outcome unknown: that error carries a downcastable
-/// [`OpenSessionIndeterminate`] holding the `claude_session_id` the request ran under
-/// (supplied or client-minted), and retrying with that id resolves to the original
-/// session instead of creating a second one. Retrying with a fresh id after an
-/// indeterminate failure can open a second session; check the Workbench first if that
-/// matters.
+/// Retry semantics: a determinate server-reported error means no session is left behind
+/// (a failed launch is torn down), so retrying is safe. Every other failure once the
+/// request started going out — a failed write, timeout, dropped connection, truncated or
+/// unparseable response, or the server answering that it cannot resolve the outcome
+/// itself (an unconfirmed launch reservation) — leaves the outcome unknown: that error
+/// carries a downcastable [`OpenSessionIndeterminate`] holding the `claude_session_id`
+/// the request ran under (supplied or client-minted), and retrying with that id resolves
+/// to the original session instead of creating a second one. Retrying with a fresh id
+/// after an indeterminate failure can open a second session; check the Workbench first
+/// if that matters.
 pub fn open_session(params: OpenSessionParams) -> Result<SdkSessionInfo> {
     open_session_at(&paths::sdk_socket_path()?, params)
 }
@@ -199,8 +200,8 @@ pub fn open_session_at(socket: &Path, params: OpenSessionParams) -> Result<SdkSe
     // leaves the session possibly running — but it runs under the id this call sent.
     // That id must survive every such failure in a structured form (not just error
     // prose), or a caller who minted through us could never retry idempotently: hence
-    // the downcastable OpenSessionIndeterminate in the chain. Only a parsed server Err
-    // proves no session was left behind.
+    // the downcastable OpenSessionIndeterminate in the chain. Only a parsed, determinate
+    // server Err proves no session was left behind.
     let indeterminate = |context: String| {
         anyhow::Error::new(OpenSessionIndeterminate {
             claude_session_id: claude_session_id.clone(),
@@ -249,7 +250,16 @@ pub fn open_session_at(socket: &Path, params: OpenSessionParams) -> Result<SdkSe
             }
             Ok(session)
         }
-        SdkResponse::Err { error } => bail!("open_session rejected: {error}"),
+        // The server can be unable to determine the outcome too (the id maps to a launch
+        // reservation still unconfirmed — an open in flight elsewhere, or one that was
+        // interrupted). That is the same "may be running under this id" situation as a
+        // lost response, and it must not read as "rejected, nothing created".
+        SdkResponse::Err { error, indeterminate: true } => {
+            Err(indeterminate(format!("open_session did not resolve: {error}")))
+        }
+        SdkResponse::Err { error, indeterminate: false } => {
+            bail!("open_session rejected: {error}")
+        }
     }
 }
 

@@ -103,15 +103,25 @@ fn serve_connection(app: &AppHandle, stream: UnixStream) -> Result<()> {
 fn handle_line(app: &AppHandle, line: &str) -> SdkResponse {
     let op = match parse_request(line) {
         Ok(op) => op,
-        Err(error) => return SdkResponse::Err { error },
+        Err(error) => return SdkResponse::Err { error, indeterminate: false },
     };
     let SdkRequestOp::OpenSdkSession { cwd, model, title, claude_session_id } = op;
     match open_sdk_session(app, cwd, model, title, claude_session_id) {
         Ok(session) => SdkResponse::Ok { session },
-        Err(e) => SdkResponse::Err {
-            error: format!("{e:#}"),
-        },
+        Err(e) => error_response(&e),
     }
+}
+
+/// An outcome the application itself could not determine (an unconfirmed launch
+/// reservation, an unverifiable daemon) must reach the client marked as such: a
+/// determinate `Err` licenses a fresh-id retry, which against an unresolved open would
+/// duplicate the session.
+fn error_response(e: &anyhow::Error) -> SdkResponse {
+    let indeterminate = matches!(
+        e.downcast_ref::<monica_application::ApplicationError>(),
+        Some(monica_application::ApplicationError::Indeterminate(_))
+    );
+    SdkResponse::Err { error: format!("{e:#}"), indeterminate }
 }
 
 fn parse_request(line: &str) -> Result<SdkRequestOp, String> {
@@ -196,6 +206,27 @@ mod tests {
         let line = r#"{"version":1,"op":"open_sdk_session","cwd":"/tmp"}"#;
         let error = parse_request(line).unwrap_err();
         assert!(error.contains("version mismatch"), "got: {error}");
+    }
+
+    #[test]
+    fn indeterminate_application_errors_are_marked_on_the_wire() {
+        let e = anyhow::Error::new(monica_application::ApplicationError::indeterminate(
+            "unconfirmed launch",
+        ));
+        let SdkResponse::Err { indeterminate, error } = error_response(&e) else {
+            panic!("expected an error response");
+        };
+        assert!(indeterminate);
+        assert!(error.contains("unconfirmed launch"), "got: {error}");
+    }
+
+    #[test]
+    fn determinate_application_errors_stay_determinate_on_the_wire() {
+        let e = anyhow::Error::new(monica_application::ApplicationError::validation("bad cwd"));
+        let SdkResponse::Err { indeterminate, .. } = error_response(&e) else {
+            panic!("expected an error response");
+        };
+        assert!(!indeterminate);
     }
 
     #[test]

@@ -27,9 +27,11 @@ export function initSdkSessions(): void {
 }
 
 // Startup recovery: re-adopt every Claude session whose PTY survived the restart. The
-// backend reconciles liveness before answering, so an `active` row here is a session
-// verified against the daemon moments ago. Adoption dedupes on sessionId, so tabs already
-// restored from the layout snapshot are untouched — only orphans materialize.
+// backend reconciles liveness before answering and fails closed when the daemon is
+// unreachable, so an `active` row here is always a session verified against the daemon
+// moments ago — the catch below skipping recovery on error is what keeps stale rows from
+// materializing as tabs. Adoption dedupes on sessionId, so tabs already restored from the
+// layout snapshot are untouched — only orphans materialize.
 export async function recoverClaudeSessions(): Promise<void> {
   const store = getDefaultStore();
   if (store.get(windowLabelAtom) !== MAIN_WINDOW_LABEL) return;
