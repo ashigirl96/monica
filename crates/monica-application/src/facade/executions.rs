@@ -199,23 +199,17 @@ impl<B: Backend> ExecutionService<'_, B> {
             }
         }
 
-        match self.m.repos.get_terminal_session(&session.id) {
+        let result = self.m.repos.get_terminal_session(&session.id);
+        if pty_live && !matches!(result, Ok(Some(_))) {
+            self.roll_back_live_session(daemon, &session.id);
+        }
+        match result {
             Ok(Some(row)) => Ok(row),
-            Ok(None) => {
-                if pty_live {
-                    self.roll_back_live_session(daemon, &session.id);
-                }
-                Err(ApplicationError::not_found(format!(
-                    "terminal session {} vanished",
-                    session.id
-                )))
-            }
-            Err(e) => {
-                if pty_live {
-                    self.roll_back_live_session(daemon, &session.id);
-                }
-                Err(e.into())
-            }
+            Ok(None) => Err(ApplicationError::not_found(format!(
+                "terminal session {} vanished",
+                session.id
+            ))),
+            Err(e) => Err(e.into()),
         }
     }
 

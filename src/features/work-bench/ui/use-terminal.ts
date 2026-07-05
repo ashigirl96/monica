@@ -177,6 +177,8 @@ async function runConnect(
 
     const initialCommand = isNew ? optionsRef.current.launch?.initialCommand : undefined;
     if (initialCommand) {
+      // Matches ptyd.rs's WRITE_INPUT_SHELL_DELAY: a freshly spawned shell needs a beat
+      // before it reads stdin.
       setTimeout(() => {
         terminalWrite(sid, toBase64(encoder.encode(initialCommand + "\r")));
         optionsRef.current.onLaunchConsumed?.();

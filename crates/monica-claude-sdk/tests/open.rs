@@ -35,11 +35,12 @@ fn session_info() -> SdkSessionInfo {
     }
 }
 
-/// Answers exactly one request with a response built from it (`None` = close the
-/// connection without answering), recording the request for main-thread assertions.
-fn start_mock_with(
+/// Reads one request off a freshly bound socket, hands it to `write` to produce the raw
+/// reply bytes (empty = close without answering), and records the request for main-thread
+/// assertions.
+fn start_mock_write(
     name: &str,
-    respond: impl FnOnce(&SdkRequest) -> Option<SdkResponse> + Send + 'static,
+    write: impl FnOnce(&SdkRequest) -> Vec<u8> + Send + 'static,
 ) -> MockServer {
     // Plain /tmp with a short name: socket paths must stay under the (macOS 104-byte)
     // sun_path limit, which temp_dir()'s /var/folders/... prefix easily blows past.
@@ -54,16 +55,30 @@ fn start_mock_with(
         let mut line = String::new();
         reader.read_line(&mut line).expect("request line");
         let request: SdkRequest = serde_json::from_str(&line).expect("valid request line");
-        let response = respond(&request);
+        let payload = write(&request);
         let _ = requests_tx.send(request);
-        let Some(response) = response else { return };
-        let mut payload = serde_json::to_string(&response).unwrap();
-        payload.push('\n');
+        if payload.is_empty() {
+            return;
+        }
         let mut stream = stream;
-        stream.write_all(payload.as_bytes()).unwrap();
+        stream.write_all(&payload).unwrap();
     });
 
     MockServer { socket, requests: requests_rx }
+}
+
+/// Answers exactly one request with a response built from it (`None` = close the
+/// connection without answering).
+fn start_mock_with(
+    name: &str,
+    respond: impl FnOnce(&SdkRequest) -> Option<SdkResponse> + Send + 'static,
+) -> MockServer {
+    start_mock_write(name, move |request| {
+        let Some(response) = respond(request) else { return Vec::new() };
+        let mut payload = serde_json::to_string(&response).unwrap();
+        payload.push('\n');
+        payload.into_bytes()
+    })
 }
 
 fn start_mock(name: &str, response: Option<SdkResponse>) -> MockServer {
@@ -73,23 +88,7 @@ fn start_mock(name: &str, response: Option<SdkResponse>) -> MockServer {
 /// Reads one request, then writes `raw` verbatim (no framing added) and closes — a server
 /// that died mid-response or answered something that is not the NDJSON protocol.
 fn start_mock_raw(name: &str, raw: &'static [u8]) -> MockServer {
-    let socket = PathBuf::from("/tmp").join(format!("mcsdk-o-{}-{name}.sock", std::process::id()));
-    let _ = std::fs::remove_file(&socket);
-    let listener = UnixListener::bind(&socket).expect("mock server should bind");
-    let (requests_tx, requests_rx) = mpsc::channel();
-
-    std::thread::spawn(move || {
-        let (stream, _) = listener.accept().expect("client should connect");
-        let mut reader = BufReader::new(stream.try_clone().expect("stream should clone"));
-        let mut line = String::new();
-        reader.read_line(&mut line).expect("request line");
-        let request: SdkRequest = serde_json::from_str(&line).expect("valid request line");
-        let _ = requests_tx.send(request);
-        let mut stream = stream;
-        stream.write_all(raw).unwrap();
-    });
-
-    MockServer { socket, requests: requests_rx }
+    start_mock_write(name, move |_| raw.to_vec())
 }
 
 /// A well-behaved current server: answers with the request's own claude_session_id.
