@@ -4,6 +4,7 @@ pub mod git;
 pub mod notebook;
 pub mod plan;
 pub mod pull_request;
+pub mod sdk;
 pub mod task;
 pub mod terminal;
 pub mod window;

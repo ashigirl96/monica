@@ -9,11 +9,12 @@ use crate::usecases::terminal::{
 };
 use crate::prelude::{
     Agent, NewNotificationIntent, NewTerminalSession, NotificationKind, TaskRun, TaskRunStatus,
-    TerminalSession, TerminalSessionStatus,
+    TerminalSession, TerminalSessionKind, TerminalSessionStatus,
 };
 use crate::{
     ApplicationError, ApplicationEvent, ApplicationResult, EventSink, HookContext, HookReport,
-    PrepareTaskResult, RunTaskResult, TaskBench, TerminalStateSnapshot,
+    OpenSdkSessionParams, PrepareTaskResult, RunTaskResult, SdkSessionSpec, TaskBench,
+    TerminalStateSnapshot,
 };
 
 /// Run preparation/execution, agent hooks, and (in a later phase) terminal sessions. Groups the
@@ -129,6 +130,11 @@ impl<B: Backend> ExecutionService<'_, B> {
     /// Create a terminal session row, then ask the daemon to spawn it. On spawn failure the
     /// session is marked `Failed` and any run waiting on this tab is settled now (rather than left
     /// to the sweep). The session is returned regardless so the frontend can bind it to its tab.
+    ///
+    /// An `Err` never leaves a live PTY behind: failures after a successful spawn (recording the
+    /// start, reloading the row) kill the process before returning. A live row stuck at `Starting`
+    /// would otherwise leak forever — reconcile deliberately skips it, trusting the create call
+    /// that just died here to own that transition.
     pub fn create_terminal_session(
         &mut self,
         daemon: &impl TerminalDaemon,
@@ -159,9 +165,14 @@ impl<B: Backend> ExecutionService<'_, B> {
             cols,
             env,
         };
+        let mut pty_live = false;
         match daemon.create(request) {
             Ok(pid) => {
-                self.m.repos.mark_terminal_session_started(&session.id, pid)?;
+                if let Err(e) = self.m.repos.mark_terminal_session_started(&session.id, pid) {
+                    self.roll_back_live_session(daemon, &session.id);
+                    return Err(e.into());
+                }
+                pty_live = true;
             }
             Err(e) => {
                 log::warn!(
@@ -185,12 +196,134 @@ impl<B: Backend> ExecutionService<'_, B> {
             }
         }
 
-        self.m
-            .repos
-            .get_terminal_session(&session.id)?
-            .ok_or_else(|| {
-                ApplicationError::not_found(format!("terminal session {} vanished", session.id))
-            })
+        match self.m.repos.get_terminal_session(&session.id) {
+            Ok(Some(row)) => Ok(row),
+            Ok(None) => {
+                if pty_live {
+                    self.roll_back_live_session(daemon, &session.id);
+                }
+                Err(ApplicationError::not_found(format!(
+                    "terminal session {} vanished",
+                    session.id
+                )))
+            }
+            Err(e) => {
+                if pty_live {
+                    self.roll_back_live_session(daemon, &session.id);
+                }
+                Err(e.into())
+            }
+        }
+    }
+
+    /// Create a Claude Code session in the permanent "sdk" runspace: pre-mint the Claude session
+    /// id and the tab id, spawn the shell through the daemon, submit the launch command into its
+    /// PTY, and only then announce the session for Workbench adoption. Transactional from the
+    /// caller's view — a failed launch tears the session down and returns an error, so a retry
+    /// can never stack a second live session on a half-open one. No webview involvement anywhere.
+    pub fn open_sdk_session(
+        &mut self,
+        daemon: &impl TerminalDaemon,
+        params: OpenSdkSessionParams,
+    ) -> ApplicationResult<SdkSessionSpec> {
+        // Relative paths would resolve against the app process, not the SDK caller that
+        // sent the request — an IPC boundary must not guess whose cwd "." means.
+        let cwd_path = std::path::Path::new(&params.cwd);
+        if !cwd_path.is_absolute() {
+            return Err(ApplicationError::validation(format!(
+                "cwd must be an absolute path: {}",
+                params.cwd
+            )));
+        }
+        if !cwd_path.is_dir() {
+            return Err(ApplicationError::validation(format!(
+                "cwd is not an existing directory: {}",
+                params.cwd
+            )));
+        }
+
+        let claude_session_id = uuid::Uuid::new_v4().to_string();
+        let tab_id = uuid::Uuid::new_v4().to_string();
+        let initial_command =
+            crate::sdk::sdk_initial_command(&claude_session_id, params.model.as_deref());
+        let env = vec![(
+            crate::MONICA_SDK_SESSION_ID_ENV.to_string(),
+            claude_session_id.clone(),
+        )];
+
+        let new = NewTerminalSession {
+            runspace_id: Some(crate::sdk_runspace_id().to_string()),
+            tab_id: Some(tab_id.clone()),
+            kind: TerminalSessionKind::Agent,
+            cwd: params.cwd.clone(),
+            shell: params.shell,
+            // Placeholder geometry until a Workbench pane attaches and fits the terminal.
+            rows: 24,
+            cols: 80,
+        };
+        let session = self.create_terminal_session(daemon, new, env)?;
+        // A spawn failure comes back as Ok(status=Failed), not Err — surface it as an error
+        // here so the caller never announces or launches into a dead session.
+        if session.status == TerminalSessionStatus::Failed {
+            return Err(ApplicationError::external(format!(
+                "terminal session {} failed to start",
+                session.id
+            )));
+        }
+
+        if let Err(e) = daemon.write_input(&session.id, format!("{initial_command}\r").as_bytes())
+        {
+            self.roll_back_live_session(daemon, &session.id);
+            return Err(ApplicationError::external(format!(
+                "failed to submit the claude launch into session {}: {e:#}; \
+                 the session was terminated, so retrying is safe",
+                session.id
+            )));
+        }
+
+        let spec = SdkSessionSpec {
+            runspace_id: crate::sdk_runspace_id().to_string(),
+            tab_id,
+            session_id: session.id,
+            claude_session_id,
+            cwd: params.cwd,
+            initial_command,
+            title: params.title,
+        };
+        self.m.events.emit(ApplicationEvent::SdkSessionOpened {
+            runspace_id: spec.runspace_id.clone(),
+            tab_id: spec.tab_id.clone(),
+            session_id: spec.session_id.clone(),
+            claude_session_id: spec.claude_session_id.clone(),
+            cwd: spec.cwd.clone(),
+            title: spec.title.clone(),
+        });
+        Ok(spec)
+    }
+
+    /// Best-effort teardown of a spawned session that its creation flow can no longer vouch for
+    /// (the start couldn't be recorded, or the launch never made it into the PTY): kill the
+    /// process, settle the row as Failed, and settle any run waiting on its tab, so nothing
+    /// adoptable or retriable lingers. The kill must come first — if the DB is the thing failing,
+    /// the Failed write below fails too, and only a dead PTY lets reconcile settle the row later.
+    fn roll_back_live_session(&mut self, daemon: &impl TerminalDaemon, session_id: &str) {
+        if let Err(e) = daemon.terminate(session_id) {
+            log::warn!(
+                target: "monica_application::terminal",
+                "failed to terminate rolled-back session {session_id}: {e:#}"
+            );
+        }
+        if let Err(e) = self.m.repos.update_terminal_session_status(
+            session_id,
+            TerminalSessionStatus::Failed,
+            None,
+        ) {
+            log::error!(
+                target: "monica_application::terminal",
+                "failed to mark rolled-back session {session_id} failed: {e}"
+            );
+        }
+        self.settle_runs_for_terminated_sessions(&[session_id.to_string()]);
     }
 
     pub fn attach_terminal_session(

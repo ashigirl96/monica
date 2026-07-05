@@ -177,6 +177,206 @@ fn facade_create_terminal_session_failure_marks_failed_and_settles() {
     assert_eq!(stopped_runs(&sink.events()), vec!["run-1".to_string()]);
 }
 
+#[test]
+fn facade_create_terminal_session_mark_started_failure_kills_pty_and_errors() {
+    let repos = FakeRepos::default();
+    repos.fail_mark_started();
+    repos.seed_run(driven_run("run-1", "MON-1", "tab-1"));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+    let daemon = FakeDaemon::default();
+    let new = NewTerminalSession {
+        runspace_id: Some("rs-1".to_string()),
+        tab_id: Some("tab-1".to_string()),
+        kind: TerminalSessionKind::Shell,
+        cwd: "/".to_string(),
+        shell: "/bin/zsh".to_string(),
+        rows: 24,
+        cols: 80,
+    };
+
+    let err = monica.executions().create_terminal_session(&daemon, new, Vec::new()).unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Storage(_)), "got: {err:?}");
+    // The spawned PTY was killed, the row settled as Failed, and the waiting run stopped —
+    // an Err from create never leaves a live session behind.
+    let session_id = daemon.created.lock().unwrap()[0].session_id.clone();
+    assert_eq!(*daemon.terminated.lock().unwrap(), vec![session_id.clone()]);
+    let rows = monica.executions().list_terminal_sessions(&daemon, Some("rs-1")).unwrap();
+    let row = rows.iter().find(|s| s.id == session_id).expect("session row should exist");
+    assert_eq!(row.status, TerminalSessionStatus::Failed);
+    assert_eq!(stopped_runs(&sink.events()), vec!["run-1".to_string()]);
+}
+
+fn sdk_params(cwd: &str) -> crate::OpenSdkSessionParams {
+    crate::OpenSdkSessionParams {
+        cwd: cwd.to_string(),
+        model: Some("opus".to_string()),
+        title: Some("hello".to_string()),
+        shell: "/bin/zsh".to_string(),
+    }
+}
+
+#[test]
+fn facade_open_sdk_session_mints_ids_spawns_and_announces() {
+    let sink = RecordingSink::default();
+    let mut monica = facade(FakeRepos::default(), sink.clone());
+    let daemon = FakeDaemon::default();
+    let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+
+    let spec = monica.executions().open_sdk_session(&daemon, sdk_params(&cwd)).unwrap();
+
+    assert_eq!(spec.runspace_id, "sdk");
+    assert_eq!(spec.cwd, cwd);
+    uuid::Uuid::parse_str(&spec.claude_session_id).expect("claude session id should be a uuid");
+    uuid::Uuid::parse_str(&spec.tab_id).expect("tab id should be a uuid");
+    assert_eq!(
+        spec.initial_command,
+        format!("claude --session-id {} --model 'opus'", spec.claude_session_id)
+    );
+
+    // The daemon spawned with the sdk marker plus the standard tab/session id env.
+    let created = daemon.created.lock().unwrap();
+    assert_eq!(created.len(), 1);
+    assert_eq!(created[0].session_id, spec.session_id);
+    let env: std::collections::HashMap<&str, &str> =
+        created[0].env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    assert_eq!(env.get("MONICA_SDK_SESSION_ID"), Some(&spec.claude_session_id.as_str()));
+    assert_eq!(env.get("MONICA_TERMINAL_TAB_ID"), Some(&spec.tab_id.as_str()));
+    assert_eq!(env.get("MONICA_TERMINAL_SESSION_ID"), Some(&spec.session_id.as_str()));
+    drop(created);
+
+    // The launch command was submitted (and acknowledged) into the session's PTY.
+    let written = daemon.written.lock().unwrap();
+    assert_eq!(written.len(), 1);
+    assert_eq!(written[0].0, spec.session_id);
+    assert_eq!(written[0].1, format!("{}\r", spec.initial_command).into_bytes());
+    drop(written);
+
+    // The DB row is an agent session parked in the "sdk" runspace under the minted tab id.
+    let rows = monica.executions().list_terminal_sessions(&daemon, Some("sdk")).unwrap();
+    let row = rows.iter().find(|s| s.id == spec.session_id).expect("session row should exist");
+    assert_eq!(row.kind, TerminalSessionKind::Agent);
+    assert_eq!(row.tab_id.as_deref(), Some(spec.tab_id.as_str()));
+
+    // The announcement mirrors the spec so the Workbench can adopt the tab as-is.
+    let event = sink
+        .events()
+        .into_iter()
+        .find(|e| matches!(e, ApplicationEvent::SdkSessionOpened { .. }))
+        .expect("SdkSessionOpened should be announced");
+    let ApplicationEvent::SdkSessionOpened {
+        runspace_id,
+        tab_id,
+        session_id,
+        claude_session_id,
+        cwd: event_cwd,
+        title,
+    } = event
+    else {
+        unreachable!()
+    };
+    assert_eq!(runspace_id, "sdk");
+    assert_eq!(tab_id, spec.tab_id);
+    assert_eq!(session_id, spec.session_id);
+    assert_eq!(claude_session_id, spec.claude_session_id);
+    assert_eq!(event_cwd, spec.cwd);
+    assert_eq!(title.as_deref(), Some("hello"));
+}
+
+#[test]
+fn facade_open_sdk_session_rejects_missing_cwd() {
+    let sink = RecordingSink::default();
+    let mut monica = facade(FakeRepos::default(), sink.clone());
+    let daemon = FakeDaemon::default();
+
+    let err = monica
+        .executions()
+        .open_sdk_session(&daemon, sdk_params("/nonexistent/monica-sdk-test"))
+        .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Validation(_)), "got: {err:?}");
+    assert!(daemon.created.lock().unwrap().is_empty());
+    assert!(sink.events().is_empty());
+}
+
+#[test]
+fn facade_open_sdk_session_rejects_relative_cwd() {
+    // "." exists but would resolve against the app process, not the SDK caller.
+    let sink = RecordingSink::default();
+    let mut monica = facade(FakeRepos::default(), sink.clone());
+    let daemon = FakeDaemon::default();
+
+    let err = monica.executions().open_sdk_session(&daemon, sdk_params(".")).unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Validation(_)), "got: {err:?}");
+    assert!(daemon.created.lock().unwrap().is_empty());
+    assert!(sink.events().is_empty());
+}
+
+#[test]
+fn facade_open_sdk_session_write_failure_rolls_back_without_announcement() {
+    let sink = RecordingSink::default();
+    let mut monica = facade(FakeRepos::default(), sink.clone());
+    let daemon = FakeDaemon::failing_write();
+    let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+
+    let err = monica.executions().open_sdk_session(&daemon, sdk_params(&cwd)).unwrap_err();
+
+    assert!(matches!(err, ApplicationError::External(_)), "got: {err:?}");
+    // The half-open session was torn down and settled as Failed, so a retry can't stack a
+    // second live session and nothing announces an unlaunched one.
+    let session_id = daemon.created.lock().unwrap()[0].session_id.clone();
+    assert_eq!(*daemon.terminated.lock().unwrap(), vec![session_id.clone()]);
+    let rows = monica.executions().list_terminal_sessions(&daemon, Some("sdk")).unwrap();
+    let row = rows.iter().find(|s| s.id == session_id).expect("session row should exist");
+    assert_eq!(row.status, TerminalSessionStatus::Failed);
+    assert!(!sink
+        .events()
+        .iter()
+        .any(|e| matches!(e, ApplicationEvent::SdkSessionOpened { .. })));
+}
+
+#[test]
+fn facade_open_sdk_session_mark_started_failure_rolls_back_without_announcement() {
+    let repos = FakeRepos::default();
+    repos.fail_mark_started();
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+    let daemon = FakeDaemon::default();
+    let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+
+    let err = monica.executions().open_sdk_session(&daemon, sdk_params(&cwd)).unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Storage(_)), "got: {err:?}");
+    // The PTY spawned but its start couldn't be recorded: the shell is killed before the error
+    // surfaces, so the documented "an error means retrying is safe" contract holds — a retry
+    // can't stack a second live session on an orphan, and nothing launches or announces.
+    let session_id = daemon.created.lock().unwrap()[0].session_id.clone();
+    assert_eq!(*daemon.terminated.lock().unwrap(), vec![session_id]);
+    assert!(daemon.written.lock().unwrap().is_empty());
+    assert!(!sink
+        .events()
+        .iter()
+        .any(|e| matches!(e, ApplicationEvent::SdkSessionOpened { .. })));
+}
+
+#[test]
+fn facade_open_sdk_session_daemon_failure_is_an_error_without_announcement() {
+    let sink = RecordingSink::default();
+    let mut monica = facade(FakeRepos::default(), sink.clone());
+    let daemon = FakeDaemon::failing_create();
+    let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+
+    let err = monica.executions().open_sdk_session(&daemon, sdk_params(&cwd)).unwrap_err();
+
+    assert!(matches!(err, ApplicationError::External(_)), "got: {err:?}");
+    assert!(!sink
+        .events()
+        .iter()
+        .any(|e| matches!(e, ApplicationEvent::SdkSessionOpened { .. })));
+}
+
 #[tokio::test]
 async fn facade_sync_pull_requests_counts_and_announces() {
     let repos = FakeRepos::default();
