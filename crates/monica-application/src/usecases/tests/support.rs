@@ -1686,6 +1686,8 @@ impl Workspace for FakeWorkspace {
 pub(crate) struct FakeDaemon {
     create_fails: bool,
     write_fails: bool,
+    write_ack_lost: bool,
+    terminate_fails: bool,
     list_fails: bool,
     pub(crate) created: Mutex<Vec<TerminalCreateRequest>>,
     pub(crate) written: Mutex<Vec<(String, Vec<u8>)>>,
@@ -1700,6 +1702,16 @@ impl FakeDaemon {
 
     pub(crate) fn failing_write() -> Self {
         Self { write_fails: true, ..Self::default() }
+    }
+
+    /// The connection dies mid-open: the write reaches the PTY but its ack is lost, and
+    /// the follow-up kill cannot be confirmed either.
+    pub(crate) fn losing_write_ack() -> Self {
+        Self { write_ack_lost: true, terminate_fails: true, ..Self::default() }
+    }
+
+    pub(crate) fn failing_terminate() -> Self {
+        Self { terminate_fails: true, ..Self::default() }
     }
 
     pub(crate) fn failing_list() -> Self {
@@ -1732,6 +1744,9 @@ impl TerminalDaemon for FakeDaemon {
             return Err(anyhow!("daemon write failed"));
         }
         self.written.lock().unwrap().push((session_id.to_string(), data.to_vec()));
+        if self.write_ack_lost {
+            return Err(anyhow!("daemon write ack lost"));
+        }
         Ok(())
     }
     fn attach(&self, _session_id: &str, _replay_bytes: Option<u32>) -> Result<TerminalAttachment> {
@@ -1741,6 +1756,9 @@ impl TerminalDaemon for FakeDaemon {
         Ok(())
     }
     fn terminate(&self, session_id: &str) -> Result<()> {
+        if self.terminate_fails {
+            return Err(anyhow!("daemon terminate failed"));
+        }
         self.terminated.lock().unwrap().push(session_id.to_string());
         Ok(())
     }

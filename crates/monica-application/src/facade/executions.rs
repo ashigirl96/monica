@@ -222,8 +222,11 @@ impl<B: Backend> ExecutionService<'_, B> {
     /// Create a Claude Code session in the permanent "sdk" runspace: pre-mint the Claude session
     /// id and the tab id, spawn the shell through the daemon, submit the launch command into its
     /// PTY, and only then announce the session for Workbench adoption. Transactional from the
-    /// caller's view — a failed launch tears the session down and returns an error, so a retry
-    /// can never stack a second live session on a half-open one. No webview involvement anywhere.
+    /// caller's view — a determinately failed launch tears the session down and returns an
+    /// error, so a retry can never stack a second live session on a half-open one. When neither
+    /// the launch nor a kill can be confirmed (the daemon dying mid-open), the error is
+    /// [`ApplicationError::Indeterminate`] and the pending reservation stays, so the id keeps
+    /// refusing non-idempotent reuse. No webview involvement anywhere.
     pub fn open_sdk_session(
         &mut self,
         daemon: &impl TerminalDaemon,
@@ -307,31 +310,49 @@ impl<B: Backend> ExecutionService<'_, B> {
             cwd: params.cwd.clone(),
             name: params.title.clone(),
         }) {
+            // Determinate even when the kill is unconfirmed: the launch was never
+            // submitted, so whatever survives in that PTY is a plain shell, not a
+            // session under this id.
             self.roll_back_live_session(daemon, &session.id);
             return Err(ApplicationError::external(format!(
                 "failed to reserve the claude session mapping for session {}: {e:#}; \
-                 this spawn was terminated (its launch was never submitted); if a \
-                 concurrent open owns this id, a retry resolves to it",
+                 the launch was never submitted, so no session runs under this id; if a \
+                 concurrent open owns the id, a retry resolves to it",
                 session.id
             )));
         }
 
         if let Err(e) = daemon.write_input(&session.id, format!("{initial_command}\r").as_bytes())
         {
-            self.roll_back_live_session(daemon, &session.id);
-            // The launch never happened, so the reservation must not outlive it — freeing
-            // the id keeps a same-id retry a clean fresh open. Best-effort: if this fails,
-            // the row was already ended by the rollback's coupled transition, which still
-            // refuses reuse.
-            if let Err(e) = self.m.repos.delete_claude_session(&claude_session_id) {
-                log::error!(
-                    target: "monica_application::sdk",
-                    "failed to delete the unlaunched reservation {claude_session_id}: {e}"
-                );
+            // The write is an acknowledged round trip and the daemon writes into the PTY
+            // before answering, so this Err does not prove the launch bytes never arrived
+            // — a timeout or dropped connection can lose only the ack. Whether "nothing
+            // runs under this id" is true hinges on the kill being confirmed.
+            if self.roll_back_live_session(daemon, &session.id) {
+                // Verifiably dead, so the reservation must not outlive the launch —
+                // freeing the id keeps a same-id retry a clean fresh open. Best-effort:
+                // if this fails, the row was already ended by the rollback's coupled
+                // transition, which still refuses reuse.
+                if let Err(e) = self.m.repos.delete_claude_session(&claude_session_id) {
+                    log::error!(
+                        target: "monica_application::sdk",
+                        "failed to delete the unlaunched reservation {claude_session_id}: {e}"
+                    );
+                }
+                return Err(ApplicationError::external(format!(
+                    "failed to submit the claude launch into session {}: {e:#}; \
+                     the session was terminated, so retrying is safe",
+                    session.id
+                )));
             }
-            return Err(ApplicationError::external(format!(
-                "failed to submit the claude launch into session {}: {e:#}; \
-                 the session was terminated, so retrying is safe",
+            // Unconfirmed kill: the PTY may be alive with the launch landed. The pending
+            // reservation stays — it refuses non-idempotent reuse — and the outcome is
+            // reported as unknown so the SDK client keeps its typed retry key.
+            return Err(ApplicationError::indeterminate(format!(
+                "failed to submit the claude launch into session {} and the daemon could \
+                 not confirm a kill: {e:#}; the session may be running under \
+                 claude_session_id {claude_session_id} — retry with this same id or check \
+                 the Workbench",
                 session.id
             )));
         }
@@ -354,18 +375,30 @@ impl<B: Backend> ExecutionService<'_, B> {
                     session.id
                 )));
             }
+            // The launch IS submitted and acknowledged here; only the pending→active
+            // write failed. A confirmed kill collapses that back to "nothing left
+            // behind"; without one Claude is likely running, so the reservation must
+            // survive and the outcome stays unknown.
             Err(e) => {
-                self.roll_back_live_session(daemon, &session.id);
-                if let Err(e) = self.m.repos.delete_claude_session(&claude_session_id) {
-                    log::error!(
-                        target: "monica_application::sdk",
-                        "failed to delete the reservation {claude_session_id} after a failed \
-                         launch confirmation: {e}"
-                    );
+                if self.roll_back_live_session(daemon, &session.id) {
+                    if let Err(e) = self.m.repos.delete_claude_session(&claude_session_id) {
+                        log::error!(
+                            target: "monica_application::sdk",
+                            "failed to delete the reservation {claude_session_id} after a \
+                             failed launch confirmation: {e}"
+                        );
+                    }
+                    return Err(ApplicationError::external(format!(
+                        "failed to confirm the claude launch for session {}: {e:#}; \
+                         the session was terminated, so retrying is safe",
+                        session.id
+                    )));
                 }
-                return Err(ApplicationError::external(format!(
-                    "failed to confirm the claude launch for session {}: {e:#}; \
-                     the session was terminated, so retrying is safe",
+                return Err(ApplicationError::indeterminate(format!(
+                    "failed to confirm the claude launch for session {} and the daemon \
+                     could not confirm a kill: {e:#}; the session may be running under \
+                     claude_session_id {claude_session_id} — retry with this same id or \
+                     check the Workbench",
                     session.id
                 )));
             }
@@ -392,16 +425,23 @@ impl<B: Backend> ExecutionService<'_, B> {
     }
 
     /// Best-effort teardown of a spawned session that its creation flow can no longer vouch for
-    /// (the start couldn't be recorded, or the launch never made it into the PTY): kill the
-    /// process, settle the row as Failed, and settle any run waiting on its tab, so nothing
-    /// adoptable or retriable lingers. The kill must come first — if the DB is the thing failing,
-    /// the Failed write below fails too, and only a dead PTY lets reconcile settle the row later.
-    fn roll_back_live_session(&mut self, daemon: &impl TerminalDaemon, session_id: &str) {
+    /// (the start couldn't be recorded, or the launch's fate is unknown): kill the process,
+    /// settle the row as Failed, and settle any run waiting on its tab, so nothing adoptable or
+    /// retriable lingers. Returns whether the daemon confirmed the kill (`terminate` is an
+    /// acknowledged round trip). On `false` the process may still be alive and NOTHING is
+    /// written: marking the row Failed would end its Claude mapping via the coupled transition,
+    /// collapsing a genuinely unknown outcome into a determinate "ended" — reconcile settles the
+    /// row once the daemon answers again. The kill still comes before the Failed write — if the
+    /// DB is the thing failing, that write fails too, and only a dead PTY lets reconcile settle
+    /// the row later.
+    fn roll_back_live_session(&mut self, daemon: &impl TerminalDaemon, session_id: &str) -> bool {
         if let Err(e) = daemon.terminate(session_id) {
             log::warn!(
                 target: "monica_application::terminal",
-                "failed to terminate rolled-back session {session_id}: {e:#}"
+                "failed to terminate rolled-back session {session_id}; leaving it for \
+                 reconcile: {e:#}"
             );
+            return false;
         }
         if let Err(e) = self.m.repos.update_terminal_session_status(
             session_id,
@@ -414,6 +454,7 @@ impl<B: Backend> ExecutionService<'_, B> {
             );
         }
         self.settle_runs_for_terminated_sessions(&[session_id.to_string()]);
+        true
     }
 
     /// Resolve a client-supplied claude_session_id to its existing session, if the id is

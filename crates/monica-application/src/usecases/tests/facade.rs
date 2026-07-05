@@ -464,6 +464,75 @@ fn facade_open_sdk_session_launch_confirmation_failure_rolls_back_and_frees_the_
 }
 
 #[test]
+fn facade_open_sdk_session_unconfirmed_launch_write_is_indeterminate_and_keeps_the_reservation() {
+    // The launch write is an acknowledged round trip and the daemon writes into the PTY
+    // before answering: here the bytes landed but the ack was lost, and the follow-up
+    // kill could not be confirmed either (the connection died mid-open). Claude may be
+    // starting, so a determinate error — which licenses a fresh-id retry — would risk a
+    // duplicate session; the outcome must stay unknown with the id recoverable.
+    let sink = RecordingSink::default();
+    let mut monica = facade(FakeRepos::default(), sink.clone());
+    let daemon = FakeDaemon::losing_write_ack();
+    let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+    let id = "5e0f5b0e-9f5c-4a4e-9d6e-000000000309";
+
+    let err = monica
+        .executions()
+        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Indeterminate(_)), "got: {err:?}");
+    assert!(err.to_string().contains(id), "the retry key must be named: {err}");
+    assert_eq!(daemon.written.lock().unwrap().len(), 1, "the launch bytes were delivered");
+    assert!(!sink
+        .events()
+        .iter()
+        .any(|e| matches!(e, ApplicationEvent::SdkSessionOpened { .. })));
+
+    // Nothing was force-failed (that would end the mapping via the coupled transition):
+    // the reservation survives as pending, so a same-id retry stays idempotent —
+    // still indeterminate, and never a second spawn.
+    let session_id = daemon.created.lock().unwrap()[0].session_id.clone();
+    daemon.seed_running_view(&session_id);
+    let sessions = monica.executions().list_claude_sessions(&daemon).unwrap();
+    let mapping = sessions.iter().find(|cs| cs.claude_session_id == id).unwrap();
+    assert_eq!(mapping.status, monica_domain::ClaudeSessionStatus::Pending);
+    let retry = monica
+        .executions()
+        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .unwrap_err();
+    assert!(matches!(retry, ApplicationError::Indeterminate(_)), "got: {retry:?}");
+    assert_eq!(daemon.created.lock().unwrap().len(), 1, "must not respawn");
+}
+
+#[test]
+fn facade_open_sdk_session_unconfirmed_kill_after_confirm_failure_is_indeterminate() {
+    // The launch was submitted and acknowledged; only the pending→active confirmation
+    // write failed, and the kill could not be confirmed either. Claude is likely
+    // running: the reservation must survive and the outcome stays unknown.
+    let repos = FakeRepos::default();
+    repos.fail_mark_claude_launched();
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+    let daemon = FakeDaemon::failing_terminate();
+    let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+    let id = "5e0f5b0e-9f5c-4a4e-9d6e-000000000309";
+
+    let err = monica
+        .executions()
+        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Indeterminate(_)), "got: {err:?}");
+    assert!(err.to_string().contains(id), "the retry key must be named: {err}");
+    let session_id = daemon.created.lock().unwrap()[0].session_id.clone();
+    daemon.seed_running_view(&session_id);
+    let sessions = monica.executions().list_claude_sessions(&daemon).unwrap();
+    let mapping = sessions.iter().find(|cs| cs.claude_session_id == id).unwrap();
+    assert_eq!(mapping.status, monica_domain::ClaudeSessionStatus::Pending);
+}
+
+#[test]
 fn facade_open_sdk_session_with_id_pending_reservation_is_indeterminate() {
     let repos = FakeRepos::default();
     let id = "5e0f5b0e-9f5c-4a4e-9d6e-000000000309";
