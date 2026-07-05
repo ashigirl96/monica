@@ -7,9 +7,15 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Bump on any incompatible wire change. The server answers a mismatched version with an
-/// `Err` response instead of guessing.
-pub const PROTOCOL_VERSION: u32 = 1;
+/// Bump on any incompatible wire change — semantic contracts included, not just shape.
+/// The server rejects a mismatched version with an `Err` response before doing anything,
+/// so version skew fails with no side effect.
+///
+/// v2: the server must honor `OpenSdkSession.claude_session_id` (idempotent opens). v1
+/// servers ignored the field and minted their own id, so a v2 client's "safe retry"
+/// against a v1 server would have opened a second session — the bump makes v1 servers
+/// reject the request before launching instead.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SdkRequest {
@@ -29,8 +35,9 @@ pub enum SdkRequestOp {
         title: Option<String>,
         /// Idempotency key: opening with an id that is already mapped to a live session
         /// returns that session instead of creating a second one, so a retry after a lost
-        /// response is safe. Servers predating this field silently ignore it — clients
-        /// detect that by comparing the echoed `claude_session_id` in the response.
+        /// response is safe. Honoring this field is the v2 contract; v1 servers ignored
+        /// it, which is why the version bump — not the echoed id in the response — is
+        /// what protects retries against them.
         #[serde(default)]
         claude_session_id: Option<String>,
     },
@@ -103,7 +110,9 @@ mod tests {
 
     #[test]
     fn optional_fields_may_be_omitted_on_the_wire() {
-        // A v1 request written before claude_session_id existed must still parse.
+        // A v1 request written before claude_session_id existed must still parse (fields
+        // default), so the server can answer it with a version-mismatch error instead of
+        // an opaque parse error.
         let back: SdkRequest =
             serde_json::from_str(r#"{"version":1,"op":"open_sdk_session","cwd":"/tmp"}"#).unwrap();
         let SdkRequestOp::OpenSdkSession { cwd, model, title, claude_session_id } = back.op;

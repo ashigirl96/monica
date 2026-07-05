@@ -189,6 +189,16 @@ mod tests {
     }
 
     #[test]
+    fn rejects_a_v1_request_before_any_session_is_launched() {
+        // v1 predates the claude_session_id idempotency contract. parse_request runs
+        // before open_sdk_session, so this rejection is guaranteed side-effect free —
+        // the same guarantee a v1 server gives a v2 client.
+        let line = r#"{"version":1,"op":"open_sdk_session","cwd":"/tmp"}"#;
+        let error = parse_request(line).unwrap_err();
+        assert!(error.contains("version mismatch"), "got: {error}");
+    }
+
+    #[test]
     fn accepts_a_current_version_request() {
         let line =
             format!(r#"{{"version":{PROTOCOL_VERSION},"op":"open_sdk_session","cwd":"/tmp"}}"#);

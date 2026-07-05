@@ -70,6 +70,28 @@ fn start_mock(name: &str, response: Option<SdkResponse>) -> MockServer {
     start_mock_with(name, move |_| response)
 }
 
+/// Reads one request, then writes `raw` verbatim (no framing added) and closes — a server
+/// that died mid-response or answered something that is not the NDJSON protocol.
+fn start_mock_raw(name: &str, raw: &'static [u8]) -> MockServer {
+    let socket = PathBuf::from("/tmp").join(format!("mcsdk-o-{}-{name}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&socket);
+    let listener = UnixListener::bind(&socket).expect("mock server should bind");
+    let (requests_tx, requests_rx) = mpsc::channel();
+
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().expect("client should connect");
+        let mut reader = BufReader::new(stream.try_clone().expect("stream should clone"));
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("request line");
+        let request: SdkRequest = serde_json::from_str(&line).expect("valid request line");
+        let _ = requests_tx.send(request);
+        let mut stream = stream;
+        stream.write_all(raw).unwrap();
+    });
+
+    MockServer { socket, requests: requests_rx }
+}
+
 /// A well-behaved current server: answers with the request's own claude_session_id.
 fn start_echo_mock(name: &str) -> MockServer {
     start_mock_with(name, |request| {
@@ -128,10 +150,10 @@ fn mints_a_claude_session_id_when_none_is_supplied() {
 }
 
 #[test]
-fn echoed_id_mismatch_identifies_an_older_server() {
-    // A server that ignores the request's claude_session_id answers with its own mint
-    // (here the canned id), which must surface as an error, not as a silent non-idempotent
-    // success.
+fn echoed_id_mismatch_fails_instead_of_breaking_idempotency() {
+    // A server that speaks the current version but ignores the request's
+    // claude_session_id answers with its own mint (here the canned id), which must
+    // surface as an error, not as a silent non-idempotent success.
     let mock = start_mock("stale", Some(SdkResponse::Ok { session: session_info() }));
     let mut other_id = params();
     other_id.claude_session_id = Some("00000000-0000-4000-8000-000000000309".to_string());
@@ -181,6 +203,49 @@ fn lost_response_recovers_the_minted_id_through_the_typed_error() {
     let request = mock.requests.recv_timeout(RECV_TIMEOUT).unwrap();
     let monica_sdk_protocol::SdkRequestOp::OpenSdkSession { claude_session_id, .. } = request.op;
     assert_eq!(Some(recovered), claude_session_id, "the error must carry the id that was sent");
+}
+
+#[test]
+fn truncated_response_is_indeterminate_and_carries_the_retry_key() {
+    // The server got the request (so it may have launched) but died mid-write: read_line
+    // returns the partial line on EOF, so the failure surfaces at JSON parsing, not I/O —
+    // and it must stay recoverable exactly like a dropped connection.
+    let mock = start_mock_raw("trunc", br#"{"type":"ok","session":{"runspace_id":"sdk""#);
+    let err = open_session_at(&mock.socket, params()).unwrap_err();
+    assert!(err.to_string().contains("unparseable response"), "got: {err}");
+    let indeterminate = err
+        .downcast_ref::<OpenSessionIndeterminate>()
+        .expect("a parse failure after the request was sent must downcast");
+    assert_eq!(indeterminate.claude_session_id, CANNED_ID);
+}
+
+#[test]
+fn non_ndjson_response_is_indeterminate_and_carries_the_retry_key() {
+    let mock = start_mock_raw("garbage", b"HTTP/1.1 400 Bad Request\r\n");
+    let err = open_session_at(&mock.socket, params()).unwrap_err();
+    let indeterminate = err
+        .downcast_ref::<OpenSessionIndeterminate>()
+        .expect("a non-protocol response after the request was sent must downcast");
+    assert_eq!(indeterminate.claude_session_id, CANNED_ID);
+}
+
+#[test]
+fn v1_server_version_rejection_is_determinate() {
+    // A v1 server rejects the version mismatch before launching anything, so this
+    // failure proves no session was left behind: no OpenSessionIndeterminate, retry
+    // (or fall back) freely.
+    let mock = start_mock(
+        "v1",
+        Some(SdkResponse::Err {
+            error: "sdk protocol version mismatch: client=2, server=1".to_string(),
+        }),
+    );
+    let err = open_session_at(&mock.socket, params()).unwrap_err();
+    assert!(err.to_string().contains("version mismatch"), "got: {err}");
+    assert!(
+        err.downcast_ref::<OpenSessionIndeterminate>().is_none(),
+        "a server-reported rejection is not an unknown outcome"
+    );
 }
 
 #[test]
