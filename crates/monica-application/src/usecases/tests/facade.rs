@@ -570,6 +570,84 @@ fn facade_open_sdk_session_unconfirmed_kill_after_confirm_failure_is_indetermina
     assert_eq!(mapping.status, monica_domain::ClaudeSessionStatus::Pending);
 }
 
+/// The winner of a same-id reservation race, its shell alive on `ts-9` in the daemon.
+fn stage_reservation_race_winner(
+    repos: &FakeRepos,
+    daemon: &FakeDaemon,
+    id: &str,
+    status: monica_domain::ClaudeSessionStatus,
+) {
+    repos.seed_session(fake_session("ts-9", Some("tab-w"), TerminalSessionStatus::Running));
+    daemon.seed_running_view("ts-9");
+    repos.race_claude_session_insert(monica_domain::ClaudeSession {
+        claude_session_id: id.to_string(),
+        runspace_id: "sdk".to_string(),
+        tab_id: "tab-w".to_string(),
+        terminal_session_id: "ts-9".to_string(),
+        cwd: "/tmp".to_string(),
+        name: None,
+        status,
+        created_at: "2026-06-02T00:00:00.000Z".to_string(),
+        ended_at: None,
+    });
+}
+
+#[test]
+fn facade_open_sdk_session_reservation_race_loser_stays_indeterminate_while_winner_is_in_flight() {
+    // Both opens pass recovery, the winner inserts the reservation first, and the loser
+    // fails on the duplicate while the winner is still mid-launch (pending). The loser
+    // must not answer determinately: "no session exists, retry freely" would duplicate
+    // the session the winner is about to confirm.
+    let repos = FakeRepos::default();
+    let daemon = FakeDaemon::default();
+    let id = "5e0f5b0e-9f5c-4a4e-9d6e-000000000309";
+    stage_reservation_race_winner(&repos, &daemon, id, monica_domain::ClaudeSessionStatus::Pending);
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+    let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+
+    let err = monica
+        .executions()
+        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Indeterminate(_)), "got: {err:?}");
+    assert!(err.to_string().contains(id), "the retry key must be named: {err}");
+    // Only the loser's own (rolled back, Claude-less) spawn happened; no launch write.
+    assert_eq!(daemon.created.lock().unwrap().len(), 1);
+    assert!(daemon.written.lock().unwrap().is_empty());
+    // The winner's reservation is untouched.
+    let sessions = monica.executions().list_claude_sessions(&daemon).unwrap();
+    let mapping = sessions.iter().find(|cs| cs.claude_session_id == id).unwrap();
+    assert_eq!(mapping.status, monica_domain::ClaudeSessionStatus::Pending);
+    assert_eq!(mapping.terminal_session_id, "ts-9");
+}
+
+#[test]
+fn facade_open_sdk_session_reservation_race_loser_resolves_to_an_active_winner() {
+    // Same race, but the winner already confirmed its launch: the loser's request is
+    // for a session that exists, so it resolves to it idempotently instead of erroring.
+    let repos = FakeRepos::default();
+    let daemon = FakeDaemon::default();
+    let id = "5e0f5b0e-9f5c-4a4e-9d6e-000000000309";
+    stage_reservation_race_winner(&repos, &daemon, id, monica_domain::ClaudeSessionStatus::Active);
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+    let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+
+    let spec = monica
+        .executions()
+        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .unwrap();
+
+    assert_eq!(spec.claude_session_id, id);
+    assert_eq!(spec.session_id, "ts-9");
+    assert_eq!(spec.tab_id, "tab-w");
+    // The loser's own spawn was rolled back and no second launch was written.
+    assert_eq!(daemon.created.lock().unwrap().len(), 1);
+    assert!(daemon.written.lock().unwrap().is_empty());
+}
+
 #[test]
 fn facade_open_sdk_session_with_id_pending_reservation_is_indeterminate() {
     let repos = FakeRepos::default();

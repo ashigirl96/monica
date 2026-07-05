@@ -300,8 +300,8 @@ impl<B: Backend> ExecutionService<'_, B> {
         // crash past this point leaves a pending row that refuses automatic reuse of the
         // id; a crash before it leaves an unmapped shell that never launched Claude, so a
         // same-id retry opening fresh is still correct. A concurrent open racing this id
-        // loses here on the primary key — before its own launch write — and only tears
-        // down its Claude-less shell.
+        // loses here on the primary key — before its own launch write — tears down only
+        // its Claude-less shell, and answers from the winner's mapping below.
         if let Err(e) = self.m.repos.create_claude_session(NewClaudeSession {
             claude_session_id: claude_session_id.clone(),
             runspace_id: crate::sdk_runspace_id().to_string(),
@@ -310,16 +310,30 @@ impl<B: Backend> ExecutionService<'_, B> {
             cwd: params.cwd.clone(),
             name: params.title.clone(),
         }) {
-            // Determinate even when the kill is unconfirmed: the launch was never
-            // submitted, so whatever survives in that PTY is a plain shell, not a
-            // session under this id.
+            // Rollback outcome is irrelevant here even when the kill is unconfirmed: the
+            // launch was never submitted, so whatever survives in that PTY is a plain
+            // shell, not a session under this id.
             self.roll_back_live_session(daemon, &session.id);
-            return Err(ApplicationError::external(format!(
-                "failed to reserve the claude session mapping for session {}: {e:#}; \
-                 the launch was never submitted, so no session runs under this id; if a \
-                 concurrent open owns the id, a retry resolves to it",
-                session.id
-            )));
+            // Losing the reservation is determinate for THIS spawn, but not for the
+            // logical open: the usual loser lost a same-id race, and the winner's
+            // session is exactly what the caller asked for. Answer from the mapping —
+            // resolve to an active winner, report an in-flight (pending) one as unknown
+            // — instead of a determinate error that would license a duplicating
+            // fresh-id retry.
+            return match self.recover_sdk_session(daemon, &claude_session_id, params.model.as_deref())
+            {
+                Ok(Some(spec)) => Ok(spec),
+                // No mapping after all: the failure wasn't a duplicate (or the
+                // concurrent open already failed and freed the id), so nothing runs
+                // under this id.
+                Ok(None) => Err(ApplicationError::external(format!(
+                    "failed to reserve the claude session mapping for session {}: {e:#}; \
+                     the launch was never submitted and no other open holds this id, so \
+                     retrying is safe",
+                    session.id
+                ))),
+                Err(recover_err) => Err(recover_err),
+            };
         }
 
         if let Err(e) = daemon.write_input(&session.id, format!("{initial_command}\r").as_bytes())

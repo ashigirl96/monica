@@ -121,6 +121,7 @@ struct FakeState {
     pr_branch_success_count: usize,
     mark_started_fails: bool,
     create_claude_session_fails: bool,
+    claude_insert_race_winner: Option<ClaudeSession>,
     mark_claude_launched_fails: bool,
     mark_claude_launched_returns_false: bool,
     branch_sync_candidates: Vec<PullRequestBranchSyncCandidate>,
@@ -1410,6 +1411,13 @@ impl FakeRepos {
         self.state.borrow_mut().create_claude_session_fails = true;
     }
 
+    /// Stage the losing side of a same-id reservation race: the winner's row lands
+    /// exactly when `create_claude_session` is called, which then fails on the
+    /// duplicate — the interleaving where both opens passed recovery first.
+    pub(crate) fn race_claude_session_insert(&self, winner: ClaudeSession) {
+        self.state.borrow_mut().claude_insert_race_winner = Some(winner);
+    }
+
     pub(crate) fn fail_mark_claude_launched(&self) {
         self.state.borrow_mut().mark_claude_launched_fails = true;
     }
@@ -1568,6 +1576,10 @@ impl ClaudeSessionRepository for FakeRepos {
         let mut state = self.state.borrow_mut();
         if state.create_claude_session_fails {
             return Err(anyhow!("create claude session failed"));
+        }
+        if let Some(winner) = state.claude_insert_race_winner.take() {
+            state.claude_sessions.push(winner);
+            return Err(anyhow!("claude session {} already exists", new.claude_session_id));
         }
         if state
             .claude_sessions
