@@ -2852,6 +2852,7 @@ dependencies = [
  "futures-util",
  "log",
  "monica-domain",
+ "monica-terminal-protocol",
  "serde",
  "serde_json",
  "strum",

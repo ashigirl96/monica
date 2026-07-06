@@ -1228,25 +1228,31 @@ fn facade_ingest_claude_session_hook_for_unknown_id_records_nothing() {
     assert_eq!(outcome.drained, 0, "an unmatched hook must not enqueue outbox rows");
 }
 
-#[test]
-fn facade_drain_reads_transcript_after_turn_complete_and_consumes() {
-    let repos = FakeRepos::default();
-    seed_active_claude_session(&repos, "cs-1");
-    let sink = RecordingSink::default();
-    let decoders = TestAgentDecoders::with_signal(turn_completed("s-2", false));
+/// FakeTranscripts primed with one flushed assistant record at offset 42.
+fn transcripts_with_assistant(text: &str) -> FakeTranscripts {
     let transcripts = FakeTranscripts::default();
     transcripts.set_next_chunk(crate::TranscriptChunk {
         records: vec![crate::ClaudeTranscriptRecord {
             uuid: Some("r-1".to_string()),
             timestamp: None,
             kind: crate::ClaudeTranscriptRecordKind::Assistant {
-                text: "hello".to_string(),
+                text: text.to_string(),
                 tool_uses: Vec::new(),
             },
         }],
         new_offset: 42,
         file_exists: true,
     });
+    transcripts
+}
+
+#[test]
+fn facade_drain_reads_transcript_after_turn_complete_and_consumes() {
+    let repos = FakeRepos::default();
+    seed_active_claude_session(&repos, "cs-1");
+    let sink = RecordingSink::default();
+    let decoders = TestAgentDecoders::with_signal(turn_completed("s-2", false));
+    let transcripts = transcripts_with_assistant("hello");
     let mut monica = facade_with_transcripts(repos, sink.clone(), decoders, transcripts.clone());
     monica
         .executions()
@@ -1466,4 +1472,217 @@ fn facade_claude_session_transcript_reads_from_zero_without_moving_the_cursor() 
         .drain_claude_session_events(Path::new("/home"), 50)
         .unwrap();
     assert_eq!(outcome.drained, 0);
+}
+
+// --- Claude session send / interrupt ---------------------------------------------------------------
+
+/// An active session whose Claude has provably booted: a hook stamped the provider id,
+/// so the readiness gate lets a claim through.
+fn seed_ready_claude_session(repos: &FakeRepos, id: &str) {
+    repos.seed_session(fake_session("ts-9", Some("tab-w"), TerminalSessionStatus::Running));
+    let mut row = claude_session_row(
+        id,
+        "tab-w",
+        "ts-9",
+        monica_domain::ClaudeSessionStatus::Active,
+        monica_domain::ClaudeLaunchPhase::Submitting,
+    );
+    row.provider_session_id = Some("s-1".to_string());
+    repos.seed_claude_session(row);
+}
+
+#[test]
+fn facade_send_claude_user_message_pastes_and_submits_then_reports_busy() {
+    let repos = FakeRepos::default();
+    seed_ready_claude_session(&repos, "cs-1");
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+    let daemon = FakeDaemon::default();
+
+    monica.executions().send_claude_user_message(&daemon, "cs-1", "hello\nworld").unwrap();
+
+    let written = daemon.written.lock().unwrap().clone();
+    assert_eq!(written.len(), 2, "paste then a separate Enter");
+    assert_eq!(written[0].0, "ts-9");
+    assert_eq!(written[0].1, b"\x1b[200~hello\rworld\x1b[201~");
+    assert_eq!(written[1].1, b"\r");
+    assert!(sink.events().iter().any(|e| matches!(
+        e,
+        ApplicationEvent::ClaudeSessionStateChanged {
+            claude_session_id,
+            conversation_status: monica_domain::ClaudeConversationStatus::Thinking,
+            ..
+        } if claude_session_id == "cs-1"
+    )));
+
+    // The claim is held until a hook settles the turn: a second send must lose without
+    // touching the PTY.
+    let err = monica.executions().send_claude_user_message(&daemon, "cs-1", "again").unwrap_err();
+    assert!(matches!(err, ApplicationError::Conflict(_)), "got: {err:?}");
+    assert_eq!(daemon.written.lock().unwrap().len(), 2, "a busy send must not write");
+}
+
+#[test]
+fn facade_send_claude_user_message_rejects_a_session_without_a_hook_observation() {
+    // Active + idle is also what a still-booting session looks like (column default);
+    // without a provider stamp the send must be refused before any PTY write.
+    let repos = FakeRepos::default();
+    seed_active_claude_session(&repos, "cs-1");
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+    let daemon = FakeDaemon::default();
+
+    let err = monica.executions().send_claude_user_message(&daemon, "cs-1", "hi").unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Conflict(_)), "got: {err:?}");
+    assert!(daemon.written.lock().unwrap().is_empty());
+}
+
+#[test]
+fn facade_send_claude_user_message_classifies_ended_and_unknown_sessions() {
+    let repos = FakeRepos::default();
+    repos.seed_session(fake_session("ts-9", Some("tab-w"), TerminalSessionStatus::Running));
+    let mut ended = claude_session_row(
+        "cs-ended",
+        "tab-w",
+        "ts-9",
+        monica_domain::ClaudeSessionStatus::Ended,
+        monica_domain::ClaudeLaunchPhase::Submitting,
+    );
+    ended.provider_session_id = Some("s-1".to_string());
+    repos.seed_claude_session(ended);
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+    let daemon = FakeDaemon::default();
+
+    let err = monica.executions().send_claude_user_message(&daemon, "cs-ended", "hi").unwrap_err();
+    assert!(matches!(err, ApplicationError::Validation(_)), "got: {err:?}");
+
+    let err = monica.executions().send_claude_user_message(&daemon, "cs-404", "hi").unwrap_err();
+    assert!(matches!(err, ApplicationError::NotFound(_)), "got: {err:?}");
+    assert!(daemon.written.lock().unwrap().is_empty());
+}
+
+#[test]
+fn facade_send_claude_user_message_write_failure_releases_the_claim() {
+    let repos = FakeRepos::default();
+    seed_ready_claude_session(&repos, "cs-1");
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    let err = monica
+        .executions()
+        .send_claude_user_message(&FakeDaemon::failing_write(), "cs-1", "hi")
+        .unwrap_err();
+    assert!(matches!(err, ApplicationError::External(_)), "got: {err:?}");
+    assert!(
+        !sink.events().iter().any(|e| matches!(
+            e,
+            ApplicationEvent::ClaudeSessionStateChanged {
+                conversation_status: monica_domain::ClaudeConversationStatus::Thinking,
+                ..
+            }
+        )),
+        "a failed send must not announce thinking"
+    );
+
+    // The claim was rolled back: a retry against a healthy daemon wins it again.
+    let daemon = FakeDaemon::default();
+    monica.executions().send_claude_user_message(&daemon, "cs-1", "hi").unwrap();
+    assert_eq!(daemon.written.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn facade_interrupt_claude_session_sends_esc_and_settles_the_claim() {
+    let repos = FakeRepos::default();
+    seed_ready_claude_session(&repos, "cs-1");
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+    let daemon = FakeDaemon::default();
+    monica.executions().send_claude_user_message(&daemon, "cs-1", "hi").unwrap();
+
+    monica.executions().interrupt_claude_session(&daemon, "cs-1").unwrap();
+
+    let written = daemon.written.lock().unwrap().clone();
+    assert_eq!(written.last().unwrap().1, b"\x1b");
+    assert!(sink.events().iter().any(|e| matches!(
+        e,
+        ApplicationEvent::ClaudeSessionStateChanged {
+            claude_session_id,
+            conversation_status: monica_domain::ClaudeConversationStatus::Idle,
+            ..
+        } if claude_session_id == "cs-1"
+    )));
+
+    // Interrupt freed the in-flight slot: the next send is accepted again.
+    monica.executions().send_claude_user_message(&daemon, "cs-1", "next").unwrap();
+}
+
+#[test]
+fn facade_interrupt_claude_session_classifies_missing_and_ended_sessions() {
+    let repos = FakeRepos::default();
+    repos.seed_session(fake_session("ts-9", Some("tab-w"), TerminalSessionStatus::Running));
+    repos.seed_claude_session(claude_session_row(
+        "cs-ended",
+        "tab-w",
+        "ts-9",
+        monica_domain::ClaudeSessionStatus::Ended,
+        monica_domain::ClaudeLaunchPhase::Submitting,
+    ));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+    let daemon = FakeDaemon::default();
+
+    let err = monica.executions().interrupt_claude_session(&daemon, "cs-404").unwrap_err();
+    assert!(matches!(err, ApplicationError::NotFound(_)), "got: {err:?}");
+    let err = monica.executions().interrupt_claude_session(&daemon, "cs-ended").unwrap_err();
+    assert!(matches!(err, ApplicationError::Validation(_)), "got: {err:?}");
+    assert!(daemon.written.lock().unwrap().is_empty());
+}
+
+#[test]
+fn facade_interrupt_claude_session_refuses_a_pending_launch() {
+    let repos = FakeRepos::default();
+    repos.seed_session(fake_session("ts-9", Some("tab-w"), TerminalSessionStatus::Running));
+    repos.seed_claude_session(claude_session_row(
+        "cs-pending",
+        "tab-w",
+        "ts-9",
+        monica_domain::ClaudeSessionStatus::Pending,
+        monica_domain::ClaudeLaunchPhase::Reserved,
+    ));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+    let daemon = FakeDaemon::default();
+
+    let err = monica.executions().interrupt_claude_session(&daemon, "cs-pending").unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Conflict(_)), "got: {err:?}");
+    assert!(daemon.written.lock().unwrap().is_empty(), "must not write into a pending launch");
+}
+
+#[test]
+fn facade_drain_emits_messages_before_the_state_snapshot() {
+    // A subscriber reading Idle as "turn over" must already hold the turn's output; the
+    // recheck path can still deliver late, so this is best-effort ordering, not contract.
+    let repos = FakeRepos::default();
+    seed_active_claude_session(&repos, "cs-1");
+    let sink = RecordingSink::default();
+    let decoders = TestAgentDecoders::with_signal(turn_completed("s-2", false));
+    let transcripts = transcripts_with_assistant("hello");
+    let mut monica = facade_with_transcripts(repos, sink.clone(), decoders, transcripts);
+    monica.executions().ingest_claude_session_hook(Agent::Claude, "cs-1", "{}").unwrap();
+
+    monica.executions().drain_claude_session_events(Path::new("/home"), 50).unwrap();
+
+    let events = sink.events();
+    let message_at = events
+        .iter()
+        .position(|e| matches!(e, ApplicationEvent::ClaudeSessionMessages { .. }))
+        .expect("messages must be emitted");
+    let state_at = events
+        .iter()
+        .position(|e| matches!(e, ApplicationEvent::ClaudeSessionStateChanged { .. }))
+        .expect("state must be emitted");
+    assert!(message_at < state_at, "messages must precede the idle snapshot");
 }
