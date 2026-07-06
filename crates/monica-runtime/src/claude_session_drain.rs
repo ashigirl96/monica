@@ -13,7 +13,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use crate::MonicaFacade;
+use crate::{InFlightGuard, MonicaFacade};
 
 const DRAIN_INTERVAL: Duration = Duration::from_millis(750);
 const DRAIN_BATCH_LIMIT: usize = 50;
@@ -54,14 +54,6 @@ where
         );
     }
     ClaudeSessionDrainHandle(tx)
-}
-
-struct InFlightGuard(Arc<AtomicBool>);
-
-impl Drop for InFlightGuard {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
-    }
 }
 
 fn drain_tick<F>(make_facade: &F, home: &std::path::Path, rechecks: &mut HashMap<String, Instant>)

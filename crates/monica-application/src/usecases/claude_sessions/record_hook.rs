@@ -64,10 +64,8 @@ pub(crate) fn observation_for(kind: &SignalKind) -> Option<ClaudeSessionObservat
             Some(conversation(ClaudeConversationStatus::Idle))
         }
         SignalKind::SessionEnded { .. } => Some(ClaudeSessionObservation {
-            conversation_status: Some(ClaudeConversationStatus::Idle),
-            wait_reason: Some(None),
             mark_ended: true,
-            ..Default::default()
+            ..conversation(ClaudeConversationStatus::Idle)
         }),
         SignalKind::NotificationReceived {
             permission_request: true,

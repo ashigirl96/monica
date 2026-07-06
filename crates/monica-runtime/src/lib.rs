@@ -23,6 +23,16 @@ pub use claude_session_drain::{start_claude_session_drain, ClaudeSessionDrainHan
 pub use notification_drain::{start_notification_drain, NotificationDrainHandle};
 pub use pr_sync::{start_pr_sync, PrSyncWaker};
 
+/// Clears an in-flight flag on drop, so a resident worker's tick releases its
+/// single-flight lock on every exit path. Shared by the drain/sync workers.
+pub(crate) struct InFlightGuard(pub(crate) std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
 /// The concrete adapter set the desktop and CLI run on: SQLite, octocrab, the git CLI, the process
 /// setup runner, the filesystem run-output/notebook stores, the keychain auth gateway, and the
 /// agent hook decoders.

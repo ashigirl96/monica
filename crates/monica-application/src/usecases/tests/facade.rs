@@ -1291,6 +1291,74 @@ fn facade_drain_reads_transcript_after_turn_complete_and_consumes() {
 }
 
 #[test]
+fn facade_drain_rechecks_when_only_the_user_record_flushed() {
+    // The assistant record flushes last; a read that surfaced only the user prompt has
+    // not captured the turn's response, so the turn must still be rechecked.
+    let repos = FakeRepos::default();
+    seed_active_claude_session(&repos, "cs-1");
+    let sink = RecordingSink::default();
+    let decoders = TestAgentDecoders::with_signal(turn_completed("s-1", false));
+    let transcripts = FakeTranscripts::default();
+    transcripts.set_next_chunk(crate::TranscriptChunk {
+        records: vec![crate::ClaudeTranscriptRecord {
+            uuid: Some("u-1".to_string()),
+            timestamp: None,
+            kind: crate::ClaudeTranscriptRecordKind::User,
+        }],
+        new_offset: 20,
+        file_exists: true,
+    });
+    let mut monica = facade_with_transcripts(repos, sink, decoders, transcripts);
+    monica
+        .executions()
+        .ingest_claude_session_hook(Agent::Claude, "cs-1", "{}")
+        .unwrap();
+
+    let outcome = monica
+        .executions()
+        .drain_claude_session_events(Path::new("/home"), 50)
+        .unwrap();
+
+    assert_eq!(outcome.drained, 1);
+    assert_eq!(
+        outcome.recheck,
+        vec!["cs-1".to_string()],
+        "a user-only read must not count as the assistant response arriving"
+    );
+}
+
+#[test]
+fn facade_drain_consumes_events_even_when_transcript_read_errors() {
+    // A poison transcript read must not wedge the outbox: events are already durable, so
+    // the batch is consumed and the session is left for recheck / offset catch-up.
+    let repos = FakeRepos::default();
+    seed_active_claude_session(&repos, "cs-1");
+    let sink = RecordingSink::default();
+    let decoders = TestAgentDecoders::with_signal(turn_completed("s-1", false));
+    let transcripts = FakeTranscripts::default();
+    transcripts.fail_next_read("disk gone");
+    let mut monica = facade_with_transcripts(repos, sink, decoders, transcripts);
+    monica
+        .executions()
+        .ingest_claude_session_hook(Agent::Claude, "cs-1", "{}")
+        .unwrap();
+
+    let outcome = monica
+        .executions()
+        .drain_claude_session_events(Path::new("/home"), 50)
+        .unwrap();
+
+    assert_eq!(outcome.drained, 1, "the batch must be consumed despite the read error");
+    assert_eq!(outcome.recheck, vec!["cs-1".to_string()]);
+    // A second tick finds nothing left — the poison event did not re-wedge the queue.
+    let second = monica
+        .executions()
+        .drain_claude_session_events(Path::new("/home"), 50)
+        .unwrap();
+    assert_eq!(second.drained, 0);
+}
+
+#[test]
 fn facade_drain_requests_recheck_when_transcript_has_nothing_yet() {
     let repos = FakeRepos::default();
     seed_active_claude_session(&repos, "cs-1");

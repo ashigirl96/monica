@@ -822,8 +822,24 @@ impl<B: Backend> ExecutionService<'_, B> {
                 event.claude_session_id == *session_id
                     && matches!(event.kind.as_str(), "turn_completed" | "session_ended")
             });
-            if turn_landed && !self.poll_claude_session_transcript(home, session_id)? {
-                recheck.push(session_id.to_string());
+            if turn_landed {
+                // A transcript read failure must not abort the batch: the events are
+                // already durable, so we still consume them below and let the persisted
+                // offset catch this session up on its next turn. Recheck on both "nothing
+                // yet" and a transient read error.
+                let done = match self.poll_transcript_from_row(home, &row) {
+                    Ok(saw_assistant) => saw_assistant,
+                    Err(e) => {
+                        log::warn!(
+                            target: "monica_application::claude_session",
+                            "failed to read transcript for {session_id}: {e:#}"
+                        );
+                        false
+                    }
+                };
+                if !done {
+                    recheck.push(session_id.to_string());
+                }
             }
         }
         let ids: Vec<i64> = events.iter().map(|event| event.id).collect();
@@ -835,8 +851,10 @@ impl<B: Backend> ExecutionService<'_, B> {
     }
 
     /// Read the session's transcript from its persisted cursor, emit the new records, and
-    /// advance the cursor. Returns whether anything was emitted. Safe to call while the
-    /// file does not exist yet (Claude creates it lazily on the first user message).
+    /// advance the cursor. Returns whether the turn's assistant output has now been
+    /// observed — `false` asks the caller to re-poll (the assistant record flushes around
+    /// the Stop hook, sometimes after it). Safe to call while the file does not exist yet
+    /// (Claude creates it lazily on the first user message).
     pub fn poll_claude_session_transcript(
         &mut self,
         home: &std::path::Path,
@@ -845,6 +863,16 @@ impl<B: Backend> ExecutionService<'_, B> {
         let Some(row) = self.m.repos.get_claude_session(claude_session_id)? else {
             return Ok(false);
         };
+        self.poll_transcript_from_row(home, &row)
+    }
+
+    /// Poll variant that reuses a session row the caller already loaded, avoiding a second
+    /// read in the drain hot path.
+    fn poll_transcript_from_row(
+        &mut self,
+        home: &std::path::Path,
+        row: &ClaudeSession,
+    ) -> ApplicationResult<bool> {
         let path = crate::claude_jsonl_path(home, &row.cwd, row.transcript_session_id());
         let chunk = self.m.transcripts.read_from(&path, row.jsonl_offset)?;
         if !chunk.file_exists {
@@ -853,16 +881,26 @@ impl<B: Backend> ExecutionService<'_, B> {
         if chunk.new_offset != row.jsonl_offset {
             self.m
                 .repos
-                .set_claude_session_jsonl_offset(claude_session_id, chunk.new_offset)?;
+                .set_claude_session_jsonl_offset(&row.claude_session_id, chunk.new_offset)?;
         }
         if chunk.records.is_empty() {
             return Ok(false);
         }
+        // The recheck exists to catch the assistant record specifically, which flushes
+        // last. A read that surfaced only the user prompt (or tool/other lines) has not
+        // captured the turn's response yet, so it must keep rechecking — otherwise the
+        // response is stranded until the next completed turn advances past it.
+        let saw_assistant = chunk.records.iter().any(|record| {
+            matches!(
+                record.kind,
+                crate::ports::ClaudeTranscriptRecordKind::Assistant { .. }
+            )
+        });
         self.m.events.emit(ApplicationEvent::ClaudeSessionMessages {
-            claude_session_id: row.claude_session_id,
+            claude_session_id: row.claude_session_id.clone(),
             records: chunk.records,
         });
-        Ok(true)
+        Ok(saw_assistant)
     }
 
     /// The full transcript of a session, from the start of its current file. Pull-style

@@ -198,44 +198,43 @@ impl SqliteStore {
              VALUES (?1, ?2, ?3)",
             params![claude_session_id, kind, payload_json],
         )?;
-        if let Some(provider_session_id) = observation.provider_session_id {
-            // Latest wins; a change means Claude writes a different transcript file now,
-            // so the cursor restarts. `IS NOT` is NULL-safe (the first stamp also resets,
-            // harmlessly — nothing was read before the first hook).
-            tx.execute(
-                "UPDATE claude_sessions
-                    SET jsonl_offset = CASE
-                            WHEN provider_session_id IS NOT ?2 THEN 0 ELSE jsonl_offset
-                        END,
-                        provider_session_id = ?2
-                  WHERE claude_session_id = ?1",
-                params![claude_session_id, provider_session_id],
-            )?;
-        }
+        // One UPDATE covers every field the observation may touch. SQLite evaluates all
+        // SET right-hand sides against the pre-update row, so `provider_session_id IS NOT ?2`
+        // and `status != ended` both see the old values consistently. Notes:
+        // - provider_session_id is latest-wins (only when ?3), and a change restarts the
+        //   transcript cursor (`IS NOT` is NULL-safe; the first stamp also resets,
+        //   harmlessly — nothing was read before the first hook).
+        // - status → ended (mark_ended) is guarded so it never restamps an already-ended
+        //   tombstone; only a real session end (not a `/clear`) sets it.
+        let ended = ClaudeSessionStatus::Ended.as_str();
         tx.execute(
-            "UPDATE claude_sessions
-                SET conversation_status = COALESCE(?2, conversation_status),
-                    wait_reason = CASE WHEN ?3 THEN ?4 ELSE wait_reason END
-              WHERE claude_session_id = ?1",
+            &format!(
+                "UPDATE claude_sessions
+                    SET provider_session_id = CASE WHEN ?3 THEN ?2 ELSE provider_session_id END,
+                        jsonl_offset = CASE
+                            WHEN ?3 AND provider_session_id IS NOT ?2 THEN 0 ELSE jsonl_offset
+                        END,
+                        conversation_status = COALESCE(?4, conversation_status),
+                        wait_reason = CASE WHEN ?5 THEN ?6 ELSE wait_reason END,
+                        status = CASE
+                            WHEN ?7 AND status != '{ended}' THEN '{ended}' ELSE status
+                        END,
+                        ended_at = CASE
+                            WHEN ?7 AND status != '{ended}' THEN COALESCE(ended_at, {SET_NOW})
+                            ELSE ended_at
+                        END
+                  WHERE claude_session_id = ?1"
+            ),
             params![
                 claude_session_id,
+                observation.provider_session_id,
+                observation.provider_session_id.is_some(),
                 observation.conversation_status.map(|s| s.as_str()),
                 observation.wait_reason.is_some(),
                 observation.wait_reason.flatten().map(|r| r.as_str()),
+                observation.mark_ended,
             ],
         )?;
-        if observation.mark_ended {
-            let ended = ClaudeSessionStatus::Ended.as_str();
-            tx.execute(
-                &format!(
-                    "UPDATE claude_sessions
-                        SET status = '{ended}',
-                            ended_at = COALESCE(ended_at, {SET_NOW})
-                      WHERE claude_session_id = ?1 AND status != '{ended}'"
-                ),
-                params![claude_session_id],
-            )?;
-        }
         tx.commit()?;
         self.get_claude_session(claude_session_id)
     }

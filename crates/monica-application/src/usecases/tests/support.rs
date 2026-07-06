@@ -2007,12 +2007,17 @@ pub(crate) struct FakeTranscripts {
 #[derive(Default)]
 struct FakeTranscriptsState {
     next_chunk: Option<crate::TranscriptChunk>,
+    read_error: Option<String>,
     reads: Vec<(PathBuf, u64)>,
 }
 
 impl FakeTranscripts {
     pub(crate) fn set_next_chunk(&self, chunk: crate::TranscriptChunk) {
         self.state.borrow_mut().next_chunk = Some(chunk);
+    }
+
+    pub(crate) fn fail_next_read(&self, message: &str) {
+        self.state.borrow_mut().read_error = Some(message.to_string());
     }
 
     pub(crate) fn reads(&self) -> Vec<(PathBuf, u64)> {
@@ -2024,6 +2029,9 @@ impl crate::ClaudeTranscriptReader for FakeTranscripts {
     fn read_from(&self, jsonl_path: &Path, offset: u64) -> Result<crate::TranscriptChunk> {
         let mut state = self.state.borrow_mut();
         state.reads.push((jsonl_path.to_path_buf(), offset));
+        if let Some(message) = state.read_error.clone() {
+            return Err(anyhow!(message));
+        }
         Ok(state.next_chunk.clone().unwrap_or(crate::TranscriptChunk {
             records: Vec::new(),
             new_offset: offset,
