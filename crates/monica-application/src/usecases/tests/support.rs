@@ -1829,9 +1829,13 @@ impl ClaudeSessionRepository for FakeRepos {
         };
         Ok(match cs.status {
             ClaudeSessionStatus::Ended => ClaudePromptClaim::Ended,
-            ClaudeSessionStatus::Pending => ClaudePromptClaim::Launching,
+            ClaudeSessionStatus::Pending => {
+                ClaudePromptClaim::Launching { active_without_hook_for_secs: None }
+            }
             ClaudeSessionStatus::Active if cs.provider_session_id.is_none() => {
-                ClaudePromptClaim::Launching
+                ClaudePromptClaim::Launching {
+                    active_without_hook_for_secs: Some(state.claude_session_age_secs),
+                }
             }
             ClaudeSessionStatus::Active
                 if cs.conversation_status == ClaudeConversationStatus::Idle =>

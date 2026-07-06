@@ -312,9 +312,12 @@ impl SqliteStore {
         };
         Ok(match row.status {
             ClaudeSessionStatus::Ended => ClaudePromptClaim::Ended,
-            ClaudeSessionStatus::Pending => ClaudePromptClaim::Launching,
+            ClaudeSessionStatus::Pending => {
+                ClaudePromptClaim::Launching { active_without_hook_for_secs: None }
+            }
             ClaudeSessionStatus::Active if row.provider_session_id.is_none() => {
-                ClaudePromptClaim::Launching
+                let age = self.claude_session_age_seconds(claude_session_id)?;
+                ClaudePromptClaim::Launching { active_without_hook_for_secs: age }
             }
             ClaudeSessionStatus::Active => ClaudePromptClaim::Busy(row.conversation_status),
         })

@@ -2817,7 +2817,9 @@ fn claude_session_claim_refuses_a_pending_launch() {
 
     assert_eq!(
         db.claim_claude_session_thinking("uuid-1").unwrap(),
-        monica_application::ClaudePromptClaim::Launching
+        monica_application::ClaudePromptClaim::Launching {
+            active_without_hook_for_secs: None
+        }
     );
 }
 
@@ -2831,10 +2833,13 @@ fn claude_session_claim_refuses_an_active_row_without_a_hook_observation() {
     db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
     db.mark_claude_session_launched("uuid-1").unwrap();
 
-    assert_eq!(
-        db.claim_claude_session_thinking("uuid-1").unwrap(),
-        monica_application::ClaudePromptClaim::Launching
-    );
+    let claim = db.claim_claude_session_thinking("uuid-1").unwrap();
+    match claim {
+        monica_application::ClaudePromptClaim::Launching {
+            active_without_hook_for_secs: Some(age),
+        } => assert!(age >= 0, "age should be non-negative, got {age}"),
+        other => panic!("expected Launching with Some(age), got {other:?}"),
+    }
     assert_eq!(
         db.get_claude_session("uuid-1").unwrap().unwrap().conversation_status,
         monica_domain::ClaudeConversationStatus::Idle,
@@ -2858,6 +2863,35 @@ fn claude_session_claim_reports_ended_and_missing_rows() {
         db.claim_claude_session_thinking("uuid-404").unwrap(),
         monica_application::ClaudePromptClaim::NotFound
     );
+}
+
+#[test]
+fn claude_session_claim_active_without_hook_reports_age() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let ts = db
+        .create_terminal_session(new_shell_session(Some("agent-runtime"), None))
+        .unwrap();
+    db.mark_terminal_session_started(&ts.id, Some(1), None)
+        .unwrap();
+    db.create_claude_session(new_claude_session("uuid-age", &ts.id))
+        .unwrap();
+    db.mark_claude_session_launched("uuid-age").unwrap();
+
+    // Backdate created_at by 45 seconds to simulate a stuck session.
+    db.conn()
+        .execute(
+            "UPDATE claude_sessions SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-45 seconds') WHERE claude_session_id = 'uuid-age'",
+            [],
+        )
+        .unwrap();
+
+    let claim = db.claim_claude_session_thinking("uuid-age").unwrap();
+    match claim {
+        monica_application::ClaudePromptClaim::Launching {
+            active_without_hook_for_secs: Some(age),
+        } => assert!((44..=46).contains(&age), "expected age ~45, got {age}"),
+        other => panic!("expected Launching with age ~45, got {other:?}"),
+    }
 }
 
 #[test]
