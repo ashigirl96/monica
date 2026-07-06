@@ -87,6 +87,30 @@ impl ClaudeSessionBroadcaster {
     }
 }
 
+pub(crate) fn events_for_transcript_records(
+    records: &[monica_application::ClaudeTranscriptRecord],
+) -> Vec<SessionEvent> {
+    let mut events = Vec::new();
+    for record in records {
+        let monica_application::ClaudeTranscriptRecordKind::Assistant { text, tool_uses } =
+            &record.kind
+        else {
+            continue;
+        };
+        for tool_use in tool_uses {
+            events.push(SessionEvent::ToolUse {
+                tool_use_id: tool_use.id.clone(),
+                name: tool_use.name.clone(),
+                input_json: tool_use.input_json.clone(),
+            });
+        }
+        if !text.is_empty() {
+            events.push(SessionEvent::AssistantMessage { text: text.clone() });
+        }
+    }
+    events
+}
+
 /// The wire events one [`ApplicationEvent`] translates to, at message granularity.
 /// `Thinking` maps to nothing: the ack to `send_user_message` (or a human typing) is the
 /// in-flight signal, and the stream only reports settled states.
@@ -115,27 +139,7 @@ fn session_events_for(event: &ApplicationEvent) -> Option<(String, Vec<SessionEv
             Some((claude_session_id.clone(), events))
         }
         ApplicationEvent::ClaudeSessionMessages { claude_session_id, records } => {
-            let mut events = Vec::new();
-            for record in records {
-                let monica_application::ClaudeTranscriptRecordKind::Assistant {
-                    text,
-                    tool_uses,
-                } = &record.kind
-                else {
-                    continue;
-                };
-                for tool_use in tool_uses {
-                    events.push(SessionEvent::ToolUse {
-                        tool_use_id: tool_use.id.clone(),
-                        name: tool_use.name.clone(),
-                        input_json: tool_use.input_json.clone(),
-                    });
-                }
-                if !text.is_empty() {
-                    events.push(SessionEvent::AssistantMessage { text: text.clone() });
-                }
-            }
-            Some((claude_session_id.clone(), events))
+            Some((claude_session_id.clone(), events_for_transcript_records(records)))
         }
         _ => None,
     }
