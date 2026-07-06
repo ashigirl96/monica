@@ -9,14 +9,6 @@ use tauri_specta::Event;
 use crate::event_sink;
 use crate::ptyd::{PtydHandle, PtydTerminalDaemon};
 
-/// The HOME the transcript JSONL path derives from — resolved here so path knowledge
-/// stays out of the webview.
-pub(crate) fn home_dir() -> Result<std::path::PathBuf, ApiError> {
-    std::env::var_os("HOME")
-        .map(std::path::PathBuf::from)
-        .ok_or_else(|| ApiError::external("HOME is not set".to_string()))
-}
-
 /// Announces an Agent Runtime-created terminal session so the Workbench can adopt a tab bound to it.
 /// Purely observational: the session row, PTY spawn, and Claude launch are already handled
 /// backend-side by the time this fires.
@@ -48,27 +40,6 @@ pub struct ClaudeSessionStateChanged {
 pub struct ClaudeSessionMessage {
     pub(crate) claude_session_id: String,
     pub(crate) records: Vec<ClaudeTranscriptRecord>,
-}
-
-/// Full transcript of a Claude Runtime session — pull-style catch-up for a frontend that
-/// missed the push events (fresh window, restart).
-#[tauri::command]
-#[specta::specta]
-pub async fn claude_session_transcript(
-    app: AppHandle,
-    claude_session_id: String,
-) -> Result<Vec<ClaudeTranscriptRecord>, ApiError> {
-    event_sink::off_main(move || {
-        let home = home_dir()?;
-        let mut monica = event_sink::open(&app)?;
-        Ok(monica
-            .executions()
-            .claude_session_transcript(&home, &claude_session_id)?
-            .into_iter()
-            .map(ClaudeTranscriptRecord::from)
-            .collect())
-    })
-    .await
 }
 
 /// The persisted Claude session mappings, with liveness reconciled against the daemon
