@@ -118,14 +118,6 @@ export const commands = {
    */
   claudeListSessions: () =>
     typedError<ClaudeSession[], ApiError>(__TAURI_INVOKE("claude_list_sessions")),
-  /**
-   *  Full transcript of a Claude Runtime session — pull-style catch-up for a frontend that
-   *  missed the push events (fresh window, restart).
-   */
-  claudeSessionTranscript: (claudeSessionId: string) =>
-    typedError<ClaudeTranscriptRecord[], ApiError>(
-      __TAURI_INVOKE("claude_session_transcript", { claudeSessionId }),
-    ),
   openNamedWindow: (label: string) =>
     typedError<null, ApiError>(__TAURI_INVOKE("open_named_window", { label })),
 };
