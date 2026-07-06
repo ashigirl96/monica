@@ -31,7 +31,11 @@ pub enum ClaudePromptClaim {
     /// has been observed yet (`provider_session_id` is unset). The row's
     /// `conversation_status` may already read `idle` — that is the column default, not a
     /// hook observation — so it must not be trusted as readiness.
-    Launching,
+    ///
+    /// `active_without_hook_for_secs`: `None` while the open is still pending (covered by
+    /// the pending-reservation lease); `Some(age)` when the row is active but no hook has
+    /// been observed — the threshold judgment belongs to the facade, not the store.
+    Launching { active_without_hook_for_secs: Option<i64> },
     Ended,
     NotFound,
 }

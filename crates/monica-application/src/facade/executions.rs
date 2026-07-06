@@ -680,6 +680,12 @@ impl<B: Backend> ExecutionService<'_, B> {
     /// sabotaging the open that owns the row.
     const PENDING_RESERVATION_LEASE_SECS: i64 = 60;
 
+    /// How long an `active` row may sit without a SessionStart hook observation before
+    /// the launch is judged stalled (hooks broken / not installed). Claude normally sends
+    /// SessionStart within seconds of boot; age is measured from `created_at` — the
+    /// pending phase it includes is sub-second, so no separate launched_at stamp is kept.
+    const LAUNCH_HOOK_OBSERVATION_LEASE_SECS: i64 = 30;
+
     /// Bounded recovery for a pending (unconfirmed-launch) reservation, so a crash can
     /// never strand the idempotency key forever. Within the lease: indeterminate (an open
     /// may be in flight). Past it, by launch phase: `reserved` provably never received a
@@ -762,6 +768,23 @@ impl<B: Backend> ExecutionService<'_, B> {
         Ok(self.m.repos.list_claude_sessions()?)
     }
 
+    pub fn claude_session_stuck_launching(
+        &self,
+        row: &ClaudeSession,
+    ) -> ApplicationResult<bool> {
+        if row.status != monica_domain::ClaudeSessionStatus::Active
+            || row.provider_session_id.is_some()
+        {
+            return Ok(false);
+        }
+        let age = self
+            .m
+            .repos
+            .claude_session_age_seconds(&row.claude_session_id)?
+            .unwrap_or(0);
+        Ok(age >= Self::LAUNCH_HOOK_OBSERVATION_LEASE_SECS)
+    }
+
     /// Submit one user message into an idle Claude session's PTY. The atomic claim
     /// (idle → thinking) is the whole in-flight lock: of two concurrent senders exactly
     /// one wins, and the loser gets `Conflict` without touching the PTY. Errors:
@@ -788,7 +811,23 @@ impl<B: Backend> ExecutionService<'_, B> {
                     status.as_str()
                 )));
             }
-            ClaudePromptClaim::Launching => {
+            ClaudePromptClaim::Launching { active_without_hook_for_secs } => {
+                if active_without_hook_for_secs
+                    .is_some_and(|age| age >= Self::LAUNCH_HOOK_OBSERVATION_LEASE_SECS)
+                {
+                    let age = active_without_hook_for_secs.unwrap();
+                    log::warn!(
+                        target: "monica_application::agent_runtime",
+                        "claude session {claude_session_id} has been active for {age}s \
+                         with no SessionStart hook observed; hooks appear broken or not \
+                         installed"
+                    );
+                    return Err(ApplicationError::external(format!(
+                        "claude session {claude_session_id} has been active for {age}s \
+                         with no SessionStart hook observed; hooks appear broken or not \
+                         installed — restart the session"
+                    )));
+                }
                 return Err(ApplicationError::conflict(format!(
                     "claude session {claude_session_id} is still launching; wait for it \
                      to report idle"

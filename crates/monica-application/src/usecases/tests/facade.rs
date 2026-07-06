@@ -1584,6 +1584,77 @@ fn facade_send_claude_user_message_rejects_a_session_without_a_hook_observation(
 }
 
 #[test]
+fn facade_send_claude_user_message_returns_external_when_hook_observation_stalled() {
+    let repos = FakeRepos::default();
+    seed_active_claude_session(&repos, "cs-1");
+    repos.set_claude_session_age(31);
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+    let daemon = FakeDaemon::default();
+
+    let err = monica
+        .executions()
+        .send_claude_user_message(&daemon, "cs-1", "hi")
+        .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::External(_)), "got: {err:?}");
+    assert!(
+        err.to_string().contains("hooks appear broken"),
+        "error should mention hooks: {err}"
+    );
+    assert!(daemon.written.lock().unwrap().is_empty());
+}
+
+#[test]
+fn facade_claude_session_stuck_launching_below_threshold() {
+    let repos = FakeRepos::default();
+    seed_active_claude_session(&repos, "cs-1");
+    repos.set_claude_session_age(10);
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+    let row = claude_session_row(
+        "cs-1", "tab-w", "ts-9",
+        monica_domain::ClaudeSessionStatus::Active,
+        monica_domain::ClaudeLaunchPhase::Submitting,
+    );
+
+    assert!(!monica.executions().claude_session_stuck_launching(&row).unwrap());
+}
+
+#[test]
+fn facade_claude_session_stuck_launching_above_threshold() {
+    let repos = FakeRepos::default();
+    seed_active_claude_session(&repos, "cs-1");
+    repos.set_claude_session_age(30);
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+    let row = claude_session_row(
+        "cs-1", "tab-w", "ts-9",
+        monica_domain::ClaudeSessionStatus::Active,
+        monica_domain::ClaudeLaunchPhase::Submitting,
+    );
+
+    assert!(monica.executions().claude_session_stuck_launching(&row).unwrap());
+}
+
+#[test]
+fn facade_claude_session_stuck_launching_false_when_hook_observed() {
+    let repos = FakeRepos::default();
+    seed_ready_claude_session(&repos, "cs-1");
+    repos.set_claude_session_age(60);
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+    let mut row = claude_session_row(
+        "cs-1", "tab-w", "ts-9",
+        monica_domain::ClaudeSessionStatus::Active,
+        monica_domain::ClaudeLaunchPhase::Submitting,
+    );
+    row.provider_session_id = Some("s-1".to_string());
+
+    assert!(!monica.executions().claude_session_stuck_launching(&row).unwrap());
+}
+
+#[test]
 fn facade_send_claude_user_message_classifies_ended_and_unknown_sessions() {
     let repos = FakeRepos::default();
     repos.seed_session(fake_session("ts-9", Some("tab-w"), TerminalSessionStatus::Running));
