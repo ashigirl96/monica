@@ -27,16 +27,19 @@ pub use events::{ApplicationEvent, EventSink};
 pub use execution_profile::{ExecutionProfile, PermissionMode};
 pub use input::parse_issue_input;
 pub use facade::{
-    Backend, ExecutionService, Monica, NotebookLintReport, NotebookPageView, NotebookService,
-    ProjectInit, ProjectService, SynchronizationService, TaskService,
+    Backend, ClaudeSessionDrainOutcome, ExecutionService, Monica, NotebookLintReport,
+    NotebookPageView, NotebookService, ProjectInit, ProjectService, SynchronizationService,
+    TaskService,
 };
 
 pub use ports::{
-    AgentDecoders, AgentEventDecoder, ClaudeSessionRepository, EventRepository, GitGateway,
+    AgentDecoders, AgentEventDecoder, ClaudeSessionEvent, ClaudeSessionObservation,
+    ClaudeSessionRepository, ClaudeToolUse, ClaudeTranscriptReader, ClaudeTranscriptRecord,
+    ClaudeTranscriptRecordKind, EventRepository, GitGateway,
     NotebookGateway, NotificationOutboxStore, ProjectRepository, PullRequestSyncStore,
     TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter, TerminalAttachment,
-    TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository, UnitOfWork, WorkbenchStore,
-    WorkTransaction, Workspace, WorktreeRef,
+    TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository, TranscriptChunk, UnitOfWork,
+    WorkbenchStore, WorkTransaction, Workspace, WorktreeRef,
 };
 
 // Application-owned types (NOT in monica-domain)
@@ -56,8 +59,8 @@ pub use terminal_state::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTab
 
 // Usecase result types (returned by facade methods)
 pub use usecases::{
-    CloseIssueReport, DaemonSessionView, HookContext, HookReport, TerminalSessionUpdate,
-    TrackGithubIssueReport,
+    ClaudeHookReport, CloseIssueReport, DaemonSessionView, HookContext, HookReport,
+    TerminalSessionUpdate, TrackGithubIssueReport,
 };
 
 // Usecase sub-ports (referenced by Backend trait)

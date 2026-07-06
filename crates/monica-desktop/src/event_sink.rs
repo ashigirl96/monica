@@ -4,7 +4,9 @@ use tauri::AppHandle;
 use tauri_specta::Event;
 
 use crate::commands::pull_request::PrSyncCompleted;
-use crate::commands::claude_runtime::ClaudeSessionOpened;
+use crate::commands::claude_runtime::{
+    ClaudeSessionMessage, ClaudeSessionOpened, ClaudeSessionStateChanged,
+};
 use crate::commands::task::TaskRunStatusChanged;
 
 /// The application façade wired to the default backend and the Tauri event sink.
@@ -74,6 +76,39 @@ impl EventSink for TauriEventSink {
             // The desktop reflects a waiting run via its TaskRunStatusChanged status; no separate
             // OS notification yet.
             ApplicationEvent::AwaitingUserInput { .. } => {}
+            ApplicationEvent::ClaudeSessionStateChanged {
+                claude_session_id,
+                tab_id,
+                session_status,
+                conversation_status,
+                wait_reason,
+            } => {
+                let event = ClaudeSessionStateChanged {
+                    claude_session_id,
+                    tab_id,
+                    session_status: session_status.into(),
+                    conversation_status: conversation_status.into(),
+                    wait_reason: wait_reason.map(Into::into),
+                };
+                if let Err(e) = event.emit(&self.app) {
+                    log::warn!(
+                        target: "monica_app::events",
+                        "failed to emit ClaudeSessionStateChanged: {e}"
+                    );
+                }
+            }
+            ApplicationEvent::ClaudeSessionMessages { claude_session_id, records } => {
+                let event = ClaudeSessionMessage {
+                    claude_session_id,
+                    records: records.into_iter().map(Into::into).collect(),
+                };
+                if let Err(e) = event.emit(&self.app) {
+                    log::warn!(
+                        target: "monica_app::events",
+                        "failed to emit ClaudeSessionMessage: {e}"
+                    );
+                }
+            }
         }
     }
 }

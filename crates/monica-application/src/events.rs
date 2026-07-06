@@ -1,4 +1,8 @@
-use monica_domain::{TaskRunStatus, TaskRunWaitReason};
+use monica_domain::{
+    ClaudeConversationStatus, ClaudeSessionStatus, TaskRunStatus, TaskRunWaitReason,
+};
+
+use crate::ports::ClaudeTranscriptRecord;
 
 /// Domain-level notifications a use case emits as a side effect of a state change. Each driver
 /// renders them in its own medium (Tauri event, OS notification, log) through an [`EventSink`],
@@ -32,6 +36,20 @@ pub enum ApplicationEvent {
         task_run_id: Option<String>,
         reason: Option<TaskRunWaitReason>,
         task_title: Option<String>,
+    },
+    /// A Claude Runtime session's observable state moved (hook-driven). Ended is derived:
+    /// `session_status == ended` wins over whatever the conversation last did.
+    ClaudeSessionStateChanged {
+        claude_session_id: String,
+        tab_id: String,
+        session_status: ClaudeSessionStatus,
+        conversation_status: ClaudeConversationStatus,
+        wait_reason: Option<TaskRunWaitReason>,
+    },
+    /// New transcript records read after a completed turn (assistant text / tool uses).
+    ClaudeSessionMessages {
+        claude_session_id: String,
+        records: Vec<ClaudeTranscriptRecord>,
     },
 }
 

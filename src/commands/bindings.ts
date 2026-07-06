@@ -118,13 +118,23 @@ export const commands = {
    */
   claudeListSessions: () =>
     typedError<ClaudeSession[], ApiError>(__TAURI_INVOKE("claude_list_sessions")),
+  /**
+   *  Full transcript of a Claude Runtime session — pull-style catch-up for a frontend that
+   *  missed the push events (fresh window, restart).
+   */
+  claudeSessionTranscript: (claudeSessionId: string) =>
+    typedError<ClaudeTranscriptRecord[], ApiError>(
+      __TAURI_INVOKE("claude_session_transcript", { claudeSessionId }),
+    ),
   openNamedWindow: (label: string) =>
     typedError<null, ApiError>(__TAURI_INVOKE("open_named_window", { label })),
 };
 
 /** Events */
 export const events = {
+  claudeSessionMessage: makeEvent<ClaudeSessionMessage>("claude-session:message"),
   claudeSessionOpened: makeEvent<ClaudeSessionOpened>("claude-session:opened"),
+  claudeSessionStateChanged: makeEvent<ClaudeSessionStateChanged>("claude-session:state-changed"),
   prSyncCompleted: makeEvent<PrSyncCompleted>("pr-sync:completed"),
   taskRunStatusChanged: makeEvent<TaskRunStatusChanged>("task-run:status-changed"),
 };
@@ -167,6 +177,8 @@ export type BoardColumn = {
   statuses: DisplayStatus[];
 };
 
+export type ClaudeConversationStatus = "idle" | "thinking" | "awaiting_user";
+
 /**
  *  The durable mapping for a Claude Code session Monica launched: which Workbench
  *  runspace/tab hosts it, which terminal session drives its PTY, and the cwd its JSONL
@@ -180,8 +192,16 @@ export type ClaudeSession = {
   cwd: string;
   name: string | null;
   status: ClaudeSessionStatus;
+  conversation_status: ClaudeConversationStatus;
+  wait_reason: TaskRunWaitReason | null;
   created_at: string;
   ended_at: string | null;
+};
+
+/**  New transcript records (assistant text / tool uses) read after a completed turn. */
+export type ClaudeSessionMessage = {
+  claude_session_id: string;
+  records: ClaudeTranscriptRecord[];
 };
 
 /**
@@ -197,7 +217,36 @@ export type ClaudeSessionOpened = {
   title: string | null;
 };
 
+/**
+ *  A Claude Runtime session's observable state moved (hook-driven): the conversation
+ *  went idle/thinking/awaiting-user, or the session ended.
+ */
+export type ClaudeSessionStateChanged = {
+  claude_session_id: string;
+  tab_id: string;
+  session_status: ClaudeSessionStatus;
+  conversation_status: ClaudeConversationStatus;
+  wait_reason: TaskRunWaitReason | null;
+};
+
 export type ClaudeSessionStatus = "pending" | "active" | "ended";
+
+export type ClaudeToolUse = {
+  id: string;
+  name: string;
+  input_json: string;
+};
+
+export type ClaudeTranscriptRecord = {
+  uuid: string | null;
+  timestamp: string | null;
+} & ClaudeTranscriptRecordKind;
+
+/**  One transcript record surfaced to the frontend (assistant text / tool uses). */
+export type ClaudeTranscriptRecordKind =
+  | { kind: "assistant"; text: string; tool_uses: ClaudeToolUse[] }
+  | { kind: "user" }
+  | { kind: "other" };
 
 export type DisplayStatus =
   | "ready"

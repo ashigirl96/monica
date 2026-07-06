@@ -110,9 +110,27 @@ fn signal_kind(agent: Agent, event_name: Option<&str>, payload: &Value) -> Signa
             reason: TaskRunWaitReason::PermissionRequest,
             plan_file_path: None,
         },
-        Some("SessionEnd") if agent == Agent::Claude => SignalKind::SessionEnded,
+        Some("SessionEnd") if agent == Agent::Claude => SignalKind::SessionEnded {
+            reason: payload
+                .get("reason")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        },
+        Some("Notification") if agent == Agent::Claude => SignalKind::NotificationReceived {
+            permission_request: notification_is_permission_request(payload),
+        },
         _ => SignalKind::Inert,
     }
+}
+
+/// Claude fires `Notification` both for permission prompts and idle reminders, with no
+/// structured discriminator — only the human-readable `message` ("Claude needs your
+/// permission to use Bash" vs "Claude is waiting for your input") tells them apart.
+fn notification_is_permission_request(payload: &Value) -> bool {
+    payload
+        .get("message")
+        .and_then(Value::as_str)
+        .is_some_and(|message| message.to_ascii_lowercase().contains("permission"))
 }
 
 /// The tool-specific wait a `tool_name` implies, if it blocks on the user.
@@ -227,9 +245,14 @@ mod tests {
                     subagents_running: false,
                 },
             ),
-            ("SessionEnd", SignalKind::SessionEnded),
+            ("SessionEnd", SignalKind::SessionEnded { reason: None }),
             ("StopFailure", SignalKind::Inert),
-            ("Notification", SignalKind::Inert),
+            (
+                "Notification",
+                SignalKind::NotificationReceived {
+                    permission_request: false,
+                },
+            ),
             ("SubagentStart", SignalKind::Inert),
         ];
         for (event, expected) in cases {
@@ -339,6 +362,51 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(phantom.kind, SignalKind::SubagentFinished { subagents_running: true });
+    }
+
+    #[test]
+    fn session_end_carries_its_reason() {
+        let cleared =
+            decode_claude(json!({"hook_event_name": "SessionEnd", "reason": "clear"})).unwrap();
+        assert_eq!(
+            cleared.kind,
+            SignalKind::SessionEnded {
+                reason: Some("clear".into())
+            }
+        );
+    }
+
+    #[test]
+    fn claude_notification_detects_permission_prompts_by_message() {
+        let permission = decode_claude(json!({
+            "hook_event_name": "Notification",
+            "message": "Claude needs your permission to use Bash"
+        }))
+        .unwrap();
+        assert_eq!(
+            permission.kind,
+            SignalKind::NotificationReceived {
+                permission_request: true
+            }
+        );
+        let idle = decode_claude(json!({
+            "hook_event_name": "Notification",
+            "message": "Claude is waiting for your input"
+        }))
+        .unwrap();
+        assert_eq!(
+            idle.kind,
+            SignalKind::NotificationReceived {
+                permission_request: false
+            }
+        );
+        // Codex has no Notification hook semantics; stays inert.
+        assert_eq!(
+            decode_codex(json!({"hook_event_name": "Notification", "message": "permission"}))
+                .unwrap()
+                .kind,
+            SignalKind::Inert
+        );
     }
 
     #[test]

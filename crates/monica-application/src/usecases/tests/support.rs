@@ -1,15 +1,18 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
 use monica_domain::{
-    ClaudeLaunchPhase, ClaudeSession, ClaudeSessionStatus, NewClaudeSession, RawJson,
+    ClaudeConversationStatus, ClaudeLaunchPhase, ClaudeSession, ClaudeSessionStatus,
+    NewClaudeSession, RawJson,
 };
 
 use crate::ports::{
-    AgentDecoders, BoxFuture, ClaudeSessionRepository, EventRepository, GitGateway,
+    AgentDecoders, BoxFuture, ClaudeSessionEvent, ClaudeSessionObservation,
+    ClaudeSessionRepository, EventRepository, GitGateway,
     NotebookGateway, NotificationOutboxStore, ProjectRepository, PullRequestSyncStore,
     TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter, TerminalAttachment,
     TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository, UnitOfWork, WorkTransaction,
@@ -66,7 +69,7 @@ pub(crate) fn subagent_finished(session: &str, subagents_running: bool) -> Agent
 }
 
 pub(crate) fn session_ended(session: &str) -> AgentSignal {
-    mk_signal(Some(session), "SessionEnd", SignalKind::SessionEnded)
+    mk_signal(Some(session), "SessionEnd", SignalKind::SessionEnded { reason: None })
 }
 
 pub(crate) fn input_required(session: Option<&str>, reason: TaskRunWaitReason) -> AgentSignal {
@@ -115,6 +118,7 @@ struct FakeState {
     /// Insertion order is creation order, so the last match for a tab is its latest session.
     terminal_sessions: Vec<TerminalSession>,
     claude_sessions: Vec<ClaudeSession>,
+    claude_session_events: Vec<ClaudeSessionEvent>,
     next_task: i64,
     next_run: i64,
     next_session: i64,
@@ -1111,19 +1115,34 @@ impl GitGateway for FakeGit {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct FakeTaskRunOutputs {
-    appended: RefCell<bool>,
-    last_cwd: RefCell<Option<String>>,
+    state: Rc<RefCell<FakeOutputsState>>,
+}
+
+#[derive(Default)]
+struct FakeOutputsState {
+    appended: bool,
+    last_cwd: Option<String>,
+    hooks_installed_in: Vec<String>,
+    install_hooks_error: Option<String>,
 }
 
 impl FakeTaskRunOutputs {
     pub(crate) fn hook_event_appended(&self) -> bool {
-        *self.appended.borrow()
+        self.state.borrow().appended
     }
 
     pub(crate) fn last_cwd(&self) -> Option<String> {
-        self.last_cwd.borrow().clone()
+        self.state.borrow().last_cwd.clone()
+    }
+
+    pub(crate) fn hooks_installed_in(&self) -> Vec<String> {
+        self.state.borrow().hooks_installed_in.clone()
+    }
+
+    pub(crate) fn fail_install_hooks(&self, message: &str) {
+        self.state.borrow_mut().install_hooks_error = Some(message.to_string());
     }
 }
 
@@ -1144,7 +1163,7 @@ impl TaskRunOutputs for FakeTaskRunOutputs {
         _task_run_id: Option<&str>,
         cwd: &std::path::Path,
     ) -> Result<crate::TaskShellEnv> {
-        *self.last_cwd.borrow_mut() = Some(cwd.to_string_lossy().into_owned());
+        self.state.borrow_mut().last_cwd = Some(cwd.to_string_lossy().into_owned());
         Ok(crate::TaskShellEnv {
             env: vec![
                 ("MONICA_TASK_ID".to_string(), task_id.to_string()),
@@ -1162,8 +1181,18 @@ impl TaskRunOutputs for FakeTaskRunOutputs {
         _event_label: Option<&str>,
         _raw_stdin: &str,
     ) -> Result<()> {
-        *self.appended.borrow_mut() = true;
+        self.state.borrow_mut().appended = true;
         Ok(())
+    }
+
+    fn install_agent_hooks(&self, _agent: Agent, cwd: &std::path::Path) -> Result<String> {
+        let mut state = self.state.borrow_mut();
+        if let Some(msg) = state.install_hooks_error.clone() {
+            return Err(anyhow!(msg));
+        }
+        let cwd = cwd.to_string_lossy().into_owned();
+        state.hooks_installed_in.push(cwd.clone());
+        Ok(format!("{cwd}/.claude/settings.local.json"))
     }
 }
 
@@ -1622,6 +1651,10 @@ impl ClaudeSessionRepository for FakeRepos {
             name: new.name,
             status: if ended { ClaudeSessionStatus::Ended } else { ClaudeSessionStatus::Pending },
             launch_phase: ClaudeLaunchPhase::Reserved,
+            conversation_status: ClaudeConversationStatus::Idle,
+            wait_reason: None,
+            provider_session_id: None,
+            jsonl_offset: 0,
             created_at: "2026-06-02T00:00:00.000Z".to_string(),
             ended_at: ended.then(|| "2026-06-02T00:00:00.000Z".to_string()),
         };
@@ -1698,6 +1731,88 @@ impl ClaudeSessionRepository for FakeRepos {
 
     fn list_claude_sessions(&self) -> Result<Vec<ClaudeSession>> {
         Ok(self.state.borrow().claude_sessions.clone())
+    }
+
+    fn record_claude_session_signal(
+        &mut self,
+        claude_session_id: &str,
+        kind: &str,
+        payload_json: &str,
+        observation: ClaudeSessionObservation<'_>,
+    ) -> Result<Option<ClaudeSession>> {
+        let mut state = self.state.borrow_mut();
+        let next_id = state.claude_session_events.len() as i64 + 1;
+        let Some(index) = state
+            .claude_sessions
+            .iter()
+            .position(|cs| cs.claude_session_id == claude_session_id)
+        else {
+            return Ok(None);
+        };
+        state.claude_session_events.push(ClaudeSessionEvent {
+            id: next_id,
+            claude_session_id: claude_session_id.to_string(),
+            kind: kind.to_string(),
+            payload_json: payload_json.to_string(),
+            created_at: "2026-06-02T00:00:02.000Z".to_string(),
+        });
+        let cs = &mut state.claude_sessions[index];
+        if let Some(provider_session_id) = observation.provider_session_id {
+            if cs.provider_session_id.as_deref() != Some(provider_session_id) {
+                cs.jsonl_offset = 0;
+            }
+            cs.provider_session_id = Some(provider_session_id.to_string());
+        }
+        if let Some(status) = observation.conversation_status {
+            cs.conversation_status = status;
+        }
+        if let Some(wait_reason) = observation.wait_reason {
+            cs.wait_reason = wait_reason;
+        }
+        if observation.mark_ended && cs.status != ClaudeSessionStatus::Ended {
+            cs.status = ClaudeSessionStatus::Ended;
+            cs.ended_at = Some("2026-06-02T00:00:02.000Z".to_string());
+        }
+        Ok(Some(cs.clone()))
+    }
+
+    fn list_unconsumed_claude_session_events(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<ClaudeSessionEvent>> {
+        Ok(self
+            .state
+            .borrow()
+            .claude_session_events
+            .iter()
+            .take(limit)
+            .cloned()
+            .collect())
+    }
+
+    fn mark_claude_session_events_consumed(&mut self, ids: &[i64]) -> Result<()> {
+        self.state
+            .borrow_mut()
+            .claude_session_events
+            .retain(|event| !ids.contains(&event.id));
+        Ok(())
+    }
+
+    fn set_claude_session_jsonl_offset(
+        &mut self,
+        claude_session_id: &str,
+        offset: u64,
+    ) -> Result<()> {
+        if let Some(cs) = self
+            .state
+            .borrow_mut()
+            .claude_sessions
+            .iter_mut()
+            .find(|cs| cs.claude_session_id == claude_session_id)
+        {
+            cs.jsonl_offset = offset;
+        }
+        Ok(())
     }
 }
 
@@ -1882,6 +1997,49 @@ impl AgentDecoders for TestAgentDecoders {
 
 pub(crate) struct FakeBackend;
 
+/// Scripted transcript reader: every `read_from` answers with the queued chunk (or
+/// "file does not exist"), recording the path/offset it was asked for.
+#[derive(Clone, Default)]
+pub(crate) struct FakeTranscripts {
+    state: Rc<RefCell<FakeTranscriptsState>>,
+}
+
+#[derive(Default)]
+struct FakeTranscriptsState {
+    next_chunk: Option<crate::TranscriptChunk>,
+    read_error: Option<String>,
+    reads: Vec<(PathBuf, u64)>,
+}
+
+impl FakeTranscripts {
+    pub(crate) fn set_next_chunk(&self, chunk: crate::TranscriptChunk) {
+        self.state.borrow_mut().next_chunk = Some(chunk);
+    }
+
+    pub(crate) fn fail_next_read(&self, message: &str) {
+        self.state.borrow_mut().read_error = Some(message.to_string());
+    }
+
+    pub(crate) fn reads(&self) -> Vec<(PathBuf, u64)> {
+        self.state.borrow().reads.clone()
+    }
+}
+
+impl crate::ClaudeTranscriptReader for FakeTranscripts {
+    fn read_from(&self, jsonl_path: &Path, offset: u64) -> Result<crate::TranscriptChunk> {
+        let mut state = self.state.borrow_mut();
+        state.reads.push((jsonl_path.to_path_buf(), offset));
+        if let Some(message) = state.read_error.clone() {
+            return Err(anyhow!(message));
+        }
+        Ok(state.next_chunk.clone().unwrap_or(crate::TranscriptChunk {
+            records: Vec::new(),
+            new_offset: offset,
+            file_exists: false,
+        }))
+    }
+}
+
 impl Backend for FakeBackend {
     type Repos = FakeRepos;
     type Git = FakeGit;
@@ -1892,6 +2050,7 @@ impl Backend for FakeBackend {
     type Notebooks = FakeNotebookGateway;
     type Workspace = FakeWorkspace;
     type Agents = TestAgentDecoders;
+    type Transcripts = FakeTranscripts;
 }
 
 pub(crate) fn facade(repos: FakeRepos, sink: RecordingSink) -> Monica<FakeBackend> {
@@ -1903,6 +2062,35 @@ pub(crate) fn facade_with_decoder(
     sink: RecordingSink,
     agents: TestAgentDecoders,
 ) -> Monica<FakeBackend> {
+    facade_with_transcripts(repos, sink, agents, FakeTranscripts::default())
+}
+
+pub(crate) fn facade_with_outputs(
+    repos: FakeRepos,
+    sink: RecordingSink,
+    outputs: FakeTaskRunOutputs,
+) -> Monica<FakeBackend> {
+    Monica::new(
+        repos,
+        FakeGit::default(),
+        FakeGithub,
+        FakeAuth,
+        FakeSetupRunner::default(),
+        outputs,
+        FakeNotebookGateway,
+        FakeWorkspace,
+        TestAgentDecoders::default(),
+        FakeTranscripts::default(),
+        Box::new(sink),
+    )
+}
+
+pub(crate) fn facade_with_transcripts(
+    repos: FakeRepos,
+    sink: RecordingSink,
+    agents: TestAgentDecoders,
+    transcripts: FakeTranscripts,
+) -> Monica<FakeBackend> {
     Monica::new(
         repos,
         FakeGit::default(),
@@ -1913,6 +2101,7 @@ pub(crate) fn facade_with_decoder(
         FakeNotebookGateway,
         FakeWorkspace,
         agents,
+        transcripts,
         Box::new(sink),
     )
 }

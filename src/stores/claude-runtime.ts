@@ -1,7 +1,61 @@
-import { getDefaultStore } from "jotai";
-import { claudeListSessions, onClaudeSessionOpened } from "@/commands/claude-runtime";
+import { atom, getDefaultStore } from "jotai";
+import type {
+  ClaudeConversationStatus,
+  ClaudeSessionStatus,
+  ClaudeTranscriptRecord,
+  TaskRunWaitReason,
+} from "@/commands/bindings";
+import {
+  claudeListSessions,
+  claudeSessionTranscript,
+  onClaudeSessionMessage,
+  onClaudeSessionOpened,
+  onClaudeSessionStateChanged,
+} from "@/commands/claude-runtime";
 import { adoptClaudeSessionAtom } from "@/features/work-bench/store";
 import { MAIN_WINDOW_LABEL, windowLabelAtom } from "@/stores/ui-state";
+
+// Hook/JSONL-driven observability for Claude Runtime sessions, keyed by claude_session_id.
+// The backend is the state machine (hooks → claude_sessions → drain → events); this map is
+// a passive mirror the UI reads.
+export type ClaudeSessionRuntimeState = {
+  sessionStatus: ClaudeSessionStatus;
+  conversationStatus: ClaudeConversationStatus;
+  waitReason: TaskRunWaitReason | null;
+  messages: ClaudeTranscriptRecord[];
+};
+
+export const claudeSessionStatesAtom = atom<ReadonlyMap<string, ClaudeSessionRuntimeState>>(
+  new Map<string, ClaudeSessionRuntimeState>(),
+);
+
+function mergeClaudeSessionState(
+  claudeSessionId: string,
+  update: Partial<ClaudeSessionRuntimeState>,
+): void {
+  const store = getDefaultStore();
+  const current = store.get(claudeSessionStatesAtom);
+  const previous = current.get(claudeSessionId) ?? {
+    sessionStatus: "active" as ClaudeSessionStatus,
+    conversationStatus: "idle" as ClaudeConversationStatus,
+    waitReason: null,
+    messages: [],
+  };
+  const next = new Map(current);
+  next.set(claudeSessionId, { ...previous, ...update });
+  store.set(claudeSessionStatesAtom, next);
+}
+
+function appendClaudeSessionMessages(
+  claudeSessionId: string,
+  records: ClaudeTranscriptRecord[],
+): void {
+  const store = getDefaultStore();
+  const previous = store.get(claudeSessionStatesAtom).get(claudeSessionId);
+  mergeClaudeSessionState(claudeSessionId, {
+    messages: [...(previous?.messages ?? []), ...records],
+  });
+}
 
 // App-lifetime owner for Agent Runtime session adoption. A single claude-session:opened listener
 // (module init, not a React effect, so StrictMode can't double-register) materializes the
@@ -23,6 +77,16 @@ export function initClaudeRuntime(): void {
       cwd: payload.cwd,
       title: payload.title ?? undefined,
     });
+  });
+  void onClaudeSessionStateChanged((payload) => {
+    mergeClaudeSessionState(payload.claude_session_id, {
+      sessionStatus: payload.session_status,
+      conversationStatus: payload.conversation_status,
+      waitReason: payload.wait_reason,
+    });
+  });
+  void onClaudeSessionMessage((payload) => {
+    appendClaudeSessionMessages(payload.claude_session_id, payload.records);
   });
 }
 
@@ -51,5 +115,20 @@ export async function recoverClaudeSessions(): Promise<void> {
       cwd: session.cwd,
       title: session.name ?? undefined,
     });
+    mergeClaudeSessionState(session.claude_session_id, {
+      sessionStatus: session.status,
+      conversationStatus: session.conversation_status,
+      waitReason: session.wait_reason,
+    });
+    // Push events emitted while no webview was alive are gone; the transcript file is the
+    // durable record, so seed the mirror from a full pull.
+    try {
+      const records = await claudeSessionTranscript(session.claude_session_id);
+      if (records.length > 0) {
+        mergeClaudeSessionState(session.claude_session_id, { messages: records });
+      }
+    } catch (e) {
+      console.warn(`failed to load transcript for ${session.claude_session_id}:`, e);
+    }
   }
 }
