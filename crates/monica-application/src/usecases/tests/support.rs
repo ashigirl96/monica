@@ -1798,6 +1798,10 @@ impl ClaudeSessionRepository for FakeRepos {
         Ok(())
     }
 
+    fn sweep_consumed_claude_session_events(&mut self, _older_than_days: u32) -> Result<usize> {
+        Ok(0)
+    }
+
     fn set_claude_session_jsonl_offset(
         &mut self,
         claude_session_id: &str,
