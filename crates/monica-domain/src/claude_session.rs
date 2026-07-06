@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::status::TaskRunWaitReason;
+
 #[derive(
     Debug,
     Clone,
@@ -62,6 +64,38 @@ impl ClaudeLaunchPhase {
     }
 }
 
+/// Where the conversation inside a live session stands, driven by hook signals.
+/// Orthogonal to [`ClaudeSessionStatus`], which is the lifecycle of the mapping itself:
+/// a session whose PTY died is `ended` regardless of what the conversation last did.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum ClaudeConversationStatus {
+    /// Claude is waiting for a prompt (session started, or the last turn completed).
+    Idle,
+    /// A turn is in flight.
+    Thinking,
+    /// Claude is blocked on the user: a pending question, a plan approval, or a
+    /// permission prompt.
+    AwaitingUser,
+}
+
+impl ClaudeConversationStatus {
+    pub fn as_str(self) -> &'static str {
+        self.into()
+    }
+}
+
 /// The durable mapping for a Claude Code session Monica launched: which Workbench
 /// runspace/tab hosts it, which terminal session drives its PTY, and the cwd its JSONL
 /// transcript path derives from. `claude_session_id` is the pre-minted UUID Claude runs
@@ -76,8 +110,26 @@ pub struct ClaudeSession {
     pub name: Option<String>,
     pub status: ClaudeSessionStatus,
     pub launch_phase: ClaudeLaunchPhase,
+    pub conversation_status: ClaudeConversationStatus,
+    pub wait_reason: Option<TaskRunWaitReason>,
+    /// The session id Claude itself currently writes its transcript under. Starts equal to
+    /// `claude_session_id`; a `/clear` or resume moves Claude onto a new id, and the hook
+    /// re-stamps this so the JSONL path keeps pointing at the live file.
+    pub provider_session_id: Option<String>,
+    /// Byte offset up to which the transcript JSONL has been consumed. Reset to 0 when
+    /// `provider_session_id` changes (the transcript is a different file from then on).
+    pub jsonl_offset: u64,
     pub created_at: String,
     pub ended_at: Option<String>,
+}
+
+impl ClaudeSession {
+    /// The session id the transcript JSONL is currently keyed by.
+    pub fn transcript_session_id(&self) -> &str {
+        self.provider_session_id
+            .as_deref()
+            .unwrap_or(&self.claude_session_id)
+    }
 }
 
 /// Input for reserving a mapping row before the launch is submitted. Status and

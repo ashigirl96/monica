@@ -1,9 +1,10 @@
 use super::{Backend, Monica};
 use crate::ports::{
-    AgentDecoders, ClaudeSessionRepository, NotificationOutboxStore, TaskRunStore,
-    TerminalAttachment, TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository,
-    WorkbenchStore,
+    AgentDecoders, ClaudeSessionRepository, ClaudeTranscriptReader, NotificationOutboxStore,
+    TaskRunStore, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
+    TerminalSessionRepository, WorkbenchStore,
 };
+use crate::usecases::runs::ports::TaskRunOutputs;
 use crate::usecases::terminal::{
     reconcile_terminal_sessions, task_run_settlement_for_orphaned_run,
     task_run_settlement_for_terminal_exit, DaemonSessionView, TerminalExitSettlement,
@@ -15,15 +16,26 @@ use crate::prelude::{
 };
 use monica_domain::{ClaudeSession, ClaudeSessionStatus, NewClaudeSession};
 use crate::{
-    ApplicationError, ApplicationEvent, ApplicationResult, EventSink, HookContext, HookReport,
-    OpenClaudeSessionParams, PrepareTaskResult, RunTaskResult, ClaudeSessionSpec, TaskBench,
-    TerminalStateSnapshot,
+    ApplicationError, ApplicationEvent, ApplicationResult, ClaudeHookReport, EventSink,
+    HookContext, HookReport, OpenClaudeSessionParams, PrepareTaskResult, RunTaskResult,
+    ClaudeSessionSpec, TaskBench, TerminalStateSnapshot,
 };
 
 /// Run preparation/execution, agent hooks, and (in a later phase) terminal sessions. Groups the
 /// `runs` and `terminal` use-case contexts because run settlement is driven by terminal state.
 pub struct ExecutionService<'a, B: Backend> {
     pub(in crate::facade) m: &'a mut Monica<B>,
+}
+
+/// What one [`ExecutionService::drain_claude_session_events`] tick did.
+#[derive(Debug, Clone, Default)]
+pub struct ClaudeSessionDrainOutcome {
+    /// Events consumed this tick.
+    pub drained: usize,
+    /// Sessions whose turn completed but whose transcript had nothing new yet (Claude
+    /// flushes the assistant record around the Stop hook, sometimes after it) — the
+    /// caller should re-poll these briefly.
+    pub recheck: Vec<String>,
 }
 
 impl<B: Backend> ExecutionService<'_, B> {
@@ -256,6 +268,20 @@ impl<B: Backend> ExecutionService<'_, B> {
                 params.cwd
             )));
         }
+
+        // Claude loads hooks from <cwd>/.claude/settings.local.json at startup, so they
+        // must be on disk before the spawn. No side effect has happened yet, so a failure
+        // here is determinate and a same-id retry stays safe.
+        self.m
+            .outputs
+            .install_agent_hooks(Agent::Claude, cwd_path)
+            .map_err(|e| {
+                ApplicationError::external(format!(
+                    "failed to install claude hooks into {}: {e:#}; nothing was launched, \
+                     so retrying is safe",
+                    params.cwd
+                ))
+            })?;
 
         let claude_session_id = params
             .claude_session_id
@@ -734,6 +760,126 @@ impl<B: Backend> ExecutionService<'_, B> {
         })?;
         self.reconcile_terminal_rows(daemon, &views)?;
         Ok(self.m.repos.list_claude_sessions()?)
+    }
+
+    /// Record a hook for a Claude Runtime session (env `MONICA_CLAUDE_SESSION_ID`
+    /// present, no task context). DB-only by design: the hook runs in a short-lived CLI
+    /// process whose EventSink is a no-op, so UI delivery happens when the desktop drain
+    /// worker consumes the outbox rows this writes.
+    pub fn ingest_claude_session_hook(
+        &mut self,
+        agent: Agent,
+        claude_session_id: &str,
+        raw_stdin: &str,
+    ) -> ApplicationResult<ClaudeHookReport> {
+        let Monica { repos, agents, .. } = &mut *self.m;
+        let signal = agents.decode(agent, raw_stdin.as_bytes())?;
+        let mut report = crate::usecases::claude_sessions::record_claude_session_hook(
+            repos,
+            claude_session_id,
+            signal.as_ref(),
+            raw_stdin,
+        )?;
+        if report.event_name.is_none() {
+            report.event_name = agents.event_label(raw_stdin.as_bytes());
+        }
+        Ok(report)
+    }
+
+    /// One drain tick: consume pending `claude_session_events`, emit a state snapshot per
+    /// touched session, and read the transcript JSONL for sessions whose turn completed
+    /// (or ended). Events are always consumed — a turn whose assistant record was not
+    /// flushed yet lands in `recheck`, and the caller re-polls those briefly; the
+    /// persisted offset guarantees the next completed turn catches up anything missed.
+    pub fn drain_claude_session_events(
+        &mut self,
+        home: &std::path::Path,
+        limit: usize,
+    ) -> ApplicationResult<ClaudeSessionDrainOutcome> {
+        let events = self.m.repos.list_unconsumed_claude_session_events(limit)?;
+        if events.is_empty() {
+            return Ok(ClaudeSessionDrainOutcome::default());
+        }
+        let mut session_ids: Vec<&str> = Vec::new();
+        for event in &events {
+            if !session_ids.contains(&event.claude_session_id.as_str()) {
+                session_ids.push(&event.claude_session_id);
+            }
+        }
+        let mut recheck = Vec::new();
+        for session_id in session_ids {
+            let Some(row) = self.m.repos.get_claude_session(session_id)? else {
+                continue;
+            };
+            self.m.events.emit(ApplicationEvent::ClaudeSessionStateChanged {
+                claude_session_id: row.claude_session_id.clone(),
+                tab_id: row.tab_id.clone(),
+                session_status: row.status,
+                conversation_status: row.conversation_status,
+                wait_reason: row.wait_reason,
+            });
+            let turn_landed = events.iter().any(|event| {
+                event.claude_session_id == *session_id
+                    && matches!(event.kind.as_str(), "turn_completed" | "session_ended")
+            });
+            if turn_landed && !self.poll_claude_session_transcript(home, session_id)? {
+                recheck.push(session_id.to_string());
+            }
+        }
+        let ids: Vec<i64> = events.iter().map(|event| event.id).collect();
+        self.m.repos.mark_claude_session_events_consumed(&ids)?;
+        Ok(ClaudeSessionDrainOutcome {
+            drained: events.len(),
+            recheck,
+        })
+    }
+
+    /// Read the session's transcript from its persisted cursor, emit the new records, and
+    /// advance the cursor. Returns whether anything was emitted. Safe to call while the
+    /// file does not exist yet (Claude creates it lazily on the first user message).
+    pub fn poll_claude_session_transcript(
+        &mut self,
+        home: &std::path::Path,
+        claude_session_id: &str,
+    ) -> ApplicationResult<bool> {
+        let Some(row) = self.m.repos.get_claude_session(claude_session_id)? else {
+            return Ok(false);
+        };
+        let path = crate::claude_jsonl_path(home, &row.cwd, row.transcript_session_id());
+        let chunk = self.m.transcripts.read_from(&path, row.jsonl_offset)?;
+        if !chunk.file_exists {
+            return Ok(false);
+        }
+        if chunk.new_offset != row.jsonl_offset {
+            self.m
+                .repos
+                .set_claude_session_jsonl_offset(claude_session_id, chunk.new_offset)?;
+        }
+        if chunk.records.is_empty() {
+            return Ok(false);
+        }
+        self.m.events.emit(ApplicationEvent::ClaudeSessionMessages {
+            claude_session_id: row.claude_session_id,
+            records: chunk.records,
+        });
+        Ok(true)
+    }
+
+    /// The full transcript of a session, from the start of its current file. Pull-style
+    /// catch-up for a frontend that missed the push events; never moves the cursor.
+    pub fn claude_session_transcript(
+        &mut self,
+        home: &std::path::Path,
+        claude_session_id: &str,
+    ) -> ApplicationResult<Vec<crate::ports::ClaudeTranscriptRecord>> {
+        let Some(row) = self.m.repos.get_claude_session(claude_session_id)? else {
+            return Err(ApplicationError::not_found(format!(
+                "claude session {claude_session_id} not found"
+            )));
+        };
+        let path = crate::claude_jsonl_path(home, &row.cwd, row.transcript_session_id());
+        let chunk = self.m.transcripts.read_from(&path, 0)?;
+        Ok(chunk.records)
     }
 
     pub fn attach_terminal_session(

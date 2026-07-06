@@ -15,7 +15,7 @@ mod synchronization;
 mod tasks;
 
 pub use backend::Backend;
-pub use executions::ExecutionService;
+pub use executions::{ClaudeSessionDrainOutcome, ExecutionService};
 pub use notebooks::{NotebookLintReport, NotebookPageView, NotebookService};
 pub use notifications::NotificationService;
 pub use projects::{ProjectInit, ProjectService};
@@ -34,6 +34,7 @@ pub struct Monica<B: Backend> {
     pub(in crate::facade) notebooks: B::Notebooks,
     pub(in crate::facade) workspace: B::Workspace,
     pub(in crate::facade) agents: B::Agents,
+    pub(in crate::facade) transcripts: B::Transcripts,
     pub(in crate::facade) events: Box<dyn EventSink>,
 }
 
@@ -49,9 +50,22 @@ impl<B: Backend> Monica<B> {
         notebooks: B::Notebooks,
         workspace: B::Workspace,
         agents: B::Agents,
+        transcripts: B::Transcripts,
         events: Box<dyn EventSink>,
     ) -> Self {
-        Self { repos, git, github, auth, setup, outputs, notebooks, workspace, agents, events }
+        Self {
+            repos,
+            git,
+            github,
+            auth,
+            setup,
+            outputs,
+            notebooks,
+            workspace,
+            agents,
+            transcripts,
+            events,
+        }
     }
 
     pub fn tasks(&mut self) -> TaskService<'_, B> {

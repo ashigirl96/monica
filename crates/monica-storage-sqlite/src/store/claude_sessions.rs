@@ -1,8 +1,10 @@
 use anyhow::Result;
-use monica_application::ports::ClaudeSessionRepository;
+use monica_application::ports::{
+    ClaudeSessionEvent, ClaudeSessionObservation, ClaudeSessionRepository,
+};
 use monica_domain::{
-    ClaudeLaunchPhase, ClaudeSession, ClaudeSessionStatus, NewClaudeSession,
-    TerminalSessionStatus,
+    ClaudeConversationStatus, ClaudeLaunchPhase, ClaudeSession, ClaudeSessionStatus,
+    NewClaudeSession, TaskRunWaitReason, TerminalSessionStatus,
 };
 use rusqlite::{params, Row};
 
@@ -10,11 +12,17 @@ use crate::SqliteStore;
 
 use super::{sql_literal_list, SET_NOW};
 
-const CLAUDE_SESSION_COLUMNS: &str = "claude_session_id, runspace_id, tab_id, terminal_session_id, cwd, name, status, launch_phase, created_at, ended_at";
+const CLAUDE_SESSION_COLUMNS: &str = "claude_session_id, runspace_id, tab_id, terminal_session_id, cwd, name, status, launch_phase, conversation_status, wait_reason, provider_session_id, jsonl_offset, created_at, ended_at";
+
+const CLAUDE_SESSION_EVENT_COLUMNS: &str =
+    "id, claude_session_id, kind, payload_json, created_at";
 
 fn claude_session_from_row(row: &Row<'_>) -> Result<ClaudeSession> {
     let status: String = row.get("status")?;
     let launch_phase: String = row.get("launch_phase")?;
+    let conversation_status: String = row.get("conversation_status")?;
+    let wait_reason: Option<String> = row.get("wait_reason")?;
+    let jsonl_offset: i64 = row.get("jsonl_offset")?;
     Ok(ClaudeSession {
         claude_session_id: row.get("claude_session_id")?,
         runspace_id: row.get("runspace_id")?,
@@ -24,8 +32,25 @@ fn claude_session_from_row(row: &Row<'_>) -> Result<ClaudeSession> {
         name: row.get("name")?,
         status: status.parse::<ClaudeSessionStatus>()?,
         launch_phase: launch_phase.parse::<ClaudeLaunchPhase>()?,
+        conversation_status: conversation_status.parse::<ClaudeConversationStatus>()?,
+        wait_reason: wait_reason
+            .as_deref()
+            .map(str::parse::<TaskRunWaitReason>)
+            .transpose()?,
+        provider_session_id: row.get("provider_session_id")?,
+        jsonl_offset: u64::try_from(jsonl_offset).unwrap_or(0),
         created_at: row.get("created_at")?,
         ended_at: row.get("ended_at")?,
+    })
+}
+
+fn claude_session_event_from_row(row: &Row<'_>) -> rusqlite::Result<ClaudeSessionEvent> {
+    Ok(ClaudeSessionEvent {
+        id: row.get("id")?,
+        claude_session_id: row.get("claude_session_id")?,
+        kind: row.get("kind")?,
+        payload_json: row.get("payload_json")?,
+        created_at: row.get("created_at")?,
     })
 }
 
@@ -147,6 +172,119 @@ impl SqliteStore {
         }
     }
 
+    /// One hook signal, atomically: the event row and the observation land in a single
+    /// transaction, so the drain never sees an event whose session row lags behind it.
+    /// Unknown id → `None` with nothing written (a hook from a session Monica never
+    /// launched). Deliberately never touches `status = pending → active`: that
+    /// confirmation belongs to the open flow.
+    pub fn record_claude_session_signal(
+        &mut self,
+        claude_session_id: &str,
+        kind: &str,
+        payload_json: &str,
+        observation: ClaudeSessionObservation<'_>,
+    ) -> Result<Option<ClaudeSession>> {
+        let tx = self.conn_mut().transaction()?;
+        let exists: i64 = tx.query_row(
+            "SELECT count(*) FROM claude_sessions WHERE claude_session_id = ?1",
+            params![claude_session_id],
+            |r| r.get(0),
+        )?;
+        if exists == 0 {
+            return Ok(None);
+        }
+        tx.execute(
+            "INSERT INTO claude_session_events (claude_session_id, kind, payload_json)
+             VALUES (?1, ?2, ?3)",
+            params![claude_session_id, kind, payload_json],
+        )?;
+        if let Some(provider_session_id) = observation.provider_session_id {
+            // Latest wins; a change means Claude writes a different transcript file now,
+            // so the cursor restarts. `IS NOT` is NULL-safe (the first stamp also resets,
+            // harmlessly — nothing was read before the first hook).
+            tx.execute(
+                "UPDATE claude_sessions
+                    SET jsonl_offset = CASE
+                            WHEN provider_session_id IS NOT ?2 THEN 0 ELSE jsonl_offset
+                        END,
+                        provider_session_id = ?2
+                  WHERE claude_session_id = ?1",
+                params![claude_session_id, provider_session_id],
+            )?;
+        }
+        tx.execute(
+            "UPDATE claude_sessions
+                SET conversation_status = COALESCE(?2, conversation_status),
+                    wait_reason = CASE WHEN ?3 THEN ?4 ELSE wait_reason END
+              WHERE claude_session_id = ?1",
+            params![
+                claude_session_id,
+                observation.conversation_status.map(|s| s.as_str()),
+                observation.wait_reason.is_some(),
+                observation.wait_reason.flatten().map(|r| r.as_str()),
+            ],
+        )?;
+        if observation.mark_ended {
+            let ended = ClaudeSessionStatus::Ended.as_str();
+            tx.execute(
+                &format!(
+                    "UPDATE claude_sessions
+                        SET status = '{ended}',
+                            ended_at = COALESCE(ended_at, {SET_NOW})
+                      WHERE claude_session_id = ?1 AND status != '{ended}'"
+                ),
+                params![claude_session_id],
+            )?;
+        }
+        tx.commit()?;
+        self.get_claude_session(claude_session_id)
+    }
+
+    pub fn list_unconsumed_claude_session_events(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<ClaudeSessionEvent>> {
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {CLAUDE_SESSION_EVENT_COLUMNS} FROM claude_session_events
+              WHERE consumed_at IS NULL ORDER BY id LIMIT ?1"
+        ))?;
+        let rows = stmt
+            .query_map(params![limit as i64], claude_session_event_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    pub fn mark_claude_session_events_consumed(&mut self, ids: &[i64]) -> Result<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let id_list = ids
+            .iter()
+            .map(i64::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.conn().execute(
+            &format!(
+                "UPDATE claude_session_events SET consumed_at = {SET_NOW}
+                  WHERE id IN ({id_list})"
+            ),
+            [],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_claude_session_jsonl_offset(
+        &mut self,
+        claude_session_id: &str,
+        offset: u64,
+    ) -> Result<()> {
+        self.conn().execute(
+            "UPDATE claude_sessions SET jsonl_offset = ?2 WHERE claude_session_id = ?1",
+            params![claude_session_id, offset as i64],
+        )?;
+        Ok(())
+    }
+
     pub fn list_claude_sessions(&self) -> Result<Vec<ClaudeSession>> {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {CLAUDE_SESSION_COLUMNS} FROM claude_sessions ORDER BY created_at"
@@ -193,5 +331,40 @@ impl ClaudeSessionRepository for SqliteStore {
 
     fn list_claude_sessions(&self) -> Result<Vec<ClaudeSession>> {
         SqliteStore::list_claude_sessions(self)
+    }
+
+    fn record_claude_session_signal(
+        &mut self,
+        claude_session_id: &str,
+        kind: &str,
+        payload_json: &str,
+        observation: ClaudeSessionObservation<'_>,
+    ) -> Result<Option<ClaudeSession>> {
+        SqliteStore::record_claude_session_signal(
+            self,
+            claude_session_id,
+            kind,
+            payload_json,
+            observation,
+        )
+    }
+
+    fn list_unconsumed_claude_session_events(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<ClaudeSessionEvent>> {
+        SqliteStore::list_unconsumed_claude_session_events(self, limit)
+    }
+
+    fn mark_claude_session_events_consumed(&mut self, ids: &[i64]) -> Result<()> {
+        SqliteStore::mark_claude_session_events_consumed(self, ids)
+    }
+
+    fn set_claude_session_jsonl_offset(
+        &mut self,
+        claude_session_id: &str,
+        offset: u64,
+    ) -> Result<()> {
+        SqliteStore::set_claude_session_jsonl_offset(self, claude_session_id, offset)
     }
 }
