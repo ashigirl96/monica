@@ -16,7 +16,7 @@ use crate::prelude::{
 use monica_domain::{ClaudeSession, ClaudeSessionStatus, NewClaudeSession};
 use crate::{
     ApplicationError, ApplicationEvent, ApplicationResult, EventSink, HookContext, HookReport,
-    OpenSdkSessionParams, PrepareTaskResult, RunTaskResult, SdkSessionSpec, TaskBench,
+    OpenClaudeSessionParams, PrepareTaskResult, RunTaskResult, ClaudeSessionSpec, TaskBench,
     TerminalStateSnapshot,
 };
 
@@ -213,7 +213,7 @@ impl<B: Backend> ExecutionService<'_, B> {
         }
     }
 
-    /// Create a Claude Code session in the permanent "sdk" runspace: pre-mint the Claude session
+    /// Create a Claude Code session in the permanent "agent-runtime" runspace: pre-mint the Claude session
     /// id and the tab id, spawn the shell through the daemon, submit the launch command into its
     /// PTY, and only then announce the session for Workbench adoption. Transactional from the
     /// caller's view — a determinately failed launch tears the session down and returns an
@@ -221,11 +221,11 @@ impl<B: Backend> ExecutionService<'_, B> {
     /// the launch nor a kill can be confirmed (the daemon dying mid-open), the error is
     /// [`ApplicationError::Indeterminate`] and the pending reservation stays, so the id keeps
     /// refusing non-idempotent reuse. No webview involvement anywhere.
-    pub fn open_sdk_session(
+    pub fn open_claude_session(
         &mut self,
         daemon: &impl TerminalDaemon,
-        params: OpenSdkSessionParams,
-    ) -> ApplicationResult<SdkSessionSpec> {
+        params: OpenClaudeSessionParams,
+    ) -> ApplicationResult<ClaudeSessionSpec> {
         // Idempotent recovery runs before cwd validation: a retry must be able to recover
         // a running session even if its cwd has since been deleted.
         if let Some(id) = &params.claude_session_id {
@@ -236,12 +236,12 @@ impl<B: Backend> ExecutionService<'_, B> {
                     "claude_session_id must be a UUID: {id}"
                 )));
             }
-            if let Some(spec) = self.recover_sdk_session(daemon, id, params.model.as_deref())? {
+            if let Some(spec) = self.recover_claude_session(daemon, id, params.model.as_deref())? {
                 return Ok(spec);
             }
         }
 
-        // Relative paths would resolve against the app process, not the SDK caller that
+        // Relative paths would resolve against the app process, not the Agent Runtime caller that
         // sent the request — an IPC boundary must not guess whose cwd "." means.
         let cwd_path = std::path::Path::new(&params.cwd);
         if !cwd_path.is_absolute() {
@@ -263,14 +263,14 @@ impl<B: Backend> ExecutionService<'_, B> {
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let tab_id = uuid::Uuid::new_v4().to_string();
         let initial_command =
-            crate::sdk::sdk_initial_command(&claude_session_id, params.model.as_deref());
+            crate::claude_runtime::claude_runtime_initial_command(&claude_session_id, params.model.as_deref());
         let env = vec![(
-            crate::MONICA_SDK_SESSION_ID_ENV.to_string(),
+            crate::MONICA_CLAUDE_SESSION_ID_ENV.to_string(),
             claude_session_id.clone(),
         )];
 
         let new = NewTerminalSession {
-            runspace_id: Some(crate::sdk_runspace_id().to_string()),
+            runspace_id: Some(crate::agent_runtime_runspace_id().to_string()),
             tab_id: Some(tab_id.clone()),
             kind: TerminalSessionKind::Agent,
             cwd: params.cwd.clone(),
@@ -298,7 +298,7 @@ impl<B: Backend> ExecutionService<'_, B> {
         // its Claude-less shell, and answers from the winner's mapping below.
         if let Err(e) = self.m.repos.create_claude_session(NewClaudeSession {
             claude_session_id: claude_session_id.clone(),
-            runspace_id: crate::sdk_runspace_id().to_string(),
+            runspace_id: crate::agent_runtime_runspace_id().to_string(),
             tab_id: tab_id.clone(),
             terminal_session_id: session.id.clone(),
             cwd: params.cwd.clone(),
@@ -314,7 +314,7 @@ impl<B: Backend> ExecutionService<'_, B> {
             // resolve to an active winner, report an in-flight (pending) one as unknown
             // — instead of a determinate error that would license a duplicating
             // fresh-id retry.
-            return match self.recover_sdk_session(daemon, &claude_session_id, params.model.as_deref())
+            return match self.recover_claude_session(daemon, &claude_session_id, params.model.as_deref())
             {
                 Ok(Some(spec)) => Ok(spec),
                 // No mapping after all: the failure wasn't a duplicate (or the
@@ -341,7 +341,7 @@ impl<B: Backend> ExecutionService<'_, B> {
             self.roll_back_live_session(daemon, &session.id);
             if let Err(e) = self.m.repos.delete_claude_session(&claude_session_id) {
                 log::error!(
-                    target: "monica_application::sdk",
+                    target: "monica_application::agent_runtime",
                     "failed to delete the unstamped reservation {claude_session_id}: {e}"
                 );
             }
@@ -378,7 +378,7 @@ impl<B: Backend> ExecutionService<'_, B> {
             }
             // Unconfirmed kill: the PTY may be alive with the launch landed. The pending
             // reservation stays — it refuses non-idempotent reuse — and the outcome is
-            // reported as unknown so the SDK client keeps its typed retry key.
+            // reported as unknown so the Agent Runtime client keeps its typed retry key.
             return Err(ApplicationError::indeterminate(format!(
                 "failed to submit the claude launch into session {} and the daemon could \
                  not confirm a kill: {e:#}; the session may be running under \
@@ -428,8 +428,8 @@ impl<B: Backend> ExecutionService<'_, B> {
             }
         }
 
-        let spec = SdkSessionSpec {
-            runspace_id: crate::sdk_runspace_id().to_string(),
+        let spec = ClaudeSessionSpec {
+            runspace_id: crate::agent_runtime_runspace_id().to_string(),
             tab_id,
             session_id: session.id,
             claude_session_id,
@@ -437,7 +437,7 @@ impl<B: Backend> ExecutionService<'_, B> {
             initial_command,
             title: params.title,
         };
-        self.m.events.emit(ApplicationEvent::SdkSessionOpened {
+        self.m.events.emit(ApplicationEvent::ClaudeSessionOpened {
             runspace_id: spec.runspace_id.clone(),
             tab_id: spec.tab_id.clone(),
             session_id: spec.session_id.clone(),
@@ -524,12 +524,12 @@ impl<B: Backend> ExecutionService<'_, B> {
     /// play, every infrastructure failure in here is classified indeterminate: a
     /// determinate error would read as "nothing exists under this id" and license a
     /// duplicating fresh-id retry.
-    fn recover_sdk_session(
+    fn recover_claude_session(
         &mut self,
         daemon: &impl TerminalDaemon,
         claude_session_id: &str,
         model: Option<&str>,
-    ) -> ApplicationResult<Option<SdkSessionSpec>> {
+    ) -> ApplicationResult<Option<ClaudeSessionSpec>> {
         let unverified = |what: &str, e: anyhow::Error| {
             ApplicationError::indeterminate(format!(
                 "cannot verify claude session {claude_session_id} ({what}): {e:#}; the \
@@ -624,19 +624,19 @@ impl<B: Backend> ExecutionService<'_, B> {
             ClaudeSessionStatus::Active => {}
         }
 
-        let spec = SdkSessionSpec {
+        let spec = ClaudeSessionSpec {
             runspace_id: row.runspace_id,
             tab_id: row.tab_id,
             session_id: row.terminal_session_id,
             claude_session_id: row.claude_session_id,
             cwd: row.cwd,
             // Informational only — the original launch already ran; this is not re-executed.
-            initial_command: crate::sdk::sdk_initial_command(claude_session_id, model),
+            initial_command: crate::claude_runtime::claude_runtime_initial_command(claude_session_id, model),
             title: row.name,
         };
         // Re-announce so a Workbench that missed the original event adopts the tab now.
         // Adoption dedupes on the terminal session id, so a repeat is a no-op there.
-        self.m.events.emit(ApplicationEvent::SdkSessionOpened {
+        self.m.events.emit(ApplicationEvent::ClaudeSessionOpened {
             runspace_id: spec.runspace_id.clone(),
             tab_id: spec.tab_id.clone(),
             session_id: spec.session_id.clone(),
@@ -665,7 +665,7 @@ impl<B: Backend> ExecutionService<'_, B> {
         &mut self,
         daemon: &impl TerminalDaemon,
         row: &monica_domain::ClaudeSession,
-    ) -> ApplicationResult<Option<SdkSessionSpec>> {
+    ) -> ApplicationResult<Option<ClaudeSessionSpec>> {
         let id = &row.claude_session_id;
         let indeterminate = |detail: String| {
             ApplicationError::indeterminate(format!(

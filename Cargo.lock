@@ -2825,6 +2825,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "monica-agent-runtime-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "monica-api"
 version = "0.1.0"
 dependencies = [
@@ -2857,9 +2865,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "monica-agent-runtime-protocol",
  "monica-domain",
  "monica-paths",
- "monica-sdk-protocol",
  "monica-storage-sqlite",
  "monica-terminal-client",
  "monica-terminal-protocol",
@@ -2891,12 +2899,12 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "log",
+ "monica-agent-runtime-protocol",
  "monica-api",
  "monica-application",
  "monica-domain",
  "monica-paths",
  "monica-runtime",
- "monica-sdk-protocol",
  "monica-terminal-client",
  "monica-terminal-protocol",
  "objc2 0.6.4",
@@ -2955,14 +2963,6 @@ dependencies = [
  "monica-domain",
  "monica-storage-sqlite",
  "tokio",
-]
-
-[[package]]
-name = "monica-sdk-protocol"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
 ]
 
 [[package]]

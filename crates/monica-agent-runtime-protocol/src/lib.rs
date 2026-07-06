@@ -1,5 +1,5 @@
-//! NDJSON wire protocol between external SDK clients (`monica-claude-sdk`) and the desktop
-//! app's SDK control socket (`<base>/sdk.sock`): one JSON object per line over a Unix domain
+//! NDJSON wire protocol between external Agent Runtime clients (`monica-claude-sdk`) and the desktop
+//! app's Agent Runtime control socket (`<base>/agent-runtime.sock`): one JSON object per line over a Unix domain
 //! socket, one request/response pair per connection.
 //!
 //! This is the Rust-client half of the external IPC surface; browser clients get a separate
@@ -11,23 +11,23 @@ use serde::{Deserialize, Serialize};
 /// The server rejects a mismatched version with an `Err` response before doing anything,
 /// so version skew fails with no side effect.
 ///
-/// v2: `OpenSdkSession.claude_session_id` is required and the server must honor it
+/// v2: `OpenClaudeSession.claude_session_id` is required and the server must honor it
 /// (idempotent opens). v1 servers ignored the field and minted their own id, so a v2
 /// client's "safe retry" against a v1 server would have opened a second session — the
 /// bump makes v1 servers reject the request before launching instead.
 pub const PROTOCOL_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SdkRequest {
+pub struct RuntimeRequest {
     pub version: u32,
     #[serde(flatten)]
-    pub op: SdkRequestOp,
+    pub op: RuntimeRequestOp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
-pub enum SdkRequestOp {
-    OpenSdkSession {
+pub enum RuntimeRequestOp {
+    OpenClaudeSession {
         cwd: String,
         #[serde(default)]
         model: Option<String>,
@@ -48,9 +48,9 @@ pub enum SdkRequestOp {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum SdkResponse {
+pub enum RuntimeResponse {
     Ok {
-        session: SdkSessionInfo,
+        session: ClaudeSessionInfo,
     },
     Err {
         error: String,
@@ -64,11 +64,11 @@ pub enum SdkResponse {
     },
 }
 
-/// The created session as the app reports it back to the SDK client. `claude_session_id`
+/// The created session as the app reports it back to the Agent Runtime client. `claude_session_id`
 /// is the pre-minted UUID Claude runs under, so the transcript path
 /// (`~/.claude/projects/<slug>/<uuid>.jsonl`) is known before Claude finishes starting.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SdkSessionInfo {
+pub struct ClaudeSessionInfo {
     pub runspace_id: String,
     pub tab_id: String,
     pub session_id: String,
@@ -87,13 +87,13 @@ pub struct SdkSessionInfo {
 mod tests {
     use super::*;
 
-    fn round_trip_request(req: &SdkRequest) -> SdkRequest {
+    fn round_trip_request(req: &RuntimeRequest) -> RuntimeRequest {
         let line = serde_json::to_string(req).unwrap();
         assert!(!line.contains('\n'), "wire format must stay one line");
         serde_json::from_str(&line).unwrap()
     }
 
-    fn round_trip_response(res: &SdkResponse) -> SdkResponse {
+    fn round_trip_response(res: &RuntimeResponse) -> RuntimeResponse {
         let line = serde_json::to_string(res).unwrap();
         assert!(!line.contains('\n'));
         serde_json::from_str(&line).unwrap()
@@ -101,9 +101,9 @@ mod tests {
 
     #[test]
     fn request_round_trips_through_ndjson() {
-        let req = SdkRequest {
+        let req = RuntimeRequest {
             version: PROTOCOL_VERSION,
-            op: SdkRequestOp::OpenSdkSession {
+            op: RuntimeRequestOp::OpenClaudeSession {
                 cwd: "/tmp".into(),
                 model: Some("opus".into()),
                 title: None,
@@ -112,7 +112,7 @@ mod tests {
         };
         let back = round_trip_request(&req);
         assert_eq!(back.version, PROTOCOL_VERSION);
-        let SdkRequestOp::OpenSdkSession { cwd, model, title, claude_session_id } = back.op;
+        let RuntimeRequestOp::OpenClaudeSession { cwd, model, title, claude_session_id } = back.op;
         assert_eq!(cwd, "/tmp");
         assert_eq!(model.as_deref(), Some("opus"));
         assert_eq!(title, None);
@@ -127,9 +127,9 @@ mod tests {
         // A v1 request written before claude_session_id existed must still parse (fields
         // default), so the server can answer it with a version-mismatch error instead of
         // an opaque parse error.
-        let back: SdkRequest =
-            serde_json::from_str(r#"{"version":1,"op":"open_sdk_session","cwd":"/tmp"}"#).unwrap();
-        let SdkRequestOp::OpenSdkSession { cwd, model, title, claude_session_id } = back.op;
+        let back: RuntimeRequest =
+            serde_json::from_str(r#"{"version":1,"op":"open_claude_session","cwd":"/tmp"}"#).unwrap();
+        let RuntimeRequestOp::OpenClaudeSession { cwd, model, title, claude_session_id } = back.op;
         assert_eq!(cwd, "/tmp");
         assert_eq!(model, None);
         assert_eq!(title, None);
@@ -139,8 +139,8 @@ mod tests {
     #[test]
     fn session_info_without_jsonl_path_still_parses() {
         // A response from a server predating jsonl_path must still parse client-side.
-        let session: SdkSessionInfo = serde_json::from_str(
-            r#"{"runspace_id":"sdk","tab_id":"t","session_id":"ts-1",
+        let session: ClaudeSessionInfo = serde_json::from_str(
+            r#"{"runspace_id":"agent-runtime","tab_id":"t","session_id":"ts-1",
                 "claude_session_id":"u","cwd":"/tmp","initial_command":"claude"}"#,
         )
         .unwrap();
@@ -149,9 +149,9 @@ mod tests {
 
     #[test]
     fn responses_round_trip() {
-        let ok = SdkResponse::Ok {
-            session: SdkSessionInfo {
-                runspace_id: "sdk".into(),
+        let ok = RuntimeResponse::Ok {
+            session: ClaudeSessionInfo {
+                runspace_id: "agent-runtime".into(),
                 tab_id: "tab-1".into(),
                 session_id: "ts-1".into(),
                 claude_session_id: "5e0f5b0e-9f5c-4a4e-9d6e-000000000000".into(),
@@ -162,26 +162,26 @@ mod tests {
             },
         };
         match round_trip_response(&ok) {
-            SdkResponse::Ok { session } => {
-                assert_eq!(session.runspace_id, "sdk");
+            RuntimeResponse::Ok { session } => {
+                assert_eq!(session.runspace_id, "agent-runtime");
                 assert_eq!(session.session_id, "ts-1");
                 assert_eq!(session.title.as_deref(), Some("t"));
             }
             other => panic!("unexpected response: {other:?}"),
         }
 
-        let err = SdkResponse::Err { error: "nope".into(), indeterminate: false };
+        let err = RuntimeResponse::Err { error: "nope".into(), indeterminate: false };
         match round_trip_response(&err) {
-            SdkResponse::Err { error, indeterminate } => {
+            RuntimeResponse::Err { error, indeterminate } => {
                 assert_eq!(error, "nope");
                 assert!(!indeterminate);
             }
             other => panic!("unexpected response: {other:?}"),
         }
 
-        let unresolved = SdkResponse::Err { error: "unconfirmed".into(), indeterminate: true };
+        let unresolved = RuntimeResponse::Err { error: "unconfirmed".into(), indeterminate: true };
         match round_trip_response(&unresolved) {
-            SdkResponse::Err { indeterminate, .. } => assert!(indeterminate),
+            RuntimeResponse::Err { indeterminate, .. } => assert!(indeterminate),
             other => panic!("unexpected response: {other:?}"),
         }
     }
@@ -189,9 +189,9 @@ mod tests {
     #[test]
     fn err_without_the_indeterminate_field_parses_as_determinate() {
         // A v1-era error line carries no flag; it must keep meaning "nothing was created".
-        let back: SdkResponse = serde_json::from_str(r#"{"type":"err","error":"nope"}"#).unwrap();
+        let back: RuntimeResponse = serde_json::from_str(r#"{"type":"err","error":"nope"}"#).unwrap();
         match back {
-            SdkResponse::Err { indeterminate, .. } => assert!(!indeterminate),
+            RuntimeResponse::Err { indeterminate, .. } => assert!(!indeterminate),
             other => panic!("unexpected response: {other:?}"),
         }
     }

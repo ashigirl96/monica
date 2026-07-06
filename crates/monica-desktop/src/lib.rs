@@ -3,7 +3,7 @@ mod event_sink;
 mod native_menu;
 mod ptyd;
 mod schedulers;
-mod sdk_server;
+mod agent_runtime_server;
 mod services;
 
 use tauri::Manager;
@@ -43,13 +43,13 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::notebook::get_notebook_pages,
             commands::plan::read_runspace_plan,
             commands::pull_request::force_sync_pull_requests,
-            commands::sdk::claude_list_sessions,
+            commands::claude_runtime::claude_list_sessions,
             commands::window::open_named_window,
         ])
         .events(tauri_specta::collect_events![
             commands::task::TaskRunStatusChanged,
             commands::pull_request::PrSyncCompleted,
-            commands::sdk::SdkSessionOpened,
+            commands::claude_runtime::ClaudeSessionOpened,
         ])
 }
 
@@ -120,7 +120,7 @@ pub fn run() {
             let drain = schedulers::notification_drain::start(app.handle().clone());
             app.manage(drain);
             ptyd::start_warmup(app.handle().clone());
-            sdk_server::start(app.handle().clone());
+            agent_runtime_server::start(app.handle().clone());
             #[cfg(not(debug_assertions))]
             log::info!(
                 target: "monica_app::startup",

@@ -20,7 +20,7 @@ mod tests {
         conn.execute(
             "INSERT INTO claude_sessions
                (claude_session_id, runspace_id, tab_id, terminal_session_id, cwd)
-             VALUES ('uuid-old', 'sdk', 'tab-1', 'ts-1', '/tmp')",
+             VALUES ('uuid-old', 'agent-runtime', 'tab-1', 'ts-1', '/tmp')",
             [],
         )
         .unwrap();

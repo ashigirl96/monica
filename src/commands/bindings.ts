@@ -124,8 +124,8 @@ export const commands = {
 
 /** Events */
 export const events = {
+  claudeSessionOpened: makeEvent<ClaudeSessionOpened>("claude-session:opened"),
   prSyncCompleted: makeEvent<PrSyncCompleted>("pr-sync:completed"),
-  sdkSessionOpened: makeEvent<SdkSessionOpened>("sdk-session:opened"),
   taskRunStatusChanged: makeEvent<TaskRunStatusChanged>("task-run:status-changed"),
 };
 
@@ -182,6 +182,19 @@ export type ClaudeSession = {
   status: ClaudeSessionStatus;
   created_at: string;
   ended_at: string | null;
+};
+
+/**
+ *  Announces an Agent Runtime-created terminal session so the Workbench can adopt a tab bound to it.
+ *  Purely observational: the session row, PTY spawn, and Claude launch are already handled
+ *  backend-side by the time this fires.
+ */
+export type ClaudeSessionOpened = {
+  runspace_id: string;
+  tab_id: string;
+  session_id: string;
+  cwd: string;
+  title: string | null;
 };
 
 export type ClaudeSessionStatus = "pending" | "active" | "ended";
@@ -252,19 +265,6 @@ export type RunTaskResult = {
   cwd: string;
   env: [string, string][];
   initial_command: string;
-};
-
-/**
- *  Announces an SDK-created terminal session so the Workbench can adopt a tab bound to it.
- *  Purely observational: the session row, PTY spawn, and Claude launch are already handled
- *  backend-side by the time this fires.
- */
-export type SdkSessionOpened = {
-  runspace_id: string;
-  tab_id: string;
-  session_id: string;
-  cwd: string;
-  title: string | null;
 };
 
 export type TaskBench = {

@@ -208,8 +208,8 @@ fn facade_create_terminal_session_mark_started_failure_kills_pty_and_errors() {
     assert_eq!(stopped_runs(&sink.events()), vec!["run-1".to_string()]);
 }
 
-fn sdk_params(cwd: &str) -> crate::OpenSdkSessionParams {
-    crate::OpenSdkSessionParams {
+fn claude_params(cwd: &str) -> crate::OpenClaudeSessionParams {
+    crate::OpenClaudeSessionParams {
         cwd: cwd.to_string(),
         model: Some("opus".to_string()),
         title: Some("hello".to_string()),
@@ -218,23 +218,23 @@ fn sdk_params(cwd: &str) -> crate::OpenSdkSessionParams {
     }
 }
 
-fn sdk_params_with_id(cwd: &str, claude_session_id: &str) -> crate::OpenSdkSessionParams {
-    crate::OpenSdkSessionParams {
+fn claude_params_with_id(cwd: &str, claude_session_id: &str) -> crate::OpenClaudeSessionParams {
+    crate::OpenClaudeSessionParams {
         claude_session_id: Some(claude_session_id.to_string()),
-        ..sdk_params(cwd)
+        ..claude_params(cwd)
     }
 }
 
 #[test]
-fn facade_open_sdk_session_mints_ids_spawns_and_announces() {
+fn facade_open_claude_session_mints_ids_spawns_and_announces() {
     let sink = RecordingSink::default();
     let mut monica = facade(FakeRepos::default(), sink.clone());
     let daemon = FakeDaemon::default();
     let cwd = std::env::temp_dir().to_string_lossy().into_owned();
 
-    let spec = monica.executions().open_sdk_session(&daemon, sdk_params(&cwd)).unwrap();
+    let spec = monica.executions().open_claude_session(&daemon, claude_params(&cwd)).unwrap();
 
-    assert_eq!(spec.runspace_id, "sdk");
+    assert_eq!(spec.runspace_id, "agent-runtime");
     assert_eq!(spec.cwd, cwd);
     uuid::Uuid::parse_str(&spec.claude_session_id).expect("claude session id should be a uuid");
     uuid::Uuid::parse_str(&spec.tab_id).expect("tab id should be a uuid");
@@ -243,13 +243,13 @@ fn facade_open_sdk_session_mints_ids_spawns_and_announces() {
         format!("claude --session-id {} --model 'opus'", spec.claude_session_id)
     );
 
-    // The daemon spawned with the sdk marker plus the standard tab/session id env.
+    // The daemon spawned with the agent runtime marker plus the standard tab/session id env.
     let created = daemon.created.lock().unwrap();
     assert_eq!(created.len(), 1);
     assert_eq!(created[0].session_id, spec.session_id);
     let env: std::collections::HashMap<&str, &str> =
         created[0].env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-    assert_eq!(env.get("MONICA_SDK_SESSION_ID"), Some(&spec.claude_session_id.as_str()));
+    assert_eq!(env.get("MONICA_CLAUDE_SESSION_ID"), Some(&spec.claude_session_id.as_str()));
     assert_eq!(env.get("MONICA_TERMINAL_TAB_ID"), Some(&spec.tab_id.as_str()));
     assert_eq!(env.get("MONICA_TERMINAL_SESSION_ID"), Some(&spec.session_id.as_str()));
     drop(created);
@@ -271,15 +271,15 @@ fn facade_open_sdk_session_mints_ids_spawns_and_announces() {
         .find(|cs| cs.claude_session_id == spec.claude_session_id)
         .expect("claude session mapping should exist");
     assert_eq!(mapping.status, monica_domain::ClaudeSessionStatus::Active);
-    assert_eq!(mapping.runspace_id, "sdk");
+    assert_eq!(mapping.runspace_id, "agent-runtime");
     assert_eq!(mapping.tab_id, spec.tab_id);
     assert_eq!(mapping.terminal_session_id, spec.session_id);
     assert_eq!(mapping.cwd, spec.cwd);
     assert_eq!(mapping.name.as_deref(), Some("hello"));
     assert_eq!(mapping.ended_at, None);
 
-    // The DB row is an agent session parked in the "sdk" runspace under the minted tab id.
-    let rows = monica.executions().list_terminal_sessions(&daemon, Some("sdk")).unwrap();
+    // The DB row is an agent session parked in the "agent-runtime" runspace under the minted tab id.
+    let rows = monica.executions().list_terminal_sessions(&daemon, Some("agent-runtime")).unwrap();
     let row = rows.iter().find(|s| s.id == spec.session_id).expect("session row should exist");
     assert_eq!(row.kind, TerminalSessionKind::Agent);
     assert_eq!(row.tab_id.as_deref(), Some(spec.tab_id.as_str()));
@@ -288,9 +288,9 @@ fn facade_open_sdk_session_mints_ids_spawns_and_announces() {
     let event = sink
         .events()
         .into_iter()
-        .find(|e| matches!(e, ApplicationEvent::SdkSessionOpened { .. }))
-        .expect("SdkSessionOpened should be announced");
-    let ApplicationEvent::SdkSessionOpened {
+        .find(|e| matches!(e, ApplicationEvent::ClaudeSessionOpened { .. }))
+        .expect("ClaudeSessionOpened should be announced");
+    let ApplicationEvent::ClaudeSessionOpened {
         runspace_id,
         tab_id,
         session_id,
@@ -301,7 +301,7 @@ fn facade_open_sdk_session_mints_ids_spawns_and_announces() {
     else {
         unreachable!()
     };
-    assert_eq!(runspace_id, "sdk");
+    assert_eq!(runspace_id, "agent-runtime");
     assert_eq!(tab_id, spec.tab_id);
     assert_eq!(session_id, spec.session_id);
     assert_eq!(claude_session_id, spec.claude_session_id);
@@ -310,14 +310,14 @@ fn facade_open_sdk_session_mints_ids_spawns_and_announces() {
 }
 
 #[test]
-fn facade_open_sdk_session_rejects_missing_cwd() {
+fn facade_open_claude_session_rejects_missing_cwd() {
     let sink = RecordingSink::default();
     let mut monica = facade(FakeRepos::default(), sink.clone());
     let daemon = FakeDaemon::default();
 
     let err = monica
         .executions()
-        .open_sdk_session(&daemon, sdk_params("/nonexistent/monica-sdk-test"))
+        .open_claude_session(&daemon, claude_params("/nonexistent/monica-agent-runtime-test"))
         .unwrap_err();
 
     assert!(matches!(err, ApplicationError::Validation(_)), "got: {err:?}");
@@ -326,13 +326,13 @@ fn facade_open_sdk_session_rejects_missing_cwd() {
 }
 
 #[test]
-fn facade_open_sdk_session_rejects_relative_cwd() {
-    // "." exists but would resolve against the app process, not the SDK caller.
+fn facade_open_claude_session_rejects_relative_cwd() {
+    // "." exists but would resolve against the app process, not the Agent Runtime caller.
     let sink = RecordingSink::default();
     let mut monica = facade(FakeRepos::default(), sink.clone());
     let daemon = FakeDaemon::default();
 
-    let err = monica.executions().open_sdk_session(&daemon, sdk_params(".")).unwrap_err();
+    let err = monica.executions().open_claude_session(&daemon, claude_params(".")).unwrap_err();
 
     assert!(matches!(err, ApplicationError::Validation(_)), "got: {err:?}");
     assert!(daemon.created.lock().unwrap().is_empty());
@@ -340,26 +340,26 @@ fn facade_open_sdk_session_rejects_relative_cwd() {
 }
 
 #[test]
-fn facade_open_sdk_session_write_failure_rolls_back_without_announcement() {
+fn facade_open_claude_session_write_failure_rolls_back_without_announcement() {
     let sink = RecordingSink::default();
     let mut monica = facade(FakeRepos::default(), sink.clone());
     let daemon = FakeDaemon::failing_write();
     let cwd = std::env::temp_dir().to_string_lossy().into_owned();
 
-    let err = monica.executions().open_sdk_session(&daemon, sdk_params(&cwd)).unwrap_err();
+    let err = monica.executions().open_claude_session(&daemon, claude_params(&cwd)).unwrap_err();
 
     assert!(matches!(err, ApplicationError::External(_)), "got: {err:?}");
     // The half-open session was torn down and settled as Failed, so a retry can't stack a
     // second live session and nothing announces an unlaunched one.
     let session_id = daemon.created.lock().unwrap()[0].session_id.clone();
     assert_eq!(*daemon.terminated.lock().unwrap(), vec![session_id.clone()]);
-    let rows = monica.executions().list_terminal_sessions(&daemon, Some("sdk")).unwrap();
+    let rows = monica.executions().list_terminal_sessions(&daemon, Some("agent-runtime")).unwrap();
     let row = rows.iter().find(|s| s.id == session_id).expect("session row should exist");
     assert_eq!(row.status, TerminalSessionStatus::Failed);
     assert!(!sink
         .events()
         .iter()
-        .any(|e| matches!(e, ApplicationEvent::SdkSessionOpened { .. })));
+        .any(|e| matches!(e, ApplicationEvent::ClaudeSessionOpened { .. })));
     // The launch write may have gone out (only the ack path is what failed), so the id
     // is retired as an ended tombstone, never freed for a corrupting relaunch.
     let sessions = monica.executions().list_claude_sessions(&daemon).unwrap();
@@ -368,7 +368,7 @@ fn facade_open_sdk_session_write_failure_rolls_back_without_announcement() {
 }
 
 #[test]
-fn facade_open_sdk_session_mark_started_failure_rolls_back_without_announcement() {
+fn facade_open_claude_session_mark_started_failure_rolls_back_without_announcement() {
     let repos = FakeRepos::default();
     repos.fail_mark_started();
     let sink = RecordingSink::default();
@@ -376,7 +376,7 @@ fn facade_open_sdk_session_mark_started_failure_rolls_back_without_announcement(
     let daemon = FakeDaemon::default();
     let cwd = std::env::temp_dir().to_string_lossy().into_owned();
 
-    let err = monica.executions().open_sdk_session(&daemon, sdk_params(&cwd)).unwrap_err();
+    let err = monica.executions().open_claude_session(&daemon, claude_params(&cwd)).unwrap_err();
 
     assert!(matches!(err, ApplicationError::Storage(_)), "got: {err:?}");
     // The PTY spawned but its start couldn't be recorded: the shell is killed before the error
@@ -388,29 +388,29 @@ fn facade_open_sdk_session_mark_started_failure_rolls_back_without_announcement(
     assert!(!sink
         .events()
         .iter()
-        .any(|e| matches!(e, ApplicationEvent::SdkSessionOpened { .. })));
+        .any(|e| matches!(e, ApplicationEvent::ClaudeSessionOpened { .. })));
     assert!(monica.executions().list_claude_sessions(&daemon).unwrap().is_empty());
 }
 
 #[test]
-fn facade_open_sdk_session_daemon_failure_is_an_error_without_announcement() {
+fn facade_open_claude_session_daemon_failure_is_an_error_without_announcement() {
     let sink = RecordingSink::default();
     let mut monica = facade(FakeRepos::default(), sink.clone());
     let daemon = FakeDaemon::failing_create();
     let cwd = std::env::temp_dir().to_string_lossy().into_owned();
 
-    let err = monica.executions().open_sdk_session(&daemon, sdk_params(&cwd)).unwrap_err();
+    let err = monica.executions().open_claude_session(&daemon, claude_params(&cwd)).unwrap_err();
 
     assert!(matches!(err, ApplicationError::External(_)), "got: {err:?}");
     assert!(!sink
         .events()
         .iter()
-        .any(|e| matches!(e, ApplicationEvent::SdkSessionOpened { .. })));
+        .any(|e| matches!(e, ApplicationEvent::ClaudeSessionOpened { .. })));
     assert!(monica.executions().list_claude_sessions(&daemon).unwrap().is_empty());
 }
 
 #[test]
-fn facade_open_sdk_session_reservation_failure_rolls_back_before_any_launch() {
+fn facade_open_claude_session_reservation_failure_rolls_back_before_any_launch() {
     let repos = FakeRepos::default();
     repos.fail_create_claude_session();
     let sink = RecordingSink::default();
@@ -418,7 +418,7 @@ fn facade_open_sdk_session_reservation_failure_rolls_back_before_any_launch() {
     let daemon = FakeDaemon::default();
     let cwd = std::env::temp_dir().to_string_lossy().into_owned();
 
-    let err = monica.executions().open_sdk_session(&daemon, sdk_params(&cwd)).unwrap_err();
+    let err = monica.executions().open_claude_session(&daemon, claude_params(&cwd)).unwrap_err();
 
     // The reservation is the idempotency lock, so it precedes the launch: a failed (or
     // concurrently lost) reservation tears down a shell that never ran Claude.
@@ -429,12 +429,12 @@ fn facade_open_sdk_session_reservation_failure_rolls_back_before_any_launch() {
     assert!(!sink
         .events()
         .iter()
-        .any(|e| matches!(e, ApplicationEvent::SdkSessionOpened { .. })));
+        .any(|e| matches!(e, ApplicationEvent::ClaudeSessionOpened { .. })));
     assert!(monica.executions().list_claude_sessions(&daemon).unwrap().is_empty());
 }
 
 #[test]
-fn facade_open_sdk_session_launch_confirmation_failure_rolls_back_and_retires_the_id() {
+fn facade_open_claude_session_launch_confirmation_failure_rolls_back_and_retires_the_id() {
     for (repos, expect_written) in [
         {
             let repos = FakeRepos::default();
@@ -452,7 +452,7 @@ fn facade_open_sdk_session_launch_confirmation_failure_rolls_back_and_retires_th
         let daemon = FakeDaemon::default();
         let cwd = std::env::temp_dir().to_string_lossy().into_owned();
 
-        let err = monica.executions().open_sdk_session(&daemon, sdk_params(&cwd)).unwrap_err();
+        let err = monica.executions().open_claude_session(&daemon, claude_params(&cwd)).unwrap_err();
 
         assert!(matches!(err, ApplicationError::External(_)), "got: {err:?}");
         let session_id = daemon.created.lock().unwrap()[0].session_id.clone();
@@ -461,7 +461,7 @@ fn facade_open_sdk_session_launch_confirmation_failure_rolls_back_and_retires_th
         assert!(!sink
             .events()
             .iter()
-            .any(|e| matches!(e, ApplicationEvent::SdkSessionOpened { .. })));
+            .any(|e| matches!(e, ApplicationEvent::ClaudeSessionOpened { .. })));
         // The launch was acknowledged, so claude may have left artifacts under the id:
         // it is retired as an ended tombstone, never freed for a corrupting relaunch.
         let sessions = monica.executions().list_claude_sessions(&daemon).unwrap();
@@ -471,7 +471,7 @@ fn facade_open_sdk_session_launch_confirmation_failure_rolls_back_and_retires_th
 }
 
 #[test]
-fn facade_open_sdk_session_retired_id_refuses_reuse_after_a_failed_launch() {
+fn facade_open_claude_session_retired_id_refuses_reuse_after_a_failed_launch() {
     // Killing the PTY rolls back the process, not Claude's external side effects: a
     // transcript keyed by the id may already exist, so a same-id retry after a failed
     // launch must be refused determinately (fresh id) instead of relaunching over it.
@@ -483,13 +483,13 @@ fn facade_open_sdk_session_retired_id_refuses_reuse_after_a_failed_launch() {
 
     let first = monica
         .executions()
-        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .open_claude_session(&daemon, claude_params_with_id(&cwd, id))
         .unwrap_err();
     assert!(matches!(first, ApplicationError::External(_)), "got: {first:?}");
 
     let retry = monica
         .executions()
-        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .open_claude_session(&daemon, claude_params_with_id(&cwd, id))
         .unwrap_err();
 
     assert!(matches!(retry, ApplicationError::Validation(_)), "got: {retry:?}");
@@ -498,7 +498,7 @@ fn facade_open_sdk_session_retired_id_refuses_reuse_after_a_failed_launch() {
 }
 
 #[test]
-fn facade_open_sdk_session_unconfirmed_launch_write_is_indeterminate_and_keeps_the_reservation() {
+fn facade_open_claude_session_unconfirmed_launch_write_is_indeterminate_and_keeps_the_reservation() {
     // The launch write is an acknowledged round trip and the daemon writes into the PTY
     // before answering: here the bytes landed but the ack was lost, and the follow-up
     // kill could not be confirmed either (the connection died mid-open). Claude may be
@@ -512,7 +512,7 @@ fn facade_open_sdk_session_unconfirmed_launch_write_is_indeterminate_and_keeps_t
 
     let err = monica
         .executions()
-        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .open_claude_session(&daemon, claude_params_with_id(&cwd, id))
         .unwrap_err();
 
     assert!(matches!(err, ApplicationError::Indeterminate(_)), "got: {err:?}");
@@ -521,7 +521,7 @@ fn facade_open_sdk_session_unconfirmed_launch_write_is_indeterminate_and_keeps_t
     assert!(!sink
         .events()
         .iter()
-        .any(|e| matches!(e, ApplicationEvent::SdkSessionOpened { .. })));
+        .any(|e| matches!(e, ApplicationEvent::ClaudeSessionOpened { .. })));
 
     // Nothing was force-failed (that would end the mapping via the coupled transition):
     // the reservation survives as pending, so a same-id retry stays idempotent —
@@ -533,14 +533,14 @@ fn facade_open_sdk_session_unconfirmed_launch_write_is_indeterminate_and_keeps_t
     assert_eq!(mapping.status, monica_domain::ClaudeSessionStatus::Pending);
     let retry = monica
         .executions()
-        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .open_claude_session(&daemon, claude_params_with_id(&cwd, id))
         .unwrap_err();
     assert!(matches!(retry, ApplicationError::Indeterminate(_)), "got: {retry:?}");
     assert_eq!(daemon.created.lock().unwrap().len(), 1, "must not respawn");
 }
 
 #[test]
-fn facade_open_sdk_session_acked_kill_without_observed_death_stays_indeterminate() {
+fn facade_open_claude_session_acked_kill_without_observed_death_stays_indeterminate() {
     // terminate's ack only proves the signal was dispatched: the daemon flips a session
     // to not-running after its wait thread reaps the child and the output drain
     // completes, and a survivor holding the PTY stalls that. Here the kill is acked but
@@ -556,7 +556,7 @@ fn facade_open_sdk_session_acked_kill_without_observed_death_stays_indeterminate
 
     let err = monica
         .executions()
-        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .open_claude_session(&daemon, claude_params_with_id(&cwd, id))
         .unwrap_err();
 
     assert!(matches!(err, ApplicationError::Indeterminate(_)), "got: {err:?}");
@@ -572,13 +572,13 @@ fn facade_open_sdk_session_acked_kill_without_observed_death_stays_indeterminate
     let sessions = monica.executions().list_claude_sessions(&daemon).unwrap();
     let mapping = sessions.iter().find(|cs| cs.claude_session_id == id).unwrap();
     assert_eq!(mapping.status, monica_domain::ClaudeSessionStatus::Pending);
-    let rows = monica.executions().list_terminal_sessions(&daemon, Some("sdk")).unwrap();
+    let rows = monica.executions().list_terminal_sessions(&daemon, Some("agent-runtime")).unwrap();
     let row = rows.iter().find(|s| s.id == "ts-1").unwrap();
     assert_ne!(row.status, TerminalSessionStatus::Failed);
 }
 
 #[test]
-fn facade_open_sdk_session_unconfirmed_kill_after_confirm_failure_is_indeterminate() {
+fn facade_open_claude_session_unconfirmed_kill_after_confirm_failure_is_indeterminate() {
     // The launch was submitted and acknowledged; only the pending→active confirmation
     // write failed, and the kill could not be confirmed either. Claude is likely
     // running: the reservation must survive and the outcome stays unknown.
@@ -592,7 +592,7 @@ fn facade_open_sdk_session_unconfirmed_kill_after_confirm_failure_is_indetermina
 
     let err = monica
         .executions()
-        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .open_claude_session(&daemon, claude_params_with_id(&cwd, id))
         .unwrap_err();
 
     assert!(matches!(err, ApplicationError::Indeterminate(_)), "got: {err:?}");
@@ -605,7 +605,7 @@ fn facade_open_sdk_session_unconfirmed_kill_after_confirm_failure_is_indetermina
 }
 
 #[test]
-fn facade_open_sdk_session_recovery_storage_failure_is_indeterminate() {
+fn facade_open_claude_session_recovery_storage_failure_is_indeterminate() {
     // Once a possibly-live mapping is observed, a transient storage failure during the
     // liveness check must not read as a determinate rejection: the mapped PTY may be
     // running, and "nothing exists, retry freely" would duplicate it.
@@ -614,7 +614,7 @@ fn facade_open_sdk_session_recovery_storage_failure_is_indeterminate() {
     repos.seed_session(fake_session("ts-9", Some("tab-w"), TerminalSessionStatus::Running));
     repos.seed_claude_session(monica_domain::ClaudeSession {
         claude_session_id: id.to_string(),
-        runspace_id: "sdk".to_string(),
+        runspace_id: "agent-runtime".to_string(),
         tab_id: "tab-w".to_string(),
         terminal_session_id: "ts-9".to_string(),
         cwd: "/tmp".to_string(),
@@ -632,7 +632,7 @@ fn facade_open_sdk_session_recovery_storage_failure_is_indeterminate() {
 
     let err = monica
         .executions()
-        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .open_claude_session(&daemon, claude_params_with_id(&cwd, id))
         .unwrap_err();
 
     assert!(matches!(err, ApplicationError::Indeterminate(_)), "got: {err:?}");
@@ -651,7 +651,7 @@ fn stage_stale_pending_reservation(
     daemon.seed_running_view("ts-9");
     repos.seed_claude_session(monica_domain::ClaudeSession {
         claude_session_id: id.to_string(),
-        runspace_id: "sdk".to_string(),
+        runspace_id: "agent-runtime".to_string(),
         tab_id: "tab-w".to_string(),
         terminal_session_id: "ts-9".to_string(),
         cwd: "/tmp".to_string(),
@@ -665,7 +665,7 @@ fn stage_stale_pending_reservation(
 }
 
 #[test]
-fn facade_open_sdk_session_reclaims_a_stale_never_launched_reservation() {
+fn facade_open_claude_session_reclaims_a_stale_never_launched_reservation() {
     // The app crashed after reserving but before stamping the launch attempt: the
     // `reserved` phase proves no launch ever reached that shell, so past the lease the
     // id is freed and the same-id retry self-heals into a clean fresh open — the key is
@@ -678,7 +678,7 @@ fn facade_open_sdk_session_reclaims_a_stale_never_launched_reservation() {
     let mut monica = facade(repos, sink.clone());
     let cwd = std::env::temp_dir().to_string_lossy().into_owned();
 
-    let spec = monica.executions().open_sdk_session(&daemon, sdk_params_with_id(&cwd, id)).unwrap();
+    let spec = monica.executions().open_claude_session(&daemon, claude_params_with_id(&cwd, id)).unwrap();
 
     assert_eq!(spec.claude_session_id, id);
     // A fresh shell was spawned and launched; the leftover was killed best-effort.
@@ -689,7 +689,7 @@ fn facade_open_sdk_session_reclaims_a_stale_never_launched_reservation() {
 }
 
 #[test]
-fn facade_open_sdk_session_reclaims_a_stale_submitted_launch_only_through_observed_death() {
+fn facade_open_claude_session_reclaims_a_stale_submitted_launch_only_through_observed_death() {
     // The crash landed after the launch write may have gone out: reclamation must run
     // through an observed death of the terminal, after which "use a fresh id" is a safe
     // determinate answer (nothing runs under the old id anymore).
@@ -708,7 +708,7 @@ fn facade_open_sdk_session_reclaims_a_stale_submitted_launch_only_through_observ
 
     let err = monica
         .executions()
-        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .open_claude_session(&daemon, claude_params_with_id(&cwd, id))
         .unwrap_err();
 
     assert!(matches!(err, ApplicationError::Validation(_)), "got: {err:?}");
@@ -721,27 +721,19 @@ fn facade_open_sdk_session_reclaims_a_stale_submitted_launch_only_through_observ
 }
 
 #[test]
-fn facade_open_sdk_session_stale_submitted_launch_stays_indeterminate_without_observed_death() {
+fn facade_open_claude_session_stale_submitted_launch_stays_indeterminate_without_observed_death() {
     // Same stale submitted reservation, but the kill is acked without the session ever
     // leaving the daemon's running view: death was not observed, so the mapping must
     // survive and the outcome stays unknown.
     let repos = FakeRepos::default();
     let daemon = FakeDaemon::kill_unobserved();
     let id = "5e0f5b0e-9f5c-4a4e-9d6e-000000000309";
-    stage_stale_pending_reservation(
-        &repos,
-        &daemon,
-        id,
-        monica_domain::ClaudeLaunchPhase::Submitting,
-    );
-    let sink = RecordingSink::default();
-    let mut monica = facade(repos, sink.clone());
+    stage_stale_pending_reservation(&repos, &daemon, id, monica_domain::ClaudeLaunchPhase::Submitting);
+    let mut monica = facade(repos, RecordingSink::default());
     let cwd = std::env::temp_dir().to_string_lossy().into_owned();
 
-    let err = monica
-        .executions()
-        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
-        .unwrap_err();
+    let params = claude_params_with_id(&cwd, id);
+    let err = monica.executions().open_claude_session(&daemon, params).unwrap_err();
 
     assert!(matches!(err, ApplicationError::Indeterminate(_)), "got: {err:?}");
     let sessions = monica.executions().list_claude_sessions(&daemon).unwrap();
@@ -760,7 +752,7 @@ fn stage_reservation_race_winner(
     daemon.seed_running_view("ts-9");
     repos.race_claude_session_insert(monica_domain::ClaudeSession {
         claude_session_id: id.to_string(),
-        runspace_id: "sdk".to_string(),
+        runspace_id: "agent-runtime".to_string(),
         tab_id: "tab-w".to_string(),
         terminal_session_id: "ts-9".to_string(),
         cwd: "/tmp".to_string(),
@@ -773,7 +765,7 @@ fn stage_reservation_race_winner(
 }
 
 #[test]
-fn facade_open_sdk_session_reservation_race_loser_stays_indeterminate_while_winner_is_in_flight() {
+fn facade_open_claude_session_reservation_race_loser_stays_indeterminate_while_winner_is_in_flight() {
     // Both opens pass recovery, the winner inserts the reservation first, and the loser
     // fails on the duplicate while the winner is still mid-launch (pending). The loser
     // must not answer determinately: "no session exists, retry freely" would duplicate
@@ -788,7 +780,7 @@ fn facade_open_sdk_session_reservation_race_loser_stays_indeterminate_while_winn
 
     let err = monica
         .executions()
-        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .open_claude_session(&daemon, claude_params_with_id(&cwd, id))
         .unwrap_err();
 
     assert!(matches!(err, ApplicationError::Indeterminate(_)), "got: {err:?}");
@@ -804,7 +796,7 @@ fn facade_open_sdk_session_reservation_race_loser_stays_indeterminate_while_winn
 }
 
 #[test]
-fn facade_open_sdk_session_reservation_race_loser_resolves_to_an_active_winner() {
+fn facade_open_claude_session_reservation_race_loser_resolves_to_an_active_winner() {
     // Same race, but the winner already confirmed its launch: the loser's request is
     // for a session that exists, so it resolves to it idempotently instead of erroring.
     let repos = FakeRepos::default();
@@ -817,7 +809,7 @@ fn facade_open_sdk_session_reservation_race_loser_resolves_to_an_active_winner()
 
     let spec = monica
         .executions()
-        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .open_claude_session(&daemon, claude_params_with_id(&cwd, id))
         .unwrap();
 
     assert_eq!(spec.claude_session_id, id);
@@ -829,18 +821,18 @@ fn facade_open_sdk_session_reservation_race_loser_resolves_to_an_active_winner()
 }
 
 #[test]
-fn facade_open_sdk_session_with_id_pending_reservation_is_indeterminate() {
+fn facade_open_claude_session_with_id_pending_reservation_is_indeterminate() {
     let repos = FakeRepos::default();
     let id = "5e0f5b0e-9f5c-4a4e-9d6e-000000000309";
     // A reservation between commit and launch confirmation: either a concurrent open is
     // mid-flight right now (a timeout retry can race it) or one was interrupted. The id
     // must be refused — but as an indeterminate outcome, because a determinate error
-    // tells the SDK "nothing was created" and licenses a fresh-id retry that would
+    // tells the Agent Runtime "nothing was created" and licenses a fresh-id retry that would
     // duplicate the session the in-flight open is about to confirm.
     repos.seed_claude_session(monica_domain::ClaudeSession {
         claude_session_id: id.to_string(),
-        runspace_id: "sdk".to_string(),
-        tab_id: "tab-sdk-1".to_string(),
+        runspace_id: "agent-runtime".to_string(),
+        tab_id: "tab-agent-runtime-1".to_string(),
         terminal_session_id: "ts-1".to_string(),
         cwd: "/tmp".to_string(),
         name: None,
@@ -855,8 +847,8 @@ fn facade_open_sdk_session_with_id_pending_reservation_is_indeterminate() {
     let cwd = std::env::temp_dir().to_string_lossy().into_owned();
     // The terminal row exists and its PTY is alive, so reconcile keeps the row pending.
     let new = NewTerminalSession {
-        runspace_id: Some("sdk".to_string()),
-        tab_id: Some("tab-sdk-1".to_string()),
+        runspace_id: Some("agent-runtime".to_string()),
+        tab_id: Some("tab-agent-runtime-1".to_string()),
         kind: TerminalSessionKind::Agent,
         cwd: "/tmp".to_string(),
         shell: "/bin/zsh".to_string(),
@@ -870,7 +862,7 @@ fn facade_open_sdk_session_with_id_pending_reservation_is_indeterminate() {
 
     let err = monica
         .executions()
-        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .open_claude_session(&daemon, claude_params_with_id(&cwd, id))
         .unwrap_err();
 
     assert!(matches!(err, ApplicationError::Indeterminate(_)), "got: {err:?}");
@@ -883,21 +875,21 @@ fn facade_open_sdk_session_with_id_pending_reservation_is_indeterminate() {
 }
 
 #[test]
-fn facade_open_sdk_session_with_id_recovers_running_session_without_respawn() {
+fn facade_open_claude_session_with_id_recovers_running_session_without_respawn() {
     let sink = RecordingSink::default();
     let mut monica = facade(FakeRepos::default(), sink.clone());
     let daemon = FakeDaemon::default();
     let cwd = std::env::temp_dir().to_string_lossy().into_owned();
     let id = "5e0f5b0e-9f5c-4a4e-9d6e-000000000309";
 
-    let first = monica.executions().open_sdk_session(&daemon, sdk_params_with_id(&cwd, id)).unwrap();
+    let first = monica.executions().open_claude_session(&daemon, claude_params_with_id(&cwd, id)).unwrap();
     assert_eq!(first.claude_session_id, id);
 
     // The retry finds the mapping, verifies the PTY is alive, and answers with the same
     // session instead of spawning a second one.
     daemon.seed_running_view(&first.session_id);
     let second =
-        monica.executions().open_sdk_session(&daemon, sdk_params_with_id(&cwd, id)).unwrap();
+        monica.executions().open_claude_session(&daemon, claude_params_with_id(&cwd, id)).unwrap();
 
     assert_eq!(second.session_id, first.session_id);
     assert_eq!(second.tab_id, first.tab_id);
@@ -909,25 +901,25 @@ fn facade_open_sdk_session_with_id_recovers_running_session_without_respawn() {
     let announcements = sink
         .events()
         .iter()
-        .filter(|e| matches!(e, ApplicationEvent::SdkSessionOpened { .. }))
+        .filter(|e| matches!(e, ApplicationEvent::ClaudeSessionOpened { .. }))
         .count();
     assert_eq!(announcements, 2);
 }
 
 #[test]
-fn facade_open_sdk_session_with_id_rejects_ended_session() {
+fn facade_open_claude_session_with_id_rejects_ended_session() {
     let sink = RecordingSink::default();
     let mut monica = facade(FakeRepos::default(), sink.clone());
     let daemon = FakeDaemon::default();
     let cwd = std::env::temp_dir().to_string_lossy().into_owned();
     let id = "5e0f5b0e-9f5c-4a4e-9d6e-000000000309";
 
-    let first = monica.executions().open_sdk_session(&daemon, sdk_params_with_id(&cwd, id)).unwrap();
+    let first = monica.executions().open_claude_session(&daemon, claude_params_with_id(&cwd, id)).unwrap();
     monica.executions().record_terminal_exit(&first.session_id, Some(0)).unwrap();
 
     let err = monica
         .executions()
-        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .open_claude_session(&daemon, claude_params_with_id(&cwd, id))
         .unwrap_err();
 
     assert!(matches!(err, ApplicationError::Validation(_)), "got: {err:?}");
@@ -935,20 +927,20 @@ fn facade_open_sdk_session_with_id_rejects_ended_session() {
 }
 
 #[test]
-fn facade_open_sdk_session_with_id_dead_pty_ends_mapping_and_errors() {
+fn facade_open_claude_session_with_id_dead_pty_ends_mapping_and_errors() {
     let sink = RecordingSink::default();
     let mut monica = facade(FakeRepos::default(), sink.clone());
     let daemon = FakeDaemon::default();
     let cwd = std::env::temp_dir().to_string_lossy().into_owned();
     let id = "5e0f5b0e-9f5c-4a4e-9d6e-000000000309";
 
-    let first = monica.executions().open_sdk_session(&daemon, sdk_params_with_id(&cwd, id)).unwrap();
+    let first = monica.executions().open_claude_session(&daemon, claude_params_with_id(&cwd, id)).unwrap();
 
     // No seeded view: the daemon does not know the session, so the recovery's liveness
     // check demotes it to Lost, which ends the mapping — and the open refuses.
     let err = monica
         .executions()
-        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .open_claude_session(&daemon, claude_params_with_id(&cwd, id))
         .unwrap_err();
 
     assert!(matches!(err, ApplicationError::Validation(_)), "got: {err:?}");
@@ -960,15 +952,15 @@ fn facade_open_sdk_session_with_id_dead_pty_ends_mapping_and_errors() {
 }
 
 #[test]
-fn facade_open_sdk_session_with_id_missing_terminal_row_ends_mapping_and_errors() {
+fn facade_open_claude_session_with_id_missing_terminal_row_ends_mapping_and_errors() {
     let repos = FakeRepos::default();
     let id = "5e0f5b0e-9f5c-4a4e-9d6e-000000000309";
     // The mapping row survived but its terminal row is gone — the inconsistency the
     // schema's no-FK design leaves to the recovery path to settle.
     repos.seed_claude_session(monica_domain::ClaudeSession {
         claude_session_id: id.to_string(),
-        runspace_id: "sdk".to_string(),
-        tab_id: "tab-sdk-1".to_string(),
+        runspace_id: "agent-runtime".to_string(),
+        tab_id: "tab-agent-runtime-1".to_string(),
         terminal_session_id: "ts-404".to_string(),
         cwd: "/tmp".to_string(),
         name: None,
@@ -984,7 +976,7 @@ fn facade_open_sdk_session_with_id_missing_terminal_row_ends_mapping_and_errors(
 
     let err = monica
         .executions()
-        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .open_claude_session(&daemon, claude_params_with_id(&cwd, id))
         .unwrap_err();
 
     assert!(matches!(err, ApplicationError::Validation(_)), "got: {err:?}");
@@ -995,14 +987,14 @@ fn facade_open_sdk_session_with_id_missing_terminal_row_ends_mapping_and_errors(
 }
 
 #[test]
-fn facade_open_sdk_session_with_unknown_id_opens_fresh_under_that_id() {
+fn facade_open_claude_session_with_unknown_id_opens_fresh_under_that_id() {
     let sink = RecordingSink::default();
     let mut monica = facade(FakeRepos::default(), sink.clone());
     let daemon = FakeDaemon::default();
     let cwd = std::env::temp_dir().to_string_lossy().into_owned();
     let id = "5e0f5b0e-9f5c-4a4e-9d6e-000000000309";
 
-    let spec = monica.executions().open_sdk_session(&daemon, sdk_params_with_id(&cwd, id)).unwrap();
+    let spec = monica.executions().open_claude_session(&daemon, claude_params_with_id(&cwd, id)).unwrap();
 
     assert_eq!(spec.claude_session_id, id);
     assert_eq!(spec.initial_command, format!("claude --session-id {id} --model 'opus'"));
@@ -1010,7 +1002,7 @@ fn facade_open_sdk_session_with_unknown_id_opens_fresh_under_that_id() {
 }
 
 #[test]
-fn facade_open_sdk_session_rejects_non_uuid_id() {
+fn facade_open_claude_session_rejects_non_uuid_id() {
     let sink = RecordingSink::default();
     let mut monica = facade(FakeRepos::default(), sink.clone());
     let daemon = FakeDaemon::default();
@@ -1018,7 +1010,7 @@ fn facade_open_sdk_session_rejects_non_uuid_id() {
 
     let err = monica
         .executions()
-        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, "$(rm -rf /)"))
+        .open_claude_session(&daemon, claude_params_with_id(&cwd, "$(rm -rf /)"))
         .unwrap_err();
 
     assert!(matches!(err, ApplicationError::Validation(_)), "got: {err:?}");
@@ -1027,21 +1019,21 @@ fn facade_open_sdk_session_rejects_non_uuid_id() {
 }
 
 #[test]
-fn facade_open_sdk_session_with_id_unreachable_daemon_errors_without_respawn() {
+fn facade_open_claude_session_with_id_unreachable_daemon_errors_without_respawn() {
     let sink = RecordingSink::default();
     let mut monica = facade(FakeRepos::default(), sink.clone());
     let daemon = FakeDaemon::failing_list();
     let cwd = std::env::temp_dir().to_string_lossy().into_owned();
     let id = "5e0f5b0e-9f5c-4a4e-9d6e-000000000309";
 
-    let first = monica.executions().open_sdk_session(&daemon, sdk_params_with_id(&cwd, id)).unwrap();
+    let first = monica.executions().open_claude_session(&daemon, claude_params_with_id(&cwd, id)).unwrap();
 
     // Liveness cannot be verified, so the retry must not guess: no error-driven respawn,
     // no silent success — and the failure is indeterminate, because the session may well
     // be running and a determinate error would license a duplicating fresh-id retry.
     let err = monica
         .executions()
-        .open_sdk_session(&daemon, sdk_params_with_id(&cwd, id))
+        .open_claude_session(&daemon, claude_params_with_id(&cwd, id))
         .unwrap_err();
 
     assert!(matches!(err, ApplicationError::Indeterminate(_)), "got: {err:?}");
@@ -1056,7 +1048,7 @@ fn facade_list_claude_sessions_fails_closed_when_daemon_unreachable() {
     let daemon = FakeDaemon::default();
     let cwd = std::env::temp_dir().to_string_lossy().into_owned();
 
-    let spec = monica.executions().open_sdk_session(&daemon, sdk_params(&cwd)).unwrap();
+    let spec = monica.executions().open_claude_session(&daemon, claude_params(&cwd)).unwrap();
 
     // Startup recovery adopts rows still `active` as live Workbench tabs, so an
     // unverifiable daemon must error instead of serving DB-only state as verified —
@@ -1081,8 +1073,8 @@ fn facade_list_claude_sessions_reconciles_liveness_before_answering() {
     let daemon = FakeDaemon::default();
     let cwd = std::env::temp_dir().to_string_lossy().into_owned();
 
-    let dead = monica.executions().open_sdk_session(&daemon, sdk_params(&cwd)).unwrap();
-    let alive = monica.executions().open_sdk_session(&daemon, sdk_params(&cwd)).unwrap();
+    let dead = monica.executions().open_claude_session(&daemon, claude_params(&cwd)).unwrap();
+    let alive = monica.executions().open_claude_session(&daemon, claude_params(&cwd)).unwrap();
     daemon.seed_running_view(&alive.session_id);
 
     let sessions = monica.executions().list_claude_sessions(&daemon).unwrap();

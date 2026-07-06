@@ -1,4 +1,4 @@
-//! Create a new Claude Code session in the Workbench's "sdk" runspace:
+//! Create a new Claude Code session in the Workbench's "agent-runtime" runspace:
 //!
 //! ```sh
 //! cargo run -p monica-claude-sdk --example open_session -- \

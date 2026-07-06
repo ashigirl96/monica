@@ -9,7 +9,7 @@ anyhow = "1.0"
 base64 = { version = "0.22", default-features = false, features = ["std"] }
 monica-domain = { path = "../monica-domain" }
 monica-paths = { path = "../monica-paths" }
-monica-sdk-protocol = { path = "../monica-sdk-protocol" }
+monica-agent-runtime-protocol = { path = "../monica-agent-runtime-protocol" }
 monica-storage-sqlite = { path = "../monica-storage-sqlite" }
 monica-terminal-client = { path = "../monica-terminal-client" }
 monica-terminal-protocol = { path = "../monica-terminal-protocol" }

@@ -27,7 +27,7 @@ pub trait TerminalDaemon {
     fn create(&self, request: TerminalCreateRequest) -> Result<Option<u32>>;
     /// Type `data` into the session's PTY, waiting for the freshly spawned shell to be
     /// ready to read input first, and return only once the daemon has acknowledged the
-    /// write. Backs the SDK launch injection, where "submitted before anyone else can
+    /// write. Backs the Agent Runtime launch injection, where "submitted before anyone else can
     /// write" is a correctness requirement, not a latency optimization.
     fn write_input(&self, session_id: &str, data: &[u8]) -> Result<()>;
     fn attach(&self, session_id: &str, replay_bytes: Option<u32>) -> Result<TerminalAttachment>;
