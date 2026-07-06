@@ -31,7 +31,7 @@ fn session_info() -> ClaudeSessionInfo {
         cwd: "/tmp".to_string(),
         initial_command: format!("claude --session-id {CANNED_ID}"),
         title: None,
-        jsonl_path: None,
+        jsonl_path: format!("/home/user/.claude/projects/-tmp/{CANNED_ID}.jsonl"),
     }
 }
 
