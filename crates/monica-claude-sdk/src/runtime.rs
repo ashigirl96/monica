@@ -70,6 +70,21 @@ impl ClaudeRuntime {
         }
     }
 
+    pub fn sync_terminal_session(&self, terminal_session_id: &str) -> Result<()> {
+        match request_once(
+            &self.socket,
+            RuntimeRequestOp::SyncTerminalSession {
+                terminal_session_id: terminal_session_id.to_string(),
+            },
+        )? {
+            RuntimeResponse::Ack => Ok(()),
+            RuntimeResponse::Err { error, .. } => {
+                bail!("sync_terminal_session rejected: {error}")
+            }
+            other => bail!("unexpected response to sync_terminal_session: {other:?}"),
+        }
+    }
+
     /// Attach to an existing session (no create) and subscribe to its events.
     pub fn session(&self, claude_session_id: &str) -> Result<ClaudeSession> {
         let summary = self

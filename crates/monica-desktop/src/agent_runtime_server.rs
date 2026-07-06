@@ -12,6 +12,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::PathBuf;
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::Arc;
 use std::time::Duration;
@@ -145,6 +146,12 @@ fn handle_op(app: &AppHandle, op: RuntimeRequestOp) -> RuntimeResponse {
                 sessions: sessions.into_iter().map(summary_from).collect(),
             })
         }),
+        RuntimeRequestOp::SyncTerminalSession { terminal_session_id } => {
+            run_session_op(app, |monica, daemon| {
+                monica.executions().sync_terminal_session(daemon, &terminal_session_id)?;
+                Ok(RuntimeResponse::Ack)
+            })
+        }
         RuntimeRequestOp::Subscribe { .. } => unreachable!("dispatched in serve_connection"),
     }
 }
@@ -190,6 +197,12 @@ fn session_error_response(e: &monica_application::ApplicationError) -> RuntimeRe
     }
 }
 
+fn home_dir() -> Result<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow::anyhow!("HOME is not set; cannot resolve the transcript path"))
+}
+
 fn summary_from(row: monica_domain::ClaudeSession) -> ClaudeSessionSummary {
     ClaudeSessionSummary {
         claude_session_id: row.claude_session_id,
@@ -203,6 +216,56 @@ fn summary_from(row: monica_domain::ClaudeSession) -> ClaudeSessionSummary {
         created_at: row.created_at,
         ended_at: row.ended_at,
     }
+}
+
+fn subscription_replay_records(
+    monica: &mut event_sink::AppMonica,
+    claude_session_id: &str,
+) -> Vec<monica_application::ClaudeTranscriptRecord> {
+    let home = match home_dir() {
+        Ok(home) => home,
+        Err(e) => {
+            log::warn!(
+                target: "monica_app::agent_runtime",
+                "failed to resolve HOME for transcript replay: {e:#}"
+            );
+            return Vec::new();
+        }
+    };
+    match monica.executions().claude_session_transcript(&home, claude_session_id) {
+        Ok(records) => records,
+        Err(e) => {
+            log::warn!(
+                target: "monica_app::agent_runtime",
+                "failed to replay transcript for {claude_session_id}: {e:#}"
+            );
+            Vec::new()
+        }
+    }
+}
+
+fn subscription_initial_events(
+    row: &monica_domain::ClaudeSession,
+    transcript_records: &[monica_application::ClaudeTranscriptRecord],
+) -> Vec<SessionEvent> {
+    let mut events = crate::agent_runtime_events::events_for_transcript_records(transcript_records);
+    if let Some(event) = snapshot_event(row) {
+        events.push(event);
+    }
+    events
+}
+
+fn write_session_event(
+    stream: &UnixStream,
+    claude_session_id: &str,
+    event: SessionEvent,
+) -> Result<bool> {
+    let ended = event == SessionEvent::Ended;
+    write_line(
+        stream,
+        &RuntimeResponse::Event { claude_session_id: claude_session_id.to_string(), event },
+    )?;
+    Ok(ended)
 }
 
 /// The state a subscription reports before any live event arrives, as a pure wire
@@ -230,16 +293,17 @@ fn serve_subscription(
     claude_session_id: &str,
 ) -> Result<()> {
     let broadcaster = app.state::<Arc<ClaudeSessionBroadcaster>>();
-    // Registered BEFORE the snapshot read: an event landing between the two is delivered
-    // twice (snapshot + live), never lost. Duplicates are defined harmless. The RAII
-    // subscription unregisters on every exit path below.
+    // Registered BEFORE the replay/snapshot reads: an event landing in that window is
+    // delivered twice at worst (replay/snapshot + live), never lost. The RAII subscription
+    // unregisters on every exit path below.
     let subscription = broadcaster.inner().subscribe(claude_session_id);
-    let row = {
+    let (mut monica, row) = {
         let state = app.state::<PtydHandle>();
         let daemon = PtydTerminalDaemon { handle: state.inner(), app };
         let mut monica = event_sink::open(app).map_err(|e| anyhow::anyhow!(e.message))?;
         let sessions = monica.executions().list_claude_sessions(&daemon)?;
-        sessions.into_iter().find(|s| s.claude_session_id == claude_session_id)
+        let row = sessions.into_iter().find(|s| s.claude_session_id == claude_session_id);
+        (monica, row)
     };
     let Some(row) = row else {
         return write_line(
@@ -252,12 +316,9 @@ fn serve_subscription(
         );
     };
     write_line(stream, &RuntimeResponse::Ack)?;
-    if let Some(event) = snapshot_event(&row) {
-        let ended = event == SessionEvent::Ended;
-        write_line(
-            stream,
-            &RuntimeResponse::Event { claude_session_id: claude_session_id.to_string(), event },
-        )?;
+    let replay_records = subscription_replay_records(&mut monica, claude_session_id);
+    for event in subscription_initial_events(&row, &replay_records) {
+        let ended = write_session_event(stream, claude_session_id, event)?;
         if ended {
             return Ok(());
         }
@@ -265,14 +326,7 @@ fn serve_subscription(
     loop {
         match subscription.recv_timeout(SUBSCRIBE_HEARTBEAT) {
             Ok(event) => {
-                let ended = event == SessionEvent::Ended;
-                write_line(
-                    stream,
-                    &RuntimeResponse::Event {
-                        claude_session_id: claude_session_id.to_string(),
-                        event,
-                    },
-                )?;
+                let ended = write_session_event(stream, claude_session_id, event)?;
                 if ended {
                     return Ok(());
                 }
@@ -346,10 +400,9 @@ fn open_claude_session(
             claude_session_id,
         },
     )?;
-    let home = std::env::var_os("HOME")
-        .ok_or_else(|| anyhow::anyhow!("HOME is not set; cannot resolve the transcript path"))?;
+    let home = home_dir()?;
     let jsonl_path = monica_application::claude_jsonl_path(
-        std::path::Path::new(&home),
+        &home,
         &spec.cwd,
         &spec.claude_session_id,
     )
@@ -370,6 +423,7 @@ fn open_claude_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use monica_application::{ClaudeToolUse, ClaudeTranscriptRecord, ClaudeTranscriptRecordKind};
 
     #[test]
     fn rejects_malformed_json() {
@@ -460,6 +514,13 @@ mod tests {
             parse_request(&subscribe).unwrap(),
             RuntimeRequestOp::Subscribe { .. }
         ));
+        let sync = format!(
+            r#"{{"version":{PROTOCOL_VERSION},"op":"sync_terminal_session","terminal_session_id":"ts-1"}}"#
+        );
+        assert!(matches!(
+            parse_request(&sync).unwrap(),
+            RuntimeRequestOp::SyncTerminalSession { .. }
+        ));
     }
 
     #[test]
@@ -525,6 +586,39 @@ mod tests {
         assert_eq!(
             snapshot_event(&subscription_row(S::Ended, C::Idle, None)),
             Some(SessionEvent::Ended)
+        );
+    }
+
+    #[test]
+    fn subscription_initial_events_replay_transcript_before_snapshot() {
+        use monica_domain::{ClaudeConversationStatus as C, ClaudeSessionStatus as S};
+        let row = subscription_row(S::Active, C::Idle, Some("s-1"));
+        let records = vec![ClaudeTranscriptRecord {
+            uuid: Some("r-1".into()),
+            timestamp: None,
+            kind: ClaudeTranscriptRecordKind::Assistant {
+                text: "answer".into(),
+                tool_uses: vec![ClaudeToolUse {
+                    id: "tool-1".into(),
+                    name: "Bash".into(),
+                    input_json: r#"{"command":"pwd"}"#.into(),
+                }],
+            },
+        }];
+
+        let events = subscription_initial_events(&row, &records);
+
+        assert_eq!(
+            events,
+            vec![
+                SessionEvent::ToolUse {
+                    tool_use_id: "tool-1".into(),
+                    name: "Bash".into(),
+                    input_json: r#"{"command":"pwd"}"#.into(),
+                },
+                SessionEvent::AssistantMessage { text: "answer".into() },
+                SessionEvent::Idle,
+            ]
         );
     }
 

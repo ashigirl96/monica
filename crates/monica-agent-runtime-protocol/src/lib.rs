@@ -22,7 +22,10 @@ use serde::{Deserialize, Serialize};
 /// `subscribe`) and their response shapes (`ack` / `sessions` / `event` / `ping`,
 /// `Err.code`). A v2 server would answer any of them with an opaque parse error, so the
 /// bump turns that into a clean version mismatch instead.
-pub const PROTOCOL_VERSION: u32 = 3;
+///
+/// v4: terminal-session sync op for external clients that attach to ptyd with their own
+/// connection and need the application facade to reconcile durable status from daemon truth.
+pub const PROTOCOL_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeRequest {
@@ -62,6 +65,10 @@ pub enum RuntimeRequestOp {
     /// answers `ack`, then writes `event` lines (and `ping` heartbeats) until the session
     /// ends or the connection drops.
     Subscribe { claude_session_id: String },
+    /// Reconcile one terminal session's durable status from ptyd's global live view.
+    /// External clients call this after they attach/detach on their own ptyd connection,
+    /// avoiding the desktop app's shared ptyd connection as an attachment lease.
+    SyncTerminalSession { terminal_session_id: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -295,6 +302,7 @@ mod tests {
             RuntimeRequestOp::InterruptSession { claude_session_id: "u-1".into() },
             RuntimeRequestOp::ListSessions,
             RuntimeRequestOp::Subscribe { claude_session_id: "u-1".into() },
+            RuntimeRequestOp::SyncTerminalSession { terminal_session_id: "ts-1".into() },
         ];
         for op in ops {
             let back =
