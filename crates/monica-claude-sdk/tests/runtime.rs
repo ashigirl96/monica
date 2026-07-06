@@ -279,6 +279,20 @@ fn list_sessions_returns_summaries_and_session_attaches_through_them() {
 }
 
 #[test]
+fn sync_terminal_session_sends_sync_op() {
+    let mock = start_scripted("termsync", vec![vec![RuntimeResponse::Ack]]);
+    let runtime = ClaudeRuntime::connect_at(&mock.socket);
+
+    runtime.sync_terminal_session("ts-42").unwrap();
+
+    let request = mock.requests.recv_timeout(RECV_TIMEOUT).unwrap();
+    let RuntimeRequestOp::SyncTerminalSession { terminal_session_id } = request.op else {
+        panic!("expected sync_terminal_session");
+    };
+    assert_eq!(terminal_session_id, "ts-42");
+}
+
+#[test]
 fn a_rejected_subscribe_fails_the_attach() {
     let mock = start_scripted(
         "reject",

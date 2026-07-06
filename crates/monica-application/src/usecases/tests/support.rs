@@ -1952,11 +1952,19 @@ impl FakeDaemon {
 
     /// Make `list_views` report this session as alive, as if the PTY survived a restart.
     pub(crate) fn seed_running_view(&self, session_id: &str) {
+        self.seed_live_view(session_id, false);
+    }
+
+    pub(crate) fn seed_attached_view(&self, session_id: &str) {
+        self.seed_live_view(session_id, true);
+    }
+
+    fn seed_live_view(&self, session_id: &str, attached: bool) {
         self.views.lock().unwrap().push(DaemonSessionView {
             session_id: session_id.to_string(),
             pid: Some(4321),
             running: true,
-            attached: false,
+            attached,
             exit_code: None,
         });
     }

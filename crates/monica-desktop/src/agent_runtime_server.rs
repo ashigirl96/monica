@@ -145,6 +145,12 @@ fn handle_op(app: &AppHandle, op: RuntimeRequestOp) -> RuntimeResponse {
                 sessions: sessions.into_iter().map(summary_from).collect(),
             })
         }),
+        RuntimeRequestOp::SyncTerminalSession { terminal_session_id } => {
+            run_session_op(app, |monica, daemon| {
+                monica.executions().sync_terminal_session(daemon, &terminal_session_id)?;
+                Ok(RuntimeResponse::Ack)
+            })
+        }
         RuntimeRequestOp::Subscribe { .. } => unreachable!("dispatched in serve_connection"),
     }
 }
@@ -459,6 +465,13 @@ mod tests {
         assert!(matches!(
             parse_request(&subscribe).unwrap(),
             RuntimeRequestOp::Subscribe { .. }
+        ));
+        let sync = format!(
+            r#"{{"version":{PROTOCOL_VERSION},"op":"sync_terminal_session","terminal_session_id":"ts-1"}}"#
+        );
+        assert!(matches!(
+            parse_request(&sync).unwrap(),
+            RuntimeRequestOp::SyncTerminalSession { .. }
         ));
     }
 
