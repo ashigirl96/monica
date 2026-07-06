@@ -11,7 +11,7 @@ use monica_domain::{
 };
 
 use crate::ports::{
-    AgentDecoders, BoxFuture, ClaudeSessionEvent, ClaudeSessionObservation,
+    AgentDecoders, BoxFuture, ClaudePromptClaim, ClaudeSessionEvent, ClaudeSessionObservation,
     ClaudeSessionRepository, EventRepository, GitGateway,
     NotebookGateway, NotificationOutboxStore, ProjectRepository, PullRequestSyncStore,
     TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter, TerminalAttachment,
@@ -1813,6 +1813,50 @@ impl ClaudeSessionRepository for FakeRepos {
             cs.jsonl_offset = offset;
         }
         Ok(())
+    }
+
+    fn claim_claude_session_thinking(
+        &mut self,
+        claude_session_id: &str,
+    ) -> Result<ClaudePromptClaim> {
+        let mut state = self.state.borrow_mut();
+        let Some(cs) = state
+            .claude_sessions
+            .iter_mut()
+            .find(|cs| cs.claude_session_id == claude_session_id)
+        else {
+            return Ok(ClaudePromptClaim::NotFound);
+        };
+        Ok(match cs.status {
+            ClaudeSessionStatus::Ended => ClaudePromptClaim::Ended,
+            ClaudeSessionStatus::Pending => ClaudePromptClaim::Launching,
+            ClaudeSessionStatus::Active if cs.provider_session_id.is_none() => {
+                ClaudePromptClaim::Launching
+            }
+            ClaudeSessionStatus::Active
+                if cs.conversation_status == ClaudeConversationStatus::Idle =>
+            {
+                cs.conversation_status = ClaudeConversationStatus::Thinking;
+                ClaudePromptClaim::Claimed
+            }
+            ClaudeSessionStatus::Active => ClaudePromptClaim::Busy(cs.conversation_status),
+        })
+    }
+
+    fn release_claude_session_thinking(&mut self, claude_session_id: &str) -> Result<bool> {
+        let mut state = self.state.borrow_mut();
+        let Some(cs) = state
+            .claude_sessions
+            .iter_mut()
+            .find(|cs| cs.claude_session_id == claude_session_id)
+        else {
+            return Ok(false);
+        };
+        if cs.conversation_status != ClaudeConversationStatus::Thinking {
+            return Ok(false);
+        }
+        cs.conversation_status = ClaudeConversationStatus::Idle;
+        Ok(true)
     }
 }
 

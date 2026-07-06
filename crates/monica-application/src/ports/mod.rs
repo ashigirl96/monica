@@ -23,7 +23,7 @@ mod workspace;
 
 pub use agent_event_decoder::{AgentDecoders, AgentEventDecoder};
 pub use claude_session_repository::{
-    ClaudeSessionEvent, ClaudeSessionObservation, ClaudeSessionRepository,
+    ClaudePromptClaim, ClaudeSessionEvent, ClaudeSessionObservation, ClaudeSessionRepository,
 };
 pub use claude_transcript::{
     ClaudeToolUse, ClaudeTranscriptReader, ClaudeTranscriptRecord, ClaudeTranscriptRecordKind,

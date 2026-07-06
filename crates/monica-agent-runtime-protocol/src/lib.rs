@@ -1,6 +1,8 @@
 //! NDJSON wire protocol between external Agent Runtime clients (`monica-claude-sdk`) and the desktop
 //! app's Agent Runtime control socket (`<base>/agent-runtime.sock`): one JSON object per line over a Unix domain
-//! socket, one request/response pair per connection.
+//! socket. Every op is one request/response pair per connection, except `subscribe`,
+//! which keeps its connection open and streams response lines (`event` / `ping`) until
+//! the session ends or either side disconnects.
 //!
 //! This is the Rust-client half of the external IPC surface; browser clients get a separate
 //! localhost WebSocket in MVP7.
@@ -15,7 +17,12 @@ use serde::{Deserialize, Serialize};
 /// (idempotent opens). v1 servers ignored the field and minted their own id, so a v2
 /// client's "safe retry" against a v1 server would have opened a second session — the
 /// bump makes v1 servers reject the request before launching instead.
-pub const PROTOCOL_VERSION: u32 = 2;
+///
+/// v3: session-driving ops (`send_user_message` / `interrupt_session` / `list_sessions` /
+/// `subscribe`) and their response shapes (`ack` / `sessions` / `event` / `ping`,
+/// `Err.code`). A v2 server would answer any of them with an opaque parse error, so the
+/// bump turns that into a clean version mismatch instead.
+pub const PROTOCOL_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeRequest {
@@ -44,6 +51,17 @@ pub enum RuntimeRequestOp {
         #[serde(default)]
         claude_session_id: Option<String>,
     },
+    /// Submit a user prompt to an idle session. Not idempotent: a retry after a lost
+    /// response may submit the prompt twice, so clients must not auto-retry. The server
+    /// answers `Busy` while a message is in flight (one in-flight message per session).
+    SendUserMessage { claude_session_id: String, text: String },
+    /// Send ESC to the session's PTY to stop the current turn.
+    InterruptSession { claude_session_id: String },
+    ListSessions,
+    /// Switch this connection into a long-lived event stream for one session: the server
+    /// answers `ack`, then writes `event` lines (and `ping` heartbeats) until the session
+    /// ends or the connection drops.
+    Subscribe { claude_session_id: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +70,19 @@ pub enum RuntimeResponse {
     Ok {
         session: ClaudeSessionInfo,
     },
+    /// The op was carried out (send/interrupt), or the subscription is established
+    /// (first line of a `subscribe` stream).
+    Ack,
+    Sessions {
+        sessions: Vec<ClaudeSessionSummary>,
+    },
+    Event {
+        claude_session_id: String,
+        event: SessionEvent,
+    },
+    /// Subscribe-stream heartbeat. Carries no information; its purpose is the write
+    /// itself, which lets the server detect a disconnected subscriber as a failed write.
+    Ping,
     Err {
         error: String,
         /// The server could not determine the outcome either (e.g. the id maps to a
@@ -61,7 +92,62 @@ pub enum RuntimeResponse {
         /// determinate errors parse unchanged — proves no session was left behind.
         #[serde(default)]
         indeterminate: bool,
+        /// Machine-readable classification for errors a client is expected to branch on
+        /// (`busy` → wait and retry, `session_ended` → stop). `None` — the default, so
+        /// v2-era error lines parse unchanged — means "unclassified".
+        #[serde(default)]
+        code: Option<RuntimeErrorCode>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeErrorCode {
+    /// A message is already in flight (or the session is still launching); retry later.
+    Busy,
+    NotFound,
+    SessionEnded,
+}
+
+/// One session-level occurrence on a `subscribe` stream, at message granularity.
+/// Deliberately no `Thinking` variant: the `ack` to `send_user_message` is the in-flight
+/// notification. Raw terminal output is out of scope (MVP5).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SessionEvent {
+    AssistantMessage {
+        text: String,
+    },
+    ToolUse {
+        tool_use_id: String,
+        name: String,
+        input_json: String,
+    },
+    AwaitingUser {
+        #[serde(default)]
+        wait_reason: Option<String>,
+    },
+    Idle,
+    Ended,
+}
+
+/// One row of `list_sessions`. Status fields are the domain enums' snake_case strings,
+/// kept as plain strings here so this crate stays dependency-free.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaudeSessionSummary {
+    pub claude_session_id: String,
+    pub tab_id: String,
+    pub terminal_session_id: String,
+    pub cwd: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    pub session_status: String,
+    pub conversation_status: String,
+    #[serde(default)]
+    pub wait_reason: Option<String>,
+    pub created_at: String,
+    #[serde(default)]
+    pub ended_at: Option<String>,
 }
 
 /// The created session as the app reports it back to the Agent Runtime client. `claude_session_id`
@@ -111,7 +197,10 @@ mod tests {
         };
         let back = round_trip_request(&req);
         assert_eq!(back.version, PROTOCOL_VERSION);
-        let RuntimeRequestOp::OpenClaudeSession { cwd, model, title, claude_session_id } = back.op;
+        let RuntimeRequestOp::OpenClaudeSession { cwd, model, title, claude_session_id } = back.op
+        else {
+            panic!("expected open_claude_session");
+        };
         assert_eq!(cwd, "/tmp");
         assert_eq!(model.as_deref(), Some("opus"));
         assert_eq!(title, None);
@@ -128,7 +217,10 @@ mod tests {
         // an opaque parse error.
         let back: RuntimeRequest =
             serde_json::from_str(r#"{"version":1,"op":"open_claude_session","cwd":"/tmp"}"#).unwrap();
-        let RuntimeRequestOp::OpenClaudeSession { cwd, model, title, claude_session_id } = back.op;
+        let RuntimeRequestOp::OpenClaudeSession { cwd, model, title, claude_session_id } = back.op
+        else {
+            panic!("expected open_claude_session");
+        };
         assert_eq!(cwd, "/tmp");
         assert_eq!(model, None);
         assert_eq!(title, None);
@@ -158,16 +250,22 @@ mod tests {
             other => panic!("unexpected response: {other:?}"),
         }
 
-        let err = RuntimeResponse::Err { error: "nope".into(), indeterminate: false };
+        let err =
+            RuntimeResponse::Err { error: "nope".into(), indeterminate: false, code: None };
         match round_trip_response(&err) {
-            RuntimeResponse::Err { error, indeterminate } => {
+            RuntimeResponse::Err { error, indeterminate, code } => {
                 assert_eq!(error, "nope");
                 assert!(!indeterminate);
+                assert_eq!(code, None);
             }
             other => panic!("unexpected response: {other:?}"),
         }
 
-        let unresolved = RuntimeResponse::Err { error: "unconfirmed".into(), indeterminate: true };
+        let unresolved = RuntimeResponse::Err {
+            error: "unconfirmed".into(),
+            indeterminate: true,
+            code: None,
+        };
         match round_trip_response(&unresolved) {
             RuntimeResponse::Err { indeterminate, .. } => assert!(indeterminate),
             other => panic!("unexpected response: {other:?}"),
@@ -179,7 +277,103 @@ mod tests {
         // A v1-era error line carries no flag; it must keep meaning "nothing was created".
         let back: RuntimeResponse = serde_json::from_str(r#"{"type":"err","error":"nope"}"#).unwrap();
         match back {
-            RuntimeResponse::Err { indeterminate, .. } => assert!(!indeterminate),
+            RuntimeResponse::Err { indeterminate, code, .. } => {
+                assert!(!indeterminate);
+                assert_eq!(code, None);
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_ops_round_trip() {
+        let ops = [
+            RuntimeRequestOp::SendUserMessage {
+                claude_session_id: "u-1".into(),
+                text: "今日の日付を教えて".into(),
+            },
+            RuntimeRequestOp::InterruptSession { claude_session_id: "u-1".into() },
+            RuntimeRequestOp::ListSessions,
+            RuntimeRequestOp::Subscribe { claude_session_id: "u-1".into() },
+        ];
+        for op in ops {
+            let back =
+                round_trip_request(&RuntimeRequest { version: PROTOCOL_VERSION, op: op.clone() });
+            assert_eq!(
+                serde_json::to_value(&back.op).unwrap(),
+                serde_json::to_value(&op).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn stream_responses_round_trip() {
+        for res in [
+            RuntimeResponse::Ack,
+            RuntimeResponse::Ping,
+            RuntimeResponse::Event {
+                claude_session_id: "u-1".into(),
+                event: SessionEvent::AssistantMessage { text: "line1\nline2".into() },
+            },
+            RuntimeResponse::Event {
+                claude_session_id: "u-1".into(),
+                event: SessionEvent::ToolUse {
+                    tool_use_id: "t-1".into(),
+                    name: "Bash".into(),
+                    input_json: r#"{"command":"date"}"#.into(),
+                },
+            },
+            RuntimeResponse::Event {
+                claude_session_id: "u-1".into(),
+                event: SessionEvent::AwaitingUser { wait_reason: Some("permission".into()) },
+            },
+            RuntimeResponse::Event { claude_session_id: "u-1".into(), event: SessionEvent::Idle },
+            RuntimeResponse::Event { claude_session_id: "u-1".into(), event: SessionEvent::Ended },
+        ] {
+            let back = round_trip_response(&res);
+            assert_eq!(
+                serde_json::to_value(&back).unwrap(),
+                serde_json::to_value(&res).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn sessions_response_round_trips_with_optional_fields_omitted() {
+        let res = RuntimeResponse::Sessions {
+            sessions: vec![ClaudeSessionSummary {
+                claude_session_id: "u-1".into(),
+                tab_id: "tab-1".into(),
+                terminal_session_id: "ts-1".into(),
+                cwd: "/tmp".into(),
+                name: None,
+                session_status: "active".into(),
+                conversation_status: "idle".into(),
+                wait_reason: None,
+                created_at: "2026-07-06T00:00:00Z".into(),
+                ended_at: None,
+            }],
+        };
+        let RuntimeResponse::Sessions { sessions } = round_trip_response(&res) else {
+            panic!("expected sessions");
+        };
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].claude_session_id, "u-1");
+        assert_eq!(sessions[0].session_status, "active");
+        assert_eq!(sessions[0].name, None);
+    }
+
+    #[test]
+    fn busy_error_code_round_trips_and_reads_as_snake_case() {
+        let err = RuntimeResponse::Err {
+            error: "a message is already in flight".into(),
+            indeterminate: false,
+            code: Some(RuntimeErrorCode::Busy),
+        };
+        let line = serde_json::to_string(&err).unwrap();
+        assert!(line.contains(r#""code":"busy""#), "got: {line}");
+        match round_trip_response(&err) {
+            RuntimeResponse::Err { code, .. } => assert_eq!(code, Some(RuntimeErrorCode::Busy)),
             other => panic!("unexpected response: {other:?}"),
         }
     }
