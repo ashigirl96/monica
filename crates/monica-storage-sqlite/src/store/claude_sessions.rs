@@ -272,6 +272,19 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn sweep_consumed_claude_session_events(
+        &mut self,
+        older_than_days: u32,
+    ) -> Result<usize> {
+        let deleted = self.conn().execute(
+            "DELETE FROM claude_session_events
+              WHERE consumed_at IS NOT NULL
+                AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || ?1 || ' days')",
+            params![older_than_days],
+        )?;
+        Ok(deleted)
+    }
+
     pub fn set_claude_session_jsonl_offset(
         &mut self,
         claude_session_id: &str,
@@ -409,6 +422,13 @@ impl ClaudeSessionRepository for SqliteStore {
 
     fn mark_claude_session_events_consumed(&mut self, ids: &[i64]) -> Result<()> {
         SqliteStore::mark_claude_session_events_consumed(self, ids)
+    }
+
+    fn sweep_consumed_claude_session_events(
+        &mut self,
+        older_than_days: u32,
+    ) -> Result<usize> {
+        SqliteStore::sweep_consumed_claude_session_events(self, older_than_days)
     }
 
     fn set_claude_session_jsonl_offset(

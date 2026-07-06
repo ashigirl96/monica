@@ -1020,6 +1020,17 @@ impl<B: Backend> ExecutionService<'_, B> {
         })
     }
 
+    pub fn sweep_claude_session_events(&mut self) -> ApplicationResult<usize> {
+        let deleted = self.m.repos.sweep_consumed_claude_session_events(30)?;
+        if deleted > 0 {
+            log::info!(
+                target: "monica_application::claude_session",
+                "swept {deleted} consumed claude_session_events older than 30 days"
+            );
+        }
+        Ok(deleted)
+    }
+
     /// Read the session's transcript from its persisted cursor, emit the new records, and
     /// advance the cursor. Returns whether the turn's assistant output has now been
     /// observed — `false` asks the caller to re-poll (the assistant record flushes around

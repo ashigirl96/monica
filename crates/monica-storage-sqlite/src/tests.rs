@@ -2923,3 +2923,102 @@ fn claude_session_release_only_undoes_a_live_claim() {
         monica_domain::ClaudeConversationStatus::AwaitingUser
     );
 }
+
+fn event_count(db: &SqliteStore) -> i64 {
+    db.conn()
+        .query_row("SELECT count(*) FROM claude_session_events", [], |r| r.get::<_, i64>(0))
+        .unwrap()
+}
+
+fn insert_and_consume_event(db: &mut SqliteStore, claude_session_id: &str) -> i64 {
+    db.record_claude_session_signal(
+        claude_session_id,
+        "turn_completed",
+        "{}",
+        observation(monica_domain::ClaudeConversationStatus::Idle),
+    )
+    .unwrap();
+    let events = db.list_unconsumed_claude_session_events(100).unwrap();
+    let id = events.last().unwrap().id;
+    db.mark_claude_session_events_consumed(&[id]).unwrap();
+    id
+}
+
+#[test]
+fn sweep_deletes_consumed_events_older_than_retention() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let ts = db.create_terminal_session(new_shell_session(Some("agent-runtime"), None)).unwrap();
+    db.mark_terminal_session_started(&ts.id, Some(1), None).unwrap();
+    db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
+
+    let id = insert_and_consume_event(&mut db, "uuid-1");
+
+    db.conn()
+        .execute(
+            "UPDATE claude_session_events SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-31 days') WHERE id = ?1",
+            rusqlite::params![id],
+        )
+        .unwrap();
+
+    let deleted = db.sweep_consumed_claude_session_events(30).unwrap();
+    assert_eq!(deleted, 1);
+    assert_eq!(event_count(&db), 0);
+}
+
+#[test]
+fn sweep_keeps_consumed_events_within_retention() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let ts = db.create_terminal_session(new_shell_session(Some("agent-runtime"), None)).unwrap();
+    db.mark_terminal_session_started(&ts.id, Some(1), None).unwrap();
+    db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
+
+    let id = insert_and_consume_event(&mut db, "uuid-1");
+
+    db.conn()
+        .execute(
+            "UPDATE claude_session_events SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-29 days') WHERE id = ?1",
+            rusqlite::params![id],
+        )
+        .unwrap();
+
+    let deleted = db.sweep_consumed_claude_session_events(30).unwrap();
+    assert_eq!(deleted, 0);
+    assert_eq!(event_count(&db), 1);
+}
+
+#[test]
+fn sweep_never_deletes_unconsumed_events() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let ts = db.create_terminal_session(new_shell_session(Some("agent-runtime"), None)).unwrap();
+    db.mark_terminal_session_started(&ts.id, Some(1), None).unwrap();
+    db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
+
+    db.record_claude_session_signal(
+        "uuid-1",
+        "turn_completed",
+        "{}",
+        observation(monica_domain::ClaudeConversationStatus::Idle),
+    )
+    .unwrap();
+
+    db.conn()
+        .execute(
+            "UPDATE claude_session_events SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-100 days')",
+            [],
+        )
+        .unwrap();
+
+    let deleted = db.sweep_consumed_claude_session_events(30).unwrap();
+    assert_eq!(deleted, 0);
+    assert_eq!(event_count(&db), 1);
+
+    let unconsumed = db.list_unconsumed_claude_session_events(10).unwrap();
+    assert_eq!(unconsumed.len(), 1);
+}
+
+#[test]
+fn sweep_on_empty_table_is_noop() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let deleted = db.sweep_consumed_claude_session_events(30).unwrap();
+    assert_eq!(deleted, 0);
+}
