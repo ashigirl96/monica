@@ -30,8 +30,7 @@ impl EventSink for CliEventSink {
                 }
             }
             ApplicationEvent::TaskRunStatusChanged { .. }
-            | ApplicationEvent::PullRequestSyncCompleted { .. }
-            | ApplicationEvent::SdkSessionOpened { .. } => {}
+            | ApplicationEvent::PullRequestSyncCompleted { .. } => {}
         }
     }
 }

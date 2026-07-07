@@ -4,7 +4,6 @@ use tauri::AppHandle;
 use tauri_specta::Event;
 
 use crate::commands::pull_request::PrSyncCompleted;
-use crate::commands::sdk::SdkSessionOpened;
 use crate::commands::task::TaskRunStatusChanged;
 
 /// The application façade wired to the default backend and the Tauri event sink.
@@ -56,19 +55,6 @@ impl EventSink for TauriEventSink {
             ApplicationEvent::PullRequestSyncCompleted { synced_count } => {
                 if let Err(e) = (PrSyncCompleted { synced_count }).emit(&self.app) {
                     log::warn!(target: "monica_app::events", "failed to emit PrSyncCompleted: {e}");
-                }
-            }
-            ApplicationEvent::SdkSessionOpened {
-                runspace_id,
-                tab_id,
-                session_id,
-                cwd,
-                title,
-                ..
-            } => {
-                let event = SdkSessionOpened { runspace_id, tab_id, session_id, cwd, title };
-                if let Err(e) = event.emit(&self.app) {
-                    log::warn!(target: "monica_app::events", "failed to emit SdkSessionOpened: {e}");
                 }
             }
             // The desktop reflects a waiting run via its TaskRunStatusChanged status; no separate

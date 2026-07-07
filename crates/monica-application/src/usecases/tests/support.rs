@@ -117,7 +117,6 @@ struct FakeState {
     pr_branch_candidate: Option<PullRequestBranchSyncCandidate>,
     pr_status_candidate: Option<PullRequestStatusSyncCandidate>,
     pr_branch_success_count: usize,
-    mark_started_fails: bool,
     branch_sync_candidates: Vec<PullRequestBranchSyncCandidate>,
     bulk_recorded: Vec<(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)>,
 }
@@ -1397,10 +1396,6 @@ impl FakeRepos {
         self.state.borrow_mut().pr_branch_candidate = Some(candidate);
     }
 
-    pub(crate) fn fail_mark_started(&self) {
-        self.state.borrow_mut().mark_started_fails = true;
-    }
-
     pub(crate) fn pr_branch_success_count(&self) -> usize {
         self.state.borrow().pr_branch_success_count
     }
@@ -1434,9 +1429,6 @@ impl TerminalSessionRepository for FakeRepos {
     }
 
     fn mark_terminal_session_started(&self, id: &str, pid: Option<u32>) -> Result<()> {
-        if self.state.borrow().mark_started_fails {
-            return Err(anyhow!("mark started failed"));
-        }
         if let Some(s) = self.state.borrow_mut().terminal_sessions.iter_mut().find(|s| s.id == id) {
             s.status = TerminalSessionStatus::Running;
             s.pid = pid;
@@ -1553,40 +1545,23 @@ impl Workspace for FakeWorkspace {
     }
 }
 
-#[derive(Default)]
 pub(crate) struct FakeDaemon {
     create_fails: bool,
-    write_fails: bool,
-    pub(crate) created: Mutex<Vec<TerminalCreateRequest>>,
-    pub(crate) written: Mutex<Vec<(String, Vec<u8>)>>,
-    pub(crate) terminated: Mutex<Vec<String>>,
 }
 
 impl FakeDaemon {
     pub(crate) fn failing_create() -> Self {
-        Self { create_fails: true, ..Self::default() }
-    }
-
-    pub(crate) fn failing_write() -> Self {
-        Self { write_fails: true, ..Self::default() }
+        Self { create_fails: true }
     }
 }
 
 impl TerminalDaemon for FakeDaemon {
-    fn create(&self, request: TerminalCreateRequest) -> Result<Option<u32>> {
-        self.created.lock().unwrap().push(request);
+    fn create(&self, _request: TerminalCreateRequest) -> Result<Option<u32>> {
         if self.create_fails {
             Err(anyhow!("daemon spawn failed"))
         } else {
             Ok(Some(4321))
         }
-    }
-    fn write_input(&self, session_id: &str, data: &[u8]) -> Result<()> {
-        if self.write_fails {
-            return Err(anyhow!("daemon write failed"));
-        }
-        self.written.lock().unwrap().push((session_id.to_string(), data.to_vec()));
-        Ok(())
     }
     fn attach(&self, _session_id: &str, _replay_bytes: Option<u32>) -> Result<TerminalAttachment> {
         Ok(TerminalAttachment { replay: String::new(), rows: 24, cols: 80 })
@@ -1594,8 +1569,7 @@ impl TerminalDaemon for FakeDaemon {
     fn detach(&self, _session_id: &str) -> Result<()> {
         Ok(())
     }
-    fn terminate(&self, session_id: &str) -> Result<()> {
-        self.terminated.lock().unwrap().push(session_id.to_string());
+    fn terminate(&self, _session_id: &str) -> Result<()> {
         Ok(())
     }
     fn list_views(&self) -> Result<Vec<DaemonSessionView>> {

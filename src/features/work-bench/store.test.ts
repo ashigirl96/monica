@@ -1,6 +1,5 @@
 /// <reference types="bun" />
 import { beforeEach, describe, expect, mock, test } from "bun:test";
-import type { TerminalSession } from "@/commands/bindings";
 import type { TerminalRunspace, TerminalState } from "./store";
 
 // --- Pure function tests (no mocking needed) ---
@@ -171,8 +170,7 @@ if (typeof globalThis.window === "undefined") {
 
 const { createStore } = await import("jotai");
 const { windowLabelAtom } = await import("@/stores/ui-state");
-const { adoptSdkSessionAtom, detachedSessionsAtom, loadTerminalStateAtom, terminalStateAtom } =
-  await import("./store");
+const { loadTerminalStateAtom, terminalStateAtom } = await import("./store");
 
 beforeEach(() => {
   loadStateResult = { runspaces: [] };
@@ -278,130 +276,6 @@ describe("saveTerminalStateAtom", () => {
 
     await new Promise((r) => setTimeout(r, 600));
     expect(getSaveCalls()).toBe(1);
-  });
-});
-
-describe("adoptSdkSessionAtom", () => {
-  test("loads the saved snapshot before adopting", async () => {
-    loadStateResult = {
-      runspaces: [
-        {
-          id: "rs-saved",
-          sort_order: 0,
-          tabs: [
-            {
-              id: "tab-saved",
-              cwd: "/home",
-              title: "zsh",
-              sort_order: 0,
-              terminal_session_id: null,
-            },
-          ],
-        },
-      ],
-    };
-
-    const store = createStore();
-    store.set(windowLabelAtom, "main");
-    await store.set(adoptSdkSessionAtom, {
-      runspaceId: "sdk",
-      tabId: "tab-sdk-1",
-      sessionId: "ts-1",
-      cwd: "/proj",
-    });
-
-    const state = store.get(terminalStateAtom)!;
-    // The saved layout survives; the sdk runspace is appended, not substituted, and the
-    // externally-triggered adopt does not steal the user's focus.
-    expect(state.runspaces.map((r) => r.id)).toEqual(["rs-saved", "sdk"]);
-    expect(state.activeRunspaceId).toBe("rs-saved");
-    const sdk = state.runspaces.find((r) => r.id === "sdk")!;
-    expect(sdk.tabs).toHaveLength(1);
-    expect(sdk.tabs[0].id).toBe("tab-sdk-1");
-    expect(sdk.tabs[0].sessionId).toBe("ts-1");
-    expect(sdk.tabs[0].cwd).toBe("/proj");
-    expect(sdk.activeTabId).toBe("tab-sdk-1");
-  });
-
-  test("reuses the existing sdk runspace for later sessions", async () => {
-    const store = createStore();
-    store.set(windowLabelAtom, "main");
-    await store.set(adoptSdkSessionAtom, {
-      runspaceId: "sdk",
-      tabId: "t1",
-      sessionId: "ts-1",
-      cwd: "/a",
-    });
-    await store.set(adoptSdkSessionAtom, {
-      runspaceId: "sdk",
-      tabId: "t2",
-      sessionId: "ts-2",
-      cwd: "/b",
-    });
-
-    const state = store.get(terminalStateAtom)!;
-    const sdkRunspaces = state.runspaces.filter((r) => r.id === "sdk");
-    expect(sdkRunspaces).toHaveLength(1);
-    expect(sdkRunspaces[0].tabs.map((t) => t.sessionId)).toEqual(["ts-1", "ts-2"]);
-    // Adding a session leaves whatever tab the user last looked at active.
-    expect(sdkRunspaces[0].activeTabId).toBe("t1");
-  });
-
-  test("a session already bound to a tab is not adopted twice", async () => {
-    const store = createStore();
-    store.set(windowLabelAtom, "main");
-    const payload = { runspaceId: "sdk", tabId: "t1", sessionId: "ts-1", cwd: "/a" };
-    await store.set(adoptSdkSessionAtom, payload);
-    await store.set(adoptSdkSessionAtom, { ...payload, tabId: "t-other" });
-
-    const sdk = store.get(terminalStateAtom)!.runspaces.find((r) => r.id === "sdk")!;
-    expect(sdk.tabs).toHaveLength(1);
-  });
-
-  test("clears the adopted session from the detached list", async () => {
-    const store = createStore();
-    store.set(windowLabelAtom, "main");
-    // Load first: adoption's own load path recomputes the detached list from the (empty)
-    // mocked session list and would wipe the seed below.
-    await store.set(loadTerminalStateAtom);
-    // A reconcile that ran before adoption classified the unbound session as detached.
-    store.set(detachedSessionsAtom, [
-      { id: "ts-1" },
-      { id: "ts-other" },
-    ] as unknown as TerminalSession[]);
-
-    await store.set(adoptSdkSessionAtom, {
-      runspaceId: "sdk",
-      tabId: "t1",
-      sessionId: "ts-1",
-      cwd: "/a",
-    });
-
-    expect(store.get(detachedSessionsAtom).map((s) => s.id)).toEqual(["ts-other"]);
-  });
-
-  test("falls back to a fresh tab id on collision and applies the title", async () => {
-    const store = createStore();
-    store.set(windowLabelAtom, "main");
-    await store.set(adoptSdkSessionAtom, {
-      runspaceId: "sdk",
-      tabId: "t1",
-      sessionId: "ts-1",
-      cwd: "/a",
-    });
-    await store.set(adoptSdkSessionAtom, {
-      runspaceId: "sdk",
-      tabId: "t1",
-      sessionId: "ts-2",
-      cwd: "/b",
-      title: "translator",
-    });
-
-    const sdk = store.get(terminalStateAtom)!.runspaces.find((r) => r.id === "sdk")!;
-    expect(sdk.tabs).toHaveLength(2);
-    expect(sdk.tabs[1].id).not.toBe("t1");
-    expect(sdk.tabs[1].sessionId).toBe("ts-2");
-    expect(sdk.tabs[1].title).toBe("translator");
   });
 });
 

@@ -8,7 +8,6 @@
 mod bench;
 mod error;
 mod events;
-mod sdk;
 mod execution_profile;
 pub mod notification;
 pub mod facade;
@@ -40,7 +39,6 @@ pub use ports::{
 
 // Application-owned types (NOT in monica-domain)
 pub use bench::{bench_runspace_id, PrepareTaskResult, RunTaskResult, TaskBench};
-pub use sdk::{sdk_runspace_id, OpenSdkSessionParams, SdkSessionSpec, MONICA_SDK_SESSION_ID_ENV};
 pub use github::{
     GithubAuthStatus, GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef,
     GithubPullRequestStatus, PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate,

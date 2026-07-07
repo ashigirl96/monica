@@ -3,7 +3,6 @@ mod event_sink;
 mod native_menu;
 mod ptyd;
 mod schedulers;
-mod sdk_server;
 mod services;
 
 use tauri::Manager;
@@ -48,7 +47,6 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         .events(tauri_specta::collect_events![
             commands::task::TaskRunStatusChanged,
             commands::pull_request::PrSyncCompleted,
-            commands::sdk::SdkSessionOpened,
         ])
 }
 
@@ -119,7 +117,6 @@ pub fn run() {
             let drain = schedulers::notification_drain::start(app.handle().clone());
             app.manage(drain);
             ptyd::start_warmup(app.handle().clone());
-            sdk_server::start(app.handle().clone());
             #[cfg(not(debug_assertions))]
             log::info!(
                 target: "monica_app::startup",

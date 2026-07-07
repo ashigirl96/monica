@@ -15,7 +15,7 @@ pub struct AttachResult {
     pub cols: u16,
 }
 
-pub(crate) fn default_shell() -> String {
+fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
 }
 

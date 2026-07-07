@@ -726,66 +726,6 @@ export const reattachSessionAtom = atom(null, (get, set, session: TerminalSessio
   set(terminalFocusRequestAtom, (c) => c + 1);
 });
 
-// Adopt a backend-created SDK session (sdk-session:opened) into the topology: get-or-create
-// its runspace, then bind a tab to the already-running session. Reattach-shaped rather than
-// launch-shaped — the pane must attach to the live PTY, not spawn a second session. Unlike
-// the user-initiated reattach/run atoms this never touches the active runspace/tab: the
-// trigger is an external process, and yanking focus away from whatever the user is typing
-// into would be hostile. Claude is already running backend-side, so nothing needs the mount.
-export const adoptSdkSessionAtom = atom(
-  null,
-  async (
-    get,
-    set,
-    payload: { runspaceId: string; tabId: string; sessionId: string; cwd: string; title?: string },
-  ) => {
-    // Adopting into the fabricated fallback state would make loadTerminalStateAtom
-    // early-return forever and later persist that fabricated layout over the saved one.
-    if (get(terminalStateAtom) === null) {
-      await set(loadTerminalStateAtom);
-    }
-
-    const state = get(resolvedStateAtom);
-    const allTabs = state.runspaces.flatMap((rs) => rs.tabs);
-    if (allTabs.some((t) => t.sessionId === payload.sessionId)) return;
-
-    const existing = state.runspaces.find((rs) => rs.id === payload.runspaceId);
-    const tab: TerminalTab = {
-      id: allTabs.some((t) => t.id === payload.tabId) ? crypto.randomUUID() : payload.tabId,
-      title: payload.title ?? "",
-      cwd: payload.cwd,
-      order: existing ? existing.tabs.length : 0,
-      sessionId: payload.sessionId,
-    };
-
-    if (existing) {
-      set(terminalStateAtom, {
-        ...state,
-        runspaces: state.runspaces.map((rs) =>
-          rs.id === existing.id ? { ...rs, tabs: [...rs.tabs, tab] } : rs,
-        ),
-      });
-    } else {
-      const maxOrder = state.runspaces.reduce((m, r) => Math.max(m, r.order), -1);
-      const rs: TerminalRunspace = {
-        id: payload.runspaceId,
-        tabs: [tab],
-        activeTabId: tab.id,
-        order: maxOrder + 1,
-      };
-      set(terminalStateAtom, {
-        ...state,
-        runspaces: [...state.runspaces, rs],
-      });
-    }
-
-    // A reconcile that ran before this adoption may have classified the (running, unbound)
-    // session as detached; it has a tab now, so drop the stale sidebar entry (same as
-    // reattach) before someone terminates it from there.
-    set(detachedSessionsAtom, (prev) => prev.filter((s) => s.id !== payload.sessionId));
-  },
-);
-
 export type TabMenuState = {
   tabId: string;
   anchor: { top: number; bottom: number; left: number };
