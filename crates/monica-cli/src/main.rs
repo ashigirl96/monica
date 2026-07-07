@@ -3,6 +3,7 @@ mod event_sink;
 mod hook;
 mod issue;
 mod notebooks;
+mod notify;
 mod project;
 mod table;
 

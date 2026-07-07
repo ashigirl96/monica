@@ -172,15 +172,15 @@ fn open_claude_session(
             claude_session_id,
         },
     )?;
-    let home = std::env::var_os("HOME")
-        .ok_or_else(|| anyhow::anyhow!("HOME is not set; cannot resolve the transcript path"))?;
-    let jsonl_path = monica_application::claude_jsonl_path(
-        std::path::Path::new(&home),
-        &spec.cwd,
-        &spec.claude_session_id,
-    )
-    .to_string_lossy()
-    .into_owned();
+    let jsonl_path = std::env::var_os("HOME").map(|home| {
+        monica_application::claude_jsonl_path(
+            std::path::Path::new(&home),
+            &spec.cwd,
+            &spec.claude_session_id,
+        )
+        .to_string_lossy()
+        .into_owned()
+    });
     Ok(ClaudeSessionInfo {
         runspace_id: spec.runspace_id,
         tab_id: spec.tab_id,

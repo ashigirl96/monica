@@ -29,7 +29,9 @@ fn run() -> Result<()> {
     println!("tab_id:            {}", session.tab_id);
     println!("runspace_id:       {}", session.runspace_id);
     println!("initial_command:   {}", session.initial_command);
-    println!("jsonl_path:        {}", session.jsonl_path);
+    if let Some(jsonl_path) = &session.jsonl_path {
+        println!("jsonl_path:        {jsonl_path}");
+    }
     Ok(())
 }
 

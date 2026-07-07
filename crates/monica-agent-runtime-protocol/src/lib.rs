@@ -78,8 +78,9 @@ pub struct ClaudeSessionInfo {
     #[serde(default)]
     pub title: Option<String>,
     /// Absolute transcript path, resolved server-side so the slug derivation stays in one
-    /// place.
-    pub jsonl_path: String,
+    /// place. `None` only from servers predating this field.
+    #[serde(default)]
+    pub jsonl_path: Option<String>,
 }
 
 #[cfg(test)]
@@ -136,6 +137,17 @@ mod tests {
     }
 
     #[test]
+    fn session_info_without_jsonl_path_still_parses() {
+        // A response from a server predating jsonl_path must still parse client-side.
+        let session: ClaudeSessionInfo = serde_json::from_str(
+            r#"{"runspace_id":"agent-runtime","tab_id":"t","session_id":"ts-1",
+                "claude_session_id":"u","cwd":"/tmp","initial_command":"claude"}"#,
+        )
+        .unwrap();
+        assert_eq!(session.jsonl_path, None);
+    }
+
+    #[test]
     fn responses_round_trip() {
         let ok = RuntimeResponse::Ok {
             session: ClaudeSessionInfo {
@@ -146,7 +158,7 @@ mod tests {
                 cwd: "/tmp".into(),
                 initial_command: "claude --session-id x".into(),
                 title: Some("t".into()),
-                jsonl_path: "/Users/me/.claude/projects/-tmp/u.jsonl".into(),
+                jsonl_path: Some("/Users/me/.claude/projects/-tmp/u.jsonl".into()),
             },
         };
         match round_trip_response(&ok) {
