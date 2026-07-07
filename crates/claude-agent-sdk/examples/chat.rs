@@ -76,14 +76,17 @@ async fn render_turn(session: &mut claude_agent_sdk::Query) -> bool {
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let model = std::env::var("CHAT_MODEL").unwrap_or_else(|_| "haiku".into());
-    let cwd = match std::env::args().nth(1) {
-        Some(arg) => {
-            let path = std::path::PathBuf::from(shellexpand_tilde(&arg));
-            assert!(path.is_dir(), "cwd not found: {}", path.display());
-            path
-        }
-        None => std::env::temp_dir(),
-    };
+    let cwd = std::env::args()
+        .nth(1)
+        .map(|arg| std::path::PathBuf::from(shellexpand_tilde(&arg)))
+        .filter(|path| {
+            let ok = path.is_dir();
+            if !ok {
+                eprintln!("cwd not found: {} (falling back to temp dir)", path.display());
+            }
+            ok
+        })
+        .unwrap_or_else(std::env::temp_dir);
     println!(
         "chat with {model} in {} (empty line or \"exit\" to quit)",
         cwd.display()
