@@ -17,10 +17,12 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use monica_domain::TerminalSession;
 use monica_paths as paths;
 use monica_agent_runtime_protocol::{
     RuntimeRequest, RuntimeRequestOp, RuntimeResponse, PROTOCOL_VERSION as RUNTIME_PROTOCOL_VERSION,
 };
+use monica_storage_sqlite::SqliteStore;
 use monica_terminal_client::PtydClient;
 use monica_terminal_protocol::{RequestOp, ResponseBody, PROTOCOL_VERSION};
 
@@ -32,6 +34,14 @@ pub use runtime::{ClaudeRuntime, CreateSessionParams};
 pub use session::{ClaudeSession, SessionBusy, SessionEnded};
 
 pub use monica_terminal_protocol::{bracketed_paste_bytes, SUBMIT_DELAY};
+
+/// The session currently driving `tab_id`. A tab respawn always inserts a fresh row,
+/// so only the most recently created session can still be live.
+pub fn resolve_tab_session(store: &SqliteStore, tab_id: &str) -> Result<TerminalSession> {
+    store
+        .latest_terminal_session_for_tab(tab_id)?
+        .with_context(|| format!("tab {tab_id} has no terminal session"))
+}
 
 /// Connect to the ptyd socket for the current `MONICA_HOME` and verify the protocol
 /// version. Incoming Output/Exit events are discarded (this client never attaches).
