@@ -17,8 +17,14 @@ specta = { version = "=2.0.0-rc.25", default-features = false, features = [
   "serde_json",
 ] }
 thiserror = "2.0"
+tokio = { version = "1.52.3", default-features = false, features = [
+  "io-util",
+  "process",
+  "rt",
+  "sync",
+] }
 tokio-util = { version = "0.7", default-features = false }
 typed-builder = "0.23"
 
 [dev-dependencies]
-tokio = { version = "1.52.3", default-features = false, features = ["macros", "rt"] }
+tokio = { version = "1.52.3", default-features = false, features = ["macros", "rt", "time"] }

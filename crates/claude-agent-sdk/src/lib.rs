@@ -6,6 +6,7 @@
 
 pub mod callbacks;
 pub mod error;
+pub mod transport;
 pub mod types;
 
 pub use error::{ClaudeError, Result};
