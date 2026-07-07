@@ -46,9 +46,9 @@ pub fn ptyd_pid_path() -> Result<PathBuf> {
     Ok(base_dir()?.join("ptyd.pid"))
 }
 
-/// Unix domain socket the desktop app's Agent Runtime control server listens on.
-pub fn agent_runtime_socket_path() -> Result<PathBuf> {
-    Ok(base_dir()?.join("agent-runtime.sock"))
+/// Unix domain socket the desktop app's SDK control server listens on.
+pub fn sdk_socket_path() -> Result<PathBuf> {
+    Ok(base_dir()?.join("sdk.sock"))
 }
 
 /// Bounded transcript files for terminal sessions: `<base>/terminal-sessions/<session_id>.log`.

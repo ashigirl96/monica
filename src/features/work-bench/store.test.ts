@@ -171,7 +171,7 @@ if (typeof globalThis.window === "undefined") {
 
 const { createStore } = await import("jotai");
 const { windowLabelAtom } = await import("@/stores/ui-state");
-const { adoptClaudeSessionAtom, detachedSessionsAtom, loadTerminalStateAtom, terminalStateAtom } =
+const { adoptSdkSessionAtom, detachedSessionsAtom, loadTerminalStateAtom, terminalStateAtom } =
   await import("./store");
 
 beforeEach(() => {
@@ -281,7 +281,7 @@ describe("saveTerminalStateAtom", () => {
   });
 });
 
-describe("adoptClaudeSessionAtom", () => {
+describe("adoptSdkSessionAtom", () => {
   test("loads the saved snapshot before adopting", async () => {
     loadStateResult = {
       runspaces: [
@@ -303,61 +303,59 @@ describe("adoptClaudeSessionAtom", () => {
 
     const store = createStore();
     store.set(windowLabelAtom, "main");
-    await store.set(adoptClaudeSessionAtom, {
-      runspaceId: "agent-runtime",
-      tabId: "tab-agent-runtime-1",
+    await store.set(adoptSdkSessionAtom, {
+      runspaceId: "sdk",
+      tabId: "tab-sdk-1",
       sessionId: "ts-1",
       cwd: "/proj",
     });
 
     const state = store.get(terminalStateAtom)!;
-    // The saved layout survives; the agent runtime runspace is appended, not substituted, and the
+    // The saved layout survives; the sdk runspace is appended, not substituted, and the
     // externally-triggered adopt does not steal the user's focus.
-    expect(state.runspaces.map((r) => r.id)).toEqual(["rs-saved", "agent-runtime"]);
+    expect(state.runspaces.map((r) => r.id)).toEqual(["rs-saved", "sdk"]);
     expect(state.activeRunspaceId).toBe("rs-saved");
-    const agentRuntime = state.runspaces.find((r) => r.id === "agent-runtime")!;
-    expect(agentRuntime.tabs).toHaveLength(1);
-    expect(agentRuntime.tabs[0].id).toBe("tab-agent-runtime-1");
-    expect(agentRuntime.tabs[0].sessionId).toBe("ts-1");
-    expect(agentRuntime.tabs[0].cwd).toBe("/proj");
-    expect(agentRuntime.activeTabId).toBe("tab-agent-runtime-1");
+    const sdk = state.runspaces.find((r) => r.id === "sdk")!;
+    expect(sdk.tabs).toHaveLength(1);
+    expect(sdk.tabs[0].id).toBe("tab-sdk-1");
+    expect(sdk.tabs[0].sessionId).toBe("ts-1");
+    expect(sdk.tabs[0].cwd).toBe("/proj");
+    expect(sdk.activeTabId).toBe("tab-sdk-1");
   });
 
-  test("reuses the existing agent runtime runspace for later sessions", async () => {
+  test("reuses the existing sdk runspace for later sessions", async () => {
     const store = createStore();
     store.set(windowLabelAtom, "main");
-    await store.set(adoptClaudeSessionAtom, {
-      runspaceId: "agent-runtime",
+    await store.set(adoptSdkSessionAtom, {
+      runspaceId: "sdk",
       tabId: "t1",
       sessionId: "ts-1",
       cwd: "/a",
     });
-    await store.set(adoptClaudeSessionAtom, {
-      runspaceId: "agent-runtime",
+    await store.set(adoptSdkSessionAtom, {
+      runspaceId: "sdk",
       tabId: "t2",
       sessionId: "ts-2",
       cwd: "/b",
     });
 
     const state = store.get(terminalStateAtom)!;
-    const agentRuntimeRunspaces = state.runspaces.filter((r) => r.id === "agent-runtime");
-    expect(agentRuntimeRunspaces).toHaveLength(1);
-    expect(agentRuntimeRunspaces[0].tabs.map((t) => t.sessionId)).toEqual(["ts-1", "ts-2"]);
+    const sdkRunspaces = state.runspaces.filter((r) => r.id === "sdk");
+    expect(sdkRunspaces).toHaveLength(1);
+    expect(sdkRunspaces[0].tabs.map((t) => t.sessionId)).toEqual(["ts-1", "ts-2"]);
     // Adding a session leaves whatever tab the user last looked at active.
-    expect(agentRuntimeRunspaces[0].activeTabId).toBe("t1");
+    expect(sdkRunspaces[0].activeTabId).toBe("t1");
   });
 
   test("a session already bound to a tab is not adopted twice", async () => {
     const store = createStore();
     store.set(windowLabelAtom, "main");
-    const payload = { runspaceId: "agent-runtime", tabId: "t1", sessionId: "ts-1", cwd: "/a" };
-    await store.set(adoptClaudeSessionAtom, payload);
-    await store.set(adoptClaudeSessionAtom, { ...payload, tabId: "t-other" });
+    const payload = { runspaceId: "sdk", tabId: "t1", sessionId: "ts-1", cwd: "/a" };
+    await store.set(adoptSdkSessionAtom, payload);
+    await store.set(adoptSdkSessionAtom, { ...payload, tabId: "t-other" });
 
-    const agentRuntime = store
-      .get(terminalStateAtom)!
-      .runspaces.find((r) => r.id === "agent-runtime")!;
-    expect(agentRuntime.tabs).toHaveLength(1);
+    const sdk = store.get(terminalStateAtom)!.runspaces.find((r) => r.id === "sdk")!;
+    expect(sdk.tabs).toHaveLength(1);
   });
 
   test("clears the adopted session from the detached list", async () => {
@@ -372,8 +370,8 @@ describe("adoptClaudeSessionAtom", () => {
       { id: "ts-other" },
     ] as unknown as TerminalSession[]);
 
-    await store.set(adoptClaudeSessionAtom, {
-      runspaceId: "agent-runtime",
+    await store.set(adoptSdkSessionAtom, {
+      runspaceId: "sdk",
       tabId: "t1",
       sessionId: "ts-1",
       cwd: "/a",
@@ -385,27 +383,25 @@ describe("adoptClaudeSessionAtom", () => {
   test("falls back to a fresh tab id on collision and applies the title", async () => {
     const store = createStore();
     store.set(windowLabelAtom, "main");
-    await store.set(adoptClaudeSessionAtom, {
-      runspaceId: "agent-runtime",
+    await store.set(adoptSdkSessionAtom, {
+      runspaceId: "sdk",
       tabId: "t1",
       sessionId: "ts-1",
       cwd: "/a",
     });
-    await store.set(adoptClaudeSessionAtom, {
-      runspaceId: "agent-runtime",
+    await store.set(adoptSdkSessionAtom, {
+      runspaceId: "sdk",
       tabId: "t1",
       sessionId: "ts-2",
       cwd: "/b",
       title: "translator",
     });
 
-    const agentRuntime = store
-      .get(terminalStateAtom)!
-      .runspaces.find((r) => r.id === "agent-runtime")!;
-    expect(agentRuntime.tabs).toHaveLength(2);
-    expect(agentRuntime.tabs[1].id).not.toBe("t1");
-    expect(agentRuntime.tabs[1].sessionId).toBe("ts-2");
-    expect(agentRuntime.tabs[1].title).toBe("translator");
+    const sdk = store.get(terminalStateAtom)!.runspaces.find((r) => r.id === "sdk")!;
+    expect(sdk.tabs).toHaveLength(2);
+    expect(sdk.tabs[1].id).not.toBe("t1");
+    expect(sdk.tabs[1].sessionId).toBe("ts-2");
+    expect(sdk.tabs[1].title).toBe("translator");
   });
 });
 

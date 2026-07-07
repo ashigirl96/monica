@@ -1,5 +1,5 @@
 //! Drive interactive Claude Code sessions in Monica's Workbench without touching the
-//! webview: create sessions through the running app's Agent Runtime control socket
+//! webview: create sessions through the running app's SDK control socket
 //! ([`open_session`]), and inject input straight into their PTYs over the ptyd Unix
 //! socket ([`send_text`]).
 //!
@@ -17,14 +17,14 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use monica_domain::TerminalSession;
 use monica_paths as paths;
-use monica_agent_runtime_protocol::{
-    RuntimeRequest, RuntimeRequestOp, RuntimeResponse, PROTOCOL_VERSION as RUNTIME_PROTOCOL_VERSION,
+use monica_sdk_protocol::{
+    SdkRequest, SdkRequestOp, SdkResponse, PROTOCOL_VERSION as SDK_PROTOCOL_VERSION,
 };
 use monica_storage_sqlite::SqliteStore;
 use monica_terminal_client::PtydClient;
 use monica_terminal_protocol::{RequestOp, ResponseBody, PROTOCOL_VERSION};
 
-pub use monica_agent_runtime_protocol::ClaudeSessionInfo;
+pub use monica_sdk_protocol::SdkSessionInfo;
 
 /// Delay between the paste write and the submitting `\r`. Claude Code (Ink) applies
 /// pasted text to its input buffer asynchronously, so the Enter must arrive as a
@@ -134,7 +134,7 @@ impl std::error::Error for OpenSessionIndeterminate {}
 /// Control-socket round-trip timeout (mirrors `PtydClient`'s request timeout).
 const OPEN_SESSION_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Ask the running Monica app to create a Claude Code session in the Workbench's "agent-runtime"
+/// Ask the running Monica app to create a Claude Code session in the Workbench's "sdk"
 /// runspace. The app pre-mints the Claude session id, spawns the shell, and launches
 /// `claude --session-id <uuid>` itself; the returned info carries every id needed to
 /// locate the transcript (`~/.claude/projects/<slug>/<uuid>.jsonl`) or send input later.
@@ -157,13 +157,13 @@ const OPEN_SESSION_TIMEOUT: Duration = Duration::from_secs(10);
 /// to the original session instead of creating a second one. Retrying with a fresh id
 /// after an indeterminate failure can open a second session; check the Workbench first
 /// if that matters.
-pub fn open_session(params: OpenSessionParams) -> Result<ClaudeSessionInfo> {
-    open_session_at(&paths::agent_runtime_socket_path()?, params)
+pub fn open_session(params: OpenSessionParams) -> Result<SdkSessionInfo> {
+    open_session_at(&paths::sdk_socket_path()?, params)
 }
 
 /// [`open_session`] against an explicit control-socket path instead of the one derived
 /// from `MONICA_HOME`.
-pub fn open_session_at(socket: &Path, params: OpenSessionParams) -> Result<ClaudeSessionInfo> {
+pub fn open_session_at(socket: &Path, params: OpenSessionParams) -> Result<SdkSessionInfo> {
     // Resolved on this side of the IPC boundary: a relative path means the *caller's*
     // working directory, which the app process has no way to know.
     let cwd = std::path::absolute(&params.cwd)
@@ -182,9 +182,9 @@ pub fn open_session_at(socket: &Path, params: OpenSessionParams) -> Result<Claud
     })?;
     stream.set_read_timeout(Some(OPEN_SESSION_TIMEOUT))?;
 
-    let request = RuntimeRequest {
-        version: RUNTIME_PROTOCOL_VERSION,
-        op: RuntimeRequestOp::OpenClaudeSession {
+    let request = SdkRequest {
+        version: SDK_PROTOCOL_VERSION,
+        op: SdkRequestOp::OpenSdkSession {
             cwd,
             model: params.model,
             title: params.title,
@@ -210,7 +210,7 @@ pub fn open_session_at(socket: &Path, params: OpenSessionParams) -> Result<Claud
     };
     if let Err(e) = writer.write_all(payload.as_bytes()) {
         return Err(indeterminate(format!(
-            "failed to send the request to the agent runtime control socket: {e}"
+            "failed to send the request to the sdk control socket: {e}"
         )));
     }
 
@@ -218,24 +218,24 @@ pub fn open_session_at(socket: &Path, params: OpenSessionParams) -> Result<Claud
     let mut line = String::new();
     if let Err(e) = reader.read_line(&mut line) {
         return Err(indeterminate(format!(
-            "failed to read a response from the agent runtime control socket: {e}"
+            "failed to read a response from the sdk control socket: {e}"
         )));
     }
     if line.trim().is_empty() {
-        return Err(indeterminate("agent runtime control socket closed without a response".to_string()));
+        return Err(indeterminate("sdk control socket closed without a response".to_string()));
     }
-    let response: RuntimeResponse = match serde_json::from_str(&line) {
+    let response: SdkResponse = match serde_json::from_str(&line) {
         Ok(response) => response,
         Err(e) => {
             // A truncated line still comes back from read_line (EOF ends it), so a server
             // that died mid-response surfaces here rather than as an I/O error.
             return Err(indeterminate(format!(
-                "agent runtime control socket answered with an unparseable response: {e}"
+                "sdk control socket answered with an unparseable response: {e}"
             )));
         }
     };
     match response {
-        RuntimeResponse::Ok { session } => {
+        SdkResponse::Ok { session } => {
             // Version negotiation makes this unreachable against real servers (v1 apps
             // reject v2 requests before launching), so a mismatch means a server that
             // claims v2 but broke the idempotency contract — fail loudly rather than let
@@ -254,10 +254,10 @@ pub fn open_session_at(socket: &Path, params: OpenSessionParams) -> Result<Claud
         // reservation still unconfirmed — an open in flight elsewhere, or one that was
         // interrupted). That is the same "may be running under this id" situation as a
         // lost response, and it must not read as "rejected, nothing created".
-        RuntimeResponse::Err { error, indeterminate: true } => {
+        SdkResponse::Err { error, indeterminate: true } => {
             Err(indeterminate(format!("open_session did not resolve: {error}")))
         }
-        RuntimeResponse::Err { error, indeterminate: false } => {
+        SdkResponse::Err { error, indeterminate: false } => {
             bail!("open_session rejected: {error}")
         }
     }

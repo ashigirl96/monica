@@ -1,7 +1,7 @@
 [package]
-name = "monica-agent-runtime-protocol"
+name = "monica-sdk-protocol"
 version = "0.1.0"
-description = "Wire protocol for the Monica Agent Runtime control socket (serde DTOs, version handshake)"
+description = "Wire protocol for the Monica SDK control socket (serde DTOs, version handshake)"
 edition = "2021"
 
 [dependencies]

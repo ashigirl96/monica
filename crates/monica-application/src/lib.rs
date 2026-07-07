@@ -8,7 +8,7 @@
 mod bench;
 mod error;
 mod events;
-mod claude_runtime;
+mod sdk;
 mod execution_profile;
 pub mod notification;
 pub mod facade;
@@ -41,9 +41,9 @@ pub use ports::{
 
 // Application-owned types (NOT in monica-domain)
 pub use bench::{bench_runspace_id, PrepareTaskResult, RunTaskResult, TaskBench};
-pub use claude_runtime::{
-    agent_runtime_runspace_id, claude_jsonl_path, claude_project_slug, ClaudeSessionSpec,
-    OpenClaudeSessionParams, MONICA_CLAUDE_SESSION_ID_ENV,
+pub use sdk::{
+    claude_jsonl_path, claude_project_slug, sdk_runspace_id, OpenSdkSessionParams, SdkSessionSpec,
+    MONICA_SDK_SESSION_ID_ENV,
 };
 pub use github::{
     GithubAuthStatus, GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef,

@@ -2365,8 +2365,8 @@ fn store_contract_holds_for_direct_and_transactional_paths() {
 fn new_claude_session(claude_session_id: &str, terminal_session_id: &str) -> NewClaudeSession {
     NewClaudeSession {
         claude_session_id: claude_session_id.to_string(),
-        runspace_id: "agent-runtime".to_string(),
-        tab_id: "tab-agent-runtime-1".to_string(),
+        runspace_id: "sdk".to_string(),
+        tab_id: "tab-sdk-1".to_string(),
         terminal_session_id: terminal_session_id.to_string(),
         cwd: "/tmp".to_string(),
         name: Some("hello".to_string()),
@@ -2376,15 +2376,15 @@ fn new_claude_session(claude_session_id: &str, terminal_session_id: &str) -> New
 #[test]
 fn claude_session_create_and_get_round_trip() {
     let mut db = SqliteStore::open_in_memory().unwrap();
-    let ts = db.create_terminal_session(new_shell_session(Some("agent-runtime"), None)).unwrap();
+    let ts = db.create_terminal_session(new_shell_session(Some("sdk"), None)).unwrap();
     db.mark_terminal_session_started(&ts.id, Some(1), None).unwrap();
 
     let created = db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
     assert_eq!(created.claude_session_id, "uuid-1");
     assert_eq!(created.status, ClaudeSessionStatus::Pending);
     assert_eq!(created.launch_phase, monica_domain::ClaudeLaunchPhase::Reserved);
-    assert_eq!(created.runspace_id, "agent-runtime");
-    assert_eq!(created.tab_id, "tab-agent-runtime-1");
+    assert_eq!(created.runspace_id, "sdk");
+    assert_eq!(created.tab_id, "tab-sdk-1");
     assert_eq!(created.terminal_session_id, ts.id);
     assert_eq!(created.cwd, "/tmp");
     assert_eq!(created.name.as_deref(), Some("hello"));
@@ -2399,7 +2399,7 @@ fn claude_session_create_and_get_round_trip() {
 #[test]
 fn claude_session_submitting_stamp_flips_reserved_once() {
     let mut db = SqliteStore::open_in_memory().unwrap();
-    let ts = db.create_terminal_session(new_shell_session(Some("agent-runtime"), None)).unwrap();
+    let ts = db.create_terminal_session(new_shell_session(Some("sdk"), None)).unwrap();
     db.mark_terminal_session_started(&ts.id, Some(1), None).unwrap();
     db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
 
@@ -2416,7 +2416,7 @@ fn claude_session_submitting_stamp_flips_reserved_once() {
 #[test]
 fn claude_session_age_is_measured_by_the_stamping_clock() {
     let mut db = SqliteStore::open_in_memory().unwrap();
-    let ts = db.create_terminal_session(new_shell_session(Some("agent-runtime"), None)).unwrap();
+    let ts = db.create_terminal_session(new_shell_session(Some("sdk"), None)).unwrap();
     db.mark_terminal_session_started(&ts.id, Some(1), None).unwrap();
     db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
 
@@ -2428,7 +2428,7 @@ fn claude_session_age_is_measured_by_the_stamping_clock() {
 #[test]
 fn claude_session_launch_confirmation_flips_pending_to_active_once() {
     let mut db = SqliteStore::open_in_memory().unwrap();
-    let ts = db.create_terminal_session(new_shell_session(Some("agent-runtime"), None)).unwrap();
+    let ts = db.create_terminal_session(new_shell_session(Some("sdk"), None)).unwrap();
     db.mark_terminal_session_started(&ts.id, Some(1), None).unwrap();
     db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
 
@@ -2447,7 +2447,7 @@ fn claude_session_launch_confirmation_refuses_a_settled_row() {
     // The PTY can die between the reservation and the launch confirmation; the coupled
     // transition ends the row, and the confirmation must observe that, not resurrect it.
     let mut db = SqliteStore::open_in_memory().unwrap();
-    let ts = db.create_terminal_session(new_shell_session(Some("agent-runtime"), None)).unwrap();
+    let ts = db.create_terminal_session(new_shell_session(Some("sdk"), None)).unwrap();
     db.mark_terminal_session_started(&ts.id, Some(1), None).unwrap();
     db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
     db.update_terminal_session_status(&ts.id, TerminalSessionStatus::Exited, Some(0)).unwrap();
@@ -2462,7 +2462,7 @@ fn claude_session_launch_confirmation_refuses_a_settled_row() {
 #[test]
 fn claude_session_delete_frees_the_id_for_a_fresh_reservation() {
     let mut db = SqliteStore::open_in_memory().unwrap();
-    let ts = db.create_terminal_session(new_shell_session(Some("agent-runtime"), None)).unwrap();
+    let ts = db.create_terminal_session(new_shell_session(Some("sdk"), None)).unwrap();
     db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
 
     db.delete_claude_session("uuid-1").unwrap();
@@ -2475,7 +2475,7 @@ fn claude_session_delete_frees_the_id_for_a_fresh_reservation() {
 fn claude_session_insert_lands_ended_when_terminal_row_already_settled() {
     // A reservation against an already-settled terminal row must never look launchable.
     let mut db = SqliteStore::open_in_memory().unwrap();
-    let ts = db.create_terminal_session(new_shell_session(Some("agent-runtime"), None)).unwrap();
+    let ts = db.create_terminal_session(new_shell_session(Some("sdk"), None)).unwrap();
     db.update_terminal_session_status(&ts.id, TerminalSessionStatus::Exited, Some(1)).unwrap();
 
     let created = db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
@@ -2496,7 +2496,7 @@ fn claude_session_insert_fails_without_a_terminal_row() {
 #[test]
 fn claude_session_duplicate_id_is_rejected() {
     let mut db = SqliteStore::open_in_memory().unwrap();
-    let ts = db.create_terminal_session(new_shell_session(Some("agent-runtime"), None)).unwrap();
+    let ts = db.create_terminal_session(new_shell_session(Some("sdk"), None)).unwrap();
     db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
 
     let err = db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap_err();
@@ -2507,7 +2507,7 @@ fn claude_session_duplicate_id_is_rejected() {
 #[test]
 fn claude_session_ends_with_its_terminal_session_and_stamps_ended_at_once() {
     let mut db = SqliteStore::open_in_memory().unwrap();
-    let ts = db.create_terminal_session(new_shell_session(Some("agent-runtime"), None)).unwrap();
+    let ts = db.create_terminal_session(new_shell_session(Some("sdk"), None)).unwrap();
     db.mark_terminal_session_started(&ts.id, Some(1), None).unwrap();
     db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
     assert!(db.mark_claude_session_launched("uuid-1").unwrap());
@@ -2531,8 +2531,8 @@ fn claude_session_ends_with_its_terminal_session_and_stamps_ended_at_once() {
 #[test]
 fn claude_session_terminal_transition_leaves_other_mappings_alone() {
     let mut db = SqliteStore::open_in_memory().unwrap();
-    let doomed = db.create_terminal_session(new_shell_session(Some("agent-runtime"), None)).unwrap();
-    let survivor = db.create_terminal_session(new_shell_session(Some("agent-runtime"), None)).unwrap();
+    let doomed = db.create_terminal_session(new_shell_session(Some("sdk"), None)).unwrap();
+    let survivor = db.create_terminal_session(new_shell_session(Some("sdk"), None)).unwrap();
     db.mark_terminal_session_started(&doomed.id, Some(1), None).unwrap();
     db.mark_terminal_session_started(&survivor.id, Some(2), None).unwrap();
     db.create_claude_session(new_claude_session("uuid-doomed", &doomed.id)).unwrap();

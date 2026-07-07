@@ -10,7 +10,7 @@ import { unwrap } from "./commands/unwrap";
 import { initPrSync } from "./stores/pr-sync";
 import { queryClient } from "./stores/query-client";
 import { initQuerySync } from "./stores/query-sync";
-import { initClaudeRuntime, recoverClaudeSessions } from "./stores/claude-runtime";
+import { initSdkSessions, recoverClaudeSessions } from "./stores/sdk-session";
 import {
   hydrateUiState,
   windowLabelAtom,
@@ -32,7 +32,7 @@ async function bootstrap() {
   store.set(queryClientAtom, queryClient);
   initQuerySync();
   initPrSync();
-  initClaudeRuntime();
+  initSdkSessions();
   try {
     const win = getCurrentWebviewWindow();
     const windowLabel = win.label;

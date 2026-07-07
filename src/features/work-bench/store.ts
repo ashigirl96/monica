@@ -726,13 +726,13 @@ export const reattachSessionAtom = atom(null, (get, set, session: TerminalSessio
   set(terminalFocusRequestAtom, (c) => c + 1);
 });
 
-// Adopt a backend-created Agent Runtime session (claude-session:opened) into the topology: get-or-create
+// Adopt a backend-created SDK session (sdk-session:opened) into the topology: get-or-create
 // its runspace, then bind a tab to the already-running session. Reattach-shaped rather than
 // launch-shaped — the pane must attach to the live PTY, not spawn a second session. Unlike
 // the user-initiated reattach/run atoms this never touches the active runspace/tab: the
 // trigger is an external process, and yanking focus away from whatever the user is typing
 // into would be hostile. Claude is already running backend-side, so nothing needs the mount.
-export const adoptClaudeSessionAtom = atom(
+export const adoptSdkSessionAtom = atom(
   null,
   async (
     get,

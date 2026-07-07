@@ -5,13 +5,13 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use monica_claude_sdk::{open_session_at, OpenSessionIndeterminate, OpenSessionParams};
-use monica_agent_runtime_protocol::{RuntimeRequest, RuntimeResponse, ClaudeSessionInfo};
+use monica_sdk_protocol::{SdkRequest, SdkResponse, SdkSessionInfo};
 
 const RECV_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct MockServer {
     socket: PathBuf,
-    requests: mpsc::Receiver<RuntimeRequest>,
+    requests: mpsc::Receiver<SdkRequest>,
 }
 
 impl Drop for MockServer {
@@ -22,9 +22,9 @@ impl Drop for MockServer {
 
 const CANNED_ID: &str = "5e0f5b0e-9f5c-4a4e-9d6e-000000000000";
 
-fn session_info() -> ClaudeSessionInfo {
-    ClaudeSessionInfo {
-        runspace_id: "agent-runtime".to_string(),
+fn session_info() -> SdkSessionInfo {
+    SdkSessionInfo {
+        runspace_id: "sdk".to_string(),
         tab_id: "tab-1".to_string(),
         session_id: "ts-42".to_string(),
         claude_session_id: CANNED_ID.to_string(),
@@ -40,7 +40,7 @@ fn session_info() -> ClaudeSessionInfo {
 /// assertions.
 fn start_mock_write(
     name: &str,
-    write: impl FnOnce(&RuntimeRequest) -> Vec<u8> + Send + 'static,
+    write: impl FnOnce(&SdkRequest) -> Vec<u8> + Send + 'static,
 ) -> MockServer {
     // Plain /tmp with a short name: socket paths must stay under the (macOS 104-byte)
     // sun_path limit, which temp_dir()'s /var/folders/... prefix easily blows past.
@@ -54,7 +54,7 @@ fn start_mock_write(
         let mut reader = BufReader::new(stream.try_clone().expect("stream should clone"));
         let mut line = String::new();
         reader.read_line(&mut line).expect("request line");
-        let request: RuntimeRequest = serde_json::from_str(&line).expect("valid request line");
+        let request: SdkRequest = serde_json::from_str(&line).expect("valid request line");
         let payload = write(&request);
         let _ = requests_tx.send(request);
         if payload.is_empty() {
@@ -71,7 +71,7 @@ fn start_mock_write(
 /// connection without answering).
 fn start_mock_with(
     name: &str,
-    respond: impl FnOnce(&RuntimeRequest) -> Option<RuntimeResponse> + Send + 'static,
+    respond: impl FnOnce(&SdkRequest) -> Option<SdkResponse> + Send + 'static,
 ) -> MockServer {
     start_mock_write(name, move |request| {
         let Some(response) = respond(request) else { return Vec::new() };
@@ -81,7 +81,7 @@ fn start_mock_with(
     })
 }
 
-fn start_mock(name: &str, response: Option<RuntimeResponse>) -> MockServer {
+fn start_mock(name: &str, response: Option<SdkResponse>) -> MockServer {
     start_mock_with(name, move |_| response)
 }
 
@@ -94,12 +94,12 @@ fn start_mock_raw(name: &str, raw: &'static [u8]) -> MockServer {
 /// A well-behaved current server: answers with the request's own claude_session_id.
 fn start_echo_mock(name: &str) -> MockServer {
     start_mock_with(name, |request| {
-        let monica_agent_runtime_protocol::RuntimeRequestOp::OpenClaudeSession { claude_session_id, .. } =
+        let monica_sdk_protocol::SdkRequestOp::OpenSdkSession { claude_session_id, .. } =
             &request.op;
         let mut session = session_info();
         session.claude_session_id =
             claude_session_id.clone().expect("client should always send an id");
-        Some(RuntimeResponse::Ok { session })
+        Some(SdkResponse::Ok { session })
     })
 }
 
@@ -114,18 +114,18 @@ fn params() -> OpenSessionParams {
 
 #[test]
 fn sends_a_versioned_request_and_returns_the_session() {
-    let mock = start_mock("ok", Some(RuntimeResponse::Ok { session: session_info() }));
+    let mock = start_mock("ok", Some(SdkResponse::Ok { session: session_info() }));
     let session = open_session_at(&mock.socket, params()).expect("open should succeed");
     assert_eq!(session.session_id, "ts-42");
-    assert_eq!(session.runspace_id, "agent-runtime");
+    assert_eq!(session.runspace_id, "sdk");
     assert_eq!(
         session.claude_session_id,
         "5e0f5b0e-9f5c-4a4e-9d6e-000000000000"
     );
 
     let request = mock.requests.recv_timeout(RECV_TIMEOUT).unwrap();
-    assert_eq!(request.version, monica_agent_runtime_protocol::PROTOCOL_VERSION);
-    let monica_agent_runtime_protocol::RuntimeRequestOp::OpenClaudeSession { cwd, model, title, claude_session_id } =
+    assert_eq!(request.version, monica_sdk_protocol::PROTOCOL_VERSION);
+    let monica_sdk_protocol::SdkRequestOp::OpenSdkSession { cwd, model, title, claude_session_id } =
         request.op;
     assert_eq!(cwd, "/tmp");
     assert_eq!(model.as_deref(), Some("opus"));
@@ -142,7 +142,7 @@ fn mints_a_claude_session_id_when_none_is_supplied() {
     let session = open_session_at(&mock.socket, no_id).expect("open should succeed");
 
     let request = mock.requests.recv_timeout(RECV_TIMEOUT).unwrap();
-    let monica_agent_runtime_protocol::RuntimeRequestOp::OpenClaudeSession { claude_session_id, .. } = request.op;
+    let monica_sdk_protocol::SdkRequestOp::OpenSdkSession { claude_session_id, .. } = request.op;
     let sent = claude_session_id.expect("the request should carry a minted id");
     uuid::Uuid::parse_str(&sent).expect("the minted id should be a uuid");
     assert_eq!(session.claude_session_id, sent);
@@ -153,7 +153,7 @@ fn echoed_id_mismatch_fails_instead_of_breaking_idempotency() {
     // A server that speaks the current version but ignores the request's
     // claude_session_id answers with its own mint (here the canned id), which must
     // surface as an error, not as a silent non-idempotent success.
-    let mock = start_mock("stale", Some(RuntimeResponse::Ok { session: session_info() }));
+    let mock = start_mock("stale", Some(SdkResponse::Ok { session: session_info() }));
     let mut other_id = params();
     other_id.claude_session_id = Some("00000000-0000-4000-8000-000000000309".to_string());
 
@@ -167,7 +167,7 @@ fn echoed_id_mismatch_fails_instead_of_breaking_idempotency() {
 fn err_response_surfaces_the_server_message() {
     let mock = start_mock(
         "err",
-        Some(RuntimeResponse::Err {
+        Some(SdkResponse::Err {
             error: "cwd is not an existing directory: /nope".to_string(),
             indeterminate: false,
         }),
@@ -187,7 +187,7 @@ fn indeterminate_err_response_downcasts_with_the_sent_id() {
     // retry key must survive so the caller retries with this id, never a fresh one.
     let mock = start_mock(
         "pend",
-        Some(RuntimeResponse::Err {
+        Some(SdkResponse::Err {
             error: "claude session has an unconfirmed launch".to_string(),
             indeterminate: true,
         }),
@@ -227,7 +227,7 @@ fn lost_response_recovers_the_minted_id_through_the_typed_error() {
         .claude_session_id
         .clone();
     let request = mock.requests.recv_timeout(RECV_TIMEOUT).unwrap();
-    let monica_agent_runtime_protocol::RuntimeRequestOp::OpenClaudeSession { claude_session_id, .. } = request.op;
+    let monica_sdk_protocol::SdkRequestOp::OpenSdkSession { claude_session_id, .. } = request.op;
     assert_eq!(Some(recovered), claude_session_id, "the error must carry the id that was sent");
 }
 
@@ -236,7 +236,7 @@ fn truncated_response_is_indeterminate_and_carries_the_retry_key() {
     // The server got the request (so it may have launched) but died mid-write: read_line
     // returns the partial line on EOF, so the failure surfaces at JSON parsing, not I/O —
     // and it must stay recoverable exactly like a dropped connection.
-    let mock = start_mock_raw("trunc", br#"{"type":"ok","session":{"runspace_id":"agent-runtime""#);
+    let mock = start_mock_raw("trunc", br#"{"type":"ok","session":{"runspace_id":"sdk""#);
     let err = open_session_at(&mock.socket, params()).unwrap_err();
     assert!(err.to_string().contains("unparseable response"), "got: {err}");
     let indeterminate = err
@@ -262,8 +262,8 @@ fn v1_server_version_rejection_is_determinate() {
     // (or fall back) freely.
     let mock = start_mock(
         "v1",
-        Some(RuntimeResponse::Err {
-            error: "agent runtime protocol version mismatch: client=2, server=1".to_string(),
+        Some(SdkResponse::Err {
+            error: "sdk protocol version mismatch: client=2, server=1".to_string(),
             indeterminate: false,
         }),
     );
@@ -277,13 +277,13 @@ fn v1_server_version_rejection_is_determinate() {
 
 #[test]
 fn relative_cwd_is_absolutized_before_sending() {
-    let mock = start_mock("relcwd", Some(RuntimeResponse::Ok { session: session_info() }));
+    let mock = start_mock("relcwd", Some(SdkResponse::Ok { session: session_info() }));
     let mut relative = params();
     relative.cwd = "rel-dir".to_string();
     open_session_at(&mock.socket, relative).expect("open should succeed");
 
     let request = mock.requests.recv_timeout(RECV_TIMEOUT).unwrap();
-    let monica_agent_runtime_protocol::RuntimeRequestOp::OpenClaudeSession { cwd, .. } = request.op;
+    let monica_sdk_protocol::SdkRequestOp::OpenSdkSession { cwd, .. } = request.op;
     let expected = std::path::absolute("rel-dir").unwrap();
     assert_eq!(cwd, expected.to_string_lossy());
 }
