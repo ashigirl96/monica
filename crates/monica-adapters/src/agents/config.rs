@@ -6,7 +6,7 @@ use monica_domain::Agent;
 /// together in this module.
 pub fn extra_hook_events(agent: Agent) -> &'static [&'static str] {
     match agent {
-        Agent::Claude => &["StopFailure", "SessionEnd"],
+        Agent::Claude => &["StopFailure", "SessionEnd", "Notification"],
         Agent::Codex => &["PermissionRequest"],
     }
 }
@@ -28,6 +28,7 @@ mod tests {
         let events = extra_hook_events(Agent::Claude);
         assert!(events.contains(&"StopFailure"));
         assert!(events.contains(&"SessionEnd"));
+        assert!(events.contains(&"Notification"));
         assert!(!events.contains(&"PermissionRequest"));
     }
 
@@ -37,6 +38,7 @@ mod tests {
         assert!(events.contains(&"PermissionRequest"));
         assert!(!events.contains(&"StopFailure"));
         assert!(!events.contains(&"SessionEnd"));
+        assert!(!events.contains(&"Notification"));
     }
 
     #[test]

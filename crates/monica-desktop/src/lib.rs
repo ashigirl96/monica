@@ -1,8 +1,10 @@
+mod agent_runtime_events;
 mod commands;
 mod event_sink;
 mod native_menu;
 mod ptyd;
 mod schedulers;
+mod agent_runtime_server;
 mod services;
 
 use tauri::Manager;
@@ -42,11 +44,15 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::notebook::get_notebook_pages,
             commands::plan::read_runspace_plan,
             commands::pull_request::force_sync_pull_requests,
+            commands::claude_runtime::claude_list_sessions,
             commands::window::open_named_window,
         ])
         .events(tauri_specta::collect_events![
             commands::task::TaskRunStatusChanged,
             commands::pull_request::PrSyncCompleted,
+            commands::claude_runtime::ClaudeSessionOpened,
+            commands::claude_runtime::ClaudeSessionStateChanged,
+            commands::claude_runtime::ClaudeSessionMessage,
         ])
 }
 
@@ -112,11 +118,30 @@ pub fn run() {
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             specta_builder.mount_events(app);
+            // Before any scheduler starts: the sink publishes through this state, so it
+            // must exist before the first façade can emit.
+            app.manage(std::sync::Arc::new(
+                agent_runtime_events::ClaudeSessionBroadcaster::default(),
+            ));
             let waker = schedulers::pull_request_sync::start(app.handle().clone());
             app.manage(waker);
             let drain = schedulers::notification_drain::start(app.handle().clone());
             app.manage(drain);
+            let watch_registry = monica_runtime::SessionWatchRegistry::default();
+            if let Some(claude_drain) = schedulers::claude_session_drain::start(
+                app.handle().clone(),
+                watch_registry.clone(),
+            ) {
+                if let Some(watch) = schedulers::claude_session_drain::start_transcript_watch(
+                    &claude_drain,
+                    watch_registry,
+                ) {
+                    app.manage(watch);
+                }
+                app.manage(claude_drain);
+            }
             ptyd::start_warmup(app.handle().clone());
+            agent_runtime_server::start(app.handle().clone());
             #[cfg(not(debug_assertions))]
             log::info!(
                 target: "monica_app::startup",

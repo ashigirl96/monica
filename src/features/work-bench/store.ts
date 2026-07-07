@@ -6,6 +6,7 @@ import {
   terminalLoadState,
   terminalSaveState,
   terminalTerminate,
+  type TerminalRunspaceKind,
   type TerminalSession,
   type TerminalSessionStatus,
   type TerminalStateSnapshot,
@@ -54,6 +55,8 @@ export type TerminalTab = {
 
 export type TerminalRunspace = {
   id: string;
+  /// Rust-derived classification (load / adopt stamp it); absence means standard.
+  kind?: TerminalRunspaceKind;
   taskId?: string;
   env?: [string, string][];
   tabs: TerminalTab[];
@@ -65,6 +68,10 @@ export type TerminalState = {
   runspaces: TerminalRunspace[];
   activeRunspaceId: string;
 };
+
+export function isAgentRuntimeRunspace(rs: { kind?: TerminalRunspaceKind }): boolean {
+  return rs.kind === "agent_runtime";
+}
 
 function defaultCwd(): string {
   return "~";
@@ -298,6 +305,7 @@ export const togglePlanPreviewAtom = atom(null, async (get, set) => {
 
 export type RunspaceSummary = {
   id: string;
+  kind: TerminalRunspaceKind | undefined;
   taskId: string | undefined;
   title: string;
   description: string;
@@ -312,6 +320,7 @@ export const runspaceSummariesAtom = atom<RunspaceSummary[]>((get) => {
     .sort((a, b) => a.order - b.order)
     .map((rs) => ({
       id: rs.id,
+      kind: rs.kind,
       taskId: rs.taskId,
       title: deriveRunspaceTitle(rs, worktrees),
       description: deriveRunspaceDescription(rs),
@@ -401,12 +410,24 @@ export const toggleLastRunspaceAtom = atom(null, (get, set) => {
   set(activateRunspaceAtom, lastId);
 });
 
+// Agent Runtime runspaces are mouse-only: they never take part in cycling, and cycling
+// out of one escapes into the normal set instead of wrapping through it.
 export const cycleRunspaceAtom = atom(null, (get, set, direction: "up" | "down") => {
   const state = get(resolvedStateAtom);
-  const sorted = [...state.runspaces].sort((a, b) => a.order - b.order);
-  if (sorted.length <= 1) return;
+  const sorted = state.runspaces
+    .filter((rs) => !isAgentRuntimeRunspace(rs))
+    .sort((a, b) => a.order - b.order);
+  if (sorted.length === 0) return;
 
   const idx = sorted.findIndex((rs) => rs.id === state.activeRunspaceId);
+  if (idx === -1) {
+    set(terminalStateAtom, {
+      ...state,
+      activeRunspaceId: sorted[direction === "down" ? 0 : sorted.length - 1].id,
+    });
+    return;
+  }
+  if (sorted.length === 1) return;
   const newIdx =
     direction === "up" ? (idx - 1 + sorted.length) % sorted.length : (idx + 1) % sorted.length;
 
@@ -480,6 +501,9 @@ export const jumpHintsActiveAtom = atom(false);
 
 // Both use digits in visual order; Ctrl disambiguates runspace (⌃1) from tab (1).
 const HINT_KEYS = [..."123456789"];
+// Agent Runtime runspaces stay out of the 1–9 numbering; the first one gets a fixed
+// 0 key, reached like any other runspace with Ctrl held (⌃0).
+const AGENT_RUNTIME_HINT_KEY = "0";
 
 type JumpHintTargets = {
   byRunspaceId: Record<string, string>;
@@ -490,7 +514,11 @@ const NO_HINT_TARGETS: JumpHintTargets = { byRunspaceId: {}, byTabId: {} };
 
 export const jumpHintTargetsAtom = atom((get): JumpHintTargets => {
   if (!get(jumpHintsActiveAtom)) return NO_HINT_TARGETS;
-  const summaries = get(runspaceSummariesAtom);
+  const allSummaries = get(runspaceSummariesAtom);
+  // Agent Runtime runspaces are kept out of the 1–9 numbering; only the first one
+  // is reachable by keyboard, via the fixed 0 key below.
+  const summaries = allSummaries.filter((s) => !isAgentRuntimeRunspace(s));
+  const agentRuntime = allSummaries.find(isAgentRuntimeRunspace);
   // Hint order must match the sidebar's visual order: task-bound group first, then shells.
   const ordered = [...summaries.filter((s) => s.taskId), ...summaries.filter((s) => !s.taskId)];
   const rs = get(activeRunspaceAtom);
@@ -501,6 +529,9 @@ export const jumpHintTargetsAtom = atom((get): JumpHintTargets => {
   ordered.slice(0, HINT_KEYS.length).forEach((s, i) => {
     byRunspaceId[s.id] = HINT_KEYS[i];
   });
+  if (agentRuntime) {
+    byRunspaceId[agentRuntime.id] = AGENT_RUNTIME_HINT_KEY;
+  }
   tabs.slice(0, HINT_KEYS.length).forEach((t, i) => {
     byTabId[t.id] = HINT_KEYS[i];
   });
@@ -578,6 +609,8 @@ function stateToSnapshot(state: TerminalState): TerminalStateSnapshot {
   return {
     runspaces: state.runspaces.map((rs) => ({
       id: rs.id,
+      // The backend re-derives kind from the id on save, so this value is never trusted.
+      kind: rs.kind ?? "standard",
       sort_order: rs.order,
       tabs: rs.tabs.map((t) => ({
         id: t.id,
@@ -596,6 +629,7 @@ function snapshotToState(snap: TerminalStateSnapshot): TerminalState | null {
   if (snap.runspaces.length === 0) return null;
   const runspaces: TerminalRunspace[] = snap.runspaces.map((rs) => ({
     id: rs.id,
+    kind: rs.kind,
     order: rs.sort_order,
     activeTabId: rs.tabs[0]?.id ?? "",
     tabs: rs.tabs.map((t) => ({
@@ -700,31 +734,116 @@ export const reattachSessionAtom = atom(null, (get, set, session: TerminalSessio
   const allTabs = state.runspaces.flatMap((rs) => rs.tabs);
   if (allTabs.some((t) => t.sessionId === session.id)) return;
 
-  const targetRs =
-    state.runspaces.find((rs) => rs.id === session.runspace_id) ??
-    state.runspaces.find((rs) => rs.id === state.activeRunspaceId) ??
-    state.runspaces[0];
-  if (!targetRs) return;
+  const originalRs = state.runspaces.find((rs) => rs.id === session.runspace_id);
+  // Merging an agent session into the active/first runspace would strip its agent_runtime
+  // classification and pull it back into cycling; rebuild its runspace instead. Standard
+  // sessions keep the merge fallback — any runspace is as good as another for them.
+  const rebuildAgentRuntimeRs = !originalRs && session.kind === "agent" && session.runspace_id;
+  const targetRs = rebuildAgentRuntimeRs
+    ? undefined
+    : (originalRs ??
+      state.runspaces.find((rs) => rs.id === state.activeRunspaceId) ??
+      state.runspaces[0]);
+  if (!targetRs && !rebuildAgentRuntimeRs) return;
 
   const tabIdFree = session.tab_id && !allTabs.some((t) => t.id === session.tab_id);
   const tab: TerminalTab = {
     id: tabIdFree && session.tab_id ? session.tab_id : crypto.randomUUID(),
     title: "",
     cwd: session.cwd,
-    order: targetRs.tabs.length,
+    order: targetRs ? targetRs.tabs.length : 0,
     sessionId: session.id,
   };
 
-  set(terminalStateAtom, {
-    ...state,
-    activeRunspaceId: targetRs.id,
-    runspaces: state.runspaces.map((rs) =>
-      rs.id === targetRs.id ? { ...rs, tabs: [...rs.tabs, tab], activeTabId: tab.id } : rs,
-    ),
-  });
+  if (targetRs) {
+    set(terminalStateAtom, {
+      ...state,
+      activeRunspaceId: targetRs.id,
+      runspaces: state.runspaces.map((rs) =>
+        rs.id === targetRs.id ? { ...rs, tabs: [...rs.tabs, tab], activeTabId: tab.id } : rs,
+      ),
+    });
+  } else {
+    const maxOrder = state.runspaces.reduce((m, r) => Math.max(m, r.order), -1);
+    const rs: TerminalRunspace = {
+      id: session.runspace_id!,
+      kind: "agent_runtime",
+      tabs: [tab],
+      activeTabId: tab.id,
+      order: maxOrder + 1,
+    };
+    set(terminalStateAtom, {
+      ...state,
+      activeRunspaceId: rs.id,
+      runspaces: [...state.runspaces, rs],
+    });
+  }
   set(detachedSessionsAtom, (prev) => prev.filter((s) => s.id !== session.id));
   set(terminalFocusRequestAtom, (c) => c + 1);
 });
+
+// Adopt a backend-created Agent Runtime session (claude-session:opened) into the topology: get-or-create
+// its runspace, then bind a tab to the already-running session. Reattach-shaped rather than
+// launch-shaped — the pane must attach to the live PTY, not spawn a second session. Unlike
+// the user-initiated reattach/run atoms this never touches the active runspace/tab: the
+// trigger is an external process, and yanking focus away from whatever the user is typing
+// into would be hostile. Claude is already running backend-side, so nothing needs the mount.
+export const adoptClaudeSessionAtom = atom(
+  null,
+  async (
+    get,
+    set,
+    payload: { runspaceId: string; tabId: string; sessionId: string; cwd: string; title?: string },
+  ) => {
+    // Adopting into the fabricated fallback state would make loadTerminalStateAtom
+    // early-return forever and later persist that fabricated layout over the saved one.
+    if (get(terminalStateAtom) === null) {
+      await set(loadTerminalStateAtom);
+    }
+
+    const state = get(resolvedStateAtom);
+    const allTabs = state.runspaces.flatMap((rs) => rs.tabs);
+    if (allTabs.some((t) => t.sessionId === payload.sessionId)) return;
+
+    const existing = state.runspaces.find((rs) => rs.id === payload.runspaceId);
+    const tab: TerminalTab = {
+      id: allTabs.some((t) => t.id === payload.tabId) ? crypto.randomUUID() : payload.tabId,
+      title: payload.title ?? "",
+      cwd: payload.cwd,
+      order: existing ? existing.tabs.length : 0,
+      sessionId: payload.sessionId,
+    };
+
+    if (existing) {
+      set(terminalStateAtom, {
+        ...state,
+        runspaces: state.runspaces.map((rs) =>
+          rs.id === existing.id ? { ...rs, tabs: [...rs.tabs, tab] } : rs,
+        ),
+      });
+    } else {
+      const maxOrder = state.runspaces.reduce((m, r) => Math.max(m, r.order), -1);
+      const rs: TerminalRunspace = {
+        id: payload.runspaceId,
+        // This atom only ever adopts Agent Runtime sessions, so the runspace it
+        // materializes is by construction an agent-runtime one — no id parsing here.
+        kind: "agent_runtime",
+        tabs: [tab],
+        activeTabId: tab.id,
+        order: maxOrder + 1,
+      };
+      set(terminalStateAtom, {
+        ...state,
+        runspaces: [...state.runspaces, rs],
+      });
+    }
+
+    // A reconcile that ran before this adoption may have classified the (running, unbound)
+    // session as detached; it has a tab now, so drop the stale sidebar entry (same as
+    // reattach) before someone terminates it from there.
+    set(detachedSessionsAtom, (prev) => prev.filter((s) => s.id !== payload.sessionId));
+  },
+);
 
 export type TabMenuState = {
   tabId: string;

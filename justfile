@@ -71,7 +71,7 @@ unused-commands:
     cmds=$(sed -n '/^export const commands/,/^};/p' "$bindings" | grep -oE '^  [a-zA-Z]+:' | sed 's/[: ]//g')
     found=0
     for cmd in $cmds; do
-        if ! grep -rq "commands\.$cmd" src/ --include='*.ts' --include='*.tsx' --exclude="$bindings"; then
+        if ! grep -rqE "commands\.$cmd\b" src/ --include='*.ts' --include='*.tsx' --exclude="$bindings"; then
             echo "unused command: $cmd"
             found=1
         fi
