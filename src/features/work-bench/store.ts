@@ -501,8 +501,8 @@ export const jumpHintsActiveAtom = atom(false);
 
 // Both use digits in visual order; Ctrl disambiguates runspace (⌃1) from tab (1).
 const HINT_KEYS = [..."123456789"];
-// Agent Runtime runspaces stay out of the 1–9 numbering, but the first one gets a
-// fixed 0 jump key (reachable without Ctrl, since 0 is never a tab key).
+// Agent Runtime runspaces stay out of the 1–9 numbering; the first one gets a fixed
+// 0 key, reached like any other runspace with Ctrl held (⌃0).
 const AGENT_RUNTIME_HINT_KEY = "0";
 
 type JumpHintTargets = {

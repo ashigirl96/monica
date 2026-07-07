@@ -45,11 +45,5 @@ export function handleJumpMode(
     return;
   }
 
-  // 0 targets the Agent Runtime runspace and needs no Ctrl (0 is never a tab key).
-  if (e.key === "0") {
-    actions.jumpToHint({ key: "0", runspace: true });
-    return;
-  }
-
   actions.jumpToHint({ key: e.key.toLowerCase(), runspace: e.ctrlKey });
 }

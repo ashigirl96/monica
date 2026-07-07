@@ -95,14 +95,12 @@ function RunspaceItem({
   dragHandlers,
   isDragOver,
   hint,
-  hintCtrl = true,
 }: {
   ws: RunspaceSummary;
   task?: RunspaceTaskSummary;
   dragHandlers: React.HTMLAttributes<HTMLButtonElement>;
   isDragOver: boolean;
   hint?: string;
-  hintCtrl?: boolean;
 }) {
   const title = task?.title || ws.title || "Terminal";
   const dot = task ? statusDotClass(task.status, task.task_run_wait_reason) : undefined;
@@ -122,7 +120,7 @@ function RunspaceItem({
     >
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex items-start gap-1.5">
-          {hint && <JumpHint hint={hint} ctrl={hintCtrl} />}
+          {hint && <JumpHint hint={hint} ctrl />}
           <span
             className={cn(
               "flex-1 text-xs font-medium leading-snug",
@@ -252,7 +250,6 @@ export function WorkBenchSidebar() {
                   dragHandlers={handlersFor(ws.id, () => activate(ws.id))}
                   isDragOver={dragOverId === ws.id}
                   hint={jumpHints.byRunspaceId[ws.id]}
-                  hintCtrl={false}
                 />
               ))}
             </div>
