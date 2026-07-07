@@ -365,8 +365,11 @@ export type TaskSummaryRow = {
   side_runs_failed: number;
 };
 
+export type TerminalRunspaceKind = "standard" | "agent_runtime";
+
 export type TerminalRunspaceRow = {
   id: string;
+  kind: TerminalRunspaceKind;
   sort_order: number;
   tabs: TerminalTabRow[];
 };

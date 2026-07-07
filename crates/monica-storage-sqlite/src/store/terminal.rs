@@ -1,7 +1,9 @@
 use anyhow::Result;
 use rusqlite::params;
 
-use monica_application::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTabRow};
+use monica_application::{
+    TerminalRunspaceKind, TerminalRunspaceRow, TerminalStateSnapshot, TerminalTabRow,
+};
 
 use crate::SqliteStore;
 
@@ -41,6 +43,7 @@ impl SqliteStore {
                 .collect::<Result<Vec<_>, _>>()?;
 
             result.push(TerminalRunspaceRow {
+                kind: TerminalRunspaceKind::of_runspace_id(&rs_id),
                 id: rs_id,
                 sort_order,
                 tabs,
