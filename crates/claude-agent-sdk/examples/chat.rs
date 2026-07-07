@@ -109,8 +109,9 @@ async fn main() {
         Box::pin(async move {
             let original_input = input.clone();
             let summary = serde_json::to_string(&input).unwrap_or_default();
-            let summary = if summary.len() > 200 {
-                format!("{}...", &summary[..200])
+            let summary = if summary.chars().count() > 200 {
+                let truncated: String = summary.chars().take(200).collect();
+                format!("{truncated}...")
             } else {
                 summary
             };
