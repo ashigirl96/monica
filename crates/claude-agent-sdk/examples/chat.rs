@@ -50,25 +50,24 @@ async fn render_turn(session: &mut claude_agent_sdk::Query) -> bool {
             }
         };
         match message {
-            Message::StreamEvent { event, .. } => {
-                if event["type"] == "content_block_delta" && event["delta"]["type"] == "text_delta"
-                {
-                    if let Some(text) = event["delta"]["text"].as_str() {
-                        print!("{text}");
-                        let _ = std::io::stdout().flush();
-                    }
+            Message::StreamEvent { event, .. }
+                if event["type"] == "content_block_delta"
+                    && event["delta"]["type"] == "text_delta" =>
+            {
+                if let Some(text) = event["delta"]["text"].as_str() {
+                    print!("{text}");
+                    let _ = std::io::stdout().flush();
                 }
             }
-            Message::Result {
-                duration_ms,
-                num_turns,
-                total_cost_usd,
-                ..
-            } => {
-                let cost = total_cost_usd
+            Message::Result(result) => {
+                let cost = result
+                    .total_cost_usd
                     .map(|c| format!(" cost=${c:.4}"))
                     .unwrap_or_default();
-                println!("\n--- ({duration_ms}ms, turns={num_turns}{cost}) ---");
+                println!(
+                    "\n--- ({}ms, turns={}{cost}) ---",
+                    result.duration_ms, result.num_turns
+                );
                 return true;
             }
             _ => {}

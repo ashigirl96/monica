@@ -52,7 +52,7 @@ pub use mcp::{
 };
 pub use messages::{
     AskUserQuestionInput, AskUserQuestionOutput, AssistantMessageContent, ContentBlock,
-    ContentValue, Message, QuestionOption, QuestionSpec, UserContent, UserMessageContent,
+    ContentValue, Message, ResultMessage, QuestionOption, QuestionSpec, UserContent, UserMessageContent,
 };
 pub use options::{
     AgentDefinition, ClaudeAgentOptions, ClaudeAgentOptionsBuilder, NetworkSandboxSettings,

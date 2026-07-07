@@ -48,7 +48,7 @@ fn known_message_types_parse_as_typed_messages() {
         match parse_line(&line) {
             ParsedLine::Message(message) => match *message {
                 Message::Assistant { .. } => assistant += 1,
-                Message::Result { .. } => result += 1,
+                Message::Result(_) => result += 1,
                 Message::StreamEvent { .. } => stream_event += 1,
                 Message::System { .. } => system += 1,
                 Message::User { .. } => user += 1,

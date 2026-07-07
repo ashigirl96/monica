@@ -131,6 +131,48 @@ pub struct AssistantMessageContent {
     pub content: Vec<ContentBlock>,
 }
 
+/// ターン終了時のメトリクス（`Message::Result` の中身。variant 間のサイズ差を抑えるため Box で持つ）
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct ResultMessage {
+    /// Result subtype (success, `error_max_turns`, `error_during_execution`, etc.)
+    pub subtype: String,
+    /// Total duration in milliseconds
+    pub duration_ms: u64,
+    /// API call duration in milliseconds
+    pub duration_api_ms: u64,
+    /// Whether this is an error result
+    pub is_error: bool,
+    /// Number of conversation turns
+    pub num_turns: u32,
+    /// Session ID
+    pub session_id: SessionId,
+    /// Total cost in USD
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_cost_usd: Option<f64>,
+    /// Token usage statistics (aggregate)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<serde_json::Value>,
+    /// Result message (for success subtype)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
+    /// Per-model usage statistics
+    #[serde(
+        rename = "modelUsage",
+        default,
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub model_usage: HashMap<String, ModelUsage>,
+    /// List of denied tool uses
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub permission_denials: Vec<SDKPermissionDenial>,
+    /// Structured output (when outputFormat is specified)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub structured_output: Option<serde_json::Value>,
+    /// Error messages (for error subtypes)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
+}
+
 /// Message types
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -169,45 +211,7 @@ pub enum Message {
         data: serde_json::Value,
     },
     /// Result message with metrics
-    Result {
-        /// Result subtype (success, `error_max_turns`, `error_during_execution`, etc.)
-        subtype: String,
-        /// Total duration in milliseconds
-        duration_ms: u64,
-        /// API call duration in milliseconds
-        duration_api_ms: u64,
-        /// Whether this is an error result
-        is_error: bool,
-        /// Number of conversation turns
-        num_turns: u32,
-        /// Session ID
-        session_id: SessionId,
-        /// Total cost in USD
-        #[serde(skip_serializing_if = "Option::is_none")]
-        total_cost_usd: Option<f64>,
-        /// Token usage statistics (aggregate)
-        #[serde(skip_serializing_if = "Option::is_none")]
-        usage: Option<serde_json::Value>,
-        /// Result message (for success subtype)
-        #[serde(skip_serializing_if = "Option::is_none")]
-        result: Option<String>,
-        /// Per-model usage statistics
-        #[serde(
-            rename = "modelUsage",
-            default,
-            skip_serializing_if = "HashMap::is_empty"
-        )]
-        model_usage: HashMap<String, ModelUsage>,
-        /// List of denied tool uses
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        permission_denials: Vec<SDKPermissionDenial>,
-        /// Structured output (when outputFormat is specified)
-        #[serde(skip_serializing_if = "Option::is_none")]
-        structured_output: Option<serde_json::Value>,
-        /// Error messages (for error subtypes)
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        errors: Vec<String>,
-    },
+    Result(Box<ResultMessage>),
     /// Stream event for partial messages
     StreamEvent {
         /// Event UUID
