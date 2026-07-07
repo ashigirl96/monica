@@ -45,6 +45,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::plan::read_runspace_plan,
             commands::pull_request::force_sync_pull_requests,
             commands::claude_runtime::claude_list_sessions,
+            commands::claude_runtime::claude_session_transcript,
             commands::window::open_named_window,
         ])
         .events(tauri_specta::collect_events![
