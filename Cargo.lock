@@ -2881,18 +2881,13 @@ name = "monica-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
  "clap",
  "clap_complete",
- "libc",
  "mmdflux",
  "monica-application",
- "monica-claude-sdk",
  "monica-domain",
  "monica-paths",
  "monica-runtime",
- "monica-terminal-client",
- "monica-terminal-protocol",
  "rumdl",
  "serde_json",
  "tokio",

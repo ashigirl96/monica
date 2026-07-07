@@ -1051,32 +1051,6 @@ impl<B: Backend> ExecutionService<'_, B> {
         Ok(chunk.records)
     }
 
-    pub fn sync_terminal_session(
-        &mut self,
-        daemon: &impl TerminalDaemon,
-        session_id: &str,
-    ) -> ApplicationResult<()> {
-        let Some(row) = self.m.repos.get_terminal_session(session_id)? else {
-            return Err(ApplicationError::not_found(format!(
-                "terminal session {session_id} not found"
-            )));
-        };
-        let views = daemon.list_views()?;
-        let outcome = reconcile_terminal_sessions(std::slice::from_ref(&row), &views);
-        let terminated: Vec<String> = outcome
-            .updates
-            .iter()
-            .filter(|update| update.status.is_terminal())
-            .map(|update| update.session_id.clone())
-            .collect();
-        self.m.repos.apply_terminal_session_updates(&outcome.updates)?;
-        self.settle_runs_for_terminated_sessions(&terminated);
-        for session_id in outcome.reap_ids {
-            daemon.reap(&session_id);
-        }
-        Ok(())
-    }
-
     pub fn attach_terminal_session(
         &mut self,
         daemon: &impl TerminalDaemon,

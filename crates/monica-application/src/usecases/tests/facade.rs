@@ -155,51 +155,6 @@ fn facade_mark_all_sessions_lost_settles_live_sessions_only() {
 }
 
 #[test]
-fn facade_sync_terminal_session_follows_daemon_attachment_truth() {
-    assert_sync_terminal_status(
-        TerminalSessionStatus::Detached,
-        |daemon| daemon.seed_attached_view("ts-1"),
-        TerminalSessionStatus::Running,
-    );
-}
-
-#[test]
-fn facade_sync_terminal_session_keeps_running_when_another_view_is_attached() {
-    assert_sync_terminal_status(
-        TerminalSessionStatus::Running,
-        |daemon| daemon.seed_attached_view("ts-1"),
-        TerminalSessionStatus::Running,
-    );
-}
-
-#[test]
-fn facade_sync_terminal_session_marks_detached_when_no_view_is_attached() {
-    assert_sync_terminal_status(
-        TerminalSessionStatus::Running,
-        |daemon| daemon.seed_running_view("ts-1"),
-        TerminalSessionStatus::Detached,
-    );
-}
-
-fn assert_sync_terminal_status(
-    initial_status: TerminalSessionStatus,
-    seed_daemon: impl FnOnce(&FakeDaemon),
-    expected_status: TerminalSessionStatus,
-) {
-    let repos = FakeRepos::default();
-    repos.seed_session(fake_session("ts-1", Some("tab-1"), initial_status));
-    let sink = RecordingSink::default();
-    let mut monica = facade(repos, sink);
-    let daemon = FakeDaemon::default();
-    seed_daemon(&daemon);
-
-    monica.executions().sync_terminal_session(&daemon, "ts-1").unwrap();
-
-    let rows = monica.executions().list_terminal_sessions(&daemon, None).unwrap();
-    assert_eq!(rows[0].status, expected_status);
-}
-
-#[test]
 fn facade_create_terminal_session_failure_marks_failed_and_settles() {
     let repos = FakeRepos::default();
     repos.seed_run(driven_run("run-1", "MON-1", "tab-1"));
