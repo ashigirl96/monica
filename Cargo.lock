@@ -2851,20 +2851,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "monica-claude-sdk"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "monica-domain",
- "monica-paths",
- "monica-storage-sqlite",
- "monica-terminal-client",
- "monica-terminal-protocol",
- "serde_json",
-]
-
-[[package]]
 name = "monica-cli"
 version = "0.1.0"
 dependencies = [
