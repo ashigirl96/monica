@@ -15,7 +15,7 @@ fn corpus_dir() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             PathBuf::from(std::env::var_os("HOME").expect("HOME not set"))
-                .join(".claude-agent-sdk/wire-corpus")
+                .join(".monica/claude-agent-sdk/wire-corpus")
         })
 }
 

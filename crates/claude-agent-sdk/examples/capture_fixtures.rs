@@ -19,7 +19,7 @@ fn corpus_path() -> std::path::PathBuf {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
             std::path::PathBuf::from(std::env::var_os("HOME").unwrap())
-                .join(".claude-agent-sdk/wire-corpus")
+                .join(".monica/claude-agent-sdk/wire-corpus")
         });
     std::fs::create_dir_all(&dir).unwrap();
     let stamp = std::time::SystemTime::now()
