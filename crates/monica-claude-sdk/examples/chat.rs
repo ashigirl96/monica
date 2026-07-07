@@ -15,15 +15,6 @@ use monica_claude_sdk::{ClaudeRuntime, CreateSessionParams, SessionEvent};
 /// Grace window after Idle for the transcript drain's late flush.
 const LATE_FLUSH: Duration = Duration::from_secs(3);
 
-/// When a tool was used, Idle events arrive repeatedly while the tool runs
-/// (e.g. a fork agent taking over a minute). This wider window keeps the
-/// loop alive as long as events keep arriving.
-const TOOL_IDLE: Duration = Duration::from_secs(30);
-
-/// When the Idle arrives before any AssistantMessage (transcript drain race),
-/// wait longer for the text to catch up.
-const ANSWER_WAIT: Duration = Duration::from_secs(30);
-
 fn main() {
     if let Err(err) = run() {
         eprintln!("chat: {err:#}");
@@ -67,68 +58,41 @@ fn run() -> Result<()> {
     Ok(())
 }
 
+/// Print events until the turn's single final Idle. `Idle { subagents_running: false }`
+/// fires only once the whole logical turn is over — subagents included — so it can be
+/// trusted as the end of the turn; a short drain then catches the transcript reader's
+/// late flush.
 fn run_turn(session: &mut monica_claude_sdk::ClaudeSession) -> Result<()> {
-    let mut answered = false;
-    let mut saw_tool = false;
-
     loop {
         match session.next_event()? {
-            SessionEvent::AssistantMessage { text } => {
-                println!("claude: {text}");
-                answered = true;
-            }
-            SessionEvent::ToolUse { name, .. } => {
-                eprintln!("[tool] {name}");
-                saw_tool = true;
-            }
+            SessionEvent::AssistantMessage { text } => println!("claude: {text}"),
+            SessionEvent::ToolUse { name, .. } => eprintln!("[tool] {name}"),
             SessionEvent::AwaitingUser { wait_reason } => {
                 eprintln!(
                     "[awaiting user: {}]",
                     wait_reason.as_deref().unwrap_or("input")
                 );
             }
-            SessionEvent::Idle { subagents_running } => {
-                if subagents_running {
-                    eprintln!("(subagents still running — waiting for next turn)");
-                    continue;
-                }
-                if drain_after_idle(session, answered, saw_tool)? {
-                    return Ok(());
-                }
+            SessionEvent::Idle { subagents_running: true } => {
+                eprintln!("(subagents still running — waiting for next turn)");
+            }
+            SessionEvent::Idle { subagents_running: false } => {
+                drain_late_flush(session)?;
+                return Ok(());
             }
             SessionEvent::Ended => bail!("session ended unexpectedly"),
         }
     }
 }
 
-/// After an Idle event, drain remaining events with an appropriate timeout.
-/// Returns `true` when the turn is considered complete.
-fn drain_after_idle(
-    session: &mut monica_claude_sdk::ClaudeSession,
-    answered: bool,
-    saw_tool: bool,
-) -> Result<bool> {
-    let window = if saw_tool {
-        TOOL_IDLE
-    } else if answered {
-        LATE_FLUSH
-    } else {
-        ANSWER_WAIT
-    };
-
-    loop {
-        match session.next_event_timeout(window)? {
-            Some(SessionEvent::AssistantMessage { text }) => {
-                println!("claude: {text}");
-            }
-            Some(SessionEvent::ToolUse { name, .. }) => {
-                eprintln!("[tool] {name}");
-            }
-            Some(SessionEvent::Idle { .. }) => {
-            }
-            Some(SessionEvent::AwaitingUser { .. }) | Some(SessionEvent::Ended) | None => {
-                return Ok(true);
-            }
+fn drain_late_flush(session: &mut monica_claude_sdk::ClaudeSession) -> Result<()> {
+    while let Some(event) = session.next_event_timeout(LATE_FLUSH)? {
+        match event {
+            SessionEvent::AssistantMessage { text } => println!("claude: {text}"),
+            SessionEvent::ToolUse { name, .. } => eprintln!("[tool] {name}"),
+            SessionEvent::Idle { .. } | SessionEvent::AwaitingUser { .. } => {}
+            SessionEvent::Ended => break,
         }
     }
+    Ok(())
 }

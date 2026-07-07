@@ -217,7 +217,7 @@ fn send_user_message_acks_and_classifies_busy() {
         ],
     );
     let runtime = ClaudeRuntime::connect_at(&mock.socket);
-    let session = runtime.get_or_create_session(CANNED_ID, params()).unwrap();
+    let mut session = runtime.get_or_create_session(CANNED_ID, params()).unwrap();
     // Drain the open + subscribe requests.
     mock.requests.recv_timeout(RECV_TIMEOUT).unwrap();
     mock.requests.recv_timeout(RECV_TIMEOUT).unwrap();
@@ -323,7 +323,7 @@ fn send_user_message_classifies_an_ended_session() {
         ],
     );
     let runtime = ClaudeRuntime::connect_at(&mock.socket);
-    let session = runtime.get_or_create_session(CANNED_ID, params()).unwrap();
+    let mut session = runtime.get_or_create_session(CANNED_ID, params()).unwrap();
 
     let err = session.send_user_message("too late").unwrap_err();
     assert!(err.chain().any(|c| c.downcast_ref::<SessionEnded>().is_some()), "got: {err:#}");
