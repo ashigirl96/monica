@@ -56,7 +56,9 @@ pub use github::{
 };
 pub use observation::TaskRunObservation;
 pub use queries::TaskSummaryRow;
-pub use terminal_state::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTabRow};
+pub use terminal_state::{
+    TerminalRunspaceKind, TerminalRunspaceRow, TerminalStateSnapshot, TerminalTabRow,
+};
 
 // Usecase result types (returned by facade methods)
 pub use usecases::{

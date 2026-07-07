@@ -1,8 +1,9 @@
 use monica_application::{
     EventRepository, ExecutionProfile, GithubPullRequest, GithubPullRequestStatus,
     ProjectRepository, PullRequestBranchSyncCandidate, TaskBoardQuery, TaskRunObservation,
-    TaskRunStore, TaskStore, TaskSummaryFilter, TaskSummaryRow, TerminalRunspaceRow,
-    TerminalSessionUpdate, TerminalStateSnapshot, TerminalTabRow, UnitOfWork, WorkbenchStore,
+    TaskRunStore, TaskStore, TaskSummaryFilter, TaskSummaryRow, TerminalRunspaceKind,
+    TerminalRunspaceRow, TerminalSessionUpdate, TerminalStateSnapshot, TerminalTabRow, UnitOfWork,
+    WorkbenchStore,
 };
 use monica_domain::{
     Agent, ClaudeSessionStatus, DisplayStatus, ExternalReference, NewClaudeSession, NewTask,
@@ -1952,12 +1953,11 @@ fn terminal_session_list_filters_by_runspace() {
 
 #[test]
 fn terminal_state_snapshot_round_trips_session_id() {
-    use monica_application::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTabRow};
-
     let mut db = SqliteStore::open_in_memory().unwrap();
     let snapshot = TerminalStateSnapshot {
         runspaces: vec![TerminalRunspaceRow {
             id: "rs-1".into(),
+            kind: TerminalRunspaceKind::Standard,
             sort_order: 0,
             tabs: vec![
                 TerminalTabRow {
@@ -1986,12 +1986,55 @@ fn terminal_state_snapshot_round_trips_session_id() {
 }
 
 #[test]
+fn terminal_state_load_derives_runspace_kind_from_id() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let snapshot = TerminalStateSnapshot {
+        runspaces: vec![
+            TerminalRunspaceRow {
+                id: "agent-runtime".into(),
+                // Deliberately wrong on the way in: kind is never persisted, so load must
+                // re-derive it from the id rather than echo what was saved.
+                kind: TerminalRunspaceKind::Standard,
+                sort_order: 0,
+                tabs: vec![TerminalTabRow {
+                    id: "tab-a".into(),
+                    cwd: "/tmp".into(),
+                    title: "claude".into(),
+                    sort_order: 0,
+                    terminal_session_id: None,
+                }],
+            },
+            TerminalRunspaceRow {
+                id: "rs-plain".into(),
+                kind: TerminalRunspaceKind::Standard,
+                sort_order: 1,
+                tabs: vec![TerminalTabRow {
+                    id: "tab-b".into(),
+                    cwd: "/tmp".into(),
+                    title: "shell".into(),
+                    sort_order: 0,
+                    terminal_session_id: None,
+                }],
+            },
+        ],
+    };
+    db.save_terminal_state("main", &snapshot).unwrap();
+
+    let loaded = db.load_terminal_state("main").unwrap();
+    assert_eq!(loaded.runspaces[0].id, "agent-runtime");
+    assert_eq!(loaded.runspaces[0].kind, TerminalRunspaceKind::AgentRuntime);
+    assert_eq!(loaded.runspaces[1].id, "rs-plain");
+    assert_eq!(loaded.runspaces[1].kind, TerminalRunspaceKind::Standard);
+}
+
+#[test]
 fn terminal_state_is_scoped_by_window_label() {
     let mut db = SqliteStore::open_in_memory().unwrap();
 
     let main_snap = TerminalStateSnapshot {
         runspaces: vec![TerminalRunspaceRow {
             id: "rs-main".into(),
+            kind: TerminalRunspaceKind::Standard,
             sort_order: 0,
             tabs: vec![TerminalTabRow {
                 id: "tab-m1".into(),
@@ -2005,6 +2048,7 @@ fn terminal_state_is_scoped_by_window_label() {
     let secondary_snap = TerminalStateSnapshot {
         runspaces: vec![TerminalRunspaceRow {
             id: "rs-sec".into(),
+            kind: TerminalRunspaceKind::Standard,
             sort_order: 0,
             tabs: vec![TerminalTabRow {
                 id: "tab-s1".into(),
@@ -2036,6 +2080,7 @@ fn terminal_state_is_scoped_by_window_label() {
     let updated_main = TerminalStateSnapshot {
         runspaces: vec![TerminalRunspaceRow {
             id: "rs-main-v2".into(),
+            kind: TerminalRunspaceKind::Standard,
             sort_order: 0,
             tabs: vec![],
         }],
@@ -2061,6 +2106,7 @@ fn same_runspace_id_in_two_windows_does_not_leak_tabs() {
     let main_snap = TerminalStateSnapshot {
         runspaces: vec![TerminalRunspaceRow {
             id: "bench-task-1".into(),
+            kind: TerminalRunspaceKind::Standard,
             sort_order: 0,
             tabs: vec![TerminalTabRow {
                 id: "tab-main".into(),
@@ -2074,6 +2120,7 @@ fn same_runspace_id_in_two_windows_does_not_leak_tabs() {
     let sec_snap = TerminalStateSnapshot {
         runspaces: vec![TerminalRunspaceRow {
             id: "bench-task-1".into(),
+            kind: TerminalRunspaceKind::Standard,
             sort_order: 0,
             tabs: vec![TerminalTabRow {
                 id: "tab-sec".into(),
