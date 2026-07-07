@@ -114,10 +114,6 @@ pub trait ClaudeSessionRepository {
 
     fn mark_claude_session_events_consumed(&mut self, ids: &[i64]) -> Result<()>;
 
-    /// Delete consumed outbox rows older than `older_than_days`. Unconsumed rows are
-    /// never deleted regardless of age.
-    fn sweep_consumed_claude_session_events(&mut self, older_than_days: u32) -> Result<usize>;
-
     /// Advance the transcript cursor after a successful read.
     fn set_claude_session_jsonl_offset(
         &mut self,

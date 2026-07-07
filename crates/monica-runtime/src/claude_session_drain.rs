@@ -17,7 +17,6 @@ use crate::{InFlightGuard, MonicaFacade};
 
 const DRAIN_INTERVAL: Duration = Duration::from_millis(750);
 const DRAIN_BATCH_LIMIT: usize = 50;
-const SWEEP_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 /// How long a completed turn whose transcript had nothing new keeps being re-polled.
 /// Claude flushes the assistant record around the Stop hook, occasionally after it; past
 /// this window the persisted offset catches it up on the next completed turn instead.
@@ -35,7 +34,6 @@ where
         .name("monica-claude-session-drain".to_string())
         .spawn(move || {
             let mut rechecks: HashMap<String, Instant> = HashMap::new();
-            let mut last_sweep: Option<Instant> = None;
             loop {
                 match rx.recv_timeout(DRAIN_INTERVAL) {
                     Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -46,10 +44,6 @@ where
                     continue;
                 }
                 let _guard = InFlightGuard(Arc::clone(&in_flight));
-                if last_sweep.is_none_or(|t| t.elapsed() >= SWEEP_INTERVAL) {
-                    sweep_tick(&make_facade);
-                    last_sweep = Some(Instant::now());
-                }
                 drain_tick(&make_facade, &home, &mut rechecks);
             }
         });
@@ -108,26 +102,4 @@ where
             }
         }
     });
-}
-
-fn sweep_tick<F>(make_facade: &F)
-where
-    F: Fn() -> anyhow::Result<MonicaFacade>,
-{
-    let mut monica = match make_facade() {
-        Ok(m) => m,
-        Err(e) => {
-            log::error!(
-                target: "monica_runtime::claude_session_drain",
-                "failed to open façade for sweep: {e:#}"
-            );
-            return;
-        }
-    };
-    if let Err(e) = monica.executions().sweep_claude_session_events() {
-        log::error!(
-            target: "monica_runtime::claude_session_drain",
-            "failed to sweep claude session events: {e:#}"
-        );
-    }
 }
