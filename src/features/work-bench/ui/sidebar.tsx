@@ -4,7 +4,6 @@ import {
   runspaceSummariesAtom,
   activateRunspaceAtom,
   detachedSessionsAtom,
-  isAgentRuntimeRunspace,
   jumpHintTargetsAtom,
   reattachSessionAtom,
   refreshSessionsAtom,
@@ -197,12 +196,10 @@ export function WorkBenchSidebar() {
   // app-wide on backend events, so only sessions need polling here.
   useLiveRefresh(refreshSessions);
 
-  const { taskBound, shells, agentRuntimes } = useMemo(() => {
-    const agentRuntimes = summaries.filter(isAgentRuntimeRunspace);
-    const rest = summaries.filter((s) => !isAgentRuntimeRunspace(s));
-    const taskBound = rest.filter((s) => s.taskId);
-    const shells = rest.filter((s) => !s.taskId);
-    return { taskBound, shells, agentRuntimes };
+  const { taskBound, shells } = useMemo(() => {
+    const taskBound = summaries.filter((s) => s.taskId);
+    const shells = summaries.filter((s) => !s.taskId);
+    return { taskBound, shells };
   }, [summaries]);
 
   return (
@@ -238,22 +235,6 @@ export function WorkBenchSidebar() {
             />
           ))}
         </div>
-
-        {agentRuntimes.length > 0 && (
-          <>
-            <GroupHeader label="Agent Runtimes" />
-            <div className="flex flex-col gap-0.5 px-0.5">
-              {agentRuntimes.map((ws) => (
-                <RunspaceItem
-                  key={ws.id}
-                  ws={ws}
-                  dragHandlers={handlersFor(ws.id, () => activate(ws.id))}
-                  isDragOver={dragOverId === ws.id}
-                />
-              ))}
-            </div>
-          </>
-        )}
 
         {detachedSessions.length > 0 && (
           <>

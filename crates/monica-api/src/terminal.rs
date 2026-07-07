@@ -117,26 +117,9 @@ pub struct TerminalTabRow {
     pub terminal_session_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "snake_case")]
-pub enum TerminalRunspaceKind {
-    Standard,
-    AgentRuntime,
-}
-
-impl From<monica_application::TerminalRunspaceKind> for TerminalRunspaceKind {
-    fn from(value: monica_application::TerminalRunspaceKind) -> Self {
-        match value {
-            monica_application::TerminalRunspaceKind::Standard => Self::Standard,
-            monica_application::TerminalRunspaceKind::AgentRuntime => Self::AgentRuntime,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct TerminalRunspaceRow {
     pub id: String,
-    pub kind: TerminalRunspaceKind,
     #[specta(type = specta_typescript::Number)]
     pub sort_order: i64,
     pub tabs: Vec<TerminalTabRow>,
@@ -161,7 +144,6 @@ impl From<monica_application::TerminalStateSnapshot> for TerminalStateSnapshot {
 impl From<monica_application::TerminalRunspaceRow> for TerminalRunspaceRow {
     fn from(value: monica_application::TerminalRunspaceRow) -> Self {
         Self {
-            kind: value.kind.into(),
             id: value.id,
             sort_order: value.sort_order,
             tabs: value.tabs.into_iter().map(Into::into).collect(),
@@ -192,9 +174,6 @@ impl From<TerminalStateSnapshot> for monica_application::TerminalStateSnapshot {
 impl From<TerminalRunspaceRow> for monica_application::TerminalRunspaceRow {
     fn from(value: TerminalRunspaceRow) -> Self {
         Self {
-            // Server-authoritative: never trust a client-sent kind — re-derive from the id so a
-            // save→load round trip can't drift the classification.
-            kind: monica_application::TerminalRunspaceKind::of_runspace_id(&value.id),
             id: value.id,
             sort_order: value.sort_order,
             tabs: value.tabs.into_iter().map(Into::into).collect(),
@@ -211,31 +190,5 @@ impl From<TerminalTabRow> for monica_application::TerminalTabRow {
             sort_order: value.sort_order,
             terminal_session_id: value.terminal_session_id,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn runspace_row_conversion_rederives_kind_from_id() {
-        let forged = TerminalRunspaceRow {
-            id: "agent-runtime".into(),
-            kind: TerminalRunspaceKind::Standard,
-            sort_order: 0,
-            tabs: vec![],
-        };
-        let row: monica_application::TerminalRunspaceRow = forged.into();
-        assert_eq!(row.kind, monica_application::TerminalRunspaceKind::AgentRuntime);
-
-        let forged = TerminalRunspaceRow {
-            id: "rs-plain".into(),
-            kind: TerminalRunspaceKind::AgentRuntime,
-            sort_order: 0,
-            tabs: vec![],
-        };
-        let row: monica_application::TerminalRunspaceRow = forged.into();
-        assert_eq!(row.kind, monica_application::TerminalRunspaceKind::Standard);
     }
 }

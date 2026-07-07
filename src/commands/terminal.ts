@@ -8,7 +8,6 @@ import {
 
 export type {
   AttachResult,
-  TerminalRunspaceKind,
   TerminalSession,
   TerminalSessionKind,
   TerminalSessionStatus,

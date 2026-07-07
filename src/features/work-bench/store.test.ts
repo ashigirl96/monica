@@ -171,16 +171,8 @@ if (typeof globalThis.window === "undefined") {
 
 const { createStore } = await import("jotai");
 const { windowLabelAtom } = await import("@/stores/ui-state");
-const {
-  adoptClaudeSessionAtom,
-  cycleRunspaceAtom,
-  detachedSessionsAtom,
-  jumpHintsActiveAtom,
-  jumpHintTargetsAtom,
-  loadTerminalStateAtom,
-  reattachSessionAtom,
-  terminalStateAtom,
-} = await import("./store");
+const { adoptClaudeSessionAtom, detachedSessionsAtom, loadTerminalStateAtom, terminalStateAtom } =
+  await import("./store");
 
 beforeEach(() => {
   loadStateResult = { runspaces: [] };
@@ -324,7 +316,6 @@ describe("adoptClaudeSessionAtom", () => {
     expect(state.runspaces.map((r) => r.id)).toEqual(["rs-saved", "agent-runtime"]);
     expect(state.activeRunspaceId).toBe("rs-saved");
     const agentRuntime = state.runspaces.find((r) => r.id === "agent-runtime")!;
-    expect(agentRuntime.kind).toBe("agent_runtime");
     expect(agentRuntime.tabs).toHaveLength(1);
     expect(agentRuntime.tabs[0].id).toBe("tab-agent-runtime-1");
     expect(agentRuntime.tabs[0].sessionId).toBe("ts-1");
@@ -415,152 +406,6 @@ describe("adoptClaudeSessionAtom", () => {
     expect(agentRuntime.tabs[1].id).not.toBe("t1");
     expect(agentRuntime.tabs[1].sessionId).toBe("ts-2");
     expect(agentRuntime.tabs[1].title).toBe("translator");
-  });
-});
-
-describe("reattachSessionAtom", () => {
-  function makeSession(overrides: Partial<TerminalSession>): TerminalSession {
-    return {
-      id: "ts-1",
-      runspace_id: null,
-      tab_id: null,
-      kind: "shell",
-      cwd: "/a",
-      ...overrides,
-    } as TerminalSession;
-  }
-
-  test("rebuilds the agent runtime runspace instead of merging into a standard one", () => {
-    const store = createStore();
-    store.set(terminalStateAtom, makeState([makeRunspace("rs-1", { order: 0 })]));
-
-    store.set(
-      reattachSessionAtom,
-      makeSession({ runspace_id: "agent-runtime", tab_id: "t1", kind: "agent" }),
-    );
-
-    const state = store.get(terminalStateAtom)!;
-    const rebuilt = state.runspaces.find((r) => r.id === "agent-runtime")!;
-    expect(rebuilt.kind).toBe("agent_runtime");
-    expect(rebuilt.tabs.map((t) => t.sessionId)).toEqual(["ts-1"]);
-    expect(state.runspaces.find((r) => r.id === "rs-1")!.tabs).toHaveLength(1);
-    expect(state.activeRunspaceId).toBe("agent-runtime");
-  });
-
-  test("still merges a standard session into the active runspace when its runspace is gone", () => {
-    const store = createStore();
-    store.set(terminalStateAtom, makeState([makeRunspace("rs-1", { order: 0 })]));
-
-    store.set(reattachSessionAtom, makeSession({ runspace_id: "rs-gone", tab_id: "t1" }));
-
-    const state = store.get(terminalStateAtom)!;
-    expect(state.runspaces.map((r) => r.id)).toEqual(["rs-1"]);
-    expect(state.runspaces[0].tabs.map((t) => t.sessionId)).toEqual([undefined, "ts-1"]);
-  });
-
-  test("prefers the surviving agent runtime runspace over rebuilding", () => {
-    const store = createStore();
-    store.set(
-      terminalStateAtom,
-      makeState(
-        [
-          makeRunspace("rs-1", { order: 0 }),
-          makeRunspace("agent-runtime", { order: 1, kind: "agent_runtime" }),
-        ],
-        "rs-1",
-      ),
-    );
-
-    store.set(
-      reattachSessionAtom,
-      makeSession({ runspace_id: "agent-runtime", tab_id: "t9", kind: "agent" }),
-    );
-
-    const state = store.get(terminalStateAtom)!;
-    const agentRuntime = state.runspaces.find((r) => r.id === "agent-runtime")!;
-    expect(agentRuntime.tabs.map((t) => t.sessionId)).toEqual([undefined, "ts-1"]);
-    expect(state.runspaces.filter((r) => r.id === "agent-runtime")).toHaveLength(1);
-  });
-});
-
-describe("cycleRunspaceAtom", () => {
-  function seedState(store: ReturnType<typeof createStore>, activeId: string) {
-    store.set(terminalStateAtom, {
-      runspaces: [
-        makeRunspace("rs-1", { order: 0 }),
-        makeRunspace("agent-runtime", { order: 1, kind: "agent_runtime" }),
-        makeRunspace("rs-2", { order: 2 }),
-      ],
-      activeRunspaceId: activeId,
-    });
-  }
-
-  test("skips agent runtime runspaces cycling down", () => {
-    const store = createStore();
-    seedState(store, "rs-1");
-    store.set(cycleRunspaceAtom, "down");
-    expect(store.get(terminalStateAtom)!.activeRunspaceId).toBe("rs-2");
-  });
-
-  test("skips agent runtime runspaces cycling up", () => {
-    const store = createStore();
-    seedState(store, "rs-2");
-    store.set(cycleRunspaceAtom, "up");
-    expect(store.get(terminalStateAtom)!.activeRunspaceId).toBe("rs-1");
-  });
-
-  test("escapes an active agent runtime runspace into the normal set", () => {
-    const store = createStore();
-    seedState(store, "agent-runtime");
-    store.set(cycleRunspaceAtom, "down");
-    expect(store.get(terminalStateAtom)!.activeRunspaceId).toBe("rs-1");
-
-    seedState(store, "agent-runtime");
-    store.set(cycleRunspaceAtom, "up");
-    expect(store.get(terminalStateAtom)!.activeRunspaceId).toBe("rs-2");
-  });
-
-  test("escapes even when a single normal runspace remains", () => {
-    const store = createStore();
-    store.set(terminalStateAtom, {
-      runspaces: [
-        makeRunspace("rs-1", { order: 0 }),
-        makeRunspace("agent-runtime", { order: 1, kind: "agent_runtime" }),
-      ],
-      activeRunspaceId: "agent-runtime",
-    });
-    store.set(cycleRunspaceAtom, "down");
-    expect(store.get(terminalStateAtom)!.activeRunspaceId).toBe("rs-1");
-  });
-
-  test("does nothing when only agent runtime runspaces exist", () => {
-    const store = createStore();
-    store.set(terminalStateAtom, {
-      runspaces: [makeRunspace("agent-runtime", { order: 0, kind: "agent_runtime" })],
-      activeRunspaceId: "agent-runtime",
-    });
-    store.set(cycleRunspaceAtom, "down");
-    expect(store.get(terminalStateAtom)!.activeRunspaceId).toBe("agent-runtime");
-  });
-});
-
-describe("jumpHintTargetsAtom", () => {
-  test("assigns no hint key to agent runtime runspaces", () => {
-    const store = createStore();
-    store.set(terminalStateAtom, {
-      runspaces: [
-        makeRunspace("rs-task", { order: 0, taskId: "task-a" }),
-        makeRunspace("agent-runtime", { order: 1, kind: "agent_runtime" }),
-        makeRunspace("rs-shell", { order: 2 }),
-      ],
-      activeRunspaceId: "rs-task",
-    });
-    store.set(jumpHintsActiveAtom, true);
-
-    const targets = store.get(jumpHintTargetsAtom);
-    expect(targets.byRunspaceId["rs-task"]).toBe("1");
-    expect(targets.byRunspaceId["rs-shell"]).toBe("2");
-    expect(targets.byRunspaceId["agent-runtime"]).toBeUndefined();
   });
 });
 
