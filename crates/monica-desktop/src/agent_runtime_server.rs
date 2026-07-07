@@ -202,7 +202,7 @@ fn session_error_response(e: &monica_application::ApplicationError) -> RuntimeRe
     }
 }
 
-fn home_dir() -> Result<PathBuf> {
+pub(crate) fn home_dir() -> Result<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .ok_or_else(|| anyhow::anyhow!("HOME is not set; cannot resolve the transcript path"))
@@ -323,6 +323,12 @@ fn serve_subscription(
             },
         );
     };
+    // Stream the transcript for as long as this subscription lives; the guard drops on
+    // every exit path below. Appends before the watch lands are not lost — the next
+    // wakeup or the turn-completed read picks them up from the persisted cursor.
+    let _transcript_watch = app
+        .try_state::<monica_runtime::TranscriptWatchHandle>()
+        .map(|watch| watch.retain(claude_session_id, &row.cwd));
     write_line(stream, &RuntimeResponse::Ack)?;
     let replay_records = subscription_replay_records(&mut monica, claude_session_id);
     for event in subscription_initial_events(&row, &replay_records) {

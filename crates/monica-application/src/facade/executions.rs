@@ -32,10 +32,31 @@ pub struct ExecutionService<'a, B: Backend> {
 pub struct ClaudeSessionDrainOutcome {
     /// Events consumed this tick.
     pub drained: usize,
-    /// Sessions whose turn completed but whose transcript had nothing new yet (Claude
-    /// flushes the assistant record around the Stop hook, sometimes after it) — the
-    /// caller should re-poll these briefly.
-    pub recheck: Vec<String>,
+    /// The transcript read made for each session whose turn landed this tick. The caller
+    /// folds these into its consumed-tail tracking alongside its own wakeup polls — a
+    /// tail cached from one reader but not the other would judge a new turn by the
+    /// previous turn's leftover record.
+    pub transcript_polls: Vec<(String, TranscriptPoll)>,
+    /// Sessions whose turn completed into Idle/Ended while this read's consumed tail was
+    /// not an assistant record (the response, or its final part, is still owed) — their
+    /// state snapshot was withheld so a subscriber never sees Idle before the turn's
+    /// messages. The caller decides when to release each one via
+    /// [`ExecutionService::emit_claude_session_state`].
+    pub deferred_states: Vec<String>,
+    /// Sessions whose state snapshot was emitted this tick — the caller must drop any
+    /// deferral it still holds for them (a newer state supersedes it).
+    pub states_emitted: Vec<String>,
+}
+
+/// What one transcript read observed, beyond the records it emitted.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TranscriptPoll {
+    /// Whether the last record consumed by this read is an assistant record; `None` when
+    /// nothing was consumed. The transcript grammar makes this the turn-completion
+    /// signal: a mid-turn assistant record is always followed by a tool_result user
+    /// record, so a transcript ending on an assistant record has delivered its response —
+    /// merely *containing* one has not.
+    pub tail_is_assistant: Option<bool>,
 }
 
 impl<B: Backend> ExecutionService<'_, B> {
@@ -924,14 +945,7 @@ impl<B: Backend> ExecutionService<'_, B> {
             self.m.repos.clear_subagents_running(claude_session_id)?;
         }
         let settled = self.m.repos.get_claude_session(claude_session_id)?.unwrap_or(row);
-        self.m.events.emit(ApplicationEvent::ClaudeSessionStateChanged {
-            claude_session_id: settled.claude_session_id,
-            tab_id: settled.tab_id,
-            session_status: settled.status,
-            conversation_status: settled.conversation_status,
-            wait_reason: settled.wait_reason,
-            subagents_running: settled.subagents_running,
-        });
+        self.emit_state_snapshot(settled);
         Ok(())
     }
 
@@ -961,9 +975,10 @@ impl<B: Backend> ExecutionService<'_, B> {
 
     /// One drain tick: consume pending `claude_session_events`, emit a state snapshot per
     /// touched session, and read the transcript JSONL for sessions whose turn completed
-    /// (or ended). Events are always consumed — a turn whose assistant record was not
-    /// flushed yet lands in `recheck`, and the caller re-polls those briefly; the
-    /// persisted offset guarantees the next completed turn catches up anything missed.
+    /// (or ended). Events are always consumed. A turn that settled into Idle/Ended
+    /// without its assistant output in this read gets its state snapshot **withheld**
+    /// (`deferred_states`) instead of emitted — a subscriber must never see Idle before
+    /// the turn's messages; the caller releases it once the transcript catches up.
     pub fn drain_claude_session_events(
         &mut self,
         home: &std::path::Path,
@@ -979,7 +994,9 @@ impl<B: Backend> ExecutionService<'_, B> {
                 session_ids.push(&event.claude_session_id);
             }
         }
-        let mut recheck = Vec::new();
+        let mut transcript_polls = Vec::new();
+        let mut deferred_states = Vec::new();
+        let mut states_emitted = Vec::new();
         for session_id in session_ids {
             let Some(row) = self.m.repos.get_claude_session(session_id)? else {
                 continue;
@@ -989,27 +1006,25 @@ impl<B: Backend> ExecutionService<'_, B> {
                     && matches!(event.kind.as_str(), "turn_completed" | "session_ended")
             });
             // Messages before the state snapshot: a subscriber treating Idle as "the turn
-            // is over" should already hold the turn's assistant output when it arrives
-            // (best effort — a recheck flush still lands after). The state is emitted
-            // even when the transcript read fails.
+            // is over" must already hold the turn's assistant output when it arrives.
+            let mut response_delivered = false;
             if turn_landed {
                 // A transcript read failure must not abort the batch: the events are
                 // already durable, so we still consume them below and let the persisted
-                // offset catch this session up on its next turn. Recheck on both "nothing
-                // yet" and a transient read error.
-                let done = match self.poll_transcript_from_row(home, &row) {
-                    Ok(saw_assistant) => saw_assistant,
+                // offset catch this session up on its next turn. Both "nothing yet" and a
+                // transient read error leave the state deferred.
+                let poll = match self.poll_transcript_from_row(home, &row) {
+                    Ok(poll) => poll,
                     Err(e) => {
                         log::warn!(
                             target: "monica_application::claude_session",
                             "failed to read transcript for {session_id}: {e:#}"
                         );
-                        false
+                        TranscriptPoll::default()
                     }
                 };
-                if !done {
-                    recheck.push(session_id.to_string());
-                }
+                response_delivered = poll.tail_is_assistant == Some(true);
+                transcript_polls.push((session_id.to_string(), poll));
             }
             // A batch of only state-neutral events (idle notifications, inert markers)
             // must not re-broadcast the unchanged state: a re-emitted Idle buffered
@@ -1018,23 +1033,51 @@ impl<B: Backend> ExecutionService<'_, B> {
                 event.claude_session_id == *session_id
                     && !crate::usecases::claude_sessions::label_is_state_neutral(&event.kind)
             });
-            if state_relevant {
-                self.m.events.emit(ApplicationEvent::ClaudeSessionStateChanged {
-                    claude_session_id: row.claude_session_id.clone(),
-                    tab_id: row.tab_id.clone(),
-                    session_status: row.status,
-                    conversation_status: row.conversation_status,
-                    wait_reason: row.wait_reason,
-                    subagents_running: row.subagents_running,
-                });
+            if !state_relevant {
+                continue;
+            }
+            let settled = row.status == ClaudeSessionStatus::Ended
+                || row.conversation_status == monica_domain::ClaudeConversationStatus::Idle;
+            if turn_landed && !response_delivered && settled {
+                deferred_states.push(row.claude_session_id.clone());
+            } else {
+                states_emitted.push(row.claude_session_id.clone());
+                self.emit_state_snapshot(row);
             }
         }
         let ids: Vec<i64> = events.iter().map(|event| event.id).collect();
         self.m.repos.mark_claude_session_events_consumed(&ids)?;
         Ok(ClaudeSessionDrainOutcome {
             drained: events.len(),
-            recheck,
+            transcript_polls,
+            deferred_states,
+            states_emitted,
         })
+    }
+
+    /// Emit the session's current state snapshot, re-read from the store. Releasing a
+    /// deferred state goes through here so a state that has already moved on (a new
+    /// prompt made it Thinking) is reported as it is now — never as a stale Idle.
+    pub fn emit_claude_session_state(
+        &mut self,
+        claude_session_id: &str,
+    ) -> ApplicationResult<()> {
+        let Some(row) = self.m.repos.get_claude_session(claude_session_id)? else {
+            return Ok(());
+        };
+        self.emit_state_snapshot(row);
+        Ok(())
+    }
+
+    fn emit_state_snapshot(&mut self, row: ClaudeSession) {
+        self.m.events.emit(ApplicationEvent::ClaudeSessionStateChanged {
+            claude_session_id: row.claude_session_id,
+            tab_id: row.tab_id,
+            session_status: row.status,
+            conversation_status: row.conversation_status,
+            wait_reason: row.wait_reason,
+            subagents_running: row.subagents_running,
+        });
     }
 
     pub fn sweep_claude_session_events(&mut self) -> ApplicationResult<usize> {
@@ -1049,17 +1092,16 @@ impl<B: Backend> ExecutionService<'_, B> {
     }
 
     /// Read the session's transcript from its persisted cursor, emit the new records, and
-    /// advance the cursor. Returns whether the turn's assistant output has now been
-    /// observed — `false` asks the caller to re-poll (the assistant record flushes around
-    /// the Stop hook, sometimes after it). Safe to call while the file does not exist yet
-    /// (Claude creates it lazily on the first user message).
+    /// advance the cursor. Safe to call while the file does not exist yet (Claude creates
+    /// it lazily on the first user message) and at any moment mid-turn — this is the
+    /// single read path for both the drain tick and the transcript-watch wakeups.
     pub fn poll_claude_session_transcript(
         &mut self,
         home: &std::path::Path,
         claude_session_id: &str,
-    ) -> ApplicationResult<bool> {
+    ) -> ApplicationResult<TranscriptPoll> {
         let Some(row) = self.m.repos.get_claude_session(claude_session_id)? else {
-            return Ok(false);
+            return Ok(TranscriptPoll::default());
         };
         self.poll_transcript_from_row(home, &row)
     }
@@ -1070,35 +1112,33 @@ impl<B: Backend> ExecutionService<'_, B> {
         &mut self,
         home: &std::path::Path,
         row: &ClaudeSession,
-    ) -> ApplicationResult<bool> {
+    ) -> ApplicationResult<TranscriptPoll> {
         let path = crate::claude_jsonl_path(home, &row.cwd, row.transcript_session_id());
         let chunk = self.m.transcripts.read_from(&path, row.jsonl_offset)?;
         if !chunk.file_exists {
-            return Ok(false);
+            return Ok(TranscriptPoll::default());
         }
         if chunk.new_offset != row.jsonl_offset {
             self.m
                 .repos
                 .set_claude_session_jsonl_offset(&row.claude_session_id, chunk.new_offset)?;
         }
+        let poll = TranscriptPoll {
+            tail_is_assistant: chunk.records.last().map(|record| {
+                matches!(
+                    record.kind,
+                    crate::ports::ClaudeTranscriptRecordKind::Assistant { .. }
+                )
+            }),
+        };
         if chunk.records.is_empty() {
-            return Ok(false);
+            return Ok(poll);
         }
-        // The recheck exists to catch the assistant record specifically, which flushes
-        // last. A read that surfaced only the user prompt (or tool/other lines) has not
-        // captured the turn's response yet, so it must keep rechecking — otherwise the
-        // response is stranded until the next completed turn advances past it.
-        let saw_assistant = chunk.records.iter().any(|record| {
-            matches!(
-                record.kind,
-                crate::ports::ClaudeTranscriptRecordKind::Assistant { .. }
-            )
-        });
         self.m.events.emit(ApplicationEvent::ClaudeSessionMessages {
             claude_session_id: row.claude_session_id.clone(),
             records: chunk.records,
         });
-        Ok(saw_assistant)
+        Ok(poll)
     }
 
     /// The full transcript of a session, from the start of its current file. Pull-style
