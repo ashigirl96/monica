@@ -78,6 +78,11 @@ bartolli 実装済み subtype: `initialize` / `interrupt` / `send_message` / `ho
       タイムアウト + `reject_all` で exit 時に全 pending を即エラー。inbound = タイムアウトなしの pending map
 - [x] `control_cancel_request` で pending inbound を取り下げ（`InboundControl::Cancelled`）。
       未応答 permission は `pending_inbound()` で列挙可能（復元 UI 用）
+- [ ] hooks 対応（P2）: initialize リクエストへの hook matcher 登録 + `hook_callback` inbound への応答。
+      現状は hooks を登録しないため CLI から hook_callback は飛んでこない。
+      なお参考実装 protocol.rs の ControlMessage (method/params) / InitRequest / capabilities
+      ネゴシエーションは実 wire に存在しない創作部分（本人の client.rs:578 も json! で bypass）。
+      写経対象にしないこと
 
 ### F. セッション管理
 
