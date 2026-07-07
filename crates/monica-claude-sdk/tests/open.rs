@@ -95,10 +95,7 @@ fn start_mock_raw(name: &str, raw: &'static [u8]) -> MockServer {
 fn start_echo_mock(name: &str) -> MockServer {
     start_mock_with(name, |request| {
         let monica_agent_runtime_protocol::RuntimeRequestOp::OpenClaudeSession { claude_session_id, .. } =
-            &request.op
-        else {
-            panic!("expected open_claude_session");
-        };
+            &request.op;
         let mut session = session_info();
         session.claude_session_id =
             claude_session_id.clone().expect("client should always send an id");
@@ -129,10 +126,7 @@ fn sends_a_versioned_request_and_returns_the_session() {
     let request = mock.requests.recv_timeout(RECV_TIMEOUT).unwrap();
     assert_eq!(request.version, monica_agent_runtime_protocol::PROTOCOL_VERSION);
     let monica_agent_runtime_protocol::RuntimeRequestOp::OpenClaudeSession { cwd, model, title, claude_session_id } =
-        request.op
-    else {
-        panic!("expected open_claude_session");
-    };
+        request.op;
     assert_eq!(cwd, "/tmp");
     assert_eq!(model.as_deref(), Some("opus"));
     assert_eq!(title.as_deref(), Some("hello"));
@@ -148,10 +142,7 @@ fn mints_a_claude_session_id_when_none_is_supplied() {
     let session = open_session_at(&mock.socket, no_id).expect("open should succeed");
 
     let request = mock.requests.recv_timeout(RECV_TIMEOUT).unwrap();
-    let monica_agent_runtime_protocol::RuntimeRequestOp::OpenClaudeSession { claude_session_id, .. } = request.op
-    else {
-        panic!("expected open_claude_session");
-    };
+    let monica_agent_runtime_protocol::RuntimeRequestOp::OpenClaudeSession { claude_session_id, .. } = request.op;
     let sent = claude_session_id.expect("the request should carry a minted id");
     uuid::Uuid::parse_str(&sent).expect("the minted id should be a uuid");
     assert_eq!(session.claude_session_id, sent);
@@ -179,7 +170,6 @@ fn err_response_surfaces_the_server_message() {
         Some(RuntimeResponse::Err {
             error: "cwd is not an existing directory: /nope".to_string(),
             indeterminate: false,
-            code: None,
         }),
     );
     let err = open_session_at(&mock.socket, params()).unwrap_err();
@@ -200,7 +190,6 @@ fn indeterminate_err_response_downcasts_with_the_sent_id() {
         Some(RuntimeResponse::Err {
             error: "claude session has an unconfirmed launch".to_string(),
             indeterminate: true,
-            code: None,
         }),
     );
     let err = open_session_at(&mock.socket, params()).unwrap_err();
@@ -238,10 +227,7 @@ fn lost_response_recovers_the_minted_id_through_the_typed_error() {
         .claude_session_id
         .clone();
     let request = mock.requests.recv_timeout(RECV_TIMEOUT).unwrap();
-    let monica_agent_runtime_protocol::RuntimeRequestOp::OpenClaudeSession { claude_session_id, .. } = request.op
-    else {
-        panic!("expected open_claude_session");
-    };
+    let monica_agent_runtime_protocol::RuntimeRequestOp::OpenClaudeSession { claude_session_id, .. } = request.op;
     assert_eq!(Some(recovered), claude_session_id, "the error must carry the id that was sent");
 }
 
@@ -279,7 +265,6 @@ fn v1_server_version_rejection_is_determinate() {
         Some(RuntimeResponse::Err {
             error: "agent runtime protocol version mismatch: client=2, server=1".to_string(),
             indeterminate: false,
-            code: None,
         }),
     );
     let err = open_session_at(&mock.socket, params()).unwrap_err();
@@ -298,10 +283,7 @@ fn relative_cwd_is_absolutized_before_sending() {
     open_session_at(&mock.socket, relative).expect("open should succeed");
 
     let request = mock.requests.recv_timeout(RECV_TIMEOUT).unwrap();
-    let monica_agent_runtime_protocol::RuntimeRequestOp::OpenClaudeSession { cwd, .. } = request.op
-    else {
-        panic!("expected open_claude_session");
-    };
+    let monica_agent_runtime_protocol::RuntimeRequestOp::OpenClaudeSession { cwd, .. } = request.op;
     let expected = std::path::absolute("rel-dir").unwrap();
     assert_eq!(cwd, expected.to_string_lossy());
 }

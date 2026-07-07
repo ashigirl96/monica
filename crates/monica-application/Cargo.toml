@@ -7,7 +7,6 @@ rust-version = "1.95"
 
 [dependencies]
 monica-domain = { path = "../monica-domain" }
-monica-terminal-protocol = { path = "../monica-terminal-protocol" }
 anyhow = "1.0.102"
 futures-util = { version = "0.3.32", default-features = false, features = ["alloc"] }
 log = "0.4"

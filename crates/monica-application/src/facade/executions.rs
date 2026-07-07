@@ -762,133 +762,6 @@ impl<B: Backend> ExecutionService<'_, B> {
         Ok(self.m.repos.list_claude_sessions()?)
     }
 
-    /// Submit one user message into an idle Claude session's PTY. The atomic claim
-    /// (idle → thinking) is the whole in-flight lock: of two concurrent senders exactly
-    /// one wins, and the loser gets `Conflict` without touching the PTY. Errors:
-    /// `Conflict` while a message is in flight, the user's input is awaited, or the
-    /// session has not proven ready (no hook observed yet); `NotFound` for an unknown id;
-    /// `Validation` for an ended session.
-    ///
-    /// The claim is optimistic — the PromptSubmitted hook re-asserts `thinking` moments
-    /// later, harmlessly. Human input is deliberately NOT excluded: a person typing into
-    /// the same PTY coexists with this API, which only re-derives state from hooks.
-    pub fn send_claude_user_message(
-        &mut self,
-        daemon: &impl TerminalDaemon,
-        claude_session_id: &str,
-        text: &str,
-    ) -> ApplicationResult<()> {
-        use crate::ports::ClaudePromptClaim;
-        match self.m.repos.claim_claude_session_thinking(claude_session_id)? {
-            ClaudePromptClaim::Claimed => {}
-            ClaudePromptClaim::Busy(status) => {
-                return Err(ApplicationError::conflict(format!(
-                    "claude session {claude_session_id} is busy ({}): one message may be \
-                     in flight per session",
-                    status.as_str()
-                )));
-            }
-            ClaudePromptClaim::Launching => {
-                return Err(ApplicationError::conflict(format!(
-                    "claude session {claude_session_id} is still launching; wait for it \
-                     to report idle"
-                )));
-            }
-            ClaudePromptClaim::Ended => {
-                return Err(ApplicationError::validation(format!(
-                    "claude session {claude_session_id} has ended"
-                )));
-            }
-            ClaudePromptClaim::NotFound => {
-                return Err(ApplicationError::not_found(format!(
-                    "claude session {claude_session_id} not found"
-                )));
-            }
-        }
-        let row = self.m.repos.get_claude_session(claude_session_id)?.ok_or_else(|| {
-            ApplicationError::external(format!(
-                "claude session {claude_session_id} vanished after its claim"
-            ))
-        })?;
-        let paste = monica_terminal_protocol::bracketed_paste_bytes(text);
-        let submit = daemon.write_input(&row.terminal_session_id, &paste).and_then(|()| {
-            std::thread::sleep(monica_terminal_protocol::SUBMIT_DELAY);
-            daemon.write_input(&row.terminal_session_id, b"\r")
-        });
-        if let Err(e) = submit {
-            // Release only a still-thinking row: a state a hook already moved on (the
-            // paste may have landed despite the failed ack) must not be overwritten. A
-            // failed release is logged, not fatal — the next hook self-corrects it.
-            if let Err(release_err) =
-                self.m.repos.release_claude_session_thinking(claude_session_id)
-            {
-                log::error!(
-                    target: "monica_application::claude_session",
-                    "failed to release the claim on {claude_session_id}: {release_err:#}"
-                );
-            }
-            return Err(ApplicationError::external(format!(
-                "failed to write the message into session {}: {e:#}; whether it reached \
-                 claude is unknown — do not blindly resend",
-                row.terminal_session_id
-            )));
-        }
-        self.m.events.emit(ApplicationEvent::ClaudeSessionStateChanged {
-            claude_session_id: row.claude_session_id,
-            tab_id: row.tab_id,
-            session_status: row.status,
-            conversation_status: monica_domain::ClaudeConversationStatus::Thinking,
-            wait_reason: None,
-        });
-        Ok(())
-    }
-
-    /// Send ESC into the session's PTY to stop the current turn, then optimistically
-    /// settle a thinking claim back to idle. The optimism is load-bearing: Claude Code
-    /// fires no Stop hook on a user interrupt, so waiting for hooks would leave the
-    /// conversation stuck at `thinking` and every future send rejected as Busy. If the
-    /// ESC did not actually land, the next hook overwrites the state anyway.
-    pub fn interrupt_claude_session(
-        &mut self,
-        daemon: &impl TerminalDaemon,
-        claude_session_id: &str,
-    ) -> ApplicationResult<()> {
-        let Some(row) = self.m.repos.get_claude_session(claude_session_id)? else {
-            return Err(ApplicationError::not_found(format!(
-                "claude session {claude_session_id} not found"
-            )));
-        };
-        match row.status {
-            ClaudeSessionStatus::Active => {}
-            ClaudeSessionStatus::Ended => {
-                return Err(ApplicationError::validation(format!(
-                    "claude session {claude_session_id} has ended"
-                )));
-            }
-            ClaudeSessionStatus::Pending => {
-                return Err(ApplicationError::conflict(format!(
-                    "claude session {claude_session_id} is still launching"
-                )));
-            }
-        }
-        daemon.write_input(&row.terminal_session_id, b"\x1b").map_err(|e| {
-            ApplicationError::external(format!(
-                "failed to write the interrupt into session {}: {e:#}",
-                row.terminal_session_id
-            ))
-        })?;
-        self.m.repos.release_claude_session_thinking(claude_session_id)?;
-        let settled = self.m.repos.get_claude_session(claude_session_id)?.unwrap_or(row);
-        self.m.events.emit(ApplicationEvent::ClaudeSessionStateChanged {
-            claude_session_id: settled.claude_session_id,
-            tab_id: settled.tab_id,
-            session_status: settled.status,
-            conversation_status: settled.conversation_status,
-            wait_reason: settled.wait_reason,
-        });
-        Ok(())
-    }
-
     /// Record a hook for a Claude Runtime session (env `MONICA_CLAUDE_SESSION_ID`
     /// present, no task context). DB-only by design: the hook runs in a short-lived CLI
     /// process whose EventSink is a no-op, so UI delivery happens when the desktop drain
@@ -938,14 +811,17 @@ impl<B: Backend> ExecutionService<'_, B> {
             let Some(row) = self.m.repos.get_claude_session(session_id)? else {
                 continue;
             };
+            self.m.events.emit(ApplicationEvent::ClaudeSessionStateChanged {
+                claude_session_id: row.claude_session_id.clone(),
+                tab_id: row.tab_id.clone(),
+                session_status: row.status,
+                conversation_status: row.conversation_status,
+                wait_reason: row.wait_reason,
+            });
             let turn_landed = events.iter().any(|event| {
                 event.claude_session_id == *session_id
                     && matches!(event.kind.as_str(), "turn_completed" | "session_ended")
             });
-            // Messages before the state snapshot: a subscriber treating Idle as "the turn
-            // is over" should already hold the turn's assistant output when it arrives
-            // (best effort — a recheck flush still lands after). The state is emitted
-            // even when the transcript read fails.
             if turn_landed {
                 // A transcript read failure must not abort the batch: the events are
                 // already durable, so we still consume them below and let the persisted
@@ -965,13 +841,6 @@ impl<B: Backend> ExecutionService<'_, B> {
                     recheck.push(session_id.to_string());
                 }
             }
-            self.m.events.emit(ApplicationEvent::ClaudeSessionStateChanged {
-                claude_session_id: row.claude_session_id.clone(),
-                tab_id: row.tab_id.clone(),
-                session_status: row.status,
-                conversation_status: row.conversation_status,
-                wait_reason: row.wait_reason,
-            });
         }
         let ids: Vec<i64> = events.iter().map(|event| event.id).collect();
         self.m.repos.mark_claude_session_events_consumed(&ids)?;

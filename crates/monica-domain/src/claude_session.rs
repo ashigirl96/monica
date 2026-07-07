@@ -125,15 +125,6 @@ pub struct ClaudeSession {
 
 impl ClaudeSession {
     /// The session id the transcript JSONL is currently keyed by.
-    /// The conversation state an observer may trust, or `None` while no hook has been
-    /// observed yet (`provider_session_id` unset): `conversation_status` also reads
-    /// `idle` on a row whose Claude has not booted — that is the column default, not an
-    /// observation. The Rust-side twin of the prompt claim's readiness gate
-    /// (`provider_session_id IS NOT NULL`).
-    pub fn observed_conversation_status(&self) -> Option<ClaudeConversationStatus> {
-        self.provider_session_id.as_ref().map(|_| self.conversation_status)
-    }
-
     pub fn transcript_session_id(&self) -> &str {
         self.provider_session_id
             .as_deref()

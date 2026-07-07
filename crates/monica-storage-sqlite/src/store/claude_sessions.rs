@@ -1,6 +1,6 @@
 use anyhow::Result;
 use monica_application::ports::{
-    ClaudePromptClaim, ClaudeSessionEvent, ClaudeSessionObservation, ClaudeSessionRepository,
+    ClaudeSessionEvent, ClaudeSessionObservation, ClaudeSessionRepository,
 };
 use monica_domain::{
     ClaudeConversationStatus, ClaudeLaunchPhase, ClaudeSession, ClaudeSessionStatus,
@@ -284,55 +284,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// One conditional UPDATE is the whole lock: SQLite serializes writers, so of two
-    /// concurrent claims exactly one sees the idle row and flips it. The
-    /// `provider_session_id IS NOT NULL` clause is the readiness gate — `idle` is also
-    /// the column default on a row whose Claude has not booted yet (no hook observed),
-    /// and pasting into that PTY would land before the TUI enables paste handling.
-    pub fn claim_claude_session_thinking(
-        &mut self,
-        claude_session_id: &str,
-    ) -> Result<ClaudePromptClaim> {
-        let idle = ClaudeConversationStatus::Idle.as_str();
-        let thinking = ClaudeConversationStatus::Thinking.as_str();
-        let active = ClaudeSessionStatus::Active.as_str();
-        let updated = self.conn().execute(
-            &format!(
-                "UPDATE claude_sessions SET conversation_status = '{thinking}'
-                  WHERE claude_session_id = ?1 AND conversation_status = '{idle}'
-                    AND status = '{active}' AND provider_session_id IS NOT NULL"
-            ),
-            params![claude_session_id],
-        )?;
-        if updated > 0 {
-            return Ok(ClaudePromptClaim::Claimed);
-        }
-        let Some(row) = self.get_claude_session(claude_session_id)? else {
-            return Ok(ClaudePromptClaim::NotFound);
-        };
-        Ok(match row.status {
-            ClaudeSessionStatus::Ended => ClaudePromptClaim::Ended,
-            ClaudeSessionStatus::Pending => ClaudePromptClaim::Launching,
-            ClaudeSessionStatus::Active if row.provider_session_id.is_none() => {
-                ClaudePromptClaim::Launching
-            }
-            ClaudeSessionStatus::Active => ClaudePromptClaim::Busy(row.conversation_status),
-        })
-    }
-
-    pub fn release_claude_session_thinking(&mut self, claude_session_id: &str) -> Result<bool> {
-        let idle = ClaudeConversationStatus::Idle.as_str();
-        let thinking = ClaudeConversationStatus::Thinking.as_str();
-        let updated = self.conn().execute(
-            &format!(
-                "UPDATE claude_sessions SET conversation_status = '{idle}'
-                  WHERE claude_session_id = ?1 AND conversation_status = '{thinking}'"
-            ),
-            params![claude_session_id],
-        )?;
-        Ok(updated > 0)
-    }
-
     pub fn list_claude_sessions(&self) -> Result<Vec<ClaudeSession>> {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {CLAUDE_SESSION_COLUMNS} FROM claude_sessions ORDER BY created_at"
@@ -414,16 +365,5 @@ impl ClaudeSessionRepository for SqliteStore {
         offset: u64,
     ) -> Result<()> {
         SqliteStore::set_claude_session_jsonl_offset(self, claude_session_id, offset)
-    }
-
-    fn claim_claude_session_thinking(
-        &mut self,
-        claude_session_id: &str,
-    ) -> Result<ClaudePromptClaim> {
-        SqliteStore::claim_claude_session_thinking(self, claude_session_id)
-    }
-
-    fn release_claude_session_thinking(&mut self, claude_session_id: &str) -> Result<bool> {
-        SqliteStore::release_claude_session_thinking(self, claude_session_id)
     }
 }

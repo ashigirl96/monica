@@ -20,22 +20,6 @@ pub struct ClaudeSessionObservation<'a> {
     pub mark_ended: bool,
 }
 
-/// The outcome of trying to claim a session for one in-flight user message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ClaudePromptClaim {
-    /// The session was idle and is now marked thinking; the caller owns the send.
-    Claimed,
-    /// A message is in flight or the session is waiting on the user.
-    Busy(ClaudeConversationStatus),
-    /// The session has not proven ready for input: the open is still pending, or no hook
-    /// has been observed yet (`provider_session_id` is unset). The row's
-    /// `conversation_status` may already read `idle` — that is the column default, not a
-    /// hook observation — so it must not be trusted as readiness.
-    Launching,
-    Ended,
-    NotFound,
-}
-
 /// A row of the `claude_session_events` log/outbox, written by the hook process and
 /// drained by the desktop worker.
 #[derive(Debug, Clone, PartialEq)]
@@ -116,16 +100,4 @@ pub trait ClaudeSessionRepository {
         claude_session_id: &str,
         offset: u64,
     ) -> Result<()>;
-
-    /// Atomically claim the session for one in-flight user message: idle → thinking, in a
-    /// single conditional UPDATE so two concurrent senders cannot both win. Requires a
-    /// hook to have been observed (`provider_session_id` set) — see
-    /// [`ClaudePromptClaim::Launching`].
-    fn claim_claude_session_thinking(&mut self, claude_session_id: &str)
-        -> Result<ClaudePromptClaim>;
-
-    /// Undo a claim (or optimistically settle after an interrupt): thinking → idle, only
-    /// if the row is still thinking — a state a hook moved on is not overwritten. `false`
-    /// means nothing changed.
-    fn release_claude_session_thinking(&mut self, claude_session_id: &str) -> Result<bool>;
 }

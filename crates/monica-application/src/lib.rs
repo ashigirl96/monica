@@ -33,9 +33,8 @@ pub use facade::{
 };
 
 pub use ports::{
-    AgentDecoders, AgentEventDecoder, ClaudePromptClaim, ClaudeSessionEvent,
-    ClaudeSessionObservation, ClaudeSessionRepository, ClaudeToolUse, ClaudeTranscriptReader,
-    ClaudeTranscriptRecord,
+    AgentDecoders, AgentEventDecoder, ClaudeSessionEvent, ClaudeSessionObservation,
+    ClaudeSessionRepository, ClaudeToolUse, ClaudeTranscriptReader, ClaudeTranscriptRecord,
     ClaudeTranscriptRecordKind, EventRepository, GitGateway,
     NotebookGateway, NotificationOutboxStore, ProjectRepository, PullRequestSyncStore,
     TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter, TerminalAttachment,

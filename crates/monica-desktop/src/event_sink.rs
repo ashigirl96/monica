@@ -1,6 +1,6 @@
 use monica_api::ApiError;
 use monica_application::{ApplicationEvent, EventSink};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tauri_specta::Event;
 
 use crate::commands::pull_request::PrSyncCompleted;
@@ -46,15 +46,6 @@ impl TauriEventSink {
 
 impl EventSink for TauriEventSink {
     fn emit(&self, event: ApplicationEvent) {
-        // Socket subscribers see every Claude-session event any façade emits, because
-        // every façade emits through this sink. `try_state` guards the window before
-        // setup manages the broadcaster.
-        if let Some(broadcaster) = self
-            .app
-            .try_state::<std::sync::Arc<crate::agent_runtime_events::ClaudeSessionBroadcaster>>()
-        {
-            broadcaster.publish(&event);
-        }
         match event {
             ApplicationEvent::TaskRunStatusChanged { task_id, task_run_id, status } => {
                 let _ = TaskRunStatusChanged {

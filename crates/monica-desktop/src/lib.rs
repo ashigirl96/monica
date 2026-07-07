@@ -1,4 +1,3 @@
-mod agent_runtime_events;
 mod commands;
 mod event_sink;
 mod native_menu;
@@ -119,11 +118,6 @@ pub fn run() {
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             specta_builder.mount_events(app);
-            // Before any scheduler starts: the sink publishes through this state, so it
-            // must exist before the first façade can emit.
-            app.manage(std::sync::Arc::new(
-                agent_runtime_events::ClaudeSessionBroadcaster::default(),
-            ));
             let waker = schedulers::pull_request_sync::start(app.handle().clone());
             app.manage(waker);
             let drain = schedulers::notification_drain::start(app.handle().clone());
