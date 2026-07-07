@@ -7,14 +7,8 @@
 //! Defaults to asking 「今日の日付を教えて」. Targets the instance selected by
 //! `MONICA_HOME` (unset = prod `~/monica`); the Monica app must be running.
 
-use std::time::Duration;
-
 use anyhow::{bail, Result};
 use monica_claude_sdk::{ClaudeRuntime, CreateSessionParams, SessionBusy, SessionEvent};
-
-/// Grace window after Idle for transcript records the drain flushes late (its recheck
-/// re-polls for up to 3s after a turn completes).
-const LATE_FLUSH_WINDOW: Duration = Duration::from_secs(3);
 
 fn main() {
     if let Err(err) = run() {
@@ -56,16 +50,12 @@ fn run() -> Result<()> {
             SessionEvent::AwaitingUser { wait_reason } => {
                 eprintln!("[awaiting user: {}]", wait_reason.as_deref().unwrap_or("input"));
             }
+            // Idle arrives only after the turn's messages have been delivered, so there
+            // is nothing left to drain.
             SessionEvent::Idle { subagents_running } => {
                 if subagents_running {
                     eprintln!("(subagents still running — waiting for the next turn)");
                     continue;
-                }
-                while let Some(event) = session.next_event_timeout(LATE_FLUSH_WINDOW)? {
-                    if let SessionEvent::AssistantMessage { text } = event {
-                        println!("{text}");
-                        answered = true;
-                    }
                 }
                 if answered {
                     return Ok(());

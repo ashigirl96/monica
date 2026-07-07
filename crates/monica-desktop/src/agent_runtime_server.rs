@@ -202,7 +202,7 @@ fn session_error_response(e: &monica_application::ApplicationError) -> RuntimeRe
     }
 }
 
-fn home_dir() -> Result<PathBuf> {
+pub(crate) fn home_dir() -> Result<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .ok_or_else(|| anyhow::anyhow!("HOME is not set; cannot resolve the transcript path"))

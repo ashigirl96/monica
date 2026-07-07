@@ -11,13 +11,14 @@
 //! the `jsonl_offset` cursor has a single writer and events reach subscribers in emit
 //! order.
 //!
-//! A turn that settled into Idle/Ended before its assistant output was observed has its
-//! state snapshot withheld by the drain (`deferred_states`); this worker releases it —
-//! never before the messages — via the transcript tail: a consumed transcript ending on
-//! an assistant record has delivered its response (mid-turn assistant records are always
-//! followed by a tool_result user record), one ending elsewhere still owes it, and the
-//! next watch wakeup (or [`STATE_FLUSH_DEADLINE`], for turns with no assistant output at
-//! all) resolves it.
+//! A watched turn that settled into Idle/Ended before its response was fully consumed
+//! has its state snapshot withheld by the drain (`deferred_states`); this worker
+//! releases it — never before the messages — via the transcript tail: a consumed
+//! transcript ending on an assistant record has delivered its response (mid-turn
+//! assistant records are always followed by a tool_result user record), one ending
+//! elsewhere still owes it, and the next watch wakeup (or [`STATE_FLUSH_DEADLINE`], for
+//! turns with no assistant output at all) resolves it. Sessions no one watches release
+//! immediately — there is no subscriber stream to order against.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -29,6 +30,7 @@ use std::time::{Duration, Instant};
 
 use monica_application::{ClaudeSessionDrainOutcome, TranscriptPoll};
 
+use crate::transcript_watch::SessionWatchRegistry;
 use crate::{InFlightGuard, MonicaFacade};
 
 const DRAIN_INTERVAL: Duration = Duration::from_millis(750);
@@ -42,18 +44,14 @@ const STATE_FLUSH_DEADLINE: Duration = Duration::from_secs(2);
 /// next append or the turn's own drain re-polls from the persisted cursor.
 const SIGNAL_BUFFER: usize = 64;
 
-enum DrainSignal {
-    Transcript(String),
-}
-
 #[derive(Clone)]
-pub struct ClaudeSessionDrainHandle(mpsc::SyncSender<DrainSignal>);
+pub struct ClaudeSessionDrainHandle(mpsc::SyncSender<String>);
 
 impl ClaudeSessionDrainHandle {
     /// Ask the worker to poll this session's transcript now. Fire-and-forget from the
     /// watcher's thread; a full queue is fine (see [`SIGNAL_BUFFER`]).
     pub fn wake_transcript(&self, claude_session_id: &str) {
-        let _ = self.0.try_send(DrainSignal::Transcript(claude_session_id.to_string()));
+        let _ = self.0.try_send(claude_session_id.to_string());
     }
 }
 
@@ -88,18 +86,23 @@ impl DrainOps for FacadeOps<'_> {
 }
 
 /// State snapshots withheld until their turn's assistant output has been delivered.
-#[derive(Default)]
 struct DeferredStates {
+    watched: SessionWatchRegistry,
     /// Withheld sessions and when their deferral started (the release deadline anchor).
     pending: HashMap<String, Instant>,
     /// Whether the last transcript record consumed for a session was an assistant
-    /// record — the "response delivered" signal (see the module docs).
+    /// record — the "response delivered" signal (see the module docs). Fed by both the
+    /// wakeup polls and the drain's own reads, and pruned to the watched/pending set.
     tail_is_assistant: HashMap<String, bool>,
 }
 
 impl DeferredStates {
+    fn new(watched: SessionWatchRegistry) -> Self {
+        Self { watched, pending: HashMap::new(), tail_is_assistant: HashMap::new() }
+    }
+
     /// A watch wakeup: poll the session's transcript, and release its withheld state if
-    /// the response has now been observed.
+    /// the response has now been fully consumed.
     fn handle_transcript(&mut self, ops: &mut impl DrainOps, claude_session_id: &str) {
         let poll = match ops.poll_transcript(claude_session_id) {
             Ok(poll) => poll,
@@ -114,7 +117,9 @@ impl DeferredStates {
         if let Some(tail) = poll.tail_is_assistant {
             self.tail_is_assistant.insert(claude_session_id.to_string(), tail);
         }
-        if poll.saw_assistant && self.pending.contains_key(claude_session_id) {
+        if self.pending.contains_key(claude_session_id)
+            && self.tail_is_assistant.get(claude_session_id) == Some(&true)
+        {
             self.release(ops, claude_session_id);
         }
     }
@@ -140,16 +145,11 @@ impl DeferredStates {
             self.pending.remove(&claude_session_id);
         }
         for claude_session_id in outcome.deferred_states {
-            match self.tail_is_assistant.get(&claude_session_id) {
-                Some(false) => {
-                    self.pending.insert(claude_session_id, now);
-                }
-                // `Some(true)`: the watcher already streamed the response. `None`: no
-                // watcher covers this session (no subscriber), so there is no one to
-                // order against — emit as it always did.
-                Some(true) | None => {
-                    let _ = ops.emit_state(&claude_session_id);
-                }
+            let streamed = self.tail_is_assistant.get(&claude_session_id) == Some(&true);
+            if streamed || !self.watched.is_watched(&claude_session_id) {
+                self.release(ops, &claude_session_id);
+            } else {
+                self.pending.insert(claude_session_id, now);
             }
         }
     }
@@ -171,6 +171,17 @@ impl DeferredStates {
         }
     }
 
+    /// Drop tail entries no deferral or watcher can ever read again, so the map tracks
+    /// the live subscription set instead of every session the process has seen.
+    fn prune_tails(&mut self) {
+        let pending = &self.pending;
+        let watched = &self.watched;
+        self.tail_is_assistant
+            .retain(|claude_session_id, _| {
+                pending.contains_key(claude_session_id) || watched.is_watched(claude_session_id)
+            });
+    }
+
     fn release(&mut self, ops: &mut impl DrainOps, claude_session_id: &str) {
         if let Err(e) = ops.emit_state(claude_session_id) {
             log::warn!(
@@ -182,22 +193,26 @@ impl DeferredStates {
     }
 }
 
-pub fn start_claude_session_drain<F>(make_facade: F, home: PathBuf) -> ClaudeSessionDrainHandle
+pub fn start_claude_session_drain<F>(
+    make_facade: F,
+    home: PathBuf,
+    watched: SessionWatchRegistry,
+) -> ClaudeSessionDrainHandle
 where
     F: Fn() -> anyhow::Result<MonicaFacade> + Send + 'static,
 {
     let in_flight = Arc::new(AtomicBool::new(false));
-    let (tx, rx) = mpsc::sync_channel::<DrainSignal>(SIGNAL_BUFFER);
+    let (tx, rx) = mpsc::sync_channel::<String>(SIGNAL_BUFFER);
     let spawn_result = std::thread::Builder::new()
         .name("monica-claude-session-drain".to_string())
         .spawn(move || {
-            let mut deferred = DeferredStates::default();
+            let mut deferred = DeferredStates::new(watched);
             let mut last_sweep: Option<Instant> = None;
             let mut next_drain = Instant::now() + DRAIN_INTERVAL;
             loop {
                 let wait = next_drain.saturating_duration_since(Instant::now());
                 let first = match rx.recv_timeout(wait) {
-                    Ok(signal) => Some(signal),
+                    Ok(claude_session_id) => Some(claude_session_id),
                     Err(mpsc::RecvTimeoutError::Timeout) => None,
                     Err(mpsc::RecvTimeoutError::Disconnected) => break,
                 };
@@ -208,11 +223,9 @@ where
                 // Coalesce the queued wakeups: polling a session once covers every
                 // append signalled so far (the read starts at the persisted cursor).
                 let mut transcripts: HashSet<String> = HashSet::new();
-                if let Some(DrainSignal::Transcript(id)) = first {
-                    transcripts.insert(id);
-                }
-                while let Ok(DrainSignal::Transcript(id)) = rx.try_recv() {
-                    transcripts.insert(id);
+                transcripts.extend(first);
+                while let Ok(claude_session_id) = rx.try_recv() {
+                    transcripts.insert(claude_session_id);
                 }
                 let mut monica = match make_facade() {
                     Ok(m) => m,
@@ -241,6 +254,7 @@ where
                     next_drain = Instant::now() + DRAIN_INTERVAL;
                 }
                 deferred.flush_expired(&mut ops, Instant::now());
+                deferred.prune_tails();
                 if last_sweep.is_none_or(|t| t.elapsed() >= SWEEP_INTERVAL) {
                     sweep_tick(&mut monica);
                     last_sweep = Some(Instant::now());
@@ -283,11 +297,10 @@ mod tests {
     }
 
     impl FakeOps {
-        fn prime_poll(&self, id: &str, saw_assistant: bool, tail: Option<bool>) {
-            self.polls.borrow_mut().insert(
-                id.to_string(),
-                TranscriptPoll { saw_assistant, tail_is_assistant: tail },
-            );
+        fn prime_poll(&self, id: &str, tail: Option<bool>) {
+            self.polls
+                .borrow_mut()
+                .insert(id.to_string(), TranscriptPoll { tail_is_assistant: tail });
         }
 
         fn calls(&self) -> Vec<Call> {
@@ -311,6 +324,35 @@ mod tests {
         }
     }
 
+    /// A DeferredStates whose registry marks `watched_ids` as streamed by a subscriber.
+    fn deferred_watching(watched_ids: &[&str]) -> (DeferredStates, Vec<crate::transcript_watch::WatchRetainGuard>) {
+        let registry = SessionWatchRegistry::default();
+        let handle = crate::transcript_watch::transcript_watch_with_backend(
+            std::env::temp_dir().join(format!(
+                "monica-draintest-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            )),
+            registry.clone(),
+            |_| {},
+            |_| Ok(Box::new(NoopBackend)),
+        )
+        .unwrap();
+        let guards =
+            watched_ids.iter().map(|id| handle.retain(id, "/w/drain-test")).collect();
+        (DeferredStates::new(registry), guards)
+    }
+
+    struct NoopBackend;
+
+    impl crate::transcript_watch::WatchBackend for NoopBackend {
+        fn watch_dir(&mut self, _dir: &std::path::Path) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn unwatch_dir(&mut self, _dir: &std::path::Path) {}
+    }
+
     fn outcome_deferring(id: &str) -> ClaudeSessionDrainOutcome {
         ClaudeSessionDrainOutcome {
             drained: 1,
@@ -325,8 +367,8 @@ mod tests {
         // The watcher streamed the whole turn (final read ended on the assistant record)
         // before the outbox tick — the withheld Idle must not wait for the deadline.
         let ops = FakeOps::default();
-        let mut deferred = DeferredStates::default();
-        ops.prime_poll("cs-1", true, Some(true));
+        let (mut deferred, _guards) = deferred_watching(&["cs-1"]);
+        ops.prime_poll("cs-1", Some(true));
         deferred.handle_transcript(&mut &ops, "cs-1");
         ops.calls();
 
@@ -341,16 +383,16 @@ mod tests {
         // Mid-turn assistant records were streamed but the transcript last ended on a
         // tool_result user record: the final response is still owed, Idle must wait.
         let ops = FakeOps::default();
-        let mut deferred = DeferredStates::default();
-        ops.prime_poll("cs-1", true, Some(false));
+        let (mut deferred, _guards) = deferred_watching(&["cs-1"]);
+        ops.prime_poll("cs-1", Some(false));
         deferred.handle_transcript(&mut &ops, "cs-1");
         ops.calls();
 
         deferred.handle_drain_outcome(&mut &ops, outcome_deferring("cs-1"), Instant::now());
         assert_eq!(ops.calls(), Vec::new(), "the withheld Idle must not be emitted yet");
 
-        // The late flush arrives: the wakeup polls, sees the assistant, and releases.
-        ops.prime_poll("cs-1", true, Some(true));
+        // The late flush arrives: the wakeup polls, sees the assistant tail, releases.
+        ops.prime_poll("cs-1", Some(true));
         deferred.handle_transcript(&mut &ops, "cs-1");
         assert_eq!(
             ops.calls(),
@@ -360,11 +402,31 @@ mod tests {
     }
 
     #[test]
-    fn unwatched_sessions_release_immediately() {
-        // No watcher ever polled this session (no subscriber): there is no stream to
-        // order against, so the state goes out as it always did.
+    fn a_wakeup_containing_only_a_mid_turn_assistant_does_not_release() {
+        // A coalesced read can hold a mid-turn assistant record followed by its
+        // tool_result: the response is still owed, whatever the read contained.
         let ops = FakeOps::default();
-        let mut deferred = DeferredStates::default();
+        let (mut deferred, _guards) = deferred_watching(&["cs-1"]);
+        ops.prime_poll("cs-1", Some(false));
+        deferred.handle_transcript(&mut &ops, "cs-1");
+        deferred.handle_drain_outcome(&mut &ops, outcome_deferring("cs-1"), Instant::now());
+        ops.calls();
+
+        // Another append lands: assistant(tool_use) + user(tool_result) — tail is still
+        // the tool_result even though an assistant record was consumed.
+        ops.prime_poll("cs-1", Some(false));
+        deferred.handle_transcript(&mut &ops, "cs-1");
+
+        assert_eq!(ops.calls(), vec![Call::Poll("cs-1".to_string())]);
+        assert!(deferred.pending.contains_key("cs-1"));
+    }
+
+    #[test]
+    fn unwatched_sessions_release_immediately() {
+        // No subscriber holds a watch on this session: there is no stream to order
+        // against, so the state goes out as it always did.
+        let ops = FakeOps::default();
+        let mut deferred = DeferredStates::new(SessionWatchRegistry::default());
 
         deferred.handle_drain_outcome(&mut &ops, outcome_deferring("cs-1"), Instant::now());
 
@@ -372,18 +434,16 @@ mod tests {
     }
 
     #[test]
-    fn a_wakeup_without_the_assistant_record_keeps_the_state_pending() {
+    fn a_watched_session_with_no_consumed_records_still_defers() {
+        // The subscriber is real but nothing has been consumed yet (the transcript file
+        // is created lazily, or FSEvents lags): absence of a tail must not be read as
+        // "unwatched" — the state waits for the wakeup or the deadline.
         let ops = FakeOps::default();
-        let mut deferred = DeferredStates::default();
-        ops.prime_poll("cs-1", false, Some(false));
-        deferred.handle_transcript(&mut &ops, "cs-1");
+        let (mut deferred, _guards) = deferred_watching(&["cs-1"]);
+
         deferred.handle_drain_outcome(&mut &ops, outcome_deferring("cs-1"), Instant::now());
-        ops.calls();
 
-        // Another append lands, still no assistant (a tool_result flush).
-        deferred.handle_transcript(&mut &ops, "cs-1");
-
-        assert_eq!(ops.calls(), vec![Call::Poll("cs-1".to_string())]);
+        assert_eq!(ops.calls(), Vec::new());
         assert!(deferred.pending.contains_key("cs-1"));
     }
 
@@ -392,8 +452,8 @@ mod tests {
         // A lost wakeup must not strand the messages behind the state: the expiry path
         // reads the transcript (emitting anything found) before the snapshot goes out.
         let ops = FakeOps::default();
-        let mut deferred = DeferredStates::default();
-        ops.prime_poll("cs-1", false, Some(false));
+        let (mut deferred, _guards) = deferred_watching(&["cs-1"]);
+        ops.prime_poll("cs-1", Some(false));
         deferred.handle_transcript(&mut &ops, "cs-1");
         let deferred_at = Instant::now();
         deferred.handle_drain_outcome(&mut &ops, outcome_deferring("cs-1"), deferred_at);
@@ -410,16 +470,16 @@ mod tests {
 
     #[test]
     fn the_deadline_release_still_orders_messages_first_when_the_flush_landed() {
-        // The expiry poll itself finds the assistant record: handle_transcript releases
+        // The expiry poll itself finds the assistant tail: handle_transcript releases
         // via the normal path and the follow-up release is not doubled.
         let ops = FakeOps::default();
-        let mut deferred = DeferredStates::default();
-        ops.prime_poll("cs-1", false, Some(false));
+        let (mut deferred, _guards) = deferred_watching(&["cs-1"]);
+        ops.prime_poll("cs-1", Some(false));
         deferred.handle_transcript(&mut &ops, "cs-1");
         let deferred_at = Instant::now();
         deferred.handle_drain_outcome(&mut &ops, outcome_deferring("cs-1"), deferred_at);
         ops.calls();
-        ops.prime_poll("cs-1", true, Some(true));
+        ops.prime_poll("cs-1", Some(true));
 
         deferred.flush_expired(&mut &ops, deferred_at + STATE_FLUSH_DEADLINE);
 
@@ -433,8 +493,8 @@ mod tests {
     #[test]
     fn a_pending_state_not_yet_expired_is_left_alone() {
         let ops = FakeOps::default();
-        let mut deferred = DeferredStates::default();
-        ops.prime_poll("cs-1", false, Some(false));
+        let (mut deferred, _guards) = deferred_watching(&["cs-1"]);
+        ops.prime_poll("cs-1", Some(false));
         deferred.handle_transcript(&mut &ops, "cs-1");
         let deferred_at = Instant::now();
         deferred.handle_drain_outcome(&mut &ops, outcome_deferring("cs-1"), deferred_at);
@@ -452,8 +512,8 @@ mod tests {
         // records ending on a tool_result: that read must overwrite the cache, or the
         // stale assistant tail would release turn 2's withheld Idle before its response.
         let ops = FakeOps::default();
-        let mut deferred = DeferredStates::default();
-        ops.prime_poll("cs-1", true, Some(true));
+        let (mut deferred, _guards) = deferred_watching(&["cs-1"]);
+        ops.prime_poll("cs-1", Some(true));
         deferred.handle_transcript(&mut &ops, "cs-1");
         ops.calls();
 
@@ -461,7 +521,7 @@ mod tests {
             drained: 1,
             transcript_polls: vec![(
                 "cs-1".to_string(),
-                TranscriptPoll { saw_assistant: false, tail_is_assistant: Some(false) },
+                TranscriptPoll { tail_is_assistant: Some(false) },
             )],
             deferred_states: vec!["cs-1".to_string()],
             states_emitted: Vec::new(),
@@ -474,11 +534,12 @@ mod tests {
 
     #[test]
     fn a_state_emitted_by_a_later_drain_supersedes_the_deferral() {
-        // A new turn's state landing normally must clear the old deferral, or the stale
-        // Idle would be re-broadcast at the deadline (the #338 bug re-introduced).
+        // A new turn's state landing normally must clear the old deferral, or a stale
+        // Idle would be re-broadcast at the deadline — a subscriber reads that as the
+        // next turn's completion.
         let ops = FakeOps::default();
-        let mut deferred = DeferredStates::default();
-        ops.prime_poll("cs-1", false, Some(false));
+        let (mut deferred, _guards) = deferred_watching(&["cs-1"]);
+        ops.prime_poll("cs-1", Some(false));
         deferred.handle_transcript(&mut &ops, "cs-1");
         let deferred_at = Instant::now();
         deferred.handle_drain_outcome(&mut &ops, outcome_deferring("cs-1"), deferred_at);
@@ -495,5 +556,24 @@ mod tests {
 
         assert_eq!(ops.calls(), Vec::new(), "the superseded deferral must not fire");
         assert!(deferred.pending.is_empty());
+    }
+
+    #[test]
+    fn tails_of_released_unwatched_sessions_are_pruned() {
+        let ops = FakeOps::default();
+        let (mut deferred, guards) = deferred_watching(&["cs-1"]);
+        ops.prime_poll("cs-1", Some(true));
+        deferred.handle_transcript(&mut &ops, "cs-1");
+        assert!(deferred.tail_is_assistant.contains_key("cs-1"));
+
+        deferred.prune_tails();
+        assert!(deferred.tail_is_assistant.contains_key("cs-1"), "watched tails survive");
+
+        drop(guards);
+        deferred.prune_tails();
+        assert!(
+            deferred.tail_is_assistant.is_empty(),
+            "an unwatched, non-pending tail must not accumulate"
+        );
     }
 }

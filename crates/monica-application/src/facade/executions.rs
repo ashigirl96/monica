@@ -37,10 +37,11 @@ pub struct ClaudeSessionDrainOutcome {
     /// tail cached from one reader but not the other would judge a new turn by the
     /// previous turn's leftover record.
     pub transcript_polls: Vec<(String, TranscriptPoll)>,
-    /// Sessions whose turn completed into Idle/Ended but whose assistant output has not
-    /// been observed in this read — their state snapshot was withheld so a subscriber
-    /// never sees Idle before the turn's messages. The caller decides when to release
-    /// each one via [`ExecutionService::emit_claude_session_state`].
+    /// Sessions whose turn completed into Idle/Ended while this read's consumed tail was
+    /// not an assistant record (the response, or its final part, is still owed) — their
+    /// state snapshot was withheld so a subscriber never sees Idle before the turn's
+    /// messages. The caller decides when to release each one via
+    /// [`ExecutionService::emit_claude_session_state`].
     pub deferred_states: Vec<String>,
     /// Sessions whose state snapshot was emitted this tick — the caller must drop any
     /// deferral it still holds for them (a newer state supersedes it).
@@ -50,12 +51,11 @@ pub struct ClaudeSessionDrainOutcome {
 /// What one transcript read observed, beyond the records it emitted.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TranscriptPoll {
-    /// An assistant record was in this read — the turn's response (or part of it) landed.
-    pub saw_assistant: bool,
     /// Whether the last record consumed by this read is an assistant record; `None` when
     /// nothing was consumed. The transcript grammar makes this the turn-completion
     /// signal: a mid-turn assistant record is always followed by a tool_result user
-    /// record, so a transcript ending on an assistant record has delivered its response.
+    /// record, so a transcript ending on an assistant record has delivered its response —
+    /// merely *containing* one has not.
     pub tail_is_assistant: Option<bool>,
 }
 
@@ -1007,7 +1007,7 @@ impl<B: Backend> ExecutionService<'_, B> {
             });
             // Messages before the state snapshot: a subscriber treating Idle as "the turn
             // is over" must already hold the turn's assistant output when it arrives.
-            let mut saw_assistant = false;
+            let mut response_delivered = false;
             if turn_landed {
                 // A transcript read failure must not abort the batch: the events are
                 // already durable, so we still consume them below and let the persisted
@@ -1023,7 +1023,7 @@ impl<B: Backend> ExecutionService<'_, B> {
                         TranscriptPoll::default()
                     }
                 };
-                saw_assistant = poll.saw_assistant;
+                response_delivered = poll.tail_is_assistant == Some(true);
                 transcript_polls.push((session_id.to_string(), poll));
             }
             // A batch of only state-neutral events (idle notifications, inert markers)
@@ -1038,7 +1038,7 @@ impl<B: Backend> ExecutionService<'_, B> {
             }
             let settled = row.status == ClaudeSessionStatus::Ended
                 || row.conversation_status == monica_domain::ClaudeConversationStatus::Idle;
-            if turn_landed && !saw_assistant && settled {
+            if turn_landed && !response_delivered && settled {
                 deferred_states.push(row.claude_session_id.clone());
             } else {
                 states_emitted.push(row.claude_session_id.clone());
@@ -1123,19 +1123,17 @@ impl<B: Backend> ExecutionService<'_, B> {
                 .repos
                 .set_claude_session_jsonl_offset(&row.claude_session_id, chunk.new_offset)?;
         }
-        if chunk.records.is_empty() {
-            return Ok(TranscriptPoll::default());
-        }
-        let is_assistant = |record: &crate::ports::ClaudeTranscriptRecord| {
-            matches!(
-                record.kind,
-                crate::ports::ClaudeTranscriptRecordKind::Assistant { .. }
-            )
-        };
         let poll = TranscriptPoll {
-            saw_assistant: chunk.records.iter().any(is_assistant),
-            tail_is_assistant: chunk.records.last().map(is_assistant),
+            tail_is_assistant: chunk.records.last().map(|record| {
+                matches!(
+                    record.kind,
+                    crate::ports::ClaudeTranscriptRecordKind::Assistant { .. }
+                )
+            }),
         };
+        if chunk.records.is_empty() {
+            return Ok(poll);
+        }
         self.m.events.emit(ApplicationEvent::ClaudeSessionMessages {
             claude_session_id: row.claude_session_id.clone(),
             records: chunk.records,

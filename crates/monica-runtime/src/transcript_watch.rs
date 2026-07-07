@@ -3,10 +3,11 @@
 //! the entire data-path trigger: the watcher never reads a transcript and never emits an
 //! event — reading, cursor movement, and emission all stay on the drain thread.
 //!
-//! Watches are directory-scoped and refcounted twice: per session (several subscribers
-//! to one session share a retain) and per directory (several sessions in one cwd share a
-//! watch). The directory rather than the file is watched because Claude creates the
-//! `.jsonl` lazily on the first user message.
+//! Watches are directory-scoped: several subscribers to one session share a retain
+//! (counted in [`SessionWatchRegistry`]), and several sessions in one cwd share a watch
+//! (the `dir → sessions` index doubles as the directory's liveness). The directory
+//! rather than the file is watched because Claude creates the `.jsonl` lazily on the
+//! first user message.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -30,32 +31,65 @@ impl WatchBackend for monica_adapters::claude::FsJsonlWatcher {
     }
 }
 
+/// Which sessions currently hold a transcript watch, shared with the drain worker: a
+/// state deferral only makes sense for a session someone is streaming, and the worker
+/// must ask the watch's own registry — inferring it from poll side-effects mistakes a
+/// watched-but-not-yet-flushed session for an unwatched one.
+#[derive(Clone, Default)]
+pub struct SessionWatchRegistry(Arc<Mutex<HashMap<String, usize>>>);
+
+impl SessionWatchRegistry {
+    pub fn is_watched(&self, claude_session_id: &str) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key(claude_session_id)
+    }
+
+    /// Increment the session's retain count, returning the new count.
+    fn retain(&self, claude_session_id: &str) -> usize {
+        let mut sessions = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let count = sessions.entry(claude_session_id.to_string()).or_insert(0);
+        *count += 1;
+        *count
+    }
+
+    /// Decrement the session's retain count, returning the new count (`None` when the
+    /// session was not registered).
+    fn release(&self, claude_session_id: &str) -> Option<usize> {
+        let mut sessions = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let count = sessions.get_mut(claude_session_id)?;
+        *count -= 1;
+        if *count == 0 {
+            sessions.remove(claude_session_id);
+            return Some(0);
+        }
+        Some(*count)
+    }
+}
+
 /// dir → sessions watching it; shared with the backend's event callback, which resolves
-/// a changed path back to the sessions to wake.
+/// a changed path back to the sessions to wake. An entry existing is also what keeps the
+/// directory watched — there is deliberately no separate per-directory refcount to keep
+/// in step with it.
 type DirIndex = Mutex<HashMap<PathBuf, HashSet<String>>>;
 
 struct WatchState {
     backend: Box<dyn WatchBackend>,
-    /// session → (its watch dir, how many retains hold it).
-    session_refs: HashMap<String, (PathBuf, usize)>,
-    /// dir → how many sessions hold a watch on it.
-    dir_refs: HashMap<PathBuf, usize>,
+    /// session → its watch dir, so release can find the dir without re-resolving.
+    session_dirs: HashMap<String, PathBuf>,
+    /// Dirs the backend accepted a watch for. A dir in the index but not here had its
+    /// watch fail — kept out so the next retain retries instead of latching the failure,
+    /// and so release never unwatches a dir that was never watched.
+    watched_dirs: HashSet<PathBuf>,
 }
 
+#[derive(Clone)]
 pub struct TranscriptWatchHandle {
     home: PathBuf,
+    registry: SessionWatchRegistry,
     state: Arc<Mutex<WatchState>>,
     index: Arc<DirIndex>,
-}
-
-impl Clone for TranscriptWatchHandle {
-    fn clone(&self) -> Self {
-        Self {
-            home: self.home.clone(),
-            state: Arc::clone(&self.state),
-            index: Arc::clone(&self.index),
-        }
-    }
 }
 
 /// A live retain, released on drop — the same RAII shape as the broadcaster's
@@ -75,9 +109,10 @@ impl Drop for WatchRetainGuard {
 /// watcher's thread whenever that session's transcript directory changes.
 pub fn start_transcript_watch(
     home: PathBuf,
+    registry: SessionWatchRegistry,
     wake: impl Fn(&str) + Send + Sync + 'static,
 ) -> anyhow::Result<TranscriptWatchHandle> {
-    transcript_watch_with_backend(home, wake, |on_jsonl_event| {
+    transcript_watch_with_backend(home, registry, wake, |on_jsonl_event| {
         Ok(Box::new(monica_adapters::claude::FsJsonlWatcher::new(on_jsonl_event)?))
     })
 }
@@ -86,6 +121,7 @@ pub fn start_transcript_watch(
 /// must fire per changed `.jsonl` path.
 pub fn transcript_watch_with_backend<F>(
     home: PathBuf,
+    registry: SessionWatchRegistry,
     wake: impl Fn(&str) + Send + Sync + 'static,
     make_backend: F,
 ) -> anyhow::Result<TranscriptWatchHandle>
@@ -108,10 +144,11 @@ where
     }))?;
     Ok(TranscriptWatchHandle {
         home,
+        registry,
         state: Arc::new(Mutex::new(WatchState {
             backend,
-            session_refs: HashMap::new(),
-            dir_refs: HashMap::new(),
+            session_dirs: HashMap::new(),
+            watched_dirs: HashSet::new(),
         })),
         index,
     })
@@ -119,32 +156,29 @@ where
 
 impl TranscriptWatchHandle {
     /// Keep the session's transcript directory watched until the guard drops. A watch
-    /// that cannot be established is logged and skipped — the drain's turn-completed
-    /// read still delivers, just without mid-turn streaming.
+    /// that cannot be established is logged and retried on the next retain — until then
+    /// the drain's turn-completed read still delivers, just without mid-turn streaming.
     pub fn retain(&self, claude_session_id: &str, cwd: &str) -> WatchRetainGuard {
-        let dir = self.resolve_dir(cwd);
         let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let (_, session_count) = state
-            .session_refs
-            .entry(claude_session_id.to_string())
-            .or_insert_with(|| (dir.clone(), 0));
-        *session_count += 1;
-        if *session_count == 1 {
+        if self.registry.retain(claude_session_id) == 1 {
+            let dir = self.resolve_dir(cwd);
+            state.session_dirs.insert(claude_session_id.to_string(), dir.clone());
             self.index
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .entry(dir.clone())
                 .or_default()
                 .insert(claude_session_id.to_string());
-            let dir_count = state.dir_refs.entry(dir.clone()).or_default();
-            *dir_count += 1;
-            if *dir_count == 1 {
-                if let Err(e) = state.backend.watch_dir(&dir) {
-                    log::warn!(
+            if !state.watched_dirs.contains(&dir) {
+                match state.backend.watch_dir(&dir) {
+                    Ok(()) => {
+                        state.watched_dirs.insert(dir);
+                    }
+                    Err(e) => log::warn!(
                         target: "monica_runtime::transcript_watch",
                         "failed to watch {} for {claude_session_id}: {e:#}",
                         dir.display()
-                    );
+                    ),
                 }
             }
         }
@@ -168,30 +202,26 @@ impl TranscriptWatchHandle {
 
     fn release(&self, claude_session_id: &str) {
         let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some((dir, session_count)) = state.session_refs.get_mut(claude_session_id) else {
-            return;
-        };
-        *session_count -= 1;
-        if *session_count > 0 {
+        if self.registry.release(claude_session_id) != Some(0) {
             return;
         }
-        let dir = dir.clone();
-        state.session_refs.remove(claude_session_id);
-        {
+        let Some(dir) = state.session_dirs.remove(claude_session_id) else {
+            return;
+        };
+        let dir_unused = {
             let mut index = self.index.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            if let Some(watching) = index.get_mut(&dir) {
-                watching.remove(claude_session_id);
-                if watching.is_empty() {
-                    index.remove(&dir);
-                }
+            let Some(watching) = index.get_mut(&dir) else {
+                return;
+            };
+            watching.remove(claude_session_id);
+            if watching.is_empty() {
+                index.remove(&dir);
+                true
+            } else {
+                false
             }
-        }
-        let Some(dir_count) = state.dir_refs.get_mut(&dir) else {
-            return;
         };
-        *dir_count -= 1;
-        if *dir_count == 0 {
-            state.dir_refs.remove(&dir);
+        if dir_unused && state.watched_dirs.remove(&dir) {
             state.backend.unwatch_dir(&dir);
         }
     }
@@ -206,10 +236,14 @@ mod tests {
     struct FakeBackend {
         watched: Arc<Mutex<Vec<PathBuf>>>,
         unwatched: Arc<Mutex<Vec<PathBuf>>>,
+        fail_next_watch: Arc<Mutex<bool>>,
     }
 
     impl WatchBackend for FakeBackend {
         fn watch_dir(&mut self, dir: &Path) -> anyhow::Result<()> {
+            if std::mem::take(&mut *self.fail_next_watch.lock().unwrap()) {
+                anyhow::bail!("injected watch failure");
+            }
             self.watched.lock().unwrap().push(dir.to_path_buf());
             Ok(())
         }
@@ -221,6 +255,7 @@ mod tests {
 
     struct Fixture {
         handle: TranscriptWatchHandle,
+        registry: SessionWatchRegistry,
         backend: FakeBackend,
         fire: Box<dyn Fn(&Path) + Send>,
         wakes: mpsc::Receiver<String>,
@@ -233,6 +268,7 @@ mod tests {
             std::thread::current().id()
         ));
         let (tx, wakes) = mpsc::channel();
+        let registry = SessionWatchRegistry::default();
         let backend = FakeBackend::default();
         let backend_clone = backend.clone();
         type CapturedCallback = Mutex<Option<Box<dyn Fn(&Path) + Send>>>;
@@ -240,6 +276,7 @@ mod tests {
         let captured_clone = Arc::clone(&captured);
         let handle = transcript_watch_with_backend(
             home,
+            registry.clone(),
             move |id| {
                 let _ = tx.send(id.to_string());
             },
@@ -250,7 +287,7 @@ mod tests {
         )
         .unwrap();
         let on_event = captured.lock().unwrap().take().unwrap();
-        Fixture { handle, backend, fire: on_event, wakes }
+        Fixture { handle, registry, backend, fire: on_event, wakes }
     }
 
     fn watch_dir_of(fixture: &Fixture, cwd: &str) -> PathBuf {
@@ -267,9 +304,11 @@ mod tests {
         assert_eq!(f.backend.watched.lock().unwrap().len(), 1);
         let dir = watch_dir_of(&f, "/w/a");
         assert!(dir.exists(), "the watch dir must be created eagerly");
+        assert!(f.registry.is_watched("cs-1"));
 
         drop(guard);
         assert_eq!(f.backend.unwatched.lock().unwrap().as_slice(), &[dir]);
+        assert!(!f.registry.is_watched("cs-1"));
     }
 
     #[test]
@@ -282,6 +321,7 @@ mod tests {
 
         drop(a);
         assert!(f.backend.unwatched.lock().unwrap().is_empty());
+        assert!(f.registry.is_watched("cs-1"));
         drop(b);
         assert_eq!(f.backend.unwatched.lock().unwrap().len(), 1);
     }
@@ -296,6 +336,24 @@ mod tests {
 
         drop(a);
         assert!(f.backend.unwatched.lock().unwrap().is_empty());
+        drop(b);
+        assert_eq!(f.backend.unwatched.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_failed_watch_is_retried_and_never_unwatched() {
+        let f = fixture();
+        *f.backend.fail_next_watch.lock().unwrap() = true;
+
+        let a = f.handle.retain("cs-1", "/w/a");
+        assert!(f.backend.watched.lock().unwrap().is_empty(), "the first watch failed");
+
+        // A second session in the same cwd retries the directory watch.
+        let b = f.handle.retain("cs-2", "/w/a");
+        assert_eq!(f.backend.watched.lock().unwrap().len(), 1);
+
+        // Releasing everything unwatches exactly once — never the failed registration.
+        drop(a);
         drop(b);
         assert_eq!(f.backend.unwatched.lock().unwrap().len(), 1);
     }

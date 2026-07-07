@@ -1426,7 +1426,6 @@ fn facade_deferred_state_is_released_after_the_assistant_flush() {
         .executions()
         .poll_claude_session_transcript(Path::new("/home"), "cs-1")
         .unwrap();
-    assert!(poll.saw_assistant);
     assert_eq!(poll.tail_is_assistant, Some(true));
 
     monica.executions().emit_claude_session_state("cs-1").unwrap();
@@ -1447,6 +1446,62 @@ fn facade_deferred_state_is_released_after_the_assistant_flush() {
         ))
         .expect("the released snapshot must be emitted");
     assert!(message_at < state_at, "messages must precede the released Idle");
+}
+
+#[test]
+fn facade_drain_defers_when_the_read_contains_an_assistant_but_ends_on_a_tool_result() {
+    // A read holding a mid-turn assistant record but ending on its tool_result has not
+    // delivered the turn's response — merely containing an assistant record must not
+    // count as delivery.
+    let repos = FakeRepos::default();
+    seed_active_claude_session(&repos, "cs-1");
+    let sink = RecordingSink::default();
+    let decoders = TestAgentDecoders::with_signal(turn_completed("s-1", false));
+    let transcripts = FakeTranscripts::default();
+    transcripts.set_next_chunk(crate::TranscriptChunk {
+        records: vec![
+            crate::ClaudeTranscriptRecord {
+                uuid: Some("r-1".to_string()),
+                timestamp: None,
+                kind: crate::ClaudeTranscriptRecordKind::Assistant {
+                    text: String::new(),
+                    tool_uses: Vec::new(),
+                },
+            },
+            crate::ClaudeTranscriptRecord {
+                uuid: Some("u-1".to_string()),
+                timestamp: None,
+                kind: crate::ClaudeTranscriptRecordKind::User,
+            },
+        ],
+        new_offset: 40,
+        file_exists: true,
+    });
+    let mut monica = facade_with_transcripts(repos, sink.clone(), decoders, transcripts);
+    monica
+        .executions()
+        .ingest_claude_session_hook(Agent::Claude, "cs-1", "{}")
+        .unwrap();
+
+    let outcome = monica
+        .executions()
+        .drain_claude_session_events(Path::new("/home"), 50)
+        .unwrap();
+
+    assert_eq!(outcome.deferred_states, vec!["cs-1".to_string()]);
+    assert_eq!(
+        outcome.transcript_polls.len(),
+        1,
+        "the read must be reported for the caller's tail tracking"
+    );
+    assert_eq!(outcome.transcript_polls[0].1.tail_is_assistant, Some(false));
+    assert!(
+        !sink
+            .events()
+            .iter()
+            .any(|e| matches!(e, ApplicationEvent::ClaudeSessionStateChanged { .. })),
+        "Idle must wait for the final assistant record"
+    );
 }
 
 #[test]
@@ -1528,7 +1583,6 @@ fn facade_poll_claude_session_transcript_is_a_no_op_for_an_unknown_session() {
         .poll_claude_session_transcript(Path::new("/home"), "cs-ghost")
         .unwrap();
 
-    assert!(!poll.saw_assistant);
     assert_eq!(poll.tail_is_assistant, None);
     assert!(transcripts.reads().is_empty(), "an unknown session must never touch the reader");
 }

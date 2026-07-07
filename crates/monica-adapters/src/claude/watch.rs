@@ -56,6 +56,7 @@ impl FsJsonlWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::Tmp;
     use std::io::Write;
     use std::path::PathBuf;
     use std::sync::mpsc;
@@ -65,16 +66,11 @@ mod tests {
     const FIRE_TIMEOUT: Duration = Duration::from_secs(10);
     const SILENCE_WINDOW: Duration = Duration::from_millis(750);
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "monica-watch-{name}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+    fn temp_dir(name: &str) -> (Tmp, PathBuf) {
+        let tmp = Tmp::new(&format!("watch-{name}"));
         // FSEvents reports canonical paths; env::temp_dir goes through /var -> /private/var.
-        dir.canonicalize().unwrap()
+        let dir = tmp.path().canonicalize().unwrap();
+        (tmp, dir)
     }
 
     fn watcher_into(tx: mpsc::Sender<PathBuf>) -> FsJsonlWatcher {
@@ -98,7 +94,7 @@ mod tests {
 
     #[test]
     fn fires_on_jsonl_creation_and_append() {
-        let dir = temp_dir("fires");
+        let (_tmp, dir) = temp_dir("fires");
         let (tx, rx) = mpsc::channel();
         let mut watcher = watcher_into(tx);
         watcher.watch_dir(&dir).unwrap();
@@ -115,7 +111,7 @@ mod tests {
 
     #[test]
     fn ignores_non_jsonl_files() {
-        let dir = temp_dir("non-jsonl");
+        let (_tmp, dir) = temp_dir("non-jsonl");
         let (tx, rx) = mpsc::channel();
         let mut watcher = watcher_into(tx);
         watcher.watch_dir(&dir).unwrap();
@@ -130,7 +126,7 @@ mod tests {
 
     #[test]
     fn unwatched_dir_stops_firing() {
-        let dir = temp_dir("unwatch");
+        let (_tmp, dir) = temp_dir("unwatch");
         let (tx, rx) = mpsc::channel();
         let mut watcher = watcher_into(tx);
         watcher.watch_dir(&dir).unwrap();
