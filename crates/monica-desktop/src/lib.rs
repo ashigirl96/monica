@@ -127,17 +127,9 @@ pub fn run() {
             app.manage(waker);
             let drain = schedulers::notification_drain::start(app.handle().clone());
             app.manage(drain);
-            let watch_registry = monica_runtime::SessionWatchRegistry::default();
-            if let Some(claude_drain) = schedulers::claude_session_drain::start(
-                app.handle().clone(),
-                watch_registry.clone(),
-            ) {
-                if let Some(watch) = schedulers::claude_session_drain::start_transcript_watch(
-                    &claude_drain,
-                    watch_registry,
-                ) {
-                    app.manage(watch);
-                }
+            if let Some(claude_drain) =
+                schedulers::claude_session_drain::start(app.handle().clone())
+            {
                 app.manage(claude_drain);
             }
             ptyd::start_warmup(app.handle().clone());

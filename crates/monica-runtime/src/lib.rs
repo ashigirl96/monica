@@ -18,14 +18,10 @@ use monica_storage_sqlite::SqliteStore;
 pub mod claude_session_drain;
 pub mod notification_drain;
 pub mod pr_sync;
-pub mod transcript_watch;
 
 pub use claude_session_drain::{start_claude_session_drain, ClaudeSessionDrainHandle};
 pub use notification_drain::{start_notification_drain, NotificationDrainHandle};
 pub use pr_sync::{start_pr_sync, PrSyncWaker};
-pub use transcript_watch::{
-    start_transcript_watch, SessionWatchRegistry, TranscriptWatchHandle, WatchRetainGuard,
-};
 
 /// Clears an in-flight flag on drop, so a resident worker's tick releases its
 /// single-flight lock on every exit path. Shared by the drain/sync workers.

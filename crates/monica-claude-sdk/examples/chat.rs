@@ -7,9 +7,13 @@
 //! The Monica app must be running. Ctrl-D or an empty line exits.
 
 use std::io::{self, BufRead, Write};
+use std::time::Duration;
 
 use anyhow::{bail, Result};
 use monica_claude_sdk::{ClaudeRuntime, CreateSessionParams, SessionEvent};
+
+/// Grace window after Idle for the transcript drain's late flush.
+const LATE_FLUSH: Duration = Duration::from_secs(3);
 
 fn main() {
     if let Err(err) = run() {
@@ -55,8 +59,9 @@ fn run() -> Result<()> {
 }
 
 /// Print events until the turn's single final Idle. `Idle { subagents_running: false }`
-/// fires only once the whole logical turn is over — subagents included — and only after
-/// the turn's messages have been delivered, so it ends the turn with nothing to drain.
+/// fires only once the whole logical turn is over — subagents included — so it can be
+/// trusted as the end of the turn; a short drain then catches the transcript reader's
+/// late flush.
 fn run_turn(session: &mut monica_claude_sdk::ClaudeSession) -> Result<()> {
     loop {
         match session.next_event()? {
@@ -71,8 +76,23 @@ fn run_turn(session: &mut monica_claude_sdk::ClaudeSession) -> Result<()> {
             SessionEvent::Idle { subagents_running: true } => {
                 eprintln!("(subagents still running — waiting for next turn)");
             }
-            SessionEvent::Idle { subagents_running: false } => return Ok(()),
+            SessionEvent::Idle { subagents_running: false } => {
+                drain_late_flush(session)?;
+                return Ok(());
+            }
             SessionEvent::Ended => bail!("session ended unexpectedly"),
         }
     }
+}
+
+fn drain_late_flush(session: &mut monica_claude_sdk::ClaudeSession) -> Result<()> {
+    while let Some(event) = session.next_event_timeout(LATE_FLUSH)? {
+        match event {
+            SessionEvent::AssistantMessage { text } => println!("claude: {text}"),
+            SessionEvent::ToolUse { name, .. } => eprintln!("[tool] {name}"),
+            SessionEvent::Idle { .. } | SessionEvent::AwaitingUser { .. } => {}
+            SessionEvent::Ended => break,
+        }
+    }
+    Ok(())
 }
