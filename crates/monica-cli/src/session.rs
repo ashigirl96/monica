@@ -121,7 +121,7 @@ fn send(id: &str, text: &str) -> Result<()> {
     let runtime = runtime()?;
     let sessions = runtime.list_sessions()?;
     let summary = resolve_session(&sessions, id)?;
-    let mut session = runtime.session(&summary.claude_session_id)?;
+    let session = runtime.session(&summary.claude_session_id)?;
     session.send_user_message(text)?;
     println!("Sent to {}", summary.claude_session_id);
     Ok(())

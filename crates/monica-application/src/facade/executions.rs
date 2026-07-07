@@ -787,12 +787,10 @@ impl<B: Backend> ExecutionService<'_, B> {
 
     /// Submit one user message into an idle Claude session's PTY. The atomic claim
     /// (idle → thinking) is the whole in-flight lock: of two concurrent senders exactly
-    /// one wins, and the loser gets `Conflict` without touching the PTY. The session
-    /// stays busy for the whole logical turn — including running subagents and the
-    /// auto-continuation turn that consumes their results. Errors: `Conflict` while a
-    /// message is in flight, the user's input is awaited, or the session has not proven
-    /// ready (no hook observed yet); `NotFound` for an unknown id; `Validation` for an
-    /// ended session.
+    /// one wins, and the loser gets `Conflict` without touching the PTY. Errors:
+    /// `Conflict` while a message is in flight, the user's input is awaited, or the
+    /// session has not proven ready (no hook observed yet); `NotFound` for an unknown id;
+    /// `Validation` for an ended session.
     ///
     /// The claim is optimistic — the PromptSubmitted hook re-asserts `thinking` moments
     /// later, harmlessly. Human input is deliberately NOT excluded: a person typing into
@@ -1011,23 +1009,14 @@ impl<B: Backend> ExecutionService<'_, B> {
                     recheck.push(session_id.to_string());
                 }
             }
-            // A batch of only state-neutral events (idle notifications, inert markers)
-            // must not re-broadcast the unchanged state: a re-emitted Idle buffered
-            // between turns reads as the next turn's completion to a subscriber.
-            let state_relevant = events.iter().any(|event| {
-                event.claude_session_id == *session_id
-                    && !crate::usecases::claude_sessions::label_is_state_neutral(&event.kind)
+            self.m.events.emit(ApplicationEvent::ClaudeSessionStateChanged {
+                claude_session_id: row.claude_session_id.clone(),
+                tab_id: row.tab_id.clone(),
+                session_status: row.status,
+                conversation_status: row.conversation_status,
+                wait_reason: row.wait_reason,
+                subagents_running: row.subagents_running,
             });
-            if state_relevant {
-                self.m.events.emit(ApplicationEvent::ClaudeSessionStateChanged {
-                    claude_session_id: row.claude_session_id.clone(),
-                    tab_id: row.tab_id.clone(),
-                    session_status: row.status,
-                    conversation_status: row.conversation_status,
-                    wait_reason: row.wait_reason,
-                    subagents_running: row.subagents_running,
-                });
-            }
         }
         let ids: Vec<i64> = events.iter().map(|event| event.id).collect();
         self.m.repos.mark_claude_session_events_consumed(&ids)?;

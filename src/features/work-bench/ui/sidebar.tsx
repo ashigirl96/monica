@@ -249,7 +249,6 @@ export function WorkBenchSidebar() {
                   ws={ws}
                   dragHandlers={handlersFor(ws.id, () => activate(ws.id))}
                   isDragOver={dragOverId === ws.id}
-                  hint={jumpHints.byRunspaceId[ws.id]}
                 />
               ))}
             </div>

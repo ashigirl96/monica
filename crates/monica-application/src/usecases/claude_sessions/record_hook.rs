@@ -27,22 +27,9 @@ pub(crate) fn signal_kind_label(kind: &SignalKind) -> &'static str {
         SignalKind::TurnCompleted { .. } => "turn_completed",
         SignalKind::SubagentFinished { .. } => "subagent_finished",
         SignalKind::SessionEnded { .. } => "session_ended",
-        SignalKind::NotificationReceived {
-            permission_request: true,
-        } => "permission_request",
-        SignalKind::NotificationReceived {
-            permission_request: false,
-        } => "notification",
+        SignalKind::NotificationReceived { .. } => "notification",
         SignalKind::Inert => "inert",
     }
-}
-
-/// Labels whose signals never change the session state (`observation_for` returns
-/// `None`). The drain skips the state re-broadcast for batches containing only these:
-/// re-emitting an unchanged Idle between turns reads as a fresh "turn over" to
-/// subscribers.
-pub(crate) fn label_is_state_neutral(kind: &str) -> bool {
-    matches!(kind, "notification" | "inert")
 }
 
 /// A `/clear` ends the provider session but not the mapping: Claude keeps running in the
@@ -75,19 +62,8 @@ pub(crate) fn observation_for(kind: &SignalKind) -> Option<ClaudeSessionObservat
             wait_reason: Some(Some(*reason)),
             ..Default::default()
         }),
-        // A turn that leaves subagents running is not the end of the logical turn:
-        // Claude auto-continues once they finish, and that continuation's TurnCompleted
-        // (subagents_running: false) is the single Idle transition. Flipping to Idle here
-        // would surface a false "turn over" to subscribers mid-subagent. If the Stop
-        // snapshot was stale (a subagent already stopped) the continuation turn's fresh
-        // snapshot corrects it; if no continuation ever fires, interrupt_claude_session
-        // is the recovery.
-        SignalKind::TurnCompleted { subagents_running: true } => Some(ClaudeSessionObservation {
-            subagents_running: Some(true),
-            ..Default::default()
-        }),
-        SignalKind::TurnCompleted { subagents_running: false } => Some(ClaudeSessionObservation {
-            subagents_running: Some(false),
+        SignalKind::TurnCompleted { subagents_running } => Some(ClaudeSessionObservation {
+            subagents_running: Some(*subagents_running),
             ..conversation(ClaudeConversationStatus::Idle)
         }),
         SignalKind::SessionEnded { reason } if is_clear(reason.as_deref()) => {
@@ -175,10 +151,6 @@ mod tests {
             Some((Some(Idle), false))
         );
         assert_eq!(
-            status_of(SignalKind::TurnCompleted { subagents_running: true }),
-            Some((None, false))
-        );
-        assert_eq!(
             status_of(SignalKind::SubagentFinished { subagents_running: false }),
             Some((None, false))
         );
@@ -189,21 +161,10 @@ mod tests {
     fn turn_completed_carries_subagents_running() {
         let obs = observation_for(&SignalKind::TurnCompleted { subagents_running: true }).unwrap();
         assert_eq!(obs.subagents_running, Some(true));
-        assert_eq!(obs.conversation_status, None);
+        assert_eq!(obs.conversation_status, Some(ClaudeConversationStatus::Idle));
 
         let obs = observation_for(&SignalKind::TurnCompleted { subagents_running: false }).unwrap();
         assert_eq!(obs.subagents_running, Some(false));
-        assert_eq!(obs.conversation_status, Some(ClaudeConversationStatus::Idle));
-    }
-
-    #[test]
-    fn turn_completed_with_subagents_keeps_conversation_status_and_wait_reason() {
-        // The logical turn is still in flight: neither the status (Thinking) nor a
-        // pending wait_reason may be disturbed until the continuation turn settles.
-        let obs = observation_for(&SignalKind::TurnCompleted { subagents_running: true }).unwrap();
-        assert_eq!(obs.conversation_status, None);
-        assert_eq!(obs.wait_reason, None);
-        assert!(!obs.mark_ended);
     }
 
     #[test]
@@ -295,31 +256,7 @@ mod tests {
         );
         assert_eq!(
             signal_kind_label(&SignalKind::NotificationReceived { permission_request: true }),
-            "permission_request"
-        );
-        assert_eq!(
-            signal_kind_label(&SignalKind::NotificationReceived { permission_request: false }),
             "notification"
         );
-    }
-
-    #[test]
-    fn state_neutral_labels_match_observationless_kinds() {
-        // Exactly the labels whose observation_for is None: a drift here either
-        // re-introduces the stale-Idle re-broadcast or silences a real state change.
-        assert!(label_is_state_neutral("notification"));
-        assert!(label_is_state_neutral("inert"));
-        for label in [
-            "session_started",
-            "prompt_submitted",
-            "user_input_required",
-            "user_input_resolved",
-            "turn_completed",
-            "subagent_finished",
-            "session_ended",
-            "permission_request",
-        ] {
-            assert!(!label_is_state_neutral(label), "{label} must re-broadcast state");
-        }
     }
 }
