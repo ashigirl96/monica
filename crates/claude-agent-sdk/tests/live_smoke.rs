@@ -330,3 +330,116 @@ async fn query_supports_multi_turn_conversation() {
     }
     assert!(second_done, "second turn did not reach result");
 }
+
+/// Phase 5 完了条件: セッション制御面の実機確認。
+/// - init_info に commands / models が入る
+/// - set_permission_mode / set_model の ack が success
+/// - --resume で同一 session_id のまま文脈が継続する
+/// - --fork-session で新しい session_id に分岐する
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires local claude login; consumes three small haiku turns"]
+async fn resume_and_fork_preserve_and_branch_session() {
+    use claude_agent_sdk::query;
+    use claude_agent_sdk::types::{PermissionMode, SessionId};
+    use futures_util::StreamExt;
+
+    async fn run_turn(session: &mut claude_agent_sdk::Query) -> (String, String) {
+        let mut text = String::new();
+        let mut session_id = String::new();
+        while let Some(message) = session.next().await {
+            let value = serde_json::to_value(message.expect("stream error")).unwrap();
+            match value.get("type").and_then(|t| t.as_str()) {
+                Some("assistant") => {
+                    if let Some(blocks) =
+                        value.pointer("/message/content").and_then(|c| c.as_array())
+                    {
+                        for block in blocks {
+                            if let Some(t) = block.get("text").and_then(|t| t.as_str()) {
+                                text.push_str(t);
+                            }
+                        }
+                    }
+                }
+                Some("result") => {
+                    session_id = value
+                        .get("session_id")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    break;
+                }
+                _ => {}
+            }
+        }
+        (text, session_id)
+    }
+
+    let options = || {
+        ClaudeAgentOptions::builder()
+            .cwd(std::env::temp_dir())
+            .model("haiku")
+    };
+
+    // ターン 1: 単語を覚えさせ、制御メソッドの ack を確認
+    let mut first = query(
+        "Remember the word: pineapple. Reply with exactly: ok",
+        options().build(),
+    )
+    .await
+    .expect("first query failed");
+    let (_, original_sid) = run_turn(&mut first).await;
+    assert!(!original_sid.is_empty(), "no session_id in result");
+
+    let init = first.init_info().expect("init_info not populated after first turn");
+    assert!(
+        init.get("commands").is_some(),
+        "init response lacks commands: {init}"
+    );
+
+    first
+        .set_permission_mode(PermissionMode::Plan)
+        .await
+        .expect("set_permission_mode not acked");
+    first
+        .set_model(Some("haiku"))
+        .await
+        .expect("set_model not acked");
+    drop(first);
+
+    // ターン 2: --resume で同一セッション継続（文脈が残っているか）
+    let mut resumed = query(
+        "What word did I ask you to remember? Reply with just that word.",
+        options().resume(SessionId::new(original_sid.clone())).build(),
+    )
+    .await
+    .expect("resume query failed");
+    let (resumed_text, resumed_sid) = run_turn(&mut resumed).await;
+    drop(resumed);
+
+    assert_eq!(
+        resumed_sid, original_sid,
+        "resume must keep the same session_id"
+    );
+    assert!(
+        resumed_text.to_lowercase().contains("pineapple"),
+        "resumed session lost context: {resumed_text:?}"
+    );
+
+    // ターン 3: --fork-session で別 session_id に分岐
+    let mut forked = query(
+        "Reply with exactly: ok",
+        options()
+            .resume(SessionId::new(original_sid.clone()))
+            .fork_session(true)
+            .build(),
+    )
+    .await
+    .expect("fork query failed");
+    let (_, forked_sid) = run_turn(&mut forked).await;
+
+    assert!(!forked_sid.is_empty());
+    assert_ne!(
+        forked_sid, original_sid,
+        "fork_session must branch to a new session_id"
+    );
+}

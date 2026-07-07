@@ -81,10 +81,10 @@ bartolli 実装済み subtype: `initialize` / `interrupt` / `send_message` / `ho
 
 ### F. セッション管理
 
-- [ ] `--resume <session_id>` + stream-json での再開は options に存在（`resume` / `fork_session` /
-      `resume_session_at`）。**`-p` なし構成で同一 session_id のまま再開できるか実機確認**
-      （#341 では検証済み。bartolli の実装が `--print` 前提の暗黙の仮定を持っていないか）
-- [ ] initialize handshake が `-p` なしでも成立するかの smoke test（vendor 後の最初の作業）
+- [x] `--resume <session_id>` + stream-json での再開を実機確認: 同一 session_id のまま文脈が継続し、
+      `fork_session` では新しい session_id に分岐する（live smoke `resume_and_fork_preserve_and_branch_session`）
+- [x] initialize handshake が `-p` なしで成立することを実機確認（live smoke + `query()` 組み込み）。
+      init 応答（commands / models / account）は `Query::init_info()` で公開
 
 ### G. 型の同期手段
 
@@ -125,4 +125,4 @@ bartolli 実装済み subtype: `initialize` / `interrupt` / `send_message` / `ho
 | 2 ✅  | parser: 2 段デコード + raw event hook                                | conformance 通過（rate_limit_event が `Unknown` に落ちることを実データで確認）  |
 | 3 ✅  | control: ControlRequestTracker（E の非対称タイムアウト）             | live smoke 通過: interrupt ack + error_during_execution、can_use_tool deny 実効 |
 | 4 ✅  | `query()` + streaming input（TS SDK 互換 interface）                 | live smoke 通過: 同一プロセスで 2 ターン対話（send_user_message）               |
-| 5     | client 制御面: `set_model` / `set_permission_mode` / resume / fork   | #342 の Acceptance Criteria 相当                                                |
+| 5 ✅  | client 制御面: `set_model` / `set_permission_mode` / resume / fork   | live smoke 通過: ack 確認・resume の文脈維持・fork の session_id 分岐           |

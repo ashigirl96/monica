@@ -43,6 +43,7 @@ enum Command {
 pub struct Query {
     messages: mpsc::UnboundedReceiver<Result<Message>>,
     commands: mpsc::UnboundedSender<Command>,
+    init_info: std::sync::Arc<std::sync::OnceLock<Value>>,
 }
 
 impl Query {
@@ -68,6 +69,12 @@ impl Query {
         self.control(requests::set_max_thinking_tokens(tokens))
             .await
             .map(|_| ())
+    }
+
+    /// initialize 応答（commands / models / account 等）。ack 受信前は None。
+    #[must_use]
+    pub fn init_info(&self) -> Option<Value> {
+        self.init_info.get().cloned()
     }
 
     /// streaming input mode で追加の user message を送る
@@ -124,6 +131,7 @@ pub async fn query(prompt: &str, options: ClaudeAgentOptions) -> Result<Query> {
         .send(Command::SendUserMessage(first))
         .map_err(|_| ClaudeError::not_connected())?;
 
+    let init_info = std::sync::Arc::new(std::sync::OnceLock::new());
     let actor = QueryActor {
         transport,
         tracker,
@@ -132,11 +140,12 @@ pub async fn query(prompt: &str, options: ClaudeAgentOptions) -> Result<Query> {
         command_rx,
         command_tx: command_tx.clone(),
     };
-    tokio::spawn(actor.run(init_ack));
+    tokio::spawn(actor.run(init_ack, std::sync::Arc::clone(&init_info)));
 
     Ok(Query {
         messages: message_rx,
         commands: command_tx,
+        init_info,
     })
 }
 
@@ -150,13 +159,22 @@ struct QueryActor {
 }
 
 impl QueryActor {
-    async fn run(mut self, init_ack: crate::control::PendingAck) {
+    async fn run(
+        mut self,
+        init_ack: crate::control::PendingAck,
+        init_info: std::sync::Arc<std::sync::OnceLock<Value>>,
+    ) {
         // init の ack を解決するのはこの下の reader ループなので、ここで await すると
         // デッドロックする。ack 待ちは別タスクへ逃がし、失敗だけをストリームに流す。
         let init_error_tx = self.message_tx.clone();
         tokio::spawn(async move {
-            if let Err(error) = init_ack.wait().await {
-                let _ = init_error_tx.send(Err(error));
+            match init_ack.wait().await {
+                Ok(response) => {
+                    let _ = init_info.set(response);
+                }
+                Err(error) => {
+                    let _ = init_error_tx.send(Err(error));
+                }
             }
         });
 
@@ -307,6 +325,7 @@ mod tests {
         let mut query = Query {
             messages: msg_rx,
             commands: command_tx,
+            init_info: std::sync::Arc::new(std::sync::OnceLock::new()),
         };
         let err = query.interrupt().await.unwrap_err();
         assert!(matches!(err, ClaudeError::NotConnected));
