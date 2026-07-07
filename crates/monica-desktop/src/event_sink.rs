@@ -91,6 +91,7 @@ impl EventSink for TauriEventSink {
                 session_status,
                 conversation_status,
                 wait_reason,
+                subagents_running: _,
             } => {
                 let event = ClaudeSessionStateChanged {
                     claude_session_id,

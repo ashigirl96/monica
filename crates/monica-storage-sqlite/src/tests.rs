@@ -2584,6 +2584,7 @@ fn claude_session_signal_records_event_and_state_in_one_transaction() {
                 conversation_status: Some(monica_domain::ClaudeConversationStatus::AwaitingUser),
                 wait_reason: Some(Some(TaskRunWaitReason::AskUserQuestion)),
                 provider_session_id: Some("uuid-1"),
+                subagents_running: None,
                 mark_ended: false,
             },
         )
@@ -2705,6 +2706,7 @@ fn claude_session_signal_mark_ended_is_guarded_and_stamps_once() {
         conversation_status: Some(monica_domain::ClaudeConversationStatus::Idle),
         wait_reason: Some(None),
         provider_session_id: None,
+        subagents_running: None,
         mark_ended: true,
     };
     let ended = db

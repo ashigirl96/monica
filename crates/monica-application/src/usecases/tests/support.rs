@@ -1654,6 +1654,7 @@ impl ClaudeSessionRepository for FakeRepos {
             conversation_status: ClaudeConversationStatus::Idle,
             wait_reason: None,
             provider_session_id: None,
+            subagents_running: false,
             jsonl_offset: 0,
             created_at: "2026-06-02T00:00:00.000Z".to_string(),
             ended_at: ended.then(|| "2026-06-02T00:00:00.000Z".to_string()),
@@ -1769,6 +1770,9 @@ impl ClaudeSessionRepository for FakeRepos {
         if let Some(wait_reason) = observation.wait_reason {
             cs.wait_reason = wait_reason;
         }
+        if let Some(subagents_running) = observation.subagents_running {
+            cs.subagents_running = subagents_running;
+        }
         if observation.mark_ended && cs.status != ClaudeSessionStatus::Ended {
             cs.status = ClaudeSessionStatus::Ended;
             cs.ended_at = Some("2026-06-02T00:00:02.000Z".to_string());
@@ -1865,6 +1869,18 @@ impl ClaudeSessionRepository for FakeRepos {
         }
         cs.conversation_status = ClaudeConversationStatus::Idle;
         Ok(true)
+    }
+
+    fn clear_subagents_running(&mut self, claude_session_id: &str) -> Result<()> {
+        let mut state = self.state.borrow_mut();
+        if let Some(cs) = state
+            .claude_sessions
+            .iter_mut()
+            .find(|cs| cs.claude_session_id == claude_session_id)
+        {
+            cs.subagents_running = false;
+        }
+        Ok(())
     }
 }
 

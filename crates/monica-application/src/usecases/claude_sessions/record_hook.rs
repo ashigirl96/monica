@@ -50,7 +50,10 @@ pub(crate) fn observation_for(kind: &SignalKind) -> Option<ClaudeSessionObservat
         ..Default::default()
     };
     match kind {
-        SignalKind::SessionStarted { .. } => Some(conversation(ClaudeConversationStatus::Idle)),
+        SignalKind::SessionStarted { .. } => Some(ClaudeSessionObservation {
+            subagents_running: Some(false),
+            ..conversation(ClaudeConversationStatus::Idle)
+        }),
         SignalKind::PromptSubmitted | SignalKind::UserInputResolved => {
             Some(conversation(ClaudeConversationStatus::Thinking))
         }
@@ -59,7 +62,10 @@ pub(crate) fn observation_for(kind: &SignalKind) -> Option<ClaudeSessionObservat
             wait_reason: Some(Some(*reason)),
             ..Default::default()
         }),
-        SignalKind::TurnCompleted { .. } => Some(conversation(ClaudeConversationStatus::Idle)),
+        SignalKind::TurnCompleted { subagents_running } => Some(ClaudeSessionObservation {
+            subagents_running: Some(*subagents_running),
+            ..conversation(ClaudeConversationStatus::Idle)
+        }),
         SignalKind::SessionEnded { reason } if is_clear(reason.as_deref()) => {
             Some(conversation(ClaudeConversationStatus::Idle))
         }
@@ -143,6 +149,25 @@ mod tests {
             None
         );
         assert_eq!(status_of(SignalKind::Inert), None);
+    }
+
+    #[test]
+    fn turn_completed_carries_subagents_running() {
+        let obs = observation_for(&SignalKind::TurnCompleted { subagents_running: true }).unwrap();
+        assert_eq!(obs.subagents_running, Some(true));
+        assert_eq!(obs.conversation_status, Some(ClaudeConversationStatus::Idle));
+
+        let obs = observation_for(&SignalKind::TurnCompleted { subagents_running: false }).unwrap();
+        assert_eq!(obs.subagents_running, Some(false));
+    }
+
+    #[test]
+    fn session_started_clears_subagents_running() {
+        let obs = observation_for(&SignalKind::SessionStarted {
+            continuation: Continuation::Fresh,
+        })
+        .unwrap();
+        assert_eq!(obs.subagents_running, Some(false));
     }
 
     #[test]
