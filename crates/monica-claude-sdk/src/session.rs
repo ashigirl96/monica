@@ -25,7 +25,9 @@ const SUBSCRIBE_ACK_TIMEOUT: Duration = Duration::from_secs(10);
 const EVENT_BUFFER: usize = 256;
 
 /// The session rejected the message because one is already in flight (or it is still
-/// launching). Recover from the `anyhow` chain via
+/// launching). The in-flight window covers the whole logical turn, including any
+/// subagents Claude spawned and the auto-continuation turn that consumes their results —
+/// potentially minutes. Recover from the `anyhow` chain via
 /// `err.downcast_ref::<SessionBusy>()`, wait for [`ClaudeSession::wait_until_idle`], and
 /// retry.
 #[derive(Debug, Clone)]
@@ -70,6 +72,8 @@ pub struct ClaudeSession {
     events: Receiver<StreamItem>,
     stream: UnixStream,
     ended: bool,
+    /// A `Closed` consumed while discarding stale events; surfaced by the next read.
+    pending_close: Option<Option<String>>,
 }
 
 impl std::fmt::Debug for ClaudeSession {
@@ -142,6 +146,7 @@ impl ClaudeSession {
             events: rx,
             stream,
             ended: false,
+            pending_close: None,
         })
     }
 
@@ -160,11 +165,18 @@ impl ClaudeSession {
         self.info.as_ref()
     }
 
-    /// Submit one user message. Accepted only while the session is idle: a `busy`
-    /// rejection carries a downcastable [`SessionBusy`], an ended session a
-    /// [`SessionEnded`]. NOT idempotent — a transport failure leaves the outcome unknown,
-    /// so do not blindly resend on error.
-    pub fn send_user_message(&self, text: &str) -> Result<()> {
+    /// Submit one user message. Accepted only while the session is idle — the session
+    /// stays busy for the whole logical turn, including running subagents and the
+    /// auto-continuation that consumes their results. A `busy` rejection carries a
+    /// downcastable [`SessionBusy`], an ended session a [`SessionEnded`]. NOT
+    /// idempotent — a transport failure leaves the outcome unknown, so do not blindly
+    /// resend on error.
+    ///
+    /// On success, events buffered before the ack are discarded: the server accepted the
+    /// message only after the idle → thinking claim, so anything still queued (a stale
+    /// Idle re-broadcast, the previous turn's late flush) predates this turn and would
+    /// otherwise be misread as its completion.
+    pub fn send_user_message(&mut self, text: &str) -> Result<()> {
         let response = request_once(
             &self.socket,
             RuntimeRequestOp::SendUserMessage {
@@ -174,7 +186,10 @@ impl ClaudeSession {
         )
         .context("send_user_message did not resolve: whether the message reached claude is unknown — do not blindly resend")?;
         match response {
-            RuntimeResponse::Ack => Ok(()),
+            RuntimeResponse::Ack => {
+                self.discard_stale_events();
+                Ok(())
+            }
             RuntimeResponse::Err { error, code, .. } => {
                 let rejected = format!("send_user_message rejected: {error}");
                 Err(match code {
@@ -209,6 +224,9 @@ impl ClaudeSession {
     /// stream is lost) this returns an error — [`SessionEnded`] is downcastable in the
     /// former case.
     pub fn next_event(&mut self) -> Result<SessionEvent> {
+        if let Some(reason) = self.pending_close.take() {
+            return self.closed(reason);
+        }
         match self.events.recv() {
             Ok(item) => self.settle(item),
             Err(_) => self.closed(None),
@@ -217,6 +235,9 @@ impl ClaudeSession {
 
     /// [`ClaudeSession::next_event`] with a timeout; `Ok(None)` when nothing arrived.
     pub fn next_event_timeout(&mut self, timeout: Duration) -> Result<Option<SessionEvent>> {
+        if let Some(reason) = self.pending_close.take() {
+            return self.closed(reason).map(Some);
+        }
         match self.events.recv_timeout(timeout) {
             Ok(item) => self.settle(item).map(Some),
             Err(RecvTimeoutError::Timeout) => Ok(None),
@@ -252,6 +273,22 @@ impl ClaudeSession {
             data: BASE64.encode(bytes),
         })?;
         Ok(())
+    }
+
+    fn discard_stale_events(&mut self) {
+        while let Ok(item) = self.events.try_recv() {
+            match item {
+                StreamItem::Event(event) => {
+                    if event == SessionEvent::Ended {
+                        self.ended = true;
+                    }
+                }
+                StreamItem::Closed(reason) => {
+                    self.pending_close = Some(reason);
+                    return;
+                }
+            }
+        }
     }
 
     fn settle(&mut self, item: StreamItem) -> Result<SessionEvent> {

@@ -501,6 +501,9 @@ export const jumpHintsActiveAtom = atom(false);
 
 // Both use digits in visual order; Ctrl disambiguates runspace (⌃1) from tab (1).
 const HINT_KEYS = [..."123456789"];
+// Agent Runtime runspaces stay out of the 1–9 numbering; the first one gets a fixed
+// 0 key, reached like any other runspace with Ctrl held (⌃0).
+const AGENT_RUNTIME_HINT_KEY = "0";
 
 type JumpHintTargets = {
   byRunspaceId: Record<string, string>;
@@ -511,8 +514,11 @@ const NO_HINT_TARGETS: JumpHintTargets = { byRunspaceId: {}, byTabId: {} };
 
 export const jumpHintTargetsAtom = atom((get): JumpHintTargets => {
   if (!get(jumpHintsActiveAtom)) return NO_HINT_TARGETS;
-  // Agent Runtime runspaces are mouse-only, so they get no hint keys.
-  const summaries = get(runspaceSummariesAtom).filter((s) => !isAgentRuntimeRunspace(s));
+  const allSummaries = get(runspaceSummariesAtom);
+  // Agent Runtime runspaces are kept out of the 1–9 numbering; only the first one
+  // is reachable by keyboard, via the fixed 0 key below.
+  const summaries = allSummaries.filter((s) => !isAgentRuntimeRunspace(s));
+  const agentRuntime = allSummaries.find(isAgentRuntimeRunspace);
   // Hint order must match the sidebar's visual order: task-bound group first, then shells.
   const ordered = [...summaries.filter((s) => s.taskId), ...summaries.filter((s) => !s.taskId)];
   const rs = get(activeRunspaceAtom);
@@ -523,6 +529,9 @@ export const jumpHintTargetsAtom = atom((get): JumpHintTargets => {
   ordered.slice(0, HINT_KEYS.length).forEach((s, i) => {
     byRunspaceId[s.id] = HINT_KEYS[i];
   });
+  if (agentRuntime) {
+    byRunspaceId[agentRuntime.id] = AGENT_RUNTIME_HINT_KEY;
+  }
   tabs.slice(0, HINT_KEYS.length).forEach((t, i) => {
     byTabId[t.id] = HINT_KEYS[i];
   });
