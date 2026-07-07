@@ -55,6 +55,11 @@ pub fn claude_project_slug(cwd: &str) -> String {
         .collect()
 }
 
+/// The directory Claude Code keeps a cwd's transcripts in: derived, never stored.
+pub fn claude_project_dir(home: &std::path::Path, cwd: &str) -> std::path::PathBuf {
+    home.join(".claude").join("projects").join(claude_project_slug(cwd))
+}
+
 /// Where Claude Code writes the session transcript: derived, never stored — the mapping
 /// row keeps only `cwd` and `claude_session_id`.
 pub fn claude_jsonl_path(
@@ -62,10 +67,7 @@ pub fn claude_jsonl_path(
     cwd: &str,
     claude_session_id: &str,
 ) -> std::path::PathBuf {
-    home.join(".claude")
-        .join("projects")
-        .join(claude_project_slug(cwd))
-        .join(format!("{claude_session_id}.jsonl"))
+    claude_project_dir(home, cwd).join(format!("{claude_session_id}.jsonl"))
 }
 
 #[cfg(test)]

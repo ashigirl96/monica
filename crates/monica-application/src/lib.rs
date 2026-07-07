@@ -27,7 +27,7 @@ pub use events::{ApplicationEvent, EventSink};
 pub use execution_profile::{ExecutionProfile, PermissionMode};
 pub use input::parse_issue_input;
 pub use facade::{
-    Backend, ClaudeSessionDrainOutcome, ExecutionService, Monica, NotebookLintReport,
+    Backend, ClaudeSessionDrainOutcome, ExecutionService, Monica, NotebookLintReport, TranscriptPoll,
     NotebookPageView, NotebookService, ProjectInit, ProjectService, SynchronizationService,
     TaskService,
 };
@@ -46,7 +46,8 @@ pub use ports::{
 // Application-owned types (NOT in monica-domain)
 pub use bench::{bench_runspace_id, PrepareTaskResult, RunTaskResult, TaskBench};
 pub use claude_runtime::{
-    agent_runtime_runspace_id, claude_jsonl_path, claude_project_slug, ClaudeSessionSpec,
+    agent_runtime_runspace_id, claude_jsonl_path, claude_project_dir, claude_project_slug,
+    ClaudeSessionSpec,
     OpenClaudeSessionParams, MONICA_CLAUDE_SESSION_ID_ENV,
 };
 pub use github::{

@@ -1312,7 +1312,8 @@ fn facade_drain_reads_transcript_after_turn_complete_and_consumes() {
         .unwrap();
 
     assert_eq!(outcome.drained, 1);
-    assert!(outcome.recheck.is_empty());
+    assert!(outcome.deferred_states.is_empty());
+    assert_eq!(outcome.states_emitted, vec!["cs-1".to_string()]);
     // The transcript path derives from the provider session id the hook stamped, not the
     // pre-minted id — after a /clear Claude writes a different file.
     let reads = transcripts.reads();
@@ -1344,9 +1345,10 @@ fn facade_drain_reads_transcript_after_turn_complete_and_consumes() {
 }
 
 #[test]
-fn facade_drain_rechecks_when_only_the_user_record_flushed() {
+fn facade_drain_defers_the_state_when_only_the_user_record_flushed() {
     // The assistant record flushes last; a read that surfaced only the user prompt has
-    // not captured the turn's response, so the turn must still be rechecked.
+    // not captured the turn's response, so the Idle snapshot must be withheld — a
+    // subscriber must never see Idle before the turn's messages.
     let repos = FakeRepos::default();
     seed_active_claude_session(&repos, "cs-1");
     let sink = RecordingSink::default();
@@ -1361,7 +1363,7 @@ fn facade_drain_rechecks_when_only_the_user_record_flushed() {
         new_offset: 20,
         file_exists: true,
     });
-    let mut monica = facade_with_transcripts(repos, sink, decoders, transcripts);
+    let mut monica = facade_with_transcripts(repos, sink.clone(), decoders, transcripts);
     monica
         .executions()
         .ingest_claude_session_hook(Agent::Claude, "cs-1", "{}")
@@ -1374,16 +1376,177 @@ fn facade_drain_rechecks_when_only_the_user_record_flushed() {
 
     assert_eq!(outcome.drained, 1);
     assert_eq!(
-        outcome.recheck,
+        outcome.deferred_states,
         vec!["cs-1".to_string()],
         "a user-only read must not count as the assistant response arriving"
     );
+    assert!(outcome.states_emitted.is_empty());
+    assert!(
+        !sink
+            .events()
+            .iter()
+            .any(|e| matches!(e, ApplicationEvent::ClaudeSessionStateChanged { .. })),
+        "the Idle snapshot must be withheld until the assistant output lands"
+    );
+}
+
+#[test]
+fn facade_deferred_state_is_released_after_the_assistant_flush() {
+    // The release path: a watch wakeup polls the transcript, sees the assistant record,
+    // and the caller then emits the withheld snapshot via emit_claude_session_state.
+    let repos = FakeRepos::default();
+    seed_active_claude_session(&repos, "cs-1");
+    let sink = RecordingSink::default();
+    let decoders = TestAgentDecoders::with_signal(turn_completed("s-1", false));
+    let transcripts = FakeTranscripts::default();
+    let mut monica = facade_with_transcripts(repos, sink.clone(), decoders, transcripts.clone());
+    monica
+        .executions()
+        .ingest_claude_session_hook(Agent::Claude, "cs-1", "{}")
+        .unwrap();
+    let outcome = monica
+        .executions()
+        .drain_claude_session_events(Path::new("/home"), 50)
+        .unwrap();
+    assert_eq!(outcome.deferred_states, vec!["cs-1".to_string()]);
+
+    transcripts.set_next_chunk(crate::TranscriptChunk {
+        records: vec![crate::ClaudeTranscriptRecord {
+            uuid: Some("r-1".to_string()),
+            timestamp: None,
+            kind: crate::ClaudeTranscriptRecordKind::Assistant {
+                text: "late flush".to_string(),
+                tool_uses: Vec::new(),
+            },
+        }],
+        new_offset: 64,
+        file_exists: true,
+    });
+    let poll = monica
+        .executions()
+        .poll_claude_session_transcript(Path::new("/home"), "cs-1")
+        .unwrap();
+    assert!(poll.saw_assistant);
+    assert_eq!(poll.tail_is_assistant, Some(true));
+
+    monica.executions().emit_claude_session_state("cs-1").unwrap();
+
+    let events = sink.events();
+    let message_at = events
+        .iter()
+        .position(|e| matches!(e, ApplicationEvent::ClaudeSessionMessages { .. }))
+        .expect("the late flush must be emitted");
+    let state_at = events
+        .iter()
+        .position(|e| matches!(
+            e,
+            ApplicationEvent::ClaudeSessionStateChanged {
+                conversation_status: monica_domain::ClaudeConversationStatus::Idle,
+                ..
+            }
+        ))
+        .expect("the released snapshot must be emitted");
+    assert!(message_at < state_at, "messages must precede the released Idle");
+}
+
+#[test]
+fn facade_drain_emits_awaiting_user_immediately_without_the_assistant_record() {
+    // Only a settled Idle/Ended is withheld: AwaitingUser is the user's cue to act and
+    // must not wait on a transcript flush.
+    let repos = FakeRepos::default();
+    seed_active_claude_session(&repos, "cs-1");
+    let sink = RecordingSink::default();
+    let decoders = TestAgentDecoders::with_signal(input_required(
+        Some("s-1"),
+        monica_domain::TaskRunWaitReason::PermissionRequest,
+    ));
+    let transcripts = FakeTranscripts::default();
+    let mut monica = facade_with_transcripts(repos, sink.clone(), decoders, transcripts);
+    monica
+        .executions()
+        .ingest_claude_session_hook(Agent::Claude, "cs-1", "{}")
+        .unwrap();
+
+    let outcome = monica
+        .executions()
+        .drain_claude_session_events(Path::new("/home"), 50)
+        .unwrap();
+
+    assert!(outcome.deferred_states.is_empty());
+    assert_eq!(outcome.states_emitted, vec!["cs-1".to_string()]);
+    assert!(sink.events().iter().any(|e| matches!(
+        e,
+        ApplicationEvent::ClaudeSessionStateChanged {
+            conversation_status: monica_domain::ClaudeConversationStatus::AwaitingUser,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn facade_drain_defers_ended_without_the_assistant_record() {
+    let repos = FakeRepos::default();
+    seed_active_claude_session(&repos, "cs-1");
+    let sink = RecordingSink::default();
+    let decoders = TestAgentDecoders::with_signal(session_ended("s-1"));
+    let transcripts = FakeTranscripts::default();
+    let mut monica = facade_with_transcripts(repos, sink.clone(), decoders, transcripts);
+    monica
+        .executions()
+        .ingest_claude_session_hook(Agent::Claude, "cs-1", "{}")
+        .unwrap();
+
+    let outcome = monica
+        .executions()
+        .drain_claude_session_events(Path::new("/home"), 50)
+        .unwrap();
+
+    assert_eq!(outcome.deferred_states, vec!["cs-1".to_string()]);
+    assert!(
+        !sink
+            .events()
+            .iter()
+            .any(|e| matches!(e, ApplicationEvent::ClaudeSessionStateChanged { .. })),
+        "Ended must also wait for the final assistant output"
+    );
+}
+
+#[test]
+fn facade_poll_claude_session_transcript_is_a_no_op_for_an_unknown_session() {
+    // A watch wakeup can race a session's teardown: an id without a row must not touch
+    // the reader or report progress.
+    let transcripts = FakeTranscripts::default();
+    let mut monica = facade_with_transcripts(
+        FakeRepos::default(),
+        RecordingSink::default(),
+        TestAgentDecoders::default(),
+        transcripts.clone(),
+    );
+
+    let poll = monica
+        .executions()
+        .poll_claude_session_transcript(Path::new("/home"), "cs-ghost")
+        .unwrap();
+
+    assert!(!poll.saw_assistant);
+    assert_eq!(poll.tail_is_assistant, None);
+    assert!(transcripts.reads().is_empty(), "an unknown session must never touch the reader");
+}
+
+#[test]
+fn facade_emit_claude_session_state_is_a_no_op_for_an_unknown_session() {
+    let sink = RecordingSink::default();
+    let mut monica = facade(FakeRepos::default(), sink.clone());
+
+    monica.executions().emit_claude_session_state("cs-ghost").unwrap();
+
+    assert!(sink.events().is_empty());
 }
 
 #[test]
 fn facade_drain_consumes_events_even_when_transcript_read_errors() {
     // A poison transcript read must not wedge the outbox: events are already durable, so
-    // the batch is consumed and the session is left for recheck / offset catch-up.
+    // the batch is consumed and the session's state is left deferred for the caller.
     let repos = FakeRepos::default();
     seed_active_claude_session(&repos, "cs-1");
     let sink = RecordingSink::default();
@@ -1402,7 +1565,7 @@ fn facade_drain_consumes_events_even_when_transcript_read_errors() {
         .unwrap();
 
     assert_eq!(outcome.drained, 1, "the batch must be consumed despite the read error");
-    assert_eq!(outcome.recheck, vec!["cs-1".to_string()]);
+    assert_eq!(outcome.deferred_states, vec!["cs-1".to_string()]);
     // A second tick finds nothing left — the poison event did not re-wedge the queue.
     let second = monica
         .executions()
@@ -1412,7 +1575,7 @@ fn facade_drain_consumes_events_even_when_transcript_read_errors() {
 }
 
 #[test]
-fn facade_drain_requests_recheck_when_transcript_has_nothing_yet() {
+fn facade_drain_defers_the_state_when_transcript_has_nothing_yet() {
     let repos = FakeRepos::default();
     seed_active_claude_session(&repos, "cs-1");
     let sink = RecordingSink::default();
@@ -1431,7 +1594,7 @@ fn facade_drain_requests_recheck_when_transcript_has_nothing_yet() {
         .unwrap();
 
     assert_eq!(outcome.drained, 1, "events are consumed even when the read is empty");
-    assert_eq!(outcome.recheck, vec!["cs-1".to_string()]);
+    assert_eq!(outcome.deferred_states, vec!["cs-1".to_string()]);
 }
 
 #[test]
@@ -1781,8 +1944,8 @@ fn facade_interrupt_claude_session_refuses_a_pending_launch() {
 
 #[test]
 fn facade_drain_emits_messages_before_the_state_snapshot() {
-    // A subscriber reading Idle as "turn over" must already hold the turn's output; the
-    // recheck path can still deliver late, so this is best-effort ordering, not contract.
+    // A subscriber reading Idle as "turn over" must already hold the turn's output: the
+    // messages emit precedes the state snapshot within one drain.
     let repos = FakeRepos::default();
     seed_active_claude_session(&repos, "cs-1");
     let sink = RecordingSink::default();

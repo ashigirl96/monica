@@ -130,6 +130,11 @@ pub fn run() {
             if let Some(claude_drain) =
                 schedulers::claude_session_drain::start(app.handle().clone())
             {
+                if let Some(watch) =
+                    schedulers::claude_session_drain::start_transcript_watch(&claude_drain)
+                {
+                    app.manage(watch);
+                }
                 app.manage(claude_drain);
             }
             ptyd::start_warmup(app.handle().clone());

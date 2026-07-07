@@ -545,7 +545,7 @@ describe("cycleRunspaceAtom", () => {
 });
 
 describe("jumpHintTargetsAtom", () => {
-  test("assigns no hint key to agent runtime runspaces", () => {
+  test("assigns the reserved 0 key to agent runtime runspaces", () => {
     const store = createStore();
     store.set(terminalStateAtom, {
       runspaces: [
@@ -560,7 +560,7 @@ describe("jumpHintTargetsAtom", () => {
     const targets = store.get(jumpHintTargetsAtom);
     expect(targets.byRunspaceId["rs-task"]).toBe("1");
     expect(targets.byRunspaceId["rs-shell"]).toBe("2");
-    expect(targets.byRunspaceId["agent-runtime"]).toBeUndefined();
+    expect(targets.byRunspaceId["agent-runtime"]).toBe("0");
   });
 });
 

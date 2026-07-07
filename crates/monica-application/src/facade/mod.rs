@@ -15,7 +15,7 @@ mod synchronization;
 mod tasks;
 
 pub use backend::Backend;
-pub use executions::{ClaudeSessionDrainOutcome, ExecutionService};
+pub use executions::{ClaudeSessionDrainOutcome, ExecutionService, TranscriptPoll};
 pub use notebooks::{NotebookLintReport, NotebookPageView, NotebookService};
 pub use notifications::NotificationService;
 pub use projects::{ProjectInit, ProjectService};
