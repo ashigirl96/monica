@@ -88,7 +88,6 @@ fn summary() -> ClaudeSessionSummary {
         wait_reason: None,
         created_at: "2026-07-06T00:00:00Z".to_string(),
         ended_at: None,
-        stuck_launching: false,
     }
 }
 

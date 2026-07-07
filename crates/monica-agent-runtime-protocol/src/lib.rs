@@ -155,8 +155,6 @@ pub struct ClaudeSessionSummary {
     pub created_at: String,
     #[serde(default)]
     pub ended_at: Option<String>,
-    #[serde(default)]
-    pub stuck_launching: bool,
 }
 
 /// The created session as the app reports it back to the Agent Runtime client. `claude_session_id`
@@ -362,7 +360,6 @@ mod tests {
                 wait_reason: None,
                 created_at: "2026-07-06T00:00:00Z".into(),
                 ended_at: None,
-                stuck_launching: false,
             }],
         };
         let RuntimeResponse::Sessions { sessions } = round_trip_response(&res) else {
@@ -372,21 +369,6 @@ mod tests {
         assert_eq!(sessions[0].claude_session_id, "u-1");
         assert_eq!(sessions[0].session_status, "active");
         assert_eq!(sessions[0].name, None);
-        assert!(!sessions[0].stuck_launching);
-    }
-
-    #[test]
-    fn summary_without_stuck_launching_field_deserializes_as_false() {
-        let json = r#"{"claude_session_id":"u-1","tab_id":"t","terminal_session_id":"ts","cwd":"/","session_status":"active","conversation_status":"idle","created_at":"2026-01-01T00:00:00Z"}"#;
-        let s: ClaudeSessionSummary = serde_json::from_str(json).unwrap();
-        assert!(!s.stuck_launching);
-    }
-
-    #[test]
-    fn summary_with_stuck_launching_true_round_trips() {
-        let json = r#"{"claude_session_id":"u-1","tab_id":"t","terminal_session_id":"ts","cwd":"/","session_status":"active","conversation_status":"idle","created_at":"2026-01-01T00:00:00Z","stuck_launching":true}"#;
-        let s: ClaudeSessionSummary = serde_json::from_str(json).unwrap();
-        assert!(s.stuck_launching);
     }
 
     #[test]

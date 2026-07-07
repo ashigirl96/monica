@@ -142,14 +142,9 @@ fn handle_op(app: &AppHandle, op: RuntimeRequestOp) -> RuntimeResponse {
         }
         RuntimeRequestOp::ListSessions => run_session_op(app, |monica, daemon| {
             let sessions = monica.executions().list_claude_sessions(daemon)?;
-            let summaries = sessions
-                .into_iter()
-                .map(|row| {
-                    let stuck = monica.executions().claude_session_stuck_launching(&row)?;
-                    Ok(summary_from(row, stuck))
-                })
-                .collect::<Result<Vec<_>, monica_application::ApplicationError>>()?;
-            Ok(RuntimeResponse::Sessions { sessions: summaries })
+            Ok(RuntimeResponse::Sessions {
+                sessions: sessions.into_iter().map(summary_from).collect(),
+            })
         }),
         RuntimeRequestOp::SyncTerminalSession { terminal_session_id } => {
             run_session_op(app, |monica, daemon| {
@@ -208,7 +203,7 @@ fn home_dir() -> Result<PathBuf> {
         .ok_or_else(|| anyhow::anyhow!("HOME is not set; cannot resolve the transcript path"))
 }
 
-fn summary_from(row: monica_domain::ClaudeSession, stuck_launching: bool) -> ClaudeSessionSummary {
+fn summary_from(row: monica_domain::ClaudeSession) -> ClaudeSessionSummary {
     ClaudeSessionSummary {
         claude_session_id: row.claude_session_id,
         tab_id: row.tab_id,
@@ -220,7 +215,6 @@ fn summary_from(row: monica_domain::ClaudeSession, stuck_launching: bool) -> Cla
         wait_reason: row.wait_reason.map(|r| r.as_str().to_string()),
         created_at: row.created_at,
         ended_at: row.ended_at,
-        stuck_launching,
     }
 }
 
