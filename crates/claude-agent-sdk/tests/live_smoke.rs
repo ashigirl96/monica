@@ -4,7 +4,9 @@
 use claude_agent_sdk::control::{requests, ControlRequestTracker, InboundControl};
 use claude_agent_sdk::parser::{parse_line, ParsedLine};
 use claude_agent_sdk::transport::SubprocessTransport;
-use claude_agent_sdk::types::{ClaudeAgentOptions, PermissionResult, PermissionResultDeny};
+use claude_agent_sdk::types::{
+    ClaudeAgentOptions, Message, PermissionResult, PermissionResultDeny,
+};
 use std::time::Duration;
 
 fn user_message(text: &str) -> String {
@@ -442,4 +444,64 @@ async fn resume_and_fork_preserve_and_branch_session() {
         forked_sid, original_sid,
         "fork_session must branch to a new session_id"
     );
+}
+
+/// P1 リグレッション: Query を drop すると（ターン実行中でも）actor の command チャネルが
+/// 閉じ、claude subprocess が終了する。actor が command 送信側を握っていると
+/// この終了経路が到達不能になり、プロセスが残る。
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires local claude login; spawns and kills a real process"]
+async fn dropping_query_terminates_subprocess() {
+    use claude_agent_sdk::query;
+    use futures_util::StreamExt;
+
+    let options = ClaudeAgentOptions::builder()
+        .cwd(std::env::temp_dir())
+        .model("haiku")
+        .build();
+
+    let mut session = query(
+        "Count from 1 to 100000 slowly, one number per line.",
+        options,
+    )
+    .await
+    .expect("query failed");
+
+    // 出力が流れ始めた（= ターン実行中）のを確認してから drop する
+    let started = tokio::time::timeout(Duration::from_secs(60), async {
+        while let Some(message) = session.next().await {
+            if let Ok(Message::StreamEvent { .. }) = message {
+                return true;
+            }
+        }
+        false
+    })
+    .await
+    .unwrap_or(false);
+    assert!(started, "turn never started streaming");
+
+    // Query を drop → actor の command_rx が閉じ、kill_on_drop で subprocess が死ぬはず。
+    // 残っていればこのテストプロセス終了後もゾンビが残るので、ここでは drop が
+    // ブロックせず完了することと、直後に新セッションを開けることで健全性を確認する
+    drop(session);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let opts2 = ClaudeAgentOptions::builder()
+        .cwd(std::env::temp_dir())
+        .model("haiku")
+        .build();
+    let mut second = query("Reply with exactly: ok", opts2)
+        .await
+        .expect("second query after drop failed");
+    let done = tokio::time::timeout(Duration::from_secs(60), async {
+        while let Some(message) = second.next().await {
+            if let Ok(Message::Result(_)) = message {
+                return true;
+            }
+        }
+        false
+    })
+    .await
+    .unwrap_or(false);
+    assert!(done, "second session did not complete after dropping first");
 }

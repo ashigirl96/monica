@@ -199,13 +199,16 @@ fn build_command(cli_path: &Path, options: &ClaudeAgentOptions) -> Command {
     let mut cmd = Command::new(cli_path);
     cmd.args(build_args(options));
 
-    for key in REMOVED_ENV_VARS {
-        cmd.env_remove(key);
-    }
     // rewind_files control の前提（#342 の spawn 仕様）
     cmd.env("CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING", "true");
     for (key, value) in &options.env {
         cmd.env(key, value);
+    }
+    // env_remove は options.env 適用の「後」に行う。順序を逆にすると、
+    // 利用側が現在の環境をコピーして options.env に載せた場合に
+    // CLAUDECODE / CLAUDE_CODE_ENTRYPOINT が復活し、課金レーンが SDK 側に落ちる
+    for key in REMOVED_ENV_VARS {
+        cmd.env_remove(key);
     }
 
     if let Some(cwd) = &options.cwd {

@@ -20,10 +20,12 @@ use crate::parser::{parse_line, ParsedLine};
 use crate::transport::SubprocessTransport;
 use crate::types::{
     CanUseToolCallback, ClaudeAgentOptions, Message, PermissionMode, PermissionResult,
-    PermissionResultDeny, ToolPermissionContext,
+    PermissionResultDeny, PermissionUpdate, ToolPermissionContext,
 };
 
-/// actor に送る制御コマンド
+/// `Query`（外部）から actor に送る制御コマンド。
+/// このチャネルの sender は actor 内に保持しない。全 `Query` が drop されると
+/// チャネルが閉じ、actor が transport を畳んで終了できる。
 enum Command {
     /// user message を送る
     SendUserMessage(String),
@@ -32,11 +34,14 @@ enum Command {
         request: Value,
         reply: oneshot::Sender<Result<Value>>,
     },
-    /// can_use_tool callback の結果を tracker 経由で応答する
-    RespondPermission {
-        request_id: String,
-        result: PermissionResult,
-    },
+}
+
+/// actor 内部で完結する permission 応答（can_use_tool callback の結果）。
+/// 外部 Command とは別チャネルにすることで、callback 用 sender が
+/// 外部 command チャネルの生存に影響しないようにする。
+struct PermissionResponse {
+    request_id: String,
+    result: PermissionResult,
 }
 
 /// `query()` の返り値。`Message` の Stream + control メソッドを持つ。
@@ -132,13 +137,15 @@ pub async fn query(prompt: &str, options: ClaudeAgentOptions) -> Result<Query> {
         .map_err(|_| ClaudeError::not_connected())?;
 
     let init_info = std::sync::Arc::new(std::sync::OnceLock::new());
+    let (perm_tx, perm_rx) = mpsc::unbounded_channel();
     let actor = QueryActor {
         transport,
         tracker,
         can_use_tool,
         message_tx,
         command_rx,
-        command_tx: command_tx.clone(),
+        perm_tx,
+        perm_rx,
     };
     tokio::spawn(actor.run(init_ack, std::sync::Arc::clone(&init_info)));
 
@@ -155,7 +162,8 @@ struct QueryActor {
     can_use_tool: Option<CanUseToolCallback>,
     message_tx: mpsc::UnboundedSender<Result<Message>>,
     command_rx: mpsc::UnboundedReceiver<Command>,
-    command_tx: mpsc::UnboundedSender<Command>,
+    perm_tx: mpsc::UnboundedSender<PermissionResponse>,
+    perm_rx: mpsc::UnboundedReceiver<PermissionResponse>,
 }
 
 impl QueryActor {
@@ -187,18 +195,6 @@ impl QueryActor {
                                 let _ = self.message_tx.send(Err(error));
                             }
                         }
-                        Some(Command::RespondPermission { request_id, result }) => {
-                            match self.tracker.create_permission_response(&request_id, &result) {
-                                Ok(line) => {
-                                    if let Err(error) = self.transport.write_line(&line).await {
-                                        let _ = self.message_tx.send(Err(error));
-                                    }
-                                }
-                                Err(error) => {
-                                    let _ = self.message_tx.send(Err(error));
-                                }
-                            }
-                        }
                         Some(Command::Control { request, reply }) => {
                             let (line, ack) = self.tracker.create_request(request);
                             if let Err(error) = self.transport.write_line(&line).await {
@@ -212,9 +208,21 @@ impl QueryActor {
                             });
                         }
                         None => {
-                            // Query が drop された。transport を畳んで終了
+                            // 全 Query が drop された。transport を畳んで終了
                             let _ = self.transport.kill().await;
                             break;
+                        }
+                    }
+                }
+                Some(PermissionResponse { request_id, result }) = self.perm_rx.recv() => {
+                    match self.tracker.create_permission_response(&request_id, &result) {
+                        Ok(line) => {
+                            if let Err(error) = self.transport.write_line(&line).await {
+                                let _ = self.message_tx.send(Err(error));
+                            }
+                        }
+                        Err(error) => {
+                            let _ = self.message_tx.send(Err(error));
                         }
                     }
                 }
@@ -269,9 +277,14 @@ impl QueryActor {
             .unwrap_or_default()
             .to_string();
         let input = request.get("input").cloned().unwrap_or(Value::Null);
+        // CLI が付ける「今後も許可」提案。未知形は無視して空にする（落とさない）
+        let suggestions = request
+            .get("permission_suggestions")
+            .and_then(|s| serde_json::from_value::<Vec<PermissionUpdate>>(s.clone()).ok())
+            .unwrap_or_default();
 
         let request_id = request_id.to_string();
-        let command_tx = self.command_tx.clone();
+        let perm_tx = self.perm_tx.clone();
 
         let Some(callback) = self.can_use_tool.clone() else {
             // callback 未設定なら安全側に倒して deny（プロセスを止めない）
@@ -279,7 +292,7 @@ impl QueryActor {
                 message: "no can_use_tool handler configured".into(),
                 interrupt: false,
             });
-            let _ = command_tx.send(Command::RespondPermission {
+            let _ = perm_tx.send(PermissionResponse {
                 request_id,
                 result: deny,
             });
@@ -287,8 +300,8 @@ impl QueryActor {
         };
 
         // callback は async なので別タスクへ逃がし、reader ループを塞がない。
-        // 結果は RespondPermission で actor に戻し、応答行は tracker が生成する
-        let context = ToolPermissionContext::default();
+        // 結果は perm チャネルで actor に戻し、応答行は tracker が生成する
+        let context = ToolPermissionContext::new(suggestions);
         tokio::spawn(async move {
             let result = callback
                 .call(tool_name, input, context)
@@ -299,7 +312,7 @@ impl QueryActor {
                         interrupt: false,
                     })
                 });
-            let _ = command_tx.send(Command::RespondPermission { request_id, result });
+            let _ = perm_tx.send(PermissionResponse { request_id, result });
         });
     }
 }
