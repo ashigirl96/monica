@@ -56,8 +56,11 @@ fn run() -> Result<()> {
             SessionEvent::AwaitingUser { wait_reason } => {
                 eprintln!("[awaiting user: {}]", wait_reason.as_deref().unwrap_or("input"));
             }
-            SessionEvent::Idle => {
-                // The turn is over; give the drain's late transcript flush a moment.
+            SessionEvent::Idle { subagents_running } => {
+                if subagents_running {
+                    eprintln!("(subagents still running — waiting for the next turn)");
+                    continue;
+                }
                 while let Some(event) = session.next_event_timeout(LATE_FLUSH_WINDOW)? {
                     if let SessionEvent::AssistantMessage { text } = event {
                         println!("{text}");

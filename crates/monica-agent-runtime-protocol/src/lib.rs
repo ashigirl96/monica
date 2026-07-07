@@ -134,7 +134,10 @@ pub enum SessionEvent {
         #[serde(default)]
         wait_reason: Option<String>,
     },
-    Idle,
+    Idle {
+        #[serde(default)]
+        subagents_running: bool,
+    },
     Ended,
 }
 
@@ -337,7 +340,10 @@ mod tests {
                 claude_session_id: "u-1".into(),
                 event: SessionEvent::AwaitingUser { wait_reason: Some("permission".into()) },
             },
-            RuntimeResponse::Event { claude_session_id: "u-1".into(), event: SessionEvent::Idle },
+            RuntimeResponse::Event {
+                claude_session_id: "u-1".into(),
+                event: SessionEvent::Idle { subagents_running: false },
+            },
             RuntimeResponse::Event { claude_session_id: "u-1".into(), event: SessionEvent::Ended },
         ] {
             let back = round_trip_response(&res);
@@ -387,6 +393,22 @@ mod tests {
         let json = r#"{"claude_session_id":"u-1","tab_id":"t","terminal_session_id":"ts","cwd":"/","session_status":"active","conversation_status":"idle","created_at":"2026-01-01T00:00:00Z","stuck_launching":true}"#;
         let s: ClaudeSessionSummary = serde_json::from_str(json).unwrap();
         assert!(s.stuck_launching);
+    }
+
+    #[test]
+    fn idle_with_subagents_running_round_trips() {
+        let event = SessionEvent::Idle { subagents_running: true };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains(r#""subagents_running":true"#), "got: {json}");
+        let back: SessionEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, SessionEvent::Idle { subagents_running: true });
+    }
+
+    #[test]
+    fn idle_without_subagents_running_field_deserializes_as_false() {
+        let json = r#"{"kind":"idle"}"#;
+        let event: SessionEvent = serde_json::from_str(json).unwrap();
+        assert_eq!(event, SessionEvent::Idle { subagents_running: false });
     }
 
     #[test]
