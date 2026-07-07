@@ -11,14 +11,14 @@
 //! the `jsonl_offset` cursor has a single writer and events reach subscribers in emit
 //! order.
 //!
-//! A watched turn that settled into Idle/Ended before its response was fully consumed
-//! has its state snapshot withheld by the drain (`deferred_states`); this worker
-//! releases it — never before the messages — via the transcript tail: a consumed
-//! transcript ending on an assistant record has delivered its response (mid-turn
-//! assistant records are always followed by a tool_result user record), one ending
-//! elsewhere still owes it, and the next watch wakeup (or [`STATE_FLUSH_DEADLINE`], for
-//! turns with no assistant output at all) resolves it. Sessions no one watches release
-//! immediately — there is no subscriber stream to order against.
+//! A turn that settled into Idle/Ended before its response was fully consumed has its
+//! state snapshot withheld by the drain (`deferred_states`); this worker releases it —
+//! never before the messages — via the transcript tail: a consumed transcript ending on
+//! an assistant record has delivered its response (mid-turn assistant records are
+//! always followed by a tool_result user record), one ending elsewhere still owes it,
+//! and the next watch wakeup (or [`STATE_FLUSH_DEADLINE`], which re-polls before
+//! releasing, for sessions with no watcher or turns with no assistant output at all)
+//! resolves it.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -125,8 +125,9 @@ impl DeferredStates {
     }
 
     /// Fold one outbox drain outcome in: withheld sessions whose response was already
-    /// streamed (or that no watcher covers) release immediately, the rest wait for the
-    /// next wakeup or the deadline. A state the drain did emit supersedes any deferral.
+    /// streamed release immediately, the rest wait for the next wakeup or the deadline
+    /// (whose poll-then-emit keeps the ordering even for sessions no watcher wakes). A
+    /// state the drain did emit supersedes any deferral.
     fn handle_drain_outcome(
         &mut self,
         ops: &mut impl DrainOps,
@@ -145,8 +146,7 @@ impl DeferredStates {
             self.pending.remove(&claude_session_id);
         }
         for claude_session_id in outcome.deferred_states {
-            let streamed = self.tail_is_assistant.get(&claude_session_id) == Some(&true);
-            if streamed || !self.watched.is_watched(&claude_session_id) {
+            if self.tail_is_assistant.get(&claude_session_id) == Some(&true) {
                 self.release(ops, &claude_session_id);
             } else {
                 self.pending.insert(claude_session_id, now);
@@ -234,6 +234,10 @@ where
                             target: "monica_runtime::claude_session_drain",
                             "failed to open façade: {e:#}"
                         );
+                        // An expired next_drain would make the next recv_timeout return
+                        // instantly — reschedule so a persistent failure retries at the
+                        // tick cadence instead of spinning.
+                        next_drain = Instant::now() + DRAIN_INTERVAL;
                         continue;
                     }
                 };
@@ -422,15 +426,23 @@ mod tests {
     }
 
     #[test]
-    fn unwatched_sessions_release_immediately() {
-        // No subscriber holds a watch on this session: there is no stream to order
-        // against, so the state goes out as it always did.
+    fn an_unwatched_deferral_waits_for_the_deadline_and_polls_before_releasing() {
+        // Even with no watcher to wake it (none subscribed, or the watcher failed to
+        // start), a deferred state must not release ahead of its messages: the deadline
+        // re-polls the transcript — delivering a late assistant flush — before emitting.
         let ops = FakeOps::default();
         let mut deferred = DeferredStates::new(SessionWatchRegistry::default());
+        let deferred_at = Instant::now();
 
-        deferred.handle_drain_outcome(&mut &ops, outcome_deferring("cs-1"), Instant::now());
+        deferred.handle_drain_outcome(&mut &ops, outcome_deferring("cs-1"), deferred_at);
+        assert_eq!(ops.calls(), Vec::new());
+        assert!(deferred.pending.contains_key("cs-1"));
 
-        assert_eq!(ops.calls(), vec![Call::Emit("cs-1".to_string())]);
+        deferred.flush_expired(&mut &ops, deferred_at + STATE_FLUSH_DEADLINE);
+        assert_eq!(
+            ops.calls(),
+            vec![Call::Poll("cs-1".to_string()), Call::Emit("cs-1".to_string())]
+        );
     }
 
     #[test]
