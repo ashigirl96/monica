@@ -112,12 +112,6 @@ export const commands = {
     >(__TAURI_INVOKE("read_runspace_plan", { terminalTabId })),
   forceSyncPullRequests: () =>
     typedError<null, ApiError>(__TAURI_INVOKE("force_sync_pull_requests")),
-  /**
-   *  The persisted Claude session mappings, with liveness reconciled against the daemon
-   *  first — startup recovery adopts the rows still `active` as Workbench tabs.
-   */
-  claudeListSessions: () =>
-    typedError<ClaudeSession[], ApiError>(__TAURI_INVOKE("claude_list_sessions")),
   openNamedWindow: (label: string) =>
     typedError<null, ApiError>(__TAURI_INVOKE("open_named_window", { label })),
 };
@@ -151,8 +145,7 @@ export type ApiErrorCode =
   | "validation"
   | "authentication_required"
   | "storage"
-  | "external"
-  | "indeterminate";
+  | "external";
 
 export type AttachResult = {
   /**  Base64 transcript tail to write into xterm before streaming live output. */
@@ -166,25 +159,6 @@ export type BoardColumn = {
   label: string;
   statuses: DisplayStatus[];
 };
-
-/**
- *  The durable mapping for a Claude Code session Monica launched: which Workbench
- *  runspace/tab hosts it, which terminal session drives its PTY, and the cwd its JSONL
- *  transcript path derives from.
- */
-export type ClaudeSession = {
-  claude_session_id: string;
-  runspace_id: string;
-  tab_id: string;
-  terminal_session_id: string;
-  cwd: string;
-  name: string | null;
-  status: ClaudeSessionStatus;
-  created_at: string;
-  ended_at: string | null;
-};
-
-export type ClaudeSessionStatus = "pending" | "active" | "ended";
 
 export type DisplayStatus =
   | "ready"

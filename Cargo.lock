@@ -2864,7 +2864,6 @@ dependencies = [
  "monica-terminal-client",
  "monica-terminal-protocol",
  "serde_json",
- "uuid",
 ]
 
 [[package]]

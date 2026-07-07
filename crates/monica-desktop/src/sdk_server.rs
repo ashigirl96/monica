@@ -103,25 +103,15 @@ fn serve_connection(app: &AppHandle, stream: UnixStream) -> Result<()> {
 fn handle_line(app: &AppHandle, line: &str) -> SdkResponse {
     let op = match parse_request(line) {
         Ok(op) => op,
-        Err(error) => return SdkResponse::Err { error, indeterminate: false },
+        Err(error) => return SdkResponse::Err { error },
     };
-    let SdkRequestOp::OpenSdkSession { cwd, model, title, claude_session_id } = op;
-    match open_sdk_session(app, cwd, model, title, claude_session_id) {
+    let SdkRequestOp::OpenSdkSession { cwd, model, title } = op;
+    match open_sdk_session(app, cwd, model, title) {
         Ok(session) => SdkResponse::Ok { session },
-        Err(e) => error_response(&e),
+        Err(e) => SdkResponse::Err {
+            error: format!("{e:#}"),
+        },
     }
-}
-
-/// An outcome the application itself could not determine (an unconfirmed launch
-/// reservation, an unverifiable daemon) must reach the client marked as such: a
-/// determinate `Err` licenses a fresh-id retry, which against an unresolved open would
-/// duplicate the session.
-fn error_response(e: &anyhow::Error) -> SdkResponse {
-    let indeterminate = matches!(
-        e.downcast_ref::<monica_application::ApplicationError>(),
-        Some(monica_application::ApplicationError::Indeterminate(_))
-    );
-    SdkResponse::Err { error: format!("{e:#}"), indeterminate }
 }
 
 fn parse_request(line: &str) -> Result<SdkRequestOp, String> {
@@ -133,18 +123,6 @@ fn parse_request(line: &str) -> Result<SdkRequestOp, String> {
             request.version
         ));
     }
-    // The key is what makes an indeterminate failure recoverable: a server-minted id
-    // would live only in the lost response, so a client without one has nothing
-    // structured to retry with and would duplicate the session on a fresh open.
-    let SdkRequestOp::OpenSdkSession { claude_session_id, .. } = &request.op;
-    if claude_session_id.is_none() {
-        return Err(
-            "open_sdk_session requires claude_session_id (the client-minted idempotency \
-             key): mint a UUID, send it with the request, and reuse the same id when \
-             retrying after an unknown outcome"
-                .to_string(),
-        );
-    }
     Ok(request.op)
 }
 
@@ -153,7 +131,6 @@ fn open_sdk_session(
     cwd: String,
     model: Option<String>,
     title: Option<String>,
-    claude_session_id: Option<String>,
 ) -> Result<SdkSessionInfo> {
     let state = app.state::<PtydHandle>();
     let daemon = PtydTerminalDaemon { handle: state.inner(), app };
@@ -169,18 +146,8 @@ fn open_sdk_session(
             model,
             title,
             shell: default_shell(),
-            claude_session_id,
         },
     )?;
-    let jsonl_path = std::env::var_os("HOME").map(|home| {
-        monica_application::claude_jsonl_path(
-            std::path::Path::new(&home),
-            &spec.cwd,
-            &spec.claude_session_id,
-        )
-        .to_string_lossy()
-        .into_owned()
-    });
     Ok(SdkSessionInfo {
         runspace_id: spec.runspace_id,
         tab_id: spec.tab_id,
@@ -189,7 +156,6 @@ fn open_sdk_session(
         cwd: spec.cwd,
         initial_command: spec.initial_command,
         title: spec.title,
-        jsonl_path,
     })
 }
 
@@ -211,61 +177,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_v1_request_before_any_session_is_launched() {
-        // v1 predates the claude_session_id idempotency contract. parse_request runs
-        // before open_sdk_session, so this rejection is guaranteed side-effect free —
-        // the same guarantee a v1 server gives a v2 client.
-        let line = r#"{"version":1,"op":"open_sdk_session","cwd":"/tmp"}"#;
-        let error = parse_request(line).unwrap_err();
-        assert!(error.contains("version mismatch"), "got: {error}");
-    }
-
-    #[test]
-    fn indeterminate_application_errors_are_marked_on_the_wire() {
-        let e = anyhow::Error::new(monica_application::ApplicationError::indeterminate(
-            "unconfirmed launch",
-        ));
-        let SdkResponse::Err { indeterminate, error } = error_response(&e) else {
-            panic!("expected an error response");
-        };
-        assert!(indeterminate);
-        assert!(error.contains("unconfirmed launch"), "got: {error}");
-    }
-
-    #[test]
-    fn determinate_application_errors_stay_determinate_on_the_wire() {
-        let e = anyhow::Error::new(monica_application::ApplicationError::validation("bad cwd"));
-        let SdkResponse::Err { indeterminate, .. } = error_response(&e) else {
-            panic!("expected an error response");
-        };
-        assert!(!indeterminate);
-    }
-
-    #[test]
     fn accepts_a_current_version_request() {
-        let line = format!(
-            r#"{{"version":{PROTOCOL_VERSION},"op":"open_sdk_session","cwd":"/tmp",
-                "claude_session_id":"5e0f5b0e-9f5c-4a4e-9d6e-000000000000"}}"#
-        );
+        let line =
+            format!(r#"{{"version":{PROTOCOL_VERSION},"op":"open_sdk_session","cwd":"/tmp"}}"#);
         let op = parse_request(&line).unwrap();
-        let SdkRequestOp::OpenSdkSession { cwd, model, title, claude_session_id } = op;
+        let SdkRequestOp::OpenSdkSession { cwd, model, title } = op;
         assert_eq!(cwd, "/tmp");
         assert_eq!(model, None);
         assert_eq!(title, None);
-        assert_eq!(
-            claude_session_id.as_deref(),
-            Some("5e0f5b0e-9f5c-4a4e-9d6e-000000000000")
-        );
-    }
-
-    #[test]
-    fn rejects_a_request_without_the_idempotency_key_before_any_side_effect() {
-        // Without a client-held key an indeterminate failure is unrecoverable (the
-        // server's mint would exist only in the lost response), so the request is
-        // refused at parse time — before open_sdk_session can create anything.
-        let line =
-            format!(r#"{{"version":{PROTOCOL_VERSION},"op":"open_sdk_session","cwd":"/tmp"}}"#);
-        let error = parse_request(&line).unwrap_err();
-        assert!(error.contains("requires claude_session_id"), "got: {error}");
     }
 }
