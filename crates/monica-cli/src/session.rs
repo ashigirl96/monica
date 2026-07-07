@@ -293,7 +293,6 @@ fn ensure_ptyd_version(client: &PtydClient) -> Result<()> {
 #[derive(Debug)]
 enum AttachMessage {
     Daemon(ClientEvent),
-    Resize,
     DetachRequested,
     StdinEof,
     StdinError(String),
@@ -366,12 +365,7 @@ fn attach_terminal(runtime: &ClaudeRuntime, session_id: &str) -> Result<()> {
                         tx.clone(),
                         session_id.to_string(),
                     )?;
-                    spawn_sigwinch_forwarder(tx.clone())?;
-                    run_attach_event_loop(
-                        &rx,
-                        session_id,
-                        &client,
-                    )
+                    run_attach_event_loop(&rx, session_id)
                 }
             }
         })();
@@ -446,7 +440,6 @@ fn drain_pending_messages(
 fn run_attach_event_loop(
     rx: &mpsc::Receiver<AttachMessage>,
     session_id: &str,
-    client: &PtydClient,
 ) -> Result<AttachStop> {
     loop {
         match rx.recv().context("attach event channel closed")? {
@@ -461,9 +454,6 @@ fn run_attach_event_loop(
             }) if sid == session_id => return Ok(AttachStop::SessionExited(exit_code)),
             AttachMessage::Daemon(ClientEvent::Disconnected) => {
                 return Ok(AttachStop::Disconnected);
-            }
-            AttachMessage::Resize => {
-                let _ = resize_to_current_terminal(client, session_id);
             }
             AttachMessage::DetachRequested => return Ok(AttachStop::Detached),
             AttachMessage::StdinEof => return Ok(AttachStop::StdinEof),
@@ -518,24 +508,6 @@ fn spawn_stdin_forwarder(
             }
         })
         .context("failed to spawn stdin forwarding thread")?;
-    Ok(())
-}
-
-fn spawn_sigwinch_forwarder(tx: mpsc::Sender<AttachMessage>) -> Result<()> {
-    use signal_hook::consts::SIGWINCH;
-    use signal_hook::iterator::Signals;
-
-    let mut signals = Signals::new([SIGWINCH]).context("failed to register SIGWINCH handler")?;
-    thread::Builder::new()
-        .name("monica-session-sigwinch".to_string())
-        .spawn(move || {
-            for _ in &mut signals {
-                if tx.send(AttachMessage::Resize).is_err() {
-                    break;
-                }
-            }
-        })
-        .context("failed to spawn SIGWINCH forwarding thread")?;
     Ok(())
 }
 

@@ -20,7 +20,6 @@ clap_complete = "4"
 anyhow = "1.0.102"
 base64 = { version = "0.22", default-features = false, features = ["std"] }
 libc = { version = "0.2", default-features = false }
-signal-hook = { version = "0.3", default-features = false, features = ["iterator"] }
 serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
 tokio = { version = "1.52.3", default-features = false, features = ["net", "rt", "time"] }
 # Notebook lint only: mermaid validation + markdown style. CLI-only — never in core/app
