@@ -8,10 +8,14 @@
 //! stream_event の text delta を逐次表示するので、token 粒度のストリーミングを
 //! 体感できる。空行または "exit" で終了。
 
+use claude_agent_sdk::callbacks::FnPermissionCallback;
 use claude_agent_sdk::query;
-use claude_agent_sdk::types::{ClaudeAgentOptions, Message};
+use claude_agent_sdk::types::{
+    ClaudeAgentOptions, Message, PermissionResult, PermissionResultAllow, PermissionResultDeny,
+};
 use futures_util::StreamExt;
 use std::io::Write;
+use std::sync::Arc;
 
 fn shellexpand_tilde(path: &str) -> String {
     match (path.strip_prefix("~/"), std::env::var("HOME")) {
@@ -99,7 +103,46 @@ async fn main() {
         return;
     };
 
-    let options = ClaudeAgentOptions::builder().cwd(cwd).model(model).build();
+    // sandbox 外のツール（WebFetch / WebSearch / 書き込み系 Bash 等）は can_use_tool が
+    // 飛んでくる。ターミナルで y/N を聞いて allow / deny を返す
+    let ask_permission = Arc::new(FnPermissionCallback::new(|tool_name, input, _context| {
+        Box::pin(async move {
+            let original_input = input.clone();
+            let summary = serde_json::to_string(&input).unwrap_or_default();
+            let summary = if summary.len() > 200 {
+                format!("{}...", &summary[..200])
+            } else {
+                summary
+            };
+            let allowed = tokio::task::spawn_blocking(move || {
+                print!("\n[permission] {tool_name} {summary}\nallow? [y/N] ");
+                let _ = std::io::stdout().flush();
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line).unwrap_or(0);
+                matches!(line.trim(), "y" | "Y" | "yes")
+            })
+            .await
+            .unwrap_or(false);
+            Ok(if allowed {
+                // allow は updatedInput に元の input を返す（CLI はこれで実行を続行する）
+                PermissionResult::Allow(PermissionResultAllow {
+                    updated_input: Some(original_input),
+                    ..PermissionResultAllow::default()
+                })
+            } else {
+                PermissionResult::Deny(PermissionResultDeny {
+                    message: "denied by user".into(),
+                    interrupt: false,
+                })
+            })
+        })
+    }));
+
+    let options = ClaudeAgentOptions::builder()
+        .cwd(cwd)
+        .model(model)
+        .can_use_tool(ask_permission)
+        .build();
     let mut session = query(&first, options).await.expect("failed to start claude");
 
     loop {
