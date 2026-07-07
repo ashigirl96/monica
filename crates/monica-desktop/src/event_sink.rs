@@ -91,7 +91,6 @@ impl EventSink for TauriEventSink {
                 session_status,
                 conversation_status,
                 wait_reason,
-                subagents_running,
             } => {
                 let event = ClaudeSessionStateChanged {
                     claude_session_id,
@@ -99,7 +98,6 @@ impl EventSink for TauriEventSink {
                     session_status: session_status.into(),
                     conversation_status: conversation_status.into(),
                     wait_reason: wait_reason.map(Into::into),
-                    subagents_running,
                 };
                 if let Err(e) = event.emit(&self.app) {
                     log::warn!(

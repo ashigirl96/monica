@@ -224,14 +224,12 @@ impl ClaudeSession {
         }
     }
 
-    /// Consume events until [`SessionEvent::Idle`] with no subagents running.
-    /// An [`SessionEvent::Ended`] on the way fails with a downcastable [`SessionEnded`].
-    /// `Idle { subagents_running: true }` is consumed and the wait continues — the session
-    /// will auto-continue once the forks complete.
+    /// Consume events until [`SessionEvent::Idle`]. An [`SessionEvent::Ended`] on the way
+    /// fails with a downcastable [`SessionEnded`].
     pub fn wait_until_idle(&mut self) -> Result<()> {
         loop {
             match self.next_event()? {
-                SessionEvent::Idle { subagents_running: false } => return Ok(()),
+                SessionEvent::Idle => return Ok(()),
                 SessionEvent::Ended => {
                     return Err(anyhow::Error::new(SessionEnded)
                         .context("the session ended while waiting for idle"));

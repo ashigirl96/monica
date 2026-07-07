@@ -32,7 +32,6 @@ pub struct ClaudeSessionStateChanged {
     pub(crate) session_status: ClaudeSessionStatus,
     pub(crate) conversation_status: ClaudeConversationStatus,
     pub(crate) wait_reason: Option<TaskRunWaitReason>,
-    pub(crate) subagents_running: bool,
 }
 
 /// New transcript records (assistant text / tool uses) read after a completed turn.

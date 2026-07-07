@@ -219,7 +219,6 @@ export type ClaudeSessionStateChanged = {
   session_status: ClaudeSessionStatus;
   conversation_status: ClaudeConversationStatus;
   wait_reason: TaskRunWaitReason | null;
-  subagents_running: boolean;
 };
 
 export type ClaudeSessionStatus = "pending" | "active" | "ended";

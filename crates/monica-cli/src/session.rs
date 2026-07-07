@@ -257,9 +257,7 @@ fn format_session_event(event: &SessionEvent) -> String {
                 single_line(wait_reason.as_deref().unwrap_or("-"))
             )
         }
-        SessionEvent::Idle { subagents_running } => {
-            if *subagents_running { "idle\tsubagents_running".to_string() } else { "idle".to_string() }
-        }
+        SessionEvent::Idle => "idle".to_string(),
         SessionEvent::Ended => "ended".to_string(),
     }
 }

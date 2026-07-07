@@ -118,7 +118,6 @@ pub struct ClaudeSession {
     pub provider_session_id: Option<String>,
     /// Byte offset up to which the transcript JSONL has been consumed. Reset to 0 when
     /// `provider_session_id` changes (the transcript is a different file from then on).
-    pub subagents_running: bool,
     pub jsonl_offset: u64,
     pub created_at: String,
     pub ended_at: Option<String>,

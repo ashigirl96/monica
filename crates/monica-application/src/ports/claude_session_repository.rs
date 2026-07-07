@@ -15,7 +15,6 @@ pub struct ClaudeSessionObservation<'a> {
     /// The session id the event carried. Latest wins; a change resets `jsonl_offset` to 0
     /// in the same transaction (the transcript is a different file from then on).
     pub provider_session_id: Option<&'a str>,
-    pub subagents_running: Option<bool>,
     /// Flip status to `ended` (guarded, `ended_at` stamped once). Only a real session end
     /// (not a `/clear`) may set this: `ended` is an irreversible tombstone.
     pub mark_ended: bool,
@@ -137,8 +136,4 @@ pub trait ClaudeSessionRepository {
     /// if the row is still thinking — a state a hook moved on is not overwritten. `false`
     /// means nothing changed.
     fn release_claude_session_thinking(&mut self, claude_session_id: &str) -> Result<bool>;
-
-    /// Unconditionally clear `subagents_running` for an interrupt: ESC kills in-flight
-    /// forks but no Stop hook fires, so `TurnCompleted` never arrives to clear it.
-    fn clear_subagents_running(&mut self, claude_session_id: &str) -> Result<()>;
 }

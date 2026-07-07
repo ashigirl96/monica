@@ -45,7 +45,6 @@ pub enum ApplicationEvent {
         session_status: ClaudeSessionStatus,
         conversation_status: ClaudeConversationStatus,
         wait_reason: Option<TaskRunWaitReason>,
-        subagents_running: bool,
     },
     /// New transcript records read after a completed turn (assistant text / tool uses).
     ClaudeSessionMessages {

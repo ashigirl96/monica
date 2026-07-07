@@ -12,7 +12,7 @@ use crate::SqliteStore;
 
 use super::{sql_literal_list, SET_NOW};
 
-const CLAUDE_SESSION_COLUMNS: &str = "claude_session_id, runspace_id, tab_id, terminal_session_id, cwd, name, status, launch_phase, conversation_status, wait_reason, provider_session_id, subagents_running, jsonl_offset, created_at, ended_at";
+const CLAUDE_SESSION_COLUMNS: &str = "claude_session_id, runspace_id, tab_id, terminal_session_id, cwd, name, status, launch_phase, conversation_status, wait_reason, provider_session_id, jsonl_offset, created_at, ended_at";
 
 const CLAUDE_SESSION_EVENT_COLUMNS: &str =
     "id, claude_session_id, kind, payload_json, created_at";
@@ -38,7 +38,6 @@ fn claude_session_from_row(row: &Row<'_>) -> Result<ClaudeSession> {
             .map(str::parse::<TaskRunWaitReason>)
             .transpose()?,
         provider_session_id: row.get("provider_session_id")?,
-        subagents_running: row.get::<_, i64>("subagents_running")? != 0,
         jsonl_offset: u64::try_from(jsonl_offset).unwrap_or(0),
         created_at: row.get("created_at")?,
         ended_at: row.get("ended_at")?,
@@ -223,8 +222,7 @@ impl SqliteStore {
                         ended_at = CASE
                             WHEN ?7 AND status != '{ended}' THEN COALESCE(ended_at, {SET_NOW})
                             ELSE ended_at
-                        END,
-                        subagents_running = COALESCE(?8, subagents_running)
+                        END
                   WHERE claude_session_id = ?1"
             ),
             params![
@@ -235,7 +233,6 @@ impl SqliteStore {
                 observation.wait_reason.is_some(),
                 observation.wait_reason.flatten().map(|r| r.as_str()),
                 observation.mark_ended,
-                observation.subagents_running.map(|b| b as i64),
             ],
         )?;
         tx.commit()?;
@@ -352,15 +349,6 @@ impl SqliteStore {
         Ok(updated > 0)
     }
 
-    pub fn clear_subagents_running(&mut self, claude_session_id: &str) -> Result<()> {
-        self.conn().execute(
-            "UPDATE claude_sessions SET subagents_running = 0
-              WHERE claude_session_id = ?1 AND subagents_running = 1",
-            params![claude_session_id],
-        )?;
-        Ok(())
-    }
-
     pub fn list_claude_sessions(&self) -> Result<Vec<ClaudeSession>> {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {CLAUDE_SESSION_COLUMNS} FROM claude_sessions ORDER BY created_at"
@@ -460,9 +448,5 @@ impl ClaudeSessionRepository for SqliteStore {
 
     fn release_claude_session_thinking(&mut self, claude_session_id: &str) -> Result<bool> {
         SqliteStore::release_claude_session_thinking(self, claude_session_id)
-    }
-
-    fn clear_subagents_running(&mut self, claude_session_id: &str) -> Result<()> {
-        SqliteStore::clear_subagents_running(self, claude_session_id)
     }
 }

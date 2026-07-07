@@ -283,9 +283,7 @@ fn snapshot_event(row: &monica_domain::ClaudeSession) -> Option<SessionEvent> {
         return Some(SessionEvent::Ended);
     }
     match row.observed_conversation_status()? {
-        monica_domain::ClaudeConversationStatus::Idle => Some(SessionEvent::Idle {
-            subagents_running: row.subagents_running,
-        }),
+        monica_domain::ClaudeConversationStatus::Idle => Some(SessionEvent::Idle),
         monica_domain::ClaudeConversationStatus::AwaitingUser => {
             Some(SessionEvent::AwaitingUser {
                 wait_reason: row.wait_reason.map(|r| r.as_str().to_string()),
@@ -571,7 +569,6 @@ mod tests {
             conversation_status,
             wait_reason: None,
             provider_session_id: provider_session_id.map(str::to_string),
-            subagents_running: false,
             jsonl_offset: 0,
             created_at: "2026-07-06T00:00:00Z".into(),
             ended_at: None,
@@ -585,7 +582,7 @@ mod tests {
         assert_eq!(snapshot_event(&subscription_row(S::Active, C::Idle, None)), None);
         assert_eq!(
             snapshot_event(&subscription_row(S::Active, C::Idle, Some("s-1"))),
-            Some(SessionEvent::Idle { subagents_running: false })
+            Some(SessionEvent::Idle)
         );
         assert_eq!(snapshot_event(&subscription_row(S::Active, C::Thinking, Some("s-1"))), None);
         assert_eq!(
@@ -626,7 +623,7 @@ mod tests {
                     input_json: r#"{"command":"pwd"}"#.into(),
                 },
                 SessionEvent::AssistantMessage { text: "answer".into() },
-                SessionEvent::Idle { subagents_running: false },
+                SessionEvent::Idle,
             ]
         );
     }

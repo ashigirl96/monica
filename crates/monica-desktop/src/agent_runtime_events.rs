@@ -121,16 +121,13 @@ fn session_events_for(event: &ApplicationEvent) -> Option<(String, Vec<SessionEv
             session_status,
             conversation_status,
             wait_reason,
-            subagents_running,
             ..
         } => {
             let events = if *session_status == ClaudeSessionStatus::Ended {
                 vec![SessionEvent::Ended]
             } else {
                 match conversation_status {
-                    ClaudeConversationStatus::Idle => vec![SessionEvent::Idle {
-                        subagents_running: *subagents_running,
-                    }],
+                    ClaudeConversationStatus::Idle => vec![SessionEvent::Idle],
                     ClaudeConversationStatus::AwaitingUser => {
                         vec![SessionEvent::AwaitingUser {
                             wait_reason: wait_reason.as_ref().map(|r| r.as_str().to_string()),
@@ -163,7 +160,6 @@ mod tests {
             session_status,
             conversation_status,
             wait_reason: None,
-            subagents_running: false,
         }
     }
 
@@ -182,7 +178,7 @@ mod tests {
             ClaudeConversationStatus::Idle,
         ))
         .unwrap();
-        assert_eq!(events, vec![SessionEvent::Idle { subagents_running: false }]);
+        assert_eq!(events, vec![SessionEvent::Idle]);
 
         let (_, events) = session_events_for(&state_changed(
             ClaudeSessionStatus::Active,
@@ -201,20 +197,6 @@ mod tests {
     }
 
     #[test]
-    fn idle_carries_subagents_running_from_event() {
-        let event = ApplicationEvent::ClaudeSessionStateChanged {
-            claude_session_id: "cs-1".into(),
-            tab_id: "tab-1".into(),
-            session_status: ClaudeSessionStatus::Active,
-            conversation_status: ClaudeConversationStatus::Idle,
-            wait_reason: None,
-            subagents_running: true,
-        };
-        let (_, events) = session_events_for(&event).unwrap();
-        assert_eq!(events, vec![SessionEvent::Idle { subagents_running: true }]);
-    }
-
-    #[test]
     fn maps_awaiting_user_with_its_reason() {
         let event = ApplicationEvent::ClaudeSessionStateChanged {
             claude_session_id: "cs-1".into(),
@@ -222,7 +204,6 @@ mod tests {
             session_status: ClaudeSessionStatus::Active,
             conversation_status: ClaudeConversationStatus::AwaitingUser,
             wait_reason: Some(monica_domain::TaskRunWaitReason::AskUserQuestion),
-            subagents_running: false,
         };
         let (_, events) = session_events_for(&event).unwrap();
         assert_eq!(
@@ -282,7 +263,7 @@ mod tests {
         broadcaster
             .publish(&state_changed(ClaudeSessionStatus::Active, ClaudeConversationStatus::Idle));
 
-        assert_eq!(sub_match.rx.try_recv().unwrap(), SessionEvent::Idle { subagents_running: false });
+        assert_eq!(sub_match.rx.try_recv().unwrap(), SessionEvent::Idle);
         assert!(sub_other.rx.try_recv().is_err());
     }
 
@@ -331,7 +312,7 @@ mod tests {
         broadcaster
             .publish(&state_changed(ClaudeSessionStatus::Active, ClaudeConversationStatus::Idle));
 
-        assert_eq!(second.rx.try_recv().unwrap(), SessionEvent::Idle { subagents_running: false });
+        assert_eq!(second.rx.try_recv().unwrap(), SessionEvent::Idle);
         assert_eq!(broadcaster.subs.lock().unwrap().len(), 1);
     }
 }

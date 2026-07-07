@@ -116,7 +116,7 @@ fn get_or_create_opens_then_subscribes_and_streams_until_ended() {
             vec![RuntimeResponse::Ok { session: session_info() }],
             vec![
                 RuntimeResponse::Ack,
-                event(SessionEvent::Idle { subagents_running: false }),
+                event(SessionEvent::Idle),
                 event(SessionEvent::ToolUse {
                     tool_use_id: "t-1".into(),
                     name: "Bash".into(),
@@ -143,7 +143,7 @@ fn get_or_create_opens_then_subscribes_and_streams_until_ended() {
     };
     assert_eq!(claude_session_id, CANNED_ID);
 
-    assert_eq!(session.next_event().unwrap(), SessionEvent::Idle { subagents_running: false });
+    assert_eq!(session.next_event().unwrap(), SessionEvent::Idle);
     assert!(matches!(session.next_event().unwrap(), SessionEvent::ToolUse { .. }));
     assert_eq!(
         session.next_event().unwrap(),
@@ -162,7 +162,7 @@ fn wait_until_idle_ignores_pings_and_acks() {
         "ping",
         vec![
             vec![RuntimeResponse::Ok { session: session_info() }],
-            vec![RuntimeResponse::Ack, RuntimeResponse::Ping, event(SessionEvent::Idle { subagents_running: false })],
+            vec![RuntimeResponse::Ack, RuntimeResponse::Ping, event(SessionEvent::Idle)],
         ],
     );
     let runtime = ClaudeRuntime::connect_at(&mock.socket);
@@ -193,13 +193,13 @@ fn an_eof_before_ended_is_a_lost_stream_not_a_clean_end() {
         "lost",
         vec![
             vec![RuntimeResponse::Ok { session: session_info() }],
-            vec![RuntimeResponse::Ack, event(SessionEvent::Idle { subagents_running: false })],
+            vec![RuntimeResponse::Ack, event(SessionEvent::Idle)],
         ],
     );
     let runtime = ClaudeRuntime::connect_at(&mock.socket);
     let mut session = runtime.get_or_create_session(CANNED_ID, params()).unwrap();
 
-    assert_eq!(session.next_event().unwrap(), SessionEvent::Idle { subagents_running: false });
+    assert_eq!(session.next_event().unwrap(), SessionEvent::Idle);
     let err = session.next_event().unwrap_err();
     assert!(err.chain().all(|c| c.downcast_ref::<SessionEnded>().is_none()));
     assert!(format!("{err:#}").contains("lost"), "got: {err:#}");
@@ -262,7 +262,7 @@ fn list_sessions_returns_summaries_and_session_attaches_through_them() {
         vec![
             vec![RuntimeResponse::Sessions { sessions: vec![summary()] }],
             vec![RuntimeResponse::Sessions { sessions: vec![summary()] }],
-            vec![RuntimeResponse::Ack, event(SessionEvent::Idle { subagents_running: false })],
+            vec![RuntimeResponse::Ack, event(SessionEvent::Idle)],
         ],
     );
     let runtime = ClaudeRuntime::connect_at(&mock.socket);
@@ -276,7 +276,7 @@ fn list_sessions_returns_summaries_and_session_attaches_through_them() {
     let mut session = runtime.session(CANNED_ID).unwrap();
     assert_eq!(session.terminal_session_id(), "ts-42");
     assert!(session.info().is_none());
-    assert_eq!(session.next_event().unwrap(), SessionEvent::Idle { subagents_running: false });
+    assert_eq!(session.next_event().unwrap(), SessionEvent::Idle);
 }
 
 #[test]
