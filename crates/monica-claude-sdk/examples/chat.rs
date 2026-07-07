@@ -87,7 +87,11 @@ fn run_turn(session: &mut monica_claude_sdk::ClaudeSession) -> Result<()> {
                     wait_reason.as_deref().unwrap_or("input")
                 );
             }
-            SessionEvent::Idle => {
+            SessionEvent::Idle { subagents_running } => {
+                if subagents_running {
+                    eprintln!("(subagents still running — waiting for next turn)");
+                    continue;
+                }
                 if drain_after_idle(session, answered, saw_tool)? {
                     return Ok(());
                 }
@@ -120,8 +124,7 @@ fn drain_after_idle(
             Some(SessionEvent::ToolUse { name, .. }) => {
                 eprintln!("[tool] {name}");
             }
-            Some(SessionEvent::Idle) => {
-                // More Idle events arrive while tools run; keep draining.
+            Some(SessionEvent::Idle { .. }) => {
             }
             Some(SessionEvent::AwaitingUser { .. }) | Some(SessionEvent::Ended) | None => {
                 return Ok(true);
