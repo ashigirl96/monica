@@ -5,7 +5,6 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 mod agent_event_decoder;
 mod claude_session_repository;
-mod claude_transcript;
 mod event_repository;
 mod git_gateway;
 mod notebook_gateway;
@@ -22,13 +21,7 @@ mod workbench_store;
 mod workspace;
 
 pub use agent_event_decoder::{AgentDecoders, AgentEventDecoder};
-pub use claude_session_repository::{
-    ClaudeSessionEvent, ClaudeSessionObservation, ClaudeSessionRepository,
-};
-pub use claude_transcript::{
-    ClaudeToolUse, ClaudeTranscriptReader, ClaudeTranscriptRecord, ClaudeTranscriptRecordKind,
-    TranscriptChunk,
-};
+pub use claude_session_repository::ClaudeSessionRepository;
 pub use event_repository::EventRepository;
 pub use git_gateway::{GitGateway, WorktreeRef};
 pub use notebook_gateway::NotebookGateway;

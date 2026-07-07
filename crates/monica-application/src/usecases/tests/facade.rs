@@ -612,13 +612,18 @@ fn facade_open_claude_session_recovery_storage_failure_is_indeterminate() {
     let repos = FakeRepos::default();
     let id = "5e0f5b0e-9f5c-4a4e-9d6e-000000000309";
     repos.seed_session(fake_session("ts-9", Some("tab-w"), TerminalSessionStatus::Running));
-    repos.seed_claude_session(claude_session_row(
-        id,
-        "tab-w",
-        "ts-9",
-        monica_domain::ClaudeSessionStatus::Active,
-        monica_domain::ClaudeLaunchPhase::Submitting,
-    ));
+    repos.seed_claude_session(monica_domain::ClaudeSession {
+        claude_session_id: id.to_string(),
+        runspace_id: "agent-runtime".to_string(),
+        tab_id: "tab-w".to_string(),
+        terminal_session_id: "ts-9".to_string(),
+        cwd: "/tmp".to_string(),
+        name: None,
+        status: monica_domain::ClaudeSessionStatus::Active,
+        launch_phase: monica_domain::ClaudeLaunchPhase::Submitting,
+        created_at: "2026-06-02T00:00:00.000Z".to_string(),
+        ended_at: None,
+    });
     repos.fail_get_terminal_session();
     let sink = RecordingSink::default();
     let mut monica = facade(repos, sink.clone());
@@ -634,33 +639,6 @@ fn facade_open_claude_session_recovery_storage_failure_is_indeterminate() {
     assert!(daemon.created.lock().unwrap().is_empty(), "must not respawn");
 }
 
-/// A `claude_sessions` row with the boilerplate every seed shares; callers vary only the
-/// coordinates and lifecycle state.
-fn claude_session_row(
-    id: &str,
-    tab_id: &str,
-    terminal_session_id: &str,
-    status: monica_domain::ClaudeSessionStatus,
-    launch_phase: monica_domain::ClaudeLaunchPhase,
-) -> monica_domain::ClaudeSession {
-    monica_domain::ClaudeSession {
-        claude_session_id: id.to_string(),
-        runspace_id: "agent-runtime".to_string(),
-        tab_id: tab_id.to_string(),
-        terminal_session_id: terminal_session_id.to_string(),
-        cwd: "/tmp".to_string(),
-        name: None,
-        status,
-        launch_phase,
-        conversation_status: monica_domain::ClaudeConversationStatus::Idle,
-        wait_reason: None,
-        provider_session_id: None,
-        jsonl_offset: 0,
-        created_at: "2026-06-02T00:00:00.000Z".to_string(),
-        ended_at: None,
-    }
-}
-
 /// A crash-leftover pending reservation on `ts-9`, its shell still alive in the daemon,
 /// old enough to be past the in-flight lease.
 fn stage_stale_pending_reservation(
@@ -671,13 +649,18 @@ fn stage_stale_pending_reservation(
 ) {
     repos.seed_session(fake_session("ts-9", Some("tab-w"), TerminalSessionStatus::Running));
     daemon.seed_running_view("ts-9");
-    repos.seed_claude_session(claude_session_row(
-        id,
-        "tab-w",
-        "ts-9",
-        monica_domain::ClaudeSessionStatus::Pending,
+    repos.seed_claude_session(monica_domain::ClaudeSession {
+        claude_session_id: id.to_string(),
+        runspace_id: "agent-runtime".to_string(),
+        tab_id: "tab-w".to_string(),
+        terminal_session_id: "ts-9".to_string(),
+        cwd: "/tmp".to_string(),
+        name: None,
+        status: monica_domain::ClaudeSessionStatus::Pending,
         launch_phase,
-    ));
+        created_at: "2026-06-02T00:00:00.000Z".to_string(),
+        ended_at: None,
+    });
     repos.set_claude_session_age(120);
 }
 
@@ -776,10 +759,6 @@ fn stage_reservation_race_winner(
         name: None,
         status,
         launch_phase: monica_domain::ClaudeLaunchPhase::Submitting,
-        conversation_status: monica_domain::ClaudeConversationStatus::Idle,
-        wait_reason: None,
-        provider_session_id: None,
-        jsonl_offset: 0,
         created_at: "2026-06-02T00:00:00.000Z".to_string(),
         ended_at: None,
     });
@@ -850,13 +829,18 @@ fn facade_open_claude_session_with_id_pending_reservation_is_indeterminate() {
     // must be refused — but as an indeterminate outcome, because a determinate error
     // tells the Agent Runtime "nothing was created" and licenses a fresh-id retry that would
     // duplicate the session the in-flight open is about to confirm.
-    repos.seed_claude_session(claude_session_row(
-        id,
-        "tab-agent-runtime-1",
-        "ts-1",
-        monica_domain::ClaudeSessionStatus::Pending,
-        monica_domain::ClaudeLaunchPhase::Submitting,
-    ));
+    repos.seed_claude_session(monica_domain::ClaudeSession {
+        claude_session_id: id.to_string(),
+        runspace_id: "agent-runtime".to_string(),
+        tab_id: "tab-agent-runtime-1".to_string(),
+        terminal_session_id: "ts-1".to_string(),
+        cwd: "/tmp".to_string(),
+        name: None,
+        status: monica_domain::ClaudeSessionStatus::Pending,
+        launch_phase: monica_domain::ClaudeLaunchPhase::Submitting,
+        created_at: "2026-06-02T00:00:00.000Z".to_string(),
+        ended_at: None,
+    });
     let sink = RecordingSink::default();
     let mut monica = facade(repos, sink.clone());
     let daemon = FakeDaemon::default();
@@ -973,13 +957,18 @@ fn facade_open_claude_session_with_id_missing_terminal_row_ends_mapping_and_erro
     let id = "5e0f5b0e-9f5c-4a4e-9d6e-000000000309";
     // The mapping row survived but its terminal row is gone — the inconsistency the
     // schema's no-FK design leaves to the recovery path to settle.
-    repos.seed_claude_session(claude_session_row(
-        id,
-        "tab-agent-runtime-1",
-        "ts-404",
-        monica_domain::ClaudeSessionStatus::Active,
-        monica_domain::ClaudeLaunchPhase::Submitting,
-    ));
+    repos.seed_claude_session(monica_domain::ClaudeSession {
+        claude_session_id: id.to_string(),
+        runspace_id: "agent-runtime".to_string(),
+        tab_id: "tab-agent-runtime-1".to_string(),
+        terminal_session_id: "ts-404".to_string(),
+        cwd: "/tmp".to_string(),
+        name: None,
+        status: monica_domain::ClaudeSessionStatus::Active,
+        launch_phase: monica_domain::ClaudeLaunchPhase::Submitting,
+        created_at: "2026-06-02T00:00:00.000Z".to_string(),
+        ended_at: None,
+    });
     let sink = RecordingSink::default();
     let mut monica = facade(repos, sink.clone());
     let daemon = FakeDaemon::default();
@@ -1168,302 +1157,4 @@ async fn facade_init_project_prefers_git_branch_over_github() {
     assert_eq!(report.project.repo, "owner/repo");
     assert_eq!(report.project.default_branch, "main");
     assert!(!report.scaffold.is_empty());
-}
-
-// --- Claude session hook ingest / drain -----------------------------------------------------------
-
-fn seed_active_claude_session(repos: &FakeRepos, id: &str) {
-    repos.seed_session(fake_session("ts-9", Some("tab-w"), TerminalSessionStatus::Running));
-    repos.seed_claude_session(claude_session_row(
-        id,
-        "tab-w",
-        "ts-9",
-        monica_domain::ClaudeSessionStatus::Active,
-        monica_domain::ClaudeLaunchPhase::Submitting,
-    ));
-}
-
-#[test]
-fn facade_ingest_claude_session_hook_moves_conversation_state() {
-    let repos = FakeRepos::default();
-    seed_active_claude_session(&repos, "cs-1");
-    let sink = RecordingSink::default();
-    let decoders = TestAgentDecoders::with_signal(input_required(
-        Some("s-1"),
-        TaskRunWaitReason::AskUserQuestion,
-    ));
-    let mut monica = facade_with_decoder(repos, sink, decoders);
-
-    let report = monica
-        .executions()
-        .ingest_claude_session_hook(Agent::Claude, "cs-1", "{}")
-        .unwrap();
-
-    assert!(report.session_found);
-    assert!(!report.ignored);
-    assert_eq!(
-        report.conversation_status,
-        Some(monica_domain::ClaudeConversationStatus::AwaitingUser)
-    );
-    assert!(!report.session_ended);
-}
-
-#[test]
-fn facade_ingest_claude_session_hook_for_unknown_id_records_nothing() {
-    let repos = FakeRepos::default();
-    let sink = RecordingSink::default();
-    let decoders = TestAgentDecoders::with_signal(prompt("s-1"));
-    let mut monica = facade_with_decoder(repos, sink, decoders);
-
-    let report = monica
-        .executions()
-        .ingest_claude_session_hook(Agent::Claude, "no-such-session", "{}")
-        .unwrap();
-
-    assert!(!report.session_found);
-    let outcome = monica
-        .executions()
-        .drain_claude_session_events(Path::new("/home"), 50)
-        .unwrap();
-    assert_eq!(outcome.drained, 0, "an unmatched hook must not enqueue outbox rows");
-}
-
-#[test]
-fn facade_drain_reads_transcript_after_turn_complete_and_consumes() {
-    let repos = FakeRepos::default();
-    seed_active_claude_session(&repos, "cs-1");
-    let sink = RecordingSink::default();
-    let decoders = TestAgentDecoders::with_signal(turn_completed("s-2", false));
-    let transcripts = FakeTranscripts::default();
-    transcripts.set_next_chunk(crate::TranscriptChunk {
-        records: vec![crate::ClaudeTranscriptRecord {
-            uuid: Some("r-1".to_string()),
-            timestamp: None,
-            kind: crate::ClaudeTranscriptRecordKind::Assistant {
-                text: "hello".to_string(),
-                tool_uses: Vec::new(),
-            },
-        }],
-        new_offset: 42,
-        file_exists: true,
-    });
-    let mut monica = facade_with_transcripts(repos, sink.clone(), decoders, transcripts.clone());
-    monica
-        .executions()
-        .ingest_claude_session_hook(Agent::Claude, "cs-1", "{}")
-        .unwrap();
-
-    let outcome = monica
-        .executions()
-        .drain_claude_session_events(Path::new("/home"), 50)
-        .unwrap();
-
-    assert_eq!(outcome.drained, 1);
-    assert!(outcome.recheck.is_empty());
-    // The transcript path derives from the provider session id the hook stamped, not the
-    // pre-minted id — after a /clear Claude writes a different file.
-    let reads = transcripts.reads();
-    assert_eq!(reads.len(), 1);
-    assert!(reads[0].0.ends_with(".claude/projects/-tmp/s-2.jsonl"), "got {:?}", reads[0].0);
-    assert_eq!(reads[0].1, 0);
-    let events = sink.events();
-    assert!(events.iter().any(|e| matches!(
-        e,
-        ApplicationEvent::ClaudeSessionStateChanged {
-            claude_session_id,
-            conversation_status: monica_domain::ClaudeConversationStatus::Idle,
-            ..
-        } if claude_session_id == "cs-1"
-    )));
-    assert!(events.iter().any(|e| matches!(
-        e,
-        ApplicationEvent::ClaudeSessionMessages { claude_session_id, records }
-            if claude_session_id == "cs-1" && records.len() == 1
-    )));
-
-    // Consumed: a second tick drains nothing and re-reads no transcript.
-    let second = monica
-        .executions()
-        .drain_claude_session_events(Path::new("/home"), 50)
-        .unwrap();
-    assert_eq!(second.drained, 0);
-    assert_eq!(transcripts.reads().len(), 1);
-}
-
-#[test]
-fn facade_drain_rechecks_when_only_the_user_record_flushed() {
-    // The assistant record flushes last; a read that surfaced only the user prompt has
-    // not captured the turn's response, so the turn must still be rechecked.
-    let repos = FakeRepos::default();
-    seed_active_claude_session(&repos, "cs-1");
-    let sink = RecordingSink::default();
-    let decoders = TestAgentDecoders::with_signal(turn_completed("s-1", false));
-    let transcripts = FakeTranscripts::default();
-    transcripts.set_next_chunk(crate::TranscriptChunk {
-        records: vec![crate::ClaudeTranscriptRecord {
-            uuid: Some("u-1".to_string()),
-            timestamp: None,
-            kind: crate::ClaudeTranscriptRecordKind::User,
-        }],
-        new_offset: 20,
-        file_exists: true,
-    });
-    let mut monica = facade_with_transcripts(repos, sink, decoders, transcripts);
-    monica
-        .executions()
-        .ingest_claude_session_hook(Agent::Claude, "cs-1", "{}")
-        .unwrap();
-
-    let outcome = monica
-        .executions()
-        .drain_claude_session_events(Path::new("/home"), 50)
-        .unwrap();
-
-    assert_eq!(outcome.drained, 1);
-    assert_eq!(
-        outcome.recheck,
-        vec!["cs-1".to_string()],
-        "a user-only read must not count as the assistant response arriving"
-    );
-}
-
-#[test]
-fn facade_drain_consumes_events_even_when_transcript_read_errors() {
-    // A poison transcript read must not wedge the outbox: events are already durable, so
-    // the batch is consumed and the session is left for recheck / offset catch-up.
-    let repos = FakeRepos::default();
-    seed_active_claude_session(&repos, "cs-1");
-    let sink = RecordingSink::default();
-    let decoders = TestAgentDecoders::with_signal(turn_completed("s-1", false));
-    let transcripts = FakeTranscripts::default();
-    transcripts.fail_next_read("disk gone");
-    let mut monica = facade_with_transcripts(repos, sink, decoders, transcripts);
-    monica
-        .executions()
-        .ingest_claude_session_hook(Agent::Claude, "cs-1", "{}")
-        .unwrap();
-
-    let outcome = monica
-        .executions()
-        .drain_claude_session_events(Path::new("/home"), 50)
-        .unwrap();
-
-    assert_eq!(outcome.drained, 1, "the batch must be consumed despite the read error");
-    assert_eq!(outcome.recheck, vec!["cs-1".to_string()]);
-    // A second tick finds nothing left — the poison event did not re-wedge the queue.
-    let second = monica
-        .executions()
-        .drain_claude_session_events(Path::new("/home"), 50)
-        .unwrap();
-    assert_eq!(second.drained, 0);
-}
-
-#[test]
-fn facade_drain_requests_recheck_when_transcript_has_nothing_yet() {
-    let repos = FakeRepos::default();
-    seed_active_claude_session(&repos, "cs-1");
-    let sink = RecordingSink::default();
-    let decoders = TestAgentDecoders::with_signal(turn_completed("s-1", false));
-    let transcripts = FakeTranscripts::default();
-    // Claude has not created the file yet (lazy creation on first user message).
-    let mut monica = facade_with_transcripts(repos, sink, decoders, transcripts);
-    monica
-        .executions()
-        .ingest_claude_session_hook(Agent::Claude, "cs-1", "{}")
-        .unwrap();
-
-    let outcome = monica
-        .executions()
-        .drain_claude_session_events(Path::new("/home"), 50)
-        .unwrap();
-
-    assert_eq!(outcome.drained, 1, "events are consumed even when the read is empty");
-    assert_eq!(outcome.recheck, vec!["cs-1".to_string()]);
-}
-
-#[test]
-fn facade_open_claude_session_installs_hooks_before_spawn() {
-    let sink = RecordingSink::default();
-    let outputs = FakeTaskRunOutputs::default();
-    let mut monica = facade_with_outputs(FakeRepos::default(), sink, outputs.clone());
-    let daemon = FakeDaemon::default();
-    let cwd = std::env::temp_dir().to_string_lossy().into_owned();
-
-    monica.executions().open_claude_session(&daemon, claude_params(&cwd)).unwrap();
-
-    assert_eq!(outputs.hooks_installed_in().len(), 1);
-    assert!(cwd.starts_with(outputs.hooks_installed_in()[0].trim_end_matches('/')));
-}
-
-#[test]
-fn facade_open_claude_session_hook_install_failure_is_determinate_and_spawns_nothing() {
-    let sink = RecordingSink::default();
-    let outputs = FakeTaskRunOutputs::default();
-    outputs.fail_install_hooks("disk full");
-    let mut monica = facade_with_outputs(FakeRepos::default(), sink, outputs);
-    let daemon = FakeDaemon::default();
-    let cwd = std::env::temp_dir().to_string_lossy().into_owned();
-
-    let err = monica.executions().open_claude_session(&daemon, claude_params(&cwd)).unwrap_err();
-
-    assert!(matches!(err, ApplicationError::External(_)), "got: {err:?}");
-    assert!(daemon.created.lock().unwrap().is_empty(), "must not spawn a PTY");
-}
-
-#[test]
-fn facade_claude_session_transcript_for_unknown_id_errors_not_found() {
-    let sink = RecordingSink::default();
-    let mut monica = facade(FakeRepos::default(), sink);
-
-    let err = monica
-        .executions()
-        .claude_session_transcript(Path::new("/home"), "no-such-session")
-        .unwrap_err();
-
-    assert!(matches!(err, ApplicationError::NotFound(_)), "got: {err:?}");
-}
-
-#[test]
-fn facade_claude_session_transcript_reads_from_zero_without_moving_the_cursor() {
-    let repos = FakeRepos::default();
-    seed_active_claude_session(&repos, "cs-1");
-    let sink = RecordingSink::default();
-    // Stamp a provider session id and advance the cursor via a completed turn first.
-    let decoders = TestAgentDecoders::with_signal(turn_completed("s-2", false));
-    let transcripts = FakeTranscripts::default();
-    transcripts.set_next_chunk(crate::TranscriptChunk {
-        records: vec![crate::ClaudeTranscriptRecord {
-            uuid: Some("r-1".to_string()),
-            timestamp: None,
-            kind: crate::ClaudeTranscriptRecordKind::User,
-        }],
-        new_offset: 42,
-        file_exists: true,
-    });
-    let mut monica = facade_with_transcripts(repos, sink, decoders, transcripts.clone());
-    monica
-        .executions()
-        .ingest_claude_session_hook(Agent::Claude, "cs-1", "{}")
-        .unwrap();
-    monica
-        .executions()
-        .drain_claude_session_events(Path::new("/home"), 50)
-        .unwrap();
-
-    let records = monica
-        .executions()
-        .claude_session_transcript(Path::new("/home"), "cs-1")
-        .unwrap();
-
-    assert_eq!(records.len(), 1);
-    let reads = transcripts.reads();
-    let (path, offset) = reads.last().unwrap();
-    assert_eq!(*offset, 0, "catch-up must read the whole file, not the cursor");
-    assert!(path.ends_with(".claude/projects/-tmp/s-2.jsonl"), "got {path:?}");
-    // The persisted cursor stays where the drain put it.
-    let outcome = monica
-        .executions()
-        .drain_claude_session_events(Path::new("/home"), 50)
-        .unwrap();
-    assert_eq!(outcome.drained, 0);
 }

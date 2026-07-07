@@ -44,15 +44,12 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::plan::read_runspace_plan,
             commands::pull_request::force_sync_pull_requests,
             commands::claude_runtime::claude_list_sessions,
-            commands::claude_runtime::claude_session_transcript,
             commands::window::open_named_window,
         ])
         .events(tauri_specta::collect_events![
             commands::task::TaskRunStatusChanged,
             commands::pull_request::PrSyncCompleted,
             commands::claude_runtime::ClaudeSessionOpened,
-            commands::claude_runtime::ClaudeSessionStateChanged,
-            commands::claude_runtime::ClaudeSessionMessage,
         ])
 }
 
@@ -122,11 +119,6 @@ pub fn run() {
             app.manage(waker);
             let drain = schedulers::notification_drain::start(app.handle().clone());
             app.manage(drain);
-            if let Some(claude_drain) =
-                schedulers::claude_session_drain::start(app.handle().clone())
-            {
-                app.manage(claude_drain);
-            }
             ptyd::start_warmup(app.handle().clone());
             agent_runtime_server::start(app.handle().clone());
             #[cfg(not(debug_assertions))]

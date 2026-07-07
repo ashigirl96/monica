@@ -62,25 +62,16 @@ fn handle_agent(agent: Agent, log_file: &str) -> Result<()> {
     let task_id = env_opt("MONICA_TASK_ID");
     let task_run_id = env_opt("MONICA_TASK_RUN_ID");
     let terminal_tab_id = env_opt("MONICA_TERMINAL_TAB_ID");
-    let claude_session_id = env_opt(monica_application::MONICA_CLAUDE_SESSION_ID_ENV);
 
     debug_log_to(log_file, &format!(
-        "invoked task_id={task_id:?} task_run_id={task_run_id:?} tab_id={terminal_tab_id:?} claude_session_id={claude_session_id:?} monica_home={:?} cwd={:?} stdin_bytes={}",
+        "invoked task_id={task_id:?} task_run_id={task_run_id:?} tab_id={terminal_tab_id:?} monica_home={:?} cwd={:?} stdin_bytes={}",
         env_opt("MONICA_HOME"),
         std::env::current_dir().ok(),
         raw.len(),
     ));
 
     if task_id.is_none() && task_run_id.is_none() {
-        // A Claude Runtime session carries only its session id; task env always wins when
-        // both are present (it never is in practice — Agent Runtime sessions get no task env).
-        if let Some(claude_session_id) = claude_session_id {
-            return handle_claude_session(agent, log_file, &claude_session_id, &raw);
-        }
         return Ok(());
-    }
-    if claude_session_id.is_some() {
-        debug_log_to(log_file, "claude_session_id ignored (task context wins)");
     }
 
     let mut monica = crate::event_sink::open()?;
@@ -116,34 +107,6 @@ fn handle_agent(agent: Agent, log_file: &str) -> Result<()> {
     if report.unsafe_task_run_id {
         eprintln!(
             "monica hook {}: MONICA_TASK_RUN_ID is not a safe task run id; skipped hook-events.jsonl",
-            agent.as_str()
-        );
-    }
-    Ok(())
-}
-
-fn handle_claude_session(
-    agent: Agent,
-    log_file: &str,
-    claude_session_id: &str,
-    raw: &str,
-) -> Result<()> {
-    let mut monica = crate::event_sink::open()?;
-    let report =
-        monica
-            .executions()
-            .ingest_claude_session_hook(agent, claude_session_id, raw)?;
-    debug_log_to(log_file, &format!(
-        "claude-session event={:?} ignored={} session_found={} conversation_status={:?} session_ended={}",
-        report.event_name,
-        report.ignored,
-        report.session_found,
-        report.conversation_status,
-        report.session_ended,
-    ));
-    if !report.ignored && !report.session_found {
-        eprintln!(
-            "monica hook {}: MONICA_CLAUDE_SESSION_ID={claude_session_id:?} not found; event dropped",
             agent.as_str()
         );
     }

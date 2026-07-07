@@ -2,8 +2,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use monica_domain::Agent;
-
 use crate::prelude::Project;
 use crate::ExecutionProfile;
 
@@ -32,9 +30,4 @@ pub trait TaskRunOutputs {
         event_label: Option<&str>,
         raw_stdin: &str,
     ) -> Result<()>;
-    /// Register the agent's hook callbacks in `cwd`'s settings file (merge-only for
-    /// Claude, keeping other keys). Returns the settings path. The hook set is the single
-    /// shared one — a task shell and a Claude Runtime session in the same cwd must not
-    /// fight over the `hooks` key with diverging sets.
-    fn install_agent_hooks(&self, agent: Agent, cwd: &Path) -> Result<String>;
 }

@@ -14,10 +14,7 @@ mod task_run;
 mod terminal;
 
 pub use bench::{PrepareTaskResult, RunTaskResult, TaskBench};
-pub use claude_session::{
-    ClaudeConversationStatus, ClaudeSession, ClaudeSessionStatus, ClaudeToolUse,
-    ClaudeTranscriptRecord, ClaudeTranscriptRecordKind,
-};
+pub use claude_session::{ClaudeSession, ClaudeSessionStatus};
 pub use error::{ApiError, ApiErrorCode};
 pub use github::GithubPullRequestRef;
 pub use status::{

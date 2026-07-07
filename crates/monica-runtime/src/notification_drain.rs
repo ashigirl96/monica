@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use monica_domain::NotificationIntent;
 
-use crate::{InFlightGuard, MonicaFacade};
+use crate::MonicaFacade;
 
 const DRAIN_INTERVAL: Duration = Duration::from_secs(2);
 const DRAIN_BATCH_LIMIT: usize = 10;
@@ -41,6 +41,14 @@ where
         );
     }
     NotificationDrainHandle(tx)
+}
+
+struct InFlightGuard(Arc<AtomicBool>);
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
 fn drain_batch<F, D>(make_facade: &F, deliver: &D)

@@ -9,7 +9,7 @@ use std::sync::{
 };
 use std::time::Duration;
 
-use crate::{InFlightGuard, MonicaFacade};
+use crate::MonicaFacade;
 
 const PR_SYNC_INTERVAL: Duration = Duration::from_secs(10);
 const PR_SYNC_BATCH_LIMIT: usize = 3;
@@ -63,6 +63,14 @@ where
         log::error!(target: "monica_runtime::pr_sync", "failed to start PR sync scheduler: {e}");
     }
     PrSyncWaker(tx)
+}
+
+struct InFlightGuard(Arc<AtomicBool>);
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
 async fn run_batch<F>(make_facade: &F, forced: bool)
