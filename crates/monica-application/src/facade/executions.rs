@@ -918,7 +918,9 @@ impl<B: Backend> ExecutionService<'_, B> {
             ))
         })?;
         self.m.repos.release_claude_session_thinking(claude_session_id)?;
-        self.m.repos.clear_subagents_running(claude_session_id)?;
+        if row.subagents_running {
+            self.m.repos.clear_subagents_running(claude_session_id)?;
+        }
         let settled = self.m.repos.get_claude_session(claude_session_id)?.unwrap_or(row);
         self.m.events.emit(ApplicationEvent::ClaudeSessionStateChanged {
             claude_session_id: settled.claude_session_id,

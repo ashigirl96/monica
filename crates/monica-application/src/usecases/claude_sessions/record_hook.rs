@@ -67,7 +67,10 @@ pub(crate) fn observation_for(kind: &SignalKind) -> Option<ClaudeSessionObservat
             ..conversation(ClaudeConversationStatus::Idle)
         }),
         SignalKind::SessionEnded { reason } if is_clear(reason.as_deref()) => {
-            Some(conversation(ClaudeConversationStatus::Idle))
+            Some(ClaudeSessionObservation {
+                subagents_running: Some(false),
+                ..conversation(ClaudeConversationStatus::Idle)
+            })
         }
         SignalKind::SessionEnded { .. } => Some(ClaudeSessionObservation {
             mark_ended: true,
@@ -80,10 +83,13 @@ pub(crate) fn observation_for(kind: &SignalKind) -> Option<ClaudeSessionObservat
             wait_reason: Some(Some(TaskRunWaitReason::PermissionRequest)),
             ..Default::default()
         }),
+        SignalKind::SubagentFinished { subagents_running } => Some(ClaudeSessionObservation {
+            subagents_running: Some(*subagents_running),
+            ..Default::default()
+        }),
         SignalKind::NotificationReceived {
             permission_request: false,
         }
-        | SignalKind::SubagentFinished { .. }
         | SignalKind::Inert => None,
     }
 }
@@ -146,7 +152,7 @@ mod tests {
         );
         assert_eq!(
             status_of(SignalKind::SubagentFinished { subagents_running: false }),
-            None
+            Some((None, false))
         );
         assert_eq!(status_of(SignalKind::Inert), None);
     }
@@ -159,6 +165,19 @@ mod tests {
 
         let obs = observation_for(&SignalKind::TurnCompleted { subagents_running: false }).unwrap();
         assert_eq!(obs.subagents_running, Some(false));
+    }
+
+    #[test]
+    fn subagent_finished_carries_subagents_running_without_touching_conversation_status() {
+        let obs =
+            observation_for(&SignalKind::SubagentFinished { subagents_running: true }).unwrap();
+        assert_eq!(obs.subagents_running, Some(true));
+        assert_eq!(obs.conversation_status, None);
+
+        let obs =
+            observation_for(&SignalKind::SubagentFinished { subagents_running: false }).unwrap();
+        assert_eq!(obs.subagents_running, Some(false));
+        assert_eq!(obs.conversation_status, None);
     }
 
     #[test]
@@ -218,6 +237,7 @@ mod tests {
             cleared.conversation_status,
             Some(ClaudeConversationStatus::Idle)
         );
+        assert_eq!(cleared.subagents_running, Some(false));
         for reason in [None, Some("logout".to_string()), Some("prompt_input_exit".to_string())] {
             let ended = observation_for(&SignalKind::SessionEnded { reason }).unwrap();
             assert!(ended.mark_ended);

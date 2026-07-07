@@ -2946,22 +2946,30 @@ fn insert_and_consume_event(db: &mut SqliteStore, claude_session_id: &str) -> i6
     id
 }
 
-#[test]
-fn sweep_deletes_consumed_events_older_than_retention() {
+fn age_consumed_event(db: &mut SqliteStore, id: i64, days_ago: i64) {
+    db.conn()
+        .execute(
+            &format!(
+                "UPDATE claude_session_events SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-{days_ago} days') WHERE id = ?1"
+            ),
+            rusqlite::params![id],
+        )
+        .unwrap();
+}
+
+fn db_with_aged_consumed_event(days_ago: i64) -> SqliteStore {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let ts = db.create_terminal_session(new_shell_session(Some("agent-runtime"), None)).unwrap();
     db.mark_terminal_session_started(&ts.id, Some(1), None).unwrap();
     db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
-
     let id = insert_and_consume_event(&mut db, "uuid-1");
+    age_consumed_event(&mut db, id, days_ago);
+    db
+}
 
-    db.conn()
-        .execute(
-            "UPDATE claude_session_events SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-31 days') WHERE id = ?1",
-            rusqlite::params![id],
-        )
-        .unwrap();
-
+#[test]
+fn sweep_deletes_consumed_events_older_than_retention() {
+    let mut db = db_with_aged_consumed_event(31);
     let deleted = db.sweep_consumed_claude_session_events(30).unwrap();
     assert_eq!(deleted, 1);
     assert_eq!(event_count(&db), 0);
@@ -2969,20 +2977,7 @@ fn sweep_deletes_consumed_events_older_than_retention() {
 
 #[test]
 fn sweep_keeps_consumed_events_within_retention() {
-    let mut db = SqliteStore::open_in_memory().unwrap();
-    let ts = db.create_terminal_session(new_shell_session(Some("agent-runtime"), None)).unwrap();
-    db.mark_terminal_session_started(&ts.id, Some(1), None).unwrap();
-    db.create_claude_session(new_claude_session("uuid-1", &ts.id)).unwrap();
-
-    let id = insert_and_consume_event(&mut db, "uuid-1");
-
-    db.conn()
-        .execute(
-            "UPDATE claude_session_events SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-29 days') WHERE id = ?1",
-            rusqlite::params![id],
-        )
-        .unwrap();
-
+    let mut db = db_with_aged_consumed_event(29);
     let deleted = db.sweep_consumed_claude_session_events(30).unwrap();
     assert_eq!(deleted, 0);
     assert_eq!(event_count(&db), 1);
