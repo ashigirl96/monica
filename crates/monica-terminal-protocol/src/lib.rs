@@ -9,10 +9,6 @@
 
 use serde::{Deserialize, Serialize};
 
-mod input;
-
-pub use input::{bracketed_paste_bytes, SUBMIT_DELAY};
-
 /// Bump on any incompatible wire change. The client refuses to talk to a daemon with a
 /// different version and restarts it instead.
 pub const PROTOCOL_VERSION: u32 = 1;

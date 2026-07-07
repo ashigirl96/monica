@@ -9,18 +9,12 @@ path = "src/main.rs"
 
 [dependencies]
 monica-application = { path = "../monica-application" }
-monica-claude-sdk = { path = "../monica-claude-sdk" }
 monica-domain = { path = "../monica-domain" }
 monica-runtime = { path = "../monica-runtime" }
 monica-paths = { path = "../monica-paths" }
-monica-terminal-client = { path = "../monica-terminal-client" }
-monica-terminal-protocol = { path = "../monica-terminal-protocol" }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 anyhow = "1.0.102"
-base64 = { version = "0.22", default-features = false, features = ["std"] }
-libc = { version = "0.2", default-features = false }
-signal-hook = { version = "0.3", default-features = false, features = ["iterator"] }
 serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
 tokio = { version = "1.52.3", default-features = false, features = ["net", "rt", "time"] }
 # Notebook lint only: mermaid validation + markdown style. CLI-only — never in core/app

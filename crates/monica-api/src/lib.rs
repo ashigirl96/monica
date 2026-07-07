@@ -5,7 +5,6 @@
 //! one crate keeps `monica-domain` and `monica-application` free of any TypeScript-binding concern.
 
 mod bench;
-mod claude_session;
 mod error;
 mod github;
 mod status;
@@ -14,10 +13,6 @@ mod task_run;
 mod terminal;
 
 pub use bench::{PrepareTaskResult, RunTaskResult, TaskBench};
-pub use claude_session::{
-    ClaudeConversationStatus, ClaudeSession, ClaudeSessionStatus, ClaudeToolUse,
-    ClaudeTranscriptRecord, ClaudeTranscriptRecordKind,
-};
 pub use error::{ApiError, ApiErrorCode};
 pub use github::GithubPullRequestRef;
 pub use status::{

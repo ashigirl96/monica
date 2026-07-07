@@ -1,12 +1,9 @@
 use monica_api::ApiError;
 use monica_application::{ApplicationEvent, EventSink};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tauri_specta::Event;
 
 use crate::commands::pull_request::PrSyncCompleted;
-use crate::commands::claude_runtime::{
-    ClaudeSessionMessage, ClaudeSessionOpened, ClaudeSessionStateChanged,
-};
 use crate::commands::task::TaskRunStatusChanged;
 
 /// The application façade wired to the default backend and the Tauri event sink.
@@ -46,15 +43,6 @@ impl TauriEventSink {
 
 impl EventSink for TauriEventSink {
     fn emit(&self, event: ApplicationEvent) {
-        // Socket subscribers see every Claude-session event any façade emits, because
-        // every façade emits through this sink. `try_state` guards the window before
-        // setup manages the broadcaster.
-        if let Some(broadcaster) = self
-            .app
-            .try_state::<std::sync::Arc<crate::agent_runtime_events::ClaudeSessionBroadcaster>>()
-        {
-            broadcaster.publish(&event);
-        }
         match event {
             ApplicationEvent::TaskRunStatusChanged { task_id, task_run_id, status } => {
                 let _ = TaskRunStatusChanged {
@@ -69,57 +57,9 @@ impl EventSink for TauriEventSink {
                     log::warn!(target: "monica_app::events", "failed to emit PrSyncCompleted: {e}");
                 }
             }
-            ApplicationEvent::ClaudeSessionOpened {
-                runspace_id,
-                tab_id,
-                session_id,
-                cwd,
-                title,
-                ..
-            } => {
-                let event = ClaudeSessionOpened { runspace_id, tab_id, session_id, cwd, title };
-                if let Err(e) = event.emit(&self.app) {
-                    log::warn!(target: "monica_app::events", "failed to emit ClaudeSessionOpened: {e}");
-                }
-            }
             // The desktop reflects a waiting run via its TaskRunStatusChanged status; no separate
             // OS notification yet.
             ApplicationEvent::AwaitingUserInput { .. } => {}
-            ApplicationEvent::ClaudeSessionStateChanged {
-                claude_session_id,
-                tab_id,
-                session_status,
-                conversation_status,
-                wait_reason,
-                subagents_running,
-            } => {
-                let event = ClaudeSessionStateChanged {
-                    claude_session_id,
-                    tab_id,
-                    session_status: session_status.into(),
-                    conversation_status: conversation_status.into(),
-                    wait_reason: wait_reason.map(Into::into),
-                    subagents_running,
-                };
-                if let Err(e) = event.emit(&self.app) {
-                    log::warn!(
-                        target: "monica_app::events",
-                        "failed to emit ClaudeSessionStateChanged: {e}"
-                    );
-                }
-            }
-            ApplicationEvent::ClaudeSessionMessages { claude_session_id, records } => {
-                let event = ClaudeSessionMessage {
-                    claude_session_id,
-                    records: records.into_iter().map(Into::into).collect(),
-                };
-                if let Err(e) = event.emit(&self.app) {
-                    log::warn!(
-                        target: "monica_app::events",
-                        "failed to emit ClaudeSessionMessage: {e}"
-                    );
-                }
-            }
         }
     }
 }

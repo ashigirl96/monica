@@ -39,9 +39,14 @@ impl TaskRunOutputs for FsTaskRunOutputs {
         fs::create_dir_all(&task_dir)
             .with_context(|| format!("failed to create {}", task_dir.display()))?;
 
+        // The hook must write to the DB this app instance reads, but the tab's
+        // MONICA_HOME can be rewritten after spawn (direnv applying a repo
+        // .envrc that exports another base) — so the command pins the base
+        // itself instead of trusting the environment it inherits.
         let monica_home = paths::base_dir()?.to_string_lossy().into_owned();
         let agent = profile.agent_default;
-        let settings_path_str = install_agent_hooks(agent, cwd)?;
+        let hook_cmd = pin_hook_command_base(&resolve_hook_command(agent)?, &monica_home);
+        let settings_path_str = write_agent_hooks_config(agent, cwd, &hook_cmd)?;
 
         let bin_dir = task_dir.join("bin");
         let agent_bin = agent.as_str();
@@ -110,20 +115,6 @@ impl TaskRunOutputs for FsTaskRunOutputs {
             .and_then(|mut f| f.write_all(line.as_bytes()))
             .with_context(|| format!("failed to append to {}", path.display()))
     }
-
-    fn install_agent_hooks(&self, agent: Agent, cwd: &Path) -> Result<String> {
-        install_agent_hooks(agent, cwd)
-    }
-}
-
-/// Resolve the hook command and write the agent's hook config into `cwd`. The command
-/// pins MONICA_HOME itself: the tab's environment can be rewritten after spawn (direnv
-/// applying a repo .envrc that exports another base), so the hook must not trust what it
-/// inherits.
-fn install_agent_hooks(agent: Agent, cwd: &Path) -> Result<String> {
-    let monica_home = paths::base_dir()?.to_string_lossy().into_owned();
-    let hook_cmd = pin_hook_command_base(&resolve_hook_command(agent)?, &monica_home);
-    write_agent_hooks_config(agent, cwd, &hook_cmd)
 }
 
 fn write_if_changed(path: &Path, contents: &str) -> Result<()> {

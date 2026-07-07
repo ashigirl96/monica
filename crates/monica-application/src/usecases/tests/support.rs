@@ -1,22 +1,16 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
-use monica_domain::{
-    ClaudeConversationStatus, ClaudeLaunchPhase, ClaudeSession, ClaudeSessionStatus,
-    NewClaudeSession, RawJson,
-};
+use monica_domain::RawJson;
 
 use crate::ports::{
-    AgentDecoders, BoxFuture, ClaudePromptClaim, ClaudeSessionEvent, ClaudeSessionObservation,
-    ClaudeSessionRepository, EventRepository, GitGateway,
-    NotebookGateway, NotificationOutboxStore, ProjectRepository, PullRequestSyncStore,
-    TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter, TerminalAttachment,
-    TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository, UnitOfWork, WorkTransaction,
-    WorkbenchStore, Workspace,
+    AgentDecoders, BoxFuture, EventRepository, GitGateway, NotebookGateway,
+    NotificationOutboxStore, ProjectRepository, PullRequestSyncStore, TaskBoardQuery, TaskRunStore,
+    TaskStore, TaskSummaryFilter, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
+    TerminalSessionRepository, UnitOfWork, WorkTransaction, WorkbenchStore, Workspace,
 };
 use crate::usecases::runs::record_hook;
 use crate::prelude::{
@@ -69,7 +63,7 @@ pub(crate) fn subagent_finished(session: &str, subagents_running: bool) -> Agent
 }
 
 pub(crate) fn session_ended(session: &str) -> AgentSignal {
-    mk_signal(Some(session), "SessionEnd", SignalKind::SessionEnded { reason: None })
+    mk_signal(Some(session), "SessionEnd", SignalKind::SessionEnded)
 }
 
 pub(crate) fn input_required(session: Option<&str>, reason: TaskRunWaitReason) -> AgentSignal {
@@ -117,21 +111,12 @@ struct FakeState {
     benches: BTreeMap<String, (String, String)>,
     /// Insertion order is creation order, so the last match for a tab is its latest session.
     terminal_sessions: Vec<TerminalSession>,
-    claude_sessions: Vec<ClaudeSession>,
-    claude_session_events: Vec<ClaudeSessionEvent>,
     next_task: i64,
     next_run: i64,
     next_session: i64,
     pr_branch_candidate: Option<PullRequestBranchSyncCandidate>,
     pr_status_candidate: Option<PullRequestStatusSyncCandidate>,
     pr_branch_success_count: usize,
-    mark_started_fails: bool,
-    get_terminal_session_fails: bool,
-    create_claude_session_fails: bool,
-    claude_insert_race_winner: Option<ClaudeSession>,
-    claude_session_age_secs: i64,
-    mark_claude_launched_fails: bool,
-    mark_claude_launched_returns_false: bool,
     branch_sync_candidates: Vec<PullRequestBranchSyncCandidate>,
     bulk_recorded: Vec<(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)>,
 }
@@ -1115,34 +1100,19 @@ impl GitGateway for FakeGit {
     }
 }
 
-#[derive(Default, Clone)]
-pub(crate) struct FakeTaskRunOutputs {
-    state: Rc<RefCell<FakeOutputsState>>,
-}
-
 #[derive(Default)]
-struct FakeOutputsState {
-    appended: bool,
-    last_cwd: Option<String>,
-    hooks_installed_in: Vec<String>,
-    install_hooks_error: Option<String>,
+pub(crate) struct FakeTaskRunOutputs {
+    appended: RefCell<bool>,
+    last_cwd: RefCell<Option<String>>,
 }
 
 impl FakeTaskRunOutputs {
     pub(crate) fn hook_event_appended(&self) -> bool {
-        self.state.borrow().appended
+        *self.appended.borrow()
     }
 
     pub(crate) fn last_cwd(&self) -> Option<String> {
-        self.state.borrow().last_cwd.clone()
-    }
-
-    pub(crate) fn hooks_installed_in(&self) -> Vec<String> {
-        self.state.borrow().hooks_installed_in.clone()
-    }
-
-    pub(crate) fn fail_install_hooks(&self, message: &str) {
-        self.state.borrow_mut().install_hooks_error = Some(message.to_string());
+        self.last_cwd.borrow().clone()
     }
 }
 
@@ -1163,7 +1133,7 @@ impl TaskRunOutputs for FakeTaskRunOutputs {
         _task_run_id: Option<&str>,
         cwd: &std::path::Path,
     ) -> Result<crate::TaskShellEnv> {
-        self.state.borrow_mut().last_cwd = Some(cwd.to_string_lossy().into_owned());
+        *self.last_cwd.borrow_mut() = Some(cwd.to_string_lossy().into_owned());
         Ok(crate::TaskShellEnv {
             env: vec![
                 ("MONICA_TASK_ID".to_string(), task_id.to_string()),
@@ -1181,18 +1151,8 @@ impl TaskRunOutputs for FakeTaskRunOutputs {
         _event_label: Option<&str>,
         _raw_stdin: &str,
     ) -> Result<()> {
-        self.state.borrow_mut().appended = true;
+        *self.appended.borrow_mut() = true;
         Ok(())
-    }
-
-    fn install_agent_hooks(&self, _agent: Agent, cwd: &std::path::Path) -> Result<String> {
-        let mut state = self.state.borrow_mut();
-        if let Some(msg) = state.install_hooks_error.clone() {
-            return Err(anyhow!(msg));
-        }
-        let cwd = cwd.to_string_lossy().into_owned();
-        state.hooks_installed_in.push(cwd.clone());
-        Ok(format!("{cwd}/.claude/settings.local.json"))
     }
 }
 
@@ -1436,49 +1396,6 @@ impl FakeRepos {
         self.state.borrow_mut().pr_branch_candidate = Some(candidate);
     }
 
-    pub(crate) fn fail_mark_started(&self) {
-        self.state.borrow_mut().mark_started_fails = true;
-    }
-
-    pub(crate) fn fail_create_claude_session(&self) {
-        self.state.borrow_mut().create_claude_session_fails = true;
-    }
-
-    /// Stage the losing side of a same-id reservation race: the winner's row lands
-    /// exactly when `create_claude_session` is called, which then fails on the
-    /// duplicate — the interleaving where both opens passed recovery first.
-    pub(crate) fn race_claude_session_insert(&self, winner: ClaudeSession) {
-        self.state.borrow_mut().claude_insert_race_winner = Some(winner);
-    }
-
-    /// Age every claude session row reports, for staging stale (crash-leftover)
-    /// reservations against the pending lease.
-    pub(crate) fn set_claude_session_age(&self, seconds: i64) {
-        self.state.borrow_mut().claude_session_age_secs = seconds;
-    }
-
-    pub(crate) fn fail_get_terminal_session(&self) {
-        self.state.borrow_mut().get_terminal_session_fails = true;
-    }
-
-    pub(crate) fn fail_mark_claude_launched(&self) {
-        self.state.borrow_mut().mark_claude_launched_fails = true;
-    }
-
-    /// Simulate the PTY settling between the launch write and its confirmation: the
-    /// coupled transition already ended the row, so the pending→active update matches
-    /// nothing.
-    pub(crate) fn stall_mark_claude_launched(&self) {
-        self.state.borrow_mut().mark_claude_launched_returns_false = true;
-    }
-
-    /// Seed a mapping row directly, bypassing the terminal-row existence check — for
-    /// staging the "mapping survived, terminal row gone" inconsistency that
-    /// `save_terminal_state`-style rewrites can leave behind.
-    pub(crate) fn seed_claude_session(&self, session: ClaudeSession) {
-        self.state.borrow_mut().claude_sessions.push(session);
-    }
-
     pub(crate) fn pr_branch_success_count(&self) -> usize {
         self.state.borrow().pr_branch_success_count
     }
@@ -1512,9 +1429,6 @@ impl TerminalSessionRepository for FakeRepos {
     }
 
     fn mark_terminal_session_started(&self, id: &str, pid: Option<u32>) -> Result<()> {
-        if self.state.borrow().mark_started_fails {
-            return Err(anyhow!("mark started failed"));
-        }
         if let Some(s) = self.state.borrow_mut().terminal_sessions.iter_mut().find(|s| s.id == id) {
             s.status = TerminalSessionStatus::Running;
             s.pid = pid;
@@ -1528,23 +1442,15 @@ impl TerminalSessionRepository for FakeRepos {
         status: TerminalSessionStatus,
         exit_code: Option<i32>,
     ) -> Result<()> {
-        let mut state = self.state.borrow_mut();
-        if let Some(s) = state.terminal_sessions.iter_mut().find(|s| s.id == id) {
+        if let Some(s) = self.state.borrow_mut().terminal_sessions.iter_mut().find(|s| s.id == id) {
             s.status = status;
             s.exit_code = exit_code;
-        }
-        if status.is_terminal() {
-            end_claude_sessions_for(&mut state, id);
         }
         Ok(())
     }
 
     fn get_terminal_session(&self, id: &str) -> Result<Option<TerminalSession>> {
-        let state = self.state.borrow();
-        if state.get_terminal_session_fails {
-            return Err(anyhow!("get terminal session failed"));
-        }
-        Ok(state.terminal_sessions.iter().find(|s| s.id == id).cloned())
+        Ok(self.state.borrow().terminal_sessions.iter().find(|s| s.id == id).cloned())
     }
 
     fn latest_terminal_session_for_tab(&self, tab_id: &str) -> Result<Option<TerminalSession>> {
@@ -1583,9 +1489,6 @@ impl TerminalSessionRepository for FakeRepos {
                     s.exit_code = update.exit_code;
                 }
             }
-            if update.status.is_terminal() {
-                end_claude_sessions_for(&mut state, &update.session_id);
-            }
         }
         Ok(())
     }
@@ -1599,287 +1502,6 @@ impl TerminalSessionRepository for FakeRepos {
         _window_label: &str,
         _snapshot: &TerminalStateSnapshot,
     ) -> Result<()> {
-        Ok(())
-    }
-}
-
-/// Mirror of the adapter's coupled transition: a terminal-status write also ends the
-/// Claude sessions mapped to that terminal session, stamping `ended_at` once.
-fn end_claude_sessions_for(state: &mut FakeState, terminal_session_id: &str) {
-    for cs in state
-        .claude_sessions
-        .iter_mut()
-        .filter(|cs| cs.terminal_session_id == terminal_session_id)
-    {
-        if cs.status != ClaudeSessionStatus::Ended {
-            cs.status = ClaudeSessionStatus::Ended;
-            cs.ended_at = Some("2026-06-02T00:00:01.000Z".to_string());
-        }
-    }
-}
-
-impl ClaudeSessionRepository for FakeRepos {
-    fn create_claude_session(&mut self, new: NewClaudeSession) -> Result<ClaudeSession> {
-        let mut state = self.state.borrow_mut();
-        if state.create_claude_session_fails {
-            return Err(anyhow!("create claude session failed"));
-        }
-        if let Some(winner) = state.claude_insert_race_winner.take() {
-            state.claude_sessions.push(winner);
-            return Err(anyhow!("claude session {} already exists", new.claude_session_id));
-        }
-        if state
-            .claude_sessions
-            .iter()
-            .any(|cs| cs.claude_session_id == new.claude_session_id)
-        {
-            return Err(anyhow!("claude session {} already exists", new.claude_session_id));
-        }
-        let ts_status = state
-            .terminal_sessions
-            .iter()
-            .find(|s| s.id == new.terminal_session_id)
-            .map(|s| s.status)
-            .ok_or_else(|| anyhow!("terminal session {} not found", new.terminal_session_id))?;
-        let ended = ts_status.is_terminal();
-        let session = ClaudeSession {
-            claude_session_id: new.claude_session_id,
-            runspace_id: new.runspace_id,
-            tab_id: new.tab_id,
-            terminal_session_id: new.terminal_session_id,
-            cwd: new.cwd,
-            name: new.name,
-            status: if ended { ClaudeSessionStatus::Ended } else { ClaudeSessionStatus::Pending },
-            launch_phase: ClaudeLaunchPhase::Reserved,
-            conversation_status: ClaudeConversationStatus::Idle,
-            wait_reason: None,
-            provider_session_id: None,
-            subagents_running: false,
-            jsonl_offset: 0,
-            created_at: "2026-06-02T00:00:00.000Z".to_string(),
-            ended_at: ended.then(|| "2026-06-02T00:00:00.000Z".to_string()),
-        };
-        state.claude_sessions.push(session.clone());
-        Ok(session)
-    }
-
-    fn mark_claude_session_submitting(&mut self, claude_session_id: &str) -> Result<bool> {
-        let mut state = self.state.borrow_mut();
-        let Some(cs) = state
-            .claude_sessions
-            .iter_mut()
-            .find(|cs| cs.claude_session_id == claude_session_id)
-        else {
-            return Ok(false);
-        };
-        if cs.status != ClaudeSessionStatus::Pending
-            || cs.launch_phase != ClaudeLaunchPhase::Reserved
-        {
-            return Ok(false);
-        }
-        cs.launch_phase = ClaudeLaunchPhase::Submitting;
-        Ok(true)
-    }
-
-    fn claude_session_age_seconds(&self, claude_session_id: &str) -> Result<Option<i64>> {
-        let state = self.state.borrow();
-        Ok(state
-            .claude_sessions
-            .iter()
-            .any(|cs| cs.claude_session_id == claude_session_id)
-            .then_some(state.claude_session_age_secs))
-    }
-
-    fn mark_claude_session_launched(&mut self, claude_session_id: &str) -> Result<bool> {
-        let mut state = self.state.borrow_mut();
-        if state.mark_claude_launched_fails {
-            return Err(anyhow!("mark launched failed"));
-        }
-        if state.mark_claude_launched_returns_false {
-            return Ok(false);
-        }
-        let Some(cs) = state
-            .claude_sessions
-            .iter_mut()
-            .find(|cs| cs.claude_session_id == claude_session_id)
-        else {
-            return Ok(false);
-        };
-        if cs.status != ClaudeSessionStatus::Pending {
-            return Ok(false);
-        }
-        cs.status = ClaudeSessionStatus::Active;
-        Ok(true)
-    }
-
-    fn delete_claude_session(&mut self, claude_session_id: &str) -> Result<()> {
-        self.state
-            .borrow_mut()
-            .claude_sessions
-            .retain(|cs| cs.claude_session_id != claude_session_id);
-        Ok(())
-    }
-
-    fn get_claude_session(&self, claude_session_id: &str) -> Result<Option<ClaudeSession>> {
-        Ok(self
-            .state
-            .borrow()
-            .claude_sessions
-            .iter()
-            .find(|cs| cs.claude_session_id == claude_session_id)
-            .cloned())
-    }
-
-    fn list_claude_sessions(&self) -> Result<Vec<ClaudeSession>> {
-        Ok(self.state.borrow().claude_sessions.clone())
-    }
-
-    fn record_claude_session_signal(
-        &mut self,
-        claude_session_id: &str,
-        kind: &str,
-        payload_json: &str,
-        observation: ClaudeSessionObservation<'_>,
-    ) -> Result<Option<ClaudeSession>> {
-        let mut state = self.state.borrow_mut();
-        let next_id = state.claude_session_events.len() as i64 + 1;
-        let Some(index) = state
-            .claude_sessions
-            .iter()
-            .position(|cs| cs.claude_session_id == claude_session_id)
-        else {
-            return Ok(None);
-        };
-        state.claude_session_events.push(ClaudeSessionEvent {
-            id: next_id,
-            claude_session_id: claude_session_id.to_string(),
-            kind: kind.to_string(),
-            payload_json: payload_json.to_string(),
-            created_at: "2026-06-02T00:00:02.000Z".to_string(),
-        });
-        let cs = &mut state.claude_sessions[index];
-        if let Some(provider_session_id) = observation.provider_session_id {
-            if cs.provider_session_id.as_deref() != Some(provider_session_id) {
-                cs.jsonl_offset = 0;
-            }
-            cs.provider_session_id = Some(provider_session_id.to_string());
-        }
-        if let Some(status) = observation.conversation_status {
-            cs.conversation_status = status;
-        }
-        if let Some(wait_reason) = observation.wait_reason {
-            cs.wait_reason = wait_reason;
-        }
-        if let Some(subagents_running) = observation.subagents_running {
-            cs.subagents_running = subagents_running;
-        }
-        if observation.mark_ended && cs.status != ClaudeSessionStatus::Ended {
-            cs.status = ClaudeSessionStatus::Ended;
-            cs.ended_at = Some("2026-06-02T00:00:02.000Z".to_string());
-        }
-        Ok(Some(cs.clone()))
-    }
-
-    fn list_unconsumed_claude_session_events(
-        &self,
-        limit: usize,
-    ) -> Result<Vec<ClaudeSessionEvent>> {
-        Ok(self
-            .state
-            .borrow()
-            .claude_session_events
-            .iter()
-            .take(limit)
-            .cloned()
-            .collect())
-    }
-
-    fn mark_claude_session_events_consumed(&mut self, ids: &[i64]) -> Result<()> {
-        self.state
-            .borrow_mut()
-            .claude_session_events
-            .retain(|event| !ids.contains(&event.id));
-        Ok(())
-    }
-
-    fn sweep_consumed_claude_session_events(&mut self, _older_than_days: u32) -> Result<usize> {
-        Ok(0)
-    }
-
-    fn set_claude_session_jsonl_offset(
-        &mut self,
-        claude_session_id: &str,
-        offset: u64,
-    ) -> Result<()> {
-        if let Some(cs) = self
-            .state
-            .borrow_mut()
-            .claude_sessions
-            .iter_mut()
-            .find(|cs| cs.claude_session_id == claude_session_id)
-        {
-            cs.jsonl_offset = offset;
-        }
-        Ok(())
-    }
-
-    fn claim_claude_session_thinking(
-        &mut self,
-        claude_session_id: &str,
-    ) -> Result<ClaudePromptClaim> {
-        let mut state = self.state.borrow_mut();
-        let Some(cs) = state
-            .claude_sessions
-            .iter_mut()
-            .find(|cs| cs.claude_session_id == claude_session_id)
-        else {
-            return Ok(ClaudePromptClaim::NotFound);
-        };
-        Ok(match cs.status {
-            ClaudeSessionStatus::Ended => ClaudePromptClaim::Ended,
-            ClaudeSessionStatus::Pending => {
-                ClaudePromptClaim::Launching { active_without_hook_for_secs: None }
-            }
-            ClaudeSessionStatus::Active if cs.provider_session_id.is_none() => {
-                ClaudePromptClaim::Launching {
-                    active_without_hook_for_secs: Some(state.claude_session_age_secs),
-                }
-            }
-            ClaudeSessionStatus::Active
-                if cs.conversation_status == ClaudeConversationStatus::Idle =>
-            {
-                cs.conversation_status = ClaudeConversationStatus::Thinking;
-                ClaudePromptClaim::Claimed
-            }
-            ClaudeSessionStatus::Active => ClaudePromptClaim::Busy(cs.conversation_status),
-        })
-    }
-
-    fn release_claude_session_thinking(&mut self, claude_session_id: &str) -> Result<bool> {
-        let mut state = self.state.borrow_mut();
-        let Some(cs) = state
-            .claude_sessions
-            .iter_mut()
-            .find(|cs| cs.claude_session_id == claude_session_id)
-        else {
-            return Ok(false);
-        };
-        if cs.conversation_status != ClaudeConversationStatus::Thinking {
-            return Ok(false);
-        }
-        cs.conversation_status = ClaudeConversationStatus::Idle;
-        Ok(true)
-    }
-
-    fn clear_subagents_running(&mut self, claude_session_id: &str) -> Result<()> {
-        let mut state = self.state.borrow_mut();
-        if let Some(cs) = state
-            .claude_sessions
-            .iter_mut()
-            .find(|cs| cs.claude_session_id == claude_session_id)
-        {
-            cs.subagents_running = false;
-        }
         Ok(())
     }
 }
@@ -1923,95 +1545,23 @@ impl Workspace for FakeWorkspace {
     }
 }
 
-#[derive(Default)]
 pub(crate) struct FakeDaemon {
     create_fails: bool,
-    write_fails: bool,
-    write_ack_lost: bool,
-    terminate_fails: bool,
-    /// The kill is acked but the session never stops reporting running — a dispatched
-    /// signal whose death is never observed (e.g. a survivor holding the PTY open).
-    kill_never_observed: bool,
-    list_fails: bool,
-    pub(crate) created: Mutex<Vec<TerminalCreateRequest>>,
-    pub(crate) written: Mutex<Vec<(String, Vec<u8>)>>,
-    pub(crate) terminated: Mutex<Vec<String>>,
-    pub(crate) views: Mutex<Vec<DaemonSessionView>>,
 }
 
 impl FakeDaemon {
     pub(crate) fn failing_create() -> Self {
-        Self { create_fails: true, ..Self::default() }
-    }
-
-    pub(crate) fn failing_write() -> Self {
-        Self { write_fails: true, ..Self::default() }
-    }
-
-    /// The connection dies mid-open: the write reaches the PTY but its ack is lost, and
-    /// the follow-up kill cannot be confirmed either.
-    pub(crate) fn losing_write_ack() -> Self {
-        Self { write_ack_lost: true, terminate_fails: true, ..Self::default() }
-    }
-
-    /// The write ack is lost and the follow-up kill IS acknowledged — but the session
-    /// keeps reporting running (seed the view): a dispatched signal whose death is never
-    /// observed, e.g. a survivor holding the PTY open.
-    pub(crate) fn losing_write_ack_kill_unobserved() -> Self {
-        Self { write_ack_lost: true, kill_never_observed: true, ..Self::default() }
-    }
-
-    /// The kill is acked but death is never observed, with writes working normally.
-    pub(crate) fn kill_unobserved() -> Self {
-        Self { kill_never_observed: true, ..Self::default() }
-    }
-
-    pub(crate) fn failing_terminate() -> Self {
-        Self { terminate_fails: true, ..Self::default() }
-    }
-
-    pub(crate) fn failing_list() -> Self {
-        Self { list_fails: true, ..Self::default() }
-    }
-
-    /// Make `list_views` report this session as alive, as if the PTY survived a restart.
-    pub(crate) fn seed_running_view(&self, session_id: &str) {
-        self.seed_live_view(session_id, false);
-    }
-
-    pub(crate) fn seed_attached_view(&self, session_id: &str) {
-        self.seed_live_view(session_id, true);
-    }
-
-    fn seed_live_view(&self, session_id: &str, attached: bool) {
-        self.views.lock().unwrap().push(DaemonSessionView {
-            session_id: session_id.to_string(),
-            pid: Some(4321),
-            running: true,
-            attached,
-            exit_code: None,
-        });
+        Self { create_fails: true }
     }
 }
 
 impl TerminalDaemon for FakeDaemon {
-    fn create(&self, request: TerminalCreateRequest) -> Result<Option<u32>> {
-        self.created.lock().unwrap().push(request);
+    fn create(&self, _request: TerminalCreateRequest) -> Result<Option<u32>> {
         if self.create_fails {
             Err(anyhow!("daemon spawn failed"))
         } else {
             Ok(Some(4321))
         }
-    }
-    fn write_input(&self, session_id: &str, data: &[u8]) -> Result<()> {
-        if self.write_fails {
-            return Err(anyhow!("daemon write failed"));
-        }
-        self.written.lock().unwrap().push((session_id.to_string(), data.to_vec()));
-        if self.write_ack_lost {
-            return Err(anyhow!("daemon write ack lost"));
-        }
-        Ok(())
     }
     fn attach(&self, _session_id: &str, _replay_bytes: Option<u32>) -> Result<TerminalAttachment> {
         Ok(TerminalAttachment { replay: String::new(), rows: 24, cols: 80 })
@@ -2019,27 +1569,11 @@ impl TerminalDaemon for FakeDaemon {
     fn detach(&self, _session_id: &str) -> Result<()> {
         Ok(())
     }
-    fn terminate(&self, session_id: &str) -> Result<()> {
-        if self.terminate_fails {
-            return Err(anyhow!("daemon terminate failed"));
-        }
-        self.terminated.lock().unwrap().push(session_id.to_string());
-        // Mirror the real daemon's exit bookkeeping: a killed session stops reporting
-        // running, unless the fake is staging an unobservable death.
-        if !self.kill_never_observed {
-            for view in self.views.lock().unwrap().iter_mut() {
-                if view.session_id == session_id {
-                    view.running = false;
-                }
-            }
-        }
+    fn terminate(&self, _session_id: &str) -> Result<()> {
         Ok(())
     }
     fn list_views(&self) -> Result<Vec<DaemonSessionView>> {
-        if self.list_fails {
-            return Err(anyhow!("daemon list failed"));
-        }
-        Ok(self.views.lock().unwrap().clone())
+        Ok(Vec::new())
     }
     fn reap(&self, _session_id: &str) {}
 }
@@ -2073,49 +1607,6 @@ impl AgentDecoders for TestAgentDecoders {
 
 pub(crate) struct FakeBackend;
 
-/// Scripted transcript reader: every `read_from` answers with the queued chunk (or
-/// "file does not exist"), recording the path/offset it was asked for.
-#[derive(Clone, Default)]
-pub(crate) struct FakeTranscripts {
-    state: Rc<RefCell<FakeTranscriptsState>>,
-}
-
-#[derive(Default)]
-struct FakeTranscriptsState {
-    next_chunk: Option<crate::TranscriptChunk>,
-    read_error: Option<String>,
-    reads: Vec<(PathBuf, u64)>,
-}
-
-impl FakeTranscripts {
-    pub(crate) fn set_next_chunk(&self, chunk: crate::TranscriptChunk) {
-        self.state.borrow_mut().next_chunk = Some(chunk);
-    }
-
-    pub(crate) fn fail_next_read(&self, message: &str) {
-        self.state.borrow_mut().read_error = Some(message.to_string());
-    }
-
-    pub(crate) fn reads(&self) -> Vec<(PathBuf, u64)> {
-        self.state.borrow().reads.clone()
-    }
-}
-
-impl crate::ClaudeTranscriptReader for FakeTranscripts {
-    fn read_from(&self, jsonl_path: &Path, offset: u64) -> Result<crate::TranscriptChunk> {
-        let mut state = self.state.borrow_mut();
-        state.reads.push((jsonl_path.to_path_buf(), offset));
-        if let Some(message) = state.read_error.clone() {
-            return Err(anyhow!(message));
-        }
-        Ok(state.next_chunk.clone().unwrap_or(crate::TranscriptChunk {
-            records: Vec::new(),
-            new_offset: offset,
-            file_exists: false,
-        }))
-    }
-}
-
 impl Backend for FakeBackend {
     type Repos = FakeRepos;
     type Git = FakeGit;
@@ -2126,7 +1617,6 @@ impl Backend for FakeBackend {
     type Notebooks = FakeNotebookGateway;
     type Workspace = FakeWorkspace;
     type Agents = TestAgentDecoders;
-    type Transcripts = FakeTranscripts;
 }
 
 pub(crate) fn facade(repos: FakeRepos, sink: RecordingSink) -> Monica<FakeBackend> {
@@ -2138,35 +1628,6 @@ pub(crate) fn facade_with_decoder(
     sink: RecordingSink,
     agents: TestAgentDecoders,
 ) -> Monica<FakeBackend> {
-    facade_with_transcripts(repos, sink, agents, FakeTranscripts::default())
-}
-
-pub(crate) fn facade_with_outputs(
-    repos: FakeRepos,
-    sink: RecordingSink,
-    outputs: FakeTaskRunOutputs,
-) -> Monica<FakeBackend> {
-    Monica::new(
-        repos,
-        FakeGit::default(),
-        FakeGithub,
-        FakeAuth,
-        FakeSetupRunner::default(),
-        outputs,
-        FakeNotebookGateway,
-        FakeWorkspace,
-        TestAgentDecoders::default(),
-        FakeTranscripts::default(),
-        Box::new(sink),
-    )
-}
-
-pub(crate) fn facade_with_transcripts(
-    repos: FakeRepos,
-    sink: RecordingSink,
-    agents: TestAgentDecoders,
-    transcripts: FakeTranscripts,
-) -> Monica<FakeBackend> {
     Monica::new(
         repos,
         FakeGit::default(),
@@ -2177,7 +1638,6 @@ pub(crate) fn facade_with_transcripts(
         FakeNotebookGateway,
         FakeWorkspace,
         agents,
-        transcripts,
         Box::new(sink),
     )
 }

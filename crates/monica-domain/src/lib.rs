@@ -6,7 +6,6 @@
 
 mod agent_signal;
 mod branch;
-mod claude_session;
 mod error;
 mod external_reference;
 mod ids;
@@ -25,10 +24,6 @@ pub use agent_signal::{
     SignalKind,
 };
 pub use branch::{branch_name, monica_number, worktree_path_for};
-pub use claude_session::{
-    ClaudeConversationStatus, ClaudeLaunchPhase, ClaudeSession, ClaudeSessionStatus,
-    NewClaudeSession,
-};
 pub use error::DomainError;
 pub use external_reference::{ExternalIssue, ExternalReference, RefType};
 pub use ids::{TaskId, TaskRunId};

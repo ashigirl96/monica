@@ -4,7 +4,6 @@
 //! only on the application ports and `monica-paths` — never on the SQLite store or the runtime.
 
 pub mod agents;
-pub mod claude;
 pub mod filesystem;
 pub mod git;
 pub mod github;

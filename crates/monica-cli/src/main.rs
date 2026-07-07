@@ -3,8 +3,8 @@ mod event_sink;
 mod hook;
 mod issue;
 mod notebooks;
+mod notify;
 mod project;
-mod session;
 mod table;
 
 use clap::{CommandFactory, Parser, Subcommand};
@@ -34,9 +34,6 @@ enum Commands {
     /// Manage Monica authorization
     #[command(subcommand)]
     Auth(auth::AuthCommand),
-    /// Manage Claude Runtime sessions
-    #[command(subcommand)]
-    Session(session::SessionCommand),
     /// Print a shell completion script (e.g. `monica completions zsh`)
     Completions { shell: Shell },
 }
@@ -60,7 +57,6 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             Commands::Auth(cmd) => auth::run(cmd).await,
             Commands::Hook(cmd) => hook::run(cmd),
             Commands::Notebooks(cmd) => notebooks::run(cmd),
-            Commands::Session(cmd) => session::run(cmd),
             Commands::Completions { shell } => {
                 let mut cmd = Cli::command();
                 let name = cmd.get_name().to_string();
@@ -98,23 +94,5 @@ mod tests {
         // `new` and `lint` require their positional argument.
         assert!(Cli::try_parse_from(["monica", "notebooks", "new"]).is_err());
         assert!(Cli::try_parse_from(["monica", "notebooks", "lint"]).is_err());
-    }
-
-    #[test]
-    fn session_subcommands_parse() {
-        for args in [
-            ["monica", "session", "create"].as_slice(),
-            ["monica", "session", "create", "--cwd", "/tmp", "--name", "work"].as_slice(),
-            ["monica", "session", "list"].as_slice(),
-            ["monica", "session", "send", "abc123", "hello"].as_slice(),
-            ["monica", "session", "events", "abc123"].as_slice(),
-            ["monica", "session", "interrupt", "abc123"].as_slice(),
-            ["monica", "session", "attach", "abc123"].as_slice(),
-        ] {
-            assert!(Cli::try_parse_from(args).is_ok(), "{args:?}");
-        }
-        assert!(Cli::try_parse_from(["monica", "session", "send", "abc123"]).is_err());
-        assert!(Cli::try_parse_from(["monica", "session", "events"]).is_err());
-        assert!(Cli::try_parse_from(["monica", "session", "attach"]).is_err());
     }
 }

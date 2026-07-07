@@ -17,11 +17,6 @@ pub enum ApplicationError {
     AuthenticationRequired(String),
     Storage(String),
     External(String),
-    /// The operation's outcome could not be determined: the requested effect may already
-    /// exist (an idempotent open whose reservation is still unconfirmed, a liveness check
-    /// the daemon couldn't answer). Callers must not read this as "nothing happened" —
-    /// retry with the same idempotency key, never a fresh one.
-    Indeterminate(String),
 }
 
 pub type ApplicationResult<T> = Result<T, ApplicationError>;
@@ -42,9 +37,6 @@ impl ApplicationError {
     pub fn external(message: impl Into<String>) -> Self {
         Self::External(message.into())
     }
-    pub fn indeterminate(message: impl Into<String>) -> Self {
-        Self::Indeterminate(message.into())
-    }
 }
 
 impl fmt::Display for ApplicationError {
@@ -55,8 +47,7 @@ impl fmt::Display for ApplicationError {
             | ApplicationError::Validation(m)
             | ApplicationError::AuthenticationRequired(m)
             | ApplicationError::Storage(m)
-            | ApplicationError::External(m)
-            | ApplicationError::Indeterminate(m) => f.write_str(m),
+            | ApplicationError::External(m) => f.write_str(m),
         }
     }
 }

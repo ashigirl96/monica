@@ -7,7 +7,6 @@ use std::path::Path;
 use anyhow::Result;
 
 use monica_adapters::agents::DefaultAgentDecoders;
-use monica_adapters::claude::FsClaudeTranscriptReader;
 use monica_adapters::filesystem::{FsNotebookGateway, FsTaskRunOutputs, FsWorkspace};
 use monica_adapters::git::GitCliGateway;
 use monica_adapters::github::{KeychainAuthGateway, OctocrabGithubGateway};
@@ -15,27 +14,11 @@ use monica_adapters::process::ProcessSetupRunner;
 use monica_application::{Backend, EventSink, Monica, WorktreeRef};
 use monica_storage_sqlite::SqliteStore;
 
-pub mod claude_session_drain;
 pub mod notification_drain;
 pub mod pr_sync;
-pub mod transcript_watch;
 
-pub use claude_session_drain::{start_claude_session_drain, ClaudeSessionDrainHandle};
 pub use notification_drain::{start_notification_drain, NotificationDrainHandle};
 pub use pr_sync::{start_pr_sync, PrSyncWaker};
-pub use transcript_watch::{
-    start_transcript_watch, SessionWatchRegistry, TranscriptWatchHandle, WatchRetainGuard,
-};
-
-/// Clears an in-flight flag on drop, so a resident worker's tick releases its
-/// single-flight lock on every exit path. Shared by the drain/sync workers.
-pub(crate) struct InFlightGuard(pub(crate) std::sync::Arc<std::sync::atomic::AtomicBool>);
-
-impl Drop for InFlightGuard {
-    fn drop(&mut self) {
-        self.0.store(false, std::sync::atomic::Ordering::Release);
-    }
-}
 
 /// The concrete adapter set the desktop and CLI run on: SQLite, octocrab, the git CLI, the process
 /// setup runner, the filesystem run-output/notebook stores, the keychain auth gateway, and the
@@ -52,7 +35,6 @@ impl Backend for DefaultBackend {
     type Notebooks = FsNotebookGateway;
     type Workspace = FsWorkspace;
     type Agents = DefaultAgentDecoders;
-    type Transcripts = FsClaudeTranscriptReader;
 }
 
 /// The application façade wired to the default backend. Drivers alias this rather than naming the
@@ -72,7 +54,6 @@ pub fn open_monica(events: Box<dyn EventSink>) -> Result<MonicaFacade> {
         FsNotebookGateway,
         FsWorkspace,
         DefaultAgentDecoders,
-        FsClaudeTranscriptReader,
         events,
     ))
 }

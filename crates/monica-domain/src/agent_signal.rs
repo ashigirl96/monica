@@ -47,20 +47,8 @@ pub enum SignalKind {
         /// finishing subagent excludes itself).
         subagents_running: bool,
     },
-    SessionEnded {
-        /// Why the session ended, verbatim from the provider (Claude: "clear", "logout",
-        /// "prompt_input_exit", ...). Task runs ignore it (a cleared session revives itself
-        /// through the SessionStart that follows); Claude session mappings must not
-        /// tombstone on "clear" because their `ended` state is irreversible.
-        reason: Option<String>,
-    },
-    /// A provider notification. Only a permission prompt blocks on the user; everything
-    /// else (idle reminders) is recorded and ignored. Task runs never act on this — their
-    /// shells run with permissions skipped.
-    NotificationReceived {
-        permission_request: bool,
-    },
-    /// Recorded for the event log but drives no state transition (recoverable
+    SessionEnded,
+    /// Recorded for the event log but drives no state transition (notifications, recoverable
     /// failures, subagent starts, events an agent emits that we don't act on).
     Inert,
 }
@@ -112,13 +100,11 @@ fn requested_transition(kind: &SignalKind) -> Option<HookTransition> {
             status: TaskRunStatus::WaitingForUser,
             wait_reason: Some(*reason),
         }),
-        SignalKind::SessionEnded { .. } => Some(HookTransition {
+        SignalKind::SessionEnded => Some(HookTransition {
             status: TaskRunStatus::Stopped,
             wait_reason: None,
         }),
-        SignalKind::SubagentFinished { .. }
-        | SignalKind::NotificationReceived { .. }
-        | SignalKind::Inert => None,
+        SignalKind::SubagentFinished { .. } | SignalKind::Inert => None,
     }
 }
 
@@ -292,17 +278,8 @@ mod tests {
                 Some((TaskRunStatus::WaitingForUser, Some(TaskRunWaitReason::AwaitingPrompt))),
             ),
             (SignalKind::UserInputResolved, Some((TaskRunStatus::Running, None))),
-            (
-                SignalKind::SessionEnded { reason: None },
-                Some((TaskRunStatus::Stopped, None)),
-            ),
+            (SignalKind::SessionEnded, Some((TaskRunStatus::Stopped, None))),
             (SignalKind::Inert, None),
-            (
-                SignalKind::NotificationReceived {
-                    permission_request: true,
-                },
-                None,
-            ),
             (
                 SignalKind::SubagentFinished {
                     subagents_running: false,
@@ -441,19 +418,13 @@ mod tests {
         for current in [TaskRunStatus::Running, TaskRunStatus::WaitingForUser] {
             let r = run(current, None, Some("s2"));
             // A SessionEnd from the dead session s1 must not kill the run s2 now drives.
-            assert_eq!(
-                r.decide(&signal(Some("s1"), SignalKind::SessionEnded { reason: None }))
-                    .transition,
-                None
-            );
+            assert_eq!(r.decide(&signal(Some("s1"), SignalKind::SessionEnded)).transition, None);
         }
         // The same verdict from the run's own session (or anonymous, or before any session) lands.
         for (known, event) in [(Some("s1"), Some("s1")), (Some("s1"), None), (None, Some("s1"))] {
             let r = run(TaskRunStatus::Running, None, known);
             assert_eq!(
-                r.decide(&signal(event, SignalKind::SessionEnded { reason: None }))
-                    .transition
-                    .map(|t| t.status),
+                r.decide(&signal(event, SignalKind::SessionEnded)).transition.map(|t| t.status),
                 Some(TaskRunStatus::Stopped)
             );
         }
