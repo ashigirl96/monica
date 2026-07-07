@@ -64,6 +64,7 @@ pub enum PermissionBehavior {
 
 /// Permission rule value
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
 pub struct PermissionRuleValue {
     /// Name of the tool
     pub tool_name: String,
@@ -81,6 +82,9 @@ pub enum PermissionUpdate {
         /// Rules to add
         #[serde(skip_serializing_if = "Option::is_none")]
         rules: Option<Vec<PermissionRuleValue>>,
+        /// Rule behavior (allow / deny / ask)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        behavior: Option<PermissionBehavior>,
         /// Where to save the rules
         #[serde(skip_serializing_if = "Option::is_none")]
         destination: Option<PermissionUpdateDestination>,
@@ -90,6 +94,9 @@ pub enum PermissionUpdate {
         /// New rules
         #[serde(skip_serializing_if = "Option::is_none")]
         rules: Option<Vec<PermissionRuleValue>>,
+        /// Rule behavior (allow / deny / ask)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        behavior: Option<PermissionBehavior>,
         /// Where to save the rules
         #[serde(skip_serializing_if = "Option::is_none")]
         destination: Option<PermissionUpdateDestination>,
@@ -99,6 +106,9 @@ pub enum PermissionUpdate {
         /// Rules to remove
         #[serde(skip_serializing_if = "Option::is_none")]
         rules: Option<Vec<PermissionRuleValue>>,
+        /// Rule behavior (allow / deny / ask)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        behavior: Option<PermissionBehavior>,
         /// Where to remove from
         #[serde(skip_serializing_if = "Option::is_none")]
         destination: Option<PermissionUpdateDestination>,
@@ -199,7 +209,8 @@ pub struct PermissionRequest {
 }
 
 /// Permission result for allowing tool use
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
 pub struct PermissionResultAllow {
     /// Modified input for the tool
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -207,10 +218,14 @@ pub struct PermissionResultAllow {
     /// Permission updates to apply
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_permissions: Option<Vec<PermissionUpdate>>,
+    /// Feedback to show the user
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_feedback: Option<String>,
 }
 
 /// Permission result for denying tool use
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
 pub struct PermissionResultDeny {
     /// Reason for denying
     pub message: String,
@@ -220,8 +235,11 @@ pub struct PermissionResultDeny {
 }
 
 /// Permission result enum
+///
+/// wire 形式は `behavior` を判別子とする（#341 実測・sdk.d.ts と一致）:
+/// `{"behavior":"allow","updatedInput":{...}}` / `{"behavior":"deny","message":"...","interrupt":false}`
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(tag = "behavior", rename_all = "lowercase")]
 pub enum PermissionResult {
     /// Allow the tool use
     Allow(PermissionResultAllow),

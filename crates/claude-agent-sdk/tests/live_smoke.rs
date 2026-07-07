@@ -1,9 +1,19 @@
 //! 実プロセスを使う smoke test。トークン消費とログイン状態に依存するため
 //! CI では走らせず、ローカルで `cargo test -p claude-agent-sdk -- --ignored` で実行する。
 
+use claude_agent_sdk::control::{requests, ControlRequestTracker, InboundControl};
+use claude_agent_sdk::parser::{parse_line, ParsedLine};
 use claude_agent_sdk::transport::SubprocessTransport;
-use claude_agent_sdk::types::ClaudeAgentOptions;
+use claude_agent_sdk::types::{ClaudeAgentOptions, PermissionResult, PermissionResultDeny};
 use std::time::Duration;
+
+fn user_message(text: &str) -> String {
+    serde_json::json!({
+        "type": "user",
+        "message": { "role": "user", "content": [{ "type": "text", "text": text }] },
+    })
+    .to_string()
+}
 
 /// Phase 1 完了条件: `-p` なし spawn → init 応答の受信。
 ///
@@ -120,4 +130,144 @@ async fn sent_user_message_is_accepted_and_replayed() {
     );
 
     transport.kill().await.expect("kill");
+}
+
+/// Phase 3 完了条件 1: interrupt の ack 往復。
+/// 長いタスクの実行中に interrupt を送り、control_response(success) の ack と
+/// 中断ターンの result を確認する。
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires local claude login; consumes a partial haiku turn"]
+async fn interrupt_is_acked_and_turn_is_aborted() {
+    let options = ClaudeAgentOptions::builder()
+        .cwd(std::env::temp_dir())
+        .model("haiku")
+        .build();
+    let mut transport = SubprocessTransport::spawn(&options).expect("spawn failed");
+    let mut tracker = ControlRequestTracker::new();
+
+    transport
+        .write_line(&user_message(
+            "Count from 1 to 5000, one number per line. Do not stop until you finish.",
+        ))
+        .await
+        .unwrap();
+
+    let mut pending_ack = None;
+    let mut result: Option<serde_json::Value> = None;
+    tokio::time::timeout(Duration::from_secs(120), async {
+        while let Some(line) = transport.next_line().await {
+            match parse_line(&line) {
+                ParsedLine::Control(value) => {
+                    tracker.handle_control(&value);
+                }
+                ParsedLine::Message(message) => {
+                    let value = serde_json::to_value(&*message).unwrap();
+                    match value.get("type").and_then(|t| t.as_str()) {
+                        // 出力が流れ始めたのを確認してから interrupt を送る
+                        Some("stream_event") if pending_ack.is_none() => {
+                            let (line, ack) = tracker.create_request(requests::interrupt());
+                            transport.write_line(&line).await.unwrap();
+                            pending_ack = Some(ack);
+                        }
+                        Some("result") => {
+                            result = Some(value);
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("timed out; stderr: {:?}", transport.stderr_tail()));
+
+    let ack = pending_ack.expect("no stream_event observed before result");
+    ack.wait().await.expect("interrupt was not acked with success");
+
+    let result = result.expect("no result message after interrupt");
+    let subtype = result.get("subtype").and_then(|s| s.as_str());
+    assert_eq!(
+        subtype,
+        Some("error_during_execution"),
+        "interrupted turn should end with error_during_execution: {result}"
+    );
+
+    transport.kill().await.unwrap();
+}
+
+/// Phase 3 完了条件 2: can_use_tool の受信と deny 応答。
+/// sandbox 外への書き込みを指示して can_use_tool を誘発し、deny で拒否。
+/// 対象ファイルが作られないことと、ターンが正常に完了することを確認する。
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires local claude login; consumes one small haiku turn"]
+async fn can_use_tool_request_is_received_and_deny_is_honored() {
+    let target = std::env::temp_dir().join("claude_agent_sdk_deny_smoke.txt");
+    let _ = std::fs::remove_file(&target);
+    let home_target = format!("{}/claude_agent_sdk_deny_smoke.txt", std::env::var("HOME").unwrap());
+    let _ = std::fs::remove_file(&home_target);
+
+    let options = ClaudeAgentOptions::builder()
+        .cwd(std::env::temp_dir())
+        .model("haiku")
+        .build();
+    let mut transport = SubprocessTransport::spawn(&options).expect("spawn failed");
+    let mut tracker = ControlRequestTracker::new();
+
+    transport
+        .write_line(&user_message(&format!(
+            "Run exactly this bash command and nothing else: echo hello > {home_target}"
+        )))
+        .await
+        .unwrap();
+
+    let mut permission_seen = false;
+    let mut got_result = false;
+    tokio::time::timeout(Duration::from_secs(180), async {
+        while let Some(line) = transport.next_line().await {
+            match parse_line(&line) {
+                ParsedLine::Control(value) => {
+                    if let Some(InboundControl::Request {
+                        request_id,
+                        request,
+                    }) = tracker.handle_control(&value)
+                    {
+                        if request.get("subtype").and_then(|s| s.as_str())
+                            == Some("can_use_tool")
+                        {
+                            permission_seen = true;
+                            let deny = PermissionResult::Deny(PermissionResultDeny {
+                                message: "denied by live smoke test".into(),
+                                interrupt: false,
+                            });
+                            let line = tracker
+                                .create_permission_response(&request_id, &deny)
+                                .unwrap();
+                            transport.write_line(&line).await.unwrap();
+                        }
+                    }
+                }
+                ParsedLine::Message(message) => {
+                    let value = serde_json::to_value(&*message).unwrap();
+                    if value.get("type").and_then(|t| t.as_str()) == Some("result") {
+                        got_result = true;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("timed out; stderr: {:?}", transport.stderr_tail()));
+
+    assert!(permission_seen, "can_use_tool control_request never arrived");
+    assert!(got_result, "turn did not complete after deny");
+    assert!(
+        !std::path::Path::new(&home_target).exists(),
+        "denied command was executed anyway"
+    );
+
+    transport.kill().await.unwrap();
 }

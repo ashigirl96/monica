@@ -50,6 +50,7 @@
 //!             Ok(PermissionResult::Allow(PermissionResultAllow {
 //!                 updated_input: None,
 //!                 updated_permissions: None,
+//!                 user_feedback: None,
 //!             }))
 //!         } else {
 //!             Ok(PermissionResult::Deny(claude_agent_sdk::types::PermissionResultDeny {
@@ -171,6 +172,7 @@ impl HookCallback for Box<dyn HookCallback> {
 ///             Ok(PermissionResult::Allow(PermissionResultAllow {
 ///                 updated_input: None,
 ///                 updated_permissions: None,
+///                 user_feedback: None,
 ///             }))
 ///         } else {
 ///             Ok(PermissionResult::Deny(PermissionResultDeny {
@@ -349,6 +351,7 @@ where
 ///         Ok(PermissionResult::Allow(PermissionResultAllow {
 ///             updated_input: None,
 ///             updated_permissions: None,
+///             user_feedback: None,
 ///         }))
 ///     })
 /// });
@@ -443,6 +446,7 @@ mod tests {
                 Ok(PermissionResult::Allow(PermissionResultAllow {
                     updated_input: None,
                     updated_permissions: None,
+                    user_feedback: None,
                 }))
             } else {
                 Ok(PermissionResult::Deny(PermissionResultDeny {
@@ -513,6 +517,7 @@ mod tests {
                 Ok(PermissionResult::Allow(PermissionResultAllow {
                     updated_input: None,
                     updated_permissions: None,
+                    user_feedback: None,
                 }))
             })
         });

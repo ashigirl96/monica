@@ -5,6 +5,7 @@
 //! SDK entrypoint 環境変数は設定せず除去する（詳細は TODO.md と issue #342 / #341 参照）。
 
 pub mod callbacks;
+pub mod control;
 pub mod error;
 pub mod parser;
 pub mod transport;
