@@ -8,7 +8,9 @@ pub mod callbacks;
 pub mod control;
 pub mod error;
 pub mod parser;
+pub mod query;
 pub mod transport;
 pub mod types;
 
 pub use error::{ClaudeError, Result};
+pub use query::{query, Query};

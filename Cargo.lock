@@ -763,6 +763,8 @@ name = "claude-agent-sdk"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "futures-core",
+ "futures-util",
  "serde",
  "serde_json",
  "specta",

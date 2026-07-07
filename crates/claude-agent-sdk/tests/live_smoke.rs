@@ -271,3 +271,62 @@ async fn can_use_tool_request_is_received_and_deny_is_honored() {
 
     transport.kill().await.unwrap();
 }
+
+/// Phase 4 完了条件: query() で複数ターンの対話が成立する。
+/// 高レベル API 経由で 2 ターン送り、それぞれ result まで到達することを確認する。
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires local claude login; consumes two small haiku turns"]
+async fn query_supports_multi_turn_conversation() {
+    use claude_agent_sdk::query;
+    use futures_util::StreamExt;
+
+    let options = ClaudeAgentOptions::builder()
+        .cwd(std::env::temp_dir())
+        .model("haiku")
+        .build();
+
+    let mut session = query("Reply with exactly: one", options)
+        .await
+        .expect("query failed");
+
+    // 1 ターン目: result まで読み、assistant テキストを集める
+    let mut first_text = String::new();
+    let mut first_done = false;
+    while let Some(message) = session.next().await {
+        let value = serde_json::to_value(message.expect("stream error")).unwrap();
+        match value.get("type").and_then(|t| t.as_str()) {
+            Some("assistant") => {
+                if let Some(blocks) = value.pointer("/message/content").and_then(|c| c.as_array()) {
+                    for block in blocks {
+                        if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                            first_text.push_str(text);
+                        }
+                    }
+                }
+            }
+            Some("result") => {
+                first_done = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(first_done, "first turn did not reach result");
+    assert!(!first_text.is_empty(), "first turn produced no assistant text");
+
+    // 2 ターン目: 同一プロセスに追加の user message を送る
+    session
+        .send_user_message("Reply with exactly: two")
+        .await
+        .expect("send second turn");
+
+    let mut second_done = false;
+    while let Some(message) = session.next().await {
+        let value = serde_json::to_value(message.expect("stream error")).unwrap();
+        if value.get("type").and_then(|t| t.as_str()) == Some("result") {
+            second_done = true;
+            break;
+        }
+    }
+    assert!(second_done, "second turn did not reach result");
+}
