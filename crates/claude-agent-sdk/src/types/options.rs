@@ -143,6 +143,23 @@ use std::sync::Arc;
 /// Useful for debugging and logging purposes.
 pub type StderrCallback = Arc<dyn Fn(String) + Send + Sync>;
 
+/// stdin/stdout を流れた生 JSON 行の方向
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum RawEventDirection {
+    /// host → CLI（stdin に書いた行）
+    Sent,
+    /// CLI → host（stdout から読んだ行）
+    Received,
+}
+
+/// stdin/stdout を流れた生の JSON 行を方向タグ付きで受け取る callback。
+///
+/// journal の永続化・未応答 permission の復元・デバッグダンプは利用側の責務で、
+/// SDK は一切保持しない（stateless）。パース前の生文字列が渡るため、
+/// 未知イベントも欠落なく観測できる。
+pub type RawEventCallback = Arc<dyn Fn(RawEventDirection, &str) + Send + Sync>;
+
 // ============================================================================
 // Output Format
 // ============================================================================
@@ -465,6 +482,10 @@ pub struct ClaudeAgentOptions {
     #[builder(default, setter(strip_option))]
     pub stderr: Option<StderrCallback>,
 
+    /// stdin/stdout の生 JSON 行を方向タグ付きで受け取る callback（journal 用 hook）
+    #[builder(default, setter(strip_option))]
+    pub raw_events: Option<RawEventCallback>,
+
     /// Tools configuration
     ///
     /// Either a list of tool names or a preset (e.g., `ToolsConfig::claude_code_preset()`).
@@ -543,6 +564,7 @@ impl std::fmt::Debug for ClaudeAgentOptions {
                 &self.path_to_claude_code_executable,
             )
             .field("stderr", &self.stderr.as_ref().map(|_| "<callback>"))
+            .field("raw_events", &self.raw_events.as_ref().map(|_| "<callback>"))
             .field(
                 "tools",
                 &self.tools.as_ref().map(|t| match t {

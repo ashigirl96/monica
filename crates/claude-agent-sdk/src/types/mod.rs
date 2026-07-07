@@ -56,7 +56,7 @@ pub use messages::{
 };
 pub use options::{
     AgentDefinition, ClaudeAgentOptions, ClaudeAgentOptionsBuilder, NetworkSandboxSettings,
-    OutputFormat, SandboxIgnoreViolations, SandboxSettings, SdkBeta, SdkPluginConfig,
+    OutputFormat, RawEventCallback, RawEventDirection, SandboxIgnoreViolations, SandboxSettings, SdkBeta, SdkPluginConfig,
     StderrCallback, SystemPrompt, SystemPromptPreset, ToolsConfig, ToolsPreset,
 };
 pub use permissions::{

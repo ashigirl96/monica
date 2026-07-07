@@ -6,6 +6,7 @@
 
 pub mod callbacks;
 pub mod error;
+pub mod parser;
 pub mod transport;
 pub mod types;
 

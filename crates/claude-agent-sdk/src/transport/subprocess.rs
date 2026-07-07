@@ -13,7 +13,9 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::mpsc;
 
 use crate::error::{ClaudeError, Result};
-use crate::types::{ClaudeAgentOptions, PermissionMode, SystemPrompt};
+use crate::types::{
+    ClaudeAgentOptions, PermissionMode, RawEventCallback, RawEventDirection, SystemPrompt,
+};
 
 /// #341 で検証済みの base args。`-p` を付けないことが課金レーン維持の必須条件。
 /// `--permission-prompt-tool stdio` は `--help` に出ない隠しフラグで、permission 確認を
@@ -225,6 +227,7 @@ pub struct SubprocessTransport {
     stdin: ChildStdin,
     stdout_rx: mpsc::UnboundedReceiver<String>,
     stderr_tail: Arc<Mutex<VecDeque<String>>>,
+    raw_events: Option<RawEventCallback>,
 }
 
 impl SubprocessTransport {
@@ -247,9 +250,14 @@ impl SubprocessTransport {
             .ok_or_else(|| ClaudeError::transport("failed to capture stderr"))?;
 
         let (stdout_tx, stdout_rx) = mpsc::unbounded_channel();
+        let raw_events = options.raw_events.clone();
+        let reader_raw_events = raw_events.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                if let Some(hook) = &reader_raw_events {
+                    hook(RawEventDirection::Received, &line);
+                }
                 if stdout_tx.send(line).is_err() {
                     break;
                 }
@@ -279,11 +287,15 @@ impl SubprocessTransport {
             stdin,
             stdout_rx,
             stderr_tail,
+            raw_events,
         })
     }
 
     /// 1 行（= 1 JSON）を stdin に書き込む。改行は付けて渡さないこと。
     pub async fn write_line(&mut self, line: &str) -> Result<()> {
+        if let Some(hook) = &self.raw_events {
+            hook(RawEventDirection::Sent, line);
+        }
         self.stdin.write_all(line.as_bytes()).await?;
         self.stdin.write_all(b"\n").await?;
         self.stdin.flush().await?;
