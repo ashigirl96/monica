@@ -12,6 +12,23 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// wire コーパス（生 wire 行の蓄積場所）。tests/wire_drift.rs が読む。
+/// プロンプト本文を含むためコミットせずローカルにのみ置く。
+fn corpus_path() -> std::path::PathBuf {
+    let dir = std::env::var_os("CLAUDE_AGENT_SDK_CORPUS")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(std::env::var_os("HOME").unwrap())
+                .join(".claude-agent-sdk/wire-corpus")
+        });
+    std::fs::create_dir_all(&dir).unwrap();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    dir.join(format!("capture-{stamp}.jsonl"))
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let out_path = concat!(
@@ -19,7 +36,11 @@ async fn main() {
         "/tests/fixtures/basic_turn.jsonl"
     );
     std::fs::create_dir_all(std::path::Path::new(out_path).parent().unwrap()).unwrap();
-    let file = Arc::new(Mutex::new(std::fs::File::create(out_path).unwrap()));
+    let corpus = corpus_path();
+    let file = Arc::new(Mutex::new((
+        std::fs::File::create(out_path).unwrap(),
+        std::fs::File::create(&corpus).unwrap(),
+    )));
 
     let journal = Arc::clone(&file);
     let options = ClaudeAgentOptions::builder()
@@ -31,8 +52,9 @@ async fn main() {
                 "line": serde_json::from_str::<serde_json::Value>(line)
                     .unwrap_or_else(|_| serde_json::Value::String(line.to_string())),
             });
-            let mut file = journal.lock().unwrap();
-            writeln!(file, "{entry}").unwrap();
+            let mut files = journal.lock().unwrap();
+            writeln!(files.0, "{entry}").unwrap();
+            writeln!(files.1, "{entry}").unwrap();
         }))
         .build();
 
@@ -76,4 +98,5 @@ async fn main() {
     assert!(done, "result message not received; see {out_path}");
     let lines = std::fs::read_to_string(out_path).unwrap().lines().count();
     println!("captured {lines} raw events -> {out_path}");
+    println!("corpus appended -> {}", corpus.display());
 }
