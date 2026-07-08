@@ -12,6 +12,7 @@ import {
   sessionStatusAtom,
   tabMenuAtom,
 } from "@/features/work-bench/store";
+import { statusDisplayLabel, statusDotClass } from "@/lib/status-config";
 import { JumpHint } from "./jump-hint";
 import { PlusIcon, XIcon } from "@/components/icons";
 import { useDragReorder } from "@/hooks/use-drag-reorder";
@@ -50,6 +51,7 @@ export function WorkBenchHeader() {
 
   // Hook-driven primary claims land in the DB without a Tauri event, so the
   // indicator follows the same listen-plus-poll pattern as the Workboard.
+  // Session status is already polled by the sidebar's useLiveRefresh.
   const refresh = useCallback(() => void refreshPrimaryTab(), [refreshPrimaryTab]);
   useLiveRefresh(refresh);
 
@@ -71,8 +73,12 @@ export function WorkBenchHeader() {
         const isActive = tab.id === rs.activeTabId;
         const isMain = tab.id === primaryTabId;
         const label = tab.title || tab.cwd.split("/").pop() || "Terminal";
-        const status = tab.sessionId ? sessionStatus[tab.sessionId]?.status : undefined;
-        const statusDot = status ? SESSION_STATUS_DOT[status] : undefined;
+        const session = tab.sessionId ? sessionStatus[tab.sessionId] : undefined;
+        const status = session?.status;
+        const terminalDot = status ? SESSION_STATUS_DOT[status] : undefined;
+        const agentStatus = session?.agentStatus;
+        const agentWaitReason = session?.agentWaitReason ?? null;
+        const agentDot = agentStatus ? statusDotClass(agentStatus, agentWaitReason) : undefined;
         const hint = jumpHints.byTabId[tab.id];
         return (
           <button
@@ -95,21 +101,24 @@ export function WorkBenchHeader() {
               isActive
                 ? "bg-[var(--content-bg)] text-foreground shadow-sm focus-visible:ring-white/50"
                 : "bg-white/[0.06] text-muted-foreground hover:bg-white/[0.1] hover:text-foreground",
+              isMain &&
+                "ring-1 ring-emerald-400/60 shadow-[0_0_6px] shadow-emerald-400/25 focus-visible:ring-emerald-300",
               dragOverId === tab.id && "ring-1 ring-sky-400/60",
             )}
+            title={isMain ? "Main Run (⌘G elsewhere to promote)" : undefined}
           >
             {hint && <JumpHint hint={hint} className="mr-1.5" />}
-            {isMain && (
+            {agentStatus && agentDot && (
               <span
-                title="Main Run (⌘G elsewhere to promote)"
-                className="mr-1.5 size-1.5 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_4px] shadow-emerald-400/60"
+                title={statusDisplayLabel(agentStatus, agentWaitReason)}
+                className={cn("mr-1.5 size-1.5 shrink-0 rounded-full", agentDot)}
               />
             )}
             <span className="flex-1 truncate">{label}</span>
-            {statusDot && (
+            {terminalDot && (
               <span
                 title={status}
-                className={cn("ml-1.5 size-1.5 shrink-0 rounded-full", statusDot)}
+                className={cn("ml-1.5 size-1.5 shrink-0 rounded-full", terminalDot)}
               />
             )}
             <span

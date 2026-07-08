@@ -18,6 +18,7 @@ use crate::prelude::{
     NewNotificationIntent, NewTask, NewTaskRun, NewTerminalSession, NotebookDoc,
     NotificationIntent, Project, Provider, RefType, SignalKind, Task, TaskId, TaskKind, TaskRun,
     TaskRunId, TaskRunStatus, TaskRunWaitReason, TaskStatus, TerminalSession,
+    AgentSessionStatus,
     TerminalSessionKind, TerminalSessionStatus,
 };
 use crate::{
@@ -89,7 +90,7 @@ pub(crate) fn record_claude_hook<R>(
     signal: &AgentSignal,
 ) -> Result<crate::HookReport>
 where
-    R: TaskStore + TaskRunStore + EventRepository + Clock + UnitOfWork,
+    R: TaskStore + TaskRunStore + EventRepository + Clock + UnitOfWork + TerminalSessionRepository,
 {
     record_hook(repos, ctx, Agent::Claude, Some(signal), "{}")
 }
@@ -1188,7 +1189,7 @@ pub(crate) fn hook_ctx<'a>(task_id: &'a str, task_run_id: Option<&'a str>) -> Ho
     HookContext {
         task_id: Some(task_id),
         task_run_id,
-        terminal_tab_id: None,
+        ..HookContext::default()
     }
 }
 
@@ -1201,6 +1202,7 @@ pub(crate) fn hook_ctx_in_tab<'a>(
         task_id: Some(task_id),
         task_run_id,
         terminal_tab_id: Some(terminal_tab_id),
+        ..HookContext::default()
     }
 }
 
@@ -1379,6 +1381,8 @@ impl TerminalSessionRepository for FakeRepos {
             cwd: new.cwd,
             shell: new.shell,
             status: TerminalSessionStatus::Starting,
+            agent_status: None,
+            agent_wait_reason: None,
             pid: None,
             rows: new.rows,
             cols: new.cols,
@@ -1411,6 +1415,19 @@ impl TerminalSessionRepository for FakeRepos {
         if let Some(s) = self.state.borrow_mut().terminal_sessions.iter_mut().find(|s| s.id == id) {
             s.status = status;
             s.exit_code = exit_code;
+        }
+        Ok(())
+    }
+
+    fn set_terminal_session_agent_status(
+        &self,
+        id: &str,
+        agent_status: Option<AgentSessionStatus>,
+        agent_wait_reason: Option<TaskRunWaitReason>,
+    ) -> Result<()> {
+        if let Some(s) = self.state.borrow_mut().terminal_sessions.iter_mut().find(|s| s.id == id) {
+            s.agent_status = agent_status;
+            s.agent_wait_reason = agent_wait_reason;
         }
         Ok(())
     }
@@ -1638,6 +1655,8 @@ pub(crate) fn fake_session(id: &str, tab: Option<&str>, status: TerminalSessionS
         cwd: "/".to_string(),
         shell: "/bin/zsh".to_string(),
         status,
+        agent_status: None,
+        agent_wait_reason: None,
         pid: None,
         rows: 24,
         cols: 80,

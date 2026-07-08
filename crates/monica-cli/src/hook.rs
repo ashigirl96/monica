@@ -62,15 +62,16 @@ fn handle_agent(agent: Agent, log_file: &str) -> Result<()> {
     let task_id = env_opt("MONICA_TASK_ID");
     let task_run_id = env_opt("MONICA_TASK_RUN_ID");
     let terminal_tab_id = env_opt("MONICA_TERMINAL_TAB_ID");
+    let terminal_session_id = env_opt("MONICA_TERMINAL_SESSION_ID");
 
     debug_log_to(log_file, &format!(
-        "invoked task_id={task_id:?} task_run_id={task_run_id:?} tab_id={terminal_tab_id:?} monica_home={:?} cwd={:?} stdin_bytes={}",
+        "invoked task_id={task_id:?} task_run_id={task_run_id:?} tab_id={terminal_tab_id:?} session_id={terminal_session_id:?} monica_home={:?} cwd={:?} stdin_bytes={}",
         env_opt("MONICA_HOME"),
         std::env::current_dir().ok(),
         raw.len(),
     ));
 
-    if task_id.is_none() && task_run_id.is_none() {
+    if task_id.is_none() && task_run_id.is_none() && terminal_session_id.is_none() {
         return Ok(());
     }
 
@@ -81,6 +82,7 @@ fn handle_agent(agent: Agent, log_file: &str) -> Result<()> {
             task_id: task_id.as_deref(),
             task_run_id: task_run_id.as_deref(),
             terminal_tab_id: terminal_tab_id.as_deref(),
+            terminal_session_id: terminal_session_id.as_deref(),
         },
         &raw,
     )?;

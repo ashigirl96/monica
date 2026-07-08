@@ -86,6 +86,8 @@ mod tests {
             cwd: "/".to_string(),
             shell: "/bin/zsh".to_string(),
             status: TerminalSessionStatus::Exited,
+            agent_status: None,
+            agent_wait_reason: None,
             pid: None,
             rows: 24,
             cols: 80,

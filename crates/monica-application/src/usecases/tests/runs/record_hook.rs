@@ -758,6 +758,7 @@ fn record_claude_hook_records_terminal_tab_id_from_context() {
             task_id: Some(&task_id),
             task_run_id: None,
             terminal_tab_id: Some("tab-7"),
+            terminal_session_id: None,
         },
         &started("sess-2", Continuation::Fresh),
     )
@@ -776,4 +777,64 @@ fn record_claude_hook_records_terminal_tab_id_from_context() {
             .id,
         side.id
     );
+}
+
+#[test]
+fn record_claude_hook_tracks_agent_status_on_session_without_task() {
+    use crate::ports::TerminalSessionRepository;
+    use crate::prelude::AgentSessionStatus;
+
+    let mut repos = FakeRepos::default();
+    let session = repos
+        .create_terminal_session(NewTerminalSession {
+            runspace_id: Some("rs-1".to_string()),
+            tab_id: Some("tab-1".to_string()),
+            kind: TerminalSessionKind::Shell,
+            cwd: "/".to_string(),
+            shell: "/bin/zsh".to_string(),
+            rows: 24,
+            cols: 80,
+        })
+        .unwrap();
+    let ctx = HookContext {
+        terminal_session_id: Some(&session.id),
+        ..HookContext::default()
+    };
+
+    record_claude_hook(&mut repos, ctx, &started("sess-1", Continuation::Fresh)).unwrap();
+    let s = repos.get_terminal_session(&session.id).unwrap().unwrap();
+    assert_eq!(s.agent_status, Some(AgentSessionStatus::Running));
+    assert_eq!(s.agent_wait_reason, None);
+
+    record_claude_hook(
+        &mut repos,
+        ctx,
+        &input_required(Some("sess-1"), TaskRunWaitReason::ExitPlanMode),
+    )
+    .unwrap();
+    let s = repos.get_terminal_session(&session.id).unwrap().unwrap();
+    assert_eq!(s.agent_status, Some(AgentSessionStatus::WaitingForUser));
+    assert_eq!(s.agent_wait_reason, Some(TaskRunWaitReason::ExitPlanMode));
+
+    record_claude_hook(&mut repos, ctx, &turn_completed("sess-1", false)).unwrap();
+    let s = repos.get_terminal_session(&session.id).unwrap().unwrap();
+    assert_eq!(s.agent_status, Some(AgentSessionStatus::WaitingForUser));
+    assert_eq!(s.agent_wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
+
+    record_claude_hook(&mut repos, ctx, &session_ended("sess-1")).unwrap();
+    let s = repos.get_terminal_session(&session.id).unwrap().unwrap();
+    assert_eq!(s.agent_status, None);
+    assert_eq!(s.agent_wait_reason, None);
+}
+
+#[test]
+fn record_claude_hook_ignores_unknown_terminal_session() {
+    let mut repos = FakeRepos::default();
+    let ctx = HookContext {
+        terminal_session_id: Some("ts-ghost"),
+        ..HookContext::default()
+    };
+    let report =
+        record_claude_hook(&mut repos, ctx, &started("sess-1", Continuation::Fresh)).unwrap();
+    assert!(!report.task_found);
 }

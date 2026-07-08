@@ -1,7 +1,10 @@
 use anyhow::Result;
 use monica_application::ports::TerminalSessionRepository;
 use monica_application::{TerminalSessionUpdate, TerminalStateSnapshot};
-use monica_domain::{NewTerminalSession, TerminalSession, TerminalSessionKind, TerminalSessionStatus};
+use monica_domain::{
+    AgentSessionStatus, NewTerminalSession, TaskRunWaitReason, TerminalSession,
+    TerminalSessionKind, TerminalSessionStatus,
+};
 use rusqlite::{params, Row};
 
 use monica_paths as paths;
@@ -9,11 +12,13 @@ use crate::SqliteStore;
 
 use super::SET_NOW;
 
-const SESSION_COLUMNS: &str = "id, runspace_id, tab_id, kind, cwd, shell, status, pid, rows, cols,      transcript_path, exit_code, started_at, last_seen_at, exited_at, created_at, updated_at";
+const SESSION_COLUMNS: &str = "id, runspace_id, tab_id, kind, cwd, shell, status, agent_status, agent_wait_reason,      pid, rows, cols, transcript_path, exit_code, started_at, last_seen_at, exited_at,      created_at, updated_at";
 
 fn session_from_row(row: &Row<'_>) -> Result<TerminalSession> {
     let kind: String = row.get("kind")?;
     let status: String = row.get("status")?;
+    let agent_status: Option<String> = row.get("agent_status")?;
+    let agent_wait_reason: Option<String> = row.get("agent_wait_reason")?;
     Ok(TerminalSession {
         id: row.get("id")?,
         runspace_id: row.get("runspace_id")?,
@@ -22,6 +27,8 @@ fn session_from_row(row: &Row<'_>) -> Result<TerminalSession> {
         cwd: row.get("cwd")?,
         shell: row.get("shell")?,
         status: status.parse::<TerminalSessionStatus>()?,
+        agent_status: agent_status.map(|s| s.parse()).transpose()?,
+        agent_wait_reason: agent_wait_reason.map(|s| s.parse()).transpose()?,
         pid: row.get("pid")?,
         rows: row.get("rows")?,
         cols: row.get("cols")?,
@@ -112,6 +119,30 @@ impl SqliteStore {
         Ok(rows)
     }
 
+    /// Update the hook-observed agent state. A missing row is a no-op: hooks can outlive their
+    /// session (stale env after a respawn), and an indicator update must never fail the hook.
+    pub fn set_terminal_session_agent_status(
+        &self,
+        id: &str,
+        agent_status: Option<AgentSessionStatus>,
+        agent_wait_reason: Option<TaskRunWaitReason>,
+    ) -> Result<()> {
+        self.conn().execute(
+            &format!(
+                "UPDATE terminal_sessions
+                    SET agent_status = ?2, agent_wait_reason = ?3, updated_at = {SET_NOW}
+                  WHERE id = ?1
+                    AND (agent_status IS NOT ?2 OR agent_wait_reason IS NOT ?3)"
+            ),
+            params![
+                id,
+                agent_status.map(AgentSessionStatus::as_str),
+                agent_wait_reason.map(TaskRunWaitReason::as_str)
+            ],
+        )?;
+        Ok(())
+    }
+
     /// Record a successful daemon spawn: starting → running with the live pid.
     pub fn mark_terminal_session_started(
         &self,
@@ -164,6 +195,8 @@ impl SqliteStore {
                         SET status = ?2,
                             pid = COALESCE(?3, pid),
                             exit_code = COALESCE(?4, exit_code),
+                            agent_status = CASE WHEN ?6 THEN NULL ELSE agent_status END,
+                            agent_wait_reason = CASE WHEN ?6 THEN NULL ELSE agent_wait_reason END,
                             last_seen_at = CASE WHEN ?5 THEN {SET_NOW} ELSE last_seen_at END,
                             exited_at = CASE
                                 WHEN ?6 AND exited_at IS NULL THEN {SET_NOW}
@@ -213,6 +246,15 @@ impl TerminalSessionRepository for SqliteStore {
         exit_code: Option<i32>,
     ) -> Result<()> {
         SqliteStore::update_terminal_session_status(self, id, status, exit_code)
+    }
+
+    fn set_terminal_session_agent_status(
+        &self,
+        id: &str,
+        agent_status: Option<AgentSessionStatus>,
+        agent_wait_reason: Option<TaskRunWaitReason>,
+    ) -> Result<()> {
+        SqliteStore::set_terminal_session_agent_status(self, id, agent_status, agent_wait_reason)
     }
 
     fn get_terminal_session(&self, id: &str) -> Result<Option<TerminalSession>> {

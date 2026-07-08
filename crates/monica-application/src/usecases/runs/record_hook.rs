@@ -1,18 +1,21 @@
 use anyhow::Result;
 
 use super::ports::{Clock, EventRepository, TaskRunStore, TaskStore};
-use crate::ports::UnitOfWork;
+use crate::ports::{TerminalSessionRepository, UnitOfWork};
 use crate::prelude::{is_safe_task_run_id, Agent, AgentSignal, SignalKind, Task};
 use crate::prelude::{NewTaskRun, TaskId, TaskRun, TaskRunStatus, TaskRunWaitReason, TaskStatus};
+use monica_domain::AgentSessionEffect;
 use crate::TaskRunObservation;
 
 /// Identity carried by a hook invocation via `MONICA_*` env vars. `task_run_id` is only present
-/// for wrapper launches with an explicit run; plain `claude` in a Bench tab has task/tab only.
+/// for wrapper launches with an explicit run; plain `claude` in a Bench tab has task/tab only, and
+/// an agent in a non-task tab has just the terminal session/tab.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HookContext<'a> {
     pub task_id: Option<&'a str>,
     pub task_run_id: Option<&'a str>,
     pub terminal_tab_id: Option<&'a str>,
+    pub terminal_session_id: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,7 +73,7 @@ pub fn record_hook<R>(
     raw_stdin: &str,
 ) -> Result<HookReport>
 where
-    R: TaskStore + TaskRunStore + EventRepository + Clock + UnitOfWork,
+    R: TaskStore + TaskRunStore + EventRepository + Clock + UnitOfWork + TerminalSessionRepository,
 {
     let safe_task_run_id = ctx.task_run_id.filter(|&r| is_safe_task_run_id(r));
     let unsafe_task_run_id = ctx.task_run_id.is_some() && safe_task_run_id.is_none();
@@ -78,6 +81,19 @@ where
     let Some(signal) = signal else {
         return Ok(HookReport::ignored(unsafe_task_run_id));
     };
+
+    // The per-tab indicator updates for any Monica shell, task-linked or not.
+    if let Some(session_id) = ctx.terminal_session_id {
+        match signal.kind.agent_session_effect() {
+            AgentSessionEffect::Keep => {}
+            AgentSessionEffect::Clear => {
+                repos.set_terminal_session_agent_status(session_id, None, None)?;
+            }
+            AgentSessionEffect::Set(status, reason) => {
+                repos.set_terminal_session_agent_status(session_id, Some(status), reason)?;
+            }
+        }
+    }
 
     let event_label = signal.event_label.as_deref();
     let provider_session_id = signal.session_id.as_deref();

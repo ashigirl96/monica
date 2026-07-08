@@ -1,6 +1,9 @@
 use anyhow::Result;
 
-use monica_domain::{NewTerminalSession, TerminalSession, TerminalSessionStatus};
+use monica_domain::{
+    AgentSessionStatus, NewTerminalSession, TaskRunWaitReason, TerminalSession,
+    TerminalSessionStatus,
+};
 
 use crate::terminal_state::TerminalStateSnapshot;
 use crate::usecases::terminal::TerminalSessionUpdate;
@@ -20,6 +23,15 @@ pub trait TerminalSessionRepository {
         id: &str,
         status: TerminalSessionStatus,
         exit_code: Option<i32>,
+    ) -> Result<()>;
+
+    /// Update the hook-observed agent state driving the per-tab indicator. `None` clears it. A
+    /// missing session row is a silent no-op — an indicator update must never fail the hook.
+    fn set_terminal_session_agent_status(
+        &self,
+        id: &str,
+        agent_status: Option<AgentSessionStatus>,
+        agent_wait_reason: Option<TaskRunWaitReason>,
     ) -> Result<()>;
 
     fn get_terminal_session(&self, id: &str) -> Result<Option<TerminalSession>>;
