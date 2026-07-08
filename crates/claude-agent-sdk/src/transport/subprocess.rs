@@ -233,9 +233,26 @@ pub struct SubprocessTransport {
     raw_events: Option<RawEventCallback>,
 }
 
+/// spawn 前の危険な設定の検証。
+///
+/// `BypassPermissions` は全 permission チェックを無効化するため、
+/// 明示的な `allow_dangerously_skip_permissions` opt-in を必須にする。
+/// config から options を組む利用側が、うっかり全バイパスで起動するのを防ぐ。
+fn validate_options(options: &ClaudeAgentOptions) -> Result<()> {
+    if options.permission_mode == Some(PermissionMode::BypassPermissions)
+        && !options.allow_dangerously_skip_permissions
+    {
+        return Err(ClaudeError::invalid_config(
+            "permission_mode = BypassPermissions requires allow_dangerously_skip_permissions = true",
+        ));
+    }
+    Ok(())
+}
+
 impl SubprocessTransport {
     /// claude CLI を spawn する。呼び出しには tokio ランタイムが必要。
     pub fn spawn(options: &ClaudeAgentOptions) -> Result<Self> {
+        validate_options(options)?;
         let cli_path = find_claude_cli(options)?;
         let mut child = build_command(&cli_path, options).spawn()?;
 
@@ -446,5 +463,28 @@ mod tests {
         for key in ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "DIRENV_DIFF"] {
             assert!(REMOVED_ENV_VARS.contains(&key));
         }
+    }
+
+    #[test]
+    fn bypass_permissions_requires_explicit_opt_in() {
+        let unguarded = ClaudeAgentOptions::builder()
+            .permission_mode(PermissionMode::BypassPermissions)
+            .build();
+        assert!(matches!(
+            validate_options(&unguarded),
+            Err(ClaudeError::InvalidConfig(_))
+        ));
+
+        let guarded = ClaudeAgentOptions::builder()
+            .permission_mode(PermissionMode::BypassPermissions)
+            .allow_dangerously_skip_permissions(true)
+            .build();
+        assert!(validate_options(&guarded).is_ok());
+
+        // 他のモードは opt-in 不要
+        let plan = ClaudeAgentOptions::builder()
+            .permission_mode(PermissionMode::Plan)
+            .build();
+        assert!(validate_options(&plan).is_ok());
     }
 }
