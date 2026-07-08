@@ -83,17 +83,15 @@ pub(crate) fn inert_event(session: &str, label: &str) -> AgentSignal {
 }
 
 /// Thin shim mirroring the production boundary: a decoded Claude signal handed to `record_hook`.
-pub(crate) fn record_claude_hook<R, A>(
+pub(crate) fn record_claude_hook<R>(
     repos: &mut R,
-    outputs: &A,
     ctx: HookContext<'_>,
     signal: &AgentSignal,
 ) -> Result<crate::HookReport>
 where
     R: TaskStore + TaskRunStore + EventRepository + Clock + UnitOfWork,
-    A: TaskRunOutputs,
 {
-    record_hook(repos, outputs, ctx, Agent::Claude, Some(signal), "{}")
+    record_hook(repos, ctx, Agent::Claude, Some(signal), "{}")
 }
 
 #[derive(Default)]
@@ -1087,15 +1085,10 @@ impl GitGateway for FakeGit {
 
 #[derive(Default)]
 pub(crate) struct FakeTaskRunOutputs {
-    appended: RefCell<bool>,
     last_cwd: RefCell<Option<String>>,
 }
 
 impl FakeTaskRunOutputs {
-    pub(crate) fn hook_event_appended(&self) -> bool {
-        *self.appended.borrow()
-    }
-
     pub(crate) fn last_cwd(&self) -> Option<String> {
         self.last_cwd.borrow().clone()
     }
@@ -1108,6 +1101,10 @@ impl TaskRunOutputs for FakeTaskRunOutputs {
 
     fn setup_log_path(&self, task_run_id: &str) -> Result<PathBuf> {
         Ok(self.task_run_dir(task_run_id)?.join("setup.log"))
+    }
+
+    fn prepare_base_shell_env(&self) -> Result<Vec<(String, String)>> {
+        Ok(Vec::new())
     }
 
     fn prepare_task_shell_env(
@@ -1123,17 +1120,6 @@ impl TaskRunOutputs for FakeTaskRunOutputs {
             ("MONICA_TASK_ID".to_string(), task_id.to_string()),
             ("MONICA_CWD".to_string(), cwd.to_string_lossy().into_owned()),
         ])
-    }
-
-    fn append_hook_event(
-        &self,
-        _task_run_id: &str,
-        _at: &str,
-        _event_label: Option<&str>,
-        _raw_stdin: &str,
-    ) -> Result<()> {
-        *self.appended.borrow_mut() = true;
-        Ok(())
     }
 }
 
@@ -1236,18 +1222,16 @@ pub(crate) fn task_with_prepared_primary(repos: &mut FakeRepos) -> (String, Stri
 
 /// A task with a primary run claimed by `sess-1` and actively working (the steady state after
 /// the Run button and the first prompt).
-pub(crate) fn task_with_running_primary(repos: &mut FakeRepos, outputs: &FakeTaskRunOutputs) -> (String, String) {
+pub(crate) fn task_with_running_primary(repos: &mut FakeRepos) -> (String, String) {
     let (task_id, run_id) = task_with_prepared_primary(repos);
     record_claude_hook(
         repos,
-        outputs,
         hook_ctx(&task_id, Some(&run_id)),
         &started("sess-1", Continuation::Fresh),
     )
     .unwrap();
     record_claude_hook(
         repos,
-        outputs,
         hook_ctx(&task_id, Some(&run_id)),
         &prompt("sess-1"),
     )

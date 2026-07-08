@@ -290,7 +290,6 @@ pub(super) fn finish_task_run_in(
     Ok(())
 }
 
-
 pub(super) fn set_task_run_worktree_path(
     conn: &Connection,
     task_run_id: &str,

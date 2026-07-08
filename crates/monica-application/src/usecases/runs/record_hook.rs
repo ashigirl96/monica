@@ -1,10 +1,10 @@
 use anyhow::Result;
 
-use super::ports::{Clock, EventRepository, TaskRunOutputs, TaskRunStore, TaskStore};
+use super::ports::{Clock, EventRepository, TaskRunStore, TaskStore};
 use crate::ports::UnitOfWork;
 use crate::prelude::{is_safe_task_run_id, Agent, AgentSignal, SignalKind, Task};
 use crate::prelude::{NewTaskRun, TaskId, TaskRun, TaskRunStatus, TaskRunWaitReason, TaskStatus};
-use crate::{ApplicationError, TaskRunObservation};
+use crate::TaskRunObservation;
 
 /// Identity carried by a hook invocation via `MONICA_*` env vars. `task_run_id` is only present
 /// for wrapper launches with an explicit run; plain `claude` in a Bench tab has task/tab only.
@@ -34,7 +34,6 @@ pub struct HookReport {
     pub task_run_linked: bool,
     pub task_run_created: bool,
     pub event_recorded: bool,
-    pub jsonl_written: bool,
     pub unsafe_task_run_id: bool,
 }
 
@@ -53,7 +52,6 @@ impl HookReport {
             task_run_linked: false,
             task_run_created: false,
             event_recorded: false,
-            jsonl_written: false,
             unsafe_task_run_id,
         }
     }
@@ -64,9 +62,8 @@ impl HookReport {
 /// asks the domain ([`TaskRun::decide`](monica_domain::TaskRun::decide)) what to record, and persists
 /// it. `signal == None` means the decoder found nothing actionable (a non-blocking tool call, an
 /// unparseable payload), so the hook is ignored without touching storage.
-pub fn record_hook<R, A>(
+pub fn record_hook<R>(
     repos: &mut R,
-    outputs: &A,
     ctx: HookContext<'_>,
     agent: Agent,
     signal: Option<&AgentSignal>,
@@ -74,7 +71,6 @@ pub fn record_hook<R, A>(
 ) -> Result<HookReport>
 where
     R: TaskStore + TaskRunStore + EventRepository + Clock + UnitOfWork,
-    A: TaskRunOutputs,
 {
     let safe_task_run_id = ctx.task_run_id.filter(|&r| is_safe_task_run_id(r));
     let unsafe_task_run_id = ctx.task_run_id.is_some() && safe_task_run_id.is_none();
@@ -112,14 +108,6 @@ where
     // The full hook payload, stored verbatim (opaque RawJson). `signal` is only `Some` when the
     // decoder parsed valid JSON, so this is always valid JSON text.
     let metadata_raw = raw_stdin.trim();
-
-    let mut jsonl_written = false;
-    if let Some(task_run_id) = linked_task_run_id {
-        outputs
-            .append_hook_event(task_run_id, &at, event_label, raw_stdin)
-            .map_err(|e| ApplicationError::external(format!("failed to write hook event: {e:#}")))?;
-        jsonl_written = true;
-    }
 
     let plan = run_row.as_ref().map(|run| run.decide(signal));
     let transition = plan.and_then(|p| p.transition);
@@ -215,7 +203,6 @@ where
         task_run_linked,
         task_run_created: resolved.created,
         event_recorded,
-        jsonl_written,
         unsafe_task_run_id,
     })
 }

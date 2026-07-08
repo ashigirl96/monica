@@ -29,7 +29,6 @@ fn resolve_by_session_returns_run_when_found() {
 
     record_claude_hook(
         &mut repos,
-        &FakeTaskRunOutputs::default(),
         HookContext { task_id: Some(&task_id), task_run_id: None, terminal_tab_id: None },
         &started("sess-1", Continuation::Fresh),
     ).unwrap();

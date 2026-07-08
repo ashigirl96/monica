@@ -52,8 +52,7 @@ fn close_issue_delegates_run_cleanup_to_git_gateway() {
 #[test]
 fn make_main_by_terminal_tab_promotes_side_run_and_reports_no_ops() {
     let mut repos = FakeRepos::default();
-    let outputs = FakeTaskRunOutputs::default();
-    let (task_id, primary_id) = task_with_running_primary(&mut repos, &outputs);
+    let (task_id, primary_id) = task_with_running_primary(&mut repos);
 
     assert_eq!(
         make_main_by_terminal_tab(&repos, "tab-unknown").unwrap(),
@@ -63,7 +62,6 @@ fn make_main_by_terminal_tab_promotes_side_run_and_reports_no_ops() {
     // Side run born in tab-2, then a restarted claude in the same tab: newest run must win.
     record_claude_hook(
         &mut repos,
-        &outputs,
         HookContext {
             task_id: Some(&task_id),
             task_run_id: None,
@@ -74,7 +72,6 @@ fn make_main_by_terminal_tab_promotes_side_run_and_reports_no_ops() {
     .unwrap();
     record_claude_hook(
         &mut repos,
-        &outputs,
         HookContext {
             task_id: Some(&task_id),
             task_run_id: None,
@@ -113,7 +110,6 @@ fn make_main_by_terminal_tab_promotes_side_run_and_reports_no_ops() {
 #[test]
 fn make_main_by_terminal_tab_refuses_while_primary_is_mid_prepare() {
     let mut repos = FakeRepos::default();
-    let outputs = FakeTaskRunOutputs::default();
     let task_id = repos.insert_task_for_run(None);
     // A SettingUp primary, as left behind by start_run while execute_run is in flight.
     let preparing = repos
@@ -128,7 +124,6 @@ fn make_main_by_terminal_tab_refuses_while_primary_is_mid_prepare() {
 
     record_claude_hook(
         &mut repos,
-        &outputs,
         HookContext {
             task_id: Some(&task_id),
             task_run_id: None,
@@ -149,13 +144,11 @@ fn make_main_by_terminal_tab_refuses_while_primary_is_mid_prepare() {
 #[test]
 fn primary_terminal_tab_resolves_through_primary_run() {
     let mut repos = FakeRepos::default();
-    let outputs = FakeTaskRunOutputs::default();
     let task_id = repos.insert_task_for_run(None);
     assert_eq!(primary_terminal_tab(&repos, &task_id).unwrap(), None);
 
     record_claude_hook(
         &mut repos,
-        &outputs,
         HookContext {
             task_id: Some(&task_id),
             task_run_id: None,
@@ -173,8 +166,7 @@ fn primary_terminal_tab_resolves_through_primary_run() {
 #[test]
 fn record_claude_hook_prefers_explicit_run_id_over_session_lookup() {
     let mut repos = FakeRepos::default();
-    let outputs = FakeTaskRunOutputs::default();
-    let (task_id, primary_id) = task_with_running_primary(&mut repos, &outputs);
+    let (task_id, primary_id) = task_with_running_primary(&mut repos);
     let other = repos
         .start_task_run(NewTaskRun {
             task_id: TaskId::from_store(task_id.clone()),
@@ -187,7 +179,6 @@ fn record_claude_hook_prefers_explicit_run_id_over_session_lookup() {
     // sess-1 belongs to the primary, but the explicit run id must win.
     let report = record_claude_hook(
         &mut repos,
-        &outputs,
         hook_ctx(&task_id, Some(&other.id)),
         &started("sess-1", Continuation::Fresh),
     )
