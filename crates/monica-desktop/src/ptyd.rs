@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use monica_application::{
     DaemonSessionView, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
 };
@@ -228,6 +230,10 @@ pub(crate) struct PtydTerminalDaemon<'a> {
     pub(crate) app: &'a AppHandle,
 }
 
+/// Matches the frontend's post-attach delay before it writes a launch command
+/// (use-terminal.ts): a freshly spawned shell needs a beat before it reads stdin.
+const WRITE_INPUT_SHELL_DELAY: Duration = Duration::from_millis(500);
+
 impl TerminalDaemon for PtydTerminalDaemon<'_> {
     fn create(&self, request: TerminalCreateRequest) -> Result<Option<u32>> {
         let client = self.handle.ensure_connected(self.app)?;
@@ -241,6 +247,21 @@ impl TerminalDaemon for PtydTerminalDaemon<'_> {
         }))? {
             ResponseBody::Created { pid } => Ok(pid),
             other => bail!("unexpected create response: {other:?}"),
+        }
+    }
+
+    fn write_input(&self, session_id: &str, data: &[u8]) -> Result<()> {
+        std::thread::sleep(WRITE_INPUT_SHELL_DELAY);
+        let client = self.handle.ensure_connected(self.app)?;
+        // An acknowledged request rather than the keystroke path's fire-and-forget notify:
+        // ptyd serves each connection on its own thread, so only the daemon's response
+        // proves these bytes reached the PTY before the caller acts on "submitted".
+        match client.request(RequestOp::Write {
+            session_id: session_id.to_string(),
+            data: BASE64.encode(data),
+        })? {
+            ResponseBody::Empty => Ok(()),
+            other => bail!("unexpected write response: {other:?}"),
         }
     }
 

@@ -10,6 +10,7 @@ import { unwrap } from "./commands/unwrap";
 import { initPrSync } from "./stores/pr-sync";
 import { queryClient } from "./stores/query-client";
 import { initQuerySync } from "./stores/query-sync";
+import { initClaudeRuntime, recoverClaudeSessions } from "./stores/claude-runtime";
 import {
   hydrateUiState,
   windowLabelAtom,
@@ -31,11 +32,17 @@ async function bootstrap() {
   store.set(queryClientAtom, queryClient);
   initQuerySync();
   initPrSync();
+  initClaudeRuntime();
   try {
     const win = getCurrentWebviewWindow();
     const windowLabel = win.label;
     store.set(windowLabelAtom, windowLabel);
     await hydrateUiState({ windowLabel });
+    // Fire-and-forget so recovery never delays the first paint — but strictly after
+    // hydrateUiState: adoption may trigger the one-shot layout load, which consumes
+    // pendingWorkbenchHintAtom, and a load before the hint is set would drop the
+    // restored active runspace/tab (and later persist that regression).
+    void recoverClaudeSessions();
     initUiStatePersistence({ windowLabel });
 
     if (windowLabel === MAIN_WINDOW_LABEL) {

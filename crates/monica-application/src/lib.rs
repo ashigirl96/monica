@@ -8,6 +8,7 @@
 mod bench;
 mod error;
 mod events;
+mod claude_runtime;
 mod execution_profile;
 pub mod notification;
 pub mod facade;
@@ -26,19 +27,29 @@ pub use events::{ApplicationEvent, EventSink};
 pub use execution_profile::{ExecutionProfile, PermissionMode};
 pub use input::parse_issue_input;
 pub use facade::{
-    Backend, ExecutionService, Monica, NotebookLintReport, NotebookPageView, NotebookService,
-    ProjectInit, ProjectService, SynchronizationService, TaskService,
+    Backend, ClaudeSessionDrainOutcome, ExecutionService, Monica, NotebookLintReport, TranscriptPoll,
+    NotebookPageView, NotebookService, ProjectInit, ProjectService, SynchronizationService,
+    TaskService,
 };
 
 pub use ports::{
-    AgentDecoders, AgentEventDecoder, EventRepository, GitGateway, NotebookGateway,
-    NotificationOutboxStore, ProjectRepository, PullRequestSyncStore, TaskBoardQuery, TaskRunStore,
-    TaskStore, TaskSummaryFilter, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
-    TerminalSessionRepository, UnitOfWork, WorkbenchStore, WorkTransaction, Workspace, WorktreeRef,
+    AgentDecoders, AgentEventDecoder, ClaudePromptClaim, ClaudeSessionEvent,
+    ClaudeSessionObservation, ClaudeSessionRepository, ClaudeToolUse, ClaudeTranscriptReader,
+    ClaudeTranscriptRecord,
+    ClaudeTranscriptRecordKind, EventRepository, GitGateway,
+    NotebookGateway, NotificationOutboxStore, ProjectRepository, PullRequestSyncStore,
+    TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter, TerminalAttachment,
+    TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository, TranscriptChunk, UnitOfWork,
+    WorkbenchStore, WorkTransaction, Workspace, WorktreeRef,
 };
 
 // Application-owned types (NOT in monica-domain)
 pub use bench::{bench_runspace_id, PrepareTaskResult, RunTaskResult, TaskBench};
+pub use claude_runtime::{
+    agent_runtime_runspace_id, claude_jsonl_path, claude_project_dir, claude_project_slug,
+    ClaudeSessionSpec,
+    OpenClaudeSessionParams, MONICA_CLAUDE_SESSION_ID_ENV,
+};
 pub use github::{
     GithubAuthStatus, GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef,
     GithubPullRequestStatus, PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate,
@@ -46,12 +57,14 @@ pub use github::{
 };
 pub use observation::TaskRunObservation;
 pub use queries::TaskSummaryRow;
-pub use terminal_state::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTabRow};
+pub use terminal_state::{
+    TerminalRunspaceKind, TerminalRunspaceRow, TerminalStateSnapshot, TerminalTabRow,
+};
 
 // Usecase result types (returned by facade methods)
 pub use usecases::{
-    CloseIssueReport, DaemonSessionView, HookContext, HookReport, TerminalSessionUpdate,
-    TrackGithubIssueReport,
+    ClaudeHookReport, CloseIssueReport, DaemonSessionView, HookContext, HookReport,
+    TerminalSessionUpdate, TrackGithubIssueReport,
 };
 
 // Usecase sub-ports (referenced by Backend trait)

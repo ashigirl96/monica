@@ -7,12 +7,14 @@ rust-version = "1.95"
 
 [dependencies]
 monica-domain = { path = "../monica-domain" }
+monica-terminal-protocol = { path = "../monica-terminal-protocol" }
 anyhow = "1.0.102"
 futures-util = { version = "0.3.32", default-features = false, features = ["alloc"] }
 log = "0.4"
 serde = { version = "1.0.228", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
 strum = { version = "0.28", features = ["derive"] }
+uuid = { version = "1", default-features = false, features = ["std", "v4"] }
 
 [dev-dependencies]
 tokio = { version = "1.52.3", default-features = false, features = ["macros", "rt"] }
