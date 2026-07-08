@@ -14,7 +14,8 @@ use tokio::sync::mpsc;
 
 use crate::error::{ClaudeError, Result};
 use crate::types::{
-    ClaudeAgentOptions, PermissionMode, RawEventCallback, RawEventDirection, SystemPrompt,
+    ClaudeAgentOptions, McpServers, PermissionMode, RawEventCallback, RawEventDirection,
+    SdkPluginConfig, SystemPrompt, ToolsConfig,
 };
 
 /// #341 で検証済みの base args。`-p` を付けないことが課金レーン維持の必須条件。
@@ -185,6 +186,60 @@ fn build_args(options: &ClaudeAgentOptions) -> Vec<String> {
         args.push("--strict-mcp-config".into());
     }
 
+    if let Some(budget) = options.max_budget_usd {
+        args.push("--max-budget-usd".into());
+        args.push(budget.to_string());
+    }
+    match &options.tools {
+        // Preset(claude_code) は既定のフルセットと同義なのでフラグ省略で表現できる
+        Some(ToolsConfig::List(list)) => {
+            args.push("--tools".into());
+            args.push(
+                list.iter()
+                    .map(|t| t.as_str().to_string())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+        }
+        Some(ToolsConfig::Preset(_)) | None => {}
+    }
+    if let Some(betas) = &options.betas {
+        args.push("--betas".into());
+        args.push(
+            betas
+                .iter()
+                .filter_map(|beta| serde_json::to_value(beta).ok())
+                .filter_map(|value| value.as_str().map(ToString::to_string))
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+    }
+    if let Some(output_format) = &options.output_format {
+        args.push("--json-schema".into());
+        args.push(output_format.schema.to_string());
+    }
+    if let Some(agents) = &options.agents {
+        args.push("--agents".into());
+        args.push(serde_json::to_string(agents).unwrap_or_default());
+    }
+    if let Some(sources) = &options.setting_sources {
+        args.push("--setting-sources".into());
+        args.push(
+            sources
+                .iter()
+                .filter_map(|source| serde_json::to_value(source).ok())
+                .filter_map(|value| value.as_str().map(ToString::to_string))
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+    }
+    if let Some(plugins) = &options.plugins {
+        for SdkPluginConfig::Local { path } in plugins {
+            args.push("--plugin-dir".into());
+            args.push(path.clone());
+        }
+    }
+
     for (key, value) in &options.extra_args {
         args.push(format!("--{key}"));
         if let Some(value) = value {
@@ -233,11 +288,12 @@ pub struct SubprocessTransport {
     raw_events: Option<RawEventCallback>,
 }
 
-/// spawn 前の危険な設定の検証。
+/// spawn 前の設定検証。
 ///
-/// `BypassPermissions` は全 permission チェックを無効化するため、
-/// 明示的な `allow_dangerously_skip_permissions` opt-in を必須にする。
-/// config から options を組む利用側が、うっかり全バイパスで起動するのを防ぐ。
+/// - `BypassPermissions` は全 permission チェックを無効化するため、
+///   明示的な `allow_dangerously_skip_permissions` opt-in を必須にする
+/// - 未配線の option は黙って無視せず `InvalidConfig` で弾く（設定したのに
+///   効いていない、という静かな事故を防ぐ。対応したら個別にこのリストから外す）
 fn validate_options(options: &ClaudeAgentOptions) -> Result<()> {
     if options.permission_mode == Some(PermissionMode::BypassPermissions)
         && !options.allow_dangerously_skip_permissions
@@ -245,6 +301,25 @@ fn validate_options(options: &ClaudeAgentOptions) -> Result<()> {
         return Err(ClaudeError::invalid_config(
             "permission_mode = BypassPermissions requires allow_dangerously_skip_permissions = true",
         ));
+    }
+
+    let unsupported: &[(&str, bool)] = &[
+        ("user", options.user.is_some()),
+        ("max_buffer_size", options.max_buffer_size.is_some()),
+        ("read_timeout_secs", options.read_timeout_secs.is_some()),
+        ("resume_session_at", options.resume_session_at.is_some()),
+        ("hooks", options.hooks.is_some()),
+        (
+            "mcp_servers",
+            !matches!(options.mcp_servers, McpServers::None),
+        ),
+    ];
+    for (name, set) in unsupported {
+        if *set {
+            return Err(ClaudeError::invalid_config(format!(
+                "option `{name}` is not supported yet by claude-agent-sdk (see TODO.md)"
+            )));
+        }
     }
     Ok(())
 }
@@ -462,6 +537,78 @@ mod tests {
     fn removed_env_vars_cover_lane_and_direnv() {
         for key in ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "DIRENV_DIFF"] {
             assert!(REMOVED_ENV_VARS.contains(&key));
+        }
+    }
+
+    #[test]
+    fn budget_tools_and_parity_flags_are_mapped() {
+        use crate::types::{AgentDefinition, OutputFormat, SdkBeta, SettingSource};
+
+        let mut agents = std::collections::HashMap::new();
+        agents.insert(
+            "reviewer".to_string(),
+            AgentDefinition {
+                description: "reviews code".into(),
+                prompt: "review".into(),
+                tools: None,
+                model: None,
+            },
+        );
+        let options = ClaudeAgentOptions::builder()
+            .max_budget_usd(1.5)
+            .tools(ToolsConfig::from_list(vec![ToolName::new("Read")]))
+            .betas(vec![SdkBeta::Context1M])
+            .output_format(OutputFormat::json_schema(serde_json::json!({"type": "object"})))
+            .agents(agents)
+            .setting_sources(vec![SettingSource::User, SettingSource::Project])
+            .plugins(vec![SdkPluginConfig::Local { path: "/tmp/plugin".into() }])
+            .build();
+        let args = build_args(&options);
+
+        let pairs: Vec<(String, String)> = args
+            .windows(2)
+            .map(|w| (w[0].clone(), w[1].clone()))
+            .collect();
+        assert!(pairs.contains(&("--max-budget-usd".into(), "1.5".into())));
+        assert!(pairs.contains(&("--tools".into(), "Read".into())));
+        assert!(pairs.contains(&("--betas".into(), "context-1m-2025-08-07".into())));
+        assert!(pairs.contains(&("--setting-sources".into(), "user,project".into())));
+        assert!(pairs.contains(&("--plugin-dir".into(), "/tmp/plugin".into())));
+        let idx = args.iter().position(|a| a == "--json-schema").unwrap();
+        assert!(args[idx + 1].contains("object"));
+        let idx = args.iter().position(|a| a == "--agents").unwrap();
+        assert!(args[idx + 1].contains("reviewer"));
+    }
+
+    #[test]
+    fn tools_preset_is_default_toolset_and_omits_flag() {
+        let options = ClaudeAgentOptions::builder()
+            .tools(ToolsConfig::claude_code_preset())
+            .build();
+        assert!(!build_args(&options).contains(&"--tools".to_string()));
+    }
+
+    #[test]
+    fn unwired_options_are_rejected_not_silently_ignored() {
+        let cases: Vec<ClaudeAgentOptions> = vec![
+            ClaudeAgentOptions::builder().user("someone").build(),
+            ClaudeAgentOptions::builder().max_buffer_size(1024).build(),
+            ClaudeAgentOptions::builder().read_timeout_secs(10).build(),
+            ClaudeAgentOptions::builder()
+                .resume_session_at("uuid-1")
+                .build(),
+            ClaudeAgentOptions::builder()
+                .hooks(std::collections::HashMap::new())
+                .build(),
+            ClaudeAgentOptions::builder()
+                .mcp_servers(McpServers::Path("/tmp/mcp.json".into()))
+                .build(),
+        ];
+        for options in cases {
+            assert!(
+                matches!(validate_options(&options), Err(ClaudeError::InvalidConfig(_))),
+                "expected InvalidConfig for unwired option"
+            );
         }
     }
 
