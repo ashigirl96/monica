@@ -309,6 +309,8 @@ fn validate_options(options: &ClaudeAgentOptions) -> Result<()> {
         ("read_timeout_secs", options.read_timeout_secs.is_some()),
         ("resume_session_at", options.resume_session_at.is_some()),
         ("hooks", options.hooks.is_some()),
+        // sandbox は CLI フラグが存在しない（settings 経由の可能性はあるが未検証）
+        ("sandbox", options.sandbox.is_some()),
         (
             "mcp_servers",
             !matches!(options.mcp_servers, McpServers::None),
@@ -602,6 +604,9 @@ mod tests {
                 .build(),
             ClaudeAgentOptions::builder()
                 .mcp_servers(McpServers::Path("/tmp/mcp.json".into()))
+                .build(),
+            ClaudeAgentOptions::builder()
+                .sandbox(crate::types::SandboxSettings::default())
                 .build(),
         ];
         for options in cases {
