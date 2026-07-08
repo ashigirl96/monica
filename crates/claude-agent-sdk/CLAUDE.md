@@ -42,7 +42,9 @@ callbacks.rs  HookCallback / PermissionCallback trait
   `tests/transcript_drift.rs`（`~/.claude/projects` の最新実データ）、
   `tests/wire_drift.rs`（`~/.monica/claude-agent-sdk/wire-corpus/` の蓄積 wire）
 - 実行: `cargo test -p claude-agent-sdk -- --ignored`
-- fixtures / corpus の採取: `cargo run -p claude-agent-sdk --example capture_fixtures`
+- **examples は人間が手で触るデモ・道具**（assert なし）。自動検証は必ず tests に書く:
+  - 対話での動作確認: `cargo run -p claude-agent-sdk --example chat [-- <cwd>]`
+  - fixtures / corpus の採取: `cargo run -p claude-agent-sdk --example capture_fixtures`
 - **テストがハングしたら** `--lib` / `--test <name>` 単位 + `timeout` で切り分ける。
   一括 `cargo test` は「どのバイナリで固まったか」が見えない。→ GOTCHAS.md
 
