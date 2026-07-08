@@ -116,9 +116,9 @@ async function runConnect(
         cwd: options.cwd,
         rows: term?.rows ?? 24,
         cols: term?.cols ?? 80,
-        // A launch intent carries the complete shell env (runspace env + run ids), so it
-        // supersedes the runspace env rather than being merged with it. The tab and
-        // session ids are injected backend-side.
+        // A launch intent carries the run-identity env vars, so it supersedes the runspace
+        // env rather than being merged with it. The agent scaffolding and the tab/session
+        // ids are injected backend-side.
         env: options.launch?.env ?? options.env,
       });
       sessionId = session.id;

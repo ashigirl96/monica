@@ -23,6 +23,8 @@ pub enum Agent {
 }
 
 impl Agent {
+    pub const ALL: [Agent; 2] = [Agent::Claude, Agent::Codex];
+
     pub fn as_str(self) -> &'static str {
         self.into()
     }

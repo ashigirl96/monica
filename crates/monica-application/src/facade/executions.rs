@@ -1,6 +1,6 @@
 use super::{Backend, Monica};
 use crate::ports::{
-    AgentDecoders, NotificationOutboxStore, TaskRunStore, TerminalAttachment,
+    AgentDecoders, NotificationOutboxStore, ShellScaffolding, TaskRunStore, TerminalAttachment,
     TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository, WorkbenchStore,
 };
 use crate::usecases::terminal::{
@@ -13,7 +13,7 @@ use crate::prelude::{
 };
 use crate::{
     ApplicationError, ApplicationEvent, ApplicationResult, EventSink, HookContext, HookReport,
-    PrepareTaskResult, RunTaskResult, TaskBench, TaskRunOutputs, TerminalStateSnapshot,
+    PrepareTaskResult, RunTaskResult, TaskBench, TerminalStateSnapshot,
 };
 
 /// Run preparation/execution, agent hooks, and (in a later phase) terminal sessions. Groups the
@@ -143,28 +143,21 @@ impl<B: Backend> ExecutionService<'_, B> {
 
         let session = self.m.repos.create_terminal_session(new)?;
 
-        // Every Monica shell gets the claude wrapper/hooks scaffolding so agent launches in any
-        // tab report back through hooks; a task env passed by the caller wins key-by-key. When
-        // the caller's env already carries every base key (a task env does — it was built by the
-        // same scaffolding), the merge is a guaranteed no-op, so skip the redundant filesystem
-        // pass. Failure degrades the tab to a vanilla shell rather than blocking it.
-        let has_scaffolding = ["MONICA_HOME", "ZDOTDIR", "PATH"]
-            .iter()
-            .all(|key| env.iter().any(|(k, _)| k == key));
-        if !has_scaffolding {
-            match self.m.outputs.prepare_base_shell_env() {
-                Ok(base) => {
-                    for (key, value) in base {
-                        if !env.iter().any(|(k, _)| *k == key) {
-                            env.push((key, value));
-                        }
+        // Every Monica shell gets the agent wrapper/hooks scaffolding so agent launches in any
+        // tab report back through hooks; an env passed by the caller wins key-by-key. Failure
+        // degrades the tab to a vanilla shell rather than blocking it.
+        match self.m.outputs.prepare_base_shell_env(std::path::Path::new(&cwd)) {
+            Ok(base) => {
+                for (key, value) in base {
+                    if !env.iter().any(|(k, _)| *k == key) {
+                        env.push((key, value));
                     }
                 }
-                Err(e) => log::warn!(
-                    target: "monica_application::terminal",
-                    "failed to prepare base shell env: {e:#}"
-                ),
             }
+            Err(e) => log::warn!(
+                target: "monica_application::terminal",
+                "failed to prepare base shell env: {e:#}"
+            ),
         }
 
         // The hook chain (shell → claude → monica hook) inherits these, letting hooks stamp the

@@ -8,11 +8,9 @@ use crate::ExecutionProfile;
 pub trait TaskRunOutputs {
     fn task_run_dir(&self, task_run_id: &str) -> Result<PathBuf>;
     fn setup_log_path(&self, task_run_id: &str) -> Result<PathBuf>;
-    /// Prepare the agent scaffolding (wrapper, zdotdir, inline hooks config) every Monica-spawned
-    /// shell gets, task or not, so `claude` launched in any tab reports back through hooks.
-    fn prepare_base_shell_env(&self) -> Result<Vec<(String, String)>>;
-    /// Prepare the shell scaffolding (wrapper, zdotdir, hooks config) and return the env vars the
-    /// task shell must be spawned with.
+    /// Prepare the task-specific pieces — the identity env vars the task shell must be spawned
+    /// with, plus any per-worktree agent config. The agent scaffolding itself is layered on at
+    /// terminal-session creation (`ShellScaffolding::prepare_base_shell_env`).
     fn prepare_task_shell_env(
         &self,
         task_id: &str,

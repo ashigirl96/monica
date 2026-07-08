@@ -1094,6 +1094,12 @@ impl FakeTaskRunOutputs {
     }
 }
 
+impl crate::ports::ShellScaffolding for FakeTaskRunOutputs {
+    fn prepare_base_shell_env(&self, _cwd: &std::path::Path) -> Result<Vec<(String, String)>> {
+        Ok(Vec::new())
+    }
+}
+
 impl TaskRunOutputs for FakeTaskRunOutputs {
     fn task_run_dir(&self, task_run_id: &str) -> Result<PathBuf> {
         Ok(PathBuf::from("/tmp").join(task_run_id))
@@ -1101,10 +1107,6 @@ impl TaskRunOutputs for FakeTaskRunOutputs {
 
     fn setup_log_path(&self, task_run_id: &str) -> Result<PathBuf> {
         Ok(self.task_run_dir(task_run_id)?.join("setup.log"))
-    }
-
-    fn prepare_base_shell_env(&self) -> Result<Vec<(String, String)>> {
-        Ok(Vec::new())
     }
 
     fn prepare_task_shell_env(
