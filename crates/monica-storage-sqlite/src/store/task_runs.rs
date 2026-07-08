@@ -290,26 +290,6 @@ pub(super) fn finish_task_run_in(
     Ok(())
 }
 
-/// Recording `settings_path` is not a status transition, so it stays out of `finish_task_run` and
-/// runs as a single UPDATE on its own.
-pub(super) fn set_task_run_settings_path(
-    conn: &Connection,
-    task_run_id: &str,
-    settings_path: &str,
-) -> Result<()> {
-    let affected = conn.execute(
-        &format!(
-            "UPDATE task_runs
-               SET settings_path = ?1, updated_at = {SET_NOW}
-             WHERE id = ?2"
-        ),
-        params![settings_path, task_run_id],
-    )?;
-    if affected == 0 {
-        return Err(anyhow!("task run not found: {task_run_id}"));
-    }
-    Ok(())
-}
 
 pub(super) fn set_task_run_worktree_path(
     conn: &Connection,
@@ -419,10 +399,6 @@ impl TaskRunStore for SqliteStore {
         finish_task_run_in(&tx, task_run_id, task_id, status)?;
         tx.commit()?;
         Ok(())
-    }
-
-    fn set_task_run_settings_path(&self, task_run_id: &str, settings_path: &str) -> Result<()> {
-        set_task_run_settings_path(self.conn(), task_run_id, settings_path)
     }
 
     fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()> {

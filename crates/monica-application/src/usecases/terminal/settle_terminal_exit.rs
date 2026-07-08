@@ -108,7 +108,6 @@ mod tests {
             worktree_path: None,
             status,
             wait_reason: None,
-            settings_path: None,
             provider_session_id: provider_session_id.map(str::to_string),
             terminal_tab_id: Some("tab-1".to_string()),
             last_event_name: None,

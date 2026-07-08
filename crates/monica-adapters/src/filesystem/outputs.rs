@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use monica_application::shell::quote_single;
-use monica_application::{ExecutionProfile, TaskRunOutputs, TaskShellEnv};
+use monica_application::{ExecutionProfile, TaskRunOutputs};
 use monica_domain::{Agent, Project};
 use serde_json::{json, Value};
 
@@ -34,26 +34,26 @@ impl TaskRunOutputs for FsTaskRunOutputs {
         profile: &ExecutionProfile,
         task_run_id: Option<&str>,
         cwd: &Path,
-    ) -> Result<TaskShellEnv> {
-        let task_dir = paths::task_shell_dir(task_id)?;
-        fs::create_dir_all(&task_dir)
-            .with_context(|| format!("failed to create {}", task_dir.display()))?;
+    ) -> Result<Vec<(String, String)>> {
+        let agent = profile.agent_default;
+        let shell_dir = paths::agent_shell_dir(agent.as_str())?;
+        fs::create_dir_all(&shell_dir)
+            .with_context(|| format!("failed to create {}", shell_dir.display()))?;
 
         // The hook must write to the DB this app instance reads, but the tab's
         // MONICA_HOME can be rewritten after spawn (direnv applying a repo
         // .envrc that exports another base) — so the command pins the base
         // itself instead of trusting the environment it inherits.
         let monica_home = paths::base_dir()?.to_string_lossy().into_owned();
-        let agent = profile.agent_default;
         let hook_cmd = pin_hook_command_base(&resolve_hook_command(agent)?, &monica_home);
-        let settings_path_str = write_agent_hooks_config(agent, cwd, &hook_cmd)?;
+        write_agent_hooks_config(agent, cwd, &hook_cmd)?;
 
-        let bin_dir = task_dir.join("bin");
+        let bin_dir = shell_dir.join("bin");
         let agent_bin = agent.as_str();
         write_agent_wrapper(&bin_dir, agent_bin, agent_wrapper_script(agent))?;
         let wrapper_path = bin_dir.join(agent_bin).to_string_lossy().into_owned();
 
-        let zdotdir = task_dir.join("zdotdir");
+        let zdotdir = shell_dir.join("zdotdir");
         write_zdotdir(&zdotdir, agent)?;
         let zdotdir_str = zdotdir.to_string_lossy().into_owned();
 
@@ -61,7 +61,7 @@ impl TaskRunOutputs for FsTaskRunOutputs {
             ("MONICA_HOME".to_string(), monica_home),
             ("MONICA_TASK_ID".to_string(), task_id.to_string()),
             ("MONICA_PROJECT_ID".to_string(), project.id.clone()),
-            ("MONICA_AGENT_WRAPPER".to_string(), wrapper_path.clone()),
+            ("MONICA_AGENT_WRAPPER".to_string(), wrapper_path),
             ("ZDOTDIR".to_string(), zdotdir_str),
         ];
         // Set only when the user actually had ZDOTDIR; .zshenv unsets it otherwise
@@ -82,11 +82,7 @@ impl TaskRunOutputs for FsTaskRunOutputs {
         };
         env.push(("PATH".to_string(), path_value));
 
-        Ok(TaskShellEnv {
-            env,
-            settings_path: settings_path_str,
-            wrapper_path,
-        })
+        Ok(env)
     }
 
     fn append_hook_event(
@@ -172,12 +168,11 @@ fn write_agent_hooks_config(
     agent: Agent,
     cwd: &Path,
     hook_command: &str,
-) -> Result<String> {
+) -> Result<()> {
     let config_path = cwd.join(crate::agents::hooks_config_path(agent));
-    let config_path_str = config_path.to_string_lossy().into_owned();
 
     if std::env::var_os("HOME").is_some_and(|home| same_path(Path::new(&home), cwd)) {
-        return Ok(config_path_str);
+        return Ok(());
     }
 
     let parent = config_path
@@ -195,8 +190,7 @@ fn write_agent_hooks_config(
         Agent::Codex => serde_json::to_string_pretty(&hooks)
             .context("failed to serialize hooks config")?,
     };
-    write_if_changed(&config_path, &body)?;
-    Ok(config_path_str)
+    write_if_changed(&config_path, &body)
 }
 
 // Compare through symlinks and trailing-slash differences so the HOME guard cannot be bypassed by
@@ -423,11 +417,8 @@ mod tests {
     #[test]
     fn write_agent_hooks_config_codex_writes_into_cwd_dot_codex() {
         let cwd = unique_temp_dir("codex-write");
-        let path =
-            write_agent_hooks_config(Agent::Codex, &cwd, "monica hook codex")
-                .unwrap();
+        write_agent_hooks_config(Agent::Codex, &cwd, "monica hook codex").unwrap();
         let expected = cwd.join(".codex").join("hooks.json");
-        assert_eq!(path, expected.to_string_lossy());
         let body = fs::read_to_string(&expected).unwrap();
         assert!(body.contains("monica hook codex"));
         assert!(body.contains("SessionStart"));
@@ -521,11 +512,8 @@ mod tests {
     #[test]
     fn write_agent_hooks_config_claude_writes_into_cwd_dot_claude() {
         let cwd = unique_temp_dir("write");
-        let path =
-            write_agent_hooks_config(Agent::Claude, &cwd, "monica hook claude")
-                .unwrap();
+        write_agent_hooks_config(Agent::Claude, &cwd, "monica hook claude").unwrap();
         let expected = cwd.join(".claude").join("settings.local.json");
-        assert_eq!(path, expected.to_string_lossy());
         let body = fs::read_to_string(&expected).unwrap();
         assert!(body.contains("monica hook claude"));
         assert!(body.contains("SessionStart"));
@@ -543,10 +531,7 @@ mod tests {
         let global = home.join(".claude").join("settings.local.json");
         let before = fs::read_to_string(&global).ok();
 
-        let path =
-            write_agent_hooks_config(Agent::Claude, &home, "monica hook claude")
-                .unwrap();
-        assert_eq!(path, global.to_string_lossy());
+        write_agent_hooks_config(Agent::Claude, &home, "monica hook claude").unwrap();
 
         let after = fs::read_to_string(&global).ok();
         assert_eq!(before, after, "must not create or modify the global settings.local.json");

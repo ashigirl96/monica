@@ -57,5 +57,5 @@ pub use usecases::{
 // Usecase sub-ports (referenced by Backend trait)
 pub use usecases::github::ports::{AuthGateway, GithubGateway};
 pub use usecases::runs::ports::{
-    Clock, SetupEnv, SetupOutcome, SetupRunner, TaskRunOutputs, TaskShellEnv,
+    Clock, SetupEnv, SetupOutcome, SetupRunner, TaskRunOutputs,
 };

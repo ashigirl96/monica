@@ -433,7 +433,6 @@ impl FakeRepos {
             worktree_path: new.worktree_path,
             status: TaskRunStatus::SettingUp,
             wait_reason: None,
-            settings_path: None,
             provider_session_id: None,
             terminal_tab_id: None,
             last_event_name: None,
@@ -543,16 +542,6 @@ impl TaskRunStore for FakeRepos {
         status: TaskRunStatus,
     ) -> Result<()> {
         self.do_finish_task_run(task_run_id, task_id, status)
-    }
-
-    fn set_task_run_settings_path(&self, task_run_id: &str, settings_path: &str) -> Result<()> {
-        self.state
-            .borrow_mut()
-            .runs
-            .get_mut(task_run_id)
-            .ok_or_else(|| anyhow!("task run not found: {task_run_id}"))?
-            .settings_path = Some(settings_path.to_string());
-        Ok(())
     }
 
     fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()> {
@@ -837,10 +826,6 @@ impl TaskRunStore for FakeUow<'_> {
         status: TaskRunStatus,
     ) -> Result<()> {
         self.inner.do_finish_task_run(task_run_id, task_id, status)
-    }
-
-    fn set_task_run_settings_path(&self, task_run_id: &str, settings_path: &str) -> Result<()> {
-        self.inner.set_task_run_settings_path(task_run_id, settings_path)
     }
 
     fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()> {
@@ -1132,16 +1117,12 @@ impl TaskRunOutputs for FakeTaskRunOutputs {
         _profile: &crate::ExecutionProfile,
         _task_run_id: Option<&str>,
         cwd: &std::path::Path,
-    ) -> Result<crate::TaskShellEnv> {
+    ) -> Result<Vec<(String, String)>> {
         *self.last_cwd.borrow_mut() = Some(cwd.to_string_lossy().into_owned());
-        Ok(crate::TaskShellEnv {
-            env: vec![
-                ("MONICA_TASK_ID".to_string(), task_id.to_string()),
-                ("MONICA_CWD".to_string(), cwd.to_string_lossy().into_owned()),
-            ],
-            settings_path: format!("/tmp/tasks/{task_id}/claude-settings.json"),
-            wrapper_path: format!("/tmp/tasks/{task_id}/bin/claude"),
-        })
+        Ok(vec![
+            ("MONICA_TASK_ID".to_string(), task_id.to_string()),
+            ("MONICA_CWD".to_string(), cwd.to_string_lossy().into_owned()),
+        ])
     }
 
     fn append_hook_event(
@@ -1369,7 +1350,6 @@ pub(crate) fn make_run(id: &str, task_id: &str, status: TaskRunStatus) -> TaskRu
         worktree_path: None,
         status,
         wait_reason: None,
-        settings_path: None,
         provider_session_id: None,
         terminal_tab_id: None,
         last_event_name: None,
@@ -1651,7 +1631,6 @@ pub(crate) fn driven_run(id: &str, task_id: &str, tab: &str) -> TaskRun {
         worktree_path: None,
         status: TaskRunStatus::Running,
         wait_reason: None,
-        settings_path: None,
         provider_session_id: Some("sess".to_string()),
         terminal_tab_id: Some(tab.to_string()),
         last_event_name: None,

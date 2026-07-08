@@ -6,8 +6,10 @@
 //! プロンプト本文を含むためコーパスはコミットしない。環境依存のため
 //! `cargo test -p claude-agent-sdk -- --ignored` でローカル実行のみ。
 
-use claude_agent_sdk::parser::{parse_line, ParsedLine};
-use std::collections::BTreeMap;
+mod common;
+
+use claude_agent_sdk::parser::parse_line;
+use common::{record, Drift, DriftStats};
 use std::path::PathBuf;
 
 fn corpus_dir() -> PathBuf {
@@ -36,8 +38,7 @@ fn accumulated_wire_corpus_parses_without_drift() {
         .collect();
     assert!(!files.is_empty(), "wire corpus is empty: {}", dir.display());
 
-    let mut totals: BTreeMap<&'static str, usize> = BTreeMap::new();
-    let mut unknown_types: BTreeMap<String, usize> = BTreeMap::new();
+    let mut stats = DriftStats::default();
     let mut failures: Vec<String> = Vec::new();
 
     for path in &files {
@@ -47,36 +48,31 @@ fn accumulated_wire_corpus_parses_without_drift() {
                 continue;
             }
             let line = entry["line"].to_string();
-            match parse_line(&line) {
-                ParsedLine::Malformed { error, .. } => {
+            match record(
+                parse_line(&line),
+                &["user", "assistant", "result", "stream_event", "system"],
+                &mut stats,
+            ) {
+                Drift::Malformed(error) => {
                     failures.push(format!("Malformed in {}: {error}", path.display()));
                 }
-                ParsedLine::Empty => *totals.entry("empty").or_default() += 1,
-                ParsedLine::Message(_) => *totals.entry("message").or_default() += 1,
-                ParsedLine::Control(_) => *totals.entry("control").or_default() += 1,
-                ParsedLine::Unknown { value, error } => {
-                    *totals.entry("unknown").or_default() += 1;
-                    let ty = value
-                        .get("type")
-                        .and_then(|t| t.as_str())
-                        .unwrap_or("<no type>")
-                        .to_string();
-                    if ["user", "assistant", "result", "stream_event", "system"]
-                        .contains(&ty.as_str())
-                    {
-                        failures.push(format!("typed decode failed for {ty}: {error}"));
-                    }
-                    *unknown_types.entry(ty).or_default() += 1;
+                Drift::TypedDecodeFailure { ty, error } => {
+                    failures.push(format!("typed decode failed for {ty}: {error}"));
                 }
+                Drift::None => {}
             }
         }
     }
 
-    println!("wire corpus: {} files, breakdown: {totals:?}", files.len());
-    println!("unknown type distribution: {unknown_types:?}");
+    println!(
+        "wire corpus: {} files, breakdown: {:?}",
+        files.len(),
+        stats.totals
+    );
+    println!("unknown type distribution: {:?}", stats.unknown_types);
 
     assert!(
-        totals.get("message").copied().unwrap_or(0) > 0,
+        stats.totals.get("message").copied().unwrap_or(0) > 0,
         "no typed Message parsed from wire corpus"
     );
     assert!(failures.is_empty(), "wire drift detected:\n{}", failures.join("\n"));

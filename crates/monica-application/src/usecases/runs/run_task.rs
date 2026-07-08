@@ -290,10 +290,9 @@ where
     let mut effective_profile = profile;
     effective_profile.agent_default = agent;
 
-    let shell = outputs
+    let env = outputs
         .prepare_task_shell_env(task_id, &project, &effective_profile, Some(&primary_id), &worktree_path)
         .map_err(|e| ApplicationError::external(format!("failed to prepare shell env: {e:#}")))?;
-    repos.set_task_run_settings_path(&primary_id, &shell.settings_path)?;
 
     let (runspace_id, _, _) = super::open_bench::ensure_bench(repos, task_id, &worktree_str, true)?;
 
@@ -306,7 +305,7 @@ where
         task_run_id: primary_id.into(),
         runspace_id,
         cwd: worktree_str,
-        env: shell.env,
+        env,
         initial_command,
     })
 }

@@ -31,9 +31,11 @@ pub fn task_run_dir(task_run_id: &str) -> Result<PathBuf> {
     Ok(task_runs_dir()?.join(task_run_id))
 }
 
-/// Per-task shell output directory: `<base>/tasks/<task_id>/` (holds wrapper, settings, zdotdir).
-pub fn task_shell_dir(task_id: &str) -> Result<PathBuf> {
-    Ok(base_dir()?.join("tasks").join(task_id))
+/// Shared per-agent shell scaffolding: `<base>/shell/<agent>/` (holds the wrapper bin and zdotdir).
+/// The files are task-independent templates; task identity travels via env vars, so one copy
+/// per agent serves every task and stays current with the running app version.
+pub fn agent_shell_dir(agent: &str) -> Result<PathBuf> {
+    Ok(base_dir()?.join("shell").join(agent))
 }
 
 /// Unix domain socket the PTY daemon (`monica-ptyd`) listens on.

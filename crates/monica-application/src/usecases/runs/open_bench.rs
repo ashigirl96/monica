@@ -64,12 +64,9 @@ where
         }
     }
     let env = match (project.as_ref(), profile.as_ref()) {
-        (Some(p), Some(prof)) => {
-            let shell = outputs
-                .prepare_task_shell_env(&task.id, p, prof, None, std::path::Path::new(&cwd))
-                .map_err(|e| ApplicationError::external(format!("failed to prepare shell env: {e:#}")))?;
-            shell.env
-        }
+        (Some(p), Some(prof)) => outputs
+            .prepare_task_shell_env(&task.id, p, prof, None, std::path::Path::new(&cwd))
+            .map_err(|e| ApplicationError::external(format!("failed to prepare shell env: {e:#}")))?,
         _ => Vec::new(),
     };
     Ok(env)
@@ -132,7 +129,6 @@ where
                 .prepare_task_shell_env(&task.id, p, prof, None, std::path::Path::new(cwd))
                 .ok()
         })
-        .map(|shell| shell.env)
         .unwrap_or_default()
 }
 

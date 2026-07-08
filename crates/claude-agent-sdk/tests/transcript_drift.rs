@@ -6,8 +6,10 @@
 //! パーサの頑健性と型 drift を確認できる。環境依存のため live smoke と同じく
 //! `cargo test -p claude-agent-sdk -- --ignored` でローカル実行のみ。
 
-use claude_agent_sdk::parser::{parse_line, ParsedLine};
-use std::collections::BTreeMap;
+mod common;
+
+use claude_agent_sdk::parser::parse_line;
+use common::{record, Drift, DriftStats};
 use std::path::PathBuf;
 
 fn latest_transcripts(count: usize) -> Vec<PathBuf> {
@@ -52,42 +54,37 @@ fn latest_local_transcripts_never_break_the_parser() {
         "no transcripts found under ~/.claude/projects"
     );
 
-    let mut totals: BTreeMap<&'static str, usize> = BTreeMap::new();
-    let mut unknown_types: BTreeMap<String, usize> = BTreeMap::new();
+    let mut stats = DriftStats::default();
     let mut typed_failures: Vec<String> = Vec::new();
 
     for path in &transcripts {
         let content = std::fs::read_to_string(path).expect("read transcript");
         for line in content.lines() {
-            match parse_line(line) {
-                ParsedLine::Malformed { error, .. } => {
+            match record(
+                parse_line(line),
+                &["user", "assistant", "result", "stream_event"],
+                &mut stats,
+            ) {
+                Drift::Malformed(error) => {
                     panic!("Malformed line in {}: {error}", path.display())
                 }
-                ParsedLine::Empty => *totals.entry("empty").or_default() += 1,
-                ParsedLine::Message(_) => *totals.entry("message").or_default() += 1,
-                ParsedLine::Control(_) => *totals.entry("control").or_default() += 1,
-                ParsedLine::Unknown { value, error } => {
-                    *totals.entry("unknown").or_default() += 1;
-                    let ty = value
-                        .get("type")
-                        .and_then(|t| t.as_str())
-                        .unwrap_or("<no type>")
-                        .to_string();
-                    // 既知 type がデコード失敗した場合は型 drift の疑い — 明示的に集める
-                    if ["user", "assistant", "result", "stream_event"].contains(&ty.as_str()) {
-                        typed_failures.push(format!("{ty}: {error}"));
-                    }
-                    *unknown_types.entry(ty).or_default() += 1;
+                Drift::TypedDecodeFailure { ty, error } => {
+                    typed_failures.push(format!("{ty}: {error}"));
                 }
+                Drift::None => {}
             }
         }
     }
 
-    println!("corpus: {} files, breakdown: {totals:?}", transcripts.len());
-    println!("unknown type distribution: {unknown_types:?}");
+    println!(
+        "corpus: {} files, breakdown: {:?}",
+        transcripts.len(),
+        stats.totals
+    );
+    println!("unknown type distribution: {:?}", stats.unknown_types);
 
     assert!(
-        totals.get("message").copied().unwrap_or(0) > 0,
+        stats.totals.get("message").copied().unwrap_or(0) > 0,
         "no line parsed as typed Message — parser or transcript format broke entirely"
     );
     assert!(

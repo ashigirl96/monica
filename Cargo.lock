@@ -2861,7 +2861,6 @@ dependencies = [
  "log",
  "monica-domain",
  "serde",
- "serde_json",
  "strum",
  "tokio",
 ]
