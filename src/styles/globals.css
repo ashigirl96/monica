@@ -349,3 +349,11 @@
 .notebook-md .notebook-page > :last-child {
   margin-bottom: 0;
 }
+
+/* Task memo editor. The ProseMirror root carries `notebook-md` so the WYSIWYG output matches
+   the read-only markdown rendering; only editing affordances live here. */
+.memo-editor {
+  outline: none;
+  min-height: 12rem;
+  white-space: pre-wrap;
+}

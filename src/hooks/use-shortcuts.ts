@@ -21,6 +21,7 @@ import {
   togglePlanPreviewAtom,
 } from "@/features/work-bench/store";
 import { forceSyncPullRequestsAtom } from "@/stores/pr-sync";
+import { taskMemoAtom, toggleTaskMemoAtom } from "@/features/task-memo/store";
 import { newTaskOpenAtom, projectFilterOpenAtom, cycleBoardViewAtom } from "@/stores/workboard";
 import { cycleLibraryModeAtom } from "@/stores/library";
 import {
@@ -89,6 +90,9 @@ export function useShortcuts() {
   const planPreview = useAtomValue(planPreviewAtom);
   const setPlanPreview = useSetAtom(planPreviewAtom);
   const forceSyncPullRequests = useSetAtom(forceSyncPullRequestsAtom);
+  const toggleTaskMemo = useSetAtom(toggleTaskMemoAtom);
+  const taskMemo = useAtomValue(taskMemoAtom);
+  const setTaskMemo = useSetAtom(taskMemoAtom);
   const jumpActive = useAtomValue(jumpHintsActiveAtom);
   const setJumpActive = useSetAtom(jumpHintsActiveAtom);
   const jumpToHint = useSetAtom(jumpToHintAtom);
@@ -115,7 +119,10 @@ export function useShortcuts() {
       clearTimeout(timeoutRef.current);
       setPlanPreview(null);
     }
-  }, [activeSpace, setJumpActive, setPlanPreview]);
+    // Close on any space switch so the memo can't linger over another space, and so
+    // the open memo always matches the space it was resolved from (unmount flushes).
+    setTaskMemo(null);
+  }, [activeSpace, setJumpActive, setPlanPreview, setTaskMemo]);
 
   useEffect(() => {
     if (activeSpace !== "work-bench" || !jumpActive) return;
@@ -178,6 +185,14 @@ export function useShortcuts() {
         action: ({ isWorkBench }) => {
           if (!isWorkBench) return false;
           void togglePlanPreview();
+        },
+      },
+      {
+        meta: true,
+        key: "i",
+        editable: true,
+        action: () => {
+          if (!toggleTaskMemo()) return false;
         },
       },
       {
@@ -270,6 +285,10 @@ export function useShortcuts() {
         key: "Escape",
         editable: true,
         action: ({ activeSpace: space, isWorkBench }) => {
+          if (taskMemo) {
+            setTaskMemo(null);
+            return;
+          }
           if (isWorkBench && planPreview) {
             setPlanPreview(null);
             return;
@@ -416,6 +435,9 @@ export function useShortcuts() {
     planPreview,
     setPlanPreview,
     forceSyncPullRequests,
+    toggleTaskMemo,
+    taskMemo,
+    setTaskMemo,
     jumpActive,
     setJumpActive,
     jumpToHint,
