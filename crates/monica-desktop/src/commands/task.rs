@@ -174,6 +174,30 @@ pub async fn primary_tab_id(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn read_task_memo(app: AppHandle, task_id: String) -> Result<String, ApiError> {
+    event_sink::off_main(move || {
+        let mut monica = event_sink::open(&app)?;
+        Ok(monica.tasks().task_memo(&task_id)?)
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn update_task_memo(
+    app: AppHandle,
+    task_id: String,
+    memo: String,
+) -> Result<(), ApiError> {
+    event_sink::off_main(move || {
+        let mut monica = event_sink::open(&app)?;
+        Ok(monica.tasks().update_task_memo(&task_id, &memo)?)
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn close_task(app: AppHandle, task_id: String) -> Result<(), ApiError> {
     event_sink::off_main(move || {
         let mut monica = event_sink::open(&app)?;

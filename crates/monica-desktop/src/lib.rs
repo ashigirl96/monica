@@ -36,6 +36,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::task::prepare_task,
             commands::task::run_task,
             commands::task::close_task,
+            commands::task::read_task_memo,
+            commands::task::update_task_memo,
             commands::task::make_main_task_run,
             commands::task::primary_tab_id,
             commands::notebook::list_notebooks,

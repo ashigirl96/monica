@@ -104,6 +104,7 @@ pub(crate) struct FakeRepos {
 struct FakeState {
     projects: HashMap<String, Project>,
     tasks: HashMap<String, Task>,
+    memos: HashMap<String, String>,
     refs: HashMap<String, Vec<ExternalReference>>,
     runs: HashMap<String, TaskRun>,
     events: Vec<Event>,
@@ -257,6 +258,23 @@ impl TaskStore for FakeRepos {
         self.do_mark_task(id, status, note)
     }
 
+    fn task_memo(&self, id: &str) -> Result<String> {
+        let state = self.state.borrow();
+        if !state.tasks.contains_key(id) {
+            return Err(anyhow!("task not found: {id}"));
+        }
+        Ok(state.memos.get(id).cloned().unwrap_or_default())
+    }
+
+    fn update_task_memo(&self, id: &str, memo: &str) -> Result<()> {
+        let mut state = self.state.borrow_mut();
+        if !state.tasks.contains_key(id) {
+            return Err(anyhow!("task not found: {id}"));
+        }
+        state.memos.insert(id.to_string(), memo.to_string());
+        Ok(())
+    }
+
     fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalReference>> {
         Ok(self
             .state
@@ -291,6 +309,7 @@ impl TaskBoardQuery for FakeRepos {
                     task_run_status: None,
                     task_run_wait_reason: None,
                     has_plan: false,
+                    has_memo: false,
                     status: display,
                     prepare_eligible: display.prepare_eligible(),
                     run_eligible: display.run_eligible(),
@@ -806,6 +825,14 @@ impl TaskStore for FakeUow<'_> {
 
     fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()> {
         self.inner.update_task_status(id, status)
+    }
+
+    fn task_memo(&self, id: &str) -> Result<String> {
+        self.inner.task_memo(id)
+    }
+
+    fn update_task_memo(&self, id: &str, memo: &str) -> Result<()> {
+        self.inner.update_task_memo(id, memo)
     }
 
     fn mark_task(&mut self, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()> {

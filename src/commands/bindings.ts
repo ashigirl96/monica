@@ -82,6 +82,10 @@ export const commands = {
     typedError<RunTaskResult, ApiError>(__TAURI_INVOKE("run_task", { taskId, agent })),
   closeTask: (taskId: string) =>
     typedError<null, ApiError>(__TAURI_INVOKE("close_task", { taskId })),
+  readTaskMemo: (taskId: string) =>
+    typedError<string, ApiError>(__TAURI_INVOKE("read_task_memo", { taskId })),
+  updateTaskMemo: (taskId: string, memo: string) =>
+    typedError<null, ApiError>(__TAURI_INVOKE("update_task_memo", { taskId, memo })),
   /**
    *  Promote the run living in the given Workbench tab to its task's Main Run. Returns whether the
    *  primary actually changed; `false` covers "no run in this tab", "already main" and "primary is
@@ -275,6 +279,7 @@ export type TaskSummaryRow = {
   task_run_status: TaskRunStatus | null;
   task_run_wait_reason: TaskRunWaitReason | null;
   has_plan: boolean;
+  has_memo: boolean;
   status: DisplayStatus;
   prepare_eligible: boolean;
   run_eligible: boolean;

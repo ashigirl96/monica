@@ -18,6 +18,7 @@ pub struct TaskSummaryRow {
     pub task_run_status: Option<TaskRunStatus>,
     pub task_run_wait_reason: Option<TaskRunWaitReason>,
     pub has_plan: bool,
+    pub has_memo: bool,
     pub status: DisplayStatus,
     pub prepare_eligible: bool,
     pub run_eligible: bool,
