@@ -64,9 +64,8 @@ fn make_main_by_terminal_tab_promotes_side_run_and_reports_no_ops() {
         &mut repos,
         HookContext {
             task_id: Some(&task_id),
-            task_run_id: None,
             terminal_tab_id: Some("tab-2"),
-            terminal_session_id: None,
+            ..HookContext::default()
         },
         &started("sess-2", Continuation::Fresh),
     )
@@ -75,9 +74,8 @@ fn make_main_by_terminal_tab_promotes_side_run_and_reports_no_ops() {
         &mut repos,
         HookContext {
             task_id: Some(&task_id),
-            task_run_id: None,
             terminal_tab_id: Some("tab-2"),
-            terminal_session_id: None,
+            ..HookContext::default()
         },
         &started("sess-3", Continuation::Fresh),
     )
@@ -128,9 +126,8 @@ fn make_main_by_terminal_tab_refuses_while_primary_is_mid_prepare() {
         &mut repos,
         HookContext {
             task_id: Some(&task_id),
-            task_run_id: None,
             terminal_tab_id: Some("tab-2"),
-            terminal_session_id: None,
+            ..HookContext::default()
         },
         &started("sess-2", Continuation::Fresh),
     )
@@ -154,9 +151,8 @@ fn primary_terminal_tab_resolves_through_primary_run() {
         &mut repos,
         HookContext {
             task_id: Some(&task_id),
-            task_run_id: None,
             terminal_tab_id: Some("tab-1"),
-            terminal_session_id: None,
+            ..HookContext::default()
         },
         &started("sess-1", Continuation::Fresh),
     )
