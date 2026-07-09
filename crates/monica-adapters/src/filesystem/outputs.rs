@@ -352,8 +352,10 @@ fn write_agent_wrapper(bin_dir: &Path, name: &str, contents: &str) -> Result<()>
         .with_context(|| format!("failed to create {}", bin_dir.display()))?;
     let wrapper_path = bin_dir.join(name);
     write_if_changed(&wrapper_path, contents)?;
-    fs::set_permissions(&wrapper_path, fs::Permissions::from_mode(0o755))
-        .with_context(|| format!("failed to chmod {}", wrapper_path.display()))?;
+    if !is_executable_file(&wrapper_path) {
+        fs::set_permissions(&wrapper_path, fs::Permissions::from_mode(0o755))
+            .with_context(|| format!("failed to chmod {}", wrapper_path.display()))?;
+    }
     Ok(())
 }
 

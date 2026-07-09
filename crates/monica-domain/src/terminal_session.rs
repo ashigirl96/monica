@@ -116,6 +116,9 @@ pub struct TerminalSession {
     pub status: TerminalSessionStatus,
     pub agent_status: Option<AgentSessionStatus>,
     pub agent_wait_reason: Option<TaskRunWaitReason>,
+    /// The Claude Code `--session-id` most recently observed via hooks. Set on every non-Inert
+    /// signal; cleared on SessionEnd.
+    pub provider_session_id: Option<String>,
     pub pid: Option<u32>,
     pub rows: u16,
     pub cols: u16,

@@ -82,4 +82,8 @@ impl monica_application::NotificationOutboxStore for SqliteStore {
     fn cancel_notifications_for_run(&self, task_run_id: &str) -> Result<()> {
         store::notification_outbox::cancel_notifications_for_run_in(self.conn(), task_run_id)
     }
+
+    fn cancel_notification_by_dedupe_key(&self, dedupe_key: &str) -> Result<()> {
+        store::notification_outbox::cancel_notification_by_dedupe_key_in(self.conn(), dedupe_key)
+    }
 }

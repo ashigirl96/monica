@@ -723,6 +723,10 @@ impl NotificationOutboxStore for FakeRepos {
     fn cancel_notifications_for_run(&self, _task_run_id: &str) -> Result<()> {
         Ok(())
     }
+
+    fn cancel_notification_by_dedupe_key(&self, _dedupe_key: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
 impl FakeRepos {
@@ -1383,6 +1387,7 @@ impl TerminalSessionRepository for FakeRepos {
             status: TerminalSessionStatus::Starting,
             agent_status: None,
             agent_wait_reason: None,
+            provider_session_id: None,
             pid: None,
             rows: new.rows,
             cols: new.cols,
@@ -1424,12 +1429,16 @@ impl TerminalSessionRepository for FakeRepos {
         id: &str,
         agent_status: Option<AgentSessionStatus>,
         agent_wait_reason: Option<TaskRunWaitReason>,
-    ) -> Result<()> {
+        provider_session_id: Option<&str>,
+    ) -> Result<bool> {
         if let Some(s) = self.state.borrow_mut().terminal_sessions.iter_mut().find(|s| s.id == id) {
+            let changed = s.agent_status != agent_status || s.agent_wait_reason != agent_wait_reason;
             s.agent_status = agent_status;
             s.agent_wait_reason = agent_wait_reason;
+            s.provider_session_id = provider_session_id.map(str::to_string);
+            return Ok(changed);
         }
-        Ok(())
+        Ok(false)
     }
 
     fn get_terminal_session(&self, id: &str) -> Result<Option<TerminalSession>> {
@@ -1657,6 +1666,7 @@ pub(crate) fn fake_session(id: &str, tab: Option<&str>, status: TerminalSessionS
         status,
         agent_status: None,
         agent_wait_reason: None,
+        provider_session_id: None,
         pid: None,
         rows: 24,
         cols: 80,

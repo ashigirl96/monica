@@ -625,6 +625,7 @@ export type SessionStatusEntry = {
   exitCode?: number | null;
   agentStatus?: AgentSessionStatus | null;
   agentWaitReason?: TaskRunWaitReason | null;
+  providerSessionId?: string | null;
 };
 
 // sessionId → last known status. Seeded by the startup reconcile, kept fresh by the
@@ -652,6 +653,7 @@ function applySessionList(get: Getter, set: Setter, sessions: TerminalSession[])
       exitCode: s.exit_code,
       agentStatus: s.agent_status,
       agentWaitReason: s.agent_wait_reason,
+      providerSessionId: s.provider_session_id,
     };
   }
   set(sessionStatusAtom, statusMap);

@@ -3,6 +3,15 @@ use monica_domain::TaskRunWaitReason;
 pub const TITLE: &str = "Monica";
 const MAX_TITLE_CHARS: usize = 40;
 
+pub fn awaiting_user_input_dedupe_key(
+    run_id: Option<&str>,
+    session_id: Option<&str>,
+) -> Option<String> {
+    run_id
+        .map(|id| format!("awaiting_user_input:{id}"))
+        .or_else(|| session_id.map(|id| format!("awaiting_user_input:session:{id}")))
+}
+
 pub fn waiting_notification(
     wait_reason: Option<TaskRunWaitReason>,
     task_title: Option<&str>,

@@ -805,6 +805,7 @@ fn record_claude_hook_tracks_agent_status_on_session_without_task() {
     let s = repos.get_terminal_session(&session.id).unwrap().unwrap();
     assert_eq!(s.agent_status, Some(AgentSessionStatus::Running));
     assert_eq!(s.agent_wait_reason, None);
+    assert_eq!(s.provider_session_id.as_deref(), Some("sess-1"));
 
     record_claude_hook(
         &mut repos,
@@ -815,6 +816,7 @@ fn record_claude_hook_tracks_agent_status_on_session_without_task() {
     let s = repos.get_terminal_session(&session.id).unwrap().unwrap();
     assert_eq!(s.agent_status, Some(AgentSessionStatus::WaitingForUser));
     assert_eq!(s.agent_wait_reason, Some(TaskRunWaitReason::ExitPlanMode));
+    assert_eq!(s.provider_session_id.as_deref(), Some("sess-1"));
 
     record_claude_hook(&mut repos, ctx, &turn_completed("sess-1", false)).unwrap();
     let s = repos.get_terminal_session(&session.id).unwrap().unwrap();
@@ -825,6 +827,7 @@ fn record_claude_hook_tracks_agent_status_on_session_without_task() {
     let s = repos.get_terminal_session(&session.id).unwrap().unwrap();
     assert_eq!(s.agent_status, None);
     assert_eq!(s.agent_wait_reason, None);
+    assert_eq!(s.provider_session_id, None);
 }
 
 #[test]

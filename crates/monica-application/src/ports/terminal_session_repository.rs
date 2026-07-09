@@ -25,14 +25,16 @@ pub trait TerminalSessionRepository {
         exit_code: Option<i32>,
     ) -> Result<()>;
 
-    /// Update the hook-observed agent state driving the per-tab indicator. `None` clears it. A
-    /// missing session row is a silent no-op — an indicator update must never fail the hook.
+    /// Update the hook-observed agent state driving the per-tab indicator. `None` clears it.
+    /// Returns `true` when the stored state actually changed (the UPDATE matched a row whose
+    /// previous values differ). A missing session row is a silent no-op (`false`).
     fn set_terminal_session_agent_status(
         &self,
         id: &str,
         agent_status: Option<AgentSessionStatus>,
         agent_wait_reason: Option<TaskRunWaitReason>,
-    ) -> Result<()>;
+        provider_session_id: Option<&str>,
+    ) -> Result<bool>;
 
     fn get_terminal_session(&self, id: &str) -> Result<Option<TerminalSession>>;
 

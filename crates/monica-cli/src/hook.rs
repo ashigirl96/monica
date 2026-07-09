@@ -96,7 +96,7 @@ fn handle_agent(agent: Agent, log_file: &str) -> Result<()> {
         report.task_run_linked,
         report.task_run_created,
         report.task_run_status,
-        report.task_run_wait_reason,
+        report.wait_reason,
         report.entered_waiting_for_user,
     ));
 

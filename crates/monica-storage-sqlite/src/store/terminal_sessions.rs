@@ -12,7 +12,7 @@ use crate::SqliteStore;
 
 use super::SET_NOW;
 
-const SESSION_COLUMNS: &str = "id, runspace_id, tab_id, kind, cwd, shell, status, agent_status, agent_wait_reason,      pid, rows, cols, transcript_path, exit_code, started_at, last_seen_at, exited_at,      created_at, updated_at";
+const SESSION_COLUMNS: &str = "id, runspace_id, tab_id, kind, cwd, shell, status, agent_status, agent_wait_reason,      provider_session_id, pid, rows, cols, transcript_path, exit_code, started_at, last_seen_at,      exited_at, created_at, updated_at";
 
 fn session_from_row(row: &Row<'_>) -> Result<TerminalSession> {
     let kind: String = row.get("kind")?;
@@ -29,6 +29,7 @@ fn session_from_row(row: &Row<'_>) -> Result<TerminalSession> {
         status: status.parse::<TerminalSessionStatus>()?,
         agent_status: agent_status.map(|s| s.parse()).transpose()?,
         agent_wait_reason: agent_wait_reason.map(|s| s.parse()).transpose()?,
+        provider_session_id: row.get("provider_session_id")?,
         pid: row.get("pid")?,
         rows: row.get("rows")?,
         cols: row.get("cols")?,
@@ -126,21 +127,24 @@ impl SqliteStore {
         id: &str,
         agent_status: Option<AgentSessionStatus>,
         agent_wait_reason: Option<TaskRunWaitReason>,
-    ) -> Result<()> {
-        self.conn().execute(
+        provider_session_id: Option<&str>,
+    ) -> Result<bool> {
+        let affected = self.conn().execute(
             &format!(
                 "UPDATE terminal_sessions
-                    SET agent_status = ?2, agent_wait_reason = ?3, updated_at = {SET_NOW}
+                    SET agent_status = ?2, agent_wait_reason = ?3,
+                        provider_session_id = ?4, updated_at = {SET_NOW}
                   WHERE id = ?1
                     AND (agent_status IS NOT ?2 OR agent_wait_reason IS NOT ?3)"
             ),
             params![
                 id,
                 agent_status.map(AgentSessionStatus::as_str),
-                agent_wait_reason.map(TaskRunWaitReason::as_str)
+                agent_wait_reason.map(TaskRunWaitReason::as_str),
+                provider_session_id,
             ],
         )?;
-        Ok(())
+        Ok(affected > 0)
     }
 
     /// Record a successful daemon spawn: starting → running with the live pid.
@@ -197,6 +201,7 @@ impl SqliteStore {
                             exit_code = COALESCE(?4, exit_code),
                             agent_status = CASE WHEN ?6 THEN NULL ELSE agent_status END,
                             agent_wait_reason = CASE WHEN ?6 THEN NULL ELSE agent_wait_reason END,
+                            provider_session_id = CASE WHEN ?6 THEN NULL ELSE provider_session_id END,
                             last_seen_at = CASE WHEN ?5 THEN {SET_NOW} ELSE last_seen_at END,
                             exited_at = CASE
                                 WHEN ?6 AND exited_at IS NULL THEN {SET_NOW}
@@ -253,8 +258,15 @@ impl TerminalSessionRepository for SqliteStore {
         id: &str,
         agent_status: Option<AgentSessionStatus>,
         agent_wait_reason: Option<TaskRunWaitReason>,
-    ) -> Result<()> {
-        SqliteStore::set_terminal_session_agent_status(self, id, agent_status, agent_wait_reason)
+        provider_session_id: Option<&str>,
+    ) -> Result<bool> {
+        SqliteStore::set_terminal_session_agent_status(
+            self,
+            id,
+            agent_status,
+            agent_wait_reason,
+            provider_session_id,
+        )
     }
 
     fn get_terminal_session(&self, id: &str) -> Result<Option<TerminalSession>> {

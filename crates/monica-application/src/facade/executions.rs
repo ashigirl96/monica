@@ -102,26 +102,34 @@ impl<B: Backend> ExecutionService<'_, B> {
             events.emit(ApplicationEvent::AwaitingUserInput {
                 task_id: report.linked_task_id.clone(),
                 task_run_id: report.linked_task_run_id.clone(),
-                reason: report.task_run_wait_reason,
+                reason: report.wait_reason,
                 task_title: report.task_title.clone(),
             });
-            if let Some(ref run_id) = report.linked_task_run_id {
+            if let Some(dedupe_key) = crate::notification::awaiting_user_input_dedupe_key(
+                report.linked_task_run_id.as_deref(),
+                report.terminal_session_id.as_deref(),
+            ) {
                 let body = crate::notification::waiting_notification(
-                    report.task_run_wait_reason,
+                    report.wait_reason,
                     report.task_title.as_deref(),
                 );
                 let intent = NewNotificationIntent {
-                    dedupe_key: format!("awaiting_user_input:{run_id}"),
+                    dedupe_key,
                     kind: NotificationKind::AwaitingUserInput,
                     title: crate::notification::TITLE.to_string(),
                     body,
                     task_id: report.linked_task_id.clone(),
-                    task_run_id: Some(run_id.clone()),
+                    task_run_id: report.linked_task_run_id.clone(),
                 };
                 if let Err(e) = repos.enqueue_notification(intent) {
                     log::warn!(target: "monica_app::notify", "failed to enqueue notification: {e}");
                 }
             }
+        } else if let Some(key) = crate::notification::awaiting_user_input_dedupe_key(
+            None,
+            report.terminal_session_id.as_deref(),
+        ) {
+            let _ = repos.cancel_notification_by_dedupe_key(&key);
         }
         Ok(report)
     }

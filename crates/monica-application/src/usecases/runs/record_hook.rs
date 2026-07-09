@@ -4,7 +4,7 @@ use super::ports::{Clock, EventRepository, TaskRunStore, TaskStore};
 use crate::ports::{TerminalSessionRepository, UnitOfWork};
 use crate::prelude::{is_safe_task_run_id, Agent, AgentSignal, SignalKind, Task};
 use crate::prelude::{NewTaskRun, TaskId, TaskRun, TaskRunStatus, TaskRunWaitReason, TaskStatus};
-use monica_domain::AgentSessionEffect;
+use monica_domain::{AgentSessionEffect, AgentSessionStatus};
 use crate::TaskRunObservation;
 
 /// Identity carried by a hook invocation via `MONICA_*` env vars. `task_run_id` is only present
@@ -22,16 +22,17 @@ pub struct HookContext<'a> {
 pub struct HookReport {
     pub event_name: Option<String>,
     pub task_run_status: Option<TaskRunStatus>,
-    pub task_run_wait_reason: Option<TaskRunWaitReason>,
-    /// This hook is the one that moved the run into `WaitingForUser`. Distinct from
-    /// `task_run_status == Some(WaitingForUser)`, which a later event re-affirms while the run is
-    /// already waiting; only the entering edge should fire a notification.
+    /// An agent entered `WaitingForUser` — either the TaskRun entering edge (task tabs) or the
+    /// session-level agent_status transition (any tab). Only the entering edge fires.
     pub entered_waiting_for_user: bool,
+    /// The wait reason for the entering edge (from TaskRun or session, whichever fired).
+    pub wait_reason: Option<TaskRunWaitReason>,
     /// The run's task title, carried only on the entering edge so a notification need not reach
     /// back into the DB for what core already resolved.
     pub task_title: Option<String>,
     pub linked_task_run_id: Option<String>,
     pub linked_task_id: Option<String>,
+    pub terminal_session_id: Option<String>,
     pub ignored: bool,
     pub task_found: bool,
     pub task_run_linked: bool,
@@ -45,11 +46,12 @@ impl HookReport {
         HookReport {
             event_name: None,
             task_run_status: None,
-            task_run_wait_reason: None,
             entered_waiting_for_user: false,
+            wait_reason: None,
             task_title: None,
             linked_task_run_id: None,
             linked_task_id: None,
+            terminal_session_id: None,
             ignored: true,
             task_found: false,
             task_run_linked: false,
@@ -83,20 +85,33 @@ where
     };
 
     // The per-tab indicator updates for any Monica shell, task-linked or not.
+    // `session_entered_waiting` detects the entering edge so notifications can fire for all tabs.
+    let mut session_entered_waiting = false;
+    let mut session_wait_reason: Option<TaskRunWaitReason> = None;
+    let provider_session_id = signal.session_id.as_deref();
+
     if let Some(session_id) = ctx.terminal_session_id {
         match signal.kind.agent_session_effect() {
             AgentSessionEffect::Keep => {}
             AgentSessionEffect::Clear => {
-                repos.set_terminal_session_agent_status(session_id, None, None)?;
+                repos.set_terminal_session_agent_status(session_id, None, None, None)?;
             }
             AgentSessionEffect::Set(status, reason) => {
-                repos.set_terminal_session_agent_status(session_id, Some(status), reason)?;
+                let changed = repos.set_terminal_session_agent_status(
+                    session_id,
+                    Some(status),
+                    reason,
+                    provider_session_id,
+                )?;
+                if changed && status == AgentSessionStatus::WaitingForUser {
+                    session_entered_waiting = true;
+                    session_wait_reason = reason;
+                }
             }
         }
     }
 
     let event_label = signal.event_label.as_deref();
-    let provider_session_id = signal.session_id.as_deref();
 
     let resolved = resolve_hook_run(
         repos,
@@ -192,16 +207,18 @@ where
             }),
         _ => None,
     };
-    let (task_run_status, task_run_wait_reason) = match landed {
-        Some(run) => (Some(run.status), run.wait_reason),
-        None => (None, None),
-    };
-
-    let entered_waiting_for_user = task_run_status == Some(TaskRunStatus::WaitingForUser)
+    let task_run_status = landed.as_ref().map(|run| run.status);
+    let task_run_entered_waiting = task_run_status == Some(TaskRunStatus::WaitingForUser)
         && !run_row
             .as_ref()
             .is_some_and(|run| run.status == TaskRunStatus::WaitingForUser);
-    let task_title = match linked_task_id.filter(|_| entered_waiting_for_user) {
+    let entered_waiting_for_user = task_run_entered_waiting || session_entered_waiting;
+    let wait_reason = if task_run_entered_waiting {
+        landed.as_ref().and_then(|run| run.wait_reason)
+    } else {
+        session_wait_reason
+    };
+    let task_title = match linked_task_id.filter(|_| task_run_entered_waiting) {
         Some(id) => repos.get_task(id)?.map(|task| task.title),
         None => None,
     };
@@ -209,11 +226,12 @@ where
     Ok(HookReport {
         event_name: signal.event_label.clone(),
         task_run_status,
-        task_run_wait_reason,
         entered_waiting_for_user,
+        wait_reason,
         task_title,
         linked_task_run_id: linked_task_run_id.map(str::to_string),
         linked_task_id: linked_task_id.map(str::to_string),
+        terminal_session_id: ctx.terminal_session_id.map(str::to_string),
         ignored: false,
         task_found,
         task_run_linked,

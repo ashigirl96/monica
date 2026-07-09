@@ -310,6 +310,7 @@ export type TerminalSession = {
   status: TerminalSessionStatus;
   agent_status: AgentSessionStatus | null;
   agent_wait_reason: TaskRunWaitReason | null;
+  provider_session_id: string | null;
   pid: number | null;
   rows: number;
   cols: number;
