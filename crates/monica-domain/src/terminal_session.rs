@@ -1,5 +1,42 @@
 use serde::{Deserialize, Serialize};
 
+use crate::status::TaskRunWaitReason;
+
+/// Hook-observed state of the agent running inside a session. Powers the per-tab indicator, so it
+/// is deliberately coarser than the TaskRun state machine: no pending-stop guard, no session
+/// claiming. Absent on the session row = no agent has reported (or its session ended).
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum AgentSessionStatus {
+    Running,
+    WaitingForUser,
+}
+
+impl AgentSessionStatus {
+    pub fn as_str(self) -> &'static str {
+        self.into()
+    }
+}
+
+/// Effect of a hook signal on the session-level agent indicator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentSessionEffect {
+    Keep,
+    Clear,
+    Set(AgentSessionStatus, Option<TaskRunWaitReason>),
+}
+
 #[derive(
     Debug,
     Clone,
@@ -77,6 +114,11 @@ pub struct TerminalSession {
     pub cwd: String,
     pub shell: String,
     pub status: TerminalSessionStatus,
+    pub agent_status: Option<AgentSessionStatus>,
+    pub agent_wait_reason: Option<TaskRunWaitReason>,
+    /// The Claude Code `--session-id` most recently observed via hooks. Set on every non-Inert
+    /// signal; cleared on SessionEnd.
+    pub provider_session_id: Option<String>,
     pub pid: Option<u32>,
     pub rows: u16,
     pub cols: u16,

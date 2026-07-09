@@ -17,8 +17,7 @@ fn facade_ingest_agent_hook_decodes_records_and_emits() {
     // The façade owns the decode: raw bytes in, the configured signal lands a transition, and the
     // entering edge into WaitingForUser emits AwaitingUserInput — all behind Monica.
     let mut repos = FakeRepos::default();
-    let outputs = FakeTaskRunOutputs::default();
-    let (task_id, run_id) = task_with_running_primary(&mut repos, &outputs);
+    let (task_id, run_id) = task_with_running_primary(&mut repos);
     let sink = RecordingSink::default();
     let decoder =
         TestAgentDecoders::with_signal(input_required(Some("sess"), TaskRunWaitReason::AskUserQuestion));

@@ -85,10 +85,6 @@ impl TaskRunStore for SqliteUow<'_> {
         task_runs::finish_task_run_in(&self.tx, task_run_id, task_id, status)
     }
 
-    fn set_task_run_settings_path(&self, task_run_id: &str, settings_path: &str) -> Result<()> {
-        task_runs::set_task_run_settings_path(&self.tx, task_run_id, settings_path)
-    }
-
     fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()> {
         task_runs::set_task_run_worktree_path(&self.tx, task_run_id, worktree_path)
     }

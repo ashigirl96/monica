@@ -23,6 +23,8 @@ pub enum Agent {
 }
 
 impl Agent {
+    pub const ALL: [Agent; 2] = [Agent::Claude, Agent::Codex];
+
     pub fn as_str(self) -> &'static str {
         self.into()
     }
@@ -38,7 +40,6 @@ pub struct TaskRun {
     pub worktree_path: Option<String>,
     pub status: TaskRunStatus,
     pub wait_reason: Option<TaskRunWaitReason>,
-    pub settings_path: Option<String>,
     pub provider_session_id: Option<String>,
     pub terminal_tab_id: Option<String>,
     pub last_event_name: Option<String>,

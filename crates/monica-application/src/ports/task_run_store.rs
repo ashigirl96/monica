@@ -11,7 +11,6 @@ pub trait TaskRunStore {
         task_id: &str,
         status: TaskRunStatus,
     ) -> Result<()>;
-    fn set_task_run_settings_path(&self, task_run_id: &str, settings_path: &str) -> Result<()>;
     fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()>;
     fn get_task_run(&self, id: &str) -> Result<Option<TaskRun>>;
     fn find_task_run_by_session(

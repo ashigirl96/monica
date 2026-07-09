@@ -6,11 +6,18 @@ import {
   terminalLoadState,
   terminalSaveState,
   terminalTerminate,
+  type AgentSessionStatus,
   type TerminalSession,
   type TerminalSessionStatus,
   type TerminalStateSnapshot,
 } from "@/commands/terminal";
-import { listBenchRunspaceMap, makeMainTaskRun, primaryTabId, taskShellEnv } from "@/commands/task";
+import {
+  listBenchRunspaceMap,
+  makeMainTaskRun,
+  primaryTabId,
+  taskShellEnv,
+  type TaskRunWaitReason,
+} from "@/commands/task";
 import { readRunspacePlan, type PlanPreview } from "@/commands/plan";
 import { worktreeInfo, type WorktreeInfo } from "@/commands/git";
 import { releaseTabConnection } from "@/features/work-bench/terminal-connections";
@@ -616,6 +623,9 @@ function snapshotToState(snap: TerminalStateSnapshot): TerminalState | null {
 export type SessionStatusEntry = {
   status: TerminalSessionStatus;
   exitCode?: number | null;
+  agentStatus?: AgentSessionStatus | null;
+  agentWaitReason?: TaskRunWaitReason | null;
+  providerSessionId?: string | null;
 };
 
 // sessionId → last known status. Seeded by the startup reconcile, kept fresh by the
@@ -638,7 +648,13 @@ export const detachedSessionsAtom = atom<TerminalSession[]>([]);
 function applySessionList(get: Getter, set: Setter, sessions: TerminalSession[]) {
   const statusMap: Record<string, SessionStatusEntry> = {};
   for (const s of sessions) {
-    statusMap[s.id] = { status: s.status, exitCode: s.exit_code };
+    statusMap[s.id] = {
+      status: s.status,
+      exitCode: s.exit_code,
+      agentStatus: s.agent_status,
+      agentWaitReason: s.agent_wait_reason,
+      providerSessionId: s.provider_session_id,
+    };
   }
   set(sessionStatusAtom, statusMap);
 

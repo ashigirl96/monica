@@ -125,6 +125,9 @@ export const events = {
 /* Types */
 export type Agent = "claude" | "codex";
 
+/**  Hook-observed state of the agent running inside a session; drives the per-tab indicator. */
+export type AgentSessionStatus = "running" | "waiting_for_user";
+
 /**
  *  The error half of every Tauri command result. Replaces the previous `Result<T, String>` so the
  *  frontend receives a structured `{ code, message }` instead of an opaque string.
@@ -305,6 +308,9 @@ export type TerminalSession = {
   cwd: string;
   shell: string;
   status: TerminalSessionStatus;
+  agent_status: AgentSessionStatus | null;
+  agent_wait_reason: TaskRunWaitReason | null;
+  provider_session_id: string | null;
   pid: number | null;
   rows: number;
   cols: number;

@@ -1,5 +1,24 @@
 use serde::{Deserialize, Serialize};
 
+use crate::status::TaskRunWaitReason;
+
+/// Hook-observed state of the agent running inside a session; drives the per-tab indicator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentSessionStatus {
+    Running,
+    WaitingForUser,
+}
+
+impl From<monica_domain::AgentSessionStatus> for AgentSessionStatus {
+    fn from(value: monica_domain::AgentSessionStatus) -> Self {
+        match value {
+            monica_domain::AgentSessionStatus::Running => Self::Running,
+            monica_domain::AgentSessionStatus::WaitingForUser => Self::WaitingForUser,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum TerminalSessionStatus {
@@ -70,6 +89,9 @@ pub struct TerminalSession {
     pub cwd: String,
     pub shell: String,
     pub status: TerminalSessionStatus,
+    pub agent_status: Option<AgentSessionStatus>,
+    pub agent_wait_reason: Option<TaskRunWaitReason>,
+    pub provider_session_id: Option<String>,
     pub pid: Option<u32>,
     pub rows: u16,
     pub cols: u16,
@@ -93,6 +115,9 @@ impl From<monica_domain::TerminalSession> for TerminalSession {
             cwd: value.cwd,
             shell: value.shell,
             status: value.status.into(),
+            agent_status: value.agent_status.map(Into::into),
+            agent_wait_reason: value.agent_wait_reason.map(Into::into),
+            provider_session_id: value.provider_session_id,
             pid: value.pid,
             rows: value.rows,
             cols: value.cols,

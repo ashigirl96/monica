@@ -62,15 +62,16 @@ fn handle_agent(agent: Agent, log_file: &str) -> Result<()> {
     let task_id = env_opt("MONICA_TASK_ID");
     let task_run_id = env_opt("MONICA_TASK_RUN_ID");
     let terminal_tab_id = env_opt("MONICA_TERMINAL_TAB_ID");
+    let terminal_session_id = env_opt("MONICA_TERMINAL_SESSION_ID");
 
     debug_log_to(log_file, &format!(
-        "invoked task_id={task_id:?} task_run_id={task_run_id:?} tab_id={terminal_tab_id:?} monica_home={:?} cwd={:?} stdin_bytes={}",
+        "invoked task_id={task_id:?} task_run_id={task_run_id:?} tab_id={terminal_tab_id:?} session_id={terminal_session_id:?} monica_home={:?} cwd={:?} stdin_bytes={}",
         env_opt("MONICA_HOME"),
         std::env::current_dir().ok(),
         raw.len(),
     ));
 
-    if task_id.is_none() && task_run_id.is_none() {
+    if task_id.is_none() && task_run_id.is_none() && terminal_session_id.is_none() {
         return Ok(());
     }
 
@@ -81,22 +82,22 @@ fn handle_agent(agent: Agent, log_file: &str) -> Result<()> {
             task_id: task_id.as_deref(),
             task_run_id: task_run_id.as_deref(),
             terminal_tab_id: terminal_tab_id.as_deref(),
+            terminal_session_id: terminal_session_id.as_deref(),
         },
         &raw,
     )?;
 
     let event_name = report.event_name.clone();
     debug_log_to(log_file, &format!(
-        "event={:?} ignored={} task_found={} run_linked={} run_created={} status={:?} wait_reason={:?} entered_waiting={} jsonl={}",
+        "event={:?} ignored={} task_found={} run_linked={} run_created={} status={:?} wait_reason={:?} entered_waiting={}",
         event_name,
         report.ignored,
         report.task_found,
         report.task_run_linked,
         report.task_run_created,
         report.task_run_status,
-        report.task_run_wait_reason,
+        report.wait_reason,
         report.entered_waiting_for_user,
-        report.jsonl_written,
     ));
 
     if let Some(id) = &task_id {
@@ -106,7 +107,7 @@ fn handle_agent(agent: Agent, log_file: &str) -> Result<()> {
     }
     if report.unsafe_task_run_id {
         eprintln!(
-            "monica hook {}: MONICA_TASK_RUN_ID is not a safe task run id; skipped hook-events.jsonl",
+            "monica hook {}: MONICA_TASK_RUN_ID is not a safe task run id; ignored",
             agent.as_str()
         );
     }

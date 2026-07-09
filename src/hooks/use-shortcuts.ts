@@ -1,10 +1,11 @@
-import { useAtomValue, useSetAtom } from "jotai";
+import { getDefaultStore, useAtomValue, useSetAtom } from "jotai";
 import { useEffect, useRef } from "react";
 import { activeSpaceAtom, sidebarOpenAtom } from "@/stores/space";
 import type { SpaceId } from "@/stores/space";
 import { spaces } from "@/spaces/registry";
 import { createTabAtom, closeTabAtom, cycleTabAtom } from "@/stores/tabs";
 import {
+  activeTerminalTabAtom,
   createRunspaceAtom,
   createTerminalTabAtom,
   cycleTerminalTabAtom,
@@ -15,6 +16,7 @@ import {
   moveActiveRunspaceAtom,
   planPreviewAtom,
   promoteActiveTabRunAtom,
+  sessionStatusAtom,
   toggleLastRunspaceAtom,
   togglePlanPreviewAtom,
 } from "@/features/work-bench/store";
@@ -32,6 +34,7 @@ import {
 import { setUiZoomAtom } from "@/stores/zoom";
 import { isEditable } from "@/lib/keyboard";
 import { handleJumpMode, type JumpModeActions } from "@/lib/jump-mode";
+import { pushInfoToast } from "@/stores/toast";
 
 const META_KEY_SPACE_MAP = Object.fromEntries(spaces.map((s, i) => [String(i + 1), s.id]));
 
@@ -149,6 +152,23 @@ export function useShortcuts() {
         editable: true,
         action: ({ isWorkBench }) => {
           if (isWorkBench) void promoteActiveTabRun();
+        },
+      },
+      {
+        meta: true,
+        alt: true,
+        code: "KeyC",
+        editable: true,
+        action: ({ isWorkBench }) => {
+          if (!isWorkBench) return false;
+          const store = getDefaultStore();
+          const sessionId = store.get(activeTerminalTabAtom)?.sessionId;
+          if (!sessionId) return false;
+          const id = store.get(sessionStatusAtom)[sessionId]?.providerSessionId;
+          if (!id) return false;
+          void navigator.clipboard.writeText(id).then(() => {
+            pushInfoToast(`Session ID copied: ${id.slice(0, 8)}…`);
+          });
         },
       },
       {

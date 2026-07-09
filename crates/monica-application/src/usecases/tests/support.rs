@@ -18,6 +18,7 @@ use crate::prelude::{
     NewNotificationIntent, NewTask, NewTaskRun, NewTerminalSession, NotebookDoc,
     NotificationIntent, Project, Provider, RefType, SignalKind, Task, TaskId, TaskKind, TaskRun,
     TaskRunId, TaskRunStatus, TaskRunWaitReason, TaskStatus, TerminalSession,
+    AgentSessionStatus,
     TerminalSessionKind, TerminalSessionStatus,
 };
 use crate::{
@@ -83,17 +84,15 @@ pub(crate) fn inert_event(session: &str, label: &str) -> AgentSignal {
 }
 
 /// Thin shim mirroring the production boundary: a decoded Claude signal handed to `record_hook`.
-pub(crate) fn record_claude_hook<R, A>(
+pub(crate) fn record_claude_hook<R>(
     repos: &mut R,
-    outputs: &A,
     ctx: HookContext<'_>,
     signal: &AgentSignal,
 ) -> Result<crate::HookReport>
 where
-    R: TaskStore + TaskRunStore + EventRepository + Clock + UnitOfWork,
-    A: TaskRunOutputs,
+    R: TaskStore + TaskRunStore + EventRepository + Clock + UnitOfWork + TerminalSessionRepository,
 {
-    record_hook(repos, outputs, ctx, Agent::Claude, Some(signal), "{}")
+    record_hook(repos, ctx, Agent::Claude, Some(signal), "{}")
 }
 
 #[derive(Default)]
@@ -433,7 +432,6 @@ impl FakeRepos {
             worktree_path: new.worktree_path,
             status: TaskRunStatus::SettingUp,
             wait_reason: None,
-            settings_path: None,
             provider_session_id: None,
             terminal_tab_id: None,
             last_event_name: None,
@@ -543,16 +541,6 @@ impl TaskRunStore for FakeRepos {
         status: TaskRunStatus,
     ) -> Result<()> {
         self.do_finish_task_run(task_run_id, task_id, status)
-    }
-
-    fn set_task_run_settings_path(&self, task_run_id: &str, settings_path: &str) -> Result<()> {
-        self.state
-            .borrow_mut()
-            .runs
-            .get_mut(task_run_id)
-            .ok_or_else(|| anyhow!("task run not found: {task_run_id}"))?
-            .settings_path = Some(settings_path.to_string());
-        Ok(())
     }
 
     fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()> {
@@ -735,6 +723,10 @@ impl NotificationOutboxStore for FakeRepos {
     fn cancel_notifications_for_run(&self, _task_run_id: &str) -> Result<()> {
         Ok(())
     }
+
+    fn cancel_notification_by_dedupe_key(&self, _dedupe_key: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
 impl FakeRepos {
@@ -837,10 +829,6 @@ impl TaskRunStore for FakeUow<'_> {
         status: TaskRunStatus,
     ) -> Result<()> {
         self.inner.do_finish_task_run(task_run_id, task_id, status)
-    }
-
-    fn set_task_run_settings_path(&self, task_run_id: &str, settings_path: &str) -> Result<()> {
-        self.inner.set_task_run_settings_path(task_run_id, settings_path)
     }
 
     fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()> {
@@ -1102,17 +1090,18 @@ impl GitGateway for FakeGit {
 
 #[derive(Default)]
 pub(crate) struct FakeTaskRunOutputs {
-    appended: RefCell<bool>,
     last_cwd: RefCell<Option<String>>,
 }
 
 impl FakeTaskRunOutputs {
-    pub(crate) fn hook_event_appended(&self) -> bool {
-        *self.appended.borrow()
-    }
-
     pub(crate) fn last_cwd(&self) -> Option<String> {
         self.last_cwd.borrow().clone()
+    }
+}
+
+impl crate::ports::ShellScaffolding for FakeTaskRunOutputs {
+    fn prepare_base_shell_env(&self, _cwd: &std::path::Path) -> Result<Vec<(String, String)>> {
+        Ok(Vec::new())
     }
 }
 
@@ -1132,27 +1121,12 @@ impl TaskRunOutputs for FakeTaskRunOutputs {
         _profile: &crate::ExecutionProfile,
         _task_run_id: Option<&str>,
         cwd: &std::path::Path,
-    ) -> Result<crate::TaskShellEnv> {
+    ) -> Result<Vec<(String, String)>> {
         *self.last_cwd.borrow_mut() = Some(cwd.to_string_lossy().into_owned());
-        Ok(crate::TaskShellEnv {
-            env: vec![
-                ("MONICA_TASK_ID".to_string(), task_id.to_string()),
-                ("MONICA_CWD".to_string(), cwd.to_string_lossy().into_owned()),
-            ],
-            settings_path: format!("/tmp/tasks/{task_id}/claude-settings.json"),
-            wrapper_path: format!("/tmp/tasks/{task_id}/bin/claude"),
-        })
-    }
-
-    fn append_hook_event(
-        &self,
-        _task_run_id: &str,
-        _at: &str,
-        _event_label: Option<&str>,
-        _raw_stdin: &str,
-    ) -> Result<()> {
-        *self.appended.borrow_mut() = true;
-        Ok(())
+        Ok(vec![
+            ("MONICA_TASK_ID".to_string(), task_id.to_string()),
+            ("MONICA_CWD".to_string(), cwd.to_string_lossy().into_owned()),
+        ])
     }
 }
 
@@ -1219,7 +1193,7 @@ pub(crate) fn hook_ctx<'a>(task_id: &'a str, task_run_id: Option<&'a str>) -> Ho
     HookContext {
         task_id: Some(task_id),
         task_run_id,
-        terminal_tab_id: None,
+        ..HookContext::default()
     }
 }
 
@@ -1232,6 +1206,7 @@ pub(crate) fn hook_ctx_in_tab<'a>(
         task_id: Some(task_id),
         task_run_id,
         terminal_tab_id: Some(terminal_tab_id),
+        ..HookContext::default()
     }
 }
 
@@ -1255,18 +1230,16 @@ pub(crate) fn task_with_prepared_primary(repos: &mut FakeRepos) -> (String, Stri
 
 /// A task with a primary run claimed by `sess-1` and actively working (the steady state after
 /// the Run button and the first prompt).
-pub(crate) fn task_with_running_primary(repos: &mut FakeRepos, outputs: &FakeTaskRunOutputs) -> (String, String) {
+pub(crate) fn task_with_running_primary(repos: &mut FakeRepos) -> (String, String) {
     let (task_id, run_id) = task_with_prepared_primary(repos);
     record_claude_hook(
         repos,
-        outputs,
         hook_ctx(&task_id, Some(&run_id)),
         &started("sess-1", Continuation::Fresh),
     )
     .unwrap();
     record_claude_hook(
         repos,
-        outputs,
         hook_ctx(&task_id, Some(&run_id)),
         &prompt("sess-1"),
     )
@@ -1369,7 +1342,6 @@ pub(crate) fn make_run(id: &str, task_id: &str, status: TaskRunStatus) -> TaskRu
         worktree_path: None,
         status,
         wait_reason: None,
-        settings_path: None,
         provider_session_id: None,
         terminal_tab_id: None,
         last_event_name: None,
@@ -1413,6 +1385,9 @@ impl TerminalSessionRepository for FakeRepos {
             cwd: new.cwd,
             shell: new.shell,
             status: TerminalSessionStatus::Starting,
+            agent_status: None,
+            agent_wait_reason: None,
+            provider_session_id: None,
             pid: None,
             rows: new.rows,
             cols: new.cols,
@@ -1447,6 +1422,23 @@ impl TerminalSessionRepository for FakeRepos {
             s.exit_code = exit_code;
         }
         Ok(())
+    }
+
+    fn set_terminal_session_agent_status(
+        &self,
+        id: &str,
+        agent_status: Option<AgentSessionStatus>,
+        agent_wait_reason: Option<TaskRunWaitReason>,
+        provider_session_id: Option<&str>,
+    ) -> Result<bool> {
+        if let Some(s) = self.state.borrow_mut().terminal_sessions.iter_mut().find(|s| s.id == id) {
+            let changed = s.agent_status != agent_status || s.agent_wait_reason != agent_wait_reason;
+            s.agent_status = agent_status;
+            s.agent_wait_reason = agent_wait_reason;
+            s.provider_session_id = provider_session_id.map(str::to_string);
+            return Ok(changed);
+        }
+        Ok(false)
     }
 
     fn get_terminal_session(&self, id: &str) -> Result<Option<TerminalSession>> {
@@ -1651,7 +1643,6 @@ pub(crate) fn driven_run(id: &str, task_id: &str, tab: &str) -> TaskRun {
         worktree_path: None,
         status: TaskRunStatus::Running,
         wait_reason: None,
-        settings_path: None,
         provider_session_id: Some("sess".to_string()),
         terminal_tab_id: Some(tab.to_string()),
         last_event_name: None,
@@ -1673,6 +1664,9 @@ pub(crate) fn fake_session(id: &str, tab: Option<&str>, status: TerminalSessionS
         cwd: "/".to_string(),
         shell: "/bin/zsh".to_string(),
         status,
+        agent_status: None,
+        agent_wait_reason: None,
+        provider_session_id: None,
         pid: None,
         rows: 24,
         cols: 80,

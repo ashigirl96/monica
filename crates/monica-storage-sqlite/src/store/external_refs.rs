@@ -19,22 +19,6 @@ pub(super) fn list_external_refs(conn: &Connection, task_id: &str) -> Result<Vec
 }
 
 impl SqliteStore {
-    pub fn save_external_ref(&self, r: &ExternalReference) -> Result<i64> {
-        self.conn().execute(
-            "INSERT INTO external_refs (task_id, provider, ref_type, repo, number, url)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                r.task_id,
-                r.provider.as_str(),
-                r.ref_type.as_str(),
-                r.repo,
-                r.number,
-                r.url
-            ],
-        )?;
-        Ok(self.conn().last_insert_rowid())
-    }
-
     pub fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalReference>> {
         list_external_refs(self.conn(), task_id)
     }

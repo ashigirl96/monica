@@ -53,6 +53,39 @@ pub enum SignalKind {
     Inert,
 }
 
+impl SignalKind {
+    /// What this signal means for the session-level agent indicator (the per-tab dot). A completed
+    /// turn reads as "your turn" (awaiting prompt) rather than a distinct idle state, matching the
+    /// TaskRun visual language. A subagent finishing with none left behaves like a turn ending —
+    /// the Stop that was held while subagents ran never re-fires, so this is its release edge.
+    pub fn agent_session_effect(&self) -> crate::terminal_session::AgentSessionEffect {
+        use crate::terminal_session::{AgentSessionEffect, AgentSessionStatus};
+        match self {
+            SignalKind::SessionStarted { .. }
+            | SignalKind::PromptSubmitted
+            | SignalKind::UserInputResolved => {
+                AgentSessionEffect::Set(AgentSessionStatus::Running, None)
+            }
+            SignalKind::UserInputRequired { reason, .. } => {
+                AgentSessionEffect::Set(AgentSessionStatus::WaitingForUser, Some(*reason))
+            }
+            SignalKind::TurnCompleted { subagents_running }
+            | SignalKind::SubagentFinished { subagents_running } => {
+                if *subagents_running {
+                    AgentSessionEffect::Set(AgentSessionStatus::Running, None)
+                } else {
+                    AgentSessionEffect::Set(
+                        AgentSessionStatus::WaitingForUser,
+                        Some(TaskRunWaitReason::AwaitingPrompt),
+                    )
+                }
+            }
+            SignalKind::SessionEnded => AgentSessionEffect::Clear,
+            SignalKind::Inert => AgentSessionEffect::Keep,
+        }
+    }
+}
+
 impl AgentSignal {
     /// Events that prove a user is actively driving a session in this shell: only these may claim a
     /// prepared run or lazily create one.
@@ -239,7 +272,6 @@ mod tests {
             worktree_path: None,
             status,
             wait_reason,
-            settings_path: None,
             provider_session_id: session.map(str::to_string),
             terminal_tab_id: None,
             last_event_name: None,

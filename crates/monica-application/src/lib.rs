@@ -32,9 +32,10 @@ pub use facade::{
 
 pub use ports::{
     AgentDecoders, AgentEventDecoder, EventRepository, GitGateway, NotebookGateway,
-    NotificationOutboxStore, ProjectRepository, PullRequestSyncStore, TaskBoardQuery, TaskRunStore,
-    TaskStore, TaskSummaryFilter, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
-    TerminalSessionRepository, UnitOfWork, WorkbenchStore, WorkTransaction, Workspace, WorktreeRef,
+    NotificationOutboxStore, ProjectRepository, PullRequestSyncStore, ShellScaffolding,
+    TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter, TerminalAttachment,
+    TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository, UnitOfWork, WorkbenchStore,
+    WorkTransaction, Workspace, WorktreeRef,
 };
 
 // Application-owned types (NOT in monica-domain)
@@ -57,5 +58,5 @@ pub use usecases::{
 // Usecase sub-ports (referenced by Backend trait)
 pub use usecases::github::ports::{AuthGateway, GithubGateway};
 pub use usecases::runs::ports::{
-    Clock, SetupEnv, SetupOutcome, SetupRunner, TaskRunOutputs, TaskShellEnv,
+    Clock, SetupEnv, SetupOutcome, SetupRunner, TaskRunOutputs,
 };

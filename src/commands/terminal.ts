@@ -7,6 +7,7 @@ import {
 } from "./bindings";
 
 export type {
+  AgentSessionStatus,
   AttachResult,
   TerminalSession,
   TerminalSessionKind,

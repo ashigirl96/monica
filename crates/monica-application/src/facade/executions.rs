@@ -1,6 +1,6 @@
 use super::{Backend, Monica};
 use crate::ports::{
-    AgentDecoders, NotificationOutboxStore, TaskRunStore, TerminalAttachment,
+    AgentDecoders, NotificationOutboxStore, ShellScaffolding, TaskRunStore, TerminalAttachment,
     TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository, WorkbenchStore,
 };
 use crate::usecases::terminal::{
@@ -82,10 +82,10 @@ impl<B: Backend> ExecutionService<'_, B> {
         ctx: HookContext<'_>,
         raw_stdin: &str,
     ) -> ApplicationResult<HookReport> {
-        let Monica { repos, outputs, events, agents, .. } = &mut *self.m;
+        let Monica { repos, events, agents, .. } = &mut *self.m;
         let signal = agents.decode(agent, raw_stdin.as_bytes())?;
         let mut report =
-            crate::usecases::runs::record_hook(repos, outputs, ctx, agent, signal.as_ref(), raw_stdin)?;
+            crate::usecases::runs::record_hook(repos, ctx, agent, signal.as_ref(), raw_stdin)?;
         // A dropped event (a non-blocking tool call) carries no signal; recover its provider name
         // here so the driver's debug log need not reach back into the decoders.
         if report.event_name.is_none() {
@@ -102,26 +102,34 @@ impl<B: Backend> ExecutionService<'_, B> {
             events.emit(ApplicationEvent::AwaitingUserInput {
                 task_id: report.linked_task_id.clone(),
                 task_run_id: report.linked_task_run_id.clone(),
-                reason: report.task_run_wait_reason,
+                reason: report.wait_reason,
                 task_title: report.task_title.clone(),
             });
-            if let Some(ref run_id) = report.linked_task_run_id {
+            if let Some(dedupe_key) = crate::notification::awaiting_user_input_dedupe_key(
+                report.linked_task_run_id.as_deref(),
+                report.terminal_session_id.as_deref(),
+            ) {
                 let body = crate::notification::waiting_notification(
-                    report.task_run_wait_reason,
+                    report.wait_reason,
                     report.task_title.as_deref(),
                 );
                 let intent = NewNotificationIntent {
-                    dedupe_key: format!("awaiting_user_input:{run_id}"),
+                    dedupe_key,
                     kind: NotificationKind::AwaitingUserInput,
                     title: crate::notification::TITLE.to_string(),
                     body,
                     task_id: report.linked_task_id.clone(),
-                    task_run_id: Some(run_id.clone()),
+                    task_run_id: report.linked_task_run_id.clone(),
                 };
                 if let Err(e) = repos.enqueue_notification(intent) {
                     log::warn!(target: "monica_app::notify", "failed to enqueue notification: {e}");
                 }
             }
+        } else if let Some(key) = crate::notification::awaiting_user_input_dedupe_key(
+            None,
+            report.terminal_session_id.as_deref(),
+        ) {
+            let _ = repos.cancel_notification_by_dedupe_key(&key);
         }
         Ok(report)
     }
@@ -142,6 +150,23 @@ impl<B: Backend> ExecutionService<'_, B> {
         let cols = new.cols;
 
         let session = self.m.repos.create_terminal_session(new)?;
+
+        // Every Monica shell gets the agent wrapper/hooks scaffolding so agent launches in any
+        // tab report back through hooks; an env passed by the caller wins key-by-key. Failure
+        // degrades the tab to a vanilla shell rather than blocking it.
+        match self.m.outputs.prepare_base_shell_env(std::path::Path::new(&cwd)) {
+            Ok(base) => {
+                for (key, value) in base {
+                    if !env.iter().any(|(k, _)| *k == key) {
+                        env.push((key, value));
+                    }
+                }
+            }
+            Err(e) => log::warn!(
+                target: "monica_application::terminal",
+                "failed to prepare base shell env: {e:#}"
+            ),
+        }
 
         // The hook chain (shell → claude → monica hook) inherits these, letting hooks stamp the
         // tab onto the TaskRun for tab-based Make Main; the session id rides along for future

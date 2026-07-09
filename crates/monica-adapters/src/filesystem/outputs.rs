@@ -1,17 +1,14 @@
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use monica_application::shell::quote_single;
-use monica_application::{ExecutionProfile, TaskRunOutputs, TaskShellEnv};
+use monica_application::{ExecutionProfile, ShellScaffolding, TaskRunOutputs};
 use monica_domain::{Agent, Project};
 use serde_json::{json, Value};
 
 use monica_paths as paths;
-
-const HOOK_EVENTS_FILE: &str = "hook-events.jsonl";
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct FsTaskRunOutputs;
@@ -34,87 +31,76 @@ impl TaskRunOutputs for FsTaskRunOutputs {
         profile: &ExecutionProfile,
         task_run_id: Option<&str>,
         cwd: &Path,
-    ) -> Result<TaskShellEnv> {
-        let task_dir = paths::task_shell_dir(task_id)?;
-        fs::create_dir_all(&task_dir)
-            .with_context(|| format!("failed to create {}", task_dir.display()))?;
-
-        // The hook must write to the DB this app instance reads, but the tab's
-        // MONICA_HOME can be rewritten after spawn (direnv applying a repo
-        // .envrc that exports another base) — so the command pins the base
-        // itself instead of trusting the environment it inherits.
-        let monica_home = paths::base_dir()?.to_string_lossy().into_owned();
-        let agent = profile.agent_default;
-        let hook_cmd = pin_hook_command_base(&resolve_hook_command(agent)?, &monica_home);
-        let settings_path_str = write_agent_hooks_config(agent, cwd, &hook_cmd)?;
-
-        let bin_dir = task_dir.join("bin");
-        let agent_bin = agent.as_str();
-        write_agent_wrapper(&bin_dir, agent_bin, agent_wrapper_script(agent))?;
-        let wrapper_path = bin_dir.join(agent_bin).to_string_lossy().into_owned();
-
-        let zdotdir = task_dir.join("zdotdir");
-        write_zdotdir(&zdotdir, agent)?;
-        let zdotdir_str = zdotdir.to_string_lossy().into_owned();
+    ) -> Result<Vec<(String, String)>> {
+        match profile.agent_default {
+            Agent::Claude => {}
+            Agent::Codex => {
+                write_codex_hooks_config(cwd, &pinned_hook_cmd(Agent::Codex)?)?;
+            }
+        }
 
         let mut env = vec![
-            ("MONICA_HOME".to_string(), monica_home),
             ("MONICA_TASK_ID".to_string(), task_id.to_string()),
             ("MONICA_PROJECT_ID".to_string(), project.id.clone()),
-            ("MONICA_AGENT_WRAPPER".to_string(), wrapper_path.clone()),
-            ("ZDOTDIR".to_string(), zdotdir_str),
         ];
-        // Set only when the user actually had ZDOTDIR; .zshenv unsets it otherwise
-        // so zsh falls back to $HOME like vanilla.
-        if let Ok(original) = std::env::var("ZDOTDIR") {
-            env.push(("MONICA_ORIGINAL_ZDOTDIR".to_string(), original));
-        }
         if let Some(run_id) = task_run_id {
             env.push(("MONICA_TASK_RUN_ID".to_string(), run_id.to_string()));
         }
-        // Best-effort fallback for non-zsh shells, which ignore ZDOTDIR. The
-        // user's rc files may still reorder PATH; zsh users get the reliable
-        // shell-function wrapper instead.
-        let bin_dir_str = bin_dir.to_string_lossy().into_owned();
-        let path_value = match std::env::var("PATH") {
-            Ok(path) if !path.is_empty() => format!("{bin_dir_str}:{path}"),
-            _ => bin_dir_str,
-        };
-        env.push(("PATH".to_string(), path_value));
-
-        Ok(TaskShellEnv {
-            env,
-            settings_path: settings_path_str,
-            wrapper_path,
-        })
+        Ok(env)
     }
+}
 
-    fn append_hook_event(
-        &self,
-        task_run_id: &str,
-        at: &str,
-        event_label: Option<&str>,
-        raw_stdin: &str,
-    ) -> Result<()> {
-        let dir = self.task_run_dir(task_run_id)?;
-        fs::create_dir_all(&dir).with_context(|| format!("failed to create {}", dir.display()))?;
-        let path = dir.join(HOOK_EVENTS_FILE);
-        let payload: Value =
-            serde_json::from_str(raw_stdin.trim()).unwrap_or_else(|_| json!({ "raw": raw_stdin }));
-        let mut line = serde_json::to_string(&json!({
-            "at": at,
-            "hook_event_name": event_label,
-            "payload": payload,
-        }))?;
-        line.push('\n');
-
-        OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .and_then(|mut f| f.write_all(line.as_bytes()))
-            .with_context(|| format!("failed to append to {}", path.display()))
+impl ShellScaffolding for FsTaskRunOutputs {
+    fn prepare_base_shell_env(&self, cwd: &Path) -> Result<Vec<(String, String)>> {
+        strip_legacy_claude_hooks(cwd)?;
+        base_shell_env()
     }
+}
+
+/// Env vars every Monica-spawned shell needs to run any supported agent wrapped: the shared
+/// zdotdir installs one shell function per agent, each wrapper injects that agent's hooks/flags.
+/// Task identity is layered on separately.
+fn base_shell_env() -> Result<Vec<(String, String)>> {
+    let mut wrappers = Vec::new();
+    let mut bin_dirs = Vec::new();
+    for agent in Agent::ALL {
+        let bin_dir = paths::agent_shell_dir(agent.as_str())?.join("bin");
+        write_agent_wrapper(&bin_dir, agent.as_str(), &agent_wrapper_script(agent)?)?;
+        wrappers.push((agent, bin_dir.join(agent.as_str())));
+        bin_dirs.push(bin_dir.to_string_lossy().into_owned());
+    }
+    let zdotdir = paths::shell_zdotdir()?;
+    write_zdotdir(&zdotdir, &wrappers)?;
+
+    let monica_home = paths::base_dir()?.to_string_lossy().into_owned();
+    let mut env = vec![
+        ("MONICA_HOME".to_string(), monica_home),
+        ("ZDOTDIR".to_string(), zdotdir.to_string_lossy().into_owned()),
+    ];
+    // Set only when the user actually had ZDOTDIR; .zshenv unsets it otherwise
+    // so zsh falls back to $HOME like vanilla.
+    if let Ok(original) = std::env::var("ZDOTDIR") {
+        env.push(("MONICA_ORIGINAL_ZDOTDIR".to_string(), original));
+    }
+    // Best-effort fallback for non-zsh shells, which ignore ZDOTDIR. The
+    // user's rc files may still reorder PATH; zsh users get the reliable
+    // shell-function wrappers instead.
+    let mut path_value = bin_dirs.join(":");
+    if let Ok(path) = std::env::var("PATH") {
+        if !path.is_empty() {
+            path_value = format!("{path_value}:{path}");
+        }
+    }
+    env.push(("PATH".to_string(), path_value));
+    Ok(env)
+}
+
+/// The hook must write to the DB this app instance reads, but the tab's MONICA_HOME can be
+/// rewritten after spawn (direnv applying a repo .envrc that exports another base) — so the
+/// command pins the base itself instead of trusting the environment it inherits.
+fn pinned_hook_cmd(agent: Agent) -> Result<String> {
+    let monica_home = paths::base_dir()?.to_string_lossy().into_owned();
+    Ok(pin_hook_command_base(&resolve_hook_command(agent)?, &monica_home))
 }
 
 fn write_if_changed(path: &Path, contents: &str) -> Result<()> {
@@ -168,16 +154,11 @@ fn pin_hook_command_base(hook_command: &str, monica_home: &str) -> String {
     format!("MONICA_HOME={} {hook_command}", quote_single(monica_home))
 }
 
-fn write_agent_hooks_config(
-    agent: Agent,
-    cwd: &Path,
-    hook_command: &str,
-) -> Result<String> {
-    let config_path = cwd.join(crate::agents::hooks_config_path(agent));
-    let config_path_str = config_path.to_string_lossy().into_owned();
+fn write_codex_hooks_config(cwd: &Path, hook_command: &str) -> Result<()> {
+    let config_path = cwd.join(crate::agents::hooks_config_path(Agent::Codex));
 
-    if std::env::var_os("HOME").is_some_and(|home| same_path(Path::new(&home), cwd)) {
-        return Ok(config_path_str);
+    if cwd_is_home(cwd) {
+        return Ok(());
     }
 
     let parent = config_path
@@ -186,17 +167,106 @@ fn write_agent_hooks_config(
     fs::create_dir_all(parent)
         .with_context(|| format!("failed to create {}", parent.display()))?;
 
-    let hooks = agent_hooks_value(agent, hook_command);
-    let body = match agent {
-        Agent::Claude => {
-            let existing = fs::read_to_string(&config_path).ok();
-            merge_hooks_into_settings(existing.as_deref(), &hooks)?
-        }
-        Agent::Codex => serde_json::to_string_pretty(&hooks)
-            .context("failed to serialize hooks config")?,
+    let hooks = agent_hooks_value(Agent::Codex, hook_command);
+    let body =
+        serde_json::to_string_pretty(&hooks).context("failed to serialize hooks config")?;
+    write_if_changed(&config_path, &body)
+}
+
+/// Earlier versions merged Monica's hook groups into the worktree's `settings.local.json`. Hooks
+/// now arrive inline via `--settings`, so a leftover block would make every event fire twice.
+fn strip_legacy_claude_hooks(cwd: &Path) -> Result<()> {
+    if cwd_is_home(cwd) {
+        return Ok(());
+    }
+    let config_path = cwd.join(crate::agents::hooks_config_path(Agent::Claude));
+    let Ok(raw) = fs::read_to_string(&config_path) else {
+        return Ok(());
     };
-    write_if_changed(&config_path, &body)?;
-    Ok(config_path_str)
+    let Ok(mut root) = serde_json::from_str::<Value>(&raw) else {
+        return Ok(());
+    };
+    if !strip_monica_hook_groups(&mut root) {
+        return Ok(());
+    }
+    if root.as_object().is_some_and(serde_json::Map::is_empty) {
+        fs::remove_file(&config_path)
+            .with_context(|| format!("failed to remove {}", config_path.display()))
+    } else {
+        let body =
+            serde_json::to_string_pretty(&root).context("failed to serialize settings")?;
+        write_if_changed(&config_path, &body)
+    }
+}
+
+/// Returns true when any Monica-owned hook group was removed. User-defined hooks are kept.
+fn strip_monica_hook_groups(root: &mut Value) -> bool {
+    let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut) else {
+        return false;
+    };
+    let mut modified = false;
+    let events: Vec<String> = hooks.keys().cloned().collect();
+    for event in events {
+        let Some(groups) = hooks.get_mut(&event).and_then(Value::as_array_mut) else {
+            continue;
+        };
+        let before = groups.len();
+        groups.retain(|group| !is_monica_hook_group(group));
+        if groups.len() != before {
+            modified = true;
+            if groups.is_empty() {
+                hooks.remove(&event);
+            }
+        }
+    }
+    if modified && hooks.is_empty() {
+        if let Some(obj) = root.as_object_mut() {
+            obj.remove("hooks");
+        }
+    }
+    modified
+}
+
+fn is_monica_hook_group(group: &Value) -> bool {
+    group.get("hooks").and_then(Value::as_array).is_some_and(|hooks| {
+        !hooks.is_empty()
+            && hooks.iter().all(|hook| {
+                hook.get("command").and_then(Value::as_str).is_some_and(is_monica_hook_command)
+            })
+    })
+}
+
+/// Legacy Monica entries were written as `<cli> hook claude`, later with a `MONICA_HOME=<value> `
+/// prefix — one command word (optionally single-quoted), nothing else. Anything looser (extra
+/// arguments, chained commands) is treated as user-owned and kept, since a stray match here
+/// deletes the group.
+fn is_monica_hook_command(cmd: &str) -> bool {
+    let rest = match cmd.strip_prefix("MONICA_HOME=") {
+        Some(after) => match strip_shell_word(after).and_then(|r| r.strip_prefix(' ')) {
+            Some(rest) => rest,
+            None => return false,
+        },
+        None => cmd,
+    };
+    strip_shell_word(rest) == Some(" hook claude")
+}
+
+/// Strips one leading shell word — single-quoted (`'…'`) or bare (up to the first space) —
+/// returning the remainder.
+fn strip_shell_word(s: &str) -> Option<&str> {
+    if let Some(rest) = s.strip_prefix('\'') {
+        let end = rest.find('\'')?;
+        Some(&rest[end + 1..])
+    } else {
+        let end = s.find(' ').unwrap_or(s.len());
+        (end > 0).then(|| &s[end..])
+    }
+}
+
+/// Guards the user's global agent config (`~/.claude`, `~/.codex`): a project checked out at
+/// $HOME must never have its hooks config written or stripped.
+fn cwd_is_home(cwd: &Path) -> bool {
+    std::env::var_os("HOME").is_some_and(|home| same_path(Path::new(&home), cwd))
 }
 
 // Compare through symlinks and trailing-slash differences so the HOME guard cannot be bypassed by
@@ -206,15 +276,6 @@ fn same_path(a: &Path, b: &Path) -> bool {
         (Ok(a), Ok(b)) => a == b,
         _ => a == b,
     }
-}
-
-fn merge_hooks_into_settings(existing: Option<&str>, hooks: &Value) -> Result<String> {
-    let mut root = existing
-        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
-        .filter(Value::is_object)
-        .unwrap_or_else(|| json!({}));
-    root["hooks"] = hooks["hooks"].clone();
-    serde_json::to_string_pretty(&root).context("failed to serialize settings")
 }
 
 fn hook_group(hook_command: &str, matcher: &str) -> Value {
@@ -243,7 +304,7 @@ fn agent_hooks_value(agent: Agent, hook_command: &str) -> Value {
     json!({ "hooks": Value::Object(map) })
 }
 
-const CLAUDE_WRAPPER: &str = r#"#!/usr/bin/env bash
+const CLAUDE_WRAPPER_TEMPLATE: &str = r#"#!/usr/bin/env bash
 find_real_claude() {
     local self_dir
     self_dir="$(cd "$(dirname "$0")" && pwd)"
@@ -255,35 +316,46 @@ find_real_claude() {
     return 1
 }
 REAL_CLAUDE="$(find_real_claude)" || { echo "Error: claude not found in PATH" >&2; exit 127; }
-# Outside a Monica-managed task shell, behave like vanilla claude. Hooks are loaded by
-# claude itself from <cwd>/.claude/settings.local.json, so the wrapper only injects the
-# launch flags (skip-permissions + a fresh session id).
-if [[ -z "${MONICA_TASK_ID:-}" ]]; then
-    exec "$REAL_CLAUDE" "$@"
-fi
 case "${1:-}" in mcp|config|api-key) exec "$REAL_CLAUDE" "$@" ;; esac
-unset CLAUDECODE
-SKIP_SESSION=false
-for arg in "$@"; do
-    case "$arg" in --resume|--resume=*|-r|--session-id|--session-id=*|--continue|-c) SKIP_SESSION=true; break ;; esac
-done
-EXTRA_ARGS=(--dangerously-skip-permissions)
-if [[ "$SKIP_SESSION" != true ]]; then
-    SESSION_ID="$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]')"
-    if [[ -n "$SESSION_ID" ]]; then
-        EXTRA_ARGS+=(--session-id "$SESSION_ID")
+EXTRA_ARGS=()
+# The hooks config is baked in at generation time; claude merges --settings additively on top of
+# the user's own settings, so nothing is written into the repo. Only Monica-spawned shells carry
+# MONICA_TERMINAL_SESSION_ID — anywhere else this wrapper stays transparent.
+if [[ -n "${MONICA_TERMINAL_SESSION_ID:-}" ]]; then
+    # Monica tabs are independent sessions even when the app was launched from Claude Code.
+    unset CLAUDECODE
+    EXTRA_ARGS+=(--settings __MONICA_HOOKS_JSON__)
+fi
+if [[ -n "${MONICA_TASK_ID:-}" ]]; then
+    unset CLAUDECODE
+    EXTRA_ARGS+=(--dangerously-skip-permissions)
+    SKIP_SESSION=false
+    for arg in "$@"; do
+        case "$arg" in --resume|--resume=*|-r|--session-id|--session-id=*|--continue|-c) SKIP_SESSION=true; break ;; esac
+    done
+    if [[ "$SKIP_SESSION" != true ]]; then
+        SESSION_ID="$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+        if [[ -n "$SESSION_ID" ]]; then
+            EXTRA_ARGS+=(--session-id "$SESSION_ID")
+        fi
     fi
 fi
 exec "$REAL_CLAUDE" "${EXTRA_ARGS[@]}" "$@"
 "#;
+
+fn claude_wrapper_script(hooks_json: &str) -> String {
+    CLAUDE_WRAPPER_TEMPLATE.replace("__MONICA_HOOKS_JSON__", &quote_single(hooks_json))
+}
 
 fn write_agent_wrapper(bin_dir: &Path, name: &str, contents: &str) -> Result<()> {
     fs::create_dir_all(bin_dir)
         .with_context(|| format!("failed to create {}", bin_dir.display()))?;
     let wrapper_path = bin_dir.join(name);
     write_if_changed(&wrapper_path, contents)?;
-    fs::set_permissions(&wrapper_path, fs::Permissions::from_mode(0o755))
-        .with_context(|| format!("failed to chmod {}", wrapper_path.display()))?;
+    if !is_executable_file(&wrapper_path) {
+        fs::set_permissions(&wrapper_path, fs::Permissions::from_mode(0o755))
+            .with_context(|| format!("failed to chmod {}", wrapper_path.display()))?;
+    }
     Ok(())
 }
 
@@ -305,40 +377,52 @@ fi
 exec "$REAL_CODEX" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust "$@"
 "#;
 
-fn agent_wrapper_script(agent: Agent) -> &'static str {
+fn agent_wrapper_script(agent: Agent) -> Result<String> {
     match agent {
-        Agent::Claude => CLAUDE_WRAPPER,
-        Agent::Codex => CODEX_WRAPPER,
+        Agent::Claude => {
+            let hooks = agent_hooks_value(Agent::Claude, &pinned_hook_cmd(Agent::Claude)?);
+            let hooks_json =
+                serde_json::to_string(&hooks).context("failed to serialize hooks config")?;
+            Ok(claude_wrapper_script(&hooks_json))
+        }
+        Agent::Codex => Ok(CODEX_WRAPPER.to_string()),
     }
 }
 
 // zsh resolves each startup file against ZDOTDIR at the moment it reads it, so
 // once .zshenv restores the user's ZDOTDIR, zsh loads the user's real
 // .zprofile/.zshrc next and the other files in this directory are never read.
-// The claude() wrapper must therefore be installed here in .zshenv — a shell
-// function survives the user's rc files, unlike PATH which path_helper,
+// The agent wrapper functions must therefore be installed here in .zshenv — a
+// shell function survives the user's rc files, unlike PATH which path_helper,
 // .zshrc, and direnv all rewrite.
-fn zdotdir_zshenv(agent: Agent) -> String {
-    let bin = agent.as_str();
-    format!(
+fn zdotdir_zshenv(wrappers: &[(Agent, PathBuf)]) -> String {
+    let mut out = String::from(
         r#"# Monica ZDOTDIR bootstrap for zsh.
-if [[ -n "${{MONICA_ORIGINAL_ZDOTDIR+X}}" ]]; then
+if [[ -n "${MONICA_ORIGINAL_ZDOTDIR+X}" ]]; then
     builtin export ZDOTDIR="$MONICA_ORIGINAL_ZDOTDIR"
     builtin unset MONICA_ORIGINAL_ZDOTDIR
 else
     builtin unset ZDOTDIR
 fi
 
-builtin typeset _monica_file="${{ZDOTDIR-$HOME}}/.zshenv"
+builtin typeset _monica_file="${ZDOTDIR-$HOME}/.zshenv"
 [[ ! -r "$_monica_file" ]] || builtin source -- "$_monica_file"
 builtin unset _monica_file
-
-if [[ -o interactive && -x "${{MONICA_AGENT_WRAPPER:-}}" ]]; then
+"#,
+    );
+    for (agent, wrapper_path) in wrappers {
+        let bin = agent.as_str();
+        let wrapper = wrapper_path.to_string_lossy();
+        out.push_str(&format!(
+            r#"
+if [[ -o interactive && -x "{wrapper}" ]]; then
     builtin unalias {bin} >/dev/null 2>&1 || true
-    eval '{bin}() {{ "$MONICA_AGENT_WRAPPER" "$@"; }}'
+    eval '{bin}() {{ "{wrapper}" "$@"; }}'
 fi
 "#
-    )
+        ));
+    }
+    out
 }
 
 fn zdotdir_shim(file: &str) -> String {
@@ -358,10 +442,10 @@ builtin unset _monica_file
     )
 }
 
-fn write_zdotdir(zdotdir: &Path, agent: Agent) -> Result<()> {
+fn write_zdotdir(zdotdir: &Path, wrappers: &[(Agent, PathBuf)]) -> Result<()> {
     fs::create_dir_all(zdotdir)
         .with_context(|| format!("failed to create {}", zdotdir.display()))?;
-    write_if_changed(&zdotdir.join(".zshenv"), &zdotdir_zshenv(agent))?;
+    write_if_changed(&zdotdir.join(".zshenv"), &zdotdir_zshenv(wrappers))?;
     for file in [".zprofile", ".zshrc", ".zlogin"] {
         write_if_changed(&zdotdir.join(file), &zdotdir_shim(file))?;
     }
@@ -423,11 +507,8 @@ mod tests {
     #[test]
     fn write_agent_hooks_config_codex_writes_into_cwd_dot_codex() {
         let cwd = unique_temp_dir("codex-write");
-        let path =
-            write_agent_hooks_config(Agent::Codex, &cwd, "monica hook codex")
-                .unwrap();
+        write_codex_hooks_config(&cwd, "monica hook codex").unwrap();
         let expected = cwd.join(".codex").join("hooks.json");
-        assert_eq!(path, expected.to_string_lossy());
         let body = fs::read_to_string(&expected).unwrap();
         assert!(body.contains("monica hook codex"));
         assert!(body.contains("SessionStart"));
@@ -444,66 +525,106 @@ mod tests {
     }
 
     #[test]
-    fn merge_hooks_creates_fresh_settings() {
-        let hooks = agent_hooks_value(Agent::Claude, "monica hook claude");
-        let body = merge_hooks_into_settings(None, &hooks).unwrap();
-        let parsed: Value = serde_json::from_str(&body).unwrap();
-        let cmd = parsed
-            .pointer("/hooks/SessionStart/0/hooks/0/command")
-            .and_then(Value::as_str);
-        assert_eq!(cmd, Some("monica hook claude"));
-    }
-
-    #[test]
-    fn merge_hooks_preserves_other_top_level_keys() {
-        let existing = r#"{"model":"opus","permissions":{"allow":["Bash"]}}"#;
-        let hooks = agent_hooks_value(Agent::Claude, "monica hook claude");
-        let body = merge_hooks_into_settings(Some(existing), &hooks).unwrap();
-        let parsed: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(parsed.pointer("/model").and_then(Value::as_str), Some("opus"));
+    fn strip_removes_monica_groups_and_keeps_user_hooks() {
+        let mut root: Value = serde_json::from_str(
+            r#"{
+              "model": "opus",
+              "hooks": {
+                "SessionStart": [
+                  {"matcher":"","hooks":[{"type":"command","command":"MONICA_HOME='/x' '/bin/monica' hook claude"}]},
+                  {"matcher":"","hooks":[{"type":"command","command":"my-own-hook"}]}
+                ],
+                "Stop": [
+                  {"matcher":"","hooks":[{"type":"command","command":"monica hook claude"}]}
+                ]
+              }
+            }"#,
+        )
+        .unwrap();
+        assert!(strip_monica_hook_groups(&mut root));
+        assert_eq!(root.pointer("/model").and_then(Value::as_str), Some("opus"));
         assert_eq!(
-            parsed.pointer("/permissions/allow/0").and_then(Value::as_str),
-            Some("Bash")
-        );
-        assert!(parsed.pointer("/hooks/Stop/0/hooks/0/command").is_some());
-    }
-
-    #[test]
-    fn merge_hooks_replaces_pre_existing_hooks_key() {
-        let existing = r#"{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"old"}]}]}}"#;
-        let hooks = agent_hooks_value(Agent::Claude, "monica hook claude");
-        let body = merge_hooks_into_settings(Some(existing), &hooks).unwrap();
-        let parsed: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(
-            parsed
-                .pointer("/hooks/SessionStart/0/hooks/0/command")
+            root.pointer("/hooks/SessionStart/0/hooks/0/command")
                 .and_then(Value::as_str),
-            Some("monica hook claude")
+            Some("my-own-hook")
         );
+        assert!(root.pointer("/hooks/Stop").is_none());
     }
 
     #[test]
-    fn merge_hooks_replaces_non_object_or_malformed_existing() {
-        let hooks = agent_hooks_value(Agent::Claude, "monica hook claude");
-        for existing in [Some("[1,2,3]"), Some("not json"), Some("\"scalar\"")] {
-            let body = merge_hooks_into_settings(existing, &hooks).unwrap();
-            let parsed: Value = serde_json::from_str(&body).unwrap();
-            assert!(parsed.is_object());
-            assert_eq!(
-                parsed
-                    .pointer("/hooks/SessionStart/0/hooks/0/command")
-                    .and_then(Value::as_str),
-                Some("monica hook claude")
-            );
+    fn strip_removes_hooks_key_when_only_monica_groups_existed() {
+        let mut root: Value = serde_json::from_str(
+            r#"{"hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"monica hook claude"}]}]}}"#,
+        )
+        .unwrap();
+        assert!(strip_monica_hook_groups(&mut root));
+        assert!(root.pointer("/hooks").is_none());
+        assert!(root.as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn strip_leaves_foreign_settings_untouched() {
+        for raw in [
+            r#"{"model":"opus"}"#,
+            r#"{"hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"other"}]}]}}"#,
+        ] {
+            let mut root: Value = serde_json::from_str(raw).unwrap();
+            let before = root.clone();
+            assert!(!strip_monica_hook_groups(&mut root));
+            assert_eq!(root, before);
         }
     }
 
     #[test]
-    fn wrapper_drops_settings_flag_and_gates_on_task_id() {
-        assert!(CLAUDE_WRAPPER.contains("--dangerously-skip-permissions"));
-        assert!(!CLAUDE_WRAPPER.contains("--settings"));
-        assert!(CLAUDE_WRAPPER.contains(r#"-z "${MONICA_TASK_ID:-}""#));
-        assert!(CLAUDE_WRAPPER.contains("--session-id"));
+    fn strip_legacy_claude_hooks_deletes_file_when_nothing_remains() {
+        let cwd = unique_temp_dir("strip-delete");
+        let config = cwd.join(".claude").join("settings.local.json");
+        fs::create_dir_all(config.parent().unwrap()).unwrap();
+        fs::write(
+            &config,
+            r#"{"hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"monica hook claude"}]}]}}"#,
+        )
+        .unwrap();
+        strip_legacy_claude_hooks(&cwd).unwrap();
+        assert!(!config.exists());
+        fs::remove_dir_all(&cwd).ok();
+    }
+
+    #[test]
+    fn strip_legacy_claude_hooks_rewrites_file_when_user_keys_remain() {
+        let cwd = unique_temp_dir("strip-rewrite");
+        let config = cwd.join(".claude").join("settings.local.json");
+        fs::create_dir_all(config.parent().unwrap()).unwrap();
+        fs::write(
+            &config,
+            r#"{"model":"opus","hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"monica hook claude"}]}]}}"#,
+        )
+        .unwrap();
+        strip_legacy_claude_hooks(&cwd).unwrap();
+        let parsed: Value = serde_json::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(parsed.pointer("/model").and_then(Value::as_str), Some("opus"));
+        assert!(parsed.pointer("/hooks").is_none());
+        fs::remove_dir_all(&cwd).ok();
+    }
+
+    #[test]
+    fn wrapper_bakes_in_hooks_and_gates_task_flags_on_task_id() {
+        let script = claude_wrapper_script(r#"{"hooks":{"Stop":[]},"cmd":"it's quoted"}"#);
+        assert!(
+            script.contains(r#"--settings '{"hooks":{"Stop":[]},"cmd":"it'\''s quoted"}'"#),
+            "hooks JSON must be baked in as a safely quoted literal"
+        );
+        assert!(!script.contains("__MONICA_HOOKS_JSON__"));
+        assert!(script.contains(r#"-n "${MONICA_TERMINAL_SESSION_ID:-}""#));
+        assert!(script.contains(r#"-n "${MONICA_TASK_ID:-}""#));
+        assert!(script.contains("--dangerously-skip-permissions"));
+        assert!(script.contains("--session-id"));
+        let hooks_pos = script.find(r#"-n "${MONICA_TERMINAL_SESSION_ID:-}""#).unwrap();
+        let task_pos = script.find(r#"-n "${MONICA_TASK_ID:-}""#).unwrap();
+        assert!(
+            hooks_pos < task_pos,
+            "hooks injection must not be gated behind the task check"
+        );
     }
 
     fn unique_temp_dir(tag: &str) -> PathBuf {
@@ -519,23 +640,7 @@ mod tests {
     }
 
     #[test]
-    fn write_agent_hooks_config_claude_writes_into_cwd_dot_claude() {
-        let cwd = unique_temp_dir("write");
-        let path =
-            write_agent_hooks_config(Agent::Claude, &cwd, "monica hook claude")
-                .unwrap();
-        let expected = cwd.join(".claude").join("settings.local.json");
-        assert_eq!(path, expected.to_string_lossy());
-        let body = fs::read_to_string(&expected).unwrap();
-        assert!(body.contains("monica hook claude"));
-        assert!(body.contains("SessionStart"));
-        assert!(body.contains("StopFailure"));
-        assert!(body.contains("SessionEnd"));
-        fs::remove_dir_all(&cwd).ok();
-    }
-
-    #[test]
-    fn write_agent_hooks_config_skips_home_to_protect_global_config() {
+    fn strip_legacy_claude_hooks_skips_home_to_protect_global_config() {
         let Some(home) = std::env::var_os("HOME") else {
             return;
         };
@@ -543,10 +648,7 @@ mod tests {
         let global = home.join(".claude").join("settings.local.json");
         let before = fs::read_to_string(&global).ok();
 
-        let path =
-            write_agent_hooks_config(Agent::Claude, &home, "monica hook claude")
-                .unwrap();
-        assert_eq!(path, global.to_string_lossy());
+        strip_legacy_claude_hooks(&home).unwrap();
 
         let after = fs::read_to_string(&global).ok();
         assert_eq!(before, after, "must not create or modify the global settings.local.json");
@@ -600,19 +702,45 @@ mod tests {
     }
 
     #[test]
-    fn zshenv_restores_zdotdir_and_installs_agent_function() {
-        for (agent, bin) in [
-            (Agent::Claude, "claude"),
-            (Agent::Codex, "codex"),
-        ] {
-            let zshenv = zdotdir_zshenv(agent);
-            assert!(zshenv.contains(r#"builtin export ZDOTDIR="$MONICA_ORIGINAL_ZDOTDIR""#), "{bin}");
-            assert!(zshenv.contains("builtin unset ZDOTDIR"), "{bin}");
-            let func = format!("{bin}() {{ \"$MONICA_AGENT_WRAPPER\" \"$@\"; }}");
+    fn zshenv_restores_zdotdir_and_installs_every_agent_function() {
+        let wrappers: Vec<(Agent, PathBuf)> = Agent::ALL
+            .into_iter()
+            .map(|agent| {
+                let bin = agent.as_str();
+                (agent, PathBuf::from("/base/shell").join(bin).join("bin").join(bin))
+            })
+            .collect();
+        let zshenv = zdotdir_zshenv(&wrappers);
+        assert!(zshenv.contains(r#"builtin export ZDOTDIR="$MONICA_ORIGINAL_ZDOTDIR""#));
+        assert!(zshenv.contains("builtin unset ZDOTDIR"));
+        let restore_pos = zshenv.find("builtin unset ZDOTDIR").unwrap();
+        for (agent, wrapper) in &wrappers {
+            let bin = agent.as_str();
+            let func = format!("{bin}() {{ \"{}\" \"$@\"; }}", wrapper.display());
             assert!(zshenv.contains(&func), "{bin}: expected {func}");
-            let restore_pos = zshenv.find("builtin unset ZDOTDIR").unwrap();
             let install_pos = zshenv.find(&format!("{bin}()")).unwrap();
             assert!(restore_pos < install_pos, "{bin}: function must be installed after ZDOTDIR restore");
+        }
+    }
+
+    #[test]
+    fn monica_hook_command_matches_only_the_exact_written_shapes() {
+        for cmd in [
+            "monica hook claude",
+            "'/usr/local/bin/monica' hook claude",
+            "MONICA_HOME='/Users/x/monica' '/usr/local/bin/monica' hook claude",
+            "MONICA_HOME=/tmp/base monica hook claude",
+        ] {
+            assert!(is_monica_hook_command(cmd), "should own: {cmd}");
+        }
+        for cmd in [
+            "my-own-hook",
+            "echo done && monica hook claude",
+            "monica hook codex",
+            "monica hook claude --verbose",
+            "MONICA_HOME='/x' echo pwned; monica hook claude",
+        ] {
+            assert!(!is_monica_hook_command(cmd), "must keep: {cmd}");
         }
     }
 

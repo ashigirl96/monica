@@ -79,6 +79,17 @@ pub(crate) fn cancel_notifications_for_run_in(
     Ok(())
 }
 
+pub(crate) fn cancel_notification_by_dedupe_key_in(
+    conn: &Connection,
+    dedupe_key: &str,
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM notification_outbox WHERE dedupe_key = ?1",
+        params![dedupe_key],
+    )?;
+    Ok(())
+}
+
 pub(crate) fn mark_notification_failed_in(
     conn: &Connection,
     id: i64,

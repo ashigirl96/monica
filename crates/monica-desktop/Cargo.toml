@@ -26,6 +26,7 @@ monica-terminal-protocol = { path = "../monica-terminal-protocol" }
 specta = { version = "=2.0.0-rc.25", default-features = false, features = ["serde_json"] }
 specta-typescript = { version = "=0.0.12", default-features = false }
 tauri = { version = "2", default-features = false, features = [
+  "devtools",
   "wry",
   "macos-private-api",
   "protocol-asset",

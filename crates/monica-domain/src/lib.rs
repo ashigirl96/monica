@@ -39,5 +39,6 @@ pub use status::{DisplayStatus, TaskRunStatus, TaskRunWaitReason, TaskStatus};
 pub use task::{Event, NewTask, Task, TaskKind};
 pub use task_run::{is_safe_task_run_id, Agent, NewTaskRun, TaskRun};
 pub use terminal_session::{
-    NewTerminalSession, TerminalSession, TerminalSessionKind, TerminalSessionStatus,
+    AgentSessionEffect, AgentSessionStatus, NewTerminalSession, TerminalSession,
+    TerminalSessionKind, TerminalSessionStatus,
 };
