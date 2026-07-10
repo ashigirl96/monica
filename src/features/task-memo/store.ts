@@ -5,7 +5,7 @@ import { activeRunspaceAtom } from "@/features/work-bench/store";
 
 export const taskMemoAtom = atom<{ taskId: string } | null>(null);
 
-// cmd+I toggles: close if open, else resolve the target task from the active space
+// alt+I toggles: close if open, else resolve the target task from the active space
 // (board = focused card, bench = the active runspace's task). Returns false when no
 // task is in scope so the shortcut can pass through.
 export const toggleTaskMemoAtom = atom(null, (get, set): boolean => {

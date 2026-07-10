@@ -357,3 +357,54 @@
   min-height: 12rem;
   white-space: pre-wrap;
 }
+
+/* GFM task items arrive as bare li[data-checked]; draw the checkbox that the preset
+   doesn't render. The gutter click is handled by the editor's toggle plugin. */
+/* Milkdown wraps every list item's text in a <p>, which inherits notebook-md's 16px
+   block rhythm and doubles the visual gap between items; collapse it inside lists. */
+.memo-editor li > p {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.memo-editor li + li {
+  margin-top: 0.25em;
+}
+
+/* The li box is widened to cover the marker gutter (margin/padding pair) so the
+   pseudo checkbox sits inside it and clicks on it hit the li — the toggle plugin
+   only reacts when event.target is the li itself. */
+.memo-editor li[data-checked] {
+  list-style: none;
+  position: relative;
+  margin-left: -1.5em;
+  padding-left: 1.5em;
+}
+
+.memo-editor li[data-checked]::before {
+  content: "";
+  position: absolute;
+  /* line the box's center up with the disc marker of sibling plain bullets */
+  left: 0.5em;
+  top: 0.35em;
+  width: 0.9em;
+  height: 0.9em;
+  border: 1.5px solid var(--muted-foreground);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.memo-editor li[data-checked="true"]::before {
+  border-color: var(--foreground);
+  background-color: var(--foreground);
+  /* inline SVG check so the mark scales with the box and needs no extra element */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-7'/%3E%3C/svg%3E");
+  background-size: 80%;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.memo-editor li[data-checked="true"] > p {
+  color: var(--muted-foreground);
+  text-decoration: line-through;
+}

@@ -188,8 +188,8 @@ export function useShortcuts() {
         },
       },
       {
-        meta: true,
-        key: "i",
+        alt: true,
+        code: "KeyI",
         editable: true,
         action: () => {
           if (!toggleTaskMemo()) return false;

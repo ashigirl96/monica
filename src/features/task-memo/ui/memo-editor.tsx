@@ -8,10 +8,11 @@ import {
   editorViewOptionsCtx,
   rootCtx,
 } from "@milkdown/kit/core";
-import { commonmark, emphasisKeymap } from "@milkdown/kit/preset/commonmark";
+import { commonmark } from "@milkdown/kit/preset/commonmark";
 import { gfm } from "@milkdown/kit/preset/gfm";
 import { listener, listenerCtx } from "@milkdown/kit/plugin/listener";
-import { getMarkdown } from "@milkdown/kit/utils";
+import { Plugin } from "@milkdown/kit/prose/state";
+import { $prose, getMarkdown } from "@milkdown/kit/utils";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { updateTaskMemo } from "@/commands/task";
 import { invalidateTaskSummaries } from "@/stores/query-keys";
@@ -22,6 +23,28 @@ type MemoEditorProps = {
 };
 
 const AUTOSAVE_DEBOUNCE_MS = 300;
+
+// GFM's task list only carries `checked` as a li[data-checked] attribute — the preset
+// ships no checkbox UI. The glyph is drawn by CSS (`.memo-editor li[data-checked]::before`)
+// and this plugin toggles the attribute when the gutter (the li itself, not its text
+// children) is clicked.
+const taskCheckboxToggle = $prose(
+  () =>
+    new Plugin({
+      props: {
+        handleClick: (view, _pos, event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLElement) || target.tagName !== "LI") return false;
+          if (target.dataset.checked === undefined) return false;
+          const pos = view.posAtDOM(target, 0) - 1;
+          const node = view.state.doc.nodeAt(pos);
+          if (!node || typeof node.attrs.checked !== "boolean") return false;
+          view.dispatch(view.state.tr.setNodeAttribute(pos, "checked", !node.attrs.checked));
+          return true;
+        },
+      },
+    }),
+);
 
 function MemoEditorInner({ taskId, initialValue }: MemoEditorProps) {
   const dirtyRef = useRef<string | null>(null);
@@ -48,8 +71,6 @@ function MemoEditorInner({ taskId, initialValue }: MemoEditorProps) {
             ...prev,
             attributes: { class: "notebook-md memo-editor", spellcheck: "false" },
           }));
-          // Mod-i belongs to the memo toggle (cmd+I closes the modal); move italic aside.
-          ctx.set(emphasisKeymap.key, { ToggleEmphasis: { shortcuts: "Mod-Shift-i" } });
           ctx.get(listenerCtx).markdownUpdated((_ctx, md) => {
             dirtyRef.current = md;
             clearTimeout(timerRef.current);
@@ -60,7 +81,8 @@ function MemoEditorInner({ taskId, initialValue }: MemoEditorProps) {
         })
         .use(commonmark)
         .use(gfm)
-        .use(listener),
+        .use(listener)
+        .use(taskCheckboxToggle),
     [],
   );
 
@@ -69,7 +91,7 @@ function MemoEditorInner({ taskId, initialValue }: MemoEditorProps) {
     get()?.action((ctx) => ctx.get(editorViewCtx).focus());
   }, [loading, get]);
 
-  // Flush on unmount (Esc / overlay click / cmd+I / space switch all converge here).
+  // Flush on unmount (Esc / overlay click / alt+I / space switch all converge here).
   // The listener debounces internally (~200ms), so the last edits may not have reached
   // dirtyRef yet — read the live document synchronously instead of trusting it.
   useEffect(() => {
