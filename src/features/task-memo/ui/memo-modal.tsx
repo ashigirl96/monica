@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { useAtom, useAtomValue } from "jotai";
 import { PreviewDialog, PreviewDialogLoading } from "@/components/preview-dialog";
 import { readTaskMemo } from "@/commands/task";
+import { pendingTaskMemoWrites } from "@/features/task-memo/save-queue";
 import { activeSpaceAtom } from "@/stores/space";
 import { taskMemoAtom } from "@/features/task-memo/store";
 
@@ -21,9 +22,12 @@ export function TaskMemoModal() {
     // warm the milkdown chunk while the memo IPC round-trip is in flight
     void import("@/features/task-memo/ui/memo-editor");
     let cancelled = false;
-    void readTaskMemo(taskId).then((md) => {
-      if (!cancelled) setInitialValue(md);
-    });
+    // a just-closed editor may still be flushing this task's memo; read after it lands
+    void pendingTaskMemoWrites(taskId)
+      .then(() => readTaskMemo(taskId))
+      .then((md) => {
+        if (!cancelled) setInitialValue(md);
+      });
     return () => {
       cancelled = true;
     };

@@ -17,6 +17,7 @@ import { findWrapping } from "@milkdown/kit/prose/transform";
 import { $inputRule, $prose, getMarkdown } from "@milkdown/kit/utils";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { updateTaskMemo } from "@/commands/task";
+import { enqueueTaskMemoWrite } from "@/features/task-memo/save-queue";
 import { invalidateTaskSummaries } from "@/stores/query-keys";
 
 type MemoEditorProps = {
@@ -74,13 +75,12 @@ function MemoEditorInner({ taskId, initialValue }: MemoEditorProps) {
   const lastMdRef = useRef(initialValue);
   const savedRef = useRef(initialValue);
   const timerRef = useRef(0);
-  const saveQueueRef = useRef(Promise.resolve());
 
-  // Saves are chained on a queue so an in-flight autosave can never land after (and
-  // overwrite) a newer write — the unmount flush races the debounced save otherwise.
-  // The dedup check runs inside the queued task, after earlier writes settled.
-  const enqueueSave = (md: string) => {
-    const run = saveQueueRef.current.then(async () => {
+  // Saves are chained on the per-task queue so an in-flight autosave can never land
+  // after (and overwrite) a newer write — the unmount flush races the debounced save
+  // otherwise. The dedup check runs inside the queued task, after earlier writes settled.
+  const enqueueSave = (md: string) =>
+    enqueueTaskMemoWrite(taskId, async () => {
       if (md === savedRef.current) return;
       try {
         await updateTaskMemo(taskId, md);
@@ -89,9 +89,6 @@ function MemoEditorInner({ taskId, initialValue }: MemoEditorProps) {
         // Keep the dirty value; a later queued save or the unmount flush retries.
       }
     });
-    saveQueueRef.current = run;
-    return run;
-  };
 
   const { get, loading } = useEditor(
     (root) =>
