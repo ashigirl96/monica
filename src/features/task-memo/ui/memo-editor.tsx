@@ -126,7 +126,7 @@ function MemoEditorInner({ taskId, initialValue }: MemoEditorProps) {
     });
   }, [loading, get]);
 
-  // Flush on unmount (Esc / overlay click / alt+I / space switch all converge here).
+  // Flush on unmount (Esc / overlay click / alt+M / space switch all converge here).
   // The listener debounces internally (~200ms), so the last edits may not have reached
   // lastMdRef yet — read the live document synchronously instead of trusting it.
   useEffect(() => {

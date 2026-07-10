@@ -5,7 +5,7 @@ import { readTaskMemo } from "@/commands/task";
 import { activeSpaceAtom } from "@/stores/space";
 import { taskMemoAtom } from "@/features/task-memo/store";
 
-// Lazy so @milkdown/* stays out of the startup bundle and loads on first alt+I.
+// Lazy so @milkdown/* stays out of the startup bundle and loads on first alt+M.
 const MemoEditor = lazy(() => import("@/features/task-memo/ui/memo-editor"));
 
 export function TaskMemoModal() {

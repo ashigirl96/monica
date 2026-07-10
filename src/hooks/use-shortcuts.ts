@@ -182,9 +182,12 @@ export function useShortcuts() {
           void togglePlanPreview();
         },
       },
+      // alt+M, not alt+I: Option+I is a macOS dead key (ˆ) and WebKit starts its
+      // composition even when keydown is defaultPrevented, leaking ˆ into the focused
+      // editor/terminal. Option+M types a plain µ, which preventDefault does suppress.
       {
         alt: true,
-        code: "KeyI",
+        code: "KeyM",
         editable: true,
         action: () => {
           if (!toggleTaskMemo()) return false;
