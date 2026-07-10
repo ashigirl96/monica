@@ -358,8 +358,6 @@
   white-space: pre-wrap;
 }
 
-/* GFM task items arrive as bare li[data-checked]; draw the checkbox that the preset
-   doesn't render. The gutter click is handled by the editor's toggle plugin. */
 /* Milkdown wraps every list item's text in a <p>, which inherits notebook-md's 16px
    block rhythm and doubles the visual gap between items; collapse it inside lists. */
 .memo-editor li > p {
@@ -387,19 +385,21 @@
 }
 
 .memo-editor ul > li::before {
-  content: "•";
   position: absolute;
   left: 0;
   width: 0.9em;
+}
+
+.memo-editor ul > li:not([data-checked])::before {
+  content: "•";
   text-align: center;
 }
 
+/* GFM task items arrive as bare li[data-checked]; draw the checkbox that the preset
+   doesn't render. The gutter click is handled by the editor's toggle plugin. */
 .memo-editor li[data-checked]::before {
   content: "";
-  position: absolute;
-  left: 0;
   top: 0.35em;
-  width: 0.9em;
   height: 0.9em;
   border: 1.5px solid var(--muted-foreground);
   border-radius: 3px;

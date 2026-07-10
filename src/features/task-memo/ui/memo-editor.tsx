@@ -71,7 +71,7 @@ const taskAtParagraphStart = $inputRule(
 );
 
 function MemoEditorInner({ taskId, initialValue }: MemoEditorProps) {
-  const dirtyRef = useRef<string | null>(null);
+  const lastMdRef = useRef(initialValue);
   const savedRef = useRef(initialValue);
   const timerRef = useRef(0);
 
@@ -96,11 +96,9 @@ function MemoEditorInner({ taskId, initialValue }: MemoEditorProps) {
             attributes: { class: "notebook-md memo-editor", spellcheck: "false" },
           }));
           ctx.get(listenerCtx).markdownUpdated((_ctx, md) => {
-            dirtyRef.current = md;
+            lastMdRef.current = md;
             clearTimeout(timerRef.current);
-            timerRef.current = window.setTimeout(() => {
-              if (dirtyRef.current !== null) void save(dirtyRef.current);
-            }, AUTOSAVE_DEBOUNCE_MS);
+            timerRef.current = window.setTimeout(() => void save(md), AUTOSAVE_DEBOUNCE_MS);
           });
         })
         .use(commonmark)
@@ -122,22 +120,23 @@ function MemoEditorInner({ taskId, initialValue }: MemoEditorProps) {
 
   // Flush on unmount (Esc / overlay click / alt+I / space switch all converge here).
   // The listener debounces internally (~200ms), so the last edits may not have reached
-  // dirtyRef yet — read the live document synchronously instead of trusting it.
+  // lastMdRef yet — read the live document synchronously instead of trusting it.
   useEffect(() => {
     return () => {
       clearTimeout(timerRef.current);
-      let md = dirtyRef.current;
+      let md = lastMdRef.current;
       try {
         md = get()?.action(getMarkdown()) ?? md;
       } catch {
         // Editor already destroyed; fall back to the last listener snapshot.
       }
-      const flush =
-        md !== null && md !== savedRef.current ? updateTaskMemo(taskId, md) : Promise.resolve();
+      const flush = md !== savedRef.current ? updateTaskMemo(taskId, md) : Promise.resolve();
       void flush
         .catch(() => {})
         .finally(() => {
-          if (md === initialValue && savedRef.current === initialValue) return;
+          // the board summary only reflects has_memo, so refetch only when the
+          // empty/non-empty state changed
+          if ((md === "") === (initialValue === "")) return;
           void invalidateTaskSummaries(getDefaultStore().get(queryClientAtom));
         });
     };
