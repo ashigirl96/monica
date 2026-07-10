@@ -25,6 +25,20 @@ where
     Ok(repos.list_tasks()?)
 }
 
+pub fn task_memo<R>(repos: &R, task_id: &str) -> ApplicationResult<String>
+where
+    R: TaskStore,
+{
+    Ok(repos.task_memo(task_id)?)
+}
+
+pub fn update_task_memo<R>(repos: &R, task_id: &str, memo: &str) -> ApplicationResult<()>
+where
+    R: TaskStore,
+{
+    Ok(repos.update_task_memo(task_id, memo)?)
+}
+
 pub fn list_task_summaries<R>(
     repos: &R,
     filter: TaskSummaryFilter,

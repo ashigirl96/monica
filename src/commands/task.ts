@@ -60,6 +60,14 @@ export function closeTask(taskId: string) {
   return unwrap(commands.closeTask(taskId));
 }
 
+export function readTaskMemo(taskId: string) {
+  return unwrap(commands.readTaskMemo(taskId));
+}
+
+export function updateTaskMemo(taskId: string, memo: string) {
+  return unwrap(commands.updateTaskMemo(taskId, memo));
+}
+
 export function makeMainTaskRun(tabId: string) {
   return unwrap(commands.makeMainTaskRun(tabId));
 }

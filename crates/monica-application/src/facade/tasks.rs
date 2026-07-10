@@ -73,6 +73,14 @@ impl<B: Backend> TaskService<'_, B> {
         crate::usecases::query::list_task_summaries(&self.m.repos, filter, project)
     }
 
+    pub fn task_memo(&self, task_id: &str) -> ApplicationResult<String> {
+        crate::usecases::query::task_memo(&self.m.repos, task_id)
+    }
+
+    pub fn update_task_memo(&self, task_id: &str, memo: &str) -> ApplicationResult<()> {
+        crate::usecases::query::update_task_memo(&self.m.repos, task_id, memo)
+    }
+
     pub fn list_events(&self, task_id: Option<&str>) -> ApplicationResult<Vec<Event>> {
         crate::usecases::query::list_events(&self.m.repos, task_id)
     }

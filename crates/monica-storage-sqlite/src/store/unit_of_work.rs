@@ -62,6 +62,14 @@ impl TaskStore for SqliteUow<'_> {
         tasks::update_task_status(&self.tx, id, status)
     }
 
+    fn task_memo(&self, id: &str) -> Result<String> {
+        tasks::task_memo_in(&self.tx, id)
+    }
+
+    fn update_task_memo(&self, id: &str, memo: &str) -> Result<()> {
+        tasks::update_task_memo_in(&self.tx, id, memo)
+    }
+
     fn mark_task(&mut self, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()> {
         tasks::mark_task_in(&self.tx, id, status, note)
     }

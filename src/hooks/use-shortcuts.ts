@@ -21,6 +21,7 @@ import {
   togglePlanPreviewAtom,
 } from "@/features/work-bench/store";
 import { forceSyncPullRequestsAtom } from "@/stores/pr-sync";
+import { toggleTaskMemoAtom } from "@/features/task-memo/store";
 import { newTaskOpenAtom, projectFilterOpenAtom, cycleBoardViewAtom } from "@/stores/workboard";
 import { cycleLibraryModeAtom } from "@/stores/library";
 import {
@@ -89,6 +90,7 @@ export function useShortcuts() {
   const planPreview = useAtomValue(planPreviewAtom);
   const setPlanPreview = useSetAtom(planPreviewAtom);
   const forceSyncPullRequests = useSetAtom(forceSyncPullRequestsAtom);
+  const toggleTaskMemo = useSetAtom(toggleTaskMemoAtom);
   const jumpActive = useAtomValue(jumpHintsActiveAtom);
   const setJumpActive = useSetAtom(jumpHintsActiveAtom);
   const jumpToHint = useSetAtom(jumpToHintAtom);
@@ -155,7 +157,6 @@ export function useShortcuts() {
         },
       },
       {
-        meta: true,
         alt: true,
         code: "KeyC",
         editable: true,
@@ -178,6 +179,17 @@ export function useShortcuts() {
         action: ({ isWorkBench }) => {
           if (!isWorkBench) return false;
           void togglePlanPreview();
+        },
+      },
+      // alt+M, not alt+I: Option+I is a macOS dead key (ˆ) and WebKit starts its
+      // composition even when keydown is defaultPrevented, leaking ˆ into the focused
+      // editor/terminal. Option+M types a plain µ, which preventDefault does suppress.
+      {
+        alt: true,
+        code: "KeyM",
+        editable: true,
+        action: () => {
+          if (!toggleTaskMemo()) return false;
         },
       },
       {
@@ -416,6 +428,7 @@ export function useShortcuts() {
     planPreview,
     setPlanPreview,
     forceSyncPullRequests,
+    toggleTaskMemo,
     jumpActive,
     setJumpActive,
     jumpToHint,

@@ -15,6 +15,8 @@ pub trait TaskStore {
     fn list_tasks(&self) -> Result<Vec<Task>>;
     fn set_primary_task_run(&self, task_id: &str, task_run_id: &str) -> Result<()>;
     fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()>;
+    fn task_memo(&self, id: &str) -> Result<String>;
+    fn update_task_memo(&self, id: &str, memo: &str) -> Result<()>;
     fn mark_task(&mut self, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()>;
     fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalReference>>;
 }
