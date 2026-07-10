@@ -2895,6 +2895,7 @@ dependencies = [
  "monica-runtime",
  "monica-terminal-client",
  "monica-terminal-protocol",
+ "monica-web",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
@@ -2994,6 +2995,15 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "monica-web"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "oxhttp",
 ]
 
 [[package]]
@@ -3671,6 +3681,16 @@ checksum = "9aa2b01e1d916879f73a53d01d1d6cee68adbb31d6d9177a8cfce093cced1d50"
 dependencies = [
  "futures-core",
  "pin-project-lite",
+]
+
+[[package]]
+name = "oxhttp"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9855b85a55168c358914bb10df57e44a5fe833301262012cdb2a9dbd26295ac8"
+dependencies = [
+ "httparse",
+ "url",
 ]
 
 [[package]]

@@ -119,6 +119,17 @@ pub fn run() {
             let drain = schedulers::notification_drain::start(app.handle().clone());
             app.manage(drain);
             ptyd::start_warmup(app.handle().clone());
+            let web_port = if cfg!(debug_assertions) { 0 } else { 19280 };
+            if let Err(e) = std::thread::Builder::new()
+                .name("monica-web".into())
+                .spawn(move || {
+                    if let Err(e) = monica_web::serve(([127, 0, 0, 1], web_port)) {
+                        log::error!(target: "monica_desktop::web", "web server failed: {e:?}");
+                    }
+                })
+            {
+                log::warn!(target: "monica_desktop::web", "failed to spawn web server thread: {e}");
+            }
             #[cfg(not(debug_assertions))]
             log::info!(
                 target: "monica_app::startup",
