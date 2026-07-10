@@ -12,7 +12,7 @@ import { bulletListSchema, commonmark } from "@milkdown/kit/preset/commonmark";
 import { gfm } from "@milkdown/kit/preset/gfm";
 import { listener, listenerCtx } from "@milkdown/kit/plugin/listener";
 import { InputRule } from "@milkdown/kit/prose/inputrules";
-import { Plugin } from "@milkdown/kit/prose/state";
+import { Plugin, Selection } from "@milkdown/kit/prose/state";
 import { findWrapping } from "@milkdown/kit/prose/transform";
 import { $inputRule, $prose, getMarkdown } from "@milkdown/kit/utils";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
@@ -113,7 +113,11 @@ function MemoEditorInner({ taskId, initialValue }: MemoEditorProps) {
 
   useEffect(() => {
     if (loading) return;
-    get()?.action((ctx) => ctx.get(editorViewCtx).focus());
+    get()?.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)).scrollIntoView());
+      view.focus();
+    });
   }, [loading, get]);
 
   // Flush on unmount (Esc / overlay click / alt+I / space switch all converge here).
