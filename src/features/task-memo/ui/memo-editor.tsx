@@ -74,15 +74,23 @@ function MemoEditorInner({ taskId, initialValue }: MemoEditorProps) {
   const lastMdRef = useRef(initialValue);
   const savedRef = useRef(initialValue);
   const timerRef = useRef(0);
+  const saveQueueRef = useRef(Promise.resolve());
 
-  const save = async (md: string) => {
-    if (md === savedRef.current) return;
-    try {
-      await updateTaskMemo(taskId, md);
-      savedRef.current = md;
-    } catch {
-      // Keep the dirty value; the next debounce tick or the unmount flush retries.
-    }
+  // Saves are chained on a queue so an in-flight autosave can never land after (and
+  // overwrite) a newer write — the unmount flush races the debounced save otherwise.
+  // The dedup check runs inside the queued task, after earlier writes settled.
+  const enqueueSave = (md: string) => {
+    const run = saveQueueRef.current.then(async () => {
+      if (md === savedRef.current) return;
+      try {
+        await updateTaskMemo(taskId, md);
+        savedRef.current = md;
+      } catch {
+        // Keep the dirty value; a later queued save or the unmount flush retries.
+      }
+    });
+    saveQueueRef.current = run;
+    return run;
   };
 
   const { get, loading } = useEditor(
@@ -98,7 +106,7 @@ function MemoEditorInner({ taskId, initialValue }: MemoEditorProps) {
           ctx.get(listenerCtx).markdownUpdated((_ctx, md) => {
             lastMdRef.current = md;
             clearTimeout(timerRef.current);
-            timerRef.current = window.setTimeout(() => void save(md), AUTOSAVE_DEBOUNCE_MS);
+            timerRef.current = window.setTimeout(() => void enqueueSave(md), AUTOSAVE_DEBOUNCE_MS);
           });
         })
         .use(commonmark)
@@ -130,15 +138,12 @@ function MemoEditorInner({ taskId, initialValue }: MemoEditorProps) {
       } catch {
         // Editor already destroyed; fall back to the last listener snapshot.
       }
-      const flush = md !== savedRef.current ? updateTaskMemo(taskId, md) : Promise.resolve();
-      void flush
-        .catch(() => {})
-        .finally(() => {
-          // the board summary only reflects has_memo, so refetch only when the
-          // empty/non-empty state changed
-          if ((md === "") === (initialValue === "")) return;
-          void invalidateTaskSummaries(getDefaultStore().get(queryClientAtom));
-        });
+      void enqueueSave(md).finally(() => {
+        // the board summary only reflects has_memo, so refetch only when the
+        // empty/non-empty state changed
+        if ((md === "") === (initialValue === "")) return;
+        void invalidateTaskSummaries(getDefaultStore().get(queryClientAtom));
+      });
     };
   }, []);
 
