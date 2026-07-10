@@ -50,7 +50,7 @@ export function PreviewDialog({
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={onDialogKeyDown}
-        className="animate-in zoom-in-95 flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-2xl outline-none duration-150"
+        className="animate-in zoom-in-95 flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-2xl outline-none duration-150"
       >
         <header className="flex items-center gap-3 border-b border-border px-4 py-2.5">
           <span className="rounded bg-foreground/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-foreground/70">
@@ -74,7 +74,11 @@ export function PreviewDialog({
             <XIcon size={14} />
           </button>
         </header>
-        <div ref={bodyRef} className={cn("overflow-y-auto px-6 py-5", bodyClassName)}>
+        {/* lift notebook-md's 980px reading cap so the content tracks the dialog width */}
+        <div
+          ref={bodyRef}
+          className={cn("overflow-y-auto px-6 py-5 [&_.notebook-md]:max-w-none", bodyClassName)}
+        >
           {children}
         </div>
       </div>
