@@ -1,0 +1,13 @@
+[package]
+name = "monica-web"
+version = "0.1.0"
+edition = "2021"
+description = "Monica HTTP server for external browser access"
+
+[dependencies]
+anyhow = "1"
+log = "0.4"
+oxhttp = { version = "0.2", default-features = false, features = ["server"] }
+
+[dev-dependencies]
+oxhttp = { version = "0.2", default-features = false, features = ["client", "server"] }
