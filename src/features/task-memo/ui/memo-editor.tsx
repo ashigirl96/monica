@@ -8,11 +8,13 @@ import {
   editorViewOptionsCtx,
   rootCtx,
 } from "@milkdown/kit/core";
-import { commonmark } from "@milkdown/kit/preset/commonmark";
+import { bulletListSchema, commonmark } from "@milkdown/kit/preset/commonmark";
 import { gfm } from "@milkdown/kit/preset/gfm";
 import { listener, listenerCtx } from "@milkdown/kit/plugin/listener";
+import { InputRule } from "@milkdown/kit/prose/inputrules";
 import { Plugin } from "@milkdown/kit/prose/state";
-import { $prose, getMarkdown } from "@milkdown/kit/utils";
+import { findWrapping } from "@milkdown/kit/prose/transform";
+import { $inputRule, $prose, getMarkdown } from "@milkdown/kit/utils";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { updateTaskMemo } from "@/commands/task";
 import { invalidateTaskSummaries } from "@/stores/query-keys";
@@ -43,6 +45,28 @@ const taskCheckboxToggle = $prose(
           return true;
         },
       },
+    }),
+);
+
+// Notion-style shortcut: `[ ] ` / `[x] ` at the start of a plain paragraph becomes a task
+// item. GFM's own rule only fires inside an existing list item (after typing `- ` first).
+const taskAtParagraphStart = $inputRule(
+  (ctx) =>
+    new InputRule(/^\[(?<checked>\s|x)\]\s$/, (state, match, start, end) => {
+      const $start = state.doc.resolve(start);
+      for (let depth = $start.depth; depth > 0; depth--) {
+        if ($start.node(depth).type.name === "list_item") return null;
+      }
+      const tr = state.tr.delete(start, end);
+      const range = tr.doc.resolve(start).blockRange();
+      if (!range) return null;
+      const wrapping = findWrapping(range, bulletListSchema.type(ctx));
+      if (!wrapping) return null;
+      tr.wrap(range, wrapping);
+      // the wrap puts bullet_list at range.start, so its list_item sits one position in
+      return tr.setNodeMarkup(range.start + 1, undefined, {
+        checked: match.groups?.checked === "x",
+      });
     }),
 );
 
@@ -82,7 +106,8 @@ function MemoEditorInner({ taskId, initialValue }: MemoEditorProps) {
         .use(commonmark)
         .use(gfm)
         .use(listener)
-        .use(taskCheckboxToggle),
+        .use(taskCheckboxToggle)
+        .use(taskAtParagraphStart),
     [],
   );
 

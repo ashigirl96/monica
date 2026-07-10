@@ -371,21 +371,33 @@
   margin-top: 0.25em;
 }
 
-/* The li box is widened to cover the marker gutter (margin/padding pair) so the
-   pseudo checkbox sits inside it and clicks on it hit the li — the toggle plugin
-   only reacts when event.target is the li itself. */
-.memo-editor li[data-checked] {
+/* Notion-style gutter: markers sit at the paragraph text column instead of notebook-md's
+   2em indent. Each li's box is widened over its own gutter (margin/padding pair) so the
+   pseudo marker stays inside the li — the checkbox toggle plugin only reacts when
+   event.target is the li itself. */
+.memo-editor ul {
   list-style: none;
+  padding-left: 1.5em;
+}
+
+.memo-editor ul > li {
   position: relative;
   margin-left: -1.5em;
   padding-left: 1.5em;
 }
 
+.memo-editor ul > li::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  width: 0.9em;
+  text-align: center;
+}
+
 .memo-editor li[data-checked]::before {
   content: "";
   position: absolute;
-  /* line the box's center up with the disc marker of sibling plain bullets */
-  left: 0.5em;
+  left: 0;
   top: 0.35em;
   width: 0.9em;
   height: 0.9em;

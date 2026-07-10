@@ -162,7 +162,6 @@ export function useShortcuts() {
         },
       },
       {
-        meta: true,
         alt: true,
         code: "KeyC",
         editable: true,
