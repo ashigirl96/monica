@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 
-use monica_domain::{Explanation, ExplanationId, ExplanationMode, NewExplanation};
+use monica_domain::{
+    Explanation, ExplanationId, ExplanationMode, NewExplanation, repo_name_from_cwd,
+};
 
 use crate::error::{ApplicationError, ApplicationResult};
-use crate::ports::{ExplanationOutputs, ExplanationStore, TerminalSessionRepository};
+use crate::ports::{ExplanationOutputs, ExplanationStore, ProjectRepository, TerminalSessionRepository};
 use super::Backend;
 
 pub struct ExplanationService<'a, B: Backend> {
@@ -11,6 +13,19 @@ pub struct ExplanationService<'a, B: Backend> {
 }
 
 impl<B: Backend> ExplanationService<'_, B> {
+    fn resolve_repo_name(&mut self, cwd: &str) -> Option<String> {
+        if let Ok(projects) = self.m.repos.list_projects() {
+            for project in &projects {
+                if let Some(path) = &project.path {
+                    if cwd.starts_with(path.as_str()) {
+                        return Some(project.name.clone());
+                    }
+                }
+            }
+        }
+        repo_name_from_cwd(cwd)
+    }
+
     pub fn list_explanations(&mut self) -> ApplicationResult<Vec<Explanation>> {
         Ok(self.m.repos.list_explanations()?)
     }
@@ -55,12 +70,15 @@ impl<B: Backend> ExplanationService<'_, B> {
                 ))
             })?;
 
+        let repo_name = self.resolve_repo_name(&session.cwd);
+
         let explanation = self.m.repos.insert_explanation(NewExplanation {
             title: title.to_string(),
             summary: summary.map(str::to_string),
             mode,
             provider_session_id,
             terminal_session_id: terminal_session_id.to_string(),
+            repo_name,
         })?;
 
         let index_path = match self

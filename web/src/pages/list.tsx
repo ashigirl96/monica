@@ -40,9 +40,16 @@ function Card({
     >
       <div className={`absolute inset-y-0 left-0 w-1 ${edge}`} />
       <div className="flex items-baseline justify-between gap-3">
-        <ModeLabel mode={item.mode} />
+        <div className="flex items-baseline gap-2">
+          <ModeLabel mode={item.mode} />
+          {item.repo_name && (
+            <span className="truncate font-mono text-xs text-muted-foreground/60">
+              {item.repo_name}
+            </span>
+          )}
+        </div>
         <span
-          className={`font-mono text-lg text-muted-foreground/25 transition-colors ${ghostHover}`}
+          className={`shrink-0 font-mono text-lg text-muted-foreground/25 transition-colors ${ghostHover}`}
         >
           {item.id}
         </span>
@@ -116,7 +123,10 @@ export function ListPage() {
     const q = query.trim().toLowerCase();
     if (!q) return explanations;
     return explanations.filter(
-      (e) => e.title.toLowerCase().includes(q) || e.id.toLowerCase().includes(q),
+      (e) =>
+        e.title.toLowerCase().includes(q) ||
+        e.id.toLowerCase().includes(q) ||
+        (e.repo_name?.toLowerCase().includes(q) ?? false),
     );
   }, [explanations, query]);
 

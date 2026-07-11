@@ -10,6 +10,7 @@ export type Explanation = {
   provider_session_id: string;
   terminal_session_id: string;
   created_at: string;
+  repo_name: string | null;
 };
 
 export type ExplanationMode = "diff" | "topic";

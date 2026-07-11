@@ -292,6 +292,7 @@ mod tests {
                 mode: ExplanationMode::Diff,
                 provider_session_id: "p1".to_string(),
                 terminal_session_id: session.id,
+                repo_name: None,
             })
             .unwrap();
         explanation.id.into_string()
