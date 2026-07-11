@@ -2,10 +2,10 @@ use anyhow::Result;
 use monica_application::ports::TerminalSessionRepository;
 use monica_application::{TerminalSessionUpdate, TerminalStateSnapshot};
 use monica_domain::{
-    AgentSessionStatus, NewTerminalSession, TaskRunWaitReason, TerminalSession,
-    TerminalSessionKind, TerminalSessionStatus,
+    AgentSessionStatus, NewTerminalSession, ProviderSessionEvent, TaskRunWaitReason,
+    TerminalSession, TerminalSessionKind, TerminalSessionStatus,
 };
-use rusqlite::{params, Row};
+use rusqlite::{params, OptionalExtension, Row, Transaction, TransactionBehavior};
 
 use monica_paths as paths;
 use crate::SqliteStore;
@@ -13,6 +13,12 @@ use crate::SqliteStore;
 use super::SET_NOW;
 
 const SESSION_COLUMNS: &str = "id, runspace_id, tab_id, kind, cwd, shell, status, agent_status, agent_wait_reason,      provider_session_id, pid, rows, cols, transcript_path, exit_code, started_at, last_seen_at,      exited_at, created_at, updated_at";
+type AgentStateRow = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
 
 fn session_from_row(row: &Row<'_>) -> Result<TerminalSession> {
     let kind: String = row.get("kind")?;
@@ -128,23 +134,72 @@ impl SqliteStore {
         agent_status: Option<AgentSessionStatus>,
         agent_wait_reason: Option<TaskRunWaitReason>,
         provider_session_id: Option<&str>,
+        provider_event: ProviderSessionEvent,
     ) -> Result<bool> {
-        let affected = self.conn().execute(
+        let tx = Transaction::new_unchecked(self.conn(), TransactionBehavior::Immediate)?;
+        let current: Option<AgentStateRow> = tx
+            .query_row(
+                "SELECT agent_status, agent_wait_reason, provider_session_id,
+                        provider_handoff_from
+                   FROM terminal_sessions WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?;
+        let Some((current_status, current_reason, current_provider, current_handoff)) = current
+        else {
+            tx.commit()?;
+            return Ok(false);
+        };
+
+        let Some(binding) = provider_event.reconcile(
+            current_provider.as_deref(),
+            current_handoff.as_deref(),
+            provider_session_id,
+        ) else {
+            tx.commit()?;
+            return Ok(false);
+        };
+
+        let status = agent_status.map(AgentSessionStatus::as_str);
+        let reason = agent_wait_reason.map(TaskRunWaitReason::as_str);
+        let state_changed = current_status.as_deref() != status || current_reason.as_deref() != reason;
+        tx.execute(
             &format!(
                 "UPDATE terminal_sessions
                     SET agent_status = ?2, agent_wait_reason = ?3,
-                        provider_session_id = ?4, updated_at = {SET_NOW}
-                  WHERE id = ?1
-                    AND (agent_status IS NOT ?2 OR agent_wait_reason IS NOT ?3)"
+                        provider_session_id = ?4, provider_handoff_from = ?5,
+                        updated_at = {SET_NOW}
+                  WHERE id = ?1"
             ),
             params![
                 id,
-                agent_status.map(AgentSessionStatus::as_str),
-                agent_wait_reason.map(TaskRunWaitReason::as_str),
-                provider_session_id,
+                status,
+                reason,
+                binding.provider_session_id,
+                binding.handoff_from
             ],
         )?;
-        Ok(affected > 0)
+        tx.commit()?;
+        Ok(state_changed)
+    }
+
+    pub fn clear_terminal_session_agent_status(
+        &self,
+        id: &str,
+        provider_session_id: Option<&str>,
+    ) -> Result<()> {
+        self.conn().execute(
+            &format!(
+                "UPDATE terminal_sessions
+                    SET agent_status = NULL, agent_wait_reason = NULL,
+                        provider_session_id = NULL, provider_handoff_from = NULL,
+                        updated_at = {SET_NOW}
+                  WHERE id = ?1 AND provider_session_id IS ?2"
+            ),
+            params![id, provider_session_id],
+        )?;
+        Ok(())
     }
 
     /// Record a successful daemon spawn: starting → running with the live pid.
@@ -259,6 +314,7 @@ impl TerminalSessionRepository for SqliteStore {
         agent_status: Option<AgentSessionStatus>,
         agent_wait_reason: Option<TaskRunWaitReason>,
         provider_session_id: Option<&str>,
+        provider_event: ProviderSessionEvent,
     ) -> Result<bool> {
         SqliteStore::set_terminal_session_agent_status(
             self,
@@ -266,7 +322,16 @@ impl TerminalSessionRepository for SqliteStore {
             agent_status,
             agent_wait_reason,
             provider_session_id,
+            provider_event,
         )
+    }
+
+    fn clear_terminal_session_agent_status(
+        &self,
+        id: &str,
+        provider_session_id: Option<&str>,
+    ) -> Result<()> {
+        SqliteStore::clear_terminal_session_agent_status(self, id, provider_session_id)
     }
 
     fn get_terminal_session(&self, id: &str) -> Result<Option<TerminalSession>> {
@@ -295,5 +360,138 @@ impl TerminalSessionRepository for SqliteStore {
         snapshot: &TerminalStateSnapshot,
     ) -> Result<()> {
         SqliteStore::save_terminal_state(self, window_label, snapshot)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_session(db: &mut SqliteStore) -> TerminalSession {
+        db.create_terminal_session(NewTerminalSession {
+            runspace_id: None,
+            tab_id: Some("tab-1".to_string()),
+            kind: TerminalSessionKind::Agent,
+            cwd: "/tmp".to_string(),
+            shell: "/bin/zsh".to_string(),
+            rows: 24,
+            cols: 80,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn session_start_can_rebind_provider_without_reporting_a_state_edge() {
+        let mut db = SqliteStore::open_in_memory().unwrap();
+        let session = create_session(&mut db);
+
+        assert!(db
+            .set_terminal_session_agent_status(
+                &session.id,
+                Some(AgentSessionStatus::Running),
+                None,
+                Some("provider-old"),
+                ProviderSessionEvent::Started,
+            )
+            .unwrap());
+        assert!(!db
+            .set_terminal_session_agent_status(
+                &session.id,
+                Some(AgentSessionStatus::Running),
+                None,
+                Some("provider-new"),
+                ProviderSessionEvent::Started,
+            )
+            .unwrap());
+
+        let stored = db.get_terminal_session(&session.id).unwrap().unwrap();
+        assert_eq!(stored.provider_session_id.as_deref(), Some("provider-new"));
+    }
+
+    #[test]
+    fn stale_provider_events_cannot_overwrite_or_clear_the_active_provider() {
+        let mut db = SqliteStore::open_in_memory().unwrap();
+        let session = create_session(&mut db);
+        db.set_terminal_session_agent_status(
+            &session.id,
+            Some(AgentSessionStatus::Running),
+            None,
+            Some("provider-old"),
+            ProviderSessionEvent::Started,
+        )
+        .unwrap();
+        db.set_terminal_session_agent_status(
+            &session.id,
+            Some(AgentSessionStatus::Running),
+            None,
+            Some("provider-new"),
+            ProviderSessionEvent::Started,
+        )
+        .unwrap();
+
+        assert!(!db
+            .set_terminal_session_agent_status(
+                &session.id,
+                Some(AgentSessionStatus::WaitingForUser),
+                Some(TaskRunWaitReason::PermissionRequest),
+                Some("provider-old"),
+                ProviderSessionEvent::Observed,
+            )
+            .unwrap());
+        db.clear_terminal_session_agent_status(&session.id, Some("provider-old"))
+            .unwrap();
+
+        let stored = db.get_terminal_session(&session.id).unwrap().unwrap();
+        assert_eq!(stored.agent_status, Some(AgentSessionStatus::Running));
+        assert_eq!(stored.provider_session_id.as_deref(), Some("provider-new"));
+
+        db.clear_terminal_session_agent_status(&session.id, Some("provider-new"))
+            .unwrap();
+        let cleared = db.get_terminal_session(&session.id).unwrap().unwrap();
+        assert_eq!(cleared.agent_status, None);
+        assert_eq!(cleared.provider_session_id, None);
+    }
+
+    #[test]
+    fn resume_handoff_is_persisted_and_consumed_once() {
+        let mut db = SqliteStore::open_in_memory().unwrap();
+        let session = create_session(&mut db);
+        db.set_terminal_session_agent_status(
+            &session.id,
+            Some(AgentSessionStatus::Running),
+            None,
+            Some("provider-source"),
+            ProviderSessionEvent::ResumeStarted,
+        )
+        .unwrap();
+
+        db.set_terminal_session_agent_status(
+            &session.id,
+            Some(AgentSessionStatus::Running),
+            None,
+            Some("provider-source"),
+            ProviderSessionEvent::PromptSubmitted,
+        )
+        .unwrap();
+        db.set_terminal_session_agent_status(
+            &session.id,
+            Some(AgentSessionStatus::Running),
+            None,
+            Some("provider-new"),
+            ProviderSessionEvent::PromptSubmitted,
+        )
+        .unwrap();
+        db.set_terminal_session_agent_status(
+            &session.id,
+            Some(AgentSessionStatus::WaitingForUser),
+            Some(TaskRunWaitReason::PermissionRequest),
+            Some("provider-late"),
+            ProviderSessionEvent::PromptSubmitted,
+        )
+        .unwrap();
+
+        let stored = db.get_terminal_session(&session.id).unwrap().unwrap();
+        assert_eq!(stored.provider_session_id.as_deref(), Some("provider-new"));
+        assert_eq!(stored.agent_status, Some(AgentSessionStatus::Running));
     }
 }

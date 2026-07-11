@@ -7,6 +7,7 @@
 //! operation / per thread via the `monica-runtime` constructor — never share one across threads.
 
 mod backend;
+mod explanations;
 mod executions;
 mod notifications;
 mod projects;
@@ -14,6 +15,7 @@ mod synchronization;
 mod tasks;
 
 pub use backend::Backend;
+pub use explanations::ExplanationService;
 pub use executions::ExecutionService;
 pub use notifications::NotificationService;
 pub use projects::{ProjectInit, ProjectService};
@@ -68,5 +70,9 @@ impl<B: Backend> Monica<B> {
 
     pub fn notifications(&mut self) -> NotificationService<'_, B> {
         NotificationService { m: self }
+    }
+
+    pub fn explanations(&mut self) -> ExplanationService<'_, B> {
+        ExplanationService { m: self }
     }
 }

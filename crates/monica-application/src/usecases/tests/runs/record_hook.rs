@@ -1,5 +1,22 @@
 use super::*;
 
+fn terminal_session_for_hook(repos: &mut FakeRepos) -> String {
+    use crate::ports::TerminalSessionRepository;
+
+    repos
+        .create_terminal_session(NewTerminalSession {
+            runspace_id: Some("rs-1".to_string()),
+            tab_id: Some("tab-1".to_string()),
+            kind: TerminalSessionKind::Shell,
+            cwd: "/".to_string(),
+            shell: "/bin/zsh".to_string(),
+            rows: 24,
+            cols: 80,
+        })
+        .unwrap()
+        .id
+}
+
 #[test]
 fn record_claude_hook_records_waiting_transition_and_run_output() {
     let mut repos = FakeRepos::default();
@@ -785,24 +802,14 @@ fn record_claude_hook_tracks_agent_status_on_session_without_task() {
     use crate::prelude::AgentSessionStatus;
 
     let mut repos = FakeRepos::default();
-    let session = repos
-        .create_terminal_session(NewTerminalSession {
-            runspace_id: Some("rs-1".to_string()),
-            tab_id: Some("tab-1".to_string()),
-            kind: TerminalSessionKind::Shell,
-            cwd: "/".to_string(),
-            shell: "/bin/zsh".to_string(),
-            rows: 24,
-            cols: 80,
-        })
-        .unwrap();
+    let session_id = terminal_session_for_hook(&mut repos);
     let ctx = HookContext {
-        terminal_session_id: Some(&session.id),
+        terminal_session_id: Some(&session_id),
         ..HookContext::default()
     };
 
     record_claude_hook(&mut repos, ctx, &started("sess-1", Continuation::Fresh)).unwrap();
-    let s = repos.get_terminal_session(&session.id).unwrap().unwrap();
+    let s = repos.get_terminal_session(&session_id).unwrap().unwrap();
     assert_eq!(s.agent_status, Some(AgentSessionStatus::Running));
     assert_eq!(s.agent_wait_reason, None);
     assert_eq!(s.provider_session_id.as_deref(), Some("sess-1"));
@@ -813,21 +820,76 @@ fn record_claude_hook_tracks_agent_status_on_session_without_task() {
         &input_required(Some("sess-1"), TaskRunWaitReason::ExitPlanMode),
     )
     .unwrap();
-    let s = repos.get_terminal_session(&session.id).unwrap().unwrap();
+    let s = repos.get_terminal_session(&session_id).unwrap().unwrap();
     assert_eq!(s.agent_status, Some(AgentSessionStatus::WaitingForUser));
     assert_eq!(s.agent_wait_reason, Some(TaskRunWaitReason::ExitPlanMode));
     assert_eq!(s.provider_session_id.as_deref(), Some("sess-1"));
 
     record_claude_hook(&mut repos, ctx, &turn_completed("sess-1", false)).unwrap();
-    let s = repos.get_terminal_session(&session.id).unwrap().unwrap();
+    let s = repos.get_terminal_session(&session_id).unwrap().unwrap();
     assert_eq!(s.agent_status, Some(AgentSessionStatus::WaitingForUser));
     assert_eq!(s.agent_wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
 
     record_claude_hook(&mut repos, ctx, &session_ended("sess-1")).unwrap();
-    let s = repos.get_terminal_session(&session.id).unwrap().unwrap();
+    let s = repos.get_terminal_session(&session_id).unwrap().unwrap();
     assert_eq!(s.agent_status, None);
     assert_eq!(s.agent_wait_reason, None);
     assert_eq!(s.provider_session_id, None);
+}
+
+#[test]
+fn terminal_provider_handoff_rejects_stale_prompts_and_clears() {
+    use crate::ports::TerminalSessionRepository;
+
+    let mut repos = FakeRepos::default();
+    let session_id = terminal_session_for_hook(&mut repos);
+    let ctx = HookContext {
+        terminal_session_id: Some(&session_id),
+        ..HookContext::default()
+    };
+
+    record_claude_hook(&mut repos, ctx, &started("sess-active", Continuation::Fresh)).unwrap();
+    record_claude_hook(&mut repos, ctx, &prompt("sess-stale")).unwrap();
+    assert_eq!(
+        repos
+            .get_terminal_session(&session_id)
+            .unwrap()
+            .unwrap()
+            .provider_session_id
+            .as_deref(),
+        Some("sess-active")
+    );
+
+    record_claude_hook(
+        &mut repos,
+        ctx,
+        &started("sess-source", Continuation::Resume),
+    )
+    .unwrap();
+    // A delayed source prompt must not consume the handoff before a fork reveals its new id.
+    record_claude_hook(&mut repos, ctx, &prompt("sess-source")).unwrap();
+    record_claude_hook(&mut repos, ctx, &prompt("sess-new")).unwrap();
+    record_claude_hook(&mut repos, ctx, &prompt("sess-source")).unwrap();
+    record_claude_hook(&mut repos, ctx, &session_ended("sess-source")).unwrap();
+    assert_eq!(
+        repos
+            .get_terminal_session(&session_id)
+            .unwrap()
+            .unwrap()
+            .provider_session_id
+            .as_deref(),
+        Some("sess-new")
+    );
+
+    record_claude_hook(&mut repos, ctx, &session_ended("sess-new")).unwrap();
+    assert_eq!(
+        repos
+            .get_terminal_session(&session_id)
+            .unwrap()
+            .unwrap()
+            .provider_session_id,
+        None
+    );
 }
 
 #[test]

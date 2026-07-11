@@ -26,15 +26,16 @@ pub use events::{ApplicationEvent, EventSink};
 pub use execution_profile::{ExecutionProfile, PermissionMode};
 pub use input::parse_issue_input;
 pub use facade::{
-    Backend, ExecutionService, Monica, ProjectInit, ProjectService, SynchronizationService,
-    TaskService,
+    Backend, ExecutionService, ExplanationService, Monica, ProjectInit, ProjectService,
+    SynchronizationService, TaskService,
 };
 
 pub use ports::{
-    AgentDecoders, AgentEventDecoder, EventRepository, GitGateway, NotificationOutboxStore,
-    ProjectRepository, PullRequestSyncStore, ShellScaffolding, TaskBoardQuery, TaskRunStore,
-    TaskStore, TaskSummaryFilter, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
-    TerminalSessionRepository, UnitOfWork, WorkbenchStore, WorkTransaction, Workspace, WorktreeRef,
+    AgentDecoders, AgentEventDecoder, EventRepository, ExplanationRepository, GitGateway,
+    NotificationOutboxStore, ProjectRepository, PullRequestSyncStore, ShellScaffolding,
+    TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter, TerminalAttachment,
+    TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository, UnitOfWork, WorkbenchStore,
+    WorkTransaction, Workspace, WorktreeRef,
 };
 
 // Application-owned types (NOT in monica-domain)

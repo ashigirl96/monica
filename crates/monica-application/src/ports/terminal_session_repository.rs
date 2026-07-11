@@ -1,8 +1,8 @@
 use anyhow::Result;
 
 use monica_domain::{
-    AgentSessionStatus, NewTerminalSession, TaskRunWaitReason, TerminalSession,
-    TerminalSessionStatus,
+    AgentSessionStatus, NewTerminalSession, ProviderSessionEvent, TaskRunWaitReason,
+    TerminalSession, TerminalSessionStatus,
 };
 
 use crate::terminal_state::TerminalStateSnapshot;
@@ -25,16 +25,26 @@ pub trait TerminalSessionRepository {
         exit_code: Option<i32>,
     ) -> Result<()>;
 
-    /// Update the hook-observed agent state driving the per-tab indicator. `None` clears it.
-    /// Returns `true` when the stored state actually changed (the UPDATE matched a row whose
-    /// previous values differ). A missing session row is a silent no-op (`false`).
+    /// Set the hook-observed agent state driving the per-tab indicator. `provider_event` lets the
+    /// store atomically enforce explicit starts and one-shot resume handoffs; unrelated provider
+    /// evidence is ignored. Returns `true` only when status/reason changed; provider-only claims
+    /// and missing rows return `false`.
     fn set_terminal_session_agent_status(
         &self,
         id: &str,
         agent_status: Option<AgentSessionStatus>,
         agent_wait_reason: Option<TaskRunWaitReason>,
         provider_session_id: Option<&str>,
+        provider_event: ProviderSessionEvent,
     ) -> Result<bool>;
+
+    /// Clear agent state only when the ending hook still owns this terminal session. A late
+    /// SessionEnd from an older provider must not clear a newer provider's state.
+    fn clear_terminal_session_agent_status(
+        &self,
+        id: &str,
+        provider_session_id: Option<&str>,
+    ) -> Result<()>;
 
     fn get_terminal_session(&self, id: &str) -> Result<Option<TerminalSession>>;
 

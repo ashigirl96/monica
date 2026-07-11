@@ -7,17 +7,17 @@ use anyhow::{anyhow, Result};
 use monica_domain::RawJson;
 
 use crate::ports::{
-    AgentDecoders, BoxFuture, EventRepository, GitGateway, NotificationOutboxStore,
-    ProjectRepository, PullRequestSyncStore, TaskBoardQuery, TaskRunStore, TaskStore,
+    AgentDecoders, BoxFuture, EventRepository, ExplanationRepository, GitGateway,
+    NotificationOutboxStore, ProjectRepository, PullRequestSyncStore, TaskBoardQuery, TaskRunStore, TaskStore,
     TaskSummaryFilter, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
     TerminalSessionRepository, UnitOfWork, WorkTransaction, WorkbenchStore, Workspace,
 };
 use crate::usecases::runs::record_hook;
 use crate::prelude::{
-    Agent, AgentSignal, Continuation, DisplayStatus, Event, ExternalReference,
-    NewNotificationIntent, NewTask, NewTaskRun, NewTerminalSession,
-    NotificationIntent, Project, Provider, RefType, SignalKind, Task, TaskId, TaskKind, TaskRun,
-    TaskRunId, TaskRunStatus, TaskRunWaitReason, TaskStatus, TerminalSession,
+    Agent, AgentSignal, Continuation, DisplayStatus, Event, Explanation, ExternalReference,
+    NewExplanation, NewNotificationIntent, NewTask, NewTaskRun, NewTerminalSession,
+    NotificationIntent, Project, Provider, ProviderSessionEvent, RefType, SignalKind, Task, TaskId,
+    TaskKind, TaskRun, TaskRunId, TaskRunStatus, TaskRunWaitReason, TaskStatus, TerminalSession,
     AgentSessionStatus,
     TerminalSessionKind, TerminalSessionStatus,
 };
@@ -111,9 +111,12 @@ struct FakeState {
     benches: BTreeMap<String, (String, String)>,
     /// Insertion order is creation order, so the last match for a tab is its latest session.
     terminal_sessions: Vec<TerminalSession>,
+    terminal_provider_handoffs: HashMap<String, String>,
+    explanations: Vec<Explanation>,
     next_task: i64,
     next_run: i64,
     next_session: i64,
+    next_explanation: i64,
     pr_branch_candidate: Option<PullRequestBranchSyncCandidate>,
     pr_status_candidate: Option<PullRequestStatusSyncCandidate>,
     pr_branch_success_count: usize,
@@ -1457,15 +1460,56 @@ impl TerminalSessionRepository for FakeRepos {
         agent_status: Option<AgentSessionStatus>,
         agent_wait_reason: Option<TaskRunWaitReason>,
         provider_session_id: Option<&str>,
+        provider_event: ProviderSessionEvent,
     ) -> Result<bool> {
-        if let Some(s) = self.state.borrow_mut().terminal_sessions.iter_mut().find(|s| s.id == id) {
+        let mut state = self.state.borrow_mut();
+        let Some(position) = state.terminal_sessions.iter().position(|s| s.id == id) else {
+            return Ok(false);
+        };
+        let current_provider = state.terminal_sessions[position].provider_session_id.clone();
+        let current_handoff = state.terminal_provider_handoffs.get(id).cloned();
+        let Some(binding) = provider_event.reconcile(
+            current_provider.as_deref(),
+            current_handoff.as_deref(),
+            provider_session_id,
+        ) else {
+            return Ok(false);
+        };
+        let changed = {
+            let s = &mut state.terminal_sessions[position];
             let changed = s.agent_status != agent_status || s.agent_wait_reason != agent_wait_reason;
             s.agent_status = agent_status;
             s.agent_wait_reason = agent_wait_reason;
-            s.provider_session_id = provider_session_id.map(str::to_string);
-            return Ok(changed);
+            s.provider_session_id = binding.provider_session_id;
+            changed
+        };
+        match binding.handoff_from {
+            Some(provider) => {
+                state.terminal_provider_handoffs.insert(id.to_string(), provider);
+            }
+            None => {
+                state.terminal_provider_handoffs.remove(id);
+            }
         }
-        Ok(false)
+        Ok(changed)
+    }
+
+    fn clear_terminal_session_agent_status(
+        &self,
+        id: &str,
+        provider_session_id: Option<&str>,
+    ) -> Result<()> {
+        let mut state = self.state.borrow_mut();
+        if let Some(position) = state.terminal_sessions.iter().position(|session| {
+            session.id == id && session.provider_session_id.as_deref() == provider_session_id
+        }) {
+            let session = &mut state.terminal_sessions[position];
+            session.agent_status = None;
+            session.agent_wait_reason = None;
+            session.provider_session_id = None;
+            state.terminal_provider_handoffs.remove(id);
+        }
+        Ok(())
     }
 
     fn get_terminal_session(&self, id: &str) -> Result<Option<TerminalSession>> {
@@ -1522,6 +1566,43 @@ impl TerminalSessionRepository for FakeRepos {
         _snapshot: &TerminalStateSnapshot,
     ) -> Result<()> {
         Ok(())
+    }
+}
+
+impl ExplanationRepository for FakeRepos {
+    fn create_explanation(
+        &mut self,
+        new: NewExplanation,
+        artifact_root: &Path,
+    ) -> Result<Explanation> {
+        let mut state = self.state.borrow_mut();
+        state.next_explanation += 1;
+        let id = format!("exp-{}", state.next_explanation);
+        let explanation = Explanation {
+            artifact_path: artifact_root.join(&id).to_string_lossy().into_owned(),
+            id,
+            title: new.title,
+            mode: new.mode,
+            provider_session_id: new.provider_session_id,
+            terminal_session_id: new.terminal_session_id,
+            created_at: "2026-07-11T00:00:00.000Z".to_string(),
+        };
+        state.explanations.push(explanation.clone());
+        Ok(explanation)
+    }
+
+    fn list_explanations(&self) -> Result<Vec<Explanation>> {
+        Ok(self.state.borrow().explanations.clone())
+    }
+
+    fn get_explanation(&self, id: &str) -> Result<Option<Explanation>> {
+        Ok(self
+            .state
+            .borrow()
+            .explanations
+            .iter()
+            .find(|explanation| explanation.id == id)
+            .cloned())
     }
 }
 

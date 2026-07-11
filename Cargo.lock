@@ -2751,6 +2751,7 @@ dependencies = [
  "monica-domain",
  "monica-paths",
  "monica-runtime",
+ "monica-storage-sqlite",
  "serde_json",
  "tokio",
 ]
@@ -2876,6 +2877,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "log",
+ "monica-application",
+ "monica-domain",
+ "monica-paths",
+ "monica-runtime",
  "oxhttp",
 ]
 

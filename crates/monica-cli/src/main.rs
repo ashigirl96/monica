@@ -1,5 +1,6 @@
 mod auth;
 mod event_sink;
+mod explain;
 mod hook;
 mod issue;
 mod notify;
@@ -30,6 +31,9 @@ enum Commands {
     /// Manage Monica authorization
     #[command(subcommand)]
     Auth(auth::AuthCommand),
+    /// Create persisted explanation artifacts
+    #[command(subcommand)]
+    Explain(explain::ExplainCommand),
     /// Print a shell completion script (e.g. `monica completions zsh`)
     Completions { shell: Shell },
 }
@@ -51,6 +55,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             Commands::Project(cmd) => project::run(cmd).await,
             Commands::Issue(cmd) => issue::run(cmd).await,
             Commands::Auth(cmd) => auth::run(cmd).await,
+            Commands::Explain(cmd) => explain::run(cmd),
             Commands::Hook(cmd) => hook::run(cmd),
             Commands::Completions { shell } => {
                 let mut cmd = Cli::command();
@@ -74,5 +79,11 @@ mod tests {
         assert!(Cli::try_parse_from(["monica", "issue", "close", "MON-1", "--yes"]).is_err());
         // the old `delete` subcommand is gone.
         assert!(Cli::try_parse_from(["monica", "issue", "delete", "MON-1"]).is_err());
+    }
+
+    #[test]
+    fn explain_new_requires_a_title() {
+        assert!(Cli::try_parse_from(["monica", "explain", "new", "Session storage"]).is_ok());
+        assert!(Cli::try_parse_from(["monica", "explain", "new"]).is_err());
     }
 }
