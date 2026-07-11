@@ -21,12 +21,23 @@ pub enum ExplainCommand {
 }
 
 pub fn run(cmd: ExplainCommand) -> Result<()> {
+    pin_monica_home();
     match cmd {
         ExplainCommand::New {
             title,
             mode,
             summary,
         } => new_command(&title, &mode, summary.as_deref()),
+    }
+}
+
+/// Restore `MONICA_HOME` to the value the app pinned at spawn time. direnv can overwrite
+/// `MONICA_HOME` after the shell starts; `_MONICA_APP_HOME` is immune because direnv doesn't
+/// know about it.
+fn pin_monica_home() {
+    #[allow(clippy::disallowed_methods)]
+    if let Ok(app_home) = std::env::var("_MONICA_APP_HOME") {
+        std::env::set_var("MONICA_HOME", app_home);
     }
 }
 
