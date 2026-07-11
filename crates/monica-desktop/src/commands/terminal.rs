@@ -44,10 +44,16 @@ pub async fn terminal_create_session(
             rows,
             cols,
         };
+        let mut env = env.unwrap_or_default();
+        let web_url = app.state::<crate::WebUrl>();
+        // caller の env が key 単位で勝つ規約（create_terminal_session の merge と同じ向き）。
+        if !web_url.0.is_empty() && !env.iter().any(|(k, _)| k == "MONICA_WEB_URL") {
+            env.push(("MONICA_WEB_URL".to_string(), web_url.0.clone()));
+        }
         let mut monica = event_sink::open(&app)?;
         let session = monica
             .executions()
-            .create_terminal_session(&daemon, new, env.unwrap_or_default())?;
+            .create_terminal_session(&daemon, new, env)?;
         Ok(TerminalSession::from(session))
     })
     .await

@@ -67,3 +67,9 @@ pub fn explanations_dir() -> Result<PathBuf> {
 pub fn explanation_dir(id: &str) -> Result<PathBuf> {
     Ok(explanations_dir()?.join(id))
 }
+
+/// The single artifact document of an explanation. Writers (scaffold) and readers (web artifact
+/// route) both resolve the filename here so they can never disagree on it.
+pub fn explanation_index_path(id: &str) -> Result<PathBuf> {
+    Ok(explanation_dir(id)?.join("index.html"))
+}

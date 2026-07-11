@@ -45,6 +45,25 @@ fn insert_explanation_in(
 }
 
 impl ExplanationStore for SqliteStore {
+    fn list_explanations(&self) -> Result<Vec<Explanation>> {
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {EXPLANATION_COLUMNS} FROM explanations ORDER BY created_at DESC, rowid DESC"
+        ))?;
+        let rows = stmt.query_map([], |row| Ok(explanation_from_row(row)))?;
+        rows.map(|r| r?).collect()
+    }
+
+    fn get_explanation(&self, id: &str) -> Result<Option<Explanation>> {
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {EXPLANATION_COLUMNS} FROM explanations WHERE id = ?1"
+        ))?;
+        let mut rows = stmt.query(params![id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(explanation_from_row(row)?)),
+            None => Ok(None),
+        }
+    }
+
     fn insert_explanation(&mut self, new: NewExplanation) -> Result<Explanation> {
         let tx = self.conn_mut().transaction()?;
         let explanation = insert_explanation_in(&tx, new)?;
@@ -108,6 +127,54 @@ mod tests {
             terminal_session_id: "ts-nonexistent".to_string(),
         });
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn list_returns_descending_order() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        let ts_id = seed_terminal_session(&mut store);
+        store
+            .insert_explanation(NewExplanation {
+                title: "first".to_string(),
+                mode: ExplanationMode::Diff,
+                provider_session_id: "p1".to_string(),
+                terminal_session_id: ts_id.clone(),
+            })
+            .unwrap();
+        store
+            .insert_explanation(NewExplanation {
+                title: "second".to_string(),
+                mode: ExplanationMode::Topic,
+                provider_session_id: "p2".to_string(),
+                terminal_session_id: ts_id,
+            })
+            .unwrap();
+
+        let list = store.list_explanations().unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].title, "second");
+        assert_eq!(list[1].title, "first");
+    }
+
+    #[test]
+    fn get_existing_and_missing() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        let ts_id = seed_terminal_session(&mut store);
+        store
+            .insert_explanation(NewExplanation {
+                title: "target".to_string(),
+                mode: ExplanationMode::Diff,
+                provider_session_id: "p1".to_string(),
+                terminal_session_id: ts_id,
+            })
+            .unwrap();
+
+        let found = store.get_explanation("expl-1").unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().title, "target");
+
+        let missing = store.get_explanation("expl-999").unwrap();
+        assert!(missing.is_none());
     }
 
     #[test]

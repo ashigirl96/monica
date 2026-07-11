@@ -101,7 +101,9 @@ impl ExplanationId {
         let s = value.into();
         if let Some(num_part) = s.strip_prefix("expl-") {
             if let Ok(n) = num_part.parse::<u64>() {
-                if n > 0 {
+                // u64::from_str は "+42" や "007" も受理するが、id は保存時の文字列そのままで
+                // path join に使われるため、正規形（n の十進表記と一致）だけを通す。
+                if n > 0 && num_part == n.to_string() {
                     return Ok(Self(s));
                 }
             }
@@ -198,5 +200,12 @@ mod tests {
         assert!(ExplanationId::parse("expl-").is_err());
         assert!(ExplanationId::parse("expl-abc").is_err());
         assert!(ExplanationId::parse("expl-0").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_non_canonical_explanation_id() {
+        assert!(ExplanationId::parse("expl-+42").is_err());
+        assert!(ExplanationId::parse("expl-007").is_err());
+        assert!(ExplanationId::parse("expl-01").is_err());
     }
 }

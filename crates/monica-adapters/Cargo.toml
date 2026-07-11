@@ -26,4 +26,5 @@ serde_json = { version = "1.0.150", default-features = false, features = ["std"]
 tokio = { version = "1.52.3", default-features = false, features = ["sync", "time"] }
 
 [dev-dependencies]
+ctor = "0.8"
 monica-storage-sqlite = { path = "../monica-storage-sqlite" }
