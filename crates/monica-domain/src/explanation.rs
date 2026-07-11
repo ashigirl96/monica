@@ -62,6 +62,7 @@ pub struct NewExplanation {
     pub mode: ExplanationMode,
     pub provider_session_id: String,
     pub terminal_session_id: String,
+    pub repo_name: Option<String>,
 }
 
 #[cfg(test)]

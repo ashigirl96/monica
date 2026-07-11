@@ -24,7 +24,7 @@ pub(super) const NOTIFICATION_OUTBOX_COLUMNS: &str =
     "id, dedupe_key, kind, title, body, task_id, task_run_id, created_at, delivered_at, error, attempts";
 
 pub(super) const EXPLANATION_COLUMNS: &str =
-    "e.id, e.title, e.summary, e.mode, e.provider_session_id, e.terminal_session_id, e.created_at, ts.cwd";
+    "e.id, e.title, e.summary, e.mode, e.provider_session_id, e.terminal_session_id, e.created_at, e.repo_name, ts.cwd";
 
 pub(super) const EXPLANATION_FROM: &str =
     "explanations e LEFT JOIN terminal_sessions ts ON e.terminal_session_id = ts.id";

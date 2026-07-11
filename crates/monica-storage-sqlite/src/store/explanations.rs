@@ -9,6 +9,7 @@ use super::{EXPLANATION_COLUMNS, EXPLANATION_FROM};
 
 fn explanation_from_row(row: &Row<'_>) -> Result<Explanation> {
     let mode: String = row.get("mode")?;
+    let stored_repo_name: Option<String> = row.get("repo_name")?;
     let cwd: Option<String> = row.get("cwd")?;
     Ok(Explanation {
         id: ExplanationId::from_store(row.get("id")?),
@@ -18,7 +19,7 @@ fn explanation_from_row(row: &Row<'_>) -> Result<Explanation> {
         provider_session_id: row.get("provider_session_id")?,
         terminal_session_id: row.get("terminal_session_id")?,
         created_at: row.get("created_at")?,
-        repo_name: cwd.as_deref().and_then(repo_name_from_cwd),
+        repo_name: stored_repo_name.or_else(|| cwd.as_deref().and_then(repo_name_from_cwd)),
     })
 }
 
@@ -29,8 +30,8 @@ fn insert_explanation_in(
     conn.execute("INSERT INTO explanation_counter DEFAULT VALUES", [])?;
     let id = format!("expl-{}", conn.last_insert_rowid());
     conn.execute(
-        "INSERT INTO explanations (id, title, summary, mode, provider_session_id, terminal_session_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO explanations (id, title, summary, mode, provider_session_id, terminal_session_id, repo_name)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             id,
             new.title,
@@ -38,6 +39,7 @@ fn insert_explanation_in(
             new.mode.as_str(),
             new.provider_session_id,
             new.terminal_session_id,
+            new.repo_name,
         ],
     )?;
     let mut stmt = conn.prepare(&format!(
@@ -116,6 +118,7 @@ mod tests {
                 mode: ExplanationMode::Diff,
                 provider_session_id: "provider-123".to_string(),
                 terminal_session_id: ts_id.clone(),
+                repo_name: Some("my-repo".to_string()),
             })
             .unwrap();
         assert_eq!(explanation.id, "expl-1");
@@ -125,6 +128,23 @@ mod tests {
         assert_eq!(explanation.provider_session_id, "provider-123");
         assert_eq!(explanation.terminal_session_id, ts_id);
         assert!(!explanation.created_at.is_empty());
+        assert_eq!(explanation.repo_name.as_deref(), Some("my-repo"));
+    }
+
+    #[test]
+    fn repo_name_falls_back_to_cwd_when_not_stored() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        let ts_id = seed_terminal_session(&mut store);
+        let explanation = store
+            .insert_explanation(NewExplanation {
+                title: "no stored repo".to_string(),
+                summary: None,
+                mode: ExplanationMode::Diff,
+                provider_session_id: "p1".to_string(),
+                terminal_session_id: ts_id,
+                repo_name: None,
+            })
+            .unwrap();
         assert_eq!(explanation.repo_name.as_deref(), Some("monica"));
     }
 
@@ -142,6 +162,7 @@ mod tests {
                 mode: ExplanationMode::Diff,
                 provider_session_id: "p1".to_string(),
                 terminal_session_id: ts_id,
+                repo_name: None,
             })
             .unwrap();
         assert_eq!(explanation.repo_name.as_deref(), Some("monica"));
@@ -156,6 +177,7 @@ mod tests {
             mode: ExplanationMode::Diff,
             provider_session_id: "p1".to_string(),
             terminal_session_id: "ts-nonexistent".to_string(),
+            repo_name: None,
         });
         assert!(result.is_err());
     }
@@ -171,6 +193,7 @@ mod tests {
                 mode: ExplanationMode::Diff,
                 provider_session_id: "p1".to_string(),
                 terminal_session_id: ts_id.clone(),
+                repo_name: None,
             })
             .unwrap();
         store
@@ -180,6 +203,7 @@ mod tests {
                 mode: ExplanationMode::Topic,
                 provider_session_id: "p2".to_string(),
                 terminal_session_id: ts_id,
+                repo_name: None,
             })
             .unwrap();
 
@@ -202,6 +226,7 @@ mod tests {
                 mode: ExplanationMode::Diff,
                 provider_session_id: "p1".to_string(),
                 terminal_session_id: ts_id,
+                repo_name: None,
             })
             .unwrap();
 
@@ -224,6 +249,7 @@ mod tests {
                 mode: ExplanationMode::Diff,
                 provider_session_id: "p1".to_string(),
                 terminal_session_id: ts_id.clone(),
+                repo_name: None,
             })
             .unwrap();
         let e2 = store
@@ -233,6 +259,7 @@ mod tests {
                 mode: ExplanationMode::Topic,
                 provider_session_id: "p2".to_string(),
                 terminal_session_id: ts_id,
+                repo_name: None,
             })
             .unwrap();
         assert_eq!(e1.id, "expl-1");
