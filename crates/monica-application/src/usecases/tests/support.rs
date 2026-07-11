@@ -7,15 +7,15 @@ use anyhow::{anyhow, Result};
 use monica_domain::RawJson;
 
 use crate::ports::{
-    AgentDecoders, BoxFuture, EventRepository, GitGateway, NotebookGateway,
-    NotificationOutboxStore, ProjectRepository, PullRequestSyncStore, TaskBoardQuery, TaskRunStore,
-    TaskStore, TaskSummaryFilter, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
+    AgentDecoders, BoxFuture, EventRepository, GitGateway, NotificationOutboxStore,
+    ProjectRepository, PullRequestSyncStore, TaskBoardQuery, TaskRunStore, TaskStore,
+    TaskSummaryFilter, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
     TerminalSessionRepository, UnitOfWork, WorkTransaction, WorkbenchStore, Workspace,
 };
 use crate::usecases::runs::record_hook;
 use crate::prelude::{
-    Agent, AgentSignal, Continuation, DisplayStatus, Event, ExternalReference, LintFinding,
-    NewNotificationIntent, NewTask, NewTaskRun, NewTerminalSession, NotebookDoc,
+    Agent, AgentSignal, Continuation, DisplayStatus, Event, ExternalReference,
+    NewNotificationIntent, NewTask, NewTaskRun, NewTerminalSession,
     NotificationIntent, Project, Provider, RefType, SignalKind, Task, TaskId, TaskKind, TaskRun,
     TaskRunId, TaskRunStatus, TaskRunWaitReason, TaskStatus, TerminalSession,
     AgentSessionStatus,
@@ -1541,21 +1541,6 @@ impl EventSink for RecordingSink {
 }
 
 #[derive(Default)]
-pub(crate) struct FakeNotebookGateway;
-
-impl NotebookGateway for FakeNotebookGateway {
-    fn page_counts(&self) -> Result<Vec<(String, usize)>> {
-        Ok(Vec::new())
-    }
-    fn read_docs(&self, _slug: &str) -> Result<Option<(Vec<NotebookDoc>, Vec<LintFinding>)>> {
-        Ok(None)
-    }
-    fn create(&self, slug: &str) -> Result<PathBuf> {
-        Ok(PathBuf::from("/tmp/notebooks").join(slug))
-    }
-}
-
-#[derive(Default)]
 pub(crate) struct FakeWorkspace;
 
 impl Workspace for FakeWorkspace {
@@ -1633,7 +1618,6 @@ impl Backend for FakeBackend {
     type Auth = FakeAuth;
     type Setup = FakeSetupRunner;
     type Outputs = FakeTaskRunOutputs;
-    type Notebooks = FakeNotebookGateway;
     type Workspace = FakeWorkspace;
     type Agents = TestAgentDecoders;
 }
@@ -1654,7 +1638,6 @@ pub(crate) fn facade_with_decoder(
         FakeAuth,
         FakeSetupRunner::default(),
         FakeTaskRunOutputs::default(),
-        FakeNotebookGateway,
         FakeWorkspace,
         agents,
         Box::new(sink),

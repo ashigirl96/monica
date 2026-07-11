@@ -3,7 +3,8 @@ import { useAtom, useAtomValue } from "jotai";
 import { PreviewDialog, PreviewDialogLoading } from "@/components/preview-dialog";
 import { activeSpaceAtom } from "@/stores/space";
 import { planPreviewAtom } from "@/features/work-bench/store";
-import { SCROLL_STEP } from "@/features/library/store";
+
+const SCROLL_STEP = 120;
 
 // Lazy so react-markdown / shiki / mermaid / katex stay out of the Workbench startup bundle and
 // load only when a plan is first previewed.

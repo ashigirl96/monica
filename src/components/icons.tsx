@@ -17,22 +17,6 @@ function Icon({ size = 18, ...props }: IconProps) {
   );
 }
 
-export function LibraryIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path
-        d="M12 6C10.5 4.8 8.3 4.5 4.5 4.5C4 4.5 3.5 5 3.5 5.5V18C3.5 18.5 4 19 4.5 19C8.3 19 10.5 19.3 12 20.5"
-        strokeWidth="1.5"
-      />
-      <path
-        d="M12 6C13.5 4.8 15.7 4.5 19.5 4.5C20 4.5 20.5 5 20.5 5.5V18C20.5 18.5 20 19 19.5 19C15.7 19 13.5 19.3 12 20.5"
-        strokeWidth="1.5"
-      />
-      <path d="M12 6V20.5" strokeWidth="1.5" />
-    </Icon>
-  );
-}
-
 export function WorkBoardIcon(props: IconProps) {
   return (
     <Icon {...props}>

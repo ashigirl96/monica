@@ -95,9 +95,6 @@ export const commands = {
     typedError<boolean, ApiError>(__TAURI_INVOKE("make_main_task_run", { tabId })),
   primaryTabId: (taskId: string) =>
     typedError<string | null, ApiError>(__TAURI_INVOKE("primary_tab_id", { taskId })),
-  listNotebooks: () => typedError<NotebookSummary[], ApiError>(__TAURI_INVOKE("list_notebooks")),
-  getNotebookPages: (notebookId: string) =>
-    typedError<NotebookPageRow[], ApiError>(__TAURI_INVOKE("get_notebook_pages", { notebookId })),
   /**
    *  Read the plan held by the run driving the given Workbench tab. `Ok(None)` covers a shell tab, a
    *  run that never planned, and a plan file since deleted — all "nothing to preview" to the caller.
@@ -183,23 +180,6 @@ export type GithubPullRequestRef = {
   url: string | null;
   status: string | null;
   is_open_or_draft: boolean;
-};
-
-export type NotebookPageRow = {
-  id: string;
-  title: string;
-  /**  Outline number (`1`, `1.1`, …) — the page's place in the document tree. */
-  number: string;
-  /**  Raw `created` front matter value (ISO 8601), if present. */
-  created: string | null;
-  /**  Page body (front matter stripped) — the markdown source. */
-  body: string;
-};
-
-export type NotebookSummary = {
-  id: string;
-  title: string;
-  page_count: number;
 };
 
 export type PlanPreview = {

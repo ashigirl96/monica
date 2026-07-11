@@ -11,7 +11,6 @@ mod external_reference;
 mod ids;
 mod json;
 mod notification;
-mod notebook;
 mod project;
 mod refs;
 mod status;
@@ -29,10 +28,6 @@ pub use external_reference::{ExternalIssue, ExternalReference, RefType};
 pub use ids::{TaskId, TaskRunId};
 pub use json::RawJson;
 pub use notification::{NewNotificationIntent, NotificationIntent, NotificationKind};
-pub use notebook::{
-    front_value, is_valid_slug, mermaid_blocks, outline, pages_from_docs, parse_front_matter,
-    parse_wikilink, structural_lint, LintFinding, NotebookDoc, NotebookPage, OutlineEntry,
-};
 pub use project::{Project, Provider};
 pub use refs::{parse_issue_number, parse_issue_ref, parse_owner_repo};
 pub use status::{DisplayStatus, TaskRunStatus, TaskRunWaitReason, TaskStatus};
