@@ -12,7 +12,7 @@ build-web:
 dev-web:
     bun --bun vite dev --config web/vite.config.ts
 
-dev: dev-cli ptyd-bin
+dev: build-web dev-cli ptyd-bin
     MONICA_HOME="$HOME/monica/dev" MONICA_BIN="{{justfile_directory()}}/monica-dev" MONICA_PTYD_PATH="{{justfile_directory()}}/target/debug/monica-ptyd" bun run tauri dev
 
 dev-cli:
