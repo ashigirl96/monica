@@ -5,13 +5,17 @@ use anyhow::Result;
 use axum::extract::{Path, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use monica_application::{ApplicationError, ApplicationEvent, EventSink};
 use monica_domain::ExplanationId;
 
 pub const PORT_PROD: u16 = 19280;
+
+#[derive(rust_embed::Embed)]
+#[folder = "../../dist-web/"]
+struct WebAssets;
 
 struct NoopEventSink;
 
@@ -83,8 +87,47 @@ async fn require_local_host(
     Ok(next.run(request).await)
 }
 
-async fn root() -> &'static str {
-    "Hello from Monica"
+fn content_type(path: &str) -> &'static str {
+    match path.rsplit('.').next() {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") => "application/javascript; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("woff2") => "font/woff2",
+        Some("woff") => "font/woff",
+        Some("json") => "application/json",
+        _ => "application/octet-stream",
+    }
+}
+
+async fn root() -> Redirect {
+    Redirect::to("/explanations")
+}
+
+async fn spa_index() -> Response {
+    match WebAssets::get("index.html") {
+        Some(file) => (
+            StatusCode::OK,
+            [("content-type", "text/html; charset=utf-8")],
+            file.data,
+        )
+            .into_response(),
+        None => (StatusCode::NOT_FOUND, "SPA not built").into_response(),
+    }
+}
+
+async fn spa_asset(Path(path): Path<String>) -> Response {
+    let full_path = format!("assets/{path}");
+    match WebAssets::get(&full_path) {
+        Some(file) => (
+            StatusCode::OK,
+            [("content-type", content_type(&full_path))],
+            file.data,
+        )
+            .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 async fn list_explanations() -> Result<Json<Vec<monica_api::ApiExplanation>>, AppError> {
@@ -147,7 +190,10 @@ fn build_router(port: u16) -> Router {
             "/api/explanations/{id}",
             get(get_explanation).delete(delete_explanation),
         )
+        .route("/explanations", get(spa_index))
+        .route("/explanations/{id}", get(spa_index))
         .route("/explanations/{id}/artifact", get(get_artifact))
+        .route("/assets/{*path}", get(spa_asset))
         .layer(middleware::from_fn_with_state(port, require_local_host))
 }
 
@@ -259,11 +305,54 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn root_returns_hello() {
+    async fn root_redirects_to_explanations() {
         let response = app().oneshot(get_req("/")).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = body_string(response).await;
-        assert!(body.contains("Hello from Monica"), "body was: {body}");
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            response.headers().get("location").unwrap().to_str().unwrap(),
+            "/explanations"
+        );
+    }
+
+    #[tokio::test]
+    async fn spa_explanations_returns_html() {
+        let response = app().oneshot(get_req("/explanations")).await.unwrap();
+        let status = response.status();
+        if WebAssets::get("index.html").is_some() {
+            assert_eq!(status, StatusCode::OK);
+            let ct = response
+                .headers()
+                .get("content-type")
+                .unwrap()
+                .to_str()
+                .unwrap();
+            assert!(ct.contains("text/html"), "content-type was: {ct}");
+        } else {
+            assert_eq!(status, StatusCode::NOT_FOUND);
+        }
+    }
+
+    #[tokio::test]
+    async fn spa_detail_returns_html() {
+        let response = app()
+            .oneshot(get_req("/explanations/expl-1"))
+            .await
+            .unwrap();
+        let status = response.status();
+        if WebAssets::get("index.html").is_some() {
+            assert_eq!(status, StatusCode::OK);
+        } else {
+            assert_eq!(status, StatusCode::NOT_FOUND);
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_asset_returns_404() {
+        let response = app()
+            .oneshot(get_req("/assets/nonexistent.js"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -408,8 +497,6 @@ mod tests {
 
     #[test]
     fn serve_binds_and_reports_port() {
-        // serve() 自身の warm open が migrated() の OnceLock 外で migration を走らせ、
-        // 並列テストの初回 open と衝突するため、先に migration を確定させる。
         migrated();
         let (port_tx, port_rx) = std::sync::mpsc::sync_channel(1);
         std::thread::spawn(move || {
@@ -426,7 +513,23 @@ mod tests {
         stream.write_all(request.as_bytes()).unwrap();
         let mut response = String::new();
         stream.read_to_string(&mut response).unwrap();
-        assert!(response.contains("200"), "response: {response}");
-        assert!(response.contains("Hello from Monica"), "response: {response}");
+        assert!(response.contains("303"), "response: {response}");
+        assert!(
+            response.contains("/explanations"),
+            "response: {response}"
+        );
+    }
+
+    #[test]
+    fn export_web_types() {
+        let types = specta::Types::default()
+            .register::<monica_api::ApiExplanation>()
+            .register::<monica_api::ApiExplanationMode>();
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/types.gen.ts");
+        specta_typescript::Typescript::default()
+            .header("// This file is auto-generated by specta-typescript. Do not edit manually.\n// Regenerate with: cargo test -p monica-web --lib tests::export_web_types -- --exact\n")
+            .export_to(&path, &types, specta_serde::Format)
+            .expect("failed to export web types");
     }
 }

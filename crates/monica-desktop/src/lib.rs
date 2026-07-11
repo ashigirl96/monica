@@ -119,7 +119,14 @@ pub fn run() {
             let drain = schedulers::notification_drain::start(app.handle().clone());
             app.manage(drain);
             ptyd::start_warmup(app.handle().clone());
-            let web_port = if cfg!(debug_assertions) { 0 } else { monica_web::PORT_PROD };
+            let web_port = if cfg!(debug_assertions) {
+                std::env::var("MONICA_WEB_PORT")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0)
+            } else {
+                monica_web::PORT_PROD
+            };
             let (port_tx, port_rx) = std::sync::mpsc::sync_channel(1);
             if let Err(e) = std::thread::Builder::new()
                 .name("monica-web".into())
