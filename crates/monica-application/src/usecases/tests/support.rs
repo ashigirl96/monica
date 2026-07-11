@@ -1157,6 +1157,14 @@ impl TaskRunOutputs for FakeTaskRunOutputs {
     }
 }
 
+impl crate::ports::ExplanationOutputs for FakeTaskRunOutputs {
+    fn write_scaffold(&self, explanation_id: &str, _title: &str) -> Result<PathBuf> {
+        Ok(PathBuf::from("/tmp/explanations")
+            .join(explanation_id)
+            .join("index.html"))
+    }
+}
+
 pub(crate) struct FakeAuth;
 
 impl AuthGateway for FakeAuth {
@@ -1521,6 +1529,26 @@ impl TerminalSessionRepository for FakeRepos {
         _window_label: &str,
         _snapshot: &TerminalStateSnapshot,
     ) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl crate::ports::ExplanationStore for FakeRepos {
+    fn insert_explanation(
+        &mut self,
+        new: monica_domain::NewExplanation,
+    ) -> Result<monica_domain::Explanation> {
+        Ok(monica_domain::Explanation {
+            id: monica_domain::ExplanationId::from_store("expl-1".to_string()),
+            title: new.title,
+            mode: new.mode,
+            provider_session_id: new.provider_session_id,
+            terminal_session_id: new.terminal_session_id,
+            created_at: "2026-07-11T00:00:00.000Z".to_string(),
+        })
+    }
+
+    fn delete_explanation(&mut self, _id: &str) -> Result<()> {
         Ok(())
     }
 }

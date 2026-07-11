@@ -11,6 +11,7 @@ pub enum DomainError {
     UnparseableRemote(String),
     InvalidIssueNumber(String),
     MissingIssueRef(String),
+    InvalidExplanationId(String),
 }
 
 impl fmt::Display for DomainError {
@@ -35,6 +36,9 @@ impl fmt::Display for DomainError {
             }
             DomainError::MissingIssueRef(target) => {
                 write!(f, "expected owner/repo#number, got {target:?}")
+            }
+            DomainError::InvalidExplanationId(id) => {
+                write!(f, "invalid explanation id (expected expl-<n>): {id:?}")
             }
         }
     }

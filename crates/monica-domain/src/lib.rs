@@ -7,6 +7,7 @@
 mod agent_signal;
 mod branch;
 mod error;
+mod explanation;
 mod external_reference;
 mod ids;
 mod json;
@@ -24,8 +25,9 @@ pub use agent_signal::{
 };
 pub use branch::{branch_name, monica_number, worktree_path_for};
 pub use error::DomainError;
+pub use explanation::{Explanation, ExplanationMode, NewExplanation};
 pub use external_reference::{ExternalIssue, ExternalReference, RefType};
-pub use ids::{TaskId, TaskRunId};
+pub use ids::{ExplanationId, TaskId, TaskRunId};
 pub use json::RawJson;
 pub use notification::{NewNotificationIntent, NotificationIntent, NotificationKind};
 pub use project::{Project, Provider};

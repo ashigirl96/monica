@@ -1,5 +1,6 @@
 mod auth;
 mod event_sink;
+mod explain;
 mod hook;
 mod issue;
 mod notify;
@@ -21,6 +22,9 @@ enum Commands {
     /// Manage the project registry (execution-environment definitions)
     #[command(subcommand)]
     Project(project::ProjectCommand),
+    /// Create and manage explanation documents
+    #[command(subcommand)]
+    Explain(explain::ExplainCommand),
     /// Track GitHub issues as Monica tasks
     #[command(subcommand)]
     Issue(issue::IssueCommand),
@@ -49,6 +53,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     runtime.block_on(async move {
         match cli.command {
             Commands::Project(cmd) => project::run(cmd).await,
+            Commands::Explain(cmd) => explain::run(cmd),
             Commands::Issue(cmd) => issue::run(cmd).await,
             Commands::Auth(cmd) => auth::run(cmd).await,
             Commands::Hook(cmd) => hook::run(cmd),

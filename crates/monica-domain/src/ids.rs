@@ -91,6 +91,25 @@ id_newtype! {
     TaskRunId
 }
 
+id_newtype! {
+    /// Identity of an [`Explanation`](crate::Explanation) (e.g. `"expl-1"`).
+    ExplanationId
+}
+
+impl ExplanationId {
+    pub fn parse(value: impl Into<String>) -> Result<Self, crate::DomainError> {
+        let s = value.into();
+        if let Some(num_part) = s.strip_prefix("expl-") {
+            if let Ok(n) = num_part.parse::<u64>() {
+                if n > 0 {
+                    return Ok(Self(s));
+                }
+            }
+        }
+        Err(crate::DomainError::InvalidExplanationId(s))
+    }
+}
+
 impl TaskRunId {
     pub fn parse(value: impl Into<String>) -> Result<Self, crate::DomainError> {
         let s = value.into();
@@ -165,5 +184,19 @@ mod tests {
     fn parse_invalid_task_run_id() {
         assert!(TaskRunId::parse("../evil").is_err());
         assert!(TaskRunId::parse("").is_err());
+    }
+
+    #[test]
+    fn parse_valid_explanation_id() {
+        assert!(ExplanationId::parse("expl-1").is_ok());
+        assert!(ExplanationId::parse("expl-42").is_ok());
+    }
+
+    #[test]
+    fn parse_invalid_explanation_id() {
+        assert!(ExplanationId::parse("not-an-id").is_err());
+        assert!(ExplanationId::parse("expl-").is_err());
+        assert!(ExplanationId::parse("expl-abc").is_err());
+        assert!(ExplanationId::parse("expl-0").is_err());
     }
 }

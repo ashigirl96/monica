@@ -8,6 +8,7 @@
 
 mod backend;
 mod executions;
+mod explanations;
 mod notifications;
 mod projects;
 mod synchronization;
@@ -15,6 +16,7 @@ mod tasks;
 
 pub use backend::Backend;
 pub use executions::ExecutionService;
+pub use explanations::ExplanationService;
 pub use notifications::NotificationService;
 pub use projects::{ProjectInit, ProjectService};
 pub use synchronization::SynchronizationService;
@@ -68,5 +70,9 @@ impl<B: Backend> Monica<B> {
 
     pub fn notifications(&mut self) -> NotificationService<'_, B> {
         NotificationService { m: self }
+    }
+
+    pub fn explanations(&mut self) -> ExplanationService<'_, B> {
+        ExplanationService { m: self }
     }
 }
