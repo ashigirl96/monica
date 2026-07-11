@@ -1582,6 +1582,7 @@ impl crate::ports::ExplanationStore for FakeRepos {
             provider_session_id: new.provider_session_id,
             terminal_session_id: new.terminal_session_id,
             created_at: "2026-07-11T00:00:00.000Z".to_string(),
+            repo_name: None,
         };
         state.explanations.push(explanation.clone());
         Ok(explanation)

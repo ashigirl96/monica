@@ -24,7 +24,10 @@ pub(super) const NOTIFICATION_OUTBOX_COLUMNS: &str =
     "id, dedupe_key, kind, title, body, task_id, task_run_id, created_at, delivered_at, error, attempts";
 
 pub(super) const EXPLANATION_COLUMNS: &str =
-    "id, title, mode, provider_session_id, terminal_session_id, created_at";
+    "e.id, e.title, e.mode, e.provider_session_id, e.terminal_session_id, e.created_at, ts.cwd";
+
+pub(super) const EXPLANATION_FROM: &str =
+    "explanations e LEFT JOIN terminal_sessions ts ON e.terminal_session_id = ts.id";
 
 pub(super) const SET_NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 

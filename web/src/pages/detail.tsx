@@ -63,6 +63,11 @@ export function DetailPage({ id }: { id: string }) {
 
         <div className="flex items-center gap-2.5 text-muted-foreground">
           <ModeIndicator mode={explanation.mode} />
+          {explanation.repo_name && (
+            <span className="font-mono text-xs text-muted-foreground/70">
+              {explanation.repo_name}
+            </span>
+          )}
           <span className="font-mono text-xs">{explanation.id}</span>
           <span className="text-xs" title={formatDate(explanation.created_at)}>
             {formatRelative(explanation.created_at)}

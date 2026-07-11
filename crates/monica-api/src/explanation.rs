@@ -24,6 +24,7 @@ pub struct Explanation {
     pub provider_session_id: String,
     pub terminal_session_id: String,
     pub created_at: String,
+    pub repo_name: Option<String>,
 }
 
 impl From<monica_domain::Explanation> for Explanation {
@@ -35,6 +36,7 @@ impl From<monica_domain::Explanation> for Explanation {
             provider_session_id: value.provider_session_id,
             terminal_session_id: value.terminal_session_id,
             created_at: value.created_at,
+            repo_name: value.repo_name,
         }
     }
 }

@@ -1,14 +1,15 @@
 use anyhow::Result;
 use monica_application::ports::ExplanationStore;
-use monica_domain::{Explanation, ExplanationId, ExplanationMode, NewExplanation};
+use monica_domain::{Explanation, ExplanationId, ExplanationMode, NewExplanation, repo_name_from_cwd};
 use rusqlite::{params, Row};
 
 use crate::SqliteStore;
 
-use super::EXPLANATION_COLUMNS;
+use super::{EXPLANATION_COLUMNS, EXPLANATION_FROM};
 
 fn explanation_from_row(row: &Row<'_>) -> Result<Explanation> {
     let mode: String = row.get("mode")?;
+    let cwd: Option<String> = row.get("cwd")?;
     Ok(Explanation {
         id: ExplanationId::from_store(row.get("id")?),
         title: row.get("title")?,
@@ -16,6 +17,7 @@ fn explanation_from_row(row: &Row<'_>) -> Result<Explanation> {
         provider_session_id: row.get("provider_session_id")?,
         terminal_session_id: row.get("terminal_session_id")?,
         created_at: row.get("created_at")?,
+        repo_name: cwd.as_deref().and_then(repo_name_from_cwd),
     })
 }
 
@@ -37,7 +39,7 @@ fn insert_explanation_in(
         ],
     )?;
     let mut stmt = conn.prepare(&format!(
-        "SELECT {EXPLANATION_COLUMNS} FROM explanations WHERE id = ?1"
+        "SELECT {EXPLANATION_COLUMNS} FROM {EXPLANATION_FROM} WHERE e.id = ?1"
     ))?;
     let mut rows = stmt.query(params![id])?;
     let row = rows.next()?.expect("just inserted");
@@ -47,7 +49,7 @@ fn insert_explanation_in(
 impl ExplanationStore for SqliteStore {
     fn list_explanations(&self) -> Result<Vec<Explanation>> {
         let mut stmt = self.conn().prepare(&format!(
-            "SELECT {EXPLANATION_COLUMNS} FROM explanations ORDER BY created_at DESC, rowid DESC"
+            "SELECT {EXPLANATION_COLUMNS} FROM {EXPLANATION_FROM} ORDER BY e.created_at DESC, e.rowid DESC"
         ))?;
         let rows = stmt.query_map([], |row| Ok(explanation_from_row(row)))?;
         rows.map(|r| r?).collect()
@@ -55,7 +57,7 @@ impl ExplanationStore for SqliteStore {
 
     fn get_explanation(&self, id: &str) -> Result<Option<Explanation>> {
         let mut stmt = self.conn().prepare(&format!(
-            "SELECT {EXPLANATION_COLUMNS} FROM explanations WHERE id = ?1"
+            "SELECT {EXPLANATION_COLUMNS} FROM {EXPLANATION_FROM} WHERE e.id = ?1"
         ))?;
         let mut rows = stmt.query(params![id])?;
         match rows.next()? {
@@ -83,12 +85,16 @@ mod tests {
     use monica_domain::{NewTerminalSession, TerminalSessionKind};
 
     fn seed_terminal_session(store: &mut SqliteStore) -> String {
+        seed_terminal_session_with_cwd(store, "/Users/user/repos/monica")
+    }
+
+    fn seed_terminal_session_with_cwd(store: &mut SqliteStore, cwd: &str) -> String {
         let session = store
             .create_terminal_session(NewTerminalSession {
                 runspace_id: None,
                 tab_id: None,
                 kind: TerminalSessionKind::Shell,
-                cwd: "/tmp".to_string(),
+                cwd: cwd.to_string(),
                 shell: "/bin/zsh".to_string(),
                 rows: 24,
                 cols: 80,
@@ -115,6 +121,25 @@ mod tests {
         assert_eq!(explanation.provider_session_id, "provider-123");
         assert_eq!(explanation.terminal_session_id, ts_id);
         assert!(!explanation.created_at.is_empty());
+        assert_eq!(explanation.repo_name.as_deref(), Some("monica"));
+    }
+
+    #[test]
+    fn repo_name_from_worktree_cwd() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        let ts_id = seed_terminal_session_with_cwd(
+            &mut store,
+            "/Users/user/repos/monica/.worktrees/issue-363",
+        );
+        let explanation = store
+            .insert_explanation(NewExplanation {
+                title: "worktree test".to_string(),
+                mode: ExplanationMode::Diff,
+                provider_session_id: "p1".to_string(),
+                terminal_session_id: ts_id,
+            })
+            .unwrap();
+        assert_eq!(explanation.repo_name.as_deref(), Some("monica"));
     }
 
     #[test]
