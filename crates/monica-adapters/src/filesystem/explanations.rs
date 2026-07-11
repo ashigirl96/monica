@@ -32,17 +32,13 @@ fn scaffold_html(title: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;");
-    format!(
-        r#"<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{escaped_title}</title>
-<style>
-pre {{ white-space: pre-wrap; word-wrap: break-word; }}
-body {{ margin: 2rem; font-family: system-ui, sans-serif; line-height: 1.6; }}
-</style>
-<!-- Preserve the head above; replace the body below. -->
-"#
-    )
+    [
+        "<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>",
+        &escaped_title,
+        "</title>\n<style>\n",
+        include_str!("scaffold.css"),
+        "</style>\n<!-- Preserve the head above; replace the body below. -->\n",
+    ].concat()
 }
 
 #[cfg(test)]

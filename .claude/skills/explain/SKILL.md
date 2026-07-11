@@ -7,6 +7,7 @@ disable-model-invocation: true
 # Explain
 
 Please make me a rich, interactive explanation of the specified code change.
+Write the title, summary, and HTML in the language the user was using in the conversation.
 
 ## Workflow
 
@@ -24,7 +25,7 @@ Please make me a rich, interactive explanation of the specified code change.
    - The explanation id is the name of the directory containing `index.html` — `expl-12` in the example above.
    - If the command exits non-zero, stop and report its error output verbatim. The usual cause is running outside a Monica terminal (`MONICA_TERMINAL_SESSION_ID` is unset). Do not fall back to writing the HTML anywhere else — output to `/tmp` is retired.
 
-4. **Read the scaffold** — Read the `index.html` at that path. It is a bare HTML fragment: `<meta>` tags, a `<title>`, and a small `<style>` block, ending with this marker line:
+4. **Read the scaffold** — Read the `index.html` at that path. It contains `<meta>` tags, a `<title>`, and a `<style>` block with a minimal base: white-paper typography and dark syntax-highlighted code blocks (`pre.code` with `.cm` / `.k` / `.s` spans for comments / keywords / strings). It ends with this marker line:
 
    ```html
    <!-- Preserve the head above; replace the body below. -->
@@ -37,7 +38,7 @@ Please make me a rich, interactive explanation of the specified code change.
 
 6. **Verify** — Re-read the top of the written file and confirm the scaffold lines and the marker comment are intact, and check each code block against the Format rules below.
 
-7. **Deliver** — Run: `!open "$MONICA_WEB_URL/explanations/<id>/`
+7. **Deliver** — Run: `!open http://monica.localhost:19280/explanations/<id>`
 
 ## Sections
 
@@ -56,8 +57,8 @@ It should have these sections:
   - A very simplified version of the UI that the user sees in the app, to explain UI changes.
   - A system diagram showing data flow or communication between components. Make sure to include example data here!
 - Don't use ASCII diagrams. Always use simple HTML designs for your diagrams, HTML lists for lists of things, etc.
-  - For code blocks, always use `<pre>` tags. If you use a custom styled div instead, it **must** have
-    `white-space: pre-wrap` in its CSS, or the browser will collapse all newlines into a single line.
-    Before saving the file, scan each code block in the HTML source and confirm its CSS includes
-    `white-space: pre` or `pre-wrap`.
+  - For code blocks, use `<pre class="code">` (dark background with syntax highlighting via `<span class="cm|k|s">`).
+    If you use a custom styled div instead, it **must** have `white-space: pre-wrap` in its CSS, or the browser
+    will collapse all newlines into a single line. Before saving the file, scan each code block in the HTML source
+    and confirm its CSS includes `white-space: pre` or `pre-wrap`.
 - Use callouts for key concepts or definitions, important edge cases, etc.
