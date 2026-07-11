@@ -17,3 +17,6 @@ clap_complete = "4"
 anyhow = "1.0.102"
 serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
 tokio = { version = "1.52.3", default-features = false, features = ["net", "rt", "time"] }
+
+[dev-dependencies]
+monica-storage-sqlite = { path = "../monica-storage-sqlite" }

@@ -2,7 +2,9 @@ use anyhow::Result;
 
 use super::ports::{Clock, EventRepository, TaskRunStore, TaskStore};
 use crate::ports::{TerminalSessionRepository, UnitOfWork};
-use crate::prelude::{is_safe_task_run_id, Agent, AgentSignal, SignalKind, Task};
+use crate::prelude::{
+    is_safe_task_run_id, Agent, AgentSignal, Continuation, ProviderSessionEvent, SignalKind, Task,
+};
 use crate::prelude::{NewTaskRun, TaskId, TaskRun, TaskRunStatus, TaskRunWaitReason, TaskStatus};
 use monica_domain::{AgentSessionEffect, AgentSessionStatus};
 use crate::TaskRunObservation;
@@ -89,12 +91,20 @@ where
     let mut session_entered_waiting = false;
     let mut session_wait_reason: Option<TaskRunWaitReason> = None;
     let provider_session_id = signal.session_id.as_deref();
+    let provider_event = match signal.kind {
+        SignalKind::SessionStarted {
+            continuation: Continuation::Resume,
+        } => ProviderSessionEvent::ResumeStarted,
+        SignalKind::SessionStarted { .. } => ProviderSessionEvent::Started,
+        SignalKind::PromptSubmitted => ProviderSessionEvent::PromptSubmitted,
+        _ => ProviderSessionEvent::Observed,
+    };
 
     if let Some(session_id) = ctx.terminal_session_id {
         match signal.kind.agent_session_effect() {
             AgentSessionEffect::Keep => {}
             AgentSessionEffect::Clear => {
-                repos.set_terminal_session_agent_status(session_id, None, None, None)?;
+                repos.clear_terminal_session_agent_status(session_id, provider_session_id)?;
             }
             AgentSessionEffect::Set(status, reason) => {
                 let changed = repos.set_terminal_session_agent_status(
@@ -102,6 +112,7 @@ where
                     Some(status),
                     reason,
                     provider_session_id,
+                    provider_event,
                 )?;
                 if changed && status == AgentSessionStatus::WaitingForUser {
                     session_entered_waiting = true;

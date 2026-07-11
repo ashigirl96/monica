@@ -7,7 +7,8 @@ description = "Monica HTTP server for external browser access"
 [dependencies]
 anyhow = "1"
 log = "0.4"
+monica-application = { path = "../monica-application" }
+monica-domain = { path = "../monica-domain" }
+monica-paths = { path = "../monica-paths" }
+monica-runtime = { path = "../monica-runtime" }
 oxhttp = { version = "0.2", default-features = false, features = ["server"] }
-
-[dev-dependencies]
-oxhttp = { version = "0.2", default-features = false, features = ["client", "server"] }

@@ -16,6 +16,8 @@ use crate::{
     PrepareTaskResult, RunTaskResult, TaskBench, TerminalStateSnapshot,
 };
 
+const TERMINAL_HOME_ENV: &str = "MONICA_TERMINAL_HOME";
+
 /// Run preparation/execution, agent hooks, and (in a later phase) terminal sessions. Groups the
 /// `runs` and `terminal` use-case contexts because run settlement is driven by terminal state.
 pub struct ExecutionService<'a, B: Backend> {
@@ -152,12 +154,15 @@ impl<B: Backend> ExecutionService<'_, B> {
         let session = self.m.repos.create_terminal_session(new)?;
 
         // Every Monica shell gets the agent wrapper/hooks scaffolding so agent launches in any
-        // tab report back through hooks; an env passed by the caller wins key-by-key. Failure
-        // degrades the tab to a vanilla shell rather than blocking it.
+        // tab report back through hooks. Caller env wins except for the terminal-home binding,
+        // which must keep session ids scoped to the database that allocated them. Failure degrades
+        // the tab to a vanilla shell rather than blocking it.
         match self.m.outputs.prepare_base_shell_env(std::path::Path::new(&cwd)) {
             Ok(base) => {
                 for (key, value) in base {
-                    if !env.iter().any(|(k, _)| *k == key) {
+                    if key == TERMINAL_HOME_ENV {
+                        upsert_env(&mut env, &key, value);
+                    } else if !env.iter().any(|(k, _)| *k == key) {
                         env.push((key, value));
                     }
                 }
@@ -172,9 +177,9 @@ impl<B: Backend> ExecutionService<'_, B> {
         // tab onto the TaskRun for tab-based Make Main; the session id rides along for future
         // session-scoped lookups.
         if let Some(tab_id) = tab_id {
-            env.push(("MONICA_TERMINAL_TAB_ID".to_string(), tab_id));
+            upsert_env(&mut env, "MONICA_TERMINAL_TAB_ID", tab_id);
         }
-        env.push(("MONICA_TERMINAL_SESSION_ID".to_string(), session.id.clone()));
+        upsert_env(&mut env, "MONICA_TERMINAL_SESSION_ID", session.id.clone());
 
         let request = TerminalCreateRequest {
             session_id: session.id.clone(),
@@ -431,5 +436,34 @@ impl<B: Backend> ExecutionService<'_, B> {
             });
         }
         Ok(())
+    }
+}
+
+fn upsert_env(env: &mut Vec<(String, String)>, key: &str, value: String) {
+    env.retain(|(existing, _)| existing != key);
+    env.push((key.to_string(), value));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::upsert_env;
+
+    #[test]
+    fn protected_terminal_env_replaces_every_caller_supplied_copy() {
+        let mut env = vec![
+            ("MONICA_TERMINAL_HOME".to_string(), "/wrong-a".to_string()),
+            ("OTHER".to_string(), "keep".to_string()),
+            ("MONICA_TERMINAL_HOME".to_string(), "/wrong-b".to_string()),
+        ];
+
+        upsert_env(&mut env, "MONICA_TERMINAL_HOME", "/right".to_string());
+
+        assert_eq!(
+            env,
+            [
+                ("OTHER".to_string(), "keep".to_string()),
+                ("MONICA_TERMINAL_HOME".to_string(), "/right".to_string()),
+            ]
+        );
     }
 }
