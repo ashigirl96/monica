@@ -16,19 +16,19 @@ export function navigate(to: string) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
-function Route({ pathname }: { pathname: string }) {
+function parseRoute(pathname: string): { page: "list" } | { page: "detail"; id: string } {
   const match = pathname.match(/^\/explanations\/(.+)$/);
-  if (match) return <DetailPage id={match[1]} />;
-  return <ListPage />;
+  if (match) return { page: "detail", id: match[1] };
+  return { page: "list" };
 }
 
 export function App() {
   const pathname = useSyncExternalStore(subscribe, getSnapshot);
+  const route = parseRoute(pathname);
+
   return (
-    <div className="min-h-full">
-      <div className="mx-auto max-w-3xl px-6 py-10">
-        <Route pathname={pathname} />
-      </div>
+    <div className="flex min-h-full flex-col">
+      {route.page === "detail" ? <DetailPage id={route.id} /> : <ListPage />}
     </div>
   );
 }

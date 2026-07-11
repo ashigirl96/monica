@@ -139,7 +139,7 @@ pub fn run() {
                 log::warn!(target: "monica_desktop::web", "failed to spawn web server thread: {e}");
             }
             let web_url = match port_rx.recv_timeout(std::time::Duration::from_secs(5)) {
-                Ok(p) => format!("http://127.0.0.1:{p}"),
+                Ok(p) => format!("http://monica.localhost:{p}"),
                 Err(e) => {
                     log::warn!(
                         target: "monica_desktop::web",

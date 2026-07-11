@@ -123,11 +123,18 @@ async fn spa_index() -> Response {
 }
 
 async fn spa_asset(Path(path): Path<String>) -> Response {
-    let full_path = format!("assets/{path}");
-    match WebAssets::get(&full_path) {
+    serve_embedded(&format!("assets/{path}"))
+}
+
+async fn favicon() -> Response {
+    serve_embedded("favicon.png")
+}
+
+fn serve_embedded(path: &str) -> Response {
+    match WebAssets::get(path) {
         Some(file) => (
             StatusCode::OK,
-            [("content-type", content_type(&full_path))],
+            [("content-type", content_type(path))],
             file.data,
         )
             .into_response(),
@@ -196,9 +203,11 @@ fn build_router(port: u16) -> Router {
             get(get_explanation).delete(delete_explanation),
         )
         .route("/explanations", get(spa_index))
+        .route("/explanations/", get(spa_index))
         .route("/explanations/{id}", get(spa_index))
         .route("/explanations/{id}/artifact", get(get_artifact))
         .route("/assets/{*path}", get(spa_asset))
+        .route("/favicon.png", get(favicon))
         .layer(middleware::from_fn_with_state(port, require_local_host))
 }
 
