@@ -35,6 +35,7 @@ impl<B: Backend> ExplanationService<'_, B> {
         terminal_session_id: &str,
         title: &str,
         mode: ExplanationMode,
+        summary: Option<&str>,
     ) -> ApplicationResult<(Explanation, PathBuf)> {
         let session = self
             .m
@@ -56,6 +57,7 @@ impl<B: Backend> ExplanationService<'_, B> {
 
         let explanation = self.m.repos.insert_explanation(NewExplanation {
             title: title.to_string(),
+            summary: summary.map(str::to_string),
             mode,
             provider_session_id,
             terminal_session_id: terminal_session_id.to_string(),

@@ -288,11 +288,12 @@ fn explanation_create_happy_path() {
 
     let (explanation, path) = monica
         .explanations()
-        .create_explanation("ts-1", "My Title", ExplanationMode::Diff)
+        .create_explanation("ts-1", "My Title", ExplanationMode::Diff, Some("summary text"))
         .unwrap();
 
     assert_eq!(explanation.id, "expl-1");
     assert_eq!(explanation.title, "My Title");
+    assert_eq!(explanation.summary.as_deref(), Some("summary text"));
     assert_eq!(explanation.mode, ExplanationMode::Diff);
     assert_eq!(explanation.provider_session_id, "provider-abc");
     assert_eq!(explanation.terminal_session_id, "ts-1");
@@ -307,7 +308,7 @@ fn explanation_create_fails_when_session_not_found() {
 
     let err = monica
         .explanations()
-        .create_explanation("ts-missing", "title", ExplanationMode::Topic)
+        .create_explanation("ts-missing", "title", ExplanationMode::Topic, None)
         .unwrap_err();
 
     assert!(matches!(err, ApplicationError::NotFound(_)));
@@ -322,7 +323,7 @@ fn explanation_create_fails_when_provider_session_id_is_null() {
 
     let err = monica
         .explanations()
-        .create_explanation("ts-1", "title", ExplanationMode::Diff)
+        .create_explanation("ts-1", "title", ExplanationMode::Diff, None)
         .unwrap_err();
 
     assert!(matches!(err, ApplicationError::Validation(_)));
@@ -337,11 +338,11 @@ fn explanation_list_returns_reverse_insertion_order() {
 
     monica
         .explanations()
-        .create_explanation("ts-1", "first", ExplanationMode::Diff)
+        .create_explanation("ts-1", "first", ExplanationMode::Diff, None)
         .unwrap();
     monica
         .explanations()
-        .create_explanation("ts-1", "second", ExplanationMode::Topic)
+        .create_explanation("ts-1", "second", ExplanationMode::Topic, None)
         .unwrap();
 
     let list = monica.explanations().list_explanations().unwrap();
@@ -359,7 +360,7 @@ fn explanation_get_found_and_missing() {
 
     monica
         .explanations()
-        .create_explanation("ts-1", "target", ExplanationMode::Diff)
+        .create_explanation("ts-1", "target", ExplanationMode::Diff, None)
         .unwrap();
 
     let found = monica.explanations().get_explanation("expl-1").unwrap();
@@ -390,7 +391,7 @@ fn explanation_delete_happy_path() {
 
     monica
         .explanations()
-        .create_explanation("ts-1", "to-delete", ExplanationMode::Diff)
+        .create_explanation("ts-1", "to-delete", ExplanationMode::Diff, None)
         .unwrap();
 
     monica.explanations().delete_explanation("expl-1").unwrap();
@@ -409,17 +410,17 @@ fn explanation_ids_are_not_reused_after_delete() {
 
     monica
         .explanations()
-        .create_explanation("ts-1", "first", ExplanationMode::Diff)
+        .create_explanation("ts-1", "first", ExplanationMode::Diff, None)
         .unwrap();
     monica
         .explanations()
-        .create_explanation("ts-1", "second", ExplanationMode::Diff)
+        .create_explanation("ts-1", "second", ExplanationMode::Diff, None)
         .unwrap();
     monica.explanations().delete_explanation("expl-1").unwrap();
 
     let (third, _) = monica
         .explanations()
-        .create_explanation("ts-1", "third", ExplanationMode::Diff)
+        .create_explanation("ts-1", "third", ExplanationMode::Diff, None)
         .unwrap();
 
     assert_eq!(third.id, "expl-3");

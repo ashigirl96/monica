@@ -20,6 +20,7 @@ impl From<monica_domain::ExplanationMode> for ExplanationMode {
 pub struct Explanation {
     pub id: String,
     pub title: String,
+    pub summary: Option<String>,
     pub mode: ExplanationMode,
     pub provider_session_id: String,
     pub terminal_session_id: String,
@@ -31,6 +32,7 @@ impl From<monica_domain::Explanation> for Explanation {
         Self {
             id: value.id.into_string(),
             title: value.title,
+            summary: value.summary,
             mode: value.mode.into(),
             provider_session_id: value.provider_session_id,
             terminal_session_id: value.terminal_session_id,

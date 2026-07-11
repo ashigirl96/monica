@@ -1578,6 +1578,7 @@ impl crate::ports::ExplanationStore for FakeRepos {
         let explanation = monica_domain::Explanation {
             id: monica_domain::ExplanationId::from_store(format!("expl-{n}")),
             title: new.title,
+            summary: new.summary,
             mode: new.mode,
             provider_session_id: new.provider_session_id,
             terminal_session_id: new.terminal_session_id,

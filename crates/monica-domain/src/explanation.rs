@@ -30,6 +30,7 @@ impl ExplanationMode {
 pub struct Explanation {
     pub id: ExplanationId,
     pub title: String,
+    pub summary: Option<String>,
     pub mode: ExplanationMode,
     pub provider_session_id: String,
     pub terminal_session_id: String,
@@ -39,6 +40,7 @@ pub struct Explanation {
 #[derive(Debug, Clone)]
 pub struct NewExplanation {
     pub title: String,
+    pub summary: Option<String>,
     pub mode: ExplanationMode,
     pub provider_session_id: String,
     pub terminal_session_id: String,

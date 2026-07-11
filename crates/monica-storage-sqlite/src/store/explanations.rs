@@ -12,6 +12,7 @@ fn explanation_from_row(row: &Row<'_>) -> Result<Explanation> {
     Ok(Explanation {
         id: ExplanationId::from_store(row.get("id")?),
         title: row.get("title")?,
+        summary: row.get("summary")?,
         mode: mode.parse::<ExplanationMode>()?,
         provider_session_id: row.get("provider_session_id")?,
         terminal_session_id: row.get("terminal_session_id")?,
@@ -26,11 +27,12 @@ fn insert_explanation_in(
     conn.execute("INSERT INTO explanation_counter DEFAULT VALUES", [])?;
     let id = format!("expl-{}", conn.last_insert_rowid());
     conn.execute(
-        "INSERT INTO explanations (id, title, mode, provider_session_id, terminal_session_id)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO explanations (id, title, summary, mode, provider_session_id, terminal_session_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             id,
             new.title,
+            new.summary,
             new.mode.as_str(),
             new.provider_session_id,
             new.terminal_session_id,
@@ -104,6 +106,7 @@ mod tests {
         let explanation = store
             .insert_explanation(NewExplanation {
                 title: "test explanation".to_string(),
+                summary: Some("test summary".to_string()),
                 mode: ExplanationMode::Diff,
                 provider_session_id: "provider-123".to_string(),
                 terminal_session_id: ts_id.clone(),
@@ -111,6 +114,7 @@ mod tests {
             .unwrap();
         assert_eq!(explanation.id, "expl-1");
         assert_eq!(explanation.title, "test explanation");
+        assert_eq!(explanation.summary.as_deref(), Some("test summary"));
         assert_eq!(explanation.mode, ExplanationMode::Diff);
         assert_eq!(explanation.provider_session_id, "provider-123");
         assert_eq!(explanation.terminal_session_id, ts_id);
@@ -122,6 +126,7 @@ mod tests {
         let mut store = SqliteStore::open_in_memory().unwrap();
         let result = store.insert_explanation(NewExplanation {
             title: "orphan".to_string(),
+            summary: None,
             mode: ExplanationMode::Diff,
             provider_session_id: "p1".to_string(),
             terminal_session_id: "ts-nonexistent".to_string(),
@@ -136,6 +141,7 @@ mod tests {
         store
             .insert_explanation(NewExplanation {
                 title: "first".to_string(),
+                summary: Some("first summary".to_string()),
                 mode: ExplanationMode::Diff,
                 provider_session_id: "p1".to_string(),
                 terminal_session_id: ts_id.clone(),
@@ -144,6 +150,7 @@ mod tests {
         store
             .insert_explanation(NewExplanation {
                 title: "second".to_string(),
+                summary: None,
                 mode: ExplanationMode::Topic,
                 provider_session_id: "p2".to_string(),
                 terminal_session_id: ts_id,
@@ -153,7 +160,9 @@ mod tests {
         let list = store.list_explanations().unwrap();
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].title, "second");
+        assert!(list[0].summary.is_none());
         assert_eq!(list[1].title, "first");
+        assert_eq!(list[1].summary.as_deref(), Some("first summary"));
     }
 
     #[test]
@@ -163,6 +172,7 @@ mod tests {
         store
             .insert_explanation(NewExplanation {
                 title: "target".to_string(),
+                summary: None,
                 mode: ExplanationMode::Diff,
                 provider_session_id: "p1".to_string(),
                 terminal_session_id: ts_id,
@@ -184,6 +194,7 @@ mod tests {
         let e1 = store
             .insert_explanation(NewExplanation {
                 title: "first".to_string(),
+                summary: None,
                 mode: ExplanationMode::Diff,
                 provider_session_id: "p1".to_string(),
                 terminal_session_id: ts_id.clone(),
@@ -192,6 +203,7 @@ mod tests {
         let e2 = store
             .insert_explanation(NewExplanation {
                 title: "second".to_string(),
+                summary: None,
                 mode: ExplanationMode::Topic,
                 provider_session_id: "p2".to_string(),
                 terminal_session_id: ts_id,
