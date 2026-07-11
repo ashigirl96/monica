@@ -456,6 +456,10 @@ impl ExplanationOutputs for FsTaskRunOutputs {
     fn write_scaffold(&self, explanation_id: &str, title: &str) -> Result<PathBuf> {
         super::explanations::write_explanation_scaffold(explanation_id, title)
     }
+
+    fn remove_dir(&self, explanation_id: &str) -> Result<()> {
+        super::explanations::remove_explanation_dir(explanation_id)
+    }
 }
 
 #[cfg(test)]

@@ -1,0 +1,4 @@
+disallowed-methods = [
+  { path = "std::env::set_var", reason = "process-global で並列テストと競合し、実データの MONICA_HOME を汚染しうる。テスト隔離は just test の mktemp 注入か #[ctor::ctor] を使う（CLAUDE.md テスト規約）。main 前・起動直後の単一スレッド区間だけ #[allow] で明示的に許可する" },
+  { path = "std::env::remove_var", reason = "set_var と同じ理由" },
+]

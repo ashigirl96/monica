@@ -38,6 +38,7 @@ pub fn fix_path_from_login_shell() -> Result<(), String> {
         .filter(|p| !p.is_empty())
         .ok_or_else(|| format!("could not parse PATH from shell output: {stdout}"))?;
 
+    #[allow(clippy::disallowed_methods)] // 起動直後・スレッド生成前の単一スレッド区間
     std::env::set_var("PATH", path);
     Ok(())
 }

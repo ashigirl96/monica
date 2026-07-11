@@ -327,3 +327,120 @@ fn explanation_create_fails_when_provider_session_id_is_null() {
 
     assert!(matches!(err, ApplicationError::Validation(_)));
 }
+
+#[test]
+fn explanation_list_returns_reverse_insertion_order() {
+    let repos = FakeRepos::default();
+    repos.seed_session(fake_terminal_session("ts-1", Some("p1")));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+
+    monica
+        .explanations()
+        .create_explanation("ts-1", "first", ExplanationMode::Diff)
+        .unwrap();
+    monica
+        .explanations()
+        .create_explanation("ts-1", "second", ExplanationMode::Topic)
+        .unwrap();
+
+    let list = monica.explanations().list_explanations().unwrap();
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0].title, "second");
+    assert_eq!(list[1].title, "first");
+}
+
+#[test]
+fn explanation_get_found_and_missing() {
+    let repos = FakeRepos::default();
+    repos.seed_session(fake_terminal_session("ts-1", Some("p1")));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+
+    monica
+        .explanations()
+        .create_explanation("ts-1", "target", ExplanationMode::Diff)
+        .unwrap();
+
+    let found = monica.explanations().get_explanation("expl-1").unwrap();
+    assert_eq!(found.title, "target");
+
+    let err = monica.explanations().get_explanation("expl-999").unwrap_err();
+    assert!(matches!(err, ApplicationError::NotFound(_)));
+}
+
+#[test]
+fn explanation_get_invalid_id_returns_validation() {
+    let repos = FakeRepos::default();
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+
+    let err = monica.explanations().get_explanation("../evil").unwrap_err();
+    assert!(matches!(err, ApplicationError::Validation(_)));
+}
+
+#[test]
+fn explanation_delete_happy_path() {
+    let repos = FakeRepos::default();
+    repos.seed_session(fake_terminal_session("ts-1", Some("p1")));
+    let sink = RecordingSink::default();
+    let outputs = FakeTaskRunOutputs::default();
+    let removed_dirs = outputs.removed_dirs_handle();
+    let mut monica = facade_with_outputs(repos, sink, outputs);
+
+    monica
+        .explanations()
+        .create_explanation("ts-1", "to-delete", ExplanationMode::Diff)
+        .unwrap();
+
+    monica.explanations().delete_explanation("expl-1").unwrap();
+
+    let err = monica.explanations().get_explanation("expl-1").unwrap_err();
+    assert!(matches!(err, ApplicationError::NotFound(_)));
+    assert_eq!(*removed_dirs.lock().unwrap(), vec!["expl-1".to_string()]);
+}
+
+#[test]
+fn explanation_ids_are_not_reused_after_delete() {
+    let repos = FakeRepos::default();
+    repos.seed_session(fake_terminal_session("ts-1", Some("p1")));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+
+    monica
+        .explanations()
+        .create_explanation("ts-1", "first", ExplanationMode::Diff)
+        .unwrap();
+    monica
+        .explanations()
+        .create_explanation("ts-1", "second", ExplanationMode::Diff)
+        .unwrap();
+    monica.explanations().delete_explanation("expl-1").unwrap();
+
+    let (third, _) = monica
+        .explanations()
+        .create_explanation("ts-1", "third", ExplanationMode::Diff)
+        .unwrap();
+
+    assert_eq!(third.id, "expl-3");
+}
+
+#[test]
+fn explanation_delete_missing_returns_not_found() {
+    let repos = FakeRepos::default();
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+
+    let err = monica.explanations().delete_explanation("expl-999").unwrap_err();
+    assert!(matches!(err, ApplicationError::NotFound(_)));
+}
+
+#[test]
+fn explanation_delete_invalid_id_returns_validation() {
+    let repos = FakeRepos::default();
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+
+    let err = monica.explanations().delete_explanation("../evil").unwrap_err();
+    assert!(matches!(err, ApplicationError::Validation(_)));
+}

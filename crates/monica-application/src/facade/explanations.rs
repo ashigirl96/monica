@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use monica_domain::{Explanation, ExplanationMode, NewExplanation};
+use monica_domain::{Explanation, ExplanationId, ExplanationMode, NewExplanation};
 
 use crate::error::{ApplicationError, ApplicationResult};
 use crate::ports::{ExplanationOutputs, ExplanationStore, TerminalSessionRepository};
@@ -11,6 +11,25 @@ pub struct ExplanationService<'a, B: Backend> {
 }
 
 impl<B: Backend> ExplanationService<'_, B> {
+    pub fn list_explanations(&mut self) -> ApplicationResult<Vec<Explanation>> {
+        Ok(self.m.repos.list_explanations()?)
+    }
+
+    pub fn get_explanation(&mut self, id: &str) -> ApplicationResult<Explanation> {
+        ExplanationId::parse(id)?;
+        self.m
+            .repos
+            .get_explanation(id)?
+            .ok_or_else(|| ApplicationError::not_found(format!("explanation {id} not found")))
+    }
+
+    pub fn delete_explanation(&mut self, id: &str) -> ApplicationResult<()> {
+        self.get_explanation(id)?;
+        self.m.outputs.remove_dir(id)?;
+        self.m.repos.delete_explanation(id)?;
+        Ok(())
+    }
+
     pub fn create_explanation(
         &mut self,
         terminal_session_id: &str,

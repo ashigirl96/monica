@@ -90,17 +90,19 @@ check: lint fmt-check knip unused-commands dup ptyd-bin
 generate-bindings: ptyd-bin
     cargo test -p monica-desktop --lib tests::export_typescript_bindings -- --exact
 
+# MONICA_HOME を実行ごとの temp dir に差し替える。セッション環境の実 home を
+# テストが継承して本物の DB・ファイルを触る事故を、crate 側の対応なしで防ぐ。
 test: ptyd-bin
-    cargo test --workspace
+    MONICA_HOME="$(mktemp -d)" cargo test --workspace
     bun test src/
 
 # Coverage doubles as dead-code detection: a pub fn at 0% that no caller or test reaches
 # is invisible to clippy (rustc has no cross-crate dead_code analysis in a workspace).
 coverage: ptyd-bin
-    cargo llvm-cov --workspace
+    MONICA_HOME="$(mktemp -d)" cargo llvm-cov --workspace
 
 coverage-html: ptyd-bin
-    cargo llvm-cov --workspace --html --open
+    MONICA_HOME="$(mktemp -d)" cargo llvm-cov --workspace --html --open
 
 analyze:
     bun --bun vite build --mode analyze

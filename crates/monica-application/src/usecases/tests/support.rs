@@ -119,6 +119,8 @@ struct FakeState {
     pr_branch_success_count: usize,
     branch_sync_candidates: Vec<PullRequestBranchSyncCandidate>,
     bulk_recorded: Vec<(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)>,
+    explanations: Vec<monica_domain::Explanation>,
+    next_explanation: i64,
 }
 
 impl FakeRepos {
@@ -1118,11 +1120,17 @@ impl GitGateway for FakeGit {
 #[derive(Default)]
 pub(crate) struct FakeTaskRunOutputs {
     last_cwd: RefCell<Option<String>>,
+    removed_dirs: Arc<Mutex<Vec<String>>>,
 }
 
 impl FakeTaskRunOutputs {
     pub(crate) fn last_cwd(&self) -> Option<String> {
         self.last_cwd.borrow().clone()
+    }
+
+    /// Monica に move した後も削除記録を観測できるよう、共有ハンドルを渡す。
+    pub(crate) fn removed_dirs_handle(&self) -> Arc<Mutex<Vec<String>>> {
+        Arc::clone(&self.removed_dirs)
     }
 }
 
@@ -1162,6 +1170,14 @@ impl crate::ports::ExplanationOutputs for FakeTaskRunOutputs {
         Ok(PathBuf::from("/tmp/explanations")
             .join(explanation_id)
             .join("index.html"))
+    }
+
+    fn remove_dir(&self, explanation_id: &str) -> Result<()> {
+        self.removed_dirs
+            .lock()
+            .unwrap()
+            .push(explanation_id.to_string());
+        Ok(())
     }
 }
 
@@ -1534,21 +1550,48 @@ impl TerminalSessionRepository for FakeRepos {
 }
 
 impl crate::ports::ExplanationStore for FakeRepos {
+    fn list_explanations(&self) -> Result<Vec<monica_domain::Explanation>> {
+        let mut list: Vec<_> = self.state.borrow().explanations.clone();
+        list.reverse();
+        Ok(list)
+    }
+
+    fn get_explanation(&self, id: &str) -> Result<Option<monica_domain::Explanation>> {
+        Ok(self
+            .state
+            .borrow()
+            .explanations
+            .iter()
+            .find(|e| e.id == id)
+            .cloned())
+    }
+
     fn insert_explanation(
         &mut self,
         new: monica_domain::NewExplanation,
     ) -> Result<monica_domain::Explanation> {
-        Ok(monica_domain::Explanation {
-            id: monica_domain::ExplanationId::from_store("expl-1".to_string()),
+        let mut state = self.state.borrow_mut();
+        // len()+1 だと delete 後の insert で id が再利用され、counter table 方式の SqliteStore と
+        // 挙動が乖離する。単調増加カウンタで実装に揃える。
+        state.next_explanation += 1;
+        let n = state.next_explanation;
+        let explanation = monica_domain::Explanation {
+            id: monica_domain::ExplanationId::from_store(format!("expl-{n}")),
             title: new.title,
             mode: new.mode,
             provider_session_id: new.provider_session_id,
             terminal_session_id: new.terminal_session_id,
             created_at: "2026-07-11T00:00:00.000Z".to_string(),
-        })
+        };
+        state.explanations.push(explanation.clone());
+        Ok(explanation)
     }
 
-    fn delete_explanation(&mut self, _id: &str) -> Result<()> {
+    fn delete_explanation(&mut self, id: &str) -> Result<()> {
+        self.state
+            .borrow_mut()
+            .explanations
+            .retain(|e| e.id != id);
         Ok(())
     }
 }
@@ -1652,6 +1695,24 @@ impl Backend for FakeBackend {
 
 pub(crate) fn facade(repos: FakeRepos, sink: RecordingSink) -> Monica<FakeBackend> {
     facade_with_decoder(repos, sink, TestAgentDecoders::default())
+}
+
+pub(crate) fn facade_with_outputs(
+    repos: FakeRepos,
+    sink: RecordingSink,
+    outputs: FakeTaskRunOutputs,
+) -> Monica<FakeBackend> {
+    Monica::new(
+        repos,
+        FakeGit::default(),
+        FakeGithub,
+        FakeAuth,
+        FakeSetupRunner::default(),
+        outputs,
+        FakeWorkspace,
+        TestAgentDecoders::default(),
+        Box::new(sink),
+    )
 }
 
 pub(crate) fn facade_with_decoder(

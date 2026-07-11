@@ -43,3 +43,18 @@ enum・struct・定数は Rust (backend) を single source of truth とし、フ
 
 - コメントは「なぜ」が非自明な場合のみ。
 - フォーマットは `just fmt` を使う。biome や cargo fmt を直接呼ばない。
+
+## テスト規約
+
+- **MONICA_HOME 隔離は 3 層構成**（テストが実データの home を継承して本物の DB を触る事故の防止）:
+  1. `just test` / `just coverage` が実行ごとに `mktemp -d` の home を注入する — 標準経路は
+     crate 側の対応なしで安全。
+  2. 生の `cargo test -p <crate>` 向けの防衛線として、MONICA_HOME 依存のテストを持つ crate は
+     `#[ctor::ctor]` で main 前に temp home へ差し替える（例: `monica-adapters/src/test_support.rs`）。
+  3. `std::env::set_var` / `remove_var` は clippy の disallowed-methods（`clippy.toml`）で禁止 —
+     テスト内で env を書き換えるコードは `just check` で機械的に落ちる。正当な例外
+     （ctor・起動直後の単一スレッド区間）だけ `#[allow(clippy::disallowed_methods)]` を理由付きで付ける。
+- cargo を生で叩くときの注意: `monica-desktop` の build script は
+  `binaries/monica-ptyd-<host-triple>` を要求する。`just check` / `just test` は `ptyd-bin` 依存で
+  自動生成されるが、生の `cargo check --workspace` 等が落ちたら先に `just ptyd-bin` を実行する
+  （新規 worktree は `.monica/setup.sh` が用意する）。

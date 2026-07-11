@@ -41,7 +41,7 @@ Please make me a rich, interactive explanation of the specified code change.
 
    ```bash
    if [ -n "$MONICA_WEB_URL" ]; then
-     echo "$MONICA_WEB_URL/explanations/<id>"
+     echo "$MONICA_WEB_URL/explanations/<id>/artifact"
    else
      open "<absolute path to index.html>"
    fi

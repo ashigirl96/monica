@@ -9,6 +9,8 @@ use tauri::Manager;
 #[cfg(all(unix, not(debug_assertions)))]
 mod shell_path;
 
+pub struct WebUrl(pub String);
+
 fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::new()
         .commands(tauri_specta::collect_commands![
@@ -117,17 +119,29 @@ pub fn run() {
             let drain = schedulers::notification_drain::start(app.handle().clone());
             app.manage(drain);
             ptyd::start_warmup(app.handle().clone());
-            let web_port = if cfg!(debug_assertions) { 0 } else { 19280 };
+            let web_port = if cfg!(debug_assertions) { 0 } else { monica_web::PORT_PROD };
+            let (port_tx, port_rx) = std::sync::mpsc::sync_channel(1);
             if let Err(e) = std::thread::Builder::new()
                 .name("monica-web".into())
                 .spawn(move || {
-                    if let Err(e) = monica_web::serve(([127, 0, 0, 1], web_port)) {
+                    if let Err(e) = monica_web::serve(([127, 0, 0, 1], web_port), port_tx) {
                         log::error!(target: "monica_desktop::web", "web server failed: {e:?}");
                     }
                 })
             {
                 log::warn!(target: "monica_desktop::web", "failed to spawn web server thread: {e}");
             }
+            let web_url = match port_rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                Ok(p) => format!("http://127.0.0.1:{p}"),
+                Err(e) => {
+                    log::warn!(
+                        target: "monica_desktop::web",
+                        "web server port not received ({e}); MONICA_WEB_URL injection disabled"
+                    );
+                    String::new()
+                }
+            };
+            app.manage(WebUrl(web_url));
             #[cfg(not(debug_assertions))]
             log::info!(
                 target: "monica_app::startup",

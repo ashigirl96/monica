@@ -4,12 +4,21 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use monica_paths as paths;
 
+pub fn remove_explanation_dir(id: &str) -> Result<()> {
+    let dir = paths::explanation_dir(id)?;
+    match fs::remove_dir_all(&dir) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e).with_context(|| format!("failed to remove {}", dir.display())),
+    }
+}
+
 pub fn write_explanation_scaffold(id: &str, title: &str) -> Result<PathBuf> {
     let dir = paths::explanation_dir(id)?;
     fs::create_dir_all(&dir)
         .with_context(|| format!("failed to create {}", dir.display()))?;
 
-    let index_path = dir.join("index.html");
+    let index_path = paths::explanation_index_path(id)?;
     let html = scaffold_html(title);
     fs::write(&index_path, html)
         .with_context(|| format!("failed to write {}", index_path.display()))?;
@@ -49,23 +58,25 @@ mod tests {
     }
 
     #[test]
-    fn write_scaffold_creates_file() {
-        let dir = std::env::temp_dir().join(format!(
-            "monica-scaffold-test-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
+    fn remove_dir_deletes_directory() {
+        write_explanation_scaffold("expl-99", "To Delete").unwrap();
+        let expl_dir = paths::explanation_dir("expl-99").unwrap();
+        assert!(expl_dir.exists());
 
-        std::env::set_var("MONICA_HOME", &dir);
+        remove_explanation_dir("expl-99").unwrap();
+        assert!(!expl_dir.exists());
+
+        // idempotent: removing again succeeds
+        remove_explanation_dir("expl-99").unwrap();
+    }
+
+    #[test]
+    fn write_scaffold_creates_file() {
         let path = write_explanation_scaffold("expl-42", "My Explanation").unwrap();
-        std::env::remove_var("MONICA_HOME");
 
         assert!(path.exists());
         assert!(path.ends_with("expl-42/index.html"));
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("My Explanation"));
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
