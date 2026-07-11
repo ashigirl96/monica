@@ -1,5 +1,6 @@
 mod bench;
 mod events;
+mod explanations;
 mod external_refs;
 pub(crate) mod notification_outbox;
 mod projects;
@@ -21,6 +22,9 @@ pub(super) const EVENT_COLUMNS: &str = "id, task_id, task_run_id, kind, payload_
 
 pub(super) const NOTIFICATION_OUTBOX_COLUMNS: &str =
     "id, dedupe_key, kind, title, body, task_id, task_run_id, created_at, delivered_at, error, attempts";
+
+pub(super) const EXPLANATION_COLUMNS: &str =
+    "id, title, mode, provider_session_id, terminal_session_id, created_at";
 
 pub(super) const SET_NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 

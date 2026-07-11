@@ -59,3 +59,11 @@ pub fn ptyd_pid_path() -> Result<PathBuf> {
 pub fn terminal_sessions_dir() -> Result<PathBuf> {
     Ok(base_dir()?.join("terminal-sessions"))
 }
+
+pub fn explanations_dir() -> Result<PathBuf> {
+    Ok(base_dir()?.join("explanations"))
+}
+
+pub fn explanation_dir(id: &str) -> Result<PathBuf> {
+    Ok(explanations_dir()?.join(id))
+}

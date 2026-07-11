@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use monica_application::shell::quote_single;
-use monica_application::{ExecutionProfile, ShellScaffolding, TaskRunOutputs};
+use monica_application::{ExecutionProfile, ExplanationOutputs, ShellScaffolding, TaskRunOutputs};
 use monica_domain::{Agent, Project};
 use serde_json::{json, Value};
 
@@ -450,6 +450,12 @@ fn write_zdotdir(zdotdir: &Path, wrappers: &[(Agent, PathBuf)]) -> Result<()> {
         write_if_changed(&zdotdir.join(file), &zdotdir_shim(file))?;
     }
     Ok(())
+}
+
+impl ExplanationOutputs for FsTaskRunOutputs {
+    fn write_scaffold(&self, explanation_id: &str, title: &str) -> Result<PathBuf> {
+        super::explanations::write_explanation_scaffold(explanation_id, title)
+    }
 }
 
 #[cfg(test)]

@@ -5,6 +5,8 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 mod agent_event_decoder;
 mod event_repository;
+mod explanation_outputs;
+mod explanation_store;
 mod git_gateway;
 mod notification_outbox_store;
 mod project_repository;
@@ -21,6 +23,8 @@ mod workspace;
 
 pub use agent_event_decoder::{AgentDecoders, AgentEventDecoder};
 pub use event_repository::EventRepository;
+pub use explanation_outputs::ExplanationOutputs;
+pub use explanation_store::ExplanationStore;
 pub use git_gateway::{GitGateway, WorktreeRef};
 pub use notification_outbox_store::NotificationOutboxStore;
 pub use project_repository::ProjectRepository;

@@ -249,3 +249,81 @@ async fn facade_init_project_prefers_git_branch_over_github() {
     assert_eq!(report.project.default_branch, "main");
     assert!(!report.scaffold.is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// ExplanationService
+// ---------------------------------------------------------------------------
+
+fn fake_terminal_session(id: &str, provider_session_id: Option<&str>) -> TerminalSession {
+    TerminalSession {
+        id: id.to_string(),
+        runspace_id: None,
+        tab_id: None,
+        kind: TerminalSessionKind::Agent,
+        cwd: "/tmp".to_string(),
+        shell: "/bin/zsh".to_string(),
+        status: TerminalSessionStatus::Running,
+        agent_status: None,
+        agent_wait_reason: None,
+        provider_session_id: provider_session_id.map(str::to_string),
+        pid: None,
+        rows: 24,
+        cols: 80,
+        transcript_path: None,
+        exit_code: None,
+        started_at: None,
+        last_seen_at: None,
+        exited_at: None,
+        created_at: "2026-07-11T00:00:00.000Z".to_string(),
+        updated_at: "2026-07-11T00:00:00.000Z".to_string(),
+    }
+}
+
+#[test]
+fn explanation_create_happy_path() {
+    let repos = FakeRepos::default();
+    repos.seed_session(fake_terminal_session("ts-1", Some("provider-abc")));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+
+    let (explanation, path) = monica
+        .explanations()
+        .create_explanation("ts-1", "My Title", ExplanationMode::Diff)
+        .unwrap();
+
+    assert_eq!(explanation.id, "expl-1");
+    assert_eq!(explanation.title, "My Title");
+    assert_eq!(explanation.mode, ExplanationMode::Diff);
+    assert_eq!(explanation.provider_session_id, "provider-abc");
+    assert_eq!(explanation.terminal_session_id, "ts-1");
+    assert!(path.to_string_lossy().contains("index.html"));
+}
+
+#[test]
+fn explanation_create_fails_when_session_not_found() {
+    let repos = FakeRepos::default();
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+
+    let err = monica
+        .explanations()
+        .create_explanation("ts-missing", "title", ExplanationMode::Topic)
+        .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::NotFound(_)));
+}
+
+#[test]
+fn explanation_create_fails_when_provider_session_id_is_null() {
+    let repos = FakeRepos::default();
+    repos.seed_session(fake_terminal_session("ts-1", None));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+
+    let err = monica
+        .explanations()
+        .create_explanation("ts-1", "title", ExplanationMode::Diff)
+        .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Validation(_)));
+}
