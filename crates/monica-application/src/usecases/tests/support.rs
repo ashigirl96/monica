@@ -1547,6 +1547,10 @@ impl crate::ports::ExplanationStore for FakeRepos {
             created_at: "2026-07-11T00:00:00.000Z".to_string(),
         })
     }
+
+    fn delete_explanation(&mut self, _id: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Default)]

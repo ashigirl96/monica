@@ -51,6 +51,11 @@ impl ExplanationStore for SqliteStore {
         tx.commit()?;
         Ok(explanation)
     }
+
+    fn delete_explanation(&mut self, id: &str) -> Result<()> {
+        self.conn().execute("DELETE FROM explanations WHERE id = ?1", params![id])?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

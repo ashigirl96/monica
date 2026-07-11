@@ -42,10 +42,17 @@ impl<B: Backend> ExplanationService<'_, B> {
             terminal_session_id: terminal_session_id.to_string(),
         })?;
 
-        let index_path = self
+        let index_path = match self
             .m
             .outputs
-            .write_scaffold(explanation.id.as_str(), title)?;
+            .write_scaffold(explanation.id.as_str(), title)
+        {
+            Ok(path) => path,
+            Err(e) => {
+                let _ = self.m.repos.delete_explanation(explanation.id.as_str());
+                return Err(e.into());
+            }
+        };
 
         Ok((explanation, index_path))
     }
