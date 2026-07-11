@@ -57,6 +57,11 @@ function Card({
       <span className="line-clamp-2 min-h-[2.6em] text-base font-medium leading-snug">
         {item.title}
       </span>
+      {item.summary && (
+        <span className="line-clamp-2 text-sm leading-snug text-muted-foreground">
+          {item.summary}
+        </span>
+      )}
       <span className="text-xs text-muted-foreground" title={formatDate(item.created_at)}>
         {formatRelative(item.created_at)}
       </span>

@@ -74,7 +74,8 @@ fn base_shell_env() -> Result<Vec<(String, String)>> {
 
     let monica_home = paths::base_dir()?.to_string_lossy().into_owned();
     let mut env = vec![
-        ("MONICA_HOME".to_string(), monica_home),
+        ("MONICA_HOME".to_string(), monica_home.clone()),
+        ("_MONICA_APP_HOME".to_string(), monica_home),
         ("ZDOTDIR".to_string(), zdotdir.to_string_lossy().into_owned()),
     ];
     // Set only when the user actually had ZDOTDIR; .zshenv unsets it otherwise

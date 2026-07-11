@@ -12,12 +12,12 @@ Please make me a rich, interactive explanation of the specified code change.
 
 1. **Understand the change** — Identify what to explain (the working diff, the current branch against the default branch, or a specific PR/range) and study it. Broadly explore the surrounding code too; the Background section depends on it.
 
-2. **Decide a title** — Choose a short, plain-text title that names the change (e.g. `Session store refactor into adapters`). It becomes the explanation's title in Monica and the HTML `<title>`. Avoid characters that need shell escaping (quotes, backticks, `$`, backslash).
+2. **Decide a title and summary** — Choose a short, plain-text title that names the change (e.g. `Session store refactor into adapters`). It becomes the explanation's title in Monica and the HTML `<title>`. Also compose a 1–2 sentence plain-text summary of what the change does — this appears on the explanation list card and helps recall without opening the full document. Avoid characters that need shell escaping (quotes, backticks, `$`, backslash) in both.
 
 3. **Create the explanation entry** — Run:
 
    ```bash
-   "${MONICA_BIN:-monica}" explain new --mode diff "<title>"
+   "${MONICA_BIN:-monica}" explain new --mode diff --title "<title>" --summary "<summary>"
    ```
 
    - On success, stdout is exactly one line: the absolute path of the scaffolded `index.html` (for example `/Users/you/monica/explanations/expl-12/index.html`). Human-facing messages go to stderr. Use this literal path in every following step.

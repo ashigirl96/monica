@@ -5,6 +5,7 @@
 export type Explanation = {
   id: string;
   title: string;
+  summary: string | null;
   mode: ExplanationMode;
   provider_session_id: string;
   terminal_session_id: string;
