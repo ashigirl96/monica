@@ -7,6 +7,15 @@ set -euo pipefail
 #   corepack enable
 #   pnpm install --frozen-lockfile
 export MONICA_HOME="$HOME/monica/dev"
+
+# worktree ごとに固有の web サーバーポートを割り当てる（並列開発で衝突しない）。
+# .envrc に書いて direnv 経由で永続化。MONICA_WEB_PORT は monica-desktop の
+# debug ビルドが読む。
+if ! grep -q MONICA_WEB_PORT .envrc.local 2>/dev/null; then
+    port=$((RANDOM % 10000 + 20000))
+    echo "export MONICA_WEB_PORT=$port" >> .envrc.local
+    echo "export MONICA_WEB_URL=http://monica.localhost:$port" >> .envrc.local
+fi
 direnv allow .
 
 # monica-desktop の build script は binaries/monica-ptyd-<host-triple> を要求する。

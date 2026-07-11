@@ -29,6 +29,7 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+.envrc.local
 
 # vendored external repos fetched locally for reference
 docs/repos/
