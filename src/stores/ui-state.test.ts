@@ -12,7 +12,7 @@ import {
 } from "@/stores/ui-state";
 
 const DEFAULT_WINDOW: WindowUiState = {
-  activeSpace: "library",
+  activeSpace: "work-board",
   sidebarOpen: true,
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
   workbench: { activeRunspaceId: null, activeTabId: null },
@@ -75,18 +75,18 @@ describe("parsePersistedUiState", () => {
     expect(
       parsePersistedUiState({ windows: { main: { activeSpace: "nope" } } }).windows.main
         .activeSpace,
-    ).toBe("library");
+    ).toBe("work-board");
   });
 
-  test("maps retired space ids to library", () => {
+  test("maps retired space ids to work-board", () => {
     expect(
       parsePersistedUiState({ windows: { main: { activeSpace: "dashboard" } } }).windows.main
         .activeSpace,
-    ).toBe("library");
+    ).toBe("work-board");
     expect(
-      parsePersistedUiState({ windows: { main: { activeSpace: "project" } } }).windows.main
+      parsePersistedUiState({ windows: { main: { activeSpace: "library" } } }).windows.main
         .activeSpace,
-    ).toBe("library");
+    ).toBe("work-board");
   });
 
   test("clamps sidebarWidth into range per window", () => {
@@ -125,7 +125,7 @@ describe("selectWindowUiState", () => {
   const state = parsePersistedUiState({
     global: { uiZoom: 1 },
     windows: {
-      main: { activeSpace: "library", sidebarWidth: 200 },
+      main: { activeSpace: "work-bench", sidebarWidth: 200 },
       "monica-window-1": { activeSpace: "work-board", sidebarWidth: 320 },
     },
   });
@@ -138,7 +138,7 @@ describe("selectWindowUiState", () => {
 
   test("falls back to main for an unknown window", () => {
     const fallback = selectWindowUiState(state, "monica-window-9");
-    expect(fallback.activeSpace).toBe("library");
+    expect(fallback.activeSpace).toBe("work-bench");
     expect(fallback.sidebarWidth).toBe(200);
   });
 
@@ -153,7 +153,7 @@ describe("selectWindowUiState", () => {
 describe("serializeUiStatePatch", () => {
   const current = parsePersistedUiState({
     global: { uiZoom: 1.3 },
-    windows: { main: { activeSpace: "library", sidebarWidth: 200 } },
+    windows: { main: { activeSpace: "work-board", sidebarWidth: 200 } },
   });
   const patch: WindowUiState = {
     activeSpace: "work-bench",

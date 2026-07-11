@@ -8,10 +8,6 @@ export const queryKeys = {
   },
   board: { columns: () => ["board", "columns"] as const },
   taskRuns: { primaryTab: (taskId: string) => ["taskRuns", "primaryTab", taskId] as const },
-  notebooks: {
-    list: () => ["notebooks", "list"] as const,
-    pages: (notebookId: string) => ["notebooks", "pages", notebookId] as const,
-  },
 };
 
 // Invalidate every tasks.summary query (filtered board + unfiltered sidebar). The single

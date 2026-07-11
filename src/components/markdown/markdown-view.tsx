@@ -16,8 +16,8 @@ function BaseMarkdown({ body }: { body: string }) {
   );
 }
 
-// Generic markdown reader: a body string → GFM + lazy math/code/diagrams. Used by the Library
-// notebook view and the Workbench plan preview. `[[wikilink]]` in-app navigation is layered on next.
+// Generic markdown reader: a body string → GFM + lazy math/code/diagrams. Used by the Workbench
+// plan preview and other markdown surfaces. `[[wikilink]]` in-app navigation is layered on next.
 export default function MarkdownView({ body }: { body: string }) {
   return (
     <article className="notebook-md">

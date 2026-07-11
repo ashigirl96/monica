@@ -40,8 +40,6 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::task::update_task_memo,
             commands::task::make_main_task_run,
             commands::task::primary_tab_id,
-            commands::notebook::list_notebooks,
-            commands::notebook::get_notebook_pages,
             commands::plan::read_runspace_plan,
             commands::pull_request::force_sync_pull_requests,
             commands::window::open_named_window,

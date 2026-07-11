@@ -8,7 +8,6 @@
 
 mod backend;
 mod executions;
-mod notebooks;
 mod notifications;
 mod projects;
 mod synchronization;
@@ -16,7 +15,6 @@ mod tasks;
 
 pub use backend::Backend;
 pub use executions::ExecutionService;
-pub use notebooks::{NotebookLintReport, NotebookPageView, NotebookService};
 pub use notifications::NotificationService;
 pub use projects::{ProjectInit, ProjectService};
 pub use synchronization::SynchronizationService;
@@ -31,7 +29,6 @@ pub struct Monica<B: Backend> {
     pub(in crate::facade) auth: B::Auth,
     pub(in crate::facade) setup: B::Setup,
     pub(in crate::facade) outputs: B::Outputs,
-    pub(in crate::facade) notebooks: B::Notebooks,
     pub(in crate::facade) workspace: B::Workspace,
     pub(in crate::facade) agents: B::Agents,
     pub(in crate::facade) events: Box<dyn EventSink>,
@@ -46,12 +43,11 @@ impl<B: Backend> Monica<B> {
         auth: B::Auth,
         setup: B::Setup,
         outputs: B::Outputs,
-        notebooks: B::Notebooks,
         workspace: B::Workspace,
         agents: B::Agents,
         events: Box<dyn EventSink>,
     ) -> Self {
-        Self { repos, git, github, auth, setup, outputs, notebooks, workspace, agents, events }
+        Self { repos, git, github, auth, setup, outputs, workspace, agents, events }
     }
 
     pub fn tasks(&mut self) -> TaskService<'_, B> {
@@ -68,10 +64,6 @@ impl<B: Backend> Monica<B> {
 
     pub fn synchronization(&mut self) -> SynchronizationService<'_, B> {
         SynchronizationService { m: self }
-    }
-
-    pub fn notebooks(&mut self) -> NotebookService<'_, B> {
-        NotebookService { m: self }
     }
 
     pub fn notifications(&mut self) -> NotificationService<'_, B> {

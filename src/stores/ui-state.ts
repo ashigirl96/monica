@@ -35,7 +35,7 @@ export const MAIN_WINDOW_LABEL = "main";
 export const windowLabelAtom = atom("");
 
 const DEFAULT_WINDOW_STATE: WindowUiState = {
-  activeSpace: "library",
+  activeSpace: "work-board",
   sidebarOpen: true,
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
   workbench: { activeRunspaceId: null, activeTabId: null },
@@ -43,7 +43,6 @@ const DEFAULT_WINDOW_STATE: WindowUiState = {
 };
 
 const SPACE_IDS: Record<SpaceId, true> = {
-  library: true,
   "work-board": true,
   "work-bench": true,
 };
