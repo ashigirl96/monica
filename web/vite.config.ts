@@ -21,11 +21,11 @@ export default defineConfig({
     port: 5174,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:19281",
+        target: "http://monica.localhost:19281",
         changeOrigin: true,
       },
       "^/explanations/.+/artifact": {
-        target: "http://127.0.0.1:19281",
+        target: "http://monica.localhost:19281",
         changeOrigin: true,
       },
     },

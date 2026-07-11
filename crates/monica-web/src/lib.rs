@@ -72,7 +72,12 @@ fn check_host(headers: &HeaderMap, port: u16) -> Result<(), StatusCode> {
         .get("host")
         .and_then(|v| v.to_str().ok())
         .ok_or(StatusCode::FORBIDDEN)?;
-    if host != format!("127.0.0.1:{port}") && host != format!("localhost:{port}") {
+    let allowed = [
+        format!("127.0.0.1:{port}"),
+        format!("localhost:{port}"),
+        format!("monica.localhost:{port}"),
+    ];
+    if !allowed.iter().any(|a| a == host) {
         return Err(StatusCode::FORBIDDEN);
     }
     Ok(())
@@ -424,6 +429,21 @@ mod tests {
                 Request::builder()
                     .uri("/api/explanations")
                     .header("host", "localhost:19999")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn monica_localhost_host_header_accepted() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/explanations")
+                    .header("host", "monica.localhost:19999")
                     .body(Body::empty())
                     .unwrap(),
             )
