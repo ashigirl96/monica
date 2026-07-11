@@ -11,12 +11,7 @@ interface ContextMenuState {
   item: Explanation;
 }
 
-function ModeLabel({ mode }: { mode: string }) {
-  const color = mode === "diff" ? "text-accent-diff" : "text-accent-topic";
-  return <span className={`font-mono text-xs uppercase tracking-widest ${color}`}>{mode}</span>;
-}
-
-function Card({
+function Entry({
   item,
   onOpen,
   onMenu,
@@ -25,47 +20,56 @@ function Card({
   onOpen: () => void;
   onMenu: (e: React.MouseEvent) => void;
 }) {
-  const edge = item.mode === "diff" ? "bg-accent-diff" : "bg-accent-topic";
-  const hoverBorder =
-    item.mode === "diff" ? "hover:border-accent-diff/40" : "hover:border-accent-topic/40";
-  const ghostHover =
-    item.mode === "diff" ? "group-hover:text-accent-diff/70" : "group-hover:text-accent-topic/70";
+  const modeColor = item.mode === "diff" ? "text-accent-diff" : "text-accent-topic";
+  const titleHover =
+    item.mode === "diff" ? "group-hover:text-accent-diff" : "group-hover:text-accent-topic";
 
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      onContextMenu={onMenu}
-      className={`group relative flex cursor-pointer flex-col gap-2 overflow-hidden rounded-lg border bg-card px-5 py-4 text-left transition-all hover:shadow-md ${hoverBorder}`}
-    >
-      <div className={`absolute inset-y-0 left-0 w-1 ${edge}`} />
-      <div className="flex items-baseline justify-between gap-3">
-        <div className="flex items-baseline gap-2">
-          <ModeLabel mode={item.mode} />
-          {item.repo_name && (
-            <span className="truncate font-mono text-xs text-muted-foreground/60">
-              {item.repo_name}
+    <li>
+      <a
+        href={`/explanations/${item.id}`}
+        onClick={(e) => {
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+          e.preventDefault();
+          onOpen();
+        }}
+        onContextMenu={onMenu}
+        className="group flex items-start gap-6 rounded-lg border bg-card px-5 py-5 transition-colors hover:border-border/80 hover:shadow-sm"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2.5">
+            <span className={`font-mono text-[0.7rem] uppercase tracking-widest ${modeColor}`}>
+              {item.mode}
             </span>
+            {item.repo_name && (
+              <span className="truncate font-mono text-xs text-muted-foreground/70">
+                {item.repo_name}
+              </span>
+            )}
+          </div>
+          <h2
+            className={`mt-1.5 text-[1.3rem] font-medium leading-snug transition-colors ${titleHover}`}
+          >
+            {item.title}
+          </h2>
+          {item.summary && (
+            <p className="mt-1.5 line-clamp-2 text-sm leading-relaxed text-muted-foreground">
+              {item.summary}
+            </p>
           )}
         </div>
-        <span
-          className={`shrink-0 font-mono text-lg text-muted-foreground/25 transition-colors ${ghostHover}`}
-        >
-          {item.id}
-        </span>
-      </div>
-      <span className="line-clamp-2 min-h-[2.6em] text-base font-medium leading-snug">
-        {item.title}
-      </span>
-      {item.summary && (
-        <span className="line-clamp-2 text-sm leading-snug text-muted-foreground">
-          {item.summary}
-        </span>
-      )}
-      <span className="text-xs text-muted-foreground" title={formatDate(item.created_at)}>
-        {formatRelative(item.created_at)}
-      </span>
-    </button>
+        <div className="flex shrink-0 flex-col items-end gap-1 pt-1">
+          <span className="font-mono text-xs text-muted-foreground/50">{item.id}</span>
+          <time
+            dateTime={item.created_at}
+            className="text-xs text-muted-foreground/70"
+            title={formatDate(item.created_at)}
+          >
+            {formatRelative(item.created_at)}
+          </time>
+        </div>
+      </a>
+    </li>
   );
 }
 
@@ -132,59 +136,67 @@ export function ListPage() {
 
   return (
     <>
-      <header className="sticky top-0 z-10 flex min-h-12 items-center gap-3 border-b bg-background/80 px-5 backdrop-blur-sm">
-        <span className="text-sm font-semibold tracking-tight">Explanations</span>
-        {explanations.length > 0 && (
-          <span className="font-mono text-xs text-muted-foreground">
-            {query ? `${filtered.length}/${explanations.length}` : explanations.length}
-          </span>
-        )}
-        <div className="ml-auto flex items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 transition-colors focus-within:border-foreground/25">
-          <svg
-            className="size-3.5 shrink-0 text-muted-foreground/60"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
-            />
-          </svg>
-          <input
-            ref={searchRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                setQuery("");
-                e.currentTarget.blur();
-              }
+      <header className="sticky top-0 z-10 border-b bg-background/85 backdrop-blur-sm">
+        <div className="mx-auto flex h-14 w-full max-w-[860px] items-center gap-3 px-6">
+          <a
+            href="/"
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+              e.preventDefault();
+              navigate("/");
             }}
-            placeholder="Search"
-            className="w-44 bg-transparent text-sm outline-none placeholder:text-muted-foreground/50"
-          />
-          <kbd className="rounded border px-1.5 font-mono text-[0.6rem] text-muted-foreground/60">
-            /
-          </kbd>
+            className="flex items-center gap-2"
+          >
+            <img src="/favicon.png" alt="" className="size-6" />
+            <h1 className="text-lg font-medium tracking-tight">Monica Library</h1>
+          </a>
+          <div className="ml-auto flex items-center gap-2">
+            <svg
+              className="size-3.5 shrink-0 text-muted-foreground/60"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+              />
+            </svg>
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setQuery("");
+                  e.currentTarget.blur();
+                }
+              }}
+              placeholder="Search"
+              className="w-28 border-b border-transparent bg-transparent pb-0.5 text-sm outline-none transition-all placeholder:text-muted-foreground/50 focus:w-44 focus:border-accent sm:w-36 sm:focus:w-56"
+            />
+            <kbd className="rounded border px-1.5 py-0.5 font-mono text-[0.65rem] text-muted-foreground/50">
+              /
+            </kbd>
+          </div>
         </div>
       </header>
 
-      <main className="flex-1 px-5 py-6">
+      <main className="mx-auto w-full max-w-[860px] flex-1 px-6 pb-24 pt-2">
         {loading ? (
-          <div className="flex items-center gap-2 py-16 text-sm text-muted-foreground">
+          <div className="flex items-center justify-center gap-2.5 py-28 text-sm text-muted-foreground">
             <div className="size-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
             Loading&hellip;
           </div>
         ) : error ? (
-          <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
+          <div className="mt-8 rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
             {error}
           </div>
         ) : explanations.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed py-20 text-center">
-            <div className="flex size-11 items-center justify-center rounded-full bg-muted">
+          <div className="flex flex-col items-center gap-4 py-28 text-center">
+            <div className="flex size-12 items-center justify-center rounded-full bg-muted">
               <svg
                 className="size-5 text-muted-foreground"
                 fill="none"
@@ -200,8 +212,8 @@ export function ListPage() {
               </svg>
             </div>
             <div>
-              <p className="text-sm font-medium">No explanations yet</p>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="text-lg">No explanations yet</p>
+              <p className="mt-1.5 text-sm text-muted-foreground">
                 Create one with{" "}
                 <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
                   monica explain new
@@ -210,13 +222,13 @@ export function ListPage() {
             </div>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="py-16 text-center text-sm text-muted-foreground">
+          <div className="py-24 text-center text-sm text-muted-foreground">
             No matches for &ldquo;{query}&rdquo;
           </div>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <ol className="flex flex-col gap-3">
             {filtered.map((e) => (
-              <Card
+              <Entry
                 key={e.id}
                 item={e}
                 onOpen={() => navigate(`/explanations/${e.id}`)}
@@ -226,14 +238,14 @@ export function ListPage() {
                 }}
               />
             ))}
-          </div>
+          </ol>
         )}
       </main>
 
       {menu && (
         <div
           ref={menuRef}
-          className="fixed z-50 w-48 rounded-md border bg-card p-1 shadow-xl"
+          className="fixed z-50 w-48 rounded-lg border bg-card p-1 shadow-lg"
           style={{
             left: Math.min(menu.x, window.innerWidth - 200),
             top: Math.min(menu.y, window.innerHeight - 130),
@@ -245,7 +257,7 @@ export function ListPage() {
               setMenu(null);
               navigate(`/explanations/${menu.item.id}`);
             }}
-            className="flex w-full items-center rounded px-2.5 py-1.5 text-sm transition-colors hover:bg-muted"
+            className="flex w-full items-center rounded-md px-2.5 py-1.5 text-sm transition-colors hover:bg-muted"
           >
             Open
           </button>
@@ -255,7 +267,7 @@ export function ListPage() {
               setMenu(null);
               window.open(`/explanations/${menu.item.id}/artifact`, "_blank");
             }}
-            className="flex w-full items-center rounded px-2.5 py-1.5 text-sm transition-colors hover:bg-muted"
+            className="flex w-full items-center rounded-md px-2.5 py-1.5 text-sm transition-colors hover:bg-muted"
           >
             Open artifact in new tab
           </button>
@@ -266,7 +278,7 @@ export function ListPage() {
               setDeleteTarget(menu.item);
               setMenu(null);
             }}
-            className="flex w-full items-center rounded px-2.5 py-1.5 text-sm text-destructive transition-colors hover:bg-destructive/10"
+            className="flex w-full items-center rounded-md px-2.5 py-1.5 text-sm text-destructive transition-colors hover:bg-destructive/10"
           >
             Delete&hellip;
           </button>
