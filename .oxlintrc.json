@@ -15,5 +15,5 @@
     "typescript/no-floating-promises": "error",
     "react-hooks/exhaustive-deps": "warn"
   },
-  "ignorePatterns": ["dist", "src-tauri/target", "node_modules", "docs/repos"]
+  "ignorePatterns": ["dist", "dist-web", "src-tauri/target", "node_modules", "docs/repos"]
 }

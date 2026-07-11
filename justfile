@@ -6,6 +6,12 @@ default:
 install:
     bun install
 
+build-web:
+    bun --bun vite build --config web/vite.config.ts
+
+dev-web:
+    bun --bun vite dev --config web/vite.config.ts
+
 dev: dev-cli ptyd-bin
     MONICA_HOME="$HOME/monica/dev" MONICA_BIN="{{justfile_directory()}}/monica-dev" MONICA_PTYD_PATH="{{justfile_directory()}}/target/debug/monica-ptyd" bun run tauri dev
 
@@ -82,7 +88,7 @@ unused-commands:
 # Fails on any verbatim clone of 100+ tokens. Smaller duplication is reviewed by humans;
 # this gate only blocks the copy-paste class that linters cannot see.
 dup:
-    bunx jscpd src crates --format "typescript,tsx,rust" --ignore "**/bindings.ts" --min-tokens 100 --threshold 0 --silent
+    bunx jscpd src web crates --format "typescript,tsx,rust" --ignore "**/bindings.ts,**/types.gen.ts" --min-tokens 100 --threshold 0 --silent
 
 check: lint fmt-check knip unused-commands dup ptyd-bin
     cargo clippy --workspace --all-targets -- -D warnings
@@ -92,7 +98,7 @@ generate-bindings: ptyd-bin
 
 # MONICA_HOME を実行ごとの temp dir に差し替える。セッション環境の実 home を
 # テストが継承して本物の DB・ファイルを触る事故を、crate 側の対応なしで防ぐ。
-test: ptyd-bin
+test: ptyd-bin build-web
     MONICA_HOME="$(mktemp -d)" cargo test --workspace
     bun test src/
 
@@ -125,4 +131,4 @@ kill-dev:
     echo "$pids" | xargs kill 2>/dev/null || true
 
 clean:
-    rm -rf dist node_modules target monica-dev
+    rm -rf dist dist-web node_modules target monica-dev
