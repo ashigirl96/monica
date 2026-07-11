@@ -37,17 +37,7 @@ Please make me a rich, interactive explanation of the specified code change.
 
 6. **Verify** — Re-read the top of the written file and confirm the scaffold lines and the marker comment are intact, and check each code block against the Format rules below.
 
-7. **Deliver** — Run:
-
-   ```bash
-   if [ -n "$MONICA_WEB_URL" ]; then
-     echo "$MONICA_WEB_URL/explanations/<id>/artifact"
-   else
-     open "<absolute path to index.html>"
-   fi
-   ```
-
-   If a URL was printed, share it with the user. Otherwise the page opened in the browser via `file://` — tell the user the file path.
+7. **Deliver** — Run: `!open "$MONICA_WEB_URL/explanations/<id>/`
 
 ## Sections
 
