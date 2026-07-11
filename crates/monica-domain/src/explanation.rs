@@ -41,7 +41,7 @@ pub struct Explanation {
 }
 
 pub fn repo_name_from_cwd(cwd: &str) -> Option<String> {
-    if cwd.is_empty() {
+    if cwd.is_empty() || cwd == "~" {
         return None;
     }
     let path = Path::new(cwd);
@@ -106,6 +106,11 @@ mod tests {
     #[test]
     fn repo_name_empty() {
         assert_eq!(repo_name_from_cwd(""), None);
+    }
+
+    #[test]
+    fn repo_name_tilde() {
+        assert_eq!(repo_name_from_cwd("~"), None);
     }
 
     #[test]
