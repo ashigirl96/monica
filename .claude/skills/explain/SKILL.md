@@ -1,64 +1,50 @@
 ---
 name: explain
-description: Creates a Monica explanation entry via `monica explain new` and writes a rich, interactive HTML explanation of a code change into the explanations directory.
+description: "`monica explain new` で Monica の explanation エントリを作成し、コード変更の rich で interactive な HTML 解説を explanations ディレクトリに書き出す。"
 disable-model-invocation: true
 ---
 
 # Explain
 
-Please make me a rich, interactive explanation of the specified code change.
-Write the title, summary, and HTML in the language the user was using in the conversation.
+指定されたコード変更について、rich で interactive な解説を作ってください。
 
 ## Workflow
 
-1. **Understand the change** — Identify what to explain (the working diff, the current branch against the default branch, or a specific PR/range) and study it. Broadly explore the surrounding code too; the Background section depends on it.
+1. **変更を理解する** — 何を説明するか（working diff、現在の branch と default branch の差分、または特定の PR / range）を特定し、それを読み込む。周辺コードも広く探索すること。Background セクションはそれに依存する。
 
-2. **Decide a title and summary** — Choose a short, plain-text title that names the change (e.g. `Session store refactor into adapters`). It becomes the explanation's title in Monica and the HTML `<title>`. Also compose a 1–2 sentence plain-text summary of what the change does — this appears on the explanation list card and helps recall without opening the full document. Avoid characters that need shell escaping (quotes, backticks, `$`, backslash) in both.
-
-3. **Create the explanation entry** — Run:
+2. **explanation エントリを作成する** — 次を実行する:
 
    ```bash
    "${MONICA_BIN:-monica}" explain new --mode diff --title "<title>" --summary "<summary>"
    ```
 
-   - On success, stdout is exactly one line: the absolute path of the scaffolded `index.html` (for example `/Users/you/monica/explanations/expl-12/index.html`). Human-facing messages go to stderr. Use this literal path in every following step.
-   - The explanation id is the name of the directory containing `index.html` — `expl-12` in the example above.
-   - If the command exits non-zero, stop and report its error output verbatim. The usual cause is running outside a Monica terminal (`MONICA_TERMINAL_SESSION_ID` is unset). Do not fall back to writing the HTML anywhere else — output to `/tmp` is retired.
+   - title と summary の両方で、shell escape が必要な文字（quote・backtick・`$`・backslash）は避ける。
+   - 成功すると stdout はちょうど 1 行で、scaffold 済み `index.html` の絶対 path が出力される（例: `/Users/you/monica/explanations/expl-12/index.html`）。以降のすべての step では、この literal な path を使うこと。
+   - explanation の id は `index.html` を含むディレクトリの名前 — 上の例なら `expl-12`。
 
-4. **Read the scaffold** — Read the `index.html` at that path. It contains `<meta>` tags, a `<title>`, and a `<style>` block with a minimal base: white-paper typography and dark syntax-highlighted code blocks (`pre.code` with `.cm` / `.k` / `.s` spans for comments / keywords / strings). It ends with this marker line:
+4. **執筆して書き込む** — 下記の Sections と Format のルールに従って解説を執筆し、完全なファイルを同じ path に Write で書き戻す。
 
-   ```html
-   <!-- Preserve the head above; replace the body below. -->
-   ```
-
-5. **Compose and write** — Author the explanation following the Sections and Format rules below, then Write the complete file back to the same path.
-
-   - The written file MUST begin with the scaffold exactly as you read it — every line up to and including the marker comment, byte for byte.
-   - Everything you author goes below the marker comment. Do not edit, reorder, or duplicate the scaffold's `<meta>`, `<title>`, or `<style>`; add your own CSS and JavaScript in new `<style>` / `<script>` blocks after the marker.
-
-6. **Verify** — Re-read the top of the written file and confirm the scaffold lines and the marker comment are intact, and check each code block against the Format rules below.
-
-7. **Deliver** — Run: `!open http://monica.localhost:19280/explanations/<id>`
+5. **届ける** — 実行: `!open http://monica.localhost:19280/explanations/<id>`
 
 ## Sections
 
-It should have these sections:
+以下のセクションを持つこと:
 
-- Background: Explain the existing system relevant to this change. (You should broadly explore surrounding code for this.) We don't know how much the reader already knows, so include a deep background for beginners (note that it can be skipped if the reader is already familiar), and then a more narrow background directly relevant to the change.
-- Intuition: Explain the core intuition for the code change. The focus here is to explain the essence, not the full details. Use concrete examples with toy data. Use figures and diagrams liberally.
-- Code: Do a high-level walkthrough of the changes to the code. Group/order the changes in an understandable way.
-- Quiz: Come up with five questions that test the reader's knowledge of this PR. This should be medium difficulty, difficult enough that you actually need to understand the substance of the PR to answer them, but not gotchas. The goal is to help the reader make sure that they've actually understood. These should be presented as interactive multiple-choice questions, and when the user clicks, it tells them whether they were correct and gives feedback.
+- Background: この変更に関係する既存システムを説明する。（そのために周辺コードを広く探索すること。）読者がどこまで知っているか分からないので、初心者向けの深い background を含めること（既に詳しい読者は読み飛ばせる旨を注記してよい）。その後に、変更に直接関係するより狭い background を書く。
+- Intuition: コード変更の核となる直感を説明する。ここでの焦点は本質を説明することであって、詳細を網羅することではない。toy データを使った具体例を用いる。図や diagram をふんだんに使う。
+- Code: コード変更の high level な walkthrough を行う。変更を理解しやすい形でグループ化・順序付けする。
+- Quiz: この PR の理解度を試す問題を 5 問作る。難易度は中程度 — PR の中身を実際に理解していないと答えられないが、ひっかけ問題ではない程度。目的は、読者が本当に理解できたかを自分で確かめられるようにすること。interactive な多肢選択式で提示し、クリックすると正誤判定と feedback が表示されるようにする。
 
 ## Format
 
-- Output a single self-contained HTML file which includes CSS and JavaScript. Make the whole thing one long page with section headers and a table of contents. Don't use tabs for the top-level structure. Basic responsive styling so you can view it on a phone is nice too.
-- Please write with the clarity and flow of Martin Kleppmann, making it engaging and written in classic style. Transitions between sections should be smooth.
-- Some tips on diagrams. Ideally, you should pick a small number of diagram families that can be reused throughout the explanation to explain various cases. Some useful kinds of diagrams:
-  - A very simplified version of the UI that the user sees in the app, to explain UI changes.
-  - A system diagram showing data flow or communication between components. Make sure to include example data here!
-- Don't use ASCII diagrams. Always use simple HTML designs for your diagrams, HTML lists for lists of things, etc.
-  - For code blocks, use `<pre class="code">` (dark background with syntax highlighting via `<span class="cm|k|s">`).
-    If you use a custom styled div instead, it **must** have `white-space: pre-wrap` in its CSS, or the browser
-    will collapse all newlines into a single line. Before saving the file, scan each code block in the HTML source
-    and confirm its CSS includes `white-space: pre` or `pre-wrap`.
-- Use callouts for key concepts or definitions, important edge cases, etc.
+- CSS と JavaScript を含んだ、self-contained な単一の HTML ファイルを出力する。全体を、section header と table of contents 付きの 1 枚の長いページにする。top level の構造に tab を使わない。スマートフォンでも見られる程度の基本的な responsive styling があるとなお良い。
+- Martin Kleppmann のような明晰さと流れを持った、classic style の engaging な文章で書く。セクション間の transition は滑らかにする。
+- diagram の tips。理想的には、説明全体を通して様々なケースの説明に再利用できる、少数の diagram ファミリーを選ぶこと。有用な diagram の種類:
+  - UI 変更の説明には、ユーザーがアプリで目にする UI をごく簡略化したもの。
+  - コンポーネント間のデータフローや通信を示す system diagram。ここには必ず example データを含めること!
+- ASCII diagram は使わない。diagram は常にシンプルな HTML デザインで作り、物の列挙には HTML の list を使う、など。
+  - code block には `<pre class="code">` を使う（dark 背景、`<span class="cm|k|s">` による syntax highlight）。
+    代わりに独自 style の div を使う場合は、その CSS に**必ず** `white-space: pre-wrap` を入れること。さもないと
+    browser がすべての改行を 1 行に潰してしまう。ファイルを保存する前に、HTML ソース内の各 code block を確認し、
+    その CSS に `white-space: pre` または `pre-wrap` が含まれることを確かめる。
+- 重要な概念や定義、重要な edge case などには callout を使う。
