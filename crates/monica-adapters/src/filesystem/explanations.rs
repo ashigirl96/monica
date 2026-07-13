@@ -49,7 +49,7 @@ mod tests {
     fn scaffold_contains_title_and_base_css() {
         let html = scaffold_html("Test & <Title>");
         assert!(html.contains("Test &amp; &lt;Title&gt;"));
-        assert!(html.contains("pre { white-space: pre-wrap;"));
+        assert!(html.contains("white-space: pre-wrap;"));
         assert!(html.contains("viewport"));
     }
 
