@@ -14,8 +14,8 @@ use tokio::sync::mpsc;
 
 use crate::error::{ClaudeError, Result};
 use crate::types::{
-    ClaudeAgentOptions, McpServers, PermissionMode, RawEventCallback, RawEventDirection,
-    SdkPluginConfig, SystemPrompt, ToolsConfig,
+    ClaudeAgentOptions, EffortLevel, McpServers, PermissionMode, RawEventCallback,
+    RawEventDirection, SdkPluginConfig, SystemPrompt, ToolsConfig,
 };
 
 /// #341 で検証済みの base args。`-p` を付けないことが課金レーン維持の必須条件。
@@ -157,6 +157,19 @@ fn build_args(options: &ClaudeAgentOptions) -> Vec<String> {
     if let Some(tokens) = options.max_thinking_tokens {
         args.push("--max-thinking-tokens".into());
         args.push(tokens.to_string());
+    }
+    if let Some(effort) = options.effort {
+        args.push("--effort".into());
+        args.push(
+            match effort {
+                EffortLevel::Low => "low",
+                EffortLevel::Medium => "medium",
+                EffortLevel::High => "high",
+                EffortLevel::XHigh => "xhigh",
+                EffortLevel::Max => "max",
+            }
+            .into(),
+        );
     }
 
     if options.continue_conversation {
@@ -442,7 +455,7 @@ impl SubprocessTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{SystemPromptPreset, ToolName};
+    use crate::types::{EffortLevel, SystemPromptPreset, ToolName};
 
     #[test]
     fn base_args_never_include_print_mode() {
@@ -533,6 +546,24 @@ mod tests {
         assert!(args.contains(&"--debug-to-stderr".to_string()));
         let idx = args.iter().position(|a| a == "--betas").unwrap();
         assert_eq!(args[idx + 1], "context-1m-2025-08-07");
+    }
+
+    #[test]
+    fn effort_level_is_mapped() {
+        let options = ClaudeAgentOptions::builder().effort(EffortLevel::Low).build();
+        let args = build_args(&options);
+        let idx = args.iter().position(|a| a == "--effort").unwrap();
+        assert_eq!(args[idx + 1], "low");
+
+        let xhigh = build_args(&ClaudeAgentOptions::builder().effort(EffortLevel::XHigh).build());
+        let idx = xhigh.iter().position(|a| a == "--effort").unwrap();
+        assert_eq!(xhigh[idx + 1], "xhigh");
+    }
+
+    #[test]
+    fn effort_absent_by_default() {
+        let args = build_args(&ClaudeAgentOptions::default());
+        assert!(!args.contains(&"--effort".to_string()));
     }
 
     #[test]

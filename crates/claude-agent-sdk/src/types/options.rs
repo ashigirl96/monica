@@ -294,6 +294,25 @@ pub struct AgentDefinition {
 }
 
 // ============================================================================
+// Effort Level
+// ============================================================================
+
+/// Reasoning effort level (maps to the `--effort` CLI flag)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffortLevel {
+    /// Lowest effort
+    Low,
+    /// Medium effort
+    Medium,
+    /// High effort
+    High,
+    /// Extra-high effort
+    XHigh,
+    /// Maximum effort
+    Max,
+}
+
+// ============================================================================
 // Claude Agent Options
 // ============================================================================
 
@@ -424,6 +443,10 @@ pub struct ClaudeAgentOptions {
     #[builder(default, setter(strip_option))]
     pub max_thinking_tokens: Option<u32>,
 
+    /// Reasoning effort level (maps to `--effort` CLI flag)
+    #[builder(default, setter(strip_option))]
+    pub effort: Option<EffortLevel>,
+
     /// Model to use if primary fails
     #[builder(default, setter(strip_option, into))]
     pub fallback_model: Option<String>,
@@ -541,6 +564,7 @@ impl std::fmt::Debug for ClaudeAgentOptions {
             // New fields for TypeScript SDK parity
             .field("max_budget_usd", &self.max_budget_usd)
             .field("max_thinking_tokens", &self.max_thinking_tokens)
+            .field("effort", &self.effort)
             .field("fallback_model", &self.fallback_model)
             .field("output_format", &self.output_format)
             .field("sandbox", &self.sandbox)
