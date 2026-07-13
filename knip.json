@@ -1,7 +1,7 @@
 {
   "$schema": "https://unpkg.com/knip@latest/schema.json",
-  "project": ["src/**/*.{ts,tsx}"],
-  "entry": ["src/**/*.test.{ts,tsx}"],
+  "project": ["src/**/*.{ts,tsx}", "extension/src/**/*.ts"],
+  "entry": ["src/**/*.test.{ts,tsx}", "extension/src/**/*.ts"],
   "ignoreExportsUsedInFile": true,
   "ignoreBinaries": ["lefthook", "tsc", "tauri"],
   "ignoreDependencies": [
@@ -9,6 +9,7 @@
     "tw-animate-css",
     "@tauri-apps/cli",
     "@tauri-apps/plugin-notification",
+    "@types/chrome",
     "oxfmt",
     "oxlint"
   ]
