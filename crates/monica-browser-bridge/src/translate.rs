@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use claude_agent_sdk::types::{ClaudeAgentOptions, Message};
+use claude_agent_sdk::types::{ClaudeAgentOptions, EffortLevel, Message};
 use claude_agent_sdk::{Query, query};
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
@@ -36,6 +36,7 @@ fn build_options() -> ClaudeAgentOptions {
         .system_prompt(SYSTEM_PROMPT)
         // 翻訳に思考は不要。thinking が first token を数十秒遅らせる実測があった
         .max_thinking_tokens(0)
+        .effort(EffortLevel::Low)
         .build()
 }
 
