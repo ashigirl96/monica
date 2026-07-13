@@ -10,17 +10,67 @@
 }
 
 /* ── Base Typography & Layout ──────────────── */
-body { color: var(--ink); background: var(--paper); max-width: 860px; margin: 2rem auto; padding: 0 1.25rem; font-family: system-ui, sans-serif; line-height: 1.6; }
-h1 { font-size: 1.7rem; line-height: 1.3; margin-bottom: 0.3rem; }
-h2 { font-size: 1.35rem; margin-top: 3rem; padding-top: 1rem; border-top: 2px solid var(--ink); }
-h3 { font-size: 1.08rem; margin-top: 2rem; }
-a { color: var(--accent); }
+body {
+  color: var(--ink);
+  background: var(--paper);
+  max-width: 860px;
+  margin: 2rem auto;
+  padding: 0 1.25rem;
+  font-family: system-ui, sans-serif;
+  line-height: 1.6;
+}
+h1 {
+  font-size: 1.7rem;
+  line-height: 1.3;
+  margin-bottom: 0.3rem;
+}
+h2 {
+  font-size: 1.35rem;
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 2px solid var(--ink);
+}
+h3 {
+  font-size: 1.08rem;
+  margin-top: 2rem;
+}
+a {
+  color: var(--accent);
+}
 
 /* ── Code Blocks ───────────────────────────── */
-pre { white-space: pre-wrap; word-wrap: break-word; }
-pre.code { background: var(--code-bg); color: var(--code-ink); border-radius: 10px; padding: 1rem 1.2rem; font-size: 0.85rem; overflow-x: auto; white-space: pre; line-height: 1.55; }
-pre.code .cm { color: #7dd3fc; }
-pre.code .k { color: #f9a8d4; }
-pre.code .s { color: #bef264; }
-code { background: var(--wash); border: 1px solid var(--line); border-radius: 4px; padding: 0.1rem 0.4rem; font-size: 0.95em; }
-pre.code code { background: none; border: none; padding: 0; }
+pre {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+pre.code {
+  background: var(--code-bg);
+  color: var(--code-ink);
+  border-radius: 10px;
+  padding: 1rem 1.2rem;
+  font-size: 0.85rem;
+  overflow-x: auto;
+  white-space: pre;
+  line-height: 1.55;
+}
+pre.code .cm {
+  color: #7dd3fc;
+}
+pre.code .k {
+  color: #f9a8d4;
+}
+pre.code .s {
+  color: #bef264;
+}
+code {
+  background: var(--wash);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.95em;
+}
+pre.code code {
+  background: none;
+  border: none;
+  padding: 0;
+}
