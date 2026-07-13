@@ -65,20 +65,34 @@ async fn handle_socket(socket: WebSocket) {
         }
     };
 
-    log::info!("translating {} segments", segments.len());
+    let request_start = std::time::Instant::now();
+    log::info!("ws request: {} segments", segments.len());
 
     let (tx, mut rx) = mpsc::channel(64);
 
     let translate_handle = tokio::spawn(async move { translate::translate(segments, tx).await });
 
+    let mut sent = 0usize;
     while let Some(st) = rx.recv().await {
         let msg = ServerMessage::Translation(st);
         if let Ok(json) = serde_json::to_string(&msg) {
             if sender.send(Message::Text(json.into())).await.is_err() {
                 break;
             }
+            sent += 1;
+            if sent == 1 {
+                log::info!(
+                    "first translation delivered in {}ms",
+                    request_start.elapsed().as_millis(),
+                );
+            }
         }
     }
+
+    log::info!(
+        "ws request finished: {sent} translations delivered in {}ms",
+        request_start.elapsed().as_millis(),
+    );
 
     let final_msg = match translate_handle.await {
         Ok(Ok(())) => ServerMessage::Done {},

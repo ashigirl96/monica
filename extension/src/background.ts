@@ -1,60 +1,88 @@
 const WS_URL = "ws://127.0.0.1:43110/ws/translate";
 
+interface Segment {
+  seg: number;
+  text: string;
+}
+
 interface TranslateRequest {
   type: "translate";
-  segments: Array<{ seg: number; text: string }>;
+  segments: Segment[];
 }
 
-interface TranslationMessage {
-  type: "translation";
-  seg: number;
-  translation: string;
-}
-
-interface DoneMessage {
-  type: "done";
-}
-
-interface ErrorMessage {
-  type: "error";
-  message: string;
-}
-
-type ServerMessage = TranslationMessage | DoneMessage | ErrorMessage;
-
-chrome.action.onClicked.addListener((tab) => {
-  if (!tab.id) return;
+function injectContentScript(tabId: number) {
   chrome.scripting.executeScript({
-    target: { tabId: tab.id },
+    target: { tabId },
     files: ["content.js"],
   });
+}
+
+chrome.action.onClicked.addListener((tab) => {
+  if (tab.id) injectContentScript(tab.id);
 });
 
-chrome.runtime.onMessage.addListener(
-  (message: TranslateRequest, sender, _sendResponse) => {
-    if (message.type !== "translate" || !sender.tab?.id) return;
+chrome.commands.onCommand.addListener((command, tab) => {
+  if (command === "translate-page" && tab?.id) injectContentScript(tab.id);
+});
 
-    const tabId = sender.tab.id;
-    const ws = new WebSocket(WS_URL);
+chrome.runtime.onMessage.addListener((message: TranslateRequest, sender) => {
+  if (message.type !== "translate" || !sender.tab?.id) return;
+  const tabId = sender.tab.id;
+  const origin = sender.tab.url ? new URL(sender.tab.url).origin : "unknown";
+  void handleTranslate(tabId, origin, message.segments);
+});
 
-    ws.onopen = () => {
-      ws.send(JSON.stringify(message.segments));
-    };
+// origin 単位の text → translation キャッシュ。sidebar 等のページ間で共通のテキストは
+// 2 ページ目以降サーバを経由せず即座に挿入される
+async function handleTranslate(tabId: number, origin: string, segments: Segment[]) {
+  const stored = await chrome.storage.session.get(origin);
+  const cache = (stored[origin] ?? {}) as Record<string, string>;
 
-    ws.onmessage = (event) => {
-      const data: ServerMessage = JSON.parse(event.data);
-      chrome.tabs.sendMessage(tabId, data);
+  const uncached: Segment[] = [];
+  let cacheHits = 0;
+  for (const s of segments) {
+    const hit = cache[s.text];
+    if (hit !== undefined) {
+      cacheHits++;
+      chrome.tabs.sendMessage(tabId, { type: "translation", seg: s.seg, translation: hit });
+    } else {
+      uncached.push(s);
+    }
+  }
+  console.log(`[monica-translate] cache hits: ${cacheHits}, uncached: ${uncached.length}`);
 
-      if (data.type === "done" || data.type === "error") {
-        ws.close();
+  if (uncached.length === 0) {
+    chrome.tabs.sendMessage(tabId, { type: "done" });
+    return;
+  }
+
+  const textBySeg = new Map(uncached.map((s) => [s.seg, s.text]));
+  const ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify(uncached));
+  };
+
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    if (data.type === "translation") {
+      const text = textBySeg.get(data.seg);
+      if (text !== undefined) {
+        cache[text] = data.translation;
       }
-    };
+    }
+    chrome.tabs.sendMessage(tabId, data);
 
-    ws.onerror = () => {
-      chrome.tabs.sendMessage(tabId, {
-        type: "error",
-        message: "WebSocket connection failed",
-      });
-    };
-  },
-);
+    if (data.type === "done" || data.type === "error") {
+      void chrome.storage.session.set({ [origin]: cache });
+      ws.close();
+    }
+  };
+
+  ws.onerror = () => {
+    chrome.tabs.sendMessage(tabId, {
+      type: "error",
+      message: "WebSocket connection failed",
+    });
+  };
+}
