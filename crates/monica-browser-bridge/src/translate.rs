@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use claude_agent_sdk::types::{ClaudeAgentOptions, EffortLevel, Message};
@@ -5,7 +6,6 @@ use claude_agent_sdk::{Query, query};
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
 
-use crate::batch::{self, DEFAULT_CHAR_LIMIT};
 use crate::jsonl::LineBuffer;
 use crate::protocol::{SegTranslation, Segment};
 
@@ -51,7 +51,11 @@ fn format_batch(batch: &[Segment]) -> String {
         .join("\n")
 }
 
-async fn stream_turn(session: &mut Query, tx: &mpsc::Sender<SegTranslation>) -> bool {
+async fn stream_turn(
+    session: &mut Query,
+    tx: &mpsc::Sender<SegTranslation>,
+    answered: &mut HashSet<u64>,
+) -> bool {
     let mut line_buf = LineBuffer::new();
     let turn_start = std::time::Instant::now();
     let mut first_delta: Option<std::time::Duration> = None;
@@ -98,6 +102,7 @@ async fn stream_turn(session: &mut Query, tx: &mpsc::Sender<SegTranslation>) -> 
                 }
                 if let Some(text) = event["delta"]["text"].as_str() {
                     for st in line_buf.push_delta(text) {
+                        answered.insert(st.seg);
                         // 空訳 = モデルが「翻訳不要」と判断した seg。挿入しない
                         if st.translation.trim().is_empty() {
                             continue;
@@ -111,6 +116,7 @@ async fn stream_turn(session: &mut Query, tx: &mpsc::Sender<SegTranslation>) -> 
             }
             Message::Result(result) => {
                 for st in line_buf.flush() {
+                    answered.insert(st.seg);
                     if st.translation.trim().is_empty() {
                         continue;
                     }
@@ -141,34 +147,20 @@ pub async fn translate(
     }
 
     let total_chars: usize = segments.iter().map(|s| s.text.chars().count()).sum();
-
-    // 最初のバッチだけ小さく切る: extension は viewport 内の seg を先頭に並べて
-    // 送ってくるので、先頭バッチが速く返るほど画面が早く埋まる
-    const FIRST_BATCH_CHAR_LIMIT: usize = 800;
-    let mut head_len = 0;
-    let mut head_chars = 0;
-    for s in &segments {
-        let c = s.text.chars().count();
-        if head_len > 0 && head_chars + c > FIRST_BATCH_CHAR_LIMIT {
-            break;
-        }
-        head_chars += c;
-        head_len += 1;
-    }
-    let (head, rest) = segments.split_at(head_len);
-    let mut batches: Vec<&[Segment]> = vec![head];
-    batches.extend(batch::split_batches(rest, DEFAULT_CHAR_LIMIT));
     log::info!(
-        "translate start: {} segments, {total_chars} chars, {} batches",
+        "translate start: {} segments, {total_chars} chars",
         segments.len(),
-        batches.len(),
     );
 
-    let first_prompt = format_batch(batches[0]);
-    let options = build_options();
+    // 全 seg を 1 turn で送る。streaming なので訳は行単位で即 push され、
+    // 出力上限で末尾が欠けても answered との差分で正確に検出できる。
+    // 欠けた seg（打ち切り・パース失敗・モデルの取りこぼし）だけを
+    // 同一セッションの follow-up turn で再送する
+    const MAX_RETRIES: usize = 2;
 
+    let options = build_options();
     let spawn_start = std::time::Instant::now();
-    let mut session = query(&first_prompt, options)
+    let mut session = query(&format_batch(&segments), options)
         .await
         .map_err(|e| format!("failed to start claude: {e}"))?;
     log::info!(
@@ -177,28 +169,42 @@ pub async fn translate(
     );
 
     let total_start = std::time::Instant::now();
+    let mut answered: HashSet<u64> = HashSet::new();
 
-    log::info!("batch 1/{}: {} segs", batches.len(), batches[0].len());
-    if !stream_turn(&mut session, &tx).await {
+    if !stream_turn(&mut session, &tx, &mut answered).await {
         return Err("first turn failed".into());
     }
 
-    for (i, batch) in batches[1..].iter().enumerate() {
-        log::info!("batch {}/{}: {} segs", i + 2, batches.len(), batch.len());
-        let prompt = format_batch(batch);
+    let mut remaining: Vec<Segment> = segments;
+    remaining.retain(|s| !answered.contains(&s.seg));
+
+    for attempt in 1..=MAX_RETRIES {
+        if remaining.is_empty() {
+            break;
+        }
+        log::warn!(
+            "retry {attempt}/{MAX_RETRIES}: {} segs unanswered",
+            remaining.len(),
+        );
         session
-            .send_user_message(&prompt)
+            .send_user_message(&format_batch(&remaining))
             .await
             .map_err(|e| format!("send error: {e}"))?;
 
-        if !stream_turn(&mut session, &tx).await {
-            return Err("turn failed".into());
+        if !stream_turn(&mut session, &tx, &mut answered).await {
+            return Err("retry turn failed".into());
         }
+        remaining.retain(|s| !answered.contains(&s.seg));
+    }
+
+    if !remaining.is_empty() {
+        log::error!("{} segs still untranslated after retries", remaining.len());
     }
 
     log::info!(
-        "translate done: {} batches in {}ms",
-        batches.len(),
+        "translate done: {}/{} segs answered in {}ms",
+        answered.len(),
+        answered.len() + remaining.len(),
         total_start.elapsed().as_millis(),
     );
     Ok(())
