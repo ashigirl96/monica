@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use claude_agent_sdk::types::{ClaudeAgentOptions, EffortLevel, Message};
+use claude_agent_sdk::types::{ClaudeAgentOptions, EffortLevel, Message, ToolsConfig};
 use claude_agent_sdk::{Query, query};
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
@@ -37,6 +37,9 @@ fn build_options() -> ClaudeAgentOptions {
         // 翻訳に思考は不要。thinking が first token を数十秒遅らせる実測があった
         .max_thinking_tokens(0)
         .effort(EffortLevel::Low)
+        // ツールを一切持たせない。can_use_tool 未設定の default deny と合わせて
+        // 「呼べない + 呼べても拒否」の二重防御
+        .tools(ToolsConfig::from_list(vec![]))
         .build()
 }
 
