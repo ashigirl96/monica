@@ -55,7 +55,7 @@ pub use messages::{
     ContentValue, Message, ResultMessage, QuestionOption, QuestionSpec, UserContent, UserMessageContent,
 };
 pub use options::{
-    AgentDefinition, ClaudeAgentOptions, ClaudeAgentOptionsBuilder, NetworkSandboxSettings,
+    AgentDefinition, ClaudeAgentOptions, ClaudeAgentOptionsBuilder, EffortLevel, NetworkSandboxSettings,
     OutputFormat, RawEventCallback, RawEventDirection, SandboxIgnoreViolations, SandboxSettings, SdkBeta, SdkPluginConfig,
     StderrCallback, SystemPrompt, SystemPromptPreset, ToolsConfig, ToolsPreset,
 };
