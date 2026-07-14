@@ -8,6 +8,7 @@ rust-version = "1.95"
 [dependencies]
 monica-application = { path = "../monica-application" }
 monica-domain = { path = "../monica-domain" }
+monica-settings = { path = "../monica-settings" }
 serde = { version = "1.0.228", default-features = false, features = ["derive"] }
 specta = { version = "=2.0.0-rc.25", default-features = false, features = ["derive", "serde_json"] }
 specta-typescript = { version = "=0.0.12", default-features = false }

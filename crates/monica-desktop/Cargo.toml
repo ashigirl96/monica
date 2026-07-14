@@ -21,6 +21,7 @@ monica-domain = { path = "../monica-domain" }
 serde = { version = "1", default-features = false, features = ["derive"] }
 monica-runtime = { path = "../monica-runtime" }
 monica-paths = { path = "../monica-paths" }
+monica-settings = { path = "../monica-settings" }
 monica-terminal-client = { path = "../monica-terminal-client" }
 monica-web = { path = "../monica-web" }
 monica-terminal-protocol = { path = "../monica-terminal-protocol" }
