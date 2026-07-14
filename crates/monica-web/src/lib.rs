@@ -250,7 +250,7 @@ mod tests {
     // ハンドラは open_monica() 経由で MONICA_HOME 配下の実 DB を開く。セッション環境から
     // 実データの home を継承したままテストすると本物の DB を読み書きしてしまうため、
     // main 前にプロセス専用の temp home へ差し替える。テスト内で set_var しないこと。
-    #[ctor::ctor]
+    #[ctor::ctor(unsafe)]
     #[allow(clippy::disallowed_methods)] // main 前の単一スレッド区間なので data race がない
     fn isolate_monica_home() {
         let dir = std::env::temp_dir().join(format!("monica-test-home-{}", std::process::id()));
