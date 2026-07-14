@@ -26,14 +26,10 @@ import {
   type TerminalSessionStatus,
 } from "@/commands/terminal";
 import { activeSpaceAtom } from "@/stores/space";
-import {
-  jumpHintsActiveAtom,
-  setSessionStatusAtom,
-  terminalFontSizeAtom,
-  terminalFocusRequestAtom,
-  zoomTerminalAtom,
-  type TerminalLaunchIntent,
-} from "@/features/work-bench/store";
+import { terminalFocusRequestAtom, type TerminalLaunchIntent } from "@/features/work-bench/store";
+import { jumpHintsActiveAtom } from "@/features/work-bench/jump-hints";
+import { setSessionStatusAtom } from "@/features/work-bench/session-status";
+import { terminalFontSizeAtom, zoomTerminalAtom } from "@/features/work-bench/terminal-zoom";
 import {
   clearTabTerminal,
   getTabConnection,

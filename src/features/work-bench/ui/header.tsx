@@ -5,13 +5,13 @@ import {
   activateTerminalTabAtom,
   closeTerminalTabAtom,
   createTerminalTabAtom,
-  jumpHintTargetsAtom,
   primaryTabByTaskAtom,
   refreshPrimaryTabAtom,
   reorderTabsAtom,
-  sessionStatusAtom,
   tabMenuAtom,
 } from "@/features/work-bench/store";
+import { jumpHintTargetsAtom } from "@/features/work-bench/jump-hints";
+import { sessionStatusAtom } from "@/features/work-bench/session-status";
 import { rectToAnchor } from "@/lib/anchor";
 import { statusDisplayLabel, statusDotClass } from "@/lib/status-config";
 import { JumpHint } from "./jump-hint";

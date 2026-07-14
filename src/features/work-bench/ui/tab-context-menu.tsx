@@ -3,13 +3,13 @@ import { cn } from "@/lib/utils";
 import { PopoverMenu } from "@/components/popover-menu";
 import {
   closeTerminalTabAtom,
-  sessionStatusAtom,
   startNewShellForTabAtom,
   tabByIdAtom,
   tabMenuAtom,
   terminateTabSessionAtom,
   type TabMenuState,
 } from "@/features/work-bench/store";
+import { sessionStatusAtom } from "@/features/work-bench/session-status";
 
 export function TabContextMenu() {
   const menu = useAtomValue(tabMenuAtom);
