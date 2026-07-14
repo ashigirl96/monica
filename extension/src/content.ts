@@ -4,8 +4,8 @@
 // viewport 内の単位を先に送り、streaming で画面から順に埋まるようにする。
 
 const w = window as unknown as {
-  __monicaTranslateUrl?: string;
   __monicaTranslateListening?: boolean;
+  __monicaTranslateInFlight?: boolean;
   innerHeight: number;
 };
 
@@ -14,11 +14,7 @@ const EXCLUDED_TAGS = new Set([
   "style",
   "noscript",
   "template",
-  "code",
   "pre",
-  "kbd",
-  "samp",
-  "var",
   "textarea",
   "input",
   "select",
@@ -85,16 +81,65 @@ function hasTranslatableText(el: Element): boolean {
   return /\p{L}/u.test(text);
 }
 
+/**
+ * 連続する「テキストノード + インライン要素」の並び（run）を 1 翻訳単位にする。
+ * <p> を使わず裸テキストを <br><br> で区切る古い HTML への対応。
+ * run が単一要素ならそのまま、複数ノードなら span.monica-run でラップして単位化する
+ */
+function flushRun(run: Node[], units: Element[]) {
+  const text = run
+    .map((n) => n.textContent ?? "")
+    .join("")
+    .trim();
+  if (text.length < MIN_TEXT_LENGTH || !/\p{L}/u.test(text)) return;
+
+  if (run.length === 1 && run[0].nodeType === Node.ELEMENT_NODE) {
+    units.push(run[0] as Element);
+    return;
+  }
+  const wrapper = document.createElement("span");
+  wrapper.className = "monica-run";
+  run[0].parentNode?.insertBefore(wrapper, run[0]);
+  for (const node of run) {
+    wrapper.appendChild(node);
+  }
+  units.push(wrapper);
+}
+
 function collectUnits(root: Element, units: Element[]) {
-  for (const child of root.children) {
-    if (isExcluded(child) || isHidden(child)) continue;
-    if (!hasTranslatableText(child)) continue;
-    if (hasOnlyInlineContent(child)) {
-      units.push(child);
+  let run: Node[] = [];
+  for (const node of Array.from(root.childNodes)) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      run.push(node);
+      continue;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+    const el = node as Element;
+
+    // inline タグでも block 子孫を持つなら（例: 全体を包む <span>）コンテナとして扱う
+    const isRunBoundary =
+      el.tagName === "BR" ||
+      !isInlineElement(el) ||
+      !hasOnlyInlineContent(el) ||
+      isExcluded(el) ||
+      el.classList.contains("monica-run");
+    if (!isRunBoundary) {
+      run.push(el);
+      continue;
+    }
+
+    flushRun(run, units);
+    run = [];
+
+    if (el.tagName === "BR" || isExcluded(el) || isHidden(el)) continue;
+    if (!hasTranslatableText(el)) continue;
+    if (hasOnlyInlineContent(el)) {
+      units.push(el);
     } else {
-      collectUnits(child, units);
+      collectUnits(el, units);
     }
   }
+  flushRun(run, units);
 }
 
 function isInViewport(el: Element): boolean {
@@ -153,6 +198,7 @@ function runTranslation() {
   console.log(
     `[monica-translate] sending ${payload.length} segments (${segments.filter((s) => s.inViewport).length} in viewport)`,
   );
+  w.__monicaTranslateInFlight = true;
   chrome.runtime.sendMessage({ type: "translate", segments: payload });
 
   // listener は 1 回だけ登録する（SPA 遷移後の再実行で重複させない）
@@ -173,7 +219,10 @@ function runTranslation() {
         wrapper.setAttribute("translate", "no");
         const inner = document.createElement("span");
         inner.textContent = message.translation;
-        if (isSingleLine(el)) {
+        // 横並びは「単行 かつ ラベル的に短い」ときだけ。長い 1 行文（広い画面の
+        // 段落等）に訳を連結すると折り返しが読みにくいので縦に落とす
+        const INLINE_MAX_CHARS = 40;
+        if (isSingleLine(el) && unitText(el).length <= INLINE_MAX_CHARS) {
           wrapper.appendChild(document.createTextNode("\u00A0\u00A0"));
         } else {
           inner.style.display = "block";
@@ -182,17 +231,22 @@ function runTranslation() {
         wrapper.appendChild(inner);
         el.appendChild(wrapper);
       } else if (message.type === "done") {
+        w.__monicaTranslateInFlight = false;
         console.log("[monica-translate] done");
       } else if (message.type === "error") {
+        w.__monicaTranslateInFlight = false;
         console.error(`[monica-translate] error: ${message.message}`);
       }
     },
   );
 }
 
-// URL 単位のガード: SPA 遷移後は再クリックで新ページを翻訳できる。
-// 同一 URL での連打だけを抑止する
-if (w.__monicaTranslateUrl !== location.href) {
-  w.__monicaTranslateUrl = location.href;
+// 実行ごとに DOM の現状を見て未翻訳の単位だけを送る。
+// 訳済み判定は履歴でなく DOM（.monica-translation の有無）が根拠なので、
+// SPA/MPA/lazy load のどれでも再クリックが正しく機能する。
+// streaming 中の連打だけは seg ID の振り直しを防ぐため抑止する
+if (w.__monicaTranslateInFlight) {
+  console.log("[monica-translate] translation in flight — ignoring");
+} else {
   runTranslation();
 }
