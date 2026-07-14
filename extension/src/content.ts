@@ -48,6 +48,9 @@ function isHidden(el: Element): boolean {
 
 function isInlineElement(el: Element): boolean {
   const display = getComputedStyle(el).display;
+  // detached/未レンダーの要素は display が "" になる。これを非 inline と誤判定すると
+  // 段落が <strong> 等で分割され、太字部分だけ翻訳されて本文が取り残される
+  if (display === "") return true;
   return display.startsWith("inline") || display === "contents";
 }
 
