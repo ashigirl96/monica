@@ -88,7 +88,7 @@ pub(crate) fn record_claude_hook<R>(
     repos: &mut R,
     ctx: HookContext<'_>,
     signal: &AgentSignal,
-) -> Result<crate::HookReport>
+) -> crate::ApplicationResult<crate::HookReport>
 where
     R: TaskStore + TaskRunStore + EventRepository + Clock + UnitOfWork + TerminalSessionRepository,
 {

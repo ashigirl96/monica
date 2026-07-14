@@ -1,8 +1,6 @@
 use std::path::Path;
 use std::time::Duration;
 
-use anyhow::Result;
-
 use crate::prelude::{branch_name, monica_number, worktree_path_for};
 use super::ports::{
     GitGateway, ProjectRepository, TaskRunOutputs, SetupEnv, SetupOutcome, SetupRunner,
@@ -228,7 +226,7 @@ where
         .map_err(|e| ApplicationError::external(format!("setup script failed to run: {e:#}")))
 }
 
-fn latest_github_issue_ref<R>(repos: &R, task_id: &str) -> Result<Option<ExternalReference>>
+fn latest_github_issue_ref<R>(repos: &R, task_id: &str) -> ApplicationResult<Option<ExternalReference>>
 where
     R: TaskStore,
 {
@@ -238,7 +236,7 @@ where
         .rfind(|r| r.ref_type == RefType::Issue))
 }
 
-fn latest_github_issue_number<R>(repos: &R, task_id: &str) -> Result<Option<i64>>
+fn latest_github_issue_number<R>(repos: &R, task_id: &str) -> ApplicationResult<Option<i64>>
 where
     R: TaskStore,
 {
