@@ -3081,7 +3081,6 @@ dependencies = [
  "anyhow",
  "log",
  "monica-terminal-protocol",
- "serde_json",
 ]
 
 [[package]]

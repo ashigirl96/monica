@@ -13,7 +13,7 @@ use base64::Engine;
 use crate::manager::PtyManager;
 use crate::transcript::Transcript;
 use crate::types::{PtySize, SpawnRequest};
-use monica_terminal_protocol::{CreateParams, ServerMessage, SessionInfo};
+use monica_terminal_protocol::{to_frame, CreateParams, ServerMessage, SessionInfo};
 
 const DEFAULT_REPLAY_BYTES: u32 = 256 * 1024;
 
@@ -31,7 +31,7 @@ impl Outbox {
 
     /// Serialize and enqueue; false when the queue is full or the writer is gone.
     pub fn send(&self, msg: &ServerMessage) -> bool {
-        match serde_json::to_string(msg) {
+        match to_frame(msg) {
             Ok(line) => self.tx.try_send(line).is_ok(),
             Err(e) => {
                 log::error!("failed to serialize server message: {e}");

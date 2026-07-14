@@ -1,3 +1,4 @@
+import type { PopoverAnchor } from "@/components/popover-menu";
 import { shortPath } from "@/lib/paths";
 import { atom, type Getter, type Setter } from "jotai";
 import {
@@ -744,7 +745,7 @@ export const reattachSessionAtom = atom(null, (get, set, session: TerminalSessio
 
 export type TabMenuState = {
   tabId: string;
-  anchor: { top: number; bottom: number; left: number };
+  anchor: PopoverAnchor;
   confirmingTerminate: boolean;
 };
 

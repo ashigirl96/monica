@@ -1,11 +1,13 @@
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufReader, BufWriter};
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc;
 use std::sync::Arc;
 
 use anyhow::Result;
 
-use monica_terminal_protocol::{Request, RequestOp, ResponseBody, ServerMessage, PROTOCOL_VERSION};
+use monica_terminal_protocol::{
+    read_frames, write_line, Request, RequestOp, ResponseBody, ServerMessage, PROTOCOL_VERSION,
+};
 
 use super::state::{Outbox, SessionTable};
 
@@ -25,12 +27,7 @@ pub fn serve_connection(stream: UnixStream, table: Arc<SessionTable>, conn_id: u
         .spawn(move || {
             let mut w = BufWriter::new(write_stream);
             for line in rx {
-                let ok = w
-                    .write_all(line.as_bytes())
-                    .and_then(|_| w.write_all(b"\n"))
-                    .and_then(|_| w.flush())
-                    .is_ok();
-                if !ok {
+                if write_line(&mut w, &line).is_err() {
                     break;
                 }
             }
@@ -44,16 +41,11 @@ pub fn serve_connection(stream: UnixStream, table: Arc<SessionTable>, conn_id: u
     table.register_connection(conn_id, outbox.clone());
     log::debug!("connection {conn_id} established");
 
-    let reader = BufReader::new(stream);
-    for line in reader.lines() {
-        let Ok(line) = line else { break };
-        if line.trim().is_empty() {
-            continue;
-        }
-        let request: Request = match serde_json::from_str(&line) {
-            Ok(req) => req,
+    for frame in read_frames::<_, Request>(BufReader::new(stream)) {
+        let request = match frame {
+            Ok(request) => request,
             Err(e) => {
-                log::warn!("connection {conn_id}: unparseable request ({e}): {line}");
+                log::warn!("connection {conn_id}: unparseable request {e}");
                 continue;
             }
         };

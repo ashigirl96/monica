@@ -10,5 +10,7 @@ pub mod github;
 pub mod process;
 pub mod secrets;
 
+mod fs_util;
+
 #[cfg(test)]
 mod test_support;

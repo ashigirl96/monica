@@ -12,6 +12,7 @@ import {
   sessionStatusAtom,
   tabMenuAtom,
 } from "@/features/work-bench/store";
+import { rectToAnchor } from "@/lib/anchor";
 import { statusDisplayLabel, statusDotClass } from "@/lib/status-config";
 import { JumpHint } from "./jump-hint";
 import { PlusIcon, XIcon } from "@/components/icons";
@@ -90,7 +91,7 @@ export function WorkBenchHeader() {
               const rect = e.currentTarget.getBoundingClientRect();
               setTabMenu({
                 tabId: tab.id,
-                anchor: { top: rect.top, bottom: rect.bottom, left: e.clientX },
+                anchor: { ...rectToAnchor(rect), left: e.clientX },
                 confirmingTerminate: false,
               });
             }}
