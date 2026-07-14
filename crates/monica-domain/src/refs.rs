@@ -34,6 +34,14 @@ pub fn parse_issue_number(raw: &str) -> Result<i64, DomainError> {
     Ok(number)
 }
 
+/// Build the canonical GitHub issue URL from an `owner/repo` and issue number. The live
+/// tracking path stores the API-provided URL directly; this is the fallback for issue refs
+/// whose `url` column is empty (the column is nullable), so the backend stays the sole authority
+/// on the URL instead of leaking construction back to callers.
+pub fn github_issue_url(repo: &str, number: i64) -> String {
+    format!("https://github.com/{repo}/issues/{number}")
+}
+
 pub fn parse_issue_ref(target: &str) -> Result<(String, i64), DomainError> {
     let (repo_part, number_part) = target
         .trim()
@@ -46,7 +54,15 @@ pub fn parse_issue_ref(target: &str) -> Result<(String, i64), DomainError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_issue_ref, parse_owner_repo};
+    use super::{github_issue_url, parse_issue_ref, parse_owner_repo};
+
+    #[test]
+    fn builds_canonical_issue_url() {
+        assert_eq!(
+            github_issue_url("ashigirl96/monica", 42),
+            "https://github.com/ashigirl96/monica/issues/42"
+        );
+    }
 
     #[test]
     fn parses_common_remote_forms() {

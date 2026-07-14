@@ -31,7 +31,7 @@ pub use ids::{ExplanationId, TaskId, TaskRunId};
 pub use json::RawJson;
 pub use notification::{NewNotificationIntent, NotificationIntent, NotificationKind};
 pub use project::{Project, Provider};
-pub use refs::{parse_issue_number, parse_issue_ref, parse_owner_repo};
+pub use refs::{github_issue_url, parse_issue_number, parse_issue_ref, parse_owner_repo};
 pub use status::{DisplayStatus, TaskRunStatus, TaskRunWaitReason, TaskStatus};
 pub use task::{Event, NewTask, Task, TaskKind};
 pub use task_run::{is_safe_task_run_id, Agent, NewTaskRun, TaskRun};

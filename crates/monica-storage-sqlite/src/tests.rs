@@ -177,12 +177,34 @@ fn task_summaries_expose_the_stored_issue_url() {
         )
         .unwrap();
 
+    // A legacy issue ref whose URL column was never populated: the backend synthesizes it from
+    // repo+number so the Work Board badge stays clickable.
+    let legacy = db
+        .insert_task_with_ref(
+            dev_task("legacy issue"),
+            ExternalReference::new(
+                "",
+                Provider::Github,
+                RefType::Issue,
+                Some("owner/repo".to_string()),
+                Some(7),
+                None,
+            ),
+        )
+        .unwrap();
+
     let summaries = db.list_task_summaries(TaskSummaryFilter::All, None).unwrap();
     let summary = summaries.iter().find(|s| s.id == item.id.as_str()).unwrap();
     assert_eq!(summary.github_issue_number, Some(42));
     assert_eq!(
         summary.github_issue_url.as_deref(),
         Some("https://github.com/owner/repo/issues/42")
+    );
+    let legacy_summary = summaries.iter().find(|s| s.id == legacy.id.as_str()).unwrap();
+    assert_eq!(
+        legacy_summary.github_issue_url.as_deref(),
+        Some("https://github.com/owner/repo/issues/7"),
+        "a stored-URL-less issue ref must fall back to the synthesized canonical URL"
     );
 }
 
