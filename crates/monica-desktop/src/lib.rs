@@ -54,6 +54,10 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::pull_request::PrSyncCompleted,
             commands::settings::OpenSettingsRequested,
         ])
+        .constant(
+            "DEFAULT_TRANSLATE_PORT",
+            monica_settings::DEFAULT_TRANSLATE_PORT,
+        )
 }
 
 fn bindings_path() -> std::path::PathBuf {

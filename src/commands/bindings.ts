@@ -130,6 +130,9 @@ export const events = {
   taskRunStatusChanged: makeEvent<TaskRunStatusChanged>("task-run:status-changed"),
 };
 
+/* Constants */
+export const DEFAULT_TRANSLATE_PORT = 43110 as const;
+
 /* Types */
 export type Agent = "claude" | "codex";
 

@@ -261,6 +261,7 @@ function runTranslation() {
       } else if (message.type === "error") {
         w.__monicaTranslateInFlight = false;
         console.error(`[monica-translate] error: ${message.message}`);
+        showToast(message.message ?? "翻訳に失敗しました");
       }
     },
   );

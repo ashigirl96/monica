@@ -1,5 +1,6 @@
 import {
   commands,
+  DEFAULT_TRANSLATE_PORT,
   events,
   type TranslateEffort,
   type TranslateModel,
@@ -9,6 +10,7 @@ import {
 import { unwrap } from "./unwrap";
 
 export type { TranslateEffort, TranslateModel, TranslateSettings, TranslateSettingsSnapshot };
+export { DEFAULT_TRANSLATE_PORT };
 
 export function translateSettingsGet() {
   return unwrap(commands.translateSettingsGet());

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useAtom } from "jotai";
 import { PlusIcon, XIcon } from "@/components/icons";
 import {
+  DEFAULT_TRANSLATE_PORT,
   onOpenSettingsRequested,
   translateSettingsGet,
   translateSettingsSave,
@@ -12,18 +13,18 @@ import {
 import { settingsModalOpenAtom } from "@/features/settings/store";
 import { cn } from "@/lib/utils";
 
-// satisfies で bindings の union に拘束: Rust 側の enum 変更が TS のコンパイルエラーになる
-const MODEL_OPTIONS = [
-  "haiku",
-  "sonnet",
-  "opus",
-] as const satisfies readonly TranslateSettings["model"][];
-const EFFORT_OPTIONS = [
-  "low",
-  "medium",
-  "high",
-] as const satisfies readonly TranslateSettings["effort"][];
-const DEFAULT_PORT = 43110;
+// Record は全キー必須 + 余剰キー拒否なので、Rust 側 enum の追加・削除・改名が
+// どの方向でも TS のコンパイルエラーとして現れる（bindings の union が単一の正）
+const MODEL_OPTIONS = Object.keys({
+  haiku: null,
+  sonnet: null,
+  opus: null,
+} satisfies Record<TranslateSettings["model"], null>) as TranslateSettings["model"][];
+const EFFORT_OPTIONS = Object.keys({
+  low: null,
+  medium: null,
+  high: null,
+} satisfies Record<TranslateSettings["effort"], null>) as TranslateSettings["effort"][];
 
 export function SettingsModal() {
   const [open, setOpen] = useAtom(settingsModalOpenAtom);
@@ -160,9 +161,9 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
               <SettingRow
                 label="Port"
                 hint={
-                  draft.port === DEFAULT_PORT
+                  draft.port === DEFAULT_TRANSLATE_PORT
                     ? undefined
-                    : `Ports other than ${DEFAULT_PORT} require rebuilding the extension`
+                    : `Ports other than ${DEFAULT_TRANSLATE_PORT} require rebuilding the extension`
                 }
               >
                 <input
