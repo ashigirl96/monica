@@ -267,6 +267,7 @@ export type TaskSummaryRow = {
   title: string;
   project: string | null;
   github_issue_number: number | null;
+  github_issue_url: string | null;
   github_pull_requests: GithubPullRequestRef[];
   task_status: TaskStatus;
   task_run_status: TaskRunStatus | null;

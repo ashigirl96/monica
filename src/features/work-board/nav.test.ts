@@ -24,6 +24,7 @@ function task(over: Partial<TaskSummaryRow>): TaskSummaryRow {
     title: "task",
     project: "owner/repo",
     github_issue_number: null,
+    github_issue_url: null,
     github_pull_requests: [],
     task_status: "ready",
     task_run_status: null,
@@ -138,7 +139,13 @@ describe("setMenuItemIndexAtom blocks when submenu is active", () => {
 
 describe("navigateSubmenuAtom", () => {
   test("enter/open sets submenu to open with index 0", () => {
-    const store = storeWithTasks([task({ id: "t1", github_issue_number: 7 })]);
+    const store = storeWithTasks([
+      task({
+        id: "t1",
+        github_issue_number: 7,
+        github_issue_url: "https://github.com/owner/repo/issues/7",
+      }),
+    ]);
     store.set(menuAtom, baseMenu());
 
     store.set(navigateSubmenuAtom, { type: "enter", submenu: "open" });

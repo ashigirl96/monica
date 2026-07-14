@@ -7,7 +7,6 @@ import {
   statusDisplayLabel,
 } from "@/lib/status-config";
 import { cn } from "@/lib/utils";
-import { issueUrl } from "@/features/work-board/github-urls";
 import { IssueIcon, PrIcon } from "@/features/work-board/ui/github-icons";
 
 function MemoIcon() {
@@ -156,10 +155,7 @@ export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boo
             {statusLabel}
           </span>
           {hasIssue && (
-            <BadgeLink
-              url={issueUrl(task.project, task.github_issue_number)}
-              className="bg-secondary text-muted-foreground"
-            >
+            <BadgeLink url={task.github_issue_url} className="bg-secondary text-muted-foreground">
               <IssueIcon />
               <span>{task.github_issue_number}</span>
             </BadgeLink>

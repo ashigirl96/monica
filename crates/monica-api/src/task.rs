@@ -21,6 +21,7 @@ pub struct TaskSummaryRow {
     pub project: Option<String>,
     #[specta(type = Option<specta_typescript::Number>)]
     pub github_issue_number: Option<i64>,
+    pub github_issue_url: Option<String>,
     pub github_pull_requests: Vec<GithubPullRequestRef>,
     pub task_status: TaskStatus,
     pub task_run_status: Option<TaskRunStatus>,
@@ -48,6 +49,7 @@ impl From<monica_application::TaskSummaryRow> for TaskSummaryRow {
             title: value.title,
             project: value.project,
             github_issue_number: value.github_issue_number,
+            github_issue_url: value.github_issue_url,
             github_pull_requests: value
                 .github_pull_requests
                 .into_iter()

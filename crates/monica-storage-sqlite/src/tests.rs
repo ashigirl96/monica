@@ -161,6 +161,32 @@ fn list_external_refs_errors_on_unrecognized_provider() {
 }
 
 #[test]
+fn task_summaries_expose_the_stored_issue_url() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let item = db
+        .insert_task_with_ref(
+            dev_task("tracked issue"),
+            ExternalReference::new(
+                "",
+                Provider::Github,
+                RefType::Issue,
+                Some("owner/repo".to_string()),
+                Some(42),
+                Some("https://github.com/owner/repo/issues/42".to_string()),
+            ),
+        )
+        .unwrap();
+
+    let summaries = db.list_task_summaries(TaskSummaryFilter::All, None).unwrap();
+    let summary = summaries.iter().find(|s| s.id == item.id.as_str()).unwrap();
+    assert_eq!(summary.github_issue_number, Some(42));
+    assert_eq!(
+        summary.github_issue_url.as_deref(),
+        Some("https://github.com/owner/repo/issues/42")
+    );
+}
+
+#[test]
 fn task_run_agent_is_typed_and_closed_task_is_not_regressed_by_finish() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let task = db.insert_task(dev_task("run me")).unwrap();

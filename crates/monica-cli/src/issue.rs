@@ -192,6 +192,7 @@ mod tests {
             title: "Test issue".to_string(),
             project: Some("ashigirl96/monica".to_string()),
             github_issue_number: Some(17),
+            github_issue_url: Some("https://github.com/ashigirl96/monica/issues/17".to_string()),
             github_pull_requests: Vec::new(),
             task_status: TaskStatus::Ready,
             task_run_status: None,
