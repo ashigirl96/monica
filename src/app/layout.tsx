@@ -10,6 +10,7 @@ import { uiZoomAtom } from "@/stores/zoom";
 import { getSpaceConfig, spaces } from "@/spaces/registry";
 import { ResizeHandle } from "@/components/resize-handle";
 import { Toaster } from "@/components/toaster";
+import { SettingsModal } from "@/features/settings/ui/settings-modal";
 import { TaskMemoModal } from "@/features/task-memo/ui/memo-modal";
 import { useShortcuts } from "@/hooks/use-shortcuts";
 import { TRAFFIC_LIGHT_ZONE_HEIGHT, TRAFFIC_LIGHT_ZONE_WIDTH } from "@/lib/layout";
@@ -116,6 +117,7 @@ export function AppLayout() {
       </div>
 
       <TaskMemoModal />
+      <SettingsModal />
       <Toaster />
     </div>
   );

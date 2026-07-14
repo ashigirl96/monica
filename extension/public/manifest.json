@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Monica Translate PoC",
+  "name": "Monica Translate",
   "version": "0.1.0",
   "description": "Translate web pages to Japanese via Monica browser bridge",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4G8Z01+eHdYNAMOpPzaQVhzYF7TO18CPB4SKda7lD4+cgNSGogVaGlcU4UKMznAcdlw9ezlGCSwUZY0xXgGoqh8Pp6x6zXEnXohgSlSH+pSpWcoLi6KntQ0JdKQwGJu49G+hLjSKUTFCxWlruQabQwSUiTjw/EPcA7lg0sy477PSW21T2JvxAN1Gj1lzG1KzC2WuesK7JqtKb8FjzIwQBofQ3qN/0EFdFawOXcZbBTTunDNV/f6gaPnFOU4HXJ448D6x6CTgs7L1ipFZEkYwGAXyXeDP+K5I653viik4cTPTjRA8kgc8hqHtw5mLXOEng1E1VBkQPG4Yd1PQyDQoUwIDAQAB",
   "action": {
     "default_title": "Translate page"
   },

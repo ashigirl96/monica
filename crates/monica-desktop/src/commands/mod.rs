@@ -3,6 +3,7 @@ pub mod editor;
 pub mod git;
 pub mod plan;
 pub mod pull_request;
+pub mod settings;
 pub mod task;
 pub mod terminal;
 pub mod window;

@@ -2,19 +2,26 @@ use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBui
 use tauri::{AppHandle, Wry};
 
 pub(crate) const NEW_WINDOW_ID: &str = "new_window";
+pub(crate) const SETTINGS_ID: &str = "open_settings";
 
 pub(crate) fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let menu = Menu::default(app)?;
     let new_window = MenuItemBuilder::with_id(NEW_WINDOW_ID, "New Window")
         .accelerator("CmdOrCtrl+Shift+N")
         .build(app)?;
+    let settings = MenuItemBuilder::with_id(SETTINGS_ID, "Settings…")
+        .accelerator("CmdOrCtrl+,")
+        .build(app)?;
     let separator = PredefinedMenuItem::separator(app)?;
 
     match file_submenu(&menu)? {
-        Some(file) => file.insert_items(&[&new_window, &separator], 0)?,
+        Some(file) => file.insert_items(&[&new_window, &settings, &separator], 0)?,
         // The default menu has no File submenu on Linux.
         None => {
-            let file = SubmenuBuilder::new(app, "File").item(&new_window).build()?;
+            let file = SubmenuBuilder::new(app, "File")
+                .item(&new_window)
+                .item(&settings)
+                .build()?;
             menu.insert(&file, 0)?;
         }
     }

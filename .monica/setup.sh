@@ -18,7 +18,9 @@ if ! grep -q MONICA_WEB_PORT .envrc.local 2>/dev/null; then
 fi
 direnv allow .
 
-# monica-desktop の build script は binaries/monica-ptyd-<host-triple> を要求する。
-# just check/test は ptyd-bin 依存で自動生成されるが、生の cargo check/test でも
+# monica-desktop の build script は binaries/monica-ptyd-<host-triple> と
+# binaries/monica-browser-bridge-<host-triple> を要求する。
+# just check/test は ptyd-bin/bridge-bin 依存で自動生成されるが、生の cargo check/test でも
 # 落ちないよう worktree 作成時点で用意しておく。
 just ptyd-bin
+just bridge-bin

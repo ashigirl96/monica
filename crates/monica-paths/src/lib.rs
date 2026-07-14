@@ -55,6 +55,11 @@ pub fn ptyd_pid_path() -> Result<PathBuf> {
     Ok(base_dir()?.join("ptyd.pid"))
 }
 
+/// Pid file for the browser-bridge sidecar, written by the desktop app that spawned it.
+pub fn browser_bridge_pid_path() -> Result<PathBuf> {
+    Ok(base_dir()?.join("browser-bridge.pid"))
+}
+
 /// Bounded transcript files for terminal sessions: `<base>/terminal-sessions/<session_id>.log`.
 pub fn terminal_sessions_dir() -> Result<PathBuf> {
     Ok(base_dir()?.join("terminal-sessions"))

@@ -1,3 +1,4 @@
+mod bridge;
 mod commands;
 mod event_sink;
 mod native_menu;
@@ -44,12 +45,19 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::task::primary_tab_id,
             commands::plan::read_runspace_plan,
             commands::pull_request::force_sync_pull_requests,
+            commands::settings::translate_settings_get,
+            commands::settings::translate_settings_save,
             commands::window::open_named_window,
         ])
         .events(tauri_specta::collect_events![
             commands::task::TaskRunStatusChanged,
             commands::pull_request::PrSyncCompleted,
+            commands::settings::OpenSettingsRequested,
         ])
+        .constant(
+            "DEFAULT_TRANSLATE_PORT",
+            monica_settings::DEFAULT_TRANSLATE_PORT,
+        )
 }
 
 fn bindings_path() -> std::path::PathBuf {
@@ -85,7 +93,12 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .menu(native_menu::build)
         .on_menu_event(|app, event| {
-            if event.id().as_ref() == native_menu::NEW_WINDOW_ID {
+            if event.id().as_ref() == native_menu::SETTINGS_ID {
+                use tauri_specta::Event;
+                if let Err(e) = (commands::settings::OpenSettingsRequested {}).emit(app) {
+                    log::warn!(target: "monica_app::settings", "failed to emit settings:open: {e}");
+                }
+            } else if event.id().as_ref() == native_menu::NEW_WINDOW_ID {
                 let app = app.clone();
                 tauri::async_runtime::spawn(async move {
                     match services::window_manager::open_new_window(app).await {
@@ -111,6 +124,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(ptyd::PtydHandle::new())
+        .manage(bridge::BridgeHandle::new())
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             specta_builder.mount_events(app);
@@ -119,6 +133,15 @@ pub fn run() {
             let drain = schedulers::notification_drain::start(app.handle().clone());
             app.manage(drain);
             ptyd::start_warmup(app.handle().clone());
+            // 起動をブロックしない + release では login-shell PATH 解決の後に
+            // 走らせる（bridge の子 claude は PATH 解決 — setup はその後なので安全）
+            let bridge_app = app.handle().clone();
+            if let Err(e) = std::thread::Builder::new()
+                .name("browser-bridge-spawn".to_string())
+                .spawn(move || bridge::start_if_enabled(&bridge_app))
+            {
+                log::warn!(target: "monica_app::bridge", "failed to spawn bridge starter thread: {e}");
+            }
             let web_port = if cfg!(debug_assertions) {
                 std::env::var("MONICA_WEB_PORT")
                     .ok()
@@ -168,8 +191,14 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            // bridge は app 同寿命: イベントループ終了で確実に殺す
+            if matches!(event, tauri::RunEvent::Exit) {
+                app.state::<bridge::BridgeHandle>().stop();
+            }
+        });
 }
 
 #[cfg(debug_assertions)]

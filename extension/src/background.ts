@@ -1,4 +1,6 @@
-const WS_URL = "ws://127.0.0.1:43110/ws/translate";
+declare const __TRANSLATE_PORT__: number;
+
+const WS_URL = `ws://127.0.0.1:${__TRANSLATE_PORT__}/ws/translate`;
 
 interface Segment {
   seg: number;
@@ -62,8 +64,11 @@ async function handleTranslate(tabId: number, origin: string, segments: Segment[
   // MV3 service worker はアイドルで殺される。claude 起動中など無通信の間も
   // WS にトラフィックを流して worker を生かし続ける（server 側は読み捨てる）
   let keepalive: ReturnType<typeof setInterval> | undefined;
+  let opened = false;
+  let finished = false;
 
   ws.onopen = () => {
+    opened = true;
     ws.send(JSON.stringify(uncached));
     keepalive = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -84,18 +89,30 @@ async function handleTranslate(tabId: number, origin: string, segments: Segment[
         cache[text] = data.translation;
       }
     }
-    chrome.tabs.sendMessage(tabId, data);
+    if (data.type === "error") {
+      chrome.tabs.sendMessage(tabId, {
+        type: "error",
+        message: `翻訳に失敗しました: ${data.message}`,
+      });
+    } else {
+      chrome.tabs.sendMessage(tabId, data);
+    }
 
     if (data.type === "done" || data.type === "error") {
+      finished = true;
       void chrome.storage.session.set({ [origin]: cache });
       ws.close();
     }
   };
 
   ws.onerror = () => {
+    if (finished) return;
     chrome.tabs.sendMessage(tabId, {
       type: "error",
-      message: "WebSocket connection failed",
+      // 接続前の失敗 = サーバ不在（Monica 未起動 or 翻訳が無効）と接続後の切断を区別する
+      message: opened
+        ? "翻訳サーバとの接続が切れました"
+        : "Monica が起動していません（翻訳サーバに接続できません）",
     });
   };
 }

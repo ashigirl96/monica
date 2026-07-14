@@ -113,6 +113,12 @@ export const commands = {
     >(__TAURI_INVOKE("read_runspace_plan", { terminalTabId })),
   forceSyncPullRequests: () =>
     typedError<null, ApiError>(__TAURI_INVOKE("force_sync_pull_requests")),
+  translateSettingsGet: () =>
+    typedError<TranslateSettingsSnapshot, ApiError>(__TAURI_INVOKE("translate_settings_get")),
+  translateSettingsSave: (settings: TranslateSettings) =>
+    typedError<TranslateSettingsSnapshot, ApiError>(
+      __TAURI_INVOKE("translate_settings_save", { settings }),
+    ),
   openNamedWindow: (label: string) =>
     typedError<null, ApiError>(__TAURI_INVOKE("open_named_window", { label })),
 };
@@ -120,8 +126,12 @@ export const commands = {
 /** Events */
 export const events = {
   prSyncCompleted: makeEvent<PrSyncCompleted>("pr-sync:completed"),
+  settingsOpen: makeEvent<OpenSettingsRequested>("settings:open"),
   taskRunStatusChanged: makeEvent<TaskRunStatusChanged>("task-run:status-changed"),
 };
+
+/* Constants */
+export const DEFAULT_TRANSLATE_PORT = 43110 as const;
 
 /* Types */
 export type Agent = "claude" | "codex";
@@ -181,6 +191,9 @@ export type GithubPullRequestRef = {
   status: string | null;
   is_open_or_draft: boolean;
 };
+
+/**  native メニューの Settings… から設定モーダルを開かせる。 */
+export type OpenSettingsRequested = Record<string, never>;
 
 export type PlanPreview = {
   /**  Absolute path of the plan file (`~/.claude/plans/<name>.md`). */
@@ -328,6 +341,24 @@ export type TerminalTabRow = {
   title: string;
   sort_order: number;
   terminal_session_id: string | null;
+};
+
+export type TranslateEffort = "low" | "medium" | "high";
+
+export type TranslateModel = "haiku" | "sonnet" | "opus";
+
+export type TranslateSettings = {
+  enabled: boolean;
+  port: number;
+  allowed_origins: string[];
+  model: TranslateModel;
+  effort: TranslateEffort;
+};
+
+/**  設定 UI が表示する snapshot: 設定値 + bridge プロセスの現況。 */
+export type TranslateSettingsSnapshot = {
+  settings: TranslateSettings;
+  bridge_running: boolean;
 };
 
 export type WorktreeInfo = {

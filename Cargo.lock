@@ -2928,6 +2928,7 @@ version = "0.1.0"
 dependencies = [
  "monica-application",
  "monica-domain",
+ "monica-settings",
  "serde",
  "serde_json",
  "specta",
@@ -2956,9 +2957,12 @@ dependencies = [
  "env_logger",
  "futures-util",
  "log",
+ "monica-paths",
+ "monica-settings",
  "serde",
  "serde_json",
  "tokio",
+ "tokio-tungstenite 0.29.0",
 ]
 
 [[package]]
@@ -2987,6 +2991,7 @@ dependencies = [
  "monica-domain",
  "monica-paths",
  "monica-runtime",
+ "monica-settings",
  "monica-terminal-client",
  "monica-terminal-protocol",
  "monica-web",
@@ -3045,6 +3050,15 @@ dependencies = [
  "monica-domain",
  "monica-storage-sqlite",
  "tokio",
+]
+
+[[package]]
+name = "monica-settings"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

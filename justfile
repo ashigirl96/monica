@@ -12,8 +12,8 @@ build-web:
 dev-web:
     bun --bun vite dev --config web/vite.config.ts
 
-dev: build-web dev-cli ptyd-bin
-    MONICA_HOME="$HOME/monica/dev" MONICA_BIN="{{justfile_directory()}}/monica-dev" MONICA_PTYD_PATH="{{justfile_directory()}}/target/debug/monica-ptyd" bun run tauri dev
+dev: build-web dev-cli ptyd-bin bridge-bin
+    MONICA_HOME="$HOME/monica/dev" MONICA_BIN="{{justfile_directory()}}/monica-dev" MONICA_PTYD_PATH="{{justfile_directory()}}/target/debug/monica-ptyd" MONICA_BROWSER_BRIDGE_PATH="{{justfile_directory()}}/target/debug/monica-browser-bridge" bun run tauri dev
 
 dev-cli:
     cargo build -p monica-cli
@@ -28,6 +28,16 @@ ptyd-bin:
     cargo build -p monica-ptyd
     mkdir -p crates/monica-desktop/binaries
     cp target/debug/monica-ptyd "crates/monica-desktop/binaries/monica-ptyd-$(rustc -vV | sed -n 's/host: //p')"
+
+# ptyd-bin と同じ理由で browser-bridge の externalBin を用意する。
+bridge-bin:
+    cargo build -p monica-browser-bridge
+    mkdir -p crates/monica-desktop/binaries
+    cp target/debug/monica-browser-bridge "crates/monica-desktop/binaries/monica-browser-bridge-$(rustc -vV | sed -n 's/host: //p')"
+
+# Chrome extension (unpacked load 用)。port を変えるときは TRANSLATE_PORT=<port> を付ける。
+build-extension:
+    bun --bun vite build --config extension/vite.config.ts
 
 build:
     bun run tauri build --bundles app
@@ -90,24 +100,24 @@ unused-commands:
 dup:
     bunx jscpd src web crates --format "typescript,tsx,rust" --ignore "**/bindings.ts,**/types.gen.ts" --min-tokens 100 --threshold 0 --silent
 
-check: lint fmt-check knip unused-commands dup ptyd-bin
+check: lint fmt-check knip unused-commands dup ptyd-bin bridge-bin
     cargo clippy --workspace --all-targets -- -D warnings
 
-generate-bindings: ptyd-bin
+generate-bindings: ptyd-bin bridge-bin
     cargo test -p monica-desktop --lib tests::export_typescript_bindings -- --exact
 
 # MONICA_HOME を実行ごとの temp dir に差し替える。セッション環境の実 home を
 # テストが継承して本物の DB・ファイルを触る事故を、crate 側の対応なしで防ぐ。
-test: ptyd-bin build-web
+test: ptyd-bin bridge-bin build-web
     MONICA_HOME="$(mktemp -d)" cargo test --workspace
     bun test src/
 
 # Coverage doubles as dead-code detection: a pub fn at 0% that no caller or test reaches
 # is invisible to clippy (rustc has no cross-crate dead_code analysis in a workspace).
-coverage: ptyd-bin
+coverage: ptyd-bin bridge-bin
     MONICA_HOME="$(mktemp -d)" cargo llvm-cov --workspace
 
-coverage-html: ptyd-bin
+coverage-html: ptyd-bin bridge-bin
     MONICA_HOME="$(mktemp -d)" cargo llvm-cov --workspace --html --open
 
 analyze:

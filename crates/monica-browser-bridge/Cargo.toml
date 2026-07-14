@@ -14,6 +14,18 @@ claude-agent-sdk = { path = "../claude-agent-sdk" }
 env_logger = "0.11"
 futures-util = { version = "0.3", default-features = false }
 log = "0.4"
+monica-paths = { path = "../monica-paths" }
+monica-settings = { path = "../monica-settings" }
 serde = { version = "1", default-features = false, features = ["std", "derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
-tokio = { version = "1", default-features = false, features = ["macros", "net", "rt"] }
+tokio = { version = "1", default-features = false, features = ["macros", "net", "rt", "sync"] }
+
+[dev-dependencies]
+tokio = { version = "1", default-features = false, features = [
+  "macros",
+  "net",
+  "rt",
+  "sync",
+  "time",
+] }
+tokio-tungstenite = "0.29"

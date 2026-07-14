@@ -8,6 +8,7 @@ mod bench;
 mod error;
 mod explanation;
 mod github;
+mod settings;
 mod status;
 mod task;
 mod task_run;
@@ -17,6 +18,9 @@ pub use bench::{PrepareTaskResult, RunTaskResult, TaskBench};
 pub use error::{ApiError, ApiErrorCode};
 pub use explanation::{Explanation as ApiExplanation, ExplanationMode as ApiExplanationMode};
 pub use github::GithubPullRequestRef;
+pub use settings::{
+    TranslateEffort, TranslateModel, TranslateSettings, TranslateSettingsSnapshot,
+};
 pub use status::{
     board_columns, BoardColumn, DisplayStatus, TaskRunStatus, TaskRunWaitReason, TaskStatus,
 };

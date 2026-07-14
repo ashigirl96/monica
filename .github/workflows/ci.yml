@@ -26,6 +26,8 @@ jobs:
       - run: bunx knip
       - name: Check unused Tauri commands
         run: just unused-commands
+      - name: Build Chrome extension
+        run: just build-extension
 
   build:
     name: tauri build (macos)
