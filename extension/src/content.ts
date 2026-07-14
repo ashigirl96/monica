@@ -163,6 +163,31 @@ function isSingleLine(el: Element): boolean {
   return bottom - top < lineHeight * 1.5;
 }
 
+// エラーはページ右下の toast で通知する（console だけだとサーバ未起動が見えない）
+function showToast(message: string) {
+  document.querySelector(".monica-translate-toast")?.remove();
+  const toast = document.createElement("div");
+  toast.className = "monica-translate-toast notranslate";
+  toast.setAttribute("translate", "no");
+  toast.textContent = message;
+  Object.assign(toast.style, {
+    position: "fixed",
+    right: "16px",
+    bottom: "16px",
+    zIndex: "2147483647",
+    maxWidth: "320px",
+    padding: "10px 14px",
+    borderRadius: "8px",
+    background: "rgba(20, 20, 24, 0.92)",
+    color: "#f4f4f5",
+    font: "12px/1.5 -apple-system, 'Hiragino Sans', sans-serif",
+    boxShadow: "0 4px 16px rgba(0, 0, 0, 0.4)",
+    pointerEvents: "none",
+  } satisfies Partial<CSSStyleDeclaration>);
+  document.documentElement.appendChild(toast);
+  setTimeout(() => toast.remove(), 5000);
+}
+
 function runTranslation() {
   const units: Element[] = [];
   collectUnits(document.body, units);
