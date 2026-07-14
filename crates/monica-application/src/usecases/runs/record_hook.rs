@@ -1,7 +1,6 @@
-use anyhow::Result;
-
 use super::ports::{Clock, EventRepository, TaskRunStore, TaskStore};
 use crate::ports::{TerminalSessionRepository, UnitOfWork};
+use crate::ApplicationResult;
 use crate::prelude::{is_safe_task_run_id, Agent, AgentSignal, SignalKind, Task};
 use crate::prelude::{NewTaskRun, TaskId, TaskRun, TaskRunStatus, TaskRunWaitReason, TaskStatus};
 use monica_domain::{AgentSessionEffect, AgentSessionStatus};
@@ -73,7 +72,7 @@ pub fn record_hook<R>(
     agent: Agent,
     signal: Option<&AgentSignal>,
     raw_stdin: &str,
-) -> Result<HookReport>
+) -> ApplicationResult<HookReport>
 where
     R: TaskStore + TaskRunStore + EventRepository + Clock + UnitOfWork + TerminalSessionRepository,
 {
@@ -252,7 +251,7 @@ impl ResolvedRun {
     }
 }
 
-type ResolveRule<R> = fn(&RunResolveCtx, &mut R) -> Result<Option<ResolvedRun>>;
+type ResolveRule<R> = fn(&RunResolveCtx, &mut R) -> ApplicationResult<Option<ResolvedRun>>;
 
 pub(in crate::usecases) struct RunResolveCtx<'a> {
     pub(in crate::usecases) task_id: &'a str,
@@ -288,7 +287,7 @@ fn resolve_hook_run<R>(
     provider_session_id: Option<&str>,
     starts_session: bool,
     agent: Agent,
-) -> Result<ResolvedRun>
+) -> ApplicationResult<ResolvedRun>
 where
     R: TaskStore + TaskRunStore,
 {
@@ -333,7 +332,7 @@ where
 pub(in crate::usecases) fn resolve_by_session<R>(
     ctx: &RunResolveCtx,
     repos: &mut R,
-) -> Result<Option<ResolvedRun>>
+) -> ApplicationResult<Option<ResolvedRun>>
 where
     R: TaskStore + TaskRunStore,
 {
@@ -349,7 +348,7 @@ where
 pub(in crate::usecases) fn resolve_by_prepared_primary<R>(
     ctx: &RunResolveCtx,
     repos: &mut R,
-) -> Result<Option<ResolvedRun>>
+) -> ApplicationResult<Option<ResolvedRun>>
 where
     R: TaskStore + TaskRunStore,
 {
@@ -380,7 +379,7 @@ where
 pub(in crate::usecases) fn resolve_by_lazy_create<R>(
     ctx: &RunResolveCtx,
     repos: &mut R,
-) -> Result<Option<ResolvedRun>>
+) -> ApplicationResult<Option<ResolvedRun>>
 where
     R: TaskStore + TaskRunStore,
 {
