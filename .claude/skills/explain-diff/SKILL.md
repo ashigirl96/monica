@@ -1,10 +1,10 @@
 ---
-name: explain
+name: explain-diff
 description: "`monica explain new` で Monica の explanation エントリを作成し、コード変更の rich で interactive な HTML 解説を explanations ディレクトリに書き出す。"
 disable-model-invocation: true
 ---
 
-# Explain
+# Explain Diff
 
 指定されたコード変更について、rich で interactive な解説を作ってください。
 
