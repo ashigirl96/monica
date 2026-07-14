@@ -126,6 +126,14 @@ async fn stream_turn(
                     emitted += 1;
                     let _ = tx.send(st).await;
                 }
+                if result.is_error {
+                    log::error!(
+                        "turn failed: subtype={} ({} seg emitted before failure)",
+                        result.subtype,
+                        emitted,
+                    );
+                    return false;
+                }
                 log::info!(
                     "turn done: {emitted} seg emitted, first_token={}ms, total={}ms (api={}ms, turns={})",
                     first_delta.map_or(0, |d| d.as_millis()),

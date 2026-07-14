@@ -89,6 +89,10 @@ async fn handle_socket(socket: WebSocket) {
         }
     }
 
+    // クライアント切断で送信ループを抜けた場合、rx を drop しないと translate 側が
+    // channel の空きを待って永久ブロックし claude セッションごとリークする
+    drop(rx);
+
     log::info!(
         "ws request finished: {sent} translations delivered in {}ms",
         request_start.elapsed().as_millis(),

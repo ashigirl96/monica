@@ -59,8 +59,21 @@ async function handleTranslate(tabId: number, origin: string, segments: Segment[
   const textBySeg = new Map(uncached.map((s) => [s.seg, s.text]));
   const ws = new WebSocket(WS_URL);
 
+  // MV3 service worker はアイドルで殺される。claude 起動中など無通信の間も
+  // WS にトラフィックを流して worker を生かし続ける（server 側は読み捨てる）
+  let keepalive: ReturnType<typeof setInterval> | undefined;
+
   ws.onopen = () => {
     ws.send(JSON.stringify(uncached));
+    keepalive = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send("ping");
+      }
+    }, 20000);
+  };
+
+  ws.onclose = () => {
+    clearInterval(keepalive);
   };
 
   ws.onmessage = (event) => {
