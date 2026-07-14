@@ -5,7 +5,7 @@ use std::process::Command;
 // MONICA_HOME（実データの home）を継承すると、テストが本物の DB・ファイルを触ってしまう。
 // main 前（単一スレッド時）に一度だけプロセス専用の temp home へ差し替え、以降テスト内では
 // set_var("MONICA_HOME") を呼ばないこと。
-#[ctor::ctor]
+#[ctor::ctor(unsafe)]
 #[allow(clippy::disallowed_methods)] // main 前の単一スレッド区間なので data race がない
 fn isolate_monica_home() {
     let dir = std::env::temp_dir().join(format!("monica-test-home-{}", std::process::id()));

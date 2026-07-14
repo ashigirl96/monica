@@ -1,6 +1,7 @@
 mod explanations;
 mod outputs;
 mod scaffold;
+mod shell_scaffold;
 mod workspace;
 
 pub use outputs::FsTaskRunOutputs;
