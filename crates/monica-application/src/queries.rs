@@ -13,6 +13,7 @@ pub struct TaskSummaryRow {
     pub title: String,
     pub project: Option<String>,
     pub github_issue_number: Option<i64>,
+    pub github_issue_url: Option<String>,
     pub github_pull_requests: Vec<GithubPullRequestRef>,
     pub task_status: TaskStatus,
     pub task_run_status: Option<TaskRunStatus>,

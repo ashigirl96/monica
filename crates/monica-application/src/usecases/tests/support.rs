@@ -306,6 +306,7 @@ impl TaskBoardQuery for FakeRepos {
                     title: task.title.clone(),
                     project: task.project_id.clone(),
                     github_issue_number: None,
+                    github_issue_url: None,
                     github_pull_requests: Vec::<GithubPullRequestRef>::new(),
                     task_status: task.status,
                     task_run_status: None,

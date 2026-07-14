@@ -1,7 +1,7 @@
 /// <reference types="bun" />
 import { describe, expect, test } from "bun:test";
 import type { GithubPullRequestRef, TaskSummaryRow } from "@/commands/task";
-import { issueUrl, openTargets } from "@/features/work-board/github-urls";
+import { openTargets } from "@/features/work-board/github-urls";
 
 function pr(over: Partial<GithubPullRequestRef>): GithubPullRequestRef {
   return {
@@ -20,6 +20,7 @@ function task(over: Partial<TaskSummaryRow>): TaskSummaryRow {
     title: "task",
     project: "owner/repo",
     github_issue_number: null,
+    github_issue_url: null,
     github_pull_requests: [],
     task_status: "ready",
     task_run_status: null,
@@ -37,27 +38,20 @@ function task(over: Partial<TaskSummaryRow>): TaskSummaryRow {
   } as TaskSummaryRow;
 }
 
-describe("issueUrl", () => {
-  test("builds the url from project and number", () => {
-    expect(issueUrl("owner/repo", 42)).toBe("https://github.com/owner/repo/issues/42");
-  });
-
-  test("null project yields null", () => {
-    expect(issueUrl(null, 42)).toBeNull();
-  });
-
-  test("null number yields null", () => {
-    expect(issueUrl("owner/repo", null)).toBeNull();
-  });
-});
-
 describe("openTargets", () => {
   test("no issue and no pr yields an empty list", () => {
     expect(openTargets(task({}))).toEqual([]);
   });
 
   test("issue only", () => {
-    expect(openTargets(task({ github_issue_number: 7 }))).toEqual([
+    expect(
+      openTargets(
+        task({
+          github_issue_number: 7,
+          github_issue_url: "https://github.com/owner/repo/issues/7",
+        }),
+      ),
+    ).toEqual([
       { id: "issue", kind: "issue", number: 7, url: "https://github.com/owner/repo/issues/7" },
     ]);
   });
@@ -66,6 +60,7 @@ describe("openTargets", () => {
     const result = openTargets(
       task({
         github_issue_number: 7,
+        github_issue_url: "https://github.com/owner/repo/issues/7",
         github_pull_requests: [
           pr({ number: 10, status: "merged", is_open_or_draft: false }),
           pr({ number: 11, status: "closed", is_open_or_draft: false }),
@@ -98,9 +93,13 @@ describe("openTargets", () => {
     expect(result.map((t) => t.id)).toEqual(["pr:2"]);
   });
 
-  test("issue is dropped when the url cannot be built but prs remain", () => {
+  test("issue is dropped when the backend supplies no url but prs remain", () => {
     const result = openTargets(
-      task({ project: null, github_issue_number: 7, github_pull_requests: [pr({ number: 3 })] }),
+      task({
+        github_issue_number: 7,
+        github_issue_url: null,
+        github_pull_requests: [pr({ number: 3 })],
+      }),
     );
     expect(result.map((t) => t.id)).toEqual(["pr:3"]);
   });

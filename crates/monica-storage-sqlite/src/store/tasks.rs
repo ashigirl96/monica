@@ -257,6 +257,8 @@ impl TaskBoardQuery for SqliteStore {
                t.title AS title,
                coalesce(project.repo, issue_ref.repo, t.project_id) AS project,
                issue_ref.number AS github_issue_number,
+               issue_ref.url AS github_issue_url,
+               issue_ref.repo AS github_issue_repo,
 	               t.status AS task_status,
 	               latest_run.status AS task_run_status,
 	               latest_run.wait_reason AS task_run_wait_reason,
@@ -326,11 +328,26 @@ impl TaskBoardQuery for SqliteStore {
             let has_plan: bool = row.get::<_, i64>("has_plan")? != 0;
             let has_memo: bool = row.get::<_, i64>("has_memo")? != 0;
             let display_status = DisplayStatus::from_task_and_run(task_status, task_run_status);
+            let github_issue_number: Option<i64> = row.get("github_issue_number")?;
+            let github_issue_repo: Option<String> = row.get("github_issue_repo")?;
+            // A tracked issue always carries a stored URL, but the column is nullable and
+            // predates URL storage; synthesize from repo+number so the backend stays the sole
+            // authority on the URL rather than leaking construction to the frontend.
+            let github_issue_url: Option<String> =
+                row.get::<_, Option<String>>("github_issue_url")?.or_else(|| {
+                    match (github_issue_repo.as_deref(), github_issue_number) {
+                        (Some(repo), Some(number)) => {
+                            Some(monica_domain::github_issue_url(repo, number))
+                        }
+                        _ => None,
+                    }
+                });
             let item = TaskSummaryRow {
                 id: row.get("task_id")?,
                 title: row.get("title")?,
                 project: row.get("project")?,
-                github_issue_number: row.get("github_issue_number")?,
+                github_issue_number,
+                github_issue_url,
                 github_pull_requests: Vec::new(),
                 task_status,
                 task_run_status,

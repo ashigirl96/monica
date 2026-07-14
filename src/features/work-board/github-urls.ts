@@ -11,17 +11,16 @@ export type OpenTarget =
       url: string;
     };
 
-export function issueUrl(project: string | null, number: number | null): string | null {
-  if (!project || number === null) return null;
-  return `https://github.com/${project}/issues/${number}`;
-}
-
 export function openTargets(task: TaskSummaryRow): OpenTarget[] {
   const targets: OpenTarget[] = [];
 
-  const issue = issueUrl(task.project, task.github_issue_number);
-  if (issue !== null && task.github_issue_number !== null) {
-    targets.push({ id: "issue", kind: "issue", number: task.github_issue_number, url: issue });
+  if (task.github_issue_url !== null && task.github_issue_number !== null) {
+    targets.push({
+      id: "issue",
+      kind: "issue",
+      number: task.github_issue_number,
+      url: task.github_issue_url,
+    });
   }
 
   // open/draft PRs are the ones a reader usually wants, so they sort ahead of the rest;
