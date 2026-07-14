@@ -1,48 +1,27 @@
 import type { PopoverAnchor } from "@/components/popover-menu";
 import { shortPath } from "@/lib/paths";
 import { atom, type Getter, type Setter } from "jotai";
-import {
-  terminalDetach,
-  terminalListSessions,
-  terminalLoadState,
-  terminalSaveState,
-  terminalTerminate,
-  type AgentSessionStatus,
-  type TerminalSession,
-  type TerminalSessionStatus,
-  type TerminalStateSnapshot,
-} from "@/commands/terminal";
-import {
-  listBenchRunspaceMap,
-  makeMainTaskRun,
-  primaryTabId,
-  taskShellEnv,
-  type TaskRunWaitReason,
-} from "@/commands/task";
+import { terminalDetach, terminalTerminate, type TerminalSession } from "@/commands/terminal";
+import { makeMainTaskRun, primaryTabId } from "@/commands/task";
 import { readRunspacePlan, type PlanPreview } from "@/commands/plan";
-import { worktreeInfo, type WorktreeInfo } from "@/commands/git";
+import type { WorktreeInfo } from "@/commands/git";
 import { releaseTabConnection } from "@/features/work-bench/terminal-connections";
 import {
   MAIN_WINDOW_LABEL,
   type WorkbenchHint,
-  pendingWorkbenchHintAtom,
   resolveWorkbenchActive,
   windowLabelAtom,
 } from "@/stores/ui-state";
 import { refreshTaskSummariesAtom } from "@/stores/workboard";
-
-const FONT_SIZE_DEFAULT = 15;
-const FONT_SIZE_MIN = 10;
-const FONT_SIZE_MAX = 28;
-
-export const terminalFontSizeAtom = atom(FONT_SIZE_DEFAULT);
+import { jumpHintsActiveAtom } from "@/features/work-bench/jump-hints";
+import { detachedSessionsAtom, refreshSessionsAtom } from "@/features/work-bench/session-status";
+import { loadTerminalStateAtom } from "@/features/work-bench/persistence";
+import {
+  resolveWorktreeInfoAtom,
+  worktreeInfoByPathAtom,
+} from "@/features/work-bench/worktree-resolver";
 
 export const terminalFocusRequestAtom = atom(0);
-
-export const zoomTerminalAtom = atom(null, (get, set, delta: 1 | -1) => {
-  const current = get(terminalFontSizeAtom);
-  set(terminalFontSizeAtom, Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, current + delta)));
-});
 
 export type TerminalLaunchIntent = {
   env: [string, string][];
@@ -149,7 +128,7 @@ function createRunspace(order: number, cwd?: string): TerminalRunspace {
   return { id, tabs: [tab], activeTabId: tab.id, order };
 }
 
-function tabDisplayPath(tab: TerminalTab): string {
+export function tabDisplayPath(tab: TerminalTab): string {
   return tab.cwd !== "~" ? tab.cwd : tab.title || tab.cwd;
 }
 
@@ -170,7 +149,7 @@ function deriveRunspaceDescription(rs: TerminalRunspace): string {
   return tab?.title ?? "";
 }
 
-function initialState(): TerminalState {
+export function initialState(): TerminalState {
   const rs = createRunspace(0);
   return { runspaces: [rs], activeRunspaceId: rs.id };
 }
@@ -216,51 +195,6 @@ export const activeTerminalTabAtom = atom((get) => {
   const rs = get(activeRunspaceAtom);
   if (!rs) return null;
   return rs.tabs.find((t) => t.id === rs.activeTabId) ?? rs.tabs[0] ?? null;
-});
-
-// path → linked-worktree identity (null = not a worktree). The branch can change
-// without a cwd change (`git switch` in place), so title updates re-resolve known
-// paths instead of trusting the cache forever; the timestamp map throttles that
-// against apps that rewrite the terminal title continuously.
-const worktreeInfoByPathAtom = atom<Record<string, WorktreeInfo | null>>({});
-
-const WORKTREE_REVALIDATE_MS = 5000;
-const worktreeResolvedAtAtom = atom<Record<string, number>>({});
-
-const resolveWorktreeInfoAtom = atom(null, async (get, set, revalidate?: string[]) => {
-  const state = get(terminalStateAtom);
-  if (!state) return;
-  const cache = get(worktreeInfoByPathAtom);
-  const resolvedAt = get(worktreeResolvedAtAtom);
-  const now = Date.now();
-
-  const paths = new Set<string>();
-  for (const path of revalidate ?? []) {
-    if (path.startsWith("/") && now - (resolvedAt[path] ?? 0) >= WORKTREE_REVALIDATE_MS) {
-      paths.add(path);
-    }
-  }
-  for (const rs of state.runspaces) {
-    for (const tab of rs.tabs) {
-      const path = tabDisplayPath(tab);
-      if (path.startsWith("/") && !(path in cache)) paths.add(path);
-    }
-  }
-  if (paths.size === 0) return;
-  set(worktreeResolvedAtAtom, (prev) => {
-    const next = { ...prev };
-    for (const path of paths) next[path] = now;
-    return next;
-  });
-
-  const entries = await Promise.all(
-    [...paths].map(async (path) => [path, await worktreeInfo(path).catch(() => null)] as const),
-  );
-  set(worktreeInfoByPathAtom, (prev) => {
-    const next = { ...prev };
-    for (const [path, info] of entries) next[path] = info;
-    return next;
-  });
 });
 
 // taskId → tab hosting the task's Main Run. Hook-driven claims write straight to the
@@ -344,24 +278,24 @@ export const createRunspaceAtom = atom(null, (get, set) => {
   });
 });
 
+export function warnTerminal(action: string, e: unknown): void {
+  console.warn(`terminal ${action} failed:`, e);
+}
+
+function endTabSession(sessionId: string | undefined, op: "detach" | "terminate"): Promise<void> {
+  if (!sessionId) return Promise.resolve();
+  const run = op === "detach" ? terminalDetach : terminalTerminate;
+  return run(sessionId).catch((e: unknown) => warnTerminal(op, e));
+}
+
 // Closing a tab or runspace detaches the session (the process keeps running under the
 // daemon and shows up in the Detached group); only an explicit terminate kills it.
 export function detachTab(tab: TerminalTab): Promise<void> {
-  const sessionId = releaseTabConnection(tab.id) ?? tab.sessionId;
-  if (!sessionId) return Promise.resolve();
-  return terminalDetach(sessionId).catch((e: unknown) =>
-    console.warn("terminal detach failed:", e),
-  );
+  return endTabSession(releaseTabConnection(tab.id) ?? tab.sessionId, "detach");
 }
 
-export async function terminateTab(tab: TerminalTab): Promise<void> {
-  const sessionId = releaseTabConnection(tab.id) ?? tab.sessionId;
-  if (!sessionId) return;
-  try {
-    await terminalTerminate(sessionId);
-  } catch (e) {
-    console.warn("terminal terminate failed:", e);
-  }
+export function terminateTab(tab: TerminalTab): Promise<void> {
+  return endTabSession(releaseTabConnection(tab.id) ?? tab.sessionId, "terminate");
 }
 
 export const removeRunspaceAtom = atom(
@@ -484,51 +418,6 @@ export const cycleTerminalTabAtom = atom(null, (get, set, direction: "left" | "r
   });
 });
 
-export const jumpHintsActiveAtom = atom(false);
-
-// Both use digits in visual order; Ctrl disambiguates runspace (⌃1) from tab (1).
-const HINT_KEYS = [..."123456789"];
-
-type JumpHintTargets = {
-  byRunspaceId: Record<string, string>;
-  byTabId: Record<string, string>;
-};
-
-const NO_HINT_TARGETS: JumpHintTargets = { byRunspaceId: {}, byTabId: {} };
-
-export const jumpHintTargetsAtom = atom((get): JumpHintTargets => {
-  if (!get(jumpHintsActiveAtom)) return NO_HINT_TARGETS;
-  const summaries = get(runspaceSummariesAtom);
-  // Hint order must match the sidebar's visual order: task-bound group first, then shells.
-  const ordered = [...summaries.filter((s) => s.taskId), ...summaries.filter((s) => !s.taskId)];
-  const rs = get(activeRunspaceAtom);
-  const tabs = rs ? [...rs.tabs].sort((a, b) => a.order - b.order) : [];
-
-  const byRunspaceId: Record<string, string> = {};
-  const byTabId: Record<string, string> = {};
-  ordered.slice(0, HINT_KEYS.length).forEach((s, i) => {
-    byRunspaceId[s.id] = HINT_KEYS[i];
-  });
-  tabs.slice(0, HINT_KEYS.length).forEach((t, i) => {
-    byTabId[t.id] = HINT_KEYS[i];
-  });
-  return { byRunspaceId, byTabId };
-});
-
-export const jumpToHintAtom = atom(null, (get, set, input: { key: string; runspace: boolean }) => {
-  // Read before dismissing: the targets atom empties once hints deactivate.
-  const targets = get(jumpHintTargetsAtom);
-  set(jumpHintsActiveAtom, false);
-  const byId = input.runspace ? targets.byRunspaceId : targets.byTabId;
-  const match = Object.entries(byId).find(([, key]) => key === input.key);
-  if (!match) return;
-  if (input.runspace) {
-    set(activateRunspaceAtom, match[0]);
-  } else {
-    set(activateTerminalTabAtom, match[0]);
-  }
-});
-
 export const updateTabTitleAtom = atom(null, (get, set, tabId: string, title: string) => {
   const state = get(resolvedStateAtom);
   set(terminalStateAtom, patchTabInState(state, tabId, { title }));
@@ -582,106 +471,6 @@ export const moveActiveRunspaceAtom = atom(null, (get, set, direction: "up" | "d
   set(terminalStateAtom, { ...state, runspaces });
 });
 
-function stateToSnapshot(state: TerminalState): TerminalStateSnapshot {
-  return {
-    runspaces: state.runspaces.map((rs) => ({
-      id: rs.id,
-      sort_order: rs.order,
-      tabs: rs.tabs.map((t) => ({
-        id: t.id,
-        cwd: tabDisplayPath(t),
-        title: t.title,
-        sort_order: t.order,
-        terminal_session_id: t.sessionId ?? null,
-      })),
-    })),
-  };
-}
-
-// active runspace/tab is resolved from the Tauri store hint in loadTerminalStateAtom;
-// here it just defaults to the first runspace/tab.
-function snapshotToState(snap: TerminalStateSnapshot): TerminalState | null {
-  if (snap.runspaces.length === 0) return null;
-  const runspaces: TerminalRunspace[] = snap.runspaces.map((rs) => ({
-    id: rs.id,
-    order: rs.sort_order,
-    activeTabId: rs.tabs[0]?.id ?? "",
-    tabs: rs.tabs.map((t) => ({
-      id: t.id,
-      title: t.title,
-      cwd: t.cwd,
-      order: t.sort_order,
-      sessionId: t.terminal_session_id ?? undefined,
-    })),
-  }));
-  const withTabs = runspaces.filter((rs) => rs.tabs.length > 0);
-  return {
-    runspaces: withTabs,
-    activeRunspaceId: withTabs[0]?.id ?? "",
-  };
-}
-
-export type SessionStatusEntry = {
-  status: TerminalSessionStatus;
-  exitCode?: number | null;
-  agentStatus?: AgentSessionStatus | null;
-  agentWaitReason?: TaskRunWaitReason | null;
-  providerSessionId?: string | null;
-};
-
-// sessionId → last known status. Seeded by the startup reconcile, kept fresh by the
-// sidebar poll, and overridden optimistically by attach/exit handling in use-terminal.
-// A session missing from the map is "unknown": panes still try to attach (the daemon may
-// simply not have been reachable yet) and only an attach failure demotes it to lost.
-export const sessionStatusAtom = atom<Record<string, SessionStatusEntry>>({});
-
-export const setSessionStatusAtom = atom(
-  null,
-  (_get, set, sessionId: string, entry: SessionStatusEntry) => {
-    set(sessionStatusAtom, (prev) => ({ ...prev, [sessionId]: entry }));
-  },
-);
-
-// Live sessions (running/detached in the daemon) not bound to any tab — what the
-// "Detached" sidebar group lists for reattach/terminate.
-export const detachedSessionsAtom = atom<TerminalSession[]>([]);
-
-function applySessionList(get: Getter, set: Setter, sessions: TerminalSession[]) {
-  const statusMap: Record<string, SessionStatusEntry> = {};
-  for (const s of sessions) {
-    statusMap[s.id] = {
-      status: s.status,
-      exitCode: s.exit_code,
-      agentStatus: s.agent_status,
-      agentWaitReason: s.agent_wait_reason,
-      providerSessionId: s.provider_session_id,
-    };
-  }
-  set(sessionStatusAtom, statusMap);
-
-  const state = get(terminalStateAtom);
-  const boundIds = new Set(
-    (state?.runspaces ?? []).flatMap((rs) => rs.tabs.map((t) => t.sessionId)).filter(Boolean),
-  );
-  const detached = sessions.filter((s) => s.status === "detached" && !boundIds.has(s.id));
-  set(detachedSessionsAtom, detached);
-}
-
-// terminal_list_sessions reconciles DB rows against the daemon backend-side, so this is
-// both the status poll and the startup reconcile. Failures are non-fatal: keep the last
-// known state and let attach failures surface as lost.
-export const refreshSessionsAtom = atom(null, async (get, set) => {
-  if (get(windowLabelAtom) !== MAIN_WINDOW_LABEL) return;
-  let sessions: TerminalSession[];
-  try {
-    sessions = await terminalListSessions();
-  } catch (e) {
-    console.warn("terminal session refresh failed:", e);
-    return;
-  }
-  applySessionList(get, set, sessions);
-});
-
 export const bindTabSessionAtom = atom(null, (get, set, tabId: string, sessionId: string) => {
   const state = get(resolvedStateAtom);
   set(terminalStateAtom, patchTabInState(state, tabId, { sessionId }));
@@ -690,14 +479,7 @@ export const bindTabSessionAtom = atom(null, (get, set, tabId: string, sessionId
 export const terminateTabSessionAtom = atom(null, async (get, set, tabId: string) => {
   const state = get(resolvedStateAtom);
   const tab = state.runspaces.flatMap((rs) => rs.tabs).find((t) => t.id === tabId);
-  const sessionId = tab?.sessionId;
-  if (sessionId) {
-    try {
-      await terminalTerminate(sessionId);
-    } catch (e) {
-      console.warn("terminal terminate failed:", e);
-    }
-  }
+  await endTabSession(tab?.sessionId, "terminate");
   set(closeTerminalTabAtom, tabId);
 });
 
@@ -779,73 +561,6 @@ export function applyHint(state: TerminalState, hint: WorkbenchHint): TerminalSt
   };
 }
 
-// Concurrent loads (e.g. WorkBench mount racing createTaskRunspaceAtom) must share
-// one promise so a slower load cannot overwrite state mutated in between.
-const loadInFlightAtom = atom<Promise<void> | null>(null);
-
-export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
-  if (get(terminalStateAtom) !== null) return Promise.resolve();
-
-  const inFlight = get(loadInFlightAtom);
-  if (inFlight) return inFlight;
-
-  const windowLabel = get(windowLabelAtom);
-
-  const promise = (async () => {
-    try {
-      // The session list is fetched with its own catch: it triggers the backend's daemon
-      // reconcile, and a daemon failure must not fall into the catch below, which would
-      // replace (and then persist) the saved layout with an empty one. Unknown statuses
-      // just mean panes attempt to attach and demote themselves to lost on failure.
-      const [snap, benchMap, sessions] = await Promise.all([
-        terminalLoadState(windowLabel),
-        listBenchRunspaceMap(),
-        terminalListSessions().catch((e) => {
-          console.warn("terminal session reconcile failed:", e);
-          return null;
-        }),
-      ]);
-      let state = snapshotToState(snap);
-      if (state && state.runspaces.length > 0) {
-        const runspaceToTask = new Map(benchMap.map(([rsId, taskId]) => [rsId, taskId]));
-        const taskIds = [
-          ...new Set(
-            state.runspaces.map((rs) => runspaceToTask.get(rs.id)).filter((t): t is string => !!t),
-          ),
-        ];
-        const envByTask = new Map(
-          await Promise.all(
-            taskIds.map(
-              async (tid) =>
-                [tid, await taskShellEnv(tid).catch(() => [])] as [string, [string, string][]],
-            ),
-          ),
-        );
-        state.runspaces = enrichRunspacesWithEnv(state.runspaces, runspaceToTask, envByTask);
-        const hint = get(pendingWorkbenchHintAtom);
-        if (hint) {
-          set(pendingWorkbenchHintAtom, null);
-          state = applyHint(state, hint);
-        }
-        set(terminalStateAtom, state);
-        if (windowLabel === MAIN_WINDOW_LABEL && sessions) applySessionList(get, set, sessions);
-        void set(resolveWorktreeInfoAtom);
-        return;
-      }
-      if (windowLabel === MAIN_WINDOW_LABEL && sessions) applySessionList(get, set, sessions);
-    } catch {
-      // first launch or empty DB
-    }
-    set(pendingWorkbenchHintAtom, null);
-    set(terminalStateAtom, initialState());
-  })().finally(() => {
-    set(loadInFlightAtom, null);
-  });
-
-  set(loadInFlightAtom, promise);
-  return promise;
-});
-
 export const createTaskRunspaceAtom = atom(
   null,
   async (
@@ -913,19 +628,4 @@ export const createTaskRunspaceAtom = atom(
 export const consumeTerminalLaunchAtom = atom(null, (get, set, tabId: string) => {
   const state = get(resolvedStateAtom);
   set(terminalStateAtom, patchTabInState(state, tabId, { launch: undefined }));
-});
-
-const saveTimerAtom = atom<number | undefined>(undefined);
-
-export const saveTerminalStateAtom = atom(null, (get, set) => {
-  const current = get(terminalStateAtom);
-  if (!current) return;
-  const prev = get(saveTimerAtom);
-  if (prev) clearTimeout(prev);
-  const windowLabel = get(windowLabelAtom);
-  const snapshot = stateToSnapshot(current);
-  const timer = window.setTimeout(() => {
-    terminalSaveState(windowLabel, snapshot).catch((e) => console.warn("terminal save failed:", e));
-  }, 500);
-  set(saveTimerAtom, timer);
 });

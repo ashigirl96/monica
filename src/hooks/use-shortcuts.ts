@@ -10,16 +10,15 @@ import {
   createTerminalTabAtom,
   cycleTerminalTabAtom,
   cycleRunspaceAtom,
-  jumpHintsActiveAtom,
-  jumpToHintAtom,
   moveActiveTabAtom,
   moveActiveRunspaceAtom,
   planPreviewAtom,
   promoteActiveTabRunAtom,
-  sessionStatusAtom,
   toggleLastRunspaceAtom,
   togglePlanPreviewAtom,
 } from "@/features/work-bench/store";
+import { jumpHintsActiveAtom, jumpToHintAtom } from "@/features/work-bench/jump-hints";
+import { sessionStatusAtom } from "@/features/work-bench/session-status";
 import { forceSyncPullRequestsAtom } from "@/stores/pr-sync";
 import { toggleTaskMemoAtom } from "@/features/task-memo/store";
 import { newTaskOpenAtom, projectFilterOpenAtom, cycleBoardViewAtom } from "@/stores/workboard";

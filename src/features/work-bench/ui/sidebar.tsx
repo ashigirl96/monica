@@ -3,13 +3,12 @@ import { useAtomValue, useSetAtom } from "jotai";
 import {
   runspaceSummariesAtom,
   activateRunspaceAtom,
-  detachedSessionsAtom,
-  jumpHintTargetsAtom,
   reattachSessionAtom,
-  refreshSessionsAtom,
   reorderRunspacesAtom,
   type RunspaceSummary,
 } from "@/features/work-bench/store";
+import { jumpHintTargetsAtom } from "@/features/work-bench/jump-hints";
+import { detachedSessionsAtom, refreshSessionsAtom } from "@/features/work-bench/session-status";
 import { JumpHint } from "./jump-hint";
 import { terminalTerminate, type TerminalSession } from "@/commands/terminal";
 import { taskSummaryByIdAtom, type RunspaceTaskSummary } from "@/stores/workboard";

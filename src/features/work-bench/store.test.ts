@@ -170,7 +170,8 @@ if (typeof globalThis.window === "undefined") {
 
 const { createStore } = await import("jotai");
 const { windowLabelAtom } = await import("@/stores/ui-state");
-const { loadTerminalStateAtom, terminalStateAtom } = await import("./store");
+const { terminalStateAtom } = await import("./store");
+const { loadTerminalStateAtom } = await import("./persistence");
 
 beforeEach(() => {
   loadStateResult = { runspaces: [] };
@@ -247,7 +248,8 @@ async function setupSaveTest(label: string) {
 
   const { createStore: cs } = await import("jotai");
   const { windowLabelAtom: wlAtom } = await import("@/stores/ui-state");
-  const { saveTerminalStateAtom: saveAtom, terminalStateAtom: stateAtom } = await import("./store");
+  const { terminalStateAtom: stateAtom } = await import("./store");
+  const { saveTerminalStateAtom: saveAtom } = await import("./persistence");
 
   const store = cs();
   store.set(wlAtom, label);
@@ -276,6 +278,51 @@ describe("saveTerminalStateAtom", () => {
 
     await new Promise((r) => setTimeout(r, 600));
     expect(getSaveCalls()).toBe(1);
+  });
+});
+
+describe("terminateTabSessionAtom", () => {
+  test("terminates the tab's session, then closes the tab", async () => {
+    let terminatedId: string | undefined;
+    mock.module("@/commands/terminal", () => ({
+      terminalLoadState: () => Promise.resolve(loadStateResult),
+      terminalListSessions: () => Promise.resolve(sessionsResult ?? []),
+      terminalDetach: () => Promise.resolve(),
+      terminalSaveState: () => Promise.resolve(),
+      terminalTerminate: (id: string) => {
+        terminatedId = id;
+        return Promise.resolve();
+      },
+    }));
+
+    const { createStore: cs } = await import("jotai");
+    const { windowLabelAtom: wlAtom } = await import("@/stores/ui-state");
+    const { terminalStateAtom: stateAtom, terminateTabSessionAtom: termAtom } =
+      await import("./store");
+
+    const store = cs();
+    store.set(wlAtom, "main");
+    store.set(stateAtom, {
+      runspaces: [
+        {
+          id: "rs",
+          tabs: [
+            { id: "t1", title: "", cwd: "~", order: 0, sessionId: "sess-1" },
+            { id: "t2", title: "", cwd: "~", order: 1 },
+          ],
+          activeTabId: "t1",
+          order: 0,
+        },
+      ],
+      activeRunspaceId: "rs",
+    });
+
+    await store.set(termAtom, "t1");
+
+    expect(terminatedId).toBe("sess-1");
+    const tabs = store.get(stateAtom)!.runspaces[0].tabs;
+    expect(tabs).toHaveLength(1);
+    expect(tabs.find((t) => t.id === "t1")).toBeUndefined();
   });
 });
 
@@ -348,7 +395,7 @@ describe("window isolation", () => {
 
     const { createStore: cs } = await import("jotai");
     const { windowLabelAtom: wlAtom } = await import("@/stores/ui-state");
-    const { refreshSessionsAtom: rAtom } = await import("./store");
+    const { refreshSessionsAtom: rAtom } = await import("./session-status");
     const store = cs();
     store.set(wlAtom, "monica-window-1");
     await store.set(rAtom);

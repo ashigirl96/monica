@@ -6,17 +6,15 @@ import {
   terminalReadyAtom,
   bindTabSessionAtom,
   closeTerminalTabAtom,
-  jumpHintsActiveAtom,
-  sessionStatusAtom,
   startNewShellForTabAtom,
   updateTabTitleAtom,
   updateTabCwdAtom,
   consumeTerminalLaunchAtom,
-  loadTerminalStateAtom,
-  saveTerminalStateAtom,
-  type SessionStatusEntry,
   type TerminalLaunchIntent,
 } from "@/features/work-bench/store";
+import { jumpHintsActiveAtom } from "@/features/work-bench/jump-hints";
+import { sessionStatusAtom, type SessionStatusEntry } from "@/features/work-bench/session-status";
+import { loadTerminalStateAtom, saveTerminalStateAtom } from "@/features/work-bench/persistence";
 import { uiZoomAtom } from "@/stores/zoom";
 import { clipboardWriteImage } from "@/commands/clipboard";
 import { terminalWrite } from "@/commands/terminal";
