@@ -18,7 +18,7 @@ serde_json = { version = "1.0.150", default-features = false, features = ["std"]
 tokio = { version = "1", default-features = false, features = ["net", "rt"] }
 
 [dev-dependencies]
-ctor = "0.8"
+ctor = "1.0"
 http-body-util = { version = "0.1", default-features = false }
 monica-storage-sqlite = { path = "../monica-storage-sqlite" }
 specta = { version = "=2.0.0-rc.25", default-features = false, features = ["derive", "serde_json"] }

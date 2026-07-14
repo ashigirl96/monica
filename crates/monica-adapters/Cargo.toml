@@ -9,7 +9,7 @@ monica-application = { path = "../monica-application" }
 monica-domain = { path = "../monica-domain" }
 monica-paths = { path = "../monica-paths" }
 anyhow = "1.0.102"
-octocrab = { version = "0.53.1", default-features = false, features = [
+octocrab = { version = "0.54.0", default-features = false, features = [
   "default-client",
   "jwt-rust-crypto",
   "rustls",
@@ -26,5 +26,5 @@ serde_json = { version = "1.0.150", default-features = false, features = ["std"]
 tokio = { version = "1.52.3", default-features = false, features = ["sync", "time"] }
 
 [dev-dependencies]
-ctor = "0.8"
+ctor = "1.0"
 monica-storage-sqlite = { path = "../monica-storage-sqlite" }
