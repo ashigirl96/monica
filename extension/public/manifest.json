@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Monica Translate PoC",
+  "version": "0.1.0",
+  "description": "Translate web pages to Japanese via Monica browser bridge",
+  "action": {
+    "default_title": "Translate page"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["activeTab", "scripting", "storage"],
+  "commands": {
+    "translate-page": {
+      "suggested_key": {
+        "default": "Alt+A"
+      },
+      "description": "Translate current page"
+    }
+  }
+}

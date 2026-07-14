@@ -1,0 +1,19 @@
+[package]
+name = "monica-browser-bridge"
+version = "0.1.0"
+edition = "2021"
+description = "Browser extension ↔ Claude localhost WebSocket bridge"
+
+[[bin]]
+name = "monica-browser-bridge"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }
+claude-agent-sdk = { path = "../claude-agent-sdk" }
+env_logger = "0.11"
+futures-util = { version = "0.3", default-features = false }
+log = "0.4"
+serde = { version = "1", default-features = false, features = ["std", "derive"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
+tokio = { version = "1", default-features = false, features = ["macros", "net", "rt"] }
