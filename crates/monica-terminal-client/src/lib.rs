@@ -2,7 +2,7 @@
 //! correlation by id, and a reader thread that forwards Output/Exit events.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufReader, BufWriter};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -11,7 +11,9 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 
-use monica_terminal_protocol::{Request, RequestOp, ResponseBody, ServerMessage, PROTOCOL_VERSION};
+use monica_terminal_protocol::{
+    read_frames, write_frame, Request, RequestOp, ResponseBody, ServerMessage, PROTOCOL_VERSION,
+};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -64,35 +66,37 @@ impl PtydClient {
             .name("ptyd-client-reader".to_string())
             .spawn(move || {
                 let reader = BufReader::new(read_stream);
-                for line in reader.lines() {
-                    let Ok(line) = line else { break };
-                    if line.trim().is_empty() {
-                        continue;
-                    }
-                    match serde_json::from_str::<ServerMessage>(&line) {
-                        Ok(ServerMessage::Ok { id, body }) => {
+                for frame in read_frames::<_, ServerMessage>(reader) {
+                    let msg = match frame {
+                        Ok(msg) => msg,
+                        Err(e) => {
+                            log::warn!("unparseable daemon message {e}");
+                            continue;
+                        }
+                    };
+                    match msg {
+                        ServerMessage::Ok { id, body } => {
                             if let Some(tx) = lock(&reader_inner.pending).remove(&id) {
                                 let _ = tx.try_send(Ok(body));
                             }
                         }
-                        Ok(ServerMessage::Err { id, error }) => {
+                        ServerMessage::Err { id, error } => {
                             if let Some(tx) = lock(&reader_inner.pending).remove(&id) {
                                 let _ = tx.try_send(Err(error));
                             }
                         }
-                        Ok(ServerMessage::Output { session_id, data }) => {
+                        ServerMessage::Output { session_id, data } => {
                             on_event(ClientEvent::Output { session_id, data });
                         }
-                        Ok(ServerMessage::Exit {
+                        ServerMessage::Exit {
                             session_id,
                             exit_code,
-                        }) => {
+                        } => {
                             on_event(ClientEvent::Exit {
                                 session_id,
                                 exit_code,
                             });
                         }
-                        Err(e) => log::warn!("unparseable daemon message ({e}): {line}"),
                     }
                 }
                 for (_, tx) in lock(&reader_inner.pending).drain() {
@@ -140,11 +144,8 @@ impl PtydClient {
     }
 
     fn send_line(&self, request: &Request) -> Result<()> {
-        let line = serde_json::to_string(request)?;
         let mut writer = lock(&self.inner.writer);
-        writer.write_all(line.as_bytes())?;
-        writer.write_all(b"\n")?;
-        writer.flush()?;
+        write_frame(&mut *writer, request)?;
         Ok(())
     }
 }

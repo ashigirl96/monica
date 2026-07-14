@@ -8,4 +8,3 @@ edition = "2021"
 anyhow = "1.0"
 log = "0.4"
 monica-terminal-protocol = { path = "../monica-terminal-protocol" }
-serde_json = { version = "1.0", default-features = false, features = ["std"] }

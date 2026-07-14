@@ -141,7 +141,7 @@ fn cleanup_worktree(repo: &Path, run: &TaskRun, worktree: &Path, rip: &Path) -> 
     // `git worktree list` includes the main working tree, so a run whose worktree_path points at
     // the checkout itself (e.g. legacy rows stamped from a session's cwd) would pass the
     // registered check and get ripped; never touch it.
-    if is_same_path(repo, worktree) {
+    if crate::fs_util::same_path(repo, worktree) {
         return Ok(());
     }
     let registered = worktree_registered(repo, worktree)?;
@@ -175,13 +175,6 @@ fn cleanup_worktree(repo: &Path, run: &TaskRun, worktree: &Path, rip: &Path) -> 
         ensure_worktree_unregistered(repo, run, worktree)?;
     }
     Ok(())
-}
-
-fn is_same_path(a: &Path, b: &Path) -> bool {
-    match (a.canonicalize(), b.canonicalize()) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => a == b,
-    }
 }
 
 fn rip_worktree(rip: &Path, worktree: &Path) -> Result<()> {

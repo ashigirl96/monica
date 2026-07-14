@@ -7,11 +7,76 @@
 //!   session's exit still reaches the app for DB recording + reap. Receivers ignore exits
 //!   for sessions they don't know.
 
+use std::io::{self, BufRead, Write};
+
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 /// Bump on any incompatible wire change. The client refuses to talk to a daemon with a
 /// different version and restarts it instead.
 pub const PROTOCOL_VERSION: u32 = 1;
+
+/// Encode a value as one NDJSON line (no trailing newline).
+pub fn to_frame<T: ?Sized + Serialize>(value: &T) -> serde_json::Result<String> {
+    serde_json::to_string(value)
+}
+
+/// Write an already-encoded line as an NDJSON frame: line + `\n` + flush.
+///
+/// The flush is load-bearing: callers wrap a `BufWriter`, so dropping it would leave a request
+/// or response sitting in the buffer until the next write, stalling the round trip.
+pub fn write_line<W: Write>(w: &mut W, line: &str) -> io::Result<()> {
+    w.write_all(line.as_bytes())?;
+    w.write_all(b"\n")?;
+    w.flush()
+}
+
+/// Serialize a value and write it as one NDJSON frame.
+pub fn write_frame<W: Write, T: ?Sized + Serialize>(w: &mut W, value: &T) -> io::Result<()> {
+    let line = to_frame(value).map_err(io::Error::other)?;
+    write_line(w, &line)
+}
+
+/// A frame that arrived but failed to deserialize. `Display` renders `({source}): {line}` so a
+/// caller can log it with its own prefix and keep the raw line for diagnosis.
+#[derive(Debug)]
+pub struct FrameError {
+    pub line: String,
+    pub source: serde_json::Error,
+}
+
+impl std::fmt::Display for FrameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}): {}", self.source, self.line)
+    }
+}
+
+impl std::error::Error for FrameError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+/// Read NDJSON frames from a reader: stop at the first io error, skip blank lines, and yield one
+/// parse result per non-blank line. Callers decide what to do with a `FrameError` (typically warn
+/// and continue) and drive whatever dispatch the parsed value needs.
+pub fn read_frames<R, T>(reader: R) -> impl Iterator<Item = Result<T, FrameError>>
+where
+    R: BufRead,
+    T: DeserializeOwned,
+{
+    let mut lines = reader.lines();
+    std::iter::from_fn(move || loop {
+        let line = match lines.next() {
+            Some(Ok(line)) => line,
+            Some(Err(_)) | None => return None,
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        return Some(serde_json::from_str::<T>(&line).map_err(|source| FrameError { line, source }));
+    })
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Request {
@@ -217,5 +282,62 @@ mod tests {
             }
             other => panic!("unexpected message: {other:?}"),
         }
+    }
+
+    #[test]
+    fn write_frame_appends_exactly_one_trailing_newline() {
+        let msg = ServerMessage::Exit {
+            session_id: "ts-1".into(),
+            exit_code: None,
+        };
+        let mut buf = Vec::new();
+        write_frame(&mut buf, &msg).unwrap();
+        let written = String::from_utf8(buf).unwrap();
+        assert_eq!(written, format!("{}\n", to_frame(&msg).unwrap()));
+        assert_eq!(written.matches('\n').count(), 1);
+    }
+
+    #[test]
+    fn read_frames_skips_blank_lines_and_flags_unparseable_ones() {
+        let req = Request {
+            id: Some(1),
+            op: RequestOp::List,
+        };
+        let mut input: Vec<u8> = Vec::new();
+        write_frame(&mut input, &req).unwrap();
+        input.extend_from_slice(b"\n"); // blank line between frames
+        input.extend_from_slice(b"   \n"); // whitespace-only line
+        input.extend_from_slice(b"{not json}\n");
+        write_frame(&mut input, &req).unwrap();
+
+        let results: Vec<_> = read_frames::<_, Request>(input.as_slice()).collect();
+        assert_eq!(results.len(), 3, "two valid frames + one unparseable");
+        assert!(matches!(results[0], Ok(Request { id: Some(1), .. })));
+        assert!(results[1].is_err());
+        assert!(matches!(results[2], Ok(Request { id: Some(1), .. })));
+    }
+
+    #[test]
+    fn write_frame_then_read_frames_round_trips() {
+        let messages = [
+            ServerMessage::Output {
+                session_id: "ts-1".into(),
+                data: "aGk=".into(),
+            },
+            ServerMessage::Exit {
+                session_id: "ts-1".into(),
+                exit_code: Some(0),
+            },
+        ];
+        let mut buf = Vec::new();
+        for msg in &messages {
+            write_frame(&mut buf, msg).unwrap();
+        }
+        let back: Vec<ServerMessage> = read_frames::<_, ServerMessage>(buf.as_slice())
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(back.len(), 2);
+        assert!(matches!(back[0], ServerMessage::Output { .. }));
+        assert!(matches!(back[1], ServerMessage::Exit { exit_code: Some(0), .. }));
     }
 }

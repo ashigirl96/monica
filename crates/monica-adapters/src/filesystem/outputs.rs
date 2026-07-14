@@ -267,16 +267,7 @@ fn strip_shell_word(s: &str) -> Option<&str> {
 /// Guards the user's global agent config (`~/.claude`, `~/.codex`): a project checked out at
 /// $HOME must never have its hooks config written or stripped.
 fn cwd_is_home(cwd: &Path) -> bool {
-    std::env::var_os("HOME").is_some_and(|home| same_path(Path::new(&home), cwd))
-}
-
-// Compare through symlinks and trailing-slash differences so the HOME guard cannot be bypassed by
-// macOS firmlinks (/home → /private/...) or a stored project path written as `$HOME/`.
-fn same_path(a: &Path, b: &Path) -> bool {
-    match (fs::canonicalize(a), fs::canonicalize(b)) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => a == b,
-    }
+    std::env::var_os("HOME").is_some_and(|home| crate::fs_util::same_path(Path::new(&home), cwd))
 }
 
 fn hook_group(hook_command: &str, matcher: &str) -> Value {

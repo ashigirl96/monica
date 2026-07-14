@@ -1,5 +1,6 @@
 import { useAtomValue, useStore } from "jotai";
 import { useEffect } from "react";
+import { rectToAnchor } from "@/lib/anchor";
 import { isEditable } from "@/lib/keyboard";
 import {
   executeMenuItemAtom,
@@ -29,7 +30,7 @@ function focusedCardElement(taskId: string): HTMLElement | null {
 
 function focusedCardAnchor(taskId: string | null): MenuAnchor | null {
   const rect = taskId ? focusedCardElement(taskId)?.getBoundingClientRect() : undefined;
-  return rect ? { top: rect.top, left: rect.left, bottom: rect.bottom } : null;
+  return rect ? rectToAnchor(rect) : null;
 }
 
 // Mounted by WorkBoardContent, which unmounts on space switch, so the listener

@@ -3,8 +3,10 @@ import { atom, type Getter } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import type { Agent } from "@/commands/bindings";
 import type { TaskSummaryRow } from "@/commands/task";
+import type { PopoverAnchor } from "@/components/popover-menu";
 import { openTargets } from "@/features/work-board/github-urls";
 import { closeTaskAtom, openBenchAtom, runTaskAtom } from "@/features/work-board/store";
+import { rectToAnchor } from "@/lib/anchor";
 import { columnTasksAtom, prepareTaskMutationAtom, taskSummariesAtom } from "@/stores/workboard";
 import { queryKeys } from "@/stores/query-keys";
 import { pendingWorkboardHintAtom, resolveWorkboardFocus } from "@/stores/ui-state";
@@ -17,7 +19,7 @@ const AGENT_TARGETS: ReadonlyArray<{ agent: Agent; label: string; hint: string }
 type MoveDirection = "up" | "down" | "left" | "right";
 type MenuItemId = "prepare" | "run" | "bench" | "open" | "close";
 
-export type MenuAnchor = { top: number; left: number; bottom: number };
+export type MenuAnchor = PopoverAnchor;
 
 export type Submenu = { kind: "open"; index: number } | { kind: "run"; index: number };
 
@@ -314,7 +316,7 @@ const enterSubmenuAtom = atom(null, (get, set, submenu: SubmenuKind) => {
       if (!rect) return;
       set(menuAtom, {
         taskId,
-        anchor: { top: rect.top, left: rect.left, bottom: rect.bottom },
+        anchor: rectToAnchor(rect),
         itemIndex: RUN_INDEX,
         confirmingClose: false,
         submenu: { kind: "run", index: 0 },

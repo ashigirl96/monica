@@ -11,4 +11,6 @@ log = "0.4"
 monica-terminal-protocol = { path = "../monica-terminal-protocol" }
 portable-pty = { version = "0.9", default-features = false }
 serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
+
+[dev-dependencies]
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
