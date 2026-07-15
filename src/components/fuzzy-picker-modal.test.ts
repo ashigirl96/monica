@@ -1,6 +1,6 @@
 /// <reference types="bun" />
 import { describe, expect, test } from "bun:test";
-import { fuzzyMatch } from "@/components/fuzzy-picker-modal";
+import { fuzzyMatch } from "@shared/fuzzy-picker/use-fuzzy-picker";
 
 describe("fuzzyMatch", () => {
   test("matches contiguous substrings", () => {

@@ -1,5 +1,4 @@
 import { createPortal } from "react-dom";
-import { cn } from "@/lib/utils";
 import { type FuzzyPickerModalProps, useFuzzyPicker } from "@shared/fuzzy-picker/use-fuzzy-picker";
 
 export function FuzzyPickerModal({
@@ -14,7 +13,7 @@ export function FuzzyPickerModal({
 
   return createPortal(
     <div
-      className="animate-in fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/50 duration-150"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       onClick={onClose}
     >
       <div
@@ -22,7 +21,7 @@ export function FuzzyPickerModal({
         aria-modal
         onClick={(e) => e.stopPropagation()}
         onKeyDown={onKeyDown}
-        className="animate-in fade-in zoom-in-95 flex w-[36rem] flex-col rounded-xl border border-border bg-popover shadow-xl duration-150"
+        className="flex w-[36rem] flex-col rounded-xl border bg-card shadow-xl"
       >
         <div className="px-5 pt-5 pb-3">
           <input
@@ -32,7 +31,7 @@ export function FuzzyPickerModal({
             onChange={(e) => setQuery(e.target.value)}
             placeholder={placeholder}
             autoComplete="off"
-            className="h-12 w-full rounded-lg border border-border bg-background px-4 font-mono text-base text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-muted-foreground/40"
+            className="h-12 w-full rounded-lg border bg-background px-4 font-mono text-base text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-muted-foreground/40"
           />
         </div>
 
@@ -46,12 +45,11 @@ export function FuzzyPickerModal({
                 onSelect(item.key);
                 onClose();
               }}
-              className={cn(
-                "w-full rounded-lg px-4 py-2.5 text-left font-mono text-base transition-colors",
+              className={`w-full rounded-lg px-4 py-2.5 text-left font-mono text-base transition-colors ${
                 i === highlightIndex
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:bg-accent/50",
-              )}
+                  ? "bg-muted text-foreground"
+                  : "text-muted-foreground hover:bg-muted/50"
+              }`}
             >
               {item.label}
             </button>
