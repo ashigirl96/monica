@@ -343,9 +343,17 @@ export const toggleLastRunspaceAtom = atom(null, (get, set) => {
   set(activateRunspaceAtom, lastId);
 });
 
+// Navigation must follow the sidebar's visual order: task-bound runspaces first, then shells.
+// Ordering by `order` alone would interleave the two groups (createRunspace inserts a shell next
+// to the active task-bound runspace), so alt+j/k would jump differently than the sidebar reads.
+function orderRunspacesForNav(runspaces: TerminalRunspace[]): TerminalRunspace[] {
+  const byOrder = [...runspaces].sort((a, b) => a.order - b.order);
+  return [...byOrder.filter((rs) => rs.taskId), ...byOrder.filter((rs) => !rs.taskId)];
+}
+
 export const cycleRunspaceAtom = atom(null, (get, set, direction: "up" | "down") => {
   const state = get(resolvedStateAtom);
-  const sorted = [...state.runspaces].sort((a, b) => a.order - b.order);
+  const sorted = orderRunspacesForNav(state.runspaces);
   if (sorted.length <= 1) return;
 
   const idx = sorted.findIndex((rs) => rs.id === state.activeRunspaceId);
