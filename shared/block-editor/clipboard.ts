@@ -159,9 +159,13 @@ export function clipboardPlugin(): Plugin {
         }
         const ctx = getBlockContext(view.state.selection.$from);
         if (!ctx) return false;
-        // 空 paragraph の上なら置き換え、それ以外は直後に挿入
+        // 空 paragraph（子なし）の上なら置き換え、それ以外は直後に挿入
         const tr = view.state.tr;
-        if (ctx.contentNode.type === nodes.paragraph && ctx.contentNode.content.size === 0) {
+        if (
+          ctx.contentNode.type === nodes.paragraph &&
+          ctx.contentNode.content.size === 0 &&
+          ctx.containerNode.childCount === 1
+        ) {
           tr.replaceWith(ctx.containerPos, ctx.containerPos + ctx.containerNode.nodeSize, blocks);
         } else {
           tr.insert(ctx.containerPos + ctx.containerNode.nodeSize, blocks);

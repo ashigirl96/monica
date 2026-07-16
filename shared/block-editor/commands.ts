@@ -49,7 +49,13 @@ export function indentRange(state: EditorState, range: SiblingRange): Transactio
   if (prev.child(0).type === nodes.divider) return null;
   const selected: PMNode[] = [];
   for (let i = range.fromIndex; i <= range.toIndex; i++) selected.push(group.child(i));
-  const newPrev = withChildren(prev, prev.child(0), [...containerChildren(prev), ...selected]);
+  // 閉じた toggle の下へ入れると block が不可視になるため開く（drag-drop と同挙動）
+  const prevContent = prev.child(0);
+  const opened =
+    prevContent.type === nodes.toggle && prevContent.attrs.open === false
+      ? prevContent.type.create({ ...prevContent.attrs, open: true }, prevContent.content)
+      : prevContent;
+  const newPrev = withChildren(prev, opened, [...containerChildren(prev), ...selected]);
   const start = childStartPos(range.groupPos, group, range.fromIndex - 1);
   const { end } = rangePositions(range);
   return state.tr.replaceWith(start, end, newPrev).setMeta("blockOperation", { type: "indent" });
@@ -106,7 +112,7 @@ export const outdentBlock: Command = structureCommand(outdentRange);
 
 // ---- 型変換（TODO.md §1.2: ID と children を維持） ----
 
-function inlineToPlainText(content: PMNode): PMNode | undefined {
+export function inlineToPlainText(content: PMNode): PMNode | undefined {
   const text = content.content.textBetween(0, content.content.size, undefined, "\n");
   return text.length > 0 ? schema.text(text) : undefined;
 }
@@ -363,7 +369,7 @@ export const backspaceBlock: Command = (state, dispatch) => {
     if (!parent) return false;
     const parentContent = parent.child(0);
     const parentId = parent.attrs.id as string | null;
-    if (!isTextBlock(parentContent.type)) {
+    if (parentContent.type === nodes.codeBlock || !isTextBlock(parentContent.type)) {
       return parentId ? selectSingleBlock(state, dispatch, parentId) : true;
     }
     const merged = parentContent.type.create(
@@ -401,7 +407,11 @@ export const deleteForwardBlock: Command = (state, dispatch) => {
     const first = childGroup.child(0);
     const firstContent = first.child(0);
     const firstId = first.attrs.id as string | null;
-    if (!isTextBlock(firstContent.type)) {
+    if (
+      content.type === nodes.codeBlock ||
+      firstContent.type === nodes.codeBlock ||
+      !isTextBlock(firstContent.type)
+    ) {
       return firstId ? selectSingleBlock(state, dispatch, firstId) : true;
     }
     const merged = content.type.create(content.attrs, content.content.append(firstContent.content));
@@ -428,6 +438,7 @@ export const deleteForwardBlock: Command = (state, dispatch) => {
   const nextContent = next.child(0);
   const nextId = next.attrs.id as string | null;
   if (
+    content.type === nodes.codeBlock ||
     nextContent.type === nodes.divider ||
     nextContent.type === nodes.codeBlock ||
     !isTextBlock(nextContent.type)

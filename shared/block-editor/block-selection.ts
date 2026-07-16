@@ -178,7 +178,8 @@ export function blockSelectionPlugin(): Plugin<BlockSelectionState> {
         if (meta?.type === "set") return normalize(tr.doc, meta.anchorId, meta.headId);
         if (meta?.type === "clear") return EMPTY;
         if (value.selectedIds.length === 0) return value;
-        // text selection への遷移（クリック・入力）で block mode を解除
+        // text selection への明示的な遷移（クリック等の setSelection）で block mode を解除。
+        // 通常のタイピングは selectionSet を立てないため handleKeyDown 側で解除する。
         if (tr.selectionSet) return EMPTY;
         if (tr.docChanged && value.anchorId && value.headId) {
           return normalize(tr.doc, value.anchorId, value.headId);
@@ -222,6 +223,12 @@ export function blockSelectionPlugin(): Plugin<BlockSelectionState> {
           ) {
             return selectAdjacentDivider(view, event.key === "ArrowDown" ? 1 : -1);
           }
+          return false;
+        }
+
+        // 印字キーは block mode を解除してそのまま入力に流す
+        if (!mod && !event.altKey && event.key.length === 1) {
+          view.dispatch(clearBlockSelection(view.state.tr));
           return false;
         }
 

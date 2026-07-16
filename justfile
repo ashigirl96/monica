@@ -110,7 +110,7 @@ generate-bindings: ptyd-bin bridge-bin
 # テストが継承して本物の DB・ファイルを触る事故を、crate 側の対応なしで防ぐ。
 test: ptyd-bin bridge-bin build-web
     MONICA_HOME="$(mktemp -d)" cargo test --workspace
-    bun test src/
+    bun test src/ shared/
 
 # Coverage doubles as dead-code detection: a pub fn at 0% that no caller or test reaches
 # is invisible to clippy (rustc has no cross-crate dead_code analysis in a workspace).

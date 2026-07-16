@@ -50,7 +50,13 @@ export const schema = new Schema({
       group: "blockContent",
       content: "inline*",
       attrs: { level: { default: 1 } },
-      parseDOM: [1, 2, 3].map((level) => ({ tag: `h${level}`, attrs: { level } })),
+      parseDOM: [
+        ...[1, 2, 3].map((level) => ({ tag: `h${level}`, attrs: { level } })),
+        {
+          tag: "div[data-block-content='heading']",
+          getAttrs: (dom: HTMLElement) => ({ level: Number(dom.dataset.level) || 1 }),
+        },
+      ],
       toDOM: (node) => [
         "div",
         { "data-block-content": "heading", "data-level": String(node.attrs.level) },

@@ -3,6 +3,7 @@ import type { EditorView } from "@milkdown/kit/prose/view";
 import type { Attrs, NodeType } from "@milkdown/kit/prose/model";
 import { emptyParagraphContainer, nodes } from "./schema";
 import { getBlockContext } from "./context";
+import { inlineToPlainText } from "./commands";
 
 type SlashState = { active: false } | { active: true; pos: number; query: string; index: number };
 
@@ -132,7 +133,8 @@ function applyItem(view: EditorView, item: SlashItem): void {
     item.nodeType === nodes.divider
       ? item.nodeType.create()
       : item.nodeType === nodes.codeBlock
-        ? item.nodeType.create(item.attrs, content.content.size > 0 ? content.content : undefined)
+        ? // codeBlock は marks 不可・text* のみなので inline を平文化する
+          item.nodeType.create(item.attrs, inlineToPlainText(content))
         : item.nodeType.create(item.attrs, content.content);
   tr.replaceWith(ctx.contentPos, ctx.contentPos + content.nodeSize, newContent);
   if (item.nodeType === nodes.divider) {

@@ -27,7 +27,8 @@ export function createBlockEditor(mount: HTMLElement, initialDoc: unknown): Edit
     doc: docFromJSON(initialDoc),
     // TODO.md §12.1: menu → block selection → 構造キー → inline → default の順
     plugins: [
-      imeDebugPlugin(),
+      // 全 keystroke の logging + 全文 walk を伴うため dev 限定
+      ...(import.meta.env.DEV ? [imeDebugPlugin()] : []),
       slashMenuPlugin(),
       blockSelectionPlugin(),
       ...editorKeymap(),

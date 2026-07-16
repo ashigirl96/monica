@@ -4,6 +4,7 @@ import type { Plugin, Transaction } from "@milkdown/kit/prose/state";
 import type { Attrs, MarkType, NodeType } from "@milkdown/kit/prose/model";
 import { emptyParagraphContainer, nodes, schema } from "./schema";
 import { getBlockContext } from "./context";
+import { inlineToPlainText } from "./commands";
 
 // 行頭 trigger でブロック型変換（TODO.md §6.1/§6.2）。
 // blockContent の型だけ差し替え、blockContainer の ID・children は維持する。
@@ -60,7 +61,10 @@ function setContentTypeOn(
   const newContent =
     target.type === nodes.divider
       ? target.type.create()
-      : target.type.create(target.attrs, content.content);
+      : target.type === nodes.codeBlock
+        ? // codeBlock は marks 不可・text* のみなので inline を平文化する
+          target.type.create(target.attrs, inlineToPlainText(content))
+        : target.type.create(target.attrs, content.content);
   return tr.replaceWith(contentPos, contentPos + content.nodeSize, newContent);
 }
 

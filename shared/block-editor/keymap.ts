@@ -1,5 +1,5 @@
 import { keymap } from "@milkdown/kit/prose/keymap";
-import { chainCommands, toggleMark } from "@milkdown/kit/prose/commands";
+import { chainCommands, deleteSelection, toggleMark } from "@milkdown/kit/prose/commands";
 import { undoInputRule } from "@milkdown/kit/prose/inputrules";
 import { history, redo, undo } from "@milkdown/kit/prose/history";
 import type { Plugin } from "@milkdown/kit/prose/state";
@@ -33,8 +33,10 @@ export function editorKeymap(): Plugin[] {
       Enter: chainCommands(ignoreCompositionEnter, codeNewline, splitBlock),
       "Shift-Enter": chainCommands(codeNewline, exitCallout, insertHardBreak),
       "Mod-Enter": exitCodeBlock,
-      Backspace: chainCommands(undoInputRule, backspaceBlock),
-      Delete: deleteForwardBlock,
+      // 複数 block をまたぐ text selection は prosemirror-view が native 削除を
+      // 抑止する（stopNativeHorizontalDelete）ため、deleteSelection で明示的に消す
+      Backspace: chainCommands(undoInputRule, deleteSelection, backspaceBlock),
+      Delete: chainCommands(deleteSelection, deleteForwardBlock),
       // macOS 流のカーソル移動
       "Ctrl-a": cursorToLineStart,
       "Ctrl-e": cursorToLineEnd,
