@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { listExplanations } from "@/api";
 import { navigate } from "@/app";
 import { DeleteDialog } from "@/components/delete-dialog";
+import { FuzzyPickerModal } from "@/components/fuzzy-picker-modal";
 import { formatDate, formatRelative } from "@/format";
 import type { Explanation } from "@/types.gen";
 
@@ -9,6 +10,40 @@ interface ContextMenuState {
   x: number;
   y: number;
   item: Explanation;
+}
+
+function RepoFilterBadge({
+  repo,
+  onReopen,
+  onClear,
+}: {
+  repo: string;
+  onReopen: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-1 text-[11px] text-cyan-400">
+      <button type="button" onClick={onReopen} className="transition-colors hover:text-cyan-300">
+        {repo}
+      </button>
+      <button
+        type="button"
+        onClick={onClear}
+        aria-label="Clear directory filter"
+        className="ml-0.5 text-cyan-400/60 transition-colors hover:text-cyan-300"
+      >
+        <svg
+          className="size-3"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2.5}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </span>
+  );
 }
 
 function Entry({
@@ -78,6 +113,8 @@ export function ListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Explanation | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -92,6 +129,12 @@ export function ListPage() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === "w" || e.key === "W")) {
+        e.preventDefault();
+        setPickerOpen((v) => !v);
+        return;
+      }
+      if (pickerOpen) return;
       if (e.key === "/" && document.activeElement !== searchRef.current) {
         e.preventDefault();
         searchRef.current?.focus();
@@ -99,7 +142,7 @@ export function ListPage() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [pickerOpen]);
 
   useEffect(() => {
     if (!menu) return;
@@ -123,16 +166,26 @@ export function ListPage() {
     };
   }, [menu]);
 
+  const repos = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of explanations) {
+      if (e.repo_name) set.add(e.repo_name);
+    }
+    return [...set].sort().map((r) => ({ key: r, label: r }));
+  }, [explanations]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return explanations;
-    return explanations.filter(
-      (e) =>
+    return explanations.filter((e) => {
+      if (selectedRepo !== null && e.repo_name !== selectedRepo) return false;
+      if (!q) return true;
+      return (
         e.title.toLowerCase().includes(q) ||
         e.id.toLowerCase().includes(q) ||
-        (e.repo_name?.toLowerCase().includes(q) ?? false),
-    );
-  }, [explanations, query]);
+        (e.repo_name?.toLowerCase().includes(q) ?? false)
+      );
+    });
+  }, [explanations, query, selectedRepo]);
 
   return (
     <>
@@ -151,6 +204,13 @@ export function ListPage() {
             <h1 className="text-lg font-medium tracking-tight">Monica Library</h1>
           </a>
           <div className="ml-auto flex items-center gap-2">
+            {selectedRepo !== null && (
+              <RepoFilterBadge
+                repo={selectedRepo}
+                onReopen={() => setPickerOpen(true)}
+                onClear={() => setSelectedRepo(null)}
+              />
+            )}
             <svg
               className="size-3.5 shrink-0 text-muted-foreground/60"
               fill="none"
@@ -283,6 +343,16 @@ export function ListPage() {
             Delete&hellip;
           </button>
         </div>
+      )}
+
+      {pickerOpen && (
+        <FuzzyPickerModal
+          items={repos}
+          onSelect={setSelectedRepo}
+          onClose={() => setPickerOpen(false)}
+          placeholder="Filter directory..."
+          footer="↑↓ move · ⏎ select · ^w clear · esc/^c close"
+        />
       )}
 
       {deleteTarget && (
