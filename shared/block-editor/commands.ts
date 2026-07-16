@@ -155,8 +155,8 @@ function splitRightContent(content: PMNode, offset: number): PMNode {
   const t = content.type;
   if (t === nodes.heading) return atEnd ? nodes.paragraph.create() : t.create(content.attrs, right);
   if (t === nodes.todo) return t.create({ checked: false }, right);
-  if (t === nodes.quote || t === nodes.callout)
-    return atEnd ? nodes.paragraph.create() : t.create(null, right);
+  // callout は splitBlock 側の専用分岐（内部に子を作る）で処理され、ここには来ない
+  if (t === nodes.quote) return atEnd ? nodes.paragraph.create() : t.create(null, right);
   // toggle 末尾 Enter は「同型の新 toggle」に固定（TODO.md §4.1 の product 設定）
   if (t === nodes.toggle) return t.create({ open: true }, right);
   return t.create(content.attrs, right);

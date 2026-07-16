@@ -132,8 +132,18 @@ export const schema = new Schema({
     callout: {
       group: "blockContent",
       content: "inline*",
-      parseDOM: [{ tag: "div[data-block-content='callout']" }],
-      toDOM: () => ["div", { "data-block-content": "callout" }, 0],
+      attrs: { kind: { default: "note" } },
+      parseDOM: [
+        {
+          tag: "div[data-block-content='callout']",
+          getAttrs: (dom: HTMLElement) => ({ kind: dom.dataset.kind ?? "note" }),
+        },
+      ],
+      toDOM: (node) => [
+        "div",
+        { "data-block-content": "callout", "data-kind": node.attrs.kind as string },
+        0,
+      ],
     },
 
     codeBlock: {

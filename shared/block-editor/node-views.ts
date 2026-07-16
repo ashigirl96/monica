@@ -95,7 +95,10 @@ class ContainerView implements NodeView {
     const content = node.child(0);
     const collapsed = content.type === nodes.toggle && content.attrs.open === false;
     this.dom.classList.toggle("jb-collapsed", collapsed);
-    this.dom.classList.toggle("jb-callout", content.type === nodes.callout);
+    const isCallout = content.type === nodes.callout;
+    this.dom.classList.toggle("jb-callout", isCallout);
+    if (isCallout) this.dom.setAttribute("data-callout-kind", content.attrs.kind as string);
+    else this.dom.removeAttribute("data-callout-kind");
   }
 
   update(node: PMNode): boolean {

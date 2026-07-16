@@ -14,6 +14,7 @@ const slashKey = new PluginKey<SlashState>("journalSlashMenu");
 type SlashItem = {
   id: string;
   label: string;
+  /* .jb-glyph の data-kind（CSS の mask アイコンに対応） */
   icon: string;
   aliases: string[];
   nodeType: NodeType;
@@ -22,92 +23,44 @@ type SlashItem = {
 
 const ITEMS: SlashItem[] = [
   {
-    id: "text",
-    label: "Text",
-    icon: "T",
-    aliases: ["paragraph", "plain"],
-    nodeType: nodes.paragraph,
-    attrs: null,
-  },
-  {
-    id: "h2",
-    label: "Heading",
-    icon: "H",
-    aliases: ["h1", "h2", "heading", "##"],
-    nodeType: nodes.heading,
-    attrs: { level: 2 },
-  },
-  {
-    id: "h3",
-    label: "Subheading",
-    icon: "h",
-    aliases: ["h3", "sub", "###"],
-    nodeType: nodes.heading,
-    attrs: { level: 3 },
-  },
-  {
-    id: "todo",
-    label: "To-do list",
-    icon: "☑",
-    aliases: ["todo", "task", "checkbox"],
-    nodeType: nodes.todo,
-    attrs: { checked: false },
-  },
-  {
-    id: "bullet",
-    label: "Bulleted list",
-    icon: "•",
-    aliases: ["bullet", "ul", "unordered"],
-    nodeType: nodes.bullet,
-    attrs: null,
-  },
-  {
-    id: "numbered",
-    label: "Numbered list",
-    icon: "1.",
-    aliases: ["numbered", "ol", "ordered"],
-    nodeType: nodes.numbered,
-    attrs: { style: "decimal" },
-  },
-  {
-    id: "toggle",
-    label: "Toggle list",
-    icon: "▸",
-    aliases: ["toggle", "collapse"],
-    nodeType: nodes.toggle,
-    attrs: { open: true },
-  },
-  {
-    id: "quote",
-    label: "Quote",
-    icon: "❝",
-    aliases: ["quote", "blockquote"],
-    nodeType: nodes.quote,
-    attrs: null,
-  },
-  {
-    id: "callout",
-    label: "Callout",
-    icon: "💡",
-    aliases: ["callout", "note", "info", "tip"],
+    id: "callout-note",
+    label: "Note",
+    icon: "note",
+    aliases: ["note", "callout", "info"],
     nodeType: nodes.callout,
-    attrs: null,
+    attrs: { kind: "note" },
   },
   {
-    id: "code",
-    label: "Code",
-    icon: "{}",
-    aliases: ["code", "codeblock", "snippet"],
-    nodeType: nodes.codeBlock,
-    attrs: null,
+    id: "callout-tips",
+    label: "Tips",
+    icon: "tips",
+    aliases: ["tips", "tip", "hint"],
+    nodeType: nodes.callout,
+    attrs: { kind: "tips" },
   },
   {
-    id: "divider",
-    label: "Divider",
-    icon: "—",
-    aliases: ["divider", "hr", "separator"],
-    nodeType: nodes.divider,
-    attrs: null,
+    id: "callout-danger",
+    label: "Danger",
+    icon: "danger",
+    aliases: ["danger", "warning", "caution"],
+    nodeType: nodes.callout,
+    attrs: { kind: "danger" },
+  },
+  {
+    id: "callout-question",
+    label: "Question",
+    icon: "question",
+    aliases: ["question", "faq", "help"],
+    nodeType: nodes.callout,
+    attrs: { kind: "question" },
+  },
+  {
+    id: "callout-example",
+    label: "Example",
+    icon: "example",
+    aliases: ["example", "sample"],
+    nodeType: nodes.callout,
+    attrs: { kind: "example" },
   },
 ];
 
@@ -183,7 +136,7 @@ class SlashMenuView {
     } else {
       const heading = document.createElement("div");
       heading.className = "jb-slash-heading";
-      heading.textContent = "Basic blocks";
+      heading.textContent = "Callout";
       this.menu.append(heading);
     }
     items.forEach((item, i) => {
@@ -195,7 +148,10 @@ class SlashMenuView {
       if (i === state.index) button.classList.add("jb-slash-item-active");
       const icon = document.createElement("span");
       icon.className = "jb-slash-icon";
-      icon.textContent = item.icon;
+      const glyph = document.createElement("span");
+      glyph.className = "jb-glyph";
+      glyph.dataset.kind = item.icon;
+      icon.append(glyph);
       const label = document.createElement("span");
       label.className = "jb-slash-label";
       label.textContent = item.label;
@@ -261,15 +217,37 @@ export function slashMenuPlugin(): Plugin<SlashState> {
       // §12.1: menu が開いている間は menu 側がキーを処理する
       handleKeyDown(view, event) {
         const state = slashKey.getState(view.state);
-        if (!state?.active) return false;
+        if (!state?.active) {
+          // Cmd-J でメニューを開く（"/" を挿入して通常のトリガー経路に乗せる）
+          if (
+            event.key === "j" &&
+            (event.metaKey || event.ctrlKey) &&
+            !event.shiftKey &&
+            !event.altKey
+          ) {
+            const sel = view.state.selection;
+            if (!sel.empty) return false;
+            const ctx = getBlockContext(sel.$from);
+            if (!ctx) return false;
+            const type = ctx.contentNode.type;
+            if (type === nodes.codeBlock || type === nodes.divider) return false;
+            const tr = view.state.tr.insertText("/", sel.from);
+            tr.setMeta(slashKey, { type: "open", pos: sel.from } satisfies SlashMeta);
+            view.dispatch(tr);
+            return true;
+          }
+          return false;
+        }
         const items = filterItems(state.query);
         if (event.key === "Escape") {
           view.dispatch(view.state.tr.setMeta(slashKey, { type: "close" } satisfies SlashMeta));
           return true;
         }
-        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        const down = event.key === "ArrowDown" || (event.ctrlKey && event.key === "n");
+        const up = event.key === "ArrowUp" || (event.ctrlKey && event.key === "p");
+        if (down || up) {
           if (items.length === 0) return true;
-          const delta = event.key === "ArrowDown" ? 1 : -1;
+          const delta = down ? 1 : -1;
           const index = (state.index + delta + items.length) % items.length;
           view.dispatch(
             view.state.tr.setMeta(slashKey, { type: "nav", index } satisfies SlashMeta),
