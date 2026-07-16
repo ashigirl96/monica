@@ -1,0 +1,492 @@
+/* Journal block editor — しずかなインターネット風の「紙とインク」トーン。
+   --jb-ink は foreground を暖色へ寄せた基準色で、text/muted/faint/border は
+   そこからの透明度導出（light/dark 両対応）。accent は静かなくすみ青、
+   inline code は落ち着いたテラコッタ。 */
+
+.jb-root {
+  --jb-ink: color-mix(in srgb, var(--foreground) 88%, #9c7b4f);
+  --jb-text: color-mix(in srgb, var(--jb-ink) 94%, transparent);
+  --jb-muted: color-mix(in srgb, var(--jb-ink) 48%, transparent);
+  --jb-faint: color-mix(in srgb, var(--jb-ink) 30%, transparent);
+  --jb-hover: color-mix(in srgb, var(--jb-ink) 6%, transparent);
+  --jb-border: color-mix(in srgb, var(--jb-ink) 14%, transparent);
+  --jb-code-bg: color-mix(in srgb, var(--jb-ink) 5%, transparent);
+  --jb-callout-bg: color-mix(in srgb, var(--jb-ink) 7%, transparent);
+  --jb-paper: color-mix(in srgb, var(--background) 97%, #c9a35f);
+  --jb-h3: color-mix(in srgb, var(--foreground) 42%, #a87848);
+  --jb-blue: #5e81ac;
+  --jb-code-red: #bd6a52;
+  /* 幅・高さは親に従う。余白やスクロールは使う側が決める */
+  background: var(--jb-paper);
+  cursor: text;
+  font-family:
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Helvetica,
+    "Apple Color Emoji",
+    Arial,
+    sans-serif;
+}
+
+/* ---- editor base ---- */
+
+.jb-editor {
+  outline: none;
+  font-size: 16px;
+  /* 16px × 1.75 = 28px。marker 類の縦位置はこの行高を前提にしている */
+  line-height: 1.75;
+  color: var(--jb-text);
+  caret-color: var(--jb-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.jb-editor ::selection {
+  background: color-mix(in srgb, var(--jb-blue) 30%, transparent);
+}
+
+/* ---- block tree layout ---- */
+
+[data-block-container] {
+  position: relative;
+  padding: 1px 0;
+}
+
+[data-block-content] {
+  padding: 3px 2px;
+  border-radius: 4px;
+}
+
+.jb-container-body > [data-block-group] {
+  padding-left: 24px;
+}
+
+/* ---- gutter (plus / drag handle) ---- */
+
+.jb-gutter {
+  position: absolute;
+  left: -48px;
+  top: 4px;
+  display: flex;
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+}
+
+/* :hover は祖先にも立つため、子孫 container がホバー中の間は自分の gutter を出さない */
+.jb-container:hover:not(:has(.jb-container:hover)) > .jb-gutter {
+  opacity: 1;
+}
+
+.jb-gutter-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  color: var(--jb-faint);
+  font-size: 16px;
+  line-height: 1;
+  user-select: none;
+  transition: background 60ms ease-out;
+}
+
+.jb-gutter-btn:hover {
+  background: var(--jb-hover);
+  color: var(--jb-muted);
+}
+
+.jb-drag-handle {
+  cursor: grab;
+  width: 18px;
+  font-size: 10px;
+  letter-spacing: -1px;
+}
+
+/* ---- block selection ---- */
+
+.jb-block-selected {
+  background: color-mix(in srgb, var(--jb-blue) 16%, transparent);
+  border-radius: 4px;
+}
+
+/* ---- placeholder ---- */
+
+.jb-placeholder {
+  position: relative;
+}
+
+.jb-placeholder::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  left: 2px;
+  top: 3px;
+  color: var(--jb-faint);
+  pointer-events: none;
+}
+
+/* ---- block content ---- */
+
+[data-block-content="heading"] {
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+/* H1 は廃止（既存 doc の level=1 は大見出しとして描画） */
+[data-block-content="heading"][data-level="1"],
+[data-block-content="heading"][data-level="2"] {
+  font-size: 1.5em;
+  margin-top: 28px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--jb-border);
+}
+
+[data-block-content="heading"][data-level="3"] {
+  font-size: 1.25em;
+  margin-top: 18px;
+  color: var(--jb-h3);
+}
+
+[data-block-container]:first-child > .jb-container-body > [data-block-content="heading"] {
+  margin-top: 0;
+}
+
+/* flex にすると WebKit が空 block の caret をコンテナ左端に描くため、
+   list 系はすべて padding + absolute マーカーで組む */
+.jb-todo {
+  position: relative;
+  padding-left: 28px;
+}
+
+.jb-todo-checkbox {
+  position: absolute;
+  left: 4px;
+  top: 9px;
+  width: 16px;
+  height: 16px;
+  border: 1.3px solid var(--jb-muted);
+  border-radius: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background 100ms ease-out,
+    border-color 100ms ease-out;
+}
+
+.jb-todo[data-checked="true"] .jb-todo-checkbox {
+  background: var(--jb-blue);
+  border-color: var(--jb-blue);
+  color: white;
+}
+
+.jb-todo[data-checked="true"] .jb-todo-text {
+  color: var(--jb-muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--jb-faint);
+}
+
+[data-block-content="bullet"],
+[data-block-content="numbered"] {
+  position: relative;
+  padding-left: 26px;
+}
+
+/* インラインに置くと空 block の caret がマーカーの左に描かれる（WebKit）。
+   マーカーはフロー外の absolute にし、テキスト領域は padding だけで始める */
+[data-block-content="bullet"]::before,
+[data-block-content="numbered"]::before {
+  position: absolute;
+  left: 2px;
+  top: 3px;
+  width: 24px;
+  padding-right: 6px;
+  text-align: center;
+  line-height: 28px;
+}
+
+[data-block-content="bullet"]::before {
+  content: "•";
+  font-size: 1.1em;
+}
+
+[data-block-content="numbered"]::before {
+  content: attr(data-marker);
+  font-variant-numeric: tabular-nums;
+}
+
+.jb-toggle {
+  position: relative;
+  padding-left: 28px;
+}
+
+.jb-toggle-btn {
+  position: absolute;
+  left: 2px;
+  top: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.75em;
+  color: var(--jb-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    transform 200ms ease-out,
+    background 60ms ease-out;
+}
+
+.jb-toggle[data-open="true"] .jb-toggle-btn {
+  transform: rotate(90deg);
+}
+
+.jb-toggle-btn:hover {
+  background: var(--jb-hover);
+}
+
+.jb-collapsed > .jb-container-body > [data-block-group] {
+  display: none;
+}
+
+[data-block-content="quote"] {
+  border-left: 3px solid currentcolor;
+  border-radius: 0;
+  padding-left: 14px;
+  margin: 2px 0;
+}
+
+/* ---- callout（container 全体を包むパネル。子ブロックを内包する） ---- */
+
+.jb-callout > .jb-container-body {
+  position: relative;
+  background: var(--jb-callout-bg);
+  border-radius: 10px;
+  margin: 4px 0;
+  padding: 14px 16px 14px 46px;
+}
+
+.jb-callout > .jb-container-body::before {
+  content: "💡";
+  position: absolute;
+  left: 16px;
+  top: 15px;
+  font-size: 1.05em;
+  line-height: 28px;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* callout の子はアイコン幅ぶんの追加インデントを付けず 1 行目と揃える */
+.jb-callout > .jb-container-body > [data-block-group] {
+  padding-left: 0;
+}
+
+/* ---- code block ---- */
+
+.jb-code {
+  position: relative;
+  background: var(--jb-code-bg);
+  border: 1px solid var(--jb-border);
+  border-radius: 6px;
+  margin: 4px 0;
+  padding: 0;
+}
+
+.jb-code-toolbar {
+  position: absolute;
+  inset: 6px 8px auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+  pointer-events: none;
+}
+
+.jb-code:hover .jb-code-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.jb-code-language {
+  background: transparent;
+  border: none;
+  color: var(--jb-muted);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.jb-code-language:hover {
+  background: var(--jb-hover);
+}
+
+.jb-code-btn {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--jb-muted);
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.jb-code-btn + .jb-code-btn {
+  margin-left: 0;
+}
+
+.jb-code-btn:hover {
+  background: var(--jb-hover);
+}
+
+.jb-code-btn-active {
+  color: var(--jb-text);
+}
+
+.jb-code-pre {
+  margin: 0;
+  padding: 34px 16px 16px;
+  overflow-x: auto;
+  font-family: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85em;
+  line-height: 1.6;
+  white-space: pre;
+  border-radius: 6px;
+}
+
+.jb-code-wrap .jb-code-pre {
+  white-space: pre-wrap;
+  overflow-x: visible;
+}
+
+/* ---- divider ---- */
+
+.jb-divider {
+  padding: 12px 2px;
+  cursor: default;
+}
+
+.jb-divider hr {
+  border: none;
+  border-top: 1px solid var(--jb-border);
+}
+
+/* ---- inline marks ---- */
+
+.jb-editor code {
+  background: color-mix(in srgb, var(--jb-ink) 10%, transparent);
+  border-radius: 3px;
+  padding: 0.1em 0.4em;
+  font-family: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85em;
+  color: var(--jb-code-red);
+}
+
+.jb-code-pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+.jb-editor a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--jb-faint);
+  text-underline-offset: 2px;
+}
+
+.jb-editor a:hover {
+  text-decoration-color: var(--jb-muted);
+}
+
+/* ---- overlays ---- */
+
+.jb-drop-guide {
+  position: absolute;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--jb-blue);
+  opacity: 0.85;
+  pointer-events: none;
+  z-index: 40;
+}
+
+.jb-slash-menu {
+  position: absolute;
+  z-index: 50;
+  min-width: 240px;
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--jb-border);
+  border-radius: 10px;
+  box-shadow:
+    0 12px 32px rgb(0 0 0 / 0.24),
+    0 2px 8px rgb(0 0 0 / 0.16);
+  padding: 6px;
+}
+
+.jb-slash-heading {
+  padding: 4px 8px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--jb-faint);
+  user-select: none;
+}
+
+.jb-slash-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--jb-text);
+  cursor: pointer;
+}
+
+.jb-slash-item:hover,
+.jb-slash-item-active {
+  background: var(--jb-hover);
+}
+
+.jb-slash-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--jb-border);
+  border-radius: 4px;
+  background: var(--jb-code-bg);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--jb-muted);
+}
+
+.jb-slash-empty {
+  padding: 6px 8px;
+  font-size: 13px;
+  color: var(--jb-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jb-root * {
+    transition: none !important;
+  }
+}

@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 
-export type SpaceId = "work-board" | "work-bench";
+export type SpaceId = "work-board" | "work-bench" | "journal";
 
 export const SIDEBAR_DEFAULT_WIDTH = 200;
 export const SIDEBAR_MIN_WIDTH = 160;
