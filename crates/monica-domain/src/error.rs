@@ -12,6 +12,7 @@ pub enum DomainError {
     InvalidIssueNumber(String),
     MissingIssueRef(String),
     InvalidExplanationId(String),
+    InvalidNoteId(String),
 }
 
 impl fmt::Display for DomainError {
@@ -39,6 +40,9 @@ impl fmt::Display for DomainError {
             }
             DomainError::InvalidExplanationId(id) => {
                 write!(f, "invalid explanation id (expected expl-<n>): {id:?}")
+            }
+            DomainError::InvalidNoteId(id) => {
+                write!(f, "invalid note id (expected note-<n>): {id:?}")
             }
         }
     }

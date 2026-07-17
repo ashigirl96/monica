@@ -66,7 +66,7 @@ pub async fn list_projects(app: AppHandle) -> Result<Vec<ProjectOption>, ApiErro
             .projects()
             .list_projects()?
             .into_iter()
-            .map(|p| ProjectOption { id: p.id })
+            .map(Into::into)
             .collect())
     })
     .await

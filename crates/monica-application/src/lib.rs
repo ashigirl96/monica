@@ -26,13 +26,14 @@ pub use events::{ApplicationEvent, EventSink};
 pub use execution_profile::{ExecutionProfile, PermissionMode};
 pub use input::parse_issue_input;
 pub use facade::{
-    Backend, ExecutionService, ExplanationService, Monica, ProjectInit, ProjectService,
+    Backend, ExecutionService, ExplanationService, Monica, NoteService, ProjectInit, ProjectService,
     SynchronizationService, TaskService,
 };
 
 pub use ports::{
     AgentDecoders, AgentEventDecoder, EventRepository, ExplanationOutputs, ExplanationStore,
-    GitGateway, NotificationOutboxStore, ProjectRepository, PullRequestSyncStore, ShellScaffolding,
+    GitGateway, NoteStore, NotificationOutboxStore, ProjectRepository, PullRequestSyncStore,
+    ShellScaffolding,
     TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter, TerminalAttachment,
     TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository, UnitOfWork, WorkbenchStore,
     WorkTransaction, Workspace, WorktreeRef,

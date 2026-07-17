@@ -6,7 +6,7 @@ description = "Monica HTTP server for external browser access"
 
 [dependencies]
 anyhow = "1"
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 log = "0.4"
 monica-api = { path = "../monica-api" }
 monica-application = { path = "../monica-application" }
@@ -14,6 +14,7 @@ monica-domain = { path = "../monica-domain" }
 monica-paths = { path = "../monica-paths" }
 monica-runtime = { path = "../monica-runtime" }
 rust-embed = { version = "8", default-features = false }
+serde = { version = "1.0.228", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
 tokio = { version = "1", default-features = false, features = ["net", "rt"] }
 

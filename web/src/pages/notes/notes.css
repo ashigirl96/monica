@@ -1,0 +1,42 @@
+/* Notes 画面 — 「机の上の一枚の紙」。エディタは block editor の紙（--paper）、
+   周囲のサイドバーは寒色ニュートラルの机。インクの基準色は block-editor.css の
+   --jb-ink（foreground を暖色 #9c7b4f へ寄せた色）をそのまま使い、世界観を揃える。 */
+/* block-editor.css の素の導出（text 94% / muted 48% / faint 30%）は紙に沈むので、
+   dark でも一段濃く（=明るく）底上げする。light はさらに下で上書き */
+.notes-screen {
+  --ink: color-mix(in srgb, var(--foreground) 88%, #9c7b4f);
+  --ink-text: var(--ink);
+  --ink-muted: color-mix(in srgb, var(--ink) 62%, transparent);
+  --ink-faint: color-mix(in srgb, var(--ink) 44%, transparent);
+  --ink-hover: color-mix(in srgb, var(--ink) 6%, transparent);
+  --ink-border: color-mix(in srgb, var(--ink) 18%, transparent);
+  --paper: color-mix(in srgb, var(--background) 97%, #c9a35f);
+  --kind-journaling: #5e81ac;
+  --kind-essay: #bd6a52;
+}
+
+.notes-screen .jb-root {
+  --jb-ink: var(--ink);
+  --jb-text: var(--jb-ink);
+  --jb-muted: color-mix(in srgb, var(--jb-ink) 62%, transparent);
+  --jb-faint: color-mix(in srgb, var(--jb-ink) 44%, transparent);
+  --jb-border: color-mix(in srgb, var(--jb-ink) 18%, transparent);
+}
+
+/* light では透明度導出のインクが紙に沈んで淡すぎるため、階調全体を濃くする（dark は従来値） */
+:root[data-theme="light"] .notes-screen {
+  --ink-muted: color-mix(in srgb, var(--ink) 78%, transparent);
+  --ink-faint: color-mix(in srgb, var(--ink) 58%, transparent);
+  --ink-border: color-mix(in srgb, var(--ink) 24%, transparent);
+  --kind-journaling: #49678f;
+  --kind-essay: #a4543f;
+}
+
+/* エディタ本文（--jb-* は block-editor.css が .jb-root に定義）も light だけ濃く上書き */
+:root[data-theme="light"] .notes-screen .jb-root {
+  --jb-text: var(--jb-ink);
+  --jb-muted: color-mix(in srgb, var(--jb-ink) 78%, transparent);
+  --jb-faint: color-mix(in srgb, var(--jb-ink) 58%, transparent);
+  --jb-border: color-mix(in srgb, var(--jb-ink) 24%, transparent);
+  --jb-h3: color-mix(in srgb, var(--foreground) 68%, #a87848);
+}

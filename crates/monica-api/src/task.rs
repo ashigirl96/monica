@@ -14,6 +14,12 @@ pub struct ProjectOption {
     pub id: String,
 }
 
+impl From<monica_domain::Project> for ProjectOption {
+    fn from(value: monica_domain::Project) -> Self {
+        Self { id: value.id }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct TaskSummaryRow {
     pub id: String,

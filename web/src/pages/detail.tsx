@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { getExplanation } from "@/api";
-import { navigate } from "@/app";
+import { deleteExplanation, getExplanation } from "@/api";
+import { navigate, spaLinkClick } from "@/app";
 import { DeleteDialog } from "@/components/delete-dialog";
 import { formatDate, formatRelative } from "@/format";
 import type { Explanation } from "@/types.gen";
@@ -53,11 +53,7 @@ export function DetailPage({ id }: { id: string }) {
         <div className="mx-auto flex h-12 w-full max-w-[860px] items-center gap-3">
           <a
             href="/explanations"
-            onClick={(e) => {
-              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-              e.preventDefault();
-              navigate("/explanations");
-            }}
+            onClick={spaLinkClick("/explanations")}
             className="flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
             <img src="/favicon.png" alt="" className="size-5" />
@@ -116,7 +112,7 @@ export function DetailPage({ id }: { id: string }) {
       {showDelete && (
         <DeleteDialog
           title={explanation.title}
-          id={id}
+          onDelete={() => deleteExplanation(id)}
           onClose={() => setShowDelete(false)}
           onDeleted={() => navigate("/explanations")}
         />

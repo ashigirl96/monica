@@ -8,6 +8,7 @@ mod bench;
 mod error;
 mod explanation;
 mod github;
+mod note;
 mod settings;
 mod status;
 mod task;
@@ -18,6 +19,10 @@ pub use bench::{PrepareTaskResult, RunTaskResult, TaskBench};
 pub use error::{ApiError, ApiErrorCode};
 pub use explanation::{Explanation as ApiExplanation, ExplanationMode as ApiExplanationMode};
 pub use github::GithubPullRequestRef;
+pub use note::{
+    DailyNoteCount as ApiDailyNoteCount, Note as ApiNote, NoteKind as ApiNoteKind,
+    NotePage as ApiNotePage, NoteSummary as ApiNoteSummary, UpdateNote as ApiUpdateNote,
+};
 pub use settings::{
     TranslateEffort, TranslateModel, TranslateSettings, TranslateSettingsSnapshot,
 };

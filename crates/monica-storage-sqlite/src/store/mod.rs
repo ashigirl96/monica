@@ -2,6 +2,7 @@ mod bench;
 mod events;
 mod explanations;
 mod external_refs;
+mod notes;
 pub(crate) mod notification_outbox;
 mod projects;
 mod pull_request_sync;
@@ -30,6 +31,9 @@ pub(super) const EXPLANATION_FROM: &str =
     "explanations e LEFT JOIN terminal_sessions ts ON e.terminal_session_id = ts.id";
 
 pub(super) const SET_NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
+
+pub(super) const NOTE_COLUMNS: &str =
+    "id, title, kind, project_id, content, date, created_at, updated_at";
 
 /// Render enum tokens as a quoted SQL IN-list. Callers pass compile-time `as_str` constants,
 /// so no escaping is needed.

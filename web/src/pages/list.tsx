@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listExplanations } from "@/api";
-import { navigate } from "@/app";
+import { deleteExplanation, listExplanations } from "@/api";
+import { navigate, spaLinkClick } from "@/app";
 import { DeleteDialog } from "@/components/delete-dialog";
 import { FuzzyPickerModal } from "@/components/fuzzy-picker-modal";
 import { formatDate, formatRelative } from "@/format";
@@ -46,15 +46,7 @@ function RepoFilterBadge({
   );
 }
 
-function Entry({
-  item,
-  onOpen,
-  onMenu,
-}: {
-  item: Explanation;
-  onOpen: () => void;
-  onMenu: (e: React.MouseEvent) => void;
-}) {
+function Entry({ item, onMenu }: { item: Explanation; onMenu: (e: React.MouseEvent) => void }) {
   const modeColor = item.mode === "diff" ? "text-accent-diff" : "text-accent-topic";
   const titleHover =
     item.mode === "diff" ? "group-hover:text-accent-diff" : "group-hover:text-accent-topic";
@@ -63,11 +55,7 @@ function Entry({
     <li>
       <a
         href={`/explanations/${item.id}`}
-        onClick={(e) => {
-          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-          e.preventDefault();
-          onOpen();
-        }}
+        onClick={spaLinkClick(`/explanations/${item.id}`)}
         onContextMenu={onMenu}
         className="group flex items-start gap-6 rounded-lg border bg-card px-5 py-5 transition-colors hover:border-border/80 hover:shadow-sm"
       >
@@ -191,15 +179,7 @@ export function ListPage() {
     <>
       <header className="sticky top-0 z-10 border-b bg-background/85 backdrop-blur-sm">
         <div className="mx-auto flex h-14 w-full max-w-[860px] items-center gap-3 px-6">
-          <a
-            href="/"
-            onClick={(e) => {
-              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-              e.preventDefault();
-              navigate("/");
-            }}
-            className="flex items-center gap-2"
-          >
+          <a href="/" onClick={spaLinkClick("/")} className="flex items-center gap-2">
             <img src="/favicon.png" alt="" className="size-6" />
             <h1 className="text-lg font-medium tracking-tight">Monica Library</h1>
           </a>
@@ -291,7 +271,6 @@ export function ListPage() {
               <Entry
                 key={e.id}
                 item={e}
-                onOpen={() => navigate(`/explanations/${e.id}`)}
                 onMenu={(ev) => {
                   ev.preventDefault();
                   setMenu({ x: ev.clientX, y: ev.clientY, item: e });
@@ -358,7 +337,7 @@ export function ListPage() {
       {deleteTarget && (
         <DeleteDialog
           title={deleteTarget.title}
-          id={deleteTarget.id}
+          onDelete={() => deleteExplanation(deleteTarget.id)}
           onClose={() => setDeleteTarget(null)}
           onDeleted={() => {
             setExplanations((prev) => prev.filter((x) => x.id !== deleteTarget.id));
