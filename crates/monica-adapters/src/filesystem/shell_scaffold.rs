@@ -127,7 +127,8 @@ pub(super) fn write_codex_hooks_config(cwd: &Path, hook_command: &str) -> Result
 }
 
 /// Earlier versions merged Monica's hook groups into the worktree's `settings.local.json`. Hooks
-/// now arrive inline via `--settings`, so a leftover block would make every event fire twice.
+/// now arrive via the wrapper's `--settings`, so a leftover block would make every event fire
+/// twice.
 pub(super) fn strip_legacy_claude_hooks(cwd: &Path) -> Result<()> {
     if cwd_is_home(cwd) {
         return Ok(());
@@ -262,13 +263,15 @@ find_real_claude() {
 REAL_CLAUDE="$(find_real_claude)" || { echo "Error: claude not found in PATH" >&2; exit 127; }
 case "${1:-}" in mcp|config|api-key) exec "$REAL_CLAUDE" "$@" ;; esac
 EXTRA_ARGS=()
-# The hooks config is baked in at generation time; claude merges --settings additively on top of
-# the user's own settings, so nothing is written into the repo. Only Monica-spawned shells carry
-# MONICA_TERMINAL_SESSION_ID — anywhere else this wrapper stays transparent.
+# The hooks config lives in a file next to this wrapper and is passed by path — inline JSON would
+# bloat the argv of every claude process (and its forks) in `ps`. claude merges --settings
+# additively on top of the user's own settings, so nothing is written into the repo. Only
+# Monica-spawned shells carry MONICA_TERMINAL_SESSION_ID — anywhere else this wrapper stays
+# transparent.
 if [[ -n "${MONICA_TERMINAL_SESSION_ID:-}" ]]; then
     # Monica tabs are independent sessions even when the app was launched from Claude Code.
     unset CLAUDECODE
-    EXTRA_ARGS+=(--settings __MONICA_HOOKS_JSON__)
+    EXTRA_ARGS+=(--settings __MONICA_SETTINGS_PATH__)
 fi
 if [[ -n "${MONICA_TASK_ID:-}" ]]; then
     unset CLAUDECODE
@@ -287,8 +290,8 @@ fi
 exec "$REAL_CLAUDE" "${EXTRA_ARGS[@]}" "$@"
 "#;
 
-fn claude_wrapper_script(hooks_json: &str) -> String {
-    CLAUDE_WRAPPER_TEMPLATE.replace("__MONICA_HOOKS_JSON__", &quote_single(hooks_json))
+fn claude_wrapper_script(settings_path: &str) -> String {
+    CLAUDE_WRAPPER_TEMPLATE.replace("__MONICA_SETTINGS_PATH__", &quote_single(settings_path))
 }
 
 fn write_agent_wrapper(bin_dir: &Path, name: &str, contents: &str) -> Result<()> {
@@ -324,13 +327,26 @@ exec "$REAL_CODEX" --dangerously-bypass-approvals-and-sandbox --dangerously-bypa
 fn agent_wrapper_script(agent: Agent) -> Result<String> {
     match agent {
         Agent::Claude => {
-            let hooks = agent_hooks_value(Agent::Claude, &pinned_hook_cmd(Agent::Claude)?);
-            let hooks_json =
-                serde_json::to_string(&hooks).context("failed to serialize hooks config")?;
-            Ok(claude_wrapper_script(&hooks_json))
+            let settings_path = write_claude_hooks_settings()?;
+            Ok(claude_wrapper_script(&settings_path.to_string_lossy()))
         }
         Agent::Codex => Ok(CODEX_WRAPPER.to_string()),
     }
+}
+
+fn write_claude_hooks_settings() -> Result<PathBuf> {
+    let dir = paths::agent_shell_dir(Agent::Claude.as_str())?;
+    write_claude_hooks_settings_in(&dir, &pinned_hook_cmd(Agent::Claude)?)
+}
+
+fn write_claude_hooks_settings_in(dir: &Path, hook_command: &str) -> Result<PathBuf> {
+    let hooks = agent_hooks_value(Agent::Claude, hook_command);
+    let body =
+        serde_json::to_string_pretty(&hooks).context("failed to serialize hooks config")?;
+    fs::create_dir_all(dir).with_context(|| format!("failed to create {}", dir.display()))?;
+    let path = dir.join("settings.json");
+    write_if_changed(&path, &body)?;
+    Ok(path)
 }
 
 // zsh resolves each startup file against ZDOTDIR at the moment it reads it, so
@@ -552,13 +568,30 @@ mod tests {
     }
 
     #[test]
-    fn wrapper_bakes_in_hooks_and_gates_task_flags_on_task_id() {
-        let script = claude_wrapper_script(r#"{"hooks":{"Stop":[]},"cmd":"it's quoted"}"#);
-        assert!(
-            script.contains(r#"--settings '{"hooks":{"Stop":[]},"cmd":"it'\''s quoted"}'"#),
-            "hooks JSON must be baked in as a safely quoted literal"
+    fn write_claude_hooks_settings_in_writes_hooks_json_at_settings_json() {
+        let dir = unique_temp_dir("claude-settings");
+        let path = write_claude_hooks_settings_in(&dir, "monica hook claude").unwrap();
+        assert_eq!(path, dir.join("settings.json"));
+        let parsed: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            parsed
+                .pointer("/hooks/SessionStart/0/hooks/0/command")
+                .and_then(Value::as_str),
+            Some("monica hook claude")
         );
-        assert!(!script.contains("__MONICA_HOOKS_JSON__"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn wrapper_bakes_in_settings_path_and_gates_task_flags_on_task_id() {
+        let script = claude_wrapper_script("/Users/it's home/monica/shell/claude/settings.json");
+        assert!(
+            script.contains(
+                r#"--settings '/Users/it'\''s home/monica/shell/claude/settings.json'"#
+            ),
+            "settings path must be baked in as a safely quoted literal"
+        );
+        assert!(!script.contains("__MONICA_SETTINGS_PATH__"));
         assert!(script.contains(r#"-n "${MONICA_TERMINAL_SESSION_ID:-}""#));
         assert!(script.contains(r#"-n "${MONICA_TASK_ID:-}""#));
         assert!(script.contains("--dangerously-skip-permissions"));
