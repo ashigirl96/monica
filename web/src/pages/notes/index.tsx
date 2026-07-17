@@ -279,6 +279,8 @@ export function NotesPage({ id }: { id: string | null }) {
 
   const deleteById = useCallback(
     async (noteId: string) => {
+      // pending の編集を先に確定させる: 破棄してしまうと restore が編集前の行に巻き戻る
+      await flush();
       discard(noteId);
       try {
         await deleteNote(noteId);
@@ -291,7 +293,7 @@ export function NotesPage({ id }: { id: string | null }) {
       setDataVersion((v) => v + 1);
       if (id === noteId) navigate("/notes", { replace: true });
     },
-    [discard, id],
+    [flush, discard, id],
   );
 
   const undoDelete = useCallback(async () => {
@@ -500,7 +502,8 @@ export function NotesPage({ id }: { id: string | null }) {
       {picker === "kind" && note && (
         <FuzzyPickerModal
           items={NOTE_KINDS.map((k) => ({ key: k, label: k }))}
-          onSelect={(key) => onDraftChange({ kind: key as NoteKind })}
+          // kind は必須なので ^w clear（onSelect(null)）は無視する
+          onSelect={(key) => key !== null && onDraftChange({ kind: key as NoteKind })}
           onClose={() => setPicker(null)}
           placeholder="Kind..."
         />
