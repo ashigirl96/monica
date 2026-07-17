@@ -1,7 +1,7 @@
 {
   "$schema": "https://unpkg.com/knip@latest/schema.json",
-  "project": ["src/**/*.{ts,tsx}", "extension/src/**/*.ts"],
-  "entry": ["src/**/*.test.{ts,tsx}", "extension/src/**/*.ts"],
+  "project": ["desktop/**/*.{ts,tsx}", "extension/src/**/*.ts"],
+  "entry": ["desktop/**/*.test.{ts,tsx}", "extension/src/**/*.ts"],
   "ignoreExportsUsedInFile": true,
   "ignoreBinaries": ["lefthook", "tsc", "tauri"],
   "ignoreDependencies": [

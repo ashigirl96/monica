@@ -61,7 +61,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
 }
 
 fn bindings_path() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src/commands/bindings.ts")
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../desktop/commands/bindings.ts")
 }
 
 pub fn export_bindings() {

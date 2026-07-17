@@ -81,13 +81,13 @@ knip:
 unused-commands:
     #!/usr/bin/env bash
     set -euo pipefail
-    bindings="src/commands/bindings.ts"
+    bindings="desktop/commands/bindings.ts"
     # Exactly two spaces of indent: deeper-indented lines are fields of inlined
     # return types (e.g. `Option<Struct>` commands), not command names.
     cmds=$(sed -n '/^export const commands/,/^};/p' "$bindings" | grep -oE '^  [a-zA-Z]+:' | sed 's/[: ]//g')
     found=0
     for cmd in $cmds; do
-        if ! grep -rqE "commands\.$cmd\b" src/ --include='*.ts' --include='*.tsx' --exclude="$bindings"; then
+        if ! grep -rqE "commands\.$cmd\b" desktop/ --include='*.ts' --include='*.tsx' --exclude="$bindings"; then
             echo "unused command: $cmd"
             found=1
         fi
@@ -98,7 +98,7 @@ unused-commands:
 # Fails on any verbatim clone of 100+ tokens. Smaller duplication is reviewed by humans;
 # this gate only blocks the copy-paste class that linters cannot see.
 dup:
-    bunx jscpd src web crates --format "typescript,tsx,rust" --ignore "**/bindings.ts,**/types.gen.ts" --min-tokens 100 --threshold 0 --silent
+    bunx jscpd desktop web crates --format "typescript,tsx,rust" --ignore "**/bindings.ts,**/types.gen.ts" --min-tokens 100 --threshold 0 --silent
 
 check: lint fmt-check knip unused-commands dup ptyd-bin bridge-bin
     cargo clippy --workspace --all-targets -- -D warnings
@@ -110,7 +110,7 @@ generate-bindings: ptyd-bin bridge-bin
 # テストが継承して本物の DB・ファイルを触る事故を、crate 側の対応なしで防ぐ。
 test: ptyd-bin bridge-bin build-web
     MONICA_HOME="$(mktemp -d)" cargo test --workspace
-    bun test src/ shared/
+    bun test desktop/ shared/
 
 # Coverage doubles as dead-code detection: a pub fn at 0% that no caller or test reaches
 # is invisible to clippy (rustc has no cross-crate dead_code analysis in a workspace).
