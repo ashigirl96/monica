@@ -26,7 +26,7 @@
 ## `#[tauri::command]` を増やす/減らすとき
 
 コマンドは tauri-specta で管理される。Rust 側で定義したコマンドから
-`src/commands/bindings.ts` に型付きバインディングが自動生成される。
+`desktop/commands/bindings.ts` に型付きバインディングが自動生成される。
 
 **コマンド追加の手順:**
 
@@ -36,7 +36,7 @@
    - `i64` フィールドには `#[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]`
    - `serde_json::Value` フィールドには `#[cfg_attr(feature = "specta", specta(type = specta_typescript::Any))]`
 4. `just generate-bindings` で bindings.ts を再生成（アプリ起動不要）
-5. `src/commands/` 配下のラッパーファイルから `commands.xxx` を呼ぶ
+5. `desktop/commands/` 配下のラッパーファイルから `commands.xxx` を呼ぶ
 
 **未使用コマンドの検知:**
 

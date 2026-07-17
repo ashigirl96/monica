@@ -1,7 +1,7 @@
 ## コード規約
 
 - クラス結合は `cn(...)` 経由 (`twMerge(clsx(...))` の合成)
-- パスエイリアス `@/*` は `src/*` を指す（`tsconfig.json` と `vite.config.ts` の両方で定義済み）
+- パスエイリアス `@/*` は `desktop/*` を指す（`tsconfig.json` と `vite.config.ts` の両方で定義済み）
 
 ## ディレクトリ構成
 

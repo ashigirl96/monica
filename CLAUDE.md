@@ -32,7 +32,7 @@ just size          # dist/ と bundle/ のサイズ表示
 ## 型の管理原則
 
 enum・struct・定数は Rust (backend) を single source of truth とし、フロントでは二重定義しない。
-`just generate-bindings` で `src/commands/bindings.ts` に TypeScript 型が自動生成される。
+`just generate-bindings` で `desktop/commands/bindings.ts` に TypeScript 型が自動生成される。
 
 - Rust 側で型やコマンドを追加・変更したら `just generate-bindings` を実行する。
 - `bindings.ts` は手動編集しない（`just dev` 起動時にも上書きされる）。

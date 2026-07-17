@@ -224,11 +224,11 @@ bunx shadcn@latest add button
 bunx shadcn@latest add dialog
 ```
 
-`components.json` の `aliases` に従って `src/components/ui/` 配下に追加される。
+`components.json` の `aliases` に従って `desktop/components/ui/` 配下に追加される。
 
 ### 6.2 Tailwind v4 + CSS 変数
 
-スタイルトークンは `src/styles/globals.css` の `:root` / `.dark` で定義した CSS 変数（oklch 色空間）。コンポーネント側は `bg-background text-foreground` のようにユーティリティで使う。
+スタイルトークンは `desktop/styles/globals.css` の `:root` / `.dark` で定義した CSS 変数（oklch 色空間）。コンポーネント側は `bg-background text-foreground` のようにユーティリティで使う。
 
 ### 6.3 `cn` ヘルパー
 

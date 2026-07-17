@@ -19,9 +19,9 @@
     "noUncheckedSideEffectImports": true,
     "verbatimModuleSyntax": true,
     "paths": {
-      "@/*": ["./src/*"],
+      "@/*": ["./desktop/*"],
       "@shared/*": ["./shared/*"]
     }
   },
-  "include": ["src", "shared"]
+  "include": ["desktop", "shared"]
 }
