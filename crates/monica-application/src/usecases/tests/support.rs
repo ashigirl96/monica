@@ -1599,6 +1599,59 @@ impl crate::ports::ExplanationStore for FakeRepos {
     }
 }
 
+// usecase テストで note を使うものはまだない — Backend::Repos の trait bound を満たすためのスタブ。
+// 最初に使うテストと一緒に、必要なメソッドだけ本物の挙動を実装すること。
+impl crate::ports::NoteStore for FakeRepos {
+    fn create_note(&mut self) -> Result<monica_domain::Note> {
+        unimplemented!("no usecase test exercises notes yet")
+    }
+
+    fn get_note(&self, _id: &str) -> Result<Option<monica_domain::Note>> {
+        unimplemented!("no usecase test exercises notes yet")
+    }
+
+    fn list_notes(
+        &self,
+        _from: Option<&str>,
+        _to: Option<&str>,
+    ) -> Result<Vec<monica_domain::NoteSummary>> {
+        unimplemented!("no usecase test exercises notes yet")
+    }
+
+    fn list_project_notes(
+        &self,
+        _project_id: &str,
+        _limit: usize,
+        _offset: usize,
+    ) -> Result<Vec<monica_domain::NoteSummary>> {
+        unimplemented!("no usecase test exercises notes yet")
+    }
+
+    fn update_note(
+        &mut self,
+        _id: &str,
+        _update: monica_domain::UpdateNote,
+    ) -> Result<Option<monica_domain::Note>> {
+        unimplemented!("no usecase test exercises notes yet")
+    }
+
+    fn delete_note(&mut self, _id: &str) -> Result<bool> {
+        unimplemented!("no usecase test exercises notes yet")
+    }
+
+    fn restore_note(&mut self, _id: &str) -> Result<Option<monica_domain::Note>> {
+        unimplemented!("no usecase test exercises notes yet")
+    }
+
+    fn daily_note_counts(
+        &self,
+        _from: Option<&str>,
+        _to: Option<&str>,
+    ) -> Result<Vec<monica_domain::DailyNoteCount>> {
+        unimplemented!("no usecase test exercises notes yet")
+    }
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct RecordingSink(Arc<Mutex<Vec<ApplicationEvent>>>);
 

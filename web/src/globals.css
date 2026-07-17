@@ -1,8 +1,11 @@
 @import "tailwindcss";
 
-@custom-variant dark (@media (prefers-color-scheme: dark));
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
+/* data-theme は index.html の pre-paint スクリプトと theme.ts が解決して付与する
+   （"system" 設定時も OS の設定を JS で light/dark に解決して属性で表す） */
 :root {
+  color-scheme: light;
   --background: oklch(1 0 0);
   --foreground: oklch(0.2 0.025 265);
   --card: oklch(0.975 0.005 250);
@@ -18,21 +21,20 @@
   --radius: 0.625rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: oklch(0.135 0.015 265);
-    --foreground: oklch(0.93 0.01 260);
-    --card: oklch(0.175 0.02 265);
-    --card-foreground: oklch(0.93 0.01 260);
-    --muted: oklch(0.22 0.02 260);
-    --muted-foreground: oklch(0.71 0.02 255);
-    --border: oklch(0.275 0.025 260);
-    --accent: oklch(0.72 0.13 266);
-    --destructive: oklch(0.704 0.191 22.216);
-    --destructive-foreground: oklch(0.985 0 0);
-    --accent-diff: oklch(0.75 0.12 75);
-    --accent-topic: oklch(0.7 0.1 230);
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: oklch(0.135 0.015 265);
+  --foreground: oklch(0.93 0.01 260);
+  --card: oklch(0.175 0.02 265);
+  --card-foreground: oklch(0.93 0.01 260);
+  --muted: oklch(0.22 0.02 260);
+  --muted-foreground: oklch(0.71 0.02 255);
+  --border: oklch(0.275 0.025 260);
+  --accent: oklch(0.72 0.13 266);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --accent-diff: oklch(0.75 0.12 75);
+  --accent-topic: oklch(0.7 0.1 230);
 }
 
 @theme inline {

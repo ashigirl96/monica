@@ -67,6 +67,18 @@ macro_rules! id_newtype {
     };
 }
 
+/// `<prefix><n>` 形式の id 検証。u64::from_str は "+42" や "007" も受理するが、id は保存時の
+/// 文字列そのままで path join に使われるため、正規形（n の十進表記と一致）だけを通す。
+fn is_canonical_numeric_id(s: &str, prefix: &str) -> bool {
+    let Some(num_part) = s.strip_prefix(prefix) else {
+        return false;
+    };
+    match num_part.parse::<u64>() {
+        Ok(n) => n > 0 && num_part == n.to_string(),
+        Err(_) => false,
+    }
+}
+
 id_newtype! {
     /// Identity of a [`Task`](crate::Task) aggregate (e.g. `"MON-1"`).
     TaskId
@@ -99,16 +111,11 @@ id_newtype! {
 impl ExplanationId {
     pub fn parse(value: impl Into<String>) -> Result<Self, crate::DomainError> {
         let s = value.into();
-        if let Some(num_part) = s.strip_prefix("expl-") {
-            if let Ok(n) = num_part.parse::<u64>() {
-                // u64::from_str は "+42" や "007" も受理するが、id は保存時の文字列そのままで
-                // path join に使われるため、正規形（n の十進表記と一致）だけを通す。
-                if n > 0 && num_part == n.to_string() {
-                    return Ok(Self(s));
-                }
-            }
+        if is_canonical_numeric_id(&s, "expl-") {
+            Ok(Self(s))
+        } else {
+            Err(crate::DomainError::InvalidExplanationId(s))
         }
-        Err(crate::DomainError::InvalidExplanationId(s))
     }
 }
 
@@ -119,6 +126,22 @@ impl TaskRunId {
             Ok(Self(s))
         } else {
             Err(crate::DomainError::InvalidTaskRunId(s))
+        }
+    }
+}
+
+id_newtype! {
+    /// Identity of a [`Note`](crate::Note) (e.g. `"note-1"`).
+    NoteId
+}
+
+impl NoteId {
+    pub fn parse(value: impl Into<String>) -> Result<Self, crate::DomainError> {
+        let s = value.into();
+        if is_canonical_numeric_id(&s, "note-") {
+            Ok(Self(s))
+        } else {
+            Err(crate::DomainError::InvalidNoteId(s))
         }
     }
 }
@@ -207,5 +230,27 @@ mod tests {
         assert!(ExplanationId::parse("expl-+42").is_err());
         assert!(ExplanationId::parse("expl-007").is_err());
         assert!(ExplanationId::parse("expl-01").is_err());
+    }
+
+    #[test]
+    fn parse_valid_note_id() {
+        assert!(NoteId::parse("note-1").is_ok());
+        assert!(NoteId::parse("note-42").is_ok());
+    }
+
+    #[test]
+    fn parse_invalid_note_id() {
+        assert!(NoteId::parse("not-an-id").is_err());
+        assert!(NoteId::parse("note-").is_err());
+        assert!(NoteId::parse("note-abc").is_err());
+        assert!(NoteId::parse("note-0").is_err());
+        assert!(NoteId::parse("daily-counts").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_non_canonical_note_id() {
+        assert!(NoteId::parse("note-+42").is_err());
+        assert!(NoteId::parse("note-007").is_err());
+        assert!(NoteId::parse("note-01").is_err());
     }
 }

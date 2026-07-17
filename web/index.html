@@ -5,6 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <title>Monica Library</title>
+    <script>
+      // ちらつき防止: 描画前にテーマを解決して data-theme を付与する（theme.ts と同じ規則）
+      (function () {
+        var pref = localStorage.getItem("monica-theme");
+        var dark =
+          pref === "dark" ||
+          (pref !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

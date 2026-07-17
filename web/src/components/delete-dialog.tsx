@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react";
-import { deleteExplanation } from "@/api";
 
 interface DeleteDialogProps {
   title: string;
-  id: string;
+  onDelete: () => Promise<void>;
   onClose: () => void;
   onDeleted: () => void;
 }
 
-export function DeleteDialog({ title, id, onClose, onDeleted }: DeleteDialogProps) {
+export function DeleteDialog({ title, onDelete, onClose, onDeleted }: DeleteDialogProps) {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,7 +23,7 @@ export function DeleteDialog({ title, id, onClose, onDeleted }: DeleteDialogProp
     setDeleting(true);
     setError(null);
     try {
-      await deleteExplanation(id);
+      await onDelete();
       onDeleted();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Delete failed");
