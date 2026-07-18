@@ -1638,6 +1638,7 @@ impl crate::ports::NoteStore for FakeRepos {
     fn set_note_kind(
         &mut self,
         _id: &str,
+        _expected_kind: &str,
         _kind: &monica_domain::NoteKind,
     ) -> Result<Option<monica_domain::Note>> {
         unimplemented!("no usecase test exercises notes yet")

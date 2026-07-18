@@ -22,8 +22,10 @@ import type { DateRange, Month } from "./dates";
 import {
   addMonths,
   currentMonth,
+  monthOf,
   monthRange,
   rollingWeek,
+  sameMonth,
   sameRange,
   todayKey,
   weekOf,
@@ -138,8 +140,10 @@ export function NotesPage({ id }: { id: string | null }) {
       .then((t) => {
         if (cancelled) return;
         setToday(t.date);
-        // ユーザーがまだ範囲を動かしていなければ、初期表示も logical today 基準に合わせる
+        // ユーザーがまだ範囲・月を動かしていなければ、初期表示も logical today 基準に合わせる
+        // （boundary で today が前月に食い込むケースでカレンダーとサイドバーがズレないように）
         setRange((r) => (sameRange(r, rollingWeek(todayKey())) ? rollingWeek(t.date) : r));
+        setMonth((m) => (sameMonth(m, currentMonth()) ? monthOf(t.date) : m));
       })
       .catch(() => {});
     return () => {
@@ -243,13 +247,10 @@ export function NotesPage({ id }: { id: string | null }) {
     [flush],
   );
 
-  // 「今日の直近7日 + 今月」へ戻す。既に同じ表示なら state 同一性を保って refetch を抑止する
+  // 「今日の直近7日 + 今日の月」へ戻す。既に同じ表示なら state 同一性を保って refetch を抑止する
   const resetToToday = useCallback(() => {
     setRange((r) => (sameRange(r, rollingWeek(today)) ? r : rollingWeek(today)));
-    setMonth((m) => {
-      const now = currentMonth();
-      return m.year === now.year && m.month === now.month ? m : now;
-    });
+    setMonth((m) => (sameMonth(m, monthOf(today)) ? m : monthOf(today)));
   }, [today]);
 
   // API レスポンスの note をそのまま表示状態にする（navigate 後の再フェッチを省く）

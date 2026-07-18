@@ -71,10 +71,11 @@ impl<B: Backend> NoteService<'_, B> {
             .kind
             .transition_to(target)
             .map_err(|e| ApplicationError::conflict(e.to_string()))?;
-        self.m
-            .repos
-            .set_note_kind(id, &next)?
-            .ok_or_else(|| ApplicationError::not_found(format!("note {id} not found")))
+        // 書き込みは遷移元 kind 条件付き。get と write の間に別の遷移が滑り込んだ場合は
+        // 不発になる（project の終端性を並行リクエストでも破らせない）。
+        self.m.repos.set_note_kind(id, note.kind.name(), &next)?.ok_or_else(|| {
+            ApplicationError::conflict(format!("note {id} kind changed concurrently"))
+        })
     }
 
     pub fn delete_note(&mut self, id: &str) -> ApplicationResult<()> {

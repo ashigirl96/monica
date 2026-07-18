@@ -181,15 +181,27 @@ impl NoteStore for SqliteStore {
         }
     }
 
-    fn set_note_kind(&mut self, id: &str, kind: &NoteKind) -> Result<Option<Note>> {
+    fn set_note_kind(
+        &mut self,
+        id: &str,
+        expected_kind: &str,
+        kind: &NoteKind,
+    ) -> Result<Option<Note>> {
+        // kind の一致を WHERE で確認する条件付き書き込み。呼び手が検証した遷移元から
+        // 変わっていたら不発（並行遷移の後勝ち上書きを防ぐ）。
         let mut stmt = self.conn().prepare(&format!(
             "UPDATE notes
              SET kind = ?1, title = ?2, project_id = ?3, updated_at = {SET_NOW}
-             WHERE id = ?4 AND deleted_at IS NULL
+             WHERE id = ?4 AND deleted_at IS NULL AND kind = ?5
              RETURNING {NOTE_COLUMNS}"
         ))?;
-        let mut rows =
-            stmt.query(params![kind.name(), kind.title(), kind.project_id(), id])?;
+        let mut rows = stmt.query(params![
+            kind.name(),
+            kind.title(),
+            kind.project_id(),
+            id,
+            expected_kind
+        ])?;
         match rows.next()? {
             Some(row) => Ok(Some(note_from_row(row)?)),
             None => Ok(None),
@@ -319,7 +331,7 @@ mod tests {
         // 削除済みへの update / kind 変更は不発（autosave の残弾で復活させない）
         assert!(store.update_note(id, content_update("zombie")).unwrap().is_none());
         assert!(store
-            .set_note_kind(id, &NoteKind::Essay { title: "zombie".to_string() })
+            .set_note_kind(id, "daily", &NoteKind::Essay { title: "zombie".to_string() })
             .unwrap()
             .is_none());
 
@@ -376,7 +388,7 @@ mod tests {
         // project: title は無視される
         let project = store.create_note(0).unwrap();
         store
-            .set_note_kind(project.id.as_str(), &NoteKind::Project { project_id: "o/r".to_string() })
+            .set_note_kind(project.id.as_str(), "daily", &NoteKind::Project { project_id: "o/r".to_string() })
             .unwrap()
             .unwrap();
         let updated = store.update_note(project.id.as_str(), update.clone()).unwrap().unwrap();
@@ -385,7 +397,7 @@ mod tests {
         // essay: Some は置換、None は keep
         let essay = store.create_note(0).unwrap();
         store
-            .set_note_kind(essay.id.as_str(), &NoteKind::Essay { title: String::new() })
+            .set_note_kind(essay.id.as_str(), "daily", &NoteKind::Essay { title: String::new() })
             .unwrap()
             .unwrap();
         let updated = store.update_note(essay.id.as_str(), update).unwrap().unwrap();
@@ -414,12 +426,12 @@ mod tests {
         let id = note.id.as_str();
 
         let essay = store
-            .set_note_kind(id, &NoteKind::Essay { title: "t".to_string() })
+            .set_note_kind(id, "daily", &NoteKind::Essay { title: "t".to_string() })
             .unwrap()
             .unwrap();
         assert_eq!(essay.kind, NoteKind::Essay { title: "t".to_string() });
 
-        let daily = store.set_note_kind(id, &NoteKind::Daily).unwrap().unwrap();
+        let daily = store.set_note_kind(id, "essay", &NoteKind::Daily).unwrap().unwrap();
         assert_eq!(daily.kind, NoteKind::Daily);
         let title: Option<String> = store
             .conn()
@@ -428,12 +440,12 @@ mod tests {
         assert_eq!(title, None, "daily 化で title 列も NULL に戻る");
 
         let project = store
-            .set_note_kind(id, &NoteKind::Project { project_id: "o/r".to_string() })
+            .set_note_kind(id, "daily", &NoteKind::Project { project_id: "o/r".to_string() })
             .unwrap()
             .unwrap();
         assert_eq!(project.kind, NoteKind::Project { project_id: "o/r".to_string() });
 
-        assert!(store.set_note_kind("note-999", &NoteKind::Daily).unwrap().is_none());
+        assert!(store.set_note_kind("note-999", "daily", &NoteKind::Daily).unwrap().is_none());
     }
 
     #[test]
@@ -443,9 +455,30 @@ mod tests {
         assert!(store
             .set_note_kind(
                 note.id.as_str(),
+                "daily",
                 &NoteKind::Project { project_id: "o/missing".to_string() }
             )
             .is_err());
+    }
+
+    #[test]
+    fn set_note_kind_is_conditional_on_expected_kind() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        seed_project(&store, "o/r");
+        let note = store.create_note(0).unwrap();
+        let id = note.id.as_str();
+        store
+            .set_note_kind(id, "daily", &NoteKind::Project { project_id: "o/r".to_string() })
+            .unwrap()
+            .unwrap();
+
+        // 遷移元が変わっていたら不発: daily 前提で検証済みの並行遷移は project を上書きできない
+        let stale = store
+            .set_note_kind(id, "daily", &NoteKind::Essay { title: String::new() })
+            .unwrap();
+        assert!(stale.is_none());
+        let read = store.get_note(id).unwrap().unwrap();
+        assert_eq!(read.kind, NoteKind::Project { project_id: "o/r".to_string() });
     }
 
     #[test]
@@ -454,7 +487,7 @@ mod tests {
         seed_project(&store, "o/r");
         let note = store.create_note(0).unwrap();
         store
-            .set_note_kind(note.id.as_str(), &NoteKind::Project { project_id: "o/r".to_string() })
+            .set_note_kind(note.id.as_str(), "daily", &NoteKind::Project { project_id: "o/r".to_string() })
             .unwrap()
             .unwrap();
 
@@ -521,7 +554,7 @@ mod tests {
         // note-1..3 を o/r に、note-4 は project なしのまま
         for id in ["note-1", "note-2", "note-3"] {
             store
-                .set_note_kind(id, &NoteKind::Project { project_id: "o/r".to_string() })
+                .set_note_kind(id, "daily", &NoteKind::Project { project_id: "o/r".to_string() })
                 .unwrap()
                 .unwrap();
         }

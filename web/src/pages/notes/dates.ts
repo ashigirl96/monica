@@ -63,6 +63,15 @@ export function currentMonth(): Month {
   return { year: now.getFullYear(), month: now.getMonth() + 1 };
 }
 
+/** date key の属する月。logical today がブラウザの月と食い違うときはこちらが正 */
+export function monthOf(key: string): Month {
+  return { year: Number(key.slice(0, 4)), month: Number(key.slice(5, 7)) };
+}
+
+export function sameMonth(a: Month, b: Month): boolean {
+  return a.year === b.year && a.month === b.month;
+}
+
 export function addMonths({ year, month }: Month, delta: number): Month {
   const d = new Date(year, month - 1 + delta, 1);
   return { year: d.getFullYear(), month: d.getMonth() + 1 };

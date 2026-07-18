@@ -18,8 +18,12 @@ pub trait NoteStore {
     /// exist (or is soft-deleted). kind は変更しない — 遷移は [`set_note_kind`](Self::set_note_kind)。
     fn update_note(&mut self, id: &str, update: UpdateNote) -> Result<Option<Note>>;
     /// Writes the kind (with its payload columns) verbatim; transition rules are the
-    /// caller's responsibility. Returns `None` when the note does not exist (or is deleted).
-    fn set_note_kind(&mut self, id: &str, kind: &NoteKind) -> Result<Option<Note>>;
+    /// caller's responsibility. The write is conditional on the current kind still being
+    /// `expected_kind`（呼び手が検証した遷移元）— 並行する遷移が同じ pre-update 状態で
+    /// 検証をすり抜けて上書きし合うのを防ぐ。Returns `None` when the note does not
+    /// exist (or is deleted), or when the kind changed since it was read.
+    fn set_note_kind(&mut self, id: &str, expected_kind: &str, kind: &NoteKind)
+        -> Result<Option<Note>>;
     /// Soft delete: sets `deleted_at`; the row survives for [`restore_note`](Self::restore_note).
     /// Returns `false` when the note does not exist (or is already deleted).
     fn delete_note(&mut self, id: &str) -> Result<bool>;
