@@ -6,6 +6,7 @@ import { containerById, getBlockContext, rangeFromIds, rangePositions } from "./
 import { deleteRange } from "./commands";
 import { blockSelectionKey } from "./selection-state";
 import { openLinkMenu } from "./link-menu";
+import { buildSyncedContainer, openPasteMenu } from "./paste-menu";
 
 // TODO.md §8.4 / §10.1
 export const BLOCKS_MIME = "application/x-monica-blocks+json";
@@ -14,16 +15,20 @@ type BlocksPayload = {
   schemaVersion: 1;
   operation: "copy" | "move";
   blocks: unknown[];
+  /** copy 元ノートの id。paste-and-sync のミラー参照先。旧 payload / desktop copy では欠落。 */
+  sourceNoteId?: string;
 };
 
 export function serializeBlocksPayload(
   containers: readonly PMNode[],
   operation: "copy" | "move",
+  sourceNoteId?: string,
 ): string {
   const payload: BlocksPayload = {
     schemaVersion: 1,
     operation,
     blocks: containers.map((node) => node.toJSON() as unknown),
+    ...(sourceNoteId ? { sourceNoteId } : {}),
   };
   return JSON.stringify(payload);
 }
@@ -32,10 +37,10 @@ export function blocksToPlainText(containers: readonly PMNode[]): string {
   const lines: string[] = [];
   const walk = (container: PMNode, depth: number) => {
     const content = container.child(0);
-    const text =
-      content.type === nodes.divider
-        ? "---"
-        : content.content.textBetween(0, content.content.size, undefined, "\n");
+    let text: string;
+    if (content.type === nodes.divider) text = "---";
+    else if (content.type === nodes.syncedBlock) text = "[synced block]";
+    else text = content.content.textBetween(0, content.content.size, undefined, "\n");
     lines.push("  ".repeat(depth) + text);
     if (container.childCount > 1) {
       container.child(1).forEach((child) => walk(child, depth + 1));
@@ -84,7 +89,11 @@ function blocksToHtml(containers: readonly PMNode[]): string {
   return holder.innerHTML;
 }
 
-function parseBlocksPayload(raw: string): PMNode[] | null {
+// 元 ID のままの container 群と sourceNoteId を返す。ID 再発行（plain paste）は呼び手の
+// 責務 — paste-and-sync は元 blockId を参照先に使うため、ここでは reissue しない。
+type ParsedBlocks = { blocks: PMNode[]; sourceNoteId: string | null };
+
+function parseBlocksPayload(raw: string): ParsedBlocks | null {
   let payload: BlocksPayload;
   try {
     payload = JSON.parse(raw) as BlocksPayload;
@@ -93,8 +102,8 @@ function parseBlocksPayload(raw: string): PMNode[] | null {
   }
   if (payload.schemaVersion !== 1 || !Array.isArray(payload.blocks)) return null;
   try {
-    // paste は常に copy 扱い: ID を全再発行する（TODO.md §10.3）
-    return payload.blocks.map((json) => reissueIds(PMNode.fromJSON(schema, json)));
+    const blocks = payload.blocks.map((json) => PMNode.fromJSON(schema, json));
+    return { blocks, sourceNoteId: payload.sourceNoteId ?? null };
   } catch {
     return null;
   }
@@ -144,15 +153,29 @@ function handleUrlPaste(view: EditorView, event: ClipboardEvent): boolean {
   return true;
 }
 
-function writeBlocksToClipboard(event: ClipboardEvent, containers: readonly PMNode[]): void {
+function writeBlocksToClipboard(
+  event: ClipboardEvent,
+  containers: readonly PMNode[],
+  sourceNoteId?: string,
+): void {
   if (!event.clipboardData) return;
   event.preventDefault();
-  event.clipboardData.setData(BLOCKS_MIME, serializeBlocksPayload(containers, "copy"));
+  event.clipboardData.setData(
+    BLOCKS_MIME,
+    serializeBlocksPayload(containers, "copy", sourceNoteId),
+  );
   event.clipboardData.setData("text/html", blocksToHtml(containers));
   event.clipboardData.setData("text/plain", blocksToPlainText(containers));
 }
 
-export function clipboardPlugin(): Plugin {
+export type ClipboardOptions = {
+  /** copy 時に payload へ載せる現在ノートの id（paste-and-sync のミラー参照元）。 */
+  sourceNoteId?: string;
+  /** paste 時に「Paste and sync」を提示するか（= resolveBlock が提供されているか）。 */
+  syncPasteEnabled?: boolean;
+};
+
+export function clipboardPlugin(options: ClipboardOptions = {}): Plugin {
   return new Plugin({
     key: new PluginKey("journalClipboard"),
     props: {
@@ -165,12 +188,14 @@ export function clipboardPlugin(): Plugin {
         copy(view, event) {
           const containers = selectedContainers(view);
           if (containers.length === 0) return false;
-          writeBlocksToClipboard(event, containers);
+          writeBlocksToClipboard(event, containers, options.sourceNoteId);
           return true;
         },
         cut(view, event) {
           const containers = selectedContainers(view);
           if (containers.length === 0) return false;
+          // cut は元ブロックを削除するので sourceNoteId を載せない。載せると paste-and-sync
+          // が「消えたブロック」を指す dangling ミラーになる（cut は move であって参照元にならない）。
           writeBlocksToClipboard(event, containers);
           const selection = blockSelectionKey.getState(view.state);
           const range = selection ? rangeFromIds(view.state, selection.selectedIds) : null;
@@ -182,30 +207,51 @@ export function clipboardPlugin(): Plugin {
       handlePaste(view, event) {
         const raw = event.clipboardData?.getData(BLOCKS_MIME);
         if (!raw) return handleUrlPaste(view, event);
-        const blocks = parseBlocksPayload(raw);
-        if (!blocks || blocks.length === 0) return false;
+        const parsed = parseBlocksPayload(raw);
+        if (!parsed || parsed.blocks.length === 0) return false;
+        const { blocks: originals, sourceNoteId } = parsed;
+        // plain paste は常に ID 再発行（重複 ID は normalizer の防衛もある）
+        const plain = originals.map(reissueIds);
 
+        // 挿入位置 start を決めて plain を入れる。start より前は触らないので、
+        // paste-menu のライブプレビュー（replaceWith）の安定アンカーになる。
+        const tr = view.state.tr;
+        let start: number;
         const selection = blockSelectionKey.getState(view.state);
         if (selection && selection.selectedIds.length > 0) {
-          // block mode paste: 選択の直後へ挿入
           const range = rangeFromIds(view.state, selection.selectedIds);
           if (!range) return false;
-          const { end } = rangePositions(range);
-          view.dispatch(view.state.tr.insert(end, blocks).scrollIntoView());
-          return true;
-        }
-        const ctx = getBlockContext(view.state.selection.$from);
-        if (!ctx) return false;
-        // 空 paragraph（子なし）の上なら置き換え、それ以外は直後に挿入
-        const tr = view.state.tr;
-        if (
-          ctx.contentNode.type === nodes.paragraph &&
-          ctx.contentNode.content.size === 0 &&
-          ctx.containerNode.childCount === 1
-        ) {
-          tr.replaceWith(ctx.containerPos, ctx.containerPos + ctx.containerNode.nodeSize, blocks);
+          start = rangePositions(range).end;
+          tr.insert(start, plain);
         } else {
-          tr.insert(ctx.containerPos + ctx.containerNode.nodeSize, blocks);
+          const ctx = getBlockContext(view.state.selection.$from);
+          if (!ctx) return false;
+          // 空 paragraph（子なし）の上なら置き換え、それ以外は直後に挿入
+          if (
+            ctx.contentNode.type === nodes.paragraph &&
+            ctx.contentNode.content.size === 0 &&
+            ctx.containerNode.childCount === 1
+          ) {
+            start = ctx.containerPos;
+            tr.replaceWith(start, start + ctx.containerNode.nodeSize, plain);
+          } else {
+            start = ctx.containerPos + ctx.containerNode.nodeSize;
+            tr.insert(start, plain);
+          }
+        }
+
+        // paste-and-sync が可能なら「Paste as」メニューを相乗りさせる。plugin 未登録
+        // （resolveBlock 不在）や旧 payload（sourceNoteId 欠落）なら plain のまま。
+        if (
+          options.syncPasteEnabled &&
+          sourceNoteId &&
+          originals.every((container) => container.attrs.id !== null)
+        ) {
+          openPasteMenu(tr, {
+            start,
+            plain,
+            synced: [buildSyncedContainer(originals, sourceNoteId)],
+          });
         }
         view.dispatch(tr.scrollIntoView());
         return true;

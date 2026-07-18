@@ -39,6 +39,14 @@ export type Note = {
   updated_at: string;
 };
 
+/**
+ *  synced block（transclusion）の解決結果。元 note の blockContainer subtree の
+ *  ProseMirror JSON。TS 側でも opaque に扱う。
+ */
+export type NoteBlock = {
+  block: unknown;
+};
+
 export type NoteKind =
   | { kind: "project"; project_id: string }
   | { kind: "daily" }

@@ -11,6 +11,7 @@ import { linkMenuPlugin } from "./link-menu";
 import type { FetchLinkMetadata } from "./link-menu";
 import { noteMentionMenuPlugin } from "./note-mention-menu";
 import type { SearchNoteMentions } from "./note-mention-menu";
+import { pasteMenuPlugin } from "./paste-menu";
 import type { OnNoteMentionClick, ResolveNoteMention } from "./node-views";
 import { normalizerPlugin } from "./normalizer";
 import { numberingPlugin, placeholderPlugin } from "./decorations";
@@ -18,6 +19,9 @@ import { dragDropPlugin } from "./drag-drop";
 import { clipboardPlugin } from "./clipboard";
 import { linkClickPlugin } from "./link-click";
 import { editorNodeViews } from "./node-views";
+import { SyncedBlockView, syncedBlockRefreshPlugin } from "./synced-block";
+import type { OnOpenBlock, ResolveBlock } from "./synced-block";
+import { blockHighlightPlugin } from "./block-highlight";
 import { imeDebugPlugin } from "./debug-ime";
 
 function docFromJSON(json: unknown): PMNode {
@@ -66,6 +70,12 @@ export type BlockEditorCallbacks = {
   resolveNoteMention?: ResolveNoteMention;
   /** noteMention チップの素クリック（SPA 遷移用） */
   onNoteMentionClick?: OnNoteMentionClick;
+  /** 現在編集中の note の id。synced block の同一ノート内参照を live doc から解決する。 */
+  noteId?: string;
+  /** synced block（transclusion）の内容解決。未指定なら paste-and-sync は無効。 */
+  resolveBlock?: ResolveBlock;
+  /** synced block のジャンプ（元ブロックを開く）。 */
+  onOpenBlock?: OnOpenBlock;
 };
 
 export function createBlockEditor(
@@ -78,8 +88,13 @@ export function createBlockEditor(
     searchNoteMentions,
     resolveNoteMention,
     onNoteMentionClick,
+    noteId,
+    resolveBlock,
+    onOpenBlock,
   }: BlockEditorCallbacks = {},
 ): EditorView {
+  // synced block の NodeView 群を refresh plugin と共有する（同一ノート内のライブ反映用）
+  const syncedRegistry = new Set<SyncedBlockView>();
   const state = EditorState.create({
     doc: docFromJSON(initialDoc),
     // TODO.md §12.1: menu → block selection → 構造キー → inline → default の順
@@ -90,6 +105,10 @@ export function createBlockEditor(
       // plugin 不在なら clipboard の open meta は無視され、常にプレーンリンクに落ちる
       ...(fetchLinkMetadata ? [linkMenuPlugin(fetchLinkMetadata)] : []),
       ...(searchNoteMentions ? [noteMentionMenuPlugin(searchNoteMentions)] : []),
+      // block selection より前: paste 直後は選択が残っており、後ろに置くと Escape/Enter/↑↓
+      // が block-selection の handleKeyDown に食われる。plugin 不在なら openPasteMenu meta は
+      // 無視され plain paste に落ちる。
+      ...(resolveBlock ? [pasteMenuPlugin()] : []),
       blockSelectionPlugin(),
       // editorKeymap の Shift-Tab（structureCommand）は outdent 不能でも true を返す（KEY-003）
       // ため、先頭 block での上方向脱出はその手前で拾う必要がある
@@ -121,15 +140,20 @@ export function createBlockEditor(
       editorInputRules(),
       placeholderPlugin(),
       numberingPlugin(),
+      blockHighlightPlugin(),
       dragDropPlugin(),
-      clipboardPlugin(),
+      clipboardPlugin({ sourceNoteId: noteId, syncPasteEnabled: !!resolveBlock }),
       linkClickPlugin(),
+      syncedBlockRefreshPlugin(syncedRegistry),
       normalizerPlugin(),
     ],
   });
   const view = new EditorView(mount, {
     state,
-    nodeViews: editorNodeViews({ resolveNoteMention, onNoteMentionClick }),
+    nodeViews: editorNodeViews(
+      { resolveNoteMention, onNoteMentionClick, noteId, resolveBlock, onOpenBlock },
+      syncedRegistry,
+    ),
     attributes: { class: "jb-editor", spellcheck: "false" },
     dispatchTransaction(tr) {
       view.updateState(view.state.apply(tr));

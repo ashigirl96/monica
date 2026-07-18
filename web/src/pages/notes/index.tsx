@@ -10,6 +10,7 @@ import {
   deleteNote,
   fetchLinkPreview,
   getNote,
+  getNoteBlock,
   getNotesToday,
   listNotes,
   listProjectNotes,
@@ -110,6 +111,9 @@ export function NotesPage({ id }: { id: string | null }) {
   // 同一 doc 内の重複 mention を 1 リクエストに畳む Promise 共有キャッシュ。
   // 開くノートが変わるたび捨てるので、開き直しで表示名が最新タイトルに追従する
   const mentionCacheRef = useRef(new Map<string, Promise<NoteMentionInfo | null>>());
+  // 別ノートの synced block へジャンプする際、navigate → 再マウントを跨いで対象 block を運ぶ。
+  // BlockEditor は key={note.id} で再マウントされるので、ロード後の effect で消費する。
+  const pendingBlockTargetRef = useRef<{ noteId: string; blockId: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -252,6 +256,16 @@ export function NotesPage({ id }: { id: string | null }) {
     if (newest) navigate(`/notes/${newest.id}`, { replace: true });
   }, [id, summaries, projectFilter, today]);
 
+  // synced block ジャンプの対象ノートがロードされたらスクロールする。子（BlockEditor）の
+  // mount effect が先に走って handleRef を張るので、ここで scrollToBlock を呼べる。
+  useEffect(() => {
+    const target = pendingBlockTargetRef.current;
+    if (target && note && target.noteId === note.id) {
+      pendingBlockTargetRef.current = null;
+      editorHandleRef.current?.scrollToBlock(target.blockId);
+    }
+  }, [note]);
+
   const selectNote = useCallback(
     (noteId: string) => {
       void flush();
@@ -271,6 +285,35 @@ export function NotesPage({ id }: { id: string | null }) {
     }
     return promise;
   }, []);
+
+  // synced block（transclusion）の内容解決。キャッシュしないのは、通信エラー時に retry で
+  // 再フェッチさせるため（NodeView が reject を error 状態として扱う）。
+  // 別ノート参照は HTTP で解決するので、直前の編集が debounce 中／in-flight だと stale を読む。
+  // ノート切替は flush を await せず navigate するため、pending PUT の完了を待ってから GET する
+  // （cross-note ミラーは一度しか解決しないので stale がそのまま残る）。
+  const resolveBlock = useCallback(
+    async (noteId: string, blockId: string): Promise<unknown | null> => {
+      await flush();
+      const r = await getNoteBlock(noteId, blockId);
+      return r?.block ?? null;
+    },
+    [flush],
+  );
+
+  // synced block のジャンプ。同一ノートなら直接スクロール、別ノートなら navigate 後に
+  // 再マウントを跨いで対象を運ぶ（onNoteMentionClick={selectNote} の延長）。
+  const onOpenBlock = useCallback(
+    (targetNoteId: string, blockId: string) => {
+      if (targetNoteId === noteRef.current?.id) {
+        editorHandleRef.current?.scrollToBlock(blockId);
+        return;
+      }
+      pendingBlockTargetRef.current = { noteId: targetNoteId, blockId };
+      void flush();
+      navigate(`/notes/${targetNoteId}`);
+    },
+    [flush],
+  );
 
   // 「今日の直近7日 + 今日の月」へ戻す。既に同じ表示なら state 同一性を保って refetch を抑止する
   const resetToToday = useCallback(() => {
@@ -584,6 +627,9 @@ export function NotesPage({ id }: { id: string | null }) {
               searchNoteMentions={searchNoteMentions}
               resolveNoteMention={resolveNoteMention}
               onNoteMentionClick={selectNote}
+              noteId={note.id}
+              resolveBlock={resolveBlock}
+              onOpenBlock={onOpenBlock}
               handleRef={editorHandleRef}
               className="min-h-[70dvh] pt-4 pb-24"
             />

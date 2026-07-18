@@ -90,6 +90,26 @@ fn first_line_preview(content: &str) -> Option<String> {
     find_first_line(&doc)
 }
 
+/// synced block（transclusion）用: content JSON から `attrs.id == block_id` の blockContainer
+/// を探し、その subtree（入れ子の blockGroup ごと）を JSON 文字列で返す。block type 非依存。
+fn block_subtree(content: &str, block_id: &str) -> Option<String> {
+    fn find(node: &serde_json::Value, block_id: &str) -> Option<serde_json::Value> {
+        if node.get("type").and_then(|t| t.as_str()) == Some("blockContainer")
+            && node.get("attrs").and_then(|a| a.get("id")).and_then(|i| i.as_str())
+                == Some(block_id)
+        {
+            return Some(node.clone());
+        }
+        node.get("content")
+            .and_then(|c| c.as_array())?
+            .iter()
+            .find_map(|child| find(child, block_id))
+    }
+
+    let doc: serde_json::Value = serde_json::from_str(content).ok()?;
+    find(&doc, block_id).map(|node| node.to_string())
+}
+
 fn summary_from_row(row: &Row<'_>) -> Result<NoteSummary> {
     let content: String = row.get("content")?;
     Ok(NoteSummary {
@@ -129,6 +149,20 @@ impl NoteStore for SqliteStore {
         let mut rows = stmt.query(params![id])?;
         match rows.next()? {
             Some(row) => Ok(Some(note_from_row(row)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn get_note_block(&self, note_id: &str, block_id: &str) -> Result<Option<RawJson>> {
+        let mut stmt = self
+            .conn()
+            .prepare("SELECT content FROM notes WHERE id = ?1 AND deleted_at IS NULL")?;
+        let mut rows = stmt.query(params![note_id])?;
+        match rows.next()? {
+            Some(row) => {
+                let content: String = row.get(0)?;
+                Ok(block_subtree(&content, block_id).map(RawJson::from))
+            }
             None => Ok(None),
         }
     }
@@ -748,5 +782,90 @@ mod tests {
     #[test]
     fn preview_garbage_is_none() {
         assert_eq!(first_line_preview("not json"), None);
+    }
+
+    fn doc_with_ids(blocks: &[(&str, &str)]) -> String {
+        let containers: Vec<String> = blocks
+            .iter()
+            .map(|(id, text)| {
+                format!(
+                    r#"{{"type":"blockContainer","attrs":{{"id":"{id}"}},"content":[{{"type":"paragraph","content":[{{"type":"text","text":"{text}"}}]}}]}}"#
+                )
+            })
+            .collect();
+        format!(
+            r#"{{"type":"doc","content":[{{"type":"blockGroup","content":[{}]}}]}}"#,
+            containers.join(",")
+        )
+    }
+
+    #[test]
+    fn block_subtree_finds_top_level() {
+        let content = doc_with_ids(&[("a", "first"), ("b", "second")]);
+        let sub = block_subtree(&content, "b").unwrap();
+        let value: serde_json::Value = serde_json::from_str(&sub).unwrap();
+        assert_eq!(value["type"], "blockContainer");
+        assert_eq!(value["attrs"]["id"], "b");
+        assert_eq!(value["content"][0]["content"][0]["text"], "second");
+    }
+
+    #[test]
+    fn block_subtree_finds_nested_with_children() {
+        // parent(id=p) が子 blockGroup に child(id=c) を持つ。p を引くと subtree ごと返る。
+        let content = r#"{"type":"doc","content":[{"type":"blockGroup","content":[
+            {"type":"blockContainer","attrs":{"id":"p"},"content":[
+                {"type":"paragraph","content":[{"type":"text","text":"parent"}]},
+                {"type":"blockGroup","content":[
+                    {"type":"blockContainer","attrs":{"id":"c"},"content":[
+                        {"type":"paragraph","content":[{"type":"text","text":"child"}]}]}]}]}]}]}"#;
+
+        let parent = block_subtree(content, "p").unwrap();
+        let parent_value: serde_json::Value = serde_json::from_str(&parent).unwrap();
+        assert_eq!(parent_value["content"][1]["type"], "blockGroup", "子 blockGroup ごと返る");
+        assert_eq!(parent_value["content"][1]["content"][0]["attrs"]["id"], "c");
+
+        let child = block_subtree(content, "c").unwrap();
+        let child_value: serde_json::Value = serde_json::from_str(&child).unwrap();
+        assert_eq!(child_value["attrs"]["id"], "c");
+        assert_eq!(child_value["content"][0]["content"][0]["text"], "child");
+    }
+
+    #[test]
+    fn block_subtree_missing_and_garbage_are_none() {
+        let content = doc_with_ids(&[("a", "x")]);
+        assert_eq!(block_subtree(&content, "missing"), None);
+        assert_eq!(block_subtree("not json", "a"), None);
+    }
+
+    #[test]
+    fn block_subtree_skips_container_without_matching_id() {
+        // attrs.id が無い container は素通りし、後続の一致を拾う
+        let content = r#"{"type":"doc","content":[{"type":"blockGroup","content":[
+            {"type":"blockContainer","content":[{"type":"paragraph"}]},
+            {"type":"blockContainer","attrs":{"id":"target"},"content":[
+                {"type":"paragraph","content":[{"type":"text","text":"hit"}]}]}]}]}"#;
+        let sub = block_subtree(content, "target").unwrap();
+        let value: serde_json::Value = serde_json::from_str(&sub).unwrap();
+        assert_eq!(value["attrs"]["id"], "target");
+    }
+
+    #[test]
+    fn get_note_block_resolves_and_misses() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        let note = store.create_note(0).unwrap();
+        let id = note.id.as_str();
+        store
+            .update_note(id, UpdateNote { title: None, content: RawJson::from(doc_with_ids(&[("blk", "body")])) })
+            .unwrap();
+
+        let sub = store.get_note_block(id, "blk").unwrap().unwrap();
+        let value: serde_json::Value = serde_json::from_str(sub.as_str()).unwrap();
+        assert_eq!(value["attrs"]["id"], "blk");
+
+        assert!(store.get_note_block(id, "nope").unwrap().is_none(), "block 不在は None");
+        assert!(store.get_note_block("note-999", "blk").unwrap().is_none(), "note 不在は None");
+
+        store.delete_note(id).unwrap();
+        assert!(store.get_note_block(id, "blk").unwrap().is_none(), "soft-delete 後は None");
     }
 }

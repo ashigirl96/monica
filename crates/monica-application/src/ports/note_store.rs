@@ -1,11 +1,15 @@
 use anyhow::Result;
 
-use monica_domain::{DailyNoteCount, Note, NoteKind, NoteSummary, UpdateNote};
+use monica_domain::{DailyNoteCount, Note, NoteKind, NoteSummary, RawJson, UpdateNote};
 
 pub trait NoteStore {
     /// Creates a daily note with all defaults (id, empty content, logical date, timestamps).
     fn create_note(&mut self, day_boundary_hour: u8) -> Result<Note>;
     fn get_note(&self, id: &str) -> Result<Option<Note>>;
+    /// synced block（transclusion）の解決: note の content から `attrs.id == block_id` の
+    /// blockContainer subtree を JSON で返す。note が存在しない/削除済み、または block が
+    /// 見つからない場合は `None`。
+    fn get_note_block(&self, note_id: &str, block_id: &str) -> Result<Option<RawJson>>;
     fn list_notes(&self, from: Option<&str>, to: Option<&str>) -> Result<Vec<NoteSummary>>;
     /// mention 検索の coarse プリフィルタ。title / project_id / date / content いずれかの
     /// 部分一致の superset を新しい順に返すだけで、display_name / preview による正確な

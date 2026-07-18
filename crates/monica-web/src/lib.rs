@@ -349,6 +349,17 @@ async fn resolve_note_mention(
     Ok(Json(note.into()))
 }
 
+async fn get_note_block(
+    Path((id, block_id)): Path<(String, String)>,
+) -> Result<Json<monica_api::ApiNoteBlock>, AppError> {
+    let block = blocking(move || {
+        let mut monica = open()?;
+        Ok(monica.notes().get_note_block(&id, &block_id)?)
+    })
+    .await?;
+    Ok(Json(block.into()))
+}
+
 async fn list_projects() -> Result<Json<Vec<monica_api::ProjectOption>>, AppError> {
     let list = blocking(|| {
         let mut monica = open()?;
@@ -417,6 +428,7 @@ fn build_router(port: u16) -> Router {
         )
         .route("/api/notes/{id}/kind", post(set_note_kind))
         .route("/api/notes/{id}/restore", post(restore_note))
+        .route("/api/notes/{id}/blocks/{block_id}", get(get_note_block))
         .route("/api/ogp", get(get_ogp))
         .route("/api/projects", get(list_projects))
         .route("/api/settings/notes", get(get_notes_settings).put(put_notes_settings))
@@ -1279,6 +1291,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_note_block_returns_subtree() {
+        let created = create_note_via_api().await;
+        let id = created["id"].as_str().unwrap();
+        let content = serde_json::json!({"type": "doc", "content": [{"type": "blockGroup", "content": [
+            {"type": "blockContainer", "attrs": {"id": "blk-http-1"}, "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": "synced body"}]}]}]}]});
+        put_note(id, None, content).await;
+
+        let response = app()
+            .oneshot(get_req(&format!("/api/notes/{id}/blocks/blk-http-1")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let payload: serde_json::Value = serde_json::from_str(&body_string(response).await).unwrap();
+        assert_eq!(payload["block"]["attrs"]["id"], "blk-http-1");
+        assert_eq!(payload["block"]["content"][0]["content"][0]["text"], "synced body");
+    }
+
+    #[tokio::test]
+    async fn get_note_block_missing_block_note_or_deleted_is_404() {
+        let created = create_note_via_api().await;
+        let id = created["id"].as_str().unwrap();
+        put_note(
+            id,
+            None,
+            serde_json::json!({"type": "doc", "content": [{"type": "blockGroup", "content": [
+                {"type": "blockContainer", "attrs": {"id": "blk-http-2"}, "content": [
+                    {"type": "paragraph", "content": [{"type": "text", "text": "x"}]}]}]}]}),
+        )
+        .await;
+
+        // 未知 block
+        let response = app()
+            .oneshot(get_req(&format!("/api/notes/{id}/blocks/unknown-block")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        // 未知 note
+        let response = app()
+            .oneshot(get_req("/api/notes/note-999999/blocks/blk-http-2"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        // 削除済み note
+        let response =
+            app().oneshot(delete_req(&format!("/api/notes/{id}"))).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let response = app()
+            .oneshot(get_req(&format!("/api/notes/{id}/blocks/blk-http-2")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn daily_counts_include_created_notes() {
         let created = create_note_via_api().await;
         let date = created["date"].as_str().unwrap();
@@ -1402,6 +1471,7 @@ mod tests {
             .register::<monica_api::ApiNotePage>()
             .register::<monica_api::ApiNoteKind>()
             .register::<monica_api::ApiNoteMention>()
+            .register::<monica_api::ApiNoteBlock>()
             .register::<monica_api::ApiSetNoteKind>()
             .register::<monica_api::ApiNotesToday>()
             .register::<monica_api::NotesSettings>()

@@ -226,6 +226,34 @@ export const schema = new Schema({
       ],
     },
 
+    // 別ノート（または同ノート）のブロック群への参照（synced block / transclusion）。
+    // Notion 同様、選択範囲全体を 1 つの synced block にまとめる（blockIds は選択順）。
+    // 内容は attrs に持たず、NodeView が (noteId, blockIds) から表示時に解決する。
+    // data-block-id は blockContainer 用に予約済みのため data-ref-block-ids で分ける。
+    syncedBlock: {
+      group: "blockContent",
+      atom: true,
+      selectable: true,
+      attrs: { noteId: {}, blockIds: {} },
+      parseDOM: [
+        {
+          tag: "div[data-block-content='syncedBlock']",
+          getAttrs: (dom: HTMLElement) => ({
+            noteId: dom.dataset.noteId ?? "",
+            blockIds: (dom.dataset.refBlockIds ?? "").split(",").filter(Boolean),
+          }),
+        },
+      ],
+      toDOM: (node) => [
+        "div",
+        {
+          "data-block-content": "syncedBlock",
+          "data-note-id": node.attrs.noteId as string,
+          "data-ref-block-ids": (node.attrs.blockIds as string[]).join(","),
+        },
+      ],
+    },
+
     text: { group: "inline" },
 
     // URL のインラインチップ表現（favicon + タイトル）
