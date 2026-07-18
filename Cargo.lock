@@ -2986,6 +2986,7 @@ name = "monica-domain"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
  "strum",
 ]
 
@@ -3088,6 +3089,7 @@ dependencies = [
  "monica-domain",
  "monica-paths",
  "monica-runtime",
+ "monica-settings",
  "monica-storage-sqlite",
  "rust-embed",
  "serde",

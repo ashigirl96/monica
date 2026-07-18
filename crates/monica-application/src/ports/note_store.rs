@@ -1,10 +1,10 @@
 use anyhow::Result;
 
-use monica_domain::{DailyNoteCount, Note, NoteSummary, UpdateNote};
+use monica_domain::{DailyNoteCount, Note, NoteKind, NoteSummary, UpdateNote};
 
 pub trait NoteStore {
-    /// Creates a note with all defaults (id, kind, empty content, local date, timestamps).
-    fn create_note(&mut self) -> Result<Note>;
+    /// Creates a daily note with all defaults (id, empty content, logical date, timestamps).
+    fn create_note(&mut self, day_boundary_hour: u8) -> Result<Note>;
     fn get_note(&self, id: &str) -> Result<Option<Note>>;
     fn list_notes(&self, from: Option<&str>, to: Option<&str>) -> Result<Vec<NoteSummary>>;
     /// One project's notes, newest first (same ordering as [`list_notes`](Self::list_notes)).
@@ -14,8 +14,12 @@ pub trait NoteStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<NoteSummary>>;
-    /// Full replace; returns `None` when the note does not exist (or is soft-deleted).
+    /// Replaces content (and, for essays, title); returns `None` when the note does not
+    /// exist (or is soft-deleted). kind は変更しない — 遷移は [`set_note_kind`](Self::set_note_kind)。
     fn update_note(&mut self, id: &str, update: UpdateNote) -> Result<Option<Note>>;
+    /// Writes the kind (with its payload columns) verbatim; transition rules are the
+    /// caller's responsibility. Returns `None` when the note does not exist (or is deleted).
+    fn set_note_kind(&mut self, id: &str, kind: &NoteKind) -> Result<Option<Note>>;
     /// Soft delete: sets `deleted_at`; the row survives for [`restore_note`](Self::restore_note).
     /// Returns `false` when the note does not exist (or is already deleted).
     fn delete_note(&mut self, id: &str) -> Result<bool>;
@@ -26,4 +30,6 @@ pub trait NoteStore {
         from: Option<&str>,
         to: Option<&str>,
     ) -> Result<Vec<DailyNoteCount>>;
+    /// day boundary 設定を適用した「今日」の logical date（`YYYY-MM-DD`）。
+    fn logical_today(&self, day_boundary_hour: u8) -> Result<String>;
 }

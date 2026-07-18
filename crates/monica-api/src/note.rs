@@ -1,19 +1,19 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NoteKind {
-    Essay,
-    Journaling,
-    Memo,
+    Project { project_id: String },
+    Daily,
+    Essay { title: String },
 }
 
 impl From<monica_domain::NoteKind> for NoteKind {
     fn from(value: monica_domain::NoteKind) -> Self {
         match value {
-            monica_domain::NoteKind::Essay => Self::Essay,
-            monica_domain::NoteKind::Journaling => Self::Journaling,
-            monica_domain::NoteKind::Memo => Self::Memo,
+            monica_domain::NoteKind::Project { project_id } => Self::Project { project_id },
+            monica_domain::NoteKind::Daily => Self::Daily,
+            monica_domain::NoteKind::Essay { title } => Self::Essay { title },
         }
     }
 }
@@ -21,9 +21,28 @@ impl From<monica_domain::NoteKind> for NoteKind {
 impl From<NoteKind> for monica_domain::NoteKind {
     fn from(value: NoteKind) -> Self {
         match value {
-            NoteKind::Essay => Self::Essay,
-            NoteKind::Journaling => Self::Journaling,
-            NoteKind::Memo => Self::Memo,
+            NoteKind::Project { project_id } => Self::Project { project_id },
+            NoteKind::Daily => Self::Daily,
+            NoteKind::Essay { title } => Self::Essay { title },
+        }
+    }
+}
+
+/// kind 遷移リクエスト。Essay に title を載せない（daily → essay は常に空 title）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SetNoteKind {
+    Daily,
+    Essay,
+    Project { project_id: String },
+}
+
+impl From<SetNoteKind> for monica_domain::NoteKindTarget {
+    fn from(value: SetNoteKind) -> Self {
+        match value {
+            SetNoteKind::Daily => Self::Daily,
+            SetNoteKind::Essay => Self::Essay,
+            SetNoteKind::Project { project_id } => Self::Project { project_id },
         }
     }
 }
@@ -37,9 +56,7 @@ fn content_value(content: monica_domain::RawJson) -> serde_json::Value {
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct Note {
     pub id: String,
-    pub title: Option<String>,
     pub kind: NoteKind,
-    pub project_id: Option<String>,
     /// ProseMirror doc。TS 側でも opaque に扱うので unknown で export する。
     #[specta(type = specta_typescript::Unknown)]
     pub content: serde_json::Value,
@@ -52,9 +69,7 @@ impl From<monica_domain::Note> for Note {
     fn from(value: monica_domain::Note) -> Self {
         Self {
             id: value.id.into_string(),
-            title: value.title,
             kind: value.kind.into(),
-            project_id: value.project_id,
             content: content_value(value.content),
             date: value.date,
             created_at: value.created_at,
@@ -66,9 +81,7 @@ impl From<monica_domain::Note> for Note {
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct NoteSummary {
     pub id: String,
-    pub title: Option<String>,
     pub kind: NoteKind,
-    pub project_id: Option<String>,
     pub preview: Option<String>,
     pub date: String,
     pub created_at: String,
@@ -79,9 +92,7 @@ impl From<monica_domain::NoteSummary> for NoteSummary {
     fn from(value: monica_domain::NoteSummary) -> Self {
         Self {
             id: value.id.into_string(),
-            title: value.title,
             kind: value.kind.into(),
-            project_id: value.project_id,
             preview: value.preview,
             date: value.date,
             created_at: value.created_at,
@@ -105,11 +116,11 @@ impl From<monica_domain::NotePage> for NotePage {
     }
 }
 
+/// autosave の置換 payload。kind の変更は POST /api/notes/{id}/kind 専用で、ここには載らない。
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct UpdateNote {
+    /// Essay の title 全置換。null = 触らない。essay 以外の note では無視される。
     pub title: Option<String>,
-    pub kind: NoteKind,
-    pub project_id: Option<String>,
     #[specta(type = specta_typescript::Unknown)]
     pub content: serde_json::Value,
 }
@@ -118,11 +129,15 @@ impl From<UpdateNote> for monica_domain::UpdateNote {
     fn from(value: UpdateNote) -> Self {
         Self {
             title: value.title,
-            kind: value.kind.into(),
-            project_id: value.project_id,
             content: monica_domain::RawJson::from(value.content.to_string()),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
+pub struct NotesToday {
+    /// day boundary 設定を適用した logical date（`YYYY-MM-DD`）。
+    pub date: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
@@ -135,5 +150,46 @@ pub struct DailyNoteCount {
 impl From<monica_domain::DailyNoteCount> for DailyNoteCount {
     fn from(value: monica_domain::DailyNoteCount) -> Self {
         Self { date: value.date, count: value.count }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kind_mirror_roundtrips_and_matches_domain_serde() {
+        let cases = [
+            monica_domain::NoteKind::Project { project_id: "o/r".to_string() },
+            monica_domain::NoteKind::Daily,
+            monica_domain::NoteKind::Essay { title: "t".to_string() },
+        ];
+        for domain in cases {
+            let api: NoteKind = domain.clone().into();
+            assert_eq!(
+                serde_json::to_string(&api).unwrap(),
+                serde_json::to_string(&domain).unwrap(),
+            );
+            let back: monica_domain::NoteKind = api.into();
+            assert_eq!(back, domain);
+        }
+    }
+
+    #[test]
+    fn set_note_kind_maps_to_domain_target() {
+        assert_eq!(
+            monica_domain::NoteKindTarget::from(SetNoteKind::Daily),
+            monica_domain::NoteKindTarget::Daily
+        );
+        assert_eq!(
+            monica_domain::NoteKindTarget::from(SetNoteKind::Essay),
+            monica_domain::NoteKindTarget::Essay
+        );
+        assert_eq!(
+            monica_domain::NoteKindTarget::from(SetNoteKind::Project {
+                project_id: "o/r".to_string()
+            }),
+            monica_domain::NoteKindTarget::Project { project_id: "o/r".to_string() }
+        );
     }
 }

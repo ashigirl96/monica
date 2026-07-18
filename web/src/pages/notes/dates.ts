@@ -22,9 +22,8 @@ export function addDays(key: string, days: number): string {
   return toKey(d);
 }
 
-/** 今日を末尾とする直近7日。デフォルトのサイドバー表示範囲 */
-export function rollingWeek(): DateRange {
-  const today = todayKey();
+/** today を末尾とする直近7日。デフォルトのサイドバー表示範囲 */
+export function rollingWeek(today: string): DateRange {
   return { from: addDays(today, -6), to: today };
 }
 

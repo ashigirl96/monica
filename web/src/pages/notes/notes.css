@@ -11,7 +11,7 @@
   --ink-hover: color-mix(in srgb, var(--ink) 6%, transparent);
   --ink-border: color-mix(in srgb, var(--ink) 18%, transparent);
   --paper: color-mix(in srgb, var(--background) 97%, #c9a35f);
-  --kind-journaling: #5e81ac;
+  --kind-daily: #5e81ac;
   --kind-essay: #bd6a52;
 }
 
@@ -28,7 +28,7 @@
   --ink-muted: color-mix(in srgb, var(--ink) 78%, transparent);
   --ink-faint: color-mix(in srgb, var(--ink) 58%, transparent);
   --ink-border: color-mix(in srgb, var(--ink) 24%, transparent);
-  --kind-journaling: #49678f;
+  --kind-daily: #49678f;
   --kind-essay: #a4543f;
 }
 

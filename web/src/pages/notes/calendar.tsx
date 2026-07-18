@@ -1,5 +1,5 @@
 import type { DateRange, Month } from "./dates";
-import { monthGrid, monthLabel, sameRange, todayKey, weekOf } from "./dates";
+import { monthGrid, monthLabel, sameRange, weekOf } from "./dates";
 
 /** 件数をインクの溜まりで表す。tier が上がるほど濃く・わずかに大きい */
 function InkBlot({ count }: { count: number }) {
@@ -42,6 +42,7 @@ export function NotesCalendar({
   month,
   counts,
   range,
+  today,
   onMonthChange,
   onSelectWeek,
   onToday,
@@ -49,11 +50,11 @@ export function NotesCalendar({
   month: Month;
   counts: Map<string, number>;
   range: DateRange;
+  today: string;
   onMonthChange: (delta: number) => void;
   onSelectWeek: (dayKey: string) => void;
   onToday: () => void;
 }) {
-  const today = todayKey();
   const weeks = monthGrid(month);
 
   return (

@@ -13,6 +13,7 @@ monica-application = { path = "../monica-application" }
 monica-domain = { path = "../monica-domain" }
 monica-paths = { path = "../monica-paths" }
 monica-runtime = { path = "../monica-runtime" }
+monica-settings = { path = "../monica-settings" }
 rust-embed = { version = "8", default-features = false }
 serde = { version = "1.0.228", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0.150", default-features = false, features = ["std"] }

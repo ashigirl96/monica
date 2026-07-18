@@ -30,7 +30,10 @@ pub use explanation::{Explanation, ExplanationMode, NewExplanation, repo_name_fr
 pub use external_reference::{ExternalIssue, ExternalReference, RefType};
 pub use ids::{ExplanationId, NoteId, TaskId, TaskRunId};
 pub use json::RawJson;
-pub use note::{DailyNoteCount, Note, NoteKind, NotePage, NoteSummary, UpdateNote, EMPTY_NOTE_DOC};
+pub use note::{
+    logical_date, DailyNoteCount, KindTransitionError, Note, NoteKind, NoteKindTarget, NotePage,
+    NoteSummary, UpdateNote, EMPTY_NOTE_DOC,
+};
 pub use notification::{NewNotificationIntent, NotificationIntent, NotificationKind};
 pub use project::{Project, Provider};
 pub use refs::{github_issue_url, parse_issue_number, parse_issue_ref, parse_owner_repo};

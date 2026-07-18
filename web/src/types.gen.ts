@@ -31,9 +31,7 @@ export type LinkPreview = {
 
 export type Note = {
   id: string;
-  title: string | null;
   kind: NoteKind;
-  project_id: string | null;
   /**  ProseMirror doc。TS 側でも opaque に扱うので unknown で export する。 */
   content: unknown;
   date: string;
@@ -41,7 +39,10 @@ export type Note = {
   updated_at: string;
 };
 
-export type NoteKind = "essay" | "journaling" | "memo";
+export type NoteKind =
+  | { kind: "project"; project_id: string }
+  | { kind: "daily" }
+  | { kind: "essay"; title: string };
 
 export type NotePage = {
   items: NoteSummary[];
@@ -50,22 +51,35 @@ export type NotePage = {
 
 export type NoteSummary = {
   id: string;
-  title: string | null;
   kind: NoteKind;
-  project_id: string | null;
   preview: string | null;
   date: string;
   created_at: string;
   updated_at: string;
 };
 
+export type NotesSettings = {
+  day_boundary_hour: number;
+};
+
+export type NotesToday = {
+  /**  day boundary 設定を適用した logical date（`YYYY-MM-DD`）。 */
+  date: string;
+};
+
 export type ProjectOption = {
   id: string;
 };
 
+/**  kind 遷移リクエスト。Essay に title を載せない（daily → essay は常に空 title）。 */
+export type SetNoteKind =
+  | { kind: "daily" }
+  | { kind: "essay" }
+  | { kind: "project"; project_id: string };
+
+/**  autosave の置換 payload。kind の変更は POST /api/notes/{id}/kind 専用で、ここには載らない。 */
 export type UpdateNote = {
+  /**  Essay の title 全置換。null = 触らない。essay 以外の note では無視される。 */
   title: string | null;
-  kind: NoteKind;
-  project_id: string | null;
   content: unknown;
 };

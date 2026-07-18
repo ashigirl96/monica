@@ -177,13 +177,66 @@ struct DateRangeQuery {
     to: Option<String>,
 }
 
+fn load_notes_settings() -> Result<monica_settings::NotesSettings, AppError> {
+    let base = monica_paths::base_dir()?;
+    Ok(monica_settings::Settings::load_from(&base)?.notes)
+}
+
 async fn create_note() -> Result<(StatusCode, Json<monica_api::ApiNote>), AppError> {
     let note = blocking(|| {
+        let settings = load_notes_settings()?;
         let mut monica = open()?;
-        Ok(monica.notes().create_note()?)
+        Ok(monica.notes().create_note(settings.day_boundary_hour)?)
     })
     .await?;
     Ok((StatusCode::CREATED, Json(note.into())))
+}
+
+async fn set_note_kind(
+    Path(id): Path<String>,
+    Json(body): Json<monica_api::ApiSetNoteKind>,
+) -> Result<Json<monica_api::ApiNote>, AppError> {
+    let note = blocking(move || {
+        let mut monica = open()?;
+        Ok(monica.notes().set_note_kind(&id, body.into())?)
+    })
+    .await?;
+    Ok(Json(note.into()))
+}
+
+async fn notes_today() -> Result<Json<monica_api::ApiNotesToday>, AppError> {
+    let date = blocking(|| {
+        let settings = load_notes_settings()?;
+        let mut monica = open()?;
+        Ok(monica.notes().logical_today(settings.day_boundary_hour)?)
+    })
+    .await?;
+    Ok(Json(monica_api::ApiNotesToday { date }))
+}
+
+async fn get_notes_settings() -> Result<Json<monica_api::NotesSettings>, AppError> {
+    let settings = blocking(load_notes_settings).await?;
+    Ok(Json(settings.into()))
+}
+
+async fn put_notes_settings(
+    Json(body): Json<monica_api::NotesSettings>,
+) -> Result<Response, AppError> {
+    let incoming: monica_settings::NotesSettings = body.into();
+    // ApplicationError::Validation は 404 に写像されるので、入力エラーはここで 422 に落とす。
+    if incoming.validate().is_err() {
+        return Ok(StatusCode::UNPROCESSABLE_ENTITY.into_response());
+    }
+    let saved = blocking(move || {
+        let base = monica_paths::base_dir()?;
+        // read-modify-write: translate など他セクションを保存で消さない
+        let mut settings = monica_settings::Settings::load_from(&base)?;
+        settings.notes = incoming;
+        settings.save_to(&base)?;
+        Ok(settings.notes)
+    })
+    .await?;
+    Ok(Json(monica_api::NotesSettings::from(saved)).into_response())
 }
 
 async fn list_notes(
@@ -327,13 +380,16 @@ fn build_router(port: u16) -> Router {
         .route("/api/notes", get(list_notes).post(create_note))
         .route("/api/notes/by-project", get(list_project_notes))
         .route("/api/notes/daily-counts", get(daily_note_counts))
+        .route("/api/notes/today", get(notes_today))
         .route(
             "/api/notes/{id}",
             get(get_note).put(update_note).delete(delete_note),
         )
+        .route("/api/notes/{id}/kind", post(set_note_kind))
         .route("/api/notes/{id}/restore", post(restore_note))
         .route("/api/ogp", get(get_ogp))
         .route("/api/projects", get(list_projects))
+        .route("/api/settings/notes", get(get_notes_settings).put(put_notes_settings))
         .route("/explanations", get(spa_index))
         .route("/explanations/", get(spa_index))
         .route("/explanations/{id}", get(spa_index))
@@ -341,6 +397,7 @@ fn build_router(port: u16) -> Router {
         .route("/notes", get(spa_index))
         .route("/notes/", get(spa_index))
         .route("/notes/{id}", get(spa_index))
+        .route("/settings", get(spa_index))
         .route("/assets/{*path}", get(spa_asset))
         .route("/favicon.png", get(favicon))
         .layer(middleware::from_fn_with_state(port, require_local_host))
@@ -679,27 +736,51 @@ mod tests {
         serde_json::from_str(&body_string(response).await).unwrap()
     }
 
+    async fn post_json_req(uri: &str, body: &serde_json::Value) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("host", "127.0.0.1:19999")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    async fn set_kind(id: &str, body: serde_json::Value) -> Response {
+        app()
+            .oneshot(post_json_req(&format!("/api/notes/{id}/kind"), &body).await)
+            .await
+            .unwrap()
+    }
+
+    async fn fetch_note(id: &str) -> serde_json::Value {
+        let response = app().oneshot(get_req(&format!("/api/notes/{id}"))).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        serde_json::from_str(&body_string(response).await).unwrap()
+    }
+
     #[tokio::test]
-    async fn post_create_note_returns_defaults() {
+    async fn post_create_note_returns_daily_defaults() {
         let created = create_note_via_api().await;
         assert!(created["id"].as_str().unwrap().starts_with("note-"));
-        assert!(created["title"].is_null());
-        assert_eq!(created["kind"], "memo");
-        assert!(created["project_id"].is_null());
+        assert_eq!(created["kind"], serde_json::json!({"kind": "daily"}));
+        assert!(created.get("title").is_none(), "title は kind payload に吸収済み");
+        assert!(created.get("project_id").is_none());
         assert_eq!(created["content"]["type"], "doc");
         let date = created["date"].as_str().unwrap();
         assert_eq!(date.len(), 10, "date must be YYYY-MM-DD, got {date}");
     }
 
     #[tokio::test]
-    async fn put_updates_note_and_get_round_trips() {
+    async fn put_updates_content_but_cannot_change_kind() {
         let created = create_note_via_api().await;
         let id = created["id"].as_str().unwrap();
 
+        // 旧 payload の kind / project_id を混ぜても無視され、daily の title も付かない
         let body = serde_json::json!({
-            "title": "morning pages",
-            "kind": "essay",
-            "project_id": null,
+            "title": "ignored on daily",
+            "kind": {"kind": "essay", "title": "smuggled"},
+            "project_id": "o/smuggled",
             "content": {"type": "doc", "content": []},
         });
         let response = app()
@@ -708,50 +789,172 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-        let response = app()
-            .oneshot(get_req(&format!("/api/notes/{id}")))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let fetched: serde_json::Value =
-            serde_json::from_str(&body_string(response).await).unwrap();
-        assert_eq!(fetched["title"], "morning pages");
-        assert_eq!(fetched["kind"], "essay");
+        let fetched = fetch_note(id).await;
+        assert_eq!(fetched["kind"], serde_json::json!({"kind": "daily"}));
         assert_eq!(fetched["date"], created["date"]);
     }
 
     #[tokio::test]
-    async fn put_with_unknown_project_returns_404() {
+    async fn kind_transitions_daily_essay_round_trip() {
         let created = create_note_via_api().await;
         let id = created["id"].as_str().unwrap();
+
+        // daily → essay は空 title で生まれる
+        let response = set_kind(id, serde_json::json!({"kind": "essay"})).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let essay: serde_json::Value = serde_json::from_str(&body_string(response).await).unwrap();
+        assert_eq!(essay["kind"], serde_json::json!({"kind": "essay", "title": ""}));
+
+        // essay の title は PUT で編集できる
         let body = serde_json::json!({
-            "title": null,
-            "kind": "memo",
-            "project_id": "o/missing-project",
+            "title": "morning pages",
             "content": {"type": "doc", "content": []},
         });
         let response = app()
             .oneshot(put_json_req(&format!("/api/notes/{id}"), &body))
             .await
             .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let fetched = fetch_note(id).await;
+        assert_eq!(fetched["kind"], serde_json::json!({"kind": "essay", "title": "morning pages"}));
+
+        // essay → daily は title を破棄する
+        let response = set_kind(id, serde_json::json!({"kind": "daily"})).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let fetched = fetch_note(id).await;
+        assert_eq!(fetched["kind"], serde_json::json!({"kind": "daily"}));
+    }
+
+    #[tokio::test]
+    async fn kind_promotion_to_project_is_terminal() {
+        migrated();
+        let store = monica_storage_sqlite::SqliteStore::open().unwrap();
+        store
+            .upsert_project(
+                &monica_domain::Project::from_repo("webtest/promotion"),
+                &monica_application::ExecutionProfile::default(),
+            )
+            .unwrap();
+
+        let created = create_note_via_api().await;
+        let id = created["id"].as_str().unwrap();
+
+        let response =
+            set_kind(id, serde_json::json!({"kind": "project", "project_id": "webtest/promotion"}))
+                .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let promoted: serde_json::Value =
+            serde_json::from_str(&body_string(response).await).unwrap();
+        assert_eq!(
+            promoted["kind"],
+            serde_json::json!({"kind": "project", "project_id": "webtest/promotion"})
+        );
+
+        // project からの脱出経路なし
+        for target in [
+            serde_json::json!({"kind": "daily"}),
+            serde_json::json!({"kind": "essay"}),
+            serde_json::json!({"kind": "project", "project_id": "webtest/promotion"}),
+        ] {
+            let response = set_kind(id, target.clone()).await;
+            assert_eq!(response.status(), StatusCode::CONFLICT, "target: {target}");
+        }
+    }
+
+    #[tokio::test]
+    async fn kind_transition_rejects_essay_to_project_and_bad_input() {
+        migrated();
+        let store = monica_storage_sqlite::SqliteStore::open().unwrap();
+        store
+            .upsert_project(
+                &monica_domain::Project::from_repo("webtest/no-direct"),
+                &monica_application::ExecutionProfile::default(),
+            )
+            .unwrap();
+
+        let created = create_note_via_api().await;
+        let id = created["id"].as_str().unwrap();
+        let response = set_kind(id, serde_json::json!({"kind": "essay"})).await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // essay → project 直行なし
+        let response =
+            set_kind(id, serde_json::json!({"kind": "project", "project_id": "webtest/no-direct"}))
+                .await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+
+        // 未知の project は 404、不正 body は 422
+        let daily = create_note_via_api().await;
+        let daily_id = daily["id"].as_str().unwrap();
+        let response =
+            set_kind(daily_id, serde_json::json!({"kind": "project", "project_id": "o/missing"}))
+                .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let response = set_kind(daily_id, serde_json::json!({"kind": "diary"})).await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let response = set_kind("note-999999", serde_json::json!({"kind": "essay"})).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
-    async fn put_with_invalid_kind_returns_422() {
-        let created = create_note_via_api().await;
-        let id = created["id"].as_str().unwrap();
-        let body = serde_json::json!({
-            "title": null,
-            "kind": "diary",
-            "project_id": null,
-            "content": {"type": "doc", "content": []},
-        });
+    async fn notes_today_returns_a_date() {
+        let response = app().oneshot(get_req("/api/notes/today")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let today: serde_json::Value = serde_json::from_str(&body_string(response).await).unwrap();
+        let date = today["date"].as_str().unwrap();
+        assert_eq!(date.len(), 10, "date must be YYYY-MM-DD, got {date}");
+    }
+
+    #[tokio::test]
+    async fn notes_settings_round_trip_and_validation() {
+        migrated();
+        let response = app().oneshot(get_req("/api/settings/notes")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let settings: serde_json::Value =
+            serde_json::from_str(&body_string(response).await).unwrap();
+        assert!(settings["day_boundary_hour"].as_u64().unwrap() <= 23);
+
         let response = app()
-            .oneshot(put_json_req(&format!("/api/notes/{id}"), &body))
+            .oneshot(put_json_req(
+                "/api/settings/notes",
+                &serde_json::json!({"day_boundary_hour": 5}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let saved: serde_json::Value = serde_json::from_str(&body_string(response).await).unwrap();
+        assert_eq!(saved["day_boundary_hour"], 5);
+
+        let response = app().oneshot(get_req("/api/settings/notes")).await.unwrap();
+        let settings: serde_json::Value =
+            serde_json::from_str(&body_string(response).await).unwrap();
+        assert_eq!(settings["day_boundary_hour"], 5);
+
+        // 範囲外は 422 で、保存済みの値は変わらない
+        let response = app()
+            .oneshot(put_json_req(
+                "/api/settings/notes",
+                &serde_json::json!({"day_boundary_hour": 24}),
+            ))
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        // read-modify-write が translate セクションを壊していない
+        let base = monica_paths::base_dir().unwrap();
+        let on_disk = monica_settings::Settings::load_from(&base).unwrap();
+        assert_eq!(on_disk.notes.day_boundary_hour, 5);
+        assert_eq!(on_disk.translate, monica_settings::TranslateSettings::default());
+
+        // 他テストの create_note が日付跨ぎの境界に巻き込まれないよう default へ戻す
+        let response = app()
+            .oneshot(put_json_req(
+                "/api/settings/notes",
+                &serde_json::json!({"day_boundary_hour": 0}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]
@@ -827,9 +1030,7 @@ mod tests {
         let doc = serde_json::json!({"type":"doc","content":[{"type":"blockGroup","content":[
             {"type":"blockContainer","content":[{"type":"paragraph","content":[{"type":"text","text":"preview line"}]}]}
         ]}]});
-        let body = serde_json::json!({
-            "title": null, "kind": "journaling", "project_id": null, "content": doc,
-        });
+        let body = serde_json::json!({ "title": null, "content": doc });
         let response = app()
             .oneshot(put_json_req(&format!("/api/notes/{id}"), &body))
             .await
@@ -850,7 +1051,7 @@ mod tests {
             .find(|n| n["id"] == id)
             .expect("note must be listed within its own date range");
         assert_eq!(entry["preview"], "preview line");
-        assert_eq!(entry["kind"], "journaling");
+        assert_eq!(entry["kind"], serde_json::json!({"kind": "daily"}));
         assert!(entry.get("content").is_none(), "summary must not ship content");
 
         // date を外したレンジ → 含まれない
@@ -877,18 +1078,15 @@ mod tests {
             .unwrap();
 
         let mut ids = Vec::new();
-        for title in ["first", "second"] {
+        for _ in 0..2 {
             let created = create_note_via_api().await;
             let id = created["id"].as_str().unwrap().to_string();
-            let body = serde_json::json!({
-                "title": title, "kind": "memo", "project_id": "webtest/by-project",
-                "content": {"type": "doc", "content": []},
-            });
-            let response = app()
-                .oneshot(put_json_req(&format!("/api/notes/{id}"), &body))
-                .await
-                .unwrap();
-            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            let response = set_kind(
+                &id,
+                serde_json::json!({"kind": "project", "project_id": "webtest/by-project"}),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::OK);
             ids.push(id);
         }
 
@@ -989,7 +1187,7 @@ mod tests {
 
     #[tokio::test]
     async fn spa_notes_routes_return_html() {
-        for uri in ["/notes", "/notes/note-1"] {
+        for uri in ["/notes", "/notes/note-1", "/settings"] {
             let response = app().oneshot(get_req(uri)).await.unwrap();
             let status = response.status();
             if WebAssets::get("index.html").is_some() {
@@ -1044,6 +1242,9 @@ mod tests {
             .register::<monica_api::ApiNoteSummary>()
             .register::<monica_api::ApiNotePage>()
             .register::<monica_api::ApiNoteKind>()
+            .register::<monica_api::ApiSetNoteKind>()
+            .register::<monica_api::ApiNotesToday>()
+            .register::<monica_api::NotesSettings>()
             .register::<monica_api::ApiUpdateNote>()
             .register::<monica_api::ApiDailyNoteCount>()
             .register::<monica_api::ApiLinkPreview>()
