@@ -5,6 +5,11 @@ export function newBlockId(): string {
   return crypto.randomUUID();
 }
 
+/** noteMention のリンク先 URL。href の組み立てはここ 1 箇所（分解は internalNoteId） */
+export function noteHref(noteId: string): string {
+  return `/notes/${noteId}`;
+}
+
 /** null 値を落として data 属性オブジェクトにする（toDOM の条件付き属性用） */
 function dataAttrs(attrs: Record<string, string | null>): Record<string, string> {
   return Object.fromEntries(
@@ -275,7 +280,7 @@ export const schema = new Schema({
       toDOM: (node) => [
         "a",
         {
-          href: `/notes/${node.attrs.noteId as string}`,
+          href: noteHref(node.attrs.noteId as string),
           "data-note-mention": node.attrs.noteId as string,
         },
         node.attrs.noteId as string,

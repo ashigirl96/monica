@@ -11,6 +11,13 @@ export type BlockEditorHandle = {
   focusStart: () => void;
 };
 
+/** 最新の props 値を mount 時固定の callback から読むための ref（再 mount 防止） */
+function useLatest<T>(value: T): { readonly current: T } {
+  const ref = useRef(value);
+  ref.current = value;
+  return ref;
+}
+
 type BlockEditorProps = {
   /** ProseMirror doc の JSON。mount 時に一度だけ読む */
   initialDoc?: unknown;
@@ -52,24 +59,18 @@ export function BlockEditor({
   const hostRef = useRef<HTMLDivElement>(null);
   const initialDocRef = useRef(initialDoc);
   const autoFocusRef = useRef(autoFocus);
-  const onDocChangeRef = useRef(onDocChange);
-  onDocChangeRef.current = onDocChange;
-  const onExitUpRef = useRef(onExitUp);
-  onExitUpRef.current = onExitUp;
+  const onDocChangeRef = useLatest(onDocChange);
+  const onExitUpRef = useLatest(onExitUp);
+  const fetchLinkMetadataRef = useLatest(fetchLinkMetadata);
+  const searchNoteMentionsRef = useLatest(searchNoteMentions);
+  const resolveNoteMentionRef = useLatest(resolveNoteMention);
+  const onNoteMentionClickRef = useLatest(onNoteMentionClick);
+  const onUnmountRef = useLatest(onUnmount);
+  // callback の有無は plugin / keymap の登録可否を決めるため mount 時に固定される
   const hasExitUp = onExitUp !== undefined;
-  const fetchLinkMetadataRef = useRef(fetchLinkMetadata);
-  fetchLinkMetadataRef.current = fetchLinkMetadata;
   const hasFetchLinkMetadata = fetchLinkMetadata !== undefined;
-  const searchNoteMentionsRef = useRef(searchNoteMentions);
-  searchNoteMentionsRef.current = searchNoteMentions;
   const hasSearchNoteMentions = searchNoteMentions !== undefined;
-  const resolveNoteMentionRef = useRef(resolveNoteMention);
-  resolveNoteMentionRef.current = resolveNoteMention;
   const hasResolveNoteMention = resolveNoteMention !== undefined;
-  const onNoteMentionClickRef = useRef(onNoteMentionClick);
-  onNoteMentionClickRef.current = onNoteMentionClick;
-  const onUnmountRef = useRef(onUnmount);
-  onUnmountRef.current = onUnmount;
   // initialDoc 等と同じく mount 時に一度だけ読む（差し替えは想定しない）
   const handleRefAtMount = useRef(handleRef);
 

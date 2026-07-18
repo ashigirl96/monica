@@ -106,7 +106,6 @@ impl From<monica_domain::NoteSummary> for NoteSummary {
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct NoteMention {
     pub id: String,
-    pub kind: NoteKind,
     pub display_name: String,
     /// 検索 dropdown のサブラベル。解決（単一取得）では返さない。
     pub preview: Option<String>,
@@ -115,19 +114,14 @@ pub struct NoteMention {
 impl From<monica_domain::NoteSummary> for NoteMention {
     fn from(value: monica_domain::NoteSummary) -> Self {
         let display_name = value.kind.display_name(&value.date);
-        Self {
-            id: value.id.into_string(),
-            kind: value.kind.into(),
-            display_name,
-            preview: value.preview,
-        }
+        Self { id: value.id.into_string(), display_name, preview: value.preview }
     }
 }
 
 impl From<monica_domain::Note> for NoteMention {
     fn from(value: monica_domain::Note) -> Self {
         let display_name = value.kind.display_name(&value.date);
-        Self { id: value.id.into_string(), kind: value.kind.into(), display_name, preview: None }
+        Self { id: value.id.into_string(), display_name, preview: None }
     }
 }
 

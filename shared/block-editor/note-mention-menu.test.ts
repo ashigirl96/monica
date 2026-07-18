@@ -39,9 +39,9 @@ describe("internalNoteId", () => {
   });
 });
 
-/** `[[query` 入力済みの doc。pos は最初の `[` の位置、カーソルは query 末尾 */
-function typedDoc(query: string, before = ""): { state: EditorState; pos: number } {
-  const text = `${before}[[${query}`;
+/** `[[query` 入力済みの doc。pos は最初の `[` の位置、カーソルは query 末尾（after はその後ろ） */
+function typedDoc(query: string, before = "", after = ""): { state: EditorState; pos: number } {
+  const text = `${before}[[${query}${after}`;
   const doc: PMNode = nodes.doc.create(
     null,
     nodes.blockGroup.create(
@@ -88,20 +88,7 @@ describe("insertNoteMentionTransaction", () => {
 
   test("mention の後ろのテキストは保持される", () => {
     // カーソルが query 末尾・後続テキストありの状態（paste 直後など）
-    const query = "/notes/note-9";
-    const text = `[[${query} tail`;
-    const doc: PMNode = nodes.doc.create(
-      null,
-      nodes.blockGroup.create(
-        null,
-        createContainer(nodes.paragraph.create(null, schema.text(text)), [], "a"),
-      ),
-    );
-    const pos = 3;
-    const state = EditorState.create({
-      doc,
-      selection: TextSelection.create(doc, pos + 2 + query.length),
-    });
+    const { state, pos } = typedDoc("/notes/note-9", "", " tail");
     const tr = insertNoteMentionTransaction(state, { pos }, "note-9");
     const next = state.apply(tr);
 

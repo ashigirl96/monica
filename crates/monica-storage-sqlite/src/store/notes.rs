@@ -149,6 +149,8 @@ impl NoteStore for SqliteStore {
         // coarse な superset を返すだけ（正確な絞り込みは facade）なので、`%`/`_` を
         // エスケープしない over-match は許容する。空 q は date（非 NULL）に必ず一致し
         // 「最近ノート」一覧を兼ねる。
+        // 既知の制限: 空 title essay の display_name "Untitled" は導出値でどの列にも
+        // 現れないため、"unt" 等の検索は coarse で落ちる（superset が破れる唯一のケース）。
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {NOTE_COLUMNS} FROM notes
              WHERE deleted_at IS NULL

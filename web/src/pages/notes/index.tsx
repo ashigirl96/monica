@@ -5,7 +5,6 @@ import type { NoteMentionItem } from "@shared/block-editor/note-mention-menu";
 import type { NoteMentionInfo } from "@shared/block-editor/node-views";
 import { fuzzyMatch } from "@shared/fuzzy-picker/use-fuzzy-picker";
 import {
-  clearNoteMentionCache,
   createNote,
   dailyNoteCounts,
   deleteNote,
@@ -58,11 +57,6 @@ async function searchNoteMentions(query: string): Promise<NoteMentionItem[]> {
   return mentions.map((m) => ({ id: m.id, displayName: m.display_name, preview: m.preview }));
 }
 
-async function resolveNoteMention(noteId: string): Promise<NoteMentionInfo | null> {
-  const mention = await resolveNoteMentionApi(noteId);
-  return mention ? { displayName: mention.display_name } : null;
-}
-
 function EmptyState() {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
@@ -113,6 +107,9 @@ export function NotesPage({ id }: { id: string | null }) {
   // onDocChange は BlockEditor の再レンダー前に発火し得るため、closure の note ではなく
   // 常に最新のフィールドを持つ ref から保存 payload を組み立てる（stale title/kind の逆行防止）
   const noteRef = useRef<Note | null>(null);
+  // 同一 doc 内の重複 mention を 1 リクエストに畳む Promise 共有キャッシュ。
+  // 開くノートが変わるたび捨てるので、開き直しで表示名が最新タイトルに追従する
+  const mentionCacheRef = useRef(new Map<string, Promise<NoteMentionInfo | null>>());
 
   useEffect(() => {
     let cancelled = false;
@@ -220,6 +217,7 @@ export function NotesPage({ id }: { id: string | null }) {
   }, []);
 
   useEffect(() => {
+    mentionCacheRef.current = new Map();
     if (id === null) {
       noteRef.current = null;
       setNote(null);
@@ -228,8 +226,6 @@ export function NotesPage({ id }: { id: string | null }) {
     }
     // create / restore 直後はレスポンスで seed 済み（noteRef が既に同じ id）なので再フェッチしない
     if (noteRef.current?.id === id) return;
-    // 開き直しで mention の表示名を最新タイトルへ追従させる
-    clearNoteMentionCache();
     let cancelled = false;
     noteRef.current = null;
     setNote(null);
@@ -263,6 +259,18 @@ export function NotesPage({ id }: { id: string | null }) {
     },
     [flush],
   );
+
+  const resolveNoteMention = useCallback((noteId: string): Promise<NoteMentionInfo | null> => {
+    const cache = mentionCacheRef.current;
+    let promise = cache.get(noteId);
+    if (!promise) {
+      promise = resolveNoteMentionApi(noteId).then((m) =>
+        m ? { displayName: m.display_name } : null,
+      );
+      cache.set(noteId, promise);
+    }
+    return promise;
+  }, []);
 
   // 「今日の直近7日 + 今日の月」へ戻す。既に同じ表示なら state 同一性を保って refetch を抑止する
   const resetToToday = useCallback(() => {

@@ -22,6 +22,39 @@ export function positionMenuAt(view: EditorView, menu: HTMLElement, pos: number)
   menu.style.top = `${(coords.bottom - wrapperRect.top) / scale + 4}px`;
 }
 
+/** trigger 系メニュー共通のキーナビ（Escape / ↑↓ / Ctrl-n・p / Enter / Tab）。
+    メニューが key を消費したら true。 */
+export function handleMenuNavKey(
+  event: KeyboardEvent,
+  index: number,
+  handlers: {
+    itemCount: number;
+    onClose: () => void;
+    onNav: (index: number) => void;
+    /** 現在の index の項目を確定する（項目が無いときの close も呼び手の責務） */
+    onPick: () => void;
+  },
+): boolean {
+  if (event.key === "Escape") {
+    handlers.onClose();
+    return true;
+  }
+  const down = event.key === "ArrowDown" || (event.ctrlKey && event.key === "n");
+  const up = event.key === "ArrowUp" || (event.ctrlKey && event.key === "p");
+  if (down || up) {
+    if (handlers.itemCount > 0) {
+      const delta = down ? 1 : -1;
+      handlers.onNav((index + delta + handlers.itemCount) % handlers.itemCount);
+    }
+    return true;
+  }
+  if (event.key === "Enter" || event.key === "Tab") {
+    handlers.onPick();
+    return true;
+  }
+  return false;
+}
+
 export function menuItemButton(opts: {
   icon: HTMLElement;
   label: string;

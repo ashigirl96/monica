@@ -50,7 +50,9 @@ impl<B: Backend> NoteService<'_, B> {
     /// なので、ここで display_name / preview の部分一致に正確に絞る。
     pub fn search_note_mentions(&mut self, q: &str) -> ApplicationResult<Vec<NoteSummary>> {
         let q = q.trim().to_lowercase();
-        let mut items = self.m.repos.search_notes(&q, MENTION_COARSE_LIMIT)?;
+        // 空 q は precise フィルタで落ちる行が無いので overfetch 不要
+        let limit = if q.is_empty() { MENTION_SEARCH_LIMIT } else { MENTION_COARSE_LIMIT };
+        let mut items = self.m.repos.search_notes(&q, limit)?;
         items.retain(|s| {
             s.kind.display_name(&s.date).to_lowercase().contains(&q)
                 || s.preview.as_deref().is_some_and(|p| p.to_lowercase().contains(&q))

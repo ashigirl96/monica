@@ -1057,15 +1057,7 @@ mod tests {
         let id = created["id"].as_str().unwrap();
         let date = created["date"].as_str().unwrap();
 
-        let doc = serde_json::json!({"type":"doc","content":[{"type":"blockGroup","content":[
-            {"type":"blockContainer","content":[{"type":"paragraph","content":[{"type":"text","text":"preview line"}]}]}
-        ]}]});
-        let body = serde_json::json!({ "title": null, "content": doc });
-        let response = app()
-            .oneshot(put_json_req(&format!("/api/notes/{id}"), &body))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        put_note(id, None, doc_with_lines(&["preview line"])).await;
 
         // 自分の date を含むレンジ → 含まれる（並列テストの note と共存するため id で探す）
         let response = app()
@@ -1193,7 +1185,6 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0]["id"], id);
         assert_eq!(found[0]["display_name"], "wikilink zettel alpha");
-        assert_eq!(found[0]["kind"], serde_json::json!({"kind": "essay", "title": "wikilink zettel alpha"}));
     }
 
     #[tokio::test]

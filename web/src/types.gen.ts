@@ -50,7 +50,6 @@ export type NoteKind =
  */
 export type NoteMention = {
   id: string;
-  kind: NoteKind;
   display_name: string;
   /**  検索 dropdown のサブラベル。解決（単一取得）では返さない。 */
   preview: string | null;

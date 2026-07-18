@@ -4,7 +4,12 @@ import type { Attrs, NodeType } from "@milkdown/kit/prose/model";
 import { nodes } from "./schema";
 import { getBlockContext } from "./context";
 import { appendEmptyParagraphAfter, inlineToPlainText } from "./commands";
-import { createMenuOverlay, menuItemButton, positionMenuAt } from "./menu-overlay";
+import {
+  createMenuOverlay,
+  handleMenuNavKey,
+  menuItemButton,
+  positionMenuAt,
+} from "./menu-overlay";
 import { noteMentionMenuKey, slashKey } from "./menu-keys";
 
 export type SlashState =
@@ -219,29 +224,21 @@ export function slashMenuPlugin(): Plugin<SlashState> {
           return false;
         }
         const items = filterItems(state.query);
-        if (event.key === "Escape") {
+        const close = () =>
           view.dispatch(view.state.tr.setMeta(slashKey, { type: "close" } satisfies SlashMeta));
-          return true;
-        }
-        const down = event.key === "ArrowDown" || (event.ctrlKey && event.key === "n");
-        const up = event.key === "ArrowUp" || (event.ctrlKey && event.key === "p");
-        if (down || up) {
-          if (items.length === 0) return true;
-          const delta = down ? 1 : -1;
-          const index = (state.index + delta + items.length) % items.length;
-          view.dispatch(
-            view.state.tr.setMeta(slashKey, { type: "nav", index } satisfies SlashMeta),
-          );
-          return true;
-        }
-        if (event.key === "Enter" || event.key === "Tab") {
-          const item = items[Math.min(state.index, items.length - 1)];
-          if (item) applyItem(view, item);
-          else
-            view.dispatch(view.state.tr.setMeta(slashKey, { type: "close" } satisfies SlashMeta));
-          return true;
-        }
-        return false;
+        return handleMenuNavKey(event, state.index, {
+          itemCount: items.length,
+          onClose: close,
+          onNav: (index) =>
+            view.dispatch(
+              view.state.tr.setMeta(slashKey, { type: "nav", index } satisfies SlashMeta),
+            ),
+          onPick: () => {
+            const item = items[Math.min(state.index, items.length - 1)];
+            if (item) applyItem(view, item);
+            else close();
+          },
+        });
       },
     },
     view: (view) => new SlashMenuView(view),

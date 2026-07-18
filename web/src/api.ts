@@ -126,30 +126,16 @@ export async function searchNoteMentions(q: string): Promise<NoteMention[]> {
   return res.json();
 }
 
-// noteId → mention の解決結果を Promise ごと共有する（同一 doc 内の重複 mention を
-// 1 リクエストに畳む in-flight 共有兼キャッシュ）。null = dangling（404 も通信失敗も
-// 同じ扱いにして NodeView 側の分岐を増やさない）。
-const noteMentionCache = new Map<string, Promise<NoteMention | null>>();
-
-export function resolveNoteMention(id: string): Promise<NoteMention | null> {
-  const cached = noteMentionCache.get(id);
-  if (cached) return cached;
-  const promise = (async (): Promise<NoteMention | null> => {
-    try {
-      const res = await fetch(`/api/notes/mentions/${id}`);
-      if (!res.ok) return null;
-      return (await res.json()) as NoteMention;
-    } catch {
-      return null;
-    }
-  })();
-  noteMentionCache.set(id, promise);
-  return promise;
-}
-
-/** ノートを開き直すたびに呼び、mention の表示名を最新のタイトルに追従させる */
-export function clearNoteMentionCache(): void {
-  noteMentionCache.clear();
+// null = dangling（404 も通信失敗も同じ扱いにして NodeView 側の分岐を増やさない）。
+// キャッシュはここでは持たず、埋め込み側がエディタの寿命に合わせてスコープする。
+export async function resolveNoteMention(id: string): Promise<NoteMention | null> {
+  try {
+    const res = await fetch(`/api/notes/mentions/${id}`);
+    if (!res.ok) return null;
+    return (await res.json()) as NoteMention;
+  } catch {
+    return null;
+  }
 }
 
 // 失敗を null で返す: 呼び手（link-menu）はプレーンリンクへのフォールバックとして扱う

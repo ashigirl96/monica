@@ -3,7 +3,13 @@ import type { EditorState, Transaction } from "@milkdown/kit/prose/state";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import { nodes } from "./schema";
 import { getBlockContext } from "./context";
-import { createMenuOverlay, menuItemButton, positionMenuAt } from "./menu-overlay";
+import { BLOCKS_MIME, pastedUrl } from "./clipboard";
+import {
+  createMenuOverlay,
+  handleMenuNavKey,
+  menuItemButton,
+  positionMenuAt,
+} from "./menu-overlay";
 import { noteMentionMenuKey, slashKey } from "./menu-keys";
 
 export type NoteMentionItem = {
@@ -40,20 +46,15 @@ type NoteMentionMenuMeta =
 export function internalNoteId(text: string, origin: string): string | null {
   const trimmed = text.trim();
   if (!trimmed || /\s/.test(trimmed)) return null;
-  let path: string;
-  if (trimmed.startsWith("/")) {
-    path = trimmed.split(/[?#]/, 1)[0];
-  } else {
-    let url: URL;
-    try {
-      url = new URL(trimmed);
-    } catch {
-      return null;
-    }
-    if (url.origin !== origin) return null;
-    path = url.pathname;
+  let url: URL;
+  try {
+    // 相対 path は origin 基準で解決され、絶対 URL は自分の origin を保つ
+    url = new URL(trimmed, origin);
+  } catch {
+    return null;
   }
-  const match = /^\/notes\/([^/]+)\/?$/.exec(path);
+  if (url.origin !== origin) return null;
+  const match = /^\/notes\/([^/]+)\/?$/.exec(url.pathname);
   return match ? decodeURIComponent(match[1]) : null;
 }
 
@@ -120,11 +121,9 @@ class NoteMentionMenuView {
   }
 
   private fetch(query: string): void {
+    // 古い結果の破棄（stale ガード）は state.apply の query 照合に一元化されている
     this.search(query)
       .then((items) => {
-        // 遅れて解決した古い結果を反映しない（apply 側の query 照合と二重の防衛）
-        const current = noteMentionMenuKey.getState(this.view.state);
-        if (!current?.active || current.query !== query) return;
         this.view.dispatch(
           this.view.state.tr.setMeta(noteMentionMenuKey, {
             type: "results",
@@ -205,20 +204,19 @@ export function noteMentionMenuPlugin(search: SearchNoteMentions): Plugin<NoteMe
         return { ...value, pos, query };
       },
     },
+    // `[[URL]]` の閉じ `]]` を検出して全体を mention に変換する。query は apply() が
+    // transaction 単位で再計算するので、ここに置けばタイピング・paste・IME を問わず効く
+    appendTransaction(_trs, _old, newState) {
+      const state = noteMentionMenuKey.getState(newState);
+      if (!state?.active || !state.query.endsWith("]]")) return null;
+      const noteId = internalNoteId(state.query.slice(0, -2), window.location.origin);
+      if (!noteId) return null;
+      return insertNoteMentionTransaction(newState, state, noteId);
+    },
     props: {
       handleTextInput(view, from, to, text) {
         if (view.composing) return false;
         const state = noteMentionMenuKey.getState(view.state);
-        // `[[URL]]` の直接入力: 閉じ `]]` の 2 文字目で全体を mention に変換する
-        // （1 文字目の `]` は通常挿入され query の末尾に載っている）
-        if (state?.active && text === "]" && state.query.endsWith("]")) {
-          const noteId = internalNoteId(state.query.slice(0, -1), window.location.origin);
-          if (noteId) {
-            applyItem(view, noteId);
-            return true;
-          }
-          return false;
-        }
         if (text !== "[" || state?.active) return false;
         if (slashKey.getState(view.state)?.active) return false;
         const $from = view.state.doc.resolve(from);
@@ -240,41 +238,52 @@ export function noteMentionMenuPlugin(search: SearchNoteMentions): Plugin<NoteMe
       handleKeyDown(view, event) {
         const state = noteMentionMenuKey.getState(view.state);
         if (!state?.active) return false;
-        if (event.key === "Escape") {
+        const close = () =>
           view.dispatch(
             view.state.tr.setMeta(noteMentionMenuKey, {
               type: "close",
             } satisfies NoteMentionMenuMeta),
           );
-          return true;
-        }
         const items = displayItems(state);
-        const down = event.key === "ArrowDown" || (event.ctrlKey && event.key === "n");
-        const up = event.key === "ArrowUp" || (event.ctrlKey && event.key === "p");
-        if (down || up) {
-          if (items.length === 0) return true;
-          const delta = down ? 1 : -1;
-          const index = (state.index + delta + items.length) % items.length;
-          view.dispatch(
-            view.state.tr.setMeta(noteMentionMenuKey, {
-              type: "nav",
-              index,
-            } satisfies NoteMentionMenuMeta),
-          );
-          return true;
-        }
-        if (event.key === "Enter" || event.key === "Tab") {
-          const item = items[Math.min(state.index, items.length - 1)];
-          if (item) applyItem(view, item.noteId);
-          else
+        return handleMenuNavKey(event, state.index, {
+          itemCount: items.length,
+          onClose: close,
+          onNav: (index) =>
             view.dispatch(
               view.state.tr.setMeta(noteMentionMenuKey, {
-                type: "close",
+                type: "nav",
+                index,
               } satisfies NoteMentionMenuMeta),
-            );
+            ),
+          onPick: () => {
+            const item = items[Math.min(state.index, items.length - 1)];
+            if (item) applyItem(view, item.noteId);
+            else close();
+          },
+        });
+      },
+      // 内部ノート URL の paste は mention に自動変換する。この plugin ごと未登録
+      // （desktop journal）なら handler が存在せず、clipboard 側の従来動作に落ちる
+      handlePaste(view, event) {
+        if (event.clipboardData?.getData(BLOCKS_MIME)) return false;
+        const url = pastedUrl(event);
+        if (!url) return false;
+        const state = noteMentionMenuKey.getState(view.state);
+        if (state?.active) {
+          // メニュー中の URL paste は query の一部（link 化すると二重メニューになる）
+          view.dispatch(view.state.tr.insertText(url));
           return true;
         }
-        return false;
+        const sel = view.state.selection;
+        if (!sel.empty) return false;
+        const ctx = getBlockContext(sel.$from);
+        if (!ctx || ctx.contentNode.type === nodes.codeBlock) return false;
+        const noteId = internalNoteId(url, window.location.origin);
+        if (!noteId) return false;
+        view.dispatch(
+          insertNoteMentionTransaction(view.state, { pos: sel.from }, noteId).scrollIntoView(),
+        );
+        return true;
       },
     },
     view: (view) => new NoteMentionMenuView(view, search),

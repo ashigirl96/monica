@@ -5,7 +5,7 @@ import type {
   NodeViewConstructor,
   ViewMutationRecord,
 } from "@milkdown/kit/prose/view";
-import { nodes } from "./schema";
+import { nodes, noteHref } from "./schema";
 import { insertParagraphAfter } from "./commands";
 import { selectBlocks } from "./selection-state";
 import { blockSelectionKey } from "./selection-state";
@@ -417,7 +417,7 @@ class NoteMentionView implements NodeView {
     opts: EditorNodeViewOptions,
   ) {
     const noteId = node.attrs.noteId as string;
-    const href = `/notes/${noteId}`;
+    const href = noteHref(noteId);
     const anchor = el("a", "jb-mention jb-note-mention");
     anchor.contentEditable = "false";
     anchor.dataset.noteMention = noteId;
