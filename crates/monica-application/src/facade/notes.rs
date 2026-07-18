@@ -1,5 +1,5 @@
 use monica_domain::{
-    DailyNoteCount, Note, NoteId, NoteKindTarget, NotePage, NoteSummary, UpdateNote,
+    DailyNoteCount, Note, NoteId, NoteKindTarget, NotePage, NoteSummary, RawJson, UpdateNote,
 };
 
 use super::Backend;
@@ -67,6 +67,15 @@ impl<B: Backend> NoteService<'_, B> {
             .repos
             .get_note(id)?
             .ok_or_else(|| ApplicationError::not_found(format!("note {id} not found")))
+    }
+
+    /// synced block（transclusion）の解決。note 不在・削除済み・block 不在はすべて
+    /// not_found（フロントはいずれも dangling 表示なので区別しない）。
+    pub fn get_note_block(&mut self, id: &str, block_id: &str) -> ApplicationResult<RawJson> {
+        NoteId::parse(id)?;
+        self.m.repos.get_note_block(id, block_id)?.ok_or_else(|| {
+            ApplicationError::not_found(format!("block {block_id} not found in note {id}"))
+        })
     }
 
     pub fn update_note(&mut self, id: &str, update: UpdateNote) -> ApplicationResult<Note> {

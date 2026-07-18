@@ -125,6 +125,23 @@ impl From<monica_domain::Note> for NoteMention {
     }
 }
 
+/// synced block（transclusion）の解決結果。元 note の blockContainer subtree の
+/// ProseMirror JSON。TS 側でも opaque に扱う。
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct NoteBlock {
+    #[specta(type = specta_typescript::Unknown)]
+    pub block: serde_json::Value,
+}
+
+impl From<monica_domain::RawJson> for NoteBlock {
+    fn from(value: monica_domain::RawJson) -> Self {
+        // store が Value::to_string() で書いた JSON なのでパースは成功する。
+        // 防御的に、壊れていたら null を返す（NodeView は fromJSON 失敗を error 表示にする）。
+        let block = serde_json::from_str(value.as_str()).unwrap_or(serde_json::Value::Null);
+        Self { block }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct NotePage {
     pub items: Vec<NoteSummary>,
@@ -197,6 +214,16 @@ mod tests {
             let back: monica_domain::NoteKind = api.into();
             assert_eq!(back, domain);
         }
+    }
+
+    #[test]
+    fn note_block_projects_raw_json() {
+        let raw = monica_domain::RawJson::from(r#"{"type":"blockContainer","attrs":{"id":"b"}}"#);
+        let dto = NoteBlock::from(raw);
+        assert_eq!(dto.block["attrs"]["id"], "b");
+
+        let broken = NoteBlock::from(monica_domain::RawJson::from("not json"));
+        assert_eq!(broken.block, serde_json::Value::Null);
     }
 
     #[test]

@@ -1610,6 +1610,14 @@ impl crate::ports::NoteStore for FakeRepos {
         unimplemented!("no usecase test exercises notes yet")
     }
 
+    fn get_note_block(
+        &self,
+        _note_id: &str,
+        _block_id: &str,
+    ) -> Result<Option<monica_domain::RawJson>> {
+        unimplemented!("no usecase test exercises notes yet")
+    }
+
     fn list_notes(
         &self,
         _from: Option<&str>,

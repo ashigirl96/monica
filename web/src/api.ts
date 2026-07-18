@@ -3,6 +3,7 @@ import type {
   Explanation,
   LinkPreview,
   Note,
+  NoteBlock,
   NoteMention,
   NotePage,
   NoteSummary,
@@ -136,6 +137,15 @@ export async function resolveNoteMention(id: string): Promise<NoteMention | null
   } catch {
     return null;
   }
+}
+
+// synced block（transclusion）の解決。404 = dangling は null、通信エラーは throw
+// （NodeView 側で「削除された」表示と「再試行可能なエラー」表示を分けるため）。
+export async function getNoteBlock(noteId: string, blockId: string): Promise<NoteBlock | null> {
+  const res = await fetch(`/api/notes/${noteId}/blocks/${blockId}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Failed to resolve synced block: ${res.status}`);
+  return (await res.json()) as NoteBlock;
 }
 
 // 失敗を null で返す: 呼び手（link-menu）はプレーンリンクへのフォールバックとして扱う

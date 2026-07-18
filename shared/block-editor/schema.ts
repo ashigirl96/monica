@@ -226,6 +226,33 @@ export const schema = new Schema({
       ],
     },
 
+    // 別ノート（または同ノート）のブロックへの参照（synced block / transclusion）。
+    // 内容は attrs に持たず、NodeView が (noteId, blockId) から表示時に解決する。
+    // data-block-id は blockContainer 用に予約済みのため data-ref-block-id で分ける。
+    syncedBlock: {
+      group: "blockContent",
+      atom: true,
+      selectable: true,
+      attrs: { noteId: {}, blockId: {} },
+      parseDOM: [
+        {
+          tag: "div[data-block-content='syncedBlock']",
+          getAttrs: (dom: HTMLElement) => ({
+            noteId: dom.dataset.noteId ?? "",
+            blockId: dom.dataset.refBlockId ?? "",
+          }),
+        },
+      ],
+      toDOM: (node) => [
+        "div",
+        {
+          "data-block-content": "syncedBlock",
+          "data-note-id": node.attrs.noteId as string,
+          "data-ref-block-id": node.attrs.blockId as string,
+        },
+      ],
+    },
+
     text: { group: "inline" },
 
     // URL のインラインチップ表現（favicon + タイトル）

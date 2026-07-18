@@ -10,10 +10,12 @@ import { insertParagraphAfter } from "./commands";
 import { selectBlocks } from "./selection-state";
 import { blockSelectionKey } from "./selection-state";
 import { beginHandleDrag } from "./drag-drop";
+import { SyncedBlockView } from "./synced-block";
+import type { OnOpenBlock, ResolveBlock } from "./synced-block";
 
 type GetPos = () => number | undefined;
 
-function el<K extends keyof HTMLElementTagNameMap>(
+export function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   className: string,
   init?: (node: HTMLElementTagNameMap[K]) => void,
@@ -521,10 +523,15 @@ class BookmarkView implements NodeView {
 export type EditorNodeViewOptions = {
   resolveNoteMention?: ResolveNoteMention;
   onNoteMentionClick?: OnNoteMentionClick;
+  /** 現在編集中の note。synced block の同一ノート内参照を live doc から解決する。 */
+  noteId?: string;
+  resolveBlock?: ResolveBlock;
+  onOpenBlock?: OnOpenBlock;
 };
 
 export function editorNodeViews(
   opts: EditorNodeViewOptions = {},
+  syncedRegistry: Set<SyncedBlockView> = new Set(),
 ): Record<string, NodeViewConstructor> {
   return {
     blockContainer: (node, view, getPos) => new ContainerView(node, view, getPos),
@@ -535,5 +542,6 @@ export function editorNodeViews(
     linkMention: (node) => new LinkMentionView(node),
     noteMention: (node) => new NoteMentionView(node, opts),
     bookmark: (node) => new BookmarkView(node),
+    syncedBlock: (node, view) => new SyncedBlockView(node, view, opts, syncedRegistry),
   };
 }

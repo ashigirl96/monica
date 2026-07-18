@@ -4,11 +4,20 @@ import { createBlockEditor } from "./create-editor";
 import type { FetchLinkMetadata } from "./link-menu";
 import type { SearchNoteMentions } from "./note-mention-menu";
 import type { OnNoteMentionClick, ResolveNoteMention } from "./node-views";
+import type { OnOpenBlock, ResolveBlock } from "./synced-block";
+import { containerById } from "./context";
+import { clearBlockHighlight, highlightBlock } from "./block-highlight";
+import { nodes } from "./schema";
 import "./block-editor.css";
+
+/** ジャンプ後に元ブロックのハイライトを消すまでの猶予 */
+const HIGHLIGHT_MS = 1500;
 
 export type BlockEditorHandle = {
   /** 文書先頭にカーソルを置いてフォーカスする（タイトル → 本文の移動用） */
   focusStart: () => void;
+  /** id の block へスクロールし、一時ハイライトする（synced block からのジャンプ用） */
+  scrollToBlock: (blockId: string) => void;
 };
 
 /** 最新の props 値を mount 時固定の callback から読むための ref（再 mount 防止） */
@@ -34,6 +43,12 @@ type BlockEditorProps = {
   resolveNoteMention?: ResolveNoteMention;
   /** noteMention チップの素クリック（SPA 遷移用） */
   onNoteMentionClick?: OnNoteMentionClick;
+  /** 現在編集中の note の id。synced block の同一ノート内参照を live doc から解決する */
+  noteId?: string;
+  /** synced block（transclusion）の内容解決。未指定なら paste-and-sync は無効 */
+  resolveBlock?: ResolveBlock;
+  /** synced block のジャンプ（元ブロックを開く） */
+  onOpenBlock?: OnOpenBlock;
   /** unmount 時に最終 doc の JSON を受け取る（永続化フック） */
   onUnmount?: (docJson: unknown) => void;
   /** mount 中だけ imperative な操作（focusStart 等）を提供する */
@@ -51,6 +66,9 @@ export function BlockEditor({
   searchNoteMentions,
   resolveNoteMention,
   onNoteMentionClick,
+  noteId,
+  resolveBlock,
+  onOpenBlock,
   onUnmount,
   handleRef,
   className,
@@ -65,12 +83,17 @@ export function BlockEditor({
   const searchNoteMentionsRef = useLatest(searchNoteMentions);
   const resolveNoteMentionRef = useLatest(resolveNoteMention);
   const onNoteMentionClickRef = useLatest(onNoteMentionClick);
+  const resolveBlockRef = useLatest(resolveBlock);
+  const onOpenBlockRef = useLatest(onOpenBlock);
   const onUnmountRef = useLatest(onUnmount);
+  // noteId は key={note.id} 再マウント前提で mount 時に固定する（initialDoc と同じ）
+  const noteIdRef = useRef(noteId);
   // callback の有無は plugin / keymap の登録可否を決めるため mount 時に固定される
   const hasExitUp = onExitUp !== undefined;
   const hasFetchLinkMetadata = fetchLinkMetadata !== undefined;
   const hasSearchNoteMentions = searchNoteMentions !== undefined;
   const hasResolveNoteMention = resolveNoteMention !== undefined;
+  const hasResolveBlock = resolveBlock !== undefined;
   // initialDoc 等と同じく mount 時に一度だけ読む（差し替えは想定しない）
   const handleRefAtMount = useRef(handleRef);
 
@@ -92,6 +115,12 @@ export function BlockEditor({
         ? (noteId) => resolveNoteMentionRef.current?.(noteId) ?? Promise.resolve(null)
         : undefined,
       onNoteMentionClick: (noteId) => onNoteMentionClickRef.current?.(noteId),
+      noteId: noteIdRef.current,
+      resolveBlock: hasResolveBlock
+        ? (refNoteId, blockId) =>
+            resolveBlockRef.current?.(refNoteId, blockId) ?? Promise.resolve(null)
+        : undefined,
+      onOpenBlock: (refNoteId, blockId) => onOpenBlockRef.current?.(refNoteId, blockId),
     });
 
     const handle = handleRefAtMount.current;
@@ -100,6 +129,31 @@ export function BlockEditor({
         focusStart: () => {
           view.dispatch(view.state.tr.setSelection(TextSelection.atStart(view.state.doc)));
           view.focus();
+        },
+        scrollToBlock: (blockId) => {
+          const entry = containerById(view.state.doc, blockId);
+          if (!entry) return;
+          const { pos } = entry;
+          const tr = view.state.tr;
+          // 閉じた toggle 祖先を開かないと対象が不可視でスクロールできない。
+          // setNodeAttribute は node size を変えないので pos は安定。
+          const $inside = view.state.doc.resolve(pos + 1);
+          for (let depth = $inside.depth; depth >= 1; depth--) {
+            const ancestor = $inside.node(depth);
+            if (ancestor.type !== nodes.blockContainer) continue;
+            const content = ancestor.child(0);
+            if (content.type === nodes.toggle && content.attrs.open === false) {
+              tr.setNodeAttribute($inside.before(depth) + 1, "open", true);
+            }
+          }
+          highlightBlock(tr, blockId);
+          view.dispatch(tr);
+          const dom = view.nodeDOM(pos);
+          if (dom instanceof HTMLElement) dom.scrollIntoView({ block: "center" });
+          window.setTimeout(() => {
+            if (view.isDestroyed) return;
+            view.dispatch(clearBlockHighlight(view.state.tr));
+          }, HIGHLIGHT_MS);
         },
       };
     }
