@@ -23,8 +23,8 @@ pub use github::GithubPullRequestRef;
 pub use link_preview::LinkPreview as ApiLinkPreview;
 pub use note::{
     DailyNoteCount as ApiDailyNoteCount, Note as ApiNote, NoteKind as ApiNoteKind,
-    NotePage as ApiNotePage, NoteSummary as ApiNoteSummary, NotesToday as ApiNotesToday,
-    SetNoteKind as ApiSetNoteKind, UpdateNote as ApiUpdateNote,
+    NoteMention as ApiNoteMention, NotePage as ApiNotePage, NoteSummary as ApiNoteSummary,
+    NotesToday as ApiNotesToday, SetNoteKind as ApiSetNoteKind, UpdateNote as ApiUpdateNote,
 };
 pub use settings::{
     NotesSettings, TranslateEffort, TranslateModel, TranslateSettings, TranslateSettingsSnapshot,

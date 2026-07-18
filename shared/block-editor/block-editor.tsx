@@ -2,6 +2,8 @@ import { type RefObject, useEffect, useRef } from "react";
 import { TextSelection } from "@milkdown/kit/prose/state";
 import { createBlockEditor } from "./create-editor";
 import type { FetchLinkMetadata } from "./link-menu";
+import type { SearchNoteMentions } from "./note-mention-menu";
+import type { OnNoteMentionClick, ResolveNoteMention } from "./node-views";
 import "./block-editor.css";
 
 export type BlockEditorHandle = {
@@ -19,6 +21,12 @@ type BlockEditorProps = {
   onExitUp?: () => void;
   /** URL ペースト時の Mention/Bookmark 用メタデータ取得。未指定なら常にプレーンリンク */
   fetchLinkMetadata?: FetchLinkMetadata;
+  /** `[[` メニューのノート検索。未指定なら wiki link メニューは無効 */
+  searchNoteMentions?: SearchNoteMentions;
+  /** noteMention チップの表示名解決。未指定なら noteId のまま表示 */
+  resolveNoteMention?: ResolveNoteMention;
+  /** noteMention チップの素クリック（SPA 遷移用） */
+  onNoteMentionClick?: OnNoteMentionClick;
   /** unmount 時に最終 doc の JSON を受け取る（永続化フック） */
   onUnmount?: (docJson: unknown) => void;
   /** mount 中だけ imperative な操作（focusStart 等）を提供する */
@@ -33,6 +41,9 @@ export function BlockEditor({
   onDocChange,
   onExitUp,
   fetchLinkMetadata,
+  searchNoteMentions,
+  resolveNoteMention,
+  onNoteMentionClick,
   onUnmount,
   handleRef,
   className,
@@ -49,6 +60,14 @@ export function BlockEditor({
   const fetchLinkMetadataRef = useRef(fetchLinkMetadata);
   fetchLinkMetadataRef.current = fetchLinkMetadata;
   const hasFetchLinkMetadata = fetchLinkMetadata !== undefined;
+  const searchNoteMentionsRef = useRef(searchNoteMentions);
+  searchNoteMentionsRef.current = searchNoteMentions;
+  const hasSearchNoteMentions = searchNoteMentions !== undefined;
+  const resolveNoteMentionRef = useRef(resolveNoteMention);
+  resolveNoteMentionRef.current = resolveNoteMention;
+  const hasResolveNoteMention = resolveNoteMention !== undefined;
+  const onNoteMentionClickRef = useRef(onNoteMentionClick);
+  onNoteMentionClickRef.current = onNoteMentionClick;
   const onUnmountRef = useRef(onUnmount);
   onUnmountRef.current = onUnmount;
   // initialDoc 等と同じく mount 時に一度だけ読む（差し替えは想定しない）
@@ -65,6 +84,13 @@ export function BlockEditor({
       fetchLinkMetadata: hasFetchLinkMetadata
         ? (url) => fetchLinkMetadataRef.current?.(url) ?? Promise.resolve(null)
         : undefined,
+      searchNoteMentions: hasSearchNoteMentions
+        ? (query) => searchNoteMentionsRef.current?.(query) ?? Promise.resolve([])
+        : undefined,
+      resolveNoteMention: hasResolveNoteMention
+        ? (noteId) => resolveNoteMentionRef.current?.(noteId) ?? Promise.resolve(null)
+        : undefined,
+      onNoteMentionClick: (noteId) => onNoteMentionClickRef.current?.(noteId),
     });
 
     const handle = handleRefAtMount.current;

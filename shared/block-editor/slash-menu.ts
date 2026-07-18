@@ -1,16 +1,17 @@
-import { Plugin, PluginKey, TextSelection } from "@milkdown/kit/prose/state";
+import { Plugin, TextSelection } from "@milkdown/kit/prose/state";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import type { Attrs, NodeType } from "@milkdown/kit/prose/model";
 import { nodes } from "./schema";
 import { getBlockContext } from "./context";
 import { appendEmptyParagraphAfter, inlineToPlainText } from "./commands";
 import { createMenuOverlay, menuItemButton, positionMenuAt } from "./menu-overlay";
+import { noteMentionMenuKey, slashKey } from "./menu-keys";
 
-type SlashState = { active: false } | { active: true; pos: number; query: string; index: number };
+export type SlashState =
+  | { active: false }
+  | { active: true; pos: number; query: string; index: number };
 
 type SlashMeta = { type: "open"; pos: number } | { type: "close" } | { type: "nav"; index: number };
-
-const slashKey = new PluginKey<SlashState>("journalSlashMenu");
 
 type SlashItem = {
   id: string;
@@ -181,6 +182,8 @@ export function slashMenuPlugin(): Plugin<SlashState> {
         if (text !== "/" || view.composing) return false;
         const state = slashKey.getState(view.state);
         if (state?.active) return false;
+        // `[[` メニュー中の `/` は検索クエリの一部（project 名は "owner/repo"）
+        if (noteMentionMenuKey.getState(view.state)?.active) return false;
         const ctx = getBlockContext(view.state.doc.resolve(from));
         if (!ctx) return false;
         const type = ctx.contentNode.type;
@@ -201,6 +204,7 @@ export function slashMenuPlugin(): Plugin<SlashState> {
             !event.shiftKey &&
             !event.altKey
           ) {
+            if (noteMentionMenuKey.getState(view.state)?.active) return false;
             const sel = view.state.selection;
             if (!sel.empty) return false;
             const ctx = getBlockContext(sel.$from);

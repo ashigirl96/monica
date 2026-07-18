@@ -25,6 +25,8 @@ export function positionMenuAt(view: EditorView, menu: HTMLElement, pos: number)
 export function menuItemButton(opts: {
   icon: HTMLElement;
   label: string;
+  /** label の後ろに薄く出すサブラベル（ノートの preview 等） */
+  hint?: string;
   active: boolean;
   onPick: () => void;
 }): HTMLButtonElement {
@@ -41,6 +43,12 @@ export function menuItemButton(opts: {
   label.className = "jb-slash-label";
   label.textContent = opts.label;
   button.append(icon, label);
+  if (opts.hint) {
+    const hint = document.createElement("span");
+    hint.className = "jb-slash-hint";
+    hint.textContent = opts.hint;
+    button.append(hint);
+  }
   button.addEventListener("mousedown", (e) => e.preventDefault());
   button.addEventListener("click", opts.onPick);
   return button;

@@ -44,6 +44,18 @@ export type NoteKind =
   | { kind: "daily" }
   | { kind: "essay"; title: string };
 
+/**
+ *  wiki link（`[[`）の検索候補・解決結果。表示名の導出規則は domain の
+ *  `NoteKind::display_name` にあり、フロントは受け取った文字列を表示するだけ。
+ */
+export type NoteMention = {
+  id: string;
+  kind: NoteKind;
+  display_name: string;
+  /**  検索 dropdown のサブラベル。解決（単一取得）では返さない。 */
+  preview: string | null;
+};
+
 export type NotePage = {
   items: NoteSummary[];
   has_more: boolean;

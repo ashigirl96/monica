@@ -9,6 +9,9 @@ import { blockSelectionPlugin } from "./block-selection";
 import { slashMenuPlugin } from "./slash-menu";
 import { linkMenuPlugin } from "./link-menu";
 import type { FetchLinkMetadata } from "./link-menu";
+import { noteMentionMenuPlugin } from "./note-mention-menu";
+import type { SearchNoteMentions } from "./note-mention-menu";
+import type { OnNoteMentionClick, ResolveNoteMention } from "./node-views";
 import { normalizerPlugin } from "./normalizer";
 import { numberingPlugin, placeholderPlugin } from "./decorations";
 import { dragDropPlugin } from "./drag-drop";
@@ -55,12 +58,26 @@ export type BlockEditorCallbacks = {
   /** URL ペースト時の Mention/Bookmark 用メタデータ取得。
       未指定なら 3 択メニューは出ず、常にプレーンリンクになる */
   fetchLinkMetadata?: FetchLinkMetadata;
+  /** `[[` メニューのノート検索。未指定なら wiki link メニューと
+      内部 URL paste の自動 mention 化が無効になる */
+  searchNoteMentions?: SearchNoteMentions;
+  /** noteMention チップの表示名解決。未指定なら noteId のまま表示 */
+  resolveNoteMention?: ResolveNoteMention;
+  /** noteMention チップの素クリック（SPA 遷移用） */
+  onNoteMentionClick?: OnNoteMentionClick;
 };
 
 export function createBlockEditor(
   mount: HTMLElement,
   initialDoc: unknown,
-  { onDocChange, onExitUp, fetchLinkMetadata }: BlockEditorCallbacks = {},
+  {
+    onDocChange,
+    onExitUp,
+    fetchLinkMetadata,
+    searchNoteMentions,
+    resolveNoteMention,
+    onNoteMentionClick,
+  }: BlockEditorCallbacks = {},
 ): EditorView {
   const state = EditorState.create({
     doc: docFromJSON(initialDoc),
@@ -71,6 +88,7 @@ export function createBlockEditor(
       slashMenuPlugin(),
       // plugin 不在なら clipboard の open meta は無視され、常にプレーンリンクに落ちる
       ...(fetchLinkMetadata ? [linkMenuPlugin(fetchLinkMetadata)] : []),
+      ...(searchNoteMentions ? [noteMentionMenuPlugin(searchNoteMentions)] : []),
       blockSelectionPlugin(),
       // editorKeymap の Shift-Tab（structureCommand）は outdent 不能でも true を返す（KEY-003）
       // ため、先頭 block での上方向脱出はその手前で拾う必要がある
@@ -109,7 +127,7 @@ export function createBlockEditor(
   });
   const view = new EditorView(mount, {
     state,
-    nodeViews: editorNodeViews(),
+    nodeViews: editorNodeViews({ resolveNoteMention, onNoteMentionClick }),
     attributes: { class: "jb-editor", spellcheck: "false" },
     dispatchTransaction(tr) {
       view.updateState(view.state.apply(tr));

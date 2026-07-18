@@ -6,6 +6,8 @@ import { containerById, getBlockContext, rangeFromIds, rangePositions } from "./
 import { deleteRange } from "./commands";
 import { blockSelectionKey } from "./selection-state";
 import { openLinkMenu } from "./link-menu";
+import { internalNoteId } from "./note-mention-menu";
+import { noteMentionMenuKey } from "./menu-keys";
 
 // TODO.md §8.4 / §10.1
 export const BLOCKS_MIME = "application/x-monica-blocks+json";
@@ -126,9 +128,25 @@ function handleUrlPaste(view: EditorView, event: ClipboardEvent): boolean {
   const url = pastedUrl(event);
   if (!url) return false;
   const { state } = view;
+  const mentionMenu = noteMentionMenuKey.getState(state);
+  // `[[` メニュー中はプレーンテキストとして挿入させ、query に取り込む
+  // （link mark + link-menu が乗ると二重メニューになる）
+  if (mentionMenu?.active) return false;
   const sel = state.selection;
   const ctx = getBlockContext(sel.$from);
   if (!ctx || ctx.contentNode.type === nodes.codeBlock) return false;
+  // 内部ノート URL は note mention に自動変換（plugin 登録済み = notes アプリ内のみ。
+  // desktop journal は未登録なので従来どおりプレーンリンク）
+  if (mentionMenu !== undefined && sel.empty) {
+    const noteId = internalNoteId(url, window.location.origin);
+    if (noteId) {
+      const mention = nodes.noteMention.create({ noteId });
+      const tr = state.tr.replaceWith(sel.from, sel.from, mention);
+      tr.setSelection(TextSelection.create(tr.doc, sel.from + mention.nodeSize));
+      view.dispatch(tr.scrollIntoView());
+      return true;
+    }
+  }
   const linkMark = schema.marks.link.create({ href: url });
   if (!sel.empty) {
     if (!(sel instanceof TextSelection) || sel.$from.parent !== sel.$to.parent) return false;

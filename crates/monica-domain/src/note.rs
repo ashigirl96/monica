@@ -48,6 +48,18 @@ impl NoteKind {
         }
     }
 
+    /// mention（wiki link）の表示名。検索と解決で共有する唯一の導出規則。
+    /// daily は ISO 日付をそのまま返す — 曜日等の整形はロケール依存の presentation
+    /// なのでここでは持たない。
+    pub fn display_name(&self, date: &str) -> String {
+        match self {
+            NoteKind::Essay { title } if !title.is_empty() => title.clone(),
+            NoteKind::Essay { .. } => "Untitled".to_string(),
+            NoteKind::Daily => date.to_string(),
+            NoteKind::Project { project_id } => project_id.clone(),
+        }
+    }
+
     /// kind 遷移規則の唯一の定義。遷移グラフは daily を中心とした星型:
     /// daily ↔ essay（essay 化は常に空 title、daily 化は title 破棄）、
     /// daily → project は無損失の「確定」昇格。project からの脱出経路
@@ -249,6 +261,18 @@ mod tests {
         assert_eq!(essay.name(), "essay");
         assert_eq!(essay.title(), Some("t"));
         assert_eq!(essay.project_id(), None);
+    }
+
+    #[test]
+    fn display_name_per_kind() {
+        let date = "2026-07-18";
+        assert_eq!(NoteKind::Essay { title: "My essay".to_string() }.display_name(date), "My essay");
+        assert_eq!(NoteKind::Essay { title: String::new() }.display_name(date), "Untitled");
+        assert_eq!(NoteKind::Daily.display_name(date), "2026-07-18");
+        assert_eq!(
+            NoteKind::Project { project_id: "owner/repo".to_string() }.display_name(date),
+            "owner/repo"
+        );
     }
 
     #[test]

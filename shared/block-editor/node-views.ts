@@ -403,6 +403,61 @@ class LinkMentionView implements NodeView {
   }
 }
 
+export type NoteMentionInfo = { displayName: string };
+/** noteId → 表示名。null = リンク先ノートが存在しない（削除済み含む）。 */
+export type ResolveNoteMention = (noteId: string) => Promise<NoteMentionInfo | null>;
+export type OnNoteMentionClick = (noteId: string) => void;
+
+class NoteMentionView implements NodeView {
+  dom: HTMLElement;
+  private destroyed = false;
+
+  constructor(
+    private node: PMNode,
+    opts: EditorNodeViewOptions,
+  ) {
+    const noteId = node.attrs.noteId as string;
+    const href = `/notes/${noteId}`;
+    const anchor = el("a", "jb-mention jb-note-mention");
+    anchor.contentEditable = "false";
+    anchor.dataset.noteMention = noteId;
+    anchor.href = href;
+    // contenteditable 内の <a> はブラウザがナビゲーションを握り潰すため明示的に処理する。
+    // 素クリックは SPA 遷移（callback）、modifier click は新規タブ。
+    anchor.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (e.metaKey || e.ctrlKey) window.open(href, "_blank", "noopener");
+      else opts.onNoteMentionClick?.(noteId);
+    });
+    const title = el("span", "jb-mention-title", (span) => {
+      span.textContent = noteId; // 解決までのフォールバック（callback 不在時はこのまま）
+    });
+    anchor.append(title);
+    this.dom = anchor;
+    opts
+      .resolveNoteMention?.(noteId)
+      .then((info) => {
+        if (this.destroyed) return;
+        if (info) {
+          title.textContent = info.displayName;
+        } else {
+          title.textContent = "Deleted note";
+          anchor.classList.add("jb-note-mention-dangling");
+        }
+      })
+      .catch(() => {});
+  }
+
+  update(node: PMNode): boolean {
+    // noteId が同じなら再構築しない（再構築 = 表示名の再解決になるため）
+    return node.type === nodes.noteMention && node.sameMarkup(this.node);
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+  }
+}
+
 class BookmarkView implements NodeView {
   dom: HTMLElement;
 
@@ -459,7 +514,14 @@ class BookmarkView implements NodeView {
   }
 }
 
-export function editorNodeViews(): Record<string, NodeViewConstructor> {
+export type EditorNodeViewOptions = {
+  resolveNoteMention?: ResolveNoteMention;
+  onNoteMentionClick?: OnNoteMentionClick;
+};
+
+export function editorNodeViews(
+  opts: EditorNodeViewOptions = {},
+): Record<string, NodeViewConstructor> {
   return {
     blockContainer: (node, view, getPos) => new ContainerView(node, view, getPos),
     todo: (node, view, getPos) => new TodoView(node, view, getPos),
@@ -467,6 +529,7 @@ export function editorNodeViews(): Record<string, NodeViewConstructor> {
     codeBlock: (node, view, getPos) => new CodeBlockView(node, view, getPos),
     divider: () => new DividerView(),
     linkMention: (node) => new LinkMentionView(node),
+    noteMention: (node) => new NoteMentionView(node, opts),
     bookmark: (node) => new BookmarkView(node),
   };
 }

@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BlockEditor, type BlockEditorHandle } from "@shared/block-editor/block-editor";
 import type { LinkMetadata } from "@shared/block-editor/link-menu";
+import type { NoteMentionItem } from "@shared/block-editor/note-mention-menu";
+import type { NoteMentionInfo } from "@shared/block-editor/node-views";
 import { fuzzyMatch } from "@shared/fuzzy-picker/use-fuzzy-picker";
 import {
+  clearNoteMentionCache,
   createNote,
   dailyNoteCounts,
   deleteNote,
@@ -12,7 +15,9 @@ import {
   listNotes,
   listProjectNotes,
   listProjects,
+  resolveNoteMention as resolveNoteMentionApi,
   restoreNote,
+  searchNoteMentions as searchNoteMentionsApi,
   setNoteKind,
 } from "@/api";
 import { navigate } from "@/app";
@@ -46,6 +51,16 @@ async function fetchLinkMetadata(url: string): Promise<LinkMetadata | null> {
     favicon: preview.favicon,
     siteName: preview.site_name,
   };
+}
+
+async function searchNoteMentions(query: string): Promise<NoteMentionItem[]> {
+  const mentions = await searchNoteMentionsApi(query);
+  return mentions.map((m) => ({ id: m.id, displayName: m.display_name, preview: m.preview }));
+}
+
+async function resolveNoteMention(noteId: string): Promise<NoteMentionInfo | null> {
+  const mention = await resolveNoteMentionApi(noteId);
+  return mention ? { displayName: mention.display_name } : null;
 }
 
 function EmptyState() {
@@ -213,6 +228,8 @@ export function NotesPage({ id }: { id: string | null }) {
     }
     // create / restore 直後はレスポンスで seed 済み（noteRef が既に同じ id）なので再フェッチしない
     if (noteRef.current?.id === id) return;
+    // 開き直しで mention の表示名を最新タイトルへ追従させる
+    clearNoteMentionCache();
     let cancelled = false;
     noteRef.current = null;
     setNote(null);
@@ -556,6 +573,9 @@ export function NotesPage({ id }: { id: string | null }) {
               onDocChange={onDocChange}
               onExitUp={() => titleRef.current?.focus()}
               fetchLinkMetadata={fetchLinkMetadata}
+              searchNoteMentions={searchNoteMentions}
+              resolveNoteMention={resolveNoteMention}
+              onNoteMentionClick={selectNote}
               handleRef={editorHandleRef}
               className="min-h-[70dvh] pt-4 pb-24"
             />

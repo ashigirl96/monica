@@ -256,6 +256,32 @@ export const schema = new Schema({
       ],
     },
 
+    // ノート間リンク（wiki link）のインラインチップ。表示名を attrs に持たず、
+    // NodeView が noteId から表示時に解決する（元ノートの改題に追従させるため）。
+    // parseDOM がないと HTML 経由の copy→paste で link mark の a[href] に食われて
+    // プレーンテキストに退化する。
+    noteMention: {
+      group: "inline",
+      inline: true,
+      atom: true,
+      selectable: true,
+      attrs: { noteId: {} },
+      parseDOM: [
+        {
+          tag: "a[data-note-mention]",
+          getAttrs: (dom: HTMLElement) => ({ noteId: dom.dataset.noteMention ?? "" }),
+        },
+      ],
+      toDOM: (node) => [
+        "a",
+        {
+          href: `/notes/${node.attrs.noteId as string}`,
+          "data-note-mention": node.attrs.noteId as string,
+        },
+        node.attrs.noteId as string,
+      ],
+    },
+
     hardBreak: {
       group: "inline",
       inline: true,

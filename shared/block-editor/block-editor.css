@@ -576,6 +576,15 @@
   color: var(--jb-muted);
 }
 
+.jb-slash-hint {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--jb-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---- link mention / bookmark ---- */
 
 .jb-favicon {
@@ -616,6 +625,15 @@
 
 .jb-mention.ProseMirror-selectednode {
   background: color-mix(in srgb, var(--jb-blue) 16%, transparent);
+}
+
+/* リンク先ノートが削除済み・不存在の note mention */
+.jb-editor a.jb-note-mention-dangling {
+  color: var(--jb-muted);
+}
+
+.jb-note-mention-dangling .jb-mention-title {
+  text-decoration: line-through;
 }
 
 .jb-bookmark {
