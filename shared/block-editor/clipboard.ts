@@ -242,11 +242,11 @@ export function clipboardPlugin(options: ClipboardOptions = {}): Plugin {
 
         // paste-and-sync が可能なら「Paste as」メニューを相乗りさせる。plugin 未登録
         // （resolveBlock 不在）や旧 payload（sourceNoteId 欠落）なら plain のまま。
-        const syncEligible =
+        if (
           options.syncPasteEnabled &&
-          !!sourceNoteId &&
-          originals.every((container) => container.attrs.id !== null);
-        if (syncEligible && sourceNoteId) {
+          sourceNoteId &&
+          originals.every((container) => container.attrs.id !== null)
+        ) {
           openPasteMenu(tr, {
             start,
             plain,

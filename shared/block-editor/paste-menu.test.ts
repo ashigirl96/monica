@@ -57,8 +57,7 @@ describe("previewPasteTransaction", () => {
     const plain = originals.map(reissueIds);
     const synced = [buildSyncedContainer(originals, "note-A")];
     const { state, start } = pastedState(plain);
-    const size = plain.reduce((sum, n) => sum + n.nodeSize, 0);
-    const base: PasteMenuActiveState = { active: true, start, size, index: 0, plain, synced };
+    const base: PasteMenuActiveState = { active: true, start, index: 0, plain, synced };
 
     // → sync（2 ブロックが 1 つの synced block にまとまる）
     const toSync = previewPasteTransaction(state, base, 1);
@@ -68,7 +67,6 @@ describe("previewPasteTransaction", () => {
     expect(firstContainer(synced1).child(0).type).toBe(nodes.syncedBlock);
     expect(firstContainer(synced1).child(0).attrs.blockIds).toEqual(["src-1", "src-2"]);
     expect(toSync!.next.index).toBe(1);
-    expect(toSync!.next.size).toBe(synced[0].nodeSize);
 
     // → paste（plain へ戻す: 2 ブロックに展開される）
     const back = previewPasteTransaction(synced1, toSync!.next, 0);

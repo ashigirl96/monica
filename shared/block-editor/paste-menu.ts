@@ -18,8 +18,6 @@ export type PasteMenuActiveState = {
   active: true;
   /** 挿入 range の先頭。start より前は触らないので全遷移を通じて安定アンカー。 */
   start: number;
-  /** 現在挿入されている表現の合計 nodeSize。 */
-  size: number;
   /** 0 = Paste（plain）, 1 = Paste and sync */
   index: number;
   plain: PMNode[];
@@ -84,8 +82,9 @@ export function previewPasteTransaction(
 ): { tr: Transaction; next: PasteMenuActiveState } | null {
   const target = targetIndex === 1 ? s.synced : s.plain;
   if (target.length === 0) return null;
-  const tr = state.tr.replaceWith(s.start, s.start + s.size, target);
-  return { tr, next: { ...s, index: targetIndex, size: totalSize(target) } };
+  const currentSize = totalSize(s.index === 1 ? s.synced : s.plain);
+  const tr = state.tr.replaceWith(s.start, s.start + currentSize, target);
+  return { tr, next: { ...s, index: targetIndex } };
 }
 
 function close(view: EditorView): void {
@@ -176,7 +175,6 @@ export function pasteMenuPlugin(): Plugin<PasteMenuState> {
           return {
             active: true,
             start: meta.start,
-            size: totalSize(meta.plain),
             index: 0,
             plain: meta.plain,
             synced: meta.synced,

@@ -4,6 +4,7 @@ import type { EditorView, NodeView } from "@milkdown/kit/prose/view";
 import { nodes, schema } from "./schema";
 import { containerById } from "./context";
 import { BookmarkView, el, LinkMentionView } from "./node-views";
+import type { ResolveNoteMention } from "./node-views";
 
 /** (noteId, blockId) → 元 blockContainer subtree の ProseMirror JSON。
     null = 元ブロックが存在しない（dangling）。reject = 通信エラー。 */
@@ -15,25 +16,80 @@ export type SyncedBlockOptions = {
   noteId?: string;
   resolveBlock?: ResolveBlock;
   onOpenBlock?: OnOpenBlock;
+  /** ミラー内の note mention を表示名へ解決する（未提供なら noteId 表示のまま）。 */
+  resolveNoteMention?: ResolveNoteMention;
 };
 
-// ミラー本体を静的描画する serializer。schema の toDOM をベースに差し替える:
-// 1. blockContainer の data-block-id を出さない（参照元と同じ ID が DOM 内に重複し、
-//    ID ベースの DOM lookup が誤ヒットするのを防ぐ）
+// ミラー本体を静的描画する serializer。NodeView（node-views.ts）が付与するクラス・構造を
+// schema の素の toDOM は持たないため、ここで差し替えて元ブロックと同じ見た目を再現する。
+// NodeView 側の DOM 構造・クラスを変えたらこの serializer も追従させること。
+// 1. blockContainer は ContainerView と同じ .jb-container > .jb-container-body を組む。
+//    data-block-id は出さない（参照元と同じ ID が DOM 内に重複し、ID ベースの DOM lookup が
+//    誤ヒットするのを防ぐ）。閉じた toggle の折りたたみ・callout パネルもクラスで再現する。
 // 2. ネストした syncedBlock はプレースホルダにする（解決を 1 段で止め、自己参照・
-//    循環でも無限再帰・fetch 連鎖を起こさない）
-// 3. linkMention / bookmark は NodeView と同じリッチ DOM で描く（schema の toDOM は
-//    素のリンクに退化するため）。両 View は node だけで DOM を組む純粋ビルダー。
+//    循環でも無限再帰・fetch 連鎖を起こさない）。
+// 3. todo / toggle は checkbox・トグル三角と .jb-*-text を静的に組む（非対話・読み取り専用）。
+// 4. linkMention / bookmark は NodeView と同じリッチ DOM で描く。両 View は node だけで
+//    DOM を組む純粋ビルダー。noteMention は chip を出し、表示名は SyncedBlockView が解決する。
 const mirrorSerializer = new DOMSerializer(
   {
     ...DOMSerializer.nodesFromSchema(schema),
-    blockContainer: () => ["div", { "data-block-container": "" }, 0],
+    blockContainer: (node) => {
+      const content = node.child(0);
+      const classes = ["jb-container"];
+      if (content.type === nodes.toggle && content.attrs.open === false) {
+        classes.push("jb-collapsed");
+      }
+      const isCallout = content.type === nodes.callout;
+      if (isCallout) classes.push("jb-callout");
+      const attrs: Record<string, string> = {
+        "data-block-container": "",
+        class: classes.join(" "),
+      };
+      if (isCallout) attrs["data-callout-kind"] = content.attrs.kind as string;
+      return ["div", attrs, ["div", { class: "jb-container-body" }, 0]];
+    },
+    todo: (node) => [
+      "div",
+      {
+        class: "jb-todo",
+        "data-block-content": "todo",
+        "data-checked": String(node.attrs.checked),
+      },
+      [
+        "button",
+        {
+          class: "jb-todo-checkbox",
+          contenteditable: "false",
+          tabindex: "-1",
+          "aria-checked": String(node.attrs.checked),
+        },
+        node.attrs.checked ? "✓" : "",
+      ],
+      ["div", { class: "jb-todo-text" }, 0],
+    ],
+    toggle: (node) => [
+      "div",
+      { class: "jb-toggle", "data-block-content": "toggle", "data-open": String(node.attrs.open) },
+      ["button", { class: "jb-toggle-btn", contenteditable: "false", tabindex: "-1" }, "▸"],
+      ["div", { class: "jb-toggle-text" }, 0],
+    ],
     syncedBlock: () => ["div", { class: "jb-synced-nested" }, "Nested synced block"],
     linkMention: (node) => new LinkMentionView(node).dom,
     bookmark: (node) => new BookmarkView(node).dom,
+    noteMention: (node) => noteMentionChip(node.attrs.noteId as string),
   },
   DOMSerializer.marksFromSchema(schema),
 );
+
+// NoteMentionView と同じ chip 構造。表示名は解決までのフォールバックで noteId を出し、
+// SyncedBlockView.resolveMentions が resolveNoteMention で差し替える（読み取り専用・非対話）。
+function noteMentionChip(noteId: string): HTMLElement {
+  const anchor = el("a", "jb-mention jb-note-mention");
+  anchor.dataset.noteMention = noteId;
+  anchor.append(el("span", "jb-mention-title", (span) => (span.textContent = noteId)));
+  return anchor;
+}
 
 function sameSources(a: readonly (PMNode | null)[], b: readonly (PMNode | null)[]): boolean {
   return a.length === b.length && a.every((node, i) => node === b[i]);
@@ -113,21 +169,22 @@ export class SyncedBlockView implements NodeView {
       });
   }
 
+  private liveSources(): (PMNode | null)[] {
+    return this.blockIds.map(
+      (blockId) => containerById(this.view.state.doc, blockId)?.node ?? null,
+    );
+  }
+
   /** refresh plugin から docChanged 時に呼ばれる。参照先ノード列の identity が
       変わったときだけ再描画する（PM の永続構造で未変更 subtree は同一参照）。 */
   refreshFromDoc(): void {
     if (!this.isSameNote()) return;
-    const sources = this.blockIds.map(
-      (blockId) => containerById(this.view.state.doc, blockId)?.node ?? null,
-    );
+    const sources = this.liveSources();
     if (sameSources(sources, this.lastSources)) return;
-    this.renderFromLiveDoc();
+    this.renderFromLiveDoc(sources);
   }
 
-  private renderFromLiveDoc(): void {
-    const sources = this.blockIds.map(
-      (blockId) => containerById(this.view.state.doc, blockId)?.node ?? null,
-    );
+  private renderFromLiveDoc(sources: (PMNode | null)[] = this.liveSources()): void {
     this.lastSources = sources;
     const found = sources.filter((node): node is PMNode => node !== null);
     if (found.length === 0) {
@@ -152,6 +209,29 @@ export class SyncedBlockView implements NodeView {
     const frag = document.createDocumentFragment();
     for (const container of containers) frag.append(mirrorSerializer.serializeNode(container));
     this.body.replaceChildren(frag);
+    this.resolveMentions();
+  }
+
+  // ミラー内の note mention chip を表示名へ解決する（serializer は同期なので後追いで差し替え）。
+  private resolveMentions(): void {
+    const resolve = this.opts.resolveNoteMention;
+    if (!resolve) return;
+    for (const anchor of this.body.querySelectorAll<HTMLElement>("a[data-note-mention]")) {
+      const noteId = anchor.dataset.noteMention;
+      const title = anchor.querySelector<HTMLElement>(".jb-mention-title");
+      if (!noteId || !title) continue;
+      resolve(noteId)
+        .then((info) => {
+          if (this.destroyed) return;
+          if (info) {
+            title.textContent = info.displayName;
+          } else {
+            title.textContent = "Deleted note";
+            anchor.classList.add("jb-note-mention-dangling");
+          }
+        })
+        .catch(() => {});
+    }
   }
 
   private renderLoading(): void {

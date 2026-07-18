@@ -288,10 +288,16 @@ export function NotesPage({ id }: { id: string | null }) {
 
   // synced block（transclusion）の内容解決。キャッシュしないのは、通信エラー時に retry で
   // 再フェッチさせるため（NodeView が reject を error 状態として扱う）。
+  // 別ノート参照は HTTP で解決するので、直前の編集が debounce 中／in-flight だと stale を読む。
+  // ノート切替は flush を await せず navigate するため、pending PUT の完了を待ってから GET する
+  // （cross-note ミラーは一度しか解決しないので stale がそのまま残る）。
   const resolveBlock = useCallback(
-    (noteId: string, blockId: string): Promise<unknown | null> =>
-      getNoteBlock(noteId, blockId).then((r) => r?.block ?? null),
-    [],
+    async (noteId: string, blockId: string): Promise<unknown | null> => {
+      await flush();
+      const r = await getNoteBlock(noteId, blockId);
+      return r?.block ?? null;
+    },
+    [flush],
   );
 
   // synced block のジャンプ。同一ノートなら直接スクロール、別ノートなら navigate 後に
