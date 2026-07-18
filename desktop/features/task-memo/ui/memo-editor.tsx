@@ -126,6 +126,8 @@ function MemoEditorInner({ taskId, initialValue }: MemoEditorProps) {
   // Flush on unmount (Esc / overlay click / alt+M / space switch all converge here).
   // The listener debounces internally (~200ms), so the last edits may not have reached
   // lastMdRef yet — read the live document synchronously instead of trusting it.
+  // Unmount-only: listing get/enqueueSave/initialValue would re-run the flush every render.
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     return () => {
       clearTimeout(timerRef.current);
@@ -143,6 +145,7 @@ function MemoEditorInner({ taskId, initialValue }: MemoEditorProps) {
       });
     };
   }, []);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   return <Milkdown />;
 }

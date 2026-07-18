@@ -97,6 +97,10 @@ export function BlockEditor({
   // initialDoc 等と同じく mount 時に一度だけ読む（差し替えは想定しない）
   const handleRefAtMount = useRef(handleRef);
 
+  // useLatest（カスタム ref ラッパー）と cleanup 内の最新 ref 読みを exhaustive-deps が
+  // 誤検知する。エディタは mount 時に一度だけ生成し中身は ref で最新を読む設計で、
+  // 依存を足すと再生成・stale コールバックが走って壊れるため deps 空が正しい。
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     const root = rootRef.current;
     const host = hostRef.current;
@@ -185,6 +189,7 @@ export function BlockEditor({
       view.destroy();
     };
   }, []);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   return (
     <div ref={rootRef} className={className ? `jb-root ${className}` : "jb-root"}>
