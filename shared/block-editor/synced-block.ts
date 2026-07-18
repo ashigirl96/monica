@@ -99,7 +99,7 @@ export class SyncedBlockView implements NodeView {
     Promise.all(this.blockIds.map((blockId) => resolve(this.noteId, blockId)))
       .then((results) => {
         if (this.destroyed) return;
-        const found = results.filter((json): json is unknown => json != null);
+        const found = results.filter((json): json is unknown => json !== null);
         if (found.length === 0) this.renderDangling();
         else this.renderResolved(found);
       })
