@@ -4,7 +4,7 @@ import { EditorState } from "@milkdown/kit/prose/state";
 import { Node as PMNode } from "@milkdown/kit/prose/model";
 import { createContainer, nodes, reissueIds, schema } from "./schema";
 import { serializeBlocksPayload } from "./clipboard";
-import { buildSyncedContainers, previewPasteTransaction } from "./paste-menu";
+import { buildSyncedContainer, previewPasteTransaction } from "./paste-menu";
 import type { PasteMenuActiveState } from "./paste-menu";
 
 function textContainer(text: string, id: string): PMNode {
@@ -15,37 +15,33 @@ function firstContainer(state: EditorState): PMNode {
   return state.doc.firstChild!.firstChild!;
 }
 
-describe("buildSyncedContainers", () => {
-  test("各 container を (sourceNoteId, 元 blockId) を指す synced ミラーにする", () => {
+describe("buildSyncedContainer", () => {
+  test("選択範囲全体を 1 つの synced ミラー（blockIds は選択順）にまとめる", () => {
     const originals = [textContainer("a", "src-1"), textContainer("b", "src-2")];
-    const synced = buildSyncedContainers(originals, "note-A");
-
-    expect(synced).toHaveLength(2);
-    for (const [i, container] of synced.entries()) {
-      const content = container.child(0);
-      expect(content.type).toBe(nodes.syncedBlock);
-      expect(content.attrs.noteId).toBe("note-A");
-      expect(content.attrs.blockId).toBe(`src-${i + 1}`);
-    }
+    const mirror = buildSyncedContainer(originals, "note-A");
+    const content = mirror.child(0);
+    expect(content.type).toBe(nodes.syncedBlock);
+    expect(content.attrs.noteId).toBe("note-A");
+    expect(content.attrs.blockIds).toEqual(["src-1", "src-2"]);
   });
 
   test("ラップする container には新しい id が振られる（元 id は syncedBlock 側に閉じる）", () => {
-    const [mirror] = buildSyncedContainers([textContainer("a", "src-1")], "note-A");
+    const mirror = buildSyncedContainer([textContainer("a", "src-1")], "note-A");
     expect(mirror.attrs.id).not.toBe("src-1");
     expect(mirror.attrs.id).not.toBeNull();
   });
 
-  test("sync-of-sync: 既に syncedBlock を包む container は参照先を引き継ぐ（チェーン化しない）", () => {
+  test("sync-of-sync: 単一 synced block の複製は参照先を引き継ぐ（チェーン化しない）", () => {
     const existing = createContainer(
-      nodes.syncedBlock.create({ noteId: "note-orig", blockId: "blk-orig" }),
+      nodes.syncedBlock.create({ noteId: "note-orig", blockIds: ["blk-a", "blk-b"] }),
       [],
       "wrapper-1",
     );
-    const [mirror] = buildSyncedContainers([existing], "note-A");
+    const mirror = buildSyncedContainer([existing], "note-A");
     const content = mirror.child(0);
     expect(content.type).toBe(nodes.syncedBlock);
     expect(content.attrs.noteId).toBe("note-orig");
-    expect(content.attrs.blockId).toBe("blk-orig");
+    expect(content.attrs.blockIds).toEqual(["blk-a", "blk-b"]);
   });
 });
 
@@ -56,27 +52,29 @@ describe("previewPasteTransaction", () => {
     return { state: EditorState.create({ doc }), start: 1 };
   }
 
-  test("paste ↔ sync のトグルが round-trip する", () => {
-    const original = textContainer("hello", "src-1");
-    const plain = [reissueIds(original)];
-    const synced = buildSyncedContainers([original], "note-A");
+  test("paste ↔ sync のトグルが round-trip する（複数ブロックは 1 つの synced にまとまる）", () => {
+    const originals = [textContainer("hello", "src-1"), textContainer("world", "src-2")];
+    const plain = originals.map(reissueIds);
+    const synced = [buildSyncedContainer(originals, "note-A")];
     const { state, start } = pastedState(plain);
-    const size = plain[0].nodeSize;
+    const size = plain.reduce((sum, n) => sum + n.nodeSize, 0);
     const base: PasteMenuActiveState = { active: true, start, size, index: 0, plain, synced };
 
-    // → sync
+    // → sync（2 ブロックが 1 つの synced block にまとまる）
     const toSync = previewPasteTransaction(state, base, 1);
     expect(toSync).not.toBeNull();
     const synced1 = state.apply(toSync!.tr);
+    expect(synced1.doc.firstChild!.childCount).toBe(1);
     expect(firstContainer(synced1).child(0).type).toBe(nodes.syncedBlock);
-    expect(firstContainer(synced1).child(0).attrs.blockId).toBe("src-1");
+    expect(firstContainer(synced1).child(0).attrs.blockIds).toEqual(["src-1", "src-2"]);
     expect(toSync!.next.index).toBe(1);
     expect(toSync!.next.size).toBe(synced[0].nodeSize);
 
-    // → paste（plain へ戻す）
+    // → paste（plain へ戻す: 2 ブロックに展開される）
     const back = previewPasteTransaction(synced1, toSync!.next, 0);
     expect(back).not.toBeNull();
     const plain2 = synced1.apply(back!.tr);
+    expect(plain2.doc.firstChild!.childCount).toBe(2);
     expect(firstContainer(plain2).child(0).type).toBe(nodes.paragraph);
     expect(firstContainer(plain2).child(0).textContent).toBe("hello");
     expect(back!.next.index).toBe(0);
@@ -87,34 +85,34 @@ describe("previewPasteTransaction", () => {
     const plain = [reissueIds(original)];
     expect(plain[0].attrs.id).not.toBe("src-1");
 
-    const synced = buildSyncedContainers([original], "note-A");
-    expect(synced[0].child(0).attrs.blockId).toBe("src-1");
+    const synced = buildSyncedContainer([original], "note-A");
+    expect(synced.child(0).attrs.blockIds).toEqual(["src-1"]);
   });
 });
 
 describe("syncedBlock schema", () => {
   test("PMNode.fromJSON で round-trip し attrs を保つ", () => {
     const container = createContainer(
-      nodes.syncedBlock.create({ noteId: "note-A", blockId: "blk-1" }),
+      nodes.syncedBlock.create({ noteId: "note-A", blockIds: ["blk-1", "blk-2"] }),
       [],
       "wrapper-1",
     );
     const restored = PMNode.fromJSON(schema, container.toJSON());
     expect(restored.child(0).type).toBe(nodes.syncedBlock);
     expect(restored.child(0).attrs.noteId).toBe("note-A");
-    expect(restored.child(0).attrs.blockId).toBe("blk-1");
+    expect(restored.child(0).attrs.blockIds).toEqual(["blk-1", "blk-2"]);
   });
 
   test("reissueIds は container の id だけ変え、syncedBlock の参照先 attrs は透過する", () => {
     const container = createContainer(
-      nodes.syncedBlock.create({ noteId: "note-A", blockId: "blk-1" }),
+      nodes.syncedBlock.create({ noteId: "note-A", blockIds: ["blk-1", "blk-2"] }),
       [],
       "wrapper-1",
     );
     const reissued = reissueIds(container);
     expect(reissued.attrs.id).not.toBe("wrapper-1");
     expect(reissued.child(0).attrs.noteId).toBe("note-A");
-    expect(reissued.child(0).attrs.blockId).toBe("blk-1");
+    expect(reissued.child(0).attrs.blockIds).toEqual(["blk-1", "blk-2"]);
   });
 });
 

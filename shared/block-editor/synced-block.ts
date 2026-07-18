@@ -31,13 +31,18 @@ const mirrorSerializer = new DOMSerializer(
   DOMSerializer.marksFromSchema(schema),
 );
 
+function sameSources(a: readonly (PMNode | null)[], b: readonly (PMNode | null)[]): boolean {
+  return a.length === b.length && a.every((node, i) => node === b[i]);
+}
+
 export class SyncedBlockView implements NodeView {
   dom: HTMLElement;
   private body: HTMLElement;
   private destroyed = false;
-  private lastSource: PMNode | null = null;
+  // 同一ノート内参照のライブ反映用。前回描画した source ノード列（未変更なら同一参照）。
+  private lastSources: (PMNode | null)[] = [];
   readonly noteId: string;
-  readonly blockId: string;
+  readonly blockIds: string[];
 
   constructor(
     private node: PMNode,
@@ -46,7 +51,7 @@ export class SyncedBlockView implements NodeView {
     private registry: Set<SyncedBlockView>,
   ) {
     this.noteId = node.attrs.noteId as string;
-    this.blockId = node.attrs.blockId as string;
+    this.blockIds = node.attrs.blockIds as string[];
 
     this.dom = el("div", "jb-synced");
     this.dom.contentEditable = "false";
@@ -63,7 +68,9 @@ export class SyncedBlockView implements NodeView {
     jump.addEventListener("mousedown", (e) => e.preventDefault());
     jump.addEventListener("click", (e) => {
       e.preventDefault();
-      this.opts.onOpenBlock?.(this.noteId, this.blockId);
+      // まとめ synced block では先頭ブロックへジャンプする
+      const first = this.blockIds[0];
+      if (first) this.opts.onOpenBlock?.(this.noteId, first);
     });
     header.append(jump);
 
@@ -87,13 +94,14 @@ export class SyncedBlockView implements NodeView {
       this.renderMessage("jb-synced-error", "Synced block unavailable");
       return;
     }
+    const resolve = this.opts.resolveBlock;
     this.renderLoading();
-    this.opts
-      .resolveBlock(this.noteId, this.blockId)
-      .then((json) => {
+    Promise.all(this.blockIds.map((blockId) => resolve(this.noteId, blockId)))
+      .then((results) => {
         if (this.destroyed) return;
-        if (json === null) this.renderDangling();
-        else this.renderResolved(json);
+        const found = results.filter((json): json is unknown => json != null);
+        if (found.length === 0) this.renderDangling();
+        else this.renderResolved(found);
       })
       .catch(() => {
         if (this.destroyed) return;
@@ -101,40 +109,45 @@ export class SyncedBlockView implements NodeView {
       });
   }
 
-  /** refresh plugin から docChanged 時に呼ばれる。参照先ノードの identity が
+  /** refresh plugin から docChanged 時に呼ばれる。参照先ノード列の identity が
       変わったときだけ再描画する（PM の永続構造で未変更 subtree は同一参照）。 */
   refreshFromDoc(): void {
     if (!this.isSameNote()) return;
-    const node = containerById(this.view.state.doc, this.blockId)?.node ?? null;
-    if (node === this.lastSource) return;
+    const sources = this.blockIds.map(
+      (blockId) => containerById(this.view.state.doc, blockId)?.node ?? null,
+    );
+    if (sameSources(sources, this.lastSources)) return;
     this.renderFromLiveDoc();
   }
 
   private renderFromLiveDoc(): void {
-    const entry = containerById(this.view.state.doc, this.blockId);
-    if (!entry) {
-      this.lastSource = null;
+    const sources = this.blockIds.map(
+      (blockId) => containerById(this.view.state.doc, blockId)?.node ?? null,
+    );
+    this.lastSources = sources;
+    const found = sources.filter((node): node is PMNode => node !== null);
+    if (found.length === 0) {
       this.renderDangling();
       return;
     }
-    this.lastSource = entry.node;
-    this.renderNode(entry.node);
+    this.renderNodes(found);
   }
 
-  private renderResolved(json: unknown): void {
-    let node: PMNode;
+  private renderResolved(jsons: unknown[]): void {
+    const parsed: PMNode[] = [];
     try {
-      node = PMNode.fromJSON(schema, json);
+      for (const json of jsons) parsed.push(PMNode.fromJSON(schema, json));
     } catch {
       this.renderError();
       return;
     }
-    this.renderNode(node);
+    this.renderNodes(parsed);
   }
 
-  private renderNode(container: PMNode): void {
-    const dom = mirrorSerializer.serializeNode(container);
-    this.body.replaceChildren(dom);
+  private renderNodes(containers: readonly PMNode[]): void {
+    const frag = document.createDocumentFragment();
+    for (const container of containers) frag.append(mirrorSerializer.serializeNode(container));
+    this.body.replaceChildren(frag);
   }
 
   private renderLoading(): void {

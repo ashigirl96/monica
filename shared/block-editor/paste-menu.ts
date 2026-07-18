@@ -44,26 +44,23 @@ function totalSize(nodesList: readonly PMNode[]): number {
   return nodesList.reduce((sum, node) => sum + node.nodeSize, 0);
 }
 
-/** copy 元の各 top-level container を、その (noteId, blockId) を指す synced ミラーに変換する。
-    既に syncedBlock を包む container なら参照先を引き継いでチェーン化を防ぐ。 */
-export function buildSyncedContainers(
-  originals: readonly PMNode[],
-  sourceNoteId: string,
-): PMNode[] {
-  return originals.map((container) => {
-    const first = container.childCount > 0 ? container.child(0) : null;
-    if (first && first.type === nodes.syncedBlock) {
-      return createContainer(
-        nodes.syncedBlock.create({
-          noteId: first.attrs.noteId as string,
-          blockId: first.attrs.blockId as string,
-        }),
-      );
-    }
-    const blockId = container.attrs.id as string | null;
-    if (!blockId) return container;
-    return createContainer(nodes.syncedBlock.create({ noteId: sourceNoteId, blockId }));
-  });
+/** copy 元の選択範囲全体を 1 つの synced ミラー（Notion 準拠）にまとめる。
+    単一 synced block の複製は参照先（noteId, blockIds）を引き継いでチェーン化を防ぐ。 */
+export function buildSyncedContainer(originals: readonly PMNode[], sourceNoteId: string): PMNode {
+  const single = originals.length === 1 ? originals[0] : null;
+  const singleContent = single && single.childCount > 0 ? single.child(0) : null;
+  if (singleContent && singleContent.type === nodes.syncedBlock) {
+    return createContainer(
+      nodes.syncedBlock.create({
+        noteId: singleContent.attrs.noteId as string,
+        blockIds: singleContent.attrs.blockIds as string[],
+      }),
+    );
+  }
+  const blockIds = originals
+    .map((container) => container.attrs.id as string | null)
+    .filter((id): id is string => id !== null);
+  return createContainer(nodes.syncedBlock.create({ noteId: sourceNoteId, blockIds }));
 }
 
 /** clipboard の paste Transaction にメニュー表示を相乗りさせる（plain は既に挿入済み）。 */

@@ -6,7 +6,7 @@ import { containerById, getBlockContext, rangeFromIds, rangePositions } from "./
 import { deleteRange } from "./commands";
 import { blockSelectionKey } from "./selection-state";
 import { openLinkMenu } from "./link-menu";
-import { buildSyncedContainers, openPasteMenu } from "./paste-menu";
+import { buildSyncedContainer, openPasteMenu } from "./paste-menu";
 
 // TODO.md §8.4 / §10.1
 export const BLOCKS_MIME = "application/x-monica-blocks+json";
@@ -250,7 +250,7 @@ export function clipboardPlugin(options: ClipboardOptions = {}): Plugin {
           openPasteMenu(tr, {
             start,
             plain,
-            synced: buildSyncedContainers(originals, sourceNoteId),
+            synced: [buildSyncedContainer(originals, sourceNoteId)],
           });
         }
         view.dispatch(tr.scrollIntoView());
