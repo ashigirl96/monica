@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { spaLinkClick } from "@/app";
 import { setThemePref, themePref, type ThemePref } from "@/theme";
 
@@ -105,9 +105,25 @@ export function AppShell({
   active: "notes" | "library";
   children: ReactNode;
 }) {
+  // alt+b の zen mode: nav rail と、group-data-[zen]/shell で反応する
+  // ページ側 sidebar をまとめて隠し、editor だけにする
+  const [zen, setZen] = useState(false);
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      if (e.code !== "KeyB") return;
+      e.preventDefault();
+      e.stopPropagation();
+      setZen((z) => !z);
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
   return (
-    <div className="flex min-h-dvh">
-      <nav className="sticky top-0 z-20 flex h-dvh w-12 shrink-0 flex-col items-center gap-1.5 border-r bg-background pt-3 pb-4">
+    <div className="group/shell flex min-h-dvh" data-zen={zen ? "" : undefined}>
+      <nav
+        className={`sticky top-0 z-20 flex h-dvh shrink-0 flex-col items-center gap-1.5 overflow-hidden bg-background pt-3 pb-4 transition-[width] duration-200 motion-reduce:transition-none ${zen ? "w-0" : "w-12 border-r"}`}
+      >
         <img src="/favicon.png" alt="" className="mb-3 size-7" />
         <RailLink to="/notes" label="Notes" active={active === "notes"}>
           <svg

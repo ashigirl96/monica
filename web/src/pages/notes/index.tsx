@@ -444,42 +444,45 @@ export function NotesPage({ id }: { id: string | null }) {
 
   return (
     <div className="notes-screen flex h-dvh flex-1 overflow-hidden">
-      <aside className="flex w-[260px] shrink-0 flex-col border-r">
-        {listError && (
-          <p className="px-4 pt-3 text-xs text-destructive">Failed to load notes — {listError}</p>
-        )}
-        {projectFilter === null ? (
-          <>
-            <NotesSidebar
-              summaries={summaries}
+      <aside className="w-[320px] shrink-0 overflow-hidden border-r transition-[width] duration-200 motion-reduce:transition-none group-data-[zen]/shell:w-0 group-data-[zen]/shell:border-r-0">
+        {/* 開閉アニメーション中に中身が折り返さないよう幅は内側で固定する */}
+        <div className="flex h-full w-[320px] flex-col">
+          {listError && (
+            <p className="px-4 pt-3 text-xs text-destructive">Failed to load notes — {listError}</p>
+          )}
+          {projectFilter === null ? (
+            <>
+              <NotesSidebar
+                summaries={summaries}
+                selectedId={id}
+                range={range}
+                onSelect={selectNote}
+                onDelete={(summary) => void deleteById(summary.id)}
+              />
+              <NotesCalendar
+                month={month}
+                counts={counts}
+                range={range}
+                onMonthChange={(delta) => setMonth((m) => addMonths(m, delta))}
+                onSelectWeek={(day) => setRange(weekOf(day))}
+                onToday={resetToToday}
+              />
+            </>
+          ) : (
+            <ProjectNotesSidebar
+              projectId={projectFilter}
+              summaries={displayedSummaries}
               selectedId={id}
-              range={range}
+              query={sidebarQuery}
+              onQueryChange={setSidebarQuery}
+              hasMore={projectHasMore}
+              onLoadMore={loadMoreProjectNotes}
               onSelect={selectNote}
               onDelete={(summary) => void deleteById(summary.id)}
+              onClearFilter={clearProjectFilter}
             />
-            <NotesCalendar
-              month={month}
-              counts={counts}
-              range={range}
-              onMonthChange={(delta) => setMonth((m) => addMonths(m, delta))}
-              onSelectWeek={(day) => setRange(weekOf(day))}
-              onToday={resetToToday}
-            />
-          </>
-        ) : (
-          <ProjectNotesSidebar
-            projectId={projectFilter}
-            summaries={displayedSummaries}
-            selectedId={id}
-            query={sidebarQuery}
-            onQueryChange={setSidebarQuery}
-            hasMore={projectHasMore}
-            onLoadMore={loadMoreProjectNotes}
-            onSelect={selectNote}
-            onDelete={(summary) => void deleteById(summary.id)}
-            onClearFilter={clearProjectFilter}
-          />
-        )}
+          )}
+        </div>
       </aside>
 
       <main className="flex-1 overflow-y-auto bg-[var(--paper)]">
