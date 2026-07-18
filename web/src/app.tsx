@@ -3,6 +3,7 @@ import { AppShell } from "./components/app-shell";
 import { DetailPage } from "./pages/detail";
 import { ListPage } from "./pages/list";
 import { NotesPage } from "./pages/notes";
+import { SettingsPage } from "./pages/settings";
 
 function subscribe(cb: () => void) {
   window.addEventListener("popstate", cb);
@@ -34,13 +35,15 @@ export function spaLinkClick(to: string) {
 type Route =
   | { page: "list" }
   | { page: "detail"; id: string }
-  | { page: "notes"; id: string | null };
+  | { page: "notes"; id: string | null }
+  | { page: "settings" };
 
 function parseRoute(pathname: string): Route {
   const explanation = pathname.match(/^\/explanations\/(.+)$/);
   if (explanation) return { page: "detail", id: explanation[1] };
   const notes = pathname.match(/^\/notes(?:\/([^/]+))?\/?$/);
   if (notes) return { page: "notes", id: notes[1] ?? null };
+  if (/^\/settings\/?$/.test(pathname)) return { page: "settings" };
   return { page: "list" };
 }
 
@@ -49,11 +52,15 @@ export function App() {
   const route = parseRoute(pathname);
 
   return (
-    <AppShell active={route.page === "notes" ? "notes" : "library"}>
+    <AppShell
+      active={route.page === "notes" ? "notes" : route.page === "settings" ? "settings" : "library"}
+    >
       {route.page === "detail" ? (
         <DetailPage id={route.id} />
       ) : route.page === "notes" ? (
         <NotesPage id={route.id} />
+      ) : route.page === "settings" ? (
+        <SettingsPage />
       ) : (
         <ListPage />
       )}

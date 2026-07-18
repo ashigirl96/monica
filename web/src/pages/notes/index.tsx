@@ -8,27 +8,30 @@ import {
   deleteNote,
   fetchLinkPreview,
   getNote,
+  getNotesToday,
   listNotes,
   listProjectNotes,
   listProjects,
   restoreNote,
+  setNoteKind,
 } from "@/api";
 import { navigate } from "@/app";
 import { FuzzyPickerModal } from "@/components/fuzzy-picker-modal";
-import type { Note, NoteKind, NoteSummary, ProjectOption } from "@/types.gen";
+import type { Note, NoteSummary, ProjectOption } from "@/types.gen";
 import type { DateRange, Month } from "./dates";
 import {
   addMonths,
   currentMonth,
+  monthOf,
   monthRange,
   rollingWeek,
+  sameMonth,
   sameRange,
   todayKey,
   weekOf,
 } from "./dates";
 import { type DraftPatch, EditorHeader } from "./editor-header";
 import { NotesCalendar } from "./calendar";
-import { NOTE_KINDS } from "./kind";
 import { NotesSidebar, ProjectNotesSidebar, summaryTitle } from "./sidebar";
 import { useAutosave } from "./use-autosave";
 import "./notes.css";
@@ -61,7 +64,10 @@ function EmptyState() {
 }
 
 export function NotesPage({ id }: { id: string | null }) {
-  const [range, setRange] = useState<DateRange>(rollingWeek);
+  // logical today は backend が正（day boundary 設定を適用）。ブラウザ midnight は
+  // 取得完了までの初期値フォールバック
+  const [today, setToday] = useState<string>(todayKey);
+  const [range, setRange] = useState<DateRange>(() => rollingWeek(todayKey()));
   const [summaries, setSummaries] = useState<NoteSummary[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [note, setNote] = useState<Note | null>(null);
@@ -72,7 +78,7 @@ export function NotesPage({ id }: { id: string | null }) {
   // create / delete 後に summaries と counts を再取得させるためのバージョン
   const [dataVersion, setDataVersion] = useState(0);
   // 同時に 1 つしか開かない modal picker。null = どれも閉じている
-  const [picker, setPicker] = useState<"kind" | "project" | "filter" | null>(null);
+  const [picker, setPicker] = useState<"project" | "filter" | null>(null);
   // ⌃T の project filter モード。null = 通常の週表示
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
   const [projectNotes, setProjectNotes] = useState<NoteSummary[] | null>(null);
@@ -126,6 +132,23 @@ export function NotesPage({ id }: { id: string | null }) {
     listProjects()
       .then(setProjects)
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getNotesToday()
+      .then((t) => {
+        if (cancelled) return;
+        setToday(t.date);
+        // ユーザーがまだ範囲・月を動かしていなければ、初期表示も logical today 基準に合わせる
+        // （boundary で today が前月に食い込むケースでカレンダーとサイドバーがズレないように）
+        setRange((r) => (sameRange(r, rollingWeek(todayKey())) ? rollingWeek(t.date) : r));
+        setMonth((m) => (sameMonth(m, currentMonth()) ? monthOf(t.date) : m));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -212,9 +235,9 @@ export function NotesPage({ id }: { id: string | null }) {
   // id なしで開いたら今日の最新エントリを自動選択する（project filter 中はしない）
   useEffect(() => {
     if (id !== null || summaries === null || projectFilter !== null) return;
-    const newest = summaries.find((s) => s.date === todayKey());
+    const newest = summaries.find((s) => s.date === today);
     if (newest) navigate(`/notes/${newest.id}`, { replace: true });
-  }, [id, summaries, projectFilter]);
+  }, [id, summaries, projectFilter, today]);
 
   const selectNote = useCallback(
     (noteId: string) => {
@@ -224,14 +247,11 @@ export function NotesPage({ id }: { id: string | null }) {
     [flush],
   );
 
-  // 「今日の直近7日 + 今月」へ戻す。既に同じ表示なら state 同一性を保って refetch を抑止する
+  // 「今日の直近7日 + 今日の月」へ戻す。既に同じ表示なら state 同一性を保って refetch を抑止する
   const resetToToday = useCallback(() => {
-    setRange((r) => (sameRange(r, rollingWeek()) ? r : rollingWeek()));
-    setMonth((m) => {
-      const now = currentMonth();
-      return m.year === now.year && m.month === now.month ? m : now;
-    });
-  }, []);
+    setRange((r) => (sameRange(r, rollingWeek(today)) ? r : rollingWeek(today)));
+    setMonth((m) => (sameMonth(m, monthOf(today)) ? m : monthOf(today)));
+  }, [today]);
 
   // API レスポンスの note をそのまま表示状態にする（navigate 後の再フェッチを省く）
   const seedNote = useCallback((n: Note) => {
@@ -245,8 +265,7 @@ export function NotesPage({ id }: { id: string | null }) {
     await flush();
     try {
       const created = await createNote();
-      pendingTitleFocusRef.current = true;
-      // 新規 note は project なしで生まれるので、filter を解いて「今日」の文脈に戻す
+      // 新規 note は daily（title なし）で生まれるので、filter を解いて「今日」の文脈に戻す
       clearProjectFilter();
       resetToToday();
       setDataVersion((v) => v + 1);
@@ -269,7 +288,7 @@ export function NotesPage({ id }: { id: string | null }) {
     editorHandleRef.current?.focusStart();
   }, []);
 
-  const openPicker = useCallback((which: "kind" | "project" | "filter") => {
+  const openPicker = useCallback((which: "project" | "filter") => {
     pickerReturnFocusRef.current = document.activeElement as HTMLElement | null;
     setPicker(which);
   }, []);
@@ -327,38 +346,60 @@ export function NotesPage({ id }: { id: string | null }) {
   const scheduleSave = useCallback(
     (target: Note) => {
       schedule(target.id, {
-        title: target.title,
-        kind: target.kind,
-        project_id: target.project_id,
+        title: target.kind.kind === "essay" ? target.kind.title : null,
         content: contentRef.current ?? target.content,
       });
     },
     [schedule],
   );
 
+  // essay の title 編集のみ。kind の変更は遷移コマンド（setNoteKind）経由で seedNote される
   const onDraftChange = useCallback(
     (patch: DraftPatch) => {
       const current = noteRef.current;
-      if (!current) return;
-      const next = { ...current, ...patch };
+      if (!current || patch.title === undefined || current.kind.kind !== "essay") return;
+      const next: Note = { ...current, kind: { kind: "essay", title: patch.title } };
       noteRef.current = next;
       setNote(next);
       scheduleSave(next);
-      const patchSummary = (s: NoteSummary) =>
-        s.id === next.id
-          ? { ...s, title: next.title, kind: next.kind, project_id: next.project_id }
-          : s;
+      const patchSummary = (s: NoteSummary) => (s.id === next.id ? { ...s, kind: next.kind } : s);
       setSummaries((list) => list?.map(patchSummary) ?? list);
-      // project filter 中は、project を外した/付け替えた note を一覧から落とす
-      setProjectNotes(
-        (list) =>
-          list
-            ?.map(patchSummary)
-            .filter((s) => s.id !== next.id || s.project_id === projectFilter) ?? list,
-      );
+      setProjectNotes((list) => list?.map(patchSummary) ?? list);
     },
-    [scheduleSave, projectFilter],
+    [scheduleSave],
   );
+
+  // kind 遷移は backend が検証して確定形を返す。pending の content を先に flush して、
+  // 遷移後に古い autosave が着弾する余地を潰す（title は CASE ガードで backend 側も防御済み）
+  const applyKindTransition = useCallback(
+    async (target: Parameters<typeof setNoteKind>[1]) => {
+      const current = noteRef.current;
+      if (!current) return;
+      await flush();
+      try {
+        const updated = await setNoteKind(current.id, target);
+        if (updated.kind.kind === "essay") pendingTitleFocusRef.current = true;
+        seedNote(updated);
+        setDataVersion((v) => v + 1);
+      } catch {
+        // 409/404 は UI 状態が古いだけ。dataVersion の再取得で追いつくので黙って握る
+        setDataVersion((v) => v + 1);
+      }
+    },
+    [flush, seedNote],
+  );
+
+  const toggleDailyEssay = useCallback(() => {
+    const kind = noteRef.current?.kind.kind;
+    if (kind !== "daily" && kind !== "essay") return; // project からの脱出経路なし
+    void applyKindTransition({ kind: kind === "daily" ? "essay" : "daily" });
+  }, [applyKindTransition]);
+
+  const openPromotionPicker = useCallback(() => {
+    // 昇格は daily → project のみ（essay は一度 daily に戻す）
+    if (noteRef.current?.kind.kind !== "daily") return;
+    openPicker("project");
+  }, [openPicker]);
 
   const onDocChange = useCallback(
     (doc: unknown) => {
@@ -390,7 +431,8 @@ export function NotesPage({ id }: { id: string | null }) {
         if (e.code === "KeyQ" || e.code === "KeyW") {
           e.preventDefault();
           e.stopPropagation();
-          openPicker(e.code === "KeyQ" ? "kind" : "project");
+          if (e.code === "KeyQ") toggleDailyEssay();
+          else openPromotionPicker();
           return;
         }
       }
@@ -437,7 +479,8 @@ export function NotesPage({ id }: { id: string | null }) {
     selectNote,
     deleteById,
     undoDelete,
-    openPicker,
+    toggleDailyEssay,
+    openPromotionPicker,
     toggleProjectFilter,
     picker,
   ]);
@@ -456,6 +499,7 @@ export function NotesPage({ id }: { id: string | null }) {
                 summaries={summaries}
                 selectedId={id}
                 range={range}
+                today={today}
                 onSelect={selectNote}
                 onDelete={(summary) => void deleteById(summary.id)}
               />
@@ -463,6 +507,7 @@ export function NotesPage({ id }: { id: string | null }) {
                 month={month}
                 counts={counts}
                 range={range}
+                today={today}
                 onMonthChange={(delta) => setMonth((m) => addMonths(m, delta))}
                 onSelectWeek={(day) => setRange(weekOf(day))}
                 onToday={resetToToday}
@@ -473,6 +518,7 @@ export function NotesPage({ id }: { id: string | null }) {
               projectId={projectFilter}
               summaries={displayedSummaries}
               selectedId={id}
+              today={today}
               query={sidebarQuery}
               onQueryChange={setSidebarQuery}
               hasMore={projectHasMore}
@@ -499,8 +545,8 @@ export function NotesPage({ id }: { id: string | null }) {
               titleRef={titleRef}
               saveError={saveError}
               onDraftChange={onDraftChange}
-              onOpenKindPicker={() => openPicker("kind")}
-              onOpenProjectPicker={() => openPicker("project")}
+              onToggleEssay={toggleDailyEssay}
+              onOpenProjectPicker={openPromotionPicker}
               onEnterEditor={focusEditorStart}
             />
             <BlockEditor
@@ -517,22 +563,17 @@ export function NotesPage({ id }: { id: string | null }) {
         ) : null}
       </main>
 
-      {picker === "kind" && note && (
-        <FuzzyPickerModal
-          items={NOTE_KINDS.map((k) => ({ key: k, label: k }))}
-          // kind は必須なので ^w clear（onSelect(null)）は無視する
-          onSelect={(key) => key !== null && onDraftChange({ kind: key as NoteKind })}
-          onClose={() => setPicker(null)}
-          placeholder="Kind..."
-        />
-      )}
-
       {picker === "project" && note && (
         <FuzzyPickerModal
           items={projects.map((p) => ({ key: p.id, label: p.id }))}
-          onSelect={(key) => onDraftChange({ project_id: key })}
+          // 昇格は project_id 必須なので ^w clear（onSelect(null)）は無視する
+          onSelect={(key) => {
+            if (key === null) return;
+            void applyKindTransition({ kind: "project", project_id: key });
+          }}
           onClose={() => setPicker(null)}
-          placeholder="Set project..."
+          placeholder="Promote to project..."
+          footer="↑↓ move · ⏎ promote · esc/^c close"
         />
       )}
 

@@ -25,6 +25,23 @@ pub enum TranslateEffort {
     High,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct NotesSettings {
+    pub day_boundary_hour: u8,
+}
+
+impl From<monica_settings::NotesSettings> for NotesSettings {
+    fn from(value: monica_settings::NotesSettings) -> Self {
+        Self { day_boundary_hour: value.day_boundary_hour }
+    }
+}
+
+impl From<NotesSettings> for monica_settings::NotesSettings {
+    fn from(value: NotesSettings) -> Self {
+        Self { day_boundary_hour: value.day_boundary_hour }
+    }
+}
+
 /// 設定 UI が表示する snapshot: 設定値 + bridge プロセスの現況。
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct TranslateSettingsSnapshot {
@@ -106,6 +123,18 @@ mod tests {
         let api: TranslateSettings = original.clone().into();
         let back: monica_settings::TranslateSettings = api.into();
         assert_eq!(back, original);
+    }
+
+    #[test]
+    fn notes_settings_mirror_roundtrips() {
+        let original = monica_settings::NotesSettings { day_boundary_hour: 5 };
+        let api: NotesSettings = original.into();
+        let back: monica_settings::NotesSettings = api.into();
+        assert_eq!(back, original);
+        assert_eq!(
+            serde_json::to_string(&api).unwrap(),
+            r#"{"day_boundary_hour":5}"#
+        );
     }
 
     #[test]

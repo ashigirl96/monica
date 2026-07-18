@@ -5,7 +5,10 @@ import type {
   Note,
   NotePage,
   NoteSummary,
+  NotesSettings,
+  NotesToday,
   ProjectOption,
+  SetNoteKind,
   UpdateNote,
 } from "./types.gen";
 
@@ -59,6 +62,38 @@ export async function updateNote(id: string, update: UpdateNote, keepalive = fal
     keepalive,
   });
   if (!res.ok) throw new Error(`Failed to save note: ${res.status}`);
+}
+
+export async function setNoteKind(id: string, kind: SetNoteKind): Promise<Note> {
+  const res = await fetch(`/api/notes/${id}/kind`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(kind),
+  });
+  if (!res.ok) throw new Error(`Failed to change note kind: ${res.status}`);
+  return res.json();
+}
+
+export async function getNotesToday(): Promise<NotesToday> {
+  const res = await fetch("/api/notes/today");
+  if (!res.ok) throw new Error(`Failed to load today: ${res.status}`);
+  return res.json();
+}
+
+export async function getNotesSettings(): Promise<NotesSettings> {
+  const res = await fetch("/api/settings/notes");
+  if (!res.ok) throw new Error(`Failed to load notes settings: ${res.status}`);
+  return res.json();
+}
+
+export async function putNotesSettings(settings: NotesSettings): Promise<NotesSettings> {
+  const res = await fetch("/api/settings/notes", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+  if (!res.ok) throw new Error(`Failed to save notes settings: ${res.status}`);
+  return res.json();
 }
 
 export async function deleteNote(id: string): Promise<void> {

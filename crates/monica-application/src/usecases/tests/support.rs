@@ -1602,7 +1602,7 @@ impl crate::ports::ExplanationStore for FakeRepos {
 // usecase テストで note を使うものはまだない — Backend::Repos の trait bound を満たすためのスタブ。
 // 最初に使うテストと一緒に、必要なメソッドだけ本物の挙動を実装すること。
 impl crate::ports::NoteStore for FakeRepos {
-    fn create_note(&mut self) -> Result<monica_domain::Note> {
+    fn create_note(&mut self, _day_boundary_hour: u8) -> Result<monica_domain::Note> {
         unimplemented!("no usecase test exercises notes yet")
     }
 
@@ -1635,6 +1635,15 @@ impl crate::ports::NoteStore for FakeRepos {
         unimplemented!("no usecase test exercises notes yet")
     }
 
+    fn set_note_kind(
+        &mut self,
+        _id: &str,
+        _expected_kind: &str,
+        _kind: &monica_domain::NoteKind,
+    ) -> Result<Option<monica_domain::Note>> {
+        unimplemented!("no usecase test exercises notes yet")
+    }
+
     fn delete_note(&mut self, _id: &str) -> Result<bool> {
         unimplemented!("no usecase test exercises notes yet")
     }
@@ -1648,6 +1657,10 @@ impl crate::ports::NoteStore for FakeRepos {
         _from: Option<&str>,
         _to: Option<&str>,
     ) -> Result<Vec<monica_domain::DailyNoteCount>> {
+        unimplemented!("no usecase test exercises notes yet")
+    }
+
+    fn logical_today(&self, _day_boundary_hour: u8) -> Result<String> {
         unimplemented!("no usecase test exercises notes yet")
     }
 }

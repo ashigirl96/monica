@@ -19,6 +19,25 @@ pub const DEFAULT_EXTENSION_ORIGIN: &str = "chrome-extension://lencjjlgejlnlgmpc
 #[serde(default)]
 pub struct Settings {
     pub translate: TranslateSettings,
+    pub notes: NotesSettings,
+}
+
+/// notes ドメイン専用の設定。アプリ全体の日付概念には影響させない。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct NotesSettings {
+    /// note の日付境界（0–23）。5 なら翌朝 5 時までは前日の daily に帰属する
+    /// （放送業界の 28 時表記と同じ発想）。変更は過去の note の date に遡及しない。
+    pub day_boundary_hour: u8,
+}
+
+impl NotesSettings {
+    pub fn validate(&self) -> Result<()> {
+        if self.day_boundary_hour > 23 {
+            anyhow::bail!("day_boundary_hour must be 0-23");
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -203,6 +222,37 @@ mod tests {
         let json = serde_json::to_value(Settings::default()).unwrap();
         assert_eq!(json["translate"]["model"], "haiku");
         assert_eq!(json["translate"]["effort"], "low");
+    }
+
+    #[test]
+    fn notes_defaults_and_partial_json() {
+        assert_eq!(Settings::default().notes.day_boundary_hour, 0);
+        // notes セクションのない既存ファイルは default で補完される
+        let base = temp_base("notes-partial");
+        std::fs::write(
+            base.join(SETTINGS_FILE),
+            r#"{ "translate": { "enabled": false } }"#,
+        )
+        .unwrap();
+        let s = Settings::load_from(&base).unwrap();
+        assert_eq!(s.notes.day_boundary_hour, 0);
+    }
+
+    #[test]
+    fn notes_roundtrip_coexists_with_translate() {
+        let base = temp_base("notes-roundtrip");
+        let mut s = Settings::default();
+        s.translate.enabled = false;
+        s.notes.day_boundary_hour = 5;
+        s.save_to(&base).unwrap();
+        assert_eq!(Settings::load_from(&base).unwrap(), s);
+    }
+
+    #[test]
+    fn notes_validate_bounds() {
+        assert!(NotesSettings { day_boundary_hour: 0 }.validate().is_ok());
+        assert!(NotesSettings { day_boundary_hour: 23 }.validate().is_ok());
+        assert!(NotesSettings { day_boundary_hour: 24 }.validate().is_err());
     }
 
     #[test]

@@ -1,11 +1,16 @@
 import { useEffect, useRef } from "react";
 import type { NoteSummary } from "@/types.gen";
 import type { DateRange } from "./dates";
-import { addDays, dayLabel, dayLabelWithYear, formatTime, todayKey } from "./dates";
+import { addDays, dayLabel, dayLabelWithYear, formatTime } from "./dates";
 import { kindColor } from "./kind";
 
 export function summaryTitle(summary: NoteSummary): string {
-  return summary.title ?? summary.preview ?? "Untitled";
+  if (summary.kind.kind === "essay" && summary.kind.title !== "") return summary.kind.title;
+  return summary.preview ?? "Untitled";
+}
+
+function isUntitled(summary: NoteSummary): boolean {
+  return (summary.kind.kind !== "essay" || summary.kind.title === "") && summary.preview === null;
 }
 
 function NoteItem({
@@ -36,12 +41,12 @@ function NoteItem({
         <span
           aria-hidden
           className="size-1.5 shrink-0 rounded-full"
-          style={{ background: kindColor(summary.kind) }}
-          title={summary.kind}
+          style={{ background: kindColor(summary.kind.kind) }}
+          title={summary.kind.kind}
         />
         <span
           className={`min-w-0 flex-1 truncate text-[0.8rem] ${
-            summary.title === null && summary.preview === null
+            isUntitled(summary)
               ? "text-[var(--ink-faint)]"
               : selected
                 ? "text-[var(--ink-text)]"
@@ -82,10 +87,10 @@ function NoteItem({
   );
 }
 
-function DayHeading({ day }: { day: string }) {
+function DayHeading({ day, today }: { day: string; today: string }) {
   return (
     <h2 className="px-2.5 pb-1 font-mono text-[0.65rem] uppercase tracking-widest text-[var(--ink-faint)]">
-      {day === todayKey() ? `TODAY · ${dayLabel(day)}` : dayLabelWithYear(day)}
+      {day === today ? `TODAY · ${dayLabel(day)}` : dayLabelWithYear(day)}
     </h2>
   );
 }
@@ -95,6 +100,7 @@ export function ProjectNotesSidebar({
   projectId,
   summaries,
   selectedId,
+  today,
   query,
   onQueryChange,
   hasMore,
@@ -106,6 +112,7 @@ export function ProjectNotesSidebar({
   projectId: string;
   summaries: NoteSummary[] | null;
   selectedId: string | null;
+  today: string;
   query: string;
   onQueryChange: (query: string) => void;
   hasMore: boolean;
@@ -199,7 +206,7 @@ export function ProjectNotesSidebar({
       <div className="flex-1 overflow-y-auto px-2 pb-3">
         {groups.map(({ day, notes }) => (
           <section key={day} className="mb-3">
-            <DayHeading day={day} />
+            <DayHeading day={day} today={today} />
             {notes.map((summary) => (
               <NoteItem
                 key={summary.id}
@@ -233,16 +240,17 @@ export function NotesSidebar({
   summaries,
   selectedId,
   range,
+  today,
   onSelect,
   onDelete,
 }: {
   summaries: NoteSummary[] | null;
   selectedId: string | null;
   range: DateRange;
+  today: string;
   onSelect: (id: string) => void;
   onDelete: (summary: NoteSummary) => void;
 }) {
-  const today = todayKey();
   const days: string[] = [];
   for (let day = range.to; day >= range.from; day = addDays(day, -1)) {
     days.push(day);
@@ -267,7 +275,7 @@ export function NotesSidebar({
         if (notes.length === 0 && day !== today) return null;
         return (
           <section key={day} className="mb-3">
-            <DayHeading day={day} />
+            <DayHeading day={day} today={today} />
             {notes.length === 0 ? (
               <p className="px-2.5 py-1 text-[0.75rem] text-[var(--ink-faint)]">
                 Press{" "}

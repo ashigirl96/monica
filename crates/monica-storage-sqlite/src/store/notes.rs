@@ -1,7 +1,9 @@
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 use monica_application::ports::NoteStore;
-use monica_domain::{DailyNoteCount, Note, NoteId, NoteKind, NoteSummary, RawJson, UpdateNote};
-use rusqlite::{params, Row};
+use monica_domain::{
+    logical_date, DailyNoteCount, Note, NoteId, NoteKind, NoteSummary, RawJson, UpdateNote,
+};
+use rusqlite::{params, Connection, Row};
 
 use crate::SqliteStore;
 
@@ -9,16 +11,41 @@ use super::{NOTE_COLUMNS, SET_NOW};
 
 const PREVIEW_MAX_CHARS: usize = 200;
 
-/// note の「その日」= 作成時点のサーバーローカル日。day boundary のルールはここが唯一の定義。
-const TODAY_LOCAL: &str = "strftime('%Y-%m-%d','now','localtime')";
+/// note の「その日」の素材になるサーバーローカル時刻。タイムゾーン解決は SQLite に
+/// 一任し、day boundary のシフトは domain の `logical_date` が担う。
+const LOCAL_NOW: &str = "strftime('%Y-%m-%dT%H:%M:%S','now','localtime')";
+
+fn logical_today_on(conn: &Connection, day_boundary_hour: u8) -> Result<String> {
+    let local_now: String = conn.query_row(&format!("SELECT {LOCAL_NOW}"), [], |r| r.get(0))?;
+    logical_date(&local_now, day_boundary_hour)
+        .ok_or_else(|| anyhow!("invalid localtime from sqlite: {local_now}"))
+}
+
+fn kind_from_columns(
+    kind: &str,
+    title: Option<String>,
+    project_id: Option<String>,
+) -> Result<NoteKind> {
+    match (kind, project_id) {
+        ("project", Some(project_id)) => Ok(NoteKind::Project { project_id }),
+        // project の削除（FK ON DELETE SET NULL）で orphan 化した project note は
+        // daily に退化して読む。元の date の daily として一覧に現れる。
+        ("project", None) => Ok(NoteKind::Daily),
+        ("daily", _) => Ok(NoteKind::Daily),
+        ("essay", _) => Ok(NoteKind::Essay { title: title.unwrap_or_default() }),
+        (other, _) => bail!("unknown note kind: {other}"),
+    }
+}
+
+fn kind_from_row(row: &Row<'_>) -> Result<NoteKind> {
+    let kind: String = row.get("kind")?;
+    kind_from_columns(&kind, row.get("title")?, row.get("project_id")?)
+}
 
 fn note_from_row(row: &Row<'_>) -> Result<Note> {
-    let kind: String = row.get("kind")?;
     Ok(Note {
         id: NoteId::from_store(row.get("id")?),
-        title: row.get("title")?,
-        kind: kind.parse::<NoteKind>()?,
-        project_id: row.get("project_id")?,
+        kind: kind_from_row(row)?,
         content: RawJson::from(row.get::<_, String>("content")?),
         date: row.get("date")?,
         created_at: row.get("created_at")?,
@@ -64,13 +91,10 @@ fn first_line_preview(content: &str) -> Option<String> {
 }
 
 fn summary_from_row(row: &Row<'_>) -> Result<NoteSummary> {
-    let kind: String = row.get("kind")?;
     let content: String = row.get("content")?;
     Ok(NoteSummary {
         id: NoteId::from_store(row.get("id")?),
-        title: row.get("title")?,
-        kind: kind.parse::<NoteKind>()?,
-        project_id: row.get("project_id")?,
+        kind: kind_from_row(row)?,
         preview: first_line_preview(&content),
         date: row.get("date")?,
         created_at: row.get("created_at")?,
@@ -79,18 +103,19 @@ fn summary_from_row(row: &Row<'_>) -> Result<NoteSummary> {
 }
 
 impl NoteStore for SqliteStore {
-    fn create_note(&mut self) -> Result<Note> {
+    fn create_note(&mut self, day_boundary_hour: u8) -> Result<Note> {
         let tx = self.conn_mut().transaction()?;
         tx.execute("INSERT INTO note_counter DEFAULT VALUES", [])?;
         let id = format!("note-{}", tx.last_insert_rowid());
+        let date = logical_today_on(&tx, day_boundary_hour)?;
         // ビジネス上のデフォルト（kind・空 doc・date）はここで明示的に insert する。
         // v38 の DDL デフォルトはこの経路では使わない（frozen な migration に依存しない）。
         let note = tx.query_row(
             &format!(
-                "INSERT INTO notes (id, kind, content, date) VALUES (?1, ?2, ?3, {TODAY_LOCAL})
+                "INSERT INTO notes (id, kind, content, date) VALUES (?1, 'daily', ?2, ?3)
                  RETURNING {NOTE_COLUMNS}"
             ),
-            params![id, NoteKind::default().as_str(), monica_domain::EMPTY_NOTE_DOC],
+            params![id, monica_domain::EMPTY_NOTE_DOC, date],
             |row| Ok(note_from_row(row)),
         )??;
         tx.commit()?;
@@ -139,18 +164,43 @@ impl NoteStore for SqliteStore {
     }
 
     fn update_note(&mut self, id: &str, update: UpdateNote) -> Result<Option<Note>> {
+        // title は essay のときだけ意味を持つ。CASE ガードにより、kind 遷移直後に着弾した
+        // stale な autosave が daily/project に title を植え付けることはない。
         let mut stmt = self.conn().prepare(&format!(
             "UPDATE notes
-             SET title = ?1, kind = ?2, project_id = ?3, content = ?4, updated_at = {SET_NOW}
-             WHERE id = ?5 AND deleted_at IS NULL
+             SET content = ?1,
+                 title = CASE WHEN kind = 'essay' AND ?2 IS NOT NULL THEN ?2 ELSE title END,
+                 updated_at = {SET_NOW}
+             WHERE id = ?3 AND deleted_at IS NULL
+             RETURNING {NOTE_COLUMNS}"
+        ))?;
+        let mut rows = stmt.query(params![update.content.as_str(), update.title, id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(note_from_row(row)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn set_note_kind(
+        &mut self,
+        id: &str,
+        expected_kind: &str,
+        kind: &NoteKind,
+    ) -> Result<Option<Note>> {
+        // kind の一致を WHERE で確認する条件付き書き込み。呼び手が検証した遷移元から
+        // 変わっていたら不発（並行遷移の後勝ち上書きを防ぐ）。
+        let mut stmt = self.conn().prepare(&format!(
+            "UPDATE notes
+             SET kind = ?1, title = ?2, project_id = ?3, updated_at = {SET_NOW}
+             WHERE id = ?4 AND deleted_at IS NULL AND kind = ?5
              RETURNING {NOTE_COLUMNS}"
         ))?;
         let mut rows = stmt.query(params![
-            update.title,
-            update.kind.as_str(),
-            update.project_id,
-            update.content.as_str(),
+            kind.name(),
+            kind.title(),
+            kind.project_id(),
             id,
+            expected_kind
         ])?;
         match rows.next()? {
             Some(row) => Ok(Some(note_from_row(row)?)),
@@ -193,6 +243,10 @@ impl NoteStore for SqliteStore {
         })?;
         rows.map(|r| Ok(r?)).collect()
     }
+
+    fn logical_today(&self, day_boundary_hour: u8) -> Result<String> {
+        logical_today_on(self.conn(), day_boundary_hour)
+    }
 }
 
 #[cfg(test)]
@@ -206,33 +260,60 @@ mod tests {
             .unwrap();
     }
 
+    fn seed_project(store: &SqliteStore, id: &str) {
+        store
+            .conn()
+            .execute(
+                "INSERT INTO projects (id, name, repo) VALUES (?1, 'r', ?1)",
+                params![id],
+            )
+            .unwrap();
+    }
+
     fn doc_with_text(text: &str) -> String {
         format!(
             r#"{{"type":"doc","content":[{{"type":"blockGroup","content":[{{"type":"blockContainer","content":[{{"type":"paragraph","content":[{{"type":"text","text":"{text}"}}]}}]}}]}}]}}"#
         )
     }
 
+    fn content_update(text: &str) -> UpdateNote {
+        UpdateNote { title: None, content: RawJson::from(doc_with_text(text)) }
+    }
+
     #[test]
-    fn create_uses_defaults() {
+    fn create_uses_defaults_and_logical_today() {
         let mut store = SqliteStore::open_in_memory().unwrap();
-        let note = store.create_note().unwrap();
-        assert_eq!(note.id, "note-1");
-        assert_eq!(note.title, None);
-        assert_eq!(note.kind, NoteKind::Memo);
-        assert_eq!(note.project_id, None);
-        assert_eq!(note.content.as_str(), monica_domain::EMPTY_NOTE_DOC);
-        assert_eq!(note.date.len(), 10);
-        assert!(note.date.chars().all(|c| c.is_ascii_digit() || c == '-'));
-        assert!(!note.created_at.is_empty());
-        assert_eq!(note.created_at, note.updated_at);
+        for boundary in [0u8, 23] {
+            let before = store.logical_today(boundary).unwrap();
+            let note = store.create_note(boundary).unwrap();
+            let after = store.logical_today(boundary).unwrap();
+            assert_eq!(note.kind, NoteKind::Daily);
+            assert_eq!(note.content.as_str(), monica_domain::EMPTY_NOTE_DOC);
+            // 日付の跨ぎ・境界秒のレースに耐えるよう、直前直後の logical today と突き合わせる
+            assert!(
+                note.date == before || note.date == after,
+                "date {} not in [{before}, {after}]",
+                note.date
+            );
+            assert!(!note.created_at.is_empty());
+            assert_eq!(note.created_at, note.updated_at);
+        }
+    }
+
+    #[test]
+    fn logical_today_format() {
+        let store = SqliteStore::open_in_memory().unwrap();
+        let today = store.logical_today(0).unwrap();
+        assert_eq!(today.len(), 10);
+        assert!(today.chars().all(|c| c.is_ascii_digit() || c == '-'));
     }
 
     #[test]
     fn ids_increment_and_survive_delete() {
         let mut store = SqliteStore::open_in_memory().unwrap();
-        let n1 = store.create_note().unwrap();
+        let n1 = store.create_note(0).unwrap();
         store.delete_note(n1.id.as_str()).unwrap();
-        let n2 = store.create_note().unwrap();
+        let n2 = store.create_note(0).unwrap();
         assert_eq!(n1.id, "note-1");
         assert_eq!(n2.id, "note-2");
     }
@@ -240,25 +321,23 @@ mod tests {
     #[test]
     fn soft_delete_hides_and_restore_brings_back() {
         let mut store = SqliteStore::open_in_memory().unwrap();
-        let note = store.create_note().unwrap();
+        let note = store.create_note(0).unwrap();
         let id = note.id.as_str();
 
         store.delete_note(id).unwrap();
         assert!(store.get_note(id).unwrap().is_none());
         assert!(store.list_notes(None, None).unwrap().is_empty());
         assert!(store.daily_note_counts(None, None).unwrap().is_empty());
-        // 削除済みへの update は不発（autosave の残弾で復活させない）
-        let update = UpdateNote {
-            title: Some("zombie".to_string()),
-            kind: NoteKind::Memo,
-            project_id: None,
-            content: RawJson::from(r#"{"type":"doc","content":[]}"#),
-        };
-        assert!(store.update_note(id, update).unwrap().is_none());
+        // 削除済みへの update / kind 変更は不発（autosave の残弾で復活させない）
+        assert!(store.update_note(id, content_update("zombie")).unwrap().is_none());
+        assert!(store
+            .set_note_kind(id, "daily", &NoteKind::Essay { title: "zombie".to_string() })
+            .unwrap()
+            .is_none());
 
         let restored = store.restore_note(id).unwrap().unwrap();
         assert_eq!(restored.id, note.id);
-        assert_eq!(restored.title, None, "delete/restore で内容は変わらない");
+        assert_eq!(restored.kind, NoteKind::Daily, "delete/restore で内容は変わらない");
         assert_eq!(store.list_notes(None, None).unwrap().len(), 1);
 
         assert!(store.restore_note("note-999").unwrap().is_none());
@@ -267,7 +346,7 @@ mod tests {
     #[test]
     fn get_existing_and_missing() {
         let mut store = SqliteStore::open_in_memory().unwrap();
-        store.create_note().unwrap();
+        store.create_note(0).unwrap();
         assert!(store.get_note("note-1").unwrap().is_some());
         assert!(store.get_note("note-999").unwrap().is_none());
     }
@@ -275,7 +354,7 @@ mod tests {
     #[test]
     fn update_round_trips_and_bumps_updated_at() {
         let mut store = SqliteStore::open_in_memory().unwrap();
-        let note = store.create_note().unwrap();
+        let note = store.create_note(0).unwrap();
         // updated_at は ms 精度なので、同一 tick でも変化が見えるよう過去に倒しておく。
         store
             .conn()
@@ -285,47 +364,149 @@ mod tests {
             )
             .unwrap();
 
-        let updated = store
-            .update_note(
-                note.id.as_str(),
-                UpdateNote {
-                    title: Some("morning pages".to_string()),
-                    kind: NoteKind::Essay,
-                    project_id: None,
-                    content: RawJson::from(doc_with_text("hello")),
-                },
-            )
-            .unwrap()
-            .unwrap();
-        assert_eq!(updated.title.as_deref(), Some("morning pages"));
-        assert_eq!(updated.kind, NoteKind::Essay);
+        let updated = store.update_note(note.id.as_str(), content_update("hello")).unwrap().unwrap();
         assert_eq!(updated.content.as_str(), doc_with_text("hello"));
         assert!(updated.updated_at.as_str() > "2000-01-01T00:00:00.000Z");
         assert_eq!(updated.date, note.date, "date is fixed at creation");
     }
 
     #[test]
-    fn update_missing_returns_none() {
+    fn update_title_only_applies_to_essays() {
         let mut store = SqliteStore::open_in_memory().unwrap();
-        let result = store
+        seed_project(&store, "o/r");
+
+        // daily: title は無視される
+        let daily = store.create_note(0).unwrap();
+        let update = UpdateNote {
+            title: Some("ignored".to_string()),
+            content: RawJson::from(doc_with_text("body")),
+        };
+        let updated = store.update_note(daily.id.as_str(), update.clone()).unwrap().unwrap();
+        assert_eq!(updated.kind, NoteKind::Daily);
+        assert_eq!(updated.kind.title(), None);
+
+        // project: title は無視される
+        let project = store.create_note(0).unwrap();
+        store
+            .set_note_kind(project.id.as_str(), "daily", &NoteKind::Project { project_id: "o/r".to_string() })
+            .unwrap()
+            .unwrap();
+        let updated = store.update_note(project.id.as_str(), update.clone()).unwrap().unwrap();
+        assert_eq!(updated.kind, NoteKind::Project { project_id: "o/r".to_string() });
+
+        // essay: Some は置換、None は keep
+        let essay = store.create_note(0).unwrap();
+        store
+            .set_note_kind(essay.id.as_str(), "daily", &NoteKind::Essay { title: String::new() })
+            .unwrap()
+            .unwrap();
+        let updated = store.update_note(essay.id.as_str(), update).unwrap().unwrap();
+        assert_eq!(updated.kind, NoteKind::Essay { title: "ignored".to_string() });
+        let kept = store.update_note(essay.id.as_str(), content_update("more")).unwrap().unwrap();
+        assert_eq!(kept.kind, NoteKind::Essay { title: "ignored".to_string() }, "None keeps title");
+        // 空文字への置換（無題化）も通る
+        let cleared = store
             .update_note(
-                "note-999",
+                essay.id.as_str(),
                 UpdateNote {
-                    title: None,
-                    kind: NoteKind::Memo,
-                    project_id: None,
-                    content: RawJson::from(r#"{"type":"doc","content":[]}"#),
+                    title: Some(String::new()),
+                    content: RawJson::from(doc_with_text("more")),
                 },
             )
+            .unwrap()
             .unwrap();
-        assert!(result.is_none());
+        assert_eq!(cleared.kind, NoteKind::Essay { title: String::new() });
+    }
+
+    #[test]
+    fn set_note_kind_writes_payload_columns() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        seed_project(&store, "o/r");
+        let note = store.create_note(0).unwrap();
+        let id = note.id.as_str();
+
+        let essay = store
+            .set_note_kind(id, "daily", &NoteKind::Essay { title: "t".to_string() })
+            .unwrap()
+            .unwrap();
+        assert_eq!(essay.kind, NoteKind::Essay { title: "t".to_string() });
+
+        let daily = store.set_note_kind(id, "essay", &NoteKind::Daily).unwrap().unwrap();
+        assert_eq!(daily.kind, NoteKind::Daily);
+        let title: Option<String> = store
+            .conn()
+            .query_row("SELECT title FROM notes WHERE id = ?1", params![id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(title, None, "daily 化で title 列も NULL に戻る");
+
+        let project = store
+            .set_note_kind(id, "daily", &NoteKind::Project { project_id: "o/r".to_string() })
+            .unwrap()
+            .unwrap();
+        assert_eq!(project.kind, NoteKind::Project { project_id: "o/r".to_string() });
+
+        assert!(store.set_note_kind("note-999", "daily", &NoteKind::Daily).unwrap().is_none());
+    }
+
+    #[test]
+    fn set_note_kind_rejects_unknown_project_via_fk() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        let note = store.create_note(0).unwrap();
+        assert!(store
+            .set_note_kind(
+                note.id.as_str(),
+                "daily",
+                &NoteKind::Project { project_id: "o/missing".to_string() }
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn set_note_kind_is_conditional_on_expected_kind() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        seed_project(&store, "o/r");
+        let note = store.create_note(0).unwrap();
+        let id = note.id.as_str();
+        store
+            .set_note_kind(id, "daily", &NoteKind::Project { project_id: "o/r".to_string() })
+            .unwrap()
+            .unwrap();
+
+        // 遷移元が変わっていたら不発: daily 前提で検証済みの並行遷移は project を上書きできない
+        let stale = store
+            .set_note_kind(id, "daily", &NoteKind::Essay { title: String::new() })
+            .unwrap();
+        assert!(stale.is_none());
+        let read = store.get_note(id).unwrap().unwrap();
+        assert_eq!(read.kind, NoteKind::Project { project_id: "o/r".to_string() });
+    }
+
+    #[test]
+    fn orphaned_project_note_reads_as_daily() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        seed_project(&store, "o/r");
+        let note = store.create_note(0).unwrap();
+        store
+            .set_note_kind(note.id.as_str(), "daily", &NoteKind::Project { project_id: "o/r".to_string() })
+            .unwrap()
+            .unwrap();
+
+        store.conn().execute("DELETE FROM projects WHERE id = 'o/r'", []).unwrap();
+        let read = store.get_note(note.id.as_str()).unwrap().unwrap();
+        assert_eq!(read.kind, NoteKind::Daily, "ON DELETE SET NULL → daily 退化");
+    }
+
+    #[test]
+    fn update_missing_returns_none() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        assert!(store.update_note("note-999", content_update("x")).unwrap().is_none());
     }
 
     #[test]
     fn list_filters_by_date_range_and_orders_desc() {
         let mut store = SqliteStore::open_in_memory().unwrap();
         for _ in 0..3 {
-            store.create_note().unwrap();
+            store.create_note(0).unwrap();
         }
         set_date(&store, "note-1", "2026-07-10");
         set_date(&store, "note-2", "2026-07-12");
@@ -345,8 +526,8 @@ mod tests {
     #[test]
     fn list_orders_same_day_newest_first() {
         let mut store = SqliteStore::open_in_memory().unwrap();
-        store.create_note().unwrap();
-        store.create_note().unwrap();
+        store.create_note(0).unwrap();
+        store.create_note(0).unwrap();
         let list = store.list_notes(None, None).unwrap();
         assert_eq!(
             list.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
@@ -357,18 +538,8 @@ mod tests {
     #[test]
     fn list_derives_preview_from_content() {
         let mut store = SqliteStore::open_in_memory().unwrap();
-        let note = store.create_note().unwrap();
-        store
-            .update_note(
-                note.id.as_str(),
-                UpdateNote {
-                    title: None,
-                    kind: NoteKind::Memo,
-                    project_id: None,
-                    content: RawJson::from(doc_with_text("最初の行だよ")),
-                },
-            )
-            .unwrap();
+        let note = store.create_note(0).unwrap();
+        store.update_note(note.id.as_str(), content_update("最初の行だよ")).unwrap();
         let list = store.list_notes(None, None).unwrap();
         assert_eq!(list[0].preview.as_deref(), Some("最初の行だよ"));
     }
@@ -376,18 +547,15 @@ mod tests {
     #[test]
     fn list_project_notes_filters_pages_and_skips_deleted() {
         let mut store = SqliteStore::open_in_memory().unwrap();
-        store
-            .conn()
-            .execute("INSERT INTO projects (id, name, repo) VALUES ('o/r', 'r', 'o/r')", [])
-            .unwrap();
+        seed_project(&store, "o/r");
         for _ in 0..4 {
-            store.create_note().unwrap();
+            store.create_note(0).unwrap();
         }
         // note-1..3 を o/r に、note-4 は project なしのまま
         for id in ["note-1", "note-2", "note-3"] {
             store
-                .conn()
-                .execute("UPDATE notes SET project_id = 'o/r' WHERE id = ?1", params![id])
+                .set_note_kind(id, "daily", &NoteKind::Project { project_id: "o/r".to_string() })
+                .unwrap()
                 .unwrap();
         }
         set_date(&store, "note-1", "2026-07-10");
@@ -411,7 +579,7 @@ mod tests {
     fn daily_counts_group_by_date() {
         let mut store = SqliteStore::open_in_memory().unwrap();
         for _ in 0..4 {
-            store.create_note().unwrap();
+            store.create_note(0).unwrap();
         }
         set_date(&store, "note-1", "2026-07-10");
         set_date(&store, "note-2", "2026-07-10");
@@ -429,35 +597,23 @@ mod tests {
     }
 
     #[test]
-    fn project_fk_rejects_unknown_and_nulls_on_project_delete() {
-        let mut store = SqliteStore::open_in_memory().unwrap();
-        let note = store.create_note().unwrap();
-
-        let update = |project_id: Option<&str>| UpdateNote {
-            title: None,
-            kind: NoteKind::Memo,
-            project_id: project_id.map(str::to_string),
-            content: RawJson::from(r#"{"type":"doc","content":[]}"#),
-        };
-
-        assert!(store.update_note(note.id.as_str(), update(Some("o/missing"))).is_err());
-
-        store
-            .conn()
-            .execute(
-                "INSERT INTO projects (id, name, repo) VALUES ('o/r', 'r', 'o/r')",
-                [],
-            )
-            .unwrap();
-        let updated = store
-            .update_note(note.id.as_str(), update(Some("o/r")))
-            .unwrap()
-            .unwrap();
-        assert_eq!(updated.project_id.as_deref(), Some("o/r"));
-
-        store.conn().execute("DELETE FROM projects WHERE id = 'o/r'", []).unwrap();
-        let note = store.get_note(note.id.as_str()).unwrap().unwrap();
-        assert_eq!(note.project_id, None, "ON DELETE SET NULL");
+    fn kind_from_columns_covers_all_shapes() {
+        assert_eq!(
+            kind_from_columns("project", None, Some("o/r".to_string())).unwrap(),
+            NoteKind::Project { project_id: "o/r".to_string() }
+        );
+        assert_eq!(kind_from_columns("project", None, None).unwrap(), NoteKind::Daily);
+        assert_eq!(kind_from_columns("daily", None, None).unwrap(), NoteKind::Daily);
+        assert_eq!(
+            kind_from_columns("essay", Some("t".to_string()), None).unwrap(),
+            NoteKind::Essay { title: "t".to_string() }
+        );
+        assert_eq!(
+            kind_from_columns("essay", None, None).unwrap(),
+            NoteKind::Essay { title: String::new() },
+            "NULL title は無題として読む"
+        );
+        assert!(kind_from_columns("memo", None, None).is_err(), "v40 後に旧 kind は存在しない");
     }
 
     #[test]

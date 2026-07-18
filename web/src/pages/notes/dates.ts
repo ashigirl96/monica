@@ -22,9 +22,8 @@ export function addDays(key: string, days: number): string {
   return toKey(d);
 }
 
-/** 今日を末尾とする直近7日。デフォルトのサイドバー表示範囲 */
-export function rollingWeek(): DateRange {
-  const today = todayKey();
+/** today を末尾とする直近7日。デフォルトのサイドバー表示範囲 */
+export function rollingWeek(today: string): DateRange {
   return { from: addDays(today, -6), to: today };
 }
 
@@ -62,6 +61,15 @@ export type Month = { year: number; month: number };
 export function currentMonth(): Month {
   const now = new Date();
   return { year: now.getFullYear(), month: now.getMonth() + 1 };
+}
+
+/** date key の属する月。logical today がブラウザの月と食い違うときはこちらが正 */
+export function monthOf(key: string): Month {
+  return { year: Number(key.slice(0, 4)), month: Number(key.slice(5, 7)) };
+}
+
+export function sameMonth(a: Month, b: Month): boolean {
+  return a.year === b.year && a.month === b.month;
 }
 
 export function addMonths({ year, month }: Month, delta: number): Month {

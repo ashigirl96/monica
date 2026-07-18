@@ -1,4 +1,6 @@
-use monica_domain::{DailyNoteCount, Note, NoteId, NotePage, NoteSummary, UpdateNote};
+use monica_domain::{
+    DailyNoteCount, Note, NoteId, NoteKindTarget, NotePage, NoteSummary, UpdateNote,
+};
 
 use super::Backend;
 use crate::error::{ApplicationError, ApplicationResult};
@@ -13,8 +15,12 @@ pub struct NoteService<'a, B: Backend> {
 }
 
 impl<B: Backend> NoteService<'_, B> {
-    pub fn create_note(&mut self) -> ApplicationResult<Note> {
-        Ok(self.m.repos.create_note()?)
+    pub fn create_note(&mut self, day_boundary_hour: u8) -> ApplicationResult<Note> {
+        Ok(self.m.repos.create_note(day_boundary_hour)?)
+    }
+
+    pub fn logical_today(&mut self, day_boundary_hour: u8) -> ApplicationResult<String> {
+        Ok(self.m.repos.logical_today(day_boundary_hour)?)
     }
 
     pub fn list_notes(
@@ -44,14 +50,32 @@ impl<B: Backend> NoteService<'_, B> {
 
     pub fn update_note(&mut self, id: &str, update: UpdateNote) -> ApplicationResult<Note> {
         NoteId::parse(id)?;
-        // FK 違反を SQLite エラー (500) にせず、先に存在チェックして not_found を返す。
-        if let Some(project_id) = &update.project_id {
-            crate::usecases::query::get_project(&self.m.repos, project_id)?;
-        }
         self.m
             .repos
             .update_note(id, update)?
             .ok_or_else(|| ApplicationError::not_found(format!("note {id} not found")))
+    }
+
+    pub fn set_note_kind(&mut self, id: &str, target: NoteKindTarget) -> ApplicationResult<Note> {
+        NoteId::parse(id)?;
+        let note = self
+            .m
+            .repos
+            .get_note(id)?
+            .ok_or_else(|| ApplicationError::not_found(format!("note {id} not found")))?;
+        // FK 違反を SQLite エラー (500) にせず、先に存在チェックして not_found を返す。
+        if let NoteKindTarget::Project { project_id } = &target {
+            crate::usecases::query::get_project(&self.m.repos, project_id)?;
+        }
+        let next = note
+            .kind
+            .transition_to(target)
+            .map_err(|e| ApplicationError::conflict(e.to_string()))?;
+        // 書き込みは遷移元 kind 条件付き。get と write の間に別の遷移が滑り込んだ場合は
+        // 不発になる（project の終端性を並行リクエストでも破らせない）。
+        self.m.repos.set_note_kind(id, note.kind.name(), &next)?.ok_or_else(|| {
+            ApplicationError::conflict(format!("note {id} kind changed concurrently"))
+        })
     }
 
     pub fn delete_note(&mut self, id: &str) -> ApplicationResult<()> {
