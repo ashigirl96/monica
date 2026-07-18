@@ -13,6 +13,7 @@ import {
   deleteRange,
   duplicateRange,
   exitCallout,
+  exitDocEnd,
   indentRange,
   moveRange,
   outdentRange,
@@ -20,7 +21,8 @@ import {
 } from "./commands";
 import { editorInputRuleList } from "./input-rules";
 import { normalizerPlugin } from "./normalizer";
-import { blockSelectionKey, type BlockSelectionMeta } from "./selection-state";
+import { blockSelectionPlugin } from "./block-selection";
+import { blockSelectionKey, selectBlocks, type BlockSelectionMeta } from "./selection-state";
 
 // ---- fixture builders ----
 
@@ -652,5 +654,81 @@ describe("normalizer", () => {
     const anon = nodes.blockContainer.create(null, [para("anon")]);
     const after = state.apply(state.tr.insert(doc.content.size - 1, anon));
     assertInvariants(after.doc);
+  });
+});
+
+// ---- exitDocEnd（Ctrl-n の下端脱出） ----
+
+function bookmark(): PMNode {
+  return nodes.bookmark.create({ href: "https://example.com" });
+}
+
+function stateWithBlockSelection(doc: PMNode, id: string): EditorState {
+  const base = EditorState.create({ doc, plugins: [blockSelectionPlugin()] });
+  return base.apply(selectBlocks(base.tr, id, id));
+}
+
+describe("exitDocEnd", () => {
+  test("末尾の非空 block では下に空 paragraph を足してカーソルを移す", () => {
+    const doc = docOf(block("A", para("ab")));
+    const state = stateWithCursor(doc, "A", "end");
+    const result = run(state, exitDocEnd)!;
+    expect(docShape(result.state.doc)).toMatchObject([
+      { id: "A", type: "paragraph", text: "ab" },
+      { type: "paragraph", text: "" },
+    ]);
+    assertInvariants(result.state.doc);
+    expect(result.state.selection.head).toBe(doc.content.size - 1 + 2);
+  });
+
+  test("末尾が空 paragraph ならカーソルを移すだけで何も足さない", () => {
+    const doc = docOf(block("A", para("ab")), block("B", para("")));
+    const state = stateWithCursor(doc, "B", "start");
+    const result = run(state, exitDocEnd)!;
+    expect(result.state.doc.eq(doc)).toBe(true);
+    expect(result.state.selection.head).toBe(containerById(doc, "B")!.pos + 2);
+  });
+
+  test("下にカーソルを置ける block が残っていれば false（通常の下移動に任せる）", () => {
+    const doc = docOf(block("A", para("ab")), block("B", para("cd")));
+    const state = stateWithCursor(doc, "A", "end");
+    expect(run(state, exitDocEnd)).toBeNull();
+  });
+
+  test("下が atom block だけなら末尾に空 paragraph を足す（bookmark 詰み回避）", () => {
+    const doc = docOf(block("A", para("ab")), block("B", bookmark()));
+    const state = stateWithCursor(doc, "A", "end");
+    const result = run(state, exitDocEnd)!;
+    expect(docShape(result.state.doc)).toMatchObject([
+      { id: "A", type: "paragraph", text: "ab" },
+      { id: "B", type: "bookmark" },
+      { type: "paragraph", text: "" },
+    ]);
+    assertInvariants(result.state.doc);
+    expect(result.state.selection.head).toBe(doc.content.size - 1 + 2);
+  });
+
+  test("末尾 bookmark の block selection 中でも末尾に空 paragraph を足す", () => {
+    const doc = docOf(block("A", para("ab")), block("B", bookmark()));
+    const state = stateWithBlockSelection(doc, "B");
+    const result = run(state, exitDocEnd)!;
+    expect(docShape(result.state.doc)).toMatchObject([
+      { id: "A", type: "paragraph", text: "ab" },
+      { id: "B", type: "bookmark" },
+      { type: "paragraph", text: "" },
+    ]);
+    expect(blockSelectionKey.getState(result.state)?.selectedIds).toEqual([]);
+    expect(result.state.selection.$head.parent.type.name).toBe("paragraph");
+  });
+
+  test("nested な末尾 block からは root level に空 paragraph を足す", () => {
+    const doc = docOf(block("A", para("A"), [block("X", para("x"))]));
+    const state = stateWithCursor(doc, "X", "end");
+    const result = run(state, exitDocEnd)!;
+    expect(docShape(result.state.doc)).toMatchObject([
+      { id: "A", type: "paragraph", text: "A", children: [{ id: "X", type: "paragraph" }] },
+      { type: "paragraph", text: "" },
+    ]);
+    assertInvariants(result.state.doc);
   });
 });

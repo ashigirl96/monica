@@ -17,10 +17,11 @@ import {
   getBlockContext,
   rangeFromContext,
   rangePositions,
+  visibleContainers,
   type BlockContext,
   type SiblingRange,
 } from "./context";
-import { clearBlockSelection, selectBlocks } from "./selection-state";
+import { blockSelectionKey, clearBlockSelection, selectBlocks } from "./selection-state";
 
 function containerChildren(container: PMNode): readonly PMNode[] {
   return container.childCount > 1 ? container.child(1).content.content : [];
@@ -532,6 +533,59 @@ export function insertParagraphAfter(state: EditorState, containerPos: number): 
   clearBlockSelection(tr);
   return tr.setMeta("blockOperation", { type: "insert" });
 }
+
+// Ctrl-n（↓と同義）で文書の下端からさらに下へ進もうとしたときの脱出ハッチ。
+// bookmark / divider などの atom block が末尾にあるとその後ろに行を作る手段が
+// ないため、文書末尾（root level）に空 paragraph を足してカーソルを移す。
+// 末尾が既に空の text 行ならそこへカーソルを移すだけで何も足さない。
+// カーソルの下にまだ入れる block が残っている間は false を返し、
+// 通常のカーソル下移動（native）に任せる。
+export const exitDocEnd: Command = (state, dispatch, view) => {
+  const visible = visibleContainers(state.doc);
+  const last = visible[visible.length - 1];
+  if (!last) return false;
+
+  const blockSel = blockSelectionKey.getState(state);
+  const currentId =
+    blockSel && blockSel.selectedIds.length > 0
+      ? blockSel.headId
+      : (getBlockContext(state.selection.$from)?.containerNode.attrs.id as string | null);
+  if (!currentId) return false;
+  const idx = visible.findIndex((v) => v.id === currentId);
+  if (idx === -1) return false;
+  // 下方向にカーソルを置ける block が残っているなら通常の下移動に任せる
+  for (let i = idx + 1; i < visible.length; i++) {
+    if (!isAtomBlock(visible[i].node.child(0).type)) return false;
+  }
+  if (
+    !(blockSel && blockSel.selectedIds.length > 0) &&
+    state.selection instanceof TextSelection &&
+    view &&
+    !view.endOfTextblock("down")
+  ) {
+    return false;
+  }
+
+  const content = last.node.child(0);
+  const emptyTextLine =
+    isTextBlock(content.type) &&
+    content.type !== nodes.codeBlock &&
+    content.content.size === 0 &&
+    last.node.childCount === 1;
+  const tr = state.tr;
+  if (emptyTextLine) {
+    tr.setSelection(TextSelection.create(tr.doc, last.pos + 2));
+  } else {
+    // root blockGroup の閉じトークン直前 = 文書末尾
+    const at = tr.doc.content.size - 1;
+    tr.insert(at, emptyParagraphContainer());
+    tr.setSelection(TextSelection.create(tr.doc, at + 2));
+    tr.setMeta("blockOperation", { type: "insert" });
+  }
+  clearBlockSelection(tr);
+  dispatch?.(tr.scrollIntoView());
+  return true;
+};
 
 export const exitCodeBlock: Command = (state, dispatch) => {
   const ctx = getBlockContext(state.selection.$from);

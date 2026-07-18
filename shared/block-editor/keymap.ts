@@ -14,6 +14,7 @@ import {
   deleteForwardBlock,
   exitCallout,
   exitCodeBlock,
+  exitDocEnd,
   ignoreCompositionEnter,
   indentBlock,
   insertHardBreak,
@@ -40,6 +41,8 @@ export function editorKeymap(): Plugin[] {
       // macOS 流のカーソル移動
       "Ctrl-a": cursorToLineStart,
       "Ctrl-e": cursorToLineEnd,
+      // ↓と同義だが、最下 block から先へ進めないときだけ末尾に空行を確保する
+      "Ctrl-n": exitDocEnd,
       // inline formatting
       "Mod-b": toggleMark(schema.marks.bold),
       "Mod-i": toggleMark(schema.marks.italic),
