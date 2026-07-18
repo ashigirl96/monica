@@ -107,7 +107,7 @@ export function monthGrid({ year, month }: Month): (string | null)[][] {
   const first = new Date(year, month - 1, 1);
   const daysInMonth = new Date(year, month, 0).getDate();
   const weeks: (string | null)[][] = [];
-  let week: (string | null)[] = new Array(first.getDay()).fill(null);
+  let week: (string | null)[] = Array.from({ length: first.getDay() }, () => null);
   for (let day = 1; day <= daysInMonth; day++) {
     week.push(toKey(new Date(year, month - 1, day)));
     if (week.length === 7) {
@@ -116,7 +116,7 @@ export function monthGrid({ year, month }: Month): (string | null)[][] {
     }
   }
   if (week.length > 0) {
-    weeks.push([...week, ...new Array(7 - week.length).fill(null)]);
+    weeks.push([...week, ...Array.from({ length: 7 - week.length }, () => null)]);
   }
   return weeks;
 }
