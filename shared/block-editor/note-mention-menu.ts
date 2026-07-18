@@ -75,9 +75,15 @@ export function insertNoteMentionTransaction(
 
 type DisplayItem = { noteId: string; label: string; hint: string | null };
 
+/** query 変更後・新しい検索結果が届く前は前 query の items を捨てる。表示と選択の両方が
+    これを通るので、stale な候補を Enter/Tab/クリックで誤挿入するのをまとめて防ぐ。 */
+export function freshItems(state: NoteMentionMenuActiveState): NoteMentionItem[] {
+  return state.loadedQuery === state.query ? state.items : [];
+}
+
 /** 表示・選択の対象リスト。query が内部ノート URL なら先頭に直接リンク候補を合成する */
 function displayItems(state: NoteMentionMenuActiveState): DisplayItem[] {
-  const items: DisplayItem[] = state.items.map((item) => ({
+  const items: DisplayItem[] = freshItems(state).map((item) => ({
     noteId: item.id,
     label: item.displayName,
     hint: item.preview,
@@ -201,7 +207,9 @@ export function noteMentionMenuPlugin(search: SearchNoteMentions): Plugin<NoteMe
         if ($pos.parent !== $head.parent || head < pos + 2) return { active: false };
         if (newState.doc.textBetween(pos, pos + 2) !== "[[") return { active: false };
         const query = newState.doc.textBetween(pos + 2, head);
-        return { ...value, pos, query };
+        // query が変わったら選択位置を先頭へ戻す（新 query の先頭候補をハイライト）
+        const index = query === value.query ? value.index : 0;
+        return { ...value, pos, query, index };
       },
     },
     // `[[URL]]` の閉じ `]]` を検出して全体を mention に変換する。query は apply() が

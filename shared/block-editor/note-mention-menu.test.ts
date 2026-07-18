@@ -3,7 +3,8 @@ import { describe, expect, test } from "bun:test";
 import { EditorState, TextSelection } from "@milkdown/kit/prose/state";
 import type { Node as PMNode } from "@milkdown/kit/prose/model";
 import { createContainer, nodes, schema } from "./schema";
-import { insertNoteMentionTransaction, internalNoteId } from "./note-mention-menu";
+import type { NoteMentionItem, NoteMentionMenuActiveState } from "./note-mention-menu";
+import { freshItems, insertNoteMentionTransaction, internalNoteId } from "./note-mention-menu";
 
 const ORIGIN = "http://localhost:19281";
 
@@ -95,5 +96,26 @@ describe("insertNoteMentionTransaction", () => {
     const para = firstParagraph(next);
     expect(para.child(0).type).toBe(nodes.noteMention);
     expect(para.child(1).text).toBe(" tail");
+  });
+});
+
+describe("freshItems", () => {
+  const item: NoteMentionItem = { id: "note-3", displayName: "foo note", preview: null };
+  const base = { active: true as const, pos: 3, index: 0, items: [item] };
+
+  test("loadedQuery が現 query と一致するときは items を返す", () => {
+    const state: NoteMentionMenuActiveState = { ...base, query: "foo", loadedQuery: "foo" };
+    expect(freshItems(state)).toEqual([item]);
+  });
+
+  test("query 変更後・新結果到着前（loadedQuery が古い）は空を返す", () => {
+    // 前 query "foo" の結果を抱えたまま "foobar" にnarrowした状態
+    const state: NoteMentionMenuActiveState = { ...base, query: "foobar", loadedQuery: "foo" };
+    expect(freshItems(state)).toEqual([]);
+  });
+
+  test("まだ一度も結果が届いていない（loadedQuery=null）ときも空", () => {
+    const state: NoteMentionMenuActiveState = { ...base, query: "foo", loadedQuery: null };
+    expect(freshItems(state)).toEqual([]);
   });
 });
