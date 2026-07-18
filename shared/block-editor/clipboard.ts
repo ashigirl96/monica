@@ -194,7 +194,9 @@ export function clipboardPlugin(options: ClipboardOptions = {}): Plugin {
         cut(view, event) {
           const containers = selectedContainers(view);
           if (containers.length === 0) return false;
-          writeBlocksToClipboard(event, containers, options.sourceNoteId);
+          // cut は元ブロックを削除するので sourceNoteId を載せない。載せると paste-and-sync
+          // が「消えたブロック」を指す dangling ミラーになる（cut は move であって参照元にならない）。
+          writeBlocksToClipboard(event, containers);
           const selection = blockSelectionKey.getState(view.state);
           const range = selection ? rangeFromIds(view.state, selection.selectedIds) : null;
           if (range) view.dispatch(deleteRange(view.state, range));
