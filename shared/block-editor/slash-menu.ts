@@ -1,16 +1,22 @@
-import { Plugin, PluginKey, TextSelection } from "@milkdown/kit/prose/state";
+import { Plugin, TextSelection } from "@milkdown/kit/prose/state";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import type { Attrs, NodeType } from "@milkdown/kit/prose/model";
 import { nodes } from "./schema";
 import { getBlockContext } from "./context";
 import { appendEmptyParagraphAfter, inlineToPlainText } from "./commands";
-import { createMenuOverlay, menuItemButton, positionMenuAt } from "./menu-overlay";
+import {
+  createMenuOverlay,
+  handleMenuNavKey,
+  menuItemButton,
+  positionMenuAt,
+} from "./menu-overlay";
+import { noteMentionMenuKey, slashKey } from "./menu-keys";
 
-type SlashState = { active: false } | { active: true; pos: number; query: string; index: number };
+export type SlashState =
+  | { active: false }
+  | { active: true; pos: number; query: string; index: number };
 
 type SlashMeta = { type: "open"; pos: number } | { type: "close" } | { type: "nav"; index: number };
-
-const slashKey = new PluginKey<SlashState>("journalSlashMenu");
 
 type SlashItem = {
   id: string;
@@ -181,6 +187,8 @@ export function slashMenuPlugin(): Plugin<SlashState> {
         if (text !== "/" || view.composing) return false;
         const state = slashKey.getState(view.state);
         if (state?.active) return false;
+        // `[[` メニュー中の `/` は検索クエリの一部（project 名は "owner/repo"）
+        if (noteMentionMenuKey.getState(view.state)?.active) return false;
         const ctx = getBlockContext(view.state.doc.resolve(from));
         if (!ctx) return false;
         const type = ctx.contentNode.type;
@@ -201,6 +209,7 @@ export function slashMenuPlugin(): Plugin<SlashState> {
             !event.shiftKey &&
             !event.altKey
           ) {
+            if (noteMentionMenuKey.getState(view.state)?.active) return false;
             const sel = view.state.selection;
             if (!sel.empty) return false;
             const ctx = getBlockContext(sel.$from);
@@ -215,29 +224,21 @@ export function slashMenuPlugin(): Plugin<SlashState> {
           return false;
         }
         const items = filterItems(state.query);
-        if (event.key === "Escape") {
+        const close = () =>
           view.dispatch(view.state.tr.setMeta(slashKey, { type: "close" } satisfies SlashMeta));
-          return true;
-        }
-        const down = event.key === "ArrowDown" || (event.ctrlKey && event.key === "n");
-        const up = event.key === "ArrowUp" || (event.ctrlKey && event.key === "p");
-        if (down || up) {
-          if (items.length === 0) return true;
-          const delta = down ? 1 : -1;
-          const index = (state.index + delta + items.length) % items.length;
-          view.dispatch(
-            view.state.tr.setMeta(slashKey, { type: "nav", index } satisfies SlashMeta),
-          );
-          return true;
-        }
-        if (event.key === "Enter" || event.key === "Tab") {
-          const item = items[Math.min(state.index, items.length - 1)];
-          if (item) applyItem(view, item);
-          else
-            view.dispatch(view.state.tr.setMeta(slashKey, { type: "close" } satisfies SlashMeta));
-          return true;
-        }
-        return false;
+        return handleMenuNavKey(event, state.index, {
+          itemCount: items.length,
+          onClose: close,
+          onNav: (index) =>
+            view.dispatch(
+              view.state.tr.setMeta(slashKey, { type: "nav", index } satisfies SlashMeta),
+            ),
+          onPick: () => {
+            const item = items[Math.min(state.index, items.length - 1)];
+            if (item) applyItem(view, item);
+            else close();
+          },
+        });
       },
     },
     view: (view) => new SlashMenuView(view),

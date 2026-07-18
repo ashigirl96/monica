@@ -3,6 +3,7 @@ import type {
   Explanation,
   LinkPreview,
   Note,
+  NoteMention,
   NotePage,
   NoteSummary,
   NotesSettings,
@@ -117,6 +118,24 @@ export async function listProjects(): Promise<ProjectOption[]> {
   const res = await fetch("/api/projects");
   if (!res.ok) throw new Error(`Failed to list projects: ${res.status}`);
   return res.json();
+}
+
+export async function searchNoteMentions(q: string): Promise<NoteMention[]> {
+  const res = await fetch(`/api/notes/mentions?q=${encodeURIComponent(q)}`);
+  if (!res.ok) throw new Error(`Failed to search note mentions: ${res.status}`);
+  return res.json();
+}
+
+// null = dangling（404 も通信失敗も同じ扱いにして NodeView 側の分岐を増やさない）。
+// キャッシュはここでは持たず、埋め込み側がエディタの寿命に合わせてスコープする。
+export async function resolveNoteMention(id: string): Promise<NoteMention | null> {
+  try {
+    const res = await fetch(`/api/notes/mentions/${id}`);
+    if (!res.ok) return null;
+    return (await res.json()) as NoteMention;
+  } catch {
+    return null;
+  }
 }
 
 // 失敗を null で返す: 呼び手（link-menu）はプレーンリンクへのフォールバックとして扱う

@@ -5,6 +5,11 @@ export function newBlockId(): string {
   return crypto.randomUUID();
 }
 
+/** noteMention のリンク先 URL。href の組み立てはここ 1 箇所（分解は internalNoteId） */
+export function noteHref(noteId: string): string {
+  return `/notes/${noteId}`;
+}
+
 /** null 値を落として data 属性オブジェクトにする（toDOM の条件付き属性用） */
 function dataAttrs(attrs: Record<string, string | null>): Record<string, string> {
   return Object.fromEntries(
@@ -253,6 +258,32 @@ export const schema = new Schema({
           ...dataAttrs({ "data-favicon": node.attrs.favicon as string | null }),
         },
         node.attrs.title as string,
+      ],
+    },
+
+    // ノート間リンク（wiki link）のインラインチップ。表示名を attrs に持たず、
+    // NodeView が noteId から表示時に解決する（元ノートの改題に追従させるため）。
+    // parseDOM がないと HTML 経由の copy→paste で link mark の a[href] に食われて
+    // プレーンテキストに退化する。
+    noteMention: {
+      group: "inline",
+      inline: true,
+      atom: true,
+      selectable: true,
+      attrs: { noteId: {} },
+      parseDOM: [
+        {
+          tag: "a[data-note-mention]",
+          getAttrs: (dom: HTMLElement) => ({ noteId: dom.dataset.noteMention ?? "" }),
+        },
+      ],
+      toDOM: (node) => [
+        "a",
+        {
+          href: noteHref(node.attrs.noteId as string),
+          "data-note-mention": node.attrs.noteId as string,
+        },
+        node.attrs.noteId as string,
       ],
     },
 

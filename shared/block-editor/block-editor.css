@@ -578,6 +578,25 @@
   color: var(--jb-muted);
 }
 
+.jb-slash-hint {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--jb-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ProseMirror が inline atom 直後の caret 描画用に挿す separator <img>。
+   Tailwind preflight の img { display: block } に食われると trailingBreak が
+   次行へ押し出され、atom 末尾のカーソルが 1 行下に見える。
+   prosemirror-view 標準スタイル（未 import）と同じ宣言で inline に戻す。 */
+.jb-editor img.ProseMirror-separator {
+  display: inline !important;
+  border: none !important;
+  margin: 0 !important;
+}
+
 /* ---- link mention / bookmark ---- */
 
 .jb-favicon {
@@ -618,6 +637,15 @@
 
 .jb-mention.ProseMirror-selectednode {
   background: color-mix(in srgb, var(--jb-blue) 16%, transparent);
+}
+
+/* リンク先ノートが削除済み・不存在の note mention */
+.jb-editor a.jb-note-mention-dangling {
+  color: var(--jb-muted);
+}
+
+.jb-note-mention-dangling .jb-mention-title {
+  text-decoration: line-through;
 }
 
 .jb-bookmark {

@@ -7,6 +7,10 @@ pub trait NoteStore {
     fn create_note(&mut self, day_boundary_hour: u8) -> Result<Note>;
     fn get_note(&self, id: &str) -> Result<Option<Note>>;
     fn list_notes(&self, from: Option<&str>, to: Option<&str>) -> Result<Vec<NoteSummary>>;
+    /// mention 検索の coarse プリフィルタ。title / project_id / date / content いずれかの
+    /// 部分一致の superset を新しい順に返すだけで、display_name / preview による正確な
+    /// 絞り込みは application 層の責務。空 `q` は全件（最近順）。
+    fn search_notes(&self, q: &str, limit: usize) -> Result<Vec<NoteSummary>>;
     /// One project's notes, newest first (same ordering as [`list_notes`](Self::list_notes)).
     fn list_project_notes(
         &self,

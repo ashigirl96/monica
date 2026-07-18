@@ -1627,6 +1627,10 @@ impl crate::ports::NoteStore for FakeRepos {
         unimplemented!("no usecase test exercises notes yet")
     }
 
+    fn search_notes(&self, _q: &str, _limit: usize) -> Result<Vec<monica_domain::NoteSummary>> {
+        unimplemented!("no usecase test exercises notes yet")
+    }
+
     fn update_note(
         &mut self,
         _id: &str,

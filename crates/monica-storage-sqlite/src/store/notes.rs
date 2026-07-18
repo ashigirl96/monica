@@ -145,6 +145,24 @@ impl NoteStore for SqliteStore {
         rows.map(|r| r?).collect()
     }
 
+    fn search_notes(&self, q: &str, limit: usize) -> Result<Vec<NoteSummary>> {
+        // coarse な superset を返すだけ（正確な絞り込みは facade）なので、`%`/`_` を
+        // エスケープしない over-match は許容する。空 q は date（非 NULL）に必ず一致し
+        // 「最近ノート」一覧を兼ねる。
+        // 既知の制限: 空 title essay の display_name "Untitled" は導出値でどの列にも
+        // 現れないため、"unt" 等の検索は coarse で落ちる（superset が破れる唯一のケース）。
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {NOTE_COLUMNS} FROM notes
+             WHERE deleted_at IS NULL
+               AND (title LIKE '%'||?1||'%' OR project_id LIKE '%'||?1||'%'
+                    OR date LIKE '%'||?1||'%' OR content LIKE '%'||?1||'%')
+             ORDER BY updated_at DESC, rowid DESC
+             LIMIT ?2"
+        ))?;
+        let rows = stmt.query_map(params![q, limit as i64], |row| Ok(summary_from_row(row)))?;
+        rows.map(|r| r?).collect()
+    }
+
     fn list_project_notes(
         &self,
         project_id: &str,
@@ -573,6 +591,77 @@ mod tests {
         assert_eq!(ids(store.list_project_notes("o/r", 1, 1).unwrap()), vec!["note-1"]);
         assert!(store.list_project_notes("o/r", 10, 2).unwrap().is_empty());
         assert!(store.list_project_notes("o/none", 10, 0).unwrap().is_empty());
+    }
+
+    fn set_updated_at(store: &SqliteStore, id: &str, updated_at: &str) {
+        store
+            .conn()
+            .execute("UPDATE notes SET updated_at = ?1 WHERE id = ?2", params![updated_at, id])
+            .unwrap();
+    }
+
+    #[test]
+    fn search_matches_title_project_date_and_content() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        seed_project(&store, "owner/repo");
+        for _ in 0..4 {
+            store.create_note(0).unwrap();
+        }
+        store
+            .set_note_kind("note-1", "daily", &NoteKind::Essay { title: "Rust 設計メモ".to_string() })
+            .unwrap()
+            .unwrap();
+        store
+            .set_note_kind(
+                "note-2",
+                "daily",
+                &NoteKind::Project { project_id: "owner/repo".to_string() },
+            )
+            .unwrap()
+            .unwrap();
+        set_date(&store, "note-3", "2025-12-31");
+        store.update_note("note-4", content_update("本文だけの daily")).unwrap();
+
+        let ids = |list: Vec<NoteSummary>| {
+            list.into_iter().map(|s| s.id.into_string()).collect::<Vec<_>>()
+        };
+        assert_eq!(ids(store.search_notes("設計", 10).unwrap()), vec!["note-1"]);
+        assert_eq!(ids(store.search_notes("owner/repo", 10).unwrap()), vec!["note-2"]);
+        assert_eq!(ids(store.search_notes("2025-12", 10).unwrap()), vec!["note-3"]);
+        assert_eq!(ids(store.search_notes("本文だけ", 10).unwrap()), vec!["note-4"]);
+        assert!(store.search_notes("該当なし", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_empty_query_lists_recent_first_with_limit() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        for _ in 0..3 {
+            store.create_note(0).unwrap();
+        }
+        set_updated_at(&store, "note-1", "2026-07-01T00:00:00.000Z");
+        set_updated_at(&store, "note-2", "2026-07-03T00:00:00.000Z");
+        set_updated_at(&store, "note-3", "2026-07-02T00:00:00.000Z");
+
+        let ids = |list: Vec<NoteSummary>| {
+            list.into_iter().map(|s| s.id.into_string()).collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ids(store.search_notes("", 10).unwrap()),
+            vec!["note-2", "note-3", "note-1"],
+            "空 q は全件を updated_at 降順で"
+        );
+        assert_eq!(ids(store.search_notes("", 2).unwrap()), vec!["note-2", "note-3"]);
+    }
+
+    #[test]
+    fn search_skips_deleted() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        store.create_note(0).unwrap();
+        store.create_note(0).unwrap();
+        store.delete_note("note-1").unwrap();
+        let found = store.search_notes("", 10).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, "note-2");
     }
 
     #[test]

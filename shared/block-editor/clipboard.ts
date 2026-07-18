@@ -108,7 +108,8 @@ function selectedContainers(view: EditorView): PMNode[] {
     .filter((node): node is PMNode => !!node);
 }
 
-function pastedUrl(event: ClipboardEvent): string | null {
+/** 単一トークンの http(s) URL の paste なら URL を返す（note-mention-menu と共有） */
+export function pastedUrl(event: ClipboardEvent): string | null {
   const text = event.clipboardData?.getData("text/plain")?.trim();
   if (!text || /\s/.test(text)) return null;
   try {
