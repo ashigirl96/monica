@@ -585,6 +585,16 @@
   white-space: nowrap;
 }
 
+/* ProseMirror が inline atom 直後の caret 描画用に挿す separator <img>。
+   Tailwind preflight の img { display: block } に食われると trailingBreak が
+   次行へ押し出され、atom 末尾のカーソルが 1 行下に見える。
+   prosemirror-view 標準スタイル（未 import）と同じ宣言で inline に戻す。 */
+.jb-editor img.ProseMirror-separator {
+  display: inline !important;
+  border: none !important;
+  margin: 0 !important;
+}
+
 /* ---- link mention / bookmark ---- */
 
 .jb-favicon {
