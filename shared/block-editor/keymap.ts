@@ -11,6 +11,7 @@ import {
   codeOutdent,
   cursorToLineEnd,
   cursorToLineStart,
+  deleteEmptyBlock,
   deleteForwardBlock,
   exitCallout,
   exitCodeBlock,
@@ -41,6 +42,8 @@ export function editorKeymap(): Plugin[] {
       // macOS 流のカーソル移動
       "Ctrl-a": cursorToLineStart,
       "Ctrl-e": cursorToLineEnd,
+      // 空行のみ行ごと削除。非空行は false でネイティブの前方 1 文字削除に落とす
+      "Ctrl-d": deleteEmptyBlock,
       // ↓と同義だが、最下 block から先へ進めないときだけ末尾に空行を確保する
       "Ctrl-n": exitDocEnd,
       // inline formatting

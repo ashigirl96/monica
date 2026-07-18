@@ -13,6 +13,7 @@ import { normalizerPlugin } from "./normalizer";
 import { numberingPlugin, placeholderPlugin } from "./decorations";
 import { dragDropPlugin } from "./drag-drop";
 import { clipboardPlugin } from "./clipboard";
+import { linkClickPlugin } from "./link-click";
 import { editorNodeViews } from "./node-views";
 import { imeDebugPlugin } from "./debug-ime";
 
@@ -104,6 +105,7 @@ export function createBlockEditor(
       numberingPlugin(),
       dragDropPlugin(),
       clipboardPlugin(),
+      linkClickPlugin(),
       normalizerPlugin(),
     ],
   });

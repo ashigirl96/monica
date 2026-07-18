@@ -63,6 +63,14 @@ export function containerById(doc: PMNode, id: string): { pos: number; node: PMN
   return { pos, node };
 }
 
+// id の block を子に持つ親 blockContainer の id。トップレベルなら null。
+export function parentContainerId(doc: PMNode, id: string): string | null {
+  const entry = containerById(doc, id);
+  if (!entry) return null;
+  const parent = getBlockContext(doc.resolve(entry.pos));
+  return (parent?.containerNode.attrs.id as string | null) ?? null;
+}
+
 // 可視 blockContainer を pre-order で列挙する。closed toggle の配下は skip
 // （TODO.md §7.4)。
 export function visibleContainers(doc: PMNode): Array<{ id: string; pos: number; node: PMNode }> {

@@ -457,6 +457,7 @@
   text-decoration: underline;
   text-decoration-color: var(--jb-faint);
   text-underline-offset: 2px;
+  cursor: pointer;
 }
 
 .jb-editor a:hover {
@@ -481,8 +482,9 @@
   min-width: 240px;
   max-height: 300px;
   overflow-y: auto;
-  background: var(--popover);
-  color: var(--popover-foreground);
+  /* host が popover token を持たない場合も透過しないよう base token に落とす */
+  background: var(--popover, var(--background));
+  color: var(--popover-foreground, var(--foreground));
   border: 1px solid var(--jb-border);
   border-radius: 10px;
   box-shadow:

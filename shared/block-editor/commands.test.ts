@@ -4,11 +4,12 @@ import { EditorState, TextSelection } from "@milkdown/kit/prose/state";
 import type { Command, Transaction } from "@milkdown/kit/prose/state";
 import type { Node as PMNode } from "@milkdown/kit/prose/model";
 import { createContainer, nodes, schema } from "./schema";
-import { containerById, rangeFromIds } from "./context";
+import { containerById, parentContainerId, rangeFromIds } from "./context";
 import {
   backspaceBlock,
   cursorToLineEnd,
   cursorToLineStart,
+  deleteEmptyBlock,
   deleteForwardBlock,
   deleteRange,
   duplicateRange,
@@ -23,6 +24,7 @@ import { editorInputRuleList } from "./input-rules";
 import { normalizerPlugin } from "./normalizer";
 import { blockSelectionPlugin } from "./block-selection";
 import { blockSelectionKey, selectBlocks, type BlockSelectionMeta } from "./selection-state";
+import { linkHrefAt } from "./link-click";
 
 // ---- fixture builders ----
 
@@ -457,6 +459,59 @@ describe("deleteForwardBlock", () => {
   });
 });
 
+describe("deleteEmptyBlock", () => {
+  test("空 block を削除しカーソルは次行の先頭へ", () => {
+    const doc = docOf(block("A", para("ab")), block("B", para()), block("C", para("cd")));
+    const state = stateWithCursor(doc, "B", "start");
+    const result = run(state, deleteEmptyBlock)!;
+    expect(docShape(result.state.doc)).toEqual([
+      sh("A", "paragraph", "ab"),
+      sh("C", "paragraph", "cd"),
+    ]);
+    const $head = result.state.selection.$head;
+    expect($head.parent.textContent).toBe("cd");
+    expect($head.parentOffset).toBe(0);
+    assertInvariants(result.state.doc);
+  });
+
+  test("末尾の空 block を削除すると前行の末尾へ", () => {
+    const doc = docOf(block("A", para("ab")), block("B", para()));
+    const state = stateWithCursor(doc, "B", "start");
+    const result = run(state, deleteEmptyBlock)!;
+    expect(docShape(result.state.doc)).toEqual([sh("A", "paragraph", "ab")]);
+    expect(result.state.selection.$head.parent.textContent).toBe("ab");
+  });
+
+  test("唯一の空 block では空 paragraph を残す", () => {
+    const doc = docOf(block("A", para()));
+    const state = stateWithCursor(doc, "A", "start");
+    const result = run(state, deleteEmptyBlock)!;
+    const shapes = docShape(result.state.doc);
+    expect(shapes).toHaveLength(1);
+    expect(shapes[0].type).toBe("paragraph");
+    expect(shapes[0].text).toBe("");
+    assertInvariants(result.state.doc);
+  });
+
+  test("非空 block では何もしない（ネイティブ前方削除へフォールスルー）", () => {
+    const doc = docOf(block("A", para("ab")));
+    const state = stateWithCursor(doc, "A", "start");
+    expect(run(state, deleteEmptyBlock)).toBeNull();
+  });
+
+  test("子持ちの空 block は対象外", () => {
+    const doc = docOf(block("A", para(), [block("B", para("cd"))]));
+    const state = stateWithCursor(doc, "A", "start");
+    expect(run(state, deleteEmptyBlock)).toBeNull();
+  });
+
+  test("空 code block は対象外", () => {
+    const doc = docOf(block("A", code()), block("B", para("cd")));
+    const state = stateWithCursor(doc, "A", "start");
+    expect(run(state, deleteEmptyBlock)).toBeNull();
+  });
+});
+
 // ---- block selection 操作（TODO.md §7.2） ----
 
 describe("deleteRange / duplicateRange / moveRange", () => {
@@ -654,6 +709,48 @@ describe("normalizer", () => {
     const anon = nodes.blockContainer.create(null, [para("anon")]);
     const after = state.apply(state.tr.insert(doc.content.size - 1, anon));
     assertInvariants(after.doc);
+  });
+});
+
+// ---- linkHrefAt（link mark クリックの href 解決） ----
+
+describe("linkHrefAt", () => {
+  const link = schema.marks.link.create({ href: "https://example.com" });
+  const doc = docOf(
+    block("A", nodes.paragraph.create(null, [schema.text("ab", [link]), schema.text("cd")])),
+  );
+  const textStart = containerById(doc, "A")!.pos + 2;
+
+  test("link mark 上の位置は href を返す", () => {
+    expect(linkHrefAt(doc, textStart)).toBe("https://example.com");
+    expect(linkHrefAt(doc, textStart + 1)).toBe("https://example.com");
+  });
+
+  test("link mark 外の位置は null", () => {
+    expect(linkHrefAt(doc, textStart + 3)).toBeNull();
+  });
+});
+
+// ---- parentContainerId（Cmd-A エスカレーションの階層クエリ） ----
+
+describe("parentContainerId", () => {
+  const doc = docOf(
+    block("A", para("xxx"), [block("B", para("yyy"), [block("C", para("zzz"))])]),
+    block("D", para("aaa")),
+  );
+
+  test("ネストした block は1階層ずつ親へ辿れる", () => {
+    expect(parentContainerId(doc, "C")).toBe("B");
+    expect(parentContainerId(doc, "B")).toBe("A");
+  });
+
+  test("トップレベル block は null", () => {
+    expect(parentContainerId(doc, "A")).toBeNull();
+    expect(parentContainerId(doc, "D")).toBeNull();
+  });
+
+  test("存在しない id は null", () => {
+    expect(parentContainerId(doc, "nope")).toBeNull();
   });
 });
 

@@ -357,14 +357,18 @@ class DividerView implements NodeView {
   }
 }
 
+// contenteditable 内の <a> はブラウザがナビゲーションを握り潰すため明示的に開く
+export function openExternal(href: string): void {
+  window.open(href, "_blank", "noopener");
+}
+
 function openHref(anchor: HTMLAnchorElement, href: string): void {
   anchor.href = href;
   anchor.target = "_blank";
   anchor.rel = "noopener noreferrer";
-  // contenteditable 内の <a> はブラウザがナビゲーションを握り潰すため明示的に開く
   anchor.addEventListener("click", (e) => {
     e.preventDefault();
-    window.open(href, "_blank", "noopener");
+    openExternal(href);
   });
 }
 

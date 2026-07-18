@@ -453,6 +453,35 @@ export const deleteForwardBlock: Command = (state, dispatch) => {
   return true;
 };
 
+// カーソルを置ける空テキスト行。子 block を持つ container は見た目が空行でも
+// subtree を抱えているため含めない。
+function isEmptyTextLine(container: PMNode): boolean {
+  const content = container.child(0);
+  return (
+    isTextBlock(content.type) &&
+    content.type !== nodes.codeBlock &&
+    content.content.size === 0 &&
+    container.childCount === 1
+  );
+}
+
+// Ctrl-d: 空 block なら行ごと削除して次行の先頭へ（Ctrl-k の kill line と同じ着地）。
+// 非空行では false を返し、ネイティブの前方 1 文字削除にフォールスルーさせる。
+export const deleteEmptyBlock: Command = (state, dispatch) => {
+  const sel = state.selection;
+  if (!sel.empty || !(sel instanceof TextSelection)) return false;
+  const ctx = getBlockContext(sel.$from);
+  if (!ctx) return false;
+  if (sel.$from.parent !== ctx.contentNode) return false;
+  if (!isEmptyTextLine(ctx.containerNode)) return false;
+  const tr = deleteRange(state, rangeFromContext(ctx));
+  tr.setSelection(
+    TextSelection.near(tr.doc.resolve(Math.min(ctx.containerPos, tr.doc.content.size)), 1),
+  );
+  dispatch?.(tr.scrollIntoView());
+  return true;
+};
+
 // ---- block selection 由来の一括操作（TODO.md §7.2） ----
 
 export function deleteRange(state: EditorState, range: SiblingRange): Transaction {
@@ -566,14 +595,8 @@ export const exitDocEnd: Command = (state, dispatch, view) => {
     return false;
   }
 
-  const content = last.node.child(0);
-  const emptyTextLine =
-    isTextBlock(content.type) &&
-    content.type !== nodes.codeBlock &&
-    content.content.size === 0 &&
-    last.node.childCount === 1;
   const tr = state.tr;
-  if (emptyTextLine) {
+  if (isEmptyTextLine(last.node)) {
     tr.setSelection(TextSelection.create(tr.doc, last.pos + 2));
   } else {
     // root blockGroup の閉じトークン直前 = 文書末尾

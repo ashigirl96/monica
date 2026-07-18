@@ -8,6 +8,7 @@ import {
   blockIndex,
   containerById,
   getBlockContext,
+  parentContainerId,
   rangeFromIds,
   visibleContainers,
 } from "./context";
@@ -95,6 +96,16 @@ function selectAllRootBlocks(view: EditorView): boolean {
   const last = root.child(root.childCount - 1).attrs.id as string | null;
   if (!first || !last) return false;
   view.dispatch(selectBlocks(view.state.tr, first, last));
+  return true;
+}
+
+// Cmd-A 2回目以降: 選択を親 container へ1階層ずつ広げ、
+// トップレベルに達したら全 root block を選択する。
+function escalateSelection(view: EditorView, state: BlockSelectionState): boolean {
+  const id = state.anchorId ?? state.selectedIds[0];
+  const parentId = id ? parentContainerId(view.state.doc, id) : null;
+  if (!parentId) return selectAllRootBlocks(view);
+  view.dispatch(selectBlocks(view.state.tr, parentId, parentId));
   return true;
 }
 
@@ -265,7 +276,7 @@ export function blockSelectionPlugin(): Plugin<BlockSelectionState> {
             }
             return false;
           case "a":
-            if (event.metaKey && !event.shiftKey) return selectAllRootBlocks(view);
+            if (event.metaKey && !event.shiftKey) return escalateSelection(view, state);
             return false;
           default:
             return false;
