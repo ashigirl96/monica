@@ -32,7 +32,8 @@ pub use facade::{
 
 pub use ports::{
     AgentDecoders, AgentEventDecoder, EventRepository, ExplanationOutputs, ExplanationStore,
-    GitGateway, NoteStore, NotificationOutboxStore, ProjectRepository, PullRequestSyncStore,
+    GitGateway, LinkPreview, NoteStore, NotificationOutboxStore, ProjectRepository,
+    PullRequestSyncStore,
     ShellScaffolding,
     TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter, TerminalAttachment,
     TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository, UnitOfWork, WorkbenchStore,

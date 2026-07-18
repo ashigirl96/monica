@@ -277,6 +277,22 @@ async fn list_projects() -> Result<Json<Vec<monica_api::ProjectOption>>, AppErro
     Ok(Json(list.into_iter().map(Into::into).collect()))
 }
 
+#[derive(serde::Deserialize)]
+struct OgpQuery {
+    url: String,
+}
+
+async fn get_ogp(
+    Query(query): Query<OgpQuery>,
+) -> Result<Json<monica_api::ApiLinkPreview>, StatusCode> {
+    // URL 検証（scheme ガード含む）は adapters 側が正。ここは HTTP status への写像だけ。
+    let preview = monica_runtime::fetch_link_preview(&query.url).await.map_err(|e| match e {
+        monica_runtime::LinkPreviewError::InvalidUrl(_) => StatusCode::BAD_REQUEST,
+        monica_runtime::LinkPreviewError::Fetch(_) => StatusCode::BAD_GATEWAY,
+    })?;
+    Ok(Json(preview.into()))
+}
+
 async fn get_artifact(Path(id): Path<String>) -> Result<Response, AppError> {
     // artifact 配信は facade を経由せず path join するため、ここでの id 検証が traversal 対策の生命線。
     ExplanationId::parse(&id).map_err(ApplicationError::from)?;
@@ -316,6 +332,7 @@ fn build_router(port: u16) -> Router {
             get(get_note).put(update_note).delete(delete_note),
         )
         .route("/api/notes/{id}/restore", post(restore_note))
+        .route("/api/ogp", get(get_ogp))
         .route("/api/projects", get(list_projects))
         .route("/explanations", get(spa_index))
         .route("/explanations/", get(spa_index))
@@ -339,8 +356,10 @@ pub fn serve(addr: impl Into<SocketAddr>, port_tx: SyncSender<u16>) -> Result<()
         log::warn!(target: "monica_web", "initial store open failed: {e:#}");
     }
 
+    // enable_time は reqwest の timeout（OGP 取得）が time driver を要求するため
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_io()
+        .enable_time()
         .build()?;
 
     rt.block_on(async {
@@ -933,6 +952,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ogp_rejects_non_http_urls() {
+        for url in ["file:///etc/passwd", "ftp://example.com", "not-a-url"] {
+            let response = app()
+                .oneshot(get_req(&format!("/api/ogp?url={url}")))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "url: {url}");
+        }
+    }
+
+    #[tokio::test]
+    async fn ogp_requires_url_param() {
+        let response = app().oneshot(get_req("/api/ogp")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
     async fn api_projects_lists_seeded_project() {
         migrated();
         let store = monica_storage_sqlite::SqliteStore::open().unwrap();
@@ -1010,6 +1046,7 @@ mod tests {
             .register::<monica_api::ApiNoteKind>()
             .register::<monica_api::ApiUpdateNote>()
             .register::<monica_api::ApiDailyNoteCount>()
+            .register::<monica_api::ApiLinkPreview>()
             .register::<monica_api::ProjectOption>();
         let path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/types.gen.ts");

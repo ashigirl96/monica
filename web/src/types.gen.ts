@@ -20,6 +20,15 @@ export type Explanation = {
 
 export type ExplanationMode = "diff" | "topic";
 
+export type LinkPreview = {
+  url: string;
+  title: string | null;
+  description: string | null;
+  image: string | null;
+  favicon: string | null;
+  site_name: string | null;
+};
+
 export type Note = {
   id: string;
   title: string | null;

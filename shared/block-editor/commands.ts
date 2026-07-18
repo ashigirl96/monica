@@ -4,6 +4,7 @@ import type { Command, EditorState, Transaction } from "@milkdown/kit/prose/stat
 import {
   createContainer,
   emptyParagraphContainer,
+  isAtomBlock,
   isListLike,
   isTextBlock,
   nodes,
@@ -46,7 +47,7 @@ export function indentRange(state: EditorState, range: SiblingRange): Transactio
   if (range.fromIndex === 0) return null;
   const group = range.groupNode;
   const prev = group.child(range.fromIndex - 1);
-  if (prev.child(0).type === nodes.divider) return null;
+  if (isAtomBlock(prev.child(0).type)) return null;
   const selected: PMNode[] = [];
   for (let i = range.fromIndex; i <= range.toIndex; i++) selected.push(group.child(i));
   // 閉じた toggle の下へ入れると block が不可視になるため開く（drag-drop と同挙動）
@@ -513,13 +514,21 @@ export function moveRange(
 
 // ---- 挿入・code block 内キー ----
 
+/** container の直後に空 paragraph を作り、カーソルをその中へ移す
+    （divider / bookmark などカーソルを置けない block への変換・挿入後の共通処理） */
+export function appendEmptyParagraphAfter(tr: Transaction, containerPos: number): void {
+  const container = tr.doc.nodeAt(containerPos);
+  if (!container) return;
+  const at = containerPos + container.nodeSize;
+  tr.insert(at, emptyParagraphContainer());
+  tr.setSelection(TextSelection.create(tr.doc, at + 2));
+}
+
 export function insertParagraphAfter(state: EditorState, containerPos: number): Transaction | null {
   const container = state.doc.nodeAt(containerPos);
   if (!container || container.type !== nodes.blockContainer) return null;
-  const inserted = emptyParagraphContainer();
-  const at = containerPos + container.nodeSize;
-  const tr = state.tr.insert(at, inserted);
-  tr.setSelection(TextSelection.create(tr.doc, at + 2));
+  const tr = state.tr;
+  appendEmptyParagraphAfter(tr, containerPos);
   clearBlockSelection(tr);
   return tr.setMeta("blockOperation", { type: "insert" });
 }

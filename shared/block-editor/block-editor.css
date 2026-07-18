@@ -26,6 +26,10 @@
   --jb-icon-danger: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10.3 4.6L2.9 17.4a2 2 0 001.7 3h14.8a2 2 0 001.7-3L13.7 4.6a2 2 0 00-3.4 0z'/%3E%3Cpath d='M12 9.5v4'/%3E%3Cpath d='M12 17h.01'/%3E%3C/svg%3E");
   --jb-icon-question: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M9.4 9.4a2.7 2.7 0 115.1 1.2c-.5 1-1.5 1.4-2 2.2-.3.4-.4.8-.4 1.4'/%3E%3Cpath d='M12 17.5h.01'/%3E%3C/svg%3E");
   --jb-icon-example: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3a6 6 0 00-3.6 10.8c.9.7 1.4 1.5 1.5 2.4h4.2c.1-.9.6-1.7 1.5-2.4A6 6 0 0012 3z'/%3E%3Cpath d='M9.8 19.5h4.4'/%3E%3Cpath d='M10.8 22h2.4'/%3E%3C/svg%3E");
+  /* link-menu（Paste as）アイコン */
+  --jb-icon-url: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 17H7A5 5 0 017 7h2'/%3E%3Cpath d='M15 7h2a5 5 0 010 10h-2'/%3E%3Cpath d='M8 12h8'/%3E%3C/svg%3E");
+  --jb-icon-mention: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cpath d='M16 8v5a3 3 0 006 0v-1a10 10 0 10-4 8'/%3E%3C/svg%3E");
+  --jb-icon-bookmark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M19 21l-7-4-7 4V5a2 2 0 012-2h10a2 2 0 012 2v16z'/%3E%3C/svg%3E");
   /* 幅・高さは親に従う。余白やスクロールは使う側が決める */
   background: var(--jb-paper);
   cursor: text;
@@ -554,10 +558,159 @@
   mask-image: var(--jb-icon-question);
 }
 
+.jb-glyph[data-kind="url"] {
+  mask-image: var(--jb-icon-url);
+}
+
+.jb-glyph[data-kind="mention"] {
+  mask-image: var(--jb-icon-mention);
+}
+
+.jb-glyph[data-kind="bookmark"] {
+  mask-image: var(--jb-icon-bookmark);
+}
+
 .jb-slash-empty {
   padding: 6px 8px;
   font-size: 13px;
   color: var(--jb-muted);
+}
+
+/* ---- link mention / bookmark ---- */
+
+.jb-favicon {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.jb-editor a.jb-mention {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: baseline;
+  max-width: 100%;
+  padding: 0 2px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.jb-editor a.jb-mention:hover {
+  background: var(--jb-hover);
+}
+
+.jb-mention .jb-favicon {
+  /* inline-flex 内で baseline を崩さないよう少し下げる */
+  transform: translateY(1px);
+}
+
+.jb-mention-title {
+  font-weight: 500;
+  /* Notion 同様、長いタイトルは切り詰めて前後にテキストを置ける inline 幅を保つ */
+  max-width: 60ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jb-mention.ProseMirror-selectednode {
+  background: color-mix(in srgb, var(--jb-blue) 16%, transparent);
+}
+
+.jb-bookmark {
+  margin: 2px 0;
+}
+
+.jb-editor a.jb-bookmark-card {
+  display: flex;
+  border: 1px solid var(--jb-border);
+  border-radius: 8px;
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.jb-editor a.jb-bookmark-card:hover {
+  background: var(--jb-hover);
+}
+
+.jb-bookmark.ProseMirror-selectednode .jb-bookmark-card {
+  border-color: var(--jb-blue);
+  box-shadow: 0 0 0 1px var(--jb-blue);
+}
+
+.jb-bookmark-thumb {
+  flex-shrink: 0;
+  width: 160px;
+}
+
+.jb-bookmark-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.jb-bookmark-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  min-width: 0;
+}
+
+.jb-bookmark-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.jb-bookmark-title .jb-favicon {
+  width: 16px;
+  height: 16px;
+}
+
+.jb-bookmark-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jb-bookmark-desc {
+  font-size: 12px;
+  color: var(--jb-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.jb-bookmark-url {
+  font-size: 12px;
+  color: var(--jb-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jb-linkmenu-spinner {
+  width: 12px;
+  height: 12px;
+  margin-left: auto;
+  border: 2px solid var(--jb-faint);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: jb-spin 0.6s linear infinite;
+}
+
+@keyframes jb-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

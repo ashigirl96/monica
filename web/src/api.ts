@@ -1,6 +1,7 @@
 import type {
   DailyNoteCount,
   Explanation,
+  LinkPreview,
   Note,
   NotePage,
   NoteSummary,
@@ -81,4 +82,15 @@ export async function listProjects(): Promise<ProjectOption[]> {
   const res = await fetch("/api/projects");
   if (!res.ok) throw new Error(`Failed to list projects: ${res.status}`);
   return res.json();
+}
+
+// 失敗を null で返す: 呼び手（link-menu）はプレーンリンクへのフォールバックとして扱う
+export async function fetchLinkPreview(url: string): Promise<LinkPreview | null> {
+  try {
+    const res = await fetch(`/api/ogp?url=${encodeURIComponent(url)}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
 }

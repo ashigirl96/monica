@@ -1,4 +1,4 @@
-use std::sync::{Once, OnceLock};
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
@@ -21,7 +21,6 @@ const ACCESS_TOKEN_SKEW_SECONDS: i64 = 60;
 
 static TOKEN_CACHE: OnceLock<Mutex<Option<StoredGithubToken>>> = OnceLock::new();
 static REFRESH_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-static CRYPTO_PROVIDER_INIT: Once = Once::new();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DevicePoll {
@@ -264,20 +263,7 @@ fn env_token() -> Option<String> {
 }
 
 fn http_client() -> reqwest::Client {
-    install_crypto_provider();
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
-}
-
-// reqwest is built with `rustls-no-provider`, so the single rustls instance has
-// no default CryptoProvider and would panic on first TLS use. Install ring to
-// match octocrab's `rustls-ring`; ignore the error if another caller won the race.
-fn install_crypto_provider() {
-    CRYPTO_PROVIDER_INIT.call_once(|| {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    });
+    crate::http::http_client(Duration::from_secs(30))
 }
 
 async fn cached_valid_access_token() -> Option<String> {

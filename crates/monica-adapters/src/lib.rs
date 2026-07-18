@@ -7,10 +7,12 @@ pub mod agents;
 pub mod filesystem;
 pub mod git;
 pub mod github;
+pub mod ogp;
 pub mod process;
 pub mod secrets;
 
 mod fs_util;
+mod http;
 
 #[cfg(test)]
 mod test_support;

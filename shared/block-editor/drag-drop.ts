@@ -2,7 +2,7 @@ import { Plugin, PluginKey } from "@milkdown/kit/prose/state";
 import type { EditorState, Transaction } from "@milkdown/kit/prose/state";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import type { Node as PMNode } from "@milkdown/kit/prose/model";
-import { nodes, reissueIds } from "./schema";
+import { isAtomBlock, nodes, reissueIds } from "./schema";
 import { containerById, getBlockContext, rangeFromIds, rangePositions } from "./context";
 import { blockSelectionKey, selectBlocks } from "./selection-state";
 import { BLOCKS_MIME, blocksToPlainText, serializeBlocksPayload } from "./clipboard";
@@ -100,7 +100,7 @@ export function dropBlocks(
     tr.insert(fresh.pos + fresh.node.nodeSize, moved);
   } else {
     const content = fresh.node.child(0);
-    if (content.type === nodes.divider) return null;
+    if (isAtomBlock(content.type)) return null;
     if (fresh.node.childCount > 1) {
       const groupPos = fresh.pos + 1 + content.nodeSize;
       tr.insert(groupPos + fresh.node.child(1).nodeSize - 1, moved);

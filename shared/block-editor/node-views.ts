@@ -357,6 +357,108 @@ class DividerView implements NodeView {
   }
 }
 
+function openHref(anchor: HTMLAnchorElement, href: string): void {
+  anchor.href = href;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  // contenteditable 内の <a> はブラウザがナビゲーションを握り潰すため明示的に開く
+  anchor.addEventListener("click", (e) => {
+    e.preventDefault();
+    window.open(href, "_blank", "noopener");
+  });
+}
+
+function faviconImg(src: string): HTMLImageElement {
+  const img = el("img", "jb-favicon", (image) => {
+    image.src = src;
+    image.alt = "";
+  });
+  img.addEventListener("error", () => {
+    img.style.display = "none";
+  });
+  return img;
+}
+
+class LinkMentionView implements NodeView {
+  dom: HTMLElement;
+
+  constructor(private node: PMNode) {
+    const anchor = el("a", "jb-mention");
+    anchor.contentEditable = "false";
+    anchor.dataset.mention = "";
+    openHref(anchor, node.attrs.href as string);
+    const favicon = node.attrs.favicon as string | null;
+    if (favicon) anchor.append(faviconImg(favicon));
+    anchor.append(
+      el("span", "jb-mention-title", (span) => {
+        span.textContent = (node.attrs.title as string) || (node.attrs.href as string);
+      }),
+    );
+    this.dom = anchor;
+  }
+
+  update(node: PMNode): boolean {
+    // link-menu の preview 中に metadata 到着で attrs が差し替わる → false で再構築
+    return node.type === nodes.linkMention && node.sameMarkup(this.node);
+  }
+}
+
+class BookmarkView implements NodeView {
+  dom: HTMLElement;
+
+  constructor(private node: PMNode) {
+    this.dom = el("div", "jb-bookmark");
+    this.dom.setAttribute("data-block-content", "bookmark");
+    this.dom.contentEditable = "false";
+
+    const href = node.attrs.href as string;
+    const card = el("a", "jb-bookmark-card");
+    openHref(card, href);
+
+    const thumbnail = node.attrs.thumbnail as string | null;
+    if (thumbnail) {
+      const thumb = el("div", "jb-bookmark-thumb");
+      const img = el("img", "jb-bookmark-img", (image) => {
+        image.src = thumbnail;
+        image.alt = "";
+      });
+      img.addEventListener("error", () => thumb.remove());
+      thumb.append(img);
+      card.append(thumb);
+    }
+
+    const body = el("div", "jb-bookmark-body");
+    const titleRow = el("div", "jb-bookmark-title");
+    const favicon = node.attrs.favicon as string | null;
+    if (favicon) titleRow.append(faviconImg(favicon));
+    titleRow.append(
+      el("span", "jb-bookmark-title-text", (span) => {
+        span.textContent = (node.attrs.title as string) || href;
+      }),
+    );
+    body.append(titleRow);
+    const description = node.attrs.description as string | null;
+    if (description) {
+      body.append(
+        el("div", "jb-bookmark-desc", (div) => {
+          div.textContent = description;
+        }),
+      );
+    }
+    body.append(
+      el("div", "jb-bookmark-url", (div) => {
+        div.textContent = href;
+      }),
+    );
+    card.append(body);
+    this.dom.append(card);
+  }
+
+  update(node: PMNode): boolean {
+    return node.type === nodes.bookmark && node.sameMarkup(this.node);
+  }
+}
+
 export function editorNodeViews(): Record<string, NodeViewConstructor> {
   return {
     blockContainer: (node, view, getPos) => new ContainerView(node, view, getPos),
@@ -364,5 +466,7 @@ export function editorNodeViews(): Record<string, NodeViewConstructor> {
     toggle: (node, view, getPos) => new ToggleView(node, view, getPos),
     codeBlock: (node, view, getPos) => new CodeBlockView(node, view, getPos),
     divider: () => new DividerView(),
+    linkMention: (node) => new LinkMentionView(node),
+    bookmark: (node) => new BookmarkView(node),
   };
 }

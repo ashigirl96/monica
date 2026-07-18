@@ -88,7 +88,7 @@ export function EditorHeader({
   onEnterEditor: () => void;
 }) {
   return (
-    <header className="mx-auto w-full max-w-[720px] px-10 pt-12">
+    <header className="pt-12">
       <input
         ref={titleRef}
         value={note.title ?? ""}

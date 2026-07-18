@@ -11,7 +11,7 @@ use monica_adapters::filesystem::{FsTaskRunOutputs, FsWorkspace};
 use monica_adapters::git::GitCliGateway;
 use monica_adapters::github::{KeychainAuthGateway, OctocrabGithubGateway};
 use monica_adapters::process::ProcessSetupRunner;
-use monica_application::{Backend, EventSink, Monica, WorktreeRef};
+use monica_application::{Backend, EventSink, LinkPreview, Monica, WorktreeRef};
 use monica_storage_sqlite::SqliteStore;
 
 pub mod notification_drain;
@@ -60,4 +60,12 @@ pub fn open_monica(events: Box<dyn EventSink>) -> Result<MonicaFacade> {
 /// pure git query, so it opens no store — drivers reach it here rather than naming the git adapter.
 pub fn worktree_info(cwd: &Path) -> Option<WorktreeRef> {
     monica_adapters::git::worktree_info(cwd)
+}
+
+pub use monica_adapters::ogp::LinkPreviewError;
+
+/// OGP tags / HTML head metadata for a pasted URL. Pure network I/O, so it opens no store —
+/// drivers reach it here rather than naming the ogp adapter.
+pub async fn fetch_link_preview(url: &str) -> Result<LinkPreview, LinkPreviewError> {
+    monica_adapters::ogp::fetch_link_preview(url).await
 }

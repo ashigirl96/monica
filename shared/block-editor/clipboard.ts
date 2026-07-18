@@ -1,10 +1,11 @@
-import { Plugin, PluginKey } from "@milkdown/kit/prose/state";
+import { Plugin, PluginKey, TextSelection } from "@milkdown/kit/prose/state";
 import { DOMSerializer, Fragment, Node as PMNode, Slice } from "@milkdown/kit/prose/model";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import { nodes, reissueIds, schema } from "./schema";
 import { containerById, getBlockContext, rangeFromIds, rangePositions } from "./context";
 import { deleteRange } from "./commands";
 import { blockSelectionKey } from "./selection-state";
+import { openLinkMenu } from "./link-menu";
 
 // TODO.md §8.4 / §10.1
 export const BLOCKS_MIME = "application/x-monica-blocks+json";
@@ -107,6 +108,41 @@ function selectedContainers(view: EditorView): PMNode[] {
     .filter((node): node is PMNode => !!node);
 }
 
+function pastedUrl(event: ClipboardEvent): string | null {
+  const text = event.clipboardData?.getData("text/plain")?.trim();
+  if (!text || /\s/.test(text)) return null;
+  try {
+    const url = new URL(text);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  } catch {
+    return null;
+  }
+  return text;
+}
+
+// 単一 URL のペースト: プレーンリンクを即挿入し、表現の 3 択（URL/Mention/Bookmark）を
+// link-menu に委ねる。選択テキストがあれば Notion 同様 link mark を付けるだけ。
+function handleUrlPaste(view: EditorView, event: ClipboardEvent): boolean {
+  const url = pastedUrl(event);
+  if (!url) return false;
+  const { state } = view;
+  const sel = state.selection;
+  const ctx = getBlockContext(sel.$from);
+  if (!ctx || ctx.contentNode.type === nodes.codeBlock) return false;
+  const linkMark = schema.marks.link.create({ href: url });
+  if (!sel.empty) {
+    if (!(sel instanceof TextSelection) || sel.$from.parent !== sel.$to.parent) return false;
+    view.dispatch(state.tr.addMark(sel.from, sel.to, linkMark));
+    return true;
+  }
+  const from = sel.from;
+  const tr = state.tr.replaceWith(from, from, schema.text(url, [linkMark]));
+  tr.setSelection(TextSelection.create(tr.doc, from + url.length));
+  openLinkMenu(tr, from, url);
+  view.dispatch(tr.scrollIntoView());
+  return true;
+}
+
 function writeBlocksToClipboard(event: ClipboardEvent, containers: readonly PMNode[]): void {
   if (!event.clipboardData) return;
   event.preventDefault();
@@ -144,7 +180,7 @@ export function clipboardPlugin(): Plugin {
 
       handlePaste(view, event) {
         const raw = event.clipboardData?.getData(BLOCKS_MIME);
-        if (!raw) return false;
+        if (!raw) return handleUrlPaste(view, event);
         const blocks = parseBlocksPayload(raw);
         if (!blocks || blocks.length === 0) return false;
 

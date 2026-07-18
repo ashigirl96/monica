@@ -1,9 +1,10 @@
 import { Plugin, PluginKey, TextSelection } from "@milkdown/kit/prose/state";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import type { Attrs, NodeType } from "@milkdown/kit/prose/model";
-import { emptyParagraphContainer, nodes } from "./schema";
+import { nodes } from "./schema";
 import { getBlockContext } from "./context";
-import { inlineToPlainText } from "./commands";
+import { appendEmptyParagraphAfter, inlineToPlainText } from "./commands";
+import { createMenuOverlay, menuItemButton, positionMenuAt } from "./menu-overlay";
 
 type SlashState = { active: false } | { active: true; pos: number; query: string; index: number };
 
@@ -92,12 +93,7 @@ function applyItem(view: EditorView, item: SlashItem): void {
   tr.replaceWith(ctx.contentPos, ctx.contentPos + content.nodeSize, newContent);
   if (item.nodeType === nodes.divider) {
     // divider はカーソルを持てないので直後に空 paragraph を作って移る
-    const container = tr.doc.nodeAt(ctx.containerPos);
-    if (container) {
-      const at = ctx.containerPos + container.nodeSize;
-      tr.insert(at, emptyParagraphContainer());
-      tr.setSelection(TextSelection.create(tr.doc, at + 2));
-    }
+    appendEmptyParagraphAfter(tr, ctx.containerPos);
   } else if (newContent.inlineContent) {
     // replaceWith で潰れたカーソルを変換後 content 内の同 offset へ張り直す
     const offset = Math.min(Math.max(state.pos - (ctx.contentPos + 1), 0), newContent.content.size);
@@ -112,11 +108,7 @@ class SlashMenuView {
   private menu: HTMLElement;
 
   constructor(private view: EditorView) {
-    this.menu = document.createElement("div");
-    this.menu.className = "jb-slash-menu";
-    this.menu.style.display = "none";
-    this.menu.setAttribute("role", "listbox");
-    view.dom.parentElement?.append(this.menu);
+    this.menu = createMenuOverlay(view);
   }
 
   update(view: EditorView): void {
@@ -140,36 +132,20 @@ class SlashMenuView {
       this.menu.append(heading);
     }
     items.forEach((item, i) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "jb-slash-item";
-      button.setAttribute("role", "option");
-      button.setAttribute("aria-selected", String(i === state.index));
-      if (i === state.index) button.classList.add("jb-slash-item-active");
-      const icon = document.createElement("span");
-      icon.className = "jb-slash-icon";
       const glyph = document.createElement("span");
       glyph.className = "jb-glyph";
       glyph.dataset.kind = item.icon;
-      icon.append(glyph);
-      const label = document.createElement("span");
-      label.className = "jb-slash-label";
-      label.textContent = item.label;
-      button.append(icon, label);
-      button.addEventListener("mousedown", (e) => e.preventDefault());
-      button.addEventListener("click", () => applyItem(this.view, item));
-      this.menu.append(button);
+      this.menu.append(
+        menuItemButton({
+          icon: glyph,
+          label: item.label,
+          active: i === state.index,
+          onPick: () => applyItem(this.view, item),
+        }),
+      );
     });
 
-    // §9.1: coordsAtPos で editor 外 overlay を配置（CSS zoom は比率で補正）
-    const wrapper = view.dom.parentElement;
-    if (!wrapper) return;
-    const coords = view.coordsAtPos(state.pos);
-    const wrapperRect = wrapper.getBoundingClientRect();
-    const scale = wrapper.offsetWidth > 0 ? wrapperRect.width / wrapper.offsetWidth : 1;
-    this.menu.style.display = "block";
-    this.menu.style.left = `${(coords.left - wrapperRect.left) / scale}px`;
-    this.menu.style.top = `${(coords.bottom - wrapperRect.top) / scale + 4}px`;
+    positionMenuAt(view, this.menu, state.pos);
   }
 
   destroy(): void {

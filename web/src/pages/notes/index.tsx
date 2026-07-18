@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BlockEditor, type BlockEditorHandle } from "@shared/block-editor/block-editor";
+import type { LinkMetadata } from "@shared/block-editor/link-menu";
 import { fuzzyMatch } from "@shared/fuzzy-picker/use-fuzzy-picker";
 import {
   createNote,
   dailyNoteCounts,
   deleteNote,
+  fetchLinkPreview,
   getNote,
   listNotes,
   listProjectNotes,
@@ -30,6 +32,18 @@ import { NOTE_KINDS } from "./kind";
 import { NotesSidebar, ProjectNotesSidebar, summaryTitle } from "./sidebar";
 import { useAutosave } from "./use-autosave";
 import "./notes.css";
+
+async function fetchLinkMetadata(url: string): Promise<LinkMetadata | null> {
+  const preview = await fetchLinkPreview(url);
+  if (!preview) return null;
+  return {
+    title: preview.title,
+    description: preview.description,
+    image: preview.image,
+    favicon: preview.favicon,
+    siteName: preview.site_name,
+  };
+}
 
 function EmptyState() {
   return (
@@ -476,7 +490,7 @@ export function NotesPage({ id }: { id: string | null }) {
             {noteError}
           </div>
         ) : note ? (
-          <>
+          <div className="mx-auto w-full max-w-[960px] px-10">
             <EditorHeader
               note={note}
               titleRef={titleRef}
@@ -492,10 +506,11 @@ export function NotesPage({ id }: { id: string | null }) {
               autoFocus={!pendingTitleFocusRef.current}
               onDocChange={onDocChange}
               onExitUp={() => titleRef.current?.focus()}
+              fetchLinkMetadata={fetchLinkMetadata}
               handleRef={editorHandleRef}
-              className="mx-auto min-h-[70dvh] w-full max-w-[720px] px-10 pt-4 pb-24"
+              className="min-h-[70dvh] pt-4 pb-24"
             />
-          </>
+          </div>
         ) : null}
       </main>
 

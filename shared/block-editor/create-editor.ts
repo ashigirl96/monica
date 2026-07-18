@@ -7,6 +7,8 @@ import { editorKeymap } from "./keymap";
 import { editorInputRules } from "./input-rules";
 import { blockSelectionPlugin } from "./block-selection";
 import { slashMenuPlugin } from "./slash-menu";
+import { linkMenuPlugin } from "./link-menu";
+import type { FetchLinkMetadata } from "./link-menu";
 import { normalizerPlugin } from "./normalizer";
 import { numberingPlugin, placeholderPlugin } from "./decorations";
 import { dragDropPlugin } from "./drag-drop";
@@ -50,12 +52,15 @@ export type BlockEditorCallbacks = {
   /** 文書先頭の block で ↑（最上行）/ Shift-Tab（outdent 不能時）が押されたとき
       （タイトル等、エディタ外への上方向フォーカス移動用） */
   onExitUp?: () => void;
+  /** URL ペースト時の Mention/Bookmark 用メタデータ取得。
+      未指定なら 3 択メニューは出ず、常にプレーンリンクになる */
+  fetchLinkMetadata?: FetchLinkMetadata;
 };
 
 export function createBlockEditor(
   mount: HTMLElement,
   initialDoc: unknown,
-  { onDocChange, onExitUp }: BlockEditorCallbacks = {},
+  { onDocChange, onExitUp, fetchLinkMetadata }: BlockEditorCallbacks = {},
 ): EditorView {
   const state = EditorState.create({
     doc: docFromJSON(initialDoc),
@@ -64,6 +69,8 @@ export function createBlockEditor(
       // 全 keystroke の logging + 全文 walk を伴うため dev 限定
       ...(import.meta.env.DEV ? [imeDebugPlugin()] : []),
       slashMenuPlugin(),
+      // plugin 不在なら clipboard の open meta は無視され、常にプレーンリンクに落ちる
+      ...(fetchLinkMetadata ? [linkMenuPlugin(fetchLinkMetadata)] : []),
       blockSelectionPlugin(),
       // editorKeymap の Shift-Tab（structureCommand）は outdent 不能でも true を返す（KEY-003）
       // ため、先頭 block での上方向脱出はその手前で拾う必要がある

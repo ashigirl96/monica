@@ -21,6 +21,7 @@ reqwest = { version = "0.13.3", default-features = false, features = [
   "rustls-no-provider",
 ] }
 rustls = { version = "0.23.40", default-features = false, features = ["ring"] }
+scraper = { version = "0.27.0", default-features = false }
 serde = { version = "1.0.228", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
 tokio = { version = "1.52.3", default-features = false, features = ["sync", "time"] }
@@ -28,3 +29,4 @@ tokio = { version = "1.52.3", default-features = false, features = ["sync", "tim
 [dev-dependencies]
 ctor = "1.0"
 monica-storage-sqlite = { path = "../monica-storage-sqlite" }
+tokio = { version = "1.52.3", default-features = false, features = ["macros", "rt"] }

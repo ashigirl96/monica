@@ -5,6 +5,13 @@ export function newBlockId(): string {
   return crypto.randomUUID();
 }
 
+/** null 値を落として data 属性オブジェクトにする（toDOM の条件付き属性用） */
+function dataAttrs(attrs: Record<string, string | null>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(attrs).filter((entry): entry is [string, string] => entry[1] !== null),
+  );
+}
+
 // TODO.md §0: ID付きの任意ネスト可能なブロックツリーを正とする。
 // doc → blockGroup → blockContainer(id) → blockContent + blockGroup?
 export const schema = new Schema({
@@ -171,7 +178,83 @@ export const schema = new Schema({
       toDOM: () => ["div", { "data-block-content": "divider" }, ["hr"]],
     },
 
+    // URL のカード表現。メタデータはペースト時のスナップショットを属性に保持する
+    bookmark: {
+      group: "blockContent",
+      atom: true,
+      selectable: true,
+      attrs: {
+        href: {},
+        title: { default: null },
+        description: { default: null },
+        thumbnail: { default: null },
+        favicon: { default: null },
+        siteName: { default: null },
+      },
+      parseDOM: [
+        {
+          tag: "div[data-block-content='bookmark']",
+          getAttrs: (dom: HTMLElement) => ({
+            href: dom.dataset.href ?? "",
+            title: dom.dataset.title ?? null,
+            description: dom.dataset.description ?? null,
+            thumbnail: dom.dataset.thumbnail ?? null,
+            favicon: dom.dataset.favicon ?? null,
+            siteName: dom.dataset.siteName ?? null,
+          }),
+        },
+      ],
+      toDOM: (node) => [
+        "div",
+        {
+          "data-block-content": "bookmark",
+          "data-href": node.attrs.href as string,
+          ...dataAttrs({
+            "data-title": node.attrs.title as string | null,
+            "data-description": node.attrs.description as string | null,
+            "data-thumbnail": node.attrs.thumbnail as string | null,
+            "data-favicon": node.attrs.favicon as string | null,
+            "data-site-name": node.attrs.siteName as string | null,
+          }),
+        },
+        ["a", { href: node.attrs.href as string }, (node.attrs.title as string) || ""],
+      ],
+    },
+
     text: { group: "inline" },
+
+    // URL のインラインチップ表現（favicon + タイトル）
+    linkMention: {
+      group: "inline",
+      inline: true,
+      atom: true,
+      selectable: true,
+      attrs: {
+        href: {},
+        title: { default: "" },
+        favicon: { default: null },
+      },
+      parseDOM: [
+        {
+          tag: "a[data-mention]",
+          getAttrs: (dom: HTMLElement) => ({
+            href: dom.getAttribute("href") ?? "",
+            title: dom.dataset.title ?? dom.textContent ?? "",
+            favicon: dom.dataset.favicon ?? null,
+          }),
+        },
+      ],
+      toDOM: (node) => [
+        "a",
+        {
+          href: node.attrs.href as string,
+          "data-mention": "",
+          "data-title": node.attrs.title as string,
+          ...dataAttrs({ "data-favicon": node.attrs.favicon as string | null }),
+        },
+        node.attrs.title as string,
+      ],
+    },
 
     hardBreak: {
       group: "inline",
@@ -222,6 +305,12 @@ export function isTextBlock(type: NodeType): boolean {
 
 export function isListLike(type: NodeType): boolean {
   return type === nodes.todo || type === nodes.bullet || type === nodes.numbered;
+}
+
+// カーソルを置けない atom block（divider / bookmark）。indent や drop でこの下に
+// 子 block を入れると操作不能になるため、受け側ガードはこの述語で判定する
+export function isAtomBlock(type: NodeType): boolean {
+  return type.spec.group === "blockContent" && type.spec.atom === true;
 }
 
 export function createContainer(

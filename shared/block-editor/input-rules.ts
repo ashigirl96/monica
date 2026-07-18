@@ -2,9 +2,9 @@ import { InputRule, inputRules } from "@milkdown/kit/prose/inputrules";
 import { TextSelection } from "@milkdown/kit/prose/state";
 import type { Plugin, Transaction } from "@milkdown/kit/prose/state";
 import type { Attrs, MarkType, NodeType } from "@milkdown/kit/prose/model";
-import { emptyParagraphContainer, nodes, schema } from "./schema";
+import { nodes, schema } from "./schema";
 import { getBlockContext } from "./context";
-import { inlineToPlainText } from "./commands";
+import { appendEmptyParagraphAfter, inlineToPlainText } from "./commands";
 
 // 行頭 trigger でブロック型変換（TODO.md §6.1/§6.2）。
 // blockContent の型だけ差し替え、blockContainer の ID・children は維持する。
@@ -40,12 +40,7 @@ function blockRule(
       result.setSelection(TextSelection.create(result.doc, mappedCtx.contentPos + 1));
     } else if (converted?.type === nodes.divider) {
       // divider はカーソルを持てないので、Notion 同様に直後へ空 paragraph を作って移る
-      const container = result.doc.nodeAt(mappedCtx.containerPos);
-      if (container) {
-        const at = mappedCtx.containerPos + container.nodeSize;
-        result.insert(at, emptyParagraphContainer());
-        result.setSelection(TextSelection.create(result.doc, at + 2));
-      }
+      appendEmptyParagraphAfter(result, mappedCtx.containerPos);
     }
     return result;
   });
