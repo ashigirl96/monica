@@ -3,7 +3,7 @@ import { Plugin, PluginKey } from "@milkdown/kit/prose/state";
 import type { EditorView, NodeView } from "@milkdown/kit/prose/view";
 import { nodes, schema } from "./schema";
 import { containerById } from "./context";
-import { el } from "./node-views";
+import { BookmarkView, el, LinkMentionView } from "./node-views";
 
 /** (noteId, blockId) → 元 blockContainer subtree の ProseMirror JSON。
     null = 元ブロックが存在しない（dangling）。reject = 通信エラー。 */
@@ -17,16 +17,20 @@ export type SyncedBlockOptions = {
   onOpenBlock?: OnOpenBlock;
 };
 
-// ミラー本体を静的描画する serializer。schema の toDOM をベースに 2 点だけ差し替える:
+// ミラー本体を静的描画する serializer。schema の toDOM をベースに差し替える:
 // 1. blockContainer の data-block-id を出さない（参照元と同じ ID が DOM 内に重複し、
 //    ID ベースの DOM lookup が誤ヒットするのを防ぐ）
 // 2. ネストした syncedBlock はプレースホルダにする（解決を 1 段で止め、自己参照・
 //    循環でも無限再帰・fetch 連鎖を起こさない）
+// 3. linkMention / bookmark は NodeView と同じリッチ DOM で描く（schema の toDOM は
+//    素のリンクに退化するため）。両 View は node だけで DOM を組む純粋ビルダー。
 const mirrorSerializer = new DOMSerializer(
   {
     ...DOMSerializer.nodesFromSchema(schema),
     blockContainer: () => ["div", { "data-block-container": "" }, 0],
     syncedBlock: () => ["div", { class: "jb-synced-nested" }, "Nested synced block"],
+    linkMention: (node) => new LinkMentionView(node).dom,
+    bookmark: (node) => new BookmarkView(node).dom,
   },
   DOMSerializer.marksFromSchema(schema),
 );

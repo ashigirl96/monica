@@ -385,7 +385,7 @@ function faviconImg(src: string): HTMLImageElement {
   return img;
 }
 
-class LinkMentionView implements NodeView {
+export class LinkMentionView implements NodeView {
   dom: HTMLElement;
 
   constructor(private node: PMNode) {
@@ -464,7 +464,7 @@ class NoteMentionView implements NodeView {
   }
 }
 
-class BookmarkView implements NodeView {
+export class BookmarkView implements NodeView {
   dom: HTMLElement;
 
   constructor(private node: PMNode) {
