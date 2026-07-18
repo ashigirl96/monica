@@ -101,6 +101,30 @@ impl From<monica_domain::NoteSummary> for NoteSummary {
     }
 }
 
+/// wiki link（`[[`）の検索候補・解決結果。表示名の導出規則は domain の
+/// `NoteKind::display_name` にあり、フロントは受け取った文字列を表示するだけ。
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct NoteMention {
+    pub id: String,
+    pub display_name: String,
+    /// 検索 dropdown のサブラベル。解決（単一取得）では返さない。
+    pub preview: Option<String>,
+}
+
+impl From<monica_domain::NoteSummary> for NoteMention {
+    fn from(value: monica_domain::NoteSummary) -> Self {
+        let display_name = value.kind.display_name(&value.date);
+        Self { id: value.id.into_string(), display_name, preview: value.preview }
+    }
+}
+
+impl From<monica_domain::Note> for NoteMention {
+    fn from(value: monica_domain::Note) -> Self {
+        let display_name = value.kind.display_name(&value.date);
+        Self { id: value.id.into_string(), display_name, preview: None }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct NotePage {
     pub items: Vec<NoteSummary>,

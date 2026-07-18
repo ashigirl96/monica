@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BlockEditor, type BlockEditorHandle } from "@shared/block-editor/block-editor";
 import type { LinkMetadata } from "@shared/block-editor/link-menu";
+import type { NoteMentionItem } from "@shared/block-editor/note-mention-menu";
+import type { NoteMentionInfo } from "@shared/block-editor/node-views";
 import { fuzzyMatch } from "@shared/fuzzy-picker/use-fuzzy-picker";
 import {
   createNote,
@@ -12,7 +14,9 @@ import {
   listNotes,
   listProjectNotes,
   listProjects,
+  resolveNoteMention as resolveNoteMentionApi,
   restoreNote,
+  searchNoteMentions as searchNoteMentionsApi,
   setNoteKind,
 } from "@/api";
 import { navigate } from "@/app";
@@ -46,6 +50,11 @@ async function fetchLinkMetadata(url: string): Promise<LinkMetadata | null> {
     favicon: preview.favicon,
     siteName: preview.site_name,
   };
+}
+
+async function searchNoteMentions(query: string): Promise<NoteMentionItem[]> {
+  const mentions = await searchNoteMentionsApi(query);
+  return mentions.map((m) => ({ id: m.id, displayName: m.display_name, preview: m.preview }));
 }
 
 function EmptyState() {
@@ -98,6 +107,9 @@ export function NotesPage({ id }: { id: string | null }) {
   // onDocChange は BlockEditor の再レンダー前に発火し得るため、closure の note ではなく
   // 常に最新のフィールドを持つ ref から保存 payload を組み立てる（stale title/kind の逆行防止）
   const noteRef = useRef<Note | null>(null);
+  // 同一 doc 内の重複 mention を 1 リクエストに畳む Promise 共有キャッシュ。
+  // 開くノートが変わるたび捨てるので、開き直しで表示名が最新タイトルに追従する
+  const mentionCacheRef = useRef(new Map<string, Promise<NoteMentionInfo | null>>());
 
   useEffect(() => {
     let cancelled = false;
@@ -205,6 +217,7 @@ export function NotesPage({ id }: { id: string | null }) {
   }, []);
 
   useEffect(() => {
+    mentionCacheRef.current = new Map();
     if (id === null) {
       noteRef.current = null;
       setNote(null);
@@ -246,6 +259,18 @@ export function NotesPage({ id }: { id: string | null }) {
     },
     [flush],
   );
+
+  const resolveNoteMention = useCallback((noteId: string): Promise<NoteMentionInfo | null> => {
+    const cache = mentionCacheRef.current;
+    let promise = cache.get(noteId);
+    if (!promise) {
+      promise = resolveNoteMentionApi(noteId).then((m) =>
+        m ? { displayName: m.display_name } : null,
+      );
+      cache.set(noteId, promise);
+    }
+    return promise;
+  }, []);
 
   // 「今日の直近7日 + 今日の月」へ戻す。既に同じ表示なら state 同一性を保って refetch を抑止する
   const resetToToday = useCallback(() => {
@@ -556,6 +581,9 @@ export function NotesPage({ id }: { id: string | null }) {
               onDocChange={onDocChange}
               onExitUp={() => titleRef.current?.focus()}
               fetchLinkMetadata={fetchLinkMetadata}
+              searchNoteMentions={searchNoteMentions}
+              resolveNoteMention={resolveNoteMention}
+              onNoteMentionClick={selectNote}
               handleRef={editorHandleRef}
               className="min-h-[70dvh] pt-4 pb-24"
             />

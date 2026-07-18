@@ -321,6 +321,34 @@ async fn daily_note_counts(
     Ok(Json(counts.into_iter().map(Into::into).collect()))
 }
 
+#[derive(serde::Deserialize)]
+struct MentionSearchQuery {
+    #[serde(default)]
+    q: String,
+}
+
+async fn search_note_mentions(
+    Query(query): Query<MentionSearchQuery>,
+) -> Result<Json<Vec<monica_api::ApiNoteMention>>, AppError> {
+    let list = blocking(move || {
+        let mut monica = open()?;
+        Ok(monica.notes().search_note_mentions(&query.q)?)
+    })
+    .await?;
+    Ok(Json(list.into_iter().map(Into::into).collect()))
+}
+
+async fn resolve_note_mention(
+    Path(id): Path<String>,
+) -> Result<Json<monica_api::ApiNoteMention>, AppError> {
+    let note = blocking(move || {
+        let mut monica = open()?;
+        Ok(monica.notes().get_note(&id)?)
+    })
+    .await?;
+    Ok(Json(note.into()))
+}
+
 async fn list_projects() -> Result<Json<Vec<monica_api::ProjectOption>>, AppError> {
     let list = blocking(|| {
         let mut monica = open()?;
@@ -380,6 +408,8 @@ fn build_router(port: u16) -> Router {
         .route("/api/notes", get(list_notes).post(create_note))
         .route("/api/notes/by-project", get(list_project_notes))
         .route("/api/notes/daily-counts", get(daily_note_counts))
+        .route("/api/notes/mentions", get(search_note_mentions))
+        .route("/api/notes/mentions/{id}", get(resolve_note_mention))
         .route("/api/notes/today", get(notes_today))
         .route(
             "/api/notes/{id}",
@@ -1027,15 +1057,7 @@ mod tests {
         let id = created["id"].as_str().unwrap();
         let date = created["date"].as_str().unwrap();
 
-        let doc = serde_json::json!({"type":"doc","content":[{"type":"blockGroup","content":[
-            {"type":"blockContainer","content":[{"type":"paragraph","content":[{"type":"text","text":"preview line"}]}]}
-        ]}]});
-        let body = serde_json::json!({ "title": null, "content": doc });
-        let response = app()
-            .oneshot(put_json_req(&format!("/api/notes/{id}"), &body))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        put_note(id, None, doc_with_lines(&["preview line"])).await;
 
         // 自分の date を含むレンジ → 含まれる（並列テストの note と共存するため id で探す）
         let response = app()
@@ -1117,6 +1139,143 @@ mod tests {
         // project_id なしはクエリ検証エラー
         let response = app().oneshot(get_req("/api/notes/by-project")).await.unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    fn doc_with_lines(lines: &[&str]) -> serde_json::Value {
+        let containers: Vec<serde_json::Value> = lines
+            .iter()
+            .map(|text| {
+                serde_json::json!({
+                    "type": "blockContainer",
+                    "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}],
+                })
+            })
+            .collect();
+        serde_json::json!({"type": "doc", "content": [{"type": "blockGroup", "content": containers}]})
+    }
+
+    async fn put_note(id: &str, title: Option<&str>, content: serde_json::Value) {
+        let body = serde_json::json!({"title": title, "content": content});
+        let response = app()
+            .oneshot(put_json_req(&format!("/api/notes/{id}"), &body))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    async fn search_mentions(q: &str) -> Vec<serde_json::Value> {
+        let response = app()
+            .oneshot(get_req(&format!("/api/notes/mentions?q={q}")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let list: serde_json::Value = serde_json::from_str(&body_string(response).await).unwrap();
+        list.as_array().unwrap().clone()
+    }
+
+    // 検索テストは同一 DB を並列テストと共有するので、クエリは各テスト固有のマーカーにする。
+    #[tokio::test]
+    async fn mentions_search_finds_essay_by_title() {
+        let created = create_note_via_api().await;
+        let id = created["id"].as_str().unwrap();
+        set_kind(id, serde_json::json!({"kind": "essay"})).await;
+        put_note(id, Some("wikilink zettel alpha"), doc_with_lines(&["body"])).await;
+
+        let found = search_mentions("wikilink%20zettel").await;
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0]["id"], id);
+        assert_eq!(found[0]["display_name"], "wikilink zettel alpha");
+    }
+
+    #[tokio::test]
+    async fn mentions_search_finds_daily_by_preview_with_date_display_name() {
+        let created = create_note_via_api().await;
+        let id = created["id"].as_str().unwrap();
+        put_note(id, None, doc_with_lines(&["mention-preview-unique-xyz"])).await;
+
+        let found = search_mentions("mention-preview-unique").await;
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0]["id"], id);
+        assert_eq!(found[0]["display_name"], created["date"], "daily の表示名は date");
+        assert_eq!(found[0]["preview"], "mention-preview-unique-xyz");
+    }
+
+    #[tokio::test]
+    async fn mentions_search_ignores_matches_beyond_first_line() {
+        let created = create_note_via_api().await;
+        let id = created["id"].as_str().unwrap();
+        put_note(id, None, doc_with_lines(&["first line", "deepmatch-second-line-qqq"])).await;
+
+        // content LIKE（coarse）には引っ掛かるが、display_name / preview（precise）には
+        // 一致しないので返らない。
+        assert!(search_mentions("deepmatch-second-line").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn mentions_search_empty_query_returns_recent_notes() {
+        create_note_via_api().await;
+        let found = search_mentions("").await;
+        assert!(!found.is_empty());
+        assert!(found.len() <= 20, "MENTION_SEARCH_LIMIT を超えない");
+    }
+
+    #[tokio::test]
+    async fn mentions_resolve_returns_display_name_per_kind() {
+        // untitled essay → "Untitled"
+        let created = create_note_via_api().await;
+        let id = created["id"].as_str().unwrap();
+        set_kind(id, serde_json::json!({"kind": "essay"})).await;
+        let response = app()
+            .oneshot(get_req(&format!("/api/notes/mentions/{id}")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let mention: serde_json::Value =
+            serde_json::from_str(&body_string(response).await).unwrap();
+        assert_eq!(mention["id"], id);
+        assert_eq!(mention["display_name"], "Untitled");
+        assert_eq!(mention["preview"], serde_json::Value::Null, "resolve は preview を返さない");
+
+        // project → project_id
+        migrated();
+        let store = monica_storage_sqlite::SqliteStore::open().unwrap();
+        store
+            .upsert_project(
+                &monica_domain::Project::from_repo("webtest/mention-resolve"),
+                &monica_application::ExecutionProfile::default(),
+            )
+            .unwrap();
+        let created = create_note_via_api().await;
+        let id = created["id"].as_str().unwrap();
+        set_kind(
+            id,
+            serde_json::json!({"kind": "project", "project_id": "webtest/mention-resolve"}),
+        )
+        .await;
+        let response = app()
+            .oneshot(get_req(&format!("/api/notes/mentions/{id}")))
+            .await
+            .unwrap();
+        let mention: serde_json::Value =
+            serde_json::from_str(&body_string(response).await).unwrap();
+        assert_eq!(mention["display_name"], "webtest/mention-resolve");
+    }
+
+    #[tokio::test]
+    async fn mentions_resolve_deleted_or_invalid_id_is_404() {
+        let created = create_note_via_api().await;
+        let id = created["id"].as_str().unwrap();
+        let response = app()
+            .oneshot(delete_req(&format!("/api/notes/{id}")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        for uri in [format!("/api/notes/mentions/{id}"), "/api/notes/mentions/not-an-id".to_string()]
+        {
+            let response = app().oneshot(get_req(&uri)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "uri: {uri}");
+        }
     }
 
     #[tokio::test]
@@ -1242,6 +1401,7 @@ mod tests {
             .register::<monica_api::ApiNoteSummary>()
             .register::<monica_api::ApiNotePage>()
             .register::<monica_api::ApiNoteKind>()
+            .register::<monica_api::ApiNoteMention>()
             .register::<monica_api::ApiSetNoteKind>()
             .register::<monica_api::ApiNotesToday>()
             .register::<monica_api::NotesSettings>()

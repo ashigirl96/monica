@@ -10,6 +10,12 @@ use crate::ports::NoteStore;
 /// この値を知る必要はない。
 const NOTE_PAGE_SIZE: usize = 100;
 
+/// mention 検索が返す最大件数（dropdown 表示分）。
+const MENTION_SEARCH_LIMIT: usize = 20;
+/// coarse プリフィルタの overfetch 幅。precise フィルタ（display_name / preview）で
+/// 落ちる分を見込んで多めに取る。
+const MENTION_COARSE_LIMIT: usize = 200;
+
 pub struct NoteService<'a, B: Backend> {
     pub(in crate::facade) m: &'a mut super::Monica<B>,
 }
@@ -38,6 +44,21 @@ impl<B: Backend> NoteService<'_, B> {
     ) -> ApplicationResult<NotePage> {
         let items = self.m.repos.list_project_notes(project_id, NOTE_PAGE_SIZE + 1, offset)?;
         Ok(NotePage::from_overfetch(items, NOTE_PAGE_SIZE))
+    }
+
+    /// wiki link（`[[`）用の mention 検索。store の coarse LIKE は superset を返すだけ
+    /// なので、ここで display_name / preview の部分一致に正確に絞る。
+    pub fn search_note_mentions(&mut self, q: &str) -> ApplicationResult<Vec<NoteSummary>> {
+        let q = q.trim().to_lowercase();
+        // 空 q は precise フィルタで落ちる行が無いので overfetch 不要
+        let limit = if q.is_empty() { MENTION_SEARCH_LIMIT } else { MENTION_COARSE_LIMIT };
+        let mut items = self.m.repos.search_notes(&q, limit)?;
+        items.retain(|s| {
+            s.kind.display_name(&s.date).to_lowercase().contains(&q)
+                || s.preview.as_deref().is_some_and(|p| p.to_lowercase().contains(&q))
+        });
+        items.truncate(MENTION_SEARCH_LIMIT);
+        Ok(items)
     }
 
     pub fn get_note(&mut self, id: &str) -> ApplicationResult<Note> {
