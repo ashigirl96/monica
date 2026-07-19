@@ -148,6 +148,23 @@ fn tailscale_ipv4() -> Option<Ipv4Addr> {
     None
 }
 
+/// `tailscale_ipv4` を短時間ポーリングする。ログイン時自動起動では tailscaled のインターフェース
+/// 準備が Monica 起動に間に合わず初回検出が空振りしうるため、一定回数まで待って再試行する。
+/// 最後まで検出できなければ None（loopback のみ）に倒す。
+async fn tailscale_ipv4_wait() -> Option<Ipv4Addr> {
+    const ATTEMPTS: u32 = 15;
+    const INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+    for attempt in 0..ATTEMPTS {
+        if let Some(ip) = tailscale_ipv4() {
+            return Some(ip);
+        }
+        if attempt + 1 < ATTEMPTS {
+            tokio::time::sleep(INTERVAL).await;
+        }
+    }
+    None
+}
+
 fn content_type(path: &str) -> &'static str {
     match path.rsplit('.').next() {
         Some("html") => "text/html; charset=utf-8",
@@ -620,36 +637,31 @@ pub fn serve(addr: impl Into<SocketAddr>, port_tx: SyncSender<u16>) -> Result<()
         let _ = port_tx.send(port);
         log::info!(target: "monica_web", "listening on http://{bound_addr}");
 
-        // Monica が起動している間は常に Tailscale インターフェースの IP に「限定して」追加
-        // bind し、tailnet 内の自分の端末（スマホ等）から到達できるようにする。Tailscale 未
-        // 起動時は検出が None を返し loopback のみになる。0.0.0.0 は使わない（全 NIC 露出 =
-        // 認証なしで公衆 Wi-Fi にも晒すことになる）。検出・bind いずれかに失敗しても loopback
-        // は生きているので、起動自体は止めない。
-        let tailscale_ip = tailscale_ipv4();
-        let tailscale_listener = match tailscale_ip {
-            Some(ip) => match tokio::net::TcpListener::bind(SocketAddr::from((ip, port))).await {
-                Ok(l) => {
+        // loopback は Tailscale 検出を待たせず即座に serve する。tailnet 向けの追加 bind は
+        // 別タスクで後追いするため、検出が遅れても・失敗しても loopback アクセスは無影響。
+        let loopback = tokio::spawn(
+            axum::serve(listener, build_router(allowed_hosts(port, None))).into_future(),
+        );
+
+        // Monica が起動している間は Tailscale インターフェースの IP に「限定して」追加 bind し、
+        // tailnet 内の自分の端末（スマホ等）から到達できるようにする。0.0.0.0 は使わない（全 NIC
+        // 露出 = 認証なしで公衆 Wi-Fi にも晒す）。ログイン項目としての自動起動直後は tailscaled が
+        // まだ IP を割り当てておらず一度きりの検出だと取りこぼすため、短時間リトライしてから諦める。
+        if let Some(ip) = tailscale_ipv4_wait().await {
+            match tokio::net::TcpListener::bind(SocketAddr::from((ip, port))).await {
+                Ok(ts) => {
                     log::info!(target: "monica_web", "also listening on http://{ip}:{port} (tailscale)");
-                    Some(l)
+                    tokio::spawn(
+                        axum::serve(ts, build_router(allowed_hosts(port, Some(ip)))).into_future(),
+                    );
                 }
                 Err(e) => {
                     log::warn!(target: "monica_web", "tailscale bind {ip}:{port} failed: {e:#}");
-                    None
                 }
-            },
-            None => None,
-        };
-
-        let router = build_router(allowed_hosts(port, tailscale_ip));
-        match tailscale_listener {
-            Some(ts) => {
-                tokio::try_join!(
-                    axum::serve(listener, router.clone()).into_future(),
-                    axum::serve(ts, router).into_future(),
-                )?;
             }
-            None => axum::serve(listener, router).await?,
         }
+
+        loopback.await??;
         Ok::<(), anyhow::Error>(())
     })?;
 
@@ -915,6 +927,7 @@ mod tests {
 
     #[tokio::test]
     async fn tailscale_host_header_accepted_only_when_bound() {
+        migrated();
         let ip = Ipv4Addr::new(100, 100, 42, 7);
         let with_ts = build_router(allowed_hosts(19999, Some(ip)));
         let response = with_ts
