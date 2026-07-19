@@ -2,7 +2,7 @@ mod bench;
 mod events;
 mod explanations;
 mod external_refs;
-mod notes;
+pub(crate) mod notes;
 pub(crate) mod notification_outbox;
 mod projects;
 mod pull_request_sync;

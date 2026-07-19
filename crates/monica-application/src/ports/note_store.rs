@@ -14,9 +14,11 @@ pub trait NoteStore {
     /// Every note's content JSON, **including soft-deleted notes**. Used by asset GC to compute
     /// reachability: a soft-deleted note is restorable, so its asset references must count as live.
     fn list_all_note_contents(&self) -> Result<Vec<RawJson>>;
-    /// mention 検索の coarse プリフィルタ。title / project_id / date / content いずれかの
-    /// 部分一致の superset を新しい順に返すだけで、display_name / preview による正確な
-    /// 絞り込みは application 層の責務。空 `q` は全件（最近順）。
+    /// 全文検索の coarse プリフィルタ。title / project_id / date は部分一致、本文は plain_text
+    /// 投影への FTS5（3 codepoint 以上は trigram MATCH、未満は body LIKE）で、いずれかに当たる
+    /// superset を新しい順に返す。display_name / preview による正確な絞り込みは application 層の
+    /// 責務。空 `q` は全件（最近順）。本文一致は plain_text 経由なので schema 語彙（`paragraph`
+    /// 等）には当たらない。preview は plain_text の部分文字列なので superset 契約は維持される。
     fn search_notes(&self, q: &str, limit: usize) -> Result<Vec<NoteSummary>>;
     /// One project's notes, newest first (same ordering as [`list_notes`](Self::list_notes)).
     fn list_project_notes(

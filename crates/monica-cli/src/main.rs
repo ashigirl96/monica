@@ -3,6 +3,7 @@ mod event_sink;
 mod explain;
 mod hook;
 mod issue;
+mod note;
 mod notify;
 mod project;
 mod table;
@@ -28,6 +29,9 @@ enum Commands {
     /// Track GitHub issues as Monica tasks
     #[command(subcommand)]
     Issue(issue::IssueCommand),
+    /// Read notes as markdown / search note bodies
+    #[command(subcommand)]
+    Note(note::NoteCommand),
     /// Receive agent lifecycle hooks (e.g. `monica hook claude`)
     #[command(subcommand)]
     Hook(hook::HookCommand),
@@ -55,6 +59,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             Commands::Project(cmd) => project::run(cmd).await,
             Commands::Explain(cmd) => explain::run(cmd),
             Commands::Issue(cmd) => issue::run(cmd).await,
+            Commands::Note(cmd) => note::run(cmd),
             Commands::Auth(cmd) => auth::run(cmd).await,
             Commands::Hook(cmd) => hook::run(cmd),
             Commands::Completions { shell } => {
@@ -79,5 +84,22 @@ mod tests {
         assert!(Cli::try_parse_from(["monica", "issue", "close", "MON-1", "--yes"]).is_err());
         // the old `delete` subcommand is gone.
         assert!(Cli::try_parse_from(["monica", "issue", "delete", "MON-1"]).is_err());
+    }
+
+    #[test]
+    fn note_show_and_search_parse() {
+        assert!(Cli::try_parse_from(["monica", "note", "show", "note-1"]).is_ok());
+        assert!(
+            Cli::try_parse_from(["monica", "note", "show", "note-1", "--format", "md", "--expand"])
+                .is_ok()
+        );
+        assert!(Cli::try_parse_from(["monica", "note", "show", "note-1", "--format", "json"])
+            .is_ok());
+        assert!(Cli::try_parse_from(["monica", "note", "search", "hello"]).is_ok());
+        // unknown format value is rejected by clap's ValueEnum.
+        assert!(Cli::try_parse_from(["monica", "note", "show", "note-1", "--format", "html"])
+            .is_err());
+        // search requires a query argument.
+        assert!(Cli::try_parse_from(["monica", "note", "search"]).is_err());
     }
 }

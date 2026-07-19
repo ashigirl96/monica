@@ -44,6 +44,8 @@ impl SqliteStore {
         conn.pragma_update(None, "foreign_keys", true)?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         self::migrations::migrate(&mut conn)?;
+        // v41 で入る notes_fts を既存 note で初回だけ埋める（ゲート済み・冪等）。
+        store::notes::backfill_notes_fts(&mut conn)?;
         Ok(Self { conn })
     }
 
