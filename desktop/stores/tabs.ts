@@ -20,7 +20,6 @@ function createInitialTabState(): TabState {
 export const tabsBySpaceAtom = atom<Record<SpaceId, TabState>>({
   "work-board": createInitialTabState(),
   "work-bench": createInitialTabState(),
-  journal: createInitialTabState(),
 });
 
 export const createTabAtom = atom(null, (get, set) => {

@@ -45,7 +45,6 @@ const DEFAULT_WINDOW_STATE: WindowUiState = {
 const SPACE_IDS: Record<SpaceId, true> = {
   "work-board": true,
   "work-bench": true,
-  journal: true,
 };
 
 function isSpaceId(v: unknown): v is SpaceId {
