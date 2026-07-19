@@ -1,5 +1,7 @@
-use std::net::SocketAddr;
+use std::future::IntoFuture;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::mpsc::SyncSender;
+use std::sync::Arc;
 
 use anyhow::Result;
 use axum::body::Bytes;
@@ -68,16 +70,31 @@ async fn blocking<T: Send + 'static>(
         .map_err(|e| AppError::from(anyhow::Error::new(e)))?
 }
 
-fn check_host(headers: &HeaderMap, port: u16) -> Result<(), StatusCode> {
-    let host = headers
-        .get("host")
-        .and_then(|v| v.to_str().ok())
-        .ok_or(StatusCode::FORBIDDEN)?;
-    let allowed = [
+/// check_host が照合する到達可能ホストの集合。middleware state として routers 間で共有する。
+/// Host ヘッダはクライアント制御なのでこれは認証ではなく DNS リバインディング対策であり、
+/// 実際の到達制御は bind するインターフェース（loopback + Tailscale IP）側で行う。
+#[derive(Clone)]
+struct AllowedHosts(Arc<Vec<String>>);
+
+fn allowed_hosts(port: u16, tailscale_ip: Option<Ipv4Addr>) -> AllowedHosts {
+    let mut hosts = vec![
         format!("127.0.0.1:{port}"),
         format!("localhost:{port}"),
         format!("monica.localhost:{port}"),
     ];
+    // Tailscale 越しのスマホアクセスは IP 直指定（http://100.x.y.z:port）で行う。
+    // ワイルドカードや .ts.net サフィックス一致は使わず、割当 IP の完全一致だけを足す。
+    if let Some(ip) = tailscale_ip {
+        hosts.push(format!("{ip}:{port}"));
+    }
+    AllowedHosts(Arc::new(hosts))
+}
+
+fn check_host(headers: &HeaderMap, allowed: &[String]) -> Result<(), StatusCode> {
+    let host = headers
+        .get("host")
+        .and_then(|v| v.to_str().ok())
+        .ok_or(StatusCode::FORBIDDEN)?;
     if !allowed.iter().any(|a| a == host) {
         return Err(StatusCode::FORBIDDEN);
     }
@@ -85,12 +102,79 @@ fn check_host(headers: &HeaderMap, port: u16) -> Result<(), StatusCode> {
 }
 
 async fn require_local_host(
-    State(port): State<u16>,
+    State(allowed): State<AllowedHosts>,
     request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    check_host(request.headers(), port)?;
+    check_host(request.headers(), &allowed.0)?;
     Ok(next.run(request).await)
+}
+
+/// Tailscale が割り当てる CGNAT アドレス（100.64.0.0/10）か判定する。
+fn is_tailscale_cgnat(ip: Ipv4Addr) -> bool {
+    let [a, b, ..] = ip.octets();
+    a == 100 && (64..=127).contains(&b)
+}
+
+/// `tailscale` CLI の探索パス。GUI 起動時の PATH は /usr/bin:/bin:/usr/sbin:/sbin に絞られ
+/// /usr/local/bin を含まないため、素の名前だけでなく実体パスも明示的に試す。
+const TAILSCALE_BINS: [&str; 4] = [
+    "tailscale",
+    "/usr/local/bin/tailscale",
+    "/opt/homebrew/bin/tailscale",
+    "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+];
+
+/// Tailscale が実際に割り当てた IPv4 を返す。`tailscale ip -4` を Tailscale 本体に問い合わせる
+/// ため、停止中はコマンドが失敗し None になる。100.64.0.0/10 の見た目一致で推測すると、同レンジ
+/// を実 LAN に使う公衆 Wi-Fi 等を Tailscale と誤検出して認証なしで晒すため、情報源は Tailscale
+/// 自身に限る。返り値も CGNAT 範囲で検証し、範囲外の IP には bind しない安全弁を残す。
+fn tailscale_ipv4() -> Option<Ipv4Addr> {
+    for bin in TAILSCALE_BINS {
+        let Ok(output) = std::process::Command::new(bin).args(["ip", "-4"]).output() else {
+            continue;
+        };
+        if !output.status.success() {
+            continue;
+        }
+        if let Some(ip) = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| line.trim().parse::<Ipv4Addr>().ok())
+            .find(|ip| is_tailscale_cgnat(*ip))
+        {
+            return Some(ip);
+        }
+    }
+    None
+}
+
+/// `tailscale_ipv4` を短時間ポーリングする。ログイン時自動起動では tailscaled のインターフェース
+/// 準備が Monica 起動に間に合わず初回検出が空振りしうるため、一定回数まで待って再試行する。
+/// 最後まで検出できなければ None（loopback のみ）に倒す。
+///
+/// プローブ（tailscale CLI 実行）はデーモンや Network Extension が wedged だとハングしうる。
+/// 同期ブロッキングのまま呼ぶと、単一スレッドランタイム上で同居する loopback serve ごと止まり
+/// 既報告のローカル URL が固まるため、spawn_blocking でランタイムスレッド外へ逃がし、全体を
+/// timeout で打ち切る。ハングしても掴まれ続ける blocking スレッドは最大 1 本に留める。
+async fn tailscale_ipv4_wait() -> Option<Ipv4Addr> {
+    const OVERALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+    let probe = tokio::task::spawn_blocking(|| {
+        const ATTEMPTS: u32 = 15;
+        const INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+        for attempt in 0..ATTEMPTS {
+            if let Some(ip) = tailscale_ipv4() {
+                return Some(ip);
+            }
+            if attempt + 1 < ATTEMPTS {
+                std::thread::sleep(INTERVAL);
+            }
+        }
+        None
+    });
+    match tokio::time::timeout(OVERALL_TIMEOUT, probe).await {
+        Ok(Ok(ip)) => ip,
+        _ => None,
+    }
 }
 
 fn content_type(path: &str) -> &'static str {
@@ -499,7 +583,7 @@ async fn import_asset(
     Ok(created_asset(saved))
 }
 
-fn build_router(port: u16) -> Router {
+fn build_router(allowed: AllowedHosts) -> Router {
     Router::new()
         .route("/", get(root))
         .route("/api/explanations", get(list_explanations))
@@ -539,7 +623,7 @@ fn build_router(port: u16) -> Router {
         .route("/settings", get(spa_index))
         .route("/assets/{*path}", get(spa_asset))
         .route("/favicon.png", get(favicon))
-        .layer(middleware::from_fn_with_state(port, require_local_host))
+        .layer(middleware::from_fn_with_state(allowed, require_local_host))
 }
 
 pub fn serve(addr: impl Into<SocketAddr>, port_tx: SyncSender<u16>) -> Result<()> {
@@ -561,9 +645,35 @@ pub fn serve(addr: impl Into<SocketAddr>, port_tx: SyncSender<u16>) -> Result<()
     rt.block_on(async {
         let listener = tokio::net::TcpListener::bind(addr).await?;
         let bound_addr = listener.local_addr()?;
-        let _ = port_tx.send(bound_addr.port());
+        let port = bound_addr.port();
+        let _ = port_tx.send(port);
         log::info!(target: "monica_web", "listening on http://{bound_addr}");
-        axum::serve(listener, build_router(bound_addr.port())).await?;
+
+        // loopback は Tailscale 検出を待たせず即座に serve する。tailnet 向けの追加 bind は
+        // 別タスクで後追いするため、検出が遅れても・失敗しても loopback アクセスは無影響。
+        let loopback = tokio::spawn(
+            axum::serve(listener, build_router(allowed_hosts(port, None))).into_future(),
+        );
+
+        // Monica が起動している間は Tailscale インターフェースの IP に「限定して」追加 bind し、
+        // tailnet 内の自分の端末（スマホ等）から到達できるようにする。0.0.0.0 は使わない（全 NIC
+        // 露出 = 認証なしで公衆 Wi-Fi にも晒す）。ログイン項目としての自動起動直後は tailscaled が
+        // まだ IP を割り当てておらず一度きりの検出だと取りこぼすため、短時間リトライしてから諦める。
+        if let Some(ip) = tailscale_ipv4_wait().await {
+            match tokio::net::TcpListener::bind(SocketAddr::from((ip, port))).await {
+                Ok(ts) => {
+                    log::info!(target: "monica_web", "also listening on http://{ip}:{port} (tailscale)");
+                    tokio::spawn(
+                        axum::serve(ts, build_router(allowed_hosts(port, Some(ip)))).into_future(),
+                    );
+                }
+                Err(e) => {
+                    log::warn!(target: "monica_web", "tailscale bind {ip}:{port} failed: {e:#}");
+                }
+            }
+        }
+
+        loopback.await??;
         Ok::<(), anyhow::Error>(())
     })?;
 
@@ -602,7 +712,7 @@ mod tests {
 
     fn app() -> Router {
         migrated();
-        build_router(19999)
+        build_router(allowed_hosts(19999, None))
     }
 
     fn seed_explanation(title: &str) -> String {
@@ -814,6 +924,48 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn tailscale_cgnat_range_boundaries() {
+        assert!(is_tailscale_cgnat(Ipv4Addr::new(100, 64, 0, 0)));
+        assert!(is_tailscale_cgnat(Ipv4Addr::new(100, 100, 100, 100)));
+        assert!(is_tailscale_cgnat(Ipv4Addr::new(100, 127, 255, 255)));
+        assert!(!is_tailscale_cgnat(Ipv4Addr::new(100, 63, 255, 255)));
+        assert!(!is_tailscale_cgnat(Ipv4Addr::new(100, 128, 0, 0)));
+        assert!(!is_tailscale_cgnat(Ipv4Addr::new(192, 168, 1, 2)));
+        assert!(!is_tailscale_cgnat(Ipv4Addr::new(10, 0, 0, 1)));
+    }
+
+    #[tokio::test]
+    async fn tailscale_host_header_accepted_only_when_bound() {
+        migrated();
+        let ip = Ipv4Addr::new(100, 100, 42, 7);
+        let with_ts = build_router(allowed_hosts(19999, Some(ip)));
+        let response = with_ts
+            .oneshot(
+                Request::builder()
+                    .uri("/api/explanations")
+                    .header("host", format!("{ip}:19999"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Tailscale bind していない router では同じ Host は許可しない。
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/explanations")
+                    .header("host", format!("{ip}:19999"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
