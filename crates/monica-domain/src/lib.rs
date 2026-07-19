@@ -1,8 +1,10 @@
 //! Monica domain: the innermost layer — business rules and aggregates only.
 //!
-//! It deliberately depends on nothing but `serde` (derive) and `strum`: no I/O, no `serde_json`,
-//! no `anyhow`, no `specta`. UI projections, GitHub-specific contracts, hook-payload parsing, and
-//! TypeScript bindings all live in the layers above (`monica-application`, `monica-api`).
+//! It deliberately depends on nothing but `serde` (derive), `serde_json`, and `strum`: no I/O,
+//! no `anyhow`, no `specta`. `serde_json` is admitted solely for the note-doc model (`note_doc`),
+//! whose `Unknown` variants must carry unrecognized JSON through unchanged. UI projections,
+//! GitHub-specific contracts, hook-payload parsing, and TypeScript bindings all live in the
+//! layers above (`monica-application`, `monica-api`).
 
 mod agent_signal;
 mod branch;
@@ -12,6 +14,7 @@ mod external_reference;
 mod ids;
 mod json;
 mod note;
+mod note_doc;
 mod notification;
 mod project;
 mod refs;
@@ -33,6 +36,12 @@ pub use json::RawJson;
 pub use note::{
     logical_date, DailyNoteCount, KindTransitionError, Note, NoteKind, NoteKindTarget, NotePage,
     NoteSummary, UpdateNote, EMPTY_NOTE_DOC,
+};
+pub use note_doc::{
+    block_subtree, first_line_preview, BlockContainerAttrs, BlockNode, BookmarkAttrs,
+    CalloutAttrs, CodeBlockAttrs, DocNode, HeadingAttrs, ImageAttrs, InlineNode, LinkMarkAttrs,
+    LinkMentionAttrs, Mark, NoteMentionAttrs, NumberedAttrs, SyncedBlockAttrs, TodoAttrs,
+    ToggleAttrs,
 };
 pub use notification::{NewNotificationIntent, NotificationIntent, NotificationKind};
 pub use project::{Project, Provider};
