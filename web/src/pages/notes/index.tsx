@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { BlockEditor, type BlockEditorHandle } from "@shared/block-editor/block-editor";
 import { stripPendingImages } from "@shared/block-editor/image-upload";
 import type { LinkMetadata } from "@shared/block-editor/link-menu";
@@ -89,6 +97,18 @@ function EmptyState() {
   );
 }
 
+const SIDEBAR_KEY = "monica-notes-sidebar-w";
+const SIDEBAR_DEFAULT = 400;
+const SIDEBAR_MIN = 260;
+const SIDEBAR_MAX = 720;
+
+const clampSidebar = (w: number) => Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, w));
+
+function readSidebarWidth(): number {
+  const raw = Number(localStorage.getItem(SIDEBAR_KEY));
+  return raw > 0 ? clampSidebar(raw) : SIDEBAR_DEFAULT;
+}
+
 export function NotesPage({ id }: { id: string | null }) {
   // logical today は backend が正（day boundary 設定を適用）。ブラウザ midnight は
   // 取得完了までの初期値フォールバック
@@ -110,6 +130,9 @@ export function NotesPage({ id }: { id: string | null }) {
   const [projectNotes, setProjectNotes] = useState<NoteSummary[] | null>(null);
   const [projectHasMore, setProjectHasMore] = useState(false);
   const [sidebarQuery, setSidebarQuery] = useState("");
+  const [sidebarWidth, setSidebarWidth] = useState<number>(readSidebarWidth);
+  const [resizing, setResizing] = useState(false);
+  const resizeStartRef = useRef<{ x: number; w: number } | null>(null);
   const loadingMoreRef = useRef(false);
   const { schedule, flush, discard, error: saveError } = useAutosave();
   const titleRef = useRef<HTMLInputElement>(null);
@@ -204,6 +227,44 @@ export function NotesPage({ id }: { id: string | null }) {
       cancelled = true;
     };
   }, [projectFilter, dataVersion]);
+
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_KEY, String(sidebarWidth));
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    if (!resizing) return;
+    const stop = () => {
+      resizeStartRef.current = null;
+      setResizing(false);
+    };
+    const onMove = (e: PointerEvent) => {
+      // WKWebView は pointerup を取りこぼし buttons=0 の move が先に来ることがある
+      if (e.buttons === 0) {
+        stop();
+        return;
+      }
+      const start = resizeStartRef.current;
+      if (start) setSidebarWidth(clampSidebar(start.w + (e.clientX - start.x)));
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+    };
+  }, [resizing]);
+
+  const startResize = useCallback(
+    (e: ReactPointerEvent) => {
+      e.preventDefault();
+      resizeStartRef.current = { x: e.clientX, w: sidebarWidth };
+      setResizing(true);
+    },
+    [sidebarWidth],
+  );
 
   const loadMoreProjectNotes = useCallback(async () => {
     if (projectFilter === null || projectNotes === null || loadingMoreRef.current) return;
@@ -570,10 +631,19 @@ export function NotesPage({ id }: { id: string | null }) {
   ]);
 
   return (
-    <div className="notes-screen flex h-dvh shrink-0 overflow-hidden">
-      <aside className="w-[320px] shrink-0 overflow-hidden border-r transition-[width] duration-200 motion-reduce:transition-none group-data-[zen]/shell:w-0 group-data-[zen]/shell:border-r-0">
+    <div
+      className={`notes-screen relative flex h-dvh shrink-0 overflow-hidden ${
+        resizing ? "cursor-col-resize select-none" : ""
+      }`}
+      style={{ "--sb-w": `${sidebarWidth}px` } as CSSProperties}
+    >
+      <aside
+        className={`w-[var(--sb-w)] shrink-0 overflow-hidden border-r group-data-[zen]/shell:w-0 group-data-[zen]/shell:border-r-0 ${
+          resizing ? "" : "transition-[width] duration-200 motion-reduce:transition-none"
+        }`}
+      >
         {/* 開閉アニメーション中に中身が折り返さないよう幅は内側で固定する */}
-        <div className="flex h-full w-[320px] flex-col">
+        <div className="flex h-full w-[var(--sb-w)] flex-col">
           {listError && (
             <p className="px-4 pt-3 text-xs text-destructive">Failed to load notes — {listError}</p>
           )}
@@ -614,6 +684,24 @@ export function NotesPage({ id }: { id: string | null }) {
           )}
         </div>
       </aside>
+
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        onPointerDown={startResize}
+        onDoubleClick={() => setSidebarWidth(SIDEBAR_DEFAULT)}
+        style={{ left: "var(--sb-w)" }}
+        className="group/resize absolute inset-y-0 z-20 flex w-3 -translate-x-1/2 cursor-col-resize justify-center group-data-[zen]/shell:hidden"
+      >
+        <span
+          className={`h-full w-0.5 transition-colors duration-100 ${
+            resizing
+              ? "bg-[var(--ink-muted)]"
+              : "bg-transparent group-hover/resize:bg-[var(--ink-muted)]"
+          }`}
+        />
+      </div>
 
       <main className="flex-1 overflow-y-auto bg-[var(--paper)]">
         {id === null ? (
