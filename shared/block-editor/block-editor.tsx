@@ -6,6 +6,7 @@ import type { SearchNoteMentions } from "./note-mention-menu";
 import type { OnNoteMentionClick, ResolveNoteMention } from "./node-views";
 import type { OnOpenBlock, ResolveBlock } from "./synced-block";
 import type { ImportExternalImage, UploadImage } from "./image-upload";
+import type { RenderMarkdown } from "./clipboard";
 import { containerById } from "./context";
 import { clearBlockHighlight, highlightBlock } from "./block-highlight";
 import { nodes } from "./schema";
@@ -54,6 +55,8 @@ type BlockEditorProps = {
   uploadImage?: UploadImage;
   /** 外部画像 URL をローカル asset 化する（外部 HTML paste の <img> 用） */
   importExternalImage?: ImportExternalImage;
+  /** 選択範囲の doc JSON を markdown へ投影する。未指定なら markdown コピーは無効（plain text 縮退） */
+  renderMarkdown?: RenderMarkdown;
   /** unmount 時に最終 doc の JSON を受け取る（永続化フック） */
   onUnmount?: (docJson: unknown) => void;
   /** mount 中だけ imperative な操作（focusStart 等）を提供する */
@@ -76,6 +79,7 @@ export function BlockEditor({
   onOpenBlock,
   uploadImage,
   importExternalImage,
+  renderMarkdown,
   onUnmount,
   handleRef,
   className,
@@ -94,6 +98,7 @@ export function BlockEditor({
   const onOpenBlockRef = useLatest(onOpenBlock);
   const uploadImageRef = useLatest(uploadImage);
   const importExternalImageRef = useLatest(importExternalImage);
+  const renderMarkdownRef = useLatest(renderMarkdown);
   const onUnmountRef = useLatest(onUnmount);
   // noteId は key={note.id} 再マウント前提で mount 時に固定する（initialDoc と同じ）
   const noteIdRef = useRef(noteId);
@@ -104,6 +109,7 @@ export function BlockEditor({
   const hasResolveNoteMention = resolveNoteMention !== undefined;
   const hasResolveBlock = resolveBlock !== undefined;
   const hasUploadImage = uploadImage !== undefined;
+  const hasRenderMarkdown = renderMarkdown !== undefined;
   // initialDoc 等と同じく mount 時に一度だけ読む（差し替えは想定しない）
   const handleRefAtMount = useRef(handleRef);
 
@@ -141,6 +147,9 @@ export function BlockEditor({
         : undefined,
       importExternalImage: hasUploadImage
         ? (url) => importExternalImageRef.current?.(url) ?? Promise.resolve(null)
+        : undefined,
+      renderMarkdown: hasRenderMarkdown
+        ? (docJson) => renderMarkdownRef.current?.(docJson) ?? Promise.resolve("")
         : undefined,
     });
 

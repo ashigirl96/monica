@@ -380,25 +380,64 @@ async fn get_note(
         }
         // markdown 投影（agent / 人が読む用）。真実は content JSON のまま。
         Some("markdown") | Some("md") => {
-            let mode = match query.expand.as_deref() {
-                None => SyncedBlockMode::Reference,
-                Some("synced") => SyncedBlockMode::Expand,
-                // Validation は 404 に写像されるので、入力エラーはここで 422 に落とす。
-                Some(_) => return Ok(StatusCode::UNPROCESSABLE_ENTITY.into_response()),
+            let mode = match synced_mode(query.expand.as_deref()) {
+                Ok(mode) => mode,
+                Err(status) => return Ok(status.into_response()),
             };
             let markdown = blocking(move || {
                 let mut monica = open()?;
                 Ok(monica.notes().note_markdown(&id, mode)?)
             })
             .await?;
-            Ok((
-                [(axum::http::header::CONTENT_TYPE, "text/markdown; charset=utf-8")],
-                markdown,
-            )
-                .into_response())
+            Ok(markdown_response(markdown))
         }
         Some(_) => Ok(StatusCode::UNPROCESSABLE_ENTITY.into_response()),
     }
+}
+
+/// `?expand` / body.expand の共通 mode 解釈。未知値は 422 に写像する
+/// （Validation は 404 になるため、入力エラーはここで明示的に落とす）。
+fn synced_mode(expand: Option<&str>) -> Result<SyncedBlockMode, StatusCode> {
+    match expand {
+        None => Ok(SyncedBlockMode::Reference),
+        Some("synced") => Ok(SyncedBlockMode::Expand),
+        Some(_) => Err(StatusCode::UNPROCESSABLE_ENTITY),
+    }
+}
+
+fn markdown_response(markdown: String) -> Response {
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/markdown; charset=utf-8")],
+        markdown,
+    )
+        .into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct RenderMarkdownBody {
+    /// 選択範囲を包んだ ProseMirror doc JSON。
+    content: serde_json::Value,
+    #[serde(default)]
+    expand: Option<String>,
+}
+
+/// 任意 content（=エディタの選択範囲）の markdown 投影。note-id を介さず content を直接渡せる点だけが
+/// `GET /api/notes/{id}?format=markdown` と異なり、mode 解釈は共有する。
+async fn render_note_markdown(
+    Json(body): Json<RenderMarkdownBody>,
+) -> Result<Response, AppError> {
+    let mode = match synced_mode(body.expand.as_deref()) {
+        Ok(mode) => mode,
+        Err(status) => return Ok(status.into_response()),
+    };
+    // Value の Display は compact JSON を無謬で吐く（to_string の fallible 変換を避ける）。
+    let content = body.content.to_string();
+    let markdown = blocking(move || {
+        let mut monica = open()?;
+        Ok(monica.notes().markdown_from_content(&content, mode))
+    })
+    .await?;
+    Ok(markdown_response(markdown))
 }
 
 async fn update_note(
@@ -594,6 +633,7 @@ fn build_router(allowed: AllowedHosts) -> Router {
         .route("/api/notes", get(list_notes).post(create_note))
         .route("/api/notes/by-project", get(list_project_notes))
         .route("/api/notes/daily-counts", get(daily_note_counts))
+        .route("/api/notes/markdown", post(render_note_markdown))
         .route("/api/notes/mentions", get(search_note_mentions))
         .route("/api/notes/mentions/{id}", get(resolve_note_mention))
         .route("/api/notes/today", get(notes_today))
@@ -1142,6 +1182,25 @@ mod tests {
         let response =
             app().oneshot(get_req("/api/notes/note-999999?format=markdown")).await.unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn post_notes_markdown_projects_content() {
+        let body = serde_json::json!({ "content": doc("Hello") });
+        let response =
+            app().oneshot(post_json_req("/api/notes/markdown", &body).await).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let ct = response.headers().get("content-type").unwrap().to_str().unwrap().to_string();
+        assert!(ct.starts_with("text/markdown"), "content-type: {ct}");
+        assert_eq!(body_string(response).await, "## Hello");
+    }
+
+    #[tokio::test]
+    async fn post_notes_markdown_rejects_unknown_expand() {
+        let body = serde_json::json!({ "content": doc("x"), "expand": "bogus" });
+        let response =
+            app().oneshot(post_json_req("/api/notes/markdown", &body).await).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     #[tokio::test]

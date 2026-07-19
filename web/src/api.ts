@@ -128,6 +128,16 @@ export async function searchNoteMentions(q: string): Promise<NoteMention[]> {
   return res.json();
 }
 
+export async function renderNoteMarkdown(content: unknown): Promise<string> {
+  const res = await fetch("/api/notes/markdown", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error(`Failed to render markdown: ${res.status}`);
+  return res.text();
+}
+
 // null = dangling（404 も通信失敗も同じ扱いにして NodeView 側の分岐を増やさない）。
 // キャッシュはここでは持たず、埋め込み側がエディタの寿命に合わせてスコープする。
 export async function resolveNoteMention(id: string): Promise<NoteMention | null> {

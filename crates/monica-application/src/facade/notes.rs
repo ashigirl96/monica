@@ -92,6 +92,13 @@ impl<B: Backend> NoteService<'_, B> {
         Ok(to_markdown(note.content.as_str(), &resolver, mode))
     }
 
+    /// 任意の content JSON（選択範囲を doc 形状に包んだもの）の markdown 投影（読み取り専用）。
+    /// note-id を介さない点だけが `note_markdown` と異なる。to_markdown は失敗しないので Result なし。
+    pub fn markdown_from_content(&mut self, content: &str, mode: SyncedBlockMode) -> String {
+        let resolver = StoreNoteResolver(&self.m.repos);
+        to_markdown(content, &resolver, mode)
+    }
+
     /// 全文検索（agent / CLI 用）。mention 検索と違い precise 再フィルタは掛けず、store の
     /// FTS 結果をそのまま返す。
     pub fn search_notes(&mut self, q: &str) -> ApplicationResult<Vec<NoteSummary>> {

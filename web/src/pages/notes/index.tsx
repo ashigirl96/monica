@@ -25,6 +25,7 @@ import {
   listNotes,
   listProjectNotes,
   listProjects,
+  renderNoteMarkdown,
   resolveNoteMention as resolveNoteMentionApi,
   restoreNote,
   searchNoteMentions as searchNoteMentionsApi,
@@ -736,6 +737,7 @@ export function NotesPage({ id }: { id: string | null }) {
               onOpenBlock={onOpenBlock}
               uploadImage={uploadImageAsset}
               importExternalImage={importImageAsset}
+              renderMarkdown={renderNoteMarkdown}
               handleRef={editorHandleRef}
               className="min-h-[70dvh] pt-4 pb-24"
             />
