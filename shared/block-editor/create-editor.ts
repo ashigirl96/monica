@@ -19,6 +19,7 @@ import { normalizerPlugin } from "./normalizer";
 import { numberingPlugin, placeholderPlugin } from "./decorations";
 import { dragDropPlugin } from "./drag-drop";
 import { clipboardPlugin } from "./clipboard";
+import type { RenderMarkdown } from "./clipboard";
 import { linkClickPlugin } from "./link-click";
 import { editorNodeViews } from "./node-views";
 import { SyncedBlockView, syncedBlockRefreshPlugin } from "./synced-block";
@@ -82,6 +83,8 @@ export type BlockEditorCallbacks = {
   uploadImage?: UploadImage;
   /** 外部画像 URL をローカル asset 化する（外部 HTML paste の <img> 用）。 */
   importExternalImage?: ImportExternalImage;
+  /** 選択範囲の doc JSON を markdown へ投影する。未指定なら markdown コピーは無効（plain text 縮退）。 */
+  renderMarkdown?: RenderMarkdown;
 };
 
 export function createBlockEditor(
@@ -99,6 +102,7 @@ export function createBlockEditor(
     onOpenBlock,
     uploadImage,
     importExternalImage,
+    renderMarkdown,
   }: BlockEditorCallbacks = {},
 ): EditorView {
   // synced block の NodeView 群を refresh plugin と共有する（同一ノート内のライブ反映用）
@@ -155,7 +159,7 @@ export function createBlockEditor(
       ...(uploadImage
         ? [imageUploadPlugin({ upload: uploadImage, importExternal: importExternalImage })]
         : []),
-      clipboardPlugin({ sourceNoteId: noteId, syncPasteEnabled: !!resolveBlock }),
+      clipboardPlugin({ sourceNoteId: noteId, syncPasteEnabled: !!resolveBlock, renderMarkdown }),
       linkClickPlugin(),
       syncedBlockRefreshPlugin(syncedRegistry),
       normalizerPlugin(),
