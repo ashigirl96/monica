@@ -151,18 +151,30 @@ fn tailscale_ipv4() -> Option<Ipv4Addr> {
 /// `tailscale_ipv4` を短時間ポーリングする。ログイン時自動起動では tailscaled のインターフェース
 /// 準備が Monica 起動に間に合わず初回検出が空振りしうるため、一定回数まで待って再試行する。
 /// 最後まで検出できなければ None（loopback のみ）に倒す。
+///
+/// プローブ（tailscale CLI 実行）はデーモンや Network Extension が wedged だとハングしうる。
+/// 同期ブロッキングのまま呼ぶと、単一スレッドランタイム上で同居する loopback serve ごと止まり
+/// 既報告のローカル URL が固まるため、spawn_blocking でランタイムスレッド外へ逃がし、全体を
+/// timeout で打ち切る。ハングしても掴まれ続ける blocking スレッドは最大 1 本に留める。
 async fn tailscale_ipv4_wait() -> Option<Ipv4Addr> {
-    const ATTEMPTS: u32 = 15;
-    const INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
-    for attempt in 0..ATTEMPTS {
-        if let Some(ip) = tailscale_ipv4() {
-            return Some(ip);
+    const OVERALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+    let probe = tokio::task::spawn_blocking(|| {
+        const ATTEMPTS: u32 = 15;
+        const INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+        for attempt in 0..ATTEMPTS {
+            if let Some(ip) = tailscale_ipv4() {
+                return Some(ip);
+            }
+            if attempt + 1 < ATTEMPTS {
+                std::thread::sleep(INTERVAL);
+            }
         }
-        if attempt + 1 < ATTEMPTS {
-            tokio::time::sleep(INTERVAL).await;
-        }
+        None
+    });
+    match tokio::time::timeout(OVERALL_TIMEOUT, probe).await {
+        Ok(Ok(ip)) => ip,
+        _ => None,
     }
-    None
 }
 
 fn content_type(path: &str) -> &'static str {
