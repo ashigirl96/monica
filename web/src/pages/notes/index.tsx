@@ -570,7 +570,7 @@ export function NotesPage({ id }: { id: string | null }) {
   ]);
 
   return (
-    <div className="notes-screen flex h-dvh flex-1 overflow-hidden">
+    <div className="notes-screen flex h-dvh shrink-0 overflow-hidden">
       <aside className="w-[320px] shrink-0 overflow-hidden border-r transition-[width] duration-200 motion-reduce:transition-none group-data-[zen]/shell:w-0 group-data-[zen]/shell:border-r-0">
         {/* 開閉アニメーション中に中身が折り返さないよう幅は内側で固定する */}
         <div className="flex h-full w-[320px] flex-col">
