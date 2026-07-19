@@ -6,7 +6,7 @@ import type {
   ViewMutationRecord,
 } from "@milkdown/kit/prose/view";
 import { nodes, noteHref } from "./schema";
-import { imageUploadKey, retryImageUpload } from "./image-upload";
+import { imageUploadKey, requestImageRetry } from "./image-upload";
 import { insertParagraphAfter } from "./commands";
 import { selectBlocks } from "./selection-state";
 import { blockSelectionKey } from "./selection-state";
@@ -528,7 +528,7 @@ export class ImageView implements NodeView {
   private retryBtn: HTMLElement | null = null;
   private img: HTMLImageElement | null = null;
   private resizing = false;
-  private lightbox: HTMLElement | null = null;
+  private closeLightbox: (() => void) | null = null;
 
   constructor(
     private node: PMNode,
@@ -629,26 +629,18 @@ export class ImageView implements NodeView {
         image.alt = "";
       }),
     );
-    const close = () => this.closeLightbox();
-    overlay.addEventListener("click", close);
+    const close = () => {
+      document.removeEventListener("keydown", onKey);
+      overlay.remove();
+      this.closeLightbox = null;
+    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
     };
+    overlay.addEventListener("click", close);
     document.addEventListener("keydown", onKey);
-    this.lightboxKeyHandler = onKey;
-    this.lightbox = overlay;
+    this.closeLightbox = close;
     document.body.append(overlay);
-  }
-
-  private lightboxKeyHandler: ((e: KeyboardEvent) => void) | null = null;
-
-  private closeLightbox(): void {
-    if (this.lightboxKeyHandler) {
-      document.removeEventListener("keydown", this.lightboxKeyHandler);
-      this.lightboxKeyHandler = null;
-    }
-    this.lightbox?.remove();
-    this.lightbox = null;
   }
 
   // 失敗バッジ + retry ボタンの出し入れ。decoration（jb-image-uploading / -failed）class は
@@ -665,7 +657,7 @@ export class ImageView implements NodeView {
       btn.addEventListener("mousedown", (e) => e.preventDefault());
       btn.addEventListener("click", (e) => {
         e.preventDefault();
-        if (uploadId) retryImageUpload(this.view, uploadId);
+        if (uploadId) requestImageRetry(this.view, uploadId);
       });
       this.retryBtn = btn;
       this.dom.append(btn);
@@ -694,7 +686,7 @@ export class ImageView implements NodeView {
   }
 
   destroy(): void {
-    this.closeLightbox();
+    this.closeLightbox?.();
   }
 }
 

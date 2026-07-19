@@ -2,7 +2,7 @@ import { Plugin, PluginKey } from "@milkdown/kit/prose/state";
 import type { EditorState, Transaction } from "@milkdown/kit/prose/state";
 import { Decoration, DecorationSet } from "@milkdown/kit/prose/view";
 import type { EditorView } from "@milkdown/kit/prose/view";
-import { ASSET_URL_PREFIX, createContainer, nodes } from "./schema";
+import { ASSET_URL_PREFIX, createContainer, isHttpUrl, nodes } from "./schema";
 import { getBlockContext } from "./context";
 
 /** File を asset にアップロードし、確定 URL を返す。失敗は null（縮退）。 */
@@ -18,8 +18,14 @@ export type ImageUploadCallbacks = {
 // アップロード中は blob: を doc に入れず、uploadId → ObjectURL の対応を plugin state に持つ。
 // done になっても entry は destroy まで残す（undo で uploadId 付き node が戻ったら再 swap するため）。
 type PendingSeed = { uploadId: string; objectUrl: string; file: File };
-type PendingStatus = "uploading" | "failed" | { done: string };
-export type PendingEntry = { objectUrl: string; file: File; status: PendingStatus };
+type PendingStatus = "uploading" | "failed" | "done";
+export type PendingEntry = {
+  objectUrl: string;
+  file: File;
+  status: PendingStatus;
+  /** status === "done" のときの確定 URL。それ以外は null。 */
+  doneUrl: string | null;
+};
 export type ImageUploadState = Map<string, PendingEntry>;
 
 type ImageUploadMeta =
@@ -36,10 +42,6 @@ const RASTER_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/web
 export function rasterImageFiles(dt: DataTransfer | null | undefined): File[] {
   if (!dt) return [];
   return Array.from(dt.files).filter((f) => RASTER_TYPES.has(f.type));
-}
-
-function doneUrl(status: PendingStatus): string | null {
-  return typeof status === "object" ? status.done : null;
 }
 
 /** uploadId 群の image block を挿入する Transaction を組む（純関数）。dropPos 指定時はその位置の
@@ -82,31 +84,19 @@ function clampToDoc(state: EditorState, pos: number): number {
 
 function applyMeta(state: ImageUploadState, meta: ImageUploadMeta): ImageUploadState {
   const next = new Map(state);
-  switch (meta.type) {
-    case "add":
-      for (const seed of meta.entries) {
-        next.set(seed.uploadId, {
-          objectUrl: seed.objectUrl,
-          file: seed.file,
-          status: "uploading",
-        });
-      }
-      break;
-    case "uploading": {
-      const e = next.get(meta.uploadId);
-      if (e) next.set(meta.uploadId, { ...e, status: "uploading" });
-      break;
+  if (meta.type === "add") {
+    for (const seed of meta.entries) {
+      next.set(seed.uploadId, { ...seed, status: "uploading", doneUrl: null });
     }
-    case "failed": {
-      const e = next.get(meta.uploadId);
-      if (e) next.set(meta.uploadId, { ...e, status: "failed" });
-      break;
-    }
-    case "done": {
-      const e = next.get(meta.uploadId);
-      if (e) next.set(meta.uploadId, { ...e, status: { done: meta.url } });
-      break;
-    }
+    return next;
+  }
+  const e = next.get(meta.uploadId);
+  if (e) {
+    next.set(meta.uploadId, {
+      ...e,
+      status: meta.type,
+      doneUrl: meta.type === "done" ? meta.url : null,
+    });
   }
   return next;
 }
@@ -120,10 +110,8 @@ function buildSwapTr(state: EditorState): Transaction | null {
     if (node.type !== nodes.image) return;
     const uploadId = node.attrs.uploadId as string | null;
     if (!uploadId) return;
-    const entry = upload.get(uploadId);
-    if (!entry) return;
-    const url = doneUrl(entry.status);
-    if (url === null) return;
+    const url = upload.get(uploadId)?.doneUrl;
+    if (!url) return;
     tr = (tr ?? state.tr).setNodeMarkup(pos, undefined, {
       ...node.attrs,
       src: url,
@@ -135,7 +123,7 @@ function buildSwapTr(state: EditorState): Transaction | null {
 }
 
 export function isExternalImageSrc(src: string | null): src is string {
-  return !!src && !src.startsWith(ASSET_URL_PREFIX) && /^https?:\/\//.test(src);
+  return !!src && !src.startsWith(ASSET_URL_PREFIX) && isHttpUrl(src);
 }
 
 export function imageUploadPlugin(callbacks: ImageUploadCallbacks): Plugin<ImageUploadState> {
@@ -195,18 +183,18 @@ export function imageUploadPlugin(callbacks: ImageUploadCallbacks): Plugin<Image
       },
       decorations(state) {
         const upload = imageUploadKey.getState(state);
-        if (!upload || upload.size === 0) return null;
+        // decoration は uploading/failed の間だけ要る。done ばかりの定常状態では map を
+        // O(images) で覗いて早期 return し、全 done 後に doc 全走査が続くのを防ぐ。
+        if (!upload || !hasPendingVisual(upload)) return null;
         const decos: Decoration[] = [];
         state.doc.descendants((node, pos) => {
           if (node.type !== nodes.image) return;
           const uploadId = node.attrs.uploadId as string | null;
-          if (!uploadId) return;
-          const entry = upload.get(uploadId);
-          if (!entry) return;
+          const status = uploadId ? upload.get(uploadId)?.status : undefined;
           const cls =
-            entry.status === "failed"
+            status === "failed"
               ? "jb-image-failed"
-              : entry.status === "uploading"
+              : status === "uploading"
                 ? "jb-image-uploading"
                 : null;
           if (cls) decos.push(Decoration.node(pos, pos + node.nodeSize, { class: cls }));
@@ -243,22 +231,27 @@ export function imageUploadPlugin(callbacks: ImageUploadCallbacks): Plugin<Image
         });
       };
 
-      retryByView.set(editorView, (uploadId: string) => {
-        const entry = imageUploadKey.getState(editorView.state)?.get(uploadId);
-        if (!entry) return;
-        editorView.dispatch(
-          editorView.state.tr.setMeta(imageUploadKey, { type: "uploading", uploadId }),
-        );
-        void runUpload(editorView, uploadId, entry.file);
-      });
+      // retry は NodeView が uploading meta を dispatch するだけ（他の NodeView→plugin 操作と同じ形）。
+      // その failed→uploading 遷移をここで検知して upload を再起動する。add 直後（prev 無し）は
+      // startInsert が既に起動済みなので二重起動しない。
+      const kickRetries = (state: EditorState, prev: EditorState): void => {
+        const cur = imageUploadKey.getState(state);
+        const before = imageUploadKey.getState(prev);
+        if (!cur) return;
+        for (const [uploadId, entry] of cur) {
+          if (entry.status === "uploading" && before?.get(uploadId)?.status === "failed") {
+            void runUpload(editorView, uploadId, entry.file);
+          }
+        }
+      };
 
       scan(editorView.state);
       return {
         update(view, prev) {
           if (view.state.doc !== prev.doc) scan(view.state);
+          kickRetries(view.state, prev);
         },
         destroy() {
-          retryByView.delete(editorView);
           imageUploadKey
             .getState(editorView.state)
             ?.forEach((e) => URL.revokeObjectURL(e.objectUrl));
@@ -268,9 +261,16 @@ export function imageUploadPlugin(callbacks: ImageUploadCallbacks): Plugin<Image
   });
 }
 
-// ImageView（node-views.ts）の retry ボタンから、plugin closure の runUpload を呼ぶための橋渡し。
-const retryByView = new WeakMap<EditorView, (uploadId: string) => void>();
+function hasPendingVisual(upload: ImageUploadState): boolean {
+  for (const entry of upload.values()) {
+    if (entry.status === "uploading" || entry.status === "failed") return true;
+  }
+  return false;
+}
 
-export function retryImageUpload(view: EditorView, uploadId: string): void {
-  retryByView.get(view)?.(uploadId);
+/** ImageView の retry ボタンから呼ぶ。uploading meta を dispatch するだけで、plugin の
+    view.update が upload を再起動する（WeakMap 経由の side-channel を使わない）。 */
+export function requestImageRetry(view: EditorView, uploadId: string): void {
+  if (imageUploadKey.getState(view.state)?.get(uploadId)?.status !== "failed") return;
+  view.dispatch(view.state.tr.setMeta(imageUploadKey, { type: "uploading", uploadId }));
 }

@@ -126,9 +126,8 @@ describe("upload state machine + appendTransaction swap", () => {
       s1.tr.setMeta(imageUploadKey, { type: "done", uploadId: "u1", url: "/api/assets/a.png" }),
     );
     const entry = imageUploadKey.getState(s2)?.get("u1");
-    expect(entry && typeof entry.status === "object" ? entry.status.done : null).toBe(
-      "/api/assets/a.png",
-    );
+    expect(entry?.status).toBe("done");
+    expect(entry?.doneUrl).toBe("/api/assets/a.png");
     expect(imageNodes(s2.doc)).toHaveLength(0);
   });
 });

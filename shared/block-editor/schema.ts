@@ -20,18 +20,22 @@ function dataAttrs(attrs: Record<string, string | null>): Record<string, string>
 /** asset 配信 URL の prefix。backend の ASSET_URL_PREFIX と一致させる（文字列一致で共有）。 */
 export const ASSET_URL_PREFIX = "/api/assets/";
 
+/** 絶対 http(s) URL か。blob:/data:/file:/javascript: などは false。 */
+export function isHttpUrl(raw: string): boolean {
+  try {
+    const { protocol } = new URL(raw);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 /** image node の src / img[src] paste で受け入れる URL を正規化する。自前 asset URL と
     外部 http(s) のみ許可し、blob:/data:/file: 等は拒否（null）。doc に blob: を入れない防波堤。 */
 export function acceptedPastedImageSrc(raw: string | null): string | null {
   if (!raw) return null;
   if (raw.startsWith(ASSET_URL_PREFIX)) return raw;
-  try {
-    const url = new URL(raw);
-    if (url.protocol === "http:" || url.protocol === "https:") return raw;
-  } catch {
-    return null;
-  }
-  return null;
+  return isHttpUrl(raw) ? raw : null;
 }
 
 // TODO.md §0: ID付きの任意ネスト可能なブロックツリーを正とする。

@@ -423,13 +423,16 @@ fn asset_status(e: monica_runtime::AssetError) -> StatusCode {
     }
 }
 
+fn created_asset(saved: monica_runtime::SavedAsset) -> Response {
+    (StatusCode::CREATED, Json(monica_api::ApiAsset { id: saved.id, url: saved.url })).into_response()
+}
+
 async fn upload_asset(body: Bytes) -> Result<Response, StatusCode> {
     let saved = tokio::task::spawn_blocking(move || monica_runtime::save_asset(&body))
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .map_err(asset_status)?;
-    Ok((StatusCode::CREATED, Json(monica_api::ApiAsset { id: saved.id, url: saved.url }))
-        .into_response())
+    Ok(created_asset(saved))
 }
 
 async fn get_asset(Path(id): Path<String>) -> Result<Response, StatusCode> {
@@ -457,8 +460,7 @@ async fn import_asset(
     Json(req): Json<monica_api::ApiImportAsset>,
 ) -> Result<Response, StatusCode> {
     let saved = monica_runtime::import_asset(&req.url).await.map_err(asset_status)?;
-    Ok((StatusCode::CREATED, Json(monica_api::ApiAsset { id: saved.id, url: saved.url }))
-        .into_response())
+    Ok(created_asset(saved))
 }
 
 fn build_router(port: u16) -> Router {
