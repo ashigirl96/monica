@@ -366,6 +366,131 @@ pub fn block_subtree(content: &str, block_id: &str) -> Option<String> {
     }
 }
 
+/// FTS 索引・全文検索用の plain text 投影。blockContainer ごとに 1 行（先頭 blockContent の
+/// 可視テキストを収集）、typed parse 失敗は Value walker に fallback、garbage は空文字。
+/// text ノードの収集は `first_line_preview` の `collect_block_text` を包含する（preview に
+/// 加えて atom ラベルも拾う）ので、preview は必ずこの出力の部分文字列になる（search の
+/// superset 契約が依存する不変条件）。
+pub fn plain_text(content: &str) -> String {
+    match serde_json::from_str::<DocNode>(content) {
+        Ok(DocNode::Doc { content }) => {
+            let mut out = String::new();
+            for block in content.iter().flatten() {
+                collect_plain_lines(block, &mut out);
+            }
+            out
+        }
+        Ok(DocNode::Unknown(value)) => value_trimmed_text(&value),
+        Err(_) => match serde_json::from_str::<Value>(content) {
+            Ok(value) => value_trimmed_text(&value),
+            Err(_) => String::new(),
+        },
+    }
+}
+
+fn push_line(line: &str, out: &mut String) {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out.push_str(trimmed);
+}
+
+fn collect_plain_lines(node: &BlockNode, out: &mut String) {
+    match node {
+        BlockNode::BlockGroup { content } => {
+            for child in content.iter().flatten() {
+                collect_plain_lines(child, out);
+            }
+        }
+        BlockNode::BlockContainer { content, .. } => {
+            let children = content.iter().flatten();
+            for (i, child) in children.enumerate() {
+                if i == 0 {
+                    let mut line = String::new();
+                    collect_visible_text(child, &mut line);
+                    push_line(&line, out);
+                } else {
+                    collect_plain_lines(child, out);
+                }
+            }
+        }
+        BlockNode::Unknown(value) => {
+            let mut line = String::new();
+            value_collect_text(value, &mut line);
+            push_line(&line, out);
+        }
+        _ => {
+            let mut line = String::new();
+            collect_visible_text(node, &mut line);
+            push_line(&line, out);
+        }
+    }
+}
+
+/// 検索索引（plain_text）用の可視テキスト収集。`collect_block_text`（preview 用・text ノード
+/// のみ）と違い、markdown 投影で実際に表示される atom ノードのラベル（linkMention / bookmark の
+/// title、noteMention の note id）も拾う。生 content への `LIKE` で拾えていた可視 attr 由来の
+/// 検索語を FTS でも取りこぼさないため。
+fn collect_visible_text(node: &BlockNode, out: &mut String) {
+    match node {
+        BlockNode::Unknown(value) => value_collect_text(value, out),
+        BlockNode::Bookmark { attrs: Some(attrs) } => {
+            let label = attrs
+                .title
+                .as_ref()
+                .and_then(|t| t.as_deref())
+                .filter(|t| !t.is_empty())
+                .or(attrs.href.as_deref());
+            if let Some(label) = label {
+                out.push_str(label);
+            }
+        }
+        _ => {
+            if let Some(inlines) = node.inline_content() {
+                for inline in inlines {
+                    collect_visible_inline(inline, out);
+                }
+            } else if let Some(blocks) = node.child_blocks() {
+                for block in blocks {
+                    collect_visible_text(block, out);
+                }
+            }
+        }
+    }
+}
+
+fn collect_visible_inline(node: &InlineNode, out: &mut String) {
+    match node {
+        InlineNode::Text { text: Some(text), .. } => out.push_str(text),
+        InlineNode::LinkMention { attrs: Some(attrs), .. } => {
+            let label =
+                attrs.title.as_deref().filter(|t| !t.is_empty()).or(attrs.href.as_deref());
+            if let Some(label) = label {
+                out.push_str(label);
+            }
+        }
+        InlineNode::NoteMention { attrs, .. } => {
+            if let Some(note_id) = attrs.as_ref().and_then(|a| a.note_id.as_deref()) {
+                out.push_str(note_id);
+            }
+        }
+        InlineNode::Unknown(value) => value_collect_text(value, out),
+        _ => {}
+    }
+}
+
+/// Value walker で拾ったテキストを trim して返す（typed parse 失敗・`Unknown` subtree 用）。
+/// plain_text と markdown 投影の Value fallback が共有する。
+pub(crate) fn value_trimmed_text(value: &Value) -> String {
+    let mut out = String::new();
+    value_collect_text(value, &mut out);
+    out.trim().to_string()
+}
+
 fn find_first_line(node: &BlockNode) -> Option<String> {
     if let BlockNode::BlockContainer { content, .. } = node {
         let children = content.as_deref()?;
@@ -447,7 +572,7 @@ fn find_block(node: &BlockNode, block_id: &str) -> Option<String> {
 // typed parse が失敗した doc（既知タグ + payload 型不一致）と `Unknown` subtree のための
 // fallback。valid JSON なら必ず走査できるという保証は、型付きモデルではなくここが担う。
 
-fn value_collect_text(node: &Value, out: &mut String) {
+pub(crate) fn value_collect_text(node: &Value, out: &mut String) {
     if let Some(text) = node.get("text").and_then(|t| t.as_str()) {
         out.push_str(text);
     }

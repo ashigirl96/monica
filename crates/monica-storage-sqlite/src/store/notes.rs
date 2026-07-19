@@ -1,10 +1,10 @@
 use anyhow::{anyhow, bail, Result};
 use monica_application::ports::NoteStore;
 use monica_domain::{
-    block_subtree, first_line_preview, logical_date, DailyNoteCount, Note, NoteId, NoteKind,
-    NoteSummary, RawJson, UpdateNote,
+    block_subtree, first_line_preview, logical_date, plain_text, DailyNoteCount, Note, NoteId,
+    NoteKind, NoteSummary, RawJson, UpdateNote,
 };
-use rusqlite::{params, Connection, Row};
+use rusqlite::{params, Connection, Row, TransactionBehavior};
 
 use crate::SqliteStore;
 
@@ -64,6 +64,68 @@ fn summary_from_row(row: &Row<'_>) -> Result<NoteSummary> {
     })
 }
 
+/// "note-42" → 42。notes_fts の rowid（本文行の O(log n) 更新キー）。id は create_note が
+/// 必ず `note-{rowid}` で発番するので、この分解は常に成立する。
+fn fts_rowid(id: &str) -> Result<i64> {
+    id.strip_prefix("note-")
+        .and_then(|n| n.parse::<i64>().ok())
+        .ok_or_else(|| anyhow!("note id is not canonical: {id}"))
+}
+
+/// note 本文の FTS 行を張り替える（FTS5 に upsert が無いので DELETE → INSERT）。
+/// body は `plain_text` 投影のみ。schema 語彙（`paragraph` 等）が索引に載らないのがミソ。
+fn upsert_note_fts(conn: &Connection, id: &str, content: &str) -> Result<()> {
+    let rowid = fts_rowid(id)?;
+    conn.execute("DELETE FROM notes_fts WHERE rowid = ?1", params![rowid])?;
+    conn.execute(
+        "INSERT INTO notes_fts (rowid, body, note_id) VALUES (?1, ?2, ?3)",
+        params![rowid, plain_text(content), id],
+    )?;
+    Ok(())
+}
+
+/// ユーザー入力を FTS5 の phrase クエリに包む。`"` を二重化して 1 個の phrase にし、
+/// クエリ演算子（`OR` / `*` / `-` 等）をリテラル扱いにする。
+fn fts_phrase(query: &str) -> String {
+    format!("\"{}\"", query.replace('"', "\"\""))
+}
+
+/// LIKE パターンの特殊文字（`\` `%` `_`）をエスケープする。`ESCAPE '\'` 節と併用し、
+/// ユーザー入力をリテラル substring として扱う（`note search "a_"` が全件に化けない）。
+fn like_escape(query: &str) -> String {
+    query.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+}
+
+/// v41 以前の既存 note を FTS に一括索引する。冪等: 索引済み DB では何もしない。
+/// per-operation で open される store（web 全ハンドラ・毎秒 autosave・CLI/hook）から init 経由で
+/// 毎回呼ばれるので、まず write lock 不要の read プローブで抜ける（backfill が実際に走るのは
+/// v41 跨ぎ直後の一度きり）。索引が空のときだけ `Immediate` tx で write lock を先取りし、
+/// tx 内でゲートを再評価して並行 open による二重 backfill（rowid 重複）を防ぐ。
+pub(crate) fn backfill_notes_fts(conn: &mut Connection) -> Result<()> {
+    let already_indexed: bool =
+        conn.query_row("SELECT EXISTS(SELECT 1 FROM notes_fts)", [], |r| r.get(0))?;
+    if already_indexed {
+        return Ok(());
+    }
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let fts_empty: bool =
+        tx.query_row("SELECT NOT EXISTS(SELECT 1 FROM notes_fts)", [], |r| r.get(0))?;
+    let notes_present: bool =
+        tx.query_row("SELECT EXISTS(SELECT 1 FROM notes)", [], |r| r.get(0))?;
+    if fts_empty && notes_present {
+        let rows: Vec<(String, String)> = {
+            let mut stmt = tx.prepare("SELECT id, content FROM notes")?;
+            let mapped = stmt.query_map([], |row| Ok((row.get("id")?, row.get("content")?)))?;
+            mapped.collect::<rusqlite::Result<_>>()?
+        };
+        for (id, content) in rows {
+            upsert_note_fts(&tx, &id, &content)?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 impl NoteStore for SqliteStore {
     fn create_note(&mut self, day_boundary_hour: u8) -> Result<Note> {
         let tx = self.conn_mut().transaction()?;
@@ -80,6 +142,8 @@ impl NoteStore for SqliteStore {
             params![id, monica_domain::EMPTY_NOTE_DOC, date],
             |row| Ok(note_from_row(row)),
         )??;
+        // 全 note が FTS 行を持つ不変条件をここで確立する（backfill ゲートの前提）。
+        upsert_note_fts(&tx, &id, monica_domain::EMPTY_NOTE_DOC)?;
         tx.commit()?;
         Ok(note)
     }
@@ -133,20 +197,47 @@ impl NoteStore for SqliteStore {
     }
 
     fn search_notes(&self, q: &str, limit: usize) -> Result<Vec<NoteSummary>> {
-        // coarse な superset を返すだけ（正確な絞り込みは facade）なので、`%`/`_` を
-        // エスケープしない over-match は許容する。空 q は date（非 NULL）に必ず一致し
-        // 「最近ノート」一覧を兼ねる。
+        // coarse な superset を返すだけ（正確な絞り込みは facade）。title/project_id/date は
+        // 従来どおり LIKE、本文は FTS5（plain_text 投影）に載せ替えてスキーマ語彙偽陽性を消す。
+        // 空 q は date（非 NULL）に必ず一致し「最近ノート」一覧を兼ねる。
         // 既知の制限: 空 title essay の display_name "Untitled" は導出値でどの列にも
         // 現れないため、"unt" 等の検索は coarse で落ちる（superset が破れる唯一のケース）。
+        if q.is_empty() {
+            // 空 q は全 note を最近順で（FTS を経由しない）。
+            let mut stmt = self.conn().prepare(&format!(
+                "SELECT {NOTE_COLUMNS} FROM notes
+                 WHERE deleted_at IS NULL
+                 ORDER BY updated_at DESC, rowid DESC
+                 LIMIT ?1"
+            ))?;
+            let rows = stmt.query_map(params![limit as i64], |row| Ok(summary_from_row(row)))?;
+            return rows.map(|r| r?).collect();
+        }
+        // trigram は 3-gram なので 3 文字（codepoint）未満は MATCH 不能 → plain_text body への
+        // LIKE で拾う。byte 長で判定すると日本語 2 文字が MATCH 分岐に流れ静かに 0 件になる。
+        // LIKE 節は `?1`（エスケープ済み）+ `ESCAPE '\'` でユーザー入力をリテラル扱いにする
+        // （full-text search は facade で再フィルタしないので `_`/`%` の過剰マッチを防ぐ）。
+        let use_match = q.chars().count() >= 3;
+        let body_clause = if use_match {
+            "id IN (SELECT note_id FROM notes_fts WHERE notes_fts MATCH ?2)"
+        } else {
+            "id IN (SELECT note_id FROM notes_fts WHERE body LIKE '%'||?1||'%' ESCAPE '\\')"
+        };
+        // `?2`（MATCH phrase）は use_match のときだけ SQL に現れる。LIKE 分岐では phrase を
+        // 組み立てず、未使用の bind に無害な空文字を渡す。
+        let phrase = if use_match { fts_phrase(q) } else { String::new() };
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {NOTE_COLUMNS} FROM notes
              WHERE deleted_at IS NULL
-               AND (title LIKE '%'||?1||'%' OR project_id LIKE '%'||?1||'%'
-                    OR date LIKE '%'||?1||'%' OR content LIKE '%'||?1||'%')
+               AND (title LIKE '%'||?1||'%' ESCAPE '\\'
+                    OR project_id LIKE '%'||?1||'%' ESCAPE '\\'
+                    OR date LIKE '%'||?1||'%' ESCAPE '\\' OR {body_clause})
              ORDER BY updated_at DESC, rowid DESC
-             LIMIT ?2"
+             LIMIT ?3"
         ))?;
-        let rows = stmt.query_map(params![q, limit as i64], |row| Ok(summary_from_row(row)))?;
+        let rows = stmt.query_map(params![like_escape(q), phrase, limit as i64], |row| {
+            Ok(summary_from_row(row))
+        })?;
         rows.map(|r| r?).collect()
     }
 
@@ -171,19 +262,28 @@ impl NoteStore for SqliteStore {
     fn update_note(&mut self, id: &str, update: UpdateNote) -> Result<Option<Note>> {
         // title は essay のときだけ意味を持つ。CASE ガードにより、kind 遷移直後に着弾した
         // stale な autosave が daily/project に title を植え付けることはない。
-        let mut stmt = self.conn().prepare(&format!(
-            "UPDATE notes
-             SET content = ?1,
-                 title = CASE WHEN kind = 'essay' AND ?2 IS NOT NULL THEN ?2 ELSE title END,
-                 updated_at = {SET_NOW}
-             WHERE id = ?3 AND deleted_at IS NULL
-             RETURNING {NOTE_COLUMNS}"
-        ))?;
-        let mut rows = stmt.query(params![update.content.as_str(), update.title, id])?;
-        match rows.next()? {
-            Some(row) => Ok(Some(note_from_row(row)?)),
-            None => Ok(None),
+        // 本文更新と FTS 索引更新を 1 tx で atomic に行う（検索が古い本文にヒットしない）。
+        let tx = self.conn_mut().transaction()?;
+        let note = {
+            let mut stmt = tx.prepare(&format!(
+                "UPDATE notes
+                 SET content = ?1,
+                     title = CASE WHEN kind = 'essay' AND ?2 IS NOT NULL THEN ?2 ELSE title END,
+                     updated_at = {SET_NOW}
+                 WHERE id = ?3 AND deleted_at IS NULL
+                 RETURNING {NOTE_COLUMNS}"
+            ))?;
+            let mut rows = stmt.query(params![update.content.as_str(), update.title, id])?;
+            match rows.next()? {
+                Some(row) => Some(note_from_row(row)?),
+                None => None,
+            }
+        };
+        if note.is_some() {
+            upsert_note_fts(&tx, id, update.content.as_str())?;
         }
+        tx.commit()?;
+        Ok(note)
     }
 
     fn set_note_kind(
@@ -731,5 +831,155 @@ mod tests {
 
         store.delete_note(id).unwrap();
         assert!(store.get_note_block(id, "blk").unwrap().is_none(), "soft-delete 後は None");
+    }
+
+    fn search_ids(store: &SqliteStore, q: &str) -> Vec<String> {
+        store.search_notes(q, 10).unwrap().into_iter().map(|s| s.id.into_string()).collect()
+    }
+
+    #[test]
+    fn search_ignores_schema_vocabulary() {
+        // 受け入れ条件の本丸: "paragraph" は全 note の doc JSON に構造語として現れるが、
+        // FTS body は plain_text 投影なのでヒットしない。本文に literal で持つ note だけ当たる。
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        store.create_note(0).unwrap();
+        store.create_note(0).unwrap();
+        store.update_note("note-2", content_update("a paragraph structure here")).unwrap();
+
+        assert_eq!(search_ids(&store, "paragraph"), vec!["note-2"], "schema 語彙に偽陽性なし");
+    }
+
+    #[test]
+    fn search_two_char_cjk_hits_body_via_like() {
+        // 2 codepoint（trigram 不能）は body LIKE で拾う。byte 長判定だと静かに 0 件になる回帰。
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        store.create_note(0).unwrap();
+        store.update_note("note-1", content_update("これは設計の話")).unwrap();
+
+        assert_eq!(search_ids(&store, "設計"), vec!["note-1"]);
+    }
+
+    #[test]
+    fn search_matches_visible_atom_titles() {
+        // 生 content LIKE で拾えていた bookmark/linkMention の title を FTS でも拾う。
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        store.create_note(0).unwrap();
+        let doc = r#"{"type":"doc","content":[{"type":"blockGroup","content":[
+            {"type":"blockContainer","content":[
+                {"type":"bookmark","attrs":{"href":"https://x.test","title":"Quarterly Roadmap"}}]}]}]}"#;
+        store.update_note("note-1", UpdateNote { title: None, content: RawJson::from(doc) }).unwrap();
+
+        assert_eq!(search_ids(&store, "Quarterly"), vec!["note-1"], "bookmark title searchable");
+    }
+
+    #[test]
+    fn search_escapes_like_wildcards_in_short_queries() {
+        // 1-2 codepoint は body LIKE 分岐。full-text search は facade で再フィルタしないので、
+        // `_` をエスケープしないと non-empty body 全件に化ける。
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        store.create_note(0).unwrap();
+        store.create_note(0).unwrap();
+        store.update_note("note-1", content_update("a_b literal underscore")).unwrap();
+        store.update_note("note-2", content_update("axb no wildcard")).unwrap();
+
+        assert_eq!(search_ids(&store, "_"), vec!["note-1"], "literal underscore only");
+    }
+
+    #[test]
+    fn search_three_char_cjk_hits_body_via_match() {
+        // 3 codepoint（9 bytes）は MATCH 分岐。マルチバイト境界で MATCH が本文に当たる。
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        store.create_note(0).unwrap();
+        store.update_note("note-1", content_update("設計図の一覧")).unwrap();
+
+        assert_eq!(search_ids(&store, "設計図"), vec!["note-1"]);
+    }
+
+    #[test]
+    fn search_reindexes_on_update() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        store.create_note(0).unwrap();
+        store.update_note("note-1", content_update("alpha content")).unwrap();
+        assert_eq!(search_ids(&store, "alpha"), vec!["note-1"]);
+
+        store.update_note("note-1", content_update("bravo content")).unwrap();
+        assert!(search_ids(&store, "alpha").is_empty(), "旧本文でヒットしない");
+        assert_eq!(search_ids(&store, "bravo"), vec!["note-1"], "新本文でヒットする");
+    }
+
+    #[test]
+    fn search_query_with_fts_operators_does_not_error() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        store.create_note(0).unwrap();
+        // MATCH に渡す前に phrase エスケープするので、演算子入りでも構文エラーにならない。
+        for q in ["a\"b\"c", "foo OR bar", "wild* card", "-nope", "AND NOT"] {
+            assert!(store.search_notes(q, 10).is_ok(), "query {q:?} must not error");
+        }
+    }
+
+    #[test]
+    fn search_excludes_soft_deleted_and_restores() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        store.create_note(0).unwrap();
+        store.update_note("note-1", content_update("findme text")).unwrap();
+        assert_eq!(search_ids(&store, "findme"), vec!["note-1"]);
+
+        store.delete_note("note-1").unwrap();
+        assert!(search_ids(&store, "findme").is_empty(), "soft-delete でヒットしない");
+
+        store.restore_note("note-1").unwrap();
+        assert_eq!(search_ids(&store, "findme"), vec!["note-1"], "restore で復活（FTS 行温存）");
+    }
+
+    #[test]
+    fn backfill_indexes_pre_v41_rows() {
+        use crate::migrations::test_support::{stage_through, temp_db_path};
+
+        // v41 以前（notes_fts が無い時点）の DB に raw の notes 行を仕込む。
+        let path = temp_db_path("notes-fts-backfill");
+        {
+            let mut conn = rusqlite::Connection::open(&path).unwrap();
+            stage_through(&mut conn, 40);
+            conn.execute(
+                "INSERT INTO notes (id, kind, content, date) VALUES ('note-1', 'daily', ?1, '2026-07-19')",
+                params![doc_with_text("legacy body")],
+            )
+            .unwrap();
+        }
+
+        // open で migrate（v41）+ backfill が走り、既存行が索引される。
+        let store = SqliteStore::open_at(&path).unwrap();
+        assert_eq!(search_ids(&store, "legacy"), vec!["note-1"]);
+
+        // 二度目の open は no-op（索引済み）で壊れない。
+        let store2 = SqliteStore::open_at(&path).unwrap();
+        assert_eq!(search_ids(&store2, "legacy"), vec!["note-1"]);
+    }
+
+    #[test]
+    fn concurrent_open_backfills_once() {
+        use crate::migrations::test_support::{stage_through, temp_db_path};
+
+        let path = temp_db_path("notes-fts-concurrent");
+        {
+            let mut conn = rusqlite::Connection::open(&path).unwrap();
+            stage_through(&mut conn, 40);
+            conn.execute(
+                "INSERT INTO notes (id, kind, content, date) VALUES ('note-1', 'daily', ?1, '2026-07-19')",
+                params![doc_with_text("shared body")],
+            )
+            .unwrap();
+        }
+
+        // 2 コネクションで開いても Immediate tx ゲートで二重 backfill にならない（両方成功）。
+        let a = SqliteStore::open_at(&path).unwrap();
+        let b = SqliteStore::open_at(&path).unwrap();
+        assert_eq!(search_ids(&a, "shared"), vec!["note-1"]);
+        assert_eq!(search_ids(&b, "shared"), vec!["note-1"]);
+
+        // 索引は 1 セットだけ（rowid 重複していない）。
+        let rows: i64 =
+            a.conn().query_row("SELECT count(*) FROM notes_fts", [], |r| r.get(0)).unwrap();
+        assert_eq!(rows, 1);
     }
 }

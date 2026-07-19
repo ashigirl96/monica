@@ -1,4 +1,5 @@
 pub mod github;
+pub mod notes;
 pub mod projects;
 pub mod query;
 pub mod runs;
