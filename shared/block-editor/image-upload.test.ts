@@ -95,6 +95,10 @@ describe("upload state machine + appendTransaction swap", () => {
     expect(images[0].attrs.src).toBe("/api/assets/a.png");
     expect(images[0].attrs.uploadId).toBeNull();
     expect(hasBlobSrc(s2.doc)).toBe(false);
+    // done meta 自体は doc を変えないが appendTransaction の swap で doc は変わる。
+    // create-editor の dispatchTransaction はこの doc 参照の変化で onDocChange を発火し、
+    // swap 後の確定 URL を autosave させる（tr.docChanged だけ見ると取りこぼす）。
+    expect(s2.doc).not.toBe(s1.doc);
   });
 
   test("swap は履歴に乗らない（addToHistory: false）", () => {

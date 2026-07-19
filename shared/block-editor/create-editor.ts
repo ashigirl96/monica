@@ -169,10 +169,14 @@ export function createBlockEditor(
     ),
     attributes: { class: "jb-editor", spellcheck: "false" },
     dispatchTransaction(tr) {
+      const prevDoc = view.state.doc;
       view.updateState(view.state.apply(tr));
-      // toJSON は全文 walk なので打鍵毎には行わない。doc は immutable な node なので
-      // 受け手が保持して flush 時に JSON.stringify（= toJSON）すればよい
-      if (tr.docChanged) onDocChange?.(view.state.doc);
+      // tr.docChanged ではなく apply 前後の doc 参照で判定する: 画像 upload 完了時の src swap の
+      // ように appendTransaction が meta-only な tr に doc 変更を足すケースを取りこぼさない
+      // （さもないと swap 後の確定 URL が autosave されず、貼っただけで放置すると画像が失われる）。
+      // toJSON は全文 walk なので打鍵毎には行わない。doc は immutable な node なので、受け手が
+      // 保持して flush 時に JSON.stringify（= toJSON）すればよい。
+      if (view.state.doc !== prevDoc) onDocChange?.(view.state.doc);
     },
   });
   return view;
