@@ -1,10 +1,12 @@
 use monica_domain::{
-    DailyNoteCount, Note, NoteId, NoteKindTarget, NotePage, NoteSummary, RawJson, UpdateNote,
+    to_markdown, DailyNoteCount, Note, NoteId, NoteKindTarget, NotePage, NoteSummary, RawJson,
+    SyncedBlockMode, UpdateNote,
 };
 
 use super::Backend;
 use crate::error::{ApplicationError, ApplicationResult};
 use crate::ports::NoteStore;
+use crate::usecases::notes::StoreNoteResolver;
 
 /// project filter 表示の 1 ページあたりの件数。フロントは has_more を見るだけで、
 /// この値を知る必要はない。
@@ -15,6 +17,9 @@ const MENTION_SEARCH_LIMIT: usize = 20;
 /// coarse プリフィルタの overfetch 幅。precise フィルタ（display_name / preview）で
 /// 落ちる分を見込んで多めに取る。
 const MENTION_COARSE_LIMIT: usize = 200;
+
+/// 全文検索（CLI / agent 用）が返す最大件数。
+const NOTE_SEARCH_LIMIT: usize = 50;
 
 pub struct NoteService<'a, B: Backend> {
     pub(in crate::facade) m: &'a mut super::Monica<B>,
@@ -72,6 +77,25 @@ impl<B: Backend> NoteService<'_, B> {
             .repos
             .get_note(id)?
             .ok_or_else(|| ApplicationError::not_found(format!("note {id} not found")))
+    }
+
+    /// note content の markdown 投影（読み取り専用）。真実は content JSON のまま。
+    /// noteMention のタイトルと syncedBlock の内容は同じ store 越しに解決する。
+    pub fn note_markdown(&mut self, id: &str, mode: SyncedBlockMode) -> ApplicationResult<String> {
+        NoteId::parse(id)?;
+        let note = self
+            .m
+            .repos
+            .get_note(id)?
+            .ok_or_else(|| ApplicationError::not_found(format!("note {id} not found")))?;
+        let resolver = StoreNoteResolver(&self.m.repos);
+        Ok(to_markdown(note.content.as_str(), &resolver, mode))
+    }
+
+    /// 全文検索（agent / CLI 用）。mention 検索と違い precise 再フィルタは掛けず、store の
+    /// FTS 結果をそのまま返す。
+    pub fn search_notes(&mut self, q: &str) -> ApplicationResult<Vec<NoteSummary>> {
+        Ok(self.m.repos.search_notes(q.trim(), NOTE_SEARCH_LIMIT)?)
     }
 
     /// synced block（transclusion）の解決。note 不在・削除済み・block 不在はすべて

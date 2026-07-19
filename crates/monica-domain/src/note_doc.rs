@@ -366,6 +366,76 @@ pub fn block_subtree(content: &str, block_id: &str) -> Option<String> {
     }
 }
 
+/// FTS 索引・全文検索用の plain text 投影。blockContainer ごとに 1 行（先頭 blockContent の
+/// テキストを収集）、typed parse 失敗は Value walker に fallback、garbage は空文字。
+/// `first_line_preview` と同じ `collect_block_text` を共有するので、preview は必ずこの
+/// 出力の部分文字列になる（search の superset 契約が依存する不変条件）。
+pub fn plain_text(content: &str) -> String {
+    match serde_json::from_str::<DocNode>(content) {
+        Ok(DocNode::Doc { content }) => {
+            let mut out = String::new();
+            for block in content.iter().flatten() {
+                collect_plain_lines(block, &mut out);
+            }
+            out
+        }
+        Ok(DocNode::Unknown(value)) => value_plain_text(&value),
+        Err(_) => match serde_json::from_str::<Value>(content) {
+            Ok(value) => value_plain_text(&value),
+            Err(_) => String::new(),
+        },
+    }
+}
+
+fn push_line(line: &str, out: &mut String) {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out.push_str(trimmed);
+}
+
+fn collect_plain_lines(node: &BlockNode, out: &mut String) {
+    match node {
+        BlockNode::BlockGroup { content } => {
+            for child in content.iter().flatten() {
+                collect_plain_lines(child, out);
+            }
+        }
+        BlockNode::BlockContainer { content, .. } => {
+            let children = content.iter().flatten();
+            for (i, child) in children.enumerate() {
+                if i == 0 {
+                    let mut line = String::new();
+                    collect_block_text(child, &mut line);
+                    push_line(&line, out);
+                } else {
+                    collect_plain_lines(child, out);
+                }
+            }
+        }
+        BlockNode::Unknown(value) => {
+            let mut line = String::new();
+            value_collect_text(value, &mut line);
+            push_line(&line, out);
+        }
+        _ => {
+            let mut line = String::new();
+            collect_block_text(node, &mut line);
+            push_line(&line, out);
+        }
+    }
+}
+
+fn value_plain_text(value: &Value) -> String {
+    let mut out = String::new();
+    value_collect_text(value, &mut out);
+    out.trim().to_string()
+}
+
 fn find_first_line(node: &BlockNode) -> Option<String> {
     if let BlockNode::BlockContainer { content, .. } = node {
         let children = content.as_deref()?;
@@ -447,7 +517,7 @@ fn find_block(node: &BlockNode, block_id: &str) -> Option<String> {
 // typed parse が失敗した doc（既知タグ + payload 型不一致）と `Unknown` subtree のための
 // fallback。valid JSON なら必ず走査できるという保証は、型付きモデルではなくここが担う。
 
-fn value_collect_text(node: &Value, out: &mut String) {
+pub(crate) fn value_collect_text(node: &Value, out: &mut String) {
     if let Some(text) = node.get("text").and_then(|t| t.as_str()) {
         out.push_str(text);
     }

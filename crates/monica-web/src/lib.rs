@@ -10,7 +10,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use monica_application::{ApplicationError, ApplicationEvent, EventSink};
-use monica_domain::ExplanationId;
+use monica_domain::{ExplanationId, SyncedBlockMode};
 
 pub const PORT_PROD: u16 = 19280;
 
@@ -272,13 +272,49 @@ async fn list_project_notes(
     Ok(Json(page.into()))
 }
 
-async fn get_note(Path(id): Path<String>) -> Result<Json<monica_api::ApiNote>, AppError> {
-    let note = blocking(move || {
-        let mut monica = open()?;
-        Ok(monica.notes().get_note(&id)?)
-    })
-    .await?;
-    Ok(Json(note.into()))
+#[derive(serde::Deserialize)]
+struct GetNoteQuery {
+    #[serde(default)]
+    format: Option<String>,
+    #[serde(default)]
+    expand: Option<String>,
+}
+
+async fn get_note(
+    Path(id): Path<String>,
+    Query(query): Query<GetNoteQuery>,
+) -> Result<Response, AppError> {
+    match query.format.as_deref() {
+        // 既定は従来どおり ProseMirror doc JSON（フロントの正の取得経路）。
+        None => {
+            let note = blocking(move || {
+                let mut monica = open()?;
+                Ok(monica.notes().get_note(&id)?)
+            })
+            .await?;
+            Ok(Json(monica_api::ApiNote::from(note)).into_response())
+        }
+        // markdown 投影（agent / 人が読む用）。真実は content JSON のまま。
+        Some("markdown") | Some("md") => {
+            let mode = match query.expand.as_deref() {
+                None => SyncedBlockMode::Reference,
+                Some("synced") => SyncedBlockMode::Expand,
+                // Validation は 404 に写像されるので、入力エラーはここで 422 に落とす。
+                Some(_) => return Ok(StatusCode::UNPROCESSABLE_ENTITY.into_response()),
+            };
+            let markdown = blocking(move || {
+                let mut monica = open()?;
+                Ok(monica.notes().note_markdown(&id, mode)?)
+            })
+            .await?;
+            Ok((
+                [(axum::http::header::CONTENT_TYPE, "text/markdown; charset=utf-8")],
+                markdown,
+            )
+                .into_response())
+        }
+        Some(_) => Ok(StatusCode::UNPROCESSABLE_ENTITY.into_response()),
+    }
 }
 
 async fn update_note(
@@ -895,6 +931,65 @@ mod tests {
         let fetched = fetch_note(id).await;
         assert_eq!(fetched["kind"], serde_json::json!({"kind": "daily"}));
         assert_eq!(fetched["date"], created["date"]);
+    }
+
+    async fn put_content(id: &str, content: serde_json::Value) {
+        let body = serde_json::json!({ "content": content });
+        let response =
+            app().oneshot(put_json_req(&format!("/api/notes/{id}"), &body)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    fn doc(text: &str) -> serde_json::Value {
+        serde_json::json!({
+            "type": "doc",
+            "content": [{ "type": "blockGroup", "content": [{ "type": "blockContainer",
+                "content": [{ "type": "heading", "attrs": { "level": 2 },
+                    "content": [{ "type": "text", "text": text }] }] }] }]
+        })
+    }
+
+    #[tokio::test]
+    async fn get_note_markdown_returns_text_markdown() {
+        let created = create_note_via_api().await;
+        let id = created["id"].as_str().unwrap().to_string();
+        put_content(&id, doc("Hello")).await;
+
+        let response =
+            app().oneshot(get_req(&format!("/api/notes/{id}?format=markdown"))).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let ct = response.headers().get("content-type").unwrap().to_str().unwrap().to_string();
+        assert!(ct.starts_with("text/markdown"), "content-type: {ct}");
+        assert_eq!(body_string(response).await, "## Hello");
+    }
+
+    #[tokio::test]
+    async fn get_note_without_format_is_still_json() {
+        let created = create_note_via_api().await;
+        let id = created["id"].as_str().unwrap();
+        let fetched = fetch_note(id).await;
+        assert_eq!(fetched["id"], created["id"], "format 省略時は従来の JSON");
+    }
+
+    #[tokio::test]
+    async fn get_note_rejects_unknown_format_and_expand() {
+        let created = create_note_via_api().await;
+        let id = created["id"].as_str().unwrap();
+
+        for uri in [
+            format!("/api/notes/{id}?format=bogus"),
+            format!("/api/notes/{id}?format=markdown&expand=bogus"),
+        ] {
+            let response = app().oneshot(get_req(&uri)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY, "{uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn get_note_markdown_missing_id_is_404() {
+        let response =
+            app().oneshot(get_req("/api/notes/note-999999?format=markdown")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
