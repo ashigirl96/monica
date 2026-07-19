@@ -132,6 +132,8 @@ pub fn run() {
             app.manage(waker);
             let drain = schedulers::notification_drain::start(app.handle().clone());
             app.manage(drain);
+            let asset_gc = schedulers::asset_gc::start(app.handle().clone());
+            app.manage(asset_gc);
             ptyd::start_warmup(app.handle().clone());
             // 起動をブロックしない + release では login-shell PATH 解決の後に
             // 走らせる（bridge の子 claude は PATH 解決 — setup はその後なので安全）

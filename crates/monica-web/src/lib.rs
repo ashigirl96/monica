@@ -2,7 +2,8 @@ use std::net::SocketAddr;
 use std::sync::mpsc::SyncSender;
 
 use anyhow::Result;
-use axum::extract::{Path, Query, Request, State};
+use axum::body::Bytes;
+use axum::extract::{DefaultBodyLimit, Path, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -99,6 +100,9 @@ fn content_type(path: &str) -> &'static str {
         Some("css") => "text/css; charset=utf-8",
         Some("svg") => "image/svg+xml",
         Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
         Some("woff2") => "font/woff2",
         Some("woff") => "font/woff",
         Some("json") => "application/json",
@@ -408,6 +412,57 @@ async fn get_artifact(Path(id): Path<String>) -> Result<Response, AppError> {
     }
 }
 
+// Content-Type ヘッダは信用せず、adapters が magic bytes で判定する。ここは HTTP status への写像だけ。
+fn asset_status(e: monica_runtime::AssetError) -> StatusCode {
+    match e {
+        monica_runtime::AssetError::InvalidUrl(_) => StatusCode::BAD_REQUEST,
+        monica_runtime::AssetError::Fetch(_) => StatusCode::BAD_GATEWAY,
+        monica_runtime::AssetError::UnsupportedFormat => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        monica_runtime::AssetError::TooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+        monica_runtime::AssetError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+fn created_asset(saved: monica_runtime::SavedAsset) -> Response {
+    (StatusCode::CREATED, Json(monica_api::ApiAsset { id: saved.id, url: saved.url })).into_response()
+}
+
+async fn upload_asset(body: Bytes) -> Result<Response, StatusCode> {
+    let saved = tokio::task::spawn_blocking(move || monica_runtime::save_asset(&body))
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map_err(asset_status)?;
+    Ok(created_asset(saved))
+}
+
+async fn get_asset(Path(id): Path<String>) -> Result<Response, StatusCode> {
+    // id 検証（traversal 対策）は adapters の parse_asset_id が正。malformed / 不在はどちらも 404。
+    let asset = tokio::task::spawn_blocking(move || monica_runtime::read_asset(&id))
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map_err(asset_status)?;
+    match asset {
+        Some((bytes, content_type)) => Ok((
+            StatusCode::OK,
+            [
+                ("content-type", content_type),
+                // 内容は uuid ごとに不変なので永続キャッシュ可
+                ("cache-control", "public, max-age=31536000, immutable"),
+            ],
+            bytes,
+        )
+            .into_response()),
+        None => Err(StatusCode::NOT_FOUND),
+    }
+}
+
+async fn import_asset(
+    Json(req): Json<monica_api::ApiImportAsset>,
+) -> Result<Response, StatusCode> {
+    let saved = monica_runtime::import_asset(&req.url).await.map_err(asset_status)?;
+    Ok(created_asset(saved))
+}
+
 fn build_router(port: u16) -> Router {
     Router::new()
         .route("/", get(root))
@@ -430,6 +485,12 @@ fn build_router(port: u16) -> Router {
         .route("/api/notes/{id}/restore", post(restore_note))
         .route("/api/notes/{id}/blocks/{block_id}", get(get_note_block))
         .route("/api/ogp", get(get_ogp))
+        .route(
+            "/api/assets",
+            post(upload_asset).layer(DefaultBodyLimit::max(monica_runtime::MAX_ASSET_BYTES)),
+        )
+        .route("/api/assets/import", post(import_asset))
+        .route("/api/assets/{id}", get(get_asset))
         .route("/api/projects", get(list_projects))
         .route("/api/settings/notes", get(get_notes_settings).put(put_notes_settings))
         .route("/explanations", get(spa_index))
@@ -1461,6 +1522,66 @@ mod tests {
         );
     }
 
+    fn post_bytes_req(uri: &str, body: Vec<u8>) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("host", "127.0.0.1:19999")
+            .body(Body::from(body))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn upload_png_then_serve_it() {
+        let png = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02, 0x03];
+        let response = app().oneshot(post_bytes_req("/api/assets", png.clone())).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let asset: serde_json::Value =
+            serde_json::from_str(&body_string(response).await).unwrap();
+        let id = asset["id"].as_str().unwrap();
+        assert!(id.ends_with(".png"));
+        assert_eq!(asset["url"], format!("/api/assets/{id}"));
+
+        let response = app().oneshot(get_req(&format!("/api/assets/{id}"))).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["content-type"], "image/png");
+        assert!(
+            response.headers()["cache-control"].to_str().unwrap().contains("immutable"),
+            "immutable cache header"
+        );
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(bytes.to_vec(), png);
+    }
+
+    #[tokio::test]
+    async fn upload_svg_is_unsupported() {
+        let svg = b"<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>".to_vec();
+        let response = app().oneshot(post_bytes_req("/api/assets", svg)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    #[tokio::test]
+    async fn get_asset_with_malformed_id_is_404() {
+        // traversal 形の id は parse_asset_id を通らないので 404（ファイル走査に到達しない）
+        let response = app().oneshot(get_req("/api/assets/not-a-valid-id")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn import_rejects_non_http_url() {
+        let response = app()
+            .oneshot(
+                post_json_req(
+                    "/api/assets/import",
+                    &serde_json::json!({"url": "file:///etc/passwd"}),
+                )
+                .await,
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
     #[test]
     fn export_web_types() {
         let types = specta::Types::default()
@@ -1478,6 +1599,8 @@ mod tests {
             .register::<monica_api::ApiUpdateNote>()
             .register::<monica_api::ApiDailyNoteCount>()
             .register::<monica_api::ApiLinkPreview>()
+            .register::<monica_api::ApiAsset>()
+            .register::<monica_api::ApiImportAsset>()
             .register::<monica_api::ProjectOption>();
         let path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/types.gen.ts");

@@ -12,6 +12,8 @@ import type { FetchLinkMetadata } from "./link-menu";
 import { noteMentionMenuPlugin } from "./note-mention-menu";
 import type { SearchNoteMentions } from "./note-mention-menu";
 import { pasteMenuPlugin } from "./paste-menu";
+import { imageUploadPlugin } from "./image-upload";
+import type { ImportExternalImage, UploadImage } from "./image-upload";
 import type { OnNoteMentionClick, ResolveNoteMention } from "./node-views";
 import { normalizerPlugin } from "./normalizer";
 import { numberingPlugin, placeholderPlugin } from "./decorations";
@@ -76,6 +78,10 @@ export type BlockEditorCallbacks = {
   resolveBlock?: ResolveBlock;
   /** synced block のジャンプ（元ブロックを開く）。 */
   onOpenBlock?: OnOpenBlock;
+  /** 画像 File を asset にアップロードする。未指定なら画像 paste / drop は無効（desktop 縮退）。 */
+  uploadImage?: UploadImage;
+  /** 外部画像 URL をローカル asset 化する（外部 HTML paste の <img> 用）。 */
+  importExternalImage?: ImportExternalImage;
 };
 
 export function createBlockEditor(
@@ -91,6 +97,8 @@ export function createBlockEditor(
     noteId,
     resolveBlock,
     onOpenBlock,
+    uploadImage,
+    importExternalImage,
   }: BlockEditorCallbacks = {},
 ): EditorView {
   // synced block の NodeView 群を refresh plugin と共有する（同一ノート内のライブ反映用）
@@ -142,6 +150,11 @@ export function createBlockEditor(
       numberingPlugin(),
       blockHighlightPlugin(),
       dragDropPlugin(),
+      // clipboardPlugin より前に置く: 画像ファイルの paste / drop を URL・block paste 経路より
+      // 先に横取りする。uploadImage 不在（desktop journal）なら plugin ごと外れて画像 paste は無効。
+      ...(uploadImage
+        ? [imageUploadPlugin({ upload: uploadImage, importExternal: importExternalImage })]
+        : []),
       clipboardPlugin({ sourceNoteId: noteId, syncPasteEnabled: !!resolveBlock }),
       linkClickPlugin(),
       syncedBlockRefreshPlugin(syncedRegistry),
@@ -156,10 +169,14 @@ export function createBlockEditor(
     ),
     attributes: { class: "jb-editor", spellcheck: "false" },
     dispatchTransaction(tr) {
+      const prevDoc = view.state.doc;
       view.updateState(view.state.apply(tr));
-      // toJSON は全文 walk なので打鍵毎には行わない。doc は immutable な node なので
-      // 受け手が保持して flush 時に JSON.stringify（= toJSON）すればよい
-      if (tr.docChanged) onDocChange?.(view.state.doc);
+      // tr.docChanged ではなく apply 前後の doc 参照で判定する: 画像 upload 完了時の src swap の
+      // ように appendTransaction が meta-only な tr に doc 変更を足すケースを取りこぼさない
+      // （さもないと swap 後の確定 URL が autosave されず、貼っただけで放置すると画像が失われる）。
+      // toJSON は全文 walk なので打鍵毎には行わない。doc は immutable な node なので、受け手が
+      // 保持して flush 時に JSON.stringify（= toJSON）すればよい。
+      if (view.state.doc !== prevDoc) onDocChange?.(view.state.doc);
     },
   });
   return view;

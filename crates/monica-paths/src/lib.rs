@@ -65,6 +65,19 @@ pub fn terminal_sessions_dir() -> Result<PathBuf> {
     Ok(base_dir()?.join("terminal-sessions"))
 }
 
+/// Directory holding pasted image assets: `<base>/assets/`. Files are named `<uuid>.<ext>` and
+/// their bytes are immutable once written.
+pub fn assets_dir() -> Result<PathBuf> {
+    Ok(base_dir()?.join("assets"))
+}
+
+/// On-disk path of a single asset. `id` must already be validated (it goes straight into the
+/// filename) — the adapter parses/validates it before calling here, mirroring how the web artifact
+/// route guards `explanation_index_path` with an id check against path traversal.
+pub fn asset_path(id: &str) -> Result<PathBuf> {
+    Ok(assets_dir()?.join(id))
+}
+
 pub fn explanations_dir() -> Result<PathBuf> {
     Ok(base_dir()?.join("explanations"))
 }

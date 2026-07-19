@@ -167,6 +167,17 @@ impl NoteStore for SqliteStore {
         }
     }
 
+    fn list_all_note_contents(&self) -> Result<Vec<RawJson>> {
+        // deleted_at フィルタなし: soft-delete された note の asset 参照も「生存」扱いにするため。
+        let mut stmt = self.conn().prepare("SELECT content FROM notes")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for content in rows {
+            out.push(RawJson::from(content?));
+        }
+        Ok(out)
+    }
+
     fn list_notes(&self, from: Option<&str>, to: Option<&str>) -> Result<Vec<NoteSummary>> {
         // `?1 IS NULL OR …` は non-sargable で notes_date_idx が効かないため COALESCE で範囲に落とす
         let mut stmt = self.conn().prepare(&format!(
@@ -393,6 +404,24 @@ mod tests {
         assert_eq!(store.list_notes(None, None).unwrap().len(), 1);
 
         assert!(store.restore_note("note-999").unwrap().is_none());
+    }
+
+    #[test]
+    fn list_all_note_contents_includes_soft_deleted() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        let live = store.create_note(0).unwrap();
+        store.update_note(live.id.as_str(), content_update("live body")).unwrap();
+        let gone = store.create_note(0).unwrap();
+        store.update_note(gone.id.as_str(), content_update("deleted body")).unwrap();
+        store.delete_note(gone.id.as_str()).unwrap();
+
+        // list_notes は soft-delete を除外するが、GC 用の走査は復活可能な note も含める。
+        assert_eq!(store.list_notes(None, None).unwrap().len(), 1);
+        let contents: Vec<String> =
+            store.list_all_note_contents().unwrap().into_iter().map(|c| c.into_string()).collect();
+        assert_eq!(contents.len(), 2);
+        assert!(contents.iter().any(|c| c.contains("live body")));
+        assert!(contents.iter().any(|c| c.contains("deleted body")));
     }
 
     #[test]

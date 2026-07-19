@@ -11,6 +11,9 @@ pub trait NoteStore {
     /// 見つからない場合は `None`。
     fn get_note_block(&self, note_id: &str, block_id: &str) -> Result<Option<RawJson>>;
     fn list_notes(&self, from: Option<&str>, to: Option<&str>) -> Result<Vec<NoteSummary>>;
+    /// Every note's content JSON, **including soft-deleted notes**. Used by asset GC to compute
+    /// reachability: a soft-deleted note is restorable, so its asset references must count as live.
+    fn list_all_note_contents(&self) -> Result<Vec<RawJson>>;
     /// mention 検索の coarse プリフィルタ。title / project_id / date / content いずれかの
     /// 部分一致の superset を新しい順に返すだけで、display_name / preview による正確な
     /// 絞り込みは application 層の責務。空 `q` は全件（最近順）。

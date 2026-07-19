@@ -37,6 +37,11 @@ impl<B: Backend> NoteService<'_, B> {
         Ok(self.m.repos.list_notes(from, to)?)
     }
 
+    /// 全 note の content JSON（soft-delete 含む）。asset GC の到達可能性判定用。
+    pub fn list_all_note_contents(&mut self) -> ApplicationResult<Vec<monica_domain::RawJson>> {
+        Ok(self.m.repos.list_all_note_contents()?)
+    }
+
     pub fn list_project_notes(
         &mut self,
         project_id: &str,
