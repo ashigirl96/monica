@@ -1,5 +1,5 @@
 use std::future::IntoFuture;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
 
@@ -116,16 +116,36 @@ fn is_tailscale_cgnat(ip: Ipv4Addr) -> bool {
     a == 100 && (64..=127).contains(&b)
 }
 
-/// Tailscale インターフェースの IPv4 を返す。100.100.100.100（MagicDNS リゾルバ）宛ての
-/// UDP ソケットを connect するとカーネルが送信元アドレスを選ぶだけで、パケットは送らない。
-/// Tailscale 停止中は既定ゲートウェイ側の IP が返るため、CGNAT 範囲外なら None に落とす。
+/// `tailscale` CLI の探索パス。GUI 起動時の PATH は /usr/bin:/bin:/usr/sbin:/sbin に絞られ
+/// /usr/local/bin を含まないため、素の名前だけでなく実体パスも明示的に試す。
+const TAILSCALE_BINS: [&str; 4] = [
+    "tailscale",
+    "/usr/local/bin/tailscale",
+    "/opt/homebrew/bin/tailscale",
+    "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+];
+
+/// Tailscale が実際に割り当てた IPv4 を返す。`tailscale ip -4` を Tailscale 本体に問い合わせる
+/// ため、停止中はコマンドが失敗し None になる。100.64.0.0/10 の見た目一致で推測すると、同レンジ
+/// を実 LAN に使う公衆 Wi-Fi 等を Tailscale と誤検出して認証なしで晒すため、情報源は Tailscale
+/// 自身に限る。返り値も CGNAT 範囲で検証し、範囲外の IP には bind しない安全弁を残す。
 fn tailscale_ipv4() -> Option<Ipv4Addr> {
-    let sock = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
-    sock.connect((Ipv4Addr::new(100, 100, 100, 100), 53)).ok()?;
-    match sock.local_addr().ok()?.ip() {
-        IpAddr::V4(ip) if is_tailscale_cgnat(ip) => Some(ip),
-        _ => None,
+    for bin in TAILSCALE_BINS {
+        let Ok(output) = std::process::Command::new(bin).args(["ip", "-4"]).output() else {
+            continue;
+        };
+        if !output.status.success() {
+            continue;
+        }
+        if let Some(ip) = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| line.trim().parse::<Ipv4Addr>().ok())
+            .find(|ip| is_tailscale_cgnat(*ip))
+        {
+            return Some(ip);
+        }
     }
+    None
 }
 
 fn content_type(path: &str) -> &'static str {
