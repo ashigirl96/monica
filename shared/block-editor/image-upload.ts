@@ -44,6 +44,32 @@ export function rasterImageFiles(dt: DataTransfer | null | undefined): File[] {
   return Array.from(dt.files).filter((f) => RASTER_TYPES.has(f.type));
 }
 
+// blockContainer が「アップロード未完了の image ただ 1 つ」だけを内容に持つか。
+// （子ブロックを持つ稀なケースは length !== 1 で保守的に残す＝ユーザー内容を落とさない）
+function isPendingImageContainer(node: unknown): boolean {
+  if (!node || typeof node !== "object") return false;
+  const n = node as { type?: string; content?: unknown };
+  if (n.type !== "blockContainer" || !Array.isArray(n.content) || n.content.length !== 1) {
+    return false;
+  }
+  const inner = n.content[0] as { type?: string; attrs?: { src?: unknown } };
+  return inner?.type === "image" && (inner.attrs?.src ?? null) === null;
+}
+
+/** 永続化用に doc JSON からアップロード未完了（src === null）の image block を取り除く（純関数）。
+    uploadId → blob の対応はタブ内の plugin state にしか無く destroy で消えるため、src:null を
+    保存すると再読込で復元不能な placeholder になり、bytes も孤児化する。確定 src を持つ image
+    だけを残せば、アップロード完了時の swap 後に改めて保存される（結果整合）。 */
+export function stripPendingImages(docJson: unknown): unknown {
+  if (!docJson || typeof docJson !== "object") return docJson;
+  const node = docJson as { content?: unknown };
+  if (!Array.isArray(node.content)) return docJson;
+  return {
+    ...node,
+    content: node.content.filter((c) => !isPendingImageContainer(c)).map(stripPendingImages),
+  };
+}
+
 /** uploadId 群の image block を挿入する Transaction を組む（純関数）。dropPos 指定時はその位置の
     block の直後、未指定（paste）時は空 paragraph 置換 / カーソル block 直後。doc に blob: は入れない。 */
 export function buildInsertImagesTr(

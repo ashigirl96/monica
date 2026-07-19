@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BlockEditor, type BlockEditorHandle } from "@shared/block-editor/block-editor";
+import { stripPendingImages } from "@shared/block-editor/image-upload";
 import type { LinkMetadata } from "@shared/block-editor/link-menu";
 import type { NoteMentionItem } from "@shared/block-editor/note-mention-menu";
 import type { NoteMentionInfo } from "@shared/block-editor/node-views";
@@ -58,6 +59,19 @@ async function fetchLinkMetadata(url: string): Promise<LinkMetadata | null> {
 async function searchNoteMentions(query: string): Promise<NoteMentionItem[]> {
   const mentions = await searchNoteMentionsApi(query);
   return mentions.map((m) => ({ id: m.id, displayName: m.display_name, preview: m.preview }));
+}
+
+// autosave が保存する content から、アップロード未完了（src:null）の image block を除く。
+// toJSON を持つ live doc（PMNode）はフラッシュ時（JSON.stringify）に一度だけ walk するよう
+// 遅延ラップし、打鍵毎の全文 walk を避ける。src:null を保存すると再読込で復元不能になる。
+function persistableContent(content: unknown): unknown {
+  return {
+    toJSON: () => {
+      const hasToJson = !!content && typeof (content as { toJSON?: unknown }).toJSON === "function";
+      const json = hasToJson ? (content as { toJSON: () => unknown }).toJSON() : content;
+      return stripPendingImages(json);
+    },
+  };
 }
 
 function EmptyState() {
@@ -417,7 +431,7 @@ export function NotesPage({ id }: { id: string | null }) {
     (target: Note) => {
       schedule(target.id, {
         title: target.kind.kind === "essay" ? target.kind.title : null,
-        content: contentRef.current ?? target.content,
+        content: persistableContent(contentRef.current ?? target.content),
       });
     },
     [schedule],

@@ -9,6 +9,7 @@ import {
   imageUploadKey,
   imageUploadPlugin,
   isExternalImageSrc,
+  stripPendingImages,
 } from "./image-upload";
 
 function para(text = ""): PMNode {
@@ -139,6 +140,58 @@ describe("外部 img 検出", () => {
     expect(isExternalImageSrc("/api/assets/a.png")).toBe(false);
     expect(isExternalImageSrc("blob:xyz")).toBe(false);
     expect(isExternalImageSrc(null)).toBe(false);
+  });
+});
+
+describe("stripPendingImages（永続化用）", () => {
+  const container = (content: unknown[]) => ({ type: "blockContainer", content });
+  const imageBlockJson = (src: string | null, uploadId: string | null) =>
+    container([{ type: "image", attrs: { src, uploadId, width: null } }]);
+  const paraJson = (text: string) =>
+    container([{ type: "paragraph", content: [{ type: "text", text }] }]);
+  const docJson = (blocks: unknown[]) => ({
+    type: "doc",
+    content: [{ type: "blockGroup", content: blocks }],
+  });
+
+  test("src:null の image block（アップロード未完了）を取り除く", () => {
+    const input = docJson([
+      paraJson("hello"),
+      imageBlockJson(null, "u1"),
+      imageBlockJson("/api/assets/a.png", null),
+    ]);
+    const out = stripPendingImages(input) as typeof input;
+    const blocks = out.content[0].content;
+    expect(blocks).toHaveLength(2);
+    // 段落と確定済み image は残り、pending image だけ消える
+    expect(JSON.stringify(out)).not.toContain('"u1"');
+    expect(JSON.stringify(out)).toContain("/api/assets/a.png");
+  });
+
+  test("ネストした blockGroup 内の pending image も取り除く", () => {
+    const nested = {
+      type: "doc",
+      content: [
+        {
+          type: "blockGroup",
+          content: [
+            {
+              type: "blockContainer",
+              content: [
+                { type: "paragraph", content: [{ type: "text", text: "parent" }] },
+                { type: "blockGroup", content: [imageBlockJson(null, "deep")] },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    expect(JSON.stringify(stripPendingImages(nested))).not.toContain('"deep"');
+  });
+
+  test("pending image が無ければ doc はそのまま（確定 src は保持）", () => {
+    const input = docJson([paraJson("x"), imageBlockJson("/api/assets/b.webp", null)]);
+    expect(JSON.stringify(stripPendingImages(input))).toContain("/api/assets/b.webp");
   });
 });
 
