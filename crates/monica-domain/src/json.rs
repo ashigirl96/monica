@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 /// An opaque JSON document the domain carries but never interprets (task details, hook payloads,
-/// run metadata). Storing it as raw text keeps `monica-domain` free of any `serde_json` dependency:
-/// interpreting the contents is an outer-layer concern (the infra store parses it, the API layer
-/// projects it). It serializes transparently as its inner string.
+/// run metadata). Storing it as raw text defers interpretation to whoever owns the contract:
+/// note content is read through the domain's own typed model (`note_doc`), everything else is an
+/// outer-layer concern (the infra store parses it, the API layer projects it). It serializes
+/// transparently as its inner string.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct RawJson(pub String);

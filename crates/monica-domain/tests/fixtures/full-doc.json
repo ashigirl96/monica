@@ -1,0 +1,179 @@
+{
+  "type": "doc",
+  "content": [
+    {
+      "type": "blockGroup",
+      "content": [
+        {
+          "type": "blockContainer",
+          "attrs": { "id": "b1" },
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                { "type": "text", "text": "plain " },
+                {
+                  "type": "text",
+                  "marks": [{ "type": "bold" }, { "type": "italic" }],
+                  "text": "styled"
+                },
+                { "type": "text", "marks": [{ "type": "strike" }], "text": " gone" },
+                { "type": "text", "marks": [{ "type": "code" }], "text": " mono" },
+                {
+                  "type": "text",
+                  "marks": [{ "type": "link", "attrs": { "href": "https://example.com" } }],
+                  "text": " linked"
+                },
+                { "type": "hardBreak" },
+                {
+                  "type": "linkMention",
+                  "attrs": { "href": "https://example.com/x", "title": "Example", "favicon": null }
+                },
+                {
+                  "type": "linkMention",
+                  "attrs": {
+                    "href": "https://example.com/y",
+                    "title": "Marked",
+                    "favicon": "https://example.com/f.ico"
+                  },
+                  "marks": [{ "type": "bold" }]
+                },
+                { "type": "noteMention", "attrs": { "noteId": "note-42" } }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "blockContainer",
+          "attrs": { "id": "b2" },
+          "content": [
+            {
+              "type": "heading",
+              "attrs": { "level": 2 },
+              "content": [{ "type": "text", "text": "Heading" }]
+            },
+            {
+              "type": "blockGroup",
+              "content": [
+                {
+                  "type": "blockContainer",
+                  "attrs": { "id": "b2-1" },
+                  "content": [
+                    {
+                      "type": "todo",
+                      "attrs": { "checked": true },
+                      "content": [{ "type": "text", "text": "done" }]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "blockContainer",
+          "attrs": { "id": "b3" },
+          "content": [{ "type": "bullet", "content": [{ "type": "text", "text": "item" }] }]
+        },
+        {
+          "type": "blockContainer",
+          "attrs": { "id": "b4" },
+          "content": [
+            {
+              "type": "numbered",
+              "attrs": { "style": "decimal" },
+              "content": [{ "type": "text", "text": "first" }]
+            }
+          ]
+        },
+        {
+          "type": "blockContainer",
+          "attrs": { "id": "b5" },
+          "content": [
+            {
+              "type": "toggle",
+              "attrs": { "open": false },
+              "content": [{ "type": "text", "text": "hidden" }]
+            }
+          ]
+        },
+        {
+          "type": "blockContainer",
+          "attrs": { "id": "b6" },
+          "content": [{ "type": "quote", "content": [{ "type": "text", "text": "quoted" }] }]
+        },
+        {
+          "type": "blockContainer",
+          "attrs": { "id": "b7" },
+          "content": [
+            {
+              "type": "callout",
+              "attrs": { "kind": "warning" },
+              "content": [{ "type": "text", "text": "careful" }]
+            }
+          ]
+        },
+        {
+          "type": "blockContainer",
+          "attrs": { "id": "b8" },
+          "content": [
+            {
+              "type": "codeBlock",
+              "attrs": { "language": "rust", "wrap": false },
+              "content": [{ "type": "text", "text": "fn main() {}" }]
+            }
+          ]
+        },
+        {
+          "type": "blockContainer",
+          "attrs": { "id": "b9" },
+          "content": [{ "type": "divider" }]
+        },
+        {
+          "type": "blockContainer",
+          "attrs": { "id": "b10" },
+          "content": [
+            {
+              "type": "bookmark",
+              "attrs": {
+                "href": "https://example.com/post",
+                "title": "Post",
+                "description": null,
+                "thumbnail": null,
+                "favicon": "https://example.com/favicon.ico",
+                "siteName": null
+              }
+            }
+          ]
+        },
+        {
+          "type": "blockContainer",
+          "attrs": { "id": "b11" },
+          "content": [
+            {
+              "type": "syncedBlock",
+              "attrs": { "noteId": "note-7", "blockIds": ["blk-a", "blk-b"] }
+            }
+          ]
+        },
+        {
+          "type": "blockContainer",
+          "attrs": { "id": "b12" },
+          "content": [
+            {
+              "type": "image",
+              "attrs": { "src": "/api/assets/abc.png", "uploadId": null, "width": 480 }
+            }
+          ]
+        },
+        {
+          "type": "blockContainer",
+          "attrs": { "id": null },
+          "content": [
+            { "type": "image", "attrs": { "src": null, "uploadId": "up-1", "width": null } }
+          ]
+        }
+      ]
+    }
+  ]
+}
