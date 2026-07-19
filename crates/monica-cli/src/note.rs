@@ -72,7 +72,7 @@ fn search(monica: &mut CliFacade, query: &str) -> Result<()> {
             note.id.as_str().to_string(),
             note.kind.display_name(&note.date),
             note.date.clone(),
-            note.preview.clone().unwrap_or_default(),
+            crate::table::or_dash(note.preview.as_deref()),
         ]);
     }
     print!("{}", crate::table::render_table(&table));

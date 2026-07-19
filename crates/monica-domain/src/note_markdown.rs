@@ -9,8 +9,8 @@ use std::collections::HashSet;
 use serde_json::Value;
 
 use crate::note_doc::{
-    value_collect_text, BlockNode, DocNode, InlineNode, LinkMentionAttrs, Mark, NoteMentionAttrs,
-    SyncedBlockAttrs,
+    value_collect_text, value_trimmed_text, BlockNode, DocNode, InlineNode, LinkMentionAttrs, Mark,
+    NoteMentionAttrs, SyncedBlockAttrs,
 };
 
 /// transclusion（syncedBlock のインライン展開）の再帰上限。循環・多重展開の暴走を防ぐ。
@@ -43,9 +43,9 @@ pub fn to_markdown(content: &str, resolver: &dyn NoteDocResolver, mode: SyncedBl
             renderer.render_group(content.as_deref().unwrap_or_default(), &mut blocks);
             join_blocks(&blocks)
         }
-        Ok(DocNode::Unknown(value)) => value_text(&value),
+        Ok(DocNode::Unknown(value)) => value_trimmed_text(&value),
         Err(_) => match serde_json::from_str::<Value>(content) {
-            Ok(value) => value_text(&value),
+            Ok(value) => value_trimmed_text(&value),
             Err(_) => String::new(),
         },
     }
@@ -64,12 +64,6 @@ fn join_blocks(blocks: &[Block]) -> String {
         out.push_str(text);
     }
     out
-}
-
-fn value_text(value: &Value) -> String {
-    let mut out = String::new();
-    value_collect_text(value, &mut out);
-    out.trim().to_string()
 }
 
 struct Renderer<'r> {
@@ -157,36 +151,36 @@ impl Renderer<'_> {
     fn render_block_content(&mut self, node: &BlockNode, marker: Option<String>) -> Option<Block> {
         match node {
             BlockNode::Paragraph { content } => {
-                let text = self.render_inlines(content.as_deref().unwrap_or_default());
+                let text = self.inlines(content);
                 (!text.is_empty()).then_some((text, false))
             }
             BlockNode::Heading { attrs, content } => {
                 let level = attrs.as_ref().and_then(|a| a.level).unwrap_or(1).clamp(1, 6) as usize;
-                let text = self.render_inlines(content.as_deref().unwrap_or_default());
+                let text = self.inlines(content);
                 Some((format!("{} {text}", "#".repeat(level)), false))
             }
             BlockNode::Todo { attrs, content } => {
                 let checked = attrs.as_ref().and_then(|a| a.checked).unwrap_or(false);
-                let text = self.render_inlines(content.as_deref().unwrap_or_default());
+                let text = self.inlines(content);
                 let mark = if checked { "[x]" } else { "[ ]" };
                 Some((format!("- {mark} {text}"), true))
             }
             BlockNode::Bullet { content } => {
-                let text = self.render_inlines(content.as_deref().unwrap_or_default());
+                let text = self.inlines(content);
                 Some((format!("- {text}"), true))
             }
             BlockNode::Numbered { content, .. } => {
                 let marker = marker.unwrap_or_else(|| "1.".to_string());
-                let text = self.render_inlines(content.as_deref().unwrap_or_default());
+                let text = self.inlines(content);
                 Some((format!("{marker} {text}"), true))
             }
             BlockNode::Quote { content } | BlockNode::Toggle { content, .. } => {
-                let text = self.render_inlines(content.as_deref().unwrap_or_default());
+                let text = self.inlines(content);
                 (!text.is_empty()).then(|| (prefix_lines(&text, "> "), false))
             }
             BlockNode::Callout { attrs, content } => {
                 let kind = attrs.as_ref().and_then(|a| a.kind.as_deref()).unwrap_or("note");
-                let body = self.render_inlines(content.as_deref().unwrap_or_default());
+                let body = self.inlines(content);
                 let mut text = format!("> [!{kind}]");
                 if !body.is_empty() {
                     text.push('\n');
@@ -197,7 +191,10 @@ impl Renderer<'_> {
             BlockNode::CodeBlock { attrs, content } => {
                 let language = attrs.as_ref().and_then(|a| a.language.as_deref()).unwrap_or("");
                 let code = raw_text(content.as_deref().unwrap_or_default());
-                Some((format!("```{language}\n{code}\n```"), false))
+                // 本文が ``` 行を含むと固定 fence が途中で閉じるので、中の最長 backtick run より
+                // 長い fence を張る（CommonMark の fenced code block 規則）。
+                let fence = "`".repeat(max_backtick_run(&code).max(2) + 1);
+                Some((format!("{fence}{language}\n{code}\n{fence}"), false))
             }
             BlockNode::Divider => Some(("---".to_string(), false)),
             BlockNode::Bookmark { attrs } => {
@@ -220,10 +217,8 @@ impl Renderer<'_> {
                 .map(|src| (format!("![]({src})"), false)),
             BlockNode::SyncedBlock { attrs } => self.render_synced(attrs.as_ref()),
             BlockNode::Unknown(value) => {
-                let mut text = String::new();
-                value_collect_text(value, &mut text);
-                let text = text.trim();
-                (!text.is_empty()).then(|| (text.to_string(), false))
+                let text = value_trimmed_text(value);
+                (!text.is_empty()).then_some((text, false))
             }
             BlockNode::BlockGroup { .. } | BlockNode::BlockContainer { .. } => {
                 let mut sub = Vec::new();
@@ -254,7 +249,7 @@ impl Renderer<'_> {
     }
 
     fn expand_one(&mut self, note_id: &str, block_id: &str) -> String {
-        let fallback = || synced_reference(note_id, std::slice::from_ref(&block_id.to_string()));
+        let fallback = || format!("![[{note_id}#^{block_id}]]");
         let key = (note_id.to_string(), block_id.to_string());
         if self.visited.contains(&key) {
             return fallback();
@@ -276,6 +271,11 @@ impl Renderer<'_> {
         } else {
             join_blocks(&sub)
         }
+    }
+
+    /// blockContent の `Option<Vec<InlineNode>>` を markdown インライン文字列へ。
+    fn inlines(&self, content: &Option<Vec<InlineNode>>) -> String {
+        self.render_inlines(content.as_deref().unwrap_or_default())
     }
 
     fn render_inlines(&self, inlines: &[InlineNode]) -> String {
@@ -389,6 +389,20 @@ fn raw_text(inlines: &[InlineNode]) -> String {
         }
     }
     out
+}
+
+fn max_backtick_run(code: &str) -> usize {
+    let mut max = 0;
+    let mut run = 0;
+    for ch in code.chars() {
+        if ch == '`' {
+            run += 1;
+            max = max.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    max
 }
 
 fn prefix_lines(text: &str, prefix: &str) -> String {

@@ -179,3 +179,26 @@ fn plain_text_has_no_schema_vocabulary() {
     assert!(!body.contains("blockContainer"), "no schema words: {body:?}");
     assert!(body.contains("Heading"), "real text present: {body:?}");
 }
+
+#[test]
+fn plain_text_indexes_visible_atom_labels() {
+    // 生 content LIKE で拾えていた可視 attr（linkMention/bookmark の title、noteMention の id）を
+    // FTS body でも取りこぼさない。text ノードを持たず atom だけの note が検索から消えないこと。
+    let body = plain_text(FULL_DOC);
+    assert!(body.contains("Example"), "linkMention title indexed: {body:?}");
+    assert!(body.contains("Post"), "bookmark title indexed: {body:?}");
+    assert!(body.contains("note-42"), "noteMention id indexed: {body:?}");
+}
+
+#[test]
+fn code_block_with_inner_fence_stays_intact() {
+    // codeBlock 本文が ``` 行を含んでも、より長い fence で包んで途中閉じを防ぐ。
+    let doc = r#"{"type":"doc","content":[{"type":"blockGroup","content":[{"type":"blockContainer","content":[
+        {"type":"codeBlock","attrs":{"language":"markdown"},"content":[{"type":"text","text":"```\nnested\n```"}]}
+    ]}]}]}"#;
+    let md = to_markdown(doc, &FakeResolver, SyncedBlockMode::Reference);
+    // 本文の最長 backtick run は 3 なので、外側 fence は 4 backtick になる。
+    assert!(md.starts_with("````markdown\n"), "outer fence longer than inner: {md:?}");
+    assert!(md.ends_with("\n````"), "closing fence matches opening: {md:?}");
+    assert!(md.contains("```\nnested\n```"), "inner content preserved verbatim: {md:?}");
+}

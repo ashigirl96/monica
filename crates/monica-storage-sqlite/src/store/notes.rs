@@ -90,6 +90,12 @@ fn fts_phrase(query: &str) -> String {
     format!("\"{}\"", query.replace('"', "\"\""))
 }
 
+/// LIKE パターンの特殊文字（`\` `%` `_`）をエスケープする。`ESCAPE '\'` 節と併用し、
+/// ユーザー入力をリテラル substring として扱う（`note search "a_"` が全件に化けない）。
+fn like_escape(query: &str) -> String {
+    query.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+}
+
 /// v41 以前の既存 note を FTS に一括索引する。冪等: 索引済み DB では何もしない。
 /// per-operation で open される store（web 全ハンドラ・毎秒 autosave・CLI/hook）から init 経由で
 /// 毎回呼ばれるので、まず write lock 不要の read プローブで抜ける（backfill が実際に走るのは
@@ -209,20 +215,27 @@ impl NoteStore for SqliteStore {
         }
         // trigram は 3-gram なので 3 文字（codepoint）未満は MATCH 不能 → plain_text body への
         // LIKE で拾う。byte 長で判定すると日本語 2 文字が MATCH 分岐に流れ静かに 0 件になる。
-        let body_clause = if q.chars().count() >= 3 {
+        // LIKE 節は `?1`（エスケープ済み）+ `ESCAPE '\'` でユーザー入力をリテラル扱いにする
+        // （full-text search は facade で再フィルタしないので `_`/`%` の過剰マッチを防ぐ）。
+        let use_match = q.chars().count() >= 3;
+        let body_clause = if use_match {
             "id IN (SELECT note_id FROM notes_fts WHERE notes_fts MATCH ?2)"
         } else {
-            "id IN (SELECT note_id FROM notes_fts WHERE body LIKE '%'||?1||'%')"
+            "id IN (SELECT note_id FROM notes_fts WHERE body LIKE '%'||?1||'%' ESCAPE '\\')"
         };
+        // `?2`（MATCH phrase）は use_match のときだけ SQL に現れる。LIKE 分岐では phrase を
+        // 組み立てず、未使用の bind に無害な空文字を渡す。
+        let phrase = if use_match { fts_phrase(q) } else { String::new() };
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {NOTE_COLUMNS} FROM notes
              WHERE deleted_at IS NULL
-               AND (title LIKE '%'||?1||'%' OR project_id LIKE '%'||?1||'%'
-                    OR date LIKE '%'||?1||'%' OR {body_clause})
+               AND (title LIKE '%'||?1||'%' ESCAPE '\\'
+                    OR project_id LIKE '%'||?1||'%' ESCAPE '\\'
+                    OR date LIKE '%'||?1||'%' ESCAPE '\\' OR {body_clause})
              ORDER BY updated_at DESC, rowid DESC
              LIMIT ?3"
         ))?;
-        let rows = stmt.query_map(params![q, fts_phrase(q), limit as i64], |row| {
+        let rows = stmt.query_map(params![like_escape(q), phrase, limit as i64], |row| {
             Ok(summary_from_row(row))
         })?;
         rows.map(|r| r?).collect()
@@ -844,6 +857,32 @@ mod tests {
         store.update_note("note-1", content_update("これは設計の話")).unwrap();
 
         assert_eq!(search_ids(&store, "設計"), vec!["note-1"]);
+    }
+
+    #[test]
+    fn search_matches_visible_atom_titles() {
+        // 生 content LIKE で拾えていた bookmark/linkMention の title を FTS でも拾う。
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        store.create_note(0).unwrap();
+        let doc = r#"{"type":"doc","content":[{"type":"blockGroup","content":[
+            {"type":"blockContainer","content":[
+                {"type":"bookmark","attrs":{"href":"https://x.test","title":"Quarterly Roadmap"}}]}]}]}"#;
+        store.update_note("note-1", UpdateNote { title: None, content: RawJson::from(doc) }).unwrap();
+
+        assert_eq!(search_ids(&store, "Quarterly"), vec!["note-1"], "bookmark title searchable");
+    }
+
+    #[test]
+    fn search_escapes_like_wildcards_in_short_queries() {
+        // 1-2 codepoint は body LIKE 分岐。full-text search は facade で再フィルタしないので、
+        // `_` をエスケープしないと non-empty body 全件に化ける。
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        store.create_note(0).unwrap();
+        store.create_note(0).unwrap();
+        store.update_note("note-1", content_update("a_b literal underscore")).unwrap();
+        store.update_note("note-2", content_update("axb no wildcard")).unwrap();
+
+        assert_eq!(search_ids(&store, "_"), vec!["note-1"], "literal underscore only");
     }
 
     #[test]
