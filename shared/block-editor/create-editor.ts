@@ -12,6 +12,8 @@ import type { FetchLinkMetadata } from "./link-menu";
 import { noteMentionMenuPlugin } from "./note-mention-menu";
 import type { SearchNoteMentions } from "./note-mention-menu";
 import { pasteMenuPlugin } from "./paste-menu";
+import { imageUploadPlugin } from "./image-upload";
+import type { ImportExternalImage, UploadImage } from "./image-upload";
 import type { OnNoteMentionClick, ResolveNoteMention } from "./node-views";
 import { normalizerPlugin } from "./normalizer";
 import { numberingPlugin, placeholderPlugin } from "./decorations";
@@ -76,6 +78,10 @@ export type BlockEditorCallbacks = {
   resolveBlock?: ResolveBlock;
   /** synced block のジャンプ（元ブロックを開く）。 */
   onOpenBlock?: OnOpenBlock;
+  /** 画像 File を asset にアップロードする。未指定なら画像 paste / drop は無効（desktop 縮退）。 */
+  uploadImage?: UploadImage;
+  /** 外部画像 URL をローカル asset 化する（外部 HTML paste の <img> 用）。 */
+  importExternalImage?: ImportExternalImage;
 };
 
 export function createBlockEditor(
@@ -91,6 +97,8 @@ export function createBlockEditor(
     noteId,
     resolveBlock,
     onOpenBlock,
+    uploadImage,
+    importExternalImage,
   }: BlockEditorCallbacks = {},
 ): EditorView {
   // synced block の NodeView 群を refresh plugin と共有する（同一ノート内のライブ反映用）
@@ -142,6 +150,11 @@ export function createBlockEditor(
       numberingPlugin(),
       blockHighlightPlugin(),
       dragDropPlugin(),
+      // clipboardPlugin より前に置く: 画像ファイルの paste / drop を URL・block paste 経路より
+      // 先に横取りする。uploadImage 不在（desktop journal）なら plugin ごと外れて画像 paste は無効。
+      ...(uploadImage
+        ? [imageUploadPlugin({ upload: uploadImage, importExternal: importExternalImage })]
+        : []),
       clipboardPlugin({ sourceNoteId: noteId, syncPasteEnabled: !!resolveBlock }),
       linkClickPlugin(),
       syncedBlockRefreshPlugin(syncedRegistry),

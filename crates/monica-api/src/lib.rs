@@ -4,6 +4,7 @@
 //! `From` conversion from its domain/application counterpart. Consolidating the specta derives in
 //! one crate keeps `monica-domain` and `monica-application` free of any TypeScript-binding concern.
 
+mod asset;
 mod bench;
 mod error;
 mod explanation;
@@ -16,6 +17,7 @@ mod task;
 mod task_run;
 mod terminal;
 
+pub use asset::{Asset as ApiAsset, ImportAsset as ApiImportAsset};
 pub use bench::{PrepareTaskResult, RunTaskResult, TaskBench};
 pub use error::{ApiError, ApiErrorCode};
 pub use explanation::{Explanation as ApiExplanation, ExplanationMode as ApiExplanationMode};

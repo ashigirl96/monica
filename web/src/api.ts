@@ -1,4 +1,5 @@
 import type {
+  Asset,
   DailyNoteCount,
   Explanation,
   LinkPreview,
@@ -154,6 +155,36 @@ export async function fetchLinkPreview(url: string): Promise<LinkPreview | null>
     const res = await fetch(`/api/ogp?url=${encodeURIComponent(url)}`);
     if (!res.ok) return null;
     return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+// 画像 File を raw body で POST。失敗は null（呼び手は ObjectURL 表示のまま upload を諦める）
+export async function uploadImageAsset(file: File): Promise<Asset | null> {
+  try {
+    const res = await fetch("/api/assets", {
+      method: "POST",
+      headers: { "content-type": file.type },
+      body: file,
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as Asset;
+  } catch {
+    return null;
+  }
+}
+
+// 外部画像 URL を backend が fetch してローカル asset 化。失敗は null（外部 URL のまま残す）
+export async function importImageAsset(url: string): Promise<Asset | null> {
+  try {
+    const res = await fetch("/api/assets/import", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as Asset;
   } catch {
     return null;
   }

@@ -12,6 +12,7 @@ import {
   getNote,
   getNoteBlock,
   getNotesToday,
+  importImageAsset,
   listNotes,
   listProjectNotes,
   listProjects,
@@ -19,6 +20,7 @@ import {
   restoreNote,
   searchNoteMentions as searchNoteMentionsApi,
   setNoteKind,
+  uploadImageAsset,
 } from "@/api";
 import { navigate } from "@/app";
 import { FuzzyPickerModal } from "@/components/fuzzy-picker-modal";
@@ -630,6 +632,8 @@ export function NotesPage({ id }: { id: string | null }) {
               noteId={note.id}
               resolveBlock={resolveBlock}
               onOpenBlock={onOpenBlock}
+              uploadImage={uploadImageAsset}
+              importExternalImage={importImageAsset}
               handleRef={editorHandleRef}
               className="min-h-[70dvh] pt-4 pb-24"
             />

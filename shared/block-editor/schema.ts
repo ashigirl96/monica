@@ -17,6 +17,23 @@ function dataAttrs(attrs: Record<string, string | null>): Record<string, string>
   );
 }
 
+/** asset 配信 URL の prefix。backend の ASSET_URL_PREFIX と一致させる（文字列一致で共有）。 */
+export const ASSET_URL_PREFIX = "/api/assets/";
+
+/** image node の src / img[src] paste で受け入れる URL を正規化する。自前 asset URL と
+    外部 http(s) のみ許可し、blob:/data:/file: 等は拒否（null）。doc に blob: を入れない防波堤。 */
+export function acceptedPastedImageSrc(raw: string | null): string | null {
+  if (!raw) return null;
+  if (raw.startsWith(ASSET_URL_PREFIX)) return raw;
+  try {
+    const url = new URL(raw);
+    if (url.protocol === "http:" || url.protocol === "https:") return raw;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 // TODO.md §0: ID付きの任意ネスト可能なブロックツリーを正とする。
 // doc → blockGroup → blockContainer(id) → blockContent + blockGroup?
 export const schema = new Schema({
@@ -251,6 +268,49 @@ export const schema = new Schema({
           "data-note-id": node.attrs.noteId as string,
           "data-ref-block-ids": (node.attrs.blockIds as string[]).join(","),
         },
+      ],
+    },
+
+    // 画像ブロック。atom leaf なので NodeView が描画を全面的に握る。src は確定 URL のみを
+    // 持ち（/api/assets/... か外部 http(s)）、アップロード中は src=null + uploadId で、blob: URL は
+    // doc に決して入れない（autosave が blob: を永続化して壊れるのを構造的に防ぐ）。
+    image: {
+      group: "blockContent",
+      atom: true,
+      selectable: true,
+      attrs: {
+        src: { default: null },
+        uploadId: { default: null },
+        width: { default: null },
+      },
+      parseDOM: [
+        {
+          tag: "div[data-block-content='image']",
+          getAttrs: (dom: HTMLElement) => ({
+            src: acceptedPastedImageSrc(dom.dataset.src ?? null),
+            uploadId: null,
+            width: dom.dataset.width ? Number(dom.dataset.width) : null,
+          }),
+        },
+        {
+          // 外部 HTML paste の <img> 取り込み口。blob:/data:/file: は弾く（null → ルール不成立）。
+          tag: "img[src]",
+          getAttrs: (dom: HTMLElement) => {
+            const src = acceptedPastedImageSrc(dom.getAttribute("src"));
+            return src === null ? false : { src, uploadId: null, width: null };
+          },
+        },
+      ],
+      toDOM: (node) => [
+        "div",
+        {
+          "data-block-content": "image",
+          ...dataAttrs({
+            "data-src": node.attrs.src as string | null,
+            "data-width": node.attrs.width !== null ? String(node.attrs.width) : null,
+          }),
+        },
+        ...(node.attrs.src ? [["img", { src: node.attrs.src as string }]] : []),
       ],
     },
 

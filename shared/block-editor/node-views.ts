@@ -6,6 +6,7 @@ import type {
   ViewMutationRecord,
 } from "@milkdown/kit/prose/view";
 import { nodes, noteHref } from "./schema";
+import { imageUploadKey, retryImageUpload } from "./image-upload";
 import { insertParagraphAfter } from "./commands";
 import { selectBlocks } from "./selection-state";
 import { blockSelectionKey } from "./selection-state";
@@ -520,6 +521,183 @@ export class BookmarkView implements NodeView {
   }
 }
 
+const IMAGE_MIN_WIDTH = 96;
+
+export class ImageView implements NodeView {
+  dom: HTMLElement;
+  private retryBtn: HTMLElement | null = null;
+  private img: HTMLImageElement | null = null;
+  private resizing = false;
+  private lightbox: HTMLElement | null = null;
+
+  constructor(
+    private node: PMNode,
+    private view: EditorView,
+    private getPos: GetPos,
+  ) {
+    this.dom = el("div", "jb-image");
+    this.dom.setAttribute("data-block-content", "image");
+    this.dom.contentEditable = "false";
+    this.render(node);
+  }
+
+  // src 解決: 確定 URL > アップロード中の ObjectURL > 復元不能プレースホルダ。
+  // doc に blob: を入れない設計なので、アップロード中の実画像は plugin state 経由で引く。
+  private resolveSrc(node: PMNode): string | null {
+    const src = node.attrs.src as string | null;
+    if (src) return src;
+    const uploadId = node.attrs.uploadId as string | null;
+    if (uploadId) {
+      const entry = imageUploadKey.getState(this.view.state)?.get(uploadId);
+      if (entry) return entry.objectUrl;
+    }
+    return null;
+  }
+
+  private render(node: PMNode): void {
+    this.dom.replaceChildren();
+    this.retryBtn = null;
+    this.img = null;
+    const src = this.resolveSrc(node);
+    if (src) {
+      const width = node.attrs.width as number | null;
+      const frame = el("div", "jb-image-frame");
+      const img = el("img", "jb-image-img", (image) => {
+        image.src = src;
+        image.alt = "";
+        if (width) image.style.width = `${width}px`;
+      });
+      img.addEventListener("click", () => this.openLightbox(src));
+      frame.append(img);
+      frame.append(this.buildResizeHandle());
+      this.img = img;
+      this.dom.append(frame);
+    } else {
+      this.dom.append(
+        el("div", "jb-image-placeholder", (div) => {
+          div.textContent = "Image unavailable";
+        }),
+      );
+    }
+    this.syncStatus(node);
+  }
+
+  private buildResizeHandle(): HTMLElement {
+    const handle = el("div", "jb-image-resize");
+    handle.addEventListener("pointerdown", (e) => this.beginResize(e));
+    return handle;
+  }
+
+  // ドラッグ中は inline style だけ更新し、pointerup で一度だけ attrs.width に commit する
+  // （中間状態を transaction にしないことで undo を「1 リサイズ = 1 ステップ」に保つ）。
+  private beginResize(event: PointerEvent): void {
+    if (!this.img) return;
+    event.preventDefault();
+    this.resizing = true;
+    const startX = event.clientX;
+    const startWidth = this.img.getBoundingClientRect().width;
+    const maxWidth = this.view.dom.clientWidth || startWidth;
+    const handle = event.currentTarget as HTMLElement;
+    handle.setPointerCapture(event.pointerId);
+    let latest = startWidth;
+
+    const onMove = (e: PointerEvent) => {
+      if (!this.img) return;
+      latest = Math.max(IMAGE_MIN_WIDTH, Math.min(startWidth + (e.clientX - startX), maxWidth));
+      this.img.style.width = `${Math.round(latest)}px`;
+    };
+    const onUp = () => {
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
+      this.resizing = false;
+      const pos = this.getPos();
+      if (pos === undefined) return;
+      this.view.dispatch(this.view.state.tr.setNodeAttribute(pos, "width", Math.round(latest)));
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onUp);
+  }
+
+  private openLightbox(src: string): void {
+    if (this.resizing) return;
+    const overlay = el("div", "jb-lightbox");
+    overlay.append(
+      el("img", "jb-lightbox-img", (image) => {
+        image.src = src;
+        image.alt = "";
+      }),
+    );
+    const close = () => this.closeLightbox();
+    overlay.addEventListener("click", close);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("keydown", onKey);
+    this.lightboxKeyHandler = onKey;
+    this.lightbox = overlay;
+    document.body.append(overlay);
+  }
+
+  private lightboxKeyHandler: ((e: KeyboardEvent) => void) | null = null;
+
+  private closeLightbox(): void {
+    if (this.lightboxKeyHandler) {
+      document.removeEventListener("keydown", this.lightboxKeyHandler);
+      this.lightboxKeyHandler = null;
+    }
+    this.lightbox?.remove();
+    this.lightbox = null;
+  }
+
+  // 失敗バッジ + retry ボタンの出し入れ。decoration（jb-image-uploading / -failed）class は
+  // plugin の decorations prop が dom に付けるので、ここでは retry の DOM だけ同期する。
+  private syncStatus(node: PMNode): void {
+    const uploadId = node.attrs.uploadId as string | null;
+    const entry = uploadId ? imageUploadKey.getState(this.view.state)?.get(uploadId) : undefined;
+    const failed = entry?.status === "failed";
+    if (failed && !this.retryBtn) {
+      const btn = el("button", "jb-image-retry", (b) => {
+        b.type = "button";
+        b.textContent = "Retry";
+      });
+      btn.addEventListener("mousedown", (e) => e.preventDefault());
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        if (uploadId) retryImageUpload(this.view, uploadId);
+      });
+      this.retryBtn = btn;
+      this.dom.append(btn);
+    } else if (!failed && this.retryBtn) {
+      this.retryBtn.remove();
+      this.retryBtn = null;
+    }
+  }
+
+  // handle 上の pointer 操作は ProseMirror に渡さない（リサイズが選択・ドラッグに化けるのを防ぐ）。
+  stopEvent(event: Event): boolean {
+    return (
+      this.resizing ||
+      (event.target instanceof HTMLElement && event.target.classList.contains("jb-image-resize"))
+    );
+  }
+
+  update(node: PMNode): boolean {
+    if (node.type !== nodes.image) return false;
+    // src / width 確定は sameMarkup=false → 再構築（BookmarkView と同じ）。
+    if (!node.sameMarkup(this.node)) return false;
+    this.node = node;
+    // markup 不変で decoration/status だけ変わる（uploading→failed）ケースを同期。
+    this.syncStatus(node);
+    return true;
+  }
+
+  destroy(): void {
+    this.closeLightbox();
+  }
+}
+
 export type EditorNodeViewOptions = {
   resolveNoteMention?: ResolveNoteMention;
   onNoteMentionClick?: OnNoteMentionClick;
@@ -542,6 +720,7 @@ export function editorNodeViews(
     linkMention: (node) => new LinkMentionView(node),
     noteMention: (node) => new NoteMentionView(node, opts),
     bookmark: (node) => new BookmarkView(node),
+    image: (node, view, getPos) => new ImageView(node, view, getPos),
     syncedBlock: (node, view) => new SyncedBlockView(node, view, opts, syncedRegistry),
   };
 }

@@ -14,9 +14,11 @@ use monica_adapters::process::ProcessSetupRunner;
 use monica_application::{Backend, EventSink, LinkPreview, Monica, WorktreeRef};
 use monica_storage_sqlite::SqliteStore;
 
+pub mod asset_gc;
 pub mod notification_drain;
 pub mod pr_sync;
 
+pub use asset_gc::{start_asset_gc, AssetGcHandle};
 pub use notification_drain::{start_notification_drain, NotificationDrainHandle};
 pub use pr_sync::{start_pr_sync, PrSyncWaker};
 
@@ -68,4 +70,22 @@ pub use monica_adapters::ogp::LinkPreviewError;
 /// drivers reach it here rather than naming the ogp adapter.
 pub async fn fetch_link_preview(url: &str) -> Result<LinkPreview, LinkPreviewError> {
     monica_adapters::ogp::fetch_link_preview(url).await
+}
+
+pub use monica_adapters::assets::{AssetError, SavedAsset, MAX_ASSET_BYTES};
+
+/// Persist raw image bytes as an asset. Pure filesystem I/O (no store), re-exported here so drivers
+/// don't name the assets adapter — same pattern as [`fetch_link_preview`].
+pub fn save_asset(bytes: &[u8]) -> Result<SavedAsset, AssetError> {
+    monica_adapters::assets::save_asset(bytes)
+}
+
+/// Read an asset's bytes and content-type; `None` for a malformed id or missing file.
+pub fn read_asset(id: &str) -> Result<Option<(Vec<u8>, &'static str)>, AssetError> {
+    monica_adapters::assets::read_asset(id)
+}
+
+/// Fetch an external image URL and store it locally.
+pub async fn import_asset(url: &str) -> Result<SavedAsset, AssetError> {
+    monica_adapters::assets::import_asset(url).await
 }
