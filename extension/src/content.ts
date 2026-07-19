@@ -51,7 +51,11 @@ function isInlineElement(el: Element): boolean {
   // detached/未レンダーの要素は display が "" になる。これを非 inline と誤判定すると
   // 段落が <strong> 等で分割され、太字部分だけ翻訳されて本文が取り残される
   if (display === "") return true;
-  return display.startsWith("inline") || display === "contents";
+  // display: contents はボックスを生成しない透過ラッパーで、中身はブロックのことが多い
+  // （Next.js/CMS のテーマ層など）。inline 扱いすると親の hasOnlyInlineContent が誤って
+  // true になり、そのラッパーだけが唯一の子のとき親ツリー全体が 1 翻訳単位に畳まれる。
+  // コンテナとして降りる
+  return display.startsWith("inline");
 }
 
 /** 子が全部「テキスト or インライン要素」なら、この要素を 1 翻訳単位として扱える */
