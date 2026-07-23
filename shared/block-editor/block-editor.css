@@ -1,6 +1,7 @@
-/* Journal block editor — しずかなインターネット風の「紙とインク」トーン。
-   --jb-ink は foreground を暖色へ寄せた基準色で、text/muted/faint/border は
-   そこからの透明度導出（light/dark 両対応）。accent は静かなくすみ青、
+/* Journal block editor — しずかなインターネット (sizu.me) のエディタと同じ紙面。
+   本文 16px / 行高 2 / 字間 0.03em、見出しは本文と同じ太さ (400) で
+   border-bottom だけで区別する。--jb-ink を基準に text/muted/faint/border を
+   透明度導出（light/dark 両対応）。accent は静かなくすみ青、
    inline code は落ち着いたテラコッタ。 */
 
 .jb-root {
@@ -13,7 +14,6 @@
   --jb-code-bg: color-mix(in srgb, var(--jb-ink) 5%, transparent);
   --jb-callout-bg: color-mix(in srgb, var(--jb-ink) 7%, transparent);
   --jb-paper: color-mix(in srgb, var(--background) 97%, #c9a35f);
-  --jb-h3: color-mix(in srgb, var(--foreground) 42%, #a87848);
   --jb-blue: #5e81ac;
   --jb-code-red: #bd6a52;
   --jb-callout-note: #5e81ac;
@@ -33,17 +33,14 @@
   /* paste-menu（Paste / Paste and sync）アイコン */
   --jb-icon-paste: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='8' y='4' width='12' height='16' rx='2'/%3E%3Cpath d='M4 8v10a2 2 0 002 2h8'/%3E%3C/svg%3E");
   --jb-icon-sync: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12a9 9 0 01-9 9 9 9 0 01-7-3.3'/%3E%3Cpath d='M3 12a9 9 0 019-9 9 9 0 017 3.3'/%3E%3Cpath d='M17 3.5V7h-3.5'/%3E%3Cpath d='M7 20.5V17h3.5'/%3E%3C/svg%3E");
+  /* 1 行の行箱の高さ。marker 類の縦位置はすべてここから導出する。
+     compact 密度（後述）は 28px に詰める */
+  --jb-line: 32px;
   /* 幅・高さは親に従う。余白やスクロールは使う側が決める */
   background: var(--jb-paper);
   cursor: text;
   font-family:
-    ui-sans-serif,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Helvetica,
-    "Apple Color Emoji",
-    Arial,
+    -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic Pro", "Noto Sans JP", "BIZ UDPGothic",
     sans-serif;
 }
 
@@ -52,8 +49,8 @@
 .jb-editor {
   outline: none;
   font-size: 16px;
-  /* 16px × 1.75 = 28px。marker 類の縦位置はこの行高を前提にしている */
-  line-height: 1.75;
+  line-height: var(--jb-line);
+  letter-spacing: 0.03em;
   color: var(--jb-text);
   caret-color: var(--jb-text);
   white-space: pre-wrap;
@@ -66,13 +63,25 @@
 
 /* ---- block tree layout ---- */
 
+/* 縦の余白（pad/margin）はブロック種別ごとに container の変数で決める。
+   content の padding・placeholder の位置・gutter の縦位置が同じ値を参照する。
+   継承で子ブロックへ漏れないよう、全 container で毎回リセットする */
 [data-block-container] {
   position: relative;
   padding: 1px 0;
+  --jb-block-pad-y: 3px;
+  --jb-block-pad-x: 2px;
+  --jb-block-margin-top: 0px;
+}
+
+/* 段落は前後合算で 16px（sizu の p margin 1em 相当）、list 系は 8px（li 0.5em 相当） */
+[data-block-container]:has(> .jb-container-body > [data-block-content="paragraph"]) {
+  --jb-block-pad-y: 7px;
 }
 
 [data-block-content] {
-  padding: 3px 2px;
+  padding: var(--jb-block-pad-y) var(--jb-block-pad-x);
+  margin-top: var(--jb-block-margin-top);
   border-radius: 4px;
 }
 
@@ -85,10 +94,24 @@
 .jb-gutter {
   position: absolute;
   left: -48px;
-  top: 4px;
+  /* 1 行目のセンター合わせ: container pad 1px + (行高 − ボタン 22px) / 2 */
+  top: calc(var(--jb-block-margin-top) + var(--jb-block-pad-y) + 1px + (var(--jb-line) - 22px) / 2);
   display: flex;
   opacity: 0;
   transition: opacity 100ms ease-out;
+}
+
+/* 行高 32px 前提の式が合わないブロックは実測で個別合わせ */
+[data-block-container]:has(> .jb-container-body > [data-block-content="divider"]) > .jb-gutter {
+  top: 11px;
+}
+
+.jb-callout > .jb-gutter {
+  top: 24px;
+}
+
+[data-block-container]:has(> .jb-container-body > .jb-code) > .jb-gutter {
+  top: 39px;
 }
 
 /* :hover は祖先にも立つため、子孫 container がホバー中の間は自分の gutter を出さない */
@@ -138,36 +161,55 @@
 .jb-placeholder::before {
   content: attr(data-placeholder);
   position: absolute;
-  left: 2px;
-  top: 3px;
+  left: var(--jb-block-pad-x, 2px);
+  top: var(--jb-block-pad-y, 3px);
   color: var(--jb-faint);
   pointer-events: none;
 }
 
 /* ---- block content ---- */
 
+/* sizu 流: 見出しは本文と同じ太さ (400) のまま控えめに拡大し、
+   h2 相当は border-bottom だけで区別する */
 [data-block-content="heading"] {
-  font-weight: 600;
-  line-height: 1.4;
+  font-size: 1.15em;
+  font-weight: 400;
+  line-height: 1.7;
+}
+
+[data-block-container]:has(> .jb-container-body > [data-block-content="heading"]) {
+  --jb-block-margin-top: 18px;
+}
+
+/* sizu の h2 + * / h3 + * 相当: 見出しの直後のブロックにも余白を足す */
+[data-block-container]:has(
+    > .jb-container-body > [data-block-content="heading"]:is([data-level="1"], [data-level="2"])
+  )
+  + [data-block-container] {
+  --jb-block-margin-top: 15px;
+}
+
+[data-block-container]:has(> .jb-container-body > [data-block-content="heading"][data-level="3"])
+  + [data-block-container] {
+  --jb-block-margin-top: 4px;
 }
 
 /* H1 は廃止（既存 doc の level=1 は大見出しとして描画） */
+[data-block-container]:has(
+  > .jb-container-body > [data-block-content="heading"]:is([data-level="1"], [data-level="2"])
+) {
+  --jb-block-pad-y: 8px;
+  --jb-block-margin-top: 26px;
+}
+
 [data-block-content="heading"][data-level="1"],
 [data-block-content="heading"][data-level="2"] {
-  font-size: 1.5em;
-  margin-top: 28px;
-  padding-bottom: 6px;
   border-bottom: 1px solid var(--jb-border);
+  border-radius: 0;
 }
 
-[data-block-content="heading"][data-level="3"] {
-  font-size: 1.25em;
-  margin-top: 18px;
-  color: var(--jb-h3);
-}
-
-[data-block-container]:first-child > .jb-container-body > [data-block-content="heading"] {
-  margin-top: 0;
+[data-block-container]:first-child:has(> .jb-container-body > [data-block-content="heading"]) {
+  --jb-block-margin-top: 0px;
 }
 
 /* flex にすると WebKit が空 block の caret をコンテナ左端に描くため、
@@ -180,7 +222,7 @@
 .jb-todo-checkbox {
   position: absolute;
   left: 4px;
-  top: 9px;
+  top: calc(3px + (var(--jb-line) - 16px) / 2);
   width: 16px;
   height: 16px;
   border: 1.3px solid var(--jb-muted);
@@ -226,7 +268,7 @@
   width: 24px;
   padding-right: 6px;
   text-align: center;
-  line-height: 28px;
+  line-height: var(--jb-line);
 }
 
 [data-block-content="bullet"]::before {
@@ -247,7 +289,7 @@
 .jb-toggle-btn {
   position: absolute;
   left: 2px;
-  top: 6px;
+  top: calc(3px + (var(--jb-line) - 22px) / 2);
   width: 22px;
   height: 22px;
   border-radius: 4px;
@@ -275,11 +317,21 @@
   display: none;
 }
 
+/* sizu 流の引用カード: 薄い紙 + 1px 枠 + 大きめの角丸で本文よりわずかに沈める */
+[data-block-container]:has(> .jb-container-body > [data-block-content="quote"]) {
+  --jb-block-pad-y: 17px;
+  --jb-block-pad-x: 18px;
+  --jb-block-margin-top: 4px;
+}
+
 [data-block-content="quote"] {
-  border-left: 3px solid currentcolor;
-  border-radius: 0;
-  padding-left: 14px;
-  margin: 2px 0;
+  border: 1px solid var(--jb-border);
+  border-radius: 1.2em;
+  background: color-mix(in srgb, var(--jb-ink) 5%, transparent);
+  color: color-mix(in srgb, var(--jb-ink) 85%, transparent);
+  font-size: 0.95em;
+  line-height: 1.9;
+  margin-bottom: 4px;
 }
 
 /* ---- callout（container 全体を包むパネル。子ブロックを内包する） ---- */
@@ -296,8 +348,8 @@
   content: "";
   position: absolute;
   left: 16px;
-  /* padding-top 14px + (行高 28px − アイコン 18px) / 2 */
-  top: 19px;
+  /* padding-top 14px + (行高 − アイコン 18px) / 2 */
+  top: calc(14px + (var(--jb-line) - 18px) / 2);
   width: 18px;
   height: 18px;
   background: var(--jb-muted);
@@ -416,6 +468,7 @@
   font-family: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
   font-size: 0.85em;
   line-height: 1.6;
+  letter-spacing: normal;
   white-space: pre;
   border-radius: 6px;
 }
@@ -428,13 +481,17 @@
 /* ---- divider ---- */
 
 .jb-divider {
-  padding: 12px 2px;
+  padding: 16px 2px 24px;
   cursor: default;
 }
 
+/* sizu の手書き風 hr に寄せた波線。mask で描き、色は --jb-faint を流す */
 .jb-divider hr {
   border: none;
-  border-top: 1px solid var(--jb-border);
+  height: 10px;
+  background: var(--jb-faint);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 10' fill='none' stroke='black' stroke-width='1.2' stroke-linecap='round'%3E%3Cpath d='M0 5 Q 5 1.5 10 5 T 20 5 T 30 5 T 40 5'/%3E%3C/svg%3E")
+    left center / auto 100% repeat-x;
 }
 
 /* ---- inline marks ---- */
@@ -455,15 +512,21 @@
   font-size: inherit;
 }
 
+.jb-editor strong {
+  font-weight: 600;
+}
+
+/* sizu 流: リンクは本文よりわずかに沈めた色 + 点線下線。hover で本文色に浮かせる */
 .jb-editor a {
-  color: inherit;
-  text-decoration: underline;
+  color: color-mix(in srgb, var(--jb-ink) 85%, transparent);
+  text-decoration: underline dotted;
   text-decoration-color: var(--jb-faint);
   text-underline-offset: 2px;
   cursor: pointer;
 }
 
 .jb-editor a:hover {
+  color: var(--jb-text);
   text-decoration-color: var(--jb-muted);
 }
 
@@ -964,4 +1027,72 @@
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+}
+
+/* ---- compact density ----
+   host が祖先に data-density="compact" を立てると、幅・文字サイズはそのままに
+   縦のリズム（行高・padding・margin）だけを詰める（プロジェクトメモ向け）。
+   relaxed（既定）側の :has 規則と specificity が並ぶものがあるため、上書きは
+   必ずこのセクションの順序（first-child リセットが最後）を保つこと */
+
+[data-density="compact"] .jb-root {
+  --jb-line: 28px;
+}
+
+[data-density="compact"]
+  [data-block-container]:has(> .jb-container-body > [data-block-content="paragraph"]) {
+  --jb-block-pad-y: 3px;
+}
+
+[data-density="compact"]
+  [data-block-container]:has(> .jb-container-body > [data-block-content="heading"]) {
+  --jb-block-margin-top: 12px;
+}
+
+[data-density="compact"]
+  [data-block-container]:has(
+    > .jb-container-body > [data-block-content="heading"]:is([data-level="1"], [data-level="2"])
+  ) {
+  --jb-block-pad-y: 4px;
+  --jb-block-margin-top: 18px;
+}
+
+[data-density="compact"]
+  [data-block-container]:has(
+    > .jb-container-body > [data-block-content="heading"]:is([data-level="1"], [data-level="2"])
+  )
+  + [data-block-container] {
+  --jb-block-margin-top: 8px;
+}
+
+[data-density="compact"]
+  [data-block-container]:has(> .jb-container-body > [data-block-content="heading"][data-level="3"])
+  + [data-block-container] {
+  --jb-block-margin-top: 2px;
+}
+
+[data-density="compact"]
+  [data-block-container]:first-child:has(> .jb-container-body > [data-block-content="heading"]) {
+  --jb-block-margin-top: 0px;
+}
+
+[data-density="compact"]
+  [data-block-container]:has(> .jb-container-body > [data-block-content="quote"]) {
+  --jb-block-pad-y: 12px;
+  --jb-block-pad-x: 14px;
+  --jb-block-margin-top: 2px;
+}
+
+[data-density="compact"] .jb-divider {
+  padding: 8px 2px 12px;
+}
+
+[data-density="compact"]
+  [data-block-container]:has(> .jb-container-body > [data-block-content="divider"])
+  > .jb-gutter {
+  top: 3px;
+}
+
+[data-density="compact"] .jb-callout > .jb-gutter {
+  top: 22px;
 }

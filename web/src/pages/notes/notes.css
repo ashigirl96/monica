@@ -1,18 +1,21 @@
 /* Notes 画面 — 「机の上の一枚の紙」。エディタは block editor の紙（--paper）、
-   周囲のサイドバーは寒色ニュートラルの机。インクの基準色は block-editor.css の
-   --jb-ink（foreground を暖色 #9c7b4f へ寄せた色）をそのまま使い、世界観を揃える。 */
-/* block-editor.css の素の導出（text 94% / muted 48% / faint 30%）は紙に沈むので、
-   dark でも一段濃く（=明るく）底上げする。light はさらに下で上書き */
+   周囲のサイドバーも同じ世界観のニュートラルな机。
+   パレットは sizu.me と同じ無彩色: 紙は light=白 / dark=#2c2d2d 相当、
+   インクは前景色の透明度落とし（light .87 / dark .8）。 */
 .notes-screen {
-  --ink: color-mix(in srgb, var(--foreground) 88%, #9c7b4f);
+  --ink: color-mix(in srgb, var(--foreground) 80%, transparent);
   --ink-text: var(--ink);
   --ink-muted: color-mix(in srgb, var(--ink) 62%, transparent);
   --ink-faint: color-mix(in srgb, var(--ink) 44%, transparent);
   --ink-hover: color-mix(in srgb, var(--ink) 6%, transparent);
   --ink-border: color-mix(in srgb, var(--ink) 18%, transparent);
-  --paper: color-mix(in srgb, var(--background) 97%, #c9a35f);
+  /* dark: 真っ黒の background を紙らしい明るさへ持ち上げる。light は白のまま */
+  --paper: color-mix(in srgb, var(--background) 85%, #fff);
   --kind-daily: #5e81ac;
   --kind-essay: #bd6a52;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic Pro", "Noto Sans JP", "BIZ UDPGothic",
+    sans-serif;
 }
 
 .notes-screen .jb-root {
@@ -21,13 +24,17 @@
   --jb-muted: color-mix(in srgb, var(--jb-ink) 62%, transparent);
   --jb-faint: color-mix(in srgb, var(--jb-ink) 44%, transparent);
   --jb-border: color-mix(in srgb, var(--jb-ink) 18%, transparent);
+  /* 紙は main 側の --paper が塗る。二重に塗ると微妙な色差が出る */
+  --jb-paper: transparent;
 }
 
-/* light では透明度導出のインクが紙に沈んで淡すぎるため、階調全体を濃くする（dark は従来値） */
+/* light では透明度導出のインクが紙に沈んで淡すぎるため、階調を濃くする。
+   border だけは sizu 同様ほとんど見えない薄さに留める（dark は従来値） */
 :root[data-theme="light"] .notes-screen {
+  --ink: color-mix(in srgb, var(--foreground) 87%, transparent);
   --ink-muted: color-mix(in srgb, var(--ink) 78%, transparent);
   --ink-faint: color-mix(in srgb, var(--ink) 58%, transparent);
-  --ink-border: color-mix(in srgb, var(--ink) 24%, transparent);
+  --ink-border: color-mix(in srgb, var(--ink) 14%, transparent);
   --kind-daily: #49678f;
   --kind-essay: #a4543f;
 }
@@ -37,6 +44,5 @@
   --jb-text: var(--jb-ink);
   --jb-muted: color-mix(in srgb, var(--jb-ink) 78%, transparent);
   --jb-faint: color-mix(in srgb, var(--jb-ink) 58%, transparent);
-  --jb-border: color-mix(in srgb, var(--jb-ink) 24%, transparent);
-  --jb-h3: color-mix(in srgb, var(--foreground) 68%, #a87848);
+  --jb-border: color-mix(in srgb, var(--jb-ink) 14%, transparent);
 }

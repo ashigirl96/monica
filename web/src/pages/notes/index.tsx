@@ -47,7 +47,7 @@ import {
   todayKey,
   weekOf,
 } from "./dates";
-import { type DraftPatch, EditorHeader } from "./editor-header";
+import { type DraftPatch, EditorHeader, type NoteDensity } from "./editor-header";
 import { NotesCalendar } from "./calendar";
 import { NotesSidebar, ProjectNotesSidebar, summaryTitle } from "./sidebar";
 import { useAutosave } from "./use-autosave";
@@ -98,6 +98,12 @@ function EmptyState() {
   );
 }
 
+const DENSITY_KEY = "monica-notes-density";
+
+function readDensity(): NoteDensity {
+  return localStorage.getItem(DENSITY_KEY) === "compact" ? "compact" : "relaxed";
+}
+
 const SIDEBAR_KEY = "monica-notes-sidebar-w";
 const SIDEBAR_DEFAULT = 400;
 const SIDEBAR_MIN = 260;
@@ -132,6 +138,7 @@ export function NotesPage({ id }: { id: string | null }) {
   const [projectHasMore, setProjectHasMore] = useState(false);
   const [sidebarQuery, setSidebarQuery] = useState("");
   const [sidebarWidth, setSidebarWidth] = useState<number>(readSidebarWidth);
+  const [density, setDensity] = useState<NoteDensity>(readDensity);
   const [resizing, setResizing] = useState(false);
   const resizeStartRef = useRef<{ x: number; w: number } | null>(null);
   const loadingMoreRef = useRef(false);
@@ -232,6 +239,10 @@ export function NotesPage({ id }: { id: string | null }) {
   useEffect(() => {
     localStorage.setItem(SIDEBAR_KEY, String(sidebarWidth));
   }, [sidebarWidth]);
+
+  useEffect(() => {
+    localStorage.setItem(DENSITY_KEY, density);
+  }, [density]);
 
   useEffect(() => {
     if (!resizing) return;
@@ -604,6 +615,10 @@ export function NotesPage({ id }: { id: string | null }) {
         act(() => void undoDelete());
         return;
       }
+      if (e.code === "KeyD") {
+        act(() => setDensity((d) => (d === "compact" ? "relaxed" : "compact")));
+        return;
+      }
       if (e.code !== "KeyJ" && e.code !== "KeyK") return;
       act(() => {
         const ids = (displayedSummaries ?? []).map((s) => s.id);
@@ -637,6 +652,7 @@ export function NotesPage({ id }: { id: string | null }) {
         resizing ? "cursor-col-resize select-none" : ""
       }`}
       style={{ "--sb-w": `${sidebarWidth}px` } as CSSProperties}
+      data-density={density}
     >
       <aside
         className={`w-[var(--sb-w)] shrink-0 overflow-hidden border-r group-data-[zen]/shell:w-0 group-data-[zen]/shell:border-r-0 ${
@@ -712,11 +728,13 @@ export function NotesPage({ id }: { id: string | null }) {
             {noteError}
           </div>
         ) : note ? (
-          <div className="mx-auto w-full max-w-[960px] px-10">
+          <div className="mx-auto w-full max-w-[684px] px-10">
             <EditorHeader
               note={note}
               titleRef={titleRef}
               saveError={saveError}
+              density={density}
+              onToggleDensity={() => setDensity((d) => (d === "compact" ? "relaxed" : "compact"))}
               onDraftChange={onDraftChange}
               onToggleEssay={toggleDailyEssay}
               onOpenProjectPicker={openPromotionPicker}

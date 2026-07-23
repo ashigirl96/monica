@@ -5,6 +5,47 @@ import { kindColor } from "./kind";
 /** essay の title 編集だけが draft 経由。kind の変更は遷移コマンド（⌃Q / ⌃W）の担当 */
 export type DraftPatch = { title?: string };
 
+/** relaxed = sizu 流のゆったりした縦リズム / compact = プロジェクトメモ向けの詰めた縦リズム */
+export type NoteDensity = "relaxed" | "compact";
+
+function DensityToggle({ density, onToggle }: { density: NoteDensity; onToggle: () => void }) {
+  const compact = density === "compact";
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      title={compact ? "Switch to relaxed spacing (⌥D)" : "Switch to compact spacing (⌥D)"}
+      className="rounded-md p-1 text-[var(--ink-faint)] transition-colors duration-100 hover:bg-[var(--ink-hover)] hover:text-[var(--ink-muted)]"
+    >
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 14 14"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        aria-hidden
+      >
+        {compact ? (
+          <>
+            <path d="M2 2.5h10" />
+            <path d="M2 5.5h10" />
+            <path d="M2 8.5h10" />
+            <path d="M2 11.5h10" />
+          </>
+        ) : (
+          <>
+            <path d="M2 3h10" />
+            <path d="M2 7h10" />
+            <path d="M2 11h10" />
+          </>
+        )}
+      </svg>
+    </button>
+  );
+}
+
 function KindChip({ kind, onToggle }: { kind: NoteKind; onToggle: () => void }) {
   // project は確定した分類なのでトグル不可（脱出経路なし）
   const inert = kind.kind === "project";
@@ -55,6 +96,8 @@ export function EditorHeader({
   note,
   titleRef,
   saveError,
+  density,
+  onToggleDensity,
   onDraftChange,
   onToggleEssay,
   onOpenProjectPicker,
@@ -63,6 +106,8 @@ export function EditorHeader({
   note: Note;
   titleRef: RefObject<HTMLInputElement | null>;
   saveError: string | null;
+  density: NoteDensity;
+  onToggleDensity: () => void;
   onDraftChange: (patch: DraftPatch) => void;
   /** daily ↔ essay トグル（⌃Q 相当） */
   onToggleEssay: () => void;
@@ -92,7 +137,7 @@ export function EditorHeader({
               onEnterEditor();
             }
           }}
-          className="w-full bg-transparent text-3xl font-semibold text-[var(--ink-text)] outline-none placeholder:text-[var(--ink-faint)]"
+          className="w-full bg-transparent text-[20px] font-normal tracking-[0.03em] text-[var(--ink-text)] outline-none placeholder:text-[var(--ink-faint)]"
         />
       )}
       <div className="mt-2.5 flex items-center gap-2 text-xs">
@@ -101,6 +146,7 @@ export function EditorHeader({
         <span className="ml-auto font-mono text-[0.7rem] text-[var(--ink-faint)]">
           {note.date.replaceAll("-", ".")}
         </span>
+        <DensityToggle density={density} onToggle={onToggleDensity} />
         {saveError && (
           <span className="text-destructive" title={saveError}>
             Failed to save — changes retry on next edit
