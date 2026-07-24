@@ -1,8 +1,8 @@
 use anyhow::{anyhow, bail, Result};
 use monica_application::ports::NoteStore;
 use monica_domain::{
-    block_subtree, first_line_preview, logical_date, plain_text, DailyNoteCount, Note, NoteId,
-    NoteKind, NoteSummary, RawJson, UpdateNote,
+    block_subtree, first_line_preview, logical_date, plain_text, DailyNoteCount, EssayStatus,
+    Note, NoteId, NoteKind, NoteSummary, RawJson, UpdateNote,
 };
 use rusqlite::{params, Connection, Row, TransactionBehavior};
 
@@ -24,21 +24,33 @@ fn kind_from_columns(
     kind: &str,
     title: Option<String>,
     project_id: Option<String>,
+    status: Option<String>,
 ) -> Result<NoteKind> {
     match (kind, project_id) {
-        ("project", Some(project_id)) => Ok(NoteKind::Project { project_id }),
+        ("project", Some(project_id)) => {
+            Ok(NoteKind::Project { project_id, title: title.unwrap_or_default() })
+        }
         // project の削除（FK ON DELETE SET NULL）で orphan 化した project note は
         // daily に退化して読む。元の date の daily として一覧に現れる。
         ("project", None) => Ok(NoteKind::Daily),
         ("daily", _) => Ok(NoteKind::Daily),
-        ("essay", _) => Ok(NoteKind::Essay { title: title.unwrap_or_default() }),
+        ("essay", _) => {
+            // NULL = writing（v42 は backfill しない）。既知外の値は黙って既定に
+            // 倒さず Err にする（手動 SQL の typo を読み取りで隠さない）。
+            let status = match status {
+                None => EssayStatus::Writing,
+                Some(s) => EssayStatus::parse(&s)
+                    .ok_or_else(|| anyhow!("unknown essay status: {s}"))?,
+            };
+            Ok(NoteKind::Essay { title: title.unwrap_or_default(), status })
+        }
         (other, _) => bail!("unknown note kind: {other}"),
     }
 }
 
 fn kind_from_row(row: &Row<'_>) -> Result<NoteKind> {
     let kind: String = row.get("kind")?;
-    kind_from_columns(&kind, row.get("title")?, row.get("project_id")?)
+    kind_from_columns(&kind, row.get("title")?, row.get("project_id")?, row.get("status")?)
 }
 
 fn note_from_row(row: &Row<'_>) -> Result<Note> {
@@ -126,24 +138,58 @@ pub(crate) fn backfill_notes_fts(conn: &mut Connection) -> Result<()> {
     Ok(())
 }
 
+/// counter 採番 → INSERT → FTS 行確立。create_note / get_or_create_daily_note が
+/// 共有する作成経路（tx は呼び手が張る）。
+fn insert_daily_note(conn: &Connection, date: &str) -> Result<Note> {
+    conn.execute("INSERT INTO note_counter DEFAULT VALUES", [])?;
+    let id = format!("note-{}", conn.last_insert_rowid());
+    // ビジネス上のデフォルト（kind・空 doc・date）はここで明示的に insert する。
+    // v38 の DDL デフォルトはこの経路では使わない（frozen な migration に依存しない）。
+    let note = conn.query_row(
+        &format!(
+            "INSERT INTO notes (id, kind, content, date) VALUES (?1, 'daily', ?2, ?3)
+             RETURNING {NOTE_COLUMNS}"
+        ),
+        params![id, monica_domain::EMPTY_NOTE_DOC, date],
+        |row| Ok(note_from_row(row)),
+    )??;
+    // 全 note が FTS 行を持つ不変条件をここで確立する（backfill ゲートの前提）。
+    upsert_note_fts(conn, &id, monica_domain::EMPTY_NOTE_DOC)?;
+    Ok(note)
+}
+
 impl NoteStore for SqliteStore {
     fn create_note(&mut self, day_boundary_hour: u8) -> Result<Note> {
         let tx = self.conn_mut().transaction()?;
-        tx.execute("INSERT INTO note_counter DEFAULT VALUES", [])?;
-        let id = format!("note-{}", tx.last_insert_rowid());
         let date = logical_today_on(&tx, day_boundary_hour)?;
-        // ビジネス上のデフォルト（kind・空 doc・date）はここで明示的に insert する。
-        // v38 の DDL デフォルトはこの経路では使わない（frozen な migration に依存しない）。
-        let note = tx.query_row(
-            &format!(
-                "INSERT INTO notes (id, kind, content, date) VALUES (?1, 'daily', ?2, ?3)
-                 RETURNING {NOTE_COLUMNS}"
-            ),
-            params![id, monica_domain::EMPTY_NOTE_DOC, date],
-            |row| Ok(note_from_row(row)),
-        )??;
-        // 全 note が FTS 行を持つ不変条件をここで確立する（backfill ゲートの前提）。
-        upsert_note_fts(&tx, &id, monica_domain::EMPTY_NOTE_DOC)?;
+        let note = insert_daily_note(&tx, &date)?;
+        tx.commit()?;
+        Ok(note)
+    }
+
+    fn get_or_create_daily_note(&mut self, date: &str) -> Result<Note> {
+        // Immediate で tx 開始時点から write lock を取る。store は per-request に open
+        // されるため、並行する get-or-create はここで直列化され、SELECT と INSERT の
+        // 間に他の作成が割り込めない（後着は先着の commit 済み行を SELECT で拾う）。
+        let tx = self.conn_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing = {
+            let mut stmt = tx.prepare(&format!(
+                "SELECT {NOTE_COLUMNS} FROM notes
+                 WHERE kind = 'daily' AND date = ?1 AND deleted_at IS NULL
+                 ORDER BY rowid ASC LIMIT 1"
+            ))?;
+            let mut rows = stmt.query(params![date])?;
+            match rows.next()? {
+                Some(row) => Some(note_from_row(row)?),
+                None => None,
+            }
+        };
+        let note = match existing {
+            // 同日に複数の live daily がある場合（旧 /notes の ⌥N 経路の遺産）は
+            // 最古（rowid 最小）で決定的に選ぶ — 手動マージ手順の「最古を残す」と一致。
+            Some(note) => note,
+            None => insert_daily_note(&tx, date)?,
+        };
         tx.commit()?;
         Ok(note)
     }
@@ -296,14 +342,15 @@ impl NoteStore for SqliteStore {
         // 変わっていたら不発（並行遷移の後勝ち上書きを防ぐ）。
         let mut stmt = self.conn().prepare(&format!(
             "UPDATE notes
-             SET kind = ?1, title = ?2, project_id = ?3, updated_at = {SET_NOW}
-             WHERE id = ?4 AND deleted_at IS NULL AND kind = ?5
+             SET kind = ?1, title = ?2, project_id = ?3, status = ?4, updated_at = {SET_NOW}
+             WHERE id = ?5 AND deleted_at IS NULL AND kind = ?6
              RETURNING {NOTE_COLUMNS}"
         ))?;
         let mut rows = stmt.query(params![
             kind.name(),
             kind.title(),
             kind.project_id(),
+            kind.status().map(EssayStatus::as_str),
             id,
             expected_kind
         ])?;
@@ -336,14 +383,16 @@ impl NoteStore for SqliteStore {
         &self,
         from: Option<&str>,
         to: Option<&str>,
+        kind: Option<&str>,
     ) -> Result<Vec<DailyNoteCount>> {
         let mut stmt = self.conn().prepare(
             "SELECT date, COUNT(*) AS count FROM notes
              WHERE deleted_at IS NULL
                AND date >= COALESCE(?1, '') AND date <= COALESCE(?2, '9999-12-31')
+               AND (?3 IS NULL OR kind = ?3)
              GROUP BY date ORDER BY date ASC",
         )?;
-        let rows = stmt.query_map(params![from, to], |row| {
+        let rows = stmt.query_map(params![from, to, kind], |row| {
             Ok(DailyNoteCount { date: row.get("date")?, count: row.get("count")? })
         })?;
         rows.map(|r| Ok(r?)).collect()
@@ -432,11 +481,11 @@ mod tests {
         store.delete_note(id).unwrap();
         assert!(store.get_note(id).unwrap().is_none());
         assert!(store.list_notes(None, None).unwrap().is_empty());
-        assert!(store.daily_note_counts(None, None).unwrap().is_empty());
+        assert!(store.daily_note_counts(None, None, None).unwrap().is_empty());
         // 削除済みへの update / kind 変更は不発（autosave の残弾で復活させない）
         assert!(store.update_note(id, content_update("zombie")).unwrap().is_none());
         assert!(store
-            .set_note_kind(id, "daily", &NoteKind::Essay { title: "zombie".to_string() })
+            .set_note_kind(id, "daily", &NoteKind::Essay { title: "zombie".to_string(), status: EssayStatus::Writing })
             .unwrap()
             .is_none());
 
@@ -511,22 +560,22 @@ mod tests {
         // project: title は無視される
         let project = store.create_note(0).unwrap();
         store
-            .set_note_kind(project.id.as_str(), "daily", &NoteKind::Project { project_id: "o/r".to_string() })
+            .set_note_kind(project.id.as_str(), "daily", &NoteKind::Project { project_id: "o/r".to_string(), title: String::new() })
             .unwrap()
             .unwrap();
         let updated = store.update_note(project.id.as_str(), update.clone()).unwrap().unwrap();
-        assert_eq!(updated.kind, NoteKind::Project { project_id: "o/r".to_string() });
+        assert_eq!(updated.kind, NoteKind::Project { project_id: "o/r".to_string(), title: String::new() });
 
         // essay: Some は置換、None は keep
         let essay = store.create_note(0).unwrap();
         store
-            .set_note_kind(essay.id.as_str(), "daily", &NoteKind::Essay { title: String::new() })
+            .set_note_kind(essay.id.as_str(), "daily", &NoteKind::Essay { title: String::new(), status: EssayStatus::Writing })
             .unwrap()
             .unwrap();
         let updated = store.update_note(essay.id.as_str(), update).unwrap().unwrap();
-        assert_eq!(updated.kind, NoteKind::Essay { title: "ignored".to_string() });
+        assert_eq!(updated.kind, NoteKind::Essay { title: "ignored".to_string(), status: EssayStatus::Writing });
         let kept = store.update_note(essay.id.as_str(), content_update("more")).unwrap().unwrap();
-        assert_eq!(kept.kind, NoteKind::Essay { title: "ignored".to_string() }, "None keeps title");
+        assert_eq!(kept.kind, NoteKind::Essay { title: "ignored".to_string(), status: EssayStatus::Writing }, "None keeps title");
         // 空文字への置換（無題化）も通る
         let cleared = store
             .update_note(
@@ -538,7 +587,7 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-        assert_eq!(cleared.kind, NoteKind::Essay { title: String::new() });
+        assert_eq!(cleared.kind, NoteKind::Essay { title: String::new(), status: EssayStatus::Writing });
     }
 
     #[test]
@@ -549,10 +598,10 @@ mod tests {
         let id = note.id.as_str();
 
         let essay = store
-            .set_note_kind(id, "daily", &NoteKind::Essay { title: "t".to_string() })
+            .set_note_kind(id, "daily", &NoteKind::Essay { title: "t".to_string(), status: EssayStatus::Writing })
             .unwrap()
             .unwrap();
-        assert_eq!(essay.kind, NoteKind::Essay { title: "t".to_string() });
+        assert_eq!(essay.kind, NoteKind::Essay { title: "t".to_string(), status: EssayStatus::Writing });
 
         let daily = store.set_note_kind(id, "essay", &NoteKind::Daily).unwrap().unwrap();
         assert_eq!(daily.kind, NoteKind::Daily);
@@ -563,10 +612,10 @@ mod tests {
         assert_eq!(title, None, "daily 化で title 列も NULL に戻る");
 
         let project = store
-            .set_note_kind(id, "daily", &NoteKind::Project { project_id: "o/r".to_string() })
+            .set_note_kind(id, "daily", &NoteKind::Project { project_id: "o/r".to_string(), title: String::new() })
             .unwrap()
             .unwrap();
-        assert_eq!(project.kind, NoteKind::Project { project_id: "o/r".to_string() });
+        assert_eq!(project.kind, NoteKind::Project { project_id: "o/r".to_string(), title: String::new() });
 
         assert!(store.set_note_kind("note-999", "daily", &NoteKind::Daily).unwrap().is_none());
     }
@@ -579,7 +628,7 @@ mod tests {
             .set_note_kind(
                 note.id.as_str(),
                 "daily",
-                &NoteKind::Project { project_id: "o/missing".to_string() }
+                &NoteKind::Project { project_id: "o/missing".to_string(), title: String::new() }
             )
             .is_err());
     }
@@ -591,17 +640,17 @@ mod tests {
         let note = store.create_note(0).unwrap();
         let id = note.id.as_str();
         store
-            .set_note_kind(id, "daily", &NoteKind::Project { project_id: "o/r".to_string() })
+            .set_note_kind(id, "daily", &NoteKind::Project { project_id: "o/r".to_string(), title: String::new() })
             .unwrap()
             .unwrap();
 
         // 遷移元が変わっていたら不発: daily 前提で検証済みの並行遷移は project を上書きできない
         let stale = store
-            .set_note_kind(id, "daily", &NoteKind::Essay { title: String::new() })
+            .set_note_kind(id, "daily", &NoteKind::Essay { title: String::new(), status: EssayStatus::Writing })
             .unwrap();
         assert!(stale.is_none());
         let read = store.get_note(id).unwrap().unwrap();
-        assert_eq!(read.kind, NoteKind::Project { project_id: "o/r".to_string() });
+        assert_eq!(read.kind, NoteKind::Project { project_id: "o/r".to_string(), title: String::new() });
     }
 
     #[test]
@@ -610,7 +659,7 @@ mod tests {
         seed_project(&store, "o/r");
         let note = store.create_note(0).unwrap();
         store
-            .set_note_kind(note.id.as_str(), "daily", &NoteKind::Project { project_id: "o/r".to_string() })
+            .set_note_kind(note.id.as_str(), "daily", &NoteKind::Project { project_id: "o/r".to_string(), title: String::new() })
             .unwrap()
             .unwrap();
 
@@ -677,7 +726,7 @@ mod tests {
         // note-1..3 を o/r に、note-4 は project なしのまま
         for id in ["note-1", "note-2", "note-3"] {
             store
-                .set_note_kind(id, "daily", &NoteKind::Project { project_id: "o/r".to_string() })
+                .set_note_kind(id, "daily", &NoteKind::Project { project_id: "o/r".to_string(), title: String::new() })
                 .unwrap()
                 .unwrap();
         }
@@ -713,14 +762,14 @@ mod tests {
             store.create_note(0).unwrap();
         }
         store
-            .set_note_kind("note-1", "daily", &NoteKind::Essay { title: "Rust 設計メモ".to_string() })
+            .set_note_kind("note-1", "daily", &NoteKind::Essay { title: "Rust 設計メモ".to_string(), status: EssayStatus::Writing })
             .unwrap()
             .unwrap();
         store
             .set_note_kind(
                 "note-2",
                 "daily",
-                &NoteKind::Project { project_id: "owner/repo".to_string() },
+                &NoteKind::Project { project_id: "owner/repo".to_string(), title: String::new() },
             )
             .unwrap()
             .unwrap();
@@ -780,7 +829,7 @@ mod tests {
         set_date(&store, "note-3", "2026-07-12");
         set_date(&store, "note-4", "2026-07-20");
 
-        let counts = store.daily_note_counts(Some("2026-07-01"), Some("2026-07-15")).unwrap();
+        let counts = store.daily_note_counts(Some("2026-07-01"), Some("2026-07-15"), None).unwrap();
         assert_eq!(
             counts,
             vec![
@@ -791,23 +840,204 @@ mod tests {
     }
 
     #[test]
+    fn get_or_create_daily_creates_then_returns_same() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        let created = store.get_or_create_daily_note("2026-07-20").unwrap();
+        assert_eq!(created.kind, NoteKind::Daily);
+        assert_eq!(created.date, "2026-07-20");
+        assert_eq!(created.content.as_str(), monica_domain::EMPTY_NOTE_DOC);
+
+        let again = store.get_or_create_daily_note("2026-07-20").unwrap();
+        assert_eq!(again.id, created.id, "冪等: 2 回目は既存を返す");
+        assert_eq!(store.list_notes(None, None).unwrap().len(), 1);
+
+        let other_day = store.get_or_create_daily_note("2026-07-21").unwrap();
+        assert_ne!(other_day.id, created.id);
+    }
+
+    #[test]
+    fn get_or_create_daily_picks_oldest_of_duplicates() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        store.create_note(0).unwrap();
+        store.create_note(0).unwrap();
+        set_date(&store, "note-1", "2026-07-20");
+        set_date(&store, "note-2", "2026-07-20");
+
+        let picked = store.get_or_create_daily_note("2026-07-20").unwrap();
+        assert_eq!(picked.id, "note-1", "同日重複（旧 ⌥N 経路の遺産）は最古を決定的に選ぶ");
+    }
+
+    #[test]
+    fn get_or_create_daily_ignores_soft_deleted_and_other_kinds() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        let deleted = store.get_or_create_daily_note("2026-07-20").unwrap();
+        store.delete_note(deleted.id.as_str()).unwrap();
+        let essay = store.create_note(0).unwrap();
+        store
+            .set_note_kind(
+                essay.id.as_str(),
+                "daily",
+                &NoteKind::Essay { title: "t".to_string(), status: EssayStatus::Writing },
+            )
+            .unwrap()
+            .unwrap();
+        set_date(&store, essay.id.as_str(), "2026-07-20");
+
+        let fresh = store.get_or_create_daily_note("2026-07-20").unwrap();
+        assert_ne!(fresh.id, deleted.id, "soft-delete 済み daily は拾わず新規作成");
+        assert_ne!(fresh.id, essay.id, "同日の essay は対象外");
+        assert_eq!(fresh.kind, NoteKind::Daily);
+    }
+
+    #[test]
+    fn get_or_create_daily_establishes_fts_row() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        let note = store.get_or_create_daily_note("2026-07-20").unwrap();
+        store.update_note(note.id.as_str(), content_update("searchable body")).unwrap();
+        assert_eq!(search_ids(&store, "searchable"), vec![note.id.as_str().to_string()]);
+    }
+
+    #[test]
+    fn set_note_kind_status_round_trip() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        let note = store.create_note(0).unwrap();
+        let id = note.id.as_str();
+        let raw_status = |store: &SqliteStore| -> Option<String> {
+            store
+                .conn()
+                .query_row("SELECT status FROM notes WHERE id = ?1", params![id], |r| r.get(0))
+                .unwrap()
+        };
+
+        store
+            .set_note_kind(
+                id,
+                "daily",
+                &NoteKind::Essay { title: String::new(), status: EssayStatus::Writing },
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(raw_status(&store).as_deref(), Some("writing"), "essay 化は明示値を書く");
+
+        // 手動 SQL で finished にした行も読める（⌃Q が来る Phase 2 までの運用経路）
+        store
+            .conn()
+            .execute("UPDATE notes SET status = 'finished' WHERE id = ?1", params![id])
+            .unwrap();
+        let read = store.get_note(id).unwrap().unwrap();
+        assert_eq!(
+            read.kind,
+            NoteKind::Essay { title: String::new(), status: EssayStatus::Finished }
+        );
+
+        // NULL = writing（v42 直後の既存 essay）
+        store.conn().execute("UPDATE notes SET status = NULL WHERE id = ?1", params![id]).unwrap();
+        let read = store.get_note(id).unwrap().unwrap();
+        assert_eq!(
+            read.kind,
+            NoteKind::Essay { title: String::new(), status: EssayStatus::Writing }
+        );
+
+        // essay → daily で status 列も NULL に戻る
+        store
+            .conn()
+            .execute("UPDATE notes SET status = 'finished' WHERE id = ?1", params![id])
+            .unwrap();
+        store.set_note_kind(id, "essay", &NoteKind::Daily).unwrap().unwrap();
+        assert_eq!(raw_status(&store), None, "daily 化で status 列も NULL に戻る");
+
+        // 未知の status は読み取りで Err（typo を既定に隠さない）
+        store
+            .conn()
+            .execute("UPDATE notes SET kind = 'essay', status = 'bogus' WHERE id = ?1", params![id])
+            .unwrap();
+        assert!(store.get_note(id).is_err());
+    }
+
+    #[test]
+    fn project_title_round_trips_via_title_column() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        seed_project(&store, "o/r");
+        let note = store.create_note(0).unwrap();
+        let id = note.id.as_str();
+        store
+            .set_note_kind(
+                id,
+                "daily",
+                &NoteKind::Project { project_id: "o/r".to_string(), title: "knowledge".to_string() },
+            )
+            .unwrap()
+            .unwrap();
+
+        let title: Option<String> = store
+            .conn()
+            .query_row("SELECT title FROM notes WHERE id = ?1", params![id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(title.as_deref(), Some("knowledge"), "project title は essay と同じ title 列");
+        let read = store.get_note(id).unwrap().unwrap();
+        assert_eq!(
+            read.kind,
+            NoteKind::Project { project_id: "o/r".to_string(), title: "knowledge".to_string() }
+        );
+    }
+
+    #[test]
+    fn daily_counts_kind_filter() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        store.create_note(0).unwrap();
+        store.create_note(0).unwrap();
+        store
+            .set_note_kind(
+                "note-2",
+                "daily",
+                &NoteKind::Essay { title: "t".to_string(), status: EssayStatus::Writing },
+            )
+            .unwrap()
+            .unwrap();
+        set_date(&store, "note-1", "2026-07-10");
+        set_date(&store, "note-2", "2026-07-11");
+
+        let all = store.daily_note_counts(None, None, None).unwrap();
+        assert_eq!(all.len(), 2, "kind なしは従来どおり全 kind を数える");
+        let daily_only = store.daily_note_counts(None, None, Some("daily")).unwrap();
+        assert_eq!(
+            daily_only,
+            vec![DailyNoteCount { date: "2026-07-10".to_string(), count: 1 }],
+            "kind='daily' で essay の日が消える"
+        );
+    }
+
+    #[test]
     fn kind_from_columns_covers_all_shapes() {
         assert_eq!(
-            kind_from_columns("project", None, Some("o/r".to_string())).unwrap(),
-            NoteKind::Project { project_id: "o/r".to_string() }
-        );
-        assert_eq!(kind_from_columns("project", None, None).unwrap(), NoteKind::Daily);
-        assert_eq!(kind_from_columns("daily", None, None).unwrap(), NoteKind::Daily);
-        assert_eq!(
-            kind_from_columns("essay", Some("t".to_string()), None).unwrap(),
-            NoteKind::Essay { title: "t".to_string() }
+            kind_from_columns("project", None, Some("o/r".to_string()), None).unwrap(),
+            NoteKind::Project { project_id: "o/r".to_string(), title: String::new() }
         );
         assert_eq!(
-            kind_from_columns("essay", None, None).unwrap(),
-            NoteKind::Essay { title: String::new() },
+            kind_from_columns("project", Some("named".to_string()), Some("o/r".to_string()), None)
+                .unwrap(),
+            NoteKind::Project { project_id: "o/r".to_string(), title: "named".to_string() }
+        );
+        assert_eq!(kind_from_columns("project", None, None, None).unwrap(), NoteKind::Daily);
+        assert_eq!(kind_from_columns("daily", None, None, None).unwrap(), NoteKind::Daily);
+        assert_eq!(
+            kind_from_columns("essay", Some("t".to_string()), None, None).unwrap(),
+            NoteKind::Essay { title: "t".to_string(), status: EssayStatus::Writing },
+            "NULL status は writing として読む（v42 は backfill しない）"
+        );
+        assert_eq!(
+            kind_from_columns("essay", None, None, Some("finished".to_string())).unwrap(),
+            NoteKind::Essay { title: String::new(), status: EssayStatus::Finished },
             "NULL title は無題として読む"
         );
-        assert!(kind_from_columns("memo", None, None).is_err(), "v40 後に旧 kind は存在しない");
+        assert!(
+            kind_from_columns("essay", None, None, Some("drafting".to_string())).is_err(),
+            "未知の status は既定に倒さず Err"
+        );
+        assert!(
+            kind_from_columns("memo", None, None, None).is_err(),
+            "v40 後に旧 kind は存在しない"
+        );
     }
 
     #[test]

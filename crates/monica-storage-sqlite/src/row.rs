@@ -91,6 +91,7 @@ pub(super) fn project_from_row(row: &Row<'_>) -> Result<Project> {
         repo: row.get("repo")?,
         path: row.get("path")?,
         default_branch: row.get("default_branch")?,
+        primary_note_id: row.get("primary_note_id")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
     })

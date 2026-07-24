@@ -34,6 +34,9 @@ pub struct Project {
     pub repo: String,
     pub path: Option<String>,
     pub default_branch: String,
+    /// project の primary note（1:1 の書き殴りノート）。lazy 作成は Phase 3 —
+    /// Phase 1 では列と読み取りだけを持ち、書き込み経路はまだ無い。
+    pub primary_note_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -56,6 +59,7 @@ impl Project {
             repo,
             path: None,
             default_branch: "main".to_string(),
+            primary_note_id: None,
             created_at: String::new(),
             updated_at: String::new(),
         }

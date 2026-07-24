@@ -1,19 +1,48 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum EssayStatus {
+    Writing,
+    Finished,
+}
+
+impl From<monica_domain::EssayStatus> for EssayStatus {
+    fn from(value: monica_domain::EssayStatus) -> Self {
+        match value {
+            monica_domain::EssayStatus::Writing => Self::Writing,
+            monica_domain::EssayStatus::Finished => Self::Finished,
+        }
+    }
+}
+
+impl From<EssayStatus> for monica_domain::EssayStatus {
+    fn from(value: EssayStatus) -> Self {
+        match value {
+            EssayStatus::Writing => Self::Writing,
+            EssayStatus::Finished => Self::Finished,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NoteKind {
-    Project { project_id: String },
+    Project { project_id: String, title: String },
     Daily,
-    Essay { title: String },
+    Essay { title: String, status: EssayStatus },
 }
 
 impl From<monica_domain::NoteKind> for NoteKind {
     fn from(value: monica_domain::NoteKind) -> Self {
         match value {
-            monica_domain::NoteKind::Project { project_id } => Self::Project { project_id },
+            monica_domain::NoteKind::Project { project_id, title } => {
+                Self::Project { project_id, title }
+            }
             monica_domain::NoteKind::Daily => Self::Daily,
-            monica_domain::NoteKind::Essay { title } => Self::Essay { title },
+            monica_domain::NoteKind::Essay { title, status } => {
+                Self::Essay { title, status: status.into() }
+            }
         }
     }
 }
@@ -21,9 +50,9 @@ impl From<monica_domain::NoteKind> for NoteKind {
 impl From<NoteKind> for monica_domain::NoteKind {
     fn from(value: NoteKind) -> Self {
         match value {
-            NoteKind::Project { project_id } => Self::Project { project_id },
+            NoteKind::Project { project_id, title } => Self::Project { project_id, title },
             NoteKind::Daily => Self::Daily,
-            NoteKind::Essay { title } => Self::Essay { title },
+            NoteKind::Essay { title, status } => Self::Essay { title, status: status.into() },
         }
     }
 }
@@ -201,9 +230,19 @@ mod tests {
     #[test]
     fn kind_mirror_roundtrips_and_matches_domain_serde() {
         let cases = [
-            monica_domain::NoteKind::Project { project_id: "o/r".to_string() },
+            monica_domain::NoteKind::Project {
+                project_id: "o/r".to_string(),
+                title: "named".to_string(),
+            },
             monica_domain::NoteKind::Daily,
-            monica_domain::NoteKind::Essay { title: "t".to_string() },
+            monica_domain::NoteKind::Essay {
+                title: "t".to_string(),
+                status: monica_domain::EssayStatus::Writing,
+            },
+            monica_domain::NoteKind::Essay {
+                title: "done".to_string(),
+                status: monica_domain::EssayStatus::Finished,
+            },
         ];
         for domain in cases {
             let api: NoteKind = domain.clone().into();

@@ -5,6 +5,9 @@ use monica_domain::{DailyNoteCount, Note, NoteKind, NoteSummary, RawJson, Update
 pub trait NoteStore {
     /// Creates a daily note with all defaults (id, empty content, logical date, timestamps).
     fn create_note(&mut self, day_boundary_hour: u8) -> Result<Note>;
+    /// `date`（検証済み `YYYY-MM-DD`）の daily note の get-or-create。SELECT と INSERT を
+    /// 原子的に行い、同日に live な daily が複数ある場合は最古（rowid 最小）を返す。
+    fn get_or_create_daily_note(&mut self, date: &str) -> Result<Note>;
     fn get_note(&self, id: &str) -> Result<Option<Note>>;
     /// synced block（transclusion）の解決: note の content から `attrs.id == block_id` の
     /// blockContainer subtree を JSON で返す。note が存在しない/削除済み、または block が
@@ -42,10 +45,13 @@ pub trait NoteStore {
     fn delete_note(&mut self, id: &str) -> Result<bool>;
     /// Clears `deleted_at`; returns `None` when the id does not exist.
     fn restore_note(&mut self, id: &str) -> Result<Option<Note>>;
+    /// date ごとの note 件数。`kind` を渡すとその kind だけを数える（None = 全 kind、
+    /// 旧 /notes カレンダーの従来挙動）。
     fn daily_note_counts(
         &self,
         from: Option<&str>,
         to: Option<&str>,
+        kind: Option<&str>,
     ) -> Result<Vec<DailyNoteCount>>;
     /// day boundary 設定を適用した「今日」の logical date（`YYYY-MM-DD`）。
     fn logical_today(&self, day_boundary_hour: u8) -> Result<String>;

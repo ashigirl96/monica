@@ -110,9 +110,29 @@ export async function restoreNote(id: string): Promise<Note> {
   return res.json();
 }
 
-export async function dailyNoteCounts(from: string, to: string): Promise<DailyNoteCount[]> {
-  const res = await fetch(`/api/notes/daily-counts?from=${from}&to=${to}`);
+export async function dailyNoteCounts(
+  from: string,
+  to: string,
+  kind?: string,
+): Promise<DailyNoteCount[]> {
+  const params = new URLSearchParams({ from, to });
+  if (kind !== undefined) params.set("kind", kind);
+  const res = await fetch(`/api/notes/daily-counts?${params}`);
   if (!res.ok) throw new Error(`Failed to load note counts: ${res.status}`);
+  return res.json();
+}
+
+/** daily が存在する全日付（範囲指定なし・date 昇順）。/daily サイドバーの巡回リスト用 */
+export async function dailyNoteDates(): Promise<DailyNoteCount[]> {
+  const res = await fetch("/api/notes/daily-counts?kind=daily");
+  if (!res.ok) throw new Error(`Failed to load daily dates: ${res.status}`);
+  return res.json();
+}
+
+/** date の daily note の get-or-create（冪等）。開く = 作る。 */
+export async function getDailyNote(date: string): Promise<Note> {
+  const res = await fetch(`/api/notes/daily/${date}`, { method: "PUT" });
+  if (!res.ok) throw new Error(`Failed to open daily note: ${res.status}`);
   return res.json();
 }
 

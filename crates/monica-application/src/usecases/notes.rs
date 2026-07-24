@@ -22,7 +22,8 @@ mod tests {
     use super::*;
     use anyhow::{anyhow, Result};
     use monica_domain::{
-        DailyNoteCount, Note, NoteDocResolver, NoteId, NoteKind, NoteSummary, RawJson, UpdateNote,
+        DailyNoteCount, EssayStatus, Note, NoteDocResolver, NoteId, NoteKind, NoteSummary,
+        RawJson, UpdateNote,
     };
 
     /// get_note / get_note_block だけ本物の値を返す最小 store。他は resolver が触らない。
@@ -33,7 +34,10 @@ mod tests {
             match id {
                 "note-1" => Ok(Some(Note {
                     id: NoteId::from_store("note-1".to_string()),
-                    kind: NoteKind::Essay { title: "My Essay".to_string() },
+                    kind: NoteKind::Essay {
+                        title: "My Essay".to_string(),
+                        status: EssayStatus::Writing,
+                    },
                     content: RawJson::from("{}"),
                     date: "2026-07-19".to_string(),
                     created_at: "2026-07-19T00:00:00.000Z".to_string(),
@@ -52,6 +56,9 @@ mod tests {
         }
 
         fn create_note(&mut self, _: u8) -> Result<Note> {
+            unimplemented!()
+        }
+        fn get_or_create_daily_note(&mut self, _: &str) -> Result<Note> {
             unimplemented!()
         }
         fn list_notes(&self, _: Option<&str>, _: Option<&str>) -> Result<Vec<NoteSummary>> {
@@ -80,6 +87,7 @@ mod tests {
         }
         fn daily_note_counts(
             &self,
+            _: Option<&str>,
             _: Option<&str>,
             _: Option<&str>,
         ) -> Result<Vec<DailyNoteCount>> {

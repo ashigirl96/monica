@@ -102,7 +102,7 @@ export function AppShell({
   active,
   children,
 }: {
-  active: "notes" | "library" | "settings";
+  active: "daily" | "notes" | "library" | "settings";
   children: ReactNode;
 }) {
   // alt+b の zen mode: nav rail と、group-data-[zen]/shell で反応する
@@ -125,6 +125,19 @@ export function AppShell({
         className={`sticky top-0 z-20 flex h-dvh shrink-0 flex-col items-center gap-1.5 overflow-hidden bg-background pt-3 pb-4 transition-[width] duration-200 motion-reduce:transition-none ${zen ? "w-0" : "w-12 border-r"}`}
       >
         <img src="/favicon.png" alt="" className="mb-3 size-7" />
+        <RailLink to="/daily" label="Daily" active={active === "daily"}>
+          <svg
+            className="size-[18px]"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={1.8}
+          >
+            <rect x="4" y="5" width="16" height="15.5" rx="2" />
+            <path strokeLinecap="round" d="M8 3v4M16 3v4M4 9.5h16" />
+            <circle cx="12" cy="15" r="1" fill="currentColor" stroke="none" />
+          </svg>
+        </RailLink>
         <RailLink to="/notes" label="Notes" active={active === "notes"}>
           <svg
             className="size-[18px]"

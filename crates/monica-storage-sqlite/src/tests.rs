@@ -1194,6 +1194,32 @@ fn project_round_trip_and_summary_pr_status_stay_wire_compatible() {
 }
 
 #[test]
+fn project_primary_note_id_reads_back_and_survives_upsert() {
+    use monica_application::ports::NoteStore;
+
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let project = Project::from_repo("owner/repo");
+    let saved = db.upsert_project(&project, &ExecutionProfile::default()).unwrap();
+    assert_eq!(saved.primary_note_id, None, "新規 project は primary note なし");
+
+    // Phase 1 に書き込み経路は無いので生 SQL で仕込む（lazy 作成は Phase 3）
+    let note = db.create_note(0).unwrap();
+    db.conn()
+        .execute(
+            "UPDATE projects SET primary_note_id = ?1 WHERE id = 'owner/repo'",
+            params![note.id.as_str()],
+        )
+        .unwrap();
+    let read = db.get_project("owner/repo").unwrap().unwrap();
+    assert_eq!(read.primary_note_id.as_deref(), Some(note.id.as_str()));
+
+    // 再 upsert（hook 経由の登録更新）が既存の primary_note_id を消さないこと
+    db.upsert_project(&project, &ExecutionProfile::default()).unwrap();
+    let read = db.get_project("owner/repo").unwrap().unwrap();
+    assert_eq!(read.primary_note_id.as_deref(), Some(note.id.as_str()));
+}
+
+#[test]
 fn branch_pull_request_candidate_uses_latest_run_branch_and_project_repo() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let mut project = Project::from_repo("owner/repo");

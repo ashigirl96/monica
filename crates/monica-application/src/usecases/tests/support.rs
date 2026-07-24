@@ -1606,6 +1606,10 @@ impl crate::ports::NoteStore for FakeRepos {
         unimplemented!("no usecase test exercises notes yet")
     }
 
+    fn get_or_create_daily_note(&mut self, _date: &str) -> Result<monica_domain::Note> {
+        unimplemented!("no usecase test exercises notes yet")
+    }
+
     fn get_note(&self, _id: &str) -> Result<Option<monica_domain::Note>> {
         unimplemented!("no usecase test exercises notes yet")
     }
@@ -1672,6 +1676,7 @@ impl crate::ports::NoteStore for FakeRepos {
         &self,
         _from: Option<&str>,
         _to: Option<&str>,
+        _kind: Option<&str>,
     ) -> Result<Vec<monica_domain::DailyNoteCount>> {
         unimplemented!("no usecase test exercises notes yet")
     }
