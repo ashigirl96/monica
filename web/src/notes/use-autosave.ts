@@ -26,11 +26,13 @@ export function useAutosave() {
     }
   }, []);
 
+  /** 保存が全て通ったかを返す。false = pending が残っている（再試行待ち）ので、
+   * 呼び手は「未保存分が消えると困る操作」（削除など）を中断できる。 */
   const flush = useCallback(
-    (keepalive = false): Promise<void> => {
-      const run = async () => {
+    (keepalive = false): Promise<boolean> => {
+      const run = async (): Promise<boolean> => {
         clearTimer();
-        if (pendingRef.current.size === 0) return;
+        if (pendingRef.current.size === 0) return true;
         const batch = pendingRef.current;
         pendingRef.current = new Map();
         let failure: string | null = null;
@@ -48,9 +50,12 @@ export function useAutosave() {
         if (failure !== null && pendingRef.current.size > 0 && timerRef.current === null) {
           timerRef.current = window.setTimeout(() => void flush(), RETRY_MS);
         }
+        return failure === null;
       };
-      flushChainRef.current = flushChainRef.current.then(run);
-      return flushChainRef.current;
+      const settled = flushChainRef.current.then(run);
+      // chain 自体は void で繋ぐ（次の flush が前回の結果を引数として受け取らないように）
+      flushChainRef.current = settled.then(() => undefined);
+      return settled;
     },
     [clearTimer],
   );
@@ -74,6 +79,12 @@ export function useAutosave() {
     [clearTimer],
   );
 
+  /** undo で復活した note の再試行を戻す。同じページに留まったまま復活すると
+   * discard の印が残り続け、以降その id の保存失敗が再試行されなくなるため。 */
+  const resume = useCallback((id: string) => {
+    discardedRef.current.delete(id);
+  }, []);
+
   useEffect(() => {
     const onPageHide = () => void flush(true);
     window.addEventListener("pagehide", onPageHide);
@@ -83,5 +94,5 @@ export function useAutosave() {
     };
   }, [flush]);
 
-  return { schedule, flush, discard, error };
+  return { schedule, flush, discard, resume, error };
 }

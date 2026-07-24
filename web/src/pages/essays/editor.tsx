@@ -60,7 +60,7 @@ export function EssayEditorPage({ id }: { id: string }) {
   const [essays, setEssays] = useState<NoteSummary[] | null>(null);
   // 作成・status 変更の失敗後に一覧を再取得させるためのバージョン
   const [dataVersion, setDataVersion] = useState(0);
-  const { schedule, flush, discard, error: saveError } = useAutosave();
+  const { schedule, flush, discard, resume, error: saveError } = useAutosave();
   const editorHandleRef = useRef<BlockEditorHandle | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   // ⌥N 直後は本文ではなくタイトルへフォーカスする（ノート読み込み後の effect で消費）
@@ -179,12 +179,13 @@ export function EssayEditorPage({ id }: { id: string }) {
   const deleteCurrent = useCallback(async () => {
     const target = noteRef.current;
     if (target === null) return;
-    await flush();
+    // 保存が通っていない状態で消すと ⌥Z で戻せるのはサーバに届いた内容までになる。
+    // flush は失敗しても resolve するので、成否を見て未保存分がある間は削除しない
+    // （saveError が画面に出ているので、保存が回復すれば削除できる）
+    if (!(await flush())) return;
     try {
       await deleteNote(target.id);
     } catch {
-      // flush が失敗して pending が再試行待ちのまま DELETE も落ちた場合、ここで discard すると
-      // 生きている note の未保存分を捨ててしまう。削除成功後にだけ pending を切る
       return;
     }
     // 削除済み note への pending 保存を止める（再試行が 404 を叩き続けるのを防ぐ）
@@ -201,10 +202,11 @@ export function EssayEditorPage({ id }: { id: string }) {
   const undoDelete = useCallback(async () => {
     const restored = await restoreLastDeletedEssay();
     if (restored === undefined) return;
+    resume(restored.id);
     setDataVersion((v) => v + 1);
     seedNote(restored);
     navigate(`/essays/${restored.id}`);
-  }, [seedNote]);
+  }, [seedNote, resume]);
 
   // トグルを直列化する chain（use-autosave の flushChain と同じ手法）。連打時に両方が
   // 同じ status を読んで 2 回のトグルが 1 回に潰れるのを防ぎ、2 回目は 1 回目の結果に

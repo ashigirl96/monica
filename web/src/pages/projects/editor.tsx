@@ -48,7 +48,7 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
   const [dataVersion, setDataVersion] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  const { schedule, flush, discard, error: saveError } = useAutosave();
+  const { schedule, flush, discard, resume, error: saveError } = useAutosave();
   const editorHandleRef = useRef<BlockEditorHandle | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const pendingTitleFocusRef = useRef(false);
@@ -239,13 +239,15 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
     async (targetId: string) => {
       // primary は削除不可
       if (targetId === primaryIdRef.current) return;
-      await flush();
-      discard(targetId);
+      // 未保存分が残っている間は削除しない（⌥Z で戻せるのがサーバに届いた内容までになる）
+      if (!(await flush())) return;
       try {
         await deleteNote(targetId);
       } catch {
         return;
       }
+      // 削除済み note への pending 保存を止める（再試行が 404 を叩き続けるのを防ぐ）
+      discard(targetId);
       undoStackRef.current.push(targetId);
       setRawNotes((list) => list?.filter((s) => s.id !== targetId) ?? list);
       if (noteId === targetId) navigate(projectPath(projectId), { replace: true });
@@ -260,12 +262,15 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
     try {
       restored = await restoreNote(targetId);
     } catch {
+      // 失敗のたびに id を捨てると ⌥Z が二度と効かなくなるので戻す
+      undoStackRef.current.push(targetId);
       return;
     }
+    resume(targetId);
     setDataVersion((v) => v + 1);
     seedNote(restored);
     navigate(projectPath(projectId, targetId));
-  }, [seedNote, projectId]);
+  }, [seedNote, projectId, resume]);
 
   const switchProject = useCallback(
     (nextId: string) => {

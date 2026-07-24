@@ -47,36 +47,41 @@ export function NotesShell({ sidebar, children }: { sidebar: ReactNode; children
     if (resizeStart === null) return;
     let frame = 0;
     let pending: number | null = null;
+    const widthAt = (clientX: number) => clampSidebar(resizeStart.w + (clientX - resizeStart.x));
     const commit = () => {
       frame = 0;
       if (pending !== null) setSidebarWidth(pending);
       pending = null;
     };
-    const stop = () => {
+    // 終了イベントは解放位置を持っているので、それを最後の幅として必ず反映する。
+    // 予約済みフレームを取り消すだけだと、素早いドラッグで幅が変わらないまま終わる
+    const finish = (clientX?: number) => {
       cancelAnimationFrame(frame);
-      // 予約済みフレームを取り消すだけだと、素早いドラッグで最後の幅が反映されずに終わる
+      if (clientX !== undefined) pending = widthAt(clientX);
       commit();
       setResizeStart(null);
     };
     const onMove = (e: PointerEvent) => {
       // WKWebView は pointerup を取りこぼし buttons=0 の move が先に来ることがある
       if (e.buttons === 0) {
-        stop();
+        finish(e.clientX);
         return;
       }
       // --sb-w は .notes-screen（= 本文の祖先）に載るので、1 フレームに複数届く
       // pointermove をそのまま反映すると ProseMirror 全体の style 再計算を余分に回す
-      pending = clampSidebar(resizeStart.w + (e.clientX - resizeStart.x));
+      pending = widthAt(e.clientX);
       if (frame === 0) frame = requestAnimationFrame(commit);
     };
+    const onUp = (e: PointerEvent) => finish(e.clientX);
+    const onCancel = () => finish();
     window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", stop);
-    window.addEventListener("pointercancel", stop);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
     return () => {
       cancelAnimationFrame(frame);
       window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", stop);
-      window.removeEventListener("pointercancel", stop);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
     };
   }, [resizeStart]);
 
