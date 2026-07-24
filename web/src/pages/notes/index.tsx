@@ -728,7 +728,7 @@ export function NotesPage({ id }: { id: string | null }) {
             {noteError}
           </div>
         ) : note ? (
-          <div className="mx-auto w-full max-w-[684px] px-10">
+          <div className="mx-auto w-full max-w-[760px] px-10">
             <EditorHeader
               note={note}
               titleRef={titleRef}

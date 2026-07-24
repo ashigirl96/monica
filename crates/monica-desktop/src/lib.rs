@@ -144,19 +144,19 @@ pub fn run() {
             {
                 log::warn!(target: "monica_app::bridge", "failed to spawn bridge starter thread: {e}");
             }
-            let web_port = if cfg!(debug_assertions) {
-                std::env::var("MONICA_WEB_PORT")
-                    .ok()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(0)
+            let web_bind = if cfg!(debug_assertions) {
+                match std::env::var("MONICA_WEB_PORT").ok().and_then(|v| v.parse().ok()) {
+                    Some(port) => monica_web::WebBind::Fixed(([127, 0, 0, 1], port).into()),
+                    None => monica_web::WebBind::DevScan,
+                }
             } else {
-                monica_web::PORT_PROD
+                monica_web::WebBind::Fixed(([127, 0, 0, 1], monica_web::PORT_PROD).into())
             };
             let (port_tx, port_rx) = std::sync::mpsc::sync_channel(1);
             if let Err(e) = std::thread::Builder::new()
                 .name("monica-web".into())
                 .spawn(move || {
-                    if let Err(e) = monica_web::serve(([127, 0, 0, 1], web_port), port_tx) {
+                    if let Err(e) = monica_web::serve(web_bind, port_tx) {
                         log::error!(target: "monica_desktop::web", "web server failed: {e:?}");
                     }
                 })
@@ -164,7 +164,11 @@ pub fn run() {
                 log::warn!(target: "monica_desktop::web", "failed to spawn web server thread: {e}");
             }
             let web_url = match port_rx.recv_timeout(std::time::Duration::from_secs(5)) {
-                Ok(p) => format!("http://monica.localhost:{p}"),
+                Ok(p) => {
+                    #[cfg(debug_assertions)]
+                    write_web_port_file(p);
+                    format!("http://monica.localhost:{p}")
+                }
                 Err(e) => {
                     log::warn!(
                         target: "monica_desktop::web",
@@ -199,8 +203,31 @@ pub fn run() {
             // bridge は app 同寿命: イベントループ終了で確実に殺す
             if matches!(event, tauri::RunEvent::Exit) {
                 app.state::<bridge::BridgeHandle>().stop();
+                #[cfg(debug_assertions)]
+                let _ = std::fs::remove_file(web_port_file_path());
             }
         });
+}
+
+/// vite dev server が並走中の dev backend の port を発見するための rendezvous ファイル。
+/// bindings_path と同じく、dev バイナリはビルドした worktree で動く前提の焼き込みパス。
+#[cfg(debug_assertions)]
+fn web_port_file_path() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/monica-web-port")
+}
+
+/// 2 行目の PID は読み手側の stale 判定用。SIGINT / SIGTERM 終了では RunEvent::Exit が
+/// 踏まれずファイルが残留する（bridge の kill_stale_bridge と同じ事情）ため、削除ではなく
+/// 生存確認で回収する。
+#[cfg(debug_assertions)]
+fn write_web_port_file(port: u16) {
+    let path = web_port_file_path();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Err(e) = std::fs::write(&path, format!("{port}\n{}\n", std::process::id())) {
+        log::warn!(target: "monica_desktop::web", "failed to write web port file: {e}");
+    }
 }
 
 #[cfg(debug_assertions)]
