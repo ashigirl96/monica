@@ -1606,6 +1606,22 @@ impl crate::ports::NoteStore for FakeRepos {
         unimplemented!("no usecase test exercises notes yet")
     }
 
+    fn create_essay_note(&mut self, _day_boundary_hour: u8) -> Result<monica_domain::Note> {
+        unimplemented!("no usecase test exercises notes yet")
+    }
+
+    fn list_essay_notes(&self) -> Result<Vec<monica_domain::NoteSummary>> {
+        unimplemented!("no usecase test exercises notes yet")
+    }
+
+    fn set_essay_status(
+        &mut self,
+        _id: &str,
+        _status: monica_domain::EssayStatus,
+    ) -> Result<Option<monica_domain::Note>> {
+        unimplemented!("no usecase test exercises notes yet")
+    }
+
     fn get_or_create_daily_note(&mut self, _date: &str) -> Result<monica_domain::Note> {
         unimplemented!("no usecase test exercises notes yet")
     }

@@ -309,6 +309,37 @@ async fn set_note_kind(
     Ok(Json(note.into()))
 }
 
+async fn create_essay() -> Result<(StatusCode, Json<monica_api::ApiNote>), AppError> {
+    let note = blocking(|| {
+        let settings = load_notes_settings()?;
+        let mut monica = open()?;
+        Ok(monica.notes().create_essay(settings.day_boundary_hour)?)
+    })
+    .await?;
+    Ok((StatusCode::CREATED, Json(note.into())))
+}
+
+async fn list_essays() -> Result<Json<Vec<monica_api::ApiNoteSummary>>, AppError> {
+    let list = blocking(|| {
+        let mut monica = open()?;
+        Ok(monica.notes().list_essays()?)
+    })
+    .await?;
+    Ok(Json(list.into_iter().map(Into::into).collect()))
+}
+
+async fn set_essay_status(
+    Path(id): Path<String>,
+    Json(body): Json<monica_api::ApiSetEssayStatus>,
+) -> Result<Json<monica_api::ApiNote>, AppError> {
+    let note = blocking(move || {
+        let mut monica = open()?;
+        Ok(monica.notes().set_essay_status(&id, body.status.into())?)
+    })
+    .await?;
+    Ok(Json(note.into()))
+}
+
 async fn notes_today() -> Result<Json<monica_api::ApiNotesToday>, AppError> {
     let date = blocking(|| {
         let settings = load_notes_settings()?;
@@ -669,6 +700,7 @@ fn build_router(allowed: AllowedHosts) -> Router {
         .route("/api/notes/by-project", get(list_project_notes))
         .route("/api/notes/daily-counts", get(daily_note_counts))
         .route("/api/notes/daily/{date}", put(put_daily_note))
+        .route("/api/notes/essays", get(list_essays).post(create_essay))
         .route("/api/notes/markdown", post(render_note_markdown))
         .route("/api/notes/mentions", get(search_note_mentions))
         .route("/api/notes/mentions/{id}", get(resolve_note_mention))
@@ -678,6 +710,7 @@ fn build_router(allowed: AllowedHosts) -> Router {
             get(get_note).put(update_note).delete(delete_note),
         )
         .route("/api/notes/{id}/kind", post(set_note_kind))
+        .route("/api/notes/{id}/status", put(set_essay_status))
         .route("/api/notes/{id}/restore", post(restore_note))
         .route("/api/notes/{id}/blocks/{block_id}", get(get_note_block))
         .route("/api/ogp", get(get_ogp))
@@ -699,6 +732,9 @@ fn build_router(allowed: AllowedHosts) -> Router {
         .route("/daily", get(spa_index))
         .route("/daily/", get(spa_index))
         .route("/daily/{date}", get(spa_index))
+        .route("/essays", get(spa_index))
+        .route("/essays/", get(spa_index))
+        .route("/essays/{id}", get(spa_index))
         .route("/settings", get(spa_index))
         .route("/assets/{*path}", get(spa_asset))
         .route("/favicon.png", get(favicon))
@@ -1130,6 +1166,12 @@ mod tests {
         serde_json::from_str(&body_string(response).await).unwrap()
     }
 
+    async fn create_essay_via_api() -> serde_json::Value {
+        let response = app().oneshot(post_req("/api/notes/essays")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        serde_json::from_str(&body_string(response).await).unwrap()
+    }
+
     async fn post_json_req(uri: &str, body: &serde_json::Value) -> Request<Body> {
         Request::builder()
             .method("POST")
@@ -1372,6 +1414,112 @@ mod tests {
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
         let response = set_kind("note-999999", serde_json::json!({"kind": "essay"})).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn post_create_essay_returns_writing_defaults() {
+        let response = app().oneshot(post_req("/api/notes/essays")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let created: serde_json::Value =
+            serde_json::from_str(&body_string(response).await).unwrap();
+        assert!(created["id"].as_str().unwrap().starts_with("note-"));
+        assert_eq!(
+            created["kind"],
+            serde_json::json!({"kind": "essay", "title": "", "status": "writing"})
+        );
+        assert_eq!(created["content"]["type"], "doc");
+        assert_eq!(created["date"].as_str().unwrap().len(), 10);
+    }
+
+    #[tokio::test]
+    async fn list_essays_returns_only_essays_newest_updated_first() {
+        // 並列テストの note と共存するため、全体一致ではなく自分の id の有無と相対順で検証する
+        let older = create_essay_via_api().await;
+        let older_id = older["id"].as_str().unwrap();
+        let newer = create_essay_via_api().await;
+        let newer_id = newer["id"].as_str().unwrap();
+        let daily = create_note_via_api().await;
+        let daily_id = daily["id"].as_str().unwrap();
+        // older を後から更新して updated_at を最新にする（作成順の逆 = updated_at 順の検証）
+        put_note(older_id, Some("bumped"), doc_with_lines(&["essay preview"])).await;
+
+        let response = app().oneshot(get_req("/api/notes/essays")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let list: serde_json::Value = serde_json::from_str(&body_string(response).await).unwrap();
+        let list = list.as_array().unwrap();
+        assert!(list.iter().all(|n| n["id"] != daily_id), "daily は essays 一覧に出ない");
+        let pos = |id: &str| list.iter().position(|n| n["id"] == id);
+        let older_pos = pos(older_id).expect("updated essay must be listed");
+        let newer_pos = pos(newer_id).expect("created essay must be listed");
+        assert!(older_pos < newer_pos, "updated_at 降順（更新した方が先）");
+        let entry = &list[older_pos];
+        assert_eq!(
+            entry["kind"],
+            serde_json::json!({"kind": "essay", "title": "bumped", "status": "writing"})
+        );
+        assert_eq!(entry["preview"], "essay preview");
+        assert!(entry.get("content").is_none(), "summary must not ship content");
+    }
+
+    #[tokio::test]
+    async fn put_status_toggles_essay_and_rejects_non_essay() {
+        let created = create_essay_via_api().await;
+        let id = created["id"].as_str().unwrap();
+
+        let response = app()
+            .oneshot(put_json_req(
+                &format!("/api/notes/{id}/status"),
+                &serde_json::json!({"status": "finished"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let updated: serde_json::Value =
+            serde_json::from_str(&body_string(response).await).unwrap();
+        assert_eq!(
+            updated["kind"],
+            serde_json::json!({"kind": "essay", "title": "", "status": "finished"})
+        );
+        let fetched = fetch_note(id).await;
+        assert_eq!(fetched["kind"]["status"], "finished");
+
+        // 逆方向（finished → writing）
+        let response = app()
+            .oneshot(put_json_req(
+                &format!("/api/notes/{id}/status"),
+                &serde_json::json!({"status": "writing"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // daily は 409、不在は 404、未知の status は 422
+        let daily = create_note_via_api().await;
+        let daily_id = daily["id"].as_str().unwrap();
+        let response = app()
+            .oneshot(put_json_req(
+                &format!("/api/notes/{daily_id}/status"),
+                &serde_json::json!({"status": "finished"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let response = app()
+            .oneshot(put_json_req(
+                "/api/notes/note-999999/status",
+                &serde_json::json!({"status": "finished"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let response = app()
+            .oneshot(put_json_req(
+                &format!("/api/notes/{id}/status"),
+                &serde_json::json!({"status": "bogus"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     #[tokio::test]
@@ -2045,6 +2193,7 @@ mod tests {
             .register::<monica_api::ApiNoteMention>()
             .register::<monica_api::ApiNoteBlock>()
             .register::<monica_api::ApiSetNoteKind>()
+            .register::<monica_api::ApiSetEssayStatus>()
             .register::<monica_api::ApiNotesToday>()
             .register::<monica_api::NotesSettings>()
             .register::<monica_api::ApiUpdateNote>()

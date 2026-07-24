@@ -474,12 +474,6 @@ export function NotesPage({ id }: { id: string | null }) {
     [flush, seedNote],
   );
 
-  const toggleDailyEssay = useCallback(() => {
-    const kind = noteRef.current?.kind.kind;
-    if (kind !== "daily" && kind !== "essay") return; // project からの脱出経路なし
-    void applyKindTransition({ kind: kind === "daily" ? "essay" : "daily" });
-  }, [applyKindTransition]);
-
   const openPromotionPicker = useCallback(() => {
     // 昇格は daily → project のみ（essay は一度 daily に戻す）
     if (noteRef.current?.kind.kind !== "daily") return;
@@ -512,14 +506,11 @@ export function NotesPage({ id }: { id: string | null }) {
         else toggleProjectFilter();
         return;
       }
-      if (ctrlOnly && picker === null && hasNote) {
-        if (e.code === "KeyQ" || e.code === "KeyW") {
-          e.preventDefault();
-          e.stopPropagation();
-          if (e.code === "KeyQ") toggleDailyEssay();
-          else openPromotionPicker();
-          return;
-        }
+      if (ctrlOnly && picker === null && hasNote && e.code === "KeyW") {
+        e.preventDefault();
+        e.stopPropagation();
+        openPromotionPicker();
+        return;
       }
       // picker 表示中のキー（^w クリア・↑↓・Enter 等）は picker 自身に任せる
       if (picker !== null) return;
@@ -568,7 +559,6 @@ export function NotesPage({ id }: { id: string | null }) {
     selectNote,
     deleteById,
     undoDelete,
-    toggleDailyEssay,
     openPromotionPicker,
     toggleProjectFilter,
     picker,
@@ -664,7 +654,6 @@ export function NotesPage({ id }: { id: string | null }) {
               density={density}
               onToggleDensity={() => setDensity((d) => (d === "compact" ? "relaxed" : "compact"))}
               onDraftChange={onDraftChange}
-              onToggleEssay={toggleDailyEssay}
               onOpenProjectPicker={openPromotionPicker}
               onEnterEditor={focusEditorStart}
             />

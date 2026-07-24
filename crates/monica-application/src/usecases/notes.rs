@@ -58,6 +58,15 @@ mod tests {
         fn create_note(&mut self, _: u8) -> Result<Note> {
             unimplemented!()
         }
+        fn create_essay_note(&mut self, _: u8) -> Result<Note> {
+            unimplemented!()
+        }
+        fn list_essay_notes(&self) -> Result<Vec<NoteSummary>> {
+            unimplemented!()
+        }
+        fn set_essay_status(&mut self, _: &str, _: EssayStatus) -> Result<Option<Note>> {
+            unimplemented!()
+        }
         fn get_or_create_daily_note(&mut self, _: &str) -> Result<Note> {
             unimplemented!()
         }

@@ -76,6 +76,12 @@ impl From<SetNoteKind> for monica_domain::NoteKindTarget {
     }
 }
 
+/// essay status 変更リクエスト（⌃Q）。トグルではなく冪等な明示 set。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct SetEssayStatus {
+    pub status: EssayStatus,
+}
+
 fn content_value(content: monica_domain::RawJson) -> serde_json::Value {
     serde_json::from_str(content.as_str()).unwrap_or_else(|_| {
         serde_json::from_str(monica_domain::EMPTY_NOTE_DOC).expect("EMPTY_NOTE_DOC is valid JSON")

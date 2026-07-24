@@ -1,6 +1,7 @@
 import type {
   Asset,
   DailyNoteCount,
+  EssayStatus,
   Explanation,
   LinkPreview,
   Note,
@@ -133,6 +134,29 @@ export async function dailyNoteDates(): Promise<DailyNoteCount[]> {
 export async function getDailyNote(date: string): Promise<Note> {
   const res = await fetch(`/api/notes/daily/${date}`, { method: "PUT" });
   if (!res.ok) throw new Error(`Failed to open daily note: ${res.status}`);
+  return res.json();
+}
+
+/** 全 essay（全 status、updated_at 降順）。/essays 一覧とエディタサイドバーの共有ソース */
+export async function listEssays(): Promise<NoteSummary[]> {
+  const res = await fetch("/api/notes/essays");
+  if (!res.ok) throw new Error(`Failed to list essays: ${res.status}`);
+  return res.json();
+}
+
+export async function createEssay(): Promise<Note> {
+  const res = await fetch("/api/notes/essays", { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to create essay: ${res.status}`);
+  return res.json();
+}
+
+export async function setEssayStatus(id: string, status: EssayStatus): Promise<Note> {
+  const res = await fetch(`/api/notes/${id}/status`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw new Error(`Failed to change essay status: ${res.status}`);
   return res.json();
 }
 

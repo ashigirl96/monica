@@ -1,10 +1,17 @@
 use anyhow::Result;
 
-use monica_domain::{DailyNoteCount, Note, NoteKind, NoteSummary, RawJson, UpdateNote};
+use monica_domain::{DailyNoteCount, EssayStatus, Note, NoteKind, NoteSummary, RawJson, UpdateNote};
 
 pub trait NoteStore {
     /// Creates a daily note with all defaults (id, empty content, logical date, timestamps).
     fn create_note(&mut self, day_boundary_hour: u8) -> Result<Note>;
+    /// Creates an essay note (empty title, explicit `writing` status) dated logical today.
+    fn create_essay_note(&mut self, day_boundary_hour: u8) -> Result<Note>;
+    /// Live essays（全 status）を updated_at 降順で返す。/essays 一覧・サイドバーの共有ソース。
+    fn list_essay_notes(&self) -> Result<Vec<NoteSummary>>;
+    /// status 列だけを書く（title に触れない — autosave の title 置換と競合しない）。
+    /// Returns `None` when the note does not exist, is deleted, or is not an essay.
+    fn set_essay_status(&mut self, id: &str, status: EssayStatus) -> Result<Option<Note>>;
     /// `date`（検証済み `YYYY-MM-DD`）の daily note の get-or-create。SELECT と INSERT を
     /// 原子的に行い、同日に live な daily が複数ある場合は最古（rowid 最小）を返す。
     fn get_or_create_daily_note(&mut self, date: &str) -> Result<Note>;

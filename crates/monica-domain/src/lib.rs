@@ -35,8 +35,9 @@ pub use external_reference::{ExternalIssue, ExternalReference, RefType};
 pub use ids::{ExplanationId, NoteId, TaskId, TaskRunId};
 pub use json::RawJson;
 pub use note::{
-    is_valid_date, logical_date, DailyNoteCount, EssayStatus, KindTransitionError, Note, NoteKind,
-    NoteKindTarget, NotePage, NoteSummary, UpdateNote, EMPTY_NOTE_DOC,
+    is_valid_date, logical_date, DailyNoteCount, EssayStatus, EssayStatusError,
+    KindTransitionError, Note, NoteKind, NoteKindTarget, NotePage, NoteSummary, UpdateNote,
+    EMPTY_NOTE_DOC,
 };
 pub use note_doc::{
     block_subtree, first_line_preview, plain_text, BlockContainerAttrs, BlockNode, BookmarkAttrs,

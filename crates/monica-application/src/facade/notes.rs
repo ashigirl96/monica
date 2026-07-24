@@ -1,6 +1,6 @@
 use monica_domain::{
-    to_markdown, DailyNoteCount, Note, NoteId, NoteKindTarget, NotePage, NoteSummary, RawJson,
-    SyncedBlockMode, UpdateNote,
+    to_markdown, DailyNoteCount, EssayStatus, Note, NoteId, NoteKindTarget, NotePage, NoteSummary,
+    RawJson, SyncedBlockMode, UpdateNote,
 };
 
 use super::Backend;
@@ -28,6 +28,35 @@ pub struct NoteService<'a, B: Backend> {
 impl<B: Backend> NoteService<'_, B> {
     pub fn create_note(&mut self, day_boundary_hour: u8) -> ApplicationResult<Note> {
         Ok(self.m.repos.create_note(day_boundary_hour)?)
+    }
+
+    /// ⌥N（/essays）の新規 essay。空 title・status Writing で logical today に作る。
+    pub fn create_essay(&mut self, day_boundary_hour: u8) -> ApplicationResult<Note> {
+        Ok(self.m.repos.create_essay_note(day_boundary_hour)?)
+    }
+
+    /// /essays 一覧とエディタサイドバーの共有ソース（全 status、updated_at 降順）。
+    /// writing だけへの絞り込みは表示都合なのでフロントの責務。
+    pub fn list_essays(&mut self) -> ApplicationResult<Vec<NoteSummary>> {
+        Ok(self.m.repos.list_essay_notes()?)
+    }
+
+    pub fn set_essay_status(
+        &mut self,
+        id: &str,
+        status: EssayStatus,
+    ) -> ApplicationResult<Note> {
+        NoteId::parse(id)?;
+        let note = self
+            .m
+            .repos
+            .get_note(id)?
+            .ok_or_else(|| ApplicationError::not_found(format!("note {id} not found")))?;
+        note.kind.with_status(status).map_err(|e| ApplicationError::conflict(e.to_string()))?;
+        // store 側も kind = 'essay' 条件付き。get と write の間に kind 遷移が滑り込んだら不発。
+        self.m.repos.set_essay_status(id, status)?.ok_or_else(|| {
+            ApplicationError::conflict(format!("note {id} kind changed concurrently"))
+        })
     }
 
     /// daily の get-or-create の唯一の入口。「1日1つ」の不変条件は DB 制約ではなく
