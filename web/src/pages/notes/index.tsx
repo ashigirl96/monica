@@ -43,6 +43,7 @@ import { takePendingBlockTarget } from "./block-jump";
 import { type DraftPatch, EditorHeader, type NoteDensity } from "./editor-header";
 import { NotesCalendar } from "./calendar";
 import {
+  cycleSelect,
   fetchLinkMetadata,
   persistableContent,
   searchNoteMentions,
@@ -463,7 +464,6 @@ export function NotesPage({ id }: { id: string | null }) {
       await flush();
       try {
         const updated = await setNoteKind(current.id, target);
-        if (updated.kind.kind === "essay") pendingTitleFocusRef.current = true;
         seedNote(updated);
         setDataVersion((v) => v + 1);
       } catch {
@@ -475,7 +475,7 @@ export function NotesPage({ id }: { id: string | null }) {
   );
 
   const openPromotionPicker = useCallback(() => {
-    // 昇格は daily → project のみ（essay は一度 daily に戻す）
+    // 昇格は daily → project のみ
     if (noteRef.current?.kind.kind !== "daily") return;
     openPicker("project");
   }, [openPicker]);
@@ -541,12 +541,8 @@ export function NotesPage({ id }: { id: string | null }) {
       if (e.code !== "KeyJ" && e.code !== "KeyK") return;
       act(() => {
         const ids = (displayedSummaries ?? []).map((s) => s.id);
-        if (ids.length === 0) return;
-        const step = e.code === "KeyJ" ? 1 : -1;
-        const found = id === null ? -1 : ids.indexOf(id);
-        // 未選択（または表示範囲外の id）は「リスト先頭の外側」扱い: J で先頭、K で末尾へ
-        const idx = found === -1 ? (step === 1 ? -1 : 0) : found;
-        selectNote(ids[(idx + step + ids.length) % ids.length]);
+        const next = cycleSelect(ids, id, e.code === "KeyJ" ? 1 : -1);
+        if (next !== undefined) selectNote(next);
       });
     }
     window.addEventListener("keydown", onKey, true);

@@ -12,6 +12,7 @@ import {
 import { navigate } from "@/app";
 import type { Note, NoteSummary } from "@/types.gen";
 import {
+  cycleSelect,
   fetchLinkMetadata,
   persistableContent,
   searchNoteMentions,
@@ -19,6 +20,7 @@ import {
 } from "../notes/editor-support";
 import { useAutosave } from "../notes/use-autosave";
 import { EssaysSidebar } from "./sidebar";
+import { essayStatus } from "./support";
 import "../notes/notes.css";
 
 function StatusChip({
@@ -126,10 +128,7 @@ export function EssayEditorPage({ id }: { id: string }) {
   }, [note]);
 
   const sidebarEssays = useMemo(
-    () =>
-      essays === null
-        ? null
-        : essays.filter((s) => s.kind.kind === "essay" && s.kind.status === "writing"),
+    () => (essays === null ? null : essays.filter((s) => essayStatus(s) === "writing")),
     [essays],
   );
   const writingIds = useMemo(() => (sidebarEssays ?? []).map((s) => s.id), [sidebarEssays]);
@@ -208,12 +207,9 @@ export function EssayEditorPage({ id }: { id: string }) {
       if (e.code !== "KeyJ" && e.code !== "KeyK") return;
       e.preventDefault();
       e.stopPropagation();
-      if (writingIds.length === 0) return;
-      const step = e.code === "KeyJ" ? 1 : -1;
-      const found = writingIds.indexOf(id);
-      // リスト外（finished を開いている等）は「リスト先頭の外側」扱い: J で先頭、K で末尾へ
-      const idx = found === -1 ? (step === 1 ? -1 : 0) : found;
-      selectEssay(writingIds[(idx + step + writingIds.length) % writingIds.length]);
+      // finished を開いているときはリスト外扱い（cycleSelect が先頭/末尾に入れる）
+      const next = cycleSelect(writingIds, id, e.code === "KeyJ" ? 1 : -1);
+      if (next !== undefined) selectEssay(next);
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);

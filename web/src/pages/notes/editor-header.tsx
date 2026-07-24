@@ -2,7 +2,7 @@ import type { RefObject } from "react";
 import type { Note, NoteKind } from "@/types.gen";
 import { kindColor } from "./kind";
 
-/** essay の title 編集だけが draft 経由。kind の変更は遷移コマンド（⌃Q / ⌃W）の担当 */
+/** essay の title 編集だけが draft 経由。kind の変更は昇格コマンド（⌃W）の担当 */
 export type DraftPatch = { title?: string };
 
 /** relaxed = sizu 流のゆったりした縦リズム / compact = プロジェクトメモ向けの詰めた縦リズム */

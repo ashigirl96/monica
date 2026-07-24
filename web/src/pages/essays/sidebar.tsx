@@ -1,6 +1,6 @@
 import { spaLinkClick } from "@/app";
 import type { NoteSummary } from "@/types.gen";
-import { essayTitle } from "./support";
+import { summaryTitle } from "../notes/sidebar";
 
 /** writing の essay だけを並べる（finished は /essays 一覧から開く）。⌥K/J はこのリスト内を巡回 */
 export function EssaysSidebar({
@@ -26,31 +26,26 @@ export function EssaysSidebar({
       <div className="flex-1 overflow-y-auto px-2 py-2">
         {(essays ?? []).map((s) => {
           const selected = s.id === selectedId;
-          const title = essayTitle(s) || s.preview || "Untitled";
           return (
-            <div
+            <button
               key={s.id}
-              className={`group relative flex items-center rounded-md transition-colors duration-100 ${
+              type="button"
+              onClick={() => onSelect(s.id)}
+              className={`relative block w-full rounded-md px-2.5 py-1.5 text-left transition-colors duration-100 ${
                 selected ? "bg-[var(--ink-hover)]" : "hover:bg-[var(--ink-hover)]"
               }`}
             >
               {selected && (
                 <span className="absolute top-1.5 bottom-1.5 left-0 w-0.5 rounded-full bg-[var(--ink-muted)]" />
               )}
-              <button
-                type="button"
-                onClick={() => onSelect(s.id)}
-                className="min-w-0 flex-1 px-2.5 py-1.5 text-left"
+              <span
+                className={`block truncate text-[0.8rem] ${
+                  selected ? "text-[var(--ink-text)]" : "text-[var(--ink-muted)]"
+                }`}
               >
-                <span
-                  className={`block truncate text-[0.8rem] ${
-                    selected ? "text-[var(--ink-text)]" : "text-[var(--ink-muted)]"
-                  }`}
-                >
-                  {title}
-                </span>
-              </button>
-            </div>
+                {summaryTitle(s)}
+              </span>
+            </button>
           );
         })}
         {essays !== null && essays.length === 0 && (

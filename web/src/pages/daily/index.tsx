@@ -22,6 +22,7 @@ import {
   todayKey,
 } from "../notes/dates";
 import {
+  cycleSelect,
   fetchLinkMetadata,
   persistableContent,
   searchNoteMentions,
@@ -183,13 +184,8 @@ export function DailyPage({ date }: { date: string | null }) {
       if (e.code !== "KeyJ" && e.code !== "KeyK") return;
       e.preventDefault();
       e.stopPropagation();
-      const list = sidebarDates ?? [];
-      if (list.length === 0) return;
-      const step = e.code === "KeyJ" ? 1 : -1;
-      const found = date === null ? -1 : list.indexOf(date);
-      // 未選択（またはリスト外の日付）は「リスト先頭の外側」扱い: J で先頭、K で末尾へ
-      const idx = found === -1 ? (step === 1 ? -1 : 0) : found;
-      selectDate(list[(idx + step + list.length) % list.length]);
+      const next = cycleSelect(sidebarDates ?? [], date, e.code === "KeyJ" ? 1 : -1);
+      if (next !== undefined) selectDate(next);
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
