@@ -1412,7 +1412,9 @@ mod tests {
         assert!(created["id"].as_str().unwrap().starts_with("note-"));
         assert_eq!(
             created["kind"],
-            serde_json::json!({"kind": "essay", "title": "", "status": "writing"})
+            serde_json::json!({
+                "kind": "essay", "title": "", "status": "writing", "next_status": "finished"
+            })
         );
         assert_eq!(created["content"]["type"], "doc");
         assert_eq!(created["date"].as_str().unwrap().len(), 10);
@@ -1442,7 +1444,9 @@ mod tests {
         let entry = &list[older_pos];
         assert_eq!(
             entry["kind"],
-            serde_json::json!({"kind": "essay", "title": "bumped", "status": "writing"})
+            serde_json::json!({
+                "kind": "essay", "title": "bumped", "status": "writing", "next_status": "finished"
+            })
         );
         assert_eq!(entry["preview"], "essay preview");
         assert!(entry.get("content").is_none(), "summary must not ship content");
@@ -1465,7 +1469,9 @@ mod tests {
             serde_json::from_str(&body_string(response).await).unwrap();
         assert_eq!(
             updated["kind"],
-            serde_json::json!({"kind": "essay", "title": "", "status": "finished"})
+            serde_json::json!({
+                "kind": "essay", "title": "", "status": "finished", "next_status": "writing"
+            })
         );
         let fetched = fetch_note(id).await;
         assert_eq!(fetched["kind"]["status"], "finished");

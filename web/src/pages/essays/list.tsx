@@ -91,10 +91,10 @@ export function EssaysListPage() {
   }, [dataVersion]);
 
   const toggleStatus = useCallback(async (summary: NoteSummary) => {
-    const current = essayStatus(summary);
-    if (current === null) return;
+    const next = nextEssayStatus(summary);
+    if (next === null) return;
     try {
-      const updated = await setEssayStatus(summary.id, nextEssayStatus(current));
+      const updated = await setEssayStatus(summary.id, next);
       setEssays((list) => patchEssayKind(list, summary.id, updated.kind));
     } catch {
       // 409/404 は手元の一覧が古いだけ。再取得で追いつく
@@ -169,8 +169,11 @@ export function EssaysListPage() {
           y={menu.y}
           items={[
             {
+              // ラベルも遷移先から作る（表示と実際に送る status が食い違わないように）
               label:
-                essayStatus(menu.target) === "writing" ? "Mark as finished" : "Move to writing",
+                nextEssayStatus(menu.target) === "finished"
+                  ? "Mark as finished"
+                  : "Move to writing",
               onSelect: () => void toggleStatus(menu.target),
             },
             {

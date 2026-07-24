@@ -6,9 +6,9 @@ export function essayStatus(summary: NoteSummary): EssayStatus | null {
   return summary.kind.kind === "essay" ? summary.kind.status : null;
 }
 
-/** ⌃Q・コンテキストメニューが共有する writing ↔ finished の遷移先 */
-export function nextEssayStatus(status: EssayStatus): EssayStatus {
-  return status === "writing" ? "finished" : "writing";
+/** 次に送る status。遷移規則は domain の `EssayStatus::toggled` が持つので導出せず受け取る */
+export function nextEssayStatus(summary: NoteSummary): EssayStatus | null {
+  return summary.kind.kind === "essay" ? summary.kind.next_status : null;
 }
 
 export function essayTitle(summary: NoteSummary): string {
@@ -47,9 +47,13 @@ export function pushDeletedEssay(id: string) {
 export async function restoreLastDeletedEssay(): Promise<Note | undefined> {
   const id = deletedEssayIds.pop();
   if (id === undefined) return undefined;
+  const index = deletedEssayIds.length;
   try {
     return await restoreNote(id);
   } catch {
+    // 失敗のたびに id を捨てると ⌥Z が二度と効かなくなる。抜いた位置に戻して押し直せるようにする
+    // （待っている間に別の削除が積まれても順序が壊れないよう index 指定で戻す）
+    deletedEssayIds.splice(index, 0, id);
     return undefined;
   }
 }

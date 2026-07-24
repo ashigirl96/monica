@@ -19,7 +19,6 @@ import { EssaysSidebar } from "./sidebar";
 import {
   dropEssay,
   essayStatus,
-  nextEssayStatus,
   patchEssayKind,
   pushDeletedEssay,
   restoreLastDeletedEssay,
@@ -181,13 +180,15 @@ export function EssayEditorPage({ id }: { id: string }) {
     const target = noteRef.current;
     if (target === null) return;
     await flush();
-    // 削除済み note への pending 保存を止める（再試行が 404 を叩き続けるのを防ぐ）
-    discard(target.id);
     try {
       await deleteNote(target.id);
     } catch {
+      // flush が失敗して pending が再試行待ちのまま DELETE も落ちた場合、ここで discard すると
+      // 生きている note の未保存分を捨ててしまう。削除成功後にだけ pending を切る
       return;
     }
+    // 削除済み note への pending 保存を止める（再試行が 404 を叩き続けるのを防ぐ）
+    discard(target.id);
     pushDeletedEssay(target.id);
     setEssays((list) => dropEssay(list, target.id));
     // writing はサイドバーの次へ送って書く流れを切らない。finished（サイドバー外）は
@@ -220,7 +221,7 @@ export function EssayEditorPage({ id }: { id: string }) {
       // 失敗時の一覧再取得が編集前の preview に巻き戻らないように）
       await flush();
       try {
-        const updated = await setEssayStatus(current.id, nextEssayStatus(current.kind.status));
+        const updated = await setEssayStatus(current.id, current.kind.next_status);
         // エディタは開いたまま status チップとサイドバー（writing のみ）だけが変わる。
         // content は seed しない — 直前の flush が失敗して pending が再試行待ちのとき、
         // status-only レスポンスの古い content で contentRef を巻き戻すと、後続の title 編集が

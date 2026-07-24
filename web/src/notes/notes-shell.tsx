@@ -46,8 +46,16 @@ export function NotesShell({ sidebar, children }: { sidebar: ReactNode; children
   useEffect(() => {
     if (resizeStart === null) return;
     let frame = 0;
+    let pending: number | null = null;
+    const commit = () => {
+      frame = 0;
+      if (pending !== null) setSidebarWidth(pending);
+      pending = null;
+    };
     const stop = () => {
       cancelAnimationFrame(frame);
+      // 予約済みフレームを取り消すだけだと、素早いドラッグで最後の幅が反映されずに終わる
+      commit();
       setResizeStart(null);
     };
     const onMove = (e: PointerEvent) => {
@@ -58,9 +66,8 @@ export function NotesShell({ sidebar, children }: { sidebar: ReactNode; children
       }
       // --sb-w は .notes-screen（= 本文の祖先）に載るので、1 フレームに複数届く
       // pointermove をそのまま反映すると ProseMirror 全体の style 再計算を余分に回す
-      const width = clampSidebar(resizeStart.w + (e.clientX - resizeStart.x));
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => setSidebarWidth(width));
+      pending = clampSidebar(resizeStart.w + (e.clientX - resizeStart.x));
+      if (frame === 0) frame = requestAnimationFrame(commit);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", stop);
