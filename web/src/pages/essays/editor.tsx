@@ -168,22 +168,32 @@ export function EssayEditorPage({ id }: { id: string }) {
     }
   }, [flush, seedNote]);
 
-  const toggleStatus = useCallback(async () => {
-    const current = noteRef.current;
-    if (current?.kind.kind !== "essay") return;
-    // pending の content を先に flush する（title は status 列単独 UPDATE なので競合しないが、
-    // 失敗時の一覧再取得が編集前の preview に巻き戻らないように）
-    await flush();
-    try {
-      const next = current.kind.status === "writing" ? "finished" : "writing";
-      const updated = await setEssayStatus(current.id, next);
-      // エディタは開いたまま status チップとサイドバー（writing のみ）だけが変わる
-      seedNote(updated);
-      patchSummaryKind(updated);
-    } catch {
-      // 409/404 は UI 状態が古いだけ。一覧の再取得で追いつくので黙って握る
-      setDataVersion((v) => v + 1);
-    }
+  // トグルを直列化する chain（use-autosave の flushChain と同じ手法）。連打時に両方が
+  // 同じ status を読んで 2 回のトグルが 1 回に潰れるのを防ぎ、2 回目は 1 回目の結果に
+  // rebase される（往復 = 元の status に戻る）。
+  const toggleChainRef = useRef<Promise<void>>(Promise.resolve());
+
+  const toggleStatus = useCallback(() => {
+    // 押した瞬間の note が対象。chain の順番待ちの間に別 essay へ移動していたら不発
+    const targetId = noteRef.current?.id;
+    const run = async () => {
+      const current = noteRef.current;
+      if (current === null || current.id !== targetId || current.kind.kind !== "essay") return;
+      // pending の content を先に flush する（title は status 列単独 UPDATE なので競合しないが、
+      // 失敗時の一覧再取得が編集前の preview に巻き戻らないように）
+      await flush();
+      try {
+        const next = current.kind.status === "writing" ? "finished" : "writing";
+        const updated = await setEssayStatus(current.id, next);
+        // エディタは開いたまま status チップとサイドバー（writing のみ）だけが変わる
+        seedNote(updated);
+        patchSummaryKind(updated);
+      } catch {
+        // 409/404 は UI 状態が古いだけ。一覧の再取得で追いつくので黙って握る
+        setDataVersion((v) => v + 1);
+      }
+    };
+    toggleChainRef.current = toggleChainRef.current.then(run);
   }, [flush, seedNote, patchSummaryKind]);
 
   useEffect(() => {
@@ -194,7 +204,7 @@ export function EssayEditorPage({ id }: { id: string }) {
       if (ctrlOnly && e.code === "KeyQ" && noteRef.current !== null) {
         e.preventDefault();
         e.stopPropagation();
-        void toggleStatus();
+        toggleStatus();
         return;
       }
       if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
@@ -293,7 +303,7 @@ export function EssayEditorPage({ id }: { id: string }) {
                 className="w-full bg-transparent text-[20px] font-normal tracking-[0.03em] text-[var(--ink-text)] outline-none placeholder:text-[var(--ink-faint)]"
               />
               <div className="mt-2.5 flex items-center gap-2 text-xs">
-                <StatusChip status={note.kind.status} onToggle={() => void toggleStatus()} />
+                <StatusChip status={note.kind.status} onToggle={toggleStatus} />
                 <span className="ml-auto font-mono text-[0.7rem] text-[var(--ink-faint)]">
                   {note.date.replaceAll("-", ".")}
                 </span>
