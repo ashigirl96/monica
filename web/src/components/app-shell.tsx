@@ -102,7 +102,7 @@ export function AppShell({
   active,
   children,
 }: {
-  active: "daily" | "essays" | "notes" | "library" | "settings";
+  active: "daily" | "essays" | "projects" | "library" | "settings";
   children: ReactNode;
 }) {
   // alt+b の zen mode: nav rail と、group-data-[zen]/shell で反応する
@@ -150,7 +150,7 @@ export function AppShell({
             <path strokeLinecap="round" d="M8.5 8h7M8.5 11.5h7M8.5 15h4.5" />
           </svg>
         </RailLink>
-        <RailLink to="/notes" label="Notes" active={active === "notes"}>
+        <RailLink to="/projects" label="Project" active={active === "projects"}>
           <svg
             className="size-[18px]"
             fill="none"
@@ -161,7 +161,7 @@ export function AppShell({
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
-              d="M4 20l1.2-4.4L16.6 4.2a2.1 2.1 0 013 3L8.2 18.6 4 20zM14.5 6.3l3 3"
+              d="M3.5 7.5a2 2 0 012-2h4l2 2.5h5a2 2 0 012 2v7a2 2 0 01-2 2h-11a2 2 0 01-2-2z"
             />
           </svg>
         </RailLink>

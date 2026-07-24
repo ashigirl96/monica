@@ -1,6 +1,6 @@
 use monica_domain::{
-    to_markdown, DailyNoteCount, EssayStatus, Note, NoteId, NoteKindTarget, NotePage, NoteSummary,
-    RawJson, SyncedBlockMode, UpdateNote,
+    to_markdown, DailyNoteCount, EssayStatus, Note, NoteId, NotePage, NoteSummary, RawJson,
+    SyncedBlockMode, UpdateNote,
 };
 
 use super::Backend;
@@ -26,10 +26,6 @@ pub struct NoteService<'a, B: Backend> {
 }
 
 impl<B: Backend> NoteService<'_, B> {
-    pub fn create_note(&mut self, day_boundary_hour: u8) -> ApplicationResult<Note> {
-        Ok(self.m.repos.create_note(day_boundary_hour)?)
-    }
-
     /// ⌥N（/essays）の新規 essay。空 title・status Writing で logical today に作る。
     pub fn create_essay(&mut self, day_boundary_hour: u8) -> ApplicationResult<Note> {
         Ok(self.m.repos.create_essay_note(day_boundary_hour)?)
@@ -39,6 +35,28 @@ impl<B: Backend> NoteService<'_, B> {
     /// writing だけへの絞り込みは表示都合なのでフロントの責務。
     pub fn list_essays(&mut self) -> ApplicationResult<Vec<NoteSummary>> {
         Ok(self.m.repos.list_essay_notes()?)
+    }
+
+    /// ⌥N（/projects）の新規 project note。存在しない project は 404
+    /// （FK 違反 500 を避けるため set_note_kind と同型に先へ検証する）。
+    pub fn create_project_note(
+        &mut self,
+        project_id: &str,
+        day_boundary_hour: u8,
+    ) -> ApplicationResult<Note> {
+        crate::usecases::query::get_project(&self.m.repos, project_id)?;
+        Ok(self.m.repos.create_project_note(project_id, day_boundary_hour)?)
+    }
+
+    /// /projects を開いたときの primary note の get-or-create。既存 project の
+    /// backfill を兼ねる（初オープン時に lazy 作成）。存在しない project は 404。
+    pub fn primary_note_for(
+        &mut self,
+        project_id: &str,
+        day_boundary_hour: u8,
+    ) -> ApplicationResult<Note> {
+        crate::usecases::query::get_project(&self.m.repos, project_id)?;
+        Ok(self.m.repos.get_or_create_primary_note(project_id, day_boundary_hour)?)
     }
 
     pub fn set_essay_status(
@@ -62,8 +80,8 @@ impl<B: Backend> NoteService<'_, B> {
     /// daily の get-or-create の唯一の入口。「1日1つ」の不変条件は DB 制約ではなく
     /// ここ（+ store の原子的な get-or-create）で保証する。未来日は許可 — カレンダーの
     /// 先日付タップと、day boundary 際の client/server 時差を弾かないため。
-    /// 注: Phase 1 では旧 /notes の create_note（⌥N）が並存するため、旧経路からは
-    /// 同日複数の daily が依然作れる。不変条件が完全になるのは旧経路撤去後（Phase 3）。
+    /// 旧 /notes の create_note（⌥N）経路は Phase 3 で撤去済みなので、daily を作る HTTP
+    /// 経路はこれだけになり不変条件が閉じる。
     pub fn daily_note_for(&mut self, date: &str) -> ApplicationResult<Note> {
         if !monica_domain::is_valid_date(date) {
             return Err(ApplicationError::validation(format!("invalid date: {date}")));
@@ -73,14 +91,6 @@ impl<B: Backend> NoteService<'_, B> {
 
     pub fn logical_today(&mut self, day_boundary_hour: u8) -> ApplicationResult<String> {
         Ok(self.m.repos.logical_today(day_boundary_hour)?)
-    }
-
-    pub fn list_notes(
-        &mut self,
-        from: Option<&str>,
-        to: Option<&str>,
-    ) -> ApplicationResult<Vec<NoteSummary>> {
-        Ok(self.m.repos.list_notes(from, to)?)
     }
 
     /// 全 note の content JSON（soft-delete 含む）。asset GC の到達可能性判定用。
@@ -161,28 +171,6 @@ impl<B: Backend> NoteService<'_, B> {
             .repos
             .update_note(id, update)?
             .ok_or_else(|| ApplicationError::not_found(format!("note {id} not found")))
-    }
-
-    pub fn set_note_kind(&mut self, id: &str, target: NoteKindTarget) -> ApplicationResult<Note> {
-        NoteId::parse(id)?;
-        let note = self
-            .m
-            .repos
-            .get_note(id)?
-            .ok_or_else(|| ApplicationError::not_found(format!("note {id} not found")))?;
-        // FK 違反を SQLite エラー (500) にせず、先に存在チェックして not_found を返す。
-        if let NoteKindTarget::Project { project_id } = &target {
-            crate::usecases::query::get_project(&self.m.repos, project_id)?;
-        }
-        let next = note
-            .kind
-            .transition_to(target)
-            .map_err(|e| ApplicationError::conflict(e.to_string()))?;
-        // 書き込みは遷移元 kind 条件付き。get と write の間に別の遷移が滑り込んだ場合は
-        // 不発になる（project の終端性を並行リクエストでも破らせない）。
-        self.m.repos.set_note_kind(id, note.kind.name(), &next)?.ok_or_else(|| {
-            ApplicationError::conflict(format!("note {id} kind changed concurrently"))
-        })
     }
 
     pub fn delete_note(&mut self, id: &str) -> ApplicationResult<()> {

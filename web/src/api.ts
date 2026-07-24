@@ -12,7 +12,6 @@ import type {
   NotesSettings,
   NotesToday,
   ProjectOption,
-  SetNoteKind,
   UpdateNote,
 } from "./types.gen";
 
@@ -33,22 +32,30 @@ export async function deleteExplanation(id: string): Promise<void> {
   if (!res.ok) throw new Error(`Failed to delete explanation: ${res.status}`);
 }
 
-export async function createNote(): Promise<Note> {
-  const res = await fetch("/api/notes", { method: "POST" });
-  if (!res.ok) throw new Error(`Failed to create note: ${res.status}`);
-  return res.json();
-}
-
-export async function listNotes(from: string, to: string): Promise<NoteSummary[]> {
-  const res = await fetch(`/api/notes?from=${from}&to=${to}`);
-  if (!res.ok) throw new Error(`Failed to list notes: ${res.status}`);
-  return res.json();
-}
-
 export async function listProjectNotes(projectId: string, offset: number): Promise<NotePage> {
   const params = new URLSearchParams({ project_id: projectId, offset: String(offset) });
   const res = await fetch(`/api/notes/by-project?${params}`);
   if (!res.ok) throw new Error(`Failed to list project notes: ${res.status}`);
+  return res.json();
+}
+
+/** project の primary note の get-or-create（冪等）。初オープン時に lazy 作成される。
+ * project_id は "owner/repo" 形式でスラッシュを含むため query で渡す。 */
+export async function primaryNote(projectId: string): Promise<Note> {
+  const params = new URLSearchParams({ project_id: projectId });
+  const res = await fetch(`/api/notes/project/primary?${params}`, { method: "PUT" });
+  if (!res.ok) throw new Error(`Failed to open primary note: ${res.status}`);
+  return res.json();
+}
+
+/** ⌥N: 現 project の新規 note。project_id は body で渡す。 */
+export async function createProjectNote(projectId: string): Promise<Note> {
+  const res = await fetch("/api/notes/project", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ project_id: projectId }),
+  });
+  if (!res.ok) throw new Error(`Failed to create project note: ${res.status}`);
   return res.json();
 }
 
@@ -66,16 +73,6 @@ export async function updateNote(id: string, update: UpdateNote, keepalive = fal
     keepalive,
   });
   if (!res.ok) throw new Error(`Failed to save note: ${res.status}`);
-}
-
-export async function setNoteKind(id: string, kind: SetNoteKind): Promise<Note> {
-  const res = await fetch(`/api/notes/${id}/kind`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(kind),
-  });
-  if (!res.ok) throw new Error(`Failed to change note kind: ${res.status}`);
-  return res.json();
 }
 
 export async function getNotesToday(): Promise<NotesToday> {
@@ -108,13 +105,6 @@ export async function deleteNote(id: string): Promise<void> {
 export async function restoreNote(id: string): Promise<Note> {
   const res = await fetch(`/api/notes/${id}/restore`, { method: "POST" });
   if (!res.ok) throw new Error(`Failed to restore note: ${res.status}`);
-  return res.json();
-}
-
-export async function dailyNoteCounts(from: string, to: string): Promise<DailyNoteCount[]> {
-  const params = new URLSearchParams({ from, to });
-  const res = await fetch(`/api/notes/daily-counts?${params}`);
-  if (!res.ok) throw new Error(`Failed to load note counts: ${res.status}`);
   return res.json();
 }
 

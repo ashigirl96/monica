@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { getNotesSettings, putNotesSettings } from "@/api";
-import "../notes/notes.css";
+import "@/notes/notes.css";
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 

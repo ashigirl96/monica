@@ -95,38 +95,21 @@ impl NoteKind {
 
     /// mention（wiki link）の表示名。検索と解決で共有する唯一の導出規則。
     /// daily は ISO 日付をそのまま返す — 曜日等の整形はロケール依存の presentation
-    /// なのでここでは持たない。
+    /// なのでここでは持たない。project は title を付けたらそれを優先する（無題なら
+    /// project_id）— title は title 列に載るので coarse LIKE と precise filter が
+    /// 同じ文字列を見ないと mention 解決に穴があく。
     pub fn display_name(&self, date: &str) -> String {
         match self {
             NoteKind::Essay { title, .. } if !title.is_empty() => title.clone(),
             NoteKind::Essay { .. } => "Untitled".to_string(),
             NoteKind::Daily => date.to_string(),
+            NoteKind::Project { title, .. } if !title.is_empty() => title.clone(),
             NoteKind::Project { project_id, .. } => project_id.clone(),
         }
     }
 
-    /// kind 遷移規則の唯一の定義。遷移グラフは daily を中心とした星型:
-    /// daily ↔ essay（essay 化は常に空 title、daily 化は title 破棄）、
-    /// daily → project は無損失の「確定」昇格。project からの脱出経路
-    /// （project 付け替え含む）と essay → project 直行は設けない。
-    /// 同一 kind への遷移も Err（essay → essay を許すと title 破棄事故になる）。
-    pub fn transition_to(&self, target: NoteKindTarget) -> Result<NoteKind, KindTransitionError> {
-        match (self, target) {
-            (NoteKind::Daily, NoteKindTarget::Essay) => {
-                Ok(NoteKind::Essay { title: String::new(), status: EssayStatus::Writing })
-            }
-            (NoteKind::Daily, NoteKindTarget::Project { project_id }) => {
-                Ok(NoteKind::Project { project_id, title: String::new() })
-            }
-            (NoteKind::Essay { .. }, NoteKindTarget::Daily) => Ok(NoteKind::Daily),
-            (from, target) => {
-                Err(KindTransitionError { from: from.name(), to: target.name() })
-            }
-        }
-    }
-
-    /// essay の status だけを差し替えた kind を返す。kind 遷移（`transition_to`）とは
-    /// 直交する操作で、title は温存し、同値への set も Ok（冪等）。essay 以外は Err。
+    /// essay の status だけを差し替えた kind を返す。title は温存し、同値への set も
+    /// Ok（冪等）。essay 以外は Err。
     pub fn with_status(&self, status: EssayStatus) -> Result<NoteKind, EssayStatusError> {
         match self {
             NoteKind::Essay { title, .. } => {
@@ -136,39 +119,6 @@ impl NoteKind {
         }
     }
 }
-
-/// kind 遷移のリクエスト。Essay に title を載せない（daily → essay は常に空 title で
-/// 生まれ、title の編集は autosave の担当）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NoteKindTarget {
-    Daily,
-    Essay,
-    Project { project_id: String },
-}
-
-impl NoteKindTarget {
-    pub fn name(&self) -> &'static str {
-        match self {
-            NoteKindTarget::Daily => "daily",
-            NoteKindTarget::Essay => "essay",
-            NoteKindTarget::Project { .. } => "project",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KindTransitionError {
-    pub from: &'static str,
-    pub to: &'static str,
-}
-
-impl std::fmt::Display for KindTransitionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "cannot change note kind: {} -> {}", self.from, self.to)
-    }
-}
-
-impl std::error::Error for KindTransitionError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EssayStatusError {
@@ -390,52 +340,13 @@ mod tests {
         assert_eq!(titled.display_name(date), "My essay");
         assert_eq!(untitled.display_name(date), "Untitled");
         assert_eq!(NoteKind::Daily.display_name(date), "2026-07-18");
-        // project の display_name は Phase 1 では title を使わない（Phase 3 の UI と一緒に検討）
-        let project =
+        // project は title を付けたらそれを、無題なら project_id を返す。
+        let named =
             NoteKind::Project { project_id: "owner/repo".to_string(), title: "named".to_string() };
-        assert_eq!(project.display_name(date), "owner/repo");
-    }
-
-    #[test]
-    fn transition_allowed() {
-        assert_eq!(
-            NoteKind::Daily.transition_to(NoteKindTarget::Essay),
-            Ok(NoteKind::Essay { title: String::new(), status: EssayStatus::Writing })
-        );
-        assert_eq!(
-            NoteKind::Daily
-                .transition_to(NoteKindTarget::Project { project_id: "o/r".to_string() }),
-            Ok(NoteKind::Project { project_id: "o/r".to_string(), title: String::new() })
-        );
-        // essay → daily は title を破棄する
-        assert_eq!(
-            NoteKind::Essay { title: "kept?".to_string(), status: EssayStatus::Writing }
-                .transition_to(NoteKindTarget::Daily),
-            Ok(NoteKind::Daily)
-        );
-    }
-
-    #[test]
-    fn transition_forbidden() {
-        let project = NoteKind::Project { project_id: "o/r".to_string(), title: String::new() };
-        let essay = NoteKind::Essay { title: "t".to_string(), status: EssayStatus::Writing };
-        let to_project = || NoteKindTarget::Project { project_id: "other".to_string() };
-        let forbidden: [(NoteKind, NoteKindTarget); 6] = [
-            // project からの脱出経路なし（付け替え含む）
-            (project.clone(), NoteKindTarget::Daily),
-            (project.clone(), NoteKindTarget::Essay),
-            (project.clone(), to_project()),
-            // essay → project 直行なし
-            (essay.clone(), to_project()),
-            // 同一 kind への遷移なし
-            (NoteKind::Daily, NoteKindTarget::Daily),
-            (essay.clone(), NoteKindTarget::Essay),
-        ];
-        for (from, target) in forbidden {
-            let err = from.clone().transition_to(target.clone()).unwrap_err();
-            assert_eq!(err.from, from.name());
-            assert_eq!(err.to, target.name());
-        }
+        assert_eq!(named.display_name(date), "named");
+        let untitled_project =
+            NoteKind::Project { project_id: "owner/repo".to_string(), title: String::new() };
+        assert_eq!(untitled_project.display_name(date), "owner/repo");
     }
 
     #[test]

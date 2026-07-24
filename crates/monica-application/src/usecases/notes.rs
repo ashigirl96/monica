@@ -61,6 +61,12 @@ mod tests {
         fn create_essay_note(&mut self, _: u8) -> Result<Note> {
             unimplemented!()
         }
+        fn create_project_note(&mut self, _: &str, _: u8) -> Result<Note> {
+            unimplemented!()
+        }
+        fn get_or_create_primary_note(&mut self, _: &str, _: u8) -> Result<Note> {
+            unimplemented!()
+        }
         fn list_essay_notes(&self) -> Result<Vec<NoteSummary>> {
             unimplemented!()
         }
@@ -83,9 +89,6 @@ mod tests {
             unimplemented!()
         }
         fn update_note(&mut self, _: &str, _: UpdateNote) -> Result<Option<Note>> {
-            unimplemented!()
-        }
-        fn set_note_kind(&mut self, _: &str, _: &str, _: &NoteKind) -> Result<Option<Note>> {
             unimplemented!()
         }
         fn delete_note(&mut self, _: &str) -> Result<bool> {

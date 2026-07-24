@@ -12,11 +12,12 @@ pub struct TaskCreated {
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ProjectOption {
     pub id: String,
+    pub name: String,
 }
 
 impl From<monica_domain::Project> for ProjectOption {
     fn from(value: monica_domain::Project) -> Self {
-        Self { id: value.id }
+        Self { id: value.id, name: value.name }
     }
 }
 

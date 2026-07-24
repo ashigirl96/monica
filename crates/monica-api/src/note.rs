@@ -57,29 +57,17 @@ impl From<NoteKind> for monica_domain::NoteKind {
     }
 }
 
-/// kind 遷移リクエスト。Essay に title を載せない（daily → essay は常に空 title）。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum SetNoteKind {
-    Daily,
-    Essay,
-    Project { project_id: String },
-}
-
-impl From<SetNoteKind> for monica_domain::NoteKindTarget {
-    fn from(value: SetNoteKind) -> Self {
-        match value {
-            SetNoteKind::Daily => Self::Daily,
-            SetNoteKind::Essay => Self::Essay,
-            SetNoteKind::Project { project_id } => Self::Project { project_id },
-        }
-    }
-}
-
 /// essay status 変更リクエスト（⌃Q）。トグルではなく冪等な明示 set。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct SetEssayStatus {
     pub status: EssayStatus,
+}
+
+/// ⌥N（/projects）の新規 project note 作成リクエスト。project_id は "owner/repo" 形式で
+/// スラッシュを含むため path ではなく body で渡す。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct CreateProjectNote {
+    pub project_id: String,
 }
 
 fn content_value(content: monica_domain::RawJson) -> serde_json::Value {
@@ -269,23 +257,5 @@ mod tests {
 
         let broken = NoteBlock::from(monica_domain::RawJson::from("not json"));
         assert_eq!(broken.block, serde_json::Value::Null);
-    }
-
-    #[test]
-    fn set_note_kind_maps_to_domain_target() {
-        assert_eq!(
-            monica_domain::NoteKindTarget::from(SetNoteKind::Daily),
-            monica_domain::NoteKindTarget::Daily
-        );
-        assert_eq!(
-            monica_domain::NoteKindTarget::from(SetNoteKind::Essay),
-            monica_domain::NoteKindTarget::Essay
-        );
-        assert_eq!(
-            monica_domain::NoteKindTarget::from(SetNoteKind::Project {
-                project_id: "o/r".to_string()
-            }),
-            monica_domain::NoteKindTarget::Project { project_id: "o/r".to_string() }
-        );
     }
 }

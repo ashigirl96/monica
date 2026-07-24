@@ -1,4 +1,4 @@
-import { dayLabel, dayLabelWithYear } from "../notes/dates";
+import { dayLabel, dayLabelWithYear } from "@/notes/dates";
 
 /** 「daily が存在する日 + 今日」の降順リスト。1 日 = 1 行なので note 単位の UI は持たない */
 export function DailySidebar({

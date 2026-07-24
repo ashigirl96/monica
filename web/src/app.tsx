@@ -4,7 +4,8 @@ import { DailyPage } from "./pages/daily";
 import { DetailPage } from "./pages/detail";
 import { EssaysPage } from "./pages/essays";
 import { ListPage } from "./pages/list";
-import { NotesPage } from "./pages/notes";
+import { NoteRedirect } from "./pages/note-redirect";
+import { ProjectsPage } from "./pages/projects";
 import { SettingsPage } from "./pages/settings";
 
 function subscribe(cb: () => void) {
@@ -40,6 +41,7 @@ type Route =
   | { page: "notes"; id: string | null }
   | { page: "daily"; date: string | null }
   | { page: "essays"; id: string | null }
+  | { page: "projects"; projectId: string | null; noteId: string | null }
   | { page: "settings" };
 
 function parseRoute(pathname: string): Route {
@@ -53,6 +55,10 @@ function parseRoute(pathname: string): Route {
   if (daily) return { page: "daily", date: daily[1] ?? null };
   const essays = pathname.match(/^\/essays(?:\/([^/]+))?\/?$/);
   if (essays) return { page: "essays", id: essays[1] ?? null };
+  // project id は "owner/repo" の 2 セグメント固定。任意で /notes/{note_id} が続く。
+  const projects = pathname.match(/^\/projects(?:\/([^/]+\/[^/]+)(?:\/notes\/([^/]+))?)?\/?$/);
+  if (projects)
+    return { page: "projects", projectId: projects[1] ?? null, noteId: projects[2] ?? null };
   if (/^\/settings\/?$/.test(pathname)) return { page: "settings" };
   return { page: "list" };
 }
@@ -64,7 +70,7 @@ export function App() {
   return (
     <AppShell
       active={
-        route.page === "notes" || route.page === "daily" || route.page === "essays"
+        route.page === "daily" || route.page === "essays" || route.page === "projects"
           ? route.page
           : route.page === "settings"
             ? "settings"
@@ -74,11 +80,13 @@ export function App() {
       {route.page === "detail" ? (
         <DetailPage id={route.id} />
       ) : route.page === "notes" ? (
-        <NotesPage id={route.id} />
+        <NoteRedirect id={route.id} />
       ) : route.page === "daily" ? (
         <DailyPage date={route.date} />
       ) : route.page === "essays" ? (
         <EssaysPage id={route.id} />
+      ) : route.page === "projects" ? (
+        <ProjectsPage projectId={route.projectId} noteId={route.noteId} />
       ) : route.page === "settings" ? (
         <SettingsPage />
       ) : (

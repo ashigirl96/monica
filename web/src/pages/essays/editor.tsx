@@ -1,27 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BlockEditor, type BlockEditorHandle } from "@shared/block-editor/block-editor";
-import {
-  createEssay,
-  getNote,
-  importImageAsset,
-  listEssays,
-  renderNoteMarkdown,
-  setEssayStatus,
-  uploadImageAsset,
-} from "@/api";
+import type { BlockEditorHandle } from "@shared/block-editor/block-editor";
+import { createEssay, getNote, listEssays, setEssayStatus } from "@/api";
 import { navigate } from "@/app";
 import type { Note, NoteSummary } from "@/types.gen";
+import { takePendingBlockTarget } from "@/notes/block-jump";
 import {
   cycleSelect,
-  fetchLinkMetadata,
   persistableContent,
-  searchNoteMentions,
+  titleFieldKeyDown,
+  useEditorDoc,
   useNoteBlockResolvers,
-} from "../notes/editor-support";
-import { useAutosave } from "../notes/use-autosave";
+} from "@/notes/editor-support";
+import { NoteBlockEditor } from "@/notes/note-block-editor";
+import { useAutosave } from "@/notes/use-autosave";
 import { EssaysSidebar } from "./sidebar";
 import { essayStatus } from "./support";
-import "../notes/notes.css";
+import "@/notes/notes.css";
 
 function StatusChip({
   status,
@@ -69,7 +63,8 @@ export function EssayEditorPage({ id }: { id: string }) {
   // 常に最新のフィールドを持つ ref から保存 payload を組み立てる
   const noteRef = useRef<Note | null>(null);
 
-  // mention / synced block のジャンプ先は kind 横断のまま旧 /notes（Phase 3 で整理）
+  // mention / synced block のジャンプ先。`/notes/{id}` は NoteRedirect が kind に応じて
+  // /daily・/essays・/projects へ振り分ける（本文に埋まった href を壊さないため経路を温存）
   const openInNotes = useCallback(
     (noteId: string) => {
       void flush();
@@ -125,6 +120,14 @@ export function EssayEditorPage({ id }: { id: string }) {
       pendingTitleFocusRef.current = false;
       titleRef.current?.focus();
     }
+  }, [note]);
+
+  // synced block ジャンプの対象がロードされたらスクロールする。別 note からの cross-note
+  // ジャンプは /notes/{id} リダイレクト経由でこのページに着地する
+  useEffect(() => {
+    if (!note) return;
+    const blockId = takePendingBlockTarget(note.id);
+    if (blockId) editorHandleRef.current?.scrollToBlock(blockId);
   }, [note]);
 
   const sidebarEssays = useMemo(
@@ -253,19 +256,12 @@ export function EssayEditorPage({ id }: { id: string }) {
     [scheduleSave, patchSummaryKind],
   );
 
-  const onDocChange = useCallback(
-    (doc: unknown) => {
-      contentRef.current = doc;
-      const current = noteRef.current;
-      if (current) scheduleSave(current);
-    },
-    [scheduleSave],
-  );
-
-  // タイトルからの移動は常に本文の先頭行へ
-  const focusEditorStart = useCallback(() => {
-    editorHandleRef.current?.focusStart();
-  }, []);
+  const { onDocChange, focusEditorStart } = useEditorDoc({
+    contentRef,
+    noteRef,
+    editorHandleRef,
+    scheduleSave,
+  });
 
   return (
     <div
@@ -292,19 +288,7 @@ export function EssayEditorPage({ id }: { id: string }) {
                 value={note.kind.title}
                 placeholder="Untitled"
                 onChange={(e) => onTitleChange(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.nativeEvent.isComposing) return;
-                  const ctrlN = e.ctrlKey && !e.metaKey && !e.altKey && e.key === "n";
-                  if (
-                    e.key === "Enter" ||
-                    e.key === "ArrowDown" ||
-                    (e.key === "Tab" && !e.shiftKey) ||
-                    ctrlN
-                  ) {
-                    e.preventDefault();
-                    focusEditorStart();
-                  }
-                }}
+                onKeyDown={(e) => titleFieldKeyDown(e, focusEditorStart)}
                 className="w-full bg-transparent text-[20px] font-normal tracking-[0.03em] text-[var(--ink-text)] outline-none placeholder:text-[var(--ink-faint)]"
               />
               <div className="mt-2.5 flex items-center gap-2 text-xs">
@@ -319,24 +303,16 @@ export function EssayEditorPage({ id }: { id: string }) {
                 )}
               </div>
             </header>
-            <BlockEditor
-              key={note.id}
-              initialDoc={note.content}
+            <NoteBlockEditor
+              note={note}
               autoFocus={!pendingTitleFocusRef.current}
               onDocChange={onDocChange}
               onExitUp={() => titleRef.current?.focus()}
-              fetchLinkMetadata={fetchLinkMetadata}
-              searchNoteMentions={searchNoteMentions}
-              resolveNoteMention={resolveNoteMention}
               onNoteMentionClick={openInNotes}
-              noteId={note.id}
+              resolveNoteMention={resolveNoteMention}
               resolveBlock={resolveBlock}
               onOpenBlock={onOpenBlock}
-              uploadImage={uploadImageAsset}
-              importExternalImage={importImageAsset}
-              renderMarkdown={renderNoteMarkdown}
               handleRef={editorHandleRef}
-              className="min-h-[70dvh] pt-4 pb-24"
             />
           </div>
         ) : note !== null ? (
