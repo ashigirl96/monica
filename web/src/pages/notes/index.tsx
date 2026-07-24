@@ -8,16 +8,12 @@ import {
   useState,
 } from "react";
 import { BlockEditor, type BlockEditorHandle } from "@shared/block-editor/block-editor";
-import { stripPendingImages } from "@shared/block-editor/image-upload";
-import type { LinkMetadata } from "@shared/block-editor/link-menu";
-import type { NoteMentionItem } from "@shared/block-editor/note-mention-menu";
 import type { NoteMentionInfo } from "@shared/block-editor/node-views";
 import { fuzzyMatch } from "@shared/fuzzy-picker/use-fuzzy-picker";
 import {
   createNote,
   dailyNoteCounts,
   deleteNote,
-  fetchLinkPreview,
   getNote,
   getNoteBlock,
   getNotesToday,
@@ -28,7 +24,6 @@ import {
   renderNoteMarkdown,
   resolveNoteMention as resolveNoteMentionApi,
   restoreNote,
-  searchNoteMentions as searchNoteMentionsApi,
   setNoteKind,
   uploadImageAsset,
 } from "@/api";
@@ -49,39 +44,10 @@ import {
 } from "./dates";
 import { type DraftPatch, EditorHeader, type NoteDensity } from "./editor-header";
 import { NotesCalendar } from "./calendar";
+import { fetchLinkMetadata, persistableContent, searchNoteMentions } from "./editor-support";
 import { NotesSidebar, ProjectNotesSidebar, summaryTitle } from "./sidebar";
 import { useAutosave } from "./use-autosave";
 import "./notes.css";
-
-async function fetchLinkMetadata(url: string): Promise<LinkMetadata | null> {
-  const preview = await fetchLinkPreview(url);
-  if (!preview) return null;
-  return {
-    title: preview.title,
-    description: preview.description,
-    image: preview.image,
-    favicon: preview.favicon,
-    siteName: preview.site_name,
-  };
-}
-
-async function searchNoteMentions(query: string): Promise<NoteMentionItem[]> {
-  const mentions = await searchNoteMentionsApi(query);
-  return mentions.map((m) => ({ id: m.id, displayName: m.display_name, preview: m.preview }));
-}
-
-// autosave が保存する content から、アップロード未完了（src:null）の image block を除く。
-// toJSON を持つ live doc（PMNode）はフラッシュ時（JSON.stringify）に一度だけ walk するよう
-// 遅延ラップし、打鍵毎の全文 walk を避ける。src:null を保存すると再読込で復元不能になる。
-function persistableContent(content: unknown): unknown {
-  return {
-    toJSON: () => {
-      const hasToJson = !!content && typeof (content as { toJSON?: unknown }).toJSON === "function";
-      const json = hasToJson ? (content as { toJSON: () => unknown }).toJSON() : content;
-      return stripPendingImages(json);
-    },
-  };
-}
 
 function EmptyState() {
   return (
@@ -515,7 +481,7 @@ export function NotesPage({ id }: { id: string | null }) {
     (patch: DraftPatch) => {
       const current = noteRef.current;
       if (!current || patch.title === undefined || current.kind.kind !== "essay") return;
-      const next: Note = { ...current, kind: { kind: "essay", title: patch.title } };
+      const next: Note = { ...current, kind: { ...current.kind, title: patch.title } };
       noteRef.current = next;
       setNote(next);
       scheduleSave(next);

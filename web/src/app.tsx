@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { AppShell } from "./components/app-shell";
+import { DailyPage } from "./pages/daily";
 import { DetailPage } from "./pages/detail";
 import { ListPage } from "./pages/list";
 import { NotesPage } from "./pages/notes";
@@ -36,6 +37,7 @@ type Route =
   | { page: "list" }
   | { page: "detail"; id: string }
   | { page: "notes"; id: string | null }
+  | { page: "daily"; date: string | null }
   | { page: "settings" };
 
 function parseRoute(pathname: string): Route {
@@ -43,6 +45,8 @@ function parseRoute(pathname: string): Route {
   if (explanation) return { page: "detail", id: explanation[1] };
   const notes = pathname.match(/^\/notes(?:\/([^/]+))?\/?$/);
   if (notes) return { page: "notes", id: notes[1] ?? null };
+  const daily = pathname.match(/^\/daily(?:\/(\d{4}-\d{2}-\d{2}))?\/?$/);
+  if (daily) return { page: "daily", date: daily[1] ?? null };
   if (/^\/settings\/?$/.test(pathname)) return { page: "settings" };
   return { page: "list" };
 }
@@ -53,12 +57,20 @@ export function App() {
 
   return (
     <AppShell
-      active={route.page === "notes" ? "notes" : route.page === "settings" ? "settings" : "library"}
+      active={
+        route.page === "notes" || route.page === "daily"
+          ? route.page
+          : route.page === "settings"
+            ? "settings"
+            : "library"
+      }
     >
       {route.page === "detail" ? (
         <DetailPage id={route.id} />
       ) : route.page === "notes" ? (
         <NotesPage id={route.id} />
+      ) : route.page === "daily" ? (
+        <DailyPage date={route.date} />
       ) : route.page === "settings" ? (
         <SettingsPage />
       ) : (

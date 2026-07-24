@@ -30,6 +30,18 @@ impl<B: Backend> NoteService<'_, B> {
         Ok(self.m.repos.create_note(day_boundary_hour)?)
     }
 
+    /// daily の get-or-create の唯一の入口。「1日1つ」の不変条件は DB 制約ではなく
+    /// ここ（+ store の原子的な get-or-create）で保証する。未来日は許可 — カレンダーの
+    /// 先日付タップと、day boundary 際の client/server 時差を弾かないため。
+    /// 注: Phase 1 では旧 /notes の create_note（⌥N）が並存するため、旧経路からは
+    /// 同日複数の daily が依然作れる。不変条件が完全になるのは旧経路撤去後（Phase 3）。
+    pub fn daily_note_for(&mut self, date: &str) -> ApplicationResult<Note> {
+        if !monica_domain::is_valid_date(date) {
+            return Err(ApplicationError::validation(format!("invalid date: {date}")));
+        }
+        Ok(self.m.repos.get_or_create_daily_note(date)?)
+    }
+
     pub fn logical_today(&mut self, day_boundary_hour: u8) -> ApplicationResult<String> {
         Ok(self.m.repos.logical_today(day_boundary_hour)?)
     }
@@ -164,7 +176,8 @@ impl<B: Backend> NoteService<'_, B> {
         &mut self,
         from: Option<&str>,
         to: Option<&str>,
+        kind: Option<&str>,
     ) -> ApplicationResult<Vec<DailyNoteCount>> {
-        Ok(self.m.repos.daily_note_counts(from, to)?)
+        Ok(self.m.repos.daily_note_counts(from, to, kind)?)
     }
 }

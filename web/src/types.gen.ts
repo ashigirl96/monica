@@ -13,6 +13,8 @@ export type DailyNoteCount = {
   count: number;
 };
 
+export type EssayStatus = "writing" | "finished";
+
 export type Explanation = {
   id: string;
   title: string;
@@ -59,9 +61,9 @@ export type NoteBlock = {
 };
 
 export type NoteKind =
-  | { kind: "project"; project_id: string }
+  | { kind: "project"; project_id: string; title: string }
   | { kind: "daily" }
-  | { kind: "essay"; title: string };
+  | { kind: "essay"; title: string; status: EssayStatus };
 
 /**
  *  wiki link（`[[`）の検索候補・解決結果。表示名の導出規則は domain の

@@ -9,7 +9,7 @@ use axum::extract::{DefaultBodyLimit, Path, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Redirect, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use monica_application::{ApplicationError, ApplicationEvent, EventSink};
 use monica_domain::{ExplanationId, SyncedBlockMode};
@@ -273,6 +273,15 @@ struct DateRangeQuery {
     to: Option<String>,
 }
 
+#[derive(serde::Deserialize)]
+struct DailyCountsQuery {
+    from: Option<String>,
+    to: Option<String>,
+    /// note kind での絞り込み（例 `daily`）。省略時は従来どおり全 kind を数える —
+    /// 旧 /notes カレンダーの濃度表示は全 kind カウントに依存している。
+    kind: Option<String>,
+}
+
 fn load_notes_settings() -> Result<monica_settings::NotesSettings, AppError> {
     let base = monica_paths::base_dir()?;
     Ok(monica_settings::Settings::load_from(&base)?.notes)
@@ -482,14 +491,32 @@ async fn restore_note(Path(id): Path<String>) -> Result<Json<monica_api::ApiNote
 }
 
 async fn daily_note_counts(
-    Query(range): Query<DateRangeQuery>,
+    Query(query): Query<DailyCountsQuery>,
 ) -> Result<Json<Vec<monica_api::ApiDailyNoteCount>>, AppError> {
     let counts = blocking(move || {
         let mut monica = open()?;
-        Ok(monica.notes().daily_counts(range.from.as_deref(), range.to.as_deref())?)
+        Ok(monica.notes().daily_counts(
+            query.from.as_deref(),
+            query.to.as_deref(),
+            query.kind.as_deref(),
+        )?)
     })
     .await?;
     Ok(Json(counts.into_iter().map(Into::into).collect()))
+}
+
+/// `daily/{date}` というリソースの冪等な確保（get-or-create）なので PUT。
+async fn put_daily_note(Path(date): Path<String>) -> Result<Response, AppError> {
+    // ApplicationError::Validation は 404 に写像されるので、入力エラーはここで 422 に落とす。
+    if !monica_domain::is_valid_date(&date) {
+        return Ok(StatusCode::UNPROCESSABLE_ENTITY.into_response());
+    }
+    let note = blocking(move || {
+        let mut monica = open()?;
+        Ok(monica.notes().daily_note_for(&date)?)
+    })
+    .await?;
+    Ok(Json(monica_api::ApiNote::from(note)).into_response())
 }
 
 #[derive(serde::Deserialize)]
@@ -641,6 +668,7 @@ fn build_router(allowed: AllowedHosts) -> Router {
         .route("/api/notes", get(list_notes).post(create_note))
         .route("/api/notes/by-project", get(list_project_notes))
         .route("/api/notes/daily-counts", get(daily_note_counts))
+        .route("/api/notes/daily/{date}", put(put_daily_note))
         .route("/api/notes/markdown", post(render_note_markdown))
         .route("/api/notes/mentions", get(search_note_mentions))
         .route("/api/notes/mentions/{id}", get(resolve_note_mention))
@@ -668,6 +696,9 @@ fn build_router(allowed: AllowedHosts) -> Router {
         .route("/notes", get(spa_index))
         .route("/notes/", get(spa_index))
         .route("/notes/{id}", get(spa_index))
+        .route("/daily", get(spa_index))
+        .route("/daily/", get(spa_index))
+        .route("/daily/{date}", get(spa_index))
         .route("/settings", get(spa_index))
         .route("/assets/{*path}", get(spa_asset))
         .route("/favicon.png", get(favicon))
@@ -825,6 +856,15 @@ mod tests {
     fn post_req(uri: &str) -> Request<Body> {
         Request::builder()
             .method("POST")
+            .uri(uri)
+            .header("host", "127.0.0.1:19999")
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    fn put_req(uri: &str) -> Request<Body> {
+        Request::builder()
+            .method("PUT")
             .uri(uri)
             .header("host", "127.0.0.1:19999")
             .body(Body::empty())
@@ -1235,7 +1275,10 @@ mod tests {
         let response = set_kind(id, serde_json::json!({"kind": "essay"})).await;
         assert_eq!(response.status(), StatusCode::OK);
         let essay: serde_json::Value = serde_json::from_str(&body_string(response).await).unwrap();
-        assert_eq!(essay["kind"], serde_json::json!({"kind": "essay", "title": ""}));
+        assert_eq!(
+            essay["kind"],
+            serde_json::json!({"kind": "essay", "title": "", "status": "writing"})
+        );
 
         // essay の title は PUT で編集できる
         let body = serde_json::json!({
@@ -1248,7 +1291,10 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
         let fetched = fetch_note(id).await;
-        assert_eq!(fetched["kind"], serde_json::json!({"kind": "essay", "title": "morning pages"}));
+        assert_eq!(
+            fetched["kind"],
+            serde_json::json!({"kind": "essay", "title": "morning pages", "status": "writing"})
+        );
 
         // essay → daily は title を破棄する
         let response = set_kind(id, serde_json::json!({"kind": "daily"})).await;
@@ -1279,7 +1325,7 @@ mod tests {
             serde_json::from_str(&body_string(response).await).unwrap();
         assert_eq!(
             promoted["kind"],
-            serde_json::json!({"kind": "project", "project_id": "webtest/promotion"})
+            serde_json::json!({"kind": "project", "project_id": "webtest/promotion", "title": ""})
         );
 
         // project からの脱出経路なし
@@ -1768,6 +1814,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn put_daily_note_is_get_or_create() {
+        // テストは DB を共有するので、他テストの logical today と衝突しない固定過去日を使う
+        let response = app().oneshot(put_req("/api/notes/daily/1987-06-15")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let created: serde_json::Value =
+            serde_json::from_str(&body_string(response).await).unwrap();
+        assert_eq!(created["kind"], serde_json::json!({"kind": "daily"}));
+        assert_eq!(created["date"], "1987-06-15");
+
+        let response = app().oneshot(put_req("/api/notes/daily/1987-06-15")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let again: serde_json::Value = serde_json::from_str(&body_string(response).await).unwrap();
+        assert_eq!(again["id"], created["id"], "冪等: 再 PUT は同じ note を返す");
+    }
+
+    #[tokio::test]
+    async fn put_daily_note_rejects_invalid_date() {
+        for date in ["2026-13-01", "2026-7-4", "2026-02-30", "not-a-date"] {
+            let response = app()
+                .oneshot(put_req(&format!("/api/notes/daily/{date}")))
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "date: {date}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn daily_counts_kind_filter_wiring() {
+        // kind フィルタの意味論は storage テストが担う。ここは query param の配線だけ:
+        // 固定過去日の daily を作り、その 1 日レンジで kind 別の見え方を確認する。
+        let response = app().oneshot(put_req("/api/notes/daily/1989-04-01")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let counts_for = |kind: Option<&str>| {
+            let query = match kind {
+                Some(kind) => format!("&kind={kind}"),
+                None => String::new(),
+            };
+            let uri = format!("/api/notes/daily-counts?from=1989-04-01&to=1989-04-01{query}");
+            async move {
+                let response = app().oneshot(get_req(&uri)).await.unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+                serde_json::from_str::<serde_json::Value>(&body_string(response).await).unwrap()
+            }
+        };
+        let expected = serde_json::json!([{"date": "1989-04-01", "count": 1}]);
+        assert_eq!(counts_for(None).await, expected, "param なしは従来どおり全 kind");
+        assert_eq!(counts_for(Some("daily")).await, expected);
+        assert_eq!(counts_for(Some("essay")).await, serde_json::json!([]));
+    }
+
+    #[tokio::test]
     async fn ogp_rejects_non_http_urls() {
         for url in ["file:///etc/passwd", "ftp://example.com", "not-a-url"] {
             let response = app()
@@ -1805,7 +1907,7 @@ mod tests {
 
     #[tokio::test]
     async fn spa_notes_routes_return_html() {
-        for uri in ["/notes", "/notes/note-1", "/settings"] {
+        for uri in ["/notes", "/notes/note-1", "/settings", "/daily", "/daily/2026-07-24"] {
             let response = app().oneshot(get_req(uri)).await.unwrap();
             let status = response.status();
             if WebAssets::get("index.html").is_some() {
@@ -1939,6 +2041,7 @@ mod tests {
             .register::<monica_api::ApiNoteSummary>()
             .register::<monica_api::ApiNotePage>()
             .register::<monica_api::ApiNoteKind>()
+            .register::<monica_api::ApiEssayStatus>()
             .register::<monica_api::ApiNoteMention>()
             .register::<monica_api::ApiNoteBlock>()
             .register::<monica_api::ApiSetNoteKind>()
