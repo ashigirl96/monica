@@ -1202,7 +1202,7 @@ fn project_primary_note_id_reads_back_and_survives_upsert() {
     let saved = db.upsert_project(&project, &ExecutionProfile::default()).unwrap();
     assert_eq!(saved.primary_note_id, None, "新規 project は primary note なし");
 
-    // Phase 1 に書き込み経路は無いので生 SQL で仕込む（lazy 作成は Phase 3）
+    // 列の永続性だけを検証するため、lazy 作成経路と切り離して生 SQL で仕込む
     let note = db.create_note(0).unwrap();
     db.conn()
         .execute(
