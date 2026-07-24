@@ -185,16 +185,21 @@ export function EssayEditorPage({ id }: { id: string }) {
       try {
         const next = current.kind.status === "writing" ? "finished" : "writing";
         const updated = await setEssayStatus(current.id, next);
-        // エディタは開いたまま status チップとサイドバー（writing のみ）だけが変わる
-        seedNote(updated);
-        patchSummaryKind(updated);
+        // エディタは開いたまま status チップとサイドバー（writing のみ）だけが変わる。
+        // content は seed しない — 直前の flush が失敗して pending が再試行待ちのとき、
+        // status-only レスポンスの古い content で contentRef を巻き戻すと、後続の title 編集が
+        // その古い本文で pending を上書きして編集を失うため（kind と updated_at だけ反映する）
+        const merged: Note = { ...current, kind: updated.kind, updated_at: updated.updated_at };
+        noteRef.current = merged;
+        setNote(merged);
+        patchSummaryKind(merged);
       } catch {
         // 409/404 は UI 状態が古いだけ。一覧の再取得で追いつくので黙って握る
         setDataVersion((v) => v + 1);
       }
     };
     toggleChainRef.current = toggleChainRef.current.then(run);
-  }, [flush, seedNote, patchSummaryKind]);
+  }, [flush, patchSummaryKind]);
 
   useEffect(() => {
     // capture phase で登録する: エディタ（ProseMirror）より先に横取りする必要がある
