@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { listProjects } from "@/api";
 import { navigate } from "@/app";
+import { ctrlOnly } from "@/keys";
 import type { ProjectOption } from "@/types.gen";
 import { FuzzyPickerModal } from "@/components/fuzzy-picker-modal";
 import { ProjectEditor } from "./editor";
@@ -38,8 +39,7 @@ function ProjectChooser() {
     // ⌃W で picker を開き直せる（他画面と流儀を揃えて capture phase）
     function onKey(e: KeyboardEvent) {
       if (e.isComposing) return;
-      const ctrlOnly = e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
-      if (ctrlOnly && e.code === "KeyW") {
+      if (ctrlOnly(e) && e.code === "KeyW") {
         e.preventDefault();
         e.stopPropagation();
         setPickerOpen(true);

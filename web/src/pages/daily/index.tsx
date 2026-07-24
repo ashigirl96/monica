@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BlockEditorHandle } from "@shared/block-editor/block-editor";
 import { dailyNoteDates, getDailyNote, getNotesToday } from "@/api";
 import { navigate } from "@/app";
+import { altOnly } from "@/keys";
 import type { Note } from "@/types.gen";
 import type { Month } from "@/notes/dates";
 import { takePendingBlockTarget } from "@/notes/block-jump";
@@ -15,10 +16,10 @@ import {
 } from "@/notes/dates";
 import { cycleSelect, persistableContent, useNoteBlockResolvers } from "@/notes/editor-support";
 import { NoteBlockEditor } from "@/notes/note-block-editor";
+import { NotesShell } from "@/notes/notes-shell";
 import { useAutosave } from "@/notes/use-autosave";
 import { DailyCalendar } from "./calendar";
 import { DailySidebar } from "./sidebar";
-import "@/notes/notes.css";
 
 /**
  * /daily: 1 日 1 note の daily 専用画面。開く = get-or-create なので EmptyState も
@@ -159,8 +160,7 @@ export function DailyPage({ date }: { date: string | null }) {
     // capture phase で登録する: エディタ（ProseMirror）より先に横取りする必要がある。
     // /daily に ⌥N は無い（新規作成の概念が「日付を開く」に吸収されるため登録しない）
     function onKey(e: KeyboardEvent) {
-      if (e.isComposing) return;
-      if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      if (e.isComposing || !altOnly(e)) return;
       if (e.code !== "KeyJ" && e.code !== "KeyK") return;
       e.preventDefault();
       e.stopPropagation();
@@ -187,13 +187,9 @@ export function DailyPage({ date }: { date: string | null }) {
   );
 
   return (
-    <div
-      className="notes-screen relative flex h-dvh shrink-0 overflow-hidden"
-      data-density="relaxed"
-    >
-      <aside className="w-[300px] shrink-0 overflow-hidden border-r transition-[width] duration-200 group-data-[zen]/shell:w-0 group-data-[zen]/shell:border-r-0 motion-reduce:transition-none">
-        {/* 開閉アニメーション中に中身が折り返さないよう幅は内側で固定する */}
-        <div className="flex h-full w-[300px] flex-col">
+    <NotesShell
+      sidebar={
+        <>
           <DailySidebar
             dates={sidebarDates}
             selectedDate={date}
@@ -209,9 +205,9 @@ export function DailyPage({ date }: { date: string | null }) {
             onSelectDay={selectDate}
             onToday={goToday}
           />
-        </div>
-      </aside>
-
+        </>
+      }
+    >
       <main className="flex-1 overflow-y-auto bg-[var(--paper)]">
         {noteError ? (
           <div className="flex h-full items-center justify-center text-sm text-destructive">
@@ -240,6 +236,6 @@ export function DailyPage({ date }: { date: string | null }) {
           </div>
         ) : null}
       </main>
-    </div>
+    </NotesShell>
   );
 }

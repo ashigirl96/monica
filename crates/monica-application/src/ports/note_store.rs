@@ -21,7 +21,7 @@ pub trait NoteStore {
         project_id: &str,
         day_boundary_hour: u8,
     ) -> Result<Note>;
-    /// Live essays（全 status）を updated_at 降順で返す。/essays 一覧・サイドバーの共有ソース。
+    /// Live essays（全 status）を created_at 降順で返す。/essays 一覧・サイドバーの共有ソース。
     fn list_essay_notes(&self) -> Result<Vec<NoteSummary>>;
     /// status 列だけを書く（title に触れない — autosave の title 置換と競合しない）。
     /// Returns `None` when the note does not exist, is deleted, or is not an essay.

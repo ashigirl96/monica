@@ -1419,7 +1419,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_essays_returns_only_essays_newest_updated_first() {
+    async fn list_essays_returns_only_essays_newest_created_first() {
         // 並列テストの note と共存するため、全体一致ではなく自分の id の有無と相対順で検証する
         let older = create_essay_via_api().await;
         let older_id = older["id"].as_str().unwrap();
@@ -1427,7 +1427,7 @@ mod tests {
         let newer_id = newer["id"].as_str().unwrap();
         let daily = create_note_via_api().await;
         let daily_id = daily["id"].as_str().unwrap();
-        // older を後から更新して updated_at を最新にする（作成順の逆 = updated_at 順の検証）
+        // older を後から更新する。created_at 基準なので並びは動かない（updated_at 順との差の検証）
         put_note(older_id, Some("bumped"), doc_with_lines(&["essay preview"])).await;
 
         let response = app().oneshot(get_req("/api/notes/essays")).await.unwrap();
@@ -1438,7 +1438,7 @@ mod tests {
         let pos = |id: &str| list.iter().position(|n| n["id"] == id);
         let older_pos = pos(older_id).expect("updated essay must be listed");
         let newer_pos = pos(newer_id).expect("created essay must be listed");
-        assert!(older_pos < newer_pos, "updated_at 降順（更新した方が先）");
+        assert!(newer_pos < older_pos, "created_at 降順（後から作った方が先・更新では動かない）");
         let entry = &list[older_pos];
         assert_eq!(
             entry["kind"],

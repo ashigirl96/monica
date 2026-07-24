@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BlockEditorHandle } from "@shared/block-editor/block-editor";
-import { createEssay, getNote, listEssays, setEssayStatus } from "@/api";
+import { createEssay, deleteNote, getNote, listEssays, setEssayStatus } from "@/api";
 import { navigate } from "@/app";
+import { altOnly, ctrlOnly } from "@/keys";
 import type { Note, NoteSummary } from "@/types.gen";
 import { takePendingBlockTarget } from "@/notes/block-jump";
 import {
@@ -12,10 +13,17 @@ import {
   useNoteBlockResolvers,
 } from "@/notes/editor-support";
 import { NoteBlockEditor } from "@/notes/note-block-editor";
+import { NotesShell } from "@/notes/notes-shell";
 import { useAutosave } from "@/notes/use-autosave";
 import { EssaysSidebar } from "./sidebar";
-import { essayStatus } from "./support";
-import "@/notes/notes.css";
+import {
+  dropEssay,
+  essayStatus,
+  nextEssayStatus,
+  patchEssayKind,
+  pushDeletedEssay,
+  restoreLastDeletedEssay,
+} from "./support";
 
 function StatusChip({
   status,
@@ -53,7 +61,7 @@ export function EssayEditorPage({ id }: { id: string }) {
   const [essays, setEssays] = useState<NoteSummary[] | null>(null);
   // 作成・status 変更の失敗後に一覧を再取得させるためのバージョン
   const [dataVersion, setDataVersion] = useState(0);
-  const { schedule, flush, error: saveError } = useAutosave();
+  const { schedule, flush, discard, error: saveError } = useAutosave();
   const editorHandleRef = useRef<BlockEditorHandle | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   // ⌥N 直後は本文ではなくタイトルへフォーカスする（ノート読み込み後の effect で消費）
@@ -153,9 +161,7 @@ export function EssayEditorPage({ id }: { id: string }) {
   }, []);
 
   const patchSummaryKind = useCallback((next: Note) => {
-    setEssays(
-      (list) => list?.map((s) => (s.id === next.id ? { ...s, kind: next.kind } : s)) ?? list,
-    );
+    setEssays((list) => patchEssayKind(list, next.id, next.kind));
   }, []);
 
   const createNew = useCallback(async () => {
@@ -170,6 +176,34 @@ export function EssayEditorPage({ id }: { id: string }) {
       // 作成失敗は次の ⌥N で再試行できるので黙って握る
     }
   }, [flush, seedNote]);
+
+  const deleteCurrent = useCallback(async () => {
+    const target = noteRef.current;
+    if (target === null) return;
+    await flush();
+    // 削除済み note への pending 保存を止める（再試行が 404 を叩き続けるのを防ぐ）
+    discard(target.id);
+    try {
+      await deleteNote(target.id);
+    } catch {
+      return;
+    }
+    pushDeletedEssay(target.id);
+    setEssays((list) => dropEssay(list, target.id));
+    // writing はサイドバーの次へ送って書く流れを切らない。finished（サイドバー外）は
+    // 一覧から開いた note なので一覧へ帰す
+    const next = writingIds.includes(target.id) ? cycleSelect(writingIds, target.id, 1) : undefined;
+    if (next !== undefined && next !== target.id) navigate(`/essays/${next}`, { replace: true });
+    else navigate("/essays", { replace: true });
+  }, [flush, discard, writingIds]);
+
+  const undoDelete = useCallback(async () => {
+    const restored = await restoreLastDeletedEssay();
+    if (restored === undefined) return;
+    setDataVersion((v) => v + 1);
+    seedNote(restored);
+    navigate(`/essays/${restored.id}`);
+  }, [seedNote]);
 
   // トグルを直列化する chain（use-autosave の flushChain と同じ手法）。連打時に両方が
   // 同じ status を読んで 2 回のトグルが 1 回に潰れるのを防ぎ、2 回目は 1 回目の結果に
@@ -186,8 +220,7 @@ export function EssayEditorPage({ id }: { id: string }) {
       // 失敗時の一覧再取得が編集前の preview に巻き戻らないように）
       await flush();
       try {
-        const next = current.kind.status === "writing" ? "finished" : "writing";
-        const updated = await setEssayStatus(current.id, next);
+        const updated = await setEssayStatus(current.id, nextEssayStatus(current.kind.status));
         // エディタは開いたまま status チップとサイドバー（writing のみ）だけが変わる。
         // content は seed しない — 直前の flush が失敗して pending が再試行待ちのとき、
         // status-only レスポンスの古い content で contentRef を巻き戻すと、後続の title 編集が
@@ -208,18 +241,30 @@ export function EssayEditorPage({ id }: { id: string }) {
     // capture phase で登録する: エディタ（ProseMirror）より先に横取りする必要がある
     function onKey(e: KeyboardEvent) {
       if (e.isComposing) return;
-      const ctrlOnly = e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
-      if (ctrlOnly && e.code === "KeyQ" && noteRef.current !== null) {
+      if (ctrlOnly(e) && e.code === "KeyQ" && noteRef.current !== null) {
         e.preventDefault();
         e.stopPropagation();
         toggleStatus();
         return;
       }
-      if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      if (!altOnly(e)) return;
       if (e.code === "KeyN") {
         e.preventDefault();
         e.stopPropagation();
         void createNew();
+        return;
+      }
+      if (e.code === "Backspace" || e.code === "Delete") {
+        if (noteRef.current === null) return;
+        e.preventDefault();
+        e.stopPropagation();
+        void deleteCurrent();
+        return;
+      }
+      if (e.code === "KeyZ") {
+        e.preventDefault();
+        e.stopPropagation();
+        void undoDelete();
         return;
       }
       if (e.code !== "KeyJ" && e.code !== "KeyK") return;
@@ -231,7 +276,7 @@ export function EssayEditorPage({ id }: { id: string }) {
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [writingIds, id, selectEssay, createNew, toggleStatus]);
+  }, [writingIds, id, selectEssay, createNew, toggleStatus, deleteCurrent, undoDelete]);
 
   const scheduleSave = useCallback(
     (target: Note) => {
@@ -264,17 +309,9 @@ export function EssayEditorPage({ id }: { id: string }) {
   });
 
   return (
-    <div
-      className="notes-screen relative flex h-dvh shrink-0 overflow-hidden"
-      data-density="relaxed"
+    <NotesShell
+      sidebar={<EssaysSidebar essays={sidebarEssays} selectedId={id} onSelect={selectEssay} />}
     >
-      <aside className="w-[300px] shrink-0 overflow-hidden border-r transition-[width] duration-200 group-data-[zen]/shell:w-0 group-data-[zen]/shell:border-r-0 motion-reduce:transition-none">
-        {/* 開閉アニメーション中に中身が折り返さないよう幅は内側で固定する */}
-        <div className="h-full w-[300px]">
-          <EssaysSidebar essays={sidebarEssays} selectedId={id} onSelect={selectEssay} />
-        </div>
-      </aside>
-
       <main className="flex-1 overflow-y-auto bg-[var(--paper)]">
         {noteError ? (
           <div className="flex h-full items-center justify-center text-sm text-destructive">
@@ -321,6 +358,6 @@ export function EssayEditorPage({ id }: { id: string }) {
           </div>
         ) : null}
       </main>
-    </div>
+    </NotesShell>
   );
 }
