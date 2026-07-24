@@ -124,7 +124,7 @@ export function DailyPage({ date }: { date: string | null }) {
     return () => {
       cancelled = true;
     };
-  }, [date]);
+  }, [date, mentionCacheRef]);
 
   useEffect(() => {
     let cancelled = false;

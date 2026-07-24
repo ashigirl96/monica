@@ -125,6 +125,22 @@ export function NotesPage({ id }: { id: string | null }) {
   // 常に最新のフィールドを持つ ref から保存 payload を組み立てる（stale title/kind の逆行防止）
   const noteRef = useRef<Note | null>(null);
 
+  const selectNote = useCallback(
+    (noteId: string) => {
+      void flush();
+      navigate(`/notes/${noteId}`);
+    },
+    [flush],
+  );
+
+  // ジャンプは onNoteMentionClick={selectNote} の延長として同じ navigate 経路を通す
+  const { mentionCacheRef, resolveNoteMention, resolveBlock, onOpenBlock } = useNoteBlockResolvers({
+    flush,
+    noteRef,
+    editorHandleRef,
+    onNavigateToNote: selectNote,
+  });
+
   useEffect(() => {
     let cancelled = false;
     listNotes(range.from, range.to)
@@ -299,7 +315,7 @@ export function NotesPage({ id }: { id: string | null }) {
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, mentionCacheRef]);
 
   // id なしで開いたら今日の最新エントリを自動選択する（project filter 中はしない）
   useEffect(() => {
@@ -315,22 +331,6 @@ export function NotesPage({ id }: { id: string | null }) {
     const blockId = takePendingBlockTarget(note.id);
     if (blockId) editorHandleRef.current?.scrollToBlock(blockId);
   }, [note]);
-
-  const selectNote = useCallback(
-    (noteId: string) => {
-      void flush();
-      navigate(`/notes/${noteId}`);
-    },
-    [flush],
-  );
-
-  // ジャンプは onNoteMentionClick={selectNote} の延長として同じ navigate 経路を通す
-  const { mentionCacheRef, resolveNoteMention, resolveBlock, onOpenBlock } = useNoteBlockResolvers({
-    flush,
-    noteRef,
-    editorHandleRef,
-    onNavigateToNote: selectNote,
-  });
 
   // 「今日の直近7日 + 今日の月」へ戻す。既に同じ表示なら state 同一性を保って refetch を抑止する
   const resetToToday = useCallback(() => {
