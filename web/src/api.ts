@@ -110,13 +110,8 @@ export async function restoreNote(id: string): Promise<Note> {
   return res.json();
 }
 
-export async function dailyNoteCounts(
-  from: string,
-  to: string,
-  kind?: string,
-): Promise<DailyNoteCount[]> {
+export async function dailyNoteCounts(from: string, to: string): Promise<DailyNoteCount[]> {
   const params = new URLSearchParams({ from, to });
-  if (kind !== undefined) params.set("kind", kind);
   const res = await fetch(`/api/notes/daily-counts?${params}`);
   if (!res.ok) throw new Error(`Failed to load note counts: ${res.status}`);
   return res.json();

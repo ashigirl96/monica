@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BlockEditor, type BlockEditorHandle } from "@shared/block-editor/block-editor";
 import {
-  dailyNoteCounts,
   dailyNoteDates,
   getDailyNote,
   getNotesToday,
@@ -17,7 +16,6 @@ import {
   currentMonth,
   dayLabelWithYear,
   monthOf,
-  monthRange,
   sameMonth,
   todayKey,
 } from "../notes/dates";
@@ -42,12 +40,9 @@ export function DailyPage({ date }: { date: string | null }) {
   const [today, setToday] = useState<string>(todayKey);
   const [note, setNote] = useState<Note | null>(null);
   const [noteError, setNoteError] = useState<string | null>(null);
-  // daily が存在する日の降順リスト（サイドバー・⌥K/J の巡回対象）
+  // daily が存在する日の集合（順序不問 — サイドバー・カレンダーは導出時に整える）
   const [dates, setDates] = useState<string[] | null>(null);
   const [month, setMonth] = useState<Month>(currentMonth);
-  const [existing, setExisting] = useState<Set<string>>(new Set());
-  // 新規日の作成後にサイドバー・カレンダーを再取得させるためのバージョン
-  const [dataVersion, setDataVersion] = useState(0);
   const { schedule, flush, error: saveError } = useAutosave();
   const editorHandleRef = useRef<BlockEditorHandle | null>(null);
   const contentRef = useRef<unknown>(null);
@@ -70,31 +65,23 @@ export function DailyPage({ date }: { date: string | null }) {
     onNavigateToNote: openInNotes,
   });
 
+  // date なしは「常に今日を開く」— backend の logical today を解決してから replace する
+  // （boundary 前の深夜にブラウザの日付で開くと前日の daily とズレるため）。解決済みなら
+  // 日付間の移動では再取得せず、素の /daily へ戻ったときだけ取り直す
+  const todayResolvedRef = useRef(false);
   useEffect(() => {
+    if (date !== null && todayResolvedRef.current) return;
     let cancelled = false;
     getNotesToday()
       .then((t) => {
         if (cancelled) return;
+        todayResolvedRef.current = true;
         setToday(t.date);
         setMonth((m) => (sameMonth(m, currentMonth()) ? monthOf(t.date) : m));
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // date なしは「常に今日を開く」— backend の logical today を解決してから replace する
-  // （boundary 前の深夜にブラウザの日付で開くと前日の daily とズレるため）
-  useEffect(() => {
-    if (date !== null) return;
-    let cancelled = false;
-    getNotesToday()
-      .then((t) => {
-        if (!cancelled) navigate(`/daily/${t.date}`, { replace: true });
+        if (date === null) navigate(`/daily/${t.date}`, { replace: true });
       })
       .catch(() => {
-        if (!cancelled) navigate(`/daily/${todayKey()}`, { replace: true });
+        if (!cancelled && date === null) navigate(`/daily/${todayKey()}`, { replace: true });
       });
     return () => {
       cancelled = true;
@@ -116,7 +103,7 @@ export function DailyPage({ date }: { date: string | null }) {
         noteRef.current = n;
         setNote(n);
         // 空日を開いた（= その場で作成された）場合に存在日リストへ反映する
-        setDataVersion((v) => v + 1);
+        setDates((prev) => (prev?.includes(date) ? prev : [...(prev ?? []), date]));
       })
       .catch((e: unknown) => {
         if (!cancelled) setNoteError(e instanceof Error ? e.message : "Failed to open daily note");
@@ -130,27 +117,23 @@ export function DailyPage({ date }: { date: string | null }) {
     let cancelled = false;
     dailyNoteDates()
       .then((list) => {
-        // API は date 昇順 — サイドバーは降順で使う
-        if (!cancelled) setDates(list.map((c) => c.date).reverse());
+        if (cancelled) return;
+        // 取得中に get-or-create で足された日付（note 読み込み effect の setDates）を
+        // レスポンスで潰さないよう合併する
+        setDates((prev) => {
+          const merged = new Set(list.map((c) => c.date));
+          for (const d of prev ?? []) merged.add(d);
+          return Array.from(merged);
+        });
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [dataVersion]);
+  }, []);
 
-  useEffect(() => {
-    const r = monthRange(month);
-    let cancelled = false;
-    dailyNoteCounts(r.from, r.to, "daily")
-      .then((list) => {
-        if (!cancelled) setExisting(new Set(list.map((c) => c.date)));
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [month, dataVersion]);
+  // カレンダーの存在日ドット。dates（全期間）の membership 判定だけなので導出で足りる
+  const existing = useMemo(() => new Set(dates ?? []), [dates]);
 
   // サイドバー = 存在日 + 今日（重複排除・降順）。存在しない日はここに現れないので、
   // ⌥K/J の巡回が自動的に「空日スキップ」になる
