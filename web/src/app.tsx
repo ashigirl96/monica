@@ -45,7 +45,9 @@ function parseRoute(pathname: string): Route {
   if (explanation) return { page: "detail", id: explanation[1] };
   const notes = pathname.match(/^\/notes(?:\/([^/]+))?\/?$/);
   if (notes) return { page: "notes", id: notes[1] ?? null };
-  const daily = pathname.match(/^\/daily(?:\/(\d{4}-\d{2}-\d{2}))?\/?$/);
+  // date の形式検証はしない（backend の is_valid_date が正 — 不正値は PUT が 422 を返し
+  // DailyPage がエラー表示する）。フロントに日付パースを複製しない。
+  const daily = pathname.match(/^\/daily(?:\/([^/]+))?\/?$/);
   if (daily) return { page: "daily", date: daily[1] ?? null };
   if (/^\/settings\/?$/.test(pathname)) return { page: "settings" };
   return { page: "list" };

@@ -1,15 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BlockEditor, type BlockEditorHandle } from "@shared/block-editor/block-editor";
-import type { NoteMentionInfo } from "@shared/block-editor/node-views";
 import {
   dailyNoteCounts,
   dailyNoteDates,
   getDailyNote,
-  getNoteBlock,
   getNotesToday,
   importImageAsset,
   renderNoteMarkdown,
-  resolveNoteMention as resolveNoteMentionApi,
   uploadImageAsset,
 } from "@/api";
 import { navigate } from "@/app";
@@ -24,7 +21,12 @@ import {
   sameMonth,
   todayKey,
 } from "../notes/dates";
-import { fetchLinkMetadata, persistableContent, searchNoteMentions } from "../notes/editor-support";
+import {
+  fetchLinkMetadata,
+  persistableContent,
+  searchNoteMentions,
+  useNoteBlockResolvers,
+} from "../notes/editor-support";
 import { useAutosave } from "../notes/use-autosave";
 import { DailyCalendar } from "./calendar";
 import { DailySidebar } from "./sidebar";
@@ -50,9 +52,23 @@ export function DailyPage({ date }: { date: string | null }) {
   const editorHandleRef = useRef<BlockEditorHandle | null>(null);
   const contentRef = useRef<unknown>(null);
   const noteRef = useRef<Note | null>(null);
-  // 同一 doc 内の重複 mention を 1 リクエストに畳む Promise 共有キャッシュ。
-  // 開く日が変わるたび捨てるので、開き直しで表示名が最新タイトルに追従する
-  const mentionCacheRef = useRef(new Map<string, Promise<NoteMentionInfo | null>>());
+
+  // mention / synced block のジャンプ先は旧 /notes（essay・project note の受け皿が
+  // まだ無い Phase 1 の暫定挙動）
+  const openInNotes = useCallback(
+    (noteId: string) => {
+      void flush();
+      navigate(`/notes/${noteId}`);
+    },
+    [flush],
+  );
+
+  const { mentionCacheRef, resolveNoteMention, resolveBlock, onOpenBlock } = useNoteBlockResolvers({
+    flush,
+    noteRef,
+    editorHandleRef,
+    onNavigateToNote: openInNotes,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -178,48 +194,6 @@ export function DailyPage({ date }: { date: string | null }) {
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [sidebarDates, date, selectDate]);
-
-  const resolveNoteMention = useCallback((noteId: string): Promise<NoteMentionInfo | null> => {
-    const cache = mentionCacheRef.current;
-    let promise = cache.get(noteId);
-    if (!promise) {
-      promise = resolveNoteMentionApi(noteId).then((m) =>
-        m ? { displayName: m.display_name } : null,
-      );
-      cache.set(noteId, promise);
-    }
-    return promise;
-  }, []);
-
-  // mention / synced block のジャンプ先は旧 /notes（essay・project note の受け皿が
-  // まだ無い Phase 1 の暫定挙動）
-  const openInNotes = useCallback(
-    (noteId: string) => {
-      void flush();
-      navigate(`/notes/${noteId}`);
-    },
-    [flush],
-  );
-
-  const resolveBlock = useCallback(
-    async (noteId: string, blockId: string): Promise<unknown | null> => {
-      await flush();
-      const r = await getNoteBlock(noteId, blockId);
-      return r?.block ?? null;
-    },
-    [flush],
-  );
-
-  const onOpenBlock = useCallback(
-    (targetNoteId: string, blockId: string) => {
-      if (targetNoteId === noteRef.current?.id) {
-        editorHandleRef.current?.scrollToBlock(blockId);
-        return;
-      }
-      openInNotes(targetNoteId);
-    },
-    [openInNotes],
-  );
 
   const onDocChange = useCallback(
     (doc: unknown) => {
