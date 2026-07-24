@@ -1,16 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { deleteExplanation, listExplanations } from "@/api";
 import { navigate, spaLinkClick } from "@/app";
+import { ContextMenu, useContextMenu } from "@/components/context-menu";
 import { DeleteDialog } from "@/components/delete-dialog";
 import { FuzzyPickerModal } from "@/components/fuzzy-picker-modal";
 import { formatDate, formatRelative } from "@/format";
 import type { Explanation } from "@/types.gen";
-
-interface ContextMenuState {
-  x: number;
-  y: number;
-  item: Explanation;
-}
 
 function RepoFilterBadge({
   repo,
@@ -103,10 +98,9 @@ export function ListPage() {
   const [query, setQuery] = useState("");
   const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [menu, setMenu] = useState<ContextMenuState | null>(null);
+  const { menu, openMenu, closeMenu } = useContextMenu<Explanation>();
   const [deleteTarget, setDeleteTarget] = useState<Explanation | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     listExplanations()
@@ -131,28 +125,6 @@ export function ListPage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [pickerOpen]);
-
-  useEffect(() => {
-    if (!menu) return;
-    function onMouseDown(e: MouseEvent) {
-      if (menuRef.current?.contains(e.target as Node)) return;
-      setMenu(null);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setMenu(null);
-    }
-    function onScroll() {
-      setMenu(null);
-    }
-    window.addEventListener("mousedown", onMouseDown);
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", onScroll, true);
-    return () => {
-      window.removeEventListener("mousedown", onMouseDown);
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", onScroll, true);
-    };
-  }, [menu]);
 
   const repos = useMemo(() => {
     const set = new Set<string>();
@@ -268,60 +240,34 @@ export function ListPage() {
         ) : (
           <ol className="flex flex-col gap-3">
             {filtered.map((e) => (
-              <Entry
-                key={e.id}
-                item={e}
-                onMenu={(ev) => {
-                  ev.preventDefault();
-                  setMenu({ x: ev.clientX, y: ev.clientY, item: e });
-                }}
-              />
+              <Entry key={e.id} item={e} onMenu={(ev) => openMenu(ev, e)} />
             ))}
           </ol>
         )}
       </main>
 
       {menu && (
-        <div
-          ref={menuRef}
-          className="fixed z-50 w-48 rounded-lg border bg-card p-1 shadow-lg"
-          style={{
-            left: Math.min(menu.x, window.innerWidth - 200),
-            top: Math.min(menu.y, window.innerHeight - 130),
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              setMenu(null);
-              navigate(`/explanations/${menu.item.id}`);
-            }}
-            className="flex w-full items-center rounded-md px-2.5 py-1.5 text-sm transition-colors hover:bg-muted"
-          >
-            Open
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setMenu(null);
-              window.open(`/explanations/${menu.item.id}/artifact`, "_blank");
-            }}
-            className="flex w-full items-center rounded-md px-2.5 py-1.5 text-sm transition-colors hover:bg-muted"
-          >
-            Open artifact in new tab
-          </button>
-          <div className="my-1 h-px bg-border" />
-          <button
-            type="button"
-            onClick={() => {
-              setDeleteTarget(menu.item);
-              setMenu(null);
-            }}
-            className="flex w-full items-center rounded-md px-2.5 py-1.5 text-sm text-destructive transition-colors hover:bg-destructive/10"
-          >
-            Delete&hellip;
-          </button>
-        </div>
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={[
+            {
+              label: "Open",
+              onSelect: () => navigate(`/explanations/${menu.target.id}`),
+            },
+            {
+              label: "Open artifact in new tab",
+              onSelect: () => window.open(`/explanations/${menu.target.id}/artifact`, "_blank"),
+            },
+            {
+              label: "Delete…",
+              destructive: true,
+              separatorBefore: true,
+              onSelect: () => setDeleteTarget(menu.target),
+            },
+          ]}
+          onClose={closeMenu}
+        />
       )}
 
       {pickerOpen && (

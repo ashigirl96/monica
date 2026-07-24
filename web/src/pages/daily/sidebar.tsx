@@ -24,7 +24,7 @@ export function DailySidebar({
             }`}
           >
             {selected && (
-              <span className="absolute top-1.5 bottom-1.5 left-0 w-0.5 rounded-full bg-[var(--ink-muted)]" />
+              <span className="absolute top-1.5 bottom-1.5 left-0 w-0.5 rounded-full bg-[var(--water)]" />
             )}
             <button
               type="button"

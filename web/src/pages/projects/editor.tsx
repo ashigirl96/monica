@@ -10,6 +10,7 @@ import {
   restoreNote,
 } from "@/api";
 import { navigate } from "@/app";
+import { altOnly, ctrlOnly } from "@/keys";
 import type { Note, NoteSummary, ProjectOption } from "@/types.gen";
 import { takePendingBlockTarget } from "@/notes/block-jump";
 import {
@@ -20,11 +21,11 @@ import {
   useNoteBlockResolvers,
 } from "@/notes/editor-support";
 import { NoteBlockEditor } from "@/notes/note-block-editor";
+import { NotesShell } from "@/notes/notes-shell";
 import { useAutosave } from "@/notes/use-autosave";
 import { FuzzyPickerModal } from "@/components/fuzzy-picker-modal";
 import { ProjectsSidebar } from "./sidebar";
 import { setLastProject } from "./support";
-import "@/notes/notes.css";
 
 function projectPath(projectId: string, noteId?: string): string {
   return noteId ? `/projects/${projectId}/notes/${noteId}` : `/projects/${projectId}`;
@@ -280,14 +281,13 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
     // capture phase: ProseMirror より先に横取りする
     function onKey(e: KeyboardEvent) {
       if (e.isComposing) return;
-      const ctrlOnly = e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
-      if (ctrlOnly && e.code === "KeyW") {
+      if (ctrlOnly(e) && e.code === "KeyW") {
         e.preventDefault();
         e.stopPropagation();
         setPickerOpen(true);
         return;
       }
-      if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      if (!altOnly(e)) return;
       if (e.code === "KeyN") {
         e.preventDefault();
         e.stopPropagation();
@@ -366,26 +366,21 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
   );
 
   return (
-    <div
-      className="notes-screen relative flex h-dvh shrink-0 overflow-hidden"
-      data-density="relaxed"
+    <NotesShell
+      sidebar={
+        <ProjectsSidebar
+          projectName={projectName}
+          primary={primary}
+          notes={timeline}
+          selectedId={currentId}
+          hasMore={hasMore}
+          onLoadMore={loadMore}
+          onSelectPrimary={() => selectNote(primaryIdRef.current ?? "")}
+          onSelect={selectNote}
+          onDelete={(s) => void deleteById(s.id)}
+        />
+      }
     >
-      <aside className="w-[300px] shrink-0 overflow-hidden border-r transition-[width] duration-200 group-data-[zen]/shell:w-0 group-data-[zen]/shell:border-r-0 motion-reduce:transition-none">
-        <div className="h-full w-[300px]">
-          <ProjectsSidebar
-            projectName={projectName}
-            primary={primary}
-            notes={timeline}
-            selectedId={currentId}
-            hasMore={hasMore}
-            onLoadMore={loadMore}
-            onSelectPrimary={() => selectNote(primaryIdRef.current ?? "")}
-            onSelect={selectNote}
-            onDelete={(s) => void deleteById(s.id)}
-          />
-        </div>
-      </aside>
-
       <main className="flex-1 overflow-y-auto bg-[var(--paper)]">
         {projectError ? (
           <div className="flex h-full items-center justify-center text-sm text-destructive">
@@ -451,6 +446,6 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
           onClose={() => setPickerOpen(false)}
         />
       )}
-    </div>
+    </NotesShell>
   );
 }

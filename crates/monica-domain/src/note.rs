@@ -34,6 +34,15 @@ impl EssayStatus {
             _ => None,
         }
     }
+
+    /// ⌃Q・コンテキストメニューが次に送る status。status が増えたときに
+    /// 遷移先を決め直す場所をここ 1 箇所に閉じる（フロントは結果を受け取るだけ）。
+    pub fn toggled(self) -> Self {
+        match self {
+            EssayStatus::Writing => EssayStatus::Finished,
+            EssayStatus::Finished => EssayStatus::Writing,
+        }
+    }
 }
 
 /// note の「取り出し方」による分類。分類の軸が取り出し経路（project 経由 /
@@ -260,8 +269,8 @@ fn days_in_month(year: i32, month: u32) -> u32 {
 mod tests {
     use super::*;
 
-    // TS 契約のスナップショット: web/src/types.gen.ts の discriminated union と
-    // 一対一で対応する JSON 表現を文字列完全一致で固定する。
+    // domain の JSON 表現を文字列完全一致で固定する。フロントが見る形は monica-api の
+    // DTO（導出フィールド next_status を足す）なので、そちらは monica-web の API テストが押さえる。
     #[test]
     fn kind_serde_representation() {
         let cases = [
@@ -307,6 +316,15 @@ mod tests {
         }
         assert_eq!(EssayStatus::parse("drafting"), None);
         assert_eq!(EssayStatus::parse(""), None);
+    }
+
+    #[test]
+    fn essay_status_toggles_both_ways() {
+        assert_eq!(EssayStatus::Writing.toggled(), EssayStatus::Finished);
+        assert_eq!(EssayStatus::Finished.toggled(), EssayStatus::Writing);
+        for status in [EssayStatus::Writing, EssayStatus::Finished] {
+            assert_eq!(status.toggled().toggled(), status, "往復で元の status に戻る");
+        }
     }
 
     #[test]

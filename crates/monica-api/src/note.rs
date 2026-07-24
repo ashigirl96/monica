@@ -28,9 +28,18 @@ impl From<EssayStatus> for monica_domain::EssayStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NoteKind {
-    Project { project_id: String, title: String },
+    Project {
+        project_id: String,
+        title: String,
+    },
     Daily,
-    Essay { title: String, status: EssayStatus },
+    Essay {
+        title: String,
+        status: EssayStatus,
+        /// ⌃Q・コンテキストメニューが次に送る status（`EssayStatus::toggled` の結果）。
+        /// 遷移規則を domain に閉じるため、フロントは二値判定せずこれをそのまま送る。
+        next_status: EssayStatus,
+    },
 }
 
 impl From<monica_domain::NoteKind> for NoteKind {
@@ -40,9 +49,11 @@ impl From<monica_domain::NoteKind> for NoteKind {
                 Self::Project { project_id, title }
             }
             monica_domain::NoteKind::Daily => Self::Daily,
-            monica_domain::NoteKind::Essay { title, status } => {
-                Self::Essay { title, status: status.into() }
-            }
+            monica_domain::NoteKind::Essay { title, status } => Self::Essay {
+                title,
+                status: status.into(),
+                next_status: status.toggled().into(),
+            },
         }
     }
 }
@@ -52,7 +63,10 @@ impl From<NoteKind> for monica_domain::NoteKind {
         match value {
             NoteKind::Project { project_id, title } => Self::Project { project_id, title },
             NoteKind::Daily => Self::Daily,
-            NoteKind::Essay { title, status } => Self::Essay { title, status: status.into() },
+            // next_status は導出値なので入力では読まない
+            NoteKind::Essay { title, status, .. } => {
+                Self::Essay { title, status: status.into() }
+            }
         }
     }
 }
@@ -222,7 +236,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn kind_mirror_roundtrips_and_matches_domain_serde() {
+    fn kind_mirror_roundtrips_and_only_adds_next_status() {
         let cases = [
             monica_domain::NoteKind::Project {
                 project_id: "o/r".to_string(),
@@ -240,10 +254,17 @@ mod tests {
         ];
         for domain in cases {
             let api: NoteKind = domain.clone().into();
-            assert_eq!(
-                serde_json::to_string(&api).unwrap(),
-                serde_json::to_string(&domain).unwrap(),
-            );
+            let mut api_json = serde_json::to_value(&api).unwrap();
+            // next_status は DTO だけが足す導出フィールド。それを除けば domain と一字一句同じであること
+            let next_status = api_json.as_object_mut().unwrap().remove("next_status");
+            assert_eq!(api_json, serde_json::to_value(&domain).unwrap());
+            match domain.status() {
+                Some(status) => assert_eq!(
+                    next_status.expect("essay には next_status が載る"),
+                    serde_json::json!(status.toggled().as_str()),
+                ),
+                None => assert!(next_status.is_none(), "essay 以外に next_status は載らない"),
+            }
             let back: monica_domain::NoteKind = api.into();
             assert_eq!(back, domain);
         }

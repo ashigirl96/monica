@@ -31,7 +31,7 @@ impl<B: Backend> NoteService<'_, B> {
         Ok(self.m.repos.create_essay_note(day_boundary_hour)?)
     }
 
-    /// /essays 一覧とエディタサイドバーの共有ソース（全 status、updated_at 降順）。
+    /// /essays 一覧とエディタサイドバーの共有ソース（全 status、created_at 降順）。
     /// writing だけへの絞り込みは表示都合なのでフロントの責務。
     pub fn list_essays(&mut self) -> ApplicationResult<Vec<NoteSummary>> {
         Ok(self.m.repos.list_essay_notes()?)
