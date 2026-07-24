@@ -103,6 +103,11 @@ export type ProjectOption = {
   id: string;
 };
 
+/**  essay status 変更リクエスト（⌃Q）。トグルではなく冪等な明示 set。 */
+export type SetEssayStatus = {
+  status: EssayStatus;
+};
+
 /**  kind 遷移リクエスト。Essay に title を載せない（daily → essay は常に空 title）。 */
 export type SetNoteKind =
   | { kind: "daily" }

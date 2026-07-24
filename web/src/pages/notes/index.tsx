@@ -43,6 +43,7 @@ import { takePendingBlockTarget } from "./block-jump";
 import { type DraftPatch, EditorHeader, type NoteDensity } from "./editor-header";
 import { NotesCalendar } from "./calendar";
 import {
+  cycleSelect,
   fetchLinkMetadata,
   persistableContent,
   searchNoteMentions,
@@ -463,7 +464,6 @@ export function NotesPage({ id }: { id: string | null }) {
       await flush();
       try {
         const updated = await setNoteKind(current.id, target);
-        if (updated.kind.kind === "essay") pendingTitleFocusRef.current = true;
         seedNote(updated);
         setDataVersion((v) => v + 1);
       } catch {
@@ -474,14 +474,8 @@ export function NotesPage({ id }: { id: string | null }) {
     [flush, seedNote],
   );
 
-  const toggleDailyEssay = useCallback(() => {
-    const kind = noteRef.current?.kind.kind;
-    if (kind !== "daily" && kind !== "essay") return; // project からの脱出経路なし
-    void applyKindTransition({ kind: kind === "daily" ? "essay" : "daily" });
-  }, [applyKindTransition]);
-
   const openPromotionPicker = useCallback(() => {
-    // 昇格は daily → project のみ（essay は一度 daily に戻す）
+    // 昇格は daily → project のみ
     if (noteRef.current?.kind.kind !== "daily") return;
     openPicker("project");
   }, [openPicker]);
@@ -512,14 +506,11 @@ export function NotesPage({ id }: { id: string | null }) {
         else toggleProjectFilter();
         return;
       }
-      if (ctrlOnly && picker === null && hasNote) {
-        if (e.code === "KeyQ" || e.code === "KeyW") {
-          e.preventDefault();
-          e.stopPropagation();
-          if (e.code === "KeyQ") toggleDailyEssay();
-          else openPromotionPicker();
-          return;
-        }
+      if (ctrlOnly && picker === null && hasNote && e.code === "KeyW") {
+        e.preventDefault();
+        e.stopPropagation();
+        openPromotionPicker();
+        return;
       }
       // picker 表示中のキー（^w クリア・↑↓・Enter 等）は picker 自身に任せる
       if (picker !== null) return;
@@ -550,12 +541,8 @@ export function NotesPage({ id }: { id: string | null }) {
       if (e.code !== "KeyJ" && e.code !== "KeyK") return;
       act(() => {
         const ids = (displayedSummaries ?? []).map((s) => s.id);
-        if (ids.length === 0) return;
-        const step = e.code === "KeyJ" ? 1 : -1;
-        const found = id === null ? -1 : ids.indexOf(id);
-        // 未選択（または表示範囲外の id）は「リスト先頭の外側」扱い: J で先頭、K で末尾へ
-        const idx = found === -1 ? (step === 1 ? -1 : 0) : found;
-        selectNote(ids[(idx + step + ids.length) % ids.length]);
+        const next = cycleSelect(ids, id, e.code === "KeyJ" ? 1 : -1);
+        if (next !== undefined) selectNote(next);
       });
     }
     window.addEventListener("keydown", onKey, true);
@@ -568,7 +555,6 @@ export function NotesPage({ id }: { id: string | null }) {
     selectNote,
     deleteById,
     undoDelete,
-    toggleDailyEssay,
     openPromotionPicker,
     toggleProjectFilter,
     picker,
@@ -664,7 +650,6 @@ export function NotesPage({ id }: { id: string | null }) {
               density={density}
               onToggleDensity={() => setDensity((d) => (d === "compact" ? "relaxed" : "compact"))}
               onDraftChange={onDraftChange}
-              onToggleEssay={toggleDailyEssay}
               onOpenProjectPicker={openPromotionPicker}
               onEnterEditor={focusEditorStart}
             />

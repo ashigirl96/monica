@@ -124,6 +124,17 @@ impl NoteKind {
             }
         }
     }
+
+    /// essay の status だけを差し替えた kind を返す。kind 遷移（`transition_to`）とは
+    /// 直交する操作で、title は温存し、同値への set も Ok（冪等）。essay 以外は Err。
+    pub fn with_status(&self, status: EssayStatus) -> Result<NoteKind, EssayStatusError> {
+        match self {
+            NoteKind::Essay { title, .. } => {
+                Ok(NoteKind::Essay { title: title.clone(), status })
+            }
+            other => Err(EssayStatusError { kind: other.name() }),
+        }
+    }
 }
 
 /// kind 遷移のリクエスト。Essay に title を載せない（daily → essay は常に空 title で
@@ -158,6 +169,19 @@ impl std::fmt::Display for KindTransitionError {
 }
 
 impl std::error::Error for KindTransitionError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EssayStatusError {
+    pub kind: &'static str,
+}
+
+impl std::fmt::Display for EssayStatusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "cannot set essay status on {} note", self.kind)
+    }
+}
+
+impl std::error::Error for EssayStatusError {}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Note {
@@ -411,6 +435,31 @@ mod tests {
             let err = from.clone().transition_to(target.clone()).unwrap_err();
             assert_eq!(err.from, from.name());
             assert_eq!(err.to, target.name());
+        }
+    }
+
+    #[test]
+    fn with_status_replaces_status_and_keeps_title() {
+        let writing = NoteKind::Essay { title: "t".to_string(), status: EssayStatus::Writing };
+        assert_eq!(
+            writing.with_status(EssayStatus::Finished),
+            Ok(NoteKind::Essay { title: "t".to_string(), status: EssayStatus::Finished })
+        );
+        let finished = NoteKind::Essay { title: "t".to_string(), status: EssayStatus::Finished };
+        assert_eq!(
+            finished.with_status(EssayStatus::Writing),
+            Ok(NoteKind::Essay { title: "t".to_string(), status: EssayStatus::Writing })
+        );
+        // 同値への set も Ok（冪等）
+        assert_eq!(writing.with_status(EssayStatus::Writing), Ok(writing.clone()));
+    }
+
+    #[test]
+    fn with_status_rejects_non_essay() {
+        let project = NoteKind::Project { project_id: "o/r".to_string(), title: String::new() };
+        for kind in [NoteKind::Daily, project] {
+            let err = kind.with_status(EssayStatus::Finished).unwrap_err();
+            assert_eq!(err.kind, kind.name());
         }
     }
 

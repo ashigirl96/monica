@@ -2,7 +2,7 @@ import type { RefObject } from "react";
 import type { Note, NoteKind } from "@/types.gen";
 import { kindColor } from "./kind";
 
-/** essay の title 編集だけが draft 経由。kind の変更は遷移コマンド（⌃Q / ⌃W）の担当 */
+/** essay の title 編集だけが draft 経由。kind の変更は昇格コマンド（⌃W）の担当 */
 export type DraftPatch = { title?: string };
 
 /** relaxed = sizu 流のゆったりした縦リズム / compact = プロジェクトメモ向けの詰めた縦リズム */
@@ -46,26 +46,17 @@ function DensityToggle({ density, onToggle }: { density: NoteDensity; onToggle: 
   );
 }
 
-function KindChip({ kind, onToggle }: { kind: NoteKind; onToggle: () => void }) {
-  // project は確定した分類なのでトグル不可（脱出経路なし）
-  const inert = kind.kind === "project";
+/** kind の表示のみ。kind 遷移は ⌃W の project 昇格だけが残っている（daily↔essay は撤去済み） */
+function KindChip({ kind }: { kind: NoteKind }) {
   return (
-    <button
-      type="button"
-      onClick={inert ? undefined : onToggle}
-      disabled={inert}
-      title={inert ? "project note" : "Toggle daily / essay (⌃Q)"}
-      className={`flex items-center gap-1.5 rounded-md px-1.5 py-0.5 transition-colors duration-100 ${
-        inert ? "cursor-default" : "hover:bg-[var(--ink-hover)]"
-      }`}
-    >
+    <span className="flex items-center gap-1.5 rounded-md px-1.5 py-0.5">
       <span
         aria-hidden
         className="size-2 rounded-full"
         style={{ background: kindColor(kind.kind) }}
       />
       <span className="text-[var(--ink-muted)]">{kind.kind}</span>
-    </button>
+    </span>
   );
 }
 
@@ -99,7 +90,6 @@ export function EditorHeader({
   density,
   onToggleDensity,
   onDraftChange,
-  onToggleEssay,
   onOpenProjectPicker,
   onEnterEditor,
 }: {
@@ -109,8 +99,6 @@ export function EditorHeader({
   density: NoteDensity;
   onToggleDensity: () => void;
   onDraftChange: (patch: DraftPatch) => void;
-  /** daily ↔ essay トグル（⌃Q 相当） */
-  onToggleEssay: () => void;
   /** daily → project 昇格 picker（⌃W 相当） */
   onOpenProjectPicker: () => void;
   /** タイトルで Enter / ↓ が押されたとき（本文へのフォーカス移動） */
@@ -141,7 +129,7 @@ export function EditorHeader({
         />
       )}
       <div className="mt-2.5 flex items-center gap-2 text-xs">
-        <KindChip kind={note.kind} onToggle={onToggleEssay} />
+        <KindChip kind={note.kind} />
         <ProjectChip kind={note.kind} onOpenPicker={onOpenProjectPicker} />
         <span className="ml-auto font-mono text-[0.7rem] text-[var(--ink-faint)]">
           {note.date.replaceAll("-", ".")}

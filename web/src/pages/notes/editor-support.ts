@@ -43,6 +43,19 @@ export function persistableContent(content: unknown): unknown {
   };
 }
 
+/** ⌥K/J の巡回選択。current がリスト外（未選択・巡回対象外の項目を開いている等）の
+ * ときは「リスト先頭の外側」扱い: 前進(+1)で先頭、後退(-1)で末尾へ。空リストは undefined。 */
+export function cycleSelect(
+  list: string[],
+  current: string | null,
+  step: 1 | -1,
+): string | undefined {
+  if (list.length === 0) return undefined;
+  const found = current === null ? -1 : list.indexOf(current);
+  const idx = found === -1 ? (step === 1 ? -1 : 0) : found;
+  return list[(idx + step + list.length) % list.length];
+}
+
 /** mention / synced block の解決とジャンプ。notes / daily 両エディタで共有する配線 */
 export function useNoteBlockResolvers({
   flush,

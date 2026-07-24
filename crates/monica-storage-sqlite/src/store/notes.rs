@@ -138,19 +138,28 @@ pub(crate) fn backfill_notes_fts(conn: &mut Connection) -> Result<()> {
     Ok(())
 }
 
-/// counter 採番 → INSERT → FTS 行確立。create_note / get_or_create_daily_note が
-/// 共有する作成経路（tx は呼び手が張る）。
-fn insert_daily_note(conn: &Connection, date: &str) -> Result<Note> {
+/// counter 採番 → INSERT → FTS 行確立。note 作成経路（daily / essay）が共有する
+/// （tx は呼び手が張る）。
+fn insert_note(conn: &Connection, date: &str, kind: &NoteKind) -> Result<Note> {
     conn.execute("INSERT INTO note_counter DEFAULT VALUES", [])?;
     let id = format!("note-{}", conn.last_insert_rowid());
     // ビジネス上のデフォルト（kind・空 doc・date）はここで明示的に insert する。
     // v38 の DDL デフォルトはこの経路では使わない（frozen な migration に依存しない）。
     let note = conn.query_row(
         &format!(
-            "INSERT INTO notes (id, kind, content, date) VALUES (?1, 'daily', ?2, ?3)
+            "INSERT INTO notes (id, kind, title, project_id, status, content, date)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              RETURNING {NOTE_COLUMNS}"
         ),
-        params![id, monica_domain::EMPTY_NOTE_DOC, date],
+        params![
+            id,
+            kind.name(),
+            kind.title(),
+            kind.project_id(),
+            kind.status().map(EssayStatus::as_str),
+            monica_domain::EMPTY_NOTE_DOC,
+            date
+        ],
         |row| Ok(note_from_row(row)),
     )??;
     // 全 note が FTS 行を持つ不変条件をここで確立する（backfill ゲートの前提）。
@@ -162,7 +171,17 @@ impl NoteStore for SqliteStore {
     fn create_note(&mut self, day_boundary_hour: u8) -> Result<Note> {
         let tx = self.conn_mut().transaction()?;
         let date = logical_today_on(&tx, day_boundary_hour)?;
-        let note = insert_daily_note(&tx, &date)?;
+        let note = insert_note(&tx, &date, &NoteKind::Daily)?;
+        tx.commit()?;
+        Ok(note)
+    }
+
+    fn create_essay_note(&mut self, day_boundary_hour: u8) -> Result<Note> {
+        let tx = self.conn_mut().transaction()?;
+        let date = logical_today_on(&tx, day_boundary_hour)?;
+        // status は明示 'writing' で書く（NULL=writing の読み替えは legacy 行のためだけに残す）
+        let kind = NoteKind::Essay { title: String::new(), status: EssayStatus::Writing };
+        let note = insert_note(&tx, &date, &kind)?;
         tx.commit()?;
         Ok(note)
     }
@@ -188,7 +207,7 @@ impl NoteStore for SqliteStore {
             // 同日に複数の live daily がある場合（旧 /notes の ⌥N 経路の遺産）は
             // 最古（rowid 最小）で決定的に選ぶ — 手動マージ手順の「最古を残す」と一致。
             Some(note) => note,
-            None => insert_daily_note(&tx, date)?,
+            None => insert_note(&tx, date, &NoteKind::Daily)?,
         };
         tx.commit()?;
         Ok(note)
@@ -239,6 +258,16 @@ impl NoteStore for SqliteStore {
              ORDER BY date DESC, rowid DESC"
         ))?;
         let rows = stmt.query_map(params![from, to], |row| Ok(summary_from_row(row)))?;
+        rows.map(|r| r?).collect()
+    }
+
+    fn list_essay_notes(&self) -> Result<Vec<NoteSummary>> {
+        let mut stmt = self.conn().prepare(&format!(
+            "SELECT {NOTE_COLUMNS} FROM notes
+             WHERE deleted_at IS NULL AND kind = 'essay'
+             ORDER BY updated_at DESC, rowid DESC"
+        ))?;
+        let rows = stmt.query_map([], |row| Ok(summary_from_row(row)))?;
         rows.map(|r| r?).collect()
     }
 
@@ -354,6 +383,22 @@ impl NoteStore for SqliteStore {
             id,
             expected_kind
         ])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(note_from_row(row)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn set_essay_status(&mut self, id: &str, status: EssayStatus) -> Result<Option<Note>> {
+        // status 列だけを書く。title に触れないので、並行する autosave の title 置換を
+        // 巻き戻す競合窓が構造的に無い（set_note_kind 流用ではこれが起きる）。
+        // kind = 'essay' 条件により、並行の essay → daily 遷移後は不発（None）になる。
+        let mut stmt = self.conn().prepare(&format!(
+            "UPDATE notes SET status = ?1, updated_at = {SET_NOW}
+             WHERE id = ?2 AND deleted_at IS NULL AND kind = 'essay'
+             RETURNING {NOTE_COLUMNS}"
+        ))?;
+        let mut rows = stmt.query(params![status.as_str(), id])?;
         match rows.next()? {
             Some(row) => Ok(Some(note_from_row(row)?)),
             None => Ok(None),
@@ -952,6 +997,109 @@ mod tests {
             .execute("UPDATE notes SET kind = 'essay', status = 'bogus' WHERE id = ?1", params![id])
             .unwrap();
         assert!(store.get_note(id).is_err());
+    }
+
+    #[test]
+    fn create_essay_note_defaults() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        let before = store.logical_today(0).unwrap();
+        let note = store.create_essay_note(0).unwrap();
+        let after = store.logical_today(0).unwrap();
+        assert_eq!(
+            note.kind,
+            NoteKind::Essay { title: String::new(), status: EssayStatus::Writing }
+        );
+        assert_eq!(note.content.as_str(), monica_domain::EMPTY_NOTE_DOC);
+        assert!(note.date == before || note.date == after);
+        assert_eq!(note.created_at, note.updated_at);
+        // status は NULL=writing の読み替えに頼らず明示値で書かれている
+        let raw: Option<String> = store
+            .conn()
+            .query_row("SELECT status FROM notes WHERE id = ?1", params![note.id.as_str()], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(raw.as_deref(), Some("writing"));
+    }
+
+    #[test]
+    fn create_essay_note_establishes_fts_row() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        let note = store.create_essay_note(0).unwrap();
+        store.update_note(note.id.as_str(), content_update("essay body")).unwrap();
+        assert_eq!(search_ids(&store, "essay body"), vec![note.id.as_str().to_string()]);
+    }
+
+    #[test]
+    fn list_essay_notes_filters_and_orders_by_updated_at() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        seed_project(&store, "o/r");
+        store.create_note(0).unwrap(); // note-1: daily（対象外）
+        let a = store.create_essay_note(0).unwrap(); // note-2: writing
+        let b = store.create_essay_note(0).unwrap(); // note-3: finished にする
+        let c = store.create_essay_note(0).unwrap(); // note-4: 削除する
+        store.create_note(0).unwrap(); // note-5: project にする（対象外）
+        store
+            .set_note_kind(
+                "note-5",
+                "daily",
+                &NoteKind::Project { project_id: "o/r".to_string(), title: String::new() },
+            )
+            .unwrap()
+            .unwrap();
+        store.set_essay_status(b.id.as_str(), EssayStatus::Finished).unwrap().unwrap();
+        store.delete_note(c.id.as_str()).unwrap();
+        set_updated_at(&store, a.id.as_str(), "2026-07-10T00:00:00.000Z");
+        set_updated_at(&store, b.id.as_str(), "2026-07-12T00:00:00.000Z");
+
+        let ids: Vec<String> =
+            store.list_essay_notes().unwrap().into_iter().map(|s| s.id.into_string()).collect();
+        assert_eq!(
+            ids,
+            vec![b.id.as_str().to_string(), a.id.as_str().to_string()],
+            "essay のみ・finished 込み・削除済み除外・updated_at 降順"
+        );
+    }
+
+    #[test]
+    fn set_essay_status_round_trip() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        let note = store.create_essay_note(0).unwrap();
+        let id = note.id.as_str();
+        store
+            .set_note_kind(
+                id,
+                "essay",
+                &NoteKind::Essay { title: "t".to_string(), status: EssayStatus::Writing },
+            )
+            .unwrap()
+            .unwrap();
+        set_updated_at(&store, id, "2020-01-01T00:00:00.000Z");
+
+        let updated = store.set_essay_status(id, EssayStatus::Finished).unwrap().unwrap();
+        assert_eq!(
+            updated.kind,
+            NoteKind::Essay { title: "t".to_string(), status: EssayStatus::Finished },
+            "status だけ変わり title は不変"
+        );
+        assert!(updated.updated_at.as_str() > "2020-01-01T00:00:00.000Z");
+        let raw: Option<String> = store
+            .conn()
+            .query_row("SELECT status FROM notes WHERE id = ?1", params![id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(raw.as_deref(), Some("finished"));
+
+        // NULL status の legacy essay（v42 直後）にも set できる
+        store.conn().execute("UPDATE notes SET status = NULL WHERE id = ?1", params![id]).unwrap();
+        let updated = store.set_essay_status(id, EssayStatus::Finished).unwrap().unwrap();
+        assert_eq!(updated.kind.status(), Some(EssayStatus::Finished));
+
+        // essay 以外・削除済みは不発
+        let daily = store.create_note(0).unwrap();
+        assert!(store.set_essay_status(daily.id.as_str(), EssayStatus::Finished).unwrap().is_none());
+        store.delete_note(id).unwrap();
+        assert!(store.set_essay_status(id, EssayStatus::Writing).unwrap().is_none());
+        assert!(store.set_essay_status("note-999999", EssayStatus::Writing).unwrap().is_none());
     }
 
     #[test]

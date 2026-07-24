@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 import { AppShell } from "./components/app-shell";
 import { DailyPage } from "./pages/daily";
 import { DetailPage } from "./pages/detail";
+import { EssaysPage } from "./pages/essays";
 import { ListPage } from "./pages/list";
 import { NotesPage } from "./pages/notes";
 import { SettingsPage } from "./pages/settings";
@@ -38,6 +39,7 @@ type Route =
   | { page: "detail"; id: string }
   | { page: "notes"; id: string | null }
   | { page: "daily"; date: string | null }
+  | { page: "essays"; id: string | null }
   | { page: "settings" };
 
 function parseRoute(pathname: string): Route {
@@ -49,6 +51,8 @@ function parseRoute(pathname: string): Route {
   // DailyPage がエラー表示する）。フロントに日付パースを複製しない。
   const daily = pathname.match(/^\/daily(?:\/([^/]+))?\/?$/);
   if (daily) return { page: "daily", date: daily[1] ?? null };
+  const essays = pathname.match(/^\/essays(?:\/([^/]+))?\/?$/);
+  if (essays) return { page: "essays", id: essays[1] ?? null };
   if (/^\/settings\/?$/.test(pathname)) return { page: "settings" };
   return { page: "list" };
 }
@@ -60,7 +64,7 @@ export function App() {
   return (
     <AppShell
       active={
-        route.page === "notes" || route.page === "daily"
+        route.page === "notes" || route.page === "daily" || route.page === "essays"
           ? route.page
           : route.page === "settings"
             ? "settings"
@@ -73,6 +77,8 @@ export function App() {
         <NotesPage id={route.id} />
       ) : route.page === "daily" ? (
         <DailyPage date={route.date} />
+      ) : route.page === "essays" ? (
+        <EssaysPage id={route.id} />
       ) : route.page === "settings" ? (
         <SettingsPage />
       ) : (
