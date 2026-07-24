@@ -1,16 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BlockEditor, type BlockEditorHandle } from "@shared/block-editor/block-editor";
-import {
-  dailyNoteDates,
-  getDailyNote,
-  getNotesToday,
-  importImageAsset,
-  renderNoteMarkdown,
-  uploadImageAsset,
-} from "@/api";
+import type { BlockEditorHandle } from "@shared/block-editor/block-editor";
+import { dailyNoteDates, getDailyNote, getNotesToday } from "@/api";
 import { navigate } from "@/app";
 import type { Note } from "@/types.gen";
-import type { Month } from "../notes/dates";
+import type { Month } from "@/notes/dates";
+import { takePendingBlockTarget } from "@/notes/block-jump";
 import {
   addMonths,
   currentMonth,
@@ -18,18 +12,13 @@ import {
   monthOf,
   sameMonth,
   todayKey,
-} from "../notes/dates";
-import {
-  cycleSelect,
-  fetchLinkMetadata,
-  persistableContent,
-  searchNoteMentions,
-  useNoteBlockResolvers,
-} from "../notes/editor-support";
-import { useAutosave } from "../notes/use-autosave";
+} from "@/notes/dates";
+import { cycleSelect, persistableContent, useNoteBlockResolvers } from "@/notes/editor-support";
+import { NoteBlockEditor } from "@/notes/note-block-editor";
+import { useAutosave } from "@/notes/use-autosave";
 import { DailyCalendar } from "./calendar";
 import { DailySidebar } from "./sidebar";
-import "../notes/notes.css";
+import "@/notes/notes.css";
 
 /**
  * /daily: 1 日 1 note の daily 専用画面。開く = get-or-create なので EmptyState も
@@ -49,8 +38,8 @@ export function DailyPage({ date }: { date: string | null }) {
   const contentRef = useRef<unknown>(null);
   const noteRef = useRef<Note | null>(null);
 
-  // mention / synced block のジャンプ先は旧 /notes（essay・project note の受け皿が
-  // まだ無い Phase 1 の暫定挙動）
+  // mention / synced block のジャンプ先。`/notes/{id}` は NoteRedirect が kind に応じて
+  // /daily・/essays・/projects へ振り分ける（本文に埋まった href を壊さないため経路を温存）
   const openInNotes = useCallback(
     (noteId: string) => {
       void flush();
@@ -113,6 +102,14 @@ export function DailyPage({ date }: { date: string | null }) {
       cancelled = true;
     };
   }, [date, mentionCacheRef]);
+
+  // synced block ジャンプの対象がロードされたらスクロールする。別 note からの cross-note
+  // ジャンプは /notes/{id} リダイレクト経由でこのページに着地する
+  useEffect(() => {
+    if (!note) return;
+    const blockId = takePendingBlockTarget(note.id);
+    if (blockId) editorHandleRef.current?.scrollToBlock(blockId);
+  }, [note]);
 
   useEffect(() => {
     let cancelled = false;
@@ -230,23 +227,15 @@ export function DailyPage({ date }: { date: string | null }) {
                 <span className="truncate text-xs text-destructive">Save failed — {saveError}</span>
               )}
             </header>
-            <BlockEditor
-              key={note.id}
-              initialDoc={note.content}
+            <NoteBlockEditor
+              note={note}
               autoFocus
               onDocChange={onDocChange}
-              fetchLinkMetadata={fetchLinkMetadata}
-              searchNoteMentions={searchNoteMentions}
-              resolveNoteMention={resolveNoteMention}
               onNoteMentionClick={openInNotes}
-              noteId={note.id}
+              resolveNoteMention={resolveNoteMention}
               resolveBlock={resolveBlock}
               onOpenBlock={onOpenBlock}
-              uploadImage={uploadImageAsset}
-              importExternalImage={importImageAsset}
-              renderMarkdown={renderNoteMarkdown}
               handleRef={editorHandleRef}
-              className="min-h-[70dvh] pt-4 pb-24"
             />
           </div>
         ) : null}

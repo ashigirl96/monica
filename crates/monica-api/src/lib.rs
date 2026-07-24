@@ -24,10 +24,10 @@ pub use explanation::{Explanation as ApiExplanation, ExplanationMode as ApiExpla
 pub use github::GithubPullRequestRef;
 pub use link_preview::LinkPreview as ApiLinkPreview;
 pub use note::{
-    DailyNoteCount as ApiDailyNoteCount, EssayStatus as ApiEssayStatus, Note as ApiNote,
-    NoteBlock as ApiNoteBlock, NoteKind as ApiNoteKind, NoteMention as ApiNoteMention,
-    NotePage as ApiNotePage, NoteSummary as ApiNoteSummary, NotesToday as ApiNotesToday,
-    SetEssayStatus as ApiSetEssayStatus, SetNoteKind as ApiSetNoteKind,
+    CreateProjectNote as ApiCreateProjectNote, DailyNoteCount as ApiDailyNoteCount,
+    EssayStatus as ApiEssayStatus, Note as ApiNote, NoteBlock as ApiNoteBlock,
+    NoteKind as ApiNoteKind, NoteMention as ApiNoteMention, NotePage as ApiNotePage,
+    NoteSummary as ApiNoteSummary, NotesToday as ApiNotesToday, SetEssayStatus as ApiSetEssayStatus,
     UpdateNote as ApiUpdateNote,
 };
 pub use settings::{

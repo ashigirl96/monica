@@ -1610,6 +1610,22 @@ impl crate::ports::NoteStore for FakeRepos {
         unimplemented!("no usecase test exercises notes yet")
     }
 
+    fn create_project_note(
+        &mut self,
+        _project_id: &str,
+        _day_boundary_hour: u8,
+    ) -> Result<monica_domain::Note> {
+        unimplemented!("no usecase test exercises notes yet")
+    }
+
+    fn get_or_create_primary_note(
+        &mut self,
+        _project_id: &str,
+        _day_boundary_hour: u8,
+    ) -> Result<monica_domain::Note> {
+        unimplemented!("no usecase test exercises notes yet")
+    }
+
     fn list_essay_notes(&self) -> Result<Vec<monica_domain::NoteSummary>> {
         unimplemented!("no usecase test exercises notes yet")
     }
@@ -1667,15 +1683,6 @@ impl crate::ports::NoteStore for FakeRepos {
         &mut self,
         _id: &str,
         _update: monica_domain::UpdateNote,
-    ) -> Result<Option<monica_domain::Note>> {
-        unimplemented!("no usecase test exercises notes yet")
-    }
-
-    fn set_note_kind(
-        &mut self,
-        _id: &str,
-        _expected_kind: &str,
-        _kind: &monica_domain::NoteKind,
     ) -> Result<Option<monica_domain::Note>> {
         unimplemented!("no usecase test exercises notes yet")
     }

@@ -1,6 +1,6 @@
 import { spaLinkClick } from "@/app";
 import type { NoteSummary } from "@/types.gen";
-import { summaryTitle } from "../notes/sidebar";
+import { summaryTitle } from "@/notes/summary";
 
 /** writing の essay だけを並べる（finished は /essays 一覧から開く）。⌥K/J はこのリスト内を巡回 */
 export function EssaysSidebar({

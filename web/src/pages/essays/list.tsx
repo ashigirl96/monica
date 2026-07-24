@@ -3,7 +3,7 @@ import { createEssay, listEssays } from "@/api";
 import { navigate, spaLinkClick } from "@/app";
 import type { NoteSummary } from "@/types.gen";
 import { essayStatus, essayTitle, slashDate } from "./support";
-import "../notes/notes.css";
+import "@/notes/notes.css";
 
 /** 机に原稿を並べて見渡す。タイル = デスクマット、その中央に紙のミニチュア */
 function EssayCard({ summary }: { summary: NoteSummary }) {

@@ -1,6 +1,6 @@
-import { CalendarHeader } from "../notes/calendar-chrome";
-import type { Month } from "../notes/dates";
-import { monthGrid } from "../notes/dates";
+import { CalendarHeader } from "@/notes/calendar-chrome";
+import type { Month } from "@/notes/dates";
+import { monthGrid } from "@/notes/dates";
 
 /**
  * /daily のカレンダー。notes と違い週選択は持たず、日セルそのものがボタン —

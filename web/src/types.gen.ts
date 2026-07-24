@@ -8,6 +8,14 @@ export type Asset = {
   url: string;
 };
 
+/**
+ *  ⌥N（/projects）の新規 project note 作成リクエスト。project_id は "owner/repo" 形式で
+ *  スラッシュを含むため path ではなく body で渡す。
+ */
+export type CreateProjectNote = {
+  project_id: string;
+};
+
 export type DailyNoteCount = {
   date: string;
   count: number;
@@ -101,18 +109,13 @@ export type NotesToday = {
 
 export type ProjectOption = {
   id: string;
+  name: string;
 };
 
 /**  essay status 変更リクエスト（⌃Q）。トグルではなく冪等な明示 set。 */
 export type SetEssayStatus = {
   status: EssayStatus;
 };
-
-/**  kind 遷移リクエスト。Essay に title を載せない（daily → essay は常に空 title）。 */
-export type SetNoteKind =
-  | { kind: "daily" }
-  | { kind: "essay" }
-  | { kind: "project"; project_id: string };
 
 /**  autosave の置換 payload。kind の変更は POST /api/notes/{id}/kind 専用で、ここには載らない。 */
 export type UpdateNote = {

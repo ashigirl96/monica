@@ -1,12 +1,26 @@
 use anyhow::Result;
 
-use monica_domain::{DailyNoteCount, EssayStatus, Note, NoteKind, NoteSummary, RawJson, UpdateNote};
+use monica_domain::{DailyNoteCount, EssayStatus, Note, NoteSummary, RawJson, UpdateNote};
 
 pub trait NoteStore {
     /// Creates a daily note with all defaults (id, empty content, logical date, timestamps).
     fn create_note(&mut self, day_boundary_hour: u8) -> Result<Note>;
     /// Creates an essay note (empty title, explicit `writing` status) dated logical today.
     fn create_essay_note(&mut self, day_boundary_hour: u8) -> Result<Note>;
+    /// Creates a project note (empty title) dated logical today, tied to `project_id`.
+    /// 呼び手（facade）が project の存在を検証済みである前提（FK は貼らず読み取り時に
+    /// orphan を daily へ退化させる既存挙動に合わせる）。
+    fn create_project_note(&mut self, project_id: &str, day_boundary_hour: u8) -> Result<Note>;
+    /// project の primary note（project と 1:1 の書き殴り note）の get-or-create。
+    /// `projects.primary_note_id` を single source of truth に、notes INSERT と
+    /// projects UPDATE を原子的に行う。既存 primary が soft-delete 済みなら復元する
+    /// （新規作成すると復元可能な旧 primary がゴミとして二重化するため）。
+    /// project が存在しないときは Err。
+    fn get_or_create_primary_note(
+        &mut self,
+        project_id: &str,
+        day_boundary_hour: u8,
+    ) -> Result<Note>;
     /// Live essays（全 status）を updated_at 降順で返す。/essays 一覧・サイドバーの共有ソース。
     fn list_essay_notes(&self) -> Result<Vec<NoteSummary>>;
     /// status 列だけを書く（title に触れない — autosave の title 置換と競合しない）。
@@ -37,16 +51,9 @@ pub trait NoteStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<NoteSummary>>;
-    /// Replaces content (and, for essays, title); returns `None` when the note does not
-    /// exist (or is soft-deleted). kind は変更しない — 遷移は [`set_note_kind`](Self::set_note_kind)。
+    /// Replaces content (and, for essays / projects, title); returns `None` when the note does
+    /// not exist (or is soft-deleted). kind は変更しない（kind 遷移は廃止済み）。
     fn update_note(&mut self, id: &str, update: UpdateNote) -> Result<Option<Note>>;
-    /// Writes the kind (with its payload columns) verbatim; transition rules are the
-    /// caller's responsibility. The write is conditional on the current kind still being
-    /// `expected_kind`（呼び手が検証した遷移元）— 並行する遷移が同じ pre-update 状態で
-    /// 検証をすり抜けて上書きし合うのを防ぐ。Returns `None` when the note does not
-    /// exist (or is deleted), or when the kind changed since it was read.
-    fn set_note_kind(&mut self, id: &str, expected_kind: &str, kind: &NoteKind)
-        -> Result<Option<Note>>;
     /// Soft delete: sets `deleted_at`; the row survives for [`restore_note`](Self::restore_note).
     /// Returns `false` when the note does not exist (or is already deleted).
     fn delete_note(&mut self, id: &str) -> Result<bool>;
