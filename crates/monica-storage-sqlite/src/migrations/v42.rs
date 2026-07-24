@@ -1,5 +1,5 @@
 // status は essay のみ使用（NULL = writing と読む。backfill はしない）。
-// primary_note_id の lazy 作成・書き込みは Phase 3 — ここでは列だけを足す。
+// primary_note_id はここでは列を足すだけ。書き込みは get-or-create の lazy 作成が担う。
 pub(super) const SQL: &str = r#"
     ALTER TABLE notes ADD COLUMN status TEXT;
     ALTER TABLE projects ADD COLUMN primary_note_id TEXT REFERENCES notes(id) ON DELETE SET NULL;

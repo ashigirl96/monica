@@ -38,7 +38,7 @@ impl<B: Backend> NoteService<'_, B> {
     }
 
     /// ⌥N（/projects）の新規 project note。存在しない project は 404
-    /// （FK 違反 500 を避けるため set_note_kind と同型に先へ検証する）。
+    /// （FK 違反 500 を避けるため project の存在を先に検証する）。
     pub fn create_project_note(
         &mut self,
         project_id: &str,
@@ -80,8 +80,8 @@ impl<B: Backend> NoteService<'_, B> {
     /// daily の get-or-create の唯一の入口。「1日1つ」の不変条件は DB 制約ではなく
     /// ここ（+ store の原子的な get-or-create）で保証する。未来日は許可 — カレンダーの
     /// 先日付タップと、day boundary 際の client/server 時差を弾かないため。
-    /// 旧 /notes の create_note（⌥N）経路は Phase 3 で撤去済みなので、daily を作る HTTP
-    /// 経路はこれだけになり不変条件が閉じる。
+    /// daily を作る HTTP 経路はこれだけなので（旧 /notes の create_note 経路は撤去済み）、
+    /// 不変条件が閉じる。
     pub fn daily_note_for(&mut self, date: &str) -> ApplicationResult<Note> {
         if !monica_domain::is_valid_date(date) {
             return Err(ApplicationError::validation(format!("invalid date: {date}")));
