@@ -235,15 +235,38 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
     }
   }, [projectId, rawNotes]);
 
+  const scheduleSave = useCallback(
+    (target: Note) => {
+      // primary は title を編集しないので title は送らない（project 名で表示する）
+      const editableTitle =
+        target.id !== primaryIdRef.current && target.kind.kind === "project"
+          ? target.kind.title
+          : null;
+      schedule(target.id, {
+        title: editableTitle,
+        content: persistableContent(contentRef.current ?? target.content),
+      });
+    },
+    [schedule],
+  );
+
   const deleteById = useCallback(
     async (targetId: string) => {
       // primary は削除不可
       if (targetId === primaryIdRef.current) return;
       // 未保存分が残っている間は削除しない（⌥Z で戻せるのがサーバに届いた内容までになる）
       if (!(await flush())) return;
+      // 開いている note を消す場合、DELETE の往復中に打った分は直後の discard で消える。
+      // 書き込み経路は noteRef を見るので、その間だけ外して予約を締める
+      const editing = noteRef.current?.id === targetId ? noteRef.current : null;
+      if (editing !== null) noteRef.current = null;
       try {
         await deleteNote(targetId);
       } catch {
+        if (editing !== null) {
+          noteRef.current = editing;
+          scheduleSave(editing);
+        }
         return;
       }
       // 削除済み note への pending 保存を止める（再試行が 404 を叩き続けるのを防ぐ）
@@ -252,7 +275,7 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
       setRawNotes((list) => list?.filter((s) => s.id !== targetId) ?? list);
       if (noteId === targetId) navigate(projectPath(projectId), { replace: true });
     },
-    [flush, discard, noteId, projectId],
+    [flush, discard, scheduleSave, noteId, projectId],
   );
 
   const undoDelete = useCallback(async () => {
@@ -323,21 +346,6 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [cycleIds, currentId, selectNote, createNew, deleteById, undoDelete]);
-
-  const scheduleSave = useCallback(
-    (target: Note) => {
-      // primary は title を編集しないので title は送らない（project 名で表示する）
-      const editableTitle =
-        target.id !== primaryIdRef.current && target.kind.kind === "project"
-          ? target.kind.title
-          : null;
-      schedule(target.id, {
-        title: editableTitle,
-        content: persistableContent(contentRef.current ?? target.content),
-      });
-    },
-    [schedule],
-  );
 
   const patchSummaryKind = useCallback((next: Note) => {
     setRawNotes(

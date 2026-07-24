@@ -163,6 +163,16 @@ export function EssayEditorPage({ id }: { id: string }) {
     setEssays((list) => patchEssayKind(list, next.id, next.kind));
   }, []);
 
+  const scheduleSave = useCallback(
+    (target: Note) => {
+      schedule(target.id, {
+        title: target.kind.kind === "essay" ? target.kind.title : null,
+        content: persistableContent(contentRef.current ?? target.content),
+      });
+    },
+    [schedule],
+  );
+
   const createNew = useCallback(async () => {
     await flush();
     try {
@@ -183,9 +193,15 @@ export function EssayEditorPage({ id }: { id: string }) {
     // flush は失敗しても resolve するので、成否を見て未保存分がある間は削除しない
     // （saveError が画面に出ているので、保存が回復すれば削除できる）
     if (!(await flush())) return;
+    // DELETE の往復中も本文は打てるが、その分は直後の discard で消える。書き込み経路
+    // （onDocChange / onTitleChange）は noteRef を見るので、ここで外して予約を締める
+    noteRef.current = null;
     try {
       await deleteNote(target.id);
     } catch {
+      // 消せなかったので編集対象に戻す。締めている間に打った分は contentRef にあるので拾い直す
+      noteRef.current = target;
+      scheduleSave(target);
       return;
     }
     // 削除済み note への pending 保存を止める（再試行が 404 を叩き続けるのを防ぐ）
@@ -197,7 +213,7 @@ export function EssayEditorPage({ id }: { id: string }) {
     const next = writingIds.includes(target.id) ? cycleSelect(writingIds, target.id, 1) : undefined;
     if (next !== undefined && next !== target.id) navigate(`/essays/${next}`, { replace: true });
     else navigate("/essays", { replace: true });
-  }, [flush, discard, writingIds]);
+  }, [flush, discard, scheduleSave, writingIds]);
 
   const undoDelete = useCallback(async () => {
     const restored = await restoreLastDeletedEssay();
@@ -280,16 +296,6 @@ export function EssayEditorPage({ id }: { id: string }) {
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [writingIds, id, selectEssay, createNew, toggleStatus, deleteCurrent, undoDelete]);
-
-  const scheduleSave = useCallback(
-    (target: Note) => {
-      schedule(target.id, {
-        title: target.kind.kind === "essay" ? target.kind.title : null,
-        content: persistableContent(contentRef.current ?? target.content),
-      });
-    },
-    [schedule],
-  );
 
   const onTitleChange = useCallback(
     (title: string) => {
