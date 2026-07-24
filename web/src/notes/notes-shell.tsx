@@ -14,8 +14,17 @@ const SIDEBAR_KEY = "monica-notes-sidebar-w";
 const SIDEBAR_DEFAULT = 400;
 const SIDEBAR_MIN = 260;
 const SIDEBAR_MAX = 720;
+/** 本文側に必ず残す幅 */
+const MAIN_MIN = 320;
+/** app rail（app-shell の w-12）。zen 中はサイドバーごと畳まれるので過大見積りは無害 */
+const RAIL_W = 48;
 
-const clampSidebar = (w: number) => Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, w));
+const clampSidebar = (w: number, max = SIDEBAR_MAX) => Math.min(max, Math.max(SIDEBAR_MIN, w));
+
+/** 窓幅から決まる上限。サイドバーが本文とリサイズ境界を画面外へ押し出さないようにする
+ * （aside は shrink-0・境界は absolute なので、幅を握る側で抑えないと届かなくなる）。
+ * コンテナ幅ではなく窓幅を見るのは、コンテナ幅が内容依存でループになるため。 */
+const maxSidebarFor = (viewport: number) => clampSidebar(viewport - RAIL_W - MAIN_MIN);
 
 function readSidebarWidth(): number {
   const raw = Number(localStorage.getItem(SIDEBAR_KEY));
@@ -31,7 +40,16 @@ export function NotesShell({ sidebar, children }: { sidebar: ReactNode; children
   const [density, setDensity] = useState<NoteDensity>(readDensity);
   // ドラッグ開始時の座標と幅。null = ドラッグ中でない
   const [resizeStart, setResizeStart] = useState<{ x: number; w: number } | null>(null);
+  const [maxWidth, setMaxWidth] = useState(() => maxSidebarFor(window.innerWidth));
   const resizing = resizeStart !== null;
+  // 永続化するのは希望幅。表示だけ窓幅に合わせるので、窓を広げれば元の幅に戻る
+  const shownWidth = clampSidebar(sidebarWidth, maxWidth);
+
+  useEffect(() => {
+    const onResize = () => setMaxWidth(maxSidebarFor(window.innerWidth));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   useEffect(() => {
     // ドラッグ中は書かない。毎フレームの同期 I/O になるので、離した一度だけ永続化する
@@ -47,7 +65,8 @@ export function NotesShell({ sidebar, children }: { sidebar: ReactNode; children
     if (resizeStart === null) return;
     let frame = 0;
     let pending: number | null = null;
-    const widthAt = (clientX: number) => clampSidebar(resizeStart.w + (clientX - resizeStart.x));
+    const widthAt = (clientX: number) =>
+      clampSidebar(resizeStart.w + (clientX - resizeStart.x), maxWidth);
     const commit = () => {
       frame = 0;
       if (pending !== null) setSidebarWidth(pending);
@@ -83,7 +102,7 @@ export function NotesShell({ sidebar, children }: { sidebar: ReactNode; children
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onCancel);
     };
-  }, [resizeStart]);
+  }, [resizeStart, maxWidth]);
 
   useEffect(() => {
     // capture phase で登録する: エディタ（ProseMirror）に食われる前に横取りする
@@ -103,7 +122,7 @@ export function NotesShell({ sidebar, children }: { sidebar: ReactNode; children
       className={`notes-screen relative flex h-dvh shrink-0 overflow-hidden ${
         resizing ? "cursor-col-resize select-none" : ""
       }`}
-      style={{ "--sb-w": `${sidebarWidth}px` } as CSSProperties}
+      style={{ "--sb-w": `${shownWidth}px` } as CSSProperties}
       data-density={density}
     >
       <aside
@@ -121,7 +140,7 @@ export function NotesShell({ sidebar, children }: { sidebar: ReactNode; children
         aria-label="Resize sidebar"
         onPointerDown={(e) => {
           e.preventDefault();
-          setResizeStart({ x: e.clientX, w: sidebarWidth });
+          setResizeStart({ x: e.clientX, w: shownWidth });
         }}
         onDoubleClick={() => setSidebarWidth(SIDEBAR_DEFAULT)}
         className="group/resize absolute inset-y-0 left-[var(--sb-w)] z-20 flex w-3 -translate-x-1/2 cursor-col-resize justify-center group-data-[zen]/shell:hidden"
