@@ -15,6 +15,14 @@ use monica_application::{ApplicationError, ApplicationEvent, EventSink};
 use monica_domain::{ExplanationId, SyncedBlockMode};
 
 pub const PORT_PROD: u16 = 19280;
+/// dev のデフォルト bind レンジ。PORT_PROD は稼働中の Monica.app が使うため含めない。
+pub const PORT_DEV_SCAN: std::ops::RangeInclusive<u16> = 19281..=19299;
+
+pub enum WebBind {
+    Fixed(SocketAddr),
+    /// 127.0.0.1 で PORT_DEV_SCAN を順に試行し、全滅なら ephemeral (0) に落ちる。
+    DevScan,
+}
 
 #[derive(rust_embed::Embed)]
 #[folder = "../../dist-web/"]
@@ -666,9 +674,21 @@ fn build_router(allowed: AllowedHosts) -> Router {
         .layer(middleware::from_fn_with_state(allowed, require_local_host))
 }
 
-pub fn serve(addr: impl Into<SocketAddr>, port_tx: SyncSender<u16>) -> Result<()> {
-    let addr = addr.into();
+/// 「probe してから bind」は TOCTOU レースがあるため、bind 自体を次の port へリトライする。
+async fn bind_scan(
+    ip: Ipv4Addr,
+    ports: std::ops::RangeInclusive<u16>,
+) -> std::io::Result<tokio::net::TcpListener> {
+    for port in ports {
+        match tokio::net::TcpListener::bind((ip, port)).await {
+            Ok(listener) => return Ok(listener),
+            Err(e) => log::debug!(target: "monica_web", "port {port} unavailable: {e}"),
+        }
+    }
+    tokio::net::TcpListener::bind((ip, 0)).await
+}
 
+pub fn serve(bind: WebBind, port_tx: SyncSender<u16>) -> Result<()> {
     // fresh / migration 保留中の DB への並列初回 open は SQLITE_BUSY になり得る。受け付け開始前に
     // 一度開いて migration を完了させ、per-request open を no-op チェックに落とす。失敗しても
     // 個々のリクエストがエラーを返せるので、サーバー起動自体は止めない。
@@ -683,7 +703,10 @@ pub fn serve(addr: impl Into<SocketAddr>, port_tx: SyncSender<u16>) -> Result<()
         .build()?;
 
     rt.block_on(async {
-        let listener = tokio::net::TcpListener::bind(addr).await?;
+        let listener = match bind {
+            WebBind::Fixed(addr) => tokio::net::TcpListener::bind(addr).await?,
+            WebBind::DevScan => bind_scan(Ipv4Addr::LOCALHOST, PORT_DEV_SCAN).await?,
+        };
         let bound_addr = listener.local_addr()?;
         let port = bound_addr.port();
         let _ = port_tx.send(port);
@@ -1803,12 +1826,31 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
+    // 占有 port は環境依存で選べないため、ephemeral bind で確保した port を基点にする。
+    // 「scan がその port を返さない」ことだけを assert すれば、隣接 port の空き状況に
+    // 依存せず決定的になる（スキップ成功でも ephemeral フォールバックでも成立）。
+    #[tokio::test]
+    async fn bind_scan_skips_occupied_port() {
+        let occupied = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let p = occupied.local_addr().unwrap().port();
+        let listener = bind_scan(Ipv4Addr::LOCALHOST, p..=p.saturating_add(1)).await.unwrap();
+        assert_ne!(listener.local_addr().unwrap().port(), p);
+    }
+
+    #[tokio::test]
+    async fn bind_scan_falls_back_to_ephemeral() {
+        let occupied = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let p = occupied.local_addr().unwrap().port();
+        let listener = bind_scan(Ipv4Addr::LOCALHOST, p..=p).await.unwrap();
+        assert_ne!(listener.local_addr().unwrap().port(), p);
+    }
+
     #[test]
     fn serve_binds_and_reports_port() {
         migrated();
         let (port_tx, port_rx) = std::sync::mpsc::sync_channel(1);
         std::thread::spawn(move || {
-            let _ = serve(([127, 0, 0, 1], 0u16), port_tx);
+            let _ = serve(WebBind::Fixed(([127, 0, 0, 1], 0u16).into()), port_tx);
         });
         let port = port_rx
             .recv_timeout(std::time::Duration::from_secs(10))
