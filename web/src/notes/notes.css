@@ -6,6 +6,9 @@
    面の hue を 264 に固定するのは、hue 240 前後（#2980af 系）だと暗く落としたとき
    R が沈んで petrol＝緑がかった青に見えてしまうため。 */
 .notes-screen {
+  /* --ambient / --ambient-blur / --ambient-opacity-{dark,light} は ambient.ts の
+     AMBIENTS が :root へ流し込む。どちらの opacity を採るかだけをここで決める */
+  --ambient-opacity: var(--ambient-opacity-dark);
   --water: #59b9c6;
   /* dark の文字階調だけは透明度で作らない: 紺の紙に白を alpha で載せると必ず
      paper の青が透けて青灰色に転ぶ。
@@ -16,8 +19,11 @@
   --ink-faint: oklch(0.8 0 0);
   --ink-hover: color-mix(in srgb, var(--ink) 10%, transparent);
   --ink-border: color-mix(in srgb, var(--ink) 22%, transparent);
-  --desk: oklch(0.24 0.058 264);
-  --paper: oklch(0.305 0.05 264);
+  /* 机と紙は ambient を透かすため alpha 付き。0.8 を超えると背景はほぼ潰れる */
+  --desk-alpha: 0.74;
+  --paper-alpha: 0.58;
+  --desk: oklch(0.24 0.058 264 / var(--desk-alpha));
+  --paper: oklch(0.305 0.05 264 / var(--paper-alpha));
   --kind-essay: #bd6a52;
   /* essays カード: 机の上にデスクマット、その中央に紙のミニチュア。sheet を一段明るく
      持ち上げて「照らされた原稿」の輪郭を出す。writing はマットの chroma を落として
@@ -31,6 +37,22 @@
   font-family:
     -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic Pro", "Noto Sans JP", "BIZ UDPGothic",
     sans-serif;
+}
+
+/* 部屋の向こう側。fixed + 負の z-index で root の stacking context まで抜けるので、
+   .notes-screen 自身が塗る背景（essays 一覧の --desk）よりも必ず下に入る。ここで
+   stacking context を作るとペイント順が逆転して背景が面の上に乗るため、.notes-screen
+   側に z-index・isolation は足さない。
+   40px 外へ広げるのは、blur が縁から引き込む透明を画面外へ逃がすため。 */
+.notes-screen::before {
+  content: "";
+  position: fixed;
+  inset: -40px;
+  z-index: -1;
+  background: var(--ambient) center / cover no-repeat;
+  opacity: var(--ambient-opacity);
+  filter: blur(var(--ambient-blur));
+  pointer-events: none;
 }
 
 .notes-screen .jb-root {
@@ -50,13 +72,15 @@
    机は紙と同じ白 — light では境界を罫線だけに任せる。
    水色は白の上では沈むので、同じ系統の紺（#2980af）に置き換える。 */
 :root[data-theme="light"] .notes-screen {
+  --ambient-opacity: var(--ambient-opacity-light);
   --water: #2980af;
   --ink: color-mix(in srgb, var(--foreground) 87%, transparent);
   --ink-muted: color-mix(in srgb, var(--ink) 78%, transparent);
   --ink-faint: color-mix(in srgb, var(--ink) 58%, transparent);
   --ink-hover: color-mix(in srgb, var(--ink) 6%, transparent);
   --ink-border: color-mix(in srgb, var(--ink) 14%, transparent);
-  --paper: var(--background);
+  --paper-alpha: 0.7;
+  --paper: color-mix(in srgb, var(--background) calc(var(--paper-alpha) * 100%), transparent);
   --desk: var(--paper);
   --kind-essay: #a4543f;
   --essay-mat: #eff7ff;
@@ -72,4 +96,15 @@
   --jb-muted: color-mix(in srgb, var(--jb-ink) 78%, transparent);
   --jb-faint: color-mix(in srgb, var(--jb-ink) 58%, transparent);
   --jb-border: color-mix(in srgb, var(--jb-ink) 14%, transparent);
+}
+
+/* 写真なし（ambient.ts の none）。透かす相手がいないのに alpha を残すと、机と紙が
+   同じ --background の上で合成されて階調差が潰れ「机の上の紙」が読めなくなる。
+   dark は oklch の alpha、light は color-mix の % として同じ --paper-alpha を消費して
+   いるので、1 に戻すこの 1 ブロックで両テーマに効く。
+   ファイル末尾に置くのは light テーマのブロックと特異性が同点 (0,3,0) で、後に書いた側
+   でないと勝てないため — 位置を上げると light だけ効かなくなる。 */
+:root[data-ambient="none"] .notes-screen {
+  --desk-alpha: 1;
+  --paper-alpha: 1;
 }
