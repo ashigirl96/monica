@@ -1,16 +1,18 @@
 import { type ReactNode, useEffect, useState } from "react";
-import { spaLinkClick } from "@/app";
-import { altOnly } from "@/keys";
+import { navigate, spaLinkClick } from "@/app";
+import { altOnly, ctrlOnly } from "@/keys";
 import { setThemePref, themePref, type ThemePref } from "@/theme";
 
 function RailLink({
   to,
   label,
+  shortcut,
   active,
   children,
 }: {
   to: string;
   label: string;
+  shortcut?: string;
   active: boolean;
   children: ReactNode;
 }) {
@@ -18,7 +20,7 @@ function RailLink({
     <a
       href={to}
       aria-label={label}
-      title={label}
+      title={shortcut ? `${label} (${shortcut})` : label}
       aria-current={active ? "page" : undefined}
       onClick={spaLinkClick(to)}
       className={`flex size-9 items-center justify-center rounded-lg transition-colors ${
@@ -31,6 +33,13 @@ function RailLink({
     </a>
   );
 }
+
+/** ⌃1/⌃2/⌃3 の遷移先。nav rail の並び順と一致させる */
+const NAV_SHORTCUTS: Record<string, string> = {
+  Digit1: "/daily",
+  Digit2: "/essays",
+  Digit3: "/projects",
+};
 
 const THEME_CYCLE: ThemePref[] = ["system", "light", "dark"];
 
@@ -120,13 +129,26 @@ export function AppShell({
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.isComposing || !ctrlOnly(e)) return;
+      const to = NAV_SHORTCUTS[e.code];
+      if (to === undefined) return;
+      e.preventDefault();
+      e.stopPropagation();
+      navigate(to);
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
   return (
     <div className="group/shell flex min-h-dvh" data-zen={zen ? "" : undefined}>
       <nav
         className={`sticky top-0 z-20 flex h-dvh shrink-0 flex-col items-center gap-1.5 overflow-hidden bg-background pt-3 pb-4 transition-[width] duration-200 motion-reduce:transition-none ${zen ? "w-0" : "w-12 border-r"}`}
       >
         <img src="/favicon.png" alt="" className="mb-3 size-7" />
-        <RailLink to="/daily" label="Daily" active={active === "daily"}>
+        <RailLink to="/daily" label="Daily" shortcut="⌃1" active={active === "daily"}>
           <svg
             className="size-[18px]"
             fill="none"
@@ -139,7 +161,7 @@ export function AppShell({
             <circle cx="12" cy="15" r="1" fill="currentColor" stroke="none" />
           </svg>
         </RailLink>
-        <RailLink to="/essays" label="Essay" active={active === "essays"}>
+        <RailLink to="/essays" label="Essay" shortcut="⌃2" active={active === "essays"}>
           <svg
             className="size-[18px]"
             fill="none"
@@ -151,7 +173,7 @@ export function AppShell({
             <path strokeLinecap="round" d="M8.5 8h7M8.5 11.5h7M8.5 15h4.5" />
           </svg>
         </RailLink>
-        <RailLink to="/projects" label="Project" active={active === "projects"}>
+        <RailLink to="/projects" label="Project" shortcut="⌃3" active={active === "projects"}>
           <svg
             className="size-[18px]"
             fill="none"
