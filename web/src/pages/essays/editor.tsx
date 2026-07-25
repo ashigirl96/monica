@@ -37,7 +37,7 @@ function StatusChip({
     <button
       type="button"
       onClick={onToggle}
-      title="Toggle writing / finished (⌃Q)"
+      title="Toggle writing / finished (⌃W)"
       className="flex items-center gap-1.5 rounded-md px-1.5 py-0.5 transition-colors duration-100 hover:bg-[var(--ink-hover)]"
     >
       <span
@@ -103,7 +103,7 @@ export function EssayEditorPage({ id }: { id: string }) {
   }, [dataVersion]);
 
   useEffect(() => {
-    // ⌥N・⌃Q 直後は API レスポンスで seed 済みなので再フェッチしない
+    // 作成・status 変更の直後は API レスポンスで seed 済みなので再フェッチしない
     if (noteRef.current?.id === id) return;
     mentionCacheRef.current = new Map();
     let cancelled = false;
@@ -281,7 +281,7 @@ export function EssayEditorPage({ id }: { id: string }) {
     // capture phase で登録する: エディタ（ProseMirror）より先に横取りする必要がある
     function onKey(e: KeyboardEvent) {
       if (e.isComposing) return;
-      if (ctrlOnly(e) && e.code === "KeyQ" && noteRef.current !== null) {
+      if (ctrlOnly(e) && e.code === "KeyW" && noteRef.current !== null) {
         e.preventDefault();
         e.stopPropagation();
         toggleStatus();

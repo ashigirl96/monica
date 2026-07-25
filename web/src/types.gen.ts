@@ -76,8 +76,8 @@ export type NoteKind =
       title: string;
       status: EssayStatus;
       /**
-       *  ⌃Q・コンテキストメニューが次に送る status（`EssayStatus::toggled` の結果）。
-       *  遷移規則を domain に閉じるため、フロントは二値判定せずこれをそのまま送る。
+       *  次に送る status（`EssayStatus::toggled` の結果）。遷移規則を domain に閉じるため、
+       *  フロントは二値判定せずこれをそのまま送る。
        */
       next_status: EssayStatus;
     };
@@ -121,7 +121,7 @@ export type ProjectOption = {
   name: string;
 };
 
-/**  essay status 変更リクエスト（⌃Q）。トグルではなく冪等な明示 set。 */
+/**  essay status 変更リクエスト。トグルではなく冪等な明示 set。 */
 export type SetEssayStatus = {
   status: EssayStatus;
 };

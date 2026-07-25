@@ -31,8 +31,7 @@ function StatusTab({
   );
 }
 
-/** essay サイドバー。writing / finished のタブで片方だけを並べ、⌥K/J は表示中タブ内を巡回する。
- * タブは ⌥H/⌥L と、開いている note の status 変化（⌃Q）で動く。 */
+/** essay サイドバー。writing / finished のタブで片方だけを並べる。 */
 export function EssaysSidebar({
   groups,
   tab,
@@ -51,7 +50,7 @@ export function EssaysSidebar({
   const selectedVisible = essays !== null && essays.some((s) => s.id === selectedId);
 
   useEffect(() => {
-    // tab: ⌃Q でタブが移ったとき（selectedId は変わらない）。selectedVisible: 一覧の到着や
+    // tab: status 変更でタブが移ったとき（selectedId は変わらない）。selectedVisible: 一覧の到着や
     // 反対タブからの復帰。title 編集の patch では 3 つとも変わらないので空振りしない
     if (selectedVisible) selectedRef.current?.scrollIntoView({ block: "nearest" });
   }, [selectedId, tab, selectedVisible]);

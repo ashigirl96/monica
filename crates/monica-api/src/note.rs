@@ -36,8 +36,8 @@ pub enum NoteKind {
     Essay {
         title: String,
         status: EssayStatus,
-        /// ⌃Q・コンテキストメニューが次に送る status（`EssayStatus::toggled` の結果）。
-        /// 遷移規則を domain に閉じるため、フロントは二値判定せずこれをそのまま送る。
+        /// 次に送る status（`EssayStatus::toggled` の結果）。遷移規則を domain に閉じるため、
+        /// フロントは二値判定せずこれをそのまま送る。
         next_status: EssayStatus,
     },
 }
@@ -71,7 +71,7 @@ impl From<NoteKind> for monica_domain::NoteKind {
     }
 }
 
-/// essay status 変更リクエスト（⌃Q）。トグルではなく冪等な明示 set。
+/// essay status 変更リクエスト。トグルではなく冪等な明示 set。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct SetEssayStatus {
     pub status: EssayStatus,

@@ -35,8 +35,8 @@ impl EssayStatus {
         }
     }
 
-    /// ⌃Q・コンテキストメニューが次に送る status。status が増えたときに
-    /// 遷移先を決め直す場所をここ 1 箇所に閉じる（フロントは結果を受け取るだけ）。
+    /// 次に送る status。status が増えたときに遷移先を決め直す場所を
+    /// ここ 1 箇所に閉じる（フロントは結果を受け取るだけ）。
     pub fn toggled(self) -> Self {
         match self {
             EssayStatus::Writing => EssayStatus::Finished,
