@@ -30,6 +30,7 @@ export function AmbientSwitcher() {
   const [selected, setSelected] = useState<AmbientName>(ambientPref);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -38,13 +39,23 @@ export function AmbientSwitcher() {
       setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      // 閉じるとフォーカス中の選択肢が unmount され、focus が body に落ちて次の Tab が
+      // ページ先頭から再開してしまう。popup 内にいたときだけ trigger へ戻す
+      // （外にいるなら奪ってはいけない）
+      if (rootRef.current?.contains(document.activeElement)) triggerRef.current?.focus();
+      setOpen(false);
     }
     window.addEventListener("mousedown", onMouseDown);
-    window.addEventListener("keydown", onKey);
+    // capture phase: bubble だと、フォーカスがエディタにあるとき ProseMirror が Escape を
+    // block 選択として消費してしまい window まで届かない。open のときだけ張るので、
+    // 閉じている間のエディタの Escape は奪わない
+    window.addEventListener("keydown", onKey, true);
     return () => {
       window.removeEventListener("mousedown", onMouseDown);
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onKey, true);
     };
   }, [open]);
 
@@ -71,6 +82,7 @@ export function AmbientSwitcher() {
   return (
     <div ref={rootRef} className="fixed right-4 bottom-4 z-40">
       <button
+        ref={triggerRef}
         type="button"
         aria-expanded={open}
         aria-label={`Ambient: ${current.label}`}
