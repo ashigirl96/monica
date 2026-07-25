@@ -3,19 +3,30 @@ import { navigate, spaLinkClick } from "@/app";
 import { altOnly, ctrlOnly } from "@/keys";
 import { setThemePref, themePref, type ThemePref } from "@/theme";
 
+/** ⌃1/⌃2/⌃3 の遷移先 */
+const NAV_SHORTCUTS: Record<string, string> = {
+  Digit1: "/daily",
+  Digit2: "/essays",
+  Digit3: "/projects",
+};
+
+/** tooltip の "(⌃1)" は上の表から導出する。手書きすると表と食い違っても誰も気づけない */
+const SHORTCUT_LABELS: Record<string, string> = Object.fromEntries(
+  Object.entries(NAV_SHORTCUTS).map(([code, to]) => [to, `⌃${code.replace("Digit", "")}`]),
+);
+
 function RailLink({
   to,
   label,
-  shortcut,
   active,
   children,
 }: {
   to: string;
   label: string;
-  shortcut?: string;
   active: boolean;
   children: ReactNode;
 }) {
+  const shortcut = SHORTCUT_LABELS[to];
   return (
     <a
       href={to}
@@ -33,13 +44,6 @@ function RailLink({
     </a>
   );
 }
-
-/** ⌃1/⌃2/⌃3 の遷移先。nav rail の並び順と一致させる */
-const NAV_SHORTCUTS: Record<string, string> = {
-  Digit1: "/daily",
-  Digit2: "/essays",
-  Digit3: "/projects",
-};
 
 const THEME_CYCLE: ThemePref[] = ["system", "light", "dark"];
 
@@ -115,24 +119,19 @@ export function AppShell({
   active: "daily" | "essays" | "projects" | "library" | "settings";
   children: ReactNode;
 }) {
-  // alt+b の zen mode: nav rail と、group-data-[zen]/shell で反応する
+  // ⌥b の zen mode: nav rail と、group-data-[zen]/shell で反応する
   // ページ側 sidebar をまとめて隠し、editor だけにする
   const [zen, setZen] = useState(false);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (!altOnly(e)) return;
-      if (e.code !== "KeyB") return;
-      e.preventDefault();
-      e.stopPropagation();
-      setZen((z) => !z);
-    }
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, []);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.isComposing || !ctrlOnly(e)) return;
+      if (e.isComposing) return;
+      if (altOnly(e) && e.code === "KeyB") {
+        e.preventDefault();
+        e.stopPropagation();
+        setZen((z) => !z);
+        return;
+      }
+      if (!ctrlOnly(e)) return;
       const to = NAV_SHORTCUTS[e.code];
       if (to === undefined) return;
       e.preventDefault();
@@ -142,13 +141,14 @@ export function AppShell({
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
+
   return (
     <div className="group/shell flex min-h-dvh" data-zen={zen ? "" : undefined}>
       <nav
         className={`sticky top-0 z-20 flex h-dvh shrink-0 flex-col items-center gap-1.5 overflow-hidden bg-background pt-3 pb-4 transition-[width] duration-200 motion-reduce:transition-none ${zen ? "w-0" : "w-12 border-r"}`}
       >
         <img src="/favicon.png" alt="" className="mb-3 size-7" />
-        <RailLink to="/daily" label="Daily" shortcut="⌃1" active={active === "daily"}>
+        <RailLink to="/daily" label="Daily" active={active === "daily"}>
           <svg
             className="size-[18px]"
             fill="none"
@@ -161,7 +161,7 @@ export function AppShell({
             <circle cx="12" cy="15" r="1" fill="currentColor" stroke="none" />
           </svg>
         </RailLink>
-        <RailLink to="/essays" label="Essay" shortcut="⌃2" active={active === "essays"}>
+        <RailLink to="/essays" label="Essay" active={active === "essays"}>
           <svg
             className="size-[18px]"
             fill="none"
@@ -173,7 +173,7 @@ export function AppShell({
             <path strokeLinecap="round" d="M8.5 8h7M8.5 11.5h7M8.5 15h4.5" />
           </svg>
         </RailLink>
-        <RailLink to="/projects" label="Project" shortcut="⌃3" active={active === "projects"}>
+        <RailLink to="/projects" label="Project" active={active === "projects"}>
           <svg
             className="size-[18px]"
             fill="none"

@@ -7,11 +7,13 @@
    R が沈んで petrol＝緑がかった青に見えてしまうため。 */
 .notes-screen {
   --water: #59b9c6;
-  --ink-base: oklch(0.945 0.014 262);
-  --ink: color-mix(in srgb, var(--ink-base) 87%, transparent);
+  /* dark の文字階調だけは透明度で作らない: 紺の紙に白を alpha で載せると必ず
+     paper の青が透けて青灰色に転ぶ。
+     線と hover は面の一部なので従来どおり alpha 導出のまま。 */
+  --ink: var(--foreground);
   --ink-text: var(--ink);
-  --ink-muted: color-mix(in srgb, var(--ink) 70%, transparent);
-  --ink-faint: color-mix(in srgb, var(--ink) 50%, transparent);
+  --ink-muted: oklch(0.9 0 0);
+  --ink-faint: oklch(0.8 0 0);
   --ink-hover: color-mix(in srgb, var(--ink) 10%, transparent);
   --ink-border: color-mix(in srgb, var(--ink) 22%, transparent);
   --desk: oklch(0.24 0.058 264);
@@ -36,8 +38,8 @@
   /* エディタの操作痕（todo の塗り・選択・synced block の枠）は水色と同系の青で揃える */
   --jb-blue: #2980af;
   --jb-text: var(--jb-ink);
-  --jb-muted: color-mix(in srgb, var(--jb-ink) 62%, transparent);
-  --jb-faint: color-mix(in srgb, var(--jb-ink) 44%, transparent);
+  --jb-muted: oklch(0.86 0 0);
+  --jb-faint: oklch(0.74 0 0);
   --jb-border: color-mix(in srgb, var(--jb-ink) 18%, transparent);
   /* 紙は main 側の --paper が塗る。二重に塗ると微妙な色差が出る */
   --jb-paper: transparent;
@@ -49,7 +51,7 @@
    水色は白の上では沈むので、同じ系統の紺（#2980af）に置き換える。 */
 :root[data-theme="light"] .notes-screen {
   --water: #2980af;
-  --ink-base: var(--foreground);
+  --ink: color-mix(in srgb, var(--foreground) 87%, transparent);
   --ink-muted: color-mix(in srgb, var(--ink) 78%, transparent);
   --ink-faint: color-mix(in srgb, var(--ink) 58%, transparent);
   --ink-hover: color-mix(in srgb, var(--ink) 6%, transparent);
