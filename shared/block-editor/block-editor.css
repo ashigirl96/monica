@@ -101,17 +101,17 @@
   transition: opacity 100ms ease-out;
 }
 
-/* 行高 32px 前提の式が合わないブロックは実測で個別合わせ */
+/* 行高 32px 前提の式が合わないブロックは実測で個別合わせ（余白ぶんの下げは共通） */
 [data-block-container]:has(> .jb-container-body > [data-block-content="divider"]) > .jb-gutter {
-  top: 11px;
+  top: calc(var(--jb-block-margin-top) + 11px);
 }
 
 .jb-callout > .jb-gutter {
-  top: 24px;
+  top: calc(var(--jb-block-margin-top) + 24px);
 }
 
 [data-block-container]:has(> .jb-container-body > .jb-code) > .jb-gutter {
-  top: 39px;
+  top: calc(var(--jb-block-margin-top) + 39px);
 }
 
 /* :hover は祖先にも立つため、子孫 container がホバー中の間は自分の gutter を出さない */
@@ -336,12 +336,19 @@
 
 /* ---- callout（container 全体を包むパネル。子ブロックを内包する） ---- */
 
+/* callout だけはパネルが container-body（= content の親）なので、ブロック間の余白を
+   content の margin-top で受けるとパネル内のテキストだけが下がり、パネル上端基準で
+   置いた ::before のアイコンと縦位置がズレる。余白はパネル側の margin で受ける */
 .jb-callout > .jb-container-body {
   position: relative;
   background: var(--jb-callout-bg);
   border-radius: 10px;
-  margin: 4px 0;
+  margin: calc(4px + var(--jb-block-margin-top)) 0 4px;
   padding: 14px 16px 14px 46px;
+}
+
+.jb-callout > .jb-container-body > [data-block-content="callout"] {
+  margin-top: 0;
 }
 
 .jb-callout > .jb-container-body::before {
@@ -1090,9 +1097,9 @@
 [data-density="compact"]
   [data-block-container]:has(> .jb-container-body > [data-block-content="divider"])
   > .jb-gutter {
-  top: 3px;
+  top: calc(var(--jb-block-margin-top) + 3px);
 }
 
 [data-density="compact"] .jb-callout > .jb-gutter {
-  top: 22px;
+  top: calc(var(--jb-block-margin-top) + 22px);
 }
