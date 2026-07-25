@@ -254,19 +254,26 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
     async (targetId: string) => {
       // primary は削除不可
       if (targetId === primaryIdRef.current) return;
-      // 未保存分が残っている間は削除しない（⌥Z で戻せるのがサーバに届いた内容までになる）
-      if (!(await flush())) return;
-      // 開いている note を消す場合、DELETE の往復中に打った分は直後の discard で消える。
-      // 書き込み経路は noteRef を見るので、その間だけ外して予約を締める
+      // 開いている note を消す場合は、往復を待つ前に予約を締める。flush は pending を先に
+      // 差し替えてから待つので、待っている間に schedule された分は成否に反映されず、直後の
+      // discard で消える。書き込み経路は noteRef を見るので、外せば予約自体が起きない
       const editing = noteRef.current?.id === targetId ? noteRef.current : null;
       if (editing !== null) noteRef.current = null;
+      // 締めている間に打った分は contentRef にあるので、中断するときは拾い直す
+      const abort = () => {
+        if (editing === null) return;
+        noteRef.current = editing;
+        scheduleSave(editing);
+      };
+      // 未保存分が残っている間は削除しない（⌥Z で戻せるのがサーバに届いた内容までになる）
+      if (!(await flush())) {
+        abort();
+        return;
+      }
       try {
         await deleteNote(targetId);
       } catch {
-        if (editing !== null) {
-          noteRef.current = editing;
-          scheduleSave(editing);
-        }
+        abort();
         return;
       }
       // 削除済み note への pending 保存を止める（再試行が 404 を叩き続けるのを防ぐ）

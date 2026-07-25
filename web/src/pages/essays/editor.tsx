@@ -189,19 +189,26 @@ export function EssayEditorPage({ id }: { id: string }) {
   const deleteCurrent = useCallback(async () => {
     const target = noteRef.current;
     if (target === null) return;
+    // 往復を待つ前に予約を締める。flush は pending を先に差し替えてから待つので、待っている
+    // 間に schedule された分は成否に反映されず、直後の discard で消える。書き込み経路
+    // （onDocChange / onTitleChange）は noteRef を見るので、外せば予約自体が起きない
+    noteRef.current = null;
+    // 締めている間に打った分は contentRef にあるので、中断するときは拾い直す
+    const abort = () => {
+      noteRef.current = target;
+      scheduleSave(target);
+    };
     // 保存が通っていない状態で消すと ⌥Z で戻せるのはサーバに届いた内容までになる。
     // flush は失敗しても resolve するので、成否を見て未保存分がある間は削除しない
     // （saveError が画面に出ているので、保存が回復すれば削除できる）
-    if (!(await flush())) return;
-    // DELETE の往復中も本文は打てるが、その分は直後の discard で消える。書き込み経路
-    // （onDocChange / onTitleChange）は noteRef を見るので、ここで外して予約を締める
-    noteRef.current = null;
+    if (!(await flush())) {
+      abort();
+      return;
+    }
     try {
       await deleteNote(target.id);
     } catch {
-      // 消せなかったので編集対象に戻す。締めている間に打った分は contentRef にあるので拾い直す
-      noteRef.current = target;
-      scheduleSave(target);
+      abort();
       return;
     }
     // 削除済み note への pending 保存を止める（再試行が 404 を叩き続けるのを防ぐ）
