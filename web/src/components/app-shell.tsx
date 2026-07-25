@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { spaLinkClick } from "@/app";
+import { altOnly } from "@/keys";
 import { setThemePref, themePref, type ThemePref } from "@/theme";
 
 function RailLink({
@@ -110,7 +111,7 @@ export function AppShell({
   const [zen, setZen] = useState(false);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      if (!altOnly(e)) return;
       if (e.code !== "KeyB") return;
       e.preventDefault();
       e.stopPropagation();

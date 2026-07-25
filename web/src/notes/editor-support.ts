@@ -107,7 +107,8 @@ export function useNoteBlockResolvers({
   editorHandleRef,
   onNavigateToNote,
 }: {
-  flush: () => Promise<void>;
+  /** pending PUT の完了待ちにしか使わないので解決値は問わない */
+  flush: () => Promise<unknown>;
   noteRef: RefObject<Note | null>;
   editorHandleRef: RefObject<BlockEditorHandle | null>;
   onNavigateToNote: (noteId: string) => void;

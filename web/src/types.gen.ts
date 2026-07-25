@@ -71,7 +71,16 @@ export type NoteBlock = {
 export type NoteKind =
   | { kind: "project"; project_id: string; title: string }
   | { kind: "daily" }
-  | { kind: "essay"; title: string; status: EssayStatus };
+  | {
+      kind: "essay";
+      title: string;
+      status: EssayStatus;
+      /**
+       *  ⌃Q・コンテキストメニューが次に送る status（`EssayStatus::toggled` の結果）。
+       *  遷移規則を domain に閉じるため、フロントは二値判定せずこれをそのまま送る。
+       */
+      next_status: EssayStatus;
+    };
 
 /**
  *  wiki link（`[[`）の検索候補・解決結果。表示名の導出規則は domain の

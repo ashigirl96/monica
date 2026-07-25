@@ -341,7 +341,7 @@ impl NoteStore for SqliteStore {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {NOTE_COLUMNS} FROM notes
              WHERE deleted_at IS NULL AND kind = 'essay'
-             ORDER BY updated_at DESC, rowid DESC"
+             ORDER BY created_at DESC, rowid DESC"
         ))?;
         let rows = stmt.query_map([], |row| Ok(summary_from_row(row)))?;
         rows.map(|r| r?).collect()
@@ -767,6 +767,13 @@ mod tests {
             .unwrap();
     }
 
+    fn set_created_at(store: &SqliteStore, id: &str, created_at: &str) {
+        store
+            .conn()
+            .execute("UPDATE notes SET created_at = ?1 WHERE id = ?2", params![created_at, id])
+            .unwrap();
+    }
+
     #[test]
     fn search_matches_title_project_date_and_content() {
         let mut store = SqliteStore::open_in_memory().unwrap();
@@ -1059,7 +1066,7 @@ mod tests {
     }
 
     #[test]
-    fn list_essay_notes_filters_and_orders_by_updated_at() {
+    fn list_essay_notes_filters_and_orders_by_created_at() {
         let mut store = SqliteStore::open_in_memory().unwrap();
         seed_project(&store, "o/r");
         store.create_note(0).unwrap(); // daily（対象外）
@@ -1069,15 +1076,17 @@ mod tests {
         store.create_project_note("o/r", 0).unwrap(); // project（対象外）
         store.set_essay_status(b.id.as_str(), EssayStatus::Finished).unwrap().unwrap();
         store.delete_note(c.id.as_str()).unwrap();
-        set_updated_at(&store, a.id.as_str(), "2026-07-10T00:00:00.000Z");
-        set_updated_at(&store, b.id.as_str(), "2026-07-12T00:00:00.000Z");
+        set_created_at(&store, a.id.as_str(), "2026-07-10T00:00:00.000Z");
+        set_created_at(&store, b.id.as_str(), "2026-07-12T00:00:00.000Z");
+        // 後から更新しても並びは動かない（created_at 基準であることの担保）
+        set_updated_at(&store, a.id.as_str(), "2026-07-20T00:00:00.000Z");
 
         let ids: Vec<String> =
             store.list_essay_notes().unwrap().into_iter().map(|s| s.id.into_string()).collect();
         assert_eq!(
             ids,
             vec![b.id.as_str().to_string(), a.id.as_str().to_string()],
-            "essay のみ・finished 込み・削除済み除外・updated_at 降順"
+            "essay のみ・finished 込み・削除済み除外・created_at 降順"
         );
     }
 

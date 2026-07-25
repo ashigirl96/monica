@@ -10,6 +10,7 @@ import {
   restoreNote,
 } from "@/api";
 import { navigate } from "@/app";
+import { altOnly, ctrlOnly } from "@/keys";
 import type { Note, NoteSummary, ProjectOption } from "@/types.gen";
 import { takePendingBlockTarget } from "@/notes/block-jump";
 import {
@@ -20,11 +21,11 @@ import {
   useNoteBlockResolvers,
 } from "@/notes/editor-support";
 import { NoteBlockEditor } from "@/notes/note-block-editor";
+import { NotesShell } from "@/notes/notes-shell";
 import { useAutosave } from "@/notes/use-autosave";
 import { FuzzyPickerModal } from "@/components/fuzzy-picker-modal";
 import { ProjectsSidebar } from "./sidebar";
 import { setLastProject } from "./support";
-import "@/notes/notes.css";
 
 function projectPath(projectId: string, noteId?: string): string {
   return noteId ? `/projects/${projectId}/notes/${noteId}` : `/projects/${projectId}`;
@@ -47,7 +48,7 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
   const [dataVersion, setDataVersion] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  const { schedule, flush, discard, error: saveError } = useAutosave();
+  const { schedule, flush, discard, resume, error: saveError } = useAutosave();
   const editorHandleRef = useRef<BlockEditorHandle | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const pendingTitleFocusRef = useRef(false);
@@ -234,22 +235,54 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
     }
   }, [projectId, rawNotes]);
 
+  const scheduleSave = useCallback(
+    (target: Note) => {
+      // primary は title を編集しないので title は送らない（project 名で表示する）
+      const editableTitle =
+        target.id !== primaryIdRef.current && target.kind.kind === "project"
+          ? target.kind.title
+          : null;
+      schedule(target.id, {
+        title: editableTitle,
+        content: persistableContent(contentRef.current ?? target.content),
+      });
+    },
+    [schedule],
+  );
+
   const deleteById = useCallback(
     async (targetId: string) => {
       // primary は削除不可
       if (targetId === primaryIdRef.current) return;
-      await flush();
-      discard(targetId);
+      // 開いている note を消す場合は、往復を待つ前に予約を締める。flush は pending を先に
+      // 差し替えてから待つので、待っている間に schedule された分は成否に反映されず、直後の
+      // discard で消える。書き込み経路は noteRef を見るので、外せば予約自体が起きない
+      const editing = noteRef.current?.id === targetId ? noteRef.current : null;
+      if (editing !== null) noteRef.current = null;
+      // 締めている間に打った分は contentRef にあるので、中断するときは拾い直す
+      const abort = () => {
+        if (editing === null) return;
+        noteRef.current = editing;
+        scheduleSave(editing);
+      };
+      // 未保存分が残っている間は削除しない（⌥Z で戻せるのがサーバに届いた内容までになる）
+      if (!(await flush())) {
+        abort();
+        return;
+      }
       try {
         await deleteNote(targetId);
       } catch {
+        abort();
         return;
       }
+      // 削除済み note への pending 保存を止める（再試行が 404 を叩き続けるのを防ぐ）
+      discard(targetId);
       undoStackRef.current.push(targetId);
       setRawNotes((list) => list?.filter((s) => s.id !== targetId) ?? list);
       if (noteId === targetId) navigate(projectPath(projectId), { replace: true });
     },
-    [flush, discard, noteId, projectId],
+    [flush, discard, scheduleSave, noteId, projectId],
   );
 
   const undoDelete = useCallback(async () => {
@@ -259,12 +292,15 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
     try {
       restored = await restoreNote(targetId);
     } catch {
+      // 失敗のたびに id を捨てると ⌥Z が二度と効かなくなるので戻す
+      undoStackRef.current.push(targetId);
       return;
     }
+    resume(targetId);
     setDataVersion((v) => v + 1);
     seedNote(restored);
     navigate(projectPath(projectId, targetId));
-  }, [seedNote, projectId]);
+  }, [seedNote, projectId, resume]);
 
   const switchProject = useCallback(
     (nextId: string) => {
@@ -280,14 +316,13 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
     // capture phase: ProseMirror より先に横取りする
     function onKey(e: KeyboardEvent) {
       if (e.isComposing) return;
-      const ctrlOnly = e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
-      if (ctrlOnly && e.code === "KeyW") {
+      if (ctrlOnly(e) && e.code === "KeyW") {
         e.preventDefault();
         e.stopPropagation();
         setPickerOpen(true);
         return;
       }
-      if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      if (!altOnly(e)) return;
       if (e.code === "KeyN") {
         e.preventDefault();
         e.stopPropagation();
@@ -318,21 +353,6 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [cycleIds, currentId, selectNote, createNew, deleteById, undoDelete]);
-
-  const scheduleSave = useCallback(
-    (target: Note) => {
-      // primary は title を編集しないので title は送らない（project 名で表示する）
-      const editableTitle =
-        target.id !== primaryIdRef.current && target.kind.kind === "project"
-          ? target.kind.title
-          : null;
-      schedule(target.id, {
-        title: editableTitle,
-        content: persistableContent(contentRef.current ?? target.content),
-      });
-    },
-    [schedule],
-  );
 
   const patchSummaryKind = useCallback((next: Note) => {
     setRawNotes(
@@ -366,26 +386,21 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
   );
 
   return (
-    <div
-      className="notes-screen relative flex h-dvh shrink-0 overflow-hidden"
-      data-density="relaxed"
+    <NotesShell
+      sidebar={
+        <ProjectsSidebar
+          projectName={projectName}
+          primary={primary}
+          notes={timeline}
+          selectedId={currentId}
+          hasMore={hasMore}
+          onLoadMore={loadMore}
+          onSelectPrimary={() => selectNote(primaryIdRef.current ?? "")}
+          onSelect={selectNote}
+          onDelete={(s) => void deleteById(s.id)}
+        />
+      }
     >
-      <aside className="w-[300px] shrink-0 overflow-hidden border-r transition-[width] duration-200 group-data-[zen]/shell:w-0 group-data-[zen]/shell:border-r-0 motion-reduce:transition-none">
-        <div className="h-full w-[300px]">
-          <ProjectsSidebar
-            projectName={projectName}
-            primary={primary}
-            notes={timeline}
-            selectedId={currentId}
-            hasMore={hasMore}
-            onLoadMore={loadMore}
-            onSelectPrimary={() => selectNote(primaryIdRef.current ?? "")}
-            onSelect={selectNote}
-            onDelete={(s) => void deleteById(s.id)}
-          />
-        </div>
-      </aside>
-
       <main className="flex-1 overflow-y-auto bg-[var(--paper)]">
         {projectError ? (
           <div className="flex h-full items-center justify-center text-sm text-destructive">
@@ -451,6 +466,6 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
           onClose={() => setPickerOpen(false)}
         />
       )}
-    </div>
+    </NotesShell>
   );
 }
