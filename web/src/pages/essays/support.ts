@@ -15,6 +15,31 @@ export function essayTitle(summary: NoteSummary): string {
   return summary.kind.kind === "essay" ? summary.kind.title : "";
 }
 
+/** サイドバーのタブが引くリスト。両 status のキーが必ず存在する */
+export type EssayGroups = Record<EssayStatus, NoteSummary[]>;
+
+/** サイドバーのタブ並び（左 → 右）。描画順と ⌥H/⌥L の移動先がこの 1 箇所から決まる。
+ * EssayStatus の全値を並べる（到達できない status を作らない）。 */
+export const ESSAY_TABS: readonly [EssayStatus, EssayStatus] = ["writing", "finished"];
+
+/** ⌥H/⌥L の移動先。両端で折り返すので、タブが 2 つの今は左右どちらのキーでも往復になる
+ * （同じキーを 2 回押せば元のタブに戻る）。 */
+export function otherEssayTab(current: EssayStatus): EssayStatus {
+  return current === ESSAY_TABS[0] ? ESSAY_TABS[1] : ESSAY_TABS[0];
+}
+
+/** 未取得（null）を保ったまま status 別に分ける。status 列が NULL の既存 essay は
+ * ストア側が writing に倒して返すので、essayStatus 経由なら writing に入る。 */
+export function splitEssaysByStatus(list: NoteSummary[] | null): EssayGroups | null {
+  if (list === null) return null;
+  const groups: EssayGroups = { writing: [], finished: [] };
+  for (const summary of list) {
+    const status = essayStatus(summary);
+    if (status !== null) groups[status].push(summary);
+  }
+  return groups;
+}
+
 /** `2026-07-21T…` → `2026/7/21`（ゼロ埋めなし。一覧カードの日付表記） */
 export function slashDate(timestamp: string): string {
   const [y, m, d] = timestamp.slice(0, 10).split("-");
