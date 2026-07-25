@@ -1,7 +1,18 @@
+import fireworksImage from "./ambients/fireworks.jpg";
+import sakuraImage from "./ambients/sakura.jpg";
+import shrineImage from "./ambients/shrine.jpg";
+import universeImage from "./ambients/universe.jpg";
+import villageImage from "./ambients/village.jpg";
+
 /**
  * 面の下に敷く背景写真のプリセット。light / dark とは直交する軸で、色は変えずに
  * 一枚の写真だけを差し替える。値は :root の CSS 変数として流し込み、notes.css の
  * .notes-screen::before が受け取る。
+ *
+ * 画像を public/ ではなく src/ambients/ に置いて import するのは、monica-web の router が
+ * ルート直下の配信物を明示列挙する設計（/assets/{*path} と /favicon.png だけ）で、
+ * public/ に置くと dist-web のルートに落ちて本番で 404 になるため。import すれば
+ * content hash 付きで /assets/ 配下に出るので既存 route でそのまま配信される。
  *
  * blur と opacity を写真ごとに持つのは、必要なぼかし量が被写体の空間周波数で決まるため。
  * 滑らかなグラデーションは薄くぼかせば足りるが、枝や提灯のような輪郭は形が判別できる
@@ -21,31 +32,31 @@ export const AMBIENTS = {
   },
   universe: {
     label: "Universe",
-    image: "/ambient-universe.jpg",
+    image: universeImage,
     blur: "2px",
     opacity: { dark: 0.85, light: 0.6 },
   },
   sakura: {
     label: "Sakura",
-    image: "/ambient-sakura.jpg",
+    image: sakuraImage,
     blur: "10px",
     opacity: { dark: 0.8, light: 0.5 },
   },
   village: {
     label: "Village",
-    image: "/ambient-village.jpg",
+    image: villageImage,
     blur: "10px",
     opacity: { dark: 0.8, light: 0.5 },
   },
   fireworks: {
     label: "Fireworks",
-    image: "/ambient-fireworks.jpg",
+    image: fireworksImage,
     blur: "4px",
     opacity: { dark: 0.85, light: 0.6 },
   },
   shrine: {
     label: "Shrine",
-    image: "/ambient-shrine.jpg",
+    image: shrineImage,
     blur: "10px",
     opacity: { dark: 0.7, light: 0.5 },
   },

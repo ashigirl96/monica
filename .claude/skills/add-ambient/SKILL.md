@@ -21,7 +21,9 @@ description: 画像を Monica web の ambient（notes 画面の背景写真）�
 
    サイズは基本気にしなくていい。画像が焼き込まれるのは release ビルドの `dist-web` だけ（debug は実行時にディスクを読む）で、.app 17MB に対し 1 枚 200〜500KB。**ambient 画像の合計が 5MB を超えたときだけ**手順 9 で伝える。
 
-4. **配置** — `web/public/ambient-<name>.jpg` へコピーして `chmod 644`。PNG なら `sips -s format jpeg <in> --out <out>` で変換してから置く。
+4. **配置** — `web/src/ambients/<name>.jpg` へコピーして `chmod 644`。PNG なら `sips -s format jpeg <in> --out <out>` で変換してから置く。
+
+   **`web/public/` に置いてはいけない。** monica-web の router はルート直下の配信物を明示列挙する設計（`/assets/{*path}` と `/favicon.png` だけ）なので、`public/` に置くと `dist-web` のルートに落ちて本番で 404 になる。Vite dev では素で配信されるため気づけない。`src/` に置いて import すれば content hash 付きで `/assets/` 配下に出て、既存 route でそのまま配信される。
 
 5. **blur を決める** — 背景は**静か**でなければならない。本文の裏で形が形として読めた瞬間、それは文字と競合する。文字サイズで眺めて輪郭が判別できなくなる値を選ぶ:
    - 滑らかなグラデーション（星雲・空・霧）→ `2px`。JPEG のバンディングを均すだけで足りる
@@ -34,8 +36,9 @@ description: 画像を Monica web の ambient（notes 画面の背景写真）�
    - `dark`: 画像が暗くパレット（紺 hue 264 + 水色）と同系色なら `0.85` まで取れる。明るい画像や暖色が主役の画像は `0.5〜0.8`
    - `light`: `0.5〜0.6`。dark より必ず低くする
 
-7. **登録** — `AMBIENTS` に追記する。既存エントリの形と、値を選んだ理由がコメントとして要るかの判断は、周りに揃える。
+7. **登録** — `ambient.ts` の先頭で `import <name>Image from "./ambients/<name>.jpg";`（既存 import はアルファベット順）し、`AMBIENTS` に `image: <name>Image` でエントリを追記する。値を選んだ理由をコメントに書くかの判断は周りに揃える。
 
 8. **通す** — `just fmt` → `bunx tsc --noEmit -p web/tsconfig.json` → `just lint`。3 つとも通ること。
+   加えて `just build-web` を通し、`ls dist-web/` のルート直下が `assets` / `favicon.png` / `index.html` の 3 つだけであること（= 画像が `/assets/` 配下に入ったこと）を確認する。
 
 9. **ユーザーに渡す** — **自分で画面を見に行かない**（agent-browser も tauri-mcp も起動しない）。決めた name / blur / opacity を、それぞれ画像の何を見てそう決めたかとセットで伝え、`just dev-web` → http://localhost:5174 の右下 switcher で light・dark 両方を確認してもらう。数値の調整は `AMBIENTS` の該当エントリ 1 箇所で効くことを添える。
