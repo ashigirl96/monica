@@ -1,7 +1,19 @@
 import { type ReactNode, useEffect, useState } from "react";
-import { spaLinkClick } from "@/app";
-import { altOnly } from "@/keys";
+import { navigate, spaLinkClick } from "@/app";
+import { altOnly, ctrlOnly } from "@/keys";
 import { setThemePref, themePref, type ThemePref } from "@/theme";
+
+/** ⌃1/⌃2/⌃3 の遷移先 */
+const NAV_SHORTCUTS: Record<string, string> = {
+  Digit1: "/daily",
+  Digit2: "/essays",
+  Digit3: "/projects",
+};
+
+/** tooltip の "(⌃1)" は上の表から導出する。手書きすると表と食い違っても誰も気づけない */
+const SHORTCUT_LABELS: Record<string, string> = Object.fromEntries(
+  Object.entries(NAV_SHORTCUTS).map(([code, to]) => [to, `⌃${code.replace("Digit", "")}`]),
+);
 
 function RailLink({
   to,
@@ -14,11 +26,12 @@ function RailLink({
   active: boolean;
   children: ReactNode;
 }) {
+  const shortcut = SHORTCUT_LABELS[to];
   return (
     <a
       href={to}
       aria-label={label}
-      title={label}
+      title={shortcut ? `${label} (${shortcut})` : label}
       aria-current={active ? "page" : undefined}
       onClick={spaLinkClick(to)}
       className={`flex size-9 items-center justify-center rounded-lg transition-colors ${
@@ -106,20 +119,29 @@ export function AppShell({
   active: "daily" | "essays" | "projects" | "library" | "settings";
   children: ReactNode;
 }) {
-  // alt+b の zen mode: nav rail と、group-data-[zen]/shell で反応する
+  // ⌥b の zen mode: nav rail と、group-data-[zen]/shell で反応する
   // ページ側 sidebar をまとめて隠し、editor だけにする
   const [zen, setZen] = useState(false);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (!altOnly(e)) return;
-      if (e.code !== "KeyB") return;
+      if (e.isComposing) return;
+      if (altOnly(e) && e.code === "KeyB") {
+        e.preventDefault();
+        e.stopPropagation();
+        setZen((z) => !z);
+        return;
+      }
+      if (!ctrlOnly(e)) return;
+      const to = NAV_SHORTCUTS[e.code];
+      if (to === undefined) return;
       e.preventDefault();
       e.stopPropagation();
-      setZen((z) => !z);
+      navigate(to);
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
+
   return (
     <div className="group/shell flex min-h-dvh" data-zen={zen ? "" : undefined}>
       <nav
