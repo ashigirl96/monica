@@ -20,8 +20,10 @@
   --ink-hover: color-mix(in srgb, var(--ink) 10%, transparent);
   --ink-border: color-mix(in srgb, var(--ink) 22%, transparent);
   /* 机と紙は ambient を透かすため alpha 付き。0.8 を超えると背景はほぼ潰れる */
-  --desk: oklch(0.24 0.058 264 / 0.74);
-  --paper: oklch(0.305 0.05 264 / 0.58);
+  --desk-alpha: 0.74;
+  --paper-alpha: 0.58;
+  --desk: oklch(0.24 0.058 264 / var(--desk-alpha));
+  --paper: oklch(0.305 0.05 264 / var(--paper-alpha));
   --kind-essay: #bd6a52;
   /* essays カード: 机の上にデスクマット、その中央に紙のミニチュア。sheet を一段明るく
      持ち上げて「照らされた原稿」の輪郭を出す。writing はマットの chroma を落として
@@ -77,7 +79,8 @@
   --ink-faint: color-mix(in srgb, var(--ink) 58%, transparent);
   --ink-hover: color-mix(in srgb, var(--ink) 6%, transparent);
   --ink-border: color-mix(in srgb, var(--ink) 14%, transparent);
-  --paper: color-mix(in srgb, var(--background) 70%, transparent);
+  --paper-alpha: 0.7;
+  --paper: color-mix(in srgb, var(--background) calc(var(--paper-alpha) * 100%), transparent);
   --desk: var(--paper);
   --kind-essay: #a4543f;
   --essay-mat: #eff7ff;
@@ -93,4 +96,15 @@
   --jb-muted: color-mix(in srgb, var(--jb-ink) 78%, transparent);
   --jb-faint: color-mix(in srgb, var(--jb-ink) 58%, transparent);
   --jb-border: color-mix(in srgb, var(--jb-ink) 14%, transparent);
+}
+
+/* 写真なし（ambient.ts の none）。透かす相手がいないのに alpha を残すと、机と紙が
+   同じ --background の上で合成されて階調差が潰れ「机の上の紙」が読めなくなる。
+   dark は oklch の alpha、light は color-mix の % として同じ --paper-alpha を消費して
+   いるので、1 に戻すこの 1 ブロックで両テーマに効く。
+   ファイル末尾に置くのは light テーマのブロックと特異性が同点 (0,3,0) で、後に書いた側
+   でないと勝てないため — 位置を上げると light だけ効かなくなる。 */
+:root[data-ambient="none"] .notes-screen {
+  --desk-alpha: 1;
+  --paper-alpha: 1;
 }

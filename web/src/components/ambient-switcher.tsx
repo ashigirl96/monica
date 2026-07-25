@@ -8,6 +8,16 @@ import { type AmbientName, AMBIENT_NAMES, AMBIENTS, ambientPref, setAmbientPref 
  * AppShell 直下 = .notes-screen の外側にいるため、--ink-* / --paper は参照できない。
  * 配色は globals.css の global token（card / muted / border）で組む。
  */
+/** 写真なし（image: null）は敷くものが無いので、斜線を引いた空のスウォッチで表す */
+function swatch(image: string | null) {
+  return {
+    backgroundImage:
+      image === null
+        ? "linear-gradient(to top right, transparent 47%, var(--color-border) 47%, var(--color-border) 53%, transparent 53%)"
+        : `url("${image}")`,
+  };
+}
+
 export function AmbientSwitcher() {
   const [selected, setSelected] = useState<AmbientName>(ambientPref);
   const [open, setOpen] = useState(false);
@@ -59,8 +69,8 @@ export function AmbientSwitcher() {
               >
                 <span
                   aria-hidden
-                  style={{ backgroundImage: `url("${ambient.image}")` }}
-                  className="size-9 shrink-0 rounded-md border bg-cover bg-center"
+                  style={swatch(ambient.image)}
+                  className="size-9 shrink-0 rounded-md border bg-muted bg-cover bg-center"
                 />
                 <span className={`text-sm ${active ? "text-foreground" : "text-muted-foreground"}`}>
                   {ambient.label}
@@ -83,8 +93,8 @@ export function AmbientSwitcher() {
       >
         <span
           aria-hidden
-          style={{ backgroundImage: `url("${current.image}")` }}
-          className="size-6 rounded-full border bg-cover bg-center"
+          style={swatch(current.image)}
+          className="size-6 rounded-full border bg-muted bg-cover bg-center"
         />
         <span className="font-mono text-[0.6rem] uppercase tracking-widest text-muted-foreground">
           {current.label}

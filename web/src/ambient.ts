@@ -10,6 +10,15 @@
  * 残す必要があり、その減衰ぶんを差し引いて透ける量を dark と揃えているため。
  */
 export const AMBIENTS = {
+  /** 写真なし。image: null が「敷くものがない」印で、notes.css は data-ambient="none" を
+   * 見て面の alpha を 1 に戻す（透かす相手がいないのに alpha を残すと机と紙が潰れる）。
+   * キー名を CSS 側が知っているので、変えるなら notes.css も直す。 */
+  none: {
+    label: "None",
+    image: null,
+    blur: "0px",
+    opacity: { dark: 0, light: 0 },
+  },
   universe: {
     label: "Universe",
     image: "/ambient-universe.jpg",
@@ -64,7 +73,9 @@ export function ambientPref(): AmbientName {
 function apply(name: AmbientName) {
   const ambient = AMBIENTS[name];
   const style = document.documentElement.style;
-  style.setProperty("--ambient", `url("${ambient.image}")`);
+  // theme.ts の data-theme と同じ流儀。CSS 側が「写真あり / なし」で分岐できるようにする
+  document.documentElement.dataset.ambient = name;
+  style.setProperty("--ambient", ambient.image === null ? "none" : `url("${ambient.image}")`);
   style.setProperty("--ambient-blur", ambient.blur);
   // 採用するのは light / dark どちらか — その判定は notes.css のカスケードに任せる。
   // ここでテーマを読むと ambient と theme が相互に再実行を要求し合う関係になる
