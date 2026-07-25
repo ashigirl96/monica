@@ -3,7 +3,7 @@ import type { BlockEditorHandle } from "@shared/block-editor/block-editor";
 import { createEssay, deleteNote, getNote, listEssays, setEssayStatus } from "@/api";
 import { navigate } from "@/app";
 import { altOnly, ctrlOnly } from "@/keys";
-import type { Note, NoteSummary } from "@/types.gen";
+import type { EssayStatus, Note, NoteSummary } from "@/types.gen";
 import { takePendingBlockTarget } from "@/notes/block-jump";
 import {
   cycleSelect,
@@ -18,10 +18,11 @@ import { useAutosave } from "@/notes/use-autosave";
 import { EssaysSidebar } from "./sidebar";
 import {
   dropEssay,
-  essayStatus,
+  otherEssayTab,
   patchEssayKind,
   pushDeletedEssay,
   restoreLastDeletedEssay,
+  splitEssaysByStatus,
 } from "./support";
 
 function StatusChip({
@@ -50,14 +51,16 @@ function StatusChip({
 }
 
 /**
- * /essays/{id}: essay 専用エディタ。サイドバーは writing のみで、finished は
- * サイドバーに現れないが本文は開ける（一覧から開く）。
+ * /essays/{id}: essay 専用エディタ。サイドバーは writing / finished のタブで片方だけを並べ、
+ * ⌥H/⌥L で往復する。⌥K/J は表示中タブ内を巡回する。
  */
 export function EssayEditorPage({ id }: { id: string }) {
   const [note, setNote] = useState<Note | null>(null);
   const [noteError, setNoteError] = useState<string | null>(null);
-  // 全 essay（全 status）。サイドバー表示と ⌥K/J はここから writing だけを使う
+  // 全 essay（全 status）。サイドバー表示と ⌥K/J は status で分けた片方だけを使う
   const [essays, setEssays] = useState<NoteSummary[] | null>(null);
+  // サイドバーが表示中の status。⌥H/⌥L の手動切替と、開いた note の status への同期で動く
+  const [tab, setTab] = useState<EssayStatus>("writing");
   // 作成・status 変更の失敗後に一覧を再取得させるためのバージョン
   const [dataVersion, setDataVersion] = useState(0);
   const { schedule, flush, discard, resume, error: saveError } = useAutosave();
@@ -137,11 +140,22 @@ export function EssayEditorPage({ id }: { id: string }) {
     if (blockId) editorHandleRef.current?.scrollToBlock(blockId);
   }, [note]);
 
-  const sidebarEssays = useMemo(
-    () => (essays === null ? null : essays.filter((s) => essayStatus(s) === "writing")),
-    [essays],
-  );
-  const writingIds = useMemo(() => (sidebarEssays ?? []).map((s) => s.id), [sidebarEssays]);
+  // 現 id の note だと確認できたときだけ status を出す。読み込みは effect の中で
+  // setNote(null) するので、id が変わった最初の render では note がまだ前の note のまま。
+  // 素通しすると旧 status でタブが動き、⌥H/⌥L で選んだタブから引き戻される
+  const openStatus = note?.id === id && note.kind.kind === "essay" ? note.kind.status : null;
+
+  useEffect(() => {
+    // 「タブ == 開いている note の status」を恒常的に強制するのではなく、状態遷移として代入する
+    // （常時強制だと ⌥H/⌥L した瞬間に mismatch と見なされて引き戻され、手動切替が成立しない）。
+    // id も deps に要る: ⌥N は seedNote 済みなので openStatus が writing → writing で
+    // 変わらないことがあり、そのとき id の変化だけが writing タブへの復帰を駆動する
+    if (openStatus !== null) setTab(openStatus);
+  }, [id, openStatus]);
+
+  const groups = useMemo(() => splitEssaysByStatus(essays), [essays]);
+  // ⌥K/J と削除後の送り先。表示中タブのリスト
+  const cycleIds = useMemo(() => (groups?.[tab] ?? []).map((s) => s.id), [groups, tab]);
 
   const selectEssay = useCallback(
     (noteId: string) => {
@@ -215,12 +229,12 @@ export function EssayEditorPage({ id }: { id: string }) {
     discard(target.id);
     pushDeletedEssay(target.id);
     setEssays((list) => dropEssay(list, target.id));
-    // writing はサイドバーの次へ送って書く流れを切らない。finished（サイドバー外）は
-    // 一覧から開いた note なので一覧へ帰す
-    const next = writingIds.includes(target.id) ? cycleSelect(writingIds, target.id, 1) : undefined;
+    // 表示中タブにあった note はサイドバーの次へ送って書く流れを切らない。タブ外の note は
+    // 送り先が画面に見えていないので一覧へ帰す
+    const next = cycleIds.includes(target.id) ? cycleSelect(cycleIds, target.id, 1) : undefined;
     if (next !== undefined && next !== target.id) navigate(`/essays/${next}`, { replace: true });
     else navigate("/essays", { replace: true });
-  }, [flush, discard, scheduleSave, writingIds]);
+  }, [flush, discard, scheduleSave, cycleIds]);
 
   const undoDelete = useCallback(async () => {
     const restored = await restoreLastDeletedEssay();
@@ -247,7 +261,7 @@ export function EssayEditorPage({ id }: { id: string }) {
       await flush();
       try {
         const updated = await setEssayStatus(current.id, current.kind.next_status);
-        // エディタは開いたまま status チップとサイドバー（writing のみ）だけが変わる。
+        // エディタは開いたまま status チップとサイドバー（タブと行）だけが変わる。
         // content は seed しない — 直前の flush が失敗して pending が再試行待ちのとき、
         // status-only レスポンスの古い content で contentRef を巻き戻すと、後続の title 編集が
         // その古い本文で pending を上書きして編集を失うため（kind と updated_at だけ反映する）
@@ -293,16 +307,24 @@ export function EssayEditorPage({ id }: { id: string }) {
         void undoDelete();
         return;
       }
+      // ⌥H/⌥L はサイドバーの見える範囲だけを変える。開いている note と URL は動かさない
+      if (e.code === "KeyH" || e.code === "KeyL") {
+        e.preventDefault();
+        e.stopPropagation();
+        setTab(otherEssayTab);
+        return;
+      }
       if (e.code !== "KeyJ" && e.code !== "KeyK") return;
       e.preventDefault();
       e.stopPropagation();
-      // finished を開いているときはリスト外扱い（cycleSelect が先頭/末尾に入れる）
-      const next = cycleSelect(writingIds, id, e.code === "KeyJ" ? 1 : -1);
+      // ⌥H/⌥L で反対タブに移っていると開いている note はリスト外扱いになる
+      // （cycleSelect が先頭/末尾に入れる）
+      const next = cycleSelect(cycleIds, id, e.code === "KeyJ" ? 1 : -1);
       if (next !== undefined) selectEssay(next);
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [writingIds, id, selectEssay, createNew, toggleStatus, deleteCurrent, undoDelete]);
+  }, [cycleIds, id, selectEssay, createNew, toggleStatus, deleteCurrent, undoDelete]);
 
   const onTitleChange = useCallback(
     (title: string) => {
@@ -326,7 +348,15 @@ export function EssayEditorPage({ id }: { id: string }) {
 
   return (
     <NotesShell
-      sidebar={<EssaysSidebar essays={sidebarEssays} selectedId={id} onSelect={selectEssay} />}
+      sidebar={
+        <EssaysSidebar
+          groups={groups}
+          tab={tab}
+          onTabChange={setTab}
+          selectedId={id}
+          onSelect={selectEssay}
+        />
+      }
     >
       <main className="flex-1 overflow-y-auto bg-[var(--paper)]">
         {noteError ? (
