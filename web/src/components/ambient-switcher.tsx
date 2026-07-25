@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { type AmbientName, AMBIENT_NAMES, AMBIENTS, ambientPref, setAmbientPref } from "@/ambient";
+import {
+  type AmbientName,
+  AMBIENT_NAMES,
+  AMBIENTS,
+  ambientPref,
+  cycleAmbient,
+  setAmbientPref,
+} from "@/ambient";
+import { altAllowingShift } from "@/keys";
 
 /**
  * 画面右下に常駐する背景の切り替え。設定画面へ行かずに、書いている手を止めずに
@@ -40,6 +48,24 @@ export function AmbientSwitcher() {
     };
   }, [open]);
 
+  // ⌥; / ⇧⌥; で popup を開かずに巡回する。capture phase なのはエディタ（ProseMirror）に
+  // 食われる前に横取りするため。code で見るのは物理キー基準で ⇧ の有無に依らないから
+  // （⌥; は macOS では "…" になるので e.key では判定できない）。
+  // 他の ⌥ ショートカットと違い e.isComposing を見ないのは、日本語の変換中でも切り替えたい
+  // ため — ambient は文書に触らないので、変換バッファを持っている間に奪っても害がない。
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!altAllowingShift(e) || e.code !== "Semicolon") return;
+      e.preventDefault();
+      e.stopPropagation();
+      const next = cycleAmbient(selected, e.shiftKey ? -1 : 1);
+      setAmbientPref(next);
+      setSelected(next);
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [selected]);
+
   const current = AMBIENTS[selected];
 
   return (
@@ -48,6 +74,7 @@ export function AmbientSwitcher() {
         type="button"
         aria-expanded={open}
         aria-label={`Ambient: ${current.label}`}
+        title={`Ambient: ${current.label} (⌥; next · ⇧⌥; previous)`}
         onClick={() => setOpen((o) => !o)}
         className={`flex items-center gap-2 rounded-full border bg-card/75 py-1.5 pr-3.5 pl-1.5 shadow-sm backdrop-blur-sm transition-opacity hover:opacity-100 ${
           open ? "opacity-100" : "opacity-55"

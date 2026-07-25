@@ -65,6 +65,12 @@ function isAmbientName(raw: string | null): raw is AmbientName {
   return raw !== null && Object.hasOwn(AMBIENTS, raw);
 }
 
+/** AMBIENTS の宣言順で次（step=1）/ 前（step=-1）。端は巻き戻る */
+export function cycleAmbient(current: AmbientName, step: 1 | -1): AmbientName {
+  const i = AMBIENT_NAMES.indexOf(current);
+  return AMBIENT_NAMES[(i + step + AMBIENT_NAMES.length) % AMBIENT_NAMES.length];
+}
+
 export function ambientPref(): AmbientName {
   const raw = localStorage.getItem(STORAGE_KEY);
   return isAmbientName(raw) ? raw : DEFAULT_AMBIENT;
