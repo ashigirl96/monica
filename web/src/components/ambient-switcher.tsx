@@ -1,0 +1,95 @@
+import { useEffect, useRef, useState } from "react";
+import { type AmbientName, AMBIENT_NAMES, AMBIENTS, ambientPref, setAmbientPref } from "@/ambient";
+
+/**
+ * 画面右下に常駐する背景の切り替え。設定画面へ行かずに、書いている手を止めずに
+ * 気分を変えられることが存在理由なので、zen mode でも隠さない。
+ *
+ * AppShell 直下 = .notes-screen の外側にいるため、--ink-* / --paper は参照できない。
+ * 配色は globals.css の global token（card / muted / border）で組む。
+ */
+export function AmbientSwitcher() {
+  const [selected, setSelected] = useState<AmbientName>(ambientPref);
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onMouseDown(e: MouseEvent) {
+      if (rootRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const current = AMBIENTS[selected];
+
+  return (
+    <div ref={rootRef} className="fixed right-4 bottom-4 z-40">
+      {open && (
+        <div
+          role="listbox"
+          aria-label="Ambient background"
+          className="absolute right-0 bottom-full mb-2 w-52 rounded-xl border bg-card p-1.5 shadow-xl"
+        >
+          {AMBIENT_NAMES.map((name) => {
+            const ambient = AMBIENTS[name];
+            const active = name === selected;
+            return (
+              <button
+                key={name}
+                type="button"
+                role="option"
+                aria-selected={active}
+                onClick={() => {
+                  setAmbientPref(name);
+                  setSelected(name);
+                }}
+                className={`flex w-full items-center gap-3 rounded-lg p-1.5 text-left transition-colors ${
+                  active ? "bg-muted" : "hover:bg-muted/60"
+                }`}
+              >
+                <span
+                  aria-hidden
+                  style={{ backgroundImage: `url("${ambient.image}")` }}
+                  className="size-9 shrink-0 rounded-md border bg-cover bg-center"
+                />
+                <span className={`text-sm ${active ? "text-foreground" : "text-muted-foreground"}`}>
+                  {ambient.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`Ambient: ${current.label}`}
+        onClick={() => setOpen((o) => !o)}
+        className={`flex items-center gap-2 rounded-full border bg-card/75 py-1.5 pr-3.5 pl-1.5 shadow-sm backdrop-blur-sm transition-opacity hover:opacity-100 ${
+          open ? "opacity-100" : "opacity-55"
+        }`}
+      >
+        <span
+          aria-hidden
+          style={{ backgroundImage: `url("${current.image}")` }}
+          className="size-6 rounded-full border bg-cover bg-center"
+        />
+        <span className="font-mono text-[0.6rem] uppercase tracking-widest text-muted-foreground">
+          {current.label}
+        </span>
+      </button>
+    </div>
+  );
+}

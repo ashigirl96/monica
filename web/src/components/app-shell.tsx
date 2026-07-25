@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { navigate, spaLinkClick } from "@/app";
 import { altOnly, ctrlOnly } from "@/keys";
 import { setThemePref, themePref, type ThemePref } from "@/theme";
+import { AmbientSwitcher } from "./ambient-switcher";
 
 /** ⌃1/⌃2/⌃3 の遷移先 */
 const NAV_SHORTCUTS: Record<string, string> = {
@@ -222,6 +223,7 @@ export function AppShell({
         <ThemeToggle />
       </nav>
       <div className="flex min-h-dvh min-w-0 flex-1 flex-col">{children}</div>
+      <AmbientSwitcher />
     </div>
   );
 }
