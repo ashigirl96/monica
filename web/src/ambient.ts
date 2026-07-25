@@ -49,8 +49,11 @@ export const AMBIENT_NAMES = Object.keys(AMBIENTS) as AmbientName[];
 const DEFAULT_AMBIENT: AmbientName = "universe";
 const STORAGE_KEY = "monica-ambient";
 
+// hasOwn で見るのは prototype 継承分を弾くため。`in` だと "constructor" や "__proto__" が
+// 通り、apply() が opacity を持たない値を触って main.tsx の render 前に throw する
+// （= 不正値が localStorage に残ったまま画面が白く固まる）
 function isAmbientName(raw: string | null): raw is AmbientName {
-  return raw !== null && raw in AMBIENTS;
+  return raw !== null && Object.hasOwn(AMBIENTS, raw);
 }
 
 export function ambientPref(): AmbientName {
