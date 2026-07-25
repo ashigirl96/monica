@@ -44,9 +44,32 @@ export function AmbientSwitcher() {
 
   return (
     <div ref={rootRef} className="fixed right-4 bottom-4 z-40">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-label={`Ambient: ${current.label}`}
+        onClick={() => setOpen((o) => !o)}
+        className={`flex items-center gap-2 rounded-full border bg-card/75 py-1.5 pr-3.5 pl-1.5 shadow-sm backdrop-blur-sm transition-opacity hover:opacity-100 ${
+          open ? "opacity-100" : "opacity-55"
+        }`}
+      >
+        <span
+          aria-hidden
+          style={swatch(current.image)}
+          className="size-6 rounded-full border bg-muted bg-cover bg-center"
+        />
+        <span className="font-mono text-[0.6rem] uppercase tracking-widest text-muted-foreground">
+          {current.label}
+        </span>
+      </button>
+
+      {/* listbox / option ロールは使わない: それらは矢印キーと roving focus を実装済みだと
+          宣言してしまう契約で、ここは Tab で辿る素のボタン列（context-menu.tsx と同じ流儀）。
+          trigger より後に置くのは、absolute なので配置は変わらないまま Tab が前方向で
+          選択肢に入るようにするため。 */}
       {open && (
         <div
-          role="listbox"
+          role="group"
           aria-label="Ambient background"
           className="absolute right-0 bottom-full mb-2 w-52 rounded-xl border bg-card p-1.5 shadow-xl"
         >
@@ -57,8 +80,7 @@ export function AmbientSwitcher() {
               <button
                 key={name}
                 type="button"
-                role="option"
-                aria-selected={active}
+                aria-pressed={active}
                 onClick={() => {
                   setAmbientPref(name);
                   setSelected(name);
@@ -80,26 +102,6 @@ export function AmbientSwitcher() {
           })}
         </div>
       )}
-
-      <button
-        type="button"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label={`Ambient: ${current.label}`}
-        onClick={() => setOpen((o) => !o)}
-        className={`flex items-center gap-2 rounded-full border bg-card/75 py-1.5 pr-3.5 pl-1.5 shadow-sm backdrop-blur-sm transition-opacity hover:opacity-100 ${
-          open ? "opacity-100" : "opacity-55"
-        }`}
-      >
-        <span
-          aria-hidden
-          style={swatch(current.image)}
-          className="size-6 rounded-full border bg-muted bg-cover bg-center"
-        />
-        <span className="font-mono text-[0.6rem] uppercase tracking-widest text-muted-foreground">
-          {current.label}
-        </span>
-      </button>
     </div>
   );
 }
