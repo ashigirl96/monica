@@ -795,7 +795,7 @@ describe("toggleCollapse", () => {
 });
 
 describe("折りたたみ中の Enter", () => {
-  test("heading は畳みを解いて直後に空 paragraph を作る", () => {
+  test("heading は畳みを解き、セクションの末尾に空 paragraph を作る", () => {
     const doc = docOf(
       block("H", heading("A", 2, true)),
       block("P1", para("1")),
@@ -804,11 +804,54 @@ describe("折りたたみ中の Enter", () => {
     const result = run(stateWithCursor(doc, "H", "end"), splitBlock);
     const shapes = docShape(result!.state.doc);
     expect(contentAttrs(result!.state.doc, "H").collapsed).toBe(false);
-    expect(shapes[1].type).toBe("paragraph");
-    expect(shapes[1].text).toBe("");
-    // 隠れていた subtree は無傷
-    expect(shapes.slice(2)).toEqual([sh("P1", "paragraph", "1"), sh("H2", "heading", "B")]);
+    // 隠れていた内容の手前ではなく、その後ろ（= 次の h2 の直前）に入る
+    expect(shapes.map((s) => [s.id, s.type, s.text])).toEqual([
+      ["H", "heading", "A"],
+      ["P1", "paragraph", "1"],
+      [shapes[2].id, "paragraph", ""],
+      ["H2", "heading", "B"],
+    ]);
+    expect(result!.state.selection.head).toBe(
+      containerById(result!.state.doc, shapes[2].id!)!.pos + 2,
+    );
     assertInvariants(result!.state.doc);
+  });
+
+  test("配下の h3 セクションごと畳まれていれば、その全体の後ろに入る", () => {
+    const doc = docOf(
+      block("H", heading("A", 2, true)),
+      block("P1", para("1")),
+      block("H3", heading("A-1", 3, true)),
+      block("P2", para("2")),
+      block("H2", heading("B", 2)),
+    );
+    const result = run(stateWithCursor(doc, "H", "end"), splitBlock);
+    const shapes = docShape(result!.state.doc);
+    expect(shapes.map((s) => s.id)).toEqual(["H", "P1", "H3", "P2", shapes[4].id, "H2"]);
+    expect(shapes[4].type).toBe("paragraph");
+    // 内側の h3 の畳みには触らない
+    expect(contentAttrs(result!.state.doc, "H3").collapsed).toBe(true);
+  });
+
+  test("末尾の折りたたみ heading なら文書の最後に入る", () => {
+    const doc = docOf(block("H", heading("A", 2, true)), block("P1", para("1")));
+    const result = run(stateWithCursor(doc, "H", "end"), splitBlock);
+    const shapes = docShape(result!.state.doc);
+    expect(shapes.map((s) => [s.id, s.text])).toEqual([
+      ["H", "A"],
+      ["P1", "1"],
+      [shapes[2].id, ""],
+    ]);
+  });
+
+  test("heading の途中 Enter は通常どおりその場で割る", () => {
+    const doc = docOf(block("H", heading("abcd", 2, true)), block("P1", para("1")));
+    const result = run(stateWithCursor(doc, "H", 2), splitBlock);
+    expect(docShape(result!.state.doc).map((s) => [s.type, s.text])).toEqual([
+      ["heading", "ab"],
+      ["heading", "cd"],
+      ["paragraph", "1"],
+    ]);
   });
 
   test("collapsed callout は内部ではなく直後の兄弟に割り、畳みは維持する", () => {

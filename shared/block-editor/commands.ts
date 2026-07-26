@@ -25,6 +25,8 @@ import { blockSelectionKey, clearBlockSelection, selectBlocks } from "./selectio
 import {
   expandedContent,
   expandedHeading,
+  foldedIndexes,
+  isFoldableHeading,
   isFoldedContent,
   isPosHidden,
   resolveFoldTarget,
@@ -245,8 +247,25 @@ export const splitBlock: Command = (state, dispatch) => {
     dispatch?.(tr.scrollIntoView());
     return true;
   }
-  // 折りたたみ中の heading の Enter は畳みを解く。範囲は後続兄弟から導出されるので、
-  // 構造上の子を持つ callout / toggle と違い「範囲の外」に新しい行を置けない。
+  // 折りたたみ中の heading の行末 Enter は畳みを解き、新しい行はセクションの末尾に置く。
+  // 直後に置くと、開いて現れた既存の内容の手前に入ってしまうため。
+  if (
+    isFoldableHeading(content) &&
+    content.attrs.collapsed === true &&
+    offset === content.content.size
+  ) {
+    const hidden = foldedIndexes(ctx.groupNode);
+    let last = ctx.siblingIndex;
+    while (hidden.has(last + 1)) last++;
+    const at = childStartPos(ctx.groupPos, ctx.groupNode, last + 1);
+    // setNodeAttribute は nodeSize を変えないので、at は展開後もそのまま使える
+    setFolded(tr, content, ctx.contentPos, false);
+    tr.insert(at, emptyParagraphContainer());
+    tr.setSelection(TextSelection.create(tr.doc, at + 2));
+    tr.setMeta("blockOperation", { type: "split" });
+    dispatch?.(tr.scrollIntoView());
+    return true;
+  }
   // 左 block が元 ID・children を保持し、右 block は新 ID で subtree の直後に入る
   const left = expandedHeading(content.cut(0, offset));
   const leftContainer = withChildren(ctx.containerNode, left, containerChildren(ctx.containerNode));
