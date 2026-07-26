@@ -49,7 +49,7 @@
           "content": [
             {
               "type": "heading",
-              "attrs": { "level": 2 },
+              "attrs": { "level": 2, "collapsed": true },
               "content": [{ "type": "text", "text": "Heading" }]
             },
             {
@@ -108,7 +108,7 @@
           "content": [
             {
               "type": "callout",
-              "attrs": { "kind": "warning" },
+              "attrs": { "kind": "warning", "collapsed": false },
               "content": [{ "type": "text", "text": "careful" }]
             }
           ]

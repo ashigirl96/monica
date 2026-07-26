@@ -89,60 +89,69 @@
   padding-left: 24px;
 }
 
-/* ---- gutter (plus / drag handle) ---- */
+/* ---- fold toggle (heading / callout) ---- */
 
-.jb-gutter {
+/* ボタンは全 container に生えるが、折りたためる block だけが data-folded を持つ */
+.jb-fold-btn {
+  --jb-fold-btn-size: 22px;
   position: absolute;
-  left: -48px;
-  /* 1 行目のセンター合わせ: container pad 1px + (行高 − ボタン 22px) / 2 */
-  top: calc(var(--jb-block-margin-top) + var(--jb-block-pad-y) + 1px + (var(--jb-line) - 22px) / 2);
-  display: flex;
+  left: -28px;
+  /* 1 行目のセンター合わせ: container pad 1px + (行高 − ボタン) / 2 */
+  top: calc(
+    var(--jb-block-margin-top) + var(--jb-block-pad-y) + 1px +
+      (var(--jb-line) - var(--jb-fold-btn-size)) / 2
+  );
+  display: none;
+  place-items: center;
+  width: var(--jb-fold-btn-size);
+  height: var(--jb-fold-btn-size);
+  border-radius: 4px;
+  color: var(--jb-faint);
+  font-size: 0.75em;
+  line-height: 1;
+  cursor: pointer;
   opacity: 0;
-  transition: opacity 100ms ease-out;
+  transition:
+    transform 200ms ease-out,
+    opacity 100ms ease-out,
+    background 60ms ease-out;
+}
+
+[data-folded] > .jb-fold-btn {
+  display: grid;
 }
 
 /* 行高 32px 前提の式が合わないブロックは実測で個別合わせ（余白ぶんの下げは共通） */
-[data-block-container]:has(> .jb-container-body > [data-block-content="divider"]) > .jb-gutter {
-  top: calc(var(--jb-block-margin-top) + 11px);
-}
-
-.jb-callout > .jb-gutter {
+.jb-callout > .jb-fold-btn {
   top: calc(var(--jb-block-margin-top) + 24px);
 }
 
-[data-block-container]:has(> .jb-container-body > .jb-code) > .jb-gutter {
-  top: calc(var(--jb-block-margin-top) + 39px);
-}
-
-/* :hover は祖先にも立つため、子孫 container がホバー中の間は自分の gutter を出さない */
-.jb-container:hover:not(:has(.jb-container:hover)) > .jb-gutter {
+/* :hover は祖先にも立つため、子孫 container がホバー中の間は自分の ▾ を出さない */
+.jb-container:hover:not(:has(.jb-container:hover)) > .jb-fold-btn {
   opacity: 1;
 }
 
-.jb-gutter-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  color: var(--jb-faint);
-  font-size: 16px;
-  line-height: 1;
-  user-select: none;
-  transition: background 60ms ease-out;
+/* ▸ を回して ▾ に見せる。折りたたみ中は ▸ のまま常時表示して所在を示す */
+[data-folded="false"] > .jb-fold-btn {
+  transform: rotate(90deg);
 }
 
-.jb-gutter-btn:hover {
-  background: var(--jb-hover);
+[data-folded="true"] > .jb-fold-btn {
+  opacity: 1;
+}
+
+.jb-fold-btn:hover,
+[data-folded="true"] > .jb-fold-btn {
   color: var(--jb-muted);
 }
 
-.jb-drag-handle {
-  cursor: grab;
-  width: 18px;
-  font-size: 10px;
-  letter-spacing: -1px;
+.jb-fold-btn:hover {
+  background: var(--jb-hover);
+}
+
+/* collapsed heading が支配する後続兄弟（Decoration で付与） */
+.jb-fold-hidden {
+  display: none;
 }
 
 /* ---- block selection ---- */
@@ -538,16 +547,6 @@
 }
 
 /* ---- overlays ---- */
-
-.jb-drop-guide {
-  position: absolute;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--jb-blue);
-  opacity: 0.85;
-  pointer-events: none;
-  z-index: 40;
-}
 
 .jb-slash-menu {
   position: absolute;
@@ -1094,12 +1093,6 @@
   padding: 8px 2px 12px;
 }
 
-[data-density="compact"]
-  [data-block-container]:has(> .jb-container-body > [data-block-content="divider"])
-  > .jb-gutter {
-  top: calc(var(--jb-block-margin-top) + 3px);
-}
-
-[data-density="compact"] .jb-callout > .jb-gutter {
+[data-density="compact"] .jb-callout > .jb-fold-btn {
   top: calc(var(--jb-block-margin-top) + 22px);
 }

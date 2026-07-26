@@ -4,7 +4,7 @@ import { EditorState, TextSelection } from "@milkdown/kit/prose/state";
 import type { Command, Transaction } from "@milkdown/kit/prose/state";
 import type { Node as PMNode } from "@milkdown/kit/prose/model";
 import { createContainer, nodes, schema } from "./schema";
-import { containerById, parentContainerId, rangeFromIds } from "./context";
+import { containerById, getBlockContext, parentContainerId, rangeFromIds } from "./context";
 import {
   backspaceBlock,
   cursorToLineEnd,
@@ -18,7 +18,9 @@ import {
   indentRange,
   moveRange,
   outdentRange,
+  setContentType,
   splitBlock,
+  toggleCollapse,
 } from "./commands";
 import { editorInputRuleList } from "./input-rules";
 import { normalizerPlugin } from "./normalizer";
@@ -40,16 +42,20 @@ function bullet(text = ""): PMNode {
   return nodes.bullet.create(null, text ? schema.text(text) : undefined);
 }
 
-function heading(text: string, level = 1): PMNode {
-  return nodes.heading.create({ level }, text ? schema.text(text) : undefined);
+function heading(text: string, level = 1, collapsed = false): PMNode {
+  return nodes.heading.create({ level, collapsed }, text ? schema.text(text) : undefined);
 }
 
 function code(text = ""): PMNode {
   return nodes.codeBlock.create(null, text ? schema.text(text) : undefined);
 }
 
-function callout(text = ""): PMNode {
-  return nodes.callout.create(null, text ? schema.text(text) : undefined);
+function callout(text = "", collapsed = false): PMNode {
+  return nodes.callout.create({ collapsed }, text ? schema.text(text) : undefined);
+}
+
+function toggle(text = "", open = true): PMNode {
+  return nodes.toggle.create({ open }, text ? schema.text(text) : undefined);
 }
 
 function block(id: string, content: PMNode, children: PMNode[] = []): PMNode {
@@ -709,6 +715,195 @@ describe("normalizer", () => {
     const anon = nodes.blockContainer.create(null, [para("anon")]);
     const after = state.apply(state.tr.insert(doc.content.size - 1, anon));
     assertInvariants(after.doc);
+  });
+});
+
+// ---- 折りたたみ（heading / callout / toggle） ----
+
+/** id の block の blockContent attrs */
+function contentAttrs(doc: PMNode, id: string): Record<string, unknown> {
+  const entry = containerById(doc, id);
+  if (!entry) throw new Error(`no container ${id}`);
+  return entry.node.child(0).attrs;
+}
+
+describe("toggleCollapse", () => {
+  test("heading の collapsed を反転する", () => {
+    const doc = docOf(block("H", heading("A", 2)), block("P", para("1")));
+    const folded = run(stateWithCursor(doc, "H", "end"), toggleCollapse);
+    expect(contentAttrs(folded!.state.doc, "H").collapsed).toBe(true);
+    const unfolded = run(stateWithCursor(folded!.state.doc, "H", "end"), toggleCollapse);
+    expect(contentAttrs(unfolded!.state.doc, "H").collapsed).toBe(false);
+  });
+
+  test("配下の段落からでも支配 heading を畳む", () => {
+    const doc = docOf(block("H", heading("A", 2)), block("P", para("1")));
+    const result = run(stateWithCursor(doc, "P", "end"), toggleCollapse);
+    expect(contentAttrs(result!.state.doc, "H").collapsed).toBe(true);
+  });
+
+  test("畳んだ範囲にカーソルが残らないよう heading 末尾へ退避する", () => {
+    const doc = docOf(block("H", heading("Head", 2)), block("P", para("1")));
+    const result = run(stateWithCursor(doc, "P", "end"), toggleCollapse);
+    const headEnd = containerById(result!.state.doc, "H")!.pos + 2 + "Head".length;
+    expect(result!.state.selection.head).toBe(headEnd);
+  });
+
+  test("既存の toggle ブロックにも効く", () => {
+    const doc = docOf(block("T", toggle("t"), [block("X", para("x"))]));
+    const folded = run(stateWithCursor(doc, "T", "end"), toggleCollapse);
+    expect(contentAttrs(folded!.state.doc, "T").open).toBe(false);
+  });
+
+  test("折りたためる対象がなければ false", () => {
+    const doc = docOf(block("P", para("1")));
+    expect(run(stateWithCursor(doc, "P", "end"), toggleCollapse)).toBeNull();
+  });
+});
+
+describe("折りたたみ中の Enter", () => {
+  test("heading は畳みを解いて直後に空 paragraph を作る", () => {
+    const doc = docOf(
+      block("H", heading("A", 2, true)),
+      block("P1", para("1")),
+      block("H2", heading("B", 2)),
+    );
+    const result = run(stateWithCursor(doc, "H", "end"), splitBlock);
+    const shapes = docShape(result!.state.doc);
+    expect(contentAttrs(result!.state.doc, "H").collapsed).toBe(false);
+    expect(shapes[1].type).toBe("paragraph");
+    expect(shapes[1].text).toBe("");
+    // 隠れていた subtree は無傷
+    expect(shapes.slice(2)).toEqual([sh("P1", "paragraph", "1"), sh("H2", "heading", "B")]);
+    assertInvariants(result!.state.doc);
+  });
+
+  test("collapsed callout は内部ではなく直後の兄弟に割り、畳みは維持する", () => {
+    const doc = docOf(block("C", callout("note", true), [block("X", para("x"))]));
+    const result = run(stateWithCursor(doc, "C", "end"), splitBlock);
+    const shapes = docShape(result!.state.doc);
+    expect(contentAttrs(result!.state.doc, "C").collapsed).toBe(true);
+    expect(shapes[0]).toEqual(sh("C", "callout", "note", [sh("X", "paragraph", "x")]));
+    expect(shapes[1].type).toBe("paragraph");
+    assertInvariants(result!.state.doc);
+  });
+
+  test("collapsed callout の途中 Enter は右テキストを兄弟へ移す", () => {
+    const doc = docOf(block("C", callout("abcd", true)));
+    const result = run(stateWithCursor(doc, "C", 2), splitBlock);
+    expect(docShape(result!.state.doc).map((s) => s.text)).toEqual(["ab", "cd"]);
+  });
+
+  test("heading の途中 Enter で右 heading は展開状態で生まれる", () => {
+    const doc = docOf(block("H", heading("abcd", 2, true)));
+    const result = run(stateWithCursor(doc, "H", 2), splitBlock);
+    const shapes = docShape(result!.state.doc);
+    expect(shapes.map((s) => [s.type, s.text])).toEqual([
+      ["heading", "ab"],
+      ["heading", "cd"],
+    ]);
+    const right = result!.state.doc.child(0).child(1).child(0);
+    expect(right.attrs.collapsed).toBe(false);
+  });
+});
+
+describe("折りたたみ中の Delete / indent / move", () => {
+  test("行末 Delete は隠れた後続兄弟を吸い込まず畳みを解く", () => {
+    const doc = docOf(block("H", heading("A", 2, true)), block("P1", para("1")));
+    const result = run(stateWithCursor(doc, "H", "end"), deleteForwardBlock);
+    expect(contentAttrs(result!.state.doc, "H").collapsed).toBe(false);
+    expect(docShape(result!.state.doc)).toEqual([
+      sh("H", "heading", "A"),
+      sh("P1", "paragraph", "1"),
+    ]);
+  });
+
+  test("行末 Delete は隠れた構造上の子も吸い込まない", () => {
+    const doc = docOf(block("C", callout("c", true), [block("X", para("x"))]));
+    const result = run(stateWithCursor(doc, "C", "end"), deleteForwardBlock);
+    expect(contentAttrs(result!.state.doc, "C").collapsed).toBe(false);
+    expect(docShape(result!.state.doc)).toEqual([
+      sh("C", "callout", "c", [sh("X", "paragraph", "x")]),
+    ]);
+  });
+
+  test("次兄弟が見えているなら通常どおり merge する", () => {
+    const doc = docOf(block("H", heading("A", 2, true)), block("H2", heading("B", 2)));
+    const result = run(stateWithCursor(doc, "H", "end"), deleteForwardBlock);
+    expect(docShape(result!.state.doc)).toEqual([sh("H", "heading", "AB")]);
+  });
+
+  test("折りたたまれた block の下へ indent すると開く", () => {
+    const doc = docOf(block("C", callout("c", true)), block("P", para("p")));
+    const state = stateWithCursor(doc, "P", "end");
+    const tr = indentRange(state, rangeFromIds(state, ["P"])!);
+    const after = state.apply(tr!);
+    expect(contentAttrs(after.doc, "C").collapsed).toBe(false);
+    expect(docShape(after.doc)).toEqual([sh("C", "callout", "c", [sh("P", "paragraph", "p")])]);
+  });
+
+  test("畳んだ heading を跨いで下へ移動すると heading が開く", () => {
+    const doc = docOf(
+      block("P", para("p")),
+      block("H", heading("A", 2, true)),
+      block("P1", para("1")),
+    );
+    const state = stateWithCursor(doc, "P", "end");
+    const after = state.apply(moveRange(state, rangeFromIds(state, ["P"])!, "down")!);
+    expect(contentAttrs(after.doc, "H").collapsed).toBe(false);
+    expect(docShape(after.doc).map((s) => s.id)).toEqual(["H", "P", "P1"]);
+  });
+
+  test("畳んだ heading 自身を動かすと畳みが解ける", () => {
+    const doc = docOf(
+      block("P", para("p")),
+      block("H", heading("A", 2, true)),
+      block("P1", para("1")),
+    );
+    const state = stateWithCursor(doc, "H", "end");
+    const after = state.apply(moveRange(state, rangeFromIds(state, ["H"])!, "up")!);
+    expect(contentAttrs(after.doc, "H").collapsed).toBe(false);
+    expect(docShape(after.doc).map((s) => s.id)).toEqual(["H", "P", "P1"]);
+  });
+});
+
+describe("normalizer（不可視カーソルの救済）", () => {
+  test("境界 heading を paragraph 化してカーソルが隠れたら支配 heading を開く", () => {
+    const doc = docOf(
+      block("H", heading("A", 2, true)),
+      block("P1", para("1")),
+      block("H2", heading("B", 2)),
+    );
+    const state = EditorState.create({
+      doc,
+      selection: TextSelection.create(doc, containerById(doc, "H2")!.pos + 2),
+      plugins: [normalizerPlugin()],
+    });
+    // H2 が paragraph になると H の折りたたみ範囲が末尾まで伸び、カーソルが不可視になる
+    const ctx = getBlockContext(state.selection.$from)!;
+    const after = state.apply(setContentType(state, ctx, nodes.paragraph, null));
+    expect(contentAttrs(after.doc, "H").collapsed).toBe(false);
+  });
+
+  test("末尾が折りたたみ範囲なら exitDocEnd の空行を可視にする", () => {
+    const doc = docOf(
+      block("P0", para("p")),
+      block("H", heading("A", 2, true)),
+      block("P1", para("1")),
+    );
+    const state = EditorState.create({
+      doc,
+      selection: TextSelection.create(doc, containerById(doc, "H")!.pos + 2),
+      plugins: [normalizerPlugin()],
+    });
+    const result = run(state, exitDocEnd);
+    expect(contentAttrs(result!.state.doc, "H").collapsed).toBe(false);
+    expect(docShape(result!.state.doc).map((s) => s.type)).toEqual([
+      "paragraph",
+      "heading",
+      "paragraph",
+      "paragraph",
+    ]);
   });
 });
 

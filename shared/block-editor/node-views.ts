@@ -7,10 +7,8 @@ import type {
 } from "@milkdown/kit/prose/view";
 import { nodes, noteHref } from "./schema";
 import { imageUploadKey, requestImageRetry } from "./image-upload";
-import { insertParagraphAfter } from "./commands";
-import { selectBlocks } from "./selection-state";
-import { blockSelectionKey } from "./selection-state";
-import { beginHandleDrag } from "./drag-drop";
+import { isCollapsedContainer, isFoldableContent, isFoldedContent } from "./folding";
+import { foldTransaction } from "./commands";
 import { SyncedBlockView } from "./synced-block";
 import type { OnOpenBlock, ResolveBlock } from "./synced-block";
 
@@ -27,66 +25,62 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-// TODO.md §11.1: blockContainer NodeView。gutter（plus / drag handle）は
-// contenteditable=false で contentDOM の外に置く。
+// TODO.md §11.1: blockContainer NodeView。折りたたみ ▾ は heading / callout のときだけ
+// contenteditable=false で contentDOM の外に置く（既存 toggle は ToggleView が持つ）。
 class ContainerView implements NodeView {
   dom: HTMLElement;
   contentDOM: HTMLElement;
-  private gutter: HTMLElement;
+  private foldBtn: HTMLButtonElement;
+  // 打鍵ごとに update が走るので、変化した属性だけ書いて余計な MutationRecord を出さない
+  private folded: string | null = null;
 
   constructor(
     private node: PMNode,
     private view: EditorView,
-    getPos: GetPos,
+    private getPos: GetPos,
   ) {
     this.dom = el("div", "jb-container");
     this.contentDOM = el("div", "jb-container-body");
-    this.gutter = el("div", "jb-gutter", (gutter) => {
-      gutter.contentEditable = "false";
-      const plus = el("button", "jb-gutter-btn", (btn) => {
-        btn.type = "button";
-        btn.tabIndex = -1;
-        btn.textContent = "+";
-        btn.title = "Add block below";
-        btn.setAttribute("aria-label", "Add block below");
-      });
-      plus.addEventListener("mousedown", (e) => e.preventDefault());
-      plus.addEventListener("click", (e) => {
-        e.preventDefault();
-        const pos = getPos();
-        if (pos === undefined) return;
-        const tr = insertParagraphAfter(view.state, pos);
-        if (tr) {
-          view.dispatch(tr.scrollIntoView());
-          view.focus();
-        }
-      });
-      const drag = el("button", "jb-gutter-btn jb-drag-handle", (btn) => {
-        btn.type = "button";
-        btn.tabIndex = -1;
-        btn.textContent = "⋮⋮";
-        btn.title = "Drag to move";
-        btn.setAttribute("aria-label", "Drag to move block");
-        btn.draggable = true;
-      });
-      drag.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        const id = this.node.attrs.id as string | null;
-        if (!id) return;
-        // §7.3: Shift+click は anchor から範囲選択
-        const current = blockSelectionKey.getState(view.state);
-        const anchor = e.shiftKey && current?.anchorId ? current.anchorId : id;
-        view.dispatch(selectBlocks(view.state.tr, anchor, id));
-        view.focus();
-      });
-      drag.addEventListener("dragstart", (e) => {
-        const id = this.node.attrs.id as string | null;
-        if (id) beginHandleDrag(view, id, e, this.dom);
-      });
-      gutter.append(plus, drag);
+    this.foldBtn = el("button", "jb-fold-btn", (btn) => {
+      btn.type = "button";
+      btn.tabIndex = -1;
+      btn.contentEditable = "false";
+      btn.textContent = "▸";
     });
-    this.dom.append(this.gutter, this.contentDOM);
+    this.foldBtn.addEventListener("mousedown", (e) => e.preventDefault());
+    this.foldBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      this.toggleFold();
+    });
+    this.dom.append(this.foldBtn, this.contentDOM);
     this.sync(node);
+  }
+
+  private toggleFold(): void {
+    const pos = this.getPos();
+    if (pos === undefined) return;
+    const content = this.node.child(0);
+    this.view.dispatch(
+      foldTransaction(this.view.state, { containerPos: pos, contentPos: pos + 1, content }),
+    );
+    this.view.focus();
+  }
+
+  // data-folded は「折りたためる block か」も兼ねる（属性なし = ▾ を出さない）
+  private syncFoldBtn(content: PMNode): void {
+    const folded = isFoldableContent(content) ? String(isFoldedContent(content)) : null;
+    if (folded === this.folded) return;
+    this.folded = folded;
+    if (folded === null) {
+      this.dom.removeAttribute("data-folded");
+      return;
+    }
+    this.dom.setAttribute("data-folded", folded);
+    this.foldBtn.setAttribute("aria-expanded", String(folded === "false"));
+    this.foldBtn.setAttribute(
+      "aria-label",
+      folded === "true" ? "Expand section" : "Collapse section",
+    );
   }
 
   private sync(node: PMNode): void {
@@ -96,12 +90,12 @@ class ContainerView implements NodeView {
     if (id) this.dom.setAttribute("data-block-id", id);
     else this.dom.removeAttribute("data-block-id");
     const content = node.child(0);
-    const collapsed = content.type === nodes.toggle && content.attrs.open === false;
-    this.dom.classList.toggle("jb-collapsed", collapsed);
+    this.dom.classList.toggle("jb-collapsed", isCollapsedContainer(node));
     const isCallout = content.type === nodes.callout;
     this.dom.classList.toggle("jb-callout", isCallout);
     if (isCallout) this.dom.setAttribute("data-callout-kind", content.attrs.kind as string);
     else this.dom.removeAttribute("data-callout-kind");
+    this.syncFoldBtn(content);
   }
 
   update(node: PMNode): boolean {
@@ -111,10 +105,7 @@ class ContainerView implements NodeView {
   }
 
   stopEvent(event: Event): boolean {
-    if (!(event.target instanceof Node)) return false;
-    if (!this.gutter.contains(event.target)) return false;
-    // drop 系は plugin（handleDOMEvents）が扱うので ProseMirror へ流す
-    return !["drop", "dragover", "dragenter", "dragleave"].includes(event.type);
+    return event.target instanceof Node && this.foldBtn.contains(event.target);
   }
 
   ignoreMutation(mutation: ViewMutationRecord): boolean {
@@ -131,7 +122,7 @@ class ContainerView implements NodeView {
         repaired = true;
       }
       for (const added of mutation.addedNodes) {
-        if (added === this.contentDOM || added === this.gutter) continue;
+        if (added === this.contentDOM || added === this.foldBtn) continue;
         const hadSelection = added.contains(document.getSelection()?.anchorNode ?? null);
         (added as ChildNode).remove();
         // 捨てたノードに DOM selection が居た場合は state の selection へ戻す

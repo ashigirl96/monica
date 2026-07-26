@@ -16,8 +16,7 @@ import { imageUploadPlugin } from "./image-upload";
 import type { ImportExternalImage, UploadImage } from "./image-upload";
 import type { OnNoteMentionClick, ResolveNoteMention } from "./node-views";
 import { normalizerPlugin } from "./normalizer";
-import { numberingPlugin, placeholderPlugin } from "./decorations";
-import { dragDropPlugin } from "./drag-drop";
+import { blockDecorationsPlugin, placeholderPlugin } from "./decorations";
 import { clipboardPlugin } from "./clipboard";
 import type { RenderMarkdown } from "./clipboard";
 import { linkClickPlugin } from "./link-click";
@@ -151,9 +150,8 @@ export function createBlockEditor(
       ...editorKeymap(),
       editorInputRules(),
       placeholderPlugin(),
-      numberingPlugin(),
+      blockDecorationsPlugin(),
       blockHighlightPlugin(),
-      dragDropPlugin(),
       // clipboardPlugin より前に置く: 画像ファイルの paste / drop を URL・block paste 経路より
       // 先に横取りする。uploadImage 不在（desktop journal）なら plugin ごと外れて画像 paste は無効。
       ...(uploadImage

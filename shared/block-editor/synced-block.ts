@@ -2,6 +2,7 @@ import { DOMSerializer, Node as PMNode } from "@milkdown/kit/prose/model";
 import { Plugin, PluginKey } from "@milkdown/kit/prose/state";
 import type { EditorView, NodeView } from "@milkdown/kit/prose/view";
 import { nodes, schema } from "./schema";
+import { foldedSiblingIndexes, isCollapsedContainer } from "./folding";
 import { containerById } from "./context";
 import { BookmarkView, el, LinkMentionView } from "./node-views";
 import type { ResolveNoteMention } from "./node-views";
@@ -37,9 +38,7 @@ const mirrorSerializer = new DOMSerializer(
     blockContainer: (node) => {
       const content = node.child(0);
       const classes = ["jb-container"];
-      if (content.type === nodes.toggle && content.attrs.open === false) {
-        classes.push("jb-collapsed");
-      }
+      if (isCollapsedContainer(node)) classes.push("jb-collapsed");
       const isCallout = content.type === nodes.callout;
       if (isCallout) classes.push("jb-callout");
       const attrs: Record<string, string> = {
@@ -81,6 +80,21 @@ const mirrorSerializer = new DOMSerializer(
   },
   DOMSerializer.marksFromSchema(schema),
 );
+
+// heading の折りたたみ範囲は decoration で描くのでミラーには効かない。PMNode と
+// serializer 出力は同じ形（container > body > [content, group?]）なので、並走して
+// blockDecorationsPlugin と同じ規則の class を付ける。
+function applyHeadingFolds(containers: readonly PMNode[], doms: readonly Element[]): void {
+  const hidden = foldedSiblingIndexes(containers);
+  containers.forEach((container, index) => {
+    const dom = doms[index];
+    if (!dom) return;
+    if (hidden.has(index)) dom.classList.add("jb-fold-hidden");
+    if (container.childCount < 2) return;
+    const group = dom.querySelector(":scope > .jb-container-body > [data-block-group]");
+    if (group) applyHeadingFolds(container.child(1).content.content, [...group.children]);
+  });
+}
 
 // NoteMentionView と同じ chip 構造。表示名は解決までのフォールバックで noteId を出し、
 // SyncedBlockView.resolveMentions が resolveNoteMention で差し替える（読み取り専用・非対話）。
@@ -209,6 +223,7 @@ export class SyncedBlockView implements NodeView {
     const frag = document.createDocumentFragment();
     for (const container of containers) frag.append(mirrorSerializer.serializeNode(container));
     this.body.replaceChildren(frag);
+    applyHeadingFolds(containers, [...this.body.children]);
     this.resolveMentions();
   }
 

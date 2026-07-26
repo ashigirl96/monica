@@ -1,6 +1,7 @@
 import type { Node as PMNode, ResolvedPos } from "@milkdown/kit/prose/model";
 import type { EditorState } from "@milkdown/kit/prose/state";
 import { nodes } from "./schema";
+import { foldedIndexes, isCollapsedContainer } from "./folding";
 
 // TODO.md §2 getBlockContext。position は selection 由来の ResolvedPos から
 // 最も近い blockContainer を見つける。
@@ -71,23 +72,25 @@ export function parentContainerId(doc: PMNode, id: string): string | null {
   return (parent?.containerNode.attrs.id as string | null) ?? null;
 }
 
-// 可視 blockContainer を pre-order で列挙する。closed toggle の配下は skip
-// （TODO.md §7.4)。
+// 可視 blockContainer を pre-order で列挙する。折りたたまれた container の配下と、
+// collapsed heading が支配する後続兄弟は skip（TODO.md §7.4)。
 export function visibleContainers(doc: PMNode): Array<{ id: string; pos: number; node: PMNode }> {
   const out: Array<{ id: string; pos: number; node: PMNode }> = [];
   const walk = (parent: PMNode, base: number) => {
-    parent.forEach((child, offset) => {
+    const hidden = parent.type === nodes.blockGroup ? foldedIndexes(parent) : null;
+    parent.forEach((child, offset, index) => {
       const pos = base + offset;
       if (child.type === nodes.blockGroup) {
         walk(child, pos + 1);
         return;
       }
       if (child.type !== nodes.blockContainer) return;
+      if (hidden?.has(index)) return;
       const id = child.attrs.id as string | null;
       if (id !== null) out.push({ id, pos, node: child });
       const content = child.child(0);
-      const collapsed = content.type === nodes.toggle && content.attrs.open === false;
-      if (!collapsed && child.childCount > 1) walk(child.child(1), pos + 1 + content.nodeSize + 1);
+      if (!isCollapsedContainer(child) && child.childCount > 1)
+        walk(child.child(1), pos + 1 + content.nodeSize + 1);
     });
   };
   walk(doc.child(0), 1);
