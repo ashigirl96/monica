@@ -116,15 +116,13 @@ describe("syncedBlock schema", () => {
 
 describe("serializeBlocksPayload", () => {
   test("sourceNoteId を渡すと payload に載る", () => {
-    const payload = JSON.parse(
-      serializeBlocksPayload([textContainer("a", "src-1")], "copy", "note-A"),
-    );
+    const payload = JSON.parse(serializeBlocksPayload([textContainer("a", "src-1")], "note-A"));
     expect(payload.sourceNoteId).toBe("note-A");
     expect(payload.schemaVersion).toBe(1);
   });
 
   test("sourceNoteId 省略時は payload に含めない（旧 payload 互換）", () => {
-    const payload = JSON.parse(serializeBlocksPayload([textContainer("a", "src-1")], "copy"));
+    const payload = JSON.parse(serializeBlocksPayload([textContainer("a", "src-1")]));
     expect(payload.sourceNoteId).toBeUndefined();
   });
 });

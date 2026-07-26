@@ -26,7 +26,6 @@ import {
   expandedContent,
   expandedHeading,
   foldedIndexes,
-  isFoldableHeading,
   isFoldedContent,
   isPosHidden,
   resolveFoldTarget,
@@ -234,7 +233,7 @@ export const splitBlock: Command = (state, dispatch) => {
   // callout 行の Enter は兄弟に割らず、内部（先頭の子）に新しい行を作る。
   // カーソル以降のテキストはその子 paragraph へ移す。
   // 折りたたみ中は内部が隠れるので、この分岐は使わず兄弟の段落に割る。
-  if (content.type === nodes.callout && content.attrs.collapsed !== true) {
+  if (content.type === nodes.callout && !isFoldedContent(content)) {
     const leftContent = content.cut(0, offset);
     const child = createContainer(nodes.paragraph.create(null, content.cut(offset).content));
     const newContainer = withChildren(ctx.containerNode, leftContent, [
@@ -250,8 +249,8 @@ export const splitBlock: Command = (state, dispatch) => {
   // 折りたたみ中の heading の行末 Enter は畳みを解き、新しい行はセクションの末尾に置く。
   // 直後に置くと、開いて現れた既存の内容の手前に入ってしまうため。
   if (
-    isFoldableHeading(content) &&
-    content.attrs.collapsed === true &&
+    content.type === nodes.heading &&
+    isFoldedContent(content) &&
     offset === content.content.size
   ) {
     const hidden = foldedIndexes(ctx.groupNode);
@@ -307,9 +306,10 @@ export function foldTransaction(state: EditorState, target: FoldTarget): Transac
   const collapsing = !isFoldedContent(target.content);
   const tr = state.tr;
   setFolded(tr, target.content, target.contentPos, collapsing);
-  const hidesSelection =
-    isPosHidden(tr.doc, tr.selection.from) || isPosHidden(tr.doc, tr.selection.to);
-  if (collapsing && hidesSelection)
+  if (
+    collapsing &&
+    (isPosHidden(tr.doc, tr.selection.from) || isPosHidden(tr.doc, tr.selection.to))
+  )
     tr.setSelection(
       TextSelection.create(tr.doc, target.contentPos + 1 + target.content.content.size),
     );

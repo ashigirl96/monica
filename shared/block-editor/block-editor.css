@@ -64,7 +64,7 @@
 /* ---- block tree layout ---- */
 
 /* 縦の余白（pad/margin）はブロック種別ごとに container の変数で決める。
-   content の padding・placeholder の位置・gutter の縦位置が同じ値を参照する。
+   content の padding・placeholder の位置・fold ボタンの縦位置が同じ値を参照する。
    継承で子ブロックへ漏れないよう、全 container で毎回リセットする */
 [data-block-container] {
   position: relative;
@@ -138,14 +138,11 @@
 
 [data-folded="true"] > .jb-fold-btn {
   opacity: 1;
-}
-
-.jb-fold-btn:hover,
-[data-folded="true"] > .jb-fold-btn {
   color: var(--jb-muted);
 }
 
 .jb-fold-btn:hover {
+  color: var(--jb-muted);
   background: var(--jb-hover);
 }
 

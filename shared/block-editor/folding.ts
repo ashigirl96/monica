@@ -12,28 +12,32 @@ import { nodes } from "./schema";
 // foldAttrOf に閉じ込め、外へは出さない。
 
 /** 折りたたみ可能な heading。h1 はセクション境界としてのみ扱い、畳めない。 */
-export function isFoldableHeading(content: PMNode): boolean {
+function isFoldableHeading(content: PMNode): boolean {
   if (content.type !== nodes.heading) return false;
   const level = Number(content.attrs.level);
   return level === 2 || level === 3;
 }
 
-type FoldAttr = "open" | "collapsed";
+/** attr 名と「どちらの値が畳みか」の極性をここだけで定義する。 */
+type FoldAttr = { attr: "open" | "collapsed"; foldedValue: boolean };
+
+const TOGGLE_FOLD: FoldAttr = { attr: "open", foldedValue: false };
+const COLLAPSED_FOLD: FoldAttr = { attr: "collapsed", foldedValue: true };
 
 function foldAttrOf(content: PMNode): FoldAttr | null {
-  if (content.type === nodes.toggle) return "open";
-  return content.type === nodes.callout || isFoldableHeading(content) ? "collapsed" : null;
+  if (content.type === nodes.toggle) return TOGGLE_FOLD;
+  return content.type === nodes.callout || isFoldableHeading(content) ? COLLAPSED_FOLD : null;
 }
 
 /** ▾ ボタンを出す blockContent。toggle は専用の ToggleView が担うので含めない。 */
 export function isFoldableContent(content: PMNode): boolean {
-  return foldAttrOf(content) === "collapsed";
+  return foldAttrOf(content) === COLLAPSED_FOLD;
 }
 
 /** blockContent が折りたたまれているか。 */
 export function isFoldedContent(content: PMNode): boolean {
-  const attr = foldAttrOf(content);
-  return attr !== null && content.attrs[attr] === (attr === "collapsed");
+  const fold = foldAttrOf(content);
+  return fold !== null && content.attrs[fold.attr] === fold.foldedValue;
 }
 
 /** container 直下の blockGroup が折りたたみで隠れているか。 */
@@ -48,15 +52,16 @@ export function setFolded(
   contentPos: number,
   folded: boolean,
 ): void {
-  const attr = foldAttrOf(content);
-  if (attr !== null) tr.setNodeAttribute(contentPos, attr, attr === "collapsed" ? folded : !folded);
+  const fold = foldAttrOf(content);
+  if (fold !== null)
+    tr.setNodeAttribute(contentPos, fold.attr, folded ? fold.foldedValue : !fold.foldedValue);
 }
 
 /** 折りたたまれた blockContent を開いた複製。開いていれば同一参照を返す。 */
 export function expandedContent(content: PMNode): PMNode {
-  const attr = foldAttrOf(content);
-  if (attr === null || !isFoldedContent(content)) return content;
-  return content.type.create({ ...content.attrs, [attr]: attr === "open" }, content.content);
+  const fold = foldAttrOf(content);
+  if (fold === null || !isFoldedContent(content)) return content;
+  return content.type.create({ ...content.attrs, [fold.attr]: !fold.foldedValue }, content.content);
 }
 
 /** heading だけ畳みを解く。callout / toggle は隠す対象が構造上の子なので一緒に動く。 */
@@ -69,7 +74,9 @@ export function expandedHeading(content: PMNode): PMNode {
 export function expandedHeadingsDeep(node: PMNode): PMNode {
   if (node.type !== nodes.blockContainer && node.type !== nodes.blockGroup)
     return expandedHeading(node);
-  return node.copy(Fragment.fromArray(node.content.content.map(expandedHeadingsDeep)));
+  const children = node.content.content.map(expandedHeadingsDeep);
+  if (children.every((child, i) => child === node.content.content[i])) return node;
+  return node.copy(Fragment.fromArray(children));
 }
 
 /** index を section に含む heading（外側 → 内側）。 */

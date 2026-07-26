@@ -87,10 +87,11 @@ export const schema = new Schema({
         ...[1, 2, 3].map((level) => ({ tag: `h${level}`, attrs: { level } })),
         {
           tag: "div[data-block-content='heading']",
-          getAttrs: (dom: HTMLElement) => ({
-            level: Number(dom.dataset.level) || 1,
-            collapsed: dom.dataset.collapsed === "true",
-          }),
+          getAttrs: (dom: HTMLElement) => {
+            const level = Number(dom.dataset.level) || 1;
+            // h1 は畳めない（セクション境界専用）ので、stale な collapsed を入口で落とす
+            return { level, collapsed: level >= 2 && dom.dataset.collapsed === "true" };
+          },
         },
       ],
       toDOM: (node) => [

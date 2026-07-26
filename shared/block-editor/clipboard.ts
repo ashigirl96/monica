@@ -14,7 +14,6 @@ export const BLOCKS_MIME = "application/x-monica-blocks+json";
 
 type BlocksPayload = {
   schemaVersion: 1;
-  operation: "copy" | "move";
   blocks: unknown[];
   /** copy 元ノートの id。paste-and-sync のミラー参照先。旧 payload / desktop copy では欠落。 */
   sourceNoteId?: string;
@@ -22,12 +21,10 @@ type BlocksPayload = {
 
 export function serializeBlocksPayload(
   containers: readonly PMNode[],
-  operation: "copy" | "move",
   sourceNoteId?: string,
 ): string {
   const payload: BlocksPayload = {
     schemaVersion: 1,
-    operation,
     blocks: containers.map((node) => node.toJSON() as unknown),
     ...(sourceNoteId ? { sourceNoteId } : {}),
   };
@@ -200,10 +197,7 @@ function writeBlocksToClipboard(
 ): void {
   if (!event.clipboardData) return;
   event.preventDefault();
-  event.clipboardData.setData(
-    BLOCKS_MIME,
-    serializeBlocksPayload(containers, "copy", sourceNoteId),
-  );
+  event.clipboardData.setData(BLOCKS_MIME, serializeBlocksPayload(containers, sourceNoteId));
   event.clipboardData.setData("text/html", blocksToHtml(containers));
   event.clipboardData.setData("text/plain", markdownPlain ?? blocksToPlainText(containers));
 }

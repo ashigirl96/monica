@@ -25,6 +25,22 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+// ▸ 開閉ボタン。mousedown の preventDefault でエディタの selection を奪わない。
+function disclosureButton(className: string, onClick: () => void): HTMLButtonElement {
+  const btn = el("button", className, (b) => {
+    b.type = "button";
+    b.tabIndex = -1;
+    b.contentEditable = "false";
+    b.textContent = "▸";
+  });
+  btn.addEventListener("mousedown", (e) => e.preventDefault());
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    onClick();
+  });
+  return btn;
+}
+
 // TODO.md §11.1: blockContainer NodeView。折りたたみ ▾ は heading / callout のときだけ
 // contenteditable=false で contentDOM の外に置く（既存 toggle は ToggleView が持つ）。
 class ContainerView implements NodeView {
@@ -41,17 +57,7 @@ class ContainerView implements NodeView {
   ) {
     this.dom = el("div", "jb-container");
     this.contentDOM = el("div", "jb-container-body");
-    this.foldBtn = el("button", "jb-fold-btn", (btn) => {
-      btn.type = "button";
-      btn.tabIndex = -1;
-      btn.contentEditable = "false";
-      btn.textContent = "▸";
-    });
-    this.foldBtn.addEventListener("mousedown", (e) => e.preventDefault());
-    this.foldBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      this.toggleFold();
-    });
+    this.foldBtn = disclosureButton("jb-fold-btn", () => this.toggleFold());
     this.dom.append(this.foldBtn, this.contentDOM);
     this.sync(node);
   }
@@ -202,18 +208,14 @@ class ToggleView implements NodeView {
   ) {
     this.dom = el("div", "jb-toggle");
     this.dom.setAttribute("data-block-content", "toggle");
-    this.button = el("button", "jb-toggle-btn", (btn) => {
-      btn.type = "button";
-      btn.tabIndex = -1;
-      btn.contentEditable = "false";
-      btn.textContent = "▸";
-    });
-    this.button.addEventListener("mousedown", (e) => e.preventDefault());
-    this.button.addEventListener("click", (e) => {
-      e.preventDefault();
+    // 生の attr 反転だと、閉じる瞬間にカーソルが配下にいた場合 normalizer の
+    // 不可視カーソル救済が畳みを開き戻す。foldTransaction が選択を退避してくれる。
+    this.button = disclosureButton("jb-toggle-btn", () => {
       const pos = getPos();
       if (pos === undefined) return;
-      view.dispatch(view.state.tr.setNodeAttribute(pos, "open", this.node.attrs.open === false));
+      view.dispatch(
+        foldTransaction(view.state, { containerPos: pos - 1, contentPos: pos, content: this.node }),
+      );
     });
     this.contentDOM = el("div", "jb-toggle-text");
     this.dom.append(this.button, this.contentDOM);

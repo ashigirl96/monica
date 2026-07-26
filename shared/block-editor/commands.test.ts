@@ -3,8 +3,20 @@ import { describe, expect, test } from "bun:test";
 import { EditorState, TextSelection } from "@milkdown/kit/prose/state";
 import type { Command, Transaction } from "@milkdown/kit/prose/state";
 import type { Node as PMNode } from "@milkdown/kit/prose/model";
-import { createContainer, nodes, schema } from "./schema";
+import { nodes, schema } from "./schema";
 import { containerById, getBlockContext, parentContainerId, rangeFromIds } from "./context";
+import {
+  block,
+  bullet,
+  callout,
+  code,
+  contentPos,
+  docOf,
+  heading,
+  para,
+  todo,
+  toggle,
+} from "./test-fixtures";
 import {
   backspaceBlock,
   cursorToLineEnd,
@@ -28,44 +40,6 @@ import { normalizerPlugin } from "./normalizer";
 import { blockSelectionPlugin } from "./block-selection";
 import { blockSelectionKey, selectBlocks, type BlockSelectionMeta } from "./selection-state";
 import { linkHrefAt } from "./link-click";
-
-// ---- fixture builders ----
-
-function para(text = ""): PMNode {
-  return nodes.paragraph.create(null, text ? schema.text(text) : undefined);
-}
-
-function todo(text = "", checked = false): PMNode {
-  return nodes.todo.create({ checked }, text ? schema.text(text) : undefined);
-}
-
-function bullet(text = ""): PMNode {
-  return nodes.bullet.create(null, text ? schema.text(text) : undefined);
-}
-
-function heading(text: string, level = 1, collapsed = false): PMNode {
-  return nodes.heading.create({ level, collapsed }, text ? schema.text(text) : undefined);
-}
-
-function code(text = ""): PMNode {
-  return nodes.codeBlock.create(null, text ? schema.text(text) : undefined);
-}
-
-function callout(text = "", collapsed = false): PMNode {
-  return nodes.callout.create({ collapsed }, text ? schema.text(text) : undefined);
-}
-
-function toggle(text = "", open = true): PMNode {
-  return nodes.toggle.create({ open }, text ? schema.text(text) : undefined);
-}
-
-function block(id: string, content: PMNode, children: PMNode[] = []): PMNode {
-  return createContainer(content, children, id);
-}
-
-function docOf(...blocks: PMNode[]): PMNode {
-  return nodes.doc.create(null, nodes.blockGroup.create(null, blocks));
-}
 
 type Shape = {
   id: string | null;
@@ -95,13 +69,10 @@ function sh(id: string | null, type: string, text = "", children: Shape[] = []):
 // ---- state helpers ----
 
 function stateWithCursor(doc: PMNode, id: string, offset: number | "start" | "end"): EditorState {
-  const entry = containerById(doc, id);
-  if (!entry) throw new Error(`no container ${id}`);
-  const content = entry.node.child(0);
-  const base = entry.pos + 2;
-  const pos =
-    offset === "start" ? base : offset === "end" ? base + content.content.size : base + offset;
-  return EditorState.create({ doc, selection: TextSelection.create(doc, pos) });
+  return EditorState.create({
+    doc,
+    selection: TextSelection.create(doc, contentPos(doc, id, offset)),
+  });
 }
 
 function run(state: EditorState, command: Command): { state: EditorState; tr: Transaction } | null {

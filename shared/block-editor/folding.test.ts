@@ -2,8 +2,9 @@
 import { describe, expect, test } from "bun:test";
 import type { Node as PMNode } from "@milkdown/kit/prose/model";
 import { EditorState } from "@milkdown/kit/prose/state";
-import { createContainer, nodes, schema } from "./schema";
-import { containerById, visibleContainers } from "./context";
+import { nodes } from "./schema";
+import { visibleContainers } from "./context";
+import { block, callout, contentPos, docOf, heading, para, posOf, toggle } from "./test-fixtures";
 import {
   expandedContent,
   expandedHeading,
@@ -15,48 +16,13 @@ import {
   revealPos,
 } from "./folding";
 
-// ---- fixture builders ----
-
-function para(text = ""): PMNode {
-  return nodes.paragraph.create(null, text ? schema.text(text) : undefined);
-}
-
-function heading(text: string, level: number, collapsed = false): PMNode {
-  return nodes.heading.create({ level, collapsed }, text ? schema.text(text) : undefined);
-}
-
-function callout(text = "", collapsed = false): PMNode {
-  return nodes.callout.create({ collapsed }, text ? schema.text(text) : undefined);
-}
-
-function toggle(text = "", open = true): PMNode {
-  return nodes.toggle.create({ open }, text ? schema.text(text) : undefined);
-}
-
-function block(id: string, content: PMNode, children: PMNode[] = []): PMNode {
-  return createContainer(content, children, id);
-}
-
-function docOf(...blocks: PMNode[]): PMNode {
-  return nodes.doc.create(null, nodes.blockGroup.create(null, blocks));
-}
-
 function rootFolds(doc: PMNode): number[] {
   return [...foldedIndexes(doc.child(0))];
 }
 
 /** id の block の content 内 offset を解決する */
 function resolveIn(doc: PMNode, id: string, offset: number | "end" = 0) {
-  const entry = containerById(doc, id);
-  if (!entry) throw new Error(`no container ${id}`);
-  const base = entry.pos + 2;
-  return doc.resolve(offset === "end" ? base + entry.node.child(0).content.size : base + offset);
-}
-
-function posOf(doc: PMNode, id: string): number {
-  const entry = containerById(doc, id);
-  if (!entry) throw new Error(`no container ${id}`);
-  return entry.pos;
+  return doc.resolve(contentPos(doc, id, offset));
 }
 
 /** id を可視にするために revealPos が開いた block の id（doc 順） */

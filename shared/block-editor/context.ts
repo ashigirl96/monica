@@ -77,7 +77,7 @@ export function parentContainerId(doc: PMNode, id: string): string | null {
 export function visibleContainers(doc: PMNode): Array<{ id: string; pos: number; node: PMNode }> {
   const out: Array<{ id: string; pos: number; node: PMNode }> = [];
   const walk = (parent: PMNode, base: number) => {
-    const hidden = parent.type === nodes.blockGroup ? foldedIndexes(parent) : null;
+    const hidden = foldedIndexes(parent);
     parent.forEach((child, offset, index) => {
       const pos = base + offset;
       if (child.type === nodes.blockGroup) {
@@ -85,7 +85,7 @@ export function visibleContainers(doc: PMNode): Array<{ id: string; pos: number;
         return;
       }
       if (child.type !== nodes.blockContainer) return;
-      if (hidden?.has(index)) return;
+      if (hidden.has(index)) return;
       const id = child.attrs.id as string | null;
       if (id !== null) out.push({ id, pos, node: child });
       const content = child.child(0);
