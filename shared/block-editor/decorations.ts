@@ -2,6 +2,7 @@ import { Plugin, PluginKey } from "@milkdown/kit/prose/state";
 import { Decoration, DecorationSet } from "@milkdown/kit/prose/view";
 import type { Node as PMNode } from "@milkdown/kit/prose/model";
 import { nodes } from "./schema";
+import { foldedIndexes } from "./folding";
 import { getBlockContext } from "./context";
 import { blockSelectionKey } from "./selection-state";
 
@@ -72,16 +73,29 @@ function markerLabel(style: string, index: number): string {
   return `${index + 1}.`;
 }
 
-// TODO.md §11.3: 表示番号は同一 group 内の連続 numbered 兄弟から導出し、
-// 文書には保存しない。非 numbered block・style 変更で reset、nested group は独立。
-function buildNumbering(doc: PMNode): Decoration[] {
+// doc 由来の block decoration をまとめて 1 回の walk で作る。打鍵ごとに再構築される
+// ので、種類ごとに plugin を分けると全文走査がそのぶん増える。
+//
+// - 表示番号（TODO.md §11.3）は同一 group 内の連続 numbered 兄弟から導出し、文書には
+//   保存しない。非 numbered block・style 変更で reset、nested group は独立。
+// - heading は doc 上の子を持たないため、折りたたみ範囲（後続兄弟）を `.jb-collapsed`
+//   の CSS では隠せない。範囲は内容から導出されるのでここで class を付ける。
+function buildBlockDecorations(doc: PMNode): Decoration[] {
   const decorations: Decoration[] = [];
   const walkGroup = (group: PMNode, groupPos: number) => {
+    const hidden = foldedIndexes(group);
     let run = 0;
     let runStyle: string | null = null;
-    group.forEach((container, offset) => {
+    group.forEach((container, offset, index) => {
       const containerPos = groupPos + 1 + offset;
       const content = container.child(0);
+      if (hidden.has(index)) {
+        decorations.push(
+          Decoration.node(containerPos, containerPos + container.nodeSize, {
+            class: "jb-fold-hidden",
+          }),
+        );
+      }
       if (content.type === nodes.numbered) {
         const style = content.attrs.style as string;
         if (style !== runStyle) {
@@ -107,14 +121,15 @@ function buildNumbering(doc: PMNode): Decoration[] {
   return decorations;
 }
 
-export function numberingPlugin(): Plugin<DecorationSet> {
+export function blockDecorationsPlugin(): Plugin<DecorationSet> {
   return new Plugin<DecorationSet>({
-    key: new PluginKey("journalNumbering"),
+    key: new PluginKey("journalBlockDecorations"),
     state: {
-      init: (_config, state) => DecorationSet.create(state.doc, buildNumbering(state.doc)),
+      init: (_config, state) => DecorationSet.create(state.doc, buildBlockDecorations(state.doc)),
       apply(tr, value) {
+        // collapsed / style は attr なので、開閉や種別変更も docChanged として届く
         if (!tr.docChanged) return value;
-        return DecorationSet.create(tr.doc, buildNumbering(tr.doc));
+        return DecorationSet.create(tr.doc, buildBlockDecorations(tr.doc));
       },
     },
     props: {

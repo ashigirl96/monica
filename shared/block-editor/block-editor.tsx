@@ -7,9 +7,9 @@ import type { OnNoteMentionClick, ResolveNoteMention } from "./node-views";
 import type { OnOpenBlock, ResolveBlock } from "./synced-block";
 import type { ImportExternalImage, UploadImage } from "./image-upload";
 import type { RenderMarkdown } from "./clipboard";
-import { containerById } from "./context";
+import { containerById, visibleContainers } from "./context";
 import { clearBlockHighlight, highlightBlock } from "./block-highlight";
-import { nodes } from "./schema";
+import { revealPos } from "./folding";
 import "./block-editor.css";
 
 /** ジャンプ後に元ブロックのハイライトを消すまでの猶予 */
@@ -165,17 +165,8 @@ export function BlockEditor({
           if (!entry) return;
           const { pos } = entry;
           const tr = view.state.tr;
-          // 閉じた toggle 祖先を開かないと対象が不可視でスクロールできない。
-          // setNodeAttribute は node size を変えないので pos は安定。
-          const $inside = view.state.doc.resolve(pos + 1);
-          for (let depth = $inside.depth; depth >= 1; depth--) {
-            const ancestor = $inside.node(depth);
-            if (ancestor.type !== nodes.blockContainer) continue;
-            const content = ancestor.child(0);
-            if (content.type === nodes.toggle && content.attrs.open === false) {
-              tr.setNodeAttribute($inside.before(depth) + 1, "open", true);
-            }
-          }
+          // 折りたたまれた祖先と、対象を隠している heading を開かないとスクロールできない
+          revealPos(tr, pos);
           highlightBlock(tr, blockId);
           view.dispatch(tr);
           const dom = view.nodeDOM(pos);
@@ -201,7 +192,14 @@ export function BlockEditor({
       if (host.contains(e.target as Node)) return;
       if (e.clientY < host.getBoundingClientRect().bottom) return;
       e.preventDefault();
-      view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)));
+      // 文書末尾が折りたたみで隠れていることがある。クリックだけで畳みを解くのは
+      // 唐突なので、最後の可視 block の末尾へ落とす（何も畳まれていなければ doc 末尾）。
+      const doc = view.state.doc;
+      const last = visibleContainers(doc).at(-1);
+      const selection = last
+        ? TextSelection.near(doc.resolve(last.pos + 1 + last.node.child(0).nodeSize), -1)
+        : TextSelection.atEnd(doc);
+      view.dispatch(view.state.tr.setSelection(selection));
       view.focus();
     };
     root.addEventListener("mousedown", focusTail);

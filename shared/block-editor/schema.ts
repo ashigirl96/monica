@@ -82,17 +82,25 @@ export const schema = new Schema({
     heading: {
       group: "blockContent",
       content: "inline*",
-      attrs: { level: { default: 1 } },
+      attrs: { level: { default: 1 }, collapsed: { default: false } },
       parseDOM: [
         ...[1, 2, 3].map((level) => ({ tag: `h${level}`, attrs: { level } })),
         {
           tag: "div[data-block-content='heading']",
-          getAttrs: (dom: HTMLElement) => ({ level: Number(dom.dataset.level) || 1 }),
+          getAttrs: (dom: HTMLElement) => {
+            const level = Number(dom.dataset.level) || 1;
+            // h1 は畳めない（セクション境界専用）ので、stale な collapsed を入口で落とす
+            return { level, collapsed: level >= 2 && dom.dataset.collapsed === "true" };
+          },
         },
       ],
       toDOM: (node) => [
         "div",
-        { "data-block-content": "heading", "data-level": String(node.attrs.level) },
+        {
+          "data-block-content": "heading",
+          "data-level": String(node.attrs.level),
+          "data-collapsed": String(node.attrs.collapsed),
+        },
         0,
       ],
     },
@@ -165,16 +173,23 @@ export const schema = new Schema({
     callout: {
       group: "blockContent",
       content: "inline*",
-      attrs: { kind: { default: "note" } },
+      attrs: { kind: { default: "note" }, collapsed: { default: false } },
       parseDOM: [
         {
           tag: "div[data-block-content='callout']",
-          getAttrs: (dom: HTMLElement) => ({ kind: dom.dataset.kind ?? "note" }),
+          getAttrs: (dom: HTMLElement) => ({
+            kind: dom.dataset.kind ?? "note",
+            collapsed: dom.dataset.collapsed === "true",
+          }),
         },
       ],
       toDOM: (node) => [
         "div",
-        { "data-block-content": "callout", "data-kind": node.attrs.kind as string },
+        {
+          "data-block-content": "callout",
+          "data-kind": node.attrs.kind as string,
+          "data-collapsed": String(node.attrs.collapsed),
+        },
         0,
       ],
     },

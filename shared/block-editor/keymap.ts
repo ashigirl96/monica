@@ -21,6 +21,7 @@ import {
   insertHardBreak,
   outdentBlock,
   splitBlock,
+  toggleCollapse,
 } from "./commands";
 
 // TODO.md §12.1 の優先順位のうち 3〜7 をここで表現する。
@@ -46,6 +47,9 @@ export function editorKeymap(): Plugin[] {
       "Ctrl-d": deleteEmptyBlock,
       // ↓と同義だが、最下 block から先へ進めないときだけ末尾に空行を確保する
       "Ctrl-n": exitDocEnd,
+      // heading / callout / toggle の折りたたみ。macOS の ⌥. は "≥" を生むが、
+      // prosemirror-keymap が keyCode から base key を解決するのでこの binding で届く
+      "Alt-.": toggleCollapse,
       // inline formatting
       "Mod-b": toggleMark(schema.marks.bold),
       "Mod-i": toggleMark(schema.marks.italic),

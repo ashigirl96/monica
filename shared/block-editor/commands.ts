@@ -22,6 +22,16 @@ import {
   type SiblingRange,
 } from "./context";
 import { blockSelectionKey, clearBlockSelection, selectBlocks } from "./selection-state";
+import {
+  expandedContent,
+  expandedHeading,
+  foldedIndexes,
+  isFoldedContent,
+  isPosHidden,
+  resolveFoldTarget,
+  setFolded,
+  type FoldTarget,
+} from "./folding";
 
 function containerChildren(container: PMNode): readonly PMNode[] {
   return container.childCount > 1 ? container.child(1).content.content : [];
@@ -51,13 +61,11 @@ export function indentRange(state: EditorState, range: SiblingRange): Transactio
   if (isAtomBlock(prev.child(0).type)) return null;
   const selected: PMNode[] = [];
   for (let i = range.fromIndex; i <= range.toIndex; i++) selected.push(group.child(i));
-  // 閉じた toggle の下へ入れると block が不可視になるため開く（drag-drop と同挙動）
-  const prevContent = prev.child(0);
-  const opened =
-    prevContent.type === nodes.toggle && prevContent.attrs.open === false
-      ? prevContent.type.create({ ...prevContent.attrs, open: true }, prevContent.content)
-      : prevContent;
-  const newPrev = withChildren(prev, opened, [...containerChildren(prev), ...selected]);
+  // 折りたたまれた block の下へ入れると不可視になるため開く
+  const newPrev = withChildren(prev, expandedContent(prev.child(0)), [
+    ...containerChildren(prev),
+    ...selected,
+  ]);
   const start = childStartPos(range.groupPos, group, range.fromIndex - 1);
   const { end } = rangePositions(range);
   return state.tr.replaceWith(start, end, newPrev).setMeta("blockOperation", { type: "indent" });
@@ -155,9 +163,13 @@ function splitRightContent(content: PMNode, offset: number): PMNode {
   const atEnd = offset === content.content.size;
   const right = content.cut(offset).content;
   const t = content.type;
-  if (t === nodes.heading) return atEnd ? nodes.paragraph.create() : t.create(content.attrs, right);
+  // 折りたたみは分割前の heading に残す（右は必ず開いた状態で生まれる）
+  if (t === nodes.heading)
+    return atEnd ? nodes.paragraph.create() : expandedContent(content.copy(right));
   if (t === nodes.todo) return t.create({ checked: false }, right);
-  // callout は splitBlock 側の専用分岐（内部に子を作る）で処理され、ここには来ない
+  // 展開中の callout は splitBlock 側の専用分岐（内部に子を作る）で処理される。
+  // 折りたたみ中は内部が隠れるのでここへ来て、兄弟の段落に割る。
+  if (t === nodes.callout) return nodes.paragraph.create(null, right);
   if (t === nodes.quote) return atEnd ? nodes.paragraph.create() : t.create(null, right);
   // toggle 末尾 Enter は「同型の新 toggle」に固定（TODO.md §4.1 の product 設定）
   if (t === nodes.toggle) return t.create({ open: true }, right);
@@ -220,7 +232,8 @@ export const splitBlock: Command = (state, dispatch) => {
   const offset = $from.pos - (ctx.contentPos + 1);
   // callout 行の Enter は兄弟に割らず、内部（先頭の子）に新しい行を作る。
   // カーソル以降のテキストはその子 paragraph へ移す。
-  if (content.type === nodes.callout) {
+  // 折りたたみ中は内部が隠れるので、この分岐は使わず兄弟の段落に割る。
+  if (content.type === nodes.callout && !isFoldedContent(content)) {
     const leftContent = content.cut(0, offset);
     const child = createContainer(nodes.paragraph.create(null, content.cut(offset).content));
     const newContainer = withChildren(ctx.containerNode, leftContent, [
@@ -233,8 +246,27 @@ export const splitBlock: Command = (state, dispatch) => {
     dispatch?.(tr.scrollIntoView());
     return true;
   }
+  // 折りたたみ中の heading の行末 Enter は畳みを解き、新しい行はセクションの末尾に置く。
+  // 直後に置くと、開いて現れた既存の内容の手前に入ってしまうため。
+  if (
+    content.type === nodes.heading &&
+    isFoldedContent(content) &&
+    offset === content.content.size
+  ) {
+    const hidden = foldedIndexes(ctx.groupNode);
+    let last = ctx.siblingIndex;
+    while (hidden.has(last + 1)) last++;
+    const at = childStartPos(ctx.groupPos, ctx.groupNode, last + 1);
+    // setNodeAttribute は nodeSize を変えないので、at は展開後もそのまま使える
+    setFolded(tr, content, ctx.contentPos, false);
+    tr.insert(at, emptyParagraphContainer());
+    tr.setSelection(TextSelection.create(tr.doc, at + 2));
+    tr.setMeta("blockOperation", { type: "split" });
+    dispatch?.(tr.scrollIntoView());
+    return true;
+  }
   // 左 block が元 ID・children を保持し、右 block は新 ID で subtree の直後に入る
-  const left = content.cut(0, offset);
+  const left = expandedHeading(content.cut(0, offset));
   const leftContainer = withChildren(ctx.containerNode, left, containerChildren(ctx.containerNode));
   const rightContainer = createContainer(splitRightContent(content, offset));
   tr.replaceWith(ctx.containerPos, ctx.containerPos + ctx.containerNode.nodeSize, [
@@ -264,6 +296,34 @@ function calloutAncestor($pos: ResolvedPos): { pos: number; node: PMNode } | nul
   }
   return null;
 }
+
+/** 折りたたみを切り替える transaction。畳む向きで選択が隠れ範囲にかかる場合は
+    対象の行末へ畳んで退避する。片端でも隠れていると、見えない内容を巻き込んだまま
+    打鍵で置換できてしまうため、両端を見る。
+    scrollIntoView は付けない — スクロール先は選択位置なので、遠くのカーソルを
+    残したまま ▾ をクリックすると画面がそこへ飛ぶ。 */
+export function foldTransaction(state: EditorState, target: FoldTarget): Transaction {
+  const collapsing = !isFoldedContent(target.content);
+  const tr = state.tr;
+  setFolded(tr, target.content, target.contentPos, collapsing);
+  if (
+    collapsing &&
+    (isPosHidden(tr.doc, tr.selection.from) || isPosHidden(tr.doc, tr.selection.to))
+  )
+    tr.setSelection(
+      TextSelection.create(tr.doc, target.contentPos + 1 + target.content.content.size),
+    );
+  return tr;
+}
+
+// ⌥.: カーソル位置の折りたたみ対象（自分・最寄りの折りたためる祖先・支配 heading）を開閉する。
+// キーボード経由は対象がカーソル由来なので、退避先まで追従してよい。
+export const toggleCollapse: Command = (state, dispatch) => {
+  const target = resolveFoldTarget(state.selection.$from);
+  if (!target) return false;
+  dispatch?.(foldTransaction(state, target).scrollIntoView());
+  return true;
+};
 
 // callout 内での Shift-Enter: callout を抜けて直後に空 paragraph を足す。
 export const exitCallout: Command = (state, dispatch) => {
@@ -403,6 +463,19 @@ export const deleteForwardBlock: Command = (state, dispatch) => {
   if (sel.$from.parent !== content) return false;
   if (sel.$from.parentOffset < content.content.size) return false;
 
+  // 行末 Delete が吸い込む先が折りたたみで隠れているなら、merge せずまず開いて見せる。
+  // 隠しているのは（構造上の子・後続兄弟のどちらでも）この container 自身。
+  const nextPos =
+    ctx.containerNode.childCount > 1
+      ? ctx.contentPos + content.nodeSize + 1
+      : ctx.containerPos + ctx.containerNode.nodeSize;
+  if (isPosHidden(state.doc, nextPos)) {
+    const tr = state.tr;
+    setFolded(tr, content, ctx.contentPos, false);
+    dispatch?.(tr.scrollIntoView());
+    return true;
+  }
+
   // 子を持つなら次の可視 block は先頭 child: それを親へ merge
   if (ctx.containerNode.childCount > 1) {
     const childGroup = ctx.containerNode.child(1);
@@ -517,6 +590,17 @@ export function duplicateRange(state: EditorState, range: SiblingRange): Transac
   return tr.setMeta("blockOperation", { type: "duplicate" });
 }
 
+// 折りたたんだ heading の section は後続兄弟から導出されるので、移動しても付いてこない。
+// 並べ替えに巻き込まれた heading は畳みを解き、移動先で無関係な兄弟を隠さないようにする。
+function unfoldHeadings(containers: readonly PMNode[]): PMNode[] {
+  return containers.map((container) => {
+    const content = expandedHeading(container.child(0));
+    return content === container.child(0)
+      ? container
+      : withChildren(container, content, containerChildren(container));
+  });
+}
+
 export function moveRange(
   state: EditorState,
   range: SiblingRange,
@@ -531,14 +615,14 @@ export function moveRange(
     const start = childStartPos(range.groupPos, group, range.fromIndex - 1);
     const { end } = rangePositions(range);
     return state.tr
-      .replaceWith(start, end, [...selected, prev])
+      .replaceWith(start, end, unfoldHeadings([...selected, prev]))
       .setMeta("blockOperation", { type: "move" });
   }
   if (range.toIndex >= group.childCount - 1) return null;
   const next = group.child(range.toIndex + 1);
   const { start, end } = rangePositions(range);
   return state.tr
-    .replaceWith(start, end + next.nodeSize, [next, ...selected])
+    .replaceWith(start, end + next.nodeSize, unfoldHeadings([next, ...selected]))
     .setMeta("blockOperation", { type: "move" });
 }
 

@@ -1,11 +1,12 @@
 import { Plugin, PluginKey } from "@milkdown/kit/prose/state";
 import type { Transaction } from "@milkdown/kit/prose/state";
 import { emptyParagraphContainer, newBlockId, nodes } from "./schema";
+import { isPosHidden, revealPos } from "./folding";
 
 const normalizerKey = new PluginKey("journalNormalizer");
 
 // TODO.md §12.2: appendTransaction は最終防衛に限定する。
-// 修復対象: missing ID / duplicate ID / empty blockGroup / empty doc。
+// 修復対象: missing ID / duplicate ID / empty blockGroup / empty doc / 不可視カーソル。
 export function normalizerPlugin(): Plugin {
   return new Plugin({
     key: normalizerKey,
@@ -37,6 +38,13 @@ export function normalizerPlugin(): Plugin {
       if (root.childCount === 0) {
         ensure().insert(tr!.mapping.map(1), emptyParagraphContainer());
       }
+
+      // heading の折りたたみ範囲は後続兄弟から導出されるため、境界の heading を消す・
+      // 型を変える・undo するといった操作でカーソルが後から範囲に飲み込まれる。
+      // 個々の command で塞ぎきれないので、不可視になったら支配する折りたたみを開く。
+      // 打鍵ごとに通る経路なので、安い判定で弾いてから開示を組み立てる。
+      const head = newState.selection.head;
+      if (isPosHidden(newState.doc, head)) revealPos(ensure(), tr!.mapping.map(head));
 
       return tr;
     },
