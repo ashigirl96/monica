@@ -1,3 +1,4 @@
+import { Fragment } from "@milkdown/kit/prose/model";
 import type { Node as PMNode, ResolvedPos } from "@milkdown/kit/prose/model";
 import type { Transaction } from "@milkdown/kit/prose/state";
 import { nodes } from "./schema";
@@ -61,6 +62,14 @@ export function expandedContent(content: PMNode): PMNode {
 /** heading だけ畳みを解く。callout / toggle は隠す対象が構造上の子なので一緒に動く。 */
 export function expandedHeading(content: PMNode): PMNode {
   return isFoldableHeading(content) ? expandedContent(content) : content;
+}
+
+/** subtree 全体の heading の畳みを解く。heading が隠すのは後続兄弟なので、畳んだまま
+    別の場所へ貼ると貼り先の無関係な block まで隠れてしまう。 */
+export function expandedHeadingsDeep(node: PMNode): PMNode {
+  if (node.type !== nodes.blockContainer && node.type !== nodes.blockGroup)
+    return expandedHeading(node);
+  return node.copy(Fragment.fromArray(node.content.content.map(expandedHeadingsDeep)));
 }
 
 /** index を section に含む heading（外側 → 内側）。 */

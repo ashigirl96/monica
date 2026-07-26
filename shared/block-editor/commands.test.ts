@@ -15,6 +15,7 @@ import {
   duplicateRange,
   exitCallout,
   exitDocEnd,
+  foldTransaction,
   indentRange,
   moveRange,
   outdentRange,
@@ -758,6 +759,38 @@ describe("toggleCollapse", () => {
   test("折りたためる対象がなければ false", () => {
     const doc = docOf(block("P", para("1")));
     expect(run(stateWithCursor(doc, "P", "end"), toggleCollapse)).toBeNull();
+  });
+
+  test("選択の片端だけが隠れる場合も畳んで退避する", () => {
+    const doc = docOf(
+      block("H", heading("Head", 2)),
+      block("P", para("body")),
+      block("H2", heading("B", 2)),
+    );
+    // P の途中から次の h2 の途中まで伸びる選択（head 側は畳んでも見えたまま）
+    const from = containerById(doc, "P")!.pos + 2 + 1;
+    const to = containerById(doc, "H2")!.pos + 2 + 1;
+    const state = EditorState.create({ doc, selection: TextSelection.create(doc, from, to) });
+    const result = run(state, toggleCollapse);
+    const sel = result!.state.selection;
+    expect(contentAttrs(result!.state.doc, "H").collapsed).toBe(true);
+    expect(sel.empty).toBe(true);
+    expect(sel.head).toBe(containerById(result!.state.doc, "H")!.pos + 2 + "Head".length);
+  });
+
+  // ▾ クリックは遠くのカーソルを動かさないので、scrollIntoView すると画面が飛ぶ
+  test("クリック経路の transaction は scrollIntoView しない", () => {
+    const doc = docOf(block("H", heading("A", 2)), block("P", para("1")));
+    const state = stateWithCursor(doc, "P", "end");
+    const entry = containerById(doc, "H")!;
+    const target = {
+      containerPos: entry.pos,
+      contentPos: entry.pos + 1,
+      content: entry.node.child(0),
+    };
+    expect(foldTransaction(state, target).scrolledIntoView).toBe(false);
+    // キーボード経由はカーソルが対象を決めるので追従してよい
+    expect(run(stateWithCursor(doc, "H", "end"), toggleCollapse)?.tr.scrolledIntoView).toBe(true);
   });
 });
 

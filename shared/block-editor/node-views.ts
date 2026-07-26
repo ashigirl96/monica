@@ -56,6 +56,8 @@ class ContainerView implements NodeView {
     this.sync(node);
   }
 
+  // focus はしない: カーソルが画面外にあると WebKit がそこへスクロールしてしまう
+  // （▾ をクリックしただけで表示位置が飛ぶ）。ToggleView の ▸ も同じ流儀。
   private toggleFold(): void {
     const pos = this.getPos();
     if (pos === undefined) return;
@@ -63,7 +65,6 @@ class ContainerView implements NodeView {
     this.view.dispatch(
       foldTransaction(this.view.state, { containerPos: pos, contentPos: pos + 1, content }),
     );
-    this.view.focus();
   }
 
   // data-folded は「折りたためる block か」も兼ねる（属性なし = ▾ を出さない）

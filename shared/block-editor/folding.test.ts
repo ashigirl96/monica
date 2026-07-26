@@ -7,6 +7,7 @@ import { containerById, visibleContainers } from "./context";
 import {
   expandedContent,
   expandedHeading,
+  expandedHeadingsDeep,
   foldedIndexes,
   isCollapsedContainer,
   isPosHidden,
@@ -356,6 +357,23 @@ describe("expandedHeading", () => {
     expect(expandedHeading(c)).toBe(c);
     const t = toggle("t", false);
     expect(expandedHeading(t)).toBe(t);
+  });
+
+  test("expandedHeadingsDeep は入れ子の heading にも届き、他の畳みは残す", () => {
+    const subtree = block("root", callout("c", true), [
+      block("h", heading("A", 2, true), [block("inner", heading("B", 3, true))]),
+      block("t", toggle("t", false)),
+    ]);
+    const out = expandedHeadingsDeep(subtree);
+    const attrs = (n: PMNode, path: number[]) =>
+      path.reduce<PMNode>((acc, i) => acc.child(i), n).child(0).attrs;
+    // callout / toggle の畳みは持ち回っても子が一緒に動くので維持
+    expect(out.child(0).attrs.collapsed).toBe(true);
+    expect(attrs(out, [1, 1]).open).toBe(false);
+    // heading は貼り先の兄弟を隠すので必ず開く
+    expect(attrs(out, [1, 0]).collapsed).toBe(false);
+    expect(attrs(out, [1, 0, 1, 0]).collapsed).toBe(false);
+    expect(out.attrs.id).toBe("root");
   });
 });
 

@@ -279,24 +279,30 @@ function calloutAncestor($pos: ResolvedPos): { pos: number; node: PMNode } | nul
   return null;
 }
 
-/** 折りたたみを切り替える transaction。畳む向きでカーソルが隠れる場合は
-    対象の行末へ退避する（打鍵内容が見えないまま入力できてしまうため）。 */
+/** 折りたたみを切り替える transaction。畳む向きで選択が隠れ範囲にかかる場合は
+    対象の行末へ畳んで退避する。片端でも隠れていると、見えない内容を巻き込んだまま
+    打鍵で置換できてしまうため、両端を見る。
+    scrollIntoView は付けない — スクロール先は選択位置なので、遠くのカーソルを
+    残したまま ▾ をクリックすると画面がそこへ飛ぶ。 */
 export function foldTransaction(state: EditorState, target: FoldTarget): Transaction {
   const collapsing = !isFoldedContent(target.content);
   const tr = state.tr;
   setFolded(tr, target.content, target.contentPos, collapsing);
-  if (collapsing && isPosHidden(tr.doc, tr.selection.head))
+  const hidesSelection =
+    isPosHidden(tr.doc, tr.selection.from) || isPosHidden(tr.doc, tr.selection.to);
+  if (collapsing && hidesSelection)
     tr.setSelection(
       TextSelection.create(tr.doc, target.contentPos + 1 + target.content.content.size),
     );
-  return tr.scrollIntoView();
+  return tr;
 }
 
 // ⌥.: カーソル位置の折りたたみ対象（自分・最寄りの折りたためる祖先・支配 heading）を開閉する。
+// キーボード経由は対象がカーソル由来なので、退避先まで追従してよい。
 export const toggleCollapse: Command = (state, dispatch) => {
   const target = resolveFoldTarget(state.selection.$from);
   if (!target) return false;
-  dispatch?.(foldTransaction(state, target));
+  dispatch?.(foldTransaction(state, target).scrollIntoView());
   return true;
 };
 

@@ -2,7 +2,7 @@ import { type EditorState, Plugin, PluginKey, TextSelection } from "@milkdown/ki
 import { DOMSerializer, Fragment, Node as PMNode, Slice } from "@milkdown/kit/prose/model";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import { nodes, reissueIds, schema } from "./schema";
-import { expandedHeading } from "./folding";
+import { expandedHeadingsDeep } from "./folding";
 import { containerById, getBlockContext, rangeFromIds, rangePositions } from "./context";
 import { deleteRange } from "./commands";
 import { blockSelectionKey } from "./selection-state";
@@ -64,6 +64,12 @@ function stripIds(node: PMNode): PMNode {
     return node.type.create(node.attrs, node.content.content.map(stripIds), node.marks);
   }
   return node;
+}
+
+// paste する subtree の正規化: ID 再発行 + heading の畳み解除。BLOCKS_MIME 経路
+// （handlePaste）と外部 paste（transformPasted）の両方がここを通る。
+function preparePasted(node: PMNode): PMNode {
+  return expandedHeadingsDeep(reissueIds(node));
 }
 
 function mapSliceNodes(slice: Slice, mapNode: (node: PMNode) => PMNode): Slice {
@@ -284,11 +290,8 @@ export function clipboardPlugin(options: ClipboardOptions = {}): Plugin {
     props: {
       // text mode copy は ProseMirror 標準に任せつつ、外部へ出る HTML から ID を剥がす
       transformCopied: (slice) => mapSliceNodes(slice, stripIds),
-      // 外部・copy 由来 paste は ID 再発行（重複 ID は normalizer の防衛もある）+ heading の
-      // 畳みを解く（範囲は後続兄弟から導出されるので、畳んだまま貼ると貼り先の無関係な
-      // block まで隠れる）。mapSliceNodes は mapNode が別 node を返すと再帰を止めるので、
-      // container を作り直す reissueIds とは別パスで回して入れ子の heading にも届かせる。
-      transformPasted: (slice) => mapSliceNodes(mapSliceNodes(slice, reissueIds), expandedHeading),
+      // 外部・copy 由来 paste は ID 再発行（重複 ID は normalizer の防衛もある）
+      transformPasted: (slice) => mapSliceNodes(slice, preparePasted),
       // text 選択の text/plain を markdown に差し替える（ヒット時のみ。ミス時は ProseMirror 標準と
       // 同じ textBetween に縮退）。block 選択は copy ハンドラが preventDefault するのでここは通らない。
       ...(renderMarkdown
@@ -330,8 +333,9 @@ export function clipboardPlugin(options: ClipboardOptions = {}): Plugin {
         const parsed = parseBlocksPayload(raw);
         if (!parsed || parsed.blocks.length === 0) return false;
         const { blocks: originals, sourceNoteId } = parsed;
-        // plain paste は常に ID 再発行（重複 ID は normalizer の防衛もある）
-        const plain = originals.map(reissueIds);
+        // plain paste は常に ID 再発行（重複 ID は normalizer の防衛もある）。
+        // originals は synced mirror が元 ID で参照するので触らない。
+        const plain = originals.map(preparePasted);
 
         // 挿入位置 start を決めて plain を入れる。start より前は触らないので、
         // paste-menu のライブプレビュー（replaceWith）の安定アンカーになる。
