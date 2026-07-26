@@ -2,7 +2,7 @@ import { type EditorState, Plugin, PluginKey, TextSelection } from "@milkdown/ki
 import { DOMSerializer, Fragment, Node as PMNode, Slice } from "@milkdown/kit/prose/model";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import { nodes, reissueIds, schema } from "./schema";
-import { expandedHeadingsDeep } from "./folding";
+import { expandedHeadingsDeep, revealPos } from "./folding";
 import { containerById, getBlockContext, rangeFromIds, rangePositions } from "./context";
 import { deleteRange } from "./commands";
 import { blockSelectionKey } from "./selection-state";
@@ -357,6 +357,10 @@ export function clipboardPlugin(options: ClipboardOptions = {}): Plugin {
             tr.insert(start, plain);
           }
         }
+        // 貼り先が collapsed heading の直後（= その heading が隠す範囲）だと、貼った
+        // 内容が不可視のままになる。preparePasted が開くのは貼る側の heading だけ
+        // なので、貼り先を隠している折りたたみはここで開く。
+        revealPos(tr, start);
 
         // paste-and-sync が可能なら「Paste as」メニューを相乗りさせる。plugin 未登録
         // （resolveBlock 不在）や旧 payload（sourceNoteId 欠落）なら plain のまま。
