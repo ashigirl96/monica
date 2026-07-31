@@ -25,13 +25,13 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-// ▸ 開閉ボタン。mousedown の preventDefault でエディタの selection を奪わない。
+// ▸ 開閉ボタン（三角は CSS の mask で描く）。mousedown の preventDefault で
+// エディタの selection を奪わない。
 function disclosureButton(className: string, onClick: () => void): HTMLButtonElement {
   const btn = el("button", className, (b) => {
     b.type = "button";
     b.tabIndex = -1;
     b.contentEditable = "false";
-    b.textContent = "▸";
   });
   btn.addEventListener("mousedown", (e) => e.preventDefault());
   btn.addEventListener("click", (e) => {

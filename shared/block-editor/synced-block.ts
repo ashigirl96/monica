@@ -70,7 +70,7 @@ const mirrorSerializer = new DOMSerializer(
     toggle: (node) => [
       "div",
       { class: "jb-toggle", "data-block-content": "toggle", "data-open": String(node.attrs.open) },
-      ["button", { class: "jb-toggle-btn", contenteditable: "false", tabindex: "-1" }, "▸"],
+      ["button", { class: "jb-toggle-btn", contenteditable: "false", tabindex: "-1" }],
       ["div", { class: "jb-toggle-text" }, 0],
     ],
     syncedBlock: () => ["div", { class: "jb-synced-nested" }, "Nested synced block"],

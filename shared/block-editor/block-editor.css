@@ -33,9 +33,15 @@
   /* paste-menu（Paste / Paste and sync）アイコン */
   --jb-icon-paste: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='8' y='4' width='12' height='16' rx='2'/%3E%3Cpath d='M4 8v10a2 2 0 002 2h8'/%3E%3C/svg%3E");
   --jb-icon-sync: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12a9 9 0 01-9 9 9 9 0 01-7-3.3'/%3E%3Cpath d='M3 12a9 9 0 019-9 9 9 0 017 3.3'/%3E%3Cpath d='M17 3.5V7h-3.5'/%3E%3Cpath d='M7 20.5V17h3.5'/%3E%3C/svg%3E");
+  /* 折りたたみ三角。文字 (▸) だと ink が送り幅の中で左寄りに置かれ、rotate(90deg) で
+     その横ズレが縦ズレに変わるため、ink の bbox を viewBox 中心に対称に置いた mask で描く */
+  --jb-icon-disclosure: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black' stroke='black' stroke-width='1.6' stroke-linejoin='round'%3E%3Cpath d='M7.5 5L16.5 12 7.5 19z'/%3E%3C/svg%3E");
   /* 1 行の行箱の高さ。marker 類の縦位置はすべてここから導出する。
      compact 密度（後述）は 28px に詰める */
   --jb-line: 32px;
+  /* 折りたたみ ▸ の当たり判定（縦位置の計算に効く）と、その中に描く三角の大きさ */
+  --jb-disclosure-box: 22px;
+  --jb-disclosure-glyph: 14px;
   /* 幅・高さは親に従う。余白やスクロールは使う側が決める */
   background: var(--jb-paper);
   cursor: text;
@@ -93,7 +99,7 @@
 
 /* ボタンは全 container に生えるが、折りたためる block だけが data-folded を持つ */
 .jb-fold-btn {
-  --jb-fold-btn-size: 22px;
+  --jb-fold-btn-size: var(--jb-disclosure-box);
   position: absolute;
   left: -28px;
   /* 1 行目のセンター合わせ: container pad 1px + (行高 − ボタン) / 2 */
@@ -107,14 +113,22 @@
   height: var(--jb-fold-btn-size);
   border-radius: 4px;
   color: var(--jb-faint);
-  font-size: 0.75em;
-  line-height: 1;
   cursor: pointer;
   opacity: 0;
   transition:
     transform 200ms ease-out,
     opacity 100ms ease-out,
     background 60ms ease-out;
+}
+
+/* 三角は擬似要素で描く（ボタンの background は hover の座布団が使う） */
+.jb-fold-btn::before,
+.jb-toggle-btn::before {
+  content: "";
+  width: var(--jb-disclosure-glyph);
+  height: var(--jb-disclosure-glyph);
+  background: currentColor;
+  mask: var(--jb-icon-disclosure) center / contain no-repeat;
 }
 
 [data-folded] > .jb-fold-btn {
@@ -268,22 +282,30 @@
    マーカーはフロー外の absolute にし、テキスト領域は padding だけで始める */
 [data-block-content="bullet"]::before,
 [data-block-content="numbered"]::before {
+  content: "";
   position: absolute;
-  left: 2px;
-  top: 3px;
-  width: 24px;
-  padding-right: 6px;
-  text-align: center;
-  line-height: var(--jb-line);
 }
 
+/* 中黒 (•) は ink が em 箱の 1/5 ほどしか乗らず font-size で追うと行送りまで動くので、
+   マーカー列（left 2px 起点・幅 24px）の中央に円として描く */
 [data-block-content="bullet"]::before {
-  content: "•";
-  font-size: 1.1em;
+  --jb-bullet-size: 6px;
+  left: calc(2px + (24px - var(--jb-bullet-size)) / 2);
+  top: calc(var(--jb-block-pad-y) + (var(--jb-line) - var(--jb-bullet-size)) / 2);
+  width: var(--jb-bullet-size);
+  height: var(--jb-bullet-size);
+  border-radius: 50%;
+  background: currentColor;
 }
 
 [data-block-content="numbered"]::before {
   content: attr(data-marker);
+  left: 2px;
+  top: var(--jb-block-pad-y);
+  width: 24px;
+  padding-right: 6px;
+  text-align: center;
+  line-height: var(--jb-line);
   font-variant-numeric: tabular-nums;
 }
 
@@ -295,13 +317,12 @@
 .jb-toggle-btn {
   position: absolute;
   left: 2px;
-  top: calc(3px + (var(--jb-line) - 22px) / 2);
-  width: 22px;
-  height: 22px;
+  top: calc(3px + (var(--jb-line) - var(--jb-disclosure-box)) / 2);
+  width: var(--jb-disclosure-box);
+  height: var(--jb-disclosure-box);
   border-radius: 4px;
   cursor: pointer;
   user-select: none;
-  font-size: 0.75em;
   color: var(--jb-text);
   display: flex;
   align-items: center;
