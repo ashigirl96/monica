@@ -65,8 +65,10 @@ export function insertNoteMentionTransaction(
   menu: Pick<NoteMentionMenuActiveState, "pos">,
   noteId: string,
 ): Transaction {
-  const head = state.selection.head;
-  const tr = state.tr.delete(menu.pos, head);
+  // trackedMenuQuery が query を selection.to まで追従させるので、削除も同じ終端に
+  // 揃える（後ろ向き選択中の確定で head までしか消さないと末尾が残る）
+  const end = state.selection.to;
+  const tr = state.tr.delete(menu.pos, end);
   const mention = nodes.noteMention.create({ noteId });
   tr.insert(menu.pos, mention);
   tr.setSelection(TextSelection.create(tr.doc, menu.pos + mention.nodeSize));

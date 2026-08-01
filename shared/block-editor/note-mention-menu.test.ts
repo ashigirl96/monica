@@ -94,6 +94,21 @@ describe("insertNoteMentionTransaction", () => {
     expect(para.child(0).attrs.noteId).toBe("note-1");
   });
 
+  test("query 内の後ろ向き選択中でも query 全体（selection.to まで）を削除する", () => {
+    // Shift+← で query 末尾から選択した状態（head が選択の前端）。trackedMenuQuery は
+    // selection.to まで query 追従するので、確定時の削除終端もそこに揃う
+    const { state: base, pos } = typedDoc("no");
+    const state = base.apply(
+      base.tr.setSelection(TextSelection.create(base.doc, pos + 4, pos + 3)),
+    );
+    const tr = insertNoteMentionTransaction(state, { pos }, "note-1");
+    const next = state.apply(tr);
+
+    const para = firstParagraph(next);
+    expect(para.childCount).toBe(1);
+    expect(para.child(0).type).toBe(nodes.noteMention);
+  });
+
   test("mention の後ろのテキストは保持される", () => {
     // カーソルが query 末尾・後続テキストありの状態（paste 直後など）
     const { state, pos } = typedDoc("/notes/note-9", "", " tail");
