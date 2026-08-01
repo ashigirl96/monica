@@ -9,6 +9,7 @@ import {
   handleMenuNavKey,
   menuItemButton,
   positionMenuAt,
+  trackedMenuQuery,
 } from "./menu-overlay";
 import { noteMentionMenuKey, slashKey } from "./menu-keys";
 
@@ -64,8 +65,10 @@ export function insertNoteMentionTransaction(
   menu: Pick<NoteMentionMenuActiveState, "pos">,
   noteId: string,
 ): Transaction {
-  const head = state.selection.head;
-  const tr = state.tr.delete(menu.pos, head);
+  // trackedMenuQuery が query を selection.to まで追従させるので、削除も同じ終端に
+  // 揃える（後ろ向き選択中の確定で head までしか消さないと末尾が残る）
+  const end = state.selection.to;
+  const tr = state.tr.delete(menu.pos, end);
   const mention = nodes.noteMention.create({ noteId });
   tr.insert(menu.pos, mention);
   tr.setSelection(TextSelection.create(tr.doc, menu.pos + mention.nodeSize));
@@ -200,13 +203,8 @@ export function noteMentionMenuPlugin(search: SearchNoteMentions): Plugin<NoteMe
           };
         }
         const pos = tr.mapping.map(value.pos);
-        const head = newState.selection.head;
-        if (!newState.selection.empty) return { active: false };
-        const $pos = newState.doc.resolve(pos);
-        const $head = newState.selection.$head;
-        if ($pos.parent !== $head.parent || head < pos + 2) return { active: false };
-        if (newState.doc.textBetween(pos, pos + 2) !== "[[") return { active: false };
-        const query = newState.doc.textBetween(pos + 2, head);
+        const query = trackedMenuQuery(newState, pos, "[[");
+        if (query === null) return { active: false };
         // query が変わったら選択位置を先頭へ戻す（新 query の先頭候補をハイライト）
         const index = query === value.query ? value.index : 0;
         return { ...value, pos, query, index };
