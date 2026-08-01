@@ -9,6 +9,7 @@ import {
   handleMenuNavKey,
   menuItemButton,
   positionMenuAt,
+  trackedMenuQuery,
 } from "./menu-overlay";
 import { noteMentionMenuKey, slashKey } from "./menu-keys";
 
@@ -200,13 +201,8 @@ export function noteMentionMenuPlugin(search: SearchNoteMentions): Plugin<NoteMe
           };
         }
         const pos = tr.mapping.map(value.pos);
-        const head = newState.selection.head;
-        if (!newState.selection.empty) return { active: false };
-        const $pos = newState.doc.resolve(pos);
-        const $head = newState.selection.$head;
-        if ($pos.parent !== $head.parent || head < pos + 2) return { active: false };
-        if (newState.doc.textBetween(pos, pos + 2) !== "[[") return { active: false };
-        const query = newState.doc.textBetween(pos + 2, head);
+        const query = trackedMenuQuery(newState, pos, "[[");
+        if (query === null) return { active: false };
         // query が変わったら選択位置を先頭へ戻す（新 query の先頭候補をハイライト）
         const index = query === value.query ? value.index : 0;
         return { ...value, pos, query, index };

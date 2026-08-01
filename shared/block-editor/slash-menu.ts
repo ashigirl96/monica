@@ -9,6 +9,7 @@ import {
   handleMenuNavKey,
   menuItemButton,
   positionMenuAt,
+  trackedMenuQuery,
 } from "./menu-overlay";
 import { noteMentionMenuKey, slashKey } from "./menu-keys";
 
@@ -171,13 +172,8 @@ export function slashMenuPlugin(): Plugin<SlashState> {
         if (!value.active) return value;
         if (meta?.type === "nav") return { ...value, index: meta.index };
         const pos = tr.mapping.map(value.pos);
-        const head = newState.selection.head;
-        if (!newState.selection.empty) return { active: false };
-        const $pos = newState.doc.resolve(pos);
-        const $head = newState.selection.$head;
-        if ($pos.parent !== $head.parent || head <= pos) return { active: false };
-        if (newState.doc.textBetween(pos, pos + 1) !== "/") return { active: false };
-        const query = newState.doc.textBetween(pos + 1, head);
+        const query = trackedMenuQuery(newState, pos, "/");
+        if (query === null) return { active: false };
         return { active: true, pos, query, index: value.index };
       },
     },

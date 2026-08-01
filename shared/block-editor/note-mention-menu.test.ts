@@ -1,10 +1,18 @@
 /// <reference types="bun" />
 import { describe, expect, test } from "bun:test";
 import { EditorState, TextSelection } from "@milkdown/kit/prose/state";
+import type { Plugin } from "@milkdown/kit/prose/state";
 import type { Node as PMNode } from "@milkdown/kit/prose/model";
-import { createContainer, nodes, schema } from "./schema";
+import { nodes } from "./schema";
+import { block, contentPos, docOf, para } from "./test-fixtures";
 import type { NoteMentionItem, NoteMentionMenuActiveState } from "./note-mention-menu";
-import { freshItems, insertNoteMentionTransaction, internalNoteId } from "./note-mention-menu";
+import {
+  freshItems,
+  insertNoteMentionTransaction,
+  internalNoteId,
+  noteMentionMenuPlugin,
+} from "./note-mention-menu";
+import { noteMentionMenuKey } from "./menu-keys";
 
 const ORIGIN = "http://localhost:19281";
 
@@ -41,18 +49,17 @@ describe("internalNoteId", () => {
 });
 
 /** `[[query` 入力済みの doc。pos は最初の `[` の位置、カーソルは query 末尾（after はその後ろ） */
-function typedDoc(query: string, before = "", after = ""): { state: EditorState; pos: number } {
-  const text = `${before}[[${query}${after}`;
-  const doc: PMNode = nodes.doc.create(
-    null,
-    nodes.blockGroup.create(
-      null,
-      createContainer(nodes.paragraph.create(null, schema.text(text)), [], "a"),
-    ),
-  );
-  const pos = 3 + before.length;
+function typedDoc(
+  query: string,
+  before = "",
+  after = "",
+  plugins: Plugin[] = [],
+): { state: EditorState; pos: number } {
+  const doc = docOf(block("a", para(`${before}[[${query}${after}`)));
+  const pos = contentPos(doc, "a", before.length);
   const state = EditorState.create({
     doc,
+    plugins,
     selection: TextSelection.create(doc, pos + 2 + query.length),
   });
   return { state, pos };
@@ -96,6 +103,61 @@ describe("insertNoteMentionTransaction", () => {
     const para = firstParagraph(next);
     expect(para.child(0).type).toBe(nodes.noteMention);
     expect(para.child(1).text).toBe(" tail");
+  });
+});
+
+describe("noteMentionMenuPlugin の state 追従", () => {
+  const plugin = noteMentionMenuPlugin(async () => []);
+
+  /** `[[` 入力直後・メニューが開いた状態。pos は最初の `[` の位置 */
+  function openedState(before = ""): { state: EditorState; pos: number } {
+    const { state: base, pos } = typedDoc("", before, "", [plugin]);
+    const state = base.apply(base.tr.setMeta(noteMentionMenuKey, { type: "open", pos }));
+    return { state, pos };
+  }
+
+  function menuState(state: EditorState) {
+    return noteMentionMenuKey.getState(state)!;
+  }
+
+  test("通常タイピングで query が追従する", () => {
+    const { state } = openedState();
+    const next = state.apply(state.tr.insertText("me"));
+    expect(menuState(next)).toMatchObject({ active: true, query: "me" });
+  });
+
+  test("IME 変換中の文節選択（query 内の非空選択）でも閉じない", () => {
+    // WebKit は変換対象の文節を DOM selection にするので、非空選択で即 close すると
+    // 日本語入力のたびにメニューが消える
+    const { state, pos } = openedState();
+    const tr = state.tr.insertText("山田");
+    tr.setSelection(TextSelection.create(tr.doc, pos + 2, pos + 4));
+    const next = state.apply(tr);
+    expect(menuState(next)).toMatchObject({ active: true, query: "山田" });
+  });
+
+  test("複数文節の変換中は selection.to までを query にする", () => {
+    // 「山田太郎」の後半文節（太郎）が変換対象のとき
+    const { state, pos } = openedState();
+    const tr = state.tr.insertText("山田太郎");
+    tr.setSelection(TextSelection.create(tr.doc, pos + 4, pos + 6));
+    const next = state.apply(tr);
+    expect(menuState(next)).toMatchObject({ active: true, query: "山田太郎" });
+  });
+
+  test("選択が [[ を跨いだら閉じる", () => {
+    const { state, pos } = openedState("see ");
+    const tr = state.tr.insertText("foo");
+    tr.setSelection(TextSelection.create(tr.doc, pos, pos + 4));
+    const next = state.apply(tr);
+    expect(menuState(next)).toEqual({ active: false });
+  });
+
+  test("カーソルが [[ より前に出たら閉じる", () => {
+    const { state, pos } = openedState("see ");
+    const tr = state.tr.setSelection(TextSelection.create(state.doc, pos));
+    const next = state.apply(tr);
+    expect(menuState(next)).toEqual({ active: false });
   });
 });
 
