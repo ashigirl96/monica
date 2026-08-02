@@ -224,6 +224,33 @@ describe("splitBlock", () => {
     assertInvariants(result.state.doc);
   });
 
+  test("行頭 Enter は空 block を上に挿入し、元 block が ID・children を保つ", () => {
+    const doc = docOf(block("A", bullet("hoge"), [block("X", bullet("X"))]));
+    const state = stateWithCursor(doc, "A", "start");
+    const result = run(state, splitBlock)!;
+    const shapes = docShape(result.state.doc);
+    expect(shapes).toMatchObject([
+      { type: "bullet", text: "", children: [] },
+      { id: "A", type: "bullet", text: "hoge", children: [{ id: "X" }] },
+    ]);
+    expect(shapes[0].id).not.toBe("A");
+    expect(result.state.selection.head).toBe(contentPos(result.state.doc, "A", "start"));
+    assertInvariants(result.state.doc);
+  });
+
+  test("checked todo の行頭 Enter は上に unchecked の空 todo を作り、元は checked のまま", () => {
+    const doc = docOf(block("A", todo("ab", true)));
+    const state = stateWithCursor(doc, "A", "start");
+    const result = run(state, splitBlock)!;
+    const after = result.state.doc;
+    expect(after.child(0).child(0).child(0).attrs.checked).toBe(false);
+    expect(after.child(0).child(1).child(0).attrs.checked).toBe(true);
+    expect(docShape(after)).toMatchObject([
+      { type: "todo", text: "" },
+      { id: "A", type: "todo", text: "ab" },
+    ]);
+  });
+
   test("todo 分割は右側を unchecked にする（EDIT-003）", () => {
     const doc = docOf(block("A", todo("ab", true)));
     const state = stateWithCursor(doc, "A", 1);

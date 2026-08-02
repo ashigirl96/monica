@@ -265,6 +265,20 @@ export const splitBlock: Command = (state, dispatch) => {
     dispatch?.(tr.scrollIntoView());
     return true;
   }
+  // 行頭 Enter は分割ではなく空 block の上挿入。元 block は container ごと動かさず、
+  // ID・attrs・fold・children をそのまま保つ（カーソルも元テキストの先頭に留まる）
+  if (offset === 0 && content.content.size > 0) {
+    const above = createContainer(
+      content.type === nodes.todo
+        ? nodes.todo.create({ checked: false })
+        : expandedContent(content.cut(0, 0)),
+    );
+    tr.insert(ctx.containerPos, above);
+    tr.setSelection(TextSelection.create(tr.doc, ctx.containerPos + above.nodeSize + 2));
+    tr.setMeta("blockOperation", { type: "split" });
+    dispatch?.(tr.scrollIntoView());
+    return true;
+  }
   // 左 block が元 ID・children を保持し、右 block は新 ID で subtree の直後に入る
   const left = expandedHeading(content.cut(0, offset));
   const leftContainer = withChildren(ctx.containerNode, left, containerChildren(ctx.containerNode));
