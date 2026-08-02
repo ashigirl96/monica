@@ -16,6 +16,7 @@ import {
   exitCallout,
   exitCodeBlock,
   exitDocEnd,
+  exitDocStart,
   ignoreCompositionEnter,
   indentBlock,
   insertHardBreak,
@@ -47,6 +48,9 @@ export function editorKeymap(): Plugin[] {
       "Ctrl-d": deleteEmptyBlock,
       // ↓と同義だが、最下 block から先へ進めないときだけ末尾に空行を確保する
       "Ctrl-n": exitDocEnd,
+      // ↑と同義だが、最上 block から先へ進めないときだけ先頭に空行を確保する。
+      // onExitUp 付き editor（essays 等）は手前の keymap がタイトルへの脱出を優先する
+      "Ctrl-p": exitDocStart,
       // heading / callout / toggle の折りたたみ。macOS の ⌥. は "≥" を生むが、
       // prosemirror-keymap が keyCode から base key を解決するのでこの binding で届く
       "Alt-.": toggleCollapse,

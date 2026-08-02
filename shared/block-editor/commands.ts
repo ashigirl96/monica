@@ -716,6 +716,52 @@ export const exitCodeBlock: Command = (state, dispatch) => {
   return true;
 };
 
+// exitDocEnd の上端版。Ctrl-p（↑と同義）で文書の上端からさらに上へ進もうとしたとき、
+// 文書先頭（root level）に空 paragraph を足してカーソルを移す。
+// 先頭が既に空の text 行ならそこへカーソルを移すだけで何も足さない。
+// カーソルの上にまだ置ける block が残っている間は false を返し、
+// 通常のカーソル上移動（native）に任せる。
+export const exitDocStart: Command = (state, dispatch, view) => {
+  const visible = visibleContainers(state.doc);
+  const first = visible[0];
+  if (!first) return false;
+
+  const blockSel = blockSelectionKey.getState(state);
+  const currentId =
+    blockSel && blockSel.selectedIds.length > 0
+      ? blockSel.headId
+      : (getBlockContext(state.selection.$from)?.containerNode.attrs.id as string | null);
+  if (!currentId) return false;
+  const idx = visible.findIndex((v) => v.id === currentId);
+  if (idx === -1) return false;
+  // 上方向にカーソルを置ける block が残っているなら通常の上移動に任せる
+  for (let i = 0; i < idx; i++) {
+    if (!isAtomBlock(visible[i].node.child(0).type)) return false;
+  }
+  if (
+    !(blockSel && blockSel.selectedIds.length > 0) &&
+    state.selection instanceof TextSelection &&
+    view &&
+    !view.endOfTextblock("up")
+  ) {
+    return false;
+  }
+
+  const tr = state.tr;
+  if (isEmptyTextLine(first.node)) {
+    tr.setSelection(TextSelection.create(tr.doc, first.pos + 2));
+  } else {
+    // root blockGroup の開きトークン直後 = 文書先頭
+    const at = 1;
+    tr.insert(at, emptyParagraphContainer());
+    tr.setSelection(TextSelection.create(tr.doc, at + 2));
+    tr.setMeta("blockOperation", { type: "insert" });
+  }
+  clearBlockSelection(tr);
+  dispatch?.(tr.scrollIntoView());
+  return true;
+};
+
 export const codeNewline: Command = (state, dispatch) => {
   const ctx = getBlockContext(state.selection.$from);
   if (!ctx || ctx.contentNode.type !== nodes.codeBlock) return false;

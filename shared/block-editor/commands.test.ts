@@ -27,6 +27,7 @@ import {
   duplicateRange,
   exitCallout,
   exitDocEnd,
+  exitDocStart,
   foldTransaction,
   indentRange,
   moveRange,
@@ -1096,5 +1097,65 @@ describe("exitDocEnd", () => {
       { type: "paragraph", text: "" },
     ]);
     assertInvariants(result.state.doc);
+  });
+});
+
+describe("exitDocStart", () => {
+  test("先頭の非空 block では上に空 paragraph を足してカーソルを移す", () => {
+    const doc = docOf(block("A", para("ab")));
+    const state = stateWithCursor(doc, "A", "start");
+    const result = run(state, exitDocStart)!;
+    expect(docShape(result.state.doc)).toMatchObject([
+      { type: "paragraph", text: "" },
+      { id: "A", type: "paragraph", text: "ab" },
+    ]);
+    assertInvariants(result.state.doc);
+    expect(result.state.selection.head).toBe(3);
+  });
+
+  test("先頭が空 paragraph ならカーソルを移すだけで何も足さない", () => {
+    const doc = docOf(block("A", para("")), block("B", para("ab")));
+    const state = stateWithCursor(doc, "A", "start");
+    const result = run(state, exitDocStart)!;
+    expect(result.state.doc.eq(doc)).toBe(true);
+    expect(result.state.selection.head).toBe(containerById(doc, "A")!.pos + 2);
+  });
+
+  test("上にカーソルを置ける block が残っていれば false（通常の上移動に任せる）", () => {
+    const doc = docOf(block("A", para("ab")), block("B", para("cd")));
+    const state = stateWithCursor(doc, "B", "start");
+    expect(run(state, exitDocStart)).toBeNull();
+  });
+
+  test("上が atom block だけなら先頭に空 paragraph を足す", () => {
+    const doc = docOf(block("A", bookmark()), block("B", para("ab")));
+    const state = stateWithCursor(doc, "B", "start");
+    const result = run(state, exitDocStart)!;
+    expect(docShape(result.state.doc)).toMatchObject([
+      { type: "paragraph", text: "" },
+      { id: "A", type: "bookmark" },
+      { id: "B", type: "paragraph", text: "ab" },
+    ]);
+    assertInvariants(result.state.doc);
+    expect(result.state.selection.head).toBe(3);
+  });
+
+  test("先頭 bookmark の block selection 中でも先頭に空 paragraph を足す", () => {
+    const doc = docOf(block("A", bookmark()), block("B", para("ab")));
+    const state = stateWithBlockSelection(doc, "A");
+    const result = run(state, exitDocStart)!;
+    expect(docShape(result.state.doc)).toMatchObject([
+      { type: "paragraph", text: "" },
+      { id: "A", type: "bookmark" },
+      { id: "B", type: "paragraph", text: "ab" },
+    ]);
+    expect(blockSelectionKey.getState(result.state)?.selectedIds).toEqual([]);
+    expect(result.state.selection.$head.parent.type.name).toBe("paragraph");
+  });
+
+  test("先頭 block の child からは false（通常の上移動に任せる）", () => {
+    const doc = docOf(block("A", para("A"), [block("X", para("x"))]));
+    const state = stateWithCursor(doc, "X", "start");
+    expect(run(state, exitDocStart)).toBeNull();
   });
 });
