@@ -12,6 +12,36 @@ build-web:
 dev-web:
     bun --bun vite dev --config web/vite.config.ts
 
+# dist-web は release バイナリに rust-embed で焼き込まれるため、素のままだと web/ の
+# 1 行変更にも fat LTO の再リンクを含む install-app が要る。<MONICA_HOME>/web-dist を
+# repo の dist-web へ向けると web サーバがそちらを毎リクエスト読むので、以降は
+# build-web + ブラウザリロードだけで反映される（Monica の再起動も不要）。
+#
+# web/ の変更を install-app なしで反映させる（以後は build-web + リロードだけ）
+link-web-dist: build-web
+    #!/usr/bin/env bash
+    set -euo pipefail
+    target="${MONICA_HOME:-$HOME/monica}/web-dist"
+    if [ -e "$target" ] && [ ! -L "$target" ]; then
+        echo "$target exists and is not a symlink; remove it first" >&2
+        exit 1
+    fi
+    ln -sfn "{{justfile_directory()}}/dist-web" "$target"
+    echo "linked: $target -> {{justfile_directory()}}/dist-web"
+    echo "以降 web/ の変更は 'just build-web' + リロードで反映される"
+
+# 上書きを解除して、埋め込み済み（= install-app した時点の）dist-web に戻す。
+unlink-web-dist:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    target="${MONICA_HOME:-$HOME/monica}/web-dist"
+    if [ -e "$target" ] && [ ! -L "$target" ]; then
+        echo "$target is not a symlink; leaving it alone" >&2
+        exit 1
+    fi
+    rm -f "$target"
+    echo "unlinked: $target (埋め込みアセットに戻る)"
+
 dev: build-web dev-cli ptyd-bin bridge-bin
     MONICA_HOME="$HOME/monica/dev" MONICA_BIN="{{justfile_directory()}}/monica-dev" MONICA_PTYD_PATH="{{justfile_directory()}}/target/debug/monica-ptyd" MONICA_BROWSER_BRIDGE_PATH="{{justfile_directory()}}/target/debug/monica-browser-bridge" bun run tauri dev
 

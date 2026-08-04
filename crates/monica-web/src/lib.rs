@@ -1,5 +1,6 @@
 use std::future::IntoFuture;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
 
@@ -206,12 +207,42 @@ async fn root() -> Redirect {
     Redirect::to("/explanations")
 }
 
+/// `<base>/web-dist` があればそこを、なければ埋め込みを読む。毎リクエスト解決するので、
+/// symlink の付け外しも dist-web の再ビルドも Monica を再起動せずに反映される。
+fn dist_override_dir() -> Option<PathBuf> {
+    let dir = monica_paths::web_dist_override_dir().ok()?;
+    dir.is_dir().then_some(dir)
+}
+
+/// 埋め込みと違いディスク読みは `..` で dist の外へ出られるため、通常成分だけを通す。
+fn dist_join(root: &std::path::Path, path: &str) -> Option<PathBuf> {
+    let mut out = root.to_path_buf();
+    for part in path.split('/') {
+        if part.is_empty() || part == "." || part == ".." {
+            return None;
+        }
+        out.push(part);
+    }
+    Some(out)
+}
+
+fn read_dist_file(dir: &std::path::Path, path: &str) -> Option<Vec<u8>> {
+    std::fs::read(dist_join(dir, path)?).ok()
+}
+
+fn asset_bytes(path: &str) -> Option<Vec<u8>> {
+    match dist_override_dir() {
+        Some(dir) => read_dist_file(&dir, path),
+        None => WebAssets::get(path).map(|file| file.data.into_owned()),
+    }
+}
+
 async fn spa_index() -> Response {
-    match WebAssets::get("index.html") {
-        Some(file) => (
+    match asset_bytes("index.html") {
+        Some(data) => (
             StatusCode::OK,
             [("content-type", "text/html; charset=utf-8")],
-            file.data,
+            data,
         )
             .into_response(),
         None => (StatusCode::NOT_FOUND, "SPA not built").into_response(),
@@ -219,21 +250,18 @@ async fn spa_index() -> Response {
 }
 
 async fn spa_asset(Path(path): Path<String>) -> Response {
-    serve_embedded(&format!("assets/{path}"))
+    serve_asset(&format!("assets/{path}"))
 }
 
 async fn favicon() -> Response {
-    serve_embedded("favicon.png")
+    serve_asset("favicon.png")
 }
 
-fn serve_embedded(path: &str) -> Response {
-    match WebAssets::get(path) {
-        Some(file) => (
-            StatusCode::OK,
-            [("content-type", content_type(path))],
-            file.data,
-        )
-            .into_response(),
+fn serve_asset(path: &str) -> Response {
+    match asset_bytes(path) {
+        Some(data) => {
+            (StatusCode::OK, [("content-type", content_type(path))], data).into_response()
+        }
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -756,6 +784,10 @@ pub fn serve(bind: WebBind, port_tx: SyncSender<u16>) -> Result<()> {
         log::warn!(target: "monica_web", "initial store open failed: {e:#}");
     }
 
+    if let Some(dir) = dist_override_dir() {
+        log::info!(target: "monica_web", "SPA served from {} (embedded assets bypassed)", dir.display());
+    }
+
     // enable_time は reqwest の timeout（OGP 取得）が time driver を要求するため
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_io()
@@ -929,7 +961,7 @@ mod tests {
     async fn spa_explanations_returns_html() {
         let response = app().oneshot(get_req("/explanations")).await.unwrap();
         let status = response.status();
-        if WebAssets::get("index.html").is_some() {
+        if asset_bytes("index.html").is_some() {
             assert_eq!(status, StatusCode::OK);
             let ct = response
                 .headers()
@@ -950,7 +982,7 @@ mod tests {
             .await
             .unwrap();
         let status = response.status();
-        if WebAssets::get("index.html").is_some() {
+        if asset_bytes("index.html").is_some() {
             assert_eq!(status, StatusCode::OK);
         } else {
             assert_eq!(status, StatusCode::NOT_FOUND);
@@ -970,6 +1002,20 @@ mod tests {
     async fn unknown_path_returns_404() {
         let response = app().oneshot(get_req("/nonexistent")).await.unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// dist 上書き読みは埋め込みと違い実ファイルシステムを触るため、`..` で外へ出られないこと。
+    #[test]
+    fn read_dist_file_stays_inside_dir() {
+        let root = monica_paths::base_dir().unwrap().join("dist-join-test");
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        std::fs::write(root.join("assets").join("app.js"), b"ok").unwrap();
+        std::fs::write(root.join("..").join("outside.js"), b"leak").unwrap();
+
+        assert_eq!(read_dist_file(&root, "assets/app.js"), Some(b"ok".to_vec()));
+        for escape in ["../outside.js", "assets/../../outside.js", "assets//app.js"] {
+            assert_eq!(read_dist_file(&root, escape), None, "path: {escape}");
+        }
     }
 
     #[tokio::test]
@@ -1997,7 +2043,7 @@ mod tests {
         for uri in ["/notes", "/notes/note-1", "/settings", "/daily", "/daily/2026-07-24"] {
             let response = app().oneshot(get_req(uri)).await.unwrap();
             let status = response.status();
-            if WebAssets::get("index.html").is_some() {
+            if asset_bytes("index.html").is_some() {
                 assert_eq!(status, StatusCode::OK, "uri: {uri}");
             } else {
                 assert_eq!(status, StatusCode::NOT_FOUND, "uri: {uri}");

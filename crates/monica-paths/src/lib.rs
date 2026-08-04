@@ -18,6 +18,13 @@ pub fn db_path() -> Result<PathBuf> {
     Ok(base_dir()?.join("db").join("monica.db"))
 }
 
+/// 存在すれば web サーバがバイナリ埋め込みの代わりに読む dist-web: `<base>/web-dist`。
+/// repo の `dist-web` への symlink を置くと `just build-web` だけで反映でき、release
+/// ビルドと再起動が要らなくなる（`just link-web-dist` / `just unlink-web-dist`）。
+pub fn web_dist_override_dir() -> Result<PathBuf> {
+    Ok(base_dir()?.join("web-dist"))
+}
+
 pub fn task_runs_dir() -> Result<PathBuf> {
     Ok(base_dir()?.join("runs"))
 }
