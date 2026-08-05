@@ -48,7 +48,7 @@ export function NoteBlockEditor({
       importExternalImage={importImageAsset}
       renderMarkdown={renderNoteMarkdown}
       handleRef={handleRef}
-      className="min-h-[70dvh] pt-4 pb-24"
+      className="min-h-[70dvh] pt-4 pb-[40dvh]"
     />
   );
 }
