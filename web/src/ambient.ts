@@ -33,32 +33,32 @@ export const AMBIENTS = {
   universe: {
     label: "Universe",
     image: universeImage,
-    blur: "2px",
-    opacity: { dark: 0.85, light: 0.6 },
+    blur: "3px",
+    opacity: { dark: 0.85, light: 0.9 },
   },
   sakura: {
     label: "Sakura",
     image: sakuraImage,
-    blur: "10px",
-    opacity: { dark: 0.8, light: 0.5 },
+    blur: "15px",
+    opacity: { dark: 0.5, light: 0.8 },
   },
   village: {
     label: "Village",
     image: villageImage,
     blur: "10px",
-    opacity: { dark: 0.8, light: 0.5 },
+    opacity: { dark: 0.5, light: 0.8 },
   },
   fireworks: {
     label: "Fireworks",
     image: fireworksImage,
     blur: "4px",
-    opacity: { dark: 0.85, light: 0.6 },
+    opacity: { dark: 0.5, light: 0.8 },
   },
   shrine: {
     label: "Shrine",
     image: shrineImage,
-    blur: "10px",
-    opacity: { dark: 0.7, light: 0.5 },
+    blur: "12px",
+    opacity: { dark: 0.5, light: 0.8 },
   },
 } as const;
 
