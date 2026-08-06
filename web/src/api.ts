@@ -167,6 +167,17 @@ export async function renderNoteMarkdown(content: unknown): Promise<string> {
   return res.text();
 }
 
+// renderNoteMarkdown の逆向き（markdown text → ProseMirror doc JSON）。plain text paste の取り込み用。
+export async function parseNoteMarkdown(markdown: string): Promise<unknown> {
+  const res = await fetch("/api/notes/from-markdown", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ markdown }),
+  });
+  if (!res.ok) throw new Error(`Failed to parse markdown: ${res.status}`);
+  return res.json();
+}
+
 // null = dangling（404 も通信失敗も同じ扱いにして NodeView 側の分岐を増やさない）。
 // キャッシュはここでは持たず、埋め込み側がエディタの寿命に合わせてスコープする。
 export async function resolveNoteMention(id: string): Promise<NoteMention | null> {

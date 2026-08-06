@@ -196,6 +196,19 @@ impl Renderer<'_> {
                 let fence = "`".repeat(max_backtick_run(&code).max(2) + 1);
                 Some((format!("{fence}{language}\n{code}\n{fence}"), false))
             }
+            BlockNode::Table { content } => {
+                self.render_table(content.as_deref().unwrap_or_default())
+            }
+            // 行・セルが table の外に単体で現れることはない（typed model の寛容さの残余）。
+            // 現れた場合も行 / セル単位のテキストとして拾い、データを落とさない。
+            BlockNode::TableRow { content } => {
+                let line = self.table_row_line(content.as_deref().unwrap_or_default());
+                (!line.is_empty()).then_some((line, false))
+            }
+            BlockNode::TableCell { content, .. } => {
+                let text = self.table_cell_text(content);
+                (!text.is_empty()).then_some((text, false))
+            }
             BlockNode::Divider => Some(("---".to_string(), false)),
             BlockNode::Bookmark { attrs } => {
                 let href = attrs.as_ref().and_then(|a| a.href.as_deref());
@@ -226,6 +239,40 @@ impl Renderer<'_> {
                 (!sub.is_empty()).then(|| (join_blocks(&sub), false))
             }
         }
+    }
+
+    /// table → GFM。先頭行のセルが header なら delimiter 行（`| --- |`）を挟む。
+    /// header なし table は delimiter を出さない（re-import で先頭行が header 化しないように）。
+    fn render_table(&self, rows: &[BlockNode]) -> Option<Block> {
+        let mut lines = Vec::new();
+        for (i, row) in rows.iter().enumerate() {
+            let BlockNode::TableRow { content } = row else { continue };
+            let cells = content.as_deref().unwrap_or_default();
+            lines.push(self.table_row_line(cells));
+            if i == 0 && is_header_row(row) {
+                let delimiter: Vec<&str> = cells.iter().map(|_| "---").collect();
+                lines.push(format!("| {} |", delimiter.join(" | ")));
+            }
+        }
+        (!lines.is_empty()).then(|| (lines.join("\n"), false))
+    }
+
+    fn table_row_line(&self, cells: &[BlockNode]) -> String {
+        let rendered: Vec<String> = cells
+            .iter()
+            .map(|cell| match cell {
+                BlockNode::TableCell { content, .. } => self.table_cell_text(content),
+                _ => String::new(),
+            })
+            .collect();
+        format!("| {} |", rendered.join(" | "))
+    }
+
+    /// セル内テキスト。`|` は行構造を壊すためエスケープし、hardBreak 由来の改行は空白に潰す。
+    /// `\` も二重化する: そのまま出すとセル末尾の `\` が続く `\|` のエスケープを食い、
+    /// import 側で区切りとして読まれてセルが 1 つ増える（表の構造が変わる）。
+    fn table_cell_text(&self, content: &Option<Vec<InlineNode>>) -> String {
+        self.inlines(content).replace('\\', "\\\\").replace('|', "\\|").replace('\n', " ")
     }
 
     fn render_synced(&mut self, attrs: Option<&SyncedBlockAttrs>) -> Option<Block> {
@@ -314,6 +361,20 @@ impl Renderer<'_> {
             Some(title) if !title.is_empty() => format!("[[{note_id}|{title}]]"),
             _ => format!("[[{note_id}]]"),
         }
+    }
+}
+
+fn is_header_row(row: &BlockNode) -> bool {
+    match row {
+        BlockNode::TableRow { content } => {
+            content.as_deref().unwrap_or_default().iter().any(|cell| {
+                matches!(
+                    cell,
+                    BlockNode::TableCell { attrs: Some(attrs), .. } if attrs.header == Some(true)
+                )
+            })
+        }
+        _ => false,
     }
 }
 

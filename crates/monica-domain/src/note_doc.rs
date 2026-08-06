@@ -109,6 +109,20 @@ pub enum BlockNode {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         content: Option<Vec<InlineNode>>,
     },
+    Table {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content: Option<Vec<BlockNode>>,
+    },
+    TableRow {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content: Option<Vec<BlockNode>>,
+    },
+    TableCell {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attrs: Option<TableCellAttrs>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content: Option<Vec<InlineNode>>,
+    },
     Divider,
     Bookmark {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -212,6 +226,14 @@ pub struct ToggleAttrs {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TableCellAttrs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header: Option<bool>,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CalloutAttrs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
@@ -302,16 +324,19 @@ pub struct LinkMarkAttrs {
 }
 
 impl BlockNode {
-    fn child_blocks(&self) -> Option<&[BlockNode]> {
+    /// block 子ノード（group / container / table の行・セル構造）。walker の再帰の要。
+    pub fn child_blocks(&self) -> Option<&[BlockNode]> {
         match self {
-            BlockNode::BlockGroup { content } | BlockNode::BlockContainer { content, .. } => {
-                content.as_deref()
-            }
+            BlockNode::BlockGroup { content }
+            | BlockNode::BlockContainer { content, .. }
+            | BlockNode::Table { content }
+            | BlockNode::TableRow { content } => content.as_deref(),
             _ => None,
         }
     }
 
-    fn inline_content(&self) -> Option<&[InlineNode]> {
+    /// inline content を持つ blockContent（textblock 相当）の中身。
+    pub fn inline_content(&self) -> Option<&[InlineNode]> {
         match self {
             BlockNode::Paragraph { content }
             | BlockNode::Heading { content, .. }
@@ -321,7 +346,8 @@ impl BlockNode {
             | BlockNode::Toggle { content, .. }
             | BlockNode::Quote { content }
             | BlockNode::Callout { content, .. }
-            | BlockNode::CodeBlock { content, .. } => content.as_deref(),
+            | BlockNode::CodeBlock { content, .. }
+            | BlockNode::TableCell { content, .. } => content.as_deref(),
             _ => None,
         }
     }
@@ -432,6 +458,22 @@ fn collect_plain_lines(node: &BlockNode, out: &mut String) {
     }
 }
 
+/// table の行・セル間に空白を挟んで再帰する。区切りなしだと隣接セルの語が連結されて
+/// FTS のトークンが壊れる。preview（collect_block_text）と同じ区切りにすること —
+/// preview ⊆ plain_text の superset 契約が崩れる。
+fn collect_cells_separated(
+    cells: &[BlockNode],
+    collect: impl Fn(&BlockNode, &mut String),
+    out: &mut String,
+) {
+    for cell in cells {
+        if !out.is_empty() && !out.ends_with(char::is_whitespace) {
+            out.push(' ');
+        }
+        collect(cell, out);
+    }
+}
+
 /// 検索索引（plain_text）用の可視テキスト収集。`collect_block_text`（preview 用・text ノード
 /// のみ）と違い、markdown 投影で実際に表示される atom ノードのラベル（linkMention / bookmark の
 /// title、noteMention の note id）も拾う。生 content への `LIKE` で拾えていた可視 attr 由来の
@@ -439,6 +481,13 @@ fn collect_plain_lines(node: &BlockNode, out: &mut String) {
 fn collect_visible_text(node: &BlockNode, out: &mut String) {
     match node {
         BlockNode::Unknown(value) => value_collect_text(value, out),
+        BlockNode::Table { content } | BlockNode::TableRow { content } => {
+            collect_cells_separated(
+                content.as_deref().unwrap_or_default(),
+                collect_visible_text,
+                out,
+            );
+        }
         BlockNode::Bookmark { attrs: Some(attrs) } => {
             let label = attrs
                 .title
@@ -524,6 +573,13 @@ fn find_first_line(node: &BlockNode) -> Option<String> {
 fn collect_block_text(node: &BlockNode, out: &mut String) {
     match node {
         BlockNode::Unknown(value) => value_collect_text(value, out),
+        BlockNode::Table { content } | BlockNode::TableRow { content } => {
+            collect_cells_separated(
+                content.as_deref().unwrap_or_default(),
+                collect_block_text,
+                out,
+            );
+        }
         _ => {
             if let Some(inlines) = node.inline_content() {
                 for inline in inlines {

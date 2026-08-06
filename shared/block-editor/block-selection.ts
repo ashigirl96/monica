@@ -12,7 +12,14 @@ import {
   rangeFromIds,
   visibleContainers,
 } from "./context";
-import { deleteRange, duplicateRange, indentRange, moveRange, outdentRange } from "./commands";
+import {
+  deleteRange,
+  duplicateRange,
+  hasAdjacentTableRow,
+  indentRange,
+  moveRange,
+  outdentRange,
+} from "./commands";
 import {
   blockSelectionKey,
   clearBlockSelection,
@@ -132,6 +139,10 @@ function moveVisible(
 function selectAdjacentDivider(view: EditorView, dir: 1 | -1): boolean {
   const sel = view.state.selection;
   if (!sel.empty || !(sel instanceof TextSelection)) return false;
+  // tableCell 内では endOfTextblock がセル単位で真になり、表の途中から表外の divider へ
+  // 飛んでしまう。進める行が残っている間だけ native のセル間移動に任せ、端の行からは
+  // 通常どおり隣接 divider を選ぶ（divider はカーソルを持てないので native では止まれない）。
+  if (hasAdjacentTableRow(sel.$from, dir)) return false;
   if (!view.endOfTextblock(dir === 1 ? "down" : "up")) return false;
   const ctx = getBlockContext(sel.$from);
   const id = ctx?.containerNode.attrs.id as string | null | undefined;
@@ -159,8 +170,10 @@ function stepOffDivider(view: EditorView, id: string, dir: 1 | -1): boolean | nu
     return true;
   }
   const tr = view.state.tr;
+  // near で解決する: table のような入れ子 textblock では content 端が有効な
+  // テキスト位置にならないため、create だと選択が壊れる（textblock なら等価）
   const pos = dir === 1 ? target.pos + 2 : target.pos + 2 + content.content.size;
-  tr.setSelection(TextSelection.create(tr.doc, pos));
+  tr.setSelection(TextSelection.near(tr.doc.resolve(pos), dir === 1 ? 1 : -1));
   view.dispatch(clearBlockSelection(tr).scrollIntoView());
   view.focus();
   return true;
@@ -172,7 +185,8 @@ function enterEditMode(view: EditorView, state: BlockSelectionState): boolean {
   const tr = view.state.tr;
   if (entry && entry.node.child(0).type !== nodes.divider) {
     const content = entry.node.child(0);
-    tr.setSelection(TextSelection.create(tr.doc, entry.pos + 2 + content.content.size));
+    // table では content 端が非テキスト位置になるため near で最寄り（最終セル末尾）に落とす
+    tr.setSelection(TextSelection.near(tr.doc.resolve(entry.pos + 2 + content.content.size), -1));
   }
   view.dispatch(clearBlockSelection(tr));
   view.focus();

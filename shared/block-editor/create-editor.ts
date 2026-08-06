@@ -18,7 +18,7 @@ import type { OnNoteMentionClick, ResolveNoteMention } from "./node-views";
 import { normalizerPlugin } from "./normalizer";
 import { blockDecorationsPlugin, placeholderPlugin } from "./decorations";
 import { clipboardPlugin } from "./clipboard";
-import type { RenderMarkdown } from "./clipboard";
+import type { ParseMarkdown, RenderMarkdown } from "./clipboard";
 import { linkClickPlugin } from "./link-click";
 import { editorNodeViews } from "./node-views";
 import { SyncedBlockView, syncedBlockRefreshPlugin } from "./synced-block";
@@ -84,6 +84,8 @@ export type BlockEditorCallbacks = {
   importExternalImage?: ImportExternalImage;
   /** 選択範囲の doc JSON を markdown へ投影する。未指定なら markdown コピーは無効（plain text 縮退）。 */
   renderMarkdown?: RenderMarkdown;
+  /** plain text paste を markdown として取り込む。未指定なら素のテキスト挿入に縮退。 */
+  parseMarkdown?: ParseMarkdown;
 };
 
 export function createBlockEditor(
@@ -102,6 +104,7 @@ export function createBlockEditor(
     uploadImage,
     importExternalImage,
     renderMarkdown,
+    parseMarkdown,
   }: BlockEditorCallbacks = {},
 ): EditorView {
   // synced block の NodeView 群を refresh plugin と共有する（同一ノート内のライブ反映用）
@@ -157,7 +160,12 @@ export function createBlockEditor(
       ...(uploadImage
         ? [imageUploadPlugin({ upload: uploadImage, importExternal: importExternalImage })]
         : []),
-      clipboardPlugin({ sourceNoteId: noteId, syncPasteEnabled: !!resolveBlock, renderMarkdown }),
+      clipboardPlugin({
+        sourceNoteId: noteId,
+        syncPasteEnabled: !!resolveBlock,
+        renderMarkdown,
+        parseMarkdown,
+      }),
       linkClickPlugin(),
       syncedBlockRefreshPlugin(syncedRegistry),
       normalizerPlugin(),

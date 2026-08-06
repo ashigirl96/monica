@@ -13,7 +13,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use monica_application::{ApplicationError, ApplicationEvent, EventSink};
-use monica_domain::{ExplanationId, SyncedBlockMode};
+use monica_domain::{from_markdown, ExplanationId, SyncedBlockMode};
 
 pub const PORT_PROD: u16 = 19280;
 /// dev のデフォルト bind レンジ。PORT_PROD は稼働中の Monica.app が使うため含めない。
@@ -506,6 +506,17 @@ async fn render_note_markdown(
     Ok(markdown_response(markdown))
 }
 
+#[derive(serde::Deserialize)]
+struct FromMarkdownBody {
+    markdown: String,
+}
+
+/// markdown → ProseMirror doc JSON（paste 取り込み用、`render_note_markdown` の逆向き）。
+/// 純関数なので DB は開かない。
+async fn parse_note_markdown(Json(body): Json<FromMarkdownBody>) -> Response {
+    Json(from_markdown(&body.markdown)).into_response()
+}
+
 async fn update_note(
     Path(id): Path<String>,
     Json(body): Json<monica_api::ApiUpdateNote>,
@@ -720,6 +731,7 @@ fn build_router(allowed: AllowedHosts) -> Router {
         .route("/api/notes/essays", get(list_essays).post(create_essay))
         .route("/api/notes/project", post(create_project_note))
         .route("/api/notes/project/primary", put(put_primary_note))
+        .route("/api/notes/from-markdown", post(parse_note_markdown))
         .route("/api/notes/markdown", post(render_note_markdown))
         .route("/api/notes/mentions", get(search_note_mentions))
         .route("/api/notes/mentions/{id}", get(resolve_note_mention))

@@ -20,24 +20,13 @@ fn assert_roundtrip(source: &str) -> DocNode {
 /// 未知として残ったノード数を数えて、既知ノードが本当に型付き variant で受かったことを固定する。
 fn count_unknown(doc: &DocNode) -> usize {
     fn walk_block(node: &BlockNode) -> usize {
-        match node {
-            BlockNode::Unknown(_) => 1,
-            BlockNode::BlockGroup { content } | BlockNode::BlockContainer { content, .. } => {
-                content.iter().flatten().map(walk_block).sum()
-            }
-            BlockNode::Paragraph { content }
-            | BlockNode::Heading { content, .. }
-            | BlockNode::Todo { content, .. }
-            | BlockNode::Bullet { content }
-            | BlockNode::Numbered { content, .. }
-            | BlockNode::Toggle { content, .. }
-            | BlockNode::Quote { content }
-            | BlockNode::Callout { content, .. }
-            | BlockNode::CodeBlock { content, .. } => {
-                content.iter().flatten().map(walk_inline).sum()
-            }
-            _ => 0,
+        if matches!(node, BlockNode::Unknown(_)) {
+            return 1;
         }
+        let blocks: usize = node.child_blocks().unwrap_or_default().iter().map(walk_block).sum();
+        let inlines: usize =
+            node.inline_content().unwrap_or_default().iter().map(walk_inline).sum();
+        blocks + inlines
     }
     fn walk_inline(node: &InlineNode) -> usize {
         match node {

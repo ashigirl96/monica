@@ -58,7 +58,8 @@ export function indentRange(state: EditorState, range: SiblingRange): Transactio
   if (range.fromIndex === 0) return null;
   const group = range.groupNode;
   const prev = group.child(range.fromIndex - 1);
-  if (isAtomBlock(prev.child(0).type)) return null;
+  // atom は operable でないため、table は配下に子ツリーを持たせない方針のため、どちらも受け側にしない
+  if (isAtomBlock(prev.child(0).type) || prev.child(0).type === nodes.table) return null;
   const selected: PMNode[] = [];
   for (let i = range.fromIndex; i <= range.toIndex; i++) selected.push(group.child(i));
   // 折りたたまれた block の下へ入れると不可視になるため開く
@@ -187,6 +188,9 @@ function splitRightContent(content: PMNode, offset: number): PMNode {
 export const ignoreCompositionEnter: Command = (state, dispatch, view) => {
   if (view?.composing !== true) return false;
   const ctx = getBlockContext(state.selection.$from);
+  // 入れ子 textblock（tableCell）内では parent ≠ contentNode。ここでの delete は
+  // 表全体を消してしまうので、DOM 修復は行わず Enter の消費だけに留める。
+  if (ctx && state.selection.$from.parent !== ctx.contentNode) return true;
   if (ctx && dispatch && ctx.contentNode.content.size > 0) {
     const dom = view.nodeDOM(ctx.contentPos);
     const domEmptied =
@@ -207,6 +211,9 @@ export const splitBlock: Command = (state, dispatch) => {
   if (!preCtx) return false;
   if (preCtx.contentNode.type === nodes.codeBlock || preCtx.contentNode.type === nodes.divider)
     return false;
+  // cell 内の Enter は keymap の tableEnter が先取りする。ここに来た場合も
+  // content.cut(offset) が表を壊すので何もしない（防衛的ガード）。
+  if (preCtx.contentNode.type === nodes.table) return false;
 
   // §4.2: 空 list-like は Enter で outdent（nested）/ paragraph 化（root）
   if (sel.empty && isListLike(preCtx.contentNode.type) && preCtx.contentNode.content.size === 0) {
@@ -661,6 +668,18 @@ export function insertParagraphAfter(state: EditorState, containerPos: number): 
   return tr.setMeta("blockOperation", { type: "insert" });
 }
 
+// tableCell は blockContainer 内の入れ子 textblock なので endOfTextblock はセル単位で
+// 真になる。表の途中の行から exitDoc* が発火すると、残りの行を飛ばして表外へ抜けて
+// しまう。進める行が残っているセル内では false を返してネイティブの移動に任せる。
+export function hasAdjacentTableRow($pos: ResolvedPos, dir: 1 | -1): boolean {
+  for (let depth = $pos.depth; depth >= 5; depth--) {
+    if ($pos.node(depth).type !== nodes.tableCell) continue;
+    const rowIndex = $pos.index(depth - 2);
+    return dir === 1 ? rowIndex < $pos.node(depth - 2).childCount - 1 : rowIndex > 0;
+  }
+  return false;
+}
+
 // Ctrl-n（↓と同義）で文書の下端からさらに下へ進もうとしたときの脱出ハッチ。
 // bookmark / divider などの atom block が末尾にあるとその後ろに行を作る手段が
 // ないため、文書末尾（root level）に空 paragraph を足してカーソルを移す。
@@ -687,8 +706,7 @@ export const exitDocEnd: Command = (state, dispatch, view) => {
   if (
     !(blockSel && blockSel.selectedIds.length > 0) &&
     state.selection instanceof TextSelection &&
-    view &&
-    !view.endOfTextblock("down")
+    (hasAdjacentTableRow(state.selection.$from, 1) || (view && !view.endOfTextblock("down")))
   ) {
     return false;
   }
@@ -741,8 +759,7 @@ export const exitDocStart: Command = (state, dispatch, view) => {
   if (
     !(blockSel && blockSel.selectedIds.length > 0) &&
     state.selection instanceof TextSelection &&
-    view &&
-    !view.endOfTextblock("up")
+    (hasAdjacentTableRow(state.selection.$from, -1) || (view && !view.endOfTextblock("up")))
   ) {
     return false;
   }

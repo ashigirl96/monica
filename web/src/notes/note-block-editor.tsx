@@ -2,7 +2,7 @@ import type { RefObject } from "react";
 import { BlockEditor, type BlockEditorHandle } from "@shared/block-editor/block-editor";
 import type { OnNoteMentionClick, ResolveNoteMention } from "@shared/block-editor/node-views";
 import type { OnOpenBlock, ResolveBlock } from "@shared/block-editor/synced-block";
-import { importImageAsset, renderNoteMarkdown, uploadImageAsset } from "@/api";
+import { importImageAsset, parseNoteMarkdown, renderNoteMarkdown, uploadImageAsset } from "@/api";
 import type { Note } from "@/types.gen";
 import { fetchLinkMetadata, searchNoteMentions } from "./editor-support";
 
@@ -47,6 +47,7 @@ export function NoteBlockEditor({
       uploadImage={uploadImageAsset}
       importExternalImage={importImageAsset}
       renderMarkdown={renderNoteMarkdown}
+      parseMarkdown={parseNoteMarkdown}
       handleRef={handleRef}
       className="min-h-[70dvh] pt-4 pb-[40dvh]"
     />
