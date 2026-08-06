@@ -16,6 +16,7 @@ mod json;
 mod note;
 mod note_doc;
 mod note_markdown;
+mod note_markdown_import;
 mod notification;
 mod project;
 mod refs;
@@ -41,10 +42,11 @@ pub use note::{
 pub use note_doc::{
     block_subtree, first_line_preview, plain_text, BlockContainerAttrs, BlockNode, BookmarkAttrs,
     CalloutAttrs, CodeBlockAttrs, DocNode, HeadingAttrs, ImageAttrs, InlineNode, LinkMarkAttrs,
-    LinkMentionAttrs, Mark, NoteMentionAttrs, NumberedAttrs, SyncedBlockAttrs, TodoAttrs,
-    ToggleAttrs,
+    LinkMentionAttrs, Mark, NoteMentionAttrs, NumberedAttrs, SyncedBlockAttrs, TableCellAttrs,
+    TodoAttrs, ToggleAttrs,
 };
 pub use note_markdown::{to_markdown, NoteDocResolver, SyncedBlockMode};
+pub use note_markdown_import::from_markdown;
 pub use notification::{NewNotificationIntent, NotificationIntent, NotificationKind};
 pub use project::{Project, Provider};
 pub use refs::{github_issue_url, parse_issue_number, parse_issue_ref, parse_owner_repo};

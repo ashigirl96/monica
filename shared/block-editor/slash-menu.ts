@@ -4,6 +4,7 @@ import type { Attrs, NodeType } from "@milkdown/kit/prose/model";
 import { nodes } from "./schema";
 import { getBlockContext } from "./context";
 import { appendEmptyParagraphAfter, inlineToPlainText } from "./commands";
+import { createTableContent } from "./table";
 import {
   createMenuOverlay,
   handleMenuNavKey,
@@ -24,6 +25,8 @@ type SlashItem = {
   label: string;
   /* .jb-glyph の data-kind（CSS の mask アイコンに対応） */
   icon: string;
+  /* メニュー内のセクション見出し。連続する同一 group は 1 つの見出しにまとまる */
+  group: string;
   aliases: string[];
   nodeType: NodeType;
   attrs: Attrs | null;
@@ -34,6 +37,7 @@ const ITEMS: SlashItem[] = [
     id: "callout-note",
     label: "Note",
     icon: "note",
+    group: "Callout",
     aliases: ["note", "callout", "info"],
     nodeType: nodes.callout,
     attrs: { kind: "note" },
@@ -42,6 +46,7 @@ const ITEMS: SlashItem[] = [
     id: "callout-tips",
     label: "Tips",
     icon: "tips",
+    group: "Callout",
     aliases: ["tips", "tip", "hint"],
     nodeType: nodes.callout,
     attrs: { kind: "tips" },
@@ -50,6 +55,7 @@ const ITEMS: SlashItem[] = [
     id: "callout-danger",
     label: "Danger",
     icon: "danger",
+    group: "Callout",
     aliases: ["danger", "warning", "caution"],
     nodeType: nodes.callout,
     attrs: { kind: "danger" },
@@ -58,6 +64,7 @@ const ITEMS: SlashItem[] = [
     id: "callout-question",
     label: "Question",
     icon: "question",
+    group: "Callout",
     aliases: ["question", "faq", "help"],
     nodeType: nodes.callout,
     attrs: { kind: "question" },
@@ -66,9 +73,19 @@ const ITEMS: SlashItem[] = [
     id: "callout-example",
     label: "Example",
     icon: "example",
+    group: "Callout",
     aliases: ["example", "sample"],
     nodeType: nodes.callout,
     attrs: { kind: "example" },
+  },
+  {
+    id: "table",
+    label: "Table",
+    icon: "table",
+    group: "Insert",
+    aliases: ["table", "grid"],
+    nodeType: nodes.table,
+    attrs: null,
   },
 ];
 
@@ -96,11 +113,18 @@ function applyItem(view: EditorView, item: SlashItem): void {
       : item.nodeType === nodes.codeBlock
         ? // codeBlock は marks 不可・text* のみなので inline を平文化する
           item.nodeType.create(item.attrs, inlineToPlainText(content))
-        : item.nodeType.create(item.attrs, content.content);
+        : item.nodeType === nodes.table
+          ? // table は inline を直接持てない。元 block のテキストは先頭セルへ引き継ぐ
+            createTableContent(content.content)
+          : item.nodeType.create(item.attrs, content.content);
   tr.replaceWith(ctx.contentPos, ctx.contentPos + content.nodeSize, newContent);
   if (item.nodeType === nodes.divider) {
     // divider はカーソルを持てないので直後に空 paragraph を作って移る
     appendEmptyParagraphAfter(tr, ctx.containerPos);
+  } else if (item.nodeType === nodes.table) {
+    // inlineContent でないためカーソル復元分岐に入らない。先頭セルの末尾へ明示的に置く
+    const firstCell = newContent.child(0).child(0);
+    tr.setSelection(TextSelection.create(tr.doc, ctx.contentPos + 3 + firstCell.content.size));
   } else if (newContent.inlineContent) {
     // replaceWith で潰れたカーソルを変換後 content 内の同 offset へ張り直す
     const offset = Math.min(Math.max(state.pos - (ctx.contentPos + 1), 0), newContent.content.size);
@@ -132,13 +156,16 @@ class SlashMenuView {
       empty.className = "jb-slash-empty";
       empty.textContent = "No results";
       this.menu.append(empty);
-    } else {
-      const heading = document.createElement("div");
-      heading.className = "jb-slash-heading";
-      heading.textContent = "Callout";
-      this.menu.append(heading);
     }
+    let lastGroup: string | null = null;
     items.forEach((item, i) => {
+      if (item.group !== lastGroup) {
+        lastGroup = item.group;
+        const heading = document.createElement("div");
+        heading.className = "jb-slash-heading";
+        heading.textContent = item.group;
+        this.menu.append(heading);
+      }
       const glyph = document.createElement("span");
       glyph.className = "jb-glyph";
       glyph.dataset.kind = item.icon;
@@ -188,7 +215,9 @@ export function slashMenuPlugin(): Plugin<SlashState> {
         const ctx = getBlockContext(view.state.doc.resolve(from));
         if (!ctx) return false;
         const type = ctx.contentNode.type;
-        if (type === nodes.codeBlock || type === nodes.divider) return false;
+        // table: applyItem の replaceWith は contentNode（= 表全体）を置換してしまう
+        if (type === nodes.codeBlock || type === nodes.divider || type === nodes.table)
+          return false;
         const tr = view.state.tr.insertText("/", from, to);
         tr.setMeta(slashKey, { type: "open", pos: from } satisfies SlashMeta);
         view.dispatch(tr);
@@ -211,7 +240,8 @@ export function slashMenuPlugin(): Plugin<SlashState> {
             const ctx = getBlockContext(sel.$from);
             if (!ctx) return false;
             const type = ctx.contentNode.type;
-            if (type === nodes.codeBlock || type === nodes.divider) return false;
+            if (type === nodes.codeBlock || type === nodes.divider || type === nodes.table)
+              return false;
             const tr = view.state.tr.insertText("/", sel.from);
             tr.setMeta(slashKey, { type: "open", pos: sel.from } satisfies SlashMeta);
             view.dispatch(tr);

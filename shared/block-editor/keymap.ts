@@ -24,6 +24,15 @@ import {
   splitBlock,
   toggleCollapse,
 } from "./commands";
+import {
+  tableEnter,
+  tableExit,
+  tableHardBreak,
+  tableLineEnd,
+  tableLineStart,
+  tableNextCell,
+  tablePrevCell,
+} from "./table";
 
 // TODO.md §12.1 の優先順位のうち 3〜7 をここで表現する。
 // 1(composition) は ProseMirror が keyCode 229 を keymap に流さないことで、
@@ -31,19 +40,23 @@ import {
 export function editorKeymap(): Plugin[] {
   return [
     keymap({
-      // code block 内キー（§4.3）→ 通常 block の構造キー（§3・§4・§5）
-      Tab: chainCommands(codeIndent, indentBlock),
-      "Shift-Tab": chainCommands(codeOutdent, outdentBlock),
-      Enter: chainCommands(ignoreCompositionEnter, codeNewline, splitBlock),
-      "Shift-Enter": chainCommands(codeNewline, exitCallout, insertHardBreak),
-      "Mod-Enter": exitCodeBlock,
+      // table cell 内キー → code block 内キー（§4.3）→ 通常 block の構造キー（§3・§4・§5）。
+      // table を先頭に置く: 後続 command は getBlockContext 経由で「table を包む container」
+      // を単位に動いてしまい、cell 内では分割・indent が表を壊す。
+      Tab: chainCommands(tableNextCell, codeIndent, indentBlock),
+      "Shift-Tab": chainCommands(tablePrevCell, codeOutdent, outdentBlock),
+      Enter: chainCommands(ignoreCompositionEnter, tableEnter, codeNewline, splitBlock),
+      // tableHardBreak は exitCallout より前: callout の子として table が nest している場合、
+      // cell 内の Shift-Enter を callout 脱出に食われない
+      "Shift-Enter": chainCommands(codeNewline, tableHardBreak, exitCallout, insertHardBreak),
+      "Mod-Enter": chainCommands(tableExit, exitCodeBlock),
       // 複数 block をまたぐ text selection は prosemirror-view が native 削除を
       // 抑止する（stopNativeHorizontalDelete）ため、deleteSelection で明示的に消す
       Backspace: chainCommands(undoInputRule, deleteSelection, backspaceBlock),
       Delete: chainCommands(deleteSelection, deleteForwardBlock),
       // macOS 流のカーソル移動
-      "Ctrl-a": cursorToLineStart,
-      "Ctrl-e": cursorToLineEnd,
+      "Ctrl-a": chainCommands(tableLineStart, cursorToLineStart),
+      "Ctrl-e": chainCommands(tableLineEnd, cursorToLineEnd),
       // 空行のみ行ごと削除。非空行は false でネイティブの前方 1 文字削除に落とす
       "Ctrl-d": deleteEmptyBlock,
       // ↓と同義だが、最下 block から先へ進めないときだけ末尾に空行を確保する

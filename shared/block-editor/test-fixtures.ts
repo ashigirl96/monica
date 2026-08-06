@@ -32,6 +32,23 @@ export function toggle(text = "", open = true): PMNode {
   return nodes.toggle.create({ open }, text ? schema.text(text) : undefined);
 }
 
+export function tableOf(rows: string[][], headerFirst = false): PMNode {
+  return nodes.table.create(
+    null,
+    rows.map((cells, r) =>
+      nodes.tableRow.create(
+        null,
+        cells.map((text) =>
+          nodes.tableCell.create(
+            { header: headerFirst && r === 0 },
+            text ? schema.text(text) : undefined,
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 export function block(id: string, content: PMNode, children: PMNode[] = []): PMNode {
   return createContainer(content, children, id);
 }

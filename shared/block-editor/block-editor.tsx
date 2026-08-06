@@ -6,7 +6,7 @@ import type { SearchNoteMentions } from "./note-mention-menu";
 import type { OnNoteMentionClick, ResolveNoteMention } from "./node-views";
 import type { OnOpenBlock, ResolveBlock } from "./synced-block";
 import type { ImportExternalImage, UploadImage } from "./image-upload";
-import type { RenderMarkdown } from "./clipboard";
+import type { ParseMarkdown, RenderMarkdown } from "./clipboard";
 import { containerById, visibleContainers } from "./context";
 import { clearBlockHighlight, highlightBlock } from "./block-highlight";
 import { revealPos } from "./folding";
@@ -57,6 +57,8 @@ type BlockEditorProps = {
   importExternalImage?: ImportExternalImage;
   /** 選択範囲の doc JSON を markdown へ投影する。未指定なら markdown コピーは無効（plain text 縮退） */
   renderMarkdown?: RenderMarkdown;
+  /** plain text paste を markdown として取り込む。未指定なら素のテキスト挿入に縮退 */
+  parseMarkdown?: ParseMarkdown;
   /** unmount 時に最終 doc の JSON を受け取る（永続化フック） */
   onUnmount?: (docJson: unknown) => void;
   /** mount 中だけ imperative な操作（focusStart 等）を提供する */
@@ -80,6 +82,7 @@ export function BlockEditor({
   uploadImage,
   importExternalImage,
   renderMarkdown,
+  parseMarkdown,
   onUnmount,
   handleRef,
   className,
@@ -99,6 +102,7 @@ export function BlockEditor({
   const uploadImageRef = useLatest(uploadImage);
   const importExternalImageRef = useLatest(importExternalImage);
   const renderMarkdownRef = useLatest(renderMarkdown);
+  const parseMarkdownRef = useLatest(parseMarkdown);
   const onUnmountRef = useLatest(onUnmount);
   // noteId は key={note.id} 再マウント前提で mount 時に固定する（initialDoc と同じ）
   const noteIdRef = useRef(noteId);
@@ -110,6 +114,7 @@ export function BlockEditor({
   const hasResolveBlock = resolveBlock !== undefined;
   const hasUploadImage = uploadImage !== undefined;
   const hasRenderMarkdown = renderMarkdown !== undefined;
+  const hasParseMarkdown = parseMarkdown !== undefined;
   // initialDoc 等と同じく mount 時に一度だけ読む（差し替えは想定しない）
   const handleRefAtMount = useRef(handleRef);
 
@@ -150,6 +155,10 @@ export function BlockEditor({
         : undefined,
       renderMarkdown: hasRenderMarkdown
         ? (docJson) => renderMarkdownRef.current?.(docJson) ?? Promise.resolve("")
+        : undefined,
+      parseMarkdown: hasParseMarkdown
+        ? (markdown) =>
+            parseMarkdownRef.current?.(markdown) ?? Promise.reject(new Error("unavailable"))
         : undefined,
     });
 

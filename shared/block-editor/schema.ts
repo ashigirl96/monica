@@ -211,6 +211,32 @@ export const schema = new Schema({
       ],
     },
 
+    // GFM 由来の表。blockContent で唯一、入れ子の textblock（tableCell）を持つ。
+    // isolating で cell 境界を越える join / lift を PM 標準コマンドから防ぐ。
+    table: {
+      group: "blockContent",
+      content: "tableRow+",
+      isolating: true,
+      parseDOM: [{ tag: "table" }],
+      // hole は tbody 側に置く: ブラウザが <table> 直下に暗黙の tbody を挿入するため、
+      // 挟まないと PM の想定 DOM と実 DOM がズレる（prosemirror-tables と同じ形）。
+      toDOM: () => ["table", { "data-block-content": "table" }, ["tbody", 0]],
+    },
+
+    tableRow: {
+      content: "tableCell+",
+      parseDOM: [{ tag: "tr" }],
+      toDOM: () => ["tr", 0],
+    },
+
+    tableCell: {
+      content: "inline*",
+      attrs: { header: { default: false } },
+      isolating: true,
+      parseDOM: [{ tag: "td" }, { tag: "th", attrs: { header: true } }],
+      toDOM: (node) => [node.attrs.header ? "th" : "td", 0],
+    },
+
     divider: {
       group: "blockContent",
       atom: true,

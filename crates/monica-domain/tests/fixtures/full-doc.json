@@ -173,6 +173,47 @@
           "content": [
             { "type": "image", "attrs": { "src": null, "uploadId": "up-1", "width": null } }
           ]
+        },
+        {
+          "type": "blockContainer",
+          "attrs": { "id": "b13" },
+          "content": [
+            {
+              "type": "table",
+              "content": [
+                {
+                  "type": "tableRow",
+                  "content": [
+                    {
+                      "type": "tableCell",
+                      "attrs": { "header": true },
+                      "content": [{ "type": "text", "text": "Col A" }]
+                    },
+                    {
+                      "type": "tableCell",
+                      "attrs": { "header": true },
+                      "content": [{ "type": "text", "text": "Col B" }]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableRow",
+                  "content": [
+                    {
+                      "type": "tableCell",
+                      "attrs": { "header": false },
+                      "content": [{ "type": "text", "text": "a1" }]
+                    },
+                    {
+                      "type": "tableCell",
+                      "attrs": { "header": false },
+                      "content": [{ "type": "text", "text": "b1 | piped" }]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       ]
     }

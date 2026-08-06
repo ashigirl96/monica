@@ -17,7 +17,8 @@ function blockRule(
     const ctx = getBlockContext($start);
     if (!ctx) return null;
     const content = ctx.contentNode;
-    if (content.type === nodes.codeBlock) return null;
+    // table は下の contentPos + 1 チェックが構造上偶然弾いてくれるが、偶然に頼らず明示する
+    if (content.type === nodes.codeBlock || content.type === nodes.table) return null;
     // trigger より前に通常文字がない = マッチが content 先頭から始まる（§6.3）
     if (start !== ctx.contentPos + 1) return null;
     const target = resolve(match);

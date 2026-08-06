@@ -61,7 +61,11 @@ fn main() {}
 ![[note-7#^blk-a]]
 ![[note-7#^blk-b]]
 
-![](/api/assets/abc.png)";
+![](/api/assets/abc.png)
+
+| Col A | Col B |
+| --- | --- |
+| a1 | b1 \\| piped |";
 
 /// Expand モードでは syncedBlock だけが resolver 経由の中身に置き換わる（他は同一）。
 const FULL_DOC_EXPANDED_MD: &str = "\
@@ -93,7 +97,11 @@ synced A
 
 synced B
 
-![](/api/assets/abc.png)";
+![](/api/assets/abc.png)
+
+| Col A | Col B |
+| --- | --- |
+| a1 | b1 \\| piped |";
 
 #[test]
 fn full_doc_reference_mode() {
