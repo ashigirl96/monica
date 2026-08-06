@@ -269,8 +269,10 @@ impl Renderer<'_> {
     }
 
     /// セル内テキスト。`|` は行構造を壊すためエスケープし、hardBreak 由来の改行は空白に潰す。
+    /// `\` も二重化する: そのまま出すとセル末尾の `\` が続く `\|` のエスケープを食い、
+    /// import 側で区切りとして読まれてセルが 1 つ増える（表の構造が変わる）。
     fn table_cell_text(&self, content: &Option<Vec<InlineNode>>) -> String {
-        self.inlines(content).replace('|', "\\|").replace('\n', " ")
+        self.inlines(content).replace('\\', "\\\\").replace('|', "\\|").replace('\n', " ")
     }
 
     fn render_synced(&mut self, attrs: Option<&SyncedBlockAttrs>) -> Option<Block> {

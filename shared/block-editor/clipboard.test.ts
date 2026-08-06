@@ -87,14 +87,19 @@ function mdDocJson(...contents: unknown[]): unknown {
   };
 }
 
-/** markdown paste（text/plain のみ）を stub view で通し、async 変換の完了後の state を返す */
+/**
+ * markdown paste（text/plain のみ）を stub view で通し、async 変換の完了後の state を返す。
+ * `meanwhile` は変換の応答前（＝ paste を握っている間）に呼ばれる。
+ */
 async function pasteMarkdown(
   state: EditorState,
   text: string,
   parseMarkdown: (markdown: string) => Promise<unknown>,
+  meanwhile?: (view: EditorView) => void,
 ): Promise<EditorState> {
   const plugin = clipboardPlugin({ parseMarkdown });
-  const holder = { state };
+  // paste 位置の保持は plugin state 側なので、state に登録した上で通す
+  const holder = { state: state.reconfigure({ plugins: [...state.plugins, plugin] }) };
   const view = {
     isDestroyed: false,
     get state() {
@@ -109,6 +114,7 @@ async function pasteMarkdown(
   } as unknown as ClipboardEvent;
   const handled = plugin.props.handlePaste!.call(plugin, view, event, Slice.empty);
   expect(handled).toBe(true);
+  meanwhile?.(view);
   await new Promise((resolve) => setTimeout(resolve, 0));
   return holder.state;
 }
@@ -195,6 +201,56 @@ describe("markdown paste", () => {
     });
     const after = await pasteMarkdown(state, "  ", () => Promise.resolve(mdDocJson()));
     expect(after.doc.child(0).child(0).textContent).toBe("a  b");
+  });
+
+  test("非空の text 選択は block 挿入でも置換される", async () => {
+    const doc = docOf(block("P", para("aaa BBB ccc")));
+    const start = contentPos(doc, "P", "start");
+    const state = EditorState.create({
+      doc,
+      selection: TextSelection.create(doc, start + 4, start + 7),
+    });
+    const parsed = mdDocJson(
+      { type: "bullet", content: [{ type: "text", text: "a" }] },
+      { type: "bullet", content: [{ type: "text", text: "b" }] },
+    );
+    const after = await pasteMarkdown(state, "- a\n- b", () => Promise.resolve(parsed));
+    const group = after.doc.child(0);
+    expect([...Array(group.childCount).keys()].map((i) => group.child(i).textContent)).toEqual([
+      "aaa  ccc",
+      "a",
+      "b",
+    ]);
+  });
+
+  test("変換を待つ間に編集・カーソル移動しても貼り先がずれない", async () => {
+    const doc = docOf(block("A", para("one")), block("B", para("two")));
+    const state = EditorState.create({
+      doc,
+      selection: TextSelection.create(doc, contentPos(doc, "A", "end")),
+    });
+    const parsed = mdDocJson({
+      type: "heading",
+      attrs: { level: 3 },
+      content: [{ type: "text", text: "hoge" }],
+    });
+    const after = await pasteMarkdown(
+      state,
+      "### hoge",
+      () => Promise.resolve(parsed),
+      (view) => {
+        // 前方に文字を入れて位置をずらし、さらにカーソルを別 block へ移す
+        view.dispatch(view.state.tr.insertText("X", contentPos(view.state.doc, "A", "start")));
+        const bStart = contentPos(view.state.doc, "B", "start");
+        view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, bStart)));
+      },
+    );
+    const group = after.doc.child(0);
+    expect([...Array(group.childCount).keys()].map((i) => group.child(i).textContent)).toEqual([
+      "Xone",
+      "hoge",
+      "two",
+    ]);
   });
 
   test("containersFromDocJson は doc 形でない JSON を弾く", () => {

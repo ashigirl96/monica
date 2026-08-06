@@ -671,7 +671,7 @@ export function insertParagraphAfter(state: EditorState, containerPos: number): 
 // tableCell は blockContainer 内の入れ子 textblock なので endOfTextblock はセル単位で
 // 真になる。表の途中の行から exitDoc* が発火すると、残りの行を飛ばして表外へ抜けて
 // しまう。進める行が残っているセル内では false を返してネイティブの移動に任せる。
-function hasAdjacentTableRow($pos: ResolvedPos, dir: 1 | -1): boolean {
+export function hasAdjacentTableRow($pos: ResolvedPos, dir: 1 | -1): boolean {
   for (let depth = $pos.depth; depth >= 5; depth--) {
     if ($pos.node(depth).type !== nodes.tableCell) continue;
     const rowIndex = $pos.index(depth - 2);

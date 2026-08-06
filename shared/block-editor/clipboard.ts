@@ -37,6 +37,25 @@ export function serializeBlocksPayload(
   return JSON.stringify(payload);
 }
 
+// Rust `to_markdown` と同じ GFM 形にする。この plain text は先読みミス時の代替なので、
+// ここだけ表の形が違うと外部へ出したあと貼り戻したときに表に戻らない。
+function tableToGfm(table: PMNode): string {
+  const lines: string[] = [];
+  table.forEach((row, _offset, index) => {
+    const cells: string[] = [];
+    let header = false;
+    row.forEach((cell) => {
+      if (cell.attrs.header) header = true;
+      // `\` は import 側の escape を食わないよう二重化し、hardBreak は空白へ潰す
+      const raw = cell.content.textBetween(0, cell.content.size, undefined, " ");
+      cells.push(raw.replace(/\\/g, "\\\\").replace(/\|/g, "\\|"));
+    });
+    lines.push(`| ${cells.join(" | ")} |`);
+    if (index === 0 && header) lines.push(`| ${cells.map(() => "---").join(" | ")} |`);
+  });
+  return lines.join("\n");
+}
+
 export function blocksToPlainText(containers: readonly PMNode[]): string {
   const lines: string[] = [];
   const walk = (container: PMNode, depth: number) => {
@@ -44,18 +63,8 @@ export function blocksToPlainText(containers: readonly PMNode[]): string {
     let text: string;
     if (content.type === nodes.divider) text = "---";
     else if (content.type === nodes.syncedBlock) text = "[synced block]";
-    else if (content.type === nodes.table) {
-      // textBetween は blockSeparator なしだと全セルが区切りなく連結される
-      const rows: string[] = [];
-      content.forEach((row) => {
-        const cells: string[] = [];
-        row.forEach((cell) => {
-          cells.push(cell.content.textBetween(0, cell.content.size, undefined, "\n"));
-        });
-        rows.push(cells.join(" | "));
-      });
-      text = rows.join("\n");
-    } else text = content.content.textBetween(0, content.content.size, undefined, "\n");
+    else if (content.type === nodes.table) text = tableToGfm(content);
+    else text = content.content.textBetween(0, content.content.size, undefined, "\n");
     lines.push("  ".repeat(depth) + text);
     if (container.childCount > 1) {
       container.child(1).forEach((child) => walk(child, depth + 1));
@@ -237,6 +246,28 @@ export type ClipboardOptions = {
 };
 
 /**
+ * paste の適用位置。`from`〜`to` が非空ならそこを置換し、`blockIds` は paste 時の block 選択。
+ * async な markdown paste では paste 時のこの値を保持して適用するため、選択を直接見ない。
+ */
+type PasteTarget = { from: number; to: number; blockIds: readonly string[] };
+
+function pasteTargetOf(state: EditorState): PasteTarget {
+  return {
+    from: state.selection.from,
+    to: state.selection.to,
+    blockIds: blockSelectionKey.getState(state)?.selectedIds ?? [],
+  };
+}
+
+/** tr の選択を target の範囲に戻す。位置は doc 内へ丸める（stale な保持位置の防衛）。 */
+function selectTarget(tr: Transaction, target: PasteTarget): void {
+  const limit = tr.doc.content.size;
+  const from = Math.min(Math.max(target.from, 0), limit);
+  const to = Math.min(Math.max(target.to, from), limit);
+  tr.setSelection(TextSelection.between(tr.doc.resolve(from), tr.doc.resolve(to)));
+}
+
+/**
  * paste した blockContainer 列の挿入 transaction を作る。block 選択があればその直後、
  * なければ空 paragraph の置き換えかカーソル block の直後。start より前は触らないので、
  * paste-menu のライブプレビュー（replaceWith）の安定アンカーになる。
@@ -244,17 +275,21 @@ export type ClipboardOptions = {
 function insertBlocksTr(
   state: EditorState,
   blocks: readonly PMNode[],
+  target: PasteTarget,
 ): { tr: Transaction; start: number } | null {
   const tr = state.tr;
   let start: number;
-  const selection = blockSelectionKey.getState(state);
-  if (selection && selection.selectedIds.length > 0) {
-    const range = rangeFromIds(state, selection.selectedIds);
+  if (target.blockIds.length > 0) {
+    const range = rangeFromIds(state, target.blockIds);
     if (!range) return null;
     start = rangePositions(range).end;
     tr.insert(start, [...blocks]);
   } else {
-    const ctx = getBlockContext(state.selection.$from);
+    // 非空の text 選択は通常の paste と同じく置換対象。残すと選択されたテキストが
+    // 消えないまま block が後ろに増える。
+    selectTarget(tr, target);
+    if (!tr.selection.empty) tr.deleteSelection();
+    const ctx = getBlockContext(tr.selection.$from);
     if (!ctx) return null;
     // 空 paragraph（子なし）の上なら置き換え、それ以外は直後に挿入
     if (
@@ -291,35 +326,53 @@ export function containersFromDocJson(docJson: unknown): PMNode[] | null {
   }
 }
 
-function insertPlainText(view: EditorView, text: string): void {
-  view.dispatch(view.state.tr.insertText(text).scrollIntoView());
+function insertPlainText(view: EditorView, text: string, target: PasteTarget): void {
+  const tr = view.state.tr;
+  selectTarget(tr, target);
+  view.dispatch(tr.insertText(text).scrollIntoView());
 }
 
 // parse 済み markdown の挿入。単一の paragraph（子なし）だけは block を増やさず
 // カーソル位置へ inline 挿入する（文中への語句 paste が block を割らないように）。
-function applyParsedMarkdown(view: EditorView, docJson: unknown, rawText: string): void {
+function applyParsedMarkdown(
+  view: EditorView,
+  docJson: unknown,
+  rawText: string,
+  target: PasteTarget,
+): void {
   const containers = containersFromDocJson(docJson);
-  if (!containers) return insertPlainText(view, rawText);
+  if (!containers) return insertPlainText(view, rawText, target);
   // markdown として空（空白のみ・改行のみ）でも paste は落とさず素のテキストで入れる
-  if (containers.length === 0) return insertPlainText(view, rawText);
+  if (containers.length === 0) return insertPlainText(view, rawText, target);
   const blocks = containers.map(preparePasted);
   const only = blocks.length === 1 ? blocks[0] : undefined;
   // block 選択中は inline 挿入だと選択範囲の中へ潜り込む。block 経路で選択の後ろへ入れる
-  const blockSelected = (blockSelectionKey.getState(view.state)?.selectedIds.length ?? 0) > 0;
-  if (!blockSelected && only && only.childCount === 1 && only.child(0).type === nodes.paragraph) {
+  if (
+    target.blockIds.length === 0 &&
+    only &&
+    only.childCount === 1 &&
+    only.child(0).type === nodes.paragraph
+  ) {
+    const tr = view.state.tr;
+    selectTarget(tr, target);
     const inline = new Slice(only.child(0).content, 0, 0);
-    view.dispatch(view.state.tr.replaceSelection(inline).scrollIntoView());
+    view.dispatch(tr.replaceSelection(inline).scrollIntoView());
     return;
   }
-  const inserted = insertBlocksTr(view.state, blocks);
-  if (!inserted) return insertPlainText(view, rawText);
+  const inserted = insertBlocksTr(view.state, blocks, target);
+  if (!inserted) return insertPlainText(view, rawText, target);
   view.dispatch(inserted.tr.scrollIntoView());
 }
 
+/** async parse を待っている paste。id ごとに適用位置を plugin state 側で mapping 追従させる。 */
+let nextPasteId = 0;
+
 // plain text paste の markdown 取り込み。text/html を持つ rich paste は ProseMirror の
 // parseDOM に任せ、text/plain のみのときだけ Rust `from_markdown` へ回す。
-// 変換は async（handlePaste は同期）なので、先に true を返して paste を握り、
-// 応答後の view.state に対して挿入する。失敗時は素のテキスト挿入に縮退する。
+// 変換は async（handlePaste は同期）なので、先に true を返して paste を握る。応答を
+// 待つ間にユーザーが入力・クリックしても貼り先がずれないよう、paste 時の位置を
+// plugin state に預け、mapping で追従させた位置に対して挿入する。
+// 失敗時は素のテキスト挿入に縮退する。
 function handleMarkdownPaste(
   view: EditorView,
   event: ClipboardEvent,
@@ -332,15 +385,33 @@ function handleMarkdownPaste(
   const ctx = getBlockContext(view.state.selection.$from);
   // codeBlock 内は markdown 解釈せず素のテキストのまま（default 挿入）
   if (!ctx || ctx.contentNode.type === nodes.codeBlock) return false;
+  const id = nextPasteId++;
+  const hold: ClipboardMeta = { type: "hold", id, target: pasteTargetOf(view.state) };
+  view.dispatch(view.state.tr.setMeta(clipboardKey, hold).setMeta("addToHistory", false));
+  const resume = (apply: (target: PasteTarget) => void) => {
+    if (view.isDestroyed) return;
+    // plugin state が失われている場合（state 差し替え等）だけ現在の選択に落とす
+    const target = clipboardKey.getState(view.state)?.pending.get(id) ?? pasteTargetOf(view.state);
+    apply(target);
+    const release: ClipboardMeta = { type: "release", id };
+    view.dispatch(view.state.tr.setMeta(clipboardKey, release).setMeta("addToHistory", false));
+  };
   parseMarkdown(text)
-    .then((docJson) => {
-      if (!view.isDestroyed) applyParsedMarkdown(view, docJson, text);
-    })
-    .catch(() => {
-      if (!view.isDestroyed) insertPlainText(view, text);
-    });
+    .then((docJson) => resume((target) => applyParsedMarkdown(view, docJson, text, target)))
+    .catch(() => resume((target) => insertPlainText(view, text, target)));
   return true;
 }
+
+/** async parse 中の paste の適用位置。plugin state で後続編集の mapping に追従させる。 */
+type ClipboardState = { pending: ReadonlyMap<number, PasteTarget> };
+
+type ClipboardMeta =
+  | { type: "hold"; id: number; target: PasteTarget }
+  | { type: "release"; id: number };
+
+const clipboardKey = new PluginKey<ClipboardState>("journalClipboard");
+
+const NO_PENDING_PASTE: ClipboardState = { pending: new Map() };
 
 /** 選択が落ち着いてから先読み POST するまでの猶予。 */
 const CLIPBOARD_PREFETCH_DEBOUNCE_MS = 150;
@@ -379,8 +450,28 @@ export function clipboardPlugin(options: ClipboardOptions = {}): Plugin {
     return selected ? cache.get(selected.signature) : undefined;
   };
 
-  return new Plugin({
-    key: new PluginKey("journalClipboard"),
+  return new Plugin<ClipboardState>({
+    key: clipboardKey,
+    state: {
+      init: () => NO_PENDING_PASTE,
+      apply(tr, value) {
+        const meta = tr.getMeta(clipboardKey) as ClipboardMeta | undefined;
+        if (!meta && (!tr.docChanged || value.pending.size === 0)) return value;
+        const pending = new Map(value.pending);
+        if (tr.docChanged) {
+          for (const [id, target] of pending) {
+            pending.set(id, {
+              ...target,
+              from: tr.mapping.map(target.from),
+              to: tr.mapping.map(target.to),
+            });
+          }
+        }
+        if (meta?.type === "hold") pending.set(meta.id, meta.target);
+        if (meta?.type === "release") pending.delete(meta.id);
+        return { pending };
+      },
+    },
     view: renderMarkdown
       ? (editorView) => {
           let timer: ReturnType<typeof setTimeout> | null = null;
@@ -462,7 +553,7 @@ export function clipboardPlugin(options: ClipboardOptions = {}): Plugin {
         // originals は synced mirror が元 ID で参照するので触らない。
         const plain = originals.map(preparePasted);
 
-        const inserted = insertBlocksTr(view.state, plain);
+        const inserted = insertBlocksTr(view.state, plain, pasteTargetOf(view.state));
         if (!inserted) return false;
         const { tr, start } = inserted;
 

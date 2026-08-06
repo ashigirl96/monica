@@ -12,7 +12,14 @@ import {
   rangeFromIds,
   visibleContainers,
 } from "./context";
-import { deleteRange, duplicateRange, indentRange, moveRange, outdentRange } from "./commands";
+import {
+  deleteRange,
+  duplicateRange,
+  hasAdjacentTableRow,
+  indentRange,
+  moveRange,
+  outdentRange,
+} from "./commands";
 import {
   blockSelectionKey,
   clearBlockSelection,
@@ -132,9 +139,10 @@ function moveVisible(
 function selectAdjacentDivider(view: EditorView, dir: 1 | -1): boolean {
   const sel = view.state.selection;
   if (!sel.empty || !(sel instanceof TextSelection)) return false;
-  // tableCell 内では endOfTextblock がセル単位で真になり、表の途中から表外の
-  // divider へ飛んでしまう。表内の ↑↓ は native のセル間移動に任せる。
-  if (sel.$from.parent.type === nodes.tableCell) return false;
+  // tableCell 内では endOfTextblock がセル単位で真になり、表の途中から表外の divider へ
+  // 飛んでしまう。進める行が残っている間だけ native のセル間移動に任せ、端の行からは
+  // 通常どおり隣接 divider を選ぶ（divider はカーソルを持てないので native では止まれない）。
+  if (hasAdjacentTableRow(sel.$from, dir)) return false;
   if (!view.endOfTextblock(dir === 1 ? "down" : "up")) return false;
   const ctx = getBlockContext(sel.$from);
   const id = ctx?.containerNode.attrs.id as string | null | undefined;

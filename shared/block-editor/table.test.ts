@@ -11,9 +11,9 @@ import {
   tableNextCell,
   tablePrevCell,
 } from "./table";
-import { exitDocEnd, exitDocStart, splitBlock } from "./commands";
+import { exitDocEnd, exitDocStart, hasAdjacentTableRow, splitBlock } from "./commands";
 import { blocksToPlainText } from "./clipboard";
-import { block, docOf, tableOf } from "./test-fixtures";
+import { block, contentPos, docOf, para, tableOf } from "./test-fixtures";
 
 function cellPositions(doc: PMNode): number[] {
   const out: number[] = [];
@@ -128,10 +128,52 @@ describe("cell 内の防衛", () => {
   });
 });
 
-describe("blocksToPlainText", () => {
-  test("table はセルを ` | `、行を改行で区切る", () => {
+// 表の端の行では false を返すことが要件: そこから先は exitDoc* と divider 選択に道を譲る
+// （native の ↑↓ は divider で止まれない）。
+describe("hasAdjacentTableRow", () => {
+  test("先頭行は下だけ、最終行は上だけ行が残っている", () => {
     const doc = twoByTwo();
-    expect(blocksToPlainText([doc.child(0).child(0)])).toBe("a | b\nc | d");
+    const first = stateInCell(doc, 0).selection.$from;
+    const last = stateInCell(doc, 2).selection.$from;
+    expect(hasAdjacentTableRow(first, 1)).toBe(true);
+    expect(hasAdjacentTableRow(first, -1)).toBe(false);
+    expect(hasAdjacentTableRow(last, 1)).toBe(false);
+    expect(hasAdjacentTableRow(last, -1)).toBe(true);
+  });
+
+  test("表の外では常に false", () => {
+    const doc = docOf(block("P", para("x")));
+    const $pos = doc.resolve(contentPos(doc, "P", "end"));
+    expect(hasAdjacentTableRow($pos, 1)).toBe(false);
+    expect(hasAdjacentTableRow($pos, -1)).toBe(false);
+  });
+});
+
+describe("blocksToPlainText", () => {
+  test("table は GFM のパイプ記法で出す（貼り戻しで表に戻るため）", () => {
+    const doc = twoByTwo();
+    expect(blocksToPlainText([doc.child(0).child(0)])).toBe("| a | b |\n| c | d |");
+  });
+
+  test("header 行があれば delimiter 行を挟む", () => {
+    const doc = docOf(
+      block(
+        "T",
+        tableOf(
+          [
+            ["a", "b"],
+            ["c", "d"],
+          ],
+          true,
+        ),
+      ),
+    );
+    expect(blocksToPlainText([doc.child(0).child(0)])).toBe("| a | b |\n| --- | --- |\n| c | d |");
+  });
+
+  test("セル内の `|` と `\\` はエスケープする（列が増えない）", () => {
+    const doc = docOf(block("T", tableOf([["a | b", "c\\d"]])));
+    expect(blocksToPlainText([doc.child(0).child(0)])).toBe("| a \\| b | c\\\\d |");
   });
 });
 

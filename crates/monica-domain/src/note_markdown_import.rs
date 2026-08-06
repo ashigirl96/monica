@@ -186,19 +186,29 @@ impl Parser<'_> {
         Some(BlockNode::Quote { content: parse_multiline_inlines(&body) })
     }
 
-    /// GFM table。連続する同インデントの `|` 行を 1 つの table にまとめる。
+    /// GFM table。連続する同インデントの行を 1 つの table にまとめる。
     /// 2 行目が delimiter 行（`| --- |`）なら 1 行目を header にする。
     /// `|` 単独行は本文にもあり得るので、2 行以上そろったときだけ table と解釈する。
     fn try_table(&mut self, ind: usize) -> Option<BlockNode> {
-        table_row_cells(self.lines[self.pos].rest)?;
         let start = self.pos;
+        // delimiter 行が裏付けにあるときだけ先頭 `|` の省略（`a | b`）を許す。GFM は常に
+        // 省略可だが、delimiter は GFM が表の必須要素でもあるので、これが無い入力
+        // （= to_markdown が出す header なし表）で省略まで許すと ` | ` を含む本文 2 行が
+        // 表に化ける。
+        let bare_ok = self
+            .lines
+            .get(start + 1)
+            .filter(|line| line.indent == ind)
+            .and_then(|line| table_row_cells(line.rest, true))
+            .is_some_and(|cells| is_delimiter_row(&cells));
+        table_row_cells(self.lines[start].rest, bare_ok)?;
         let mut raw_rows: Vec<Vec<String>> = Vec::new();
         let mut header = false;
         while let Some(line) = self.lines.get(self.pos) {
             if line.indent != ind {
                 break;
             }
-            let Some(cells) = table_row_cells(line.rest) else { break };
+            let Some(cells) = table_row_cells(line.rest, bare_ok) else { break };
             if raw_rows.len() == 1 && !header && is_delimiter_row(&cells) {
                 header = true;
             } else {
@@ -411,10 +421,16 @@ fn is_closing_fence(text: &str, fence_char: char, min_len: usize) -> bool {
     t.len() >= min_len && t.chars().all(|c| c == fence_char)
 }
 
-/// `| a | b |` 行をセル列に分解する。先頭 `|` 必須・末尾 `|` は省略可（GFM と同じ）。
+/// `| a | b |` 行をセル列に分解する。末尾 `|` は省略可。`bare_ok` なら先頭 `|` も省略可
+/// （代わりに区切りの `|` を 1 つ以上含むことを要求する — 本文 1 行を表の行と読まないため）。
 /// `\|` はセル区切りにしない（エスケープ解決は inline parser に任せる）。
-fn table_row_cells(text: &str) -> Option<Vec<String>> {
-    let inner = text.trim_end().strip_prefix('|')?;
+fn table_row_cells(text: &str, bare_ok: bool) -> Option<Vec<String>> {
+    let trimmed = text.trim_end();
+    let (inner, bare) = match trimmed.strip_prefix('|') {
+        Some(rest) => (rest, false),
+        None if bare_ok => (trimmed, true),
+        None => return None,
+    };
     let inner = inner.strip_suffix('|').unwrap_or(inner);
     let mut cells = Vec::new();
     let mut current = String::new();
@@ -432,6 +448,9 @@ fn table_row_cells(text: &str) -> Option<Vec<String>> {
         }
     }
     cells.push(current.trim().to_string());
+    if bare && cells.len() < 2 {
+        return None;
+    }
     Some(cells)
 }
 

@@ -291,6 +291,42 @@ fn escaped_pipe_stays_inside_cell() {
 }
 
 #[test]
+fn cell_with_backslash_before_pipe_roundtrips() {
+    // `\` を素で出すと続く `\|` のエスケープを食い、区切りとしてセルが増える
+    let markdown = "| a \\\\\\| b | c |\n| --- | --- |\n| d | e |";
+    let doc = doc_json(markdown);
+    let first_cell = &content_at(&doc, 0)["content"][0]["content"][0];
+    assert_eq!(first_cell["content"][0]["text"], "a \\| b");
+    assert_eq!(
+        content_at(&doc, 0)["content"][0]["content"].as_array().unwrap().len(),
+        2,
+        "エスケープ済みの `|` でセルは増えない"
+    );
+    assert_eq!(roundtrip(markdown), markdown);
+}
+
+#[test]
+fn delimiter_row_allows_rows_without_leading_pipe() {
+    // GFM は先頭・末尾 `|` の省略を許す。delimiter 行がある入力でだけ受ける
+    let doc = doc_json("a | b\n--- | ---\nc | d");
+    let table = content_at(&doc, 0);
+    assert_eq!(table["type"], "table");
+    let rows = table["content"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["content"][1]["attrs"]["header"], true);
+    assert_eq!(rows[0]["content"][1]["content"][0]["text"], "b");
+    assert_eq!(rows[1]["content"][0]["content"][0]["text"], "c");
+}
+
+#[test]
+fn pipes_in_prose_stay_paragraphs_without_delimiter_row() {
+    // delimiter 行が無ければ先頭 `|` を要求する（本文が表に化けない）
+    let doc = doc_json("foo | bar\nbaz | qux");
+    assert_eq!(content_at(&doc, 0)["type"], "paragraph");
+    assert_eq!(content_at(&doc, 1)["type"], "paragraph");
+}
+
+#[test]
 fn code_span_keeps_inner_markdown_raw() {
     let doc = doc_json("`**not bold**` after");
     let inlines = &content_at(&doc, 0)["content"];
