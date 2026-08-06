@@ -8,6 +8,9 @@
 //! - toggle は `> ` に投影されるため、import では quote になる。
 //! - list 以外の入れ子（heading 配下など）は export 時に平坦化されるため復元しない。
 //! - `[[id|title]]` の title は捨てる（noteMention の表示名は NodeView が解決する）。
+//! - heading 内の hardBreak も改行に投影されるが、CommonMark の ATX heading は 1 行で
+//!   閉じるため、続く行は別 block として読む（外部 markdown の見出し直後の本文を
+//!   見出しに巻き込まないことを優先する）。
 
 use serde_json::Map;
 
@@ -89,17 +92,8 @@ impl Parser<'_> {
     }
 
     fn parse_block(&mut self, ind: usize, depth: usize, out: &mut Vec<BlockNode>) {
-        let content = self
-            .try_code_block(ind)
-            .or_else(|| self.try_callout(ind))
-            .or_else(|| self.try_quote(ind))
-            .or_else(|| self.try_synced(ind))
-            .or_else(|| self.try_table(ind))
-            .unwrap_or_else(|| {
-                let text = self.lines[self.pos].rest;
-                self.pos += 1;
-                single_line_block(text)
-            });
+        let content =
+            self.try_multiline_block(ind).unwrap_or_else(|| self.parse_line_block(ind));
         // より深いインデントの後続行はこのブロックの子。ただし atom（カーソルを
         // 置けない block）には子を入れられないので同階層へ繰り上げる。
         // 上限に達したら子を作らない = 以降の深いインデントは同階層の兄弟になる。
@@ -114,6 +108,48 @@ impl Parser<'_> {
         } else {
             out.push(container(content, children));
         }
+    }
+
+    /// 複数行を 1 つの block にまとめる構文。どれにも該当しなければ `self.pos` を動かさない。
+    fn try_multiline_block(&mut self, ind: usize) -> Option<BlockNode> {
+        self.try_code_block(ind)
+            .or_else(|| self.try_callout(ind))
+            .or_else(|| self.try_quote(ind))
+            .or_else(|| self.try_synced(ind))
+            .or_else(|| self.try_table(ind))
+    }
+
+    /// 行ベースの block（heading / list / divider など）。ただし markdown の soft wrap
+    /// （1 つの段落・list item を複数行に折り返した入力）を 1 block に戻すため、同インデントの
+    /// 素の本文行が続く限り hardBreak で連結する。CommonMark の lazy continuation と同じ範囲で、
+    /// `to_markdown` が block 内 hardBreak を改行で出す投影の逆にもなる。
+    fn parse_line_block(&mut self, ind: usize) -> BlockNode {
+        let mut block = single_line_block(self.lines[self.pos].rest);
+        self.pos += 1;
+        if let Some(slot) = continuation_slot(&mut block) {
+            while self
+                .lines
+                .get(self.pos)
+                .is_some_and(|line| !line.is_blank() && line.indent == ind)
+                && !self.opens_new_block(ind)
+            {
+                let inlines = slot.get_or_insert_with(Vec::new);
+                inlines.push(InlineNode::HardBreak { marks: None });
+                parse_inline_into(self.lines[self.pos].rest, &[], inlines);
+                self.pos += 1;
+            }
+        }
+        block
+    }
+
+    /// 行 `self.pos` が新しい block を開始するか（消費せずに判定する）。実際の dispatch を
+    /// 試して巻き戻すので、受理範囲が本体と乖離しない。
+    fn opens_new_block(&mut self, ind: usize) -> bool {
+        let saved = self.pos;
+        let multiline = self.try_multiline_block(ind).is_some();
+        self.pos = saved;
+        multiline
+            || !matches!(single_line_block(self.lines[saved].rest), BlockNode::Paragraph { .. })
     }
 
     /// ```` ```lang ```` フェンス。閉じフェンスが無ければ末尾までをコードとする。
@@ -191,6 +227,12 @@ impl Parser<'_> {
     /// `|` 単独行は本文にもあり得るので、2 行以上そろったときだけ table と解釈する。
     fn try_table(&mut self, ind: usize) -> Option<BlockNode> {
         let start = self.pos;
+        // 表の行は必ず `|` を含む（bare 形式も 2 セル以上が条件）。opens_new_block が
+        // 継続候補の行ごとにここを通すので、素の本文行で次行の delimiter 判定
+        // （行全体の tokenize）まで走らせない。
+        if !self.lines[start].rest.contains('|') {
+            return None;
+        }
         // delimiter 行が裏付けにあるときだけ先頭 `|` の省略（`a | b`）を許す。GFM は常に
         // 省略可だが、delimiter は GFM が表の必須要素でもあるので、これが無い入力
         // （= to_markdown が出す header なし表）で省略まで許すと ` | ` を含む本文 2 行が
@@ -291,6 +333,18 @@ fn is_atom(node: &BlockNode) -> bool {
             | BlockNode::SyncedBlock { .. }
             | BlockNode::Table { .. }
     )
+}
+
+/// 折り返しの継続行を受け取れる block の inline 列。heading は含めない（CommonMark の
+/// ATX heading は 1 行で閉じる）。それ以外の block はここで `None` を返して継続を断つ。
+fn continuation_slot(node: &mut BlockNode) -> Option<&mut Option<Vec<InlineNode>>> {
+    match node {
+        BlockNode::Paragraph { content }
+        | BlockNode::Bullet { content }
+        | BlockNode::Todo { content, .. }
+        | BlockNode::Numbered { content, .. } => Some(content),
+        _ => None,
+    }
 }
 
 fn single_line_block(text: &str) -> BlockNode {

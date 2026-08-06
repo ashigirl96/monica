@@ -1,4 +1,4 @@
-import type { Node as PMNode, NodeType, Attrs, ResolvedPos } from "@milkdown/kit/prose/model";
+import type { Node as PMNode, NodeType, Attrs, Mark, ResolvedPos } from "@milkdown/kit/prose/model";
 import { TextSelection } from "@milkdown/kit/prose/state";
 import type { Command, EditorState, Transaction } from "@milkdown/kit/prose/state";
 import {
@@ -813,6 +813,45 @@ export const cursorToLineEnd: Command = (state, dispatch) => {
     if (nl !== -1) target = ctx.contentPos + 1 + nl;
   }
   dispatch?.(state.tr.setSelection(TextSelection.create(state.doc, target)).scrollIntoView());
+  return true;
+};
+
+// 行末で inline code の右境界に立っているカーソルと、そこでの実効 mark（storedMarks
+// 優先）。exitInlineCode / enterInlineCode / codeExitPos が同じ境界判定を共有する。
+function codeBoundary(state: EditorState): { $cursor: ResolvedPos; marks: readonly Mark[] } | null {
+  const { $cursor } = state.selection as TextSelection;
+  if (!$cursor || $cursor.nodeAfter) return null;
+  const before = $cursor.nodeBefore;
+  if (!before || !schema.marks.code.isInSet(before.marks)) return null;
+  return { $cursor, marks: state.storedMarks ?? $cursor.marks() };
+}
+
+// inline code の右端で → を押したら、カーソルを動かさず code mark だけ降りる。
+// code mark は inclusive なので末尾でも追記が続く（`hoge` に足せるのはこの性質）が、
+// text block の末尾だと → に行き先がなく、mark から抜ける手段がなくなる。
+// 右に文字が残っているときは native の 1 文字移動でそのまま抜けられるので手を出さない。
+export const exitInlineCode: Command = (state, dispatch) => {
+  const boundary = codeBoundary(state);
+  if (!boundary || !schema.marks.code.isInSet(boundary.marks)) return false;
+  dispatch?.(state.tr.setStoredMarks(schema.marks.code.removeFromSet(boundary.marks)));
+  return true;
+};
+
+// exitInlineCode で降りた直後の「code の外にいる」状態の位置。storedMarks は doc にも
+// DOM にも出ないため、native キャレットは <code> 内の同じ DOM 位置に描かれ続ける。
+// decorations.ts がこの位置に fake caret を widget で立てて「抜けた」ことを見せる。
+export function codeExitPos(state: EditorState): number | null {
+  const boundary = codeBoundary(state);
+  if (!boundary || schema.marks.code.isInSet(boundary.marks)) return null;
+  return boundary.$cursor.pos;
+}
+
+// exitInlineCode の逆。降りた状態で ← を押したら、カーソルを動かさず code mark に戻る
+// （`abc`| → `abc|`）。native に落とすと 1 文字左（`ab|c`）へ動いてしまい対称にならない。
+export const enterInlineCode: Command = (state, dispatch) => {
+  const boundary = codeBoundary(state);
+  if (!boundary || schema.marks.code.isInSet(boundary.marks)) return false;
+  dispatch?.(state.tr.setStoredMarks(schema.marks.code.create().addToSet(boundary.marks)));
   return true;
 };
 

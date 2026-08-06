@@ -15,8 +15,10 @@ import {
   deleteForwardBlock,
   exitCallout,
   exitCodeBlock,
+  enterInlineCode,
   exitDocEnd,
   exitDocStart,
+  exitInlineCode,
   ignoreCompositionEnter,
   indentBlock,
   insertHardBreak,
@@ -67,6 +69,10 @@ export function editorKeymap(): Plugin[] {
       // heading / callout / toggle の折りたたみ。macOS の ⌥. は "≥" を生むが、
       // prosemirror-keymap が keyCode から base key を解決するのでこの binding で届く
       "Alt-.": toggleCollapse,
+      // 行末の inline code から抜ける。抜けたあとの → は false に落ちて native 移動に戻る
+      ArrowRight: exitInlineCode,
+      // その対称: 抜けた状態の ← はカーソルを動かさず code の右端（mark 内）へ戻る
+      ArrowLeft: enterInlineCode,
       // inline formatting
       "Mod-b": toggleMark(schema.marks.bold),
       "Mod-i": toggleMark(schema.marks.italic),

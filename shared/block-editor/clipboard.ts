@@ -361,18 +361,32 @@ function applyParsedMarkdown(
   }
   const inserted = insertBlocksTr(view.state, blocks, target);
   if (!inserted) return insertPlainText(view, rawText, target);
-  view.dispatch(inserted.tr.scrollIntoView());
+  // 待機中の paste の貼り先を、今入れた最後の block の直後へ寄せる。位置の mapping だけでは
+  // 貼り先 block が変わらないため、後発の paste が今回の挿入より前へ潜り込む。
+  // blocks は非空（上の early return）かつ preparePasted → reissueIds 済みなので id は必ずある。
+  const anchor: ClipboardMeta = {
+    type: "anchor",
+    afterBlockId: blocks[blocks.length - 1].attrs.id as string,
+  };
+  view.dispatch(inserted.tr.setMeta(clipboardKey, anchor).scrollIntoView());
 }
 
 /** async parse を待っている paste。id ごとに適用位置を plugin state 側で mapping 追従させる。 */
 let nextPasteId = 0;
 
+/**
+ * view ごとの適用キュー。応答順に適用すると、変換の速い後発 paste が先に着地して
+ * 貼り順が入れ替わる（先発の貼り先はその挿入の後ろへ mapping される）。変換要求自体は
+ * 待たずに投げ、挿入だけを paste を握った順に直列化する。
+ */
+const pasteChains = new WeakMap<EditorView, Promise<void>>();
+
 // plain text paste の markdown 取り込み。text/html を持つ rich paste は ProseMirror の
 // parseDOM に任せ、text/plain のみのときだけ Rust `from_markdown` へ回す。
 // 変換は async（handlePaste は同期）なので、先に true を返して paste を握る。応答を
 // 待つ間にユーザーが入力・クリックしても貼り先がずれないよう、paste 時の位置を
-// plugin state に預け、mapping で追従させた位置に対して挿入する。
-// 失敗時は素のテキスト挿入に縮退する。
+// plugin state に預け、mapping で追従させた位置に対して挿入する。連続 paste は応答順に
+// 依らず握った順で着地させる（pasteChains）。失敗時は素のテキスト挿入に縮退する。
 function handleMarkdownPaste(
   view: EditorView,
   event: ClipboardEvent,
@@ -396,9 +410,19 @@ function handleMarkdownPaste(
     const release: ClipboardMeta = { type: "release", id };
     view.dispatch(view.state.tr.setMeta(clipboardKey, release).setMeta("addToHistory", false));
   };
-  parseMarkdown(text)
-    .then((docJson) => resume((target) => applyParsedMarkdown(view, docJson, text, target)))
-    .catch(() => resume((target) => insertPlainText(view, text, target)));
+  const applier = parseMarkdown(text).then(
+    (docJson) => (target: PasteTarget) => applyParsedMarkdown(view, docJson, text, target),
+    () => (target: PasteTarget) => insertPlainText(view, text, target),
+  );
+  const prev = pasteChains.get(view) ?? Promise.resolve();
+  // 1 つの適用が投げても後続の paste を落とさない（キューは常に決着した promise を持つ）
+  pasteChains.set(
+    view,
+    prev
+      .then(() => applier)
+      .then(resume)
+      .catch(() => {}),
+  );
   return true;
 }
 
@@ -407,7 +431,9 @@ type ClipboardState = { pending: ReadonlyMap<number, PasteTarget> };
 
 type ClipboardMeta =
   | { type: "hold"; id: number; target: PasteTarget }
-  | { type: "release"; id: number };
+  | { type: "release"; id: number }
+  /** 待機中の paste の貼り先を、この block の直後へ付け替える。 */
+  | { type: "anchor"; afterBlockId: string };
 
 const clipboardKey = new PluginKey<ClipboardState>("journalClipboard");
 
@@ -465,6 +491,13 @@ export function clipboardPlugin(options: ClipboardOptions = {}): Plugin {
               from: tr.mapping.map(target.from),
               to: tr.mapping.map(target.to),
             });
+          }
+        }
+        if (meta?.type === "anchor") {
+          for (const [id, target] of pending) {
+            // 非空の text 選択は置換対象なので付け替えない（block 経路にすると選択が残る）
+            if (target.from !== target.to) continue;
+            pending.set(id, { ...target, blockIds: [meta.afterBlockId] });
           }
         }
         if (meta?.type === "hold") pending.set(meta.id, meta.target);

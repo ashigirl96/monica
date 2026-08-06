@@ -12,7 +12,10 @@
   --jb-hover: color-mix(in srgb, var(--jb-ink) 6%, transparent);
   --jb-border: color-mix(in srgb, var(--jb-ink) 14%, transparent);
   --jb-code-bg: color-mix(in srgb, var(--jb-ink) 5%, transparent);
-  --jb-callout-bg: color-mix(in srgb, var(--jb-ink) 7%, transparent);
+  --jb-inline-code-bg: color-mix(in srgb, var(--jb-ink) 10%, transparent);
+  /* callout パネルの下地。パネルを不透明にしたいテーマは transparent の代わりに
+     solid 色を差す（合成式は .jb-callout > .jb-container-body が 1 箇所で持つ） */
+  --jb-callout-under: transparent;
   --jb-paper: color-mix(in srgb, var(--background) 97%, #c9a35f);
   --jb-blue: #5e81ac;
   --jb-code-red: #bd6a52;
@@ -369,7 +372,16 @@
    置いた ::before のアイコンと縦位置がズレる。余白はパネル側の margin で受ける */
 .jb-callout > .jb-container-body {
   position: relative;
-  background: var(--jb-callout-bg);
+  /* パネルの合成式はここ 1 箇所が持ち、kind ごとの rule は accent と濃度の token だけを
+     差す。token をこの要素で毎回リセットするのは、nest した callout が外側の kind の
+     accent を継承しないため */
+  --jb-callout-accent: var(--jb-ink);
+  --jb-callout-mix: 7%;
+  background: color-mix(
+    in srgb,
+    var(--jb-callout-accent) var(--jb-callout-mix),
+    var(--jb-callout-under)
+  );
   border-radius: 10px;
   margin: calc(4px + var(--jb-block-margin-top)) 0 4px;
   padding: 14px 16px 14px 46px;
@@ -399,7 +411,8 @@
 
 /* kind ごとの色とアイコン。example は base（暖色パネル + 電球）をそのまま使う */
 .jb-callout[data-callout-kind="note"] > .jb-container-body {
-  background: color-mix(in srgb, var(--jb-callout-note) 13%, transparent);
+  --jb-callout-accent: var(--jb-callout-note);
+  --jb-callout-mix: 13%;
 }
 
 .jb-callout[data-callout-kind="note"] > .jb-container-body::before {
@@ -408,7 +421,8 @@
 }
 
 .jb-callout[data-callout-kind="tips"] > .jb-container-body {
-  background: color-mix(in srgb, var(--jb-callout-tips) 14%, transparent);
+  --jb-callout-accent: var(--jb-callout-tips);
+  --jb-callout-mix: 14%;
 }
 
 .jb-callout[data-callout-kind="tips"] > .jb-container-body::before {
@@ -417,7 +431,8 @@
 }
 
 .jb-callout[data-callout-kind="danger"] > .jb-container-body {
-  background: color-mix(in srgb, var(--jb-callout-danger) 13%, transparent);
+  --jb-callout-accent: var(--jb-callout-danger);
+  --jb-callout-mix: 13%;
 }
 
 .jb-callout[data-callout-kind="danger"] > .jb-container-body::before {
@@ -426,7 +441,8 @@
 }
 
 .jb-callout[data-callout-kind="question"] > .jb-container-body {
-  background: color-mix(in srgb, var(--jb-callout-question) 15%, transparent);
+  --jb-callout-accent: var(--jb-callout-question);
+  --jb-callout-mix: 15%;
 }
 
 .jb-callout[data-callout-kind="question"] > .jb-container-body::before {
@@ -560,7 +576,7 @@
 /* ---- inline marks ---- */
 
 .jb-editor code {
-  background: color-mix(in srgb, var(--jb-ink) 10%, transparent);
+  background: var(--jb-inline-code-bg);
   border-radius: 3px;
   padding: 0.1em 0.4em;
   font-family: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
@@ -573,6 +589,27 @@
   padding: 0;
   color: inherit;
   font-size: inherit;
+}
+
+/* 行末の → で inline code から降りた状態の fake caret（decorations.ts の
+   codeExitCaretPlugin）。storedMarks は DOM に出ず native キャレットは <code> 内に
+   描かれたままなので、chip の外に自前で立てて native 側を隠す。widget が消えれば
+   :has が外れて native に戻る */
+.jb-editor:has(.jb-code-exit-caret) {
+  caret-color: transparent;
+}
+
+.jb-code-exit-caret {
+  border-left: 1.5px solid var(--jb-text);
+  margin-left: 2px;
+  pointer-events: none;
+  animation: jb-caret-blink 1.1s steps(2, start) infinite;
+}
+
+@keyframes jb-caret-blink {
+  to {
+    visibility: hidden;
+  }
 }
 
 .jb-editor strong {

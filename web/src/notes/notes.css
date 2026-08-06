@@ -98,6 +98,18 @@
   --jb-border: color-mix(in srgb, var(--jb-ink) 14%, transparent);
 }
 
+/* inline code と callout は dark で block-editor.css の透明度導出から降りる。紙 (--paper)
+   がすでに ambient を透かしているうえに alpha の面を重ねると写真が二重に抜けて面の輪郭が
+   消え、載せた色も紺に沈む。
+   どちらも紙より一段明るい不透明な紺を下地にし（chroma 0.05 が紺の下限）、callout は
+   その上に kind ごとのアクセントが載る。inline code の文字は同じテラコッタの明度だけを
+   上げたもの。 */
+:root[data-theme="dark"] .notes-screen .jb-root {
+  --jb-inline-code-bg: oklch(0.37 0.05 264);
+  --jb-code-red: oklch(0.82 0.12 42);
+  --jb-callout-under: oklch(0.345 0.045 264);
+}
+
 /* 写真なし（ambient.ts の none）。透かす相手がいないのに alpha を残すと、机と紙が
    同じ --background の上で合成されて階調差が潰れ「机の上の紙」が読めなくなる。
    dark は oklch の alpha、light は color-mix の % として同じ --paper-alpha を消費して

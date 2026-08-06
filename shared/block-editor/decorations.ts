@@ -2,6 +2,7 @@ import { Plugin, PluginKey } from "@milkdown/kit/prose/state";
 import { Decoration, DecorationSet } from "@milkdown/kit/prose/view";
 import type { Node as PMNode } from "@milkdown/kit/prose/model";
 import { nodes } from "./schema";
+import { codeExitPos } from "./commands";
 import { foldedIndexes } from "./folding";
 import { getBlockContext } from "./context";
 import { blockSelectionKey } from "./selection-state";
@@ -26,6 +27,33 @@ export function placeholderPlugin(): Plugin {
             class: "jb-placeholder",
             "data-placeholder": "Write, or press '/' for commands",
           }),
+        ]);
+      },
+    },
+  });
+}
+
+function codeExitCaretDOM(): HTMLElement {
+  const caret = document.createElement("span");
+  caret.className = "jb-code-exit-caret";
+  return caret;
+}
+
+// exitInlineCode（行末の → で inline code から降りる）の直後、native キャレットは
+// <code> 内の DOM 位置に描かれたままで「抜けた」ことが見えない。code の外に fake caret を
+// 立て、native 側は CSS（.jb-editor:has(.jb-code-exit-caret)）が隠す。
+// marks: [] が必須 — 省略すると widget が code mark に包まれて chip の内側に描かれる。
+// key は widget の同一性判定用 — 無いと表示中の全 transaction で span が作り直され、
+// blink アニメーションもそのたび先頭に戻る。
+export function codeExitCaretPlugin(): Plugin {
+  return new Plugin({
+    key: new PluginKey("journalCodeExitCaret"),
+    props: {
+      decorations(state) {
+        const pos = codeExitPos(state);
+        if (pos === null) return null;
+        return DecorationSet.create(state.doc, [
+          Decoration.widget(pos, codeExitCaretDOM, { side: 1, marks: [], key: "code-exit-caret" }),
         ]);
       },
     },

@@ -26,8 +26,11 @@ import {
   deleteRange,
   duplicateRange,
   exitCallout,
+  codeExitPos,
+  enterInlineCode,
   exitDocEnd,
   exitDocStart,
+  exitInlineCode,
   foldTransaction,
   indentRange,
   moveRange,
@@ -692,6 +695,55 @@ describe("cursorToLineStart / cursorToLineEnd", () => {
     expect(start.state.selection.head).toBe(base + 3);
     const end = run(state, cursorToLineEnd)!;
     expect(end.state.selection.head).toBe(base + 5);
+  });
+});
+
+describe("exitInlineCode", () => {
+  function paraCode(text: string, trailing = ""): PMNode {
+    const inline = [schema.text(text, [schema.marks.code.create()])];
+    if (trailing) inline.push(schema.text(trailing));
+    return nodes.paragraph.create(null, inline);
+  }
+
+  test("行末の inline code から mark だけ降りる（カーソルは動かさない）", () => {
+    const doc = docOf(block("A", paraCode("hoge")));
+    const state = stateWithCursor(doc, "A", "end");
+    expect(codeExitPos(state)).toBeNull();
+    const after = run(state, exitInlineCode)!;
+    expect(after.state.storedMarks).toEqual([]);
+    expect(after.state.selection.head).toBe(state.selection.head);
+    // 降りた状態でだけ fake caret の位置を返す
+    expect(codeExitPos(after.state)).toBe(after.state.selection.head);
+  });
+
+  test("降りた状態の ← はカーソルを動かさず code mark に戻る", () => {
+    const doc = docOf(block("A", paraCode("abc")));
+    const exited = run(stateWithCursor(doc, "A", "end"), exitInlineCode)!;
+    const back = run(exited.state, enterInlineCode)!;
+    expect(back.state.selection.head).toBe(exited.state.selection.head);
+    expect(schema.marks.code.isInSet(back.state.storedMarks ?? [])).toBeTruthy();
+    expect(codeExitPos(back.state)).toBeNull();
+  });
+
+  test("降りていない状態の ← は native 移動に落ちる", () => {
+    const doc = docOf(block("A", paraCode("abc")));
+    expect(enterInlineCode(stateWithCursor(doc, "A", "end"), () => {})).toBe(false);
+  });
+
+  test("降りた直後の → は native 移動に落ちる", () => {
+    const doc = docOf(block("A", paraCode("hoge")), block("B", para("B")));
+    const first = run(stateWithCursor(doc, "A", "end"), exitInlineCode)!;
+    expect(exitInlineCode(first.state, () => {})).toBe(false);
+  });
+
+  test("右に文字が残っているときは native の 1 文字移動に任せる", () => {
+    const doc = docOf(block("A", paraCode("hoge", " world")));
+    expect(exitInlineCode(stateWithCursor(doc, "A", 4), () => {})).toBe(false);
+  });
+
+  test("code でない行末では何もしない", () => {
+    const doc = docOf(block("A", para("hoge")));
+    expect(exitInlineCode(stateWithCursor(doc, "A", "end"), () => {})).toBe(false);
   });
 });
 

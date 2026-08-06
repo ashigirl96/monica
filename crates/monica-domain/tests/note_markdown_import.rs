@@ -323,7 +323,49 @@ fn pipes_in_prose_stay_paragraphs_without_delimiter_row() {
     // delimiter 行が無ければ先頭 `|` を要求する（本文が表に化けない）
     let doc = doc_json("foo | bar\nbaz | qux");
     assert_eq!(content_at(&doc, 0)["type"], "paragraph");
-    assert_eq!(content_at(&doc, 1)["type"], "paragraph");
+    assert_eq!(content_at(&doc, 1), &Value::Null, "折り返しとして 1 段落にまとまる");
+}
+
+#[test]
+fn soft_wrapped_prose_stays_one_paragraph() {
+    // 折り返された 1 段落を行ごとに割らない（空行だけが段落の区切り）
+    let doc = doc_json("This is a\nwrapped paragraph\n\nnext one");
+    let first = content_at(&doc, 0);
+    assert_eq!(first["type"], "paragraph");
+    assert_eq!(first["content"][0]["text"], "This is a");
+    assert_eq!(first["content"][1]["type"], "hardBreak");
+    assert_eq!(first["content"][2]["text"], "wrapped paragraph");
+    assert_eq!(content_at(&doc, 1)["content"][0]["text"], "next one");
+    assert_eq!(content_at(&doc, 2), &Value::Null);
+}
+
+#[test]
+fn continuation_stops_at_the_next_construct() {
+    // 継続行として食えるのは素の本文行だけ。heading は 1 行で閉じる（CommonMark と同じ）
+    let doc = doc_json("intro line\n# Title\nbody\n- item\ncont\n\n```\nfence\n```");
+    let expected = ["paragraph", "heading", "paragraph", "bullet", "codeBlock"];
+    for (i, ty) in expected.iter().enumerate() {
+        assert_eq!(content_at(&doc, i)["type"], *ty, "index {i}");
+    }
+    // list item は lazy continuation を受ける（`- item` + `cont` で 1 つ）
+    let item = content_at(&doc, 3);
+    assert_eq!(item["content"][1]["type"], "hardBreak");
+    assert_eq!(item["content"][2]["text"], "cont");
+}
+
+#[test]
+fn paragraph_hard_breaks_roundtrip() {
+    let markdown = "wrapped one\nwrapped two\n\n- item\nlazy line";
+    assert_eq!(roundtrip(markdown), markdown);
+}
+
+#[test]
+fn continuation_stops_before_a_bare_table() {
+    // 継続行の判定は実際の dispatch を試すので、delimiter 行で裏付けられた表を食わない
+    let doc = doc_json("intro\na | b\n--- | ---\nc | d");
+    assert_eq!(content_at(&doc, 0)["type"], "paragraph");
+    assert_eq!(content_at(&doc, 0)["content"].as_array().unwrap().len(), 1);
+    assert_eq!(content_at(&doc, 1)["type"], "table");
 }
 
 #[test]
