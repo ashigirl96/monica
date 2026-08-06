@@ -57,6 +57,7 @@ export function editorKeymap(): Plugin[] {
       // inline formatting
       "Mod-b": toggleMark(schema.marks.bold),
       "Mod-i": toggleMark(schema.marks.italic),
+      "Mod-u": toggleMark(schema.marks.underline),
       "Mod-e": toggleMark(schema.marks.code),
       "Mod-Shift-s": toggleMark(schema.marks.strike),
       // history

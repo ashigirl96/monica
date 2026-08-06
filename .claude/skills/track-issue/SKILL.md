@@ -58,7 +58,7 @@ gh sub-issue create --parent <親番号> --repo <owner/repo> --title "<title>" -
 `$HOME/monica` を指定する（指定しないと別の data dir を見てしまう）。
 
 ```bash
-MONICA_HOME=$HOME/monica /Users/1e0nhard96/.local/bin/monica issue track <issue url>
+MONICA_HOME=$HOME/monica monica issue track <issue url>
 ```
 
 成功すると `Created MON-<id> from <owner/repo>#<number>` のように出力される。
@@ -70,7 +70,7 @@ MONICA_HOME=$HOME/monica /Users/1e0nhard96/.local/bin/monica issue track <issue 
 `MONICA_HOME=$HOME/monica` を付ける。
 
 ```bash
-MONICA_HOME=$HOME/monica /Users/1e0nhard96/.local/bin/monica issue status
+MONICA_HOME=$HOME/monica monica issue status
 ```
 
 直前に作成した `MON-<id>` が一覧に出ていれば track 成功。

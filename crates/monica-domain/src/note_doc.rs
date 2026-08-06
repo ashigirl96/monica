@@ -160,6 +160,7 @@ pub enum InlineNode {
 pub enum Mark {
     Bold,
     Italic,
+    Underline,
     Strike,
     Code,
     Link {

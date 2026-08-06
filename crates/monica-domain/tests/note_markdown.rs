@@ -34,7 +34,7 @@ fn container(id: &str, text: &str) -> String {
 
 /// full-doc fixture の全ノード型を投影した golden markdown。syncedBlock は参照記法のまま。
 const FULL_DOC_MD: &str = "\
-plain ***styled***~~ gone~~` mono`[ linked](https://example.com)
+plain ***styled***<u> under</u>~~ gone~~` mono`[ linked](https://example.com)
 [Example](https://example.com/x)**[Marked](https://example.com/y)**[[note-42|Target Note]]
 
 ## Heading
@@ -65,7 +65,7 @@ fn main() {}
 
 /// Expand モードでは syncedBlock だけが resolver 経由の中身に置き換わる（他は同一）。
 const FULL_DOC_EXPANDED_MD: &str = "\
-plain ***styled***~~ gone~~` mono`[ linked](https://example.com)
+plain ***styled***<u> under</u>~~ gone~~` mono`[ linked](https://example.com)
 [Example](https://example.com/x)**[Marked](https://example.com/y)**[[note-42|Target Note]]
 
 ## Heading

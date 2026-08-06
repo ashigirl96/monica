@@ -17,6 +17,7 @@
                   "marks": [{ "type": "bold" }, { "type": "italic" }],
                   "text": "styled"
                 },
+                { "type": "text", "marks": [{ "type": "underline" }], "text": " under" },
                 { "type": "text", "marks": [{ "type": "strike" }], "text": " gone" },
                 { "type": "text", "marks": [{ "type": "code" }], "text": " mono" },
                 {

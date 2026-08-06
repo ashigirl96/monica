@@ -340,11 +340,14 @@ fn link_mention_md(attrs: Option<&LinkMentionAttrs>) -> String {
     }
 }
 
-/// marks を text に適用する。ネスト順は code（最内）→ italic → bold → strike → link（最外）。
+/// marks を text に適用する。
+/// ネスト順は code（最内）→ italic → bold → underline → strike → link（最外）。
+/// underline は markdown に記法がないので inline HTML で投影する（`__` は CommonMark で bold）。
 /// 読み取り投影なので markdown 特殊文字はエスケープしない。
 fn apply_marks(base: &str, marks: &[Mark]) -> String {
     let mut bold = false;
     let mut italic = false;
+    let mut underline = false;
     let mut strike = false;
     let mut code = false;
     let mut link: Option<&str> = None;
@@ -352,6 +355,7 @@ fn apply_marks(base: &str, marks: &[Mark]) -> String {
         match mark {
             Mark::Bold => bold = true,
             Mark::Italic => italic = true,
+            Mark::Underline => underline = true,
             Mark::Strike => strike = true,
             Mark::Code => code = true,
             Mark::Link { attrs } => link = attrs.as_ref().and_then(|a| a.href.as_deref()),
@@ -367,6 +371,9 @@ fn apply_marks(base: &str, marks: &[Mark]) -> String {
     }
     if bold {
         text = format!("**{text}**");
+    }
+    if underline {
+        text = format!("<u>{text}</u>");
     }
     if strike {
         text = format!("~~{text}~~");

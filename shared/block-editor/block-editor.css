@@ -550,6 +550,13 @@
   font-weight: 600;
 }
 
+/* 下線は行高の底ではなく文字の直下に置く（日本語のディセンダに被らない位置） */
+.jb-editor u {
+  text-decoration-color: var(--jb-muted);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
 /* sizu 流: リンクは本文よりわずかに沈めた色 + 点線下線。hover で本文色に浮かせる */
 .jb-editor a {
   color: color-mix(in srgb, var(--jb-ink) 85%, transparent);

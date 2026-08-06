@@ -412,6 +412,10 @@ export const schema = new Schema({
       parseDOM: [{ tag: "em" }, { tag: "i" }, { style: "font-style=italic" }],
       toDOM: () => ["em", 0],
     },
+    underline: {
+      parseDOM: [{ tag: "u" }, { style: "text-decoration=underline" }],
+      toDOM: () => ["u", 0],
+    },
     strike: {
       parseDOM: [{ tag: "s" }, { tag: "del" }],
       toDOM: () => ["s", 0],
