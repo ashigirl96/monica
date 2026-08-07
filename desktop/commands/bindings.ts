@@ -278,6 +278,7 @@ export type TaskSummaryRow = {
   status: DisplayStatus;
   prepare_eligible: boolean;
   run_eligible: boolean;
+  run_needs_prepare: boolean;
   is_active: boolean;
   has_open_pull_request: boolean;
   branch: string | null;

@@ -83,7 +83,9 @@ export async function runTaskFlow(
     const summaries = await listTaskSummaries();
     const task = summaries.find((t) => t.id === taskId);
 
-    if (task?.prepare_eligible) {
+    // False when a run is already prepared or the stopped primary's session resumes as-is —
+    // then run_task alone launches (or reopens) the agent.
+    if (task?.run_needs_prepare) {
       const waiter = waitForPreparedOrFailed(taskId);
       try {
         const prep = await prepareTask(taskId);

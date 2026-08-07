@@ -150,6 +150,18 @@ impl DisplayStatus {
         self.prepare_eligible() || self == DisplayStatus::Prepared
     }
 
+    /// A stopped primary that recorded a provider session is reopened with the agent's resume
+    /// command instead of preparing a fresh run from scratch.
+    pub fn resume_eligible(self, primary_has_session: bool) -> bool {
+        self == DisplayStatus::Stopped && primary_has_session
+    }
+
+    /// Whether Run must create and set up a fresh TaskRun before launching. False when a run is
+    /// already prepared, or when the stopped primary's session can be resumed as-is.
+    pub fn run_needs_prepare(self, primary_has_session: bool) -> bool {
+        self.prepare_eligible() && !self.resume_eligible(primary_has_session)
+    }
+
     /// Something is actively engaged with the task right now — machine prep, a launch waiting
     /// to be driven, or the agent itself. The board highlights these cards.
     pub fn is_active(self) -> bool {
@@ -206,5 +218,21 @@ mod tests {
             assert_eq!(status.run_eligible(), run, "{status:?} run");
             assert_eq!(status.is_active(), active, "{status:?} active");
         }
+    }
+
+    #[test]
+    fn resume_requires_stopped_primary_with_session() {
+        assert!(DisplayStatus::Stopped.resume_eligible(true));
+        assert!(!DisplayStatus::Stopped.resume_eligible(false));
+        assert!(!DisplayStatus::Failed.resume_eligible(true));
+        assert!(!DisplayStatus::Prepared.resume_eligible(true));
+    }
+
+    #[test]
+    fn run_needs_prepare_unless_resumable_or_already_prepared() {
+        assert!(DisplayStatus::Stopped.run_needs_prepare(false));
+        assert!(!DisplayStatus::Stopped.run_needs_prepare(true));
+        assert!(DisplayStatus::Ready.run_needs_prepare(true));
+        assert!(!DisplayStatus::Prepared.run_needs_prepare(false));
     }
 }

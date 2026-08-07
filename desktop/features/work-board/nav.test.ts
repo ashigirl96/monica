@@ -4,6 +4,7 @@ import { QueryClient } from "@tanstack/query-core";
 import { createStore } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import type { TaskSummaryRow } from "@/commands/task";
+import { taskSummary as task } from "@/features/work-board/test-fixtures";
 import {
   type MenuAnchor,
   type MenuState,
@@ -17,30 +18,6 @@ import {
 import { queryKeys } from "@/stores/query-keys";
 
 const ANCHOR: MenuAnchor = { top: 0, left: 0, bottom: 0 };
-
-function task(over: Partial<TaskSummaryRow>): TaskSummaryRow {
-  return {
-    id: "t1",
-    title: "task",
-    project: "owner/repo",
-    github_issue_number: null,
-    github_issue_url: null,
-    github_pull_requests: [],
-    task_status: "ready",
-    task_run_status: null,
-    task_run_wait_reason: null,
-    status: "ready",
-    prepare_eligible: false,
-    run_eligible: false,
-    is_active: false,
-    has_open_pull_request: false,
-    branch: null,
-    side_runs_running: 0,
-    side_runs_waiting_for_user: 0,
-    side_runs_failed: 0,
-    ...over,
-  } as TaskSummaryRow;
-}
 
 function baseMenu(over?: Partial<MenuState>): MenuState {
   return {
