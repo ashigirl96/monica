@@ -271,6 +271,42 @@ fn prepare_claude_for_run_resumes_stopped_primary_with_session() {
 }
 
 #[test]
+fn overridden_launch_agent_is_stamped_and_survives_resume() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+
+    let (run_id, worktree) = prepared_run_with_worktree(&mut repos, &task_id, "");
+    let fresh = prepare_claude_for_run(
+        &mut repos,
+        &FakeTaskRunOutputs::default(),
+        &task_id,
+        Some(Agent::Codex),
+    )
+    .unwrap();
+    assert_eq!(fresh.initial_command, "codex");
+    assert_eq!(
+        repos.get_task_run(&run_id).unwrap().unwrap().agent,
+        Some(Agent::Codex),
+        "the effective agent is persisted on the run at launch"
+    );
+
+    assert!(repos.claim_prepared_run(&run_id, "sess-9").unwrap());
+    repos
+        .finish_task_run(&run_id, &task_id, TaskRunStatus::Stopped)
+        .unwrap();
+
+    let resumed =
+        prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap();
+    std::fs::remove_dir_all(&worktree).ok();
+
+    assert_eq!(
+        resumed.initial_command, "codex resume 'sess-9'",
+        "resume reopens under the agent that launched the session, not the profile default"
+    );
+}
+
+#[test]
 fn prepare_claude_for_run_rejects_stopped_primary_without_session() {
     let mut repos = FakeRepos::default();
     insert_runnable_project(&repos);

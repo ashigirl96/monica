@@ -300,6 +300,9 @@ where
         Some(_) => primary_run.agent.unwrap_or(profile.agent_default),
         None => agent_override.unwrap_or(profile.agent_default),
     };
+    // Stamp the effective agent on the run: without this an overridden fresh launch leaves
+    // `agent = NULL` behind and a later resume would fall back to the profile default.
+    repos.set_task_run_agent(&primary_id, agent)?;
     let mut effective_profile = profile;
     effective_profile.agent_default = agent;
 

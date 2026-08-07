@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::prelude::{NewTaskRun, TaskRun, TaskRunStatus};
+use crate::prelude::{Agent, NewTaskRun, TaskRun, TaskRunStatus};
 use crate::TaskRunObservation;
 
 pub trait TaskRunStore {
@@ -12,6 +12,9 @@ pub trait TaskRunStore {
         status: TaskRunStatus,
     ) -> Result<()>;
     fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()>;
+    /// Record the agent a launch actually used, so a later resume reopens the session under the
+    /// same agent even when it was an override of the profile default.
+    fn set_task_run_agent(&self, task_run_id: &str, agent: Agent) -> Result<()>;
     fn get_task_run(&self, id: &str) -> Result<Option<TaskRun>>;
     fn find_task_run_by_session(
         &self,

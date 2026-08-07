@@ -576,6 +576,16 @@ impl TaskRunStore for FakeRepos {
         Ok(())
     }
 
+    fn set_task_run_agent(&self, task_run_id: &str, agent: Agent) -> Result<()> {
+        self.state
+            .borrow_mut()
+            .runs
+            .get_mut(task_run_id)
+            .ok_or_else(|| anyhow!("task run not found: {task_run_id}"))?
+            .agent = Some(agent);
+        Ok(())
+    }
+
     fn get_task_run(&self, id: &str) -> Result<Option<TaskRun>> {
         Ok(self.state.borrow().runs.get(id).cloned())
     }
@@ -864,6 +874,10 @@ impl TaskRunStore for FakeUow<'_> {
 
     fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()> {
         self.inner.set_task_run_worktree_path(task_run_id, worktree_path)
+    }
+
+    fn set_task_run_agent(&self, task_run_id: &str, agent: Agent) -> Result<()> {
+        self.inner.set_task_run_agent(task_run_id, agent)
     }
 
     fn get_task_run(&self, id: &str) -> Result<Option<TaskRun>> {
