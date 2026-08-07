@@ -244,7 +244,8 @@ where
 }
 
 /// Write hook config into the worktree's `.claude/settings.local.json` + wrapper script + PTY env
-/// for a prepared run.
+/// for a prepared run. A stopped primary that recorded a provider session is relaunched with the
+/// agent's resume command instead — same run, same worktree, no new setup.
 /// Does NOT transition the TaskRun — the SessionStart hook parks it at awaiting-prompt and
 /// the first UserPromptSubmit moves it to Running.
 pub fn prepare_claude_for_run<R, A>(
@@ -267,12 +268,21 @@ where
         .get_task_run(&primary_id)?
         .ok_or_else(|| ApplicationError::not_found(format!("primary run {primary_id} not found")))?;
 
-    if primary_run.status != TaskRunStatus::Prepared {
-        return Err(ApplicationError::conflict(format!(
-            "primary run {primary_id} is {} (expected prepared)",
-            primary_run.status.as_str()
-        )));
-    }
+    let resume_session_id = match (primary_run.status, primary_run.resumable_session()) {
+        (TaskRunStatus::Prepared, _) => None,
+        (_, Some(session)) => Some(session.to_string()),
+        (TaskRunStatus::Stopped, None) => {
+            return Err(ApplicationError::conflict(format!(
+                "primary run {primary_id} is stopped with no session to resume; prepare a new run"
+            )));
+        }
+        (other, _) => {
+            return Err(ApplicationError::conflict(format!(
+                "primary run {primary_id} is {} (expected prepared or a resumable stopped run)",
+                other.as_str()
+            )));
+        }
+    };
 
     let worktree_str = primary_run.worktree_path.ok_or_else(|| {
         ApplicationError::validation(format!("primary run {primary_id} has no worktree path"))
@@ -284,7 +294,15 @@ where
         )));
     }
 
-    let agent = agent_override.unwrap_or(profile.agent_default);
+    // A resumed session must reopen under the agent that recorded it — an override only applies
+    // to fresh launches, so `codex resume` can never be fed a Claude session.
+    let agent = match resume_session_id {
+        Some(_) => primary_run.agent.unwrap_or(profile.agent_default),
+        None => agent_override.unwrap_or(profile.agent_default),
+    };
+    // Stamp the effective agent on the run: without this an overridden fresh launch leaves
+    // `agent = NULL` behind and a later resume would fall back to the profile default.
+    repos.set_task_run_agent(&primary_id, agent)?;
     let mut effective_profile = profile;
     effective_profile.agent_default = agent;
 
@@ -294,9 +312,15 @@ where
 
     let (runspace_id, _, _) = super::open_bench::ensure_bench(repos, task_id, &worktree_str, true)?;
 
-    let file_prompt = read_prompt_file(&worktree_path);
-    let prompt = resolve_prompt(latest_github_issue_ref(repos, task_id)?.is_some(), file_prompt);
-    let initial_command = agent_initial_command(agent, prompt.as_deref());
+    let initial_command = match resume_session_id {
+        Some(session_id) => agent_resume_command(agent, &session_id),
+        None => {
+            let file_prompt = read_prompt_file(&worktree_path);
+            let prompt =
+                resolve_prompt(latest_github_issue_ref(repos, task_id)?.is_some(), file_prompt);
+            agent_initial_command(agent, prompt.as_deref())
+        }
+    };
 
     Ok(crate::RunTaskResult {
         task_id: task_id.to_string(),
@@ -332,9 +356,30 @@ fn agent_initial_command(agent: crate::prelude::Agent, prompt: Option<&str>) -> 
     }
 }
 
+fn agent_resume_command(agent: crate::prelude::Agent, session_id: &str) -> String {
+    let bin = agent.as_str();
+    let sid = crate::shell::quote_single(session_id);
+    match agent {
+        crate::prelude::Agent::Claude => format!("{bin} --resume {sid}"),
+        crate::prelude::Agent::Codex => format!("{bin} resume {sid}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resume_command_quotes_session_per_agent() {
+        assert_eq!(
+            agent_resume_command(crate::prelude::Agent::Claude, "sess-1"),
+            "claude --resume 'sess-1'"
+        );
+        assert_eq!(
+            agent_resume_command(crate::prelude::Agent::Codex, "sess-1"),
+            "codex resume 'sess-1'"
+        );
+    }
 
     #[test]
     fn empty_prompt_launches_agent_bare() {

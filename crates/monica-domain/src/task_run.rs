@@ -56,6 +56,17 @@ pub struct TaskRun {
     pub updated_at: String,
 }
 
+impl TaskRun {
+    /// The provider session this run left behind when it stopped — present exactly when the run
+    /// can be reopened with the agent's resume command instead of preparing a fresh run.
+    pub fn resumable_session(&self) -> Option<&str> {
+        match self.status {
+            TaskRunStatus::Stopped => self.provider_session_id.as_deref(),
+            _ => None,
+        }
+    }
+}
+
 /// Input for starting a task run. The `id`, status, and timestamps are assigned by the store:
 /// repository implementations always insert at [`TaskRunStatus::SettingUp`].
 #[derive(Debug, Clone)]
@@ -82,6 +93,35 @@ pub fn is_safe_task_run_id(task_run_id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resumable_session_requires_stopped_status_and_a_recorded_session() {
+        let run = |status: TaskRunStatus, session: Option<&str>| TaskRun {
+            id: TaskRunId::from_store("run-1".to_string()),
+            task_id: TaskId::from_store("mon-1".to_string()),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+            status,
+            wait_reason: None,
+            provider_session_id: session.map(str::to_string),
+            terminal_tab_id: None,
+            last_event_name: None,
+            last_event_at: None,
+            plan_file_path: None,
+            pending_stop: false,
+            metadata: RawJson::empty_object(),
+            created_at: "t0".into(),
+            updated_at: "t0".into(),
+        };
+        assert_eq!(
+            run(TaskRunStatus::Stopped, Some("sess-1")).resumable_session(),
+            Some("sess-1")
+        );
+        assert_eq!(run(TaskRunStatus::Stopped, None).resumable_session(), None);
+        assert_eq!(run(TaskRunStatus::Failed, Some("sess-1")).resumable_session(), None);
+        assert_eq!(run(TaskRunStatus::Prepared, Some("sess-1")).resumable_session(), None);
+    }
 
     #[test]
     fn safe_task_run_id_accepts_run_ids_and_rejects_traversal() {

@@ -316,6 +316,7 @@ impl TaskBoardQuery for FakeRepos {
                     status: display,
                     prepare_eligible: display.prepare_eligible(),
                     run_eligible: display.run_eligible(),
+                    run_needs_prepare: display.run_needs_prepare(false),
                     is_active: display.is_active(),
                     has_open_pull_request: false,
                     branch: None,
@@ -572,6 +573,16 @@ impl TaskRunStore for FakeRepos {
             .get_mut(task_run_id)
             .ok_or_else(|| anyhow!("task run not found: {task_run_id}"))?
             .worktree_path = Some(worktree_path.to_string());
+        Ok(())
+    }
+
+    fn set_task_run_agent(&self, task_run_id: &str, agent: Agent) -> Result<()> {
+        self.state
+            .borrow_mut()
+            .runs
+            .get_mut(task_run_id)
+            .ok_or_else(|| anyhow!("task run not found: {task_run_id}"))?
+            .agent = Some(agent);
         Ok(())
     }
 
@@ -863,6 +874,10 @@ impl TaskRunStore for FakeUow<'_> {
 
     fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()> {
         self.inner.set_task_run_worktree_path(task_run_id, worktree_path)
+    }
+
+    fn set_task_run_agent(&self, task_run_id: &str, agent: Agent) -> Result<()> {
+        self.inner.set_task_run_agent(task_run_id, agent)
     }
 
     fn get_task_run(&self, id: &str) -> Result<Option<TaskRun>> {

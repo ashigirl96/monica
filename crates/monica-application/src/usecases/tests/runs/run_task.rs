@@ -198,7 +198,11 @@ fn prepare_claude_for_run_rejects_missing_worktree() {
     assert!(err.to_string().contains("worktree does not exist"), "{err}");
 }
 
-fn prepared_run_with_worktree(repos: &mut FakeRepos, task_id: &str, prompt_body: &str) -> PathBuf {
+fn prepared_run_with_worktree(
+    repos: &mut FakeRepos,
+    task_id: &str,
+    prompt_body: &str,
+) -> (String, PathBuf) {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -215,7 +219,7 @@ fn prepared_run_with_worktree(repos: &mut FakeRepos, task_id: &str, prompt_body:
     repos
         .set_task_run_worktree_path(&prep.task_run_id, &worktree.to_string_lossy())
         .unwrap();
-    worktree
+    (prep.task_run_id, worktree)
 }
 
 #[test]
@@ -224,12 +228,101 @@ fn prepare_claude_for_run_seeds_prompt_for_issue_backed_task() {
     insert_runnable_project(&repos);
     let task_id = insert_issue_backed_task(&mut repos, 7);
 
-    let worktree = prepared_run_with_worktree(&mut repos, &task_id, "do the thing");
+    let (_, worktree) = prepared_run_with_worktree(&mut repos, &task_id, "do the thing");
     let result =
         prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap();
     std::fs::remove_dir_all(&worktree).ok();
 
     assert_eq!(result.initial_command, "claude 'do the thing'");
+}
+
+#[test]
+fn prepare_claude_for_run_resumes_stopped_primary_with_session() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = insert_issue_backed_task(&mut repos, 7);
+
+    let (run_id, worktree) = prepared_run_with_worktree(&mut repos, &task_id, "stale prompt");
+    assert!(repos.claim_prepared_run(&run_id, "sess-42").unwrap());
+    repos
+        .finish_task_run(&run_id, &task_id, TaskRunStatus::Stopped)
+        .unwrap();
+
+    let result =
+        prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap();
+    let overridden = prepare_claude_for_run(
+        &mut repos,
+        &FakeTaskRunOutputs::default(),
+        &task_id,
+        Some(Agent::Codex),
+    )
+    .unwrap();
+    std::fs::remove_dir_all(&worktree).ok();
+
+    assert_eq!(result.task_run_id, run_id, "the stopped run is reused, not replaced");
+    assert_eq!(
+        result.initial_command, "claude --resume 'sess-42'",
+        "resume reopens the recorded session and ignores the prompt file"
+    );
+    assert_eq!(
+        overridden.initial_command, "claude --resume 'sess-42'",
+        "an agent override never re-targets a recorded session to another agent"
+    );
+}
+
+#[test]
+fn overridden_launch_agent_is_stamped_and_survives_resume() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+
+    let (run_id, worktree) = prepared_run_with_worktree(&mut repos, &task_id, "");
+    let fresh = prepare_claude_for_run(
+        &mut repos,
+        &FakeTaskRunOutputs::default(),
+        &task_id,
+        Some(Agent::Codex),
+    )
+    .unwrap();
+    assert_eq!(fresh.initial_command, "codex");
+    assert_eq!(
+        repos.get_task_run(&run_id).unwrap().unwrap().agent,
+        Some(Agent::Codex),
+        "the effective agent is persisted on the run at launch"
+    );
+
+    assert!(repos.claim_prepared_run(&run_id, "sess-9").unwrap());
+    repos
+        .finish_task_run(&run_id, &task_id, TaskRunStatus::Stopped)
+        .unwrap();
+
+    let resumed =
+        prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap();
+    std::fs::remove_dir_all(&worktree).ok();
+
+    assert_eq!(
+        resumed.initial_command, "codex resume 'sess-9'",
+        "resume reopens under the agent that launched the session, not the profile default"
+    );
+}
+
+#[test]
+fn prepare_claude_for_run_rejects_stopped_primary_without_session() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+
+    let (run_id, worktree) = prepared_run_with_worktree(&mut repos, &task_id, "");
+    repos
+        .finish_task_run(&run_id, &task_id, TaskRunStatus::Stopped)
+        .unwrap();
+
+    let err =
+        prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap_err();
+    std::fs::remove_dir_all(&worktree).ok();
+
+    assert!(matches!(err, ApplicationError::Conflict(_)), "{err:?}");
+    assert!(err.to_string().contains("no session to resume"), "{err}");
 }
 
 #[test]
@@ -240,7 +333,7 @@ fn prepare_claude_for_run_ignores_prompt_for_raw_task() {
         .unwrap()
         .id;
 
-    let worktree = prepared_run_with_worktree(&mut repos, &task_id, "leftover prompt");
+    let (_, worktree) = prepared_run_with_worktree(&mut repos, &task_id, "leftover prompt");
     let result =
         prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap();
     std::fs::remove_dir_all(&worktree).ok();

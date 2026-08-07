@@ -97,6 +97,10 @@ impl TaskRunStore for SqliteUow<'_> {
         task_runs::set_task_run_worktree_path(&self.tx, task_run_id, worktree_path)
     }
 
+    fn set_task_run_agent(&self, task_run_id: &str, agent: monica_domain::Agent) -> Result<()> {
+        task_runs::set_task_run_agent(&self.tx, task_run_id, agent)
+    }
+
     fn get_task_run(&self, id: &str) -> Result<Option<TaskRun>> {
         task_runs::get_task_run(&self.tx, id)
     }

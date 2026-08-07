@@ -309,6 +309,25 @@ pub(super) fn set_task_run_worktree_path(
     Ok(())
 }
 
+pub(super) fn set_task_run_agent(
+    conn: &Connection,
+    task_run_id: &str,
+    agent: monica_domain::Agent,
+) -> Result<()> {
+    let affected = conn.execute(
+        &format!(
+            "UPDATE task_runs
+               SET agent = ?1, updated_at = {SET_NOW}
+             WHERE id = ?2"
+        ),
+        params![agent.as_str(), task_run_id],
+    )?;
+    if affected == 0 {
+        return Err(anyhow!("task run not found: {task_run_id}"));
+    }
+    Ok(())
+}
+
 pub(super) fn get_task_run(conn: &Connection, id: &str) -> Result<Option<TaskRun>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {TASK_RUN_COLUMNS} FROM task_runs WHERE id = ?1"
@@ -402,6 +421,10 @@ impl TaskRunStore for SqliteStore {
 
     fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()> {
         set_task_run_worktree_path(self.conn(), task_run_id, worktree_path)
+    }
+
+    fn set_task_run_agent(&self, task_run_id: &str, agent: monica_domain::Agent) -> Result<()> {
+        set_task_run_agent(self.conn(), task_run_id, agent)
     }
 
     fn get_task_run(&self, id: &str) -> Result<Option<TaskRun>> {

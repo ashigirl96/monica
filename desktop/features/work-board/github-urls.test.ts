@@ -1,7 +1,8 @@
 /// <reference types="bun" />
 import { describe, expect, test } from "bun:test";
-import type { GithubPullRequestRef, TaskSummaryRow } from "@/commands/task";
+import type { GithubPullRequestRef } from "@/commands/task";
 import { openTargets } from "@/features/work-board/github-urls";
+import { taskSummary as task } from "@/features/work-board/test-fixtures";
 
 function pr(over: Partial<GithubPullRequestRef>): GithubPullRequestRef {
   return {
@@ -12,30 +13,6 @@ function pr(over: Partial<GithubPullRequestRef>): GithubPullRequestRef {
     is_open_or_draft: true,
     ...over,
   };
-}
-
-function task(over: Partial<TaskSummaryRow>): TaskSummaryRow {
-  return {
-    id: "t1",
-    title: "task",
-    project: "owner/repo",
-    github_issue_number: null,
-    github_issue_url: null,
-    github_pull_requests: [],
-    task_status: "ready",
-    task_run_status: null,
-    task_run_wait_reason: null,
-    status: "ready",
-    prepare_eligible: false,
-    run_eligible: false,
-    is_active: false,
-    has_open_pull_request: false,
-    branch: null,
-    side_runs_running: 0,
-    side_runs_waiting_for_user: 0,
-    side_runs_failed: 0,
-    ...over,
-  } as TaskSummaryRow;
 }
 
 describe("openTargets", () => {

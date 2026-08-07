@@ -1006,6 +1006,40 @@ fn task_summaries_fall_back_to_latest_run_when_primary_pointer_dangles() {
 }
 
 #[test]
+fn task_summaries_skip_prepare_for_stopped_primary_with_session() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let resumable = db.insert_task(dev_task("stopped with session")).unwrap();
+    let cold = db.insert_task(dev_task("stopped without session")).unwrap();
+    let new_run = |task_id: &TaskId| NewTaskRun {
+        task_id: task_id.clone(),
+        agent: None,
+        branch: None,
+        worktree_path: None,
+    };
+
+    let run = db.start_task_run(new_run(&resumable.id)).unwrap();
+    db.set_primary_task_run(&resumable.id, &run.id).unwrap();
+    db.finish_task_run(&run.id, &resumable.id, TaskRunStatus::Prepared)
+        .unwrap();
+    assert!(db.claim_prepared_run(&run.id, "sess-1").unwrap());
+    db.finish_task_run(&run.id, &resumable.id, TaskRunStatus::Stopped)
+        .unwrap();
+
+    let cold_run = db.start_task_run(new_run(&cold.id)).unwrap();
+    db.set_primary_task_run(&cold.id, &cold_run.id).unwrap();
+    db.finish_task_run(&cold_run.id, &cold.id, TaskRunStatus::Stopped)
+        .unwrap();
+
+    let summaries = db.list_task_summaries(TaskSummaryFilter::All, None).unwrap();
+    let with_session = summaries.iter().find(|s| s.id == resumable.id.as_str()).unwrap();
+    assert_eq!(with_session.status, DisplayStatus::Stopped);
+    assert!(!with_session.run_needs_prepare);
+    let without_session = summaries.iter().find(|s| s.id == cold.id.as_str()).unwrap();
+    assert_eq!(without_session.status, DisplayStatus::Stopped);
+    assert!(without_session.run_needs_prepare);
+}
+
+#[test]
 fn task_summaries_expose_has_plan_from_the_primary_run() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let planned = db.insert_task(dev_task("has a plan")).unwrap();

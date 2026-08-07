@@ -263,6 +263,7 @@ impl TaskBoardQuery for SqliteStore {
 	               latest_run.status AS task_run_status,
 	               latest_run.wait_reason AS task_run_wait_reason,
 	               latest_run.plan_file_path IS NOT NULL AS has_plan,
+	               latest_run.provider_session_id IS NOT NULL AS primary_has_session,
 	               t.memo != '' AS has_memo,
 	               latest_run.branch AS branch,
                (SELECT COUNT(*) FROM task_runs r
@@ -326,6 +327,7 @@ impl TaskBoardQuery for SqliteStore {
                 .map(|s| s.parse())
                 .transpose()?;
             let has_plan: bool = row.get::<_, i64>("has_plan")? != 0;
+            let primary_has_session: bool = row.get::<_, i64>("primary_has_session")? != 0;
             let has_memo: bool = row.get::<_, i64>("has_memo")? != 0;
             let display_status = DisplayStatus::from_task_and_run(task_status, task_run_status);
             let github_issue_number: Option<i64> = row.get("github_issue_number")?;
@@ -357,6 +359,7 @@ impl TaskBoardQuery for SqliteStore {
                 status: display_status,
                 prepare_eligible: display_status.prepare_eligible(),
                 run_eligible: display_status.run_eligible(),
+                run_needs_prepare: display_status.run_needs_prepare(primary_has_session),
                 is_active: display_status.is_active(),
                 has_open_pull_request: false,
                 branch: row.get("branch")?,
