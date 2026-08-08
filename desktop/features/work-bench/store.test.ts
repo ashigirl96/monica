@@ -509,6 +509,58 @@ describe("pin guards", () => {
   });
 });
 
+describe("closeTaskAtom pin guard", () => {
+  async function setupCloseTaskTest(pinnedTabId?: string) {
+    const closedIds: string[] = [];
+    mock.module("@/commands/task", () => ({
+      listBenchRunspaceMap: () => Promise.resolve(benchMapResult),
+      taskShellEnv: (tid: string) => Promise.resolve(shellEnvResult.get(tid) ?? []),
+      makeMainTaskRun: () => Promise.resolve(false),
+      primaryTabId: () => Promise.resolve(null),
+      openBench: () => Promise.resolve({ runspace_id: "", task_id: "", cwd: "", env: [] }),
+      closeTask: (id: string) => {
+        closedIds.push(id);
+        return Promise.resolve();
+      },
+    }));
+    mock.module("@/features/work-board/run-flow", () => ({
+      runTaskFlow: () => Promise.resolve(null),
+    }));
+
+    const { createStore: cs } = await import("jotai");
+    const { windowLabelAtom: wlAtom } = await import("@/stores/ui-state");
+    const { terminalStateAtom: stateAtom } = await import("./store");
+    const { closeTaskAtom } = await import("@/features/work-board/store");
+
+    const store = cs();
+    store.set(wlAtom, "main");
+    store.set(
+      stateAtom,
+      makeState([makeRunspace("bench-task-a", { taskId: "task-a", pinnedTabId })]),
+    );
+    return { store, stateAtom, closeTaskAtom, closedIds };
+  }
+
+  test("blocks the backend close while the task's runspace is pinned", async () => {
+    const { store, stateAtom, closeTaskAtom, closedIds } =
+      await setupCloseTaskTest("bench-task-a-tab");
+
+    await store.set(closeTaskAtom, "task-a");
+
+    expect(closedIds).toEqual([]);
+    expect(store.get(stateAtom)!.runspaces).toHaveLength(1);
+  });
+
+  test("closes normally when the task's runspace is not pinned", async () => {
+    const { store, stateAtom, closeTaskAtom, closedIds } = await setupCloseTaskTest();
+
+    await store.set(closeTaskAtom, "task-a");
+
+    expect(closedIds).toEqual(["task-a"]);
+    expect(store.get(stateAtom)!.runspaces.some((r) => r.id === "bench-task-a")).toBe(false);
+  });
+});
+
 describe("visual order with pins", () => {
   test("cycleRunspaceAtom walks pinned → task runs → shells", async () => {
     const { createStore: cs } = await import("jotai");

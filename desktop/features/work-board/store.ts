@@ -7,7 +7,9 @@ import {
   removeRunspaceAtom,
   terminalStateAtom,
 } from "@/features/work-bench/store";
+import { loadTerminalStateAtom } from "@/features/work-bench/persistence";
 import { activeSpaceAtom } from "@/stores/space";
+import { pushInfoToast } from "@/stores/toast";
 import { refreshTaskSummariesAtom } from "@/stores/workboard";
 
 // These depend on the work-bench feature because acting on a task drives its terminal
@@ -26,8 +28,19 @@ export const openBenchAtom = atom(null, async (_get, set, taskId: string) => {
 });
 
 export const closeTaskAtom = atom(null, async (get, set, taskId: string) => {
+  // The pin lives in the terminal state, which may not be loaded yet when closing
+  // straight from the board — load it first so a persisted pin is not overlooked.
+  if (get(terminalStateAtom) === null) {
+    await set(loadTerminalStateAtom);
+  }
   const state = get(terminalStateAtom);
   const runspace = state?.runspaces.find((rs) => rs.taskId === taskId);
+  // Backend close_issue rips the task's worktrees/branches before the runspace guard
+  // below could ever run, so a pinned session blocks the whole close up front.
+  if (runspace?.pinnedTabId) {
+    pushInfoToast("Task has a pinned session — unpin it before closing");
+    return;
+  }
   await closeTask(taskId);
   if (runspace) {
     set(removeRunspaceAtom, runspace.id, "terminate");
