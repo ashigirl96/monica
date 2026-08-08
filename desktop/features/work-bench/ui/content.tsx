@@ -149,7 +149,12 @@ function TerminalPane({
     (sessionId: string) => bindSession(tabId, sessionId),
     [tabId, bindSession],
   );
-  const onExit = useCallback(() => closeTab(tabId), [tabId, closeTab]);
+  // A pinned tab must never sit dead: the process exiting (typed `exit`, crash) is out of
+  // the app's control, so instead of closing (guarded anyway) it respawns a shell in place.
+  const onExit = useCallback(
+    () => (pinned ? startNewShell(tabId) : closeTab(tabId)),
+    [tabId, pinned, startNewShell, closeTab],
+  );
 
   useTerminal(containerRef, {
     tabId,
