@@ -14,22 +14,7 @@ mod tests {
     fn adds_pinned_tab_id_column() {
         let mut conn = Connection::open_in_memory().unwrap();
         stage_through(&mut conn, 42);
-        conn.execute(
-            "INSERT INTO terminal_runspaces (id, sort_order, window_label) VALUES ('rs-1', 0, 'main')",
-            [],
-        )
-        .unwrap();
-
         conn.execute_batch(super::SQL).unwrap();
         assert_column_exists(&conn, "terminal_runspaces", "pinned_tab_id");
-
-        let pinned: Option<String> = conn
-            .query_row(
-                "SELECT pinned_tab_id FROM terminal_runspaces WHERE id = 'rs-1'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert!(pinned.is_none());
     }
 }

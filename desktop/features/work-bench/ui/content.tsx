@@ -7,6 +7,7 @@ import {
   bindTabSessionAtom,
   closeTerminalTabAtom,
   startNewShellForTabAtom,
+  tabExitedAtom,
   updateTabTitleAtom,
   updateTabCwdAtom,
   consumeTerminalLaunchAtom,
@@ -132,6 +133,7 @@ function TerminalPane({
   const closeTab = useSetAtom(closeTerminalTabAtom);
   const bindSession = useSetAtom(bindTabSessionAtom);
   const startNewShell = useSetAtom(startNewShellForTabAtom);
+  const tabExited = useSetAtom(tabExitedAtom);
   const updateTitle = useSetAtom(updateTabTitleAtom);
   const updateCwd = useSetAtom(updateTabCwdAtom);
 
@@ -149,12 +151,7 @@ function TerminalPane({
     (sessionId: string) => bindSession(tabId, sessionId),
     [tabId, bindSession],
   );
-  // A pinned tab must never sit dead: the process exiting (typed `exit`, crash) is out of
-  // the app's control, so instead of closing (guarded anyway) it respawns a shell in place.
-  const onExit = useCallback(
-    () => (pinned ? startNewShell(tabId) : closeTab(tabId)),
-    [tabId, pinned, startNewShell, closeTab],
-  );
+  const onExit = useCallback(() => tabExited(tabId), [tabId, tabExited]);
 
   useTerminal(containerRef, {
     tabId,

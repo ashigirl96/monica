@@ -29,10 +29,9 @@ export const openBenchAtom = atom(null, async (_get, set, taskId: string) => {
 
 export const closeTaskAtom = atom(null, async (get, set, taskId: string) => {
   // The pin lives in the terminal state, which may not be loaded yet when closing
-  // straight from the board — load it first so a persisted pin is not overlooked.
-  if (get(terminalStateAtom) === null) {
-    await set(loadTerminalStateAtom);
-  }
+  // straight from the board — load it first (a no-op when already loaded) so a
+  // persisted pin is not overlooked.
+  await set(loadTerminalStateAtom);
   const state = get(terminalStateAtom);
   const runspace = state?.runspaces.find((rs) => rs.taskId === taskId);
   // Backend close_issue rips the task's worktrees/branches before the runspace guard

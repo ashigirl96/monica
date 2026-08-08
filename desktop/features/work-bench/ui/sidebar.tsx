@@ -120,7 +120,9 @@ function RunspaceItem({
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex items-start gap-1.5">
           {hint && <JumpHint hint={hint} ctrl />}
-          {ws.pinned && <PinIcon size={11} className="mt-0.5 shrink-0 text-muted-foreground" />}
+          {ws.group === "pinned" && (
+            <PinIcon size={11} className="mt-0.5 shrink-0 text-muted-foreground" />
+          )}
           <span
             className={cn(
               "flex-1 text-xs font-medium leading-snug",
@@ -180,6 +182,23 @@ function GroupHeader({ label }: { label: string }) {
   );
 }
 
+function RunspaceGroup({
+  label,
+  items,
+  renderItem,
+}: {
+  label: string;
+  items: RunspaceSummary[];
+  renderItem: (ws: RunspaceSummary) => React.ReactNode;
+}) {
+  return (
+    <>
+      <GroupHeader label={label} />
+      <div className="flex flex-col gap-0.5 px-0.5">{items.map(renderItem)}</div>
+    </>
+  );
+}
+
 export function WorkBenchSidebar() {
   const summaries = useAtomValue(runspaceSummariesAtom);
   const detachedSessions = useAtomValue(detachedSessionsAtom);
@@ -197,64 +216,40 @@ export function WorkBenchSidebar() {
   // app-wide on backend events, so only sessions need polling here.
   useLiveRefresh(refreshSessions);
 
-  const { pinned, taskBound, shells } = useMemo(() => {
-    const pinned = summaries.filter((s) => s.pinned);
-    const taskBound = summaries.filter((s) => !s.pinned && s.taskId);
-    const shells = summaries.filter((s) => !s.pinned && !s.taskId);
-    return { pinned, taskBound, shells };
-  }, [summaries]);
+  const { pinned, taskBound, shells } = useMemo(
+    () => ({
+      pinned: summaries.filter((s) => s.group === "pinned"),
+      taskBound: summaries.filter((s) => s.group === "task"),
+      shells: summaries.filter((s) => s.group === "shell"),
+    }),
+    [summaries],
+  );
+
+  const renderItem = (ws: RunspaceSummary) => (
+    <RunspaceItem
+      key={ws.id}
+      ws={ws}
+      dragHandlers={handlersFor(ws.id, () => activate(ws.id))}
+      isDragOver={dragOverId === ws.id}
+      task={ws.taskId ? taskSummaryById[ws.taskId] : undefined}
+      hint={jumpHints.byRunspaceId[ws.id]}
+    />
+  );
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto">
         {pinned.length > 0 && (
-          <>
-            <GroupHeader label="Pinned" />
-            <div className="flex flex-col gap-0.5 px-0.5">
-              {pinned.map((ws) => (
-                <RunspaceItem
-                  key={ws.id}
-                  ws={ws}
-                  dragHandlers={handlersFor(ws.id, () => activate(ws.id))}
-                  isDragOver={dragOverId === ws.id}
-                  task={ws.taskId ? taskSummaryById[ws.taskId] : undefined}
-                  hint={jumpHints.byRunspaceId[ws.id]}
-                />
-              ))}
-            </div>
-          </>
+          <RunspaceGroup label="Pinned" items={pinned} renderItem={renderItem} />
         )}
-
         {taskBound.length > 0 && (
-          <>
-            <GroupHeader label="Task Runs" />
-            <div className="flex flex-col gap-0.5 px-0.5">
-              {taskBound.map((ws) => (
-                <RunspaceItem
-                  key={ws.id}
-                  ws={ws}
-                  dragHandlers={handlersFor(ws.id, () => activate(ws.id))}
-                  isDragOver={dragOverId === ws.id}
-                  task={ws.taskId ? taskSummaryById[ws.taskId] : undefined}
-                  hint={jumpHints.byRunspaceId[ws.id]}
-                />
-              ))}
-            </div>
-          </>
+          <RunspaceGroup label="Task Runs" items={taskBound} renderItem={renderItem} />
         )}
-
-        <GroupHeader label={pinned.length + taskBound.length > 0 ? "Shells" : ""} />
-        <div className="flex flex-col gap-0.5 px-0.5">
-          {shells.map((ws) => (
-            <RunspaceItem
-              key={ws.id}
-              ws={ws}
-              dragHandlers={handlersFor(ws.id, () => activate(ws.id))}
-              isDragOver={dragOverId === ws.id}
-              hint={jumpHints.byRunspaceId[ws.id]}
-            />
-          ))}
-        </div>
+        <RunspaceGroup
+          label={pinned.length + taskBound.length > 0 ? "Shells" : ""}
+          items={shells}
+          renderItem={renderItem}
+        />
 
         {detachedSessions.length > 0 && (
           <>
