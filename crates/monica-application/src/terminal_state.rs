@@ -15,6 +15,7 @@ pub struct TerminalTabRow {
 pub struct TerminalRunspaceRow {
     pub id: String,
     pub sort_order: i64,
+    pub pinned_tab_id: Option<String>,
     pub tabs: Vec<TerminalTabRow>,
 }
 

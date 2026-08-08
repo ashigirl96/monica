@@ -3,13 +3,16 @@ import { cn } from "@/lib/utils";
 import { PopoverMenu } from "@/components/popover-menu";
 import {
   closeTerminalTabAtom,
+  pinnedTabIdsAtom,
   startNewShellForTabAtom,
   tabByIdAtom,
   tabMenuAtom,
   terminateTabSessionAtom,
+  toggleTabPinAtom,
   type TabMenuState,
 } from "@/features/work-bench/store";
 import { sessionStatusAtom } from "@/features/work-bench/session-status";
+import { MAIN_WINDOW_LABEL, windowLabelAtom } from "@/stores/ui-state";
 
 export function TabContextMenu() {
   const menu = useAtomValue(tabMenuAtom);
@@ -22,8 +25,11 @@ function MenuPopover({ menu }: { menu: TabMenuState }) {
   const closeTab = useSetAtom(closeTerminalTabAtom);
   const terminateSession = useSetAtom(terminateTabSessionAtom);
   const startNewShell = useSetAtom(startNewShellForTabAtom);
+  const togglePin = useSetAtom(toggleTabPinAtom);
   const tab = useAtomValue(tabByIdAtom).get(menu.tabId);
   const sessionStatus = useAtomValue(sessionStatusAtom);
+  const isPinned = useAtomValue(pinnedTabIdsAtom).has(menu.tabId);
+  const isMainWindow = useAtomValue(windowLabelAtom) === MAIN_WINDOW_LABEL;
 
   if (!tab) return null;
 
@@ -31,7 +37,7 @@ function MenuPopover({ menu }: { menu: TabMenuState }) {
   const dead =
     entry !== undefined &&
     (entry.status === "exited" || entry.status === "lost" || entry.status === "failed");
-  const canTerminate = tab.sessionId !== undefined && !dead;
+  const canTerminate = tab.sessionId !== undefined && !dead && !isPinned;
 
   const itemClass = (selectedStyle: string, disabled?: boolean) =>
     cn(
@@ -42,13 +48,26 @@ function MenuPopover({ menu }: { menu: TabMenuState }) {
 
   return (
     <PopoverMenu anchor={menu.anchor} onClose={() => setMenu(null)}>
+      {isMainWindow && (
+        <button
+          type="button"
+          onClick={() => {
+            setMenu(null);
+            togglePin(menu.tabId);
+          }}
+          className={itemClass("hover:bg-accent hover:text-accent-foreground")}
+        >
+          {isPinned ? "Unpin" : "Pin"}
+        </button>
+      )}
       <button
         type="button"
+        disabled={isPinned}
         onClick={() => {
           setMenu(null);
           closeTab(menu.tabId);
         }}
-        className={itemClass("hover:bg-accent hover:text-accent-foreground")}
+        className={itemClass("hover:bg-accent hover:text-accent-foreground", isPinned)}
       >
         Close (keep shell)
       </button>

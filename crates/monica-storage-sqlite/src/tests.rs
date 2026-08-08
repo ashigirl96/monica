@@ -2067,6 +2067,7 @@ fn terminal_state_snapshot_round_trips_session_id() {
         runspaces: vec![TerminalRunspaceRow {
             id: "rs-1".into(),
             sort_order: 0,
+            pinned_tab_id: None,
             tabs: vec![
                 TerminalTabRow {
                     id: "tab-1".into(),
@@ -2094,6 +2095,49 @@ fn terminal_state_snapshot_round_trips_session_id() {
 }
 
 #[test]
+fn terminal_state_round_trips_pinned_tab_id_and_drops_dangling() {
+    use monica_application::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTabRow};
+
+    let tab = |id: &str| TerminalTabRow {
+        id: id.into(),
+        cwd: "/tmp".into(),
+        title: id.into(),
+        sort_order: 0,
+        terminal_session_id: None,
+    };
+
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let snapshot = TerminalStateSnapshot {
+        runspaces: vec![
+            TerminalRunspaceRow {
+                id: "rs-pinned".into(),
+                sort_order: 0,
+                pinned_tab_id: Some("tab-1".into()),
+                tabs: vec![tab("tab-1")],
+            },
+            TerminalRunspaceRow {
+                id: "rs-dangling".into(),
+                sort_order: 1,
+                pinned_tab_id: Some("tab-gone".into()),
+                tabs: vec![tab("tab-2")],
+            },
+            TerminalRunspaceRow {
+                id: "rs-unpinned".into(),
+                sort_order: 2,
+                pinned_tab_id: None,
+                tabs: vec![tab("tab-3")],
+            },
+        ],
+    };
+    db.save_terminal_state("main", &snapshot).unwrap();
+
+    let loaded = db.load_terminal_state("main").unwrap();
+    assert_eq!(loaded.runspaces[0].pinned_tab_id.as_deref(), Some("tab-1"));
+    assert_eq!(loaded.runspaces[1].pinned_tab_id, None);
+    assert_eq!(loaded.runspaces[2].pinned_tab_id, None);
+}
+
+#[test]
 fn terminal_state_is_scoped_by_window_label() {
     let mut db = SqliteStore::open_in_memory().unwrap();
 
@@ -2101,6 +2145,7 @@ fn terminal_state_is_scoped_by_window_label() {
         runspaces: vec![TerminalRunspaceRow {
             id: "rs-main".into(),
             sort_order: 0,
+            pinned_tab_id: None,
             tabs: vec![TerminalTabRow {
                 id: "tab-m1".into(),
                 cwd: "/home".into(),
@@ -2114,6 +2159,7 @@ fn terminal_state_is_scoped_by_window_label() {
         runspaces: vec![TerminalRunspaceRow {
             id: "rs-sec".into(),
             sort_order: 0,
+            pinned_tab_id: None,
             tabs: vec![TerminalTabRow {
                 id: "tab-s1".into(),
                 cwd: "/tmp".into(),
@@ -2145,6 +2191,7 @@ fn terminal_state_is_scoped_by_window_label() {
         runspaces: vec![TerminalRunspaceRow {
             id: "rs-main-v2".into(),
             sort_order: 0,
+            pinned_tab_id: None,
             tabs: vec![],
         }],
     };
@@ -2170,6 +2217,7 @@ fn same_runspace_id_in_two_windows_does_not_leak_tabs() {
         runspaces: vec![TerminalRunspaceRow {
             id: "bench-task-1".into(),
             sort_order: 0,
+            pinned_tab_id: None,
             tabs: vec![TerminalTabRow {
                 id: "tab-main".into(),
                 cwd: "/main".into(),
@@ -2183,6 +2231,7 @@ fn same_runspace_id_in_two_windows_does_not_leak_tabs() {
         runspaces: vec![TerminalRunspaceRow {
             id: "bench-task-1".into(),
             sort_order: 0,
+            pinned_tab_id: None,
             tabs: vec![TerminalTabRow {
                 id: "tab-sec".into(),
                 cwd: "/secondary".into(),

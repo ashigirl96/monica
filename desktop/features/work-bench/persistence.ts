@@ -25,6 +25,7 @@ function stateToSnapshot(state: TerminalState): TerminalStateSnapshot {
     runspaces: state.runspaces.map((rs) => ({
       id: rs.id,
       sort_order: rs.order,
+      pinned_tab_id: rs.pinnedTabId ?? null,
       tabs: rs.tabs.map((t) => ({
         id: t.id,
         cwd: tabDisplayPath(t),
@@ -43,6 +44,7 @@ function snapshotToState(snap: TerminalStateSnapshot): TerminalState | null {
   const runspaces: TerminalRunspace[] = snap.runspaces.map((rs) => ({
     id: rs.id,
     order: rs.sort_order,
+    pinnedTabId: rs.pinned_tab_id ?? undefined,
     activeTabId: rs.tabs[0]?.id ?? "",
     tabs: rs.tabs.map((t) => ({
       id: t.id,

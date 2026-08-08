@@ -15,7 +15,7 @@ import { sessionStatusAtom } from "@/features/work-bench/session-status";
 import { rectToAnchor } from "@/lib/anchor";
 import { statusDisplayLabel, statusDotClass } from "@/lib/status-config";
 import { JumpHint } from "./jump-hint";
-import { PlusIcon, XIcon } from "@/components/icons";
+import { PinIcon, PlusIcon, XIcon } from "@/components/icons";
 import { useDragReorder } from "@/hooks/use-drag-reorder";
 import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import { cn } from "@/lib/utils";
@@ -81,6 +81,7 @@ export function WorkBenchHeader() {
         const agentWaitReason = session?.agentWaitReason ?? null;
         const agentDot = agentStatus ? statusDotClass(agentStatus, agentWaitReason) : undefined;
         const hint = jumpHints.byTabId[tab.id];
+        const isPinned = tab.id === rs.pinnedTabId;
         return (
           <button
             key={tab.id}
@@ -109,6 +110,7 @@ export function WorkBenchHeader() {
             title={isMain ? "Main Run (⌘G elsewhere to promote)" : undefined}
           >
             {hint && <JumpHint hint={hint} className="mr-1.5" />}
+            {isPinned && <PinIcon size={11} className="mr-1.5 shrink-0 text-muted-foreground" />}
             {agentStatus && agentDot && (
               <span
                 title={statusDisplayLabel(agentStatus, agentWaitReason)}
@@ -122,20 +124,22 @@ export function WorkBenchHeader() {
                 className={cn("ml-1.5 size-1.5 shrink-0 rounded-full", terminalDot)}
               />
             )}
-            <span
-              role="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                closeTab(tab.id);
-              }}
-              className={cn(
-                "flex h-4 w-4 items-center justify-center rounded",
-                "opacity-0 transition-opacity duration-100 group-hover:opacity-100",
-                "hover:bg-white/[0.1]",
-              )}
-            >
-              <XIcon size={10} />
-            </span>
+            {!isPinned && (
+              <span
+                role="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeTab(tab.id);
+                }}
+                className={cn(
+                  "flex h-4 w-4 items-center justify-center rounded",
+                  "opacity-0 transition-opacity duration-100 group-hover:opacity-100",
+                  "hover:bg-white/[0.1]",
+                )}
+              >
+                <XIcon size={10} />
+              </span>
+            )}
           </button>
         );
       })}

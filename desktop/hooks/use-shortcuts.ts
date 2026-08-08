@@ -16,6 +16,7 @@ import {
   promoteActiveTabRunAtom,
   toggleLastRunspaceAtom,
   togglePlanPreviewAtom,
+  toggleTabPinAtom,
 } from "@/features/work-bench/store";
 import { jumpHintsActiveAtom, jumpToHintAtom } from "@/features/work-bench/jump-hints";
 import { sessionStatusAtom } from "@/features/work-bench/session-status";
@@ -76,6 +77,7 @@ export function useShortcuts() {
   const cycleTerminalTab = useSetAtom(cycleTerminalTabAtom);
   const cycleRunspace = useSetAtom(cycleRunspaceAtom);
   const promoteActiveTabRun = useSetAtom(promoteActiveTabRunAtom);
+  const toggleTabPin = useSetAtom(toggleTabPinAtom);
   const togglePlanPreview = useSetAtom(togglePlanPreviewAtom);
   const planPreview = useAtomValue(planPreviewAtom);
   const setPlanPreview = useSetAtom(planPreviewAtom);
@@ -162,6 +164,17 @@ export function useShortcuts() {
         action: ({ isWorkBench }) => {
           if (!isWorkBench) return false;
           void togglePlanPreview();
+        },
+      },
+      // macOS の Print ダイアログは preventDefault で shadow できる。
+      {
+        meta: true,
+        shift: false,
+        key: "p",
+        editable: true,
+        action: ({ isWorkBench }) => {
+          if (!isWorkBench) return false;
+          toggleTabPin();
         },
       },
       // alt+M, not alt+I: Option+I is a macOS dead key (ˆ) and WebKit starts its
@@ -359,6 +372,7 @@ export function useShortcuts() {
     cycleTerminalTab,
     cycleRunspace,
     promoteActiveTabRun,
+    toggleTabPin,
     togglePlanPreview,
     planPreview,
     setPlanPreview,

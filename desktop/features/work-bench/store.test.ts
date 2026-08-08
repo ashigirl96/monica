@@ -113,6 +113,7 @@ let loadStateResult: {
   runspaces: {
     id: string;
     sort_order: number;
+    pinned_tab_id?: string | null;
     tabs: {
       id: string;
       cwd: string;
@@ -281,28 +282,33 @@ describe("saveTerminalStateAtom", () => {
   });
 });
 
+async function setupTerminateTest(state: TerminalState) {
+  const terminatedIds: string[] = [];
+  mock.module("@/commands/terminal", () => ({
+    terminalLoadState: () => Promise.resolve(loadStateResult),
+    terminalListSessions: () => Promise.resolve(sessionsResult ?? []),
+    terminalDetach: () => Promise.resolve(),
+    terminalSaveState: () => Promise.resolve(),
+    terminalTerminate: (id: string) => {
+      terminatedIds.push(id);
+      return Promise.resolve();
+    },
+  }));
+
+  const { createStore: cs } = await import("jotai");
+  const { windowLabelAtom: wlAtom } = await import("@/stores/ui-state");
+  const { terminalStateAtom: stateAtom, terminateTabSessionAtom: termAtom } =
+    await import("./store");
+
+  const store = cs();
+  store.set(wlAtom, "main");
+  store.set(stateAtom, state);
+  return { store, stateAtom, termAtom, terminatedIds };
+}
+
 describe("terminateTabSessionAtom", () => {
   test("terminates the tab's session, then closes the tab", async () => {
-    let terminatedId: string | undefined;
-    mock.module("@/commands/terminal", () => ({
-      terminalLoadState: () => Promise.resolve(loadStateResult),
-      terminalListSessions: () => Promise.resolve(sessionsResult ?? []),
-      terminalDetach: () => Promise.resolve(),
-      terminalSaveState: () => Promise.resolve(),
-      terminalTerminate: (id: string) => {
-        terminatedId = id;
-        return Promise.resolve();
-      },
-    }));
-
-    const { createStore: cs } = await import("jotai");
-    const { windowLabelAtom: wlAtom } = await import("@/stores/ui-state");
-    const { terminalStateAtom: stateAtom, terminateTabSessionAtom: termAtom } =
-      await import("./store");
-
-    const store = cs();
-    store.set(wlAtom, "main");
-    store.set(stateAtom, {
+    const { store, stateAtom, termAtom, terminatedIds } = await setupTerminateTest({
       runspaces: [
         {
           id: "rs",
@@ -319,10 +325,283 @@ describe("terminateTabSessionAtom", () => {
 
     await store.set(termAtom, "t1");
 
-    expect(terminatedId).toBe("sess-1");
+    expect(terminatedIds).toEqual(["sess-1"]);
     const tabs = store.get(stateAtom)!.runspaces[0].tabs;
     expect(tabs).toHaveLength(1);
     expect(tabs.find((t) => t.id === "t1")).toBeUndefined();
+  });
+});
+
+describe("toggleTabPinAtom", () => {
+  async function setupPinStore(state: TerminalState, windowLabel = "main") {
+    const { createStore: cs } = await import("jotai");
+    const { windowLabelAtom: wlAtom } = await import("@/stores/ui-state");
+    const { terminalStateAtom: stateAtom, toggleTabPinAtom: pinAtom } = await import("./store");
+    const store = cs();
+    store.set(wlAtom, windowLabel);
+    store.set(stateAtom, state);
+    return { store, stateAtom, pinAtom };
+  }
+
+  test("pins a task runspace in place and moves it to the end of the order", async () => {
+    const taskRs = makeRunspace("rs-task", { taskId: "task-a", order: 0 });
+    const shellRs = makeRunspace("rs-shell", { order: 1 });
+    const { store, stateAtom, pinAtom } = await setupPinStore(
+      makeState([taskRs, shellRs], "rs-task"),
+    );
+
+    store.set(pinAtom, "rs-task-tab");
+
+    const rs = store.get(stateAtom)!.runspaces.find((r) => r.id === "rs-task")!;
+    expect(rs.pinnedTabId).toBe("rs-task-tab");
+    expect(rs.taskId).toBe("task-a");
+    expect(rs.tabs).toHaveLength(1);
+    expect(rs.order).toBe(2);
+  });
+
+  test("unpin clears the flag without touching order or tabs", async () => {
+    const rs = makeRunspace("rs-1", { pinnedTabId: "rs-1-tab", order: 5 });
+    const { store, stateAtom, pinAtom } = await setupPinStore(makeState([rs]));
+
+    store.set(pinAtom, "rs-1-tab");
+
+    const after = store.get(stateAtom)!.runspaces[0];
+    expect(after.pinnedTabId).toBeUndefined();
+    expect(after.order).toBe(5);
+    expect(after.tabs).toHaveLength(1);
+  });
+
+  test("pins a single-tab shell in place without creating a runspace", async () => {
+    const shell = makeRunspace("rs-shell", { order: 0 });
+    const { store, stateAtom, pinAtom } = await setupPinStore(makeState([shell]));
+
+    store.set(pinAtom, "rs-shell-tab");
+
+    const state = store.get(stateAtom)!;
+    expect(state.runspaces).toHaveLength(1);
+    expect(state.runspaces[0].id).toBe("rs-shell");
+    expect(state.runspaces[0].pinnedTabId).toBe("rs-shell-tab");
+  });
+
+  test("extracts a tab from a multi-tab shell into a new pinned runspace", async () => {
+    const shell = makeRunspace("rs-shell", {
+      tabs: [
+        { id: "t1", title: "", cwd: "~", order: 0 },
+        { id: "t2", title: "", cwd: "/work", order: 1, sessionId: "sess-2" },
+        { id: "t3", title: "", cwd: "~", order: 2 },
+      ],
+      activeTabId: "t2",
+      order: 0,
+    });
+    const { store, stateAtom, pinAtom } = await setupPinStore(makeState([shell], "rs-shell"));
+
+    store.set(pinAtom, "t2");
+
+    const state = store.get(stateAtom)!;
+    expect(state.runspaces).toHaveLength(2);
+
+    const original = state.runspaces.find((r) => r.id === "rs-shell")!;
+    expect(original.tabs.map((t) => t.id)).toEqual(["t1", "t3"]);
+    expect(original.pinnedTabId).toBeUndefined();
+    expect(original.activeTabId).toBe("t3");
+
+    const pinned = state.runspaces.find((r) => r.id !== "rs-shell")!;
+    expect(pinned.pinnedTabId).toBe("t2");
+    expect(pinned.tabs).toHaveLength(1);
+    expect(pinned.tabs[0].id).toBe("t2");
+    expect(pinned.tabs[0].sessionId).toBe("sess-2");
+    expect(pinned.tabs[0].cwd).toBe("/work");
+    expect(pinned.order).toBe(1);
+    expect(state.activeRunspaceId).toBe(pinned.id);
+  });
+
+  test("is a no-op in a secondary window", async () => {
+    const rs = makeRunspace("rs-1");
+    const { store, stateAtom, pinAtom } = await setupPinStore(makeState([rs]), "monica-window-1");
+
+    store.set(pinAtom, "rs-1-tab");
+
+    expect(store.get(stateAtom)!.runspaces[0].pinnedTabId).toBeUndefined();
+  });
+});
+
+describe("pin guards", () => {
+  test("closeTerminalTabAtom is a no-op for the pinned tab", async () => {
+    let detachCalls = 0;
+    mock.module("@/commands/terminal", () => ({
+      terminalLoadState: () => Promise.resolve(loadStateResult),
+      terminalListSessions: () => Promise.resolve(sessionsResult ?? []),
+      terminalDetach: () => {
+        detachCalls++;
+        return Promise.resolve();
+      },
+      terminalSaveState: () => Promise.resolve(),
+      terminalTerminate: () => Promise.resolve(),
+    }));
+
+    const { createStore: cs } = await import("jotai");
+    const { windowLabelAtom: wlAtom } = await import("@/stores/ui-state");
+    const { terminalStateAtom: stateAtom, closeTerminalTabAtom: closeAtom } =
+      await import("./store");
+
+    const store = cs();
+    store.set(wlAtom, "main");
+    store.set(stateAtom, {
+      runspaces: [
+        {
+          id: "rs",
+          tabs: [
+            { id: "t1", title: "", cwd: "~", order: 0, sessionId: "sess-1" },
+            { id: "t2", title: "", cwd: "~", order: 1, sessionId: "sess-2" },
+          ],
+          activeTabId: "t1",
+          order: 0,
+          pinnedTabId: "t1",
+        },
+      ],
+      activeRunspaceId: "rs",
+    });
+
+    store.set(closeAtom, "t1");
+    expect(store.get(stateAtom)!.runspaces[0].tabs).toHaveLength(2);
+    expect(detachCalls).toBe(0);
+
+    // Other tabs in the pinned runspace close normally.
+    store.set(closeAtom, "t2");
+    expect(store.get(stateAtom)!.runspaces[0].tabs.map((t) => t.id)).toEqual(["t1"]);
+    expect(detachCalls).toBe(1);
+  });
+
+  test("terminateTabSessionAtom is a no-op for the pinned tab", async () => {
+    const { store, stateAtom, termAtom, terminatedIds } = await setupTerminateTest({
+      runspaces: [
+        {
+          id: "rs",
+          tabs: [{ id: "t1", title: "", cwd: "~", order: 0, sessionId: "sess-1" }],
+          activeTabId: "t1",
+          order: 0,
+          pinnedTabId: "t1",
+        },
+      ],
+      activeRunspaceId: "rs",
+    });
+
+    await store.set(termAtom, "t1");
+
+    expect(terminatedIds).toEqual([]);
+    expect(store.get(stateAtom)!.runspaces[0].tabs).toHaveLength(1);
+  });
+
+  test("removeRunspaceAtom is a no-op for a pinned runspace", async () => {
+    const { createStore: cs } = await import("jotai");
+    const { windowLabelAtom: wlAtom } = await import("@/stores/ui-state");
+    const { terminalStateAtom: stateAtom, removeRunspaceAtom: removeAtom } =
+      await import("./store");
+
+    const store = cs();
+    store.set(wlAtom, "main");
+    const pinnedRs = makeRunspace("rs-pinned", { pinnedTabId: "rs-pinned-tab" });
+    store.set(stateAtom, makeState([pinnedRs, makeRunspace("rs-other", { order: 1 })]));
+
+    store.set(removeAtom, "rs-pinned", "terminate");
+
+    expect(store.get(stateAtom)!.runspaces.map((r) => r.id)).toEqual(["rs-pinned", "rs-other"]);
+  });
+});
+
+describe("visual order with pins", () => {
+  test("cycleRunspaceAtom walks pinned → task runs → shells", async () => {
+    const { createStore: cs } = await import("jotai");
+    const { windowLabelAtom: wlAtom } = await import("@/stores/ui-state");
+    const { terminalStateAtom: stateAtom, cycleRunspaceAtom: cycleAtom } = await import("./store");
+
+    const store = cs();
+    store.set(wlAtom, "main");
+    // By raw order: task (0), shell (1), pinned shell (2). Visually the pin comes first.
+    store.set(
+      stateAtom,
+      makeState(
+        [
+          makeRunspace("rs-task", { taskId: "task-a", order: 0 }),
+          makeRunspace("rs-shell", { order: 1 }),
+          makeRunspace("rs-pinned", { order: 2, pinnedTabId: "rs-pinned-tab" }),
+        ],
+        "rs-pinned",
+      ),
+    );
+
+    store.set(cycleAtom, "down");
+    expect(store.get(stateAtom)!.activeRunspaceId).toBe("rs-task");
+    store.set(cycleAtom, "down");
+    expect(store.get(stateAtom)!.activeRunspaceId).toBe("rs-shell");
+    store.set(cycleAtom, "down");
+    expect(store.get(stateAtom)!.activeRunspaceId).toBe("rs-pinned");
+  });
+});
+
+describe("pin persistence", () => {
+  test("saved snapshot carries pinned_tab_id", async () => {
+    let saved: { runspaces: { id: string; pinned_tab_id: string | null }[] } | undefined;
+    mock.module("@/commands/terminal", () => ({
+      terminalLoadState: () => Promise.resolve(loadStateResult),
+      terminalListSessions: () => Promise.resolve(sessionsResult ?? []),
+      terminalDetach: () => Promise.resolve(),
+      terminalSaveState: (
+        _label: string,
+        snapshot: { runspaces: { id: string; pinned_tab_id: string | null }[] },
+      ) => {
+        saved = snapshot;
+        return Promise.resolve();
+      },
+      terminalTerminate: () => Promise.resolve(),
+    }));
+
+    const { createStore: cs } = await import("jotai");
+    const { windowLabelAtom: wlAtom } = await import("@/stores/ui-state");
+    const { terminalStateAtom: stateAtom } = await import("./store");
+    const { saveTerminalStateAtom: saveAtom } = await import("./persistence");
+
+    const store = cs();
+    store.set(wlAtom, "main");
+    store.set(
+      stateAtom,
+      makeState([
+        makeRunspace("rs-pinned", { pinnedTabId: "rs-pinned-tab" }),
+        makeRunspace("rs-plain", { order: 1 }),
+      ]),
+    );
+    store.set(saveAtom);
+    await new Promise((r) => setTimeout(r, 600));
+
+    expect(saved).toBeDefined();
+    expect(saved!.runspaces.find((r) => r.id === "rs-pinned")!.pinned_tab_id).toBe("rs-pinned-tab");
+    expect(saved!.runspaces.find((r) => r.id === "rs-plain")!.pinned_tab_id).toBeNull();
+  });
+
+  test("load restores pinnedTabId from the snapshot", async () => {
+    loadStateResult = {
+      runspaces: [
+        {
+          id: "rs-1",
+          sort_order: 0,
+          pinned_tab_id: "tab-1",
+          tabs: [
+            { id: "tab-1", cwd: "/home", title: "zsh", sort_order: 0, terminal_session_id: null },
+          ],
+        },
+      ],
+    };
+
+    const { createStore: cs } = await import("jotai");
+    const { windowLabelAtom: wlAtom } = await import("@/stores/ui-state");
+    const { terminalStateAtom: stateAtom } = await import("./store");
+    const { loadTerminalStateAtom: loadAtom } = await import("./persistence");
+
+    const store = cs();
+    store.set(wlAtom, "main");
+    await store.set(loadAtom);
+
+    expect(store.get(stateAtom)!.runspaces[0].pinnedTabId).toBe("tab-1");
   });
 });
 

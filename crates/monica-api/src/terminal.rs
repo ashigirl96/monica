@@ -147,6 +147,7 @@ pub struct TerminalRunspaceRow {
     pub id: String,
     #[specta(type = specta_typescript::Number)]
     pub sort_order: i64,
+    pub pinned_tab_id: Option<String>,
     pub tabs: Vec<TerminalTabRow>,
 }
 
@@ -171,6 +172,7 @@ impl From<monica_application::TerminalRunspaceRow> for TerminalRunspaceRow {
         Self {
             id: value.id,
             sort_order: value.sort_order,
+            pinned_tab_id: value.pinned_tab_id,
             tabs: value.tabs.into_iter().map(Into::into).collect(),
         }
     }
@@ -201,6 +203,7 @@ impl From<TerminalRunspaceRow> for monica_application::TerminalRunspaceRow {
         Self {
             id: value.id,
             sort_order: value.sort_order,
+            pinned_tab_id: value.pinned_tab_id,
             tabs: value.tabs.into_iter().map(Into::into).collect(),
         }
     }
