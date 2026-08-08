@@ -415,6 +415,28 @@ describe("toggleTabPinAtom", () => {
     expect(state.activeRunspaceId).toBe(pinned.id);
   });
 
+  test("re-points the pin when another tab in a pinned runspace is pinned", async () => {
+    const pinnedShell = makeRunspace("rs-pinned", {
+      tabs: [
+        { id: "t1", title: "", cwd: "~", order: 0 },
+        { id: "t2", title: "", cwd: "~", order: 1 },
+      ],
+      activeTabId: "t2",
+      order: 3,
+      pinnedTabId: "t1",
+    });
+    const { store, stateAtom, pinAtom } = await setupPinStore(makeState([pinnedShell]));
+
+    store.set(pinAtom, "t2");
+
+    const state = store.get(stateAtom)!;
+    expect(state.runspaces).toHaveLength(1);
+    const rs = state.runspaces[0];
+    expect(rs.pinnedTabId).toBe("t2");
+    expect(rs.tabs.map((t) => t.id)).toEqual(["t1", "t2"]);
+    expect(rs.order).toBe(3);
+  });
+
   test("is a no-op in a secondary window", async () => {
     const rs = makeRunspace("rs-1");
     const { store, stateAtom, pinAtom } = await setupPinStore(makeState([rs]), "monica-window-1");

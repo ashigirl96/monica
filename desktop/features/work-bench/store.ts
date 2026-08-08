@@ -537,6 +537,14 @@ export const toggleTabPinAtom = atom(null, (get, set, tabId?: string) => {
     return;
   }
 
+  if (rs.pinnedTabId) {
+    // The runspace is already pinned via another tab: re-point the pin there instead of
+    // extracting a second pinned runspace — the 1:1 pair moves within the runspace and
+    // its position in PINNED stays put.
+    set(terminalStateAtom, patchRunspaceInState(state, rs.id, { pinnedTabId: target.id }));
+    return;
+  }
+
   // maxOrder + 1 lands the runspace at the end of the PINNED group (groups are filters
   // over the order-sorted list, and nothing sorts after the global maximum).
   const maxOrder = state.runspaces.reduce((m, r) => Math.max(m, r.order), -1);
