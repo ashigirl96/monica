@@ -20,9 +20,8 @@ const NO_HINT_TARGETS: JumpHintTargets = { byRunspaceId: {}, byTabId: {} };
 
 export const jumpHintTargetsAtom = atom((get): JumpHintTargets => {
   if (!get(jumpHintsActiveAtom)) return NO_HINT_TARGETS;
-  const summaries = get(runspaceSummariesAtom);
-  // Hint order must match the sidebar's visual order: task-bound group first, then shells.
-  const ordered = [...summaries.filter((s) => s.taskId), ...summaries.filter((s) => !s.taskId)];
+  // Summaries already come in the sidebar's visual order (pinned → task runs → shells).
+  const ordered = get(runspaceSummariesAtom);
   const rs = get(activeRunspaceAtom);
   const tabs = rs ? [...rs.tabs].sort((a, b) => a.order - b.order) : [];
 

@@ -7,6 +7,7 @@ import {
   bindTabSessionAtom,
   closeTerminalTabAtom,
   startNewShellForTabAtom,
+  tabExitedAtom,
   updateTabTitleAtom,
   updateTabCwdAtom,
   consumeTerminalLaunchAtom,
@@ -49,7 +50,7 @@ function SessionOverlay({
   entry: SessionStatusEntry;
   cwd: string;
   onNewShell: () => void;
-  onCloseTab: () => void;
+  onCloseTab?: () => void;
 }) {
   const message =
     entry.status === "lost"
@@ -71,13 +72,15 @@ function SessionOverlay({
         >
           {entry.status === "failed" ? "Retry" : `New shell in ${shortCwd(cwd)}`}
         </button>
-        <button
-          type="button"
-          onClick={onCloseTab}
-          className="rounded-md px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
-        >
-          Close tab
-        </button>
+        {onCloseTab && (
+          <button
+            type="button"
+            onClick={onCloseTab}
+            className="rounded-md px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+          >
+            Close tab
+          </button>
+        )}
       </div>
     </div>
   );
@@ -110,6 +113,7 @@ function TerminalPane({
   sessionEntry,
   cwd,
   active,
+  pinned,
   env,
   launch,
   onLaunchConsumed,
@@ -120,6 +124,7 @@ function TerminalPane({
   sessionEntry?: SessionStatusEntry;
   cwd: string;
   active: boolean;
+  pinned: boolean;
   env?: [string, string][];
   launch?: TerminalLaunchIntent;
   onLaunchConsumed?: () => void;
@@ -128,6 +133,7 @@ function TerminalPane({
   const closeTab = useSetAtom(closeTerminalTabAtom);
   const bindSession = useSetAtom(bindTabSessionAtom);
   const startNewShell = useSetAtom(startNewShellForTabAtom);
+  const tabExited = useSetAtom(tabExitedAtom);
   const updateTitle = useSetAtom(updateTabTitleAtom);
   const updateCwd = useSetAtom(updateTabCwdAtom);
 
@@ -145,7 +151,7 @@ function TerminalPane({
     (sessionId: string) => bindSession(tabId, sessionId),
     [tabId, bindSession],
   );
-  const onExit = useCallback(() => closeTab(tabId), [tabId, closeTab]);
+  const onExit = useCallback(() => tabExited(tabId), [tabId, tabExited]);
 
   useTerminal(containerRef, {
     tabId,
@@ -186,7 +192,7 @@ function TerminalPane({
           entry={sessionEntry}
           cwd={cwd}
           onNewShell={() => startNewShell(tabId)}
-          onCloseTab={() => closeTab(tabId)}
+          onCloseTab={pinned ? undefined : () => closeTab(tabId)}
         />
       )}
     </div>
@@ -260,6 +266,7 @@ export default function WorkBenchContent() {
                 sessionEntry={tab.sessionId ? sessionStatus[tab.sessionId] : undefined}
                 cwd={tab.cwd}
                 active={rs.id === state.activeRunspaceId && tab.id === rs.activeTabId}
+                pinned={tab.id === rs.pinnedTabId}
                 env={rs.env}
                 launch={tab.launch}
                 onLaunchConsumed={() => consumeLaunch(tab.id)}

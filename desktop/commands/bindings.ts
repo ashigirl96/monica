@@ -290,6 +290,7 @@ export type TaskSummaryRow = {
 export type TerminalRunspaceRow = {
   id: string;
   sort_order: number;
+  pinned_tab_id: string | null;
   tabs: TerminalTabRow[];
 };
 

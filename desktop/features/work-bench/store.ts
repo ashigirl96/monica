@@ -46,6 +46,10 @@ export type TerminalRunspace = {
   tabs: TerminalTab[];
   activeTabId: string;
   order: number;
+  /// Pin is a runspace ↔ tab 1:1 pair: holding the tab id here (instead of a bool on the
+  /// tab) makes "two pinned tabs in one runspace" structurally unrepresentable. The pinned
+  /// tab can be neither detached nor terminated until unpinned.
+  pinnedTabId?: string;
 };
 
 export type TerminalState = {
@@ -87,6 +91,22 @@ function patchRunspaceInState(
     ...state,
     runspaces: state.runspaces.map((r) => (r.id === rsId ? { ...r, ...patch } : r)),
   };
+}
+
+// Callers guarantee at least one tab remains after removal.
+function removeTabFromRunspace(
+  rs: TerminalRunspace,
+  tabId: string,
+): Pick<TerminalRunspace, "tabs" | "activeTabId"> {
+  const idx = rs.tabs.findIndex((t) => t.id === tabId);
+  const tabs = rs.tabs.filter((t) => t.id !== tabId);
+  const activeTabId =
+    rs.activeTabId === tabId ? tabs[Math.min(idx, tabs.length - 1)].id : rs.activeTabId;
+  return { tabs, activeTabId };
+}
+
+function maxRunspaceOrder(runspaces: TerminalRunspace[]): number {
+  return runspaces.reduce((m, r) => Math.max(m, r.order), -1);
 }
 
 function updateActiveRunspace(
@@ -241,25 +261,28 @@ export const togglePlanPreviewAtom = atom(null, async (get, set) => {
 export type RunspaceSummary = {
   id: string;
   taskId: string | undefined;
+  group: RunspaceNavGroup;
   title: string;
   description: string;
   tabCount: number;
   isActive: boolean;
 };
 
+// Emitted in the sidebar's visual order (pinned → task runs → shells), with `group`
+// carrying the grouping, so the sidebar, jump hints, and alt+j/k all share one
+// definition of it instead of re-deriving it.
 export const runspaceSummariesAtom = atom<RunspaceSummary[]>((get) => {
   const state = get(resolvedStateAtom);
   const worktrees = get(worktreeInfoByPathAtom);
-  return state.runspaces
-    .sort((a, b) => a.order - b.order)
-    .map((rs) => ({
-      id: rs.id,
-      taskId: rs.taskId,
-      title: deriveRunspaceTitle(rs, worktrees),
-      description: deriveRunspaceDescription(rs),
-      tabCount: rs.tabs.length,
-      isActive: rs.id === state.activeRunspaceId,
-    }));
+  return orderRunspacesForNav(state.runspaces).map((rs) => ({
+    id: rs.id,
+    taskId: rs.taskId,
+    group: runspaceNavGroup(rs),
+    title: deriveRunspaceTitle(rs, worktrees),
+    description: deriveRunspaceDescription(rs),
+    tabCount: rs.tabs.length,
+    isActive: rs.id === state.activeRunspaceId,
+  }));
 });
 
 export const createRunspaceAtom = atom(null, (get, set) => {
@@ -303,7 +326,7 @@ export const removeRunspaceAtom = atom(
   (get, set, rsId: string, mode: "detach" | "terminate" = "detach") => {
     const state = get(resolvedStateAtom);
     const rs = state.runspaces.find((r) => r.id === rsId);
-    if (!rs) return;
+    if (!rs || rs.pinnedTabId) return;
 
     if (mode === "terminate") {
       // A detach racing the Exit broadcast would transiently mark the session Detached
@@ -343,12 +366,27 @@ export const toggleLastRunspaceAtom = atom(null, (get, set) => {
   set(activateRunspaceAtom, lastId);
 });
 
-// Navigation must follow the sidebar's visual order: task-bound runspaces first, then shells.
-// Ordering by `order` alone would interleave the two groups (createRunspace inserts a shell next
-// to the active task-bound runspace), so alt+j/k would jump differently than the sidebar reads.
+// The single definition of the sidebar's grouping — every consumer (sidebar sections,
+// navigation order, summaries) derives from this so the groups can never drift apart.
+export type RunspaceNavGroup = "pinned" | "task" | "shell";
+
+function runspaceNavGroup(rs: TerminalRunspace): RunspaceNavGroup {
+  if (rs.pinnedTabId) return "pinned";
+  return rs.taskId ? "task" : "shell";
+}
+
+const NAV_GROUP_RANK: Record<RunspaceNavGroup, number> = { pinned: 0, task: 1, shell: 2 };
+
+// Navigation must follow the sidebar's visual order: pinned first, then task-bound, then
+// shells. Ordering by `order` alone would interleave the groups (createRunspace inserts a
+// shell next to the active task-bound runspace), so alt+j/k would jump differently than the
+// sidebar reads.
 function orderRunspacesForNav(runspaces: TerminalRunspace[]): TerminalRunspace[] {
-  const byOrder = [...runspaces].sort((a, b) => a.order - b.order);
-  return [...byOrder.filter((rs) => rs.taskId), ...byOrder.filter((rs) => !rs.taskId)];
+  return [...runspaces].sort(
+    (a, b) =>
+      NAV_GROUP_RANK[runspaceNavGroup(a)] - NAV_GROUP_RANK[runspaceNavGroup(b)] ||
+      a.order - b.order,
+  );
 }
 
 export const cycleRunspaceAtom = atom(null, (get, set, direction: "up" | "down") => {
@@ -387,6 +425,10 @@ export const closeTerminalTabAtom = atom(null, (get, set, tabId?: string) => {
   const target = rs.tabs.find((t) => t.id === targetId);
   if (!target) return;
 
+  // Guards every close path at once: cmd+w, the header × button, the context menu,
+  // and any stray caller — a pinned tab only leaves via unpin.
+  if (rs.pinnedTabId === targetId) return;
+
   if (rs.tabs.length <= 1) {
     set(removeRunspaceAtom, rs.id, isSecondary ? "terminate" : "detach");
     return;
@@ -398,15 +440,7 @@ export const closeTerminalTabAtom = atom(null, (get, set, tabId?: string) => {
     detachTab(target);
   }
 
-  const idx = rs.tabs.findIndex((t) => t.id === targetId);
-  const newTabs = rs.tabs.filter((t) => t.id !== targetId);
-  const newActiveId =
-    targetId === rs.activeTabId ? newTabs[Math.min(idx, newTabs.length - 1)].id : rs.activeTabId;
-
-  set(
-    terminalStateAtom,
-    patchRunspaceInState(state, rs.id, { tabs: newTabs, activeTabId: newActiveId }),
-  );
+  set(terminalStateAtom, patchRunspaceInState(state, rs.id, removeTabFromRunspace(rs, targetId)));
 });
 
 export const activateTerminalTabAtom = atom(null, (get, set, tabId: string) => {
@@ -485,10 +519,85 @@ export const bindTabSessionAtom = atom(null, (get, set, tabId: string, sessionId
 });
 
 export const terminateTabSessionAtom = atom(null, async (get, set, tabId: string) => {
+  // The kill happens before closeTerminalTabAtom runs, so its pin guard cannot stop it.
+  if (get(pinnedTabIdsAtom).has(tabId)) return;
   const state = get(resolvedStateAtom);
   const tab = state.runspaces.flatMap((rs) => rs.tabs).find((t) => t.id === tabId);
   await endTabSession(tab?.sessionId, "terminate");
   set(closeTerminalTabAtom, tabId);
+});
+
+// Pinned tabs looked up by id, for guards that only have a tabId (terminate, exit
+// handling, context menu); paths that already found the runspace check rs.pinnedTabId.
+export const pinnedTabIdsAtom = atom((get) => {
+  const state = get(resolvedStateAtom);
+  return new Set(
+    state.runspaces.flatMap((rs) => (rs.pinnedTabId !== undefined ? [rs.pinnedTabId] : [])),
+  );
+});
+
+export const toggleTabPinAtom = atom(null, (get, set, tabId?: string) => {
+  // Main window only: a secondary window terminates every session and saves an empty
+  // snapshot on close (main.tsx), which would kill a pinned tab without passing any guard.
+  if (get(windowLabelAtom) !== MAIN_WINDOW_LABEL) return;
+
+  const state = get(resolvedStateAtom);
+  const rs = tabId
+    ? state.runspaces.find((r) => r.tabs.some((t) => t.id === tabId))
+    : state.runspaces.find((r) => r.id === state.activeRunspaceId);
+  if (!rs) return;
+  const target = rs.tabs.find((t) => t.id === (tabId ?? rs.activeTabId));
+  if (!target) return;
+
+  if (rs.pinnedTabId === target.id) {
+    // Unpin only clears the flag: the runspace falls back to its group by taskId, and
+    // tabs added while pinned stay where they are.
+    set(terminalStateAtom, patchRunspaceInState(state, rs.id, { pinnedTabId: undefined }));
+    return;
+  }
+
+  if (rs.pinnedTabId) {
+    // The runspace is already pinned via another tab: re-point the pin there instead of
+    // extracting a second pinned runspace — the 1:1 pair moves within the runspace and
+    // its position in PINNED stays put.
+    set(terminalStateAtom, patchRunspaceInState(state, rs.id, { pinnedTabId: target.id }));
+    return;
+  }
+
+  // maxOrder + 1 lands the runspace at the end of the PINNED group (groups only rank
+  // above `order`, and nothing sorts after the global maximum).
+  const maxOrder = maxRunspaceOrder(state.runspaces);
+
+  if (rs.taskId || rs.tabs.length === 1) {
+    // Task runspaces pin whole — keeping the runspace id intact preserves the
+    // MONICA_TERMINAL_TAB_ID-based hook claims. A single-tab shell pins in place too:
+    // extraction would only rename the runspace id ("move the tab out, collapse the
+    // now-empty original" is observationally the same).
+    set(
+      terminalStateAtom,
+      patchRunspaceInState(state, rs.id, { pinnedTabId: target.id, order: maxOrder + 1 }),
+    );
+    return;
+  }
+
+  // Multi-tab shell: pull the tab out into its own pinned runspace so the siblings
+  // stay in SHELLS instead of being dragged into PINNED with it.
+  const remaining = removeTabFromRunspace(rs, target.id);
+  const pinnedRs: TerminalRunspace = {
+    id: crypto.randomUUID(),
+    tabs: [{ ...target, order: 0 }],
+    activeTabId: target.id,
+    pinnedTabId: target.id,
+    order: maxOrder + 1,
+  };
+  const followTab = state.activeRunspaceId === rs.id && rs.activeTabId === target.id;
+  set(terminalStateAtom, {
+    runspaces: [
+      ...state.runspaces.map((r) => (r.id === rs.id ? { ...r, ...remaining } : r)),
+      pinnedRs,
+    ],
+    activeRunspaceId: followTab ? pinnedRs.id : state.activeRunspaceId,
+  });
 });
 
 // For lost/exited/failed tabs: keep the tab (and its cwd) but start a fresh session in
@@ -497,6 +606,16 @@ export const startNewShellForTabAtom = atom(null, (get, set, tabId: string) => {
   releaseTabConnection(tabId);
   const state = get(resolvedStateAtom);
   set(terminalStateAtom, patchTabInState(state, tabId, { sessionId: undefined }));
+});
+
+// The tab's process exited (typed `exit`, crash). A pinned tab must never sit dead —
+// the exit is out of the app's control — so it respawns a shell in place of closing.
+export const tabExitedAtom = atom(null, (get, set, tabId: string) => {
+  if (get(pinnedTabIdsAtom).has(tabId)) {
+    set(startNewShellForTabAtom, tabId);
+  } else {
+    set(closeTerminalTabAtom, tabId);
+  }
 });
 
 // Reattach a detached session into a tab. Prefers its original runspace and tab id (the
@@ -582,9 +701,7 @@ export const createTaskRunspaceAtom = atom(
       launch?: TerminalLaunchIntent;
     },
   ) => {
-    if (get(terminalStateAtom) === null) {
-      await set(loadTerminalStateAtom);
-    }
+    await set(loadTerminalStateAtom);
 
     const state = get(resolvedStateAtom);
 
@@ -612,7 +729,7 @@ export const createTaskRunspaceAtom = atom(
       return;
     }
 
-    const maxOrder = state.runspaces.reduce((m, r) => Math.max(m, r.order), -1);
+    const maxOrder = maxRunspaceOrder(state.runspaces);
     const tab = createTab(params.cwd, 0);
     if (params.launch) {
       tab.launch = params.launch;

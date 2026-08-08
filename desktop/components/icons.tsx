@@ -45,6 +45,15 @@ export function PlusIcon(props: IconProps) {
   );
 }
 
+export function PinIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M9 4h6l-1 6 3 3v2H7v-2l3-3z" strokeWidth="1.5" strokeLinejoin="round" />
+      <line x1="12" y1="15" x2="12" y2="20" strokeWidth="1.5" />
+    </Icon>
+  );
+}
+
 export function XIcon(props: IconProps) {
   return (
     <Icon {...props}>
