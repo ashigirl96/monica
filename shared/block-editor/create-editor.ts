@@ -16,7 +16,12 @@ import { imageUploadPlugin } from "./image-upload";
 import type { ImportExternalImage, UploadImage } from "./image-upload";
 import type { OnNoteMentionClick, ResolveNoteMention } from "./node-views";
 import { normalizerPlugin } from "./normalizer";
-import { blockDecorationsPlugin, codeExitCaretPlugin, placeholderPlugin } from "./decorations";
+import {
+  blockDecorationsPlugin,
+  codeBlockActivePlugin,
+  codeExitCaretPlugin,
+  placeholderPlugin,
+} from "./decorations";
 import { clipboardPlugin } from "./clipboard";
 import type { ParseMarkdown, RenderMarkdown } from "./clipboard";
 import { linkClickPlugin } from "./link-click";
@@ -154,6 +159,7 @@ export function createBlockEditor(
       editorInputRules(),
       placeholderPlugin(),
       codeExitCaretPlugin(),
+      codeBlockActivePlugin(),
       blockDecorationsPlugin(),
       blockHighlightPlugin(),
       // clipboardPlugin より前に置く: 画像ファイルの paste / drop を URL・block paste 経路より

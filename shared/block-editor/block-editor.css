@@ -472,7 +472,7 @@
   pointer-events: none;
 }
 
-.jb-code:hover .jb-code-toolbar {
+.jb-code-active .jb-code-toolbar {
   opacity: 1;
   pointer-events: auto;
 }
@@ -514,7 +514,8 @@
 
 .jb-code-pre {
   margin: 0;
-  padding: 34px 16px 16px;
+  padding: 16px;
+  transition: padding-top 100ms ease-out;
   overflow-x: auto;
   font-family: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
   font-size: 0.85em;
@@ -522,6 +523,10 @@
   letter-spacing: normal;
   white-space: pre;
   border-radius: 6px;
+}
+
+.jb-code-active .jb-code-pre {
+  padding-top: 34px;
 }
 
 .jb-code-wrap .jb-code-pre {

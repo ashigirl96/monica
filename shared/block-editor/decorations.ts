@@ -60,6 +60,29 @@ export function codeExitCaretPlugin(): Plugin {
   });
 }
 
+// contenteditable は editor 全体で 1 つなので、「カーソルがこの code block 内にある」は
+// :focus-within では取れない。selection から導出した class で toolbar 分の上余白
+// （CSS の .jb-code-active）を確保する。
+export function codeBlockActivePlugin(): Plugin {
+  return new Plugin({
+    key: new PluginKey("journalCodeBlockActive"),
+    props: {
+      decorations(state) {
+        const $from = state.selection.$from;
+        for (let depth = $from.depth; depth > 0; depth--) {
+          const node = $from.node(depth);
+          if (node.type !== nodes.codeBlock) continue;
+          const pos = $from.before(depth);
+          return DecorationSet.create(state.doc, [
+            Decoration.node(pos, pos + node.nodeSize, { class: "jb-code-active" }),
+          ]);
+        }
+        return null;
+      },
+    },
+  });
+}
+
 function toRoman(n: number): string {
   const table: Array<[number, string]> = [
     [1000, "m"],
