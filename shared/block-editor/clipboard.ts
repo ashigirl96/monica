@@ -7,7 +7,7 @@ import {
 } from "@milkdown/kit/prose/state";
 import { DOMSerializer, Fragment, Node as PMNode, Slice } from "@milkdown/kit/prose/model";
 import type { EditorView } from "@milkdown/kit/prose/view";
-import { nodes, reissueIds, schema } from "./schema";
+import { isEmptyParagraphContainer, nodes, reissueIds, schema } from "./schema";
 import { expandedHeadingsDeep, revealPos } from "./folding";
 import { containerById, getBlockContext, rangeFromIds, rangePositions } from "./context";
 import { deleteRange } from "./commands";
@@ -292,11 +292,7 @@ function insertBlocksTr(
     const ctx = getBlockContext(tr.selection.$from);
     if (!ctx) return null;
     // 空 paragraph（子なし）の上なら置き換え、それ以外は直後に挿入
-    if (
-      ctx.contentNode.type === nodes.paragraph &&
-      ctx.contentNode.content.size === 0 &&
-      ctx.containerNode.childCount === 1
-    ) {
+    if (isEmptyParagraphContainer(ctx.containerNode)) {
       start = ctx.containerPos;
       tr.replaceWith(start, start + ctx.containerNode.nodeSize, [...blocks]);
     } else {

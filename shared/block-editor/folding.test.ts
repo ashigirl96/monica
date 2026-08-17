@@ -4,7 +4,17 @@ import type { Node as PMNode } from "@milkdown/kit/prose/model";
 import { EditorState } from "@milkdown/kit/prose/state";
 import { nodes } from "./schema";
 import { visibleContainers } from "./context";
-import { block, callout, contentPos, docOf, heading, para, posOf, toggle } from "./test-fixtures";
+import {
+  block,
+  callout,
+  contentPos,
+  divider,
+  docOf,
+  heading,
+  para,
+  posOf,
+  toggle,
+} from "./test-fixtures";
 import {
   expandedContent,
   expandedHeading,
@@ -131,6 +141,111 @@ describe("foldedIndexes", () => {
     expect(rootFolds(doc)).toEqual([1, 2, 3]);
   });
 
+  test("divider は h2 の範囲を切り、divider 自身と以降は可視", () => {
+    const doc = docOf(
+      block("h2a", heading("A", 2, true)),
+      block("p1", para("1")),
+      block("d", divider()),
+      block("p2", para("2")),
+    );
+    expect(rootFolds(doc)).toEqual([1]);
+  });
+
+  test("divider は最内の h3 section だけを終端し、h2 の範囲には留まる", () => {
+    const doc = docOf(
+      block("h2a", heading("A", 2)),
+      block("h3a", heading("A-1", 3, true)),
+      block("p1", para("1")),
+      block("d", divider()),
+      block("p2", para("2")),
+    );
+    expect(rootFolds(doc)).toEqual([2]);
+  });
+
+  test("h3 内に divider があっても h2 を畳めば末尾まで隠れる", () => {
+    const doc = docOf(
+      block("h2a", heading("A", 2, true)),
+      block("h3a", heading("A-1", 3)),
+      block("p1", para("1")),
+      block("d", divider()),
+      block("p2", para("2")),
+    );
+    expect(rootFolds(doc)).toEqual([1, 2, 3, 4]);
+  });
+
+  test("本文間の空行は最内の h3 section を終端し、自身は一緒に隠れる", () => {
+    const doc = docOf(
+      block("h2a", heading("A", 2)),
+      block("h3a", heading("A-1", 3, true)),
+      block("p1", para("1")),
+      block("gap", para()),
+      block("p2", para("2")),
+    );
+    expect(rootFolds(doc)).toEqual([2, 3]);
+  });
+
+  test("空行で h3 が切れても h2 を畳めば末尾まで隠れる", () => {
+    const doc = docOf(
+      block("h2a", heading("A", 2, true)),
+      block("h3a", heading("A-1", 3)),
+      block("p1", para("1")),
+      block("gap", para()),
+      block("p2", para("2")),
+    );
+    expect(rootFolds(doc)).toEqual([1, 2, 3, 4]);
+  });
+
+  test("heading 直後の空行は余白として section 内に留まる", () => {
+    const doc = docOf(
+      block("h2a", heading("A", 2, true)),
+      block("gap1", para()),
+      block("p1", para("1")),
+      block("p2", para("2")),
+      block("gap2", para()),
+      block("gap3", para()),
+      block("p3", para("3")),
+    );
+    // gap2 が section を終端して一緒に隠れ、gap3 以降は可視
+    expect(rootFolds(doc)).toEqual([1, 2, 3, 4]);
+  });
+
+  test("sub-heading 直前の空行は区切りにならない", () => {
+    const doc = docOf(
+      block("h2a", heading("A", 2, true)),
+      block("p1", para("1")),
+      block("gap", para()),
+      block("h3a", heading("A-1", 3)),
+      block("p2", para("2")),
+    );
+    expect(rootFolds(doc)).toEqual([1, 2, 3, 4]);
+  });
+
+  test("divider に隣接する空行は divider に従属し、二重に終端しない", () => {
+    const doc = docOf(
+      block("h3a", heading("A", 3, true)),
+      block("p1", para("1")),
+      block("gap1", para()),
+      block("d", divider()),
+      block("gap2", para()),
+      block("p2", para("2")),
+    );
+    // gap1 は h3 の中身として隠れ、divider が h3 を終端。gap2 以降は可視
+    expect(rootFolds(doc)).toEqual([1, 2]);
+  });
+
+  test("連続した空行は 1 行につき 1 レベル終端する", () => {
+    const doc = docOf(
+      block("h2a", heading("A", 2, true)),
+      block("h3a", heading("A-1", 3)),
+      block("p1", para("1")),
+      block("gap1", para()),
+      block("gap2", para()),
+      block("p2", para("2")),
+    );
+    // gap1 が h3 を、gap2 が h2 を終端するので p2 は h2 の外
+    expect(rootFolds(doc)).toEqual([1, 2, 3, 4]);
+  });
+
   test("h2 を展開しても内側の collapsed h3 は畳まれたまま", () => {
     const doc = docOf(
       block("h2a", heading("A", 2)),
@@ -239,6 +354,43 @@ describe("resolveFoldTarget", () => {
   test("heading より前の段落には対象なし", () => {
     const doc = docOf(block("p0", para("0")), block("h2a", heading("A", 2)));
     expect(resolveFoldTarget(resolveIn(doc, "p0"))).toBeNull();
+  });
+
+  test("divider を挟んだ段落は前方の heading の対象外", () => {
+    const doc = docOf(block("h2a", heading("A", 2)), block("d", divider()), block("p1", para("1")));
+    expect(resolveFoldTarget(resolveIn(doc, "p1"))).toBeNull();
+  });
+
+  test("h3 内の divider の後ろでは h3 ではなく h2 が対象", () => {
+    const doc = docOf(
+      block("h2a", heading("A", 2)),
+      block("h3a", heading("A-1", 3)),
+      block("d", divider()),
+      block("p1", para("1")),
+    );
+    expect(resolveFoldTarget(resolveIn(doc, "p1"))?.containerPos).toBe(posOf(doc, "h2a"));
+  });
+
+  test("終端空行の後ろの段落は前方の heading の対象外、空行自身は section 内", () => {
+    const doc = docOf(
+      block("h2a", heading("A", 2)),
+      block("p1", para("1")),
+      block("gap", para()),
+      block("p2", para("2")),
+    );
+    expect(resolveFoldTarget(resolveIn(doc, "p2"))).toBeNull();
+    expect(resolveFoldTarget(resolveIn(doc, "gap"))?.containerPos).toBe(posOf(doc, "h2a"));
+  });
+
+  test("h3 を終端する空行の後ろでは h2 が対象", () => {
+    const doc = docOf(
+      block("h2a", heading("A", 2)),
+      block("h3a", heading("A-1", 3)),
+      block("p1", para("1")),
+      block("gap", para()),
+      block("p2", para("2")),
+    );
+    expect(resolveFoldTarget(resolveIn(doc, "p2"))?.containerPos).toBe(posOf(doc, "h2a"));
   });
 
   test("callout / toggle の子は最寄りの親が対象", () => {

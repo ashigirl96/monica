@@ -24,6 +24,10 @@ export function code(text = ""): PMNode {
   return nodes.codeBlock.create(null, text ? schema.text(text) : undefined);
 }
 
+export function divider(): PMNode {
+  return nodes.divider.create();
+}
+
 export function callout(text = "", collapsed = false): PMNode {
   return nodes.callout.create({ collapsed }, text ? schema.text(text) : undefined);
 }

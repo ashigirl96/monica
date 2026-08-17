@@ -1,13 +1,13 @@
 import { Fragment } from "@milkdown/kit/prose/model";
 import type { Node as PMNode, ResolvedPos } from "@milkdown/kit/prose/model";
 import type { Transaction } from "@milkdown/kit/prose/state";
-import { nodes } from "./schema";
+import { isEmptyParagraphContainer, nodes } from "./schema";
 
 // 折りたたみの判定・範囲導出・開示操作をここに集約する。callout / toggle は構造上の子
 // blockGroup を隠すだけだが、heading は doc 上の子を持たない（`## ` 直後の段落は兄弟）
-// ため「後続兄弟のうち次の同レベル以上 heading の手前まで」を範囲とする。範囲が attr
-// ではなく内容から毎回導出されるので、範囲へ block やカーソルを送り込む操作は支配
-// heading を開く（expandedHeading / revealPos）。
+// ため「後続兄弟のうち、次の同レベル以上 heading / divider の手前、または本文間の空行
+// まで」を範囲とする。範囲が attr ではなく内容から毎回導出されるので、範囲へ block や
+// カーソルを送り込む操作は支配 heading を開く（expandedHeading / revealPos）。
 // 「畳まれているか」を toggle は open、heading / callout は collapsed で表す差は
 // foldAttrOf に閉じ込め、外へは出さない。
 
@@ -82,9 +82,28 @@ export function expandedHeadingsDeep(node: PMNode): PMNode {
 /** index を section に含む heading（外側 → 内側）。 */
 type Dominator = { level: number; contentPos: number; content: PMNode; collapsed: boolean };
 
+/** section を終端する境界 block。空行が区切りとして働く相手にならない。 */
+function isSectionBoundary(content: PMNode): boolean {
+  return content.type === nodes.heading || content.type === nodes.divider;
+}
+
+// 空行が section を終端するのは「本文と本文の間」にあるときだけ。heading 直後の空行は
+// section 内の余白であり、heading / divider に（空行の連なり越しに）隣接する空行は
+// その境界に従属するので、どちらも区切りにならない。
+function blankTerminates(siblings: readonly PMNode[], index: number): boolean {
+  const bodyAt = (i: number, step: 1 | -1): boolean => {
+    while (i >= 0 && i < siblings.length && isEmptyParagraphContainer(siblings[i])) i += step;
+    if (i < 0 || i >= siblings.length) return false;
+    return !isSectionBoundary(siblings[i].child(0));
+  };
+  return bodyAt(index - 1, -1) && bodyAt(index + 1, 1);
+}
+
 // 兄弟列を前から走査し、各 index とそれを支配する heading の連鎖を visit へ渡す。
 // 同レベル以上の heading が section を終端するので、連鎖は level 昇順に保たれる
-// （h3 の section は必ず h2 の section に含まれる）。visit が false を返すと打ち切る。
+// （h3 の section は必ず h2 の section に含まれる）。divider と本文間の空行は最内の
+// section だけを終端する（h3 の section 内なら h3 を閉じるが h2 の範囲には留まる）。
+// visit が false を返すと打ち切る。
 function scanFolds(
   siblings: readonly PMNode[],
   basePos: number,
@@ -93,11 +112,21 @@ function scanFolds(
   const stack: Dominator[] = [];
   let pos = basePos;
   for (let index = 0; index < siblings.length; index++) {
-    const content = siblings[index].child(0);
+    const container = siblings[index];
+    const content = container.child(0);
     const level = content.type === nodes.heading ? Number(content.attrs.level) : null;
     if (level !== null)
       while (stack.length > 0 && level <= stack[stack.length - 1].level) stack.pop();
+    else if (content.type === nodes.divider) stack.pop();
     if (visit(index, stack) === false) return;
+    // 終端空行は section の末尾として一緒に隠れるので visit の後に pop する
+    // （heading / divider は境界自身が可視のまま残るので visit の前）。
+    if (
+      stack.length > 0 &&
+      isEmptyParagraphContainer(container) &&
+      blankTerminates(siblings, index)
+    )
+      stack.pop();
     if (level !== null && isFoldableHeading(content))
       stack.push({
         level,
@@ -105,7 +134,7 @@ function scanFolds(
         content,
         collapsed: content.attrs.collapsed === true,
       });
-    pos += siblings[index].nodeSize;
+    pos += container.nodeSize;
   }
 }
 

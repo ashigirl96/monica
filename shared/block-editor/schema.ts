@@ -495,6 +495,14 @@ export function emptyParagraphContainer(): PMNode {
   return createContainer(nodes.paragraph.create());
 }
 
+/** 内容が空の paragraph だけを持つ（子 group もない）container。 */
+export function isEmptyParagraphContainer(container: PMNode): boolean {
+  const content = container.child(0);
+  return (
+    container.childCount === 1 && content.type === nodes.paragraph && content.content.size === 0
+  );
+}
+
 export function emptyDoc(): PMNode {
   return nodes.doc.create(null, nodes.blockGroup.create(null, emptyParagraphContainer()));
 }

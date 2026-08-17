@@ -228,8 +228,18 @@
 
 [data-block-content="heading"][data-level="1"],
 [data-block-content="heading"][data-level="2"] {
+  font-size: 1.25em;
   border-bottom: 1px solid var(--jb-border);
   border-radius: 0;
+}
+
+/* h3 は border ではなく淡い座布団で区別する。padding を広げた分を
+   負マージンで相殺し、テキストの左端は本文と揃えたまま背景だけ張り出す */
+[data-block-content="heading"][data-level="3"] {
+  --jb-block-pad-x: 8px;
+  margin-left: -6px;
+  margin-right: -6px;
+  background: color-mix(in srgb, var(--jb-ink) 8%, transparent);
 }
 
 [data-block-container]:first-child:has(> .jb-container-body > [data-block-content="heading"]) {

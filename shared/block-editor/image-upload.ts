@@ -2,7 +2,13 @@ import { Plugin, PluginKey } from "@milkdown/kit/prose/state";
 import type { EditorState, Transaction } from "@milkdown/kit/prose/state";
 import { Decoration, DecorationSet } from "@milkdown/kit/prose/view";
 import type { EditorView } from "@milkdown/kit/prose/view";
-import { ASSET_URL_PREFIX, createContainer, isHttpUrl, nodes } from "./schema";
+import {
+  ASSET_URL_PREFIX,
+  createContainer,
+  isEmptyParagraphContainer,
+  isHttpUrl,
+  nodes,
+} from "./schema";
 import { getBlockContext } from "./context";
 
 /** File を asset にアップロードし、確定 URL を返す。失敗は null（縮退）。 */
@@ -91,12 +97,7 @@ export function buildInsertImagesTr(
     tr.insert(1 + group.content.size, containers);
     return tr.scrollIntoView();
   }
-  if (
-    dropPos === undefined &&
-    ctx.contentNode.type === nodes.paragraph &&
-    ctx.contentNode.content.size === 0 &&
-    ctx.containerNode.childCount === 1
-  ) {
+  if (dropPos === undefined && isEmptyParagraphContainer(ctx.containerNode)) {
     tr.replaceWith(ctx.containerPos, ctx.containerPos + ctx.containerNode.nodeSize, containers);
   } else {
     tr.insert(ctx.containerPos + ctx.containerNode.nodeSize, containers);
