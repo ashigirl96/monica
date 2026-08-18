@@ -214,7 +214,7 @@ export function DailyPage({ date }: { date: string | null }) {
             {noteError}
           </div>
         ) : note && date !== null ? (
-          <div className="mx-auto w-full max-w-[760px] px-10">
+          <div className="mx-auto w-full max-w-[calc(760px+var(--note-extra-w,0px))] px-10">
             <header className="flex items-baseline justify-between gap-3 pt-10">
               <h1 className="font-mono text-[0.8rem] uppercase tracking-widest text-[var(--ink-muted)]">
                 {dayLabelWithYear(date)}

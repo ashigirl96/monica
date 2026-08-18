@@ -3,6 +3,7 @@ import { navigate, spaLinkClick } from "@/app";
 import { altOnly, ctrlOnly } from "@/keys";
 import { setThemePref, themePref, type ThemePref } from "@/theme";
 import { AmbientSwitcher } from "./ambient-switcher";
+import { NoteWidthControl } from "./note-width-control";
 
 /** ⌃1/⌃2/⌃3 の遷移先 */
 const NAV_SHORTCUTS: Record<string, string> = {
@@ -223,7 +224,12 @@ export function AppShell({
         <ThemeToggle />
       </nav>
       <div className="flex min-h-dvh min-w-0 flex-1 flex-col">{children}</div>
-      <AmbientSwitcher />
+      {/* 右下常駐ピルのクラスタ。書いている手を止めずに触れることが存在理由なので
+          zen mode でも隠さない */}
+      <div className="fixed right-4 bottom-4 z-40 flex items-center gap-2">
+        <AmbientSwitcher />
+        <NoteWidthControl />
+      </div>
     </div>
   );
 }

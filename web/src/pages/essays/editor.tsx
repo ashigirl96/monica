@@ -364,7 +364,7 @@ export function EssayEditorPage({ id }: { id: string }) {
             {noteError}
           </div>
         ) : note !== null && note.kind.kind === "essay" ? (
-          <div className="mx-auto w-full max-w-[760px] px-10">
+          <div className="mx-auto w-full max-w-[calc(760px+var(--note-extra-w,0px))] px-10">
             <header className="pt-12">
               <input
                 ref={titleRef}
