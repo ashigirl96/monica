@@ -411,7 +411,7 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
             {noteError}
           </div>
         ) : note !== null ? (
-          <div className="mx-auto w-full max-w-[760px] px-10">
+          <div className="mx-auto w-full max-w-[calc(760px+var(--note-extra-w,0px))] px-10">
             <header className="pt-12">
               {isPrimary ? (
                 <h1 className="text-[20px] font-normal tracking-[0.03em] text-[var(--ink-text)]">

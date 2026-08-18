@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type AmbientName,
   AMBIENT_NAMES,
@@ -8,6 +8,7 @@ import {
   setAmbientPref,
 } from "@/ambient";
 import { altAllowingShift } from "@/keys";
+import { usePopupDismiss } from "./use-popup-dismiss";
 
 /**
  * 画面右下に常駐する背景の切り替え。設定画面へ行かずに、書いている手を止めずに
@@ -31,33 +32,8 @@ export function AmbientSwitcher() {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onMouseDown(e: MouseEvent) {
-      if (rootRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      e.stopPropagation();
-      // 閉じるとフォーカス中の選択肢が unmount され、focus が body に落ちて次の Tab が
-      // ページ先頭から再開してしまう。popup 内にいたときだけ trigger へ戻す
-      // （外にいるなら奪ってはいけない）
-      if (rootRef.current?.contains(document.activeElement)) triggerRef.current?.focus();
-      setOpen(false);
-    }
-    window.addEventListener("mousedown", onMouseDown);
-    // capture phase: bubble だと、フォーカスがエディタにあるとき ProseMirror が Escape を
-    // block 選択として消費してしまい window まで届かない。open のときだけ張るので、
-    // 閉じている間のエディタの Escape は奪わない
-    window.addEventListener("keydown", onKey, true);
-    return () => {
-      window.removeEventListener("mousedown", onMouseDown);
-      window.removeEventListener("keydown", onKey, true);
-    };
-  }, [open]);
+  const close = useCallback(() => setOpen(false), []);
+  usePopupDismiss({ open, rootRef, triggerRef, onClose: close });
 
   // ⌥; / ⇧⌥; で popup を開かずに巡回する。capture phase なのはエディタ（ProseMirror）に
   // 食われる前に横取りするため。code で見るのは物理キー基準で ⇧ の有無に依らないから
@@ -80,7 +56,7 @@ export function AmbientSwitcher() {
   const current = AMBIENTS[selected];
 
   return (
-    <div ref={rootRef} className="fixed right-4 bottom-4 z-40">
+    <div ref={rootRef} className="relative">
       <button
         ref={triggerRef}
         type="button"
