@@ -34,11 +34,20 @@ export function usePopupDismiss({
       if (rootRef.current?.contains(document.activeElement)) triggerRef.current?.focus();
       onClose();
     }
+    // キーボードで隣のピルへ移って開くと mousedown が発火せず、popup が両方開いたまま
+    // 重なる。フォーカスが外の要素へ移った時点で閉じる（body へ落ちるだけなら focusin は
+    // 発火しないので、popup 内クリックの選択操作は閉じない）
+    function onFocusIn(e: FocusEvent) {
+      if (rootRef.current?.contains(e.target as Node)) return;
+      onClose();
+    }
     window.addEventListener("mousedown", onMouseDown);
     window.addEventListener("keydown", onKey, true);
+    window.addEventListener("focusin", onFocusIn);
     return () => {
       window.removeEventListener("mousedown", onMouseDown);
       window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("focusin", onFocusIn);
     };
   }, [open, rootRef, triggerRef, onClose]);
 }
