@@ -20,6 +20,9 @@ const SYSTEM_PROMPT: &str = "\
 - 入力と同じ順序・同じ件数で出力する。seg 番号を変えない。行を省略しない。\n\
 - 訳文内の改行は \\n にエスケープする（1 レコード 1 行を守る）。\n\
 - 固有名詞・用語の訳語はこの会話全体で一貫させる。\n\
+- 直訳しない。30 代の日本人男性が自分の言葉で書いたような、自然で読みやすい日本語にする。\n\
+  英語の語順・構文をなぞった翻訳調、不自然な受動態、冗長な指示語（「それは」「〜のこと」）を\n\
+  避け、日本語として自然な語順に組み替える。\n\
 - 翻訳しても意味がない seg は {\"seg\": <番号>, \"translation\": \"\"} と空文字列を返す。\n\
   該当するのは: リポジトリ名・パッケージ名・コマンド・ファイルパス・コード識別子・\n\
   URL・人名・組織名・数値やバージョンだけの行、および日本語圏でもそのまま英語表記で\n\
@@ -166,12 +169,23 @@ async fn stream_turn<S: TranslateSession>(
                     );
                     return false;
                 }
+                // model_usage のキーは alias (`sonnet`) ではなく解決後の実 ID。
+                // 設定値だけでは「実際にどのモデルが動いたか」が残らない
+                let mut models: Vec<&str> = result.model_usage.keys().map(String::as_str).collect();
+                models.sort_unstable();
+                let model_label = if models.is_empty() {
+                    "?".to_string()
+                } else {
+                    models.join("+")
+                };
                 log::info!(
-                    "turn done: {emitted} seg emitted, first_token={}ms, total={}ms (api={}ms, turns={})",
+                    "turn done: {emitted} seg emitted, first_token={}ms, total={}ms (api={}ms, turns={}, model={}, cost=${:.4})",
                     first_delta.map_or(0, |d| d.as_millis()),
                     turn_start.elapsed().as_millis(),
                     result.duration_api_ms,
                     result.num_turns,
+                    model_label,
+                    result.total_cost_usd.unwrap_or(0.0),
                 );
                 return true;
             }
@@ -193,8 +207,10 @@ pub async fn translate(
 
     let total_chars: usize = segments.iter().map(|s| s.text.chars().count()).sum();
     log::info!(
-        "translate start: {} segments, {total_chars} chars",
+        "translate start: {} segments, {total_chars} chars (model={}, effort={:?})",
         segments.len(),
+        model_arg(model),
+        effort,
     );
 
     let options = build_options(model, effort);

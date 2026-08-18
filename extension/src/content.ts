@@ -6,6 +6,7 @@
 const w = window as unknown as {
   __monicaTranslateListening?: boolean;
   __monicaTranslateInFlight?: boolean;
+  __monicaTranslateCacheDropped?: boolean;
   innerHeight: number;
 };
 
@@ -227,11 +228,20 @@ function runTranslation() {
   segments.sort((a, b) => Number(b.inViewport) - Number(a.inViewport));
   const payload = segments.map(({ seg, text }) => ({ seg, text }));
 
+  // リロード後の初回翻訳だけ origin キャッシュを捨てる。捨てないと全 seg が
+  // cache hit して前回と 1 文字も違わない訳が即座に戻り、訳し直しができない。
+  // document 単位のフラグなので、同じページでの 2 回目以降は捨てない
+  const [nav] = performance.getEntriesByType("navigation") as PerformanceNavigationTiming[];
+  const dropCache = nav?.type === "reload" && !w.__monicaTranslateCacheDropped;
+  if (dropCache) {
+    w.__monicaTranslateCacheDropped = true;
+  }
+
   console.log(
-    `[monica-translate] sending ${payload.length} segments (${segments.filter((s) => s.inViewport).length} in viewport)`,
+    `[monica-translate] sending ${payload.length} segments (${segments.filter((s) => s.inViewport).length} in viewport)${dropCache ? ", dropping cache (reload)" : ""}`,
   );
   w.__monicaTranslateInFlight = true;
-  chrome.runtime.sendMessage({ type: "translate", segments: payload });
+  chrome.runtime.sendMessage({ type: "translate", segments: payload, dropCache });
 
   // listener は 1 回だけ登録する（SPA 遷移後の再実行で重複させない）
   if (w.__monicaTranslateListening) return;

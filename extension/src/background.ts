@@ -10,6 +10,7 @@ interface Segment {
 interface TranslateRequest {
   type: "translate";
   segments: Segment[];
+  dropCache: boolean;
 }
 
 function injectContentScript(tabId: number) {
@@ -31,13 +32,19 @@ chrome.runtime.onMessage.addListener((message: TranslateRequest, sender) => {
   if (message.type !== "translate" || !sender.tab?.id) return;
   const tabId = sender.tab.id;
   const origin = sender.tab.url ? new URL(sender.tab.url).origin : "unknown";
-  void handleTranslate(tabId, origin, message.segments);
+  void handleTranslate(tabId, origin, message.segments, message.dropCache);
 });
 
 // origin 単位の text → translation キャッシュ。sidebar 等のページ間で共通のテキストは
-// 2 ページ目以降サーバを経由せず即座に挿入される
-async function handleTranslate(tabId: number, origin: string, segments: Segment[]) {
-  const stored = await chrome.storage.session.get(origin);
+// 2 ページ目以降サーバを経由せず即座に挿入される。
+// dropCache（リロード直後）は空から作り直し、完了時の set で origin キーごと置き換える
+async function handleTranslate(
+  tabId: number,
+  origin: string,
+  segments: Segment[],
+  dropCache: boolean,
+) {
+  const stored = dropCache ? {} : await chrome.storage.session.get(origin);
   const cache = (stored[origin] ?? {}) as Record<string, string>;
 
   const uncached: Segment[] = [];
@@ -51,7 +58,9 @@ async function handleTranslate(tabId: number, origin: string, segments: Segment[
       uncached.push(s);
     }
   }
-  console.log(`[monica-translate] cache hits: ${cacheHits}, uncached: ${uncached.length}`);
+  console.log(
+    `[monica-translate] cache hits: ${cacheHits}, uncached: ${uncached.length}${dropCache ? " (cache dropped: reload)" : ""}`,
+  );
 
   if (uncached.length === 0) {
     chrome.tabs.sendMessage(tabId, { type: "done" });
