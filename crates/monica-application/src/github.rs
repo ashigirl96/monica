@@ -96,28 +96,15 @@ pub struct PullRequestBranchSyncCandidate {
     pub branch: String,
 }
 
+/// A tracked PR whose recorded state is still in flight (no state row, unknown, draft, or open),
+/// so a forced sync must re-check it. One row per external_ref: the same PR tracked by two tasks
+/// yields two entries, matching the per-task state rows the sync writes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PullRequestStatusSyncCandidate {
+pub struct UnresolvedPullRequestRef {
     pub task_id: String,
     pub external_ref_id: i64,
     pub repo: String,
     pub number: i64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PullRequestSyncStatus {
-    Idle,
-    Synced,
-    Failed,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PullRequestSyncResult {
-    pub status: PullRequestSyncStatus,
-    pub task_id: Option<String>,
-    pub pull_request_count: usize,
-    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -141,31 +128,3 @@ pub struct GithubDeviceFlow {
     pub device_code: String,
 }
 
-impl PullRequestSyncResult {
-    pub fn idle() -> Self {
-        Self {
-            status: PullRequestSyncStatus::Idle,
-            task_id: None,
-            pull_request_count: 0,
-            error: None,
-        }
-    }
-
-    pub fn synced(task_id: impl Into<String>, pull_request_count: usize) -> Self {
-        Self {
-            status: PullRequestSyncStatus::Synced,
-            task_id: Some(task_id.into()),
-            pull_request_count,
-            error: None,
-        }
-    }
-
-    pub fn failed(task_id: impl Into<String>, error: impl Into<String>) -> Self {
-        Self {
-            status: PullRequestSyncStatus::Failed,
-            task_id: Some(task_id.into()),
-            pull_request_count: 0,
-            error: Some(error.into()),
-        }
-    }
-}

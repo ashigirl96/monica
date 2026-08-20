@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use super::*;
 use super::support::*;
 use crate::usecases::github::{bulk_sync_pull_requests, TrackGithubIssueInput};
-use crate::{GithubPullRequest, GithubPullRequestStatus, RepoPullRequest};
+use crate::{GithubPullRequest, GithubPullRequestStatus, RepoPullRequest, UnresolvedPullRequestRef};
 
 #[tokio::test]
 async fn track_github_issue_uses_gateway_and_repositories() {
@@ -30,21 +30,6 @@ async fn track_github_issue_uses_gateway_and_repositories() {
     assert_eq!(refs[0].number, Some(42));
 }
 
-
-#[tokio::test]
-async fn sync_pull_requests_records_branch_gateway_result() {
-    let mut repos = FakeRepos::default();
-    repos.seed_pr_branch_candidate(PullRequestBranchSyncCandidate {
-        task_id: "MON-1".to_string(),
-        repo: "owner/repo".to_string(),
-        branch: "issue-42".to_string(),
-    });
-    let result = sync_next_pull_request(&mut repos, &FakeGithub)
-        .await
-        .unwrap();
-    assert_eq!(result.status, PullRequestSyncStatus::Synced);
-    assert_eq!(repos.pr_branch_success_count(), 1);
-}
 
 #[test]
 fn github_auth_status_uses_auth_gateway() {
@@ -83,6 +68,20 @@ fn candidate(task_id: &str, repo: &str, branch: &str) -> PullRequestBranchSyncCa
         task_id: task_id.to_string(),
         repo: repo.to_string(),
         branch: branch.to_string(),
+    }
+}
+
+fn unresolved(
+    task_id: &str,
+    external_ref_id: i64,
+    repo: &str,
+    number: i64,
+) -> UnresolvedPullRequestRef {
+    UnresolvedPullRequestRef {
+        task_id: task_id.to_string(),
+        external_ref_id,
+        repo: repo.to_string(),
+        number,
     }
 }
 
@@ -146,12 +145,133 @@ async fn bulk_sync_matches_recent_prs_to_branch_candidates() {
 }
 
 #[tokio::test]
-async fn bulk_sync_no_candidates_is_noop() {
+async fn bulk_sync_no_candidates_and_no_unresolved_refs_is_noop() {
     let mut repos = FakeRepos::default();
     let github = RecentPrGithub::new(HashMap::new());
     let synced = bulk_sync_pull_requests(&mut repos, &github).await.unwrap();
     assert_eq!(synced, 0);
     assert!(repos.bulk_recorded().is_empty());
+    assert!(repos.status_recorded().is_empty());
+}
+
+#[tokio::test]
+async fn bulk_sync_refreshes_unresolved_refs_without_branch_candidates() {
+    // All development work is settled (no branch candidates), but a tracked PR is still open in
+    // the DB: the status pass must run anyway and fetch it by number.
+    let mut repos = FakeRepos::default();
+    repos.set_unresolved_pr_refs(vec![unresolved("MON-1", 7, "owner/repo", 12)]);
+    let github = RecentPrGithub::new(HashMap::new()).with_pull_request(GithubPullRequest {
+        repo: "owner/repo".to_string(),
+        number: 12,
+        url: "https://github.com/owner/repo/pull/12".to_string(),
+        status: GithubPullRequestStatus::Merged,
+    });
+
+    let synced = bulk_sync_pull_requests(&mut repos, &github).await.unwrap();
+
+    assert_eq!(synced, 1);
+    assert_eq!(github.fetched_pull_requests(), vec![("owner/repo".to_string(), 12)]);
+    let recorded = repos.status_recorded();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].0.external_ref_id, 7);
+    assert_eq!(recorded[0].1.status, GithubPullRequestStatus::Merged);
+}
+
+#[tokio::test]
+async fn bulk_sync_reuses_repo_listing_for_unresolved_refs() {
+    // The unresolved PR appears in the repo's recent listing (under a branch that is no longer a
+    // candidate), so its status is taken from memory without a by-number fetch.
+    let mut repos = FakeRepos::default();
+    repos.set_branch_sync_candidates(vec![candidate("MON-1", "owner/repo", "feature/current")]);
+    repos.set_unresolved_pr_refs(vec![unresolved("MON-1", 7, "owner/repo", 12)]);
+    let mut by_repo = HashMap::new();
+    by_repo.insert(
+        "owner/repo".to_string(),
+        Some(vec![recent_pr(
+            12,
+            GithubPullRequestStatus::Merged,
+            "feature/old",
+            "2026-01-01T00:00:00Z",
+        )]),
+    );
+    let github = RecentPrGithub::new(by_repo);
+
+    let synced = bulk_sync_pull_requests(&mut repos, &github).await.unwrap();
+
+    assert_eq!(synced, 1, "no branch match, one status refresh");
+    assert!(github.fetched_pull_requests().is_empty(), "listing data is reused in memory");
+    let recorded = repos.status_recorded();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].1.status, GithubPullRequestStatus::Merged);
+}
+
+#[tokio::test]
+async fn bulk_sync_counts_branch_matched_refs_once() {
+    // The PR matched by the branch pass is also an unresolved ref of the same task; it must not
+    // be re-fetched or double-counted. Another task tracking the same PR still gets its own state
+    // row refreshed (the branch pass only writes the matched task's row).
+    let mut repos = FakeRepos::default();
+    repos.set_branch_sync_candidates(vec![candidate("MON-1", "owner/repo", "feature/x")]);
+    repos.set_unresolved_pr_refs(vec![
+        unresolved("MON-1", 7, "owner/repo", 10),
+        unresolved("MON-2", 8, "owner/repo", 10),
+    ]);
+    let mut by_repo = HashMap::new();
+    by_repo.insert(
+        "owner/repo".to_string(),
+        Some(vec![recent_pr(
+            10,
+            GithubPullRequestStatus::Open,
+            "feature/x",
+            "2026-01-01T00:00:00Z",
+        )]),
+    );
+    let github = RecentPrGithub::new(by_repo);
+
+    let synced = bulk_sync_pull_requests(&mut repos, &github).await.unwrap();
+
+    assert_eq!(synced, 2, "one branch match plus MON-2's status refresh, not three");
+    assert!(github.fetched_pull_requests().is_empty());
+    let recorded = repos.status_recorded();
+    assert_eq!(recorded.len(), 1, "MON-1's ref is covered by the branch pass");
+    assert_eq!(recorded[0].0.task_id, "MON-2");
+    assert_eq!(recorded[0].0.external_ref_id, 8);
+}
+
+#[tokio::test]
+async fn bulk_sync_skips_unresolved_refs_of_failed_repos_and_tolerates_fetch_errors() {
+    let mut repos = FakeRepos::default();
+    repos.set_unresolved_pr_refs(vec![
+        unresolved("MON-1", 7, "owner/failing", 12),
+        unresolved("MON-2", 8, "owner/repo", 13),
+        unresolved("MON-3", 9, "owner/repo", 14),
+    ]);
+    let mut by_repo = HashMap::new();
+    by_repo.insert("owner/failing".to_string(), None);
+    by_repo.insert("owner/repo".to_string(), Some(Vec::new()));
+    // Only #13 is scripted; #14's fetch errors and must be skipped without failing the sync.
+    let github = RecentPrGithub::new(by_repo).with_pull_request(GithubPullRequest {
+        repo: "owner/repo".to_string(),
+        number: 13,
+        url: "https://github.com/owner/repo/pull/13".to_string(),
+        status: GithubPullRequestStatus::Closed,
+    });
+    // The failing repo needs a branch candidate so its listing is fetched (and fails).
+    repos.set_branch_sync_candidates(vec![
+        candidate("MON-1", "owner/failing", "feature/a"),
+        candidate("MON-2", "owner/repo", "feature/b"),
+    ]);
+
+    let synced = bulk_sync_pull_requests(&mut repos, &github).await.unwrap();
+
+    assert_eq!(synced, 1, "only #13 was refreshed");
+    let fetched = github.fetched_pull_requests();
+    assert_eq!(fetched.len(), 2, "the failed repo's ref is never fetched by number");
+    assert!(!fetched.iter().any(|(repo, _)| repo == "owner/failing"));
+    let recorded = repos.status_recorded();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].0.external_ref_id, 8);
+    assert_eq!(recorded[0].1.status, GithubPullRequestStatus::Closed);
 }
 
 #[tokio::test]

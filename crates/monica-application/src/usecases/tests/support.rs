@@ -25,8 +25,8 @@ use crate::{
     ApplicationEvent, AuthGateway, Backend, Clock, DaemonSessionView, EventSink, ExecutionProfile,
     GithubAuthStatus, GithubDeviceFlow, GithubGateway, GithubIssue, GithubPullRequest,
     GithubPullRequestRef, GithubPullRequestStatus, HookContext, Monica,
-    PullRequestBranchSyncCandidate, PullRequestStatusSyncCandidate, RepoPullRequest, SetupEnv,
-    SetupOutcome,
+    PullRequestBranchSyncCandidate, RepoPullRequest, SetupEnv,
+    SetupOutcome, UnresolvedPullRequestRef,
     SetupRunner, TaskRunObservation, TaskRunOutputs, TaskSummaryRow, TerminalSessionUpdate,
     TerminalStateSnapshot,
 };
@@ -113,11 +113,10 @@ struct FakeState {
     next_task: i64,
     next_run: i64,
     next_session: i64,
-    pr_branch_candidate: Option<PullRequestBranchSyncCandidate>,
-    pr_status_candidate: Option<PullRequestStatusSyncCandidate>,
-    pr_branch_success_count: usize,
     branch_sync_candidates: Vec<PullRequestBranchSyncCandidate>,
+    unresolved_pr_refs: Vec<UnresolvedPullRequestRef>,
     bulk_recorded: Vec<(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)>,
+    status_recorded: Vec<(UnresolvedPullRequestRef, GithubPullRequest)>,
     explanations: Vec<monica_domain::Explanation>,
     next_explanation: i64,
 }
@@ -137,10 +136,18 @@ impl FakeRepos {
         self.state.borrow_mut().branch_sync_candidates = candidates;
     }
 
+    pub(crate) fn set_unresolved_pr_refs(&self, refs: Vec<UnresolvedPullRequestRef>) {
+        self.state.borrow_mut().unresolved_pr_refs = refs;
+    }
+
     pub(crate) fn bulk_recorded(
         &self,
     ) -> Vec<(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)> {
         self.state.borrow().bulk_recorded.clone()
+    }
+
+    pub(crate) fn status_recorded(&self) -> Vec<(UnresolvedPullRequestRef, GithubPullRequest)> {
+        self.state.borrow().status_recorded.clone()
     }
 
     pub(crate) fn insert_task_for_run(&mut self, project_id: Option<String>) -> String {
@@ -313,72 +320,22 @@ impl TaskBoardQuery for FakeRepos {
 }
 
 impl PullRequestSyncStore for FakeRepos {
-    fn next_pull_request_branch_sync_candidate(
-        &self,
-    ) -> Result<Option<PullRequestBranchSyncCandidate>> {
-        Ok(self.state.borrow().pr_branch_candidate.clone())
-    }
-
-    fn next_pull_request_status_sync_candidate(
-        &self,
-    ) -> Result<Option<PullRequestStatusSyncCandidate>> {
-        Ok(self.state.borrow().pr_status_candidate.clone())
-    }
-
     fn all_branch_sync_candidates(&self) -> Result<Vec<PullRequestBranchSyncCandidate>> {
         Ok(self.state.borrow().branch_sync_candidates.clone())
     }
 
-    fn record_pull_request_branch_sync_success(
+    fn all_unresolved_pull_request_refs(&self) -> Result<Vec<UnresolvedPullRequestRef>> {
+        Ok(self.state.borrow().unresolved_pr_refs.clone())
+    }
+
+    fn bulk_record_pr_sync(
         &mut self,
-        _candidate: &PullRequestBranchSyncCandidate,
-        pull_requests: &[GithubPullRequest],
+        branch_entries: &[(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)],
+        status_entries: &[(UnresolvedPullRequestRef, GithubPullRequest)],
     ) -> Result<()> {
         let mut state = self.state.borrow_mut();
-        state.pr_branch_success_count = pull_requests.len();
-        state.pr_branch_candidate = None;
-        Ok(())
-    }
-
-    fn bulk_record_branch_sync_success(
-        &mut self,
-        entries: &[(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)],
-    ) -> Result<()> {
-        self.state
-            .borrow_mut()
-            .bulk_recorded
-            .extend_from_slice(entries);
-        Ok(())
-    }
-
-    fn record_pull_request_branch_sync_failure(
-        &mut self,
-        _candidate: &PullRequestBranchSyncCandidate,
-        _error: &str,
-    ) -> Result<()> {
-        self.state.borrow_mut().pr_branch_candidate = None;
-        Ok(())
-    }
-
-    fn record_pull_request_status_sync_success(
-        &mut self,
-        _candidate: &PullRequestStatusSyncCandidate,
-        _pull_request: &GithubPullRequest,
-    ) -> Result<()> {
-        self.state.borrow_mut().pr_status_candidate = None;
-        Ok(())
-    }
-
-    fn record_pull_request_status_sync_failure(
-        &mut self,
-        _candidate: &PullRequestStatusSyncCandidate,
-        _error: &str,
-    ) -> Result<()> {
-        self.state.borrow_mut().pr_status_candidate = None;
-        Ok(())
-    }
-
-    fn force_clear_pr_sync_state(&mut self) -> Result<()> {
+        state.bulk_recorded.extend_from_slice(branch_entries);
+        state.status_recorded.extend_from_slice(status_entries);
         Ok(())
     }
 }
@@ -965,21 +922,6 @@ impl GithubGateway for FakeGithub {
         Box::pin(async { Ok(Some("main".to_string())) })
     }
 
-    fn fetch_pull_requests_by_branch<'a>(
-        &'a self,
-        repo: &'a str,
-        _branch: &'a str,
-    ) -> BoxFuture<'a, Result<Vec<GithubPullRequest>>> {
-        Box::pin(async move {
-            Ok(vec![GithubPullRequest {
-                repo: repo.to_string(),
-                number: 8,
-                url: format!("https://github.com/{repo}/pull/8"),
-                status: GithubPullRequestStatus::Open,
-            }])
-        })
-    }
-
     fn fetch_pull_request<'a>(
         &'a self,
         repo: &'a str,
@@ -1004,14 +946,34 @@ impl GithubGateway for FakeGithub {
 }
 
 /// A `GithubGateway` whose repo-wide PR listing is scripted per repo, for the bulk-sync usecase.
-/// `None` for a repo yields an error (to exercise per-repo failure isolation).
+/// `None` for a repo yields an error (to exercise per-repo failure isolation). Individual PR
+/// fetches are scripted with [`with_pull_request`] and recorded so tests can assert which
+/// unresolved refs fell through to a by-number fetch.
 pub(crate) struct RecentPrGithub {
     by_repo: HashMap<String, Option<Vec<RepoPullRequest>>>,
+    pull_requests: HashMap<(String, i64), GithubPullRequest>,
+    fetched_pull_requests: RefCell<Vec<(String, i64)>>,
 }
 
 impl RecentPrGithub {
     pub(crate) fn new(by_repo: HashMap<String, Option<Vec<RepoPullRequest>>>) -> Self {
-        Self { by_repo }
+        Self {
+            by_repo,
+            pull_requests: HashMap::new(),
+            fetched_pull_requests: RefCell::new(Vec::new()),
+        }
+    }
+
+    pub(crate) fn with_pull_request(mut self, pull_request: GithubPullRequest) -> Self {
+        self.pull_requests.insert(
+            (pull_request.repo.clone(), pull_request.number),
+            pull_request,
+        );
+        self
+    }
+
+    pub(crate) fn fetched_pull_requests(&self) -> Vec<(String, i64)> {
+        self.fetched_pull_requests.borrow().clone()
     }
 }
 
@@ -1028,20 +990,18 @@ impl GithubGateway for RecentPrGithub {
         Box::pin(async { Err(anyhow!("unused")) })
     }
 
-    fn fetch_pull_requests_by_branch<'a>(
-        &'a self,
-        _repo: &'a str,
-        _branch: &'a str,
-    ) -> BoxFuture<'a, Result<Vec<GithubPullRequest>>> {
-        Box::pin(async { Err(anyhow!("unused")) })
-    }
-
     fn fetch_pull_request<'a>(
         &'a self,
-        _repo: &'a str,
-        _number: i64,
+        repo: &'a str,
+        number: i64,
     ) -> BoxFuture<'a, Result<GithubPullRequest>> {
-        Box::pin(async { Err(anyhow!("unused")) })
+        self.fetched_pull_requests
+            .borrow_mut()
+            .push((repo.to_string(), number));
+        let outcome = self.pull_requests.get(&(repo.to_string(), number)).cloned();
+        Box::pin(async move {
+            outcome.ok_or_else(|| anyhow!("no scripted pull request for {repo}#{number}"))
+        })
     }
 
     fn fetch_recent_pull_requests<'a>(
@@ -1404,13 +1364,6 @@ impl FakeRepos {
         self.state.borrow_mut().terminal_sessions.push(session);
     }
 
-    pub(crate) fn seed_pr_branch_candidate(&self, candidate: PullRequestBranchSyncCandidate) {
-        self.state.borrow_mut().pr_branch_candidate = Some(candidate);
-    }
-
-    pub(crate) fn pr_branch_success_count(&self) -> usize {
-        self.state.borrow().pr_branch_success_count
-    }
 }
 
 impl TerminalSessionRepository for FakeRepos {

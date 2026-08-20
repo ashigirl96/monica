@@ -30,6 +30,7 @@ migrations!(
     v42,
     v43,
     v44,
+    v45,
 );
 
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.

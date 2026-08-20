@@ -4,12 +4,14 @@ use std::time::Instant;
 use super::ports::{GithubGateway, PullRequestSyncStore};
 use crate::{
     ApplicationResult, GithubPullRequest, PullRequestBranchSyncCandidate, RepoPullRequest,
+    UnresolvedPullRequestRef,
 };
 
-/// Forced PR refresh. Instead of draining one stale branch per request (the periodic path), fetch
-/// every tracked repo's recent PRs once — in parallel — and match them to branches in memory, then
-/// persist all matches in a single transaction. Returns the number of candidates that matched at
-/// least one PR.
+/// Forced PR refresh, the only sync path. Fetches every tracked repo's recent PRs once — in
+/// parallel — and matches them to branch candidates in memory, then re-checks every unresolved
+/// tracked PR the branch pass didn't cover (reusing the repo listings where possible, fetching by
+/// number otherwise), and persists everything in a single transaction. Returns the number of
+/// branch candidates that matched at least one PR plus the number of unresolved refs refreshed.
 pub async fn bulk_sync_pull_requests<R, G>(repos: &mut R, github: &G) -> ApplicationResult<u32>
 where
     R: PullRequestSyncStore,
@@ -17,8 +19,9 @@ where
 {
     let started = Instant::now();
     let candidates = repos.all_branch_sync_candidates()?;
+    let unresolved = repos.all_unresolved_pull_request_refs()?;
     let candidates_ms = started.elapsed().as_millis();
-    if candidates.is_empty() {
+    if candidates.is_empty() && unresolved.is_empty() {
         return Ok(0);
     }
 
@@ -41,7 +44,8 @@ where
     let results = futures_util::future::join_all(fetches).await;
     let fetch_ms = fetch_started.elapsed().as_millis();
 
-    let mut by_repo: HashMap<String, HashMap<String, RepoPullRequest>> = HashMap::new();
+    let mut by_branch: HashMap<String, HashMap<String, RepoPullRequest>> = HashMap::new();
+    let mut by_number: HashMap<String, HashMap<i64, RepoPullRequest>> = HashMap::new();
     let mut failed_repos: HashSet<String> = HashSet::new();
     for (repo, (elapsed, result)) in distinct_repos.iter().zip(results) {
         let pull_requests = match result {
@@ -57,8 +61,10 @@ where
             }
         };
         let fetched = pull_requests.len();
-        let branch_map = by_repo.entry(repo.to_ascii_lowercase()).or_default();
+        let branch_map = by_branch.entry(repo.to_ascii_lowercase()).or_default();
+        let number_map = by_number.entry(repo.to_ascii_lowercase()).or_default();
         for pr in pull_requests {
+            number_map.insert(pr.number, pr.clone());
             let branch_key = pr.head_branch.trim().to_ascii_lowercase();
             if branch_key.is_empty() {
                 continue;
@@ -79,8 +85,9 @@ where
         );
     }
 
-    let mut synced_count = 0u32;
-    let mut entries: Vec<(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)> =
+    let mut branch_matched = 0u32;
+    let mut matched_refs: HashSet<(String, String, i64)> = HashSet::new();
+    let mut branch_entries: Vec<(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)> =
         Vec::with_capacity(candidates.len());
     for candidate in candidates {
         let repo_key = candidate.repo.to_ascii_lowercase();
@@ -90,7 +97,7 @@ where
             continue;
         }
         let branch_key = candidate.branch.trim().to_ascii_lowercase();
-        let matched = by_repo
+        let matched = by_branch
             .get(&repo_key)
             .and_then(|branches| branches.get(&branch_key))
             .map(|pr| GithubPullRequest {
@@ -101,31 +108,90 @@ where
             });
         let pull_requests = match matched {
             Some(pr) => {
-                synced_count += 1;
+                branch_matched += 1;
+                matched_refs.insert((candidate.task_id.clone(), repo_key, pr.number));
                 vec![pr]
             }
             None => Vec::new(),
         };
-        entries.push((candidate, pull_requests));
+        branch_entries.push((candidate, pull_requests));
     }
 
+    // The branch pass only writes the matched task's own ref row, so exclusion must be per
+    // (task, repo, number): the same PR tracked by another task still needs its status refreshed.
+    let mut status_entries: Vec<(UnresolvedPullRequestRef, GithubPullRequest)> = Vec::new();
+    let mut to_fetch: Vec<&UnresolvedPullRequestRef> = Vec::new();
+    for unresolved_ref in &unresolved {
+        let repo_key = unresolved_ref.repo.to_ascii_lowercase();
+        if failed_repos.contains(&repo_key) {
+            continue;
+        }
+        let ref_key = (
+            unresolved_ref.task_id.clone(),
+            repo_key.clone(),
+            unresolved_ref.number,
+        );
+        if matched_refs.contains(&ref_key) {
+            continue;
+        }
+        match by_number
+            .get(&repo_key)
+            .and_then(|numbers| numbers.get(&unresolved_ref.number))
+        {
+            Some(pr) => status_entries.push((
+                unresolved_ref.clone(),
+                GithubPullRequest {
+                    repo: repo_key,
+                    number: pr.number,
+                    url: pr.url.clone(),
+                    status: pr.status,
+                },
+            )),
+            None => to_fetch.push(unresolved_ref),
+        }
+    }
+
+    let status_fetch_started = Instant::now();
+    let status_fetches = to_fetch.iter().map(|unresolved_ref| async move {
+        let result = github
+            .fetch_pull_request(&unresolved_ref.repo, unresolved_ref.number)
+            .await;
+        (*unresolved_ref, result)
+    });
+    for (unresolved_ref, result) in futures_util::future::join_all(status_fetches).await {
+        match result {
+            Ok(pr) => status_entries.push((unresolved_ref.clone(), pr)),
+            // No retry state to record: the next forced sync simply tries again.
+            Err(e) => log::warn!(
+                target: "monica_application::pr_sync",
+                "status refresh fetch failed repo={} pull_request_number={} error={e:#}",
+                unresolved_ref.repo,
+                unresolved_ref.number
+            ),
+        }
+    }
+    let status_fetch_ms = status_fetch_started.elapsed().as_millis();
+
+    let synced_count = branch_matched + status_entries.len() as u32;
     let record_started = Instant::now();
-    repos.bulk_record_branch_sync_success(&entries)?;
+    repos.bulk_record_pr_sync(&branch_entries, &status_entries)?;
     log::info!(
         target: "monica_application::pr_sync",
-        "bulk PR sync done: candidates={} repos={} matched={} | candidates={}ms fetch={}ms record={}ms total={}ms",
-        entries.len(),
+        "bulk PR sync done: candidates={} repos={} matched={} statuses={} | candidates={}ms fetch={}ms status_fetch={}ms record={}ms total={}ms",
+        branch_entries.len(),
         distinct_repos.len(),
-        synced_count,
+        branch_matched,
+        status_entries.len(),
         candidates_ms,
         fetch_ms,
+        status_fetch_ms,
         record_started.elapsed().as_millis(),
         started.elapsed().as_millis()
     );
     Ok(synced_count)
 }
 
-/// The per-branch path keeps the single PR that best represents a branch: active over settled, then
+/// The bulk pass keeps the single PR that best represents a branch: active over settled, then
 /// most-recently-updated, then highest number. Mirror that when several PRs share a head branch.
 fn is_better_branch_pr(candidate: &RepoPullRequest, current: &RepoPullRequest) -> bool {
     (
