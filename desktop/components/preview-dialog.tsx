@@ -1,7 +1,6 @@
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { XIcon } from "@/components/icons";
-import { cn } from "@/lib/utils";
 
 type PreviewDialogProps = {
   label: string;
@@ -10,12 +9,10 @@ type PreviewDialogProps = {
   closeLabel: string;
   onClose: () => void;
   bodyRef?: RefObject<HTMLDivElement | null>;
-  onDialogKeyDown?: (e: React.KeyboardEvent<HTMLDivElement>) => void;
-  bodyClassName?: string;
   children: ReactNode;
 };
 
-// Quick Look-style overlay shared by plan preview and task memo. Portaled to
+// Quick Look-style overlay for plan preview. Portaled to
 // document.body so a hidden/inert space wrapper can't reach it. Moving focus into the
 // dialog keeps typed keys, paste and IME out of the xterm behind it; on close focus
 // returns to whatever held it (normally the terminal).
@@ -26,8 +23,6 @@ export function PreviewDialog({
   closeLabel,
   onClose,
   bodyRef,
-  onDialogKeyDown,
-  bodyClassName,
   children,
 }: PreviewDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -49,7 +44,6 @@ export function PreviewDialog({
         aria-modal
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        onKeyDown={onDialogKeyDown}
         className="animate-in zoom-in-95 flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-2xl outline-none duration-150"
       >
         <header className="flex items-center gap-3 border-b border-border px-4 py-2.5">
@@ -75,10 +69,7 @@ export function PreviewDialog({
           </button>
         </header>
         {/* lift notebook-md's 980px reading cap so the content tracks the dialog width */}
-        <div
-          ref={bodyRef}
-          className={cn("overflow-y-auto px-6 py-5 [&_.notebook-md]:max-w-none", bodyClassName)}
-        >
+        <div ref={bodyRef} className="overflow-y-auto px-6 py-5 [&_.notebook-md]:max-w-none">
           {children}
         </div>
       </div>
