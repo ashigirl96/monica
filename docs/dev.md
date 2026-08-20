@@ -31,7 +31,7 @@ monica auth github status
 monica auth github logout
 ```
 
-開発時の一時 override は `MONICA_GITHUB_TOKEN` を使う。GitHub App client id は既定値を持つが、別 app で試すときは `MONICA_GITHUB_CLIENT_ID` で上書きできる。Dashboard は未ログイン時に PR sync worker を起動しない。
+開発時の一時 override は `MONICA_GITHUB_TOKEN` を使う。GitHub App client id は既定値を持つが、別 app で試すときは `MONICA_GITHUB_CLIENT_ID` で上書きできる。PR 同期は常時 polling ではなく、Workboard への移動時と cmd+r の forced sync だけが worker を起こす（未ログイン時は façade 側で no-op）。
 
 ---
 

@@ -177,40 +177,26 @@ fn facade_create_terminal_session_failure_marks_failed_and_settles() {
 }
 
 #[tokio::test]
-async fn facade_sync_pull_requests_counts_and_announces() {
+async fn facade_force_sync_pull_requests_refreshes_unresolved_refs() {
     let repos = FakeRepos::default();
-    repos.seed_pr_branch_candidate(PullRequestBranchSyncCandidate {
+    // FakeGithub lists no recent PRs, so the unresolved ref falls through to a by-number fetch
+    // (FakeGithub answers Merged).
+    repos.set_unresolved_pr_refs(vec![UnresolvedPullRequestRef {
         task_id: "MON-1".to_string(),
+        external_ref_id: 7,
         repo: "owner/repo".to_string(),
-        branch: "issue-1".to_string(),
-    });
+        number: 12,
+    }]);
     let sink = RecordingSink::default();
     let mut monica = facade(repos, sink.clone());
 
-    let count = monica.synchronization().sync_pull_requests(5, true).await.unwrap();
+    let count = monica.synchronization().force_sync_pull_requests().await.unwrap();
 
     assert_eq!(count, 1);
     assert!(sink
         .events()
         .iter()
         .any(|e| matches!(e, ApplicationEvent::PullRequestSyncCompleted { synced_count: 1 })));
-}
-
-#[tokio::test]
-async fn facade_sync_pull_requests_stays_silent_without_announce() {
-    let repos = FakeRepos::default();
-    repos.seed_pr_branch_candidate(PullRequestBranchSyncCandidate {
-        task_id: "MON-1".to_string(),
-        repo: "owner/repo".to_string(),
-        branch: "issue-1".to_string(),
-    });
-    let sink = RecordingSink::default();
-    let mut monica = facade(repos, sink.clone());
-
-    let count = monica.synchronization().sync_pull_requests(5, false).await.unwrap();
-
-    assert_eq!(count, 1);
-    assert!(sink.events().is_empty());
 }
 
 #[tokio::test]

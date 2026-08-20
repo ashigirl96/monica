@@ -25,9 +25,8 @@ pub async fn force_sync_pull_requests(
             "Not authenticated with GitHub",
         ));
     }
-    monica.synchronization().reset_pull_request_sync()?;
     if !waker.wake_forced() {
-        return Err(ApiError::external("PR sync scheduler is not running"));
+        return Err(ApiError::external("PR sync worker is not running"));
     }
     Ok(())
 }

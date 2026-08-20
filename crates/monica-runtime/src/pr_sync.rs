@@ -1,37 +1,33 @@
-//! The PR-sync interval worker. Owns the timer, the in-flight guard, and the forced-wake channel;
-//! the driver supplies a façade factory (carrying its event sink) and the application does the
-//! actual batch via [`SynchronizationService::sync_pull_requests`]. The worker builds a fresh
-//! façade on its own thread each tick, so the `!Send` façade never crosses a thread boundary.
+//! The PR-sync worker. Owns the wake channel; the driver supplies a façade factory (carrying its
+//! event sink) and the application does the actual refresh via
+//! [`SynchronizationService::force_sync_pull_requests`]. The worker builds a fresh façade on its
+//! own thread for each wake, so the `!Send` façade never crosses a thread boundary. There is no
+//! periodic schedule: syncs run only when a command wakes the worker.
 
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    mpsc, Arc,
-};
-use std::time::Duration;
+use std::sync::mpsc;
 
 use crate::MonicaFacade;
 
-const PR_SYNC_INTERVAL: Duration = Duration::from_secs(10);
-const PR_SYNC_BATCH_LIMIT: usize = 3;
-
-/// Handle to nudge the scheduler from a command. A forced sync drains a larger batch and announces
-/// completion.
-pub struct PrSyncWaker(mpsc::SyncSender<bool>);
+/// Handle to wake the sync worker from a command.
+pub struct PrSyncWaker(mpsc::SyncSender<()>);
 
 impl PrSyncWaker {
+    /// Request a sync. Returns false only when the worker is gone (thread spawn failed or it
+    /// exited); a full channel means a wake is already queued, which covers this request too.
     pub fn wake_forced(&self) -> bool {
-        self.0.try_send(true).is_ok()
+        !matches!(self.0.try_send(()), Err(mpsc::TrySendError::Disconnected(_)))
     }
 }
 
-/// Spawn the PR-sync interval worker. `make_facade` builds a fresh façade (with the driver's event
-/// sink) on the worker thread each cycle; it captures only `Send` state (e.g. a Tauri `AppHandle`).
+/// Spawn the PR-sync worker. `make_facade` builds a fresh façade (with the driver's event sink)
+/// on the worker thread each wake; it captures only `Send` state (e.g. a Tauri `AppHandle`).
 pub fn start_pr_sync<F>(make_facade: F) -> PrSyncWaker
 where
     F: Fn() -> anyhow::Result<MonicaFacade> + Send + 'static,
 {
-    let in_flight = Arc::new(AtomicBool::new(false));
-    let (tx, rx) = mpsc::sync_channel::<bool>(1);
+    // Capacity 1: a wake arriving while a sync runs is queued and coalesces with any later ones,
+    // so a burst of requests yields at most one trailing sync.
+    let (tx, rx) = mpsc::sync_channel::<()>(1);
     let spawn_result = std::thread::Builder::new()
         .name("monica-pr-sync".to_string())
         .spawn(move || {
@@ -44,36 +40,18 @@ where
                     return;
                 }
             };
-            loop {
-                let forced = match rx.recv_timeout(PR_SYNC_INTERVAL) {
-                    Ok(f) => f,
-                    Err(mpsc::RecvTimeoutError::Timeout) => false,
-                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                };
-                if in_flight.swap(true, Ordering::AcqRel) {
-                    continue;
-                }
-                let _guard = InFlightGuard(Arc::clone(&in_flight));
-                // Forced syncs take the bulk path (one request per repo) and announce completion;
-                // the periodic sweep drains a few stale candidates and stays quiet.
-                rt.block_on(run_batch(&make_facade, forced));
+            // Blocks until a command wakes us; ends when every waker is dropped.
+            while rx.recv().is_ok() {
+                rt.block_on(run_sync(&make_facade));
             }
         });
     if let Err(e) = spawn_result {
-        log::error!(target: "monica_runtime::pr_sync", "failed to start PR sync scheduler: {e}");
+        log::error!(target: "monica_runtime::pr_sync", "failed to start PR sync worker: {e}");
     }
     PrSyncWaker(tx)
 }
 
-struct InFlightGuard(Arc<AtomicBool>);
-
-impl Drop for InFlightGuard {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
-    }
-}
-
-async fn run_batch<F>(make_facade: &F, forced: bool)
+async fn run_sync<F>(make_facade: &F)
 where
     F: Fn() -> anyhow::Result<MonicaFacade>,
 {
@@ -84,15 +62,22 @@ where
             return;
         }
     };
-    let result = if forced {
-        monica.synchronization().force_sync_pull_requests().await
-    } else {
-        monica
-            .synchronization()
-            .sync_pull_requests(PR_SYNC_BATCH_LIMIT, false)
-            .await
-    };
-    if let Err(e) = result {
-        log::error!(target: "monica_runtime::pr_sync", "PR sync batch failed: {e}");
+    if let Err(e) = monica.synchronization().force_sync_pull_requests().await {
+        log::error!(target: "monica_runtime::pr_sync", "PR sync failed: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::start_pr_sync;
+
+    #[test]
+    fn wake_forced_stays_true_while_the_worker_lives_even_when_a_wake_is_queued() {
+        let waker = start_pr_sync(|| Err(anyhow::anyhow!("no facade in this test")));
+        // Burst faster than the worker drains: some sends land on a full channel, which must
+        // read as "a sync is already pending", not as a dead worker.
+        for _ in 0..32 {
+            assert!(waker.wake_forced());
+        }
     }
 }
