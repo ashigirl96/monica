@@ -31,7 +31,7 @@ fn record_claude_hook_forwards_plan_file_path_from_the_signal() {
     let (task_id, run_id) = task_with_running_primary(&mut repos);
 
     let plan = AgentSignal {
-        session_id: Some("sess-1".to_string()),
+        agent_session_id: Some("sess-1".to_string()),
         event_label: Some("PreToolUse".to_string()),
         kind: SignalKind::UserInputRequired {
             reason: TaskRunWaitReason::ExitPlanMode,
@@ -152,7 +152,7 @@ fn record_claude_hook_does_not_claim_prepared_primary_on_stray_stop() {
     assert!(report.event_recorded);
     let primary = repos.get_task_run(&run_id).unwrap().unwrap();
     assert_eq!(primary.status, TaskRunStatus::Prepared);
-    assert_eq!(primary.provider_session_id, None);
+    assert_eq!(primary.agent_session_id, None);
 }
 
 #[test]
@@ -192,7 +192,7 @@ fn record_claude_hook_creates_side_run_instead_of_stealing_active_primary() {
     assert_eq!(task.primary_task_run_id.as_deref(), Some(primary_id.as_str()));
     let primary = repos.get_task_run(&primary_id).unwrap().unwrap();
     assert_eq!(primary.status, TaskRunStatus::Running);
-    assert_eq!(primary.provider_session_id.as_deref(), Some("sess-1"));
+    assert_eq!(primary.agent_session_id.as_deref(), Some("sess-1"));
 
     let side = repos
         .find_task_run_by_session(&task_id, "sess-2")
@@ -521,7 +521,7 @@ fn record_claude_hook_fresh_session_start_revives_stopped_run() {
     let run = repos.get_task_run(&run_id).unwrap().unwrap();
     assert_eq!(run.status, TaskRunStatus::WaitingForUser);
     assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
-    assert_eq!(run.provider_session_id.as_deref(), Some("sess-2"));
+    assert_eq!(run.agent_session_id.as_deref(), Some("sess-2"));
 }
 
 #[test]
@@ -654,7 +654,7 @@ fn record_claude_hook_promotes_created_run_when_no_primary_is_set() {
     let task = repos.get_task(&task_id).unwrap().unwrap();
     let primary_id = task.primary_task_run_id.expect("created run becomes primary");
     let primary = repos.get_task_run(&primary_id).unwrap().unwrap();
-    assert_eq!(primary.provider_session_id.as_deref(), Some("sess-1"));
+    assert_eq!(primary.agent_session_id.as_deref(), Some("sess-1"));
     assert_eq!(primary.status, TaskRunStatus::WaitingForUser);
     assert_eq!(primary.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
 }
@@ -805,7 +805,7 @@ fn record_claude_hook_tracks_agent_status_on_session_without_task() {
     let s = repos.get_terminal_session(&session.id).unwrap().unwrap();
     assert_eq!(s.agent_status, Some(AgentSessionStatus::Running));
     assert_eq!(s.agent_wait_reason, None);
-    assert_eq!(s.provider_session_id.as_deref(), Some("sess-1"));
+    assert_eq!(s.agent_session_id.as_deref(), Some("sess-1"));
 
     record_claude_hook(
         &mut repos,
@@ -816,7 +816,7 @@ fn record_claude_hook_tracks_agent_status_on_session_without_task() {
     let s = repos.get_terminal_session(&session.id).unwrap().unwrap();
     assert_eq!(s.agent_status, Some(AgentSessionStatus::WaitingForUser));
     assert_eq!(s.agent_wait_reason, Some(TaskRunWaitReason::ExitPlanMode));
-    assert_eq!(s.provider_session_id.as_deref(), Some("sess-1"));
+    assert_eq!(s.agent_session_id.as_deref(), Some("sess-1"));
 
     record_claude_hook(&mut repos, ctx, &turn_completed("sess-1", false)).unwrap();
     let s = repos.get_terminal_session(&session.id).unwrap().unwrap();
@@ -827,7 +827,7 @@ fn record_claude_hook_tracks_agent_status_on_session_without_task() {
     let s = repos.get_terminal_session(&session.id).unwrap().unwrap();
     assert_eq!(s.agent_status, None);
     assert_eq!(s.agent_wait_reason, None);
-    assert_eq!(s.provider_session_id, None);
+    assert_eq!(s.agent_session_id, None);
 }
 
 #[test]

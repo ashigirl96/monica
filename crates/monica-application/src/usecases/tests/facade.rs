@@ -45,7 +45,7 @@ fn facade_ingest_agent_hook_decodes_records_and_emits() {
 
 #[test]
 fn facade_ingest_agent_hook_recovers_event_label_for_dropped_event() {
-    // A non-actionable payload decodes to None; the façade still recovers the provider event name
+    // A non-actionable payload decodes to None; the façade still recovers the agent event name
     // via the decoder's event_label so the driver's debug log keeps it without touching decoders.
     let sink = RecordingSink::default();
     let decoder = TestAgentDecoders::with_label("PreToolUse");
@@ -254,7 +254,7 @@ async fn facade_init_project_prefers_git_branch_over_github() {
 // ExplanationService
 // ---------------------------------------------------------------------------
 
-fn fake_terminal_session(id: &str, provider_session_id: Option<&str>) -> TerminalSession {
+fn fake_terminal_session(id: &str, agent_session_id: Option<&str>) -> TerminalSession {
     TerminalSession {
         id: id.to_string(),
         runspace_id: None,
@@ -265,7 +265,7 @@ fn fake_terminal_session(id: &str, provider_session_id: Option<&str>) -> Termina
         status: TerminalSessionStatus::Running,
         agent_status: None,
         agent_wait_reason: None,
-        provider_session_id: provider_session_id.map(str::to_string),
+        agent_session_id: agent_session_id.map(str::to_string),
         pid: None,
         rows: 24,
         cols: 80,
@@ -282,7 +282,7 @@ fn fake_terminal_session(id: &str, provider_session_id: Option<&str>) -> Termina
 #[test]
 fn explanation_create_happy_path() {
     let repos = FakeRepos::default();
-    repos.seed_session(fake_terminal_session("ts-1", Some("provider-abc")));
+    repos.seed_session(fake_terminal_session("ts-1", Some("agent-abc")));
     let sink = RecordingSink::default();
     let mut monica = facade(repos, sink);
 
@@ -295,7 +295,7 @@ fn explanation_create_happy_path() {
     assert_eq!(explanation.title, "My Title");
     assert_eq!(explanation.summary.as_deref(), Some("summary text"));
     assert_eq!(explanation.mode, ExplanationMode::Diff);
-    assert_eq!(explanation.provider_session_id, "provider-abc");
+    assert_eq!(explanation.agent_session_id, "agent-abc");
     assert_eq!(explanation.terminal_session_id, "ts-1");
     assert!(path.to_string_lossy().contains("index.html"));
 }
@@ -315,7 +315,7 @@ fn explanation_create_fails_when_session_not_found() {
 }
 
 #[test]
-fn explanation_create_fails_when_provider_session_id_is_null() {
+fn explanation_create_fails_when_agent_session_id_is_null() {
     let repos = FakeRepos::default();
     repos.seed_session(fake_terminal_session("ts-1", None));
     let sink = RecordingSink::default();

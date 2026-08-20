@@ -15,7 +15,7 @@ mod unit_of_work;
 pub(super) const TASK_COLUMNS: &str = "id, kind, status, phase, title, body, project_id,      labels, details_json, source_json, primary_task_run_id, closed_at, created_at, updated_at";
 
 pub(super) const TASK_RUN_COLUMNS: &str =
-    "id, task_id, agent, branch, worktree_path, status, wait_reason,      provider_session_id, terminal_tab_id, last_event_name, last_event_at, plan_file_path, pending_stop, metadata_json,      created_at, updated_at";
+    "id, task_id, agent, branch, worktree_path, status, wait_reason,      agent_session_id, terminal_tab_id, last_event_name, last_event_at, plan_file_path, pending_stop, metadata_json,      created_at, updated_at";
 
 pub(super) const PROJECT_COLUMNS: &str = "id, name, provider, repo, path, default_branch, worktree_root,      setup_timeout_sec, agent_default, agent_permission_mode, hooks_claude,      primary_note_id, created_at, updated_at";
 
@@ -25,7 +25,7 @@ pub(super) const NOTIFICATION_OUTBOX_COLUMNS: &str =
     "id, dedupe_key, kind, title, body, task_id, task_run_id, created_at, delivered_at, error, attempts";
 
 pub(super) const EXPLANATION_COLUMNS: &str =
-    "e.id, e.title, e.summary, e.mode, e.provider_session_id, e.terminal_session_id, e.created_at, e.repo_name, ts.cwd";
+    "e.id, e.title, e.summary, e.mode, e.agent_session_id, e.terminal_session_id, e.created_at, e.repo_name, ts.cwd";
 
 pub(super) const EXPLANATION_FROM: &str =
     "explanations e LEFT JOIN terminal_sessions ts ON e.terminal_session_id = ts.id";

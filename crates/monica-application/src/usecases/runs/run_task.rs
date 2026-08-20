@@ -244,7 +244,7 @@ where
 }
 
 /// Write hook config into the worktree's `.claude/settings.local.json` + wrapper script + PTY env
-/// for a prepared run. A stopped primary that recorded a provider session is relaunched with the
+/// for a prepared run. A stopped primary that recorded an agent session is relaunched with the
 /// agent's resume command instead — same run, same worktree, no new setup.
 /// Does NOT transition the TaskRun — the SessionStart hook parks it at awaiting-prompt and
 /// the first UserPromptSubmit moves it to Running.

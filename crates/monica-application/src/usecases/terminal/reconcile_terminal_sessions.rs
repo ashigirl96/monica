@@ -107,7 +107,7 @@ mod tests {
             status,
             agent_status: None,
             agent_wait_reason: None,
-            provider_session_id: None,
+            agent_session_id: None,
             pid: None,
             rows: 24,
             cols: 80,

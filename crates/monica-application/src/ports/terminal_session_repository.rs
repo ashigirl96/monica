@@ -33,7 +33,7 @@ pub trait TerminalSessionRepository {
         id: &str,
         agent_status: Option<AgentSessionStatus>,
         agent_wait_reason: Option<TaskRunWaitReason>,
-        provider_session_id: Option<&str>,
+        agent_session_id: Option<&str>,
     ) -> Result<bool>;
 
     fn get_terminal_session(&self, id: &str) -> Result<Option<TerminalSession>>;

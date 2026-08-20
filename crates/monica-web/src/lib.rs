@@ -901,7 +901,7 @@ mod tests {
                 title: title.to_string(),
                 summary: Some(format!("{title} summary")),
                 mode: ExplanationMode::Diff,
-                provider_session_id: "p1".to_string(),
+                agent_session_id: "p1".to_string(),
                 terminal_session_id: session.id,
                 repo_name: None,
             })

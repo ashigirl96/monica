@@ -67,7 +67,7 @@ pub fn task_run_settlement_for_orphaned_run(
 fn run_is_session_driven(run: &TaskRun) -> bool {
     match run.status {
         TaskRunStatus::Running | TaskRunStatus::WaitingForUser => true,
-        TaskRunStatus::SettingUp => run.provider_session_id.is_some(),
+        TaskRunStatus::SettingUp => run.agent_session_id.is_some(),
         _ => false,
     }
 }
@@ -88,7 +88,7 @@ mod tests {
             status: TerminalSessionStatus::Exited,
             agent_status: None,
             agent_wait_reason: None,
-            provider_session_id: None,
+            agent_session_id: None,
             pid: None,
             rows: 24,
             cols: 80,
@@ -102,7 +102,7 @@ mod tests {
         }
     }
 
-    fn run(status: TaskRunStatus, provider_session_id: Option<&str>) -> TaskRun {
+    fn run(status: TaskRunStatus, agent_session_id: Option<&str>) -> TaskRun {
         TaskRun {
             id: TaskRunId::from_store("run-1".to_string()),
             task_id: TaskId::from_store("MON-1".to_string()),
@@ -111,7 +111,7 @@ mod tests {
             worktree_path: None,
             status,
             wait_reason: None,
-            provider_session_id: provider_session_id.map(str::to_string),
+            agent_session_id: agent_session_id.map(str::to_string),
             terminal_tab_id: Some("tab-1".to_string()),
             last_event_name: None,
             last_event_at: None,

@@ -28,7 +28,7 @@ export type Explanation = {
   title: string;
   summary: string | null;
   mode: ExplanationMode;
-  provider_session_id: string;
+  agent_session_id: string;
   terminal_session_id: string;
   created_at: string;
   repo_name: string | null;

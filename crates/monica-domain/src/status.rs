@@ -150,7 +150,7 @@ impl DisplayStatus {
         self.prepare_eligible() || self == DisplayStatus::Prepared
     }
 
-    /// A stopped primary that recorded a provider session is reopened with the agent's resume
+    /// A stopped primary that recorded an agent session is reopened with the agent's resume
     /// command instead of preparing a fresh run from scratch.
     pub fn resume_eligible(self, primary_has_session: bool) -> bool {
         self == DisplayStatus::Stopped && primary_has_session
