@@ -12,7 +12,7 @@ fn resolve_by_session_returns_none_without_session_id() {
         task_id: "t1",
         task: &task,
         explicit_run_id_rejected: false,
-        provider_session_id: None,
+        agent_session_id: None,
         starts_session: true,
         agent: Agent::Claude,
         primary_run: None,
@@ -37,7 +37,7 @@ fn resolve_by_session_returns_run_when_found() {
         task_id: &task_id,
         task: &task,
         explicit_run_id_rejected: false,
-        provider_session_id: Some("sess-1"),
+        agent_session_id: Some("sess-1"),
         starts_session: false,
         agent: Agent::Claude,
         primary_run: None,
@@ -56,7 +56,7 @@ fn resolve_by_prepared_primary_skips_non_prepared() {
         task_id: "t1",
         task: &task,
         explicit_run_id_rejected: false,
-        provider_session_id: Some("sess-1"),
+        agent_session_id: Some("sess-1"),
         starts_session: true,
         agent: Agent::Claude,
         primary_run: Some(&run),
@@ -74,7 +74,7 @@ fn resolve_by_prepared_primary_skips_non_starting_event() {
         task_id: "t1",
         task: &task,
         explicit_run_id_rejected: false,
-        provider_session_id: Some("sess-1"),
+        agent_session_id: Some("sess-1"),
         starts_session: false,
         agent: Agent::Claude,
         primary_run: Some(&run),
@@ -93,7 +93,7 @@ fn resolve_by_prepared_primary_claims_on_session_start() {
         task_id: "t1",
         task: &task,
         explicit_run_id_rejected: false,
-        provider_session_id: Some("sess-1"),
+        agent_session_id: Some("sess-1"),
         starts_session: true,
         agent: Agent::Claude,
         primary_run: Some(&run),
@@ -104,7 +104,7 @@ fn resolve_by_prepared_primary_claims_on_session_start() {
     let resolved_run = resolved.run.unwrap();
     assert_eq!(resolved_run.id, "run-1");
     // The atomic claim stamped the session, and the returned snapshot reflects the post-claim row.
-    assert_eq!(resolved_run.provider_session_id.as_deref(), Some("sess-1"));
+    assert_eq!(resolved_run.agent_session_id.as_deref(), Some("sess-1"));
 }
 
 #[test]
@@ -112,14 +112,14 @@ fn resolve_by_prepared_primary_loses_race_when_already_claimed() {
     let task = make_task("t1", TaskStatus::Ready, Some("run-1"));
     let mut run = make_run("run-1", "t1", TaskRunStatus::Prepared);
     // Another SessionStart won the claim first: the run is prepared but already carries a session.
-    run.provider_session_id = Some("sess-winner".to_string());
+    run.agent_session_id = Some("sess-winner".to_string());
     let mut repos = FakeRepos::default();
     repos.seed_run(run.clone());
     let ctx = RunResolveCtx {
         task_id: "t1",
         task: &task,
         explicit_run_id_rejected: false,
-        provider_session_id: Some("sess-loser"),
+        agent_session_id: Some("sess-loser"),
         starts_session: true,
         agent: Agent::Claude,
         primary_run: Some(&run),
@@ -127,7 +127,7 @@ fn resolve_by_prepared_primary_loses_race_when_already_claimed() {
     // The loser changes 0 rows and falls through (Ok(None)) so lazy-create makes it a side run.
     assert!(resolve_by_prepared_primary(&ctx, &mut repos).unwrap().is_none());
     assert_eq!(
-        repos.get_task_run("run-1").unwrap().unwrap().provider_session_id.as_deref(),
+        repos.get_task_run("run-1").unwrap().unwrap().agent_session_id.as_deref(),
         Some("sess-winner")
     );
 }
@@ -141,7 +141,7 @@ fn resolve_by_lazy_create_rejects_without_session_id() {
         task_id: &task_id,
         task: &task,
         explicit_run_id_rejected: false,
-        provider_session_id: None,
+        agent_session_id: None,
         starts_session: true,
         agent: Agent::Claude,
         primary_run: None,
@@ -159,7 +159,7 @@ fn resolve_by_lazy_create_rejects_non_starting_event() {
         task_id: &task_id,
         task: &task,
         explicit_run_id_rejected: false,
-        provider_session_id: Some("sess-1"),
+        agent_session_id: Some("sess-1"),
         starts_session: false,
         agent: Agent::Claude,
         primary_run: None,
@@ -177,7 +177,7 @@ fn resolve_by_lazy_create_rejects_when_explicit_run_id_rejected() {
         task_id: &task_id,
         task: &task,
         explicit_run_id_rejected: true,
-        provider_session_id: Some("sess-1"),
+        agent_session_id: Some("sess-1"),
         starts_session: true,
         agent: Agent::Claude,
         primary_run: None,
@@ -196,7 +196,7 @@ fn resolve_by_lazy_create_rejects_closed_task() {
         task_id: &task_id,
         task: &task,
         explicit_run_id_rejected: false,
-        provider_session_id: Some("sess-1"),
+        agent_session_id: Some("sess-1"),
         starts_session: true,
         agent: Agent::Claude,
         primary_run: None,
@@ -214,7 +214,7 @@ fn resolve_by_lazy_create_creates_primary_when_none_exists() {
         task_id: &task_id,
         task: &task,
         explicit_run_id_rejected: false,
-        provider_session_id: Some("sess-1"),
+        agent_session_id: Some("sess-1"),
         starts_session: true,
         agent: Agent::Claude,
         primary_run: None,
@@ -237,7 +237,7 @@ fn resolve_by_lazy_create_creates_side_run_when_primary_exists() {
         task_id: &task_id,
         task: &task,
         explicit_run_id_rejected: false,
-        provider_session_id: Some("sess-1"),
+        agent_session_id: Some("sess-1"),
         starts_session: true,
         agent: Agent::Claude,
         primary_run: Some(&existing_primary),

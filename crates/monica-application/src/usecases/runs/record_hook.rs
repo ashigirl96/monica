@@ -61,7 +61,7 @@ impl HookReport {
     }
 }
 
-/// Apply a decoded agent [`AgentSignal`] to the run it belongs to. The provider payload was already
+/// Apply a decoded agent [`AgentSignal`] to the run it belongs to. The agent payload was already
 /// interpreted by the adapter decoder; this use case only resolves which run the signal targets,
 /// asks the domain ([`TaskRun::decide`](monica_domain::TaskRun::decide)) what to record, and persists
 /// it. `signal == None` means the decoder found nothing actionable (a non-blocking tool call, an
@@ -87,7 +87,7 @@ where
     // `session_entered_waiting` detects the entering edge so notifications can fire for all tabs.
     let mut session_entered_waiting = false;
     let mut session_wait_reason: Option<TaskRunWaitReason> = None;
-    let provider_session_id = signal.session_id.as_deref();
+    let agent_session_id = signal.agent_session_id.as_deref();
 
     if let Some(session_id) = ctx.terminal_session_id {
         match signal.kind.agent_session_effect() {
@@ -100,7 +100,7 @@ where
                     session_id,
                     Some(status),
                     reason,
-                    provider_session_id,
+                    agent_session_id,
                 )?;
                 if changed && status == AgentSessionStatus::WaitingForUser {
                     session_entered_waiting = true;
@@ -117,7 +117,7 @@ where
         ctx.task_id,
         safe_task_run_id,
         unsafe_task_run_id,
-        provider_session_id,
+        agent_session_id,
         signal.starts_session(),
         agent,
     )?;
@@ -176,7 +176,7 @@ where
                     wait_reason: wait_update,
                     event_label,
                     at: &at,
-                    provider_session_id: provider_session_id.filter(|_| plan.stamp_session),
+                    agent_session_id: agent_session_id.filter(|_| plan.stamp_session),
                     terminal_tab_id: ctx.terminal_tab_id.filter(|_| plan.stamp_tab),
                     metadata_raw: Some(metadata_raw),
                     plan_file_path: signal.plan_file_path(),
@@ -257,7 +257,7 @@ pub(in crate::usecases) struct RunResolveCtx<'a> {
     pub(in crate::usecases) task_id: &'a str,
     pub(in crate::usecases) task: &'a Task,
     pub(in crate::usecases) explicit_run_id_rejected: bool,
-    pub(in crate::usecases) provider_session_id: Option<&'a str>,
+    pub(in crate::usecases) agent_session_id: Option<&'a str>,
     /// Whether the signal proves a user is actively driving a session (session start / first
     /// prompt) — only such signals may claim or create a run.
     pub(in crate::usecases) starts_session: bool,
@@ -284,7 +284,7 @@ fn resolve_hook_run<R>(
     task_id: Option<&str>,
     explicit_run_id: Option<&str>,
     explicit_run_id_rejected: bool,
-    provider_session_id: Option<&str>,
+    agent_session_id: Option<&str>,
     starts_session: bool,
     agent: Agent,
 ) -> ApplicationResult<ResolvedRun>
@@ -310,7 +310,7 @@ where
         task_id,
         task: &task,
         explicit_run_id_rejected,
-        provider_session_id,
+        agent_session_id,
         starts_session,
         agent,
         primary_run: primary_run.as_ref(),
@@ -336,7 +336,7 @@ pub(in crate::usecases) fn resolve_by_session<R>(
 where
     R: TaskStore + TaskRunStore,
 {
-    let Some(session_id) = ctx.provider_session_id else {
+    let Some(session_id) = ctx.agent_session_id else {
         return Ok(None);
     };
     match repos.find_task_run_by_session(ctx.task_id, session_id)? {
@@ -360,16 +360,16 @@ where
     }
     // No session id to stamp (e.g. the Run-button flow before its first hook): nothing to claim
     // and nothing another session could clobber, so keep the snapshot behavior.
-    let Some(session_id) = ctx.provider_session_id else {
+    let Some(session_id) = ctx.agent_session_id else {
         return Ok(Some(ResolvedRun::linked(Some(run.clone()))));
     };
     // Atomic claim: only the start whose guarded UPDATE lands keeps the prepared run. A loser
     // changes 0 rows and falls through to lazy-create as a side run.
     if repos.claim_prepared_run(&run.id, session_id)? {
-        // The claim only set `provider_session_id`; reflect it on the snapshot we already hold
+        // The claim only set `agent_session_id`; reflect it on the snapshot we already hold
         // (avoiding a re-read) so the observation that follows sees the claimed session.
         let mut claimed = run.clone();
-        claimed.provider_session_id = Some(session_id.to_string());
+        claimed.agent_session_id = Some(session_id.to_string());
         Ok(Some(ResolvedRun::linked(Some(claimed))))
     } else {
         Ok(None)
@@ -383,7 +383,7 @@ pub(in crate::usecases) fn resolve_by_lazy_create<R>(
 where
     R: TaskStore + TaskRunStore,
 {
-    if ctx.provider_session_id.is_none()
+    if ctx.agent_session_id.is_none()
         || !ctx.starts_session
         || ctx.explicit_run_id_rejected
         || ctx.task.status == TaskStatus::Closed

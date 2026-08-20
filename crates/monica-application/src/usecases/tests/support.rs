@@ -31,13 +31,13 @@ use crate::{
     TerminalStateSnapshot,
 };
 // --- Agent-signal test builders -------------------------------------------------------------------
-// The use-case tests drive `record_hook` with typed `AgentSignal`s (the provider JSON -> signal
+// The use-case tests drive `record_hook` with typed `AgentSignal`s (the agent JSON -> signal
 // decoding is covered by the adapter decoder's own tests in `monica-adapters::agents`). `raw_stdin` is
 // irrelevant to these assertions, so the shim feeds a constant.
 
 fn mk_signal(session: Option<&str>, label: &str, kind: SignalKind) -> AgentSignal {
     AgentSignal {
-        session_id: session.map(str::to_string),
+        agent_session_id: session.map(str::to_string),
         event_label: Some(label.to_string()),
         kind,
     }
@@ -376,7 +376,7 @@ fn is_live_driven_run(run: &TaskRun) -> bool {
     matches!(
         run.status,
         TaskRunStatus::Running | TaskRunStatus::WaitingForUser
-    ) || (run.status == TaskRunStatus::SettingUp && run.provider_session_id.is_some())
+    ) || (run.status == TaskRunStatus::SettingUp && run.agent_session_id.is_some())
 }
 
 // Mutating TaskRunStore ops as `&self` inherent helpers, shared by the trait impl and `FakeUow`.
@@ -393,7 +393,7 @@ impl FakeRepos {
             worktree_path: new.worktree_path,
             status: TaskRunStatus::SettingUp,
             wait_reason: None,
-            provider_session_id: None,
+            agent_session_id: None,
             terminal_tab_id: None,
             last_event_name: None,
             last_event_at: None,
@@ -461,8 +461,8 @@ impl FakeRepos {
         if let Some(wait_reason) = observation.wait_reason {
             run.wait_reason = wait_reason;
         }
-        if let Some(session) = observation.provider_session_id {
-            run.provider_session_id = Some(session.to_string());
+        if let Some(session) = observation.agent_session_id {
+            run.agent_session_id = Some(session.to_string());
         }
         if let Some(tab) = observation.terminal_tab_id {
             run.terminal_tab_id = Some(tab.to_string());
@@ -531,7 +531,7 @@ impl TaskRunStore for FakeRepos {
     fn find_task_run_by_session(
         &self,
         task_id: &str,
-        provider_session_id: &str,
+        agent_session_id: &str,
     ) -> Result<Option<TaskRun>> {
         Ok(self
             .state
@@ -540,7 +540,7 @@ impl TaskRunStore for FakeRepos {
             .values()
             .filter(|run| {
                 run.task_id == task_id
-                    && run.provider_session_id.as_deref() == Some(provider_session_id)
+                    && run.agent_session_id.as_deref() == Some(agent_session_id)
             })
             // mirrors sqlite: most recently observed first, run number as tie-break
             .max_by_key(|run| (run.last_event_at.clone(), run_number(&run.id)))
@@ -584,14 +584,14 @@ impl TaskRunStore for FakeRepos {
         self.do_settle_task_run_if_live(task_run_id, task_id)
     }
 
-    fn claim_prepared_run(&self, task_run_id: &str, provider_session_id: &str) -> Result<bool> {
-        // Mirror the SQLite guard: WHERE id=? AND status='prepared' AND provider_session_id IS NULL.
+    fn claim_prepared_run(&self, task_run_id: &str, agent_session_id: &str) -> Result<bool> {
+        // Mirror the SQLite guard: WHERE id=? AND status='prepared' AND agent_session_id IS NULL.
         let mut state = self.state.borrow_mut();
         let Some(run) = state.runs.get_mut(task_run_id) else {
             return Ok(false);
         };
-        if run.status == TaskRunStatus::Prepared && run.provider_session_id.is_none() {
-            run.provider_session_id = Some(provider_session_id.to_string());
+        if run.status == TaskRunStatus::Prepared && run.agent_session_id.is_none() {
+            run.agent_session_id = Some(agent_session_id.to_string());
             Ok(true)
         } else {
             Ok(false)
@@ -817,9 +817,9 @@ impl TaskRunStore for FakeUow<'_> {
     fn find_task_run_by_session(
         &self,
         task_id: &str,
-        provider_session_id: &str,
+        agent_session_id: &str,
     ) -> Result<Option<TaskRun>> {
-        self.inner.find_task_run_by_session(task_id, provider_session_id)
+        self.inner.find_task_run_by_session(task_id, agent_session_id)
     }
 
     fn find_task_run_by_terminal_tab(&self, terminal_tab_id: &str) -> Result<Option<TaskRun>> {
@@ -838,8 +838,8 @@ impl TaskRunStore for FakeUow<'_> {
         self.inner.do_settle_task_run_if_live(task_run_id, task_id)
     }
 
-    fn claim_prepared_run(&self, task_run_id: &str, provider_session_id: &str) -> Result<bool> {
-        self.inner.claim_prepared_run(task_run_id, provider_session_id)
+    fn claim_prepared_run(&self, task_run_id: &str, agent_session_id: &str) -> Result<bool> {
+        self.inner.claim_prepared_run(task_run_id, agent_session_id)
     }
 
     fn create_lazy_run_for_session(
@@ -1342,7 +1342,7 @@ pub(crate) fn make_run(id: &str, task_id: &str, status: TaskRunStatus) -> TaskRu
         worktree_path: None,
         status,
         wait_reason: None,
-        provider_session_id: None,
+        agent_session_id: None,
         terminal_tab_id: None,
         last_event_name: None,
         last_event_at: None,
@@ -1380,7 +1380,7 @@ impl TerminalSessionRepository for FakeRepos {
             status: TerminalSessionStatus::Starting,
             agent_status: None,
             agent_wait_reason: None,
-            provider_session_id: None,
+            agent_session_id: None,
             pid: None,
             rows: new.rows,
             cols: new.cols,
@@ -1422,13 +1422,13 @@ impl TerminalSessionRepository for FakeRepos {
         id: &str,
         agent_status: Option<AgentSessionStatus>,
         agent_wait_reason: Option<TaskRunWaitReason>,
-        provider_session_id: Option<&str>,
+        agent_session_id: Option<&str>,
     ) -> Result<bool> {
         if let Some(s) = self.state.borrow_mut().terminal_sessions.iter_mut().find(|s| s.id == id) {
             let changed = s.agent_status != agent_status || s.agent_wait_reason != agent_wait_reason;
             s.agent_status = agent_status;
             s.agent_wait_reason = agent_wait_reason;
-            s.provider_session_id = provider_session_id.map(str::to_string);
+            s.agent_session_id = agent_session_id.map(str::to_string);
             return Ok(changed);
         }
         Ok(false)
@@ -1522,7 +1522,7 @@ impl crate::ports::ExplanationStore for FakeRepos {
             title: new.title,
             summary: new.summary,
             mode: new.mode,
-            provider_session_id: new.provider_session_id,
+            agent_session_id: new.agent_session_id,
             terminal_session_id: new.terminal_session_id,
             created_at: "2026-07-11T00:00:00.000Z".to_string(),
             repo_name: None,
@@ -1796,7 +1796,7 @@ pub(crate) fn driven_run(id: &str, task_id: &str, tab: &str) -> TaskRun {
         worktree_path: None,
         status: TaskRunStatus::Running,
         wait_reason: None,
-        provider_session_id: Some("sess".to_string()),
+        agent_session_id: Some("sess".to_string()),
         terminal_tab_id: Some(tab.to_string()),
         last_event_name: None,
         last_event_at: None,
@@ -1819,7 +1819,7 @@ pub(crate) fn fake_session(id: &str, tab: Option<&str>, status: TerminalSessionS
         status,
         agent_status: None,
         agent_wait_reason: None,
-        provider_session_id: None,
+        agent_session_id: None,
         pid: None,
         rows: 24,
         cols: 80,

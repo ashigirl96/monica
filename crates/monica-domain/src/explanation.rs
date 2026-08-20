@@ -34,7 +34,7 @@ pub struct Explanation {
     pub title: String,
     pub summary: Option<String>,
     pub mode: ExplanationMode,
-    pub provider_session_id: String,
+    pub agent_session_id: String,
     pub terminal_session_id: String,
     pub created_at: String,
     pub repo_name: Option<String>,
@@ -60,7 +60,7 @@ pub struct NewExplanation {
     pub title: String,
     pub summary: Option<String>,
     pub mode: ExplanationMode,
-    pub provider_session_id: String,
+    pub agent_session_id: String,
     pub terminal_session_id: String,
     pub repo_name: Option<String>,
 }

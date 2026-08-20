@@ -12,16 +12,16 @@ pub enum Continuation {
     Compact,
 }
 
-/// A provider-agnostic lifecycle signal decoded from a raw agent hook event. Every provider-specific
+/// An agent-agnostic lifecycle signal decoded from a raw agent hook event. Every agent-specific
 /// concern — event-name strings, JSON field layout, which events a given agent emits — is resolved by
 /// the adapter decoder; the domain state machine and the stores below it only ever see this type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentSignal {
-    /// The provider session id the event carried, when present. Needed on *every* signal (not just
+    /// The agent session id the event carried, when present. Needed on *every* signal (not just
     /// session start) so the late/out-of-order protection rules can tell a straggler from the dead
     /// session apart from fresh evidence of life.
-    pub session_id: Option<String>,
-    /// The opaque provider event name (e.g. `"Stop"`). Persisted as `last_event_name` and surfaced
+    pub agent_session_id: Option<String>,
+    /// The opaque agent event name (e.g. `"Stop"`). Persisted as `last_event_name` and surfaced
     /// in debug logs only — the state machine never matches on it.
     pub event_label: Option<String>,
     pub kind: SignalKind,
@@ -154,7 +154,7 @@ pub struct RunObservationPlan {
 }
 
 impl TaskRun {
-    /// Reconcile a provider-agnostic [`AgentSignal`] against this run's current state, yielding the
+    /// Reconcile an agent-agnostic [`AgentSignal`] against this run's current state, yielding the
     /// observation to record. Pure: the caller persists the result and the store re-checks the same
     /// protection rules atomically.
     pub fn decide(&self, signal: &AgentSignal) -> RunObservationPlan {
@@ -219,8 +219,8 @@ impl TaskRun {
     /// by a session the run has never met is new evidence of life, so it may revive a stopped run
     /// and clears a tool wait whose question died with its session.
     fn transition_is_protected(&self, signal: &AgentSignal, next: HookTransition) -> bool {
-        let known = self.provider_session_id.as_deref();
-        let event = signal.session_id.as_deref();
+        let known = self.agent_session_id.as_deref();
+        let event = signal.agent_session_id.as_deref();
         if next.status.is_terminal() {
             return matches!((known, event), (Some(known), Some(event)) if known != event);
         }
@@ -272,7 +272,7 @@ mod tests {
             worktree_path: None,
             status,
             wait_reason,
-            provider_session_id: session.map(str::to_string),
+            agent_session_id: session.map(str::to_string),
             terminal_tab_id: None,
             last_event_name: None,
             last_event_at: None,
@@ -286,7 +286,7 @@ mod tests {
 
     fn signal(session: Option<&str>, kind: SignalKind) -> AgentSignal {
         AgentSignal {
-            session_id: session.map(str::to_string),
+            agent_session_id: session.map(str::to_string),
             event_label: None,
             kind,
         }

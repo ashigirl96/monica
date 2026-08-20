@@ -69,7 +69,7 @@ pub(super) fn list_driven_task_runs_with_tab(conn: &Connection) -> Result<Vec<Ta
         "SELECT {TASK_RUN_COLUMNS} FROM task_runs
          WHERE terminal_tab_id IS NOT NULL
            AND (status IN ('{}', '{}')
-                OR (status = '{}' AND provider_session_id IS NOT NULL))",
+                OR (status = '{}' AND agent_session_id IS NOT NULL))",
         TaskRunStatus::Running.as_str(),
         TaskRunStatus::WaitingForUser.as_str(),
         TaskRunStatus::SettingUp.as_str(),
@@ -100,7 +100,7 @@ pub(super) fn settle_task_run_if_live_in(
                    updated_at = {SET_NOW}
              WHERE id = ?1 AND task_id = ?2
                AND (status IN ('{}', '{}')
-                    OR (status = '{}' AND provider_session_id IS NOT NULL))",
+                    OR (status = '{}' AND agent_session_id IS NOT NULL))",
             TaskRunStatus::Stopped.as_str(),
             TaskRunStatus::Running.as_str(),
             TaskRunStatus::WaitingForUser.as_str(),
@@ -149,7 +149,7 @@ pub(super) fn record_task_run_observation_in(
     let release_stop = observation.release_stop;
     let tool_waits =
         sql_literal_list(TaskRunWaitReason::TOOL_WAITS.iter().map(|r| r.as_str()));
-    // `?6 IS NULL OR provider_session_id IS ?6` scopes the generic-wait guards to events
+    // `?6 IS NULL OR agent_session_id IS ?6` scopes the generic-wait guards to events
     // from the run's recorded session (or anonymous ones); a session the run never saw is
     // fresh evidence of life and passes through. A terminal verdict (?11) is scoped the
     // other way: it belongs to the session that died, so it is refused when it arrives
@@ -160,9 +160,9 @@ pub(super) fn record_task_run_observation_in(
     let awaiting_prompt = TaskRunWaitReason::AwaitingPrompt.as_str();
     let protected = format!(
         "(?11 AND ?6 IS NOT NULL
-              AND provider_session_id IS NOT NULL
-              AND provider_session_id != ?6)
-         OR (?10 AND (?6 IS NULL OR provider_session_id IS ?6)
+              AND agent_session_id IS NOT NULL
+              AND agent_session_id != ?6)
+         OR (?10 AND (?6 IS NULL OR agent_session_id IS ?6)
                  AND (status = '{stopped}'
                       OR (status = '{waiting_for_user}'
                           AND wait_reason IN ({tool_waits}))))
@@ -183,8 +183,8 @@ pub(super) fn record_task_run_observation_in(
                     last_event_at = ?5,
                     -- a protected straggler must not re-stamp its dead session over the
                     -- successor's id, or its next straggler would look same-session
-                    provider_session_id = CASE WHEN {protected} THEN provider_session_id
-                                               ELSE COALESCE(?6, provider_session_id) END,
+                    agent_session_id = CASE WHEN {protected} THEN agent_session_id
+                                               ELSE COALESCE(?6, agent_session_id) END,
                     terminal_tab_id = COALESCE(?7, terminal_tab_id),
                     pending_stop = CASE
                         WHEN ?12 AND status = '{running}' THEN 1
@@ -202,7 +202,7 @@ pub(super) fn record_task_run_observation_in(
             wait_reason,
             observation.event_label,
             observation.at,
-            observation.provider_session_id,
+            observation.agent_session_id,
             observation.terminal_tab_id,
             observation.metadata_raw,
             task_run_id,
@@ -344,12 +344,12 @@ pub(super) fn get_task_run(conn: &Connection, id: &str) -> Result<Option<TaskRun
 pub(super) fn find_task_run_by_session(
     conn: &Connection,
     task_id: &str,
-    provider_session_id: &str,
+    agent_session_id: &str,
 ) -> Result<Option<TaskRun>> {
     find_latest_observed_task_run(
         conn,
-        "task_id = ?1 AND provider_session_id = ?2",
-        params![task_id, provider_session_id],
+        "task_id = ?1 AND agent_session_id = ?2",
+        params![task_id, agent_session_id],
     )
 }
 
@@ -383,18 +383,18 @@ pub(super) fn list_task_runs_for_task(conn: &Connection, task_id: &str) -> Resul
 pub(super) fn claim_prepared_run(
     conn: &Connection,
     task_run_id: &str,
-    provider_session_id: &str,
+    agent_session_id: &str,
 ) -> Result<bool> {
     let affected = conn.execute(
         &format!(
             "UPDATE task_runs
-               SET provider_session_id = ?2, updated_at = {SET_NOW}
+               SET agent_session_id = ?2, updated_at = {SET_NOW}
              WHERE id = ?1
                AND status = '{}'
-               AND provider_session_id IS NULL",
+               AND agent_session_id IS NULL",
             TaskRunStatus::Prepared.as_str(),
         ),
-        params![task_run_id, provider_session_id],
+        params![task_run_id, agent_session_id],
     )?;
     Ok(affected == 1)
 }
@@ -434,9 +434,9 @@ impl TaskRunStore for SqliteStore {
     fn find_task_run_by_session(
         &self,
         task_id: &str,
-        provider_session_id: &str,
+        agent_session_id: &str,
     ) -> Result<Option<TaskRun>> {
-        find_task_run_by_session(self.conn(), task_id, provider_session_id)
+        find_task_run_by_session(self.conn(), task_id, agent_session_id)
     }
 
     fn find_task_run_by_terminal_tab(&self, terminal_tab_id: &str) -> Result<Option<TaskRun>> {
@@ -458,8 +458,8 @@ impl TaskRunStore for SqliteStore {
         Ok(settled)
     }
 
-    fn claim_prepared_run(&self, task_run_id: &str, provider_session_id: &str) -> Result<bool> {
-        claim_prepared_run(self.conn(), task_run_id, provider_session_id)
+    fn claim_prepared_run(&self, task_run_id: &str, agent_session_id: &str) -> Result<bool> {
+        claim_prepared_run(self.conn(), task_run_id, agent_session_id)
     }
 
     fn create_lazy_run_for_session(

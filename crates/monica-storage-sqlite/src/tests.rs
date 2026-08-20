@@ -50,7 +50,7 @@ fn raw_json_columns_survive_sqlite_round_trip() {
             wait_reason: Some(None),
             event_label: Some("PreToolUse"),
             at: "2026-06-02T00:00:00.000Z",
-            provider_session_id: None,
+            agent_session_id: None,
             terminal_tab_id: None,
             metadata_raw: Some(&metadata),
             plan_file_path: None,
@@ -239,7 +239,7 @@ fn task_run_observation_records_wait_reason_and_event_metadata() {
             wait_reason: Some(Some(TaskRunWaitReason::AskUserQuestion)),
             event_label: Some("PreToolUse"),
             at: "2026-06-02T00:00:00.000Z",
-            provider_session_id: Some("provider-session"),
+            agent_session_id: Some("provider-session"),
             terminal_tab_id: Some("tab-1"),
             metadata_raw: Some(&metadata),
             plan_file_path: None,
@@ -252,7 +252,7 @@ fn task_run_observation_records_wait_reason_and_event_metadata() {
     let run = db.get_task_run(&run.id).unwrap().unwrap();
     assert_eq!(run.status, TaskRunStatus::WaitingForUser);
     assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AskUserQuestion));
-    assert_eq!(run.provider_session_id.as_deref(), Some("provider-session"));
+    assert_eq!(run.agent_session_id.as_deref(), Some("provider-session"));
     assert_eq!(run.terminal_tab_id.as_deref(), Some("tab-1"));
 }
 
@@ -276,7 +276,7 @@ fn task_run_observation_retains_plan_file_path_across_later_hooks() {
         wait_reason: Some(Some(TaskRunWaitReason::ExitPlanMode)),
         event_label: Some("PreToolUse"),
         at,
-        provider_session_id: None,
+        agent_session_id: None,
         terminal_tab_id: None,
         metadata_raw: None,
         plan_file_path: path,
@@ -303,7 +303,7 @@ fn task_run_observation_retains_plan_file_path_across_later_hooks() {
             wait_reason: Some(None),
             event_label: Some("UserPromptSubmit"),
             at: "2026-06-02T00:01:00.000Z",
-            provider_session_id: None,
+            agent_session_id: None,
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: None,
@@ -360,7 +360,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
         wait_reason: Some(Some(TaskRunWaitReason::AwaitingPrompt)),
         event_label: Some("Stop"),
         at: "2026-06-02T00:00:00.000Z",
-        provider_session_id: None,
+        agent_session_id: None,
         terminal_tab_id: None,
         metadata_raw: None,
         plan_file_path: None,
@@ -393,7 +393,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
                 wait_reason: Some(Some(reason)),
                 event_label: Some("PreToolUse"),
                 at: "2026-06-02T00:00:00.000Z",
-                provider_session_id: None,
+                agent_session_id: None,
                 terminal_tab_id: None,
                 metadata_raw: None,
                 plan_file_path: None,
@@ -419,7 +419,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
             wait_reason: None,
             event_label: Some("UserPromptSubmit"),
             at: "2026-06-02T00:00:00.000Z",
-            provider_session_id: Some("sess-old"),
+            agent_session_id: Some("sess-old"),
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: None,
@@ -435,7 +435,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
         wait_reason: Some(Some(TaskRunWaitReason::AwaitingPrompt)),
         event_label: Some(event),
         at: "2026-06-02T00:00:00.000Z",
-        provider_session_id: Some(session),
+        agent_session_id: Some(session),
         terminal_tab_id: None,
         metadata_raw: None,
         plan_file_path: None,
@@ -456,7 +456,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
     let run = db.get_task_run(&relaunched.id).unwrap().unwrap();
     assert_eq!(run.status, TaskRunStatus::WaitingForUser);
     assert_eq!(run.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
-    assert_eq!(run.provider_session_id.as_deref(), Some("sess-new"));
+    assert_eq!(run.agent_session_id.as_deref(), Some("sess-new"));
 
     // A real prompt does revive a stopped run: only the generic wait is refused.
     let revived = start_run(&mut db);
@@ -469,7 +469,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
             wait_reason: Some(None),
             event_label: Some("UserPromptSubmit"),
             at: "2026-06-02T00:00:00.000Z",
-            provider_session_id: None,
+            agent_session_id: None,
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: None,
@@ -493,7 +493,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
         wait_reason: Some(None),
         event_label: Some(event),
         at: "2026-06-02T00:00:00.000Z",
-        provider_session_id: session,
+        agent_session_id: session,
         terminal_tab_id: None,
         metadata_raw: None,
         plan_file_path: None,
@@ -509,7 +509,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
                 wait_reason: None,
                 event_label: Some("UserPromptSubmit"),
                 at: "2026-06-02T00:00:00.000Z",
-                provider_session_id: Some("sess-new"),
+                agent_session_id: Some("sess-new"),
                 terminal_tab_id: None,
                 metadata_raw: None,
                 plan_file_path: None,
@@ -528,7 +528,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
             .unwrap();
             let run = db.get_task_run(&survivor.id).unwrap().unwrap();
             assert_eq!(run.status, TaskRunStatus::Running, "{event}");
-            assert_eq!(run.provider_session_id.as_deref(), Some("sess-new"), "{event}");
+            assert_eq!(run.agent_session_id.as_deref(), Some("sess-new"), "{event}");
         }
         db.record_task_run_observation(
             &survivor.id,
@@ -549,7 +549,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
             wait_reason: None,
             event_label: Some("UserPromptSubmit"),
             at: "2026-06-02T00:00:00.000Z",
-            provider_session_id: Some("sess-new"),
+            agent_session_id: Some("sess-new"),
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: None,
@@ -590,7 +590,7 @@ fn record_observation(
             }),
             event_label: Some(event),
             at: "2026-06-02T00:00:00.000Z",
-            provider_session_id: Some("sess-1"),
+            agent_session_id: Some("sess-1"),
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: None,
@@ -697,7 +697,7 @@ fn task_run_observation_pending_stop_cleared_by_boundary_and_settlement() {
             wait_reason: Some(None),
             event_label: Some("SessionEnd"),
             at: "2026-06-02T00:00:00.000Z",
-            provider_session_id: Some("sess-1"),
+            agent_session_id: Some("sess-1"),
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: None,
@@ -730,7 +730,7 @@ fn task_run_observation_keeps_existing_tab_and_session_on_none() {
             wait_reason: None,
             event_label: Some("SessionStart"),
             at: "2026-06-02T00:00:00.000Z",
-            provider_session_id: Some("sess-1"),
+            agent_session_id: Some("sess-1"),
             terminal_tab_id: Some("tab-1"),
             metadata_raw: None,
             plan_file_path: None,
@@ -746,7 +746,7 @@ fn task_run_observation_keeps_existing_tab_and_session_on_none() {
             wait_reason: None,
             event_label: Some("Stop"),
             at: "2026-06-02T00:00:01.000Z",
-            provider_session_id: None,
+            agent_session_id: None,
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: None,
@@ -757,7 +757,7 @@ fn task_run_observation_keeps_existing_tab_and_session_on_none() {
     .unwrap();
 
     let run = db.get_task_run(&run.id).unwrap().unwrap();
-    assert_eq!(run.provider_session_id.as_deref(), Some("sess-1"));
+    assert_eq!(run.agent_session_id.as_deref(), Some("sess-1"));
     assert_eq!(run.terminal_tab_id.as_deref(), Some("tab-1"));
 }
 
@@ -773,7 +773,7 @@ fn find_task_run_by_terminal_tab_returns_latest_observed_run_in_tab() {
                 wait_reason: None,
                 event_label: Some("SessionStart"),
                 at,
-                provider_session_id: Some(session),
+                agent_session_id: Some(session),
                 terminal_tab_id: Some("tab-1"),
                 metadata_raw: None,
                 plan_file_path: None,
@@ -844,7 +844,7 @@ fn find_task_run_by_session_is_scoped_to_task() {
             wait_reason: None,
             event_label: Some("SessionStart"),
             at: "2026-06-02T00:00:00.000Z",
-            provider_session_id: Some("sess-shared"),
+            agent_session_id: Some("sess-shared"),
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: None,
@@ -884,7 +884,7 @@ fn task_summaries_count_side_runs_excluding_primary_and_sessionless_failures() {
                 wait_reason: None,
                 event_label: None,
                 at: "2026-06-02T00:00:00.000Z",
-                provider_session_id: Some(session),
+                agent_session_id: Some(session),
                 terminal_tab_id: None,
                 metadata_raw: None,
                 plan_file_path: None,
@@ -908,7 +908,7 @@ fn task_summaries_count_side_runs_excluding_primary_and_sessionless_failures() {
                     wait_reason: Some(Some(reason)),
                     event_label: None,
                     at: "2026-06-02T00:00:00.000Z",
-                    provider_session_id: Some(session),
+                    agent_session_id: Some(session),
                     terminal_tab_id: None,
                     metadata_raw: None,
                     plan_file_path: None,
@@ -975,7 +975,7 @@ fn task_summaries_fall_back_to_latest_run_when_primary_pointer_dangles() {
             wait_reason: None,
             event_label: Some("SessionStart"),
             at: "2026-06-02T00:00:00.000Z",
-            provider_session_id: Some("sess-1"),
+            agent_session_id: Some("sess-1"),
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: None,
@@ -1048,7 +1048,7 @@ fn task_summaries_expose_has_plan_from_the_primary_run() {
             wait_reason: Some(Some(TaskRunWaitReason::ExitPlanMode)),
             event_label: Some("PreToolUse"),
             at: "2026-06-02T00:00:00.000Z",
-            provider_session_id: Some("sess-plan"),
+            agent_session_id: Some("sess-plan"),
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: Some("/Users/me/.claude/plans/hazy-wiggling-salamander.md"),
@@ -1079,7 +1079,7 @@ fn task_summaries_expose_has_plan_from_the_primary_run() {
             wait_reason: Some(None),
             event_label: Some("UserPromptSubmit"),
             at: "2026-06-02T00:01:00.000Z",
-            provider_session_id: None,
+            agent_session_id: None,
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: None,
@@ -1643,7 +1643,7 @@ fn settle_task_run_if_live_only_stops_session_driven_runs() {
                 wait_reason: None,
                 event_label: None,
                 at: "2026-06-02T00:00:00.000Z",
-                provider_session_id: Some("sess-1"),
+                agent_session_id: Some("sess-1"),
                 terminal_tab_id: None,
                 metadata_raw: None,
                 plan_file_path: None,
@@ -1684,7 +1684,7 @@ fn settle_task_run_if_live_only_stops_session_driven_runs() {
             wait_reason: None,
             event_label: Some("SessionStart"),
             at: "2026-06-02T00:00:00.000Z",
-            provider_session_id: Some("sess-2"),
+            agent_session_id: Some("sess-2"),
             terminal_tab_id: Some("tab-1"),
             metadata_raw: None,
             plan_file_path: None,
@@ -1748,7 +1748,7 @@ fn settle_task_run_if_live_survives_a_closed_task() {
             wait_reason: None,
             event_label: None,
             at: "2026-06-02T00:00:00.000Z",
-            provider_session_id: Some("sess-1"),
+            agent_session_id: Some("sess-1"),
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: None,
@@ -1792,7 +1792,7 @@ fn list_driven_task_runs_with_tab_returns_only_tab_pinned_session_driven_runs() 
                 wait_reason: None,
                 event_label: None,
                 at: "2026-06-02T00:00:00.000Z",
-                provider_session_id: session,
+                agent_session_id: session,
                 terminal_tab_id: tab,
                 metadata_raw: None,
                 plan_file_path: None,
@@ -2312,7 +2312,7 @@ fn claim_prepared_run_is_won_by_a_single_session() {
         "a second claim on an already-claimed run loses"
     );
     assert_eq!(
-        db.get_task_run(&run.id).unwrap().unwrap().provider_session_id.as_deref(),
+        db.get_task_run(&run.id).unwrap().unwrap().agent_session_id.as_deref(),
         Some("session-A")
     );
 }
@@ -2338,7 +2338,7 @@ fn claim_prepared_run_refuses_non_prepared_run() {
         .get_task_run(&run.id)
         .unwrap()
         .unwrap()
-        .provider_session_id
+        .agent_session_id
         .is_none());
 }
 

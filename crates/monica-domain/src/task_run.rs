@@ -40,7 +40,7 @@ pub struct TaskRun {
     pub worktree_path: Option<String>,
     pub status: TaskRunStatus,
     pub wait_reason: Option<TaskRunWaitReason>,
-    pub provider_session_id: Option<String>,
+    pub agent_session_id: Option<String>,
     pub terminal_tab_id: Option<String>,
     pub last_event_name: Option<String>,
     pub last_event_at: Option<String>,
@@ -57,11 +57,11 @@ pub struct TaskRun {
 }
 
 impl TaskRun {
-    /// The provider session this run left behind when it stopped — present exactly when the run
+    /// The agent session this run left behind when it stopped — present exactly when the run
     /// can be reopened with the agent's resume command instead of preparing a fresh run.
     pub fn resumable_session(&self) -> Option<&str> {
         match self.status {
-            TaskRunStatus::Stopped => self.provider_session_id.as_deref(),
+            TaskRunStatus::Stopped => self.agent_session_id.as_deref(),
             _ => None,
         }
     }
@@ -104,7 +104,7 @@ mod tests {
             worktree_path: None,
             status,
             wait_reason: None,
-            provider_session_id: session.map(str::to_string),
+            agent_session_id: session.map(str::to_string),
             terminal_tab_id: None,
             last_event_name: None,
             last_event_at: None,

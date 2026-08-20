@@ -62,11 +62,11 @@ impl<B: Backend> ExplanationService<'_, B> {
                 ))
             })?;
 
-        let provider_session_id =
-            session.provider_session_id.ok_or_else(|| {
+        let agent_session_id =
+            session.agent_session_id.ok_or_else(|| {
                 ApplicationError::validation(format!(
                     "terminal session {terminal_session_id} has no active agent session \
-                     (provider_session_id is null)"
+                     (agent_session_id is null)"
                 ))
             })?;
 
@@ -76,7 +76,7 @@ impl<B: Backend> ExplanationService<'_, B> {
             title: title.to_string(),
             summary: summary.map(str::to_string),
             mode,
-            provider_session_id,
+            agent_session_id,
             terminal_session_id: terminal_session_id.to_string(),
             repo_name,
         })?;

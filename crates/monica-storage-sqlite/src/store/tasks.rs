@@ -239,7 +239,7 @@ impl TaskBoardQuery for SqliteStore {
 	               latest_run.status AS task_run_status,
 	               latest_run.wait_reason AS task_run_wait_reason,
 	               latest_run.plan_file_path IS NOT NULL AS has_plan,
-	               latest_run.provider_session_id IS NOT NULL AS primary_has_session,
+	               latest_run.agent_session_id IS NOT NULL AS primary_has_session,
 	               latest_run.branch AS branch,
                (SELECT COUNT(*) FROM task_runs r
                  WHERE r.task_id = t.id AND r.id IS NOT latest_run.id
@@ -254,7 +254,7 @@ impl TaskBoardQuery for SqliteStore {
                (SELECT COUNT(*) FROM task_runs r
                  WHERE r.task_id = t.id AND r.id IS NOT latest_run.id
                    AND r.status = ?4
-                   AND r.provider_session_id IS NOT NULL) AS side_runs_failed
+                   AND r.agent_session_id IS NOT NULL) AS side_runs_failed
 	             FROM tasks t
              LEFT JOIN projects project
                ON project.id = t.project_id
