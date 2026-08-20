@@ -12,7 +12,6 @@ export function taskSummary(over: Partial<TaskSummaryRow>): TaskSummaryRow {
     task_run_status: null,
     task_run_wait_reason: null,
     has_plan: false,
-    has_memo: false,
     status: "ready",
     prepare_eligible: false,
     run_eligible: false,

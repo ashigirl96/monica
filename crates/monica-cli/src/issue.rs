@@ -198,7 +198,6 @@ mod tests {
             task_run_status: None,
             task_run_wait_reason: None,
             has_plan: false,
-            has_memo: false,
             status: DisplayStatus::Ready,
             prepare_eligible: true,
             run_eligible: true,
