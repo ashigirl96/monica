@@ -5,6 +5,7 @@
   "ignoreExportsUsedInFile": true,
   "ignoreBinaries": ["lefthook", "tsc", "tauri"],
   "ignoreDependencies": [
+    "@milkdown/kit",
     "tailwindcss",
     "tw-animate-css",
     "@tauri-apps/cli",

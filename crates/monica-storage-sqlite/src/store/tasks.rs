@@ -121,22 +121,6 @@ pub(super) fn set_primary_task_run(conn: &Connection, task_id: &str, task_run_id
     Ok(())
 }
 
-pub(super) fn task_memo_in(conn: &Connection, id: &str) -> Result<String> {
-    conn.query_row("SELECT memo FROM tasks WHERE id = ?1", [id], |r| r.get(0))
-        .map_err(|_| anyhow!("task not found: {id}"))
-}
-
-pub(super) fn update_task_memo_in(conn: &Connection, id: &str, memo: &str) -> Result<()> {
-    let affected = conn.execute(
-        &format!("UPDATE tasks SET memo = ?1, updated_at = {SET_NOW} WHERE id = ?2"),
-        params![memo, id],
-    )?;
-    if affected == 0 {
-        return Err(anyhow!("task not found: {id}"));
-    }
-    Ok(())
-}
-
 pub(super) fn update_task_status(conn: &Connection, id: &str, status: TaskStatus) -> Result<()> {
     let affected = conn.execute(
         &format!(
@@ -223,14 +207,6 @@ impl TaskStore for SqliteStore {
         update_task_status(self.conn(), id, status)
     }
 
-    fn task_memo(&self, id: &str) -> Result<String> {
-        task_memo_in(self.conn(), id)
-    }
-
-    fn update_task_memo(&self, id: &str, memo: &str) -> Result<()> {
-        update_task_memo_in(self.conn(), id, memo)
-    }
-
     fn mark_task(&mut self, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()> {
         let tx = self.conn_mut().transaction()?;
         mark_task_in(&tx, id, status, note)?;
@@ -264,7 +240,6 @@ impl TaskBoardQuery for SqliteStore {
 	               latest_run.wait_reason AS task_run_wait_reason,
 	               latest_run.plan_file_path IS NOT NULL AS has_plan,
 	               latest_run.provider_session_id IS NOT NULL AS primary_has_session,
-	               t.memo != '' AS has_memo,
 	               latest_run.branch AS branch,
                (SELECT COUNT(*) FROM task_runs r
                  WHERE r.task_id = t.id AND r.id IS NOT latest_run.id
@@ -328,7 +303,6 @@ impl TaskBoardQuery for SqliteStore {
                 .transpose()?;
             let has_plan: bool = row.get::<_, i64>("has_plan")? != 0;
             let primary_has_session: bool = row.get::<_, i64>("primary_has_session")? != 0;
-            let has_memo: bool = row.get::<_, i64>("has_memo")? != 0;
             let display_status = DisplayStatus::from_task_and_run(task_status, task_run_status);
             let github_issue_number: Option<i64> = row.get("github_issue_number")?;
             let github_issue_repo: Option<String> = row.get("github_issue_repo")?;
@@ -355,7 +329,6 @@ impl TaskBoardQuery for SqliteStore {
                 task_run_status,
                 task_run_wait_reason,
                 has_plan,
-                has_memo,
                 status: display_status,
                 prepare_eligible: display_status.prepare_eligible(),
                 run_eligible: display_status.run_eligible(),
