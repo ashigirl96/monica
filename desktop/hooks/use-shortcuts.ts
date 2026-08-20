@@ -148,7 +148,7 @@ export function useShortcuts() {
           const store = getDefaultStore();
           const sessionId = store.get(activeTerminalTabAtom)?.sessionId;
           if (!sessionId) return false;
-          const id = store.get(sessionStatusAtom)[sessionId]?.providerSessionId;
+          const id = store.get(sessionStatusAtom)[sessionId]?.agentSessionId;
           if (!id) return false;
           void navigator.clipboard.writeText(id).then(() => {
             pushInfoToast(`Session ID copied: ${id.slice(0, 8)}…`);

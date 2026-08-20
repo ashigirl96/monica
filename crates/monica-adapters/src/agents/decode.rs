@@ -5,7 +5,7 @@ use monica_application::{AgentDecoders, AgentEventDecoder};
 use monica_domain::{Agent, AgentSignal, Continuation, SignalKind, TaskRunWaitReason};
 
 /// The default [`AgentDecoders`] factory the runtime wires into the façade: it picks the per-agent
-/// [`AgentEventDecoder`] and exposes the opaque event label, keeping provider knowledge here.
+/// [`AgentEventDecoder`] and exposes the opaque event label, keeping agent knowledge here.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultAgentDecoders;
 
@@ -18,7 +18,7 @@ impl AgentDecoders for DefaultAgentDecoders {
     }
 }
 
-/// Claude Code hook-event decoder: raw Claude hook payload → provider-agnostic [`AgentSignal`].
+/// Claude Code hook-event decoder: raw Claude hook payload → agent-agnostic [`AgentSignal`].
 #[derive(Debug, Default, Clone, Copy)]
 struct ClaudeEventDecoder;
 
@@ -47,8 +47,8 @@ fn decoder_for(agent: Agent) -> &'static dyn AgentEventDecoder {
     }
 }
 
-/// The opaque provider event name, for logging an event the decoder declined to act on (e.g. a
-/// dropped non-blocking tool call, where [`AgentEventDecoder::decode`] returns `None`). Provider
+/// The opaque agent event name, for logging an event the decoder declined to act on (e.g. a
+/// dropped non-blocking tool call, where [`AgentEventDecoder::decode`] returns `None`). Agent
 /// field knowledge stays in this module rather than leaking into the driver's log line.
 fn event_label(raw: &[u8]) -> Option<String> {
     let text = std::str::from_utf8(raw).ok()?.trim();
@@ -70,12 +70,12 @@ fn decode_signal(agent: Agent, raw: &[u8]) -> Option<AgentSignal> {
         return None;
     }
 
-    let session_id = parsed
+    let agent_session_id = parsed
         .get("session_id")
         .and_then(Value::as_str)
         .map(str::to_string);
     Some(AgentSignal {
-        session_id,
+        agent_session_id,
         event_label: event_name.map(str::to_string),
         kind: signal_kind(agent, event_name, &parsed),
     })
@@ -344,7 +344,7 @@ mod tests {
     #[test]
     fn session_id_is_extracted() {
         let sig = decode_claude(json!({"hook_event_name": "Stop", "session_id": "s1"})).unwrap();
-        assert_eq!(sig.session_id.as_deref(), Some("s1"));
+        assert_eq!(sig.agent_session_id.as_deref(), Some("s1"));
     }
 
     #[test]

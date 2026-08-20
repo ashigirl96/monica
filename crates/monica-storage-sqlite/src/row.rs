@@ -43,7 +43,7 @@ pub(super) fn task_run_from_row(row: &Row<'_>) -> Result<TaskRun> {
         worktree_path: row.get("worktree_path")?,
         status: status.parse::<TaskRunStatus>()?,
         wait_reason: wait_reason.map(|s| s.parse()).transpose()?,
-        provider_session_id: row.get("provider_session_id")?,
+        agent_session_id: row.get("agent_session_id")?,
         terminal_tab_id: row.get("terminal_tab_id")?,
         last_event_name: row.get("last_event_name")?,
         last_event_at: row.get("last_event_at")?,

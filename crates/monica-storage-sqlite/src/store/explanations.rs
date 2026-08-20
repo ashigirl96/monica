@@ -16,7 +16,7 @@ fn explanation_from_row(row: &Row<'_>) -> Result<Explanation> {
         title: row.get("title")?,
         summary: row.get("summary")?,
         mode: mode.parse::<ExplanationMode>()?,
-        provider_session_id: row.get("provider_session_id")?,
+        agent_session_id: row.get("agent_session_id")?,
         terminal_session_id: row.get("terminal_session_id")?,
         created_at: row.get("created_at")?,
         repo_name: stored_repo_name.or_else(|| cwd.as_deref().and_then(repo_name_from_cwd)),
@@ -30,14 +30,14 @@ fn insert_explanation_in(
     conn.execute("INSERT INTO explanation_counter DEFAULT VALUES", [])?;
     let id = format!("expl-{}", conn.last_insert_rowid());
     conn.execute(
-        "INSERT INTO explanations (id, title, summary, mode, provider_session_id, terminal_session_id, repo_name)
+        "INSERT INTO explanations (id, title, summary, mode, agent_session_id, terminal_session_id, repo_name)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             id,
             new.title,
             new.summary,
             new.mode.as_str(),
-            new.provider_session_id,
+            new.agent_session_id,
             new.terminal_session_id,
             new.repo_name,
         ],
@@ -116,7 +116,7 @@ mod tests {
                 title: "test explanation".to_string(),
                 summary: Some("test summary".to_string()),
                 mode: ExplanationMode::Diff,
-                provider_session_id: "provider-123".to_string(),
+                agent_session_id: "agent-123".to_string(),
                 terminal_session_id: ts_id.clone(),
                 repo_name: Some("my-repo".to_string()),
             })
@@ -125,7 +125,7 @@ mod tests {
         assert_eq!(explanation.title, "test explanation");
         assert_eq!(explanation.summary.as_deref(), Some("test summary"));
         assert_eq!(explanation.mode, ExplanationMode::Diff);
-        assert_eq!(explanation.provider_session_id, "provider-123");
+        assert_eq!(explanation.agent_session_id, "agent-123");
         assert_eq!(explanation.terminal_session_id, ts_id);
         assert!(!explanation.created_at.is_empty());
         assert_eq!(explanation.repo_name.as_deref(), Some("my-repo"));
@@ -140,7 +140,7 @@ mod tests {
                 title: "no stored repo".to_string(),
                 summary: None,
                 mode: ExplanationMode::Diff,
-                provider_session_id: "p1".to_string(),
+                agent_session_id: "p1".to_string(),
                 terminal_session_id: ts_id,
                 repo_name: None,
             })
@@ -160,7 +160,7 @@ mod tests {
                 title: "worktree test".to_string(),
                 summary: None,
                 mode: ExplanationMode::Diff,
-                provider_session_id: "p1".to_string(),
+                agent_session_id: "p1".to_string(),
                 terminal_session_id: ts_id,
                 repo_name: None,
             })
@@ -175,7 +175,7 @@ mod tests {
             title: "orphan".to_string(),
             summary: None,
             mode: ExplanationMode::Diff,
-            provider_session_id: "p1".to_string(),
+            agent_session_id: "p1".to_string(),
             terminal_session_id: "ts-nonexistent".to_string(),
             repo_name: None,
         });
@@ -191,7 +191,7 @@ mod tests {
                 title: "first".to_string(),
                 summary: Some("first summary".to_string()),
                 mode: ExplanationMode::Diff,
-                provider_session_id: "p1".to_string(),
+                agent_session_id: "p1".to_string(),
                 terminal_session_id: ts_id.clone(),
                 repo_name: None,
             })
@@ -201,7 +201,7 @@ mod tests {
                 title: "second".to_string(),
                 summary: None,
                 mode: ExplanationMode::Topic,
-                provider_session_id: "p2".to_string(),
+                agent_session_id: "p2".to_string(),
                 terminal_session_id: ts_id,
                 repo_name: None,
             })
@@ -224,7 +224,7 @@ mod tests {
                 title: "target".to_string(),
                 summary: None,
                 mode: ExplanationMode::Diff,
-                provider_session_id: "p1".to_string(),
+                agent_session_id: "p1".to_string(),
                 terminal_session_id: ts_id,
                 repo_name: None,
             })
@@ -247,7 +247,7 @@ mod tests {
                 title: "first".to_string(),
                 summary: None,
                 mode: ExplanationMode::Diff,
-                provider_session_id: "p1".to_string(),
+                agent_session_id: "p1".to_string(),
                 terminal_session_id: ts_id.clone(),
                 repo_name: None,
             })
@@ -257,7 +257,7 @@ mod tests {
                 title: "second".to_string(),
                 summary: None,
                 mode: ExplanationMode::Topic,
-                provider_session_id: "p2".to_string(),
+                agent_session_id: "p2".to_string(),
                 terminal_session_id: ts_id,
                 repo_name: None,
             })

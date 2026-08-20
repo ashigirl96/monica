@@ -1,5 +1,5 @@
-//! Agent adapters: the single place that knows a provider's hook protocol. Decoders translate raw
-//! hook payloads into the provider-agnostic [`AgentSignal`](monica_application::AgentSignal); the
+//! Agent adapters: the single place that knows an agent's hook protocol. Decoders translate raw
+//! hook payloads into the agent-agnostic [`AgentSignal`](monica_application::AgentSignal); the
 //! config functions describe which events to register and where. Adding a new agent means adding a
 //! decoder here, not touching the domain state machine or the stores.
 

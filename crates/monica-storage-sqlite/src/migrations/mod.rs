@@ -30,6 +30,7 @@ migrations!(
     v42,
     v43,
     v44,
+    v45,
 );
 
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
@@ -587,7 +588,7 @@ mod tests {
         assert_eq!(wait_run.status, TaskRunStatus::WaitingForUser);
         assert_eq!(wait_run.wait_reason, Some(TaskRunWaitReason::ExitPlanMode));
         assert_eq!(
-            wait_run.provider_session_id.as_deref(),
+            wait_run.agent_session_id.as_deref(),
             Some("provider-new")
         );
         assert_eq!(wait_run.last_event_name.as_deref(), Some("PreToolUse"));

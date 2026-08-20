@@ -100,9 +100,9 @@ impl TaskRunStore for SqliteUow<'_> {
     fn find_task_run_by_session(
         &self,
         task_id: &str,
-        provider_session_id: &str,
+        agent_session_id: &str,
     ) -> Result<Option<TaskRun>> {
-        task_runs::find_task_run_by_session(&self.tx, task_id, provider_session_id)
+        task_runs::find_task_run_by_session(&self.tx, task_id, agent_session_id)
     }
 
     fn find_task_run_by_terminal_tab(&self, terminal_tab_id: &str) -> Result<Option<TaskRun>> {
@@ -121,8 +121,8 @@ impl TaskRunStore for SqliteUow<'_> {
         task_runs::settle_task_run_if_live_in(&self.tx, task_run_id, task_id)
     }
 
-    fn claim_prepared_run(&self, task_run_id: &str, provider_session_id: &str) -> Result<bool> {
-        task_runs::claim_prepared_run(&self.tx, task_run_id, provider_session_id)
+    fn claim_prepared_run(&self, task_run_id: &str, agent_session_id: &str) -> Result<bool> {
+        task_runs::claim_prepared_run(&self.tx, task_run_id, agent_session_id)
     }
 
     fn create_lazy_run_for_session(

@@ -566,7 +566,7 @@ mod tests {
             worktree_path: Some(worktree.to_string_lossy().into_owned()),
             status: TaskRunStatus::Running,
             wait_reason: None,
-            provider_session_id: None,
+            agent_session_id: None,
             terminal_tab_id: None,
             last_event_name: None,
             last_event_at: None,
