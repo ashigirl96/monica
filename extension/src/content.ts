@@ -59,8 +59,24 @@ function isInlineElement(el: Element): boolean {
   return display.startsWith("inline");
 }
 
+// pre-wrap 系ではテキスト中の \n\n が段落区切りとして描画される（X のツイート本文等）
+const PARAGRAPH_BREAK = /\n\s*\n/;
+
+function preservesNewlines(el: Element): boolean {
+  const ws = getComputedStyle(el).whiteSpace;
+  return ws.startsWith("pre") || ws === "break-spaces";
+}
+
+/** DOM 上は全部インラインでも、\n\n で複数段落を描画している要素 */
+function hasRenderedParagraphBreaks(el: Element): boolean {
+  return preservesNewlines(el) && PARAGRAPH_BREAK.test(unitText(el));
+}
+
 /** 子が全部「テキスト or インライン要素」なら、この要素を 1 翻訳単位として扱える */
 function hasOnlyInlineContent(el: Element): boolean {
+  // 複数段落を 1 単位に畳むと本文全体が 1 巨大 seg になる。コンテナとして降りて
+  // collectUnits 側で段落ごとに分割する
+  if (hasRenderedParagraphBreaks(el)) return false;
   for (const child of el.childNodes) {
     if (child.nodeType === Node.TEXT_NODE) continue;
     if (child.nodeType !== Node.ELEMENT_NODE) continue;
@@ -114,11 +130,54 @@ function flushRun(run: Node[], units: Element[]) {
   units.push(wrapper);
 }
 
-function collectUnits(root: Element, units: Element[]) {
+/**
+ * テキストノードを \n\s*\n の位置で splitText し、段落ごとの piece に分ける。
+ * 区切り自体のノードは DOM に残したまま run に入れない（描画は不変）。
+ * 生きている Range は splitText でオフセットが自動調整されるので選択判定と共存できる
+ */
+function splitAtParagraphBreaks(first: Text): Text[] {
+  const pieces: Text[] = [];
+  let node = first;
+  let match = PARAGRAPH_BREAK.exec(node.data);
+  while (match) {
+    const rest = node.splitText(match.index).splitText(match[0].length);
+    if (node.data.length > 0) pieces.push(node);
+    node = rest;
+    match = PARAGRAPH_BREAK.exec(node.data);
+  }
+  if (node.data.length > 0) pieces.push(node);
+  return pieces;
+}
+
+function collectUnits(root: Element, units: Element[], range: Range | null) {
+  const splitParagraphs = preservesNewlines(root);
   let run: Node[] = [];
   for (const node of Array.from(root.childNodes)) {
+    // 選択翻訳時は選択に触れないノードを飛ばす。run の途中なら境界として分断する
+    if (range && !range.intersectsNode(node)) {
+      flushRun(run, units);
+      run = [];
+      continue;
+    }
     if (node.nodeType === Node.TEXT_NODE) {
-      run.push(node);
+      const text = node as Text;
+      if (splitParagraphs && PARAGRAPH_BREAK.test(text.data)) {
+        for (const [i, piece] of splitAtParagraphBreaks(text).entries()) {
+          // 先頭 piece は直前のインライン run の続き、以降は新しい段落
+          if (i > 0) {
+            flushRun(run, units);
+            run = [];
+          }
+          if (!range || range.intersectsNode(piece)) {
+            run.push(piece);
+          } else {
+            flushRun(run, units);
+            run = [];
+          }
+        }
+      } else {
+        run.push(text);
+      }
       continue;
     }
     if (node.nodeType !== Node.ELEMENT_NODE) continue;
@@ -144,10 +203,19 @@ function collectUnits(root: Element, units: Element[]) {
     if (hasOnlyInlineContent(el)) {
       units.push(el);
     } else {
-      collectUnits(el, units);
+      collectUnits(el, units, range);
     }
   }
   flushRun(run, units);
+}
+
+/** テキストが選択されていればその Range。選択翻訳では選択に触れる単位だけを訳す */
+function getSelectionRange(): Range | null {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  if (range.toString().trim().length === 0) return null;
+  return range;
 }
 
 function isInViewport(el: Element): boolean {
@@ -197,11 +265,15 @@ function showToast(message: string) {
 }
 
 function runTranslation() {
+  const range = getSelectionRange();
   const units: Element[] = [];
-  collectUnits(document.body, units);
+  collectUnits(document.body, units, range);
 
   if (units.length === 0) {
-    console.warn("[monica-translate] no translatable units");
+    console.warn(
+      `[monica-translate] no translatable units${range ? " in selection" : ""}`,
+    );
+    if (range) showToast("選択範囲に翻訳できるテキストがありません");
     return;
   }
 
@@ -238,7 +310,7 @@ function runTranslation() {
   }
 
   console.log(
-    `[monica-translate] sending ${payload.length} segments (${segments.filter((s) => s.inViewport).length} in viewport)${dropCache ? ", dropping cache (reload)" : ""}`,
+    `[monica-translate] sending ${payload.length} segments (${segments.filter((s) => s.inViewport).length} in viewport)${range ? ", selection only" : ""}${dropCache ? ", dropping cache (reload)" : ""}`,
   );
   w.__monicaTranslateInFlight = true;
   chrome.runtime.sendMessage({ type: "translate", segments: payload, dropCache });
