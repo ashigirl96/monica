@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use monica_application::{
     GithubGateway, GithubIssue, GithubPullRequest, GithubPullRequestStatus, RepoPullRequest,
 };
@@ -84,7 +84,12 @@ impl GithubApiClient {
     }
 
     async fn crab(&self) -> Result<Octocrab> {
-        let token = self.token_provider.access_token().await?;
+        // access_token shells out to `gh` on a cold cache, which can block on a
+        // Keychain prompt; keep that off the async runtime's worker threads.
+        let provider = self.token_provider;
+        let token = tokio::task::spawn_blocking(move || provider.access_token())
+            .await
+            .context("GitHub token task failed")??;
         Octocrab::builder()
             .personal_token(token)
             .build()
@@ -103,22 +108,22 @@ fn map_github_error(error: octocrab::Error, action: &str) -> anyhow::Error {
             let status = source.status_code.as_u16();
             match status {
                 401 => anyhow!(
-                    "GitHub auth failed while trying to {action}: {}; run `monica auth github login`",
+                    "GitHub auth failed while trying to {action}: {}; run `gh auth login`, then restart Monica so it picks up the new token",
                     source.message
                 ),
                 403 => anyhow!(
-                    "GitHub denied access while trying to {action}: {}. Your token may lack the `repo` scope, or an organization may restrict Monica's OAuth app — re-run `monica auth github login` and, for organization repositories, ask an org owner to approve Monica (and authorize SSO) in the organization's third-party access settings.",
+                    "GitHub denied access while trying to {action}: {}. Your gh token may lack the `repo` scope (`gh auth refresh -s repo`), or the organization may require SSO authorization for the token (`gh auth refresh`). Restart Monica after refreshing so it picks up the new token.",
                     source.message
                 ),
                 404 => anyhow!(
-                    "GitHub repository or item was not found while trying to {action}: {}. Confirm you have access to the repository; for organization repositories an org owner may need to approve Monica's OAuth app or grant SSO authorization.",
+                    "GitHub repository or item was not found while trying to {action}: {}. Confirm you have access to the repository; organization repositories may require SSO authorization for your gh token.",
                     source.message
                 ),
                 _ => anyhow!("GitHub API error while trying to {action}: {source}"),
             }
         }
         octocrab::Error::Graphql { source, .. } => anyhow!(
-            "GitHub GraphQL error while trying to {action}: {source}. Confirm you have access to the repository and that Monica's OAuth app is authorized (re-run `monica auth github login`; org repositories may require org owner approval)."
+            "GitHub GraphQL error while trying to {action}: {source}. Confirm you have access to the repository and that your gh token is authorized (`gh auth status`; org repositories may require SSO authorization)."
         ),
         other => anyhow!("GitHub API error while trying to {action}: {other}"),
     }

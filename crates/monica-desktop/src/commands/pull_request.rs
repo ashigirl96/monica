@@ -18,11 +18,20 @@ pub async fn force_sync_pull_requests(
     app: AppHandle,
     waker: State<'_, PrSyncWaker>,
 ) -> Result<(), ApiError> {
-    let mut monica = event_sink::open(&app)?;
-    if !monica.synchronization().auth_status().authenticated {
+    // auth_status shells out to `gh` on a cold cache, which can block on a
+    // Keychain prompt; keep it (and the SQLite open) off the async runtime.
+    let status = tauri::async_runtime::spawn_blocking(move || {
+        event_sink::open(&app).map(|mut monica| monica.synchronization().auth_status())
+    })
+    .await
+    .map_err(|e| ApiError::external(format!("GitHub auth check failed: {e}")))??;
+    if !status.authenticated {
         return Err(ApiError::new(
             ApiErrorCode::AuthenticationRequired,
-            "Not authenticated with GitHub",
+            status
+                .message
+                .as_deref()
+                .unwrap_or("Not authenticated with GitHub"),
         ));
     }
     if !waker.wake_forced() {

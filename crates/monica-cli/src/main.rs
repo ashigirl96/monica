@@ -1,4 +1,3 @@
-mod auth;
 mod event_sink;
 mod explain;
 mod hook;
@@ -35,9 +34,6 @@ enum Commands {
     /// Receive agent lifecycle hooks (e.g. `monica hook claude`)
     #[command(subcommand)]
     Hook(hook::HookCommand),
-    /// Manage Monica authorization
-    #[command(subcommand)]
-    Auth(auth::AuthCommand),
     /// Print a shell completion script (e.g. `monica completions zsh`)
     Completions { shell: Shell },
 }
@@ -60,7 +56,6 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             Commands::Explain(cmd) => explain::run(cmd),
             Commands::Issue(cmd) => issue::run(cmd).await,
             Commands::Note(cmd) => note::run(cmd),
-            Commands::Auth(cmd) => auth::run(cmd).await,
             Commands::Hook(cmd) => hook::run(cmd),
             Commands::Completions { shell } => {
                 let mut cmd = Cli::command();

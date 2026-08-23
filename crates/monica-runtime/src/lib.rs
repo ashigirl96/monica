@@ -9,7 +9,7 @@ use anyhow::Result;
 use monica_adapters::agents::DefaultAgentDecoders;
 use monica_adapters::filesystem::{FsTaskRunOutputs, FsWorkspace};
 use monica_adapters::git::GitCliGateway;
-use monica_adapters::github::{KeychainAuthGateway, OctocrabGithubGateway};
+use monica_adapters::github::{GithubTokenProvider, OctocrabGithubGateway};
 use monica_adapters::process::ProcessSetupRunner;
 use monica_application::{Backend, EventSink, LinkPreview, Monica, WorktreeRef};
 use monica_storage_sqlite::SqliteStore;
@@ -23,7 +23,7 @@ pub use notification_drain::{start_notification_drain, NotificationDrainHandle};
 pub use pr_sync::{start_pr_sync, PrSyncWaker};
 
 /// The concrete adapter set the desktop and CLI run on: SQLite, octocrab, the git CLI, the process
-/// setup runner, the filesystem run-output stores, the keychain auth gateway, and the
+/// setup runner, the filesystem run-output stores, the gh-CLI-backed auth gateway, and the
 /// agent hook decoders.
 pub struct DefaultBackend;
 
@@ -31,7 +31,7 @@ impl Backend for DefaultBackend {
     type Repos = SqliteStore;
     type Git = GitCliGateway;
     type Github = OctocrabGithubGateway;
-    type Auth = KeychainAuthGateway;
+    type Auth = GithubTokenProvider;
     type Setup = ProcessSetupRunner;
     type Outputs = FsTaskRunOutputs;
     type Workspace = FsWorkspace;
@@ -49,7 +49,7 @@ pub fn open_monica(events: Box<dyn EventSink>) -> Result<MonicaFacade> {
         SqliteStore::open()?,
         GitCliGateway,
         OctocrabGithubGateway::new(),
-        KeychainAuthGateway::new(),
+        GithubTokenProvider::new(),
         ProcessSetupRunner,
         FsTaskRunOutputs,
         FsWorkspace,

@@ -107,24 +107,9 @@ pub struct UnresolvedPullRequestRef {
     pub number: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GithubAuthStatus {
     pub authenticated: bool,
-    pub source: String,
-    pub login: Option<String>,
-    pub access_expires_at: Option<i64>,
-    pub refresh_expires_at: Option<i64>,
-    pub reauth_required: bool,
     pub message: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct GithubDeviceFlow {
-    pub user_code: String,
-    pub verification_uri: String,
-    pub expires_at: i64,
-    pub interval: u64,
-    #[serde(skip_serializing)]
-    pub device_code: String,
 }
 

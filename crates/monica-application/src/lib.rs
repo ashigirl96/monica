@@ -2,7 +2,7 @@
 //! just outside the domain — CQRS read models, GitHub adapter DTOs, and hook-lifecycle parsing.
 //!
 //! Pure aggregates and business rules live in `monica-domain`; concrete SQLite persistence lives in
-//! `monica-storage-sqlite`, the GitHub/Git/filesystem/process/keychain/agent adapters in
+//! `monica-storage-sqlite`, the GitHub/Git/filesystem/process/agent adapters in
 //! `monica-adapters`, and the composition root in `monica-runtime`.
 
 mod bench;
@@ -43,7 +43,7 @@ pub use ports::{
 // Application-owned types (NOT in monica-domain)
 pub use bench::{bench_runspace_id, PrepareTaskResult, RunTaskResult, TaskBench};
 pub use github::{
-    GithubAuthStatus, GithubDeviceFlow, GithubIssue, GithubPullRequest, GithubPullRequestRef,
+    GithubAuthStatus, GithubIssue, GithubPullRequest, GithubPullRequestRef,
     GithubPullRequestStatus, PullRequestBranchSyncCandidate, RepoPullRequest,
     UnresolvedPullRequestRef,
 };
