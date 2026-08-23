@@ -35,17 +35,6 @@ async fn track_github_issue_uses_gateway_and_repositories() {
 fn github_auth_status_uses_auth_gateway() {
     let status = github_auth_status(&FakeAuth);
     assert!(status.authenticated);
-    assert_eq!(status.source, "fake");
-}
-
-#[tokio::test]
-async fn github_auth_flow_usecases_delegate_to_auth_gateway() {
-    let auth = FakeAuth;
-    let flow = begin_github_device_flow(&auth).await.unwrap();
-    assert_eq!(flow.user_code, "CODE");
-    let status = wait_for_github_device_flow(&auth, &flow).await.unwrap();
-    assert_eq!(status.login.as_deref(), Some("user"));
-    logout_github(&auth).await.unwrap();
 }
 
 fn recent_pr(

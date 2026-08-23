@@ -1,15 +1,5 @@
-use anyhow::Result;
-
-use crate::{GithubAuthStatus, GithubDeviceFlow};
-
-use crate::ports::BoxFuture;
+use crate::GithubAuthStatus;
 
 pub trait AuthGateway {
     fn status(&self) -> GithubAuthStatus;
-    fn begin_device_flow<'a>(&'a self) -> BoxFuture<'a, Result<GithubDeviceFlow>>;
-    fn wait_for_device_flow<'a>(
-        &'a self,
-        flow: &'a GithubDeviceFlow,
-    ) -> BoxFuture<'a, Result<GithubAuthStatus>>;
-    fn logout<'a>(&'a self) -> BoxFuture<'a, Result<()>>;
 }

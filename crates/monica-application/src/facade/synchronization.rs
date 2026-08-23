@@ -1,8 +1,8 @@
 use super::{Backend, Monica};
 use crate::usecases::github::{TrackGithubIssueInput, TrackGithubIssueReport};
-use crate::{ApplicationEvent, ApplicationResult, GithubAuthStatus, GithubDeviceFlow};
+use crate::{ApplicationEvent, ApplicationResult, GithubAuthStatus};
 
-/// GitHub-facing synchronization: auth, issue tracking, and pull-request sync.
+/// GitHub-facing synchronization: auth status, issue tracking, and pull-request sync.
 pub struct SynchronizationService<'a, B: Backend> {
     pub(in crate::facade) m: &'a mut Monica<B>,
 }
@@ -10,21 +10,6 @@ pub struct SynchronizationService<'a, B: Backend> {
 impl<B: Backend> SynchronizationService<'_, B> {
     pub fn auth_status(&self) -> GithubAuthStatus {
         crate::usecases::github::github_auth_status(&self.m.auth)
-    }
-
-    pub async fn begin_device_flow(&self) -> ApplicationResult<GithubDeviceFlow> {
-        crate::usecases::github::begin_github_device_flow(&self.m.auth).await
-    }
-
-    pub async fn wait_for_device_flow(
-        &self,
-        flow: &GithubDeviceFlow,
-    ) -> ApplicationResult<GithubAuthStatus> {
-        crate::usecases::github::wait_for_github_device_flow(&self.m.auth, flow).await
-    }
-
-    pub async fn logout(&self) -> ApplicationResult<()> {
-        crate::usecases::github::logout_github(&self.m.auth).await
     }
 
     pub async fn track_github_issue(

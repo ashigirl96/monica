@@ -23,7 +23,7 @@ use crate::prelude::{
 };
 use crate::{
     ApplicationEvent, AuthGateway, Backend, Clock, DaemonSessionView, EventSink, ExecutionProfile,
-    GithubAuthStatus, GithubDeviceFlow, GithubGateway, GithubIssue, GithubPullRequest,
+    GithubAuthStatus, GithubGateway, GithubIssue, GithubPullRequest,
     GithubPullRequestRef, GithubPullRequestStatus, HookContext, Monica,
     PullRequestBranchSyncCandidate, RepoPullRequest, SetupEnv,
     SetupOutcome, UnresolvedPullRequestRef,
@@ -1136,36 +1136,8 @@ impl AuthGateway for FakeAuth {
     fn status(&self) -> GithubAuthStatus {
         GithubAuthStatus {
             authenticated: true,
-            source: "fake".to_string(),
-            login: Some("user".to_string()),
-            access_expires_at: None,
-            refresh_expires_at: None,
-            reauth_required: false,
             message: None,
         }
-    }
-
-    fn begin_device_flow<'a>(&'a self) -> BoxFuture<'a, Result<GithubDeviceFlow>> {
-        Box::pin(async {
-            Ok(GithubDeviceFlow {
-                user_code: "CODE".to_string(),
-                verification_uri: "https://github.com/login/device".to_string(),
-                expires_at: 1,
-                interval: 1,
-                device_code: "device".to_string(),
-            })
-        })
-    }
-
-    fn wait_for_device_flow<'a>(
-        &'a self,
-        _flow: &'a GithubDeviceFlow,
-    ) -> BoxFuture<'a, Result<GithubAuthStatus>> {
-        Box::pin(async move { Ok(self.status()) })
-    }
-
-    fn logout<'a>(&'a self) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async { Ok(()) })
     }
 }
 

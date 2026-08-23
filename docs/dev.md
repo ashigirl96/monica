@@ -23,15 +23,11 @@
 
 ## GitHub 認証
 
-Monica は GitHub CLI の token storage を読まない。GitHub App device flow で Monica 専用 token を取得し、macOS では `monica.github` / `github.com` の Keychain item に保存する。
+Monica は自前の OAuth app を持たず、GitHub CLI に委譲する。トークンが必要になったタイミングで `gh auth token` を実行し、結果をプロセス内にキャッシュする（gh の OAuth token は無期限なので TTL なし。gh で re-login した場合はプロセス再起動で追従）。gh が未インストール・未ログインならエラーメッセージが `gh auth login` を案内する。
 
-```bash
-monica auth github login
-monica auth github status
-monica auth github logout
-```
+GUI 起動（Finder/Dock）は launchd の最小 PATH を引き継ぎ Homebrew の bin が見えないため、`gh` は PATH → `/opt/homebrew/bin/gh` → `/usr/local/bin/gh` の順で解決する。
 
-開発時の一時 override は `MONICA_GITHUB_TOKEN` を使う。GitHub App client id は既定値を持つが、別 app で試すときは `MONICA_GITHUB_CLIENT_ID` で上書きできる。PR 同期は常時 polling ではなく、Workboard への移動時と cmd+r の forced sync だけが worker を起こす（未ログイン時は façade 側で no-op）。
+PR 同期は常時 polling ではなく、Workboard への移動時と cmd+r の forced sync だけが worker を起こす（gh トークンが取れないときは façade 側で no-op）。
 
 ---
 
