@@ -15,3 +15,12 @@ Explain like I'm someone who knows nothing about this topic:
 - Few words. Prefer one concrete example over an abstract paragraph.
 
 Topic: $ARGUMENTS (if empty, teach what was designed or implemented earlier in this session)
+
+## Gotchas
+
+Lessons learned from real sessions:
+
+- **End every step with the bottom line in everyday words.** After the detailed explanation, close with a block like 「つまり最終的に何が言いたいかというと: > …」 — the entire step compressed into one or two sentences a layperson could say out loud (e.g. the actual question you'd ask someone, in casual speech). Detail without this landing point is where learners get lost.
+- **State the point before the evidence.** Don't build up through mechanism/background and reveal the conclusion at the end — lead with what it means in plain words, then explain why. A learner who can't see where the explanation is going can't follow it.
+- **When the learner paraphrases back ("so it means X?"), confirm what's right first**, then sharpen only the part that's off. Never restart the explanation from scratch — their paraphrase is the vocabulary that works for them; build on it.
+- **Name the recurring pattern.** When several steps share one underlying principle (e.g. "contracts don't show up in code"), say explicitly "this is the same type as step N" — recognition beats re-derivation.
