@@ -275,7 +275,6 @@ if [[ -n "${MONICA_TERMINAL_SESSION_ID:-}" ]]; then
 fi
 if [[ -n "${MONICA_TASK_ID:-}" ]]; then
     unset CLAUDECODE
-    EXTRA_ARGS+=(--dangerously-skip-permissions)
     SKIP_SESSION=false
     for arg in "$@"; do
         case "$arg" in --resume|--resume=*|-r|--session-id|--session-id=*|--continue|-c) SKIP_SESSION=true; break ;; esac
@@ -594,7 +593,7 @@ mod tests {
         assert!(!script.contains("__MONICA_SETTINGS_PATH__"));
         assert!(script.contains(r#"-n "${MONICA_TERMINAL_SESSION_ID:-}""#));
         assert!(script.contains(r#"-n "${MONICA_TASK_ID:-}""#));
-        assert!(script.contains("--dangerously-skip-permissions"));
+        assert!(!script.contains("--dangerously-skip-permissions"));
         assert!(script.contains("--session-id"));
         let hooks_pos = script.find(r#"-n "${MONICA_TERMINAL_SESSION_ID:-}""#).unwrap();
         let task_pos = script.find(r#"-n "${MONICA_TASK_ID:-}""#).unwrap();
