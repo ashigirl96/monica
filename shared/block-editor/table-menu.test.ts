@@ -3,7 +3,8 @@ import { describe, expect, test } from "bun:test";
 import { EditorState, TextSelection } from "@milkdown/kit/prose/state";
 import { block, cellPositions, contentPos, docOf, para, tableOf } from "./test-fixtures";
 import { TABLE_MENU_ITEMS, tableMenuPlugin } from "./table-menu";
-import { tableMenuKey } from "./menu-keys";
+import { linkMenuPlugin, openLinkMenu } from "./link-menu";
+import { linkMenuKey, tableMenuKey } from "./menu-keys";
 
 describe("tableMenuPlugin の state 追従", () => {
   const plugin = tableMenuPlugin();
@@ -74,5 +75,79 @@ describe("tableMenuPlugin の state 追従", () => {
     });
     expect(next.doc.child(0).child(0).child(0).childCount).toBe(1);
     expect(menuState(next)).toEqual({ active: false });
+  });
+});
+
+describe("他メニューが開いている間は contextmenu を譲る", () => {
+  /** contextmenu handler が必要とする最小限の EditorView 相当 */
+  function fakeView(state: EditorState, cellPos: number) {
+    const dispatched: unknown[] = [];
+    return {
+      view: {
+        state,
+        posAtCoords: () => ({ pos: cellPos, inside: cellPos }),
+        dispatch: (tr: unknown) => dispatched.push(tr),
+      },
+      dispatched,
+    };
+  }
+
+  function contextmenuOn(state: EditorState, cellPos: number) {
+    const { view, dispatched } = fakeView(state, cellPos);
+    let defaultPrevented = false;
+    const event = {
+      clientX: 10,
+      clientY: 20,
+      preventDefault: () => {
+        defaultPrevented = true;
+      },
+    };
+    const plugin = tableMenuPlugin();
+    const handler = plugin.props.handleDOMEvents!.contextmenu!;
+    // biome-ignore lint/suspicious/noExplicitAny: 最小限の view / event スタブ
+    const handled = handler.call(plugin, view as any, event as any);
+    return { handled, dispatched, defaultPrevented };
+  }
+
+  const tableDoc = () =>
+    docOf(
+      block(
+        "T",
+        tableOf([
+          ["a", "b"],
+          ["c", "d"],
+        ]),
+      ),
+    );
+
+  test("link-menu が開いていればセル上でも開かず、native メニューに任せる", () => {
+    const d = tableDoc();
+    const cell = cellPositions(d)[0] + 1;
+    const base = EditorState.create({
+      doc: d,
+      plugins: [tableMenuPlugin(), linkMenuPlugin(async () => null)],
+      selection: TextSelection.create(d, cell),
+    });
+    const state = base.apply(openLinkMenu(base.tr, cell, "https://example.com"));
+    expect(linkMenuKey.getState(state)).toMatchObject({ active: true });
+
+    const { handled, dispatched, defaultPrevented } = contextmenuOn(state, cell);
+    expect(handled).toBe(false);
+    expect(dispatched).toHaveLength(0);
+    expect(defaultPrevented).toBe(false);
+  });
+
+  test("他メニューが閉じていればセル上で開く", () => {
+    const d = tableDoc();
+    const cell = cellPositions(d)[0] + 1;
+    const state = EditorState.create({
+      doc: d,
+      plugins: [tableMenuPlugin(), linkMenuPlugin(async () => null)],
+      selection: TextSelection.create(d, cell),
+    });
+    const { handled, dispatched, defaultPrevented } = contextmenuOn(state, cell);
+    expect(handled).toBe(true);
+    expect(dispatched).toHaveLength(1);
+    expect(defaultPrevented).toBe(true);
   });
 });

@@ -16,7 +16,7 @@ import {
   menuItemButton,
   positionMenuAtPoint,
 } from "./menu-overlay";
-import { noteMentionMenuKey, pasteMenuKey, tableMenuKey } from "./menu-keys";
+import { linkMenuKey, noteMentionMenuKey, pasteMenuKey, tableMenuKey } from "./menu-keys";
 
 // セル右クリックで開く行・列の操作メニュー。slash menu は table 内で開かない
 // （applyItem の replaceWith が表全体を置換してしまう）ので、表の構造編集はここが唯一の入口。
@@ -161,9 +161,12 @@ export function tableMenuPlugin(): Plugin<TableMenuState> {
       },
       handleDOMEvents: {
         contextmenu(view, event) {
+          // 他のメニューが開いている間は譲る。同じセル内での右クリックは selection を
+          // 動かさないので、開いたままだと両方表示されて矢印 / Enter を奪い合う
           if (
             noteMentionMenuKey.getState(view.state)?.active ||
-            pasteMenuKey.getState(view.state)?.active
+            pasteMenuKey.getState(view.state)?.active ||
+            linkMenuKey.getState(view.state)?.active
           )
             return false;
           const found = view.posAtCoords({ left: event.clientX, top: event.clientY });
