@@ -38,6 +38,12 @@ function selectCellIn(tr: Transaction, tablePos: number, rowIndex: number, cellI
   tr.setSelection(TextSelection.create(tr.doc, cellStartPos(tablePos, table, r, c) + 1));
 }
 
+function tableWidth(table: PMNode): number {
+  let max = 0;
+  for (let r = 0; r < table.childCount; r++) max = Math.max(max, table.child(r).childCount);
+  return max;
+}
+
 /** 最後の行 / 列を消すときは表ごと空 paragraph に置き換える（container と id は残す） */
 function tableToParagraph(tr: Transaction, ctx: TableCellContext): void {
   tr.replaceWith(ctx.tablePos, ctx.tablePos + ctx.tableNode.nodeSize, nodes.paragraph.create());
@@ -103,7 +109,9 @@ export function insertColumnTr(
 export function deleteColumnTr(state: EditorState, ctx: TableCellContext): Transaction {
   const col = ctx.cellIndex;
   const tr = state.tr;
-  if (ctx.tableNode.child(ctx.rowIndex).childCount === 1) {
+  // 選択行だけでなく全行が幅 1 のときにだけ畳む。ragged な表で幅 1 の行から消すと
+  // 表ごと落ちて、より広い行のセルが道連れになる
+  if (tableWidth(ctx.tableNode) === 1) {
     tableToParagraph(tr, ctx);
     return tr;
   }

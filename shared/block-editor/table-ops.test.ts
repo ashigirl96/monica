@@ -159,6 +159,12 @@ describe("列の削除", () => {
     expect(rowTexts(table, 1)).toEqual(["d"]);
   });
 
+  test("ragged: 幅 1 の行から消しても、広い行のセルは失われない", () => {
+    const { table } = apply(ragged(), 3, tableDeleteColumn);
+    expect(rowTexts(table, 0)).toEqual(["b", "c"]);
+    expect(rowTexts(table, 1)).toEqual(["d"]);
+  });
+
   test("幅 1 の表は空 paragraph になる", () => {
     const doc = docOf(block("T", tableOf([["a"], ["b"]])));
     const { state } = run(stateInCell(doc, 0), tableDeleteColumn);
