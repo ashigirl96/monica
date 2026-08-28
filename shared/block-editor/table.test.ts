@@ -1,8 +1,5 @@
 /// <reference types="bun" />
 import { describe, expect, test } from "bun:test";
-import { EditorState, TextSelection } from "@milkdown/kit/prose/state";
-import type { Command } from "@milkdown/kit/prose/state";
-import type { Node as PMNode } from "@milkdown/kit/prose/model";
 import { nodes } from "./schema";
 import {
   getTableCellContext,
@@ -13,30 +10,16 @@ import {
 } from "./table";
 import { exitDocEnd, exitDocStart, hasAdjacentTableRow, splitBlock } from "./commands";
 import { blocksToPlainText } from "./clipboard";
-import { block, contentPos, docOf, para, tableOf } from "./test-fixtures";
-
-function cellPositions(doc: PMNode): number[] {
-  const out: number[] = [];
-  doc.descendants((node, pos) => {
-    if (node.type === nodes.tableCell) out.push(pos);
-    return true;
-  });
-  return out;
-}
-
-/** n 番目（文書順）のセル先頭にカーソルを置いた state */
-function stateInCell(doc: PMNode, cellIndex: number, offset = 0): EditorState {
-  const pos = cellPositions(doc)[cellIndex];
-  return EditorState.create({ doc, selection: TextSelection.create(doc, pos + 1 + offset) });
-}
-
-function run(state: EditorState, command: Command): { state: EditorState; handled: boolean } {
-  let next = state;
-  const handled = command(state, (tr) => {
-    next = state.apply(tr);
-  });
-  return { state: next, handled };
-}
+import {
+  block,
+  cellPositions,
+  contentPos,
+  docOf,
+  para,
+  run,
+  stateInCell,
+  tableOf,
+} from "./test-fixtures";
 
 const twoByTwo = () =>
   docOf(

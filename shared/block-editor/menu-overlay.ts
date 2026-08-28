@@ -13,17 +13,42 @@ export function createMenuOverlay(view: EditorView): HTMLElement {
 
 // §9.1: coordsAtPos で editor 外 overlay を配置（CSS zoom は比率で補正）
 export function positionMenuAt(view: EditorView, menu: HTMLElement, pos: number): void {
-  const wrapper = view.dom.parentElement;
-  if (!wrapper) return;
   // display を先に立てて layout read（coordsAtPos / offsetTop）をまとめ、style の
   // 書き込みは最後に寄せる — read/write を交互にすると transaction ごとの強制 reflow が増える
   menu.style.display = "block";
   const coords = view.coordsAtPos(pos);
+  placeMenu(view, menu, coords.left, coords.bottom + 4);
+}
+
+/** 右クリック等、viewport 座標（clientX/Y）を起点に配置する。右端は wrapper 内に収める。 */
+export function positionMenuAtPoint(
+  view: EditorView,
+  menu: HTMLElement,
+  clientX: number,
+  clientY: number,
+): void {
+  menu.style.display = "block";
+  placeMenu(view, menu, clientX, clientY, { clampRight: true });
+}
+
+function placeMenu(
+  view: EditorView,
+  menu: HTMLElement,
+  clientLeft: number,
+  clientTop: number,
+  opts: { clampRight?: boolean } = {},
+): void {
+  const wrapper = view.dom.parentElement;
+  if (!wrapper) return;
   const wrapperRect = wrapper.getBoundingClientRect();
   const scale = wrapper.offsetWidth > 0 ? wrapperRect.width / wrapper.offsetWidth : 1;
   const scrollTop = activeItemScrollTop(menu);
-  menu.style.left = `${(coords.left - wrapperRect.left) / scale}px`;
-  menu.style.top = `${(coords.bottom - wrapperRect.top) / scale + 4}px`;
+  let left = (clientLeft - wrapperRect.left) / scale;
+  if (opts.clampRight) {
+    left = Math.max(0, Math.min(left, wrapper.offsetWidth - menu.offsetWidth - 8));
+  }
+  menu.style.left = `${left}px`;
+  menu.style.top = `${(clientTop - wrapperRect.top) / scale}px`;
   if (scrollTop !== null) menu.scrollTop = scrollTop;
 }
 
@@ -94,6 +119,8 @@ export function menuItemButton(opts: {
   /** label の後ろに薄く出すサブラベル（ノートの preview 等） */
   hint?: string;
   active: boolean;
+  /** 削除系の項目。ラベルを danger 色にする */
+  destructive?: boolean;
   onPick: () => void;
 }): HTMLButtonElement {
   const button = document.createElement("button");
@@ -102,6 +129,7 @@ export function menuItemButton(opts: {
   button.setAttribute("role", "option");
   button.setAttribute("aria-selected", String(opts.active));
   if (opts.active) button.classList.add("jb-slash-item-active");
+  if (opts.destructive) button.classList.add("jb-slash-item-destructive");
   const icon = document.createElement("span");
   icon.className = "jb-slash-icon";
   icon.append(opts.icon);
