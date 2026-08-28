@@ -126,6 +126,12 @@ describe("行の削除", () => {
     expect(ctx).toMatchObject({ rowIndex: 0, cellIndex: 1 });
   });
 
+  test("header 行を消すと後続行が header になり、GFM の delimiter が残る", () => {
+    const { table } = apply(twoByTwo(true), 0, tableDeleteRow);
+    expect(rowTexts(table, 0)).toEqual(["c", "d"]);
+    expect(rowHeaders(table, 0)).toEqual([true, true]);
+  });
+
   test("1 行だけの表は空 paragraph になる（container id は維持）", () => {
     const doc = docOf(block("T", tableOf([["a", "b"]])));
     const { state } = run(stateInCell(doc, 0), tableDeleteRow);

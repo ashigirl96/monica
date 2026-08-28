@@ -78,6 +78,15 @@ export function deleteRowTr(state: EditorState, ctx: TableCellContext): Transact
     tableToParagraph(tr, ctx);
     return tr;
   }
+  // header 行を消すときは後続行へ header を移す。setNodeMarkup は node size を
+  // 変えないので、この後の delete も元 doc の位置のまま使える
+  if (ctx.rowIndex === 0 && rowIsHeader(ctx.tableNode.child(0))) {
+    const successor = ctx.tableNode.child(1);
+    for (let c = 0; c < successor.childCount; c++) {
+      const pos = cellStartPos(ctx.tablePos, ctx.tableNode, 1, c);
+      tr.setNodeMarkup(pos, undefined, { header: true });
+    }
+  }
   const from = rowStartPos(ctx.tablePos, ctx.tableNode, ctx.rowIndex);
   tr.delete(from, from + ctx.tableNode.child(ctx.rowIndex).nodeSize);
   selectCellIn(tr, ctx.tablePos, ctx.rowIndex, ctx.cellIndex);
