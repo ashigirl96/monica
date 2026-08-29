@@ -54,11 +54,11 @@ gh sub-issue create --parent <親番号> --repo <owner/repo> --title "<title>" -
 
 ### 2. Monica で track する
 
-作成した issue の URL を `monica issue track` に渡す。`MONICA_HOME` は必ず
+作成した issue の URL を `monica task track` に渡す。`MONICA_HOME` は必ず
 `$HOME/monica` を指定する（指定しないと別の data dir を見てしまう）。
 
 ```bash
-MONICA_HOME=$HOME/monica monica issue track <issue url>
+MONICA_HOME=$HOME/monica monica task track <issue url>
 ```
 
 成功すると `Created MON-<id> from <owner/repo>#<number>` のように出力される。
@@ -66,18 +66,18 @@ MONICA_HOME=$HOME/monica monica issue track <issue url>
 
 ### 3. track されたか確認する
 
-正しく取り込まれたかは `monica issue status` で一覧を見て確認できる。ここでも
+正しく取り込まれたかは `monica task status` で一覧を見て確認できる。ここでも
 `MONICA_HOME=$HOME/monica` を付ける。
 
 ```bash
-MONICA_HOME=$HOME/monica monica issue status
+MONICA_HOME=$HOME/monica monica task status
 ```
 
 直前に作成した `MON-<id>` が一覧に出ていれば track 成功。
 
 ## 補足
 
-- `monica issue track` は issue URL（`https://github.com/owner/repo/issues/123`）
+- `monica task track` は issue URL（`https://github.com/owner/repo/issues/123`）
   でも `owner/repo#123` 形式でも受け付ける。手元に URL があれば URL をそのまま渡す。
 - 作成に失敗した場合は issue を track せず、エラーをそのまま報告する。
 - track 後は「実装しましょうか」と誘導せず、次にどんな issue を作るかを相談する

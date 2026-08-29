@@ -1,5 +1,5 @@
 use super::{Backend, Monica};
-use crate::usecases::tasks::{CloseIssueReport, MakeMainOutcome};
+use crate::usecases::tasks::{CloseTaskReport, MakeMainOutcome};
 use crate::prelude::{DisplayStatus, Event, Task};
 use crate::{ApplicationEvent, ApplicationResult, TaskSummaryRow};
 use crate::ports::TaskSummaryFilter;
@@ -14,9 +14,9 @@ impl<B: Backend> TaskService<'_, B> {
         crate::usecases::tasks::create_raw_task(&mut self.m.repos, title, project_id)
     }
 
-    pub fn close_issue(&mut self, id: &str) -> ApplicationResult<CloseIssueReport> {
+    pub fn close_task(&mut self, id: &str) -> ApplicationResult<CloseTaskReport> {
         let Monica { repos, git, .. } = &mut *self.m;
-        crate::usecases::tasks::close_issue(repos, git, id)
+        crate::usecases::tasks::close_task(repos, git, id)
     }
 
     /// Promote the run hosted in a Workbench tab to its task's Main Run, emitting the run's new

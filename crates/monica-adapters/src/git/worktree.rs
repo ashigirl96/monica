@@ -413,7 +413,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn close_issue_rips_dirty_worktree_prunes_metadata_and_keeps_run_record() {
+    fn close_task_rips_dirty_worktree_prunes_metadata_and_keeps_run_record() {
         let root = Tmp::new("rip-close");
         let repo = root.path().join("repo");
         fs::create_dir_all(&repo).unwrap();

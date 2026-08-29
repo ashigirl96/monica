@@ -18,7 +18,7 @@ use super::runs::record_hook::{
 use crate::usecases::github::{github_auth_status, track_github_issue};
 use crate::usecases::projects::register_project_with_default_branch;
 use crate::usecases::runs::{execute_run, open_bench, prepare_claude_for_run, start_run};
-use crate::usecases::tasks::{close_issue, create_raw_task, make_main_by_terminal_tab, primary_terminal_tab};
+use crate::usecases::tasks::{close_task, create_raw_task, make_main_by_terminal_tab, primary_terminal_tab};
 use crate::prelude::{
     Agent, AgentSignal, Continuation, ExplanationMode, NewTaskRun, NewTerminalSession, Project,
     Provider, RefType, SignalKind, TaskId, TaskRunStatus, TaskRunWaitReason, TaskStatus,

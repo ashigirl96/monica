@@ -3,12 +3,12 @@ use std::io::{self, Write};
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_application::{parse_issue_input, TaskSummaryRow};
-use monica_domain::{parse_owner_repo, DisplayStatus, Task};
+use monica_domain::{parse_owner_repo, DisplayStatus};
 
 use crate::event_sink::{self, CliFacade};
 
 #[derive(Subcommand)]
-pub enum IssueCommand {
+pub enum TaskCommand {
     /// Track an existing GitHub issue (owner/repo#123 or issue URL) as a Monica task
     Track {
         /// owner/repo#123 or GitHub issue URL
@@ -21,19 +21,19 @@ pub enum IssueCommand {
         #[arg(long)]
         project: Option<String>,
     },
-    /// Close a tracked Monica issue (MON-<id>)
+    /// Close a tracked Monica task (MON-<id>)
     Close {
         /// MON-<id>
         id: String,
     },
 }
 
-pub async fn run(cmd: IssueCommand) -> Result<()> {
+pub async fn run(cmd: TaskCommand) -> Result<()> {
     let mut monica = event_sink::open()?;
     match cmd {
-        IssueCommand::Track { target } => track_command(&mut monica, &target).await,
-        IssueCommand::Status { status, project } => status_command(&mut monica, status, project),
-        IssueCommand::Close { id } => close_command(&mut monica, &id),
+        TaskCommand::Track { target } => track_command(&mut monica, &target).await,
+        TaskCommand::Status { status, project } => status_command(&mut monica, status, project),
+        TaskCommand::Close { id } => close_command(&mut monica, &id),
     }
 }
 
@@ -44,11 +44,11 @@ async fn track_command(monica: &mut CliFacade, target: &str) -> Result<()> {
         .track_github_issue(repo.clone(), number)
         .await
         .with_context(|| format!("failed to fetch GitHub issue {repo}#{number}"))?;
-    let item = report.task;
+    let task = report.task;
     let issue = report.issue;
-    println!("Created {} from {}#{}", item.id, repo, issue.number);
-    println!("Status: {}", item.status.as_str());
-    println!("Title: {}", item.title);
+    println!("Created {} from {}#{}", task.id, repo, issue.number);
+    println!("Status: {}", task.status.as_str());
+    println!("Title: {}", task.title);
     Ok(())
 }
 
@@ -68,27 +68,21 @@ fn status_command(
 }
 
 fn close_command(monica: &mut CliFacade, id: &str) -> Result<()> {
-    let item = monica
-        .tasks()
-        .list_tasks()?
-        .into_iter()
-        .find(|task| task.id == id)
-        .ok_or_else(|| anyhow!("Issue not found: {id}"))?;
-    let project = monica
+    let task = monica
         .tasks()
         .list_all_task_summaries(None)?
         .into_iter()
-        .find(|row| row.id == item.id.as_str())
-        .and_then(|row| row.project);
+        .find(|row| row.id == id)
+        .ok_or_else(|| anyhow!("Task not found: {id}"))?;
 
-    print_close_summary(&item, project.as_deref());
+    print_close_summary(&task);
     if !confirm_close()? {
         println!("Canceled.");
         return Ok(());
     }
 
-    let report = monica.tasks().close_issue(id)?;
-    println!("Closed issue {}.", report.item.id);
+    let report = monica.tasks().close_task(id)?;
+    println!("Closed task {}.", report.task.id);
     if !report.task_runs.is_empty() {
         println!("Preserved task runs: {}.", report.task_runs.join(", "));
     }
@@ -98,13 +92,13 @@ fn close_command(monica: &mut CliFacade, id: &str) -> Result<()> {
     Ok(())
 }
 
-fn print_close_summary(item: &Task, project: Option<&str>) {
-    println!("Close issue?");
+fn print_close_summary(task: &TaskSummaryRow) {
+    println!("Close task?");
     println!();
-    println!("  ID:      {}", item.id);
-    println!("  Title:   {}", item.title);
-    println!("  Status:  {}", item.status.as_str());
-    println!("  Project: {}", project.unwrap_or("-"));
+    println!("  ID:      {}", task.id);
+    println!("  Title:   {}", task.title);
+    println!("  Status:  {}", task.task_status.as_str());
+    println!("  Project: {}", task.project.as_deref().unwrap_or("-"));
     println!();
     println!("This cannot be undone.");
 }
@@ -134,7 +128,7 @@ fn normalize_project_filter(project: Option<&str>) -> Result<Option<String>> {
 
 fn render_status_table(rows: &[TaskSummaryRow]) -> String {
     if rows.is_empty() {
-        return "No tracked issues found.\n".to_string();
+        return "No tracked tasks found.\n".to_string();
     }
 
     let mut table = vec![vec![
@@ -221,6 +215,6 @@ mod tests {
             .split_whitespace()
             .any(|column| column == "PR"));
 
-        assert_eq!(render_status_table(&[]), "No tracked issues found.\n");
+        assert_eq!(render_status_table(&[]), "No tracked tasks found.\n");
     }
 }

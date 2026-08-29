@@ -11,5 +11,5 @@ mod tests;
 
 pub use github::TrackGithubIssueReport;
 pub use runs::{HookContext, HookReport};
-pub use tasks::CloseIssueReport;
+pub use tasks::CloseTaskReport;
 pub use terminal::{DaemonSessionView, TerminalSessionUpdate};

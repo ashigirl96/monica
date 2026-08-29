@@ -177,7 +177,7 @@ pub async fn primary_tab_id(
 pub async fn close_task(app: AppHandle, task_id: String) -> Result<(), ApiError> {
     event_sink::off_main(move || {
         let mut monica = event_sink::open(&app)?;
-        monica.tasks().close_issue(&task_id).map(|_| ()).map_err(ApiError::from)
+        monica.tasks().close_task(&task_id).map(|_| ()).map_err(ApiError::from)
     })
     .await
 }

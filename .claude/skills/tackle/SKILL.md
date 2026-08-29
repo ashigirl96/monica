@@ -197,7 +197,7 @@ subagent の最終メッセージがレビュー本文としてそのまま返�
 
 ### Step 7: 動作確認
 
-- **CLI 機能**（M0 の `monica project` / `issue` 系など）: `just dev` でデバッグ版 `./monica` をビルドし、該当サブコマンドを実行して出力と DB 状態を確認する。`just test` だけで足りるなら GUI は不要。
+- **CLI 機能**（M0 の `monica project` / `task` 系など）: `just dev` でデバッグ版 `./monica` をビルドし、該当サブコマンドを実行して出力と DB 状態を確認する。`just test` だけで足りるなら GUI は不要。
 - **GUI / フロント変更**: `just dev` で Tauri ウィンドウ + Vite を起動し、`verify` skill か Tauri MCP（`webview_*` / `ipc_*` ツール）で「操作 → 期待結果」を確認する。hello_pay と違い monica では dev サーバーが常駐していないので、起動も確認手順の一部。
 
 ### Step 8: checklist を完了する
