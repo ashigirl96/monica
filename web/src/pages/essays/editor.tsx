@@ -17,7 +17,8 @@ import { useServerDoc } from "@/notes/note-sync";
 import { NotesShell } from "@/notes/notes-shell";
 import { useEssaysCache, useEssaysQuery, useNoteQuery, useSeedNote } from "@/notes/queries";
 import { SaveStatus } from "@/notes/save-status";
-import { useAutosave } from "@/notes/use-autosave";
+import { useAutosaveContext } from "@/notes/autosave-context";
+import { noteLabel } from "@/notes/summary";
 import { EssaysSidebar } from "./sidebar";
 import {
   dropEssay,
@@ -60,8 +61,8 @@ function StatusChip({
 export function EssayEditorPage({ id }: { id: string }) {
   // サイドバーが表示中の status。⌥H/⌥L の手動切替と、開いた note の status への同期で動く
   const [tab, setTab] = useState<EssayStatus>("writing");
-  const autosave = useAutosave();
-  const { schedule, flush, discard, resume, error: saveError, conflictId } = autosave;
+  const autosave = useAutosaveContext();
+  const { schedule, flush, discard, resume, error: saveError, hasConflict } = autosave;
   const { setBase, hasUnsaved } = autosave;
   const { data: essays = null } = useEssaysQuery();
   const { patchEssays, invalidateEssays } = useEssaysCache();
@@ -159,10 +160,14 @@ export function EssayEditorPage({ id }: { id: string }) {
 
   const scheduleSave = useCallback(
     (target: Note) => {
-      schedule(target.id, {
-        title: target.kind.kind === "essay" ? target.kind.title : null,
-        content: persistableContent(contentRef.current ?? target.content),
-      });
+      schedule(
+        target.id,
+        {
+          title: target.kind.kind === "essay" ? target.kind.title : null,
+          content: persistableContent(contentRef.current ?? target.content),
+        },
+        noteLabel(target, "Untitled"),
+      );
     },
     [schedule],
   );
@@ -194,9 +199,10 @@ export function EssayEditorPage({ id }: { id: string }) {
       scheduleSave(target);
     };
     // 保存が通っていない状態で消すと ⌥Z で戻せるのはサーバに届いた内容までになる。
-    // flush は失敗しても resolve するので、成否を見て未保存分がある間は削除しない
-    // （saveError が画面に出ているので、保存が回復すれば削除できる）
-    if (!(await flush())) {
+    // flush は失敗しても resolve するので、この note の未保存分が残る間は削除しない
+    // （saveError / 競合バナーが画面に出ているので、解消すれば削除できる）
+    await flush();
+    if (hasUnsaved(target.id)) {
       abort();
       return;
     }
@@ -215,7 +221,7 @@ export function EssayEditorPage({ id }: { id: string }) {
     const next = cycleIds.includes(target.id) ? cycleSelect(cycleIds, target.id, 1) : undefined;
     if (next !== undefined && next !== target.id) navigate(`/essays/${next}`, { replace: true });
     else navigate("/essays", { replace: true });
-  }, [flush, discard, scheduleSave, cycleIds, patchEssays]);
+  }, [flush, discard, scheduleSave, cycleIds, patchEssays, hasUnsaved]);
 
   const undoDelete = useCallback(async () => {
     const restored = await restoreLastDeletedEssay();
@@ -242,7 +248,8 @@ export function EssayEditorPage({ id }: { id: string }) {
       // 通らなかったときは中断する: 下で基準版を status の新しい updated_at へ進めてしまうと、
       // 競合で行き場を失った古い本文が「新しい基準版に載った正当な編集」に化け、次の打鍵で
       // 勝った側の外部変更を上書きしてしまう（削除と同じく、未保存が残る間は手を出さない）。
-      if (!(await flush())) return;
+      await flush();
+      if (hasUnsaved(current.id)) return;
       try {
         const updated = await setEssayStatus(current.id, current.kind.next_status);
         // status 列単独の UPDATE で updated_at だけが進む。自分の content 書き込みはその上に
@@ -380,7 +387,7 @@ export function EssayEditorPage({ id }: { id: string }) {
                 </span>
                 <SaveStatus
                   saveError={saveError}
-                  conflict={conflictId === note.id}
+                  conflict={hasConflict(note.id)}
                   onReload={() => void reload()}
                 />
               </div>

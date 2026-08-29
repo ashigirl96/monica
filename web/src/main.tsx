@@ -6,6 +6,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./app";
+import { AutosaveProvider } from "./notes/autosave-context";
 import { queryClient } from "./query";
 import "./globals.css";
 
@@ -16,7 +17,9 @@ initNoteWidth();
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
+      <AutosaveProvider>
+        <App />
+      </AutosaveProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

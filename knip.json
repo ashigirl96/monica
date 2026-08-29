@@ -6,6 +6,7 @@
   "ignoreBinaries": ["lefthook", "tsc", "tauri"],
   "ignoreDependencies": [
     "@milkdown/kit",
+    "@tanstack/react-query",
     "tailwindcss",
     "tw-animate-css",
     "@tauri-apps/cli",

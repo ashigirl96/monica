@@ -67,7 +67,7 @@ export function useServerDoc({
   // 再マウントの世代。自分の保存では進まないので打鍵中にカーソルと undo が飛ばない
   const [generation, setGeneration] = useState(0);
   const [lastKey, setLastKey] = useState(docKey);
-  const { baseVersion, setBase, hasUnsaved, dropPending } = autosave;
+  const { baseVersion, setBase, hasUnsaved, dropPending, setOpenNote } = autosave;
 
   if (lastKey !== docKey) {
     // doc が変わったら latch を破棄する。派生値でマスクするだけだと、採用が終わる前に
@@ -107,6 +107,14 @@ export function useServerDoc({
     });
     if (adoptable) adopt(usable, true);
   }, [data, current, adopt, baseVersion, hasUnsaved]);
+
+  const openId = current?.id ?? null;
+  useEffect(() => {
+    // 開いている note を autosave へ知らせる。グローバルな競合通知は、ヘッダのバナーが
+    // 担当している note の行を出さないためにこれを見る。
+    setOpenNote(openId);
+    return () => setOpenNote(null);
+  }, [openId, setOpenNote]);
 
   /** 「最新を読み込む」の実体。未送信の編集を捨ててサーバの現在値を採用し直す。 */
   const reload = useCallback(async () => {

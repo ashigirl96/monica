@@ -21,7 +21,8 @@ import { useServerDoc } from "@/notes/note-sync";
 import { NotesShell } from "@/notes/notes-shell";
 import { useDailyDatesQuery, useDailyNoteQuery, useNotesTodayQuery } from "@/notes/queries";
 import { SaveStatus } from "@/notes/save-status";
-import { useAutosave } from "@/notes/use-autosave";
+import { useAutosaveContext } from "@/notes/autosave-context";
+import { noteLabel } from "@/notes/summary";
 import { DailyCalendar } from "./calendar";
 import { DailySidebar } from "./sidebar";
 
@@ -35,8 +36,8 @@ export function DailyPage({ date }: { date: string | null }) {
   const [today, setToday] = useState<string>(todayKey);
   const [month, setMonth] = useState<Month>(currentMonth);
   const queryClient = useQueryClient();
-  const autosave = useAutosave();
-  const { schedule, flush, error: saveError, conflictId } = autosave;
+  const autosave = useAutosaveContext();
+  const { schedule, flush, error: saveError, hasConflict } = autosave;
   const editorHandleRef = useRef<BlockEditorHandle | null>(null);
   const contentRef = useRef<unknown>(null);
   const noteRef = useRef<Note | null>(null);
@@ -170,11 +171,16 @@ export function DailyPage({ date }: { date: string | null }) {
       contentRef.current = doc;
       const current = noteRef.current;
       if (current) {
-        // daily は title を持たないので常に null（essay の title 置換経路は通らない）
-        schedule(current.id, {
-          title: null,
-          content: persistableContent(contentRef.current ?? current.content),
-        });
+        // daily は title を持たないので常に null（essay の title 置換経路は通らない）。
+        // 競合通知の見出しも title ではなく日付になる
+        schedule(
+          current.id,
+          {
+            title: null,
+            content: persistableContent(contentRef.current ?? current.content),
+          },
+          noteLabel(current, dayLabelWithYear(current.date)),
+        );
       }
     },
     [schedule],
@@ -216,7 +222,7 @@ export function DailyPage({ date }: { date: string | null }) {
               <span className="truncate text-xs">
                 <SaveStatus
                   saveError={saveError}
-                  conflict={conflictId === note.id}
+                  conflict={hasConflict(note.id)}
                   onReload={() => void reload()}
                 />
               </span>

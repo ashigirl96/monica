@@ -24,7 +24,8 @@ import {
   useSeedNote,
 } from "@/notes/queries";
 import { SaveStatus } from "@/notes/save-status";
-import { useAutosave } from "@/notes/use-autosave";
+import { useAutosaveContext } from "@/notes/autosave-context";
+import { noteLabel } from "@/notes/summary";
 import { FuzzyPickerModal } from "@/components/fuzzy-picker-modal";
 import { ProjectsSidebar } from "./sidebar";
 import { setLastProject } from "./support";
@@ -40,8 +41,9 @@ function projectPath(projectId: string, noteId?: string): string {
 export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId: string | null }) {
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  const autosave = useAutosave();
-  const { schedule, flush, discard, resume, error: saveError, conflictId } = autosave;
+  const autosave = useAutosaveContext();
+  const { schedule, flush, discard, resume, error: saveError, hasConflict } = autosave;
+  const { hasUnsaved } = autosave;
   const editorHandleRef = useRef<BlockEditorHandle | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const pendingTitleFocusRef = useRef(false);
@@ -194,12 +196,19 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
         target.id !== primaryIdRef.current && target.kind.kind === "project"
           ? target.kind.title
           : null;
-      schedule(target.id, {
-        title: editableTitle,
-        content: persistableContent(contentRef.current ?? target.content),
-      });
+      // 競合通知の見出しもヘッダと同じ規則で決める（primary は project 名で名指しする）
+      const label =
+        target.id === primaryIdRef.current ? projectName : noteLabel(target, "Untitled");
+      schedule(
+        target.id,
+        {
+          title: editableTitle,
+          content: persistableContent(contentRef.current ?? target.content),
+        },
+        label,
+      );
     },
-    [schedule],
+    [schedule, projectName],
   );
 
   const deleteById = useCallback(
@@ -217,8 +226,9 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
         noteRef.current = editing;
         scheduleSave(editing);
       };
-      // 未保存分が残っている間は削除しない（⌥Z で戻せるのがサーバに届いた内容までになる）
-      if (!(await flush())) {
+      // この note の未保存分が残る間は削除しない（⌥Z で戻せるのがサーバに届いた内容までになる）
+      await flush();
+      if (hasUnsaved(targetId)) {
         abort();
         return;
       }
@@ -234,7 +244,7 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
       patchProjectNotes((items) => items.filter((s) => s.id !== targetId));
       if (noteId === targetId) navigate(projectPath(projectId), { replace: true });
     },
-    [flush, discard, scheduleSave, noteId, projectId, patchProjectNotes],
+    [flush, discard, scheduleSave, noteId, projectId, patchProjectNotes, hasUnsaved],
   );
 
   const undoDelete = useCallback(async () => {
@@ -390,7 +400,7 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
                 </span>
                 <SaveStatus
                   saveError={saveError}
-                  conflict={conflictId === note.id}
+                  conflict={hasConflict(note.id)}
                   onReload={() => void reload()}
                 />
               </div>
