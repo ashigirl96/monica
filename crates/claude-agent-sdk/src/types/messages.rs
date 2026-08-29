@@ -6,10 +6,6 @@ use std::collections::HashMap;
 use super::identifiers::SessionId;
 use super::introspection::{ModelUsage, SDKPermissionDenial};
 
-// ============================================================================
-// AskUserQuestion Tool Types
-// ============================================================================
-
 /// Option for a question in `AskUserQuestion`
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct QuestionOption {
@@ -49,10 +45,6 @@ pub struct AskUserQuestionOutput {
     /// User's answers keyed by question header
     pub answers: HashMap<String, String>,
 }
-
-// ============================================================================
-// Message Types
-// ============================================================================
 
 /// Content value for tool results
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -265,7 +257,6 @@ mod tests {
         };
 
         let json = serde_json::to_string(&spec).unwrap();
-        // camelCase for multiSelect
         assert!(json.contains("multiSelect"));
         assert!(!json.contains("multi_select"));
 
@@ -321,7 +312,6 @@ mod tests {
         };
 
         let json = serde_json::to_string(&input).unwrap();
-        // answers should be omitted when None
         assert!(!json.contains("answers"));
 
         let parsed: AskUserQuestionInput = serde_json::from_str(&json).unwrap();
@@ -377,7 +367,6 @@ mod tests {
 
     #[test]
     fn test_ask_user_question_from_json_value() {
-        // Simulate parsing from a ToolUse input
         let json_value = serde_json::json!({
             "questions": [{
                 "question": "Which database?",

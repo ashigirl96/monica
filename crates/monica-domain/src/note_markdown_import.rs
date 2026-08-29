@@ -556,8 +556,6 @@ fn image(text: &str) -> Option<BlockNode> {
     })
 }
 
-// ---- inline ----
-
 fn parse_inlines(text: &str) -> Option<Vec<InlineNode>> {
     let mut out = Vec::new();
     parse_inline_into(text, &[], &mut out);

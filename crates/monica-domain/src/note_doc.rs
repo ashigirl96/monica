@@ -625,7 +625,6 @@ fn find_block(node: &BlockNode, block_id: &str) -> Option<String> {
     }
 }
 
-// ---- Value walker ----
 // typed parse が失敗した doc（既知タグ + payload 型不一致）と `Unknown` subtree のための
 // fallback。valid JSON なら必ず走査できるという保証は、型付きモデルではなくここが担う。
 

@@ -30,7 +30,6 @@ use crate::{
     SetupRunner, TaskRunObservation, TaskRunOutputs, TaskSummaryRow, TerminalSessionUpdate,
     TerminalStateSnapshot,
 };
-// --- Agent-signal test builders -------------------------------------------------------------------
 // The use-case tests drive `record_hook` with typed `AgentSignal`s (the agent JSON -> signal
 // decoding is covered by the adapter decoder's own tests in `monica-adapters::agents`). `raw_stdin` is
 // irrelevant to these assertions, so the shim feeds a constant.

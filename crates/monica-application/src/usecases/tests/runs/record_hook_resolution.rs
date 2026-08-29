@@ -1,8 +1,6 @@
 use super::*;
 
 
-// --- resolve rule unit tests ---
-
 
 #[test]
 fn resolve_by_session_returns_none_without_session_id() {

@@ -3,7 +3,6 @@
 //! This module contains all the type definitions used throughout the SDK,
 //! including identifiers for type safety, message types, option types, and more.
 
-// Module declarations
 pub mod hooks;
 pub mod identifiers;
 pub mod introspection;
@@ -15,11 +14,8 @@ pub mod usage;
 
 // Re-export all public types for backward compatibility
 pub use hooks::{
-    // Base input
     BaseHookInput,
-    // Event-specific inputs
     CompactTrigger,
-    // Core hook types
     HookContext,
     HookDecision,
     HookEvent,

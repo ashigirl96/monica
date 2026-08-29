@@ -73,13 +73,11 @@ export function editorKeymap(): Plugin[] {
       ArrowRight: exitInlineCode,
       // その対称: 抜けた状態の ← はカーソルを動かさず code の右端（mark 内）へ戻る
       ArrowLeft: enterInlineCode,
-      // inline formatting
       "Mod-b": toggleMark(schema.marks.bold),
       "Mod-i": toggleMark(schema.marks.italic),
       "Mod-u": toggleMark(schema.marks.underline),
       "Mod-e": toggleMark(schema.marks.code),
       "Mod-Shift-s": toggleMark(schema.marks.strike),
-      // history
       "Mod-z": undo,
       "Shift-Mod-z": redo,
       "Mod-y": redo,

@@ -6,10 +6,6 @@ use tokio_util::sync::CancellationToken;
 
 use super::identifiers::ToolName;
 
-// ============================================================================
-// Permission Types
-// ============================================================================
-
 /// Permission modes for tool execution
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]

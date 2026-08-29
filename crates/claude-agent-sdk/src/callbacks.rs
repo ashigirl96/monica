@@ -67,10 +67,6 @@ use async_trait::async_trait;
 use crate::error::Result;
 use crate::types::{HookContext, HookOutput, PermissionResult, ToolPermissionContext};
 
-// ============================================================================
-// Hook Callback Trait
-// ============================================================================
-
 /// Trait for hook callbacks.
 ///
 /// Implement this trait to create custom hook handlers that can intercept
@@ -124,7 +120,6 @@ pub trait HookCallback: Send + Sync {
     ) -> Result<HookOutput>;
 }
 
-// Blanket implementation for boxed trait objects
 #[async_trait]
 impl HookCallback for Box<dyn HookCallback> {
     async fn call(
@@ -136,10 +131,6 @@ impl HookCallback for Box<dyn HookCallback> {
         (**self).call(input, tool_use_id, context).await
     }
 }
-
-// ============================================================================
-// Permission Callback Trait
-// ============================================================================
 
 /// Trait for permission callbacks.
 ///
@@ -204,7 +195,6 @@ pub trait PermissionCallback: Send + Sync {
     ) -> Result<PermissionResult>;
 }
 
-// Blanket implementation for boxed trait objects
 #[async_trait]
 impl PermissionCallback for Box<dyn PermissionCallback> {
     async fn call(
@@ -216,10 +206,6 @@ impl PermissionCallback for Box<dyn PermissionCallback> {
         (**self).call(tool_name, input, context).await
     }
 }
-
-// ============================================================================
-// Arc wrapper implementations for shared callbacks
-// ============================================================================
 
 use std::sync::Arc;
 
@@ -247,19 +233,11 @@ impl<T: PermissionCallback + ?Sized> PermissionCallback for Arc<T> {
     }
 }
 
-// ============================================================================
-// Type aliases for backward compatibility and convenience
-// ============================================================================
-
 /// Type alias for a shared hook callback.
 pub type SharedHookCallback = Arc<dyn HookCallback>;
 
 /// Type alias for a shared permission callback.
 pub type SharedPermissionCallback = Arc<dyn PermissionCallback>;
-
-// ============================================================================
-// Closure-based callback wrappers
-// ============================================================================
 
 /// Wrapper to convert a closure into a `HookCallback`.
 ///
@@ -493,7 +471,6 @@ mod tests {
     async fn test_fn_hook_callback() {
         let callback = FnHookCallback::new(|_input, _tool_id, ctx| {
             Box::pin(async move {
-                // Verify context fields are accessible
                 let _ = ctx.session_id;
                 let _ = ctx.cwd;
                 let _ = ctx.is_cancelled();
@@ -511,7 +488,6 @@ mod tests {
     async fn test_fn_permission_callback() {
         let callback = FnPermissionCallback::new(|_tool, _input, ctx| {
             Box::pin(async move {
-                // Verify context has suggestions and cancellation fields
                 let _ = ctx.suggestions;
                 let _ = ctx.is_cancelled();
                 Ok(PermissionResult::Allow(PermissionResultAllow {

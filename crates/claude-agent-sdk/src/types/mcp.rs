@@ -7,10 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-// ============================================================================
-// MCP Server Types
-// ============================================================================
-
 /// MCP stdio server configuration
 ///
 /// Used to spawn an MCP server as a subprocess.

@@ -57,8 +57,8 @@ impl EventSink for TauriEventSink {
                     log::warn!(target: "monica_app::events", "failed to emit PrSyncCompleted: {e}");
                 }
             }
-            // The desktop reflects a waiting run via its TaskRunStatusChanged status; no separate
-            // OS notification yet.
+            // The OS notification is delivered from the outbox by `schedulers::notification_drain`,
+            // not from this sink — emitting here too would double-notify.
             ApplicationEvent::AwaitingUserInput { .. } => {}
         }
     }

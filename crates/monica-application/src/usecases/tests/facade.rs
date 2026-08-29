@@ -2,14 +2,10 @@ use super::*;
 use super::support::*;
 
 
-// ---------------------------------------------------------------------------
-// Façade orchestration tests
-//
 // The pure decision functions (task_run_settlement_for_*, reconcile_terminal_sessions) and the
 // store CAS guard (settle_task_run_if_live) are tested elsewhere. These exercise the composition
 // the façade adds on top: fetch rows → call the pure verdict → apply → emit, end to end against a
 // fake backend, asserting the emitted ApplicationEvents.
-// ---------------------------------------------------------------------------
 
 
 #[test]
@@ -235,10 +231,6 @@ async fn facade_init_project_prefers_git_branch_over_github() {
     assert_eq!(report.project.default_branch, "main");
     assert!(!report.scaffold.is_empty());
 }
-
-// ---------------------------------------------------------------------------
-// ExplanationService
-// ---------------------------------------------------------------------------
 
 fn fake_terminal_session(id: &str, agent_session_id: Option<&str>) -> TerminalSession {
     TerminalSession {

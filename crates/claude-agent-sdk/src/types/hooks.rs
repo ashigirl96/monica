@@ -4,10 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-// ============================================================================
-// Hook Types
-// ============================================================================
-
 /// Hook event types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
 pub enum HookEvent {
@@ -36,10 +32,6 @@ pub enum HookEvent {
     /// When a permission is requested
     PermissionRequest,
 }
-
-// ============================================================================
-// Hook Input Types
-// ============================================================================
 
 /// Base fields common to all hook inputs
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -305,10 +297,6 @@ pub enum HookInput {
     PermissionRequest(PermissionRequestHookInput),
 }
 
-// ============================================================================
-// Hook Output and Decision Types
-// ============================================================================
-
 /// Hook decision
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
@@ -527,7 +515,6 @@ mod tests {
     fn test_hook_output_serialization_omits_none() {
         let output = HookOutput::default();
         let json = serde_json::to_string(&output).unwrap();
-        // Should be empty object when all fields are None
         assert_eq!(json, "{}");
     }
 

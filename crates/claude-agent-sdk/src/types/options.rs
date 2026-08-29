@@ -10,10 +10,6 @@ use super::identifiers::ToolName;
 use super::mcp::McpServers;
 use super::permissions::{CanUseToolCallback, PermissionMode, SettingSource};
 
-// ============================================================================
-// System Prompt Types
-// ============================================================================
-
 /// System prompt preset
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct SystemPromptPreset {
@@ -38,7 +34,6 @@ pub enum SystemPrompt {
     File(PathBuf),
 }
 
-// Implement conversions for SystemPrompt
 impl From<String> for SystemPrompt {
     fn from(s: String) -> Self {
         SystemPrompt::String(s)
@@ -70,10 +65,6 @@ impl SystemPrompt {
         SystemPrompt::File(path.into())
     }
 }
-
-// ============================================================================
-// Tools Configuration
-// ============================================================================
 
 /// Tools configuration - either a list of tool names or a preset
 #[derive(Debug, Clone)]
@@ -131,10 +122,6 @@ impl From<ToolsPreset> for ToolsConfig {
     }
 }
 
-// ============================================================================
-// Stderr Callback
-// ============================================================================
-
 use std::sync::Arc;
 
 /// Callback for stderr output
@@ -160,10 +147,6 @@ pub enum RawEventDirection {
 /// 未知イベントも欠落なく観測できる。
 pub type RawEventCallback = Arc<dyn Fn(RawEventDirection, &str) + Send + Sync>;
 
-// ============================================================================
-// Output Format
-// ============================================================================
-
 /// Output format configuration for structured outputs
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct OutputFormat {
@@ -184,10 +167,6 @@ impl OutputFormat {
         }
     }
 }
-
-// ============================================================================
-// Sandbox Settings
-// ============================================================================
 
 /// Network-specific configuration for sandbox mode
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
@@ -246,10 +225,6 @@ pub struct SandboxSettings {
     pub enable_weaker_nested_sandbox: Option<bool>,
 }
 
-// ============================================================================
-// Plugin Configuration
-// ============================================================================
-
 /// Configuration for loading plugins
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(tag = "type")]
@@ -262,10 +237,6 @@ pub enum SdkPluginConfig {
     },
 }
 
-// ============================================================================
-// Beta Features
-// ============================================================================
-
 /// Available beta features
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
 pub enum SdkBeta {
@@ -273,10 +244,6 @@ pub enum SdkBeta {
     #[serde(rename = "context-1m-2025-08-07")]
     Context1M,
 }
-
-// ============================================================================
-// Agent Definition
-// ============================================================================
 
 /// Agent definition configuration
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -293,10 +260,6 @@ pub struct AgentDefinition {
     pub model: Option<String>,
 }
 
-// ============================================================================
-// Effort Level
-// ============================================================================
-
 /// Reasoning effort level (maps to the `--effort` CLI flag)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EffortLevel {
@@ -311,10 +274,6 @@ pub enum EffortLevel {
     /// Maximum effort
     Max,
 }
-
-// ============================================================================
-// Claude Agent Options
-// ============================================================================
 
 /// Main options for Claude Agent SDK
 #[allow(clippy::struct_excessive_bools)]
@@ -432,9 +391,6 @@ pub struct ClaudeAgentOptions {
     #[builder(default, setter(strip_option))]
     pub setting_sources: Option<Vec<SettingSource>>,
 
-    // ========================================================================
-    // New options for TypeScript SDK parity
-    // ========================================================================
     /// Maximum budget in USD for the query
     #[builder(default, setter(strip_option))]
     pub max_budget_usd: Option<f64>,
@@ -483,9 +439,6 @@ pub struct ClaudeAgentOptions {
     #[builder(default, setter(strip_option, into))]
     pub resume_session_at: Option<String>,
 
-    // ========================================================================
-    // Additional TypeScript SDK parity options
-    // ========================================================================
     /// Enable bypassing permissions (requires permissionMode: `BypassPermissions`)
     ///
     /// **WARNING**: This is dangerous and should only be used in controlled
@@ -561,7 +514,6 @@ impl std::fmt::Debug for ClaudeAgentOptions {
             .field("session_id", &self.session_id)
             .field("agents", &self.agents)
             .field("setting_sources", &self.setting_sources)
-            // New fields for TypeScript SDK parity
             .field("max_budget_usd", &self.max_budget_usd)
             .field("max_thinking_tokens", &self.max_thinking_tokens)
             .field("effort", &self.effort)
@@ -578,7 +530,6 @@ impl std::fmt::Debug for ClaudeAgentOptions {
             .field("betas", &self.betas)
             .field("strict_mcp_config", &self.strict_mcp_config)
             .field("resume_session_at", &self.resume_session_at)
-            // Additional TypeScript SDK parity options
             .field(
                 "allow_dangerously_skip_permissions",
                 &self.allow_dangerously_skip_permissions,

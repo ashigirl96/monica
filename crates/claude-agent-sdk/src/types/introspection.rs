@@ -6,10 +6,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-// ============================================================================
-// Session Information (from init message)
-// ============================================================================
-
 /// Tool information from the init message
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ToolInfo {
@@ -81,7 +77,6 @@ impl SessionInfo {
             .map(|arr| {
                 arr.iter()
                     .filter_map(|t| {
-                        // Handle string format (from CLI)
                         if let Some(name) = t.as_str() {
                             return Some(ToolInfo {
                                 name: name.to_string(),
@@ -123,7 +118,6 @@ impl SessionInfo {
                     .filter_map(|s| {
                         let name = s.get("name").and_then(|n| n.as_str())?;
 
-                        // Extract MCP tools from main tools array
                         // Format: mcp__servername__toolname (hyphens preserved)
                         let server_prefix = format!("mcp__{name}__");
                         let server_tools: Vec<String> = all_tools
@@ -147,7 +141,6 @@ impl SessionInfo {
             })
             .unwrap_or_default();
 
-        // Collect extra fields
         let extra = data
             .as_object()
             .map(|obj| {
@@ -208,10 +201,6 @@ impl SessionInfo {
     }
 }
 
-// ============================================================================
-// Account Information
-// ============================================================================
-
 /// Account information from OAuth credentials
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct AccountInfo {
@@ -227,10 +216,6 @@ pub struct AccountInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub organization_id: Option<String>,
 }
-
-// ============================================================================
-// Supported Models
-// ============================================================================
 
 /// Information about a supported model
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -288,10 +273,6 @@ impl ModelInfo {
     }
 }
 
-// ============================================================================
-// Slash Commands
-// ============================================================================
-
 /// Information about an available slash command
 ///
 /// Slash commands are custom user-defined commands that can be invoked
@@ -307,10 +288,6 @@ pub struct SlashCommand {
     pub argument_hint: String,
 }
 
-// ============================================================================
-// Permission Denials
-// ============================================================================
-
 /// Information about a denied tool use
 ///
 /// Returned in Result messages to indicate which tool uses were
@@ -324,10 +301,6 @@ pub struct SDKPermissionDenial {
     /// Input parameters that were passed to the tool
     pub tool_input: serde_json::Value,
 }
-
-// ============================================================================
-// Model Usage Statistics
-// ============================================================================
 
 /// Per-model usage statistics returned in result messages
 ///

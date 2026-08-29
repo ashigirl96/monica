@@ -3,10 +3,6 @@
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 
-// ============================================================================
-// Newtype Wrappers for Type Safety
-// ============================================================================
-
 /// Session ID newtype for type safety
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
 #[serde(transparent)]
