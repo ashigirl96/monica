@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, updateNote } from "@/api";
 import type { UpdateNote } from "@/types.gen";
+import { type NoteConflict, removeConflict, shouldAdvanceBase, upsertConflict } from "./conflicts";
 
 const DEBOUNCE_MS = 1000;
 const RETRY_MS = 5000;
@@ -10,13 +11,16 @@ export type NoteDraft = Omit<UpdateNote, "expected_updated_at">;
 
 /**
  * ノート id ごとに最新 payload を保持し、1 秒 debounce で PUT する。flush はノート切替・
- * unmount・pagehide（keepalive fetch）から呼ばれる。失敗した payload は同 id のより新しい
- * pending や削除済み id がない限り復元し、RETRY_MS 後に自動再試行する。
+ * pagehide（keepalive fetch）から呼ばれる。失敗した payload は同 id のより新しい pending や
+ * 削除済み id がない限り復元し、RETRY_MS 後に自動再試行する。
  *
  * 併せて id ごとの基準版（最後に読んだ / 書いた updated_at）を台帳に持ち、PUT に
  * expected_updated_at として添える。サーバが 409 を返したら他クライアントに先を越された
- * ということなので、再試行せず conflictId を立てて呼び手に委ねる（同じ stale な基準版で
+ * ということなので、再試行せず競合台帳に積んで呼び手に委ねる（同じ stale な基準版で
  * 再試行しても永久に 409 になるため）。
+ *
+ * この hook は router より上（AutosaveProvider）で 1 度だけ mount する。ページ単位で持つと、
+ * 別セクションへ移った瞬間に台帳ごと消えて、後から返った 409 の行き場が無くなる。
  */
 export function useAutosave() {
   const pendingRef = useRef(new Map<string, NoteDraft>());
@@ -28,11 +32,16 @@ export function useAutosave() {
   // 409 で行き場を失った draft。再送しても永久に 409 なので pending には戻さないが、
   // 「未保存」ではあるので削除や content 採用の前で止められるよう別に持つ
   const conflictedRef = useRef(new Map<string, NoteDraft>());
+  // 競合通知に出す見出し。kind ごとの決め方はページの知識なので schedule で受け取る
+  const labelRef = useRef(new Map<string, string>());
   const timerRef = useRef<number | null>(null);
   // flush を直列化し、古い payload の PUT が新しい PUT を追い越して上書きするのを防ぐ
   const flushChainRef = useRef<Promise<void>>(Promise.resolve());
   const [error, setError] = useState<string | null>(null);
-  const [conflictId, setConflictId] = useState<string | null>(null);
+  // 競合の一覧。開いている note に依らず保持するので、離脱後に返った 409 も surface できる
+  const [conflicts, setConflicts] = useState<NoteConflict[]>([]);
+  // 画面に出ている note。通知はこの行を出さない（インラインバナーと二重になる）
+  const [openNoteId, setOpenNote] = useState<string | null>(null);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -43,10 +52,11 @@ export function useAutosave() {
 
   const baseVersion = useCallback((id: string) => versionRef.current.get(id) ?? null, []);
 
-  /** 基準版は単調にしか進めない。巻き戻すと偽の 409 か、古い doc での静かな上書きに直結する。 */
+  /** 前進の可否は shouldAdvanceBase が持つ（単調性 + 競合中のピン留め）。 */
   const setBase = useCallback((id: string, updatedAt: string) => {
-    const current = versionRef.current.get(id);
-    if (current === undefined || updatedAt > current) versionRef.current.set(id, updatedAt);
+    const current = versionRef.current.get(id) ?? null;
+    if (!shouldAdvanceBase(current, updatedAt, conflictedRef.current.has(id))) return;
+    versionRef.current.set(id, updatedAt);
   }, []);
 
   /** 未保存（pending・送信中・競合で滞留）の編集を抱えているか。 */
@@ -56,17 +66,19 @@ export function useAutosave() {
     [],
   );
 
-  /** 保存が全て通ったかを返す。false = pending が残っている（再試行待ち）ので、
-   * 呼び手は「未保存分が消えると困る操作」（削除など）を中断できる。 */
+  /** 競合バナーの表示条件。台帳ではなく state から引くので、409 の到着で再描画される。 */
+  const hasConflict = useCallback((id: string) => conflicts.some((c) => c.id === id), [conflicts]);
+
+  /** pending を出し切る。成否は id ごとに `hasUnsaved(id)` で見る — 呼び手が気にするのは
+   * 常に自分が触っている note の 1 件で、無関係な note の失敗で操作を止める理由はない。 */
   const flush = useCallback(
-    (keepalive = false): Promise<boolean> => {
-      const run = async (): Promise<boolean> => {
+    (keepalive = false): Promise<void> => {
+      const run = async (): Promise<void> => {
         clearTimer();
-        if (pendingRef.current.size === 0) return true;
+        if (pendingRef.current.size === 0) return;
         const batch = pendingRef.current;
         pendingRef.current = new Map();
         let failure: string | null = null;
-        let conflicted = false;
         await Promise.all(
           [...batch].map(([id, draft]) => {
             inflightRef.current.add(id);
@@ -79,11 +91,11 @@ export function useAutosave() {
               .catch((e: unknown) => {
                 if (e instanceof ApiError && e.status === 409) {
                   // 基準版が古いので同じ payload を投げ直しても永久に 409。pending へ戻して
-                  // リトライさせず、競合として保持したうえでバナーに渡す。
-                  // failure にはしない（自動リトライを誘発し、競合バナーとも二重表示になる）。
+                  // リトライさせず、競合として保持したうえで通知とバナーに渡す。
+                  // failure にはしない（自動リトライを誘発し、競合表示とも二重になる）。
                   conflictedRef.current.set(id, draft);
-                  conflicted = true;
-                  setConflictId(id);
+                  const label = labelRef.current.get(id) ?? "Untitled";
+                  setConflicts((list) => upsertConflict(list, { id, label }));
                   return;
                 }
                 if (!discardedRef.current.has(id) && !pendingRef.current.has(id)) {
@@ -98,21 +110,18 @@ export function useAutosave() {
         if (failure !== null && pendingRef.current.size > 0 && timerRef.current === null) {
           timerRef.current = window.setTimeout(() => void flush(), RETRY_MS);
         }
-        // 競合が残っている間は false。削除のように「未保存が消えると困る」呼び手が
-        // 中断できるようにする（ユーザーが「最新を読み込む」を選ぶまで解けない）。
-        return failure === null && !conflicted;
       };
       const settled = flushChainRef.current.then(run);
-      // chain 自体は void で繋ぐ（次の flush が前回の結果を引数として受け取らないように）
-      flushChainRef.current = settled.then(() => undefined);
+      flushChainRef.current = settled;
       return settled;
     },
     [clearTimer, setBase],
   );
 
   const schedule = useCallback(
-    (id: string, draft: NoteDraft) => {
+    (id: string, draft: NoteDraft, label: string) => {
       pendingRef.current.set(id, draft);
+      labelRef.current.set(id, label);
       clearTimer();
       timerRef.current = window.setTimeout(() => void flush(), DEBOUNCE_MS);
     },
@@ -125,6 +134,8 @@ export function useAutosave() {
       discardedRef.current.add(id);
       pendingRef.current.delete(id);
       conflictedRef.current.delete(id);
+      labelRef.current.delete(id);
+      setConflicts((list) => removeConflict(list, id));
       if (pendingRef.current.size === 0) clearTimer();
     },
     [clearTimer],
@@ -137,19 +148,23 @@ export function useAutosave() {
   }, []);
 
   /** 競合解決で「サーバの最新を読む」を選んだときに、捨てる編集を落とす。
-   * discard と違い削除済みの印は残さない（そのまま編集を続けられる）。 */
+   * discard と違い削除済みの印は残さない（そのまま編集を続けられる）。
+   * 基準版のピン（shouldAdvanceBase）が解けるのはこの経路だけ。 */
   const dropPending = useCallback(
     (id: string) => {
       pendingRef.current.delete(id);
       conflictedRef.current.delete(id);
       versionRef.current.delete(id);
-      setConflictId((current) => (current === id ? null : current));
+      setConflicts((list) => removeConflict(list, id));
       if (pendingRef.current.size === 0) clearTimer();
     },
     [clearTimer],
   );
 
   useEffect(() => {
+    // pagehide の keepalive flush が 409 を返しても、それを出す画面はもう無い。ここでは
+    // 拾わない方針で確定している: サーバのデータは壊れず勝った側の変更がそのまま残るので、
+    // 次回ロード時の再フェッチが最新を見せる形で吸収する。
     const onPageHide = () => void flush(true);
     window.addEventListener("pagehide", onPageHide);
     return () => {
@@ -167,8 +182,11 @@ export function useAutosave() {
     baseVersion,
     setBase,
     hasUnsaved,
+    hasConflict,
+    setOpenNote,
     error,
-    conflictId,
+    conflicts,
+    openNoteId,
   };
 }
 

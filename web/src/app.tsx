@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { AppShell } from "./components/app-shell";
+import { NoteConflictNotice } from "./notes/conflict-notice";
 import { DailyPage } from "./pages/daily";
 import { DetailPage } from "./pages/detail";
 import { EssaysPage } from "./pages/essays";
@@ -68,30 +69,33 @@ export function App() {
   const route = parseRoute(pathname);
 
   return (
-    <AppShell
-      active={
-        route.page === "daily" || route.page === "essays" || route.page === "projects"
-          ? route.page
-          : route.page === "settings"
-            ? "settings"
-            : "library"
-      }
-    >
-      {route.page === "detail" ? (
-        <DetailPage id={route.id} />
-      ) : route.page === "notes" ? (
-        <NoteRedirect id={route.id} />
-      ) : route.page === "daily" ? (
-        <DailyPage date={route.date} />
-      ) : route.page === "essays" ? (
-        <EssaysPage id={route.id} />
-      ) : route.page === "projects" ? (
-        <ProjectsPage projectId={route.projectId} noteId={route.noteId} />
-      ) : route.page === "settings" ? (
-        <SettingsPage />
-      ) : (
-        <ListPage />
-      )}
-    </AppShell>
+    <>
+      <AppShell
+        active={
+          route.page === "daily" || route.page === "essays" || route.page === "projects"
+            ? route.page
+            : route.page === "settings"
+              ? "settings"
+              : "library"
+        }
+      >
+        {route.page === "detail" ? (
+          <DetailPage id={route.id} />
+        ) : route.page === "notes" ? (
+          <NoteRedirect id={route.id} />
+        ) : route.page === "daily" ? (
+          <DailyPage date={route.date} />
+        ) : route.page === "essays" ? (
+          <EssaysPage id={route.id} />
+        ) : route.page === "projects" ? (
+          <ProjectsPage projectId={route.projectId} noteId={route.noteId} />
+        ) : route.page === "settings" ? (
+          <SettingsPage />
+        ) : (
+          <ListPage />
+        )}
+      </AppShell>
+      <NoteConflictNotice />
+    </>
   );
 }
