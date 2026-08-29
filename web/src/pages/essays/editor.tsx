@@ -238,16 +238,19 @@ export function EssayEditorPage({ id }: { id: string }) {
       const current = noteRef.current;
       if (current === null || current.id !== targetId || current.kind.kind !== "essay") return;
       // pending の content を先に flush する（title は status 列単独 UPDATE なので競合しないが、
-      // 失敗時の一覧再取得が編集前の preview に巻き戻らないように）
-      await flush();
+      // 失敗時の一覧再取得が編集前の preview に巻き戻らないように）。
+      // 通らなかったときは中断する: 下で基準版を status の新しい updated_at へ進めてしまうと、
+      // 競合で行き場を失った古い本文が「新しい基準版に載った正当な編集」に化け、次の打鍵で
+      // 勝った側の外部変更を上書きしてしまう（削除と同じく、未保存が残る間は手を出さない）。
+      if (!(await flush())) return;
       try {
         const updated = await setEssayStatus(current.id, current.kind.next_status);
         // status 列単独の UPDATE で updated_at だけが進む。自分の content 書き込みはその上に
         // 載せてよいので基準版は進める（進めないと自分のトグルで偽の 409 が出る）。
         setBase(updated.id, updated.updated_at);
         if (hasUnsaved(updated.id)) {
-          // 直前の flush が失敗して pending が再試行待ち。レスポンスの content は手元より
-          // 古いので、キャッシュにも latch にも載せない（古い本文で編集を失う）。
+          // setEssayStatus の往復中に打鍵が入った。レスポンスの content はその打鍵より
+          // 古いので、キャッシュにも latch にも載せない（新しい本文を失う）。
           // 新しい updated_at だけを古い content にスタンプするのも禁物 — キャッシュが
           // 嘘をつき、note 往復で 1 世代前の本文が mount される。kind だけ反映する。
           patchKind(updated.kind);
