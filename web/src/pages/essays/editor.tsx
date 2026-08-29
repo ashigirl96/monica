@@ -93,7 +93,6 @@ export function EssayEditorPage({ id }: { id: string }) {
   });
 
   const noteQuery = useNoteQuery(id);
-  const noteError = noteQuery.error === null ? null : noteQuery.error.message;
   const { note, generation, reload, patchKind, adopt } = useServerDoc({
     docKey: id,
     data: noteQuery.data,
@@ -102,6 +101,10 @@ export function EssayEditorPage({ id }: { id: string }) {
     noteRef,
     refetch: noteQuery.refetch,
   });
+
+  // 描画できる note がある間はエラーを出さない（daily と同じ理由 — 復帰時の一時的な
+  // 再フェッチ失敗でエディタを unmount すると、保存済みの編集が巻き戻る）。
+  const noteError = note === null && noteQuery.error !== null ? noteQuery.error.message : null;
 
   useEffect(() => {
     // 別 note の mention 解決結果を持ち越さない

@@ -25,6 +25,9 @@ export function useAutosave() {
   const versionRef = useRef(new Map<string, string>());
   // 送信中の id。差し替え判定が in-flight な書き込みを見落とさないために要る
   const inflightRef = useRef(new Set<string>());
+  // 409 で行き場を失った draft。再送しても永久に 409 なので pending には戻さないが、
+  // 「未保存」ではあるので削除や content 採用の前で止められるよう別に持つ
+  const conflictedRef = useRef(new Map<string, NoteDraft>());
   const timerRef = useRef<number | null>(null);
   // flush を直列化し、古い payload の PUT が新しい PUT を追い越して上書きするのを防ぐ
   const flushChainRef = useRef<Promise<void>>(Promise.resolve());
@@ -46,9 +49,10 @@ export function useAutosave() {
     if (current === undefined || updatedAt > current) versionRef.current.set(id, updatedAt);
   }, []);
 
-  /** 未保存（pending か送信中）の編集を抱えているか。 */
+  /** 未保存（pending・送信中・競合で滞留）の編集を抱えているか。 */
   const hasUnsaved = useCallback(
-    (id: string) => pendingRef.current.has(id) || inflightRef.current.has(id),
+    (id: string) =>
+      pendingRef.current.has(id) || inflightRef.current.has(id) || conflictedRef.current.has(id),
     [],
   );
 
@@ -62,6 +66,7 @@ export function useAutosave() {
         const batch = pendingRef.current;
         pendingRef.current = new Map();
         let failure: string | null = null;
+        let conflicted = false;
         await Promise.all(
           [...batch].map(([id, draft]) => {
             inflightRef.current.add(id);
@@ -73,8 +78,11 @@ export function useAutosave() {
               .then((version) => setBase(id, version.updated_at))
               .catch((e: unknown) => {
                 if (e instanceof ApiError && e.status === 409) {
-                  // 基準版が古いので同じ payload を投げ直しても永久に 409。pending へ戻さず
-                  // 呼び手（バナー）に渡し、サーバの最新を読み直させる。
+                  // 基準版が古いので同じ payload を投げ直しても永久に 409。pending へ戻して
+                  // リトライさせず、競合として保持したうえでバナーに渡す。
+                  // failure にはしない（自動リトライを誘発し、競合バナーとも二重表示になる）。
+                  conflictedRef.current.set(id, draft);
+                  conflicted = true;
                   setConflictId(id);
                   return;
                 }
@@ -90,7 +98,9 @@ export function useAutosave() {
         if (failure !== null && pendingRef.current.size > 0 && timerRef.current === null) {
           timerRef.current = window.setTimeout(() => void flush(), RETRY_MS);
         }
-        return failure === null;
+        // 競合が残っている間は false。削除のように「未保存が消えると困る」呼び手が
+        // 中断できるようにする（ユーザーが「最新を読み込む」を選ぶまで解けない）。
+        return failure === null && !conflicted;
       };
       const settled = flushChainRef.current.then(run);
       // chain 自体は void で繋ぐ（次の flush が前回の結果を引数として受け取らないように）
@@ -114,6 +124,7 @@ export function useAutosave() {
     (id: string) => {
       discardedRef.current.add(id);
       pendingRef.current.delete(id);
+      conflictedRef.current.delete(id);
       if (pendingRef.current.size === 0) clearTimer();
     },
     [clearTimer],
@@ -130,6 +141,7 @@ export function useAutosave() {
   const dropPending = useCallback(
     (id: string) => {
       pendingRef.current.delete(id);
+      conflictedRef.current.delete(id);
       versionRef.current.delete(id);
       setConflictId((current) => (current === id ? null : current));
       if (pendingRef.current.size === 0) clearTimer();

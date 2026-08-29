@@ -53,7 +53,6 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
   const { data: projects = [] } = useProjectsQuery();
   const primaryQuery = useProjectPrimaryQuery(projectId);
   const primary = primaryQuery.data ?? null;
-  const projectError = primaryQuery.error === null ? null : primaryQuery.error.message;
   const notesQuery = useProjectNotesQuery(projectId);
   const { patchProjectNotes, invalidateProject } = useProjectNotesCache(projectId);
   const seedNoteInCache = useSeedNote();
@@ -111,7 +110,6 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
   // 表示する doc は noteId 無し = primary、あり = その note。latch のキーも同じ軸で切る
   const noteQuery = useNoteQuery(noteId);
   const docKey = noteId ?? projectId;
-  const noteError = noteQuery.error === null ? null : noteQuery.error.message;
   const { note, generation, reload, patchKind } = useServerDoc({
     docKey,
     data: noteId === null ? primaryQuery.data : noteQuery.data,
@@ -120,6 +118,14 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
     noteRef,
     refetch: noteId === null ? primaryQuery.refetch : noteQuery.refetch,
   });
+
+  // 描画できる note がある間はエラーを出さない（daily と同じ理由 — 復帰時の一時的な
+  // 再フェッチ失敗でエディタを unmount すると、保存済みの編集が巻き戻る）。
+  const noteError = note === null && noteQuery.error !== null ? noteQuery.error.message : null;
+
+  // primary の取得失敗も、描画できる note がある間は出さない（noteError と同じ理由）
+  const projectError =
+    note === null && primaryQuery.error !== null ? primaryQuery.error.message : null;
 
   useEffect(() => {
     // 別 note の mention 解決結果を持ち越さない

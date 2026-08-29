@@ -80,7 +80,6 @@ export function DailyPage({ date }: { date: string | null }) {
   // 開く = 作る（get-or-create、冪等）。docKey は note id ではなく date —
   // id はフェッチするまで分からないため
   const noteQuery = useDailyNoteQuery(date);
-  const noteError = noteQuery.error === null ? null : noteQuery.error.message;
   const { note, generation, reload } = useServerDoc({
     docKey: date ?? "",
     data: noteQuery.data,
@@ -89,6 +88,11 @@ export function DailyPage({ date }: { date: string | null }) {
     noteRef,
     refetch: noteQuery.refetch,
   });
+
+  // 描画できる note がある間はエラーを出さない。復帰時の再フェッチが一時的に失敗しても
+  // エディタを unmount しないため（latch の古い content で remount され、保存済みの
+  // 編集が巻き戻ってそのまま上書きされる）。
+  const noteError = note === null && noteQuery.error !== null ? noteQuery.error.message : null;
 
   useEffect(() => {
     // 別 note の mention 解決結果を持ち越さない
