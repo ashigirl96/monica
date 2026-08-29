@@ -22,9 +22,14 @@ pub struct AttachSessionReport {
 /// resolution has no task to scope its lookups by, so it falls back to the tab -> run binding this
 /// creates. The task's primary pointer is left alone — an attached session is a side run, so
 /// `start_run` can still prepare a real worktree run for the same task.
+///
+/// `agent` must be the agent actually running in the tab. Nothing corrects it later — hook
+/// observations never touch `agent` — and it is what a resume builds its command line from
+/// (`agent_resume_command`), so a wrong value here would feed one agent's session id to another.
 pub fn attach_terminal_session_to_task<R>(
     repos: &mut R,
     task_id: &TaskId,
+    agent: Agent,
     terminal_tab_id: &str,
     terminal_session_id: &str,
 ) -> ApplicationResult<AttachSessionReport>
@@ -54,7 +59,7 @@ where
     let attachment = repos.attach_terminal_tab_to_task(
         NewTaskRun {
             task_id: task.id.clone(),
-            agent: Some(Agent::Claude),
+            agent: Some(agent),
             branch: None,
             worktree_path: None,
         },

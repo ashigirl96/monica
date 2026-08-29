@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_application::{parse_issue_input, AttachSessionReport, TaskSummaryRow};
-use monica_domain::{parse_owner_repo, DisplayStatus, TaskId};
+use monica_domain::{parse_owner_repo, Agent, DisplayStatus, TaskId};
 
 use crate::event_sink::{self, CliFacade};
 
@@ -25,6 +25,9 @@ pub enum TaskCommand {
     Attach {
         /// MON-<id>
         id: String,
+        /// Agent running in this tab: claude (default) or codex
+        #[arg(long)]
+        agent: Option<String>,
     },
     /// Close a tracked Monica task (MON-<id>)
     Close {
@@ -38,7 +41,7 @@ pub async fn run(cmd: TaskCommand) -> Result<()> {
     match cmd {
         TaskCommand::Track { target } => track_command(&mut monica, &target).await,
         TaskCommand::Status { status, project } => status_command(&mut monica, status, project),
-        TaskCommand::Attach { id } => attach_command(&mut monica, &id),
+        TaskCommand::Attach { id, agent } => attach_command(&mut monica, &id, agent.as_deref()),
         TaskCommand::Close { id } => close_command(&mut monica, &id),
     }
 }
@@ -108,15 +111,28 @@ fn env_opt(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.is_empty())
 }
 
-fn attach_command(monica: &mut CliFacade, id: &str) -> Result<()> {
+/// The agent to record on the attached run. Nothing corrects it later and a resume builds its
+/// command line from it, so a Codex session must say so rather than inherit the Claude default.
+fn parse_attach_agent(agent: Option<&str>) -> Result<Agent> {
+    match agent {
+        None => Ok(Agent::Claude),
+        Some(token) => token
+            .parse()
+            .map_err(|_| anyhow!("unknown agent: {token} (expected claude or codex)")),
+    }
+}
+
+fn attach_command(monica: &mut CliFacade, id: &str, agent: Option<&str>) -> Result<()> {
     let env = attach_env_from(
         env_opt("MONICA_TASK_ID").as_deref(),
         env_opt("MONICA_TERMINAL_TAB_ID").as_deref(),
         env_opt("MONICA_TERMINAL_SESSION_ID").as_deref(),
     )?;
+    let agent = parse_attach_agent(agent)?;
     let task_id = TaskId::parse(id)?;
     let report = monica.tasks().attach_terminal_session(
         &task_id,
+        agent,
         &env.terminal_tab_id,
         &env.terminal_session_id,
     )?;
@@ -256,6 +272,16 @@ mod tests {
                 "{err} (tab={tab:?}, session={session:?})"
             );
         }
+    }
+
+    #[test]
+    fn attach_agent_defaults_to_claude_and_rejects_unknown_agents() {
+        assert_eq!(parse_attach_agent(None).unwrap(), Agent::Claude);
+        assert_eq!(parse_attach_agent(Some("claude")).unwrap(), Agent::Claude);
+        assert_eq!(parse_attach_agent(Some("codex")).unwrap(), Agent::Codex);
+        assert!(parse_attach_agent(Some("gemini")).is_err());
+        // Nothing corrects `agent` later, so a typo must not silently fall back to the default.
+        assert!(parse_attach_agent(Some("Claude")).is_err());
     }
 
     #[test]

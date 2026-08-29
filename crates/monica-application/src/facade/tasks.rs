@@ -1,6 +1,6 @@
 use super::{Backend, Monica};
 use crate::usecases::tasks::{AttachSessionReport, CloseTaskReport, MakeMainOutcome};
-use crate::prelude::{DisplayStatus, Event, Task, TaskId};
+use crate::prelude::{Agent, DisplayStatus, Event, Task, TaskId};
 use crate::{ApplicationEvent, ApplicationResult, TaskSummaryRow};
 use crate::ports::TaskSummaryFilter;
 
@@ -26,12 +26,14 @@ impl<B: Backend> TaskService<'_, B> {
     pub fn attach_terminal_session(
         &mut self,
         task_id: &TaskId,
+        agent: Agent,
         terminal_tab_id: &str,
         terminal_session_id: &str,
     ) -> ApplicationResult<AttachSessionReport> {
         crate::usecases::tasks::attach_terminal_session_to_task(
             &mut self.m.repos,
             task_id,
+            agent,
             terminal_tab_id,
             terminal_session_id,
         )

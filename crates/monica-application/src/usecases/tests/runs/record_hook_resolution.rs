@@ -289,7 +289,7 @@ fn hook_from_an_attached_raw_tab_drives_the_attached_run() {
     let task_id = repos.insert_task_for_run(None);
     let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
     let attached =
-        attach_terminal_session_to_task(&mut repos, &task_id, "tab-1", &session_id).unwrap();
+        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id).unwrap();
 
     let report = record_claude_hook(
         &mut repos,
@@ -318,7 +318,7 @@ fn a_new_session_in_an_attached_tab_revives_the_same_run() {
     let task_id = repos.insert_task_for_run(None);
     let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
     let attached =
-        attach_terminal_session_to_task(&mut repos, &task_id, "tab-1", &session_id).unwrap();
+        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id).unwrap();
 
     record_claude_hook(
         &mut repos,
