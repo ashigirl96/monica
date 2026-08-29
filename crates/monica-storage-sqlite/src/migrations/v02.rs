@@ -1,5 +1,5 @@
 /// v2: project registry. One row per repo, holding the execution-environment definition
-/// that `issue run` resolves (worktree layout, branch naming, agent settings).
+/// that task runs resolve (worktree layout, branch naming, agent settings).
 pub(super) const SQL: &str = r#"
     CREATE TABLE projects (
       id                    TEXT PRIMARY KEY,

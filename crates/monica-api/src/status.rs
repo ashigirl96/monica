@@ -103,7 +103,7 @@ pub struct BoardColumn {
 /// action pushes it rightward: Prepare keeps it in Ready (setting_up is machine work, nobody's
 /// turn), the moment it needs the user it enters Needs You, handing it to the agent moves it to
 /// Running, and a turn's end brings it back. Closed tasks are archived off the board entirely —
-/// `monica issue status --status closed` still reaches them.
+/// `monica task status --status closed` still reaches them.
 pub fn board_columns() -> Vec<BoardColumn> {
     vec![
         BoardColumn {

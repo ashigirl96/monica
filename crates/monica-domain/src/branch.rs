@@ -21,7 +21,7 @@ pub fn branch_name(github_issue_number: Option<i64>, monica_number: i64) -> Stri
     }
 }
 
-/// Where `issue run` places a worktree. The directory name is the full branch with `/` and any
+/// Where a task run places its worktree. The directory name is the full branch with `/` and any
 /// non-`[A-Za-z0-9._-]` char replaced by `-`, so distinct branches never collapse to the same path.
 /// Resolution order is: explicit `worktree_root`, otherwise `<project.path>/.worktrees`.
 /// A project with neither cannot run until one of those is configured.

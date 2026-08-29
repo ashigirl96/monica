@@ -29,7 +29,7 @@ fn create_raw_task_rejects_unknown_project() {
 }
 
 #[test]
-fn close_issue_delegates_run_cleanup_to_git_gateway() {
+fn close_task_delegates_run_cleanup_to_git_gateway() {
     let mut repos = FakeRepos::default();
     let mut project = Project::from_repo("owner/repo");
     project.path = Some("/repo".to_string());
@@ -44,7 +44,7 @@ fn close_issue_delegates_run_cleanup_to_git_gateway() {
         })
         .unwrap();
     let git = FakeGit::default();
-    let report = close_issue(&mut repos, &git, &task_id).unwrap();
+    let report = close_task(&mut repos, &git, &task_id).unwrap();
     assert_eq!(report.removed_branches, vec!["issue-42"]);
     assert!(git.cleaned());
 }

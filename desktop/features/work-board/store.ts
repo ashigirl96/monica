@@ -34,7 +34,7 @@ export const closeTaskAtom = atom(null, async (get, set, taskId: string) => {
   await set(loadTerminalStateAtom);
   const state = get(terminalStateAtom);
   const runspace = state?.runspaces.find((rs) => rs.taskId === taskId);
-  // Backend close_issue rips the task's worktrees/branches before the runspace guard
+  // Backend close_task rips the task's worktrees/branches before the runspace guard
   // below could ever run, so a pinned session blocks the whole close up front.
   if (runspace?.pinnedTabId) {
     pushInfoToast("Task has a pinned session — unpin it before closing");

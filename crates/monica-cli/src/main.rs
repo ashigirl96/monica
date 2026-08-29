@@ -1,17 +1,17 @@
 mod event_sink;
 mod explain;
 mod hook;
-mod issue;
 mod note;
 mod notify;
 mod project;
 mod table;
+mod task;
 
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 
 #[derive(Parser)]
-#[command(name = "monica", version, about = "Monica Issue Runner")]
+#[command(name = "monica", version, about = "Monica Task Runner")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -25,9 +25,9 @@ enum Commands {
     /// Create and manage explanation documents
     #[command(subcommand)]
     Explain(explain::ExplainCommand),
-    /// Track GitHub issues as Monica tasks
+    /// Manage Monica tasks (track GitHub issues, show status, close)
     #[command(subcommand)]
-    Issue(issue::IssueCommand),
+    Task(task::TaskCommand),
     /// Read notes as markdown / search note bodies
     #[command(subcommand)]
     Note(note::NoteCommand),
@@ -54,7 +54,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         match cli.command {
             Commands::Project(cmd) => project::run(cmd).await,
             Commands::Explain(cmd) => explain::run(cmd),
-            Commands::Issue(cmd) => issue::run(cmd).await,
+            Commands::Task(cmd) => task::run(cmd).await,
             Commands::Note(cmd) => note::run(cmd),
             Commands::Hook(cmd) => hook::run(cmd),
             Commands::Completions { shell } => {
@@ -72,13 +72,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn issue_close_replaces_delete_and_has_no_yes_bypass() {
-        assert!(Cli::try_parse_from(["monica", "issue", "close", "MON-1"]).is_ok());
+    fn task_close_replaces_delete_and_has_no_yes_bypass() {
+        assert!(Cli::try_parse_from(["monica", "task", "close", "MON-1"]).is_ok());
         // close confirms interactively; there is no --yes bypass flag.
-        assert!(Cli::try_parse_from(["monica", "issue", "close", "MON-1", "-y"]).is_err());
-        assert!(Cli::try_parse_from(["monica", "issue", "close", "MON-1", "--yes"]).is_err());
+        assert!(Cli::try_parse_from(["monica", "task", "close", "MON-1", "-y"]).is_err());
+        assert!(Cli::try_parse_from(["monica", "task", "close", "MON-1", "--yes"]).is_err());
         // the old `delete` subcommand is gone.
-        assert!(Cli::try_parse_from(["monica", "issue", "delete", "MON-1"]).is_err());
+        assert!(Cli::try_parse_from(["monica", "task", "delete", "MON-1"]).is_err());
+        // the old `issue` subcommand is gone (renamed to `task`, no alias).
+        assert!(Cli::try_parse_from(["monica", "issue", "close", "MON-1"]).is_err());
     }
 
     #[test]
