@@ -35,6 +35,7 @@ pub use ports::{
     GitGateway, LinkPreview, NoteStore, NotificationOutboxStore, ProjectRepository,
     PullRequestSyncStore,
     ShellScaffolding,
+    TabAttachment,
     TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter, TerminalAttachment,
     TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository, UnitOfWork, WorkbenchStore,
     WorkTransaction, Workspace, WorktreeRef,
@@ -53,7 +54,8 @@ pub use terminal_state::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTab
 
 // Usecase result types (returned by facade methods)
 pub use usecases::{
-    CloseTaskReport, DaemonSessionView, HookContext, HookReport, TerminalSessionUpdate,
+    AttachSessionReport, CloseTaskReport, DaemonSessionView, HookContext, HookReport,
+    TerminalSessionUpdate,
     TrackGithubIssueReport,
 };
 

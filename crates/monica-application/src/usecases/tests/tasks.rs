@@ -1,6 +1,6 @@
 use super::*;
 use super::support::*;
-use crate::usecases::tasks::MakeMainOutcome;
+use crate::usecases::tasks::{attach_terminal_session_to_task, MakeMainOutcome};
 use monica_domain::AgentSessionId;
 
 #[test]
@@ -191,4 +191,183 @@ fn record_claude_hook_prefers_explicit_run_id_over_session_lookup() {
         TaskRunStatus::WaitingForUser
     );
     assert_ne!(other.id.as_str(), primary_id.as_str());
+}
+
+
+#[test]
+fn attach_creates_a_running_side_run_carrying_the_tab_and_session() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
+
+    let report =
+        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id).unwrap();
+
+    assert_eq!(report.task_id, task_id);
+    assert_eq!(report.task_title, "tracked");
+    assert!(report.detached_run_ids.is_empty());
+    assert_eq!(
+        report.agent_session_id,
+        Some(AgentSessionId::from_agent("sess-1"))
+    );
+
+    let run = repos.get_task_run(&report.task_run_id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::Running);
+    assert_eq!(run.terminal_tab_id.as_deref(), Some("tab-1"));
+    assert_eq!(run.agent, Some(Agent::Claude));
+    assert_eq!(run.branch, None);
+    assert_eq!(run.worktree_path, None);
+    // The task follows its run into in_progress, exactly as a hook-created run would.
+    assert_eq!(
+        repos.get_task(&task_id).unwrap().unwrap().status,
+        TaskStatus::InProgress
+    );
+}
+
+#[test]
+fn attach_leaves_the_primary_pointer_alone_so_prepare_stays_available() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
+
+    attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id).unwrap();
+
+    assert_eq!(
+        repos.get_task(&task_id).unwrap().unwrap().primary_task_run_id,
+        None
+    );
+}
+
+#[test]
+fn attach_without_an_observed_agent_session_still_binds_the_tab() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    let session_id = raw_tab_session(&mut repos, "tab-1", None);
+
+    let report =
+        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id).unwrap();
+
+    assert_eq!(report.agent_session_id, None);
+    let run = repos.get_task_run(&report.task_run_id).unwrap().unwrap();
+    assert_eq!(run.terminal_tab_id.as_deref(), Some("tab-1"));
+}
+
+#[test]
+fn re_attach_settles_the_previous_run_and_keeps_its_session_as_history() {
+    let mut repos = FakeRepos::default();
+    let first_task = repos.insert_task_for_run(None);
+    let second_task = repos.insert_task_for_run(None);
+    let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
+
+    let first =
+        attach_terminal_session_to_task(&mut repos, &first_task, Agent::Claude, "tab-1", &session_id).unwrap();
+    let second =
+        attach_terminal_session_to_task(&mut repos, &second_task, Agent::Claude, "tab-1", &session_id).unwrap();
+
+    assert_eq!(second.detached_run_ids, vec![first.task_run_id.clone()]);
+
+    // Every settlement path keys on the tab, so unbinding without settling would strand this run
+    // as "running" forever on the first task's board.
+    let old = repos.get_task_run(&first.task_run_id).unwrap().unwrap();
+    assert_eq!(old.status, TaskRunStatus::Stopped);
+    assert_eq!(old.terminal_tab_id, None);
+    assert_eq!(
+        old.agent_session_id,
+        Some(AgentSessionId::from_agent("sess-1"))
+    );
+
+    // Exactly one run answers for the tab.
+    assert_eq!(
+        repos
+            .find_task_run_by_terminal_tab("tab-1")
+            .unwrap()
+            .map(|run| run.id),
+        Some(second.task_run_id)
+    );
+}
+
+#[test]
+fn re_attach_leaves_an_already_settled_previous_run_untouched() {
+    let mut repos = FakeRepos::default();
+    let first_task = repos.insert_task_for_run(None);
+    let second_task = repos.insert_task_for_run(None);
+    let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
+
+    let first =
+        attach_terminal_session_to_task(&mut repos, &first_task, Agent::Claude, "tab-1", &session_id).unwrap();
+    repos
+        .finish_task_run(&first.task_run_id, &first_task, TaskRunStatus::Failed)
+        .unwrap();
+
+    attach_terminal_session_to_task(&mut repos, &second_task, Agent::Claude, "tab-1", &session_id).unwrap();
+
+    assert_eq!(
+        repos.get_task_run(&first.task_run_id).unwrap().unwrap().status,
+        TaskRunStatus::Failed
+    );
+}
+
+#[test]
+fn attach_rejects_an_unknown_task() {
+    let mut repos = FakeRepos::default();
+    let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
+    let err = attach_terminal_session_to_task(
+        &mut repos,
+        &TaskId::from_store("MON-404".to_string()),
+        Agent::Claude,
+        "tab-1",
+        &session_id,
+    )
+    .unwrap_err();
+    assert!(matches!(err, ApplicationError::NotFound(_)), "{err:?}");
+}
+
+#[test]
+fn attach_rejects_a_closed_task() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    repos.mark_task_closed(&task_id).unwrap();
+    let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
+
+    let err =
+        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id).unwrap_err();
+    assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
+}
+
+#[test]
+fn attach_rejects_an_unknown_terminal_session() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    let err =
+        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", "ts-404").unwrap_err();
+    assert!(matches!(err, ApplicationError::NotFound(_)), "{err:?}");
+}
+
+#[test]
+fn attach_rejects_a_session_belonging_to_another_tab() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
+
+    let err = attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-2", &session_id)
+        .unwrap_err();
+    assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
+}
+
+/// Nothing corrects `agent` after the fact — hook observations never touch it — and a resume
+/// builds its command line from it, so the caller's agent must land verbatim.
+#[test]
+fn attach_records_the_agent_it_was_given() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
+
+    let report =
+        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Codex, "tab-1", &session_id)
+            .unwrap();
+
+    assert_eq!(
+        repos.get_task_run(&report.task_run_id).unwrap().unwrap().agent,
+        Some(Agent::Codex)
+    );
 }

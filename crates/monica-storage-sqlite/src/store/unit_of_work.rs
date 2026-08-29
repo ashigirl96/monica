@@ -3,7 +3,7 @@ use rusqlite::Transaction;
 
 use crate::SqliteStore;
 use monica_application::{
-    Clock, EventRepository, TaskRunObservation, TaskRunStore, TaskStore, UnitOfWork,
+    Clock, EventRepository, TabAttachment, TaskRunObservation, TaskRunStore, TaskStore, UnitOfWork,
     WorkTransaction, WorkbenchStore,
 };
 use monica_domain::{
@@ -141,6 +141,15 @@ impl TaskRunStore for SqliteUow<'_> {
             tasks::set_primary_task_run(&self.tx, &task_id, &run.id)?;
         }
         Ok(run)
+    }
+
+    fn attach_terminal_tab_to_task(
+        &mut self,
+        new: NewTaskRun,
+        terminal_tab_id: &str,
+        agent_session_id: Option<&AgentSessionId>,
+    ) -> Result<TabAttachment> {
+        task_runs::attach_terminal_tab_to_task_in(&self.tx, new, terminal_tab_id, agent_session_id)
     }
 
     fn record_task_run_observation(

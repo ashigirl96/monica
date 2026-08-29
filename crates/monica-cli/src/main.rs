@@ -84,6 +84,16 @@ mod tests {
     }
 
     #[test]
+    fn task_attach_takes_exactly_one_task_id() {
+        assert!(Cli::try_parse_from(["monica", "task", "attach", "MON-1"]).is_ok());
+        assert!(Cli::try_parse_from(["monica", "task", "attach"]).is_err());
+        assert!(Cli::try_parse_from(["monica", "task", "attach", "MON-1", "MON-2"]).is_err());
+        assert!(
+            Cli::try_parse_from(["monica", "task", "attach", "MON-1", "--agent", "codex"]).is_ok()
+        );
+    }
+
+    #[test]
     fn note_show_and_search_parse() {
         assert!(Cli::try_parse_from(["monica", "note", "show", "note-1"]).is_ok());
         assert!(

@@ -8,7 +8,7 @@ use monica_domain::RawJson;
 
 use crate::ports::{
     AgentDecoders, BoxFuture, EventRepository, GitGateway, NotificationOutboxStore,
-    ProjectRepository, PullRequestSyncStore, TaskBoardQuery, TaskRunStore, TaskStore,
+    ProjectRepository, PullRequestSyncStore, TabAttachment, TaskBoardQuery, TaskRunStore, TaskStore,
     TaskSummaryFilter, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
     TerminalSessionRepository, UnitOfWork, WorkTransaction, WorkbenchStore, Workspace,
 };
@@ -443,6 +443,52 @@ impl FakeRepos {
         Ok(true)
     }
 
+    fn do_attach_terminal_tab_to_task(
+        &self,
+        new: NewTaskRun,
+        terminal_tab_id: &str,
+        agent_session_id: Option<&AgentSessionId>,
+    ) -> Result<TabAttachment> {
+        let previous: Vec<(TaskRunId, TaskId)> = self
+            .state
+            .borrow()
+            .runs
+            .values()
+            .filter(|run| run.terminal_tab_id.as_deref() == Some(terminal_tab_id))
+            .map(|run| (run.id.clone(), run.task_id.clone()))
+            .collect();
+        // Mirrors the store: settle before unbinding, or a live run losing its tab could never
+        // reach a terminal status again.
+        for (run_id, task_id) in &previous {
+            self.do_settle_task_run_if_live(run_id, task_id)?;
+        }
+        {
+            let mut state = self.state.borrow_mut();
+            for run in state.runs.values_mut() {
+                if run.terminal_tab_id.as_deref() == Some(terminal_tab_id) {
+                    run.terminal_tab_id = None;
+                }
+            }
+        }
+
+        let run = self.do_start_task_run(new)?;
+        let run = {
+            let mut state = self.state.borrow_mut();
+            let stored = state
+                .runs
+                .get_mut(run.id.as_str())
+                .ok_or_else(|| anyhow!("attached task run {} not found", run.id))?;
+            stored.status = TaskRunStatus::Running;
+            stored.terminal_tab_id = Some(terminal_tab_id.to_string());
+            stored.agent_session_id = agent_session_id.cloned();
+            stored.clone()
+        };
+        Ok(TabAttachment {
+            run,
+            detached_run_ids: previous.into_iter().map(|(id, _)| id).collect(),
+        })
+    }
+
     fn do_record_task_run_observation(
         &self,
         task_run_id: &TaskRunId,
@@ -611,6 +657,15 @@ impl TaskRunStore for FakeRepos {
             self.set_primary_task_run(&task_id, &run.id)?;
         }
         Ok(run)
+    }
+
+    fn attach_terminal_tab_to_task(
+        &mut self,
+        new: NewTaskRun,
+        terminal_tab_id: &str,
+        agent_session_id: Option<&AgentSessionId>,
+    ) -> Result<TabAttachment> {
+        self.do_attach_terminal_tab_to_task(new, terminal_tab_id, agent_session_id)
     }
 
     fn record_task_run_observation(
@@ -879,6 +934,16 @@ impl TaskRunStore for FakeUow<'_> {
             self.inner.set_primary_task_run(&task_id, &run.id)?;
         }
         Ok(run)
+    }
+
+    fn attach_terminal_tab_to_task(
+        &mut self,
+        new: NewTaskRun,
+        terminal_tab_id: &str,
+        agent_session_id: Option<&AgentSessionId>,
+    ) -> Result<TabAttachment> {
+        self.inner
+            .do_attach_terminal_tab_to_task(new, terminal_tab_id, agent_session_id)
     }
 
     fn record_task_run_observation(
@@ -1212,6 +1277,49 @@ pub(crate) fn hook_ctx_in_tab<'a>(
         task_id: Some(task_id),
         task_run_id,
         terminal_tab_id: Some(terminal_tab_id),
+        ..HookContext::default()
+    }
+}
+
+/// A terminal session in a tab launched without `MONICA_TASK_ID` — the shape `monica task attach`
+/// runs inside. `agent_session_id` is what the tab's hooks have already reported.
+pub(crate) fn raw_tab_session(
+    repos: &mut FakeRepos,
+    tab_id: &str,
+    agent_session_id: Option<&str>,
+) -> String {
+    let session = repos
+        .create_terminal_session(NewTerminalSession {
+            runspace_id: None,
+            tab_id: Some(tab_id.to_string()),
+            kind: TerminalSessionKind::Shell,
+            cwd: "/repo".to_string(),
+            shell: "/bin/zsh".to_string(),
+            rows: 24,
+            cols: 80,
+        })
+        .unwrap();
+    if let Some(agent_session_id) = agent_session_id {
+        repos
+            .set_terminal_session_agent_status(
+                &session.id,
+                Some(AgentSessionStatus::Running),
+                None,
+                Some(&AgentSessionId::from_agent(agent_session_id)),
+            )
+            .unwrap();
+    }
+    session.id
+}
+
+/// The hook identity a tab with no `MONICA_TASK_ID` carries: tab + session only.
+pub(crate) fn hook_ctx_raw_tab<'a>(
+    terminal_tab_id: &'a str,
+    terminal_session_id: &'a str,
+) -> HookContext<'a> {
+    HookContext {
+        terminal_tab_id: Some(terminal_tab_id),
+        terminal_session_id: Some(terminal_session_id),
         ..HookContext::default()
     }
 }

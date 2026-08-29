@@ -2,8 +2,8 @@ use std::io::{self, Write};
 
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
-use monica_application::{parse_issue_input, TaskSummaryRow};
-use monica_domain::{parse_owner_repo, DisplayStatus, TaskId};
+use monica_application::{parse_issue_input, AttachSessionReport, TaskSummaryRow};
+use monica_domain::{parse_owner_repo, Agent, DisplayStatus, TaskId};
 
 use crate::event_sink::{self, CliFacade};
 
@@ -21,6 +21,14 @@ pub enum TaskCommand {
         #[arg(long)]
         project: Option<String>,
     },
+    /// Connect this terminal tab's agent session to an existing task (MON-<id>)
+    Attach {
+        /// MON-<id>
+        id: String,
+        /// Agent running in this tab: claude (default) or codex
+        #[arg(long)]
+        agent: Option<String>,
+    },
     /// Close a tracked Monica task (MON-<id>)
     Close {
         /// MON-<id>
@@ -33,6 +41,7 @@ pub async fn run(cmd: TaskCommand) -> Result<()> {
     match cmd {
         TaskCommand::Track { target } => track_command(&mut monica, &target).await,
         TaskCommand::Status { status, project } => status_command(&mut monica, status, project),
+        TaskCommand::Attach { id, agent } => attach_command(&mut monica, &id, agent.as_deref()),
         TaskCommand::Close { id } => close_command(&mut monica, &id),
     }
 }
@@ -65,6 +74,85 @@ fn status_command(
     };
     print!("{}", render_status_table(&rows));
     Ok(())
+}
+
+/// The `MONICA_*` identity a tab burns into its shell env, as `attach` needs it.
+#[derive(Debug, PartialEq, Eq)]
+struct AttachEnv {
+    terminal_tab_id: String,
+    terminal_session_id: String,
+}
+
+/// Validate the ambient tab identity before attaching. A tab carrying `MONICA_TASK_ID` is already
+/// bound to that task and its hooks resolve through the task-scoped rules, so a run attached here
+/// would never receive one — refuse instead of leaving a silently dead binding behind.
+fn attach_env_from(
+    task_id: Option<&str>,
+    tab_id: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<AttachEnv> {
+    if let Some(task_id) = task_id {
+        return Err(anyhow!(
+            "this tab is already bound to task {task_id}; attach is for tabs started outside a task"
+        ));
+    }
+    let (Some(terminal_tab_id), Some(terminal_session_id)) = (tab_id, session_id) else {
+        return Err(anyhow!(
+            "no Monica terminal tab detected; run this inside a Monica terminal tab"
+        ));
+    };
+    Ok(AttachEnv {
+        terminal_tab_id: terminal_tab_id.to_string(),
+        terminal_session_id: terminal_session_id.to_string(),
+    })
+}
+
+fn env_opt(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|v| !v.is_empty())
+}
+
+/// The agent to record on the attached run. Nothing corrects it later and a resume builds its
+/// command line from it, so a Codex session must say so rather than inherit the Claude default.
+fn parse_attach_agent(agent: Option<&str>) -> Result<Agent> {
+    match agent {
+        None => Ok(Agent::Claude),
+        Some(token) => token
+            .parse()
+            .map_err(|_| anyhow!("unknown agent: {token} (expected claude or codex)")),
+    }
+}
+
+fn attach_command(monica: &mut CliFacade, id: &str, agent: Option<&str>) -> Result<()> {
+    let env = attach_env_from(
+        env_opt("MONICA_TASK_ID").as_deref(),
+        env_opt("MONICA_TERMINAL_TAB_ID").as_deref(),
+        env_opt("MONICA_TERMINAL_SESSION_ID").as_deref(),
+    )?;
+    let agent = parse_attach_agent(agent)?;
+    let task_id = TaskId::parse(id)?;
+    let report = monica.tasks().attach_terminal_session(
+        &task_id,
+        agent,
+        &env.terminal_tab_id,
+        &env.terminal_session_id,
+    )?;
+    print!("{}", render_attach_report(&report));
+    Ok(())
+}
+
+fn render_attach_report(report: &AttachSessionReport) -> String {
+    let mut out = format!("Attached {} to this terminal tab.\n", report.task_id);
+    out.push_str(&format!("  Task:    {}\n", report.task_title));
+    out.push_str(&format!("  Run:     {}\n", report.task_run_id));
+    out.push_str(&format!(
+        "  Session: {}\n",
+        crate::table::or_dash(report.agent_session_id.as_deref())
+    ));
+    if !report.detached_run_ids.is_empty() {
+        let ids: Vec<&str> = report.detached_run_ids.iter().map(|id| id.as_str()).collect();
+        out.push_str(&format!("  Detached previous runs: {}\n", ids.join(", ")));
+    }
+    out
 }
 
 fn close_command(monica: &mut CliFacade, id: &str) -> Result<()> {
@@ -155,6 +243,66 @@ fn render_status_table(rows: &[TaskSummaryRow]) -> String {
 mod tests {
     use super::*;
     use monica_domain::TaskStatus;
+
+    #[test]
+    fn attach_env_reads_the_tab_identity_from_a_task_less_tab() {
+        assert_eq!(
+            attach_env_from(None, Some("tab-1"), Some("ts-9")).unwrap(),
+            AttachEnv {
+                terminal_tab_id: "tab-1".to_string(),
+                terminal_session_id: "ts-9".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn attach_env_refuses_a_tab_already_bound_to_a_task() {
+        // Such a tab's hooks resolve through the task-scoped rules and would never reach a run
+        // attached here, so the binding would be silently dead.
+        let err = attach_env_from(Some("MON-7"), Some("tab-1"), Some("ts-9")).unwrap_err();
+        assert!(err.to_string().contains("MON-7"), "{err}");
+    }
+
+    #[test]
+    fn attach_env_refuses_a_shell_outside_a_monica_tab() {
+        for (tab, session) in [(None, Some("ts-9")), (Some("tab-1"), None), (None, None)] {
+            let err = attach_env_from(None, tab, session).unwrap_err();
+            assert!(
+                err.to_string().contains("Monica terminal tab"),
+                "{err} (tab={tab:?}, session={session:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn attach_agent_defaults_to_claude_and_rejects_unknown_agents() {
+        assert_eq!(parse_attach_agent(None).unwrap(), Agent::Claude);
+        assert_eq!(parse_attach_agent(Some("claude")).unwrap(), Agent::Claude);
+        assert_eq!(parse_attach_agent(Some("codex")).unwrap(), Agent::Codex);
+        assert!(parse_attach_agent(Some("gemini")).is_err());
+        // Nothing corrects `agent` later, so a typo must not silently fall back to the default.
+        assert!(parse_attach_agent(Some("Claude")).is_err());
+    }
+
+    #[test]
+    fn render_attach_report_shows_detached_runs_only_when_there_are_any() {
+        let mut report = AttachSessionReport {
+            task_id: TaskId::from_store("MON-42".to_string()),
+            task_title: "orchestration session".to_string(),
+            task_run_id: monica_domain::TaskRunId::from_store("run-73".to_string()),
+            agent_session_id: None,
+            detached_run_ids: Vec::new(),
+        };
+        let rendered = render_attach_report(&report);
+        assert!(rendered.contains("Attached MON-42"));
+        assert!(rendered.contains("run-73"));
+        assert!(rendered.contains("Session: -"), "{rendered}");
+        assert!(!rendered.contains("Detached"), "{rendered}");
+
+        report.detached_run_ids =
+            vec![monica_domain::TaskRunId::from_store("run-70".to_string())];
+        assert!(render_attach_report(&report).contains("Detached previous runs: run-70"));
+    }
 
     #[test]
     fn parse_status_filter_defaults_to_none_and_validates_enum() {

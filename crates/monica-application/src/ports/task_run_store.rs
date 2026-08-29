@@ -5,6 +5,16 @@ use monica_domain::{AgentSessionId, TaskId, TaskRunId};
 use crate::prelude::{Agent, NewTaskRun, TaskRun, TaskRunStatus};
 use crate::TaskRunObservation;
 
+/// Outcome of binding a terminal tab to a task with [`TaskRunStore::attach_terminal_tab_to_task`].
+pub struct TabAttachment {
+    pub run: TaskRun,
+    /// Runs this tab was driving until now. Each was settled if still live, then had its
+    /// `terminal_tab_id` cleared: every path that stops a run keys on that tab, so an un-settled
+    /// run losing it would never reach a terminal status again. `agent_session_id` is deliberately
+    /// left behind as the record of which agent session discussed that task.
+    pub detached_run_ids: Vec<TaskRunId>,
+}
+
 pub trait TaskRunStore {
     fn start_task_run(&mut self, new: NewTaskRun) -> Result<TaskRun>;
     fn finish_task_run(
@@ -50,6 +60,18 @@ pub trait TaskRunStore {
         new: NewTaskRun,
         make_primary_if_missing: bool,
     ) -> Result<TaskRun>;
+    /// Bind a terminal tab, and the agent session running inside it, to a task as a fresh
+    /// `running` run — the durable half of `monica task attach`. Settling and unbinding the runs
+    /// this tab previously drove happens in the same transaction as the insert, so the tab -> run
+    /// lookup can never observe two candidates and no run is stranded live with no tab left to
+    /// settle it. The task's primary pointer is deliberately untouched: an attached session must
+    /// not occupy the Main Run slot and block `start_run`.
+    fn attach_terminal_tab_to_task(
+        &mut self,
+        new: NewTaskRun,
+        terminal_tab_id: &str,
+        agent_session_id: Option<&AgentSessionId>,
+    ) -> Result<TabAttachment>;
     fn record_task_run_observation(
         &mut self,
         task_run_id: &TaskRunId,

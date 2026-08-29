@@ -35,7 +35,7 @@ pub use project_repository::ProjectRepository;
 pub use pull_request_sync::PullRequestSyncStore;
 pub use shell_scaffolding::ShellScaffolding;
 pub use task_board_query::{TaskBoardQuery, TaskSummaryFilter};
-pub use task_run_store::TaskRunStore;
+pub use task_run_store::{TabAttachment, TaskRunStore};
 pub use task_store::TaskStore;
 pub use terminal_daemon::{TerminalAttachment, TerminalCreateRequest, TerminalDaemon};
 pub use terminal_session_repository::TerminalSessionRepository;

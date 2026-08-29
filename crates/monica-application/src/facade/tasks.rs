@@ -1,6 +1,6 @@
 use super::{Backend, Monica};
-use crate::usecases::tasks::{CloseTaskReport, MakeMainOutcome};
-use crate::prelude::{DisplayStatus, Event, Task, TaskId};
+use crate::usecases::tasks::{AttachSessionReport, CloseTaskReport, MakeMainOutcome};
+use crate::prelude::{Agent, DisplayStatus, Event, Task, TaskId};
 use crate::{ApplicationEvent, ApplicationResult, TaskSummaryRow};
 use crate::ports::TaskSummaryFilter;
 
@@ -17,6 +17,26 @@ impl<B: Backend> TaskService<'_, B> {
     pub fn close_task(&mut self, id: &TaskId) -> ApplicationResult<CloseTaskReport> {
         let Monica { repos, git, .. } = &mut *self.m;
         crate::usecases::tasks::close_task(repos, git, id)
+    }
+
+    /// Connect the agent session running in a terminal tab to an existing task, as a run with no
+    /// worktree and no branch. Emits nothing: the only caller is the CLI, whose event sink drops
+    /// `TaskRunStatusChanged`. A GUI entry point must also announce the runs this detached and
+    /// settled, the way the settlement paths in `ExecutionService` do.
+    pub fn attach_terminal_session(
+        &mut self,
+        task_id: &TaskId,
+        agent: Agent,
+        terminal_tab_id: &str,
+        terminal_session_id: &str,
+    ) -> ApplicationResult<AttachSessionReport> {
+        crate::usecases::tasks::attach_terminal_session_to_task(
+            &mut self.m.repos,
+            task_id,
+            agent,
+            terminal_tab_id,
+            terminal_session_id,
+        )
     }
 
     /// Promote the run hosted in a Workbench tab to its task's Main Run, emitting the run's new
