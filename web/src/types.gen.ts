@@ -107,6 +107,14 @@ export type NoteSummary = {
   updated_at: string;
 };
 
+/**
+ *  PUT /api/notes/{id} の応答。autosave が毎秒叩く経路なので doc は返さず、
+ *  次の PUT の基準版になる `updated_at` だけを返す。
+ */
+export type NoteVersion = {
+  updated_at: string;
+};
+
 export type NotesSettings = {
   day_boundary_hour: number;
 };
@@ -131,4 +139,9 @@ export type UpdateNote = {
   /**  Essay の title 全置換。null = 触らない。essay 以外の note では無視される。 */
   title: string | null;
   content: unknown;
+  /**
+   *  楽観ロックの基準版。直前に読んだ / 書いた `updated_at` をそのまま送り返す。
+   *  null・省略 = 無条件更新（競合を検出しない）。
+   */
+  expected_updated_at?: string | null;
 };

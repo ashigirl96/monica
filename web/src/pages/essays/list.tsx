@@ -1,8 +1,9 @@
-import { type MouseEvent as ReactMouseEvent, useCallback, useEffect, useState } from "react";
-import { createEssay, deleteNote, listEssays, setEssayStatus } from "@/api";
+import { type MouseEvent as ReactMouseEvent, useCallback, useEffect } from "react";
+import { createEssay, deleteNote, setEssayStatus } from "@/api";
 import { navigate, spaLinkClick } from "@/app";
 import { ContextMenu, useContextMenu } from "@/components/context-menu";
 import { altOnly } from "@/keys";
+import { useEssaysCache, useEssaysQuery } from "@/notes/queries";
 import type { NoteSummary } from "@/types.gen";
 import {
   dropEssay,
@@ -68,55 +69,44 @@ function EssayCard({
 }
 
 export function EssaysListPage() {
-  const [essays, setEssays] = useState<NoteSummary[] | null>(null);
-  const [listError, setListError] = useState<string | null>(null);
+  const { data: essays = null, error: listQueryError } = useEssaysQuery();
+  const listError = listQueryError === null ? null : listQueryError.message;
   const { menu, openMenu, closeMenu } = useContextMenu<NoteSummary>();
-  // status 変更の失敗・undo の後に一覧を取り直すためのバージョン
-  const [dataVersion, setDataVersion] = useState(0);
+  const { patchEssays, invalidateEssays } = useEssaysCache();
 
-  useEffect(() => {
-    let cancelled = false;
-    listEssays()
-      .then((list) => {
-        if (cancelled) return;
-        setEssays(list);
-        setListError(null);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setListError(e instanceof Error ? e.message : "Failed to load essays");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [dataVersion]);
+  const toggleStatus = useCallback(
+    async (summary: NoteSummary) => {
+      const next = nextEssayStatus(summary);
+      if (next === null) return;
+      try {
+        const updated = await setEssayStatus(summary.id, next);
+        patchEssays((list) => patchEssayKind(list, summary.id, updated.kind));
+      } catch {
+        // 409/404 は手元の一覧が古いだけ。再取得で追いつく
+        invalidateEssays();
+      }
+    },
+    [patchEssays, invalidateEssays],
+  );
 
-  const toggleStatus = useCallback(async (summary: NoteSummary) => {
-    const next = nextEssayStatus(summary);
-    if (next === null) return;
-    try {
-      const updated = await setEssayStatus(summary.id, next);
-      setEssays((list) => patchEssayKind(list, summary.id, updated.kind));
-    } catch {
-      // 409/404 は手元の一覧が古いだけ。再取得で追いつく
-      setDataVersion((v) => v + 1);
-    }
-  }, []);
-
-  const deleteEssay = useCallback(async (id: string) => {
-    try {
-      await deleteNote(id);
-    } catch {
-      return;
-    }
-    pushDeletedEssay(id);
-    setEssays((list) => dropEssay(list, id));
-  }, []);
+  const deleteEssay = useCallback(
+    async (id: string) => {
+      try {
+        await deleteNote(id);
+      } catch {
+        return;
+      }
+      pushDeletedEssay(id);
+      patchEssays((list) => dropEssay(list, id));
+    },
+    [patchEssays],
+  );
 
   const undoDelete = useCallback(async () => {
     if ((await restoreLastDeletedEssay()) === undefined) return;
     // 復活した note の preview まで正しく並べ直すため summary は組まず取り直す
-    setDataVersion((v) => v + 1);
-  }, []);
+    invalidateEssays();
+  }, [invalidateEssays]);
 
   useEffect(() => {
     // capture phase で登録する: エディタは無い画面だが、他画面と流儀を揃える

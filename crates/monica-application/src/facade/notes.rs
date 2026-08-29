@@ -5,7 +5,7 @@ use monica_domain::{
 
 use super::Backend;
 use crate::error::{ApplicationError, ApplicationResult};
-use crate::ports::NoteStore;
+use crate::ports::{NoteStore, NoteUpdate};
 use crate::usecases::notes::StoreNoteResolver;
 
 /// project filter 表示の 1 ページあたりの件数。フロントは has_more を見るだけで、
@@ -167,10 +167,15 @@ impl<B: Backend> NoteService<'_, B> {
 
     pub fn update_note(&mut self, id: &str, update: UpdateNote) -> ApplicationResult<Note> {
         NoteId::parse(id)?;
-        self.m
-            .repos
-            .update_note(id, update)?
-            .ok_or_else(|| ApplicationError::not_found(format!("note {id} not found")))
+        match self.m.repos.update_note(id, update)? {
+            NoteUpdate::Updated(note) => Ok(note),
+            NoteUpdate::Stale => {
+                Err(ApplicationError::conflict(format!("note {id} was updated concurrently")))
+            }
+            NoteUpdate::Missing => {
+                Err(ApplicationError::not_found(format!("note {id} not found")))
+            }
+        }
     }
 
     pub fn delete_note(&mut self, id: &str) -> ApplicationResult<()> {

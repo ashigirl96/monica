@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { BlockEditorHandle } from "@shared/block-editor/block-editor";
-import { dailyNoteDates, getDailyNote, getNotesToday } from "@/api";
+import { queryKeys } from "@/query";
 import { navigate } from "@/app";
 import { altOnly } from "@/keys";
-import type { Note } from "@/types.gen";
+import type { DailyNoteCount, Note } from "@/types.gen";
 import type { Month } from "@/notes/dates";
 import { takePendingBlockTarget } from "@/notes/block-jump";
 import {
@@ -16,7 +17,10 @@ import {
 } from "@/notes/dates";
 import { cycleSelect, persistableContent, useNoteBlockResolvers } from "@/notes/editor-support";
 import { NoteBlockEditor } from "@/notes/note-block-editor";
+import { useServerDoc } from "@/notes/note-sync";
 import { NotesShell } from "@/notes/notes-shell";
+import { useDailyDatesQuery, useDailyNoteQuery, useNotesTodayQuery } from "@/notes/queries";
+import { SaveStatus } from "@/notes/save-status";
 import { useAutosave } from "@/notes/use-autosave";
 import { DailyCalendar } from "./calendar";
 import { DailySidebar } from "./sidebar";
@@ -29,12 +33,10 @@ export function DailyPage({ date }: { date: string | null }) {
   // logical today は backend が正（day boundary 設定を適用）。ブラウザ midnight は
   // 取得完了までの初期値フォールバック
   const [today, setToday] = useState<string>(todayKey);
-  const [note, setNote] = useState<Note | null>(null);
-  const [noteError, setNoteError] = useState<string | null>(null);
-  // daily が存在する日の集合（順序不問 — サイドバー・カレンダーは導出時に整える）
-  const [dates, setDates] = useState<string[] | null>(null);
   const [month, setMonth] = useState<Month>(currentMonth);
-  const { schedule, flush, error: saveError } = useAutosave();
+  const queryClient = useQueryClient();
+  const autosave = useAutosave();
+  const { schedule, flush, error: saveError, conflictId } = autosave;
   const editorHandleRef = useRef<BlockEditorHandle | null>(null);
   const contentRef = useRef<unknown>(null);
   const noteRef = useRef<Note | null>(null);
@@ -60,49 +62,51 @@ export function DailyPage({ date }: { date: string | null }) {
   // （boundary 前の深夜にブラウザの日付で開くと前日の daily とズレるため）。解決済みなら
   // 日付間の移動では再取得せず、素の /daily へ戻ったときだけ取り直す
   const todayResolvedRef = useRef(false);
+  const todayQuery = useNotesTodayQuery(date === null || !todayResolvedRef.current);
   useEffect(() => {
-    if (date !== null && todayResolvedRef.current) return;
-    let cancelled = false;
-    getNotesToday()
-      .then((t) => {
-        if (cancelled) return;
-        todayResolvedRef.current = true;
-        setToday(t.date);
-        setMonth((m) => (sameMonth(m, currentMonth()) ? monthOf(t.date) : m));
-        if (date === null) navigate(`/daily/${t.date}`, { replace: true });
-      })
-      .catch(() => {
-        if (!cancelled && date === null) navigate(`/daily/${todayKey()}`, { replace: true });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [date]);
+    const resolved = todayQuery.data;
+    if (resolved !== undefined) {
+      todayResolvedRef.current = true;
+      setToday(resolved.date);
+      setMonth((m) => (sameMonth(m, currentMonth()) ? monthOf(resolved.date) : m));
+      if (date === null) navigate(`/daily/${resolved.date}`, { replace: true });
+      return;
+    }
+    if (todayQuery.error !== null && date === null) {
+      navigate(`/daily/${todayKey()}`, { replace: true });
+    }
+  }, [todayQuery.data, todayQuery.error, date]);
 
-  // 開く = 作る（get-or-create、冪等）
+  // 開く = 作る（get-or-create、冪等）。docKey は note id ではなく date —
+  // id はフェッチするまで分からないため
+  const noteQuery = useDailyNoteQuery(date);
+  const noteError = noteQuery.error === null ? null : noteQuery.error.message;
+  const { note, generation, reload } = useServerDoc({
+    docKey: date ?? "",
+    data: noteQuery.data,
+    autosave,
+    contentRef,
+    noteRef,
+    refetch: noteQuery.refetch,
+  });
+
   useEffect(() => {
-    if (date === null) return;
+    // 別 note の mention 解決結果を持ち越さない
     mentionCacheRef.current = new Map();
-    let cancelled = false;
-    noteRef.current = null;
-    setNote(null);
-    setNoteError(null);
-    getDailyNote(date)
-      .then((n) => {
-        if (cancelled) return;
-        contentRef.current = n.content;
-        noteRef.current = n;
-        setNote(n);
-        // 空日を開いた（= その場で作成された）場合に存在日リストへ反映する
-        setDates((prev) => (prev?.includes(date) ? prev : [...(prev ?? []), date]));
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setNoteError(e instanceof Error ? e.message : "Failed to open daily note");
-      });
-    return () => {
-      cancelled = true;
-    };
   }, [date, mentionCacheRef]);
+
+  const datesQuery = useDailyDatesQuery();
+
+  useEffect(() => {
+    // 空日を開いた（= その場で作成された）場合に存在日リストへ反映する。
+    // 一覧の到着が後になる場合もあるので、datesQuery.data が入れ替わるたびに撃ち直す
+    if (date === null || noteQuery.data === undefined) return;
+    queryClient.setQueryData(queryKeys.dailyDates(), (prev: DailyNoteCount[] | undefined) =>
+      prev === undefined || prev.some((c) => c.date === date)
+        ? prev
+        : [...prev, { date, count: 1 }],
+    );
+  }, [date, noteQuery.data, datesQuery.data, queryClient]);
 
   // synced block ジャンプの対象がロードされたらスクロールする。別 note からの cross-note
   // ジャンプは /notes/{id} リダイレクト経由でこのページに着地する
@@ -112,24 +116,10 @@ export function DailyPage({ date }: { date: string | null }) {
     if (blockId) editorHandleRef.current?.scrollToBlock(blockId);
   }, [note]);
 
-  useEffect(() => {
-    let cancelled = false;
-    dailyNoteDates()
-      .then((list) => {
-        if (cancelled) return;
-        // 取得中に get-or-create で足された日付（note 読み込み effect の setDates）を
-        // レスポンスで潰さないよう合併する
-        setDates((prev) => {
-          const merged = new Set(list.map((c) => c.date));
-          for (const d of prev ?? []) merged.add(d);
-          return Array.from(merged);
-        });
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const dates = useMemo(
+    () => (datesQuery.data === undefined ? null : datesQuery.data.map((c) => c.date)),
+    [datesQuery.data],
+  );
 
   // カレンダーの存在日ドット。dates（全期間）の membership 判定だけなので導出で足りる
   const existing = useMemo(() => new Set(dates ?? []), [dates]);
@@ -219,12 +209,17 @@ export function DailyPage({ date }: { date: string | null }) {
               <h1 className="font-mono text-[0.8rem] uppercase tracking-widest text-[var(--ink-muted)]">
                 {dayLabelWithYear(date)}
               </h1>
-              {saveError && (
-                <span className="truncate text-xs text-destructive">Save failed — {saveError}</span>
-              )}
+              <span className="truncate text-xs">
+                <SaveStatus
+                  saveError={saveError}
+                  conflict={conflictId === note.id}
+                  onReload={() => void reload()}
+                />
+              </span>
             </header>
             <NoteBlockEditor
               note={note}
+              generation={generation}
               autoFocus
               onDocChange={onDocChange}
               onNoteMentionClick={openInNotes}

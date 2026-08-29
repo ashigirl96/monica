@@ -201,6 +201,10 @@ pub struct UpdateNote {
     pub title: Option<String>,
     #[specta(type = specta_typescript::Unknown)]
     pub content: serde_json::Value,
+    /// 楽観ロックの基準版。直前に読んだ / 書いた `updated_at` をそのまま送り返す。
+    /// null・省略 = 無条件更新（競合を検出しない）。
+    #[serde(default)]
+    pub expected_updated_at: Option<String>,
 }
 
 impl From<UpdateNote> for monica_domain::UpdateNote {
@@ -208,8 +212,16 @@ impl From<UpdateNote> for monica_domain::UpdateNote {
         Self {
             title: value.title,
             content: monica_domain::RawJson::from(value.content.to_string()),
+            expected_updated_at: value.expected_updated_at,
         }
     }
+}
+
+/// PUT /api/notes/{id} の応答。autosave が毎秒叩く経路なので doc は返さず、
+/// 次の PUT の基準版になる `updated_at` だけを返す。
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct NoteVersion {
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]

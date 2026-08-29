@@ -20,6 +20,7 @@ impl<R: NoteStore> NoteDocResolver for StoreNoteResolver<'_, R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ports::NoteUpdate;
     use anyhow::{anyhow, Result};
     use monica_domain::{
         DailyNoteCount, EssayStatus, Note, NoteDocResolver, NoteId, NoteKind, NoteSummary,
@@ -88,7 +89,7 @@ mod tests {
         fn list_project_notes(&self, _: &str, _: usize, _: usize) -> Result<Vec<NoteSummary>> {
             unimplemented!()
         }
-        fn update_note(&mut self, _: &str, _: UpdateNote) -> Result<Option<Note>> {
+        fn update_note(&mut self, _: &str, _: UpdateNote) -> Result<NoteUpdate> {
             unimplemented!()
         }
         fn delete_note(&mut self, _: &str) -> Result<bool> {

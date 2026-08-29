@@ -11,6 +11,7 @@ import { fetchLinkMetadata, searchNoteMentions } from "./editor-support";
  * 解決子とハンドラだけを props で受ける。 */
 export function NoteBlockEditor({
   note,
+  generation,
   autoFocus,
   onDocChange,
   onExitUp,
@@ -21,6 +22,9 @@ export function NoteBlockEditor({
   handleRef,
 }: {
   note: Note;
+  /** 外部更新を採用したときだけ進む世代。自分の autosave では進まないので、
+   * 打鍵のたびに再マウントしてカーソルと undo を失うことがない。 */
+  generation: number;
   autoFocus: boolean;
   onDocChange: (doc: unknown) => void;
   onExitUp?: () => void;
@@ -32,7 +36,7 @@ export function NoteBlockEditor({
 }) {
   return (
     <BlockEditor
-      key={note.id}
+      key={`${note.id}:${generation}`}
       initialDoc={note.content}
       autoFocus={autoFocus}
       onDocChange={onDocChange}
