@@ -42,7 +42,7 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const autosave = useAutosaveContext();
-  const { schedule, flush, discard, resume, error: saveError, hasConflict } = autosave;
+  const { schedule, flush, discard, resume } = autosave;
   const { hasUnsaved } = autosave;
   const editorHandleRef = useRef<BlockEditorHandle | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
@@ -398,11 +398,7 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
                 <span className="ml-auto font-mono text-[0.7rem] text-[var(--ink-faint)]">
                   {note.date.replaceAll("-", ".")}
                 </span>
-                <SaveStatus
-                  saveError={saveError}
-                  conflict={hasConflict(note.id)}
-                  onReload={() => void reload()}
-                />
+                <SaveStatus noteId={note.id} onReload={() => void reload()} />
               </div>
             </header>
             <NoteBlockEditor

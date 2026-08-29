@@ -1,6 +1,6 @@
 import { navigate } from "@/app";
 import { useAutosaveContext } from "./autosave-context";
-import { visibleConflicts } from "./conflicts";
+import { visibleConflicts } from "./note-ledger";
 
 /** 開いていない note で起きた 409 を surface する常駐通知。開いている note はヘッダの
  * SaveStatus が担当するので出さない（同じことを二重に言わない）。
