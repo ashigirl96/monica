@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, updateNote } from "@/api";
 import type { UpdateNote } from "@/types.gen";
-import { type NoteConflict, removeConflict, shouldAdvanceBase, upsertConflict } from "./conflicts";
+import {
+  type NoteConflict,
+  nextSaveErrors,
+  removeConflict,
+  removeSaveError,
+  shouldAdvanceBase,
+  upsertConflict,
+} from "./note-ledger";
 
 const DEBOUNCE_MS = 1000;
 const RETRY_MS = 5000;
@@ -37,7 +44,9 @@ export function useAutosave() {
   const timerRef = useRef<number | null>(null);
   // flush を直列化し、古い payload の PUT が新しい PUT を追い越して上書きするのを防ぐ
   const flushChainRef = useRef<Promise<void>>(Promise.resolve());
-  const [error, setError] = useState<string | null>(null);
+  // 保存エラーも id ごとに持つ。全体で 1 値にすると、note A の失敗が note B のヘッダに
+  // 出て「B の保存が落ちた」と嘘をつく（autosave がアプリ全体で 1 つになったため）
+  const [errors, setErrors] = useState<Record<string, string>>({});
   // 競合の一覧。開いている note に依らず保持するので、離脱後に返った 409 も surface できる
   const [conflicts, setConflicts] = useState<NoteConflict[]>([]);
   // 画面に出ている note。通知はこの行を出さない（インラインバナーと二重になる）
@@ -69,6 +78,9 @@ export function useAutosave() {
   /** 競合バナーの表示条件。台帳ではなく state から引くので、409 の到着で再描画される。 */
   const hasConflict = useCallback((id: string) => conflicts.some((c) => c.id === id), [conflicts]);
 
+  /** その note の保存失敗メッセージ（再試行待ち）。 */
+  const saveError = useCallback((id: string) => errors[id] ?? null, [errors]);
+
   /** pending を出し切る。成否は id ごとに `hasUnsaved(id)` で見る — 呼び手が気にするのは
    * 常に自分が触っている note の 1 件で、無関係な note の失敗で操作を止める理由はない。 */
   const flush = useCallback(
@@ -78,7 +90,8 @@ export function useAutosave() {
         if (pendingRef.current.size === 0) return;
         const batch = pendingRef.current;
         pendingRef.current = new Map();
-        let failure: string | null = null;
+        const attempted = [...batch.keys()];
+        const failures: Record<string, string> = {};
         await Promise.all(
           [...batch].map(([id, draft]) => {
             inflightRef.current.add(id);
@@ -101,13 +114,17 @@ export function useAutosave() {
                 if (!discardedRef.current.has(id) && !pendingRef.current.has(id)) {
                   pendingRef.current.set(id, draft);
                 }
-                failure = e instanceof Error ? e.message : "Failed to save";
+                failures[id] = e instanceof Error ? e.message : "Failed to save";
               })
               .finally(() => inflightRef.current.delete(id));
           }),
         );
-        setError(failure);
-        if (failure !== null && pendingRef.current.size > 0 && timerRef.current === null) {
+        setErrors((prev) => nextSaveErrors(prev, attempted, failures));
+        if (
+          Object.keys(failures).length > 0 &&
+          pendingRef.current.size > 0 &&
+          timerRef.current === null
+        ) {
           timerRef.current = window.setTimeout(() => void flush(), RETRY_MS);
         }
       };
@@ -136,6 +153,7 @@ export function useAutosave() {
       conflictedRef.current.delete(id);
       labelRef.current.delete(id);
       setConflicts((list) => removeConflict(list, id));
+      setErrors((prev) => removeSaveError(prev, id));
       if (pendingRef.current.size === 0) clearTimer();
     },
     [clearTimer],
@@ -156,6 +174,7 @@ export function useAutosave() {
       conflictedRef.current.delete(id);
       versionRef.current.delete(id);
       setConflicts((list) => removeConflict(list, id));
+      setErrors((prev) => removeSaveError(prev, id));
       if (pendingRef.current.size === 0) clearTimer();
     },
     [clearTimer],
@@ -183,8 +202,8 @@ export function useAutosave() {
     setBase,
     hasUnsaved,
     hasConflict,
+    saveError,
     setOpenNote,
-    error,
     conflicts,
     openNoteId,
   };

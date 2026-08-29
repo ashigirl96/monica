@@ -37,7 +37,7 @@ export function DailyPage({ date }: { date: string | null }) {
   const [month, setMonth] = useState<Month>(currentMonth);
   const queryClient = useQueryClient();
   const autosave = useAutosaveContext();
-  const { schedule, flush, error: saveError, hasConflict } = autosave;
+  const { schedule, flush } = autosave;
   const editorHandleRef = useRef<BlockEditorHandle | null>(null);
   const contentRef = useRef<unknown>(null);
   const noteRef = useRef<Note | null>(null);
@@ -220,11 +220,7 @@ export function DailyPage({ date }: { date: string | null }) {
                 {dayLabelWithYear(date)}
               </h1>
               <span className="truncate text-xs">
-                <SaveStatus
-                  saveError={saveError}
-                  conflict={hasConflict(note.id)}
-                  onReload={() => void reload()}
-                />
+                <SaveStatus noteId={note.id} onReload={() => void reload()} />
               </span>
             </header>
             <NoteBlockEditor

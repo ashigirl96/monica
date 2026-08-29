@@ -2,11 +2,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   type NoteConflict,
+  nextSaveErrors,
   removeConflict,
+  removeSaveError,
   shouldAdvanceBase,
   upsertConflict,
   visibleConflicts,
-} from "./conflicts";
+} from "./note-ledger";
 
 const V1 = "2026-08-29T10:00:00.000Z";
 const V2 = "2026-08-29T10:00:01.000Z";
@@ -64,5 +66,25 @@ describe("shouldAdvanceBase", () => {
   test("競合が未解決なら新しい版でも進まない", () => {
     expect(shouldAdvanceBase(V1, V2, true)).toBe(false);
     expect(shouldAdvanceBase(null, V1, true)).toBe(false);
+  });
+});
+
+describe("nextSaveErrors", () => {
+  test("今回投げて失敗した id を載せる", () => {
+    expect(nextSaveErrors({}, ["a"], { a: "boom" })).toEqual({ a: "boom" });
+  });
+
+  test("今回投げて通った id のエラーは畳む", () => {
+    expect(nextSaveErrors({ a: "boom" }, ["a"], {})).toEqual({});
+  });
+
+  test("今回投げていない id はそのまま残す（別 note の再試行待ちを消さない）", () => {
+    expect(nextSaveErrors({ b: "boom" }, ["a"], { a: "bang" })).toEqual({ a: "bang", b: "boom" });
+  });
+});
+
+describe("removeSaveError", () => {
+  test("その id だけ落ちる", () => {
+    expect(removeSaveError({ a: "boom", b: "bang" }, "a")).toEqual({ b: "bang" });
   });
 });
