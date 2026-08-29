@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::ids::AgentSessionId;
+use crate::ids::{AgentSessionId, RunspaceId};
 
 use crate::status::TaskRunWaitReason;
 
@@ -108,7 +108,7 @@ impl TerminalSessionKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TerminalSession {
     pub id: String,
-    pub runspace_id: Option<String>,
+    pub runspace_id: Option<RunspaceId>,
     /// The Workbench tab this session was created for. Burned into the child env as
     /// MONICA_TERMINAL_TAB_ID, so reattach prefers reusing it to keep hook claims valid.
     pub tab_id: Option<String>,
@@ -137,7 +137,7 @@ pub struct TerminalSession {
 /// are assigned by the store.
 #[derive(Debug, Clone)]
 pub struct NewTerminalSession {
-    pub runspace_id: Option<String>,
+    pub runspace_id: Option<RunspaceId>,
     pub tab_id: Option<String>,
     pub kind: TerminalSessionKind,
     pub cwd: String,

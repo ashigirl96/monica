@@ -1,6 +1,6 @@
 use super::*;
 use super::support::*;
-use monica_domain::AgentSessionId;
+use monica_domain::{AgentSessionId, RunspaceId};
 
 
 // The pure decision functions (task_run_settlement_for_*, reconcile_terminal_sessions) and the
@@ -158,7 +158,7 @@ fn facade_create_terminal_session_failure_marks_failed_and_settles() {
     let mut monica = facade(repos, sink.clone());
     let daemon = FakeDaemon::failing_create();
     let new = NewTerminalSession {
-        runspace_id: Some("rs-1".to_string()),
+        runspace_id: Some(RunspaceId::from_store("rs-1".to_string())),
         tab_id: Some("tab-1".to_string()),
         kind: TerminalSessionKind::Shell,
         cwd: "/".to_string(),

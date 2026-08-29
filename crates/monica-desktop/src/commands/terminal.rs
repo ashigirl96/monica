@@ -1,5 +1,5 @@
 use monica_api::{ApiError, TerminalSession, TerminalSessionKind, TerminalStateSnapshot};
-use monica_domain::NewTerminalSession;
+use monica_domain::{NewTerminalSession, RunspaceId};
 use monica_terminal_protocol::RequestOp;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
@@ -36,7 +36,7 @@ pub async fn terminal_create_session(
         let state = app.state::<PtydHandle>();
         let daemon = PtydTerminalDaemon { handle: state.inner(), app: &app };
         let new = NewTerminalSession {
-            runspace_id: Some(runspace_id),
+            runspace_id: Some(RunspaceId::from_store(runspace_id)),
             tab_id: Some(tab_id),
             kind: kind.into(),
             cwd,
@@ -155,9 +155,10 @@ pub async fn terminal_list_sessions(
         let state = app.state::<PtydHandle>();
         let daemon = PtydTerminalDaemon { handle: state.inner(), app: &app };
         let mut monica = event_sink::open(&app)?;
+        let runspace_id = runspace_id.map(RunspaceId::from_store);
         Ok(monica
             .executions()
-            .list_terminal_sessions(&daemon, runspace_id.as_deref())?
+            .list_terminal_sessions(&daemon, runspace_id.as_ref())?
             .into_iter()
             .map(TerminalSession::from)
             .collect())

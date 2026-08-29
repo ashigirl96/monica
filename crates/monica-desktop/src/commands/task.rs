@@ -98,7 +98,12 @@ pub async fn list_bench_runspace_map(
 ) -> Result<Vec<(String, String)>, ApiError> {
     event_sink::off_main(move || {
         let mut monica = event_sink::open(&app)?;
-        Ok(monica.executions().list_bench_runspace_map()?)
+        Ok(monica
+            .executions()
+            .list_bench_runspace_map()?
+            .into_iter()
+            .map(|(runspace_id, task_id)| (runspace_id.into_string(), task_id.into_string()))
+            .collect())
     })
     .await
 }

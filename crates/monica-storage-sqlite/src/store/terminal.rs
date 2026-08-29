@@ -2,6 +2,7 @@ use anyhow::Result;
 use rusqlite::params;
 
 use monica_application::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTabRow};
+use monica_domain::RunspaceId;
 
 use crate::SqliteStore;
 
@@ -32,8 +33,9 @@ impl SqliteStore {
 
         let mut result = Vec::with_capacity(runspaces.len());
         for (rs_id, sort_order, pinned_tab_id) in runspaces {
+            let rs_id = RunspaceId::from_store(rs_id);
             let tabs = tab_stmt
-                .query_map(params![rs_id, window_label], |row| {
+                .query_map(params![rs_id.as_str(), window_label], |row| {
                     Ok(TerminalTabRow {
                         id: row.get(0)?,
                         cwd: row.get(1)?,
@@ -81,7 +83,7 @@ impl SqliteStore {
             tx.execute(
                 "INSERT INTO terminal_runspaces (id, sort_order, window_label, pinned_tab_id)
                  VALUES (?1, ?2, ?3, ?4)",
-                params![rs.id, rs.sort_order, window_label, rs.pinned_tab_id],
+                params![rs.id.as_str(), rs.sort_order, window_label, rs.pinned_tab_id],
             )?;
 
             for tab in &rs.tabs {
@@ -91,7 +93,7 @@ impl SqliteStore {
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![
                         tab.id,
-                        rs.id,
+                        rs.id.as_str(),
                         window_label,
                         tab.cwd,
                         tab.title,

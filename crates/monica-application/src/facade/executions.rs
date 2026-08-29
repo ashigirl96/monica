@@ -8,8 +8,8 @@ use crate::usecases::terminal::{
     task_run_settlement_for_terminal_exit, TerminalExitSettlement, TerminalSessionUpdate,
 };
 use crate::prelude::{
-    Agent, NewNotificationIntent, NewTerminalSession, NotificationKind, TaskId, TaskRun,
-    TaskRunId, TaskRunStatus, TerminalSession, TerminalSessionStatus,
+    Agent, NewNotificationIntent, NewTerminalSession, NotificationKind, RunspaceId, TaskId,
+    TaskRun, TaskRunId, TaskRunStatus, TerminalSession, TerminalSessionStatus,
 };
 use crate::{
     ApplicationError, ApplicationEvent, ApplicationResult, EventSink, HookContext, HookReport,
@@ -68,7 +68,7 @@ impl<B: Backend> ExecutionService<'_, B> {
         crate::usecases::runs::task_shell_env(&self.m.repos, &self.m.outputs, task_id)
     }
 
-    pub fn list_bench_runspace_map(&self) -> ApplicationResult<Vec<(String, String)>> {
+    pub fn list_bench_runspace_map(&self) -> ApplicationResult<Vec<(RunspaceId, TaskId)>> {
         Ok(self.m.repos.list_bench_runspace_map()?)
     }
 
@@ -269,7 +269,7 @@ impl<B: Backend> ExecutionService<'_, B> {
     pub fn list_terminal_sessions(
         &mut self,
         daemon: &impl TerminalDaemon,
-        runspace_id: Option<&str>,
+        runspace_id: Option<&RunspaceId>,
     ) -> ApplicationResult<Vec<TerminalSession>> {
         match daemon.list_views() {
             Ok(views) => {

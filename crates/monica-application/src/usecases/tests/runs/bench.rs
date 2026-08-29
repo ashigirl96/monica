@@ -1,4 +1,5 @@
 use super::*;
+use monica_domain::RunspaceId;
 
 #[test]
 fn default_bench_cwd_prefers_project_path() {
@@ -68,6 +69,35 @@ fn open_bench_creates_bench_on_first_call_and_reuses_on_second() {
     let bench2: TaskBench = open_bench(&mut repos, &outputs, &task_id).unwrap();
     assert!(!bench2.created);
     assert_eq!(bench2.runspace_id, bench.runspace_id);
+}
+
+/// The fake must honour the same `(runspace_id, task_id)` pairing as the SQLite store, or use-case
+/// tests would pass against a shape the real workbench never sees.
+#[test]
+fn fake_list_bench_runspace_map_pairs_each_runspace_with_its_own_task() {
+    let mut repos = FakeRepos::default();
+    let first = repos.insert_task_for_run(None);
+    let second = repos.insert_task_for_run(None);
+    repos.create_bench(&first, &RunspaceId::from_store("bench-first".to_string()), "/a").unwrap();
+    repos.create_bench(&second, &RunspaceId::from_store("bench-second".to_string()), "/b").unwrap();
+
+    let mut map = repos.list_bench_runspace_map().unwrap();
+    map.sort();
+    assert_eq!(
+        map,
+        vec![
+            (RunspaceId::from_store("bench-first".to_string()), first),
+            (RunspaceId::from_store("bench-second".to_string()), second),
+        ]
+    );
+}
+
+#[test]
+fn bench_runspace_id_prefixes_the_task_id() {
+    assert_eq!(
+        crate::bench::bench_runspace_id(&TaskId::from_store("MON-1".to_string())),
+        RunspaceId::from_store("bench-MON-1".to_string())
+    );
 }
 
 fn env_value<'a>(env: &'a [(String, String)], key: &str) -> Option<&'a str> {

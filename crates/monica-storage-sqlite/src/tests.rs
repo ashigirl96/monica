@@ -6,8 +6,8 @@ use monica_application::{
 };
 use monica_domain::{
     Agent, AgentSessionId, DisplayStatus, ExternalReference, NewTask, NewTaskRun,
-    NewTerminalSession, Project, Provider, RawJson, RefType, TaskId, TaskKind, TaskRun,
-    TaskRunId, TaskRunStatus, TaskRunWaitReason, TaskStatus, TerminalSessionKind,
+    NewTerminalSession, Project, Provider, RawJson, RefType, RunspaceId, TaskId, TaskKind,
+    TaskRun, TaskRunId, TaskRunStatus, TaskRunWaitReason, TaskStatus, TerminalSessionKind,
     TerminalSessionStatus,
 };
 use rusqlite::params;
@@ -21,6 +21,10 @@ fn tid(id: &str) -> TaskId {
 
 fn rid(id: &str) -> TaskRunId {
     TaskRunId::from_store(id.to_string())
+}
+
+fn rsid(id: &str) -> RunspaceId {
+    RunspaceId::from_store(id.to_string())
 }
 
 /// The domain carries `details`/`source`/`metadata`/`payload` as opaque [`RawJson`] text; the store
@@ -1569,7 +1573,7 @@ fn all_unresolved_pull_request_refs_select_missing_unknown_open_and_draft_states
 
 fn new_shell_session(runspace: Option<&str>, tab: Option<&str>) -> NewTerminalSession {
     NewTerminalSession {
-        runspace_id: runspace.map(str::to_string),
+        runspace_id: runspace.map(rsid),
         tab_id: tab.map(str::to_string),
         kind: TerminalSessionKind::Shell,
         cwd: "/tmp".into(),
@@ -1968,7 +1972,7 @@ fn terminal_session_list_filters_by_runspace() {
     db.create_terminal_session(new_shell_session(None, None)).unwrap();
 
     assert_eq!(db.list_terminal_sessions(None).unwrap().len(), 3);
-    let scoped = db.list_terminal_sessions(Some("rs-1")).unwrap();
+    let scoped = db.list_terminal_sessions(Some(&rsid("rs-1"))).unwrap();
     assert_eq!(scoped.len(), 1);
     assert_eq!(scoped[0].runspace_id.as_deref(), Some("rs-1"));
 }
@@ -1980,7 +1984,7 @@ fn terminal_state_snapshot_round_trips_session_id() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let snapshot = TerminalStateSnapshot {
         runspaces: vec![TerminalRunspaceRow {
-            id: "rs-1".into(),
+            id: rsid("rs-1"),
             sort_order: 0,
             pinned_tab_id: None,
             tabs: vec![
@@ -2025,19 +2029,19 @@ fn terminal_state_round_trips_pinned_tab_id_and_drops_dangling() {
     let snapshot = TerminalStateSnapshot {
         runspaces: vec![
             TerminalRunspaceRow {
-                id: "rs-pinned".into(),
+                id: rsid("rs-pinned"),
                 sort_order: 0,
                 pinned_tab_id: Some("tab-1".into()),
                 tabs: vec![tab("tab-1")],
             },
             TerminalRunspaceRow {
-                id: "rs-dangling".into(),
+                id: rsid("rs-dangling"),
                 sort_order: 1,
                 pinned_tab_id: Some("tab-gone".into()),
                 tabs: vec![tab("tab-2")],
             },
             TerminalRunspaceRow {
-                id: "rs-unpinned".into(),
+                id: rsid("rs-unpinned"),
                 sort_order: 2,
                 pinned_tab_id: None,
                 tabs: vec![tab("tab-3")],
@@ -2058,7 +2062,7 @@ fn terminal_state_is_scoped_by_window_label() {
 
     let main_snap = TerminalStateSnapshot {
         runspaces: vec![TerminalRunspaceRow {
-            id: "rs-main".into(),
+            id: rsid("rs-main"),
             sort_order: 0,
             pinned_tab_id: None,
             tabs: vec![TerminalTabRow {
@@ -2072,7 +2076,7 @@ fn terminal_state_is_scoped_by_window_label() {
     };
     let secondary_snap = TerminalStateSnapshot {
         runspaces: vec![TerminalRunspaceRow {
-            id: "rs-sec".into(),
+            id: rsid("rs-sec"),
             sort_order: 0,
             pinned_tab_id: None,
             tabs: vec![TerminalTabRow {
@@ -2104,7 +2108,7 @@ fn terminal_state_is_scoped_by_window_label() {
     // Saving main again must not destroy the secondary window's data.
     let updated_main = TerminalStateSnapshot {
         runspaces: vec![TerminalRunspaceRow {
-            id: "rs-main-v2".into(),
+            id: rsid("rs-main-v2"),
             sort_order: 0,
             pinned_tab_id: None,
             tabs: vec![],
@@ -2130,7 +2134,7 @@ fn same_runspace_id_in_two_windows_does_not_leak_tabs() {
 
     let main_snap = TerminalStateSnapshot {
         runspaces: vec![TerminalRunspaceRow {
-            id: "bench-task-1".into(),
+            id: rsid("bench-task-1"),
             sort_order: 0,
             pinned_tab_id: None,
             tabs: vec![TerminalTabRow {
@@ -2144,7 +2148,7 @@ fn same_runspace_id_in_two_windows_does_not_leak_tabs() {
     };
     let sec_snap = TerminalStateSnapshot {
         runspaces: vec![TerminalRunspaceRow {
-            id: "bench-task-1".into(),
+            id: rsid("bench-task-1"),
             sort_order: 0,
             pinned_tab_id: None,
             tabs: vec![TerminalTabRow {
@@ -2225,7 +2229,7 @@ fn work_transaction_commit_persists_run_primary_and_bench() {
             })
             .unwrap();
         tx.set_primary_task_run(&task.id, &run.id).unwrap();
-        tx.create_bench(&task.id, "runspace-1", "/tmp/wt").unwrap();
+        tx.create_bench(&task.id, &rsid("runspace-1"), "/tmp/wt").unwrap();
         tx.commit().unwrap();
         run.id
     };
@@ -2235,7 +2239,7 @@ fn work_transaction_commit_persists_run_primary_and_bench() {
     );
     assert_eq!(
         db.get_bench_for_task(&task.id).unwrap(),
-        Some(("runspace-1".to_string(), "/tmp/wt".to_string()))
+        Some((rsid("runspace-1"), "/tmp/wt".to_string()))
     );
     assert_eq!(db.list_task_runs_for_task(&task.id).unwrap().len(), 1);
 }
@@ -2371,15 +2375,38 @@ fn claim_prepared_run_returns_false_for_missing_run() {
 
 /// Exercises a store contract; reused below against both the direct store and a `WorkTransaction`.
 fn workbench_contract<S: WorkbenchStore + ?Sized>(store: &mut S, task_id: &TaskId) {
-    store.create_bench(task_id, "runspace-x", "/a").unwrap();
+    store.create_bench(task_id, &rsid("runspace-x"), "/a").unwrap();
     assert_eq!(
         store.get_bench_for_task(task_id).unwrap(),
-        Some(("runspace-x".to_string(), "/a".to_string()))
+        Some((rsid("runspace-x"), "/a".to_string()))
     );
     store.update_bench_cwd(task_id, "/b").unwrap();
     assert_eq!(
         store.get_bench_for_task(task_id).unwrap(),
-        Some(("runspace-x".to_string(), "/b".to_string()))
+        Some((rsid("runspace-x"), "/b".to_string()))
+    );
+    assert_eq!(
+        store.list_bench_runspace_map().unwrap(),
+        vec![(rsid("runspace-x"), task_id.clone())]
+    );
+}
+
+/// `list_bench_runspace_map` returns `(runspace_id, task_id)` — the pair the workbench uses to map
+/// a restored runspace back to its task. Two benches, so a swapped or cross-wired pairing shows up
+/// as a mismatch rather than passing by symmetry.
+#[test]
+fn list_bench_runspace_map_pairs_each_runspace_with_its_own_task() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let first = db.insert_task(dev_task("first")).unwrap();
+    let second = db.insert_task(dev_task("second")).unwrap();
+    db.create_bench(&first.id, &rsid("bench-first"), "/a").unwrap();
+    db.create_bench(&second.id, &rsid("bench-second"), "/b").unwrap();
+
+    let mut map = db.list_bench_runspace_map().unwrap();
+    map.sort();
+    assert_eq!(
+        map,
+        vec![(rsid("bench-first"), first.id), (rsid("bench-second"), second.id)]
     );
 }
 
@@ -2426,7 +2453,7 @@ fn store_contract_holds_for_direct_and_transactional_paths() {
     };
     assert_eq!(
         tx_store.get_bench_for_task(&tx_task.id).unwrap(),
-        Some(("runspace-x".to_string(), "/b".to_string()))
+        Some((rsid("runspace-x"), "/b".to_string()))
     );
     assert_eq!(
         tx_store.get_task_run(&run_id).unwrap().unwrap().worktree_path.as_deref(),

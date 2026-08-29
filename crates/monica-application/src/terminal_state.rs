@@ -2,6 +2,8 @@
 //! projection (like `TaskSummaryRow`), owned by the application so the `TerminalSessionRepository`
 //! port and the Tauri DTO can both name it without either side depending on the other.
 
+use monica_domain::RunspaceId;
+
 #[derive(Debug, Clone)]
 pub struct TerminalTabRow {
     pub id: String,
@@ -13,7 +15,7 @@ pub struct TerminalTabRow {
 
 #[derive(Debug, Clone)]
 pub struct TerminalRunspaceRow {
-    pub id: String,
+    pub id: RunspaceId,
     pub sort_order: i64,
     pub pinned_tab_id: Option<String>,
     pub tabs: Vec<TerminalTabRow>,

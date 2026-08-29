@@ -7,8 +7,8 @@ use monica_application::{
     WorkTransaction, WorkbenchStore,
 };
 use monica_domain::{
-    AgentSessionId, Event, ExternalReference, NewTask, NewTaskRun, Task, TaskId, TaskRun,
-    TaskRunId, TaskRunStatus, TaskStatus,
+    AgentSessionId, Event, ExternalReference, NewTask, NewTaskRun, RunspaceId, Task, TaskId,
+    TaskRun, TaskRunId, TaskRunStatus, TaskStatus,
 };
 
 use super::{bench, events, external_refs, task_runs, tasks};
@@ -175,15 +175,20 @@ impl Clock for SqliteUow<'_> {
 }
 
 impl WorkbenchStore for SqliteUow<'_> {
-    fn get_bench_for_task(&self, task_id: &TaskId) -> Result<Option<(String, String)>> {
+    fn get_bench_for_task(&self, task_id: &TaskId) -> Result<Option<(RunspaceId, String)>> {
         bench::get_bench_for_task(&self.tx, task_id)
     }
 
-    fn list_bench_runspace_map(&self) -> Result<Vec<(String, String)>> {
+    fn list_bench_runspace_map(&self) -> Result<Vec<(RunspaceId, TaskId)>> {
         bench::list_bench_runspace_map(&self.tx)
     }
 
-    fn create_bench(&mut self, task_id: &TaskId, runspace_id: &str, cwd: &str) -> Result<()> {
+    fn create_bench(
+        &mut self,
+        task_id: &TaskId,
+        runspace_id: &RunspaceId,
+        cwd: &str,
+    ) -> Result<()> {
         bench::create_bench(&self.tx, task_id, runspace_id, cwd)
     }
 
