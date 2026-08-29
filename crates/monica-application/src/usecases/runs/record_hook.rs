@@ -114,12 +114,15 @@ where
 
     let resolved = resolve_hook_run(
         repos,
-        ctx.task_id,
-        safe_task_run_id,
-        unsafe_task_run_id,
-        agent_session_id,
-        signal.starts_session(),
-        agent,
+        RunLookup {
+            task_id: ctx.task_id,
+            explicit_run_id: safe_task_run_id,
+            explicit_run_id_rejected: unsafe_task_run_id,
+            agent_session_id,
+            terminal_tab_id: ctx.terminal_tab_id,
+            starts_session: signal.starts_session(),
+            agent,
+        },
     )?;
     let run_row = resolved.run;
     let task_run_linked = run_row.is_some();
@@ -262,6 +265,19 @@ pub(in crate::usecases) struct RunResolveCtx<'a> {
     pub(in crate::usecases) primary_run: Option<&'a TaskRun>,
 }
 
+/// Everything a hook carries about which run it belongs to, once the raw env has been validated.
+/// `explicit_run_id` is the wrapper-supplied id after the safety check; `explicit_run_id_rejected`
+/// says the env carried one that failed it.
+struct RunLookup<'a> {
+    task_id: Option<&'a TaskId>,
+    explicit_run_id: Option<&'a TaskRunId>,
+    explicit_run_id_rejected: bool,
+    agent_session_id: Option<&'a AgentSessionId>,
+    terminal_tab_id: Option<&'a str>,
+    starts_session: bool,
+    agent: Agent,
+}
+
 /// Resolve which task run a hook belongs to. Rules are evaluated top-down, first match wins:
 ///
 /// 1. An explicit run id (wrapper launch) always wins; no session lookup.
@@ -276,23 +292,37 @@ pub(in crate::usecases) struct RunResolveCtx<'a> {
 ///    primary when none is set (or the pointer dangles), and a side run when a primary already
 ///    exists — a run actively driven by another session is never stolen. A rejected explicit run id
 ///    means a wrapper launch with corrupted env, not a plain session; it never creates.
-fn resolve_hook_run<R>(
-    repos: &mut R,
-    task_id: Option<&TaskId>,
-    explicit_run_id: Option<&TaskRunId>,
-    explicit_run_id_rejected: bool,
-    agent_session_id: Option<&AgentSessionId>,
-    starts_session: bool,
-    agent: Agent,
-) -> ApplicationResult<ResolvedRun>
+///
+/// Rules 2-4 all scope their lookups by task, so a tab launched without `MONICA_TASK_ID` can never
+/// reach them. Such a tab is instead resolved by the tab -> run binding `monica task attach` wrote,
+/// which is also the only thing that can have created one. That binding deliberately carries none
+/// of the guards above: it never creates a run, and it follows the tab regardless of which session
+/// the signal came from or whether that signal starts a session. So a fresh agent started in an
+/// attached tab keeps driving the same run (reviving it from `Stopped` if need be), where a task
+/// tab would have lazily created a new one — the attachment is a property of the tab, not of the
+/// session inside it.
+fn resolve_hook_run<R>(repos: &mut R, lookup: RunLookup<'_>) -> ApplicationResult<ResolvedRun>
 where
     R: TaskStore + TaskRunStore,
 {
+    let RunLookup {
+        task_id,
+        explicit_run_id,
+        explicit_run_id_rejected,
+        agent_session_id,
+        terminal_tab_id,
+        starts_session,
+        agent,
+    } = lookup;
+
     if let Some(run_id) = explicit_run_id {
         return Ok(ResolvedRun::linked(repos.get_task_run(run_id)?));
     }
     let Some(task_id) = task_id else {
-        return Ok(ResolvedRun::linked(None));
+        return Ok(ResolvedRun::linked(match terminal_tab_id {
+            Some(tab_id) => repos.find_task_run_by_terminal_tab(tab_id)?,
+            None => None,
+        }));
     };
     let Some(task) = repos.get_task(task_id)? else {
         return Ok(ResolvedRun::linked(None));

@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection};
 
 use crate::SqliteStore;
-use monica_application::{TaskRunObservation, TaskRunStore};
+use monica_application::{TabAttachment, TaskRunObservation, TaskRunStore};
 use monica_domain::{
     transition_is_generic_wait, AgentSessionId, HookTransition, NewTaskRun, TaskId, TaskRun,
     TaskRunId, TaskRunStatus, TaskRunWaitReason, TaskStatus,
@@ -339,6 +339,70 @@ pub(super) fn get_task_run(conn: &Connection, id: &TaskRunId) -> Result<Option<T
     }
 }
 
+/// Bind a terminal tab (and the agent session inside it) to a task as a fresh `running` run.
+///
+/// The runs this tab was driving are settled first and only then unbound: `terminal_tab_id` is the
+/// sole key every settlement path uses (`list_driven_task_runs_with_tab`, the per-death sweep in
+/// the facade, and the hook's tab rule), so a still-live run that loses its tab would never reach a
+/// terminal status again. Both halves share the caller's transaction, so the tab -> run lookup can
+/// never observe two candidates. `agent_session_id` is left on the detached runs as the record of
+/// which agent session discussed that task.
+pub(super) fn attach_terminal_tab_to_task_in(
+    conn: &Connection,
+    new: NewTaskRun,
+    terminal_tab_id: &str,
+    agent_session_id: Option<&AgentSessionId>,
+) -> Result<TabAttachment> {
+    let previous: Vec<(TaskRunId, TaskId)> = {
+        let mut stmt =
+            conn.prepare("SELECT id, task_id FROM task_runs WHERE terminal_tab_id = ?1")?;
+        let mut rows = stmt.query(params![terminal_tab_id])?;
+        let mut ids = Vec::new();
+        while let Some(row) = rows.next()? {
+            ids.push((
+                TaskRunId::from_store(row.get(0)?),
+                TaskId::from_store(row.get(1)?),
+            ));
+        }
+        ids
+    };
+    for (run_id, task_id) in &previous {
+        settle_task_run_if_live_in(conn, run_id, task_id)?;
+    }
+    conn.execute(
+        &format!(
+            "UPDATE task_runs SET terminal_tab_id = NULL, updated_at = {SET_NOW}
+             WHERE terminal_tab_id = ?1"
+        ),
+        params![terminal_tab_id],
+    )?;
+
+    let run = start_task_run_in(conn, new)?;
+    conn.execute(
+        &format!(
+            "UPDATE task_runs
+                SET status = '{}',
+                    terminal_tab_id = ?2,
+                    agent_session_id = ?3,
+                    updated_at = {SET_NOW}
+              WHERE id = ?1",
+            TaskRunStatus::Running.as_str(),
+        ),
+        params![
+            run.id.as_str(),
+            terminal_tab_id,
+            agent_session_id.map(AgentSessionId::as_str),
+        ],
+    )?;
+
+    let run = get_task_run(conn, &run.id)?
+        .ok_or_else(|| anyhow!("attached task run {} not found", run.id))?;
+    Ok(TabAttachment {
+        run,
+        detached_run_ids: previous.into_iter().map(|(id, _)| id).collect(),
+    })
+}
+
 /// Latest run observed for a Claude session. Scoped to a task so an (unlikely) session id
 /// collision across tasks cannot cross-link runs.
 pub(super) fn find_task_run_by_session(
@@ -479,6 +543,19 @@ impl TaskRunStore for SqliteStore {
         }
         tx.commit()?;
         Ok(run)
+    }
+
+    fn attach_terminal_tab_to_task(
+        &mut self,
+        new: NewTaskRun,
+        terminal_tab_id: &str,
+        agent_session_id: Option<&AgentSessionId>,
+    ) -> Result<TabAttachment> {
+        let tx = self.conn_mut().transaction()?;
+        let attachment =
+            attach_terminal_tab_to_task_in(&tx, new, terminal_tab_id, agent_session_id)?;
+        tx.commit()?;
+        Ok(attachment)
     }
 
     fn record_task_run_observation(
