@@ -3,7 +3,7 @@ use crate::ports::{TerminalSessionRepository, UnitOfWork};
 use crate::ApplicationResult;
 use crate::prelude::{is_safe_task_run_id, Agent, AgentSignal, SignalKind, Task};
 use crate::prelude::{NewTaskRun, TaskId, TaskRun, TaskRunStatus, TaskRunWaitReason, TaskStatus};
-use monica_domain::{AgentSessionEffect, AgentSessionStatus};
+use monica_domain::{AgentSessionEffect, AgentSessionId, AgentSessionStatus};
 use crate::TaskRunObservation;
 
 /// Identity carried by a hook invocation via `MONICA_*` env vars. `task_run_id` is only present
@@ -87,7 +87,7 @@ where
     // `session_entered_waiting` detects the entering edge so notifications can fire for all tabs.
     let mut session_entered_waiting = false;
     let mut session_wait_reason: Option<TaskRunWaitReason> = None;
-    let agent_session_id = signal.agent_session_id.as_deref();
+    let agent_session_id = signal.agent_session_id.as_ref();
 
     if let Some(session_id) = ctx.terminal_session_id {
         match signal.kind.agent_session_effect() {
@@ -257,7 +257,7 @@ pub(in crate::usecases) struct RunResolveCtx<'a> {
     pub(in crate::usecases) task_id: &'a str,
     pub(in crate::usecases) task: &'a Task,
     pub(in crate::usecases) explicit_run_id_rejected: bool,
-    pub(in crate::usecases) agent_session_id: Option<&'a str>,
+    pub(in crate::usecases) agent_session_id: Option<&'a AgentSessionId>,
     /// Whether the signal proves a user is actively driving a session (session start / first
     /// prompt) — only such signals may claim or create a run.
     pub(in crate::usecases) starts_session: bool,
@@ -284,7 +284,7 @@ fn resolve_hook_run<R>(
     task_id: Option<&str>,
     explicit_run_id: Option<&str>,
     explicit_run_id_rejected: bool,
-    agent_session_id: Option<&str>,
+    agent_session_id: Option<&AgentSessionId>,
     starts_session: bool,
     agent: Agent,
 ) -> ApplicationResult<ResolvedRun>
@@ -369,7 +369,7 @@ where
         // The claim only set `agent_session_id`; reflect it on the snapshot we already hold
         // (avoiding a re-read) so the observation that follows sees the claimed session.
         let mut claimed = run.clone();
-        claimed.agent_session_id = Some(session_id.to_string());
+        claimed.agent_session_id = Some(session_id.clone());
         Ok(Some(ResolvedRun::linked(Some(claimed))))
     } else {
         Ok(None)

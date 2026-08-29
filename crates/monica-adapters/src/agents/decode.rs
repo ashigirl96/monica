@@ -2,7 +2,9 @@ use anyhow::Result;
 use serde_json::Value;
 
 use monica_application::{AgentDecoders, AgentEventDecoder};
-use monica_domain::{Agent, AgentSignal, Continuation, SignalKind, TaskRunWaitReason};
+use monica_domain::{
+    Agent, AgentSessionId, AgentSignal, Continuation, SignalKind, TaskRunWaitReason,
+};
 
 /// The default [`AgentDecoders`] factory the runtime wires into the façade: it picks the per-agent
 /// [`AgentEventDecoder`] and exposes the opaque event label, keeping agent knowledge here.
@@ -73,7 +75,7 @@ fn decode_signal(agent: Agent, raw: &[u8]) -> Option<AgentSignal> {
     let agent_session_id = parsed
         .get("session_id")
         .and_then(Value::as_str)
-        .map(str::to_string);
+        .map(AgentSessionId::from_agent);
     Some(AgentSignal {
         agent_session_id,
         event_label: event_name.map(str::to_string),

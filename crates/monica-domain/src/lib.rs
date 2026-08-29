@@ -33,7 +33,7 @@ pub use branch::{branch_name, monica_number, worktree_path_for};
 pub use error::DomainError;
 pub use explanation::{Explanation, ExplanationMode, NewExplanation, repo_name_from_cwd};
 pub use external_reference::{ExternalIssue, ExternalReference, RefType};
-pub use ids::{ExplanationId, NoteId, TaskId, TaskRunId};
+pub use ids::{AgentSessionId, ExplanationId, NoteId, TaskId, TaskRunId};
 pub use json::RawJson;
 pub use note::{
     is_valid_date, logical_date, DailyNoteCount, EssayStatus, EssayStatusError, Note, NoteKind,

@@ -1,6 +1,8 @@
 use anyhow::Result;
 use monica_application::ports::ExplanationStore;
-use monica_domain::{Explanation, ExplanationId, ExplanationMode, NewExplanation, repo_name_from_cwd};
+use monica_domain::{
+    AgentSessionId, Explanation, ExplanationId, ExplanationMode, NewExplanation, repo_name_from_cwd,
+};
 use rusqlite::{params, Row};
 
 use crate::SqliteStore;
@@ -16,7 +18,7 @@ fn explanation_from_row(row: &Row<'_>) -> Result<Explanation> {
         title: row.get("title")?,
         summary: row.get("summary")?,
         mode: mode.parse::<ExplanationMode>()?,
-        agent_session_id: row.get("agent_session_id")?,
+        agent_session_id: AgentSessionId::from_store(row.get("agent_session_id")?),
         terminal_session_id: row.get("terminal_session_id")?,
         created_at: row.get("created_at")?,
         repo_name: stored_repo_name.or_else(|| cwd.as_deref().and_then(repo_name_from_cwd)),
@@ -37,7 +39,7 @@ fn insert_explanation_in(
             new.title,
             new.summary,
             new.mode.as_str(),
-            new.agent_session_id,
+            new.agent_session_id.as_str(),
             new.terminal_session_id,
             new.repo_name,
         ],
@@ -116,7 +118,7 @@ mod tests {
                 title: "test explanation".to_string(),
                 summary: Some("test summary".to_string()),
                 mode: ExplanationMode::Diff,
-                agent_session_id: "agent-123".to_string(),
+                agent_session_id: AgentSessionId::from_agent("agent-123"),
                 terminal_session_id: ts_id.clone(),
                 repo_name: Some("my-repo".to_string()),
             })
@@ -140,7 +142,7 @@ mod tests {
                 title: "no stored repo".to_string(),
                 summary: None,
                 mode: ExplanationMode::Diff,
-                agent_session_id: "p1".to_string(),
+                agent_session_id: AgentSessionId::from_agent("p1"),
                 terminal_session_id: ts_id,
                 repo_name: None,
             })
@@ -160,7 +162,7 @@ mod tests {
                 title: "worktree test".to_string(),
                 summary: None,
                 mode: ExplanationMode::Diff,
-                agent_session_id: "p1".to_string(),
+                agent_session_id: AgentSessionId::from_agent("p1"),
                 terminal_session_id: ts_id,
                 repo_name: None,
             })
@@ -175,7 +177,7 @@ mod tests {
             title: "orphan".to_string(),
             summary: None,
             mode: ExplanationMode::Diff,
-            agent_session_id: "p1".to_string(),
+            agent_session_id: AgentSessionId::from_agent("p1"),
             terminal_session_id: "ts-nonexistent".to_string(),
             repo_name: None,
         });
@@ -191,7 +193,7 @@ mod tests {
                 title: "first".to_string(),
                 summary: Some("first summary".to_string()),
                 mode: ExplanationMode::Diff,
-                agent_session_id: "p1".to_string(),
+                agent_session_id: AgentSessionId::from_agent("p1"),
                 terminal_session_id: ts_id.clone(),
                 repo_name: None,
             })
@@ -201,7 +203,7 @@ mod tests {
                 title: "second".to_string(),
                 summary: None,
                 mode: ExplanationMode::Topic,
-                agent_session_id: "p2".to_string(),
+                agent_session_id: AgentSessionId::from_agent("p2"),
                 terminal_session_id: ts_id,
                 repo_name: None,
             })
@@ -224,7 +226,7 @@ mod tests {
                 title: "target".to_string(),
                 summary: None,
                 mode: ExplanationMode::Diff,
-                agent_session_id: "p1".to_string(),
+                agent_session_id: AgentSessionId::from_agent("p1"),
                 terminal_session_id: ts_id,
                 repo_name: None,
             })
@@ -247,7 +249,7 @@ mod tests {
                 title: "first".to_string(),
                 summary: None,
                 mode: ExplanationMode::Diff,
-                agent_session_id: "p1".to_string(),
+                agent_session_id: AgentSessionId::from_agent("p1"),
                 terminal_session_id: ts_id.clone(),
                 repo_name: None,
             })
@@ -257,7 +259,7 @@ mod tests {
                 title: "second".to_string(),
                 summary: None,
                 mode: ExplanationMode::Topic,
-                agent_session_id: "p2".to_string(),
+                agent_session_id: AgentSessionId::from_agent("p2"),
                 terminal_session_id: ts_id,
                 repo_name: None,
             })

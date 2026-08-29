@@ -1,4 +1,5 @@
 use super::*;
+use monica_domain::AgentSessionId;
 
 #[test]
 fn record_claude_hook_records_waiting_transition_and_run_output() {
@@ -31,7 +32,7 @@ fn record_claude_hook_forwards_plan_file_path_from_the_signal() {
     let (task_id, run_id) = task_with_running_primary(&mut repos);
 
     let plan = AgentSignal {
-        agent_session_id: Some("sess-1".to_string()),
+        agent_session_id: Some(AgentSessionId::from_agent("sess-1")),
         event_label: Some("PreToolUse".to_string()),
         kind: SignalKind::UserInputRequired {
             reason: TaskRunWaitReason::ExitPlanMode,
@@ -195,7 +196,7 @@ fn record_claude_hook_creates_side_run_instead_of_stealing_active_primary() {
     assert_eq!(primary.agent_session_id.as_deref(), Some("sess-1"));
 
     let side = repos
-        .find_task_run_by_session(&task_id, "sess-2")
+        .find_task_run_by_session(&task_id, &AgentSessionId::from_agent("sess-2"))
         .unwrap()
         .unwrap();
     assert_ne!(side.id.as_str(), primary_id.as_str());
@@ -240,7 +241,7 @@ fn record_claude_hook_fork_session_start_does_not_steal_primary_tab() {
     .unwrap();
     assert!(report.task_run_created);
     let side = repos
-        .find_task_run_by_session(&task_id, "sess-2")
+        .find_task_run_by_session(&task_id, &AgentSessionId::from_agent("sess-2"))
         .unwrap()
         .unwrap();
     assert_eq!(side.terminal_tab_id.as_deref(), Some("tab-fork"));
@@ -765,7 +766,7 @@ fn record_claude_hook_records_terminal_tab_id_from_context() {
     .unwrap();
 
     let side = repos
-        .find_task_run_by_session(&task_id, "sess-2")
+        .find_task_run_by_session(&task_id, &AgentSessionId::from_agent("sess-2"))
         .unwrap()
         .unwrap();
     assert_eq!(side.terminal_tab_id.as_deref(), Some("tab-7"));

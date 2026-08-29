@@ -5,9 +5,9 @@ use monica_application::{
     TerminalSessionUpdate, TerminalStateSnapshot, TerminalTabRow, UnitOfWork, WorkbenchStore,
 };
 use monica_domain::{
-    Agent, DisplayStatus, ExternalReference, NewTask, NewTaskRun, NewTerminalSession, Project,
-    Provider, RawJson, RefType, TaskId, TaskKind, TaskRun, TaskRunStatus, TaskRunWaitReason,
-    TaskStatus, TerminalSessionKind, TerminalSessionStatus,
+    Agent, AgentSessionId, DisplayStatus, ExternalReference, NewTask, NewTaskRun,
+    NewTerminalSession, Project, Provider, RawJson, RefType, TaskId, TaskKind, TaskRun,
+    TaskRunStatus, TaskRunWaitReason, TaskStatus, TerminalSessionKind, TerminalSessionStatus,
 };
 use rusqlite::params;
 use serde_json::json;
@@ -239,7 +239,7 @@ fn task_run_observation_records_wait_reason_and_event_metadata() {
             wait_reason: Some(Some(TaskRunWaitReason::AskUserQuestion)),
             event_label: Some("PreToolUse"),
             at: "2026-06-02T00:00:00.000Z",
-            agent_session_id: Some("provider-session"),
+            agent_session_id: Some(&AgentSessionId::from_agent("provider-session")),
             terminal_tab_id: Some("tab-1"),
             metadata_raw: Some(&metadata),
             plan_file_path: None,
@@ -419,7 +419,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
             wait_reason: None,
             event_label: Some("UserPromptSubmit"),
             at: "2026-06-02T00:00:00.000Z",
-            agent_session_id: Some("sess-old"),
+            agent_session_id: Some(&AgentSessionId::from_agent("sess-old")),
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: None,
@@ -430,19 +430,24 @@ fn task_run_observation_sql_guards_protected_transitions() {
     .unwrap();
     db.finish_task_run(&relaunched.id, &task.id, TaskRunStatus::Stopped)
         .unwrap();
-    let generic_wait_from = |session: &'static str, event: &'static str| TaskRunObservation {
-        status: Some(TaskRunStatus::WaitingForUser),
-        wait_reason: Some(Some(TaskRunWaitReason::AwaitingPrompt)),
-        event_label: Some(event),
-        at: "2026-06-02T00:00:00.000Z",
-        agent_session_id: Some(session),
-        terminal_tab_id: None,
-        metadata_raw: None,
-        plan_file_path: None,
-        hold_stop: false,
-        release_stop: false,
-    };
-    db.record_task_run_observation(&relaunched.id, generic_wait_from("sess-old", "Stop"))
+    fn generic_wait_from<'a>(
+        session: &'a AgentSessionId,
+        event: &'static str,
+    ) -> TaskRunObservation<'a> {
+        TaskRunObservation {
+            status: Some(TaskRunStatus::WaitingForUser),
+            wait_reason: Some(Some(TaskRunWaitReason::AwaitingPrompt)),
+            event_label: Some(event),
+            at: "2026-06-02T00:00:00.000Z",
+            agent_session_id: Some(session),
+            terminal_tab_id: None,
+            metadata_raw: None,
+            plan_file_path: None,
+            hold_stop: false,
+            release_stop: false,
+        }
+    }
+    db.record_task_run_observation(&relaunched.id, generic_wait_from(&AgentSessionId::from_agent("sess-old"), "Stop"))
         .unwrap();
     assert_eq!(
         db.get_task_run(&relaunched.id).unwrap().unwrap().status,
@@ -450,7 +455,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
     );
     db.record_task_run_observation(
         &relaunched.id,
-        generic_wait_from("sess-new", "SessionStart"),
+        generic_wait_from(&AgentSessionId::from_agent("sess-new"), "SessionStart"),
     )
     .unwrap();
     let run = db.get_task_run(&relaunched.id).unwrap().unwrap();
@@ -486,20 +491,24 @@ fn task_run_observation_sql_guards_protected_transitions() {
     // A terminal verdict is scoped to the session that died: a stale SessionEnd from the
     // previous session must not kill the run its successor now drives, while the successor's
     // own verdict (or an anonymous one) still lands.
-    let terminal_verdict_from = |session: Option<&'static str>,
-                                 status: TaskRunStatus,
-                                 event: &'static str| TaskRunObservation {
-        status: Some(status),
-        wait_reason: Some(None),
-        event_label: Some(event),
-        at: "2026-06-02T00:00:00.000Z",
-        agent_session_id: session,
-        terminal_tab_id: None,
-        metadata_raw: None,
-        plan_file_path: None,
-        hold_stop: false,
-        release_stop: false,
-    };
+    fn terminal_verdict_from<'a>(
+        session: Option<&'a AgentSessionId>,
+        status: TaskRunStatus,
+        event: &'static str,
+    ) -> TaskRunObservation<'a> {
+        TaskRunObservation {
+            status: Some(status),
+            wait_reason: Some(None),
+            event_label: Some(event),
+            at: "2026-06-02T00:00:00.000Z",
+            agent_session_id: session,
+            terminal_tab_id: None,
+            metadata_raw: None,
+            plan_file_path: None,
+            hold_stop: false,
+            release_stop: false,
+        }
+    }
     for (status, event) in [(TaskRunStatus::Stopped, "SessionEnd")] {
         let survivor = start_run(&mut db);
         db.record_task_run_observation(
@@ -509,7 +518,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
                 wait_reason: None,
                 event_label: Some("UserPromptSubmit"),
                 at: "2026-06-02T00:00:00.000Z",
-                agent_session_id: Some("sess-new"),
+                agent_session_id: Some(&AgentSessionId::from_agent("sess-new")),
                 terminal_tab_id: None,
                 metadata_raw: None,
                 plan_file_path: None,
@@ -523,7 +532,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
         for _ in 0..2 {
             db.record_task_run_observation(
                 &survivor.id,
-                terminal_verdict_from(Some("sess-old"), status, event),
+                terminal_verdict_from(Some(&AgentSessionId::from_agent("sess-old")), status, event),
             )
             .unwrap();
             let run = db.get_task_run(&survivor.id).unwrap().unwrap();
@@ -532,7 +541,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
         }
         db.record_task_run_observation(
             &survivor.id,
-            terminal_verdict_from(Some("sess-new"), status, event),
+            terminal_verdict_from(Some(&AgentSessionId::from_agent("sess-new")), status, event),
         )
         .unwrap();
         assert_eq!(
@@ -549,7 +558,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
             wait_reason: None,
             event_label: Some("UserPromptSubmit"),
             at: "2026-06-02T00:00:00.000Z",
-            agent_session_id: Some("sess-new"),
+            agent_session_id: Some(&AgentSessionId::from_agent("sess-new")),
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: None,
@@ -590,7 +599,7 @@ fn record_observation(
             }),
             event_label: Some(event),
             at: "2026-06-02T00:00:00.000Z",
-            agent_session_id: Some("sess-1"),
+            agent_session_id: Some(&AgentSessionId::from_agent("sess-1")),
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: None,
@@ -697,7 +706,7 @@ fn task_run_observation_pending_stop_cleared_by_boundary_and_settlement() {
             wait_reason: Some(None),
             event_label: Some("SessionEnd"),
             at: "2026-06-02T00:00:00.000Z",
-            agent_session_id: Some("sess-1"),
+            agent_session_id: Some(&AgentSessionId::from_agent("sess-1")),
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: None,
@@ -730,7 +739,7 @@ fn task_run_observation_keeps_existing_tab_and_session_on_none() {
             wait_reason: None,
             event_label: Some("SessionStart"),
             at: "2026-06-02T00:00:00.000Z",
-            agent_session_id: Some("sess-1"),
+            agent_session_id: Some(&AgentSessionId::from_agent("sess-1")),
             terminal_tab_id: Some("tab-1"),
             metadata_raw: None,
             plan_file_path: None,
@@ -773,7 +782,7 @@ fn find_task_run_by_terminal_tab_returns_latest_observed_run_in_tab() {
                 wait_reason: None,
                 event_label: Some("SessionStart"),
                 at,
-                agent_session_id: Some(session),
+                agent_session_id: Some(&AgentSessionId::from_agent(session)),
                 terminal_tab_id: Some("tab-1"),
                 metadata_raw: None,
                 plan_file_path: None,
@@ -844,7 +853,7 @@ fn find_task_run_by_session_is_scoped_to_task() {
             wait_reason: None,
             event_label: Some("SessionStart"),
             at: "2026-06-02T00:00:00.000Z",
-            agent_session_id: Some("sess-shared"),
+            agent_session_id: Some(&AgentSessionId::from_agent("sess-shared")),
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: None,
@@ -855,12 +864,12 @@ fn find_task_run_by_session_is_scoped_to_task() {
     .unwrap();
 
     let found = db
-        .find_task_run_by_session(&task_a.id, "sess-shared")
+        .find_task_run_by_session(&task_a.id, &AgentSessionId::from_agent("sess-shared"))
         .unwrap()
         .unwrap();
     assert_eq!(found.id, run_a.id);
     assert!(db
-        .find_task_run_by_session(&task_b.id, "sess-shared")
+        .find_task_run_by_session(&task_b.id, &AgentSessionId::from_agent("sess-shared"))
         .unwrap()
         .is_none());
 }
@@ -884,7 +893,7 @@ fn task_summaries_count_side_runs_excluding_primary_and_sessionless_failures() {
                 wait_reason: None,
                 event_label: None,
                 at: "2026-06-02T00:00:00.000Z",
-                agent_session_id: Some(session),
+                agent_session_id: Some(&AgentSessionId::from_agent(session)),
                 terminal_tab_id: None,
                 metadata_raw: None,
                 plan_file_path: None,
@@ -908,7 +917,7 @@ fn task_summaries_count_side_runs_excluding_primary_and_sessionless_failures() {
                     wait_reason: Some(Some(reason)),
                     event_label: None,
                     at: "2026-06-02T00:00:00.000Z",
-                    agent_session_id: Some(session),
+                    agent_session_id: Some(&AgentSessionId::from_agent(session)),
                     terminal_tab_id: None,
                     metadata_raw: None,
                     plan_file_path: None,
@@ -975,7 +984,7 @@ fn task_summaries_fall_back_to_latest_run_when_primary_pointer_dangles() {
             wait_reason: None,
             event_label: Some("SessionStart"),
             at: "2026-06-02T00:00:00.000Z",
-            agent_session_id: Some("sess-1"),
+            agent_session_id: Some(&AgentSessionId::from_agent("sess-1")),
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: None,
@@ -1009,7 +1018,7 @@ fn task_summaries_skip_prepare_for_stopped_primary_with_session() {
     db.set_primary_task_run(&resumable.id, &run.id).unwrap();
     db.finish_task_run(&run.id, &resumable.id, TaskRunStatus::Prepared)
         .unwrap();
-    assert!(db.claim_prepared_run(&run.id, "sess-1").unwrap());
+    assert!(db.claim_prepared_run(&run.id, &AgentSessionId::from_agent("sess-1")).unwrap());
     db.finish_task_run(&run.id, &resumable.id, TaskRunStatus::Stopped)
         .unwrap();
 
@@ -1048,7 +1057,7 @@ fn task_summaries_expose_has_plan_from_the_primary_run() {
             wait_reason: Some(Some(TaskRunWaitReason::ExitPlanMode)),
             event_label: Some("PreToolUse"),
             at: "2026-06-02T00:00:00.000Z",
-            agent_session_id: Some("sess-plan"),
+            agent_session_id: Some(&AgentSessionId::from_agent("sess-plan")),
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: Some("/Users/me/.claude/plans/hazy-wiggling-salamander.md"),
@@ -1643,7 +1652,7 @@ fn settle_task_run_if_live_only_stops_session_driven_runs() {
                 wait_reason: None,
                 event_label: None,
                 at: "2026-06-02T00:00:00.000Z",
-                agent_session_id: Some("sess-1"),
+                agent_session_id: Some(&AgentSessionId::from_agent("sess-1")),
                 terminal_tab_id: None,
                 metadata_raw: None,
                 plan_file_path: None,
@@ -1684,7 +1693,7 @@ fn settle_task_run_if_live_only_stops_session_driven_runs() {
             wait_reason: None,
             event_label: Some("SessionStart"),
             at: "2026-06-02T00:00:00.000Z",
-            agent_session_id: Some("sess-2"),
+            agent_session_id: Some(&AgentSessionId::from_agent("sess-2")),
             terminal_tab_id: Some("tab-1"),
             metadata_raw: None,
             plan_file_path: None,
@@ -1748,7 +1757,7 @@ fn settle_task_run_if_live_survives_a_closed_task() {
             wait_reason: None,
             event_label: None,
             at: "2026-06-02T00:00:00.000Z",
-            agent_session_id: Some("sess-1"),
+            agent_session_id: Some(&AgentSessionId::from_agent("sess-1")),
             terminal_tab_id: None,
             metadata_raw: None,
             plan_file_path: None,
@@ -1785,6 +1794,7 @@ fn list_driven_task_runs_with_tab_returns_only_tab_pinned_session_driven_runs() 
                    status: Option<TaskRunStatus>,
                    session: Option<&str>,
                    tab: Option<&str>| {
+        let session = session.map(AgentSessionId::from_agent);
         db.record_task_run_observation(
             run_id,
             TaskRunObservation {
@@ -1792,7 +1802,7 @@ fn list_driven_task_runs_with_tab_returns_only_tab_pinned_session_driven_runs() 
                 wait_reason: None,
                 event_label: None,
                 at: "2026-06-02T00:00:00.000Z",
-                agent_session_id: session,
+                agent_session_id: session.as_ref(),
                 terminal_tab_id: tab,
                 metadata_raw: None,
                 plan_file_path: None,
@@ -2304,11 +2314,11 @@ fn claim_prepared_run_is_won_by_a_single_session() {
         .unwrap();
 
     assert!(
-        db.claim_prepared_run(&run.id, "session-A").unwrap(),
+        db.claim_prepared_run(&run.id, &AgentSessionId::from_agent("session-A")).unwrap(),
         "the first claim wins"
     );
     assert!(
-        !db.claim_prepared_run(&run.id, "session-B").unwrap(),
+        !db.claim_prepared_run(&run.id, &AgentSessionId::from_agent("session-B")).unwrap(),
         "a second claim on an already-claimed run loses"
     );
     assert_eq!(
@@ -2333,7 +2343,7 @@ fn claim_prepared_run_refuses_non_prepared_run() {
         .unwrap();
 
     // The run is still `SettingUp` (never moved to `Prepared`).
-    assert!(!db.claim_prepared_run(&run.id, "session-A").unwrap());
+    assert!(!db.claim_prepared_run(&run.id, &AgentSessionId::from_agent("session-A")).unwrap());
     assert!(db
         .get_task_run(&run.id)
         .unwrap()
@@ -2347,7 +2357,7 @@ fn claim_prepared_run_refuses_non_prepared_run() {
 #[test]
 fn claim_prepared_run_returns_false_for_missing_run() {
     let db = SqliteStore::open_in_memory().unwrap();
-    assert!(!db.claim_prepared_run("run-does-not-exist", "session-A").unwrap());
+    assert!(!db.claim_prepared_run("run-does-not-exist", &AgentSessionId::from_agent("session-A")).unwrap());
 }
 
 /// Exercises a store contract; reused below against both the direct store and a `WorkTransaction`.

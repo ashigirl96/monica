@@ -1,4 +1,5 @@
 use super::*;
+use monica_domain::AgentSessionId;
 
 
 
@@ -31,11 +32,12 @@ fn resolve_by_session_returns_run_when_found() {
         &started("sess-1", Continuation::Fresh),
     ).unwrap();
 
+    let agent_session = AgentSessionId::from_agent("sess-1");
     let ctx = RunResolveCtx {
         task_id: &task_id,
         task: &task,
         explicit_run_id_rejected: false,
-        agent_session_id: Some("sess-1"),
+        agent_session_id: Some(&agent_session),
         starts_session: false,
         agent: Agent::Claude,
         primary_run: None,
@@ -50,11 +52,12 @@ fn resolve_by_prepared_primary_skips_non_prepared() {
     let task = make_task("t1", TaskStatus::InProgress, Some("run-1"));
     let run = make_run("run-1", "t1", TaskRunStatus::Running);
     let mut repos = FakeRepos::default();
+    let agent_session = AgentSessionId::from_agent("sess-1");
     let ctx = RunResolveCtx {
         task_id: "t1",
         task: &task,
         explicit_run_id_rejected: false,
-        agent_session_id: Some("sess-1"),
+        agent_session_id: Some(&agent_session),
         starts_session: true,
         agent: Agent::Claude,
         primary_run: Some(&run),
@@ -68,11 +71,12 @@ fn resolve_by_prepared_primary_skips_non_starting_event() {
     let task = make_task("t1", TaskStatus::Ready, Some("run-1"));
     let run = make_run("run-1", "t1", TaskRunStatus::Prepared);
     let mut repos = FakeRepos::default();
+    let agent_session = AgentSessionId::from_agent("sess-1");
     let ctx = RunResolveCtx {
         task_id: "t1",
         task: &task,
         explicit_run_id_rejected: false,
-        agent_session_id: Some("sess-1"),
+        agent_session_id: Some(&agent_session),
         starts_session: false,
         agent: Agent::Claude,
         primary_run: Some(&run),
@@ -87,11 +91,12 @@ fn resolve_by_prepared_primary_claims_on_session_start() {
     let run = make_run("run-1", "t1", TaskRunStatus::Prepared);
     let mut repos = FakeRepos::default();
     repos.seed_run(run.clone());
+    let agent_session = AgentSessionId::from_agent("sess-1");
     let ctx = RunResolveCtx {
         task_id: "t1",
         task: &task,
         explicit_run_id_rejected: false,
-        agent_session_id: Some("sess-1"),
+        agent_session_id: Some(&agent_session),
         starts_session: true,
         agent: Agent::Claude,
         primary_run: Some(&run),
@@ -110,14 +115,15 @@ fn resolve_by_prepared_primary_loses_race_when_already_claimed() {
     let task = make_task("t1", TaskStatus::Ready, Some("run-1"));
     let mut run = make_run("run-1", "t1", TaskRunStatus::Prepared);
     // Another SessionStart won the claim first: the run is prepared but already carries a session.
-    run.agent_session_id = Some("sess-winner".to_string());
+    run.agent_session_id = Some(AgentSessionId::from_agent("sess-winner"));
     let mut repos = FakeRepos::default();
     repos.seed_run(run.clone());
+    let agent_session = AgentSessionId::from_agent("sess-loser");
     let ctx = RunResolveCtx {
         task_id: "t1",
         task: &task,
         explicit_run_id_rejected: false,
-        agent_session_id: Some("sess-loser"),
+        agent_session_id: Some(&agent_session),
         starts_session: true,
         agent: Agent::Claude,
         primary_run: Some(&run),
@@ -153,11 +159,12 @@ fn resolve_by_lazy_create_rejects_non_starting_event() {
     let mut repos = FakeRepos::default();
     let task_id = repos.insert_task_for_run(None);
     let task = repos.get_task(&task_id).unwrap().unwrap();
+    let agent_session = AgentSessionId::from_agent("sess-1");
     let ctx = RunResolveCtx {
         task_id: &task_id,
         task: &task,
         explicit_run_id_rejected: false,
-        agent_session_id: Some("sess-1"),
+        agent_session_id: Some(&agent_session),
         starts_session: false,
         agent: Agent::Claude,
         primary_run: None,
@@ -171,11 +178,12 @@ fn resolve_by_lazy_create_rejects_when_explicit_run_id_rejected() {
     let mut repos = FakeRepos::default();
     let task_id = repos.insert_task_for_run(None);
     let task = repos.get_task(&task_id).unwrap().unwrap();
+    let agent_session = AgentSessionId::from_agent("sess-1");
     let ctx = RunResolveCtx {
         task_id: &task_id,
         task: &task,
         explicit_run_id_rejected: true,
-        agent_session_id: Some("sess-1"),
+        agent_session_id: Some(&agent_session),
         starts_session: true,
         agent: Agent::Claude,
         primary_run: None,
@@ -190,11 +198,12 @@ fn resolve_by_lazy_create_rejects_closed_task() {
     let task_id = repos.insert_task_for_run(None);
     repos.mark_task_closed(&task_id).unwrap();
     let task = repos.get_task(&task_id).unwrap().unwrap();
+    let agent_session = AgentSessionId::from_agent("sess-1");
     let ctx = RunResolveCtx {
         task_id: &task_id,
         task: &task,
         explicit_run_id_rejected: false,
-        agent_session_id: Some("sess-1"),
+        agent_session_id: Some(&agent_session),
         starts_session: true,
         agent: Agent::Claude,
         primary_run: None,
@@ -208,11 +217,12 @@ fn resolve_by_lazy_create_creates_primary_when_none_exists() {
     let mut repos = FakeRepos::default();
     let task_id = repos.insert_task_for_run(None);
     let task = repos.get_task(&task_id).unwrap().unwrap();
+    let agent_session = AgentSessionId::from_agent("sess-1");
     let ctx = RunResolveCtx {
         task_id: &task_id,
         task: &task,
         explicit_run_id_rejected: false,
-        agent_session_id: Some("sess-1"),
+        agent_session_id: Some(&agent_session),
         starts_session: true,
         agent: Agent::Claude,
         primary_run: None,
@@ -231,11 +241,12 @@ fn resolve_by_lazy_create_creates_side_run_when_primary_exists() {
     let task_id = repos.insert_task_for_run(None);
     let task = repos.get_task(&task_id).unwrap().unwrap();
     let existing_primary = make_run("run-existing", &task_id, TaskRunStatus::Running);
+    let agent_session = AgentSessionId::from_agent("sess-1");
     let ctx = RunResolveCtx {
         task_id: &task_id,
         task: &task,
         explicit_run_id_rejected: false,
-        agent_session_id: Some("sess-1"),
+        agent_session_id: Some(&agent_session),
         starts_session: true,
         agent: Agent::Claude,
         primary_run: Some(&existing_primary),

@@ -35,7 +35,7 @@ impl From<monica_domain::Explanation> for Explanation {
             title: value.title,
             summary: value.summary,
             mode: value.mode.into(),
-            agent_session_id: value.agent_session_id,
+            agent_session_id: value.agent_session_id.into_string(),
             terminal_session_id: value.terminal_session_id,
             created_at: value.created_at,
             repo_name: value.repo_name,

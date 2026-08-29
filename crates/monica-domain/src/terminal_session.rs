@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::ids::AgentSessionId;
+
 use crate::status::TaskRunWaitReason;
 
 /// Hook-observed state of the agent running inside a session. Powers the per-tab indicator, so it
@@ -118,7 +120,7 @@ pub struct TerminalSession {
     pub agent_wait_reason: Option<TaskRunWaitReason>,
     /// The Claude Code `--session-id` most recently observed via hooks. Set on every non-Inert
     /// signal; cleared on SessionEnd.
-    pub agent_session_id: Option<String>,
+    pub agent_session_id: Option<AgentSessionId>,
     pub pid: Option<u32>,
     pub rows: u16,
     pub cols: u16,

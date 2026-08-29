@@ -7,7 +7,8 @@ use monica_application::{
     WorkTransaction, WorkbenchStore,
 };
 use monica_domain::{
-    Event, ExternalReference, NewTask, NewTaskRun, Task, TaskRun, TaskRunStatus, TaskStatus,
+    AgentSessionId, Event, ExternalReference, NewTask, NewTaskRun, Task, TaskRun, TaskRunStatus,
+    TaskStatus,
 };
 
 use super::{bench, events, external_refs, task_runs, tasks};
@@ -100,7 +101,7 @@ impl TaskRunStore for SqliteUow<'_> {
     fn find_task_run_by_session(
         &self,
         task_id: &str,
-        agent_session_id: &str,
+        agent_session_id: &AgentSessionId,
     ) -> Result<Option<TaskRun>> {
         task_runs::find_task_run_by_session(&self.tx, task_id, agent_session_id)
     }
@@ -121,7 +122,11 @@ impl TaskRunStore for SqliteUow<'_> {
         task_runs::settle_task_run_if_live_in(&self.tx, task_run_id, task_id)
     }
 
-    fn claim_prepared_run(&self, task_run_id: &str, agent_session_id: &str) -> Result<bool> {
+    fn claim_prepared_run(
+        &self,
+        task_run_id: &str,
+        agent_session_id: &AgentSessionId,
+    ) -> Result<bool> {
         task_runs::claim_prepared_run(&self.tx, task_run_id, agent_session_id)
     }
 

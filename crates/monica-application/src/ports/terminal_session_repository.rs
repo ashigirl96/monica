@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use monica_domain::{
-    AgentSessionStatus, NewTerminalSession, TaskRunWaitReason, TerminalSession,
+    AgentSessionId, AgentSessionStatus, NewTerminalSession, TaskRunWaitReason, TerminalSession,
     TerminalSessionStatus,
 };
 
@@ -33,7 +33,7 @@ pub trait TerminalSessionRepository {
         id: &str,
         agent_status: Option<AgentSessionStatus>,
         agent_wait_reason: Option<TaskRunWaitReason>,
-        agent_session_id: Option<&str>,
+        agent_session_id: Option<&AgentSessionId>,
     ) -> Result<bool>;
 
     fn get_terminal_session(&self, id: &str) -> Result<Option<TerminalSession>>;

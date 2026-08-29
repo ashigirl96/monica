@@ -146,6 +146,23 @@ impl NoteId {
     }
 }
 
+id_newtype! {
+    /// Identity of an agent conversation, as minted by the agent itself (Claude Code's
+    /// `--session-id`). Distinct from every monica-minted id it travels next to — a
+    /// [`TerminalSession`](crate::TerminalSession) carries both its own `ts-<n>` id and the
+    /// `AgentSessionId` of whatever is currently running inside it.
+    AgentSessionId
+}
+
+impl AgentSessionId {
+    /// The agent owns this id's format, so there is nothing monica can validate it against. It is
+    /// opaque, but it does reach an agent resume command line, so callers must not build that
+    /// command by unquoted interpolation.
+    pub fn from_agent(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

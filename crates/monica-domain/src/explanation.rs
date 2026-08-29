@@ -2,7 +2,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::ExplanationId;
+use crate::ids::{AgentSessionId, ExplanationId};
 
 #[derive(
     Debug,
@@ -34,7 +34,7 @@ pub struct Explanation {
     pub title: String,
     pub summary: Option<String>,
     pub mode: ExplanationMode,
-    pub agent_session_id: String,
+    pub agent_session_id: AgentSessionId,
     pub terminal_session_id: String,
     pub created_at: String,
     pub repo_name: Option<String>,
@@ -60,7 +60,7 @@ pub struct NewExplanation {
     pub title: String,
     pub summary: Option<String>,
     pub mode: ExplanationMode,
-    pub agent_session_id: String,
+    pub agent_session_id: AgentSessionId,
     pub terminal_session_id: String,
     pub repo_name: Option<String>,
 }

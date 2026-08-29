@@ -117,7 +117,7 @@ impl From<monica_domain::TerminalSession> for TerminalSession {
             status: value.status.into(),
             agent_status: value.agent_status.map(Into::into),
             agent_wait_reason: value.agent_wait_reason.map(Into::into),
-            agent_session_id: value.agent_session_id,
+            agent_session_id: value.agent_session_id.map(Into::into),
             pid: value.pid,
             rows: value.rows,
             cols: value.cols,

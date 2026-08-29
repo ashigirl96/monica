@@ -2,7 +2,7 @@ use anyhow::Result;
 use monica_application::ports::TerminalSessionRepository;
 use monica_application::{TerminalSessionUpdate, TerminalStateSnapshot};
 use monica_domain::{
-    AgentSessionStatus, NewTerminalSession, TaskRunWaitReason, TerminalSession,
+    AgentSessionId, AgentSessionStatus, NewTerminalSession, TaskRunWaitReason, TerminalSession,
     TerminalSessionKind, TerminalSessionStatus,
 };
 use rusqlite::{params, Row};
@@ -29,7 +29,9 @@ fn session_from_row(row: &Row<'_>) -> Result<TerminalSession> {
         status: status.parse::<TerminalSessionStatus>()?,
         agent_status: agent_status.map(|s| s.parse()).transpose()?,
         agent_wait_reason: agent_wait_reason.map(|s| s.parse()).transpose()?,
-        agent_session_id: row.get("agent_session_id")?,
+        agent_session_id: row
+            .get::<_, Option<String>>("agent_session_id")?
+            .map(AgentSessionId::from_store),
         pid: row.get("pid")?,
         rows: row.get("rows")?,
         cols: row.get("cols")?,
@@ -127,7 +129,7 @@ impl SqliteStore {
         id: &str,
         agent_status: Option<AgentSessionStatus>,
         agent_wait_reason: Option<TaskRunWaitReason>,
-        agent_session_id: Option<&str>,
+        agent_session_id: Option<&AgentSessionId>,
     ) -> Result<bool> {
         let affected = self.conn().execute(
             &format!(
@@ -141,7 +143,7 @@ impl SqliteStore {
                 id,
                 agent_status.map(AgentSessionStatus::as_str),
                 agent_wait_reason.map(TaskRunWaitReason::as_str),
-                agent_session_id,
+                agent_session_id.map(AgentSessionId::as_str),
             ],
         )?;
         Ok(affected > 0)
@@ -258,7 +260,7 @@ impl TerminalSessionRepository for SqliteStore {
         id: &str,
         agent_status: Option<AgentSessionStatus>,
         agent_wait_reason: Option<TaskRunWaitReason>,
-        agent_session_id: Option<&str>,
+        agent_session_id: Option<&AgentSessionId>,
     ) -> Result<bool> {
         SqliteStore::set_terminal_session_agent_status(
             self,
