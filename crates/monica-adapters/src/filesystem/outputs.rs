@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use monica_application::{ExecutionProfile, ExplanationOutputs, ShellScaffolding, TaskRunOutputs};
-use monica_domain::{Agent, Project};
+use monica_domain::{Agent, Project, TaskId, TaskRunId};
 
 use monica_paths as paths;
 
@@ -15,11 +15,11 @@ use super::shell_scaffold::{
 pub struct FsTaskRunOutputs;
 
 impl TaskRunOutputs for FsTaskRunOutputs {
-    fn task_run_dir(&self, task_run_id: &str) -> Result<PathBuf> {
-        paths::task_run_dir(task_run_id)
+    fn task_run_dir(&self, task_run_id: &TaskRunId) -> Result<PathBuf> {
+        paths::task_run_dir(task_run_id.as_str())
     }
 
-    fn setup_log_path(&self, task_run_id: &str) -> Result<PathBuf> {
+    fn setup_log_path(&self, task_run_id: &TaskRunId) -> Result<PathBuf> {
         let dir = self.task_run_dir(task_run_id)?;
         fs::create_dir_all(&dir).with_context(|| format!("failed to create {}", dir.display()))?;
         Ok(dir.join("setup.log"))
@@ -27,10 +27,10 @@ impl TaskRunOutputs for FsTaskRunOutputs {
 
     fn prepare_task_shell_env(
         &self,
-        task_id: &str,
+        task_id: &TaskId,
         project: &Project,
         profile: &ExecutionProfile,
-        task_run_id: Option<&str>,
+        task_run_id: Option<&TaskRunId>,
         cwd: &Path,
     ) -> Result<Vec<(String, String)>> {
         match profile.agent_default {

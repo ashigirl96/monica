@@ -1,5 +1,5 @@
 use super::*;
-use monica_domain::AgentSessionId;
+use monica_domain::{AgentSessionId, TaskRunId};
 
 #[test]
 fn record_claude_hook_records_waiting_transition_and_run_output() {
@@ -7,7 +7,7 @@ fn record_claude_hook_records_waiting_transition_and_run_output() {
     let task_id = repos.insert_task_for_run(None);
     let run = repos
         .start_task_run(NewTaskRun {
-            task_id: TaskId::from_store(task_id.clone()),
+            task_id: task_id.clone(),
             agent: Some(Agent::Claude),
             branch: None,
             worktree_path: None,
@@ -163,7 +163,7 @@ fn record_claude_hook_does_not_create_runs_for_rejected_run_id() {
 
     let report = record_claude_hook(
         &mut repos,
-        hook_ctx(&task_id, Some("../evil")),
+        hook_ctx(&task_id, Some(&TaskRunId::from_store("../evil".to_string()))),
         &started("sess-1", Continuation::Fresh),
     )
     .unwrap();
@@ -664,7 +664,9 @@ fn record_claude_hook_promotes_created_run_when_no_primary_is_set() {
 fn record_claude_hook_repairs_dangling_primary_pointer() {
     let mut repos = FakeRepos::default();
     let task_id = repos.insert_task_for_run(None);
-    repos.set_primary_task_run(&task_id, "run-999").unwrap();
+    repos
+        .set_primary_task_run(&task_id, &TaskRunId::from_store("run-999".to_string()))
+        .unwrap();
 
     let report = record_claude_hook(
         &mut repos,

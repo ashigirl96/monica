@@ -1,5 +1,5 @@
 use super::*;
-use monica_domain::AgentSessionId;
+use monica_domain::{AgentSessionId, TaskId, TaskRunId};
 
 
 #[test]
@@ -54,7 +54,7 @@ fn start_run_rejects_closed_task() {
 #[test]
 fn start_run_missing_task_is_not_found() {
     let mut repos = FakeRepos::default();
-    let err = start_run(&mut repos, "MON-404").unwrap_err();
+    let err = start_run(&mut repos, &TaskId::from_store("MON-404".to_string())).unwrap_err();
     assert!(matches!(err, ApplicationError::NotFound(_)), "{err:?}");
 }
 
@@ -201,9 +201,9 @@ fn prepare_claude_for_run_rejects_missing_worktree() {
 
 fn prepared_run_with_worktree(
     repos: &mut FakeRepos,
-    task_id: &str,
+    task_id: &TaskId,
     prompt_body: &str,
-) -> (String, PathBuf) {
+) -> (TaskRunId, PathBuf) {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
 

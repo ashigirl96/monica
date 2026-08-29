@@ -1,5 +1,5 @@
 use anyhow::Result;
-use monica_domain::{NewNotificationIntent, NotificationIntent};
+use monica_domain::{NewNotificationIntent, NotificationIntent, TaskRunId};
 
 pub trait NotificationOutboxStore {
     fn enqueue_notification(
@@ -13,7 +13,7 @@ pub trait NotificationOutboxStore {
 
     fn mark_notification_failed(&self, id: i64, error: &str) -> Result<()>;
 
-    fn cancel_notifications_for_run(&self, task_run_id: &str) -> Result<()>;
+    fn cancel_notifications_for_run(&self, task_run_id: &TaskRunId) -> Result<()>;
 
     fn cancel_notification_by_dedupe_key(&self, dedupe_key: &str) -> Result<()>;
 }

@@ -1,5 +1,5 @@
 use super::ports::{TaskRunStore, TaskStore};
-use crate::prelude::TaskRunStatus;
+use crate::prelude::{TaskId, TaskRunStatus};
 use crate::ApplicationResult;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,10 +29,10 @@ where
     let Some(task) = repos.get_task(&run.task_id)? else {
         return Ok(MakeMainOutcome::NotFound);
     };
-    if task.primary_task_run_id.as_deref() == Some(run.id.as_str()) {
+    if task.primary_task_run_id.as_ref() == Some(&run.id) {
         return Ok(MakeMainOutcome::AlreadyMain);
     }
-    if let Some(current_id) = task.primary_task_run_id.as_deref() {
+    if let Some(current_id) = task.primary_task_run_id.as_ref() {
         if let Some(current) = repos.get_task_run(current_id)? {
             if matches!(
                 current.status,
@@ -51,7 +51,7 @@ where
 }
 
 /// The tab currently hosting the task's Main Run, if any — drives the Workbench tab indicator.
-pub fn primary_terminal_tab<R>(repos: &R, task_id: &str) -> ApplicationResult<Option<String>>
+pub fn primary_terminal_tab<R>(repos: &R, task_id: &TaskId) -> ApplicationResult<Option<String>>
 where
     R: TaskStore + TaskRunStore,
 {

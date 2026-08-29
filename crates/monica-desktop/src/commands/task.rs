@@ -3,6 +3,7 @@ use monica_api::{
     TaskCreated, TaskRunStatus, TaskSummaryRow,
 };
 use monica_application::parse_issue_input;
+use monica_domain::{TaskId, TaskRunId};
 use serde::Serialize;
 use tauri::AppHandle;
 use tauri_specta::Event;
@@ -110,7 +111,7 @@ pub async fn task_shell_env(
 ) -> Result<Vec<(String, String)>, ApiError> {
     event_sink::off_main(move || {
         let mut monica = event_sink::open(&app)?;
-        Ok(monica.executions().task_shell_env(&task_id)?)
+        Ok(monica.executions().task_shell_env(&TaskId::from_store(task_id))?)
     })
     .await
 }
@@ -120,7 +121,9 @@ pub async fn task_shell_env(
 pub async fn open_bench(app: AppHandle, task_id: String) -> Result<TaskBench, ApiError> {
     event_sink::off_main(move || {
         let mut monica = event_sink::open(&app)?;
-        Ok(TaskBench::from(monica.executions().open_bench(&task_id)?))
+        Ok(TaskBench::from(
+            monica.executions().open_bench(&TaskId::from_store(task_id))?,
+        ))
     })
     .await
 }
@@ -131,15 +134,15 @@ pub async fn prepare_task(app: AppHandle, task_id: String) -> Result<PrepareTask
     let app_spawn = app.clone();
     let result: PrepareTaskResult = event_sink::off_main(move || {
         let mut monica = event_sink::open(&app)?;
-        let result = monica.executions().prepare_task(&task_id)?;
+        let result = monica.executions().prepare_task(&TaskId::from_store(task_id))?;
         Ok(result.into())
     })
     .await?;
 
     crate::services::task_runner::spawn_execute_run(
         app_spawn,
-        result.task_id.clone(),
-        result.task_run_id.clone(),
+        TaskId::from_store(result.task_id.clone()),
+        TaskRunId::from_store(result.task_run_id.clone()),
     )
     .map_err(ApiError::external)?;
 
@@ -167,7 +170,7 @@ pub async fn primary_tab_id(
 ) -> Result<Option<String>, ApiError> {
     event_sink::off_main(move || {
         let mut monica = event_sink::open(&app)?;
-        Ok(monica.tasks().primary_terminal_tab(&task_id)?)
+        Ok(monica.tasks().primary_terminal_tab(&TaskId::from_store(task_id))?)
     })
     .await
 }
@@ -177,7 +180,11 @@ pub async fn primary_tab_id(
 pub async fn close_task(app: AppHandle, task_id: String) -> Result<(), ApiError> {
     event_sink::off_main(move || {
         let mut monica = event_sink::open(&app)?;
-        monica.tasks().close_task(&task_id).map(|_| ()).map_err(ApiError::from)
+        monica
+            .tasks()
+            .close_task(&TaskId::from_store(task_id))
+            .map(|_| ())
+            .map_err(ApiError::from)
     })
     .await
 }
@@ -193,7 +200,10 @@ pub async fn run_task(
         let mut monica = event_sink::open(&app)?;
         let result = monica
             .executions()
-            .prepare_claude_for_run(&task_id, agent.map(monica_domain::Agent::from))?;
+            .prepare_claude_for_run(
+                &TaskId::from_store(task_id),
+                agent.map(monica_domain::Agent::from),
+            )?;
         Ok(RunTaskResult::from(result))
     })
     .await

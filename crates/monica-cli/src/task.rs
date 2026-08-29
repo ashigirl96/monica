@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_application::{parse_issue_input, TaskSummaryRow};
-use monica_domain::{parse_owner_repo, DisplayStatus};
+use monica_domain::{parse_owner_repo, DisplayStatus, TaskId};
 
 use crate::event_sink::{self, CliFacade};
 
@@ -81,7 +81,7 @@ fn close_command(monica: &mut CliFacade, id: &str) -> Result<()> {
         return Ok(());
     }
 
-    let report = monica.tasks().close_task(id)?;
+    let report = monica.tasks().close_task(&TaskId::from_store(id.to_string()))?;
     println!("Closed task {}.", report.task.id);
     if !report.task_runs.is_empty() {
         println!("Preserved task runs: {}.", report.task_runs.join(", "));

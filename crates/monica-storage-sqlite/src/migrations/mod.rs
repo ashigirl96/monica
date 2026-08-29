@@ -135,11 +135,19 @@ mod tests {
         TaskSummaryFilter,
     };
     use monica_domain::{
-        DisplayStatus, NewTaskRun, Provider, RefType, TaskId, TaskRunStatus, TaskRunWaitReason,
-        TaskStatus,
+        DisplayStatus, NewTaskRun, Provider, RefType, TaskId, TaskRunId, TaskRunStatus,
+        TaskRunWaitReason, TaskStatus,
     };
     use rusqlite::params;
     use test_support::*;
+
+    fn tid(id: &str) -> TaskId {
+        TaskId::from_store(id.to_string())
+    }
+
+    fn rid(id: &str) -> TaskRunId {
+        TaskRunId::from_store(id.to_string())
+    }
 
     #[test]
     fn migration_set_is_valid() {
@@ -290,7 +298,7 @@ mod tests {
         assert_eq!(status_of("mon-2"), "closed");
         assert_eq!(status_of("mon-3"), "in_progress");
 
-        let task = db.get_task("mon-1").unwrap().unwrap();
+        let task = db.get_task(&tid("mon-1")).unwrap().unwrap();
         assert_eq!(task.status, TaskStatus::Ready);
 
         std::fs::remove_file(&path).ok();
@@ -336,7 +344,7 @@ mod tests {
         assert_eq!(active_status, "in_progress");
         assert!(active_closed_at.is_none());
 
-        let task = db.get_task("mon-done").unwrap().unwrap();
+        let task = db.get_task(&tid("mon-done")).unwrap().unwrap();
         assert_eq!(task.status, TaskStatus::Closed);
         assert!(task.closed_at.is_some());
 
@@ -429,41 +437,41 @@ mod tests {
         }
 
         assert_eq!(
-            db.get_task("MON-setting-up").unwrap().unwrap().status,
+            db.get_task(&tid("MON-setting-up")).unwrap().unwrap().status,
             TaskStatus::InProgress
         );
         assert_eq!(
-            db.get_task("MON-running").unwrap().unwrap().status,
+            db.get_task(&tid("MON-running")).unwrap().unwrap().status,
             TaskStatus::InProgress
         );
         assert_eq!(
-            db.get_task("MON-stopped").unwrap().unwrap().status,
+            db.get_task(&tid("MON-stopped")).unwrap().unwrap().status,
             TaskStatus::InProgress
         );
         assert_eq!(
-            db.get_task("MON-failed").unwrap().unwrap().status,
+            db.get_task(&tid("MON-failed")).unwrap().unwrap().status,
             TaskStatus::InProgress
         );
         assert_eq!(
-            db.get_task("MON-ready").unwrap().unwrap().status,
+            db.get_task(&tid("MON-ready")).unwrap().unwrap().status,
             TaskStatus::Ready
         );
 
-        let run = db.get_task_run("run-1").unwrap().unwrap();
+        let run = db.get_task_run(&rid("run-1")).unwrap().unwrap();
         assert_eq!(run.task_id, "MON-running");
         assert_eq!(run.status, TaskRunStatus::Running);
         assert!(
-            db.get_task_run("legacy-MON-running").unwrap().is_none(),
+            db.get_task_run(&rid("legacy-MON-running")).unwrap().is_none(),
             "tasks with an existing matching run do not need a synthetic lifecycle run"
         );
-        let stale_run = db.get_task_run("run-99").unwrap().unwrap();
+        let stale_run = db.get_task_run(&rid("run-99")).unwrap().unwrap();
         assert_eq!(stale_run.task_id, "MON-stopped");
         assert_eq!(stale_run.status, TaskRunStatus::Running);
 
-        let setup_run = db.get_task_run("legacy-MON-setting-up").unwrap().unwrap();
+        let setup_run = db.get_task_run(&rid("legacy-MON-setting-up")).unwrap().unwrap();
         assert_eq!(setup_run.task_id, "MON-setting-up");
         assert_eq!(setup_run.status, TaskRunStatus::SettingUp);
-        let stopped_run = db.get_task_run("legacy-MON-stopped").unwrap().unwrap();
+        let stopped_run = db.get_task_run(&rid("legacy-MON-stopped")).unwrap().unwrap();
         assert_eq!(stopped_run.task_id, "MON-stopped");
         assert_eq!(stopped_run.status, TaskRunStatus::Stopped);
 
@@ -479,12 +487,12 @@ mod tests {
             "legacy stopped tasks without runs must survive display-status filters"
         );
 
-        let events = db.list_events(Some("MON-running")).unwrap();
+        let events = db.list_events(Some(&tid("MON-running"))).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].task_id.as_deref(), Some("MON-running"));
         assert_eq!(events[0].task_run_id.as_deref(), Some("run-1"));
 
-        let refs = db.list_external_refs("MON-running").unwrap();
+        let refs = db.list_external_refs(&tid("MON-running")).unwrap();
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].task_id, "MON-running");
 
@@ -560,17 +568,17 @@ mod tests {
         let db = crate::SqliteStore::open_at(&path).unwrap();
 
         assert_eq!(
-            db.get_task("MON-wait").unwrap().unwrap().status,
+            db.get_task(&tid("MON-wait")).unwrap().unwrap().status,
             TaskStatus::InProgress
         );
         assert_eq!(
-            db.get_task("MON-pr").unwrap().unwrap().status,
+            db.get_task(&tid("MON-pr")).unwrap().unwrap().status,
             TaskStatus::InProgress
         );
         // v21 (applied by open_at → to_latest) folds the v6 soft-delete into `closed`, which is
         // a visible archive — the old "hidden from normal reads" guarantee no longer holds.
         assert_eq!(
-            db.get_task("MON-archived").unwrap().unwrap().status,
+            db.get_task(&tid("MON-archived")).unwrap().unwrap().status,
             TaskStatus::Closed
         );
 
@@ -585,7 +593,7 @@ mod tests {
         assert_eq!(archived.0, TaskStatus::Closed.as_str());
         assert!(archived.1.is_some());
 
-        let wait_run = db.get_task_run("run-11").unwrap().unwrap();
+        let wait_run = db.get_task_run(&rid("run-11")).unwrap().unwrap();
         assert_eq!(wait_run.status, TaskRunStatus::WaitingForUser);
         assert_eq!(wait_run.wait_reason, Some(TaskRunWaitReason::ExitPlanMode));
         assert_eq!(
@@ -597,19 +605,19 @@ mod tests {
             serde_json::from_str(wait_run.metadata.as_str()).unwrap();
         assert_eq!(wait_metadata["version"].as_i64(), Some(2));
 
-        let legacy_wait = db.get_task_run("legacy-MON-wait-no-run").unwrap().unwrap();
+        let legacy_wait = db.get_task_run(&rid("legacy-MON-wait-no-run")).unwrap().unwrap();
         assert_eq!(legacy_wait.status, TaskRunStatus::WaitingForUser);
         assert_eq!(
             legacy_wait.wait_reason,
             Some(TaskRunWaitReason::ExitPlanMode)
         );
         let legacy_failed = db
-            .get_task_run("legacy-MON-failed-no-run")
+            .get_task_run(&rid("legacy-MON-failed-no-run"))
             .unwrap()
             .unwrap();
         assert_eq!(legacy_failed.status, TaskRunStatus::Failed);
         assert_eq!(legacy_failed.wait_reason, None);
-        let failed_run = db.get_task_run("run-12").unwrap().unwrap();
+        let failed_run = db.get_task_run(&rid("run-12")).unwrap().unwrap();
         assert_eq!(failed_run.status, TaskRunStatus::Failed);
 
         let visible = db.list_task_summaries(TaskSummaryFilter::All, None).unwrap();
@@ -707,7 +715,7 @@ mod tests {
 
         // open_at applies v28; reading back exercises external_ref_from_row's provider/ref_type parse.
         let db = crate::SqliteStore::open_at(&path).unwrap();
-        let refs = db.list_external_refs("mon-1").unwrap();
+        let refs = db.list_external_refs(&tid("mon-1")).unwrap();
         assert_eq!(refs.len(), 2);
         assert!(refs.iter().all(|r| r.provider == Provider::Github));
         assert_eq!(refs[0].ref_type, RefType::Issue);

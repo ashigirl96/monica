@@ -3,7 +3,7 @@ use crate::ports::{TerminalSessionRepository, UnitOfWork};
 use crate::ApplicationResult;
 use crate::prelude::{is_safe_task_run_id, Agent, AgentSignal, SignalKind, Task};
 use crate::prelude::{NewTaskRun, TaskId, TaskRun, TaskRunStatus, TaskRunWaitReason, TaskStatus};
-use monica_domain::{AgentSessionEffect, AgentSessionId, AgentSessionStatus};
+use monica_domain::{AgentSessionEffect, AgentSessionId, AgentSessionStatus, TaskRunId};
 use crate::TaskRunObservation;
 
 /// Identity carried by a hook invocation via `MONICA_*` env vars. `task_run_id` is only present
@@ -11,8 +11,8 @@ use crate::TaskRunObservation;
 /// an agent in a non-task tab has just the terminal session/tab.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HookContext<'a> {
-    pub task_id: Option<&'a str>,
-    pub task_run_id: Option<&'a str>,
+    pub task_id: Option<&'a TaskId>,
+    pub task_run_id: Option<&'a TaskRunId>,
     pub terminal_tab_id: Option<&'a str>,
     pub terminal_session_id: Option<&'a str>,
 }
@@ -29,8 +29,8 @@ pub struct HookReport {
     /// The run's task title, carried only on the entering edge so a notification need not reach
     /// back into the DB for what core already resolved.
     pub task_title: Option<String>,
-    pub linked_task_run_id: Option<String>,
-    pub linked_task_id: Option<String>,
+    pub linked_task_run_id: Option<TaskRunId>,
+    pub linked_task_id: Option<TaskId>,
     pub terminal_session_id: Option<String>,
     pub ignored: bool,
     pub task_found: bool,
@@ -76,7 +76,7 @@ pub fn record_hook<R>(
 where
     R: TaskStore + TaskRunStore + EventRepository + Clock + UnitOfWork + TerminalSessionRepository,
 {
-    let safe_task_run_id = ctx.task_run_id.filter(|&r| is_safe_task_run_id(r));
+    let safe_task_run_id = ctx.task_run_id.filter(|r| is_safe_task_run_id(r.as_str()));
     let unsafe_task_run_id = ctx.task_run_id.is_some() && safe_task_run_id.is_none();
 
     let Some(signal) = signal else {
@@ -123,11 +123,8 @@ where
     )?;
     let run_row = resolved.run;
     let task_run_linked = run_row.is_some();
-    let linked_task_run_id = run_row.as_ref().map(|run| run.id.as_str());
-    let linked_task_id = run_row
-        .as_ref()
-        .map(|run| run.task_id.as_str())
-        .or(ctx.task_id);
+    let linked_task_run_id = run_row.as_ref().map(|run| &run.id);
+    let linked_task_id = run_row.as_ref().map(|run| &run.task_id).or(ctx.task_id);
     let task_found = match linked_task_id {
         Some(_) if run_row.is_some() => true,
         Some(id) => repos.get_task(id)?.is_some(),
@@ -228,8 +225,8 @@ where
         entered_waiting_for_user,
         wait_reason,
         task_title,
-        linked_task_run_id: linked_task_run_id.map(str::to_string),
-        linked_task_id: linked_task_id.map(str::to_string),
+        linked_task_run_id: linked_task_run_id.cloned(),
+        linked_task_id: linked_task_id.cloned(),
         terminal_session_id: ctx.terminal_session_id.map(str::to_string),
         ignored: false,
         task_found,
@@ -254,7 +251,7 @@ impl ResolvedRun {
 type ResolveRule<R> = fn(&RunResolveCtx, &mut R) -> ApplicationResult<Option<ResolvedRun>>;
 
 pub(in crate::usecases) struct RunResolveCtx<'a> {
-    pub(in crate::usecases) task_id: &'a str,
+    pub(in crate::usecases) task_id: &'a TaskId,
     pub(in crate::usecases) task: &'a Task,
     pub(in crate::usecases) explicit_run_id_rejected: bool,
     pub(in crate::usecases) agent_session_id: Option<&'a AgentSessionId>,
@@ -281,8 +278,8 @@ pub(in crate::usecases) struct RunResolveCtx<'a> {
 ///    means a wrapper launch with corrupted env, not a plain session; it never creates.
 fn resolve_hook_run<R>(
     repos: &mut R,
-    task_id: Option<&str>,
-    explicit_run_id: Option<&str>,
+    task_id: Option<&TaskId>,
+    explicit_run_id: Option<&TaskRunId>,
     explicit_run_id_rejected: bool,
     agent_session_id: Option<&AgentSessionId>,
     starts_session: bool,
@@ -301,7 +298,7 @@ where
         return Ok(ResolvedRun::linked(None));
     };
 
-    let primary_run = match task.primary_task_run_id.as_deref() {
+    let primary_run = match task.primary_task_run_id.as_ref() {
         Some(primary_id) => repos.get_task_run(primary_id)?,
         None => None,
     };
@@ -395,7 +392,7 @@ where
     // pointer, which `primary_run` already resolved to `None`; otherwise the new run is a side run.
     let run = repos.create_lazy_run_for_session(
         NewTaskRun {
-            task_id: TaskId::from_store(ctx.task_id.to_string()),
+            task_id: ctx.task_id.clone(),
             agent: Some(ctx.agent),
             branch: None,
             worktree_path: None,

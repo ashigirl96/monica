@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use super::ports::{GitGateway, ProjectRepository, TaskRunStore, TaskStore};
-use crate::prelude::{Task, TaskRun};
+use crate::prelude::{Task, TaskId, TaskRun};
 use crate::{ApplicationError, ApplicationResult};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -11,7 +11,7 @@ pub struct CloseTaskReport {
     pub removed_branches: Vec<String>,
 }
 
-pub fn close_task<R, G>(repos: &mut R, git: &G, id: &str) -> ApplicationResult<CloseTaskReport>
+pub fn close_task<R, G>(repos: &mut R, git: &G, id: &TaskId) -> ApplicationResult<CloseTaskReport>
 where
     R: TaskStore + TaskRunStore + ProjectRepository,
     G: GitGateway,

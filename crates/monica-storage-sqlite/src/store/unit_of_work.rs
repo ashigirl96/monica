@@ -7,8 +7,8 @@ use monica_application::{
     WorkTransaction, WorkbenchStore,
 };
 use monica_domain::{
-    AgentSessionId, Event, ExternalReference, NewTask, NewTaskRun, Task, TaskRun, TaskRunStatus,
-    TaskStatus,
+    AgentSessionId, Event, ExternalReference, NewTask, NewTaskRun, Task, TaskId, TaskRun,
+    TaskRunId, TaskRunStatus, TaskStatus,
 };
 
 use super::{bench, events, external_refs, task_runs, tasks};
@@ -43,11 +43,11 @@ impl TaskStore for SqliteUow<'_> {
         tasks::insert_task_in(&self.tx, new, Some(external))
     }
 
-    fn get_task(&self, id: &str) -> Result<Option<Task>> {
+    fn get_task(&self, id: &TaskId) -> Result<Option<Task>> {
         tasks::get_task(&self.tx, id)
     }
 
-    fn mark_task_closed(&mut self, id: &str) -> Result<Task> {
+    fn mark_task_closed(&mut self, id: &TaskId) -> Result<Task> {
         tasks::mark_task_closed_in(&self.tx, id)
     }
 
@@ -55,19 +55,19 @@ impl TaskStore for SqliteUow<'_> {
         tasks::list_tasks(&self.tx)
     }
 
-    fn set_primary_task_run(&self, task_id: &str, task_run_id: &str) -> Result<()> {
+    fn set_primary_task_run(&self, task_id: &TaskId, task_run_id: &TaskRunId) -> Result<()> {
         tasks::set_primary_task_run(&self.tx, task_id, task_run_id)
     }
 
-    fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()> {
+    fn update_task_status(&self, id: &TaskId, status: TaskStatus) -> Result<()> {
         tasks::update_task_status(&self.tx, id, status)
     }
 
-    fn mark_task(&mut self, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()> {
+    fn mark_task(&mut self, id: &TaskId, status: TaskStatus, note: Option<&str>) -> Result<()> {
         tasks::mark_task_in(&self.tx, id, status, note)
     }
 
-    fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalReference>> {
+    fn list_external_refs(&self, task_id: &TaskId) -> Result<Vec<ExternalReference>> {
         external_refs::list_external_refs(&self.tx, task_id)
     }
 }
@@ -79,28 +79,28 @@ impl TaskRunStore for SqliteUow<'_> {
 
     fn finish_task_run(
         &mut self,
-        task_run_id: &str,
-        task_id: &str,
+        task_run_id: &TaskRunId,
+        task_id: &TaskId,
         status: TaskRunStatus,
     ) -> Result<()> {
         task_runs::finish_task_run_in(&self.tx, task_run_id, task_id, status)
     }
 
-    fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()> {
+    fn set_task_run_worktree_path(&self, task_run_id: &TaskRunId, worktree_path: &str) -> Result<()> {
         task_runs::set_task_run_worktree_path(&self.tx, task_run_id, worktree_path)
     }
 
-    fn set_task_run_agent(&self, task_run_id: &str, agent: monica_domain::Agent) -> Result<()> {
+    fn set_task_run_agent(&self, task_run_id: &TaskRunId, agent: monica_domain::Agent) -> Result<()> {
         task_runs::set_task_run_agent(&self.tx, task_run_id, agent)
     }
 
-    fn get_task_run(&self, id: &str) -> Result<Option<TaskRun>> {
+    fn get_task_run(&self, id: &TaskRunId) -> Result<Option<TaskRun>> {
         task_runs::get_task_run(&self.tx, id)
     }
 
     fn find_task_run_by_session(
         &self,
-        task_id: &str,
+        task_id: &TaskId,
         agent_session_id: &AgentSessionId,
     ) -> Result<Option<TaskRun>> {
         task_runs::find_task_run_by_session(&self.tx, task_id, agent_session_id)
@@ -110,7 +110,7 @@ impl TaskRunStore for SqliteUow<'_> {
         task_runs::find_task_run_by_terminal_tab(&self.tx, terminal_tab_id)
     }
 
-    fn list_task_runs_for_task(&self, task_id: &str) -> Result<Vec<TaskRun>> {
+    fn list_task_runs_for_task(&self, task_id: &TaskId) -> Result<Vec<TaskRun>> {
         task_runs::list_task_runs_for_task(&self.tx, task_id)
     }
 
@@ -118,13 +118,13 @@ impl TaskRunStore for SqliteUow<'_> {
         task_runs::list_driven_task_runs_with_tab(&self.tx)
     }
 
-    fn settle_task_run_if_live(&mut self, task_run_id: &str, task_id: &str) -> Result<bool> {
+    fn settle_task_run_if_live(&mut self, task_run_id: &TaskRunId, task_id: &TaskId) -> Result<bool> {
         task_runs::settle_task_run_if_live_in(&self.tx, task_run_id, task_id)
     }
 
     fn claim_prepared_run(
         &self,
-        task_run_id: &str,
+        task_run_id: &TaskRunId,
         agent_session_id: &AgentSessionId,
     ) -> Result<bool> {
         task_runs::claim_prepared_run(&self.tx, task_run_id, agent_session_id)
@@ -135,17 +135,17 @@ impl TaskRunStore for SqliteUow<'_> {
         new: NewTaskRun,
         make_primary_if_missing: bool,
     ) -> Result<TaskRun> {
-        let task_id_str = new.task_id.to_string();
+        let task_id = new.task_id.clone();
         let run = task_runs::start_task_run_in(&self.tx, new)?;
         if make_primary_if_missing {
-            tasks::set_primary_task_run(&self.tx, &task_id_str, &run.id)?;
+            tasks::set_primary_task_run(&self.tx, &task_id, &run.id)?;
         }
         Ok(run)
     }
 
     fn record_task_run_observation(
         &mut self,
-        task_run_id: &str,
+        task_run_id: &TaskRunId,
         observation: TaskRunObservation<'_>,
     ) -> Result<()> {
         task_runs::record_task_run_observation_in(&self.tx, task_run_id, observation)
@@ -155,15 +155,15 @@ impl TaskRunStore for SqliteUow<'_> {
 impl EventRepository for SqliteUow<'_> {
     fn insert_event(
         &self,
-        task_id: Option<&str>,
-        task_run_id: Option<&str>,
+        task_id: Option<&TaskId>,
+        task_run_id: Option<&TaskRunId>,
         kind: &str,
         payload_json: &str,
     ) -> Result<Event> {
         events::insert_event_in(&self.tx, task_id, task_run_id, kind, payload_json)
     }
 
-    fn list_events(&self, task_id: Option<&str>) -> Result<Vec<Event>> {
+    fn list_events(&self, task_id: Option<&TaskId>) -> Result<Vec<Event>> {
         events::list_events_in(&self.tx, task_id)
     }
 }
@@ -175,7 +175,7 @@ impl Clock for SqliteUow<'_> {
 }
 
 impl WorkbenchStore for SqliteUow<'_> {
-    fn get_bench_for_task(&self, task_id: &str) -> Result<Option<(String, String)>> {
+    fn get_bench_for_task(&self, task_id: &TaskId) -> Result<Option<(String, String)>> {
         bench::get_bench_for_task(&self.tx, task_id)
     }
 
@@ -183,11 +183,11 @@ impl WorkbenchStore for SqliteUow<'_> {
         bench::list_bench_runspace_map(&self.tx)
     }
 
-    fn create_bench(&mut self, task_id: &str, runspace_id: &str, cwd: &str) -> Result<()> {
+    fn create_bench(&mut self, task_id: &TaskId, runspace_id: &str, cwd: &str) -> Result<()> {
         bench::create_bench(&self.tx, task_id, runspace_id, cwd)
     }
 
-    fn update_bench_cwd(&self, task_id: &str, cwd: &str) -> Result<()> {
+    fn update_bench_cwd(&self, task_id: &TaskId, cwd: &str) -> Result<()> {
         bench::update_bench_cwd(&self.tx, task_id, cwd)
     }
 }

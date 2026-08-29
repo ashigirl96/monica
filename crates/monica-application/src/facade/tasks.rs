@@ -1,6 +1,6 @@
 use super::{Backend, Monica};
 use crate::usecases::tasks::{CloseTaskReport, MakeMainOutcome};
-use crate::prelude::{DisplayStatus, Event, Task};
+use crate::prelude::{DisplayStatus, Event, Task, TaskId};
 use crate::{ApplicationEvent, ApplicationResult, TaskSummaryRow};
 use crate::ports::TaskSummaryFilter;
 
@@ -14,7 +14,7 @@ impl<B: Backend> TaskService<'_, B> {
         crate::usecases::tasks::create_raw_task(&mut self.m.repos, title, project_id)
     }
 
-    pub fn close_task(&mut self, id: &str) -> ApplicationResult<CloseTaskReport> {
+    pub fn close_task(&mut self, id: &TaskId) -> ApplicationResult<CloseTaskReport> {
         let Monica { repos, git, .. } = &mut *self.m;
         crate::usecases::tasks::close_task(repos, git, id)
     }
@@ -35,7 +35,7 @@ impl<B: Backend> TaskService<'_, B> {
         Ok(matches!(outcome, MakeMainOutcome::Changed { .. }))
     }
 
-    pub fn primary_terminal_tab(&self, task_id: &str) -> ApplicationResult<Option<String>> {
+    pub fn primary_terminal_tab(&self, task_id: &TaskId) -> ApplicationResult<Option<String>> {
         crate::usecases::tasks::primary_terminal_tab(&self.m.repos, task_id)
     }
 
@@ -73,7 +73,7 @@ impl<B: Backend> TaskService<'_, B> {
         crate::usecases::query::list_task_summaries(&self.m.repos, filter, project)
     }
 
-    pub fn list_events(&self, task_id: Option<&str>) -> ApplicationResult<Vec<Event>> {
+    pub fn list_events(&self, task_id: Option<&TaskId>) -> ApplicationResult<Vec<Event>> {
         crate::usecases::query::list_events(&self.m.repos, task_id)
     }
 

@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 use clap::Subcommand;
 use monica_application::HookContext;
-use monica_domain::Agent;
+use monica_domain::{Agent, TaskId, TaskRunId};
 
 #[derive(Subcommand)]
 pub enum HookCommand {
@@ -59,8 +59,8 @@ fn env_opt(key: &str) -> Option<String> {
 
 fn handle_agent(agent: Agent, log_file: &str) -> Result<()> {
     let raw = read_stdin()?;
-    let task_id = env_opt("MONICA_TASK_ID");
-    let task_run_id = env_opt("MONICA_TASK_RUN_ID");
+    let task_id = env_opt("MONICA_TASK_ID").map(TaskId::from_store);
+    let task_run_id = env_opt("MONICA_TASK_RUN_ID").map(TaskRunId::from_store);
     let terminal_tab_id = env_opt("MONICA_TERMINAL_TAB_ID");
     let terminal_session_id = env_opt("MONICA_TERMINAL_SESSION_ID");
 
@@ -79,8 +79,8 @@ fn handle_agent(agent: Agent, log_file: &str) -> Result<()> {
     let report = monica.executions().ingest_agent_hook(
         agent,
         HookContext {
-            task_id: task_id.as_deref(),
-            task_run_id: task_run_id.as_deref(),
+            task_id: task_id.as_ref(),
+            task_run_id: task_run_id.as_ref(),
             terminal_tab_id: terminal_tab_id.as_deref(),
             terminal_session_id: terminal_session_id.as_deref(),
         },
