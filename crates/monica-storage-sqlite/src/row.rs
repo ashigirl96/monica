@@ -1,8 +1,9 @@
 use anyhow::Result;
 use monica_application::{ExecutionProfile, PermissionMode};
 use monica_domain::{
-    Agent, Event, ExternalReference, NotificationIntent, NotificationKind, Project, Provider,
-    RawJson, RefType, Task, TaskId, TaskKind, TaskRun, TaskRunId, TaskRunStatus, TaskStatus,
+    Agent, AgentSessionId, Event, ExternalReference, NotificationIntent, NotificationKind, Project,
+    Provider, RawJson, RefType, Task, TaskId, TaskKind, TaskRun, TaskRunId, TaskRunStatus,
+    TaskStatus,
 };
 use rusqlite::Row;
 
@@ -43,7 +44,9 @@ pub(super) fn task_run_from_row(row: &Row<'_>) -> Result<TaskRun> {
         worktree_path: row.get("worktree_path")?,
         status: status.parse::<TaskRunStatus>()?,
         wait_reason: wait_reason.map(|s| s.parse()).transpose()?,
-        agent_session_id: row.get("agent_session_id")?,
+        agent_session_id: row
+            .get::<_, Option<String>>("agent_session_id")?
+            .map(AgentSessionId::from_store),
         terminal_tab_id: row.get("terminal_tab_id")?,
         last_event_name: row.get("last_event_name")?,
         last_event_at: row.get("last_event_at")?,

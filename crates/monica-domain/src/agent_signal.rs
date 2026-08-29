@@ -1,3 +1,4 @@
+use crate::ids::AgentSessionId;
 use crate::status::{TaskRunStatus, TaskRunWaitReason};
 use crate::task_run::TaskRun;
 
@@ -20,7 +21,7 @@ pub struct AgentSignal {
     /// The agent session id the event carried, when present. Needed on *every* signal (not just
     /// session start) so the late/out-of-order protection rules can tell a straggler from the dead
     /// session apart from fresh evidence of life.
-    pub agent_session_id: Option<String>,
+    pub agent_session_id: Option<AgentSessionId>,
     /// The opaque agent event name (e.g. `"Stop"`). Persisted as `last_event_name` and surfaced
     /// in debug logs only — the state machine never matches on it.
     pub event_label: Option<String>,
@@ -219,8 +220,8 @@ impl TaskRun {
     /// by a session the run has never met is new evidence of life, so it may revive a stopped run
     /// and clears a tool wait whose question died with its session.
     fn transition_is_protected(&self, signal: &AgentSignal, next: HookTransition) -> bool {
-        let known = self.agent_session_id.as_deref();
-        let event = signal.agent_session_id.as_deref();
+        let known = self.agent_session_id.as_ref();
+        let event = signal.agent_session_id.as_ref();
         if next.status.is_terminal() {
             return matches!((known, event), (Some(known), Some(event)) if known != event);
         }
@@ -272,7 +273,7 @@ mod tests {
             worktree_path: None,
             status,
             wait_reason,
-            agent_session_id: session.map(str::to_string),
+            agent_session_id: session.map(AgentSessionId::from_agent),
             terminal_tab_id: None,
             last_event_name: None,
             last_event_at: None,
@@ -286,7 +287,7 @@ mod tests {
 
     fn signal(session: Option<&str>, kind: SignalKind) -> AgentSignal {
         AgentSignal {
-            agent_session_id: session.map(str::to_string),
+            agent_session_id: session.map(AgentSessionId::from_agent),
             event_label: None,
             kind,
         }

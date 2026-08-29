@@ -14,7 +14,7 @@ use crate::ports::{
 };
 use crate::usecases::runs::record_hook;
 use crate::prelude::{
-    Agent, AgentSignal, Continuation, DisplayStatus, Event, ExternalReference,
+    Agent, AgentSessionId, AgentSignal, Continuation, DisplayStatus, Event, ExternalReference,
     NewNotificationIntent, NewTask, NewTaskRun, NewTerminalSession,
     NotificationIntent, Project, Provider, RefType, SignalKind, Task, TaskId, TaskKind, TaskRun,
     TaskRunId, TaskRunStatus, TaskRunWaitReason, TaskStatus, TerminalSession,
@@ -36,7 +36,7 @@ use crate::{
 
 fn mk_signal(session: Option<&str>, label: &str, kind: SignalKind) -> AgentSignal {
     AgentSignal {
-        agent_session_id: session.map(str::to_string),
+        agent_session_id: session.map(AgentSessionId::from_agent),
         event_label: Some(label.to_string()),
         kind,
     }
@@ -461,7 +461,7 @@ impl FakeRepos {
             run.wait_reason = wait_reason;
         }
         if let Some(session) = observation.agent_session_id {
-            run.agent_session_id = Some(session.to_string());
+            run.agent_session_id = Some(session.clone());
         }
         if let Some(tab) = observation.terminal_tab_id {
             run.terminal_tab_id = Some(tab.to_string());
@@ -530,7 +530,7 @@ impl TaskRunStore for FakeRepos {
     fn find_task_run_by_session(
         &self,
         task_id: &str,
-        agent_session_id: &str,
+        agent_session_id: &AgentSessionId,
     ) -> Result<Option<TaskRun>> {
         Ok(self
             .state
@@ -539,7 +539,7 @@ impl TaskRunStore for FakeRepos {
             .values()
             .filter(|run| {
                 run.task_id == task_id
-                    && run.agent_session_id.as_deref() == Some(agent_session_id)
+                    && run.agent_session_id.as_ref() == Some(agent_session_id)
             })
             // mirrors sqlite: most recently observed first, run number as tie-break
             .max_by_key(|run| (run.last_event_at.clone(), run_number(&run.id)))
@@ -583,14 +583,18 @@ impl TaskRunStore for FakeRepos {
         self.do_settle_task_run_if_live(task_run_id, task_id)
     }
 
-    fn claim_prepared_run(&self, task_run_id: &str, agent_session_id: &str) -> Result<bool> {
+    fn claim_prepared_run(
+        &self,
+        task_run_id: &str,
+        agent_session_id: &AgentSessionId,
+    ) -> Result<bool> {
         // Mirror the SQLite guard: WHERE id=? AND status='prepared' AND agent_session_id IS NULL.
         let mut state = self.state.borrow_mut();
         let Some(run) = state.runs.get_mut(task_run_id) else {
             return Ok(false);
         };
         if run.status == TaskRunStatus::Prepared && run.agent_session_id.is_none() {
-            run.agent_session_id = Some(agent_session_id.to_string());
+            run.agent_session_id = Some(agent_session_id.clone());
             Ok(true)
         } else {
             Ok(false)
@@ -816,7 +820,7 @@ impl TaskRunStore for FakeUow<'_> {
     fn find_task_run_by_session(
         &self,
         task_id: &str,
-        agent_session_id: &str,
+        agent_session_id: &AgentSessionId,
     ) -> Result<Option<TaskRun>> {
         self.inner.find_task_run_by_session(task_id, agent_session_id)
     }
@@ -837,7 +841,11 @@ impl TaskRunStore for FakeUow<'_> {
         self.inner.do_settle_task_run_if_live(task_run_id, task_id)
     }
 
-    fn claim_prepared_run(&self, task_run_id: &str, agent_session_id: &str) -> Result<bool> {
+    fn claim_prepared_run(
+        &self,
+        task_run_id: &str,
+        agent_session_id: &AgentSessionId,
+    ) -> Result<bool> {
         self.inner.claim_prepared_run(task_run_id, agent_session_id)
     }
 
@@ -1393,13 +1401,13 @@ impl TerminalSessionRepository for FakeRepos {
         id: &str,
         agent_status: Option<AgentSessionStatus>,
         agent_wait_reason: Option<TaskRunWaitReason>,
-        agent_session_id: Option<&str>,
+        agent_session_id: Option<&AgentSessionId>,
     ) -> Result<bool> {
         if let Some(s) = self.state.borrow_mut().terminal_sessions.iter_mut().find(|s| s.id == id) {
             let changed = s.agent_status != agent_status || s.agent_wait_reason != agent_wait_reason;
             s.agent_status = agent_status;
             s.agent_wait_reason = agent_wait_reason;
-            s.agent_session_id = agent_session_id.map(str::to_string);
+            s.agent_session_id = agent_session_id.cloned();
             return Ok(changed);
         }
         Ok(false)
@@ -1767,7 +1775,7 @@ pub(crate) fn driven_run(id: &str, task_id: &str, tab: &str) -> TaskRun {
         worktree_path: None,
         status: TaskRunStatus::Running,
         wait_reason: None,
-        agent_session_id: Some("sess".to_string()),
+        agent_session_id: Some(AgentSessionId::from_agent("sess")),
         terminal_tab_id: Some(tab.to_string()),
         last_event_name: None,
         last_event_at: None,

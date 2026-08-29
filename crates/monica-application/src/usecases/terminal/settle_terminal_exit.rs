@@ -75,7 +75,9 @@ fn run_is_session_driven(run: &TaskRun) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::{TaskId, TaskRunId, TerminalSessionKind, TerminalSessionStatus};
+    use crate::prelude::{
+        AgentSessionId, TaskId, TaskRunId, TerminalSessionKind, TerminalSessionStatus,
+    };
 
     fn session(id: &str, tab_id: Option<&str>) -> TerminalSession {
         TerminalSession {
@@ -111,7 +113,7 @@ mod tests {
             worktree_path: None,
             status,
             wait_reason: None,
-            agent_session_id: agent_session_id.map(str::to_string),
+            agent_session_id: agent_session_id.map(AgentSessionId::from_agent),
             terminal_tab_id: Some("tab-1".to_string()),
             last_event_name: None,
             last_event_at: None,

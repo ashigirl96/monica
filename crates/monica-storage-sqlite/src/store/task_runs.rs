@@ -4,7 +4,7 @@ use rusqlite::{params, Connection};
 use crate::SqliteStore;
 use monica_application::{TaskRunObservation, TaskRunStore};
 use monica_domain::{
-    transition_is_generic_wait, HookTransition, NewTaskRun, TaskRun, TaskRunStatus,
+    transition_is_generic_wait, AgentSessionId, HookTransition, NewTaskRun, TaskRun, TaskRunStatus,
     TaskRunWaitReason, TaskStatus,
 };
 
@@ -202,7 +202,7 @@ pub(super) fn record_task_run_observation_in(
             wait_reason,
             observation.event_label,
             observation.at,
-            observation.agent_session_id,
+            observation.agent_session_id.map(AgentSessionId::as_str),
             observation.terminal_tab_id,
             observation.metadata_raw,
             task_run_id,
@@ -344,12 +344,12 @@ pub(super) fn get_task_run(conn: &Connection, id: &str) -> Result<Option<TaskRun
 pub(super) fn find_task_run_by_session(
     conn: &Connection,
     task_id: &str,
-    agent_session_id: &str,
+    agent_session_id: &AgentSessionId,
 ) -> Result<Option<TaskRun>> {
     find_latest_observed_task_run(
         conn,
         "task_id = ?1 AND agent_session_id = ?2",
-        params![task_id, agent_session_id],
+        params![task_id, agent_session_id.as_str()],
     )
 }
 
@@ -383,7 +383,7 @@ pub(super) fn list_task_runs_for_task(conn: &Connection, task_id: &str) -> Resul
 pub(super) fn claim_prepared_run(
     conn: &Connection,
     task_run_id: &str,
-    agent_session_id: &str,
+    agent_session_id: &AgentSessionId,
 ) -> Result<bool> {
     let affected = conn.execute(
         &format!(
@@ -394,7 +394,7 @@ pub(super) fn claim_prepared_run(
                AND agent_session_id IS NULL",
             TaskRunStatus::Prepared.as_str(),
         ),
-        params![task_run_id, agent_session_id],
+        params![task_run_id, agent_session_id.as_str()],
     )?;
     Ok(affected == 1)
 }
@@ -434,7 +434,7 @@ impl TaskRunStore for SqliteStore {
     fn find_task_run_by_session(
         &self,
         task_id: &str,
-        agent_session_id: &str,
+        agent_session_id: &AgentSessionId,
     ) -> Result<Option<TaskRun>> {
         find_task_run_by_session(self.conn(), task_id, agent_session_id)
     }
@@ -458,7 +458,11 @@ impl TaskRunStore for SqliteStore {
         Ok(settled)
     }
 
-    fn claim_prepared_run(&self, task_run_id: &str, agent_session_id: &str) -> Result<bool> {
+    fn claim_prepared_run(
+        &self,
+        task_run_id: &str,
+        agent_session_id: &AgentSessionId,
+    ) -> Result<bool> {
         claim_prepared_run(self.conn(), task_run_id, agent_session_id)
     }
 

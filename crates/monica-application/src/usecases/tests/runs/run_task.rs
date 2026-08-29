@@ -1,4 +1,5 @@
 use super::*;
+use monica_domain::AgentSessionId;
 
 
 #[test]
@@ -243,7 +244,7 @@ fn prepare_claude_for_run_resumes_stopped_primary_with_session() {
     let task_id = insert_issue_backed_task(&mut repos, 7);
 
     let (run_id, worktree) = prepared_run_with_worktree(&mut repos, &task_id, "stale prompt");
-    assert!(repos.claim_prepared_run(&run_id, "sess-42").unwrap());
+    assert!(repos.claim_prepared_run(&run_id, &AgentSessionId::from_agent("sess-42")).unwrap());
     repos
         .finish_task_run(&run_id, &task_id, TaskRunStatus::Stopped)
         .unwrap();
@@ -291,7 +292,7 @@ fn overridden_launch_agent_is_stamped_and_survives_resume() {
         "the effective agent is persisted on the run at launch"
     );
 
-    assert!(repos.claim_prepared_run(&run_id, "sess-9").unwrap());
+    assert!(repos.claim_prepared_run(&run_id, &AgentSessionId::from_agent("sess-9")).unwrap());
     repos
         .finish_task_run(&run_id, &task_id, TaskRunStatus::Stopped)
         .unwrap();

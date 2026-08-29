@@ -1,6 +1,7 @@
 use super::*;
 use super::support::*;
 use crate::usecases::tasks::MakeMainOutcome;
+use monica_domain::AgentSessionId;
 
 #[test]
 fn create_raw_task_links_project_and_has_no_issue_ref() {
@@ -81,7 +82,7 @@ fn make_main_by_terminal_tab_promotes_side_run_and_reports_no_ops() {
     )
     .unwrap();
     let latest_in_tab = repos
-        .find_task_run_by_session(&task_id, "sess-3")
+        .find_task_run_by_session(&task_id, &AgentSessionId::from_agent("sess-3"))
         .unwrap()
         .unwrap();
 

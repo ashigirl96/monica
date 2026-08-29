@@ -1,5 +1,6 @@
 use super::*;
 use super::support::*;
+use monica_domain::AgentSessionId;
 
 
 // The pure decision functions (task_run_settlement_for_*, reconcile_terminal_sessions) and the
@@ -243,7 +244,7 @@ fn fake_terminal_session(id: &str, agent_session_id: Option<&str>) -> TerminalSe
         status: TerminalSessionStatus::Running,
         agent_status: None,
         agent_wait_reason: None,
-        agent_session_id: agent_session_id.map(str::to_string),
+        agent_session_id: agent_session_id.map(AgentSessionId::from_agent),
         pid: None,
         rows: 24,
         cols: 80,
