@@ -12,6 +12,7 @@ import type { FetchLinkMetadata } from "./link-menu";
 import { noteMentionMenuPlugin } from "./note-mention-menu";
 import type { SearchNoteMentions } from "./note-mention-menu";
 import { pasteMenuPlugin } from "./paste-menu";
+import { tableMenuPlugin } from "./table-menu";
 import { imageUploadPlugin } from "./image-upload";
 import type { ImportExternalImage, UploadImage } from "./image-upload";
 import type { OnNoteMentionClick, ResolveNoteMention } from "./node-views";
@@ -121,6 +122,7 @@ export function createBlockEditor(
       // 全 keystroke の logging + 全文 walk を伴うため dev 限定
       ...(import.meta.env.DEV ? [imeDebugPlugin()] : []),
       slashMenuPlugin(),
+      tableMenuPlugin(),
       // plugin 不在なら clipboard の open meta は無視され、常にプレーンリンクに落ちる
       ...(fetchLinkMetadata ? [linkMenuPlugin(fetchLinkMetadata)] : []),
       ...(searchNoteMentions ? [noteMentionMenuPlugin(searchNoteMentions)] : []),

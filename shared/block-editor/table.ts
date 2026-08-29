@@ -37,7 +37,7 @@ export function getTableCellContext($pos: ResolvedPos): TableCellContext | null 
   return null;
 }
 
-function cellStartPos(
+export function cellStartPos(
   tablePos: number,
   table: PMNode,
   rowIndex: number,

@@ -1,4 +1,4 @@
-import { Plugin, PluginKey, TextSelection } from "@milkdown/kit/prose/state";
+import { Plugin, TextSelection } from "@milkdown/kit/prose/state";
 import type { EditorState, Transaction } from "@milkdown/kit/prose/state";
 import type { Node as PMNode } from "@milkdown/kit/prose/model";
 import type { EditorView } from "@milkdown/kit/prose/view";
@@ -6,6 +6,7 @@ import { createContainer, nodes, schema } from "./schema";
 import { getBlockContext } from "./context";
 import { appendEmptyParagraphAfter } from "./commands";
 import { createMenuOverlay, menuItemButton, positionMenuAt } from "./menu-overlay";
+import { linkMenuKey } from "./menu-keys";
 
 export type LinkMetadata = {
   title: string | null;
@@ -43,14 +44,12 @@ export type LinkMenuActiveState = {
   confirmPending: boolean;
 };
 
-type LinkMenuState = { active: false } | LinkMenuActiveState;
+export type LinkMenuState = { active: false } | LinkMenuActiveState;
 
 type LinkMenuMeta =
   | { type: "open"; from: number; url: string }
   | { type: "close" }
   | { type: "set"; state: LinkMenuActiveState };
-
-const linkMenuKey = new PluginKey<LinkMenuState>("journalLinkMenu");
 
 const EMPTY_META: LinkMetadata = {
   title: null,

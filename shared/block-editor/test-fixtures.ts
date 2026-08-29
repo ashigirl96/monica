@@ -1,4 +1,6 @@
 import type { Node as PMNode } from "@milkdown/kit/prose/model";
+import { EditorState, TextSelection } from "@milkdown/kit/prose/state";
+import type { Command } from "@milkdown/kit/prose/state";
 import { createContainer, nodes, schema } from "./schema";
 import { containerById } from "./context";
 
@@ -75,4 +77,30 @@ export function contentPos(doc: PMNode, id: string, offset: number | "start" | "
   if (offset === "start") return base;
   if (offset === "end") return base + entry.node.child(0).content.size;
   return base + offset;
+}
+
+export function cellPositions(doc: PMNode): number[] {
+  const out: number[] = [];
+  doc.descendants((node, pos) => {
+    if (node.type === nodes.tableCell) out.push(pos);
+    return true;
+  });
+  return out;
+}
+
+/** n 番目（文書順）のセル先頭にカーソルを置いた state */
+export function stateInCell(doc: PMNode, cellIndex: number, offset = 0): EditorState {
+  const pos = cellPositions(doc)[cellIndex];
+  return EditorState.create({ doc, selection: TextSelection.create(doc, pos + 1 + offset) });
+}
+
+export function run(
+  state: EditorState,
+  command: Command,
+): { state: EditorState; handled: boolean } {
+  let next = state;
+  const handled = command(state, (tr) => {
+    next = state.apply(tr);
+  });
+  return { state: next, handled };
 }
