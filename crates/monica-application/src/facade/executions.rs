@@ -8,8 +8,8 @@ use crate::usecases::terminal::{
     task_run_settlement_for_terminal_exit, TerminalExitSettlement, TerminalSessionUpdate,
 };
 use crate::prelude::{
-    Agent, NewNotificationIntent, NewTerminalSession, NotificationKind, TaskRun, TaskRunStatus,
-    TerminalSession, TerminalSessionStatus,
+    Agent, NewNotificationIntent, NewTerminalSession, NotificationKind, TaskId, TaskRun,
+    TaskRunId, TaskRunStatus, TerminalSession, TerminalSessionStatus,
 };
 use crate::{
     ApplicationError, ApplicationEvent, ApplicationResult, EventSink, HookContext, HookReport,
@@ -24,7 +24,7 @@ pub struct ExecutionService<'a, B: Backend> {
 
 impl<B: Backend> ExecutionService<'_, B> {
     /// Phase 1 of a run: create the TaskRun, set it primary, ensure the bench exists.
-    pub fn prepare_task(&mut self, task_id: &str) -> ApplicationResult<PrepareTaskResult> {
+    pub fn prepare_task(&mut self, task_id: &TaskId) -> ApplicationResult<PrepareTaskResult> {
         crate::usecases::runs::start_run(&mut self.m.repos, task_id)
     }
 
@@ -32,8 +32,8 @@ impl<B: Backend> ExecutionService<'_, B> {
     /// (the run is marked `Failed` internally on error, so a failure still notifies).
     pub fn execute_run(
         &mut self,
-        task_id: &str,
-        task_run_id: &str,
+        task_id: &TaskId,
+        task_run_id: &TaskRunId,
     ) -> ApplicationResult<TaskRunStatus> {
         let Monica { repos, git, setup, outputs, events, .. } = &mut *self.m;
         let result =
@@ -52,19 +52,19 @@ impl<B: Backend> ExecutionService<'_, B> {
 
     pub fn prepare_claude_for_run(
         &mut self,
-        task_id: &str,
+        task_id: &TaskId,
         agent_override: Option<Agent>,
     ) -> ApplicationResult<RunTaskResult> {
         let Monica { repos, outputs, .. } = &mut *self.m;
         crate::usecases::runs::prepare_claude_for_run(repos, outputs, task_id, agent_override)
     }
 
-    pub fn open_bench(&mut self, task_id: &str) -> ApplicationResult<TaskBench> {
+    pub fn open_bench(&mut self, task_id: &TaskId) -> ApplicationResult<TaskBench> {
         let Monica { repos, outputs, .. } = &mut *self.m;
         crate::usecases::runs::open_bench(repos, outputs, task_id)
     }
 
-    pub fn task_shell_env(&self, task_id: &str) -> ApplicationResult<Vec<(String, String)>> {
+    pub fn task_shell_env(&self, task_id: &TaskId) -> ApplicationResult<Vec<(String, String)>> {
         crate::usecases::runs::task_shell_env(&self.m.repos, &self.m.outputs, task_id)
     }
 
@@ -100,13 +100,13 @@ impl<B: Backend> ExecutionService<'_, B> {
         }
         if report.entered_waiting_for_user {
             events.emit(ApplicationEvent::AwaitingUserInput {
-                task_id: report.linked_task_id.clone(),
-                task_run_id: report.linked_task_run_id.clone(),
+                task_id: report.linked_task_id.clone().map(Into::into),
+                task_run_id: report.linked_task_run_id.clone().map(Into::into),
                 reason: report.wait_reason,
                 task_title: report.task_title.clone(),
             });
             if let Some(dedupe_key) = crate::notification::awaiting_user_input_dedupe_key(
-                report.linked_task_run_id.as_deref(),
+                report.linked_task_run_id.as_ref().map(TaskRunId::as_str),
                 report.terminal_session_id.as_deref(),
             ) {
                 let body = crate::notification::waiting_notification(
@@ -118,8 +118,8 @@ impl<B: Backend> ExecutionService<'_, B> {
                     kind: NotificationKind::AwaitingUserInput,
                     title: crate::notification::TITLE.to_string(),
                     body,
-                    task_id: report.linked_task_id.clone(),
-                    task_run_id: report.linked_task_run_id.clone(),
+                    task_id: report.linked_task_id.clone().map(Into::into),
+                    task_run_id: report.linked_task_run_id.clone().map(Into::into),
                 };
                 if let Err(e) = repos.enqueue_notification(intent) {
                     log::warn!(target: "monica_app::notify", "failed to enqueue notification: {e}");
@@ -425,8 +425,8 @@ impl<B: Backend> ExecutionService<'_, B> {
     ) -> ApplicationResult<()> {
         if repos.settle_task_run_if_live(&settlement.task_run_id, &settlement.task_id)? {
             events.emit(ApplicationEvent::TaskRunStatusChanged {
-                task_id: settlement.task_id,
-                task_run_id: settlement.task_run_id,
+                task_id: settlement.task_id.into(),
+                task_run_id: settlement.task_run_id.into(),
                 status: TaskRunStatus::Stopped,
             });
         }

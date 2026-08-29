@@ -1,7 +1,7 @@
 use anyhow::Result;
 use rusqlite::{params, Connection};
 
-use monica_domain::{NewNotificationIntent, NotificationIntent};
+use monica_domain::{NewNotificationIntent, NotificationIntent, TaskRunId};
 
 use super::NOTIFICATION_OUTBOX_COLUMNS;
 use crate::row::notification_intent_from_row;
@@ -70,11 +70,11 @@ pub(crate) fn mark_notification_delivered_in(conn: &Connection, id: i64) -> Resu
 
 pub(crate) fn cancel_notifications_for_run_in(
     conn: &Connection,
-    task_run_id: &str,
+    task_run_id: &TaskRunId,
 ) -> Result<()> {
     conn.execute(
         "DELETE FROM notification_outbox WHERE task_run_id = ?1",
-        params![task_run_id],
+        params![task_run_id.as_str()],
     )?;
     Ok(())
 }
@@ -199,7 +199,9 @@ mod tests {
         let mut store = test_store();
         store.enqueue_notification(sample_intent()).unwrap();
 
-        store.cancel_notifications_for_run("run-1").unwrap();
+        store
+            .cancel_notifications_for_run(&TaskRunId::from_store("run-1".to_string()))
+            .unwrap();
 
         let pending = store.list_pending_notifications(10).unwrap();
         assert!(pending.is_empty());

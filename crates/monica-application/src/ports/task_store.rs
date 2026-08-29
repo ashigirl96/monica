@@ -1,5 +1,7 @@
 use anyhow::Result;
 
+use monica_domain::{TaskId, TaskRunId};
+
 use crate::prelude::{ExternalReference, Task, TaskStatus};
 use crate::prelude::NewTask;
 
@@ -10,11 +12,11 @@ use crate::prelude::NewTask;
 pub trait TaskStore {
     fn insert_task(&mut self, new: NewTask) -> Result<Task>;
     fn insert_task_with_ref(&mut self, new: NewTask, external: ExternalReference) -> Result<Task>;
-    fn get_task(&self, id: &str) -> Result<Option<Task>>;
-    fn mark_task_closed(&mut self, id: &str) -> Result<Task>;
+    fn get_task(&self, id: &TaskId) -> Result<Option<Task>>;
+    fn mark_task_closed(&mut self, id: &TaskId) -> Result<Task>;
     fn list_tasks(&self) -> Result<Vec<Task>>;
-    fn set_primary_task_run(&self, task_id: &str, task_run_id: &str) -> Result<()>;
-    fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()>;
-    fn mark_task(&mut self, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()>;
-    fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalReference>>;
+    fn set_primary_task_run(&self, task_id: &TaskId, task_run_id: &TaskRunId) -> Result<()>;
+    fn update_task_status(&self, id: &TaskId, status: TaskStatus) -> Result<()>;
+    fn mark_task(&mut self, id: &TaskId, status: TaskStatus, note: Option<&str>) -> Result<()>;
+    fn list_external_refs(&self, task_id: &TaskId) -> Result<Vec<ExternalReference>>;
 }

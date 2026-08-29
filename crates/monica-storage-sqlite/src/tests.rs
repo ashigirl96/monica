@@ -7,12 +7,21 @@ use monica_application::{
 use monica_domain::{
     Agent, AgentSessionId, DisplayStatus, ExternalReference, NewTask, NewTaskRun,
     NewTerminalSession, Project, Provider, RawJson, RefType, TaskId, TaskKind, TaskRun,
-    TaskRunStatus, TaskRunWaitReason, TaskStatus, TerminalSessionKind, TerminalSessionStatus,
+    TaskRunId, TaskRunStatus, TaskRunWaitReason, TaskStatus, TerminalSessionKind,
+    TerminalSessionStatus,
 };
 use rusqlite::params;
 use serde_json::json;
 
 use super::SqliteStore;
+
+fn tid(id: &str) -> TaskId {
+    TaskId::from_store(id.to_string())
+}
+
+fn rid(id: &str) -> TaskRunId {
+    TaskRunId::from_store(id.to_string())
+}
 
 /// The domain carries `details`/`source`/`metadata`/`payload` as opaque [`RawJson`] text; the store
 /// must persist and reload that text verbatim (no JSON re-encoding). Guards the read/write path in
@@ -79,7 +88,7 @@ fn project_task_with_branch(
     repo: &str,
     default_branch: &str,
     branch: &str,
-) -> (String, PullRequestBranchSyncCandidate) {
+) -> (TaskId, PullRequestBranchSyncCandidate) {
     let mut project = Project::from_repo(repo);
     project.default_branch = default_branch.to_string();
     db.upsert_project(&project, &ExecutionProfile::default()).unwrap();
@@ -94,7 +103,7 @@ fn project_task_with_branch(
     })
     .unwrap();
     (
-        item.id.to_string(),
+        item.id.clone(),
         PullRequestBranchSyncCandidate {
             task_id: item.id.to_string(),
             repo: repo.to_string(),
@@ -583,7 +592,7 @@ fn task_run_observation_sql_guards_protected_transitions() {
 /// decoder's tests). The store still enforces the `pending_stop` SQL CASE from these flags.
 fn record_observation(
     db: &mut SqliteStore,
-    run_id: &str,
+    run_id: &TaskRunId,
     event: &str,
     status: Option<TaskRunStatus>,
     hold_stop: bool,
@@ -774,7 +783,7 @@ fn task_run_observation_keeps_existing_tab_and_session_on_none() {
 fn find_task_run_by_terminal_tab_returns_latest_observed_run_in_tab() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let task = db.insert_task(dev_task("tab lookup")).unwrap();
-    let observe = |db: &mut SqliteStore, run_id: &str, session: &str, at: &str| {
+    let observe = |db: &mut SqliteStore, run_id: &TaskRunId, session: &str, at: &str| {
         db.record_task_run_observation(
             run_id,
             TaskRunObservation {
@@ -885,7 +894,7 @@ fn task_summaries_count_side_runs_excluding_primary_and_sessionless_failures() {
         branch: None,
         worktree_path: None,
     };
-    let observe = |db: &mut SqliteStore, run_id: &str, status: TaskRunStatus, session: &str| {
+    let observe = |db: &mut SqliteStore, run_id: &TaskRunId, status: TaskRunStatus, session: &str| {
         db.record_task_run_observation(
             run_id,
             TaskRunObservation {
@@ -909,7 +918,7 @@ fn task_summaries_count_side_runs_excluding_primary_and_sessionless_failures() {
     db.set_primary_task_run(&task.id, &primary.id).unwrap();
 
     let observe_waiting =
-        |db: &mut SqliteStore, run_id: &str, reason: TaskRunWaitReason, session: &str| {
+        |db: &mut SqliteStore, run_id: &TaskRunId, reason: TaskRunWaitReason, session: &str| {
             db.record_task_run_observation(
                 run_id,
                 TaskRunObservation {
@@ -993,7 +1002,7 @@ fn task_summaries_fall_back_to_latest_run_when_primary_pointer_dangles() {
         },
     )
     .unwrap();
-    db.set_primary_task_run(&task.id, "run-999").unwrap();
+    db.set_primary_task_run(&task.id, &rid("run-999")).unwrap();
 
     let summaries = db.list_task_summaries(TaskSummaryFilter::All, None).unwrap();
     let summary = summaries.iter().find(|s| s.id == task.id.as_str()).unwrap();
@@ -1324,7 +1333,7 @@ fn mark_task_closed_sets_status_and_closed_at() {
     assert!(refetched.closed_at.is_some());
 
     assert!(
-        db.mark_task_closed("MON-missing").is_err(),
+        db.mark_task_closed(&tid("MON-missing")).is_err(),
         "closing a missing task must error"
     );
 }
@@ -1417,7 +1426,7 @@ fn bulk_record_pr_sync_upserts_refs_and_states() {
     let (id1, c1) = project_task_with_branch(&mut db, "owner/repo", "main", "feature/a");
     let (id2, c2) = project_task_with_branch(&mut db, "owner/repo", "main", "feature/b");
 
-    let pr_ref_count = |db: &SqliteStore, task_id: &str| -> usize {
+    let pr_ref_count = |db: &SqliteStore, task_id: &TaskId| -> usize {
         db.list_external_refs(task_id)
             .unwrap()
             .iter()
@@ -1644,7 +1653,7 @@ fn settle_task_run_if_live_only_stops_session_driven_runs() {
         })
         .unwrap()
     };
-    let observe = |db: &mut SqliteStore, run_id: &str, status: TaskRunStatus| {
+    let observe = |db: &mut SqliteStore, run_id: &TaskRunId, status: TaskRunStatus| {
         db.record_task_run_observation(
             run_id,
             TaskRunObservation {
@@ -1731,7 +1740,7 @@ fn settle_task_run_if_live_only_stops_session_driven_runs() {
     // A mismatched task id never settles someone else's run.
     let run = start_run(&mut db);
     observe(&mut db, &run.id, TaskRunStatus::Running);
-    assert!(!db.settle_task_run_if_live(&run.id, "MON-404").unwrap());
+    assert!(!db.settle_task_run_if_live(&run.id, &tid("MON-404")).unwrap());
     assert_eq!(
         db.get_task_run(&run.id).unwrap().unwrap().status,
         TaskRunStatus::Running
@@ -1790,7 +1799,7 @@ fn list_driven_task_runs_with_tab_returns_only_tab_pinned_session_driven_runs() 
         .unwrap()
     };
     let observe = |db: &mut SqliteStore,
-                   run_id: &str,
+                   run_id: &TaskRunId,
                    status: Option<TaskRunStatus>,
                    session: Option<&str>,
                    tab: Option<&str>| {
@@ -2357,11 +2366,11 @@ fn claim_prepared_run_refuses_non_prepared_run() {
 #[test]
 fn claim_prepared_run_returns_false_for_missing_run() {
     let db = SqliteStore::open_in_memory().unwrap();
-    assert!(!db.claim_prepared_run("run-does-not-exist", &AgentSessionId::from_agent("session-A")).unwrap());
+    assert!(!db.claim_prepared_run(&rid("run-does-not-exist"), &AgentSessionId::from_agent("session-A")).unwrap());
 }
 
 /// Exercises a store contract; reused below against both the direct store and a `WorkTransaction`.
-fn workbench_contract<S: WorkbenchStore + ?Sized>(store: &mut S, task_id: &str) {
+fn workbench_contract<S: WorkbenchStore + ?Sized>(store: &mut S, task_id: &TaskId) {
     store.create_bench(task_id, "runspace-x", "/a").unwrap();
     assert_eq!(
         store.get_bench_for_task(task_id).unwrap(),
@@ -2374,10 +2383,10 @@ fn workbench_contract<S: WorkbenchStore + ?Sized>(store: &mut S, task_id: &str) 
     );
 }
 
-fn task_run_contract<S: TaskRunStore + ?Sized>(store: &mut S, task_id: &str) -> String {
+fn task_run_contract<S: TaskRunStore + ?Sized>(store: &mut S, task_id: &TaskId) -> TaskRunId {
     let run = store
         .start_task_run(NewTaskRun {
-            task_id: TaskId::from_store(task_id.to_string()),
+            task_id: task_id.clone(),
             agent: None,
             branch: Some("br".to_string()),
             worktree_path: None,
@@ -2391,7 +2400,7 @@ fn task_run_contract<S: TaskRunStore + ?Sized>(store: &mut S, task_id: &str) -> 
         store.get_task_run(&run.id).unwrap().unwrap().worktree_path.as_deref(),
         Some("/wt")
     );
-    run.id.into_string()
+    run.id
 }
 
 /// The same store operations must behave identically whether a caller drives `SqliteStore`

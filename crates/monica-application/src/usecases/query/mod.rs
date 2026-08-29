@@ -3,7 +3,7 @@ mod ports;
 use self::ports::{
     EventRepository, ProjectRepository, TaskBoardQuery, TaskRunStore, TaskStore, TaskSummaryFilter,
 };
-use crate::prelude::{Event, Project, Task};
+use crate::prelude::{Event, Project, Task, TaskId};
 use crate::{ApplicationError, ApplicationResult, TaskSummaryRow};
 
 /// The plan file path retained on the run currently driven by the given Workbench tab — set when
@@ -59,7 +59,7 @@ where
     Ok(repos.set_project_field(repo, key, value)?)
 }
 
-pub fn list_events<R>(repos: &R, task_id: Option<&str>) -> ApplicationResult<Vec<Event>>
+pub fn list_events<R>(repos: &R, task_id: Option<&TaskId>) -> ApplicationResult<Vec<Event>>
 where
     R: EventRepository,
 {

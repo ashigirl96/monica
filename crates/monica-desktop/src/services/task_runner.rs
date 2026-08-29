@@ -1,3 +1,4 @@
+use monica_domain::{TaskId, TaskRunId};
 use tauri::AppHandle;
 
 use crate::event_sink::TauriEventSink;
@@ -7,8 +8,8 @@ use crate::event_sink::TauriEventSink;
 /// this driver helper only owns the thread, not any orchestration.
 pub(crate) fn spawn_execute_run(
     app: AppHandle,
-    task_id: String,
-    run_id: String,
+    task_id: TaskId,
+    run_id: TaskRunId,
 ) -> Result<(), String> {
     std::thread::Builder::new()
         .name(format!("run-{run_id}"))

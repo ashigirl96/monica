@@ -4,15 +4,15 @@ use rusqlite::{params, Connection};
 use crate::SqliteStore;
 use monica_application::{TaskRunObservation, TaskRunStore};
 use monica_domain::{
-    transition_is_generic_wait, AgentSessionId, HookTransition, NewTaskRun, TaskRun, TaskRunStatus,
-    TaskRunWaitReason, TaskStatus,
+    transition_is_generic_wait, AgentSessionId, HookTransition, NewTaskRun, TaskId, TaskRun,
+    TaskRunId, TaskRunStatus, TaskRunWaitReason, TaskStatus,
 };
 
 use super::{sql_literal_list, tasks, SET_NOW, TASK_RUN_COLUMNS};
 
 /// Keep the owning task pinned to in_progress while a run progresses. Returns false when no
 /// row changed (closed task or missing id).
-fn keep_task_in_progress(conn: &Connection, task_id: &str) -> Result<bool> {
+fn keep_task_in_progress(conn: &Connection, task_id: &TaskId) -> Result<bool> {
     let affected = conn.execute(
         &format!(
             "UPDATE tasks SET status = ?1, updated_at = {SET_NOW}
@@ -20,17 +20,17 @@ fn keep_task_in_progress(conn: &Connection, task_id: &str) -> Result<bool> {
         ),
         params![
             TaskStatus::InProgress.as_str(),
-            task_id,
+            task_id.as_str(),
             TaskStatus::Closed.as_str()
         ],
     )?;
     Ok(affected > 0)
 }
 
-fn require_task_exists(conn: &Connection, task_id: &str) -> Result<()> {
+fn require_task_exists(conn: &Connection, task_id: &TaskId) -> Result<()> {
     let exists: i64 = conn.query_row(
         "SELECT count(*) FROM tasks WHERE id = ?1",
-        params![task_id],
+        params![task_id.as_str()],
         |row| row.get(0),
     )?;
     if exists == 0 {
@@ -88,8 +88,8 @@ pub(super) fn list_driven_task_runs_with_tab(conn: &Connection) -> Result<Vec<Ta
 /// and the caller has nothing to announce.
 pub(super) fn settle_task_run_if_live_in(
     conn: &Connection,
-    task_run_id: &str,
-    task_id: &str,
+    task_run_id: &TaskRunId,
+    task_id: &TaskId,
 ) -> Result<bool> {
     let affected = conn.execute(
         &format!(
@@ -106,7 +106,7 @@ pub(super) fn settle_task_run_if_live_in(
             TaskRunStatus::WaitingForUser.as_str(),
             TaskRunStatus::SettingUp.as_str(),
         ),
-        params![task_run_id, task_id],
+        params![task_run_id.as_str(), task_id.as_str()],
     )?;
     if affected > 0 {
         // A closed task's runs still deserve their tombstone (same silent no-op as hook
@@ -125,7 +125,7 @@ pub(super) fn settle_task_run_if_live_in(
 /// from resurrecting a run that SessionEnd (or terminal-exit settlement) just stopped.
 pub(super) fn record_task_run_observation_in(
     conn: &Connection,
-    task_run_id: &str,
+    task_run_id: &TaskRunId,
     observation: TaskRunObservation<'_>,
 ) -> Result<()> {
     // Kept sticky via COALESCE in the UPDATE: a later hook yields None and must not wipe the path.
@@ -205,7 +205,7 @@ pub(super) fn record_task_run_observation_in(
             observation.agent_session_id.map(AgentSessionId::as_str),
             observation.terminal_tab_id,
             observation.metadata_raw,
-            task_run_id,
+            task_run_id.as_str(),
             generic_wait,
             terminal_verdict,
             hold_stop,
@@ -219,11 +219,11 @@ pub(super) fn record_task_run_observation_in(
     if status.is_some() {
         let task_id: String = conn.query_row(
             "SELECT task_id FROM task_runs WHERE id = ?1",
-            params![task_run_id],
+            params![task_run_id.as_str()],
             |row| row.get(0),
         )?;
         // Hooks may observe runs of closed tasks; that stays a silent no-op.
-        keep_task_in_progress(conn, &task_id)?;
+        keep_task_in_progress(conn, &TaskId::from_store(task_id))?;
     }
     Ok(())
 }
@@ -234,13 +234,13 @@ pub(super) fn start_task_run_in(conn: &Connection, new: NewTaskRun) -> Result<Ta
 
     conn.execute("INSERT INTO task_run_counter DEFAULT VALUES", [])?;
     let id = format!("run-{}", conn.last_insert_rowid());
-    let task_id = new.task_id.as_str();
+    let task_id = &new.task_id;
     conn.execute(
         "INSERT INTO task_runs (id, task_id, agent, branch, worktree_path, status)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             id,
-            task_id,
+            task_id.as_str(),
             agent,
             new.branch,
             new.worktree_path,
@@ -265,8 +265,8 @@ pub(super) fn start_task_run_in(conn: &Connection, new: NewTaskRun) -> Result<Ta
 /// never drift. Run failures stay at the run layer; the task remains `in_progress`.
 pub(super) fn finish_task_run_in(
     conn: &Connection,
-    task_run_id: &str,
-    task_id: &str,
+    task_run_id: &TaskRunId,
+    task_id: &TaskId,
     status: TaskRunStatus,
 ) -> Result<()> {
     let status = status.as_str();
@@ -279,7 +279,7 @@ pub(super) fn finish_task_run_in(
                    updated_at = {SET_NOW}
              WHERE id = ?2 AND task_id = ?3"
         ),
-        params![status, task_run_id, task_id],
+        params![status, task_run_id.as_str(), task_id.as_str()],
     )?;
     if run_affected == 0 {
         return Err(anyhow!("task run not found: {task_run_id}"));
@@ -292,7 +292,7 @@ pub(super) fn finish_task_run_in(
 
 pub(super) fn set_task_run_worktree_path(
     conn: &Connection,
-    task_run_id: &str,
+    task_run_id: &TaskRunId,
     worktree_path: &str,
 ) -> Result<()> {
     let affected = conn.execute(
@@ -301,7 +301,7 @@ pub(super) fn set_task_run_worktree_path(
                SET worktree_path = ?1, updated_at = {SET_NOW}
              WHERE id = ?2"
         ),
-        params![worktree_path, task_run_id],
+        params![worktree_path, task_run_id.as_str()],
     )?;
     if affected == 0 {
         return Err(anyhow!("task run not found: {task_run_id}"));
@@ -311,7 +311,7 @@ pub(super) fn set_task_run_worktree_path(
 
 pub(super) fn set_task_run_agent(
     conn: &Connection,
-    task_run_id: &str,
+    task_run_id: &TaskRunId,
     agent: monica_domain::Agent,
 ) -> Result<()> {
     let affected = conn.execute(
@@ -320,7 +320,7 @@ pub(super) fn set_task_run_agent(
                SET agent = ?1, updated_at = {SET_NOW}
              WHERE id = ?2"
         ),
-        params![agent.as_str(), task_run_id],
+        params![agent.as_str(), task_run_id.as_str()],
     )?;
     if affected == 0 {
         return Err(anyhow!("task run not found: {task_run_id}"));
@@ -328,11 +328,11 @@ pub(super) fn set_task_run_agent(
     Ok(())
 }
 
-pub(super) fn get_task_run(conn: &Connection, id: &str) -> Result<Option<TaskRun>> {
+pub(super) fn get_task_run(conn: &Connection, id: &TaskRunId) -> Result<Option<TaskRun>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {TASK_RUN_COLUMNS} FROM task_runs WHERE id = ?1"
     ))?;
-    let mut rows = stmt.query(params![id])?;
+    let mut rows = stmt.query(params![id.as_str()])?;
     match rows.next()? {
         Some(row) => Ok(Some(crate::row::task_run_from_row(row)?)),
         None => Ok(None),
@@ -343,13 +343,13 @@ pub(super) fn get_task_run(conn: &Connection, id: &str) -> Result<Option<TaskRun
 /// collision across tasks cannot cross-link runs.
 pub(super) fn find_task_run_by_session(
     conn: &Connection,
-    task_id: &str,
+    task_id: &TaskId,
     agent_session_id: &AgentSessionId,
 ) -> Result<Option<TaskRun>> {
     find_latest_observed_task_run(
         conn,
         "task_id = ?1 AND agent_session_id = ?2",
-        params![task_id, agent_session_id.as_str()],
+        params![task_id.as_str(), agent_session_id.as_str()],
     )
 }
 
@@ -363,13 +363,13 @@ pub(super) fn find_task_run_by_terminal_tab(
     find_latest_observed_task_run(conn, "terminal_tab_id = ?1", params![terminal_tab_id])
 }
 
-pub(super) fn list_task_runs_for_task(conn: &Connection, task_id: &str) -> Result<Vec<TaskRun>> {
+pub(super) fn list_task_runs_for_task(conn: &Connection, task_id: &TaskId) -> Result<Vec<TaskRun>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {TASK_RUN_COLUMNS} FROM task_runs
          WHERE task_id = ?1
          ORDER BY created_at, CAST(SUBSTR(id, 5) AS INTEGER)"
     ))?;
-    let mut rows = stmt.query(params![task_id])?;
+    let mut rows = stmt.query(params![task_id.as_str()])?;
     let mut runs = Vec::new();
     while let Some(row) = rows.next()? {
         runs.push(crate::row::task_run_from_row(row)?);
@@ -382,7 +382,7 @@ pub(super) fn list_task_runs_for_task(conn: &Connection, task_id: &str) -> Resul
 /// (1 row) wins; the other sees 0 rows. `last_event_at` is left to the observation that follows.
 pub(super) fn claim_prepared_run(
     conn: &Connection,
-    task_run_id: &str,
+    task_run_id: &TaskRunId,
     agent_session_id: &AgentSessionId,
 ) -> Result<bool> {
     let affected = conn.execute(
@@ -394,7 +394,7 @@ pub(super) fn claim_prepared_run(
                AND agent_session_id IS NULL",
             TaskRunStatus::Prepared.as_str(),
         ),
-        params![task_run_id, agent_session_id.as_str()],
+        params![task_run_id.as_str(), agent_session_id.as_str()],
     )?;
     Ok(affected == 1)
 }
@@ -409,8 +409,8 @@ impl TaskRunStore for SqliteStore {
 
     fn finish_task_run(
         &mut self,
-        task_run_id: &str,
-        task_id: &str,
+        task_run_id: &TaskRunId,
+        task_id: &TaskId,
         status: TaskRunStatus,
     ) -> Result<()> {
         let tx = self.conn_mut().transaction()?;
@@ -419,21 +419,21 @@ impl TaskRunStore for SqliteStore {
         Ok(())
     }
 
-    fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()> {
+    fn set_task_run_worktree_path(&self, task_run_id: &TaskRunId, worktree_path: &str) -> Result<()> {
         set_task_run_worktree_path(self.conn(), task_run_id, worktree_path)
     }
 
-    fn set_task_run_agent(&self, task_run_id: &str, agent: monica_domain::Agent) -> Result<()> {
+    fn set_task_run_agent(&self, task_run_id: &TaskRunId, agent: monica_domain::Agent) -> Result<()> {
         set_task_run_agent(self.conn(), task_run_id, agent)
     }
 
-    fn get_task_run(&self, id: &str) -> Result<Option<TaskRun>> {
+    fn get_task_run(&self, id: &TaskRunId) -> Result<Option<TaskRun>> {
         get_task_run(self.conn(), id)
     }
 
     fn find_task_run_by_session(
         &self,
-        task_id: &str,
+        task_id: &TaskId,
         agent_session_id: &AgentSessionId,
     ) -> Result<Option<TaskRun>> {
         find_task_run_by_session(self.conn(), task_id, agent_session_id)
@@ -443,7 +443,7 @@ impl TaskRunStore for SqliteStore {
         find_task_run_by_terminal_tab(self.conn(), terminal_tab_id)
     }
 
-    fn list_task_runs_for_task(&self, task_id: &str) -> Result<Vec<TaskRun>> {
+    fn list_task_runs_for_task(&self, task_id: &TaskId) -> Result<Vec<TaskRun>> {
         list_task_runs_for_task(self.conn(), task_id)
     }
 
@@ -451,7 +451,7 @@ impl TaskRunStore for SqliteStore {
         list_driven_task_runs_with_tab(self.conn())
     }
 
-    fn settle_task_run_if_live(&mut self, task_run_id: &str, task_id: &str) -> Result<bool> {
+    fn settle_task_run_if_live(&mut self, task_run_id: &TaskRunId, task_id: &TaskId) -> Result<bool> {
         let tx = self.conn_mut().transaction()?;
         let settled = settle_task_run_if_live_in(&tx, task_run_id, task_id)?;
         tx.commit()?;
@@ -460,7 +460,7 @@ impl TaskRunStore for SqliteStore {
 
     fn claim_prepared_run(
         &self,
-        task_run_id: &str,
+        task_run_id: &TaskRunId,
         agent_session_id: &AgentSessionId,
     ) -> Result<bool> {
         claim_prepared_run(self.conn(), task_run_id, agent_session_id)
@@ -483,7 +483,7 @@ impl TaskRunStore for SqliteStore {
 
     fn record_task_run_observation(
         &mut self,
-        task_run_id: &str,
+        task_run_id: &TaskRunId,
         observation: TaskRunObservation<'_>,
     ) -> Result<()> {
         let tx = self.conn_mut().transaction()?;

@@ -149,7 +149,7 @@ impl FakeRepos {
         self.state.borrow().status_recorded.clone()
     }
 
-    pub(crate) fn insert_task_for_run(&mut self, project_id: Option<String>) -> String {
+    pub(crate) fn insert_task_for_run(&mut self, project_id: Option<String>) -> TaskId {
         self.insert_task(NewTask {
             kind: TaskKind::Development,
             status: TaskStatus::Ready,
@@ -163,7 +163,6 @@ impl FakeRepos {
         })
         .unwrap()
         .id
-        .into_string()
     }
 }
 
@@ -197,22 +196,22 @@ impl FakeRepos {
         Ok(task)
     }
 
-    fn do_mark_task_closed(&self, id: &str) -> Result<Task> {
+    fn do_mark_task_closed(&self, id: &TaskId) -> Result<Task> {
         let mut state = self.state.borrow_mut();
         let task = state
             .tasks
-            .get_mut(id)
+            .get_mut(id.as_str())
             .ok_or_else(|| anyhow!("task not found: {id}"))?;
         task.status = TaskStatus::Closed;
         task.closed_at = Some("2026-06-02T00:00:00.000Z".to_string());
         Ok(task.clone())
     }
 
-    fn do_mark_task(&self, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()> {
+    fn do_mark_task(&self, id: &TaskId, status: TaskStatus, note: Option<&str>) -> Result<()> {
         let mut state = self.state.borrow_mut();
         let task = state
             .tasks
-            .get_mut(id)
+            .get_mut(id.as_str())
             .ok_or_else(|| anyhow!("task not found: {id}"))?;
         task.status = status;
         task.phase = note.map(ToString::to_string);
@@ -229,11 +228,11 @@ impl TaskStore for FakeRepos {
         self.do_insert_task_with_ref(new, external)
     }
 
-    fn get_task(&self, id: &str) -> Result<Option<Task>> {
-        Ok(self.state.borrow().tasks.get(id).cloned())
+    fn get_task(&self, id: &TaskId) -> Result<Option<Task>> {
+        Ok(self.state.borrow().tasks.get(id.as_str()).cloned())
     }
 
-    fn mark_task_closed(&mut self, id: &str) -> Result<Task> {
+    fn mark_task_closed(&mut self, id: &TaskId) -> Result<Task> {
         self.do_mark_task_closed(id)
     }
 
@@ -241,36 +240,36 @@ impl TaskStore for FakeRepos {
         Ok(self.state.borrow().tasks.values().cloned().collect())
     }
 
-    fn set_primary_task_run(&self, task_id: &str, task_run_id: &str) -> Result<()> {
+    fn set_primary_task_run(&self, task_id: &TaskId, task_run_id: &TaskRunId) -> Result<()> {
         self.state
             .borrow_mut()
             .tasks
-            .get_mut(task_id)
+            .get_mut(task_id.as_str())
             .ok_or_else(|| anyhow!("task not found: {task_id}"))?
-            .primary_task_run_id = Some(TaskRunId::from_store(task_run_id.to_string()));
+            .primary_task_run_id = Some(task_run_id.clone());
         Ok(())
     }
 
-    fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()> {
+    fn update_task_status(&self, id: &TaskId, status: TaskStatus) -> Result<()> {
         self.state
             .borrow_mut()
             .tasks
-            .get_mut(id)
+            .get_mut(id.as_str())
             .ok_or_else(|| anyhow!("task not found: {id}"))?
             .status = status;
         Ok(())
     }
 
-    fn mark_task(&mut self, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()> {
+    fn mark_task(&mut self, id: &TaskId, status: TaskStatus, note: Option<&str>) -> Result<()> {
         self.do_mark_task(id, status, note)
     }
 
-    fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalReference>> {
+    fn list_external_refs(&self, task_id: &TaskId) -> Result<Vec<ExternalReference>> {
         Ok(self
             .state
             .borrow()
             .refs
-            .get(task_id)
+            .get(task_id.as_str())
             .cloned()
             .unwrap_or_default())
     }
@@ -413,17 +412,17 @@ impl FakeRepos {
 
     fn do_finish_task_run(
         &self,
-        task_run_id: &str,
-        task_id: &str,
+        task_run_id: &TaskRunId,
+        task_id: &TaskId,
         status: TaskRunStatus,
     ) -> Result<()> {
         let mut state = self.state.borrow_mut();
         state
             .runs
-            .get_mut(task_run_id)
+            .get_mut(task_run_id.as_str())
             .ok_or_else(|| anyhow!("task run not found: {task_run_id}"))?
             .status = status;
-        if let Some(task) = state.tasks.get_mut(task_id) {
+        if let Some(task) = state.tasks.get_mut(task_id.as_str()) {
             if task.status != TaskStatus::Closed {
                 task.status = TaskStatus::InProgress;
             }
@@ -431,12 +430,12 @@ impl FakeRepos {
         Ok(())
     }
 
-    fn do_settle_task_run_if_live(&self, task_run_id: &str, task_id: &str) -> Result<bool> {
+    fn do_settle_task_run_if_live(&self, task_run_id: &TaskRunId, task_id: &TaskId) -> Result<bool> {
         let mut state = self.state.borrow_mut();
-        let Some(run) = state.runs.get_mut(task_run_id) else {
+        let Some(run) = state.runs.get_mut(task_run_id.as_str()) else {
             return Ok(false);
         };
-        if run.task_id != task_id || !is_live_driven_run(run) {
+        if &run.task_id != task_id || !is_live_driven_run(run) {
             return Ok(false);
         }
         run.status = TaskRunStatus::Stopped;
@@ -446,13 +445,13 @@ impl FakeRepos {
 
     fn do_record_task_run_observation(
         &self,
-        task_run_id: &str,
+        task_run_id: &TaskRunId,
         observation: TaskRunObservation<'_>,
     ) -> Result<()> {
         let mut state = self.state.borrow_mut();
         let run = state
             .runs
-            .get_mut(task_run_id)
+            .get_mut(task_run_id.as_str())
             .ok_or_else(|| anyhow!("task run not found: {task_run_id}"))?;
         if let Some(status) = observation.status {
             run.status = status;
@@ -496,40 +495,40 @@ impl TaskRunStore for FakeRepos {
 
     fn finish_task_run(
         &mut self,
-        task_run_id: &str,
-        task_id: &str,
+        task_run_id: &TaskRunId,
+        task_id: &TaskId,
         status: TaskRunStatus,
     ) -> Result<()> {
         self.do_finish_task_run(task_run_id, task_id, status)
     }
 
-    fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()> {
+    fn set_task_run_worktree_path(&self, task_run_id: &TaskRunId, worktree_path: &str) -> Result<()> {
         self.state
             .borrow_mut()
             .runs
-            .get_mut(task_run_id)
+            .get_mut(task_run_id.as_str())
             .ok_or_else(|| anyhow!("task run not found: {task_run_id}"))?
             .worktree_path = Some(worktree_path.to_string());
         Ok(())
     }
 
-    fn set_task_run_agent(&self, task_run_id: &str, agent: Agent) -> Result<()> {
+    fn set_task_run_agent(&self, task_run_id: &TaskRunId, agent: Agent) -> Result<()> {
         self.state
             .borrow_mut()
             .runs
-            .get_mut(task_run_id)
+            .get_mut(task_run_id.as_str())
             .ok_or_else(|| anyhow!("task run not found: {task_run_id}"))?
             .agent = Some(agent);
         Ok(())
     }
 
-    fn get_task_run(&self, id: &str) -> Result<Option<TaskRun>> {
-        Ok(self.state.borrow().runs.get(id).cloned())
+    fn get_task_run(&self, id: &TaskRunId) -> Result<Option<TaskRun>> {
+        Ok(self.state.borrow().runs.get(id.as_str()).cloned())
     }
 
     fn find_task_run_by_session(
         &self,
-        task_id: &str,
+        task_id: &TaskId,
         agent_session_id: &AgentSessionId,
     ) -> Result<Option<TaskRun>> {
         Ok(self
@@ -538,7 +537,7 @@ impl TaskRunStore for FakeRepos {
             .runs
             .values()
             .filter(|run| {
-                run.task_id == task_id
+                &run.task_id == task_id
                     && run.agent_session_id.as_ref() == Some(agent_session_id)
             })
             // mirrors sqlite: most recently observed first, run number as tie-break
@@ -557,13 +556,13 @@ impl TaskRunStore for FakeRepos {
             .cloned())
     }
 
-    fn list_task_runs_for_task(&self, task_id: &str) -> Result<Vec<TaskRun>> {
+    fn list_task_runs_for_task(&self, task_id: &TaskId) -> Result<Vec<TaskRun>> {
         Ok(self
             .state
             .borrow()
             .runs
             .values()
-            .filter(|run| run.task_id == task_id)
+            .filter(|run| &run.task_id == task_id)
             .cloned()
             .collect())
     }
@@ -579,18 +578,18 @@ impl TaskRunStore for FakeRepos {
             .collect())
     }
 
-    fn settle_task_run_if_live(&mut self, task_run_id: &str, task_id: &str) -> Result<bool> {
+    fn settle_task_run_if_live(&mut self, task_run_id: &TaskRunId, task_id: &TaskId) -> Result<bool> {
         self.do_settle_task_run_if_live(task_run_id, task_id)
     }
 
     fn claim_prepared_run(
         &self,
-        task_run_id: &str,
+        task_run_id: &TaskRunId,
         agent_session_id: &AgentSessionId,
     ) -> Result<bool> {
         // Mirror the SQLite guard: WHERE id=? AND status='prepared' AND agent_session_id IS NULL.
         let mut state = self.state.borrow_mut();
-        let Some(run) = state.runs.get_mut(task_run_id) else {
+        let Some(run) = state.runs.get_mut(task_run_id.as_str()) else {
             return Ok(false);
         };
         if run.status == TaskRunStatus::Prepared && run.agent_session_id.is_none() {
@@ -616,7 +615,7 @@ impl TaskRunStore for FakeRepos {
 
     fn record_task_run_observation(
         &mut self,
-        task_run_id: &str,
+        task_run_id: &TaskRunId,
         observation: TaskRunObservation<'_>,
     ) -> Result<()> {
         self.do_record_task_run_observation(task_run_id, observation)
@@ -626,8 +625,8 @@ impl TaskRunStore for FakeRepos {
 impl EventRepository for FakeRepos {
     fn insert_event(
         &self,
-        task_id: Option<&str>,
-        task_run_id: Option<&str>,
+        task_id: Option<&TaskId>,
+        task_run_id: Option<&TaskRunId>,
         kind: &str,
         payload_json: &str,
     ) -> Result<Event> {
@@ -644,13 +643,15 @@ impl EventRepository for FakeRepos {
         Ok(event)
     }
 
-    fn list_events(&self, task_id: Option<&str>) -> Result<Vec<Event>> {
+    fn list_events(&self, task_id: Option<&TaskId>) -> Result<Vec<Event>> {
         Ok(self
             .state
             .borrow()
             .events
             .iter()
-            .filter(|event| task_id.is_none_or(|id| event.task_id.as_deref() == Some(id)))
+            .filter(|event| {
+                task_id.is_none_or(|id| event.task_id.as_deref() == Some(id.as_str()))
+            })
             .cloned()
             .collect())
     }
@@ -694,7 +695,7 @@ impl NotificationOutboxStore for FakeRepos {
         Ok(())
     }
 
-    fn cancel_notifications_for_run(&self, _task_run_id: &str) -> Result<()> {
+    fn cancel_notifications_for_run(&self, _task_run_id: &TaskRunId) -> Result<()> {
         Ok(())
     }
 
@@ -714,20 +715,20 @@ impl FakeRepos {
 }
 
 impl WorkbenchStore for FakeRepos {
-    fn get_bench_for_task(&self, task_id: &str) -> Result<Option<(String, String)>> {
-        Ok(self.state.borrow().benches.get(task_id).cloned())
+    fn get_bench_for_task(&self, task_id: &TaskId) -> Result<Option<(String, String)>> {
+        Ok(self.state.borrow().benches.get(task_id.as_str()).cloned())
     }
 
     fn list_bench_runspace_map(&self) -> Result<Vec<(String, String)>> {
         Ok(self.state.borrow().benches.values().cloned().collect())
     }
 
-    fn create_bench(&mut self, task_id: &str, runspace_id: &str, cwd: &str) -> Result<()> {
+    fn create_bench(&mut self, task_id: &TaskId, runspace_id: &str, cwd: &str) -> Result<()> {
         self.do_create_bench(task_id, runspace_id, cwd)
     }
 
-    fn update_bench_cwd(&self, task_id: &str, cwd: &str) -> Result<()> {
-        if let Some(entry) = self.state.borrow_mut().benches.get_mut(task_id) {
+    fn update_bench_cwd(&self, task_id: &TaskId, cwd: &str) -> Result<()> {
+        if let Some(entry) = self.state.borrow_mut().benches.get_mut(task_id.as_str()) {
             entry.1 = cwd.to_string();
         }
         Ok(())
@@ -762,11 +763,11 @@ impl TaskStore for FakeUow<'_> {
         self.inner.do_insert_task_with_ref(new, external)
     }
 
-    fn get_task(&self, id: &str) -> Result<Option<Task>> {
+    fn get_task(&self, id: &TaskId) -> Result<Option<Task>> {
         self.inner.get_task(id)
     }
 
-    fn mark_task_closed(&mut self, id: &str) -> Result<Task> {
+    fn mark_task_closed(&mut self, id: &TaskId) -> Result<Task> {
         self.inner.do_mark_task_closed(id)
     }
 
@@ -774,19 +775,19 @@ impl TaskStore for FakeUow<'_> {
         self.inner.list_tasks()
     }
 
-    fn set_primary_task_run(&self, task_id: &str, task_run_id: &str) -> Result<()> {
+    fn set_primary_task_run(&self, task_id: &TaskId, task_run_id: &TaskRunId) -> Result<()> {
         self.inner.set_primary_task_run(task_id, task_run_id)
     }
 
-    fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()> {
+    fn update_task_status(&self, id: &TaskId, status: TaskStatus) -> Result<()> {
         self.inner.update_task_status(id, status)
     }
 
-    fn mark_task(&mut self, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()> {
+    fn mark_task(&mut self, id: &TaskId, status: TaskStatus, note: Option<&str>) -> Result<()> {
         self.inner.do_mark_task(id, status, note)
     }
 
-    fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalReference>> {
+    fn list_external_refs(&self, task_id: &TaskId) -> Result<Vec<ExternalReference>> {
         self.inner.list_external_refs(task_id)
     }
 }
@@ -798,28 +799,28 @@ impl TaskRunStore for FakeUow<'_> {
 
     fn finish_task_run(
         &mut self,
-        task_run_id: &str,
-        task_id: &str,
+        task_run_id: &TaskRunId,
+        task_id: &TaskId,
         status: TaskRunStatus,
     ) -> Result<()> {
         self.inner.do_finish_task_run(task_run_id, task_id, status)
     }
 
-    fn set_task_run_worktree_path(&self, task_run_id: &str, worktree_path: &str) -> Result<()> {
+    fn set_task_run_worktree_path(&self, task_run_id: &TaskRunId, worktree_path: &str) -> Result<()> {
         self.inner.set_task_run_worktree_path(task_run_id, worktree_path)
     }
 
-    fn set_task_run_agent(&self, task_run_id: &str, agent: Agent) -> Result<()> {
+    fn set_task_run_agent(&self, task_run_id: &TaskRunId, agent: Agent) -> Result<()> {
         self.inner.set_task_run_agent(task_run_id, agent)
     }
 
-    fn get_task_run(&self, id: &str) -> Result<Option<TaskRun>> {
+    fn get_task_run(&self, id: &TaskRunId) -> Result<Option<TaskRun>> {
         self.inner.get_task_run(id)
     }
 
     fn find_task_run_by_session(
         &self,
-        task_id: &str,
+        task_id: &TaskId,
         agent_session_id: &AgentSessionId,
     ) -> Result<Option<TaskRun>> {
         self.inner.find_task_run_by_session(task_id, agent_session_id)
@@ -829,7 +830,7 @@ impl TaskRunStore for FakeUow<'_> {
         self.inner.find_task_run_by_terminal_tab(terminal_tab_id)
     }
 
-    fn list_task_runs_for_task(&self, task_id: &str) -> Result<Vec<TaskRun>> {
+    fn list_task_runs_for_task(&self, task_id: &TaskId) -> Result<Vec<TaskRun>> {
         self.inner.list_task_runs_for_task(task_id)
     }
 
@@ -837,13 +838,13 @@ impl TaskRunStore for FakeUow<'_> {
         self.inner.list_driven_task_runs_with_tab()
     }
 
-    fn settle_task_run_if_live(&mut self, task_run_id: &str, task_id: &str) -> Result<bool> {
+    fn settle_task_run_if_live(&mut self, task_run_id: &TaskRunId, task_id: &TaskId) -> Result<bool> {
         self.inner.do_settle_task_run_if_live(task_run_id, task_id)
     }
 
     fn claim_prepared_run(
         &self,
-        task_run_id: &str,
+        task_run_id: &TaskRunId,
         agent_session_id: &AgentSessionId,
     ) -> Result<bool> {
         self.inner.claim_prepared_run(task_run_id, agent_session_id)
@@ -864,7 +865,7 @@ impl TaskRunStore for FakeUow<'_> {
 
     fn record_task_run_observation(
         &mut self,
-        task_run_id: &str,
+        task_run_id: &TaskRunId,
         observation: TaskRunObservation<'_>,
     ) -> Result<()> {
         self.inner.do_record_task_run_observation(task_run_id, observation)
@@ -874,15 +875,15 @@ impl TaskRunStore for FakeUow<'_> {
 impl EventRepository for FakeUow<'_> {
     fn insert_event(
         &self,
-        task_id: Option<&str>,
-        task_run_id: Option<&str>,
+        task_id: Option<&TaskId>,
+        task_run_id: Option<&TaskRunId>,
         kind: &str,
         payload_json: &str,
     ) -> Result<Event> {
         self.inner.insert_event(task_id, task_run_id, kind, payload_json)
     }
 
-    fn list_events(&self, task_id: Option<&str>) -> Result<Vec<Event>> {
+    fn list_events(&self, task_id: Option<&TaskId>) -> Result<Vec<Event>> {
         self.inner.list_events(task_id)
     }
 }
@@ -894,7 +895,7 @@ impl Clock for FakeUow<'_> {
 }
 
 impl WorkbenchStore for FakeUow<'_> {
-    fn get_bench_for_task(&self, task_id: &str) -> Result<Option<(String, String)>> {
+    fn get_bench_for_task(&self, task_id: &TaskId) -> Result<Option<(String, String)>> {
         self.inner.get_bench_for_task(task_id)
     }
 
@@ -902,11 +903,11 @@ impl WorkbenchStore for FakeUow<'_> {
         self.inner.list_bench_runspace_map()
     }
 
-    fn create_bench(&mut self, task_id: &str, runspace_id: &str, cwd: &str) -> Result<()> {
+    fn create_bench(&mut self, task_id: &TaskId, runspace_id: &str, cwd: &str) -> Result<()> {
         self.inner.do_create_bench(task_id, runspace_id, cwd)
     }
 
-    fn update_bench_cwd(&self, task_id: &str, cwd: &str) -> Result<()> {
+    fn update_bench_cwd(&self, task_id: &TaskId, cwd: &str) -> Result<()> {
         self.inner.update_bench_cwd(task_id, cwd)
     }
 }
@@ -1097,20 +1098,20 @@ impl crate::ports::ShellScaffolding for FakeTaskRunOutputs {
 }
 
 impl TaskRunOutputs for FakeTaskRunOutputs {
-    fn task_run_dir(&self, task_run_id: &str) -> Result<PathBuf> {
-        Ok(PathBuf::from("/tmp").join(task_run_id))
+    fn task_run_dir(&self, task_run_id: &TaskRunId) -> Result<PathBuf> {
+        Ok(PathBuf::from("/tmp").join(task_run_id.as_str()))
     }
 
-    fn setup_log_path(&self, task_run_id: &str) -> Result<PathBuf> {
+    fn setup_log_path(&self, task_run_id: &TaskRunId) -> Result<PathBuf> {
         Ok(self.task_run_dir(task_run_id)?.join("setup.log"))
     }
 
     fn prepare_task_shell_env(
         &self,
-        task_id: &str,
+        task_id: &TaskId,
         _project: &Project,
         _profile: &crate::ExecutionProfile,
-        _task_run_id: Option<&str>,
+        _task_run_id: Option<&TaskRunId>,
         cwd: &std::path::Path,
     ) -> Result<Vec<(String, String)>> {
         *self.last_cwd.borrow_mut() = Some(cwd.to_string_lossy().into_owned());
@@ -1168,7 +1169,10 @@ fn task_from_new(id: String, new: NewTask) -> Task {
 }
 
 
-pub(crate) fn hook_ctx<'a>(task_id: &'a str, task_run_id: Option<&'a str>) -> HookContext<'a> {
+pub(crate) fn hook_ctx<'a>(
+    task_id: &'a TaskId,
+    task_run_id: Option<&'a TaskRunId>,
+) -> HookContext<'a> {
     HookContext {
         task_id: Some(task_id),
         task_run_id,
@@ -1177,8 +1181,8 @@ pub(crate) fn hook_ctx<'a>(task_id: &'a str, task_run_id: Option<&'a str>) -> Ho
 }
 
 pub(crate) fn hook_ctx_in_tab<'a>(
-    task_id: &'a str,
-    task_run_id: Option<&'a str>,
+    task_id: &'a TaskId,
+    task_run_id: Option<&'a TaskRunId>,
     terminal_tab_id: &'a str,
 ) -> HookContext<'a> {
     HookContext {
@@ -1190,11 +1194,11 @@ pub(crate) fn hook_ctx_in_tab<'a>(
 }
 
 /// A task whose primary run is Prepared but not yet claimed by any session.
-pub(crate) fn task_with_prepared_primary(repos: &mut FakeRepos) -> (String, String) {
+pub(crate) fn task_with_prepared_primary(repos: &mut FakeRepos) -> (TaskId, TaskRunId) {
     let task_id = repos.insert_task_for_run(None);
     let run = repos
         .start_task_run(NewTaskRun {
-            task_id: TaskId::from_store(task_id.clone()),
+            task_id: task_id.clone(),
             agent: Some(Agent::Claude),
             branch: None,
             worktree_path: None,
@@ -1204,12 +1208,12 @@ pub(crate) fn task_with_prepared_primary(repos: &mut FakeRepos) -> (String, Stri
         .finish_task_run(&run.id, &task_id, TaskRunStatus::Prepared)
         .unwrap();
     repos.set_primary_task_run(&task_id, &run.id).unwrap();
-    (task_id, run.id.into_string())
+    (task_id, run.id)
 }
 
 /// A task with a primary run claimed by `sess-1` and actively working (the steady state after
 /// the Run button and the first prompt).
-pub(crate) fn task_with_running_primary(repos: &mut FakeRepos) -> (String, String) {
+pub(crate) fn task_with_running_primary(repos: &mut FakeRepos) -> (TaskId, TaskRunId) {
     let (task_id, run_id) = task_with_prepared_primary(repos);
     record_claude_hook(
         repos,
@@ -1270,7 +1274,7 @@ pub(crate) fn insert_runnable_project(repos: &FakeRepos) {
     repos.insert_project(project);
 }
 
-pub(crate) fn insert_issue_backed_task(repos: &mut FakeRepos, issue_number: i64) -> String {
+pub(crate) fn insert_issue_backed_task(repos: &mut FakeRepos, issue_number: i64) -> TaskId {
     let mut new = NewTask::new(TaskKind::Development, "tracked");
     new.project_id = Some("owner/repo".to_string());
     repos
@@ -1289,7 +1293,6 @@ pub(crate) fn insert_issue_backed_task(repos: &mut FakeRepos, issue_number: i64)
         )
         .unwrap()
         .id
-        .into_string()
 }
 
 

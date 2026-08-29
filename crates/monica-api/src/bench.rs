@@ -12,7 +12,7 @@ pub struct TaskBench {
 impl From<monica_application::TaskBench> for TaskBench {
     fn from(value: monica_application::TaskBench) -> Self {
         Self {
-            task_id: value.task_id,
+            task_id: value.task_id.into(),
             runspace_id: value.runspace_id,
             cwd: value.cwd,
             created: value.created,
@@ -31,8 +31,8 @@ pub struct PrepareTaskResult {
 impl From<monica_application::PrepareTaskResult> for PrepareTaskResult {
     fn from(value: monica_application::PrepareTaskResult) -> Self {
         Self {
-            task_id: value.task_id,
-            task_run_id: value.task_run_id,
+            task_id: value.task_id.into(),
+            task_run_id: value.task_run_id.into(),
             branch: value.branch,
         }
     }
@@ -51,8 +51,8 @@ pub struct RunTaskResult {
 impl From<monica_application::RunTaskResult> for RunTaskResult {
     fn from(value: monica_application::RunTaskResult) -> Self {
         Self {
-            task_id: value.task_id,
-            task_run_id: value.task_run_id,
+            task_id: value.task_id.into(),
+            task_run_id: value.task_run_id.into(),
             runspace_id: value.runspace_id,
             cwd: value.cwd,
             env: value.env,

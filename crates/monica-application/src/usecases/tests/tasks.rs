@@ -37,7 +37,7 @@ fn close_task_delegates_run_cleanup_to_git_gateway() {
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
     repos
         .start_task_run(NewTaskRun {
-            task_id: TaskId::from_store(task_id.clone()),
+            task_id: task_id.clone(),
             agent: None,
             branch: Some("issue-42".to_string()),
             worktree_path: Some("/tmp/wt".to_string()),
@@ -90,7 +90,7 @@ fn make_main_by_terminal_tab_promotes_side_run_and_reports_no_ops() {
     assert_eq!(
         outcome,
         MakeMainOutcome::Changed {
-            task_id: task_id.clone(),
+            task_id: task_id.to_string(),
             task_run_id: latest_in_tab.id.to_string(),
             status: TaskRunStatus::WaitingForUser,
         }
@@ -115,7 +115,7 @@ fn make_main_by_terminal_tab_refuses_while_primary_is_mid_prepare() {
     // A SettingUp primary, as left behind by start_run while execute_run is in flight.
     let preparing = repos
         .start_task_run(NewTaskRun {
-            task_id: TaskId::from_store(task_id.clone()),
+            task_id: task_id.clone(),
             agent: None,
             branch: Some("issue-1".to_string()),
             worktree_path: None,
@@ -170,7 +170,7 @@ fn record_claude_hook_prefers_explicit_run_id_over_session_lookup() {
     let (task_id, primary_id) = task_with_running_primary(&mut repos);
     let other = repos
         .start_task_run(NewTaskRun {
-            task_id: TaskId::from_store(task_id.clone()),
+            task_id: task_id.clone(),
             agent: Some(Agent::Claude),
             branch: None,
             worktree_path: None,

@@ -3,21 +3,26 @@ use rusqlite::{params, Connection};
 
 use crate::SqliteStore;
 use monica_application::{Clock, EventRepository};
-use monica_domain::Event;
+use monica_domain::{Event, TaskId, TaskRunId};
 
 use super::{EVENT_COLUMNS, SET_NOW};
 
 pub(crate) fn insert_event_in(
     conn: &Connection,
-    task_id: Option<&str>,
-    task_run_id: Option<&str>,
+    task_id: Option<&TaskId>,
+    task_run_id: Option<&TaskRunId>,
     kind: &str,
     payload_json: &str,
 ) -> Result<Event> {
     conn.execute(
         "INSERT INTO events (task_id, task_run_id, kind, payload_json)
          VALUES (?1, ?2, ?3, ?4)",
-        params![task_id, task_run_id, kind, payload_json],
+        params![
+            task_id.map(TaskId::as_str),
+            task_run_id.map(TaskRunId::as_str),
+            kind,
+            payload_json
+        ],
     )?;
     let id = conn.last_insert_rowid();
     let mut stmt = conn.prepare(&format!("SELECT {EVENT_COLUMNS} FROM events WHERE id = ?1"))?;
@@ -28,13 +33,13 @@ pub(crate) fn insert_event_in(
     }
 }
 
-pub(crate) fn list_events_in(conn: &Connection, task_id: Option<&str>) -> Result<Vec<Event>> {
+pub(crate) fn list_events_in(conn: &Connection, task_id: Option<&TaskId>) -> Result<Vec<Event>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {EVENT_COLUMNS} FROM events
          WHERE (?1 IS NULL OR task_id = ?1)
          ORDER BY id"
     ))?;
-    let mut rows = stmt.query(params![task_id])?;
+    let mut rows = stmt.query(params![task_id.map(TaskId::as_str)])?;
     let mut events = Vec::new();
     while let Some(row) = rows.next()? {
         events.push(crate::row::event_from_row(row)?);
@@ -50,15 +55,15 @@ pub(crate) fn now_iso_in(conn: &Connection) -> Result<String> {
 impl EventRepository for SqliteStore {
     fn insert_event(
         &self,
-        task_id: Option<&str>,
-        task_run_id: Option<&str>,
+        task_id: Option<&TaskId>,
+        task_run_id: Option<&TaskRunId>,
         kind: &str,
         payload_json: &str,
     ) -> Result<Event> {
         insert_event_in(self.conn(), task_id, task_run_id, kind, payload_json)
     }
 
-    fn list_events(&self, task_id: Option<&str>) -> Result<Vec<Event>> {
+    fn list_events(&self, task_id: Option<&TaskId>) -> Result<Vec<Event>> {
         list_events_in(self.conn(), task_id)
     }
 }

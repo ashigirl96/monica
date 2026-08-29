@@ -1,5 +1,5 @@
 use super::*;
-use monica_domain::AgentSessionId;
+use monica_domain::{AgentSessionId, TaskRunId};
 
 
 
@@ -8,7 +8,7 @@ fn resolve_by_session_returns_none_without_session_id() {
     let mut repos = FakeRepos::default();
     let task = make_task("t1", TaskStatus::Ready, None);
     let ctx = RunResolveCtx {
-        task_id: "t1",
+        task_id: &TaskId::from_store("t1".to_string()),
         task: &task,
         explicit_run_id_rejected: false,
         agent_session_id: None,
@@ -54,7 +54,7 @@ fn resolve_by_prepared_primary_skips_non_prepared() {
     let mut repos = FakeRepos::default();
     let agent_session = AgentSessionId::from_agent("sess-1");
     let ctx = RunResolveCtx {
-        task_id: "t1",
+        task_id: &TaskId::from_store("t1".to_string()),
         task: &task,
         explicit_run_id_rejected: false,
         agent_session_id: Some(&agent_session),
@@ -73,7 +73,7 @@ fn resolve_by_prepared_primary_skips_non_starting_event() {
     let mut repos = FakeRepos::default();
     let agent_session = AgentSessionId::from_agent("sess-1");
     let ctx = RunResolveCtx {
-        task_id: "t1",
+        task_id: &TaskId::from_store("t1".to_string()),
         task: &task,
         explicit_run_id_rejected: false,
         agent_session_id: Some(&agent_session),
@@ -93,7 +93,7 @@ fn resolve_by_prepared_primary_claims_on_session_start() {
     repos.seed_run(run.clone());
     let agent_session = AgentSessionId::from_agent("sess-1");
     let ctx = RunResolveCtx {
-        task_id: "t1",
+        task_id: &TaskId::from_store("t1".to_string()),
         task: &task,
         explicit_run_id_rejected: false,
         agent_session_id: Some(&agent_session),
@@ -120,7 +120,7 @@ fn resolve_by_prepared_primary_loses_race_when_already_claimed() {
     repos.seed_run(run.clone());
     let agent_session = AgentSessionId::from_agent("sess-loser");
     let ctx = RunResolveCtx {
-        task_id: "t1",
+        task_id: &TaskId::from_store("t1".to_string()),
         task: &task,
         explicit_run_id_rejected: false,
         agent_session_id: Some(&agent_session),
@@ -131,7 +131,7 @@ fn resolve_by_prepared_primary_loses_race_when_already_claimed() {
     // The loser changes 0 rows and falls through (Ok(None)) so lazy-create makes it a side run.
     assert!(resolve_by_prepared_primary(&ctx, &mut repos).unwrap().is_none());
     assert_eq!(
-        repos.get_task_run("run-1").unwrap().unwrap().agent_session_id.as_deref(),
+        repos.get_task_run(&TaskRunId::from_store("run-1".to_string())).unwrap().unwrap().agent_session_id.as_deref(),
         Some("sess-winner")
     );
 }

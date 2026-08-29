@@ -4,7 +4,7 @@ use crate::bench::bench_runspace_id;
 use super::ports::{
     ProjectRepository, TaskRunOutputs, TaskRunStore, TaskStore, WorkbenchStore,
 };
-use crate::prelude::{Project, Task};
+use crate::prelude::{Project, Task, TaskId};
 use crate::{ApplicationError, ApplicationResult, ExecutionProfile, TaskBench};
 
 pub(crate) fn default_bench_cwd(project: Option<&Project>, home_dir: Option<&str>) -> String {
@@ -23,7 +23,7 @@ pub(crate) fn home_dir() -> Option<String> {
 /// a run's worktree becomes the only sensible working directory).
 pub(crate) fn ensure_bench<R>(
     repos: &mut R,
-    task_id: &str,
+    task_id: &TaskId,
     desired_cwd: &str,
     pin_cwd: bool,
 ) -> Result<(String, String, bool)>
@@ -37,7 +37,7 @@ where
         }
         return Ok((runspace_id, cwd, false));
     }
-    let runspace_id = bench_runspace_id(task_id);
+    let runspace_id = bench_runspace_id(task_id.as_str());
     repos.create_bench(task_id, &runspace_id, desired_cwd)?;
     Ok((runspace_id, desired_cwd.to_string(), true))
 }
@@ -45,7 +45,7 @@ where
 pub fn task_shell_env<R, A>(
     repos: &R,
     outputs: &A,
-    task_id: &str,
+    task_id: &TaskId,
 ) -> ApplicationResult<Vec<(String, String)>>
 where
     R: TaskStore + ProjectRepository + TaskRunStore + WorkbenchStore,
@@ -84,7 +84,7 @@ where
 
 fn load_task_and_optional_project<R>(
     repos: &R,
-    task_id: &str,
+    task_id: &TaskId,
 ) -> ApplicationResult<(Task, Option<Project>)>
 where
     R: TaskStore + ProjectRepository,
@@ -132,7 +132,7 @@ where
         .unwrap_or_default()
 }
 
-pub fn open_bench<R, A>(repos: &mut R, outputs: &A, task_id: &str) -> ApplicationResult<TaskBench>
+pub fn open_bench<R, A>(repos: &mut R, outputs: &A, task_id: &TaskId) -> ApplicationResult<TaskBench>
 where
     R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore,
     A: TaskRunOutputs,
@@ -149,7 +149,7 @@ where
     let env = shell_env_for(outputs, &task, project.as_ref(), profile.as_ref(), &cwd);
 
     Ok(TaskBench {
-        task_id: task_id.to_string(),
+        task_id: task.id,
         runspace_id,
         cwd,
         created,

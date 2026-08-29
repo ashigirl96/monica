@@ -6,7 +6,8 @@ use monica_application::{
     GithubPullRequestStatus, TaskBoardQuery, TaskStore, TaskSummaryFilter, TaskSummaryRow,
 };
 use monica_domain::{
-    DisplayStatus, ExternalReference, NewTask, Task, TaskRunStatus, TaskRunWaitReason, TaskStatus,
+    DisplayStatus, ExternalReference, NewTask, Task, TaskId, TaskRunId, TaskRunStatus,
+    TaskRunWaitReason, TaskStatus,
 };
 
 use super::{external_refs, sql_literal_list, SET_NOW, TASK_COLUMNS};
@@ -63,16 +64,16 @@ pub(super) fn insert_task_in(
     }
 }
 
-pub(super) fn get_task(conn: &Connection, id: &str) -> Result<Option<Task>> {
+pub(super) fn get_task(conn: &Connection, id: &TaskId) -> Result<Option<Task>> {
     let mut stmt = conn.prepare(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"))?;
-    let mut rows = stmt.query(params![id])?;
+    let mut rows = stmt.query(params![id.as_str()])?;
     match rows.next()? {
         Some(row) => Ok(Some(crate::row::task_from_row(row)?)),
         None => Ok(None),
     }
 }
 
-pub(super) fn mark_task_closed_in(conn: &Connection, id: &str) -> Result<Task> {
+pub(super) fn mark_task_closed_in(conn: &Connection, id: &TaskId) -> Result<Task> {
     let affected = conn.execute(
         &format!(
             "UPDATE tasks
@@ -81,13 +82,13 @@ pub(super) fn mark_task_closed_in(conn: &Connection, id: &str) -> Result<Task> {
                     updated_at = {SET_NOW}
               WHERE id = ?1"
         ),
-        params![id],
+        params![id.as_str()],
     )?;
     if affected == 0 {
         return Err(anyhow!("task not found: {id}"));
     }
     let mut stmt = conn.prepare(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"))?;
-    let mut rows = stmt.query(params![id])?;
+    let mut rows = stmt.query(params![id.as_str()])?;
     match rows.next()? {
         Some(row) => Ok(crate::row::task_from_row(row)?),
         None => Err(anyhow!("task not found: {id}")),
@@ -107,13 +108,17 @@ pub(super) fn list_tasks(conn: &Connection) -> Result<Vec<Task>> {
     Ok(items)
 }
 
-pub(super) fn set_primary_task_run(conn: &Connection, task_id: &str, task_run_id: &str) -> Result<()> {
+pub(super) fn set_primary_task_run(
+    conn: &Connection,
+    task_id: &TaskId,
+    task_run_id: &TaskRunId,
+) -> Result<()> {
     let affected = conn.execute(
         &format!(
             "UPDATE tasks SET primary_task_run_id = ?1, updated_at = {SET_NOW}
              WHERE id = ?2"
         ),
-        params![task_run_id, task_id],
+        params![task_run_id.as_str(), task_id.as_str()],
     )?;
     if affected == 0 {
         return Err(anyhow!("task not found: {task_id}"));
@@ -121,14 +126,14 @@ pub(super) fn set_primary_task_run(conn: &Connection, task_id: &str, task_run_id
     Ok(())
 }
 
-pub(super) fn update_task_status(conn: &Connection, id: &str, status: TaskStatus) -> Result<()> {
+pub(super) fn update_task_status(conn: &Connection, id: &TaskId, status: TaskStatus) -> Result<()> {
     let affected = conn.execute(
         &format!(
             "UPDATE tasks
                SET status = ?1, updated_at = {SET_NOW}
              WHERE id = ?2"
         ),
-        params![status.as_str(), id],
+        params![status.as_str(), id.as_str()],
     )?;
     if affected == 0 {
         return Err(anyhow!("task not found: {id}"));
@@ -138,7 +143,7 @@ pub(super) fn update_task_status(conn: &Connection, id: &str, status: TaskStatus
 
 pub(super) fn mark_task_in(
     conn: &Connection,
-    id: &str,
+    id: &TaskId,
     status: TaskStatus,
     note: Option<&str>,
 ) -> Result<()> {
@@ -154,14 +159,14 @@ pub(super) fn mark_task_in(
                    SET status = ?1, phase = COALESCE(?2, phase), updated_at = {SET_NOW}
                  WHERE id = ?3"
         ),
-        params![status_str, note, id],
+        params![status_str, note, id.as_str()],
     )?;
     if affected == 0 {
         return Err(anyhow!("task not found: {id}"));
     }
     conn.execute(
         "INSERT INTO events (task_id, kind, payload_json) VALUES (?1, 'mark', ?2)",
-        params![id, payload],
+        params![id.as_str(), payload],
     )?;
     Ok(())
 }
@@ -184,11 +189,11 @@ impl TaskStore for SqliteStore {
         Ok(item)
     }
 
-    fn get_task(&self, id: &str) -> Result<Option<Task>> {
+    fn get_task(&self, id: &TaskId) -> Result<Option<Task>> {
         get_task(self.conn(), id)
     }
 
-    fn mark_task_closed(&mut self, id: &str) -> Result<Task> {
+    fn mark_task_closed(&mut self, id: &TaskId) -> Result<Task> {
         let tx = self.conn_mut().transaction()?;
         let item = mark_task_closed_in(&tx, id)?;
         tx.commit()?;
@@ -199,22 +204,22 @@ impl TaskStore for SqliteStore {
         list_tasks(self.conn())
     }
 
-    fn set_primary_task_run(&self, task_id: &str, task_run_id: &str) -> Result<()> {
+    fn set_primary_task_run(&self, task_id: &TaskId, task_run_id: &TaskRunId) -> Result<()> {
         set_primary_task_run(self.conn(), task_id, task_run_id)
     }
 
-    fn update_task_status(&self, id: &str, status: TaskStatus) -> Result<()> {
+    fn update_task_status(&self, id: &TaskId, status: TaskStatus) -> Result<()> {
         update_task_status(self.conn(), id, status)
     }
 
-    fn mark_task(&mut self, id: &str, status: TaskStatus, note: Option<&str>) -> Result<()> {
+    fn mark_task(&mut self, id: &TaskId, status: TaskStatus, note: Option<&str>) -> Result<()> {
         let tx = self.conn_mut().transaction()?;
         mark_task_in(&tx, id, status, note)?;
         tx.commit()?;
         Ok(())
     }
 
-    fn list_external_refs(&self, task_id: &str) -> Result<Vec<ExternalReference>> {
+    fn list_external_refs(&self, task_id: &TaskId) -> Result<Vec<ExternalReference>> {
         external_refs::list_external_refs(self.conn(), task_id)
     }
 }

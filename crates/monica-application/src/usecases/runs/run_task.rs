@@ -6,7 +6,10 @@ use super::ports::{
     GitGateway, ProjectRepository, TaskRunOutputs, SetupEnv, SetupOutcome, SetupRunner,
     TaskRunStore, TaskStore, UnitOfWork, WorkbenchStore,
 };
-use crate::prelude::{ExternalReference, NewTaskRun, Project, RefType, Task, TaskRunStatus, TaskStatus};
+use crate::prelude::{
+    ExternalReference, NewTaskRun, Project, RefType, Task, TaskId, TaskRunId, TaskRunStatus,
+    TaskStatus,
+};
 use crate::{ApplicationError, ApplicationResult, ExecutionProfile, PrepareTaskResult};
 
 fn is_active_run_status(status: TaskRunStatus) -> bool {
@@ -18,7 +21,7 @@ fn is_active_run_status(status: TaskRunStatus) -> bool {
 
 fn load_task_and_project<R>(
     repos: &R,
-    task_id: &str,
+    task_id: &TaskId,
 ) -> ApplicationResult<(Task, Project)>
 where
     R: TaskStore + ProjectRepository,
@@ -45,7 +48,7 @@ where
 
 /// Phase 1: Create TaskRun (SettingUp) + set as Main Run + ensure bench exists.
 /// Returns immediately so the UI can reflect `setting_up` without blocking.
-pub fn start_run<R>(repos: &mut R, task_id: &str) -> ApplicationResult<PrepareTaskResult>
+pub fn start_run<R>(repos: &mut R, task_id: &TaskId) -> ApplicationResult<PrepareTaskResult>
 where
     R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore + UnitOfWork,
 {
@@ -74,7 +77,7 @@ where
     }
 
     let github_issue_number = latest_github_issue_number(repos, task_id)?;
-    let mon = monica_number(task_id)?;
+    let mon = monica_number(task_id.as_str())?;
     let branch = branch_name(github_issue_number, mon);
     let cwd = super::open_bench::default_bench_cwd(
         Some(&project),
@@ -90,13 +93,13 @@ where
         branch: Some(branch.clone()),
         worktree_path: None,
     })?;
-    tx.set_primary_task_run(task_id, &run.id)?;
-    super::open_bench::ensure_bench(&mut *tx, task_id, &cwd, false)?;
+    tx.set_primary_task_run(&task.id, &run.id)?;
+    super::open_bench::ensure_bench(&mut *tx, &task.id, &cwd, false)?;
     tx.commit()?;
 
     Ok(PrepareTaskResult {
-        task_id: task_id.to_string(),
-        task_run_id: run.id.into(),
+        task_id: task.id,
+        task_run_id: run.id,
         branch,
     })
 }
@@ -108,8 +111,8 @@ pub fn execute_run<R, G, S, A>(
     git: &G,
     setup_runner: &S,
     outputs: &A,
-    task_id: &str,
-    task_run_id: &str,
+    task_id: &TaskId,
+    task_run_id: &TaskRunId,
 ) -> ApplicationResult<TaskRunStatus>
 where
     R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore,
@@ -129,8 +132,8 @@ fn execute_run_inner<R, G, S, A>(
     git: &G,
     setup_runner: &S,
     outputs: &A,
-    task_id: &str,
-    task_run_id: &str,
+    task_id: &TaskId,
+    task_run_id: &TaskRunId,
 ) -> ApplicationResult<TaskRunStatus>
 where
     R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore,
@@ -193,8 +196,8 @@ where
 }
 
 struct SetupContext<'a> {
-    task_run_id: &'a str,
-    task_id: &'a str,
+    task_run_id: &'a TaskRunId,
+    task_id: &'a TaskId,
     worktree_path: &'a Path,
     project: &'a Project,
     profile: &'a ExecutionProfile,
@@ -226,7 +229,7 @@ where
         .map_err(|e| ApplicationError::external(format!("setup script failed to run: {e:#}")))
 }
 
-fn latest_github_issue_ref<R>(repos: &R, task_id: &str) -> ApplicationResult<Option<ExternalReference>>
+fn latest_github_issue_ref<R>(repos: &R, task_id: &TaskId) -> ApplicationResult<Option<ExternalReference>>
 where
     R: TaskStore,
 {
@@ -236,7 +239,7 @@ where
         .rfind(|r| r.ref_type == RefType::Issue))
 }
 
-fn latest_github_issue_number<R>(repos: &R, task_id: &str) -> ApplicationResult<Option<i64>>
+fn latest_github_issue_number<R>(repos: &R, task_id: &TaskId) -> ApplicationResult<Option<i64>>
 where
     R: TaskStore,
 {
@@ -251,7 +254,7 @@ where
 pub fn prepare_claude_for_run<R, A>(
     repos: &mut R,
     outputs: &A,
-    task_id: &str,
+    task_id: &TaskId,
     agent_override: Option<crate::prelude::Agent>,
 ) -> ApplicationResult<crate::RunTaskResult>
 where
@@ -310,7 +313,7 @@ where
         .prepare_task_shell_env(task_id, &project, &effective_profile, Some(&primary_id), &worktree_path)
         .map_err(|e| ApplicationError::external(format!("failed to prepare shell env: {e:#}")))?;
 
-    let (runspace_id, _, _) = super::open_bench::ensure_bench(repos, task_id, &worktree_str, true)?;
+    let (runspace_id, _, _) = super::open_bench::ensure_bench(repos, &task.id, &worktree_str, true)?;
 
     let initial_command = match resume_session_id {
         Some(session_id) => agent_resume_command(agent, &session_id),
@@ -323,8 +326,8 @@ where
     };
 
     Ok(crate::RunTaskResult {
-        task_id: task_id.to_string(),
-        task_run_id: primary_id.into(),
+        task_id: task.id,
+        task_run_id: primary_id,
         runspace_id,
         cwd: worktree_str,
         env,
