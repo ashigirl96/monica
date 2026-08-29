@@ -1632,7 +1632,7 @@ impl crate::ports::NoteStore for FakeRepos {
         &mut self,
         _id: &str,
         _update: monica_domain::UpdateNote,
-    ) -> Result<Option<monica_domain::Note>> {
+    ) -> Result<crate::ports::NoteUpdate> {
         unimplemented!("no usecase test exercises notes yet")
     }
 

@@ -1,17 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BlockEditorHandle } from "@shared/block-editor/block-editor";
-import {
-  createProjectNote,
-  deleteNote,
-  getNote,
-  listProjectNotes,
-  listProjects,
-  primaryNote,
-  restoreNote,
-} from "@/api";
+import { createProjectNote, deleteNote, restoreNote } from "@/api";
 import { navigate } from "@/app";
 import { altOnly, ctrlOnly } from "@/keys";
-import type { Note, NoteSummary, ProjectOption } from "@/types.gen";
+import type { Note } from "@/types.gen";
 import { takePendingBlockTarget } from "@/notes/block-jump";
 import {
   cycleSelect,
@@ -21,7 +13,17 @@ import {
   useNoteBlockResolvers,
 } from "@/notes/editor-support";
 import { NoteBlockEditor } from "@/notes/note-block-editor";
+import { useServerDoc } from "@/notes/note-sync";
 import { NotesShell } from "@/notes/notes-shell";
+import {
+  useNoteQuery,
+  useProjectNotesCache,
+  useProjectNotesQuery,
+  useProjectPrimaryQuery,
+  useProjectsQuery,
+  useSeedNote,
+} from "@/notes/queries";
+import { SaveStatus } from "@/notes/save-status";
 import { useAutosave } from "@/notes/use-autosave";
 import { FuzzyPickerModal } from "@/components/fuzzy-picker-modal";
 import { ProjectsSidebar } from "./sidebar";
@@ -36,27 +38,39 @@ function projectPath(projectId: string, noteId?: string): string {
  * サイドバーは primary 固定 + 時系列。⌃W で project 切替、⌥N で新規 note。
  */
 export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId: string | null }) {
-  const [note, setNote] = useState<Note | null>(null);
-  const [noteError, setNoteError] = useState<string | null>(null);
-  const [primary, setPrimary] = useState<Note | null>(null);
-  const [projectError, setProjectError] = useState<string | null>(null);
-  const [projects, setProjects] = useState<ProjectOption[]>([]);
-  // primary を含む全 project note の生リスト（pagination offset の基準）。表示用の時系列は
-  // ここから primary を除いたもの。
-  const [rawNotes, setRawNotes] = useState<NoteSummary[] | null>(null);
-  const [hasMore, setHasMore] = useState(false);
-  const [dataVersion, setDataVersion] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  const { schedule, flush, discard, resume, error: saveError } = useAutosave();
+  const autosave = useAutosave();
+  const { schedule, flush, discard, resume, error: saveError, conflictId } = autosave;
   const editorHandleRef = useRef<BlockEditorHandle | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const pendingTitleFocusRef = useRef(false);
   const contentRef = useRef<unknown>(null);
   const noteRef = useRef<Note | null>(null);
   const primaryIdRef = useRef<string | null>(null);
-  const loadingMoreRef = useRef(false);
   const undoStackRef = useRef<string[]>([]);
+
+  const { data: projects = [] } = useProjectsQuery();
+  const primaryQuery = useProjectPrimaryQuery(projectId);
+  const primary = primaryQuery.data ?? null;
+  const notesQuery = useProjectNotesQuery(projectId);
+  const { patchProjectNotes, invalidateProject } = useProjectNotesCache(projectId);
+  const seedNoteInCache = useSeedNote();
+  // primary を含む全 project note の生リスト（pagination offset の基準）。表示用の時系列は
+  // ここから primary を除いたもの。
+  const rawNotes = useMemo(
+    () => notesQuery.data?.pages.flatMap((p) => p.items) ?? null,
+    [notesQuery.data],
+  );
+  const hasMore = notesQuery.hasNextPage;
+
+  useEffect(() => {
+    primaryIdRef.current = primary?.id ?? null;
+  }, [primary]);
+
+  useEffect(() => {
+    setLastProject(projectId);
+  }, [projectId]);
 
   const projectName = useMemo(() => {
     const found = projects.find((p) => p.id === projectId);
@@ -86,85 +100,41 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
     onNavigateToNote: openInNotes,
   });
 
-  // project 一覧（⌃W picker とヘッダ名の表示用）。切替時に project 名がすぐ出るよう一度だけ取る
+  // primary の id を指す URL は正規化する（/projects/{id} が primary の正準形）
   useEffect(() => {
-    let cancelled = false;
-    listProjects()
-      .then((list) => {
-        if (!cancelled) setProjects(list);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // project が確定したら primary を get-or-create し、時系列 1 ページ目を取る
-  useEffect(() => {
-    let cancelled = false;
-    setPrimary(null);
-    primaryIdRef.current = null;
-    setRawNotes(null);
-    setProjectError(null);
-    undoStackRef.current = [];
-    setLastProject(projectId);
-    primaryNote(projectId)
-      .then((p) => {
-        if (cancelled) return;
-        primaryIdRef.current = p.id;
-        setPrimary(p);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setProjectError(e instanceof Error ? e.message : "Failed to open project");
-      });
-    listProjectNotes(projectId, 0)
-      .then((page) => {
-        if (cancelled) return;
-        setRawNotes(page.items);
-        setHasMore(page.has_more);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, dataVersion]);
-
-  // 表示する note の解決。noteId 無し = primary、primary の id を指していたら URL を正規化する
-  useEffect(() => {
-    if (noteId === null) {
-      if (primary) {
-        contentRef.current = primary.content;
-        noteRef.current = primary;
-        setNote(primary);
-        setNoteError(null);
-      }
-      return;
-    }
-    if (primaryIdRef.current !== null && noteId === primaryIdRef.current) {
+    if (noteId !== null && primaryIdRef.current !== null && noteId === primaryIdRef.current) {
       navigate(projectPath(projectId), { replace: true });
-      return;
     }
-    // ⌥N 直後は seed 済みなので再フェッチしない
-    if (noteRef.current?.id === noteId) return;
+  }, [noteId, projectId, primary]);
+
+  // 表示する doc は noteId 無し = primary、あり = その note。latch のキーも同じ軸で切る
+  const noteQuery = useNoteQuery(noteId);
+  const docKey = noteId ?? projectId;
+  const { note, generation, reload, patchKind } = useServerDoc({
+    docKey,
+    data: noteId === null ? primaryQuery.data : noteQuery.data,
+    autosave,
+    contentRef,
+    noteRef,
+    refetch: noteId === null ? primaryQuery.refetch : noteQuery.refetch,
+  });
+
+  // 描画できる note がある間はエラーを出さない（daily と同じ理由 — 復帰時の一時的な
+  // 再フェッチ失敗でエディタを unmount すると、保存済みの編集が巻き戻る）。
+  const noteError = note === null && noteQuery.error !== null ? noteQuery.error.message : null;
+
+  // primary の取得失敗も、描画できる note がある間は出さない（noteError と同じ理由）
+  const projectError =
+    note === null && primaryQuery.error !== null ? primaryQuery.error.message : null;
+
+  useEffect(() => {
+    // 別 note の mention 解決結果を持ち越さない
     mentionCacheRef.current = new Map();
-    let cancelled = false;
-    noteRef.current = null;
-    setNote(null);
-    setNoteError(null);
-    getNote(noteId)
-      .then((n) => {
-        if (cancelled) return;
-        contentRef.current = n.content;
-        noteRef.current = n;
-        setNote(n);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setNoteError(e instanceof Error ? e.message : "Failed to load note");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [noteId, projectId, primary, mentionCacheRef]);
+  }, [docKey, mentionCacheRef]);
+
+  useEffect(() => {
+    undoStackRef.current = [];
+  }, [projectId]);
 
   useEffect(() => {
     if (note && pendingTitleFocusRef.current) {
@@ -179,13 +149,6 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
     const blockId = takePendingBlockTarget(note.id);
     if (blockId) editorHandleRef.current?.scrollToBlock(blockId);
   }, [note]);
-
-  const seedNote = useCallback((n: Note) => {
-    contentRef.current = n.content;
-    noteRef.current = n;
-    setNote(n);
-    setNoteError(null);
-  }, []);
 
   const isPrimary = note !== null && note.id === primaryIdRef.current;
 
@@ -210,30 +173,19 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
     try {
       const created = await createProjectNote(projectId);
       pendingTitleFocusRef.current = true;
-      seedNote(created);
+      // 先にキャッシュへ置いてから遷移する（loading を挟まず即描画される）
+      seedNoteInCache(created);
       navigate(projectPath(projectId, created.id));
-      setDataVersion((v) => v + 1);
+      invalidateProject();
     } catch {
       // 作成失敗は次の ⌥N で再試行できるので黙って握る
     }
-  }, [flush, projectId, seedNote]);
+  }, [flush, projectId, seedNoteInCache, invalidateProject]);
 
-  const loadMore = useCallback(async () => {
-    if (rawNotes === null || loadingMoreRef.current) return;
-    loadingMoreRef.current = true;
-    try {
-      const page = await listProjectNotes(projectId, rawNotes.length);
-      setRawNotes((prev) => {
-        const seen = new Set((prev ?? []).map((s) => s.id));
-        return [...(prev ?? []), ...page.items.filter((s) => !seen.has(s.id))];
-      });
-      setHasMore(page.has_more);
-    } catch {
-      // 失敗は次に sentinel が見えたときに再試行される
-    } finally {
-      loadingMoreRef.current = false;
-    }
-  }, [projectId, rawNotes]);
+  const loadMore = useCallback(() => {
+    // 多重発火は infinite query 側が弾く。失敗は次に sentinel が見えたときに再試行される
+    void notesQuery.fetchNextPage();
+  }, [notesQuery]);
 
   const scheduleSave = useCallback(
     (target: Note) => {
@@ -279,10 +231,10 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
       // 削除済み note への pending 保存を止める（再試行が 404 を叩き続けるのを防ぐ）
       discard(targetId);
       undoStackRef.current.push(targetId);
-      setRawNotes((list) => list?.filter((s) => s.id !== targetId) ?? list);
+      patchProjectNotes((items) => items.filter((s) => s.id !== targetId));
       if (noteId === targetId) navigate(projectPath(projectId), { replace: true });
     },
-    [flush, discard, scheduleSave, noteId, projectId],
+    [flush, discard, scheduleSave, noteId, projectId, patchProjectNotes],
   );
 
   const undoDelete = useCallback(async () => {
@@ -297,10 +249,10 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
       return;
     }
     resume(targetId);
-    setDataVersion((v) => v + 1);
-    seedNote(restored);
+    invalidateProject();
+    seedNoteInCache(restored);
     navigate(projectPath(projectId, targetId));
-  }, [seedNote, projectId, resume]);
+  }, [seedNoteInCache, projectId, resume, invalidateProject]);
 
   const switchProject = useCallback(
     (nextId: string) => {
@@ -354,23 +306,25 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
     return () => window.removeEventListener("keydown", onKey, true);
   }, [cycleIds, currentId, selectNote, createNew, deleteById, undoDelete]);
 
-  const patchSummaryKind = useCallback((next: Note) => {
-    setRawNotes(
-      (list) => list?.map((s) => (s.id === next.id ? { ...s, kind: next.kind } : s)) ?? list,
-    );
-  }, []);
+  const patchSummaryKind = useCallback(
+    (next: Note) => {
+      patchProjectNotes((items) =>
+        items.map((s) => (s.id === next.id ? { ...s, kind: next.kind } : s)),
+      );
+    },
+    [patchProjectNotes],
+  );
 
   const onTitleChange = useCallback(
     (title: string) => {
       const current = noteRef.current;
       if (current?.kind.kind !== "project") return;
       const next: Note = { ...current, kind: { ...current.kind, title } };
-      noteRef.current = next;
-      setNote(next);
+      patchKind(next.kind);
       scheduleSave(next);
       patchSummaryKind(next);
     },
-    [scheduleSave, patchSummaryKind],
+    [scheduleSave, patchSummaryKind, patchKind],
   );
 
   const { onDocChange, focusEditorStart } = useEditorDoc({
@@ -434,15 +388,16 @@ export function ProjectEditor({ projectId, noteId }: { projectId: string; noteId
                 <span className="ml-auto font-mono text-[0.7rem] text-[var(--ink-faint)]">
                   {note.date.replaceAll("-", ".")}
                 </span>
-                {saveError && (
-                  <span className="text-destructive" title={saveError}>
-                    Failed to save — changes retry on next edit
-                  </span>
-                )}
+                <SaveStatus
+                  saveError={saveError}
+                  conflict={conflictId === note.id}
+                  onReload={() => void reload()}
+                />
               </div>
             </header>
             <NoteBlockEditor
               note={note}
+              generation={generation}
               autoFocus={!pendingTitleFocusRef.current}
               onDocChange={onDocChange}
               onExitUp={isPrimary ? undefined : () => titleRef.current?.focus()}

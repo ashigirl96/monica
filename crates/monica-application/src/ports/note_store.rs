@@ -2,6 +2,26 @@ use anyhow::Result;
 
 use monica_domain::{DailyNoteCount, EssayStatus, Note, NoteSummary, RawJson, UpdateNote};
 
+/// [`NoteStore::update_note`] の結果。条件付き UPDATE の 0 行は「存在しない」と「基準版が古い」の
+/// 両方を意味するため、store が同一 tx 内で区別して返す（呼び手が引き直すと delete と競合する）。
+#[derive(Debug)]
+pub enum NoteUpdate {
+    Updated(Note),
+    /// 存在しない、または soft-delete 済み。
+    Missing,
+    /// `expected_updated_at` が現在の版と一致しない（他クライアントが先に書いた）。
+    Stale,
+}
+
+impl NoteUpdate {
+    pub fn updated(self) -> Option<Note> {
+        match self {
+            Self::Updated(note) => Some(note),
+            Self::Missing | Self::Stale => None,
+        }
+    }
+}
+
 pub trait NoteStore {
     /// Creates a daily note with all defaults (id, empty content, logical date, timestamps).
     fn create_note(&mut self, day_boundary_hour: u8) -> Result<Note>;
@@ -51,9 +71,9 @@ pub trait NoteStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<NoteSummary>>;
-    /// Replaces content (and, for essays / projects, title); returns `None` when the note does
-    /// not exist (or is soft-deleted). kind は変更しない（kind 遷移は廃止済み）。
-    fn update_note(&mut self, id: &str, update: UpdateNote) -> Result<Option<Note>>;
+    /// Replaces content (and, for essays / projects, title). kind は変更しない（kind 遷移は廃止済み）。
+    /// `update.expected_updated_at` が Some なら、その版と一致する行だけを書く（楽観ロック）。
+    fn update_note(&mut self, id: &str, update: UpdateNote) -> Result<NoteUpdate>;
     /// Soft delete: sets `deleted_at`; the row survives for [`restore_note`](Self::restore_note).
     /// Returns `false` when the note does not exist (or is already deleted).
     fn delete_note(&mut self, id: &str) -> Result<bool>;

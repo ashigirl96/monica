@@ -9,11 +9,24 @@ import type {
   NoteMention,
   NotePage,
   NoteSummary,
+  NoteVersion,
   NotesSettings,
   NotesToday,
   ProjectOption,
   UpdateNote,
 } from "./types.gen";
+
+/** HTTP status を型で残す失敗。autosave が 409（楽観ロックの競合）だけを
+ * リトライ経路から外すために要る — message に埋めた status では分岐できない。 */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 
 export async function listExplanations(): Promise<Explanation[]> {
   const res = await fetch("/api/explanations");
@@ -65,14 +78,20 @@ export async function getNote(id: string): Promise<Note> {
   return res.json();
 }
 
-export async function updateNote(id: string, update: UpdateNote, keepalive = false): Promise<void> {
+/** doc は返らない。返るのは次の PUT の基準版になる updated_at だけ（autosave が毎秒叩くため）。 */
+export async function updateNote(
+  id: string,
+  update: UpdateNote,
+  keepalive = false,
+): Promise<NoteVersion> {
   const res = await fetch(`/api/notes/${id}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(update),
     keepalive,
   });
-  if (!res.ok) throw new Error(`Failed to save note: ${res.status}`);
+  if (!res.ok) throw new ApiError(res.status, `Failed to save note: ${res.status}`);
+  return res.json();
 }
 
 export async function getNotesToday(): Promise<NotesToday> {

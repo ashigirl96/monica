@@ -1,10 +1,10 @@
 use anyhow::{anyhow, bail, Result};
-use monica_application::ports::NoteStore;
+use monica_application::ports::{NoteStore, NoteUpdate};
 use monica_domain::{
     block_subtree, first_line_preview, logical_date, plain_text, DailyNoteCount, EssayStatus,
     Note, NoteId, NoteKind, NoteSummary, RawJson, UpdateNote,
 };
-use rusqlite::{params, Connection, Row, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, Row, TransactionBehavior};
 
 use crate::SqliteStore;
 
@@ -410,11 +410,12 @@ impl NoteStore for SqliteStore {
         rows.map(|r| r?).collect()
     }
 
-    fn update_note(&mut self, id: &str, update: UpdateNote) -> Result<Option<Note>> {
+    fn update_note(&mut self, id: &str, update: UpdateNote) -> Result<NoteUpdate> {
         // title は essay / project のときだけ意味を持つ（daily は title を持たない）。
         // CASE ガードにより、kind 遷移直後に着弾した stale な autosave が daily に title を
         // 植え付けることはない。本文更新と FTS 索引更新を 1 tx で atomic に行う
         // （検索が古い本文にヒットしない）。
+        // ?4 が NULL のとき条件が無効化されるので、基準版なしの呼び手は従来どおり無条件更新になる。
         let tx = self.conn_mut().transaction()?;
         let note = {
             let mut stmt = tx.prepare(&format!(
@@ -424,19 +425,36 @@ impl NoteStore for SqliteStore {
                                   THEN ?2 ELSE title END,
                      updated_at = {SET_NOW}
                  WHERE id = ?3 AND deleted_at IS NULL
+                   AND (?4 IS NULL OR updated_at = ?4)
                  RETURNING {NOTE_COLUMNS}"
             ))?;
-            let mut rows = stmt.query(params![update.content.as_str(), update.title, id])?;
+            let mut rows = stmt.query(params![
+                update.content.as_str(),
+                update.title,
+                id,
+                update.expected_updated_at
+            ])?;
             match rows.next()? {
                 Some(row) => Some(note_from_row(row)?),
                 None => None,
             }
         };
-        if note.is_some() {
-            upsert_note_fts(&tx, id, update.content.as_str())?;
-        }
+        let Some(note) = note else {
+            // 0 行は「行が無い」と「基準版が古い」の両方を意味する。呼び手が引き直すと
+            // その間の delete と競合するので、同じ tx の中で撃ち分ける。
+            let live: Option<i64> = tx
+                .query_row(
+                    "SELECT 1 FROM notes WHERE id = ?1 AND deleted_at IS NULL",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            tx.commit()?;
+            return Ok(if live.is_some() { NoteUpdate::Stale } else { NoteUpdate::Missing });
+        };
+        upsert_note_fts(&tx, id, update.content.as_str())?;
         tx.commit()?;
-        Ok(note)
+        Ok(NoteUpdate::Updated(note))
     }
 
     fn set_essay_status(&mut self, id: &str, status: EssayStatus) -> Result<Option<Note>> {
@@ -526,7 +544,11 @@ mod tests {
     }
 
     fn content_update(text: &str) -> UpdateNote {
-        UpdateNote { title: None, content: RawJson::from(doc_with_text(text)) }
+        UpdateNote {
+            title: None,
+            content: RawJson::from(doc_with_text(text)),
+            expected_updated_at: None,
+        }
     }
 
     #[test]
@@ -578,7 +600,7 @@ mod tests {
         assert!(store.list_notes(None, None).unwrap().is_empty());
         assert!(store.daily_note_counts(None, None, None).unwrap().is_empty());
         // 削除済みへの update は不発（autosave の残弾で復活させない）
-        assert!(store.update_note(id, content_update("zombie")).unwrap().is_none());
+        assert!(store.update_note(id, content_update("zombie")).unwrap().updated().is_none());
 
         let restored = store.restore_note(id).unwrap().unwrap();
         assert_eq!(restored.id, note.id);
@@ -627,7 +649,7 @@ mod tests {
             )
             .unwrap();
 
-        let updated = store.update_note(note.id.as_str(), content_update("hello")).unwrap().unwrap();
+        let updated = store.update_note(note.id.as_str(), content_update("hello")).unwrap().updated().unwrap();
         assert_eq!(updated.content.as_str(), doc_with_text("hello"));
         assert!(updated.updated_at.as_str() > "2000-01-01T00:00:00.000Z");
         assert_eq!(updated.date, note.date, "date is fixed at creation");
@@ -642,15 +664,15 @@ mod tests {
         let daily = store.create_note(0).unwrap();
         let update = UpdateNote {
             title: Some("ignored".to_string()),
-            content: RawJson::from(doc_with_text("body")),
+            content: RawJson::from(doc_with_text("body")), expected_updated_at: None,
         };
-        let updated = store.update_note(daily.id.as_str(), update.clone()).unwrap().unwrap();
+        let updated = store.update_note(daily.id.as_str(), update.clone()).unwrap().updated().unwrap();
         assert_eq!(updated.kind, NoteKind::Daily);
         assert_eq!(updated.kind.title(), None);
 
         // project: title は置換される（無題 → named）
         let project = store.create_project_note("o/r", 0).unwrap();
-        let updated = store.update_note(project.id.as_str(), update.clone()).unwrap().unwrap();
+        let updated = store.update_note(project.id.as_str(), update.clone()).unwrap().updated().unwrap();
         assert_eq!(
             updated.kind,
             NoteKind::Project { project_id: "o/r".to_string(), title: "ignored".to_string() }
@@ -658,9 +680,9 @@ mod tests {
 
         // essay: Some は置換、None は keep
         let essay = store.create_essay_note(0).unwrap();
-        let updated = store.update_note(essay.id.as_str(), update).unwrap().unwrap();
+        let updated = store.update_note(essay.id.as_str(), update).unwrap().updated().unwrap();
         assert_eq!(updated.kind, NoteKind::Essay { title: "ignored".to_string(), status: EssayStatus::Writing });
-        let kept = store.update_note(essay.id.as_str(), content_update("more")).unwrap().unwrap();
+        let kept = store.update_note(essay.id.as_str(), content_update("more")).unwrap().updated().unwrap();
         assert_eq!(kept.kind, NoteKind::Essay { title: "ignored".to_string(), status: EssayStatus::Writing }, "None keeps title");
         // 空文字への置換（無題化）も通る
         let cleared = store
@@ -668,10 +690,11 @@ mod tests {
                 essay.id.as_str(),
                 UpdateNote {
                     title: Some(String::new()),
-                    content: RawJson::from(doc_with_text("more")),
+                    content: RawJson::from(doc_with_text("more")), expected_updated_at: None,
                 },
             )
             .unwrap()
+            .updated()
             .unwrap();
         assert_eq!(cleared.kind, NoteKind::Essay { title: String::new(), status: EssayStatus::Writing });
     }
@@ -690,7 +713,75 @@ mod tests {
     #[test]
     fn update_missing_returns_none() {
         let mut store = SqliteStore::open_in_memory().unwrap();
-        assert!(store.update_note("note-999", content_update("x")).unwrap().is_none());
+        assert!(matches!(
+            store.update_note("note-999", content_update("x")).unwrap(),
+            NoteUpdate::Missing
+        ));
+    }
+
+    fn versioned_update(text: &str, expected: &str) -> UpdateNote {
+        UpdateNote {
+            title: None,
+            content: RawJson::from(doc_with_text(text)),
+            expected_updated_at: Some(expected.to_string()),
+        }
+    }
+
+    #[test]
+    fn update_with_matching_expected_version_applies() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        let note = store.create_note(0).unwrap();
+        set_updated_at(&store, note.id.as_str(), "2020-01-01T00:00:00.000Z");
+
+        let updated = store
+            .update_note(note.id.as_str(), versioned_update("hello", "2020-01-01T00:00:00.000Z"))
+            .unwrap()
+            .updated()
+            .unwrap();
+        assert_eq!(updated.content.as_str(), doc_with_text("hello"));
+        assert!(updated.updated_at.as_str() > "2020-01-01T00:00:00.000Z", "版が前進する");
+    }
+
+    #[test]
+    fn update_with_stale_expected_version_is_rejected() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        let note = store.create_note(0).unwrap();
+        store.update_note(note.id.as_str(), content_update("winner")).unwrap();
+
+        let outcome = store
+            .update_note(note.id.as_str(), versioned_update("loser", "2020-01-01T00:00:00.000Z"))
+            .unwrap();
+        assert!(matches!(outcome, NoteUpdate::Stale));
+        let read = store.get_note(note.id.as_str()).unwrap().unwrap();
+        assert_eq!(read.content.as_str(), doc_with_text("winner"), "先勝ちの本文が残る");
+    }
+
+    #[test]
+    fn update_with_expected_version_on_missing_or_deleted_is_missing() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        let outcome =
+            store.update_note("note-999", versioned_update("x", "2020-01-01T00:00:00.000Z")).unwrap();
+        assert!(matches!(outcome, NoteUpdate::Missing), "存在しない id は Stale ではない");
+
+        let note = store.create_note(0).unwrap();
+        let version = note.updated_at.clone();
+        store.delete_note(note.id.as_str()).unwrap();
+        // 基準版は一致するが soft-delete 済み。競合ではなく不在として扱う。
+        let outcome =
+            store.update_note(note.id.as_str(), versioned_update("x", &version)).unwrap();
+        assert!(matches!(outcome, NoteUpdate::Missing));
+    }
+
+    #[test]
+    fn update_without_expected_version_is_unconditional() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        let note = store.create_note(0).unwrap();
+        store.update_note(note.id.as_str(), content_update("first")).unwrap();
+
+        // 基準版を送らない呼び手（旧クライアント）は従来どおり後勝ちで通る
+        let updated =
+            store.update_note(note.id.as_str(), content_update("second")).unwrap().updated().unwrap();
+        assert_eq!(updated.content.as_str(), doc_with_text("second"));
     }
 
     #[test]
@@ -784,7 +875,7 @@ mod tests {
                 essay.id.as_str(),
                 UpdateNote {
                     title: Some("Rust 設計メモ".to_string()),
-                    content: RawJson::from(monica_domain::EMPTY_NOTE_DOC),
+                    content: RawJson::from(monica_domain::EMPTY_NOTE_DOC), expected_updated_at: None,
                 },
             )
             .unwrap();
@@ -1100,7 +1191,7 @@ mod tests {
                 id,
                 UpdateNote {
                     title: Some("t".to_string()),
-                    content: RawJson::from(monica_domain::EMPTY_NOTE_DOC),
+                    content: RawJson::from(monica_domain::EMPTY_NOTE_DOC), expected_updated_at: None,
                 },
             )
             .unwrap();
@@ -1143,7 +1234,7 @@ mod tests {
                 id,
                 UpdateNote {
                     title: Some("knowledge".to_string()),
-                    content: RawJson::from(monica_domain::EMPTY_NOTE_DOC),
+                    content: RawJson::from(monica_domain::EMPTY_NOTE_DOC), expected_updated_at: None,
                 },
             )
             .unwrap();
@@ -1220,7 +1311,7 @@ mod tests {
             {"type":"blockContainer","attrs":{"id":"blk"},"content":[
                 {"type":"paragraph","content":[{"type":"text","text":"body"}]}]}]}]}"#;
         store
-            .update_note(id, UpdateNote { title: None, content: RawJson::from(doc) })
+            .update_note(id, UpdateNote { title: None, content: RawJson::from(doc), expected_updated_at: None, })
             .unwrap();
 
         let sub = store.get_note_block(id, "blk").unwrap().unwrap();
@@ -1268,7 +1359,7 @@ mod tests {
         let doc = r#"{"type":"doc","content":[{"type":"blockGroup","content":[
             {"type":"blockContainer","content":[
                 {"type":"bookmark","attrs":{"href":"https://x.test","title":"Quarterly Roadmap"}}]}]}]}"#;
-        store.update_note("note-1", UpdateNote { title: None, content: RawJson::from(doc) }).unwrap();
+        store.update_note("note-1", UpdateNote { title: None, content: RawJson::from(doc), expected_updated_at: None, }).unwrap();
 
         assert_eq!(search_ids(&store, "Quarterly"), vec!["note-1"], "bookmark title searchable");
     }

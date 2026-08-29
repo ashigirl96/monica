@@ -520,16 +520,16 @@ async fn parse_note_markdown(Json(body): Json<FromMarkdownBody>) -> Response {
 async fn update_note(
     Path(id): Path<String>,
     Json(body): Json<monica_api::ApiUpdateNote>,
-) -> Result<StatusCode, AppError> {
-    // autosave が毎秒叩く経路。クライアントはレスポンス body を読まないので、
-    // 全文 doc をパースし直して返送するコストを掛けずに 204 で応える。
-    blocking(move || {
+) -> Result<Json<monica_api::ApiNoteVersion>, AppError> {
+    // autosave が毎秒叩く経路。全文 doc をパースし直して返送するコストは掛けず、
+    // 次の PUT の基準版になる updated_at だけを返す。
+    // 基準版が食い違ったときは facade が Conflict を返し、409 に写像される。
+    let updated_at = blocking(move || {
         let mut monica = open()?;
-        monica.notes().update_note(&id, body.into())?;
-        Ok(())
+        Ok(monica.notes().update_note(&id, body.into())?.updated_at)
     })
     .await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Json(monica_api::ApiNoteVersion { updated_at }))
 }
 
 async fn delete_note(Path(id): Path<String>) -> Result<StatusCode, AppError> {
@@ -1258,6 +1258,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn put_returns_new_version_and_rejects_stale_base() {
+        let created = create_note_via_api().await;
+        let id = created["id"].as_str().unwrap();
+
+        // 基準版に読んだときの updated_at を送ると通り、次の基準版が返る
+        let body = serde_json::json!({
+            "content": {"type": "doc", "content": []},
+            "expected_updated_at": created["updated_at"],
+        });
+        let response =
+            app().oneshot(put_json_req(&format!("/api/notes/{id}"), &body)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let version: serde_json::Value =
+            serde_json::from_str(&body_string(response).await).unwrap();
+        let next = version["updated_at"].as_str().unwrap();
+        assert_eq!(next, fetch_note(id).await["updated_at"].as_str().unwrap());
+
+        // 同じ基準版をもう一度送る = 他クライアントに先を越された状況 → 409
+        let response =
+            app().oneshot(put_json_req(&format!("/api/notes/{id}"), &body)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+
+        // 存在しない note は競合ではなく 404
+        let response = app()
+            .oneshot(put_json_req("/api/notes/note-does-not-exist", &body))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn put_without_expected_version_stays_unconditional() {
+        let created = create_note_via_api().await;
+        let id = created["id"].as_str().unwrap();
+        // 基準版を送らない呼び手は従来どおり後勝ちで通り続ける
+        let body = serde_json::json!({ "content": {"type": "doc", "content": []} });
+        for _ in 0..2 {
+            let response =
+                app().oneshot(put_json_req(&format!("/api/notes/{id}"), &body)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+    }
+
+    #[tokio::test]
     async fn put_updates_content_but_cannot_change_kind() {
         let created = create_note_via_api().await;
         let id = created["id"].as_str().unwrap();
@@ -1273,7 +1317,7 @@ mod tests {
             .oneshot(put_json_req(&format!("/api/notes/{id}"), &body))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(response.status(), StatusCode::OK);
 
         let fetched = fetch_note(id).await;
         assert_eq!(fetched["kind"], serde_json::json!({"kind": "daily"}));
@@ -1284,7 +1328,7 @@ mod tests {
         let body = serde_json::json!({ "content": content });
         let response =
             app().oneshot(put_json_req(&format!("/api/notes/{id}"), &body)).await.unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     fn doc(text: &str) -> serde_json::Value {
@@ -1453,7 +1497,7 @@ mod tests {
             .oneshot(put_json_req(&format!("/api/notes/{id}"), &body))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(response.status(), StatusCode::OK);
         let fetched = fetch_note(id).await;
         assert_eq!(
             fetched["kind"],
@@ -1760,7 +1804,7 @@ mod tests {
             .oneshot(put_json_req(&format!("/api/notes/{id}"), &body))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     async fn search_mentions(q: &str) -> Vec<serde_json::Value> {
@@ -2194,6 +2238,7 @@ mod tests {
             .register::<monica_api::ApiNotesToday>()
             .register::<monica_api::NotesSettings>()
             .register::<monica_api::ApiUpdateNote>()
+            .register::<monica_api::ApiNoteVersion>()
             .register::<monica_api::ApiDailyNoteCount>()
             .register::<monica_api::ApiLinkPreview>()
             .register::<monica_api::ApiAsset>()

@@ -29,7 +29,7 @@ pub use explanation_outputs::ExplanationOutputs;
 pub use explanation_store::ExplanationStore;
 pub use git_gateway::{GitGateway, WorktreeRef};
 pub use link_preview::LinkPreview;
-pub use note_store::NoteStore;
+pub use note_store::{NoteStore, NoteUpdate};
 pub use notification_outbox_store::NotificationOutboxStore;
 pub use project_repository::ProjectRepository;
 pub use pull_request_sync::PullRequestSyncStore;

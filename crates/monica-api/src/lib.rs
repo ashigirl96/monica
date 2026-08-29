@@ -27,8 +27,8 @@ pub use note::{
     CreateProjectNote as ApiCreateProjectNote, DailyNoteCount as ApiDailyNoteCount,
     EssayStatus as ApiEssayStatus, Note as ApiNote, NoteBlock as ApiNoteBlock,
     NoteKind as ApiNoteKind, NoteMention as ApiNoteMention, NotePage as ApiNotePage,
-    NoteSummary as ApiNoteSummary, NotesToday as ApiNotesToday, SetEssayStatus as ApiSetEssayStatus,
-    UpdateNote as ApiUpdateNote,
+    NoteSummary as ApiNoteSummary, NoteVersion as ApiNoteVersion, NotesToday as ApiNotesToday,
+    SetEssayStatus as ApiSetEssayStatus, UpdateNote as ApiUpdateNote,
 };
 pub use settings::{
     NotesSettings, TranslateEffort, TranslateModel, TranslateSettings, TranslateSettingsSnapshot,

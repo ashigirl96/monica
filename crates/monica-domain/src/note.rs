@@ -192,6 +192,9 @@ pub struct UpdateNote {
     /// title を巻き戻さないための保険。
     pub title: Option<String>,
     pub content: RawJson,
+    /// 楽観ロックの基準版。直前に読んだ / 書いた `updated_at` をそのまま送り返す。
+    /// None = 無条件更新（競合検出なし）。
+    pub expected_updated_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

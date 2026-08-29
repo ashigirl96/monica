@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BlockEditorHandle } from "@shared/block-editor/block-editor";
-import { createEssay, deleteNote, getNote, listEssays, setEssayStatus } from "@/api";
+import { createEssay, deleteNote, setEssayStatus } from "@/api";
 import { navigate } from "@/app";
 import { altOnly, ctrlOnly } from "@/keys";
-import type { EssayStatus, Note, NoteSummary } from "@/types.gen";
+import type { EssayStatus, Note } from "@/types.gen";
 import { takePendingBlockTarget } from "@/notes/block-jump";
 import {
   cycleSelect,
@@ -13,7 +13,10 @@ import {
   useNoteBlockResolvers,
 } from "@/notes/editor-support";
 import { NoteBlockEditor } from "@/notes/note-block-editor";
+import { useServerDoc } from "@/notes/note-sync";
 import { NotesShell } from "@/notes/notes-shell";
+import { useEssaysCache, useEssaysQuery, useNoteQuery, useSeedNote } from "@/notes/queries";
+import { SaveStatus } from "@/notes/save-status";
 import { useAutosave } from "@/notes/use-autosave";
 import { EssaysSidebar } from "./sidebar";
 import {
@@ -55,15 +58,14 @@ function StatusChip({
  * ⌥H/⌥L で往復する。⌥K/J は表示中タブ内を巡回する。
  */
 export function EssayEditorPage({ id }: { id: string }) {
-  const [note, setNote] = useState<Note | null>(null);
-  const [noteError, setNoteError] = useState<string | null>(null);
-  // 全 essay（全 status）。サイドバー表示と ⌥K/J は status で分けた片方だけを使う
-  const [essays, setEssays] = useState<NoteSummary[] | null>(null);
   // サイドバーが表示中の status。⌥H/⌥L の手動切替と、開いた note の status への同期で動く
   const [tab, setTab] = useState<EssayStatus>("writing");
-  // 作成・status 変更の失敗後に一覧を再取得させるためのバージョン
-  const [dataVersion, setDataVersion] = useState(0);
-  const { schedule, flush, discard, resume, error: saveError } = useAutosave();
+  const autosave = useAutosave();
+  const { schedule, flush, discard, resume, error: saveError, conflictId } = autosave;
+  const { setBase, hasUnsaved } = autosave;
+  const { data: essays = null } = useEssaysQuery();
+  const { patchEssays, invalidateEssays } = useEssaysCache();
+  const seedNoteInCache = useSeedNote();
   const editorHandleRef = useRef<BlockEditorHandle | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   // ⌥N 直後は本文ではなくタイトルへフォーカスする（ノート読み込み後の effect で消費）
@@ -90,39 +92,23 @@ export function EssayEditorPage({ id }: { id: string }) {
     onNavigateToNote: openInNotes,
   });
 
-  useEffect(() => {
-    let cancelled = false;
-    listEssays()
-      .then((list) => {
-        if (!cancelled) setEssays(list);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [dataVersion]);
+  const noteQuery = useNoteQuery(id);
+  const { note, generation, reload, patchKind, adopt } = useServerDoc({
+    docKey: id,
+    data: noteQuery.data,
+    autosave,
+    contentRef,
+    noteRef,
+    refetch: noteQuery.refetch,
+  });
+
+  // 描画できる note がある間はエラーを出さない（daily と同じ理由 — 復帰時の一時的な
+  // 再フェッチ失敗でエディタを unmount すると、保存済みの編集が巻き戻る）。
+  const noteError = note === null && noteQuery.error !== null ? noteQuery.error.message : null;
 
   useEffect(() => {
-    // 作成・status 変更の直後は API レスポンスで seed 済みなので再フェッチしない
-    if (noteRef.current?.id === id) return;
+    // 別 note の mention 解決結果を持ち越さない
     mentionCacheRef.current = new Map();
-    let cancelled = false;
-    noteRef.current = null;
-    setNote(null);
-    setNoteError(null);
-    getNote(id)
-      .then((n) => {
-        if (cancelled) return;
-        contentRef.current = n.content;
-        noteRef.current = n;
-        setNote(n);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setNoteError(e instanceof Error ? e.message : "Failed to load essay");
-      });
-    return () => {
-      cancelled = true;
-    };
   }, [id, mentionCacheRef]);
 
   useEffect(() => {
@@ -140,10 +126,9 @@ export function EssayEditorPage({ id }: { id: string }) {
     if (blockId) editorHandleRef.current?.scrollToBlock(blockId);
   }, [note]);
 
-  // 現 id の note だと確認できたときだけ status を出す。読み込みは effect の中で
-  // setNote(null) するので、id が変わった最初の render では note がまだ前の note のまま。
-  // 素通しすると旧 status でタブが動き、⌥H/⌥L で選んだタブから引き戻される
-  const openStatus = note?.id === id && note.kind.kind === "essay" ? note.kind.status : null;
+  // latch は docKey（= id）が変わった時点で捨てられるので、note は常に現 id のもの。
+  // essay 以外を開いたときに旧 status でタブが動かないよう kind は見る
+  const openStatus = note?.kind.kind === "essay" ? note.kind.status : null;
 
   useEffect(() => {
     // 「タブ == 開いている note の status」を恒常的に強制するのではなく、状態遷移として代入する
@@ -165,17 +150,12 @@ export function EssayEditorPage({ id }: { id: string }) {
     [flush],
   );
 
-  // API レスポンスの note をそのまま表示状態にする（navigate 後の再フェッチを省く）
-  const seedNote = useCallback((n: Note) => {
-    contentRef.current = n.content;
-    noteRef.current = n;
-    setNote(n);
-    setNoteError(null);
-  }, []);
-
-  const patchSummaryKind = useCallback((next: Note) => {
-    setEssays((list) => patchEssayKind(list, next.id, next.kind));
-  }, []);
+  const patchSummaryKind = useCallback(
+    (next: Note) => {
+      patchEssays((list) => patchEssayKind(list, next.id, next.kind));
+    },
+    [patchEssays],
+  );
 
   const scheduleSave = useCallback(
     (target: Note) => {
@@ -192,13 +172,14 @@ export function EssayEditorPage({ id }: { id: string }) {
     try {
       const created = await createEssay();
       pendingTitleFocusRef.current = true;
-      seedNote(created);
+      // 先にキャッシュへ置いてから遷移する（loading を挟まず即描画される）
+      seedNoteInCache(created);
       navigate(`/essays/${created.id}`);
-      setDataVersion((v) => v + 1);
+      invalidateEssays();
     } catch {
       // 作成失敗は次の ⌥N で再試行できるので黙って握る
     }
-  }, [flush, seedNote]);
+  }, [flush, seedNoteInCache, invalidateEssays]);
 
   const deleteCurrent = useCallback(async () => {
     const target = noteRef.current;
@@ -228,22 +209,22 @@ export function EssayEditorPage({ id }: { id: string }) {
     // 削除済み note への pending 保存を止める（再試行が 404 を叩き続けるのを防ぐ）
     discard(target.id);
     pushDeletedEssay(target.id);
-    setEssays((list) => dropEssay(list, target.id));
+    patchEssays((list) => dropEssay(list, target.id));
     // 表示中タブにあった note はサイドバーの次へ送って書く流れを切らない。タブ外の note は
     // 送り先が画面に見えていないので一覧へ帰す
     const next = cycleIds.includes(target.id) ? cycleSelect(cycleIds, target.id, 1) : undefined;
     if (next !== undefined && next !== target.id) navigate(`/essays/${next}`, { replace: true });
     else navigate("/essays", { replace: true });
-  }, [flush, discard, scheduleSave, cycleIds]);
+  }, [flush, discard, scheduleSave, cycleIds, patchEssays]);
 
   const undoDelete = useCallback(async () => {
     const restored = await restoreLastDeletedEssay();
     if (restored === undefined) return;
     resume(restored.id);
-    setDataVersion((v) => v + 1);
-    seedNote(restored);
+    invalidateEssays();
+    seedNoteInCache(restored);
     navigate(`/essays/${restored.id}`);
-  }, [seedNote, resume]);
+  }, [seedNoteInCache, resume, invalidateEssays]);
 
   // トグルを直列化する chain（use-autosave の flushChain と同じ手法）。連打時に両方が
   // 同じ status を読んで 2 回のトグルが 1 回に潰れるのを防ぎ、2 回目は 1 回目の結果に
@@ -257,25 +238,44 @@ export function EssayEditorPage({ id }: { id: string }) {
       const current = noteRef.current;
       if (current === null || current.id !== targetId || current.kind.kind !== "essay") return;
       // pending の content を先に flush する（title は status 列単独 UPDATE なので競合しないが、
-      // 失敗時の一覧再取得が編集前の preview に巻き戻らないように）
-      await flush();
+      // 失敗時の一覧再取得が編集前の preview に巻き戻らないように）。
+      // 通らなかったときは中断する: 下で基準版を status の新しい updated_at へ進めてしまうと、
+      // 競合で行き場を失った古い本文が「新しい基準版に載った正当な編集」に化け、次の打鍵で
+      // 勝った側の外部変更を上書きしてしまう（削除と同じく、未保存が残る間は手を出さない）。
+      if (!(await flush())) return;
       try {
         const updated = await setEssayStatus(current.id, current.kind.next_status);
-        // エディタは開いたまま status チップとサイドバー（タブと行）だけが変わる。
-        // content は seed しない — 直前の flush が失敗して pending が再試行待ちのとき、
-        // status-only レスポンスの古い content で contentRef を巻き戻すと、後続の title 編集が
-        // その古い本文で pending を上書きして編集を失うため（kind と updated_at だけ反映する）
-        const merged: Note = { ...current, kind: updated.kind, updated_at: updated.updated_at };
-        noteRef.current = merged;
-        setNote(merged);
-        patchSummaryKind(merged);
+        // status 列単独の UPDATE で updated_at だけが進む。自分の content 書き込みはその上に
+        // 載せてよいので基準版は進める（進めないと自分のトグルで偽の 409 が出る）。
+        setBase(updated.id, updated.updated_at);
+        if (hasUnsaved(updated.id)) {
+          // setEssayStatus の往復中に打鍵が入った。レスポンスの content はその打鍵より
+          // 古いので、キャッシュにも latch にも載せない（新しい本文を失う）。
+          // 新しい updated_at だけを古い content にスタンプするのも禁物 — キャッシュが
+          // 嘘をつき、note 往復で 1 世代前の本文が mount される。kind だけ反映する。
+          patchKind(updated.kind);
+        } else {
+          // 未保存が無ければレスポンスの content はサーバの真値。丸ごと採用してよい。
+          seedNoteInCache(updated);
+          adopt(updated, false);
+        }
+        patchSummaryKind(updated);
       } catch {
         // 409/404 は UI 状態が古いだけ。一覧の再取得で追いつくので黙って握る
-        setDataVersion((v) => v + 1);
+        invalidateEssays();
       }
     };
     toggleChainRef.current = toggleChainRef.current.then(run);
-  }, [flush, patchSummaryKind]);
+  }, [
+    flush,
+    patchSummaryKind,
+    invalidateEssays,
+    setBase,
+    hasUnsaved,
+    patchKind,
+    seedNoteInCache,
+    adopt,
+  ]);
 
   useEffect(() => {
     // capture phase で登録する: エディタ（ProseMirror）より先に横取りする必要がある
@@ -331,12 +331,11 @@ export function EssayEditorPage({ id }: { id: string }) {
       const current = noteRef.current;
       if (current?.kind.kind !== "essay") return;
       const next: Note = { ...current, kind: { ...current.kind, title } };
-      noteRef.current = next;
-      setNote(next);
+      patchKind(next.kind);
       scheduleSave(next);
       patchSummaryKind(next);
     },
-    [scheduleSave, patchSummaryKind],
+    [scheduleSave, patchSummaryKind, patchKind],
   );
 
   const { onDocChange, focusEditorStart } = useEditorDoc({
@@ -379,15 +378,16 @@ export function EssayEditorPage({ id }: { id: string }) {
                 <span className="ml-auto font-mono text-[0.7rem] text-[var(--ink-faint)]">
                   {note.date.replaceAll("-", ".")}
                 </span>
-                {saveError && (
-                  <span className="text-destructive" title={saveError}>
-                    Failed to save — changes retry on next edit
-                  </span>
-                )}
+                <SaveStatus
+                  saveError={saveError}
+                  conflict={conflictId === note.id}
+                  onReload={() => void reload()}
+                />
               </div>
             </header>
             <NoteBlockEditor
               note={note}
+              generation={generation}
               autoFocus={!pendingTitleFocusRef.current}
               onDocChange={onDocChange}
               onExitUp={() => titleRef.current?.focus()}
