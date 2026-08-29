@@ -4,7 +4,7 @@ use crate::bench::bench_runspace_id;
 use super::ports::{
     ProjectRepository, TaskRunOutputs, TaskRunStore, TaskStore, WorkbenchStore,
 };
-use crate::prelude::{Project, Task, TaskId};
+use crate::prelude::{Project, RunspaceId, Task, TaskId};
 use crate::{ApplicationError, ApplicationResult, ExecutionProfile, TaskBench};
 
 pub(crate) fn default_bench_cwd(project: Option<&Project>, home_dir: Option<&str>) -> String {
@@ -26,7 +26,7 @@ pub(crate) fn ensure_bench<R>(
     task_id: &TaskId,
     desired_cwd: &str,
     pin_cwd: bool,
-) -> Result<(String, String, bool)>
+) -> Result<(RunspaceId, String, bool)>
 where
     R: WorkbenchStore + ?Sized,
 {
@@ -37,7 +37,7 @@ where
         }
         return Ok((runspace_id, cwd, false));
     }
-    let runspace_id = bench_runspace_id(task_id.as_str());
+    let runspace_id = bench_runspace_id(task_id);
     repos.create_bench(task_id, &runspace_id, desired_cwd)?;
     Ok((runspace_id, desired_cwd.to_string(), true))
 }

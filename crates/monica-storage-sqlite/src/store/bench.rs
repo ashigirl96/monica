@@ -3,27 +3,27 @@ use rusqlite::{params, Connection};
 
 use crate::SqliteStore;
 use monica_application::WorkbenchStore;
-use monica_domain::TaskId;
+use monica_domain::{RunspaceId, TaskId};
 
 pub(super) fn get_bench_for_task(
     conn: &Connection,
     task_id: &TaskId,
-) -> Result<Option<(String, String)>> {
+) -> Result<Option<(RunspaceId, String)>> {
     let mut stmt =
         conn.prepare("SELECT runspace_id, cwd FROM \"_TaskToRunspace\" WHERE task_id = ?1")?;
     let mut rows = stmt.query(params![task_id.as_str()])?;
     match rows.next()? {
-        Some(row) => Ok(Some((row.get(0)?, row.get(1)?))),
+        Some(row) => Ok(Some((RunspaceId::from_store(row.get(0)?), row.get(1)?))),
         None => Ok(None),
     }
 }
 
-pub(super) fn list_bench_runspace_map(conn: &Connection) -> Result<Vec<(String, String)>> {
+pub(super) fn list_bench_runspace_map(conn: &Connection) -> Result<Vec<(RunspaceId, TaskId)>> {
     let mut stmt = conn.prepare("SELECT runspace_id, task_id FROM \"_TaskToRunspace\"")?;
     let mut rows = stmt.query([])?;
     let mut items = Vec::new();
     while let Some(row) = rows.next()? {
-        items.push((row.get(0)?, row.get(1)?));
+        items.push((RunspaceId::from_store(row.get(0)?), TaskId::from_store(row.get(1)?)));
     }
     Ok(items)
 }
@@ -31,12 +31,12 @@ pub(super) fn list_bench_runspace_map(conn: &Connection) -> Result<Vec<(String, 
 pub(super) fn create_bench(
     conn: &Connection,
     task_id: &TaskId,
-    runspace_id: &str,
+    runspace_id: &RunspaceId,
     cwd: &str,
 ) -> Result<()> {
     conn.execute(
         "INSERT INTO \"_TaskToRunspace\" (task_id, runspace_id, cwd) VALUES (?1, ?2, ?3)",
-        params![task_id.as_str(), runspace_id, cwd],
+        params![task_id.as_str(), runspace_id.as_str(), cwd],
     )?;
     Ok(())
 }
@@ -50,15 +50,20 @@ pub(super) fn update_bench_cwd(conn: &Connection, task_id: &TaskId, cwd: &str) -
 }
 
 impl WorkbenchStore for SqliteStore {
-    fn get_bench_for_task(&self, task_id: &TaskId) -> Result<Option<(String, String)>> {
+    fn get_bench_for_task(&self, task_id: &TaskId) -> Result<Option<(RunspaceId, String)>> {
         get_bench_for_task(self.conn(), task_id)
     }
 
-    fn list_bench_runspace_map(&self) -> Result<Vec<(String, String)>> {
+    fn list_bench_runspace_map(&self) -> Result<Vec<(RunspaceId, TaskId)>> {
         list_bench_runspace_map(self.conn())
     }
 
-    fn create_bench(&mut self, task_id: &TaskId, runspace_id: &str, cwd: &str) -> Result<()> {
+    fn create_bench(
+        &mut self,
+        task_id: &TaskId,
+        runspace_id: &RunspaceId,
+        cwd: &str,
+    ) -> Result<()> {
         create_bench(self.conn(), task_id, runspace_id, cwd)
     }
 

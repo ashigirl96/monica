@@ -1,5 +1,5 @@
 use super::*;
-use monica_domain::{AgentSessionId, TaskRunId};
+use monica_domain::{AgentSessionId, RunspaceId, TaskRunId};
 
 #[test]
 fn record_claude_hook_records_waiting_transition_and_run_output() {
@@ -790,7 +790,7 @@ fn record_claude_hook_tracks_agent_status_on_session_without_task() {
     let mut repos = FakeRepos::default();
     let session = repos
         .create_terminal_session(NewTerminalSession {
-            runspace_id: Some("rs-1".to_string()),
+            runspace_id: Some(RunspaceId::from_store("rs-1".to_string())),
             tab_id: Some("tab-1".to_string()),
             kind: TerminalSessionKind::Shell,
             cwd: "/".to_string(),

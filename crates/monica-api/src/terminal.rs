@@ -109,7 +109,7 @@ impl From<monica_domain::TerminalSession> for TerminalSession {
     fn from(value: monica_domain::TerminalSession) -> Self {
         Self {
             id: value.id,
-            runspace_id: value.runspace_id,
+            runspace_id: value.runspace_id.map(Into::into),
             tab_id: value.tab_id,
             kind: value.kind.into(),
             cwd: value.cwd,
@@ -170,7 +170,7 @@ impl From<monica_application::TerminalStateSnapshot> for TerminalStateSnapshot {
 impl From<monica_application::TerminalRunspaceRow> for TerminalRunspaceRow {
     fn from(value: monica_application::TerminalRunspaceRow) -> Self {
         Self {
-            id: value.id,
+            id: value.id.into(),
             sort_order: value.sort_order,
             pinned_tab_id: value.pinned_tab_id,
             tabs: value.tabs.into_iter().map(Into::into).collect(),
@@ -201,7 +201,7 @@ impl From<TerminalStateSnapshot> for monica_application::TerminalStateSnapshot {
 impl From<TerminalRunspaceRow> for monica_application::TerminalRunspaceRow {
     fn from(value: TerminalRunspaceRow) -> Self {
         Self {
-            id: value.id,
+            id: monica_domain::RunspaceId::from_store(value.id),
             sort_order: value.sort_order,
             pinned_tab_id: value.pinned_tab_id,
             tabs: value.tabs.into_iter().map(Into::into).collect(),

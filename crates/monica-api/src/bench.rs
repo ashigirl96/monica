@@ -13,7 +13,7 @@ impl From<monica_application::TaskBench> for TaskBench {
     fn from(value: monica_application::TaskBench) -> Self {
         Self {
             task_id: value.task_id.into(),
-            runspace_id: value.runspace_id,
+            runspace_id: value.runspace_id.into(),
             cwd: value.cwd,
             created: value.created,
             env: value.env,
@@ -53,7 +53,7 @@ impl From<monica_application::RunTaskResult> for RunTaskResult {
         Self {
             task_id: value.task_id.into(),
             task_run_id: value.task_run_id.into(),
-            runspace_id: value.runspace_id,
+            runspace_id: value.runspace_id.into(),
             cwd: value.cwd,
             env: value.env,
             initial_command: value.initial_command,

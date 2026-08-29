@@ -147,6 +147,13 @@ impl NoteId {
 }
 
 id_newtype! {
+    /// Identity of a runspace — either the per-task bench (`bench-<task-id>`, minted by
+    /// `monica_application::bench_runspace_id`) or a workbench layout runspace minted by the
+    /// desktop. The two mints share no format, so there is nothing to validate against.
+    RunspaceId
+}
+
+id_newtype! {
     /// Identity of an agent conversation, as minted by the agent itself (Claude Code's
     /// `--session-id`). Distinct from every monica-minted id it travels next to — a
     /// [`TerminalSession`](crate::TerminalSession) carries both its own `ts-<n>` id and the
@@ -214,6 +221,15 @@ mod tests {
         let raw: String = id.clone().into();
         assert_eq!(raw, "run-7");
         assert_eq!(id.into_string(), "run-7");
+    }
+
+    #[test]
+    fn runspace_id_round_trips() {
+        let bench = RunspaceId::from_store("bench-MON-1".to_string());
+        assert_eq!(bench.as_str(), "bench-MON-1");
+        assert_eq!(bench.to_string(), "bench-MON-1");
+        assert_eq!(bench, "bench-MON-1");
+        assert_eq!(bench.into_string(), "bench-MON-1");
     }
 
     #[test]

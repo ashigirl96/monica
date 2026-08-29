@@ -2,8 +2,8 @@ use anyhow::Result;
 use monica_application::ports::TerminalSessionRepository;
 use monica_application::{TerminalSessionUpdate, TerminalStateSnapshot};
 use monica_domain::{
-    AgentSessionId, AgentSessionStatus, NewTerminalSession, TaskRunWaitReason, TerminalSession,
-    TerminalSessionKind, TerminalSessionStatus,
+    AgentSessionId, AgentSessionStatus, NewTerminalSession, RunspaceId, TaskRunWaitReason,
+    TerminalSession, TerminalSessionKind, TerminalSessionStatus,
 };
 use rusqlite::{params, Row};
 
@@ -21,7 +21,7 @@ fn session_from_row(row: &Row<'_>) -> Result<TerminalSession> {
     let agent_wait_reason: Option<String> = row.get("agent_wait_reason")?;
     Ok(TerminalSession {
         id: row.get("id")?,
-        runspace_id: row.get("runspace_id")?,
+        runspace_id: row.get::<_, Option<String>>("runspace_id")?.map(RunspaceId::from_store),
         tab_id: row.get("tab_id")?,
         kind: kind.parse::<TerminalSessionKind>()?,
         cwd: row.get("cwd")?,
@@ -56,7 +56,7 @@ impl SqliteStore {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'starting', ?7, ?8)",
             params![
                 id,
-                new.runspace_id,
+                new.runspace_id.as_ref().map(RunspaceId::as_str),
                 new.tab_id,
                 new.kind.as_str(),
                 new.cwd,
@@ -99,8 +99,9 @@ impl SqliteStore {
 
     pub fn list_terminal_sessions(
         &self,
-        runspace_id: Option<&str>,
+        runspace_id: Option<&RunspaceId>,
     ) -> Result<Vec<TerminalSession>> {
+        let runspace_id = runspace_id.map(RunspaceId::as_str);
         let (filter, params): (&str, Vec<&dyn rusqlite::ToSql>) = match &runspace_id {
             Some(rs) => ("WHERE runspace_id = ?1", vec![rs]),
             None => ("", vec![]),
@@ -279,7 +280,10 @@ impl TerminalSessionRepository for SqliteStore {
         SqliteStore::latest_terminal_session_for_tab(self, tab_id)
     }
 
-    fn list_terminal_sessions(&self, runspace_id: Option<&str>) -> Result<Vec<TerminalSession>> {
+    fn list_terminal_sessions(
+        &self,
+        runspace_id: Option<&RunspaceId>,
+    ) -> Result<Vec<TerminalSession>> {
         SqliteStore::list_terminal_sessions(self, runspace_id)
     }
 

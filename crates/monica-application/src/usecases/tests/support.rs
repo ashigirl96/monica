@@ -16,7 +16,7 @@ use crate::usecases::runs::record_hook;
 use crate::prelude::{
     Agent, AgentSessionId, AgentSignal, Continuation, DisplayStatus, Event, ExternalReference,
     NewNotificationIntent, NewTask, NewTaskRun, NewTerminalSession,
-    NotificationIntent, Project, Provider, RefType, SignalKind, Task, TaskId, TaskKind, TaskRun,
+    NotificationIntent, Project, Provider, RefType, RunspaceId, SignalKind, Task, TaskId, TaskKind, TaskRun,
     TaskRunId, TaskRunStatus, TaskRunWaitReason, TaskStatus, TerminalSession,
     AgentSessionStatus,
     TerminalSessionKind, TerminalSessionStatus,
@@ -705,7 +705,7 @@ impl NotificationOutboxStore for FakeRepos {
 }
 
 impl FakeRepos {
-    fn do_create_bench(&self, task_id: &str, runspace_id: &str, cwd: &str) -> Result<()> {
+    fn do_create_bench(&self, task_id: &TaskId, runspace_id: &RunspaceId, cwd: &str) -> Result<()> {
         self.state
             .borrow_mut()
             .benches
@@ -715,15 +715,33 @@ impl FakeRepos {
 }
 
 impl WorkbenchStore for FakeRepos {
-    fn get_bench_for_task(&self, task_id: &TaskId) -> Result<Option<(String, String)>> {
-        Ok(self.state.borrow().benches.get(task_id.as_str()).cloned())
+    fn get_bench_for_task(&self, task_id: &TaskId) -> Result<Option<(RunspaceId, String)>> {
+        Ok(self
+            .state
+            .borrow()
+            .benches
+            .get(task_id.as_str())
+            .map(|(runspace_id, cwd)| (RunspaceId::from_store(runspace_id.clone()), cwd.clone())))
     }
 
-    fn list_bench_runspace_map(&self) -> Result<Vec<(String, String)>> {
-        Ok(self.state.borrow().benches.values().cloned().collect())
+    fn list_bench_runspace_map(&self) -> Result<Vec<(RunspaceId, TaskId)>> {
+        Ok(self
+            .state
+            .borrow()
+            .benches
+            .iter()
+            .map(|(task_id, (runspace_id, _cwd))| {
+                (RunspaceId::from_store(runspace_id.clone()), TaskId::from_store(task_id.clone()))
+            })
+            .collect())
     }
 
-    fn create_bench(&mut self, task_id: &TaskId, runspace_id: &str, cwd: &str) -> Result<()> {
+    fn create_bench(
+        &mut self,
+        task_id: &TaskId,
+        runspace_id: &RunspaceId,
+        cwd: &str,
+    ) -> Result<()> {
         self.do_create_bench(task_id, runspace_id, cwd)
     }
 
@@ -895,15 +913,20 @@ impl Clock for FakeUow<'_> {
 }
 
 impl WorkbenchStore for FakeUow<'_> {
-    fn get_bench_for_task(&self, task_id: &TaskId) -> Result<Option<(String, String)>> {
+    fn get_bench_for_task(&self, task_id: &TaskId) -> Result<Option<(RunspaceId, String)>> {
         self.inner.get_bench_for_task(task_id)
     }
 
-    fn list_bench_runspace_map(&self) -> Result<Vec<(String, String)>> {
+    fn list_bench_runspace_map(&self) -> Result<Vec<(RunspaceId, TaskId)>> {
         self.inner.list_bench_runspace_map()
     }
 
-    fn create_bench(&mut self, task_id: &TaskId, runspace_id: &str, cwd: &str) -> Result<()> {
+    fn create_bench(
+        &mut self,
+        task_id: &TaskId,
+        runspace_id: &RunspaceId,
+        cwd: &str,
+    ) -> Result<()> {
         self.inner.do_create_bench(task_id, runspace_id, cwd)
     }
 
@@ -1431,13 +1454,16 @@ impl TerminalSessionRepository for FakeRepos {
             .cloned())
     }
 
-    fn list_terminal_sessions(&self, runspace_id: Option<&str>) -> Result<Vec<TerminalSession>> {
+    fn list_terminal_sessions(
+        &self,
+        runspace_id: Option<&RunspaceId>,
+    ) -> Result<Vec<TerminalSession>> {
         Ok(self
             .state
             .borrow()
             .terminal_sessions
             .iter()
-            .filter(|s| runspace_id.is_none_or(|r| s.runspace_id.as_deref() == Some(r)))
+            .filter(|s| runspace_id.is_none_or(|r| s.runspace_id.as_ref() == Some(r)))
             .cloned()
             .collect())
     }

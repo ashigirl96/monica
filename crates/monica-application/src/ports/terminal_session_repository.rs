@@ -1,8 +1,8 @@
 use anyhow::Result;
 
 use monica_domain::{
-    AgentSessionId, AgentSessionStatus, NewTerminalSession, TaskRunWaitReason, TerminalSession,
-    TerminalSessionStatus,
+    AgentSessionId, AgentSessionStatus, NewTerminalSession, RunspaceId, TaskRunWaitReason,
+    TerminalSession, TerminalSessionStatus,
 };
 
 use crate::terminal_state::TerminalStateSnapshot;
@@ -40,7 +40,10 @@ pub trait TerminalSessionRepository {
 
     fn latest_terminal_session_for_tab(&self, tab_id: &str) -> Result<Option<TerminalSession>>;
 
-    fn list_terminal_sessions(&self, runspace_id: Option<&str>) -> Result<Vec<TerminalSession>>;
+    fn list_terminal_sessions(
+        &self,
+        runspace_id: Option<&RunspaceId>,
+    ) -> Result<Vec<TerminalSession>>;
 
     /// Apply daemon-reconcile results in one transaction; a settled (terminal) row never returns
     /// to a live status.
