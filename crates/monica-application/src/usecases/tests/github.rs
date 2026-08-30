@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::*;
 use super::support::*;
-use crate::usecases::github::{bulk_sync_pull_requests, TrackGithubIssueInput};
+use crate::usecases::github::{bulk_sync_pull_requests, TrackGithubIssueInput, TrackOutcome};
 use crate::{GithubPullRequest, GithubPullRequestStatus, RepoPullRequest, UnresolvedPullRequestRef};
 
 #[tokio::test]
@@ -22,6 +22,7 @@ async fn track_github_issue_uses_gateway_and_repositories() {
     assert_eq!(report.task.id, "MON-1");
     assert_eq!(report.task.project_id.as_deref(), Some("owner/repo"));
     assert_eq!(report.issue.number, 42);
+    assert_eq!(report.outcome, TrackOutcome::Created);
 
     let refs = repos.list_external_refs(&report.task.id).unwrap();
     assert_eq!(refs.len(), 1);
@@ -30,6 +31,66 @@ async fn track_github_issue_uses_gateway_and_repositories() {
     assert_eq!(refs[0].number, Some(42));
 }
 
+
+fn track_input() -> TrackGithubIssueInput {
+    TrackGithubIssueInput { repo: "owner/repo".to_string(), number: 42 }
+}
+
+#[tokio::test]
+async fn track_github_issue_returns_the_existing_open_task_on_retrack() {
+    let mut repos = FakeRepos::default();
+    let first = track_github_issue(&mut repos, &FakeGithub, track_input())
+        .await
+        .unwrap();
+    let second = track_github_issue(&mut repos, &FakeGithub, track_input())
+        .await
+        .unwrap();
+
+    assert_eq!(first.outcome, TrackOutcome::Created);
+    assert_eq!(second.outcome, TrackOutcome::AlreadyTracked);
+    assert_eq!(second.task.id, first.task.id);
+    assert_eq!(repos.list_tasks().unwrap().len(), 1, "re-tracking must not fork a second task");
+    assert_eq!(
+        repos.list_external_refs(&first.task.id).unwrap().len(),
+        1,
+        "the issue ref must not be duplicated either"
+    );
+}
+
+#[tokio::test]
+async fn track_github_issue_creates_a_new_task_when_the_previous_one_is_closed() {
+    let mut repos = FakeRepos::default();
+    let first = track_github_issue(&mut repos, &FakeGithub, track_input())
+        .await
+        .unwrap();
+    repos.mark_task_closed(&first.task.id).unwrap();
+
+    let second = track_github_issue(&mut repos, &FakeGithub, track_input())
+        .await
+        .unwrap();
+
+    assert_eq!(second.outcome, TrackOutcome::Created);
+    assert_eq!(second.task.id, "MON-2");
+    assert_eq!(repos.list_tasks().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn track_github_issue_does_not_resync_the_title_of_an_existing_task() {
+    let mut repos = FakeRepos::default();
+    let github = RetitlingGithub::new("original title");
+    let first = track_github_issue(&mut repos, &github, track_input())
+        .await
+        .unwrap();
+
+    github.set_title("renamed upstream");
+    let second = track_github_issue(&mut repos, &github, track_input())
+        .await
+        .unwrap();
+
+    assert_eq!(second.task.title, "original title", "the stored task is returned untouched");
+    assert_eq!(second.issue.title, "renamed upstream", "the report still reflects the fetch");
+    assert_eq!(second.task.id, first.task.id);
+}
 
 #[test]
 fn github_auth_status_uses_auth_gateway() {

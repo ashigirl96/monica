@@ -56,7 +56,7 @@ pub use terminal_state::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTab
 pub use usecases::{
     AttachSessionReport, CloseTaskReport, DaemonSessionView, HookContext, HookReport,
     TerminalSessionUpdate,
-    TrackGithubIssueReport,
+    TrackGithubIssueReport, TrackOutcome,
 };
 
 // Usecase sub-ports (referenced by Backend trait)
