@@ -5,7 +5,7 @@ use super::ports::{
     ProjectRepository, TaskRunOutputs, TaskRunStore, TaskStore, WorkbenchStore,
 };
 use crate::prelude::{Project, RunspaceId, Task, TaskId};
-use crate::{ApplicationError, ApplicationResult, ExecutionProfile, TaskBench};
+use crate::{ApplicationError, ApplicationResult, TaskBench};
 
 pub(crate) fn default_bench_cwd(project: Option<&Project>, home_dir: Option<&str>) -> String {
     project
@@ -48,38 +48,17 @@ pub fn task_shell_env<R, A>(
     task_id: &TaskId,
 ) -> ApplicationResult<Vec<(String, String)>>
 where
-    R: TaskStore + ProjectRepository + TaskRunStore + WorkbenchStore,
+    R: TaskStore + ProjectRepository,
     A: TaskRunOutputs,
 {
     let (task, project) = load_task_and_optional_project(repos, task_id)?;
-    let cwd = repos
-        .get_bench_for_task(task_id)?
-        .map(|(_, cwd)| cwd)
-        .or_else(|| resolve_worktree_cwd(repos, &task))
-        .unwrap_or_else(|| default_bench_cwd(project.as_ref(), home_dir().as_deref()));
-    let mut profile = load_optional_profile(repos, project.as_ref())?;
-    if let Some(prof) = &mut profile {
-        if let Some(agent) = primary_run_agent(repos, &task) {
-            prof.agent_default = agent;
-        }
-    }
-    let env = match (project.as_ref(), profile.as_ref()) {
-        (Some(p), Some(prof)) => outputs
-            .prepare_task_shell_env(&task.id, p, prof, None, std::path::Path::new(&cwd))
+    let env = match project.as_ref() {
+        Some(p) => outputs
+            .prepare_task_shell_env(&task.id, p, None)
             .map_err(|e| ApplicationError::external(format!("failed to prepare shell env: {e:#}")))?,
-        _ => Vec::new(),
+        None => Vec::new(),
     };
     Ok(env)
-}
-
-fn primary_run_agent<R>(repos: &R, task: &Task) -> Option<crate::prelude::Agent>
-where
-    R: TaskRunStore,
-{
-    task.primary_task_run_id
-        .as_ref()
-        .and_then(|id| repos.get_task_run(id).ok().flatten())
-        .and_then(|run| run.agent)
 }
 
 fn load_task_and_optional_project<R>(
@@ -99,36 +78,12 @@ where
     Ok((task, project))
 }
 
-fn load_optional_profile<R>(
-    repos: &R,
-    project: Option<&Project>,
-) -> ApplicationResult<Option<ExecutionProfile>>
-where
-    R: ProjectRepository,
-{
-    match project {
-        Some(p) => Ok(repos.get_execution_profile(&p.id)?),
-        None => Ok(None),
-    }
-}
-
-fn shell_env_for<A>(
-    outputs: &A,
-    task: &Task,
-    project: Option<&Project>,
-    profile: Option<&ExecutionProfile>,
-    cwd: &str,
-) -> Vec<(String, String)>
+fn shell_env_for<A>(outputs: &A, task: &Task, project: Option<&Project>) -> Vec<(String, String)>
 where
     A: TaskRunOutputs,
 {
     project
-        .zip(profile)
-        .and_then(|(p, prof)| {
-            outputs
-                .prepare_task_shell_env(&task.id, p, prof, None, std::path::Path::new(cwd))
-                .ok()
-        })
+        .and_then(|p| outputs.prepare_task_shell_env(&task.id, p, None).ok())
         .unwrap_or_default()
 }
 
@@ -142,11 +97,7 @@ where
     let desired_cwd = resolve_worktree_cwd(repos, &task)
         .unwrap_or_else(|| default_bench_cwd(project.as_ref(), home_dir().as_deref()));
     let (runspace_id, cwd, created) = ensure_bench(repos, task_id, &desired_cwd, false)?;
-
-    // Write hook settings into the cwd Claude will actually launch in (the bench's resolved cwd,
-    // which may differ from desired_cwd when the bench already existed).
-    let profile = load_optional_profile(repos, project.as_ref())?;
-    let env = shell_env_for(outputs, &task, project.as_ref(), profile.as_ref(), &cwd);
+    let env = shell_env_for(outputs, &task, project.as_ref());
 
     Ok(TaskBench {
         task_id: task.id,

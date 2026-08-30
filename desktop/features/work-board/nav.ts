@@ -13,7 +13,6 @@ import { pendingWorkboardHintAtom, resolveWorkboardFocus } from "@/stores/ui-sta
 
 const AGENT_TARGETS: ReadonlyArray<{ agent: Agent; label: string; hint: string }> = [
   { agent: "claude", label: "Claude", hint: "c" },
-  { agent: "codex", label: "Codex", hint: "x" },
 ];
 
 type MoveDirection = "up" | "down" | "left" | "right";

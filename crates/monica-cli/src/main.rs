@@ -88,8 +88,9 @@ mod tests {
         assert!(Cli::try_parse_from(["monica", "task", "attach", "MON-1"]).is_ok());
         assert!(Cli::try_parse_from(["monica", "task", "attach"]).is_err());
         assert!(Cli::try_parse_from(["monica", "task", "attach", "MON-1", "MON-2"]).is_err());
+        // Claude is the only agent, so attach takes no agent selector.
         assert!(
-            Cli::try_parse_from(["monica", "task", "attach", "MON-1", "--agent", "codex"]).is_ok()
+            Cli::try_parse_from(["monica", "task", "attach", "MON-1", "--agent", "claude"]).is_err()
         );
     }
 

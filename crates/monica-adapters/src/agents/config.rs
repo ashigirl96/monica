@@ -7,7 +7,6 @@ use monica_domain::Agent;
 pub fn extra_hook_events(agent: Agent) -> &'static [&'static str] {
     match agent {
         Agent::Claude => &["StopFailure", "SessionEnd"],
-        Agent::Codex => &["PermissionRequest"],
     }
 }
 
@@ -15,7 +14,6 @@ pub fn extra_hook_events(agent: Agent) -> &'static [&'static str] {
 pub fn hooks_config_path(agent: Agent) -> &'static str {
     match agent {
         Agent::Claude => ".claude/settings.local.json",
-        Agent::Codex => ".codex/hooks.json",
     }
 }
 
@@ -32,16 +30,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_extra_hook_events() {
-        let events = extra_hook_events(Agent::Codex);
-        assert!(events.contains(&"PermissionRequest"));
-        assert!(!events.contains(&"StopFailure"));
-        assert!(!events.contains(&"SessionEnd"));
-    }
-
-    #[test]
     fn hook_config_paths() {
         assert_eq!(hooks_config_path(Agent::Claude), ".claude/settings.local.json");
-        assert_eq!(hooks_config_path(Agent::Codex), ".codex/hooks.json");
     }
 }

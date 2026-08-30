@@ -53,10 +53,7 @@ export function useBoardNavigation() {
             store.set(navigateSubmenuAtom, { type: "move", direction: "up" });
           else if (e.key === "Enter") store.set(executeRunAtom);
           else if (e.key === "c") store.set(executeRunAtom);
-          else if (e.key === "x") {
-            store.set(navigateSubmenuAtom, { type: "move", direction: "down" });
-            store.set(executeRunAtom);
-          } else if (e.key === "Escape" || e.key === "h" || e.key === "Backspace")
+          else if (e.key === "Escape" || e.key === "h" || e.key === "Backspace")
             store.set(navigateSubmenuAtom, { type: "exit" });
           else if (e.key === " ") store.set(menuAtom, null);
           else return;

@@ -11,14 +11,11 @@ use monica_domain::{Agent, TaskId, TaskRunId};
 pub enum HookCommand {
     /// Receive a Claude Code hook callback (event JSON on stdin, `MONICA_*` in env)
     Claude,
-    /// Receive a Codex CLI hook callback (event JSON on stdin, `MONICA_*` in env)
-    Codex,
 }
 
 pub fn run(cmd: HookCommand) -> Result<()> {
     let agent = match cmd {
         HookCommand::Claude => Agent::Claude,
-        HookCommand::Codex => Agent::Codex,
     };
     let log_file = format!("hook-{}.log", agent.as_str());
     if let Err(e) = handle_agent(agent, &log_file) {

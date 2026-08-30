@@ -355,7 +355,8 @@ fn attach_rejects_a_session_belonging_to_another_tab() {
 }
 
 /// Nothing corrects `agent` after the fact — hook observations never touch it — and a resume
-/// builds its command line from it, so the caller's agent must land verbatim.
+/// builds its command line from it, so the caller's agent must land verbatim rather than staying
+/// NULL for the profile default to fill in later.
 #[test]
 fn attach_records_the_agent_it_was_given() {
     let mut repos = FakeRepos::default();
@@ -363,11 +364,11 @@ fn attach_records_the_agent_it_was_given() {
     let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
 
     let report =
-        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Codex, "tab-1", &session_id)
+        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id)
             .unwrap();
 
     assert_eq!(
         repos.get_task_run(&report.task_run_id).unwrap().unwrap().agent,
-        Some(Agent::Codex)
+        Some(Agent::Claude)
     );
 }

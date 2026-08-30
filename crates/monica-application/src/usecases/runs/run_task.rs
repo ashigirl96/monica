@@ -298,7 +298,7 @@ where
     }
 
     // A resumed session must reopen under the agent that recorded it — an override only applies
-    // to fresh launches, so `codex resume` can never be fed a Claude session.
+    // to fresh launches, so a resume can never be fed another agent's session.
     let agent = match resume_session_id {
         Some(_) => primary_run.agent.unwrap_or(profile.agent_default),
         None => agent_override.unwrap_or(profile.agent_default),
@@ -306,11 +306,9 @@ where
     // Stamp the effective agent on the run: without this an overridden fresh launch leaves
     // `agent = NULL` behind and a later resume would fall back to the profile default.
     repos.set_task_run_agent(&primary_id, agent)?;
-    let mut effective_profile = profile;
-    effective_profile.agent_default = agent;
 
     let env = outputs
-        .prepare_task_shell_env(task_id, &project, &effective_profile, Some(&primary_id), &worktree_path)
+        .prepare_task_shell_env(task_id, &project, Some(&primary_id))
         .map_err(|e| ApplicationError::external(format!("failed to prepare shell env: {e:#}")))?;
 
     let (runspace_id, _, _) = super::open_bench::ensure_bench(repos, &task.id, &worktree_str, true)?;
@@ -362,10 +360,7 @@ fn agent_initial_command(agent: crate::prelude::Agent, prompt: Option<&str>) -> 
 fn agent_resume_command(agent: crate::prelude::Agent, session_id: &str) -> String {
     let bin = agent.as_str();
     let sid = crate::shell::quote_single(session_id);
-    match agent {
-        crate::prelude::Agent::Claude => format!("{bin} --resume {sid}"),
-        crate::prelude::Agent::Codex => format!("{bin} resume {sid}"),
-    }
+    format!("{bin} --resume {sid}")
 }
 
 #[cfg(test)]
@@ -373,21 +368,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resume_command_quotes_session_per_agent() {
+    fn resume_command_quotes_session_id() {
         assert_eq!(
             agent_resume_command(crate::prelude::Agent::Claude, "sess-1"),
             "claude --resume 'sess-1'"
-        );
-        assert_eq!(
-            agent_resume_command(crate::prelude::Agent::Codex, "sess-1"),
-            "codex resume 'sess-1'"
         );
     }
 
     #[test]
     fn empty_prompt_launches_agent_bare() {
         assert_eq!(agent_initial_command(crate::prelude::Agent::Claude, None), "claude");
-        assert_eq!(agent_initial_command(crate::prelude::Agent::Codex, None), "codex");
     }
 
     #[test]
@@ -395,10 +385,6 @@ mod tests {
         assert_eq!(
             agent_initial_command(crate::prelude::Agent::Claude, Some("fix the login bug")),
             "claude 'fix the login bug'"
-        );
-        assert_eq!(
-            agent_initial_command(crate::prelude::Agent::Codex, Some("fix the login bug")),
-            "codex 'fix the login bug'"
         );
     }
 

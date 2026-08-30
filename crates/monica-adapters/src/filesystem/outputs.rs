@@ -2,14 +2,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use monica_application::{ExecutionProfile, ExplanationOutputs, ShellScaffolding, TaskRunOutputs};
-use monica_domain::{Agent, Project, TaskId, TaskRunId};
+use monica_application::{ExplanationOutputs, ShellScaffolding, TaskRunOutputs};
+use monica_domain::{Project, TaskId, TaskRunId};
 
 use monica_paths as paths;
 
-use super::shell_scaffold::{
-    base_shell_env, pinned_hook_cmd, strip_legacy_claude_hooks, write_codex_hooks_config,
-};
+use super::shell_scaffold::{base_shell_env, strip_legacy_claude_hooks};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct FsTaskRunOutputs;
@@ -29,17 +27,8 @@ impl TaskRunOutputs for FsTaskRunOutputs {
         &self,
         task_id: &TaskId,
         project: &Project,
-        profile: &ExecutionProfile,
         task_run_id: Option<&TaskRunId>,
-        cwd: &Path,
     ) -> Result<Vec<(String, String)>> {
-        match profile.agent_default {
-            Agent::Claude => {}
-            Agent::Codex => {
-                write_codex_hooks_config(cwd, &pinned_hook_cmd(Agent::Codex)?)?;
-            }
-        }
-
         let mut env = vec![
             ("MONICA_TASK_ID".to_string(), task_id.to_string()),
             ("MONICA_PROJECT_ID".to_string(), project.id.clone()),

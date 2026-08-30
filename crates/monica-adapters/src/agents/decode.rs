@@ -26,17 +26,7 @@ struct ClaudeEventDecoder;
 
 impl AgentEventDecoder for ClaudeEventDecoder {
     fn decode(&self, raw: &[u8]) -> Result<Option<AgentSignal>> {
-        Ok(decode_signal(Agent::Claude, raw))
-    }
-}
-
-/// Codex CLI hook-event decoder.
-#[derive(Debug, Default, Clone, Copy)]
-struct CodexEventDecoder;
-
-impl AgentEventDecoder for CodexEventDecoder {
-    fn decode(&self, raw: &[u8]) -> Result<Option<AgentSignal>> {
-        Ok(decode_signal(Agent::Codex, raw))
+        Ok(decode_signal(raw))
     }
 }
 
@@ -45,7 +35,6 @@ impl AgentEventDecoder for CodexEventDecoder {
 fn decoder_for(agent: Agent) -> &'static dyn AgentEventDecoder {
     match agent {
         Agent::Claude => &ClaudeEventDecoder,
-        Agent::Codex => &CodexEventDecoder,
     }
 }
 
@@ -61,7 +50,7 @@ fn event_label(raw: &[u8]) -> Option<String> {
         .map(str::to_string)
 }
 
-fn decode_signal(agent: Agent, raw: &[u8]) -> Option<AgentSignal> {
+fn decode_signal(raw: &[u8]) -> Option<AgentSignal> {
     let text = std::str::from_utf8(raw).ok()?.trim();
     let parsed: Value = serde_json::from_str(text).ok()?;
     let event_name = parsed.get("hook_event_name").and_then(Value::as_str);
@@ -79,11 +68,11 @@ fn decode_signal(agent: Agent, raw: &[u8]) -> Option<AgentSignal> {
     Some(AgentSignal {
         agent_session_id,
         event_label: event_name.map(str::to_string),
-        kind: signal_kind(agent, event_name, &parsed),
+        kind: signal_kind(event_name, &parsed),
     })
 }
 
-fn signal_kind(agent: Agent, event_name: Option<&str>, payload: &Value) -> SignalKind {
+fn signal_kind(event_name: Option<&str>, payload: &Value) -> SignalKind {
     match event_name {
         Some("SessionStart") => SignalKind::SessionStarted {
             continuation: continuation_of(payload),
@@ -108,11 +97,7 @@ fn signal_kind(agent: Agent, event_name: Option<&str>, payload: &Value) -> Signa
         Some("SubagentStop") => SignalKind::SubagentFinished {
             subagents_running: subagents_in_flight(payload, stopping_subagent_id(payload)),
         },
-        Some("PermissionRequest") if agent == Agent::Codex => SignalKind::UserInputRequired {
-            reason: TaskRunWaitReason::PermissionRequest,
-            plan_file_path: None,
-        },
-        Some("SessionEnd") if agent == Agent::Claude => SignalKind::SessionEnded,
+        Some("SessionEnd") => SignalKind::SessionEnded,
         _ => SignalKind::Inert,
     }
 }
@@ -177,10 +162,6 @@ mod tests {
         decoder_for(Agent::Claude).decode(payload.to_string().as_bytes()).unwrap()
     }
 
-    fn decode_codex(payload: Value) -> Option<AgentSignal> {
-        decoder_for(Agent::Codex).decode(payload.to_string().as_bytes()).unwrap()
-    }
-
     #[test]
     fn unparseable_or_empty_yields_no_signal() {
         assert!(decoder_for(Agent::Claude).decode(b"not json").unwrap().is_none());
@@ -198,18 +179,14 @@ mod tests {
     }
 
     #[test]
-    fn non_wait_tool_use_is_dropped_for_all_agents() {
-        for agent in [Agent::Claude, Agent::Codex] {
-            for event in ["PreToolUse", "PostToolUse"] {
-                let sig = decoder_for(agent)
-                    .decode(
-                        json!({"hook_event_name": event, "tool_name": "Read"})
-                            .to_string()
-                            .as_bytes(),
-                    )
-                    .unwrap();
-                assert!(sig.is_none(), "{agent:?} {event}");
-            }
+    fn non_wait_tool_use_is_dropped() {
+        for event in ["PreToolUse", "PostToolUse"] {
+            let sig = decoder_for(Agent::Claude)
+                .decode(
+                    json!({"hook_event_name": event, "tool_name": "Read"}).to_string().as_bytes(),
+                )
+                .unwrap();
+            assert!(sig.is_none(), "{event}");
         }
     }
 
@@ -349,28 +326,24 @@ mod tests {
         assert_eq!(sig.agent_session_id.as_deref(), Some("s1"));
     }
 
+    /// Every hook event outside the tracked set decodes to `Inert` rather than being dropped: the
+    /// driver still gets a signal carrying the session id and label.
     #[test]
-    fn codex_permission_request_and_session_end_differ_from_claude() {
-        let perm = decode_codex(json!({"hook_event_name": "PermissionRequest"})).unwrap();
-        assert_eq!(
-            perm.kind,
-            SignalKind::UserInputRequired {
-                reason: TaskRunWaitReason::PermissionRequest,
-                plan_file_path: None,
-            }
-        );
-        // Codex has no terminal SessionEnd, and compaction hooks are inert.
-        assert_eq!(
-            decode_codex(json!({"hook_event_name": "SessionEnd"})).unwrap().kind,
-            SignalKind::Inert
-        );
-        for event in ["PreCompact", "PostCompact"] {
-            assert_eq!(decode_codex(json!({"hook_event_name": event})).unwrap().kind, SignalKind::Inert);
+    fn untracked_events_are_inert() {
+        for event in ["PreCompact", "PostCompact", "PermissionRequest"] {
+            assert_eq!(
+                decode_claude(json!({"hook_event_name": event})).unwrap().kind,
+                SignalKind::Inert,
+                "{event}"
+            );
         }
-        // Claude does not act on a PermissionRequest (it never emits one).
+    }
+
+    #[test]
+    fn session_end_is_terminal() {
         assert_eq!(
-            decode_claude(json!({"hook_event_name": "PermissionRequest"})).unwrap().kind,
-            SignalKind::Inert
+            decode_claude(json!({"hook_event_name": "SessionEnd"})).unwrap().kind,
+            SignalKind::SessionEnded
         );
     }
 }
