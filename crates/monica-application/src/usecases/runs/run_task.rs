@@ -141,11 +141,9 @@ where
 {
     let (task, project) = load_task_and_project(repos, task_id)?;
     ensure_task_accepts_new_run(repos, &task)?;
-
-    let cwd = super::open_bench::default_bench_cwd(
-        Some(&project),
-        super::open_bench::home_dir().as_deref(),
-    );
+    // Validated before the run exists: there is no setup phase to fail into, so a run committed as
+    // `Prepared` against an unusable checkout would leave the task with no way forward.
+    let cwd = project_checkout(&project)?;
 
     // Same atomicity as `start_run`, plus the Prepared transition: there is no second phase to
     // reach it, so a run left at `SettingUp` here would never advance.
@@ -422,10 +420,7 @@ where
 /// session either. A run with no worktree at all — in-place, or attached — opens in the checkout.
 fn launch_cwd(run: &TaskRun, project: &Project) -> ApplicationResult<String> {
     let Some(worktree) = run.worktree_path.as_deref() else {
-        return Ok(super::open_bench::default_bench_cwd(
-            Some(project),
-            super::open_bench::home_dir().as_deref(),
-        ));
+        return project_checkout(project);
     };
     if !Path::new(worktree).exists() {
         return Err(ApplicationError::validation(format!(
@@ -433,6 +428,28 @@ fn launch_cwd(run: &TaskRun, project: &Project) -> ApplicationResult<String> {
         )));
     }
     Ok(worktree.to_string())
+}
+
+/// The project checkout a worktree-less run opens in.
+///
+/// Deliberately stricter than `default_bench_cwd`, which falls back to `$HOME` (then `/tmp`) so a
+/// browsing shell always has somewhere to open: launching an agent outside the project is never
+/// what Run meant. Missing and stale paths both fail here rather than at terminal spawn, because
+/// a launch that dies after the run is `Prepared` strands the task — Prepare is disabled in that
+/// state and Run just retries the same bad cwd, which `ensure_bench` has by then pinned.
+fn project_checkout(project: &Project) -> ApplicationResult<String> {
+    let path = project.path.as_deref().ok_or_else(|| {
+        ApplicationError::validation(format!(
+            "project {} has no checkout path; register it before running without a worktree",
+            project.id
+        ))
+    })?;
+    if !Path::new(path).exists() {
+        return Err(ApplicationError::validation(format!(
+            "project checkout does not exist at {path}"
+        )));
+    }
+    Ok(path.to_string())
 }
 
 /// Reads `.monica/prompt.md` from the run's working directory, returning the trimmed body only

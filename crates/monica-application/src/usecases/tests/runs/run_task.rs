@@ -184,8 +184,7 @@ fn prepare_claude_for_run_rejects_non_prepared_primary() {
 #[test]
 fn prepare_claude_for_run_falls_back_to_project_path_without_worktree() {
     let mut repos = FakeRepos::default();
-    insert_runnable_project(&repos);
-    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let (task_id, checkout) = checkout_backed_task(&mut repos);
     let prep = start_run(&mut repos, &task_id).unwrap();
     repos
         .finish_task_run(&prep.task_run_id, &task_id, TaskRunStatus::Prepared)
@@ -194,7 +193,7 @@ fn prepare_claude_for_run_falls_back_to_project_path_without_worktree() {
     let result =
         run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree)
             .unwrap();
-    assert_eq!(result.cwd, "/repo");
+    assert_eq!(result.cwd, checkout.to_string_lossy());
 }
 
 /// A worktree that is merely *missing* must stay an error: falling back would run an isolated
@@ -359,11 +358,19 @@ fn in_place_run(repos: &mut FakeRepos, task_id: &TaskId) -> crate::RunTaskResult
     run_task(repos, &FakeTaskRunOutputs::default(), task_id, None, RunMode::InPlace).unwrap()
 }
 
+/// An in-place run stats the project checkout before launching, so these tests need one that
+/// actually exists rather than the `/repo` placeholder.
+fn checkout_backed_task(repos: &mut FakeRepos) -> (TaskId, PathBuf) {
+    let checkout = temp_dir_named("monica-checkout");
+    insert_runnable_project_at(repos, &checkout.to_string_lossy());
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    (task_id, checkout)
+}
+
 #[test]
 fn run_task_in_place_creates_prepared_run_without_branch_or_worktree() {
     let mut repos = FakeRepos::default();
-    insert_runnable_project(&repos);
-    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let (task_id, _checkout) = checkout_backed_task(&mut repos);
 
     let result = in_place_run(&mut repos, &task_id);
 
@@ -378,15 +385,15 @@ fn run_task_in_place_creates_prepared_run_without_branch_or_worktree() {
 #[test]
 fn run_task_in_place_launches_claude_at_project_path() {
     let mut repos = FakeRepos::default();
-    insert_runnable_project(&repos);
-    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let (task_id, checkout) = checkout_backed_task(&mut repos);
 
     let result = in_place_run(&mut repos, &task_id);
 
-    assert_eq!(result.cwd, "/repo");
+    let expected = checkout.to_string_lossy();
+    assert_eq!(result.cwd, expected);
     assert_eq!(result.initial_command, "claude");
     let (_, cwd) = repos.get_bench_for_task(&task_id).unwrap().unwrap();
-    assert_eq!(cwd, "/repo", "the bench is pinned to the run's cwd");
+    assert_eq!(cwd, expected, "the bench is pinned to the run's cwd");
 }
 
 /// The mode only decides how a *new* run is born. A stopped in-place primary that recorded a
@@ -394,8 +401,7 @@ fn run_task_in_place_launches_claude_at_project_path() {
 #[test]
 fn run_task_in_place_resumes_stopped_in_place_primary() {
     let mut repos = FakeRepos::default();
-    insert_runnable_project(&repos);
-    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let (task_id, checkout) = checkout_backed_task(&mut repos);
 
     let first = in_place_run(&mut repos, &task_id);
     assert!(repos
@@ -409,14 +415,13 @@ fn run_task_in_place_resumes_stopped_in_place_primary() {
 
     assert_eq!(resumed.task_run_id, first.task_run_id, "the stopped run is reused");
     assert_eq!(resumed.initial_command, "claude --resume 'sess-7'");
-    assert_eq!(resumed.cwd, "/repo");
+    assert_eq!(resumed.cwd, checkout.to_string_lossy());
 }
 
 #[test]
 fn run_task_in_place_reuses_existing_prepared_primary() {
     let mut repos = FakeRepos::default();
-    insert_runnable_project(&repos);
-    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let (task_id, _checkout) = checkout_backed_task(&mut repos);
 
     let first = in_place_run(&mut repos, &task_id);
     let second = in_place_run(&mut repos, &task_id);
@@ -428,8 +433,7 @@ fn run_task_in_place_reuses_existing_prepared_primary() {
 #[test]
 fn run_task_in_place_rejects_active_primary() {
     let mut repos = FakeRepos::default();
-    insert_runnable_project(&repos);
-    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let (task_id, _checkout) = checkout_backed_task(&mut repos);
     start_run(&mut repos, &task_id).unwrap();
 
     let err =
@@ -442,8 +446,7 @@ fn run_task_in_place_rejects_active_primary() {
 #[test]
 fn run_task_in_place_rejects_closed_task() {
     let mut repos = FakeRepos::default();
-    insert_runnable_project(&repos);
-    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let (task_id, _checkout) = checkout_backed_task(&mut repos);
     repos.update_task_status(&task_id, TaskStatus::Closed).unwrap();
 
     let err =
@@ -458,8 +461,7 @@ fn run_task_in_place_rejects_closed_task() {
 #[test]
 fn run_task_in_place_ignores_sibling_worktree() {
     let mut repos = FakeRepos::default();
-    insert_runnable_project(&repos);
-    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let (task_id, checkout) = checkout_backed_task(&mut repos);
 
     let (worktree_run, worktree) = prepared_run_with_worktree(&mut repos, &task_id, "");
     repos
@@ -469,8 +471,48 @@ fn run_task_in_place_ignores_sibling_worktree() {
     let result = in_place_run(&mut repos, &task_id);
     std::fs::remove_dir_all(&worktree).ok();
 
+    let expected = checkout.to_string_lossy();
     assert_ne!(result.task_run_id, worktree_run);
-    assert_eq!(result.cwd, "/repo");
+    assert_eq!(result.cwd, expected);
     let (_, cwd) = repos.get_bench_for_task(&task_id).unwrap().unwrap();
-    assert_eq!(cwd, "/repo", "the bench follows the in-place run, not the sibling worktree");
+    assert_eq!(cwd, expected, "the bench follows the in-place run, not the sibling worktree");
+}
+
+/// `default_bench_cwd` would answer `$HOME` (then `/tmp`) here — fine for a browsing shell, but a
+/// Run must never launch its agent outside the project.
+#[test]
+fn run_task_in_place_rejects_project_without_checkout_path() {
+    let mut repos = FakeRepos::default();
+    repos.insert_project(Project::from_repo("owner/repo"));
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+
+    let err =
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+            .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
+    assert!(err.to_string().contains("has no checkout path"), "{err}");
+    assert_eq!(repos.list_task_runs_for_task(&task_id).unwrap().len(), 0);
+}
+
+/// A checkout that moved or was deleted fails at Run, not at terminal spawn: a run committed as
+/// `Prepared` against a bad cwd cannot be prepared again and Run would just retry it.
+#[test]
+fn run_task_in_place_rejects_missing_checkout_and_creates_no_run() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project_at(&repos, "/nonexistent/checkout");
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+
+    let err =
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+            .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
+    assert!(err.to_string().contains("project checkout does not exist"), "{err}");
+    assert_eq!(
+        repos.list_task_runs_for_task(&task_id).unwrap().len(),
+        0,
+        "no dead-end Prepared run is left behind"
+    );
+    assert_eq!(repos.get_bench_for_task(&task_id).unwrap(), None);
 }
