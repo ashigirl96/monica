@@ -508,11 +508,31 @@ fn run_task_in_place_rejects_missing_checkout_and_creates_no_run() {
             .unwrap_err();
 
     assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
-    assert!(err.to_string().contains("project checkout does not exist"), "{err}");
+    assert!(err.to_string().contains("is not a directory"), "{err}");
     assert_eq!(
         repos.list_task_runs_for_task(&task_id).unwrap().len(),
         0,
         "no dead-end Prepared run is left behind"
     );
     assert_eq!(repos.get_bench_for_task(&task_id).unwrap(), None);
+}
+
+/// `monica project set <repo> path` accepts any nonempty string, so the checkout can point at a
+/// regular file — which passes `exists()` but cannot be a cwd.
+#[test]
+fn run_task_in_place_rejects_checkout_that_is_not_a_directory() {
+    let mut repos = FakeRepos::default();
+    let file = temp_dir_named("monica-not-a-dir").join("checkout");
+    std::fs::write(&file, "").unwrap();
+    insert_runnable_project_at(&repos, &file.to_string_lossy());
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+
+    let err =
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+            .unwrap_err();
+    std::fs::remove_file(&file).ok();
+
+    assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
+    assert!(err.to_string().contains("is not a directory"), "{err}");
+    assert_eq!(repos.list_task_runs_for_task(&task_id).unwrap().len(), 0);
 }

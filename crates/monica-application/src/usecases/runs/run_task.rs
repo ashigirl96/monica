@@ -422,7 +422,7 @@ fn launch_cwd(run: &TaskRun, project: &Project) -> ApplicationResult<String> {
     let Some(worktree) = run.worktree_path.as_deref() else {
         return project_checkout(project);
     };
-    if !Path::new(worktree).exists() {
+    if !Path::new(worktree).is_dir() {
         return Err(ApplicationError::validation(format!(
             "worktree does not exist at {worktree}"
         )));
@@ -444,9 +444,11 @@ fn project_checkout(project: &Project) -> ApplicationResult<String> {
             project.id
         ))
     })?;
-    if !Path::new(path).exists() {
+    // `is_dir`, not `is_file`-tolerant `exists`: `monica project set <repo> path` takes any
+    // nonempty string, and a regular file passes `exists` only to fail at terminal spawn.
+    if !Path::new(path).is_dir() {
         return Err(ApplicationError::validation(format!(
-            "project checkout does not exist at {path}"
+            "project checkout is not a directory: {path}"
         )));
     }
     Ok(path.to_string())
