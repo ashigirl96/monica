@@ -62,7 +62,7 @@ export function EssayEditorPage({ id }: { id: string }) {
   // サイドバーが表示中の status。⌥H/⌥L の手動切替と、開いた note の status への同期で動く
   const [tab, setTab] = useState<EssayStatus>("writing");
   const autosave = useAutosaveContext();
-  const { schedule, flush, discard, resume, error: saveError, hasConflict } = autosave;
+  const { schedule, flush, discard, resume } = autosave;
   const { setBase, hasUnsaved } = autosave;
   const { data: essays = null } = useEssaysQuery();
   const { patchEssays, invalidateEssays } = useEssaysCache();
@@ -385,11 +385,7 @@ export function EssayEditorPage({ id }: { id: string }) {
                 <span className="ml-auto font-mono text-[0.7rem] text-[var(--ink-faint)]">
                   {note.date.replaceAll("-", ".")}
                 </span>
-                <SaveStatus
-                  saveError={saveError}
-                  conflict={hasConflict(note.id)}
-                  onReload={() => void reload()}
-                />
+                <SaveStatus noteId={note.id} onReload={() => void reload()} />
               </div>
             </header>
             <NoteBlockEditor
