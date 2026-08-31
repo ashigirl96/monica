@@ -178,22 +178,38 @@ describe("navigateSubmenuAtom", () => {
     expect(store.get(menuAtom)).toEqual(menu);
   });
 
-  test("move increments run submenu index", () => {
-    const store = createStore();
-    store.set(menuAtom, baseMenu({ submenu: { kind: "run", index: 0 } }));
+  test("move increments open submenu index", () => {
+    const store = storeWithTasks([
+      task({
+        id: "t1",
+        github_issue_number: 7,
+        github_issue_url: "https://github.com/owner/repo/issues/7",
+        github_pull_requests: [
+          {
+            repo: "owner/repo",
+            number: 8,
+            url: "https://github.com/owner/repo/pull/8",
+            status: "open",
+            is_open_or_draft: true,
+          },
+        ],
+      }),
+    ]);
+    store.set(menuAtom, baseMenu({ submenu: { kind: "open", index: 0 } }));
 
     store.set(navigateSubmenuAtom, { type: "move", direction: "down" });
 
-    expect(store.get(menuAtom)?.submenu).toEqual({ kind: "run", index: 1 });
+    expect(store.get(menuAtom)?.submenu).toEqual({ kind: "open", index: 1 });
   });
 
   test("move does not exceed bounds", () => {
     const store = createStore();
-    store.set(menuAtom, baseMenu({ submenu: { kind: "run", index: 1 } }));
+    // Claude is the only agent, so the run submenu has a single entry to sit on.
+    store.set(menuAtom, baseMenu({ submenu: { kind: "run", index: 0 } }));
 
     store.set(navigateSubmenuAtom, { type: "move", direction: "down" });
 
-    expect(store.get(menuAtom)?.submenu).toEqual({ kind: "run", index: 1 });
+    expect(store.get(menuAtom)?.submenu).toEqual({ kind: "run", index: 0 });
   });
 
   test("move does not go below 0", () => {

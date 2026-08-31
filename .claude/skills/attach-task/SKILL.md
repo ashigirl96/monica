@@ -81,9 +81,8 @@ MON-id・Task タイトル・run-id をユーザーに伝える。付け替え�
 ## 補足
 
 - `MONICA_HOME` は必ず `$HOME/monica` を指定する（指定しないと別の data dir を見てしまう）。
-- claude から使う限り `--agent` は不要（既定が claude）。codex の session から attach する
-  ときだけ `--agent codex` を付ける。この値は後から補正されず、将来の resume の
-  コマンドライン（`claude --resume` / `codex resume`）を決めるので嘘を書かないこと。
+- attach した run の agent は claude 固定（Monica が扱う agent は claude だけ）。この値は
+  後から補正されず、将来の resume のコマンドライン（`claude --resume`）を決める。
 - attach した run は **Main Run にはならない**。その Task で Prepare / Run
   （worktree を切る実装 run）は従来どおり使える。
 - detach 専用コマンドは未実装。別 Task に attach し直すと自動で付け替わる。

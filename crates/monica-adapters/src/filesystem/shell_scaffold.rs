@@ -51,7 +51,7 @@ pub(super) fn base_shell_env() -> Result<Vec<(String, String)>> {
 /// The hook must write to the DB this app instance reads, but the tab's MONICA_HOME can be
 /// rewritten after spawn (direnv applying a repo .envrc that exports another base) — so the
 /// command pins the base itself instead of trusting the environment it inherits.
-pub(super) fn pinned_hook_cmd(agent: Agent) -> Result<String> {
+fn pinned_hook_cmd(agent: Agent) -> Result<String> {
     let monica_home = paths::base_dir()?.to_string_lossy().into_owned();
     Ok(pin_hook_command_base(&resolve_hook_command(agent)?, &monica_home))
 }
@@ -105,25 +105,6 @@ fn find_monica_in(bin: &str, path_var: &str) -> Option<String> {
 
 fn pin_hook_command_base(hook_command: &str, monica_home: &str) -> String {
     format!("MONICA_HOME={} {hook_command}", quote_single(monica_home))
-}
-
-pub(super) fn write_codex_hooks_config(cwd: &Path, hook_command: &str) -> Result<()> {
-    let config_path = cwd.join(crate::agents::hooks_config_path(Agent::Codex));
-
-    if cwd_is_home(cwd) {
-        return Ok(());
-    }
-
-    let parent = config_path
-        .parent()
-        .ok_or_else(|| anyhow!("hooks config path has no parent: {}", config_path.display()))?;
-    fs::create_dir_all(parent)
-        .with_context(|| format!("failed to create {}", parent.display()))?;
-
-    let hooks = agent_hooks_value(Agent::Codex, hook_command);
-    let body =
-        serde_json::to_string_pretty(&hooks).context("failed to serialize hooks config")?;
-    write_if_changed(&config_path, &body)
 }
 
 /// Earlier versions merged Monica's hook groups into the worktree's `settings.local.json`. Hooks
@@ -217,7 +198,7 @@ fn strip_shell_word(s: &str) -> Option<&str> {
     }
 }
 
-/// Guards the user's global agent config (`~/.claude`, `~/.codex`): a project checked out at
+/// Guards the user's global agent config (`~/.claude`): a project checked out at
 /// $HOME must never have its hooks config written or stripped.
 fn cwd_is_home(cwd: &Path) -> bool {
     std::env::var_os("HOME").is_some_and(|home| crate::fs_util::same_path(Path::new(&home), cwd))
@@ -305,31 +286,12 @@ fn write_agent_wrapper(bin_dir: &Path, name: &str, contents: &str) -> Result<()>
     Ok(())
 }
 
-const CODEX_WRAPPER: &str = r#"#!/usr/bin/env bash
-find_real_codex() {
-    local self_dir
-    self_dir="$(cd "$(dirname "$0")" && pwd)"
-    local IFS=:
-    for d in $PATH; do
-        [[ "$d" == "$self_dir" ]] && continue
-        [[ -x "$d/codex" ]] && printf '%s' "$d/codex" && return 0
-    done
-    return 1
-}
-REAL_CODEX="$(find_real_codex)" || { echo "Error: codex not found in PATH" >&2; exit 127; }
-if [[ -z "${MONICA_TASK_ID:-}" ]]; then
-    exec "$REAL_CODEX" "$@"
-fi
-exec "$REAL_CODEX" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust "$@"
-"#;
-
 fn agent_wrapper_script(agent: Agent) -> Result<String> {
     match agent {
         Agent::Claude => {
             let settings_path = write_claude_hooks_settings()?;
             Ok(claude_wrapper_script(&settings_path.to_string_lossy()))
         }
-        Agent::Codex => Ok(CODEX_WRAPPER.to_string()),
     }
 }
 
@@ -434,45 +396,6 @@ mod tests {
                 .and_then(Value::as_str);
             assert_eq!(cmd, Some("monica hook claude"), "{event}: command");
         }
-    }
-
-    #[test]
-    fn agent_hooks_value_codex_contains_supported_events() {
-        let parsed = agent_hooks_value(Agent::Codex, "monica hook codex");
-        for event in [
-            "SessionStart",
-            "UserPromptSubmit",
-            "PreToolUse",
-            "PostToolUse",
-            "Stop",
-            "SubagentStart",
-            "SubagentStop",
-            "PermissionRequest",
-        ] {
-            let cmd = parsed
-                .pointer(&format!("/hooks/{event}/0/hooks/0/command"))
-                .and_then(Value::as_str);
-            assert_eq!(cmd, Some("monica hook codex"), "{event}: command");
-        }
-    }
-
-    #[test]
-    fn agent_hooks_value_codex_excludes_claude_only_events() {
-        let parsed = agent_hooks_value(Agent::Codex, "monica hook codex");
-        assert!(parsed.pointer("/hooks/SessionEnd").is_none());
-        assert!(parsed.pointer("/hooks/StopFailure").is_none());
-    }
-
-    #[test]
-    fn write_agent_hooks_config_codex_writes_into_cwd_dot_codex() {
-        let cwd = unique_temp_dir("codex-write");
-        write_codex_hooks_config(&cwd, "monica hook codex").unwrap();
-        let expected = cwd.join(".codex").join("hooks.json");
-        let body = fs::read_to_string(&expected).unwrap();
-        assert!(body.contains("monica hook codex"));
-        assert!(body.contains("SessionStart"));
-        assert!(!body.contains("SessionEnd"));
-        fs::remove_dir_all(&cwd).ok();
     }
 
     #[test]
@@ -712,7 +635,6 @@ mod tests {
         for cmd in [
             "my-own-hook",
             "echo done && monica hook claude",
-            "monica hook codex",
             "monica hook claude --verbose",
             "MONICA_HOME='/x' echo pwned; monica hook claude",
         ] {

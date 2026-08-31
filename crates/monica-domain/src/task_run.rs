@@ -19,11 +19,10 @@ use crate::status::{TaskRunStatus, TaskRunWaitReason};
 #[strum(serialize_all = "snake_case")]
 pub enum Agent {
     Claude,
-    Codex,
 }
 
 impl Agent {
-    pub const ALL: [Agent; 2] = [Agent::Claude, Agent::Codex];
+    pub const ALL: [Agent; 1] = [Agent::Claude];
 
     pub fn as_str(self) -> &'static str {
         self.into()

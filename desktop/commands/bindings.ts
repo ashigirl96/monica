@@ -78,7 +78,7 @@ export const commands = {
     typedError<TaskBench, ApiError>(__TAURI_INVOKE("open_bench", { taskId })),
   prepareTask: (taskId: string) =>
     typedError<PrepareTaskResult, ApiError>(__TAURI_INVOKE("prepare_task", { taskId })),
-  runTask: (taskId: string, agent: "claude" | "codex" | null) =>
+  runTask: (taskId: string, agent: "claude" | null) =>
     typedError<RunTaskResult, ApiError>(__TAURI_INVOKE("run_task", { taskId, agent })),
   closeTask: (taskId: string) =>
     typedError<null, ApiError>(__TAURI_INVOKE("close_task", { taskId })),
@@ -130,7 +130,7 @@ export const events = {
 export const DEFAULT_TRANSLATE_PORT = 43110 as const;
 
 /* Types */
-export type Agent = "claude" | "codex";
+export type Agent = "claude";
 
 /**  Hook-observed state of the agent running inside a session; drives the per-tab indicator. */
 export type AgentSessionStatus = "running" | "waiting_for_user";

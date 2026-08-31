@@ -1265,15 +1265,10 @@ impl GitGateway for FakeGit {
 
 #[derive(Default)]
 pub(crate) struct FakeTaskRunOutputs {
-    last_cwd: RefCell<Option<String>>,
     removed_dirs: Arc<Mutex<Vec<String>>>,
 }
 
 impl FakeTaskRunOutputs {
-    pub(crate) fn last_cwd(&self) -> Option<String> {
-        self.last_cwd.borrow().clone()
-    }
-
     /// Monica に move した後も削除記録を観測できるよう、共有ハンドルを渡す。
     pub(crate) fn removed_dirs_handle(&self) -> Arc<Mutex<Vec<String>>> {
         Arc::clone(&self.removed_dirs)
@@ -1298,15 +1293,12 @@ impl TaskRunOutputs for FakeTaskRunOutputs {
     fn prepare_task_shell_env(
         &self,
         task_id: &TaskId,
-        _project: &Project,
-        _profile: &crate::ExecutionProfile,
+        project: &Project,
         _task_run_id: Option<&TaskRunId>,
-        cwd: &std::path::Path,
     ) -> Result<Vec<(String, String)>> {
-        *self.last_cwd.borrow_mut() = Some(cwd.to_string_lossy().into_owned());
         Ok(vec![
             ("MONICA_TASK_ID".to_string(), task_id.to_string()),
-            ("MONICA_CWD".to_string(), cwd.to_string_lossy().into_owned()),
+            ("MONICA_PROJECT_ID".to_string(), project.id.clone()),
         ])
     }
 }

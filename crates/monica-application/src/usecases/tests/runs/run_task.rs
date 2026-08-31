@@ -251,13 +251,6 @@ fn prepare_claude_for_run_resumes_stopped_primary_with_session() {
 
     let result =
         prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap();
-    let overridden = prepare_claude_for_run(
-        &mut repos,
-        &FakeTaskRunOutputs::default(),
-        &task_id,
-        Some(Agent::Codex),
-    )
-    .unwrap();
     std::fs::remove_dir_all(&worktree).ok();
 
     assert_eq!(result.task_run_id, run_id, "the stopped run is reused, not replaced");
@@ -265,14 +258,13 @@ fn prepare_claude_for_run_resumes_stopped_primary_with_session() {
         result.initial_command, "claude --resume 'sess-42'",
         "resume reopens the recorded session and ignores the prompt file"
     );
-    assert_eq!(
-        overridden.initial_command, "claude --resume 'sess-42'",
-        "an agent override never re-targets a recorded session to another agent"
-    );
 }
 
+/// A fresh launch stamps the effective agent on the run. Without it the run would keep
+/// `agent = NULL` and a later resume would fall back to the profile default instead of the agent
+/// that actually opened the session.
 #[test]
-fn overridden_launch_agent_is_stamped_and_survives_resume() {
+fn launch_agent_is_stamped_on_the_run_and_drives_the_resume() {
     let mut repos = FakeRepos::default();
     insert_runnable_project(&repos);
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
@@ -282,13 +274,13 @@ fn overridden_launch_agent_is_stamped_and_survives_resume() {
         &mut repos,
         &FakeTaskRunOutputs::default(),
         &task_id,
-        Some(Agent::Codex),
+        Some(Agent::Claude),
     )
     .unwrap();
-    assert_eq!(fresh.initial_command, "codex");
+    assert_eq!(fresh.initial_command, "claude");
     assert_eq!(
         repos.get_task_run(&run_id).unwrap().unwrap().agent,
-        Some(Agent::Codex),
+        Some(Agent::Claude),
         "the effective agent is persisted on the run at launch"
     );
 
@@ -302,8 +294,8 @@ fn overridden_launch_agent_is_stamped_and_survives_resume() {
     std::fs::remove_dir_all(&worktree).ok();
 
     assert_eq!(
-        resumed.initial_command, "codex resume 'sess-9'",
-        "resume reopens under the agent that launched the session, not the profile default"
+        resumed.initial_command, "claude --resume 'sess-9'",
+        "resume reopens the session recorded on the run"
     );
 }
 

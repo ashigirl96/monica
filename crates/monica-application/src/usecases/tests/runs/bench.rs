@@ -100,40 +100,10 @@ fn bench_runspace_id_prefixes_the_task_id() {
     );
 }
 
-fn env_value<'a>(env: &'a [(String, String)], key: &str) -> Option<&'a str> {
-    env.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
-}
-
+/// The primary run's worktree wins over the project path, so a bench opens where the run's code
+/// actually is.
 #[test]
-fn open_bench_writes_hook_settings_into_resolved_cwd() {
-    let mut repos = FakeRepos::default();
-    let mut project = Project::from_repo("owner/repo");
-    project.path = Some("/test/repo".to_string());
-    repos.insert_project(project);
-    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
-    let outputs = FakeTaskRunOutputs::default();
-
-    let bench = open_bench(&mut repos, &outputs, &task_id).unwrap();
-    assert_eq!(env_value(&bench.env, "MONICA_CWD"), Some(bench.cwd.as_str()));
-    assert_eq!(outputs.last_cwd().as_deref(), Some(bench.cwd.as_str()));
-}
-
-#[test]
-fn task_shell_env_uses_existing_bench_cwd() {
-    let mut repos = FakeRepos::default();
-    let mut project = Project::from_repo("owner/repo");
-    project.path = Some("/test/repo".to_string());
-    repos.insert_project(project);
-    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
-    let outputs = FakeTaskRunOutputs::default();
-
-    let bench = open_bench(&mut repos, &outputs, &task_id).unwrap();
-    let env = crate::usecases::runs::task_shell_env(&repos, &outputs, &task_id).unwrap();
-    assert_eq!(env_value(&env, "MONICA_CWD"), Some(bench.cwd.as_str()));
-}
-
-#[test]
-fn task_shell_env_falls_back_to_worktree_when_no_bench() {
+fn open_bench_prefers_the_primary_run_worktree_over_the_project_path() {
     let mut repos = FakeRepos::default();
     let mut project = Project::from_repo("owner/repo");
     project.path = Some("/test/repo".to_string());
@@ -152,19 +122,6 @@ fn task_shell_env_falls_back_to_worktree_when_no_bench() {
     repos.set_primary_task_run(&task_id, &run.id).unwrap();
 
     let outputs = FakeTaskRunOutputs::default();
-    let env = crate::usecases::runs::task_shell_env(&repos, &outputs, &task_id).unwrap();
-    assert_eq!(env_value(&env, "MONICA_CWD"), Some("/tmp"));
-}
-
-#[test]
-fn task_shell_env_falls_back_to_project_path_when_no_bench_no_worktree() {
-    let mut repos = FakeRepos::default();
-    let mut project = Project::from_repo("owner/repo");
-    project.path = Some("/test/repo".to_string());
-    repos.insert_project(project);
-    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
-
-    let outputs = FakeTaskRunOutputs::default();
-    let env = crate::usecases::runs::task_shell_env(&repos, &outputs, &task_id).unwrap();
-    assert_eq!(env_value(&env, "MONICA_CWD"), Some("/test/repo"));
+    let bench = open_bench(&mut repos, &outputs, &task_id).unwrap();
+    assert_eq!(bench.cwd, "/tmp");
 }
