@@ -6,9 +6,10 @@ use super::ports::{
     GitGateway, ProjectRepository, TaskRunOutputs, SetupEnv, SetupOutcome, SetupRunner,
     TaskRunStore, TaskStore, UnitOfWork, WorkbenchStore,
 };
+use crate::ports::TerminalSessionRepository;
 use crate::prelude::{
-    ExternalReference, NewTaskRun, Project, RefType, Task, TaskId, TaskRunId, TaskRunStatus,
-    TaskStatus,
+    ExternalReference, NewTaskRun, Project, RefType, RunMode, Task, TaskId, TaskRun, TaskRunId,
+    TaskRunStatus, TaskStatus,
 };
 use crate::{ApplicationError, ApplicationResult, ExecutionProfile, PrepareTaskResult};
 
@@ -46,6 +47,52 @@ where
     Ok(repos.get_execution_profile(project_id)?.unwrap_or_default())
 }
 
+/// Shared by both run-creation paths: a closed task takes no new run, and the Main Run slot must
+/// be free — nothing live, and nothing already prepared and waiting to launch.
+fn ensure_task_accepts_new_run<R>(repos: &R, task: &Task) -> ApplicationResult<()>
+where
+    R: TaskRunStore,
+{
+    let task_id = &task.id;
+    if task.status == TaskStatus::Closed {
+        return Err(ApplicationError::validation(format!(
+            "task {task_id} is closed; reopen it before preparing"
+        )));
+    }
+
+    let Some(primary_id) = task.primary_task_run_id.as_ref() else {
+        return Ok(());
+    };
+    let Some(primary_run) = repos.get_task_run(primary_id)? else {
+        return Ok(());
+    };
+    if is_active_run_status(primary_run.status) {
+        return Err(ApplicationError::conflict(format!(
+            "task {task_id} already has an active run ({primary_id}, status: {})",
+            primary_run.status.as_str()
+        )));
+    }
+    if primary_run.status == TaskRunStatus::Prepared {
+        return Err(ApplicationError::conflict(format!(
+            "task {task_id} is already prepared (run {primary_id}); use Run to launch Claude"
+        )));
+    }
+    Ok(())
+}
+
+fn primary_run<R>(repos: &R, task_id: &TaskId) -> ApplicationResult<Option<TaskRun>>
+where
+    R: TaskStore + TaskRunStore,
+{
+    let task = repos
+        .get_task(task_id)?
+        .ok_or_else(|| ApplicationError::not_found(format!("task not found: {task_id}")))?;
+    match task.primary_task_run_id {
+        Some(id) => Ok(repos.get_task_run(&id)?),
+        None => Ok(None),
+    }
+}
+
 /// Phase 1: Create TaskRun (SettingUp) + set as Main Run + ensure bench exists.
 /// Returns immediately so the UI can reflect `setting_up` without blocking.
 pub fn start_run<R>(repos: &mut R, task_id: &TaskId) -> ApplicationResult<PrepareTaskResult>
@@ -53,28 +100,7 @@ where
     R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore + UnitOfWork,
 {
     let (task, project) = load_task_and_project(repos, task_id)?;
-
-    if task.status == TaskStatus::Closed {
-        return Err(ApplicationError::validation(format!(
-            "task {task_id} is closed; reopen it before preparing"
-        )));
-    }
-
-    if let Some(ref primary_id) = task.primary_task_run_id {
-        if let Some(primary_run) = repos.get_task_run(primary_id)? {
-            if is_active_run_status(primary_run.status) {
-                return Err(ApplicationError::conflict(format!(
-                    "task {task_id} already has an active run ({primary_id}, status: {})",
-                    primary_run.status.as_str()
-                )));
-            }
-            if primary_run.status == TaskRunStatus::Prepared {
-                return Err(ApplicationError::conflict(format!(
-                    "task {task_id} is already prepared (run {primary_id}); use Run to launch Claude"
-                )));
-            }
-        }
-    }
+    ensure_task_accepts_new_run(repos, &task)?;
 
     let github_issue_number = latest_github_issue_number(repos, task_id)?;
     let mon = monica_number(task_id.as_str())?;
@@ -102,6 +128,68 @@ where
         task_run_id: run.id,
         branch,
     })
+}
+
+/// Create an already-`Prepared` run carrying no branch and no worktree, and point the task's Main
+/// Run at it. Nothing needs setting up: `project.path` is the user's own checkout, and the setup
+/// script exists to provision a *fresh* worktree, so it is deliberately skipped.
+///
+/// `branch` stays `None` on purpose — naming the primary branch here would hand it to
+/// `close_task`'s cleanup, which deletes every branch a run records.
+fn start_in_place_run<R>(repos: &mut R, task_id: &TaskId) -> ApplicationResult<()>
+where
+    R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore + UnitOfWork,
+{
+    let (task, project) = load_task_and_project(repos, task_id)?;
+    ensure_task_accepts_new_run(repos, &task)?;
+    // Validated before the run exists: there is no setup phase to fail into, so a run committed as
+    // `Prepared` against an unusable checkout would leave the task with no way forward.
+    let cwd = project_checkout(&project)?;
+
+    // Same atomicity as `start_run`, plus the Prepared transition: there is no second phase to
+    // reach it, so a run left at `SettingUp` here would never advance.
+    let mut tx = repos.begin()?;
+    let run = tx.start_task_run(NewTaskRun {
+        task_id: task.id.clone(),
+        agent: None,
+        branch: None,
+        worktree_path: None,
+    })?;
+    tx.set_primary_task_run(&task.id, &run.id)?;
+    super::open_bench::ensure_bench(&mut *tx, &task.id, &cwd, false)?;
+    tx.finish_task_run(&run.id, &task.id, TaskRunStatus::Prepared)?;
+    tx.commit()?;
+
+    Ok(())
+}
+
+/// Whether an in-place Run has to create a fresh TaskRun. A prepared primary is launched as it
+/// stands and a stopped one with a recorded session is resumed in place, so the mode only decides
+/// how a *new* run is born — never how an existing one is reopened.
+fn needs_new_run(primary: Option<&TaskRun>) -> bool {
+    match primary {
+        None => true,
+        Some(run) => run.status != TaskRunStatus::Prepared && run.resumable_session().is_none(),
+    }
+}
+
+/// Entry point behind the board's RUN submenu. `mode` picks how a fresh run is created; when the
+/// primary can already be launched or resumed, it is used as it stands and `mode` does not apply.
+pub fn run_task<R, A>(
+    repos: &mut R,
+    outputs: &A,
+    task_id: &TaskId,
+    agent_override: Option<crate::prelude::Agent>,
+    mode: RunMode,
+) -> ApplicationResult<crate::RunTaskResult>
+where
+    R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore + TerminalSessionRepository + UnitOfWork,
+    A: TaskRunOutputs,
+{
+    if mode == RunMode::InPlace && needs_new_run(primary_run(repos, task_id)?.as_ref()) {
+        start_in_place_run(repos, task_id)?;
+    }
+    prepare_claude_for_run(repos, outputs, task_id, agent_override)
 }
 
 /// Phase 2: Create worktree, run setup script, update TaskRun status, update bench cwd.
@@ -258,7 +346,7 @@ pub fn prepare_claude_for_run<R, A>(
     agent_override: Option<crate::prelude::Agent>,
 ) -> ApplicationResult<crate::RunTaskResult>
 where
-    R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore,
+    R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore + TerminalSessionRepository,
     A: TaskRunOutputs,
 {
     let (task, project) = load_task_and_project(repos, task_id)?;
@@ -287,15 +375,7 @@ where
         }
     };
 
-    let worktree_str = primary_run.worktree_path.ok_or_else(|| {
-        ApplicationError::validation(format!("primary run {primary_id} has no worktree path"))
-    })?;
-    let worktree_path = std::path::PathBuf::from(&worktree_str);
-    if !worktree_path.exists() {
-        return Err(ApplicationError::validation(format!(
-            "worktree does not exist at {worktree_str}"
-        )));
-    }
+    let cwd = launch_cwd(repos, &primary_run, &project)?;
 
     // A resumed session must reopen under the agent that recorded it — an override only applies
     // to fresh launches, so a resume can never be fed another agent's session.
@@ -311,12 +391,12 @@ where
         .prepare_task_shell_env(task_id, &project, Some(&primary_id))
         .map_err(|e| ApplicationError::external(format!("failed to prepare shell env: {e:#}")))?;
 
-    let (runspace_id, _, _) = super::open_bench::ensure_bench(repos, &task.id, &worktree_str, true)?;
+    let (runspace_id, _, _) = super::open_bench::ensure_bench(repos, &task.id, &cwd, true)?;
 
     let initial_command = match resume_session_id {
         Some(session_id) => agent_resume_command(agent, &session_id),
         None => {
-            let file_prompt = read_prompt_file(&worktree_path);
+            let file_prompt = read_prompt_file(Path::new(&cwd));
             let prompt =
                 resolve_prompt(latest_github_issue_ref(repos, task_id)?.is_some(), file_prompt);
             agent_initial_command(agent, prompt.as_deref())
@@ -327,24 +407,92 @@ where
         task_id: task.id,
         task_run_id: primary_id,
         runspace_id,
-        cwd: worktree_str,
+        cwd,
         env,
         initial_command,
     })
 }
 
-/// Reads `.monica/prompt.md` from the worktree, returning the trimmed body only
+/// Working directory a launch opens in.
+///
+/// A run that owns a worktree must open there, and a merely *missing* worktree stays an error: the
+/// silent fallback would run an isolated branch's agent against the primary checkout (pinning the
+/// bench there too), and `claude --resume` resolves its session by cwd, so it would not find the
+/// session either. A run with no worktree at all — in-place, or attached — reopens in the cwd its
+/// own terminal session recorded, and only failing that in the project checkout.
+fn launch_cwd<R>(repos: &R, run: &TaskRun, project: &Project) -> ApplicationResult<String>
+where
+    R: TerminalSessionRepository,
+{
+    if let Some(worktree) = run.worktree_path.as_deref() {
+        if !Path::new(worktree).is_dir() {
+            return Err(ApplicationError::validation(format!(
+                "worktree does not exist at {worktree}"
+            )));
+        }
+        return Ok(worktree.to_string());
+    }
+    match tab_session_cwd(repos, run)? {
+        Some(cwd) => Ok(cwd),
+        None => project_checkout(project),
+    }
+}
+
+/// The directory the run's own terminal session opened in. An attached run (`monica task attach`)
+/// is the case that matters: its session was started wherever the user happened to be, and
+/// `claude --resume` resolves a session by cwd, so reopening it anywhere else neither finds the
+/// session nor operates on the files it was working with. A directory that has since gone away is
+/// treated as no answer at all — resume cannot work there either way, and the caller's project
+/// checkout is at least validated.
+fn tab_session_cwd<R>(repos: &R, run: &TaskRun) -> ApplicationResult<Option<String>>
+where
+    R: TerminalSessionRepository,
+{
+    let Some(tab_id) = run.terminal_tab_id.as_deref() else {
+        return Ok(None);
+    };
+    Ok(repos
+        .latest_terminal_session_for_tab(tab_id)?
+        .map(|session| session.cwd)
+        .filter(|cwd| Path::new(cwd).is_dir()))
+}
+
+/// The project checkout a worktree-less run opens in.
+///
+/// Deliberately stricter than `default_bench_cwd`, which falls back to `$HOME` (then `/tmp`) so a
+/// browsing shell always has somewhere to open: launching an agent outside the project is never
+/// what Run meant. Missing and stale paths both fail here rather than at terminal spawn, because
+/// a launch that dies after the run is `Prepared` strands the task — Prepare is disabled in that
+/// state and Run just retries the same bad cwd, which `ensure_bench` has by then pinned.
+fn project_checkout(project: &Project) -> ApplicationResult<String> {
+    let path = project.path.as_deref().ok_or_else(|| {
+        ApplicationError::validation(format!(
+            "project {} has no checkout path; register it before running without a worktree",
+            project.id
+        ))
+    })?;
+    // `is_dir`, not `is_file`-tolerant `exists`: `monica project set <repo> path` takes any
+    // nonempty string, and a regular file passes `exists` only to fail at terminal spawn.
+    if !Path::new(path).is_dir() {
+        return Err(ApplicationError::validation(format!(
+            "project checkout is not a directory: {path}"
+        )));
+    }
+    Ok(path.to_string())
+}
+
+/// Reads `.monica/prompt.md` from the run's working directory, returning the trimmed body only
 /// when it carries an actual prompt. An empty or whitespace-only file means
 /// "launch Claude bare".
-fn read_prompt_file(worktree_path: &Path) -> Option<String> {
-    let contents = std::fs::read_to_string(worktree_path.join(".monica/prompt.md")).ok()?;
+fn read_prompt_file(cwd: &Path) -> Option<String> {
+    let contents = std::fs::read_to_string(cwd.join(".monica/prompt.md")).ok()?;
     let trimmed = contents.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
 /// `.monica/prompt.md` feeds Claude only for issue-backed tasks. A raw task launches Claude bare
-/// regardless of what the worktree's prompt file happens to hold, so the explorer isn't seeded
-/// with a stale prompt committed to the project repo.
+/// regardless of what the prompt file happens to hold, so the explorer isn't seeded with a stale
+/// prompt committed to the project repo.
 fn resolve_prompt(has_github_issue: bool, file_prompt: Option<String>) -> Option<String> {
     has_github_issue.then_some(file_prompt).flatten()
 }

@@ -1381,12 +1381,21 @@ pub(crate) fn raw_tab_session(
     tab_id: &str,
     agent_session_id: Option<&str>,
 ) -> String {
+    raw_tab_session_at(repos, tab_id, agent_session_id, "/repo")
+}
+
+pub(crate) fn raw_tab_session_at(
+    repos: &mut FakeRepos,
+    tab_id: &str,
+    agent_session_id: Option<&str>,
+    cwd: &str,
+) -> String {
     let session = repos
         .create_terminal_session(NewTerminalSession {
             runspace_id: None,
             tab_id: Some(tab_id.to_string()),
             kind: TerminalSessionKind::Shell,
-            cwd: "/repo".to_string(),
+            cwd: cwd.to_string(),
             shell: "/bin/zsh".to_string(),
             rows: 24,
             cols: 80,
@@ -1493,9 +1502,24 @@ impl SetupRunner for FakeSetupRunner {
 
 /// The registered project all run tests use; `path` is required by `execute_run`.
 pub(crate) fn insert_runnable_project(repos: &FakeRepos) {
+    insert_runnable_project_at(repos, "/repo");
+}
+
+pub(crate) fn insert_runnable_project_at(repos: &FakeRepos, path: &str) {
     let mut project = Project::from_repo("owner/repo");
-    project.path = Some("/repo".to_string());
+    project.path = Some(path.to_string());
     repos.insert_project(project);
+}
+
+/// A real directory on disk, for the paths a use case stats before handing them to a terminal.
+pub(crate) fn temp_dir_named(prefix: &str) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("{prefix}-{}-{unique}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
 }
 
 pub(crate) fn insert_issue_backed_task(repos: &mut FakeRepos, issue_number: i64) -> TaskId {

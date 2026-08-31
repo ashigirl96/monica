@@ -19,6 +19,7 @@ import {
   requestCloseAtom,
   requestOpenAtom,
   runDirectActionAtom,
+  runTargetIndexForHint,
 } from "@/features/work-board/nav";
 
 const NAV_KEYS = { h: "left", j: "down", k: "up", l: "right" } as const;
@@ -47,13 +48,16 @@ export function useBoardNavigation() {
       const menu = store.get(menuAtom);
       if (menu !== null) {
         if (menu.submenu?.kind === "run") {
+          const hintIndex = runTargetIndexForHint(e.key);
           if (e.key === "j" || e.key === "ArrowDown")
             store.set(navigateSubmenuAtom, { type: "move", direction: "down" });
           else if (e.key === "k" || e.key === "ArrowUp")
             store.set(navigateSubmenuAtom, { type: "move", direction: "up" });
           else if (e.key === "Enter") store.set(executeRunAtom);
-          else if (e.key === "c") store.set(executeRunAtom);
-          else if (e.key === "Escape" || e.key === "h" || e.key === "Backspace")
+          else if (hintIndex !== -1) {
+            store.set(navigateSubmenuAtom, { type: "setIndex", index: hintIndex });
+            store.set(executeRunAtom);
+          } else if (e.key === "Escape" || e.key === "h" || e.key === "Backspace")
             store.set(navigateSubmenuAtom, { type: "exit" });
           else if (e.key === " ") store.set(menuAtom, null);
           else return;

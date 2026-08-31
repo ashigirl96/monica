@@ -21,3 +21,28 @@ impl From<Agent> for monica_domain::Agent {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum RunMode {
+    Worktree,
+    InPlace,
+}
+
+impl From<monica_domain::RunMode> for RunMode {
+    fn from(value: monica_domain::RunMode) -> Self {
+        match value {
+            monica_domain::RunMode::Worktree => Self::Worktree,
+            monica_domain::RunMode::InPlace => Self::InPlace,
+        }
+    }
+}
+
+impl From<RunMode> for monica_domain::RunMode {
+    fn from(value: RunMode) -> Self {
+        match value {
+            RunMode::Worktree => Self::Worktree,
+            RunMode::InPlace => Self::InPlace,
+        }
+    }
+}

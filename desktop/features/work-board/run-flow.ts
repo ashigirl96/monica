@@ -1,4 +1,4 @@
-import type { Agent } from "@/commands/bindings";
+import type { Agent, RunMode } from "@/commands/bindings";
 import {
   listTaskSummaries,
   onTaskRunStatusChanged,
@@ -69,23 +69,29 @@ function waitForPreparedOrFailed(taskId: string): {
   };
 }
 
+// The cached summaries can lag behind hook-driven status changes by a polling interval; decide
+// prepare-vs-run from a fresh read. False when a run is already prepared or the stopped primary's
+// session resumes as-is — then run_task alone launches (or reopens) the agent.
+async function worktreeRunNeedsPrepare(taskId: string): Promise<boolean> {
+  const summaries = await listTaskSummaries();
+  return summaries.find((t) => t.id === taskId)?.run_needs_prepare === true;
+}
+
 const runTaskInFlight = new Set<string>();
 
 export async function runTaskFlow(
   taskId: string,
-  agent: Agent | null = null,
+  agent: Agent | null,
+  mode: RunMode,
 ): Promise<RunFlowResult | null> {
   if (runTaskInFlight.has(taskId)) return null;
   runTaskInFlight.add(taskId);
   try {
-    // The cached summaries can lag behind hook-driven status changes by a
-    // polling interval; decide prepare-vs-run from a fresh read.
-    const summaries = await listTaskSummaries();
-    const task = summaries.find((t) => t.id === taskId);
+    // An in-place run needs no worktree and no setup script, so run_task creates its already
+    // prepared run synchronously — there is no background phase to wait on.
+    const needsPrepare = mode === "worktree" && (await worktreeRunNeedsPrepare(taskId));
 
-    // False when a run is already prepared or the stopped primary's session resumes as-is —
-    // then run_task alone launches (or reopens) the agent.
-    if (task?.run_needs_prepare) {
+    if (needsPrepare) {
       const waiter = waitForPreparedOrFailed(taskId);
       try {
         const prep = await prepareTask(taskId);
@@ -97,7 +103,7 @@ export async function runTaskFlow(
       await waiter.promise;
     }
 
-    const launch = await runTask(taskId, agent);
+    const launch = await runTask(taskId, agent, mode);
 
     // The launch env (with run ids) is consumed by the first tab only; the runspace
     // needs the plain task shell env so later tabs still get the Monica context +

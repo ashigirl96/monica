@@ -1,5 +1,5 @@
 use super::*;
-use monica_domain::{AgentSessionId, TaskId, TaskRunId};
+use monica_domain::{AgentSessionId, RunMode, TaskId, TaskRunId};
 
 
 #[test]
@@ -175,10 +175,30 @@ fn prepare_claude_for_run_rejects_non_prepared_primary() {
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
     start_run(&mut repos, &task_id).unwrap();
 
-    let err = prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap_err();
+    let err = run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree).unwrap_err();
     assert!(err.to_string().contains("expected prepared"), "{err}");
 }
 
+/// A run that never had a worktree — in-place, or attached — launches in the project checkout
+/// rather than erroring. This is what lets an attach run stand as primary without breaking Run.
+#[test]
+fn prepare_claude_for_run_falls_back_to_project_path_without_worktree() {
+    let mut repos = FakeRepos::default();
+    let (task_id, checkout) = checkout_backed_task(&mut repos);
+    let prep = start_run(&mut repos, &task_id).unwrap();
+    repos
+        .finish_task_run(&prep.task_run_id, &task_id, TaskRunStatus::Prepared)
+        .unwrap();
+
+    let result =
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree)
+            .unwrap();
+    assert_eq!(result.cwd, checkout.to_string_lossy());
+}
+
+/// A worktree that is merely *missing* must stay an error: falling back would run an isolated
+/// branch's agent against the primary checkout, and `claude --resume` resolves its session by cwd
+/// so it would not find the session there either.
 #[test]
 fn prepare_claude_for_run_rejects_missing_worktree() {
     let mut repos = FakeRepos::default();
@@ -188,14 +208,13 @@ fn prepare_claude_for_run_rejects_missing_worktree() {
     repos
         .finish_task_run(&prep.task_run_id, &task_id, TaskRunStatus::Prepared)
         .unwrap();
-
-    let err = prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap_err();
-    assert!(err.to_string().contains("no worktree path"), "{err}");
-
     repos
         .set_task_run_worktree_path(&prep.task_run_id, "/nonexistent/worktree")
         .unwrap();
-    let err = prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap_err();
+
+    let err =
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree)
+            .unwrap_err();
     assert!(err.to_string().contains("worktree does not exist"), "{err}");
 }
 
@@ -231,7 +250,7 @@ fn prepare_claude_for_run_seeds_prompt_for_issue_backed_task() {
 
     let (_, worktree) = prepared_run_with_worktree(&mut repos, &task_id, "do the thing");
     let result =
-        prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap();
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree).unwrap();
     std::fs::remove_dir_all(&worktree).ok();
 
     assert_eq!(result.initial_command, "claude 'do the thing'");
@@ -250,7 +269,7 @@ fn prepare_claude_for_run_resumes_stopped_primary_with_session() {
         .unwrap();
 
     let result =
-        prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap();
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree).unwrap();
     std::fs::remove_dir_all(&worktree).ok();
 
     assert_eq!(result.task_run_id, run_id, "the stopped run is reused, not replaced");
@@ -270,11 +289,12 @@ fn launch_agent_is_stamped_on_the_run_and_drives_the_resume() {
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
 
     let (run_id, worktree) = prepared_run_with_worktree(&mut repos, &task_id, "");
-    let fresh = prepare_claude_for_run(
+    let fresh = run_task(
         &mut repos,
         &FakeTaskRunOutputs::default(),
         &task_id,
         Some(Agent::Claude),
+        RunMode::Worktree,
     )
     .unwrap();
     assert_eq!(fresh.initial_command, "claude");
@@ -290,7 +310,7 @@ fn launch_agent_is_stamped_on_the_run_and_drives_the_resume() {
         .unwrap();
 
     let resumed =
-        prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap();
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree).unwrap();
     std::fs::remove_dir_all(&worktree).ok();
 
     assert_eq!(
@@ -311,7 +331,7 @@ fn prepare_claude_for_run_rejects_stopped_primary_without_session() {
         .unwrap();
 
     let err =
-        prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap_err();
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree).unwrap_err();
     std::fs::remove_dir_all(&worktree).ok();
 
     assert!(matches!(err, ApplicationError::Conflict(_)), "{err:?}");
@@ -328,8 +348,258 @@ fn prepare_claude_for_run_ignores_prompt_for_raw_task() {
 
     let (_, worktree) = prepared_run_with_worktree(&mut repos, &task_id, "leftover prompt");
     let result =
-        prepare_claude_for_run(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None).unwrap();
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree).unwrap();
     std::fs::remove_dir_all(&worktree).ok();
 
     assert_eq!(result.initial_command, "claude");
+}
+
+fn in_place_run(repos: &mut FakeRepos, task_id: &TaskId) -> crate::RunTaskResult {
+    run_task(repos, &FakeTaskRunOutputs::default(), task_id, None, RunMode::InPlace).unwrap()
+}
+
+/// An in-place run stats the project checkout before launching, so these tests need one that
+/// actually exists rather than the `/repo` placeholder.
+fn checkout_backed_task(repos: &mut FakeRepos) -> (TaskId, PathBuf) {
+    let checkout = temp_dir_named("monica-checkout");
+    insert_runnable_project_at(repos, &checkout.to_string_lossy());
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    (task_id, checkout)
+}
+
+#[test]
+fn run_task_in_place_creates_prepared_run_without_branch_or_worktree() {
+    let mut repos = FakeRepos::default();
+    let (task_id, _checkout) = checkout_backed_task(&mut repos);
+
+    let result = in_place_run(&mut repos, &task_id);
+
+    let run = repos.get_task_run(&result.task_run_id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::Prepared);
+    assert_eq!(run.branch, None, "a branch here would be deleted by close_task's cleanup");
+    assert_eq!(run.worktree_path, None);
+    let task = repos.get_task(&task_id).unwrap().unwrap();
+    assert_eq!(task.primary_task_run_id.as_deref(), Some(result.task_run_id.as_str()));
+}
+
+#[test]
+fn run_task_in_place_launches_claude_at_project_path() {
+    let mut repos = FakeRepos::default();
+    let (task_id, checkout) = checkout_backed_task(&mut repos);
+
+    let result = in_place_run(&mut repos, &task_id);
+
+    let expected = checkout.to_string_lossy();
+    assert_eq!(result.cwd, expected);
+    assert_eq!(result.initial_command, "claude");
+    let (_, cwd) = repos.get_bench_for_task(&task_id).unwrap().unwrap();
+    assert_eq!(cwd, expected, "the bench is pinned to the run's cwd");
+}
+
+/// The mode only decides how a *new* run is born. A stopped in-place primary that recorded a
+/// session is reopened where it was, not replaced by a second in-place run.
+#[test]
+fn run_task_in_place_resumes_stopped_in_place_primary() {
+    let mut repos = FakeRepos::default();
+    let (task_id, checkout) = checkout_backed_task(&mut repos);
+
+    let first = in_place_run(&mut repos, &task_id);
+    assert!(repos
+        .claim_prepared_run(&first.task_run_id, &AgentSessionId::from_agent("sess-7"))
+        .unwrap());
+    repos
+        .finish_task_run(&first.task_run_id, &task_id, TaskRunStatus::Stopped)
+        .unwrap();
+
+    let resumed = in_place_run(&mut repos, &task_id);
+
+    assert_eq!(resumed.task_run_id, first.task_run_id, "the stopped run is reused");
+    assert_eq!(resumed.initial_command, "claude --resume 'sess-7'");
+    assert_eq!(resumed.cwd, checkout.to_string_lossy());
+}
+
+#[test]
+fn run_task_in_place_reuses_existing_prepared_primary() {
+    let mut repos = FakeRepos::default();
+    let (task_id, _checkout) = checkout_backed_task(&mut repos);
+
+    let first = in_place_run(&mut repos, &task_id);
+    let second = in_place_run(&mut repos, &task_id);
+
+    assert_eq!(second.task_run_id, first.task_run_id);
+    assert_eq!(repos.list_task_runs_for_task(&task_id).unwrap().len(), 1);
+}
+
+#[test]
+fn run_task_in_place_rejects_active_primary() {
+    let mut repos = FakeRepos::default();
+    let (task_id, _checkout) = checkout_backed_task(&mut repos);
+    start_run(&mut repos, &task_id).unwrap();
+
+    let err =
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+            .unwrap_err();
+    assert!(matches!(err, ApplicationError::Conflict(_)), "{err:?}");
+    assert!(err.to_string().contains("already has an active run"), "{err}");
+}
+
+#[test]
+fn run_task_in_place_rejects_closed_task() {
+    let mut repos = FakeRepos::default();
+    let (task_id, _checkout) = checkout_backed_task(&mut repos);
+    repos.update_task_status(&task_id, TaskStatus::Closed).unwrap();
+
+    let err =
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+            .unwrap_err();
+    assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
+    assert!(err.to_string().contains("is closed"), "{err}");
+}
+
+/// The launch cwd comes from the run's own worktree, never from a sibling's: a task that already
+/// carries a worktree run must still open an in-place run in the project checkout.
+#[test]
+fn run_task_in_place_ignores_sibling_worktree() {
+    let mut repos = FakeRepos::default();
+    let (task_id, checkout) = checkout_backed_task(&mut repos);
+
+    let (worktree_run, worktree) = prepared_run_with_worktree(&mut repos, &task_id, "");
+    repos
+        .finish_task_run(&worktree_run, &task_id, TaskRunStatus::Stopped)
+        .unwrap();
+
+    let result = in_place_run(&mut repos, &task_id);
+    std::fs::remove_dir_all(&worktree).ok();
+
+    let expected = checkout.to_string_lossy();
+    assert_ne!(result.task_run_id, worktree_run);
+    assert_eq!(result.cwd, expected);
+    let (_, cwd) = repos.get_bench_for_task(&task_id).unwrap().unwrap();
+    assert_eq!(cwd, expected, "the bench follows the in-place run, not the sibling worktree");
+}
+
+/// `default_bench_cwd` would answer `$HOME` (then `/tmp`) here — fine for a browsing shell, but a
+/// Run must never launch its agent outside the project.
+#[test]
+fn run_task_in_place_rejects_project_without_checkout_path() {
+    let mut repos = FakeRepos::default();
+    repos.insert_project(Project::from_repo("owner/repo"));
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+
+    let err =
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+            .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
+    assert!(err.to_string().contains("has no checkout path"), "{err}");
+    assert_eq!(repos.list_task_runs_for_task(&task_id).unwrap().len(), 0);
+}
+
+/// A checkout that moved or was deleted fails at Run, not at terminal spawn: a run committed as
+/// `Prepared` against a bad cwd cannot be prepared again and Run would just retry it.
+#[test]
+fn run_task_in_place_rejects_missing_checkout_and_creates_no_run() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project_at(&repos, "/nonexistent/checkout");
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+
+    let err =
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+            .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
+    assert!(err.to_string().contains("is not a directory"), "{err}");
+    assert_eq!(
+        repos.list_task_runs_for_task(&task_id).unwrap().len(),
+        0,
+        "no dead-end Prepared run is left behind"
+    );
+    assert_eq!(repos.get_bench_for_task(&task_id).unwrap(), None);
+}
+
+/// `monica project set <repo> path` accepts any nonempty string, so the checkout can point at a
+/// regular file — which passes `exists()` but cannot be a cwd.
+#[test]
+fn run_task_in_place_rejects_checkout_that_is_not_a_directory() {
+    let mut repos = FakeRepos::default();
+    let file = temp_dir_named("monica-not-a-dir").join("checkout");
+    std::fs::write(&file, "").unwrap();
+    insert_runnable_project_at(&repos, &file.to_string_lossy());
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+
+    let err =
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+            .unwrap_err();
+    std::fs::remove_file(&file).ok();
+
+    assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
+    assert!(err.to_string().contains("is not a directory"), "{err}");
+    assert_eq!(repos.list_task_runs_for_task(&task_id).unwrap().len(), 0);
+}
+
+/// Builds the shape `monica task attach` leaves behind: a stopped run with a session to resume,
+/// no branch and no worktree, bound to a tab whose terminal session recorded its own cwd.
+fn stopped_attached_primary(
+    repos: &mut FakeRepos,
+    task_id: &TaskId,
+    tab_cwd: &str,
+) -> TaskRunId {
+    let session_id = raw_tab_session_at(repos, "tab-attach", Some("sess-attached"), tab_cwd);
+    let report =
+        attach_terminal_session_to_task(repos, task_id, Agent::Claude, "tab-attach", &session_id)
+            .unwrap();
+    repos.set_primary_task_run(task_id, &report.task_run_id).unwrap();
+    repos
+        .finish_task_run(&report.task_run_id, task_id, TaskRunStatus::Stopped)
+        .unwrap();
+    report.task_run_id
+}
+
+/// `claude --resume` resolves a session by cwd, so a worktree-less run reopens where its own
+/// terminal session ran — substituting the project checkout would neither find the session nor
+/// touch the files it was working with.
+#[test]
+fn run_task_resumes_worktreeless_run_in_its_recorded_tab_cwd() {
+    let mut repos = FakeRepos::default();
+    let (task_id, checkout) = checkout_backed_task(&mut repos);
+    let elsewhere = temp_dir_named("monica-attached-cwd");
+    let run_id = stopped_attached_primary(&mut repos, &task_id, &elsewhere.to_string_lossy());
+
+    let result =
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+            .unwrap();
+
+    assert_eq!(result.task_run_id, run_id, "the attached run is resumed, not replaced");
+    assert_eq!(result.initial_command, "claude --resume 'sess-attached'");
+    assert_eq!(result.cwd, elsewhere.to_string_lossy());
+    assert_ne!(result.cwd, checkout.to_string_lossy());
+}
+
+/// A recorded cwd that has since gone away is no answer at all — resume cannot work there either
+/// way, so the launch falls through to the validated project checkout instead of erroring.
+#[test]
+fn run_task_falls_back_to_checkout_when_the_recorded_cwd_is_gone() {
+    let mut repos = FakeRepos::default();
+    let (task_id, checkout) = checkout_backed_task(&mut repos);
+    stopped_attached_primary(&mut repos, &task_id, "/nonexistent/attached");
+
+    let result =
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+            .unwrap();
+
+    assert_eq!(result.cwd, checkout.to_string_lossy());
+}
+
+/// A fresh in-place run has no tab yet, and a relaunched one recorded the checkout itself, so the
+/// tab lookup never diverts an in-place run away from `project.path`.
+#[test]
+fn run_task_in_place_is_unaffected_by_the_tab_cwd_lookup() {
+    let mut repos = FakeRepos::default();
+    let (task_id, checkout) = checkout_backed_task(&mut repos);
+
+    let result = in_place_run(&mut repos, &task_id);
+
+    assert_eq!(result.cwd, checkout.to_string_lossy());
+    let run = repos.get_task_run(&result.task_run_id).unwrap().unwrap();
+    assert_eq!(run.terminal_tab_id, None);
 }

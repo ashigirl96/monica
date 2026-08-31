@@ -29,6 +29,36 @@ impl Agent {
     }
 }
 
+/// How a Run creates the TaskRun it launches into. Only consulted when a fresh run is needed —
+/// an already-prepared or resumable primary is launched as it stands, whatever the caller picked.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum RunMode {
+    /// Cut a branch + git worktree and run the setup script before launching.
+    #[default]
+    Worktree,
+    /// Launch straight in the project's own checkout: no branch, no worktree, no setup script.
+    InPlace,
+}
+
+impl RunMode {
+    pub fn as_str(self) -> &'static str {
+        self.into()
+    }
+}
+
 /// An execution attempt against a task. Persisted from issue E onward.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TaskRun {

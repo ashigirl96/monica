@@ -6,6 +6,7 @@ import { queryClientAtom } from "jotai-tanstack-query";
 import type { TaskSummaryRow } from "@/commands/task";
 import { taskSummary as task } from "@/features/work-board/test-fixtures";
 import {
+  AGENT_TARGETS,
   type MenuAnchor,
   type MenuState,
   findNearestTask,
@@ -13,6 +14,7 @@ import {
   menuAtom,
   moveMenuItemAtom,
   navigateSubmenuAtom,
+  runTargetIndexForHint,
   setMenuItemIndexAtom,
 } from "@/features/work-board/nav";
 import { queryKeys } from "@/stores/query-keys";
@@ -204,12 +206,35 @@ describe("navigateSubmenuAtom", () => {
 
   test("move does not exceed bounds", () => {
     const store = createStore();
-    // Claude is the only agent, so the run submenu has a single entry to sit on.
+    const last = AGENT_TARGETS.length - 1;
+    store.set(menuAtom, baseMenu({ submenu: { kind: "run", index: last } }));
+
+    store.set(navigateSubmenuAtom, { type: "move", direction: "down" });
+
+    expect(store.get(menuAtom)?.submenu).toEqual({ kind: "run", index: last });
+  });
+
+  // Both entries carry agent "claude", so the renderer keys off `id` — a duplicate would make
+  // React reuse the wrong button during reconciliation.
+  test("agent targets have unique ids and hints", () => {
+    expect(new Set(AGENT_TARGETS.map((t) => t.id)).size).toBe(AGENT_TARGETS.length);
+    expect(new Set(AGENT_TARGETS.map((t) => t.hint)).size).toBe(AGENT_TARGETS.length);
+  });
+
+  test("hints select their agent target", () => {
+    expect(runTargetIndexForHint("c")).toBe(0);
+    expect(runTargetIndexForHint("x")).toBe(1);
+    expect(runTargetIndexForHint("z")).toBe(-1);
+  });
+
+  test("move walks the whole agent target list", () => {
+    const store = createStore();
     store.set(menuAtom, baseMenu({ submenu: { kind: "run", index: 0 } }));
 
     store.set(navigateSubmenuAtom, { type: "move", direction: "down" });
 
-    expect(store.get(menuAtom)?.submenu).toEqual({ kind: "run", index: 0 });
+    expect(store.get(menuAtom)?.submenu).toEqual({ kind: "run", index: 1 });
+    expect(AGENT_TARGETS[1]?.mode).toBe("in_place");
   });
 
   test("move does not go below 0", () => {

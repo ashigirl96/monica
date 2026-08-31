@@ -8,8 +8,8 @@ use crate::usecases::terminal::{
     task_run_settlement_for_terminal_exit, TerminalExitSettlement, TerminalSessionUpdate,
 };
 use crate::prelude::{
-    Agent, NewNotificationIntent, NewTerminalSession, NotificationKind, RunspaceId, TaskId,
-    TaskRun, TaskRunId, TaskRunStatus, TerminalSession, TerminalSessionStatus,
+    Agent, NewNotificationIntent, NewTerminalSession, NotificationKind, RunMode, RunspaceId,
+    TaskId, TaskRun, TaskRunId, TaskRunStatus, TerminalSession, TerminalSessionStatus,
 };
 use crate::{
     ApplicationError, ApplicationEvent, ApplicationResult, EventSink, HookContext, HookReport,
@@ -50,13 +50,16 @@ impl<B: Backend> ExecutionService<'_, B> {
         result
     }
 
-    pub fn prepare_claude_for_run(
+    /// Launch (or reopen) the task's Main Run. `mode` only decides how a *fresh* run is created —
+    /// an already-prepared or resumable primary is used as it stands.
+    pub fn run_task(
         &mut self,
         task_id: &TaskId,
         agent_override: Option<Agent>,
+        mode: RunMode,
     ) -> ApplicationResult<RunTaskResult> {
         let Monica { repos, outputs, .. } = &mut *self.m;
-        crate::usecases::runs::prepare_claude_for_run(repos, outputs, task_id, agent_override)
+        crate::usecases::runs::run_task(repos, outputs, task_id, agent_override, mode)
     }
 
     pub fn open_bench(&mut self, task_id: &TaskId) -> ApplicationResult<TaskBench> {
