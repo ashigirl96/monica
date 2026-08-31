@@ -173,7 +173,7 @@ function RunSubmenu({ runIndex }: { runIndex: number }) {
         const selected = i === runIndex;
         return (
           <button
-            key={target.agent}
+            key={target.id}
             type="button"
             onMouseEnter={() => navigate({ type: "setIndex", index: i })}
             onClick={() => {

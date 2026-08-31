@@ -14,13 +14,20 @@ import { pendingWorkboardHintAtom, resolveWorkboardFocus } from "@/stores/ui-sta
 // `mode` only decides how a *fresh* run is created: a prepared or resumable primary is reopened
 // as it stands whichever entry is picked.
 const AGENT_TARGETS: ReadonlyArray<{
+  id: string;
   agent: Agent;
   mode: RunMode;
   label: string;
   hint: string;
 }> = [
-  { agent: "claude", mode: "worktree", label: "Claude", hint: "c" },
-  { agent: "claude", mode: "in_place", label: "Claude without worktree", hint: "x" },
+  { id: "claude-worktree", agent: "claude", mode: "worktree", label: "Claude", hint: "c" },
+  {
+    id: "claude-in-place",
+    agent: "claude",
+    mode: "in_place",
+    label: "Claude without worktree",
+    hint: "x",
+  },
 ];
 
 type MoveDirection = "up" | "down" | "left" | "right";

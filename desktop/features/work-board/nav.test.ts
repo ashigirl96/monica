@@ -214,6 +214,13 @@ describe("navigateSubmenuAtom", () => {
     expect(store.get(menuAtom)?.submenu).toEqual({ kind: "run", index: last });
   });
 
+  // Both entries carry agent "claude", so the renderer keys off `id` — a duplicate would make
+  // React reuse the wrong button during reconciliation.
+  test("agent targets have unique ids and hints", () => {
+    expect(new Set(AGENT_TARGETS.map((t) => t.id)).size).toBe(AGENT_TARGETS.length);
+    expect(new Set(AGENT_TARGETS.map((t) => t.hint)).size).toBe(AGENT_TARGETS.length);
+  });
+
   test("hints select their agent target", () => {
     expect(runTargetIndexForHint("c")).toBe(0);
     expect(runTargetIndexForHint("x")).toBe(1);
