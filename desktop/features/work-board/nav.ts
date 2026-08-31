@@ -1,7 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { atom, type Getter } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
-import type { Agent } from "@/commands/bindings";
+import type { Agent, RunMode } from "@/commands/bindings";
 import type { TaskSummaryRow } from "@/commands/task";
 import type { PopoverAnchor } from "@/components/popover-menu";
 import { openTargets } from "@/features/work-board/github-urls";
@@ -11,8 +11,16 @@ import { columnTasksAtom, prepareTaskMutationAtom, taskSummariesAtom } from "@/s
 import { queryKeys } from "@/stores/query-keys";
 import { pendingWorkboardHintAtom, resolveWorkboardFocus } from "@/stores/ui-state";
 
-const AGENT_TARGETS: ReadonlyArray<{ agent: Agent; label: string; hint: string }> = [
-  { agent: "claude", label: "Claude", hint: "c" },
+// `mode` only decides how a *fresh* run is created: a prepared or resumable primary is reopened
+// as it stands whichever entry is picked.
+const AGENT_TARGETS: ReadonlyArray<{
+  agent: Agent;
+  mode: RunMode;
+  label: string;
+  hint: string;
+}> = [
+  { agent: "claude", mode: "worktree", label: "Claude", hint: "c" },
+  { agent: "claude", mode: "in_place", label: "Claude without worktree", hint: "x" },
 ];
 
 type MoveDirection = "up" | "down" | "left" | "right";
@@ -375,14 +383,20 @@ export const requestOpenAtom = atom(null, (get, set, anchor: MenuAnchor | null) 
 
 export { AGENT_TARGETS };
 
+// Index of the run target a shortcut key selects, or -1. Keeps the submenu's keys derived from
+// AGENT_TARGETS so adding a target does not mean touching the keyboard handler.
+export function runTargetIndexForHint(key: string): number {
+  return AGENT_TARGETS.findIndex((target) => target.hint === key);
+}
+
 export const executeRunAtom = atom(null, (get, set) => {
   const menu = get(menuAtom);
   if (menu === null || menu.submenu?.kind !== "run") return;
-  const agent = AGENT_TARGETS[menu.submenu.index];
-  if (!agent) return;
+  const target = AGENT_TARGETS[menu.submenu.index];
+  if (!target) return;
   const taskId = menu.taskId;
   set(menuAtom, null);
-  void set(runTaskAtom, taskId, agent.agent);
+  void set(runTaskAtom, taskId, target.agent, target.mode);
 });
 
 // Bound to "i" in the submenu (PRs get no single key because a task can have several): jumps

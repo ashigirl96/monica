@@ -52,7 +52,7 @@ pub use project::{Project, Provider};
 pub use refs::{github_issue_url, parse_issue_number, parse_issue_ref, parse_owner_repo};
 pub use status::{DisplayStatus, TaskRunStatus, TaskRunWaitReason, TaskStatus};
 pub use task::{Event, NewTask, Task, TaskKind};
-pub use task_run::{is_safe_task_run_id, Agent, NewTaskRun, TaskRun};
+pub use task_run::{is_safe_task_run_id, Agent, NewTaskRun, RunMode, TaskRun};
 pub use terminal_session::{
     AgentSessionEffect, AgentSessionStatus, NewTerminalSession, TerminalSession,
     TerminalSessionKind, TerminalSessionStatus,

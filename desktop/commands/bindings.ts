@@ -78,8 +78,8 @@ export const commands = {
     typedError<TaskBench, ApiError>(__TAURI_INVOKE("open_bench", { taskId })),
   prepareTask: (taskId: string) =>
     typedError<PrepareTaskResult, ApiError>(__TAURI_INVOKE("prepare_task", { taskId })),
-  runTask: (taskId: string, agent: "claude" | null) =>
-    typedError<RunTaskResult, ApiError>(__TAURI_INVOKE("run_task", { taskId, agent })),
+  runTask: (taskId: string, agent: "claude" | null, mode: RunMode) =>
+    typedError<RunTaskResult, ApiError>(__TAURI_INVOKE("run_task", { taskId, agent, mode })),
   closeTask: (taskId: string) =>
     typedError<null, ApiError>(__TAURI_INVOKE("close_task", { taskId })),
   /**
@@ -214,6 +214,8 @@ export type ProjectOption = {
   id: string;
   name: string;
 };
+
+export type RunMode = "worktree" | "in_place";
 
 export type RunTaskResult = {
   task_id: string;

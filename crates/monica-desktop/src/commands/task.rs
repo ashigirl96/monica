@@ -1,6 +1,6 @@
 use monica_api::{
-    Agent, ApiError, BoardColumn, PrepareTaskResult, ProjectOption, RunTaskResult, TaskBench,
-    TaskCreated, TaskRunStatus, TaskSummaryRow,
+    Agent, ApiError, BoardColumn, PrepareTaskResult, ProjectOption, RunMode, RunTaskResult,
+    TaskBench, TaskCreated, TaskRunStatus, TaskSummaryRow,
 };
 use monica_application::parse_issue_input;
 use monica_domain::{TaskId, TaskRunId};
@@ -200,15 +200,15 @@ pub async fn run_task(
     app: AppHandle,
     task_id: String,
     agent: Option<Agent>,
+    mode: RunMode,
 ) -> Result<RunTaskResult, ApiError> {
     event_sink::off_main(move || {
         let mut monica = event_sink::open(&app)?;
-        let result = monica
-            .executions()
-            .prepare_claude_for_run(
-                &TaskId::from_store(task_id),
-                agent.map(monica_domain::Agent::from),
-            )?;
+        let result = monica.executions().run_task(
+            &TaskId::from_store(task_id),
+            agent.map(monica_domain::Agent::from),
+            monica_domain::RunMode::from(mode),
+        )?;
         Ok(RunTaskResult::from(result))
     })
     .await

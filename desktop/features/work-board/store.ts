@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import type { Agent } from "@/commands/bindings";
+import type { Agent, RunMode } from "@/commands/bindings";
 import { closeTask, openBench } from "@/commands/task";
 import { runTaskFlow } from "@/features/work-board/run-flow";
 import {
@@ -47,9 +47,12 @@ export const closeTaskAtom = atom(null, async (get, set, taskId: string) => {
   await set(refreshTaskSummariesAtom);
 });
 
-export const runTaskAtom = atom(null, async (_get, set, taskId: string, agent?: Agent) => {
-  const result = await runTaskFlow(taskId, agent ?? null);
-  if (!result) return;
-  await set(createTaskRunspaceAtom, result);
-  await set(refreshTaskSummariesAtom);
-});
+export const runTaskAtom = atom(
+  null,
+  async (_get, set, taskId: string, agent: Agent | null, mode: RunMode) => {
+    const result = await runTaskFlow(taskId, agent, mode);
+    if (!result) return;
+    await set(createTaskRunspaceAtom, result);
+    await set(refreshTaskSummariesAtom);
+  },
+);
