@@ -7,8 +7,8 @@ use monica_application::{
     WorkTransaction, WorkbenchStore,
 };
 use monica_domain::{
-    AgentSessionId, Event, ExternalReference, NewTask, NewTaskRun, RunspaceId, Task, TaskId,
-    TaskRun, TaskRunId, TaskRunStatus, TaskStatus,
+    AgentSessionId, Event, ExternalReference, NewTask, NewTaskRun, Provider, RefType, RunspaceId,
+    Task, TaskId, TaskRun, TaskRunId, TaskRunStatus, TaskStatus,
 };
 
 use super::{bench, events, external_refs, task_runs, tasks};
@@ -69,6 +69,16 @@ impl TaskStore for SqliteUow<'_> {
 
     fn list_external_refs(&self, task_id: &TaskId) -> Result<Vec<ExternalReference>> {
         external_refs::list_external_refs(&self.tx, task_id)
+    }
+
+    fn find_open_task_by_external_ref(
+        &self,
+        provider: Provider,
+        ref_type: RefType,
+        repo: &str,
+        number: i64,
+    ) -> Result<Option<Task>> {
+        tasks::find_open_task_by_external_ref_in(&self.tx, provider, ref_type, repo, number)
     }
 }
 

@@ -145,6 +145,90 @@ fn task_and_external_ref_round_trip_through_sqlite_repository() {
     assert_eq!(refs[0].number, Some(42));
 }
 
+fn track_issue(db: &mut SqliteStore, title: &str, repo: &str, number: i64) -> TaskId {
+    db.insert_task_with_ref(
+        dev_task(title),
+        ExternalReference::new(
+            "",
+            Provider::Github,
+            RefType::Issue,
+            Some(repo.to_string()),
+            Some(number),
+            None,
+        ),
+    )
+    .unwrap()
+    .id
+}
+
+fn find_open_issue_task(db: &SqliteStore, repo: &str, number: i64) -> Option<TaskId> {
+    db.find_open_task_by_external_ref(Provider::Github, RefType::Issue, repo, number)
+        .unwrap()
+        .map(|t| t.id)
+}
+
+#[test]
+fn find_open_task_by_external_ref_returns_the_newest_open_match() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    // Ten duplicates so the newest id is MON-10, which sorts *before* MON-9 as text: the tie-break
+    // must compare the counter numerically.
+    let ids: Vec<TaskId> = (1..=10)
+        .map(|i| track_issue(&mut db, &format!("dup {i}"), "owner/repo", 42))
+        .collect();
+    assert_eq!(ids.last().unwrap().as_str(), "MON-10");
+
+    assert_eq!(find_open_issue_task(&db, "owner/repo", 42), Some(ids[9].clone()));
+
+    db.mark_task_closed(&ids[9]).unwrap();
+    assert_eq!(
+        find_open_issue_task(&db, "owner/repo", 42),
+        Some(ids[8].clone()),
+        "closing the newest falls back to the next open one"
+    );
+}
+
+#[test]
+fn find_open_task_by_external_ref_skips_closed_tasks() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let id = track_issue(&mut db, "tracked", "owner/repo", 42);
+    db.mark_task_closed(&id).unwrap();
+
+    assert_eq!(
+        find_open_issue_task(&db, "owner/repo", 42),
+        None,
+        "a closed task must not shadow a fresh attempt at the same issue"
+    );
+}
+
+#[test]
+fn find_open_task_by_external_ref_matches_provider_ref_type_repo_and_number() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let id = track_issue(&mut db, "tracked", "owner/repo", 42);
+    let pr_task = db
+        .insert_task_with_ref(
+            dev_task("a pull request, not an issue"),
+            ExternalReference::new(
+                "",
+                Provider::Github,
+                RefType::PullRequest,
+                Some("owner/repo".to_string()),
+                Some(7),
+                None,
+            ),
+        )
+        .unwrap();
+
+    assert_eq!(find_open_issue_task(&db, "owner/repo", 42), Some(id));
+    assert_eq!(find_open_issue_task(&db, "owner/other", 42), None, "repo must match");
+    assert_eq!(find_open_issue_task(&db, "owner/repo", 43), None, "number must match");
+    assert_eq!(
+        find_open_issue_task(&db, "owner/repo", 7),
+        None,
+        "a pull-request ref must not answer an issue lookup"
+    );
+    assert!(db.get_task(&pr_task.id).unwrap().is_some());
+}
+
 #[test]
 fn list_external_refs_errors_on_unrecognized_provider() {
     let mut db = SqliteStore::open_in_memory().unwrap();

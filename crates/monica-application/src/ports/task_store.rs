@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use monica_domain::{TaskId, TaskRunId};
 
-use crate::prelude::{ExternalReference, Task, TaskStatus};
+use crate::prelude::{ExternalReference, Provider, RefType, Task, TaskStatus};
 use crate::prelude::NewTask;
 
 /// Task aggregate persistence: create, read, status transitions, primary-run pointer, and the
@@ -19,4 +19,14 @@ pub trait TaskStore {
     fn update_task_status(&self, id: &TaskId, status: TaskStatus) -> Result<()>;
     fn mark_task(&mut self, id: &TaskId, status: TaskStatus, note: Option<&str>) -> Result<()>;
     fn list_external_refs(&self, task_id: &TaskId) -> Result<Vec<ExternalReference>>;
+    /// The newest task carrying this external reference that is not Closed, if any. An issue is an
+    /// immutable external reference while a task is one attempt at it, so a task closed earlier
+    /// must not shadow a fresh attempt — only open tasks establish identity here.
+    fn find_open_task_by_external_ref(
+        &self,
+        provider: Provider,
+        ref_type: RefType,
+        repo: &str,
+        number: i64,
+    ) -> Result<Option<Task>>;
 }

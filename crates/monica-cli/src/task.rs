@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
-use monica_application::{parse_issue_input, AttachSessionReport, TaskSummaryRow};
+use monica_application::{parse_issue_input, AttachSessionReport, TaskSummaryRow, TrackOutcome};
 use monica_domain::{parse_owner_repo, Agent, DisplayStatus, TaskId};
 
 use crate::event_sink::{self, CliFacade};
@@ -55,7 +55,12 @@ async fn track_command(monica: &mut CliFacade, target: &str) -> Result<()> {
         .with_context(|| format!("failed to fetch GitHub issue {repo}#{number}"))?;
     let task = report.task;
     let issue = report.issue;
-    println!("Created {} from {}#{}", task.id, repo, issue.number);
+    match report.outcome {
+        TrackOutcome::Created => println!("Created {} from {}#{}", task.id, repo, issue.number),
+        TrackOutcome::AlreadyTracked => {
+            println!("Already tracked as {} from {}#{}", task.id, repo, issue.number)
+        }
+    }
     println!("Status: {}", task.status.as_str());
     println!("Title: {}", task.title);
     Ok(())

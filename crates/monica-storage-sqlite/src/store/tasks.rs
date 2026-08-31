@@ -6,8 +6,8 @@ use monica_application::{
     GithubPullRequestStatus, TaskBoardQuery, TaskStore, TaskSummaryFilter, TaskSummaryRow,
 };
 use monica_domain::{
-    DisplayStatus, ExternalReference, NewTask, Task, TaskId, TaskRunId, TaskRunStatus,
-    TaskRunWaitReason, TaskStatus,
+    DisplayStatus, ExternalReference, NewTask, Provider, RefType, Task, TaskId, TaskRunId,
+    TaskRunStatus, TaskRunWaitReason, TaskStatus,
 };
 
 use super::{external_refs, sql_literal_list, SET_NOW, TASK_COLUMNS};
@@ -67,6 +67,36 @@ pub(super) fn insert_task_in(
 pub(super) fn get_task(conn: &Connection, id: &TaskId) -> Result<Option<Task>> {
     let mut stmt = conn.prepare(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"))?;
     let mut rows = stmt.query(params![id.as_str()])?;
+    match rows.next()? {
+        Some(row) => Ok(Some(crate::row::task_from_row(row)?)),
+        None => Ok(None),
+    }
+}
+
+pub(super) fn find_open_task_by_external_ref_in(
+    conn: &Connection,
+    provider: Provider,
+    ref_type: RefType,
+    repo: &str,
+    number: i64,
+) -> Result<Option<Task>> {
+    // `MON-<n>` sorts wrong as text (MON-10 < MON-9), so the created_at tie-break casts the
+    // counter part to an integer — the same shape the summary query uses for the latest run.
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {TASK_COLUMNS} FROM tasks
+          WHERE status != ?1
+            AND id IN (SELECT task_id FROM external_refs
+                        WHERE provider = ?2 AND ref_type = ?3 AND repo = ?4 AND number = ?5)
+          ORDER BY created_at DESC, CAST(SUBSTR(id, 5) AS INTEGER) DESC
+          LIMIT 1"
+    ))?;
+    let mut rows = stmt.query(params![
+        TaskStatus::Closed.as_str(),
+        provider.as_str(),
+        ref_type.as_str(),
+        repo,
+        number
+    ])?;
     match rows.next()? {
         Some(row) => Ok(Some(crate::row::task_from_row(row)?)),
         None => Ok(None),
@@ -221,6 +251,16 @@ impl TaskStore for SqliteStore {
 
     fn list_external_refs(&self, task_id: &TaskId) -> Result<Vec<ExternalReference>> {
         external_refs::list_external_refs(self.conn(), task_id)
+    }
+
+    fn find_open_task_by_external_ref(
+        &self,
+        provider: Provider,
+        ref_type: RefType,
+        repo: &str,
+        number: i64,
+    ) -> Result<Option<Task>> {
+        find_open_task_by_external_ref_in(self.conn(), provider, ref_type, repo, number)
     }
 }
 

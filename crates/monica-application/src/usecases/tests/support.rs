@@ -196,6 +196,37 @@ impl FakeRepos {
         Ok(task)
     }
 
+    fn do_find_open_task_by_external_ref(
+        &self,
+        provider: Provider,
+        ref_type: RefType,
+        repo: &str,
+        number: i64,
+    ) -> Result<Option<Task>> {
+        let state = self.state.borrow();
+        // Every fake task shares one created_at, so the `MON-<n>` counter stands in for creation
+        // order when picking the newest match.
+        Ok(state
+            .refs
+            .values()
+            .flatten()
+            .filter(|r| {
+                r.provider == provider
+                    && r.ref_type == ref_type
+                    && r.repo.as_deref() == Some(repo)
+                    && r.number == Some(number)
+            })
+            .filter_map(|r| state.tasks.get(&r.task_id))
+            .filter(|t| t.status != TaskStatus::Closed)
+            .max_by_key(|t| {
+                t.id.as_str()
+                    .strip_prefix("MON-")
+                    .and_then(|n| n.parse::<i64>().ok())
+                    .unwrap_or(0)
+            })
+            .cloned())
+    }
+
     fn do_mark_task_closed(&self, id: &TaskId) -> Result<Task> {
         let mut state = self.state.borrow_mut();
         let task = state
@@ -272,6 +303,16 @@ impl TaskStore for FakeRepos {
             .get(task_id.as_str())
             .cloned()
             .unwrap_or_default())
+    }
+
+    fn find_open_task_by_external_ref(
+        &self,
+        provider: Provider,
+        ref_type: RefType,
+        repo: &str,
+        number: i64,
+    ) -> Result<Option<Task>> {
+        self.do_find_open_task_by_external_ref(provider, ref_type, repo, number)
     }
 }
 
@@ -863,6 +904,17 @@ impl TaskStore for FakeUow<'_> {
     fn list_external_refs(&self, task_id: &TaskId) -> Result<Vec<ExternalReference>> {
         self.inner.list_external_refs(task_id)
     }
+
+    fn find_open_task_by_external_ref(
+        &self,
+        provider: Provider,
+        ref_type: RefType,
+        repo: &str,
+        number: i64,
+    ) -> Result<Option<Task>> {
+        self.inner
+            .do_find_open_task_by_external_ref(provider, ref_type, repo, number)
+    }
 }
 
 impl TaskRunStore for FakeUow<'_> {
@@ -1031,6 +1083,55 @@ impl GithubGateway for FakeGithub {
                 status: GithubPullRequestStatus::Merged,
             })
         })
+    }
+
+    fn fetch_recent_pull_requests<'a>(
+        &'a self,
+        _repo: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<RepoPullRequest>>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+}
+
+/// A gateway whose issue title can be swapped between calls, so a re-track can be told apart from
+/// a re-sync of the stored title (`FakeGithub` always answers with the same title).
+pub(crate) struct RetitlingGithub {
+    title: RefCell<String>,
+}
+
+impl RetitlingGithub {
+    pub(crate) fn new(title: &str) -> Self {
+        Self { title: RefCell::new(title.to_string()) }
+    }
+
+    pub(crate) fn set_title(&self, title: &str) {
+        *self.title.borrow_mut() = title.to_string();
+    }
+}
+
+impl GithubGateway for RetitlingGithub {
+    fn fetch_issue<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, Result<GithubIssue>> {
+        let title = self.title.borrow().clone();
+        Box::pin(async move {
+            Ok(GithubIssue {
+                number,
+                title,
+                body: Some("body".to_string()),
+                url: format!("https://github.com/{repo}/issues/{number}"),
+            })
+        })
+    }
+
+    fn fetch_default_branch<'a>(&'a self, _repo: &'a str) -> BoxFuture<'a, Result<Option<String>>> {
+        Box::pin(async { Ok(Some("main".to_string())) })
+    }
+
+    fn fetch_pull_request<'a>(
+        &'a self,
+        _repo: &'a str,
+        _number: i64,
+    ) -> BoxFuture<'a, Result<GithubPullRequest>> {
+        Box::pin(async { Err(anyhow::anyhow!("not used")) })
     }
 
     fn fetch_recent_pull_requests<'a>(

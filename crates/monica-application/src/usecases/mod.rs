@@ -9,7 +9,7 @@ pub mod terminal;
 #[cfg(test)]
 mod tests;
 
-pub use github::TrackGithubIssueReport;
+pub use github::{TrackGithubIssueReport, TrackOutcome};
 pub use runs::{HookContext, HookReport};
 pub use tasks::{AttachSessionReport, CloseTaskReport};
 pub use terminal::{DaemonSessionView, TerminalSessionUpdate};
