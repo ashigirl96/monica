@@ -536,3 +536,70 @@ fn run_task_in_place_rejects_checkout_that_is_not_a_directory() {
     assert!(err.to_string().contains("is not a directory"), "{err}");
     assert_eq!(repos.list_task_runs_for_task(&task_id).unwrap().len(), 0);
 }
+
+/// Builds the shape `monica task attach` leaves behind: a stopped run with a session to resume,
+/// no branch and no worktree, bound to a tab whose terminal session recorded its own cwd.
+fn stopped_attached_primary(
+    repos: &mut FakeRepos,
+    task_id: &TaskId,
+    tab_cwd: &str,
+) -> TaskRunId {
+    let session_id = raw_tab_session_at(repos, "tab-attach", Some("sess-attached"), tab_cwd);
+    let report =
+        attach_terminal_session_to_task(repos, task_id, Agent::Claude, "tab-attach", &session_id)
+            .unwrap();
+    repos.set_primary_task_run(task_id, &report.task_run_id).unwrap();
+    repos
+        .finish_task_run(&report.task_run_id, task_id, TaskRunStatus::Stopped)
+        .unwrap();
+    report.task_run_id
+}
+
+/// `claude --resume` resolves a session by cwd, so a worktree-less run reopens where its own
+/// terminal session ran — substituting the project checkout would neither find the session nor
+/// touch the files it was working with.
+#[test]
+fn run_task_resumes_worktreeless_run_in_its_recorded_tab_cwd() {
+    let mut repos = FakeRepos::default();
+    let (task_id, checkout) = checkout_backed_task(&mut repos);
+    let elsewhere = temp_dir_named("monica-attached-cwd");
+    let run_id = stopped_attached_primary(&mut repos, &task_id, &elsewhere.to_string_lossy());
+
+    let result =
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+            .unwrap();
+
+    assert_eq!(result.task_run_id, run_id, "the attached run is resumed, not replaced");
+    assert_eq!(result.initial_command, "claude --resume 'sess-attached'");
+    assert_eq!(result.cwd, elsewhere.to_string_lossy());
+    assert_ne!(result.cwd, checkout.to_string_lossy());
+}
+
+/// A recorded cwd that has since gone away is no answer at all — resume cannot work there either
+/// way, so the launch falls through to the validated project checkout instead of erroring.
+#[test]
+fn run_task_falls_back_to_checkout_when_the_recorded_cwd_is_gone() {
+    let mut repos = FakeRepos::default();
+    let (task_id, checkout) = checkout_backed_task(&mut repos);
+    stopped_attached_primary(&mut repos, &task_id, "/nonexistent/attached");
+
+    let result =
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+            .unwrap();
+
+    assert_eq!(result.cwd, checkout.to_string_lossy());
+}
+
+/// A fresh in-place run has no tab yet, and a relaunched one recorded the checkout itself, so the
+/// tab lookup never diverts an in-place run away from `project.path`.
+#[test]
+fn run_task_in_place_is_unaffected_by_the_tab_cwd_lookup() {
+    let mut repos = FakeRepos::default();
+    let (task_id, checkout) = checkout_backed_task(&mut repos);
+
+    let result = in_place_run(&mut repos, &task_id);
+
+    assert_eq!(result.cwd, checkout.to_string_lossy());
+    let run = repos.get_task_run(&result.task_run_id).unwrap().unwrap();
+    assert_eq!(run.terminal_tab_id, None);
+}

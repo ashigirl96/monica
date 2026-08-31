@@ -1381,12 +1381,21 @@ pub(crate) fn raw_tab_session(
     tab_id: &str,
     agent_session_id: Option<&str>,
 ) -> String {
+    raw_tab_session_at(repos, tab_id, agent_session_id, "/repo")
+}
+
+pub(crate) fn raw_tab_session_at(
+    repos: &mut FakeRepos,
+    tab_id: &str,
+    agent_session_id: Option<&str>,
+    cwd: &str,
+) -> String {
     let session = repos
         .create_terminal_session(NewTerminalSession {
             runspace_id: None,
             tab_id: Some(tab_id.to_string()),
             kind: TerminalSessionKind::Shell,
-            cwd: "/repo".to_string(),
+            cwd: cwd.to_string(),
             shell: "/bin/zsh".to_string(),
             rows: 24,
             cols: 80,

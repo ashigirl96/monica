@@ -6,6 +6,7 @@ use super::ports::{
     GitGateway, ProjectRepository, TaskRunOutputs, SetupEnv, SetupOutcome, SetupRunner,
     TaskRunStore, TaskStore, UnitOfWork, WorkbenchStore,
 };
+use crate::ports::TerminalSessionRepository;
 use crate::prelude::{
     ExternalReference, NewTaskRun, Project, RefType, RunMode, Task, TaskId, TaskRun, TaskRunId,
     TaskRunStatus, TaskStatus,
@@ -182,7 +183,7 @@ pub fn run_task<R, A>(
     mode: RunMode,
 ) -> ApplicationResult<crate::RunTaskResult>
 where
-    R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore + UnitOfWork,
+    R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore + TerminalSessionRepository + UnitOfWork,
     A: TaskRunOutputs,
 {
     if mode == RunMode::InPlace && needs_new_run(primary_run(repos, task_id)?.as_ref()) {
@@ -345,7 +346,7 @@ pub fn prepare_claude_for_run<R, A>(
     agent_override: Option<crate::prelude::Agent>,
 ) -> ApplicationResult<crate::RunTaskResult>
 where
-    R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore,
+    R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore + TerminalSessionRepository,
     A: TaskRunOutputs,
 {
     let (task, project) = load_task_and_project(repos, task_id)?;
@@ -374,7 +375,7 @@ where
         }
     };
 
-    let cwd = launch_cwd(&primary_run, &project)?;
+    let cwd = launch_cwd(repos, &primary_run, &project)?;
 
     // A resumed session must reopen under the agent that recorded it — an override only applies
     // to fresh launches, so a resume can never be fed another agent's session.
@@ -417,17 +418,43 @@ where
 /// A run that owns a worktree must open there, and a merely *missing* worktree stays an error: the
 /// silent fallback would run an isolated branch's agent against the primary checkout (pinning the
 /// bench there too), and `claude --resume` resolves its session by cwd, so it would not find the
-/// session either. A run with no worktree at all — in-place, or attached — opens in the checkout.
-fn launch_cwd(run: &TaskRun, project: &Project) -> ApplicationResult<String> {
-    let Some(worktree) = run.worktree_path.as_deref() else {
-        return project_checkout(project);
-    };
-    if !Path::new(worktree).is_dir() {
-        return Err(ApplicationError::validation(format!(
-            "worktree does not exist at {worktree}"
-        )));
+/// session either. A run with no worktree at all — in-place, or attached — reopens in the cwd its
+/// own terminal session recorded, and only failing that in the project checkout.
+fn launch_cwd<R>(repos: &R, run: &TaskRun, project: &Project) -> ApplicationResult<String>
+where
+    R: TerminalSessionRepository,
+{
+    if let Some(worktree) = run.worktree_path.as_deref() {
+        if !Path::new(worktree).is_dir() {
+            return Err(ApplicationError::validation(format!(
+                "worktree does not exist at {worktree}"
+            )));
+        }
+        return Ok(worktree.to_string());
     }
-    Ok(worktree.to_string())
+    match tab_session_cwd(repos, run)? {
+        Some(cwd) => Ok(cwd),
+        None => project_checkout(project),
+    }
+}
+
+/// The directory the run's own terminal session opened in. An attached run (`monica task attach`)
+/// is the case that matters: its session was started wherever the user happened to be, and
+/// `claude --resume` resolves a session by cwd, so reopening it anywhere else neither finds the
+/// session nor operates on the files it was working with. A directory that has since gone away is
+/// treated as no answer at all — resume cannot work there either way, and the caller's project
+/// checkout is at least validated.
+fn tab_session_cwd<R>(repos: &R, run: &TaskRun) -> ApplicationResult<Option<String>>
+where
+    R: TerminalSessionRepository,
+{
+    let Some(tab_id) = run.terminal_tab_id.as_deref() else {
+        return Ok(None);
+    };
+    Ok(repos
+        .latest_terminal_session_for_tab(tab_id)?
+        .map(|session| session.cwd)
+        .filter(|cwd| Path::new(cwd).is_dir()))
 }
 
 /// The project checkout a worktree-less run opens in.
