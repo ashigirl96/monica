@@ -53,7 +53,7 @@ where
     let fetch_ms = fetch_started.elapsed().as_millis();
 
     let mut by_repo: HashMap<String, HashMap<i64, FetchedIssue>> = HashMap::new();
-    let mut failed_repos: Vec<String> = Vec::new();
+    let mut unrefreshed: Vec<String> = Vec::new();
     for ((repo, _), (elapsed, result)) in repo_batches.iter().zip(results) {
         match result {
             Ok(issues) => {
@@ -72,7 +72,7 @@ where
             // below. Recording them as empty successes would blank every cached title in that
             // repo over a transient error.
             Err(e) => {
-                failed_repos.push(repo.clone());
+                unrefreshed.push(repo.clone());
                 log::warn!(
                     target: "monica_application::github_sync",
                     "bulk issue fetch failed repo={repo} after {}ms error={e:#}",
@@ -85,11 +85,17 @@ where
     let mut entries: Vec<(OpenIssueRef, FetchedIssue)> = Vec::with_capacity(refs.len());
     for issue_ref in &refs {
         let repo_key = issue_ref.repo.to_ascii_lowercase();
-        if let Some(issue) = by_repo
-            .get(&repo_key)
-            .and_then(|issues| issues.get(&issue_ref.number))
-        {
-            entries.push((issue_ref.clone(), issue.clone()));
+        let fetched = by_repo.get(&repo_key);
+        match fetched.and_then(|issues| issues.get(&issue_ref.number)) {
+            Some(issue) => entries.push((issue_ref.clone(), issue.clone())),
+            // The repo answered but this number did not come back: the adapter drops an alias that
+            // no longer resolves (deleted, transferred, or a PR number) to protect the cached
+            // title. Name the ref, or a task whose only issue is gone reports as "nothing to sync".
+            None if fetched.is_some() => {
+                unrefreshed.push(format!("{}#{}", issue_ref.repo, issue_ref.number));
+            }
+            // Its repo already stands in `unrefreshed` as a whole; don't name every ref twice.
+            None => {}
         }
     }
 
@@ -104,9 +110,10 @@ where
         record_started.elapsed().as_millis(),
         started.elapsed().as_millis()
     );
+    unrefreshed.sort();
     Ok(SyncPassOutcome {
         synced_count,
         changes,
-        failed_repos,
+        unrefreshed,
     })
 }

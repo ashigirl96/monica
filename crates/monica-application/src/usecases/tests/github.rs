@@ -320,9 +320,36 @@ async fn bulk_sync_issues_reports_no_change_for_a_repo_whose_fetch_failed() {
         "a transient failure must not be reported as a change"
     );
     assert_eq!(
-        outcome.failed_repos,
+        outcome.unrefreshed,
         vec!["owner/repo".to_string()],
         "the unreachable repo is named so the caller can't read the skip as \"nothing to do\""
+    );
+}
+
+#[tokio::test]
+async fn bulk_sync_issues_names_a_ref_the_repo_stopped_resolving() {
+    let mut repos = FakeRepos::default();
+    track_github_issue(&mut repos, &FakeGithub, track_input())
+        .await
+        .unwrap();
+
+    // The repo answers, but #42 is absent from the batch — what the adapter does when an alias
+    // comes back null (issue deleted, transferred, or the number is a PR).
+    let github = RepoIssueGithub::new(HashMap::from([(
+        "owner/repo".to_string(),
+        Some(Vec::new()),
+    )]));
+    let outcome = bulk_sync_issues(&mut repos, &github, &GithubSyncScope::All)
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.synced_count, 0);
+    assert!(outcome.changes.is_empty());
+    assert_eq!(
+        outcome.unrefreshed,
+        vec!["owner/repo#42".to_string()],
+        "a reachable repo that dropped the ref must still count as unrefreshed, or a task whose \
+         only issue is gone reports as \"nothing to sync\""
     );
 }
 
@@ -575,10 +602,9 @@ async fn bulk_sync_skips_unresolved_refs_of_failed_repos_and_tolerates_fetch_err
 
     assert_eq!(outcome.synced_count, 1, "only #13 was refreshed");
     assert_eq!(
-        outcome.failed_repos,
-        vec!["owner/failing".to_string(), "owner/repo".to_string()],
-        "owner/repo's listing succeeded, but #14's by-number fetch did not — that ref is stale too, \
-         so the repo is named rather than silently skipped"
+        outcome.unrefreshed,
+        vec!["owner/failing".to_string(), "owner/repo#14".to_string()],
+        "the failing repo is named whole; owner/repo's listing succeeded so only #14 is stale"
     );
     let fetched = github.fetched_pull_requests();
     assert_eq!(fetched.len(), 2, "the failed repo's ref is never fetched by number");

@@ -58,7 +58,9 @@ where
 
     let mut by_branch: HashMap<String, HashMap<String, RepoPullRequest>> = HashMap::new();
     let mut by_number: HashMap<String, HashMap<i64, RepoPullRequest>> = HashMap::new();
+    // `failed_repos` gates control flow; `unrefreshed` is what the caller is told.
     let mut failed_repos: HashSet<String> = HashSet::new();
+    let mut unrefreshed: Vec<String> = Vec::new();
     for (repo, (elapsed, result)) in distinct_repos.iter().zip(results) {
         let pull_requests = match result {
             Ok(pull_requests) => pull_requests,
@@ -173,10 +175,15 @@ where
     for (unresolved_ref, result) in futures_util::future::join_all(status_fetches).await {
         match result {
             Ok(pr) => status_entries.push((unresolved_ref.clone(), pr)),
-            // No retry state to record: the next forced sync simply tries again. The repo still
-            // goes on the failed list so the caller does not read the skip as "nothing to do".
+            // No retry state to record: the next forced sync simply tries again. The ref is
+            // still named so the caller does not read the skip as "nothing to do" — the repo's
+            // listing succeeded, so only this one PR is stale.
             Err(e) => {
-                failed_repos.insert(unresolved_ref.repo.to_ascii_lowercase());
+                unrefreshed.push(format!(
+                    "{}#{}",
+                    unresolved_ref.repo.to_ascii_lowercase(),
+                    unresolved_ref.number
+                ));
                 log::warn!(
                     target: "monica_application::github_sync",
                     "status refresh fetch failed repo={} pull_request_number={} error={e:#}",
@@ -204,12 +211,12 @@ where
         record_started.elapsed().as_millis(),
         started.elapsed().as_millis()
     );
-    let mut failed_repos: Vec<String> = failed_repos.into_iter().collect();
-    failed_repos.sort();
+    unrefreshed.extend(failed_repos);
+    unrefreshed.sort();
     Ok(SyncPassOutcome {
         synced_count,
         changes,
-        failed_repos,
+        unrefreshed,
     })
 }
 

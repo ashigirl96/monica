@@ -260,15 +260,18 @@ impl PullRequestSyncChange {
     }
 }
 
-/// What one pass of the sync did. `failed_repos` is the load-bearing field: a repo whose fetch
-/// failed is skipped rather than recorded as empty, so its cached state survives — which means a
-/// caller that ignores this cannot tell "nothing needed refreshing" from "nothing could be
+/// What one pass of the sync did. `unrefreshed` is the load-bearing field: anything the sync could
+/// not fetch is skipped rather than recorded as empty, so its cached state survives — which means a
+/// caller that ignores it cannot tell "nothing needed refreshing" from "nothing could be
 /// refreshed".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncPassOutcome<C> {
     pub synced_count: u32,
     pub changes: Vec<C>,
-    pub failed_repos: Vec<String>,
+    /// Addresses left holding stale data, at whichever granularity failed: `owner/repo` when the
+    /// whole repo was unreachable, `owner/repo#123` when the repo answered but that one ref did
+    /// not resolve.
+    pub unrefreshed: Vec<String>,
 }
 
 // Hand-written: `derive(Default)` would demand `C: Default`, which `Vec<C>` never needs.
@@ -277,7 +280,7 @@ impl<C> Default for SyncPassOutcome<C> {
         Self {
             synced_count: 0,
             changes: Vec::new(),
-            failed_repos: Vec::new(),
+            unrefreshed: Vec::new(),
         }
     }
 }
@@ -288,8 +291,9 @@ pub struct GithubSyncReport {
     pub synced_count: u32,
     pub issue_changes: Vec<IssueSyncChange>,
     pub pull_request_changes: Vec<PullRequestSyncChange>,
-    /// Repos the sync could not reach, deduplicated across both passes.
-    pub failed_repos: Vec<String>,
+    /// What the sync could not refresh, deduplicated across both passes. See
+    /// [`SyncPassOutcome::unrefreshed`].
+    pub unrefreshed: Vec<String>,
 }
 
 impl GithubSyncReport {

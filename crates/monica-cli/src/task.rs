@@ -198,10 +198,10 @@ async fn sync_command(monica: &mut CliFacade, id: Option<&str>) -> Result<()> {
     };
     let report = monica.synchronization().sync_github(scope).await?;
     print!("{}", render_sync_report(&report));
-    if report.failed_repos.is_empty() {
+    if report.unrefreshed.is_empty() {
         return Ok(());
     }
-    Err(anyhow!("{}", incomplete_sync_message(&report.failed_repos)))
+    Err(anyhow!("{}", incomplete_sync_message(&report.unrefreshed)))
 }
 
 /// Reject an unknown task here rather than letting the sync report zero refs, which reads the same
@@ -215,12 +215,12 @@ fn resolve_task_id(monica: &mut CliFacade, id: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("Task not found: {id}"))
 }
 
-/// A repo the sync could not reach keeps whatever was cached, so the command must fail rather than
-/// let `monica task sync && monica task status` read stale rows as fresh ones.
-fn incomplete_sync_message(failed_repos: &[String]) -> String {
+/// Anything the sync could not refresh keeps whatever was cached, so the command must fail rather
+/// than let `monica task sync && monica task status` read stale rows as fresh ones.
+fn incomplete_sync_message(unrefreshed: &[String]) -> String {
     format!(
-        "sync incomplete: could not reach {}; those refs still show what was cached before",
-        failed_repos.join(", ")
+        "sync incomplete: could not refresh {}; those refs still show what was cached before",
+        unrefreshed.join(", ")
     )
 }
 
@@ -286,8 +286,8 @@ fn render_status_table(rows: &[TaskSummaryRow]) -> String {
 fn render_sync_report(report: &GithubSyncReport) -> String {
     let changed = report.changed_count();
     if changed == 0 {
-        return match (report.synced_count, report.failed_repos.is_empty()) {
-            // Every ref failed to fetch: the error carries the reason, so say nothing here rather
+        return match (report.synced_count, report.unrefreshed.is_empty()) {
+            // Nothing came back at all: the error carries the reason, so say nothing here rather
             // than claim there was nothing to sync.
             (0, false) => String::new(),
             (0, true) => "No refs to sync.\n".to_string(),
@@ -407,21 +407,22 @@ mod tests {
     }
 
     #[test]
-    fn render_sync_report_stays_silent_when_every_repo_was_unreachable() {
+    fn render_sync_report_stays_silent_when_nothing_could_be_refreshed() {
         // Otherwise this prints "No refs to sync." for a sync that reached nothing — the exact
         // confusion that makes `monica task sync && monica task status` act on stale rows.
         let report = GithubSyncReport {
-            failed_repos: vec!["ashigirl96/monica".to_string()],
+            unrefreshed: vec!["ashigirl96/monica#481".to_string()],
             ..GithubSyncReport::default()
         };
         assert_eq!(render_sync_report(&report), "");
     }
 
     #[test]
-    fn incomplete_sync_message_names_the_unreachable_repos() {
+    fn incomplete_sync_message_names_what_stayed_stale() {
+        // Mixed granularity on purpose: a whole repo went unreachable, one ref stopped resolving.
         assert_eq!(
-            incomplete_sync_message(&["a/b".to_string(), "c/d".to_string()]),
-            "sync incomplete: could not reach a/b, c/d; those refs still show what was cached before"
+            incomplete_sync_message(&["a/b".to_string(), "c/d#12".to_string()]),
+            "sync incomplete: could not refresh a/b, c/d#12; those refs still show what was cached before"
         );
     }
 
@@ -461,7 +462,7 @@ mod tests {
                     newly_linked: true,
                 },
             ],
-            failed_repos: Vec::new(),
+            unrefreshed: Vec::new(),
         };
 
         assert_eq!(
@@ -493,7 +494,7 @@ mod tests {
                 }),
             )],
             pull_request_changes: Vec::new(),
-            failed_repos: Vec::new(),
+            unrefreshed: Vec::new(),
         };
 
         assert_eq!(
