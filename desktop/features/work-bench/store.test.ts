@@ -177,6 +177,7 @@ const {
   cycleRunspaceAtom,
   removeRunspaceAtom,
   tabExitedAtom,
+  createTaskRunspaceAtom,
 } = await import("./store");
 const { loadTerminalStateAtom } = await import("./persistence");
 
@@ -772,5 +773,40 @@ describe("window isolation", () => {
     await store.set(rAtom);
 
     expect(listCalls).toBe(0);
+  });
+});
+
+describe("createTaskRunspaceAtom activation", () => {
+  const initial = () => makeState([makeRunspace("shell")], "shell");
+  const params = { runspaceId: "bench-T1", taskId: "T1", cwd: "/repo" };
+
+  test("activates the new runspace by default", async () => {
+    const store = storeWithState(initial());
+    await store.set(createTaskRunspaceAtom, params);
+    expect(store.get(terminalStateAtom)!.activeRunspaceId).toBe("bench-T1");
+  });
+
+  test("activate: false adds the runspace but keeps the current one active", async () => {
+    const store = storeWithState(initial());
+    await store.set(createTaskRunspaceAtom, { ...params, activate: false });
+    const state = store.get(terminalStateAtom)!;
+    expect(state.runspaces.map((r) => r.id)).toEqual(["shell", "bench-T1"]);
+    expect(state.activeRunspaceId).toBe("shell");
+  });
+
+  test("activate: false on an existing runspace adds the launch tab without switching", async () => {
+    const store = storeWithState(
+      makeState([makeRunspace("shell"), makeRunspace("bench-T1")], "shell"),
+    );
+    await store.set(createTaskRunspaceAtom, {
+      ...params,
+      launch: { env: [], initialCommand: "claude" },
+      activate: false,
+    });
+    const state = store.get(terminalStateAtom)!;
+    const bench = state.runspaces.find((r) => r.id === "bench-T1")!;
+    expect(bench.tabs).toHaveLength(2);
+    expect(bench.activeTabId).toBe(bench.tabs[1].id);
+    expect(state.activeRunspaceId).toBe("shell");
   });
 });

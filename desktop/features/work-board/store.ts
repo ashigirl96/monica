@@ -52,7 +52,7 @@ export const runTaskAtom = atom(
   async (_get, set, taskId: string, agent: Agent | null, mode: RunMode) => {
     const result = await runTaskFlow(taskId, agent, mode);
     if (!result) return;
-    await set(createTaskRunspaceAtom, result);
+    await set(createTaskRunspaceAtom, { ...result, activate: false });
     await set(refreshTaskSummariesAtom);
   },
 );

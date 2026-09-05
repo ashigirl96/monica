@@ -699,11 +699,15 @@ export const createTaskRunspaceAtom = atom(
       cwd: string;
       env?: [string, string][];
       launch?: TerminalLaunchIntent;
+      /// A run launched from the board must not yank the bench away from whatever the
+      /// user is working in; opening the bench for a task is the explicit "go there".
+      activate?: boolean;
     },
   ) => {
     await set(loadTerminalStateAtom);
 
     const state = get(resolvedStateAtom);
+    const activate = params.activate ?? true;
 
     const existing = state.runspaces.find((r) => r.id === params.runspaceId);
     if (existing) {
@@ -722,7 +726,7 @@ export const createTaskRunspaceAtom = atom(
 
       set(terminalStateAtom, {
         ...state,
-        activeRunspaceId: existing.id,
+        activeRunspaceId: activate ? existing.id : state.activeRunspaceId,
         runspaces: state.runspaces.map((r) => (r.id === existing.id ? updated : r)),
       });
       void set(resolveWorktreeInfoAtom);
@@ -744,7 +748,7 @@ export const createTaskRunspaceAtom = atom(
     };
     set(terminalStateAtom, {
       runspaces: [...state.runspaces, rs],
-      activeRunspaceId: rs.id,
+      activeRunspaceId: activate ? rs.id : state.activeRunspaceId,
     });
     void set(resolveWorktreeInfoAtom);
   },
