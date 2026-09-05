@@ -1,8 +1,10 @@
 use super::{Backend, Monica};
-use crate::usecases::tasks::{AttachSessionReport, CloseTaskReport, MakeMainOutcome};
-use crate::prelude::{Agent, DisplayStatus, Event, Task, TaskId};
+use crate::usecases::tasks::{
+    AttachSessionReport, CloseTaskReport, MakeMainOutcome, TabTaskBinding,
+};
+use crate::prelude::{Agent, DisplayStatus, Event, Task, TaskId, TaskRunStatus};
 use crate::{ApplicationEvent, ApplicationResult, TaskSummaryRow};
-use crate::ports::TaskSummaryFilter;
+use crate::ports::{TaskRunStore, TaskSummaryFilter};
 
 /// Task lifecycle and task/run read models.
 pub struct TaskService<'a, B: Backend> {
@@ -20,9 +22,9 @@ impl<B: Backend> TaskService<'_, B> {
     }
 
     /// Connect the agent session running in a terminal tab to an existing task, as a run with no
-    /// worktree and no branch. Emits nothing: the only caller is the CLI, whose event sink drops
-    /// `TaskRunStatusChanged`. A GUI entry point must also announce the runs this detached and
-    /// settled, the way the settlement paths in `ExecutionService` do.
+    /// worktree and no branch that becomes the task's Main Run. Announces the new run and every run
+    /// the tab was driving before (settled and unbound by the attach), so the board and the bench
+    /// refresh when the caller is the desktop; the CLI's sink drops these events.
     pub fn attach_terminal_session(
         &mut self,
         task_id: &TaskId,
@@ -30,13 +32,38 @@ impl<B: Backend> TaskService<'_, B> {
         terminal_tab_id: &str,
         terminal_session_id: &str,
     ) -> ApplicationResult<AttachSessionReport> {
-        crate::usecases::tasks::attach_terminal_session_to_task(
-            &mut self.m.repos,
+        let Monica { repos, events, .. } = &mut *self.m;
+        let report = crate::usecases::tasks::attach_terminal_session_to_task(
+            repos,
             task_id,
             agent,
             terminal_tab_id,
             terminal_session_id,
-        )
+        )?;
+        // `detached_run_ids` carries no task or status; a detached run may also have been settled
+        // long before this attach (a hook's SessionEnd, a failed setup), so read back what each
+        // actually is rather than announcing a status it never reached.
+        for run_id in &report.detached_run_ids {
+            if let Some(run) = repos.get_task_run(run_id)? {
+                events.emit(ApplicationEvent::TaskRunStatusChanged {
+                    task_id: run.task_id.into(),
+                    task_run_id: run.id.into(),
+                    status: run.status,
+                });
+            }
+        }
+        events.emit(ApplicationEvent::TaskRunStatusChanged {
+            task_id: report.task_id.to_string(),
+            task_run_id: report.task_run_id.to_string(),
+            status: TaskRunStatus::Running,
+        });
+        Ok(report)
+    }
+
+    /// Live tab-driven runs paired with their task's bench runspace, for the Workbench to pull
+    /// each tab into the runspace it belongs to.
+    pub fn list_tab_task_bindings(&self) -> ApplicationResult<Vec<TabTaskBinding>> {
+        crate::usecases::tasks::list_tab_task_bindings(&self.m.repos)
     }
 
     /// Promote the run hosted in a Workbench tab to its task's Main Run, emitting the run's new

@@ -4,7 +4,8 @@ import type { TerminalRunspace, TerminalState } from "./store";
 
 // --- Pure function tests (no mocking needed) ---
 
-const { enrichRunspacesWithEnv, applyHint } = await import("./store");
+const { enrichRunspacesWithEnv, applyHint, moveTabToRunspace, planTabMoves } =
+  await import("./store");
 
 function makeRunspace(id: string, overrides?: Partial<TerminalRunspace>): TerminalRunspace {
   return {
@@ -107,6 +108,142 @@ describe("applyHint", () => {
   });
 });
 
+describe("moveTabToRunspace", () => {
+  const target = {
+    runspaceId: "bench-MON-1",
+    taskId: "MON-1",
+    env: [["K", "v"]] as [string, string][],
+  };
+
+  function twoTabShell() {
+    return makeRunspace("shell", {
+      tabs: [
+        { id: "tab-a", title: "", cwd: "/a", order: 0 },
+        { id: "tab-b", title: "", cwd: "/b", order: 1 },
+      ],
+      activeTabId: "tab-a",
+    });
+  }
+
+  test("creates the bench runspace at the end when it is not open yet", () => {
+    const state = makeState([twoTabShell()], "shell");
+
+    const result = moveTabToRunspace(state, "tab-b", target, false);
+
+    const bench = result.runspaces.find((rs) => rs.id === "bench-MON-1");
+    expect(bench).toMatchObject({ taskId: "MON-1", env: [["K", "v"]], activeTabId: "tab-b" });
+    expect(bench?.tabs.map((t) => t.id)).toEqual(["tab-b"]);
+    expect(bench?.order).toBe(1);
+    // The tab keeps its identity and cwd; only its position changes.
+    expect(bench?.tabs[0]).toMatchObject({ id: "tab-b", cwd: "/b", order: 0 });
+    expect(result.runspaces.find((rs) => rs.id === "shell")?.tabs.map((t) => t.id)).toEqual([
+      "tab-a",
+    ]);
+  });
+
+  test("appends to an existing runspace and collapses an emptied source", () => {
+    const shell = makeRunspace("shell", {
+      tabs: [{ id: "tab-a", title: "", cwd: "/a", order: 0 }],
+      activeTabId: "tab-a",
+    });
+    const bench = makeRunspace("bench-MON-1", {
+      taskId: "MON-1",
+      tabs: [{ id: "tab-x", title: "", cwd: "/wt", order: 0 }],
+      activeTabId: "tab-x",
+      order: 1,
+    });
+    const state = makeState([shell, bench], "bench-MON-1");
+
+    const result = moveTabToRunspace(state, "tab-a", target, false);
+
+    expect(result.runspaces.map((rs) => rs.id)).toEqual(["bench-MON-1"]);
+    expect(result.runspaces[0].tabs.map((t) => [t.id, t.order])).toEqual([
+      ["tab-x", 0],
+      ["tab-a", 1],
+    ]);
+    // A background move leaves the front tab alone.
+    expect(result.runspaces[0].activeTabId).toBe("tab-x");
+    expect(result.activeRunspaceId).toBe("bench-MON-1");
+  });
+
+  test("follows the tab when it was in front, and stays put otherwise", () => {
+    const inFront = moveTabToRunspace(makeState([twoTabShell()], "shell"), "tab-a", target, false);
+    expect(inFront.activeRunspaceId).toBe("bench-MON-1");
+
+    const other = makeRunspace("other", { order: 5 });
+    const behind = moveTabToRunspace(
+      makeState([twoTabShell(), other], "other"),
+      "tab-a",
+      target,
+      false,
+    );
+    expect(behind.activeRunspaceId).toBe("other");
+  });
+
+  test("follow forces the target active even for a background tab", () => {
+    const other = makeRunspace("other", { order: 5 });
+    const result = moveTabToRunspace(
+      makeState([twoTabShell(), other], "other"),
+      "tab-b",
+      target,
+      true,
+    );
+    expect(result.activeRunspaceId).toBe("bench-MON-1");
+    expect(result.runspaces.find((rs) => rs.id === "bench-MON-1")?.activeTabId).toBe("tab-b");
+  });
+
+  test("drops the pin from a moved tab", () => {
+    const pinned = makeRunspace("shell", {
+      tabs: [
+        { id: "tab-a", title: "", cwd: "/a", order: 0 },
+        { id: "tab-b", title: "", cwd: "/b", order: 1 },
+      ],
+      activeTabId: "tab-a",
+      pinnedTabId: "tab-a",
+    });
+
+    const result = moveTabToRunspace(makeState([pinned], "shell"), "tab-a", target, false);
+
+    expect(result.runspaces.find((rs) => rs.id === "shell")?.pinnedTabId).toBeUndefined();
+    expect(result.runspaces.find((rs) => rs.id === "bench-MON-1")?.pinnedTabId).toBeUndefined();
+  });
+
+  test("is a no-op when the tab is already there or unknown", () => {
+    const bench = makeRunspace("bench-MON-1", {
+      taskId: "MON-1",
+      tabs: [{ id: "tab-a", title: "", cwd: "/a", order: 0 }],
+      activeTabId: "tab-a",
+    });
+    const state = makeState([bench], "bench-MON-1");
+
+    expect(moveTabToRunspace(state, "tab-a", target, true)).toBe(state);
+    expect(moveTabToRunspace(state, "tab-nope", target, true)).toBe(state);
+  });
+});
+
+describe("planTabMoves", () => {
+  test("lists only visible tabs whose runspace disagrees with the binding", () => {
+    const shell = makeRunspace("shell", {
+      tabs: [{ id: "tab-a", title: "", cwd: "/a", order: 0 }],
+      activeTabId: "tab-a",
+    });
+    const bench = makeRunspace("bench-MON-1", {
+      taskId: "MON-1",
+      tabs: [{ id: "tab-x", title: "", cwd: "/wt", order: 0 }],
+      activeTabId: "tab-x",
+    });
+    const state = makeState([shell, bench], "shell");
+
+    const moves = planTabMoves(state, [
+      { terminal_tab_id: "tab-a", task_id: "MON-2", runspace_id: "bench-MON-2" },
+      { terminal_tab_id: "tab-x", task_id: "MON-1", runspace_id: "bench-MON-1" },
+      { terminal_tab_id: "tab-elsewhere", task_id: "MON-3", runspace_id: "bench-MON-3" },
+    ]);
+
+    expect(moves).toEqual([{ tabId: "tab-a", runspaceId: "bench-MON-2", taskId: "MON-2" }]);
+  });
+});
+
 // --- Atom integration tests (mock Tauri commands) ---
 
 let loadStateResult: {
@@ -149,6 +286,8 @@ mock.module("@/commands/task", () => ({
   taskShellEnv: (tid: string) => Promise.resolve(shellEnvResult.get(tid) ?? []),
   makeMainTaskRun: () => Promise.resolve(false),
   primaryTabId: () => Promise.resolve(null),
+  attachTerminalTab: () => Promise.reject(new Error("not mocked")),
+  listTabTaskBindings: () => Promise.resolve([]),
 }));
 mock.module("@/commands/git", () => ({
   worktreeInfo: () => Promise.resolve(null),

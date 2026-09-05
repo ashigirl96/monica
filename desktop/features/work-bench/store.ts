@@ -2,7 +2,14 @@ import type { PopoverAnchor } from "@/components/popover-menu";
 import { shortPath } from "@/lib/paths";
 import { atom, type Getter, type Setter } from "jotai";
 import { terminalDetach, terminalTerminate, type TerminalSession } from "@/commands/terminal";
-import { makeMainTaskRun, primaryTabId } from "@/commands/task";
+import {
+  attachTerminalTab,
+  listTabTaskBindings,
+  makeMainTaskRun,
+  primaryTabId,
+  taskShellEnv,
+  type TabTaskBinding,
+} from "@/commands/task";
 import { readRunspacePlan, type PlanPreview } from "@/commands/plan";
 import type { WorktreeInfo } from "@/commands/git";
 import { releaseTabConnection } from "@/features/work-bench/terminal-connections";
@@ -13,6 +20,7 @@ import {
   windowLabelAtom,
 } from "@/stores/ui-state";
 import { refreshTaskSummariesAtom } from "@/stores/workboard";
+import { pushErrorToast } from "@/stores/toast";
 import { jumpHintsActiveAtom } from "@/features/work-bench/jump-hints";
 import { detachedSessionsAtom, refreshSessionsAtom } from "@/features/work-bench/session-status";
 import { loadTerminalStateAtom } from "@/features/work-bench/persistence";
@@ -754,3 +762,156 @@ export const consumeTerminalLaunchAtom = atom(null, (get, set, tabId: string) =>
   const state = get(resolvedStateAtom);
   set(terminalStateAtom, patchTabInState(state, tabId, { launch: undefined }));
 });
+
+export type TabMoveTarget = {
+  runspaceId: string;
+  taskId: string;
+  env?: [string, string][];
+};
+
+// Move a tab into a task's bench runspace, creating the runspace when the bench has never been
+// opened here. The tab keeps its id (hook claims key on it), its session and its cwd — only the
+// layout changes. A source left empty collapses; a pin on the moved tab is dropped, since a
+// pinned tab must stay put and this move is the user's explicit say-so that it should not.
+// `follow` forces the target active; otherwise focus follows only if the moved tab was the one in
+// front, so a background reconcile never yanks the user out of what they are looking at.
+export function moveTabToRunspace(
+  state: TerminalState,
+  tabId: string,
+  target: TabMoveTarget,
+  follow: boolean,
+): TerminalState {
+  const source = state.runspaces.find((rs) => rs.tabs.some((t) => t.id === tabId));
+  if (!source || source.id === target.runspaceId) return state;
+  const tab = source.tabs.find((t) => t.id === tabId)!;
+
+  const wasInFront = state.activeRunspaceId === source.id && source.activeTabId === tabId;
+  const activate = follow || wasInFront;
+
+  const withoutSource = state.runspaces
+    .filter((rs) => rs.id !== source.id || rs.tabs.length > 1)
+    .map((rs) => {
+      if (rs.id !== source.id) return rs;
+      return {
+        ...rs,
+        ...removeTabFromRunspace(rs, tabId),
+        pinnedTabId: rs.pinnedTabId === tabId ? undefined : rs.pinnedTabId,
+      };
+    });
+
+  const existing = withoutSource.find((rs) => rs.id === target.runspaceId);
+  let runspaces: TerminalRunspace[];
+  if (existing) {
+    const moved = { ...tab, order: existing.tabs.length };
+    runspaces = withoutSource.map((rs) =>
+      rs.id === existing.id
+        ? {
+            ...rs,
+            tabs: [...rs.tabs, moved],
+            activeTabId: activate ? moved.id : rs.activeTabId,
+          }
+        : rs,
+    );
+  } else {
+    const moved = { ...tab, order: 0 };
+    runspaces = [
+      ...withoutSource,
+      {
+        id: target.runspaceId,
+        taskId: target.taskId,
+        env: target.env,
+        tabs: [moved],
+        activeTabId: moved.id,
+        order: maxRunspaceOrder(withoutSource) + 1,
+      },
+    ];
+  }
+
+  const activeSurvived = runspaces.some((rs) => rs.id === state.activeRunspaceId);
+  return {
+    runspaces,
+    activeRunspaceId: activate || !activeSurvived ? target.runspaceId : state.activeRunspaceId,
+  };
+}
+
+// The tabs whose runspace disagrees with the binding the backend holds for them. Tabs this window
+// does not show (another window, a closed tab) are not its business.
+export function planTabMoves(
+  state: TerminalState,
+  bindings: TabTaskBinding[],
+): { tabId: string; runspaceId: string; taskId: string }[] {
+  const runspaceByTab = new Map(
+    state.runspaces.flatMap((rs) => rs.tabs.map((t) => [t.id, rs.id] as const)),
+  );
+  return bindings
+    .filter((b) => {
+      const current = runspaceByTab.get(b.terminal_tab_id);
+      return current !== undefined && current !== b.runspace_id;
+    })
+    .map((b) => ({ tabId: b.terminal_tab_id, runspaceId: b.runspace_id, taskId: b.task_id }));
+}
+
+async function moveTabIntoTask(
+  get: Getter,
+  set: Setter,
+  tabId: string,
+  target: TabMoveTarget,
+  follow: boolean,
+): Promise<void> {
+  const state = get(resolvedStateAtom);
+  const targetKnown = state.runspaces.some((rs) => rs.id === target.runspaceId);
+  const env =
+    target.env ?? (targetKnown ? undefined : await taskShellEnv(target.taskId).catch(() => []));
+  set(
+    terminalStateAtom,
+    moveTabToRunspace(
+      get(resolvedStateAtom),
+      tabId,
+      {
+        ...target,
+        env: env && env.length > 0 ? env : undefined,
+      },
+      follow,
+    ),
+  );
+}
+
+// GUI attach ("Attach to Task…" in the tab menu): bind the tab's session to the task as its Main
+// Run, then pull the tab into the task's runspace right away rather than waiting for the poll.
+export const attachTabToTaskAtom = atom(null, async (get, set, tabId: string, taskId: string) => {
+  const tab = get(tabByIdAtom).get(tabId);
+  if (!tab?.sessionId) return;
+  let result;
+  try {
+    result = await attachTerminalTab(taskId, tabId, tab.sessionId);
+  } catch (e) {
+    pushErrorToast(e instanceof Error ? e.message : String(e));
+    return;
+  }
+  await moveTabIntoTask(
+    get,
+    set,
+    tabId,
+    {
+      runspaceId: result.runspace_id,
+      taskId: result.task_id,
+      env: result.env.length > 0 ? result.env : undefined,
+    },
+    true,
+  );
+  set(terminalFocusRequestAtom, (c) => c + 1);
+  await Promise.all([set(refreshTaskSummariesAtom), set(refreshPrimaryTabAtom)]);
+});
+
+// `monica task attach` runs in another process and cannot touch this window's layout, so the
+// sidebar poll asks the backend which tab belongs to which task's runspace and moves the strays.
+export const reconcileTabBindingsAtom = atom(null, async (get, set) => {
+  if (get(terminalStateAtom) === null) return;
+  const bindings = await listTabTaskBindings();
+  for (const move of planTabMoves(get(resolvedStateAtom), bindings)) {
+    await moveTabIntoTask(get, set, move.tabId, move, false);
+  }
+});
+
+// The tab whose "Attach to Task…" picker is open.
+export const attachPickerTabIdAtom = atom<string | null>(null);

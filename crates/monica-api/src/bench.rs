@@ -60,3 +60,30 @@ impl From<monica_application::RunTaskResult> for RunTaskResult {
         }
     }
 }
+
+/// What the Workbench needs to move a freshly attached tab into its task's runspace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct AttachTabResult {
+    pub task_id: String,
+    pub task_run_id: String,
+    pub runspace_id: String,
+    pub env: Vec<(String, String)>,
+}
+
+/// A live tab-driven run and the bench runspace its task owns.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct TabTaskBinding {
+    pub terminal_tab_id: String,
+    pub task_id: String,
+    pub runspace_id: String,
+}
+
+impl From<monica_application::TabTaskBinding> for TabTaskBinding {
+    fn from(value: monica_application::TabTaskBinding) -> Self {
+        Self {
+            terminal_tab_id: value.terminal_tab_id,
+            task_id: value.task_id.into(),
+            runspace_id: value.runspace_id.into(),
+        }
+    }
+}

@@ -92,6 +92,16 @@ export const commands = {
   primaryTabId: (taskId: string) =>
     typedError<string | null, ApiError>(__TAURI_INVOKE("primary_tab_id", { taskId })),
   /**
+   *  Bind the Claude session in a Workbench tab to a task as its Main Run (`monica task attach`
+   *  from the GUI). The tab itself is moved by the caller: the layout is frontend state.
+   */
+  attachTerminalTab: (taskId: string, tabId: string, sessionId: string) =>
+    typedError<AttachTabResult, ApiError>(
+      __TAURI_INVOKE("attach_terminal_tab", { taskId, tabId, sessionId }),
+    ),
+  listTabTaskBindings: () =>
+    typedError<TabTaskBinding[], ApiError>(__TAURI_INVOKE("list_tab_task_bindings")),
+  /**
    *  Read the plan held by the run driving the given Workbench tab. `Ok(None)` covers a shell tab, a
    *  run that never planned, and a plan file since deleted — all "nothing to preview" to the caller.
    */
@@ -163,6 +173,14 @@ export type AttachResult = {
   cols: number;
 };
 
+/**  What the Workbench needs to move a freshly attached tab into its task's runspace. */
+export type AttachTabResult = {
+  task_id: string;
+  task_run_id: string;
+  runspace_id: string;
+  env: [string, string][];
+};
+
 export type BoardColumn = {
   key: string;
   label: string;
@@ -224,6 +242,13 @@ export type RunTaskResult = {
   cwd: string;
   env: [string, string][];
   initial_command: string;
+};
+
+/**  A live tab-driven run and the bench runspace its task owns. */
+export type TabTaskBinding = {
+  terminal_tab_id: string;
+  task_id: string;
+  runspace_id: string;
 };
 
 export type TaskBench = {

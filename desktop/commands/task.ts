@@ -12,6 +12,8 @@ export type {
   TaskBench,
   PrepareTaskResult,
   RunTaskResult,
+  AttachTabResult,
+  TabTaskBinding,
 } from "./bindings";
 
 import { unwrap } from "./unwrap";
@@ -66,6 +68,14 @@ export function makeMainTaskRun(tabId: string) {
 
 export function primaryTabId(taskId: string) {
   return unwrap(commands.primaryTabId(taskId));
+}
+
+export function attachTerminalTab(taskId: string, tabId: string, sessionId: string) {
+  return unwrap(commands.attachTerminalTab(taskId, tabId, sessionId));
+}
+
+export function listTabTaskBindings() {
+  return unwrap(commands.listTabTaskBindings());
 }
 
 export function onTaskRunStatusChanged(

@@ -64,8 +64,8 @@ pub trait TaskRunStore {
     /// `running` run — the durable half of `monica task attach`. Settling and unbinding the runs
     /// this tab previously drove happens in the same transaction as the insert, so the tab -> run
     /// lookup can never observe two candidates and no run is stranded live with no tab left to
-    /// settle it. The task's primary pointer is deliberately untouched: an attached session must
-    /// not occupy the Main Run slot and block `start_run`.
+    /// settle it. The task's primary pointer is left to the use case, which decides whether the
+    /// attached run may take the Main Run slot.
     fn attach_terminal_tab_to_task(
         &mut self,
         new: NewTaskRun,

@@ -7,7 +7,11 @@ import {
 } from "@/commands/terminal";
 import type { TaskRunWaitReason } from "@/commands/task";
 import { MAIN_WINDOW_LABEL, windowLabelAtom } from "@/stores/ui-state";
-import { terminalStateAtom, warnTerminal } from "@/features/work-bench/store";
+import {
+  reconcileTabBindingsAtom,
+  terminalStateAtom,
+  warnTerminal,
+} from "@/features/work-bench/store";
 
 export type SessionStatusEntry = {
   status: TerminalSessionStatus;
@@ -68,4 +72,11 @@ export const refreshSessionsAtom = atom(null, async (get, set) => {
     return;
   }
   applySessionList(get, set, sessions);
+  // Same poll, same reason: a CLI attach lands in the DB only, so tabs bound to a task from
+  // another process are pulled into that task's runspace here.
+  try {
+    await set(reconcileTabBindingsAtom);
+  } catch (e) {
+    warnTerminal("tab binding reconcile", e);
+  }
 });

@@ -1,6 +1,9 @@
+use super::make_main::primary_mid_prepare;
 use super::ports::{TaskRunStore, TaskStore};
-use crate::ports::TerminalSessionRepository;
-use crate::prelude::{Agent, AgentSessionId, NewTaskRun, TaskId, TaskRunId, TaskStatus};
+use crate::ports::{TerminalSessionRepository, UnitOfWork, WorkbenchStore};
+use crate::prelude::{
+    Agent, AgentSessionId, NewTaskRun, RunspaceId, TaskId, TaskRunId, TaskStatus,
+};
 use crate::{ApplicationError, ApplicationResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,15 +16,36 @@ pub struct AttachSessionReport {
     pub agent_session_id: Option<AgentSessionId>,
     /// Runs this tab was driving before, now settled and unbound.
     pub detached_run_ids: Vec<TaskRunId>,
+    /// The task's bench runspace the tab now belongs to.
+    pub runspace_id: RunspaceId,
+    /// The primary that stayed in place because it was mid-prepare. `None` means the attached run
+    /// took the Main Run slot.
+    pub kept_primary_run_id: Option<TaskRunId>,
+}
+
+impl AttachSessionReport {
+    pub fn became_primary(&self) -> bool {
+        self.kept_primary_run_id.is_none()
+    }
+}
+
+/// A live run's tab and the bench runspace its task owns — where the Workbench must show the tab.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TabTaskBinding {
+    pub terminal_tab_id: String,
+    pub task_id: TaskId,
+    pub runspace_id: RunspaceId,
 }
 
 /// Connect the agent session living in a terminal tab to an existing task, as a run carrying no
-/// worktree and no branch.
+/// worktree and no branch, and make that run the task's Main Run.
 ///
 /// This is the only way a tab launched without `MONICA_TASK_ID` can ever reach a TaskRun: hook
 /// resolution has no task to scope its lookups by, so it falls back to the tab -> run binding this
-/// creates. The task's primary pointer is left alone — an attached session is a side run, so
-/// `start_run` can still prepare a real worktree run for the same task.
+/// creates. The tab moves into the task's bench runspace, so the bench is created here when the
+/// task has none yet — with the tab's own cwd, never pinned, so a later worktree run still gets to
+/// pin it. An attached run is an in-place primary like a worktree-less Run: the only primary it
+/// will not displace is one still mid-prepare, whose prepared worktree would otherwise be orphaned.
 ///
 /// `agent` must be the agent actually running in the tab. Nothing corrects it later — hook
 /// observations never touch `agent` — and it is what a resume builds its command line from
@@ -34,7 +58,7 @@ pub fn attach_terminal_session_to_task<R>(
     terminal_session_id: &str,
 ) -> ApplicationResult<AttachSessionReport>
 where
-    R: TaskStore + TaskRunStore + TerminalSessionRepository,
+    R: TaskStore + TaskRunStore + TerminalSessionRepository + WorkbenchStore + UnitOfWork,
 {
     let task = repos
         .get_task(task_id)?
@@ -55,8 +79,21 @@ where
             "terminal session {terminal_session_id} does not belong to tab {terminal_tab_id}"
         )));
     }
+    // A shell spawned inside a bench carries MONICA_TASK_ID, so its hooks resolve through the
+    // task-scoped rules and would never reach a run attached here — the CLI refuses such tabs by
+    // env; this is the same refusal for callers that only know the session.
+    if let Some(bound_task) = bench_owner(repos, session.runspace_id.as_ref())? {
+        return Err(ApplicationError::validation(format!(
+            "this tab is already bound to task {bound_task}; attach is for tabs started outside a task"
+        )));
+    }
 
-    let attachment = repos.attach_terminal_tab_to_task(
+    let kept_primary_run_id = primary_mid_prepare(repos, &task)?;
+
+    // The run, the primary pointer, and the bench land as one transaction, as in `start_run`: a
+    // crash between them would strand a run with no runspace for the Workbench to move its tab to.
+    let mut tx = repos.begin()?;
+    let attachment = tx.attach_terminal_tab_to_task(
         NewTaskRun {
             task_id: task.id.clone(),
             agent: Some(agent),
@@ -66,6 +103,12 @@ where
         terminal_tab_id,
         session.agent_session_id.as_ref(),
     )?;
+    if kept_primary_run_id.is_none() {
+        tx.set_primary_task_run(&task.id, &attachment.run.id)?;
+    }
+    let (runspace_id, _, _) =
+        crate::usecases::runs::open_bench::ensure_bench(&mut *tx, &task.id, &session.cwd, false)?;
+    tx.commit()?;
 
     Ok(AttachSessionReport {
         task_id: task.id,
@@ -73,5 +116,45 @@ where
         task_run_id: attachment.run.id,
         agent_session_id: attachment.run.agent_session_id,
         detached_run_ids: attachment.detached_run_ids,
+        runspace_id,
+        kept_primary_run_id,
     })
+}
+
+fn bench_owner<R>(repos: &R, runspace_id: Option<&RunspaceId>) -> ApplicationResult<Option<TaskId>>
+where
+    R: WorkbenchStore,
+{
+    let Some(runspace_id) = runspace_id else {
+        return Ok(None);
+    };
+    Ok(repos
+        .list_bench_runspace_map()?
+        .into_iter()
+        .find(|(bench, _)| bench == runspace_id)
+        .map(|(_, task_id)| task_id))
+}
+
+/// Every live run driven from a terminal tab, paired with its task's bench runspace. The Workbench
+/// polls this to pull tabs into the runspace they belong to — the layout is frontend-owned, so a
+/// binding made by the CLI (a separate process) can only reach the screen this way. Runs whose task
+/// has no bench are skipped: there is nowhere to move the tab.
+pub fn list_tab_task_bindings<R>(repos: &R) -> ApplicationResult<Vec<TabTaskBinding>>
+where
+    R: TaskRunStore + WorkbenchStore,
+{
+    let mut bindings = Vec::new();
+    for run in repos.list_driven_task_runs_with_tab()? {
+        let Some(terminal_tab_id) = run.terminal_tab_id else {
+            continue;
+        };
+        if let Some((runspace_id, _)) = repos.get_bench_for_task(&run.task_id)? {
+            bindings.push(TabTaskBinding {
+                terminal_tab_id,
+                task_id: run.task_id,
+                runspace_id,
+            });
+        }
+    }
+    Ok(bindings)
 }

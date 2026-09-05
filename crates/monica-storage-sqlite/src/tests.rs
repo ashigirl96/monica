@@ -2329,6 +2329,71 @@ fn work_transaction_commit_persists_run_primary_and_bench() {
     assert_eq!(db.list_task_runs_for_task(&task.id).unwrap().len(), 1);
 }
 
+/// `attach_terminal_session_to_task` binds the tab, takes the primary, and creates the bench as one
+/// unit — a crash in between would leave a run with no runspace for the Workbench to move its tab to.
+#[test]
+fn work_transaction_commit_persists_attach_primary_and_bench() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("attach-atomic")).unwrap();
+    let run_id = {
+        let mut tx = db.begin().unwrap();
+        let attachment = tx
+            .attach_terminal_tab_to_task(
+                NewTaskRun {
+                    task_id: task.id.clone(),
+                    agent: Some(Agent::Claude),
+                    branch: None,
+                    worktree_path: None,
+                },
+                "tab-1",
+                Some(&AgentSessionId::from_agent("sess-1")),
+            )
+            .unwrap();
+        tx.set_primary_task_run(&task.id, &attachment.run.id).unwrap();
+        tx.create_bench(&task.id, &rsid("bench-x"), "/home/me").unwrap();
+        tx.commit().unwrap();
+        attachment.run.id
+    };
+    assert_eq!(
+        db.get_task(&task.id).unwrap().unwrap().primary_task_run_id.as_deref(),
+        Some(run_id.as_str())
+    );
+    assert_eq!(
+        db.get_bench_for_task(&task.id).unwrap(),
+        Some((rsid("bench-x"), "/home/me".to_string()))
+    );
+    assert_eq!(
+        db.find_task_run_by_terminal_tab("tab-1").unwrap().map(|run| run.id),
+        Some(run_id)
+    );
+}
+
+#[test]
+fn work_transaction_rolls_back_an_attach_dropped_without_commit() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = db.insert_task(dev_task("attach-rollback")).unwrap();
+    {
+        let mut tx = db.begin().unwrap();
+        let attachment = tx
+            .attach_terminal_tab_to_task(
+                NewTaskRun {
+                    task_id: task.id.clone(),
+                    agent: Some(Agent::Claude),
+                    branch: None,
+                    worktree_path: None,
+                },
+                "tab-1",
+                None,
+            )
+            .unwrap();
+        tx.set_primary_task_run(&task.id, &attachment.run.id).unwrap();
+        tx.create_bench(&task.id, &rsid("bench-x"), "/home/me").unwrap();
+    }
+    assert!(db.find_task_run_by_terminal_tab("tab-1").unwrap().is_none());
+    assert_eq!(db.get_task(&task.id).unwrap().unwrap().primary_task_run_id, None);
+    assert_eq!(db.get_bench_for_task(&task.id).unwrap(), None);
+}
+
 /// `create_lazy_run_for_session(make_primary_if_missing = true)` lands the new run AND the primary
 /// pointer in one transaction — the atomicity the hook lazy-create path relies on so a hook firing
 /// from a separate process can never strand a run with no primary.
@@ -2561,8 +2626,8 @@ fn attach_tab(db: &mut SqliteStore, task_id: &TaskId, tab_id: &str, session: &st
     .unwrap()
 }
 
-/// `monica task attach` lands a `running` run already carrying its tab and session, and leaves the
-/// primary pointer alone so `start_run` can still prepare a real worktree run for the same task.
+/// `monica task attach` lands a `running` run already carrying its tab and session. The store leaves
+/// the primary pointer alone: whether the run may take the Main Run slot is the use case's call.
 #[test]
 fn attach_terminal_tab_to_task_stamps_tab_and_session_without_taking_the_primary() {
     let mut db = SqliteStore::open_in_memory().unwrap();
@@ -2582,7 +2647,7 @@ fn attach_terminal_tab_to_task_stamps_tab_and_session_without_taking_the_primary
     assert_eq!(
         db.get_task(&task.id).unwrap().unwrap().primary_task_run_id,
         None,
-        "an attached session is a side run and must not occupy the Main Run slot"
+        "the store binds the tab only; the primary pointer belongs to the use case"
     );
     assert_eq!(
         db.find_task_run_by_terminal_tab("tab-1").unwrap().map(|run| run.id),

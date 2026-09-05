@@ -1,6 +1,6 @@
 use monica_api::{
-    Agent, ApiError, BoardColumn, PrepareTaskResult, ProjectOption, RunMode, RunTaskResult,
-    TaskBench, TaskCreated, TaskRunStatus, TaskSummaryRow,
+    Agent, ApiError, AttachTabResult, BoardColumn, PrepareTaskResult, ProjectOption, RunMode,
+    RunTaskResult, TabTaskBinding, TaskBench, TaskCreated, TaskRunStatus, TaskSummaryRow,
 };
 use monica_application::parse_issue_input;
 use monica_domain::{TaskId, TaskRunId};
@@ -163,6 +163,51 @@ pub async fn make_main_task_run(app: AppHandle, tab_id: String) -> Result<bool, 
     event_sink::off_main(move || {
         let mut monica = event_sink::open(&app)?;
         Ok(monica.tasks().make_main_by_terminal_tab(&tab_id)?)
+    })
+    .await
+}
+
+/// Bind the Claude session in a Workbench tab to a task as its Main Run (`monica task attach`
+/// from the GUI). The tab itself is moved by the caller: the layout is frontend state.
+#[tauri::command]
+#[specta::specta]
+pub async fn attach_terminal_tab(
+    app: AppHandle,
+    task_id: String,
+    tab_id: String,
+    session_id: String,
+) -> Result<AttachTabResult, ApiError> {
+    event_sink::off_main(move || {
+        let mut monica = event_sink::open(&app)?;
+        let task_id = TaskId::from_store(task_id);
+        let report = monica.tasks().attach_terminal_session(
+            &task_id,
+            monica_domain::Agent::Claude,
+            &tab_id,
+            &session_id,
+        )?;
+        let env = monica.executions().task_shell_env(&task_id)?;
+        Ok(AttachTabResult {
+            task_id: report.task_id.into(),
+            task_run_id: report.task_run_id.into(),
+            runspace_id: report.runspace_id.into(),
+            env,
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_tab_task_bindings(app: AppHandle) -> Result<Vec<TabTaskBinding>, ApiError> {
+    event_sink::off_main(move || {
+        let mut monica = event_sink::open(&app)?;
+        Ok(monica
+            .tasks()
+            .list_tab_task_bindings()?
+            .into_iter()
+            .map(TabTaskBinding::from)
+            .collect())
     })
     .await
 }
