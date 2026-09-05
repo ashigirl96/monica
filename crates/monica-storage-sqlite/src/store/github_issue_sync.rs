@@ -121,6 +121,10 @@ fn upsert_issue_ref_state_in(
 /// when GitHub reports no parent and when the parent issue has no open task. Every sync rewrites
 /// this, so a link dropped on GitHub disappears here too. `tasks.updated_at` deliberately stays
 /// put: this mirrors GitHub rather than recording a change to the task itself.
+///
+/// A closed task leaves the sync entirely, freezing its link the same way its cached title and
+/// state freeze — what the hierarchy looked like while the task was open is history worth keeping,
+/// not a stale claim about GitHub.
 fn record_parent_task_in(
     conn: &rusqlite::Connection,
     external_ref_id: i64,

@@ -3004,3 +3004,28 @@ fn bulk_record_issue_sync_ignores_a_self_parent() {
 
     assert_eq!(parent_of(&db, &task), None);
 }
+
+#[test]
+fn a_closed_child_keeps_the_link_it_had_while_open() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let parent = tracked_task(&mut db, "owner/repo", 100);
+    let child = tracked_task(&mut db, "owner/repo", 101);
+    let ref_id = issue_ref_id(&db, "owner/repo", 101);
+    db.bulk_record_issue_sync(&[(
+        ref_id,
+        fetched_with_parent(101, IssueAddress { repo: "owner/repo".to_string(), number: 100 }),
+    )])
+    .unwrap();
+
+    db.mark_task_closed(&child).unwrap();
+
+    assert!(
+        db.all_open_task_issue_refs().unwrap().iter().all(|r| r.external_ref_id != ref_id),
+        "a closed task leaves the sync"
+    );
+    assert_eq!(
+        parent_of(&db, &child).as_deref(),
+        Some(parent.as_str()),
+        "the link freezes with the rest of the closed task's GitHub cache"
+    );
+}
