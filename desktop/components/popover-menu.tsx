@@ -9,24 +9,14 @@ export type PopoverAnchor = { top: number; bottom: number; left: number };
 export function PopoverMenu({
   anchor,
   onClose,
-  onKeyDown,
-  autoFocus = false,
   children,
 }: {
   anchor: PopoverAnchor;
   onClose: () => void;
-  onKeyDown?: (e: React.KeyboardEvent) => void;
-  // Moves DOM focus onto the menu so keys reach onKeyDown instead of the element that was
-  // focused when it opened (an xterm textarea would otherwise swallow them).
-  autoFocus?: boolean;
   children: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-
-  useEffect(() => {
-    if (autoFocus) ref.current?.focus({ preventScroll: true });
-  }, [autoFocus]);
 
   // The anchor rect is captured at open time; measure the menu itself before
   // showing it so it can flip above the anchor near the bottom edge.
@@ -64,9 +54,7 @@ export function PopoverMenu({
   return createPortal(
     <div
       ref={ref}
-      tabIndex={autoFocus ? -1 : undefined}
-      onKeyDown={onKeyDown}
-      className="fixed z-50 w-44 rounded-md border border-border bg-popover p-1 shadow-lg outline-none"
+      className="fixed z-50 w-44 rounded-md border border-border bg-popover p-1 shadow-lg"
       style={
         pos
           ? { top: pos.top, left: pos.left }
