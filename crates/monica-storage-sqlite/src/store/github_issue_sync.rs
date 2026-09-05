@@ -11,6 +11,7 @@ impl SqliteStore {
         let mut stmt = self.conn().prepare(
             "SELECT
                er.id AS external_ref_id,
+               er.task_id AS task_id,
                er.repo AS repo,
                er.number AS number
              FROM external_refs er
@@ -27,6 +28,7 @@ impl SqliteStore {
             .query_map([], |row| {
                 Ok(OpenIssueRef {
                     external_ref_id: row.get("external_ref_id")?,
+                    task_id: row.get("task_id")?,
                     repo: row.get("repo")?,
                     number: row.get("number")?,
                 })

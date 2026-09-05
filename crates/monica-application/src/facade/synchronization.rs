@@ -1,5 +1,8 @@
 use super::{Backend, Monica};
-use crate::usecases::github::{TrackGithubIssueInput, TrackGithubIssueReport};
+use crate::prelude::TaskId;
+use crate::usecases::github::{
+    LinkPullRequestReport, TrackGithubIssueInput, TrackGithubIssueReport,
+};
 use crate::{ApplicationEvent, ApplicationResult, GithubAuthStatus};
 
 /// GitHub-facing synchronization: auth status, issue tracking, and the forced GitHub refresh.
@@ -20,6 +23,17 @@ impl<B: Backend> SynchronizationService<'_, B> {
         let input = TrackGithubIssueInput { repo, number };
         let Monica { repos, github, .. } = &mut *self.m;
         crate::usecases::github::track_github_issue(repos, github, input).await
+    }
+
+    /// Attach a pull request to a task by hand, for the PRs the forced sync cannot discover.
+    pub async fn link_pull_request(
+        &mut self,
+        task_id: &TaskId,
+        repo: String,
+        number: i64,
+    ) -> ApplicationResult<LinkPullRequestReport> {
+        let Monica { repos, github, .. } = &mut *self.m;
+        crate::usecases::github::link_pull_request(repos, github, task_id, repo, number).await
     }
 
     /// User-forced refresh (cmd+r / entering the Workboard) — the only GitHub sync path. Runs the

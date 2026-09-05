@@ -116,6 +116,18 @@ impl SqliteStore {
         tx.commit()?;
         Ok(())
     }
+
+    pub fn record_linked_pull_requests(
+        &mut self,
+        entries: &[(String, GithubPullRequest)],
+    ) -> Result<()> {
+        let tx = self.conn_mut().transaction()?;
+        for (task_id, pull_request) in entries {
+            upsert_pull_request_ref(&tx, task_id, pull_request)?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
 }
 
 // PR sync delegates to the inherent methods above; a trait impl cannot span files, so the SQL
@@ -136,6 +148,13 @@ impl PullRequestSyncStore for SqliteStore {
     ) -> Result<()> {
         SqliteStore::bulk_record_pr_sync(self, branch_entries, status_entries)
     }
+
+    fn record_linked_pull_requests(
+        &mut self,
+        entries: &[(String, GithubPullRequest)],
+    ) -> Result<()> {
+        SqliteStore::record_linked_pull_requests(self, entries)
+    }
 }
 
 fn write_branch_sync_success(
@@ -144,50 +163,55 @@ fn write_branch_sync_success(
     pull_requests: &[GithubPullRequest],
 ) -> Result<()> {
     for pr in pull_requests {
-        let existing = tx
-            .query_row(
-                "SELECT id
-                 FROM external_refs
-                 WHERE task_id = ?1
-                   AND ref_type = ?2
-                   AND repo = ?3
-                   AND number = ?4
-                 LIMIT 1",
-                params![
-                    &candidate.task_id,
-                    RefType::PullRequest.as_str(),
-                    &pr.repo,
-                    pr.number
-                ],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()?;
-        let ref_id = if let Some(id) = existing {
-            tx.execute(
-                "UPDATE external_refs
-                    SET url = ?1
-                  WHERE id = ?2",
-                params![&pr.url, id],
-            )?;
-            id
-        } else {
-            tx.execute(
-                "INSERT INTO external_refs (task_id, provider, ref_type, repo, number, url)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    &candidate.task_id,
-                    Provider::Github.as_str(),
-                    RefType::PullRequest.as_str(),
-                    &pr.repo,
-                    pr.number,
-                    &pr.url
-                ],
-            )?;
-            tx.last_insert_rowid()
-        };
-        upsert_pr_ref_state_success(tx, ref_id, pr.status.as_str())?;
+        upsert_pull_request_ref(tx, &candidate.task_id, pr)?;
     }
     Ok(())
+}
+
+/// The one place a `pull_request` ref is created. The branch match, the issue reverse lookup and
+/// the manual link all land here, so (task, repo, number) stays unique however the PR was found.
+fn upsert_pull_request_ref(
+    conn: &rusqlite::Connection,
+    task_id: &str,
+    pr: &GithubPullRequest,
+) -> Result<()> {
+    let existing = conn
+        .query_row(
+            "SELECT id
+             FROM external_refs
+             WHERE task_id = ?1
+               AND ref_type = ?2
+               AND repo = ?3
+               AND number = ?4
+             LIMIT 1",
+            params![task_id, RefType::PullRequest.as_str(), &pr.repo, pr.number],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+    let ref_id = if let Some(id) = existing {
+        conn.execute(
+            "UPDATE external_refs
+                SET url = ?1
+              WHERE id = ?2",
+            params![&pr.url, id],
+        )?;
+        id
+    } else {
+        conn.execute(
+            "INSERT INTO external_refs (task_id, provider, ref_type, repo, number, url)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                task_id,
+                Provider::Github.as_str(),
+                RefType::PullRequest.as_str(),
+                &pr.repo,
+                pr.number,
+                &pr.url
+            ],
+        )?;
+        conn.last_insert_rowid()
+    };
+    upsert_pr_ref_state_success(conn, ref_id, pr.status.as_str())
 }
 
 fn upsert_pr_ref_state_success(
