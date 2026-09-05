@@ -120,11 +120,18 @@ fn attach_command(monica: &mut CliFacade, id: &str) -> Result<()> {
         env_opt("MONICA_TERMINAL_SESSION_ID").as_deref(),
     )?;
     let task_id = TaskId::parse(id)?;
+    // The shell's current directory, not the session's spawn directory: the user may have `cd`ed
+    // since, and the bench should open where they actually are.
+    let cwd = std::env::current_dir()
+        .context("failed to read the current directory")?
+        .to_string_lossy()
+        .into_owned();
     let report = monica.tasks().attach_terminal_session(
         &task_id,
         Agent::Claude,
         &env.terminal_tab_id,
         &env.terminal_session_id,
+        &cwd,
     )?;
     print!("{}", render_attach_report(&report));
     Ok(())
@@ -138,10 +145,15 @@ fn render_attach_report(report: &AttachSessionReport) -> String {
         "  Session: {}\n",
         crate::table::or_dash(report.agent_session_id.as_deref())
     ));
+    match &report.kept_primary_run_id {
+        None => out.push_str("  Main Run: yes\n"),
+        Some(kept) => out.push_str(&format!("  Main Run: kept {kept} (mid-prepare)\n")),
+    }
     if !report.detached_run_ids.is_empty() {
         let ids: Vec<&str> = report.detached_run_ids.iter().map(|id| id.as_str()).collect();
         out.push_str(&format!("  Detached previous runs: {}\n", ids.join(", ")));
     }
+    out.push_str("The tab moves into the task's runspace in Monica.\n");
     out
 }
 
@@ -272,16 +284,35 @@ mod tests {
             task_run_id: monica_domain::TaskRunId::from_store("run-73".to_string()),
             agent_session_id: None,
             detached_run_ids: Vec::new(),
+            runspace_id: monica_domain::RunspaceId::from_store("bench-MON-42".to_string()),
+            kept_primary_run_id: None,
         };
         let rendered = render_attach_report(&report);
         assert!(rendered.contains("Attached MON-42"));
         assert!(rendered.contains("run-73"));
         assert!(rendered.contains("Session: -"), "{rendered}");
+        assert!(rendered.contains("Main Run: yes"), "{rendered}");
         assert!(!rendered.contains("Detached"), "{rendered}");
 
         report.detached_run_ids =
             vec![monica_domain::TaskRunId::from_store("run-70".to_string())];
         assert!(render_attach_report(&report).contains("Detached previous runs: run-70"));
+    }
+
+    #[test]
+    fn render_attach_report_names_the_primary_it_left_in_place() {
+        let report = AttachSessionReport {
+            task_id: TaskId::from_store("MON-42".to_string()),
+            task_title: "orchestration session".to_string(),
+            task_run_id: monica_domain::TaskRunId::from_store("run-73".to_string()),
+            agent_session_id: None,
+            detached_run_ids: Vec::new(),
+            runspace_id: monica_domain::RunspaceId::from_store("bench-MON-42".to_string()),
+            kept_primary_run_id: Some(monica_domain::TaskRunId::from_store("run-70".to_string())),
+        };
+        let rendered = render_attach_report(&report);
+        assert!(rendered.contains("Main Run: kept run-70 (mid-prepare)"), "{rendered}");
+        assert!(!rendered.contains("Main Run: yes"), "{rendered}");
     }
 
     #[test]
@@ -324,6 +355,7 @@ mod tests {
             prepare_eligible: true,
             run_eligible: true,
             run_needs_prepare: true,
+            attach_eligible: true,
             is_active: false,
             has_open_pull_request: false,
             branch: Some("monica/gh-17".to_string()),

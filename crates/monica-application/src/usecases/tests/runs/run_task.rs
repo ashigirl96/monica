@@ -546,7 +546,7 @@ fn stopped_attached_primary(
 ) -> TaskRunId {
     let session_id = raw_tab_session_at(repos, "tab-attach", Some("sess-attached"), tab_cwd);
     let report =
-        attach_terminal_session_to_task(repos, task_id, Agent::Claude, "tab-attach", &session_id)
+        attach_terminal_session_to_task(repos, task_id, Agent::Claude, "tab-attach", &session_id, "/repo")
             .unwrap();
     repos.set_primary_task_run(task_id, &report.task_run_id).unwrap();
     repos

@@ -344,6 +344,7 @@ impl TaskBoardQuery for FakeRepos {
                     prepare_eligible: display.prepare_eligible(),
                     run_eligible: display.run_eligible(),
                     run_needs_prepare: display.run_needs_prepare(false),
+                    attach_eligible: display.attach_eligible(),
                     is_active: display.is_active(),
                     has_open_pull_request: false,
                     branch: None,
@@ -508,6 +509,9 @@ impl FakeRepos {
             for run in state.runs.values_mut() {
                 if run.terminal_tab_id.as_deref() == Some(terminal_tab_id) {
                     run.terminal_tab_id = None;
+                    if agent_session_id.is_some() && run.agent_session_id.as_ref() == agent_session_id {
+                        run.agent_session_id = None;
+                    }
                 }
             }
         }

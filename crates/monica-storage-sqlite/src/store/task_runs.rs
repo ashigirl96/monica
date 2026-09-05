@@ -345,8 +345,10 @@ pub(super) fn get_task_run(conn: &Connection, id: &TaskRunId) -> Result<Option<T
 /// sole key every settlement path uses (`list_driven_task_runs_with_tab`, the per-death sweep in
 /// the facade, and the hook's tab rule), so a still-live run that loses its tab would never reach a
 /// terminal status again. Both halves share the caller's transaction, so the tab -> run lookup can
-/// never observe two candidates. `agent_session_id` is left on the detached runs as the record of
-/// which agent session discussed that task.
+/// never observe two candidates. A detached run keeps its `agent_session_id` as the record of which
+/// agent discussed that task — unless it is the very session now moving to the new run: a session
+/// drives one task at a time, and a stopped run still naming it would offer `--resume` of a
+/// conversation that is live under another task.
 pub(super) fn attach_terminal_tab_to_task_in(
     conn: &Connection,
     new: NewTaskRun,
@@ -371,10 +373,14 @@ pub(super) fn attach_terminal_tab_to_task_in(
     }
     conn.execute(
         &format!(
-            "UPDATE task_runs SET terminal_tab_id = NULL, updated_at = {SET_NOW}
-             WHERE terminal_tab_id = ?1"
+            "UPDATE task_runs
+                SET terminal_tab_id = NULL,
+                    agent_session_id = CASE WHEN agent_session_id = ?2 THEN NULL
+                                            ELSE agent_session_id END,
+                    updated_at = {SET_NOW}
+              WHERE terminal_tab_id = ?1"
         ),
-        params![terminal_tab_id],
+        params![terminal_tab_id, agent_session_id.map(AgentSessionId::as_str)],
     )?;
 
     let run = start_task_run_in(conn, new)?;

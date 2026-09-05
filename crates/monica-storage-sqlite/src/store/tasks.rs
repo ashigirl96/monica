@@ -378,6 +378,7 @@ impl TaskBoardQuery for SqliteStore {
                 prepare_eligible: display_status.prepare_eligible(),
                 run_eligible: display_status.run_eligible(),
                 run_needs_prepare: display_status.run_needs_prepare(primary_has_session),
+                attach_eligible: display_status.attach_eligible(),
                 is_active: display_status.is_active(),
                 has_open_pull_request: false,
                 branch: row.get("branch")?,

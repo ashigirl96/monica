@@ -16,6 +16,7 @@ export function taskSummary(over: Partial<TaskSummaryRow>): TaskSummaryRow {
     prepare_eligible: false,
     run_eligible: false,
     run_needs_prepare: false,
+    attach_eligible: false,
     is_active: false,
     has_open_pull_request: false,
     branch: null,

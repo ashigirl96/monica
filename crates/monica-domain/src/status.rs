@@ -150,6 +150,13 @@ impl DisplayStatus {
         self.prepare_eligible() || self == DisplayStatus::Prepared
     }
 
+    /// A terminal tab's agent session may be attached to the task as its Main Run. Only a closed
+    /// task refuses: attach is how an already-running session adopts a task, so a live primary is
+    /// displaced rather than blocking it.
+    pub fn attach_eligible(self) -> bool {
+        self != DisplayStatus::Closed
+    }
+
     /// A stopped primary that recorded an agent session is reopened with the agent's resume
     /// command instead of preparing a fresh run from scratch.
     pub fn resume_eligible(self, primary_has_session: bool) -> bool {
@@ -217,6 +224,11 @@ mod tests {
             assert_eq!(status.prepare_eligible(), prepare, "{status:?} prepare");
             assert_eq!(status.run_eligible(), run, "{status:?} run");
             assert_eq!(status.is_active(), active, "{status:?} active");
+            assert_eq!(
+                status.attach_eligible(),
+                status != DisplayStatus::Closed,
+                "{status:?} attach"
+            );
         }
     }
 

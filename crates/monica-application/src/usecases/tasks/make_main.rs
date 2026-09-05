@@ -1,5 +1,5 @@
 use super::ports::{TaskRunStore, TaskStore};
-use crate::prelude::{TaskId, TaskRunStatus};
+use crate::prelude::{Task, TaskId, TaskRunId, TaskRunStatus};
 use crate::ApplicationResult;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,15 +32,8 @@ where
     if task.primary_task_run_id.as_ref() == Some(&run.id) {
         return Ok(MakeMainOutcome::AlreadyMain);
     }
-    if let Some(current_id) = task.primary_task_run_id.as_ref() {
-        if let Some(current) = repos.get_task_run(current_id)? {
-            if matches!(
-                current.status,
-                TaskRunStatus::SettingUp | TaskRunStatus::Prepared
-            ) {
-                return Ok(MakeMainOutcome::PrimaryBusy);
-            }
-        }
+    if primary_mid_prepare(repos, &task)?.is_some() {
+        return Ok(MakeMainOutcome::PrimaryBusy);
     }
     repos.set_primary_task_run(&task.id, &run.id)?;
     Ok(MakeMainOutcome::Changed {
@@ -48,6 +41,26 @@ where
         task_run_id: run.id.into(),
         status: run.status,
     })
+}
+
+/// The task's primary when it must not be displaced: a run still mid-prepare (`SettingUp` or
+/// `Prepared`). Pointing the task elsewhere would orphan the prepared worktree and break
+/// `prepare_claude_for_run`'s prepared-primary contract. `None` when the slot is free to take.
+pub(super) fn primary_mid_prepare<R>(repos: &R, task: &Task) -> ApplicationResult<Option<TaskRunId>>
+where
+    R: TaskRunStore + ?Sized,
+{
+    let Some(current_id) = task.primary_task_run_id.as_ref() else {
+        return Ok(None);
+    };
+    let Some(current) = repos.get_task_run(current_id)? else {
+        return Ok(None);
+    };
+    Ok(matches!(
+        current.status,
+        TaskRunStatus::SettingUp | TaskRunStatus::Prepared
+    )
+    .then(|| current_id.clone()))
 }
 
 /// The tab currently hosting the task's Main Run, if any — drives the Workbench tab indicator.

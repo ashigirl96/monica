@@ -13,9 +13,13 @@ description: >-
 
 `monica task attach` で、いま自分が動いている terminal tab を既存 Task に接続する。
 
-接続すると、この tab の claude が出す hook が対象 Task の TaskRun に反映され、
-「作業中 / 入力待ち」が workboard に映るようになる。「この Task を相談していた
+接続すると、この tab は Monica の Workbench 上で **その Task の runspace（bench）へ移動**し、
+attach された run がその Task の **Main Run** になる。tab の claude が出す hook は対象 Task の
+TaskRun に反映され、「作業中 / 入力待ち」が workboard に映る。「この Task を相談していた
 session はこれ」という対応も記録として残る。
+
+GUI からも同じことができる: Workbench の tab を右クリック → **Attach to Task…** → Task を選ぶ。
+CLI 経路は Monica が 3 秒ごとに DB を読んで tab を移動するので、移動まで数秒かかる。
 
 ## track との違い
 
@@ -58,16 +62,23 @@ Attached MON-42 to this terminal tab.
   Task:    orchestration session: 生の terminal session を Task に紐づける
   Run:     run-73
   Session: 0f9d1c3a-...
+  Main Run: yes
   Detached previous runs: run-70
+The tab moves into the task's runspace in Monica.
 ```
+
+`Main Run` は通常 `yes`。その Task に準備中の worktree run（Prepare 直後で SettingUp / Prepared）
+がある場合だけ `kept run-N (mid-prepare)` となり、prepared run が Main Run のまま残る
+（attach 自体は成功し、hook の追跡も行われる）。
 
 `Detached previous runs` は、この tab が直前まで別の Task を駆動していた場合にだけ出る。
 その旧 run は Stopped に落ちて履歴として残る（1 tab につき有効な attach は高々 1 本）。
+tab は新しい Task の runspace へ移り、元の runspace が空になればそのまま消える。
 
 ### 3. 報告する
 
 MON-id・Task タイトル・run-id をユーザーに伝える。付け替えが起きたなら、
-どの run を detach したかも添える。
+どの run を detach したかも添える。`Main Run: kept ...` だった場合はその旨も伝える。
 
 ## エラーの読み方
 
@@ -83,6 +94,10 @@ MON-id・Task タイトル・run-id をユーザーに伝える。付け替え�
 - `MONICA_HOME` は必ず `$HOME/monica` を指定する（指定しないと別の data dir を見てしまう）。
 - attach した run の agent は claude 固定（Monica が扱う agent は claude だけ）。この値は
   後から補正されず、将来の resume のコマンドライン（`claude --resume`）を決める。
-- attach した run は **Main Run にはならない**。その Task で Prepare / Run
-  （worktree を切る実装 run）は従来どおり使える。
+- attach した run はその Task の **Main Run になる**（worktree なし Run と同じ「in-place な
+  primary run」）。この claude が動いている間は、その Task の Prepare / Run はどちらも
+  「active run あり」で拒否される。claude を終了すると run が Stopped になり、ボードの Run で
+  同じ session を元の tab の cwd で resume できる。Prepare もそのとき以降は従来どおり使える。
+- runspace の cwd は動かさない。bench が未作成なら tab の cwd で作られ、既にあればそのまま。
+  tab の shell 自体の cwd も変わらない。
 - detach 専用コマンドは未実装。別 Task に attach し直すと自動で付け替わる。

@@ -2,6 +2,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { cn } from "@/lib/utils";
 import { PopoverMenu } from "@/components/popover-menu";
 import {
+  attachPickerTabIdAtom,
   closeTerminalTabAtom,
   pinnedTabIdsAtom,
   startNewShellForTabAtom,
@@ -26,6 +27,7 @@ function MenuPopover({ menu }: { menu: TabMenuState }) {
   const terminateSession = useSetAtom(terminateTabSessionAtom);
   const startNewShell = useSetAtom(startNewShellForTabAtom);
   const togglePin = useSetAtom(toggleTabPinAtom);
+  const openAttachPicker = useSetAtom(attachPickerTabIdAtom);
   const tab = useAtomValue(tabByIdAtom).get(menu.tabId);
   const sessionStatus = useAtomValue(sessionStatusAtom);
   const isPinned = useAtomValue(pinnedTabIdsAtom).has(menu.tabId);
@@ -38,6 +40,9 @@ function MenuPopover({ menu }: { menu: TabMenuState }) {
     entry !== undefined &&
     (entry.status === "exited" || entry.status === "lost" || entry.status === "failed");
   const canTerminate = tab.sessionId !== undefined && !dead && !isPinned;
+  // Attach binds the tab's live session; a tab with no session yet, or a dead one, has nothing
+  // a task could adopt. Whether the session is already task-scoped is the backend's call.
+  const canAttach = tab.sessionId !== undefined && !dead;
 
   const itemClass = (selectedStyle: string, disabled?: boolean) =>
     cn(
@@ -58,6 +63,19 @@ function MenuPopover({ menu }: { menu: TabMenuState }) {
           className={itemClass("hover:bg-accent hover:text-accent-foreground")}
         >
           {isPinned ? "Unpin" : "Pin"}
+        </button>
+      )}
+      {isMainWindow && (
+        <button
+          type="button"
+          disabled={!canAttach}
+          onClick={() => {
+            setMenu(null);
+            openAttachPicker(menu.tabId);
+          }}
+          className={itemClass("hover:bg-accent hover:text-accent-foreground", !canAttach)}
+        >
+          Attach to Task…
         </button>
       )}
       <button

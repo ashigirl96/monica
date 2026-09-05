@@ -10,8 +10,10 @@ pub struct TabAttachment {
     pub run: TaskRun,
     /// Runs this tab was driving until now. Each was settled if still live, then had its
     /// `terminal_tab_id` cleared: every path that stops a run keys on that tab, so an un-settled
-    /// run losing it would never reach a terminal status again. `agent_session_id` is deliberately
-    /// left behind as the record of which agent session discussed that task.
+    /// run losing it would never reach a terminal status again. `agent_session_id` stays behind as
+    /// the record of which agent session discussed that task, except when it is the session now
+    /// bound to the new run — a stopped run naming a session that is live under another task would
+    /// otherwise stay resumable there.
     pub detached_run_ids: Vec<TaskRunId>,
 }
 
@@ -64,8 +66,8 @@ pub trait TaskRunStore {
     /// `running` run — the durable half of `monica task attach`. Settling and unbinding the runs
     /// this tab previously drove happens in the same transaction as the insert, so the tab -> run
     /// lookup can never observe two candidates and no run is stranded live with no tab left to
-    /// settle it. The task's primary pointer is deliberately untouched: an attached session must
-    /// not occupy the Main Run slot and block `start_run`.
+    /// settle it. The task's primary pointer is left to the use case, which decides whether the
+    /// attached run may take the Main Run slot.
     fn attach_terminal_tab_to_task(
         &mut self,
         new: NewTaskRun,
