@@ -45,7 +45,7 @@ export const forceSyncGithubAtom = atom(null, async (get, set) => {
   }
 });
 
-// App-lifetime owner for PR sync state. A single github-sync-completed listener (module init,
+// App-lifetime owner for GitHub sync state. A single github-sync-completed listener (module init,
 // not a React effect, so StrictMode can't double-register) refreshes the cache, records the
 // timestamp the header reads, clears the in-flight flag, and toasts.
 export function initGithubSync(): void {

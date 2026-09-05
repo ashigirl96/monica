@@ -1,6 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { TaskSummaryRow } from "@/commands/task";
 import {
+  GITHUB_BADGE_TONES,
   STATUS_BADGE_STYLES,
   STATUS_COLORS,
   statusBadgeClass,
@@ -149,13 +150,13 @@ export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boo
           {hasIssue && (
             <BadgeLink
               url={task.github_issue_url}
-              className={cn(
+              className={
                 task.github_issue_state === "open"
-                  ? "bg-emerald-500/15 text-emerald-400"
+                  ? GITHUB_BADGE_TONES.active
                   : task.github_issue_state === "closed"
-                    ? "bg-purple-500/15 text-purple-400"
-                    : "bg-secondary text-muted-foreground",
-              )}
+                    ? GITHUB_BADGE_TONES.settled
+                    : GITHUB_BADGE_TONES.unknown
+              }
             >
               <IssueIcon />
               <span>{task.github_issue_number}</span>
@@ -167,13 +168,13 @@ export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boo
               <BadgeLink
                 key={pr.number}
                 url={pr.url}
-                className={cn(
+                className={
                   pr.status === "merged"
-                    ? "bg-purple-500/15 text-purple-400"
+                    ? GITHUB_BADGE_TONES.settled
                     : pr.status === "open" || pr.status === "draft"
-                      ? "bg-emerald-500/15 text-emerald-400"
-                      : "bg-secondary text-muted-foreground",
-                )}
+                      ? GITHUB_BADGE_TONES.active
+                      : GITHUB_BADGE_TONES.unknown
+                }
               >
                 <PrIcon />
                 <span>{pr.number}</span>

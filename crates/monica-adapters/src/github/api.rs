@@ -6,6 +6,7 @@ use monica_application::{
     GithubPullRequestStatus, RepoPullRequest,
 };
 use octocrab::Octocrab;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -39,19 +40,17 @@ impl GithubApiClient {
 
     pub async fn fetch_issues(&self, repo: &str, numbers: &[i64]) -> Result<Vec<FetchedIssue>> {
         let (owner, name) = split_repo(repo)?;
+        // `crab()` builds a fresh client — new TLS config, new connection pool — so it is hoisted
+        // out of the chunk loop rather than paid per request.
+        let crab = self.crab().await?;
+        let action = format!("fetch issues for {repo}");
         let mut issues = Vec::with_capacity(numbers.len());
         for chunk in numbers.chunks(ISSUE_BATCH) {
             let payload = json!({
                 "query": issues_query(chunk),
                 "variables": { "owner": owner, "name": name },
             });
-            let response: IssuesResponse = self
-                .crab()
-                .await?
-                .graphql(&payload)
-                .await
-                .map_err(|e| map_github_error(e, &format!("fetch issues for {repo}")))?;
-            issues.extend(issues_from_response(response)?);
+            issues.extend(issues_from_response(graphql(&crab, &payload, &action).await?)?);
         }
         Ok(issues)
     }
@@ -77,12 +76,8 @@ impl GithubApiClient {
             "query": RECENT_PULL_REQUESTS_QUERY,
             "variables": { "owner": owner, "name": name },
         });
-        let response: RecentPullRequestsResponse = self
-            .crab()
-            .await?
-            .graphql(&payload)
-            .await
-            .map_err(|e| map_github_error(e, &format!("fetch recent pull requests for {repo}")))?;
+        let action = format!("fetch recent pull requests for {repo}");
+        let response = graphql(&self.crab().await?, &payload, &action).await?;
         recent_pull_requests_from_response(response)
     }
 
@@ -96,12 +91,8 @@ impl GithubApiClient {
                 "number": number,
             },
         });
-        let response: PullRequestResponse = self
-            .crab()
-            .await?
-            .graphql(&payload)
-            .await
-            .map_err(|e| map_github_error(e, &format!("fetch pull request {repo}#{number}")))?;
+        let action = format!("fetch pull request {repo}#{number}");
+        let response = graphql(&self.crab().await?, &payload, &action).await?;
         pull_request_from_response(response)
     }
 
@@ -117,6 +108,20 @@ impl GithubApiClient {
             .build()
             .map_err(Into::into)
     }
+}
+
+async fn graphql<T: DeserializeOwned>(
+    crab: &Octocrab,
+    payload: &serde_json::Value,
+    action: &str,
+) -> Result<T> {
+    crab.graphql(payload)
+        .await
+        .map_err(|e| map_github_error(e, action))
+}
+
+fn repository_not_found() -> anyhow::Error {
+    anyhow!("GitHub repository was not found; confirm you have access to it")
 }
 
 fn split_repo(repo: &str) -> Result<(&str, &str)> {
@@ -154,7 +159,7 @@ fn map_github_error(error: octocrab::Error, action: &str) -> anyhow::Error {
 fn pull_request_from_response(response: PullRequestResponse) -> Result<GithubPullRequest> {
     let repository = response
         .repository
-        .ok_or_else(|| anyhow!("GitHub repository was not found; confirm you have access to it"))?;
+        .ok_or_else(repository_not_found)?;
     let node = repository.pull_request.ok_or_else(|| {
         anyhow!("GitHub pull request was not found; confirm you have access to the repository")
     })?;
@@ -187,7 +192,7 @@ fn recent_pull_requests_from_response(
 ) -> Result<Vec<RepoPullRequest>> {
     let repository = response
         .repository
-        .ok_or_else(|| anyhow!("GitHub repository was not found; confirm you have access to it"))?;
+        .ok_or_else(repository_not_found)?;
     let nodes = repository.pull_requests.nodes;
     let mut pull_requests = Vec::with_capacity(nodes.len());
     for node in nodes {
@@ -300,7 +305,7 @@ repository(owner: $owner, name: $name) {{\n{selections}  }}\n}}\n"
 fn issues_from_response(response: IssuesResponse) -> Result<Vec<FetchedIssue>> {
     let repository = response
         .repository
-        .ok_or_else(|| anyhow!("GitHub repository was not found; confirm you have access to it"))?;
+        .ok_or_else(repository_not_found)?;
     let mut issues = Vec::with_capacity(repository.len());
     // A null alias is a number that no longer resolves (deleted, transferred, or a PR); skipping
     // it leaves that ref's cached state untouched instead of failing the whole repo.

@@ -1,4 +1,4 @@
-//! Desktop wiring for the PR-sync worker. The interval/guard/waker mechanics live in
+//! Desktop wiring for the GitHub-sync worker. The interval/guard/waker mechanics live in
 //! `monica-runtime`; the desktop only supplies a façade factory carrying its Tauri event sink.
 
 use tauri::AppHandle;

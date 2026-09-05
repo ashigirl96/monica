@@ -302,19 +302,9 @@ impl TaskBoardQuery for SqliteStore {
                  WHERE r.task_id = t.id AND r.id IS NOT latest_run.id
                    AND r.status = ?4
                    AND r.agent_session_id IS NOT NULL) AS side_runs_failed
-	             FROM tasks t
+	             FROM {TASK_FROM}
              LEFT JOIN projects project
                ON project.id = t.project_id
-             LEFT JOIN external_refs issue_ref
-               ON issue_ref.id = (
-                 SELECT er.id
-                 FROM external_refs er
-                 WHERE er.task_id = t.id AND er.ref_type = 'issue'
-                 ORDER BY er.id DESC
-                 LIMIT 1
-               )
-             LEFT JOIN github_issue_ref_states issue_state
-               ON issue_state.external_ref_id = issue_ref.id
             -- resolve the primary pointer through an existence check: a dangling pointer must
             -- fall back to the latest run instead of matching nothing (which would also count
             -- every run as a side run via `r.id IS NOT latest_run.id`)

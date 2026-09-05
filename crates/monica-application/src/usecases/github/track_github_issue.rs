@@ -70,32 +70,31 @@ where
     let repo = parse_owner_repo(repo_input)?;
     // Re-tracking must resolve to the running attempt rather than fork a second task. The task row
     // itself is never rewritten; only the issue-ref cache below learns the fresh title.
-    let (task_id, outcome) = match repos.find_open_task_by_external_ref(
+    let (mut task, outcome) = match repos.find_open_task_by_external_ref(
         Provider::Github,
         RefType::Issue,
         &repo,
         issue.number,
     )? {
-        Some(existing) => (existing.id, TrackOutcome::AlreadyTracked),
+        Some(existing) => (existing, TrackOutcome::AlreadyTracked),
         None => (
-            insert_tracked_task(repos, &repo, issue)?.id,
+            insert_tracked_task(repos, &repo, issue)?,
             TrackOutcome::Created,
         ),
     };
 
     repos.upsert_issue_ref_state(
-        task_id.as_str(),
+        task.id.as_str(),
         &repo,
         issue.number,
         &issue.title,
         issue.state,
     )?;
-    // Both branches hold a task read before the cache was seeded, so its title is the previous
-    // snapshot (or empty for a fresh row). Re-read so callers — `monica task track`'s output and
-    // the desktop's TaskCreated among them — report what GitHub says right now.
-    let task = repos
-        .get_task(&task_id)?
-        .ok_or_else(|| ApplicationError::not_found(format!("task not found: {task_id}")))?;
+    // Both branches read the task before the cache was seeded, so it still carries the previous
+    // snapshot (or nothing, for a fresh row). The cache now holds `issue.title`, so that is what a
+    // re-read would resolve to; assign it directly and let callers — `monica task track`'s output
+    // and the desktop's TaskCreated among them — report what GitHub says right now.
+    task.title = issue.title.clone();
     Ok((task, outcome))
 }
 

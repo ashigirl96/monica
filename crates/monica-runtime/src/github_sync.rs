@@ -1,4 +1,4 @@
-//! The PR-sync worker. Owns the wake channel; the driver supplies a façade factory (carrying its
+//! The GitHub-sync worker. Owns the wake channel; the driver supplies a façade factory (carrying its
 //! event sink) and the application does the actual refresh via
 //! [`SynchronizationService::force_sync_github`]. The worker builds a fresh façade on its
 //! own thread for each wake, so the `!Send` façade never crosses a thread boundary. There is no
@@ -19,7 +19,7 @@ impl GithubSyncWaker {
     }
 }
 
-/// Spawn the PR-sync worker. `make_facade` builds a fresh façade (with the driver's event sink)
+/// Spawn the GitHub-sync worker. `make_facade` builds a fresh façade (with the driver's event sink)
 /// on the worker thread each wake; it captures only `Send` state (e.g. a Tauri `AppHandle`).
 pub fn start_github_sync<F>(make_facade: F) -> GithubSyncWaker
 where
@@ -46,7 +46,7 @@ where
             }
         });
     if let Err(e) = spawn_result {
-        log::error!(target: "monica_runtime::github_sync", "failed to start PR sync worker: {e}");
+        log::error!(target: "monica_runtime::github_sync", "failed to start GitHub sync worker: {e}");
     }
     GithubSyncWaker(tx)
 }
@@ -58,12 +58,12 @@ where
     let mut monica = match make_facade() {
         Ok(monica) => monica,
         Err(e) => {
-            log::error!(target: "monica_runtime::github_sync", "failed to open façade for PR sync: {e:#}");
+            log::error!(target: "monica_runtime::github_sync", "failed to open façade for GitHub sync: {e:#}");
             return;
         }
     };
     if let Err(e) = monica.synchronization().force_sync_github().await {
-        log::error!(target: "monica_runtime::github_sync", "PR sync failed: {e}");
+        log::error!(target: "monica_runtime::github_sync", "GitHub sync failed: {e}");
     }
 }
 

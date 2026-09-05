@@ -9,11 +9,20 @@ pub(super) const SQL: &str = r#"
       created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
       updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
     );
+
+    -- Every task read now resolves its newest issue ref through a correlated subquery. The only
+    -- other index on external_refs is partial on ref_type = 'pull_request', so without this one
+    -- that subquery full-scans the table once per task row.
+    CREATE INDEX external_refs_issue_idx
+      ON external_refs(task_id, id)
+      WHERE ref_type = 'issue';
 "#;
 
 #[cfg(test)]
 mod tests {
-    use crate::migrations::test_support::{assert_column_exists, assert_table_exists, stage_through};
+    use crate::migrations::test_support::{
+        assert_column_exists, assert_index_exists, assert_table_exists, stage_through,
+    };
     use rusqlite::Connection;
 
     fn staged() -> Connection {
@@ -37,6 +46,23 @@ mod tests {
         for column in ["external_ref_id", "title", "state", "created_at", "updated_at"] {
             assert_column_exists(&conn, "github_issue_ref_states", column);
         }
+    }
+
+    #[test]
+    fn indexes_the_newest_issue_ref_lookup() {
+        let conn = staged();
+        assert_index_exists(&conn, "external_refs_issue_idx");
+        let plan: String = conn
+            .query_row(
+                "EXPLAIN QUERY PLAN
+                   SELECT er.id FROM external_refs er
+                    WHERE er.task_id = 'MON-1' AND er.ref_type = 'issue'
+                    ORDER BY er.id DESC LIMIT 1",
+                [],
+                |r| r.get("detail"),
+            )
+            .unwrap();
+        assert!(plan.contains("external_refs_issue_idx"), "unexpected plan: {plan}");
     }
 
     #[test]

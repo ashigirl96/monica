@@ -36,6 +36,14 @@ export const STATUS_BADGE_STYLES: Record<DisplayStatus, string> = {
   closed: "bg-muted text-muted-foreground/60",
 };
 
+// The issue and pull-request badges share one palette: work still in flight, settled history,
+// and a ref whose state hasn't been fetched yet.
+export const GITHUB_BADGE_TONES = {
+  active: "bg-emerald-500/15 text-emerald-400",
+  settled: "bg-purple-500/15 text-purple-400",
+  unknown: "bg-secondary text-muted-foreground",
+} as const;
+
 // The sidebar only shows a status dot for in-flight states; ready / in_progress /
 // closed are intentionally omitted so a dot's presence signals attention.
 const SIDEBAR_DOT_STATUSES = [
