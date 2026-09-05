@@ -248,6 +248,9 @@ export default function WorkBenchContent() {
 
   const consumeLaunch = useSetAtom(consumeTerminalLaunchAtom);
   const uiZoom = useAtomValue(uiZoomAtom);
+  // The bench stays mounted behind other spaces (opacity 0, which still has a layout box,
+  // so xterm would keep rendering every write). Session connects do not depend on this.
+  const spaceActive = useAtomValue(activeSpaceAtom) === "work-bench";
 
   if (!ready || !state) return null;
 
@@ -269,7 +272,9 @@ export default function WorkBenchContent() {
                 sessionId={tab.sessionId}
                 sessionEntry={tab.sessionId ? sessionStatus[tab.sessionId] : undefined}
                 cwd={tab.cwd}
-                active={rs.id === state.activeRunspaceId && tab.id === rs.activeTabId}
+                active={
+                  spaceActive && rs.id === state.activeRunspaceId && tab.id === rs.activeTabId
+                }
                 pinned={tab.id === rs.pinnedTabId}
                 env={rs.env}
                 launch={tab.launch}

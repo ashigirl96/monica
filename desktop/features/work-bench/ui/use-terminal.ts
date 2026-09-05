@@ -21,6 +21,7 @@ import {
   onTerminalOutput,
   terminalAttach,
   terminalCreateSession,
+  terminalDetach,
   terminalResize,
   terminalTerminate,
   terminalWrite,
@@ -78,6 +79,13 @@ type UseTerminalOptions = {
   onLaunchConsumed?: () => void;
   onExit?: () => void;
 };
+
+// A release racing this connect empties conn.unlisteners; anything subscribed after that
+// point is only reachable from here.
+function dropListeners(conn: TabConnection) {
+  for (const unlisten of conn.unlisteners) unlisten();
+  conn.unlisteners = [];
+}
 
 /// Create the tab's session if needed, then attach: subscribe → attach → replay → flush.
 /// Output arriving between subscribe and replay-write is buffered, and the daemon only
@@ -159,12 +167,21 @@ async function runConnect(
       }),
     );
 
-    const attach = await terminalAttach(sessionId);
-    // Released mid-attach: the closer already ended the session by id, so only the
-    // listeners registered after the release are left to drop.
+    // Released while subscribing: the closer already ended the session by id; attaching
+    // now would pull it back out of the Detached group with no tab to own it.
     if (getTabConnection(tabId) !== conn) {
-      for (const unlisten of conn.unlisteners) unlisten();
-      conn.unlisteners = [];
+      dropListeners(conn);
+      return;
+    }
+
+    const attach = await terminalAttach(sessionId);
+    // Released mid-attach: the closer's detach may have landed before this attach, so
+    // detach again to leave the session where the closer put it.
+    if (getTabConnection(tabId) !== conn) {
+      dropListeners(conn);
+      terminalDetach(sid).catch((e: unknown) => {
+        console.warn(`terminal detach failed for released session ${sid}:`, e);
+      });
       return;
     }
     // No reset before the replay: the terminal here is always a freshly mounted (empty)
@@ -207,8 +224,7 @@ async function runConnect(
   } catch (e) {
     console.warn(`terminal connect failed for tab ${tabId}:`, e);
     conn.state = "dead";
-    for (const unlisten of conn.unlisteners) unlisten();
-    conn.unlisteners = [];
+    dropListeners(conn);
     // No pretend-reconnect: a session we cannot attach to is honestly lost.
     if (sessionId) {
       store.set(setSessionStatusAtom, sessionId, { status: "lost" });

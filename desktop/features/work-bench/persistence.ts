@@ -6,6 +6,7 @@ import {
   type TerminalStateSnapshot,
 } from "@/commands/terminal";
 import { listBenchRunspaceMap, taskShellEnv } from "@/commands/task";
+import { pushErrorToast } from "@/stores/toast";
 import { MAIN_WINDOW_LABEL, pendingWorkbenchHintAtom, windowLabelAtom } from "@/stores/ui-state";
 import {
   applyHint,
@@ -68,6 +69,8 @@ const loadInFlightAtom = atom<Promise<void> | null>(null);
 // An empty DB loads as an empty snapshot, so the load only rejects on a real failure. The
 // fallback layout it leaves behind must never be written back over the stored one — the
 // bench is mounted from startup, so this would happen before the user even looks at it.
+// The suspension lasts for the process: any later save would still derive from the
+// fallback, so the stored layout stays intact until a restart reloads it.
 const persistenceSuspendedAtom = atom(false);
 
 export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
@@ -123,6 +126,9 @@ export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
     } catch (e) {
       warnTerminal("load", e);
       set(persistenceSuspendedAtom, true);
+      pushErrorToast(
+        "Failed to load the saved terminal layout — layout changes will not be saved until Monica is restarted",
+      );
     }
     set(pendingWorkbenchHintAtom, null);
     set(terminalStateAtom, initialState());
