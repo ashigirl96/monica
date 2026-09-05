@@ -16,7 +16,7 @@ mod unit_of_work;
 /// Task columns as read through [`TASK_FROM`]. `title` resolves against the issue-ref cache so a
 /// task backed by a GitHub issue shows what GitHub currently says, falling back to the column for
 /// rows tracked before the cache existed and to `''` when neither is set.
-pub(super) const TASK_COLUMNS: &str = "t.id, t.kind, t.status, t.phase,      COALESCE(issue_state.title, t.title, '') AS title, COALESCE(t.body, '') AS body,      t.project_id, t.labels, t.details_json, t.source_json, t.primary_task_run_id, t.closed_at,      t.created_at, t.updated_at";
+pub(super) const TASK_COLUMNS: &str = "t.id, t.kind, t.status, t.phase,      COALESCE(issue_state.title, t.title, '') AS title, COALESCE(t.body, '') AS body,      t.project_id, t.labels, t.details_json, t.source_json, t.primary_task_run_id, t.parent_task_id,      t.closed_at, t.created_at, t.updated_at";
 
 /// The task table joined to its newest issue ref and that ref's cached state. Every read of
 /// [`TASK_COLUMNS`] goes through this so the two can't drift.

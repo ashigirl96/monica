@@ -10,6 +10,7 @@ use crate::github::{GithubIssueState, GithubPullRequestRef};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskSummaryRow {
     pub id: String,
+    pub parent_task_id: Option<String>,
     pub title: String,
     pub project: Option<String>,
     pub github_issue_number: Option<i64>,
