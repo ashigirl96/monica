@@ -11,13 +11,20 @@ use crate::{ApplicationResult, FetchedIssue, GithubPullRequest};
 /// The same fetch carries each issue's closing PRs, which the branch pass cannot see for a task
 /// whose runs never took a branch (attach and in-place runs are deliberately branch-less), so they
 /// are linked here. Returns the number of refs whose cache was refreshed plus the PRs linked.
-pub async fn bulk_sync_issues<R, G>(repos: &mut R, github: &G) -> ApplicationResult<u32>
+///
+/// `task` narrows the pass to one task's refs, which also narrows the repo batches to that task's
+/// repo — the CLI's per-task sync.
+pub async fn bulk_sync_issues<R, G>(
+    repos: &mut R,
+    github: &G,
+    task: Option<&str>,
+) -> ApplicationResult<u32>
 where
     R: GithubIssueSyncStore + PullRequestSyncStore,
     G: GithubGateway,
 {
     let started = Instant::now();
-    let refs = repos.all_open_task_issue_refs()?;
+    let refs = repos.open_task_issue_refs(task)?;
     if refs.is_empty() {
         return Ok(0);
     }

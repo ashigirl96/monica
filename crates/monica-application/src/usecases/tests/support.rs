@@ -421,12 +421,32 @@ impl TaskBoardQuery for FakeRepos {
 }
 
 impl PullRequestSyncStore for FakeRepos {
-    fn all_branch_sync_candidates(&self) -> Result<Vec<PullRequestBranchSyncCandidate>> {
-        Ok(self.state.borrow().branch_sync_candidates.clone())
+    fn branch_sync_candidates(
+        &self,
+        task: Option<&str>,
+    ) -> Result<Vec<PullRequestBranchSyncCandidate>> {
+        Ok(self
+            .state
+            .borrow()
+            .branch_sync_candidates
+            .iter()
+            .filter(|c| task.is_none_or(|id| id == c.task_id))
+            .cloned()
+            .collect())
     }
 
-    fn all_unresolved_pull_request_refs(&self) -> Result<Vec<UnresolvedPullRequestRef>> {
-        Ok(self.state.borrow().unresolved_pr_refs.clone())
+    fn unresolved_pull_request_refs(
+        &self,
+        task: Option<&str>,
+    ) -> Result<Vec<UnresolvedPullRequestRef>> {
+        Ok(self
+            .state
+            .borrow()
+            .unresolved_pr_refs
+            .iter()
+            .filter(|r| task.is_none_or(|id| id == r.task_id))
+            .cloned()
+            .collect())
     }
 
     fn bulk_record_pr_sync(
@@ -453,13 +473,14 @@ impl PullRequestSyncStore for FakeRepos {
 }
 
 impl GithubIssueSyncStore for FakeRepos {
-    fn all_open_task_issue_refs(&self) -> Result<Vec<OpenIssueRef>> {
+    fn open_task_issue_refs(&self, task: Option<&str>) -> Result<Vec<OpenIssueRef>> {
         let state = self.state.borrow();
         let mut refs: Vec<OpenIssueRef> = state
             .refs
             .values()
             .flatten()
             .filter(|r| r.ref_type == RefType::Issue && r.provider == Provider::Github)
+            .filter(|r| task.is_none_or(|id| id == r.task_id.as_str()))
             .filter(|r| {
                 state
                     .tasks

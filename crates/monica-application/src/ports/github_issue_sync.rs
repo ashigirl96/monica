@@ -6,8 +6,10 @@ use crate::github::{FetchedIssue, GithubIssueState, OpenIssueRef};
 /// Separated from [`TaskStore`](super::TaskStore) because it caches what GitHub owns rather than
 /// persisting the task aggregate.
 pub trait GithubIssueSyncStore {
-    /// The issue ref of every task that is not closed. A closed task's issue needs no freshness.
-    fn all_open_task_issue_refs(&self) -> Result<Vec<OpenIssueRef>>;
+    /// The issue ref of every task that is not closed, or of `task` alone when given. A closed task
+    /// stays out either way: its cached title, state and parent link are frozen history, not a
+    /// stale claim about GitHub.
+    fn open_task_issue_refs(&self, task: Option<&str>) -> Result<Vec<OpenIssueRef>>;
     /// Persist a whole forced sync in one transaction, one entry per external_ref id.
     fn bulk_record_issue_sync(&mut self, entries: &[(i64, FetchedIssue)]) -> Result<()>;
     /// Seed the cache for a single tracked issue, resolving the external_ref from its address.

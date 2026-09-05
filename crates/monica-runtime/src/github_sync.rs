@@ -62,7 +62,7 @@ where
             return;
         }
     };
-    if let Err(e) = monica.synchronization().force_sync_github().await {
+    if let Err(e) = monica.synchronization().force_sync_github(None).await {
         log::error!(target: "monica_runtime::github_sync", "GitHub sync failed: {e}");
     }
 }

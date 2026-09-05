@@ -12,14 +12,20 @@ use crate::{
 /// tracked PR the branch pass didn't cover (reusing the repo listings where possible, fetching by
 /// number otherwise), and persists everything in a single transaction. Returns the number of
 /// branch candidates that matched at least one PR plus the number of unresolved refs refreshed.
-pub async fn bulk_sync_pull_requests<R, G>(repos: &mut R, github: &G) -> ApplicationResult<u32>
+///
+/// `task` narrows both passes to one task, so only that task's repo is fetched.
+pub async fn bulk_sync_pull_requests<R, G>(
+    repos: &mut R,
+    github: &G,
+    task: Option<&str>,
+) -> ApplicationResult<u32>
 where
     R: PullRequestSyncStore,
     G: GithubGateway,
 {
     let started = Instant::now();
-    let candidates = repos.all_branch_sync_candidates()?;
-    let unresolved = repos.all_unresolved_pull_request_refs()?;
+    let candidates = repos.branch_sync_candidates(task)?;
+    let unresolved = repos.unresolved_pull_request_refs(task)?;
     let candidates_ms = started.elapsed().as_millis();
     if candidates.is_empty() && unresolved.is_empty() {
         return Ok(0);

@@ -84,6 +84,13 @@ mod tests {
     }
 
     #[test]
+    fn task_sync_takes_an_optional_task_id() {
+        assert!(Cli::try_parse_from(["monica", "task", "sync"]).is_ok());
+        assert!(Cli::try_parse_from(["monica", "task", "sync", "MON-42"]).is_ok());
+        assert!(Cli::try_parse_from(["monica", "task", "sync", "MON-1", "MON-2"]).is_err());
+    }
+
+    #[test]
     fn task_attach_takes_exactly_one_task_id() {
         assert!(Cli::try_parse_from(["monica", "task", "attach", "MON-1"]).is_ok());
         assert!(Cli::try_parse_from(["monica", "task", "attach"]).is_err());

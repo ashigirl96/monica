@@ -55,9 +55,9 @@ pub use terminal_state::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTab
 
 // Usecase result types (returned by facade methods)
 pub use usecases::{
-    AttachSessionReport, CloseTaskReport, DaemonSessionView, HookContext, HookReport,
-    LinkPullRequestReport, TabTaskBinding, TerminalSessionUpdate,
-    TrackGithubIssueReport, TrackOutcome,
+    AttachSessionReport, CloseTaskReport, DaemonSessionView, GithubSyncReport, HookContext,
+    HookReport, LinkPullRequestReport, SyncChangeCounts, TabTaskBinding, TaskSyncChange,
+    TaskSyncChanges, TerminalSessionUpdate, TrackGithubIssueReport, TrackOutcome,
 };
 
 // Usecase sub-ports (referenced by Backend trait)
