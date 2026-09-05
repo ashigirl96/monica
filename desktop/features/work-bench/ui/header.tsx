@@ -86,6 +86,7 @@ export function WorkBenchHeader() {
           <button
             key={tab.id}
             ref={isActive ? activeTabRef : undefined}
+            data-tab-id={tab.id}
             {...handlersFor(tab.id, () => activateTab(tab.id))}
             onContextMenu={(e) => {
               e.preventDefault();

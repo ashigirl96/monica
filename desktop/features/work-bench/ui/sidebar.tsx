@@ -17,7 +17,7 @@ import { useDragReorder } from "@/hooks/use-drag-reorder";
 import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import { shortPath } from "@/lib/paths";
 import { statusDisplayLabel, statusDotClass } from "@/lib/status-config";
-import { IssueIcon } from "@/features/work-board/ui/github-icons";
+import { IssueIcon } from "@/components/github-icons";
 import { PinIcon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 
@@ -107,6 +107,7 @@ function RunspaceItem({
   return (
     <button
       {...dragHandlers}
+      data-runspace-id={ws.id}
       className={cn(
         "flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left",
         "transition-colors duration-100",

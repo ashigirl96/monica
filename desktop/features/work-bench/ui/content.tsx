@@ -22,6 +22,7 @@ import { clipboardWriteImage } from "@/commands/clipboard";
 import { terminalWrite } from "@/commands/terminal";
 import { useTerminal } from "./use-terminal";
 import { TabContextMenu } from "./tab-context-menu";
+import { OpenTargetMenu } from "./open-target-menu";
 import { AttachTaskPicker } from "./attach-task-picker";
 import { PlanPreview } from "./plan-preview";
 
@@ -284,6 +285,7 @@ export default function WorkBenchContent() {
         )}
       <JumpOverlay />
       <TabContextMenu />
+      <OpenTargetMenu />
       <AttachTaskPicker />
       <PlanPreview />
     </div>

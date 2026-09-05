@@ -184,8 +184,8 @@ export function initialState(): TerminalState {
 
 const baseTerminalStateAtom = atom<TerminalState | null>(null);
 
-// Every runspace/tab switch routes through this setter, so hint dismissal and the
-// Alt+O last-runspace memory live here instead of being repeated in each action atom.
+// Every runspace/tab switch routes through this setter, so hint dismissal lives here
+// instead of being repeated in each action atom.
 export const terminalStateAtom = atom(
   (get) => get(baseTerminalStateAtom),
   (get, set, next: TerminalState) => {
@@ -200,12 +200,6 @@ export const terminalStateAtom = atom(
       activeTabId(prev) !== activeTabId(next)
     ) {
       set(jumpHintsActiveAtom, false);
-    }
-    if (
-      prev.activeRunspaceId !== next.activeRunspaceId &&
-      next.runspaces.some((r) => r.id === prev.activeRunspaceId)
-    ) {
-      set(lastRunspaceIdAtom, prev.activeRunspaceId);
     }
   },
 );
@@ -358,20 +352,10 @@ export const removeRunspaceAtom = atom(
   },
 );
 
-export const lastRunspaceIdAtom = atom<string | null>(null);
-
 export const activateRunspaceAtom = atom(null, (get, set, rsId: string) => {
   const state = get(resolvedStateAtom);
   set(terminalStateAtom, { ...state, activeRunspaceId: rsId });
   set(terminalFocusRequestAtom, (c) => c + 1);
-});
-
-export const toggleLastRunspaceAtom = atom(null, (get, set) => {
-  const state = get(resolvedStateAtom);
-  const lastId = get(lastRunspaceIdAtom);
-  if (!lastId || lastId === state.activeRunspaceId) return;
-  if (!state.runspaces.some((r) => r.id === lastId)) return;
-  set(activateRunspaceAtom, lastId);
 });
 
 // The single definition of the sidebar's grouping — every consumer (sidebar sections,

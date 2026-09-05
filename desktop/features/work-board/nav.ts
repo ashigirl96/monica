@@ -4,9 +4,9 @@ import { queryClientAtom } from "jotai-tanstack-query";
 import type { Agent, RunMode } from "@/commands/bindings";
 import type { TaskSummaryRow } from "@/commands/task";
 import type { PopoverAnchor } from "@/components/popover-menu";
-import { openTargets } from "@/features/work-board/github-urls";
+import { openTargets } from "@/lib/github-targets";
 import { closeTaskAtom, openBenchAtom, runTaskAtom } from "@/features/work-board/store";
-import { rectToAnchor } from "@/lib/anchor";
+import { anchorForSelector } from "@/lib/anchor";
 import { columnTasksAtom, prepareTaskMutationAtom, taskSummariesAtom } from "@/stores/workboard";
 import { queryKeys } from "@/stores/query-keys";
 import { pendingWorkboardHintAtom, resolveWorkboardFocus } from "@/stores/ui-state";
@@ -325,12 +325,11 @@ const enterSubmenuAtom = atom(null, (get, set, submenu: SubmenuKind) => {
         submenu: { kind: "run", index: 0 },
       });
     } else {
-      const el = document.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(taskId)}"]`);
-      const rect = el?.getBoundingClientRect();
-      if (!rect) return;
+      const anchor = anchorForSelector(`[data-task-id="${CSS.escape(taskId)}"]`);
+      if (!anchor) return;
       set(menuAtom, {
         taskId,
-        anchor: rectToAnchor(rect),
+        anchor,
         itemIndex: RUN_INDEX,
         confirmingClose: false,
         submenu: { kind: "run", index: 0 },
