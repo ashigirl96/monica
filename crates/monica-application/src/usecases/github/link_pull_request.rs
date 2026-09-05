@@ -1,11 +1,10 @@
 use super::ports::{GithubGateway, PullRequestSyncStore, TaskStore};
-use crate::prelude::TaskId;
+use crate::prelude::{Task, TaskId};
 use crate::{ApplicationError, ApplicationResult, GithubPullRequest};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LinkPullRequestReport {
-    pub task_id: String,
-    pub task_title: String,
+    pub task: Task,
     pub pull_request: GithubPullRequest,
 }
 
@@ -30,10 +29,9 @@ where
         .fetch_pull_request(&repo, number)
         .await
         .map_err(|e| ApplicationError::external(format!("{e:#}")))?;
-    repos.record_linked_pull_requests(&[(task.id.as_str().to_string(), pull_request.clone())])?;
+    repos.record_linked_pull_requests(&[(task.id.to_string(), pull_request.clone())])?;
     Ok(LinkPullRequestReport {
-        task_id: task.id.into(),
-        task_title: task.title,
+        task,
         pull_request,
     })
 }

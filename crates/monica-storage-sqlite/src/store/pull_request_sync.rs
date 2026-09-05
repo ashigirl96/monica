@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::params;
 
 use crate::SqliteStore;
 use monica_application::{
@@ -98,7 +98,9 @@ impl SqliteStore {
     ) -> Result<()> {
         let tx = self.conn_mut().transaction()?;
         for (candidate, pull_requests) in branch_entries {
-            write_branch_sync_success(&tx, candidate, pull_requests)?;
+            for pull_request in pull_requests {
+                upsert_pull_request_ref(&tx, &candidate.task_id, pull_request)?;
+            }
         }
         for (unresolved_ref, pull_request) in status_entries {
             tx.execute(
@@ -121,6 +123,9 @@ impl SqliteStore {
         &mut self,
         entries: &[(String, GithubPullRequest)],
     ) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
         let tx = self.conn_mut().transaction()?;
         for (task_id, pull_request) in entries {
             upsert_pull_request_ref(&tx, task_id, pull_request)?;
@@ -157,17 +162,6 @@ impl PullRequestSyncStore for SqliteStore {
     }
 }
 
-fn write_branch_sync_success(
-    tx: &rusqlite::Transaction,
-    candidate: &PullRequestBranchSyncCandidate,
-    pull_requests: &[GithubPullRequest],
-) -> Result<()> {
-    for pr in pull_requests {
-        upsert_pull_request_ref(tx, &candidate.task_id, pr)?;
-    }
-    Ok(())
-}
-
 /// The one place a `pull_request` ref is created. The branch match, the issue reverse lookup and
 /// the manual link all land here, so (task, repo, number) stays unique however the PR was found.
 fn upsert_pull_request_ref(
@@ -175,42 +169,27 @@ fn upsert_pull_request_ref(
     task_id: &str,
     pr: &GithubPullRequest,
 ) -> Result<()> {
-    let existing = conn
-        .query_row(
-            "SELECT id
-             FROM external_refs
-             WHERE task_id = ?1
-               AND ref_type = ?2
-               AND repo = ?3
-               AND number = ?4
-             LIMIT 1",
-            params![task_id, RefType::PullRequest.as_str(), &pr.repo, pr.number],
-            |row| row.get::<_, i64>(0),
-        )
-        .optional()?;
-    let ref_id = if let Some(id) = existing {
-        conn.execute(
-            "UPDATE external_refs
-                SET url = ?1
-              WHERE id = ?2",
-            params![&pr.url, id],
-        )?;
-        id
-    } else {
-        conn.execute(
-            "INSERT INTO external_refs (task_id, provider, ref_type, repo, number, url)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                task_id,
-                Provider::Github.as_str(),
-                RefType::PullRequest.as_str(),
-                &pr.repo,
-                pr.number,
-                &pr.url
-            ],
-        )?;
-        conn.last_insert_rowid()
-    };
+    // The conflict target repeats the predicate of the v28 partial index verbatim; SQLite only
+    // matches a partial unique index when the ON CONFLICT clause restates it.
+    let ref_id: i64 = conn.query_row(
+        "INSERT INTO external_refs (task_id, provider, ref_type, repo, number, url)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(task_id, ref_type, repo, number)
+           WHERE ref_type = 'pull_request'
+             AND repo IS NOT NULL
+             AND number IS NOT NULL
+           DO UPDATE SET url = excluded.url
+         RETURNING id",
+        params![
+            task_id,
+            Provider::Github.as_str(),
+            RefType::PullRequest.as_str(),
+            &pr.repo,
+            pr.number,
+            &pr.url
+        ],
+        |row| row.get(0),
+    )?;
     upsert_pr_ref_state_success(conn, ref_id, pr.status.as_str())
 }
 

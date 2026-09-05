@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use super::*;
 use super::support::*;
+use crate::ports::PullRequestSyncStore;
 use crate::usecases::github::{
     bulk_sync_issues, bulk_sync_pull_requests, link_pull_request, TrackGithubIssueInput,
     TrackOutcome,
@@ -244,18 +245,28 @@ async fn bulk_sync_issues_is_a_noop_without_tracked_issues() {
     assert!(github.requested().is_empty());
 }
 
+/// Two open tasks carrying the same issue address. Tracking is idempotent while a task is open,
+/// so the first has to be closed to let the second one be created, then reopened.
+async fn two_tasks_tracking_the_same_issue(repos: &mut FakeRepos) -> (TaskId, TaskId) {
+    let first = track_github_issue(repos, &FakeGithub, track_input())
+        .await
+        .unwrap()
+        .task
+        .id;
+    repos.mark_task_closed(&first).unwrap();
+    let second = track_github_issue(repos, &FakeGithub, track_input())
+        .await
+        .unwrap()
+        .task
+        .id;
+    repos.update_task_status(&first, TaskStatus::Ready).unwrap();
+    (first, second)
+}
+
 #[tokio::test]
 async fn bulk_sync_issues_fetches_a_shared_issue_once_and_writes_both_refs() {
     let mut repos = FakeRepos::default();
-    let first = track_github_issue(&mut repos, &FakeGithub, track_input())
-        .await
-        .unwrap();
-    repos.mark_task_closed(&first.task.id).unwrap();
-    let second = track_github_issue(&mut repos, &FakeGithub, track_input())
-        .await
-        .unwrap();
-    // Reopen the first so both tasks carry the same issue address at once.
-    repos.update_task_status(&first.task.id, TaskStatus::Ready).unwrap();
+    let (first, second) = two_tasks_tracking_the_same_issue(&mut repos).await;
 
     let github = RepoIssueGithub::new(HashMap::from([(
         "owner/repo".to_string(),
@@ -269,8 +280,8 @@ async fn bulk_sync_issues_fetches_a_shared_issue_once_and_writes_both_refs() {
         vec![("owner/repo".to_string(), vec![42])],
         "the shared number is fetched once"
     );
-    assert_eq!(repos.get_task(&first.task.id).unwrap().unwrap().title, "shared");
-    assert_eq!(repos.get_task(&second.task.id).unwrap().unwrap().title, "shared");
+    assert_eq!(repos.get_task(&first).unwrap().unwrap().title, "shared");
+    assert_eq!(repos.get_task(&second).unwrap().unwrap().title, "shared");
 }
 
 fn linked_pr(number: i64, status: GithubPullRequestStatus) -> GithubPullRequest {
@@ -297,9 +308,7 @@ async fn bulk_sync_issues_links_the_pull_requests_that_close_the_issue() {
     let tracked = track_github_issue(&mut repos, &FakeGithub, track_input())
         .await
         .unwrap();
-    assert!(crate::ports::PullRequestSyncStore::all_branch_sync_candidates(&repos)
-        .unwrap()
-        .is_empty());
+    assert!(repos.all_branch_sync_candidates().unwrap().is_empty());
 
     let github = RepoIssueGithub::new(HashMap::from([(
         "owner/repo".to_string(),
@@ -322,14 +331,7 @@ async fn bulk_sync_issues_links_the_pull_requests_that_close_the_issue() {
 #[tokio::test]
 async fn bulk_sync_issues_links_a_pull_request_to_every_task_tracking_the_issue() {
     let mut repos = FakeRepos::default();
-    let first = track_github_issue(&mut repos, &FakeGithub, track_input())
-        .await
-        .unwrap();
-    repos.mark_task_closed(&first.task.id).unwrap();
-    let second = track_github_issue(&mut repos, &FakeGithub, track_input())
-        .await
-        .unwrap();
-    repos.update_task_status(&first.task.id, TaskStatus::Ready).unwrap();
+    let (first, second) = two_tasks_tracking_the_same_issue(&mut repos).await;
 
     let github = RepoIssueGithub::new(HashMap::from([(
         "owner/repo".to_string(),
@@ -347,7 +349,7 @@ async fn bulk_sync_issues_links_a_pull_request_to_every_task_tracking_the_issue(
         .collect();
     assert_eq!(
         linked_tasks,
-        vec![first.task.id.to_string(), second.task.id.to_string()],
+        vec![first.to_string(), second.to_string()],
         "both tasks tracking the issue get the PR"
     );
 }
@@ -386,7 +388,7 @@ async fn link_pull_request_records_the_fetched_pr_against_the_task() {
     .await
     .unwrap();
 
-    assert_eq!(report.task_id, tracked.task.id.as_str());
+    assert_eq!(report.task.id, tracked.task.id);
     assert_eq!(report.pull_request.number, 482);
     // The status comes from the gateway, not from the caller's input.
     assert_eq!(report.pull_request.status, GithubPullRequestStatus::Merged);

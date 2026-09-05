@@ -362,8 +362,7 @@ struct IssueNode {
     closed_by_pull_requests_references: LinkedPullRequestConnection,
 }
 
-/// The PRs whose closing keyword points at this issue. Same node shape as the by-number lookup,
-/// so [`github_pull_request_from`] converts both.
+/// The PRs whose closing keyword points at this issue.
 #[derive(Debug, Deserialize)]
 struct LinkedPullRequestConnection {
     nodes: Vec<PullRequestNode>,

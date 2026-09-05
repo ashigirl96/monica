@@ -3,8 +3,7 @@ use std::io::{self, Write};
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_application::{
-    parse_issue_input, parse_pull_request_input, AttachSessionReport, LinkPullRequestReport,
-    TaskSummaryRow, TrackOutcome,
+    parse_issue_input, parse_pull_request_input, AttachSessionReport, TaskSummaryRow, TrackOutcome,
 };
 use monica_domain::{parse_owner_repo, Agent, DisplayStatus, TaskId};
 
@@ -82,21 +81,17 @@ async fn pr_command(monica: &mut CliFacade, id: &str, target: &str) -> Result<()
         .link_pull_request(&task_id, repo.clone(), number)
         .await
         .with_context(|| format!("failed to link GitHub pull request {repo}#{number}"))?;
-    print!("{}", render_link_report(&report));
-    Ok(())
-}
-
-fn render_link_report(report: &LinkPullRequestReport) -> String {
-    let pr = &report.pull_request;
-    format!(
-        "Linked {}#{} ({}) to {}.\n  Task: {}\n  URL:  {}\n",
+    let pr = report.pull_request;
+    println!(
+        "Linked {}#{} ({}) to {}.",
         pr.repo,
         pr.number,
         pr.status.as_str(),
-        report.task_id,
-        report.task_title,
-        pr.url
-    )
+        report.task.id
+    );
+    println!("Task: {}", report.task.title);
+    println!("URL: {}", pr.url);
+    Ok(())
 }
 
 fn status_command(

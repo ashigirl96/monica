@@ -88,7 +88,6 @@ where
         }
     }
 
-    let synced_count = (entries.len() + linked.len()) as u32;
     let record_started = Instant::now();
     repos.bulk_record_issue_sync(&entries)?;
     repos.record_linked_pull_requests(&linked)?;
@@ -102,5 +101,5 @@ where
         record_started.elapsed().as_millis(),
         started.elapsed().as_millis()
     );
-    Ok(synced_count)
+    Ok((entries.len() + linked.len()) as u32)
 }

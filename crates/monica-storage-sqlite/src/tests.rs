@@ -1,8 +1,7 @@
 use monica_application::{
     EventRepository, ExecutionProfile, FetchedIssue, GithubIssueState, GithubIssueSyncStore,
     GithubPullRequest, GithubPullRequestStatus,
-    ProjectRepository, PullRequestBranchSyncCandidate, PullRequestSyncStore, TabAttachment,
-    TaskBoardQuery,
+    ProjectRepository, PullRequestBranchSyncCandidate, TabAttachment, TaskBoardQuery,
     TaskRunObservation,
     TaskRunStore, TaskStore, TaskSummaryFilter, TaskSummaryRow, TerminalRunspaceRow,
     TerminalSessionUpdate, TerminalStateSnapshot, TerminalTabRow, UnitOfWork, WorkbenchStore,
@@ -1572,18 +1571,15 @@ fn record_linked_pull_requests_creates_the_ref_for_a_branchless_task() {
     // No run, so the branch pass has nothing to match — exactly the attach / in-place case.
     assert!(db.all_branch_sync_candidates().unwrap().is_empty());
 
-    PullRequestSyncStore::record_linked_pull_requests(
-        &mut db,
-        &[(
-            id.to_string(),
-            GithubPullRequest {
-                repo: "owner/repo".to_string(),
-                number: 482,
-                url: "https://github.com/owner/repo/pull/482".to_string(),
-                status: GithubPullRequestStatus::Open,
-            },
-        )],
-    )
+    db.record_linked_pull_requests(&[(
+        id.to_string(),
+        GithubPullRequest {
+            repo: "owner/repo".to_string(),
+            number: 482,
+            url: "https://github.com/owner/repo/pull/482".to_string(),
+            status: GithubPullRequestStatus::Open,
+        },
+    )])
     .unwrap();
 
     let refs = db.list_github_pull_request_refs(id.as_str()).unwrap();

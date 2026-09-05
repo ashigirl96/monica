@@ -38,8 +38,8 @@ impl<B: Backend> SynchronizationService<'_, B> {
 
     /// User-forced refresh (cmd+r / entering the Workboard) — the only GitHub sync path. Runs the
     /// PR pass (repo listings matched to branches, then unresolved refs re-checked) followed by the
-    /// issue pass (open tasks' issue titles and states), then announces completion. A no-op when
-    /// GitHub isn't authenticated.
+    /// issue pass (open tasks' issue titles and states, plus the PRs that close them), then
+    /// announces completion. A no-op when GitHub isn't authenticated.
     pub async fn force_sync_github(&mut self) -> ApplicationResult<u32> {
         if !self.auth_status().authenticated {
             return Ok(0);
