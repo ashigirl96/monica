@@ -30,5 +30,5 @@ use crate::prelude::{
 };
 use crate::{
     ApplicationError, ApplicationEvent, HookContext, PullRequestBranchSyncCandidate,
-    SetupOutcome, TaskBench, UnresolvedPullRequestRef,
+    SetupOutcome, TaskBench,
 };

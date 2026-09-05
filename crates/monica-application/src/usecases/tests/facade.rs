@@ -176,15 +176,7 @@ fn facade_create_terminal_session_failure_marks_failed_and_settles() {
 
 #[tokio::test]
 async fn facade_force_sync_github_refreshes_unresolved_refs() {
-    let repos = FakeRepos::default();
-    // FakeGithub lists no recent PRs, so the unresolved ref falls through to a by-number fetch
-    // (FakeGithub answers Merged).
-    repos.set_unresolved_pr_refs(vec![UnresolvedPullRequestRef {
-        task_id: "MON-1".to_string(),
-        external_ref_id: 7,
-        repo: "owner/repo".to_string(),
-        number: 12,
-    }]);
+    let repos = repos_with_unresolved_ref();
     let sink = RecordingSink::default();
     let mut monica = facade(repos, sink.clone());
 
@@ -221,13 +213,7 @@ async fn facade_force_sync_github_announces_completion() {
 
 #[tokio::test]
 async fn facade_sync_github_fails_loudly_when_github_is_unauthenticated() {
-    let repos = FakeRepos::default();
-    repos.set_unresolved_pr_refs(vec![UnresolvedPullRequestRef {
-        task_id: "MON-1".to_string(),
-        external_ref_id: 7,
-        repo: "owner/repo".to_string(),
-        number: 12,
-    }]);
+    let repos = repos_with_unresolved_ref();
     let sink = RecordingSink::default();
     let mut monica = facade_with_auth(
         repos,
@@ -256,13 +242,7 @@ async fn facade_sync_github_fails_loudly_when_github_is_unauthenticated() {
 
 #[tokio::test]
 async fn facade_force_sync_github_stays_quiet_when_github_is_unauthenticated() {
-    let repos = FakeRepos::default();
-    repos.set_unresolved_pr_refs(vec![UnresolvedPullRequestRef {
-        task_id: "MON-1".to_string(),
-        external_ref_id: 7,
-        repo: "owner/repo".to_string(),
-        number: 12,
-    }]);
+    let repos = repos_with_unresolved_ref();
     let sink = RecordingSink::default();
     let mut monica = facade_with_auth(
         repos,
@@ -283,13 +263,7 @@ async fn facade_force_sync_github_stays_quiet_when_github_is_unauthenticated() {
 
 #[tokio::test]
 async fn facade_sync_github_reports_the_status_moves_it_wrote() {
-    let repos = FakeRepos::default();
-    repos.set_unresolved_pr_refs(vec![UnresolvedPullRequestRef {
-        task_id: "MON-1".to_string(),
-        external_ref_id: 7,
-        repo: "owner/repo".to_string(),
-        number: 12,
-    }]);
+    let repos = repos_with_unresolved_ref();
     let sink = RecordingSink::default();
     let mut monica = facade(repos, sink.clone());
 
@@ -300,7 +274,7 @@ async fn facade_sync_github_reports_the_status_moves_it_wrote() {
         .unwrap();
 
     assert_eq!(report.synced_count, 1);
-    assert!(!report.is_unchanged());
+    assert_eq!(report.changed_count(), 1);
     assert_eq!(report.pull_request_changes.len(), 1);
     assert_eq!(report.pull_request_changes[0].task_id, "MON-1");
     assert_eq!(report.pull_request_changes[0].number, 12);
@@ -312,13 +286,7 @@ async fn facade_sync_github_reports_the_status_moves_it_wrote() {
 
 #[tokio::test]
 async fn facade_sync_github_scoped_to_another_task_touches_nothing() {
-    let repos = FakeRepos::default();
-    repos.set_unresolved_pr_refs(vec![UnresolvedPullRequestRef {
-        task_id: "MON-1".to_string(),
-        external_ref_id: 7,
-        repo: "owner/repo".to_string(),
-        number: 12,
-    }]);
+    let repos = repos_with_unresolved_ref();
     let sink = RecordingSink::default();
     let mut monica = facade(repos, sink);
 
@@ -329,7 +297,7 @@ async fn facade_sync_github_scoped_to_another_task_touches_nothing() {
         .unwrap();
 
     assert_eq!(report.synced_count, 0);
-    assert!(report.is_unchanged());
+    assert_eq!(report.changed_count(), 0);
 }
 
 #[tokio::test]

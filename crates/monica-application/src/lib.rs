@@ -48,7 +48,7 @@ pub use github::{
     FetchedIssue, FieldChange, GithubAuthStatus, GithubIssue, GithubIssueState, GithubPullRequest,
     GithubPullRequestRef, GithubPullRequestStatus, GithubSyncReport, GithubSyncScope,
     IssueSyncChange, OpenIssueRef, PullRequestBranchSyncCandidate, PullRequestSyncChange,
-    RepoPullRequest, UnresolvedPullRequestRef,
+    RepoPullRequest, SyncPassOutcome, UnresolvedPullRequestRef,
 };
 pub use observation::TaskRunObservation;
 pub use queries::TaskSummaryRow;

@@ -3,8 +3,8 @@ use std::io::{self, Write};
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_application::{
-    parse_issue_input, AttachSessionReport, GithubSyncReport, GithubSyncScope, TaskSummaryRow,
-    TrackOutcome,
+    parse_issue_input, AttachSessionReport, GithubSyncReport, GithubSyncScope, IssueSyncChange,
+    PullRequestSyncChange, TaskSummaryRow, TrackOutcome,
 };
 use monica_domain::{parse_owner_repo, Agent, DisplayStatus, TaskId};
 
@@ -198,7 +198,10 @@ async fn sync_command(monica: &mut CliFacade, id: Option<&str>) -> Result<()> {
     };
     let report = monica.synchronization().sync_github(scope).await?;
     print!("{}", render_sync_report(&report));
-    Ok(())
+    if report.failed_repos.is_empty() {
+        return Ok(());
+    }
+    Err(anyhow!("{}", incomplete_sync_message(&report.failed_repos)))
 }
 
 /// Reject an unknown task here rather than letting the sync report zero refs, which reads the same
@@ -207,11 +210,18 @@ fn resolve_task_id(monica: &mut CliFacade, id: &str) -> Result<String> {
     let task_id = TaskId::parse(id)?;
     monica
         .tasks()
-        .list_all_task_summaries(None)?
-        .into_iter()
-        .find(|row| row.id == task_id.as_str())
-        .map(|row| row.id)
+        .get_task(&task_id)?
+        .map(|task| task.id.into_string())
         .ok_or_else(|| anyhow!("Task not found: {id}"))
+}
+
+/// A repo the sync could not reach keeps whatever was cached, so the command must fail rather than
+/// let `monica task sync && monica task status` read stale rows as fresh ones.
+fn incomplete_sync_message(failed_repos: &[String]) -> String {
+    format!(
+        "sync incomplete: could not reach {}; those refs still show what was cached before",
+        failed_repos.join(", ")
+    )
 }
 
 fn print_close_summary(task: &TaskSummaryRow) {
@@ -274,58 +284,23 @@ fn render_status_table(rows: &[TaskSummaryRow]) -> String {
 }
 
 fn render_sync_report(report: &GithubSyncReport) -> String {
-    let mut table = vec![vec![
-        "ID".to_string(),
-        "REF".to_string(),
-        "FIELD".to_string(),
-        "CHANGE".to_string(),
-    ]];
-    for change in &report.issue_changes {
-        let reference = format!("{}#{}", change.repo, change.number);
-        if let Some(title) = &change.title {
-            let previous = title.previous.as_deref().map(quoted);
-            table.push(vec![
-                change.task_id.clone(),
-                reference.clone(),
-                "title".to_string(),
-                render_transition(previous.as_deref(), &quoted(&title.current)),
-            ]);
-        }
-        if let Some(state) = &change.state {
-            table.push(vec![
-                change.task_id.clone(),
-                reference,
-                "state".to_string(),
-                render_transition(state.previous.map(|s| s.as_str()), state.current.as_str()),
-            ]);
-        }
-    }
-    for change in &report.pull_request_changes {
-        let status = change.status.as_ref();
-        // A freshly linked PR has no prior status by construction, so "linked (open)" says more
-        // than "- -> open".
-        let rendered = match (change.newly_linked, status) {
-            (true, Some(status)) => format!("linked ({})", status.current.as_str()),
-            (true, None) => "linked".to_string(),
-            (false, Some(status)) => {
-                render_transition(status.previous.map(|s| s.as_str()), status.current.as_str())
-            }
-            (false, None) => continue,
+    let changed = report.changed_count();
+    if changed == 0 {
+        return match (report.synced_count, report.failed_repos.is_empty()) {
+            // Every ref failed to fetch: the error carries the reason, so say nothing here rather
+            // than claim there was nothing to sync.
+            (0, false) => String::new(),
+            (0, true) => "No refs to sync.\n".to_string(),
+            (synced, _) => format!("Synced {synced} refs, nothing changed.\n"),
         };
-        table.push(vec![
-            change.task_id.clone(),
-            format!("{}#{}", change.repo, change.number),
-            "pr".to_string(),
-            rendered,
-        ]);
     }
 
-    let changed = table.len() - 1;
-    if changed == 0 {
-        return match report.synced_count {
-            0 => "No refs to sync.\n".to_string(),
-            synced => format!("Synced {synced} refs, nothing changed.\n"),
-        };
+    let mut table = vec![sync_row("ID", "REF", "FIELD", "CHANGE")];
+    for change in &report.issue_changes {
+        table.extend(issue_rows(change));
+    }
+    for change in &report.pull_request_changes {
+        table.push(pull_request_row(change));
     }
     format!(
         "Synced {} refs, {changed} changed.\n\n{}",
@@ -334,8 +309,57 @@ fn render_sync_report(report: &GithubSyncReport) -> String {
     )
 }
 
+fn issue_rows(change: &IssueSyncChange) -> Vec<Vec<String>> {
+    let reference = format!("{}#{}", change.repo, change.number);
+    let mut rows = Vec::new();
+    if let Some(title) = &change.title {
+        let previous = title.previous.as_deref().map(quoted);
+        rows.push(sync_row(
+            &change.task_id,
+            &reference,
+            "title",
+            &render_transition(previous.as_deref(), &quoted(&title.current)),
+        ));
+    }
+    if let Some(state) = &change.state {
+        rows.push(sync_row(
+            &change.task_id,
+            &reference,
+            "state",
+            &render_transition(state.previous.map(|s| s.as_str()), state.current.as_str()),
+        ));
+    }
+    rows
+}
+
+fn pull_request_row(change: &PullRequestSyncChange) -> Vec<String> {
+    // A freshly linked PR has no prior status, so "linked (open)" says more than "- -> open".
+    let rendered = match (&change.status, change.newly_linked) {
+        (Some(status), true) => format!("linked ({})", status.current.as_str()),
+        (Some(status), false) => {
+            render_transition(status.previous.map(|s| s.as_str()), status.current.as_str())
+        }
+        (None, _) => "linked".to_string(),
+    };
+    sync_row(
+        &change.task_id,
+        &format!("{}#{}", change.repo, change.number),
+        "pr",
+        &rendered,
+    )
+}
+
+fn sync_row(task_id: &str, reference: &str, field: &str, change: &str) -> Vec<String> {
+    vec![
+        task_id.to_string(),
+        reference.to_string(),
+        field.to_string(),
+        change.to_string(),
+    ]
+}
+
 fn render_transition(previous: Option<&str>, current: &str) -> String {
-    format!("{} -> {current}", previous.unwrap_or("-"))
+    format!("{} -> {current}", crate::table::or_dash(previous))
 }
 
 fn quoted(value: &str) -> String {
@@ -383,6 +407,25 @@ mod tests {
     }
 
     #[test]
+    fn render_sync_report_stays_silent_when_every_repo_was_unreachable() {
+        // Otherwise this prints "No refs to sync." for a sync that reached nothing — the exact
+        // confusion that makes `monica task sync && monica task status` act on stale rows.
+        let report = GithubSyncReport {
+            failed_repos: vec!["ashigirl96/monica".to_string()],
+            ..GithubSyncReport::default()
+        };
+        assert_eq!(render_sync_report(&report), "");
+    }
+
+    #[test]
+    fn incomplete_sync_message_names_the_unreachable_repos() {
+        assert_eq!(
+            incomplete_sync_message(&["a/b".to_string(), "c/d".to_string()]),
+            "sync incomplete: could not reach a/b, c/d; those refs still show what was cached before"
+        );
+    }
+
+    #[test]
     fn render_sync_report_lists_one_row_per_changed_field() {
         let report = GithubSyncReport {
             synced_count: 12,
@@ -418,6 +461,7 @@ mod tests {
                     newly_linked: true,
                 },
             ],
+            failed_repos: Vec::new(),
         };
 
         assert_eq!(
@@ -449,6 +493,7 @@ mod tests {
                 }),
             )],
             pull_request_changes: Vec::new(),
+            failed_repos: Vec::new(),
         };
 
         assert_eq!(

@@ -18,6 +18,13 @@ where
         .and_then(|run| run.plan_file_path))
 }
 
+pub fn get_task<R>(repos: &R, id: &TaskId) -> ApplicationResult<Option<Task>>
+where
+    R: TaskStore,
+{
+    Ok(repos.get_task(id)?)
+}
+
 pub fn list_tasks<R>(repos: &R) -> ApplicationResult<Vec<Task>>
 where
     R: TaskStore,

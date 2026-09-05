@@ -24,7 +24,7 @@ use crate::prelude::{
 };
 use crate::{
     ApplicationEvent, AuthGateway, Backend, Clock, DaemonSessionView, EventSink, ExecutionProfile,
-    FetchedIssue, FieldChange, GithubAuthStatus, GithubGateway, GithubIssue, GithubIssueState,
+    FetchedIssue, GithubAuthStatus, GithubGateway, GithubIssue, GithubIssueState,
     GithubPullRequest, IssueSyncChange, OpenIssueRef, PullRequestSyncChange,
     GithubPullRequestRef, GithubPullRequestStatus, HookContext, Monica,
     PullRequestBranchSyncCandidate, RepoPullRequest, SetupEnv,
@@ -119,9 +119,10 @@ struct FakeState {
     /// it exactly as the SQL `COALESCE(issue_state.title, tasks.title, '')` does, so the fake and
     /// the real store can't disagree about which title a tracked task shows.
     issue_ref_states: HashMap<i64, (String, GithubIssueState)>,
-    /// Mirrors `github_pull_request_ref_states`, keyed by external_ref id, so the fake reports the
-    /// same status transitions the real store's diff does.
-    pr_ref_states: HashMap<i64, GithubPullRequestStatus>,
+    /// Mirrors `github_pull_request_ref_states`. Keyed by the PR's address rather than an
+    /// external_ref id: the fake has no ref rows to allocate ids from, and both sync passes carry
+    /// all three parts.
+    pr_ref_states: HashMap<(String, String, i64), GithubPullRequestStatus>,
     branch_sync_candidates: Vec<PullRequestBranchSyncCandidate>,
     unresolved_pr_refs: Vec<UnresolvedPullRequestRef>,
     bulk_recorded: Vec<(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)>,
@@ -429,59 +430,28 @@ impl PullRequestSyncStore for FakeRepos {
         let mut changes = Vec::new();
         for (candidate, pull_requests) in branch_entries {
             for pr in pull_requests {
-                let existing = state.refs.get(&candidate.task_id).and_then(|refs| {
-                    refs.iter()
-                        .find(|r| {
-                            r.ref_type == RefType::PullRequest
-                                && r.repo.as_deref() == Some(pr.repo.as_str())
-                                && r.number == Some(pr.number)
-                        })
-                        .map(|r| r.id)
-                });
-                let newly_linked = existing.is_none();
-                let ref_id = existing.unwrap_or_else(|| {
-                    state.next_ref += 1;
-                    let id = state.next_ref;
-                    let mut external = ExternalReference::new(
-                        candidate.task_id.clone(),
-                        Provider::Github,
-                        RefType::PullRequest,
-                        Some(pr.repo.clone()),
-                        Some(pr.number),
-                        Some(pr.url.clone()),
-                    );
-                    external.id = id;
-                    state
-                        .refs
-                        .entry(candidate.task_id.clone())
-                        .or_default()
-                        .push(external);
-                    id
-                });
-                let previous = state.pr_ref_states.insert(ref_id, pr.status);
-                let status = FieldChange::detect(previous, pr.status);
-                if newly_linked || status.is_some() {
-                    changes.push(PullRequestSyncChange {
-                        task_id: candidate.task_id.clone(),
-                        repo: pr.repo.clone(),
-                        number: pr.number,
-                        status,
-                        newly_linked,
-                    });
-                }
+                let key = (candidate.task_id.clone(), pr.repo.clone(), pr.number);
+                let previous = state.pr_ref_states.insert(key, pr.status);
+                // The real store keys `newly_linked` off the external_ref row; here the first
+                // recorded status for an address is the same moment.
+                let newly_linked = previous.is_none();
+                changes.extend(PullRequestSyncChange::detect(
+                    &candidate.task_id,
+                    pr,
+                    previous,
+                    newly_linked,
+                ));
             }
         }
         for (unresolved_ref, pr) in status_entries {
-            let previous = state.pr_ref_states.insert(unresolved_ref.external_ref_id, pr.status);
-            if let Some(status) = FieldChange::detect(previous, pr.status) {
-                changes.push(PullRequestSyncChange {
-                    task_id: unresolved_ref.task_id.clone(),
-                    repo: pr.repo.clone(),
-                    number: pr.number,
-                    status: Some(status),
-                    newly_linked: false,
-                });
-            }
+            let key = (unresolved_ref.task_id.clone(), pr.repo.clone(), pr.number);
+            let previous = state.pr_ref_states.insert(key, pr.status);
+            changes.extend(PullRequestSyncChange::detect(
+                &unresolved_ref.task_id,
+                pr,
+                previous,
+                false,
+            ));
         }
         Ok(changes)
     }
@@ -528,17 +498,12 @@ impl GithubIssueSyncStore for FakeRepos {
                 Some((title, state)) => (Some(title), Some(state)),
                 None => (None, None),
             };
-            let title = FieldChange::detect(previous_title, issue.title.clone());
-            let issue_state = FieldChange::detect(previous_state, issue.state);
-            if title.is_some() || issue_state.is_some() {
-                changes.push(IssueSyncChange {
-                    task_id: issue_ref.task_id.clone(),
-                    repo: issue_ref.repo.clone(),
-                    number: issue_ref.number,
-                    title,
-                    state: issue_state,
-                });
-            }
+            changes.extend(IssueSyncChange::detect(
+                issue_ref,
+                issue,
+                previous_title,
+                previous_state,
+            ));
         }
         Ok(changes)
     }
@@ -2302,6 +2267,28 @@ impl AgentDecoders for TestAgentDecoders {
     }
 }
 
+/// The `UnresolvedPullRequestRef` shape both the façade and use-case tests drive the PR pass with.
+pub(crate) fn unresolved(
+    task_id: &str,
+    external_ref_id: i64,
+    repo: &str,
+    number: i64,
+) -> UnresolvedPullRequestRef {
+    UnresolvedPullRequestRef {
+        task_id: task_id.to_string(),
+        external_ref_id,
+        repo: repo.to_string(),
+        number,
+    }
+}
+
+/// A store holding one in-flight PR ref — the starting point for every façade sync test.
+pub(crate) fn repos_with_unresolved_ref() -> FakeRepos {
+    let repos = FakeRepos::default();
+    repos.set_unresolved_pr_refs(vec![unresolved("MON-1", 7, "owner/repo", 12)]);
+    repos
+}
+
 pub(crate) struct FakeBackend;
 
 impl Backend for FakeBackend {
@@ -2316,7 +2303,7 @@ impl Backend for FakeBackend {
 }
 
 pub(crate) fn facade(repos: FakeRepos, sink: RecordingSink) -> Monica<FakeBackend> {
-    facade_with_decoder(repos, sink, TestAgentDecoders::default())
+    facade_from(repos, sink, FakeAuth::default(), FakeTaskRunOutputs::default(), TestAgentDecoders::default())
 }
 
 pub(crate) fn facade_with_auth(
@@ -2324,17 +2311,7 @@ pub(crate) fn facade_with_auth(
     sink: RecordingSink,
     auth: FakeAuth,
 ) -> Monica<FakeBackend> {
-    Monica::new(
-        repos,
-        FakeGit::default(),
-        FakeGithub,
-        auth,
-        FakeSetupRunner::default(),
-        FakeTaskRunOutputs::default(),
-        FakeWorkspace,
-        TestAgentDecoders::default(),
-        Box::new(sink),
-    )
+    facade_from(repos, sink, auth, FakeTaskRunOutputs::default(), TestAgentDecoders::default())
 }
 
 pub(crate) fn facade_with_outputs(
@@ -2342,36 +2319,39 @@ pub(crate) fn facade_with_outputs(
     sink: RecordingSink,
     outputs: FakeTaskRunOutputs,
 ) -> Monica<FakeBackend> {
-    Monica::new(
-        repos,
-        FakeGit::default(),
-        FakeGithub,
-        FakeAuth::default(),
-        FakeSetupRunner::default(),
-        outputs,
-        FakeWorkspace,
-        TestAgentDecoders::default(),
-        Box::new(sink),
-    )
+    facade_from(repos, sink, FakeAuth::default(), outputs, TestAgentDecoders::default())
 }
 
 pub(crate) fn facade_with_decoder(
     repos: FakeRepos,
     sink: RecordingSink,
-    agents: TestAgentDecoders,
+    decoders: TestAgentDecoders,
+) -> Monica<FakeBackend> {
+    facade_from(repos, sink, FakeAuth::default(), FakeTaskRunOutputs::default(), decoders)
+}
+
+/// The one `Monica::new` call site, so a new backend dependency is a single edit rather than one
+/// per named wrapper.
+fn facade_from(
+    repos: FakeRepos,
+    sink: RecordingSink,
+    auth: FakeAuth,
+    outputs: FakeTaskRunOutputs,
+    decoders: TestAgentDecoders,
 ) -> Monica<FakeBackend> {
     Monica::new(
         repos,
         FakeGit::default(),
         FakeGithub,
-        FakeAuth::default(),
+        auth,
         FakeSetupRunner::default(),
-        FakeTaskRunOutputs::default(),
+        outputs,
         FakeWorkspace,
-        agents,
+        decoders,
         Box::new(sink),
     )
 }
+
 
 pub(crate) fn driven_run(id: &str, task_id: &str, tab: &str) -> TaskRun {
     TaskRun {

@@ -1,11 +1,9 @@
-use std::str::FromStr;
-
 use anyhow::Result;
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
 use crate::SqliteStore;
 use monica_application::{
-    FieldChange, GithubPullRequest, GithubPullRequestStatus, PullRequestBranchSyncCandidate,
+    GithubPullRequest, GithubPullRequestStatus, PullRequestBranchSyncCandidate,
     PullRequestSyncChange, PullRequestSyncStore, UnresolvedPullRequestRef,
 };
 use monica_domain::{Provider, RefType};
@@ -121,15 +119,12 @@ impl SqliteStore {
                 unresolved_ref.external_ref_id,
                 pull_request.status.as_str(),
             )?;
-            if let Some(status) = FieldChange::detect(previous, pull_request.status) {
-                changes.push(PullRequestSyncChange {
-                    task_id: unresolved_ref.task_id.clone(),
-                    repo: pull_request.repo.clone(),
-                    number: pull_request.number,
-                    status: Some(status),
-                    newly_linked: false,
-                });
-            }
+            changes.extend(PullRequestSyncChange::detect(
+                &unresolved_ref.task_id,
+                pull_request,
+                previous,
+                false,
+            ));
         }
         tx.commit()?;
         Ok(changes)
@@ -205,18 +200,20 @@ fn write_branch_sync_success(
             tx.last_insert_rowid()
         };
         let newly_linked = existing.is_none();
-        let previous = read_pr_ref_status(tx, ref_id)?;
+        // A ref this loop just inserted cannot carry a cached status: the state row is keyed by
+        // its brand-new id and cascades on delete, so skip the read that can only answer `None`.
+        let previous = if newly_linked {
+            None
+        } else {
+            read_pr_ref_status(tx, ref_id)?
+        };
         upsert_pr_ref_state_success(tx, ref_id, pr.status.as_str())?;
-        let status = FieldChange::detect(previous, pr.status);
-        if newly_linked || status.is_some() {
-            changes.push(PullRequestSyncChange {
-                task_id: candidate.task_id.clone(),
-                repo: pr.repo.clone(),
-                number: pr.number,
-                status,
-                newly_linked,
-            });
-        }
+        changes.extend(PullRequestSyncChange::detect(
+            &candidate.task_id,
+            pr,
+            previous,
+            newly_linked,
+        ));
     }
     Ok(changes)
 }
@@ -226,16 +223,13 @@ fn read_pr_ref_status(
     conn: &rusqlite::Connection,
     external_ref_id: i64,
 ) -> Result<Option<GithubPullRequestStatus>> {
+    // `prepare_cached` for the same reason as the issue store's read: once per ref, inside the
+    // write transaction.
     let status: Option<Option<String>> = conn
-        .query_row(
-            "SELECT status FROM github_pull_request_ref_states WHERE external_ref_id = ?1",
-            params![external_ref_id],
-            |row| row.get("status"),
-        )
+        .prepare_cached("SELECT status FROM github_pull_request_ref_states WHERE external_ref_id = ?1")?
+        .query_row(params![external_ref_id], |row| row.get("status"))
         .optional()?;
-    Ok(status
-        .flatten()
-        .and_then(|s| GithubPullRequestStatus::from_str(&s).ok()))
+    Ok(status.flatten().and_then(|s| s.parse().ok()))
 }
 
 fn upsert_pr_ref_state_success(

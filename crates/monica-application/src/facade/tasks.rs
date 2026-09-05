@@ -89,6 +89,12 @@ impl<B: Backend> TaskService<'_, B> {
         crate::usecases::tasks::primary_terminal_tab(&self.m.repos, task_id)
     }
 
+    /// A single task by id, straight off the primary key. Callers that only need to know whether
+    /// an id exists should use this rather than scanning `list_all_task_summaries`.
+    pub fn get_task(&self, id: &TaskId) -> ApplicationResult<Option<Task>> {
+        crate::usecases::query::get_task(&self.m.repos, id)
+    }
+
     pub fn list_tasks(&self) -> ApplicationResult<Vec<Task>> {
         crate::usecases::query::list_tasks(&self.m.repos)
     }

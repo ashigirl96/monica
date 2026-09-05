@@ -161,7 +161,8 @@ pub struct GithubAuthStatus {
 }
 
 /// Which refs a GitHub sync covers. `Task` narrows every pass to one task's refs before any
-/// network call, so `monica task sync MON-42` costs one issue lookup instead of a repo-wide sweep.
+/// request goes out, so the issue pass asks for one number instead of every tracked one. The PR
+/// pass still lists the task's repo: branch matching has no PR number to query by.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GithubSyncScope {
     All,
@@ -218,16 +219,87 @@ pub struct PullRequestSyncChange {
     pub newly_linked: bool,
 }
 
-/// The outcome of one sync pass, paired with the count the completion event already reported.
+impl IssueSyncChange {
+    /// The one place that decides whether a fetched issue moved. Both the SQLite store and the
+    /// test fake go through it, so the two cannot disagree about what counts as a change.
+    pub fn detect(
+        issue_ref: &OpenIssueRef,
+        issue: &FetchedIssue,
+        previous_title: Option<String>,
+        previous_state: Option<GithubIssueState>,
+    ) -> Option<Self> {
+        let title = FieldChange::detect(previous_title, issue.title.clone());
+        let state = FieldChange::detect(previous_state, issue.state);
+        (title.is_some() || state.is_some()).then(|| Self {
+            task_id: issue_ref.task_id.clone(),
+            repo: issue_ref.repo.clone(),
+            number: issue_ref.number,
+            title,
+            state,
+        })
+    }
+}
+
+impl PullRequestSyncChange {
+    /// The PR counterpart of [`IssueSyncChange::detect`]. A newly linked PR is always worth
+    /// reporting even when its status is the one it was born with.
+    pub fn detect(
+        task_id: &str,
+        pull_request: &GithubPullRequest,
+        previous_status: Option<GithubPullRequestStatus>,
+        newly_linked: bool,
+    ) -> Option<Self> {
+        let status = FieldChange::detect(previous_status, pull_request.status);
+        (newly_linked || status.is_some()).then(|| Self {
+            task_id: task_id.to_string(),
+            repo: pull_request.repo.clone(),
+            number: pull_request.number,
+            status,
+            newly_linked,
+        })
+    }
+}
+
+/// What one pass of the sync did. `failed_repos` is the load-bearing field: a repo whose fetch
+/// failed is skipped rather than recorded as empty, so its cached state survives — which means a
+/// caller that ignores this cannot tell "nothing needed refreshing" from "nothing could be
+/// refreshed".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncPassOutcome<C> {
+    pub synced_count: u32,
+    pub changes: Vec<C>,
+    pub failed_repos: Vec<String>,
+}
+
+// Hand-written: `derive(Default)` would demand `C: Default`, which `Vec<C>` never needs.
+impl<C> Default for SyncPassOutcome<C> {
+    fn default() -> Self {
+        Self {
+            synced_count: 0,
+            changes: Vec::new(),
+            failed_repos: Vec::new(),
+        }
+    }
+}
+
+/// Both passes combined, as the CLI and the completion event see them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GithubSyncReport {
     pub synced_count: u32,
     pub issue_changes: Vec<IssueSyncChange>,
     pub pull_request_changes: Vec<PullRequestSyncChange>,
+    /// Repos the sync could not reach, deduplicated across both passes.
+    pub failed_repos: Vec<String>,
 }
 
 impl GithubSyncReport {
-    pub fn is_unchanged(&self) -> bool {
-        self.issue_changes.is_empty() && self.pull_request_changes.is_empty()
+    /// One per moved field, so an issue whose title and state both moved counts twice — the report
+    /// owns this number rather than leaving each renderer to derive it from its own output.
+    pub fn changed_count(&self) -> usize {
+        self.issue_changes
+            .iter()
+            .map(|change| usize::from(change.title.is_some()) + usize::from(change.state.is_some()))
+            .sum::<usize>()
+            + self.pull_request_changes.len()
     }
 }

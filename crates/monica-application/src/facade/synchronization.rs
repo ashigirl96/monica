@@ -45,7 +45,7 @@ impl<B: Backend> SynchronizationService<'_, B> {
     ) -> ApplicationResult<GithubSyncReport> {
         let status = self.auth_status();
         if !status.authenticated {
-            return Err(ApplicationError::AuthenticationRequired(
+            return Err(ApplicationError::authentication_required(
                 status
                     .message
                     .unwrap_or_else(|| "GitHub authentication required".to_string()),

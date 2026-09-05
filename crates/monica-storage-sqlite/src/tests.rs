@@ -2768,6 +2768,15 @@ fn fetched(number: i64, title: &str, state: GithubIssueState) -> FetchedIssue {
 }
 
 /// An issue-backed task carries no title of its own; the cache is what the reads must show.
+fn pr11(status: GithubPullRequestStatus) -> GithubPullRequest {
+    GithubPullRequest {
+        repo: "owner/repo".to_string(),
+        number: 11,
+        url: "https://github.com/owner/repo/pull/11".to_string(),
+        status,
+    }
+}
+
 fn tracked_task(db: &mut SqliteStore, repo: &str, number: i64) -> TaskId {
     db.insert_task_with_ref(NewTask::untitled(TaskKind::Development), issue_ref(repo, number))
         .unwrap()
@@ -2952,15 +2961,8 @@ fn bulk_record_issue_sync_reports_the_first_fetch_then_only_real_changes() {
 fn bulk_record_pr_sync_reports_newly_linked_prs_and_status_moves() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let (id1, c1) = project_task_with_branch(&mut db, "owner/repo", "main", "feature/a");
-    let pr = |status| GithubPullRequest {
-        repo: "owner/repo".to_string(),
-        number: 11,
-        url: "https://github.com/owner/repo/pull/11".to_string(),
-        status,
-    };
-
     let changes = db
-        .bulk_record_pr_sync(&[(c1.clone(), vec![pr(GithubPullRequestStatus::Open)])], &[])
+        .bulk_record_pr_sync(&[(c1.clone(), vec![pr11(GithubPullRequestStatus::Open)])], &[])
         .unwrap();
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].task_id, id1.as_str());
@@ -2972,12 +2974,12 @@ fn bulk_record_pr_sync_reports_newly_linked_prs_and_status_moves() {
     );
 
     let changes = db
-        .bulk_record_pr_sync(&[(c1.clone(), vec![pr(GithubPullRequestStatus::Open)])], &[])
+        .bulk_record_pr_sync(&[(c1.clone(), vec![pr11(GithubPullRequestStatus::Open)])], &[])
         .unwrap();
     assert!(changes.is_empty(), "same ref, same status: nothing to report");
 
     let changes = db
-        .bulk_record_pr_sync(&[(c1, vec![pr(GithubPullRequestStatus::Merged)])], &[])
+        .bulk_record_pr_sync(&[(c1, vec![pr11(GithubPullRequestStatus::Merged)])], &[])
         .unwrap();
     assert_eq!(changes.len(), 1);
     assert!(!changes[0].newly_linked, "the ref already existed");
@@ -2990,27 +2992,11 @@ fn bulk_record_pr_sync_reports_newly_linked_prs_and_status_moves() {
 fn bulk_record_pr_sync_reports_status_entry_moves() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let (_, c1) = project_task_with_branch(&mut db, "owner/repo", "main", "feature/a");
-    db.bulk_record_pr_sync(
-        &[(
-            c1,
-            vec![GithubPullRequest {
-                repo: "owner/repo".to_string(),
-                number: 11,
-                url: "https://github.com/owner/repo/pull/11".to_string(),
-                status: GithubPullRequestStatus::Draft,
-            }],
-        )],
-        &[],
-    )
-    .unwrap();
+    db.bulk_record_pr_sync(&[(c1, vec![pr11(GithubPullRequestStatus::Draft)])], &[])
+        .unwrap();
     let unresolved = db.all_unresolved_pull_request_refs().unwrap();
 
-    let merged = GithubPullRequest {
-        repo: "owner/repo".to_string(),
-        number: 11,
-        url: "https://github.com/owner/repo/pull/11".to_string(),
-        status: GithubPullRequestStatus::Merged,
-    };
+    let merged = pr11(GithubPullRequestStatus::Merged);
     let changes = db
         .bulk_record_pr_sync(&[], &[(unresolved[0].clone(), merged.clone())])
         .unwrap();

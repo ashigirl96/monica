@@ -1,12 +1,9 @@
-use std::str::FromStr;
-
 use anyhow::Result;
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
 use crate::SqliteStore;
 use monica_application::{
-    FetchedIssue, FieldChange, GithubIssueState, GithubIssueSyncStore, IssueSyncChange,
-    OpenIssueRef,
+    FetchedIssue, GithubIssueState, GithubIssueSyncStore, IssueSyncChange, OpenIssueRef,
 };
 
 use super::SET_NOW;
@@ -58,17 +55,12 @@ impl SqliteStore {
             let (previous_title, previous_state) =
                 read_issue_ref_state(&tx, issue_ref.external_ref_id)?;
             upsert_issue_ref_state_in(&tx, issue_ref.external_ref_id, &issue.title, issue.state)?;
-            let title = FieldChange::detect(previous_title, issue.title.clone());
-            let state = FieldChange::detect(previous_state, issue.state);
-            if title.is_some() || state.is_some() {
-                changes.push(IssueSyncChange {
-                    task_id: issue_ref.task_id.clone(),
-                    repo: issue_ref.repo.clone(),
-                    number: issue_ref.number,
-                    title,
-                    state,
-                });
-            }
+            changes.extend(IssueSyncChange::detect(
+                issue_ref,
+                issue,
+                previous_title,
+                previous_state,
+            ));
         }
         tx.commit()?;
         Ok(changes)
@@ -152,16 +144,14 @@ fn read_issue_ref_state(
     conn: &rusqlite::Connection,
     external_ref_id: i64,
 ) -> Result<(Option<String>, Option<GithubIssueState>)> {
+    // `prepare_cached` because this runs once per ref inside the write transaction; re-parsing the
+    // same statement for every entry is pure overhead against a rowid lookup.
     let row: Option<(Option<String>, Option<String>)> = conn
-        .query_row(
-            "SELECT title, state FROM github_issue_ref_states WHERE external_ref_id = ?1",
-            params![external_ref_id],
-            |row| Ok((row.get("title")?, row.get("state")?)),
-        )
+        .prepare_cached("SELECT title, state FROM github_issue_ref_states WHERE external_ref_id = ?1")?
+        .query_row(params![external_ref_id], |row| {
+            Ok((row.get("title")?, row.get("state")?))
+        })
         .optional()?;
     let (title, state) = row.unwrap_or((None, None));
-    Ok((
-        title,
-        state.and_then(|s| GithubIssueState::from_str(&s).ok()),
-    ))
+    Ok((title, state.and_then(|s| s.parse().ok())))
 }

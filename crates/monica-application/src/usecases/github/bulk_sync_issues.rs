@@ -2,18 +2,20 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use super::ports::{GithubGateway, GithubIssueSyncStore};
-use crate::{ApplicationResult, FetchedIssue, GithubSyncScope, IssueSyncChange, OpenIssueRef};
+use crate::{
+    ApplicationResult, FetchedIssue, GithubSyncScope, IssueSyncChange, OpenIssueRef,
+    SyncPassOutcome,
+};
 
 /// Forced issue refresh, the issue half of the GitHub sync. Fetches every repo's tracked issues in
 /// one batched request each — all repos in parallel — and records the fresh title and state in a
 /// single transaction. Only open tasks are covered: a closed task's issue needs no freshness.
-/// `scope` narrows the refs before any request goes out. Returns the number of refs whose cache was
-/// refreshed, plus the ones whose title or state actually moved.
+/// `scope` narrows the refs before any request goes out.
 pub async fn bulk_sync_issues<R, G>(
     repos: &mut R,
     github: &G,
     scope: &GithubSyncScope,
-) -> ApplicationResult<(u32, Vec<IssueSyncChange>)>
+) -> ApplicationResult<SyncPassOutcome<IssueSyncChange>>
 where
     R: GithubIssueSyncStore,
     G: GithubGateway,
@@ -25,7 +27,7 @@ where
         .filter(|issue_ref| scope.covers(&issue_ref.task_id))
         .collect();
     if refs.is_empty() {
-        return Ok((0, Vec::new()));
+        return Ok(SyncPassOutcome::default());
     }
 
     // One request set per repo, with the numbers deduplicated: the same issue tracked by two
@@ -51,6 +53,7 @@ where
     let fetch_ms = fetch_started.elapsed().as_millis();
 
     let mut by_repo: HashMap<String, HashMap<i64, FetchedIssue>> = HashMap::new();
+    let mut failed_repos: Vec<String> = Vec::new();
     for ((repo, _), (elapsed, result)) in repo_batches.iter().zip(results) {
         match result {
             Ok(issues) => {
@@ -68,11 +71,14 @@ where
             // A failed repo is left out of `by_repo`, so none of its refs produce an entry
             // below. Recording them as empty successes would blank every cached title in that
             // repo over a transient error.
-            Err(e) => log::warn!(
-                target: "monica_application::github_sync",
-                "bulk issue fetch failed repo={repo} after {}ms error={e:#}",
-                elapsed.as_millis()
-            ),
+            Err(e) => {
+                failed_repos.push(repo.clone());
+                log::warn!(
+                    target: "monica_application::github_sync",
+                    "bulk issue fetch failed repo={repo} after {}ms error={e:#}",
+                    elapsed.as_millis()
+                );
+            }
         }
     }
 
@@ -98,5 +104,9 @@ where
         record_started.elapsed().as_millis(),
         started.elapsed().as_millis()
     );
-    Ok((synced_count, changes))
+    Ok(SyncPassOutcome {
+        synced_count,
+        changes,
+        failed_repos,
+    })
 }
