@@ -6,7 +6,9 @@ import {
   closeOpenTargetMenuAtom,
   executeOpenTargetAtom,
   moveOpenTargetAtom,
+  openTargetIndexAtom,
   openTargetMenuAtom,
+  openTargetMenuStaleAtom,
   openTargetsAtom,
   type OpenTargetMenuState,
   setOpenTargetIndexAtom,
@@ -24,14 +26,15 @@ function MenuPopover({ menu }: { menu: OpenTargetMenuState }) {
   const setIndex = useSetAtom(setOpenTargetIndexAtom);
   const execute = useSetAtom(executeOpenTargetAtom);
   const targets = useAtomValue(openTargetsAtom);
+  const index = useAtomValue(openTargetIndexAtom);
 
-  // A poll can drop the task or its links while the menu is up; leaving it open with no rows
-  // would strand keyboard focus on an empty popover.
-  const empty = targets.length === 0;
+  // A poll can drop the task's links, and ⌘1 / ⌥J move away from the runspace the menu describes;
+  // either way keeping it up would strand keyboard focus on a popover that no longer applies.
+  const stale = useAtomValue(openTargetMenuStaleAtom);
   useEffect(() => {
-    if (empty) close();
-  }, [empty, close]);
-  if (empty) return null;
+    if (stale) close();
+  }, [stale, close]);
+  if (stale) return null;
 
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -52,7 +55,7 @@ function MenuPopover({ menu }: { menu: OpenTargetMenuState }) {
     <PopoverMenu anchor={menu.anchor} onClose={close} onKeyDown={onKeyDown} autoFocus>
       <OpenTargetList
         targets={targets}
-        selectedIndex={menu.index}
+        selectedIndex={index}
         onHover={setIndex}
         onSelect={execute}
         onBack={close}
