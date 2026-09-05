@@ -8,7 +8,7 @@ import {
   statusDisplayLabel,
 } from "@/lib/status-config";
 import { cn } from "@/lib/utils";
-import { IssueIcon, PrIcon } from "@/features/work-board/ui/github-icons";
+import { IssueIcon, PrIcon } from "@/components/github-icons";
 
 function BranchIcon() {
   return (

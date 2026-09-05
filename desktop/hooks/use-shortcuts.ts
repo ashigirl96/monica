@@ -14,11 +14,11 @@ import {
   moveActiveRunspaceAtom,
   planPreviewAtom,
   promoteActiveTabRunAtom,
-  toggleLastRunspaceAtom,
   togglePlanPreviewAtom,
   toggleTabPinAtom,
 } from "@/features/work-bench/store";
 import { jumpHintsActiveAtom, jumpToHintAtom } from "@/features/work-bench/jump-hints";
+import { toggleOpenTargetMenuAtom } from "@/features/work-bench/open-targets";
 import { sessionStatusAtom } from "@/features/work-bench/session-status";
 import { forceSyncGithubAtom } from "@/stores/github-sync";
 import { newTaskOpenAtom, projectFilterOpenAtom, cycleBoardViewAtom } from "@/stores/workboard";
@@ -86,7 +86,7 @@ export function useShortcuts() {
   const jumpToHint = useSetAtom(jumpToHintAtom);
   const moveActiveTab = useSetAtom(moveActiveTabAtom);
   const moveActiveRunspace = useSetAtom(moveActiveRunspaceAtom);
-  const toggleLastRunspace = useSetAtom(toggleLastRunspaceAtom);
+  const toggleOpenTargetMenu = useSetAtom(toggleOpenTargetMenuAtom);
   const setNewTaskOpen = useSetAtom(newTaskOpenAtom);
   const setProjectFilterOpen = useSetAtom(projectFilterOpenAtom);
   const cycleBoardView = useSetAtom(cycleBoardViewAtom);
@@ -196,7 +196,7 @@ export function useShortcuts() {
         code: "KeyO",
         editable: true,
         action: ({ isWorkBench }) => {
-          if (isWorkBench) toggleLastRunspace();
+          if (isWorkBench) toggleOpenTargetMenu();
         },
       },
       {
@@ -369,7 +369,7 @@ export function useShortcuts() {
     jumpToHint,
     moveActiveTab,
     moveActiveRunspace,
-    toggleLastRunspace,
+    toggleOpenTargetMenu,
     cycleBoardView,
     setNewTaskOpen,
     setProjectFilterOpen,

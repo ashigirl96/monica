@@ -1,7 +1,7 @@
 /// <reference types="bun" />
 import { describe, expect, test } from "bun:test";
 import type { GithubPullRequestRef } from "@/commands/task";
-import { openTargets } from "@/features/work-board/github-urls";
+import { openTargets } from "@/lib/github-targets";
 import { taskSummary as task } from "@/features/work-board/test-fixtures";
 
 function pr(over: Partial<GithubPullRequestRef>): GithubPullRequestRef {

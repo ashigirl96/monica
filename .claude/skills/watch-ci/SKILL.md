@@ -1,11 +1,11 @@
 ---
 name: watch-ci
-description: PR に "@codex review" コメントを投げ、返却を 5 分間隔でポーリングし、指摘対応 → 再レビュー依頼まで自動で回す（上限 3 往復）。「codex レビュー回して」「codex に見てもらって」「レビュー対応ループ」「watch-ci」、または PR 作成後にレビュー対応まで面倒を見てほしいと示されたときに使う。
+description: PR に "@codex review" コメントを投げ、返却を 1 分間隔でポーリングし、指摘対応 → 再レビュー依頼まで自動で回す（上限 3 往復）。「codex レビュー回して」「codex に見てもらって」「レビュー対応ループ」「watch-ci」、または PR 作成後にレビュー対応まで面倒を見てほしいと示されたときに使う。
 ---
 
 # watch-ci
 
-PR の codex review を**往復**で回す: 依頼 → 5 分待ち → 指摘対応 → 再依頼。往復は最大 3 回。
+PR の codex review を**往復**で回す: 依頼 → 1 分待ち → 指摘対応 → 再依頼。往復は最大 3 回。
 状態（PR・round・依頼時刻）は wakeup prompt に verbatim で載せて持ち回る — 次の wakeup はこの prompt だけを頼りに再開する。
 
 ## 1. PR を特定する
@@ -18,7 +18,7 @@ PR の codex review を**往復**で回す: 依頼 → 5 分待ち → 指摘対
 gh pr comment <PR> --body "@codex review"
 ```
 
-投稿したら ScheduleWakeup(delaySeconds: 300, noop: false) で再開を予約する。prompt:
+投稿したら ScheduleWakeup(delaySeconds: 60, noop: false) で再開を予約する。prompt:
 
 ```
 /watch-ci PR=<url> round=<N> requested_at=<この依頼コメントの createdAt>
@@ -33,7 +33,7 @@ gh pr view <PR> --json comments,reviews          # 指摘ゼロは issue comment
 gh api repos/<owner>/<repo>/pulls/<PR>/comments  # 指摘は inline review comment
 ```
 
-- **未返却** → noop: true で 300s 再スケジュール（prompt は同一）。
+- **未返却** → noop: true で 60s 再スケジュール（prompt は同一）。
 - **指摘ゼロ**（"Didn't find any major issues" 等）→ 手順 5 へ。
 - **指摘あり** → 手順 4 へ。
 
