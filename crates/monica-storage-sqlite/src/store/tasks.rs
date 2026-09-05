@@ -276,6 +276,7 @@ impl TaskBoardQuery for SqliteStore {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT
                t.id AS task_id,
+               t.parent_task_id AS parent_task_id,
                COALESCE(issue_state.title, t.title, '') AS title,
                coalesce(project.repo, issue_ref.repo, t.project_id) AS project,
                issue_ref.number AS github_issue_number,
@@ -363,6 +364,7 @@ impl TaskBoardQuery for SqliteStore {
                 });
             let item = TaskSummaryRow {
                 id: row.get("task_id")?,
+                parent_task_id: row.get("parent_task_id")?,
                 title: row.get("title")?,
                 project: row.get("project")?,
                 github_issue_number,

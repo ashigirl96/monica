@@ -40,6 +40,9 @@ pub struct Task {
     pub details: RawJson,
     pub source: Option<RawJson>,
     pub primary_task_run_id: Option<TaskRunId>,
+    /// The task tracking this one's parent issue. Owned by the GitHub Sub-issues link, which the
+    /// issue sync re-resolves on every run, so it is never set at insert time.
+    pub parent_task_id: Option<TaskId>,
     pub closed_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,

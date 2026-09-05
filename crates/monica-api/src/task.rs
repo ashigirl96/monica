@@ -21,6 +21,9 @@ impl From<monica_domain::Project> for ProjectOption {
     }
 }
 
+// jscpd:ignore-start — this DTO intentionally mirrors `monica_application::TaskSummaryRow`
+// field-for-field; the From impl below keeps them in lockstep. The duplication is the contract
+// boundary, not copy-paste drift.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct TaskSummaryRow {
     pub id: String,
@@ -50,6 +53,7 @@ pub struct TaskSummaryRow {
     #[specta(type = specta_typescript::Number)]
     pub side_runs_failed: i64,
 }
+// jscpd:ignore-end
 
 impl From<monica_application::TaskSummaryRow> for TaskSummaryRow {
     fn from(value: monica_application::TaskSummaryRow) -> Self {

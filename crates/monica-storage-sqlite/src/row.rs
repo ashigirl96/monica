@@ -25,6 +25,7 @@ pub(super) fn task_from_row(row: &Row<'_>) -> Result<Task> {
         details: RawJson(details),
         source: source.map(RawJson),
         primary_task_run_id: row.get::<_, Option<String>>("primary_task_run_id")?.map(TaskRunId::from_store),
+        parent_task_id: row.get::<_, Option<String>>("parent_task_id")?.map(TaskId::from_store),
         closed_at: row.get("closed_at")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,

@@ -223,6 +223,7 @@ fn render_status_table(rows: &[TaskSummaryRow]) -> String {
 
     let mut table = vec![vec![
         "ID".to_string(),
+        "PARENT".to_string(),
         "PROJECT".to_string(),
         "GH ISSUE".to_string(),
         "STATUS".to_string(),
@@ -232,6 +233,7 @@ fn render_status_table(rows: &[TaskSummaryRow]) -> String {
         let github_issue = row.github_issue_number.map(|n| format!("#{n}"));
         table.push(vec![
             row.id.clone(),
+            crate::table::or_dash(row.parent_task_id.as_deref()),
             crate::table::or_dash(row.project.as_deref()),
             crate::table::or_dash(github_issue.as_deref()),
             row.status.as_str().to_string(),
@@ -339,9 +341,9 @@ mod tests {
         assert!(normalize_project_filter(Some("bad")).is_err());
     }
 
-    #[test]
-    fn render_status_table_formats_rows_and_empty_state() {
-        let rows = vec![TaskSummaryRow {
+    fn summary_row() -> TaskSummaryRow {
+        TaskSummaryRow {
+            parent_task_id: Some("MON-9".to_string()),
             id: "MON-1".to_string(),
             title: "Test issue".to_string(),
             project: Some("ashigirl96/monica".to_string()),
@@ -364,9 +366,20 @@ mod tests {
             side_runs_running: 0,
             side_runs_waiting_for_user: 0,
             side_runs_failed: 0,
-        }];
-        let rendered = render_status_table(&rows);
+        }
+    }
+
+    /// The cell under `PARENT` on the single data row.
+    fn parent_cell(rendered: &str) -> String {
+        rendered.lines().nth(1).unwrap().split_whitespace().nth(1).unwrap().to_string()
+    }
+
+    #[test]
+    fn render_status_table_formats_rows_and_empty_state() {
+        let rendered = render_status_table(&[summary_row()]);
         assert!(rendered.contains("ID"));
+        assert!(rendered.contains("PARENT"));
+        assert_eq!(parent_cell(&rendered), "MON-9");
         assert!(rendered.contains("ashigirl96/monica"));
         assert!(rendered.contains("#17"));
         assert!(rendered.contains("BRANCH"));
@@ -378,5 +391,11 @@ mod tests {
             .any(|column| column == "PR"));
 
         assert_eq!(render_status_table(&[]), "No tracked tasks found.\n");
+    }
+
+    #[test]
+    fn render_status_table_dashes_a_task_without_a_parent() {
+        let row = TaskSummaryRow { parent_task_id: None, ..summary_row() };
+        assert_eq!(parent_cell(&render_status_table(&[row])), "-");
     }
 }

@@ -1,6 +1,6 @@
 use monica_application::{
     EventRepository, ExecutionProfile, FetchedIssue, GithubIssueState, GithubIssueSyncStore,
-    GithubPullRequest, GithubPullRequestStatus,
+    GithubPullRequest, GithubPullRequestStatus, IssueAddress,
     ProjectRepository, PullRequestBranchSyncCandidate, TabAttachment, TaskBoardQuery,
     TaskRunObservation,
     TaskRunStore, TaskStore, TaskSummaryFilter, TaskSummaryRow, TerminalRunspaceRow,
@@ -2758,13 +2758,15 @@ fn issue_ref(repo: &str, number: i64) -> ExternalReference {
 }
 
 fn fetched(number: i64, title: &str, state: GithubIssueState) -> FetchedIssue {
-    FetchedIssue {
-        number,
-        title: title.to_string(),
-        state,
-        parent: None,
-        sub_issues: Vec::new(),
-    }
+    FetchedIssue { number, title: title.to_string(), state, parent: None }
+}
+
+fn fetched_with_parent(number: i64, parent: IssueAddress) -> FetchedIssue {
+    FetchedIssue { parent: Some(parent), ..fetched(number, "issue", GithubIssueState::Open) }
+}
+
+fn parent_of(db: &SqliteStore, id: &TaskId) -> Option<String> {
+    db.get_task(id).unwrap().unwrap().parent_task_id.map(|p| p.to_string())
 }
 
 /// An issue-backed task carries no title of its own; the cache is what the reads must show.
@@ -2902,4 +2904,103 @@ fn bulk_record_issue_sync_with_no_entries_is_a_noop() {
     let id = tracked_task(&mut db, "owner/repo", 42);
     db.bulk_record_issue_sync(&[]).unwrap();
     assert_eq!(db.get_task(&id).unwrap().unwrap().title, "");
+}
+
+fn issue_ref_id(db: &SqliteStore, repo: &str, number: i64) -> i64 {
+    db.all_open_task_issue_refs()
+        .unwrap()
+        .into_iter()
+        .find(|r| r.repo == repo && r.number == number)
+        .unwrap()
+        .external_ref_id
+}
+
+#[test]
+fn bulk_record_issue_sync_links_the_child_to_its_parent_task() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let parent = tracked_task(&mut db, "owner/repo", 100);
+    let child = tracked_task(&mut db, "owner/repo", 101);
+    let ref_id = issue_ref_id(&db, "owner/repo", 101);
+
+    db.bulk_record_issue_sync(&[(
+        ref_id,
+        fetched_with_parent(101, IssueAddress { repo: "owner/repo".to_string(), number: 100 }),
+    )])
+    .unwrap();
+
+    assert_eq!(parent_of(&db, &child).as_deref(), Some(parent.as_str()));
+    let rows = db.list_task_summaries(TaskSummaryFilter::All, None).unwrap();
+    let summary = rows.iter().find(|r| r.id == child.as_str()).unwrap();
+    assert_eq!(summary.parent_task_id.as_deref(), Some(parent.as_str()));
+}
+
+#[test]
+fn bulk_record_issue_sync_clears_a_link_github_dropped() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    tracked_task(&mut db, "owner/repo", 100);
+    let child = tracked_task(&mut db, "owner/repo", 101);
+    let ref_id = issue_ref_id(&db, "owner/repo", 101);
+    db.bulk_record_issue_sync(&[(
+        ref_id,
+        fetched_with_parent(101, IssueAddress { repo: "owner/repo".to_string(), number: 100 }),
+    )])
+    .unwrap();
+
+    db.bulk_record_issue_sync(&[(ref_id, fetched(101, "issue", GithubIssueState::Open))]).unwrap();
+
+    assert_eq!(parent_of(&db, &child), None, "GitHub is the source of truth for the link");
+}
+
+#[test]
+fn bulk_record_issue_sync_leaves_a_closed_parent_task_unlinked() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let parent = tracked_task(&mut db, "owner/repo", 100);
+    let child = tracked_task(&mut db, "owner/repo", 101);
+    let ref_id = issue_ref_id(&db, "owner/repo", 101);
+    db.mark_task_closed(&parent).unwrap();
+
+    db.bulk_record_issue_sync(&[(
+        ref_id,
+        fetched_with_parent(101, IssueAddress { repo: "owner/repo".to_string(), number: 100 }),
+    )])
+    .unwrap();
+
+    assert_eq!(
+        parent_of(&db, &child),
+        None,
+        "a new child must not hang off the remains of a closed epic"
+    );
+}
+
+#[test]
+fn bulk_record_issue_sync_resolves_the_parent_in_the_repo_that_owns_it() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let real_parent = tracked_task(&mut db, "other/repo", 100);
+    let same_number_elsewhere = tracked_task(&mut db, "owner/repo", 100);
+    let child = tracked_task(&mut db, "owner/repo", 101);
+    let ref_id = issue_ref_id(&db, "owner/repo", 101);
+
+    db.bulk_record_issue_sync(&[(
+        ref_id,
+        fetched_with_parent(101, IssueAddress { repo: "other/repo".to_string(), number: 100 }),
+    )])
+    .unwrap();
+
+    assert_eq!(parent_of(&db, &child).as_deref(), Some(real_parent.as_str()));
+    assert_ne!(parent_of(&db, &child).as_deref(), Some(same_number_elsewhere.as_str()));
+}
+
+#[test]
+fn bulk_record_issue_sync_ignores_a_self_parent() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = tracked_task(&mut db, "owner/repo", 42);
+    let ref_id = issue_ref_id(&db, "owner/repo", 42);
+
+    db.bulk_record_issue_sync(&[(
+        ref_id,
+        fetched_with_parent(42, IssueAddress { repo: "owner/repo".to_string(), number: 42 }),
+    )])
+    .unwrap();
+
+    assert_eq!(parent_of(&db, &task), None);
 }

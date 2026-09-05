@@ -2,7 +2,10 @@ use anyhow::Result;
 use rusqlite::{params, OptionalExtension};
 
 use crate::SqliteStore;
-use monica_application::{FetchedIssue, GithubIssueState, GithubIssueSyncStore, OpenIssueRef};
+use monica_application::{
+    FetchedIssue, GithubIssueState, GithubIssueSyncStore, IssueAddress, OpenIssueRef,
+};
+use monica_domain::{Provider, RefType};
 
 use super::SET_NOW;
 
@@ -39,6 +42,7 @@ impl SqliteStore {
         let tx = self.conn_mut().transaction()?;
         for (external_ref_id, issue) in entries {
             upsert_issue_ref_state_in(&tx, *external_ref_id, &issue.title, issue.state)?;
+            record_parent_task_in(&tx, *external_ref_id, issue.parent.as_ref())?;
         }
         tx.commit()?;
         Ok(())
@@ -109,6 +113,46 @@ fn upsert_issue_ref_state_in(
                updated_at = {SET_NOW}"
         ),
         params![external_ref_id, title, state.as_str()],
+    )?;
+    Ok(())
+}
+
+/// Point the task behind `external_ref_id` at the task tracking its parent issue, or at nothing
+/// when GitHub reports no parent and when the parent issue has no open task. Every sync rewrites
+/// this, so a link dropped on GitHub disappears here too. `tasks.updated_at` deliberately stays
+/// put: this mirrors GitHub rather than recording a change to the task itself.
+fn record_parent_task_in(
+    conn: &rusqlite::Connection,
+    external_ref_id: i64,
+    parent: Option<&IssueAddress>,
+) -> Result<()> {
+    let child_task_id: Option<String> = conn
+        .query_row(
+            "SELECT task_id FROM external_refs WHERE id = ?1",
+            params![external_ref_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(child_task_id) = child_task_id else {
+        return Ok(());
+    };
+    let parent_task_id = match parent {
+        Some(address) => super::tasks::find_open_task_by_external_ref_in(
+            conn,
+            Provider::Github,
+            RefType::Issue,
+            &address.repo,
+            address.number,
+        )?
+        .map(|task| task.id.to_string())
+        // GitHub never lets an issue parent itself, but a stray self-link would be a cycle no
+        // reader could walk out of.
+        .filter(|id| *id != child_task_id),
+        None => None,
+    };
+    conn.execute(
+        "UPDATE tasks SET parent_task_id = ?2 WHERE id = ?1",
+        params![child_task_id, parent_task_id],
     )?;
     Ok(())
 }
