@@ -17,6 +17,14 @@ impl GithubPullRequestRef {
             .and_then(|s| GithubPullRequestStatus::from_str(s).ok())
             .is_some_and(GithubPullRequestStatus::is_open_or_draft)
     }
+
+    /// The recorded status as a value. `None` covers both "never synced" and a column written by an
+    /// older build with a status this one no longer knows — callers treat the two the same.
+    pub fn parsed_status(&self) -> Option<GithubPullRequestStatus> {
+        self.status
+            .as_deref()
+            .and_then(|s| GithubPullRequestStatus::from_str(s).ok())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

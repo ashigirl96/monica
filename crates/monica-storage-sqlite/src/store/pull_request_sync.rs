@@ -8,7 +8,7 @@ use monica_application::{
 };
 use monica_domain::{Provider, RefType};
 
-use super::SET_NOW;
+use super::{task_scope_clause, SET_NOW};
 
 // The latest run's branch per development task, joined to its project repo.
 const BRANCH_CANDIDATE_FROM: &str = "SELECT
@@ -49,12 +49,12 @@ impl SqliteStore {
     ) -> Result<Vec<PullRequestBranchSyncCandidate>> {
         let mut stmt = self.conn().prepare(&format!(
             "{BRANCH_CANDIDATE_FROM}
-             WHERE {BRANCH_CANDIDATE_WHERE}
-               AND (?1 IS NULL OR t.id = ?1)
+             WHERE {BRANCH_CANDIDATE_WHERE}{}
              ORDER BY latest_run.created_at, t.id",
+            task_scope_clause(task, "t.id"),
         ))?;
         let candidates = stmt
-            .query_map(params![task], |row| {
+            .query_map(rusqlite::params_from_iter(task), |row| {
                 Ok(PullRequestBranchSyncCandidate {
                     task_id: row.get("task_id")?,
                     repo: row.get("repo")?,
@@ -69,7 +69,7 @@ impl SqliteStore {
         &self,
         task: Option<&str>,
     ) -> Result<Vec<UnresolvedPullRequestRef>> {
-        let mut stmt = self.conn().prepare(
+        let mut stmt = self.conn().prepare(&format!(
             "SELECT
                pr.id AS external_ref_id,
                pr.task_id AS task_id,
@@ -81,13 +81,13 @@ impl SqliteStore {
              WHERE pr.ref_type = 'pull_request'
                AND pr.repo IS NOT NULL
                AND pr.number IS NOT NULL
-               AND pr.number > 0
-               AND (?1 IS NULL OR pr.task_id = ?1)
+               AND pr.number > 0{}
                AND (state.status IS NULL OR state.status IN ('draft', 'open'))
              ORDER BY pr.id",
-        )?;
+            task_scope_clause(task, "pr.task_id"),
+        ))?;
         let refs = stmt
-            .query_map(params![task], |row| {
+            .query_map(rusqlite::params_from_iter(task), |row| {
                 Ok(UnresolvedPullRequestRef {
                     external_ref_id: row.get("external_ref_id")?,
                     task_id: row.get("task_id")?,

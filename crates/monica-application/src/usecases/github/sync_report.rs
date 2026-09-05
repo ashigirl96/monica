@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::str::FromStr;
 
 use crate::github::{GithubIssueState, GithubPullRequestRef, GithubPullRequestStatus};
 use crate::queries::TaskSummaryRow;
@@ -44,13 +43,43 @@ pub struct SyncChangeCounts {
     pub parent: usize,
 }
 
-/// What a forced GitHub sync did: how many refs it wrote, and which tasks actually moved.
+impl SyncChangeCounts {
+    pub fn total(self) -> usize {
+        self.title + self.issue_state + self.pull_request + self.parent
+    }
+}
+
+/// What one sync pass wrote, and which repos it could not reach. A pass keeps going when a repo
+/// fetch fails — recording an empty success would blank every cached title in that repo over a
+/// transient error — so "finished" and "saw everything" are different answers, and the caller has
+/// to be able to tell them apart.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BulkSyncOutcome {
+    pub synced_count: u32,
+    pub failed_repos: Vec<String>,
+}
+
+impl BulkSyncOutcome {
+    pub fn merge(mut self, other: BulkSyncOutcome) -> BulkSyncOutcome {
+        self.synced_count += other.synced_count;
+        self.failed_repos.extend(other.failed_repos);
+        self.failed_repos.sort();
+        self.failed_repos.dedup();
+        self
+    }
+}
+
+/// What a forced GitHub sync did: how many refs it wrote, which tasks actually moved, and which
+/// repos it never reached.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GithubSyncReport {
     /// Refs the sync wrote, not fields that changed — the number the completion event has always
     /// carried. Use [`GithubSyncReport::change_count`] for "what moved".
     pub synced_count: u32,
     pub tasks: Vec<TaskSyncChanges>,
+    /// Repos whose fetch failed. Non-empty means the rest of this report is partial: whatever those
+    /// repos own kept its previous value rather than being refreshed.
+    pub failed_repos: Vec<String>,
 }
 
 impl GithubSyncReport {
@@ -58,8 +87,11 @@ impl GithubSyncReport {
         self.tasks.is_empty()
     }
 
-    pub fn change_count(&self) -> usize {
-        self.tasks.iter().map(|task| task.changes.len()).sum()
+    /// Whether the sync reached every repo it needed. A caller that hands the result to something
+    /// downstream — `monica task sync && monica task status` — must not treat a partial sync as
+    /// fresh data.
+    pub fn is_complete(&self) -> bool {
+        self.failed_repos.is_empty()
     }
 
     pub fn counts(&self) -> SyncChangeCounts {
@@ -134,57 +166,40 @@ fn diff_task(before: &TaskSummaryRow, after: &TaskSummaryRow) -> Vec<TaskSyncCha
     changes
 }
 
-/// PRs are matched on `(repo, number)` rather than by position: the branch pass and the issue
-/// reverse lookup both write into the same list, so the order a task's PRs come back in is not
-/// stable across a sync.
+/// PRs are matched on `(repo, number)` rather than by position, because a sync appends: the branch
+/// pass and the issue reverse lookup can each add a PR the other didn't know about, which shifts
+/// every later entry. Only `after` is walked — nothing removes a PR ref, so a key can appear
+/// between the snapshots but never disappear.
 fn diff_pull_requests(
     before: &[GithubPullRequestRef],
     after: &[GithubPullRequestRef],
 ) -> Vec<TaskSyncChange> {
-    let previous: HashMap<(String, i64), Option<GithubPullRequestStatus>> =
+    let previous: HashMap<(&str, i64), Option<GithubPullRequestStatus>> =
         before.iter().filter_map(keyed_status).collect();
-    let current: HashMap<(String, i64), Option<GithubPullRequestStatus>> =
-        after.iter().filter_map(keyed_status).collect();
 
-    let mut changes = Vec::new();
-    for pull_request in after {
-        let Some((key, status)) = keyed_status(pull_request) else {
-            continue;
-        };
-        let was = previous.get(&key).copied().flatten();
-        if was != status {
-            changes.push(TaskSyncChange::PullRequest {
-                repo: key.0,
-                number: key.1,
+    after
+        .iter()
+        .filter_map(keyed_status)
+        .filter_map(|((repo, number), status)| {
+            let was = previous.get(&(repo, number)).copied().flatten();
+            (was != status).then(|| TaskSyncChange::PullRequest {
+                repo: repo.to_string(),
+                number,
                 before: was,
                 after: status,
-            });
-        }
-    }
-    for pull_request in before {
-        let Some((key, status)) = keyed_status(pull_request) else {
-            continue;
-        };
-        if !current.contains_key(&key) {
-            changes.push(TaskSyncChange::PullRequest {
-                repo: key.0,
-                number: key.1,
-                before: status,
-                after: None,
-            });
-        }
-    }
-    changes
+            })
+        })
+        .collect()
 }
 
+/// A ref's identity and status, or `None` for a row too incomplete to compare. Both snapshots read
+/// the same column, so the stored spelling compares directly and the key can borrow it — only a
+/// change that is actually reported allocates.
 fn keyed_status(
     pull_request: &GithubPullRequestRef,
-) -> Option<((String, i64), Option<GithubPullRequestStatus>)> {
-    let repo = pull_request.repo.as_deref()?.to_ascii_lowercase();
-    let number = pull_request.number?;
-    let status = pull_request
-        .status
-        .as_deref()
-        .and_then(|s| GithubPullRequestStatus::from_str(s).ok());
-    Some(((repo, number), status))
+) -> Option<((&str, i64), Option<GithubPullRequestStatus>)> {
+    Some((
+        (pull_request.repo.as_deref()?, pull_request.number?),
+        pull_request.parsed_status(),
+    ))
 }

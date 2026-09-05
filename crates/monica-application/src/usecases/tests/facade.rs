@@ -187,7 +187,7 @@ async fn facade_force_sync_github_refreshes_unresolved_refs() {
     let sink = RecordingSink::default();
     let mut monica = facade(repos, sink.clone());
 
-    let count = monica.synchronization().force_sync_github(None).await.unwrap().synced_count;
+    let count = monica.synchronization().force_sync_github(None).await.unwrap();
 
     assert_eq!(count, 1);
     assert!(sink
@@ -209,7 +209,7 @@ async fn facade_force_sync_github_announces_completion() {
 
     // FakeGithub lists no recent PRs, so nothing matches; the forced path still announces (unlike
     // the periodic sweep, which stays silent).
-    let count = monica.synchronization().force_sync_github(None).await.unwrap().synced_count;
+    let count = monica.synchronization().force_sync_github(None).await.unwrap();
 
     assert_eq!(count, 0);
     assert!(sink

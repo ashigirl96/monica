@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use super::ports::{GithubGateway, GithubIssueSyncStore, PullRequestSyncStore};
+use super::BulkSyncOutcome;
 use crate::{ApplicationResult, FetchedIssue, GithubPullRequest};
 
 /// Forced issue refresh, the issue half of the GitHub sync. Fetches every repo's tracked issues in
@@ -10,7 +11,8 @@ use crate::{ApplicationResult, FetchedIssue, GithubPullRequest};
 ///
 /// The same fetch carries each issue's closing PRs, which the branch pass cannot see for a task
 /// whose runs never took a branch (attach and in-place runs are deliberately branch-less), so they
-/// are linked here. Returns the number of refs whose cache was refreshed plus the PRs linked.
+/// are linked here. Reports the number of refs whose cache was refreshed plus the PRs linked, and
+/// the repos it could not read.
 ///
 /// `task` narrows the pass to one task's refs, which also narrows the repo batches to that task's
 /// repo — the CLI's per-task sync.
@@ -18,7 +20,7 @@ pub async fn bulk_sync_issues<R, G>(
     repos: &mut R,
     github: &G,
     task: Option<&str>,
-) -> ApplicationResult<u32>
+) -> ApplicationResult<BulkSyncOutcome>
 where
     R: GithubIssueSyncStore + PullRequestSyncStore,
     G: GithubGateway,
@@ -26,7 +28,7 @@ where
     let started = Instant::now();
     let refs = repos.open_task_issue_refs(task)?;
     if refs.is_empty() {
-        return Ok(0);
+        return Ok(BulkSyncOutcome::default());
     }
 
     // One request set per repo, with the numbers deduplicated: the same issue tracked by two
@@ -52,6 +54,7 @@ where
     let fetch_ms = fetch_started.elapsed().as_millis();
 
     let mut by_repo: HashMap<String, HashMap<i64, FetchedIssue>> = HashMap::new();
+    let mut failed_repos: Vec<String> = Vec::new();
     for ((repo, _), (elapsed, result)) in repo_batches.iter().zip(results) {
         match result {
             Ok(issues) => {
@@ -68,12 +71,16 @@ where
             }
             // A failed repo is left out of `by_repo`, so none of its refs produce an entry
             // below. Recording them as empty successes would blank every cached title in that
-            // repo over a transient error.
-            Err(e) => log::warn!(
-                target: "monica_application::github_sync",
-                "bulk issue fetch failed repo={repo} after {}ms error={e:#}",
-                elapsed.as_millis()
-            ),
+            // repo over a transient error — but the caller still has to hear that this pass
+            // never saw it, or a partial sync reads as a complete one.
+            Err(e) => {
+                failed_repos.push(repo.clone());
+                log::warn!(
+                    target: "monica_application::github_sync",
+                    "bulk issue fetch failed repo={repo} after {}ms error={e:#}",
+                    elapsed.as_millis()
+                );
+            }
         }
     }
 
@@ -108,5 +115,8 @@ where
         record_started.elapsed().as_millis(),
         started.elapsed().as_millis()
     );
-    Ok((entries.len() + linked.len()) as u32)
+    Ok(BulkSyncOutcome {
+        synced_count: (entries.len() + linked.len()) as u32,
+        failed_repos,
+    })
 }

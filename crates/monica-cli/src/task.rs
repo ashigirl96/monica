@@ -9,6 +9,7 @@ use monica_application::{
 use monica_domain::{parse_owner_repo, Agent, DisplayStatus, TaskId};
 
 use crate::event_sink::{self, CliFacade};
+use crate::table::{or_dash, render_table};
 
 #[derive(Subcommand)]
 pub enum TaskCommand {
@@ -129,26 +130,23 @@ async fn sync_command(monica: &mut CliFacade, id: Option<&str>) -> Result<()> {
         ));
     }
 
-    let task_id = id.map(|id| resolve_task_id(monica, id)).transpose()?;
+    let task_id = id.map(TaskId::parse).transpose()?;
     let report = monica
         .synchronization()
-        .force_sync_github(task_id.as_ref())
-        .await
-        .context("failed to sync with GitHub")?;
+        .sync_github_with_report(task_id.as_ref())
+        .await?;
     print!("{}", render_sync_report(&report));
+    // A pass that could not read a repo still returns what it did manage to write, which is the
+    // right call for the board. A script — `monica task sync && monica task status` — must not
+    // read that as fresh, so an unreachable repo fails the command after showing the partial work.
+    if !report.is_complete() {
+        return Err(anyhow!(
+            "GitHub fetch failed for {}; the results above are partial and those repos kept their \
+             previous values",
+            report.failed_repos.join(", ")
+        ));
+    }
     Ok(())
-}
-
-fn resolve_task_id(monica: &mut CliFacade, id: &str) -> Result<TaskId> {
-    let task_id = TaskId::parse(id)?;
-    let exists = monica
-        .tasks()
-        .list_all_task_summaries(None)?
-        .iter()
-        .any(|row| row.id == id);
-    exists
-        .then_some(task_id)
-        .ok_or_else(|| anyhow!("Task not found: {id}"))
 }
 
 fn render_sync_report(report: &GithubSyncReport) -> String {
@@ -160,7 +158,7 @@ fn render_sync_report(report: &GithubSyncReport) -> String {
     let mut out = format!(
         "Synced {} refs; {} changes (title {}, state {}, pr {}, parent {})\n",
         report.synced_count,
-        report.change_count(),
+        counts.total(),
         counts.title,
         counts.issue_state,
         counts.pull_request,
@@ -174,13 +172,13 @@ fn render_sync_report(report: &GithubSyncReport) -> String {
         for change in &task.changes {
             let (kind, reference, before, after) = match change {
                 TaskSyncChange::Title { before, after } => {
-                    ("title", None, before.clone(), after.clone())
+                    ("title", dash(), before.clone(), after.clone())
                 }
                 TaskSyncChange::IssueState { before, after } => (
                     "state",
-                    None,
-                    crate::table::or_dash(before.map(GithubIssueState::as_str)),
-                    crate::table::or_dash(after.map(GithubIssueState::as_str)),
+                    dash(),
+                    or_dash(before.map(GithubIssueState::as_str)),
+                    or_dash(after.map(GithubIssueState::as_str)),
                 ),
                 TaskSyncChange::PullRequest {
                     repo,
@@ -189,29 +187,34 @@ fn render_sync_report(report: &GithubSyncReport) -> String {
                     after,
                 } => (
                     "pr",
-                    Some(format!("{repo}#{number}")),
-                    crate::table::or_dash(before.map(GithubPullRequestStatus::as_str)),
-                    crate::table::or_dash(after.map(GithubPullRequestStatus::as_str)),
+                    format!("{repo}#{number}"),
+                    or_dash(before.map(GithubPullRequestStatus::as_str)),
+                    or_dash(after.map(GithubPullRequestStatus::as_str)),
                 ),
                 TaskSyncChange::Parent { before, after } => (
                     "parent",
-                    None,
-                    crate::table::or_dash(before.as_deref()),
-                    crate::table::or_dash(after.as_deref()),
+                    dash(),
+                    or_dash(before.as_deref()),
+                    or_dash(after.as_deref()),
                 ),
             };
             table.push(vec![
                 task.task_id.clone(),
                 kind.to_string(),
-                crate::table::or_dash(reference.as_deref()),
+                reference,
                 before,
                 "->".to_string(),
                 after,
             ]);
         }
     }
-    out.push_str(&crate::table::render_table(&table));
+    out.push_str(&render_table(&table));
     out
+}
+
+/// The `-` the table uses for a column a given change kind has nothing to put in.
+fn dash() -> String {
+    or_dash(None)
 }
 
 /// The `MONICA_*` identity a tab burns into its shell env, as `attach` needs it.
@@ -279,7 +282,7 @@ fn render_attach_report(report: &AttachSessionReport) -> String {
     out.push_str(&format!("  Run:     {}\n", report.task_run_id));
     out.push_str(&format!(
         "  Session: {}\n",
-        crate::table::or_dash(report.agent_session_id.as_deref())
+        or_dash(report.agent_session_id.as_deref())
     ));
     match &report.kept_primary_run_id {
         None => out.push_str("  Main Run: yes\n"),
@@ -369,14 +372,14 @@ fn render_status_table(rows: &[TaskSummaryRow]) -> String {
         let github_issue = row.github_issue_number.map(|n| format!("#{n}"));
         table.push(vec![
             row.id.clone(),
-            crate::table::or_dash(row.parent_task_id.as_deref()),
-            crate::table::or_dash(row.project.as_deref()),
-            crate::table::or_dash(github_issue.as_deref()),
+            or_dash(row.parent_task_id.as_deref()),
+            or_dash(row.project.as_deref()),
+            or_dash(github_issue.as_deref()),
             row.status.as_str().to_string(),
-            crate::table::or_dash(row.branch.as_deref()),
+            or_dash(row.branch.as_deref()),
         ]);
     }
-    crate::table::render_table(&table)
+    render_table(&table)
 }
 
 #[cfg(test)]
@@ -539,6 +542,7 @@ mod tests {
     fn render_sync_report_lists_every_change_kind_in_fixed_columns() {
         let report = GithubSyncReport {
             synced_count: 14,
+            failed_repos: Vec::new(),
             tasks: vec![
                 TaskSyncChanges {
                     task_id: "MON-42".to_string(),
@@ -606,7 +610,7 @@ mod tests {
     fn render_sync_report_collapses_an_unchanged_sync_to_one_line() {
         let report = GithubSyncReport {
             synced_count: 14,
-            tasks: Vec::new(),
+            ..GithubSyncReport::default()
         };
         assert_eq!(render_sync_report(&report), "Synced 14 refs; no changes.\n");
         assert_eq!(

@@ -14,7 +14,8 @@ pub use bulk_sync_issues::bulk_sync_issues;
 pub use bulk_sync_pull_requests::bulk_sync_pull_requests;
 pub use link_pull_request::{link_pull_request, LinkPullRequestReport};
 pub use sync_report::{
-    diff_task_summaries, GithubSyncReport, SyncChangeCounts, TaskSyncChange, TaskSyncChanges,
+    diff_task_summaries, BulkSyncOutcome, GithubSyncReport, SyncChangeCounts, TaskSyncChange,
+    TaskSyncChanges,
 };
 pub use track_github_issue::{
     track_github_issue, TrackGithubIssueInput, TrackGithubIssueReport, TrackOutcome,

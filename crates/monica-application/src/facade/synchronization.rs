@@ -1,9 +1,11 @@
 use super::{Backend, Monica};
+use crate::ports::TaskStore;
 use crate::prelude::TaskId;
 use crate::usecases::github::{
-    GithubSyncReport, LinkPullRequestReport, TrackGithubIssueInput, TrackGithubIssueReport,
+    BulkSyncOutcome, GithubSyncReport, LinkPullRequestReport, TrackGithubIssueInput,
+    TrackGithubIssueReport,
 };
-use crate::{ApplicationEvent, ApplicationResult, GithubAuthStatus, TaskSummaryFilter};
+use crate::{ApplicationError, ApplicationEvent, ApplicationResult, GithubAuthStatus};
 
 /// GitHub-facing synchronization: auth status, issue tracking, and the forced GitHub refresh.
 pub struct SynchronizationService<'a, B: Backend> {
@@ -43,35 +45,62 @@ impl<B: Backend> SynchronizationService<'_, B> {
     /// A no-op when GitHub isn't authenticated — the board navigates into a sync on every visit,
     /// and an unauthenticated user must not be nagged for it; callers that need to say so (the CLI,
     /// the desktop command) check [`auth_status`](Self::auth_status) themselves first.
+    pub async fn force_sync_github(&mut self, task: Option<&TaskId>) -> ApplicationResult<u32> {
+        self.ensure_task_exists(task)?;
+        if !self.auth_status().authenticated {
+            return Ok(0);
+        }
+        Ok(self.run_sync(task.map(TaskId::as_str)).await?.synced_count)
+    }
+
+    /// [`force_sync_github`](Self::force_sync_github) plus a report of what moved, for a caller that
+    /// shows the diff rather than the refreshed board — `monica task sync`.
     ///
-    /// The report is a diff of the board read model taken around the sync, because no single writer
-    /// sees all four fields it covers. A concurrent desktop sync could therefore land inside the
-    /// window and be reported here; both write the same GitHub truth, so the worst case is
-    /// attributing someone else's refresh to this call.
-    pub async fn force_sync_github(
+    /// The diff comes from two reads of the board read model taken around the sync, because no
+    /// single writer sees all four fields it covers. That costs a board read on each side, so the
+    /// board's own refresh deliberately does not come through here. A concurrent desktop sync can
+    /// land inside the window and be reported here; both write the same GitHub truth, so the worst
+    /// case is attributing someone else's refresh to this call.
+    pub async fn sync_github_with_report(
         &mut self,
         task: Option<&TaskId>,
     ) -> ApplicationResult<GithubSyncReport> {
+        self.ensure_task_exists(task)?;
         if !self.auth_status().authenticated {
             return Ok(GithubSyncReport::default());
         }
         let task = task.map(TaskId::as_str);
-        let before = self.task_summaries()?;
-        let synced_count = {
-            let Monica { repos, github, .. } = &mut *self.m;
-            crate::usecases::github::bulk_sync_github(repos, github, task).await?
-        };
-        let after = self.task_summaries()?;
-        self.m
-            .events
-            .emit(ApplicationEvent::GithubSyncCompleted { synced_count });
+        // The same read model the board and `monica task status` show, so "what changed" is
+        // literally what a reader would have seen change.
+        let before = self.m.tasks().list_all_task_summaries(None)?;
+        let outcome = self.run_sync(task).await?;
+        let after = self.m.tasks().list_all_task_summaries(None)?;
         Ok(GithubSyncReport {
-            synced_count,
+            synced_count: outcome.synced_count,
             tasks: crate::usecases::github::diff_task_summaries(&before, &after, task),
+            failed_repos: outcome.failed_repos,
         })
     }
 
-    fn task_summaries(&self) -> ApplicationResult<Vec<crate::TaskSummaryRow>> {
-        crate::usecases::query::list_task_summaries(&self.m.repos, TaskSummaryFilter::All, None)
+    async fn run_sync(&mut self, task: Option<&str>) -> ApplicationResult<BulkSyncOutcome> {
+        let outcome = {
+            let Monica { repos, github, .. } = &mut *self.m;
+            crate::usecases::github::bulk_sync_github(repos, github, task).await?
+        };
+        self.m.events.emit(ApplicationEvent::GithubSyncCompleted {
+            synced_count: outcome.synced_count,
+        });
+        Ok(outcome)
+    }
+
+    /// Naming a task that does not exist is a mistake worth reporting, not a sync that quietly
+    /// covers nothing — and every driver gets the same answer by asking here.
+    fn ensure_task_exists(&self, task: Option<&TaskId>) -> ApplicationResult<()> {
+        match task {
+            Some(task_id) if self.m.repos.get_task(task_id)?.is_none() => Err(
+                ApplicationError::not_found(format!("task not found: {task_id}")),
+            ),
+            _ => Ok(()),
+        }
     }
 }

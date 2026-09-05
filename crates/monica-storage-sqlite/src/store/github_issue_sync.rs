@@ -7,11 +7,11 @@ use monica_application::{
 };
 use monica_domain::{Provider, RefType};
 
-use super::SET_NOW;
+use super::{task_scope_clause, SET_NOW};
 
 impl SqliteStore {
     pub fn open_task_issue_refs(&self, task: Option<&str>) -> Result<Vec<OpenIssueRef>> {
-        let mut stmt = self.conn().prepare(
+        let mut stmt = self.conn().prepare(&format!(
             "SELECT
                er.id AS external_ref_id,
                er.task_id AS task_id,
@@ -21,15 +21,15 @@ impl SqliteStore {
              JOIN tasks t ON t.id = er.task_id
              WHERE er.ref_type = 'issue'
                AND er.provider = 'github'
-               AND t.status != 'closed'
-               AND (?1 IS NULL OR er.task_id = ?1)
+               AND t.status != 'closed'{}
                AND er.repo IS NOT NULL
                AND er.number IS NOT NULL
                AND er.number > 0
              ORDER BY er.id",
-        )?;
+            task_scope_clause(task, "er.task_id"),
+        ))?;
         let refs = stmt
-            .query_map(params![task], |row| {
+            .query_map(rusqlite::params_from_iter(task), |row| {
                 Ok(OpenIssueRef {
                     external_ref_id: row.get("external_ref_id")?,
                     task_id: row.get("task_id")?,
