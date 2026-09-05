@@ -33,14 +33,19 @@ export const openTargetsAtom = atom((get) => {
 });
 
 // Prefers the sidebar entry so the menu drops from the runspace it describes, falling back to the
-// header tab. Neither ⌘B (which clips the sidebar to zero width) nor scrolling the runspace list
-// removes a row from the DOM, so both anchors are resolved through the visibility-aware lookup.
+// header tab. Both checks are needed and neither subsumes the other: `sidebarOpenAtom` is where the
+// layout is headed — ⌘B animates the width over 200ms, so a rect measured mid-collapse still
+// reports a usable row — while the clipped rect is where things actually are, which is the only
+// way to notice a row scrolled out of the runspace list.
 const FALLBACK_ANCHOR: PopoverAnchor = { top: 8, bottom: 40, left: 8 };
 function menuAnchor(get: Getter): PopoverAnchor {
   const rs = get(activeRunspaceAtom);
   if (!rs) return FALLBACK_ANCHOR;
+  const sidebarRow = get(sidebarOpenAtom)
+    ? visibleAnchorForSelector(`[data-runspace-id="${CSS.escape(rs.id)}"]`)
+    : null;
   return (
-    visibleAnchorForSelector(`[data-runspace-id="${CSS.escape(rs.id)}"]`) ??
+    sidebarRow ??
     (rs.activeTabId
       ? visibleAnchorForSelector(`[data-tab-id="${CSS.escape(rs.activeTabId)}"]`)
       : null) ??
