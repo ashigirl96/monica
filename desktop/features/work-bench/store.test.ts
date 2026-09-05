@@ -449,6 +449,34 @@ describe("saveTerminalStateAtom", () => {
     await waitFor(() => getSaveCalls() > 0);
     expect(getSaveCalls()).toBe(1);
   });
+
+  test("does not persist the fallback layout after a failed load", async () => {
+    let saveCalls = 0;
+    mock.module("@/commands/terminal", () => ({
+      terminalLoadState: () => Promise.reject(new Error("db unavailable")),
+      terminalListSessions: () => Promise.resolve([]),
+      terminalDetach: () => Promise.resolve(),
+      terminalSaveState: () => {
+        saveCalls++;
+        return Promise.resolve();
+      },
+      terminalTerminate: () => Promise.resolve(),
+    }));
+    const { createStore: cs } = await import("jotai");
+    const { windowLabelAtom: wlAtom } = await import("@/stores/ui-state");
+    const { terminalStateAtom: stateAtom } = await import("./store");
+    const { loadTerminalStateAtom: loadAtom, saveTerminalStateAtom: saveAtom } =
+      await import("./persistence");
+
+    const store = cs();
+    store.set(wlAtom, "main");
+    await store.set(loadAtom);
+    expect(store.get(stateAtom)!.runspaces).toHaveLength(1);
+
+    store.set(saveAtom);
+    await new Promise((r) => setTimeout(r, 600));
+    expect(saveCalls).toBe(0);
+  });
 });
 
 async function setupTerminateTest(state: TerminalState) {

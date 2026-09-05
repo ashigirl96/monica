@@ -65,6 +65,11 @@ function snapshotToState(snap: TerminalStateSnapshot): TerminalState | null {
 // one promise so a slower load cannot overwrite state mutated in between.
 const loadInFlightAtom = atom<Promise<void> | null>(null);
 
+// An empty DB loads as an empty snapshot, so the load only rejects on a real failure. The
+// fallback layout it leaves behind must never be written back over the stored one — the
+// bench is mounted from startup, so this would happen before the user even looks at it.
+const persistenceSuspendedAtom = atom(false);
+
 export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
   if (get(terminalStateAtom) !== null) return Promise.resolve();
 
@@ -115,8 +120,9 @@ export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
         return;
       }
       if (windowLabel === MAIN_WINDOW_LABEL && sessions) applySessionList(get, set, sessions);
-    } catch {
-      // first launch or empty DB
+    } catch (e) {
+      warnTerminal("load", e);
+      set(persistenceSuspendedAtom, true);
     }
     set(pendingWorkbenchHintAtom, null);
     set(terminalStateAtom, initialState());
@@ -132,7 +138,7 @@ const saveTimerAtom = atom<number | undefined>(undefined);
 
 export const saveTerminalStateAtom = atom(null, (get, set) => {
   const current = get(terminalStateAtom);
-  if (!current) return;
+  if (!current || get(persistenceSuspendedAtom)) return;
   const prev = get(saveTimerAtom);
   if (prev) clearTimeout(prev);
   const windowLabel = get(windowLabelAtom);
