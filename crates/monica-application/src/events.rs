@@ -13,7 +13,7 @@ pub enum ApplicationEvent {
         task_run_id: String,
         status: TaskRunStatus,
     },
-    PullRequestSyncCompleted {
+    GithubSyncCompleted {
         synced_count: u32,
     },
     AwaitingUserInput {

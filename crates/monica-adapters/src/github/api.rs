@@ -1,8 +1,12 @@
+use std::collections::HashMap;
+
 use anyhow::{anyhow, Context, Result};
 use monica_application::{
-    GithubGateway, GithubIssue, GithubPullRequest, GithubPullRequestStatus, RepoPullRequest,
+    FetchedIssue, GithubGateway, GithubIssue, GithubIssueState, GithubPullRequest,
+    GithubPullRequestStatus, RepoPullRequest,
 };
 use octocrab::Octocrab;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -34,6 +38,23 @@ impl GithubApiClient {
         issue_from_response(issue, number)
     }
 
+    pub async fn fetch_issues(&self, repo: &str, numbers: &[i64]) -> Result<Vec<FetchedIssue>> {
+        let (owner, name) = split_repo(repo)?;
+        // `crab()` builds a fresh client — new TLS config, new connection pool — so it is hoisted
+        // out of the chunk loop rather than paid per request.
+        let crab = self.crab().await?;
+        let action = format!("fetch issues for {repo}");
+        let mut issues = Vec::with_capacity(numbers.len());
+        for chunk in numbers.chunks(ISSUE_BATCH) {
+            let payload = json!({
+                "query": issues_query(chunk),
+                "variables": { "owner": owner, "name": name },
+            });
+            issues.extend(issues_from_response(graphql(&crab, &payload, &action).await?)?);
+        }
+        Ok(issues)
+    }
+
     pub async fn fetch_default_branch(&self, repo: &str) -> Result<Option<String>> {
         let (owner, name) = split_repo(repo)?;
         let route = format!("/repos/{owner}/{name}");
@@ -55,12 +76,8 @@ impl GithubApiClient {
             "query": RECENT_PULL_REQUESTS_QUERY,
             "variables": { "owner": owner, "name": name },
         });
-        let response: RecentPullRequestsResponse = self
-            .crab()
-            .await?
-            .graphql(&payload)
-            .await
-            .map_err(|e| map_github_error(e, &format!("fetch recent pull requests for {repo}")))?;
+        let action = format!("fetch recent pull requests for {repo}");
+        let response = graphql(&self.crab().await?, &payload, &action).await?;
         recent_pull_requests_from_response(response)
     }
 
@@ -74,12 +91,8 @@ impl GithubApiClient {
                 "number": number,
             },
         });
-        let response: PullRequestResponse = self
-            .crab()
-            .await?
-            .graphql(&payload)
-            .await
-            .map_err(|e| map_github_error(e, &format!("fetch pull request {repo}#{number}")))?;
+        let action = format!("fetch pull request {repo}#{number}");
+        let response = graphql(&self.crab().await?, &payload, &action).await?;
         pull_request_from_response(response)
     }
 
@@ -95,6 +108,20 @@ impl GithubApiClient {
             .build()
             .map_err(Into::into)
     }
+}
+
+async fn graphql<T: DeserializeOwned>(
+    crab: &Octocrab,
+    payload: &serde_json::Value,
+    action: &str,
+) -> Result<T> {
+    crab.graphql(payload)
+        .await
+        .map_err(|e| map_github_error(e, action))
+}
+
+fn repository_not_found() -> anyhow::Error {
+    anyhow!("GitHub repository was not found; confirm you have access to it")
 }
 
 fn split_repo(repo: &str) -> Result<(&str, &str)> {
@@ -132,7 +159,7 @@ fn map_github_error(error: octocrab::Error, action: &str) -> anyhow::Error {
 fn pull_request_from_response(response: PullRequestResponse) -> Result<GithubPullRequest> {
     let repository = response
         .repository
-        .ok_or_else(|| anyhow!("GitHub repository was not found; confirm you have access to it"))?;
+        .ok_or_else(repository_not_found)?;
     let node = repository.pull_request.ok_or_else(|| {
         anyhow!("GitHub pull request was not found; confirm you have access to the repository")
     })?;
@@ -165,7 +192,7 @@ fn recent_pull_requests_from_response(
 ) -> Result<Vec<RepoPullRequest>> {
     let repository = response
         .repository
-        .ok_or_else(|| anyhow!("GitHub repository was not found; confirm you have access to it"))?;
+        .ok_or_else(repository_not_found)?;
     let nodes = repository.pull_requests.nodes;
     let mut pull_requests = Vec::with_capacity(nodes.len());
     for node in nodes {
@@ -190,6 +217,14 @@ impl GithubGateway for GithubApiClient {
         number: i64,
     ) -> monica_application::ports::BoxFuture<'a, Result<GithubIssue>> {
         Box::pin(async move { GithubApiClient::fetch_issue(self, repo, number).await })
+    }
+
+    fn fetch_issues<'a>(
+        &'a self,
+        repo: &'a str,
+        numbers: &'a [i64],
+    ) -> monica_application::ports::BoxFuture<'a, Result<Vec<FetchedIssue>>> {
+        Box::pin(async move { GithubApiClient::fetch_issues(self, repo, numbers).await })
     }
 
     fn fetch_default_branch<'a>(
@@ -235,7 +270,58 @@ fn issue_from_response(issue: IssueResponse, requested: i64) -> Result<GithubIss
         title: issue.title,
         body: issue.body,
         url: issue.html_url,
+        state: parse_issue_state(&issue.state)?,
     })
+}
+
+/// REST answers in lowercase and GraphQL in uppercase; both feed the same enum.
+fn parse_issue_state(state: &str) -> Result<GithubIssueState> {
+    state
+        .to_ascii_lowercase()
+        .parse()
+        .map_err(|_| anyhow!("GitHub returned an unknown issue state: {state}"))
+}
+
+/// Aliased `issue(number:)` selections batched into one request. 50 keeps the query well inside
+/// GitHub's node limit while collapsing a board's worth of issues into a couple of round trips.
+const ISSUE_BATCH: usize = 50;
+
+fn issues_query(numbers: &[i64]) -> String {
+    let selections: String = numbers
+        .iter()
+        .map(|n| {
+            format!(
+                "    i{n}: issue(number: {n}) {{ number title state parent {{ number }} \
+subIssues(first: 50) {{ nodes {{ number }} }} }}\n"
+            )
+        })
+        .collect();
+    format!(
+        "query MonicaIssues($owner: String!, $name: String!) {{\n  \
+repository(owner: $owner, name: $name) {{\n{selections}  }}\n}}\n"
+    )
+}
+
+fn issues_from_response(response: IssuesResponse) -> Result<Vec<FetchedIssue>> {
+    let repository = response
+        .repository
+        .ok_or_else(repository_not_found)?;
+    let mut issues = Vec::with_capacity(repository.len());
+    // A null alias is a number that no longer resolves (deleted, transferred, or a PR); skipping
+    // it leaves that ref's cached state untouched instead of failing the whole repo.
+    for node in repository.into_values().flatten() {
+        if node.number <= 0 {
+            continue;
+        }
+        issues.push(FetchedIssue {
+            number: node.number,
+            title: node.title,
+            state: parse_issue_state(&node.state)?,
+            parent: node.parent.map(|p| p.number),
+            sub_issues: node.sub_issues.nodes.into_iter().map(|n| n.number).collect(),
+        });
+    }
+    Ok(issues)
 }
 
 #[derive(Debug, Deserialize)]
@@ -244,8 +330,34 @@ struct IssueResponse {
     title: String,
     body: Option<String>,
     html_url: String,
+    state: String,
     #[serde(default)]
     pull_request: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IssuesResponse {
+    repository: Option<HashMap<String, Option<IssueNode>>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IssueNode {
+    number: i64,
+    title: String,
+    state: String,
+    parent: Option<IssueNumberNode>,
+    #[serde(rename = "subIssues")]
+    sub_issues: SubIssueConnection,
+}
+
+#[derive(Debug, Deserialize)]
+struct IssueNumberNode {
+    number: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct SubIssueConnection {
+    nodes: Vec<IssueNumberNode>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -349,12 +461,13 @@ struct PullRequestRepository {
 
 #[cfg(test)]
 mod tests {
-    use monica_application::GithubPullRequestStatus;
+    use monica_application::{GithubIssueState, GithubPullRequestStatus};
 
     use super::{
-        issue_from_response, pull_request_from_response, recent_pull_requests_from_response,
+        issue_from_response, issues_from_response, issues_query, pull_request_from_response,
+        recent_pull_requests_from_response,
     };
-    use super::{IssueResponse, PullRequestResponse, RecentPullRequestsResponse};
+    use super::{IssueResponse, IssuesResponse, PullRequestResponse, RecentPullRequestsResponse};
 
     fn issue_response(value: serde_json::Value) -> IssueResponse {
         serde_json::from_value(value).unwrap()
@@ -373,6 +486,7 @@ mod tests {
             issue_response(serde_json::json!({
                 "number": 9,
                 "title": "hello",
+                "state": "open",
                 "html_url": "https://github.com/o/r/issues/9"
             })),
             9,
@@ -382,15 +496,17 @@ mod tests {
         assert_eq!(issue.title, "hello");
         assert_eq!(issue.body, None);
         assert_eq!(issue.url, "https://github.com/o/r/issues/9");
+        assert_eq!(issue.state, GithubIssueState::Open);
 
         let null_body = issue_from_response(
             issue_response(serde_json::json!({
-                "number": 9, "title": "t", "body": null, "html_url": "u"
+                "number": 9, "title": "t", "body": null, "state": "closed", "html_url": "u"
             })),
             9,
         )
         .unwrap();
         assert_eq!(null_body.body, None);
+        assert_eq!(null_body.state, GithubIssueState::Closed);
     }
 
     #[test]
@@ -399,6 +515,7 @@ mod tests {
             issue_response(serde_json::json!({
                 "number": 57,
                 "title": "a pr",
+                "state": "open",
                 "html_url": "https://github.com/o/r/pull/57",
                 "pull_request": { "url": "https://api.github.com/repos/o/r/pulls/57" }
             })),
@@ -412,7 +529,7 @@ mod tests {
     fn issue_from_response_rejects_number_mismatch() {
         let err = issue_from_response(
             issue_response(serde_json::json!({
-                "number": 9, "title": "t", "html_url": "u"
+                "number": 9, "title": "t", "state": "open", "html_url": "u"
             })),
             5,
         )
@@ -513,4 +630,67 @@ mod tests {
         assert!(pull_requests.is_empty());
     }
 
+
+    #[test]
+    fn issues_query_aliases_every_requested_number() {
+        let query = issues_query(&[42, 7]);
+        assert!(query.contains("i42: issue(number: 42)"), "{query}");
+        assert!(query.contains("i7: issue(number: 7)"), "{query}");
+        assert!(query.contains("parent { number }"), "{query}");
+        assert!(query.contains("subIssues(first: 50)"), "{query}");
+    }
+
+    #[test]
+    fn issues_from_response_maps_aliases_and_hierarchy() {
+        let response: IssuesResponse = serde_json::from_value(serde_json::json!({
+            "repository": {
+                "i42": {
+                    "number": 42,
+                    "title": "hello",
+                    "state": "OPEN",
+                    "parent": { "number": 7 },
+                    "subIssues": { "nodes": [{ "number": 43 }, { "number": 44 }] }
+                }
+            }
+        }))
+        .unwrap();
+        let issues = issues_from_response(response).unwrap();
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].number, 42);
+        assert_eq!(issues[0].title, "hello");
+        // GraphQL shouts its enums; the parse must not care.
+        assert_eq!(issues[0].state, GithubIssueState::Open);
+        assert_eq!(issues[0].parent, Some(7));
+        assert_eq!(issues[0].sub_issues, vec![43, 44]);
+    }
+
+    #[test]
+    fn issues_from_response_skips_unresolvable_aliases() {
+        let response: IssuesResponse = serde_json::from_value(serde_json::json!({
+            "repository": {
+                "i42": null,
+                "i7": {
+                    "number": 7,
+                    "title": "kept",
+                    "state": "CLOSED",
+                    "parent": null,
+                    "subIssues": { "nodes": [] }
+                }
+            }
+        }))
+        .unwrap();
+        let issues = issues_from_response(response).unwrap();
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].number, 7);
+        assert_eq!(issues[0].state, GithubIssueState::Closed);
+        assert_eq!(issues[0].parent, None);
+    }
+
+    #[test]
+    fn issues_from_response_rejects_a_missing_repository() {
+        let response: IssuesResponse =
+            serde_json::from_value(serde_json::json!({ "repository": null })).unwrap();
+        let err = issues_from_response(response).unwrap_err();
+        assert!(format!("{err:#}").contains("not found"), "{err:#}");
+    }
 }

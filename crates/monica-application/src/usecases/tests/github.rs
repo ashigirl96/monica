@@ -2,8 +2,13 @@ use std::collections::HashMap;
 
 use super::*;
 use super::support::*;
-use crate::usecases::github::{bulk_sync_pull_requests, TrackGithubIssueInput, TrackOutcome};
-use crate::{GithubPullRequest, GithubPullRequestStatus, RepoPullRequest, UnresolvedPullRequestRef};
+use crate::usecases::github::{
+    bulk_sync_issues, bulk_sync_pull_requests, TrackGithubIssueInput, TrackOutcome,
+};
+use crate::{
+    FetchedIssue, GithubIssueState, GithubPullRequest, GithubPullRequestStatus, RepoPullRequest,
+    UnresolvedPullRequestRef,
+};
 
 #[tokio::test]
 async fn track_github_issue_uses_gateway_and_repositories() {
@@ -75,21 +80,194 @@ async fn track_github_issue_creates_a_new_task_when_the_previous_one_is_closed()
 }
 
 #[tokio::test]
-async fn track_github_issue_does_not_resync_the_title_of_an_existing_task() {
+async fn track_github_issue_refreshes_the_cached_title_of_an_existing_task() {
     let mut repos = FakeRepos::default();
     let github = RetitlingGithub::new("original title");
     let first = track_github_issue(&mut repos, &github, track_input())
         .await
         .unwrap();
+    assert_eq!(first.task.title, "original title");
 
     github.set_title("renamed upstream");
     let second = track_github_issue(&mut repos, &github, track_input())
         .await
         .unwrap();
 
-    assert_eq!(second.task.title, "original title", "the stored task is returned untouched");
-    assert_eq!(second.issue.title, "renamed upstream", "the report still reflects the fetch");
     assert_eq!(second.task.id, first.task.id);
+    assert_eq!(second.issue.title, "renamed upstream", "the report still reflects the fetch");
+    assert_eq!(
+        second.task.title, "renamed upstream",
+        "the returned task is re-read after the cache is seeded, not the pre-upsert snapshot"
+    );
+    let ref_id = repos.list_external_refs(&second.task.id).unwrap()[0].id;
+    assert_eq!(
+        repos.issue_ref_state(ref_id).map(|(title, _)| title),
+        Some("renamed upstream".to_string()),
+    );
+}
+
+#[tokio::test]
+async fn track_github_issue_leaves_the_task_row_without_a_baked_in_title() {
+    let mut repos = FakeRepos::default();
+    let github = RetitlingGithub::new("upstream title");
+    let report = track_github_issue(&mut repos, &github, track_input())
+        .await
+        .unwrap();
+
+    let ref_id = repos.list_external_refs(&report.task.id).unwrap()[0].id;
+    assert_eq!(
+        repos.issue_ref_state(ref_id),
+        Some(("upstream title".to_string(), GithubIssueState::Open)),
+        "the fetched title and state land in the ref cache",
+    );
+    // With the cache cleared the resolved title falls back to the (empty) stored column, which is
+    // what proves nothing was written into `tasks.title`.
+    repos.clear_issue_ref_states();
+    assert_eq!(repos.get_task(&report.task.id).unwrap().unwrap().title, "");
+}
+
+fn open_issue(number: i64, title: &str) -> FetchedIssue {
+    FetchedIssue {
+        number,
+        title: title.to_string(),
+        state: GithubIssueState::Open,
+        parent: None,
+        sub_issues: Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn bulk_sync_issues_refreshes_open_tasks_only() {
+    let mut repos = FakeRepos::default();
+    let tracked = track_github_issue(&mut repos, &FakeGithub, track_input())
+        .await
+        .unwrap();
+    let closed = track_github_issue(
+        &mut repos,
+        &FakeGithub,
+        TrackGithubIssueInput { repo: "owner/repo".to_string(), number: 43 },
+    )
+    .await
+    .unwrap();
+    repos.mark_task_closed(&closed.task.id).unwrap();
+
+    let github = RepoIssueGithub::new(HashMap::from([(
+        "owner/repo".to_string(),
+        Some(vec![
+            open_issue(42, "fresh 42"),
+            open_issue(43, "fresh 43"),
+        ]),
+    )]));
+    let synced = bulk_sync_issues(&mut repos, &github).await.unwrap();
+
+    assert_eq!(synced, 1);
+    assert_eq!(
+        github.requested(),
+        vec![("owner/repo".to_string(), vec![42])],
+        "a closed task's issue is never even asked for"
+    );
+    assert_eq!(repos.get_task(&tracked.task.id).unwrap().unwrap().title, "fresh 42");
+    assert_eq!(repos.get_task(&closed.task.id).unwrap().unwrap().title, "owner/repo issue");
+}
+
+#[tokio::test]
+async fn bulk_sync_issues_records_the_state_without_touching_task_status() {
+    let mut repos = FakeRepos::default();
+    let tracked = track_github_issue(&mut repos, &FakeGithub, track_input())
+        .await
+        .unwrap();
+
+    let github = RepoIssueGithub::new(HashMap::from([(
+        "owner/repo".to_string(),
+        Some(vec![FetchedIssue {
+            number: 42,
+            title: "closed upstream".to_string(),
+            state: GithubIssueState::Closed,
+            parent: None,
+            sub_issues: Vec::new(),
+        }]),
+    )]));
+    bulk_sync_issues(&mut repos, &github).await.unwrap();
+
+    let ref_id = repos.list_external_refs(&tracked.task.id).unwrap()[0].id;
+    assert_eq!(
+        repos.issue_ref_state(ref_id),
+        Some(("closed upstream".to_string(), GithubIssueState::Closed))
+    );
+    assert_eq!(
+        repos.get_task(&tracked.task.id).unwrap().unwrap().status,
+        TaskStatus::Ready,
+        "a closed issue must not close the task"
+    );
+}
+
+#[tokio::test]
+async fn bulk_sync_issues_keeps_known_state_when_a_repo_fetch_fails() {
+    let mut repos = FakeRepos::default();
+    let good = track_github_issue(&mut repos, &FakeGithub, track_input())
+        .await
+        .unwrap();
+    let bad = track_github_issue(
+        &mut repos,
+        &FakeGithub,
+        TrackGithubIssueInput { repo: "other/repo".to_string(), number: 7 },
+    )
+    .await
+    .unwrap();
+
+    let github = RepoIssueGithub::new(HashMap::from([
+        (
+            "owner/repo".to_string(),
+            Some(vec![open_issue(42, "fresh 42")]),
+        ),
+        ("other/repo".to_string(), None),
+    ]));
+    let synced = bulk_sync_issues(&mut repos, &github).await.unwrap();
+
+    assert_eq!(synced, 1, "only the healthy repo is recorded");
+    assert_eq!(repos.get_task(&good.task.id).unwrap().unwrap().title, "fresh 42");
+    assert_eq!(
+        repos.get_task(&bad.task.id).unwrap().unwrap().title,
+        "other/repo issue",
+        "the failed repo keeps what track already cached instead of being blanked"
+    );
+}
+
+#[tokio::test]
+async fn bulk_sync_issues_is_a_noop_without_tracked_issues() {
+    let mut repos = FakeRepos::default();
+    let github = RepoIssueGithub::new(HashMap::new());
+    assert_eq!(bulk_sync_issues(&mut repos, &github).await.unwrap(), 0);
+    assert!(github.requested().is_empty());
+}
+
+#[tokio::test]
+async fn bulk_sync_issues_fetches_a_shared_issue_once_and_writes_both_refs() {
+    let mut repos = FakeRepos::default();
+    let first = track_github_issue(&mut repos, &FakeGithub, track_input())
+        .await
+        .unwrap();
+    repos.mark_task_closed(&first.task.id).unwrap();
+    let second = track_github_issue(&mut repos, &FakeGithub, track_input())
+        .await
+        .unwrap();
+    // Reopen the first so both tasks carry the same issue address at once.
+    repos.update_task_status(&first.task.id, TaskStatus::Ready).unwrap();
+
+    let github = RepoIssueGithub::new(HashMap::from([(
+        "owner/repo".to_string(),
+        Some(vec![open_issue(42, "shared")]),
+    )]));
+    let synced = bulk_sync_issues(&mut repos, &github).await.unwrap();
+
+    assert_eq!(synced, 2, "both refs are recorded");
+    assert_eq!(
+        github.requested(),
+        vec![("owner/repo".to_string(), vec![42])],
+        "the shared number is fetched once"
+    );
+    assert_eq!(repos.get_task(&first.task.id).unwrap().unwrap().title, "shared");
+    assert_eq!(repos.get_task(&second.task.id).unwrap().unwrap().title, "shared");
 }
 
 #[test]

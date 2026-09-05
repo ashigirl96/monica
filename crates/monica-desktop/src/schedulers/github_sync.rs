@@ -1,4 +1,4 @@
-//! Desktop wiring for the PR-sync worker. The interval/guard/waker mechanics live in
+//! Desktop wiring for the GitHub-sync worker. The interval/guard/waker mechanics live in
 //! `monica-runtime`; the desktop only supplies a façade factory carrying its Tauri event sink.
 
 use tauri::AppHandle;
@@ -7,10 +7,10 @@ use monica_runtime::MonicaFacade;
 
 use crate::event_sink::TauriEventSink;
 
-pub use monica_runtime::PrSyncWaker;
+pub use monica_runtime::GithubSyncWaker;
 
-pub(crate) fn start(app_handle: AppHandle) -> PrSyncWaker {
-    monica_runtime::start_pr_sync(move || open_facade(&app_handle))
+pub(crate) fn start(app_handle: AppHandle) -> GithubSyncWaker {
+    monica_runtime::start_github_sync(move || open_facade(&app_handle))
 }
 
 fn open_facade(app: &AppHandle) -> anyhow::Result<MonicaFacade> {

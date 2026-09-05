@@ -2,6 +2,7 @@ mod bench;
 mod events;
 mod explanations;
 mod external_refs;
+mod github_issue_sync;
 pub(crate) mod notes;
 pub(crate) mod notification_outbox;
 mod projects;
@@ -12,7 +13,14 @@ pub(crate) mod terminal;
 mod terminal_sessions;
 mod unit_of_work;
 
-pub(super) const TASK_COLUMNS: &str = "id, kind, status, phase, title, body, project_id,      labels, details_json, source_json, primary_task_run_id, closed_at, created_at, updated_at";
+/// Task columns as read through [`TASK_FROM`]. `title` resolves against the issue-ref cache so a
+/// task backed by a GitHub issue shows what GitHub currently says, falling back to the column for
+/// rows tracked before the cache existed and to `''` when neither is set.
+pub(super) const TASK_COLUMNS: &str = "t.id, t.kind, t.status, t.phase,      COALESCE(issue_state.title, t.title, '') AS title, COALESCE(t.body, '') AS body,      t.project_id, t.labels, t.details_json, t.source_json, t.primary_task_run_id, t.closed_at,      t.created_at, t.updated_at";
+
+/// The task table joined to its newest issue ref and that ref's cached state. Every read of
+/// [`TASK_COLUMNS`] goes through this so the two can't drift.
+pub(super) const TASK_FROM: &str = "tasks t      LEFT JOIN external_refs issue_ref ON issue_ref.id = (        SELECT er.id FROM external_refs er        WHERE er.task_id = t.id AND er.ref_type = 'issue'        ORDER BY er.id DESC LIMIT 1)      LEFT JOIN github_issue_ref_states issue_state ON issue_state.external_ref_id = issue_ref.id";
 
 pub(super) const TASK_RUN_COLUMNS: &str =
     "id, task_id, agent, branch, worktree_path, status, wait_reason,      agent_session_id, terminal_tab_id, last_event_name, last_event_at, plan_file_path, pending_stop, metadata_json,      created_at, updated_at";

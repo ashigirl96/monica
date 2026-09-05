@@ -3,14 +3,15 @@ use rusqlite::{params, Connection};
 
 use crate::SqliteStore;
 use monica_application::{
-    GithubPullRequestStatus, TaskBoardQuery, TaskStore, TaskSummaryFilter, TaskSummaryRow,
+    GithubIssueState, GithubPullRequestStatus, TaskBoardQuery, TaskStore, TaskSummaryFilter,
+    TaskSummaryRow,
 };
 use monica_domain::{
     DisplayStatus, ExternalReference, NewTask, Provider, RefType, Task, TaskId, TaskRunId,
     TaskRunStatus, TaskRunWaitReason, TaskStatus,
 };
 
-use super::{external_refs, sql_literal_list, SET_NOW, TASK_COLUMNS};
+use super::{external_refs, sql_literal_list, SET_NOW, TASK_COLUMNS, TASK_FROM};
 
 pub(super) fn insert_task_in(
     conn: &Connection,
@@ -56,7 +57,7 @@ pub(super) fn insert_task_in(
         )?;
     }
 
-    let mut stmt = conn.prepare(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"))?;
+    let mut stmt = conn.prepare(&format!("SELECT {TASK_COLUMNS} FROM {TASK_FROM} WHERE t.id = ?1"))?;
     let mut rows = stmt.query(params![id])?;
     match rows.next()? {
         Some(row) => Ok(crate::row::task_from_row(row)?),
@@ -65,7 +66,7 @@ pub(super) fn insert_task_in(
 }
 
 pub(super) fn get_task(conn: &Connection, id: &TaskId) -> Result<Option<Task>> {
-    let mut stmt = conn.prepare(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"))?;
+    let mut stmt = conn.prepare(&format!("SELECT {TASK_COLUMNS} FROM {TASK_FROM} WHERE t.id = ?1"))?;
     let mut rows = stmt.query(params![id.as_str()])?;
     match rows.next()? {
         Some(row) => Ok(Some(crate::row::task_from_row(row)?)),
@@ -83,11 +84,11 @@ pub(super) fn find_open_task_by_external_ref_in(
     // `MON-<n>` sorts wrong as text (MON-10 < MON-9), so the created_at tie-break casts the
     // counter part to an integer — the same shape the summary query uses for the latest run.
     let mut stmt = conn.prepare(&format!(
-        "SELECT {TASK_COLUMNS} FROM tasks
-          WHERE status != ?1
-            AND id IN (SELECT task_id FROM external_refs
-                        WHERE provider = ?2 AND ref_type = ?3 AND repo = ?4 AND number = ?5)
-          ORDER BY created_at DESC, CAST(SUBSTR(id, 5) AS INTEGER) DESC
+        "SELECT {TASK_COLUMNS} FROM {TASK_FROM}
+          WHERE t.status != ?1
+            AND t.id IN (SELECT task_id FROM external_refs
+                          WHERE provider = ?2 AND ref_type = ?3 AND repo = ?4 AND number = ?5)
+          ORDER BY t.created_at DESC, CAST(SUBSTR(t.id, 5) AS INTEGER) DESC
           LIMIT 1"
     ))?;
     let mut rows = stmt.query(params![
@@ -117,7 +118,7 @@ pub(super) fn mark_task_closed_in(conn: &Connection, id: &TaskId) -> Result<Task
     if affected == 0 {
         return Err(anyhow!("task not found: {id}"));
     }
-    let mut stmt = conn.prepare(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"))?;
+    let mut stmt = conn.prepare(&format!("SELECT {TASK_COLUMNS} FROM {TASK_FROM} WHERE t.id = ?1"))?;
     let mut rows = stmt.query(params![id.as_str()])?;
     match rows.next()? {
         Some(row) => Ok(crate::row::task_from_row(row)?),
@@ -127,8 +128,8 @@ pub(super) fn mark_task_closed_in(conn: &Connection, id: &TaskId) -> Result<Task
 
 pub(super) fn list_tasks(conn: &Connection) -> Result<Vec<Task>> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT {TASK_COLUMNS} FROM tasks
-         ORDER BY created_at, id"
+        "SELECT {TASK_COLUMNS} FROM {TASK_FROM}
+         ORDER BY t.created_at, t.id"
     ))?;
     let mut rows = stmt.query([])?;
     let mut items = Vec::new();
@@ -275,11 +276,12 @@ impl TaskBoardQuery for SqliteStore {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT
                t.id AS task_id,
-               t.title AS title,
+               COALESCE(issue_state.title, t.title, '') AS title,
                coalesce(project.repo, issue_ref.repo, t.project_id) AS project,
                issue_ref.number AS github_issue_number,
                issue_ref.url AS github_issue_url,
                issue_ref.repo AS github_issue_repo,
+               issue_state.state AS github_issue_state,
 	               t.status AS task_status,
 	               latest_run.status AS task_run_status,
 	               latest_run.wait_reason AS task_run_wait_reason,
@@ -300,17 +302,9 @@ impl TaskBoardQuery for SqliteStore {
                  WHERE r.task_id = t.id AND r.id IS NOT latest_run.id
                    AND r.status = ?4
                    AND r.agent_session_id IS NOT NULL) AS side_runs_failed
-	             FROM tasks t
+	             FROM {TASK_FROM}
              LEFT JOIN projects project
                ON project.id = t.project_id
-             LEFT JOIN external_refs issue_ref
-               ON issue_ref.id = (
-                 SELECT er.id
-                 FROM external_refs er
-                 WHERE er.task_id = t.id AND er.ref_type = 'issue'
-                 ORDER BY er.id DESC
-                 LIMIT 1
-               )
             -- resolve the primary pointer through an existence check: a dangling pointer must
             -- fall back to the latest run instead of matching nothing (which would also count
             -- every run as a side run via `r.id IS NOT latest_run.id`)
@@ -350,6 +344,10 @@ impl TaskBoardQuery for SqliteStore {
             let primary_has_session: bool = row.get::<_, i64>("primary_has_session")? != 0;
             let display_status = DisplayStatus::from_task_and_run(task_status, task_run_status);
             let github_issue_number: Option<i64> = row.get("github_issue_number")?;
+            let github_issue_state: Option<GithubIssueState> = row
+                .get::<_, Option<String>>("github_issue_state")?
+                .map(|s| s.parse())
+                .transpose()?;
             let github_issue_repo: Option<String> = row.get("github_issue_repo")?;
             // A tracked issue always carries a stored URL, but the column is nullable and
             // predates URL storage; synthesize from repo+number so the backend stays the sole
@@ -369,6 +367,7 @@ impl TaskBoardQuery for SqliteStore {
                 project: row.get("project")?,
                 github_issue_number,
                 github_issue_url,
+                github_issue_state,
                 github_pull_requests: Vec::new(),
                 task_status,
                 task_run_status,

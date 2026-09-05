@@ -20,7 +20,7 @@ import {
 } from "@/features/work-bench/store";
 import { jumpHintsActiveAtom, jumpToHintAtom } from "@/features/work-bench/jump-hints";
 import { sessionStatusAtom } from "@/features/work-bench/session-status";
-import { forceSyncPullRequestsAtom } from "@/stores/pr-sync";
+import { forceSyncGithubAtom } from "@/stores/github-sync";
 import { newTaskOpenAtom, projectFilterOpenAtom, cycleBoardViewAtom } from "@/stores/workboard";
 import { setUiZoomAtom } from "@/stores/zoom";
 import { isEditable } from "@/lib/keyboard";
@@ -80,7 +80,7 @@ export function useShortcuts() {
   const togglePlanPreview = useSetAtom(togglePlanPreviewAtom);
   const planPreview = useAtomValue(planPreviewAtom);
   const setPlanPreview = useSetAtom(planPreviewAtom);
-  const forceSyncPullRequests = useSetAtom(forceSyncPullRequestsAtom);
+  const forceSyncGithub = useSetAtom(forceSyncGithubAtom);
   const jumpActive = useAtomValue(jumpHintsActiveAtom);
   const setJumpActive = useSetAtom(jumpHintsActiveAtom);
   const jumpToHint = useSetAtom(jumpToHintAtom);
@@ -180,7 +180,7 @@ export function useShortcuts() {
         key: "r",
         editable: true,
         action: ({ activeSpace: space }) => {
-          if (space === "work-board") void forceSyncPullRequests();
+          if (space === "work-board") void forceSyncGithub();
         },
       },
       {
@@ -363,7 +363,7 @@ export function useShortcuts() {
     togglePlanPreview,
     planPreview,
     setPlanPreview,
-    forceSyncPullRequests,
+    forceSyncGithub,
     jumpActive,
     setJumpActive,
     jumpToHint,

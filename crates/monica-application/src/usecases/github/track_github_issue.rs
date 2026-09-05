@@ -1,4 +1,4 @@
-use super::ports::{GithubGateway, ProjectRepository, TaskStore};
+use super::ports::{GithubGateway, GithubIssueSyncStore, ProjectRepository, TaskStore};
 use crate::prelude::{
     parse_owner_repo, ExternalIssue, ExternalReference, NewTask, Provider, RefType, Task, TaskKind,
     TaskStatus,
@@ -33,7 +33,7 @@ pub async fn track_github_issue<R, G>(
     input: TrackGithubIssueInput,
 ) -> ApplicationResult<TrackGithubIssueReport>
 where
-    R: TaskStore + ProjectRepository,
+    R: TaskStore + ProjectRepository + GithubIssueSyncStore,
     G: GithubGateway,
 {
     let repo = parse_owner_repo(&input.repo)?;
@@ -65,30 +65,58 @@ pub fn track_github_issue_from_fetched<R>(
     issue: &GithubIssue,
 ) -> ApplicationResult<(Task, TrackOutcome)>
 where
-    R: TaskStore + ProjectRepository,
+    R: TaskStore + ProjectRepository + GithubIssueSyncStore,
 {
     let repo = parse_owner_repo(repo_input)?;
-    // Re-tracking must resolve to the running attempt rather than fork a second task. The
-    // existing task's title and body are left as they are: re-syncing them is a separate concern.
-    if let Some(existing) =
-        repos.find_open_task_by_external_ref(Provider::Github, RefType::Issue, &repo, issue.number)?
-    {
-        return Ok((existing, TrackOutcome::AlreadyTracked));
-    }
-    let project_id = repos.get_project(&repo)?.map(|p| p.id);
+    // Re-tracking must resolve to the running attempt rather than fork a second task. The task row
+    // itself is never rewritten; only the issue-ref cache below learns the fresh title.
+    let (mut task, outcome) = match repos.find_open_task_by_external_ref(
+        Provider::Github,
+        RefType::Issue,
+        &repo,
+        issue.number,
+    )? {
+        Some(existing) => (existing, TrackOutcome::AlreadyTracked),
+        None => (
+            insert_tracked_task(repos, &repo, issue)?,
+            TrackOutcome::Created,
+        ),
+    };
 
-    let mut new = NewTask::new(TaskKind::Development, &issue.title);
+    repos.upsert_issue_ref_state(
+        task.id.as_str(),
+        &repo,
+        issue.number,
+        &issue.title,
+        issue.state,
+    )?;
+    // Both branches read the task before the cache was seeded, so it still carries the previous
+    // snapshot (or nothing, for a fresh row). The cache now holds `issue.title`, so that is what a
+    // re-read would resolve to; assign it directly and let callers — `monica task track`'s output
+    // and the desktop's TaskCreated among them — report what GitHub says right now.
+    task.title = issue.title.clone();
+    Ok((task, outcome))
+}
+
+fn insert_tracked_task<R>(repos: &mut R, repo: &str, issue: &GithubIssue) -> ApplicationResult<Task>
+where
+    R: TaskStore + ProjectRepository,
+{
+    let project_id = repos.get_project(repo)?.map(|p| p.id);
+
+    // Title and body stay NULL: they belong to the issue, and baking a snapshot in is exactly
+    // what left tracked tasks showing stale titles.
+    let mut new = NewTask::untitled(TaskKind::Development);
     new.status = TaskStatus::Ready;
-    new.body = issue.body.clone().unwrap_or_default();
     new.project_id = project_id;
 
     let external = ExternalReference::new(
         String::new(),
         Provider::Github,
         RefType::Issue,
-        Some(repo),
+        Some(repo.to_string()),
         Some(issue.number),
         Some(issue.url.clone()),
     );
-    Ok((repos.insert_task_with_ref(new, external)?, TrackOutcome::Created))
+    Ok(repos.insert_task_with_ref(new, external)?)
 }

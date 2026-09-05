@@ -46,12 +46,17 @@ pub struct Task {
 }
 
 /// Input for inserting a [`Task`]. The `id` and timestamps are assigned by the store.
+///
+/// `title` and `body` are optional because a task backed by a GitHub issue owns neither. Its
+/// title lives in the issue-ref state cache and the store resolves it on read; its body is simply
+/// not kept — nothing reads `Task::body`, and a snapshot of it would go stale the same way the
+/// title used to.
 #[derive(Debug, Clone)]
 pub struct NewTask {
     pub kind: TaskKind,
     pub status: TaskStatus,
-    pub title: String,
-    pub body: String,
+    pub title: Option<String>,
+    pub body: Option<String>,
     pub phase: Option<String>,
     pub project_id: Option<String>,
     pub labels: Vec<String>,
@@ -61,11 +66,16 @@ pub struct NewTask {
 
 impl NewTask {
     pub fn new(kind: TaskKind, title: impl Into<String>) -> Self {
+        Self { title: Some(title.into()), ..Self::untitled(kind) }
+    }
+
+    /// A task whose title is owned elsewhere (a tracked GitHub issue).
+    pub fn untitled(kind: TaskKind) -> Self {
         Self {
             kind,
             status: TaskStatus::Ready,
-            title: title.into(),
-            body: String::new(),
+            title: None,
+            body: None,
             phase: None,
             project_id: None,
             labels: Vec::new(),

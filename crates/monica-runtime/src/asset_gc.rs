@@ -1,4 +1,4 @@
-//! The orphan-asset GC worker. Same shape as [`crate::pr_sync`]: a `std::thread` whose
+//! The orphan-asset GC worker. Same shape as [`crate::github_sync`]: a `std::thread` whose
 //! `recv_timeout` doubles as the interval, building a fresh `!Send` façade each cycle. The
 //! reachability + sweep logic lives in `monica-adapters`; this only orchestrates.
 

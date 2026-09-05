@@ -8,7 +8,8 @@ use monica_domain::RawJson;
 
 use crate::ports::{
     AgentDecoders, BoxFuture, EventRepository, GitGateway, NotificationOutboxStore,
-    ProjectRepository, PullRequestSyncStore, TabAttachment, TaskBoardQuery, TaskRunStore, TaskStore,
+    GithubIssueSyncStore, ProjectRepository, PullRequestSyncStore, TabAttachment, TaskBoardQuery,
+    TaskRunStore, TaskStore,
     TaskSummaryFilter, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
     TerminalSessionRepository, UnitOfWork, WorkTransaction, WorkbenchStore, Workspace,
 };
@@ -23,7 +24,8 @@ use crate::prelude::{
 };
 use crate::{
     ApplicationEvent, AuthGateway, Backend, Clock, DaemonSessionView, EventSink, ExecutionProfile,
-    GithubAuthStatus, GithubGateway, GithubIssue, GithubPullRequest,
+    FetchedIssue, GithubAuthStatus, GithubGateway, GithubIssue, GithubIssueState,
+    GithubPullRequest, OpenIssueRef,
     GithubPullRequestRef, GithubPullRequestStatus, HookContext, Monica,
     PullRequestBranchSyncCandidate, RepoPullRequest, SetupEnv,
     SetupOutcome, UnresolvedPullRequestRef,
@@ -112,6 +114,11 @@ struct FakeState {
     next_task: i64,
     next_run: i64,
     next_session: i64,
+    next_ref: i64,
+    /// Mirrors `github_issue_ref_states`, keyed by external_ref id. Reads resolve titles through
+    /// it exactly as the SQL `COALESCE(issue_state.title, tasks.title, '')` does, so the fake and
+    /// the real store can't disagree about which title a tracked task shows.
+    issue_ref_states: HashMap<i64, (String, GithubIssueState)>,
     branch_sync_candidates: Vec<PullRequestBranchSyncCandidate>,
     unresolved_pr_refs: Vec<UnresolvedPullRequestRef>,
     bulk_recorded: Vec<(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)>,
@@ -149,12 +156,42 @@ impl FakeRepos {
         self.state.borrow().status_recorded.clone()
     }
 
+    pub(crate) fn issue_ref_state(&self, external_ref_id: i64) -> Option<(String, GithubIssueState)> {
+        self.state
+            .borrow()
+            .issue_ref_states
+            .get(&external_ref_id)
+            .cloned()
+    }
+
+    pub(crate) fn clear_issue_ref_states(&self) {
+        self.state.borrow_mut().issue_ref_states.clear();
+    }
+
+    /// Override the stored snapshot with the cached issue title, mirroring the store's COALESCE.
+    fn resolve_title(&self, mut task: Task) -> Task {
+        let state = self.state.borrow();
+        let cached = state
+            .refs
+            .get(task.id.as_str())
+            .and_then(|refs| {
+                refs.iter()
+                    .filter(|r| r.ref_type == RefType::Issue)
+                    .max_by_key(|r| r.id)
+            })
+            .and_then(|r| state.issue_ref_states.get(&r.id));
+        if let Some((title, _)) = cached {
+            task.title = title.clone();
+        }
+        task
+    }
+
     pub(crate) fn insert_task_for_run(&mut self, project_id: Option<String>) -> TaskId {
         self.insert_task(NewTask {
             kind: TaskKind::Development,
             status: TaskStatus::Ready,
-            title: "tracked".to_string(),
-            body: String::new(),
+            title: Some("tracked".to_string()),
+            body: None,
             phase: None,
             project_id,
             labels: Vec::new(),
@@ -185,7 +222,11 @@ impl FakeRepos {
         mut external: ExternalReference,
     ) -> Result<Task> {
         let task = self.do_insert_task(new)?;
-        external.id = 1;
+        {
+            let mut state = self.state.borrow_mut();
+            state.next_ref += 1;
+            external.id = state.next_ref;
+        }
         external.task_id = task.id.to_string();
         self.state
             .borrow_mut()
@@ -206,7 +247,7 @@ impl FakeRepos {
         let state = self.state.borrow();
         // Every fake task shares one created_at, so the `MON-<n>` counter stands in for creation
         // order when picking the newest match.
-        Ok(state
+        let found = state
             .refs
             .values()
             .flatten()
@@ -224,7 +265,9 @@ impl FakeRepos {
                     .and_then(|n| n.parse::<i64>().ok())
                     .unwrap_or(0)
             })
-            .cloned())
+            .cloned();
+        drop(state);
+        Ok(found.map(|t| self.resolve_title(t)))
     }
 
     fn do_mark_task_closed(&self, id: &TaskId) -> Result<Task> {
@@ -260,7 +303,8 @@ impl TaskStore for FakeRepos {
     }
 
     fn get_task(&self, id: &TaskId) -> Result<Option<Task>> {
-        Ok(self.state.borrow().tasks.get(id.as_str()).cloned())
+        let task = self.state.borrow().tasks.get(id.as_str()).cloned();
+        Ok(task.map(|t| self.resolve_title(t)))
     }
 
     fn mark_task_closed(&mut self, id: &TaskId) -> Result<Task> {
@@ -268,7 +312,8 @@ impl TaskStore for FakeRepos {
     }
 
     fn list_tasks(&self) -> Result<Vec<Task>> {
-        Ok(self.state.borrow().tasks.values().cloned().collect())
+        let tasks: Vec<Task> = self.state.borrow().tasks.values().cloned().collect();
+        Ok(tasks.into_iter().map(|t| self.resolve_title(t)).collect())
     }
 
     fn set_primary_task_run(&self, task_id: &TaskId, task_run_id: &TaskRunId) -> Result<()> {
@@ -329,12 +374,14 @@ impl TaskBoardQuery for FakeRepos {
             .values()
             .map(|task| {
                 let display = DisplayStatus::from_task_and_run(task.status, None);
+                let resolved = self.resolve_title(task.clone());
                 TaskSummaryRow {
                     id: task.id.to_string(),
-                    title: task.title.clone(),
+                    title: resolved.title,
                     project: task.project_id.clone(),
                     github_issue_number: None,
                     github_issue_url: None,
+                    github_issue_state: None,
                     github_pull_requests: Vec::<GithubPullRequestRef>::new(),
                     task_status: task.status,
                     task_run_status: None,
@@ -376,6 +423,69 @@ impl PullRequestSyncStore for FakeRepos {
         let mut state = self.state.borrow_mut();
         state.bulk_recorded.extend_from_slice(branch_entries);
         state.status_recorded.extend_from_slice(status_entries);
+        Ok(())
+    }
+}
+
+impl GithubIssueSyncStore for FakeRepos {
+    fn all_open_task_issue_refs(&self) -> Result<Vec<OpenIssueRef>> {
+        let state = self.state.borrow();
+        let mut refs: Vec<OpenIssueRef> = state
+            .refs
+            .values()
+            .flatten()
+            .filter(|r| r.ref_type == RefType::Issue && r.provider == Provider::Github)
+            .filter(|r| {
+                state
+                    .tasks
+                    .get(&r.task_id)
+                    .is_some_and(|t| t.status != TaskStatus::Closed)
+            })
+            .filter_map(|r| {
+                Some(OpenIssueRef {
+                    external_ref_id: r.id,
+                    repo: r.repo.clone()?,
+                    number: r.number?,
+                })
+            })
+            .collect();
+        refs.sort_by_key(|r| r.external_ref_id);
+        Ok(refs)
+    }
+
+    fn bulk_record_issue_sync(&mut self, entries: &[(i64, FetchedIssue)]) -> Result<()> {
+        let mut state = self.state.borrow_mut();
+        for (external_ref_id, issue) in entries {
+            state
+                .issue_ref_states
+                .insert(*external_ref_id, (issue.title.clone(), issue.state));
+        }
+        Ok(())
+    }
+
+    fn upsert_issue_ref_state(
+        &mut self,
+        task_id: &str,
+        repo: &str,
+        number: i64,
+        title: &str,
+        state: GithubIssueState,
+    ) -> Result<()> {
+        let mut fake = self.state.borrow_mut();
+        let external_ref_id = fake.refs.get(task_id).and_then(|refs| {
+            refs.iter()
+                .filter(|r| {
+                    r.ref_type == RefType::Issue
+                        && r.repo.as_deref() == Some(repo)
+                        && r.number == Some(number)
+                })
+                .map(|r| r.id)
+                .max()
+        });
+        if let Some(external_ref_id) = external_ref_id {
+            fake.issue_ref_states
+                .insert(external_ref_id, (title.to_string(), state));
+        }
         Ok(())
     }
 }
@@ -1066,7 +1176,27 @@ impl GithubGateway for FakeGithub {
                 title: format!("{repo} issue"),
                 body: Some("body".to_string()),
                 url: format!("https://github.com/{repo}/issues/{number}"),
+                state: GithubIssueState::Open,
             })
+        })
+    }
+
+    fn fetch_issues<'a>(
+        &'a self,
+        repo: &'a str,
+        numbers: &'a [i64],
+    ) -> BoxFuture<'a, Result<Vec<FetchedIssue>>> {
+        Box::pin(async move {
+            Ok(numbers
+                .iter()
+                .map(|number| FetchedIssue {
+                    number: *number,
+                    title: format!("{repo} issue"),
+                    state: GithubIssueState::Open,
+                    parent: None,
+                    sub_issues: Vec::new(),
+                })
+                .collect())
         })
     }
 
@@ -1122,7 +1252,28 @@ impl GithubGateway for RetitlingGithub {
                 title,
                 body: Some("body".to_string()),
                 url: format!("https://github.com/{repo}/issues/{number}"),
+                state: GithubIssueState::Open,
             })
+        })
+    }
+
+    fn fetch_issues<'a>(
+        &'a self,
+        _repo: &'a str,
+        numbers: &'a [i64],
+    ) -> BoxFuture<'a, Result<Vec<FetchedIssue>>> {
+        let title = self.title.borrow().clone();
+        Box::pin(async move {
+            Ok(numbers
+                .iter()
+                .map(|number| FetchedIssue {
+                    number: *number,
+                    title: title.clone(),
+                    state: GithubIssueState::Open,
+                    parent: None,
+                    sub_issues: Vec::new(),
+                })
+                .collect())
         })
     }
 
@@ -1187,6 +1338,14 @@ impl GithubGateway for RecentPrGithub {
         Box::pin(async { Err(anyhow!("unused")) })
     }
 
+    fn fetch_issues<'a>(
+        &'a self,
+        _repo: &'a str,
+        _numbers: &'a [i64],
+    ) -> BoxFuture<'a, Result<Vec<FetchedIssue>>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
     fn fetch_default_branch<'a>(&'a self, _repo: &'a str) -> BoxFuture<'a, Result<Option<String>>> {
         Box::pin(async { Err(anyhow!("unused")) })
     }
@@ -1217,6 +1376,77 @@ impl GithubGateway for RecentPrGithub {
                 None => Ok(Vec::new()),
             }
         })
+    }
+}
+
+/// A `GithubGateway` whose issue batch is scripted per repo, for the issue bulk-sync usecase.
+/// `None` for a repo yields an error (to exercise per-repo failure isolation). Requested numbers
+/// are recorded so tests can assert which refs were asked for.
+pub(crate) struct RepoIssueGithub {
+    by_repo: HashMap<String, Option<Vec<FetchedIssue>>>,
+    requested: RefCell<Vec<(String, Vec<i64>)>>,
+}
+
+impl RepoIssueGithub {
+    pub(crate) fn new(by_repo: HashMap<String, Option<Vec<FetchedIssue>>>) -> Self {
+        Self {
+            by_repo,
+            requested: RefCell::new(Vec::new()),
+        }
+    }
+
+    pub(crate) fn requested(&self) -> Vec<(String, Vec<i64>)> {
+        self.requested.borrow().clone()
+    }
+}
+
+impl GithubGateway for RepoIssueGithub {
+    fn fetch_issue<'a>(
+        &'a self,
+        _repo: &'a str,
+        _number: i64,
+    ) -> BoxFuture<'a, Result<GithubIssue>> {
+        Box::pin(async { Err(anyhow!("unused")) })
+    }
+
+    fn fetch_issues<'a>(
+        &'a self,
+        repo: &'a str,
+        numbers: &'a [i64],
+    ) -> BoxFuture<'a, Result<Vec<FetchedIssue>>> {
+        self.requested
+            .borrow_mut()
+            .push((repo.to_string(), numbers.to_vec()));
+        let outcome = self.by_repo.get(repo).cloned();
+        Box::pin(async move {
+            match outcome {
+                Some(Some(issues)) => Ok(issues
+                    .into_iter()
+                    .filter(|i| numbers.contains(&i.number))
+                    .collect()),
+                Some(None) => Err(anyhow!("fetch failed for {repo}")),
+                None => Ok(Vec::new()),
+            }
+        })
+    }
+
+    fn fetch_default_branch<'a>(&'a self, _repo: &'a str) -> BoxFuture<'a, Result<Option<String>>> {
+        Box::pin(async { Err(anyhow!("unused")) })
+    }
+
+    fn fetch_pull_request<'a>(
+        &'a self,
+        _repo: &'a str,
+        _number: i64,
+    ) -> BoxFuture<'a, Result<GithubPullRequest>> {
+        Box::pin(async { Err(anyhow!("unused")) })
+    }
+
+    fn fetch_recent_pull_requests<'a>(
+        &'a self,
+        _repo: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<RepoPullRequest>>> {
+        Box::pin(async { Ok(Vec::new()) })
     }
 }
 
@@ -1340,8 +1570,8 @@ fn task_from_new(id: String, new: NewTask) -> Task {
         kind: new.kind,
         status: new.status,
         phase: new.phase,
-        title: new.title,
-        body: new.body,
+        title: new.title.unwrap_or_default(),
+        body: new.body.unwrap_or_default(),
         project_id: new.project_id,
         labels: new.labels,
         details: new.details,

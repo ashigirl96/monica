@@ -32,7 +32,8 @@ pub use facade::{
 
 pub use ports::{
     AgentDecoders, AgentEventDecoder, EventRepository, ExplanationOutputs, ExplanationStore,
-    GitGateway, LinkPreview, NoteStore, NotificationOutboxStore, ProjectRepository,
+    GitGateway, GithubIssueSyncStore, LinkPreview, NoteStore, NotificationOutboxStore,
+    ProjectRepository,
     PullRequestSyncStore,
     ShellScaffolding,
     TabAttachment,
@@ -44,9 +45,9 @@ pub use ports::{
 // Application-owned types (NOT in monica-domain)
 pub use bench::{bench_runspace_id, PrepareTaskResult, RunTaskResult, TaskBench};
 pub use github::{
-    GithubAuthStatus, GithubIssue, GithubPullRequest, GithubPullRequestRef,
-    GithubPullRequestStatus, PullRequestBranchSyncCandidate, RepoPullRequest,
-    UnresolvedPullRequestRef,
+    FetchedIssue, GithubAuthStatus, GithubIssue, GithubIssueState, GithubPullRequest,
+    GithubPullRequestRef, GithubPullRequestStatus, OpenIssueRef, PullRequestBranchSyncCandidate,
+    RepoPullRequest, UnresolvedPullRequestRef,
 };
 pub use observation::TaskRunObservation;
 pub use queries::TaskSummaryRow;

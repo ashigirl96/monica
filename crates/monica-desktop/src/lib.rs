@@ -44,14 +44,14 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::task::attach_terminal_tab,
             commands::task::list_tab_task_bindings,
             commands::plan::read_runspace_plan,
-            commands::pull_request::force_sync_pull_requests,
+            commands::github_sync::force_sync_github,
             commands::settings::translate_settings_get,
             commands::settings::translate_settings_save,
             commands::window::open_named_window,
         ])
         .events(tauri_specta::collect_events![
             commands::task::TaskRunStatusChanged,
-            commands::pull_request::PrSyncCompleted,
+            commands::github_sync::GithubSyncCompleted,
             commands::settings::OpenSettingsRequested,
         ])
         .constant(
@@ -128,7 +128,7 @@ pub fn run() {
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             specta_builder.mount_events(app);
-            let waker = schedulers::pull_request_sync::start(app.handle().clone());
+            let waker = schedulers::github_sync::start(app.handle().clone());
             app.manage(waker);
             let drain = schedulers::notification_drain::start(app.handle().clone());
             app.manage(drain);

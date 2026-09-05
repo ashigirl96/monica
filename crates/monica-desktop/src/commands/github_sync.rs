@@ -4,19 +4,19 @@ use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
 use crate::event_sink;
-use crate::schedulers::pull_request_sync::PrSyncWaker;
+use crate::schedulers::github_sync::GithubSyncWaker;
 
 #[derive(Clone, Serialize, specta::Type, Event)]
-#[tauri_specta(event_name = "pr-sync:completed")]
-pub struct PrSyncCompleted {
+#[tauri_specta(event_name = "github-sync:completed")]
+pub struct GithubSyncCompleted {
     pub synced_count: u32,
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn force_sync_pull_requests(
+pub async fn force_sync_github(
     app: AppHandle,
-    waker: State<'_, PrSyncWaker>,
+    waker: State<'_, GithubSyncWaker>,
 ) -> Result<(), ApiError> {
     // auth_status shells out to `gh` on a cold cache, which can block on a
     // Keychain prompt; keep it (and the SQLite open) off the async runtime.
@@ -35,7 +35,7 @@ pub async fn force_sync_pull_requests(
         ));
     }
     if !waker.wake_forced() {
-        return Err(ApiError::external("PR sync worker is not running"));
+        return Err(ApiError::external("GitHub sync worker is not running"));
     }
     Ok(())
 }

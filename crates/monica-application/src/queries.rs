@@ -1,7 +1,7 @@
 use monica_domain::{DisplayStatus, TaskRunStatus, TaskRunWaitReason, TaskStatus};
 use serde::{Deserialize, Serialize};
 
-use crate::github::GithubPullRequestRef;
+use crate::github::{GithubIssueState, GithubPullRequestRef};
 
 /// A read model projecting a [`Task`](monica_domain::Task) plus its primary run and side-run
 /// counts for the board/list views. Lives outside the `Task` aggregate (lightweight CQRS): it
@@ -14,6 +14,7 @@ pub struct TaskSummaryRow {
     pub project: Option<String>,
     pub github_issue_number: Option<i64>,
     pub github_issue_url: Option<String>,
+    pub github_issue_state: Option<GithubIssueState>,
     pub github_pull_requests: Vec<GithubPullRequestRef>,
     pub task_status: TaskStatus,
     pub task_run_status: Option<TaskRunStatus>,

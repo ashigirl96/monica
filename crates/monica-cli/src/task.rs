@@ -244,6 +244,7 @@ fn render_status_table(rows: &[TaskSummaryRow]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use monica_application::GithubIssueState;
     use monica_domain::TaskStatus;
 
     #[test]
@@ -346,6 +347,7 @@ mod tests {
             project: Some("ashigirl96/monica".to_string()),
             github_issue_number: Some(17),
             github_issue_url: Some("https://github.com/ashigirl96/monica/issues/17".to_string()),
+            github_issue_state: Some(GithubIssueState::Open),
             github_pull_requests: Vec::new(),
             task_status: TaskStatus::Ready,
             task_run_status: None,

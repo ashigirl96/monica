@@ -5,10 +5,11 @@ use monica_api::{
 use monica_application::parse_issue_input;
 use monica_domain::{TaskId, TaskRunId};
 use serde::Serialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
 use crate::event_sink;
+use crate::schedulers::github_sync::GithubSyncWaker;
 
 #[derive(Clone, Serialize, specta::Type, Event)]
 #[tauri_specta(event_name = "task-run:status-changed")]
@@ -44,7 +45,11 @@ pub fn get_board_columns() -> Vec<BoardColumn> {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn track_github_issue(app: AppHandle, input: String) -> Result<TaskCreated, ApiError> {
+pub async fn track_github_issue(
+    app: AppHandle,
+    waker: State<'_, GithubSyncWaker>,
+    input: String,
+) -> Result<TaskCreated, ApiError> {
     let (repo, number) =
         parse_issue_input(&input).map_err(|e| ApiError::validation(e.to_string()))?;
     let mut monica = event_sink::open(&app)?;
@@ -52,6 +57,9 @@ pub async fn track_github_issue(app: AppHandle, input: String) -> Result<TaskCre
         .synchronization()
         .track_github_issue(repo, number)
         .await?;
+    // Tracking seeds this issue's own title and state, but the fresh task also belongs in the
+    // next repo-wide refresh; a missing worker is not worth failing the track over.
+    waker.wake_forced();
     Ok(TaskCreated {
         task_id: report.task.id.into(),
         title: report.task.title,

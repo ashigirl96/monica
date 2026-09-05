@@ -21,7 +21,7 @@ pub use asset::{Asset as ApiAsset, ImportAsset as ApiImportAsset};
 pub use bench::{AttachTabResult, PrepareTaskResult, RunTaskResult, TabTaskBinding, TaskBench};
 pub use error::{ApiError, ApiErrorCode};
 pub use explanation::{Explanation as ApiExplanation, ExplanationMode as ApiExplanationMode};
-pub use github::GithubPullRequestRef;
+pub use github::{GithubIssueState, GithubPullRequestRef};
 pub use link_preview::LinkPreview as ApiLinkPreview;
 pub use note::{
     CreateProjectNote as ApiCreateProjectNote, DailyNoteCount as ApiDailyNoteCount,
