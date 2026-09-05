@@ -11,7 +11,7 @@ description: >-
 
 # track-issue
 
-GitHub issue を作成し、その URL を Monica に track させるまでを一気通貫で行う。
+GitHub issue を作成し、その URL を Monica に track させ、GitHub sync まで一気通貫で行う。
 
 ## 手順
 
@@ -31,7 +31,8 @@ gh issue create --repo <owner/repo> --title "<title>" --body "<body>"
 `gh issue create` ではなく **`gh sub-issue create --parent <親番号|URL>`**
 （`yahsan2/gh-sub-issue` 拡張）を使う。作成と同時に GitHub の Sub-issues
 リンクが張られ、子 issue から GraphQL の `Issue.parent` で親を逆引きできる
-ようになる（body に `Part of #N` と書くだけではリンクされない）。
+ようになる（body に `Part of #N` と書くだけではリンクされない）。Monica は
+この親リンクを sync で読んで `parent_task_id` を張る。
 
 ```bash
 gh sub-issue create --parent <親番号> --repo <owner/repo> --title "<title>" --body "<body>"
@@ -62,18 +63,35 @@ MONICA_HOME=$HOME/monica monica task track <issue url>
 ```
 
 成功すると `Created MON-<id> from <owner/repo>#<number>` のように出力される。
-その MON-ID と元の issue URL をユーザーに報告する。
+同じ issue に open な Task が既にあれば新規作成せず既存の MON-ID が返る
+（closed な Task しか無ければ再挑戦として新規作成される）。
 
-### 3. track されたか確認する
+### 3. sync する
 
-正しく取り込まれたかは `monica task status` で一覧を見て確認できる。ここでも
-`MONICA_HOME=$HOME/monica` を付ける。
+CLI の `monica task track` は track 直後の GitHub sync を **kick しない**
+（kick するのは desktop からの track だけ）。そのままでは親子（PARENT 列）・
+issue の state・PR の紐づけが次の sync まで埋まらないので、track したら必ず
+1 回 sync する。複数 issue を track したときは最後にまとめて 1 回でよい。
+
+```bash
+MONICA_HOME=$HOME/monica monica task sync
+```
+
+変化レポートに `MON-<id>  parent  -  -  ->  MON-<親>` が出れば、子 issue として
+親 Task に繋がっている。親 issue が未 track か closed のときは parent は `-` の
+まま（Monica は open な Task 同士だけを繋ぐ）。
+
+### 4. track されたか確認する
+
+`monica task status` で一覧を見て確認する。ここでも `MONICA_HOME=$HOME/monica` を付ける。
 
 ```bash
 MONICA_HOME=$HOME/monica monica task status
 ```
 
-直前に作成した `MON-<id>` が一覧に出ていれば track 成功。
+直前に作成した `MON-<id>` が一覧に出ていれば track 成功。子 issue なら PARENT 列に
+親の MON-ID が入っていることも確認する。MON-ID・元の issue URL・親 MON-ID を
+ユーザーに報告する。
 
 ## 補足
 
