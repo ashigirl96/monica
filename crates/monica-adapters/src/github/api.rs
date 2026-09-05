@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::{anyhow, Context, Result};
 use monica_application::{
     FetchedIssue, GithubGateway, GithubIssue, GithubIssueState, GithubPullRequest,
-    GithubPullRequestStatus, RepoPullRequest,
+    GithubPullRequestStatus, IssueAddress, RepoPullRequest,
 };
 use octocrab::Octocrab;
 use serde::de::DeserializeOwned;
@@ -291,8 +291,8 @@ fn issues_query(numbers: &[i64]) -> String {
         .iter()
         .map(|n| {
             format!(
-                "    i{n}: issue(number: {n}) {{ number title state parent {{ number }} \
-subIssues(first: 50) {{ nodes {{ number }} }} \
+                "    i{n}: issue(number: {n}) {{ number title state \
+parent {{ number repository {{ nameWithOwner }} }} \
 closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {{ nodes {{ number url state \
 isDraft repository {{ nameWithOwner }} }} }} }}\n"
             )
@@ -326,8 +326,12 @@ fn issues_from_response(response: IssuesResponse) -> Result<Vec<FetchedIssue>> {
             number: node.number,
             title: node.title,
             state: parse_issue_state(&node.state)?,
-            parent: node.parent.map(|p| p.number),
-            sub_issues: node.sub_issues.nodes.into_iter().map(|n| n.number).collect(),
+            // `external_refs.repo` is stored lowercased by `parse_owner_repo`, so the address the
+            // sync resolves the parent by has to be lowercased too.
+            parent: node.parent.map(|p| IssueAddress {
+                repo: p.repository.name_with_owner.to_ascii_lowercase(),
+                number: p.number,
+            }),
             linked_pull_requests,
         });
     }
@@ -355,9 +359,7 @@ struct IssueNode {
     number: i64,
     title: String,
     state: String,
-    parent: Option<IssueNumberNode>,
-    #[serde(rename = "subIssues")]
-    sub_issues: SubIssueConnection,
+    parent: Option<IssueParentNode>,
     #[serde(rename = "closedByPullRequestsReferences")]
     closed_by_pull_requests_references: LinkedPullRequestConnection,
 }
@@ -369,13 +371,9 @@ struct LinkedPullRequestConnection {
 }
 
 #[derive(Debug, Deserialize)]
-struct IssueNumberNode {
+struct IssueParentNode {
     number: i64,
-}
-
-#[derive(Debug, Deserialize)]
-struct SubIssueConnection {
-    nodes: Vec<IssueNumberNode>,
+    repository: RepositoryNode,
 }
 
 #[derive(Debug, Deserialize)]
@@ -468,18 +466,18 @@ struct PullRequestNode {
     url: String,
     state: String,
     is_draft: bool,
-    repository: PullRequestRepository,
+    repository: RepositoryNode,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PullRequestRepository {
+struct RepositoryNode {
     name_with_owner: String,
 }
 
 #[cfg(test)]
 mod tests {
-    use monica_application::{GithubIssueState, GithubPullRequestStatus};
+    use monica_application::{GithubIssueState, GithubPullRequestStatus, IssueAddress};
 
     use super::{
         issue_from_response, issues_from_response, issues_query, pull_request_from_response,
@@ -654,8 +652,9 @@ mod tests {
         let query = issues_query(&[42, 7]);
         assert!(query.contains("i42: issue(number: 42)"), "{query}");
         assert!(query.contains("i7: issue(number: 7)"), "{query}");
-        assert!(query.contains("parent { number }"), "{query}");
-        assert!(query.contains("subIssues(first: 50)"), "{query}");
+        // The parent's repo is part of its identity: sub-issues can cross repositories.
+        assert!(query.contains("parent { number repository { nameWithOwner } }"), "{query}");
+        assert!(!query.contains("subIssues"), "{query}");
         assert!(
             query.contains("closedByPullRequestsReferences(first: 10, includeClosedPrs: true)"),
             "{query}"
@@ -670,8 +669,7 @@ mod tests {
                     "number": 42,
                     "title": "hello",
                     "state": "OPEN",
-                    "parent": { "number": 7 },
-                    "subIssues": { "nodes": [{ "number": 43 }, { "number": 44 }] },
+                    "parent": { "number": 7, "repository": { "nameWithOwner": "Owner/Repo" } },
                     "closedByPullRequestsReferences": { "nodes": [] }
                 }
             }
@@ -683,8 +681,11 @@ mod tests {
         assert_eq!(issues[0].title, "hello");
         // GraphQL shouts its enums; the parse must not care.
         assert_eq!(issues[0].state, GithubIssueState::Open);
-        assert_eq!(issues[0].parent, Some(7));
-        assert_eq!(issues[0].sub_issues, vec![43, 44]);
+        assert_eq!(
+            issues[0].parent,
+            Some(IssueAddress { repo: "owner/repo".to_string(), number: 7 }),
+            "the address must be lowercased to match how external_refs stores a repo"
+        );
         assert!(issues[0].linked_pull_requests.is_empty());
     }
 
@@ -697,7 +698,6 @@ mod tests {
                     "title": "hello",
                     "state": "CLOSED",
                     "parent": null,
-                    "subIssues": { "nodes": [] },
                     "closedByPullRequestsReferences": { "nodes": [
                         {
                             "number": 482,
@@ -741,7 +741,6 @@ mod tests {
                     "title": "kept",
                     "state": "CLOSED",
                     "parent": null,
-                    "subIssues": { "nodes": [] },
                     "closedByPullRequestsReferences": { "nodes": [] }
                 }
             }

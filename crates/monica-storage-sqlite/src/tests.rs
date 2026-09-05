@@ -1,6 +1,6 @@
 use monica_application::{
     EventRepository, ExecutionProfile, FetchedIssue, GithubIssueState, GithubIssueSyncStore,
-    GithubPullRequest, GithubPullRequestStatus,
+    GithubPullRequest, GithubPullRequestStatus, IssueAddress,
     ProjectRepository, PullRequestBranchSyncCandidate, TabAttachment, TaskBoardQuery,
     TaskRunObservation,
     TaskRunStore, TaskStore, TaskSummaryFilter, TaskSummaryRow, TerminalRunspaceRow,
@@ -2838,9 +2838,16 @@ fn fetched(number: i64, title: &str, state: GithubIssueState) -> FetchedIssue {
         title: title.to_string(),
         state,
         parent: None,
-        sub_issues: Vec::new(),
         linked_pull_requests: Vec::new(),
     }
+}
+
+fn fetched_with_parent(number: i64, parent: IssueAddress) -> FetchedIssue {
+    FetchedIssue { parent: Some(parent), ..fetched(number, "issue", GithubIssueState::Open) }
+}
+
+fn parent_of(db: &SqliteStore, id: &TaskId) -> Option<String> {
+    db.get_task(id).unwrap().unwrap().parent_task_id.map(|p| p.to_string())
 }
 
 /// An issue-backed task carries no title of its own; the cache is what the reads must show.
@@ -2979,4 +2986,161 @@ fn bulk_record_issue_sync_with_no_entries_is_a_noop() {
     let id = tracked_task(&mut db, "owner/repo", 42);
     db.bulk_record_issue_sync(&[]).unwrap();
     assert_eq!(db.get_task(&id).unwrap().unwrap().title, "");
+}
+
+fn issue_ref_id(db: &SqliteStore, repo: &str, number: i64) -> i64 {
+    db.all_open_task_issue_refs()
+        .unwrap()
+        .into_iter()
+        .find(|r| r.repo == repo && r.number == number)
+        .unwrap()
+        .external_ref_id
+}
+
+/// Track a parent and a child issue in one repo and let a sync link them, the starting point for
+/// every hierarchy assertion below.
+fn link_parent_and_child(db: &mut SqliteStore, parent_number: i64, child_number: i64) -> (TaskId, TaskId) {
+    let parent = tracked_task(db, "owner/repo", parent_number);
+    let child = tracked_task(db, "owner/repo", child_number);
+    let ref_id = issue_ref_id(db, "owner/repo", child_number);
+    db.bulk_record_issue_sync(&[(
+        ref_id,
+        fetched_with_parent(
+            child_number,
+            IssueAddress { repo: "owner/repo".to_string(), number: parent_number },
+        ),
+    )])
+    .unwrap();
+    (parent, child)
+}
+
+#[test]
+fn bulk_record_issue_sync_links_the_child_to_its_parent_task() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+
+    let (parent, child) = link_parent_and_child(&mut db, 100, 101);
+
+    assert_eq!(parent_of(&db, &child).as_deref(), Some(parent.as_str()));
+    let rows = db.list_task_summaries(TaskSummaryFilter::All, None).unwrap();
+    let summary = rows.iter().find(|r| r.id == child.as_str()).unwrap();
+    assert_eq!(summary.parent_task_id.as_deref(), Some(parent.as_str()));
+}
+
+#[test]
+fn bulk_record_issue_sync_clears_a_link_github_dropped() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let (_, child) = link_parent_and_child(&mut db, 100, 101);
+    let ref_id = issue_ref_id(&db, "owner/repo", 101);
+
+    db.bulk_record_issue_sync(&[(ref_id, fetched(101, "issue", GithubIssueState::Open))]).unwrap();
+
+    assert_eq!(parent_of(&db, &child), None, "GitHub is the source of truth for the link");
+}
+
+#[test]
+fn bulk_record_issue_sync_leaves_a_closed_parent_task_unlinked() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let parent = tracked_task(&mut db, "owner/repo", 100);
+    let child = tracked_task(&mut db, "owner/repo", 101);
+    let ref_id = issue_ref_id(&db, "owner/repo", 101);
+    db.mark_task_closed(&parent).unwrap();
+
+    db.bulk_record_issue_sync(&[(
+        ref_id,
+        fetched_with_parent(101, IssueAddress { repo: "owner/repo".to_string(), number: 100 }),
+    )])
+    .unwrap();
+
+    assert_eq!(
+        parent_of(&db, &child),
+        None,
+        "a new child must not hang off the remains of a closed epic"
+    );
+}
+
+#[test]
+fn bulk_record_issue_sync_resolves_the_parent_in_the_repo_that_owns_it() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let real_parent = tracked_task(&mut db, "other/repo", 100);
+    let same_number_elsewhere = tracked_task(&mut db, "owner/repo", 100);
+    let child = tracked_task(&mut db, "owner/repo", 101);
+    let ref_id = issue_ref_id(&db, "owner/repo", 101);
+
+    db.bulk_record_issue_sync(&[(
+        ref_id,
+        fetched_with_parent(101, IssueAddress { repo: "other/repo".to_string(), number: 100 }),
+    )])
+    .unwrap();
+
+    assert_eq!(parent_of(&db, &child).as_deref(), Some(real_parent.as_str()));
+    assert_ne!(parent_of(&db, &child).as_deref(), Some(same_number_elsewhere.as_str()));
+}
+
+#[test]
+fn bulk_record_issue_sync_ignores_a_self_parent() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = tracked_task(&mut db, "owner/repo", 42);
+    let ref_id = issue_ref_id(&db, "owner/repo", 42);
+
+    db.bulk_record_issue_sync(&[(
+        ref_id,
+        fetched_with_parent(42, IssueAddress { repo: "owner/repo".to_string(), number: 42 }),
+    )])
+    .unwrap();
+
+    assert_eq!(parent_of(&db, &task), None);
+}
+
+#[test]
+fn a_closed_child_keeps_the_link_it_had_while_open() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let (parent, child) = link_parent_and_child(&mut db, 100, 101);
+    let ref_id = issue_ref_id(&db, "owner/repo", 101);
+
+    db.mark_task_closed(&child).unwrap();
+
+    assert!(
+        db.all_open_task_issue_refs().unwrap().iter().all(|r| r.external_ref_id != ref_id),
+        "a closed task leaves the sync"
+    );
+    assert_eq!(
+        parent_of(&db, &child).as_deref(),
+        Some(parent.as_str()),
+        "the link freezes with the rest of the closed task's GitHub cache"
+    );
+}
+
+#[test]
+fn closing_a_parent_unlinks_its_open_children_but_not_its_closed_ones() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let parent = tracked_task(&mut db, "owner/repo", 100);
+    let open_child = tracked_task(&mut db, "owner/repo", 101);
+    let closed_child = tracked_task(&mut db, "owner/repo", 102);
+    let entries: Vec<(i64, FetchedIssue)> = [101, 102]
+        .into_iter()
+        .map(|number| {
+            (
+                issue_ref_id(&db, "owner/repo", number),
+                fetched_with_parent(
+                    number,
+                    IssueAddress { repo: "owner/repo".to_string(), number: 100 },
+                ),
+            )
+        })
+        .collect();
+    db.bulk_record_issue_sync(&entries).unwrap();
+    db.mark_task_closed(&closed_child).unwrap();
+
+    db.mark_task_closed(&parent).unwrap();
+
+    assert_eq!(
+        parent_of(&db, &open_child),
+        None,
+        "an open child must not keep pointing at a closed parent until the next sync"
+    );
+    assert_eq!(
+        parent_of(&db, &closed_child).as_deref(),
+        Some(parent.as_str()),
+        "a closed child's link stays frozen with the rest of its cache"
+    );
 }

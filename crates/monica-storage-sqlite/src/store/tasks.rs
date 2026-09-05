@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::SqliteStore;
 use monica_application::{
@@ -74,6 +74,17 @@ pub(super) fn get_task(conn: &Connection, id: &TaskId) -> Result<Option<Task>> {
     }
 }
 
+/// Picks the newest open task tracking one external ref. Shared by the full-row and the id-only
+/// lookup so the rule can't drift between them. `MON-<n>` sorts wrong as text (MON-10 < MON-9), so
+/// the created_at tie-break casts the counter part to an integer — the same shape the summary
+/// query uses for the latest run.
+const NEWEST_OPEN_TASK_FOR_REF: &str = "
+          WHERE t.status != ?1
+            AND t.id IN (SELECT task_id FROM external_refs
+                          WHERE provider = ?2 AND ref_type = ?3 AND repo = ?4 AND number = ?5)
+          ORDER BY t.created_at DESC, CAST(SUBSTR(t.id, 5) AS INTEGER) DESC
+          LIMIT 1";
+
 pub(super) fn find_open_task_by_external_ref_in(
     conn: &Connection,
     provider: Provider,
@@ -81,15 +92,8 @@ pub(super) fn find_open_task_by_external_ref_in(
     repo: &str,
     number: i64,
 ) -> Result<Option<Task>> {
-    // `MON-<n>` sorts wrong as text (MON-10 < MON-9), so the created_at tie-break casts the
-    // counter part to an integer — the same shape the summary query uses for the latest run.
     let mut stmt = conn.prepare(&format!(
-        "SELECT {TASK_COLUMNS} FROM {TASK_FROM}
-          WHERE t.status != ?1
-            AND t.id IN (SELECT task_id FROM external_refs
-                          WHERE provider = ?2 AND ref_type = ?3 AND repo = ?4 AND number = ?5)
-          ORDER BY t.created_at DESC, CAST(SUBSTR(t.id, 5) AS INTEGER) DESC
-          LIMIT 1"
+        "SELECT {TASK_COLUMNS} FROM {TASK_FROM}{NEWEST_OPEN_TASK_FOR_REF}"
     ))?;
     let mut rows = stmt.query(params![
         TaskStatus::Closed.as_str(),
@@ -102,6 +106,31 @@ pub(super) fn find_open_task_by_external_ref_in(
         Some(row) => Ok(Some(crate::row::task_from_row(row)?)),
         None => Ok(None),
     }
+}
+
+/// The same lookup for callers that only need the id — the issue sync resolving a parent link, for
+/// one. Reading it through [`find_open_task_by_external_ref_in`] would hydrate a whole task (two
+/// joins plus the JSON and enum columns) on every synced issue just to throw all of it away.
+pub(super) fn find_open_task_id_by_external_ref_in(
+    conn: &Connection,
+    provider: Provider,
+    ref_type: RefType,
+    repo: &str,
+    number: i64,
+) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            &format!("SELECT t.id FROM tasks t{NEWEST_OPEN_TASK_FOR_REF}"),
+            params![
+                TaskStatus::Closed.as_str(),
+                provider.as_str(),
+                ref_type.as_str(),
+                repo,
+                number
+            ],
+            |row| row.get(0),
+        )
+        .optional()?)
 }
 
 pub(super) fn mark_task_closed_in(conn: &Connection, id: &TaskId) -> Result<Task> {
@@ -118,6 +147,13 @@ pub(super) fn mark_task_closed_in(conn: &Connection, id: &TaskId) -> Result<Task
     if affected == 0 {
         return Err(anyhow!("task not found: {id}"));
     }
+    // A closed task is no longer a parent, so drop the links pointing at it now rather than
+    // waiting for the next GitHub sync to re-resolve them. Children that are themselves closed
+    // keep theirs: their whole GitHub cache is frozen at what it was while they were open.
+    conn.execute(
+        "UPDATE tasks SET parent_task_id = NULL WHERE parent_task_id = ?1 AND status != 'closed'",
+        params![id.as_str()],
+    )?;
     let mut stmt = conn.prepare(&format!("SELECT {TASK_COLUMNS} FROM {TASK_FROM} WHERE t.id = ?1"))?;
     let mut rows = stmt.query(params![id.as_str()])?;
     match rows.next()? {
@@ -276,6 +312,7 @@ impl TaskBoardQuery for SqliteStore {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT
                t.id AS task_id,
+               t.parent_task_id AS parent_task_id,
                COALESCE(issue_state.title, t.title, '') AS title,
                coalesce(project.repo, issue_ref.repo, t.project_id) AS project,
                issue_ref.number AS github_issue_number,
@@ -363,6 +400,7 @@ impl TaskBoardQuery for SqliteStore {
                 });
             let item = TaskSummaryRow {
                 id: row.get("task_id")?,
+                parent_task_id: row.get("parent_task_id")?,
                 title: row.get("title")?,
                 project: row.get("project")?,
                 github_issue_number,

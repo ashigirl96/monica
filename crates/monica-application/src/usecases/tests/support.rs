@@ -283,7 +283,15 @@ impl FakeRepos {
             .ok_or_else(|| anyhow!("task not found: {id}"))?;
         task.status = TaskStatus::Closed;
         task.closed_at = Some("2026-06-02T00:00:00.000Z".to_string());
-        Ok(task.clone())
+        let closed = task.clone();
+        // Mirrors the store: a closed task stops being a parent, but a closed child keeps the
+        // link it had while open.
+        for other in state.tasks.values_mut() {
+            if other.status != TaskStatus::Closed && other.parent_task_id.as_ref() == Some(id) {
+                other.parent_task_id = None;
+            }
+        }
+        Ok(closed)
     }
 
     fn do_mark_task(&self, id: &TaskId, status: TaskStatus, note: Option<&str>) -> Result<()> {
@@ -382,6 +390,7 @@ impl TaskBoardQuery for FakeRepos {
                 let resolved = self.resolve_title(task.clone());
                 TaskSummaryRow {
                     id: task.id.to_string(),
+                    parent_task_id: task.parent_task_id.as_ref().map(|p| p.to_string()),
                     title: resolved.title,
                     project: task.project_id.clone(),
                     github_issue_number: None,
@@ -471,11 +480,35 @@ impl GithubIssueSyncStore for FakeRepos {
     }
 
     fn bulk_record_issue_sync(&mut self, entries: &[(i64, FetchedIssue)]) -> Result<()> {
-        let mut state = self.state.borrow_mut();
         for (external_ref_id, issue) in entries {
+            // Same resolution the SQL store does: the parent is whichever open task tracks the
+            // parent issue, in the repo that owns it, and never the child itself.
+            let parent_task_id = match &issue.parent {
+                Some(address) => self.do_find_open_task_by_external_ref(
+                    Provider::Github,
+                    RefType::Issue,
+                    &address.repo,
+                    address.number,
+                )?,
+                None => None,
+            };
+            let mut state = self.state.borrow_mut();
             state
                 .issue_ref_states
                 .insert(*external_ref_id, (issue.title.clone(), issue.state));
+            let child_task_id = state
+                .refs
+                .values()
+                .flatten()
+                .find(|r| r.id == *external_ref_id)
+                .map(|r| r.task_id.clone());
+            if let Some(child_task_id) = child_task_id {
+                let parent_task_id =
+                    parent_task_id.map(|task| task.id).filter(|id| id.as_str() != child_task_id);
+                if let Some(task) = state.tasks.get_mut(&child_task_id) {
+                    task.parent_task_id = parent_task_id;
+                }
+            }
         }
         Ok(())
     }
@@ -1211,7 +1244,6 @@ impl GithubGateway for FakeGithub {
                     title: format!("{repo} issue"),
                     state: GithubIssueState::Open,
                     parent: None,
-                    sub_issues: Vec::new(),
                     linked_pull_requests: Vec::new(),
                 })
                 .collect())
@@ -1289,7 +1321,6 @@ impl GithubGateway for RetitlingGithub {
                     title: title.clone(),
                     state: GithubIssueState::Open,
                     parent: None,
-                    sub_issues: Vec::new(),
                     linked_pull_requests: Vec::new(),
                 })
                 .collect())
@@ -1596,6 +1627,7 @@ fn task_from_new(id: String, new: NewTask) -> Task {
         details: new.details,
         source: new.source,
         primary_task_run_id: None,
+        parent_task_id: None,
         closed_at: None,
         created_at: "2026-06-02T00:00:00.000Z".to_string(),
         updated_at: "2026-06-02T00:00:00.000Z".to_string(),
@@ -1810,6 +1842,7 @@ pub(crate) fn make_task(id: &str, status: TaskStatus, primary_run_id: Option<&st
         details: RawJson::empty_object(),
         source: None,
         primary_task_run_id: primary_run_id.map(|s| TaskRunId::from_store(s.to_string())),
+        parent_task_id: None,
         closed_at: None,
         created_at: "2026-06-02T00:00:00.000Z".to_string(),
         updated_at: "2026-06-02T00:00:00.000Z".to_string(),

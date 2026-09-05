@@ -8,8 +8,8 @@ use crate::usecases::github::{
     TrackOutcome,
 };
 use crate::{
-    FetchedIssue, GithubIssueState, GithubPullRequest, GithubPullRequestStatus, RepoPullRequest,
-    UnresolvedPullRequestRef,
+    FetchedIssue, GithubIssueState, GithubPullRequest, GithubPullRequestStatus, IssueAddress,
+    RepoPullRequest, UnresolvedPullRequestRef,
 };
 
 #[tokio::test]
@@ -128,13 +128,19 @@ async fn track_github_issue_leaves_the_task_row_without_a_baked_in_title() {
     assert_eq!(repos.get_task(&report.task.id).unwrap().unwrap().title, "");
 }
 
+fn sub_issue(number: i64, parent_repo: &str, parent_number: i64) -> FetchedIssue {
+    FetchedIssue {
+        parent: Some(IssueAddress { repo: parent_repo.to_string(), number: parent_number }),
+        ..open_issue(number, "sub issue")
+    }
+}
+
 fn open_issue(number: i64, title: &str) -> FetchedIssue {
     FetchedIssue {
         number,
         title: title.to_string(),
         state: GithubIssueState::Open,
         parent: None,
-        sub_issues: Vec::new(),
         linked_pull_requests: Vec::new(),
     }
 }
@@ -187,7 +193,6 @@ async fn bulk_sync_issues_records_the_state_without_touching_task_status() {
             title: "closed upstream".to_string(),
             state: GithubIssueState::Closed,
             parent: None,
-            sub_issues: Vec::new(),
             linked_pull_requests: Vec::new(),
         }]),
     )]));
@@ -680,4 +685,55 @@ async fn bulk_sync_keeps_active_pr_when_a_worse_one_arrives_later() {
     assert_eq!(matched.len(), 1);
     assert_eq!(matched[0].number, 50, "the active PR is kept over a newer closed one");
     assert_eq!(matched[0].status, GithubPullRequestStatus::Open);
+}
+
+/// An epic (#42) and a sub-issue (#43), both tracked as tasks.
+async fn tracked_epic_and_sub(repos: &mut FakeRepos) -> (TaskId, TaskId) {
+    let epic = track_github_issue(repos, &FakeGithub, track_input()).await.unwrap();
+    let sub = track_github_issue(
+        repos,
+        &FakeGithub,
+        TrackGithubIssueInput { repo: "owner/repo".to_string(), number: 43 },
+    )
+    .await
+    .unwrap();
+    (epic.task.id, sub.task.id)
+}
+
+/// A gateway reporting #43 as a sub-issue of #42.
+fn linked_hierarchy() -> RepoIssueGithub {
+    RepoIssueGithub::new(HashMap::from([(
+        "owner/repo".to_string(),
+        Some(vec![open_issue(42, "epic"), sub_issue(43, "owner/repo", 42)]),
+    )]))
+}
+
+#[tokio::test]
+async fn bulk_sync_issues_links_a_sub_issue_to_its_parent_task() {
+    let mut repos = FakeRepos::default();
+    let (epic, sub) = tracked_epic_and_sub(&mut repos).await;
+
+    bulk_sync_issues(&mut repos, &linked_hierarchy()).await.unwrap();
+
+    assert_eq!(repos.get_task(&sub).unwrap().unwrap().parent_task_id, Some(epic.clone()));
+    assert_eq!(
+        repos.get_task(&epic).unwrap().unwrap().parent_task_id,
+        None,
+        "the epic has no parent of its own"
+    );
+}
+
+#[tokio::test]
+async fn bulk_sync_issues_unlinks_a_parent_github_dropped() {
+    let mut repos = FakeRepos::default();
+    let (_, sub) = tracked_epic_and_sub(&mut repos).await;
+    bulk_sync_issues(&mut repos, &linked_hierarchy()).await.unwrap();
+
+    let unlinked = RepoIssueGithub::new(HashMap::from([(
+        "owner/repo".to_string(),
+        Some(vec![open_issue(42, "epic"), open_issue(43, "sub issue")]),
+    )]));
+    bulk_sync_issues(&mut repos, &unlinked).await.unwrap();
+
+    assert_eq!(repos.get_task(&sub).unwrap().unwrap().parent_task_id, None);
 }

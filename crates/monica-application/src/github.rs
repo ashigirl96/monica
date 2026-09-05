@@ -52,17 +52,25 @@ impl GithubIssueState {
     }
 }
 
-/// An issue as returned by the bulk sync fetch. `parent` and `sub_issues` mirror the GitHub
-/// Sub-issues links; #464 turns them into `parent_task_id` and nothing reads them yet.
-/// `linked_pull_requests` are the PRs whose closing keyword points at this issue — the reverse
-/// lookup that reaches tasks the branch pass cannot see.
+/// Where an issue lives. Sub-issues can cross repositories inside an organization, so a parent is
+/// only identified by its number together with the repo that owns it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IssueAddress {
+    pub repo: String,
+    pub number: i64,
+}
+
+/// An issue as returned by the bulk sync fetch. `parent` mirrors the GitHub Sub-issues link and
+/// becomes `parent_task_id`. The children are not fetched: a sync re-reads every open task's issue,
+/// so a tracked child always reports the same link from its own side. `linked_pull_requests` are
+/// the PRs whose closing keyword points at this issue — the reverse lookup that reaches tasks the
+/// branch pass cannot see.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FetchedIssue {
     pub number: i64,
     pub title: String,
     pub state: GithubIssueState,
-    pub parent: Option<i64>,
-    pub sub_issues: Vec<i64>,
+    pub parent: Option<IssueAddress>,
     pub linked_pull_requests: Vec<GithubPullRequest>,
 }
 
