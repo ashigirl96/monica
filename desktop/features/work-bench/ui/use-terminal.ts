@@ -102,16 +102,20 @@ async function runConnect(
   let sessionId = optionsRef.current.sessionId;
   const isNew = !sessionId;
   try {
+    // An unopened (background) terminal reports xterm's default grid here; the PTY follows
+    // the fitted size once the pane is shown.
+    const created = getTabTerminal(tabId);
+    const createdRows = created?.rows ?? 24;
+    const createdCols = created?.cols ?? 80;
     if (!sessionId) {
       const options = optionsRef.current;
-      const term = getTabTerminal(tabId);
       const session = await terminalCreateSession({
         runspaceId: options.runspaceId,
         tabId,
         kind: options.launch ? "agent" : "shell",
         cwd: options.cwd,
-        rows: term?.rows ?? 24,
-        cols: term?.cols ?? 80,
+        rows: createdRows,
+        cols: createdCols,
         // A launch intent carries the run-identity env vars, so it supersedes the runspace
         // env rather than being merged with it. The agent scaffolding and the tab/session
         // ids are injected backend-side.
@@ -170,6 +174,11 @@ async function runConnect(
     }
     conn.state = "attached";
     store.set(setSessionStatusAtom, sessionId, { status: "running" });
+
+    // The pane may have been opened and fitted while the create/attach was in flight.
+    if (isNew && term?.element && (term.rows !== createdRows || term.cols !== createdCols)) {
+      terminalResize(sid, term.rows, term.cols);
+    }
 
     const initialCommand = isNew ? optionsRef.current.launch?.initialCommand : undefined;
     if (initialCommand) {
@@ -316,6 +325,17 @@ export function useTerminal(
       openedRef.current = false;
     };
   }, [options.tabId, containerRef]);
+
+  // A tab without a session starts one as soon as it exists, shown or not: a run launched
+  // from the board must have its shell and agent going before the user looks at it. xterm
+  // buffers writes to an unopened terminal, so the output is already there on activation.
+  // Existing sessions are only re-attached when shown — their replay is sized to the pane.
+  useEffect(() => {
+    if (options.sessionId || isDeadStatus(options.sessionStatus)) return;
+    const conn = getTabConnection(options.tabId);
+    if (conn?.inFlight || conn?.state === "attached") return;
+    connectTab(optionsRef, sessionIdRef);
+  }, [options.tabId, options.sessionId, options.sessionStatus]);
 
   useEffect(() => {
     const term = termRef.current;
