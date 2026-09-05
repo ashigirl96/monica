@@ -22,6 +22,7 @@ import {
   terminalAttach,
   terminalCreateSession,
   terminalResize,
+  terminalTerminate,
   terminalWrite,
   type TerminalSessionStatus,
 } from "@/commands/terminal";
@@ -121,6 +122,15 @@ async function runConnect(
         // ids are injected backend-side.
         env: options.launch?.env ?? options.env,
       });
+      // The tab may have been closed while the create was pending; the closer found no
+      // sessionId to end. Nothing has run in the session yet, so there is nothing worth
+      // keeping detached — kill it rather than leave an orphan the UI can no longer reach.
+      if (getTabConnection(tabId) !== conn) {
+        terminalTerminate(session.id).catch((e: unknown) => {
+          console.warn(`terminal terminate failed for orphaned session ${session.id}:`, e);
+        });
+        return;
+      }
       sessionId = session.id;
       options.onSessionCreated?.(session.id);
       if (session.status === "failed") {
@@ -150,6 +160,13 @@ async function runConnect(
     );
 
     const attach = await terminalAttach(sessionId);
+    // Released mid-attach: the closer already ended the session by id, so only the
+    // listeners registered after the release are left to drop.
+    if (getTabConnection(tabId) !== conn) {
+      for (const unlisten of conn.unlisteners) unlisten();
+      conn.unlisteners = [];
+      return;
+    }
     // No reset before the replay: the terminal here is always a freshly mounted (empty)
     // instance — the connection guard prevents double-attach — and Terminal.reset()
     // corrupts the WebGL renderer (blank canvas, "this._renderer.value.dimensions"
