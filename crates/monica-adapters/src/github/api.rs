@@ -166,16 +166,16 @@ fn pull_request_from_response(response: PullRequestResponse) -> Result<GithubPul
     if node.number <= 0 {
         return Err(anyhow!("GitHub pull request returned invalid number"));
     }
+    github_pull_request_from(node)
+}
+
+fn github_pull_request_from(node: PullRequestNode) -> Result<GithubPullRequest> {
     Ok(GithubPullRequest {
-        repo: pull_request_repo(&node),
+        repo: node.repository.name_with_owner.to_lowercase(),
         number: node.number,
         url: node.url,
         status: resolve_pull_request_status(&node.state, node.is_draft)?,
     })
-}
-
-fn pull_request_repo(node: &PullRequestNode) -> String {
-    node.repository.name_with_owner.to_lowercase()
 }
 
 fn resolve_pull_request_status(state: &str, is_draft: bool) -> Result<GithubPullRequestStatus> {
@@ -292,7 +292,9 @@ fn issues_query(numbers: &[i64]) -> String {
         .map(|n| {
             format!(
                 "    i{n}: issue(number: {n}) {{ number title state parent {{ number }} \
-subIssues(first: 50) {{ nodes {{ number }} }} }}\n"
+subIssues(first: 50) {{ nodes {{ number }} }} \
+closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {{ nodes {{ number url state \
+isDraft repository {{ nameWithOwner }} }} }} }}\n"
             )
         })
         .collect();
@@ -313,12 +315,20 @@ fn issues_from_response(response: IssuesResponse) -> Result<Vec<FetchedIssue>> {
         if node.number <= 0 {
             continue;
         }
+        let mut linked_pull_requests = Vec::new();
+        for pull_request in node.closed_by_pull_requests_references.nodes {
+            if pull_request.number <= 0 {
+                continue;
+            }
+            linked_pull_requests.push(github_pull_request_from(pull_request)?);
+        }
         issues.push(FetchedIssue {
             number: node.number,
             title: node.title,
             state: parse_issue_state(&node.state)?,
             parent: node.parent.map(|p| p.number),
             sub_issues: node.sub_issues.nodes.into_iter().map(|n| n.number).collect(),
+            linked_pull_requests,
         });
     }
     Ok(issues)
@@ -348,6 +358,14 @@ struct IssueNode {
     parent: Option<IssueNumberNode>,
     #[serde(rename = "subIssues")]
     sub_issues: SubIssueConnection,
+    #[serde(rename = "closedByPullRequestsReferences")]
+    closed_by_pull_requests_references: LinkedPullRequestConnection,
+}
+
+/// The PRs whose closing keyword points at this issue.
+#[derive(Debug, Deserialize)]
+struct LinkedPullRequestConnection {
+    nodes: Vec<PullRequestNode>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -638,6 +656,10 @@ mod tests {
         assert!(query.contains("i7: issue(number: 7)"), "{query}");
         assert!(query.contains("parent { number }"), "{query}");
         assert!(query.contains("subIssues(first: 50)"), "{query}");
+        assert!(
+            query.contains("closedByPullRequestsReferences(first: 10, includeClosedPrs: true)"),
+            "{query}"
+        );
     }
 
     #[test]
@@ -649,7 +671,8 @@ mod tests {
                     "title": "hello",
                     "state": "OPEN",
                     "parent": { "number": 7 },
-                    "subIssues": { "nodes": [{ "number": 43 }, { "number": 44 }] }
+                    "subIssues": { "nodes": [{ "number": 43 }, { "number": 44 }] },
+                    "closedByPullRequestsReferences": { "nodes": [] }
                 }
             }
         }))
@@ -662,6 +685,50 @@ mod tests {
         assert_eq!(issues[0].state, GithubIssueState::Open);
         assert_eq!(issues[0].parent, Some(7));
         assert_eq!(issues[0].sub_issues, vec![43, 44]);
+        assert!(issues[0].linked_pull_requests.is_empty());
+    }
+
+    #[test]
+    fn issues_from_response_maps_the_pull_requests_that_close_the_issue() {
+        let response: IssuesResponse = serde_json::from_value(serde_json::json!({
+            "repository": {
+                "i484": {
+                    "number": 484,
+                    "title": "hello",
+                    "state": "CLOSED",
+                    "parent": null,
+                    "subIssues": { "nodes": [] },
+                    "closedByPullRequestsReferences": { "nodes": [
+                        {
+                            "number": 482,
+                            "url": "https://github.com/AshiGirl96/Monica/pull/482",
+                            "state": "MERGED",
+                            "isDraft": false,
+                            "repository": { "nameWithOwner": "AshiGirl96/Monica" }
+                        },
+                        {
+                            "number": 483,
+                            "url": "https://github.com/o/r/pull/483",
+                            "state": "OPEN",
+                            "isDraft": true,
+                            "repository": { "nameWithOwner": "o/r" }
+                        },
+                        { "number": 0, "url": "u", "state": "OPEN", "isDraft": false,
+                          "repository": { "nameWithOwner": "o/r" } }
+                    ] }
+                }
+            }
+        }))
+        .unwrap();
+        let issues = issues_from_response(response).unwrap();
+        let linked = &issues[0].linked_pull_requests;
+        assert_eq!(linked.len(), 2, "the invalid number is dropped");
+        assert_eq!(linked[0].number, 482);
+        // The PR's own repo is what gets recorded, normalized the way refs are stored.
+        assert_eq!(linked[0].repo, "ashigirl96/monica");
+        assert_eq!(linked[0].status, GithubPullRequestStatus::Merged);
+        // An open PR marked draft resolves to Draft, same as the by-number lookup.
+        assert_eq!(linked[1].status, GithubPullRequestStatus::Draft);
     }
 
     #[test]
@@ -674,7 +741,8 @@ mod tests {
                     "title": "kept",
                     "state": "CLOSED",
                     "parent": null,
-                    "subIssues": { "nodes": [] }
+                    "subIssues": { "nodes": [] },
+                    "closedByPullRequestsReferences": { "nodes": [] }
                 }
             }
         }))

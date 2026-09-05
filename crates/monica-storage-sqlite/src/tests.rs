@@ -1565,6 +1565,81 @@ fn bulk_record_pr_sync_upserts_refs_and_states() {
 }
 
 #[test]
+fn record_linked_pull_requests_creates_the_ref_for_a_branchless_task() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let id = tracked_task(&mut db, "owner/repo", 484);
+    // No run, so the branch pass has nothing to match — exactly the attach / in-place case.
+    assert!(db.all_branch_sync_candidates().unwrap().is_empty());
+
+    db.record_linked_pull_requests(&[(
+        id.to_string(),
+        GithubPullRequest {
+            repo: "owner/repo".to_string(),
+            number: 482,
+            url: "https://github.com/owner/repo/pull/482".to_string(),
+            status: GithubPullRequestStatus::Open,
+        },
+    )])
+    .unwrap();
+
+    let refs = db.list_github_pull_request_refs(id.as_str()).unwrap();
+    assert_eq!(refs.len(), 1);
+    assert_eq!(refs[0].number, Some(482));
+    assert_eq!(refs[0].status.as_deref(), Some("open"));
+    assert_eq!(pr_status_of(&db, &id), "open");
+}
+
+#[test]
+fn record_linked_pull_requests_upserts_the_ref_the_branch_pass_already_made() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let (id, candidate) = project_task_with_branch(&mut db, "owner/repo", "main", "feature/a");
+    db.bulk_record_pr_sync(
+        &[(
+            candidate,
+            vec![GithubPullRequest {
+                repo: "owner/repo".to_string(),
+                number: 11,
+                url: "https://github.com/owner/repo/pull/11".to_string(),
+                status: GithubPullRequestStatus::Open,
+            }],
+        )],
+        &[],
+    )
+    .unwrap();
+
+    // Both discovery paths write through the same upsert, so the second must land on the first row.
+    db.record_linked_pull_requests(&[(
+        id.to_string(),
+        GithubPullRequest {
+            repo: "owner/repo".to_string(),
+            number: 11,
+            url: "https://github.com/owner/repo/pull/11-moved".to_string(),
+            status: GithubPullRequestStatus::Merged,
+        },
+    )])
+    .unwrap();
+
+    let refs = db.list_github_pull_request_refs(id.as_str()).unwrap();
+    assert_eq!(refs.len(), 1, "relinking a known PR never forks a second ref");
+    assert_eq!(
+        refs[0].url.as_deref(),
+        Some("https://github.com/owner/repo/pull/11-moved")
+    );
+    assert_eq!(pr_status_of(&db, &id), "merged");
+}
+
+#[test]
+fn record_linked_pull_requests_with_no_entries_is_a_noop() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    db.record_linked_pull_requests(&[]).unwrap();
+    let rows: i64 = db
+        .conn()
+        .query_row("SELECT COUNT(*) FROM external_refs", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(rows, 0);
+}
+
+#[test]
 fn bulk_record_pr_sync_status_entries_update_state_and_url() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let (id1, c1) = project_task_with_branch(&mut db, "owner/repo", "main", "feature/a");
@@ -2764,6 +2839,7 @@ fn fetched(number: i64, title: &str, state: GithubIssueState) -> FetchedIssue {
         state,
         parent: None,
         sub_issues: Vec::new(),
+        linked_pull_requests: Vec::new(),
     }
 }
 
@@ -2874,6 +2950,7 @@ fn open_task_issue_refs_skip_closed_tasks_and_pull_request_refs() {
     assert_eq!(refs.len(), 1);
     assert_eq!(refs[0].repo, "owner/repo");
     assert_eq!(refs[0].number, 42);
+    assert_eq!(refs[0].task_id, "MON-1", "the reverse lookup files its PR against this task");
 }
 
 #[test]

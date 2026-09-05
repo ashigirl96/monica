@@ -54,6 +54,8 @@ impl GithubIssueState {
 
 /// An issue as returned by the bulk sync fetch. `parent` and `sub_issues` mirror the GitHub
 /// Sub-issues links; #464 turns them into `parent_task_id` and nothing reads them yet.
+/// `linked_pull_requests` are the PRs whose closing keyword points at this issue — the reverse
+/// lookup that reaches tasks the branch pass cannot see.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FetchedIssue {
     pub number: i64,
@@ -61,6 +63,7 @@ pub struct FetchedIssue {
     pub state: GithubIssueState,
     pub parent: Option<i64>,
     pub sub_issues: Vec<i64>,
+    pub linked_pull_requests: Vec<GithubPullRequest>,
 }
 
 /// The issue ref of a task that is still open, so a forced sync must re-check it. One row per
@@ -69,6 +72,7 @@ pub struct FetchedIssue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenIssueRef {
     pub external_ref_id: i64,
+    pub task_id: String,
     pub repo: String,
     pub number: i64,
 }

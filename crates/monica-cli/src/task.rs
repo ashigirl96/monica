@@ -2,7 +2,9 @@ use std::io::{self, Write};
 
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
-use monica_application::{parse_issue_input, AttachSessionReport, TaskSummaryRow, TrackOutcome};
+use monica_application::{
+    parse_issue_input, parse_pull_request_input, AttachSessionReport, TaskSummaryRow, TrackOutcome,
+};
 use monica_domain::{parse_owner_repo, Agent, DisplayStatus, TaskId};
 
 use crate::event_sink::{self, CliFacade};
@@ -21,6 +23,13 @@ pub enum TaskCommand {
         #[arg(long)]
         project: Option<String>,
     },
+    /// Link a pull request (owner/repo#123 or PR URL) to a tracked task
+    Pr {
+        /// MON-<id>
+        id: String,
+        /// owner/repo#123 or GitHub pull request URL
+        target: String,
+    },
     /// Connect this terminal tab's agent session to an existing task (MON-<id>)
     Attach {
         /// MON-<id>
@@ -38,6 +47,7 @@ pub async fn run(cmd: TaskCommand) -> Result<()> {
     match cmd {
         TaskCommand::Track { target } => track_command(&mut monica, &target).await,
         TaskCommand::Status { status, project } => status_command(&mut monica, status, project),
+        TaskCommand::Pr { id, target } => pr_command(&mut monica, &id, &target).await,
         TaskCommand::Attach { id } => attach_command(&mut monica, &id),
         TaskCommand::Close { id } => close_command(&mut monica, &id),
     }
@@ -60,6 +70,27 @@ async fn track_command(monica: &mut CliFacade, target: &str) -> Result<()> {
     }
     println!("Status: {}", task.status.as_str());
     println!("Title: {}", task.title);
+    Ok(())
+}
+
+async fn pr_command(monica: &mut CliFacade, id: &str, target: &str) -> Result<()> {
+    let task_id = TaskId::parse(id)?;
+    let (repo, number) = parse_pull_request_input(target)?;
+    let report = monica
+        .synchronization()
+        .link_pull_request(&task_id, repo.clone(), number)
+        .await
+        .with_context(|| format!("failed to link GitHub pull request {repo}#{number}"))?;
+    let pr = report.pull_request;
+    println!(
+        "Linked {}#{} ({}) to {}.",
+        pr.repo,
+        pr.number,
+        pr.status.as_str(),
+        report.task.id
+    );
+    println!("Task: {}", report.task.title);
+    println!("URL: {}", pr.url);
     Ok(())
 }
 
