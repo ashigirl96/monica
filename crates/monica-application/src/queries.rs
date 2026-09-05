@@ -23,6 +23,7 @@ pub struct TaskSummaryRow {
     pub prepare_eligible: bool,
     pub run_eligible: bool,
     pub run_needs_prepare: bool,
+    pub attach_eligible: bool,
     pub is_active: bool,
     pub has_open_pull_request: bool,
     pub branch: Option<String>,

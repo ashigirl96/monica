@@ -344,6 +344,7 @@ impl TaskBoardQuery for FakeRepos {
                     prepare_eligible: display.prepare_eligible(),
                     run_eligible: display.run_eligible(),
                     run_needs_prepare: display.run_needs_prepare(false),
+                    attach_eligible: display.attach_eligible(),
                     is_active: display.is_active(),
                     has_open_pull_request: false,
                     branch: None,

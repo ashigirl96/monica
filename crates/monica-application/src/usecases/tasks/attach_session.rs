@@ -43,8 +43,8 @@ pub struct TabTaskBinding {
 /// This is the only way a tab launched without `MONICA_TASK_ID` can ever reach a TaskRun: hook
 /// resolution has no task to scope its lookups by, so it falls back to the tab -> run binding this
 /// creates. The tab moves into the task's bench runspace, so the bench is created here when the
-/// task has none yet — with the tab's own cwd, never pinned, so a later worktree run still gets to
-/// pin it. An attached run is an in-place primary like a worktree-less Run: the only primary it
+/// task has none yet — at `cwd`, the directory the tab's shell is in right now (its session only
+/// remembers where it was spawned), never pinned, so a later worktree run still gets to pin it. An attached run is an in-place primary like a worktree-less Run: the only primary it
 /// will not displace is one still mid-prepare, whose prepared worktree would otherwise be orphaned.
 ///
 /// `agent` must be the agent actually running in the tab. Nothing corrects it later — hook
@@ -56,6 +56,7 @@ pub fn attach_terminal_session_to_task<R>(
     agent: Agent,
     terminal_tab_id: &str,
     terminal_session_id: &str,
+    cwd: &str,
 ) -> ApplicationResult<AttachSessionReport>
 where
     R: TaskStore + TaskRunStore + TerminalSessionRepository + WorkbenchStore + UnitOfWork,
@@ -77,6 +78,14 @@ where
     if session.tab_id.as_deref() != Some(terminal_tab_id) {
         return Err(ApplicationError::validation(format!(
             "terminal session {terminal_session_id} does not belong to tab {terminal_tab_id}"
+        )));
+    }
+    // A dead session has no agent left to adopt; binding it would hand the task a `running`
+    // Main Run that only the orphan sweep can ever settle.
+    if session.status.is_terminal() {
+        return Err(ApplicationError::validation(format!(
+            "terminal session {terminal_session_id} is {}; attach needs a live shell",
+            session.status.as_str()
         )));
     }
     // A shell spawned inside a bench carries MONICA_TASK_ID, so its hooks resolve through the
@@ -107,7 +116,7 @@ where
         tx.set_primary_task_run(&task.id, &attachment.run.id)?;
     }
     let (runspace_id, _, _) =
-        crate::usecases::runs::open_bench::ensure_bench(&mut *tx, &task.id, &session.cwd, false)?;
+        crate::usecases::runs::open_bench::ensure_bench(&mut *tx, &task.id, cwd, false)?;
     tx.commit()?;
 
     Ok(AttachSessionReport {

@@ -120,11 +120,18 @@ fn attach_command(monica: &mut CliFacade, id: &str) -> Result<()> {
         env_opt("MONICA_TERMINAL_SESSION_ID").as_deref(),
     )?;
     let task_id = TaskId::parse(id)?;
+    // The shell's current directory, not the session's spawn directory: the user may have `cd`ed
+    // since, and the bench should open where they actually are.
+    let cwd = std::env::current_dir()
+        .context("failed to read the current directory")?
+        .to_string_lossy()
+        .into_owned();
     let report = monica.tasks().attach_terminal_session(
         &task_id,
         Agent::Claude,
         &env.terminal_tab_id,
         &env.terminal_session_id,
+        &cwd,
     )?;
     print!("{}", render_attach_report(&report));
     Ok(())
@@ -348,6 +355,7 @@ mod tests {
             prepare_eligible: true,
             run_eligible: true,
             run_needs_prepare: true,
+            attach_eligible: true,
             is_active: false,
             has_open_pull_request: false,
             branch: Some("monica/gh-17".to_string()),

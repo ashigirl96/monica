@@ -15,7 +15,7 @@ function Picker({ tabId }: { tabId: string }) {
   const tasks = useAtomValue(taskSummariesAtom);
 
   const items = tasks
-    .filter((t) => t.task_status !== "closed")
+    .filter((t) => t.attach_eligible)
     .map((t) => ({ key: t.id, label: `${t.id}  ${t.title}` }));
 
   return (

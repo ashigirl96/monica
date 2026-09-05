@@ -93,11 +93,12 @@ export const commands = {
     typedError<string | null, ApiError>(__TAURI_INVOKE("primary_tab_id", { taskId })),
   /**
    *  Bind the Claude session in a Workbench tab to a task as its Main Run (`monica task attach`
-   *  from the GUI). The tab itself is moved by the caller: the layout is frontend state.
+   *  from the GUI). `cwd` is the tab's current directory, which seeds the bench when the task has
+   *  none. The tab itself is moved by the caller: the layout is frontend state.
    */
-  attachTerminalTab: (taskId: string, tabId: string, sessionId: string) =>
+  attachTerminalTab: (taskId: string, tabId: string, sessionId: string, cwd: string) =>
     typedError<AttachTabResult, ApiError>(
-      __TAURI_INVOKE("attach_terminal_tab", { taskId, tabId, sessionId }),
+      __TAURI_INVOKE("attach_terminal_tab", { taskId, tabId, sessionId, cwd }),
     ),
   listTabTaskBindings: () =>
     typedError<TabTaskBinding[], ApiError>(__TAURI_INVOKE("list_tab_task_bindings")),
@@ -301,6 +302,7 @@ export type TaskSummaryRow = {
   prepare_eligible: boolean;
   run_eligible: boolean;
   run_needs_prepare: boolean;
+  attach_eligible: boolean;
   is_active: boolean;
   has_open_pull_request: boolean;
   branch: string | null;

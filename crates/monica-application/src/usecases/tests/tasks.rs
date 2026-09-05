@@ -220,7 +220,7 @@ fn attach_creates_a_running_primary_run_carrying_the_tab_and_session() {
     let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
 
     let report =
-        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id).unwrap();
+        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id, "/repo").unwrap();
 
     assert_eq!(report.task_id, task_id);
     assert_eq!(report.task_title, "tracked");
@@ -246,18 +246,20 @@ fn attach_creates_a_running_primary_run_carrying_the_tab_and_session() {
 }
 
 /// The bench is where the Workbench moves the tab, so attach creates it when the task has none —
-/// at the tab's own cwd, since that is where the session already lives.
+/// at the directory the shell is in now, not where its session was spawned.
 #[test]
 fn attach_creates_the_bench_at_the_tab_cwd_when_the_task_has_none() {
     let mut repos = FakeRepos::default();
     let task_id = repos.insert_task_for_run(None);
-    let session_id = raw_tab_session_at(&mut repos, "tab-1", Some("sess-1"), "/somewhere/else");
+    // The session remembers where it was spawned; the caller passes where the shell is now.
+    let session_id = raw_tab_session_at(&mut repos, "tab-1", Some("sess-1"), "/spawned/here");
 
-    attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id).unwrap();
+    attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id, "/now/here")
+        .unwrap();
 
     assert_eq!(
         repos.get_bench_for_task(&task_id).unwrap(),
-        Some((bench_runspace_id(&task_id), "/somewhere/else".to_string()))
+        Some((bench_runspace_id(&task_id), "/now/here".to_string()))
     );
 }
 
@@ -273,7 +275,7 @@ fn attach_leaves_an_existing_bench_cwd_alone() {
     let session_id = raw_tab_session_at(&mut repos, "tab-1", Some("sess-1"), "/somewhere/else");
 
     let report =
-        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id).unwrap();
+        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id, "/repo").unwrap();
 
     assert_eq!(report.runspace_id, bench_runspace_id(&task_id));
     assert_eq!(
@@ -291,7 +293,7 @@ fn attach_keeps_a_prepared_primary_in_place_and_reports_it() {
     let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
 
     let report =
-        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id).unwrap();
+        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id, "/repo").unwrap();
 
     assert!(!report.became_primary());
     assert_eq!(report.kept_primary_run_id, Some(prepared_id.clone()));
@@ -315,7 +317,7 @@ fn attach_displaces_a_running_primary() {
     let session_id = raw_tab_session(&mut repos, "tab-9", Some("sess-9"));
 
     let report =
-        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-9", &session_id).unwrap();
+        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-9", &session_id, "/repo").unwrap();
 
     assert!(report.became_primary());
     assert_eq!(
@@ -341,7 +343,7 @@ fn attach_rejects_a_session_spawned_in_a_bench_runspace() {
     repos.create_bench(&bench_task, &bench, "/repo").unwrap();
     let session_id = tab_session_in_runspace(&mut repos, "tab-1", &bench);
 
-    let err = attach_terminal_session_to_task(&mut repos, &other_task, Agent::Claude, "tab-1", &session_id)
+    let err = attach_terminal_session_to_task(&mut repos, &other_task, Agent::Claude, "tab-1", &session_id, "/repo")
         .unwrap_err();
 
     assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
@@ -351,6 +353,29 @@ fn attach_rejects_a_session_spawned_in_a_bench_runspace() {
 
 /// A tab that already moved into one task's bench (its session still records the shell runspace
 /// it was spawned in) can be re-attached to another task.
+/// A dead session has no agent to adopt. Without this the menu's own liveness check is the only
+/// guard, and it goes stale the moment the shell exits behind an open picker.
+#[test]
+fn attach_rejects_a_dead_session() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
+    repos
+        .update_terminal_session_status(&session_id, TerminalSessionStatus::Exited, Some(0))
+        .unwrap();
+
+    let err = attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id, "/repo")
+        .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
+    assert!(err.to_string().contains("exited"), "{err}");
+    assert!(repos.find_task_run_by_terminal_tab("tab-1").unwrap().is_none());
+    assert_eq!(
+        repos.get_task(&task_id).unwrap().unwrap().primary_task_run_id,
+        None
+    );
+}
+
 #[test]
 fn attach_accepts_a_session_spawned_in_a_plain_shell_runspace() {
     let mut repos = FakeRepos::default();
@@ -358,7 +383,7 @@ fn attach_accepts_a_session_spawned_in_a_plain_shell_runspace() {
     let shell = RunspaceId::from_store("shell-1".to_string());
     let session_id = tab_session_in_runspace(&mut repos, "tab-1", &shell);
 
-    attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id).unwrap();
+    attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id, "/repo").unwrap();
 
     assert!(repos.find_task_run_by_terminal_tab("tab-1").unwrap().is_some());
 }
@@ -370,7 +395,7 @@ fn attach_without_an_observed_agent_session_still_binds_the_tab() {
     let session_id = raw_tab_session(&mut repos, "tab-1", None);
 
     let report =
-        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id).unwrap();
+        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id, "/repo").unwrap();
 
     assert_eq!(report.agent_session_id, None);
     let run = repos.get_task_run(&report.task_run_id).unwrap().unwrap();
@@ -385,9 +410,9 @@ fn re_attach_settles_the_previous_run_and_keeps_its_session_as_history() {
     let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
 
     let first =
-        attach_terminal_session_to_task(&mut repos, &first_task, Agent::Claude, "tab-1", &session_id).unwrap();
+        attach_terminal_session_to_task(&mut repos, &first_task, Agent::Claude, "tab-1", &session_id, "/repo").unwrap();
     let second =
-        attach_terminal_session_to_task(&mut repos, &second_task, Agent::Claude, "tab-1", &session_id).unwrap();
+        attach_terminal_session_to_task(&mut repos, &second_task, Agent::Claude, "tab-1", &session_id, "/repo").unwrap();
 
     assert_eq!(second.detached_run_ids, vec![first.task_run_id.clone()]);
 
@@ -424,7 +449,7 @@ fn list_tab_task_bindings_pairs_live_tab_runs_with_their_bench() {
     let attached = repos.insert_task_for_run(None);
     let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
     let report =
-        attach_terminal_session_to_task(&mut repos, &attached, Agent::Claude, "tab-1", &session_id).unwrap();
+        attach_terminal_session_to_task(&mut repos, &attached, Agent::Claude, "tab-1", &session_id, "/repo").unwrap();
 
     // A hook-driven run in a bench tab is bound the same way.
     let (running_task, _) = task_with_running_primary(&mut repos);
@@ -490,12 +515,12 @@ fn re_attach_leaves_an_already_settled_previous_run_untouched() {
     let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
 
     let first =
-        attach_terminal_session_to_task(&mut repos, &first_task, Agent::Claude, "tab-1", &session_id).unwrap();
+        attach_terminal_session_to_task(&mut repos, &first_task, Agent::Claude, "tab-1", &session_id, "/repo").unwrap();
     repos
         .finish_task_run(&first.task_run_id, &first_task, TaskRunStatus::Failed)
         .unwrap();
 
-    attach_terminal_session_to_task(&mut repos, &second_task, Agent::Claude, "tab-1", &session_id).unwrap();
+    attach_terminal_session_to_task(&mut repos, &second_task, Agent::Claude, "tab-1", &session_id, "/repo").unwrap();
 
     assert_eq!(
         repos.get_task_run(&first.task_run_id).unwrap().unwrap().status,
@@ -513,6 +538,7 @@ fn attach_rejects_an_unknown_task() {
         Agent::Claude,
         "tab-1",
         &session_id,
+        "/repo",
     )
     .unwrap_err();
     assert!(matches!(err, ApplicationError::NotFound(_)), "{err:?}");
@@ -526,7 +552,7 @@ fn attach_rejects_a_closed_task() {
     let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
 
     let err =
-        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id).unwrap_err();
+        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id, "/repo").unwrap_err();
     assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
 }
 
@@ -535,7 +561,7 @@ fn attach_rejects_an_unknown_terminal_session() {
     let mut repos = FakeRepos::default();
     let task_id = repos.insert_task_for_run(None);
     let err =
-        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", "ts-404").unwrap_err();
+        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", "ts-404", "/repo").unwrap_err();
     assert!(matches!(err, ApplicationError::NotFound(_)), "{err:?}");
 }
 
@@ -545,7 +571,7 @@ fn attach_rejects_a_session_belonging_to_another_tab() {
     let task_id = repos.insert_task_for_run(None);
     let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
 
-    let err = attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-2", &session_id)
+    let err = attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-2", &session_id, "/repo")
         .unwrap_err();
     assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
 }
@@ -560,7 +586,7 @@ fn attach_records_the_agent_it_was_given() {
     let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
 
     let report =
-        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id)
+        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id, "/repo")
             .unwrap();
 
     assert_eq!(

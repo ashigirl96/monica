@@ -22,7 +22,8 @@ impl<B: Backend> TaskService<'_, B> {
     }
 
     /// Connect the agent session running in a terminal tab to an existing task, as a run with no
-    /// worktree and no branch that becomes the task's Main Run. Announces the new run and every run
+    /// worktree and no branch that becomes the task's Main Run. `cwd` seeds the task's bench when it
+    /// has none. Announces the new run and every run
     /// the tab was driving before (settled and unbound by the attach), so the board and the bench
     /// refresh when the caller is the desktop; the CLI's sink drops these events.
     pub fn attach_terminal_session(
@@ -31,6 +32,7 @@ impl<B: Backend> TaskService<'_, B> {
         agent: Agent,
         terminal_tab_id: &str,
         terminal_session_id: &str,
+        cwd: &str,
     ) -> ApplicationResult<AttachSessionReport> {
         let Monica { repos, events, .. } = &mut *self.m;
         let report = crate::usecases::tasks::attach_terminal_session_to_task(
@@ -39,6 +41,7 @@ impl<B: Backend> TaskService<'_, B> {
             agent,
             terminal_tab_id,
             terminal_session_id,
+            cwd,
         )?;
         // `detached_run_ids` carries no task or status; a detached run may also have been settled
         // long before this attach (a hook's SessionEnd, a failed setup), so read back what each

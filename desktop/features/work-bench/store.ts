@@ -883,7 +883,7 @@ export const attachTabToTaskAtom = atom(null, async (get, set, tabId: string, ta
   if (!tab?.sessionId) return;
   let result;
   try {
-    result = await attachTerminalTab(taskId, tabId, tab.sessionId);
+    result = await attachTerminalTab(taskId, tabId, tab.sessionId, tabDisplayPath(tab));
   } catch (e) {
     pushErrorToast(e instanceof Error ? e.message : String(e));
     return;

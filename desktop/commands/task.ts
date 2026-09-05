@@ -70,8 +70,8 @@ export function primaryTabId(taskId: string) {
   return unwrap(commands.primaryTabId(taskId));
 }
 
-export function attachTerminalTab(taskId: string, tabId: string, sessionId: string) {
-  return unwrap(commands.attachTerminalTab(taskId, tabId, sessionId));
+export function attachTerminalTab(taskId: string, tabId: string, sessionId: string, cwd: string) {
+  return unwrap(commands.attachTerminalTab(taskId, tabId, sessionId, cwd));
 }
 
 export function listTabTaskBindings() {

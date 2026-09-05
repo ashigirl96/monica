@@ -168,7 +168,8 @@ pub async fn make_main_task_run(app: AppHandle, tab_id: String) -> Result<bool, 
 }
 
 /// Bind the Claude session in a Workbench tab to a task as its Main Run (`monica task attach`
-/// from the GUI). The tab itself is moved by the caller: the layout is frontend state.
+/// from the GUI). `cwd` is the tab's current directory, which seeds the bench when the task has
+/// none. The tab itself is moved by the caller: the layout is frontend state.
 #[tauri::command]
 #[specta::specta]
 pub async fn attach_terminal_tab(
@@ -176,6 +177,7 @@ pub async fn attach_terminal_tab(
     task_id: String,
     tab_id: String,
     session_id: String,
+    cwd: String,
 ) -> Result<AttachTabResult, ApiError> {
     event_sink::off_main(move || {
         let mut monica = event_sink::open(&app)?;
@@ -185,6 +187,7 @@ pub async fn attach_terminal_tab(
             monica_domain::Agent::Claude,
             &tab_id,
             &session_id,
+            &cwd,
         )?;
         let env = monica.executions().task_shell_env(&task_id)?;
         Ok(AttachTabResult {
