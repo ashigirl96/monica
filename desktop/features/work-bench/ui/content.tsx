@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { useAtomValue, useSetAtom } from "jotai";
+import { getDefaultStore, useAtomValue, useSetAtom } from "jotai";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   terminalStateAtom,
@@ -16,6 +16,7 @@ import {
 import { jumpHintsActiveAtom } from "@/features/work-bench/jump-hints";
 import { sessionStatusAtom, type SessionStatusEntry } from "@/features/work-bench/session-status";
 import { loadTerminalStateAtom, saveTerminalStateAtom } from "@/features/work-bench/persistence";
+import { activeSpaceAtom } from "@/stores/space";
 import { uiZoomAtom } from "@/stores/zoom";
 import { clipboardWriteImage } from "@/commands/clipboard";
 import { terminalWrite } from "@/commands/terminal";
@@ -227,6 +228,8 @@ export default function WorkBenchContent() {
   useEffect(() => {
     const unlisten = getCurrentWebview().onDragDropEvent((event) => {
       if (event.payload.type !== "drop") return;
+      // The bench stays mounted behind other spaces; a drop on the board is not a paste.
+      if (getDefaultStore().get(activeSpaceAtom) !== "work-bench") return;
       const sessionId = activeSessionIdRef.current;
       if (!sessionId) return;
       const imagePath = event.payload.paths.find((p) => {
@@ -245,6 +248,9 @@ export default function WorkBenchContent() {
 
   const consumeLaunch = useSetAtom(consumeTerminalLaunchAtom);
   const uiZoom = useAtomValue(uiZoomAtom);
+  // The bench stays mounted behind other spaces (opacity 0, which still has a layout box,
+  // so xterm would keep rendering every write). Session connects do not depend on this.
+  const spaceActive = useAtomValue(activeSpaceAtom) === "work-bench";
 
   if (!ready || !state) return null;
 
@@ -266,7 +272,9 @@ export default function WorkBenchContent() {
                 sessionId={tab.sessionId}
                 sessionEntry={tab.sessionId ? sessionStatus[tab.sessionId] : undefined}
                 cwd={tab.cwd}
-                active={rs.id === state.activeRunspaceId && tab.id === rs.activeTabId}
+                active={
+                  spaceActive && rs.id === state.activeRunspaceId && tab.id === rs.activeTabId
+                }
                 pinned={tab.id === rs.pinnedTabId}
                 env={rs.env}
                 launch={tab.launch}

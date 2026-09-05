@@ -21,7 +21,9 @@ import {
   onTerminalOutput,
   terminalAttach,
   terminalCreateSession,
+  terminalDetach,
   terminalResize,
+  terminalTerminate,
   terminalWrite,
   type TerminalSessionStatus,
 } from "@/commands/terminal";
@@ -78,6 +80,13 @@ type UseTerminalOptions = {
   onExit?: () => void;
 };
 
+// A release racing this connect empties conn.unlisteners; anything subscribed after that
+// point is only reachable from here.
+function dropListeners(conn: TabConnection) {
+  for (const unlisten of conn.unlisteners) unlisten();
+  conn.unlisteners = [];
+}
+
 /// Create the tab's session if needed, then attach: subscribe → attach → replay → flush.
 /// Output arriving between subscribe and replay-write is buffered, and the daemon only
 /// emits post-attach output, so the stream is gapless without sequence numbers.
@@ -102,21 +111,34 @@ async function runConnect(
   let sessionId = optionsRef.current.sessionId;
   const isNew = !sessionId;
   try {
+    // An unopened (background) terminal reports xterm's default grid here; the PTY follows
+    // the fitted size once the pane is shown.
+    const created = getTabTerminal(tabId);
+    const createdRows = created?.rows ?? 24;
+    const createdCols = created?.cols ?? 80;
     if (!sessionId) {
       const options = optionsRef.current;
-      const term = getTabTerminal(tabId);
       const session = await terminalCreateSession({
         runspaceId: options.runspaceId,
         tabId,
         kind: options.launch ? "agent" : "shell",
         cwd: options.cwd,
-        rows: term?.rows ?? 24,
-        cols: term?.cols ?? 80,
+        rows: createdRows,
+        cols: createdCols,
         // A launch intent carries the run-identity env vars, so it supersedes the runspace
         // env rather than being merged with it. The agent scaffolding and the tab/session
         // ids are injected backend-side.
         env: options.launch?.env ?? options.env,
       });
+      // The tab may have been closed while the create was pending; the closer found no
+      // sessionId to end. Nothing has run in the session yet, so there is nothing worth
+      // keeping detached — kill it rather than leave an orphan the UI can no longer reach.
+      if (getTabConnection(tabId) !== conn) {
+        terminalTerminate(session.id).catch((e: unknown) => {
+          console.warn(`terminal terminate failed for orphaned session ${session.id}:`, e);
+        });
+        return;
+      }
       sessionId = session.id;
       options.onSessionCreated?.(session.id);
       if (session.status === "failed") {
@@ -145,7 +167,23 @@ async function runConnect(
       }),
     );
 
+    // Released while subscribing: the closer already ended the session by id; attaching
+    // now would pull it back out of the Detached group with no tab to own it.
+    if (getTabConnection(tabId) !== conn) {
+      dropListeners(conn);
+      return;
+    }
+
     const attach = await terminalAttach(sessionId);
+    // Released mid-attach: the closer's detach may have landed before this attach, so
+    // detach again to leave the session where the closer put it.
+    if (getTabConnection(tabId) !== conn) {
+      dropListeners(conn);
+      terminalDetach(sid).catch((e: unknown) => {
+        console.warn(`terminal detach failed for released session ${sid}:`, e);
+      });
+      return;
+    }
     // No reset before the replay: the terminal here is always a freshly mounted (empty)
     // instance — the connection guard prevents double-attach — and Terminal.reset()
     // corrupts the WebGL renderer (blank canvas, "this._renderer.value.dimensions"
@@ -171,6 +209,11 @@ async function runConnect(
     conn.state = "attached";
     store.set(setSessionStatusAtom, sessionId, { status: "running" });
 
+    // The pane may have been opened and fitted while the create/attach was in flight.
+    if (isNew && term?.element && (term.rows !== createdRows || term.cols !== createdCols)) {
+      terminalResize(sid, term.rows, term.cols);
+    }
+
     const initialCommand = isNew ? optionsRef.current.launch?.initialCommand : undefined;
     if (initialCommand) {
       setTimeout(() => {
@@ -181,8 +224,7 @@ async function runConnect(
   } catch (e) {
     console.warn(`terminal connect failed for tab ${tabId}:`, e);
     conn.state = "dead";
-    for (const unlisten of conn.unlisteners) unlisten();
-    conn.unlisteners = [];
+    dropListeners(conn);
     // No pretend-reconnect: a session we cannot attach to is honestly lost.
     if (sessionId) {
       store.set(setSessionStatusAtom, sessionId, { status: "lost" });
@@ -316,6 +358,17 @@ export function useTerminal(
       openedRef.current = false;
     };
   }, [options.tabId, containerRef]);
+
+  // A tab without a session starts one as soon as it exists, shown or not: a run launched
+  // from the board must have its shell and agent going before the user looks at it. xterm
+  // buffers writes to an unopened terminal, so the output is already there on activation.
+  // Existing sessions are only re-attached when shown — their replay is sized to the pane.
+  useEffect(() => {
+    if (options.sessionId || isDeadStatus(options.sessionStatus)) return;
+    const conn = getTabConnection(options.tabId);
+    if (conn?.inFlight || conn?.state === "attached") return;
+    connectTab(optionsRef, sessionIdRef);
+  }, [options.tabId, options.sessionId, options.sessionStatus]);
 
   useEffect(() => {
     const term = termRef.current;

@@ -1,4 +1,4 @@
-import { Suspense, useRef } from "react";
+import { Suspense } from "react";
 import { useAtomValue } from "jotai";
 import {
   activeSpaceAtom,
@@ -30,11 +30,10 @@ export function AppLayout() {
   const Header = space.header;
   const Content = space.content;
 
-  const visitedRef = useRef(new Set<string>());
-  visitedRef.current.add(activeSpace);
-
   const activePersistent = space.persistent;
-  const persistentSpaces = spaces.filter((s) => s.persistent && visitedRef.current.has(s.id));
+  // Mounted from startup, not on first visit: the bench must be able to start shells and
+  // agents while the user is still on the board.
+  const persistentSpaces = spaces.filter((s) => s.persistent);
 
   const hasSidebar = sidebarOpen && !!Sidebar;
   const leftPanelWidth = hasSidebar ? sidebarWidth : 0;
