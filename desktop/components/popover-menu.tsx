@@ -42,7 +42,7 @@ export function PopoverMenu({
     if (top + height > window.innerHeight - VIEWPORT_PADDING) {
       top = anchor.top - height - ANCHOR_GAP;
     }
-    setPos({ top, left });
+    setPos({ top: Math.max(top, VIEWPORT_PADDING), left });
   }, [anchor]);
 
   // The menu does not track its anchor; any scroll or resize just closes it.

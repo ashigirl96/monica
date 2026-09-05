@@ -2,9 +2,9 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { atom, type Getter } from "jotai";
 import type { PopoverAnchor } from "@/components/popover-menu";
 import { activeRunspaceAtom, terminalFocusRequestAtom } from "@/features/work-bench/store";
-import { anchorForSelector } from "@/lib/anchor";
+import { visibleAnchorForSelector } from "@/lib/anchor";
 import { type OpenTarget, openTargets } from "@/lib/github-targets";
-import { activeSpaceAtom, sidebarOpenAtom } from "@/stores/space";
+import { activeSpaceAtom } from "@/stores/space";
 import { taskSummariesAtom } from "@/stores/workboard";
 import { pushInfoToast } from "@/stores/toast";
 
@@ -30,20 +30,18 @@ export const openTargetsAtom = atom((get) => {
   return menu ? targetsFor(get, menu.taskId) : NO_TARGETS;
 });
 
-// Prefers the sidebar entry so the menu drops from the runspace it describes; with the sidebar
-// collapsed (⌘B) the header tab is the only visible element that stands for the runspace.
-// Collapsing only clips the sidebar to zero width, so its rows keep resolving to a rect at the
-// window's left edge — visibility has to come from the atom, not from querySelector.
+// Prefers the sidebar entry so the menu drops from the runspace it describes, falling back to the
+// header tab. Neither ⌘B (which clips the sidebar to zero width) nor scrolling the runspace list
+// removes a row from the DOM, so both anchors are resolved through the visibility-aware lookup.
 const FALLBACK_ANCHOR: PopoverAnchor = { top: 8, bottom: 40, left: 8 };
 function menuAnchor(get: Getter): PopoverAnchor {
   const rs = get(activeRunspaceAtom);
   if (!rs) return FALLBACK_ANCHOR;
-  const sidebarRow = get(sidebarOpenAtom)
-    ? anchorForSelector(`[data-runspace-id="${CSS.escape(rs.id)}"]`)
-    : null;
   return (
-    sidebarRow ??
-    (rs.activeTabId ? anchorForSelector(`[data-tab-id="${CSS.escape(rs.activeTabId)}"]`) : null) ??
+    visibleAnchorForSelector(`[data-runspace-id="${CSS.escape(rs.id)}"]`) ??
+    (rs.activeTabId
+      ? visibleAnchorForSelector(`[data-tab-id="${CSS.escape(rs.activeTabId)}"]`)
+      : null) ??
     FALLBACK_ANCHOR
   );
 }
