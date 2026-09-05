@@ -2657,9 +2657,11 @@ fn attach_terminal_tab_to_task_stamps_tab_and_session_without_taking_the_primary
 
 /// Re-attaching a tab settles the run it was driving before unbinding it. Every path that stops a
 /// run keys on `terminal_tab_id`, so clearing the tab without settling would leave the old run
-/// `running` on its task's board forever, with nothing left to move it.
+/// `running` on its task's board forever, with nothing left to move it. The live session moves
+/// with the tab: the old run must not keep naming it, or it would stay resumable under a task the
+/// conversation no longer belongs to.
 #[test]
-fn re_attach_settles_the_previous_run_and_keeps_its_session() {
+fn re_attach_settles_the_previous_run_and_takes_its_session_along() {
     let mut db = SqliteStore::open_in_memory().unwrap();
     let first = db.insert_task(dev_task("first")).unwrap();
     let second = db.insert_task(dev_task("second")).unwrap();
@@ -2672,16 +2674,29 @@ fn re_attach_settles_the_previous_run_and_keeps_its_session() {
     let old = db.get_task_run(&old.run.id).unwrap().unwrap();
     assert_eq!(old.status, TaskRunStatus::Stopped);
     assert_eq!(old.terminal_tab_id, None);
-    assert_eq!(
-        old.agent_session_id,
-        Some(AgentSessionId::from_agent("sess-1")),
-        "the session stays behind as the record of which agent discussed that task"
-    );
+    assert_eq!(old.agent_session_id, None, "the session now drives the second task");
+    assert!(old.resumable_session().is_none());
     assert_eq!(
         db.find_task_run_by_terminal_tab("tab-1").unwrap().map(|run| run.id),
         Some(new.run.id),
         "exactly one run answers for the tab"
     );
+}
+
+/// A tab whose earlier agent already exited keeps that session on the old run when a *new* agent
+/// in the same tab is attached elsewhere: nothing live shares the id, so it is still history.
+#[test]
+fn re_attach_with_a_different_session_keeps_the_old_one_as_history() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let first = db.insert_task(dev_task("first")).unwrap();
+    let second = db.insert_task(dev_task("second")).unwrap();
+
+    let old = attach_tab(&mut db, &first.id, "tab-1", "sess-1");
+    attach_tab(&mut db, &second.id, "tab-1", "sess-2");
+
+    let old = db.get_task_run(&old.run.id).unwrap().unwrap();
+    assert_eq!(old.terminal_tab_id, None);
+    assert_eq!(old.agent_session_id, Some(AgentSessionId::from_agent("sess-1")));
 }
 
 /// The detached run drops out of the orphan sweep's candidate set (it no longer has a tab), which

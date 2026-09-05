@@ -403,7 +403,7 @@ fn attach_without_an_observed_agent_session_still_binds_the_tab() {
 }
 
 #[test]
-fn re_attach_settles_the_previous_run_and_keeps_its_session_as_history() {
+fn re_attach_settles_the_previous_run_and_takes_its_session_along() {
     let mut repos = FakeRepos::default();
     let first_task = repos.insert_task_for_run(None);
     let second_task = repos.insert_task_for_run(None);
@@ -421,10 +421,14 @@ fn re_attach_settles_the_previous_run_and_keeps_its_session_as_history() {
     let old = repos.get_task_run(&first.task_run_id).unwrap().unwrap();
     assert_eq!(old.status, TaskRunStatus::Stopped);
     assert_eq!(old.terminal_tab_id, None);
+    // The old run stays the first task's primary, so it must not stay resumable: Run there would
+    // `--resume` the very conversation now driving the second task.
     assert_eq!(
-        old.agent_session_id,
-        Some(AgentSessionId::from_agent("sess-1"))
+        repos.get_task(&first_task).unwrap().unwrap().primary_task_run_id,
+        Some(first.task_run_id.clone())
     );
+    assert_eq!(old.agent_session_id, None);
+    assert!(old.resumable_session().is_none());
 
     // Exactly one run answers for the tab.
     assert_eq!(
@@ -505,6 +509,35 @@ fn list_tab_task_bindings_pairs_live_tab_runs_with_their_bench() {
     let bindings = list_tab_task_bindings(&repos).unwrap();
     assert_eq!(bindings.len(), 1);
     assert_eq!(bindings[0].terminal_tab_id, "tab-2");
+}
+
+/// Only the session that actually moves is taken along. A new agent in the same tab leaves the
+/// earlier agent's session on the old run, which stays resumable for its task.
+#[test]
+fn re_attach_with_a_new_agent_session_keeps_the_old_run_resumable() {
+    let mut repos = FakeRepos::default();
+    let first_task = repos.insert_task_for_run(None);
+    let second_task = repos.insert_task_for_run(None);
+    let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
+
+    let first =
+        attach_terminal_session_to_task(&mut repos, &first_task, Agent::Claude, "tab-1", &session_id, "/repo").unwrap();
+    repos
+        .set_terminal_session_agent_status(
+            &session_id,
+            Some(AgentSessionStatus::Running),
+            None,
+            Some(&AgentSessionId::from_agent("sess-2")),
+        )
+        .unwrap();
+    attach_terminal_session_to_task(&mut repos, &second_task, Agent::Claude, "tab-1", &session_id, "/repo").unwrap();
+
+    let old = repos.get_task_run(&first.task_run_id).unwrap().unwrap();
+    assert_eq!(old.status, TaskRunStatus::Stopped);
+    assert_eq!(
+        old.resumable_session(),
+        Some(&AgentSessionId::from_agent("sess-1"))
+    );
 }
 
 #[test]

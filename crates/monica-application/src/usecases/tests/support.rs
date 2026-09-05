@@ -509,6 +509,9 @@ impl FakeRepos {
             for run in state.runs.values_mut() {
                 if run.terminal_tab_id.as_deref() == Some(terminal_tab_id) {
                     run.terminal_tab_id = None;
+                    if agent_session_id.is_some() && run.agent_session_id.as_ref() == agent_session_id {
+                        run.agent_session_id = None;
+                    }
                 }
             }
         }
