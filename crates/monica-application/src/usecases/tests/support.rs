@@ -24,8 +24,8 @@ use crate::prelude::{
 };
 use crate::{
     ApplicationEvent, AuthGateway, Backend, Clock, DaemonSessionView, EventSink, ExecutionProfile,
-    FetchedIssue, GithubAuthStatus, GithubGateway, GithubIssue, GithubIssueState,
-    GithubPullRequest, OpenIssueRef,
+    FetchedIssue, FieldChange, GithubAuthStatus, GithubGateway, GithubIssue, GithubIssueState,
+    GithubPullRequest, IssueSyncChange, OpenIssueRef, PullRequestSyncChange,
     GithubPullRequestRef, GithubPullRequestStatus, HookContext, Monica,
     PullRequestBranchSyncCandidate, RepoPullRequest, SetupEnv,
     SetupOutcome, UnresolvedPullRequestRef,
@@ -119,6 +119,9 @@ struct FakeState {
     /// it exactly as the SQL `COALESCE(issue_state.title, tasks.title, '')` does, so the fake and
     /// the real store can't disagree about which title a tracked task shows.
     issue_ref_states: HashMap<i64, (String, GithubIssueState)>,
+    /// Mirrors `github_pull_request_ref_states`, keyed by external_ref id, so the fake reports the
+    /// same status transitions the real store's diff does.
+    pr_ref_states: HashMap<i64, GithubPullRequestStatus>,
     branch_sync_candidates: Vec<PullRequestBranchSyncCandidate>,
     unresolved_pr_refs: Vec<UnresolvedPullRequestRef>,
     bulk_recorded: Vec<(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)>,
@@ -419,11 +422,68 @@ impl PullRequestSyncStore for FakeRepos {
         &mut self,
         branch_entries: &[(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)],
         status_entries: &[(UnresolvedPullRequestRef, GithubPullRequest)],
-    ) -> Result<()> {
+    ) -> Result<Vec<PullRequestSyncChange>> {
         let mut state = self.state.borrow_mut();
         state.bulk_recorded.extend_from_slice(branch_entries);
         state.status_recorded.extend_from_slice(status_entries);
-        Ok(())
+        let mut changes = Vec::new();
+        for (candidate, pull_requests) in branch_entries {
+            for pr in pull_requests {
+                let existing = state.refs.get(&candidate.task_id).and_then(|refs| {
+                    refs.iter()
+                        .find(|r| {
+                            r.ref_type == RefType::PullRequest
+                                && r.repo.as_deref() == Some(pr.repo.as_str())
+                                && r.number == Some(pr.number)
+                        })
+                        .map(|r| r.id)
+                });
+                let newly_linked = existing.is_none();
+                let ref_id = existing.unwrap_or_else(|| {
+                    state.next_ref += 1;
+                    let id = state.next_ref;
+                    let mut external = ExternalReference::new(
+                        candidate.task_id.clone(),
+                        Provider::Github,
+                        RefType::PullRequest,
+                        Some(pr.repo.clone()),
+                        Some(pr.number),
+                        Some(pr.url.clone()),
+                    );
+                    external.id = id;
+                    state
+                        .refs
+                        .entry(candidate.task_id.clone())
+                        .or_default()
+                        .push(external);
+                    id
+                });
+                let previous = state.pr_ref_states.insert(ref_id, pr.status);
+                let status = FieldChange::detect(previous, pr.status);
+                if newly_linked || status.is_some() {
+                    changes.push(PullRequestSyncChange {
+                        task_id: candidate.task_id.clone(),
+                        repo: pr.repo.clone(),
+                        number: pr.number,
+                        status,
+                        newly_linked,
+                    });
+                }
+            }
+        }
+        for (unresolved_ref, pr) in status_entries {
+            let previous = state.pr_ref_states.insert(unresolved_ref.external_ref_id, pr.status);
+            if let Some(status) = FieldChange::detect(previous, pr.status) {
+                changes.push(PullRequestSyncChange {
+                    task_id: unresolved_ref.task_id.clone(),
+                    repo: pr.repo.clone(),
+                    number: pr.number,
+                    status: Some(status),
+                    newly_linked: false,
+                });
+            }
+        }
+        Ok(changes)
     }
 }
 
@@ -443,6 +503,7 @@ impl GithubIssueSyncStore for FakeRepos {
             })
             .filter_map(|r| {
                 Some(OpenIssueRef {
+                    task_id: r.task_id.clone(),
                     external_ref_id: r.id,
                     repo: r.repo.clone()?,
                     number: r.number?,
@@ -453,14 +514,33 @@ impl GithubIssueSyncStore for FakeRepos {
         Ok(refs)
     }
 
-    fn bulk_record_issue_sync(&mut self, entries: &[(i64, FetchedIssue)]) -> Result<()> {
+    fn bulk_record_issue_sync(
+        &mut self,
+        entries: &[(OpenIssueRef, FetchedIssue)],
+    ) -> Result<Vec<IssueSyncChange>> {
         let mut state = self.state.borrow_mut();
-        for (external_ref_id, issue) in entries {
-            state
+        let mut changes = Vec::new();
+        for (issue_ref, issue) in entries {
+            let previous = state
                 .issue_ref_states
-                .insert(*external_ref_id, (issue.title.clone(), issue.state));
+                .insert(issue_ref.external_ref_id, (issue.title.clone(), issue.state));
+            let (previous_title, previous_state) = match previous {
+                Some((title, state)) => (Some(title), Some(state)),
+                None => (None, None),
+            };
+            let title = FieldChange::detect(previous_title, issue.title.clone());
+            let issue_state = FieldChange::detect(previous_state, issue.state);
+            if title.is_some() || issue_state.is_some() {
+                changes.push(IssueSyncChange {
+                    task_id: issue_ref.task_id.clone(),
+                    repo: issue_ref.repo.clone(),
+                    number: issue_ref.number,
+                    title,
+                    state: issue_state,
+                });
+            }
         }
-        Ok(())
+        Ok(changes)
     }
 
     fn upsert_issue_ref_state(
@@ -1553,14 +1633,35 @@ impl crate::ports::ExplanationOutputs for FakeTaskRunOutputs {
     }
 }
 
-pub(crate) struct FakeAuth;
+pub(crate) struct FakeAuth {
+    status: GithubAuthStatus,
+}
+
+impl Default for FakeAuth {
+    fn default() -> Self {
+        Self {
+            status: GithubAuthStatus {
+                authenticated: true,
+                message: None,
+            },
+        }
+    }
+}
+
+impl FakeAuth {
+    pub(crate) fn unauthenticated(message: &str) -> Self {
+        Self {
+            status: GithubAuthStatus {
+                authenticated: false,
+                message: Some(message.to_string()),
+            },
+        }
+    }
+}
 
 impl AuthGateway for FakeAuth {
     fn status(&self) -> GithubAuthStatus {
-        GithubAuthStatus {
-            authenticated: true,
-            message: None,
-        }
+        self.status.clone()
     }
 }
 
@@ -2218,6 +2319,24 @@ pub(crate) fn facade(repos: FakeRepos, sink: RecordingSink) -> Monica<FakeBacken
     facade_with_decoder(repos, sink, TestAgentDecoders::default())
 }
 
+pub(crate) fn facade_with_auth(
+    repos: FakeRepos,
+    sink: RecordingSink,
+    auth: FakeAuth,
+) -> Monica<FakeBackend> {
+    Monica::new(
+        repos,
+        FakeGit::default(),
+        FakeGithub,
+        auth,
+        FakeSetupRunner::default(),
+        FakeTaskRunOutputs::default(),
+        FakeWorkspace,
+        TestAgentDecoders::default(),
+        Box::new(sink),
+    )
+}
+
 pub(crate) fn facade_with_outputs(
     repos: FakeRepos,
     sink: RecordingSink,
@@ -2227,7 +2346,7 @@ pub(crate) fn facade_with_outputs(
         repos,
         FakeGit::default(),
         FakeGithub,
-        FakeAuth,
+        FakeAuth::default(),
         FakeSetupRunner::default(),
         outputs,
         FakeWorkspace,
@@ -2245,7 +2364,7 @@ pub(crate) fn facade_with_decoder(
         repos,
         FakeGit::default(),
         FakeGithub,
-        FakeAuth,
+        FakeAuth::default(),
         FakeSetupRunner::default(),
         FakeTaskRunOutputs::default(),
         FakeWorkspace,

@@ -45,8 +45,9 @@ pub use ports::{
 // Application-owned types (NOT in monica-domain)
 pub use bench::{bench_runspace_id, PrepareTaskResult, RunTaskResult, TaskBench};
 pub use github::{
-    FetchedIssue, GithubAuthStatus, GithubIssue, GithubIssueState, GithubPullRequest,
-    GithubPullRequestRef, GithubPullRequestStatus, OpenIssueRef, PullRequestBranchSyncCandidate,
+    FetchedIssue, FieldChange, GithubAuthStatus, GithubIssue, GithubIssueState, GithubPullRequest,
+    GithubPullRequestRef, GithubPullRequestStatus, GithubSyncReport, GithubSyncScope,
+    IssueSyncChange, OpenIssueRef, PullRequestBranchSyncCandidate, PullRequestSyncChange,
     RepoPullRequest, UnresolvedPullRequestRef,
 };
 pub use observation::TaskRunObservation;

@@ -68,6 +68,7 @@ pub struct FetchedIssue {
 /// state rows the sync writes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenIssueRef {
+    pub task_id: String,
     pub external_ref_id: i64,
     pub repo: String,
     pub number: i64,
@@ -159,3 +160,74 @@ pub struct GithubAuthStatus {
     pub message: Option<String>,
 }
 
+/// Which refs a GitHub sync covers. `Task` narrows every pass to one task's refs before any
+/// network call, so `monica task sync MON-42` costs one issue lookup instead of a repo-wide sweep.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GithubSyncScope {
+    All,
+    Task(String),
+}
+
+impl GithubSyncScope {
+    pub fn covers(&self, task_id: &str) -> bool {
+        match self {
+            GithubSyncScope::All => true,
+            GithubSyncScope::Task(scoped) => scoped == task_id,
+        }
+    }
+}
+
+/// One field's move from its cached value to the freshly fetched one. `previous` is `None` when
+/// nothing was cached yet — a first fetch rather than a change of an established value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldChange<T> {
+    pub previous: Option<T>,
+    pub current: T,
+}
+
+impl<T: PartialEq> FieldChange<T> {
+    /// `Some` only when the fetched value differs from what was cached, so callers can push the
+    /// result straight into a change list without re-testing.
+    pub fn detect(previous: Option<T>, current: T) -> Option<Self> {
+        if previous.as_ref() == Some(&current) {
+            return None;
+        }
+        Some(Self { previous, current })
+    }
+}
+
+/// What a sync actually altered for one issue ref. Only refs with at least one changed field are
+/// reported; an unchanged ref leaves no entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IssueSyncChange {
+    pub task_id: String,
+    pub repo: String,
+    pub number: i64,
+    pub title: Option<FieldChange<String>>,
+    pub state: Option<FieldChange<GithubIssueState>>,
+}
+
+/// What a sync altered for one pull-request ref. `newly_linked` marks a PR the branch pass
+/// discovered and attached to the task for the first time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestSyncChange {
+    pub task_id: String,
+    pub repo: String,
+    pub number: i64,
+    pub status: Option<FieldChange<GithubPullRequestStatus>>,
+    pub newly_linked: bool,
+}
+
+/// The outcome of one sync pass, paired with the count the completion event already reported.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GithubSyncReport {
+    pub synced_count: u32,
+    pub issue_changes: Vec<IssueSyncChange>,
+    pub pull_request_changes: Vec<PullRequestSyncChange>,
+}
+
+impl GithubSyncReport {
+    pub fn is_unchanged(&self) -> bool {
+        self.issue_changes.is_empty() && self.pull_request_changes.is_empty()
+    }
+}

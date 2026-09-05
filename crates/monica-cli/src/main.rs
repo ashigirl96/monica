@@ -95,6 +95,14 @@ mod tests {
     }
 
     #[test]
+    fn task_sync_takes_an_optional_task_id() {
+        assert!(Cli::try_parse_from(["monica", "task", "sync"]).is_ok());
+        assert!(Cli::try_parse_from(["monica", "task", "sync", "MON-1"]).is_ok());
+        // one task at a time; the repo-wide sweep is the no-argument form.
+        assert!(Cli::try_parse_from(["monica", "task", "sync", "MON-1", "MON-2"]).is_err());
+    }
+
+    #[test]
     fn note_show_and_search_parse() {
         assert!(Cli::try_parse_from(["monica", "note", "show", "note-1"]).is_ok());
         assert!(

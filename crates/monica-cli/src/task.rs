@@ -2,7 +2,10 @@ use std::io::{self, Write};
 
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
-use monica_application::{parse_issue_input, AttachSessionReport, TaskSummaryRow, TrackOutcome};
+use monica_application::{
+    parse_issue_input, AttachSessionReport, GithubSyncReport, GithubSyncScope, TaskSummaryRow,
+    TrackOutcome,
+};
 use monica_domain::{parse_owner_repo, Agent, DisplayStatus, TaskId};
 
 use crate::event_sink::{self, CliFacade};
@@ -31,6 +34,11 @@ pub enum TaskCommand {
         /// MON-<id>
         id: String,
     },
+    /// Re-fetch GitHub issue / PR state for tracked tasks and report what changed
+    Sync {
+        /// MON-<id> to sync one task's refs. Defaults to every open task's refs.
+        id: Option<String>,
+    },
 }
 
 pub async fn run(cmd: TaskCommand) -> Result<()> {
@@ -40,6 +48,7 @@ pub async fn run(cmd: TaskCommand) -> Result<()> {
         TaskCommand::Status { status, project } => status_command(&mut monica, status, project),
         TaskCommand::Attach { id } => attach_command(&mut monica, &id),
         TaskCommand::Close { id } => close_command(&mut monica, &id),
+        TaskCommand::Sync { id } => sync_command(&mut monica, id.as_deref()).await,
     }
 }
 
@@ -182,6 +191,29 @@ fn close_command(monica: &mut CliFacade, id: &str) -> Result<()> {
     Ok(())
 }
 
+async fn sync_command(monica: &mut CliFacade, id: Option<&str>) -> Result<()> {
+    let scope = match id {
+        Some(id) => GithubSyncScope::Task(resolve_task_id(monica, id)?),
+        None => GithubSyncScope::All,
+    };
+    let report = monica.synchronization().sync_github(scope).await?;
+    print!("{}", render_sync_report(&report));
+    Ok(())
+}
+
+/// Reject an unknown task here rather than letting the sync report zero refs, which reads the same
+/// as a typo'd id having nothing to refresh.
+fn resolve_task_id(monica: &mut CliFacade, id: &str) -> Result<String> {
+    let task_id = TaskId::parse(id)?;
+    monica
+        .tasks()
+        .list_all_task_summaries(None)?
+        .into_iter()
+        .find(|row| row.id == task_id.as_str())
+        .map(|row| row.id)
+        .ok_or_else(|| anyhow!("Task not found: {id}"))
+}
+
 fn print_close_summary(task: &TaskSummaryRow) {
     println!("Close task?");
     println!();
@@ -241,9 +273,196 @@ fn render_status_table(rows: &[TaskSummaryRow]) -> String {
     crate::table::render_table(&table)
 }
 
+fn render_sync_report(report: &GithubSyncReport) -> String {
+    let mut table = vec![vec![
+        "ID".to_string(),
+        "REF".to_string(),
+        "FIELD".to_string(),
+        "CHANGE".to_string(),
+    ]];
+    for change in &report.issue_changes {
+        let reference = format!("{}#{}", change.repo, change.number);
+        if let Some(title) = &change.title {
+            let previous = title.previous.as_deref().map(quoted);
+            table.push(vec![
+                change.task_id.clone(),
+                reference.clone(),
+                "title".to_string(),
+                render_transition(previous.as_deref(), &quoted(&title.current)),
+            ]);
+        }
+        if let Some(state) = &change.state {
+            table.push(vec![
+                change.task_id.clone(),
+                reference,
+                "state".to_string(),
+                render_transition(state.previous.map(|s| s.as_str()), state.current.as_str()),
+            ]);
+        }
+    }
+    for change in &report.pull_request_changes {
+        let status = change.status.as_ref();
+        // A freshly linked PR has no prior status by construction, so "linked (open)" says more
+        // than "- -> open".
+        let rendered = match (change.newly_linked, status) {
+            (true, Some(status)) => format!("linked ({})", status.current.as_str()),
+            (true, None) => "linked".to_string(),
+            (false, Some(status)) => {
+                render_transition(status.previous.map(|s| s.as_str()), status.current.as_str())
+            }
+            (false, None) => continue,
+        };
+        table.push(vec![
+            change.task_id.clone(),
+            format!("{}#{}", change.repo, change.number),
+            "pr".to_string(),
+            rendered,
+        ]);
+    }
+
+    let changed = table.len() - 1;
+    if changed == 0 {
+        return match report.synced_count {
+            0 => "No refs to sync.\n".to_string(),
+            synced => format!("Synced {synced} refs, nothing changed.\n"),
+        };
+    }
+    format!(
+        "Synced {} refs, {changed} changed.\n\n{}",
+        report.synced_count,
+        crate::table::render_table(&table)
+    )
+}
+
+fn render_transition(previous: Option<&str>, current: &str) -> String {
+    format!("{} -> {current}", previous.unwrap_or("-"))
+}
+
+fn quoted(value: &str) -> String {
+    format!("{value:?}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use monica_application::{
+        FieldChange, GithubPullRequestStatus, IssueSyncChange, PullRequestSyncChange,
+    };
+
+    fn issue_change(
+        title: Option<FieldChange<String>>,
+        state: Option<FieldChange<GithubIssueState>>,
+    ) -> IssueSyncChange {
+        IssueSyncChange {
+            task_id: "MON-42".to_string(),
+            repo: "ashigirl96/monica".to_string(),
+            number: 481,
+            title,
+            state,
+        }
+    }
+
+    #[test]
+    fn render_sync_report_says_nothing_changed_without_hiding_the_work_done() {
+        let report = GithubSyncReport {
+            synced_count: 12,
+            ..GithubSyncReport::default()
+        };
+        assert_eq!(
+            render_sync_report(&report),
+            "Synced 12 refs, nothing changed.\n"
+        );
+    }
+
+    #[test]
+    fn render_sync_report_distinguishes_having_nothing_to_sync() {
+        assert_eq!(
+            render_sync_report(&GithubSyncReport::default()),
+            "No refs to sync.\n"
+        );
+    }
+
+    #[test]
+    fn render_sync_report_lists_one_row_per_changed_field() {
+        let report = GithubSyncReport {
+            synced_count: 12,
+            issue_changes: vec![issue_change(
+                Some(FieldChange {
+                    previous: Some("old title".to_string()),
+                    current: "new title".to_string(),
+                }),
+                Some(FieldChange {
+                    previous: Some(GithubIssueState::Open),
+                    current: GithubIssueState::Closed,
+                }),
+            )],
+            pull_request_changes: vec![
+                PullRequestSyncChange {
+                    task_id: "MON-39".to_string(),
+                    repo: "ashigirl96/monica".to_string(),
+                    number: 488,
+                    status: Some(FieldChange {
+                        previous: Some(GithubPullRequestStatus::Open),
+                        current: GithubPullRequestStatus::Merged,
+                    }),
+                    newly_linked: false,
+                },
+                PullRequestSyncChange {
+                    task_id: "MON-51".to_string(),
+                    repo: "ashigirl96/monica".to_string(),
+                    number: 490,
+                    status: Some(FieldChange {
+                        previous: None,
+                        current: GithubPullRequestStatus::Open,
+                    }),
+                    newly_linked: true,
+                },
+            ],
+        };
+
+        assert_eq!(
+            render_sync_report(&report),
+            concat!(
+                "Synced 12 refs, 4 changed.\n",
+                "\n",
+                "ID      REF                    FIELD  CHANGE\n",
+                "MON-42  ashigirl96/monica#481  title  \"old title\" -> \"new title\"\n",
+                "MON-42  ashigirl96/monica#481  state  open -> closed\n",
+                "MON-39  ashigirl96/monica#488  pr     open -> merged\n",
+                "MON-51  ashigirl96/monica#490  pr     linked (open)\n",
+            )
+        );
+    }
+
+    #[test]
+    fn render_sync_report_marks_a_first_fetch_with_a_dash() {
+        let report = GithubSyncReport {
+            synced_count: 1,
+            issue_changes: vec![issue_change(
+                Some(FieldChange {
+                    previous: None,
+                    current: "first title".to_string(),
+                }),
+                Some(FieldChange {
+                    previous: None,
+                    current: GithubIssueState::Open,
+                }),
+            )],
+            pull_request_changes: Vec::new(),
+        };
+
+        assert_eq!(
+            render_sync_report(&report),
+            concat!(
+                "Synced 1 refs, 2 changed.\n",
+                "\n",
+                "ID      REF                    FIELD  CHANGE\n",
+                "MON-42  ashigirl96/monica#481  title  - -> \"first title\"\n",
+                "MON-42  ashigirl96/monica#481  state  - -> open\n",
+            )
+        );
+    }
+
     use monica_application::GithubIssueState;
     use monica_domain::TaskStatus;
 

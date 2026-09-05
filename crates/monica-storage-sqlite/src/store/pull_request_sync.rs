@@ -1,10 +1,12 @@
+use std::str::FromStr;
+
 use anyhow::Result;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
 use crate::SqliteStore;
 use monica_application::{
-    GithubPullRequest, PullRequestBranchSyncCandidate, PullRequestSyncStore,
-    UnresolvedPullRequestRef,
+    FieldChange, GithubPullRequest, GithubPullRequestStatus, PullRequestBranchSyncCandidate,
+    PullRequestSyncChange, PullRequestSyncStore, UnresolvedPullRequestRef,
 };
 use monica_domain::{Provider, RefType};
 
@@ -95,10 +97,16 @@ impl SqliteStore {
         &mut self,
         branch_entries: &[(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)],
         status_entries: &[(UnresolvedPullRequestRef, GithubPullRequest)],
-    ) -> Result<()> {
-        let tx = self.conn_mut().transaction()?;
+    ) -> Result<Vec<PullRequestSyncChange>> {
+        // Immediate: both passes read a row before writing it, and a DEFERRED transaction that
+        // starts with a read gets SQLITE_BUSY without consulting the busy handler when it later
+        // tries to upgrade to a write lock. Same reason as `get_or_create_daily_note`.
+        let tx = self
+            .conn_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut changes = Vec::new();
         for (candidate, pull_requests) in branch_entries {
-            write_branch_sync_success(&tx, candidate, pull_requests)?;
+            changes.extend(write_branch_sync_success(&tx, candidate, pull_requests)?);
         }
         for (unresolved_ref, pull_request) in status_entries {
             tx.execute(
@@ -107,14 +115,24 @@ impl SqliteStore {
                   WHERE id = ?2",
                 params![&pull_request.url, unresolved_ref.external_ref_id],
             )?;
+            let previous = read_pr_ref_status(&tx, unresolved_ref.external_ref_id)?;
             upsert_pr_ref_state_success(
                 &tx,
                 unresolved_ref.external_ref_id,
                 pull_request.status.as_str(),
             )?;
+            if let Some(status) = FieldChange::detect(previous, pull_request.status) {
+                changes.push(PullRequestSyncChange {
+                    task_id: unresolved_ref.task_id.clone(),
+                    repo: pull_request.repo.clone(),
+                    number: pull_request.number,
+                    status: Some(status),
+                    newly_linked: false,
+                });
+            }
         }
         tx.commit()?;
-        Ok(())
+        Ok(changes)
     }
 }
 
@@ -133,7 +151,7 @@ impl PullRequestSyncStore for SqliteStore {
         &mut self,
         branch_entries: &[(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)],
         status_entries: &[(UnresolvedPullRequestRef, GithubPullRequest)],
-    ) -> Result<()> {
+    ) -> Result<Vec<PullRequestSyncChange>> {
         SqliteStore::bulk_record_pr_sync(self, branch_entries, status_entries)
     }
 }
@@ -142,7 +160,8 @@ fn write_branch_sync_success(
     tx: &rusqlite::Transaction,
     candidate: &PullRequestBranchSyncCandidate,
     pull_requests: &[GithubPullRequest],
-) -> Result<()> {
+) -> Result<Vec<PullRequestSyncChange>> {
+    let mut changes = Vec::new();
     for pr in pull_requests {
         let existing = tx
             .query_row(
@@ -185,9 +204,38 @@ fn write_branch_sync_success(
             )?;
             tx.last_insert_rowid()
         };
+        let newly_linked = existing.is_none();
+        let previous = read_pr_ref_status(tx, ref_id)?;
         upsert_pr_ref_state_success(tx, ref_id, pr.status.as_str())?;
+        let status = FieldChange::detect(previous, pr.status);
+        if newly_linked || status.is_some() {
+            changes.push(PullRequestSyncChange {
+                task_id: candidate.task_id.clone(),
+                repo: pr.repo.clone(),
+                number: pr.number,
+                status,
+                newly_linked,
+            });
+        }
     }
-    Ok(())
+    Ok(changes)
+}
+
+/// The cached status, `None` when no state row exists yet or the column was never filled.
+fn read_pr_ref_status(
+    conn: &rusqlite::Connection,
+    external_ref_id: i64,
+) -> Result<Option<GithubPullRequestStatus>> {
+    let status: Option<Option<String>> = conn
+        .query_row(
+            "SELECT status FROM github_pull_request_ref_states WHERE external_ref_id = ?1",
+            params![external_ref_id],
+            |row| row.get("status"),
+        )
+        .optional()?;
+    Ok(status
+        .flatten()
+        .and_then(|s| GithubPullRequestStatus::from_str(&s).ok()))
 }
 
 fn upsert_pr_ref_state_success(

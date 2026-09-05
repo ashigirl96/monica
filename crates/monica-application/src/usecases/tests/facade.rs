@@ -1,5 +1,6 @@
 use super::*;
 use super::support::*;
+use crate::GithubSyncScope;
 use monica_domain::{AgentSessionId, RunspaceId};
 
 
@@ -216,6 +217,119 @@ async fn facade_force_sync_github_announces_completion() {
         .events()
         .iter()
         .any(|e| matches!(e, ApplicationEvent::GithubSyncCompleted { synced_count: 0 })));
+}
+
+#[tokio::test]
+async fn facade_sync_github_fails_loudly_when_github_is_unauthenticated() {
+    let repos = FakeRepos::default();
+    repos.set_unresolved_pr_refs(vec![UnresolvedPullRequestRef {
+        task_id: "MON-1".to_string(),
+        external_ref_id: 7,
+        repo: "owner/repo".to_string(),
+        number: 12,
+    }]);
+    let sink = RecordingSink::default();
+    let mut monica = facade_with_auth(
+        repos,
+        sink.clone(),
+        FakeAuth::unauthenticated("run `gh auth login`"),
+    );
+
+    let err = monica
+        .synchronization()
+        .sync_github(GithubSyncScope::All)
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(err, ApplicationError::AuthenticationRequired(ref m) if m == "run `gh auth login`"),
+        "an explicitly requested sync surfaces the gh guidance, got {err:?}"
+    );
+    assert!(
+        !sink
+            .events()
+            .iter()
+            .any(|e| matches!(e, ApplicationEvent::GithubSyncCompleted { .. })),
+        "a sync that never ran must not announce completion"
+    );
+}
+
+#[tokio::test]
+async fn facade_force_sync_github_stays_quiet_when_github_is_unauthenticated() {
+    let repos = FakeRepos::default();
+    repos.set_unresolved_pr_refs(vec![UnresolvedPullRequestRef {
+        task_id: "MON-1".to_string(),
+        external_ref_id: 7,
+        repo: "owner/repo".to_string(),
+        number: 12,
+    }]);
+    let sink = RecordingSink::default();
+    let mut monica = facade_with_auth(
+        repos,
+        sink.clone(),
+        FakeAuth::unauthenticated("run `gh auth login`"),
+    );
+
+    // The background path fires on every board navigation, so it stays a no-op instead of erroring.
+    assert_eq!(
+        monica.synchronization().force_sync_github().await.unwrap(),
+        0
+    );
+    assert!(!sink
+        .events()
+        .iter()
+        .any(|e| matches!(e, ApplicationEvent::GithubSyncCompleted { .. })));
+}
+
+#[tokio::test]
+async fn facade_sync_github_reports_the_status_moves_it_wrote() {
+    let repos = FakeRepos::default();
+    repos.set_unresolved_pr_refs(vec![UnresolvedPullRequestRef {
+        task_id: "MON-1".to_string(),
+        external_ref_id: 7,
+        repo: "owner/repo".to_string(),
+        number: 12,
+    }]);
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    let report = monica
+        .synchronization()
+        .sync_github(GithubSyncScope::All)
+        .await
+        .unwrap();
+
+    assert_eq!(report.synced_count, 1);
+    assert!(!report.is_unchanged());
+    assert_eq!(report.pull_request_changes.len(), 1);
+    assert_eq!(report.pull_request_changes[0].task_id, "MON-1");
+    assert_eq!(report.pull_request_changes[0].number, 12);
+    assert!(sink
+        .events()
+        .iter()
+        .any(|e| matches!(e, ApplicationEvent::GithubSyncCompleted { synced_count: 1 })));
+}
+
+#[tokio::test]
+async fn facade_sync_github_scoped_to_another_task_touches_nothing() {
+    let repos = FakeRepos::default();
+    repos.set_unresolved_pr_refs(vec![UnresolvedPullRequestRef {
+        task_id: "MON-1".to_string(),
+        external_ref_id: 7,
+        repo: "owner/repo".to_string(),
+        number: 12,
+    }]);
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+
+    let report = monica
+        .synchronization()
+        .sync_github(GithubSyncScope::Task("MON-2".to_string()))
+        .await
+        .unwrap();
+
+    assert_eq!(report.synced_count, 0);
+    assert!(report.is_unchanged());
 }
 
 #[tokio::test]

@@ -3,26 +3,40 @@ use std::time::Instant;
 
 use super::ports::{GithubGateway, PullRequestSyncStore};
 use crate::{
-    ApplicationResult, GithubPullRequest, PullRequestBranchSyncCandidate, RepoPullRequest,
-    UnresolvedPullRequestRef,
+    ApplicationResult, GithubPullRequest, GithubSyncScope, PullRequestBranchSyncCandidate,
+    PullRequestSyncChange, RepoPullRequest, UnresolvedPullRequestRef,
 };
 
 /// Forced PR refresh, the only sync path. Fetches every tracked repo's recent PRs once — in
 /// parallel — and matches them to branch candidates in memory, then re-checks every unresolved
 /// tracked PR the branch pass didn't cover (reusing the repo listings where possible, fetching by
-/// number otherwise), and persists everything in a single transaction. Returns the number of
-/// branch candidates that matched at least one PR plus the number of unresolved refs refreshed.
-pub async fn bulk_sync_pull_requests<R, G>(repos: &mut R, github: &G) -> ApplicationResult<u32>
+/// number otherwise), and persists everything in a single transaction. `scope` narrows the
+/// candidates and refs before any request goes out. Returns the number of branch candidates that
+/// matched at least one PR plus the number of unresolved refs refreshed, along with the refs whose
+/// status actually moved.
+pub async fn bulk_sync_pull_requests<R, G>(
+    repos: &mut R,
+    github: &G,
+    scope: &GithubSyncScope,
+) -> ApplicationResult<(u32, Vec<PullRequestSyncChange>)>
 where
     R: PullRequestSyncStore,
     G: GithubGateway,
 {
     let started = Instant::now();
-    let candidates = repos.all_branch_sync_candidates()?;
-    let unresolved = repos.all_unresolved_pull_request_refs()?;
+    let candidates: Vec<PullRequestBranchSyncCandidate> = repos
+        .all_branch_sync_candidates()?
+        .into_iter()
+        .filter(|candidate| scope.covers(&candidate.task_id))
+        .collect();
+    let unresolved: Vec<UnresolvedPullRequestRef> = repos
+        .all_unresolved_pull_request_refs()?
+        .into_iter()
+        .filter(|pr_ref| scope.covers(&pr_ref.task_id))
+        .collect();
     let candidates_ms = started.elapsed().as_millis();
     if candidates.is_empty() && unresolved.is_empty() {
-        return Ok(0);
+        return Ok((0, Vec::new()));
     }
 
     let mut seen = HashSet::new();
@@ -174,7 +188,7 @@ where
 
     let synced_count = branch_matched + status_entries.len() as u32;
     let record_started = Instant::now();
-    repos.bulk_record_pr_sync(&branch_entries, &status_entries)?;
+    let changes = repos.bulk_record_pr_sync(&branch_entries, &status_entries)?;
     log::info!(
         target: "monica_application::github_sync",
         "bulk PR sync done: candidates={} repos={} matched={} statuses={} | candidates={}ms fetch={}ms status_fetch={}ms record={}ms total={}ms",
@@ -188,7 +202,7 @@ where
         record_started.elapsed().as_millis(),
         started.elapsed().as_millis()
     );
-    Ok(synced_count)
+    Ok((synced_count, changes))
 }
 
 /// The bulk pass keeps the single PR that best represents a branch: active over settled, then

@@ -1,6 +1,9 @@
 use anyhow::Result;
 
-use crate::github::{GithubPullRequest, PullRequestBranchSyncCandidate, UnresolvedPullRequestRef};
+use crate::github::{
+    GithubPullRequest, PullRequestBranchSyncCandidate, PullRequestSyncChange,
+    UnresolvedPullRequestRef,
+};
 
 /// Pull-request sync bookkeeping for the forced bulk refresh. Separated from
 /// [`TaskStore`](super::TaskStore) because it is GitHub-sync machinery, not task-aggregate
@@ -16,9 +19,11 @@ pub trait PullRequestSyncStore {
     /// Persist a whole forced sync in one transaction. Each branch entry pairs a candidate with
     /// the PRs matched to it (empty when the repo listing carried none for that branch); each
     /// status entry pairs an unresolved ref with its freshly fetched PR.
+    /// Returns only the refs whose status actually moved, plus the PRs the branch pass linked to
+    /// a task for the first time.
     fn bulk_record_pr_sync(
         &mut self,
         branch_entries: &[(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)],
         status_entries: &[(UnresolvedPullRequestRef, GithubPullRequest)],
-    ) -> Result<()>;
+    ) -> Result<Vec<PullRequestSyncChange>>;
 }

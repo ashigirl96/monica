@@ -2,21 +2,30 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use super::ports::{GithubGateway, GithubIssueSyncStore};
-use crate::{ApplicationResult, FetchedIssue};
+use crate::{ApplicationResult, FetchedIssue, GithubSyncScope, IssueSyncChange, OpenIssueRef};
 
 /// Forced issue refresh, the issue half of the GitHub sync. Fetches every repo's tracked issues in
 /// one batched request each — all repos in parallel — and records the fresh title and state in a
 /// single transaction. Only open tasks are covered: a closed task's issue needs no freshness.
-/// Returns the number of refs whose cache was refreshed.
-pub async fn bulk_sync_issues<R, G>(repos: &mut R, github: &G) -> ApplicationResult<u32>
+/// `scope` narrows the refs before any request goes out. Returns the number of refs whose cache was
+/// refreshed, plus the ones whose title or state actually moved.
+pub async fn bulk_sync_issues<R, G>(
+    repos: &mut R,
+    github: &G,
+    scope: &GithubSyncScope,
+) -> ApplicationResult<(u32, Vec<IssueSyncChange>)>
 where
     R: GithubIssueSyncStore,
     G: GithubGateway,
 {
     let started = Instant::now();
-    let refs = repos.all_open_task_issue_refs()?;
+    let refs: Vec<OpenIssueRef> = repos
+        .all_open_task_issue_refs()?
+        .into_iter()
+        .filter(|issue_ref| scope.covers(&issue_ref.task_id))
+        .collect();
     if refs.is_empty() {
-        return Ok(0);
+        return Ok((0, Vec::new()));
     }
 
     // One request set per repo, with the numbers deduplicated: the same issue tracked by two
@@ -67,20 +76,20 @@ where
         }
     }
 
-    let mut entries: Vec<(i64, FetchedIssue)> = Vec::with_capacity(refs.len());
+    let mut entries: Vec<(OpenIssueRef, FetchedIssue)> = Vec::with_capacity(refs.len());
     for issue_ref in &refs {
         let repo_key = issue_ref.repo.to_ascii_lowercase();
         if let Some(issue) = by_repo
             .get(&repo_key)
             .and_then(|issues| issues.get(&issue_ref.number))
         {
-            entries.push((issue_ref.external_ref_id, issue.clone()));
+            entries.push((issue_ref.clone(), issue.clone()));
         }
     }
 
     let synced_count = entries.len() as u32;
     let record_started = Instant::now();
-    repos.bulk_record_issue_sync(&entries)?;
+    let changes = repos.bulk_record_issue_sync(&entries)?;
     log::info!(
         target: "monica_application::github_sync",
         "bulk issue sync done: refs={} repos={} synced={synced_count} | fetch={fetch_ms}ms record={}ms total={}ms",
@@ -89,5 +98,5 @@ where
         record_started.elapsed().as_millis(),
         started.elapsed().as_millis()
     );
-    Ok(synced_count)
+    Ok((synced_count, changes))
 }

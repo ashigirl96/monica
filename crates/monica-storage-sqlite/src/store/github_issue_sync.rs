@@ -1,8 +1,13 @@
+use std::str::FromStr;
+
 use anyhow::Result;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
 use crate::SqliteStore;
-use monica_application::{FetchedIssue, GithubIssueState, GithubIssueSyncStore, OpenIssueRef};
+use monica_application::{
+    FetchedIssue, FieldChange, GithubIssueState, GithubIssueSyncStore, IssueSyncChange,
+    OpenIssueRef,
+};
 
 use super::SET_NOW;
 
@@ -10,6 +15,7 @@ impl SqliteStore {
     pub fn all_open_task_issue_refs(&self) -> Result<Vec<OpenIssueRef>> {
         let mut stmt = self.conn().prepare(
             "SELECT
+               t.id AS task_id,
                er.id AS external_ref_id,
                er.repo AS repo,
                er.number AS number
@@ -26,6 +32,7 @@ impl SqliteStore {
         let refs = stmt
             .query_map([], |row| {
                 Ok(OpenIssueRef {
+                    task_id: row.get("task_id")?,
                     external_ref_id: row.get("external_ref_id")?,
                     repo: row.get("repo")?,
                     number: row.get("number")?,
@@ -35,13 +42,36 @@ impl SqliteStore {
         Ok(refs)
     }
 
-    pub fn bulk_record_issue_sync(&mut self, entries: &[(i64, FetchedIssue)]) -> Result<()> {
-        let tx = self.conn_mut().transaction()?;
-        for (external_ref_id, issue) in entries {
-            upsert_issue_ref_state_in(&tx, *external_ref_id, &issue.title, issue.state)?;
+    pub fn bulk_record_issue_sync(
+        &mut self,
+        entries: &[(OpenIssueRef, FetchedIssue)],
+    ) -> Result<Vec<IssueSyncChange>> {
+        // Immediate: this transaction reads each cached row before overwriting it, and a DEFERRED
+        // transaction that starts with a read gets SQLITE_BUSY without consulting the busy handler
+        // when it later tries to upgrade to a write lock. Same reason as the notes store's
+        // `get_or_create_daily_note`.
+        let tx = self
+            .conn_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut changes = Vec::new();
+        for (issue_ref, issue) in entries {
+            let (previous_title, previous_state) =
+                read_issue_ref_state(&tx, issue_ref.external_ref_id)?;
+            upsert_issue_ref_state_in(&tx, issue_ref.external_ref_id, &issue.title, issue.state)?;
+            let title = FieldChange::detect(previous_title, issue.title.clone());
+            let state = FieldChange::detect(previous_state, issue.state);
+            if title.is_some() || state.is_some() {
+                changes.push(IssueSyncChange {
+                    task_id: issue_ref.task_id.clone(),
+                    repo: issue_ref.repo.clone(),
+                    number: issue_ref.number,
+                    title,
+                    state,
+                });
+            }
         }
         tx.commit()?;
-        Ok(())
+        Ok(changes)
     }
 
     pub fn upsert_issue_ref_state(
@@ -76,7 +106,10 @@ impl GithubIssueSyncStore for SqliteStore {
         SqliteStore::all_open_task_issue_refs(self)
     }
 
-    fn bulk_record_issue_sync(&mut self, entries: &[(i64, FetchedIssue)]) -> Result<()> {
+    fn bulk_record_issue_sync(
+        &mut self,
+        entries: &[(OpenIssueRef, FetchedIssue)],
+    ) -> Result<Vec<IssueSyncChange>> {
         SqliteStore::bulk_record_issue_sync(self, entries)
     }
 
@@ -111,4 +144,24 @@ fn upsert_issue_ref_state_in(
         params![external_ref_id, title, state.as_str()],
     )?;
     Ok(())
+}
+
+/// The cached title and state, each `None` when the row is missing or the column was never
+/// filled. Read before the upsert so the caller can tell a changed value from a first fetch.
+fn read_issue_ref_state(
+    conn: &rusqlite::Connection,
+    external_ref_id: i64,
+) -> Result<(Option<String>, Option<GithubIssueState>)> {
+    let row: Option<(Option<String>, Option<String>)> = conn
+        .query_row(
+            "SELECT title, state FROM github_issue_ref_states WHERE external_ref_id = ?1",
+            params![external_ref_id],
+            |row| Ok((row.get("title")?, row.get("state")?)),
+        )
+        .optional()?;
+    let (title, state) = row.unwrap_or((None, None));
+    Ok((
+        title,
+        state.and_then(|s| GithubIssueState::from_str(&s).ok()),
+    ))
 }
