@@ -48,7 +48,7 @@ where
 /// `prepare_claude_for_run`'s prepared-primary contract. `None` when the slot is free to take.
 pub(super) fn primary_mid_prepare<R>(repos: &R, task: &Task) -> ApplicationResult<Option<TaskRunId>>
 where
-    R: TaskRunStore,
+    R: TaskRunStore + ?Sized,
 {
     let Some(current_id) = task.primary_task_run_id.as_ref() else {
         return Ok(None);

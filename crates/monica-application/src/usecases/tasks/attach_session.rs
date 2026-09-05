@@ -97,11 +97,15 @@ where
         )));
     }
 
-    let kept_primary_run_id = primary_mid_prepare(repos, &task)?;
-
     // The run, the primary pointer, and the bench land as one transaction, as in `start_run`: a
     // crash between them would strand a run with no runspace for the Workbench to move its tab to.
+    // The primary is re-read inside it: a Prepare committing between a snapshot taken outside and
+    // the pointer update below would have its fresh worktree run silently displaced.
     let mut tx = repos.begin()?;
+    let task = tx
+        .get_task(task_id)?
+        .ok_or_else(|| ApplicationError::not_found(format!("task not found: {task_id}")))?;
+    let kept_primary_run_id = primary_mid_prepare(&*tx, &task)?;
     let attachment = tx.attach_terminal_tab_to_task(
         NewTaskRun {
             task_id: task.id.clone(),
