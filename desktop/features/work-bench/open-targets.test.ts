@@ -15,7 +15,7 @@ import {
 import { terminalFocusRequestAtom, terminalStateAtom } from "@/features/work-bench/store";
 import { taskSummary as task } from "@/features/work-board/test-fixtures";
 import { queryKeys } from "@/stores/query-keys";
-import { activeSpaceAtom } from "@/stores/space";
+import { activeSpaceAtom, sidebarOpenAtom } from "@/stores/space";
 
 const ANCHOR = { top: 0, left: 0, bottom: 0 };
 const ISSUE_URL = "https://github.com/owner/repo/issues/7";
@@ -42,6 +42,7 @@ function storeWithLinkedTask() {
   store.set(queryClientAtom, qc);
   qc.setQueryData(queryKeys.tasks.summary(null), [linkedTask([{ number: 12, url: PR_URL }])]);
   store.set(activeSpaceAtom, "work-bench");
+  store.set(sidebarOpenAtom, true);
   store.set(terminalStateAtom, {
     runspaces: [
       { id: "rs-1", tabs: [], activeTabId: "", order: 0, taskId: "t1" },
@@ -59,6 +60,7 @@ function openMenu(store: ReturnType<typeof createStore>, selectedUrl = ISSUE_URL
     taskId: "t1",
     runspaceId: "rs-1",
     anchor: ANCHOR,
+    sidebarOpen: true,
     selectedUrl,
   });
   store.sub(openTargetsAtom, () => {});
@@ -170,6 +172,13 @@ describe("openTargetMenuStaleAtom", () => {
       ],
       activeRunspaceId: "rs-2",
     });
+    expect(store.get(openTargetMenuStaleAtom)).toBe(true);
+  });
+
+  test("goes stale when ⌘B moves what the anchor pointed at", () => {
+    const { store } = storeWithLinkedTask();
+    openMenu(store);
+    store.set(sidebarOpenAtom, false);
     expect(store.get(openTargetMenuStaleAtom)).toBe(true);
   });
 

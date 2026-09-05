@@ -4,7 +4,7 @@ import type { PopoverAnchor } from "@/components/popover-menu";
 import { activeRunspaceAtom, terminalFocusRequestAtom } from "@/features/work-bench/store";
 import { visibleAnchorForSelector } from "@/lib/anchor";
 import { type OpenTarget, openTargets } from "@/lib/github-targets";
-import { activeSpaceAtom } from "@/stores/space";
+import { activeSpaceAtom, sidebarOpenAtom } from "@/stores/space";
 import { taskSummariesAtom } from "@/stores/workboard";
 import { pushInfoToast } from "@/stores/toast";
 
@@ -12,6 +12,8 @@ export type OpenTargetMenuState = {
   taskId: string;
   runspaceId: string;
   anchor: PopoverAnchor;
+  // The layout the anchor was measured against, so a later ⌘B can be told apart from no change.
+  sidebarOpen: boolean;
   selectedUrl: string;
 };
 
@@ -71,18 +73,21 @@ export const toggleOpenTargetMenuAtom = atom(null, (get, set) => {
     taskId: rs.taskId,
     runspaceId: rs.id,
     anchor: menuAnchor(get),
+    sidebarOpen: get(sidebarOpenAtom),
     selectedUrl: targets[0].url,
   });
 });
 
 // The bench keeps running behind the board and the menu is portalled to <body>, so a shortcut
 // that leaves this runspace (⌘1, ⌥J) would otherwise strand the menu over another space or
-// leave it opening the previous task's links.
+// leave it opening the previous task's links. ⌘B is the same story for the anchor: PopoverMenu
+// measures it once and only watches scroll and resize, neither of which a collapse fires.
 export const openTargetMenuStaleAtom = atom((get) => {
   const menu = get(openTargetMenuAtom);
   if (menu === null) return false;
   if (get(activeSpaceAtom) !== "work-bench") return true;
   if (get(activeRunspaceAtom)?.id !== menu.runspaceId) return true;
+  if (get(sidebarOpenAtom) !== menu.sidebarOpen) return true;
   return get(openTargetsAtom).length === 0;
 });
 
