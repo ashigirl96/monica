@@ -118,6 +118,13 @@ pub(super) fn mark_task_closed_in(conn: &Connection, id: &TaskId) -> Result<Task
     if affected == 0 {
         return Err(anyhow!("task not found: {id}"));
     }
+    // A closed task is no longer a parent, so drop the links pointing at it now rather than
+    // waiting for the next GitHub sync to re-resolve them. Children that are themselves closed
+    // keep theirs: their whole GitHub cache is frozen at what it was while they were open.
+    conn.execute(
+        "UPDATE tasks SET parent_task_id = NULL WHERE parent_task_id = ?1 AND status != 'closed'",
+        params![id.as_str()],
+    )?;
     let mut stmt = conn.prepare(&format!("SELECT {TASK_COLUMNS} FROM {TASK_FROM} WHERE t.id = ?1"))?;
     let mut rows = stmt.query(params![id.as_str()])?;
     match rows.next()? {

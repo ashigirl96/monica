@@ -278,7 +278,15 @@ impl FakeRepos {
             .ok_or_else(|| anyhow!("task not found: {id}"))?;
         task.status = TaskStatus::Closed;
         task.closed_at = Some("2026-06-02T00:00:00.000Z".to_string());
-        Ok(task.clone())
+        let closed = task.clone();
+        // Mirrors the store: a closed task stops being a parent, but a closed child keeps the
+        // link it had while open.
+        for other in state.tasks.values_mut() {
+            if other.status != TaskStatus::Closed && other.parent_task_id.as_ref() == Some(id) {
+                other.parent_task_id = None;
+            }
+        }
+        Ok(closed)
     }
 
     fn do_mark_task(&self, id: &TaskId, status: TaskStatus, note: Option<&str>) -> Result<()> {

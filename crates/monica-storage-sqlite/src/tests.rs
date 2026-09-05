@@ -3029,3 +3029,38 @@ fn a_closed_child_keeps_the_link_it_had_while_open() {
         "the link freezes with the rest of the closed task's GitHub cache"
     );
 }
+
+#[test]
+fn closing_a_parent_unlinks_its_open_children_but_not_its_closed_ones() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let parent = tracked_task(&mut db, "owner/repo", 100);
+    let open_child = tracked_task(&mut db, "owner/repo", 101);
+    let closed_child = tracked_task(&mut db, "owner/repo", 102);
+    let entries: Vec<(i64, FetchedIssue)> = [101, 102]
+        .into_iter()
+        .map(|number| {
+            (
+                issue_ref_id(&db, "owner/repo", number),
+                fetched_with_parent(
+                    number,
+                    IssueAddress { repo: "owner/repo".to_string(), number: 100 },
+                ),
+            )
+        })
+        .collect();
+    db.bulk_record_issue_sync(&entries).unwrap();
+    db.mark_task_closed(&closed_child).unwrap();
+
+    db.mark_task_closed(&parent).unwrap();
+
+    assert_eq!(
+        parent_of(&db, &open_child),
+        None,
+        "an open child must not keep pointing at a closed parent until the next sync"
+    );
+    assert_eq!(
+        parent_of(&db, &closed_child).as_deref(),
+        Some(parent.as_str()),
+        "a closed child's link stays frozen with the rest of its cache"
+    );
+}
