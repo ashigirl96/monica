@@ -1,6 +1,7 @@
 /// v50: add `tasks.parent_task_id`, the Monica-side mirror of GitHub's Sub-issues link. The
 /// github-sync issue pass resolves each fetched issue's parent to an open task and writes it here,
-/// so the column always reflects what GitHub currently says.
+/// so the column reflects what GitHub currently says. Closing a task also clears the links pointing
+/// at it, since a closed task is no longer a parent.
 ///
 /// Deliberately without `REFERENCES tasks(id)`: SQLite refuses to `DROP COLUMN` a column used in a
 /// foreign key, and the 12-step rebuild that would work around that is unavailable for `tasks`

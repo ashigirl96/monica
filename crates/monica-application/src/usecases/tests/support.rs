@@ -464,35 +464,33 @@ impl GithubIssueSyncStore for FakeRepos {
 
     fn bulk_record_issue_sync(&mut self, entries: &[(i64, FetchedIssue)]) -> Result<()> {
         for (external_ref_id, issue) in entries {
-            let child_task_id = {
-                let state = self.state.borrow();
-                state
-                    .refs
-                    .values()
-                    .flatten()
-                    .find(|r| r.id == *external_ref_id)
-                    .map(|r| r.task_id.clone())
-            };
             // Same resolution the SQL store does: the parent is whichever open task tracks the
             // parent issue, in the repo that owns it, and never the child itself.
-            let parent_task_id = match (&child_task_id, &issue.parent) {
-                (Some(child), Some(address)) => self
-                    .do_find_open_task_by_external_ref(
-                        Provider::Github,
-                        RefType::Issue,
-                        &address.repo,
-                        address.number,
-                    )?
-                    .map(|task| task.id)
-                    .filter(|id| id.as_str() != child.as_str()),
-                _ => None,
+            let parent_task_id = match &issue.parent {
+                Some(address) => self.do_find_open_task_by_external_ref(
+                    Provider::Github,
+                    RefType::Issue,
+                    &address.repo,
+                    address.number,
+                )?,
+                None => None,
             };
             let mut state = self.state.borrow_mut();
             state
                 .issue_ref_states
                 .insert(*external_ref_id, (issue.title.clone(), issue.state));
-            if let Some(task) = child_task_id.and_then(|id| state.tasks.get_mut(&id)) {
-                task.parent_task_id = parent_task_id;
+            let child_task_id = state
+                .refs
+                .values()
+                .flatten()
+                .find(|r| r.id == *external_ref_id)
+                .map(|r| r.task_id.clone());
+            if let Some(child_task_id) = child_task_id {
+                let parent_task_id =
+                    parent_task_id.map(|task| task.id).filter(|id| id.as_str() != child_task_id);
+                if let Some(task) = state.tasks.get_mut(&child_task_id) {
+                    task.parent_task_id = parent_task_id;
+                }
             }
         }
         Ok(())

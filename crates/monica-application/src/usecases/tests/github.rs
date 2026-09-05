@@ -537,30 +537,37 @@ async fn bulk_sync_keeps_active_pr_when_a_worse_one_arrives_later() {
     assert_eq!(matched[0].status, GithubPullRequestStatus::Open);
 }
 
-#[tokio::test]
-async fn bulk_sync_issues_links_a_sub_issue_to_its_parent_task() {
-    let mut repos = FakeRepos::default();
-    let epic = track_github_issue(&mut repos, &FakeGithub, track_input()).await.unwrap();
+/// An epic (#42) and a sub-issue (#43), both tracked as tasks.
+async fn tracked_epic_and_sub(repos: &mut FakeRepos) -> (TaskId, TaskId) {
+    let epic = track_github_issue(repos, &FakeGithub, track_input()).await.unwrap();
     let sub = track_github_issue(
-        &mut repos,
+        repos,
         &FakeGithub,
         TrackGithubIssueInput { repo: "owner/repo".to_string(), number: 43 },
     )
     .await
     .unwrap();
+    (epic.task.id, sub.task.id)
+}
 
-    let github = RepoIssueGithub::new(HashMap::from([(
+/// A gateway reporting #43 as a sub-issue of #42.
+fn linked_hierarchy() -> RepoIssueGithub {
+    RepoIssueGithub::new(HashMap::from([(
         "owner/repo".to_string(),
         Some(vec![open_issue(42, "epic"), sub_issue(43, "owner/repo", 42)]),
-    )]));
-    bulk_sync_issues(&mut repos, &github).await.unwrap();
+    )]))
+}
 
+#[tokio::test]
+async fn bulk_sync_issues_links_a_sub_issue_to_its_parent_task() {
+    let mut repos = FakeRepos::default();
+    let (epic, sub) = tracked_epic_and_sub(&mut repos).await;
+
+    bulk_sync_issues(&mut repos, &linked_hierarchy()).await.unwrap();
+
+    assert_eq!(repos.get_task(&sub).unwrap().unwrap().parent_task_id, Some(epic.clone()));
     assert_eq!(
-        repos.get_task(&sub.task.id).unwrap().unwrap().parent_task_id,
-        Some(epic.task.id.clone())
-    );
-    assert_eq!(
-        repos.get_task(&epic.task.id).unwrap().unwrap().parent_task_id,
+        repos.get_task(&epic).unwrap().unwrap().parent_task_id,
         None,
         "the epic has no parent of its own"
     );
@@ -569,19 +576,8 @@ async fn bulk_sync_issues_links_a_sub_issue_to_its_parent_task() {
 #[tokio::test]
 async fn bulk_sync_issues_unlinks_a_parent_github_dropped() {
     let mut repos = FakeRepos::default();
-    track_github_issue(&mut repos, &FakeGithub, track_input()).await.unwrap();
-    let sub = track_github_issue(
-        &mut repos,
-        &FakeGithub,
-        TrackGithubIssueInput { repo: "owner/repo".to_string(), number: 43 },
-    )
-    .await
-    .unwrap();
-    let linked = RepoIssueGithub::new(HashMap::from([(
-        "owner/repo".to_string(),
-        Some(vec![open_issue(42, "epic"), sub_issue(43, "owner/repo", 42)]),
-    )]));
-    bulk_sync_issues(&mut repos, &linked).await.unwrap();
+    let (_, sub) = tracked_epic_and_sub(&mut repos).await;
+    bulk_sync_issues(&mut repos, &linked_hierarchy()).await.unwrap();
 
     let unlinked = RepoIssueGithub::new(HashMap::from([(
         "owner/repo".to_string(),
@@ -589,5 +585,5 @@ async fn bulk_sync_issues_unlinks_a_parent_github_dropped() {
     )]));
     bulk_sync_issues(&mut repos, &unlinked).await.unwrap();
 
-    assert_eq!(repos.get_task(&sub.task.id).unwrap().unwrap().parent_task_id, None);
+    assert_eq!(repos.get_task(&sub).unwrap().unwrap().parent_task_id, None);
 }

@@ -2915,18 +2915,28 @@ fn issue_ref_id(db: &SqliteStore, repo: &str, number: i64) -> i64 {
         .external_ref_id
 }
 
+/// Track a parent and a child issue in one repo and let a sync link them, the starting point for
+/// every hierarchy assertion below.
+fn link_parent_and_child(db: &mut SqliteStore, parent_number: i64, child_number: i64) -> (TaskId, TaskId) {
+    let parent = tracked_task(db, "owner/repo", parent_number);
+    let child = tracked_task(db, "owner/repo", child_number);
+    let ref_id = issue_ref_id(db, "owner/repo", child_number);
+    db.bulk_record_issue_sync(&[(
+        ref_id,
+        fetched_with_parent(
+            child_number,
+            IssueAddress { repo: "owner/repo".to_string(), number: parent_number },
+        ),
+    )])
+    .unwrap();
+    (parent, child)
+}
+
 #[test]
 fn bulk_record_issue_sync_links_the_child_to_its_parent_task() {
     let mut db = SqliteStore::open_in_memory().unwrap();
-    let parent = tracked_task(&mut db, "owner/repo", 100);
-    let child = tracked_task(&mut db, "owner/repo", 101);
-    let ref_id = issue_ref_id(&db, "owner/repo", 101);
 
-    db.bulk_record_issue_sync(&[(
-        ref_id,
-        fetched_with_parent(101, IssueAddress { repo: "owner/repo".to_string(), number: 100 }),
-    )])
-    .unwrap();
+    let (parent, child) = link_parent_and_child(&mut db, 100, 101);
 
     assert_eq!(parent_of(&db, &child).as_deref(), Some(parent.as_str()));
     let rows = db.list_task_summaries(TaskSummaryFilter::All, None).unwrap();
@@ -2937,14 +2947,8 @@ fn bulk_record_issue_sync_links_the_child_to_its_parent_task() {
 #[test]
 fn bulk_record_issue_sync_clears_a_link_github_dropped() {
     let mut db = SqliteStore::open_in_memory().unwrap();
-    tracked_task(&mut db, "owner/repo", 100);
-    let child = tracked_task(&mut db, "owner/repo", 101);
+    let (_, child) = link_parent_and_child(&mut db, 100, 101);
     let ref_id = issue_ref_id(&db, "owner/repo", 101);
-    db.bulk_record_issue_sync(&[(
-        ref_id,
-        fetched_with_parent(101, IssueAddress { repo: "owner/repo".to_string(), number: 100 }),
-    )])
-    .unwrap();
 
     db.bulk_record_issue_sync(&[(ref_id, fetched(101, "issue", GithubIssueState::Open))]).unwrap();
 
@@ -3008,14 +3012,8 @@ fn bulk_record_issue_sync_ignores_a_self_parent() {
 #[test]
 fn a_closed_child_keeps_the_link_it_had_while_open() {
     let mut db = SqliteStore::open_in_memory().unwrap();
-    let parent = tracked_task(&mut db, "owner/repo", 100);
-    let child = tracked_task(&mut db, "owner/repo", 101);
+    let (parent, child) = link_parent_and_child(&mut db, 100, 101);
     let ref_id = issue_ref_id(&db, "owner/repo", 101);
-    db.bulk_record_issue_sync(&[(
-        ref_id,
-        fetched_with_parent(101, IssueAddress { repo: "owner/repo".to_string(), number: 100 }),
-    )])
-    .unwrap();
 
     db.mark_task_closed(&child).unwrap();
 

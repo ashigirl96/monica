@@ -130,33 +130,23 @@ fn record_parent_task_in(
     external_ref_id: i64,
     parent: Option<&IssueAddress>,
 ) -> Result<()> {
-    let child_task_id: Option<String> = conn
-        .query_row(
-            "SELECT task_id FROM external_refs WHERE id = ?1",
-            params![external_ref_id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let Some(child_task_id) = child_task_id else {
-        return Ok(());
-    };
     let parent_task_id = match parent {
-        Some(address) => super::tasks::find_open_task_by_external_ref_in(
+        Some(address) => super::tasks::find_open_task_id_by_external_ref_in(
             conn,
             Provider::Github,
             RefType::Issue,
             &address.repo,
             address.number,
-        )?
-        .map(|task| task.id.to_string())
-        // GitHub never lets an issue parent itself, but a stray self-link would be a cycle no
-        // reader could walk out of.
-        .filter(|id| *id != child_task_id),
+        )?,
         None => None,
     };
+    // GitHub never lets an issue parent itself, but a stray self-link would be a cycle no reader
+    // could walk out of, so the CASE drops it rather than storing it.
     conn.execute(
-        "UPDATE tasks SET parent_task_id = ?2 WHERE id = ?1",
-        params![child_task_id, parent_task_id],
+        "UPDATE tasks
+            SET parent_task_id = CASE WHEN ?2 = id THEN NULL ELSE ?2 END
+          WHERE id = (SELECT task_id FROM external_refs WHERE id = ?1)",
+        params![external_ref_id, parent_task_id],
     )?;
     Ok(())
 }
