@@ -24,7 +24,7 @@ pub(crate) mod usecases;
 pub use error::{ApplicationError, ApplicationResult};
 pub use events::{ApplicationEvent, EventSink};
 pub use execution_profile::{ExecutionProfile, PermissionMode};
-pub use input::parse_issue_input;
+pub use input::{parse_issue_input, parse_pull_request_input};
 pub use facade::{
     Backend, ExecutionService, ExplanationService, Monica, NoteService, ProjectInit, ProjectService,
     SynchronizationService, TaskService,
@@ -56,7 +56,7 @@ pub use terminal_state::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTab
 // Usecase result types (returned by facade methods)
 pub use usecases::{
     AttachSessionReport, CloseTaskReport, DaemonSessionView, HookContext, HookReport,
-    TabTaskBinding, TerminalSessionUpdate,
+    LinkPullRequestReport, TabTaskBinding, TerminalSessionUpdate,
     TrackGithubIssueReport, TrackOutcome,
 };
 

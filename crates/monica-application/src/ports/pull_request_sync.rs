@@ -21,4 +21,9 @@ pub trait PullRequestSyncStore {
         branch_entries: &[(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)],
         status_entries: &[(UnresolvedPullRequestRef, GithubPullRequest)],
     ) -> Result<()>;
+    /// Attach pull requests to tasks the branch pass cannot reach — the issue reverse lookup and
+    /// the manual CLI link. Each entry pairs a task id with the PR to record; the write upserts the
+    /// ref and its status, so relinking the same PR never yields a second row.
+    fn record_linked_pull_requests(&mut self, entries: &[(String, GithubPullRequest)])
+        -> Result<()>;
 }

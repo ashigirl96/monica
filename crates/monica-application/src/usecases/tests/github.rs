@@ -2,8 +2,10 @@ use std::collections::HashMap;
 
 use super::*;
 use super::support::*;
+use crate::ports::PullRequestSyncStore;
 use crate::usecases::github::{
-    bulk_sync_issues, bulk_sync_pull_requests, TrackGithubIssueInput, TrackOutcome,
+    bulk_sync_issues, bulk_sync_pull_requests, link_pull_request, TrackGithubIssueInput,
+    TrackOutcome,
 };
 use crate::{
     FetchedIssue, GithubIssueState, GithubPullRequest, GithubPullRequestStatus, IssueAddress,
@@ -139,6 +141,7 @@ fn open_issue(number: i64, title: &str) -> FetchedIssue {
         title: title.to_string(),
         state: GithubIssueState::Open,
         parent: None,
+        linked_pull_requests: Vec::new(),
     }
 }
 
@@ -190,6 +193,7 @@ async fn bulk_sync_issues_records_the_state_without_touching_task_status() {
             title: "closed upstream".to_string(),
             state: GithubIssueState::Closed,
             parent: None,
+            linked_pull_requests: Vec::new(),
         }]),
     )]));
     bulk_sync_issues(&mut repos, &github).await.unwrap();
@@ -246,18 +250,28 @@ async fn bulk_sync_issues_is_a_noop_without_tracked_issues() {
     assert!(github.requested().is_empty());
 }
 
+/// Two open tasks carrying the same issue address. Tracking is idempotent while a task is open,
+/// so the first has to be closed to let the second one be created, then reopened.
+async fn two_tasks_tracking_the_same_issue(repos: &mut FakeRepos) -> (TaskId, TaskId) {
+    let first = track_github_issue(repos, &FakeGithub, track_input())
+        .await
+        .unwrap()
+        .task
+        .id;
+    repos.mark_task_closed(&first).unwrap();
+    let second = track_github_issue(repos, &FakeGithub, track_input())
+        .await
+        .unwrap()
+        .task
+        .id;
+    repos.update_task_status(&first, TaskStatus::Ready).unwrap();
+    (first, second)
+}
+
 #[tokio::test]
 async fn bulk_sync_issues_fetches_a_shared_issue_once_and_writes_both_refs() {
     let mut repos = FakeRepos::default();
-    let first = track_github_issue(&mut repos, &FakeGithub, track_input())
-        .await
-        .unwrap();
-    repos.mark_task_closed(&first.task.id).unwrap();
-    let second = track_github_issue(&mut repos, &FakeGithub, track_input())
-        .await
-        .unwrap();
-    // Reopen the first so both tasks carry the same issue address at once.
-    repos.update_task_status(&first.task.id, TaskStatus::Ready).unwrap();
+    let (first, second) = two_tasks_tracking_the_same_issue(&mut repos).await;
 
     let github = RepoIssueGithub::new(HashMap::from([(
         "owner/repo".to_string(),
@@ -271,8 +285,144 @@ async fn bulk_sync_issues_fetches_a_shared_issue_once_and_writes_both_refs() {
         vec![("owner/repo".to_string(), vec![42])],
         "the shared number is fetched once"
     );
-    assert_eq!(repos.get_task(&first.task.id).unwrap().unwrap().title, "shared");
-    assert_eq!(repos.get_task(&second.task.id).unwrap().unwrap().title, "shared");
+    assert_eq!(repos.get_task(&first).unwrap().unwrap().title, "shared");
+    assert_eq!(repos.get_task(&second).unwrap().unwrap().title, "shared");
+}
+
+fn linked_pr(number: i64, status: GithubPullRequestStatus) -> GithubPullRequest {
+    GithubPullRequest {
+        repo: "owner/repo".to_string(),
+        number,
+        url: format!("https://github.com/owner/repo/pull/{number}"),
+        status,
+    }
+}
+
+fn issue_closed_by(number: i64, pull_requests: Vec<GithubPullRequest>) -> FetchedIssue {
+    FetchedIssue {
+        linked_pull_requests: pull_requests,
+        ..open_issue(number, "tracked")
+    }
+}
+
+#[tokio::test]
+async fn bulk_sync_issues_links_the_pull_requests_that_close_the_issue() {
+    // The task has no branch candidate at all — an attach or in-place run leaves `branch` NULL —
+    // so the issue reverse lookup is the only way its PR can ever be recorded.
+    let mut repos = FakeRepos::default();
+    let tracked = track_github_issue(&mut repos, &FakeGithub, track_input())
+        .await
+        .unwrap();
+    assert!(repos.all_branch_sync_candidates().unwrap().is_empty());
+
+    let github = RepoIssueGithub::new(HashMap::from([(
+        "owner/repo".to_string(),
+        Some(vec![issue_closed_by(
+            42,
+            vec![linked_pr(482, GithubPullRequestStatus::Merged)],
+        )]),
+    )]));
+    let synced = bulk_sync_issues(&mut repos, &github).await.unwrap();
+
+    assert_eq!(synced, 2, "one refreshed ref plus one linked PR");
+    let linked = repos.linked_pull_requests();
+    assert_eq!(linked.len(), 1);
+    assert_eq!(linked[0].0, tracked.task.id.as_str());
+    assert_eq!(linked[0].1.number, 482);
+    assert_eq!(linked[0].1.status, GithubPullRequestStatus::Merged);
+    assert_eq!(linked[0].1.url, "https://github.com/owner/repo/pull/482");
+}
+
+#[tokio::test]
+async fn bulk_sync_issues_links_a_pull_request_to_every_task_tracking_the_issue() {
+    let mut repos = FakeRepos::default();
+    let (first, second) = two_tasks_tracking_the_same_issue(&mut repos).await;
+
+    let github = RepoIssueGithub::new(HashMap::from([(
+        "owner/repo".to_string(),
+        Some(vec![issue_closed_by(
+            42,
+            vec![linked_pr(482, GithubPullRequestStatus::Open)],
+        )]),
+    )]));
+    bulk_sync_issues(&mut repos, &github).await.unwrap();
+
+    let linked_tasks: Vec<String> = repos
+        .linked_pull_requests()
+        .into_iter()
+        .map(|(task_id, _)| task_id)
+        .collect();
+    assert_eq!(
+        linked_tasks,
+        vec![first.to_string(), second.to_string()],
+        "both tasks tracking the issue get the PR"
+    );
+}
+
+#[tokio::test]
+async fn bulk_sync_issues_links_nothing_when_the_repo_fetch_fails() {
+    let mut repos = FakeRepos::default();
+    track_github_issue(&mut repos, &FakeGithub, track_input())
+        .await
+        .unwrap();
+
+    let github = RepoIssueGithub::new(HashMap::from([("owner/repo".to_string(), None)]));
+    let synced = bulk_sync_issues(&mut repos, &github).await.unwrap();
+
+    assert_eq!(synced, 0);
+    assert!(
+        repos.linked_pull_requests().is_empty(),
+        "a transient fetch failure must not be read as 'this issue has no PR'"
+    );
+}
+
+#[tokio::test]
+async fn link_pull_request_records_the_fetched_pr_against_the_task() {
+    let mut repos = FakeRepos::default();
+    let tracked = track_github_issue(&mut repos, &FakeGithub, track_input())
+        .await
+        .unwrap();
+
+    let report = link_pull_request(
+        &mut repos,
+        &FakeGithub,
+        &tracked.task.id,
+        "owner/repo".to_string(),
+        482,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(report.task.id, tracked.task.id);
+    assert_eq!(report.pull_request.number, 482);
+    // The status comes from the gateway, not from the caller's input.
+    assert_eq!(report.pull_request.status, GithubPullRequestStatus::Merged);
+    let linked = repos.linked_pull_requests();
+    assert_eq!(linked.len(), 1);
+    assert_eq!(linked[0].0, tracked.task.id.as_str());
+    assert_eq!(linked[0].1.number, 482);
+}
+
+#[tokio::test]
+async fn link_pull_request_rejects_an_unknown_task() {
+    let mut repos = FakeRepos::default();
+    let task_id = TaskId::from_store("MON-999".to_string());
+
+    let err = link_pull_request(
+        &mut repos,
+        &FakeGithub,
+        &task_id,
+        "owner/repo".to_string(),
+        482,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::NotFound(_)), "{err:?}");
+    assert!(
+        repos.linked_pull_requests().is_empty(),
+        "an unknown task must not reach the gateway or the store"
+    );
 }
 
 #[test]

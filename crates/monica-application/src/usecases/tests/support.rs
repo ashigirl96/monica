@@ -123,6 +123,7 @@ struct FakeState {
     unresolved_pr_refs: Vec<UnresolvedPullRequestRef>,
     bulk_recorded: Vec<(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)>,
     status_recorded: Vec<(UnresolvedPullRequestRef, GithubPullRequest)>,
+    linked_pull_requests: Vec<(String, GithubPullRequest)>,
     explanations: Vec<monica_domain::Explanation>,
     next_explanation: i64,
 }
@@ -154,6 +155,10 @@ impl FakeRepos {
 
     pub(crate) fn status_recorded(&self) -> Vec<(UnresolvedPullRequestRef, GithubPullRequest)> {
         self.state.borrow().status_recorded.clone()
+    }
+
+    pub(crate) fn linked_pull_requests(&self) -> Vec<(String, GithubPullRequest)> {
+        self.state.borrow().linked_pull_requests.clone()
     }
 
     pub(crate) fn issue_ref_state(&self, external_ref_id: i64) -> Option<(String, GithubIssueState)> {
@@ -434,6 +439,17 @@ impl PullRequestSyncStore for FakeRepos {
         state.status_recorded.extend_from_slice(status_entries);
         Ok(())
     }
+
+    fn record_linked_pull_requests(
+        &mut self,
+        entries: &[(String, GithubPullRequest)],
+    ) -> Result<()> {
+        self.state
+            .borrow_mut()
+            .linked_pull_requests
+            .extend_from_slice(entries);
+        Ok(())
+    }
 }
 
 impl GithubIssueSyncStore for FakeRepos {
@@ -453,6 +469,7 @@ impl GithubIssueSyncStore for FakeRepos {
             .filter_map(|r| {
                 Some(OpenIssueRef {
                     external_ref_id: r.id,
+                    task_id: r.task_id.clone(),
                     repo: r.repo.clone()?,
                     number: r.number?,
                 })
@@ -1227,6 +1244,7 @@ impl GithubGateway for FakeGithub {
                     title: format!("{repo} issue"),
                     state: GithubIssueState::Open,
                     parent: None,
+                    linked_pull_requests: Vec::new(),
                 })
                 .collect())
         })
@@ -1303,6 +1321,7 @@ impl GithubGateway for RetitlingGithub {
                     title: title.clone(),
                     state: GithubIssueState::Open,
                     parent: None,
+                    linked_pull_requests: Vec::new(),
                 })
                 .collect())
         })

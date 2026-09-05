@@ -166,16 +166,16 @@ fn pull_request_from_response(response: PullRequestResponse) -> Result<GithubPul
     if node.number <= 0 {
         return Err(anyhow!("GitHub pull request returned invalid number"));
     }
+    github_pull_request_from(node)
+}
+
+fn github_pull_request_from(node: PullRequestNode) -> Result<GithubPullRequest> {
     Ok(GithubPullRequest {
-        repo: pull_request_repo(&node),
+        repo: node.repository.name_with_owner.to_lowercase(),
         number: node.number,
         url: node.url,
         status: resolve_pull_request_status(&node.state, node.is_draft)?,
     })
-}
-
-fn pull_request_repo(node: &PullRequestNode) -> String {
-    node.repository.name_with_owner.to_lowercase()
 }
 
 fn resolve_pull_request_status(state: &str, is_draft: bool) -> Result<GithubPullRequestStatus> {
@@ -292,7 +292,9 @@ fn issues_query(numbers: &[i64]) -> String {
         .map(|n| {
             format!(
                 "    i{n}: issue(number: {n}) {{ number title state \
-parent {{ number repository {{ nameWithOwner }} }} }}\n"
+parent {{ number repository {{ nameWithOwner }} }} \
+closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {{ nodes {{ number url state \
+isDraft repository {{ nameWithOwner }} }} }} }}\n"
             )
         })
         .collect();
@@ -313,6 +315,13 @@ fn issues_from_response(response: IssuesResponse) -> Result<Vec<FetchedIssue>> {
         if node.number <= 0 {
             continue;
         }
+        let mut linked_pull_requests = Vec::new();
+        for pull_request in node.closed_by_pull_requests_references.nodes {
+            if pull_request.number <= 0 {
+                continue;
+            }
+            linked_pull_requests.push(github_pull_request_from(pull_request)?);
+        }
         issues.push(FetchedIssue {
             number: node.number,
             title: node.title,
@@ -323,6 +332,7 @@ fn issues_from_response(response: IssuesResponse) -> Result<Vec<FetchedIssue>> {
                 repo: p.repository.name_with_owner.to_ascii_lowercase(),
                 number: p.number,
             }),
+            linked_pull_requests,
         });
     }
     Ok(issues)
@@ -350,6 +360,14 @@ struct IssueNode {
     title: String,
     state: String,
     parent: Option<IssueParentNode>,
+    #[serde(rename = "closedByPullRequestsReferences")]
+    closed_by_pull_requests_references: LinkedPullRequestConnection,
+}
+
+/// The PRs whose closing keyword points at this issue.
+#[derive(Debug, Deserialize)]
+struct LinkedPullRequestConnection {
+    nodes: Vec<PullRequestNode>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -637,6 +655,10 @@ mod tests {
         // The parent's repo is part of its identity: sub-issues can cross repositories.
         assert!(query.contains("parent { number repository { nameWithOwner } }"), "{query}");
         assert!(!query.contains("subIssues"), "{query}");
+        assert!(
+            query.contains("closedByPullRequestsReferences(first: 10, includeClosedPrs: true)"),
+            "{query}"
+        );
     }
 
     #[test]
@@ -647,7 +669,8 @@ mod tests {
                     "number": 42,
                     "title": "hello",
                     "state": "OPEN",
-                    "parent": { "number": 7, "repository": { "nameWithOwner": "Owner/Repo" } }
+                    "parent": { "number": 7, "repository": { "nameWithOwner": "Owner/Repo" } },
+                    "closedByPullRequestsReferences": { "nodes": [] }
                 }
             }
         }))
@@ -663,6 +686,49 @@ mod tests {
             Some(IssueAddress { repo: "owner/repo".to_string(), number: 7 }),
             "the address must be lowercased to match how external_refs stores a repo"
         );
+        assert!(issues[0].linked_pull_requests.is_empty());
+    }
+
+    #[test]
+    fn issues_from_response_maps_the_pull_requests_that_close_the_issue() {
+        let response: IssuesResponse = serde_json::from_value(serde_json::json!({
+            "repository": {
+                "i484": {
+                    "number": 484,
+                    "title": "hello",
+                    "state": "CLOSED",
+                    "parent": null,
+                    "closedByPullRequestsReferences": { "nodes": [
+                        {
+                            "number": 482,
+                            "url": "https://github.com/AshiGirl96/Monica/pull/482",
+                            "state": "MERGED",
+                            "isDraft": false,
+                            "repository": { "nameWithOwner": "AshiGirl96/Monica" }
+                        },
+                        {
+                            "number": 483,
+                            "url": "https://github.com/o/r/pull/483",
+                            "state": "OPEN",
+                            "isDraft": true,
+                            "repository": { "nameWithOwner": "o/r" }
+                        },
+                        { "number": 0, "url": "u", "state": "OPEN", "isDraft": false,
+                          "repository": { "nameWithOwner": "o/r" } }
+                    ] }
+                }
+            }
+        }))
+        .unwrap();
+        let issues = issues_from_response(response).unwrap();
+        let linked = &issues[0].linked_pull_requests;
+        assert_eq!(linked.len(), 2, "the invalid number is dropped");
+        assert_eq!(linked[0].number, 482);
+        // The PR's own repo is what gets recorded, normalized the way refs are stored.
+        assert_eq!(linked[0].repo, "ashigirl96/monica");
+        assert_eq!(linked[0].status, GithubPullRequestStatus::Merged);
+        // An open PR marked draft resolves to Draft, same as the by-number lookup.
+        assert_eq!(linked[1].status, GithubPullRequestStatus::Draft);
     }
 
     #[test]
@@ -674,7 +740,8 @@ mod tests {
                     "number": 7,
                     "title": "kept",
                     "state": "CLOSED",
-                    "parent": null
+                    "parent": null,
+                    "closedByPullRequestsReferences": { "nodes": [] }
                 }
             }
         }))
