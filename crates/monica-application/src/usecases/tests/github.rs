@@ -3,13 +3,17 @@ use std::collections::HashMap;
 use super::*;
 use super::support::*;
 use crate::ports::PullRequestSyncStore;
+use crate::prelude::DisplayStatus;
 use crate::usecases::github::{
-    bulk_sync_issues, bulk_sync_pull_requests, link_pull_request, TrackGithubIssueInput,
+    bulk_sync_issues, bulk_sync_pull_requests, diff_task_summaries, link_pull_request,
+    BulkSyncOutcome, GithubSyncReport, SyncChangeCounts, TaskSyncChange, TaskSyncChanges,
+    TrackGithubIssueInput,
     TrackOutcome,
 };
 use crate::{
-    FetchedIssue, GithubIssueState, GithubPullRequest, GithubPullRequestStatus, IssueAddress,
-    RepoPullRequest, UnresolvedPullRequestRef,
+    FetchedIssue, GithubIssueState, GithubPullRequest, GithubPullRequestRef,
+    GithubPullRequestStatus, IssueAddress, RepoPullRequest, TaskSummaryRow,
+    UnresolvedPullRequestRef,
 };
 
 #[tokio::test]
@@ -167,7 +171,7 @@ async fn bulk_sync_issues_refreshes_open_tasks_only() {
             open_issue(43, "fresh 43"),
         ]),
     )]));
-    let synced = bulk_sync_issues(&mut repos, &github).await.unwrap();
+    let synced = bulk_sync_issues(&mut repos, &github, None).await.unwrap().synced_count;
 
     assert_eq!(synced, 1);
     assert_eq!(
@@ -196,7 +200,7 @@ async fn bulk_sync_issues_records_the_state_without_touching_task_status() {
             linked_pull_requests: Vec::new(),
         }]),
     )]));
-    bulk_sync_issues(&mut repos, &github).await.unwrap();
+    bulk_sync_issues(&mut repos, &github, None).await.unwrap();
 
     let ref_id = repos.list_external_refs(&tracked.task.id).unwrap()[0].id;
     assert_eq!(
@@ -231,7 +235,7 @@ async fn bulk_sync_issues_keeps_known_state_when_a_repo_fetch_fails() {
         ),
         ("other/repo".to_string(), None),
     ]));
-    let synced = bulk_sync_issues(&mut repos, &github).await.unwrap();
+    let synced = bulk_sync_issues(&mut repos, &github, None).await.unwrap().synced_count;
 
     assert_eq!(synced, 1, "only the healthy repo is recorded");
     assert_eq!(repos.get_task(&good.task.id).unwrap().unwrap().title, "fresh 42");
@@ -246,7 +250,7 @@ async fn bulk_sync_issues_keeps_known_state_when_a_repo_fetch_fails() {
 async fn bulk_sync_issues_is_a_noop_without_tracked_issues() {
     let mut repos = FakeRepos::default();
     let github = RepoIssueGithub::new(HashMap::new());
-    assert_eq!(bulk_sync_issues(&mut repos, &github).await.unwrap(), 0);
+    assert_eq!(bulk_sync_issues(&mut repos, &github, None).await.unwrap().synced_count, 0);
     assert!(github.requested().is_empty());
 }
 
@@ -277,7 +281,7 @@ async fn bulk_sync_issues_fetches_a_shared_issue_once_and_writes_both_refs() {
         "owner/repo".to_string(),
         Some(vec![open_issue(42, "shared")]),
     )]));
-    let synced = bulk_sync_issues(&mut repos, &github).await.unwrap();
+    let synced = bulk_sync_issues(&mut repos, &github, None).await.unwrap().synced_count;
 
     assert_eq!(synced, 2, "both refs are recorded");
     assert_eq!(
@@ -313,7 +317,7 @@ async fn bulk_sync_issues_links_the_pull_requests_that_close_the_issue() {
     let tracked = track_github_issue(&mut repos, &FakeGithub, track_input())
         .await
         .unwrap();
-    assert!(repos.all_branch_sync_candidates().unwrap().is_empty());
+    assert!(repos.branch_sync_candidates(None).unwrap().is_empty());
 
     let github = RepoIssueGithub::new(HashMap::from([(
         "owner/repo".to_string(),
@@ -322,7 +326,7 @@ async fn bulk_sync_issues_links_the_pull_requests_that_close_the_issue() {
             vec![linked_pr(482, GithubPullRequestStatus::Merged)],
         )]),
     )]));
-    let synced = bulk_sync_issues(&mut repos, &github).await.unwrap();
+    let synced = bulk_sync_issues(&mut repos, &github, None).await.unwrap().synced_count;
 
     assert_eq!(synced, 2, "one refreshed ref plus one linked PR");
     let linked = repos.linked_pull_requests();
@@ -345,7 +349,7 @@ async fn bulk_sync_issues_links_a_pull_request_to_every_task_tracking_the_issue(
             vec![linked_pr(482, GithubPullRequestStatus::Open)],
         )]),
     )]));
-    bulk_sync_issues(&mut repos, &github).await.unwrap();
+    bulk_sync_issues(&mut repos, &github, None).await.unwrap();
 
     let linked_tasks: Vec<String> = repos
         .linked_pull_requests()
@@ -367,7 +371,7 @@ async fn bulk_sync_issues_links_nothing_when_the_repo_fetch_fails() {
         .unwrap();
 
     let github = RepoIssueGithub::new(HashMap::from([("owner/repo".to_string(), None)]));
-    let synced = bulk_sync_issues(&mut repos, &github).await.unwrap();
+    let synced = bulk_sync_issues(&mut repos, &github, None).await.unwrap().synced_count;
 
     assert_eq!(synced, 0);
     assert!(
@@ -501,7 +505,7 @@ async fn bulk_sync_matches_recent_prs_to_branch_candidates() {
     by_repo.insert("owner/repoC".to_string(), None);
 
     let github = RecentPrGithub::new(by_repo);
-    let synced = bulk_sync_pull_requests(&mut repos, &github).await.unwrap();
+    let synced = bulk_sync_pull_requests(&mut repos, &github, None).await.unwrap().synced_count;
 
     assert_eq!(synced, 2, "only MON-1 and MON-2 matched a PR");
 
@@ -531,7 +535,7 @@ async fn bulk_sync_matches_recent_prs_to_branch_candidates() {
 async fn bulk_sync_no_candidates_and_no_unresolved_refs_is_noop() {
     let mut repos = FakeRepos::default();
     let github = RecentPrGithub::new(HashMap::new());
-    let synced = bulk_sync_pull_requests(&mut repos, &github).await.unwrap();
+    let synced = bulk_sync_pull_requests(&mut repos, &github, None).await.unwrap().synced_count;
     assert_eq!(synced, 0);
     assert!(repos.bulk_recorded().is_empty());
     assert!(repos.status_recorded().is_empty());
@@ -550,7 +554,7 @@ async fn bulk_sync_refreshes_unresolved_refs_without_branch_candidates() {
         status: GithubPullRequestStatus::Merged,
     });
 
-    let synced = bulk_sync_pull_requests(&mut repos, &github).await.unwrap();
+    let synced = bulk_sync_pull_requests(&mut repos, &github, None).await.unwrap().synced_count;
 
     assert_eq!(synced, 1);
     assert_eq!(github.fetched_pull_requests(), vec![("owner/repo".to_string(), 12)]);
@@ -579,7 +583,7 @@ async fn bulk_sync_reuses_repo_listing_for_unresolved_refs() {
     );
     let github = RecentPrGithub::new(by_repo);
 
-    let synced = bulk_sync_pull_requests(&mut repos, &github).await.unwrap();
+    let synced = bulk_sync_pull_requests(&mut repos, &github, None).await.unwrap().synced_count;
 
     assert_eq!(synced, 1, "no branch match, one status refresh");
     assert!(github.fetched_pull_requests().is_empty(), "listing data is reused in memory");
@@ -611,7 +615,7 @@ async fn bulk_sync_counts_branch_matched_refs_once() {
     );
     let github = RecentPrGithub::new(by_repo);
 
-    let synced = bulk_sync_pull_requests(&mut repos, &github).await.unwrap();
+    let synced = bulk_sync_pull_requests(&mut repos, &github, None).await.unwrap().synced_count;
 
     assert_eq!(synced, 2, "one branch match plus MON-2's status refresh, not three");
     assert!(github.fetched_pull_requests().is_empty());
@@ -645,7 +649,7 @@ async fn bulk_sync_skips_unresolved_refs_of_failed_repos_and_tolerates_fetch_err
         candidate("MON-2", "owner/repo", "feature/b"),
     ]);
 
-    let synced = bulk_sync_pull_requests(&mut repos, &github).await.unwrap();
+    let synced = bulk_sync_pull_requests(&mut repos, &github, None).await.unwrap().synced_count;
 
     assert_eq!(synced, 1, "only #13 was refreshed");
     let fetched = github.fetched_pull_requests();
@@ -673,7 +677,7 @@ async fn bulk_sync_keeps_active_pr_when_a_worse_one_arrives_later() {
     );
     let github = RecentPrGithub::new(by_repo);
 
-    let synced = bulk_sync_pull_requests(&mut repos, &github).await.unwrap();
+    let synced = bulk_sync_pull_requests(&mut repos, &github, None).await.unwrap().synced_count;
     assert_eq!(synced, 1);
 
     let recorded = repos.bulk_recorded();
@@ -713,7 +717,7 @@ async fn bulk_sync_issues_links_a_sub_issue_to_its_parent_task() {
     let mut repos = FakeRepos::default();
     let (epic, sub) = tracked_epic_and_sub(&mut repos).await;
 
-    bulk_sync_issues(&mut repos, &linked_hierarchy()).await.unwrap();
+    bulk_sync_issues(&mut repos, &linked_hierarchy(), None).await.unwrap();
 
     assert_eq!(repos.get_task(&sub).unwrap().unwrap().parent_task_id, Some(epic.clone()));
     assert_eq!(
@@ -727,13 +731,331 @@ async fn bulk_sync_issues_links_a_sub_issue_to_its_parent_task() {
 async fn bulk_sync_issues_unlinks_a_parent_github_dropped() {
     let mut repos = FakeRepos::default();
     let (_, sub) = tracked_epic_and_sub(&mut repos).await;
-    bulk_sync_issues(&mut repos, &linked_hierarchy()).await.unwrap();
+    bulk_sync_issues(&mut repos, &linked_hierarchy(), None).await.unwrap();
 
     let unlinked = RepoIssueGithub::new(HashMap::from([(
         "owner/repo".to_string(),
         Some(vec![open_issue(42, "epic"), open_issue(43, "sub issue")]),
     )]));
-    bulk_sync_issues(&mut repos, &unlinked).await.unwrap();
+    bulk_sync_issues(&mut repos, &unlinked, None).await.unwrap();
 
     assert_eq!(repos.get_task(&sub).unwrap().unwrap().parent_task_id, None);
+}
+
+fn snapshot_row(id: &str) -> TaskSummaryRow {
+    TaskSummaryRow {
+        id: id.to_string(),
+        parent_task_id: None,
+        title: "Original title".to_string(),
+        project: Some("owner/repo".to_string()),
+        github_issue_number: Some(42),
+        github_issue_url: None,
+        github_issue_state: Some(GithubIssueState::Open),
+        github_pull_requests: Vec::new(),
+        task_status: TaskStatus::Ready,
+        task_run_status: None,
+        task_run_wait_reason: None,
+        has_plan: false,
+        status: DisplayStatus::Ready,
+        prepare_eligible: true,
+        run_eligible: true,
+        run_needs_prepare: true,
+        attach_eligible: true,
+        is_active: false,
+        has_open_pull_request: false,
+        branch: None,
+        side_runs_running: 0,
+        side_runs_waiting_for_user: 0,
+        side_runs_failed: 0,
+    }
+}
+
+fn pull_request_ref(number: i64, status: GithubPullRequestStatus) -> GithubPullRequestRef {
+    GithubPullRequestRef {
+        repo: Some("owner/repo".to_string()),
+        number: Some(number),
+        url: Some(format!("https://github.com/owner/repo/pull/{number}")),
+        status: Some(status.as_str().to_string()),
+        is_open_or_draft: status.is_open_or_draft(),
+    }
+}
+
+#[test]
+fn diff_task_summaries_reports_a_retitled_issue() {
+    let before = vec![snapshot_row("MON-1")];
+    let mut after = before.clone();
+    after[0].title = "Renamed upstream".to_string();
+
+    let changes = diff_task_summaries(&before, &after, None);
+    assert_eq!(
+        changes,
+        vec![TaskSyncChanges {
+            task_id: "MON-1".to_string(),
+            changes: vec![TaskSyncChange::Title {
+                before: "Original title".to_string(),
+                after: "Renamed upstream".to_string(),
+            }],
+        }]
+    );
+}
+
+#[test]
+fn diff_task_summaries_reports_a_closed_issue() {
+    let before = vec![snapshot_row("MON-1")];
+    let mut after = before.clone();
+    after[0].github_issue_state = Some(GithubIssueState::Closed);
+
+    let changes = diff_task_summaries(&before, &after, None);
+    assert_eq!(
+        changes[0].changes,
+        vec![TaskSyncChange::IssueState {
+            before: Some(GithubIssueState::Open),
+            after: Some(GithubIssueState::Closed),
+        }]
+    );
+}
+
+#[test]
+fn diff_task_summaries_reports_a_newly_linked_pull_request() {
+    let before = vec![snapshot_row("MON-1")];
+    let mut after = before.clone();
+    after[0].github_pull_requests = vec![pull_request_ref(7, GithubPullRequestStatus::Open)];
+
+    let changes = diff_task_summaries(&before, &after, None);
+    assert_eq!(
+        changes[0].changes,
+        vec![TaskSyncChange::PullRequest {
+            repo: "owner/repo".to_string(),
+            number: 7,
+            before: None,
+            after: Some(GithubPullRequestStatus::Open),
+        }]
+    );
+}
+
+#[test]
+fn diff_task_summaries_reports_a_merged_pull_request_matched_by_number_not_position() {
+    let mut before = vec![snapshot_row("MON-1")];
+    before[0].github_pull_requests = vec![
+        pull_request_ref(7, GithubPullRequestStatus::Open),
+        pull_request_ref(9, GithubPullRequestStatus::Draft),
+    ];
+    let mut after = before.clone();
+    // The PR pass and the issue reverse lookup both write this list, so its order is not stable
+    // across a sync; only #7's status actually moved.
+    after[0].github_pull_requests = vec![
+        pull_request_ref(9, GithubPullRequestStatus::Draft),
+        pull_request_ref(7, GithubPullRequestStatus::Merged),
+    ];
+
+    let changes = diff_task_summaries(&before, &after, None);
+    assert_eq!(
+        changes[0].changes,
+        vec![TaskSyncChange::PullRequest {
+            repo: "owner/repo".to_string(),
+            number: 7,
+            before: Some(GithubPullRequestStatus::Open),
+            after: Some(GithubPullRequestStatus::Merged),
+        }],
+        "reordering the same PRs must not read as a change"
+    );
+}
+
+#[test]
+fn diff_task_summaries_reports_the_hierarchy_being_rewired_both_ways() {
+    let before = vec![snapshot_row("MON-1")];
+    let mut after = before.clone();
+    after[0].parent_task_id = Some("MON-9".to_string());
+    assert_eq!(
+        diff_task_summaries(&before, &after, None)[0].changes,
+        vec![TaskSyncChange::Parent {
+            before: None,
+            after: Some("MON-9".to_string()),
+        }]
+    );
+
+    // GitHub dropping the sub-issue link clears the column, and that is a change too.
+    assert_eq!(
+        diff_task_summaries(&after, &before, None)[0].changes,
+        vec![TaskSyncChange::Parent {
+            before: Some("MON-9".to_string()),
+            after: None,
+        }]
+    );
+}
+
+#[test]
+fn diff_task_summaries_is_empty_when_nothing_moved() {
+    let before = vec![snapshot_row("MON-1"), snapshot_row("MON-2")];
+    assert!(diff_task_summaries(&before, &before, None).is_empty());
+}
+
+#[test]
+fn diff_task_summaries_ignores_a_task_only_one_snapshot_has() {
+    let before = vec![snapshot_row("MON-1")];
+    let after = vec![snapshot_row("MON-1"), snapshot_row("MON-2")];
+    assert!(
+        diff_task_summaries(&before, &after, None).is_empty(),
+        "a sync creates no task, so an id on one side alone belongs to a concurrent writer"
+    );
+    assert!(diff_task_summaries(&after, &before, None).is_empty());
+}
+
+#[test]
+fn diff_task_summaries_narrows_to_the_requested_task() {
+    let before = vec![snapshot_row("MON-1"), snapshot_row("MON-2")];
+    let mut after = before.clone();
+    after[0].title = "Renamed by someone else".to_string();
+    after[1].title = "Renamed upstream".to_string();
+
+    let changes = diff_task_summaries(&before, &after, Some("MON-2"));
+    assert_eq!(changes.len(), 1, "a scoped sync must not report other tasks");
+    assert_eq!(changes[0].task_id, "MON-2");
+}
+
+#[test]
+fn sync_report_counts_changes_by_kind() {
+    let report = GithubSyncReport {
+        synced_count: 12,
+        failed_repos: Vec::new(),
+        tasks: vec![
+            TaskSyncChanges {
+                task_id: "MON-1".to_string(),
+                changes: vec![
+                    TaskSyncChange::Title {
+                        before: "a".to_string(),
+                        after: "b".to_string(),
+                    },
+                    TaskSyncChange::Parent {
+                        before: None,
+                        after: Some("MON-9".to_string()),
+                    },
+                ],
+            },
+            TaskSyncChanges {
+                task_id: "MON-2".to_string(),
+                changes: vec![TaskSyncChange::Title {
+                    before: "c".to_string(),
+                    after: "d".to_string(),
+                }],
+            },
+        ],
+    };
+
+    assert!(!report.is_unchanged());
+    assert_eq!(report.counts().total(), 3);
+    assert_eq!(
+        report.counts(),
+        SyncChangeCounts {
+            title: 2,
+            issue_state: 0,
+            pull_request: 0,
+            parent: 1,
+        }
+    );
+    assert!(GithubSyncReport::default().is_unchanged());
+}
+
+#[tokio::test]
+async fn bulk_sync_issues_scoped_to_one_task_never_asks_for_another_repo() {
+    let mut repos = FakeRepos::default();
+    let scoped = track_github_issue(&mut repos, &FakeGithub, track_input())
+        .await
+        .unwrap();
+    let other = track_github_issue(
+        &mut repos,
+        &FakeGithub,
+        TrackGithubIssueInput { repo: "other/repo".to_string(), number: 7 },
+    )
+    .await
+    .unwrap();
+
+    let github = RepoIssueGithub::new(HashMap::from([
+        (
+            "owner/repo".to_string(),
+            Some(vec![open_issue(42, "fresh 42")]),
+        ),
+        (
+            "other/repo".to_string(),
+            Some(vec![open_issue(7, "fresh 7")]),
+        ),
+    ]));
+    let synced = bulk_sync_issues(&mut repos, &github, Some(scoped.task.id.as_str()))
+        .await
+        .unwrap()
+        .synced_count;
+
+    assert_eq!(synced, 1);
+    assert_eq!(
+        github.requested(),
+        vec![("owner/repo".to_string(), vec![42])],
+        "a scoped sync must not even ask for another task's repo"
+    );
+    assert_eq!(repos.get_task(&scoped.task.id).unwrap().unwrap().title, "fresh 42");
+    assert_eq!(
+        repos.get_task(&other.task.id).unwrap().unwrap().title,
+        "other/repo issue",
+        "the unscoped task keeps what track already cached"
+    );
+}
+
+#[tokio::test]
+async fn bulk_sync_issues_names_the_repo_it_could_not_read() {
+    let mut repos = FakeRepos::default();
+    track_github_issue(&mut repos, &FakeGithub, track_input())
+        .await
+        .unwrap();
+    track_github_issue(
+        &mut repos,
+        &FakeGithub,
+        TrackGithubIssueInput { repo: "other/repo".to_string(), number: 7 },
+    )
+    .await
+    .unwrap();
+
+    let github = RepoIssueGithub::new(HashMap::from([
+        (
+            "owner/repo".to_string(),
+            Some(vec![open_issue(42, "fresh 42")]),
+        ),
+        ("other/repo".to_string(), None),
+    ]));
+    let outcome = bulk_sync_issues(&mut repos, &github, None).await.unwrap();
+
+    assert_eq!(outcome.synced_count, 1, "the healthy repo still lands");
+    assert_eq!(
+        outcome.failed_repos,
+        vec!["other/repo".to_string()],
+        "a swallowed fetch error must still reach the caller, or a partial sync reads as complete"
+    );
+}
+
+#[test]
+fn sync_report_is_complete_only_when_every_repo_was_read() {
+    assert!(GithubSyncReport::default().is_complete());
+    assert!(!GithubSyncReport {
+        failed_repos: vec!["owner/repo".to_string()],
+        ..GithubSyncReport::default()
+    }
+    .is_complete());
+}
+
+#[test]
+fn bulk_sync_outcome_merge_unions_the_failed_repos_without_duplicates() {
+    let pull_requests = BulkSyncOutcome {
+        synced_count: 3,
+        failed_repos: vec!["owner/repo".to_string()],
+    };
+    let issues = BulkSyncOutcome {
+        synced_count: 4,
+        failed_repos: vec!["owner/repo".to_string(), "other/repo".to_string()],
+    };
+
+    let merged = pull_requests.merge(issues);
+    assert_eq!(merged.synced_count, 7);
+    assert_eq!(
+        merged.failed_repos,
+        vec!["other/repo".to_string(), "owner/repo".to_string()],
+        "a repo both passes failed on is named once"
+    );
 }

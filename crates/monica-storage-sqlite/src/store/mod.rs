@@ -40,6 +40,20 @@ pub(super) const EXPLANATION_FROM: &str =
 
 pub(super) const SET_NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
+/// The optional per-task narrowing the GitHub sync passes carry, as a SQL fragment bound to `?1`.
+///
+/// Composed into the statement rather than bound as `?1 IS NULL OR <column> = ?1`, because SQLite
+/// cannot satisfy that idiom with an index seek — the scoped query would scan every row and defeat
+/// the indexes these tables have. An unscoped call yields an empty fragment and no parameter, so
+/// its statement is unchanged. Pair with `rusqlite::params_from_iter(task)`, which binds the one
+/// parameter when there is one and nothing when there isn't.
+pub(super) fn task_scope_clause(task: Option<&str>, column: &str) -> String {
+    match task {
+        Some(_) => format!("\n               AND {column} = ?1"),
+        None => String::new(),
+    }
+}
+
 pub(super) const NOTE_COLUMNS: &str =
     "id, title, kind, project_id, status, content, date, created_at, updated_at";
 

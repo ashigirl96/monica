@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use super::ports::{GithubGateway, PullRequestSyncStore};
+use super::BulkSyncOutcome;
 use crate::{
     ApplicationResult, GithubPullRequest, PullRequestBranchSyncCandidate, RepoPullRequest,
     UnresolvedPullRequestRef,
@@ -11,18 +12,25 @@ use crate::{
 /// parallel — and matches them to branch candidates in memory, then re-checks every unresolved
 /// tracked PR the branch pass didn't cover (reusing the repo listings where possible, fetching by
 /// number otherwise), and persists everything in a single transaction. Returns the number of
-/// branch candidates that matched at least one PR plus the number of unresolved refs refreshed.
-pub async fn bulk_sync_pull_requests<R, G>(repos: &mut R, github: &G) -> ApplicationResult<u32>
+/// branch candidates that matched at least one PR plus the number of unresolved refs refreshed,
+/// along with the repos it could not read.
+///
+/// `task` narrows both passes to one task, so only that task's repo is fetched.
+pub async fn bulk_sync_pull_requests<R, G>(
+    repos: &mut R,
+    github: &G,
+    task: Option<&str>,
+) -> ApplicationResult<BulkSyncOutcome>
 where
     R: PullRequestSyncStore,
     G: GithubGateway,
 {
     let started = Instant::now();
-    let candidates = repos.all_branch_sync_candidates()?;
-    let unresolved = repos.all_unresolved_pull_request_refs()?;
+    let candidates = repos.branch_sync_candidates(task)?;
+    let unresolved = repos.unresolved_pull_request_refs(task)?;
     let candidates_ms = started.elapsed().as_millis();
     if candidates.is_empty() && unresolved.is_empty() {
-        return Ok(0);
+        return Ok(BulkSyncOutcome::default());
     }
 
     let mut seen = HashSet::new();
@@ -161,13 +169,17 @@ where
     for (unresolved_ref, result) in futures_util::future::join_all(status_fetches).await {
         match result {
             Ok(pr) => status_entries.push((unresolved_ref.clone(), pr)),
-            // No retry state to record: the next forced sync simply tries again.
-            Err(e) => log::warn!(
-                target: "monica_application::github_sync",
-                "status refresh fetch failed repo={} pull_request_number={} error={e:#}",
-                unresolved_ref.repo,
-                unresolved_ref.number
-            ),
+            // No retry state to record: the next forced sync simply tries again. The repo still
+            // joins the failed set so the caller knows this pass did not see all of it.
+            Err(e) => {
+                failed_repos.insert(unresolved_ref.repo.to_ascii_lowercase());
+                log::warn!(
+                    target: "monica_application::github_sync",
+                    "status refresh fetch failed repo={} pull_request_number={} error={e:#}",
+                    unresolved_ref.repo,
+                    unresolved_ref.number
+                );
+            }
         }
     }
     let status_fetch_ms = status_fetch_started.elapsed().as_millis();
@@ -188,7 +200,12 @@ where
         record_started.elapsed().as_millis(),
         started.elapsed().as_millis()
     );
-    Ok(synced_count)
+    let mut failed_repos: Vec<String> = failed_repos.into_iter().collect();
+    failed_repos.sort();
+    Ok(BulkSyncOutcome {
+        synced_count,
+        failed_repos,
+    })
 }
 
 /// The bulk pass keeps the single PR that best represents a branch: active over settled, then

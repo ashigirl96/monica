@@ -3,11 +3,13 @@ use std::io::{self, Write};
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_application::{
-    parse_issue_input, parse_pull_request_input, AttachSessionReport, TaskSummaryRow, TrackOutcome,
+    parse_issue_input, parse_pull_request_input, AttachSessionReport, GithubIssueState,
+    GithubPullRequestStatus, GithubSyncReport, TaskSummaryRow, TaskSyncChange, TrackOutcome,
 };
 use monica_domain::{parse_owner_repo, Agent, DisplayStatus, TaskId};
 
 use crate::event_sink::{self, CliFacade};
+use crate::table::{or_dash, render_table};
 
 #[derive(Subcommand)]
 pub enum TaskCommand {
@@ -40,6 +42,11 @@ pub enum TaskCommand {
         /// MON-<id>
         id: String,
     },
+    /// Refresh tracked tasks from GitHub and report what changed
+    Sync {
+        /// MON-<id>; omit to sync every open task
+        id: Option<String>,
+    },
 }
 
 pub async fn run(cmd: TaskCommand) -> Result<()> {
@@ -50,6 +57,7 @@ pub async fn run(cmd: TaskCommand) -> Result<()> {
         TaskCommand::Pr { id, target } => pr_command(&mut monica, &id, &target).await,
         TaskCommand::Attach { id } => attach_command(&mut monica, &id),
         TaskCommand::Close { id } => close_command(&mut monica, &id),
+        TaskCommand::Sync { id } => sync_command(&mut monica, id.as_deref()).await,
     }
 }
 
@@ -107,6 +115,106 @@ fn status_command(
     };
     print!("{}", render_status_table(&rows));
     Ok(())
+}
+
+async fn sync_command(monica: &mut CliFacade, id: Option<&str>) -> Result<()> {
+    // The façade treats an unauthenticated sync as a no-op so the board can navigate into one on
+    // every visit; a CLI invocation is deliberate, so say why nothing would happen instead.
+    let auth = monica.synchronization().auth_status();
+    if !auth.authenticated {
+        return Err(anyhow!(
+            "GitHub is not authenticated: {}",
+            auth.message
+                .as_deref()
+                .unwrap_or("run `gh auth login`, then retry")
+        ));
+    }
+
+    let task_id = id.map(TaskId::parse).transpose()?;
+    let report = monica
+        .synchronization()
+        .sync_github_with_report(task_id.as_ref())
+        .await?;
+    print!("{}", render_sync_report(&report));
+    // A pass that could not read a repo still returns what it did manage to write, which is the
+    // right call for the board. A script — `monica task sync && monica task status` — must not
+    // read that as fresh, so an unreachable repo fails the command after showing the partial work.
+    if !report.is_complete() {
+        return Err(anyhow!(
+            "GitHub fetch failed for {}; the results above are partial and those repos kept their \
+             previous values",
+            report.failed_repos.join(", ")
+        ));
+    }
+    Ok(())
+}
+
+fn render_sync_report(report: &GithubSyncReport) -> String {
+    if report.is_unchanged() {
+        return format!("Synced {} refs; no changes.\n", report.synced_count);
+    }
+
+    let counts = report.counts();
+    let mut out = format!(
+        "Synced {} refs; {} changes (title {}, state {}, pr {}, parent {})\n",
+        report.synced_count,
+        counts.total(),
+        counts.title,
+        counts.issue_state,
+        counts.pull_request,
+        counts.parent,
+    );
+
+    // One row per change with a fixed column shape — task, kind, the PR it concerns, before,
+    // after — so an agent reading this can split on whitespace instead of parsing prose.
+    let mut table = Vec::new();
+    for task in &report.tasks {
+        for change in &task.changes {
+            let (kind, reference, before, after) = match change {
+                TaskSyncChange::Title { before, after } => {
+                    ("title", dash(), before.clone(), after.clone())
+                }
+                TaskSyncChange::IssueState { before, after } => (
+                    "state",
+                    dash(),
+                    or_dash(before.map(GithubIssueState::as_str)),
+                    or_dash(after.map(GithubIssueState::as_str)),
+                ),
+                TaskSyncChange::PullRequest {
+                    repo,
+                    number,
+                    before,
+                    after,
+                } => (
+                    "pr",
+                    format!("{repo}#{number}"),
+                    or_dash(before.map(GithubPullRequestStatus::as_str)),
+                    or_dash(after.map(GithubPullRequestStatus::as_str)),
+                ),
+                TaskSyncChange::Parent { before, after } => (
+                    "parent",
+                    dash(),
+                    or_dash(before.as_deref()),
+                    or_dash(after.as_deref()),
+                ),
+            };
+            table.push(vec![
+                task.task_id.clone(),
+                kind.to_string(),
+                reference,
+                before,
+                "->".to_string(),
+                after,
+            ]);
+        }
+    }
+    out.push_str(&render_table(&table));
+    out
+}
+
+/// The `-` the table uses for a column a given change kind has nothing to put in.
+fn dash() -> String {
+    or_dash(None)
 }
 
 /// The `MONICA_*` identity a tab burns into its shell env, as `attach` needs it.
@@ -174,7 +282,7 @@ fn render_attach_report(report: &AttachSessionReport) -> String {
     out.push_str(&format!("  Run:     {}\n", report.task_run_id));
     out.push_str(&format!(
         "  Session: {}\n",
-        crate::table::or_dash(report.agent_session_id.as_deref())
+        or_dash(report.agent_session_id.as_deref())
     ));
     match &report.kept_primary_run_id {
         None => out.push_str("  Main Run: yes\n"),
@@ -264,20 +372,20 @@ fn render_status_table(rows: &[TaskSummaryRow]) -> String {
         let github_issue = row.github_issue_number.map(|n| format!("#{n}"));
         table.push(vec![
             row.id.clone(),
-            crate::table::or_dash(row.parent_task_id.as_deref()),
-            crate::table::or_dash(row.project.as_deref()),
-            crate::table::or_dash(github_issue.as_deref()),
+            or_dash(row.parent_task_id.as_deref()),
+            or_dash(row.project.as_deref()),
+            or_dash(github_issue.as_deref()),
             row.status.as_str().to_string(),
-            crate::table::or_dash(row.branch.as_deref()),
+            or_dash(row.branch.as_deref()),
         ]);
     }
-    crate::table::render_table(&table)
+    render_table(&table)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use monica_application::GithubIssueState;
+    use monica_application::TaskSyncChanges;
     use monica_domain::TaskStatus;
 
     #[test]
@@ -428,5 +536,86 @@ mod tests {
     fn render_status_table_dashes_a_task_without_a_parent() {
         let row = TaskSummaryRow { parent_task_id: None, ..summary_row() };
         assert_eq!(parent_cell(&render_status_table(&[row])), "-");
+    }
+
+    #[test]
+    fn render_sync_report_lists_every_change_kind_in_fixed_columns() {
+        let report = GithubSyncReport {
+            synced_count: 14,
+            failed_repos: Vec::new(),
+            tasks: vec![
+                TaskSyncChanges {
+                    task_id: "MON-42".to_string(),
+                    changes: vec![
+                        TaskSyncChange::Title {
+                            before: "Old title".to_string(),
+                            after: "New title".to_string(),
+                        },
+                        TaskSyncChange::IssueState {
+                            before: Some(GithubIssueState::Open),
+                            after: Some(GithubIssueState::Closed),
+                        },
+                    ],
+                },
+                TaskSyncChanges {
+                    task_id: "MON-51".to_string(),
+                    changes: vec![
+                        TaskSyncChange::PullRequest {
+                            repo: "ashigirl96/monica".to_string(),
+                            number: 489,
+                            before: Some(GithubPullRequestStatus::Open),
+                            after: Some(GithubPullRequestStatus::Merged),
+                        },
+                        TaskSyncChange::Parent {
+                            before: None,
+                            after: Some("MON-42".to_string()),
+                        },
+                    ],
+                },
+            ],
+        };
+
+        let rendered = render_sync_report(&report);
+        let mut lines = rendered.lines();
+        assert_eq!(
+            lines.next().unwrap(),
+            "Synced 14 refs; 4 changes (title 1, state 1, pr 1, parent 1)"
+        );
+
+        let cells = |line: &str| -> Vec<String> {
+            line.split_whitespace().map(str::to_string).collect()
+        };
+        let title = cells(lines.next().unwrap());
+        assert_eq!(title[0], "MON-42");
+        assert_eq!(title[1], "title");
+        assert_eq!(title[2], "-", "only a PR change carries a ref");
+
+        let state = cells(lines.next().unwrap());
+        assert_eq!(state[1], "state");
+        assert_eq!((state[3].as_str(), state[5].as_str()), ("open", "closed"));
+
+        let pr = cells(lines.next().unwrap());
+        assert_eq!(pr[0], "MON-51");
+        assert_eq!(pr[1], "pr");
+        assert_eq!(pr[2], "ashigirl96/monica#489");
+        assert_eq!((pr[3].as_str(), pr[5].as_str()), ("open", "merged"));
+
+        let parent = cells(lines.next().unwrap());
+        assert_eq!(parent[1], "parent");
+        assert_eq!((parent[3].as_str(), parent[5].as_str()), ("-", "MON-42"));
+        assert!(lines.next().is_none());
+    }
+
+    #[test]
+    fn render_sync_report_collapses_an_unchanged_sync_to_one_line() {
+        let report = GithubSyncReport {
+            synced_count: 14,
+            ..GithubSyncReport::default()
+        };
+        assert_eq!(render_sync_report(&report), "Synced 14 refs; no changes.\n");
+        assert_eq!(
+            render_sync_report(&GithubSyncReport::default()),
+            "Synced 0 refs; no changes.\n"
+        );
     }
 }

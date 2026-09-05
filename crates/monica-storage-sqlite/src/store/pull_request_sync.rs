@@ -8,7 +8,7 @@ use monica_application::{
 };
 use monica_domain::{Provider, RefType};
 
-use super::SET_NOW;
+use super::{task_scope_clause, SET_NOW};
 
 // The latest run's branch per development task, joined to its project repo.
 const BRANCH_CANDIDATE_FROM: &str = "SELECT
@@ -43,14 +43,18 @@ const BRANCH_CANDIDATE_WHERE: &str = "t.kind = 'development'
                AND lower(trim(latest_run.branch)) != lower(trim(project.default_branch))";
 
 impl SqliteStore {
-    pub fn all_branch_sync_candidates(&self) -> Result<Vec<PullRequestBranchSyncCandidate>> {
+    pub fn branch_sync_candidates(
+        &self,
+        task: Option<&str>,
+    ) -> Result<Vec<PullRequestBranchSyncCandidate>> {
         let mut stmt = self.conn().prepare(&format!(
             "{BRANCH_CANDIDATE_FROM}
-             WHERE {BRANCH_CANDIDATE_WHERE}
+             WHERE {BRANCH_CANDIDATE_WHERE}{}
              ORDER BY latest_run.created_at, t.id",
+            task_scope_clause(task, "t.id"),
         ))?;
         let candidates = stmt
-            .query_map([], |row| {
+            .query_map(rusqlite::params_from_iter(task), |row| {
                 Ok(PullRequestBranchSyncCandidate {
                     task_id: row.get("task_id")?,
                     repo: row.get("repo")?,
@@ -61,8 +65,11 @@ impl SqliteStore {
         Ok(candidates)
     }
 
-    pub fn all_unresolved_pull_request_refs(&self) -> Result<Vec<UnresolvedPullRequestRef>> {
-        let mut stmt = self.conn().prepare(
+    pub fn unresolved_pull_request_refs(
+        &self,
+        task: Option<&str>,
+    ) -> Result<Vec<UnresolvedPullRequestRef>> {
+        let mut stmt = self.conn().prepare(&format!(
             "SELECT
                pr.id AS external_ref_id,
                pr.task_id AS task_id,
@@ -74,12 +81,13 @@ impl SqliteStore {
              WHERE pr.ref_type = 'pull_request'
                AND pr.repo IS NOT NULL
                AND pr.number IS NOT NULL
-               AND pr.number > 0
+               AND pr.number > 0{}
                AND (state.status IS NULL OR state.status IN ('draft', 'open'))
              ORDER BY pr.id",
-        )?;
+            task_scope_clause(task, "pr.task_id"),
+        ))?;
         let refs = stmt
-            .query_map([], |row| {
+            .query_map(rusqlite::params_from_iter(task), |row| {
                 Ok(UnresolvedPullRequestRef {
                     external_ref_id: row.get("external_ref_id")?,
                     task_id: row.get("task_id")?,
@@ -138,12 +146,18 @@ impl SqliteStore {
 // PR sync delegates to the inherent methods above; a trait impl cannot span files, so the SQL
 // lives here with its tables while [`SqliteStore`] also exposes them inherently.
 impl PullRequestSyncStore for SqliteStore {
-    fn all_branch_sync_candidates(&self) -> Result<Vec<PullRequestBranchSyncCandidate>> {
-        SqliteStore::all_branch_sync_candidates(self)
+    fn branch_sync_candidates(
+        &self,
+        task: Option<&str>,
+    ) -> Result<Vec<PullRequestBranchSyncCandidate>> {
+        SqliteStore::branch_sync_candidates(self, task)
     }
 
-    fn all_unresolved_pull_request_refs(&self) -> Result<Vec<UnresolvedPullRequestRef>> {
-        SqliteStore::all_unresolved_pull_request_refs(self)
+    fn unresolved_pull_request_refs(
+        &self,
+        task: Option<&str>,
+    ) -> Result<Vec<UnresolvedPullRequestRef>> {
+        SqliteStore::unresolved_pull_request_refs(self, task)
     }
 
     fn bulk_record_pr_sync(
