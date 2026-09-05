@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::github::GithubPullRequestRef;
+use crate::github::{GithubIssueState, GithubPullRequestRef};
 use crate::status::{DisplayStatus, TaskRunStatus, TaskRunWaitReason, TaskStatus};
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -29,6 +29,7 @@ pub struct TaskSummaryRow {
     #[specta(type = Option<specta_typescript::Number>)]
     pub github_issue_number: Option<i64>,
     pub github_issue_url: Option<String>,
+    pub github_issue_state: Option<GithubIssueState>,
     pub github_pull_requests: Vec<GithubPullRequestRef>,
     pub task_status: TaskStatus,
     pub task_run_status: Option<TaskRunStatus>,
@@ -57,6 +58,7 @@ impl From<monica_application::TaskSummaryRow> for TaskSummaryRow {
             project: value.project,
             github_issue_number: value.github_issue_number,
             github_issue_url: value.github_issue_url,
+            github_issue_state: value.github_issue_state.map(GithubIssueState::from),
             github_pull_requests: value
                 .github_pull_requests
                 .into_iter()

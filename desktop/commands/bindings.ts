@@ -107,8 +107,7 @@ export const commands = {
       } | null,
       ApiError
     >(__TAURI_INVOKE("read_runspace_plan", { terminalTabId })),
-  forceSyncPullRequests: () =>
-    typedError<null, ApiError>(__TAURI_INVOKE("force_sync_pull_requests")),
+  forceSyncGithub: () => typedError<null, ApiError>(__TAURI_INVOKE("force_sync_github")),
   translateSettingsGet: () =>
     typedError<TranslateSettingsSnapshot, ApiError>(__TAURI_INVOKE("translate_settings_get")),
   translateSettingsSave: (settings: TranslateSettings) =>
@@ -121,7 +120,7 @@ export const commands = {
 
 /** Events */
 export const events = {
-  prSyncCompleted: makeEvent<PrSyncCompleted>("pr-sync:completed"),
+  githubSyncCompleted: makeEvent<GithubSyncCompleted>("github-sync:completed"),
   settingsOpen: makeEvent<OpenSettingsRequested>("settings:open"),
   taskRunStatusChanged: makeEvent<TaskRunStatusChanged>("task-run:status-changed"),
 };
@@ -180,12 +179,22 @@ export type DisplayStatus =
   | "failed"
   | "closed";
 
+/**
+ *  The open/closed state of a tracked issue, kept as an enum across the boundary so the frontend
+ *  gets a `"open" | "closed"` union instead of a bare string it has to compare by hand.
+ */
+export type GithubIssueState = "open" | "closed";
+
 export type GithubPullRequestRef = {
   repo: string | null;
   number: number | null;
   url: string | null;
   status: string | null;
   is_open_or_draft: boolean;
+};
+
+export type GithubSyncCompleted = {
+  synced_count: number;
 };
 
 /**  native メニューの Settings… から設定モーダルを開かせる。 */
@@ -198,10 +207,6 @@ export type PlanPreview = {
   file_name: string;
   /**  Markdown source of the plan. */
   body: string;
-};
-
-export type PrSyncCompleted = {
-  synced_count: number;
 };
 
 export type PrepareTaskResult = {
@@ -267,6 +272,7 @@ export type TaskSummaryRow = {
   project: string | null;
   github_issue_number: number | null;
   github_issue_url: string | null;
+  github_issue_state: GithubIssueState | null;
   github_pull_requests: GithubPullRequestRef[];
   task_status: TaskStatus;
   task_run_status: TaskRunStatus | null;

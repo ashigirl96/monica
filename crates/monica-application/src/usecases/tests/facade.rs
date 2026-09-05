@@ -174,7 +174,7 @@ fn facade_create_terminal_session_failure_marks_failed_and_settles() {
 }
 
 #[tokio::test]
-async fn facade_force_sync_pull_requests_refreshes_unresolved_refs() {
+async fn facade_force_sync_github_refreshes_unresolved_refs() {
     let repos = FakeRepos::default();
     // FakeGithub lists no recent PRs, so the unresolved ref falls through to a by-number fetch
     // (FakeGithub answers Merged).
@@ -187,17 +187,17 @@ async fn facade_force_sync_pull_requests_refreshes_unresolved_refs() {
     let sink = RecordingSink::default();
     let mut monica = facade(repos, sink.clone());
 
-    let count = monica.synchronization().force_sync_pull_requests().await.unwrap();
+    let count = monica.synchronization().force_sync_github().await.unwrap();
 
     assert_eq!(count, 1);
     assert!(sink
         .events()
         .iter()
-        .any(|e| matches!(e, ApplicationEvent::PullRequestSyncCompleted { synced_count: 1 })));
+        .any(|e| matches!(e, ApplicationEvent::GithubSyncCompleted { synced_count: 1 })));
 }
 
 #[tokio::test]
-async fn facade_force_sync_pull_requests_announces_completion() {
+async fn facade_force_sync_github_announces_completion() {
     let repos = FakeRepos::default();
     repos.set_branch_sync_candidates(vec![PullRequestBranchSyncCandidate {
         task_id: "MON-1".to_string(),
@@ -209,13 +209,13 @@ async fn facade_force_sync_pull_requests_announces_completion() {
 
     // FakeGithub lists no recent PRs, so nothing matches; the forced path still announces (unlike
     // the periodic sweep, which stays silent).
-    let count = monica.synchronization().force_sync_pull_requests().await.unwrap();
+    let count = monica.synchronization().force_sync_github().await.unwrap();
 
     assert_eq!(count, 0);
     assert!(sink
         .events()
         .iter()
-        .any(|e| matches!(e, ApplicationEvent::PullRequestSyncCompleted { synced_count: 0 })));
+        .any(|e| matches!(e, ApplicationEvent::GithubSyncCompleted { synced_count: 0 })));
 }
 
 #[tokio::test]

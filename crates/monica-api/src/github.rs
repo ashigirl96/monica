@@ -21,3 +21,21 @@ impl From<monica_application::GithubPullRequestRef> for GithubPullRequestRef {
         }
     }
 }
+
+/// The open/closed state of a tracked issue, kept as an enum across the boundary so the frontend
+/// gets a `"open" | "closed"` union instead of a bare string it has to compare by hand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum GithubIssueState {
+    Open,
+    Closed,
+}
+
+impl From<monica_application::GithubIssueState> for GithubIssueState {
+    fn from(value: monica_application::GithubIssueState) -> Self {
+        match value {
+            monica_application::GithubIssueState::Open => Self::Open,
+            monica_application::GithubIssueState::Closed => Self::Closed,
+        }
+    }
+}

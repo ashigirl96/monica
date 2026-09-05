@@ -7,6 +7,7 @@ export function taskSummary(over: Partial<TaskSummaryRow>): TaskSummaryRow {
     project: "owner/repo",
     github_issue_number: null,
     github_issue_url: null,
+    github_issue_state: null,
     github_pull_requests: [],
     task_status: "ready",
     task_run_status: null,

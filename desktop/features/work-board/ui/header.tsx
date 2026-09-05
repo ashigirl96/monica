@@ -10,7 +10,7 @@ import {
 } from "@/stores/workboard";
 import { projectsAtom } from "@/stores/projects";
 import { ProjectPickerModal } from "@/components/project-picker-modal";
-import { prSyncLastSyncedAtom } from "@/stores/pr-sync";
+import { githubSyncLastSyncedAtom } from "@/stores/github-sync";
 import { XIcon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 
@@ -221,7 +221,7 @@ function formatElapsed(seconds: number): string {
 }
 
 function LastSyncedLabel() {
-  const lastSyncAt = useAtomValue(prSyncLastSyncedAtom);
+  const lastSyncAt = useAtomValue(githubSyncLastSyncedAtom);
   const [, setTick] = useState(0);
 
   useEffect(() => {

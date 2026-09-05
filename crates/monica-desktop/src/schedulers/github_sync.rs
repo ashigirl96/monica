@@ -7,10 +7,10 @@ use monica_runtime::MonicaFacade;
 
 use crate::event_sink::TauriEventSink;
 
-pub use monica_runtime::PrSyncWaker;
+pub use monica_runtime::GithubSyncWaker;
 
-pub(crate) fn start(app_handle: AppHandle) -> PrSyncWaker {
-    monica_runtime::start_pr_sync(move || open_facade(&app_handle))
+pub(crate) fn start(app_handle: AppHandle) -> GithubSyncWaker {
+    monica_runtime::start_github_sync(move || open_facade(&app_handle))
 }
 
 fn open_facade(app: &AppHandle) -> anyhow::Result<MonicaFacade> {

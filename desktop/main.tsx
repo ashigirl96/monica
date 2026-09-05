@@ -7,7 +7,7 @@ import "@fontsource-variable/jetbrains-mono";
 import App from "./App";
 import { commands } from "./commands/bindings";
 import { unwrap } from "./commands/unwrap";
-import { initPrSync } from "./stores/pr-sync";
+import { initGithubSync } from "./stores/github-sync";
 import { queryClient } from "./stores/query-client";
 import { initQuerySync } from "./stores/query-sync";
 import {
@@ -30,7 +30,7 @@ async function bootstrap() {
   const store = getDefaultStore();
   store.set(queryClientAtom, queryClient);
   initQuerySync();
-  initPrSync();
+  initGithubSync();
   try {
     const win = getCurrentWebviewWindow();
     const windowLabel = win.label;

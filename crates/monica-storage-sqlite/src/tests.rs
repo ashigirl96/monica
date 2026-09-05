@@ -1,5 +1,6 @@
 use monica_application::{
-    EventRepository, ExecutionProfile, GithubPullRequest, GithubPullRequestStatus,
+    EventRepository, ExecutionProfile, FetchedIssue, GithubIssueState, GithubIssueSyncStore,
+    GithubPullRequest, GithubPullRequestStatus,
     ProjectRepository, PullRequestBranchSyncCandidate, TabAttachment, TaskBoardQuery,
     TaskRunObservation,
     TaskRunStore, TaskStore, TaskSummaryFilter, TaskSummaryRow, TerminalRunspaceRow,
@@ -2663,4 +2664,162 @@ fn re_attach_leaves_an_already_settled_previous_run_untouched() {
         db.get_task_run(&old.run.id).unwrap().unwrap().status,
         TaskRunStatus::Failed
     );
+}
+
+fn issue_ref(repo: &str, number: i64) -> ExternalReference {
+    ExternalReference::new(
+        "",
+        Provider::Github,
+        RefType::Issue,
+        Some(repo.to_string()),
+        Some(number),
+        Some(monica_domain::github_issue_url(repo, number)),
+    )
+}
+
+fn fetched(number: i64, title: &str, state: GithubIssueState) -> FetchedIssue {
+    FetchedIssue {
+        number,
+        title: title.to_string(),
+        state,
+        parent: None,
+        sub_issues: Vec::new(),
+    }
+}
+
+/// An issue-backed task carries no title of its own; the cache is what the reads must show.
+fn tracked_task(db: &mut SqliteStore, repo: &str, number: i64) -> TaskId {
+    db.insert_task_with_ref(NewTask::untitled(TaskKind::Development), issue_ref(repo, number))
+        .unwrap()
+        .id
+}
+
+#[test]
+fn issue_ref_state_title_wins_over_the_stored_column() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let id = tracked_task(&mut db, "owner/repo", 42);
+
+    assert_eq!(db.get_task(&id).unwrap().unwrap().title, "");
+
+    GithubIssueSyncStore::upsert_issue_ref_state(
+        &mut db,
+        "MON-1",
+        "owner/repo",
+        42,
+        "fresh title",
+        GithubIssueState::Open,
+    )
+    .unwrap();
+    assert_eq!(db.get_task(&id).unwrap().unwrap().title, "fresh title");
+
+    // Every task read path resolves through the same columns, so they must all agree.
+    assert_eq!(db.list_tasks().unwrap()[0].title, "fresh title");
+    let found = db
+        .find_open_task_by_external_ref(Provider::Github, RefType::Issue, "owner/repo", 42)
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.title, "fresh title");
+    assert_eq!(db.mark_task_closed(&id).unwrap().title, "fresh title");
+}
+
+#[test]
+fn task_title_falls_back_to_the_stored_column_without_a_cached_state() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    // A task tracked before the cache existed still has its snapshot in `tasks.title`.
+    let mut task = dev_task("legacy snapshot");
+    task.status = TaskStatus::Ready;
+    let id = db.insert_task_with_ref(task, issue_ref("owner/repo", 7)).unwrap().id;
+    assert_eq!(db.get_task(&id).unwrap().unwrap().title, "legacy snapshot");
+
+    db.upsert_issue_ref_state("MON-1", "owner/repo", 7, "renamed", GithubIssueState::Closed)
+        .unwrap();
+    assert_eq!(db.get_task(&id).unwrap().unwrap().title, "renamed");
+}
+
+#[test]
+fn raw_task_title_is_untouched_by_the_issue_cache() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let id = db.insert_task(dev_task("raw task")).unwrap().id;
+    assert_eq!(db.get_task(&id).unwrap().unwrap().title, "raw task");
+    let rows = db.list_task_summaries(TaskSummaryFilter::All, None).unwrap();
+    assert_eq!(rows[0].title, "raw task");
+    assert_eq!(rows[0].github_issue_state, None);
+}
+
+#[test]
+fn upsert_issue_ref_state_on_an_unknown_address_is_a_noop() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let id = tracked_task(&mut db, "owner/repo", 42);
+    db.upsert_issue_ref_state("MON-1", "owner/repo", 999, "wrong number", GithubIssueState::Open)
+        .unwrap();
+    assert_eq!(db.get_task(&id).unwrap().unwrap().title, "");
+}
+
+#[test]
+fn task_summaries_expose_the_cached_issue_title_and_state() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    tracked_task(&mut db, "owner/repo", 42);
+    db.upsert_issue_ref_state("MON-1", "owner/repo", 42, "synced title", GithubIssueState::Closed)
+        .unwrap();
+
+    let rows = db.list_task_summaries(TaskSummaryFilter::All, None).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].title, "synced title");
+    assert_eq!(rows[0].github_issue_state, Some(GithubIssueState::Closed));
+    // The cache never touches the task's own status.
+    assert_eq!(rows[0].task_status, TaskStatus::Ready);
+}
+
+#[test]
+fn open_task_issue_refs_skip_closed_tasks_and_pull_request_refs() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    tracked_task(&mut db, "owner/repo", 42);
+    let closed = tracked_task(&mut db, "owner/repo", 43);
+    db.mark_task_closed(&closed).unwrap();
+    db.insert_task_with_ref(
+        dev_task("pr only"),
+        ExternalReference::new(
+            "",
+            Provider::Github,
+            RefType::PullRequest,
+            Some("owner/repo".to_string()),
+            Some(9),
+            None,
+        ),
+    )
+    .unwrap();
+
+    // Through the port, so the trait's delegation to the inherent method stays covered.
+    let refs = GithubIssueSyncStore::all_open_task_issue_refs(&db).unwrap();
+    assert_eq!(refs.len(), 1);
+    assert_eq!(refs[0].repo, "owner/repo");
+    assert_eq!(refs[0].number, 42);
+}
+
+#[test]
+fn bulk_record_issue_sync_upserts_by_external_ref() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let id = tracked_task(&mut db, "owner/repo", 42);
+    let ref_id = db.all_open_task_issue_refs().unwrap()[0].external_ref_id;
+
+    GithubIssueSyncStore::bulk_record_issue_sync(
+        &mut db,
+        &[(ref_id, fetched(42, "first", GithubIssueState::Open))],
+    )
+    .unwrap();
+    assert_eq!(db.get_task(&id).unwrap().unwrap().title, "first");
+
+    db.bulk_record_issue_sync(&[(ref_id, fetched(42, "second", GithubIssueState::Closed))])
+        .unwrap();
+    assert_eq!(db.get_task(&id).unwrap().unwrap().title, "second");
+    let rows = db.list_task_summaries(TaskSummaryFilter::All, None).unwrap();
+    assert_eq!(rows[0].github_issue_state, Some(GithubIssueState::Closed));
+}
+
+#[test]
+fn bulk_record_issue_sync_with_no_entries_is_a_noop() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let id = tracked_task(&mut db, "owner/repo", 42);
+    db.bulk_record_issue_sync(&[]).unwrap();
+    assert_eq!(db.get_task(&id).unwrap().unwrap().title, "");
 }

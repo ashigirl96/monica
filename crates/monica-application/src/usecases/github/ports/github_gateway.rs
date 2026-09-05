@@ -1,11 +1,19 @@
 use anyhow::Result;
 
-use crate::{GithubIssue, GithubPullRequest, RepoPullRequest};
+use crate::{FetchedIssue, GithubIssue, GithubPullRequest, RepoPullRequest};
 
 use crate::ports::BoxFuture;
 
 pub trait GithubGateway {
     fn fetch_issue<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, Result<GithubIssue>>;
+    /// The named issues of one repo in as few requests as possible. Missing or inaccessible
+    /// numbers are dropped rather than failing the batch, so one deleted issue cannot stall the
+    /// sync of its repo.
+    fn fetch_issues<'a>(
+        &'a self,
+        repo: &'a str,
+        numbers: &'a [i64],
+    ) -> BoxFuture<'a, Result<Vec<FetchedIssue>>>;
     fn fetch_default_branch<'a>(&'a self, repo: &'a str) -> BoxFuture<'a, Result<Option<String>>>;
     fn fetch_pull_request<'a>(
         &'a self,

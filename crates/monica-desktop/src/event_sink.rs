@@ -3,7 +3,7 @@ use monica_application::{ApplicationEvent, EventSink};
 use tauri::AppHandle;
 use tauri_specta::Event;
 
-use crate::commands::pull_request::PrSyncCompleted;
+use crate::commands::github_sync::GithubSyncCompleted;
 use crate::commands::task::TaskRunStatusChanged;
 
 /// The application façade wired to the default backend and the Tauri event sink.
@@ -52,9 +52,9 @@ impl EventSink for TauriEventSink {
                 }
                 .emit(&self.app);
             }
-            ApplicationEvent::PullRequestSyncCompleted { synced_count } => {
-                if let Err(e) = (PrSyncCompleted { synced_count }).emit(&self.app) {
-                    log::warn!(target: "monica_app::events", "failed to emit PrSyncCompleted: {e}");
+            ApplicationEvent::GithubSyncCompleted { synced_count } => {
+                if let Err(e) = (GithubSyncCompleted { synced_count }).emit(&self.app) {
+                    log::warn!(target: "monica_app::events", "failed to emit GithubSyncCompleted: {e}");
                 }
             }
             // The OS notification is delivered from the outbox by `schedulers::notification_drain`,

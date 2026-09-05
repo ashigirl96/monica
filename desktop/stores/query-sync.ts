@@ -8,7 +8,7 @@ const POLL_INTERVAL_MS = 3000;
 // App-lifetime owner for backend-driven query freshness. A single listener/interval per
 // signal, rather than one per mounted component. Module init (not a React effect) so it
 // runs once and StrictMode can't double-register. (PR sync freshness has its own owner in
-// stores/pr-sync.ts.)
+// stores/github-sync.ts.)
 export function initQuerySync(): void {
   const invalidate = () => void invalidateTaskSummaries(queryClient);
 

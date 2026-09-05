@@ -52,7 +52,7 @@ where
             Ok(pull_requests) => pull_requests,
             Err(e) => {
                 log::warn!(
-                    target: "monica_application::pr_sync",
+                    target: "monica_application::github_sync",
                     "bulk PR fetch failed repo={repo} after {}ms error={e:#}",
                     elapsed.as_millis()
                 );
@@ -78,7 +78,7 @@ where
             }
         }
         log::info!(
-            target: "monica_application::pr_sync",
+            target: "monica_application::github_sync",
             "bulk PR fetch repo={repo} fetched={fetched} branches={} in {}ms",
             branch_map.len(),
             elapsed.as_millis()
@@ -163,7 +163,7 @@ where
             Ok(pr) => status_entries.push((unresolved_ref.clone(), pr)),
             // No retry state to record: the next forced sync simply tries again.
             Err(e) => log::warn!(
-                target: "monica_application::pr_sync",
+                target: "monica_application::github_sync",
                 "status refresh fetch failed repo={} pull_request_number={} error={e:#}",
                 unresolved_ref.repo,
                 unresolved_ref.number
@@ -176,7 +176,7 @@ where
     let record_started = Instant::now();
     repos.bulk_record_pr_sync(&branch_entries, &status_entries)?;
     log::info!(
-        target: "monica_application::pr_sync",
+        target: "monica_application::github_sync",
         "bulk PR sync done: candidates={} repos={} matched={} statuses={} | candidates={}ms fetch={}ms status_fetch={}ms record={}ms total={}ms",
         branch_entries.len(),
         distinct_repos.len(),

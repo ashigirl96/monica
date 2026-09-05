@@ -1,5 +1,6 @@
 use crate::ports::{
     AgentDecoders, EventRepository, ExplanationOutputs, ExplanationStore, GitGateway,
+    GithubIssueSyncStore,
     NoteStore, NotificationOutboxStore, ProjectRepository, PullRequestSyncStore, ShellScaffolding,
     TaskBoardQuery, TaskRunStore, TaskStore, TerminalSessionRepository, UnitOfWork, WorkbenchStore,
     Workspace,
@@ -15,6 +16,7 @@ pub trait Backend {
     type Repos: TaskStore
         + TaskBoardQuery
         + PullRequestSyncStore
+        + GithubIssueSyncStore
         + TaskRunStore
         + ProjectRepository
         + EventRepository

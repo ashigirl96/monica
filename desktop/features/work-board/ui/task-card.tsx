@@ -147,7 +147,16 @@ export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boo
             {statusLabel}
           </span>
           {hasIssue && (
-            <BadgeLink url={task.github_issue_url} className="bg-secondary text-muted-foreground">
+            <BadgeLink
+              url={task.github_issue_url}
+              className={cn(
+                task.github_issue_state === "open"
+                  ? "bg-emerald-500/15 text-emerald-400"
+                  : task.github_issue_state === "closed"
+                    ? "bg-purple-500/15 text-purple-400"
+                    : "bg-secondary text-muted-foreground",
+              )}
+            >
               <IssueIcon />
               <span>{task.github_issue_number}</span>
             </BadgeLink>

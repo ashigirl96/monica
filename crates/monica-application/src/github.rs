@@ -25,6 +25,52 @@ pub struct GithubIssue {
     pub title: String,
     pub body: Option<String>,
     pub url: String,
+    pub state: GithubIssueState,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum GithubIssueState {
+    Open,
+    Closed,
+}
+
+impl GithubIssueState {
+    pub fn as_str(self) -> &'static str {
+        self.into()
+    }
+}
+
+/// An issue as returned by the bulk sync fetch. `parent` and `sub_issues` mirror the GitHub
+/// Sub-issues links; #464 turns them into `parent_task_id` and nothing reads them yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchedIssue {
+    pub number: i64,
+    pub title: String,
+    pub state: GithubIssueState,
+    pub parent: Option<i64>,
+    pub sub_issues: Vec<i64>,
+}
+
+/// The issue ref of a task that is still open, so a forced sync must re-check it. One row per
+/// external_ref: the same issue tracked by two tasks yields two entries, matching the per-ref
+/// state rows the sync writes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenIssueRef {
+    pub external_ref_id: i64,
+    pub repo: String,
+    pub number: i64,
 }
 
 #[derive(
