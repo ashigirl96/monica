@@ -5,7 +5,7 @@ import { isPosHidden, revealPos } from "./folding";
 
 const normalizerKey = new PluginKey("journalNormalizer");
 
-// TODO.md §12.2: appendTransaction は最終防衛に限定する。
+// appendTransaction は最終防衛に限定する。
 // 修復対象: missing ID / duplicate ID / empty blockGroup / empty doc / 不可視カーソル。
 export function normalizerPlugin(): Plugin {
   return new Plugin({

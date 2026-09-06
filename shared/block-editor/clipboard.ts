@@ -15,7 +15,6 @@ import { blockSelectionKey } from "./selection-state";
 import { openLinkMenu } from "./link-menu";
 import { buildSyncedContainer, openPasteMenu } from "./paste-menu";
 
-// TODO.md §8.4 / §10.1
 export const BLOCKS_MIME = "application/x-monica-blocks+json";
 
 type BlocksPayload = {
@@ -74,7 +73,7 @@ export function blocksToPlainText(containers: readonly PMNode[]): string {
   return lines.join("\n");
 }
 
-// 外部 HTML/plain text に block ID を出さない（TODO.md §10.1）
+// 外部 HTML/plain text に block ID を出さない
 function stripIds(node: PMNode): PMNode {
   if (node.type === nodes.blockContainer) {
     return node.type.create(

@@ -98,7 +98,7 @@ function filterItems(query: string): SlashItem[] {
   );
 }
 
-// slash 文字と query の削除、block 変換を 1 Transaction で行う（TODO.md §9.1）
+// slash 文字と query の削除、block 変換を 1 Transaction で行う
 function applyItem(view: EditorView, item: SlashItem): void {
   const state = slashKey.getState(view.state);
   if (!state?.active) return;
@@ -205,7 +205,7 @@ export function slashMenuPlugin(): Plugin<SlashState> {
       },
     },
     props: {
-      // §6.3/§13.1: composition 中は trigger しない
+      // composition 中は trigger しない
       handleTextInput(view, from, to, text) {
         if (text !== "/" || view.composing) return false;
         const state = slashKey.getState(view.state);
@@ -223,7 +223,7 @@ export function slashMenuPlugin(): Plugin<SlashState> {
         view.dispatch(tr);
         return true;
       },
-      // §12.1: menu が開いている間は menu 側がキーを処理する
+      // menu が開いている間は menu 側がキーを処理する
       handleKeyDown(view, event) {
         const state = slashKey.getState(view.state);
         if (!state?.active) {

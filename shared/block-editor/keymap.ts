@@ -36,13 +36,13 @@ import {
   tablePrevCell,
 } from "./table";
 
-// TODO.md §12.1 の優先順位のうち 3〜7 をここで表現する。
-// 1(composition) は ProseMirror が keyCode 229 を keymap に流さないことで、
-// 2(menu) と 4(block selection) は plugin 配列で keymap より前に置くことで満たす。
+// composition・menu・block selection はここへ届く前に処理される。composition は
+// ProseMirror が keyCode 229 を keymap に流さないことで、menu と block selection は
+// plugin 配列で keymap より前に置くことで満たす。
 export function editorKeymap(): Plugin[] {
   return [
     keymap({
-      // table cell 内キー → code block 内キー（§4.3）→ 通常 block の構造キー（§3・§4・§5）。
+      // table cell 内キー → code block 内キー → 通常 block の構造キー。
       // table を先頭に置く: 後続 command は getBlockContext 経由で「table を包む container」
       // を単位に動いてしまい、cell 内では分割・indent が表を壊す。
       Tab: chainCommands(tableNextCell, codeIndent, indentBlock),

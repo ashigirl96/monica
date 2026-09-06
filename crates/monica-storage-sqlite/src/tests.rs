@@ -2344,8 +2344,6 @@ fn same_runspace_id_in_two_windows_does_not_leak_tabs() {
     assert_eq!(reloaded_sec.runspaces[0].tabs[0].id, "tab-sec");
 }
 
-// --- Issue #256: UnitOfWork transaction boundary + prepared-run claim CAS ---
-
 /// A run created inside a [`WorkTransaction`] that is dropped without `commit` must leave no trace.
 /// This is the atomicity `start_run` relies on: a failure midway through (run created, then primary
 /// or bench write fails) rolls the whole thing back instead of stranding an orphan run.

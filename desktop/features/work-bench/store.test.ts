@@ -2,8 +2,6 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type { TerminalRunspace, TerminalState } from "./store";
 
-// --- Pure function tests (no mocking needed) ---
-
 const { enrichRunspacesWithEnv, applyHint, moveTabToRunspace, planTabMoves } =
   await import("./store");
 
@@ -243,8 +241,6 @@ describe("planTabMoves", () => {
     expect(moves).toEqual([{ tabId: "tab-a", runspaceId: "bench-MON-2", taskId: "MON-2" }]);
   });
 });
-
-// --- Atom integration tests (mock Tauri commands) ---
 
 let loadStateResult: {
   runspaces: {

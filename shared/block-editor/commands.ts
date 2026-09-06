@@ -44,15 +44,13 @@ function withChildren(container: PMNode, content: PMNode, children: readonly PMN
   );
 }
 
-// カーソルを ID + container 内 offset で復元する（TODO.md §1.4）。
+// カーソルを ID + container 内 offset で復元する。
 function restoreCursor(tr: Transaction, id: string, offset: number): void {
   const entry = containerById(tr.doc, id);
   if (!entry) return;
   const pos = Math.min(entry.pos + offset, tr.doc.content.size);
   tr.setSelection(TextSelection.near(tr.doc.resolve(pos), 1));
 }
-
-// ---- indent / outdent（TODO.md §3） ----
 
 export function indentRange(state: EditorState, range: SiblingRange): Transaction | null {
   if (range.fromIndex === 0) return null;
@@ -86,7 +84,7 @@ export function outdentRange(state: EditorState, range: SiblingRange): Transacti
     else if (i <= range.toIndex) selected.push(child);
     else following.push(child);
   });
-  // §3.2: 見た目の pre-order を保つため、後続兄弟は最後に lift した block の子へ
+  // 見た目の pre-order を保つため、後続兄弟は最後に lift した block の子へ
   if (following.length > 0) {
     const last = selected[selected.length - 1];
     selected[selected.length - 1] = withChildren(last, last.child(0), [
@@ -120,8 +118,6 @@ function structureCommand(
 
 export const indentBlock: Command = structureCommand(indentRange);
 export const outdentBlock: Command = structureCommand(outdentRange);
-
-// ---- 型変換（TODO.md §1.2: ID と children を維持） ----
 
 export function inlineToPlainText(content: PMNode): PMNode | undefined {
   const text = content.content.textBetween(0, content.content.size, undefined, "\n");
@@ -158,8 +154,6 @@ export function setContentType(
   return tr;
 }
 
-// ---- split（TODO.md §4） ----
-
 function splitRightContent(content: PMNode, offset: number): PMNode {
   const atEnd = offset === content.content.size;
   const right = content.cut(offset).content;
@@ -172,7 +166,7 @@ function splitRightContent(content: PMNode, offset: number): PMNode {
   // 折りたたみ中は内部が隠れるのでここへ来て、兄弟の段落に割る。
   if (t === nodes.callout) return nodes.paragraph.create(null, right);
   if (t === nodes.quote) return atEnd ? nodes.paragraph.create() : t.create(null, right);
-  // toggle 末尾 Enter は「同型の新 toggle」に固定（TODO.md §4.1 の product 設定）
+  // toggle 末尾 Enter は「同型の新 toggle」に固定（product 設定）
   if (t === nodes.toggle) return t.create({ open: true }, right);
   return t.create(content.attrs, right);
 }
@@ -215,7 +209,7 @@ export const splitBlock: Command = (state, dispatch) => {
   // content.cut(offset) が表を壊すので何もしない（防衛的ガード）。
   if (preCtx.contentNode.type === nodes.table) return false;
 
-  // §4.2: 空 list-like は Enter で outdent（nested）/ paragraph 化（root）
+  // 空 list-like は Enter で outdent（nested）/ paragraph 化（root）
   if (sel.empty && isListLike(preCtx.contentNode.type) && preCtx.contentNode.content.size === 0) {
     const cursorId = preCtx.containerNode.attrs.id as string | null;
     if (preCtx.parentContainerPos !== null) {
@@ -358,8 +352,6 @@ export const exitCallout: Command = (state, dispatch) => {
   return true;
 };
 
-// ---- merge（TODO.md §5） ----
-
 function selectSingleBlock(
   state: EditorState,
   dispatch: ((tr: Transaction) => void) | undefined,
@@ -424,7 +416,7 @@ export const backspaceBlock: Command = (state, dispatch) => {
       dispatch?.(tr.scrollIntoView());
       return true;
     }
-    // §5.1/§5.2: atom・code・子持ちへの merge は順序が壊れるので block-select に移行
+    // atom・code・子持ちへの merge は順序が壊れるので block-select に移行
     if (
       prevContent.type === nodes.divider ||
       prevContent.type === nodes.codeBlock ||
@@ -471,7 +463,7 @@ export const backspaceBlock: Command = (state, dispatch) => {
     return true;
   }
 
-  // root 先頭 block: 何もしないが Backspace は消費する（§5.1-6）
+  // root 先頭 block: 何もしないが Backspace は消費する
   return true;
 };
 
@@ -576,8 +568,6 @@ export const deleteEmptyBlock: Command = (state, dispatch) => {
   return true;
 };
 
-// ---- block selection 由来の一括操作（TODO.md §7.2） ----
-
 export function deleteRange(state: EditorState, range: SiblingRange): Transaction {
   const group = range.groupNode;
   const { start, end } = rangePositions(range);
@@ -590,7 +580,7 @@ export function deleteRange(state: EditorState, range: SiblingRange): Transactio
       emptyParagraphContainer(),
     );
   } else if (wholeGroup) {
-    // 空の blockGroup を残さない（TODO.md §1.5）
+    // 空の blockGroup を残さない
     tr.delete(range.groupPos, range.groupPos + group.nodeSize);
   } else {
     tr.delete(start, end);
@@ -646,8 +636,6 @@ export function moveRange(
     .replaceWith(start, end + next.nodeSize, unfoldHeadings([next, ...selected]))
     .setMeta("blockOperation", { type: "move" });
 }
-
-// ---- 挿入・code block 内キー ----
 
 /** container の直後に空 paragraph を作り、カーソルをその中へ移す
     （divider / bookmark などカーソルを置けない block への変換・挿入後の共通処理） */
@@ -864,7 +852,7 @@ export const codeIndent: Command = (state, dispatch) => {
   return true;
 };
 
-// §4.3: code の indent を減らす。行頭で減らせなくても block outdent にはしない。
+// code の indent を減らす。行頭で減らせなくても block outdent にはしない。
 export const codeOutdent: Command = (state, dispatch) => {
   const ctx = getBlockContext(state.selection.$from);
   if (!ctx || ctx.contentNode.type !== nodes.codeBlock) return false;

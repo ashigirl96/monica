@@ -51,8 +51,6 @@ function opensFor(doc: PMNode, id: string): string[] {
   return opened;
 }
 
-// ---- foldedIndexes ----
-
 describe("foldedIndexes", () => {
   test("折りたたんだ h2 は次の h2 の手前まで隠す", () => {
     const doc = docOf(
@@ -258,8 +256,6 @@ describe("foldedIndexes", () => {
   });
 });
 
-// ---- isCollapsedContainer / expandedContent ----
-
 describe("isCollapsedContainer", () => {
   test("閉じた toggle / collapsed な callout・heading を検出する", () => {
     expect(isCollapsedContainer(block("a", toggle("t", false)))).toBe(true);
@@ -295,8 +291,6 @@ describe("expandedContent", () => {
   });
 });
 
-// ---- isPosHidden ----
-
 describe("isPosHidden", () => {
   test("collapsed heading の支配下にある兄弟は不可視", () => {
     const doc = docOf(
@@ -324,8 +318,6 @@ describe("isPosHidden", () => {
     expect(isPosHidden(doc, resolveIn(doc, "hx").pos)).toBe(true);
   });
 });
-
-// ---- resolveFoldTarget ----
 
 describe("resolveFoldTarget", () => {
   test("heading 上のカーソルは自分自身", () => {
@@ -420,8 +412,6 @@ describe("resolveFoldTarget", () => {
   });
 });
 
-// ---- revealPos ----
-
 describe("revealPos", () => {
   test("可視な block には何もしない", () => {
     const doc = docOf(block("h2a", heading("A", 2)), block("p1", para("1")));
@@ -494,8 +484,6 @@ describe("expandedHeading", () => {
     expect(out.attrs.id).toBe("root");
   });
 });
-
-// ---- visibleContainers（キーボードナビの走査元） ----
 
 describe("visibleContainers", () => {
   test("collapsed heading の支配範囲と構造上の子を飛ばす", () => {

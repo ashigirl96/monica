@@ -11,7 +11,7 @@ export function createMenuOverlay(view: EditorView): HTMLElement {
   return menu;
 }
 
-// §9.1: coordsAtPos で editor 外 overlay を配置（CSS zoom は比率で補正）
+// coordsAtPos で editor 外 overlay を配置（CSS zoom は比率で補正）
 export function positionMenuAt(view: EditorView, menu: HTMLElement, pos: number): void {
   // display を先に立てて layout read（coordsAtPos / offsetTop）をまとめ、style の
   // 書き込みは最後に寄せる — read/write を交互にすると transaction ごとの強制 reflow が増える

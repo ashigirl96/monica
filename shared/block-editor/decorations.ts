@@ -7,7 +7,7 @@ import { foldedIndexes } from "./folding";
 import { getBlockContext } from "./context";
 import { blockSelectionKey } from "./selection-state";
 
-// TODO.md §9.2: placeholder 文字列は文書に入れず Decoration で描く。
+// placeholder 文字列は文書に入れず Decoration で描く。
 export function placeholderPlugin(): Plugin {
   return new Plugin({
     key: new PluginKey("journalPlaceholder"),
@@ -127,7 +127,7 @@ function markerLabel(style: string, index: number): string {
 // doc 由来の block decoration をまとめて 1 回の walk で作る。打鍵ごとに再構築される
 // ので、種類ごとに plugin を分けると全文走査がそのぶん増える。
 //
-// - 表示番号（TODO.md §11.3）は同一 group 内の連続 numbered 兄弟から導出し、文書には
+// - 表示番号は同一 group 内の連続 numbered 兄弟から導出し、文書には
 //   保存しない。非 numbered block・style 変更で reset、nested group は独立。
 // - heading は doc 上の子を持たないため、折りたたみ範囲（後続兄弟）を `.jb-collapsed`
 //   の CSS では隠せない。範囲は内容から導出されるのでここで class を付ける。

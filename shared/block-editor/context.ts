@@ -3,7 +3,7 @@ import type { EditorState } from "@milkdown/kit/prose/state";
 import { nodes } from "./schema";
 import { foldedIndexes, isCollapsedContainer } from "./folding";
 
-// TODO.md §2 getBlockContext。position は selection 由来の ResolvedPos から
+// position は selection 由来の ResolvedPos から
 // 最も近い blockContainer を見つける。
 export type BlockContext = {
   containerPos: number;
@@ -38,7 +38,7 @@ export function getBlockContext($pos: ResolvedPos): BlockContext | null {
   return null;
 }
 
-// TODO.md §1.4: position は Transaction で変わるため、UI 状態は ID 基準。
+// position は Transaction で変わるため、UI 状態は ID 基準。
 // index は doc ごとに一度だけ計算して WeakMap でメモ化する。
 const indexCache = new WeakMap<PMNode, Map<string, number>>();
 
@@ -73,7 +73,7 @@ export function parentContainerId(doc: PMNode, id: string): string | null {
 }
 
 // 可視 blockContainer を pre-order で列挙する。折りたたまれた container の配下と、
-// collapsed heading が支配する後続兄弟は skip（TODO.md §7.4)。
+// collapsed heading が支配する後続兄弟は skip。
 export function visibleContainers(doc: PMNode): Array<{ id: string; pos: number; node: PMNode }> {
   const out: Array<{ id: string; pos: number; node: PMNode }> = [];
   const walk = (parent: PMNode, base: number) => {
@@ -97,7 +97,7 @@ export function visibleContainers(doc: PMNode): Array<{ id: string; pos: number;
   return out;
 }
 
-// 連続兄弟レンジ: 構造 command が操作する単位（TODO.md §3.4 MVP）。
+// 連続兄弟レンジ: 構造 command が操作する単位。
 export type SiblingRange = {
   groupPos: number;
   groupNode: PMNode;

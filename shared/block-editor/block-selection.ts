@@ -43,7 +43,7 @@ function ancestorChain(doc: PMNode, containerPos: number): ChainEntry[] {
   return chain;
 }
 
-// anchor/head をトップレベル選択へ正規化する（TODO.md §1.4/§7.1）。
+// anchor/head をトップレベル選択へ正規化する。
 // 共通の blockGroup まで持ち上げ、そこでの連続 index 範囲を selectedIds にする。
 function normalize(doc: PMNode, anchorId: string, headId: string): BlockSelectionState {
   const anchor = containerById(doc, anchorId);
@@ -235,7 +235,7 @@ export function blockSelectionPlugin(): Plugin<BlockSelectionState> {
         const mod = event.metaKey || event.ctrlKey;
 
         if (!active) {
-          // §7.2: Esc / Cmd-A 1回目は現在 block を選択（Ctrl-A は行頭移動に使うため対象外）
+          // Esc / Cmd-A 1回目は現在 block を選択（Ctrl-A は行頭移動に使うため対象外）
           if (event.key === "Escape") return selectCurrentBlock(view);
           if (event.metaKey && !event.shiftKey && !event.altKey && event.key === "a") {
             return selectCurrentBlock(view);

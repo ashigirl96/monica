@@ -6,7 +6,7 @@ import { nodes, schema } from "./schema";
 import { getBlockContext } from "./context";
 import { appendEmptyParagraphAfter, inlineToPlainText } from "./commands";
 
-// 行頭 trigger でブロック型変換（TODO.md §6.1/§6.2）。
+// 行頭 trigger でブロック型変換。
 // blockContent の型だけ差し替え、blockContainer の ID・children は維持する。
 function blockRule(
   regexp: RegExp,
@@ -19,7 +19,7 @@ function blockRule(
     const content = ctx.contentNode;
     // table は下の contentPos + 1 チェックが構造上偶然弾いてくれるが、偶然に頼らず明示する
     if (content.type === nodes.codeBlock || content.type === nodes.table) return null;
-    // trigger より前に通常文字がない = マッチが content 先頭から始まる（§6.3）
+    // trigger より前に通常文字がない = マッチが content 先頭から始まる
     if (start !== ctx.contentPos + 1) return null;
     const target = resolve(match);
     if (!target) return null;
@@ -64,7 +64,6 @@ function setContentTypeOn(
   return tr.replaceWith(contentPos, contentPos + content.nodeSize, newContent);
 }
 
-// inline mark rule（TODO.md §6.4）
 function markRule(regexp: RegExp, markType: MarkType): InputRule {
   return new InputRule(regexp, (state, match, start, end) => {
     const $start = state.doc.resolve(start);
@@ -109,7 +108,6 @@ export function editorInputRuleList(): InputRule[] {
     blockRule(/^---$/, () => ({ type: nodes.divider, attrs: null })),
     // ``` → code block（Notion 互換）
     blockRule(/^```$/, () => ({ type: nodes.codeBlock, attrs: null })),
-    // inline marks（§6.4）
     markRule(/\*\*([^*\s](?:[^*]*[^*\s])?)\*\*$/, schema.marks.bold),
     markRule(/(?<!\*)\*([^*\s](?:[^*]*[^*\s])?)\*$/, schema.marks.italic),
     markRule(/`([^`\s](?:[^`]*[^`\s])?)`$/, schema.marks.code),

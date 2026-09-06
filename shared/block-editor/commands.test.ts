@@ -70,8 +70,6 @@ function sh(id: string | null, type: string, text = "", children: Shape[] = []):
   return { id, type, text, children };
 }
 
-// ---- state helpers ----
-
 function stateWithCursor(doc: PMNode, id: string, offset: number | "start" | "end"): EditorState {
   return EditorState.create({
     doc,
@@ -99,8 +97,6 @@ function assertInvariants(doc: PMNode): void {
   });
   expect(new Set(ids).size).toBe(ids.length);
 }
-
-// ---- Tab / Shift+Tab（TODO.md §3） ----
 
 describe("indentRange", () => {
   test("直前兄弟の子になる（CMD-004）", () => {
@@ -211,8 +207,6 @@ describe("outdentRange", () => {
     assertInvariants(after.doc);
   });
 });
-
-// ---- Enter（TODO.md §4） ----
 
 describe("splitBlock", () => {
   test("paragraph 途中: 左が元 ID・children を保持し右は新 ID（§4.1）", () => {
@@ -356,8 +350,6 @@ describe("exitCallout", () => {
     expect(run(state, exitCallout)).toBeNull();
   });
 });
-
-// ---- Backspace / Delete（TODO.md §5） ----
 
 describe("backspaceBlock", () => {
   test("先頭 Backspace の paragraph 化でカーソルが後続 block へ飛ばない", () => {
@@ -521,8 +513,6 @@ describe("deleteEmptyBlock", () => {
   });
 });
 
-// ---- block selection 操作（TODO.md §7.2） ----
-
 describe("deleteRange / duplicateRange / moveRange", () => {
   test("subtree 削除。root が空になったら空 paragraph を残す（§1.5 / SEL-009）", () => {
     const doc = docOf(block("A", para("A"), [block("X", para("X"))]));
@@ -556,8 +546,6 @@ describe("deleteRange / duplicateRange / moveRange", () => {
     expect(docShape(down.doc).map((s) => s.id)).toEqual(["A", "C", "B"]);
   });
 });
-
-// ---- input rules（TODO.md §6） ----
 
 type RuleInternals = {
   match: RegExp;
@@ -675,8 +663,6 @@ describe("input rules", () => {
   });
 });
 
-// ---- Ctrl-a / Ctrl-e ----
-
 describe("cursorToLineStart / cursorToLineEnd", () => {
   test("text block では content の先頭・末尾へ移動する", () => {
     const doc = docOf(block("A", para("hello")));
@@ -747,8 +733,6 @@ describe("exitInlineCode", () => {
   });
 });
 
-// ---- normalizer（TODO.md §12.2） ----
-
 describe("normalizer", () => {
   test("duplicate ID を再発行する（CORE-003）", () => {
     const doc = docOf(block("A", para("A")));
@@ -769,8 +753,6 @@ describe("normalizer", () => {
     assertInvariants(after.doc);
   });
 });
-
-// ---- 折りたたみ（heading / callout / toggle） ----
 
 /** id の block の blockContent attrs */
 function contentAttrs(doc: PMNode, id: string): Record<string, unknown> {
@@ -1034,8 +1016,6 @@ describe("normalizer（不可視カーソルの救済）", () => {
   });
 });
 
-// ---- linkHrefAt（link mark クリックの href 解決） ----
-
 describe("linkHrefAt", () => {
   const link = schema.marks.link.create({ href: "https://example.com" });
   const doc = docOf(
@@ -1052,8 +1032,6 @@ describe("linkHrefAt", () => {
     expect(linkHrefAt(doc, textStart + 3)).toBeNull();
   });
 });
-
-// ---- parentContainerId（Cmd-A エスカレーションの階層クエリ） ----
 
 describe("parentContainerId", () => {
   const doc = docOf(
@@ -1075,8 +1053,6 @@ describe("parentContainerId", () => {
     expect(parentContainerId(doc, "nope")).toBeNull();
   });
 });
-
-// ---- exitDocEnd（Ctrl-n の下端脱出） ----
 
 function bookmark(): PMNode {
   return nodes.bookmark.create({ href: "https://example.com" });

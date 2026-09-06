@@ -117,7 +117,7 @@ export function createBlockEditor(
   const syncedRegistry = new Set<SyncedBlockView>();
   const state = EditorState.create({
     doc: docFromJSON(initialDoc),
-    // TODO.md §12.1: menu → block selection → 構造キー → inline → default の順
+    // menu → block selection → 構造キー → inline → default の順
     plugins: [
       // 全 keystroke の logging + 全文 walk を伴うため dev 限定
       ...(import.meta.env.DEV ? [imeDebugPlugin()] : []),

@@ -41,7 +41,7 @@ function disclosureButton(className: string, onClick: () => void): HTMLButtonEle
   return btn;
 }
 
-// TODO.md §11.1: blockContainer NodeView。折りたたみ ▾ は heading / callout のときだけ
+// blockContainer NodeView。折りたたみ ▾ は heading / callout のときだけ
 // contenteditable=false で contentDOM の外に置く（既存 toggle は ToggleView が持つ）。
 class ContainerView implements NodeView {
   dom: HTMLElement;
@@ -142,7 +142,7 @@ class ContainerView implements NodeView {
   }
 }
 
-// TODO.md §11.2: todo checkbox は contenteditable=false、クリックで checked を更新。
+// todo checkbox は contenteditable=false、クリックで checked を更新。
 class TodoView implements NodeView {
   dom: HTMLElement;
   contentDOM: HTMLElement;

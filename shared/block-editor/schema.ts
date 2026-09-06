@@ -38,7 +38,7 @@ export function acceptedPastedImageSrc(raw: string | null): string | null {
   return isHttpUrl(raw) ? raw : null;
 }
 
-// TODO.md §0: ID付きの任意ネスト可能なブロックツリーを正とする。
+// ID付きの任意ネスト可能なブロックツリーを正とする。
 // doc → blockGroup → blockContainer(id) → blockContent + blockGroup?
 export const schema = new Schema({
   nodes: {
@@ -507,7 +507,7 @@ export function emptyDoc(): PMNode {
   return nodes.doc.create(null, nodes.blockGroup.create(null, emptyParagraphContainer()));
 }
 
-// paste / duplicate / copy-drag で subtree の全 ID を再発行する（TODO.md §1.5）
+// paste / duplicate / copy-drag で subtree の全 ID を再発行する
 export function reissueIds(node: PMNode): PMNode {
   if (node.type === nodes.blockContainer) {
     return node.type.create(
