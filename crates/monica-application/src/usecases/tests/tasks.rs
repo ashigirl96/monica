@@ -184,6 +184,38 @@ fn primary_terminal_tab_resolves_through_primary_run() {
 }
 
 #[test]
+fn primary_agent_session_id_survives_the_primary_run_stopping() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    assert_eq!(primary_agent_session_id(&repos, &task_id).unwrap(), None);
+
+    record_claude_hook(
+        &mut repos,
+        HookContext {
+            task_id: Some(&task_id),
+            terminal_tab_id: Some("tab-1"),
+            ..HookContext::default()
+        },
+        &started("sess-1", Continuation::Fresh),
+    )
+    .unwrap();
+    let primary_id = repos
+        .get_task(&task_id)
+        .unwrap()
+        .unwrap()
+        .primary_task_run_id
+        .unwrap();
+    repos
+        .finish_task_run(&primary_id, &task_id, TaskRunStatus::Stopped)
+        .unwrap();
+
+    assert_eq!(
+        primary_agent_session_id(&repos, &task_id).unwrap().as_deref(),
+        Some("sess-1")
+    );
+}
+
+#[test]
 fn record_claude_hook_prefers_explicit_run_id_over_session_lookup() {
     let mut repos = FakeRepos::default();
     let (task_id, primary_id) = task_with_running_primary(&mut repos);

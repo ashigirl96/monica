@@ -7,6 +7,7 @@ use super::ports::{
     TaskRunStore, TaskStore, UnitOfWork, WorkbenchStore,
 };
 use crate::ports::TerminalSessionRepository;
+use crate::usecases::tasks::primary_run;
 use crate::prelude::{
     ExternalReference, NewTaskRun, Project, RefType, RunMode, Task, TaskId, TaskRun, TaskRunId,
     TaskRunStatus, TaskStatus,
@@ -78,19 +79,6 @@ where
         )));
     }
     Ok(())
-}
-
-fn primary_run<R>(repos: &R, task_id: &TaskId) -> ApplicationResult<Option<TaskRun>>
-where
-    R: TaskStore + TaskRunStore,
-{
-    let task = repos
-        .get_task(task_id)?
-        .ok_or_else(|| ApplicationError::not_found(format!("task not found: {task_id}")))?;
-    match task.primary_task_run_id {
-        Some(id) => Ok(repos.get_task_run(&id)?),
-        None => Ok(None),
-    }
 }
 
 /// Phase 1: Create TaskRun (SettingUp) + set as Main Run + ensure bench exists.

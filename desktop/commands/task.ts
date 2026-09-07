@@ -70,6 +70,10 @@ export function primaryTabId(taskId: string) {
   return unwrap(commands.primaryTabId(taskId));
 }
 
+export function primaryAgentSessionId(taskId: string) {
+  return unwrap(commands.primaryAgentSessionId(taskId));
+}
+
 export function attachTerminalTab(taskId: string, tabId: string, sessionId: string, cwd: string) {
   return unwrap(commands.attachTerminalTab(taskId, tabId, sessionId, cwd));
 }

@@ -89,6 +89,11 @@ impl<B: Backend> TaskService<'_, B> {
         crate::usecases::tasks::primary_terminal_tab(&self.m.repos, task_id)
     }
 
+    pub fn primary_agent_session_id(&self, task_id: &TaskId) -> ApplicationResult<Option<String>> {
+        Ok(crate::usecases::tasks::primary_agent_session_id(&self.m.repos, task_id)?
+            .map(String::from))
+    }
+
     pub fn list_tasks(&self) -> ApplicationResult<Vec<Task>> {
         crate::usecases::query::list_tasks(&self.m.repos)
     }

@@ -6,6 +6,7 @@ import { spaces } from "@/spaces/registry";
 import { createTabAtom, closeTabAtom, cycleTabAtom } from "@/stores/tabs";
 import {
   activeTerminalTabAtom,
+  copyPrimarySessionIdAtom,
   createRunspaceAtom,
   createTerminalTabAtom,
   cycleTerminalTabAtom,
@@ -76,6 +77,7 @@ export function useShortcuts() {
   const cycleTerminalTab = useSetAtom(cycleTerminalTabAtom);
   const cycleRunspace = useSetAtom(cycleRunspaceAtom);
   const promoteActiveTabRun = useSetAtom(promoteActiveTabRunAtom);
+  const copyPrimarySessionId = useSetAtom(copyPrimarySessionIdAtom);
   const toggleTabPin = useSetAtom(toggleTabPinAtom);
   const togglePlanPreview = useSetAtom(togglePlanPreviewAtom);
   const planPreview = useAtomValue(planPreviewAtom);
@@ -153,6 +155,16 @@ export function useShortcuts() {
           void navigator.clipboard.writeText(id).then(() => {
             pushInfoToast(`Session ID copied: ${id.slice(0, 8)}…`);
           });
+        },
+      },
+      {
+        alt: true,
+        meta: true,
+        code: "KeyC",
+        editable: true,
+        action: ({ isWorkBench }) => {
+          if (!isWorkBench) return false;
+          void copyPrimarySessionId();
         },
       },
       {
@@ -359,6 +371,7 @@ export function useShortcuts() {
     cycleTerminalTab,
     cycleRunspace,
     promoteActiveTabRun,
+    copyPrimarySessionId,
     toggleTabPin,
     togglePlanPreview,
     planPreview,

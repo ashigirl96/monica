@@ -6,6 +6,7 @@ import {
   attachTerminalTab,
   listTabTaskBindings,
   makeMainTaskRun,
+  primaryAgentSessionId,
   primaryTabId,
   taskShellEnv,
   type TabTaskBinding,
@@ -20,7 +21,7 @@ import {
   windowLabelAtom,
 } from "@/stores/ui-state";
 import { refreshTaskSummariesAtom } from "@/stores/workboard";
-import { pushErrorToast } from "@/stores/toast";
+import { pushErrorToast, pushInfoToast } from "@/stores/toast";
 import { jumpHintsActiveAtom } from "@/features/work-bench/jump-hints";
 import { detachedSessionsAtom, refreshSessionsAtom } from "@/features/work-bench/session-status";
 import { loadTerminalStateAtom } from "@/features/work-bench/persistence";
@@ -242,6 +243,20 @@ export const promoteActiveTabRunAtom = atom(null, async (get, set) => {
   if (changed) {
     await Promise.all([set(refreshTaskSummariesAtom), set(refreshPrimaryTabAtom)]);
   }
+});
+
+// Reads the Main Run's recorded session rather than a live tab, so a stopped run's id stays
+// copyable for `claude --resume` after its tab is gone.
+export const copyPrimarySessionIdAtom = atom(null, async (get) => {
+  const taskId = get(activeRunspaceAtom)?.taskId;
+  if (!taskId) return;
+  const id = await primaryAgentSessionId(taskId);
+  if (!id) {
+    pushInfoToast("Main Run has no session to copy");
+    return;
+  }
+  await navigator.clipboard.writeText(id);
+  pushInfoToast(`Main Run session ID copied: ${id.slice(0, 8)}…`);
 });
 
 // Quick Look-style plan preview: null when closed, the resolved plan when open.

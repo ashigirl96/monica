@@ -20,7 +20,7 @@ use crate::usecases::projects::register_project_with_default_branch;
 use crate::usecases::runs::{execute_run, open_bench, run_task, start_run};
 use crate::usecases::tasks::{
     attach_terminal_session_to_task, close_task, create_raw_task, make_main_by_terminal_tab,
-    primary_terminal_tab,
+    primary_agent_session_id, primary_terminal_tab,
 };
 use crate::prelude::{
     Agent, AgentSessionStatus, AgentSignal, Continuation, ExplanationMode, NewTaskRun,

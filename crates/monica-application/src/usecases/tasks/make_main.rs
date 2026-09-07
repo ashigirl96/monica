@@ -1,5 +1,5 @@
 use super::ports::{TaskRunStore, TaskStore};
-use crate::prelude::{Task, TaskId, TaskRunId, TaskRunStatus};
+use crate::prelude::{AgentSessionId, Task, TaskId, TaskRun, TaskRunId, TaskRunStatus};
 use crate::ApplicationResult;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,8 +63,7 @@ where
     .then(|| current_id.clone()))
 }
 
-/// The tab currently hosting the task's Main Run, if any — drives the Workbench tab indicator.
-pub fn primary_terminal_tab<R>(repos: &R, task_id: &TaskId) -> ApplicationResult<Option<String>>
+pub(crate) fn primary_run<R>(repos: &R, task_id: &TaskId) -> ApplicationResult<Option<TaskRun>>
 where
     R: TaskStore + TaskRunStore,
 {
@@ -74,7 +73,25 @@ where
     let Some(primary_id) = task.primary_task_run_id else {
         return Ok(None);
     };
-    Ok(repos
-        .get_task_run(&primary_id)?
-        .and_then(|run| run.terminal_tab_id))
+    Ok(repos.get_task_run(&primary_id)?)
+}
+
+/// The tab currently hosting the task's Main Run, if any — drives the Workbench tab indicator.
+pub fn primary_terminal_tab<R>(repos: &R, task_id: &TaskId) -> ApplicationResult<Option<String>>
+where
+    R: TaskStore + TaskRunStore,
+{
+    Ok(primary_run(repos, task_id)?.and_then(|run| run.terminal_tab_id))
+}
+
+/// The agent session recorded on the task's Main Run, whatever its status. Unlike the tab lookup
+/// this survives the run stopping and its tab closing, which is when the id is needed for a resume.
+pub fn primary_agent_session_id<R>(
+    repos: &R,
+    task_id: &TaskId,
+) -> ApplicationResult<Option<AgentSessionId>>
+where
+    R: TaskStore + TaskRunStore,
+{
+    Ok(primary_run(repos, task_id)?.and_then(|run| run.agent_session_id))
 }

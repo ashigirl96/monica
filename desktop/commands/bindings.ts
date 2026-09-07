@@ -91,6 +91,8 @@ export const commands = {
     typedError<boolean, ApiError>(__TAURI_INVOKE("make_main_task_run", { tabId })),
   primaryTabId: (taskId: string) =>
     typedError<string | null, ApiError>(__TAURI_INVOKE("primary_tab_id", { taskId })),
+  primaryAgentSessionId: (taskId: string) =>
+    typedError<string | null, ApiError>(__TAURI_INVOKE("primary_agent_session_id", { taskId })),
   /**
    *  Bind the Claude session in a Workbench tab to a task as its Main Run (`monica task attach`
    *  from the GUI). `cwd` is the tab's current directory, which seeds the bench when the task has

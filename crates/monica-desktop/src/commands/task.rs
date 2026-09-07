@@ -238,6 +238,21 @@ pub async fn primary_tab_id(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn primary_agent_session_id(
+    app: AppHandle,
+    task_id: String,
+) -> Result<Option<String>, ApiError> {
+    event_sink::off_main(move || {
+        let mut monica = event_sink::open(&app)?;
+        Ok(monica
+            .tasks()
+            .primary_agent_session_id(&TaskId::from_store(task_id))?)
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn close_task(app: AppHandle, task_id: String) -> Result<(), ApiError> {
     event_sink::off_main(move || {
         let mut monica = event_sink::open(&app)?;
