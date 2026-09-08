@@ -7,10 +7,11 @@
 //!
 //! A worktree root is only ever the *parent* of a recorded path, so it can be a directory Monica
 //! does not own — a legacy run stamped with the main checkout puts the repo's parent in that set.
-//! A reaper therefore removes nothing until it finds [`OWNER_MARKER`], which only [`bury`] writes:
-//! ownership is proven, never inferred from a name. Inside a directory Monica created, everything
-//! is Monica's, and the only writer is [`bury`], which callers reach after the live-worktree
-//! guards. That keeps "delete a live worktree" unreachable from this module.
+//! A reaper therefore removes nothing until it finds [`OWNER_MARKER`], which [`bury`] writes only
+//! into a trash directory it created itself: ownership is proven, never inferred from a name and
+//! never claimed after the fact. Inside a directory Monica created, everything is Monica's, and the
+//! only writer is [`bury`], which callers reach after the live-worktree guards. That keeps "delete
+//! a live worktree" unreachable from this module.
 
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
@@ -82,15 +83,29 @@ fn bury_as(worktree: &Path, stamp: &str) -> Result<()> {
     }
 }
 
-/// The root's trash directory, created and stamped as Monica's if it does not exist yet.
+/// The root's trash directory. Only a directory this call creates is stamped as Monica's: adopting
+/// one that was already there would hand its unrelated contents to the next reap.
 fn ensure_trash_dir(worktree_root: &Path) -> Result<PathBuf> {
     let trash = trash_dir(worktree_root);
-    fs::create_dir_all(&trash).with_context(|| format!("failed to create {}", trash.display()))?;
     let marker = trash.join(OWNER_MARKER);
-    if !marker.exists() {
-        // Without the marker nothing buried here is ever reclaimable, so a burial that cannot
-        // write it must fail rather than leak the tree it is about to move.
-        fs::write(&marker, b"").with_context(|| format!("failed to write {}", marker.display()))?;
+    match fs::create_dir(&trash) {
+        Ok(()) => {
+            // Without the marker nothing buried here is ever reclaimable, so a burial that cannot
+            // write it must fail rather than leak the tree it is about to move.
+            fs::write(&marker, b"")
+                .with_context(|| format!("failed to write {}", marker.display()))?;
+        }
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+            if !marker.is_file() {
+                return Err(anyhow!(
+                    "refusing to use {}: it already exists and was not created by Monica",
+                    trash.display()
+                ));
+            }
+        }
+        Err(e) => {
+            return Err(e).with_context(|| format!("failed to create {}", trash.display()));
+        }
     }
     Ok(trash)
 }
@@ -203,6 +218,7 @@ fn spawn_detached_rm(paths: Vec<PathBuf>) -> Result<usize> {
 /// entries already waiting in one.
 #[cfg(test)]
 pub(crate) fn seed_trash_dir(worktree_root: &Path) -> PathBuf {
+    fs::create_dir_all(worktree_root).unwrap();
     ensure_trash_dir(worktree_root).unwrap()
 }
 
@@ -294,6 +310,22 @@ mod tests {
         fs::create_dir_all(trash.join("notes")).unwrap();
         fs::create_dir_all(trash.join("project.backup.2024.01")).unwrap();
 
+        assert!(pending(root.path()).is_empty());
+    }
+
+    #[test]
+    fn bury_refuses_to_adopt_a_trash_dir_monica_did_not_create() {
+        let root = Tmp::new("trash-adopt");
+        let trash = trash_dir(root.path());
+        fs::create_dir_all(trash.join("someone-elses-data")).unwrap();
+        let worktree = root.path().join("issue-1");
+        fs::create_dir_all(&worktree).unwrap();
+
+        let err = bury_as(&worktree, "monica.issue-1.7.42").unwrap_err();
+
+        assert!(format!("{err:#}").contains("was not created by Monica"));
+        assert!(worktree.exists());
+        assert!(!trash.join(OWNER_MARKER).exists());
         assert!(pending(root.path()).is_empty());
     }
 
