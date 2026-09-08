@@ -9,16 +9,15 @@
 //! yardstick: restoring a mode xterm ignores, or restoring two modes that xterm treats as one
 //! slot, would leave the daemon's idea of the session out of step with what the user sees.
 
-/// Independent flags, in the order they are restored. `1049` leads so the buffer switch happens
-/// before the replay body lands in it.
-const TRACKED_FLAGS: [u16; 4] = [1049, 2004, 1004, 25];
+/// Independent flags, in the order they are restored. These are also exactly what xterm's
+/// DECSTR returns to its defaults -- the mouse protocol and encoding live in a service
+/// `softReset` never touches, and neither does the alt buffer, so those stay put.
+const TRACKED_FLAGS: [u16; 3] = [2004, 1004, 25];
 
-/// The one tracked mode that decides *where* output lands rather than just how it is reported.
+/// Handled apart from the flags because it decides *where* output lands rather than just how it
+/// is reported, which means `restore_prefix` needs its value at the replay boundary, not its
+/// latest value.
 const ALT_SCREEN: u16 = 1049;
-
-/// What xterm's DECSTR returns to its defaults among the modes tracked here. The mouse protocol
-/// and encoding live in a service `softReset` never touches, so they deliberately stay put.
-const SOFT_RESET_FLAGS: [u16; 3] = [2004, 1004, 25];
 
 /// xterm keeps a single active mouse protocol, so these override each other and resetting any
 /// one of them disables reporting outright.
@@ -33,6 +32,14 @@ const MOUSE_ENCODINGS: [u16; 2] = [1006, 1016];
 const MAX_CSI_PARAMS: usize = 64;
 
 const MAX_KITTY_STACK: usize = 32;
+
+/// Alt-screen switches are the only history `restore_prefix` needs, and only to answer which
+/// buffer the app was in when the tail began. `?1049h` is an assignment rather than a toggle,
+/// so that answer cannot be recovered by rewinding the tail -- an app re-asserting a mode it
+/// already holds is indistinguishable from one changing it. Bounded: the oldest entry folds
+/// into `alt_at_history_start` when the log fills, so a boundary older than the log still
+/// resolves, just at the precision of the log's start.
+const MAX_ALT_HISTORY: usize = 256;
 
 /// Mirrors the subset of xterm's VT500 transition table that CSI dispatch depends on. Notably
 /// `ESC` aborts whatever is in flight from any state, which is why OSC/DCS payloads need no
@@ -62,9 +69,11 @@ pub struct TerminalModes {
     csi: Vec<u8>,
     /// Parallel to `TRACKED_FLAGS`; `None` means never observed, so the peer's default holds.
     flags: [Option<bool>; TRACKED_FLAGS.len()],
-    /// Direction of the *first* alt-screen switch seen. Only meaningful on a tracker fed a
-    /// replay tail, where it reveals which buffer the app was in when the tail began.
-    first_alt_screen: Option<bool>,
+    /// Bytes fed so far, so alt-screen switches can be placed against a replay boundary.
+    stream_len: u64,
+    /// `(bytes consumed through the switch, entered alt)`, oldest first.
+    alt_history: std::collections::VecDeque<(u64, bool)>,
+    alt_at_history_start: Option<bool>,
     mouse_protocol: Exclusive,
     mouse_encoding: Exclusive,
     kitty_stack: Vec<u32>,
@@ -77,8 +86,30 @@ impl TerminalModes {
     /// Feed a chunk of PTY output. Sequences split across chunks resume from the kept state.
     pub fn feed(&mut self, bytes: &[u8]) {
         for &b in bytes {
+            self.stream_len += 1;
             self.step(b);
         }
+    }
+
+    fn record_alt_switch(&mut self, entered: bool) {
+        if self.alt_history.len() == MAX_ALT_HISTORY {
+            if let Some((_, dropped)) = self.alt_history.pop_front() {
+                self.alt_at_history_start = Some(dropped);
+            }
+        }
+        self.alt_history.push_back((self.stream_len, entered));
+    }
+
+    /// Which buffer the app was in once `boundary` bytes had been consumed.
+    fn alt_screen_at(&self, boundary: u64) -> Option<bool> {
+        let mut state = self.alt_at_history_start;
+        for &(offset, entered) in &self.alt_history {
+            if offset > boundary {
+                break;
+            }
+            state = Some(entered);
+        }
+        state
     }
 
     fn step(&mut self, b: u8) {
@@ -99,7 +130,14 @@ impl TerminalModes {
                 }
                 // RIS returns the terminal to power-on defaults, so nothing observed before it
                 // still holds -- keeping it would re-enter the alt screen on a later attach.
-                b'c' => *self = Self::default(),
+                // The stream offset is not terminal state and must survive, or every later
+                // boundary would be measured against the wrong origin.
+                b'c' => {
+                    let stream_len = self.stream_len;
+                    *self = Self::default();
+                    self.stream_len = stream_len;
+                    self.record_alt_switch(false);
+                }
                 _ => self.scan = Scan::Ground,
             },
             Scan::Csi | Scan::CsiIgnore => match b {
@@ -136,33 +174,31 @@ impl TerminalModes {
         match (prefix, final_byte) {
             (b'?', b'h' | b'l') => {
                 let on = final_byte == b'h';
+                // Deferred: recording needs `&mut self` while `params` still borrows `self.csi`.
+                let mut alt_switch = None;
                 for param in params.split(|&b| b == b';') {
                     let Some(mode) = parse_u16(param) else {
                         continue;
                     };
+                    if mode == ALT_SCREEN {
+                        alt_switch = Some(on);
+                        continue;
+                    }
                     let slot = if on { Exclusive::On(mode) } else { Exclusive::Off };
                     match classify(mode) {
-                        Some(Slot::Flag(index)) => {
-                            self.flags[index] = Some(on);
-                            if mode == ALT_SCREEN && self.first_alt_screen.is_none() {
-                                self.first_alt_screen = Some(on);
-                            }
-                        }
+                        Some(Slot::Flag(index)) => self.flags[index] = Some(on),
                         Some(Slot::MouseProtocol) => self.mouse_protocol = slot,
                         Some(Slot::MouseEncoding) => self.mouse_encoding = slot,
                         None => {}
                     }
                 }
+                if let Some(entered) = alt_switch {
+                    self.record_alt_switch(entered);
+                }
             }
             // DECSTR. Clearing to `None` rather than to a literal default keeps the defaults in
             // one place: a mode nobody asserted is a mode the fresh client already agrees on.
-            (b'!', b'p') => {
-                for mode in SOFT_RESET_FLAGS {
-                    if let Some(Slot::Flag(index)) = classify(mode) {
-                        self.flags[index] = None;
-                    }
-                }
-            }
+            (b'!', b'p') => self.flags = [None; TRACKED_FLAGS.len()],
             (b'>', b'u') => {
                 self.kitty_touched = true;
                 if self.kitty_stack.len() < MAX_KITTY_STACK {
@@ -193,24 +229,26 @@ impl TerminalModes {
     /// not touch, applying this prefix then the tail lands on the tracked state -- the tail
     /// cannot hold a later transition than the tracker saw.
     ///
-    /// The alt screen is the exception, because it decides *where* the tail's output lands. The
-    /// client has to begin the tail in the buffer the app was in at that moment, which is the
-    /// inverse of the tail's first switch: prepending nothing would paint a departing TUI's
-    /// final frame into the shell's scrollback, and prepending the current state would drop the
-    /// tail's leading normal-buffer history into the alt buffer.
+    /// The alt screen is the exception, because it decides *where* the tail's output lands: the
+    /// client has to begin the tail in the buffer the app was in at that point, taken from the
+    /// recorded history. Prepending nothing would paint a departing TUI's final frame into the
+    /// shell's scrollback, and prepending the current state would drop the tail's leading
+    /// normal-buffer history into the alt buffer.
+    ///
+    /// `tail` must be a suffix of what has been fed, which is what `attach` hands over.
     pub fn restore_prefix(&self, tail: &[u8]) -> Vec<u8> {
         let mut in_tail = Self::default();
         in_tail.feed(tail);
+        let boundary = self.stream_len.saturating_sub(tail.len() as u64);
 
         let mut out = Vec::new();
+        // The buffer switch leads so the replay body lands in the right buffer. Only the alt
+        // case needs saying: a fresh client is on the normal buffer already.
+        if self.alt_screen_at(boundary) == Some(true) {
+            push_mode(&mut out, ALT_SCREEN, true);
+        }
         for (index, mode) in TRACKED_FLAGS.iter().enumerate() {
-            let restored = if *mode == ALT_SCREEN {
-                in_tail.first_alt_screen.map_or(self.flags[index], |first| Some(!first))
-            } else if in_tail.flags[index].is_some() {
-                None
-            } else {
-                self.flags[index]
-            };
+            let restored = if in_tail.flags[index].is_some() { None } else { self.flags[index] };
             if let Some(on) = restored {
                 push_mode(&mut out, *mode, on);
             }
@@ -276,7 +314,10 @@ mod tests {
 
     /// Restores against a tail that says nothing, isolating what the tracker itself holds.
     fn restore(chunks: &[&[u8]]) -> Vec<u8> {
-        tracker(chunks).restore_prefix(b"no sequences here")
+        const QUIET_TAIL: &[u8] = b"no sequences here";
+        let mut modes = tracker(chunks);
+        modes.feed(QUIET_TAIL);
+        modes.restore_prefix(QUIET_TAIL)
     }
 
     fn tracker(chunks: &[&[u8]]) -> TerminalModes {
@@ -285,6 +326,14 @@ mod tests {
             modes.feed(chunk);
         }
         modes
+    }
+
+    /// `restore_prefix` is contracted on `tail` being a suffix of the stream, so tests state the
+    /// stream as "what scrolled out of the window" plus "what stayed in it".
+    fn restore_with_tail(before: &[u8], tail: &[u8]) -> Vec<u8> {
+        let mut modes = tracker(&[before]);
+        modes.feed(tail);
+        modes.restore_prefix(tail)
     }
 
     /// Claude Code's real startup handshake, transcribed from a production transcript. The
@@ -305,11 +354,25 @@ mod tests {
     /// startup need carrying.
     #[test]
     fn only_modes_an_app_never_repeats_survive_into_the_prefix() {
-        let modes = tracker(&[b"\x1b[?1049h\x1b[?2004h\x1b[?1004h\x1b[>1u\
-\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?25l"]);
+        let startup = b"\x1b[?1049h\x1b[?2004h\x1b[?1004h\x1b[>1u\
+\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?25l";
         // What a resize puts back into the tail, and nothing else.
         let tail = b"\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?25l\x1b[>1u";
-        assert_eq!(modes.restore_prefix(tail), b"\x1b[?1049h\x1b[?2004h\x1b[?1004h");
+        assert_eq!(restore_with_tail(startup, tail), b"\x1b[?1049h\x1b[?2004h\x1b[?1004h");
+    }
+
+    /// A boundary older than the retained history still resolves, at the precision of the
+    /// history's start rather than degrading to "unknown".
+    #[test]
+    fn a_boundary_older_than_the_history_falls_back_to_its_start() {
+        let mut modes = TerminalModes::default();
+        modes.feed(b"\x1b[?1049h");
+        let early_boundary = modes.stream_len;
+        for _ in 0..MAX_ALT_HISTORY {
+            modes.feed(b"\x1b[?1049l\x1b[?1049h");
+        }
+        assert_eq!(modes.alt_history.len(), MAX_ALT_HISTORY);
+        assert_eq!(modes.alt_screen_at(early_boundary), Some(true));
     }
 
     #[test]
@@ -354,9 +417,8 @@ mod tests {
     /// by normal-buffer history that must stay in the normal buffer.
     #[test]
     fn a_tail_that_enters_the_alt_screen_starts_in_the_normal_buffer() {
-        let modes = tracker(&[b"$ prompt\r\n\x1b[?1049h\x1b[?1006halt content"]);
         let tail = b"$ prompt\r\n\x1b[?1049h\x1b[?1006halt content";
-        assert_eq!(modes.restore_prefix(tail), b"\x1b[?1049l");
+        assert_eq!(restore_with_tail(b"earlier shell output\r\n", tail), b"");
     }
 
     /// The mirror image, and the one skipping the mode outright got wrong: a TUI that exited
@@ -364,33 +426,45 @@ mod tests {
     /// in the normal buffer and that frame lands in the shell's scrollback for good.
     #[test]
     fn a_tail_that_leaves_the_alt_screen_starts_in_the_alt_buffer() {
-        let modes = tracker(&[b"\x1b[?1049hframe\x1b[?1049l$ prompt"]);
         let tail = b"frame\x1b[?1049l$ prompt";
-        assert_eq!(modes.restore_prefix(tail), b"\x1b[?1049h");
+        assert_eq!(restore_with_tail(b"\x1b[?1049h", tail), b"\x1b[?1049h");
     }
 
-    /// Only the *first* switch says where the tail began; later ones are the tail's own story.
+    /// The case direction alone cannot answer: the app re-asserts `?1049h` while already in the
+    /// alt buffer, so the tail's first switch looks like an entry even though everything before
+    /// it belongs in the alt buffer too.
     #[test]
-    fn the_first_alt_screen_switch_in_the_tail_decides_the_starting_buffer() {
-        let modes = tracker(&[b"\x1b[?1049hone\x1b[?1049ltwo\x1b[?1049hthree"]);
-        assert_eq!(modes.restore_prefix(b"one\x1b[?1049ltwo\x1b[?1049hthree"), b"\x1b[?1049h");
+    fn a_redundant_alt_screen_set_inside_the_tail_does_not_move_the_boundary() {
+        let tail = b"more frames\x1b[?1049hredrawn";
+        assert_eq!(restore_with_tail(b"\x1b[?1049hframe", tail), b"\x1b[?1049h");
+    }
+
+    /// Switches after the boundary are the tail's own story and must not shift the answer.
+    #[test]
+    fn later_switches_in_the_tail_do_not_change_the_starting_buffer() {
+        let tail = b"one\x1b[?1049ltwo\x1b[?1049hthree";
+        assert_eq!(restore_with_tail(b"\x1b[?1049h", tail), b"\x1b[?1049h");
+    }
+
+    #[test]
+    fn a_boundary_before_any_switch_leaves_the_buffer_at_its_default() {
+        let tail = b"shell output only";
+        assert_eq!(restore_with_tail(b"more shell output", tail), b"");
     }
 
     #[test]
     fn only_modes_missing_from_the_tail_are_prepended() {
-        let modes = tracker(&[b"\x1b[?1049h\x1b[?1003h\x1b[?1006h\x1b[?2004hlater\x1b[?25l"]);
         // The tail begins after the startup handshake and carries only the cursor change.
         assert_eq!(
-            modes.restore_prefix(b"later\x1b[?25l"),
+            restore_with_tail(b"\x1b[?1049h\x1b[?1003h\x1b[?1006h\x1b[?2004h", b"later\x1b[?25l"),
             b"\x1b[?1049h\x1b[?2004h\x1b[?1003h\x1b[?1006h"
         );
     }
 
     #[test]
     fn a_kitty_stack_the_tail_touches_is_left_alone() {
-        let modes = tracker(&[b"\x1b[>1u\x1b[>5u"]);
-        assert_eq!(modes.restore_prefix(b"\x1b[>5u"), b"");
-        assert_eq!(modes.restore_prefix(b"nothing"), b"\x1b[>1u\x1b[>5u");
+        assert_eq!(restore_with_tail(b"\x1b[>1u", b"\x1b[>5u"), b"");
+        assert_eq!(restore_with_tail(b"\x1b[>1u\x1b[>5u", b"nothing"), b"\x1b[>1u\x1b[>5u");
     }
 
     // --- mutually exclusive groups ---
