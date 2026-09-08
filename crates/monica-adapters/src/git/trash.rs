@@ -8,10 +8,11 @@
 //! A worktree root is only ever the *parent* of a recorded path, so it can be a directory Monica
 //! does not own — a legacy run stamped with the main checkout puts the repo's parent in that set.
 //! A reaper therefore removes nothing until it finds [`OWNER_MARKER`], which [`bury`] writes only
-//! into a trash directory it created itself: ownership is proven, never inferred from a name and
-//! never claimed after the fact. Inside a directory Monica created, everything is Monica's, and the
-//! only writer is [`bury`], which callers reach after the live-worktree guards. That keeps "delete
-//! a live worktree" unreachable from this module.
+//! into a trash directory that was empty when it claimed it: ownership is proven rather than
+//! inferred from a name, and no directory holding someone else's data is ever adopted. Inside a
+//! directory Monica claimed, everything is Monica's, and the only writer is [`bury`], which callers
+//! reach after the live-worktree guards. That keeps "delete a live worktree" unreachable from this
+//! module.
 
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
@@ -83,24 +84,24 @@ fn bury_as(worktree: &Path, stamp: &str) -> Result<()> {
     }
 }
 
-/// The root's trash directory. Only a directory this call creates is stamped as Monica's: adopting
-/// one that was already there would hand its unrelated contents to the next reap.
+/// The root's trash directory, stamped as Monica's. An unmarked directory that already holds
+/// something is refused rather than adopted — its contents are not Monica's to hand to a reaper.
+/// An *empty* one holds nothing to lose, so it is adopted: that is also how a burial recovers from
+/// a crash between the two steps of a previous claim.
 fn ensure_trash_dir(worktree_root: &Path) -> Result<PathBuf> {
     let trash = trash_dir(worktree_root);
     let marker = trash.join(OWNER_MARKER);
     match fs::create_dir(&trash) {
-        Ok(()) => {
-            // Without the marker nothing buried here is ever reclaimable, so a burial that cannot
-            // write it must fail rather than leak the tree it is about to move.
-            fs::write(&marker, b"")
-                .with_context(|| format!("failed to write {}", marker.display()))?;
-        }
+        Ok(()) => claim(&trash, &marker, Rollback::RemoveDir)?,
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
             if !marker.is_file() {
-                return Err(anyhow!(
-                    "refusing to use {}: it already exists and was not created by Monica",
-                    trash.display()
-                ));
+                if !is_empty_dir(&trash) {
+                    return Err(anyhow!(
+                        "refusing to use {}: it already exists and was not created by Monica",
+                        trash.display()
+                    ));
+                }
+                claim(&trash, &marker, Rollback::Keep)?;
             }
         }
         Err(e) => {
@@ -108,6 +109,27 @@ fn ensure_trash_dir(worktree_root: &Path) -> Result<PathBuf> {
         }
     }
     Ok(trash)
+}
+
+enum Rollback {
+    RemoveDir,
+    Keep,
+}
+
+/// Stamp a trash directory as Monica's. Without the marker nothing buried there is ever
+/// reclaimable *and* every later burial refuses the root, so a failed stamp must not leave a
+/// directory this call brought into existence.
+fn claim(trash: &Path, marker: &Path, rollback: Rollback) -> Result<()> {
+    fs::write(marker, b"").map_err(|e| {
+        if matches!(rollback, Rollback::RemoveDir) {
+            let _ = fs::remove_dir(trash);
+        }
+        anyhow!(e).context(format!("failed to write {}", marker.display()))
+    })
+}
+
+fn is_empty_dir(path: &Path) -> bool {
+    fs::read_dir(path).is_ok_and(|mut entries| entries.next().is_none())
 }
 
 /// Everything waiting in a root's `.monica-trash/`, in no particular order — nothing at all unless
@@ -127,9 +149,10 @@ pub(crate) fn pending(worktree_root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Everything waiting in the `.monica-trash/` beside any of `worktrees`, each root visited once. A
-/// relative recorded path would resolve its trash directory against whatever cwd the CLI happens to
-/// run in, so only absolute roots are visited.
+/// Everything waiting in the `.monica-trash/` beside any of `worktrees`, each root visited once.
+/// `worktree_path_for` rejects a relative root, but a row predating that check could still hold
+/// one, and it would resolve against whatever cwd this process happens to have — so only absolute
+/// roots are visited.
 fn pending_beside(worktrees: &[PathBuf]) -> Vec<PathBuf> {
     worktrees
         .iter()
@@ -327,6 +350,20 @@ mod tests {
         assert!(worktree.exists());
         assert!(!trash.join(OWNER_MARKER).exists());
         assert!(pending(root.path()).is_empty());
+    }
+
+    #[test]
+    fn bury_adopts_an_empty_trash_dir_left_by_an_interrupted_claim() {
+        let root = Tmp::new("trash-resume-claim");
+        let trash = trash_dir(root.path());
+        fs::create_dir_all(&trash).unwrap();
+        let worktree = root.path().join("issue-1");
+        fs::create_dir_all(&worktree).unwrap();
+
+        bury_as(&worktree, "monica.issue-1.7.42").unwrap();
+
+        assert!(trash.join(OWNER_MARKER).is_file());
+        assert_eq!(pending(root.path()), vec![trash.join("monica.issue-1.7.42")]);
     }
 
     #[test]

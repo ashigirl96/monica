@@ -25,6 +25,10 @@ pub fn branch_name(github_issue_number: Option<i64>, monica_number: i64) -> Stri
 /// non-`[A-Za-z0-9._-]` char replaced by `-`, so distinct branches never collapse to the same path.
 /// Resolution order is: explicit `worktree_root`, otherwise `<project.path>/.worktrees`.
 /// A project with neither cannot run until one of those is configured.
+///
+/// The root must be absolute. A relative one names a different directory in the desktop app, in a
+/// CLI invocation, and in a hook, so a worktree buried under it by one process is invisible to the
+/// next — and would be left on disk forever.
 pub fn worktree_path_for(
     project: &Project,
     worktree_root: Option<&str>,
@@ -41,6 +45,12 @@ pub fn worktree_path_for(
             PathBuf::from(path).join(".worktrees")
         }
     };
+    if !root.is_absolute() {
+        return Err(DomainError::RelativeWorktreeLocation {
+            project_id: project.id.clone(),
+            root: root.display().to_string(),
+        });
+    }
     Ok(root.join(sanitize_path_component(branch)))
 }
 
@@ -93,6 +103,20 @@ mod tests {
 
         project.path = None;
         assert!(worktree_path_for(&project, None, "mon-1").is_err());
+    }
+
+    #[test]
+    fn worktree_root_must_be_absolute() {
+        let mut project = Project::from_repo("owner/repo");
+        project.path = Some("relative/repo".to_string());
+        assert!(matches!(
+            worktree_path_for(&project, None, "mon-1"),
+            Err(DomainError::RelativeWorktreeLocation { .. })
+        ));
+        assert!(matches!(
+            worktree_path_for(&project, Some("worktrees"), "mon-1"),
+            Err(DomainError::RelativeWorktreeLocation { .. })
+        ));
     }
 
     #[test]
