@@ -3,20 +3,30 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { useBoardNavigation } from "@/features/work-board/use-board-navigation";
 import { boardViewAtom, columnTasksAtom, loadBoardAtom } from "@/stores/workboard";
 import { applyRestoredWorkboardAtom, focusedTaskIdAtom } from "@/features/work-board/nav";
+import { pinnedTaskIdsAtom } from "@/features/work-bench/store";
+import { loadTerminalStateAtom } from "@/features/work-bench/persistence";
 import { BoardContextMenu } from "./board-context-menu";
 import { TaskCard } from "./task-card";
 
 function TasksView() {
   const columns = useAtomValue(columnTasksAtom);
   const focusedTaskId = useAtomValue(focusedTaskIdAtom);
+  const pinnedTaskIds = useAtomValue(pinnedTaskIdsAtom);
   const loadBoard = useSetAtom(loadBoardAtom);
   const applyRestored = useSetAtom(applyRestoredWorkboardAtom);
+  const loadTerminalState = useSetAtom(loadTerminalStateAtom);
 
   useBoardNavigation();
 
   useEffect(() => {
     loadBoard().then(() => applyRestored());
   }, [loadBoard, applyRestored]);
+
+  // Pins live in the terminal state, which is otherwise only loaded when the bench is
+  // first shown; load it here too so a persisted pin is visible straight from the board.
+  useEffect(() => {
+    void loadTerminalState();
+  }, [loadTerminalState]);
 
   return (
     <div className="flex h-full flex-col">
@@ -39,7 +49,12 @@ function TasksView() {
             <div className="flex flex-1 flex-col gap-1.5 overflow-y-auto px-1.5 pb-3 scrollbar-hide">
               {col.tasks.length > 0 ? (
                 col.tasks.map((task) => (
-                  <TaskCard key={task.id} task={task} focused={task.id === focusedTaskId} />
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    focused={task.id === focusedTaskId}
+                    pinned={pinnedTaskIds.has(task.id)}
+                  />
                 ))
               ) : (
                 <div className="flex flex-1 items-start justify-center pt-12">

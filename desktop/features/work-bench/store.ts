@@ -543,6 +543,17 @@ export const pinnedTabIdsAtom = atom((get) => {
   );
 });
 
+// Tasks whose bench runspace holds a pin, so the board can mark them without knowing
+// which tab carries the pin.
+export const pinnedTaskIdsAtom = atom((get) => {
+  const state = get(resolvedStateAtom);
+  return new Set(
+    state.runspaces.flatMap((rs) =>
+      rs.pinnedTabId !== undefined && rs.taskId !== undefined ? [rs.taskId] : [],
+    ),
+  );
+});
+
 export const toggleTabPinAtom = atom(null, (get, set, tabId?: string) => {
   // Main window only: a secondary window terminates every session and saves an empty
   // snapshot on close (main.tsx), which would kill a pinned tab without passing any guard.
