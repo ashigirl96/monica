@@ -9,6 +9,7 @@ monica-application = { path = "../monica-application" }
 monica-domain = { path = "../monica-domain" }
 monica-paths = { path = "../monica-paths" }
 anyhow = "1.0.102"
+log = "0.4"
 octocrab = { version = "0.54.0", default-features = false, features = [
   "default-client",
   "jwt-rust-crypto",

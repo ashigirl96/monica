@@ -50,6 +50,13 @@ impl<B: Backend> ExecutionService<'_, B> {
         result
     }
 
+    /// Resume any worktree deletion that a reaper left unfinished, beside every worktree the store
+    /// has recorded. Drivers call this once at startup.
+    pub fn reap_worktree_trash(&mut self) {
+        let Monica { repos, git, .. } = &mut *self.m;
+        crate::usecases::runs::reap_worktree_trash(repos, git);
+    }
+
     /// Launch (or reopen) the task's Main Run. `mode` only decides how a *fresh* run is created —
     /// an already-prepared or resumable primary is used as it stands.
     pub fn run_task(

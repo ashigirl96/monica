@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::prelude::{branch_name, monica_number, worktree_path_for};
@@ -13,6 +13,26 @@ use crate::prelude::{
     TaskRunStatus, TaskStatus,
 };
 use crate::{ApplicationError, ApplicationResult, ExecutionProfile, PrepareTaskResult};
+
+/// Retry every deferred worktree deletion still waiting beside any recorded worktree. Called after
+/// each cleanup and each new worktree, and at startup, so a deletion a reaper never finished is
+/// picked up by the next of these. Best-effort: failures are logged, never returned.
+pub fn reap_worktree_trash<R, G>(repos: &R, git: &G)
+where
+    R: TaskRunStore,
+    G: GitGateway,
+{
+    match repos.list_worktree_paths() {
+        Ok(paths) => {
+            let worktrees: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+            git.reap_worktree_trash(&worktrees);
+        }
+        Err(e) => log::warn!(
+            target: "monica_application::worktree_trash",
+            "skipping worktree trash reap; could not list worktree paths: {e:#}"
+        ),
+    }
+}
 
 fn is_active_run_status(status: TaskRunStatus) -> bool {
     matches!(
@@ -245,6 +265,7 @@ where
     }
 
     repos.set_task_run_worktree_path(task_run_id, &worktree_str)?;
+    reap_worktree_trash(repos, git);
 
     let setup = setup_phase(
         setup_runner,

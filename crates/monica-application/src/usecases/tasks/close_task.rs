@@ -21,6 +21,7 @@ where
         .ok_or_else(|| ApplicationError::not_found(format!("task not found: {id}")))?;
     let runs = repos.list_task_runs_for_task(id)?;
     let removed_branches = cleanup_runs(repos, git, &task, &runs)?;
+    crate::usecases::runs::reap_worktree_trash(repos, git);
     let task = repos.mark_task_closed(id)?;
     Ok(CloseTaskReport {
         task,

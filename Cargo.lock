@@ -2970,6 +2970,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ctor 1.0.13",
+ "log",
  "monica-application",
  "monica-domain",
  "monica-paths",

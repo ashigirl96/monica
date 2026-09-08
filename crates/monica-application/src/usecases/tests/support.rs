@@ -839,6 +839,16 @@ impl TaskRunStore for FakeRepos {
             .collect())
     }
 
+    fn list_worktree_paths(&self) -> Result<Vec<String>> {
+        Ok(self
+            .state
+            .borrow()
+            .runs
+            .values()
+            .filter_map(|run| run.worktree_path.clone())
+            .collect())
+    }
+
     fn list_driven_task_runs_with_tab(&self) -> Result<Vec<TaskRun>> {
         Ok(self
             .state
@@ -1142,6 +1152,10 @@ impl TaskRunStore for FakeUow<'_> {
 
     fn list_task_runs_for_task(&self, task_id: &TaskId) -> Result<Vec<TaskRun>> {
         self.inner.list_task_runs_for_task(task_id)
+    }
+
+    fn list_worktree_paths(&self) -> Result<Vec<String>> {
+        self.inner.list_worktree_paths()
     }
 
     fn list_driven_task_runs_with_tab(&self) -> Result<Vec<TaskRun>> {
@@ -1525,6 +1539,7 @@ impl GithubGateway for RepoIssueGithub {
 pub(crate) struct FakeGit {
     cleaned: RefCell<bool>,
     create_worktree_error: RefCell<Option<String>>,
+    reaped_worktrees: RefCell<Vec<PathBuf>>,
 }
 
 impl FakeGit {
@@ -1537,6 +1552,10 @@ impl FakeGit {
 
     pub(crate) fn cleaned(&self) -> bool {
         *self.cleaned.borrow()
+    }
+
+    pub(crate) fn reaped_worktrees(&self) -> Vec<PathBuf> {
+        self.reaped_worktrees.borrow().clone()
     }
 }
 
@@ -1557,6 +1576,10 @@ impl GitGateway for FakeGit {
     fn cleanup_task_runs(&self, _repo: &Path, runs: &[TaskRun]) -> Result<Vec<String>> {
         *self.cleaned.borrow_mut() = true;
         Ok(runs.iter().filter_map(|run| run.branch.clone()).collect())
+    }
+
+    fn reap_worktree_trash(&self, worktrees: &[PathBuf]) {
+        self.reaped_worktrees.borrow_mut().extend_from_slice(worktrees);
     }
 
     fn detect_repo(&self) -> Result<String> {

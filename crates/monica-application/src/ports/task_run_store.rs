@@ -37,6 +37,10 @@ pub trait TaskRunStore {
     ) -> Result<Option<TaskRun>>;
     fn find_task_run_by_terminal_tab(&self, terminal_tab_id: &str) -> Result<Option<TaskRun>>;
     fn list_task_runs_for_task(&self, task_id: &TaskId) -> Result<Vec<TaskRun>>;
+    /// Every distinct `worktree_path` ever recorded, including runs of already-closed tasks. Their
+    /// parent directories are the worktree roots a trash reap must revisit, so a deletion left
+    /// behind under any of them is eventually retried.
+    fn list_worktree_paths(&self) -> Result<Vec<String>>;
     /// Runs still pinned to a terminal tab and not yet in a terminal state — the candidate set for
     /// the orphaned-run settlement sweep.
     fn list_driven_task_runs_with_tab(&self) -> Result<Vec<TaskRun>>;
