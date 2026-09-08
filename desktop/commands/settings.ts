@@ -2,14 +2,12 @@ import {
   commands,
   DEFAULT_TRANSLATE_PORT,
   events,
-  type TranslateEffort,
-  type TranslateModel,
   type TranslateSettings,
   type TranslateSettingsSnapshot,
 } from "./bindings";
 import { unwrap } from "./unwrap";
 
-export type { TranslateEffort, TranslateModel, TranslateSettings, TranslateSettingsSnapshot };
+export type { TranslateSettings, TranslateSettingsSnapshot };
 export { DEFAULT_TRANSLATE_PORT };
 
 export function translateSettingsGet() {
