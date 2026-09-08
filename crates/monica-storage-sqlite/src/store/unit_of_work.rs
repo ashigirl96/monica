@@ -124,6 +124,10 @@ impl TaskRunStore for SqliteUow<'_> {
         task_runs::list_task_runs_for_task(&self.tx, task_id)
     }
 
+    fn list_worktree_paths(&self) -> Result<Vec<String>> {
+        task_runs::list_worktree_paths(&self.tx)
+    }
+
     fn list_driven_task_runs_with_tab(&self) -> Result<Vec<TaskRun>> {
         task_runs::list_driven_task_runs_with_tab(&self.tx)
     }

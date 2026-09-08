@@ -433,6 +433,15 @@ pub(super) fn find_task_run_by_terminal_tab(
     find_latest_observed_task_run(conn, "terminal_tab_id = ?1", params![terminal_tab_id])
 }
 
+pub(super) fn list_worktree_paths(conn: &Connection) -> Result<Vec<String>> {
+    let mut stmt =
+        conn.prepare("SELECT DISTINCT worktree_path FROM task_runs WHERE worktree_path IS NOT NULL")?;
+    let paths = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(paths)
+}
+
 pub(super) fn list_task_runs_for_task(conn: &Connection, task_id: &TaskId) -> Result<Vec<TaskRun>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {TASK_RUN_COLUMNS} FROM task_runs
@@ -515,6 +524,10 @@ impl TaskRunStore for SqliteStore {
 
     fn list_task_runs_for_task(&self, task_id: &TaskId) -> Result<Vec<TaskRun>> {
         list_task_runs_for_task(self.conn(), task_id)
+    }
+
+    fn list_worktree_paths(&self) -> Result<Vec<String>> {
+        list_worktree_paths(self.conn())
     }
 
     fn list_driven_task_runs_with_tab(&self) -> Result<Vec<TaskRun>> {

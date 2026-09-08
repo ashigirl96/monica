@@ -39,6 +39,15 @@ impl Drop for Tmp {
     }
 }
 
+/// Block until a detached deleter has removed `path`, failing after 10 s.
+pub fn wait_for_removal(path: &Path) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while path.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(!path.exists(), "detached rm left {}", path.display());
+}
+
 pub fn init_repo(dir: &Path) {
     run_git(dir, &["init", "-b", "main"]);
     run_git(dir, &["config", "user.email", "monica@example.com"]);

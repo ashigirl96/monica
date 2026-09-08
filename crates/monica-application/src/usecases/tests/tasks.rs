@@ -66,6 +66,7 @@ fn close_task_delegates_run_cleanup_to_git_gateway() {
     let report = close_task(&mut repos, &git, &task_id).unwrap();
     assert_eq!(report.removed_branches, vec!["issue-42"]);
     assert!(git.cleaned());
+    assert_eq!(git.reaped_worktrees(), vec![std::path::PathBuf::from("/tmp/wt")]);
 }
 
 

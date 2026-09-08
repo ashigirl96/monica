@@ -8,6 +8,7 @@ pub enum DomainError {
     InvalidTaskId(String),
     InvalidTaskRunId(String),
     MissingWorktreeLocation { project_id: String },
+    RelativeWorktreeLocation { project_id: String, root: String },
     UnparseableRemote(String),
     InvalidIssueNumber(String),
     MissingIssueRef(String),
@@ -28,6 +29,13 @@ impl fmt::Display for DomainError {
                 f,
                 "project {project_id} has neither path nor worktree_root; run `monica project \
                  init` in the repo or set `monica project set {project_id} worktree_root <path>`"
+            ),
+            DomainError::RelativeWorktreeLocation { project_id, root } => write!(
+                f,
+                "project {project_id} resolves worktrees under the relative path {root:?}; a \
+                 relative root means a different directory depending on where Monica is started, \
+                 so set an absolute one with `monica project set {project_id} worktree_root \
+                 <absolute path>`"
             ),
             DomainError::UnparseableRemote(url) => {
                 write!(f, "could not parse owner/repo from git remote {url:?}")

@@ -6,7 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use monica_application::{GitGateway, WorktreeRef};
 use monica_domain::{parse_owner_repo, TaskRun};
 
-const RIP_COMMAND: &str = "/opt/homebrew/bin/rip";
+use super::trash::{bury, reap};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GitCliGateway;
@@ -24,6 +24,10 @@ impl GitGateway for GitCliGateway {
 
     fn cleanup_task_runs(&self, repo: &Path, runs: &[TaskRun]) -> Result<Vec<String>> {
         cleanup_task_runs(repo, runs)
+    }
+
+    fn reap_worktree_trash(&self, worktrees: &[PathBuf]) {
+        reap(worktrees);
     }
 
     fn detect_repo(&self) -> Result<String> {
@@ -114,17 +118,15 @@ fn create_worktree(repo: &Path, worktree: &Path, branch: &str, base: &str) -> Re
     Ok(())
 }
 
+/// Detach every run's worktree from git (into `.trash/`, not deleted yet) and delete its branch.
+/// Deleting the trashed trees is a separate step, [`GitGateway::reap_worktree_trash`], so a
+/// failure here leaves nothing worse than an entry the next reap picks up.
 fn cleanup_task_runs(repo: &Path, runs: &[TaskRun]) -> Result<Vec<String>> {
-    cleanup_task_runs_with_rip(repo, runs, Path::new(RIP_COMMAND))
-}
-
-fn cleanup_task_runs_with_rip(repo: &Path, runs: &[TaskRun], rip: &Path) -> Result<Vec<String>> {
     let mut removed_branches = Vec::new();
 
     for run in runs {
         if let Some(worktree_path) = run.worktree_path.as_deref() {
-            let worktree = Path::new(worktree_path);
-            cleanup_worktree(repo, run, worktree, rip)?;
+            cleanup_worktree(repo, run, Path::new(worktree_path))?;
         }
         if let Some(branch) = run.branch.as_deref() {
             if !removed_branches.iter().any(|b| b == branch) && branch_exists(repo, branch)? {
@@ -137,10 +139,10 @@ fn cleanup_task_runs_with_rip(repo: &Path, runs: &[TaskRun], rip: &Path) -> Resu
     Ok(removed_branches)
 }
 
-fn cleanup_worktree(repo: &Path, run: &TaskRun, worktree: &Path, rip: &Path) -> Result<()> {
+fn cleanup_worktree(repo: &Path, run: &TaskRun, worktree: &Path) -> Result<()> {
     // `git worktree list` includes the main working tree, so a run whose worktree_path points at
     // the checkout itself (e.g. legacy rows stamped from a session's cwd) would pass the
-    // registered check and get ripped; never touch it.
+    // registered check and get trashed; never touch it.
     if crate::fs_util::same_path(repo, worktree) {
         return Ok(());
     }
@@ -153,9 +155,9 @@ fn cleanup_worktree(repo: &Path, run: &TaskRun, worktree: &Path, rip: &Path) -> 
                 worktree.display()
             ));
         }
-        rip_worktree(rip, worktree).with_context(|| {
+        bury(repo, worktree).with_context(|| {
             format!(
-                "failed to rip worktree for {} at {}",
+                "failed to trash worktree for {} at {}",
                 run.id,
                 worktree.display()
             )
@@ -173,30 +175,6 @@ fn cleanup_worktree(repo: &Path, run: &TaskRun, worktree: &Path, rip: &Path) -> 
             )
         })?;
         ensure_worktree_unregistered(repo, run, worktree)?;
-    }
-    Ok(())
-}
-
-fn rip_worktree(rip: &Path, worktree: &Path) -> Result<()> {
-    if !rip.is_file() {
-        return Err(anyhow!(
-            "rip command is required to delete Monica worktrees; expected {}",
-            rip.display()
-        ));
-    }
-    let output = Command::new(rip).arg(worktree).output().with_context(|| {
-        format!(
-            "failed to run {}; install rip at {RIP_COMMAND}",
-            rip.display()
-        )
-    })?;
-    if !output.status.success() {
-        return Err(anyhow!(
-            "{} {} failed: {}",
-            rip.display(),
-            worktree.display(),
-            command_stderr(&output.stderr)
-        ));
     }
     Ok(())
 }
@@ -333,21 +311,16 @@ fn command_stderr(stderr: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-    use std::path::{Path, PathBuf};
-    use std::process::Command;
-
     use monica_application::{
         GitGateway, ProjectRepository, TaskRunStore, TaskStore,
     };
     use monica_domain::{
         NewTask, NewTaskRun, Project, TaskId, TaskKind, TaskRun, TaskRunId, TaskRunStatus, TaskStatus,
     };
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
 
     use monica_storage_sqlite::SqliteStore;
-    use crate::test_support::{init_repo, run_git, Tmp};
+    use crate::git::trash::{pending, seed_trash_dir};
+    use crate::test_support::{init_repo, run_git, wait_for_removal, Tmp};
 
     use super::*;
 
@@ -400,6 +373,19 @@ mod tests {
         assert_eq!(head_commit(&worktree), local);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn reap_worktree_trash_deletes_pending_entries_beside_the_given_worktrees() {
+        let root = Tmp::new("worktree-reap-gateway");
+        let worktrees = root.path().join("worktrees");
+        let leftover = seed_trash_dir(&worktrees).join("other.issue-1.7.42");
+        fs::create_dir_all(leftover.join("node_modules")).unwrap();
+
+        GitCliGateway.reap_worktree_trash(&[worktrees.join("issue-2")]);
+
+        wait_for_removal(&leftover);
+    }
+
     fn head_commit(repo: &Path) -> String {
         let output = Command::new("git")
             .arg("-C")
@@ -411,14 +397,13 @@ mod tests {
         String::from_utf8(output.stdout).unwrap().trim().to_string()
     }
 
-    #[cfg(unix)]
     #[test]
-    fn close_task_rips_dirty_worktree_prunes_metadata_and_keeps_run_record() {
-        let root = Tmp::new("rip-close");
+    fn close_task_trashes_dirty_worktree_prunes_metadata_and_keeps_run_record() {
+        let root = Tmp::new("trash-close");
         let repo = root.path().join("repo");
         fs::create_dir_all(&repo).unwrap();
         init_repo(&repo);
-        let worktree = root.path().join("worktree");
+        let worktree = root.path().join("worktrees").join("issue-42");
         add_worktree(&repo, &worktree, "issue-42");
         fs::write(worktree.join("dirty.txt"), "dirty\n").unwrap();
 
@@ -439,22 +424,47 @@ mod tests {
         })
         .unwrap();
 
-        let git = TestGit {
-            rip: write_fake_rip(root.path()),
-        };
         let runs = db.list_task_runs_for_task(&item.id).unwrap();
-        let removed = git.cleanup_task_runs(Path::new(&repo), &runs).unwrap();
+        let removed = cleanup_task_runs(Path::new(&repo), &runs).unwrap();
 
+        let worktrees_root = worktree.parent().unwrap();
         assert!(!worktree.exists());
         assert!(!worktree_registered(&repo, &worktree).unwrap());
         assert!(!branch_exists(&repo, "issue-42").unwrap());
         assert_eq!(db.list_task_runs_for_task(&item.id).unwrap().len(), 1);
         assert_eq!(removed, vec!["issue-42"]);
+
+        let trashed = pending(worktrees_root);
+        assert_eq!(trashed.len(), 1);
+        assert!(trashed[0]
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("repo.issue-42."));
+        assert!(trashed[0].join("dirty.txt").exists());
     }
 
-    #[cfg(unix)]
     #[test]
-    fn cleanup_never_rips_the_main_checkout() {
+    fn cleanup_refuses_an_unregistered_worktree_before_mutating() {
+        let root = Tmp::new("unregistered-worktree");
+        let repo = root.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        init_repo(&repo);
+        let worktrees = root.path().join("worktrees");
+        let stranger = worktrees.join("stranger");
+        fs::create_dir_all(&stranger).unwrap();
+        let run = task_run("run-1", "issue-42", &stranger);
+
+        let err = cleanup_task_runs(&repo, &[run]).unwrap_err();
+
+        assert!(format!("{err:#}").contains("refusing to delete unregistered worktree"));
+        assert!(stranger.exists());
+        assert!(pending(&worktrees).is_empty());
+    }
+
+    #[test]
+    fn cleanup_never_trashes_the_main_checkout() {
         let root = Tmp::new("main-checkout-guard");
         let repo = root.path().join("repo");
         fs::create_dir_all(&repo).unwrap();
@@ -464,33 +474,15 @@ mod tests {
         let mut run = task_run("run-1", "unused-branch", &repo);
         run.branch = None;
 
-        cleanup_task_runs_with_rip(&repo, &[run], &write_fake_rip(root.path())).unwrap();
+        cleanup_task_runs(&repo, &[run]).unwrap();
 
         assert!(repo.exists());
         assert!(repo.join(".git").exists());
+        assert!(pending(&repo).is_empty());
     }
 
     #[test]
-    fn cleanup_fails_before_mutating_when_rip_is_missing() {
-        let root = Tmp::new("missing-rip");
-        let repo = root.path().join("repo");
-        fs::create_dir_all(&repo).unwrap();
-        init_repo(&repo);
-        let worktree = root.path().join("worktree");
-        add_worktree(&repo, &worktree, "issue-42");
-        let run = task_run("run-1", "issue-42", &worktree);
-
-        let err = cleanup_task_runs_with_rip(&repo, &[run], &root.path().join("missing-rip"))
-            .unwrap_err();
-
-        assert!(format!("{err:#}").contains("rip command is required to delete Monica worktrees"));
-        assert!(worktree.exists());
-        assert!(worktree_registered(&repo, &worktree).unwrap());
-        assert!(branch_exists(&repo, "issue-42").unwrap());
-    }
-
-    #[test]
-    fn cleanup_prunes_stale_worktree_metadata_without_rip() {
+    fn cleanup_prunes_stale_worktree_metadata_when_the_directory_is_already_gone() {
         let root = Tmp::new("stale-worktree");
         let repo = root.path().join("repo");
         fs::create_dir_all(&repo).unwrap();
@@ -500,8 +492,7 @@ mod tests {
         fs::remove_dir_all(&worktree).unwrap();
         let run = task_run("run-1", "issue-42", &worktree);
 
-        let removed =
-            cleanup_task_runs_with_rip(&repo, &[run], &root.path().join("missing-rip")).unwrap();
+        let removed = cleanup_task_runs(&repo, &[run]).unwrap();
 
         assert_eq!(removed, vec!["issue-42"]);
         assert!(!worktree_registered(&repo, &worktree).unwrap());
@@ -529,34 +520,6 @@ mod tests {
         assert_eq!(worktree_info(root.path()), None);
     }
 
-    struct TestGit {
-        rip: PathBuf,
-    }
-
-    impl GitGateway for TestGit {
-        fn create_worktree(
-            &self,
-            repo: &Path,
-            worktree: &Path,
-            branch: &str,
-            base: &str,
-        ) -> Result<()> {
-            create_worktree(repo, worktree, branch, base)
-        }
-
-        fn cleanup_task_runs(&self, repo: &Path, runs: &[TaskRun]) -> Result<Vec<String>> {
-            cleanup_task_runs_with_rip(repo, runs, &self.rip)
-        }
-
-        fn detect_repo(&self) -> Result<String> {
-            Ok("owner/repo".to_string())
-        }
-
-        fn detect_default_branch(&self, _repo: &str) -> Option<String> {
-            Some("main".to_string())
-        }
-    }
-
     fn task_run(id: &str, branch: &str, worktree: &Path) -> TaskRun {
         TaskRun {
             id: TaskRunId::from_store(id.to_string()),
@@ -578,30 +541,8 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
-    fn write_fake_rip(dir: &Path) -> PathBuf {
-        let path = dir.join("rip");
-        fs::write(
-            &path,
-            r#"#!/bin/sh
-set -eu
-graveyard="${0}.graveyard"
-mkdir -p "$graveyard"
-for target in "$@"; do
-  base=$(basename "$target")
-  rm -rf "$graveyard/$base"
-  mv "$target" "$graveyard/$base"
-done
-"#,
-        )
-        .unwrap();
-        let mut perms = fs::metadata(&path).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&path, perms).unwrap();
-        path
-    }
-
     fn add_worktree(repo: &Path, worktree: &Path, branch: &str) {
+        fs::create_dir_all(worktree.parent().unwrap()).unwrap();
         let output = Command::new("git")
             .arg("-C")
             .arg(repo)
