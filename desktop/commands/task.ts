@@ -6,13 +6,6 @@ export type {
   DisplayStatus,
   TaskRunWaitReason,
   GithubPullRequestRef,
-  BoardColumn,
-  TaskCreated,
-  ProjectOption,
-  TaskBench,
-  PrepareTaskResult,
-  RunTaskResult,
-  AttachTabResult,
   TabTaskBinding,
 } from "./bindings";
 
