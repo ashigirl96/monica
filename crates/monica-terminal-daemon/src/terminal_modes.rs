@@ -1,24 +1,35 @@
-//! Tracks the terminal modes an application turned on so `attach` can restore them ahead of
-//! the replay tail. Escape sequences are state *transitions*, not state: an app that sends
-//! `?1049h` once at startup leaves nothing in the transcript tail for a reconnecting client to
+//! Tracks the terminal modes an application turned on so `attach` can restore the ones the
+//! replay tail cannot convey. Escape sequences are state *transitions*, not state: an app that
+//! sends `?1049h` once at startup leaves nothing in a 256 KB tail for a reconnecting client to
 //! learn the alt screen from, so the client ends up with mouse reporting on while its buffer
 //! says `normal` -- a combination no real terminal can be in. tmux restores modes the same way
 //! on re-attach.
+//!
+//! Every grouping here mirrors what xterm actually keys off, because the client's parser is the
+//! yardstick: restoring a mode xterm ignores, or restoring two modes that xterm treats as one
+//! slot, would leave the daemon's idea of the session out of step with what the user sees.
 
-/// Modes worth restoring, in the order they are emitted. `1049` leads so the buffer switch
-/// happens before the replay body lands in it.
-const TRACKED_MODES: [u16; 8] = [1049, 1000, 1002, 1003, 1006, 2004, 1004, 25];
+/// Independent flags, in the order they are restored. `1049` leads so the buffer switch happens
+/// before the replay body lands in it.
+const TRACKED_FLAGS: [u16; 4] = [1049, 2004, 1004, 25];
+
+/// xterm keeps a single active mouse protocol, so these override each other and resetting any
+/// one of them disables reporting outright.
+const MOUSE_PROTOCOLS: [u16; 4] = [9, 1000, 1002, 1003];
+
+/// Likewise a single active encoding. `1005`/`1015` are deliberately absent: xterm logs them as
+/// unsupported without touching the slot, so tracking them would restore a no-op and lose the
+/// encoding the app actually asked for.
+const MOUSE_ENCODINGS: [u16; 2] = [1006, 1016];
 
 /// Parameter bytes past this are a malformed or hostile sequence, never a mode we track.
 const MAX_CSI_PARAMS: usize = 64;
 
 const MAX_KITTY_STACK: usize = 32;
 
-/// Mirrors the subset of xterm's VT500 transition table that CSI dispatch depends on. The
-/// client's parser is the yardstick, not the spec: a tracker that disagrees with it would
-/// restore modes the client is not actually in. Notably `ESC` aborts whatever is in flight
-/// from any state, which is why OSC/DCS payloads need no state of their own -- their bytes
-/// can only reach a CSI through an `ESC` that xterm would honour too.
+/// Mirrors the subset of xterm's VT500 transition table that CSI dispatch depends on. Notably
+/// `ESC` aborts whatever is in flight from any state, which is why OSC/DCS payloads need no
+/// state of their own -- their bytes can only reach a CSI through an `ESC` xterm would honour.
 #[derive(Default, PartialEq)]
 enum Scan {
     #[default]
@@ -29,13 +40,27 @@ enum Scan {
     CsiIgnore,
 }
 
+/// One slot shared by several modes: the last one set wins, and any reset clears the slot.
+#[derive(Default, Clone, Copy, PartialEq)]
+enum Exclusive {
+    #[default]
+    Unobserved,
+    Off,
+    On(u16),
+}
+
 #[derive(Default)]
 pub struct TerminalModes {
     scan: Scan,
     csi: Vec<u8>,
-    /// Parallel to `TRACKED_MODES`; `None` means never observed, so the peer's default holds.
-    states: [Option<bool>; TRACKED_MODES.len()],
+    /// Parallel to `TRACKED_FLAGS`; `None` means never observed, so the peer's default holds.
+    flags: [Option<bool>; TRACKED_FLAGS.len()],
+    mouse_protocol: Exclusive,
+    mouse_encoding: Exclusive,
     kitty_stack: Vec<u32>,
+    /// A stack cannot be rebuilt from a suffix, so attach needs to know whether the tail
+    /// touches it at all rather than just where it ended up.
+    kitty_touched: bool,
 }
 
 impl TerminalModes {
@@ -62,6 +87,9 @@ impl TerminalModes {
                     self.csi.clear();
                     self.scan = Scan::Csi;
                 }
+                // RIS returns the terminal to power-on defaults, so nothing observed before it
+                // still holds -- keeping it would re-enter the alt screen on a later attach.
+                b'c' => *self = Self::default(),
                 _ => self.scan = Scan::Ground,
             },
             Scan::Csi | Scan::CsiIgnore => match b {
@@ -99,57 +127,112 @@ impl TerminalModes {
             (b'?', b'h' | b'l') => {
                 let on = final_byte == b'h';
                 for param in params.split(|&b| b == b';') {
-                    if let Some(index) = std::str::from_utf8(param)
-                        .ok()
-                        .and_then(|s| s.parse::<u16>().ok())
-                        .and_then(|mode| TRACKED_MODES.iter().position(|&m| m == mode))
-                    {
-                        self.states[index] = Some(on);
+                    let Some(mode) = parse_u16(param) else {
+                        continue;
+                    };
+                    let slot = if on { Exclusive::On(mode) } else { Exclusive::Off };
+                    match classify(mode) {
+                        Some(Slot::Flag(index)) => self.flags[index] = Some(on),
+                        Some(Slot::MouseProtocol) => self.mouse_protocol = slot,
+                        Some(Slot::MouseEncoding) => self.mouse_encoding = slot,
+                        None => {}
                     }
                 }
             }
             (b'>', b'u') => {
-                let flags = parse_u32(params).unwrap_or(0);
+                self.kitty_touched = true;
                 if self.kitty_stack.len() < MAX_KITTY_STACK {
-                    self.kitty_stack.push(flags);
+                    self.kitty_stack.push(parse_u32(params).unwrap_or(0));
                 }
             }
             (b'<', b'u') => {
+                self.kitty_touched = true;
                 let count = parse_u32(params).unwrap_or(1) as usize;
                 let keep = self.kitty_stack.len().saturating_sub(count);
                 self.kitty_stack.truncate(keep);
             }
             (b'=', b'u') => {
-                let flags = params
-                    .split(|&b| b == b';')
-                    .next()
-                    .and_then(parse_u32)
-                    .unwrap_or(0);
+                self.kitty_touched = true;
+                let flags = params.split(|&b| b == b';').next().and_then(parse_u32);
                 if let Some(top) = self.kitty_stack.last_mut() {
-                    *top = flags;
+                    *top = flags.unwrap_or(0);
                 }
             }
             _ => {}
         }
     }
 
-    /// Sequences that put a fresh terminal into the state observed so far. Applying this
-    /// followed by the transcript tail always lands on the current state: for any mode the
-    /// tail's last transition is the current one (a later transition would itself be in the
-    /// tail), and modes the tail never touches keep what this prefix set.
-    pub fn restore_sequence(&self) -> Vec<u8> {
+    /// Sequences that bring a fresh terminal up to date on everything `tail` leaves unsaid.
+    ///
+    /// Anything the tail transitions itself is left to the tail. That is not just an
+    /// optimisation for `?1049`: prepending the alt screen ahead of a tail that enters it on
+    /// its own would paint the tail's leading normal-buffer history into the alt buffer, so the
+    /// user would drop back to an empty screen when the app exits.
+    ///
+    /// For everything the tail does not touch, applying this prefix then the tail always lands
+    /// on the tracked state -- the tail cannot contain a later transition than the tracker saw.
+    pub fn restore_prefix(&self, tail: &[u8]) -> Vec<u8> {
+        let mut in_tail = Self::default();
+        in_tail.feed(tail);
+
         let mut out = Vec::new();
-        for (index, mode) in TRACKED_MODES.iter().enumerate() {
-            if let Some(on) = self.states[index] {
-                let final_byte = if on { 'h' } else { 'l' };
-                out.extend_from_slice(format!("\x1b[?{mode}{final_byte}").as_bytes());
+        for (index, mode) in TRACKED_FLAGS.iter().enumerate() {
+            if in_tail.flags[index].is_some() {
+                continue;
+            }
+            if let Some(on) = self.flags[index] {
+                push_mode(&mut out, *mode, on);
             }
         }
-        for flags in &self.kitty_stack {
-            out.extend_from_slice(format!("\x1b[>{flags}u").as_bytes());
+        if in_tail.mouse_protocol == Exclusive::Unobserved {
+            push_exclusive(&mut out, self.mouse_protocol, MOUSE_PROTOCOLS[1]);
+        }
+        if in_tail.mouse_encoding == Exclusive::Unobserved {
+            push_exclusive(&mut out, self.mouse_encoding, MOUSE_ENCODINGS[0]);
+        }
+        if !in_tail.kitty_touched {
+            for flags in &self.kitty_stack {
+                out.extend_from_slice(format!("\x1b[>{flags}u").as_bytes());
+            }
         }
         out
     }
+}
+
+enum Slot {
+    Flag(usize),
+    MouseProtocol,
+    MouseEncoding,
+}
+
+fn classify(mode: u16) -> Option<Slot> {
+    if let Some(index) = TRACKED_FLAGS.iter().position(|&m| m == mode) {
+        Some(Slot::Flag(index))
+    } else if MOUSE_PROTOCOLS.contains(&mode) {
+        Some(Slot::MouseProtocol)
+    } else if MOUSE_ENCODINGS.contains(&mode) {
+        Some(Slot::MouseEncoding)
+    } else {
+        None
+    }
+}
+
+fn push_mode(out: &mut Vec<u8>, mode: u16, on: bool) {
+    let final_byte = if on { 'h' } else { 'l' };
+    out.extend_from_slice(format!("\x1b[?{mode}{final_byte}").as_bytes());
+}
+
+/// `off_mode` is any member of the group -- resetting one clears the shared slot.
+fn push_exclusive(out: &mut Vec<u8>, state: Exclusive, off_mode: u16) {
+    match state {
+        Exclusive::Unobserved => {}
+        Exclusive::Off => push_mode(out, off_mode, false),
+        Exclusive::On(mode) => push_mode(out, mode, true),
+    }
+}
+
+fn parse_u16(bytes: &[u8]) -> Option<u16> {
+    std::str::from_utf8(bytes).ok()?.parse().ok()
 }
 
 fn parse_u32(bytes: &[u8]) -> Option<u32> {
@@ -160,12 +243,17 @@ fn parse_u32(bytes: &[u8]) -> Option<u32> {
 mod tests {
     use super::*;
 
+    /// Restores against a tail that says nothing, isolating what the tracker itself holds.
     fn restore(chunks: &[&[u8]]) -> Vec<u8> {
+        tracker(chunks).restore_prefix(b"no sequences here")
+    }
+
+    fn tracker(chunks: &[&[u8]]) -> TerminalModes {
         let mut modes = TerminalModes::default();
         for chunk in chunks {
             modes.feed(chunk);
         }
-        modes.restore_sequence()
+        modes
     }
 
     /// Claude Code's real startup handshake, transcribed from a production transcript. The
@@ -177,8 +265,20 @@ mod tests {
 \x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?25l\x1b[?2004h\x1b[?1004h\x1b[?2031h";
         assert_eq!(
             restore(&[startup]),
-            b"\x1b[?1049h\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[?25l\x1b[>1u"
+            b"\x1b[?1049h\x1b[?2004h\x1b[?1004h\x1b[?25l\x1b[?1003h\x1b[?1006h\x1b[>1u"
         );
+    }
+
+    /// Taken from a production transcript whose `?1049h` had scrolled out of the replay window:
+    /// Claude Code re-sends the mouse modes on every resize, so only the modes it sends once at
+    /// startup need carrying.
+    #[test]
+    fn only_modes_an_app_never_repeats_survive_into_the_prefix() {
+        let modes = tracker(&[b"\x1b[?1049h\x1b[?2004h\x1b[?1004h\x1b[>1u\
+\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?25l"]);
+        // What a resize puts back into the tail, and nothing else.
+        let tail = b"\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?25l\x1b[>1u";
+        assert_eq!(modes.restore_prefix(tail), b"\x1b[?1049h\x1b[?2004h\x1b[?1004h");
     }
 
     #[test]
@@ -198,10 +298,7 @@ mod tests {
 
     #[test]
     fn combined_parameters_are_split() {
-        assert_eq!(
-            restore(&[b"\x1b[?1000;1002;1006h"]),
-            b"\x1b[?1000h\x1b[?1002h\x1b[?1006h"
-        );
+        assert_eq!(restore(&[b"\x1b[?1049;2004;25h"]), b"\x1b[?1049h\x1b[?2004h\x1b[?25h");
     }
 
     #[test]
@@ -211,8 +308,8 @@ mod tests {
 
     #[test]
     fn alt_screen_leads_the_restore_regardless_of_arrival_order() {
-        let out = restore(&[b"\x1b[?2004h\x1b[?1002h\x1b[?1049h"]);
-        assert_eq!(out, b"\x1b[?1049h\x1b[?1002h\x1b[?2004h");
+        let out = restore(&[b"\x1b[?2004h\x1b[?1004h\x1b[?1049h"]);
+        assert_eq!(out, b"\x1b[?1049h\x1b[?2004h\x1b[?1004h");
     }
 
     #[test]
@@ -220,9 +317,86 @@ mod tests {
         assert_eq!(restore(&[b"\x1b[?7h\x1b[?12l\x1b[2J\x1b[38;5;196m"]), b"");
     }
 
+    // --- what the tail already says is left to the tail ---
+
+    /// The regression this guards: a TUI that started inside the replay window leaves its own
+    /// `?1049h` in the tail, preceded by the normal-buffer history that must stay there.
+    #[test]
+    fn alt_screen_is_not_prepended_when_the_tail_enters_it() {
+        let modes = tracker(&[b"$ prompt\r\n\x1b[?1049h\x1b[?1006halt content"]);
+        let tail = b"$ prompt\r\n\x1b[?1049h\x1b[?1006halt content";
+        assert_eq!(modes.restore_prefix(tail), b"");
+    }
+
+    #[test]
+    fn only_modes_missing_from_the_tail_are_prepended() {
+        let modes = tracker(&[b"\x1b[?1049h\x1b[?1003h\x1b[?1006h\x1b[?2004hlater\x1b[?25l"]);
+        // The tail begins after the startup handshake and carries only the cursor change.
+        assert_eq!(
+            modes.restore_prefix(b"later\x1b[?25l"),
+            b"\x1b[?1049h\x1b[?2004h\x1b[?1003h\x1b[?1006h"
+        );
+    }
+
+    #[test]
+    fn a_kitty_stack_the_tail_touches_is_left_alone() {
+        let modes = tracker(&[b"\x1b[>1u\x1b[>5u"]);
+        assert_eq!(modes.restore_prefix(b"\x1b[>5u"), b"");
+        assert_eq!(modes.restore_prefix(b"nothing"), b"\x1b[>1u\x1b[>5u");
+    }
+
+    // --- mutually exclusive groups ---
+
+    /// xterm holds one `activeProtocol`, so the last mode set wins. A fixed emit order would
+    /// restore any-event tracking here and flood the app with motion reports.
+    #[test]
+    fn the_last_mouse_protocol_set_wins() {
+        assert_eq!(restore(&[b"\x1b[?1003h\x1b[?1002h"]), b"\x1b[?1002h");
+        assert_eq!(restore(&[b"\x1b[?1002h\x1b[?1003h"]), b"\x1b[?1003h");
+        assert_eq!(restore(&[b"\x1b[?1000h\x1b[?9h"]), b"\x1b[?9h");
+    }
+
+    /// Resetting any member of the group turns reporting off in xterm, not just that mode.
+    #[test]
+    fn resetting_one_mouse_protocol_disables_reporting() {
+        assert_eq!(restore(&[b"\x1b[?1003h\x1b[?1000l"]), b"\x1b[?1000l");
+    }
+
+    #[test]
+    fn the_last_mouse_encoding_set_wins() {
+        assert_eq!(restore(&[b"\x1b[?1006h\x1b[?1016h"]), b"\x1b[?1016h");
+        assert_eq!(restore(&[b"\x1b[?1016h\x1b[?1006h"]), b"\x1b[?1006h");
+        assert_eq!(restore(&[b"\x1b[?1006h\x1b[?1016l"]), b"\x1b[?1006l");
+    }
+
+    /// xterm logs 1005/1015 as unsupported without touching the encoding slot, so they must not
+    /// displace the encoding the app actually asked for.
+    #[test]
+    fn unsupported_encodings_do_not_displace_the_active_one() {
+        assert_eq!(restore(&[b"\x1b[?1006h\x1b[?1005h"]), b"\x1b[?1006h");
+        assert_eq!(restore(&[b"\x1b[?1006h\x1b[?1015h"]), b"\x1b[?1006h");
+    }
+
+    // --- resets ---
+
+    /// `reset` after a crashed TUI emits RIS; keeping state across it would drag the pane back
+    /// into the alt screen on the next attach.
+    #[test]
+    fn ris_clears_everything_tracked() {
+        assert_eq!(restore(&[b"\x1b[?1049h\x1b[?1003h\x1b[>1u\x1bc"]), b"");
+        assert_eq!(restore(&[b"\x1b[?1049h\x1bc\x1b[?25l"]), b"\x1b[?25l");
+    }
+
+    #[test]
+    fn ris_leaves_the_scanner_usable() {
+        let modes = tracker(&[b"\x1bc\x1b[?1049h"]);
+        assert_eq!(modes.restore_prefix(b""), b"\x1b[?1049h");
+    }
+
+    // --- scanner robustness ---
+
     #[test]
     fn string_payloads_need_a_real_introducer_to_count() {
-        // An OSC title carrying the literal text: no ESC, so no sequence.
         assert_eq!(restore(&[b"\x1b]0;window [?1049h\x07"]), b"");
     }
 
@@ -258,10 +432,10 @@ mod tests {
         modes.feed(&b"1".repeat(4096));
         modes.feed(b"?1049h");
         assert!(modes.csi.len() <= MAX_CSI_PARAMS);
-        assert_eq!(modes.restore_sequence(), b"");
+        assert_eq!(modes.restore_prefix(b""), b"");
         // The ignored sequence ended at its final byte, so tracking resumes.
         modes.feed(b"\x1b[?1049h");
-        assert_eq!(modes.restore_sequence(), b"\x1b[?1049h");
+        assert_eq!(modes.restore_prefix(b""), b"\x1b[?1049h");
     }
 
     #[test]
@@ -295,14 +469,13 @@ mod tests {
 
     #[test]
     fn byte_at_a_time_matches_whole_chunk_parsing() {
-        let stream = b"\x1b[?1049h\x1b]0;t\x07\x1b[?1000;1006h\x1b[>1u\x1b[?25l";
+        let stream = b"\x1b[?1049h\x1b]0;t\x07\x1b[?1003h\x1b[?1006h\x1b[>1u\x1b[?25l";
         let mut split = TerminalModes::default();
         for &b in stream {
             split.feed(&[b]);
         }
-        let mut whole = TerminalModes::default();
-        whole.feed(stream);
-        assert_eq!(split.restore_sequence(), whole.restore_sequence());
-        assert!(!whole.restore_sequence().is_empty());
+        let whole = tracker(&[stream]);
+        assert_eq!(split.restore_prefix(b""), whole.restore_prefix(b""));
+        assert!(!whole.restore_prefix(b"").is_empty());
     }
 }
