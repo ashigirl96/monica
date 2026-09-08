@@ -3036,6 +3036,7 @@ dependencies = [
  "clap_complete",
  "monica-application",
  "monica-domain",
+ "monica-logfile",
  "monica-paths",
  "monica-runtime",
  "serde_json",
@@ -3080,6 +3081,14 @@ dependencies = [
  "serde",
  "serde_json",
  "strum",
+]
+
+[[package]]
+name = "monica-logfile"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
 ]
 
 [[package]]
