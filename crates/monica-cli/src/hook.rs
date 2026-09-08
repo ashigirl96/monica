@@ -1,11 +1,11 @@
-use std::fs::OpenOptions;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use clap::Subcommand;
 use monica_application::HookContext;
 use monica_domain::{Agent, TaskId, TaskRunId};
+use monica_logfile::DailyLog;
 
 #[derive(Subcommand)]
 pub enum HookCommand {
@@ -17,31 +17,30 @@ pub fn run(cmd: HookCommand) -> Result<()> {
     let agent = match cmd {
         HookCommand::Claude => Agent::Claude,
     };
-    let log_file = format!("hook-{}.log", agent.as_str());
-    if let Err(e) = handle_agent(agent, &log_file) {
+    let log = open_debug_log(agent);
+    if let Err(e) = handle_agent(agent, log.as_ref()) {
         eprintln!("monica hook {}: {e:#}", agent.as_str());
-        debug_log_to(&log_file, &format!("error: {e:#}"));
+        debug_log_to(log.as_ref(), &format!("error: {e:#}"));
     }
     Ok(())
 }
 
-fn debug_log_to(log_file: &str, msg: &str) {
-    let Ok(dir) = monica_paths::logs_dir() else {
+/// `None` when the logs dir cannot be resolved or opened, which keeps every later `debug_log_to`
+/// a silent no-op — a hook must still ingest its event when the debug log is unavailable.
+fn open_debug_log(agent: Agent) -> Option<DailyLog> {
+    let dir = monica_paths::logs_dir().ok()?;
+    DailyLog::open(&dir, &format!("hook-{}", agent.as_str())).ok()
+}
+
+fn debug_log_to(log: Option<&DailyLog>, msg: &str) {
+    let Some(log) = log else {
         return;
     };
-    if std::fs::create_dir_all(&dir).is_err() {
-        return;
-    }
     let ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-    let line = format!("{ms} pid={} {msg}\n", std::process::id());
-    let _ = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(dir.join(log_file))
-        .and_then(|mut f| f.write_all(line.as_bytes()));
+    log.append(&format!("{ms} pid={} {msg}", std::process::id()));
 }
 
 fn read_stdin() -> Result<String> {
@@ -54,14 +53,14 @@ fn env_opt(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.is_empty())
 }
 
-fn handle_agent(agent: Agent, log_file: &str) -> Result<()> {
+fn handle_agent(agent: Agent, log: Option<&DailyLog>) -> Result<()> {
     let raw = read_stdin()?;
     let task_id = env_opt("MONICA_TASK_ID").map(TaskId::from_store);
     let task_run_id = env_opt("MONICA_TASK_RUN_ID").map(TaskRunId::from_store);
     let terminal_tab_id = env_opt("MONICA_TERMINAL_TAB_ID");
     let terminal_session_id = env_opt("MONICA_TERMINAL_SESSION_ID");
 
-    debug_log_to(log_file, &format!(
+    debug_log_to(log, &format!(
         "invoked task_id={task_id:?} task_run_id={task_run_id:?} tab_id={terminal_tab_id:?} session_id={terminal_session_id:?} monica_home={:?} cwd={:?} stdin_bytes={}",
         env_opt("MONICA_HOME"),
         std::env::current_dir().ok(),
@@ -85,7 +84,7 @@ fn handle_agent(agent: Agent, log_file: &str) -> Result<()> {
     )?;
 
     let event_name = report.event_name.clone();
-    debug_log_to(log_file, &format!(
+    debug_log_to(log, &format!(
         "event={:?} ignored={} task_found={} run_linked={} run_created={} status={:?} wait_reason={:?} entered_waiting={}",
         event_name,
         report.ignored,
