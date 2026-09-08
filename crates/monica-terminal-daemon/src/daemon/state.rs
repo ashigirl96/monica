@@ -11,6 +11,7 @@ use anyhow::{bail, Context, Result};
 use base64::Engine;
 
 use crate::manager::PtyManager;
+use crate::terminal_modes::TerminalModes;
 use crate::transcript::Transcript;
 use crate::types::{PtySize, SpawnRequest};
 use monica_terminal_protocol::{to_frame, CreateParams, ServerMessage, SessionInfo};
@@ -47,6 +48,7 @@ struct LiveEntry {
     cols: u16,
     pid: Option<u32>,
     transcript: Transcript,
+    modes: TerminalModes,
 }
 
 struct ExitedEntry {
@@ -157,6 +159,7 @@ impl SessionTable {
                 cols: params.cols,
                 pid,
                 transcript,
+                modes: TerminalModes::default(),
             },
         );
         Ok(pid)
@@ -170,6 +173,7 @@ impl SessionTable {
         if let Err(e) = entry.transcript.append(bytes) {
             log::warn!("transcript append failed for {session_id}: {e}");
         }
+        entry.modes.feed(bytes);
         if inner.attachments.get(session_id).is_none_or(|c| c.is_empty()) {
             return;
         }
@@ -222,13 +226,18 @@ impl SessionTable {
         };
         let max = replay_bytes.unwrap_or(DEFAULT_REPLAY_BYTES) as usize;
         let tail = entry.transcript.tail(max).context("failed to read transcript tail")?;
+        // The tail is a suffix of the output, so mode transitions older than it are lost.
+        // Leading with the ones it cannot convey keeps the client's modes honest -- notably the
+        // alt screen, which apps enter exactly once at startup.
+        let mut replay = entry.modes.restore_prefix(&tail);
+        replay.extend_from_slice(&tail);
         let (rows, cols) = (entry.rows, entry.cols);
         inner
             .attachments
             .entry(session_id.to_string())
             .or_default()
             .insert(conn_id);
-        Ok((b64(&tail), rows, cols))
+        Ok((b64(&replay), rows, cols))
     }
 
     pub fn detach(&self, session_id: &str, conn_id: u64) {
@@ -411,6 +420,45 @@ mod tests {
         });
         let text = String::from_utf8_lossy(&replay);
         assert!(text.contains("--login"), "transcript should hold the echoed arg, got: {text:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The alt screen is entered once at startup, so a long session's transcript tail no
+    /// longer carries it and only the tracked state can tell the client where it is.
+    #[test]
+    fn attach_restores_tracked_modes_ahead_of_the_replay_tail() {
+        let dir = temp_dir("mode-restore");
+        let t = table(&dir);
+        let mut params = echo_params("ts-1");
+        params.shell = Some("/bin/zsh".to_string());
+        t.create(params).unwrap();
+
+        t.on_output("ts-1", b"\x1b[?1049h\x1b[?1002h\x1b[?1006h");
+        t.on_output("ts-1", &b"painted".repeat(64));
+
+        // A window this small cannot reach back to the handshake, so only the prefix can carry
+        // it -- which is the situation a pane reconnected after an app restart is in.
+        let (replay, _, _) = t.attach("ts-1", 1, Some(32)).unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD.decode(replay).unwrap();
+
+        // The invariant that matters: a client consuming this replay lands on the tracked
+        // state, so it has nothing left to assert of its own.
+        let mut client = TerminalModes::default();
+        client.feed(&bytes);
+        let client_state = client.restore_prefix(b"");
+        assert_eq!(client_state, t.lock().live["ts-1"].modes.restore_prefix(b""));
+        assert!(
+            client_state.starts_with(b"\x1b[?1049h"),
+            "the alt screen must survive a replay window that excludes it, got: {:?}",
+            String::from_utf8_lossy(&client_state)
+        );
+        assert!(
+            bytes.ends_with(b"painted"),
+            "the size-capped tail must still follow the prefix, got: {:?}",
+            String::from_utf8_lossy(&bytes)
+        );
+
+        t.terminate("ts-1").unwrap();
         std::fs::remove_dir_all(&dir).ok();
     }
 

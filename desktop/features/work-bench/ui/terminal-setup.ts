@@ -1,6 +1,7 @@
 import type { Terminal, ITheme } from "@xterm/xterm";
 
 const PIXELS_PER_LINE = 20;
+const DOM_DELTA_LINE = 1;
 
 function buildSgrWheelSequence(lines: number, down: boolean, col: number, row: number): string {
   const code = down ? 65 : 64;
@@ -91,19 +92,49 @@ export function buildKeyEventHandler(
   };
 }
 
+const SGR_MOUSE_MODE = 1006;
+/// xterm holds one active mouse encoding, so `?1016h` (pixel coordinates) displaces `?1006h`
+/// and resetting either clears the slot. These live here rather than coming from the daemon
+/// because they are read straight out of xterm's parser callback -- routing a fact xterm
+/// already handed us back through the PTY protocol would only add a way for the two to drift.
+const MOUSE_ENCODING_MODES = [SGR_MOUSE_MODE, 1016];
+
+/// `IModes` exposes which mouse events an app wants but not how it wants them encoded, so the
+/// encoding has to be watched here. Returning false leaves xterm's own DEC mode handling
+/// intact -- the handler only observes.
+function trackSgrMouseMode(term: Terminal): () => boolean {
+  let active = 0;
+  const observe = (on: boolean) => (params: (number | number[])[]) => {
+    for (const param of params) {
+      if (typeof param === "number" && MOUSE_ENCODING_MODES.includes(param)) {
+        active = on ? param : 0;
+      }
+    }
+    return false;
+  };
+  term.parser.registerCsiHandler({ final: "h", prefix: "?" }, observe(true));
+  term.parser.registerCsiHandler({ final: "l", prefix: "?" }, observe(false));
+  return () => active === SGR_MOUSE_MODE;
+}
+
 export function createWheelHandler(
   term: Terminal,
   writeText: (text: string) => void,
 ): (e: WheelEvent) => void {
+  const sgrMouseEnabled = trackSgrMouseMode(term);
   let scrollAccumulator = 0;
 
   return (e: WheelEvent) => {
-    if (term.buffer.active.type !== "alternate") return;
+    // Keyed on mouse reporting, not the alt screen: a pane reconnected from a replay tail
+    // that predates the app's one-shot `?1049h` still reads as the normal buffer, and
+    // falling back to xterm's wheel path there caps it at one SGR event per DOM event.
+    // Without `?1006` the app cannot read these reports, so xterm's encoder has to own it.
+    if (term.modes.mouseTrackingMode === "none" || !sgrMouseEnabled()) return;
 
     e.preventDefault();
     e.stopPropagation();
 
-    const delta = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * PIXELS_PER_LINE : e.deltaY;
+    const delta = e.deltaMode === DOM_DELTA_LINE ? e.deltaY * PIXELS_PER_LINE : e.deltaY;
 
     scrollAccumulator += delta;
 
