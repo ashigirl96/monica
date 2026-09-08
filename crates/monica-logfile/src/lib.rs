@@ -76,16 +76,18 @@ impl DailyLog {
             return;
         };
         if open_day.day != today {
-            sweep(
-                &self.dir,
-                &self.stem,
-                today,
-                self.retention_days,
-                self.max_total_bytes,
-            );
-            // Keeping the stale handle beats dropping the line when the new day cannot be opened.
+            // Open before sweeping: yesterday's file is a deletion candidate once the day turns,
+            // and keeping the stale handle (rather than dropping the line) is only safe while
+            // that file still exists. A failed open therefore also defers housekeeping.
             if let Ok(file) = open_day_file(&self.dir, &self.stem, today) {
                 *open_day = OpenDay { day: today, file };
+                sweep(
+                    &self.dir,
+                    &self.stem,
+                    today,
+                    self.retention_days,
+                    self.max_total_bytes,
+                );
             }
         }
         // One `write_all` so concurrent processes appending to the same file interleave whole
@@ -165,12 +167,22 @@ fn sweep(dir: &Path, stem: &str, today: NaiveDate, retention_days: u64, max_tota
         kept.push((day, entry.path(), size));
     }
 
-    let mut total: u64 = kept.iter().map(|(_, _, size)| size).sum();
+    enforce_total_cap(&mut kept, today, max_total_bytes);
+}
+
+/// Deletes whole days, oldest first, until the retained bytes fit under `max_total_bytes`.
+/// Takes the candidates as a slice so a test can hand it a snapshot that no longer matches disk.
+fn enforce_total_cap(
+    candidates: &mut [(NaiveDate, PathBuf, u64)],
+    today: NaiveDate,
+    max_total_bytes: u64,
+) {
+    let mut total: u64 = candidates.iter().map(|(_, _, size)| size).sum();
     if total <= max_total_bytes {
         return;
     }
-    kept.sort_by_key(|(day, _, _)| *day);
-    for (day, path, size) in &kept {
+    candidates.sort_by_key(|(day, _, _)| *day);
+    for (day, path, size) in candidates.iter() {
         if total <= max_total_bytes {
             break;
         }
@@ -181,8 +193,15 @@ fn sweep(dir: &Path, stem: &str, today: NaiveDate, retention_days: u64, max_tota
         if *day >= today {
             continue;
         }
-        if std::fs::remove_file(path).is_ok() {
-            total -= size;
+        // A concurrent sweep may have won the race for this file. Its bytes are gone either way,
+        // so counting it as freed stops this process from discarding a further day on a stale
+        // total — which is what serializing the sweeps across processes would otherwise buy.
+        let freed = match std::fs::remove_file(path) {
+            Ok(()) => true,
+            Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+        };
+        if freed {
+            total = total.saturating_sub(*size);
         }
     }
 }
@@ -300,6 +319,26 @@ mod tests {
         assert!(!dir.join("hook-claude_2026-09-07.log").exists());
         assert!(!dir.join("hook-claude_2026-09-08.log").exists());
         assert!(dir.join("hook-claude_2026-09-09.log").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The over-deletion a concurrent sweep would otherwise cause: process A removed the oldest
+    /// day while process B still holds it in its snapshot, so B must not spend another day.
+    #[test]
+    fn a_day_another_sweep_already_removed_counts_as_freed() {
+        let dir = temp_dir("cap-race");
+        write(&dir, "hook-claude_2026-09-08.log", b"0123456789");
+        let mut candidates = vec![
+            (day(2026, 9, 7), dir.join("hook-claude_2026-09-07.log"), 10),
+            (day(2026, 9, 8), dir.join("hook-claude_2026-09-08.log"), 10),
+        ];
+
+        enforce_total_cap(&mut candidates, day(2026, 9, 9), 15);
+
+        assert!(
+            dir.join("hook-claude_2026-09-08.log").exists(),
+            "the 10 bytes already freed by the other sweep must count toward the cap"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
