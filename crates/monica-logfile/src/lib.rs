@@ -7,6 +7,7 @@
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Days, Local, NaiveDate};
@@ -17,12 +18,22 @@ const SUFFIX: &str = ".log";
 const DAY_FORMAT: &str = "%Y-%m-%d";
 
 pub struct DailyLog {
+    dir: PathBuf,
+    stem: String,
+    retention_days: u64,
+    max_total_bytes: u64,
+    open_day: Mutex<OpenDay>,
+}
+
+struct OpenDay {
+    day: NaiveDate,
     file: File,
 }
 
 impl DailyLog {
-    /// Opens today's file, doing all housekeeping once: the caller is expected to hold the value
-    /// for the life of the process rather than reopening per line.
+    /// Opens today's file and runs housekeeping. The value is meant to be held for the life of
+    /// the process: it re-resolves the day on every append, so a daemon that outlives local
+    /// midnight keeps landing in the right file without reopening.
     pub fn open(dir: &Path, stem: &str) -> Result<Self> {
         Self::open_with_policy(
             dir,
@@ -44,24 +55,55 @@ impl DailyLog {
             .with_context(|| format!("failed to create {}", dir.display()))?;
         migrate_legacy(dir, stem, legacy_day(dir, stem, today));
         sweep(dir, stem, today, retention_days, max_total_bytes);
-        let path = day_path(dir, stem, today);
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .with_context(|| format!("failed to open {}", path.display()))?;
-        Ok(Self { file })
+        let file = open_day_file(dir, stem, today)?;
+        Ok(Self {
+            dir: dir.to_path_buf(),
+            stem: stem.to_string(),
+            retention_days,
+            max_total_bytes,
+            open_day: Mutex::new(OpenDay { day: today, file }),
+        })
     }
 
     /// Appends `line` plus a newline. Best-effort: a logging failure must never surface to the
-    /// caller. Written in one `write_all` so concurrent processes appending to the same file
-    /// interleave whole lines rather than fragments.
+    /// caller.
     pub fn append(&self, line: &str) {
+        self.append_on(Local::now().date_naive(), line);
+    }
+
+    fn append_on(&self, today: NaiveDate, line: &str) {
+        let Ok(mut open_day) = self.open_day.lock() else {
+            return;
+        };
+        if open_day.day != today {
+            sweep(
+                &self.dir,
+                &self.stem,
+                today,
+                self.retention_days,
+                self.max_total_bytes,
+            );
+            // Keeping the stale handle beats dropping the line when the new day cannot be opened.
+            if let Ok(file) = open_day_file(&self.dir, &self.stem, today) {
+                *open_day = OpenDay { day: today, file };
+            }
+        }
+        // One `write_all` so concurrent processes appending to the same file interleave whole
+        // lines rather than fragments.
         let mut buf = String::with_capacity(line.len() + 1);
         buf.push_str(line);
         buf.push('\n');
-        let _ = (&self.file).write_all(buf.as_bytes());
+        let _ = (&open_day.file).write_all(buf.as_bytes());
     }
+}
+
+fn open_day_file(dir: &Path, stem: &str, day: NaiveDate) -> Result<File> {
+    let path = day_path(dir, stem, day);
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .with_context(|| format!("failed to open {}", path.display()))
 }
 
 fn day_path(dir: &Path, stem: &str, day: NaiveDate) -> PathBuf {
@@ -170,13 +212,40 @@ mod tests {
     #[test]
     fn append_writes_to_todays_file_creating_the_dir() {
         let dir = temp_dir("append");
+        let today = day(2026, 9, 9);
         let log =
-            DailyLog::open_with_policy(&dir, STEM, day(2026, 9, 9), RETENTION_DAYS, NO_CAP).unwrap();
-        log.append("first");
-        log.append("second");
+            DailyLog::open_with_policy(&dir, STEM, today, RETENTION_DAYS, NO_CAP).unwrap();
+        log.append_on(today, "first");
+        log.append_on(today, "second");
 
         let body = std::fs::read_to_string(dir.join("hook-claude_2026-09-09.log")).unwrap();
         assert_eq!(body, "first\nsecond\n");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn append_rolls_over_when_the_local_date_changes() {
+        let dir = temp_dir("rollover");
+        // today - 14 on the 9th, so it survives the open and falls out of retention on the 10th.
+        write(&dir, "hook-claude_2026-08-26.log", b"cutoff day");
+        let log = DailyLog::open_with_policy(&dir, STEM, day(2026, 9, 9), RETENTION_DAYS, NO_CAP)
+            .unwrap();
+
+        log.append_on(day(2026, 9, 9), "ninth");
+        log.append_on(day(2026, 9, 10), "tenth");
+
+        assert_eq!(
+            std::fs::read_to_string(dir.join("hook-claude_2026-09-09.log")).unwrap(),
+            "ninth\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("hook-claude_2026-09-10.log")).unwrap(),
+            "tenth\n"
+        );
+        assert!(
+            !dir.join("hook-claude_2026-08-26.log").exists(),
+            "housekeeping must run again on the new day"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
