@@ -2,6 +2,7 @@
 
 mod manager;
 mod session;
+mod terminal_modes;
 mod transcript;
 mod types;
 
