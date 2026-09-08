@@ -13,6 +13,13 @@
 /// before the replay body lands in it.
 const TRACKED_FLAGS: [u16; 4] = [1049, 2004, 1004, 25];
 
+/// The one tracked mode that decides *where* output lands rather than just how it is reported.
+const ALT_SCREEN: u16 = 1049;
+
+/// What xterm's DECSTR returns to its defaults among the modes tracked here. The mouse protocol
+/// and encoding live in a service `softReset` never touches, so they deliberately stay put.
+const SOFT_RESET_FLAGS: [u16; 3] = [2004, 1004, 25];
+
 /// xterm keeps a single active mouse protocol, so these override each other and resetting any
 /// one of them disables reporting outright.
 const MOUSE_PROTOCOLS: [u16; 4] = [9, 1000, 1002, 1003];
@@ -55,6 +62,9 @@ pub struct TerminalModes {
     csi: Vec<u8>,
     /// Parallel to `TRACKED_FLAGS`; `None` means never observed, so the peer's default holds.
     flags: [Option<bool>; TRACKED_FLAGS.len()],
+    /// Direction of the *first* alt-screen switch seen. Only meaningful on a tracker fed a
+    /// replay tail, where it reveals which buffer the app was in when the tail began.
+    first_alt_screen: Option<bool>,
     mouse_protocol: Exclusive,
     mouse_encoding: Exclusive,
     kitty_stack: Vec<u32>,
@@ -132,10 +142,24 @@ impl TerminalModes {
                     };
                     let slot = if on { Exclusive::On(mode) } else { Exclusive::Off };
                     match classify(mode) {
-                        Some(Slot::Flag(index)) => self.flags[index] = Some(on),
+                        Some(Slot::Flag(index)) => {
+                            self.flags[index] = Some(on);
+                            if mode == ALT_SCREEN && self.first_alt_screen.is_none() {
+                                self.first_alt_screen = Some(on);
+                            }
+                        }
                         Some(Slot::MouseProtocol) => self.mouse_protocol = slot,
                         Some(Slot::MouseEncoding) => self.mouse_encoding = slot,
                         None => {}
+                    }
+                }
+            }
+            // DECSTR. Clearing to `None` rather than to a literal default keeps the defaults in
+            // one place: a mode nobody asserted is a mode the fresh client already agrees on.
+            (b'!', b'p') => {
+                for mode in SOFT_RESET_FLAGS {
+                    if let Some(Slot::Flag(index)) = classify(mode) {
+                        self.flags[index] = None;
                     }
                 }
             }
@@ -164,23 +188,30 @@ impl TerminalModes {
 
     /// Sequences that bring a fresh terminal up to date on everything `tail` leaves unsaid.
     ///
-    /// Anything the tail transitions itself is left to the tail. That is not just an
-    /// optimisation for `?1049`: prepending the alt screen ahead of a tail that enters it on
-    /// its own would paint the tail's leading normal-buffer history into the alt buffer, so the
-    /// user would drop back to an empty screen when the app exits.
+    /// Modes the tail transitions itself only have to *end up* right, and the tail's own last
+    /// transition already does that, so they are left to the tail. For everything the tail does
+    /// not touch, applying this prefix then the tail lands on the tracked state -- the tail
+    /// cannot hold a later transition than the tracker saw.
     ///
-    /// For everything the tail does not touch, applying this prefix then the tail always lands
-    /// on the tracked state -- the tail cannot contain a later transition than the tracker saw.
+    /// The alt screen is the exception, because it decides *where* the tail's output lands. The
+    /// client has to begin the tail in the buffer the app was in at that moment, which is the
+    /// inverse of the tail's first switch: prepending nothing would paint a departing TUI's
+    /// final frame into the shell's scrollback, and prepending the current state would drop the
+    /// tail's leading normal-buffer history into the alt buffer.
     pub fn restore_prefix(&self, tail: &[u8]) -> Vec<u8> {
         let mut in_tail = Self::default();
         in_tail.feed(tail);
 
         let mut out = Vec::new();
         for (index, mode) in TRACKED_FLAGS.iter().enumerate() {
-            if in_tail.flags[index].is_some() {
-                continue;
-            }
-            if let Some(on) = self.flags[index] {
+            let restored = if *mode == ALT_SCREEN {
+                in_tail.first_alt_screen.map_or(self.flags[index], |first| Some(!first))
+            } else if in_tail.flags[index].is_some() {
+                None
+            } else {
+                self.flags[index]
+            };
+            if let Some(on) = restored {
                 push_mode(&mut out, *mode, on);
             }
         }
@@ -319,13 +350,30 @@ mod tests {
 
     // --- what the tail already says is left to the tail ---
 
-    /// The regression this guards: a TUI that started inside the replay window leaves its own
-    /// `?1049h` in the tail, preceded by the normal-buffer history that must stay there.
+    /// A TUI that started inside the replay window leaves its own `?1049h` in the tail, preceded
+    /// by normal-buffer history that must stay in the normal buffer.
     #[test]
-    fn alt_screen_is_not_prepended_when_the_tail_enters_it() {
+    fn a_tail_that_enters_the_alt_screen_starts_in_the_normal_buffer() {
         let modes = tracker(&[b"$ prompt\r\n\x1b[?1049h\x1b[?1006halt content"]);
         let tail = b"$ prompt\r\n\x1b[?1049h\x1b[?1006halt content";
-        assert_eq!(modes.restore_prefix(tail), b"");
+        assert_eq!(modes.restore_prefix(tail), b"\x1b[?1049l");
+    }
+
+    /// The mirror image, and the one skipping the mode outright got wrong: a TUI that exited
+    /// while detached leaves its last frame at the head of the tail followed by `?1049l`. Start
+    /// in the normal buffer and that frame lands in the shell's scrollback for good.
+    #[test]
+    fn a_tail_that_leaves_the_alt_screen_starts_in_the_alt_buffer() {
+        let modes = tracker(&[b"\x1b[?1049hframe\x1b[?1049l$ prompt"]);
+        let tail = b"frame\x1b[?1049l$ prompt";
+        assert_eq!(modes.restore_prefix(tail), b"\x1b[?1049h");
+    }
+
+    /// Only the *first* switch says where the tail began; later ones are the tail's own story.
+    #[test]
+    fn the_first_alt_screen_switch_in_the_tail_decides_the_starting_buffer() {
+        let modes = tracker(&[b"\x1b[?1049hone\x1b[?1049ltwo\x1b[?1049hthree"]);
+        assert_eq!(modes.restore_prefix(b"one\x1b[?1049ltwo\x1b[?1049hthree"), b"\x1b[?1049h");
     }
 
     #[test]
@@ -385,6 +433,24 @@ mod tests {
     fn ris_clears_everything_tracked() {
         assert_eq!(restore(&[b"\x1b[?1049h\x1b[?1003h\x1b[>1u\x1bc"]), b"");
         assert_eq!(restore(&[b"\x1b[?1049h\x1bc\x1b[?25l"]), b"\x1b[?25l");
+    }
+
+    /// DECSTR returns bracketed paste, focus reporting and the cursor to xterm's defaults, so
+    /// the tracker has nothing left to assert about them.
+    #[test]
+    fn decstr_clears_the_modes_xterm_soft_resets() {
+        assert_eq!(restore(&[b"\x1b[?2004h\x1b[?1004h\x1b[?25l\x1b[!p"]), b"");
+        assert_eq!(restore(&[b"\x1b[?2004h\x1b[!p\x1b[?2004h"]), b"\x1b[?2004h");
+    }
+
+    /// `softReset` never touches xterm's mouse service, and the alt buffer survives it too.
+    /// Clearing either here would drop state the client keeps.
+    #[test]
+    fn decstr_leaves_the_buffer_and_mouse_state_alone() {
+        assert_eq!(
+            restore(&[b"\x1b[?1049h\x1b[?1003h\x1b[?1006h\x1b[!p"]),
+            b"\x1b[?1049h\x1b[?1003h\x1b[?1006h"
+        );
     }
 
     #[test]

@@ -93,6 +93,25 @@ describe("createWheelHandler", () => {
     expect(prevented()).toBe(0);
   });
 
+  // xterm keeps one active encoding, so pixel coordinates displace SGR cell coordinates and
+  // our cell-based reports would point at the wrong place.
+  test("stands down when ?1016 takes the encoding slot", () => {
+    const { onWheel, writes, term } = handlerWithSink();
+
+    term.setDecMode(1016, true);
+    onWheel(wheelEvent({ deltaY: 200 }).event);
+    expect(writes).toEqual([]);
+
+    // Releasing 1016 clears the slot outright rather than falling back to SGR.
+    term.setDecMode(1016, false);
+    onWheel(wheelEvent({ deltaY: 200 }).event);
+    expect(writes).toEqual([]);
+
+    term.setDecMode(1006, true);
+    onWheel(wheelEvent({ deltaY: 20 }).event);
+    expect(writes).toEqual(["\x1b[<65;40;12M"]);
+  });
+
   test("stops sending SGR events once the app resets ?1006", () => {
     const { onWheel, writes, term } = handlerWithSink();
 

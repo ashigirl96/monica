@@ -93,19 +93,28 @@ export function buildKeyEventHandler(
 }
 
 const SGR_MOUSE_MODE = 1006;
+/// xterm holds one active mouse encoding, so `?1016h` (pixel coordinates) displaces `?1006h`
+/// and resetting either clears the slot. These live here rather than coming from the daemon
+/// because they are read straight out of xterm's parser callback -- routing a fact xterm
+/// already handed us back through the PTY protocol would only add a way for the two to drift.
+const MOUSE_ENCODING_MODES = [SGR_MOUSE_MODE, 1016];
 
 /// `IModes` exposes which mouse events an app wants but not how it wants them encoded, so the
-/// `?1006` state has to be watched here. Returning false leaves xterm's own DEC mode handling
+/// encoding has to be watched here. Returning false leaves xterm's own DEC mode handling
 /// intact -- the handler only observes.
 function trackSgrMouseMode(term: Terminal): () => boolean {
-  let enabled = false;
+  let active = 0;
   const observe = (on: boolean) => (params: (number | number[])[]) => {
-    if (params.some((param) => param === SGR_MOUSE_MODE)) enabled = on;
+    for (const param of params) {
+      if (typeof param === "number" && MOUSE_ENCODING_MODES.includes(param)) {
+        active = on ? param : 0;
+      }
+    }
     return false;
   };
   term.parser.registerCsiHandler({ final: "h", prefix: "?" }, observe(true));
   term.parser.registerCsiHandler({ final: "l", prefix: "?" }, observe(false));
-  return () => enabled;
+  return () => active === SGR_MOUSE_MODE;
 }
 
 export function createWheelHandler(
