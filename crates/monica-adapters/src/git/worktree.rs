@@ -319,7 +319,7 @@ mod tests {
     };
 
     use monica_storage_sqlite::SqliteStore;
-    use crate::git::trash::{pending, trash_dir};
+    use crate::git::trash::{pending, seed_trash_dir};
     use crate::test_support::{init_repo, run_git, wait_for_removal, Tmp};
 
     use super::*;
@@ -378,7 +378,7 @@ mod tests {
     fn reap_worktree_trash_deletes_pending_entries_beside_the_given_worktrees() {
         let root = Tmp::new("worktree-reap-gateway");
         let worktrees = root.path().join("worktrees");
-        let leftover = trash_dir(&worktrees).join("other.issue-1.7.42");
+        let leftover = seed_trash_dir(&worktrees).join("other.issue-1.7.42");
         fs::create_dir_all(leftover.join("node_modules")).unwrap();
 
         GitCliGateway.reap_worktree_trash(&[worktrees.join("issue-2")]);

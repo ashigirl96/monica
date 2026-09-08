@@ -1,14 +1,19 @@
-//! Deferred worktree deletion: a worktree is renamed into a `.trash/` directory beside it (constant
-//! time — same parent, so same volume by construction) and the actual `rm -rf` runs in a detached
-//! process. A deletion that never finished — a reaper cut off by a reboot, a `/bin/rm` that failed
-//! to spawn — waits in `.trash/` until the next [`reap`], which the application runs over every
-//! worktree path it has ever recorded, so no root is ever forgotten and no periodic job is needed.
+//! Deferred worktree deletion: a worktree is renamed into a `.monica-trash/` directory beside it
+//! (constant time — same parent, so same volume by construction) and the actual `rm -rf` runs in a
+//! detached process. A deletion that never finished — a reaper cut off by a reboot, a `/bin/rm`
+//! that failed to spawn — waits there until the next [`reap`], which the application runs over
+//! every worktree path it has ever recorded, so no root is ever forgotten and no periodic job is
+//! needed.
 //!
-//! `.trash/` is the only path family a reaper ever removes, and the only writer into it is
-//! [`bury`], which callers reach after the live-worktree guards. That keeps "delete a live
-//! worktree" unreachable from this module.
+//! A worktree root is only ever the *parent* of a recorded path, so it can be a directory Monica
+//! does not own — a legacy run stamped with the main checkout puts the repo's parent in that set.
+//! A reaper therefore removes nothing until it finds [`OWNER_MARKER`], which only [`bury`] writes:
+//! ownership is proven, never inferred from a name. Inside a directory Monica created, everything
+//! is Monica's, and the only writer is [`bury`], which callers reach after the live-worktree
+//! guards. That keeps "delete a live worktree" unreachable from this module.
 
 use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -17,15 +22,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
 
-const TRASH_DIR: &str = ".trash";
+const TRASH_DIR: &str = ".monica-trash";
+/// Written by [`bury`] when it creates a trash directory; its absence means the directory is not
+/// Monica's to empty.
+const OWNER_MARKER: &str = ".created-by-monica";
 
 pub(crate) fn trash_dir(worktree_root: &Path) -> PathBuf {
     worktree_root.join(TRASH_DIR)
 }
 
-/// Move `worktree` into its root's `.trash/`. Falls back to a synchronous recursive delete only if
-/// the rename is refused as cross-device, which a sibling directory should never be — this keeps
-/// cleanup correct on an exotic mount layout.
+/// Move `worktree` into its root's `.monica-trash/`. Falls back to a synchronous recursive delete
+/// only if the rename is refused as cross-device, which a sibling directory should never be — this
+/// keeps cleanup correct on an exotic mount layout.
 pub(crate) fn bury(repo: &Path, worktree: &Path) -> Result<()> {
     let repo_name = repo.file_name().and_then(|n| n.to_str()).unwrap_or("repo");
     let name = worktree
@@ -46,8 +54,7 @@ fn bury_as(worktree: &Path, stamp: &str) -> Result<()> {
     let root = worktree
         .parent()
         .ok_or_else(|| anyhow!("worktree {} has no parent directory", worktree.display()))?;
-    let trash = trash_dir(root);
-    fs::create_dir_all(&trash).with_context(|| format!("failed to create {}", trash.display()))?;
+    let trash = ensure_trash_dir(root)?;
 
     // rename(2) silently replaces an empty directory, so an existing entry — even a hollow one
     // left by a half-finished reaper — must be skipped before the syscall, not detected after.
@@ -75,34 +82,39 @@ fn bury_as(worktree: &Path, stamp: &str) -> Result<()> {
     }
 }
 
-/// Names [`bury`] produces — `<repo>.<worktree>.<millis>.<pid>`, plus a `.<n>` collision suffix —
-/// always end in numeric components. A worktree root is only ever a *parent* of a recorded path, so
-/// it can be a directory Monica does not own (a legacy run stamped with the main checkout puts the
-/// repo's parent in that set); refusing every other name keeps a `.trash/` that predates Monica, or
-/// belongs to another tool, out of the reaper's reach.
-fn is_buried_name(name: &str) -> bool {
-    let parts: Vec<&str> = name.split('.').collect();
-    parts.len() >= 4
-        && parts[parts.len() - 2..]
-            .iter()
-            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+/// The root's trash directory, created and stamped as Monica's if it does not exist yet.
+fn ensure_trash_dir(worktree_root: &Path) -> Result<PathBuf> {
+    let trash = trash_dir(worktree_root);
+    fs::create_dir_all(&trash).with_context(|| format!("failed to create {}", trash.display()))?;
+    let marker = trash.join(OWNER_MARKER);
+    if !marker.exists() {
+        // Without the marker nothing buried here is ever reclaimable, so a burial that cannot
+        // write it must fail rather than leak the tree it is about to move.
+        fs::write(&marker, b"").with_context(|| format!("failed to write {}", marker.display()))?;
+    }
+    Ok(trash)
 }
 
-/// Everything waiting in a root's `.trash/`, in no particular order.
+/// Everything waiting in a root's `.monica-trash/`, in no particular order — nothing at all unless
+/// [`bury`] created that directory.
 pub(crate) fn pending(worktree_root: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = fs::read_dir(trash_dir(worktree_root)) else {
+    let trash = trash_dir(worktree_root);
+    if !trash.join(OWNER_MARKER).is_file() {
+        return Vec::new();
+    }
+    let Ok(entries) = fs::read_dir(&trash) else {
         return Vec::new();
     };
     entries
         .filter_map(|e| e.ok())
-        .filter(|e| e.file_name().to_str().is_some_and(is_buried_name))
+        .filter(|e| e.file_name() != OsStr::new(OWNER_MARKER))
         .map(|e| e.path())
         .collect()
 }
 
-/// Everything waiting in the `.trash/` beside any of `worktrees`, each root visited once. A
-/// relative recorded path would resolve its `.trash/` against whatever cwd the CLI happens to run
-/// in, so only absolute roots are visited.
+/// Everything waiting in the `.monica-trash/` beside any of `worktrees`, each root visited once. A
+/// relative recorded path would resolve its trash directory against whatever cwd the CLI happens to
+/// run in, so only absolute roots are visited.
 fn pending_beside(worktrees: &[PathBuf]) -> Vec<PathBuf> {
     worktrees
         .iter()
@@ -187,6 +199,13 @@ fn spawn_detached_rm(paths: Vec<PathBuf>) -> Result<usize> {
     Ok(count)
 }
 
+/// A trash directory stamped as Monica's without going through [`bury`], for tests that need
+/// entries already waiting in one.
+#[cfg(test)]
+pub(crate) fn seed_trash_dir(worktree_root: &Path) -> PathBuf {
+    ensure_trash_dir(worktree_root).unwrap()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,7 +239,7 @@ mod tests {
     #[test]
     fn bury_disambiguates_colliding_stamps() {
         let root = Tmp::new("trash-collide");
-        let trash = trash_dir(root.path());
+        let trash = seed_trash_dir(root.path());
         fs::create_dir_all(trash.join("monica.issue-1.7.42")).unwrap();
         fs::create_dir_all(trash.join("monica.issue-1.7.42.1")).unwrap();
         let worktree = root.path().join("issue-1");
@@ -251,9 +270,9 @@ mod tests {
         let root = Tmp::new("trash-reap");
         let a = root.path().join("a");
         let b = root.path().join("b");
-        fs::create_dir_all(trash_dir(&a).join("x.old.1.1")).unwrap();
-        fs::create_dir_all(trash_dir(&b).join("y.old.2.1")).unwrap();
-        fs::create_dir_all(trash_dir(&b).join("y.old.3.1")).unwrap();
+        fs::create_dir_all(seed_trash_dir(&a).join("x.old.1.1")).unwrap();
+        fs::create_dir_all(seed_trash_dir(&b).join("y.old.2.1")).unwrap();
+        fs::create_dir_all(seed_trash_dir(&b).join("y.old.3.1")).unwrap();
 
         let mut paths = pending_beside(&[a.join("issue-1"), b.join("issue-2"), b.join("issue-3")]);
         paths.sort();
@@ -269,11 +288,19 @@ mod tests {
     }
 
     #[test]
-    fn pending_ignores_entries_this_module_did_not_bury() {
+    fn pending_ignores_a_trash_dir_monica_did_not_create() {
         let root = Tmp::new("trash-foreign");
         let trash = trash_dir(root.path());
         fs::create_dir_all(trash.join("notes")).unwrap();
-        fs::create_dir_all(trash.join("backup.2024.01")).unwrap();
+        fs::create_dir_all(trash.join("project.backup.2024.01")).unwrap();
+
+        assert!(pending(root.path()).is_empty());
+    }
+
+    #[test]
+    fn pending_skips_the_ownership_marker_itself() {
+        let root = Tmp::new("trash-marker");
+        let trash = seed_trash_dir(root.path());
         fs::create_dir_all(trash.join("repo.issue-1.7.42")).unwrap();
 
         assert_eq!(pending(root.path()), vec![trash.join("repo.issue-1.7.42")]);
