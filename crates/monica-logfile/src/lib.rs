@@ -174,7 +174,11 @@ fn sweep(dir: &Path, stem: &str, today: NaiveDate, retention_days: u64, max_tota
         if total <= max_total_bytes {
             break;
         }
-        if *day == today {
+        // Today and anything dated later are being written right now — a file can be dated ahead
+        // of this process when the clock or zone moves back, or when a sweep that captured
+        // yesterday runs after another process opened today. Unlinking one cannot free enough to
+        // satisfy the cap anyway, since the current day always stays.
+        if *day >= today {
             continue;
         }
         if std::fs::remove_file(path).is_ok() {
@@ -296,6 +300,22 @@ mod tests {
         assert!(!dir.join("hook-claude_2026-09-07.log").exists());
         assert!(!dir.join("hook-claude_2026-09-08.log").exists());
         assert!(dir.join("hook-claude_2026-09-09.log").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn future_dated_files_survive_the_cap() {
+        let dir = temp_dir("size-cap-future");
+        write(&dir, "hook-claude_2026-09-08.log", b"0123456789");
+        write(&dir, "hook-claude_2026-09-10.log", b"0123456789"); // another process' day
+
+        DailyLog::open_with_policy(&dir, STEM, day(2026, 9, 9), RETENTION_DAYS, 1).unwrap();
+
+        assert!(!dir.join("hook-claude_2026-09-08.log").exists());
+        assert_eq!(
+            std::fs::read(dir.join("hook-claude_2026-09-10.log")).unwrap(),
+            b"0123456789"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
