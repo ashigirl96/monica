@@ -111,7 +111,7 @@ export function WorkBenchHeader() {
             title={isMain ? "Main Run (⌘G elsewhere to promote)" : undefined}
           >
             {hint && <JumpHint hint={hint} className="mr-1.5" />}
-            {isPinned && <PinIcon size={11} className="mr-1.5 shrink-0 text-muted-foreground" />}
+            {isPinned && <PinIcon size={14} className="mr-1.5 shrink-0 text-rose-400" />}
             {agentStatus && agentDot && (
               <span
                 title={statusDisplayLabel(agentStatus, agentWaitReason)}

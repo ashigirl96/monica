@@ -313,6 +313,7 @@ const {
   removeRunspaceAtom,
   tabExitedAtom,
   createTaskRunspaceAtom,
+  pinnedTaskIdsAtom,
 } = await import("./store");
 const { loadTerminalStateAtom } = await import("./persistence");
 
@@ -818,6 +819,20 @@ describe("visual order with pins", () => {
     expect(store.get(terminalStateAtom)!.activeRunspaceId).toBe("rs-shell");
     store.set(cycleRunspaceAtom, "down");
     expect(store.get(terminalStateAtom)!.activeRunspaceId).toBe("rs-pinned");
+  });
+});
+
+describe("pinnedTaskIdsAtom", () => {
+  test("collects the task ids of pinned task runspaces only", () => {
+    const store = storeWithState(
+      makeState([
+        makeRunspace("rs-pinned-task", { taskId: "MON-1", pinnedTabId: "rs-pinned-task-tab" }),
+        makeRunspace("rs-plain-task", { taskId: "MON-2", order: 1 }),
+        makeRunspace("rs-pinned-shell", { order: 2, pinnedTabId: "rs-pinned-shell-tab" }),
+      ]),
+    );
+
+    expect([...store.get(pinnedTaskIdsAtom)]).toEqual(["MON-1"]);
   });
 });
 

@@ -9,6 +9,7 @@ import {
 } from "@/lib/status-config";
 import { cn } from "@/lib/utils";
 import { IssueIcon, PrIcon } from "@/components/github-icons";
+import { PinIcon } from "@/components/icons";
 
 function BranchIcon() {
   return (
@@ -100,7 +101,15 @@ function SideRunBadges({ task }: { task: TaskSummaryRow }) {
   );
 }
 
-export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boolean }) {
+export function TaskCard({
+  task,
+  focused,
+  pinned,
+}: {
+  task: TaskSummaryRow;
+  focused: boolean;
+  pinned: boolean;
+}) {
   const hasIssue = task.github_issue_number !== null;
   const hasBranch = task.branch !== null;
   const statusLabel = statusDisplayLabel(task.status, task.task_run_wait_reason);
@@ -131,8 +140,15 @@ export function TaskCard({ task, focused }: { task: TaskSummaryRow; focused: boo
           <span className="min-w-0 truncate text-[11px] font-medium text-muted-foreground">
             {task.project}
           </span>
-          <span className="shrink-0 font-mono text-[10px] tracking-tight text-muted-foreground/60">
-            {task.id}
+          <span className="flex shrink-0 items-center gap-1.5">
+            {pinned && (
+              <span title="Pinned in Work Bench" className="flex shrink-0 text-rose-400">
+                <PinIcon size={14} aria-label="Pinned in Work Bench" />
+              </span>
+            )}
+            <span className="font-mono text-[10px] tracking-tight text-muted-foreground/60">
+              {task.id}
+            </span>
           </span>
         </div>
 

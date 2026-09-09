@@ -121,9 +121,7 @@ function RunspaceItem({
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex items-start gap-1.5">
           {hint && <JumpHint hint={hint} ctrl />}
-          {ws.group === "pinned" && (
-            <PinIcon size={11} className="mt-0.5 shrink-0 text-muted-foreground" />
-          )}
+          {ws.group === "pinned" && <PinIcon size={14} className="shrink-0 text-rose-400" />}
           <span
             className={cn(
               "flex-1 text-xs font-medium leading-snug",
