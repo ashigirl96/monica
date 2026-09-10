@@ -3118,10 +3118,12 @@ name = "monica-runtime"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "log",
  "monica-adapters",
  "monica-application",
  "monica-domain",
+ "monica-logfile",
  "monica-paths",
  "monica-storage-sqlite",
  "tokio",
