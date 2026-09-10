@@ -96,3 +96,15 @@ fn take_drops_launches_whose_run_can_no_longer_open() {
     // Dropped, not deferred: a second take finds nothing left behind either.
     assert!(take_launchable_pending_launches(&mut repos).unwrap().is_empty());
 }
+
+/// Closing a task deletes its worktree but leaves the run `Prepared`; a launch still pending from
+/// before the close would open a tab in a directory that no longer exists.
+#[test]
+fn take_drops_launches_whose_task_was_closed_meanwhile() {
+    let mut repos = FakeRepos::default();
+    let (task_id, run_id) = task_with_prepared_primary(&mut repos);
+    repos.put_pending_launch(&launch_for(&task_id, &run_id)).unwrap();
+    repos.update_task_status(&task_id, TaskStatus::Closed).unwrap();
+
+    assert!(take_launchable_pending_launches(&mut repos).unwrap().is_empty());
+}

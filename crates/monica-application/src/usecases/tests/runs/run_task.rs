@@ -639,3 +639,31 @@ fn start_run_still_conflicts_on_a_young_setting_up_primary() {
     let run = repos.get_task_run(&live.task_run_id).unwrap().unwrap();
     assert_eq!(run.status, TaskRunStatus::SettingUp);
 }
+
+/// A prepared primary skips the fresh-run path (and its closed-task check), so the launch itself
+/// has to refuse a closed task — otherwise `monica task run` would open an agent on it.
+#[test]
+fn run_task_rejects_a_closed_task_even_with_a_prepared_primary() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let run = repos
+        .start_task_run(NewTaskRun {
+            task_id: task_id.clone(),
+            agent: None,
+            branch: None,
+            worktree_path: None,
+        })
+        .unwrap();
+    repos
+        .finish_task_run(&run.id, &task_id, TaskRunStatus::Prepared)
+        .unwrap();
+    repos.set_primary_task_run(&task_id, &run.id).unwrap();
+    repos.update_task_status(&task_id, TaskStatus::Closed).unwrap();
+
+    let err = run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+        .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
+    assert!(err.to_string().contains("is closed"), "{err}");
+}

@@ -380,6 +380,13 @@ where
     A: TaskRunOutputs,
 {
     let (task, project) = load_task_and_project(repos, task_id)?;
+    // A prepared or resumable primary skips the fresh-run path and its closed-task check, so the
+    // rule is enforced here too: a closed task never launches, whatever its primary looks like.
+    if task.status == TaskStatus::Closed {
+        return Err(ApplicationError::validation(format!(
+            "task {task_id} is closed; reopen it before running"
+        )));
+    }
     let profile = load_execution_profile(repos, &project.id)?;
 
     let primary_id = task.primary_task_run_id.ok_or_else(|| {
