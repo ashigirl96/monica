@@ -11,8 +11,10 @@ import {
   updateTabTitleAtom,
   updateTabCwdAtom,
   consumeTerminalLaunchAtom,
+  materializePendingLaunchesAtom,
   type TerminalLaunchIntent,
 } from "@/features/work-bench/store";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import { jumpHintsActiveAtom } from "@/features/work-bench/jump-hints";
 import { sessionStatusAtom, type SessionStatusEntry } from "@/features/work-bench/session-status";
 import { loadTerminalStateAtom, saveTerminalStateAtom } from "@/features/work-bench/persistence";
@@ -208,10 +210,18 @@ export default function WorkBenchContent() {
   const sessionStatus = useAtomValue(sessionStatusAtom);
   const loadState = useSetAtom(loadTerminalStateAtom);
   const saveState = useSetAtom(saveTerminalStateAtom);
+  const materializeLaunches = useSetAtom(materializePendingLaunchesAtom);
 
   useEffect(() => {
     loadState();
   }, [loadState]);
+
+  // Polled here, not in the sidebar: the bench content stays mounted whichever space is showing,
+  // so a `monica task run` issued while the user is on the board still gets its tab.
+  const pollLaunches = useCallback(() => {
+    void materializeLaunches();
+  }, [materializeLaunches]);
+  useLiveRefresh(pollLaunches);
 
   const prevStateRef = useRef(state);
   useEffect(() => {

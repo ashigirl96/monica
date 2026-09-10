@@ -603,3 +603,39 @@ fn run_task_in_place_is_unaffected_by_the_tab_cwd_lookup() {
     let run = repos.get_task_run(&result.task_run_id).unwrap().unwrap();
     assert_eq!(run.terminal_tab_id, None);
 }
+
+/// A primary left `SettingUp` by a process that died mid-prepare (a killed app, a Ctrl-C'd CLI)
+/// has nothing that will ever finish it; once it is older than the setup timeout it is failed and
+/// the task takes a new run.
+#[test]
+fn start_run_reaps_a_stale_setting_up_primary() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let stale = start_run(&mut repos, &task_id).unwrap();
+    repos.mark_task_run_stale(&stale.task_run_id);
+
+    let fresh = start_run(&mut repos, &task_id).unwrap();
+
+    assert_ne!(fresh.task_run_id, stale.task_run_id);
+    let stale_run = repos.get_task_run(&stale.task_run_id).unwrap().unwrap();
+    assert_eq!(stale_run.status, TaskRunStatus::Failed);
+    let task = repos.get_task(&task_id).unwrap().unwrap();
+    assert_eq!(task.primary_task_run_id.as_deref(), Some(fresh.task_run_id.as_str()));
+}
+
+/// Only age distinguishes an abandoned setup from one still running in another process, so a
+/// young `SettingUp` primary keeps its conflict.
+#[test]
+fn start_run_still_conflicts_on_a_young_setting_up_primary() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let live = start_run(&mut repos, &task_id).unwrap();
+
+    let err = start_run(&mut repos, &task_id).unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Conflict(_)), "{err:?}");
+    let run = repos.get_task_run(&live.task_run_id).unwrap().unwrap();
+    assert_eq!(run.status, TaskRunStatus::SettingUp);
+}

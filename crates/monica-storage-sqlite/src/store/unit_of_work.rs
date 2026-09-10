@@ -132,6 +132,10 @@ impl TaskRunStore for SqliteUow<'_> {
         task_runs::list_driven_task_runs_with_tab(&self.tx)
     }
 
+    fn is_task_run_older_than(&self, task_run_id: &TaskRunId, max_age_secs: i64) -> Result<bool> {
+        task_runs::is_task_run_older_than(&self.tx, task_run_id, max_age_secs)
+    }
+
     fn settle_task_run_if_live(&mut self, task_run_id: &TaskRunId, task_id: &TaskId) -> Result<bool> {
         task_runs::settle_task_run_if_live_in(&self.tx, task_run_id, task_id)
     }

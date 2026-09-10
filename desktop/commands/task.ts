@@ -47,8 +47,12 @@ export function prepareTask(taskId: string) {
   return unwrap(commands.prepareTask(taskId));
 }
 
-export function runTask(taskId: string, agent: Agent | null, mode: RunMode) {
-  return unwrap(commands.runTask(taskId, agent, mode));
+export function launchTask(taskId: string, agent: Agent | null, mode: RunMode) {
+  return unwrap(commands.launchTask(taskId, agent, mode));
+}
+
+export function takePendingLaunches() {
+  return unwrap(commands.takePendingLaunches());
 }
 
 export function closeTask(taskId: string) {

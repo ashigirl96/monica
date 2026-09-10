@@ -265,9 +265,11 @@ pub async fn close_task(app: AppHandle, task_id: String) -> Result<(), ApiError>
     .await
 }
 
+/// Blocks through worktree creation and setup when the run needs preparing; `off_main` keeps that
+/// off the UI thread, and the caller sees the launch only once it is recorded.
 #[tauri::command]
 #[specta::specta]
-pub async fn run_task(
+pub async fn launch_task(
     app: AppHandle,
     task_id: String,
     agent: Option<Agent>,
@@ -275,12 +277,27 @@ pub async fn run_task(
 ) -> Result<RunTaskResult, ApiError> {
     event_sink::off_main(move || {
         let mut monica = event_sink::open(&app)?;
-        let result = monica.executions().run_task(
+        let result = monica.executions().launch_task(
             &TaskId::from_store(task_id),
             agent.map(monica_domain::Agent::from),
             monica_domain::RunMode::from(mode),
         )?;
         Ok(RunTaskResult::from(result))
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn take_pending_launches(app: AppHandle) -> Result<Vec<RunTaskResult>, ApiError> {
+    event_sink::off_main(move || {
+        let mut monica = event_sink::open(&app)?;
+        Ok(monica
+            .executions()
+            .take_pending_launches()?
+            .into_iter()
+            .map(RunTaskResult::from)
+            .collect())
     })
     .await
 }

@@ -1,9 +1,9 @@
 import { atom } from "jotai";
 import type { Agent, RunMode } from "@/commands/bindings";
-import { closeTask, openBench } from "@/commands/task";
-import { runTaskFlow } from "@/features/work-board/run-flow";
+import { closeTask, launchTask, openBench } from "@/commands/task";
 import {
   createTaskRunspaceAtom,
+  materializePendingLaunchesAtom,
   removeRunspaceAtom,
   terminalStateAtom,
 } from "@/features/work-bench/store";
@@ -47,12 +47,22 @@ export const closeTaskAtom = atom(null, async (get, set, taskId: string) => {
   await set(refreshTaskSummariesAtom);
 });
 
+// A worktree Run blocks in launch_task until setup finishes; a second press meanwhile would only
+// surface the backend's "already has an active run" conflict, so it is swallowed here.
+const runTaskInFlight = new Set<string>();
+
+// The backend records the launch; materializing right away spares the wait for the bench poll.
 export const runTaskAtom = atom(
   null,
   async (_get, set, taskId: string, agent: Agent | null, mode: RunMode) => {
-    const result = await runTaskFlow(taskId, agent, mode);
-    if (!result) return;
-    await set(createTaskRunspaceAtom, { ...result, activate: false });
+    if (runTaskInFlight.has(taskId)) return;
+    runTaskInFlight.add(taskId);
+    try {
+      await launchTask(taskId, agent, mode);
+    } finally {
+      runTaskInFlight.delete(taskId);
+    }
+    await set(materializePendingLaunchesAtom);
     await set(refreshTaskSummariesAtom);
   },
 );

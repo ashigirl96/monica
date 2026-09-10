@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -8,7 +8,8 @@ use monica_domain::RawJson;
 
 use crate::ports::{
     AgentDecoders, BoxFuture, EventRepository, GitGateway, NotificationOutboxStore,
-    GithubIssueSyncStore, ProjectRepository, PullRequestSyncStore, TabAttachment, TaskBoardQuery,
+    GithubIssueSyncStore, PendingLaunchStore, ProjectRepository, PullRequestSyncStore,
+    TabAttachment, TaskBoardQuery,
     TaskRunStore, TaskStore,
     TaskSummaryFilter, TerminalAttachment, TerminalCreateRequest, TerminalDaemon,
     TerminalSessionRepository, UnitOfWork, WorkTransaction, WorkbenchStore, Workspace,
@@ -27,7 +28,7 @@ use crate::{
     FetchedIssue, GithubAuthStatus, GithubGateway, GithubIssue, GithubIssueState,
     GithubPullRequest, OpenIssueRef,
     GithubPullRequestRef, GithubPullRequestStatus, HookContext, Monica,
-    PullRequestBranchSyncCandidate, RepoPullRequest, SetupEnv,
+    PullRequestBranchSyncCandidate, RepoPullRequest, RunTaskResult, SetupEnv,
     SetupOutcome, UnresolvedPullRequestRef,
     SetupRunner, TaskRunObservation, TaskRunOutputs, TaskSummaryRow, TerminalSessionUpdate,
     TerminalStateSnapshot,
@@ -109,6 +110,10 @@ struct FakeState {
     runs: HashMap<String, TaskRun>,
     events: Vec<Event>,
     benches: BTreeMap<String, (String, String)>,
+    pending_launches: BTreeMap<String, RunTaskResult>,
+    /// Runs a test declares old enough for the stale-setup reap. The fake clock is a constant, so
+    /// age cannot be derived from timestamps.
+    stale_task_run_ids: BTreeSet<String>,
     /// Insertion order is creation order, so the last match for a tab is its latest session.
     terminal_sessions: Vec<TerminalSession>,
     next_task: i64,
@@ -860,6 +865,10 @@ impl TaskRunStore for FakeRepos {
             .collect())
     }
 
+    fn is_task_run_older_than(&self, task_run_id: &TaskRunId, _max_age_secs: i64) -> Result<bool> {
+        Ok(self.state.borrow().stale_task_run_ids.contains(task_run_id.as_str()))
+    }
+
     fn settle_task_run_if_live(&mut self, task_run_id: &TaskRunId, task_id: &TaskId) -> Result<bool> {
         self.do_settle_task_run_if_live(task_run_id, task_id)
     }
@@ -1044,6 +1053,30 @@ impl WorkbenchStore for FakeRepos {
     }
 }
 
+impl FakeRepos {
+    pub(crate) fn mark_task_run_stale(&self, task_run_id: &TaskRunId) {
+        self.state
+            .borrow_mut()
+            .stale_task_run_ids
+            .insert(task_run_id.to_string());
+    }
+}
+
+impl PendingLaunchStore for FakeRepos {
+    fn put_pending_launch(&mut self, launch: &RunTaskResult) -> Result<()> {
+        self.state
+            .borrow_mut()
+            .pending_launches
+            .insert(launch.task_run_id.to_string(), launch.clone());
+        Ok(())
+    }
+
+    fn take_pending_launches(&mut self) -> Result<Vec<RunTaskResult>> {
+        let launches = std::mem::take(&mut self.state.borrow_mut().pending_launches);
+        Ok(launches.into_values().collect())
+    }
+}
+
 impl UnitOfWork for FakeRepos {
     fn begin(&mut self) -> Result<Box<dyn WorkTransaction + '_>> {
         Ok(Box::new(FakeUow { inner: self }))
@@ -1160,6 +1193,10 @@ impl TaskRunStore for FakeUow<'_> {
 
     fn list_driven_task_runs_with_tab(&self) -> Result<Vec<TaskRun>> {
         self.inner.list_driven_task_runs_with_tab()
+    }
+
+    fn is_task_run_older_than(&self, task_run_id: &TaskRunId, max_age_secs: i64) -> Result<bool> {
+        self.inner.is_task_run_older_than(task_run_id, max_age_secs)
     }
 
     fn settle_task_run_if_live(&mut self, task_run_id: &TaskRunId, task_id: &TaskId) -> Result<bool> {
@@ -2326,6 +2363,24 @@ pub(crate) fn facade_with_outputs(
         FakeAuth,
         FakeSetupRunner::default(),
         outputs,
+        FakeWorkspace,
+        TestAgentDecoders::default(),
+        Box::new(sink),
+    )
+}
+
+pub(crate) fn facade_with_setup(
+    repos: FakeRepos,
+    sink: RecordingSink,
+    setup: FakeSetupRunner,
+) -> Monica<FakeBackend> {
+    Monica::new(
+        repos,
+        FakeGit::default(),
+        FakeGithub,
+        FakeAuth,
+        setup,
+        FakeTaskRunOutputs::default(),
         FakeWorkspace,
         TestAgentDecoders::default(),
         Box::new(sink),

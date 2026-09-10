@@ -268,6 +268,15 @@ let sessionsResult:
     }[]
   | null;
 let shellEnvResult: Map<string, [string, string][]>;
+let pendingLaunchesResult: {
+  task_id: string;
+  task_run_id: string;
+  runspace_id: string;
+  cwd: string;
+  env: [string, string][];
+  initial_command: string;
+}[];
+let takePendingLaunchesCalls = 0;
 
 mock.module("@/commands/terminal", () => ({
   terminalLoadState: () => Promise.resolve(loadStateResult),
@@ -284,6 +293,10 @@ mock.module("@/commands/task", () => ({
   primaryTabId: () => Promise.resolve(null),
   attachTerminalTab: () => Promise.reject(new Error("not mocked")),
   listTabTaskBindings: () => Promise.resolve([]),
+  takePendingLaunches: () => {
+    takePendingLaunchesCalls += 1;
+    return Promise.resolve(pendingLaunchesResult);
+  },
 }));
 mock.module("@/commands/git", () => ({
   worktreeInfo: () => Promise.resolve(null),
@@ -313,6 +326,7 @@ const {
   removeRunspaceAtom,
   tabExitedAtom,
   createTaskRunspaceAtom,
+  materializePendingLaunchesAtom,
   pinnedTaskIdsAtom,
 } = await import("./store");
 const { loadTerminalStateAtom } = await import("./persistence");
@@ -338,6 +352,8 @@ beforeEach(() => {
   benchMapResult = [];
   sessionsResult = [];
   shellEnvResult = new Map();
+  pendingLaunchesResult = [];
+  takePendingLaunchesCalls = 0;
 });
 
 describe("loadTerminalStateAtom", () => {
@@ -760,9 +776,12 @@ describe("closeTaskAtom pin guard", () => {
         closedIds.push(id);
         return Promise.resolve();
       },
-    }));
-    mock.module("@/features/work-board/run-flow", () => ({
-      runTaskFlow: () => Promise.resolve(null),
+      // mock.module is process-global, so this re-mock must keep serving the shared fixture or
+      // the materialize tests below see an empty queue.
+      takePendingLaunches: () => {
+        takePendingLaunchesCalls += 1;
+        return Promise.resolve(pendingLaunchesResult);
+      },
     }));
 
     const { createStore: cs } = await import("jotai");
@@ -986,5 +1005,67 @@ describe("createTaskRunspaceAtom activation", () => {
     expect(bench.tabs).toHaveLength(2);
     expect(bench.activeTabId).toBe(bench.tabs[1].id);
     expect(state.activeRunspaceId).toBe("shell");
+  });
+});
+
+describe("materializePendingLaunchesAtom", () => {
+  const launch = (taskId: string) => ({
+    task_id: taskId,
+    task_run_id: "run-1",
+    runspace_id: `bench-${taskId}`,
+    cwd: "/wt",
+    env: [["MONICA_TASK_RUN_ID", "run-1"]] as [string, string][],
+    initial_command: "claude",
+  });
+
+  test("opens a new runspace with a launch tab without switching to it", async () => {
+    pendingLaunchesResult = [launch("T1")];
+    shellEnvResult.set("T1", [["MONICA_TASK_ID", "T1"]]);
+    const store = storeWithState(makeState([makeRunspace("shell")], "shell"));
+
+    await store.set(materializePendingLaunchesAtom);
+
+    const state = store.get(terminalStateAtom)!;
+    const bench = state.runspaces.find((r) => r.id === "bench-T1")!;
+    expect(bench.tabs).toHaveLength(1);
+    expect(bench.tabs[0].launch).toEqual({
+      env: [["MONICA_TASK_RUN_ID", "run-1"]],
+      initialCommand: "claude",
+    });
+    expect(bench.env).toEqual([["MONICA_TASK_ID", "T1"]]);
+    expect(state.activeRunspaceId).toBe("shell");
+  });
+
+  test("adds a launch tab to a runspace that is already open", async () => {
+    pendingLaunchesResult = [launch("T1")];
+    const store = storeWithState(
+      makeState([makeRunspace("shell"), makeRunspace("bench-T1")], "shell"),
+    );
+
+    await store.set(materializePendingLaunchesAtom);
+
+    const bench = store.get(terminalStateAtom)!.runspaces.find((r) => r.id === "bench-T1")!;
+    expect(bench.tabs).toHaveLength(2);
+    expect(bench.tabs[1].launch?.initialCommand).toBe("claude");
+  });
+
+  test("takes nothing before the layout is loaded", async () => {
+    pendingLaunchesResult = [launch("T1")];
+    const store = createStore();
+    store.set(windowLabelAtom, "main");
+
+    await store.set(materializePendingLaunchesAtom);
+
+    expect(takePendingLaunchesCalls).toBe(0);
+  });
+
+  test("takes nothing in a secondary window", async () => {
+    pendingLaunchesResult = [launch("T1")];
+    const store = storeWithState(makeState([makeRunspace("shell")], "shell"), "secondary");
+
+    await store.set(materializePendingLaunchesAtom);
+
+    expect(takePendingLaunchesCalls).toBe(0);
+    expect(store.get(terminalStateAtom)!.runspaces.map((r) => r.id)).toEqual(["shell"]);
   });
 });

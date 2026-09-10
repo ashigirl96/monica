@@ -5,14 +5,30 @@ import { createStore } from "jotai";
 type RunCall = { taskId: string; agent: string | null; mode: string };
 
 // Mocks the leaf that reaches Tauri, not work-board/store itself: replacing that module would
-// hand every other test file a stubbed closeTaskAtom for the rest of the process.
+// hand every other test file a stubbed closeTaskAtom for the rest of the process. The stub set
+// mirrors work-bench/store.test.ts's, since mock.module is process-global and the two files
+// replace the same module.
 async function loadNavWithRecordedRuns() {
   const calls: RunCall[] = [];
-  mock.module("@/features/work-board/run-flow", () => ({
-    runTaskFlow: (taskId: string, agent: string | null, mode: string) => {
+  mock.module("@/commands/task", () => ({
+    launchTask: (taskId: string, agent: string | null, mode: string) => {
       calls.push({ taskId, agent, mode });
-      return Promise.resolve(null);
+      return Promise.resolve({
+        task_id: taskId,
+        task_run_id: "run-1",
+        runspace_id: `bench-${taskId}`,
+        cwd: "/wt",
+        env: [],
+        initial_command: "claude",
+      });
     },
+    takePendingLaunches: () => Promise.resolve([]),
+    listBenchRunspaceMap: () => Promise.resolve([]),
+    taskShellEnv: () => Promise.resolve([]),
+    makeMainTaskRun: () => Promise.resolve(false),
+    primaryTabId: () => Promise.resolve(null),
+    attachTerminalTab: () => Promise.reject(new Error("not mocked")),
+    listTabTaskBindings: () => Promise.resolve([]),
   }));
   const nav = await import("@/features/work-board/nav");
   return { calls, nav };

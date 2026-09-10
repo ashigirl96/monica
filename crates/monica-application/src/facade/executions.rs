@@ -1,8 +1,10 @@
 use super::{Backend, Monica};
 use crate::ports::{
-    AgentDecoders, NotificationOutboxStore, ShellScaffolding, TaskRunStore, TerminalAttachment,
-    TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository, WorkbenchStore,
+    AgentDecoders, NotificationOutboxStore, PendingLaunchStore, ShellScaffolding, TaskRunStore,
+    TerminalAttachment, TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository,
+    WorkbenchStore,
 };
+use crate::usecases::runs::ports::TaskRunOutputs;
 use crate::usecases::terminal::{
     reconcile_terminal_sessions, task_run_settlement_for_orphaned_run,
     task_run_settlement_for_terminal_exit, TerminalExitSettlement, TerminalSessionUpdate,
@@ -67,6 +69,42 @@ impl<B: Backend> ExecutionService<'_, B> {
     ) -> ApplicationResult<RunTaskResult> {
         let Monica { repos, outputs, .. } = &mut *self.m;
         crate::usecases::runs::run_task(repos, outputs, task_id, agent_override, mode)
+    }
+
+    /// The single entry behind the board's RUN menu and `monica task run`: prepare when a worktree
+    /// run needs a fresh one (waiting for setup here, in the caller's process), resolve the launch,
+    /// and leave it for the Workbench to open as an agent tab.
+    pub fn launch_task(
+        &mut self,
+        task_id: &TaskId,
+        agent_override: Option<Agent>,
+        mode: RunMode,
+    ) -> ApplicationResult<RunTaskResult> {
+        if mode == RunMode::Worktree
+            && crate::usecases::runs::worktree_run_needs_fresh_run(&self.m.repos, task_id)?
+        {
+            let prep = self.prepare_task(task_id)?;
+            if self.execute_run(task_id, &prep.task_run_id)? == TaskRunStatus::Failed {
+                let log = self
+                    .m
+                    .outputs
+                    .setup_log_path(&prep.task_run_id)
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|_| "setup log unavailable".to_string());
+                return Err(ApplicationError::external(format!(
+                    "setup failed for run {} ({log})",
+                    prep.task_run_id
+                )));
+            }
+        }
+        let launch = self.run_task(task_id, agent_override, mode)?;
+        self.m.repos.put_pending_launch(&launch)?;
+        Ok(launch)
+    }
+
+    /// Pending launches whose run can still be opened, removed as they are handed out.
+    pub fn take_pending_launches(&mut self) -> ApplicationResult<Vec<RunTaskResult>> {
+        crate::usecases::runs::take_launchable_pending_launches(&mut self.m.repos)
     }
 
     pub fn open_bench(&mut self, task_id: &TaskId) -> ApplicationResult<TaskBench> {

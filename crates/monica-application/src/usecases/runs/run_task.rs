@@ -68,11 +68,19 @@ where
     Ok(repos.get_execution_profile(project_id)?.unwrap_or_default())
 }
 
+/// Slack past the setup timeout before a `SettingUp` run with no process behind it is presumed
+/// abandoned.
+const SETUP_STALE_GRACE_SECS: i64 = 60;
+
+fn stale_setup_age_secs(profile: &ExecutionProfile) -> i64 {
+    profile.setup_timeout_sec.max(0) + SETUP_STALE_GRACE_SECS
+}
+
 /// Shared by both run-creation paths: a closed task takes no new run, and the Main Run slot must
 /// be free — nothing live, and nothing already prepared and waiting to launch.
-fn ensure_task_accepts_new_run<R>(repos: &R, task: &Task) -> ApplicationResult<()>
+fn ensure_task_accepts_new_run<R>(repos: &mut R, task: &Task) -> ApplicationResult<()>
 where
-    R: TaskRunStore,
+    R: TaskRunStore + ProjectRepository,
 {
     let task_id = &task.id;
     if task.status == TaskStatus::Closed {
@@ -87,6 +95,19 @@ where
     let Some(primary_run) = repos.get_task_run(primary_id)? else {
         return Ok(());
     };
+    if primary_run.status == TaskRunStatus::SettingUp && primary_run.terminal_tab_id.is_none() {
+        let profile = match task.project_id.as_deref() {
+            Some(project_id) => load_execution_profile(repos, project_id)?,
+            None => ExecutionProfile::default(),
+        };
+        // Setup is killed at `setup_timeout_sec`, so a run still setting up well past it lost the
+        // process that owned it (an app killed mid-prepare, a Ctrl-C'd `monica task run`). No hook
+        // or sweep ever finishes such a run; left alone it blocks the task for good.
+        if repos.is_task_run_older_than(primary_id, stale_setup_age_secs(&profile))? {
+            repos.finish_task_run(primary_id, task_id, TaskRunStatus::Failed)?;
+            return Ok(());
+        }
+    }
     if is_active_run_status(primary_run.status) {
         return Err(ApplicationError::conflict(format!(
             "task {task_id} already has an active run ({primary_id}, status: {})",
@@ -174,7 +195,7 @@ where
 /// Whether an in-place Run has to create a fresh TaskRun. A prepared primary is launched as it
 /// stands and a stopped one with a recorded session is resumed in place, so the mode only decides
 /// how a *new* run is born — never how an existing one is reopened.
-fn needs_new_run(primary: Option<&TaskRun>) -> bool {
+pub(super) fn needs_new_run(primary: Option<&TaskRun>) -> bool {
     match primary {
         None => true,
         Some(run) => run.status != TaskRunStatus::Prepared && run.resumable_session().is_none(),
