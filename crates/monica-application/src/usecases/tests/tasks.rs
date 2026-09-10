@@ -1,6 +1,7 @@
 use super::*;
 use super::support::*;
 use crate::bench::bench_runspace_id;
+use crate::{PendingLaunchStore, RunTaskResult};
 use crate::usecases::tasks::{
     attach_terminal_session_to_task, list_tab_task_bindings, MakeMainOutcome, TabTaskBinding,
 };
@@ -67,6 +68,40 @@ fn close_task_delegates_run_cleanup_to_git_gateway() {
     assert_eq!(report.removed_branches, vec!["issue-42"]);
     assert!(git.cleaned());
     assert_eq!(git.reaped_worktrees(), vec![std::path::PathBuf::from("/tmp/wt")]);
+}
+
+#[test]
+fn close_task_drops_the_pending_launch_before_cleanup() {
+    let mut repos = FakeRepos::default();
+    let mut project = Project::from_repo("owner/repo");
+    project.path = Some("/repo".to_string());
+    repos.insert_project(project);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let run = repos
+        .start_task_run(NewTaskRun {
+            task_id: task_id.clone(),
+            agent: None,
+            branch: Some("mon-1".to_string()),
+            worktree_path: Some("/tmp/wt".to_string()),
+        })
+        .unwrap();
+    repos
+        .finish_task_run(&run.id, &task_id, TaskRunStatus::Prepared)
+        .unwrap();
+    repos
+        .put_pending_launch(&RunTaskResult {
+            task_id: task_id.clone(),
+            task_run_id: run.id.clone(),
+            runspace_id: bench_runspace_id(&task_id),
+            cwd: "/tmp/wt".to_string(),
+            env: Vec::new(),
+            initial_command: "claude".to_string(),
+        })
+        .unwrap();
+
+    close_task(&mut repos, &FakeGit::default(), &task_id).unwrap();
+
+    assert!(repos.take_pending_launches().unwrap().is_empty());
 }
 
 

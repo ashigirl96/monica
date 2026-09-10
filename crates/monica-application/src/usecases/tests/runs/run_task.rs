@@ -51,6 +51,20 @@ fn start_run_rejects_closed_task() {
     assert!(err.to_string().contains("is closed"), "{err}");
 }
 
+/// The board greys Run out for `in_progress` with no Main Run; the backend has to agree, or
+/// `monica task run` prepares a task the GUI refuses.
+#[test]
+fn start_run_rejects_an_in_progress_task_without_a_primary() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    repos.update_task_status(&task_id, TaskStatus::InProgress).unwrap();
+
+    let err = start_run(&mut repos, &task_id).unwrap_err();
+    assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
+    assert!(err.to_string().contains("without a Main Run"), "{err}");
+}
+
 #[test]
 fn start_run_missing_task_is_not_found() {
     let mut repos = FakeRepos::default();

@@ -1,5 +1,6 @@
 use anyhow::Result;
 
+use crate::prelude::TaskId;
 use crate::RunTaskResult;
 
 /// Runs whose agent tab the Workbench has yet to open. The tab layout is frontend-owned, so a Run
@@ -11,4 +12,6 @@ pub trait PendingLaunchStore {
     fn put_pending_launch(&mut self, launch: &RunTaskResult) -> Result<()>;
     /// Remove and return every pending launch in request order.
     fn take_pending_launches(&mut self) -> Result<Vec<RunTaskResult>>;
+    /// Drop every pending launch for `task_id` without returning it.
+    fn remove_pending_launches_for_task(&mut self, task_id: &TaskId) -> Result<()>;
 }

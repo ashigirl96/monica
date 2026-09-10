@@ -61,6 +61,14 @@ pub(super) fn take_pending_launches(conn: &mut Connection) -> Result<Vec<RunTask
     Ok(launches)
 }
 
+pub(super) fn remove_pending_launches_for_task(conn: &Connection, task_id: &TaskId) -> Result<()> {
+    conn.execute(
+        "DELETE FROM task_run_launches WHERE task_id = ?1",
+        [task_id.as_str()],
+    )?;
+    Ok(())
+}
+
 impl PendingLaunchStore for SqliteStore {
     fn put_pending_launch(&mut self, launch: &RunTaskResult) -> Result<()> {
         put_pending_launch(self.conn(), launch)
@@ -68,6 +76,10 @@ impl PendingLaunchStore for SqliteStore {
 
     fn take_pending_launches(&mut self) -> Result<Vec<RunTaskResult>> {
         take_pending_launches(self.conn_mut())
+    }
+
+    fn remove_pending_launches_for_task(&mut self, task_id: &TaskId) -> Result<()> {
+        remove_pending_launches_for_task(self.conn(), task_id)
     }
 }
 
@@ -132,5 +144,21 @@ mod tests {
             .map(|l| l.task_run_id.to_string())
             .collect();
         assert_eq!(ids, vec!["run-2", "run-1"]);
+    }
+
+    #[test]
+    fn remove_for_task_leaves_other_tasks_launches_alone() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        store.put_pending_launch(&launch("run-1", "claude")).unwrap();
+        let mut other = launch("run-2", "claude");
+        other.task_id = TaskId::from_store("MON-2".to_string());
+        store.put_pending_launch(&other).unwrap();
+
+        store
+            .remove_pending_launches_for_task(&TaskId::from_store("MON-1".to_string()))
+            .unwrap();
+
+        let taken = store.take_pending_launches().unwrap();
+        assert_eq!(taken, vec![other]);
     }
 }

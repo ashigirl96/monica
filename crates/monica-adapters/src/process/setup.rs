@@ -51,6 +51,13 @@ pub fn run_setup_script(
     env: &SetupEnv,
     timeout: Duration,
 ) -> Result<SetupOutcome> {
+    if take_interrupt_request() {
+        write_log(log_path, "monica: setup interrupted before it started\n")?;
+        return Ok(SetupOutcome::Failed {
+            code: None,
+            timed_out: false,
+        });
+    }
     let script = worktree.join(SETUP_SCRIPT_REL);
     if !script.is_file() {
         write_log(
@@ -196,14 +203,24 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
+    use std::sync::Mutex;
 
-    fn worktree_with_setup(name: &str, script: &str) -> PathBuf {
+    /// The interrupt flag is process-wide, so tests that set or consume it cannot overlap.
+    static INTERRUPT_FLAG_OWNER: Mutex<()> = Mutex::new(());
+
+    fn temp_worktree(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "monica-setup-{name}-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
         let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn worktree_with_setup(name: &str, script: &str) -> PathBuf {
+        let dir = temp_worktree(name);
         fs::create_dir_all(dir.join(".monica")).unwrap();
         let path = dir.join(SETUP_SCRIPT_REL);
         fs::write(&path, script).unwrap();
@@ -223,6 +240,7 @@ mod tests {
 
     #[test]
     fn an_interrupt_request_kills_the_script_and_reports_a_plain_failure() {
+        let _owner = INTERRUPT_FLAG_OWNER.lock().unwrap();
         let worktree = worktree_with_setup("interrupt", "#!/bin/sh\nsleep 30\n");
         let log_path = worktree.join("setup.log");
         thread::spawn(|| {
@@ -247,12 +265,35 @@ mod tests {
 
     #[test]
     fn a_script_that_exits_on_its_own_is_not_interrupted() {
+        let _owner = INTERRUPT_FLAG_OWNER.lock().unwrap();
         let worktree = worktree_with_setup("exit-zero", "#!/bin/sh\nexit 0\n");
         let log_path = worktree.join("setup.log");
 
         let outcome = run_setup_script(&worktree, &log_path, &env(), Duration::from_secs(30)).unwrap();
 
         assert_eq!(outcome, SetupOutcome::Succeeded);
+        let _ = fs::remove_dir_all(&worktree);
+    }
+
+    /// Ctrl-C during worktree creation lands before the script exists to kill; without a script at
+    /// all it must still stop the run instead of reporting setup as skipped.
+    #[test]
+    fn an_interrupt_already_requested_fails_setup_even_without_a_script() {
+        let _owner = INTERRUPT_FLAG_OWNER.lock().unwrap();
+        let worktree = temp_worktree("no-script");
+        let log_path = worktree.join("setup.log");
+        request_setup_interrupt();
+
+        let outcome = run_setup_script(&worktree, &log_path, &env(), Duration::from_secs(30)).unwrap();
+
+        assert_eq!(
+            outcome,
+            SetupOutcome::Failed {
+                code: None,
+                timed_out: false
+            }
+        );
+        assert!(fs::read_to_string(&log_path).unwrap().contains("interrupted"));
         let _ = fs::remove_dir_all(&worktree);
     }
 }

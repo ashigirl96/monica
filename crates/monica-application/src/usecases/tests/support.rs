@@ -1075,6 +1075,14 @@ impl PendingLaunchStore for FakeRepos {
         let launches = std::mem::take(&mut self.state.borrow_mut().pending_launches);
         Ok(launches.into_values().collect())
     }
+
+    fn remove_pending_launches_for_task(&mut self, task_id: &TaskId) -> Result<()> {
+        self.state
+            .borrow_mut()
+            .pending_launches
+            .retain(|_, launch| launch.task_id != *task_id);
+        Ok(())
+    }
 }
 
 impl UnitOfWork for FakeRepos {

@@ -9,8 +9,8 @@ use super::ports::{
 use crate::ports::TerminalSessionRepository;
 use crate::usecases::tasks::primary_run;
 use crate::prelude::{
-    ExternalReference, NewTaskRun, Project, RefType, RunMode, Task, TaskId, TaskRun, TaskRunId,
-    TaskRunStatus, TaskStatus,
+    DisplayStatus, ExternalReference, NewTaskRun, Project, RefType, RunMode, Task, TaskId, TaskRun,
+    TaskRunId, TaskRunStatus, TaskStatus,
 };
 use crate::{ApplicationError, ApplicationResult, ExecutionProfile, PrepareTaskResult};
 
@@ -109,12 +109,20 @@ where
         )));
     }
 
-    let Some(primary_id) = task.primary_task_run_id.as_ref() else {
-        return Ok(());
+    let primary_run = match task.primary_task_run_id.as_ref() {
+        Some(primary_id) => repos.get_task_run(primary_id)?,
+        None => None,
     };
-    let Some(primary_run) = repos.get_task_run(primary_id)? else {
-        return Ok(());
+    let Some(primary_run) = primary_run else {
+        if DisplayStatus::from_task_and_run(task.status, None).prepare_eligible() {
+            return Ok(());
+        }
+        return Err(ApplicationError::validation(format!(
+            "task {task_id} is in progress without a Main Run; mark it ready or attach a session \
+             before running"
+        )));
     };
+    let primary_id = &primary_run.id;
     // Setup is killed at `setup_timeout_sec`, so a run still setting up well past it lost the
     // process that owned it (an app killed mid-prepare). No hook or sweep ever finishes such a run;
     // left alone it blocks the task for good.
