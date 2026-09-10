@@ -1,6 +1,6 @@
 use super::*;
 use super::support::*;
-use monica_domain::{AgentSessionId, RunspaceId};
+use monica_domain::{AgentSessionId, RunMode, RunspaceId};
 
 
 // The pure decision functions (task_run_settlement_for_*, reconcile_terminal_sessions) and the
@@ -423,4 +423,95 @@ fn explanation_delete_invalid_id_returns_validation() {
 
     let err = monica.explanations().delete_explanation("../evil").unwrap_err();
     assert!(matches!(err, ApplicationError::Validation(_)));
+}
+
+fn status_events(sink: &RecordingSink) -> Vec<TaskRunStatus> {
+    sink.events()
+        .iter()
+        .filter_map(|e| match e {
+            ApplicationEvent::TaskRunStatusChanged { status, .. } => Some(*status),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A worktree Run on a task with no run yet prepares in-line (worktree, setup, `Prepared`
+/// announced) and leaves exactly one pending launch for the Workbench to open.
+#[test]
+fn facade_launch_task_prepares_a_worktree_run_and_records_the_launch() {
+    let mut repos = FakeRepos::default();
+    let checkout = temp_dir_named("launch-worktree");
+    insert_runnable_project_at(&repos, &checkout.to_string_lossy());
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    // FakeGit records no directory; the launch stats the worktree before opening there.
+    std::fs::create_dir_all(checkout.join(".worktrees/mon-1")).unwrap();
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    let launch = monica
+        .executions()
+        .launch_task(&task_id, None, RunMode::Worktree)
+        .unwrap();
+
+    assert_eq!(launch.cwd, checkout.join(".worktrees/mon-1").to_string_lossy());
+    assert_eq!(launch.initial_command, "claude");
+    assert_eq!(status_events(&sink), vec![TaskRunStatus::Prepared]);
+    let pending = monica.executions().take_pending_launches().unwrap();
+    assert_eq!(pending, vec![launch]);
+}
+
+#[test]
+fn facade_launch_task_fails_when_setup_fails_and_records_no_launch() {
+    let mut repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let sink = RecordingSink::default();
+    let setup = FakeSetupRunner::with_outcome(SetupOutcome::Failed { code: Some(1), timed_out: false });
+    let mut monica = facade_with_setup(repos, sink.clone(), setup);
+
+    let err = monica
+        .executions()
+        .launch_task(&task_id, None, RunMode::Worktree)
+        .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::External(_)), "{err:?}");
+    assert!(err.to_string().contains("setup failed"), "{err}");
+    assert_eq!(status_events(&sink), vec![TaskRunStatus::Failed]);
+    assert!(monica.executions().take_pending_launches().unwrap().is_empty());
+}
+
+/// An in-place Run has no setup phase: nothing is announced, and the launch opens in the checkout.
+#[test]
+fn facade_launch_task_in_place_skips_setup() {
+    let mut repos = FakeRepos::default();
+    let checkout = temp_dir_named("launch-in-place");
+    insert_runnable_project_at(&repos, &checkout.to_string_lossy());
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    let launch = monica
+        .executions()
+        .launch_task(&task_id, None, RunMode::InPlace)
+        .unwrap();
+
+    assert_eq!(launch.cwd, checkout.to_string_lossy());
+    assert!(status_events(&sink).is_empty());
+    assert_eq!(monica.executions().take_pending_launches().unwrap().len(), 1);
+}
+
+/// Running a still-prepared task twice replaces the request instead of queueing two tabs.
+#[test]
+fn facade_launch_task_rerun_replaces_the_pending_launch() {
+    let mut repos = FakeRepos::default();
+    let checkout = temp_dir_named("launch-rerun");
+    insert_runnable_project_at(&repos, &checkout.to_string_lossy());
+    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink);
+
+    monica.executions().launch_task(&task_id, None, RunMode::InPlace).unwrap();
+    monica.executions().launch_task(&task_id, None, RunMode::InPlace).unwrap();
+
+    assert_eq!(monica.executions().take_pending_launches().unwrap().len(), 1);
 }

@@ -4,9 +4,10 @@ use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_application::{
     parse_issue_input, parse_pull_request_input, AttachSessionReport, GithubIssueState,
-    GithubPullRequestStatus, GithubSyncReport, TaskSummaryRow, TaskSyncChange, TrackOutcome,
+    GithubPullRequestStatus, GithubSyncReport, RunTaskResult, TaskSummaryRow, TaskSyncChange,
+    TrackOutcome,
 };
-use monica_domain::{parse_owner_repo, Agent, DisplayStatus, TaskId};
+use monica_domain::{parse_owner_repo, Agent, DisplayStatus, RunMode, TaskId};
 
 use crate::event_sink::{self, CliFacade};
 use crate::table::{or_dash, render_table};
@@ -32,6 +33,14 @@ pub enum TaskCommand {
         /// owner/repo#123 or GitHub pull request URL
         target: String,
     },
+    /// Launch (or resume) the task's Main Run; Monica opens a Claude tab in its runspace
+    Run {
+        /// MON-<id>
+        id: String,
+        /// Run in the project checkout instead of preparing a worktree
+        #[arg(long)]
+        in_place: bool,
+    },
     /// Connect this terminal tab's agent session to an existing task (MON-<id>)
     Attach {
         /// MON-<id>
@@ -55,6 +64,7 @@ pub async fn run(cmd: TaskCommand) -> Result<()> {
         TaskCommand::Track { target } => track_command(&mut monica, &target).await,
         TaskCommand::Status { status, project } => status_command(&mut monica, status, project),
         TaskCommand::Pr { id, target } => pr_command(&mut monica, &id, &target).await,
+        TaskCommand::Run { id, in_place } => run_command(&mut monica, &id, in_place),
         TaskCommand::Attach { id } => attach_command(&mut monica, &id),
         TaskCommand::Close { id } => close_command(&mut monica, &id),
         TaskCommand::Sync { id } => sync_command(&mut monica, id.as_deref()).await,
@@ -215,6 +225,54 @@ fn render_sync_report(report: &GithubSyncReport) -> String {
 /// The `-` the table uses for a column a given change kind has nothing to put in.
 fn dash() -> String {
     or_dash(None)
+}
+
+fn run_command(monica: &mut CliFacade, id: &str, in_place: bool) -> Result<()> {
+    let task_id = TaskId::parse(id)?;
+    let mode = if in_place { RunMode::InPlace } else { RunMode::Worktree };
+    // Setup can take minutes and launch_task blocks through it, so say so up front.
+    let needs_prepare = mode == RunMode::Worktree
+        && monica
+            .tasks()
+            .list_all_task_summaries(None)?
+            .iter()
+            .any(|row| row.id == task_id.as_str() && row.run_needs_prepare);
+    if needs_prepare {
+        println!("Preparing a worktree and running setup for {task_id} ...");
+        io::stdout().flush()?;
+        forward_ctrl_c_to_setup();
+    }
+    let launch = monica.executions().launch_task(&task_id, None, mode)?;
+    print!("{}", render_run_report(&launch));
+    Ok(())
+}
+
+/// The setup script runs in its own process group so a timeout can kill its whole tree, which also
+/// keeps the terminal's Ctrl-C from reaching it. Hand the interrupt on so an aborted `task run`
+/// takes its setup down with it and the run ends `failed` instead of an orphaned script keeping
+/// the task stuck at `setting_up`.
+#[cfg(unix)]
+fn forward_ctrl_c_to_setup() {
+    extern "C" fn on_sigint(_: libc::c_int) {
+        monica_runtime::request_setup_interrupt();
+    }
+    // SAFETY: the handler only stores to an atomic, which is async-signal-safe.
+    unsafe {
+        libc::signal(
+            libc::SIGINT,
+            on_sigint as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        );
+    }
+}
+
+#[cfg(not(unix))]
+fn forward_ctrl_c_to_setup() {}
+
+fn render_run_report(launch: &RunTaskResult) -> String {
+    format!(
+        "Launched {} ({}) in {}\nMonica opens a Claude tab in the task's runspace.\n",
+        launch.task_id, launch.task_run_id, launch.cwd
+    )
 }
 
 /// The `MONICA_*` identity a tab burns into its shell env, as `attach` needs it.
@@ -416,6 +474,23 @@ mod tests {
                 "{err} (tab={tab:?}, session={session:?})"
             );
         }
+    }
+
+    #[test]
+    fn render_run_report_names_the_run_and_where_it_opens() {
+        let rendered = render_run_report(&RunTaskResult {
+            task_id: TaskId::from_store("MON-42".to_string()),
+            task_run_id: monica_domain::TaskRunId::from_store("run-73".to_string()),
+            runspace_id: monica_domain::RunspaceId::from_store("bench-MON-42".to_string()),
+            cwd: "/repo/.worktrees/mon-42".to_string(),
+            env: Vec::new(),
+            initial_command: "claude".to_string(),
+        });
+        assert_eq!(
+            rendered,
+            "Launched MON-42 (run-73) in /repo/.worktrees/mon-42\n\
+             Monica opens a Claude tab in the task's runspace.\n"
+        );
     }
 
     #[test]

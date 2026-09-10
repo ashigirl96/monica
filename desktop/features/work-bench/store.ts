@@ -8,6 +8,7 @@ import {
   makeMainTaskRun,
   primaryAgentSessionId,
   primaryTabId,
+  takePendingLaunches,
   taskShellEnv,
   type TabTaskBinding,
 } from "@/commands/task";
@@ -924,6 +925,32 @@ export const reconcileTabBindingsAtom = atom(null, async (get, set) => {
   const bindings = await listTabTaskBindings();
   for (const move of planTabMoves(get(resolvedStateAtom), bindings)) {
     await moveTabIntoTask(get, set, move.tabId, move, false);
+  }
+});
+
+// Run records a pending launch in the DB instead of opening a tab itself, so a Run requested from
+// another process (`monica task run`) and one from the board reach the bench the same way: this
+// takes the pending launches and opens each as an agent tab. Taking is destructive, so only the
+// main window does it, and only once the layout it would add to has been loaded.
+export const materializePendingLaunchesAtom = atom(null, async (get, set) => {
+  if (get(windowLabelAtom) !== MAIN_WINDOW_LABEL) return;
+  if (get(terminalStateAtom) === null) return;
+  const launches = await takePendingLaunches();
+  for (const launch of launches) {
+    try {
+      const known = get(resolvedStateAtom).runspaces.some((rs) => rs.id === launch.runspace_id);
+      const shellEnv = known ? undefined : await taskShellEnv(launch.task_id).catch(() => []);
+      await set(createTaskRunspaceAtom, {
+        runspaceId: launch.runspace_id,
+        taskId: launch.task_id,
+        cwd: launch.cwd,
+        env: shellEnv && shellEnv.length > 0 ? shellEnv : undefined,
+        launch: { env: launch.env, initialCommand: launch.initial_command },
+        activate: false,
+      });
+    } catch (e) {
+      warnTerminal(`launch ${launch.task_run_id}`, e);
+    }
   }
 });
 

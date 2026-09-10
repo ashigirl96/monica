@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use super::ports::{GitGateway, ProjectRepository, TaskRunStore, TaskStore};
+use crate::ports::PendingLaunchStore;
 use crate::prelude::{Task, TaskId, TaskRun};
 use crate::{ApplicationError, ApplicationResult};
 
@@ -13,13 +14,16 @@ pub struct CloseTaskReport {
 
 pub fn close_task<R, G>(repos: &mut R, git: &G, id: &TaskId) -> ApplicationResult<CloseTaskReport>
 where
-    R: TaskStore + TaskRunStore + ProjectRepository,
+    R: TaskStore + TaskRunStore + ProjectRepository + PendingLaunchStore,
     G: GitGateway,
 {
     let task = repos
         .get_task(id)?
         .ok_or_else(|| ApplicationError::not_found(format!("task not found: {id}")))?;
     let runs = repos.list_task_runs_for_task(id)?;
+    // Before the worktrees go: the task reads as open until `mark_task_closed`, so a launch the
+    // desktop polls in between would otherwise open a tab in a directory that no longer exists.
+    repos.remove_pending_launches_for_task(id)?;
     let removed_branches = cleanup_runs(repos, git, &task, &runs)?;
     crate::usecases::runs::reap_worktree_trash(repos, git);
     let task = repos.mark_task_closed(id)?;

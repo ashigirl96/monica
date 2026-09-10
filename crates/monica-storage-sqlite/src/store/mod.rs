@@ -3,6 +3,7 @@ mod events;
 mod explanations;
 mod external_refs;
 mod github_issue_sync;
+mod launches;
 pub(crate) mod notes;
 pub(crate) mod notification_outbox;
 mod projects;

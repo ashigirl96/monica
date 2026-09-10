@@ -33,7 +33,7 @@ pub use facade::{
 pub use ports::{
     AgentDecoders, AgentEventDecoder, EventRepository, ExplanationOutputs, ExplanationStore,
     GitGateway, GithubIssueSyncStore, LinkPreview, NoteStore, NotificationOutboxStore,
-    ProjectRepository,
+    PendingLaunchStore, ProjectRepository,
     PullRequestSyncStore,
     ShellScaffolding,
     TabAttachment,

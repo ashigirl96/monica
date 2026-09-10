@@ -82,6 +82,22 @@ pub(super) fn list_driven_task_runs_with_tab(conn: &Connection) -> Result<Vec<Ta
     Ok(runs)
 }
 
+pub(super) fn is_task_run_older_than(
+    conn: &Connection,
+    task_run_id: &TaskRunId,
+    max_age_secs: i64,
+) -> Result<bool> {
+    let mut stmt = conn.prepare(
+        "SELECT updated_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?2)
+           FROM task_runs WHERE id = ?1",
+    )?;
+    let mut rows = stmt.query(params![task_run_id.as_str(), format!("-{max_age_secs} seconds")])?;
+    match rows.next()? {
+        Some(row) => Ok(row.get(0)?),
+        None => Ok(false),
+    }
+}
+
 /// Settle a run as Stopped because its terminal died, but only while it is still live.
 /// The status precondition lives in the WHERE clause so a SessionEnd → Stopped hook landing
 /// concurrently can never be overwritten; `Ok(false)` means someone else settled it first
@@ -534,6 +550,10 @@ impl TaskRunStore for SqliteStore {
         list_driven_task_runs_with_tab(self.conn())
     }
 
+    fn is_task_run_older_than(&self, task_run_id: &TaskRunId, max_age_secs: i64) -> Result<bool> {
+        is_task_run_older_than(self.conn(), task_run_id, max_age_secs)
+    }
+
     fn settle_task_run_if_live(&mut self, task_run_id: &TaskRunId, task_id: &TaskId) -> Result<bool> {
         let tx = self.conn_mut().transaction()?;
         let settled = settle_task_run_if_live_in(&tx, task_run_id, task_id)?;
@@ -586,5 +606,65 @@ impl TaskRunStore for SqliteStore {
         record_task_run_observation_in(&tx, task_run_id, observation)?;
         tx.commit()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SqliteStore;
+    use monica_application::TaskStore;
+    use monica_domain::{NewTask, RawJson, TaskKind, TaskStatus};
+
+    fn store_with_run() -> (SqliteStore, TaskRunId) {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        let task = store
+            .insert_task(NewTask {
+                kind: TaskKind::Development,
+                status: TaskStatus::Ready,
+                title: Some("t".to_string()),
+                body: None,
+                phase: None,
+                project_id: None,
+                labels: Vec::new(),
+                details: RawJson::empty_object(),
+                source: None,
+            })
+            .unwrap();
+        let run = store
+            .start_task_run(NewTaskRun {
+                task_id: task.id,
+                agent: None,
+                branch: None,
+                worktree_path: None,
+            })
+            .unwrap();
+        (store, run.id)
+    }
+
+    #[test]
+    fn a_fresh_run_is_not_older_than_the_threshold() {
+        let (store, run_id) = store_with_run();
+        assert!(!store.is_task_run_older_than(&run_id, 60).unwrap());
+    }
+
+    #[test]
+    fn an_aged_run_is_older_than_the_threshold() {
+        let (store, run_id) = store_with_run();
+        store
+            .conn()
+            .execute(
+                "UPDATE task_runs SET updated_at = '2000-01-01T00:00:00.000Z' WHERE id = ?1",
+                params![run_id.as_str()],
+            )
+            .unwrap();
+        assert!(store.is_task_run_older_than(&run_id, 60).unwrap());
+    }
+
+    #[test]
+    fn an_unknown_run_is_not_older_than_anything() {
+        let (store, _) = store_with_run();
+        let missing = TaskRunId::from_store("run-404".to_string());
+        assert!(!store.is_task_run_older_than(&missing, 0).unwrap());
     }
 }

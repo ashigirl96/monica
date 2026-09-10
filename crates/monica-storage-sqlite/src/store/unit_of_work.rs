@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rusqlite::Transaction;
+use rusqlite::{Transaction, TransactionBehavior};
 
 use crate::SqliteStore;
 use monica_application::{
@@ -22,8 +22,12 @@ struct SqliteUow<'conn> {
 }
 
 impl UnitOfWork for SqliteStore {
+    /// Takes the write lock up front. Use cases read state inside the transaction to decide what
+    /// to write (is the Main Run slot free?), and a deferred transaction would let two processes
+    /// both pass that read before either one's write is visible to the other.
     fn begin(&mut self) -> Result<Box<dyn WorkTransaction + '_>> {
-        Ok(Box::new(SqliteUow { tx: self.conn_mut().transaction()? }))
+        let tx = self.conn_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        Ok(Box::new(SqliteUow { tx }))
     }
 }
 
@@ -132,6 +136,10 @@ impl TaskRunStore for SqliteUow<'_> {
         task_runs::list_driven_task_runs_with_tab(&self.tx)
     }
 
+    fn is_task_run_older_than(&self, task_run_id: &TaskRunId, max_age_secs: i64) -> Result<bool> {
+        task_runs::is_task_run_older_than(&self.tx, task_run_id, max_age_secs)
+    }
+
     fn settle_task_run_if_live(&mut self, task_run_id: &TaskRunId, task_id: &TaskId) -> Result<bool> {
         task_runs::settle_task_run_if_live_in(&self.tx, task_run_id, task_id)
     }
@@ -217,5 +225,33 @@ impl WorkbenchStore for SqliteUow<'_> {
 
     fn update_bench_cwd(&self, task_id: &TaskId, cwd: &str) -> Result<()> {
         bench::update_bench_cwd(&self.tx, task_id, cwd)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::migrations::test_support::temp_db_path;
+    use rusqlite::{Connection, ErrorCode};
+
+    #[test]
+    fn begin_holds_the_write_lock_before_any_write() {
+        let path = temp_db_path("uow-lock");
+        let mut store = SqliteStore::open_at(&path).unwrap();
+        let other = Connection::open(&path).unwrap();
+        other.busy_timeout(std::time::Duration::ZERO).unwrap();
+
+        let tx = store.begin().unwrap();
+        let err = other
+            .execute_batch("BEGIN IMMEDIATE")
+            .expect_err("a second writer must be refused while the unit of work is open");
+        assert_eq!(
+            err.sqlite_error_code(),
+            Some(ErrorCode::DatabaseBusy),
+            "unexpected error: {err}"
+        );
+        drop(tx);
+
+        other.execute_batch("BEGIN IMMEDIATE; ROLLBACK").unwrap();
     }
 }

@@ -44,6 +44,9 @@ pub trait TaskRunStore {
     /// Runs still pinned to a terminal tab and not yet in a terminal state — the candidate set for
     /// the orphaned-run settlement sweep.
     fn list_driven_task_runs_with_tab(&self) -> Result<Vec<TaskRun>>;
+    /// Whether the run's `updated_at` is more than `max_age_secs` in the past. `false` for an
+    /// unknown run.
+    fn is_task_run_older_than(&self, task_run_id: &TaskRunId, max_age_secs: i64) -> Result<bool>;
     /// Settle a still-live run as stopped, returning `true` only if this call moved it (a hook may
     /// have settled it first, in which case the caller must not re-announce).
     fn settle_task_run_if_live(&mut self, task_run_id: &TaskRunId, task_id: &TaskId) -> Result<bool>;

@@ -102,6 +102,18 @@ mod tests {
     }
 
     #[test]
+    fn task_run_takes_a_task_id_and_an_optional_in_place_flag() {
+        assert!(Cli::try_parse_from(["monica", "task", "run", "MON-1"]).is_ok());
+        assert!(Cli::try_parse_from(["monica", "task", "run", "MON-1", "--in-place"]).is_ok());
+        assert!(Cli::try_parse_from(["monica", "task", "run"]).is_err());
+        assert!(Cli::try_parse_from(["monica", "task", "run", "MON-1", "MON-2"]).is_err());
+        // Claude is the only agent, so run takes no agent selector (same as attach).
+        assert!(
+            Cli::try_parse_from(["monica", "task", "run", "MON-1", "--agent", "claude"]).is_err()
+        );
+    }
+
+    #[test]
     fn note_show_and_search_parse() {
         assert!(Cli::try_parse_from(["monica", "note", "show", "note-1"]).is_ok());
         assert!(

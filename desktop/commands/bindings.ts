@@ -78,8 +78,14 @@ export const commands = {
     typedError<TaskBench, ApiError>(__TAURI_INVOKE("open_bench", { taskId })),
   prepareTask: (taskId: string) =>
     typedError<PrepareTaskResult, ApiError>(__TAURI_INVOKE("prepare_task", { taskId })),
-  runTask: (taskId: string, agent: "claude" | null, mode: RunMode) =>
-    typedError<RunTaskResult, ApiError>(__TAURI_INVOKE("run_task", { taskId, agent, mode })),
+  /**
+   *  Blocks through worktree creation and setup when the run needs preparing; `off_main` keeps that
+   *  off the UI thread, and the caller sees the launch only once it is recorded.
+   */
+  launchTask: (taskId: string, agent: "claude" | null, mode: RunMode) =>
+    typedError<RunTaskResult, ApiError>(__TAURI_INVOKE("launch_task", { taskId, agent, mode })),
+  takePendingLaunches: () =>
+    typedError<RunTaskResult[], ApiError>(__TAURI_INVOKE("take_pending_launches")),
   closeTask: (taskId: string) =>
     typedError<null, ApiError>(__TAURI_INVOKE("close_task", { taskId })),
   /**

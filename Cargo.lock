@@ -3035,6 +3035,7 @@ dependencies = [
  "anyhow",
  "clap",
  "clap_complete",
+ "libc",
  "monica-application",
  "monica-domain",
  "monica-logfile",

@@ -1,3 +1,3 @@
 mod setup;
 
-pub use setup::ProcessSetupRunner;
+pub use setup::{request_setup_interrupt, ProcessSetupRunner};
