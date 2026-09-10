@@ -84,6 +84,14 @@ pub fn export_bindings() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before anything else, so a panic during setup is reported too. The hook needs no logger at
+    // install time — only when it fires, by which point the log plugin is up.
+    monica_runtime::panic::install();
+
+    // Read once: the levels the plugin is built with are the same ones `setup` reports typos for.
+    let mut log_filter = monica_runtime::log_filter::from_env(log::LevelFilter::Info);
+    let unknown_log_filters = std::mem::take(&mut log_filter.unknown);
+
     #[cfg(all(unix, not(debug_assertions)))]
     let path_fix = shell_path::fix_path_from_login_shell();
 
@@ -117,9 +125,9 @@ pub fn run() {
     #[cfg(debug_assertions)]
     let builder = builder.plugin(tauri_plugin_mcp_bridge::init());
     #[cfg(debug_assertions)]
-    let builder = builder.plugin(debug_log_plugin());
+    let builder = builder.plugin(debug_log_plugin(log_filter));
     #[cfg(not(debug_assertions))]
-    let builder = builder.plugin(release_log_plugin());
+    let builder = builder.plugin(release_log_plugin(log_filter));
 
     builder
         .plugin(tauri_plugin_notification::init())
@@ -129,6 +137,12 @@ pub fn run() {
         .manage(bridge::BridgeHandle::new())
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
+            // First line of the process: the log plugin's logger is installed during `build()`,
+            // and nothing else here has logged yet.
+            monica_runtime::log_startup_banner(env!("CARGO_PKG_VERSION"), env!("MONICA_GIT_SHA"));
+            for token in &unknown_log_filters {
+                log::warn!(target: "monica_app::startup", "ignoring unparsable log filter {token:?}");
+            }
             specta_builder.mount_events(app);
             let waker = schedulers::github_sync::start(app.handle().clone());
             app.manage(waker);
@@ -181,12 +195,6 @@ pub fn run() {
                 }
             };
             app.manage(WebUrl(web_url));
-            #[cfg(not(debug_assertions))]
-            log::info!(
-                target: "monica_app::startup",
-                "release file logging enabled path={}",
-                release_log_path().display()
-            );
             #[cfg(all(unix, not(debug_assertions)))]
             match &path_fix {
                 Ok(()) => log::info!(
@@ -233,46 +241,60 @@ fn write_web_port_file(port: u16) {
     }
 }
 
+fn with_log_filter(
+    builder: tauri_plugin_log::Builder,
+    filter: monica_runtime::LogFilter,
+) -> tauri_plugin_log::Builder {
+    let mut builder = builder.level(filter.default);
+    for (target, level) in filter.targets {
+        builder = builder.level_for(target, level);
+    }
+    builder
+}
+
 #[cfg(debug_assertions)]
-fn debug_log_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+fn debug_log_plugin<R: tauri::Runtime>(
+    filter: monica_runtime::LogFilter,
+) -> tauri::plugin::TauriPlugin<R> {
     use tauri_plugin_log::{Target, TargetKind};
 
     // Dev builds otherwise initialize no logger, so backend `log::*` output is silently dropped.
     // Route it to stdout (the `just dev` console) and the webview console for parity with the
     // release Folder target.
-    tauri_plugin_log::Builder::new()
-        .clear_targets()
-        .target(Target::new(TargetKind::Stdout))
-        .target(Target::new(TargetKind::Webview))
-        .level(log::LevelFilter::Info)
-        .build()
+    with_log_filter(
+        tauri_plugin_log::Builder::new()
+            .clear_targets()
+            .target(Target::new(TargetKind::Stdout))
+            .target(Target::new(TargetKind::Webview)),
+        filter,
+    )
+    .build()
 }
 
 #[cfg(not(debug_assertions))]
-fn release_log_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+fn release_log_plugin<R: tauri::Runtime>(
+    filter: monica_runtime::LogFilter,
+) -> tauri::plugin::TauriPlugin<R> {
     use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 
-    tauri_plugin_log::Builder::new()
-        .clear_targets()
-        .target(Target::new(TargetKind::Folder {
-            path: release_log_dir(),
-            file_name: Some("monica".to_string()),
-        }))
-        .level(log::LevelFilter::Info)
-        .max_file_size(1_000_000)
-        .rotation_strategy(RotationStrategy::KeepSome(5))
-        .build()
+    with_log_filter(
+        tauri_plugin_log::Builder::new()
+            .clear_targets()
+            .target(Target::new(TargetKind::Folder {
+                path: release_log_dir(),
+                file_name: Some("monica".to_string()),
+            })),
+        filter,
+    )
+    .max_file_size(1_000_000)
+    .rotation_strategy(RotationStrategy::KeepSome(5))
+    .build()
 }
 
 #[cfg(not(debug_assertions))]
 fn release_log_dir() -> std::path::PathBuf {
     monica_paths::logs_dir()
         .unwrap_or_else(|_| std::env::temp_dir().join("monica").join("logs"))
-}
-
-#[cfg(not(debug_assertions))]
-fn release_log_path() -> std::path::PathBuf {
-    release_log_dir().join("monica.log")
 }
 
 #[cfg(test)]

@@ -85,7 +85,7 @@ where
                 branch_map.insert(branch_key, pr);
             }
         }
-        log::info!(
+        log::debug!(
             target: "monica_application::github_sync",
             "bulk PR fetch repo={repo} fetched={fetched} branches={} in {}ms",
             branch_map.len(),

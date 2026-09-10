@@ -3122,6 +3122,7 @@ dependencies = [
  "monica-adapters",
  "monica-application",
  "monica-domain",
+ "monica-paths",
  "monica-storage-sqlite",
  "tokio",
 ]

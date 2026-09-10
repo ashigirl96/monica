@@ -63,7 +63,7 @@ where
                 for issue in issues {
                     map.insert(issue.number, issue);
                 }
-                log::info!(
+                log::debug!(
                     target: "monica_application::github_sync",
                     "bulk issue fetch repo={repo} fetched={fetched} in {}ms",
                     elapsed.as_millis()
