@@ -31,6 +31,35 @@ PR 同期は常時 polling ではなく、Workboard への移動時と cmd+r の
 
 ---
 
+## ログ
+
+release は `~/monica/logs/monica.log`（1MB × 5 世代）、dev は stdout と webview console に出る。どちらも起動直後に 1 行のバナーを出すので、そのログをどのビルドがどの `MONICA_HOME` で書いたかは先頭を見れば分かる。
+
+```
+startup version=0.1.0 git_sha=5113b5d profile=release monica_home=… db=… ptyd_sock=…
+```
+
+web の port はバナーに入れていない。直後の `monica_web listening on http://…` が出すので重複であり、port の確定を待つとバナーがその timeout の後ろに落ちてファイル先頭を外れるため。
+
+パニックは `monica.log` ではなく **`~/monica/logs/panic_<YYYY-MM-DD>.log`**（日次ローテーション・14 日保持）に残る。release は `panic = "abort"` かつ Finder 起動で stderr が捨てられるため、これがクラッシュ原因を知る唯一の経路になる（`strip = true` なのでバックトレースはアドレスのみ。dSYM と `atos` で解決する）。
+
+`monica.log` に載せていないのは 2 つの理由から。fern はレコードの引数を writer mutex を保持したまま評価するので、ログ呼び出しの最中に起きた panic を hook から `log::error!` すると同一スレッドで再ロックして**ハングする**（abort にすら到達しない）。もう 1 つは寿命で、`monica.log` はサイズ上限のため 5 世代を 1 日で使い切ることがあり、クラッシュ記録が数時間で押し流されうる。ログ系から独立させた副産物として、log plugin が立つ前の起動最初期の panic も拾える。
+
+レベルは `MONICA_LOG`（無ければ `RUST_LOG`）で変えられる。裸のレベルが既定値、`target=level` が個別指定。target のマッチは fern の仕様で `::` 区切りのセグメント単位なので、`monica_application` は `monica_application::github_sync` に効くが `monica_app` は効かない（前方一致ではない）。
+
+```bash
+MONICA_LOG=debug bun run tauri dev
+MONICA_LOG=info,monica_application::github_sync=debug bun run tauri dev
+```
+
+**Finder / Dock から起動した `.app` はシェルの環境変数を引き継がない**（上の PATH の話と同じ理由）。release で効かせるには `launchctl setenv MONICA_LOG debug` してから再起動する。
+
+`debug` にすると notification drain が 2 秒ごとに数行出る（畳まれた tick 自身と、façade を開き直すたびの `rusqlite_migration`）。特定の target だけ上げるほうが読みやすい。
+
+2 秒周期の notification drain だけは、失敗が続いても同じ行を出し続けない。同一の失敗は最初の 1 行と約 30 分ごとの `suppressed=N` 付きの再掲だけに畳まれ、復旧すると 1 行出る。畳まれている間の各 tick は DEBUG に落ちる。
+
+---
+
 ## 1. Rust release profile — "Five Aces"（ワークスペース root の `Cargo.toml`）
 
 `[profile.release]` の **5 項目すべて** が入っていることが前提。1 つでも欠けると目に見えてサイズが増える。

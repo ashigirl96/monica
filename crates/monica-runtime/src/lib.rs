@@ -15,12 +15,18 @@ use monica_application::{Backend, EventSink, LinkPreview, Monica, WorktreeRef};
 use monica_storage_sqlite::SqliteStore;
 
 pub mod asset_gc;
+pub mod log_filter;
 pub mod notification_drain;
 pub mod github_sync;
+pub mod panic;
+pub mod startup;
+mod tick_log;
 
 pub use asset_gc::{start_asset_gc, AssetGcHandle};
+pub use log_filter::LogFilter;
 pub use notification_drain::{start_notification_drain, NotificationDrainHandle};
 pub use github_sync::{start_github_sync, GithubSyncWaker};
+pub use startup::log_startup_banner;
 
 /// The concrete adapter set the desktop and CLI run on: SQLite, octocrab, the git CLI, the process
 /// setup runner, the filesystem run-output stores, the gh-CLI-backed auth gateway, and the
