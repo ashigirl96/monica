@@ -48,9 +48,7 @@ fn load_task_and_project<R>(
 where
     R: TaskStore + ProjectRepository,
 {
-    let task = repos
-        .get_task(task_id)?
-        .ok_or_else(|| ApplicationError::not_found(format!("task not found: {task_id}")))?;
+    let task = reload_task(repos, task_id)?;
     let project_id = task
         .project_id
         .as_deref()
@@ -72,15 +70,37 @@ where
 /// abandoned.
 const SETUP_STALE_GRACE_SECS: i64 = 60;
 
-fn stale_setup_age_secs(profile: &ExecutionProfile) -> i64 {
-    profile.setup_timeout_sec.max(0) + SETUP_STALE_GRACE_SECS
+fn stale_setup_age_secs<R>(repos: &R, task: &Task) -> ApplicationResult<i64>
+where
+    R: ProjectRepository,
+{
+    let profile = match task.project_id.as_deref() {
+        Some(project_id) => load_execution_profile(repos, project_id)?,
+        None => ExecutionProfile::default(),
+    };
+    Ok(profile.setup_timeout_sec.max(0) + SETUP_STALE_GRACE_SECS)
+}
+
+fn reload_task<R>(repos: &R, task_id: &TaskId) -> ApplicationResult<Task>
+where
+    R: TaskStore + ?Sized,
+{
+    repos
+        .get_task(task_id)?
+        .ok_or_else(|| ApplicationError::not_found(format!("task not found: {task_id}")))
 }
 
 /// Shared by both run-creation paths: a closed task takes no new run, and the Main Run slot must
-/// be free — nothing live, and nothing already prepared and waiting to launch.
-fn ensure_task_accepts_new_run<R>(repos: &mut R, task: &Task) -> ApplicationResult<()>
+/// be free — nothing live, and nothing already prepared and waiting to launch. Runs inside the
+/// write transaction that creates the run: the GUI and `monica task run` are separate processes,
+/// and checked outside it both could find the slot free and each create a run.
+fn ensure_task_accepts_new_run<R>(
+    repos: &mut R,
+    task: &Task,
+    stale_setup_age_secs: i64,
+) -> ApplicationResult<()>
 where
-    R: TaskRunStore + ProjectRepository,
+    R: TaskRunStore + ?Sized,
 {
     let task_id = &task.id;
     if task.status == TaskStatus::Closed {
@@ -95,18 +115,15 @@ where
     let Some(primary_run) = repos.get_task_run(primary_id)? else {
         return Ok(());
     };
-    if primary_run.status == TaskRunStatus::SettingUp && primary_run.terminal_tab_id.is_none() {
-        let profile = match task.project_id.as_deref() {
-            Some(project_id) => load_execution_profile(repos, project_id)?,
-            None => ExecutionProfile::default(),
-        };
-        // Setup is killed at `setup_timeout_sec`, so a run still setting up well past it lost the
-        // process that owned it (an app killed mid-prepare, a Ctrl-C'd `monica task run`). No hook
-        // or sweep ever finishes such a run; left alone it blocks the task for good.
-        if repos.is_task_run_older_than(primary_id, stale_setup_age_secs(&profile))? {
-            repos.finish_task_run(primary_id, task_id, TaskRunStatus::Failed)?;
-            return Ok(());
-        }
+    // Setup is killed at `setup_timeout_sec`, so a run still setting up well past it lost the
+    // process that owned it (an app killed mid-prepare). No hook or sweep ever finishes such a run;
+    // left alone it blocks the task for good.
+    if primary_run.status == TaskRunStatus::SettingUp
+        && primary_run.terminal_tab_id.is_none()
+        && repos.is_task_run_older_than(primary_id, stale_setup_age_secs)?
+    {
+        repos.finish_task_run(primary_id, task_id, TaskRunStatus::Failed)?;
+        return Ok(());
     }
     if is_active_run_status(primary_run.status) {
         return Err(ApplicationError::conflict(format!(
@@ -129,7 +146,7 @@ where
     R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore + UnitOfWork,
 {
     let (task, project) = load_task_and_project(repos, task_id)?;
-    ensure_task_accepts_new_run(repos, &task)?;
+    let stale_setup_age_secs = stale_setup_age_secs(repos, &task)?;
 
     let github_issue_number = latest_github_issue_number(repos, task_id)?;
     let mon = monica_number(task_id.as_str())?;
@@ -142,6 +159,8 @@ where
     // Run creation, the primary pointer, and the bench land as one transaction: a crash between
     // these steps would otherwise strand a run that has no primary pointer and no workbench.
     let mut tx = repos.begin()?;
+    let task = reload_task(&*tx, task_id)?;
+    ensure_task_accepts_new_run(&mut *tx, &task, stale_setup_age_secs)?;
     let run = tx.start_task_run(NewTaskRun {
         task_id: task.id.clone(),
         agent: None,
@@ -170,7 +189,7 @@ where
     R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore + UnitOfWork,
 {
     let (task, project) = load_task_and_project(repos, task_id)?;
-    ensure_task_accepts_new_run(repos, &task)?;
+    let stale_setup_age_secs = stale_setup_age_secs(repos, &task)?;
     // Validated before the run exists: there is no setup phase to fail into, so a run committed as
     // `Prepared` against an unusable checkout would leave the task with no way forward.
     let cwd = project_checkout(&project)?;
@@ -178,6 +197,8 @@ where
     // Same atomicity as `start_run`, plus the Prepared transition: there is no second phase to
     // reach it, so a run left at `SettingUp` here would never advance.
     let mut tx = repos.begin()?;
+    let task = reload_task(&*tx, task_id)?;
+    ensure_task_accepts_new_run(&mut *tx, &task, stale_setup_age_secs)?;
     let run = tx.start_task_run(NewTaskRun {
         task_id: task.id.clone(),
         agent: None,

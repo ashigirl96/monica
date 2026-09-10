@@ -240,11 +240,33 @@ fn run_command(monica: &mut CliFacade, id: &str, in_place: bool) -> Result<()> {
     if needs_prepare {
         println!("Preparing a worktree and running setup for {task_id} ...");
         io::stdout().flush()?;
+        forward_ctrl_c_to_setup();
     }
     let launch = monica.executions().launch_task(&task_id, None, mode)?;
     print!("{}", render_run_report(&launch));
     Ok(())
 }
+
+/// The setup script runs in its own process group so a timeout can kill its whole tree, which also
+/// keeps the terminal's Ctrl-C from reaching it. Hand the interrupt on so an aborted `task run`
+/// takes its setup down with it and the run ends `failed` instead of an orphaned script keeping
+/// the task stuck at `setting_up`.
+#[cfg(unix)]
+fn forward_ctrl_c_to_setup() {
+    extern "C" fn on_sigint(_: libc::c_int) {
+        monica_runtime::request_setup_interrupt();
+    }
+    // SAFETY: the handler only stores to an atomic, which is async-signal-safe.
+    unsafe {
+        libc::signal(
+            libc::SIGINT,
+            on_sigint as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        );
+    }
+}
+
+#[cfg(not(unix))]
+fn forward_ctrl_c_to_setup() {}
 
 fn render_run_report(launch: &RunTaskResult) -> String {
     format!(

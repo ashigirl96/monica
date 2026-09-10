@@ -65,6 +65,7 @@ pub fn worktree_info(cwd: &Path) -> Option<WorktreeRef> {
 }
 
 pub use monica_adapters::ogp::LinkPreviewError;
+pub use monica_adapters::process::request_setup_interrupt;
 
 /// OGP tags / HTML head metadata for a pasted URL. Pure network I/O, so it opens no store —
 /// drivers reach it here rather than naming the ogp adapter.
