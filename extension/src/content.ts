@@ -7,6 +7,10 @@ const w = window as unknown as {
   __monicaTranslateListening?: boolean;
   __monicaTranslateInFlight?: boolean;
   __monicaTranslateCacheDropped?: boolean;
+  // seg 番号は実行ごとに 0 から振り直すので、対応は DOM 属性に残さず実行ごとに作り直す。
+  // 属性に残すと SPA 遷移で生き残った旧要素が同じ番号を持ち、querySelector が
+  // 文書順で先にあるそちらを拾って新しい訳文を捨てる
+  __monicaTranslateTargets?: Map<number, Element>;
   innerHeight: number;
 };
 
@@ -277,13 +281,13 @@ function runTranslation() {
     return;
   }
 
-  let segId = 0;
+  const targets = new Map<number, Element>();
   const segments: Array<{ seg: number; text: string; inViewport: boolean }> = [];
   for (const el of units) {
     // 既に訳文が付いている単位（SPA 遷移で残った sidebar 等）は再送しない
     if (el.querySelector(":scope > .monica-translation")) continue;
-    const seg = segId++;
-    (el as HTMLElement).dataset.monicaSeg = String(seg);
+    const seg = targets.size;
+    targets.set(seg, el);
     segments.push({
       seg,
       text: unitText(el),
@@ -313,6 +317,7 @@ function runTranslation() {
     `[monica-translate] sending ${payload.length} segments (${segments.filter((s) => s.inViewport).length} in viewport)${range ? ", selection only" : ""}${dropCache ? ", dropping cache (reload)" : ""}`,
   );
   w.__monicaTranslateInFlight = true;
+  w.__monicaTranslateTargets = targets;
   chrome.runtime.sendMessage({ type: "translate", segments: payload, dropCache });
 
   // listener は 1 回だけ登録する（SPA 遷移後の再実行で重複させない）
@@ -322,8 +327,8 @@ function runTranslation() {
   chrome.runtime.onMessage.addListener(
     (message: { type: string; seg?: number; translation?: string; message?: string }) => {
       if (message.type === "translation" && message.seg != null && message.translation) {
-        const el = document.querySelector(`[data-monica-seg="${message.seg}"]`);
-        if (!el) return;
+        const el = w.__monicaTranslateTargets?.get(message.seg);
+        if (!el?.isConnected) return;
         if (el.querySelector(":scope > .monica-translation")) return;
 
         // 原文と同じ要素の子として追記し、スタイルを継承させる（immersive-translate 方式）
