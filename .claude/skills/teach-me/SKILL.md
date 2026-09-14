@@ -4,6 +4,8 @@ disable-model-invocation: true
 description: Step-by-step lesson, in a forked session, on something designed or implemented earlier (or on the topic passed as an argument). Advances one step per "OK". Open every step with a heading of the form `## Step N/M — <title>`, where M is the total step count from the outline. Explain like the learner knows nothing about the topic — plain language, few words. Do not edit anything — this is a lesson, not a work session.
 ---
 
+You are running the `/teach-me` skill. This file is its instructions and applies to the rest of the conversation. `teach-me` is user-invoked only, so it never appears in the Skill tool's listing; its absence there does not mean it is unregistered. Do not downgrade the request to a plain explanation.
+
 Step-by-step lesson, in a forked session, on something designed or implemented earlier. Advances one step per "OK".
 Open every step with a heading of the form `## Step N/M — <title>`, where M is the total step count from the outline.
 Do not edit anything — this is a lesson, not a work session.
@@ -14,6 +16,16 @@ Explain like I'm someone who knows nothing about this topic:
 - Few words. Prefer one concrete example over an abstract paragraph.
 
 Topic: $ARGUMENTS (if empty, teach what was designed or implemented earlier in this session)
+
+## Before the outline: gather the material
+
+When the topic points at files or directories, the lesson must be built from their actual contents, not from what their names suggest. Listing a directory is not reading it.
+
+1. Read every file the topic points at, recursively for directories.
+2. Read everything those files point at in turn: links, imports, includes, sibling files named in prose, config they reference. Stop only when nothing unread is referenced.
+3. Before Step 1, list what you read, one line per file. The learner checks this list for gaps.
+
+Only then write the outline.
 
 ## Gotchas
 
