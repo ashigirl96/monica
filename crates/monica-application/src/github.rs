@@ -75,12 +75,17 @@ pub struct IssueBlocker {
     pub address: IssueAddress,
     pub state: GithubIssueState,
     pub closed_by_merged_pull_request: bool,
+    /// GitHub reported `stateReason: REOPENED`. Kept beside the merge flag because
+    /// `closedByPullRequestsReferences` is history: it still names the PR that once closed an
+    /// issue somebody has since reopened.
+    pub reopened: bool,
 }
 
 impl IssueBlocker {
     pub fn new(
         address: IssueAddress,
         state: GithubIssueState,
+        reopened: bool,
         closing_pull_requests: &[GithubPullRequest],
     ) -> Self {
         Self {
@@ -89,14 +94,23 @@ impl IssueBlocker {
             closed_by_merged_pull_request: closing_pull_requests
                 .iter()
                 .any(|pr| pr.status == GithubPullRequestStatus::Merged),
+            reopened,
         }
     }
 
-    /// The start gate's rule: upstream work is done once GitHub closed the issue or merged a pull
-    /// request that closes it. The merged-PR arm matters because a PR merges before automation
-    /// closes the issue it references, and the downstream task is unblocked at the merge.
+    /// The start gate's rule: upstream work is done once GitHub closed the issue, or merged a pull
+    /// request that closes it and has not been reopened since.
+    ///
+    /// The merged-PR arm exists because the gate is "start after *merged*" — a PR lands seconds
+    /// before automation closes the issue it references, and a downstream task should not wait on
+    /// that bookkeeping. But a merged closing PR never leaves the issue's history, so on its own it
+    /// would also clear a blocker that was reopened precisely because the work turned out to be
+    /// unfinished. The two look identical in the PR data; `reopened` is what tells them apart.
     pub fn is_cleared(&self) -> bool {
-        self.state == GithubIssueState::Closed || self.closed_by_merged_pull_request
+        match self.state {
+            GithubIssueState::Closed => true,
+            GithubIssueState::Open => self.closed_by_merged_pull_request && !self.reopened,
+        }
     }
 
     /// `owner/repo#number`. The repo is always spelled out because a blocker can live in another
@@ -236,22 +250,29 @@ mod tests {
     }
 
     #[test]
-    fn a_blocker_is_cleared_once_the_issue_closes_or_a_closing_pull_request_merges() {
-        for (state, merged, expected) in [
-            (GithubIssueState::Open, false, false),
-            (GithubIssueState::Open, true, true),
-            (GithubIssueState::Closed, false, true),
-            (GithubIssueState::Closed, true, true),
+    fn a_blocker_clears_on_a_close_or_an_unreopened_merge() {
+        for (state, merged, reopened, expected) in [
+            (GithubIssueState::Open, false, false, false),
+            (GithubIssueState::Open, true, false, true),
+            // Reopened after the merge: the PR stays in the issue's history forever, so without
+            // this the gate would wave through work its upstream has explicitly resumed.
+            (GithubIssueState::Open, true, true, false),
+            (GithubIssueState::Open, false, true, false),
+            (GithubIssueState::Closed, false, false, true),
+            (GithubIssueState::Closed, true, false, true),
+            // Closed again after a reopen — closed is closed, whatever the history says.
+            (GithubIssueState::Closed, true, true, true),
         ] {
             let blocker = IssueBlocker {
                 address: address(),
                 state,
                 closed_by_merged_pull_request: merged,
+                reopened,
             };
             assert_eq!(
                 blocker.is_cleared(),
                 expected,
-                "state={state:?} merged_pr={merged}"
+                "state={state:?} merged_pr={merged} reopened={reopened}"
             );
         }
     }
@@ -264,20 +285,20 @@ mod tests {
             GithubPullRequestStatus::Closed,
         ]
         .map(pull_request);
-        let blocker = IssueBlocker::new(address(), GithubIssueState::Open, &unmerged);
+        let blocker = IssueBlocker::new(address(), GithubIssueState::Open, false, &unmerged);
         assert!(!blocker.closed_by_merged_pull_request);
 
         let with_merge = [
             pull_request(GithubPullRequestStatus::Closed),
             pull_request(GithubPullRequestStatus::Merged),
         ];
-        let blocker = IssueBlocker::new(address(), GithubIssueState::Open, &with_merge);
+        let blocker = IssueBlocker::new(address(), GithubIssueState::Open, false, &with_merge);
         assert!(blocker.closed_by_merged_pull_request);
     }
 
     #[test]
     fn a_blocker_label_always_carries_its_repo() {
-        let blocker = IssueBlocker::new(address(), GithubIssueState::Open, &[]);
+        let blocker = IssueBlocker::new(address(), GithubIssueState::Open, false, &[]);
         assert_eq!(
             blocker.label(),
             "owner/repo#7",

@@ -11,6 +11,9 @@ pub(super) const SQL: &str = r#"
       state           TEXT NOT NULL CHECK(state IN ('open', 'closed')),
       closed_by_merged_pull_request INTEGER NOT NULL
         CHECK(closed_by_merged_pull_request IN (0, 1)),
+      -- Held beside the merge flag rather than folded into it: the PR that once closed an issue
+      -- stays in its history after a reopen, so only this tells a pending close from a reopen.
+      reopened        INTEGER NOT NULL DEFAULT 0 CHECK(reopened IN (0, 1)),
       created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
       updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
       PRIMARY KEY (external_ref_id, repo, number)
@@ -55,6 +58,7 @@ mod tests {
             "number",
             "state",
             "closed_by_merged_pull_request",
+            "reopened",
             "created_at",
             "updated_at",
         ] {

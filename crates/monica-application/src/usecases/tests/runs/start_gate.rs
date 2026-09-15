@@ -10,6 +10,7 @@ fn blocker(number: i64, state: GithubIssueState, merged_pr: bool) -> IssueBlocke
         address: IssueAddress { repo: "owner/repo".to_string(), number },
         state,
         closed_by_merged_pull_request: merged_pr,
+        reopened: false,
     }
 }
 
@@ -86,6 +87,26 @@ fn a_blocker_closed_by_a_merged_pull_request_lets_the_run_start_while_still_open
 }
 
 #[test]
+fn a_blocker_reopened_after_its_merge_refuses_the_run() {
+    let mut repos = FakeRepos::default();
+    let task_id = blocked_task(
+        &mut repos,
+        vec![IssueBlocker {
+            reopened: true,
+            ..blocker(7, GithubIssueState::Open, true)
+        }],
+    );
+
+    let err = start_run(&mut repos, &task_id, false).unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Conflict(_)), "{err:?}");
+    assert!(
+        err.to_string().contains("owner/repo#7"),
+        "the merge is history; the reopen is the current answer: {err}"
+    );
+}
+
+#[test]
 fn a_blocker_no_task_tracks_still_blocks() {
     let mut repos = FakeRepos::default();
     insert_runnable_project(&repos);
@@ -98,6 +119,7 @@ fn a_blocker_no_task_tracks_still_blocks() {
             address: IssueAddress { repo: "other/repo".to_string(), number: 404 },
             state: GithubIssueState::Open,
             closed_by_merged_pull_request: false,
+            reopened: false,
         }],
     );
 

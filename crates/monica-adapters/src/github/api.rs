@@ -305,7 +305,7 @@ fn issues_query(numbers: &[i64]) -> String {
 parent {{ number repository {{ nameWithOwner }} }} \
 closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {{ nodes {{ number url state \
 isDraft repository {{ nameWithOwner }} }} }} \
-blockedBy(first: {BLOCKED_BY_PAGE}) {{ nodes {{ number state repository {{ nameWithOwner }} \
+blockedBy(first: {BLOCKED_BY_PAGE}) {{ nodes {{ number state stateReason repository {{ nameWithOwner }} \
 closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {{ nodes {{ number url state \
 isDraft repository {{ nameWithOwner }} }} }} }} }} }}\n"
             )
@@ -338,6 +338,7 @@ fn issues_from_response(response: IssuesResponse) -> Result<Vec<FetchedIssue>> {
             blockers.push(IssueBlocker::new(
                 issue_address_from(blocker.repository, blocker.number),
                 parse_issue_state(&blocker.state)?,
+                is_reopened(blocker.state_reason.as_deref()),
                 &closing,
             ));
         }
@@ -362,6 +363,12 @@ fn issue_address_from(repository: RepositoryNode, number: i64) -> IssueAddress {
         repo: repository.name_with_owner.to_ascii_lowercase(),
         number,
     }
+}
+
+/// An unknown reason reads as "not reopened": every other value GitHub has ever returned here
+/// describes a *closed* issue, and guessing "reopened" from one would hold back runs for good.
+fn is_reopened(state_reason: Option<&str>) -> bool {
+    state_reason.is_some_and(|reason| reason.eq_ignore_ascii_case("reopened"))
 }
 
 fn pull_requests_from(connection: LinkedPullRequestConnection) -> Result<Vec<GithubPullRequest>> {
@@ -414,6 +421,7 @@ struct IssueBlockerConnection {
 struct IssueBlockerNode {
     number: i64,
     state: String,
+    state_reason: Option<String>,
     repository: RepositoryNode,
     closed_by_pull_requests_references: LinkedPullRequestConnection,
 }
@@ -722,8 +730,12 @@ mod tests {
         // would be invisible, and the gate would open for a task that is still blocked.
         assert!(query.contains("blockedBy(first: 50)"), "{query}");
         // A blocker's own repo, state and closing PRs all have to ride along: the start gate must
-        // decide about blockers no task tracks, without a second round trip.
-        assert!(query.contains("blockedBy(first: 50) { nodes { number state repository"), "{query}");
+        // decide about blockers no task tracks, without a second round trip. `stateReason` comes
+        // with them because a merged closing PR alone cannot tell a pending close from a reopen.
+        assert!(
+            query.contains("blockedBy(first: 50) { nodes { number state stateReason repository"),
+            "{query}"
+        );
         assert_eq!(
             query.matches("includeClosedPrs: true").count(),
             2,
@@ -749,9 +761,20 @@ mod tests {
     }
 
     fn blocker_node(number: i64, state: &str, repo: &str, prs: serde_json::Value) -> serde_json::Value {
+        blocker_node_with_reason(number, state, None, repo, prs)
+    }
+
+    fn blocker_node_with_reason(
+        number: i64,
+        state: &str,
+        state_reason: Option<&str>,
+        repo: &str,
+        prs: serde_json::Value,
+    ) -> serde_json::Value {
         serde_json::json!({
             "number": number,
             "state": state,
+            "stateReason": state_reason,
             "repository": { "nameWithOwner": repo },
             "closedByPullRequestsReferences": { "nodes": prs }
         })
@@ -801,6 +824,42 @@ mod tests {
             blocker.is_cleared(),
             "the merge is what unblocks downstream work; the issue closing is a later formality"
         );
+    }
+
+    #[test]
+    fn a_blocker_reopened_after_its_merge_still_blocks() {
+        // The merged PR never leaves `closedByPullRequestsReferences`, so reopening an issue looks
+        // exactly like "merged, close still pending" in the PR data alone. `stateReason` is the
+        // only thing separating them, and getting it wrong lets a run start on unfinished work.
+        let response = blocked_issue_response(serde_json::json!([blocker_node_with_reason(
+            7,
+            "OPEN",
+            Some("REOPENED"),
+            "o/r",
+            serde_json::json!([pr_node(11, "MERGED")])
+        )]));
+        let blocker = &issues_from_response(response).unwrap()[0].blockers[0];
+        assert!(blocker.closed_by_merged_pull_request, "the merge did happen");
+        assert!(blocker.reopened);
+        assert!(!blocker.is_cleared(), "someone reopened it because the work was not done");
+    }
+
+    #[test]
+    fn an_unknown_state_reason_does_not_read_as_reopened() {
+        // Every other value GitHub puts here describes a closed issue; treating an unfamiliar one
+        // as a reopen would hold runs back with no way to clear them short of --force.
+        for reason in [None, Some("COMPLETED"), Some("NOT_PLANNED"), Some("SOMETHING_NEW")] {
+            let response = blocked_issue_response(serde_json::json!([blocker_node_with_reason(
+                7,
+                "OPEN",
+                reason,
+                "o/r",
+                serde_json::json!([pr_node(11, "MERGED")])
+            )]));
+            let blocker = &issues_from_response(response).unwrap()[0].blockers[0];
+            assert!(!blocker.reopened, "reason={reason:?}");
+            assert!(blocker.is_cleared(), "reason={reason:?}");
+        }
     }
 
     #[test]

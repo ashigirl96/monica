@@ -531,6 +531,7 @@ fn blocked_runnable_task(repos: &mut FakeRepos, checkout: &str) -> TaskId {
             address: IssueAddress { repo: "owner/repo".to_string(), number: 7 },
             state: GithubIssueState::Open,
             closed_by_merged_pull_request: false,
+            reopened: false,
         }],
     );
     task_id

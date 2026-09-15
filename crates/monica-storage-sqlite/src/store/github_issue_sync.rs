@@ -57,7 +57,7 @@ impl SqliteStore {
     /// [`IssueBlocker::is_cleared`] is the single place that reads it.
     pub fn list_task_blockers(&self, task_id: &str) -> Result<Vec<IssueBlocker>> {
         let mut stmt = self.conn().prepare(
-            "SELECT DISTINCT b.repo, b.number, b.state, b.closed_by_merged_pull_request
+            "SELECT DISTINCT b.repo, b.number, b.state, b.closed_by_merged_pull_request, b.reopened
                FROM github_issue_blockers b
                JOIN external_refs er ON er.id = b.external_ref_id
               WHERE er.task_id = ?1 AND er.ref_type = 'issue'
@@ -74,6 +74,7 @@ impl SqliteStore {
                 state: row.get::<_, String>("state")?.parse()?,
                 closed_by_merged_pull_request: row.get::<_, i64>("closed_by_merged_pull_request")?
                     != 0,
+                reopened: row.get::<_, i64>("reopened")? != 0,
             });
         }
         Ok(blockers)
@@ -167,14 +168,15 @@ fn record_issue_blockers_in(
     for blocker in blockers {
         conn.execute(
             "INSERT INTO github_issue_blockers
-               (external_ref_id, repo, number, state, closed_by_merged_pull_request)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+               (external_ref_id, repo, number, state, closed_by_merged_pull_request, reopened)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 external_ref_id,
                 blocker.address.repo,
                 blocker.address.number,
                 blocker.state.as_str(),
                 i64::from(blocker.closed_by_merged_pull_request),
+                i64::from(blocker.reopened),
             ],
         )?;
     }

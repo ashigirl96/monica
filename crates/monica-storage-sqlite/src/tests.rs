@@ -2854,6 +2854,7 @@ fn blocker(repo: &str, number: i64, state: GithubIssueState, merged_pr: bool) ->
         address: IssueAddress { repo: repo.to_string(), number },
         state,
         closed_by_merged_pull_request: merged_pr,
+        reopened: false,
     }
 }
 
@@ -3186,6 +3187,26 @@ fn sync_stores_the_blockers_github_reports() {
         ],
         "blockers come back ordered by address, with GitHub's raw answer intact"
     );
+}
+
+#[test]
+fn a_reopened_blocker_survives_the_round_trip() {
+    // Stored beside the merge flag rather than folded into it, so the gate's rule stays the one
+    // place that decides — and a reopen after a merge still reads as blocking after a reload.
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = tracked_task(&mut db, "owner/repo", 42);
+    let ref_id = issue_ref_id(&db, "owner/repo", 42);
+    let reopened = IssueBlocker {
+        reopened: true,
+        ..blocker("owner/repo", 7, GithubIssueState::Open, true)
+    };
+
+    db.bulk_record_issue_sync(&[(ref_id, fetched_with_blockers(42, vec![reopened.clone()]))])
+        .unwrap();
+
+    let stored = db.list_task_blockers(task.as_str()).unwrap();
+    assert_eq!(stored, vec![reopened]);
+    assert!(!stored[0].is_cleared());
 }
 
 #[test]

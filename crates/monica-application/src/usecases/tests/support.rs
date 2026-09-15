@@ -1350,6 +1350,7 @@ pub(crate) fn fake_github_blocker() -> IssueBlocker {
         address: IssueAddress { repo: "owner/repo".to_string(), number: 7 },
         state: GithubIssueState::Open,
         closed_by_merged_pull_request: false,
+            reopened: false,
     }
 }
 

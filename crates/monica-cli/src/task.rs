@@ -644,6 +644,7 @@ mod tests {
             },
             state,
             closed_by_merged_pull_request: merged_pr,
+            reopened: false,
         }
     }
 
