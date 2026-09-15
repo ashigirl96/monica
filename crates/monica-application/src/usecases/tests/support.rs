@@ -26,7 +26,7 @@ use crate::prelude::{
 use crate::{
     ApplicationEvent, AuthGateway, Backend, Clock, DaemonSessionView, EventSink, ExecutionProfile,
     FetchedIssue, GithubAuthStatus, GithubGateway, GithubIssue, GithubIssueState,
-    GithubPullRequest, OpenIssueRef,
+    GithubPullRequest, IssueAddress, IssueBlocker, OpenIssueRef,
     GithubPullRequestRef, GithubPullRequestStatus, HookContext, Monica,
     PullRequestBranchSyncCandidate, RepoPullRequest, RunTaskResult, SetupEnv,
     SetupOutcome, UnresolvedPullRequestRef,
@@ -124,6 +124,9 @@ struct FakeState {
     /// it exactly as the SQL `COALESCE(issue_state.title, tasks.title, '')` does, so the fake and
     /// the real store can't disagree about which title a tracked task shows.
     issue_ref_states: HashMap<i64, (String, GithubIssueState)>,
+    /// Mirrors `github_issue_blockers`, keyed by external_ref id. Wholesale-rewritten per sync,
+    /// the same way the SQL store replaces the rows for a ref.
+    issue_blockers: HashMap<i64, Vec<IssueBlocker>>,
     branch_sync_candidates: Vec<PullRequestBranchSyncCandidate>,
     unresolved_pr_refs: Vec<UnresolvedPullRequestRef>,
     bulk_recorded: Vec<(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)>,
@@ -176,6 +179,24 @@ impl FakeRepos {
 
     pub(crate) fn clear_issue_ref_states(&self) {
         self.state.borrow_mut().issue_ref_states.clear();
+    }
+
+    /// Record blockers against the task's newest issue ref, standing in for a sync that mirrored
+    /// them. Panics when the task has no issue ref: a blocker with nothing to hang off would make
+    /// the gate silently pass and the test lie about what it proved.
+    pub(crate) fn set_task_blockers(&self, task_id: &str, blockers: Vec<IssueBlocker>) {
+        let mut state = self.state.borrow_mut();
+        let external_ref_id = state
+            .refs
+            .get(task_id)
+            .and_then(|refs| {
+                refs.iter()
+                    .filter(|r| r.ref_type == RefType::Issue)
+                    .map(|r| r.id)
+                    .max()
+            })
+            .unwrap_or_else(|| panic!("{task_id} has no issue ref to hang blockers off"));
+        state.issue_blockers.insert(external_ref_id, blockers);
     }
 
     /// Override the stored snapshot with the cached issue title, mirroring the store's COALESCE.
@@ -402,6 +423,7 @@ impl TaskBoardQuery for FakeRepos {
                     github_issue_url: None,
                     github_issue_state: None,
                     github_pull_requests: Vec::<GithubPullRequestRef>::new(),
+                    blockers: Vec::new(),
                     task_status: task.status,
                     task_run_status: None,
                     task_run_wait_reason: None,
@@ -522,6 +544,9 @@ impl GithubIssueSyncStore for FakeRepos {
             state
                 .issue_ref_states
                 .insert(*external_ref_id, (issue.title.clone(), issue.state));
+            state
+                .issue_blockers
+                .insert(*external_ref_id, issue.blockers.clone());
             let child_task_id = state
                 .refs
                 .values()
@@ -563,6 +588,24 @@ impl GithubIssueSyncStore for FakeRepos {
                 .insert(external_ref_id, (title.to_string(), state));
         }
         Ok(())
+    }
+
+    fn list_task_blockers(&self, task_id: &str) -> Result<Vec<IssueBlocker>> {
+        let state = self.state.borrow();
+        let mut blockers: Vec<IssueBlocker> = state
+            .refs
+            .get(task_id)
+            .into_iter()
+            .flatten()
+            .filter(|r| r.ref_type == RefType::Issue)
+            .filter_map(|r| state.issue_blockers.get(&r.id))
+            .flatten()
+            .cloned()
+            .collect();
+        blockers.sort_by(|a, b| {
+            (&a.address.repo, a.address.number).cmp(&(&b.address.repo, b.address.number))
+        });
+        Ok(blockers)
     }
 }
 
@@ -1298,6 +1341,18 @@ impl WorkbenchStore for FakeUow<'_> {
 
 pub(crate) struct FakeGithub;
 
+/// The one issue number [`FakeGithub`] reports a blocker for, so a test can tell "the sync ran and
+/// found nothing" apart from "the sync never ran".
+pub(crate) const BLOCKED_ISSUE_NUMBER: i64 = 777;
+
+pub(crate) fn fake_github_blocker() -> IssueBlocker {
+    IssueBlocker {
+        address: IssueAddress { repo: "owner/repo".to_string(), number: 7 },
+        state: GithubIssueState::Open,
+        closed_by_merged_pull_request: false,
+    }
+}
+
 impl GithubGateway for FakeGithub {
     fn fetch_issue<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, Result<GithubIssue>> {
         Box::pin(async move {
@@ -1325,6 +1380,11 @@ impl GithubGateway for FakeGithub {
                     state: GithubIssueState::Open,
                     parent: None,
                     linked_pull_requests: Vec::new(),
+                    blockers: if *number == BLOCKED_ISSUE_NUMBER {
+                        vec![fake_github_blocker()]
+                    } else {
+                        Vec::new()
+                    },
                 })
                 .collect())
         })
@@ -1402,6 +1462,7 @@ impl GithubGateway for RetitlingGithub {
                     state: GithubIssueState::Open,
                     parent: None,
                     linked_pull_requests: Vec::new(),
+                    blockers: Vec::new(),
                 })
                 .collect())
         })

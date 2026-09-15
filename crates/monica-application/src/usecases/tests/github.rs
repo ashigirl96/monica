@@ -146,6 +146,7 @@ fn open_issue(number: i64, title: &str) -> FetchedIssue {
         state: GithubIssueState::Open,
         parent: None,
         linked_pull_requests: Vec::new(),
+        blockers: Vec::new(),
     }
 }
 
@@ -198,6 +199,7 @@ async fn bulk_sync_issues_records_the_state_without_touching_task_status() {
             state: GithubIssueState::Closed,
             parent: None,
             linked_pull_requests: Vec::new(),
+            blockers: Vec::new(),
         }]),
     )]));
     bulk_sync_issues(&mut repos, &github, None).await.unwrap();
@@ -752,6 +754,7 @@ fn snapshot_row(id: &str) -> TaskSummaryRow {
         github_issue_url: None,
         github_issue_state: Some(GithubIssueState::Open),
         github_pull_requests: Vec::new(),
+        blockers: Vec::new(),
         task_status: TaskStatus::Ready,
         task_run_status: None,
         task_run_wait_reason: None,

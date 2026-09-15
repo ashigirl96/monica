@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::github::{FetchedIssue, GithubIssueState, OpenIssueRef};
+use crate::github::{FetchedIssue, GithubIssueState, IssueBlocker, OpenIssueRef};
 
 /// Issue-sync bookkeeping, the mirror of [`PullRequestSyncStore`](super::PullRequestSyncStore).
 /// Separated from [`TaskStore`](super::TaskStore) because it caches what GitHub owns rather than
@@ -22,4 +22,7 @@ pub trait GithubIssueSyncStore {
         title: &str,
         state: GithubIssueState,
     ) -> Result<()>;
+    /// The blockers mirrored for the task's issue refs, carrying GitHub's raw answer. Callers
+    /// decide what still blocks through [`IssueBlocker::is_cleared`]; the store never filters.
+    fn list_task_blockers(&self, task_id: &str) -> Result<Vec<IssueBlocker>>;
 }

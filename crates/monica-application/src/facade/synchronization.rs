@@ -24,7 +24,20 @@ impl<B: Backend> SynchronizationService<'_, B> {
     ) -> ApplicationResult<TrackGithubIssueReport> {
         let input = TrackGithubIssueInput { repo, number };
         let Monica { repos, github, .. } = &mut *self.m;
-        crate::usecases::github::track_github_issue(repos, github, input).await
+        let report = crate::usecases::github::track_github_issue(repos, github, input).await?;
+        // The REST fetch behind tracking carries no relationships, and the start gate reads only
+        // what a sync mirrored — so without this, `monica task track … && monica task run …` would
+        // start a blocked task with an empty blocker list. Best-effort: tracking the issue is the
+        // point, and failing it over a refresh would lose that. The gate degrades to open until the
+        // next sync, which is how far a mirror can ever be trusted.
+        if let Err(e) = self.force_sync_github(Some(&report.task.id)).await {
+            log::warn!(
+                target: "monica_application::github",
+                "failed to refresh {} right after tracking it: {e}",
+                report.task.id
+            );
+        }
+        Ok(report)
     }
 
     /// Attach a pull request to a task by hand, for the PRs the forced sync cannot discover.

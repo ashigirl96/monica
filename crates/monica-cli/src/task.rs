@@ -4,8 +4,8 @@ use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_application::{
     parse_issue_input, parse_pull_request_input, AttachSessionReport, GithubIssueState,
-    GithubPullRequestStatus, GithubSyncReport, RunTaskResult, TaskSummaryRow, TaskSyncChange,
-    TrackOutcome,
+    GithubPullRequestStatus, GithubSyncReport, IssueBlocker, RunTaskResult, TaskSummaryRow,
+    TaskSyncChange, TrackOutcome,
 };
 use monica_domain::{parse_owner_repo, Agent, DisplayStatus, RunMode, TaskId};
 
@@ -40,6 +40,9 @@ pub enum TaskCommand {
         /// Run in the project checkout instead of preparing a worktree
         #[arg(long)]
         in_place: bool,
+        /// Start even though an issue blocking this one is still unfinished
+        #[arg(long)]
+        force: bool,
     },
     /// Connect this terminal tab's agent session to an existing task (MON-<id>)
     Attach {
@@ -64,7 +67,9 @@ pub async fn run(cmd: TaskCommand) -> Result<()> {
         TaskCommand::Track { target } => track_command(&mut monica, &target).await,
         TaskCommand::Status { status, project } => status_command(&mut monica, status, project),
         TaskCommand::Pr { id, target } => pr_command(&mut monica, &id, &target).await,
-        TaskCommand::Run { id, in_place } => run_command(&mut monica, &id, in_place),
+        TaskCommand::Run { id, in_place, force } => {
+            run_command(&mut monica, &id, in_place, force)
+        }
         TaskCommand::Attach { id } => attach_command(&mut monica, &id),
         TaskCommand::Close { id } => close_command(&mut monica, &id),
         TaskCommand::Sync { id } => sync_command(&mut monica, id.as_deref()).await,
@@ -227,22 +232,24 @@ fn dash() -> String {
     or_dash(None)
 }
 
-fn run_command(monica: &mut CliFacade, id: &str, in_place: bool) -> Result<()> {
+fn run_command(monica: &mut CliFacade, id: &str, in_place: bool, force: bool) -> Result<()> {
     let task_id = TaskId::parse(id)?;
     let mode = if in_place { RunMode::InPlace } else { RunMode::Worktree };
-    // Setup can take minutes and launch_task blocks through it, so say so up front.
+    // Setup can take minutes and launch_task blocks through it, so say so up front — but not when
+    // the start gate is about to refuse, or the announcement would promise work that never starts.
+    let summaries = monica.tasks().list_all_task_summaries(None)?;
+    let row = summaries.iter().find(|row| row.id == task_id.as_str());
+    let gate_will_refuse =
+        !force && row.is_some_and(|row| !row.blockers.iter().all(IssueBlocker::is_cleared));
     let needs_prepare = mode == RunMode::Worktree
-        && monica
-            .tasks()
-            .list_all_task_summaries(None)?
-            .iter()
-            .any(|row| row.id == task_id.as_str() && row.run_needs_prepare);
+        && !gate_will_refuse
+        && row.is_some_and(|row| row.run_needs_prepare);
     if needs_prepare {
         println!("Preparing a worktree and running setup for {task_id} ...");
         io::stdout().flush()?;
         forward_ctrl_c_to_setup();
     }
-    let launch = monica.executions().launch_task(&task_id, None, mode)?;
+    let launch = monica.executions().launch_task(&task_id, None, mode, force)?;
     print!("{}", render_run_report(&launch));
     Ok(())
 }
@@ -424,20 +431,35 @@ fn render_status_table(rows: &[TaskSummaryRow]) -> String {
         "PROJECT".to_string(),
         "GH ISSUE".to_string(),
         "STATUS".to_string(),
+        "BLOCKED BY".to_string(),
         "BRANCH".to_string(),
     ]];
     for row in rows {
         let github_issue = row.github_issue_number.map(|n| format!("#{n}"));
+        let blocked_by = render_blockers(&row.blockers);
         table.push(vec![
             row.id.clone(),
             or_dash(row.parent_task_id.as_deref()),
             or_dash(row.project.as_deref()),
             or_dash(github_issue.as_deref()),
             row.status.as_str().to_string(),
+            or_dash(blocked_by.as_deref()),
             or_dash(row.branch.as_deref()),
         ]);
     }
     render_table(&table)
+}
+
+/// Only the blockers that still block, each named by [`IssueBlocker::label`] so the column and the
+/// refusal `monica task run` prints agree on which issue is which. Joined without a space: a cell
+/// here has to stay one whitespace-delimited token, the way the rest of this table reads.
+fn render_blockers(blockers: &[IssueBlocker]) -> Option<String> {
+    let unresolved: Vec<String> = blockers
+        .iter()
+        .filter(|blocker| !blocker.is_cleared())
+        .map(IssueBlocker::label)
+        .collect();
+    (!unresolved.is_empty()).then(|| unresolved.join(","))
 }
 
 #[cfg(test)]
@@ -565,6 +587,7 @@ mod tests {
             github_issue_url: Some("https://github.com/ashigirl96/monica/issues/17".to_string()),
             github_issue_state: Some(GithubIssueState::Open),
             github_pull_requests: Vec::new(),
+            blockers: Vec::new(),
             task_status: TaskStatus::Ready,
             task_run_status: None,
             task_run_wait_reason: None,
@@ -611,6 +634,50 @@ mod tests {
     fn render_status_table_dashes_a_task_without_a_parent() {
         let row = TaskSummaryRow { parent_task_id: None, ..summary_row() };
         assert_eq!(parent_cell(&render_status_table(&[row])), "-");
+    }
+
+    fn blocker(number: i64, state: GithubIssueState, merged_pr: bool) -> IssueBlocker {
+        IssueBlocker {
+            address: monica_application::IssueAddress {
+                repo: "ashigirl96/monica".to_string(),
+                number,
+            },
+            state,
+            closed_by_merged_pull_request: merged_pr,
+        }
+    }
+
+    #[test]
+    fn the_blocked_by_column_lists_only_what_still_blocks() {
+        // The column has to agree with the refusal `monica task run` prints, so it narrows the
+        // stored blockers through the same rule the gate uses.
+        assert_eq!(
+            render_blockers(&[
+                blocker(7, GithubIssueState::Open, false),
+                blocker(8, GithubIssueState::Closed, false),
+                blocker(9, GithubIssueState::Open, true),
+                blocker(10, GithubIssueState::Open, false),
+            ])
+            .as_deref(),
+            Some("ashigirl96/monica#7,ashigirl96/monica#10")
+        );
+    }
+
+    #[test]
+    fn the_blocked_by_column_is_empty_when_nothing_blocks() {
+        assert_eq!(render_blockers(&[]), None);
+        assert_eq!(render_blockers(&[blocker(8, GithubIssueState::Closed, false)]), None);
+    }
+
+    #[test]
+    fn render_status_table_shows_the_blockers_that_hold_a_task_back() {
+        let row = TaskSummaryRow {
+            blockers: vec![blocker(7, GithubIssueState::Open, false)],
+            ..summary_row()
+        };
+        let rendered = render_status_table(&[row]);
+        assert!(rendered.contains("BLOCKED BY"), "{rendered}");
+        assert!(rendered.contains("ashigirl96/monica#7"), "{rendered}");
     }
 
     #[test]

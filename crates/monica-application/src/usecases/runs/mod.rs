@@ -4,6 +4,7 @@ mod launch_task;
 pub(crate) mod open_bench;
 pub(crate) mod record_hook;
 mod run_task;
+mod start_gate;
 
 pub use launch_task::{take_launchable_pending_launches, worktree_run_needs_fresh_run};
 pub use open_bench::{open_bench, task_shell_env};

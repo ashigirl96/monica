@@ -62,17 +62,55 @@ impl GithubIssueState {
 
 /// Where an issue lives. Sub-issues can cross repositories inside an organization, so a parent is
 /// only identified by its number together with the repo that owns it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IssueAddress {
     pub repo: String,
     pub number: i64,
+}
+
+/// An issue GitHub reports as blocking another one. Carries GitHub's own answer about the blocker
+/// rather than a link into Monica, so a blocker no task tracks is still decidable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssueBlocker {
+    pub address: IssueAddress,
+    pub state: GithubIssueState,
+    pub closed_by_merged_pull_request: bool,
+}
+
+impl IssueBlocker {
+    pub fn new(
+        address: IssueAddress,
+        state: GithubIssueState,
+        closing_pull_requests: &[GithubPullRequest],
+    ) -> Self {
+        Self {
+            address,
+            state,
+            closed_by_merged_pull_request: closing_pull_requests
+                .iter()
+                .any(|pr| pr.status == GithubPullRequestStatus::Merged),
+        }
+    }
+
+    /// The start gate's rule: upstream work is done once GitHub closed the issue or merged a pull
+    /// request that closes it. The merged-PR arm matters because a PR merges before automation
+    /// closes the issue it references, and the downstream task is unblocked at the merge.
+    pub fn is_cleared(&self) -> bool {
+        self.state == GithubIssueState::Closed || self.closed_by_merged_pull_request
+    }
+
+    /// `owner/repo#number`. The repo is always spelled out because a blocker can live in another
+    /// repository, and the gate's message and `monica task status` must not disagree.
+    pub fn label(&self) -> String {
+        format!("{}#{}", self.address.repo, self.address.number)
+    }
 }
 
 /// An issue as returned by the bulk sync fetch. `parent` mirrors the GitHub Sub-issues link and
 /// becomes `parent_task_id`. The children are not fetched: a sync re-reads every open task's issue,
 /// so a tracked child always reports the same link from its own side. `linked_pull_requests` are
 /// the PRs whose closing keyword points at this issue — the reverse lookup that reaches tasks the
-/// branch pass cannot see.
+/// branch pass cannot see. `blockers` mirrors GitHub's blocked-by edges and feeds the start gate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FetchedIssue {
     pub number: i64,
@@ -80,6 +118,7 @@ pub struct FetchedIssue {
     pub state: GithubIssueState,
     pub parent: Option<IssueAddress>,
     pub linked_pull_requests: Vec<GithubPullRequest>,
+    pub blockers: Vec<IssueBlocker>,
 }
 
 /// The issue ref of a task that is still open, so a forced sync must re-check it. One row per
@@ -179,3 +218,70 @@ pub struct GithubAuthStatus {
     pub message: Option<String>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn address() -> IssueAddress {
+        IssueAddress { repo: "owner/repo".to_string(), number: 7 }
+    }
+
+    fn pull_request(status: GithubPullRequestStatus) -> GithubPullRequest {
+        GithubPullRequest {
+            repo: "owner/repo".to_string(),
+            number: 11,
+            url: "https://github.com/owner/repo/pull/11".to_string(),
+            status,
+        }
+    }
+
+    #[test]
+    fn a_blocker_is_cleared_once_the_issue_closes_or_a_closing_pull_request_merges() {
+        for (state, merged, expected) in [
+            (GithubIssueState::Open, false, false),
+            (GithubIssueState::Open, true, true),
+            (GithubIssueState::Closed, false, true),
+            (GithubIssueState::Closed, true, true),
+        ] {
+            let blocker = IssueBlocker {
+                address: address(),
+                state,
+                closed_by_merged_pull_request: merged,
+            };
+            assert_eq!(
+                blocker.is_cleared(),
+                expected,
+                "state={state:?} merged_pr={merged}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_a_merged_closing_pull_request_counts() {
+        let unmerged = [
+            GithubPullRequestStatus::Open,
+            GithubPullRequestStatus::Draft,
+            GithubPullRequestStatus::Closed,
+        ]
+        .map(pull_request);
+        let blocker = IssueBlocker::new(address(), GithubIssueState::Open, &unmerged);
+        assert!(!blocker.closed_by_merged_pull_request);
+
+        let with_merge = [
+            pull_request(GithubPullRequestStatus::Closed),
+            pull_request(GithubPullRequestStatus::Merged),
+        ];
+        let blocker = IssueBlocker::new(address(), GithubIssueState::Open, &with_merge);
+        assert!(blocker.closed_by_merged_pull_request);
+    }
+
+    #[test]
+    fn a_blocker_label_always_carries_its_repo() {
+        let blocker = IssueBlocker::new(address(), GithubIssueState::Open, &[]);
+        assert_eq!(
+            blocker.label(),
+            "owner/repo#7",
+            "a blocker can live in another repo, so a bare #number would be ambiguous"
+        );
+    }
+}

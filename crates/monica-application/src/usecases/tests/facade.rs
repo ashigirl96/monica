@@ -1,6 +1,7 @@
 use super::*;
 use super::support::*;
-use monica_domain::{AgentSessionId, RunMode, RunspaceId};
+use crate::github::{GithubIssueState, IssueAddress, IssueBlocker};
+use monica_domain::{AgentSessionId, RunMode, RunspaceId, TaskId};
 
 
 // The pure decision functions (task_run_settlement_for_*, reconcile_terminal_sessions) and the
@@ -450,7 +451,7 @@ fn facade_launch_task_prepares_a_worktree_run_and_records_the_launch() {
 
     let launch = monica
         .executions()
-        .launch_task(&task_id, None, RunMode::Worktree)
+        .launch_task(&task_id, None, RunMode::Worktree, false)
         .unwrap();
 
     assert_eq!(launch.cwd, checkout.join(".worktrees/mon-1").to_string_lossy());
@@ -471,7 +472,7 @@ fn facade_launch_task_fails_when_setup_fails_and_records_no_launch() {
 
     let err = monica
         .executions()
-        .launch_task(&task_id, None, RunMode::Worktree)
+        .launch_task(&task_id, None, RunMode::Worktree, false)
         .unwrap_err();
 
     assert!(matches!(err, ApplicationError::External(_)), "{err:?}");
@@ -492,7 +493,7 @@ fn facade_launch_task_in_place_skips_setup() {
 
     let launch = monica
         .executions()
-        .launch_task(&task_id, None, RunMode::InPlace)
+        .launch_task(&task_id, None, RunMode::InPlace, false)
         .unwrap();
 
     assert_eq!(launch.cwd, checkout.to_string_lossy());
@@ -510,8 +511,135 @@ fn facade_launch_task_rerun_replaces_the_pending_launch() {
     let sink = RecordingSink::default();
     let mut monica = facade(repos, sink);
 
-    monica.executions().launch_task(&task_id, None, RunMode::InPlace).unwrap();
-    monica.executions().launch_task(&task_id, None, RunMode::InPlace).unwrap();
+    monica.executions().launch_task(&task_id, None, RunMode::InPlace, false).unwrap();
+    monica.executions().launch_task(&task_id, None, RunMode::InPlace, false).unwrap();
 
     assert_eq!(monica.executions().take_pending_launches().unwrap().len(), 1);
+}
+
+// The start gate has to hold at every facade entry that can start a first run, and at none of the
+// entries that merely reopen one. `prepare_task` is the entry the board's Prepare button uses; it
+// reaches `start_run` without going through `launch_task`, so a gate placed at `launch_task` alone
+// would let Prepare-then-Run walk around it.
+
+fn blocked_runnable_task(repos: &mut FakeRepos, checkout: &str) -> TaskId {
+    insert_runnable_project_at(repos, checkout);
+    let task_id = insert_issue_backed_task(repos, 9);
+    repos.set_task_blockers(
+        task_id.as_str(),
+        vec![IssueBlocker {
+            address: IssueAddress { repo: "owner/repo".to_string(), number: 7 },
+            state: GithubIssueState::Open,
+            closed_by_merged_pull_request: false,
+        }],
+    );
+    task_id
+}
+
+#[test]
+fn facade_launch_task_refuses_a_blocked_task_and_records_nothing() {
+    let mut repos = FakeRepos::default();
+    let checkout = temp_dir_named("launch-blocked");
+    let task_id = blocked_runnable_task(&mut repos, &checkout.to_string_lossy());
+    let sink = RecordingSink::default();
+    let mut monica = facade(repos, sink.clone());
+
+    let err = monica
+        .executions()
+        .launch_task(&task_id, None, RunMode::Worktree, false)
+        .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Conflict(_)), "{err:?}");
+    assert!(err.to_string().contains("owner/repo#7"), "{err}");
+    assert!(status_events(&sink).is_empty(), "no run was ever created to announce");
+    assert!(monica.executions().take_pending_launches().unwrap().is_empty());
+    assert!(
+        !checkout.join(".worktrees/issue-9").exists(),
+        "the gate runs before setup, so a refusal must not leave a worktree behind"
+    );
+}
+
+#[test]
+fn facade_prepare_task_refuses_a_blocked_task() {
+    let mut repos = FakeRepos::default();
+    let checkout = temp_dir_named("prepare-blocked");
+    let task_id = blocked_runnable_task(&mut repos, &checkout.to_string_lossy());
+    let mut monica = facade(repos, RecordingSink::default());
+
+    let err = monica.executions().prepare_task(&task_id, false).unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Conflict(_)), "{err:?}");
+    assert!(
+        err.to_string().contains("owner/repo#7"),
+        "Prepare must not be the way around the gate that Run enforces: {err}"
+    );
+}
+
+#[test]
+fn facade_launch_task_forces_past_the_gate() {
+    let mut repos = FakeRepos::default();
+    let checkout = temp_dir_named("launch-forced");
+    let task_id = blocked_runnable_task(&mut repos, &checkout.to_string_lossy());
+    let mut monica = facade(repos, RecordingSink::default());
+
+    let launch = monica
+        .executions()
+        .launch_task(&task_id, None, RunMode::InPlace, true)
+        .unwrap();
+
+    assert_eq!(launch.cwd, checkout.to_string_lossy());
+}
+
+/// `monica task track … && monica task run …` is the Epic flow's own sequence. Tracking fetches
+/// over REST, which carries no relationships, so without the refresh the facade chains on, the
+/// gate would meet an empty blocker list and wave the task through.
+#[tokio::test]
+async fn facade_track_github_issue_leaves_the_start_gate_able_to_refuse() {
+    let repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let mut monica = facade(repos, RecordingSink::default());
+
+    let report = monica
+        .synchronization()
+        .track_github_issue("owner/repo".to_string(), BLOCKED_ISSUE_NUMBER)
+        .await
+        .unwrap();
+
+    let err = monica.executions().prepare_task(&report.task.id, false).unwrap_err();
+    assert!(matches!(err, ApplicationError::Conflict(_)), "{err:?}");
+    assert!(
+        err.to_string().contains(&fake_github_blocker().label()),
+        "tracking has to leave behind what the gate reads, not wait for the next sync: {err}"
+    );
+}
+
+#[tokio::test]
+async fn facade_track_github_issue_reports_a_task_with_no_blockers_as_startable() {
+    let repos = FakeRepos::default();
+    insert_runnable_project(&repos);
+    let mut monica = facade(repos, RecordingSink::default());
+
+    let report = monica
+        .synchronization()
+        .track_github_issue("owner/repo".to_string(), 42)
+        .await
+        .unwrap();
+
+    assert!(monica.executions().prepare_task(&report.task.id, false).is_ok());
+}
+
+/// A start gate gates starting. Once a run exists, reopening it is not a new start — otherwise an
+/// upstream issue reopening would strand work already under way, with no force on the board.
+#[test]
+fn facade_launch_task_still_opens_a_prepared_run_of_a_blocked_task() {
+    let mut repos = FakeRepos::default();
+    let checkout = temp_dir_named("launch-blocked-prepared");
+    let task_id = blocked_runnable_task(&mut repos, &checkout.to_string_lossy());
+    let mut monica = facade(repos, RecordingSink::default());
+    monica.executions().launch_task(&task_id, None, RunMode::InPlace, true).unwrap();
+    monica.executions().take_pending_launches().unwrap();
+
+    let relaunch = monica.executions().launch_task(&task_id, None, RunMode::InPlace, false);
+
+    assert!(relaunch.is_ok(), "{:?}", relaunch.err());
 }

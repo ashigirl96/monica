@@ -407,6 +407,7 @@ impl TaskBoardQuery for SqliteStore {
                 github_issue_url,
                 github_issue_state,
                 github_pull_requests: Vec::new(),
+                blockers: Vec::new(),
                 task_status,
                 task_run_status,
                 task_run_wait_reason,
@@ -428,6 +429,7 @@ impl TaskBoardQuery for SqliteStore {
             }
         }
         for item in &mut items {
+            item.blockers = self.list_task_blockers(&item.id)?;
             item.github_pull_requests = self.list_github_pull_request_refs(&item.id)?;
             item.has_open_pull_request = item.github_pull_requests.iter().any(|pr| {
                 pr.status
