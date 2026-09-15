@@ -45,11 +45,13 @@ migrations!(
     v52,
 );
 
+/// The schema transition this connection observed. `from` is read outside the migration's own
+/// transaction, so a second process can land the pending steps in between — the outcome says which
+/// versions were seen, never that this call is what moved them.
 #[derive(Debug)]
 pub(crate) struct MigrationOutcome {
     pub from: usize,
     pub to: usize,
-    pub applied: usize,
     pub elapsed: Duration,
 }
 
@@ -77,12 +79,7 @@ pub(crate) fn migrate(conn: &mut Connection) -> Result<MigrationOutcome> {
         .to_latest(conn)
         .context("failed to apply database migrations")?;
     let elapsed = started.elapsed();
-    let outcome = MigrationOutcome {
-        from,
-        to,
-        applied: to.saturating_sub(from),
-        elapsed,
-    };
+    let outcome = MigrationOutcome { from, to, elapsed };
     log_outcome(conn, &outcome);
     Ok(outcome)
 }
@@ -93,13 +90,12 @@ fn log_outcome(conn: &Connection, outcome: &MigrationOutcome) {
     static ALREADY_CURRENT: Once = Once::new();
 
     let db = db_label(conn);
-    if outcome.applied > 0 {
+    if outcome.from < outcome.to {
         log::info!(
             target: observe::TARGET_MIGRATIONS,
-            "migrated db={db} from={} to={} applied={} duration_ms={}",
+            "migrated db={db} from={} to={} duration_ms={}",
             outcome.from,
             outcome.to,
-            outcome.applied,
             outcome.elapsed.as_millis()
         );
         return;
@@ -225,25 +221,23 @@ mod tests {
     }
 
     #[test]
-    fn migrate_reports_the_applied_range() {
+    fn migrate_reports_the_version_transition() {
         let mut conn = Connection::open_in_memory().unwrap();
         stage_through(&mut conn, migration_count() - 2);
 
         let outcome = migrate(&mut conn).unwrap();
         assert_eq!(outcome.from, migration_count() - 2);
         assert_eq!(outcome.to, migration_count());
-        assert_eq!(outcome.applied, 2);
     }
 
     #[test]
-    fn migrate_reports_nothing_applied_on_a_current_database() {
+    fn migrate_reports_a_standing_version_on_a_current_database() {
         let mut conn = Connection::open_in_memory().unwrap();
         migrate(&mut conn).unwrap();
 
         let outcome = migrate(&mut conn).unwrap();
         assert_eq!(outcome.from, migration_count());
         assert_eq!(outcome.to, migration_count());
-        assert_eq!(outcome.applied, 0);
     }
 
     #[test]
