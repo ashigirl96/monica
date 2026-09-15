@@ -45,7 +45,7 @@ S2. 自分に関わるものを抜き出す。
 |---|---|
 | `gh issue view <this> --json blockedBy` | 上流の一覧。各上流を `gh issue view <up> --json state,stateReason,closedByPullRequestsReferences` で見て、closed なら通過。open なら `closedByPullRequestsReferences` の各 `number` を `gh pr view <pr> --json state,mergedAt` で見て、merged かつ `stateReason` が `REOPENED` でなければ start gate 通過（`--json closedByPullRequestsReferences` は PR の番号と URL しか返さず、merged かは分からない。reopen された issue も merged PR を返し続ける）。Monica の `monica task run` が同じ規則で拒否しているので、ここで未達と出るのは `--force` で起動されたか、attach など Run を経ずに始めたとき |
 | Brief の `## Merge Gate` | 自分が下流として出る行。上流が Released かを判定し、未 Released なら「PR は draft + `merge-gate` で出す」と控える |
-| Brief の `## Human Action` | Gate が `#<this> 着手前` で未チェックの項目 |
+| Brief の `## Human Action` | Gate が `#<this> 着手前` の未チェック項目（着手を止める）と、`#<this> merge 前` の未チェック項目（着手は止めないが R2 で PR を draft + `merge-gate` にする）。両方を控える |
 | Brief の `## Discovery` と、コメントの `### Discovery` | 自分の実装に効く事実 |
 | `gh issue view <epic> --json subIssues` | 兄弟の一覧。各兄弟の領分には踏み込まない |
 
@@ -56,7 +56,7 @@ S3. 判定して返す。start gate 未達、または `#<this> 着手前` の H
 - start gate: 上流 #A（merged、通過）
 - merge gate: #A の Released 後に merge。現在 未 Released → PR は draft + merge-gate で出す
 - 効く Discovery: 決済鍵は 1Password「<item>」に保管（#A）
-- Human Action: なし
+- Human Action: 着手前 なし / merge 前 「本番鍵の発行」が未完 → PR は draft + merge-gate
 - 兄弟: #B <title>、#C <title>
 ```
 
@@ -90,7 +90,7 @@ R1. **Verification の 3 節を PR 本文に揃える。** 見出しは固定で
 
 PR を作る前に自分で確かめたことは PR template の既存の動作確認の節に属する。この 3 節は「これから誰かが確かめること」だけを持つ。
 
-R2. **merge gate を反映する。** start で控えた merge-after-released の上流が今も未 Released なら draft に戻し、ラベルを付ける。解除は Orchestrator が行う。
+R2. **merge gate を反映する。** 次のどちらかが残っていれば draft に戻し、ラベルを付ける — start で控えた merge-after-released の上流が今も未 Released、または Gate が `#<this> merge 前` の Human Action が未チェック（実装中に増えたものも含むので Brief を読み直す）。どちらも解けていれば ready のままでよい。解除は Orchestrator が行う。
 
 ```bash
 gh pr ready --undo <PR>

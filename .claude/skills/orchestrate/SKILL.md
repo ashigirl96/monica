@@ -73,9 +73,11 @@ minimize されていないコメントのうち、先頭行が `<!-- epic-worke
 | `### Human Action` | `## Human Action` | `- [ ] <内容> — Gate: <…> — 結果:` の形で追記 |
 | `### 依存` | `## Merge Gate` | `merge-after-released` の行だけ追記。blocked-by の辺は Worker が張っている前提で、無ければ `gh issue edit --add-blocked-by` で張る |
 
-畳んだコメントは `RESOLVED` で minimize する。先頭行に目印の無いコメント（人が書いたもの）は畳まず、手順 9 の報告で「未処理のコメント」として列挙する。
+minimize はここでは行わない。本文への書き込みが成功してから（手順 8）畳む。書き込みが失敗した Tick や、途中で止まった Tick でコメントを先に畳むと、その内容は agent の手元にしか無いまま次の Tick から見えなくなり、Discovery と Human Action が消える。畳む対象のコメント node id は手順 8 まで控えておく。
 
-完了条件: 目印付きで未 minimize のコメントが 0 件。
+先頭行に目印の無いコメント（人が書いたもの）は畳まず、手順 9 の報告で「未処理のコメント」として列挙する。
+
+完了条件: 目印付きで未 minimize のコメント全件について、本文のどの節に何を移すかが決まっている。
 
 ### 6. 対話入力を Brief に反映する
 
@@ -107,7 +109,7 @@ sub-issue ごとに状態を 1 つ決める。上から順に最初に当たっ�
 提案は次の 5 種を、当てはまるものだけ列挙する。
 
 1. **起動**: Frontier の各 sub-issue。Task が無ければ track と sync も含める。
-2. **merge gate の解除**: 「PR draft（merge gate 待ち）」のうち、`## Merge Gate` に書かれた上流が全て Released になっているもの。
+2. **merge gate の解除**: 「PR draft（merge gate 待ち）」のうち、`## Merge Gate` に書かれた上流が全て Released で、かつ Gate が `#<sub-issue> merge 前` の Human Action が全てチェック済みのもの。gate は上流と人の作業の両方を持つので、片方だけで外さない。
 3. **Verification の実行**: 全 PR の未チェック項目のうち、`条件:` が今満たされているもの。post-merge は merged で、post-release は Released で、日時指定はその時刻を過ぎていれば満たす。agent が確認できるものは実行を、人にしかできないものは Human Action への変換を提案する。
 4. **追加の分解**: `## Fog` の各行について、「何が分かれば切れるか」が `## Discovery` で満たされたもの。
 5. **close**: PR merged かつ post-merge 項目が全てチェック済みの sub-issue Task。全 sub-issue が done、Verification（未完了）が空、Human Action が全てチェック済み、Fog が空なら epic そのもの。
@@ -117,6 +119,8 @@ sub-issue ごとに状態を 1 つ決める。上から順に最初に当たっ�
 ### 8. Brief を再生成し、提案して止まる
 
 [brief-template.md](brief-template.md) の区切りに従い、`## Status` と `## Verification（未完了）` を手順 7 の結果で置き換える。区切りの外は手順 5・6 で追記した分以外は触らない。本文の書き込みは、直前に本文を読み直してから行う。`## Verification（未完了）` を置き換える前に、手順 6 の PR への書き戻しが済んでいること — 済んでいれば、その項目は PR 本文でチェック済みになっているので再生成で自然に消える。
+
+本文の書き込みが成功したら、そこで初めて手順 5 で控えたコメントを `RESOLVED` で minimize する。失敗したら畳まずに止め、何が書けなかったかを報告する（コメントは未 minimize のまま残るので、次の Tick が同じものを読み直せる）。
 
 続けて報告を出し、あなたの指示を待つ。
 

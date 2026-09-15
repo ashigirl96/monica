@@ -9,17 +9,21 @@
 `gh issue view --json comments` は minimize 状態を返さないので GraphQL で取る。`id` はあとで minimize に使う node id。
 
 ```bash
-gh api graphql -f query='query {
+gh api graphql --paginate \
+  -f query='query($endCursor: String) {
   repository(owner: "<O>", name: "<R>") {
     issue(number: <E>) {
       id body
-      comments(first: 100) {
+      comments(first: 100, after: $endCursor) {
         nodes { id databaseId isMinimized author { login } body url }
+        pageInfo { hasNextPage endCursor }
       }
     }
   }
 }' --jq '.data.repository.issue'
 ```
+
+`--paginate` を落とさないこと。畳んだコメントは minimize されるだけで connection に残るので、書き戻しが溜まった epic では最初の 100 件が全部 minimize 済みになり、未処理の Worker コメントが 2 ページ目以降に沈む。1 ページしか見ないと「書き戻しは無い」と誤って結論づける。
 
 ### sub-issue 一覧と、それぞれの依存・PR
 

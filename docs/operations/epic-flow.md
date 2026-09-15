@@ -27,7 +27,7 @@ Epic（親 issue）を sub-issue に分解し、Worker が [Worker flow](./worke
 
 - gate は 2 種類。**start-after-merged**（デフォルト）と **merge-after-released**（Brief の Merge Gate 節に明記）。
 - start gate は Monica が機械的に止める（ADR-0002）。sync が GitHub の blocked-by を写し、上流が「closed」か「閉じる PR が merged で、その後 reopen されていない」のどちらかなら通過、そうでなければ `monica task run`・board の Run・Prepare のいずれも `task MON-n is blocked by owner/repo#N; land them first or force the run` で拒否する。突破は `monica task run MON-n --force` だけ。CLI の `task run` は gate の直前に対象 Task を 1 回 sync するので、写しの古さで素通りしない（オフラインなら前回の写しで判定する）。`epic-worker start` と Tick の手順 7 が GitHub を直接読む判定は同じ規則で、`--force` や attach など Run を経ない着手に対する保険。
-- merge gate は Worker が draft + `merge-gate` ラベルで出す。解除は Orchestrator のみ。
+- merge gate は Worker が draft + `merge-gate` ラベルで出す。解除は Orchestrator のみ。gate が塞がる理由は 2 つあり、merge-after-released の上流が未 Released か、Gate が `#N merge 前` の Human Action が未完かのどちらか。両方が解けて初めて外す。
 - CI による硬い merge gate は事故が起きてから検討する。
 
 ## Orchestrator（`/orchestrate`）
