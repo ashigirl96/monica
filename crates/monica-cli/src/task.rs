@@ -68,7 +68,7 @@ pub async fn run(cmd: TaskCommand) -> Result<()> {
         TaskCommand::Status { status, project } => status_command(&mut monica, status, project),
         TaskCommand::Pr { id, target } => pr_command(&mut monica, &id, &target).await,
         TaskCommand::Run { id, in_place, force } => {
-            run_command(&mut monica, &id, in_place, force)
+            run_command(&mut monica, &id, in_place, force).await
         }
         TaskCommand::Attach { id } => attach_command(&mut monica, &id),
         TaskCommand::Close { id } => close_command(&mut monica, &id),
@@ -232,9 +232,26 @@ fn dash() -> String {
     or_dash(None)
 }
 
-fn run_command(monica: &mut CliFacade, id: &str, in_place: bool, force: bool) -> Result<()> {
+async fn run_command(
+    monica: &mut CliFacade,
+    id: &str,
+    in_place: bool,
+    force: bool,
+) -> Result<()> {
     let task_id = TaskId::parse(id)?;
     let mode = if in_place { RunMode::InPlace } else { RunMode::Worktree };
+    // The start gate reads a mirror of GitHub, and outside the desktop nothing else refreshes it:
+    // the background sync worker only runs in the app. Without this, a task tracked before its
+    // blocker existed — or before this feature shipped at all — would keep an empty blocker list
+    // and start regardless. Refreshed here rather than inside the gate so `--force` pays nothing.
+    //
+    // Best-effort on purpose: offline, the run still goes ahead on whatever the mirror last knew,
+    // which is no worse than before. An unauthenticated façade makes this a no-op already.
+    if !force {
+        if let Err(e) = monica.synchronization().force_sync_github(Some(&task_id)).await {
+            eprintln!("monica: could not refresh {task_id} from GitHub ({e:#}); using the last sync");
+        }
+    }
     // Setup can take minutes and launch_task blocks through it, so say so up front — but not when
     // the start gate is about to refuse, or the announcement would promise work that never starts.
     let summaries = monica.tasks().list_all_task_summaries(None)?;
