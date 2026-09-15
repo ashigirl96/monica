@@ -1,7 +1,7 @@
 use super::*;
 use super::support::*;
 use crate::github::{GithubIssueState, IssueAddress, IssueBlocker};
-use monica_domain::{AgentSessionId, RunMode, RunspaceId, TaskId};
+use monica_domain::{AgentSessionId, RunMode, RunspaceId, TaskId, TaskRunId};
 
 
 // The pure decision functions (task_run_settlement_for_*, reconcile_terminal_sessions) and the
@@ -51,7 +51,16 @@ fn facade_ingest_agent_hook_recovers_event_label_for_dropped_event() {
 
     let report = monica
         .executions()
-        .ingest_agent_hook(Agent::Claude, HookContext::default(), r#"{"hook_event_name":"PreToolUse","tool_name":"Read"}"#)
+        .ingest_agent_hook(
+            Agent::Claude,
+            HookContext {
+                task_id: Some(&TaskId::from_store("MON-1".to_string())),
+                task_run_id: Some(&TaskRunId::from_store("run-1".to_string())),
+                terminal_tab_id: Some("tab-1"),
+                terminal_session_id: Some("ts-1"),
+            },
+            r#"{"hook_event_name":"PreToolUse","tool_name":"Read"}"#,
+        )
         .unwrap();
 
     assert!(report.ignored);
@@ -61,6 +70,17 @@ fn facade_ingest_agent_hook_recovers_event_label_for_dropped_event() {
     let line = report.trace_line();
     assert!(line.contains("event=PreToolUse"), "{line}");
     assert!(line.contains("ignored=true"), "{line}");
+    // Dropped payloads are the most common hook of all; the ids they were launched with survive the
+    // early return, so a grep for the run still finds them.
+    assert!(
+        line.contains(
+            "task_id=MON-1 task_run_id=run-1 agent_session_id=none tab_id=tab-1 session_id=ts-1"
+        ),
+        "{line}"
+    );
+    // The field that drives notification cancellation stays unset, which is why the trace keeps its
+    // own copy rather than reusing it.
+    assert_eq!(report.terminal_session_id, None);
 }
 
 #[test]

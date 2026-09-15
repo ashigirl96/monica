@@ -13,7 +13,7 @@ pub use github::{
     GithubSyncReport, LinkPullRequestReport, SyncChangeCounts, TaskSyncChange, TaskSyncChanges,
     TrackGithubIssueReport, TrackOutcome,
 };
-pub use runs::{HookContext, HookReport, HookResolveRoute, ResolveSkip};
+pub use runs::{HookContext, HookIdentity, HookReport, HookResolveRoute, ResolveSkip};
 pub use tasks::{
     AttachSessionReport, CloseTaskReport, CurrentTaskReport, CurrentTaskSource, TabIdentity,
     TabTaskBinding,

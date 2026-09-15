@@ -66,6 +66,33 @@ impl std::fmt::Display for ResolveSkip {
     }
 }
 
+/// The identity a hook arrived with, kept for the trace line alone.
+///
+/// Separate from the report's own `terminal_session_id` on purpose: that field drives notification
+/// cancellation, so an ignored payload must leave it unset while its trace line still names every
+/// id the hook was launched with.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HookIdentity {
+    pub task_id: Option<TaskId>,
+    pub task_run_id: Option<TaskRunId>,
+    pub terminal_tab_id: Option<String>,
+    pub terminal_session_id: Option<String>,
+}
+
+impl HookIdentity {
+    /// `task_run_id` is the id after the safety check, never the raw env value: an id that failed it
+    /// is attacker-shaped text, and a log line is the wrong place to repeat it. `unsafe_run_id=true`
+    /// on the same line says one was supplied and rejected.
+    fn of(ctx: HookContext<'_>, safe_task_run_id: Option<&TaskRunId>) -> Self {
+        HookIdentity {
+            task_id: ctx.task_id.cloned(),
+            task_run_id: safe_task_run_id.cloned(),
+            terminal_tab_id: ctx.terminal_tab_id.map(str::to_string),
+            terminal_session_id: ctx.terminal_session_id.map(str::to_string),
+        }
+    }
+}
+
 /// The three task-scoped rules, in evaluation order. Paired with `ResolveTrace::skipped` by index.
 const RULE_NAMES: [&str; 3] = ["session", "prepared_primary", "lazy_create"];
 
@@ -95,8 +122,9 @@ pub struct HookReport {
     pub linked_task_run_id: Option<TaskRunId>,
     pub linked_task_id: Option<TaskId>,
     pub terminal_session_id: Option<String>,
-    pub terminal_tab_id: Option<String>,
     pub agent_session_id: Option<AgentSessionId>,
+    /// What the hook was launched with, for the trace line — present even when nothing resolved.
+    pub identity: HookIdentity,
     pub ignored: bool,
     pub task_found: bool,
     pub task_run_linked: bool,
@@ -116,7 +144,7 @@ pub struct HookReport {
 }
 
 impl HookReport {
-    fn ignored(unsafe_task_run_id: bool) -> Self {
+    fn ignored(identity: HookIdentity, unsafe_task_run_id: bool) -> Self {
         HookReport {
             event_name: None,
             task_run_status: None,
@@ -126,8 +154,8 @@ impl HookReport {
             linked_task_run_id: None,
             linked_task_id: None,
             terminal_session_id: None,
-            terminal_tab_id: None,
             agent_session_id: None,
+            identity,
             ignored: true,
             task_found: false,
             task_run_linked: false,
@@ -160,11 +188,14 @@ impl HookReport {
              resolved_by={} created={} skipped={} from={} requested={} to={} refused={} \
              ignored={} task_found={} run_linked={} event_recorded={} unsafe_run_id={} \
              wait_reason={} entered_waiting={}",
-            opt(self.linked_task_id.as_deref()),
-            opt(self.linked_task_run_id.as_deref()),
+            opt(self.linked_task_id.as_deref().or(self.identity.task_id.as_deref())),
+            opt(self
+                .linked_task_run_id
+                .as_deref()
+                .or(self.identity.task_run_id.as_deref())),
             opt(self.agent_session_id.as_deref()),
-            opt(self.terminal_tab_id.as_deref()),
-            opt(self.terminal_session_id.as_deref()),
+            opt(self.identity.terminal_tab_id.as_deref()),
+            opt(self.identity.terminal_session_id.as_deref()),
             opt(self.event_name.as_deref()),
             self.resolved_by.as_str(),
             self.task_run_created,
@@ -202,8 +233,10 @@ where
     let safe_task_run_id = ctx.task_run_id.filter(|r| is_safe_task_run_id(r.as_str()));
     let unsafe_task_run_id = ctx.task_run_id.is_some() && safe_task_run_id.is_none();
 
+    let identity = HookIdentity::of(ctx, safe_task_run_id);
+
     let Some(signal) = signal else {
-        return Ok(HookReport::ignored(unsafe_task_run_id));
+        return Ok(HookReport::ignored(identity, unsafe_task_run_id));
     };
 
     // The per-tab indicator updates for any Monica shell, task-linked or not.
@@ -369,8 +402,8 @@ where
         linked_task_run_id: linked_task_run_id.cloned(),
         linked_task_id: linked_task_id.cloned(),
         terminal_session_id: ctx.terminal_session_id.map(str::to_string),
-        terminal_tab_id: ctx.terminal_tab_id.map(str::to_string),
         agent_session_id: agent_session_id.cloned(),
+        identity,
         ignored: false,
         task_found,
         task_run_linked,
@@ -628,7 +661,7 @@ mod tests {
     #[test]
     fn a_hook_that_resolved_nothing_still_names_every_field() {
         assert_eq!(
-            HookReport::ignored(false).trace_line(),
+            HookReport::ignored(HookIdentity::default(), false).trace_line(),
             "hook task_id=none task_run_id=none agent_session_id=none tab_id=none session_id=none \
              event=none resolved_by=none created=false skipped=none from=none requested=none \
              to=none refused=none ignored=true task_found=false run_linked=false \
@@ -646,8 +679,13 @@ mod tests {
             linked_task_run_id: Some(TaskRunId::from_store("run-12".to_string())),
             linked_task_id: Some(TaskId::from_store("MON-42".to_string())),
             terminal_session_id: Some("ts-1".to_string()),
-            terminal_tab_id: Some("tab-1".to_string()),
             agent_session_id: Some(AgentSessionId::from_agent("sess-1")),
+            identity: HookIdentity {
+                task_id: Some(TaskId::from_store("MON-42".to_string())),
+                task_run_id: None,
+                terminal_tab_id: Some("tab-1".to_string()),
+                terminal_session_id: Some("ts-1".to_string()),
+            },
             ignored: false,
             task_found: true,
             task_run_linked: true,

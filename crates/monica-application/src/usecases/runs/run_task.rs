@@ -114,11 +114,19 @@ where
 /// be free — nothing live, and nothing already prepared and waiting to launch. Runs inside the
 /// write transaction that creates the run: the GUI and `monica task run` are separate processes,
 /// and checked outside it both could find the slot free and each create a run.
+/// The stale run this check finished on its way through. Returned rather than announced here: the
+/// check runs inside the caller's write transaction, and a rollback after it would leave the log
+/// claiming a transition the store never kept.
+struct ReapedStaleSetup {
+    task_run_id: TaskRunId,
+    from: TaskRunStatus,
+}
+
 fn ensure_task_accepts_new_run<R>(
     repos: &mut R,
     task: &Task,
     stale_setup_age_secs: i64,
-) -> ApplicationResult<()>
+) -> ApplicationResult<Option<ReapedStaleSetup>>
 where
     R: TaskRunStore + ?Sized,
 {
@@ -141,7 +149,7 @@ where
     };
     let Some(primary_run) = primary_run else {
         if DisplayStatus::from_task_and_run(task.status, None).prepare_eligible() {
-            return Ok(());
+            return Ok(None);
         }
         return Err(reject(
             "accepts_new_run",
@@ -163,14 +171,10 @@ where
         && repos.is_task_run_older_than(primary_id, stale_setup_age_secs)?
     {
         repos.finish_task_run(primary_id, task_id, TaskRunStatus::Failed)?;
-        run_status(
-            primary_id,
-            task_id,
-            Some(primary_run.status),
-            TaskRunStatus::Failed,
-            "stale_setup",
-        );
-        return Ok(());
+        return Ok(Some(ReapedStaleSetup {
+            task_run_id: primary_id.clone(),
+            from: primary_run.status,
+        }));
     }
     if is_active_run_status(primary_run.status) {
         return Err(reject(
@@ -195,7 +199,20 @@ where
             )),
         ));
     }
-    Ok(())
+    Ok(None)
+}
+
+/// Announce a stale-setup reap, once the transaction that performed it has committed.
+fn log_reaped_stale_setup(reaped: Option<ReapedStaleSetup>, task_id: &TaskId) {
+    if let Some(reaped) = reaped {
+        run_status(
+            &reaped.task_run_id,
+            task_id,
+            Some(reaped.from),
+            TaskRunStatus::Failed,
+            "stale_setup",
+        );
+    }
 }
 
 /// Phase 1: Create TaskRun (SettingUp) + set as Main Run + ensure bench exists.
@@ -225,7 +242,7 @@ where
     // these steps would otherwise strand a run that has no primary pointer and no workbench.
     let mut tx = repos.begin()?;
     let task = reload_task(&*tx, task_id)?;
-    ensure_task_accepts_new_run(&mut *tx, &task, stale_setup_age_secs)?;
+    let reaped = ensure_task_accepts_new_run(&mut *tx, &task, stale_setup_age_secs)?;
     let run = tx.start_task_run(NewTaskRun {
         task_id: task.id.clone(),
         agent: None,
@@ -235,6 +252,7 @@ where
     tx.set_primary_task_run(&task.id, &run.id)?;
     super::open_bench::ensure_bench(&mut *tx, &task.id, &cwd, false)?;
     tx.commit()?;
+    log_reaped_stale_setup(reaped, &task.id);
     run_status(&run.id, &task.id, None, run.status, "prepare");
 
     Ok(PrepareTaskResult {
@@ -266,7 +284,7 @@ where
     // reach it, so a run left at `SettingUp` here would never advance.
     let mut tx = repos.begin()?;
     let task = reload_task(&*tx, task_id)?;
-    ensure_task_accepts_new_run(&mut *tx, &task, stale_setup_age_secs)?;
+    let reaped = ensure_task_accepts_new_run(&mut *tx, &task, stale_setup_age_secs)?;
     let run = tx.start_task_run(NewTaskRun {
         task_id: task.id.clone(),
         agent: None,
@@ -277,6 +295,7 @@ where
     super::open_bench::ensure_bench(&mut *tx, &task.id, &cwd, false)?;
     tx.finish_task_run(&run.id, &task.id, TaskRunStatus::Prepared)?;
     tx.commit()?;
+    log_reaped_stale_setup(reaped, &task.id);
     run_status(&run.id, &task.id, None, run.status, "run_in_place");
     run_status(
         &run.id,
