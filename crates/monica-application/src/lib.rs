@@ -46,7 +46,7 @@ pub use ports::{
 pub use bench::{bench_runspace_id, PrepareTaskResult, RunTaskResult, TaskBench};
 pub use github::{
     FetchedIssue, GithubAuthStatus, GithubIssue, GithubIssueState, GithubPullRequest,
-    GithubPullRequestRef, GithubPullRequestStatus, IssueAddress, OpenIssueRef,
+    GithubPullRequestRef, GithubPullRequestStatus, IssueAddress, IssueBlocker, OpenIssueRef,
     PullRequestBranchSyncCandidate, RepoPullRequest, UnresolvedPullRequestRef,
 };
 pub use observation::TaskRunObservation;

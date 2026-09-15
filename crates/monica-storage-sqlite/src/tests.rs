@@ -1,6 +1,6 @@
 use monica_application::{
     EventRepository, ExecutionProfile, FetchedIssue, GithubIssueState, GithubIssueSyncStore,
-    GithubPullRequest, GithubPullRequestStatus, IssueAddress,
+    GithubPullRequest, GithubPullRequestStatus, IssueAddress, IssueBlocker,
     ProjectRepository, PullRequestBranchSyncCandidate, TabAttachment, TaskBoardQuery,
     TaskRunObservation,
     TaskRunStore, TaskStore, TaskSummaryFilter, TaskSummaryRow, TerminalRunspaceRow,
@@ -2837,11 +2837,25 @@ fn fetched(number: i64, title: &str, state: GithubIssueState) -> FetchedIssue {
         state,
         parent: None,
         linked_pull_requests: Vec::new(),
+        blockers: Vec::new(),
     }
 }
 
 fn fetched_with_parent(number: i64, parent: IssueAddress) -> FetchedIssue {
     FetchedIssue { parent: Some(parent), ..fetched(number, "issue", GithubIssueState::Open) }
+}
+
+fn fetched_with_blockers(number: i64, blockers: Vec<IssueBlocker>) -> FetchedIssue {
+    FetchedIssue { blockers, ..fetched(number, "issue", GithubIssueState::Open) }
+}
+
+fn blocker(repo: &str, number: i64, state: GithubIssueState, merged_pr: bool) -> IssueBlocker {
+    IssueBlocker {
+        address: IssueAddress { repo: repo.to_string(), number },
+        state,
+        closed_by_merged_pull_request: merged_pr,
+        reopened: false,
+    }
 }
 
 fn parent_of(db: &SqliteStore, id: &TaskId) -> Option<String> {
@@ -3140,6 +3154,169 @@ fn closing_a_parent_unlinks_its_open_children_but_not_its_closed_ones() {
         parent_of(&db, &closed_child).as_deref(),
         Some(parent.as_str()),
         "a closed child's link stays frozen with the rest of its cache"
+    );
+}
+
+// A blocker is stored as the address GitHub gave plus GitHub's answer about it, never as a link
+// into Monica, so the start gate can decide against issues no task tracks.
+
+#[test]
+fn sync_stores_the_blockers_github_reports() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = tracked_task(&mut db, "owner/repo", 42);
+    let ref_id = issue_ref_id(&db, "owner/repo", 42);
+
+    db.bulk_record_issue_sync(&[(
+        ref_id,
+        fetched_with_blockers(
+            42,
+            vec![
+                blocker("owner/repo", 7, GithubIssueState::Open, false),
+                blocker("other/repo", 3, GithubIssueState::Closed, false),
+            ],
+        ),
+    )])
+    .unwrap();
+
+    let stored = db.list_task_blockers(task.as_str()).unwrap();
+    assert_eq!(
+        stored,
+        vec![
+            blocker("other/repo", 3, GithubIssueState::Closed, false),
+            blocker("owner/repo", 7, GithubIssueState::Open, false),
+        ],
+        "blockers come back ordered by address, with GitHub's raw answer intact"
+    );
+}
+
+#[test]
+fn a_reopened_blocker_survives_the_round_trip() {
+    // Stored beside the merge flag rather than folded into it, so the gate's rule stays the one
+    // place that decides — and a reopen after a merge still reads as blocking after a reload.
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = tracked_task(&mut db, "owner/repo", 42);
+    let ref_id = issue_ref_id(&db, "owner/repo", 42);
+    let reopened = IssueBlocker {
+        reopened: true,
+        ..blocker("owner/repo", 7, GithubIssueState::Open, true)
+    };
+
+    db.bulk_record_issue_sync(&[(ref_id, fetched_with_blockers(42, vec![reopened.clone()]))])
+        .unwrap();
+
+    let stored = db.list_task_blockers(task.as_str()).unwrap();
+    assert_eq!(stored, vec![reopened]);
+    assert!(!stored[0].is_cleared());
+}
+
+#[test]
+fn a_blocker_dropped_on_github_disappears_on_the_next_sync() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = tracked_task(&mut db, "owner/repo", 42);
+    let ref_id = issue_ref_id(&db, "owner/repo", 42);
+    let both = vec![
+        blocker("owner/repo", 7, GithubIssueState::Open, false),
+        blocker("owner/repo", 8, GithubIssueState::Open, false),
+    ];
+    db.bulk_record_issue_sync(&[(ref_id, fetched_with_blockers(42, both))]).unwrap();
+
+    db.bulk_record_issue_sync(&[(
+        ref_id,
+        fetched_with_blockers(42, vec![blocker("owner/repo", 8, GithubIssueState::Closed, true)]),
+    )])
+    .unwrap();
+
+    assert_eq!(
+        db.list_task_blockers(task.as_str()).unwrap(),
+        vec![blocker("owner/repo", 8, GithubIssueState::Closed, true)],
+        "every sync rewrites the set, so a removed edge and a changed state both land"
+    );
+}
+
+#[test]
+fn blockers_are_dropped_with_the_ref_that_owns_them() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = tracked_task(&mut db, "owner/repo", 42);
+    let ref_id = issue_ref_id(&db, "owner/repo", 42);
+    db.bulk_record_issue_sync(&[(
+        ref_id,
+        fetched_with_blockers(42, vec![blocker("owner/repo", 7, GithubIssueState::Open, false)]),
+    )])
+    .unwrap();
+
+    db.conn().execute("DELETE FROM external_refs WHERE id = ?1", [ref_id]).unwrap();
+
+    assert!(db.list_task_blockers(task.as_str()).unwrap().is_empty());
+}
+
+#[test]
+fn task_blockers_span_every_issue_ref_the_task_carries() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = tracked_task(&mut db, "owner/repo", 42);
+    // Re-tracking the same task against a second issue is the only way a task grows another issue
+    // ref, and there is no store method for it; the sync path below is what this test is about.
+    db.conn()
+        .execute(
+            "INSERT INTO external_refs (task_id, provider, ref_type, repo, number)
+             VALUES (?1, 'github', 'issue', 'owner/repo', 43)",
+            [task.as_str()],
+        )
+        .unwrap();
+    let entries: Vec<(i64, FetchedIssue)> = [(42, 7), (43, 8)]
+        .into_iter()
+        .map(|(issue, blocked_by)| {
+            (
+                issue_ref_id(&db, "owner/repo", issue),
+                fetched_with_blockers(
+                    issue,
+                    vec![blocker("owner/repo", blocked_by, GithubIssueState::Open, false)],
+                ),
+            )
+        })
+        .collect();
+
+    db.bulk_record_issue_sync(&entries).unwrap();
+
+    assert_eq!(
+        db.list_task_blockers(task.as_str()).unwrap(),
+        vec![
+            blocker("owner/repo", 7, GithubIssueState::Open, false),
+            blocker("owner/repo", 8, GithubIssueState::Open, false),
+        ]
+    );
+}
+
+#[test]
+fn one_blocker_shared_by_two_issue_refs_is_reported_once() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task = tracked_task(&mut db, "owner/repo", 42);
+    db.conn()
+        .execute(
+            "INSERT INTO external_refs (task_id, provider, ref_type, repo, number)
+             VALUES (?1, 'github', 'issue', 'owner/repo', 43)",
+            [task.as_str()],
+        )
+        .unwrap();
+    let entries: Vec<(i64, FetchedIssue)> = [42, 43]
+        .into_iter()
+        .map(|issue| {
+            (
+                issue_ref_id(&db, "owner/repo", issue),
+                fetched_with_blockers(
+                    issue,
+                    vec![blocker("owner/repo", 7, GithubIssueState::Open, false)],
+                ),
+            )
+        })
+        .collect();
+
+    db.bulk_record_issue_sync(&entries).unwrap();
+
+    assert_eq!(
+        db.list_task_blockers(task.as_str()).unwrap(),
+        vec![blocker("owner/repo", 7, GithubIssueState::Open, false)],
+        "the rows are per ref, but the reader wants the set of issues blocking the task — a \
+         repeat would list the same issue twice in the column and in the run's refusal"
     );
 }
 

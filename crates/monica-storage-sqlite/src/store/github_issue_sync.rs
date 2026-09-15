@@ -3,7 +3,7 @@ use rusqlite::{params, OptionalExtension};
 
 use crate::SqliteStore;
 use monica_application::{
-    FetchedIssue, GithubIssueState, GithubIssueSyncStore, IssueAddress, OpenIssueRef,
+    FetchedIssue, GithubIssueState, GithubIssueSyncStore, IssueAddress, IssueBlocker, OpenIssueRef,
 };
 use monica_domain::{Provider, RefType};
 
@@ -46,9 +46,38 @@ impl SqliteStore {
         for (external_ref_id, issue) in entries {
             upsert_issue_ref_state_in(&tx, *external_ref_id, &issue.title, issue.state)?;
             record_parent_task_in(&tx, *external_ref_id, issue.parent.as_ref())?;
+            record_issue_blockers_in(&tx, *external_ref_id, &issue.blockers)?;
         }
         tx.commit()?;
         Ok(())
+    }
+
+    /// Every blocker stored for the task's issue refs, exactly as the last sync mirrored them.
+    /// Whether a blocker still blocks is not decided here — the rows carry GitHub's raw answer and
+    /// [`IssueBlocker::is_cleared`] is the single place that reads it.
+    pub fn list_task_blockers(&self, task_id: &str) -> Result<Vec<IssueBlocker>> {
+        let mut stmt = self.conn().prepare(
+            "SELECT DISTINCT b.repo, b.number, b.state, b.closed_by_merged_pull_request, b.reopened
+               FROM github_issue_blockers b
+               JOIN external_refs er ON er.id = b.external_ref_id
+              WHERE er.task_id = ?1 AND er.ref_type = 'issue'
+              ORDER BY b.repo, b.number",
+        )?;
+        let mut rows = stmt.query(params![task_id])?;
+        let mut blockers = Vec::new();
+        while let Some(row) = rows.next()? {
+            blockers.push(IssueBlocker {
+                address: IssueAddress {
+                    repo: row.get("repo")?,
+                    number: row.get("number")?,
+                },
+                state: row.get::<_, String>("state")?.parse()?,
+                closed_by_merged_pull_request: row.get::<_, i64>("closed_by_merged_pull_request")?
+                    != 0,
+                reopened: row.get::<_, i64>("reopened")? != 0,
+            });
+        }
+        Ok(blockers)
     }
 
     pub fn upsert_issue_ref_state(
@@ -97,6 +126,10 @@ impl GithubIssueSyncStore for SqliteStore {
     ) -> Result<()> {
         SqliteStore::upsert_issue_ref_state(self, task_id, repo, number, title, state)
     }
+
+    fn list_task_blockers(&self, task_id: &str) -> Result<Vec<IssueBlocker>> {
+        SqliteStore::list_task_blockers(self, task_id)
+    }
 }
 
 fn upsert_issue_ref_state_in(
@@ -117,6 +150,36 @@ fn upsert_issue_ref_state_in(
         ),
         params![external_ref_id, title, state.as_str()],
     )?;
+    Ok(())
+}
+
+/// Replace the blockers recorded for `external_ref_id` with what GitHub reports now. A wholesale
+/// rewrite rather than an upsert: an edge dropped on GitHub has to disappear here, and the set is
+/// small enough that re-inserting it costs less than reconciling it row by row.
+fn record_issue_blockers_in(
+    conn: &rusqlite::Connection,
+    external_ref_id: i64,
+    blockers: &[IssueBlocker],
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM github_issue_blockers WHERE external_ref_id = ?1",
+        params![external_ref_id],
+    )?;
+    for blocker in blockers {
+        conn.execute(
+            "INSERT INTO github_issue_blockers
+               (external_ref_id, repo, number, state, closed_by_merged_pull_request, reopened)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                external_ref_id,
+                blocker.address.repo,
+                blocker.address.number,
+                blocker.state.as_str(),
+                i64::from(blocker.closed_by_merged_pull_request),
+                i64::from(blocker.reopened),
+            ],
+        )?;
+    }
     Ok(())
 }
 

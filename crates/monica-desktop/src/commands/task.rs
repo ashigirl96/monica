@@ -147,7 +147,9 @@ pub async fn prepare_task(app: AppHandle, task_id: String) -> Result<PrepareTask
     let app_spawn = app.clone();
     let result: PrepareTaskResult = event_sink::off_main(move || {
         let mut monica = event_sink::open(&app)?;
-        let result = monica.executions().prepare_task(&TaskId::from_store(task_id))?;
+        // No force from the board: a blocked task is held back here, and the escape hatch lives on
+        // `monica task run --force`.
+        let result = monica.executions().prepare_task(&TaskId::from_store(task_id), false)?;
         Ok(result.into())
     })
     .await?;
@@ -281,6 +283,7 @@ pub async fn launch_task(
             &TaskId::from_store(task_id),
             agent.map(monica_domain::Agent::from),
             monica_domain::RunMode::from(mode),
+            false,
         )?;
         Ok(RunTaskResult::from(result))
     })

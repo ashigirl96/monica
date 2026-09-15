@@ -25,9 +25,14 @@ pub struct ExecutionService<'a, B: Backend> {
 }
 
 impl<B: Backend> ExecutionService<'_, B> {
-    /// Phase 1 of a run: create the TaskRun, set it primary, ensure the bench exists.
-    pub fn prepare_task(&mut self, task_id: &TaskId) -> ApplicationResult<PrepareTaskResult> {
-        crate::usecases::runs::start_run(&mut self.m.repos, task_id)
+    /// Phase 1 of a run: create the TaskRun, set it primary, ensure the bench exists. `force`
+    /// overrides the start gate that holds a task back while its upstream issues are unfinished.
+    pub fn prepare_task(
+        &mut self,
+        task_id: &TaskId,
+        force: bool,
+    ) -> ApplicationResult<PrepareTaskResult> {
+        crate::usecases::runs::start_run(&mut self.m.repos, task_id, force)
     }
 
     /// Phase 2 of a run: create the worktree and run setup. Emits the run's resulting status
@@ -66,9 +71,10 @@ impl<B: Backend> ExecutionService<'_, B> {
         task_id: &TaskId,
         agent_override: Option<Agent>,
         mode: RunMode,
+        force: bool,
     ) -> ApplicationResult<RunTaskResult> {
         let Monica { repos, outputs, .. } = &mut *self.m;
-        crate::usecases::runs::run_task(repos, outputs, task_id, agent_override, mode)
+        crate::usecases::runs::run_task(repos, outputs, task_id, agent_override, mode, force)
     }
 
     /// The single entry behind the board's RUN menu and `monica task run`: prepare when a worktree
@@ -79,11 +85,12 @@ impl<B: Backend> ExecutionService<'_, B> {
         task_id: &TaskId,
         agent_override: Option<Agent>,
         mode: RunMode,
+        force: bool,
     ) -> ApplicationResult<RunTaskResult> {
         if mode == RunMode::Worktree
             && crate::usecases::runs::worktree_run_needs_fresh_run(&self.m.repos, task_id)?
         {
-            let prep = self.prepare_task(task_id)?;
+            let prep = self.prepare_task(task_id, force)?;
             if self.execute_run(task_id, &prep.task_run_id)? == TaskRunStatus::Failed {
                 let log = self
                     .m
@@ -97,7 +104,7 @@ impl<B: Backend> ExecutionService<'_, B> {
                 )));
             }
         }
-        let launch = self.run_task(task_id, agent_override, mode)?;
+        let launch = self.run_task(task_id, agent_override, mode, force)?;
         self.m.repos.put_pending_launch(&launch)?;
         Ok(launch)
     }

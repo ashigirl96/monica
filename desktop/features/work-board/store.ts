@@ -9,7 +9,7 @@ import {
 } from "@/features/work-bench/store";
 import { loadTerminalStateAtom } from "@/features/work-bench/persistence";
 import { activeSpaceAtom } from "@/stores/space";
-import { pushInfoToast } from "@/stores/toast";
+import { pushErrorToast, pushInfoToast } from "@/stores/toast";
 import { refreshTaskSummariesAtom } from "@/stores/workboard";
 
 // These depend on the work-bench feature because acting on a task drives its terminal
@@ -59,6 +59,12 @@ export const runTaskAtom = atom(
     runTaskInFlight.add(taskId);
     try {
       await launchTask(taskId, agent, mode);
+    } catch (error) {
+      // The menu fires this and walks away, so a rejection here has nowhere else to surface.
+      // A refusal the reader can act on — an upstream issue still open, setup that failed — has
+      // to be said out loud rather than leaving the Run key looking broken.
+      pushErrorToast(error instanceof Error ? error.message : String(error));
+      return;
     } finally {
       runTaskInFlight.delete(taskId);
     }

@@ -122,6 +122,18 @@ mod tests {
     }
 
     #[test]
+    fn task_run_takes_force_to_get_past_the_start_gate() {
+        assert!(Cli::try_parse_from(["monica", "task", "run", "MON-1", "--force"]).is_ok());
+        assert!(
+            Cli::try_parse_from(["monica", "task", "run", "MON-1", "--in-place", "--force"]).is_ok()
+        );
+        // Forcing is a deliberate override, so it is spelled out — no short flag to fat-finger.
+        assert!(Cli::try_parse_from(["monica", "task", "run", "MON-1", "-f"]).is_err());
+        // Only `run` starts work, so only `run` can force past the gate.
+        assert!(Cli::try_parse_from(["monica", "task", "sync", "--force"]).is_err());
+    }
+
+    #[test]
     fn note_show_and_search_parse() {
         assert!(Cli::try_parse_from(["monica", "note", "show", "note-1"]).is_ok());
         assert!(

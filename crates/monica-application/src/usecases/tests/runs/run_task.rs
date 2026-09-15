@@ -8,7 +8,7 @@ fn start_run_names_branch_from_mon_id_and_creates_bench() {
     insert_runnable_project(&repos);
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
 
-    let prep = start_run(&mut repos, &task_id).unwrap();
+    let prep = start_run(&mut repos, &task_id, false).unwrap();
 
     assert_eq!(prep.branch, "mon-1");
     let task = repos.get_task(&task_id).unwrap().unwrap();
@@ -23,7 +23,7 @@ fn start_run_prefers_linked_issue_number_for_branch() {
     insert_runnable_project(&repos);
     let task_id = insert_issue_backed_task(&mut repos, 9);
 
-    let prep = start_run(&mut repos, &task_id).unwrap();
+    let prep = start_run(&mut repos, &task_id, false).unwrap();
     assert_eq!(prep.branch, "issue-9");
 }
 
@@ -32,9 +32,9 @@ fn start_run_rejects_active_primary_run() {
     let mut repos = FakeRepos::default();
     insert_runnable_project(&repos);
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
-    start_run(&mut repos, &task_id).unwrap();
+    start_run(&mut repos, &task_id, false).unwrap();
 
-    let err = start_run(&mut repos, &task_id).unwrap_err();
+    let err = start_run(&mut repos, &task_id, false).unwrap_err();
     assert!(matches!(err, ApplicationError::Conflict(_)), "{err:?}");
     assert!(err.to_string().contains("already has an active run"), "{err}");
 }
@@ -46,7 +46,7 @@ fn start_run_rejects_closed_task() {
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
     repos.update_task_status(&task_id, TaskStatus::Closed).unwrap();
 
-    let err = start_run(&mut repos, &task_id).unwrap_err();
+    let err = start_run(&mut repos, &task_id, false).unwrap_err();
     assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
     assert!(err.to_string().contains("is closed"), "{err}");
 }
@@ -60,7 +60,7 @@ fn start_run_rejects_an_in_progress_task_without_a_primary() {
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
     repos.update_task_status(&task_id, TaskStatus::InProgress).unwrap();
 
-    let err = start_run(&mut repos, &task_id).unwrap_err();
+    let err = start_run(&mut repos, &task_id, false).unwrap_err();
     assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
     assert!(err.to_string().contains("without a Main Run"), "{err}");
 }
@@ -68,7 +68,7 @@ fn start_run_rejects_an_in_progress_task_without_a_primary() {
 #[test]
 fn start_run_missing_task_is_not_found() {
     let mut repos = FakeRepos::default();
-    let err = start_run(&mut repos, &TaskId::from_store("MON-404".to_string())).unwrap_err();
+    let err = start_run(&mut repos, &TaskId::from_store("MON-404".to_string()), false).unwrap_err();
     assert!(matches!(err, ApplicationError::NotFound(_)), "{err:?}");
 }
 
@@ -77,7 +77,7 @@ fn execute_run_records_failed_on_setup_failure() {
     let mut repos = FakeRepos::default();
     insert_runnable_project(&repos);
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
-    let prep = start_run(&mut repos, &task_id).unwrap();
+    let prep = start_run(&mut repos, &task_id, false).unwrap();
     let setup = FakeSetupRunner::with_outcome(SetupOutcome::Failed {
         code: Some(1),
         timed_out: false,
@@ -108,7 +108,7 @@ fn execute_run_prepares_run_and_pins_bench_to_worktree() {
     let mut repos = FakeRepos::default();
     insert_runnable_project(&repos);
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
-    let prep = start_run(&mut repos, &task_id).unwrap();
+    let prep = start_run(&mut repos, &task_id, false).unwrap();
 
     let status = execute_run(
         &mut repos,
@@ -135,7 +135,7 @@ fn execute_run_classifies_worktree_failure_as_external() {
     let mut repos = FakeRepos::default();
     insert_runnable_project(&repos);
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
-    let prep = start_run(&mut repos, &task_id).unwrap();
+    let prep = start_run(&mut repos, &task_id, false).unwrap();
     let git = FakeGit::with_create_worktree_error("fatal: worktree add failed");
 
     let err = execute_run(
@@ -162,7 +162,7 @@ fn execute_run_classifies_setup_script_run_failure_as_external() {
     let mut repos = FakeRepos::default();
     insert_runnable_project(&repos);
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
-    let prep = start_run(&mut repos, &task_id).unwrap();
+    let prep = start_run(&mut repos, &task_id, false).unwrap();
     let setup = FakeSetupRunner::with_error("setup runner failed to spawn");
 
     let err = execute_run(
@@ -187,9 +187,9 @@ fn prepare_claude_for_run_rejects_non_prepared_primary() {
     let mut repos = FakeRepos::default();
     insert_runnable_project(&repos);
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
-    start_run(&mut repos, &task_id).unwrap();
+    start_run(&mut repos, &task_id, false).unwrap();
 
-    let err = run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree).unwrap_err();
+    let err = run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree, false).unwrap_err();
     assert!(err.to_string().contains("expected prepared"), "{err}");
 }
 
@@ -199,13 +199,13 @@ fn prepare_claude_for_run_rejects_non_prepared_primary() {
 fn prepare_claude_for_run_falls_back_to_project_path_without_worktree() {
     let mut repos = FakeRepos::default();
     let (task_id, checkout) = checkout_backed_task(&mut repos);
-    let prep = start_run(&mut repos, &task_id).unwrap();
+    let prep = start_run(&mut repos, &task_id, false).unwrap();
     repos
         .finish_task_run(&prep.task_run_id, &task_id, TaskRunStatus::Prepared)
         .unwrap();
 
     let result =
-        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree)
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree, false)
             .unwrap();
     assert_eq!(result.cwd, checkout.to_string_lossy());
 }
@@ -218,7 +218,7 @@ fn prepare_claude_for_run_rejects_missing_worktree() {
     let mut repos = FakeRepos::default();
     insert_runnable_project(&repos);
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
-    let prep = start_run(&mut repos, &task_id).unwrap();
+    let prep = start_run(&mut repos, &task_id, false).unwrap();
     repos
         .finish_task_run(&prep.task_run_id, &task_id, TaskRunStatus::Prepared)
         .unwrap();
@@ -227,7 +227,7 @@ fn prepare_claude_for_run_rejects_missing_worktree() {
         .unwrap();
 
     let err =
-        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree)
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree, false)
             .unwrap_err();
     assert!(err.to_string().contains("worktree does not exist"), "{err}");
 }
@@ -240,7 +240,7 @@ fn prepared_run_with_worktree(
     use std::sync::atomic::{AtomicUsize, Ordering};
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-    let prep = start_run(repos, task_id).unwrap();
+    let prep = start_run(repos, task_id, false).unwrap();
     repos
         .finish_task_run(&prep.task_run_id, task_id, TaskRunStatus::Prepared)
         .unwrap();
@@ -264,7 +264,7 @@ fn prepare_claude_for_run_seeds_prompt_for_issue_backed_task() {
 
     let (_, worktree) = prepared_run_with_worktree(&mut repos, &task_id, "do the thing");
     let result =
-        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree).unwrap();
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree, false).unwrap();
     std::fs::remove_dir_all(&worktree).ok();
 
     assert_eq!(result.initial_command, "claude 'do the thing'");
@@ -283,7 +283,7 @@ fn prepare_claude_for_run_resumes_stopped_primary_with_session() {
         .unwrap();
 
     let result =
-        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree).unwrap();
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree, false).unwrap();
     std::fs::remove_dir_all(&worktree).ok();
 
     assert_eq!(result.task_run_id, run_id, "the stopped run is reused, not replaced");
@@ -309,6 +309,7 @@ fn launch_agent_is_stamped_on_the_run_and_drives_the_resume() {
         &task_id,
         Some(Agent::Claude),
         RunMode::Worktree,
+        false,
     )
     .unwrap();
     assert_eq!(fresh.initial_command, "claude");
@@ -324,7 +325,7 @@ fn launch_agent_is_stamped_on_the_run_and_drives_the_resume() {
         .unwrap();
 
     let resumed =
-        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree).unwrap();
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree, false).unwrap();
     std::fs::remove_dir_all(&worktree).ok();
 
     assert_eq!(
@@ -345,7 +346,7 @@ fn prepare_claude_for_run_rejects_stopped_primary_without_session() {
         .unwrap();
 
     let err =
-        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree).unwrap_err();
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree, false).unwrap_err();
     std::fs::remove_dir_all(&worktree).ok();
 
     assert!(matches!(err, ApplicationError::Conflict(_)), "{err:?}");
@@ -362,14 +363,14 @@ fn prepare_claude_for_run_ignores_prompt_for_raw_task() {
 
     let (_, worktree) = prepared_run_with_worktree(&mut repos, &task_id, "leftover prompt");
     let result =
-        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree).unwrap();
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::Worktree, false).unwrap();
     std::fs::remove_dir_all(&worktree).ok();
 
     assert_eq!(result.initial_command, "claude");
 }
 
 fn in_place_run(repos: &mut FakeRepos, task_id: &TaskId) -> crate::RunTaskResult {
-    run_task(repos, &FakeTaskRunOutputs::default(), task_id, None, RunMode::InPlace).unwrap()
+    run_task(repos, &FakeTaskRunOutputs::default(), task_id, None, RunMode::InPlace, false).unwrap()
 }
 
 /// An in-place run stats the project checkout before launching, so these tests need one that
@@ -448,10 +449,10 @@ fn run_task_in_place_reuses_existing_prepared_primary() {
 fn run_task_in_place_rejects_active_primary() {
     let mut repos = FakeRepos::default();
     let (task_id, _checkout) = checkout_backed_task(&mut repos);
-    start_run(&mut repos, &task_id).unwrap();
+    start_run(&mut repos, &task_id, false).unwrap();
 
     let err =
-        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace, false)
             .unwrap_err();
     assert!(matches!(err, ApplicationError::Conflict(_)), "{err:?}");
     assert!(err.to_string().contains("already has an active run"), "{err}");
@@ -464,7 +465,7 @@ fn run_task_in_place_rejects_closed_task() {
     repos.update_task_status(&task_id, TaskStatus::Closed).unwrap();
 
     let err =
-        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace, false)
             .unwrap_err();
     assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
     assert!(err.to_string().contains("is closed"), "{err}");
@@ -501,7 +502,7 @@ fn run_task_in_place_rejects_project_without_checkout_path() {
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
 
     let err =
-        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace, false)
             .unwrap_err();
 
     assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
@@ -518,7 +519,7 @@ fn run_task_in_place_rejects_missing_checkout_and_creates_no_run() {
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
 
     let err =
-        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace, false)
             .unwrap_err();
 
     assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
@@ -542,7 +543,7 @@ fn run_task_in_place_rejects_checkout_that_is_not_a_directory() {
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
 
     let err =
-        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace, false)
             .unwrap_err();
     std::fs::remove_file(&file).ok();
 
@@ -580,7 +581,7 @@ fn run_task_resumes_worktreeless_run_in_its_recorded_tab_cwd() {
     let run_id = stopped_attached_primary(&mut repos, &task_id, &elsewhere.to_string_lossy());
 
     let result =
-        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace, false)
             .unwrap();
 
     assert_eq!(result.task_run_id, run_id, "the attached run is resumed, not replaced");
@@ -598,7 +599,7 @@ fn run_task_falls_back_to_checkout_when_the_recorded_cwd_is_gone() {
     stopped_attached_primary(&mut repos, &task_id, "/nonexistent/attached");
 
     let result =
-        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+        run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace, false)
             .unwrap();
 
     assert_eq!(result.cwd, checkout.to_string_lossy());
@@ -626,10 +627,10 @@ fn start_run_reaps_a_stale_setting_up_primary() {
     let mut repos = FakeRepos::default();
     insert_runnable_project(&repos);
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
-    let stale = start_run(&mut repos, &task_id).unwrap();
+    let stale = start_run(&mut repos, &task_id, false).unwrap();
     repos.mark_task_run_stale(&stale.task_run_id);
 
-    let fresh = start_run(&mut repos, &task_id).unwrap();
+    let fresh = start_run(&mut repos, &task_id, false).unwrap();
 
     assert_ne!(fresh.task_run_id, stale.task_run_id);
     let stale_run = repos.get_task_run(&stale.task_run_id).unwrap().unwrap();
@@ -645,9 +646,9 @@ fn start_run_still_conflicts_on_a_young_setting_up_primary() {
     let mut repos = FakeRepos::default();
     insert_runnable_project(&repos);
     let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
-    let live = start_run(&mut repos, &task_id).unwrap();
+    let live = start_run(&mut repos, &task_id, false).unwrap();
 
-    let err = start_run(&mut repos, &task_id).unwrap_err();
+    let err = start_run(&mut repos, &task_id, false).unwrap_err();
 
     assert!(matches!(err, ApplicationError::Conflict(_)), "{err:?}");
     let run = repos.get_task_run(&live.task_run_id).unwrap().unwrap();
@@ -675,7 +676,7 @@ fn run_task_rejects_a_closed_task_even_with_a_prepared_primary() {
     repos.set_primary_task_run(&task_id, &run.id).unwrap();
     repos.update_task_status(&task_id, TaskStatus::Closed).unwrap();
 
-    let err = run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace)
+    let err = run_task(&mut repos, &FakeTaskRunOutputs::default(), &task_id, None, RunMode::InPlace, false)
         .unwrap_err();
 
     assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");

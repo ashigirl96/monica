@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::{anyhow, Context, Result};
 use monica_application::{
     FetchedIssue, GithubGateway, GithubIssue, GithubIssueState, GithubPullRequest,
-    GithubPullRequestStatus, IssueAddress, RepoPullRequest,
+    GithubPullRequestStatus, IssueAddress, IssueBlocker, RepoPullRequest,
 };
 use octocrab::Octocrab;
 use serde::de::DeserializeOwned;
@@ -286,6 +286,16 @@ fn parse_issue_state(state: &str) -> Result<GithubIssueState> {
 /// GitHub's node limit while collapsing a board's worth of issues into a couple of round trips.
 const ISSUE_BATCH: usize = 50;
 
+/// GitHub caps an issue at 50 blocked-by relationships, so one page holds every blocker there can
+/// be. Asking for fewer would silently drop the rest, and a blocker Monica never sees is a blocker
+/// the start gate cannot enforce — the one direction this must not fail in.
+///
+/// The blockers' own `closedByPullRequestsReferences` stays at a single page of 10, like the
+/// issue's: missing a merged PR there leaves a cleared blocker looking unfinished, which holds a
+/// run back rather than letting one through, is overridable with `--force`, and resolves itself
+/// once the upstream issue closes.
+const BLOCKED_BY_PAGE: usize = 50;
+
 fn issues_query(numbers: &[i64]) -> String {
     let selections: String = numbers
         .iter()
@@ -294,7 +304,10 @@ fn issues_query(numbers: &[i64]) -> String {
                 "    i{n}: issue(number: {n}) {{ number title state \
 parent {{ number repository {{ nameWithOwner }} }} \
 closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {{ nodes {{ number url state \
-isDraft repository {{ nameWithOwner }} }} }} }}\n"
+isDraft repository {{ nameWithOwner }} }} }} \
+blockedBy(first: {BLOCKED_BY_PAGE}) {{ nodes {{ number state stateReason repository {{ nameWithOwner }} \
+closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {{ nodes {{ number url state \
+isDraft repository {{ nameWithOwner }} }} }} }} }} }}\n"
             )
         })
         .collect();
@@ -315,27 +328,58 @@ fn issues_from_response(response: IssuesResponse) -> Result<Vec<FetchedIssue>> {
         if node.number <= 0 {
             continue;
         }
-        let mut linked_pull_requests = Vec::new();
-        for pull_request in node.closed_by_pull_requests_references.nodes {
-            if pull_request.number <= 0 {
+        let linked_pull_requests = pull_requests_from(node.closed_by_pull_requests_references)?;
+        let mut blockers = Vec::new();
+        for blocker in node.blocked_by.nodes {
+            if blocker.number <= 0 {
                 continue;
             }
-            linked_pull_requests.push(github_pull_request_from(pull_request)?);
+            let closing = pull_requests_from(blocker.closed_by_pull_requests_references)?;
+            blockers.push(IssueBlocker::new(
+                issue_address_from(blocker.repository, blocker.number),
+                parse_issue_state(&blocker.state)?,
+                is_reopened(blocker.state_reason.as_deref()),
+                &closing,
+            ));
         }
         issues.push(FetchedIssue {
             number: node.number,
             title: node.title,
             state: parse_issue_state(&node.state)?,
-            // `external_refs.repo` is stored lowercased by `parse_owner_repo`, so the address the
-            // sync resolves the parent by has to be lowercased too.
-            parent: node.parent.map(|p| IssueAddress {
-                repo: p.repository.name_with_owner.to_ascii_lowercase(),
-                number: p.number,
-            }),
+            parent: node
+                .parent
+                .map(|p| issue_address_from(p.repository, p.number)),
             linked_pull_requests,
+            blockers,
         });
     }
     Ok(issues)
+}
+
+/// `external_refs.repo` is stored lowercased by `parse_owner_repo`, so every address the sync
+/// resolves or stores has to be lowercased too.
+fn issue_address_from(repository: RepositoryNode, number: i64) -> IssueAddress {
+    IssueAddress {
+        repo: repository.name_with_owner.to_ascii_lowercase(),
+        number,
+    }
+}
+
+/// An unknown reason reads as "not reopened": every other value GitHub has ever returned here
+/// describes a *closed* issue, and guessing "reopened" from one would hold back runs for good.
+fn is_reopened(state_reason: Option<&str>) -> bool {
+    state_reason.is_some_and(|reason| reason.eq_ignore_ascii_case("reopened"))
+}
+
+fn pull_requests_from(connection: LinkedPullRequestConnection) -> Result<Vec<GithubPullRequest>> {
+    let mut pull_requests = Vec::with_capacity(connection.nodes.len());
+    for pull_request in connection.nodes {
+        if pull_request.number <= 0 {
+            continue;
+        }
+        pull_requests.push(github_pull_request_from(pull_request)?);
+    }
+    Ok(pull_requests)
 }
 
 #[derive(Debug, Deserialize)]
@@ -361,6 +405,24 @@ struct IssueNode {
     state: String,
     parent: Option<IssueParentNode>,
     #[serde(rename = "closedByPullRequestsReferences")]
+    closed_by_pull_requests_references: LinkedPullRequestConnection,
+    #[serde(rename = "blockedBy")]
+    blocked_by: IssueBlockerConnection,
+}
+
+/// The issues GitHub reports as blocking this one.
+#[derive(Debug, Deserialize)]
+struct IssueBlockerConnection {
+    nodes: Vec<IssueBlockerNode>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IssueBlockerNode {
+    number: i64,
+    state: String,
+    state_reason: Option<String>,
+    repository: RepositoryNode,
     closed_by_pull_requests_references: LinkedPullRequestConnection,
 }
 
@@ -662,6 +724,169 @@ mod tests {
     }
 
     #[test]
+    fn issues_query_asks_for_the_blockers_and_what_would_clear_them() {
+        let query = issues_query(&[42]);
+        // One page has to hold every blocker GitHub allows (50): a blocker left on a second page
+        // would be invisible, and the gate would open for a task that is still blocked.
+        assert!(query.contains("blockedBy(first: 50)"), "{query}");
+        // A blocker's own repo, state and closing PRs all have to ride along: the start gate must
+        // decide about blockers no task tracks, without a second round trip. `stateReason` comes
+        // with them because a merged closing PR alone cannot tell a pending close from a reopen.
+        assert!(
+            query.contains("blockedBy(first: 50) { nodes { number state stateReason repository"),
+            "{query}"
+        );
+        assert_eq!(
+            query.matches("includeClosedPrs: true").count(),
+            2,
+            "the blocker's closing PRs need it too — a merged PR is a closed PR, and the default \
+             would hide exactly the merges that open the gate: {query}"
+        );
+    }
+
+    fn blocked_issue_response(blockers: serde_json::Value) -> IssuesResponse {
+        serde_json::from_value(serde_json::json!({
+            "repository": {
+                "i42": {
+                    "number": 42,
+                    "title": "hello",
+                    "state": "OPEN",
+                    "parent": null,
+                    "closedByPullRequestsReferences": { "nodes": [] },
+                    "blockedBy": { "nodes": blockers }
+                }
+            }
+        }))
+        .unwrap()
+    }
+
+    fn blocker_node(number: i64, state: &str, repo: &str, prs: serde_json::Value) -> serde_json::Value {
+        blocker_node_with_reason(number, state, None, repo, prs)
+    }
+
+    fn blocker_node_with_reason(
+        number: i64,
+        state: &str,
+        state_reason: Option<&str>,
+        repo: &str,
+        prs: serde_json::Value,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "number": number,
+            "state": state,
+            "stateReason": state_reason,
+            "repository": { "nameWithOwner": repo },
+            "closedByPullRequestsReferences": { "nodes": prs }
+        })
+    }
+
+    fn pr_node(number: i64, state: &str) -> serde_json::Value {
+        serde_json::json!({
+            "number": number,
+            "url": "https://github.com/o/r/pull/1",
+            "state": state,
+            "isDraft": false,
+            "repository": { "nameWithOwner": "o/r" }
+        })
+    }
+
+    #[test]
+    fn issues_from_response_maps_blockers_with_lowercased_addresses() {
+        let response = blocked_issue_response(serde_json::json!([
+            blocker_node(7, "OPEN", "Owner/Repo", serde_json::json!([])),
+            blocker_node(3, "CLOSED", "Other/Repo", serde_json::json!([])),
+        ]));
+        let issues = issues_from_response(response).unwrap();
+        let blockers = &issues[0].blockers;
+        assert_eq!(blockers.len(), 2);
+        assert_eq!(
+            blockers[0].address,
+            IssueAddress { repo: "owner/repo".to_string(), number: 7 },
+            "a blocker address is stored the way external_refs stores a repo"
+        );
+        assert_eq!(blockers[0].state, GithubIssueState::Open);
+        assert!(!blockers[0].is_cleared());
+        assert_eq!(blockers[1].address.repo, "other/repo", "a blocker can live in another repo");
+        assert!(blockers[1].is_cleared(), "a closed blocker no longer blocks");
+    }
+
+    #[test]
+    fn a_blocker_closed_by_a_merged_pull_request_is_cleared_while_still_open() {
+        let response = blocked_issue_response(serde_json::json!([blocker_node(
+            7,
+            "OPEN",
+            "o/r",
+            serde_json::json!([pr_node(11, "OPEN"), pr_node(12, "MERGED")])
+        )]));
+        let blocker = &issues_from_response(response).unwrap()[0].blockers[0];
+        assert!(blocker.closed_by_merged_pull_request);
+        assert!(
+            blocker.is_cleared(),
+            "the merge is what unblocks downstream work; the issue closing is a later formality"
+        );
+    }
+
+    #[test]
+    fn a_blocker_reopened_after_its_merge_still_blocks() {
+        // The merged PR never leaves `closedByPullRequestsReferences`, so reopening an issue looks
+        // exactly like "merged, close still pending" in the PR data alone. `stateReason` is the
+        // only thing separating them, and getting it wrong lets a run start on unfinished work.
+        let response = blocked_issue_response(serde_json::json!([blocker_node_with_reason(
+            7,
+            "OPEN",
+            Some("REOPENED"),
+            "o/r",
+            serde_json::json!([pr_node(11, "MERGED")])
+        )]));
+        let blocker = &issues_from_response(response).unwrap()[0].blockers[0];
+        assert!(blocker.closed_by_merged_pull_request, "the merge did happen");
+        assert!(blocker.reopened);
+        assert!(!blocker.is_cleared(), "someone reopened it because the work was not done");
+    }
+
+    #[test]
+    fn an_unknown_state_reason_does_not_read_as_reopened() {
+        // Every other value GitHub puts here describes a closed issue; treating an unfamiliar one
+        // as a reopen would hold runs back with no way to clear them short of --force.
+        for reason in [None, Some("COMPLETED"), Some("NOT_PLANNED"), Some("SOMETHING_NEW")] {
+            let response = blocked_issue_response(serde_json::json!([blocker_node_with_reason(
+                7,
+                "OPEN",
+                reason,
+                "o/r",
+                serde_json::json!([pr_node(11, "MERGED")])
+            )]));
+            let blocker = &issues_from_response(response).unwrap()[0].blockers[0];
+            assert!(!blocker.reopened, "reason={reason:?}");
+            assert!(blocker.is_cleared(), "reason={reason:?}");
+        }
+    }
+
+    #[test]
+    fn a_blocker_whose_pull_requests_are_unmerged_still_blocks() {
+        let response = blocked_issue_response(serde_json::json!([blocker_node(
+            7,
+            "OPEN",
+            "o/r",
+            serde_json::json!([pr_node(11, "OPEN"), pr_node(12, "CLOSED")])
+        )]));
+        let blocker = &issues_from_response(response).unwrap()[0].blockers[0];
+        assert!(!blocker.closed_by_merged_pull_request);
+        assert!(!blocker.is_cleared(), "an abandoned PR does not land the upstream work");
+    }
+
+    #[test]
+    fn issues_from_response_drops_a_blocker_with_an_unusable_number() {
+        let response = blocked_issue_response(serde_json::json!([
+            blocker_node(0, "OPEN", "o/r", serde_json::json!([])),
+            blocker_node(7, "OPEN", "o/r", serde_json::json!([])),
+        ]));
+        let blockers = &issues_from_response(response).unwrap()[0].blockers;
+        assert_eq!(blockers.len(), 1);
+        assert_eq!(blockers[0].address.number, 7);
+    }
+
+    #[test]
     fn issues_from_response_maps_aliases_and_hierarchy() {
         let response: IssuesResponse = serde_json::from_value(serde_json::json!({
             "repository": {
@@ -670,7 +895,8 @@ mod tests {
                     "title": "hello",
                     "state": "OPEN",
                     "parent": { "number": 7, "repository": { "nameWithOwner": "Owner/Repo" } },
-                    "closedByPullRequestsReferences": { "nodes": [] }
+                    "closedByPullRequestsReferences": { "nodes": [] },
+                    "blockedBy": { "nodes": [] }
                 }
             }
         }))
@@ -715,7 +941,8 @@ mod tests {
                         },
                         { "number": 0, "url": "u", "state": "OPEN", "isDraft": false,
                           "repository": { "nameWithOwner": "o/r" } }
-                    ] }
+                    ] },
+                    "blockedBy": { "nodes": [] }
                 }
             }
         }))
@@ -741,7 +968,8 @@ mod tests {
                     "title": "kept",
                     "state": "CLOSED",
                     "parent": null,
-                    "closedByPullRequestsReferences": { "nodes": [] }
+                    "closedByPullRequestsReferences": { "nodes": [] },
+                    "blockedBy": { "nodes": [] }
                 }
             }
         }))

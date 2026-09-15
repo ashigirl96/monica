@@ -6,7 +6,7 @@ use super::ports::{
     GitGateway, ProjectRepository, TaskRunOutputs, SetupEnv, SetupOutcome, SetupRunner,
     TaskRunStore, TaskStore, UnitOfWork, WorkbenchStore,
 };
-use crate::ports::TerminalSessionRepository;
+use crate::ports::{GithubIssueSyncStore, TerminalSessionRepository};
 use crate::usecases::tasks::primary_run;
 use crate::prelude::{
     DisplayStatus, ExternalReference, NewTaskRun, Project, RefType, RunMode, Task, TaskId, TaskRun,
@@ -90,6 +90,25 @@ where
         .ok_or_else(|| ApplicationError::not_found(format!("task not found: {task_id}")))
 }
 
+/// Shared by both run-creation paths: refuse to start work the upstream issues have not cleared.
+/// Sits here rather than at a facade entry because this is where a first run is born, so the
+/// board's Prepare cannot walk around the check that `monica task run` and the board's Run hit.
+/// Resuming or launching an existing run never reaches here, which is the point — a start gate
+/// gates starting, not reopening work already under way.
+///
+/// Deliberately outside the write transaction below, unlike [`ensure_task_accepts_new_run`]: that
+/// one excludes a concurrent run from claiming the same slot, while this reads a mirror of GitHub
+/// that no concurrent run competes for.
+fn ensure_start_gate<R>(repos: &R, task_id: &TaskId, force: bool) -> ApplicationResult<()>
+where
+    R: GithubIssueSyncStore + ?Sized,
+{
+    if force {
+        return Ok(());
+    }
+    super::start_gate::ensure_start_gate_open(repos, task_id)
+}
+
 /// Shared by both run-creation paths: a closed task takes no new run, and the Main Run slot must
 /// be free — nothing live, and nothing already prepared and waiting to launch. Runs inside the
 /// write transaction that creates the run: the GUI and `monica task run` are separate processes,
@@ -149,11 +168,17 @@ where
 
 /// Phase 1: Create TaskRun (SettingUp) + set as Main Run + ensure bench exists.
 /// Returns immediately so the UI can reflect `setting_up` without blocking.
-pub fn start_run<R>(repos: &mut R, task_id: &TaskId) -> ApplicationResult<PrepareTaskResult>
+pub fn start_run<R>(
+    repos: &mut R,
+    task_id: &TaskId,
+    force: bool,
+) -> ApplicationResult<PrepareTaskResult>
 where
-    R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore + UnitOfWork,
+    R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore + GithubIssueSyncStore
+        + UnitOfWork,
 {
     let (task, project) = load_task_and_project(repos, task_id)?;
+    ensure_start_gate(repos, task_id, force)?;
     let stale_setup_age_secs = stale_setup_age_secs(repos, &task)?;
 
     let github_issue_number = latest_github_issue_number(repos, task_id)?;
@@ -192,11 +217,13 @@ where
 ///
 /// `branch` stays `None` on purpose — naming the primary branch here would hand it to
 /// `close_task`'s cleanup, which deletes every branch a run records.
-fn start_in_place_run<R>(repos: &mut R, task_id: &TaskId) -> ApplicationResult<()>
+fn start_in_place_run<R>(repos: &mut R, task_id: &TaskId, force: bool) -> ApplicationResult<()>
 where
-    R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore + UnitOfWork,
+    R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore + GithubIssueSyncStore
+        + UnitOfWork,
 {
     let (task, project) = load_task_and_project(repos, task_id)?;
+    ensure_start_gate(repos, task_id, force)?;
     let stale_setup_age_secs = stale_setup_age_secs(repos, &task)?;
     // Validated before the run exists: there is no setup phase to fail into, so a run committed as
     // `Prepared` against an unusable checkout would leave the task with no way forward.
@@ -239,13 +266,15 @@ pub fn run_task<R, A>(
     task_id: &TaskId,
     agent_override: Option<crate::prelude::Agent>,
     mode: RunMode,
+    force: bool,
 ) -> ApplicationResult<crate::RunTaskResult>
 where
-    R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore + TerminalSessionRepository + UnitOfWork,
+    R: TaskStore + TaskRunStore + ProjectRepository + WorkbenchStore + TerminalSessionRepository
+        + GithubIssueSyncStore + UnitOfWork,
     A: TaskRunOutputs,
 {
     if mode == RunMode::InPlace && needs_new_run(primary_run(repos, task_id)?.as_ref()) {
-        start_in_place_run(repos, task_id)?;
+        start_in_place_run(repos, task_id, force)?;
     }
     prepare_claude_for_run(repos, outputs, task_id, agent_override)
 }
