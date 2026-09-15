@@ -1,9 +1,9 @@
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Result};
+use monica_logfile::DailyLog;
 use monica_terminal_daemon::daemon::{run_daemon, DaemonConfig};
 
 /// Mirrors `monica-paths`'s `base_dir()`. Deliberately not a dependency: the daemon must stay a
@@ -18,8 +18,26 @@ fn base_dir() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join("monica"))
 }
 
+enum Sink {
+    Stderr,
+    Daily(DailyLog),
+}
+
+impl Sink {
+    /// `line` carries no trailing newline: [`DailyLog::append`] adds its own, and writing one line
+    /// per call is what keeps concurrent appends from interleaving mid-line.
+    fn write_line(&self, line: &str) {
+        match self {
+            Self::Stderr => {
+                let _ = writeln!(std::io::stderr().lock(), "{line}");
+            }
+            Self::Daily(log) => log.append(line),
+        }
+    }
+}
+
 struct WriterLogger {
-    writer: Mutex<Box<dyn Write + Send>>,
+    sink: Sink,
 }
 
 impl log::Log for WriterLogger {
@@ -34,38 +52,29 @@ impl log::Log for WriterLogger {
         let elapsed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();
-        if let Ok(mut writer) = self.writer.lock() {
-            let _ = writeln!(
-                writer,
-                "[{}.{:03}] {} {}",
-                elapsed.as_secs(),
-                elapsed.subsec_millis(),
-                record.level(),
-                record.args()
-            );
-        }
+        self.sink
+            .write_line(&format_line(elapsed, record.level(), record.args()));
     }
 
     fn flush(&self) {}
 }
 
+fn format_line(elapsed: Duration, level: log::Level, args: &std::fmt::Arguments) -> String {
+    format!(
+        "[{}.{:03}] {level} {args}",
+        elapsed.as_secs(),
+        elapsed.subsec_millis(),
+    )
+}
+
 fn init_logging(base: &std::path::Path, foreground: bool) -> Result<()> {
-    let writer: Box<dyn Write + Send> = if foreground {
-        Box::new(std::io::stderr())
+    let sink = if foreground {
+        Sink::Stderr
     } else {
-        let logs_dir = base.join("logs");
-        std::fs::create_dir_all(&logs_dir)?;
-        Box::new(
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(logs_dir.join("ptyd.log"))?,
-        )
+        Sink::Daily(DailyLog::open(&base.join("logs"), "ptyd")?)
     };
-    log::set_boxed_logger(Box::new(WriterLogger {
-        writer: Mutex::new(writer),
-    }))
-    .map_err(|e| anyhow!("failed to install logger: {e}"))?;
+    log::set_boxed_logger(Box::new(WriterLogger { sink }))
+        .map_err(|e| anyhow!("failed to install logger: {e}"))?;
     log::set_max_level(log::LevelFilter::Info);
     Ok(())
 }
@@ -108,4 +117,28 @@ fn main() -> Result<()> {
         pid_path: base.join("ptyd.pid"),
         sessions_dir: base.join("terminal-sessions"),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_line_keeps_the_established_shape() {
+        assert_eq!(
+            format_line(
+                Duration::from_millis(12_007),
+                log::Level::Info,
+                &format_args!("listening on {}", "/tmp/ptyd.sock"),
+            ),
+            "[12.007] INFO listening on /tmp/ptyd.sock",
+        );
+    }
+
+    /// Both sinks add their own line terminator, so one here would double it in the file.
+    #[test]
+    fn format_line_carries_no_trailing_newline() {
+        let line = format_line(Duration::ZERO, log::Level::Warn, &format_args!("busy"));
+        assert_eq!(line, "[0.000] WARN busy");
+    }
 }

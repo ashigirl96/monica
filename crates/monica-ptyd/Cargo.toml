@@ -8,6 +8,7 @@ edition = "2021"
 anyhow = "1.0"
 libc = { version = "0.2", default-features = false }
 log = { version = "0.4", features = ["std"] }
+monica-logfile = { path = "../monica-logfile" }
 monica-terminal-daemon = { path = "../monica-terminal-daemon" }
 
 [dev-dependencies]
