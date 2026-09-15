@@ -102,6 +102,14 @@ mod tests {
     }
 
     #[test]
+    fn task_current_takes_no_argument_beyond_an_optional_json_flag() {
+        assert!(Cli::try_parse_from(["monica", "task", "current"]).is_ok());
+        assert!(Cli::try_parse_from(["monica", "task", "current", "--json"]).is_ok());
+        // The tab is read from the environment, never named on the command line.
+        assert!(Cli::try_parse_from(["monica", "task", "current", "MON-1"]).is_err());
+    }
+
+    #[test]
     fn task_run_takes_a_task_id_and_an_optional_in_place_flag() {
         assert!(Cli::try_parse_from(["monica", "task", "run", "MON-1"]).is_ok());
         assert!(Cli::try_parse_from(["monica", "task", "run", "MON-1", "--in-place"]).is_ok());

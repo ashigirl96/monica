@@ -14,5 +14,8 @@ pub use github::{
     TrackGithubIssueReport, TrackOutcome,
 };
 pub use runs::{HookContext, HookReport};
-pub use tasks::{AttachSessionReport, CloseTaskReport, TabTaskBinding};
+pub use tasks::{
+    AttachSessionReport, CloseTaskReport, CurrentTaskReport, CurrentTaskSource, TabIdentity,
+    TabTaskBinding,
+};
 pub use terminal::{DaemonSessionView, TerminalSessionUpdate};
