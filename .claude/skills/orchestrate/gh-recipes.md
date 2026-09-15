@@ -154,7 +154,7 @@ gh issue create --repo <O>/<R> --parent <E> --title "<title>" --body-file <path>
 
 ### 依存を張る
 
-作成順で表せなかった辺は 2 パス目で張る。
+作成順で表せなかった辺は 2 パス目で張る。張るのは start-after-merged の依存だけ — GitHub の辺は種類を持てず、張れば必ず Monica の start gate として効くので、merge-after-released の依存に辺を張ると並行実装ができなくなる。そちらは Brief の `## Merge Gate` にだけ書く。
 
 ```bash
 gh issue edit <downstream> --repo <O>/<R> --add-blocked-by <upstream>[,<upstream>]

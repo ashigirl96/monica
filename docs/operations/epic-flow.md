@@ -16,7 +16,7 @@ Epic（親 issue）を sub-issue に分解し、Worker が [Worker flow](./worke
 | 情報 | 正本 | 備考 |
 |---|---|---|
 | Epic Brief（Discovery・Human Action・Merge Gate・Fog） | epic issue 本文 | Monica は写しを持たない（ADR-0001） |
-| sub-issue 間の依存 | GitHub ネイティブの blocked-by | Merge Gate だけ Brief に書く |
+| sub-issue 間の依存 | start-after-merged は GitHub ネイティブの blocked-by、merge-after-released は Brief の Merge Gate | 辺は種類を持てず必ず start gate として効くので、merge-after-released に辺は張らない |
 | Verification | その PR の本文 | epic レベルの項目だけ Brief が正本。Brief には派生リストを持つ |
 | Claim | Monica の Run + GitHub の assignee | 起動時に両方を立てる |
 | Released の判定 | 既定は default branch への merge。タグでリリースする repo だけ `.monica/epic-flow.md` に宣言する | 宣言の形は setup-monica の雛形 |
@@ -25,7 +25,7 @@ Epic（親 issue）を sub-issue に分解し、Worker が [Worker flow](./worke
 
 ## Gate と強制
 
-- gate は 2 種類。**start-after-merged**（デフォルト）と **merge-after-released**（Brief の Merge Gate 節に明記）。
+- gate は 2 種類。**start-after-merged**（デフォルト。blocked-by の辺で表す）と **merge-after-released**（辺は張らず、Brief の Merge Gate 節だけで表す）。
 - start gate は Monica が機械的に止める（ADR-0002）。sync が GitHub の blocked-by を写し、上流が「closed」か「閉じる PR が merged で、その後 reopen されていない」のどちらかなら通過、そうでなければ `monica task run`・board の Run・Prepare のいずれも `task MON-n is blocked by owner/repo#N; land them first or force the run` で拒否する。突破は `monica task run MON-n --force` だけ。CLI の `task run` は gate の直前に対象 Task を 1 回 sync するので、写しの古さで素通りしない（オフラインなら前回の写しで判定する）。`epic-worker start` と Tick の手順 7 が GitHub を直接読む判定は同じ規則で、`--force` や attach など Run を経ない着手に対する保険。
 - merge gate は Worker が draft + `merge-gate` ラベルで出す。解除は Orchestrator のみ。gate が塞がる理由は 2 つあり、merge-after-released の上流が未 Released か、Gate が `#N merge 前` の Human Action が未完かのどちらか。両方が解けて初めて外す。
 - CI による硬い merge gate は事故が起きてから検討する。
@@ -51,7 +51,7 @@ Epic（親 issue）を sub-issue に分解し、Worker が [Worker flow](./worke
 
 1. 着手時に親の Epic Brief を本文と未 minimize のコメントの両方で読む。
 2. Human Action や未知の前提に当たった瞬間、epic issue にコメントする。
-3. PR 作成時に Discovery と新たに判明した依存をコメントする。依存は `gh issue edit --add-blocked-by` で辺も張る。コメントは sub-issue あたり原則 1 本、追記は自分のコメントの編集。
+3. PR 作成時に Discovery と新たに判明した依存をコメントする。start-after-merged の依存だけ `gh issue edit --add-blocked-by` で辺も張る。コメントは sub-issue あたり原則 1 本、追記は自分のコメントの編集。
 4. merge gate 未達なら draft + `merge-gate` ラベルで出し、自分では解除しない。
 5. PR 本文に pre-merge / post-merge / post-release の見出しを書く。各項目はチェックボックスと「いつ確認できるか」の条件を持つ。
 

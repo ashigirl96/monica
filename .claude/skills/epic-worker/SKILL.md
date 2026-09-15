@@ -66,7 +66,7 @@ S3. 判定して返す。start gate 未達、または `#<this> 着手前` の H
 
 B1. 当たったものを 1 行にし、種類を決める。人にしかできない作業なら **Human Action**（Gate 付き）。分かった事実なら **Discovery**。他の issue が先に要ると分かったなら **依存**。
 
-B2. 書き戻しコメントを書く（下の「書き戻しコメント」）。依存なら辺も張る。
+B2. 書き戻しコメントを書く（下の「書き戻しコメント」）。依存のうち、上流が merge されるまで着手できないもの（start-after-merged）だけ辺を張る。上流が Released になるまで merge しなければよいだけのもの（merge-after-released）は辺を張らない — 張ると start gate が着手を止め、並行して実装できなくなる。そちらはコメントの `### 依存` に書いて Orchestrator に Merge Gate へ入れてもらう。
 
 ```bash
 gh issue edit <this> --add-blocked-by <upstream>
@@ -80,7 +80,7 @@ B3. あなたに報告する。何が要るか、依存せずに進められる�
 
 `/create-pr` の直後に呼ぶ。PR 番号は `gh pr view --json number,url,body` で取る。
 
-R1. **Verification の 3 節を PR 本文に揃える。** 見出しは固定で `## マージ前の確認` / `## マージ後の手順` / `## リリース後の確認`。この 3 つを本文に置き、各項目を `- [ ] <内容> — 条件: <いつ確認できるか>` の形で書く。項目が無い節は `- なし`。既に本文にある節はそのまま、無い節は末尾に追記して `gh pr edit <PR> --body-file <path>` で書き戻す。
+R1. **Verification の 3 節を PR 本文に揃える。** 見出しは固定で `## マージ前の確認` / `## マージ後の手順` / `## リリース後の確認`。この 3 つを本文に置き、各項目を `- [ ] <内容> — 条件: <いつ確認できるか>` の形で書く。項目が無い節は `- なし`。無い節は末尾に追記する。既にある節のうち、PR template のプレースホルダ行（`- [ ]  — 条件:` のように内容が空のもの）は残さず、実項目か `- なし` に置き換える — 空のまま残すと Orchestrator が条件不明の未完了 Verification として取り込み、epic が閉じられなくなる。人が書いた実項目はそのまま残す。書き戻しは `gh pr edit <PR> --body-file <path>`。
 
 | 節 | 入れるもの | 条件の例 |
 |---|---|---|
@@ -98,7 +98,7 @@ gh label create merge-gate --color D93F0B --description "Waiting for the upstrea
 gh pr edit <PR> --add-label merge-gate
 ```
 
-R3. **書き戻す。** 実装で知った Discovery、新たに判明した依存、merge や release までに人が要る Human Action を書き戻しコメントに載せる。依存は `gh issue edit <this> --add-blocked-by <upstream>` で辺も張る。載せるものが無ければコメントは書かない。
+R3. **書き戻す。** 実装で知った Discovery、新たに判明した依存、merge や release までに人が要る Human Action を書き戻しコメントに載せる。依存の辺は B2 と同じ規則で、start-after-merged のものだけ `gh issue edit <this> --add-blocked-by <upstream>` で張る。載せるものが無ければコメントは書かない。
 
 R4. 3 行で報告して呼び出し元に戻る。PR の URL、gate の状態（ready か draft + merge-gate か）、書き戻した項目数。
 
@@ -125,8 +125,10 @@ epic issue へのコメント。先頭行の目印を Orchestrator が読む。
 
 ```bash
 # 自分のコメントを探す（先頭行が目印で isMinimized が false のもの）
-gh api graphql -f query='query { repository(owner: "<O>", name: "<R>") { issue(number: <epic>) {
-  comments(first: 100) { nodes { databaseId isMinimized body } } } } }' \
+# --paginate は必須。畳まれたコメントも connection に残るので、書き戻しが溜まった
+# epic では自分の最新コメントが 2 ページ目以降に沈み、見落とすと 2 本目を作ってしまう
+gh api graphql --paginate -f query='query($endCursor: String) { repository(owner: "<O>", name: "<R>") { issue(number: <epic>) {
+  comments(first: 100, after: $endCursor) { nodes { databaseId isMinimized body } pageInfo { hasNextPage endCursor } } } } }' \
   --jq '.data.repository.issue.comments.nodes[] | select(.isMinimized == false and (.body | startswith("<!-- epic-worker: #<this> -->"))) | .databaseId'
 
 # 無ければ作る
