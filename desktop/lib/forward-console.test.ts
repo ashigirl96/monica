@@ -12,13 +12,17 @@ function harness(sink?: (level: BackendLogLevel, message: string) => Promise<voi
   const printed: unknown[][] = [];
   const sent: Array<[BackendLogLevel, string]> = [];
   const listeners = new Map<string, (event: Event) => void>();
+  const options = new Map<string, AddEventListenerOptions | undefined>();
   const fakeConsole = {
     error: (...args: unknown[]) => printed.push(args),
     warn: (...args: unknown[]) => printed.push(args),
   };
   installConsoleForwarding({
     console: fakeConsole,
-    addEventListener: (type, listener) => listeners.set(type, listener),
+    addEventListener: (type, listener, opts) => {
+      listeners.set(type, listener);
+      options.set(type, opts);
+    },
     sink:
       sink ??
       ((level, message) => {
@@ -26,7 +30,7 @@ function harness(sink?: (level: BackendLogLevel, message: string) => Promise<voi
         return Promise.resolve();
       }),
   });
-  return { printed, sent, listeners, console: fakeConsole };
+  return { printed, sent, listeners, options, console: fakeConsole };
 }
 
 describe("line formatting", () => {
@@ -54,8 +58,20 @@ describe("line formatting", () => {
     );
   });
 
-  test("a resource-load error event carries no message and still logs", () => {
+  test("a failed resource is named by its element, not by a message", () => {
     // `window`'s error event is a plain Event (no `message`) when an <img>/<script> fails to load.
+    expect(errorEventLine({ target: { src: "/assets/missing.png" } })).toBe(
+      'uncaught kind=error message="resource failed to load" source="/assets/missing.png"',
+    );
+  });
+
+  test("a failed stylesheet is named by its href", () => {
+    expect(errorEventLine({ target: { href: "/assets/app.css" } })).toBe(
+      'uncaught kind=error message="resource failed to load" source="/assets/app.css"',
+    );
+  });
+
+  test("an error event with neither a message nor a resource still logs", () => {
     expect(errorEventLine({})).toBe('uncaught kind=error message="undefined"');
   });
 
@@ -98,6 +114,11 @@ describe("installation", () => {
       'uncaught kind=error message="boom"',
       'unhandledrejection kind=error message="nope"',
     ]);
+  });
+
+  test("the error listener captures, so non-bubbling resource failures reach it", () => {
+    const h = harness();
+    expect(h.options.get("error")?.capture).toBe(true);
   });
 
   test("a console call made by the sink itself does not recurse", () => {

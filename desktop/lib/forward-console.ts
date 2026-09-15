@@ -15,6 +15,7 @@ export interface ForwardingDeps {
   addEventListener: (
     type: "error" | "unhandledrejection",
     listener: (event: Event) => void,
+    options?: AddEventListenerOptions,
   ) => void;
 }
 
@@ -51,19 +52,33 @@ export function consoleLine(kind: BackendLogLevel, args: unknown[]): string {
   return `console kind=${kind} message=${field(message, MAX_MESSAGE)}`;
 }
 
+/// The URL of an element whose load failed. A resource `error` event carries no message — the
+/// element it fired on is the only thing that says what went wrong.
+function resourceUrl(target: unknown): string | null {
+  if (target === null || typeof target !== "object") return null;
+  const element = target as { src?: unknown; href?: unknown };
+  if (typeof element.src === "string" && element.src) return element.src;
+  if (typeof element.href === "string" && element.href) return element.href;
+  return null;
+}
+
 export function errorEventLine(event: {
   message?: unknown;
   filename?: string;
   lineno?: number;
   colno?: number;
   error?: unknown;
+  target?: unknown;
 }): string {
-  const source = event.filename
-    ? ` source=${field(`${event.filename}:${event.lineno ?? 0}:${event.colno ?? 0}`, MAX_MESSAGE)}`
-    : "";
+  const resource = event.message === undefined ? resourceUrl(event.target) : null;
+  const message = resource === null ? describe(event.message) : "resource failed to load";
+  const origin = event.filename
+    ? `${event.filename}:${event.lineno ?? 0}:${event.colno ?? 0}`
+    : resource;
   const stack = stackOf(event.error);
   return (
-    `uncaught kind=error message=${field(describe(event.message), MAX_MESSAGE)}${source}` +
+    `uncaught kind=error message=${field(message, MAX_MESSAGE)}` +
+    (origin === null ? "" : ` source=${field(origin, MAX_MESSAGE)}`) +
     (stack ? ` stack=${field(stack, MAX_STACK)}` : "")
   );
 }
@@ -122,9 +137,15 @@ export function installConsoleForwarding(overrides: Partial<ForwardingDeps> = {}
     forward("warn", consoleLine("warn", args));
   };
 
-  listen("error", (event) => {
-    forward("error", errorEventLine(event as ErrorEvent));
-  });
+  // Capture phase: a failed `<img>` / `<script>` / stylesheet fires `error` on the element and it
+  // does not bubble, so a listener on `window` only sees those while capturing.
+  listen(
+    "error",
+    (event) => {
+      forward("error", errorEventLine(event as ErrorEvent));
+    },
+    { capture: true },
+  );
   listen("unhandledrejection", (event) => {
     forward("error", rejectionLine((event as PromiseRejectionEvent).reason));
   });
