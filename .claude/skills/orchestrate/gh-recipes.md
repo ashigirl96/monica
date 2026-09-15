@@ -71,7 +71,10 @@ git tag --contains <mergeCommit.oid> | grep -E '<タグのパターン>'
 
 ```bash
 MONICA_HOME=$HOME/monica monica task status --project <O>/<R>
+MONICA_HOME=$HOME/monica monica task status --project <O>/<R> --status closed
 ```
+
+`--status` 無しは active な Task だけを返す。済んだ sub-issue の Task は閉じられているので、2 本目で拾って突き合わせる。どちらにも行が無い sub-issue だけが「Task 無し」。
 
 列は `ID / PARENT / PROJECT / GH ISSUE / STATUS / BLOCKED BY / BRANCH`。GH ISSUE 列で sub-issue と突き合わせる。STATUS は snake_case で出る。`setting_up` `prepared` `running` `waiting_for_user` のいずれかなら「生きている Run」。`in_progress` は Run の無い Task なので生きている Run には含めない。
 

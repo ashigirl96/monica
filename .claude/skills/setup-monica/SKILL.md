@@ -16,7 +16,7 @@ disable-model-invocation: true
 | 2 | `gh` が認証済み | `gh auth status` | `gh auth login` を案内 |
 | 3 | repo が Monica に登録済み | `MONICA_HOME=$HOME/monica monica project list` にこの repo の行がある | `MONICA_HOME=$HOME/monica monica project init` |
 | 4 | 登録の default branch が実際と一致 | `monica project list` の BRANCH 列と `gh repo view --json defaultBranchRef` | `monica project set` |
-| 5 | `.monica/` が git で追跡されている | `git check-ignore -v .monica` が何も返さない | `.gitignore` から除く |
+| 5 | `.monica/` が git で追跡されている | `git check-ignore -v .monica` が何も返さず、`git ls-files .monica` に `prompt.md` と `setup.sh` が並ぶ。`project init` の直後は ignore されていなくても未追跡のことがあり、その場合 Run の worktree にファイルが降りてこない | ignore されているなら `.gitignore` から除く。未追跡なら `git add .monica` してコミットを促す |
 | 6 | `.monica/prompt.md` が `/tackle` | 中身が `/tackle` の 1 行。`project init` は空で作る | `/tackle` を書く |
 | 7 | `.monica/setup.sh` が実行可能で冪等 | `test -x`、先頭に `set -euo pipefail`。中身は repo 固有なので目視で報告 | `chmod +x`、雛形は `project init` が作る |
 | 8 | Released の判定が既定と違うなら宣言がある | 既定は default branch への merge で、その repo にはファイルは要らない。タグでリリースする repo には `.monica/epic-flow.md` に「Released の判定」の節があり、タグのパターンが書かれている | 質問して [epic-flow-template.md](epic-flow-template.md) から書く。既定で済むなら書かない |
