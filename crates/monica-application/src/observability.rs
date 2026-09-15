@@ -8,11 +8,35 @@
 //! Two correlation ids look alike and are deliberately not: `session_id` is the terminal session
 //! (what `monica hook` already logs under that name), `agent_session_id` is the agent's own.
 
+use std::borrow::Cow;
+
 use crate::prelude::{TaskId, TaskRunId, TaskRunStatus, TaskStatus};
 use crate::ApplicationError;
 
 /// Run and task lifecycle: transitions that landed, and the gates that refused one.
 const LIFECYCLE: &str = "monica_application::lifecycle";
+
+/// Make one free-form value safe to put in a line.
+///
+/// Ids and event names reach these lines from hook payloads and the environment, so they are
+/// arbitrary text. A newline in one would split the record in two and let a payload forge a log
+/// entry; a space would make `key=value` ambiguous. Whitespace and control characters become `_`,
+/// and nothing else is touched, so a real id still reads back verbatim.
+pub(crate) fn field(value: &str) -> Cow<'_, str> {
+    fn unsafe_char(c: char) -> bool {
+        c.is_whitespace() || c.is_control()
+    }
+    if value.contains(unsafe_char) {
+        Cow::Owned(
+            value
+                .chars()
+                .map(|c| if unsafe_char(c) { '_' } else { c })
+                .collect(),
+        )
+    } else {
+        Cow::Borrowed(value)
+    }
+}
 
 fn status_or_unknown(status: Option<TaskRunStatus>) -> &'static str {
     status.map_or("unknown", TaskRunStatus::as_str)
@@ -26,9 +50,12 @@ fn run_status_line(
     cause: &str,
 ) -> String {
     format!(
-        "run_status task_run_id={task_run_id} task_id={task_id} from={} to={} cause={cause}",
+        "run_status task_run_id={} task_id={} from={} to={} cause={}",
+        field(task_run_id),
+        field(task_id),
         status_or_unknown(from),
         to.as_str(),
+        field(cause),
     )
 }
 
@@ -46,9 +73,11 @@ pub(crate) fn run_status(
 
 fn task_status_line(task_id: &TaskId, from: TaskStatus, to: TaskStatus, cause: &str) -> String {
     format!(
-        "task_status task_id={task_id} from={} to={} cause={cause}",
+        "task_status task_id={} from={} to={} cause={}",
+        field(task_id),
         from.as_str(),
         to.as_str(),
+        field(cause),
     )
 }
 
@@ -62,8 +91,11 @@ fn rejection_line(
     task_run_id: Option<&TaskRunId>,
     reason: &str,
 ) -> String {
-    let run = task_run_id.map_or_else(|| "none".to_string(), TaskRunId::to_string);
-    format!("run_rejected gate={gate} task_id={task_id} task_run_id={run} reason={reason}")
+    let run = task_run_id.map_or(Cow::Borrowed("none"), |id| field(id));
+    format!(
+        "run_rejected gate={gate} task_id={} task_run_id={run} reason={reason}",
+        field(task_id),
+    )
 }
 
 /// Report why a gate turned a user action down, and hand the error straight back for `return
@@ -113,6 +145,21 @@ mod tests {
             run_status_line(&run_id(), &task_id(), None, TaskRunStatus::Failed, "execute_error"),
             "run_status task_run_id=run-12 task_id=MON-42 from=unknown to=failed \
              cause=execute_error"
+        );
+    }
+
+    #[test]
+    fn a_payload_supplied_cause_cannot_split_the_line() {
+        assert_eq!(
+            run_status_line(
+                &run_id(),
+                &task_id(),
+                Some(TaskRunStatus::Running),
+                TaskRunStatus::Stopped,
+                "hook:Stop\nrun_status task_run_id=run-99 forged=true",
+            ),
+            "run_status task_run_id=run-12 task_id=MON-42 from=running to=stopped \
+             cause=hook:Stop_run_status_task_run_id=run-99_forged=true"
         );
     }
 

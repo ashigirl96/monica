@@ -174,8 +174,11 @@ impl HookReport {
     /// in `event_name` for payloads the decoder dropped *after* this use case returns, and a line
     /// frozen here would report those as having no event.
     pub fn trace_line(&self) -> String {
-        fn opt(value: Option<&str>) -> &str {
-            value.unwrap_or("none")
+        // The event name and the agent's session id are copied verbatim out of the hook payload's
+        // JSON, so both are arbitrary text: without this a newline in either would split the
+        // promised one-line record and let a payload forge a second one.
+        fn opt(value: Option<&str>) -> std::borrow::Cow<'_, str> {
+            value.map_or(std::borrow::Cow::Borrowed("none"), crate::observability::field)
         }
         let skipped = self
             .resolve_skipped
@@ -655,6 +658,26 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A payload cannot end the line early and start a second, forged one.
+    #[test]
+    fn free_form_payload_values_cannot_split_the_line() {
+        let report = HookReport {
+            event_name: Some("Stop\nhook task_id=MON-1 forged=true".to_string()),
+            agent_session_id: Some(AgentSessionId::from_agent("sess 1\tx")),
+            ..resolved_report()
+        };
+        let line = report.trace_line();
+        assert!(!line.contains('\n'), "{line}");
+        assert!(
+            line.contains("agent_session_id=sess_1_x"),
+            "{line}"
+        );
+        assert!(
+            line.contains("event=Stop_hook_task_id=MON-1_forged=true"),
+            "{line}"
+        );
+    }
 
     /// A hook that resolved nothing and changed nothing still prints every key, so a grep for one
     /// field never silently misses the lines where it is absent.
