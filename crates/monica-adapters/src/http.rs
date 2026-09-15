@@ -28,7 +28,7 @@ pub(crate) async fn send_logged(
     let request = match built {
         Ok(request) => request,
         Err(e) => {
-            let fields = [("op", op.to_string()), ("error", e.to_string())];
+            let fields = [("op", op.to_string()), ("error", safe_error(&e))];
             log::warn!(target: HTTP, "{}", render("http unsent", &fields));
             return Err(e);
         }
@@ -53,13 +53,27 @@ pub(crate) async fn send_logged(
         }
         Err(e) => {
             fields.push(("status", "none".to_string()));
-            fields.push(("error", redact(&e.to_string()).into_owned()));
+            fields.push(("error", safe_error(e)));
             log::Level::Warn
         }
     };
     fields.push(("duration_ms", started.elapsed().as_millis().to_string()));
     log::log!(target: HTTP, level, "{}", render("http", &fields));
     result
+}
+
+/// A reqwest error carries the URL it failed on and prints it verbatim (`" for url ({url})"`), so
+/// sanitising the `url=` field alone would let the raw one back in through `error=`.
+fn safe_error(error: &reqwest::Error) -> String {
+    safe_error_text(&error.to_string(), error.url())
+}
+
+fn safe_error_text(text: &str, url: Option<&reqwest::Url>) -> String {
+    let text = match url {
+        Some(url) => text.replace(url.as_str(), &safe_url(url)),
+        None => text.to_string(),
+    };
+    redact(&text).into_owned()
 }
 
 /// A URL fit to write down. These URLs come from whoever pasted a link, so the secrets they can
@@ -99,7 +113,7 @@ fn install_crypto_provider() {
 
 #[cfg(test)]
 mod tests {
-    use super::safe_url;
+    use super::{safe_error_text, safe_url};
 
     fn url(raw: &str) -> reqwest::Url {
         reqwest::Url::parse(raw).unwrap()
@@ -128,5 +142,25 @@ mod tests {
     #[test]
     fn an_empty_query_does_not_become_a_stray_parameter() {
         assert_eq!(safe_url(&url("https://example.com/p?")), "https://example.com/p?");
+    }
+
+    /// reqwest appends the failing URL to its own message, so the same masking has to reach there.
+    #[test]
+    fn the_url_a_transport_error_quotes_is_masked_too() {
+        let failed = url("https://alice:hunter2@example.com/p?token=s3cret");
+        let text = format!("error sending request for url ({failed})");
+
+        let safe = safe_error_text(&text, Some(&failed));
+
+        assert_eq!(
+            safe,
+            "error sending request for url (https://***@example.com/p?token=***)"
+        );
+        assert!(!safe.contains("hunter2") && !safe.contains("s3cret"));
+    }
+
+    #[test]
+    fn an_error_without_a_url_is_left_alone() {
+        assert_eq!(safe_error_text("builder error", None), "builder error");
     }
 }
