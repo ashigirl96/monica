@@ -1,6 +1,9 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use anyhow::Result;
 use rusqlite::{Transaction, TransactionBehavior};
 
+use crate::observe;
 use crate::SqliteStore;
 use monica_application::{
     Clock, EventRepository, TabAttachment, TaskRunObservation, TaskRunStore, TaskStore, UnitOfWork,
@@ -18,8 +21,14 @@ use super::{bench, events, external_refs, task_runs, tasks};
 /// drift. Nothing is durable until [`WorkTransaction::commit`]; dropping without committing rolls
 /// back (rusqlite's `Transaction` default).
 struct SqliteUow<'conn> {
+    /// Must stay declared before `guard`: fields drop in declaration order, so the rollback has to
+    /// happen before the guard reports it.
     tx: Transaction<'conn>,
+    id: u64,
+    guard: RollbackGuard,
 }
+
+static NEXT_TX_ID: AtomicU64 = AtomicU64::new(1);
 
 impl UnitOfWork for SqliteStore {
     /// Takes the write lock up front. Use cases read state inside the transaction to decide what
@@ -27,14 +36,57 @@ impl UnitOfWork for SqliteStore {
     /// both pass that read before either one's write is visible to the other.
     fn begin(&mut self) -> Result<Box<dyn WorkTransaction + '_>> {
         let tx = self.conn_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
-        Ok(Box::new(SqliteUow { tx }))
+        let id = NEXT_TX_ID.fetch_add(1, Ordering::Relaxed);
+        log::debug!(target: observe::TARGET_TX, "tx begin tx={id} behavior=immediate");
+        Ok(Box::new(SqliteUow {
+            tx,
+            id,
+            guard: RollbackGuard::armed(id),
+        }))
     }
 }
 
 impl WorkTransaction for SqliteUow<'_> {
-    fn commit(self: Box<Self>) -> Result<()> {
-        self.tx.commit()?;
-        Ok(())
+    fn commit(mut self: Box<Self>) -> Result<()> {
+        let id = self.id;
+        // Disarm before the commit moves `tx` out of the box; the failure branch below is the only
+        // rollback the guard would otherwise double-report.
+        self.guard.disarm();
+        match self.tx.commit() {
+            Ok(()) => {
+                log::debug!(target: observe::TARGET_TX, "tx commit tx={id}");
+                Ok(())
+            }
+            Err(e) => {
+                log::debug!(target: observe::TARGET_TX, "tx rollback tx={id} reason=commit_failed error={e}");
+                Err(e.into())
+            }
+        }
+    }
+}
+
+/// Reports the rollback a dropped `Transaction` performs silently. It lives as its own field so
+/// `SqliteUow` stays `Drop`-free — a `Drop` impl on `SqliteUow` would forbid `commit`'s move of
+/// `tx` out of the box.
+struct RollbackGuard {
+    tx_id: Option<u64>,
+}
+
+impl RollbackGuard {
+    fn armed(tx_id: u64) -> Self {
+        Self { tx_id: Some(tx_id) }
+    }
+
+    fn disarm(&mut self) {
+        self.tx_id = None;
+    }
+}
+
+impl Drop for RollbackGuard {
+    fn drop(&mut self) {
+        if let Some(id) = self.tx_id {
+            log::debug!(target: observe::TARGET_TX, "tx rollback tx={id} reason=dropped_without_commit");
+        }
     }
 }
 
@@ -253,5 +305,13 @@ mod tests {
         drop(tx);
 
         other.execute_batch("BEGIN IMMEDIATE; ROLLBACK").unwrap();
+    }
+
+    #[test]
+    fn the_rollback_guard_reports_until_it_is_disarmed() {
+        let mut guard = RollbackGuard::armed(7);
+        assert_eq!(guard.tx_id, Some(7));
+        guard.disarm();
+        assert_eq!(guard.tx_id, None);
     }
 }

@@ -3145,6 +3145,7 @@ name = "monica-storage-sqlite"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "log",
  "monica-application",
  "monica-domain",
  "monica-paths",

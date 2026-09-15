@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
+use rusqlite::trace::TraceEventCodes;
 use rusqlite::Connection;
 
 use monica_paths as paths;
 
 mod migrations;
+mod observe;
 mod row;
 mod store;
 #[cfg(test)]
@@ -42,7 +44,10 @@ impl SqliteStore {
 
     fn init(mut conn: Connection) -> Result<Self> {
         conn.pragma_update(None, "foreign_keys", true)?;
-        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        // Replaces the handler `busy_timeout` would install, so the lock waits it already performs
+        // become observable. `observe::on_busy` reproduces the same schedule.
+        conn.busy_handler(Some(observe::on_busy))?;
+        conn.trace_v2(TraceEventCodes::SQLITE_TRACE_PROFILE, Some(observe::on_trace));
         self::migrations::migrate(&mut conn)?;
         // v41 で入る notes_fts を既存 note で初回だけ埋める（ゲート済み・冪等）。
         store::notes::backfill_notes_fts(&mut conn)?;

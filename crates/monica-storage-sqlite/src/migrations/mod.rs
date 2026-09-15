@@ -1,6 +1,11 @@
+use std::sync::Once;
+use std::time::{Duration, Instant};
+
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use rusqlite_migration::{Migrations, M};
+
+use crate::observe;
 
 macro_rules! migrations {
     ($($v:ident),+ $(,)?) => {
@@ -40,11 +45,71 @@ migrations!(
     v52,
 );
 
+/// The schema transition this connection observed. `from` is read outside the migration's own
+/// transaction, so a second process can land the pending steps in between — the outcome says which
+/// versions were seen, never that this call is what moved them.
+#[derive(Debug)]
+pub(crate) struct MigrationOutcome {
+    pub from: usize,
+    pub to: usize,
+    pub elapsed: Duration,
+}
+
 /// Apply any pending migrations. Idempotent: a fully-migrated database is a no-op.
-pub(crate) fn migrate(conn: &mut Connection) -> Result<()> {
-    Migrations::new(migration_steps())
+pub(crate) fn migrate(conn: &mut Connection) -> Result<MigrationOutcome> {
+    let steps = migration_steps();
+    let to = steps.len();
+    let migrations = Migrations::new(steps);
+    let from = usize::from(
+        migrations
+            .current_version(conn)
+            .context("failed to read the current schema version")?,
+    );
+    // Two worktrees can hand out the same migration number, leaving a database numbered past what
+    // this build knows. `to_latest` only reports "too far ahead", so name both versions first.
+    if from > to {
+        log::warn!(
+            target: observe::TARGET_MIGRATIONS,
+            "schema ahead of this build db={} version={from} known={to}",
+            db_label(conn)
+        );
+    }
+    let started = Instant::now();
+    migrations
         .to_latest(conn)
-        .context("failed to apply database migrations")
+        .context("failed to apply database migrations")?;
+    let elapsed = started.elapsed();
+    let outcome = MigrationOutcome { from, to, elapsed };
+    log_outcome(conn, &outcome);
+    Ok(outcome)
+}
+
+/// Every store operation opens its own connection, so the up-to-date line would otherwise repeat
+/// on every HTTP request. Migrations themselves are rare enough to log unconditionally.
+fn log_outcome(conn: &Connection, outcome: &MigrationOutcome) {
+    static ALREADY_CURRENT: Once = Once::new();
+
+    let db = db_label(conn);
+    if outcome.from < outcome.to {
+        log::info!(
+            target: observe::TARGET_MIGRATIONS,
+            "migrated db={db} from={} to={} duration_ms={}",
+            outcome.from,
+            outcome.to,
+            outcome.elapsed.as_millis()
+        );
+        return;
+    }
+    ALREADY_CURRENT.call_once(|| {
+        log::info!(target: observe::TARGET_MIGRATIONS, "schema db={db} version={}", outcome.to);
+    });
+}
+
+fn db_label(conn: &Connection) -> String {
+    match conn.path() {
+        Some(path) if !path.is_empty() => path.to_owned(),
+        _ => ":memory:".to_owned(),
+    }
 }
 
 #[cfg(test)]
@@ -153,6 +218,59 @@ mod tests {
 
     fn rid(id: &str) -> TaskRunId {
         TaskRunId::from_store(id.to_string())
+    }
+
+    #[test]
+    fn migrate_reports_the_version_transition() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        stage_through(&mut conn, migration_count() - 2);
+
+        let outcome = migrate(&mut conn).unwrap();
+        assert_eq!(outcome.from, migration_count() - 2);
+        assert_eq!(outcome.to, migration_count());
+    }
+
+    #[test]
+    fn migrate_reports_a_standing_version_on_a_current_database() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate(&mut conn).unwrap();
+
+        let outcome = migrate(&mut conn).unwrap();
+        assert_eq!(outcome.from, migration_count());
+        assert_eq!(outcome.to, migration_count());
+    }
+
+    #[test]
+    fn migrate_refuses_a_database_numbered_past_this_build() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate(&mut conn).unwrap();
+        conn.pragma_update(None, "user_version", migration_count() as i64 + 1)
+            .unwrap();
+
+        let err = migrate(&mut conn)
+            .expect_err("a database ahead of this build must not be migrated further");
+        assert!(
+            err.to_string().contains("failed to apply database migrations"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn db_label_names_an_in_memory_connection() {
+        let conn = Connection::open_in_memory().unwrap();
+        assert_eq!(db_label(&conn), ":memory:");
+    }
+
+    /// SQLite hands back the canonicalised path (on macOS `/var` resolves to `/private/var`), so
+    /// the label is compared by suffix rather than against the path we opened.
+    #[test]
+    fn db_label_is_the_file_path_on_disk() {
+        let path = temp_db_path("db-label");
+        let conn = Connection::open(&path).unwrap();
+
+        let label = db_label(&conn);
+        assert!(label.ends_with("test.db"), "unexpected label: {label}");
+        assert!(label.starts_with('/'), "unexpected label: {label}");
     }
 
     #[test]
