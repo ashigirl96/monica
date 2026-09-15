@@ -33,23 +33,30 @@ function field(value: string, maxChars: number): string {
   return `"${capped.replace(/"/g, '\\"')}"`;
 }
 
+/// Total by construction. Every way of inspecting a value can throw on a hostile one — a revoked
+/// proxy throws on `instanceof` and on `Object.prototype.toString` alike — and this line is the
+/// only record a release build keeps, so no argument may cost us the record.
 function describe(value: unknown): string {
-  if (value instanceof Error) return `${value.name}: ${value.message}`;
-  if (typeof value === "string") return value;
   try {
+    if (value instanceof Error) return `${value.name}: ${value.message}`;
+    if (typeof value === "string") return value;
     return JSON.stringify(value) ?? String(value);
   } catch {
-    try {
-      // A cyclic value lands here, and coercing one with a null prototype throws all over again.
-      return String(value);
-    } catch {
-      return Object.prototype.toString.call(value);
-    }
+    // Cyclic, null-prototype, or a proxy with throwing traps.
+  }
+  try {
+    return String(value);
+  } catch {
+    return "[unprintable]";
   }
 }
 
 function stackOf(value: unknown): string | null {
-  return value instanceof Error && value.stack ? value.stack : null;
+  try {
+    return value instanceof Error && value.stack ? value.stack : null;
+  } catch {
+    return null;
+  }
 }
 
 export function consoleLine(kind: BackendLogLevel, args: unknown[]): string {

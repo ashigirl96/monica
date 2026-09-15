@@ -95,7 +95,14 @@ describe("line formatting", () => {
     // Cyclic (JSON.stringify throws) and null-prototype (String() throws too).
     const hostile = Object.create(null) as Record<string, unknown>;
     hostile.self = hostile;
-    expect(rejectionLine(hostile)).toBe('unhandledrejection kind=error message="[object Object]"');
+    expect(rejectionLine(hostile)).toBe('unhandledrejection kind=error message="[unprintable]"');
+  });
+
+  test("a revoked proxy still produces a line", () => {
+    // Every way of inspecting one throws, `instanceof` and Object.prototype.toString included.
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    expect(rejectionLine(proxy)).toBe('unhandledrejection kind=error message="[unprintable]"');
   });
 });
 
@@ -143,7 +150,15 @@ describe("installation", () => {
     const hostile = Object.create(null) as Record<string, unknown>;
     hostile.self = hostile;
     expect(() => h.console.error(hostile)).not.toThrow();
-    expect(h.sent).toEqual([["error", 'console kind=error message="[object Object]"']]);
+    expect(h.sent).toEqual([["error", 'console kind=error message="[unprintable]"']]);
+  });
+
+  test("a revoked proxy reaches the backend rather than being dropped", () => {
+    const h = harness();
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    expect(() => h.console.error(proxy)).not.toThrow();
+    expect(h.sent).toEqual([["error", 'console kind=error message="[unprintable]"']]);
   });
 
   test("a sink that throws synchronously is reported once, not rethrown", () => {
