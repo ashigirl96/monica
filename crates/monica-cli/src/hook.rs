@@ -83,18 +83,9 @@ fn handle_agent(agent: Agent, log: Option<&DailyLog>) -> Result<()> {
         &raw,
     )?;
 
-    let event_name = report.event_name.clone();
-    debug_log_to(log, &format!(
-        "event={:?} ignored={} task_found={} run_linked={} run_created={} status={:?} wait_reason={:?} entered_waiting={}",
-        event_name,
-        report.ignored,
-        report.task_found,
-        report.task_run_linked,
-        report.task_run_created,
-        report.task_run_status,
-        report.wait_reason,
-        report.entered_waiting_for_user,
-    ));
+    // `monica hook` installs no logger, so the core's own `log::*` output goes nowhere here. The
+    // line the core builds is written to this file instead — same vocabulary, one place to change.
+    debug_log_to(log, &report.trace_line());
 
     if let Some(id) = &task_id {
         if !report.ignored && !report.task_found {

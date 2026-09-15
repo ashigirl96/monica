@@ -49,6 +49,13 @@ impl<B: Backend> TaskService<'_, B> {
         // actually is rather than announcing a status it never reached.
         for run_id in &report.detached_run_ids {
             if let Some(run) = repos.get_task_run(run_id)? {
+                crate::observability::run_status(
+                    &run.id,
+                    &run.task_id,
+                    None,
+                    run.status,
+                    "attach_detached",
+                );
                 events.emit(ApplicationEvent::TaskRunStatusChanged {
                     task_id: run.task_id.into(),
                     task_run_id: run.id.into(),
@@ -56,6 +63,13 @@ impl<B: Backend> TaskService<'_, B> {
                 });
             }
         }
+        crate::observability::run_status(
+            &report.task_run_id,
+            &report.task_id,
+            None,
+            TaskRunStatus::Running,
+            "attach",
+        );
         events.emit(ApplicationEvent::TaskRunStatusChanged {
             task_id: report.task_id.to_string(),
             task_run_id: report.task_run_id.to_string(),

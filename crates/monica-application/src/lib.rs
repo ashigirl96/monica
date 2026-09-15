@@ -13,6 +13,7 @@ pub mod notification;
 pub mod facade;
 mod github;
 mod input;
+mod observability;
 mod observation;
 pub mod ports;
 pub(crate) mod prelude;
@@ -56,7 +57,8 @@ pub use terminal_state::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTab
 // Usecase result types (returned by facade methods)
 pub use usecases::{
     AttachSessionReport, CloseTaskReport, CurrentTaskReport, CurrentTaskSource, DaemonSessionView,
-    GithubSyncReport, HookContext, HookReport, LinkPullRequestReport, SyncChangeCounts,
+    GithubSyncReport, HookContext, HookReport, HookResolveRoute, LinkPullRequestReport,
+    ResolveSkip, SyncChangeCounts,
     TabIdentity, TabTaskBinding, TaskSyncChange, TaskSyncChanges, TerminalSessionUpdate,
     TrackGithubIssueReport, TrackOutcome,
 };

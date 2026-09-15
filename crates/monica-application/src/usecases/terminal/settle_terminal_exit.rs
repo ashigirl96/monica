@@ -6,6 +6,9 @@ use crate::prelude::{TaskId, TaskRun, TaskRunId, TaskRunStatus, TerminalSession}
 pub struct TerminalExitSettlement {
     pub task_id: TaskId,
     pub task_run_id: TaskRunId,
+    /// The status the run is being settled away from. Carried rather than re-read: both verdicts
+    /// already hold the run, and the settlement is applied by a caller that does not.
+    pub from_status: TaskRunStatus,
 }
 
 /// Decide whether a terminated terminal session takes its task run down with it.
@@ -32,6 +35,7 @@ pub fn task_run_settlement_for_terminal_exit(
     Some(TerminalExitSettlement {
         task_id: run.task_id.clone(),
         task_run_id: run.id.clone(),
+        from_status: run.status,
     })
 }
 
@@ -58,6 +62,7 @@ pub fn task_run_settlement_for_orphaned_run(
     Some(TerminalExitSettlement {
         task_id: run.task_id.clone(),
         task_run_id: run.id.clone(),
+        from_status: run.status,
     })
 }
 
@@ -196,6 +201,7 @@ mod tests {
             Some(TerminalExitSettlement {
                 task_id: TaskId::from_store("MON-1".to_string()),
                 task_run_id: TaskRunId::from_store("run-1".to_string()),
+                from_status: TaskRunStatus::Running,
             })
         );
         // A live (or unrecorded) latest session means the tab can still report; hands off.

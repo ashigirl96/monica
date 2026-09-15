@@ -142,12 +142,38 @@ fn requested_transition(kind: &SignalKind) -> Option<HookTransition> {
     }
 }
 
+/// Why a requested transition was dropped. Carried out of [`TaskRun::decide`] so the layer above can
+/// report which rule refused a hook; the decision itself stays here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransitionRefusal {
+    ResumeContinuation,
+    StaleTerminalFromOtherSession,
+    SubagentInFlight,
+    ToolWaitDowngrade,
+    StoppedStaysStopped,
+}
+
+impl TransitionRefusal {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TransitionRefusal::ResumeContinuation => "resume_continuation",
+            TransitionRefusal::StaleTerminalFromOtherSession => "stale_terminal_from_other_session",
+            TransitionRefusal::SubagentInFlight => "subagent_in_flight",
+            TransitionRefusal::ToolWaitDowngrade => "tool_wait_downgrade",
+            TransitionRefusal::StoppedStaysStopped => "stopped_stays_stopped",
+        }
+    }
+}
+
 /// What a hook observation should record once [`TaskRun::decide`] has reconciled a signal against the
 /// run's current state. The store still re-enforces the protection rules atomically (hooks race in
 /// separate processes); this is the advisory snapshot that decides which observation to write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RunObservationPlan {
     pub transition: Option<HookTransition>,
+    /// Set exactly when a transition was requested and dropped. `ResumeContinuation` deliberately
+    /// does not clear `stamp_session`: the start is still this run's own session.
+    pub refused: Option<TransitionRefusal>,
     pub stamp_session: bool,
     pub stamp_tab: bool,
     pub hold_stop: bool,
@@ -170,17 +196,22 @@ impl TaskRun {
                 }
             );
         let protected = match requested {
-            Some(next) if !suppressed_continuation => self.transition_is_protected(signal, next),
-            _ => false,
+            Some(next) if !suppressed_continuation => self.transition_refusal(signal, next),
+            _ => None,
         };
         let transition = match requested {
-            Some(next) if !suppressed_continuation && !protected => Some(next),
+            Some(next) if !suppressed_continuation && protected.is_none() => Some(next),
             _ => None,
         };
         RunObservationPlan {
             transition,
+            refused: if suppressed_continuation {
+                Some(TransitionRefusal::ResumeContinuation)
+            } else {
+                protected
+            },
             // A protected straggler must not re-stamp its dead session over the successor's id.
-            stamp_session: !protected,
+            stamp_session: protected.is_none(),
             // A resumed start still carries the source session id, so it can't prove where the
             // session lives; the tab claim waits for the first real activity.
             stamp_tab: !matches!(
@@ -219,14 +250,19 @@ impl TaskRun {
     /// The generic-wait rules are scoped to the session the run already saw: a generic wait carried
     /// by a session the run has never met is new evidence of life, so it may revive a stopped run
     /// and clears a tool wait whose question died with its session.
-    fn transition_is_protected(&self, signal: &AgentSignal, next: HookTransition) -> bool {
+    fn transition_refusal(
+        &self,
+        signal: &AgentSignal,
+        next: HookTransition,
+    ) -> Option<TransitionRefusal> {
         let known = self.agent_session_id.as_ref();
         let event = signal.agent_session_id.as_ref();
         if next.status.is_terminal() {
-            return matches!((known, event), (Some(known), Some(event)) if known != event);
+            return matches!((known, event), (Some(known), Some(event)) if known != event)
+                .then_some(TransitionRefusal::StaleTerminalFromOtherSession);
         }
         if !transition_is_generic_wait(next) {
-            return false;
+            return None;
         }
         // A turn-complete fired while a subagent is still working must not demote the run; a session
         // start carrying the same generic wait is new life and is exempt.
@@ -237,7 +273,7 @@ impl TaskRun {
             }
         );
         if subagent_in_flight && !signal.starts_session() {
-            return true;
+            return Some(TransitionRefusal::SubagentInFlight);
         }
         let from_new_session = match (known, event) {
             (_, None) => false,
@@ -245,14 +281,15 @@ impl TaskRun {
             (Some(known), Some(event)) => known != event,
         };
         if from_new_session {
-            return false;
+            return None;
         }
         match self.status {
-            TaskRunStatus::Stopped => true,
-            TaskRunStatus::WaitingForUser => {
-                self.wait_reason.is_some_and(TaskRunWaitReason::is_tool_wait)
-            }
-            _ => false,
+            TaskRunStatus::Stopped => Some(TransitionRefusal::StoppedStaysStopped),
+            TaskRunStatus::WaitingForUser => self
+                .wait_reason
+                .is_some_and(TaskRunWaitReason::is_tool_wait)
+                .then_some(TransitionRefusal::ToolWaitDowngrade),
+            _ => None,
         }
     }
 }
@@ -366,6 +403,7 @@ mod tests {
                 },
             ));
             assert_eq!(plan.transition, None);
+            assert_eq!(plan.refused, Some(TransitionRefusal::StoppedStaysStopped));
         }
     }
 
@@ -383,6 +421,7 @@ mod tests {
             Some(TaskRunStatus::WaitingForUser)
         );
         assert!(plan.stamp_session);
+        assert_eq!(plan.refused, None);
     }
 
     #[test]
@@ -399,6 +438,7 @@ mod tests {
             },
         ));
         assert_eq!(plan.transition, None);
+        assert_eq!(plan.refused, Some(TransitionRefusal::ToolWaitDowngrade));
     }
 
     #[test]
@@ -411,6 +451,7 @@ mod tests {
             },
         ));
         assert_eq!(plan.transition, None, "held, not demoted to your-turn");
+        assert_eq!(plan.refused, Some(TransitionRefusal::SubagentInFlight));
         assert!(plan.hold_stop);
         // A session start carries the same generic wait but is new life: never held.
         let started = r.decide(&signal(
@@ -451,15 +492,19 @@ mod tests {
         for current in [TaskRunStatus::Running, TaskRunStatus::WaitingForUser] {
             let r = run(current, None, Some("s2"));
             // A SessionEnd from the dead session s1 must not kill the run s2 now drives.
-            assert_eq!(r.decide(&signal(Some("s1"), SignalKind::SessionEnded)).transition, None);
+            let plan = r.decide(&signal(Some("s1"), SignalKind::SessionEnded));
+            assert_eq!(plan.transition, None);
+            assert_eq!(
+                plan.refused,
+                Some(TransitionRefusal::StaleTerminalFromOtherSession)
+            );
         }
         // The same verdict from the run's own session (or anonymous, or before any session) lands.
         for (known, event) in [(Some("s1"), Some("s1")), (Some("s1"), None), (None, Some("s1"))] {
             let r = run(TaskRunStatus::Running, None, known);
-            assert_eq!(
-                r.decide(&signal(event, SignalKind::SessionEnded)).transition.map(|t| t.status),
-                Some(TaskRunStatus::Stopped)
-            );
+            let plan = r.decide(&signal(event, SignalKind::SessionEnded));
+            assert_eq!(plan.transition.map(|t| t.status), Some(TaskRunStatus::Stopped));
+            assert_eq!(plan.refused, None);
         }
     }
 
@@ -469,6 +514,14 @@ mod tests {
             let r = run(TaskRunStatus::Running, None, Some("s1"));
             let plan = r.decide(&signal(Some("s1"), SignalKind::SessionStarted { continuation }));
             assert_eq!(plan.transition, None, "{continuation:?}");
+            assert_eq!(
+                plan.refused,
+                Some(TransitionRefusal::ResumeContinuation),
+                "{continuation:?}"
+            );
+            // The start is still this run's own session, so the stamp is kept — unlike every
+            // other refusal, which comes from a session that no longer owns the run.
+            assert!(plan.stamp_session, "{continuation:?}");
         }
     }
 
@@ -505,6 +558,7 @@ mod tests {
             },
         ));
         assert!(!plan.stamp_session);
+        assert_eq!(plan.refused, Some(TransitionRefusal::StoppedStaysStopped));
     }
 
     #[test]

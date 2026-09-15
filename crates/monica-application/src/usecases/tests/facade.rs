@@ -56,6 +56,11 @@ fn facade_ingest_agent_hook_recovers_event_label_for_dropped_event() {
 
     assert!(report.ignored);
     assert_eq!(report.event_name.as_deref(), Some("PreToolUse"));
+    // The recovery happens after `record_hook` returns, so the line must be built on demand: one
+    // frozen inside the use case would report this hook as having no event at all.
+    let line = report.trace_line();
+    assert!(line.contains("event=PreToolUse"), "{line}");
+    assert!(line.contains("ignored=true"), "{line}");
 }
 
 #[test]

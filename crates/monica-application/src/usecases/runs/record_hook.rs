@@ -3,8 +3,71 @@ use crate::ports::{TerminalSessionRepository, UnitOfWork};
 use crate::ApplicationResult;
 use crate::prelude::{is_safe_task_run_id, Agent, AgentSignal, SignalKind, Task};
 use crate::prelude::{NewTaskRun, TaskId, TaskRun, TaskRunStatus, TaskRunWaitReason, TaskStatus};
-use monica_domain::{AgentSessionEffect, AgentSessionId, AgentSessionStatus, TaskRunId};
+use monica_domain::{
+    AgentSessionEffect, AgentSessionId, AgentSessionStatus, TaskRunId, TransitionRefusal,
+};
 use crate::TaskRunObservation;
+
+/// Which rule bound this hook to a run. Reported so a hook that landed on the "wrong" run can be
+/// traced back to the rule that chose it, without re-deriving the chain from the payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HookResolveRoute {
+    ExplicitRunId,
+    TabBinding,
+    TaskMissing,
+    BySession,
+    ByPreparedPrimary,
+    ByLazyCreate,
+    Unresolved,
+}
+
+impl HookResolveRoute {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HookResolveRoute::ExplicitRunId => "explicit_run_id",
+            HookResolveRoute::TabBinding => "tab_binding",
+            HookResolveRoute::TaskMissing => "task_missing",
+            HookResolveRoute::BySession => "session",
+            HookResolveRoute::ByPreparedPrimary => "prepared_primary",
+            HookResolveRoute::ByLazyCreate => "lazy_create",
+            HookResolveRoute::Unresolved => "none",
+        }
+    }
+}
+
+/// Why a rule declined. Each variant is one `return` in one resolver; conditions the code used to
+/// OR together are split so the report names the condition that actually fired.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolveSkip {
+    NoSessionId,
+    NoRunForSession,
+    NoPrimaryRun,
+    PrimaryNotPrepared(TaskRunStatus),
+    NotSessionStarting,
+    ClaimLost,
+    ExplicitRunIdRejected,
+    TaskClosed,
+}
+
+impl std::fmt::Display for ResolveSkip {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ResolveSkip::NoSessionId => f.write_str("no_session_id"),
+            ResolveSkip::NoRunForSession => f.write_str("no_run_for_session"),
+            ResolveSkip::NoPrimaryRun => f.write_str("no_primary_run"),
+            ResolveSkip::PrimaryNotPrepared(status) => {
+                write!(f, "primary_not_prepared({})", status.as_str())
+            }
+            ResolveSkip::NotSessionStarting => f.write_str("not_session_starting"),
+            ResolveSkip::ClaimLost => f.write_str("claim_lost"),
+            ResolveSkip::ExplicitRunIdRejected => f.write_str("explicit_run_id_rejected"),
+            ResolveSkip::TaskClosed => f.write_str("task_closed"),
+        }
+    }
+}
+
+/// The three task-scoped rules, in evaluation order. Paired with `ResolveTrace::skipped` by index.
+const RULE_NAMES: [&str; 3] = ["session", "prepared_primary", "lazy_create"];
 
 /// Identity carried by a hook invocation via `MONICA_*` env vars. `task_run_id` is only present
 /// for wrapper launches with an explicit run; plain `claude` in a Bench tab has task/tab only, and
@@ -32,12 +95,24 @@ pub struct HookReport {
     pub linked_task_run_id: Option<TaskRunId>,
     pub linked_task_id: Option<TaskId>,
     pub terminal_session_id: Option<String>,
+    pub terminal_tab_id: Option<String>,
+    pub agent_session_id: Option<AgentSessionId>,
     pub ignored: bool,
     pub task_found: bool,
     pub task_run_linked: bool,
     pub task_run_created: bool,
     pub event_recorded: bool,
     pub unsafe_task_run_id: bool,
+    /// How the run was chosen, and what each rule that declined gave as its reason (by the order in
+    /// [`RULE_NAMES`]).
+    pub resolved_by: HookResolveRoute,
+    pub resolve_skipped: [Option<ResolveSkip>; 3],
+    /// The run's status before this hook, the status the domain asked for, and the domain's reason
+    /// for asking for nothing. `requested_status` differing from `task_run_status` is the store's
+    /// atomic guard refusing a stale snapshot — the one refusal the domain cannot see.
+    pub from_status: Option<TaskRunStatus>,
+    pub requested_status: Option<TaskRunStatus>,
+    pub refused: Option<TransitionRefusal>,
 }
 
 impl HookReport {
@@ -51,13 +126,61 @@ impl HookReport {
             linked_task_run_id: None,
             linked_task_id: None,
             terminal_session_id: None,
+            terminal_tab_id: None,
+            agent_session_id: None,
             ignored: true,
             task_found: false,
             task_run_linked: false,
             task_run_created: false,
             event_recorded: false,
             unsafe_task_run_id,
+            resolved_by: HookResolveRoute::Unresolved,
+            resolve_skipped: [None; 3],
+            from_status: None,
+            requested_status: None,
+            refused: None,
         }
+    }
+
+    /// The whole hook as one `key=value` line. Built on demand rather than stored: the façade fills
+    /// in `event_name` for payloads the decoder dropped *after* this use case returns, and a line
+    /// frozen here would report those as having no event.
+    pub fn trace_line(&self) -> String {
+        fn opt(value: Option<&str>) -> &str {
+            value.unwrap_or("none")
+        }
+        let skipped = self
+            .resolve_skipped
+            .iter()
+            .enumerate()
+            .filter_map(|(i, skip)| skip.map(|skip| format!("{}:{skip}", RULE_NAMES[i])))
+            .collect::<Vec<_>>();
+        format!(
+            "hook task_id={} task_run_id={} agent_session_id={} tab_id={} session_id={} event={} \
+             resolved_by={} created={} skipped={} from={} requested={} to={} refused={} \
+             ignored={} task_found={} run_linked={} event_recorded={} unsafe_run_id={} \
+             wait_reason={} entered_waiting={}",
+            opt(self.linked_task_id.as_deref()),
+            opt(self.linked_task_run_id.as_deref()),
+            opt(self.agent_session_id.as_deref()),
+            opt(self.terminal_tab_id.as_deref()),
+            opt(self.terminal_session_id.as_deref()),
+            opt(self.event_name.as_deref()),
+            self.resolved_by.as_str(),
+            self.task_run_created,
+            if skipped.is_empty() { "none".to_string() } else { skipped.join(",") },
+            opt(self.from_status.map(TaskRunStatus::as_str)),
+            opt(self.requested_status.map(TaskRunStatus::as_str)),
+            opt(self.task_run_status.map(TaskRunStatus::as_str)),
+            opt(self.refused.map(TransitionRefusal::as_str)),
+            self.ignored,
+            self.task_found,
+            self.task_run_linked,
+            self.event_recorded,
+            self.unsafe_task_run_id,
+            opt(self.wait_reason.map(TaskRunWaitReason::as_str)),
+            self.entered_waiting_for_user,
+        )
     }
 }
 
@@ -112,7 +235,7 @@ where
 
     let event_label = signal.event_label.as_deref();
 
-    let resolved = resolve_hook_run(
+    let (resolved, trace) = resolve_hook_run(
         repos,
         RunLookup {
             task_id: ctx.task_id,
@@ -125,6 +248,9 @@ where
         },
     )?;
     let run_row = resolved.run;
+    if let Some(run) = run_row.as_ref().filter(|_| resolved.created) {
+        crate::observability::run_status(&run.id, &run.task_id, None, run.status, "hook_lazy_create");
+    }
     let task_run_linked = run_row.is_some();
     let linked_task_run_id = run_row.as_ref().map(|run| &run.id);
     let linked_task_id = run_row.as_ref().map(|run| &run.task_id).or(ctx.task_id);
@@ -207,6 +333,18 @@ where
         _ => None,
     };
     let task_run_status = landed.as_ref().map(|run| run.status);
+    let from_status = run_row.as_ref().map(|run| run.status);
+    if let (Some(run), Some(to)) = (landed.as_ref(), task_run_status) {
+        if from_status != Some(to) {
+            crate::observability::run_status(
+                &run.id,
+                &run.task_id,
+                from_status,
+                to,
+                &format!("hook:{}", event_label.unwrap_or("unknown")),
+            );
+        }
+    }
     let task_run_entered_waiting = task_run_status == Some(TaskRunStatus::WaitingForUser)
         && !run_row
             .as_ref()
@@ -231,15 +369,23 @@ where
         linked_task_run_id: linked_task_run_id.cloned(),
         linked_task_id: linked_task_id.cloned(),
         terminal_session_id: ctx.terminal_session_id.map(str::to_string),
+        terminal_tab_id: ctx.terminal_tab_id.map(str::to_string),
+        agent_session_id: agent_session_id.cloned(),
         ignored: false,
         task_found,
         task_run_linked,
         task_run_created: resolved.created,
         event_recorded,
         unsafe_task_run_id,
+        resolved_by: trace.route,
+        resolve_skipped: trace.skipped,
+        from_status,
+        requested_status: transition.map(|t| t.status),
+        refused: plan.and_then(|p| p.refused),
     })
 }
 
+#[derive(Debug)]
 pub(in crate::usecases) struct ResolvedRun {
     pub(in crate::usecases) run: Option<TaskRun>,
     pub(in crate::usecases) created: bool,
@@ -251,7 +397,17 @@ impl ResolvedRun {
     }
 }
 
-type ResolveRule<R> = fn(&RunResolveCtx, &mut R) -> ApplicationResult<Option<ResolvedRun>>;
+/// A rule either takes the hook or names why it passed. `Result` rather than a local enum on
+/// purpose: a local one holding a `TaskRun` trips `clippy::large_enum_variant`.
+pub(in crate::usecases) type Resolution = Result<ResolvedRun, ResolveSkip>;
+
+/// Which rule bound the run, plus the reason from each rule that declined before it.
+pub(in crate::usecases) struct ResolveTrace {
+    route: HookResolveRoute,
+    skipped: [Option<ResolveSkip>; 3],
+}
+
+type ResolveRule<R> = fn(&RunResolveCtx, &mut R) -> ApplicationResult<Resolution>;
 
 pub(in crate::usecases) struct RunResolveCtx<'a> {
     pub(in crate::usecases) task_id: &'a TaskId,
@@ -301,7 +457,10 @@ struct RunLookup<'a> {
 /// attached tab keeps driving the same run (reviving it from `Stopped` if need be), where a task
 /// tab would have lazily created a new one — the attachment is a property of the tab, not of the
 /// session inside it.
-fn resolve_hook_run<R>(repos: &mut R, lookup: RunLookup<'_>) -> ApplicationResult<ResolvedRun>
+fn resolve_hook_run<R>(
+    repos: &mut R,
+    lookup: RunLookup<'_>,
+) -> ApplicationResult<(ResolvedRun, ResolveTrace)>
 where
     R: TaskStore + TaskRunStore,
 {
@@ -314,18 +473,25 @@ where
         starts_session,
         agent,
     } = lookup;
+    let took = |run, route| {
+        Ok((
+            ResolvedRun::linked(run),
+            ResolveTrace { route, skipped: [None; 3] },
+        ))
+    };
 
     if let Some(run_id) = explicit_run_id {
-        return Ok(ResolvedRun::linked(repos.get_task_run(run_id)?));
+        return took(repos.get_task_run(run_id)?, HookResolveRoute::ExplicitRunId);
     }
     let Some(task_id) = task_id else {
-        return Ok(ResolvedRun::linked(match terminal_tab_id {
+        let run = match terminal_tab_id {
             Some(tab_id) => repos.find_task_run_by_terminal_tab(tab_id)?,
             None => None,
-        }));
+        };
+        return took(run, HookResolveRoute::TabBinding);
     };
     let Some(task) = repos.get_task(task_id)? else {
-        return Ok(ResolvedRun::linked(None));
+        return took(None, HookResolveRoute::TaskMissing);
     };
 
     let primary_run = match task.primary_task_run_id.as_ref() {
@@ -348,47 +514,60 @@ where
         resolve_by_prepared_primary,
         resolve_by_lazy_create,
     ];
-    for rule in &rules {
-        if let Some(resolved) = rule(&ctx, repos)? {
-            return Ok(resolved);
+    let routes = [
+        HookResolveRoute::BySession,
+        HookResolveRoute::ByPreparedPrimary,
+        HookResolveRoute::ByLazyCreate,
+    ];
+    let mut skipped = [None; 3];
+    for (i, rule) in rules.iter().enumerate() {
+        match rule(&ctx, repos)? {
+            Ok(resolved) => return Ok((resolved, ResolveTrace { route: routes[i], skipped })),
+            Err(skip) => skipped[i] = Some(skip),
         }
     }
-    Ok(ResolvedRun::linked(None))
+    Ok((
+        ResolvedRun::linked(None),
+        ResolveTrace { route: HookResolveRoute::Unresolved, skipped },
+    ))
 }
 
 pub(in crate::usecases) fn resolve_by_session<R>(
     ctx: &RunResolveCtx,
     repos: &mut R,
-) -> ApplicationResult<Option<ResolvedRun>>
+) -> ApplicationResult<Resolution>
 where
     R: TaskStore + TaskRunStore,
 {
     let Some(session_id) = ctx.agent_session_id else {
-        return Ok(None);
+        return Ok(Err(ResolveSkip::NoSessionId));
     };
     match repos.find_task_run_by_session(ctx.task_id, session_id)? {
-        Some(run) => Ok(Some(ResolvedRun::linked(Some(run)))),
-        None => Ok(None),
+        Some(run) => Ok(Ok(ResolvedRun::linked(Some(run)))),
+        None => Ok(Err(ResolveSkip::NoRunForSession)),
     }
 }
 
 pub(in crate::usecases) fn resolve_by_prepared_primary<R>(
     ctx: &RunResolveCtx,
     repos: &mut R,
-) -> ApplicationResult<Option<ResolvedRun>>
+) -> ApplicationResult<Resolution>
 where
     R: TaskStore + TaskRunStore,
 {
     let Some(run) = ctx.primary_run else {
-        return Ok(None);
+        return Ok(Err(ResolveSkip::NoPrimaryRun));
     };
-    if run.status != TaskRunStatus::Prepared || !ctx.starts_session {
-        return Ok(None);
+    if run.status != TaskRunStatus::Prepared {
+        return Ok(Err(ResolveSkip::PrimaryNotPrepared(run.status)));
+    }
+    if !ctx.starts_session {
+        return Ok(Err(ResolveSkip::NotSessionStarting));
     }
     // No session id to stamp (e.g. the Run-button flow before its first hook): nothing to claim
     // and nothing another session could clobber, so keep the snapshot behavior.
     let Some(session_id) = ctx.agent_session_id else {
-        return Ok(Some(ResolvedRun::linked(Some(run.clone()))));
+        return Ok(Ok(ResolvedRun::linked(Some(run.clone()))));
     };
     // Atomic claim: only the start whose guarded UPDATE lands keeps the prepared run. A loser
     // changes 0 rows and falls through to lazy-create as a side run.
@@ -397,25 +576,30 @@ where
         // (avoiding a re-read) so the observation that follows sees the claimed session.
         let mut claimed = run.clone();
         claimed.agent_session_id = Some(session_id.clone());
-        Ok(Some(ResolvedRun::linked(Some(claimed))))
+        Ok(Ok(ResolvedRun::linked(Some(claimed))))
     } else {
-        Ok(None)
+        Ok(Err(ResolveSkip::ClaimLost))
     }
 }
 
 pub(in crate::usecases) fn resolve_by_lazy_create<R>(
     ctx: &RunResolveCtx,
     repos: &mut R,
-) -> ApplicationResult<Option<ResolvedRun>>
+) -> ApplicationResult<Resolution>
 where
     R: TaskStore + TaskRunStore,
 {
-    if ctx.agent_session_id.is_none()
-        || !ctx.starts_session
-        || ctx.explicit_run_id_rejected
-        || ctx.task.status == TaskStatus::Closed
-    {
-        return Ok(None);
+    if ctx.agent_session_id.is_none() {
+        return Ok(Err(ResolveSkip::NoSessionId));
+    }
+    if !ctx.starts_session {
+        return Ok(Err(ResolveSkip::NotSessionStarting));
+    }
+    if ctx.explicit_run_id_rejected {
+        return Ok(Err(ResolveSkip::ExplicitRunIdRejected));
+    }
+    if ctx.task.status == TaskStatus::Closed {
+        return Ok(Err(ResolveSkip::TaskClosed));
     }
 
     // `make_primary_if_missing` is true exactly when no usable primary exists — including a dangling
@@ -429,8 +613,117 @@ where
         },
         ctx.primary_run.is_none(),
     )?;
-    Ok(Some(ResolvedRun {
+    Ok(Ok(ResolvedRun {
         run: Some(run),
         created: true,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A hook that resolved nothing and changed nothing still prints every key, so a grep for one
+    /// field never silently misses the lines where it is absent.
+    #[test]
+    fn a_hook_that_resolved_nothing_still_names_every_field() {
+        assert_eq!(
+            HookReport::ignored(false).trace_line(),
+            "hook task_id=none task_run_id=none agent_session_id=none tab_id=none session_id=none \
+             event=none resolved_by=none created=false skipped=none from=none requested=none \
+             to=none refused=none ignored=true task_found=false run_linked=false \
+             event_recorded=false unsafe_run_id=false wait_reason=none entered_waiting=false"
+        );
+    }
+
+    fn resolved_report() -> HookReport {
+        HookReport {
+            event_name: Some("Stop".to_string()),
+            task_run_status: Some(TaskRunStatus::WaitingForUser),
+            entered_waiting_for_user: true,
+            wait_reason: Some(TaskRunWaitReason::AwaitingPrompt),
+            task_title: None,
+            linked_task_run_id: Some(TaskRunId::from_store("run-12".to_string())),
+            linked_task_id: Some(TaskId::from_store("MON-42".to_string())),
+            terminal_session_id: Some("ts-1".to_string()),
+            terminal_tab_id: Some("tab-1".to_string()),
+            agent_session_id: Some(AgentSessionId::from_agent("sess-1")),
+            ignored: false,
+            task_found: true,
+            task_run_linked: true,
+            task_run_created: false,
+            event_recorded: true,
+            unsafe_task_run_id: false,
+            resolved_by: HookResolveRoute::ByPreparedPrimary,
+            resolve_skipped: [Some(ResolveSkip::NoRunForSession), None, None],
+            from_status: Some(TaskRunStatus::Running),
+            requested_status: Some(TaskRunStatus::WaitingForUser),
+            refused: None,
+        }
+    }
+
+    #[test]
+    fn a_resolved_hook_names_the_rule_that_took_it_and_the_one_that_passed() {
+        assert_eq!(
+            resolved_report().trace_line(),
+            "hook task_id=MON-42 task_run_id=run-12 agent_session_id=sess-1 tab_id=tab-1 \
+             session_id=ts-1 event=Stop resolved_by=prepared_primary created=false \
+             skipped=session:no_run_for_session from=running requested=waiting_for_user \
+             to=waiting_for_user refused=none ignored=false task_found=true run_linked=true \
+             event_recorded=true unsafe_run_id=false wait_reason=awaiting_prompt \
+             entered_waiting=true"
+        );
+    }
+
+    /// The domain refused the transition, so nothing was asked of the store and nothing landed.
+    #[test]
+    fn a_refused_hook_names_the_rule_that_refused_it() {
+        let report = HookReport {
+            task_run_status: None,
+            requested_status: None,
+            refused: Some(TransitionRefusal::StoppedStaysStopped),
+            entered_waiting_for_user: false,
+            wait_reason: None,
+            resolve_skipped: [None; 3],
+            resolved_by: HookResolveRoute::BySession,
+            from_status: Some(TaskRunStatus::Stopped),
+            ..resolved_report()
+        };
+        assert!(report
+            .trace_line()
+            .contains("from=stopped requested=none to=none refused=stopped_stays_stopped"));
+    }
+
+    /// The domain asked for a transition the store's own guard then refused — the one refusal the
+    /// domain cannot see, readable only as `requested` differing from `to`.
+    #[test]
+    fn a_hook_the_store_guard_refused_shows_requested_apart_from_landed() {
+        let report = HookReport {
+            requested_status: Some(TaskRunStatus::Running),
+            task_run_status: Some(TaskRunStatus::Stopped),
+            refused: None,
+            ..resolved_report()
+        };
+        assert!(report
+            .trace_line()
+            .contains("requested=running to=stopped refused=none"));
+    }
+
+    /// Every rule declined, so all three reasons are named in evaluation order.
+    #[test]
+    fn an_unresolved_hook_names_all_three_reasons() {
+        let report = HookReport {
+            resolved_by: HookResolveRoute::Unresolved,
+            resolve_skipped: [
+                Some(ResolveSkip::NoRunForSession),
+                Some(ResolveSkip::PrimaryNotPrepared(TaskRunStatus::Running)),
+                Some(ResolveSkip::TaskClosed),
+            ],
+            ..resolved_report()
+        };
+        assert!(report.trace_line().contains(
+            "resolved_by=none created=false skipped=session:no_run_for_session,\
+             prepared_primary:primary_not_prepared(running),lazy_create:task_closed"
+        ));
+    }
 }

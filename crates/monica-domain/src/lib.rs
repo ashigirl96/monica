@@ -27,7 +27,7 @@ mod terminal_session;
 
 pub use agent_signal::{
     transition_is_generic_wait, AgentSignal, Continuation, HookTransition, RunObservationPlan,
-    SignalKind,
+    SignalKind, TransitionRefusal,
 };
 pub use branch::{branch_name, monica_number, worktree_path_for};
 pub use error::DomainError;
