@@ -3,7 +3,8 @@ use super::support::*;
 use crate::bench::bench_runspace_id;
 use crate::{PendingLaunchStore, RunTaskResult};
 use crate::usecases::tasks::{
-    attach_terminal_session_to_task, list_tab_task_bindings, MakeMainOutcome, TabTaskBinding,
+    attach_terminal_session_to_task, list_tab_task_bindings, resolve_current_task,
+    CurrentTaskSource, MakeMainOutcome, TabIdentity, TabTaskBinding,
 };
 use monica_domain::{AgentSessionId, RunspaceId};
 
@@ -694,4 +695,141 @@ fn attach_records_the_agent_it_was_given() {
         repos.get_task_run(&report.task_run_id).unwrap().unwrap().agent,
         Some(Agent::Claude)
     );
+}
+
+fn tab_identity(task: Option<&str>, tab: Option<&str>, session: Option<&str>) -> TabIdentity {
+    TabIdentity {
+        task_id: task.map(str::to_string),
+        terminal_tab_id: tab.map(str::to_string),
+        terminal_session_id: session.map(str::to_string),
+    }
+}
+
+#[test]
+fn current_task_answers_a_task_tab_from_its_env() {
+    let mut repos = FakeRepos::default();
+    let (task_id, run_id) = task_with_running_primary(&mut repos);
+
+    let report =
+        resolve_current_task(&repos, &tab_identity(Some(task_id.as_str()), None, None)).unwrap();
+
+    assert_eq!(report.task_id, task_id.as_str());
+    assert_eq!(report.source, CurrentTaskSource::Env);
+    // No tab id to look up, so the task's Main Run answers for it.
+    assert_eq!(report.task_run_id.as_deref(), Some(run_id.as_str()));
+    assert_eq!(report.task_run_status, Some(TaskRunStatus::Running));
+}
+
+/// The case `monica task attach` exists for: the shell is already running, so it never gains
+/// `MONICA_TASK_ID` and only the tab -> run binding can name its task.
+#[test]
+fn current_task_resolves_an_attached_raw_tab_through_its_binding() {
+    let mut repos = FakeRepos::default();
+    let task_id = insert_issue_backed_task(&mut repos, 519);
+    let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
+    let attached =
+        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id, "/repo")
+            .unwrap();
+
+    let report =
+        resolve_current_task(&repos, &tab_identity(None, Some("tab-1"), Some(&session_id))).unwrap();
+
+    assert_eq!(report.task_id, task_id.as_str());
+    assert_eq!(report.source, CurrentTaskSource::Tab);
+    assert_eq!(report.task_run_id.as_deref(), Some(attached.task_run_id.as_str()));
+    assert_eq!(report.task_run_status, Some(TaskRunStatus::Running));
+    assert_eq!(report.project.as_deref(), Some("owner/repo"));
+    assert_eq!(report.github_issue_number, Some(519));
+}
+
+/// A tab whose session carries no `MONICA_TERMINAL_TAB_ID` of its own still resolves: the session
+/// row knows which tab owns it.
+#[test]
+fn current_task_falls_back_to_the_tab_owning_the_session() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
+    attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id, "/repo")
+        .unwrap();
+
+    let report = resolve_current_task(&repos, &tab_identity(None, None, Some(&session_id))).unwrap();
+
+    assert_eq!(report.task_id, task_id.as_str());
+    assert_eq!(report.source, CurrentTaskSource::Tab);
+}
+
+#[test]
+fn current_task_reports_an_unbound_tab_as_not_found() {
+    let mut repos = FakeRepos::default();
+    let session_id = raw_tab_session(&mut repos, "tab-1", None);
+
+    let err = resolve_current_task(&repos, &tab_identity(None, Some("tab-1"), Some(&session_id)))
+        .unwrap_err();
+
+    assert!(matches!(err, ApplicationError::NotFound(_)), "{err:?}");
+    assert_eq!(err.to_string(), "no task is bound to this tab");
+}
+
+#[test]
+fn current_task_refuses_a_shell_outside_a_monica_tab() {
+    let repos = FakeRepos::default();
+
+    let err = resolve_current_task(&repos, &tab_identity(None, None, None)).unwrap_err();
+
+    assert!(matches!(err, ApplicationError::Validation(_)), "{err:?}");
+    assert!(err.to_string().contains("no Monica terminal tab detected"), "{err}");
+}
+
+/// Closing a task does not unbind the tabs that were working on it, so the tab must still be able
+/// to say what it was on — the board projection is read with the Closed archive included.
+#[test]
+fn current_task_still_resolves_a_tab_bound_to_a_closed_task() {
+    let mut repos = FakeRepos::default();
+    let task_id = repos.insert_task_for_run(None);
+    let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
+    attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id, "/repo")
+        .unwrap();
+    repos.mark_task_closed(&task_id).unwrap();
+
+    let report = resolve_current_task(&repos, &tab_identity(None, Some("tab-1"), None)).unwrap();
+
+    assert_eq!(report.task_id, task_id.as_str());
+    assert_eq!(report.task_status, TaskStatus::Closed);
+}
+
+/// `status` is the board's view of the task (Main Run based) while `task_run_*` describe this
+/// tab's own run. They diverge whenever attach left a mid-prepare primary in place, and reporting
+/// the board's run id next to the board's status would name a run this tab does not drive.
+#[test]
+fn current_task_reports_this_tabs_run_even_when_another_run_is_main() {
+    let mut repos = FakeRepos::default();
+    let (task_id, prepared_primary) = task_with_prepared_primary(&mut repos);
+    let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-1"));
+    let attached =
+        attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id, "/repo")
+            .unwrap();
+    assert_eq!(attached.kept_primary_run_id, Some(prepared_primary));
+
+    let report = resolve_current_task(&repos, &tab_identity(None, Some("tab-1"), None)).unwrap();
+
+    assert_eq!(report.task_run_id.as_deref(), Some(attached.task_run_id.as_str()));
+    assert_eq!(report.task_run_status, Some(TaskRunStatus::Running));
+}
+
+/// An env inherited from another tab's shell would otherwise hand this task another task's run.
+#[test]
+fn current_task_ignores_a_tab_run_belonging_to_another_task() {
+    let mut repos = FakeRepos::default();
+    let (env_task, env_primary) = task_with_running_primary(&mut repos);
+    let other_task = repos.insert_task_for_run(None);
+    let session_id = raw_tab_session(&mut repos, "tab-1", Some("sess-2"));
+    attach_terminal_session_to_task(&mut repos, &other_task, Agent::Claude, "tab-1", &session_id, "/repo")
+        .unwrap();
+
+    let report =
+        resolve_current_task(&repos, &tab_identity(Some(env_task.as_str()), Some("tab-1"), None))
+            .unwrap();
+
+    assert_eq!(report.task_id, env_task.as_str());
+    assert_eq!(report.task_run_id.as_deref(), Some(env_primary.as_str()));
 }

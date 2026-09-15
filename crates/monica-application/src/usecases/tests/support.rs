@@ -202,19 +202,24 @@ impl FakeRepos {
     /// Override the stored snapshot with the cached issue title, mirroring the store's COALESCE.
     fn resolve_title(&self, mut task: Task) -> Task {
         let state = self.state.borrow();
-        let cached = state
-            .refs
-            .get(task.id.as_str())
-            .and_then(|refs| {
-                refs.iter()
-                    .filter(|r| r.ref_type == RefType::Issue)
-                    .max_by_key(|r| r.id)
-            })
+        let cached = self
+            .latest_issue_ref(&state, task.id.as_str())
             .and_then(|r| state.issue_ref_states.get(&r.id));
         if let Some((title, _)) = cached {
             task.title = title.clone();
         }
         task
+    }
+
+    /// The issue ref the board joins on, mirroring the store's "latest issue ref wins".
+    fn latest_issue_ref(&self, state: &FakeState, task_id: &str) -> Option<ExternalReference> {
+        state
+            .refs
+            .get(task_id)?
+            .iter()
+            .filter(|r| r.ref_type == RefType::Issue)
+            .max_by_key(|r| r.id)
+            .cloned()
     }
 
     pub(crate) fn insert_task_for_run(&mut self, project_id: Option<String>) -> TaskId {
@@ -414,13 +419,14 @@ impl TaskBoardQuery for FakeRepos {
             .map(|task| {
                 let display = DisplayStatus::from_task_and_run(task.status, None);
                 let resolved = self.resolve_title(task.clone());
+                let issue_ref = self.latest_issue_ref(&self.state.borrow(), task.id.as_str());
                 TaskSummaryRow {
                     id: task.id.to_string(),
                     parent_task_id: task.parent_task_id.as_ref().map(|p| p.to_string()),
                     title: resolved.title,
                     project: task.project_id.clone(),
-                    github_issue_number: None,
-                    github_issue_url: None,
+                    github_issue_number: issue_ref.as_ref().and_then(|r| r.number),
+                    github_issue_url: issue_ref.as_ref().and_then(|r| r.url.clone()),
                     github_issue_state: None,
                     github_pull_requests: Vec::<GithubPullRequestRef>::new(),
                     blockers: Vec::new(),

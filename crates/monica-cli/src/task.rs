@@ -3,9 +3,9 @@ use std::io::{self, Write};
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_application::{
-    parse_issue_input, parse_pull_request_input, AttachSessionReport, GithubIssueState,
-    GithubPullRequestStatus, GithubSyncReport, IssueBlocker, RunTaskResult, TaskSummaryRow,
-    TaskSyncChange, TrackOutcome,
+    parse_issue_input, parse_pull_request_input, AttachSessionReport, CurrentTaskReport,
+    GithubIssueState, GithubPullRequestStatus, GithubSyncReport, IssueBlocker, RunTaskResult,
+    TabIdentity, TaskSummaryRow, TaskSyncChange, TrackOutcome,
 };
 use monica_domain::{parse_owner_repo, Agent, DisplayStatus, RunMode, TaskId};
 
@@ -49,6 +49,12 @@ pub enum TaskCommand {
         /// MON-<id>
         id: String,
     },
+    /// Show the task this terminal tab is working on
+    Current {
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Close a tracked Monica task (MON-<id>)
     Close {
         /// MON-<id>
@@ -71,6 +77,7 @@ pub async fn run(cmd: TaskCommand) -> Result<()> {
             run_command(&mut monica, &id, in_place, force).await
         }
         TaskCommand::Attach { id } => attach_command(&mut monica, &id),
+        TaskCommand::Current { json } => current_command(&mut monica, json),
         TaskCommand::Close { id } => close_command(&mut monica, &id),
         TaskCommand::Sync { id } => sync_command(&mut monica, id.as_deref()).await,
     }
@@ -299,47 +306,23 @@ fn render_run_report(launch: &RunTaskResult) -> String {
     )
 }
 
-/// The `MONICA_*` identity a tab burns into its shell env, as `attach` needs it.
-#[derive(Debug, PartialEq, Eq)]
-struct AttachEnv {
-    terminal_tab_id: String,
-    terminal_session_id: String,
-}
-
-/// Validate the ambient tab identity before attaching. A tab carrying `MONICA_TASK_ID` is already
-/// bound to that task and its hooks resolve through the task-scoped rules, so a run attached here
-/// would never receive one — refuse instead of leaving a silently dead binding behind.
-fn attach_env_from(
-    task_id: Option<&str>,
-    tab_id: Option<&str>,
-    session_id: Option<&str>,
-) -> Result<AttachEnv> {
-    if let Some(task_id) = task_id {
-        return Err(anyhow!(
-            "this tab is already bound to task {task_id}; attach is for tabs started outside a task"
-        ));
-    }
-    let (Some(terminal_tab_id), Some(terminal_session_id)) = (tab_id, session_id) else {
-        return Err(anyhow!(
-            "no Monica terminal tab detected; run this inside a Monica terminal tab"
-        ));
-    };
-    Ok(AttachEnv {
-        terminal_tab_id: terminal_tab_id.to_string(),
-        terminal_session_id: terminal_session_id.to_string(),
-    })
-}
-
 fn env_opt(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.is_empty())
 }
 
+/// The `MONICA_*` identity this shell was started with. The acceptance rules live in
+/// `TabIdentity`, so `attach` and `current` agree on what counts as a Monica tab.
+fn tab_identity() -> TabIdentity {
+    TabIdentity {
+        task_id: env_opt("MONICA_TASK_ID"),
+        terminal_tab_id: env_opt("MONICA_TERMINAL_TAB_ID"),
+        terminal_session_id: env_opt("MONICA_TERMINAL_SESSION_ID"),
+    }
+}
+
 fn attach_command(monica: &mut CliFacade, id: &str) -> Result<()> {
-    let env = attach_env_from(
-        env_opt("MONICA_TASK_ID").as_deref(),
-        env_opt("MONICA_TERMINAL_TAB_ID").as_deref(),
-        env_opt("MONICA_TERMINAL_SESSION_ID").as_deref(),
-    )?;
+    let identity = tab_identity();
+    let (terminal_tab_id, terminal_session_id) = identity.attach_target()?;
     let task_id = TaskId::parse(id)?;
     // The shell's current directory, not the session's spawn directory: the user may have `cd`ed
     // since, and the bench should open where they actually are.
@@ -350,12 +333,41 @@ fn attach_command(monica: &mut CliFacade, id: &str) -> Result<()> {
     let report = monica.tasks().attach_terminal_session(
         &task_id,
         Agent::Claude,
-        &env.terminal_tab_id,
-        &env.terminal_session_id,
+        terminal_tab_id,
+        terminal_session_id,
         &cwd,
     )?;
     print!("{}", render_attach_report(&report));
     Ok(())
+}
+
+fn current_command(monica: &mut CliFacade, json: bool) -> Result<()> {
+    let report = monica.tasks().current_task(&tab_identity())?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+    print!("{}", render_current_report(&report));
+    Ok(())
+}
+
+fn render_current_report(report: &CurrentTaskReport) -> String {
+    let issue = report.github_issue_number.map(|number| format!("#{number}"));
+    let run = report.task_run_id.as_ref().map(|id| {
+        let status = report
+            .task_run_status
+            .map(|status| status.as_str())
+            .unwrap_or("-");
+        format!("{id} ({status})")
+    });
+    let mut out = format!("{}\n", report.task_id);
+    out.push_str(&format!("  Title:   {}\n", report.title));
+    out.push_str(&format!("  Project: {}\n", or_dash(report.project.as_deref())));
+    out.push_str(&format!("  Issue:   {}\n", or_dash(issue.as_deref())));
+    out.push_str(&format!("  Status:  {}\n", report.status.as_str()));
+    out.push_str(&format!("  Run:     {}\n", or_dash(run.as_deref())));
+    out.push_str(&format!("  Source:  {}\n", report.source.as_str()));
+    out
 }
 
 fn render_attach_report(report: &AttachSessionReport) -> String {
@@ -482,37 +494,53 @@ fn render_blockers(blockers: &[IssueBlocker]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use monica_application::TaskSyncChanges;
+    use monica_application::{CurrentTaskSource, TaskSyncChanges};
     use monica_domain::TaskStatus;
 
     #[test]
-    fn attach_env_reads_the_tab_identity_from_a_task_less_tab() {
+    fn render_current_report_lays_out_the_fields_a_skill_reads() {
+        let rendered = render_current_report(&CurrentTaskReport {
+            task_id: "MON-42".to_string(),
+            title: "orchestration session".to_string(),
+            project: Some("ashigirl96/monica".to_string()),
+            github_issue_number: Some(519),
+            github_issue_url: None,
+            task_status: TaskStatus::InProgress,
+            status: DisplayStatus::Running,
+            task_run_id: Some("run-73".to_string()),
+            task_run_status: Some(monica_domain::TaskRunStatus::Running),
+            source: CurrentTaskSource::Tab,
+        });
         assert_eq!(
-            attach_env_from(None, Some("tab-1"), Some("ts-9")).unwrap(),
-            AttachEnv {
-                terminal_tab_id: "tab-1".to_string(),
-                terminal_session_id: "ts-9".to_string(),
-            }
+            rendered,
+            "MON-42\n\
+             \x20 Title:   orchestration session\n\
+             \x20 Project: ashigirl96/monica\n\
+             \x20 Issue:   #519\n\
+             \x20 Status:  running\n\
+             \x20 Run:     run-73 (running)\n\
+             \x20 Source:  tab\n"
         );
     }
 
     #[test]
-    fn attach_env_refuses_a_tab_already_bound_to_a_task() {
-        // Such a tab's hooks resolve through the task-scoped rules and would never reach a run
-        // attached here, so the binding would be silently dead.
-        let err = attach_env_from(Some("MON-7"), Some("tab-1"), Some("ts-9")).unwrap_err();
-        assert!(err.to_string().contains("MON-7"), "{err}");
-    }
-
-    #[test]
-    fn attach_env_refuses_a_shell_outside_a_monica_tab() {
-        for (tab, session) in [(None, Some("ts-9")), (Some("tab-1"), None), (None, None)] {
-            let err = attach_env_from(None, tab, session).unwrap_err();
-            assert!(
-                err.to_string().contains("Monica terminal tab"),
-                "{err} (tab={tab:?}, session={session:?})"
-            );
-        }
+    fn render_current_report_dashes_a_task_with_no_issue_project_or_run() {
+        let rendered = render_current_report(&CurrentTaskReport {
+            task_id: "MON-7".to_string(),
+            title: "raw task".to_string(),
+            project: None,
+            github_issue_number: None,
+            github_issue_url: None,
+            task_status: TaskStatus::Ready,
+            status: DisplayStatus::Ready,
+            task_run_id: None,
+            task_run_status: None,
+            source: CurrentTaskSource::Env,
+        });
+        assert!(rendered.contains("  Project: -\n"), "{rendered}");
+        assert!(rendered.contains("  Issue:   -\n"), "{rendered}");
+        assert!(rendered.contains("  Run:     -\n"), "{rendered}");
+        assert!(rendered.contains("  Source:  env\n"), "{rendered}");
     }
 
     #[test]

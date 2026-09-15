@@ -36,6 +36,22 @@ where
     Ok(repos.list_task_summaries(filter, project)?)
 }
 
+/// The board projection for a single task, Closed archive included. The port exposes only the list
+/// projection, and the board is small enough to filter here rather than have every store grow a
+/// per-task query.
+pub(crate) fn find_task_summary<R>(
+    repos: &R,
+    task_id: &TaskId,
+) -> ApplicationResult<Option<TaskSummaryRow>>
+where
+    R: TaskBoardQuery,
+{
+    Ok(repos
+        .list_task_summaries(TaskSummaryFilter::All, None)?
+        .into_iter()
+        .find(|row| row.id == task_id.as_str()))
+}
+
 pub fn list_projects<R>(repos: &R) -> ApplicationResult<Vec<Project>>
 where
     R: ProjectRepository,
