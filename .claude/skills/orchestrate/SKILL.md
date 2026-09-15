@@ -67,11 +67,11 @@ PR 本文の Verification の見出しは固定で、`## マージ前の確認` 
 
 minimize されていないコメントのうち、先頭行が `<!-- epic-worker: #<sub-issue> -->` のものが Worker の書き戻し。コメント内の見出しごとに本文へ移す。
 
-| コメントの見出し | 本文の節 | 書き方 |
-|---|---|---|
-| `### Discovery` | `## Discovery` | 1 行ずつ末尾に追記し、末尾に `（#<sub-issue>）` を付ける |
-| `### Human Action` | `## Human Action` | `- [ ] <内容> — Gate: <…> — 結果:` の形で追記 |
-| `### 依存` | `## Merge Gate` | `merge-after-released` の行だけ追記。この種類に blocked-by の辺は張らない（start gate が着手を止めてしまう）。`start-after-merged` の行は本文に書かず、辺が無ければ `gh issue edit --add-blocked-by` で張る |
+| コメントの見出し   | 本文の節          | 書き方                                                                                                                                                                                                      |
+| ------------------ | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `### Discovery`    | `## Discovery`    | 1 行ずつ末尾に追記し、末尾に `（#<sub-issue>）` を付ける                                                                                                                                                    |
+| `### Human Action` | `## Human Action` | `- [ ] <内容> — Gate: <…> — 結果:` の形で追記                                                                                                                                                               |
+| `### 依存`         | `## Merge Gate`   | `merge-after-released` の行だけ追記。この種類に blocked-by の辺は張らない（start gate が着手を止めてしまう）。`start-after-merged` の行は本文に書かず、辺が無ければ `gh issue edit --add-blocked-by` で張る |
 
 本文に既に同じ項目がある行は追記しない。minimize に失敗した Tick や途中で止まった Tick を次の Tick がやり直すと、同じコメントをもう一度読むため、照合しないと Brief が二重に増える。Discovery は末尾の `（#<sub-issue>）` 込みの文面で、Human Action と Merge Gate は内容で照合する。
 
@@ -94,17 +94,17 @@ minimize はここでは行わない。本文への書き込みが成功して�
 
 sub-issue ごとに状態を 1 つ決める。上から順に最初に当たったもの。
 
-| 状態 | 条件 |
-|---|---|
-| done | issue closed、かつ merged PR の post-merge 項目が全てチェック済み。PR が無い、または merge されずに閉じた issue は closed だけで done |
-| Released | PR merged、かつ Released の判定を満たす |
-| merged | PR merged |
-| PR draft（merge gate 待ち） | PR open かつ draft かつ `merge-gate` ラベル |
-| PR open | PR open |
-| 着手中 | Monica に生きている Run がある（STATUS 列が `setting_up` / `prepared` / `running` / `waiting_for_user`） |
-| Human Action 待ち | `## Human Action` に「#N 着手前」の Gate で未チェックの項目がある |
-| blocked | blockedBy の上流のうち、「closed」でも「閉じる PR が merged で `stateReason` が `REOPENED` でない」でもないものがある。Monica の start gate と同じ規則 |
-| 着手可 | 上のどれにも当たらない open な sub-issue |
+| 状態                        | 条件                                                                                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| done                        | issue closed、かつ merged PR の post-merge 項目が全てチェック済み。PR が無い、または merge されずに閉じた issue は closed だけで done                  |
+| Released                    | PR merged、かつ Released の判定を満たす                                                                                                                |
+| merged                      | PR merged                                                                                                                                              |
+| PR draft（merge gate 待ち） | PR open かつ draft かつ `merge-gate` ラベル                                                                                                            |
+| PR open                     | PR open                                                                                                                                                |
+| 着手中                      | Monica に生きている Run がある（STATUS 列が `setting_up` / `prepared` / `running` / `waiting_for_user`）                                               |
+| Human Action 待ち           | `## Human Action` に「#N 着手前」の Gate で未チェックの項目がある                                                                                      |
+| blocked                     | blockedBy の上流のうち、「closed」でも「閉じる PR が merged で `stateReason` が `REOPENED` でない」でもないものがある。Monica の start gate と同じ規則 |
+| 着手可                      | 上のどれにも当たらない open な sub-issue                                                                                                               |
 
 **Frontier** は「着手可」の集合。
 
@@ -149,13 +149,13 @@ Worker 生存: MON-42（#B）Running
 
 ### 9. 指示されたものを実行し、報告して終わる
 
-| 指示 | 実行 |
-|---|---|
-| 起動 | `MONICA_HOME=$HOME/monica monica task run MON-n`、続けて `gh issue edit <sub-issue> --add-assignee @me`。Task が無ければ先に `monica task track`（track が対象 Task を sync する）。`task run` は直前に sync して start gate を通すので、`is blocked by` で拒否されたら assignee は立てず「拒否された（理由）」で報告する。`--force` はあなたの明示指示があるときだけ |
-| merge gate の解除 | `gh pr ready <pr>`、`gh pr edit <pr> --remove-label merge-gate` |
-| Verification の実行 | `条件:` に従い、repo の skill と CLAUDE.md にある手段で確認し、PR 本文の該当チェックボックスを `[x]` にする。本番に対する読み取り以外の操作は、実行前にコマンド全文を示して許可を得る |
-| 追加の分解 | 手順 P の P2〜P4 を、その項目だけに対して行う |
-| close | `printf 'y\n' \| MONICA_HOME=$HOME/monica monica task close MON-n`。`task close` は stdin で `[y/N]` を聞き、非対話では `Canceled.` を出して exit 0 で終わるので、`y` を流して出力に `Closed task` があることを確認する。epic なら `gh issue close <epic>` の後に自分の Task を close |
+| 指示                | 実行                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 起動                | `MONICA_HOME=$HOME/monica monica task run MON-n`、続けて `gh issue edit <sub-issue> --add-assignee @me`。Task が無ければ先に `monica task track`（track が対象 Task を sync する）。`task run` は直前に sync して start gate を通すので、`is blocked by` で拒否されたら assignee は立てず「拒否された（理由）」で報告する。`--force` はあなたの明示指示があるときだけ |
+| merge gate の解除   | `gh pr ready <pr>`、`gh pr edit <pr> --remove-label merge-gate`                                                                                                                                                                                                                                                                                                       |
+| Verification の実行 | `条件:` に従い、repo の skill と CLAUDE.md にある手段で確認し、PR 本文の該当チェックボックスを `[x]` にする。本番に対する読み取り以外の操作は、実行前にコマンド全文を示して許可を得る                                                                                                                                                                                 |
+| 追加の分解          | 手順 P の P2〜P4 を、その項目だけに対して行う                                                                                                                                                                                                                                                                                                                         |
+| close               | `printf 'y\n' \| MONICA_HOME=$HOME/monica monica task close MON-n`。`task close` は stdin で `[y/N]` を聞き、非対話では `Canceled.` を出して exit 0 で終わるので、`y` を流して出力に `Closed task` があることを確認する。epic なら `gh issue close <epic>` の後に自分の Task を close                                                                                 |
 
 実行で Status が変わったら、もう一度 `## Status` を再生成する。最後に、実行した内容と次に Tick を呼ぶ目安（「#A の PR が merge されたら」など）を 3 行以内で報告し、ターンを終える。待つ処理はここに含めない。
 
@@ -167,11 +167,11 @@ P1. epic 本文を読み、ゴールとスコープ外を把握する。無い�
 
 P2. 分解方針を 1 つ提案する。
 
-| 方針 | 選ぶとき |
-|---|---|
-| 順序制約で切る | migration・破壊的変更・feature flag のように「先に本番へ出さないと次に進めない」ものがある |
-| PoC を 1 本先に通す | 形が見えていない。最初の 1 本の Discovery で残りの切り方が決まる |
-| 単独で検証・着地できる単位で切る | 形は見えている。書き込み集合が交わらない独立した成果物に分けられる |
+| 方針                             | 選ぶとき                                                                                   |
+| -------------------------------- | ------------------------------------------------------------------------------------------ |
+| 順序制約で切る                   | migration・破壊的変更・feature flag のように「先に本番へ出さないと次に進めない」ものがある |
+| PoC を 1 本先に通す              | 形が見えていない。最初の 1 本の Discovery で残りの切り方が決まる                           |
+| 単独で検証・着地できる単位で切る | 形は見えている。書き込み集合が交わらない独立した成果物に分けられる                         |
 
 P3. 今、問いを正確に述べられるものだけを sub-issue の案にする。1 案につき: タイトル、実現する振る舞い、受け入れ条件、blockedBy、Gate（既定は start-after-merged）。述べられないものは `## Fog` の案にし、「何が分かれば切れるか」を添える。案の数が 8 を超えるなら epic を分けることを提案する。
 

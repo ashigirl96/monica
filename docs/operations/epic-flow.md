@@ -13,15 +13,15 @@ Epic（親 issue）を sub-issue に分解し、Worker が [Worker flow](./worke
 
 ## 正本と所在
 
-| 情報 | 正本 | 備考 |
-|---|---|---|
-| Epic Brief（Discovery・Human Action・Merge Gate・Fog） | epic issue 本文 | Monica は写しを持たない（ADR-0001） |
-| sub-issue 間の依存 | start-after-merged は GitHub ネイティブの blocked-by、merge-after-released は Brief の Merge Gate | 辺は種類を持てず必ず start gate として効くので、merge-after-released に辺は張らない |
-| Verification | その PR の本文 | epic レベルの項目だけ Brief が正本。Brief には派生リストを持つ |
-| Claim | Monica の Run + GitHub の assignee | 起動時に両方を立てる |
-| Released の判定 | 既定は default branch への merge。タグでリリースする repo だけ `.monica/epic-flow.md` に宣言する | 宣言の形は setup-monica の雛形 |
-| PR 本文の Verification の見出し | 固定の 3 つ。`## マージ前の確認` / `## マージ後の手順` / `## リリース後の確認` | PR template に置く |
-| 検証の手段 | 各 repo の skill と CLAUDE.md | Epic flow 用の設定は持たない |
+| 情報                                                   | 正本                                                                                              | 備考                                                                                |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Epic Brief（Discovery・Human Action・Merge Gate・Fog） | epic issue 本文                                                                                   | Monica は写しを持たない（ADR-0001）                                                 |
+| sub-issue 間の依存                                     | start-after-merged は GitHub ネイティブの blocked-by、merge-after-released は Brief の Merge Gate | 辺は種類を持てず必ず start gate として効くので、merge-after-released に辺は張らない |
+| Verification                                           | その PR の本文                                                                                    | epic レベルの項目だけ Brief が正本。Brief には派生リストを持つ                      |
+| Claim                                                  | Monica の Run + GitHub の assignee                                                                | 起動時に両方を立てる                                                                |
+| Released の判定                                        | 既定は default branch への merge。タグでリリースする repo だけ `.monica/epic-flow.md` に宣言する  | 宣言の形は setup-monica の雛形                                                      |
+| PR 本文の Verification の見出し                        | 固定の 3 つ。`## マージ前の確認` / `## マージ後の手順` / `## リリース後の確認`                    | PR template に置く                                                                  |
+| 検証の手段                                             | 各 repo の skill と CLAUDE.md                                                                     | Epic flow 用の設定は持たない                                                        |
 
 ## Gate と強制
 
@@ -78,40 +78,54 @@ Epic（親 issue）を sub-issue に分解し、Worker が [Worker flow](./worke
 
 ```markdown
 ## ゴール
+
 <1〜2 行。人間が書く>
 
 <!-- orchestrate:status:begin -->
+
 ## Status
-| sub-issue | 状態 | Worker | blocked by |
-|---|---|---|---|
-最終 tick: <timestamp>
+
+| sub-issue              | 状態 | Worker | blocked by |
+| ---------------------- | ---- | ------ | ---------- |
+| 最終 tick: <timestamp> |
+
 <!-- orchestrate:status:end -->
 
 ## Human Action
+
 - [ ] <内容> — Gate: <#N 着手前 / #N merge 前> — 結果: <完了時に Discovery を書く>
 
 <!-- orchestrate:verification:begin -->
+
 ## Verification（未完了）
+
 - [ ] [PR #N](url) <項目> — 条件: <いつ確認できるか>
 - [ ] epic レベル: <項目> — 条件: <...>
+
 <!-- orchestrate:verification:end -->
 
 ## Discovery
+
 - <事実 1 行>（#N）
 
 ## Merge Gate
+
 - #B は #A の Released 後に merge（<理由>）
 
 ## Fog
+
 - <問いをまだ正確に述べられない作業。何が分かれば切れるか>
 
 ## スコープ外
+
 - <扱わないこと。別 issue があればリンク>
 
 ## 分解方針
+
 <順序制約で切る / PoC を 1 本先に通す / 単独で検証・着地できる単位で切る>
 
 ## 経緯
+
 <任意>
 ```
 

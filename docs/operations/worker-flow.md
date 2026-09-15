@@ -18,26 +18,26 @@ issue ─track→ Task(Ready) ─run→ Run(SettingUp→Running) ─/tackle→ P
 
 ## Monica が各段階でしていること
 
-| 段階 | Monica の仕事 |
-|---|---|
-| track | issue の title と state を写し、project（`owner/repo`）に紐づける。sub-issue なら親 Task も記録し、blocked-by の上流とその状態も写す。 |
-| run | start gate を通す（未完の上流があれば拒否）。worktree と branch を作る。`setup.sh` を実行し、失敗ならログの場所を返す。tab を開き、`MONICA_TASK_ID` などの環境変数と hook 設定を載せた agent を起動する。 |
-| 観測 | hook から session id、イベント名、待ち理由を受け取り、Run の状態を更新する。質問待ちになれば通知を出す。 |
-| PR | sync のたびに PR の Draft / Open / Closed / Merged を写す。 |
-| close | worktree と branch を消し、この Task を親としていた sub-issue Task の親リンクを外す。 |
+| 段階  | Monica の仕事                                                                                                                                                                                             |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| track | issue の title と state を写し、project（`owner/repo`）に紐づける。sub-issue なら親 Task も記録し、blocked-by の上流とその状態も写す。                                                                    |
+| run   | start gate を通す（未完の上流があれば拒否）。worktree と branch を作る。`setup.sh` を実行し、失敗ならログの場所を返す。tab を開き、`MONICA_TASK_ID` などの環境変数と hook 設定を載せた agent を起動する。 |
+| 観測  | hook から session id、イベント名、待ち理由を受け取り、Run の状態を更新する。質問待ちになれば通知を出す。                                                                                                  |
+| PR    | sync のたびに PR の Draft / Open / Closed / Merged を写す。                                                                                                                                               |
+| close | worktree と branch を消し、この Task を親としていた sub-issue Task の親リンクを外す。                                                                                                                     |
 
 ## board のカードが示す状態
 
-| 状態 | 意味 | あなたがすること |
-|---|---|---|
-| Ready | track されたが Run が無い | Run を押す |
-| SettingUp | worktree と setup.sh の実行中 | 待つ。長引けばログを見る |
-| Prepared | 起動待ち。desktop が tab を開くと Running になる | 待つ |
-| Running | agent が動いている | 放置してよい |
-| WaitingForUser | 質問、計画承認、権限確認、または入力待ち | tab を開いて答える |
-| Stopped | agent のセッションが終わった。再開できる | 続きがあれば Run で再開 |
-| Failed | setup.sh などの失敗 | ログを見て直し、Run し直す |
-| Closed | Task を閉じた | なし |
+| 状態           | 意味                                             | あなたがすること           |
+| -------------- | ------------------------------------------------ | -------------------------- |
+| Ready          | track されたが Run が無い                        | Run を押す                 |
+| SettingUp      | worktree と setup.sh の実行中                    | 待つ。長引けばログを見る   |
+| Prepared       | 起動待ち。desktop が tab を開くと Running になる | 待つ                       |
+| Running        | agent が動いている                               | 放置してよい               |
+| WaitingForUser | 質問、計画承認、権限確認、または入力待ち         | tab を開いて答える         |
+| Stopped        | agent のセッションが終わった。再開できる         | 続きがあれば Run で再開    |
+| Failed         | setup.sh などの失敗                              | ログを見て直し、Run し直す |
+| Closed         | Task を閉じた                                    | なし                       |
 
 ## 途中から乗る、あとから戻る
 

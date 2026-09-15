@@ -32,6 +32,7 @@ PR は Issue に書かれた scope を丸ごと含む。**1 PR = Issue の全 sc
 
 ```markdown
 ## Checklist
+
 - [ ] 実装完了
 - [ ] テスト通過（`<テストコマンド>`）
 - [ ] lint / format 通過（`<lint コマンド>`）
@@ -60,8 +61,8 @@ PR は Issue に書かれた scope を丸ごと含む。**1 PR = Issue の全 sc
 
 ## 埋める値
 
-| 置き換え | 例 |
-|---|---|
-| `<テストコマンド>` | `just test`、`pnpm test`、`cargo test` |
-| `<lint コマンド>` | `just check`、`pnpm lint` |
-| `<確認手段>` | `just dev` で起動して操作、`agent-browser` でブラウザ確認、CLI なら該当コマンドの実行 |
+| 置き換え           | 例                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------- |
+| `<テストコマンド>` | `just test`、`pnpm test`、`cargo test`                                                |
+| `<lint コマンド>`  | `just check`、`pnpm lint`                                                             |
+| `<確認手段>`       | `just dev` で起動して操作、`agent-browser` でブラウザ確認、CLI なら該当コマンドの実行 |

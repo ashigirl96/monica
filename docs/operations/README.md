@@ -22,22 +22,22 @@ Monica が担わないこと:
 
 ## 登場人物
 
-| 誰 | 役割 |
-|---|---|
-| あなた | issue を書き、Run を押し、agent の問いに答え、PR を merge し、Task を閉じる。判断の主体。 |
-| coding agent | Run の中で動く Claude Code。issue を実装するときは Worker、Epic flow では Orchestrator にもなる。 |
-| skill | agent の手順書。`/tackle` など repo 側のものと、`~/.claude/skills` の汎用のものがある。運用の規定は skill に書かれ、Monica はそれを起動する。 |
-| Monica | 上記の世話係。CLI と desktop の 2 つの顔を持つ。 |
-| GitHub | issue、PR、sub-issue、blocked-by、Epic Brief の正本。 |
+| 誰           | 役割                                                                                                                                          |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| あなた       | issue を書き、Run を押し、agent の問いに答え、PR を merge し、Task を閉じる。判断の主体。                                                     |
+| coding agent | Run の中で動く Claude Code。issue を実装するときは Worker、Epic flow では Orchestrator にもなる。                                             |
+| skill        | agent の手順書。`/tackle` など repo 側のものと、`~/.claude/skills` の汎用のものがある。運用の規定は skill に書かれ、Monica はそれを起動する。 |
+| Monica       | 上記の世話係。CLI と desktop の 2 つの顔を持つ。                                                                                              |
+| GitHub       | issue、PR、sub-issue、blocked-by、Epic Brief の正本。                                                                                         |
 
 ## 正本の分担
 
-| 情報 | 正本 |
-|---|---|
-| issue、PR、sub-issue の親子、依存、Epic Brief | GitHub |
-| Task と Run の状態、terminal tab、通知 | Monica の DB |
+| 情報                                                             | 正本                       |
+| ---------------------------------------------------------------- | -------------------------- |
+| issue、PR、sub-issue の親子、依存、Epic Brief                    | GitHub                     |
+| Task と Run の状態、terminal tab、通知                           | Monica の DB               |
 | repo 固有のルール（起動プロンプト、初期化、Released の判定など） | 各 repo の `.monica/` 配下 |
-| 運用の手順 | skill |
+| 運用の手順                                                       | skill                      |
 
 Monica の DB にある GitHub 由来の情報（issue の title と state、PR の状態、親子関係、blocked-by の上流とその状態）は sync で上書きされる写しであり、そこから GitHub に書き戻すことはない。
 
@@ -50,10 +50,10 @@ Monica の DB にある GitHub 由来の情報（issue の title と state、PR 
 
 Monica を使う repo には `.monica/` を置く。`monica project init` が雛形を作る。
 
-| ファイル | 役割 |
-|---|---|
-| `.monica/prompt.md` | Run 起動時に agent へ渡す初期プロンプト。issue を track した Task でのみ使われる。通常は skill 名 1 行。 |
-| `.monica/setup.sh` | worktree を作った直後に走る初期化。依存の取得、ポートの割り当てなど。冪等に書く。 |
-| `.monica/epic-flow.md` | Released の判定。default branch への merge が既定で、タグでリリースする repo だけが置く。 |
+| ファイル               | 役割                                                                                                     |
+| ---------------------- | -------------------------------------------------------------------------------------------------------- |
+| `.monica/prompt.md`    | Run 起動時に agent へ渡す初期プロンプト。issue を track した Task でのみ使われる。通常は skill 名 1 行。 |
+| `.monica/setup.sh`     | worktree を作った直後に走る初期化。依存の取得、ポートの割り当てなど。冪等に書く。                        |
+| `.monica/epic-flow.md` | Released の判定。default branch への merge が既定で、タグでリリースする repo だけが置く。                |
 
 repo 固有の事情はここに閉じ、Monica 本体と汎用 skill には持ち込まない。

@@ -4,55 +4,68 @@ epic issue 本文の形。節の順は「人が最初に知りたい順」。HTM
 
 ```markdown
 ## ゴール
+
 <1〜2 行。この epic が終わった時に何ができるか>
 
 <!-- orchestrate:status:begin -->
+
 ## Status
-| sub-issue | 状態 | Worker | blocked by |
-|---|---|---|---|
-| #A <title> | Released | - | - |
-| #B <title> | PR draft（merge gate 待ち） | MON-42 Running | #A |
-| #C <title> | 着手可 | - | - |
+
+| sub-issue  | 状態                        | Worker         | blocked by |
+| ---------- | --------------------------- | -------------- | ---------- |
+| #A <title> | Released                    | -              | -          |
+| #B <title> | PR draft（merge gate 待ち） | MON-42 Running | #A         |
+| #C <title> | 着手可                      | -              | -          |
 
 最終 Tick: <YYYY-MM-DD HH:mm>
 <!-- orchestrate:status:end -->
 
 ## Human Action
+
 - [ ] <内容> — Gate: <#N 着手前 | #N merge 前> — 結果:
 - [x] <内容> — Gate: <…> — 結果: <得た事実>
 
 <!-- orchestrate:verification:begin -->
+
 ## Verification（未完了）
-- [ ] [PR #N](<url>) <項目> — 条件: <いつ確認できるか>
+
+- [ ] [PR #N](url) <項目> — 条件: <いつ確認できるか>
 - [ ] epic レベル: <項目> — 条件: <…>
+
 <!-- orchestrate:verification:end -->
 
 ## Discovery
+
 - <事実 1 行>（#N）
 
 ## Merge Gate
+
 - #B は #A の Released 後に merge（<理由>）
 
 ## Fog
+
 - <作業> — <何が分かれば切れるか>
 
 ## スコープ外
+
 - <扱わないこと。別 issue があればリンク>
 
 ## 分解方針
+
 <順序制約で切る | PoC を 1 本先に通す | 単独で検証・着地できる単位で切る>
 
 ## 経緯
+
 <任意>
 ```
 
 ## 書き手
 
-| 節 | 書き手 | 更新の仕方 |
-|---|---|---|
-| ゴール・スコープ外・経緯・分解方針 | 人 | GitHub UI で直接編集してよい。Orchestrator は plan モードで初期値を置くだけ |
-| Discovery・Human Action・Merge Gate・Fog | Orchestrator | コメントの畳み込みと対話入力で末尾に追記。既存行は消さない |
-| Status・Verification（未完了） | Tick | 区切りの内側を全て置き換える |
+| 節                                       | 書き手       | 更新の仕方                                                                  |
+| ---------------------------------------- | ------------ | --------------------------------------------------------------------------- |
+| ゴール・スコープ外・経緯・分解方針       | 人           | GitHub UI で直接編集してよい。Orchestrator は plan モードで初期値を置くだけ |
+| Discovery・Human Action・Merge Gate・Fog | Orchestrator | コメントの畳み込みと対話入力で末尾に追記。既存行は消さない                  |
+| Status・Verification（未完了）           | Tick         | 区切りの内側を全て置き換える                                                |
 
 ## Status の「状態」欄
 

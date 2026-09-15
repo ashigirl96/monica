@@ -4,6 +4,7 @@ Released の判定が既定と違う repo だけが repo ルートに置く。�
 
 ```markdown
 ## Released の判定
+
 merge commit を含む `v*` タグ
 ```
 
