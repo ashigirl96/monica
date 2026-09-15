@@ -39,7 +39,12 @@ function describe(value: unknown): string {
   try {
     return JSON.stringify(value) ?? String(value);
   } catch {
-    return String(value);
+    try {
+      // A cyclic value lands here, and coercing one with a null prototype throws all over again.
+      return String(value);
+    } catch {
+      return Object.prototype.toString.call(value);
+    }
   }
 }
 
@@ -114,13 +119,15 @@ export function installConsoleForwarding(overrides: Partial<ForwardingDeps> = {}
     original.error("failed to forward logs to the backend:", e);
   };
 
-  const forward = (level: BackendLogLevel, line: string) => {
+  // The line is built inside the guard, not passed in: this runs inside a patched `console.error`,
+  // so an exception escaping here would break the caller rather than just lose the log. Both
+  // halves can throw — formatting on a value that neither serializes nor coerces, and `invoke`
+  // synchronously when the Tauri internals are absent.
+  const forward = (level: BackendLogLevel, line: () => string) => {
     if (forwardingSynchronously) return;
     forwardingSynchronously = true;
     try {
-      // `invoke` throws synchronously when the Tauri internals are absent, and this runs inside a
-      // patched `console.error` — letting that escape would break the caller rather than the log.
-      void sink(level, line).catch(reportSinkFailure);
+      void sink(level, line()).catch(reportSinkFailure);
     } catch (e) {
       reportSinkFailure(e);
     } finally {
@@ -130,11 +137,11 @@ export function installConsoleForwarding(overrides: Partial<ForwardingDeps> = {}
 
   patched.error = (...args: unknown[]) => {
     original.error(...args);
-    forward("error", consoleLine("error", args));
+    forward("error", () => consoleLine("error", args));
   };
   patched.warn = (...args: unknown[]) => {
     original.warn(...args);
-    forward("warn", consoleLine("warn", args));
+    forward("warn", () => consoleLine("warn", args));
   };
 
   // Capture phase: a failed `<img>` / `<script>` / stylesheet fires `error` on the element and it
@@ -142,11 +149,11 @@ export function installConsoleForwarding(overrides: Partial<ForwardingDeps> = {}
   listen(
     "error",
     (event) => {
-      forward("error", errorEventLine(event as ErrorEvent));
+      forward("error", () => errorEventLine(event as ErrorEvent));
     },
     { capture: true },
   );
   listen("unhandledrejection", (event) => {
-    forward("error", rejectionLine((event as PromiseRejectionEvent).reason));
+    forward("error", () => rejectionLine((event as PromiseRejectionEvent).reason));
   });
 }

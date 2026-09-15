@@ -90,6 +90,13 @@ describe("line formatting", () => {
     cyclic.self = cyclic;
     expect(rejectionLine(cyclic)).toBe('unhandledrejection kind=error message="[object Object]"');
   });
+
+  test("a value that neither serializes nor coerces still produces a line", () => {
+    // Cyclic (JSON.stringify throws) and null-prototype (String() throws too).
+    const hostile = Object.create(null) as Record<string, unknown>;
+    hostile.self = hostile;
+    expect(rejectionLine(hostile)).toBe('unhandledrejection kind=error message="[object Object]"');
+  });
 });
 
 describe("installation", () => {
@@ -129,6 +136,14 @@ describe("installation", () => {
     });
     h.console.error("boom");
     expect(h.sent).toEqual([["error", 'console kind=error message="boom"']]);
+  });
+
+  test("a console call whose argument cannot be formatted does not reach the caller", () => {
+    const h = harness();
+    const hostile = Object.create(null) as Record<string, unknown>;
+    hostile.self = hostile;
+    expect(() => h.console.error(hostile)).not.toThrow();
+    expect(h.sent).toEqual([["error", 'console kind=error message="[object Object]"']]);
   });
 
   test("a sink that throws synchronously is reported once, not rethrown", () => {
