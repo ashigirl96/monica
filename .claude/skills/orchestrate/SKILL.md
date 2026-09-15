@@ -71,7 +71,9 @@ minimize されていないコメントのうち、先頭行が `<!-- epic-worke
 |---|---|---|
 | `### Discovery` | `## Discovery` | 1 行ずつ末尾に追記し、末尾に `（#<sub-issue>）` を付ける |
 | `### Human Action` | `## Human Action` | `- [ ] <内容> — Gate: <…> — 結果:` の形で追記 |
-| `### 依存` | `## Merge Gate` | `merge-after-released` の行だけ追記。blocked-by の辺は Worker が張っている前提で、無ければ `gh issue edit --add-blocked-by` で張る |
+| `### 依存` | `## Merge Gate` | `merge-after-released` の行だけ追記。この種類に blocked-by の辺は張らない（start gate が着手を止めてしまう）。`start-after-merged` の行は本文に書かず、辺が無ければ `gh issue edit --add-blocked-by` で張る |
+
+本文に既に同じ項目がある行は追記しない。minimize に失敗した Tick や途中で止まった Tick を次の Tick がやり直すと、同じコメントをもう一度読むため、照合しないと Brief が二重に増える。Discovery は末尾の `（#<sub-issue>）` 込みの文面で、Human Action と Merge Gate は内容で照合する。
 
 minimize はここでは行わない。本文への書き込みが成功してから（手順 8）畳む。書き込みが失敗した Tick や、途中で止まった Tick でコメントを先に畳むと、その内容は agent の手元にしか無いまま次の Tick から見えなくなり、Discovery と Human Action が消える。畳む対象のコメント node id は手順 8 まで控えておく。
 
@@ -175,7 +177,7 @@ P3. 今、問いを正確に述べられるものだけを sub-issue の案に�
 
 P4. 案の一覧をあなたに示し、修正を受けて確定する。確定前に issue は作らない。
 
-P5. 確定したら [gh-recipes.md](gh-recipes.md) の「作る」で、blocker から順に `gh issue create --parent` し、2 パス目で `--add-blocked-by` を張る。辺を張り終えてから各 sub-issue を `monica task track` する（track が直後にその Task を sync し、blocked-by の上流まで写す）。
+P5. 確定したら [gh-recipes.md](gh-recipes.md) の「作る」で、blocker から順に `gh issue create --parent` し、2 パス目で `--add-blocked-by` を張る。**辺を張るのは start-after-merged の依存だけ。** merge-after-released の依存に辺を張ると Monica の start gate が上流の merge まで着手を止めてしまい、「並行して実装してよい」という Gate の定義と食い違う。この種類は辺を張らず、Brief の `## Merge Gate` にだけ書く。辺を張り終えてから各 sub-issue を `monica task track` する（track が直後にその Task を sync し、blocked-by の上流まで写す）。
 
 P6. [brief-template.md](brief-template.md) で本文を組み直す。既存の本文はゴール・スコープ外・経緯に振り分けて残す。分解方針・Merge Gate・Fog を書き、Status と Verification は空の区切りで置く。
 

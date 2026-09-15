@@ -65,11 +65,11 @@ _Avoid_: TODO, manual step, blocker, human task
 _Avoid_: dependency type, phase, checkpoint
 
 **Merge Gate**:
-merge-after-released の Gate を持つ辺の一覧。Epic Brief の節として「#B は #A の Released 後に merge」の形で書く。GitHub の辺は種類を持てないので、既定と違う辺だけをここに宣言する。
+merge-after-released の Gate を持つ依存の一覧。Epic Brief の節として「#B は #A の Released 後に merge」の形で書く。GitHub の辺は種類を持てず、張れば必ず start gate として効いてしまうので、この種類の依存は Blocked-by を張らず、この節だけで表す。
 _Avoid_: Gate の例外, release gate, merge 制約
 
 **Blocked-by**:
-sub-issue 間の依存の辺。GitHub ネイティブの issue 依存として張り、Epic Brief には Merge Gate だけを書く。
+start-after-merged の依存の辺。GitHub ネイティブの issue 依存として張り、Monica の start gate がこれを読む。merge-after-released の依存は着手を止めてはならないので辺を張らず、Epic Brief の Merge Gate に書く。
 _Avoid_: depends on, prerequisite, 前提 issue
 
 **Fog**:
