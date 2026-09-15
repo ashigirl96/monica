@@ -164,12 +164,15 @@ gh issue edit <downstream> --repo <O>/<R> --add-blocked-by <upstream>[,<upstream
 
 ```markdown
 ## 実現する振る舞い
+
 <利用者から見て、これが終わると何ができるか>
 
 ## 受け入れ条件
+
 - [ ] <観測できる条件>
 
 ## Blocked by
+
 - #<upstream>（<gate: start-after-merged | merge-after-released>）
 - なし（すぐ着手できる）
 ```
