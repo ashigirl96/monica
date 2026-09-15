@@ -45,16 +45,26 @@ impl EventSink for TauriEventSink {
     fn emit(&self, event: ApplicationEvent) {
         match event {
             ApplicationEvent::TaskRunStatusChanged { task_id, task_run_id, status } => {
-                let _ = TaskRunStatusChanged {
+                let event = TaskRunStatusChanged {
                     task_id,
                     task_run_id,
                     status: status.into(),
+                };
+                if let Err(e) = event.emit(&self.app) {
+                    log::warn!(
+                        target: "monica_app::events",
+                        "failed to emit event=task-run:status-changed task_id={} task_run_id={} error={e}",
+                        event.task_id,
+                        event.task_run_id
+                    );
                 }
-                .emit(&self.app);
             }
             ApplicationEvent::GithubSyncCompleted { synced_count } => {
                 if let Err(e) = (GithubSyncCompleted { synced_count }).emit(&self.app) {
-                    log::warn!(target: "monica_app::events", "failed to emit GithubSyncCompleted: {e}");
+                    log::warn!(
+                        target: "monica_app::events",
+                        "failed to emit event=github-sync:completed synced_count={synced_count} error={e}"
+                    );
                 }
             }
             // The OS notification is delivered from the outbox by `schedulers::notification_drain`,

@@ -13,6 +13,21 @@ pub enum ApiErrorCode {
     External,
 }
 
+impl ApiErrorCode {
+    /// The same spelling the frontend receives, so a `code=` in the log and a `code` in a bug
+    /// report are the same token. Exhaustive on purpose: a new variant must be named here too.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotFound => "not_found",
+            Self::Conflict => "conflict",
+            Self::Validation => "validation",
+            Self::AuthenticationRequired => "authentication_required",
+            Self::Storage => "storage",
+            Self::External => "external",
+        }
+    }
+}
+
 /// The error half of every Tauri command result. Replaces the previous `Result<T, String>` so the
 /// frontend receives a structured `{ code, message }` instead of an opaque string.
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -50,5 +65,25 @@ impl From<monica_application::ApplicationError> for ApiError {
             E::External(m) => (ApiErrorCode::External, m),
         };
         Self { code, message }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ApiErrorCode;
+
+    #[test]
+    fn as_str_matches_the_serde_representation() {
+        let all = [
+            ApiErrorCode::NotFound,
+            ApiErrorCode::Conflict,
+            ApiErrorCode::Validation,
+            ApiErrorCode::AuthenticationRequired,
+            ApiErrorCode::Storage,
+            ApiErrorCode::External,
+        ];
+        for code in all {
+            assert_eq!(serde_json::to_value(code).unwrap(), code.as_str());
+        }
     }
 }

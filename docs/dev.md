@@ -58,6 +58,47 @@ MONICA_LOG=info,monica_application::github_sync=debug bun run tauri dev
 
 2 秒周期の notification drain だけは、失敗が続いても同じ行を出し続けない。同一の失敗は最初の 1 行と約 30 分ごとの `suppressed=N` 付きの再掲だけに畳まれ、復旧すると 1 行出る。畳まれている間の各 tick は DEBUG に落ちる。
 
+### tauri command の 1 行（target `monica_app::commands`）
+
+フロントからの command 呼び出しは 1 呼び出し 1 行になる。`rg 'command=prepare_task'` で 1 回の操作を抜き出せる。
+
+```
+command=launch_task task_id=MON-42 duration_ms=37 result=ok
+command=launch_task task_id=MON-42 duration_ms=5 result=err code=conflict message="task already running"
+```
+
+`code=` はフロントが受け取る `ApiError.code` と同じ綴りなので、バグ報告の文字列でそのまま grep できる。`message=` は改行を空白に畳んで 300 文字で切る（`…` が付く）。大きな引数は中身ではなく長さだけを載せる（`terminal_write` の `bytes=`）。
+
+**既定レベルで見えるのは状態を変える command だけ**。呼び出し頻度が 3 桁違うので、ok のレベルを 3 段に分けている（`result=err` はクラスに関係なく WARN）。
+
+| クラス         | ok のレベル | 対象                                                                                    |
+| -------------- | ----------- | --------------------------------------------------------------------------------------- |
+| 状態遷移       | INFO        | `launch_task` `prepare_task` `attach_terminal_tab` `terminal_create_session` など 17 個 |
+| 読み取り       | DEBUG       | `list_task_summaries` など 16 個。board は 3 秒ごとにポーリングする                     |
+| 入力ストリーム | TRACE       | `terminal_write`（キー入力 1 打ごと）・`terminal_resize`                                |
+
+一律 INFO にすると打鍵とポーリングだけで 1MB × 5 世代を数時間で使い切り、バナーも本当の失敗も押し流される。全部見たいときだけ上げる:
+
+```bash
+MONICA_LOG=info,monica_app::commands=trace bun run tauri dev
+```
+
+### フロントのログ（target `webview`）
+
+`console.error` / `console.warn` と、拾われなかった例外・promise rejection は Rust 側のロガーに転送され、release では `monica.log` に合流する。dev では stdout に出る。**release には webview console もファイル以外の出力先も無いので、これがフロントの例外を知る唯一の経路**。
+
+```
+uncaught kind=error message="x is not a function" source="/assets/index-a1b2.js:1:4821" stack="…"
+```
+
+転送は `desktop/lib/forward-console.ts` が `console` をラップして行う。`capabilities/default.json` の `log:default` が前提で、これが無いと転送だけが静かに失敗する（最初の 1 回だけ devtools に出る）。ノイズが増えたら target で落とせる:
+
+```bash
+MONICA_LOG=info,webview=off bun run tauri dev
+```
+
+log plugin の `attachConsole`（Rust のログを webview console に流す JS API）は使っていない。あれは `console.error` を呼ぶので、上のラッパーと組み合わせると console → Rust → console の往復ループになる。転送側で `location` を送らないのも同じ種類の都合で、送ると target が `webview:<場所>` になり、`::` 区切りセグメント単位の target マッチでは `webview=off` が効かなくなる。
+
 ---
 
 ## 1. Rust release profile — "Five Aces"（ワークスペース root の `Cargo.toml`）

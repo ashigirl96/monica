@@ -101,7 +101,15 @@ fn open_facade(app: &AppHandle) -> Result<AppMonica> {
 fn handle_event(app: &AppHandle, event: ClientEvent) {
     match event {
         ClientEvent::Output { session_id, data } => {
-            let _ = app.emit(&format!("terminal:output:{session_id}"), &data);
+            // DEBUG rather than WARN: this runs once per PTY chunk, so a webview that has gone
+            // away would otherwise fill the rotation faster than anything else in the file.
+            if let Err(e) = app.emit(&format!("terminal:output:{session_id}"), &data) {
+                log::debug!(
+                    target: "monica_app::ptyd",
+                    "failed to emit terminal output session_id={session_id} bytes={} error={e}",
+                    data.len()
+                );
+            }
         }
         ClientEvent::Exit {
             session_id,
@@ -122,7 +130,12 @@ fn handle_event(app: &AppHandle, event: ClientEvent) {
                     "failed to open façade for exit of {session_id}: {e:#}"
                 ),
             }
-            let _ = app.emit(&format!("terminal:exit:{session_id}"), &exit_code);
+            if let Err(e) = app.emit(&format!("terminal:exit:{session_id}"), &exit_code) {
+                log::warn!(
+                    target: "monica_app::ptyd",
+                    "failed to emit terminal exit session_id={session_id} exit_code={exit_code:?} error={e}"
+                );
+            }
             // Reap must be a notification: this runs on the client reader thread, and a
             // request() would deadlock waiting for a response only this thread can read.
             if let Some(client) = app.state::<PtydHandle>().current() {
