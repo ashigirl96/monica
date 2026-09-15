@@ -136,8 +136,13 @@ pub struct HookReport {
     pub resolved_by: HookResolveRoute,
     pub resolve_skipped: [Option<ResolveSkip>; 3],
     /// The run's status before this hook, the status the domain asked for, and the domain's reason
-    /// for asking for nothing. `requested_status` differing from `task_run_status` is the store's
-    /// atomic guard refusing a stale snapshot — the one refusal the domain cannot see.
+    /// for asking for nothing.
+    ///
+    /// `requested_status` differing from `task_run_status` means the run did not end up where this
+    /// hook asked it to — usually the store's atomic guard refusing a stale snapshot, but a hook
+    /// that committed in another process between this one's write and its re-read looks the same
+    /// from here. The pair is reported as the two facts it is; reading a cause into the difference
+    /// needs the neighbouring lines for the same `task_run_id`.
     pub from_status: Option<TaskRunStatus>,
     pub requested_status: Option<TaskRunStatus>,
     pub refused: Option<TransitionRefusal>,
@@ -755,10 +760,10 @@ mod tests {
             .contains("from=stopped requested=none to=none refused=stopped_stays_stopped"));
     }
 
-    /// The domain asked for a transition the store's own guard then refused — the one refusal the
-    /// domain cannot see, readable only as `requested` differing from `to`.
+    /// The domain asked for a transition the run did not end up in — readable only as `requested`
+    /// differing from `to`, which no other field carries.
     #[test]
-    fn a_hook_the_store_guard_refused_shows_requested_apart_from_landed() {
+    fn a_hook_shows_what_it_asked_for_apart_from_where_the_run_landed() {
         let report = HookReport {
             requested_status: Some(TaskRunStatus::Running),
             task_run_status: Some(TaskRunStatus::Stopped),

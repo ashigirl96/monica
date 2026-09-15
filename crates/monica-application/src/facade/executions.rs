@@ -481,6 +481,9 @@ impl<B: Backend> ExecutionService<'_, B> {
         cause: &str,
     ) -> ApplicationResult<()> {
         if repos.settle_task_run_if_live(&settlement.task_run_id, &settlement.task_id)? {
+            // `from` is the status read when the verdict was decided, not one read inside the
+            // guarded update. The guard accepts any live status, so a hook moving the run between
+            // two of them in between leaves this naming the earlier one.
             crate::observability::run_status(
                 &settlement.task_run_id,
                 &settlement.task_id,
