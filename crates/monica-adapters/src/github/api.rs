@@ -286,6 +286,16 @@ fn parse_issue_state(state: &str) -> Result<GithubIssueState> {
 /// GitHub's node limit while collapsing a board's worth of issues into a couple of round trips.
 const ISSUE_BATCH: usize = 50;
 
+/// GitHub caps an issue at 50 blocked-by relationships, so one page holds every blocker there can
+/// be. Asking for fewer would silently drop the rest, and a blocker Monica never sees is a blocker
+/// the start gate cannot enforce — the one direction this must not fail in.
+///
+/// The blockers' own `closedByPullRequestsReferences` stays at a single page of 10, like the
+/// issue's: missing a merged PR there leaves a cleared blocker looking unfinished, which holds a
+/// run back rather than letting one through, is overridable with `--force`, and resolves itself
+/// once the upstream issue closes.
+const BLOCKED_BY_PAGE: usize = 50;
+
 fn issues_query(numbers: &[i64]) -> String {
     let selections: String = numbers
         .iter()
@@ -295,7 +305,7 @@ fn issues_query(numbers: &[i64]) -> String {
 parent {{ number repository {{ nameWithOwner }} }} \
 closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {{ nodes {{ number url state \
 isDraft repository {{ nameWithOwner }} }} }} \
-blockedBy(first: 20) {{ nodes {{ number state repository {{ nameWithOwner }} \
+blockedBy(first: {BLOCKED_BY_PAGE}) {{ nodes {{ number state repository {{ nameWithOwner }} \
 closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {{ nodes {{ number url state \
 isDraft repository {{ nameWithOwner }} }} }} }} }} }}\n"
             )
@@ -708,10 +718,12 @@ mod tests {
     #[test]
     fn issues_query_asks_for_the_blockers_and_what_would_clear_them() {
         let query = issues_query(&[42]);
-        assert!(query.contains("blockedBy(first: 20)"), "{query}");
+        // One page has to hold every blocker GitHub allows (50): a blocker left on a second page
+        // would be invisible, and the gate would open for a task that is still blocked.
+        assert!(query.contains("blockedBy(first: 50)"), "{query}");
         // A blocker's own repo, state and closing PRs all have to ride along: the start gate must
         // decide about blockers no task tracks, without a second round trip.
-        assert!(query.contains("blockedBy(first: 20) { nodes { number state repository"), "{query}");
+        assert!(query.contains("blockedBy(first: 50) { nodes { number state repository"), "{query}");
         assert_eq!(
             query.matches("includeClosedPrs: true").count(),
             2,
