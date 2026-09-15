@@ -1,6 +1,7 @@
 use super::{Backend, Monica};
 use crate::usecases::tasks::{
-    AttachSessionReport, CloseTaskReport, MakeMainOutcome, TabTaskBinding,
+    AttachSessionReport, CloseTaskReport, CurrentTaskReport, MakeMainOutcome, TabIdentity,
+    TabTaskBinding,
 };
 use crate::prelude::{Agent, DisplayStatus, Event, Task, TaskId, TaskRunStatus};
 use crate::{ApplicationEvent, ApplicationResult, TaskSummaryRow};
@@ -61,6 +62,12 @@ impl<B: Backend> TaskService<'_, B> {
             status: TaskRunStatus::Running,
         });
         Ok(report)
+    }
+
+    /// The task the given terminal tab is working on — the `MONICA_TASK_ID` it was launched with,
+    /// or the task `monica task attach` bound the tab to.
+    pub fn current_task(&self, identity: &TabIdentity) -> ApplicationResult<CurrentTaskReport> {
+        crate::usecases::tasks::resolve_current_task(&self.m.repos, identity)
     }
 
     /// Live tab-driven runs paired with their task's bench runspace, for the Workbench to pull

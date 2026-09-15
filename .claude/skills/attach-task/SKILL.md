@@ -80,6 +80,13 @@ tab は新しい Task の runspace へ移り、元の runspace が空になれ�
 MON-id・Task タイトル・run-id をユーザーに伝える。付け替えが起きたなら、
 どの run を detach したかも添える。`Main Run: kept ...` だった場合はその旨も伝える。
 
+以降このセッションが「自分はどの Task か」を知りたくなったら、次で引く。
+
+```bash
+MONICA_HOME=$HOME/monica monica task current          # 人が読む形
+MONICA_HOME=$HOME/monica monica task current --json   # MON-id / project / issue 番号 / run 状態
+```
+
 ## エラーの読み方
 
 | メッセージ                                  | 意味                                                    | 対処                                                           |
@@ -101,3 +108,7 @@ MON-id・Task タイトル・run-id をユーザーに伝える。付け替え�
 - runspace の cwd は動かさない。bench が未作成なら tab の cwd で作られ、既にあればそのまま。
   tab の shell 自体の cwd も変わらない。
 - detach 専用コマンドは未実装。別 Task に attach し直すと自動で付け替わる。
+- **attach しても `MONICA_TASK_ID` は立たない。** 既に走っているシェルの環境変数は書き換えられず、
+  この変数は Task から起こした tab にしか載らない。attach した tab の紐づけは DB 側
+  （tab → run の binding）にあるので、`echo $MONICA_TASK_ID` ではなく
+  `monica task current` で引く。どちらの経路の tab でも同じコマンドで答えが返る。
