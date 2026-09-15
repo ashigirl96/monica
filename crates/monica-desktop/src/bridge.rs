@@ -13,7 +13,9 @@ use anyhow::{Context, Result};
 use monica_paths as paths;
 use tauri::{AppHandle, Manager};
 
-const LOG_FILE_NAME: &str = "browser-bridge.log";
+/// The child holds the descriptor it is spawned with, so the file is named for the spawn day and
+/// covers everything up to the next respawn — retention judges it by its mtime, not by that name.
+const LOG_STEM: &str = "browser-bridge";
 /// bind 失敗等の即死を検知するまでの猶予。長すぎると起動失敗の warn が遅れるだけ。
 const EARLY_EXIT_GRACE: Duration = Duration::from_millis(500);
 
@@ -40,14 +42,8 @@ impl BridgeHandle {
         kill_stale_bridge();
 
         let logs_dir = paths::logs_dir()?;
-        std::fs::create_dir_all(&logs_dir)
-            .with_context(|| format!("failed to create {}", logs_dir.display()))?;
-        let log_path = logs_dir.join(LOG_FILE_NAME);
-        let log_file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path)
-            .with_context(|| format!("failed to open {}", log_path.display()))?;
+        let (log_path, log_file) =
+            monica_logfile::open_today(&logs_dir, LOG_STEM).context("failed to open the log")?;
         let stderr_file = log_file.try_clone().context("failed to clone log handle")?;
 
         let binary = bridge_binary();
@@ -144,7 +140,7 @@ impl BridgeHandle {
                 if let Ok(Some(status)) = child.try_wait() {
                     log::warn!(
                         target: "monica_app::bridge",
-                        "browser-bridge exited early ({status}) — port conflict? see logs/{LOG_FILE_NAME}",
+                        "browser-bridge exited early ({status}) — port conflict? see logs/{LOG_STEM}_*.log",
                     );
                     guard.take();
                     if let Ok(pid_path) = paths::browser_bridge_pid_path() {

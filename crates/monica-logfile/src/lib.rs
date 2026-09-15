@@ -51,11 +51,7 @@ impl DailyLog {
         retention_days: u64,
         max_total_bytes: u64,
     ) -> Result<Self> {
-        std::fs::create_dir_all(dir)
-            .with_context(|| format!("failed to create {}", dir.display()))?;
-        migrate_legacy(dir, stem, legacy_day(dir, stem, today));
-        sweep(dir, stem, today, retention_days, max_total_bytes);
-        let file = open_day_file(dir, stem, today)?;
+        let (_, file) = prepare_today(dir, stem, today, retention_days, max_total_bytes)?;
         Ok(Self {
             dir: dir.to_path_buf(),
             stem: stem.to_string(),
@@ -99,6 +95,35 @@ impl DailyLog {
     }
 }
 
+/// Runs the same migration and retention housekeeping as [`DailyLog::open`], then hands back
+/// today's path and a raw append handle. For a child process' stdio, which needs a descriptor
+/// rather than a writer and therefore cannot roll over while the child holds it: the file is named
+/// for the day the child was spawned, and retention treats it by its mtime rather than that name.
+pub fn open_today(dir: &Path, stem: &str) -> Result<(PathBuf, File)> {
+    prepare_today(
+        dir,
+        stem,
+        Local::now().date_naive(),
+        RETENTION_DAYS,
+        MAX_TOTAL_BYTES,
+    )
+}
+
+/// Returns the path alongside the handle so both come from one date resolution — building the path
+/// separately lets a caller name a different day than the one it opened, across local midnight.
+fn prepare_today(
+    dir: &Path,
+    stem: &str,
+    today: NaiveDate,
+    retention_days: u64,
+    max_total_bytes: u64,
+) -> Result<(PathBuf, File)> {
+    std::fs::create_dir_all(dir).with_context(|| format!("failed to create {}", dir.display()))?;
+    migrate_legacy(dir, stem, legacy_day(dir, stem, today));
+    sweep(dir, stem, today, retention_days, max_total_bytes);
+    Ok((day_path(dir, stem, today), open_day_file(dir, stem, today)?))
+}
+
 fn open_day_file(dir: &Path, stem: &str, day: NaiveDate) -> Result<File> {
     let path = day_path(dir, stem, day);
     OpenOptions::new()
@@ -123,13 +148,31 @@ fn parse_day(name: &str, stem: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(rest.strip_suffix(SUFFIX)?, DAY_FORMAT).ok()
 }
 
+fn modified_day(meta: &std::fs::Metadata) -> Option<NaiveDate> {
+    meta.modified()
+        .ok()
+        .map(|mtime| DateTime::<Local>::from(mtime).date_naive())
+}
+
 /// The day the pre-rotation `<stem>.log` belongs to, from its mtime. Falls back to `today` when
 /// the mtime is unreadable, so the file still joins the rotation instead of growing forever.
 fn legacy_day(dir: &Path, stem: &str, today: NaiveDate) -> NaiveDate {
     std::fs::metadata(legacy_path(dir, stem))
-        .and_then(|meta| meta.modified())
-        .map(|mtime| DateTime::<Local>::from(mtime).date_naive())
+        .ok()
+        .and_then(|meta| modified_day(&meta))
         .unwrap_or(today)
+}
+
+/// How old a file counts as: the later of the day it is named for and the day it was last written.
+///
+/// The name alone would be enough if every writer re-opened at midnight, which every [`DailyLog`]
+/// holder does. A file handed to a child process as its stdio cannot — it keeps the descriptor it
+/// was spawned with — so its name records the spawn day while its contents run up to the present.
+/// Judging that file by its name deletes the newest log first, silently: on Unix the child's writes
+/// keep succeeding into the unlinked inode.
+fn effective_day(name_day: NaiveDate, meta: Option<&std::fs::Metadata>) -> NaiveDate {
+    meta.and_then(modified_day)
+        .map_or(name_day, |mtime_day| name_day.max(mtime_day))
 }
 
 fn migrate_legacy(dir: &Path, stem: &str, day: NaiveDate) {
@@ -153,15 +196,17 @@ fn sweep(dir: &Path, stem: &str, today: NaiveDate, retention_days: u64, max_tota
     let mut kept: Vec<(NaiveDate, PathBuf, u64)> = Vec::new();
     for entry in entries.flatten() {
         let name = entry.file_name();
-        let Some(day) = name.to_str().and_then(|name| parse_day(name, stem)) else {
+        let Some(name_day) = name.to_str().and_then(|name| parse_day(name, stem)) else {
             continue;
         };
+        let meta = entry.metadata().ok();
+        let day = effective_day(name_day, meta.as_ref());
         if cutoff.is_some_and(|cutoff| day < cutoff) {
             let _ = std::fs::remove_file(entry.path());
             continue;
         }
         // A file whose size is unreadable is left out of the total and out of the candidates.
-        let Ok(size) = entry.metadata().map(|meta| meta.len()) else {
+        let Some(size) = meta.map(|meta| meta.len()) else {
             continue;
         };
         kept.push((day, entry.path(), size));
@@ -170,8 +215,10 @@ fn sweep(dir: &Path, stem: &str, today: NaiveDate, retention_days: u64, max_tota
     enforce_total_cap(&mut kept, today, max_total_bytes);
 }
 
-/// Deletes whole days, oldest first, until the retained bytes fit under `max_total_bytes`.
-/// Takes the candidates as a slice so a test can hand it a snapshot that no longer matches disk.
+/// Deletes whole days, oldest first, until the retained bytes fit under `max_total_bytes`. Each
+/// candidate's day is its [`effective_day`], already resolved by the caller — taking the candidates
+/// as a slice keeps this free of the filesystem, so a test can hand it a snapshot that no longer
+/// matches disk.
 fn enforce_total_cap(
     candidates: &mut [(NaiveDate, PathBuf, u64)],
     today: NaiveDate,
@@ -186,10 +233,10 @@ fn enforce_total_cap(
         if total <= max_total_bytes {
             break;
         }
-        // Today and anything dated later are being written right now — a file can be dated ahead
-        // of this process when the clock or zone moves back, or when a sweep that captured
-        // yesterday runs after another process opened today. Unlinking one cannot free enough to
-        // satisfy the cap anyway, since the current day always stays.
+        // Today and later means written today or dated ahead of this process — the latter when the
+        // clock or zone moves back, or when a sweep that captured yesterday runs after another
+        // process opened today. Unlinking one cannot free enough to satisfy the cap anyway, since
+        // the current day always stays.
         if *day >= today {
             continue;
         }
@@ -208,6 +255,8 @@ fn enforce_total_cap(
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, SystemTime};
+
     use super::*;
 
     const STEM: &str = "hook-claude";
@@ -227,9 +276,38 @@ mod tests {
         NaiveDate::from_ymd_opt(year, month, date).expect("valid date")
     }
 
+    /// Writes a fixture and back-dates its mtime to the day its name claims, so retention reads the
+    /// same day from both. Without this the mtime is the real clock, which is what a file written
+    /// by a live process looks like — see [`write_dated`] for fixtures that want exactly that.
     fn write(dir: &Path, name: &str, bytes: &[u8]) {
+        match parse_day(name, STEM) {
+            Some(day) => write_dated(dir, name, bytes, day),
+            None => {
+                std::fs::create_dir_all(dir).expect("create dir");
+                std::fs::write(dir.join(name), bytes).expect("write");
+            }
+        }
+    }
+
+    /// Writes a fixture whose mtime is `mtime_day` regardless of the day its name claims.
+    fn write_dated(dir: &Path, name: &str, bytes: &[u8], mtime_day: NaiveDate) {
         std::fs::create_dir_all(dir).expect("create dir");
-        std::fs::write(dir.join(name), bytes).expect("write");
+        let path = dir.join(name);
+        // After the write, which sets the mtime to now.
+        std::fs::write(&path, bytes).expect("write");
+        let noon = mtime_day
+            .and_hms_opt(12, 0, 0)
+            .expect("valid time")
+            .and_local_timezone(Local)
+            .single()
+            .expect("unambiguous local time");
+        let secs = u64::try_from(noon.timestamp()).expect("after the unix epoch");
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .expect("reopen")
+            .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
+            .expect("set mtime");
     }
 
     #[test]
@@ -282,6 +360,51 @@ mod tests {
 
         assert!(dir.join("hook-claude_2026-08-26.log").exists());
         assert!(!dir.join("hook-claude_2026-08-25.log").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The browser-bridge case: a child process holds the descriptor it was spawned with, so the
+    /// file keeps its spawn day in the name while its contents run up to now.
+    #[test]
+    fn a_file_named_old_but_written_today_survives_retention() {
+        let dir = temp_dir("retention-mtime");
+        let today = day(2026, 9, 9);
+        write_dated(&dir, "hook-claude_2026-08-01.log", b"still in use", today);
+
+        DailyLog::open_with_policy(&dir, STEM, today, RETENTION_DAYS, NO_CAP).unwrap();
+
+        assert!(dir.join("hook-claude_2026-08-01.log").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_file_named_old_and_written_long_ago_is_deleted() {
+        let dir = temp_dir("retention-mtime-old");
+        write_dated(
+            &dir,
+            "hook-claude_2026-08-01.log",
+            b"abandoned",
+            day(2026, 8, 1),
+        );
+
+        DailyLog::open_with_policy(&dir, STEM, day(2026, 9, 9), RETENTION_DAYS, NO_CAP).unwrap();
+
+        assert!(!dir.join("hook-claude_2026-08-01.log").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_file_named_old_but_written_today_survives_the_cap() {
+        let dir = temp_dir("cap-mtime");
+        let today = day(2026, 9, 9);
+        write_dated(&dir, "hook-claude_2026-09-01.log", b"0123456789", today);
+
+        DailyLog::open_with_policy(&dir, STEM, today, RETENTION_DAYS, 1).unwrap();
+
+        assert_eq!(
+            std::fs::read(dir.join("hook-claude_2026-09-01.log")).unwrap(),
+            b"0123456789"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -460,6 +583,63 @@ mod tests {
             .collect();
         assert_eq!(dated.len(), 1, "expected one dated file, got {dated:?}");
         assert_eq!(std::fs::read_to_string(&dated[0]).unwrap(), "line\n");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Asserts on the shape rather than on a named day so a run crossing midnight cannot flake:
+    /// whichever day the two opens land on, the first file must still hold what was written to it.
+    #[test]
+    fn open_today_hands_back_an_appending_handle_to_the_dated_file() {
+        let dir = temp_dir("open-today");
+        let (path, mut file) = open_today(&dir, STEM).unwrap();
+        assert_eq!(path.parent(), Some(dir.as_path()));
+        assert!(path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| parse_day(name, STEM))
+            .is_some());
+        file.write_all(b"first\n").unwrap();
+
+        let (second, mut again) = open_today(&dir, STEM).unwrap();
+        again.write_all(b"second\n").unwrap();
+
+        assert!(std::fs::read_to_string(&path).unwrap().contains("first"));
+        assert!(std::fs::read_to_string(&second).unwrap().contains("second"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn open_today_creates_the_dir() {
+        let dir = temp_dir("open-today-mkdir");
+        let (path, _) = open_today(&dir, STEM).unwrap();
+        assert!(path.exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn open_today_folds_the_legacy_file_into_the_rotation() {
+        let dir = temp_dir("open-today-legacy");
+        write(&dir, "hook-claude.log", b"before rotation\n");
+
+        let (path, _) = open_today(&dir, STEM).unwrap();
+
+        assert!(!dir.join("hook-claude.log").exists());
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"before rotation\n",
+            "the legacy file's content must be the handle's starting point"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn open_today_runs_retention() {
+        let dir = temp_dir("open-today-sweep");
+        write(&dir, "hook-claude_2020-01-01.log", b"ancient");
+
+        open_today(&dir, STEM).unwrap();
+
+        assert!(!dir.join("hook-claude_2020-01-01.log").exists());
         std::fs::remove_dir_all(&dir).ok();
     }
 
