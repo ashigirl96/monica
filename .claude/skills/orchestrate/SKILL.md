@@ -53,9 +53,9 @@ PR 本文の Verification の見出しは固定で、`## マージ前の確認` 
 - 各 sub-issue の state・assignee・blockedBy・その issue を閉じる PR（state・isDraft・labels・mergeCommit）。
 - 各 PR の本文。見出し 3 つの下のチェックボックス。
 - merged な PR の Released 判定。
-- `monica task status --project owner/repo` の各行。sub-issue ごとの Task と Run の状態、BLOCKED BY 列（Monica の start gate がまだ塞いでいる上流）。
+- `monica task status --project owner/repo` の各行。sub-issue ごとの Task と Run の状態、BLOCKED BY 列（Monica の start gate がまだ塞いでいる上流）。既定は active な Task しか返さないので、`--status closed` も併せて読む。済んだ sub-issue の Task は Worker flow の最後に閉じられており、片方だけでは行が消えて「Task が無い」と誤読する。
 
-完了条件: sub-issue ごとに「issue の状態・PR の状態・Released か・Task と Run の状態・blockedBy」の 5 つが埋まった表が手元にある。1 つでも欠けた sub-issue があれば読み直す。
+完了条件: sub-issue ごとに「issue の状態・PR の状態・Released か・Task と Run の状態・blockedBy」の 5 つが埋まった表が手元にある。1 つでも欠けた sub-issue があれば読み直す。Task の欄を「無し」と確定してよいのは、active と closed の両方に行が無いときだけ。
 
 ### 4. モードを決める
 
@@ -79,11 +79,12 @@ minimize されていないコメントのうち、先頭行が `<!-- epic-worke
 
 ### 6. 対話入力を Brief に反映する
 
-引数の自由文、またはこの会話であなたが直前に伝えた内容に事実が含まれていれば、ここで本文に書く。
+引数の自由文、またはこの会話であなたが直前に伝えた内容に事実が含まれていれば、ここで本文に書く。前回の Tick 以降にあなたが Brief の箱に入れたチェックも、同じくあなたからの入力としてここで処理する。
 
 - 「〜が終わった」「〜から返事が来た」→ 該当する Human Action にチェックを入れ、`結果:` に得た事実を書く。同じ事実を `## Discovery` にも 1 行追記する。
 - 新しい事実 → `## Discovery` に追記。
 - 新しい人間の作業 → `## Human Action` に追記。Gate はあなたに確認する。
+- `## Verification（未完了）` でチェック済みの項目 → その項目の出どころの PR 本文の同じ行を `- [x]` にして書き戻す（[gh-recipes.md](gh-recipes.md) の「PR 本文のチェックボックスを入れる」）。手順 8 はこの節を PR 本文から作り直すので、先に PR を直さないとチェックが捨てられる。PR に属さない epic レベルの項目は書き戻し先が無いので、本文でチェック済みのまま残し、手順 8 の再生成でも消さない。
 
 ### 7. Frontier と提案を計算する
 
@@ -115,7 +116,7 @@ sub-issue ごとに状態を 1 つ決める。上から順に最初に当たっ�
 
 ### 8. Brief を再生成し、提案して止まる
 
-[brief-template.md](brief-template.md) の区切りに従い、`## Status` と `## Verification（未完了）` を手順 7 の結果で置き換える。区切りの外は手順 5・6 で追記した分以外は触らない。本文の書き込みは、直前に本文を読み直してから行う。
+[brief-template.md](brief-template.md) の区切りに従い、`## Status` と `## Verification（未完了）` を手順 7 の結果で置き換える。区切りの外は手順 5・6 で追記した分以外は触らない。本文の書き込みは、直前に本文を読み直してから行う。`## Verification（未完了）` を置き換える前に、手順 6 の PR への書き戻しが済んでいること — 済んでいれば、その項目は PR 本文でチェック済みになっているので再生成で自然に消える。
 
 続けて報告を出し、あなたの指示を待つ。
 
