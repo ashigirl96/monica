@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::future::Future;
+use std::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
 use monica_application::{
@@ -11,6 +13,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use super::auth::GithubTokenProvider;
+use crate::exec::{redact, GITHUB};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GithubApiClient {
@@ -29,12 +32,12 @@ impl GithubApiClient {
     pub async fn fetch_issue(&self, repo: &str, number: i64) -> Result<GithubIssue> {
         let (owner, name) = split_repo(repo)?;
         let route = format!("/repos/{owner}/{name}/issues/{number}");
-        let issue: IssueResponse = self
-            .crab()
-            .await?
-            .get(route, None::<&()>)
-            .await
-            .map_err(|e| map_github_error(e, &format!("fetch issue {repo}#{number}")))?;
+        let crab = self.crab().await?;
+        let issue: IssueResponse = logged(
+            &format!("fetch issue {repo}#{number}"),
+            crab.get(route, None::<&()>),
+        )
+        .await?;
         issue_from_response(issue, number)
     }
 
@@ -58,12 +61,12 @@ impl GithubApiClient {
     pub async fn fetch_default_branch(&self, repo: &str) -> Result<Option<String>> {
         let (owner, name) = split_repo(repo)?;
         let route = format!("/repos/{owner}/{name}");
-        let response: RepoResponse = self
-            .crab()
-            .await?
-            .get(route, None::<&()>)
-            .await
-            .map_err(|e| map_github_error(e, &format!("fetch repository {repo}")))?;
+        let crab = self.crab().await?;
+        let response: RepoResponse = logged(
+            &format!("fetch repository {repo}"),
+            crab.get(route, None::<&()>),
+        )
+        .await?;
         Ok((!response.default_branch.trim().is_empty()).then_some(response.default_branch))
     }
 
@@ -115,9 +118,51 @@ async fn graphql<T: DeserializeOwned>(
     payload: &serde_json::Value,
     action: &str,
 ) -> Result<T> {
-    crab.graphql(payload)
-        .await
-        .map_err(|e| map_github_error(e, action))
+    logged(action, crab.graphql(payload)).await
+}
+
+/// One line per GitHub call, for the timing and the outcome; the error text a person reads is still
+/// [`map_github_error`]'s.
+///
+/// `status=` only appears on failure: octocrab deserializes a successful response straight into the
+/// body type, so the HTTP status never reaches this side. It survives on the error path because
+/// `Error::GitHub` carries it.
+async fn logged<T>(action: &str, call: impl Future<Output = octocrab::Result<T>>) -> Result<T> {
+    let started = Instant::now();
+    let result = call.await;
+    let duration_ms = started.elapsed().as_millis();
+    match result {
+        Ok(value) => {
+            log::debug!(target: GITHUB, "github ok action={action:?} duration_ms={duration_ms}");
+            Ok(value)
+        }
+        Err(e) => {
+            log::warn!(
+                target: GITHUB,
+                "github failed action={action:?} status={} duration_ms={duration_ms} error={:?}",
+                error_status(&e),
+                redact(&error_detail(&e))
+            );
+            Err(map_github_error(e, action))
+        }
+    }
+}
+
+fn error_status(error: &octocrab::Error) -> String {
+    match error {
+        octocrab::Error::GitHub { source, .. } => source.status_code.as_u16().to_string(),
+        _ => "none".to_string(),
+    }
+}
+
+/// `Display` for `Error::GitHub` is the bare word "GitHub" — what GitHub actually said is one level
+/// down, and it is the only part worth keeping.
+fn error_detail(error: &octocrab::Error) -> String {
+    match error {
+        octocrab::Error::GitHub { source, .. } => source.message.clone(),
+        octocrab::Error::Graphql { source, .. } => source.to_string(),
+        other => other.to_string(),
+    }
 }
 
 fn repository_not_found() -> anyhow::Error {

@@ -38,9 +38,7 @@ pub async fn fetch_link_preview(url: &str) -> Result<LinkPreview, LinkPreviewErr
             parsed.scheme()
         )));
     }
-    let mut response = client()
-        .get(parsed)
-        .send()
+    let mut response = crate::http::send_logged("ogp_fetch", client().get(parsed))
         .await
         .map_err(|e| LinkPreviewError::Fetch(e.into()))?;
     // リダイレクトを追った後の URL を相対パス解決の基準にする

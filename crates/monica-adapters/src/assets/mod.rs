@@ -167,9 +167,7 @@ pub async fn import_asset(url: &str) -> Result<SavedAsset, AssetError> {
             parsed.scheme()
         )));
     }
-    let mut response = client()
-        .get(parsed)
-        .send()
+    let mut response = crate::http::send_logged("asset_import", client().get(parsed))
         .await
         .map_err(|e| AssetError::Fetch(e.into()))?;
     let bytes = read_capped(&mut response).await?;

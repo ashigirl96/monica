@@ -4,6 +4,8 @@ use std::sync::OnceLock;
 use anyhow::{anyhow, Context, Result};
 use monica_application::{AuthGateway, GithubAuthStatus};
 
+use crate::exec::{stderr_message, Exec, GH};
+
 // GUI launches (Finder/Dock) inherit launchd's minimal PATH, which has no
 // Homebrew entry — so a bare `gh` lookup fails there and the well-known
 // install locations must be tried explicitly.
@@ -59,12 +61,10 @@ fn gh_auth_token() -> Result<String> {
     // here and would fail with a misleading 401.
     let output = run_gh(&["auth", "token", "--hostname", "github.com"])?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stderr = stderr.trim();
         return Err(anyhow!(
             "`gh auth token` failed ({}): {}; run `gh auth login`",
             output.status,
-            if stderr.is_empty() { "no error output" } else { stderr }
+            stderr_message(&output.stderr)
         ));
     }
     let token = String::from_utf8(output.stdout)
@@ -82,8 +82,13 @@ fn run_gh(args: &[&str]) -> Result<std::process::Output> {
     // preempt a working one later in the list, so spawn errors other than
     // NotFound are remembered and surfaced only when every candidate fails.
     let mut spawn_error: Option<(&str, std::io::Error)> = None;
-    for candidate in GH_CANDIDATES {
-        match Command::new(candidate).args(args).output() {
+    for (index, candidate) in GH_CANDIDATES.iter().enumerate() {
+        let mut command = Command::new(candidate);
+        command.args(args);
+        // Missing candidates are the normal shape of this search, not a fault: a GUI launch is
+        // expected to miss the bare `gh` and find a Homebrew one. Only the exhausted search warns.
+        let attempt = u32::try_from(index).unwrap_or(u32::MAX).saturating_add(1);
+        match Exec::new(GH, &mut command).probing().attempt(attempt).output() {
             Ok(output) => return Ok(output),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
             Err(e) => {
@@ -93,12 +98,17 @@ fn run_gh(args: &[&str]) -> Result<std::process::Output> {
             }
         }
     }
+    let candidates = GH_CANDIDATES.len();
     match spawn_error {
         Some((candidate, e)) => {
+            log::warn!(target: GH, "gh unusable candidates={candidates} last={candidate} error={e}");
             Err(anyhow!(e)).context(format!("failed to run `{candidate} {}`", args.join(" ")))
         }
-        None => Err(anyhow!(
-            "GitHub CLI (gh) not found; install it and run `gh auth login`"
-        )),
+        None => {
+            log::warn!(target: GH, "gh not found candidates={candidates}");
+            Err(anyhow!(
+                "GitHub CLI (gh) not found; install it and run `gh auth login`"
+            ))
+        }
     }
 }

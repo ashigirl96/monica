@@ -24,6 +24,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
 
+use crate::exec::{Exec, TRASH};
+
 const TRASH_DIR: &str = ".monica-trash";
 /// Written by [`bury`] when it creates a trash directory; its absence means the directory is not
 /// Monica's to empty.
@@ -70,8 +72,8 @@ fn bury_as(worktree: &Path, stamp: &str) -> Result<()> {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
             log::warn!(
-                target: "monica_adapters::worktree_trash",
-                "{} is on another volume than {}; deleting synchronously",
+                target: TRASH,
+                "trash across volumes worktree={} trash={} action=delete_synchronously",
                 worktree.display(),
                 trash.display()
             );
@@ -122,7 +124,15 @@ enum Rollback {
 fn claim(trash: &Path, marker: &Path, rollback: Rollback) -> Result<()> {
     fs::write(marker, b"").map_err(|e| {
         if matches!(rollback, Rollback::RemoveDir) {
-            let _ = fs::remove_dir(trash);
+            // The write failure is what the caller hears about; a rollback that cannot finish
+            // only leaves an empty directory the next burial will adopt.
+            if let Err(e) = fs::remove_dir(trash) {
+                log::debug!(
+                    target: TRASH,
+                    "trash rollback incomplete trash={} error={e}",
+                    trash.display()
+                );
+            }
         }
         anyhow!(e).context(format!("failed to write {}", marker.display()))
     })
@@ -173,14 +183,8 @@ pub(crate) fn reap(worktrees: &[PathBuf]) {
         return;
     }
     match spawn_detached_rm(paths) {
-        Ok(count) => log::info!(
-            target: "monica_adapters::worktree_trash",
-            "reaping {count} trashed worktree entries"
-        ),
-        Err(e) => log::error!(
-            target: "monica_adapters::worktree_trash",
-            "failed to start worktree reaper: {e:#}"
-        ),
+        Ok(count) => log::info!(target: TRASH, "reaping trashed worktrees entries={count}"),
+        Err(e) => log::error!(target: TRASH, "worktree reaper not started error={e:#}"),
     }
 }
 
@@ -200,7 +204,10 @@ fn spawn_detached_rm(paths: Vec<PathBuf>) -> Result<usize> {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
-    let mut child = command.spawn().context("failed to spawn /bin/rm")?;
+    let mut child = Exec::new(TRASH, &mut command)
+        .field("entries", paths.len().to_string())
+        .spawn()
+        .context("failed to spawn /bin/rm")?;
     let count = paths.len();
     let watcher = std::thread::Builder::new()
         .name("monica-worktree-reaper".to_string())
@@ -215,13 +222,14 @@ fn spawn_detached_rm(paths: Vec<PathBuf>) -> Result<usize> {
             match child.wait() {
                 Ok(status) if status.success() => {}
                 Ok(status) => log::warn!(
-                    target: "monica_adapters::worktree_trash",
-                    "rm -rf exited with {status} for {}",
+                    target: TRASH,
+                    "reap failed exit={} paths={:?}",
+                    status.code().map_or_else(|| "signal".to_string(), |c| c.to_string()),
                     summary()
                 ),
                 Err(e) => log::warn!(
-                    target: "monica_adapters::worktree_trash",
-                    "failed to wait for rm -rf ({}): {e}",
+                    target: TRASH,
+                    "reap not waited on paths={:?} error={e}",
                     summary()
                 ),
             }
@@ -229,10 +237,7 @@ fn spawn_detached_rm(paths: Vec<PathBuf>) -> Result<usize> {
     // The rm is already running and detached; losing its watcher only costs a zombie entry, so it
     // must not be reported as a failed reap.
     if let Err(e) = watcher {
-        log::warn!(
-            target: "monica_adapters::worktree_trash",
-            "reaper wait thread not started ({e}); rm -rf runs unwatched"
-        );
+        log::warn!(target: TRASH, "reaper watcher not started consequence=unwatched error={e}");
     }
     Ok(count)
 }

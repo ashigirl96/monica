@@ -11,6 +11,12 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use monica_application::{SetupEnv, SetupOutcome, SetupRunner};
 
+use crate::exec::{Exec, SETUP};
+
+/// `kill -KILL` on a process group the preceding `-TERM` already emptied exits 1 ("No such
+/// process"). That is the intended end of every interrupt and timeout, not a failure.
+const ALREADY_GONE: &[i32] = &[1];
+
 const SETUP_SCRIPT_REL: &str = ".monica/setup.sh";
 const SETUP_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
@@ -51,12 +57,15 @@ pub fn run_setup_script(
     env: &SetupEnv,
     timeout: Duration,
 ) -> Result<SetupOutcome> {
+    let started = Instant::now();
     if take_interrupt_request() {
         write_log(log_path, "monica: setup interrupted before it started\n")?;
-        return Ok(SetupOutcome::Failed {
+        let outcome = SetupOutcome::Failed {
             code: None,
             timed_out: false,
-        });
+        };
+        record_outcome(env, started, "interrupted", &outcome);
+        return Ok(outcome);
     }
     let script = worktree.join(SETUP_SCRIPT_REL);
     if !script.is_file() {
@@ -64,6 +73,7 @@ pub fn run_setup_script(
             log_path,
             &format!("monica: no {SETUP_SCRIPT_REL}; setup skipped\n"),
         )?;
+        record_outcome(env, started, "skipped", &SetupOutcome::Skipped);
         return Ok(SetupOutcome::Skipped);
     }
 
@@ -75,7 +85,7 @@ pub fn run_setup_script(
     #[cfg(unix)]
     command.process_group(0);
 
-    let spawned = command
+    command
         .current_dir(worktree)
         .env("MONICA_TASK_ID", &env.monica_id)
         .env("MONICA_TASK_RUN_ID", &env.task_run_id)
@@ -84,7 +94,12 @@ pub fn run_setup_script(
         .env("MONICA_WORKTREE", &env.worktree)
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
-        .stderr(Stdio::from(log_err))
+        .stderr(Stdio::from(log_err));
+
+    let spawned = Exec::new(SETUP, &mut command)
+        .field("task_id", env.monica_id.clone())
+        .field("task_run_id", env.task_run_id.clone())
+        .field("project_id", env.project_id.clone())
         .spawn();
 
     let mut child = match spawned {
@@ -94,43 +109,77 @@ pub fn run_setup_script(
                 log_path,
                 &format!("monica: failed to spawn {SETUP_SCRIPT_REL}: {e}\n"),
             )?;
-            return Ok(SetupOutcome::Failed {
+            let outcome = SetupOutcome::Failed {
                 code: None,
                 timed_out: false,
-            });
+            };
+            record_outcome(env, started, "not started", &outcome);
+            return Ok(outcome);
         }
     };
 
     let start = Instant::now();
     loop {
         if let Some(status) = child.try_wait()? {
-            return Ok(if status.success() {
+            let outcome = if status.success() {
                 SetupOutcome::Succeeded
             } else {
                 SetupOutcome::Failed {
                     code: status.code(),
                     timed_out: false,
                 }
-            });
+            };
+            record_outcome(env, started, "exited", &outcome);
+            return Ok(outcome);
         }
         if take_interrupt_request() {
-            return kill_setup(
+            let outcome = kill_setup(
                 &mut child,
                 log_path,
                 "monica: setup interrupted; killed\n",
                 false,
-            );
+            )?;
+            record_outcome(env, started, "interrupted", &outcome);
+            return Ok(outcome);
         }
         if start.elapsed() >= timeout {
-            return kill_setup(
+            let outcome = kill_setup(
                 &mut child,
                 log_path,
                 &format!("monica: setup timed out after {timeout:?}; killed\n"),
                 true,
-            );
+            )?;
+            record_outcome(env, started, "timed out", &outcome);
+            return Ok(outcome);
         }
         thread::sleep(SETUP_POLL_INTERVAL);
     }
+}
+
+/// One line per setup run, whatever became of it, carrying the ids that tie it to everything else
+/// written about the same run.
+fn record_outcome(env: &SetupEnv, started: Instant, reason: &str, outcome: &SetupOutcome) {
+    let (level, exit, timed_out) = match outcome {
+        SetupOutcome::Failed { code, timed_out } => (
+            log::Level::Warn,
+            code.map_or_else(|| "none".to_string(), |code| code.to_string()),
+            *timed_out,
+        ),
+        SetupOutcome::Succeeded => (log::Level::Debug, "0".to_string(), false),
+        // Nothing ran, so there is no status to report as a zero.
+        SetupOutcome::Skipped | SetupOutcome::ReusedWorktree => {
+            (log::Level::Debug, "none".to_string(), false)
+        }
+    };
+    log::log!(
+        target: SETUP,
+        level,
+        "setup {reason} task_id={} task_run_id={} project_id={} exit={exit} timed_out={timed_out} duration_ms={}",
+        env.monica_id,
+        env.task_run_id,
+        env.project_id,
+        started.elapsed().as_millis()
+    );
 }
 
 fn kill_setup(
@@ -158,30 +207,28 @@ pub(super) fn terminate_setup_process_tree(pid: u32) -> Result<()> {
     #[cfg(unix)]
     {
         let pgid = format!("-{pid}");
-        let _ = Command::new("kill")
-            .arg("-TERM")
-            .arg(&pgid)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-        let _ = Command::new("kill")
-            .arg("-KILL")
-            .arg(&pgid)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        for signal in ["-TERM", "-KILL"] {
+            let mut command = Command::new("kill");
+            command
+                .arg(signal)
+                .arg(&pgid)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            let _ = Exec::new(SETUP, &mut command).benign(ALREADY_GONE).status();
+        }
         Ok(())
     }
 
     #[cfg(not(unix))]
     {
         let pid = pid.to_string();
-        let _ = Command::new("taskkill")
+        let mut command = Command::new("taskkill");
+        command
             .args(["/T", "/F", "/PID"])
             .arg(&pid)
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+            .stderr(Stdio::null());
+        let _ = Exec::new(SETUP, &mut command).benign(ALREADY_GONE).status();
         Ok(())
     }
 }

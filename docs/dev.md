@@ -52,6 +52,28 @@ MONICA_LOG=debug bun run tauri dev
 MONICA_LOG=info,monica_application::github_sync=debug bun run tauri dev
 ```
 
+CLI（`./monica`）も同じ `MONICA_LOG` を解釈し、stderr に出す（stdout はコマンドの出力そのものなので汚さない）。既定レベルだけがビルドごとに違う。
+
+| プロセス            | 既定   | 出力先                                                              |
+| ------------------- | ------ | ------------------------------------------------------------------- |
+| desktop             | `info` | release: `monica.log` / dev: stdout + webview                       |
+| `monica <その他>`   | `warn` | stderr                                                              |
+| `monica hook <...>` | `off`  | stderr（`hook-<agent>.log` は `MONICA_LOG` と無関係に常に書かれる） |
+
+hook が既定で黙るのは、stderr が呼び出し元のエージェントに流れるため。調査時は `MONICA_LOG=debug` を明示すれば出る。
+
+```bash
+MONICA_LOG=debug ./monica task run MON-42
+MONICA_LOG=warn,monica_adapters=debug ./monica task run MON-42   # 外部呼び出しだけ見る
+```
+
+外部呼び出し（git / gh / GitHub API / HTTP / プロセス起動）は `monica_adapters::{git,gh,github,http,setup,worktree_trash}` に 1 呼び出し 1 行で出る。成功は DEBUG、失敗は WARN。
+
+```
+DEBUG monica_adapters::git exec cmd="git -C /path/to/repo worktree add …" cwd=… exit=0 duration_ms=118
+WARN  monica_adapters::git exec cmd="git -C /path/to/repo worktree add …" cwd=… exit=128 duration_ms=12 stderr="fatal: …"
+```
+
 **Finder / Dock から起動した `.app` はシェルの環境変数を引き継がない**（上の PATH の話と同じ理由）。release で効かせるには `launchctl setenv MONICA_LOG debug` してから再起動する。
 
 `debug` にすると notification drain が 2 秒ごとに数行出る（畳まれた tick 自身と、façade を開き直すたびの `rusqlite_migration`）。特定の target だけ上げるほうが読みやすい。
