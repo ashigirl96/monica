@@ -18,17 +18,26 @@ use crate::log_filter::{self, LogFilter};
 /// neither `MONICA_LOG` nor `RUST_LOG` says otherwise.
 pub fn install(fallback: LevelFilter) {
     let mut filter = log_filter::from_env(fallback);
-    // A typo must not keep the command from running, but it cannot be swallowed either — it is
-    // reported once the logger is up, which is the earliest anything can be said at all.
-    let unknown = std::mem::take(&mut filter.unknown);
+    // A typo must not keep the command from running, but it cannot be swallowed either — and it
+    // cannot be reported through the logger it is misconfiguring: `monica hook` falls back to
+    // `Off`, so a spec of `bogus` leaves a ceiling that discards this very warning. It goes
+    // straight to stderr, which is where the logger would have put it anyway.
+    for line in unknown_filter_notices(&filter.unknown) {
+        let _ = writeln!(std::io::stderr(), "{line}");
+    }
+    filter.unknown.clear();
+
     let ceiling = ceiling(&filter);
-    if log::set_boxed_logger(Box::new(StderrLogger { filter })).is_err() {
-        return;
+    if log::set_boxed_logger(Box::new(StderrLogger { filter })).is_ok() {
+        log::set_max_level(ceiling);
     }
-    log::set_max_level(ceiling);
-    for token in unknown {
-        log::warn!(target: "monica_runtime::startup", "ignoring unparsable log filter {token:?}");
-    }
+}
+
+fn unknown_filter_notices(unknown: &[String]) -> Vec<String> {
+    unknown
+        .iter()
+        .map(|token| format!("WARN monica_runtime::startup ignoring unparsable log filter {token:?}"))
+        .collect()
 }
 
 struct StderrLogger {
@@ -127,6 +136,23 @@ mod tests {
         assert_eq!(ceiling(&filter("error,monica_adapters=debug")), LevelFilter::Debug);
         assert_eq!(ceiling(&filter("info")), LevelFilter::Info);
         assert_eq!(ceiling(&filter("")), LevelFilter::Warn);
+    }
+
+    /// `monica hook` falls back to `Off`, which would otherwise discard the one warning that says
+    /// why nothing is being logged.
+    #[test]
+    fn an_unparsable_token_is_reported_even_when_the_filter_silences_everything() {
+        let filter = log_filter::parse("bogus", LevelFilter::Off);
+        assert_eq!(ceiling(&filter), LevelFilter::Off);
+
+        let notices = unknown_filter_notices(&filter.unknown);
+        assert_eq!(notices.len(), 1);
+        assert!(notices[0].contains("\"bogus\""));
+    }
+
+    #[test]
+    fn a_well_formed_filter_produces_no_notices() {
+        assert!(unknown_filter_notices(&filter("info,monica_adapters=debug").unknown).is_empty());
     }
 
     #[test]

@@ -36,7 +36,7 @@ pub(crate) async fn send_logged(
     let mut fields = vec![
         ("op", op.to_string()),
         ("method", request.method().to_string()),
-        ("url", redact(request.url().as_str()).into_owned()),
+        ("url", safe_url(request.url())),
     ];
 
     let started = Instant::now();
@@ -62,6 +62,29 @@ pub(crate) async fn send_logged(
     result
 }
 
+/// A URL fit to write down. These URLs come from whoever pasted a link, so the secrets they can
+/// carry have no fixed shape — `https://user:pass@…`, `?token=…`, a presigned `X-Amz-Signature`.
+/// Masking only the patterns we happen to know would leak the rest, so userinfo and every query
+/// value go regardless of name; the keys stay, since which parameters were sent is the part worth
+/// having when a fetch misbehaves.
+fn safe_url(url: &reqwest::Url) -> String {
+    let mut safe = url.clone();
+    if !safe.username().is_empty() || safe.password().is_some() {
+        let _ = safe.set_username("***");
+        let _ = safe.set_password(None);
+    }
+    let masked = safe.query().map(|_| {
+        safe.query_pairs()
+            .map(|(key, _)| format!("{key}=***"))
+            .collect::<Vec<_>>()
+            .join("&")
+    });
+    if let Some(masked) = masked {
+        safe.set_query(Some(&masked));
+    }
+    redact(safe.as_str()).into_owned()
+}
+
 // reqwest is built with `rustls-no-provider`, so the single rustls instance has
 // no default CryptoProvider and would panic on first TLS use. Install ring to
 // match octocrab's `rustls-ring`; ignore the error if another caller won the race.
@@ -72,4 +95,38 @@ fn install_crypto_provider() {
             log::debug!(target: HTTP, "crypto provider already installed by another caller");
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_url;
+
+    fn url(raw: &str) -> reqwest::Url {
+        reqwest::Url::parse(raw).unwrap()
+    }
+
+    #[test]
+    fn a_url_without_secrets_survives_intact() {
+        assert_eq!(safe_url(&url("https://example.com/a/b")), "https://example.com/a/b");
+    }
+
+    #[test]
+    fn userinfo_is_replaced_rather_than_carried_into_the_log() {
+        let safe = safe_url(&url("https://alice:hunter2@example.com/a"));
+        assert_eq!(safe, "https://***@example.com/a");
+        assert!(!safe.contains("hunter2") && !safe.contains("alice"));
+    }
+
+    #[test]
+    fn query_values_are_masked_whatever_they_are_named() {
+        assert_eq!(
+            safe_url(&url("https://example.com/p?token=s3cret&w=64&X-Amz-Signature=abc")),
+            "https://example.com/p?token=***&w=***&X-Amz-Signature=***"
+        );
+    }
+
+    #[test]
+    fn an_empty_query_does_not_become_a_stray_parameter() {
+        assert_eq!(safe_url(&url("https://example.com/p?")), "https://example.com/p?");
+    }
 }
