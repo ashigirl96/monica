@@ -1,4 +1,5 @@
 mod bridge;
+mod command_log;
 mod commands;
 mod event_sink;
 mod native_menu;

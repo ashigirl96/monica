@@ -4,6 +4,7 @@ use monica_terminal_protocol::RequestOp;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
+use crate::command_log::{self, ids};
 use crate::event_sink;
 use crate::ptyd::{PtydHandle, PtydTerminalDaemon};
 
@@ -32,29 +33,33 @@ pub async fn terminal_create_session(
     cols: u16,
     env: Option<Vec<(String, String)>>,
 ) -> Result<TerminalSession, ApiError> {
-    event_sink::off_main(move || {
-        let state = app.state::<PtydHandle>();
-        let daemon = PtydTerminalDaemon { handle: state.inner(), app: &app };
-        let new = NewTerminalSession {
-            runspace_id: Some(RunspaceId::from_store(runspace_id)),
-            tab_id: Some(tab_id),
-            kind: kind.into(),
-            cwd,
-            shell: default_shell(),
-            rows,
-            cols,
-        };
-        let mut env = env.unwrap_or_default();
-        let web_url = app.state::<crate::WebUrl>();
-        // caller の env が key 単位で勝つ規約（create_terminal_session の merge と同じ向き）。
-        if !web_url.0.is_empty() && !env.iter().any(|(k, _)| k == "MONICA_WEB_URL") {
-            env.push(("MONICA_WEB_URL".to_string(), web_url.0.clone()));
-        }
-        let mut monica = event_sink::open(&app)?;
-        let session = monica
-            .executions()
-            .create_terminal_session(&daemon, new, env)?;
-        Ok(TerminalSession::from(session))
+    let log_ids = ids![runspace_id, tab_id, cwd];
+    command_log::operation("terminal_create_session", log_ids, async move {
+        event_sink::off_main(move || {
+            let state = app.state::<PtydHandle>();
+            let daemon = PtydTerminalDaemon { handle: state.inner(), app: &app };
+            let new = NewTerminalSession {
+                runspace_id: Some(RunspaceId::from_store(runspace_id)),
+                tab_id: Some(tab_id),
+                kind: kind.into(),
+                cwd,
+                shell: default_shell(),
+                rows,
+                cols,
+            };
+            let mut env = env.unwrap_or_default();
+            let web_url = app.state::<crate::WebUrl>();
+            // caller の env が key 単位で勝つ規約（create_terminal_session の merge と同じ向き）。
+            if !web_url.0.is_empty() && !env.iter().any(|(k, _)| k == "MONICA_WEB_URL") {
+                env.push(("MONICA_WEB_URL".to_string(), web_url.0.clone()));
+            }
+            let mut monica = event_sink::open(&app)?;
+            let session = monica
+                .executions()
+                .create_terminal_session(&daemon, new, env)?;
+            Ok(TerminalSession::from(session))
+        })
+        .await
     })
     .await
 }
@@ -66,18 +71,22 @@ pub async fn terminal_attach(
     session_id: String,
     replay_bytes: Option<u32>,
 ) -> Result<AttachResult, ApiError> {
-    event_sink::off_main(move || {
-        let state = app.state::<PtydHandle>();
-        let daemon = PtydTerminalDaemon { handle: state.inner(), app: &app };
-        let mut monica = event_sink::open(&app)?;
-        let attachment = monica
-            .executions()
-            .attach_terminal_session(&daemon, &session_id, replay_bytes)?;
-        Ok(AttachResult {
-            replay: attachment.replay,
-            rows: attachment.rows,
-            cols: attachment.cols,
+    let log_ids = ids![session_id];
+    command_log::operation("terminal_attach", log_ids, async move {
+        event_sink::off_main(move || {
+            let state = app.state::<PtydHandle>();
+            let daemon = PtydTerminalDaemon { handle: state.inner(), app: &app };
+            let mut monica = event_sink::open(&app)?;
+            let attachment = monica
+                .executions()
+                .attach_terminal_session(&daemon, &session_id, replay_bytes)?;
+            Ok(AttachResult {
+                replay: attachment.replay,
+                rows: attachment.rows,
+                cols: attachment.cols,
+            })
         })
+        .await
     })
     .await
 }
@@ -85,11 +94,15 @@ pub async fn terminal_attach(
 #[tauri::command]
 #[specta::specta]
 pub async fn terminal_detach(app: AppHandle, session_id: String) -> Result<(), ApiError> {
-    event_sink::off_main(move || {
-        let state = app.state::<PtydHandle>();
-        let daemon = PtydTerminalDaemon { handle: state.inner(), app: &app };
-        let mut monica = event_sink::open(&app)?;
-        Ok(monica.executions().detach_terminal_session(&daemon, &session_id)?)
+    let log_ids = ids![session_id];
+    command_log::operation("terminal_detach", log_ids, async move {
+        event_sink::off_main(move || {
+            let state = app.state::<PtydHandle>();
+            let daemon = PtydTerminalDaemon { handle: state.inner(), app: &app };
+            let mut monica = event_sink::open(&app)?;
+            Ok(monica.executions().detach_terminal_session(&daemon, &session_id)?)
+        })
+        .await
     })
     .await
 }
@@ -101,14 +114,18 @@ pub async fn terminal_write(
     session_id: String,
     data: String,
 ) -> Result<(), ApiError> {
-    event_sink::off_main(move || {
-        let client = app
-            .state::<PtydHandle>()
-            .ensure_connected(&app)
-            .map_err(|e| ApiError::external(format!("{e:#}")))?;
-        client
-            .notify(RequestOp::Write { session_id, data })
-            .map_err(|e| ApiError::external(e.to_string()))
+    let log_ids = ids![session_id].with("bytes", data.len());
+    command_log::stream("terminal_write", log_ids, async move {
+        event_sink::off_main(move || {
+            let client = app
+                .state::<PtydHandle>()
+                .ensure_connected(&app)
+                .map_err(|e| ApiError::external(format!("{e:#}")))?;
+            client
+                .notify(RequestOp::Write { session_id, data })
+                .map_err(|e| ApiError::external(e.to_string()))
+        })
+        .await
     })
     .await
 }
@@ -121,14 +138,20 @@ pub async fn terminal_resize(
     rows: u16,
     cols: u16,
 ) -> Result<(), ApiError> {
-    event_sink::off_main(move || {
-        let client = app
-            .state::<PtydHandle>()
-            .ensure_connected(&app)
-            .map_err(|e| ApiError::external(format!("{e:#}")))?;
-        client
-            .notify(RequestOp::Resize { session_id, rows, cols })
-            .map_err(|e| ApiError::external(e.to_string()))
+    let log_ids = ids![session_id]
+        .with("rows", usize::from(rows))
+        .with("cols", usize::from(cols));
+    command_log::stream("terminal_resize", log_ids, async move {
+        event_sink::off_main(move || {
+            let client = app
+                .state::<PtydHandle>()
+                .ensure_connected(&app)
+                .map_err(|e| ApiError::external(format!("{e:#}")))?;
+            client
+                .notify(RequestOp::Resize { session_id, rows, cols })
+                .map_err(|e| ApiError::external(e.to_string()))
+        })
+        .await
     })
     .await
 }
@@ -136,11 +159,15 @@ pub async fn terminal_resize(
 #[tauri::command]
 #[specta::specta]
 pub async fn terminal_terminate(app: AppHandle, session_id: String) -> Result<(), ApiError> {
-    event_sink::off_main(move || {
-        let state = app.state::<PtydHandle>();
-        let daemon = PtydTerminalDaemon { handle: state.inner(), app: &app };
-        let mut monica = event_sink::open(&app)?;
-        Ok(monica.executions().terminate_terminal_session(&daemon, &session_id)?)
+    let log_ids = ids![session_id];
+    command_log::operation("terminal_terminate", log_ids, async move {
+        event_sink::off_main(move || {
+            let state = app.state::<PtydHandle>();
+            let daemon = PtydTerminalDaemon { handle: state.inner(), app: &app };
+            let mut monica = event_sink::open(&app)?;
+            Ok(monica.executions().terminate_terminal_session(&daemon, &session_id)?)
+        })
+        .await
     })
     .await
 }
@@ -151,17 +178,21 @@ pub async fn terminal_list_sessions(
     app: AppHandle,
     runspace_id: Option<String>,
 ) -> Result<Vec<TerminalSession>, ApiError> {
-    event_sink::off_main(move || {
-        let state = app.state::<PtydHandle>();
-        let daemon = PtydTerminalDaemon { handle: state.inner(), app: &app };
-        let mut monica = event_sink::open(&app)?;
-        let runspace_id = runspace_id.map(RunspaceId::from_store);
-        Ok(monica
-            .executions()
-            .list_terminal_sessions(&daemon, runspace_id.as_ref())?
-            .into_iter()
-            .map(TerminalSession::from)
-            .collect())
+    let log_ids = ids![runspace_id];
+    command_log::routine("terminal_list_sessions", log_ids, async move {
+        event_sink::off_main(move || {
+            let state = app.state::<PtydHandle>();
+            let daemon = PtydTerminalDaemon { handle: state.inner(), app: &app };
+            let mut monica = event_sink::open(&app)?;
+            let runspace_id = runspace_id.map(RunspaceId::from_store);
+            Ok(monica
+                .executions()
+                .list_terminal_sessions(&daemon, runspace_id.as_ref())?
+                .into_iter()
+                .map(TerminalSession::from)
+                .collect())
+        })
+        .await
     })
     .await
 }
@@ -172,12 +203,16 @@ pub async fn terminal_load_state(
     app: AppHandle,
     window_label: String,
 ) -> Result<TerminalStateSnapshot, ApiError> {
-    event_sink::off_main(move || {
-        let mut monica = event_sink::open(&app)?;
-        Ok(monica
-            .executions()
-            .load_terminal_state(&window_label)?
-            .into())
+    let log_ids = ids![window_label];
+    command_log::routine("terminal_load_state", log_ids, async move {
+        event_sink::off_main(move || {
+            let mut monica = event_sink::open(&app)?;
+            Ok(monica
+                .executions()
+                .load_terminal_state(&window_label)?
+                .into())
+        })
+        .await
     })
     .await
 }
@@ -189,11 +224,15 @@ pub async fn terminal_save_state(
     window_label: String,
     state: TerminalStateSnapshot,
 ) -> Result<(), ApiError> {
-    event_sink::off_main(move || {
-        let mut monica = event_sink::open(&app)?;
-        Ok(monica
-            .executions()
-            .save_terminal_state(&window_label, &state.into())?)
+    let log_ids = ids![window_label];
+    command_log::routine("terminal_save_state", log_ids, async move {
+        event_sink::off_main(move || {
+            let mut monica = event_sink::open(&app)?;
+            Ok(monica
+                .executions()
+                .save_terminal_state(&window_label, &state.into())?)
+        })
+        .await
     })
     .await
 }

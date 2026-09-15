@@ -7,6 +7,7 @@ import "@fontsource-variable/jetbrains-mono";
 import App from "./App";
 import { commands } from "./commands/bindings";
 import { unwrap } from "./commands/unwrap";
+import { installConsoleForwarding } from "./lib/forward-console";
 import { initGithubSync } from "./stores/github-sync";
 import { queryClient } from "./stores/query-client";
 import { initQuerySync } from "./stores/query-sync";
@@ -27,6 +28,9 @@ import "./styles/globals.css";
 // Restore the saved view before the first paint so the app opens on the last Space
 // instead of flashing the Dashboard. A failed restore falls back to defaults.
 async function bootstrap() {
+  // Before anything else can throw: a release build has no devtools and no webview log target, so
+  // an exception raised during startup is only recoverable from `monica.log`.
+  installConsoleForwarding();
   const store = getDefaultStore();
   store.set(queryClientAtom, queryClient);
   initQuerySync();

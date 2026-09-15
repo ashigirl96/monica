@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use monica_api::ApiError;
 
+use crate::command_log::{self, ids};
 use crate::event_sink;
 
 /// Resolve each candidate against `cwd` (expanding a leading `~`) and return the
@@ -14,11 +15,15 @@ pub async fn resolve_editor_paths(
     cwd: String,
     candidates: Vec<String>,
 ) -> Result<Vec<Option<String>>, ApiError> {
-    event_sink::off_main(move || {
-        Ok(candidates
-            .iter()
-            .map(|raw| resolve_one(&cwd, raw))
-            .collect())
+    let log_ids = ids![cwd].with("candidates", candidates.len());
+    command_log::routine("resolve_editor_paths", log_ids, async move {
+        event_sink::off_main(move || {
+            Ok(candidates
+                .iter()
+                .map(|raw| resolve_one(&cwd, raw))
+                .collect())
+        })
+        .await
     })
     .await
 }
@@ -26,25 +31,29 @@ pub async fn resolve_editor_paths(
 #[tauri::command]
 #[specta::specta]
 pub async fn open_in_editor(path: String) -> Result<(), ApiError> {
-    event_sink::off_main(move || {
-        #[cfg(target_os = "macos")]
-        {
-            let status = std::process::Command::new("/usr/bin/open")
-                .args(["-a", "Zed", &path])
-                .status()
-                .map_err(|e| ApiError::external(format!("failed to launch Zed: {e}")))?;
-            if !status.success() {
-                return Err(ApiError::external(format!(
-                    "`open -a Zed {path}` exited with {status}"
-                )));
+    let log_ids = ids![path];
+    command_log::operation("open_in_editor", log_ids, async move {
+        event_sink::off_main(move || {
+            #[cfg(target_os = "macos")]
+            {
+                let status = std::process::Command::new("/usr/bin/open")
+                    .args(["-a", "Zed", &path])
+                    .status()
+                    .map_err(|e| ApiError::external(format!("failed to launch Zed: {e}")))?;
+                if !status.success() {
+                    return Err(ApiError::external(format!(
+                        "`open -a Zed {path}` exited with {status}"
+                    )));
+                }
+                Ok(())
             }
-            Ok(())
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = path;
-            Err(ApiError::external("open_in_editor is only supported on macOS"))
-        }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = path;
+                Err(ApiError::external("open_in_editor is only supported on macOS"))
+            }
+        })
+        .await
     })
     .await
 }

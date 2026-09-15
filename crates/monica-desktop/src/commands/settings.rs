@@ -4,6 +4,7 @@ use tauri::{AppHandle, Manager};
 use tauri_specta::Event;
 
 use crate::bridge::BridgeHandle;
+use crate::command_log::{self, ids};
 use crate::event_sink;
 
 /// native メニューの Settings… から設定モーダルを開かせる。
@@ -14,14 +15,17 @@ pub struct OpenSettingsRequested {}
 #[tauri::command]
 #[specta::specta]
 pub async fn translate_settings_get(app: AppHandle) -> Result<TranslateSettingsSnapshot, ApiError> {
-    event_sink::off_main(move || {
-        let base = monica_paths::base_dir().map_err(|e| ApiError::storage(format!("{e:#}")))?;
-        let settings = monica_settings::Settings::load_from(&base)
-            .map_err(|e| ApiError::storage(format!("{e:#}")))?;
-        Ok(TranslateSettingsSnapshot {
-            settings: settings.translate.into(),
-            bridge_running: app.state::<BridgeHandle>().is_running(),
+    command_log::routine("translate_settings_get", ids![], async move {
+        event_sink::off_main(move || {
+            let base = monica_paths::base_dir().map_err(|e| ApiError::storage(format!("{e:#}")))?;
+            let settings = monica_settings::Settings::load_from(&base)
+                .map_err(|e| ApiError::storage(format!("{e:#}")))?;
+            Ok(TranslateSettingsSnapshot {
+                settings: settings.translate.into(),
+                bridge_running: app.state::<BridgeHandle>().is_running(),
+            })
         })
+        .await
     })
     .await
 }
@@ -32,30 +36,33 @@ pub async fn translate_settings_save(
     app: AppHandle,
     settings: TranslateSettings,
 ) -> Result<TranslateSettingsSnapshot, ApiError> {
-    event_sink::off_main(move || {
-        let translate: monica_settings::TranslateSettings = settings.into();
-        translate
-            .validate()
-            .map_err(|e| ApiError::validation(format!("{e:#}")))?;
+    command_log::operation("translate_settings_save", ids![], async move {
+        event_sink::off_main(move || {
+            let translate: monica_settings::TranslateSettings = settings.into();
+            translate
+                .validate()
+                .map_err(|e| ApiError::validation(format!("{e:#}")))?;
 
-        let base = monica_paths::base_dir().map_err(|e| ApiError::storage(format!("{e:#}")))?;
-        // translate 以外のセクションを消さないよう read-modify-write
-        let mut current = monica_settings::Settings::load_from(&base)
-            .map_err(|e| ApiError::storage(format!("{e:#}")))?;
-        current.translate = translate;
-        current
-            .save_to(&base)
-            .map_err(|e| ApiError::storage(format!("{e:#}")))?;
+            let base = monica_paths::base_dir().map_err(|e| ApiError::storage(format!("{e:#}")))?;
+            // translate 以外のセクションを消さないよう read-modify-write
+            let mut current = monica_settings::Settings::load_from(&base)
+                .map_err(|e| ApiError::storage(format!("{e:#}")))?;
+            current.translate = translate;
+            current
+                .save_to(&base)
+                .map_err(|e| ApiError::storage(format!("{e:#}")))?;
 
-        let handle = app.state::<BridgeHandle>();
-        handle
-            .apply(current.translate.enabled)
-            .map_err(|e| ApiError::external(format!("{e:#}")))?;
+            let handle = app.state::<BridgeHandle>();
+            handle
+                .apply(current.translate.enabled)
+                .map_err(|e| ApiError::external(format!("{e:#}")))?;
 
-        Ok(TranslateSettingsSnapshot {
-            settings: current.translate.into(),
-            bridge_running: handle.is_running(),
+            Ok(TranslateSettingsSnapshot {
+                settings: current.translate.into(),
+                bridge_running: handle.is_running(),
+            })
         })
+        .await
     })
     .await
 }

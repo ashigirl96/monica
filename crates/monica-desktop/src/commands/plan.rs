@@ -4,6 +4,7 @@ use monica_api::ApiError;
 use serde::Serialize;
 use tauri::AppHandle;
 
+use crate::command_log::{self, Ids};
 use crate::event_sink;
 
 #[derive(Serialize, specta::Type)]
@@ -24,19 +25,23 @@ pub async fn read_runspace_plan(
     app: AppHandle,
     terminal_tab_id: String,
 ) -> Result<Option<PlanPreview>, ApiError> {
-    event_sink::off_main(move || {
-        let mut monica = event_sink::open(&app)?;
-        let Some(path) = monica.tasks().plan_path_for_terminal_tab(&terminal_tab_id)? else {
-            return Ok(None);
-        };
-        let Ok(body) = std::fs::read_to_string(&path) else {
-            return Ok(None);
-        };
-        let file_name = PathBuf::from(&path)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.clone());
-        Ok(Some(PlanPreview { path, file_name, body }))
+    let log_ids = Ids::default().with("tab_id", &terminal_tab_id);
+    command_log::routine("read_runspace_plan", log_ids, async move {
+        event_sink::off_main(move || {
+            let mut monica = event_sink::open(&app)?;
+            let Some(path) = monica.tasks().plan_path_for_terminal_tab(&terminal_tab_id)? else {
+                return Ok(None);
+            };
+            let Ok(body) = std::fs::read_to_string(&path) else {
+                return Ok(None);
+            };
+            let file_name = PathBuf::from(&path)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.clone());
+            Ok(Some(PlanPreview { path, file_name, body }))
+        })
+        .await
     })
     .await
 }

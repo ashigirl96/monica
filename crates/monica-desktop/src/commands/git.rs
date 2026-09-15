@@ -3,6 +3,7 @@ use std::path::Path;
 use monica_api::ApiError;
 use serde::Serialize;
 
+use crate::command_log::{self, ids};
 use crate::event_sink;
 
 #[derive(Serialize, specta::Type)]
@@ -14,9 +15,13 @@ pub struct WorktreeInfo {
 #[tauri::command]
 #[specta::specta]
 pub async fn worktree_info(cwd: String) -> Result<Option<WorktreeInfo>, ApiError> {
-    event_sink::off_main(move || {
-        Ok(monica_runtime::worktree_info(Path::new(&cwd))
-            .map(|info| WorktreeInfo { repo: info.repo, branch: info.branch }))
+    let log_ids = ids![cwd];
+    command_log::routine("worktree_info", log_ids, async move {
+        event_sink::off_main(move || {
+            Ok(monica_runtime::worktree_info(Path::new(&cwd))
+                .map(|info| WorktreeInfo { repo: info.repo, branch: info.branch }))
+        })
+        .await
     })
     .await
 }
