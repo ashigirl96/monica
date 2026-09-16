@@ -1,6 +1,6 @@
 ---
 name: Design Task
-about: /build-with-me で設計が固まった実装タスク。参考実装 PR 付き。
+about: 対話で設計が固まった実装タスク。参考実装 PR 付き。
 title: ""
 labels: []
 assignees: []
