@@ -45,7 +45,7 @@ web の port はバナーに入れていない。直後の `monica_web listening
 
 `monica.log` に載せていないのは 2 つの理由から。fern はレコードの引数を writer mutex を保持したまま評価するので、ログ呼び出しの最中に起きた panic を hook から `log::error!` すると同一スレッドで再ロックして**ハングする**（abort にすら到達しない）。もう 1 つは寿命で、`monica.log` はサイズ上限のため 5 世代を 1 日で使い切ることがあり、クラッシュ記録が数時間で押し流されうる。ログ系から独立させた副産物として、log plugin が立つ前の起動最初期の panic も拾える。
 
-レベルは `MONICA_LOG`（無ければ `RUST_LOG`）で変えられる。裸のレベルが既定値、`target=level` が個別指定。target のマッチは fern の仕様で `::` 区切りのセグメント単位なので、`monica_application` は `monica_application::github_sync` に効くが `monica_app` は効かない（前方一致ではない）。
+レベルは `MONICA_LOG`（無ければ `RUST_LOG`）で変えられる。裸のレベルが既定値、`target=level` が個別指定。target のマッチは fern の仕様で `::` 区切りのセグメント単位なので、`monica_application` は `monica_application::github_sync` に効くが、`monica_app` のような途中で切れた綴りは効かない（前方一致ではない）。
 
 ```bash
 MONICA_LOG=debug bun run tauri dev
@@ -80,7 +80,47 @@ WARN  monica_adapters::git exec cmd="git -C /path/to/repo worktree add …" cwd=
 
 2 秒周期の notification drain だけは、失敗が続いても同じ行を出し続けない。同一の失敗は最初の 1 行と約 30 分ごとの `suppressed=N` 付きの再掲だけに畳まれ、復旧すると 1 行出る。畳まれている間の各 tick は DEBUG に落ちる。
 
-### tauri command の 1 行（target `monica_app::commands`）
+### 相関 ID
+
+ログ行の `key=value` のうち、プロセスと crate をまたいで同じものを指すキーはこの 7 つ。**綴りは全 crate で共通**で、`rg 'task_run_id=run-688' ~/monica/logs/` のような 1 回の grep が desktop・core・hook のどこが書いた行でも拾えることがこの表の存在理由。
+
+| キー               | 指すもの                                            | 値の形                                | 出どころ                                         | 主に出るファイル                  |
+| ------------------ | --------------------------------------------------- | ------------------------------------- | ------------------------------------------------ | --------------------------------- |
+| `task_id`          | Task                                                | `MON-42`                              | `TaskId` / `MONICA_TASK_ID`                      | `monica.log` / `hook-<agent>.log` |
+| `task_run_id`      | TaskRun（Task の 1 回の実行）                       | `run-688`                             | `TaskRunId` / `MONICA_TASK_RUN_ID`               | 同上                              |
+| `tab_id`           | ワークベンチのタブ                                  | UUID                                  | `MONICA_TERMINAL_TAB_ID`                         | 同上                              |
+| `session_id`       | **terminal session**（ptyd が作る PTY）             | `ts-1865`                             | `MONICA_TERMINAL_SESSION_ID`                     | 同上                              |
+| `agent_session_id` | **agent 自身のセッション**                          | agent が決める（Claude Code は UUID） | `AgentSessionId`（hook payload の `session_id`） | `hook-<agent>.log`                |
+| `runspace_id`      | runspace（`bench-<task-id>` かレイアウト runspace） | 2 系統で形式が違う                    | `RunspaceId`                                     | `monica.log`                      |
+| `project_id`       | プロジェクト                                        | プロジェクト依存                      | `MONICA_PROJECT_ID`                              | `monica.log`                      |
+
+**`session_id` と `agent_session_id` は別物で、混ぜてはいけない。** 前者は monica が作った PTY セッション、後者はその中で動いている agent が自分で名乗ったセッション。同じキーに入れると `rg session_id=` が 2 つの名前空間を突き合わせることになり、調査で嘘の相関ができる。newtype があるのは `AgentSessionId` 側だけ（`monica-domain/src/ids.rs`）で terminal session は素の `String` なので、型が守ってくれるのは片側だけ。
+
+`agent_session_id=` は文字列として `session_id=` を含むので、terminal session だけを拾いたいときは語境界を付ける（`_` は単語文字なので `\b` が効く）。値まで書くなら曖昧さは無い。
+
+```bash
+rg '\bsession_id=' ~/monica/logs/      # terminal session だけ
+rg 'session_id=' ~/monica/logs/        # agent_session_id= の行も混ざる
+```
+
+> vendored な `crates/claude-agent-sdk` の `SessionId` 型は **agent session** を指し、monica の `session_id=` とは逆の意味になる。SDK 側の値をログに載せるときは `agent_session_id=` で出すこと。
+
+値が無いときの書き方は 2 通りあるが、どちらも `rg 'task_id=MON-42'` では引ける。
+
+- `hook-<agent>.log`（`invoked` / `hook` 行）は**常に全キーを出し**、欠けている値を `none` と書く。hook はどの ID を渡されなかったかが分岐の理由そのものなので、キーごと消えると読めない
+- `monica.log` の command 行は**欠けているキーごと省く**。`rg 'task_id='` が実際に ID を持った呼び出しだけに当たるようにするため
+
+ID・イベント名・エラー文はいずれも hook の payload や環境変数から来る任意のテキストなので、そのままでは改行 1 つで行が 2 本に割れ、payload が偽のログ行を作れてしまう。core と `monica hook` は空白と制御文字を `_` に潰し（`monica_application::log_field`）、desktop の command 行は値を `"…"` で括って畳む（`command_log`）。どちらでも 1 行 1 レコードは崩れず、ID 自体は空白を含まないので綴りは変わらない。
+
+所要時間は **`duration_ms=` がその行の表す処理全体**、内訳は `<phase>_ms=`。1 行に `duration_ms=` がちょうど 1 つ載るので、`rg 'duration_ms=' ~/monica/logs/` で全ての所要時間ログが引ける。
+
+```
+INFO monica_application::github_sync bulk_issue_sync refs=22 repos=3 synced=22 linked=7 fetch_ms=1131 record_ms=9 duration_ms=1142
+```
+
+log target は必ず crate 名（`-` を `_` にしたもの）で始める。fern の照合は `::` 区切りのセグメント単位なので、ここがずれると `MONICA_LOG=<crate>=debug` から届かなくなる。各 crate が target の一覧を 1 箇所に持ち、crate 名との一致をテストで固定している（`monica-desktop/src/log_target.rs` など）。
+
+### tauri command の 1 行（target `monica_desktop::commands`）
 
 フロントからの command 呼び出しは 1 呼び出し 1 行になる。`rg 'command=prepare_task'` で 1 回の操作を抜き出せる。
 
@@ -102,7 +142,7 @@ command=launch_task task_id=MON-42 duration_ms=5 result=err code=conflict messag
 一律 INFO にすると打鍵とポーリングだけで 1MB × 5 世代を数時間で使い切り、バナーも本当の失敗も押し流される。全部見たいときだけ上げる:
 
 ```bash
-MONICA_LOG=info,monica_app::commands=trace bun run tauri dev
+MONICA_LOG=info,monica_desktop::commands=trace bun run tauri dev
 ```
 
 ### フロントのログ（target `webview`）

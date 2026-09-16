@@ -6,6 +6,7 @@
 
 use std::sync::mpsc;
 
+use crate::log_target::GITHUB_SYNC;
 use crate::MonicaFacade;
 
 /// Handle to wake the sync worker from a command.
@@ -36,7 +37,7 @@ where
             let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
                 Ok(rt) => rt,
                 Err(e) => {
-                    log::error!(target: "monica_runtime::github_sync", "failed to build sync runtime: {e}");
+                    log::error!(target: GITHUB_SYNC, "failed to build sync runtime: {e}");
                     return;
                 }
             };
@@ -46,7 +47,7 @@ where
             }
         });
     if let Err(e) = spawn_result {
-        log::error!(target: "monica_runtime::github_sync", "failed to start GitHub sync worker: {e}");
+        log::error!(target: GITHUB_SYNC, "failed to start GitHub sync worker: {e}");
     }
     GithubSyncWaker(tx)
 }
@@ -58,12 +59,12 @@ where
     let mut monica = match make_facade() {
         Ok(monica) => monica,
         Err(e) => {
-            log::error!(target: "monica_runtime::github_sync", "failed to open façade for GitHub sync: {e:#}");
+            log::error!(target: GITHUB_SYNC, "failed to open façade for GitHub sync: {e:#}");
             return;
         }
     };
     if let Err(e) = monica.synchronization().force_sync_github(None).await {
-        log::error!(target: "monica_runtime::github_sync", "GitHub sync failed: {e}");
+        log::error!(target: GITHUB_SYNC, "GitHub sync failed: {e}");
     }
 }
 

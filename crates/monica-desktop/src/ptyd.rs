@@ -18,6 +18,7 @@ use monica_terminal_protocol::{CreateParams, RequestOp, ResponseBody, SessionInf
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::event_sink::{AppMonica, TauriEventSink};
+use crate::log_target::PTYD;
 
 const CONNECT_RETRY_WINDOW: Duration = Duration::from_secs(2);
 const CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(50);
@@ -105,7 +106,7 @@ fn handle_event(app: &AppHandle, event: ClientEvent) {
             // away would otherwise fill the rotation faster than anything else in the file.
             if let Err(e) = app.emit(&format!("terminal:output:{session_id}"), &data) {
                 log::debug!(
-                    target: "monica_app::ptyd",
+                    target: PTYD,
                     "failed to emit terminal output session_id={session_id} bytes={} error={e}",
                     data.len()
                 );
@@ -120,19 +121,19 @@ fn handle_event(app: &AppHandle, event: ClientEvent) {
                     if let Err(e) = monica.executions().record_terminal_exit(&session_id, exit_code)
                     {
                         log::error!(
-                            target: "monica_app::ptyd",
+                            target: PTYD,
                             "failed to record exit of {session_id}: {e}"
                         );
                     }
                 }
                 Err(e) => log::error!(
-                    target: "monica_app::ptyd",
+                    target: PTYD,
                     "failed to open façade for exit of {session_id}: {e:#}"
                 ),
             }
             if let Err(e) = app.emit(&format!("terminal:exit:{session_id}"), &exit_code) {
                 log::warn!(
-                    target: "monica_app::ptyd",
+                    target: PTYD,
                     "failed to emit terminal exit session_id={session_id} exit_code={exit_code:?} error={e}"
                 );
             }
@@ -143,7 +144,7 @@ fn handle_event(app: &AppHandle, event: ClientEvent) {
             }
         }
         ClientEvent::Disconnected => {
-            log::warn!(target: "monica_app::ptyd", "monica-ptyd connection lost");
+            log::warn!(target: PTYD, "monica-ptyd connection lost");
             app.state::<PtydHandle>().mark_disconnected();
         }
     }
@@ -155,7 +156,7 @@ fn replace_incompatible_daemon(
     daemon_version: u32,
 ) -> Result<Arc<PtydClient>> {
     log::warn!(
-        target: "monica_app::ptyd",
+        target: PTYD,
         "monica-ptyd speaks protocol {daemon_version} (want {PROTOCOL_VERSION}); replacing it"
     );
     // Honest-lost policy: the old daemon's sessions cannot be carried across the protocol
@@ -163,10 +164,10 @@ fn replace_incompatible_daemon(
     match open_facade(app) {
         Ok(mut monica) => {
             if let Err(e) = monica.executions().mark_all_sessions_lost() {
-                log::error!(target: "monica_app::ptyd", "failed to mark sessions lost: {e}");
+                log::error!(target: PTYD, "failed to mark sessions lost: {e}");
             }
         }
-        Err(e) => log::error!(target: "monica_app::ptyd", "failed to open façade: {e:#}"),
+        Err(e) => log::error!(target: PTYD, "failed to open façade: {e:#}"),
     }
 
     let _ = old.notify(RequestOp::Shutdown);
@@ -225,11 +226,11 @@ pub(crate) fn start_warmup(app: AppHandle) {
         .name("monica-ptyd-warmup".to_string())
         .spawn(move || {
             if let Err(e) = app.state::<PtydHandle>().ensure_connected(&app) {
-                log::warn!(target: "monica_app::ptyd", "daemon warmup failed: {e:#}");
+                log::warn!(target: PTYD, "daemon warmup failed: {e:#}");
             }
         });
     if let Err(e) = spawned {
-        log::error!(target: "monica_app::ptyd", "failed to start ptyd warmup thread: {e}");
+        log::error!(target: PTYD, "failed to start ptyd warmup thread: {e}");
     }
 }
 

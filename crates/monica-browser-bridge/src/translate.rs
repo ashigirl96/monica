@@ -114,10 +114,10 @@ async fn stream_turn<S: TranslateSession>(
             if !first_event_logged {
                 first_event_logged = true;
                 log::info!(
-                    "first stream event at {}ms: type={} delta_type={}",
-                    turn_start.elapsed().as_millis(),
+                    "first_stream_event type={} delta_type={} duration_ms={}",
                     event["type"].as_str().unwrap_or("?"),
                     event["delta"]["type"].as_str().unwrap_or("-"),
+                    turn_start.elapsed().as_millis(),
                 );
             }
             if event["delta"]["type"] == "thinking_delta" {
@@ -133,7 +133,7 @@ async fn stream_turn<S: TranslateSession>(
                     first_delta = Some(turn_start.elapsed());
                     if thinking_chars > 0 {
                         log::info!(
-                            "thinking before text: {thinking_chars} chars ({}ms until first text)",
+                            "thinking_before_text chars={thinking_chars} duration_ms={}",
                             turn_start.elapsed().as_millis(),
                         );
                     }
@@ -179,13 +179,13 @@ async fn stream_turn<S: TranslateSession>(
                     models.join("+")
                 };
                 log::info!(
-                    "turn done: {emitted} seg emitted, first_token={}ms, total={}ms (api={}ms, turns={}, model={}, cost=${:.4})",
-                    first_delta.map_or(0, |d| d.as_millis()),
-                    turn_start.elapsed().as_millis(),
-                    result.duration_api_ms,
+                    "turn_done emitted={emitted} turns={} model={model_label} cost_usd={:.4} \
+                     first_token_ms={} api_ms={} duration_ms={}",
                     result.num_turns,
-                    model_label,
                     result.total_cost_usd.unwrap_or(0.0),
+                    first_delta.map_or(0, |d| d.as_millis()),
+                    result.duration_api_ms,
+                    turn_start.elapsed().as_millis(),
                 );
                 return true;
             }
@@ -218,8 +218,9 @@ pub async fn translate(
     let mut session = query(&format_batch(&segments), options)
         .await
         .map_err(|e| format!("failed to start claude: {e}"))?;
+    // spawn + handshake + 最初のプロンプト送信までを 1 つの所要時間として数える
     log::info!(
-        "claude session ready in {}ms (spawn + handshake + first prompt sent)",
+        "claude_session_ready duration_ms={}",
         spawn_start.elapsed().as_millis(),
     );
 
@@ -274,7 +275,7 @@ async fn translate_with<S: TranslateSession>(
     }
 
     log::info!(
-        "translate done: {}/{} segs answered in {}ms",
+        "translate_done answered={} segs={} duration_ms={}",
         answered.len(),
         answered.len() + remaining.len(),
         total_start.elapsed().as_millis(),

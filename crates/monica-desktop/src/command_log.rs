@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use monica_api::ApiError;
 
-const TARGET: &str = "monica_app::commands";
+use crate::log_target::COMMANDS as TARGET;
 
 const MAX_VALUE: usize = 200;
 const MAX_MESSAGE: usize = 300;

@@ -2,6 +2,7 @@ use monica_domain::{TaskId, TaskRunId};
 use tauri::AppHandle;
 
 use crate::event_sink::TauriEventSink;
+use crate::log_target::PREPARE_TASK;
 
 /// Run phase 2 (`execute_run`) off the UI thread. The façade is opened inside the spawned thread
 /// (it owns a `!Send` SQLite connection) and emits the run's resulting status through its sink, so
@@ -17,12 +18,12 @@ pub(crate) fn spawn_execute_run(
             let mut monica = match monica_runtime::open_monica(Box::new(TauriEventSink::new(app))) {
                 Ok(monica) => monica,
                 Err(e) => {
-                    log::error!(target: "monica_app::prepare_task", "background façade open failed: {e:#}");
+                    log::error!(target: PREPARE_TASK, "background façade open failed: {e:#}");
                     return;
                 }
             };
             if let Err(e) = monica.executions().execute_run(&task_id, &run_id) {
-                log::error!(target: "monica_app::prepare_task", "execute_run failed: {e}");
+                log::error!(target: PREPARE_TASK, "execute_run failed: {e}");
             }
         })
         .map(|_| ())

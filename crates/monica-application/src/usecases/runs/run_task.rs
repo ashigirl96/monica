@@ -7,7 +7,7 @@ use super::ports::{
     TaskRunStore, TaskStore, UnitOfWork, WorkbenchStore,
 };
 use crate::ports::{GithubIssueSyncStore, TerminalSessionRepository};
-use crate::observability::{reject, run_status};
+use crate::observability::{reject, run_status, WORKTREE_TRASH};
 use crate::usecases::tasks::primary_run;
 use crate::prelude::{
     DisplayStatus, ExternalReference, NewTaskRun, Project, RefType, RunMode, Task, TaskId, TaskRun,
@@ -29,7 +29,7 @@ where
             git.reap_worktree_trash(&worktrees);
         }
         Err(e) => log::warn!(
-            target: "monica_application::worktree_trash",
+            target: WORKTREE_TRASH,
             "skipping worktree trash reap; could not list worktree paths: {e:#}"
         ),
     }

@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use super::ports::{GithubGateway, PullRequestSyncStore};
 use super::BulkSyncOutcome;
+use crate::observability::{Line, GITHUB_SYNC};
 use crate::{
     ApplicationResult, GithubPullRequest, PullRequestBranchSyncCandidate, RepoPullRequest,
     UnresolvedPullRequestRef,
@@ -60,9 +61,13 @@ where
             Ok(pull_requests) => pull_requests,
             Err(e) => {
                 log::warn!(
-                    target: "monica_application::github_sync",
-                    "bulk PR fetch failed repo={repo} after {}ms error={e:#}",
-                    elapsed.as_millis()
+                    target: GITHUB_SYNC,
+                    "{}",
+                    Line::new("bulk_pr_fetch_failed")
+                        .id("repo", repo)
+                        .duration_ms(elapsed.as_millis())
+                        .error(&format!("{e:#}"))
+                        .finish()
                 );
                 failed_repos.insert(repo.to_ascii_lowercase());
                 continue;
@@ -86,10 +91,14 @@ where
             }
         }
         log::debug!(
-            target: "monica_application::github_sync",
-            "bulk PR fetch repo={repo} fetched={fetched} branches={} in {}ms",
-            branch_map.len(),
-            elapsed.as_millis()
+            target: GITHUB_SYNC,
+            "{}",
+            Line::new("bulk_pr_fetch")
+                .id("repo", repo)
+                .num("fetched", fetched)
+                .num("branches", branch_map.len())
+                .duration_ms(elapsed.as_millis())
+                .finish()
         );
     }
 
@@ -174,10 +183,13 @@ where
             Err(e) => {
                 failed_repos.insert(unresolved_ref.repo.to_ascii_lowercase());
                 log::warn!(
-                    target: "monica_application::github_sync",
-                    "status refresh fetch failed repo={} pull_request_number={} error={e:#}",
-                    unresolved_ref.repo,
-                    unresolved_ref.number
+                    target: GITHUB_SYNC,
+                    "{}",
+                    Line::new("status_refresh_failed")
+                        .id("repo", &unresolved_ref.repo)
+                        .num("pull_request_number", unresolved_ref.number)
+                        .error(&format!("{e:#}"))
+                        .finish()
                 );
             }
         }
@@ -188,17 +200,19 @@ where
     let record_started = Instant::now();
     repos.bulk_record_pr_sync(&branch_entries, &status_entries)?;
     log::info!(
-        target: "monica_application::github_sync",
-        "bulk PR sync done: candidates={} repos={} matched={} statuses={} | candidates={}ms fetch={}ms status_fetch={}ms record={}ms total={}ms",
-        branch_entries.len(),
-        distinct_repos.len(),
-        branch_matched,
-        status_entries.len(),
-        candidates_ms,
-        fetch_ms,
-        status_fetch_ms,
-        record_started.elapsed().as_millis(),
-        started.elapsed().as_millis()
+        target: GITHUB_SYNC,
+        "{}",
+        Line::new("bulk_pr_sync")
+            .num("candidates", branch_entries.len())
+            .num("repos", distinct_repos.len())
+            .num("matched", branch_matched)
+            .num("statuses", status_entries.len())
+            .phase_ms("candidates", candidates_ms)
+            .phase_ms("fetch", fetch_ms)
+            .phase_ms("status_fetch", status_fetch_ms)
+            .phase_ms("record", record_started.elapsed().as_millis())
+            .duration_ms(started.elapsed().as_millis())
+            .finish()
     );
     let mut failed_repos: Vec<String> = failed_repos.into_iter().collect();
     failed_repos.sort();

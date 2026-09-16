@@ -125,6 +125,10 @@ fn is_tailscale_cgnat(ip: Ipv4Addr) -> bool {
     a == 100 && (64..=127).contains(&b)
 }
 
+/// この crate のログ target。fern は `::` 区切りのセグメント単位で照合するので、crate 名と
+/// 一致していないと `MONICA_LOG=monica_web=debug` から届かなくなる。
+const TARGET: &str = "monica_web";
+
 /// `tailscale` CLI の探索パス。GUI 起動時の PATH は /usr/bin:/bin:/usr/sbin:/sbin に絞られ
 /// /usr/local/bin を含まないため、素の名前だけでなく実体パスも明示的に試す。
 const TAILSCALE_BINS: [&str; 4] = [
@@ -782,7 +786,7 @@ async fn bind_scan(
     for port in ports {
         match tokio::net::TcpListener::bind((ip, port)).await {
             Ok(listener) => return Ok(listener),
-            Err(e) => log::debug!(target: "monica_web", "port {port} unavailable: {e}"),
+            Err(e) => log::debug!(target: TARGET, "port {port} unavailable: {e}"),
         }
     }
     tokio::net::TcpListener::bind((ip, 0)).await
@@ -793,11 +797,11 @@ pub fn serve(bind: WebBind, port_tx: SyncSender<u16>) -> Result<()> {
     // 一度開いて migration を完了させ、per-request open を no-op チェックに落とす。失敗しても
     // 個々のリクエストがエラーを返せるので、サーバー起動自体は止めない。
     if let Err(e) = open() {
-        log::warn!(target: "monica_web", "initial store open failed: {e:#}");
+        log::warn!(target: TARGET, "initial store open failed: {e:#}");
     }
 
     if let Some(dir) = dist_override_dir() {
-        log::info!(target: "monica_web", "SPA served from {} (embedded assets bypassed)", dir.display());
+        log::info!(target: TARGET, "SPA served from {} (embedded assets bypassed)", dir.display());
     }
 
     // enable_time は reqwest の timeout（OGP 取得）が time driver を要求するため
@@ -814,7 +818,7 @@ pub fn serve(bind: WebBind, port_tx: SyncSender<u16>) -> Result<()> {
         let bound_addr = listener.local_addr()?;
         let port = bound_addr.port();
         let _ = port_tx.send(port);
-        log::info!(target: "monica_web", "listening on http://{bound_addr}");
+        log::info!(target: TARGET, "listening on http://{bound_addr}");
 
         // loopback は Tailscale 検出を待たせず即座に serve する。tailnet 向けの追加 bind は
         // 別タスクで後追いするため、検出が遅れても・失敗しても loopback アクセスは無影響。
@@ -829,13 +833,13 @@ pub fn serve(bind: WebBind, port_tx: SyncSender<u16>) -> Result<()> {
         if let Some(ip) = tailscale_ipv4_wait().await {
             match tokio::net::TcpListener::bind(SocketAddr::from((ip, port))).await {
                 Ok(ts) => {
-                    log::info!(target: "monica_web", "also listening on http://{ip}:{port} (tailscale)");
+                    log::info!(target: TARGET, "also listening on http://{ip}:{port} (tailscale)");
                     tokio::spawn(
                         axum::serve(ts, build_router(allowed_hosts(port, Some(ip)))).into_future(),
                     );
                 }
                 Err(e) => {
-                    log::warn!(target: "monica_web", "tailscale bind {ip}:{port} failed: {e:#}");
+                    log::warn!(target: TARGET, "tailscale bind {ip}:{port} failed: {e:#}");
                 }
             }
         }
@@ -850,6 +854,19 @@ pub fn serve(bind: WebBind, port_tx: SyncSender<u16>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// fern は target を `::` セグメント単位で照合するので、crate 名で始まらない target は
+    /// `MONICA_LOG=<crate>=debug` から届かない。アンカーは package 名。`CARGO_CRATE_NAME` は
+    /// `[lib] name` の上書きで変わるため使わない。
+    #[test]
+    fn every_target_is_reachable_from_this_crate_name() {
+        let crate_name = env!("CARGO_PKG_NAME").replace('-', "_");
+        let rest = TARGET.strip_prefix(&crate_name);
+        assert!(
+            rest.is_some_and(|rest| rest.is_empty() || rest.starts_with("::")),
+            "{TARGET} is unreachable from MONICA_LOG={crate_name}=debug"
+        );
+    }
     use axum::body::Body;
     use axum::http::Request;
     use http_body_util::BodyExt;

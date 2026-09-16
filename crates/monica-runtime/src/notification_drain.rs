@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use monica_domain::NotificationIntent;
 
+use crate::log_target::NOTIFICATION_DRAIN;
 use crate::tick_log::TickLog;
 use crate::MonicaFacade;
 
@@ -48,7 +49,7 @@ where
         });
     if let Err(e) = spawn_result {
         log::error!(
-            target: "monica_runtime::notification_drain",
+            target: NOTIFICATION_DRAIN,
             "failed to start notification drain: {e}"
         );
     }
@@ -76,7 +77,7 @@ fn report(tick: &mut TickLog, fault: Option<DrainFault>) {
     let Some(fault) = fault else {
         if let Some(suppressed) = tick.clear() {
             log::info!(
-                target: "monica_runtime::notification_drain",
+                target: NOTIFICATION_DRAIN,
                 "notification drain recovered suppressed={suppressed}"
             );
         }
@@ -84,12 +85,12 @@ fn report(tick: &mut TickLog, fault: Option<DrainFault>) {
     };
     match tick.observe(&fault.summary) {
         Some(suppressed) => log::log!(
-            target: "monica_runtime::notification_drain",
+            target: NOTIFICATION_DRAIN,
             fault.level,
             "{} suppressed={suppressed}",
             fault.detail
         ),
-        None => log::debug!(target: "monica_runtime::notification_drain", "{}", fault.detail),
+        None => log::debug!(target: NOTIFICATION_DRAIN, "{}", fault.detail),
     }
 }
 

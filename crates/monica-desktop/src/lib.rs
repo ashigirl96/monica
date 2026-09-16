@@ -2,12 +2,15 @@ mod bridge;
 mod command_log;
 mod commands;
 mod event_sink;
+mod log_target;
 mod native_menu;
 mod ptyd;
 mod schedulers;
 mod services;
 
 use tauri::Manager;
+
+use crate::log_target::{BRIDGE, SETTINGS, STARTUP, WEB, WINDOW};
 #[cfg(all(unix, not(debug_assertions)))]
 mod shell_path;
 
@@ -107,17 +110,17 @@ pub fn run() {
             if event.id().as_ref() == native_menu::SETTINGS_ID {
                 use tauri_specta::Event;
                 if let Err(e) = (commands::settings::OpenSettingsRequested {}).emit(app) {
-                    log::warn!(target: "monica_app::settings", "failed to emit settings:open: {e}");
+                    log::warn!(target: SETTINGS, "failed to emit settings:open: {e}");
                 }
             } else if event.id().as_ref() == native_menu::NEW_WINDOW_ID {
                 let app = app.clone();
                 tauri::async_runtime::spawn(async move {
                     match services::window_manager::open_new_window(app).await {
                         Ok(label) => {
-                            log::info!(target: "monica_app::window", "opened new window {label}")
+                            log::info!(target: WINDOW, "opened new window {label}")
                         }
                         Err(err) => {
-                            log::error!(target: "monica_app::window", "failed to open new window: {err:?}")
+                            log::error!(target: WINDOW, "failed to open new window: {err:?}")
                         }
                     }
                 });
@@ -142,7 +145,7 @@ pub fn run() {
             // and nothing else here has logged yet.
             monica_runtime::log_startup_banner(env!("CARGO_PKG_VERSION"), env!("MONICA_GIT_SHA"));
             for token in &unknown_log_filters {
-                log::warn!(target: "monica_app::startup", "ignoring unparsable log filter {token:?}");
+                log::warn!(target: STARTUP, "ignoring unparsable log filter {token:?}");
             }
             specta_builder.mount_events(app);
             let waker = schedulers::github_sync::start(app.handle().clone());
@@ -160,7 +163,7 @@ pub fn run() {
                 .name("browser-bridge-spawn".to_string())
                 .spawn(move || bridge::start_if_enabled(&bridge_app))
             {
-                log::warn!(target: "monica_app::bridge", "failed to spawn bridge starter thread: {e}");
+                log::warn!(target: BRIDGE, "failed to spawn bridge starter thread: {e}");
             }
             let web_bind = if cfg!(debug_assertions) {
                 match std::env::var("MONICA_WEB_PORT").ok().and_then(|v| v.parse().ok()) {
@@ -175,11 +178,11 @@ pub fn run() {
                 .name("monica-web".into())
                 .spawn(move || {
                     if let Err(e) = monica_web::serve(web_bind, port_tx) {
-                        log::error!(target: "monica_desktop::web", "web server failed: {e:?}");
+                        log::error!(target: WEB, "web server failed: {e:?}");
                     }
                 })
             {
-                log::warn!(target: "monica_desktop::web", "failed to spawn web server thread: {e}");
+                log::warn!(target: WEB, "failed to spawn web server thread: {e}");
             }
             let web_url = match port_rx.recv_timeout(std::time::Duration::from_secs(5)) {
                 Ok(p) => {
@@ -189,7 +192,7 @@ pub fn run() {
                 }
                 Err(e) => {
                     log::warn!(
-                        target: "monica_desktop::web",
+                        target: WEB,
                         "web server port not received ({e}); MONICA_WEB_URL injection disabled"
                     );
                     String::new()
@@ -199,11 +202,11 @@ pub fn run() {
             #[cfg(all(unix, not(debug_assertions)))]
             match &path_fix {
                 Ok(()) => log::info!(
-                    target: "monica_app::startup",
+                    target: STARTUP,
                     "PATH resolved from login shell"
                 ),
                 Err(e) => log::warn!(
-                    target: "monica_app::startup",
+                    target: STARTUP,
                     "failed to resolve PATH from login shell: {e}"
                 ),
             }
@@ -238,7 +241,7 @@ fn write_web_port_file(port: u16) {
         let _ = std::fs::create_dir_all(dir);
     }
     if let Err(e) = std::fs::write(&path, format!("{port}\n{}\n", std::process::id())) {
-        log::warn!(target: "monica_desktop::web", "failed to write web port file: {e}");
+        log::warn!(target: WEB, "failed to write web port file: {e}");
     }
 }
 

@@ -16,6 +16,7 @@ use monica_storage_sqlite::SqliteStore;
 
 pub mod asset_gc;
 pub mod log_filter;
+mod log_target;
 pub mod notification_drain;
 pub mod github_sync;
 pub mod panic;
