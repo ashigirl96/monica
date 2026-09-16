@@ -1,11 +1,10 @@
 [package]
 name = "monica-domain"
-version = "0.1.0"
-edition = "2021"
-# Deps allow lower, but we standardize on the dev/CI stable toolchain.
-rust-version = "1.95"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
-serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
-strum = { version = "0.28", features = ["derive"] }
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json.workspace = true
+strum.workspace = true

@@ -1,10 +1,11 @@
 [package]
 name = "monica-terminal-client"
-version = "0.1.0"
+version.workspace = true
 description = "Client transport for the Monica terminal daemon"
-edition = "2021"
+edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-anyhow = "1.0"
-log = "0.4"
-monica-terminal-protocol = { path = "../monica-terminal-protocol" }
+anyhow.workspace = true
+log.workspace = true
+monica-terminal-protocol.workspace = true

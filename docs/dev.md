@@ -196,21 +196,39 @@ strip = true        # デバッグシンボル除去
 
 主要クレートはデフォルトで重い feature を有効にしている。**default を消し、必要な feature だけ列挙する**。
 
-monica の既存依存はこの方針で書かれている:
+バージョンと `default-features` はワークスペース root の `[workspace.dependencies]` に置き、
+crate 側は `.workspace = true` で継承する:
 
 ```toml
-tauri = { version = "2", default-features = false, features = ["wry"] }
-serde = { version = "1", default-features = false, features = ["derive"] }
-serde_json = { version = "1", default-features = false, features = ["std"] }
+# ルート Cargo.toml
+[workspace.dependencies]
+serde = { version = "1.0.228", default-features = false }
+serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
+
+# crates/<crate>/Cargo.toml
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 ```
+
+**feature を workspace 側で union にしないこと。** 全 crate が一致する feature だけを root に
+置き、crate ごとに違う分は member 側の `features = [...]` に残す（Cargo が加算する）。
+`cargo check -p <crate>` の単独ビルドでは feature unification が効かず、crate 自身の宣言が
+すべてになるため、union に潰すと単独ビルドの feature セットが変わる。
+
+例外は `tauri` と `tauri-build`。Tauri CLI が `tauri.conf.json` から features を書き戻して
+同期するが、workspace 継承にするとその同期が止まる。`crates/monica-desktop/Cargo.toml` に
+直接書いたままにする。
 
 ### 2.2 新しいクレートを追加するときの手順
 
-1. `default-features = false` を必ず付ける
+1. ルート `Cargo.toml` の `[workspace.dependencies]` に `default-features = false` 付きで追加
 2. README / docs.rs で feature 一覧を確認
-3. **使う機能だけ** を `features = [...]` に列挙
-4. プラットフォーム別 native API があれば `[target.'cfg(target_os = "macos")'.dependencies]` で分岐
-5. `just bloat` を走らせて、追加前後でバイナリサイズの差を確認
+3. **使う機能だけ** を `features = [...]` に列挙。複数 crate で使うなら、全員一致の feature
+   だけ root に置き、差分は crate 側に書く
+4. crate 側は `<dep>.workspace = true` または `<dep> = { workspace = true, features = [...] }`
+5. プラットフォーム別 native API があれば `[target.'cfg(target_os = "macos")'.dependencies]` で分岐
+   （ここでも `.workspace = true` は使える）
+6. `just bloat` を走らせて、追加前後でバイナリサイズの差を確認
 
 ### 2.3 「これ標準ライブラリで書けない？」を毎回問う
 

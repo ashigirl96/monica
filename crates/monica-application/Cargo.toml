@@ -1,17 +1,16 @@
 [package]
 name = "monica-application"
-version = "0.1.0"
-edition = "2021"
-# Deps allow lower, but we standardize on the dev/CI stable toolchain.
-rust-version = "1.95"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-monica-domain = { path = "../monica-domain" }
-anyhow = "1.0.102"
-futures-util = { version = "0.3.32", default-features = false, features = ["alloc"] }
-log = "0.4"
-serde = { version = "1.0.228", default-features = false, features = ["derive"] }
-strum = { version = "0.28", features = ["derive"] }
+monica-domain.workspace = true
+anyhow.workspace = true
+futures-util = { workspace = true, features = ["alloc"] }
+log.workspace = true
+serde = { workspace = true, features = ["derive"] }
+strum.workspace = true
 
 [dev-dependencies]
-tokio = { version = "1.52.3", default-features = false, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt"] }

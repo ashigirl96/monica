@@ -1,54 +1,52 @@
 [package]
 name = "monica-desktop"
-version = "0.1.0"
+version.workspace = true
 description = "monica desktop app"
 authors = ["ashigirl96"]
-edition = "2021"
+edition.workspace = true
+rust-version.workspace = true
 
 [lib]
 name = "monica_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# tauri / tauri-build は [workspace.dependencies] に上げない。Tauri CLI は tauri.conf.json の
+# 内容から tauri の features 配列を書き戻して同期するが、workspace 継承にするとその同期を
+# 諦める。一方 tauri-build の check_features はコンパイルのたびに features と config の一致を
+# 要求し続けるため、conf を変えるたびに手で直す羽目になる。どちらもこの crate 専用。
 [build-dependencies]
 tauri-build = { version = "2", default-features = false, features = [] }
 
 [dependencies]
-anyhow = "1.0"
-log = "0.4"
-monica-api = { path = "../monica-api" }
-monica-application = { path = "../monica-application" }
-monica-domain = { path = "../monica-domain" }
-monica-logfile = { path = "../monica-logfile" }
-serde = { version = "1", default-features = false, features = ["derive"] }
-monica-runtime = { path = "../monica-runtime" }
-monica-paths = { path = "../monica-paths" }
-monica-settings = { path = "../monica-settings" }
-monica-terminal-client = { path = "../monica-terminal-client" }
-monica-web = { path = "../monica-web" }
-monica-terminal-protocol = { path = "../monica-terminal-protocol" }
-specta = { version = "=2.0.0-rc.25", default-features = false, features = ["serde_json"] }
-specta-typescript = { version = "=0.0.12", default-features = false }
+anyhow.workspace = true
+log.workspace = true
+monica-api.workspace = true
+monica-application.workspace = true
+monica-domain.workspace = true
+monica-logfile.workspace = true
+serde = { workspace = true, features = ["derive"] }
+monica-runtime.workspace = true
+monica-paths.workspace = true
+monica-settings.workspace = true
+monica-terminal-client.workspace = true
+monica-web.workspace = true
+monica-terminal-protocol.workspace = true
+specta = { workspace = true, features = ["serde_json"] }
+specta-typescript.workspace = true
 tauri = { version = "2", default-features = false, features = [
   "devtools",
   "wry",
   "macos-private-api",
   "protocol-asset",
 ] }
-tauri-specta = { version = "=2.0.0-rc.25", default-features = false, features = [
-  "derive",
-  "typescript",
-] }
-tauri-plugin-log = "2"
-tauri-plugin-mcp-bridge = { version = "0.13", default-features = false }
-tauri-plugin-notification = { version = "2", default-features = false }
-tauri-plugin-opener = { version = "2", default-features = false }
-tauri-plugin-store = { version = "2", default-features = false }
+tauri-specta.workspace = true
+tauri-plugin-log.workspace = true
+tauri-plugin-mcp-bridge.workspace = true
+tauri-plugin-notification.workspace = true
+tauri-plugin-opener.workspace = true
+tauri-plugin-store.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = { version = "0.6", default-features = false }
-objc2-foundation = { version = "0.3", default-features = false, features = ["NSString", "NSArray"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = [
-  "NSPasteboard",
-  "NSImage",
-  "NSPasteboardItem",
-] }
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = ["NSString", "NSArray"] }
+objc2-app-kit = { workspace = true, features = ["NSPasteboard", "NSImage", "NSPasteboardItem"] }

@@ -1,17 +1,17 @@
 [package]
 name = "monica-runtime"
-version = "0.1.0"
-edition = "2021"
-rust-version = "1.95"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-monica-application = { path = "../monica-application" }
-monica-domain = { path = "../monica-domain" }
-monica-adapters = { path = "../monica-adapters" }
-monica-storage-sqlite = { path = "../monica-storage-sqlite" }
-monica-paths = { path = "../monica-paths" }
-monica-logfile = { path = "../monica-logfile" }
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
-anyhow = "1.0.102"
-log = { version = "0.4", features = ["std"] }
-tokio = { version = "1.52.3", default-features = false, features = ["rt", "net", "time"] }
+monica-application.workspace = true
+monica-domain.workspace = true
+monica-adapters.workspace = true
+monica-storage-sqlite.workspace = true
+monica-paths.workspace = true
+monica-logfile.workspace = true
+chrono.workspace = true
+anyhow.workspace = true
+log = { workspace = true, features = ["std"] }
+tokio = { workspace = true, features = ["rt", "net", "time"] }

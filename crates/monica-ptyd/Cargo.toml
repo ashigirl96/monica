@@ -1,17 +1,18 @@
 [package]
 name = "monica-ptyd"
-version = "0.1.0"
+version.workspace = true
 description = "Monica PTY daemon: owns terminal sessions independently of the app lifecycle"
-edition = "2021"
+edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-anyhow = "1.0"
-libc = { version = "0.2", default-features = false }
-log = { version = "0.4", features = ["std"] }
-monica-logfile = { path = "../monica-logfile" }
-monica-terminal-daemon = { path = "../monica-terminal-daemon" }
+anyhow.workspace = true
+libc.workspace = true
+log = { workspace = true, features = ["std"] }
+monica-logfile.workspace = true
+monica-terminal-daemon.workspace = true
 
 [dev-dependencies]
-base64 = { version = "0.23", default-features = false, features = ["std"] }
-monica-terminal-client = { path = "../monica-terminal-client" }
-monica-terminal-protocol = { path = "../monica-terminal-protocol" }
+base64.workspace = true
+monica-terminal-client.workspace = true
+monica-terminal-protocol.workspace = true
