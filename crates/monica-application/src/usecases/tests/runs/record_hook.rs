@@ -1,5 +1,6 @@
 use super::*;
-use monica_domain::{AgentSessionId, RunspaceId, TaskRunId};
+use monica_domain::{AgentSessionId, RunspaceId, TaskRunId, TransitionRefusal};
+use crate::usecases::runs::{HookResolveRoute, ResolveSkip};
 
 #[test]
 fn record_claude_hook_records_waiting_transition_and_run_output() {
@@ -61,6 +62,11 @@ fn record_claude_hook_claims_prepared_primary_run_without_run_id() {
     assert!(report.task_run_linked);
     assert!(!report.task_run_created);
     assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
+    assert_eq!(report.resolved_by, HookResolveRoute::ByPreparedPrimary);
+    assert_eq!(
+        report.resolve_skipped,
+        [Some(ResolveSkip::NoRunForSession), None, None]
+    );
     let claimed = repos.get_task_run(&run_id).unwrap().unwrap();
     assert_eq!(claimed.status, TaskRunStatus::WaitingForUser);
     assert_eq!(claimed.wait_reason, Some(TaskRunWaitReason::AwaitingPrompt));
@@ -187,6 +193,15 @@ fn record_claude_hook_creates_side_run_instead_of_stealing_active_primary() {
     assert!(report.task_run_linked);
     assert!(report.task_run_created);
     assert_eq!(report.task_run_status, Some(TaskRunStatus::WaitingForUser));
+    assert_eq!(report.resolved_by, HookResolveRoute::ByLazyCreate);
+    assert_eq!(
+        report.resolve_skipped,
+        [
+            Some(ResolveSkip::NoRunForSession),
+            Some(ResolveSkip::PrimaryNotPrepared(TaskRunStatus::Running)),
+            None,
+        ]
+    );
 
     // The primary is neither stolen nor re-pointed.
     let task = repos.get_task(&task_id).unwrap().unwrap();
@@ -493,6 +508,8 @@ fn record_claude_hook_late_stop_does_not_resurrect_stopped_run() {
     )
     .unwrap();
     assert_eq!(report.task_run_status, None);
+    assert_eq!(report.requested_status, None);
+    assert_eq!(report.refused, Some(TransitionRefusal::StoppedStaysStopped));
     assert_eq!(
         repos.get_task_run(&run_id).unwrap().unwrap().status,
         TaskRunStatus::Stopped

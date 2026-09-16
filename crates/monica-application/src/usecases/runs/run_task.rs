@@ -7,6 +7,7 @@ use super::ports::{
     TaskRunStore, TaskStore, UnitOfWork, WorkbenchStore,
 };
 use crate::ports::{GithubIssueSyncStore, TerminalSessionRepository};
+use crate::observability::{reject, run_status};
 use crate::usecases::tasks::primary_run;
 use crate::prelude::{
     DisplayStatus, ExternalReference, NewTaskRun, Project, RefType, RunMode, Task, TaskId, TaskRun,
@@ -113,19 +114,33 @@ where
 /// be free — nothing live, and nothing already prepared and waiting to launch. Runs inside the
 /// write transaction that creates the run: the GUI and `monica task run` are separate processes,
 /// and checked outside it both could find the slot free and each create a run.
+/// The stale run this check finished on its way through. Returned rather than announced here: the
+/// check runs inside the caller's write transaction, and a rollback after it would leave the log
+/// claiming a transition the store never kept.
+struct ReapedStaleSetup {
+    task_run_id: TaskRunId,
+    from: TaskRunStatus,
+}
+
 fn ensure_task_accepts_new_run<R>(
     repos: &mut R,
     task: &Task,
     stale_setup_age_secs: i64,
-) -> ApplicationResult<()>
+) -> ApplicationResult<Option<ReapedStaleSetup>>
 where
     R: TaskRunStore + ?Sized,
 {
     let task_id = &task.id;
     if task.status == TaskStatus::Closed {
-        return Err(ApplicationError::validation(format!(
-            "task {task_id} is closed; reopen it before preparing"
-        )));
+        return Err(reject(
+            "accepts_new_run",
+            task_id,
+            None,
+            "task_closed",
+            ApplicationError::validation(format!(
+                "task {task_id} is closed; reopen it before preparing"
+            )),
+        ));
     }
 
     let primary_run = match task.primary_task_run_id.as_ref() {
@@ -134,12 +149,18 @@ where
     };
     let Some(primary_run) = primary_run else {
         if DisplayStatus::from_task_and_run(task.status, None).prepare_eligible() {
-            return Ok(());
+            return Ok(None);
         }
-        return Err(ApplicationError::validation(format!(
-            "task {task_id} is in progress without a Main Run; mark it ready or attach a session \
-             before running"
-        )));
+        return Err(reject(
+            "accepts_new_run",
+            task_id,
+            None,
+            "no_main_run",
+            ApplicationError::validation(format!(
+                "task {task_id} is in progress without a Main Run; mark it ready or attach a \
+                 session before running"
+            )),
+        ));
     };
     let primary_id = &primary_run.id;
     // Setup is killed at `setup_timeout_sec`, so a run still setting up well past it lost the
@@ -150,20 +171,48 @@ where
         && repos.is_task_run_older_than(primary_id, stale_setup_age_secs)?
     {
         repos.finish_task_run(primary_id, task_id, TaskRunStatus::Failed)?;
-        return Ok(());
+        return Ok(Some(ReapedStaleSetup {
+            task_run_id: primary_id.clone(),
+            from: primary_run.status,
+        }));
     }
     if is_active_run_status(primary_run.status) {
-        return Err(ApplicationError::conflict(format!(
-            "task {task_id} already has an active run ({primary_id}, status: {})",
-            primary_run.status.as_str()
-        )));
+        return Err(reject(
+            "accepts_new_run",
+            task_id,
+            Some(primary_id),
+            "active_run",
+            ApplicationError::conflict(format!(
+                "task {task_id} already has an active run ({primary_id}, status: {})",
+                primary_run.status.as_str()
+            )),
+        ));
     }
     if primary_run.status == TaskRunStatus::Prepared {
-        return Err(ApplicationError::conflict(format!(
-            "task {task_id} is already prepared (run {primary_id}); use Run to launch Claude"
-        )));
+        return Err(reject(
+            "accepts_new_run",
+            task_id,
+            Some(primary_id),
+            "already_prepared",
+            ApplicationError::conflict(format!(
+                "task {task_id} is already prepared (run {primary_id}); use Run to launch Claude"
+            )),
+        ));
     }
-    Ok(())
+    Ok(None)
+}
+
+/// Announce a stale-setup reap, once the transaction that performed it has committed.
+fn log_reaped_stale_setup(reaped: Option<ReapedStaleSetup>, task_id: &TaskId) {
+    if let Some(reaped) = reaped {
+        run_status(
+            &reaped.task_run_id,
+            task_id,
+            Some(reaped.from),
+            TaskRunStatus::Failed,
+            "stale_setup",
+        );
+    }
 }
 
 /// Phase 1: Create TaskRun (SettingUp) + set as Main Run + ensure bench exists.
@@ -193,7 +242,7 @@ where
     // these steps would otherwise strand a run that has no primary pointer and no workbench.
     let mut tx = repos.begin()?;
     let task = reload_task(&*tx, task_id)?;
-    ensure_task_accepts_new_run(&mut *tx, &task, stale_setup_age_secs)?;
+    let reaped = ensure_task_accepts_new_run(&mut *tx, &task, stale_setup_age_secs)?;
     let run = tx.start_task_run(NewTaskRun {
         task_id: task.id.clone(),
         agent: None,
@@ -203,6 +252,8 @@ where
     tx.set_primary_task_run(&task.id, &run.id)?;
     super::open_bench::ensure_bench(&mut *tx, &task.id, &cwd, false)?;
     tx.commit()?;
+    log_reaped_stale_setup(reaped, &task.id);
+    run_status(&run.id, &task.id, None, run.status, "prepare");
 
     Ok(PrepareTaskResult {
         task_id: task.id,
@@ -233,7 +284,7 @@ where
     // reach it, so a run left at `SettingUp` here would never advance.
     let mut tx = repos.begin()?;
     let task = reload_task(&*tx, task_id)?;
-    ensure_task_accepts_new_run(&mut *tx, &task, stale_setup_age_secs)?;
+    let reaped = ensure_task_accepts_new_run(&mut *tx, &task, stale_setup_age_secs)?;
     let run = tx.start_task_run(NewTaskRun {
         task_id: task.id.clone(),
         agent: None,
@@ -244,6 +295,15 @@ where
     super::open_bench::ensure_bench(&mut *tx, &task.id, &cwd, false)?;
     tx.finish_task_run(&run.id, &task.id, TaskRunStatus::Prepared)?;
     tx.commit()?;
+    log_reaped_stale_setup(reaped, &task.id);
+    run_status(&run.id, &task.id, None, run.status, "run_in_place");
+    run_status(
+        &run.id,
+        &task.id,
+        Some(run.status),
+        TaskRunStatus::Prepared,
+        "in_place_no_setup",
+    );
 
     Ok(())
 }
@@ -297,7 +357,15 @@ where
 {
     execute_run_inner(repos, git, setup_runner, outputs, task_id, task_run_id).inspect_err(
         |_| {
-            let _ = repos.finish_task_run(task_run_id, task_id, TaskRunStatus::Failed);
+            // The only transition whose origin is not already in hand; worth one read on a path
+            // that is failing anyway, since this is where a run dies without explaining itself.
+            let from = repos.get_task_run(task_run_id).ok().flatten().map(|run| run.status);
+            if repos
+                .finish_task_run(task_run_id, task_id, TaskRunStatus::Failed)
+                .is_ok()
+            {
+                run_status(task_run_id, task_id, from, TaskRunStatus::Failed, "execute_error");
+            }
         },
     )
 }
@@ -322,6 +390,7 @@ where
     let run = repos
         .get_task_run(task_run_id)?
         .ok_or_else(|| ApplicationError::not_found(format!("task run not found: {task_run_id}")))?;
+    let from = run.status;
     let branch = run
         .branch
         .ok_or_else(|| ApplicationError::validation(format!("task run {task_run_id} has no branch")))?;
@@ -361,12 +430,14 @@ where
 
     if setup.is_failure() {
         repos.finish_task_run(task_run_id, task_id, TaskRunStatus::Failed)?;
+        run_status(task_run_id, task_id, Some(from), TaskRunStatus::Failed, "setup_failed");
         return Ok(TaskRunStatus::Failed);
     }
 
     repos.update_bench_cwd(task_id, &worktree_str)?;
 
     repos.finish_task_run(task_run_id, task_id, TaskRunStatus::Prepared)?;
+    run_status(task_run_id, task_id, Some(from), TaskRunStatus::Prepared, "setup_ok");
 
     Ok(TaskRunStatus::Prepared)
 }
@@ -441,32 +512,65 @@ where
     // A prepared or resumable primary skips the fresh-run path and its closed-task check, so the
     // rule is enforced here too: a closed task never launches, whatever its primary looks like.
     if task.status == TaskStatus::Closed {
-        return Err(ApplicationError::validation(format!(
-            "task {task_id} is closed; reopen it before running"
-        )));
+        return Err(reject(
+            "prepare_claude_for_run",
+            task_id,
+            None,
+            "task_closed",
+            ApplicationError::validation(format!(
+                "task {task_id} is closed; reopen it before running"
+            )),
+        ));
     }
     let profile = load_execution_profile(repos, &project.id)?;
 
     let primary_id = task.primary_task_run_id.ok_or_else(|| {
-        ApplicationError::validation(format!("task {task_id} has no primary run; prepare it first"))
+        reject(
+            "prepare_claude_for_run",
+            task_id,
+            None,
+            "no_primary",
+            ApplicationError::validation(format!(
+                "task {task_id} has no primary run; prepare it first"
+            )),
+        )
     })?;
-    let primary_run = repos
-        .get_task_run(&primary_id)?
-        .ok_or_else(|| ApplicationError::not_found(format!("primary run {primary_id} not found")))?;
+    let primary_run = repos.get_task_run(&primary_id)?.ok_or_else(|| {
+        reject(
+            "prepare_claude_for_run",
+            task_id,
+            Some(&primary_id),
+            "primary_missing",
+            ApplicationError::not_found(format!("primary run {primary_id} not found")),
+        )
+    })?;
 
     let resume_session_id = match (primary_run.status, primary_run.resumable_session()) {
         (TaskRunStatus::Prepared, _) => None,
         (_, Some(session)) => Some(session.to_string()),
         (TaskRunStatus::Stopped, None) => {
-            return Err(ApplicationError::conflict(format!(
-                "primary run {primary_id} is stopped with no session to resume; prepare a new run"
-            )));
+            return Err(reject(
+                "prepare_claude_for_run",
+                task_id,
+                Some(&primary_id),
+                "stopped_no_session",
+                ApplicationError::conflict(format!(
+                    "primary run {primary_id} is stopped with no session to resume; prepare a new \
+                     run"
+                )),
+            ));
         }
         (other, _) => {
-            return Err(ApplicationError::conflict(format!(
-                "primary run {primary_id} is {} (expected prepared or a resumable stopped run)",
-                other.as_str()
-            )));
+            return Err(reject(
+                "prepare_claude_for_run",
+                task_id,
+                Some(&primary_id),
+                "unexpected_status",
+                ApplicationError::conflict(format!(
+                    "primary run {primary_id} is {} (expected prepared or a resumable stopped run)",
+                    other.as_str()
+                )),
+            ));
         }
     };
 

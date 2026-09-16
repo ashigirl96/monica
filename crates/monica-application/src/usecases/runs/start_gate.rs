@@ -1,4 +1,5 @@
 use crate::github::IssueBlocker;
+use crate::observability::reject;
 use crate::ports::GithubIssueSyncStore;
 use crate::prelude::TaskId;
 use crate::{ApplicationError, ApplicationResult};
@@ -33,7 +34,13 @@ where
         .map(IssueBlocker::label)
         .collect::<Vec<_>>()
         .join(", ");
-    Err(ApplicationError::conflict(format!(
-        "task {task_id} is blocked by {blockers}; land them first or force the run"
-    )))
+    Err(reject(
+        "start_gate",
+        task_id,
+        None,
+        "blocked_by",
+        ApplicationError::conflict(format!(
+            "task {task_id} is blocked by {blockers}; land them first or force the run"
+        )),
+    ))
 }

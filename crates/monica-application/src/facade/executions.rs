@@ -146,6 +146,7 @@ impl<B: Backend> ExecutionService<'_, B> {
         if report.event_name.is_none() {
             report.event_name = agents.event_label(raw_stdin.as_bytes());
         }
+        log::debug!(target: "monica_application::hook", "{}", report.trace_line());
         if let (Some(ref run_id), Some(status)) =
             (&report.linked_task_run_id, report.task_run_status)
         {
@@ -177,7 +178,7 @@ impl<B: Backend> ExecutionService<'_, B> {
                     task_run_id: report.linked_task_run_id.clone().map(Into::into),
                 };
                 if let Err(e) = repos.enqueue_notification(intent) {
-                    log::warn!(target: "monica_app::notify", "failed to enqueue notification: {e}");
+                    log::warn!(target: "monica_application::notify", "failed to enqueue notification: {e}");
                 }
             }
         } else if let Some(key) = crate::notification::awaiting_user_input_dedupe_key(
@@ -408,7 +409,7 @@ impl<B: Backend> ExecutionService<'_, B> {
     pub fn settle_runs_for_terminated_sessions(&mut self, session_ids: &[String]) {
         for session_id in session_ids {
             if let Err(e) = self.settle_one(session_id) {
-                log::error!(
+                log::warn!(
                     target: "monica_application::settlement",
                     "failed to settle run for session {session_id}: {e}"
                 );
@@ -423,7 +424,7 @@ impl<B: Backend> ExecutionService<'_, B> {
         let runs = match self.m.repos.list_driven_task_runs_with_tab() {
             Ok(runs) => runs,
             Err(e) => {
-                log::error!(
+                log::warn!(
                     target: "monica_application::settlement",
                     "failed to list driven runs for the orphan sweep: {e}"
                 );
@@ -435,7 +436,7 @@ impl<B: Backend> ExecutionService<'_, B> {
                 continue;
             };
             if let Err(e) = self.settle_orphaned_one(&run, &tab_id) {
-                log::error!(
+                log::warn!(
                     target: "monica_application::settlement",
                     "failed to settle orphaned run {}: {e}",
                     run.id
@@ -459,14 +460,14 @@ impl<B: Backend> ExecutionService<'_, B> {
         else {
             return Ok(());
         };
-        Self::apply_settlement(repos, &**events, settlement)
+        Self::apply_settlement(repos, &**events, settlement, "terminal_exit")
     }
 
     fn settle_orphaned_one(&mut self, run: &TaskRun, tab_id: &str) -> ApplicationResult<()> {
         let Monica { repos, events, .. } = &mut *self.m;
         let latest = repos.latest_terminal_session_for_tab(tab_id)?;
         if let Some(settlement) = task_run_settlement_for_orphaned_run(run, latest.as_ref()) {
-            Self::apply_settlement(repos, &**events, settlement)?;
+            Self::apply_settlement(repos, &**events, settlement, "orphan_sweep")?;
         }
         Ok(())
     }
@@ -477,13 +478,31 @@ impl<B: Backend> ExecutionService<'_, B> {
         repos: &mut B::Repos,
         events: &dyn EventSink,
         settlement: TerminalExitSettlement,
+        cause: &str,
     ) -> ApplicationResult<()> {
         if repos.settle_task_run_if_live(&settlement.task_run_id, &settlement.task_id)? {
+            // `from` is the status read when the verdict was decided, not one read inside the
+            // guarded update. The guard accepts any live status, so a hook moving the run between
+            // two of them in between leaves this naming the earlier one.
+            crate::observability::run_status(
+                &settlement.task_run_id,
+                &settlement.task_id,
+                Some(settlement.from_status),
+                TaskRunStatus::Stopped,
+                cause,
+            );
             events.emit(ApplicationEvent::TaskRunStatusChanged {
                 task_id: settlement.task_id.into(),
                 task_run_id: settlement.task_run_id.into(),
                 status: TaskRunStatus::Stopped,
             });
+        } else {
+            log::debug!(
+                target: "monica_application::lifecycle",
+                "run_settle_skipped task_run_id={} task_id={} cause={cause} reason=not_live",
+                settlement.task_run_id,
+                settlement.task_id,
+            );
         }
         Ok(())
     }

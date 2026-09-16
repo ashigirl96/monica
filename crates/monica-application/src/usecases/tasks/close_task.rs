@@ -2,6 +2,7 @@ use std::path::Path;
 
 use super::ports::{GitGateway, ProjectRepository, TaskRunStore, TaskStore};
 use crate::ports::PendingLaunchStore;
+use crate::observability::task_status;
 use crate::prelude::{Task, TaskId, TaskRun};
 use crate::{ApplicationError, ApplicationResult};
 
@@ -26,9 +27,10 @@ where
     repos.remove_pending_launches_for_task(id)?;
     let removed_branches = cleanup_runs(repos, git, &task, &runs)?;
     crate::usecases::runs::reap_worktree_trash(repos, git);
-    let task = repos.mark_task_closed(id)?;
+    let closed = repos.mark_task_closed(id)?;
+    task_status(id, task.status, closed.status, "close_task");
     Ok(CloseTaskReport {
-        task,
+        task: closed,
         task_runs: runs.into_iter().map(|run| run.id.into()).collect(),
         removed_branches,
     })

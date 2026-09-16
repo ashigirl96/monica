@@ -1,5 +1,6 @@
 use super::*;
 use monica_domain::{AgentSessionId, TaskRunId};
+use crate::usecases::runs::ResolveSkip;
 
 
 
@@ -17,7 +18,7 @@ fn resolve_by_session_returns_none_without_session_id() {
         primary_run: None,
     };
     let result = resolve_by_session(&ctx, &mut repos).unwrap();
-    assert!(result.is_none());
+    assert_eq!(result.unwrap_err(), ResolveSkip::NoSessionId);
 }
 
 #[test]
@@ -43,7 +44,6 @@ fn resolve_by_session_returns_run_when_found() {
         primary_run: None,
     };
     let result = resolve_by_session(&ctx, &mut repos).unwrap();
-    assert!(result.is_some());
     assert!(!result.unwrap().created);
 }
 
@@ -63,7 +63,10 @@ fn resolve_by_prepared_primary_skips_non_prepared() {
         primary_run: Some(&run),
     };
     let result = resolve_by_prepared_primary(&ctx, &mut repos).unwrap();
-    assert!(result.is_none());
+    assert_eq!(
+        result.unwrap_err(),
+        ResolveSkip::PrimaryNotPrepared(TaskRunStatus::Running)
+    );
 }
 
 #[test]
@@ -82,7 +85,25 @@ fn resolve_by_prepared_primary_skips_non_starting_event() {
         primary_run: Some(&run),
     };
     let result = resolve_by_prepared_primary(&ctx, &mut repos).unwrap();
-    assert!(result.is_none());
+    assert_eq!(result.unwrap_err(), ResolveSkip::NotSessionStarting);
+}
+
+#[test]
+fn resolve_by_prepared_primary_skips_when_the_task_has_no_primary() {
+    let task = make_task("t1", TaskStatus::Ready, None);
+    let mut repos = FakeRepos::default();
+    let agent_session = AgentSessionId::from_agent("sess-1");
+    let ctx = RunResolveCtx {
+        task_id: &TaskId::from_store("t1".to_string()),
+        task: &task,
+        explicit_run_id_rejected: false,
+        agent_session_id: Some(&agent_session),
+        starts_session: true,
+        agent: Agent::Claude,
+        primary_run: None,
+    };
+    let result = resolve_by_prepared_primary(&ctx, &mut repos).unwrap();
+    assert_eq!(result.unwrap_err(), ResolveSkip::NoPrimaryRun);
 }
 
 #[test]
@@ -101,8 +122,7 @@ fn resolve_by_prepared_primary_claims_on_session_start() {
         agent: Agent::Claude,
         primary_run: Some(&run),
     };
-    let result = resolve_by_prepared_primary(&ctx, &mut repos).unwrap();
-    let resolved = result.unwrap();
+    let resolved = resolve_by_prepared_primary(&ctx, &mut repos).unwrap().unwrap();
     assert!(!resolved.created);
     let resolved_run = resolved.run.unwrap();
     assert_eq!(resolved_run.id, "run-1");
@@ -128,8 +148,11 @@ fn resolve_by_prepared_primary_loses_race_when_already_claimed() {
         agent: Agent::Claude,
         primary_run: Some(&run),
     };
-    // The loser changes 0 rows and falls through (Ok(None)) so lazy-create makes it a side run.
-    assert!(resolve_by_prepared_primary(&ctx, &mut repos).unwrap().is_none());
+    // The loser changes 0 rows and falls through so lazy-create makes it a side run.
+    assert_eq!(
+        resolve_by_prepared_primary(&ctx, &mut repos).unwrap().unwrap_err(),
+        ResolveSkip::ClaimLost
+    );
     assert_eq!(
         repos.get_task_run(&TaskRunId::from_store("run-1".to_string())).unwrap().unwrap().agent_session_id.as_deref(),
         Some("sess-winner")
@@ -151,7 +174,7 @@ fn resolve_by_lazy_create_rejects_without_session_id() {
         primary_run: None,
     };
     let result = resolve_by_lazy_create(&ctx, &mut repos).unwrap();
-    assert!(result.is_none());
+    assert_eq!(result.unwrap_err(), ResolveSkip::NoSessionId);
 }
 
 #[test]
@@ -170,7 +193,7 @@ fn resolve_by_lazy_create_rejects_non_starting_event() {
         primary_run: None,
     };
     let result = resolve_by_lazy_create(&ctx, &mut repos).unwrap();
-    assert!(result.is_none());
+    assert_eq!(result.unwrap_err(), ResolveSkip::NotSessionStarting);
 }
 
 #[test]
@@ -189,7 +212,7 @@ fn resolve_by_lazy_create_rejects_when_explicit_run_id_rejected() {
         primary_run: None,
     };
     let result = resolve_by_lazy_create(&ctx, &mut repos).unwrap();
-    assert!(result.is_none());
+    assert_eq!(result.unwrap_err(), ResolveSkip::ExplicitRunIdRejected);
 }
 
 #[test]
@@ -209,7 +232,7 @@ fn resolve_by_lazy_create_rejects_closed_task() {
         primary_run: None,
     };
     let result = resolve_by_lazy_create(&ctx, &mut repos).unwrap();
-    assert!(result.is_none());
+    assert_eq!(result.unwrap_err(), ResolveSkip::TaskClosed);
 }
 
 #[test]
@@ -227,8 +250,7 @@ fn resolve_by_lazy_create_creates_primary_when_none_exists() {
         agent: Agent::Claude,
         primary_run: None,
     };
-    let result = resolve_by_lazy_create(&ctx, &mut repos).unwrap();
-    let resolved = result.unwrap();
+    let resolved = resolve_by_lazy_create(&ctx, &mut repos).unwrap().unwrap();
     assert!(resolved.created);
     let run = resolved.run.unwrap();
     let updated_task = repos.get_task(&task_id).unwrap().unwrap();
@@ -251,8 +273,7 @@ fn resolve_by_lazy_create_creates_side_run_when_primary_exists() {
         agent: Agent::Claude,
         primary_run: Some(&existing_primary),
     };
-    let result = resolve_by_lazy_create(&ctx, &mut repos).unwrap();
-    let resolved = result.unwrap();
+    let resolved = resolve_by_lazy_create(&ctx, &mut repos).unwrap().unwrap();
     assert!(resolved.created);
     let updated_task = repos.get_task(&task_id).unwrap().unwrap();
     assert!(updated_task.primary_task_run_id.is_none());
