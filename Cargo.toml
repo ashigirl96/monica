@@ -2,6 +2,89 @@
 members = ["crates/*"]
 resolver = "2"
 
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+# 依存はもっと下も許すが、dev/CI の stable toolchain に合わせる。
+rust-version = "1.95"
+
+# feature はここで union にしない。全 crate が一致するものだけを置き、crate ごとに違う分は
+# member 側の features に残す。cargo check -p <crate> の単独ビルドでは feature unification が
+# 効かず、crate 自身の宣言がすべてになるため。
+[workspace.dependencies]
+claude-agent-sdk = { path = "crates/claude-agent-sdk" }
+monica-adapters = { path = "crates/monica-adapters" }
+monica-api = { path = "crates/monica-api" }
+monica-application = { path = "crates/monica-application" }
+monica-domain = { path = "crates/monica-domain" }
+monica-logfile = { path = "crates/monica-logfile" }
+monica-paths = { path = "crates/monica-paths" }
+monica-runtime = { path = "crates/monica-runtime" }
+monica-settings = { path = "crates/monica-settings" }
+monica-storage-sqlite = { path = "crates/monica-storage-sqlite" }
+monica-terminal-client = { path = "crates/monica-terminal-client" }
+monica-terminal-daemon = { path = "crates/monica-terminal-daemon" }
+monica-terminal-protocol = { path = "crates/monica-terminal-protocol" }
+monica-web = { path = "crates/monica-web" }
+
+anyhow = "1.0.102"
+async-trait = "0.1"
+axum = { version = "0.8", default-features = false }
+base64 = { version = "0.23", default-features = false, features = ["std"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+ctor = "1.0"
+env_logger = "0.11"
+futures-core = { version = "0.3", default-features = false }
+futures-util = { version = "0.3.32", default-features = false }
+http-body-util = { version = "0.1", default-features = false }
+libc = { version = "0.2", default-features = false }
+log = "0.4"
+objc2 = { version = "0.6", default-features = false }
+objc2-app-kit = { version = "0.3", default-features = false }
+objc2-foundation = { version = "0.3", default-features = false }
+octocrab = { version = "0.54.0", default-features = false, features = [
+  "default-client",
+  "jwt-rust-crypto",
+  "rustls",
+  "rustls-ring",
+] }
+portable-pty = { version = "0.9", default-features = false }
+reqwest = { version = "0.13.3", default-features = false, features = [
+  "json",
+  "rustls-no-provider",
+] }
+rusqlite = { version = "0.40", features = ["bundled", "trace"] }
+rusqlite_migration = "2.6.0"
+rust-embed = { version = "8", default-features = false }
+rustls = { version = "0.23.40", default-features = false, features = ["ring"] }
+scraper = { version = "0.27.0", default-features = false }
+serde = { version = "1.0.228", default-features = false }
+serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
+# bindings 生成の互換性のため rc に pin する。specta / specta-serde / specta-typescript /
+# tauri-specta は同じ rc 世代で揃っている必要があるので、pin の理由ごとここに 1 度だけ書く。
+specta = { version = "=2.0.0-rc.25", default-features = false }
+specta-serde = { version = "=0.0.12", default-features = false }
+specta-typescript = { version = "=0.0.12", default-features = false }
+strum = { version = "0.28", features = ["derive"] }
+tauri-plugin-log = "2"
+tauri-plugin-mcp-bridge = { version = "0.13", default-features = false }
+tauri-plugin-notification = { version = "2", default-features = false }
+tauri-plugin-opener = { version = "2", default-features = false }
+tauri-plugin-store = { version = "2", default-features = false }
+tauri-specta = { version = "=2.0.0-rc.25", default-features = false, features = [
+  "derive",
+  "typescript",
+] }
+thiserror = "2.0"
+tokio = { version = "1.52.3", default-features = false }
+tokio-tungstenite = "0.30"
+tokio-util = { version = "0.7", default-features = false }
+tower = { version = "0.5", default-features = false, features = ["util"] }
+typed-builder = "0.23"
+uuid = { version = "1", default-features = false, features = ["v4"] }
+
 # profile はワークスペース root にのみ効く。メンバー crate 側に書いても無視される。
 # "Five Aces"（docs/dev.md §1）を崩さないこと。
 [profile.dev]

@@ -1,24 +1,25 @@
 [package]
 name = "monica-cli"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 [[bin]]
 name = "monica"
 path = "src/main.rs"
 
 [dependencies]
-monica-application = { path = "../monica-application" }
-monica-domain = { path = "../monica-domain" }
-monica-logfile = { path = "../monica-logfile" }
-monica-runtime = { path = "../monica-runtime" }
-monica-paths = { path = "../monica-paths" }
-clap = { version = "4", features = ["derive"] }
-clap_complete = "4"
-anyhow = "1.0.102"
-log = "0.4"
-serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
-tokio = { version = "1.52.3", default-features = false, features = ["net", "rt", "time"] }
+monica-application.workspace = true
+monica-domain.workspace = true
+monica-logfile.workspace = true
+monica-runtime.workspace = true
+monica-paths.workspace = true
+clap.workspace = true
+clap_complete.workspace = true
+anyhow.workspace = true
+log.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["net", "rt", "time"] }
 
 [target.'cfg(unix)'.dependencies]
-libc = { version = "0.2", default-features = false }
+libc.workspace = true

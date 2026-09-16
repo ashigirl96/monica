@@ -1,9 +1,10 @@
 [package]
 name = "monica-logfile"
-version = "0.1.0"
+version.workspace = true
 description = "Daily-rotated, retention-bounded append-only log files"
-edition = "2021"
+edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-anyhow = "1.0.102"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+anyhow.workspace = true
+chrono.workspace = true

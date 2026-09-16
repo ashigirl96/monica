@@ -1,15 +1,15 @@
 [package]
 name = "monica-storage-sqlite"
-version = "0.1.0"
-edition = "2021"
-rust-version = "1.95"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-monica-application = { path = "../monica-application" }
-monica-domain = { path = "../monica-domain" }
-monica-paths = { path = "../monica-paths" }
-anyhow = "1.0.102"
-log = "0.4"
-rusqlite = { version = "0.40", features = ["bundled", "trace"] }
-rusqlite_migration = "2.6.0"
-serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
+monica-application.workspace = true
+monica-domain.workspace = true
+monica-paths.workspace = true
+anyhow.workspace = true
+log.workspace = true
+rusqlite.workspace = true
+rusqlite_migration.workspace = true
+serde_json.workspace = true

@@ -17,9 +17,15 @@
 
 ## 依存クレート追加時のチェック
 
-- `default-features = false` を必ず付ける。`tokio` や `reqwest` を default で入れると数 MB 級の事故になる。
-- 必要な feature だけ `features = [...]` に列挙する。既存依存
-  (`tauri` / `serde` / `serde_json` / `tauri-build`) はこの方針で書かれている。
+- バージョンと `default-features = false` はルート `Cargo.toml` の `[workspace.dependencies]`
+  に書き、この crate では `<dep>.workspace = true` で継承する。`tokio` や `reqwest` を
+  default で入れると数 MB 級の事故になる。
+- 必要な feature だけ `features = [...]` に列挙する。全 crate 共通なら root に、この crate
+  固有なら `<dep> = { workspace = true, features = [...] }` で足す。
+- **`tauri` と `tauri-build` は例外**で、この crate の `Cargo.toml` に直接書く。Tauri CLI が
+  `tauri.conf.json` から `tauri` の features を書き戻して同期しており、workspace 継承にすると
+  その同期が止まる一方、`tauri-build` の `check_features` は features と config の一致を
+  要求し続けるため。
 - 追加前後で `just bloat` を走らせてサイズ差を確認する。
 - 詳細手順は `docs/dev.md §2` と `§10` のチェックリスト。
 
