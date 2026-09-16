@@ -81,8 +81,12 @@ fn safe_error_text(text: &str, url: Option<&reqwest::Url>) -> String {
 /// A URL fit to write down. These come from whoever pasted a link, so the secrets they carry have
 /// no fixed shape — `https://user:pass@…`, `?token=…`, a presigned `X-Amz-Signature`, or a bare
 /// `?capability-token` that the parser reads as a *key*. Nothing about a query is structurally safe
-/// to keep, so the whole of it goes; scheme, host and path stay, because naming the resource that
-/// was fetched is the reason the line exists at all.
+/// to keep, so the whole of it goes, and the fragment goes with it: it is never sent to the server,
+/// so recording it is cost without use.
+///
+/// Scheme, host and path stay. A path can carry a capability too, but it is the only part that says
+/// *what was fetched*, which is the reason the line exists — masking it would leave a record of
+/// having made a request and nothing else.
 fn safe_url(url: &reqwest::Url) -> String {
     let mut safe = url.clone();
     if !safe.username().is_empty() || safe.password().is_some() {
@@ -92,6 +96,7 @@ fn safe_url(url: &reqwest::Url) -> String {
     if safe.query().is_some_and(|query| !query.is_empty()) {
         safe.set_query(Some(MASK));
     }
+    safe.set_fragment(None);
     redact(safe.as_str()).into_owned()
 }
 
@@ -140,6 +145,15 @@ mod tests {
     fn a_bare_query_token_is_not_mistaken_for_a_harmless_key() {
         let safe = safe_url(&url("https://example.com/file?s3cret-capability"));
         assert_eq!(safe, "https://example.com/file?***");
+        assert!(!safe.contains("s3cret"));
+    }
+
+    /// A fragment never reaches the server, so it is pure exposure — and OAuth implicit flows put
+    /// access tokens there.
+    #[test]
+    fn the_fragment_is_dropped_rather_than_recorded() {
+        let safe = safe_url(&url("https://example.com/cb#access_token=s3cret&type=bearer"));
+        assert_eq!(safe, "https://example.com/cb");
         assert!(!safe.contains("s3cret"));
     }
 
