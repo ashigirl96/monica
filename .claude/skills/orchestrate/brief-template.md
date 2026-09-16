@@ -1,50 +1,17 @@
 # Epic Brief テンプレート
 
-epic issue 本文の形。節の順は「人が最初に知りたい順」。HTML コメントの区切りで囲まれた 2 節は Tick が毎回置き換える。
+epic issue 本文の形。全ての節が「他に置き場所が無い情報」で、導出できるものは置かない（後述）。
+
+節の順は**書き手で切る**。上半分が人の書く静的な節、下半分が Orchestrator が追記していく節で、境界は 1 本だけ。新しい節を足すときもこの境界のどちら側かで置き場所が決まる。
 
 ```markdown
 ## ゴール
 
 <1〜2 行。この epic が終わった時に何ができるか>
 
-<!-- orchestrate:status:begin -->
+## 経緯
 
-## Status
-
-| sub-issue  | 状態                        | Worker         | blocked by |
-| ---------- | --------------------------- | -------------- | ---------- |
-| #A <title> | Released                    | -              | -          |
-| #B <title> | PR draft（merge gate 待ち） | MON-42 Running | #A         |
-| #C <title> | 着手可                      | -              | -          |
-
-最終 Tick: <YYYY-MM-DD HH:mm>
-<!-- orchestrate:status:end -->
-
-## Human Action
-
-- [ ] <内容> — Gate: <#N 着手前 | #N merge 前> — 結果:
-- [x] <内容> — Gate: <…> — 結果: <得た事実>
-
-<!-- orchestrate:verification:begin -->
-
-## Verification（未完了）
-
-- [ ] [PR #N](url) <項目> — 条件: <いつ確認できるか>
-- [ ] epic レベル: <項目> — 条件: <…>
-
-<!-- orchestrate:verification:end -->
-
-## Discovery
-
-- <事実 1 行>（#N）
-
-## Merge Gate
-
-- #B は #A の Released 後に merge（<理由>）
-
-## Fog
-
-- <作業> — <何が分かれば切れるか>
+<任意。数行を超えるなら <details> で畳む>
 
 ## スコープ外
 
@@ -54,10 +21,33 @@ epic issue 本文の形。節の順は「人が最初に知りたい順」。HTM
 
 <順序制約で切る | PoC を 1 本先に通す | 単独で検証・着地できる単位で切る>
 
-## 経緯
+## Human Action
 
-<任意>
+- [ ] <内容> — Gate: <#N 着手前 | #N merge 前> — 結果:
+- [x] <内容> — Gate: <…> — 結果: <得た事実>
+
+## Verification
+
+- [ ] <epic レベルの項目> — 条件: <いつ確認できるか>
+
+## Merge Gate
+
+- #B は #A の Released 後に merge（<理由>）
+
+## Fog
+
+- <作業> — <何が分かれば切れるか>
+
+## Discovery
+
+- <事実 1 行>（#N）
 ```
+
+Discovery が最下部なのは、epic が進むほど単調に増える唯一の節だから。上に置くと Human Action・Merge Gate・Fog が読み手の視界から押し出される。最下部なら Tick の追記先が「本文の末尾」に一致するので、挿入位置を間違えようがないという利点もある。
+
+人が書く節はテンプレ外のものを足してよい（例: 実装方針の共有）。置き場所は上半分で、長ければ `<details>` で畳む。
+
+**畳んでよいのは静的な節だけ。** Discovery を `<details>` に入れてはいけない — 追記が `</details>` の直前への挿入になり、「節の末尾に足す」という規則が壊れる。経緯や方針は plan 時に書いて以後 Tick が触らないので、畳んでも壊れない。
 
 ## 書き手
 
@@ -65,17 +55,27 @@ epic issue 本文の形。節の順は「人が最初に知りたい順」。HTM
 | ---------------------------------------- | ------------ | --------------------------------------------------------------------------- |
 | ゴール・スコープ外・経緯・分解方針       | 人           | GitHub UI で直接編集してよい。Orchestrator は plan モードで初期値を置くだけ |
 | Discovery・Human Action・Merge Gate・Fog | Orchestrator | コメントの畳み込みと対話入力で末尾に追記。既存行は消さない                  |
-| Status・Verification（未完了）           | Tick         | 区切りの内側を全て置き換える                                                |
+| Verification                             | 人 / Tick    | epic レベルの項目だけを置く。PR に属する項目は PR 本文が正本なので置かない  |
 
-## Status の「状態」欄
+Tick が本文を書くのは、手順 5 の畳み込みと手順 6 の対話入力で**追記する分があるときだけ**。無ければ本文は触らない。
 
-`着手可` / `blocked` / `Human Action 待ち` / `着手中` / `PR open` / `PR draft（merge gate 待ち）` / `merged` / `Released` / `done` のいずれか 1 つ。判定順は SKILL.md 手順 7。
+## Brief に置かないもの
 
-## Verification（未完了）の集め方
+機械的に導出できるものは本文に写さない。Tick が毎回ゼロから計算し、terminal の報告に出す。
 
-全 PR の本文から、repo の見出し 3 つ（pre-merge / post-merge / post-release）の下にある未チェックの行を集め、PR へのリンクと元の `条件:` を付けて並べる。epic レベルの項目は本文のこの節に人か Orchestrator が直接書き、PR に属さないので集め直しても消えない。
+| 導出できるもの               | 正本                                                     | どこで見るか                                        |
+| ---------------------------- | -------------------------------------------------------- | --------------------------------------------------- |
+| sub-issue の状態（9 値）     | GitHub の issue / PR と、本文の Human Action・Merge Gate | Tick の報告（SKILL.md 手順 7）                      |
+| 走っている Worker と Run     | Monica                                                   | `monica task status --project <O>/<R>`・Tick の報告 |
+| PR 由来の未完了 Verification | その PR の本文                                           | Tick の報告                                         |
 
-この節の箱にあなたがチェックを入れた場合、次の Tick はそれを入力として扱い、元の PR 本文の同じ項目を `[x]` にしてから節を再生成する。
+本文に写すと Tick 間で必ず腐る。しかも「最終 Tick: <時刻>」のような添え書きが付くと読み手が確認を省くので、腐った写しは無いより悪い。sub-issue の一覧・open/closed・進捗・assignee・紐づく PR は GitHub が epic issue 上に常に最新で描くので、人が眺める用途はそちらで足りる。
+
+## Verification の節
+
+epic レベルの項目だけを置く。「どの PR にも属さないが、この epic が終わったと言うために確認が要ること」がここに来る。PR の pre-merge / post-merge / post-release 項目は PR 本文が正本で、Brief には写さない。
+
+epic を閉じてよいかの判定（SKILL.md 手順 7 の提案 5）は、この節の未チェック項目と、全 PR の未チェック項目の両方が空であることを見る。
 
 ## Worker の書き戻しコメント
 

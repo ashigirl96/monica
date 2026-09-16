@@ -17,11 +17,13 @@ Epic（親 issue）を sub-issue に分解し、Worker が [Worker flow](./worke
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | Epic Brief（Discovery・Human Action・Merge Gate・Fog） | epic issue 本文                                                                                   | Monica は写しを持たない（ADR-0001）                                                 |
 | sub-issue 間の依存                                     | start-after-merged は GitHub ネイティブの blocked-by、merge-after-released は Brief の Merge Gate | 辺は種類を持てず必ず start gate として効くので、merge-after-released に辺は張らない |
-| Verification                                           | その PR の本文                                                                                    | epic レベルの項目だけ Brief が正本。Brief には派生リストを持つ                      |
+| Verification                                           | その PR の本文                                                                                    | epic レベルの項目だけ Brief が正本。派生リストは持たない                            |
 | Claim                                                  | Monica の Run + GitHub の assignee                                                                | 起動時に両方を立てる                                                                |
 | Released の判定                                        | 既定は default branch への merge。タグでリリースする repo だけ `.monica/epic-flow.md` に宣言する  | 宣言の形は setup-monica の雛形                                                      |
 | PR 本文の Verification の見出し                        | 固定の 3 つ。`## マージ前の確認` / `## マージ後の手順` / `## リリース後の確認`                    | PR template に置く                                                                  |
 | 検証の手段                                             | 各 repo の skill と CLAUDE.md                                                                     | Epic flow 用の設定は持たない                                                        |
+
+Brief には「他に置き場所が無いもの」だけを置く。sub-issue の状態・走っている Worker・PR 由来の未完了 Verification はいずれも GitHub と Monica から機械的に導出できるので、tick が毎回計算して報告に出し、本文には写さない。写すと tick 間で必ず腐り、しかも最終更新時刻が添えられていると読み手が確認を省くため、腐った写しは無いより悪い。sub-issue の一覧・open/closed・進捗・assignee・紐づく PR は GitHub が epic issue 上に常に最新で描く。
 
 ## Gate と強制
 
@@ -39,7 +41,7 @@ Epic（親 issue）を sub-issue に分解し、Worker が [Worker flow](./worke
   3. Frontier を計算する。Human Action に阻まれた sub-issue は除く。
   4. 提案する: Worker の起動、merge gate の解除、確認条件を満たした Verification の実行、Fog からの追加分解、閉じられる Task と epic。
   5. あなたの指示で実行する。起動時は `monica task run` と assign を同時に行う。
-  6. Status 節と Verification（未完了）節を再生成して終わる。
+  6. 計算した状態は報告に出すだけで、本文には書かない。本文を書くのは畳み込みと対話入力で追記が出たときだけ。
 - **plan モード**: sub-issue が無いとき。分解方針（順序制約で切る / PoC を 1 本先に通す / 単独で検証・着地できる単位で切る）を選んで Brief に 1 行残し、今問いを正確に述べられるものだけ `gh issue create --parent --blocked-by` で切り、残りは Fog 節に置き、あなたのレビューで止まる。
 - **対話入力**: あなたが「田中さんからこう返事が来た」と伝えたら、Human Action にチェックを入れ、得た事実を Discovery に書く。
 - 自律度は「提案して止まる」。並列上限は固定せず、走っている Worker 数を報告に含める。
@@ -60,12 +62,12 @@ Epic（親 issue）を sub-issue に分解し、Worker が [Worker flow](./worke
 - pre-merge: Worker。
 - post-merge（ステージング確認など）: Worker の tab が生きていればあなたがその tab で頼む。tick は生存を報告に含める。生きていなければ Orchestrator。
 - post-release（本番確認、後日の cron 確認）: Orchestrator。Worker はここまで残さない。
-- 記録は誰が確認しても PR 本文のチェックボックス。Brief の派生リストへの記入は入力として PR に書き戻される。
+- 記録は誰が確認しても PR 本文のチェックボックス。Brief の Verification 節には、どの PR にも属さない epic レベルの項目だけを置く。
 
 ## 終わり方
 
 - sub-issue の Task は post-merge の Verification が終わった時点で閉じてよい。
-- epic は「全 sub-issue が閉じ、Verification（未完了）が空、Human Action が全チェック、Fog が空」で閉じられる。tick が判定して提案し、あなたの指示で `gh issue close` する。Fog が残る epic は閉じない。
+- epic は「全 sub-issue が閉じ、全 PR と Brief の Verification 節に未チェック項目が無い、Human Action が全チェック、Fog が空」で閉じられる。tick が判定して提案し、あなたの指示で `gh issue close` する。Fog が残る epic は閉じない。
 - epic を閉じたら tick が自分の Task を `monica task close` する。
 
 ## 分解の粒度と閾値
@@ -76,45 +78,16 @@ Epic（親 issue）を sub-issue に分解し、Worker が [Worker flow](./worke
 
 ## Epic Brief テンプレート
 
+節の順は書き手で切る。上半分が人間の書く静的な節、下半分が Orchestrator が追記していく節。
+
 ```markdown
 ## ゴール
 
 <1〜2 行。人間が書く>
 
-<!-- orchestrate:status:begin -->
+## 経緯
 
-## Status
-
-| sub-issue              | 状態 | Worker | blocked by |
-| ---------------------- | ---- | ------ | ---------- |
-| 最終 tick: <timestamp> |
-
-<!-- orchestrate:status:end -->
-
-## Human Action
-
-- [ ] <内容> — Gate: <#N 着手前 / #N merge 前> — 結果: <完了時に Discovery を書く>
-
-<!-- orchestrate:verification:begin -->
-
-## Verification（未完了）
-
-- [ ] [PR #N](url) <項目> — 条件: <いつ確認できるか>
-- [ ] epic レベル: <項目> — 条件: <...>
-
-<!-- orchestrate:verification:end -->
-
-## Discovery
-
-- <事実 1 行>（#N）
-
-## Merge Gate
-
-- #B は #A の Released 後に merge（<理由>）
-
-## Fog
-
-- <問いをまだ正確に述べられない作業。何が分かれば切れるか>
+<任意。数行を超えるなら <details> で畳む>
 
 ## スコープ外
 
@@ -124,12 +97,30 @@ Epic（親 issue）を sub-issue に分解し、Worker が [Worker flow](./worke
 
 <順序制約で切る / PoC を 1 本先に通す / 単独で検証・着地できる単位で切る>
 
-## 経緯
+## Human Action
 
-<任意>
+- [ ] <内容> — Gate: <#N 着手前 / #N merge 前> — 結果: <完了時に Discovery を書く>
+
+## Verification
+
+- [ ] <epic レベルの項目> — 条件: <いつ確認できるか>
+
+## Merge Gate
+
+- #B は #A の Released 後に merge（<理由>）
+
+## Fog
+
+- <問いをまだ正確に述べられない作業。何が分かれば切れるか>
+
+## Discovery
+
+- <事実 1 行>（#N）
 ```
 
-書き手の分担: ゴール・スコープ外・経緯・分解方針は人間。Discovery・Human Action・Merge Gate・Fog は Orchestrator。Status・Verification は tick が区切り内だけを再生成。
+書き手の分担: ゴール・スコープ外・経緯・分解方針は人間。Discovery・Human Action・Merge Gate・Fog は Orchestrator が末尾に追記する。Verification は epic レベルの項目だけを置き、人間と tick の両方が書く。
+
+Discovery は epic が進むほど単調に増える唯一の節なので最下部に置く。人間が書く静的な節は長ければ `<details>` で畳んでよいが、Orchestrator が追記する節は畳まない（追記先が節の末尾でなくなる）。
 
 ## 最初に実装する範囲
 

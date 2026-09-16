@@ -59,7 +59,9 @@ gh api graphql -f query='query {
 gh pr view <PR> --repo <O>/<R> --json body,state,isDraft,labels,mergeCommit,mergedAt,url
 ```
 
-見出し 3 つ（固定: `## マージ前の確認` / `## マージ後の手順` / `## リリース後の確認`）の下の `- [ ]` 行を集める。各行は `- [ ] <内容> — 条件: <…>` の形を期待するが、`条件:` が無い行も項目として扱い、条件は「不明」とする。
+見出し 3 つ（固定: `## マージ前の確認` / `## マージ後の手順` / `## リリース後の確認`）の下の箇条書きを集める。`- [ ]` / `- [x]` が項目で、`- なし` はその節に項目が無いことを表す。各行は `- [ ] <内容> — 条件: <…>` の形を期待するが、`条件:` が無い行も項目として扱い、条件は「不明」とする。
+
+そのどれでもない素の `- <内容>` 行は、**未チェック項目として数え**、かつ「形式違反の Verification 項目」として手順 8 の報告に出す。集計から落としてはいけない — 落とすとチェックボックスを付け忘れた PR が「Verification 項目ゼロ」に見え、手順 7 の提案 5（close 判定）が未確認のまま通る。この行はチェックを入れられないので、提案する手は確認の実行ではなく「PR 本文の該当行を `- [ ]` に直す」。
 
 ### Released の判定
 
@@ -75,10 +77,9 @@ git tag --contains <mergeCommit.oid> | grep -E '<タグのパターン>'
 
 ```bash
 MONICA_HOME=$HOME/monica monica task status --project <O>/<R>
-MONICA_HOME=$HOME/monica monica task status --project <O>/<R> --status closed
 ```
 
-`--status` 無しは active な Task だけを返す。済んだ sub-issue の Task は閉じられているので、2 本目で拾って突き合わせる。どちらにも行が無い sub-issue だけが「Task 無し」。
+`--status` 無しは Closed archive 以外の全ての Task を返す（`stopped` や `ready` も含む）。落ちるのは closed だけで、closed の Task は Tick のどの判定も変えない — 生きている Run を持たないので「着手中」にはならず、close 済みなので close の対象にもならず、Task 無しとして track に回しても正しい手になる。`--status closed` は読まない（sub-issue ごとに絞れないので project の全履歴が返り、行数は単調に増え続ける）。
 
 列は `ID / PARENT / PROJECT / GH ISSUE / STATUS / BLOCKED BY / BRANCH`。GH ISSUE 列で sub-issue と突き合わせる。STATUS は snake_case で出る。`setting_up` `prepared` `running` `waiting_for_user` のいずれかなら「生きている Run」。`in_progress` は Run の無い Task なので生きている Run には含めない。
 
@@ -88,7 +89,7 @@ BLOCKED BY は Monica の start gate がまだ塞いでいると見ている上�
 
 ### 本文を置き換える
 
-読み直した本文を手元で編集してファイルに書き、`--body-file` で置き換える。区切り `<!-- orchestrate:status:begin -->` 〜 `<!-- orchestrate:status:end -->` と `<!-- orchestrate:verification:begin -->` 〜 `<!-- orchestrate:verification:end -->` の内側だけを差し替える。
+読み直した本文を手元で編集してファイルに書き、`--body-file` で置き換える。触ってよいのは `## Discovery` / `## Human Action` / `## Merge Gate` / `## Verification` の 4 節だけで、追記は末尾に足す。既存行は消さない。追記する分が無い Tick は、このコマンドを打たない。
 
 ```bash
 gh issue edit <E> --repo <O>/<R> --body-file <path>
@@ -136,7 +137,7 @@ monica: task MON-<n> is blocked by <O>/<R>#<upstream>; land them first or force 
 
 拒否されたら assignee は立てず、その旨を報告する。`--force` は Orchestrator の判断では付けない。あなたが「gate を無視して起動して」と明示したときだけ `monica task run MON-<n> --force` を打つ（`--force` は sync も飛ばす）。
 
-Task が無い sub-issue は先に track する。track は直後に対象 Task を 1 回 sync するので、続けて sync を打つ必要はない。
+Task が無い sub-issue は先に track する。track は直後に対象 Task を 1 回 sync するので、続けて sync を打つ必要はない。同じ issue を再び track しても Task は二重にならない — ただし重複の判定は open な Task に対してだけで、前の Task が閉じている issue（例: 一度 done にして reopen した sub-issue）には新しい Task が作られる。これは仕様なので、closed の Task を気にせず track してよい。
 
 ```bash
 MONICA_HOME=$HOME/monica monica task track <O>/<R>#<sub-issue>

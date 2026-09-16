@@ -53,15 +53,15 @@ PR 本文の Verification の見出しは固定で、`## マージ前の確認` 
 - 各 sub-issue の state・assignee・blockedBy・その issue を閉じる PR（state・isDraft・labels・mergeCommit）。
 - 各 PR の本文。見出し 3 つの下のチェックボックス。
 - merged な PR の Released 判定。
-- `monica task status --project owner/repo` の各行。sub-issue ごとの Task と Run の状態、BLOCKED BY 列（Monica の start gate がまだ塞いでいる上流）。既定は active な Task しか返さないので、`--status closed` も併せて読む。済んだ sub-issue の Task は Worker flow の最後に閉じられており、片方だけでは行が消えて「Task が無い」と誤読する。
+- `monica task status --project owner/repo` の各行。sub-issue ごとの Task と Run の状態、BLOCKED BY 列（Monica の start gate がまだ塞いでいる上流）。closed の Task は読まない。
 
-完了条件: sub-issue ごとに「issue の状態・PR の状態・Released か・Task と Run の状態・blockedBy」の 5 つが埋まった表が手元にある。1 つでも欠けた sub-issue があれば読み直す。Task の欄を「無し」と確定してよいのは、active と closed の両方に行が無いときだけ。
+完了条件: sub-issue ごとに「issue の状態・PR の状態・Released か・Task と Run の状態・blockedBy」の 5 つが埋まった表が手元にある。1 つでも欠けた sub-issue があれば読み直す。この listing に行が無い sub-issue は「Task 無し」として扱ってよい（提案 1 の track がそのまま正しい手になる）。
 
 ### 4. モードを決める
 
 - sub-issue が 0 件 → **plan モード**（手順 P）。
 - sub-issue が 1 件以上 → **Tick**（手順 5〜9）。
-- 本文に `<!-- orchestrate:status:begin -->` が無く sub-issue も無い issue は、epic として扱ってよいかを尋ねてから plan モードに入る。
+- sub-issue が 0 件の issue は、epic として扱ってよいかを尋ねてから plan モードに入る。
 
 ### 5. コメントを Brief に畳む
 
@@ -88,7 +88,8 @@ minimize はここでは行わない。本文への書き込みが成功して�
 - 「〜が終わった」「〜から返事が来た」→ 該当する Human Action にチェックを入れ、`結果:` に得た事実を書く。同じ事実を `## Discovery` にも 1 行追記する。
 - 新しい事実 → `## Discovery` に追記。
 - 新しい人間の作業 → `## Human Action` に追記。Gate はあなたに確認する。
-- `## Verification（未完了）` でチェック済みの項目 → その項目の出どころの PR 本文の同じ行を `- [x]` にして書き戻す（[gh-recipes.md](gh-recipes.md) の「PR 本文のチェックボックスを入れる」）。手順 8 はこの節を PR 本文から作り直すので、先に PR を直さないとチェックが捨てられる。PR に属さない epic レベルの項目は書き戻し先が無いので、本文でチェック済みのまま残し、手順 8 の再生成でも消さない。
+- 「〜の確認が取れた」が PR の Verification 項目を指す → その PR 本文の該当行を `- [x]` にする（[gh-recipes.md](gh-recipes.md) の「PR 本文のチェックボックスを入れる」）。正本は PR 本文なので、Brief には書かない。
+- 同じことが `## Verification` の epic レベル項目を指す → 本文のその行にチェックを入れる。
 
 ### 7. Frontier と提案を計算する
 
@@ -112,25 +113,32 @@ sub-issue ごとに状態を 1 つ決める。上から順に最初に当たっ�
 
 1. **起動**: Frontier の各 sub-issue。Task が無ければ track と sync も含める。
 2. **merge gate の解除**: 「PR draft（merge gate 待ち）」のうち、`## Merge Gate` に書かれた上流が全て Released で、かつ Gate が `#<sub-issue> merge 前` の Human Action が全てチェック済みのもの。gate は上流と人の作業の両方を持つので、片方だけで外さない。
-3. **Verification の実行**: 全 PR の未チェック項目のうち、`条件:` が今満たされているもの。post-merge は merged で、post-release は Released で、日時指定はその時刻を過ぎていれば満たす。agent が確認できるものは実行を、人にしかできないものは Human Action への変換を提案する。
+3. **Verification の実行**: 全 PR の未チェック項目と `## Verification` の未チェック項目のうち、`条件:` が今満たされているもの。post-merge は merged で、post-release は Released で、日時指定はその時刻を過ぎていれば満たす。agent が確認できるものは実行を、人にしかできないものは Human Action への変換を提案する。
 4. **追加の分解**: `## Fog` の各行について、「何が分かれば切れるか」が `## Discovery` で満たされたもの。
-5. **close**: PR merged かつ post-merge 項目が全てチェック済みの sub-issue Task。全 sub-issue が done、Verification（未完了）が空、Human Action が全てチェック済み、Fog が空なら epic そのもの。
+5. **close**: PR merged かつ post-merge 項目が全てチェック済みの sub-issue Task。全 sub-issue が done、全 PR と `## Verification` に未チェック項目が無い、Human Action が全てチェック済み、Fog が空なら epic そのもの。
 
 完了条件: 全 sub-issue に状態が付き、5 種の提案それぞれについて「該当あり（列挙）」か「該当なし」が言える。
 
-### 8. Brief を再生成し、提案して止まる
+### 8. 追記があれば Brief に書き、提案して止まる
 
-[brief-template.md](brief-template.md) の区切りに従い、`## Status` と `## Verification（未完了）` を手順 7 の結果で置き換える。区切りの外は手順 5・6 で追記した分以外は触らない。本文の書き込みは、直前に本文を読み直してから行う。`## Verification（未完了）` を置き換える前に、手順 6 の PR への書き戻しが済んでいること — 済んでいれば、その項目は PR 本文でチェック済みになっているので再生成で自然に消える。
+本文を書くのは、手順 5 の畳み込みと手順 6 の対話入力で**追記する分があるときだけ**。無ければ本文は触らない。手順 7 の結果は本文に書かない — 状態は毎 Tick 計算し直すもので、写しを置くと Tick 間で腐る（[brief-template.md](brief-template.md) の「Brief に置かないもの」）。
+
+書くときは、直前に本文を読み直してから `--body-file` で置き換える。追記先は `## Discovery` / `## Human Action` / `## Merge Gate` / `## Verification` の末尾で、他の節は触らない。
 
 本文の書き込みが成功したら、そこで初めて手順 5 で控えたコメントを `RESOLVED` で minimize する。失敗したら畳まずに止め、何が書けなかったかを報告する（コメントは未 minimize のまま残るので、次の Tick が同じものを読み直せる）。
 
-続けて報告を出し、あなたの指示を待つ。
+続けて報告を出し、あなたの指示を待つ。手順 7 の結果が人の目に触れるのはここだけなので、全 sub-issue の状態を省かずに出す。
 
 ```
 ## Tick — #<epic> <title>
 
+| sub-issue  | 状態                        | Worker         |
+| ---------- | --------------------------- | -------------- |
+| #A <title> | Released                    | -              |
+| #B <title> | PR draft（merge gate 待ち） | MON-42 Running |
+| #C <title> | 着手可                      | -              |
+
 Frontier: #C, #E
-Worker 生存: MON-42（#B）Running
 
 提案
 1. #C に Worker を起動（MON-45）
@@ -157,7 +165,7 @@ Worker 生存: MON-42（#B）Running
 | 追加の分解          | 手順 P の P2〜P4 を、その項目だけに対して行う                                                                                                                                                                                                                                                                                                                         |
 | close               | `printf 'y\n' \| MONICA_HOME=$HOME/monica monica task close MON-n`。`task close` は stdin で `[y/N]` を聞き、非対話では `Canceled.` を出して exit 0 で終わるので、`y` を流して出力に `Closed task` があることを確認する。epic なら `gh issue close <epic>` の後に自分の Task を close                                                                                 |
 
-実行で Status が変わったら、もう一度 `## Status` を再生成する。最後に、実行した内容と次に Tick を呼ぶ目安（「#A の PR が merge されたら」など）を 3 行以内で報告し、ターンを終える。待つ処理はここに含めない。
+実行で状態が変わっても本文は書き換えない。最後に、実行した内容と変わった状態、次に Tick を呼ぶ目安（「#A の PR が merge されたら」など）を 3 行以内で報告し、ターンを終える。待つ処理はここに含めない。
 
 完了条件: 指示された提案が全て「実行した」か「拒否された（理由）」のどちらかで報告されている。
 
@@ -179,7 +187,7 @@ P4. 案の一覧をあなたに示し、修正を受けて確定する。確定�
 
 P5. 確定したら [gh-recipes.md](gh-recipes.md) の「作る」で、blocker から順に `gh issue create --parent` し、2 パス目で `--add-blocked-by` を張る。**辺を張るのは start-after-merged の依存だけ。** merge-after-released の依存に辺を張ると Monica の start gate が上流の merge まで着手を止めてしまい、「並行して実装してよい」という Gate の定義と食い違う。この種類は辺を張らず、Brief の `## Merge Gate` にだけ書く。辺を張り終えてから各 sub-issue を `monica task track` する（track が直後にその Task を sync し、blocked-by の上流まで写す）。
 
-P6. [brief-template.md](brief-template.md) で本文を組み直す。既存の本文はゴール・スコープ外・経緯に振り分けて残す。分解方針・Merge Gate・Fog を書き、Status と Verification は空の区切りで置く。
+P6. [brief-template.md](brief-template.md) で本文を組み直す。既存の本文はゴール・スコープ外・経緯に振り分けて残す。分解方針・Merge Gate・Fog を書く。Human Action と Verification は、この時点で分かっている項目が無ければ見出しだけ置く。
 
 P7. 作った sub-issue と Brief の URL を報告して終わる。Worker の起動は次の Tick で提案する。
 
