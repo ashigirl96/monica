@@ -3,6 +3,8 @@ use std::time::{Duration, Instant};
 
 use crate::exec::{redact, render, HTTP};
 
+const MASK: &str = "***";
+
 pub(crate) fn http_client(timeout: Duration) -> reqwest::Client {
     install_crypto_provider();
     reqwest::Client::builder()
@@ -76,25 +78,19 @@ fn safe_error_text(text: &str, url: Option<&reqwest::Url>) -> String {
     redact(&text).into_owned()
 }
 
-/// A URL fit to write down. These URLs come from whoever pasted a link, so the secrets they can
-/// carry have no fixed shape — `https://user:pass@…`, `?token=…`, a presigned `X-Amz-Signature`.
-/// Masking only the patterns we happen to know would leak the rest, so userinfo and every query
-/// value go regardless of name; the keys stay, since which parameters were sent is the part worth
-/// having when a fetch misbehaves.
+/// A URL fit to write down. These come from whoever pasted a link, so the secrets they carry have
+/// no fixed shape — `https://user:pass@…`, `?token=…`, a presigned `X-Amz-Signature`, or a bare
+/// `?capability-token` that the parser reads as a *key*. Nothing about a query is structurally safe
+/// to keep, so the whole of it goes; scheme, host and path stay, because naming the resource that
+/// was fetched is the reason the line exists at all.
 fn safe_url(url: &reqwest::Url) -> String {
     let mut safe = url.clone();
     if !safe.username().is_empty() || safe.password().is_some() {
-        let _ = safe.set_username("***");
+        let _ = safe.set_username(MASK);
         let _ = safe.set_password(None);
     }
-    let masked = safe.query().map(|_| {
-        safe.query_pairs()
-            .map(|(key, _)| format!("{key}=***"))
-            .collect::<Vec<_>>()
-            .join("&")
-    });
-    if let Some(masked) = masked {
-        safe.set_query(Some(&masked));
+    if safe.query().is_some_and(|query| !query.is_empty()) {
+        safe.set_query(Some(MASK));
     }
     redact(safe.as_str()).into_owned()
 }
@@ -132,10 +128,26 @@ mod tests {
     }
 
     #[test]
-    fn query_values_are_masked_whatever_they_are_named() {
+    fn the_whole_query_goes_whatever_it_is_named() {
         assert_eq!(
             safe_url(&url("https://example.com/p?token=s3cret&w=64&X-Amz-Signature=abc")),
-            "https://example.com/p?token=***&w=***&X-Amz-Signature=***"
+            "https://example.com/p?***"
+        );
+    }
+
+    /// A query with no `=` parses as a key, so keeping keys would publish this capability token.
+    #[test]
+    fn a_bare_query_token_is_not_mistaken_for_a_harmless_key() {
+        let safe = safe_url(&url("https://example.com/file?s3cret-capability"));
+        assert_eq!(safe, "https://example.com/file?***");
+        assert!(!safe.contains("s3cret"));
+    }
+
+    #[test]
+    fn the_resource_being_fetched_stays_legible() {
+        assert_eq!(
+            safe_url(&url("https://example.com/a/b/image.png?v=2")),
+            "https://example.com/a/b/image.png?***"
         );
     }
 
@@ -152,10 +164,7 @@ mod tests {
 
         let safe = safe_error_text(&text, Some(&failed));
 
-        assert_eq!(
-            safe,
-            "error sending request for url (https://***@example.com/p?token=***)"
-        );
+        assert_eq!(safe, "error sending request for url (https://***@example.com/p?***)");
         assert!(!safe.contains("hunter2") && !safe.contains("s3cret"));
     }
 
