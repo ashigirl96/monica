@@ -64,6 +64,19 @@ pub(crate) async fn send_logged(
     result
 }
 
+/// Report a body that never finished arriving. [`send_logged`] returns once the headers are in, so
+/// a server that answers 200 and then stalls or resets mid-stream would otherwise leave that DEBUG
+/// success as the last word on the request — and at the CLI's default level, nothing at all.
+pub(crate) fn log_body_failure(op: &str, url: &reqwest::Url, started: Instant, error: &str) {
+    let fields = [
+        ("op", op.to_string()),
+        ("url", safe_url(url)),
+        ("error", safe_error_text(error, Some(url))),
+        ("duration_ms", started.elapsed().as_millis().to_string()),
+    ];
+    log::warn!(target: HTTP, "{}", render("http body failed", &fields));
+}
+
 /// A reqwest error carries the URL it failed on and prints it verbatim (`" for url ({url})"`), so
 /// sanitising the `url=` field alone would let the raw one back in through `error=`.
 fn safe_error(error: &reqwest::Error) -> String {

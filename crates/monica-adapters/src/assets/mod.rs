@@ -3,7 +3,7 @@
 //! verbatim (no re-encode, so animated GIFs survive) under `<MONICA_HOME>/assets/<uuid>.<ext>`, and
 //! the filename doubles as the public id.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub mod gc;
 
@@ -170,7 +170,15 @@ pub async fn import_asset(url: &str) -> Result<SavedAsset, AssetError> {
     let mut response = crate::http::send_logged("asset_import", client().get(parsed))
         .await
         .map_err(|e| AssetError::Fetch(e.into()))?;
-    let bytes = read_capped(&mut response).await?;
+    let final_url = response.url().clone();
+    let started = Instant::now();
+    let bytes = match read_capped(&mut response).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            crate::http::log_body_failure("asset_import", &final_url, started, &e.to_string());
+            return Err(e);
+        }
+    };
     save_asset(&bytes)
 }
 
