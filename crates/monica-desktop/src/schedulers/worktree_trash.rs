@@ -4,6 +4,7 @@
 use tauri::AppHandle;
 
 use crate::event_sink::TauriEventSink;
+use crate::log_target::WORKTREE_TRASH;
 
 pub(crate) fn start(app: AppHandle) {
     let spawned = std::thread::Builder::new()
@@ -11,11 +12,11 @@ pub(crate) fn start(app: AppHandle) {
         .spawn(move || match monica_runtime::open_monica(Box::new(TauriEventSink::new(app))) {
             Ok(mut monica) => monica.executions().reap_worktree_trash(),
             Err(e) => log::warn!(
-                target: "monica_app::worktree_trash",
+                target: WORKTREE_TRASH,
                 "failed to open façade for worktree trash reap: {e:#}"
             ),
         });
     if let Err(e) = spawned {
-        log::error!(target: "monica_app::worktree_trash", "failed to start worktree trash reap thread: {e}");
+        log::error!(target: WORKTREE_TRASH, "failed to start worktree trash reap thread: {e}");
     }
 }

@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use super::ports::{GithubGateway, GithubIssueSyncStore, PullRequestSyncStore};
 use super::BulkSyncOutcome;
+use crate::observability::{Line, GITHUB_SYNC};
 use crate::{ApplicationResult, FetchedIssue, GithubPullRequest};
 
 /// Forced issue refresh, the issue half of the GitHub sync. Fetches every repo's tracked issues in
@@ -64,9 +65,13 @@ where
                     map.insert(issue.number, issue);
                 }
                 log::debug!(
-                    target: "monica_application::github_sync",
-                    "bulk issue fetch repo={repo} fetched={fetched} in {}ms",
-                    elapsed.as_millis()
+                    target: GITHUB_SYNC,
+                    "{}",
+                    Line::new("bulk_issue_fetch")
+                        .id("repo", repo)
+                        .num("fetched", fetched)
+                        .duration_ms(elapsed.as_millis())
+                        .finish()
                 );
             }
             // A failed repo is left out of `by_repo`, so none of its refs produce an entry
@@ -76,9 +81,13 @@ where
             Err(e) => {
                 failed_repos.push(repo.clone());
                 log::warn!(
-                    target: "monica_application::github_sync",
-                    "bulk issue fetch failed repo={repo} after {}ms error={e:#}",
-                    elapsed.as_millis()
+                    target: GITHUB_SYNC,
+                    "{}",
+                    Line::new("bulk_issue_fetch_failed")
+                        .id("repo", repo)
+                        .duration_ms(elapsed.as_millis())
+                        .error(&format!("{e:#}"))
+                        .finish()
                 );
             }
         }
@@ -106,14 +115,17 @@ where
     repos.bulk_record_issue_sync(&entries)?;
     repos.record_linked_pull_requests(&linked)?;
     log::info!(
-        target: "monica_application::github_sync",
-        "bulk issue sync done: refs={} repos={} synced={} linked={} | fetch={fetch_ms}ms record={}ms total={}ms",
-        refs.len(),
-        repo_batches.len(),
-        entries.len(),
-        linked.len(),
-        record_started.elapsed().as_millis(),
-        started.elapsed().as_millis()
+        target: GITHUB_SYNC,
+        "{}",
+        Line::new("bulk_issue_sync")
+            .num("refs", refs.len())
+            .num("repos", repo_batches.len())
+            .num("synced", entries.len())
+            .num("linked", linked.len())
+            .phase_ms("fetch", fetch_ms)
+            .phase_ms("record", record_started.elapsed().as_millis())
+            .duration_ms(started.elapsed().as_millis())
+            .finish()
     );
     Ok(BulkSyncOutcome {
         synced_count: (entries.len() + linked.len()) as u32,

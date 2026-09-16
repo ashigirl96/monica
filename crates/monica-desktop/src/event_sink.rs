@@ -5,6 +5,7 @@ use tauri_specta::Event;
 
 use crate::commands::github_sync::GithubSyncCompleted;
 use crate::commands::task::TaskRunStatusChanged;
+use crate::log_target::EVENTS;
 
 /// The application façade wired to the default backend and the Tauri event sink.
 pub type AppMonica = monica_runtime::MonicaFacade;
@@ -52,7 +53,7 @@ impl EventSink for TauriEventSink {
                 };
                 if let Err(e) = event.emit(&self.app) {
                     log::warn!(
-                        target: "monica_app::events",
+                        target: EVENTS,
                         "failed to emit event=task-run:status-changed task_id={} task_run_id={} error={e}",
                         event.task_id,
                         event.task_run_id
@@ -62,7 +63,7 @@ impl EventSink for TauriEventSink {
             ApplicationEvent::GithubSyncCompleted { synced_count } => {
                 if let Err(e) = (GithubSyncCompleted { synced_count }).emit(&self.app) {
                     log::warn!(
-                        target: "monica_app::events",
+                        target: EVENTS,
                         "failed to emit event=github-sync:completed synced_count={synced_count} error={e}"
                     );
                 }

@@ -13,6 +13,8 @@ use anyhow::{Context, Result};
 use monica_paths as paths;
 use tauri::{AppHandle, Manager};
 
+use crate::log_target::BRIDGE;
+
 /// The child holds the descriptor it is spawned with, so the file is named for the spawn day and
 /// covers everything up to the next respawn — retention judges it by its mtime, not by that name.
 const LOG_STEM: &str = "browser-bridge";
@@ -58,7 +60,7 @@ impl BridgeHandle {
 
         if let Ok(pid_path) = paths::browser_bridge_pid_path() {
             if let Err(e) = std::fs::write(&pid_path, child.id().to_string()) {
-                log::warn!(target: "monica_app::bridge", "failed to write pid file: {e}");
+                log::warn!(target: BRIDGE, "failed to write pid file: {e}");
             }
         }
 
@@ -76,7 +78,7 @@ impl BridgeHandle {
             *guard = Some((generation, child));
         }
 
-        log::info!(target: "monica_app::bridge", "browser-bridge spawned (logs: {})", log_path.display());
+        log::info!(target: BRIDGE, "browser-bridge spawned (logs: {})", log_path.display());
         self.watch_early_exit(generation);
         Ok(())
     }
@@ -139,7 +141,7 @@ impl BridgeHandle {
                 }
                 if let Ok(Some(status)) = child.try_wait() {
                     log::warn!(
-                        target: "monica_app::bridge",
+                        target: BRIDGE,
                         "browser-bridge exited early ({status}) — port conflict? see logs/{LOG_STEM}_*.log",
                     );
                     guard.take();
@@ -149,7 +151,7 @@ impl BridgeHandle {
                 }
             });
         if let Err(e) = spawned {
-            log::warn!(target: "monica_app::bridge", "failed to start early-exit watcher: {e}");
+            log::warn!(target: BRIDGE, "failed to start early-exit watcher: {e}");
         }
     }
 }
@@ -160,14 +162,14 @@ pub(crate) fn start_if_enabled(app: &AppHandle) {
     match settings {
         Ok(settings) if settings.translate.enabled => {
             if let Err(e) = app.state::<BridgeHandle>().start() {
-                log::warn!(target: "monica_app::bridge", "failed to start browser-bridge: {e:#}");
+                log::warn!(target: BRIDGE, "failed to start browser-bridge: {e:#}");
             }
         }
         Ok(_) => {
-            log::info!(target: "monica_app::bridge", "translate disabled; browser-bridge not started");
+            log::info!(target: BRIDGE, "translate disabled; browser-bridge not started");
         }
         Err(e) => {
-            log::warn!(target: "monica_app::bridge", "failed to load settings; browser-bridge not started: {e:#}");
+            log::warn!(target: BRIDGE, "failed to load settings; browser-bridge not started: {e:#}");
         }
     }
 }

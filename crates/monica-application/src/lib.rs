@@ -26,6 +26,9 @@ pub use error::{ApplicationError, ApplicationResult};
 pub use events::{ApplicationEvent, EventSink};
 pub use execution_profile::{ExecutionProfile, PermissionMode};
 pub use input::{parse_issue_input, parse_pull_request_input};
+/// The escaping every Monica log line uses for free-form values. Exported so a process that writes
+/// its own file (`monica hook` → `hook-<agent>.log`) spells values the same way the core does.
+pub use observability::field as log_field;
 pub use facade::{
     Backend, ExecutionService, ExplanationService, Monica, NoteService, ProjectInit, ProjectService,
     SynchronizationService, TaskService,

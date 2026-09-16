@@ -287,6 +287,23 @@ fn find_token(value: &str, from: usize) -> Option<(usize, usize, usize)> {
 mod tests {
     use super::*;
 
+    const ALL_TARGETS: &[&str] = &[GIT, GH, GITHUB, HTTP, SETUP, TRASH];
+
+    /// fern matches a target by `::` segment, so a target that does not name this crate is
+    /// unreachable from `MONICA_LOG=<crate>=debug`. Anchoring on the package name (not
+    /// `CARGO_CRATE_NAME`, which a `[lib] name` override changes) makes a crate rename fail here.
+    #[test]
+    fn every_target_is_reachable_from_this_crate_name() {
+        let crate_name = env!("CARGO_PKG_NAME").replace('-', "_");
+        for target in ALL_TARGETS {
+            let rest = target.strip_prefix(&crate_name);
+            assert!(
+                rest.is_some_and(|rest| rest.is_empty() || rest.starts_with("::")),
+                "{target} is unreachable from MONICA_LOG={crate_name}=debug"
+            );
+        }
+    }
+
     fn fields(pairs: &[(&'static str, &str)]) -> Vec<(&'static str, String)> {
         pairs.iter().map(|(k, v)| (*k, v.to_string())).collect()
     }

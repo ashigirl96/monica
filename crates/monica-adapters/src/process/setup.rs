@@ -113,7 +113,7 @@ pub fn run_setup_script(
                 code: None,
                 timed_out: false,
             };
-            record_outcome(env, started, "not started", &outcome);
+            record_outcome(env, started, "not_started", &outcome);
             return Ok(outcome);
         }
     };
@@ -149,7 +149,7 @@ pub fn run_setup_script(
                 &format!("monica: setup timed out after {timeout:?}; killed\n"),
                 true,
             )?;
-            record_outcome(env, started, "timed out", &outcome);
+            record_outcome(env, started, "timed_out", &outcome);
             return Ok(outcome);
         }
         thread::sleep(SETUP_POLL_INTERVAL);
@@ -174,7 +174,7 @@ fn record_outcome(env: &SetupEnv, started: Instant, reason: &str, outcome: &Setu
     log::log!(
         target: SETUP,
         level,
-        "setup {reason} task_id={} task_run_id={} project_id={} exit={exit} timed_out={timed_out} duration_ms={}",
+        "setup reason={reason} task_id={} task_run_id={} project_id={} exit={exit} timed_out={timed_out} duration_ms={}",
         env.monica_id,
         env.task_run_id,
         env.project_id,

@@ -130,7 +130,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                         sent += 1;
                         if sent == 1 {
                             log::info!(
-                                "first translation delivered in {}ms",
+                                "first_translation_delivered duration_ms={}",
                                 request_start.elapsed().as_millis(),
                             );
                         }
@@ -158,7 +158,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     drop(rx);
 
     log::info!(
-        "ws request finished: {sent} translations delivered in {}ms",
+        "ws_request_done delivered={sent} duration_ms={}",
         request_start.elapsed().as_millis(),
     );
 

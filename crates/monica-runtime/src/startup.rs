@@ -6,6 +6,8 @@
 
 use std::path::Path;
 
+use crate::log_target::STARTUP;
+
 struct StartupFacts<'a> {
     version: &'a str,
     git_sha: &'a str,
@@ -39,7 +41,7 @@ pub fn log_startup_banner(version: &str, git_sha: &str) {
     let db = monica_paths::db_path().unwrap_or_else(|_| unknown());
     let ptyd_sock = monica_paths::ptyd_socket_path().unwrap_or_else(|_| unknown());
     log::info!(
-        target: "monica_runtime::startup",
+        target: STARTUP,
         "{}",
         banner_line(&StartupFacts {
             version,

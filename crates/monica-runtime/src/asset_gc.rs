@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use monica_adapters::assets::gc::{referenced_asset_ids, sweep_orphan_assets};
 
+use crate::log_target::ASSET_GC;
 use crate::MonicaFacade;
 
 // 起動直後は走らせず、アプリが落ち着いてから最初の掃除をする。
@@ -36,7 +37,7 @@ where
             }
         });
     if let Err(e) = spawn_result {
-        log::error!(target: "monica_runtime::asset_gc", "failed to start asset GC scheduler: {e}");
+        log::error!(target: ASSET_GC, "failed to start asset GC scheduler: {e}");
     }
     AssetGcHandle(tx)
 }
@@ -48,23 +49,23 @@ where
     let mut monica = match make_facade() {
         Ok(monica) => monica,
         Err(e) => {
-            log::error!(target: "monica_runtime::asset_gc", "failed to open façade for asset GC: {e:#}");
+            log::error!(target: ASSET_GC, "failed to open façade for asset GC: {e:#}");
             return;
         }
     };
     let contents = match monica.notes().list_all_note_contents() {
         Ok(contents) => contents,
         Err(e) => {
-            log::error!(target: "monica_runtime::asset_gc", "failed to list note contents: {e:#}");
+            log::error!(target: ASSET_GC, "failed to list note contents: {e:#}");
             return;
         }
     };
     let referenced = referenced_asset_ids(&contents);
     match sweep_orphan_assets(&referenced, GC_GRACE) {
         Ok(deleted) if !deleted.is_empty() => {
-            log::info!(target: "monica_runtime::asset_gc", "removed {} orphan asset(s)", deleted.len());
+            log::info!(target: ASSET_GC, "removed {} orphan asset(s)", deleted.len());
         }
         Ok(_) => {}
-        Err(e) => log::error!(target: "monica_runtime::asset_gc", "asset GC sweep failed: {e:#}"),
+        Err(e) => log::error!(target: ASSET_GC, "asset GC sweep failed: {e:#}"),
     }
 }

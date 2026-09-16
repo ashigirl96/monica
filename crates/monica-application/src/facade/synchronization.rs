@@ -1,4 +1,5 @@
 use super::{Backend, Monica};
+use crate::observability::GITHUB;
 use crate::ports::TaskStore;
 use crate::prelude::TaskId;
 use crate::usecases::github::{
@@ -32,7 +33,7 @@ impl<B: Backend> SynchronizationService<'_, B> {
         // next sync, which is how far a mirror can ever be trusted.
         if let Err(e) = self.force_sync_github(Some(&report.task.id)).await {
             log::warn!(
-                target: "monica_application::github",
+                target: GITHUB,
                 "failed to refresh {} right after tracking it: {e}",
                 report.task.id
             );

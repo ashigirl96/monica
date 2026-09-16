@@ -1,4 +1,5 @@
 use super::{Backend, Monica};
+use crate::observability::{HOOK, NOTIFY, SETTLEMENT, TERMINAL};
 use crate::ports::{
     AgentDecoders, NotificationOutboxStore, PendingLaunchStore, ShellScaffolding, TaskRunStore,
     TerminalAttachment, TerminalCreateRequest, TerminalDaemon, TerminalSessionRepository,
@@ -146,7 +147,7 @@ impl<B: Backend> ExecutionService<'_, B> {
         if report.event_name.is_none() {
             report.event_name = agents.event_label(raw_stdin.as_bytes());
         }
-        log::debug!(target: "monica_application::hook", "{}", report.trace_line());
+        log::debug!(target: HOOK, "{}", report.trace_line());
         if let (Some(ref run_id), Some(status)) =
             (&report.linked_task_run_id, report.task_run_status)
         {
@@ -178,7 +179,7 @@ impl<B: Backend> ExecutionService<'_, B> {
                     task_run_id: report.linked_task_run_id.clone().map(Into::into),
                 };
                 if let Err(e) = repos.enqueue_notification(intent) {
-                    log::warn!(target: "monica_application::notify", "failed to enqueue notification: {e}");
+                    log::warn!(target: NOTIFY, "failed to enqueue notification: {e}");
                 }
             }
         } else if let Some(key) = crate::notification::awaiting_user_input_dedupe_key(
@@ -219,7 +220,7 @@ impl<B: Backend> ExecutionService<'_, B> {
                 }
             }
             Err(e) => log::warn!(
-                target: "monica_application::terminal",
+                target: TERMINAL,
                 "failed to prepare base shell env: {e:#}"
             ),
         }
@@ -245,10 +246,11 @@ impl<B: Backend> ExecutionService<'_, B> {
                 self.m.repos.mark_terminal_session_started(&session.id, pid)?;
             }
             Err(e) => {
-                log::warn!(
-                    target: "monica_application::terminal",
-                    "failed to start terminal session {}: {e:#}",
-                    session.id
+                crate::observability::failed(
+                    TERMINAL,
+                    "terminal_start_failed",
+                    &[("session_id", &session.id)],
+                    &format!("{e:#}"),
                 );
                 // Settle regardless, but surface a failed status write rather than swallowing it.
                 if let Err(e) = self.m.repos.update_terminal_session_status(
@@ -256,10 +258,11 @@ impl<B: Backend> ExecutionService<'_, B> {
                     TerminalSessionStatus::Failed,
                     None,
                 ) {
-                    log::error!(
-                        target: "monica_application::terminal",
-                        "failed to mark session {} failed: {e}",
-                        session.id
+                    crate::observability::fault(
+                        TERMINAL,
+                        "terminal_status_write_failed",
+                        &[("session_id", &session.id)],
+                        &e.to_string(),
                     );
                 }
                 self.settle_runs_for_terminated_sessions(std::slice::from_ref(&session.id));
@@ -341,7 +344,7 @@ impl<B: Backend> ExecutionService<'_, B> {
             }
             Err(e) => {
                 log::warn!(
-                    target: "monica_application::terminal",
+                    target: TERMINAL,
                     "daemon unreachable; listing sessions from DB only: {e:#}"
                 );
             }
@@ -409,9 +412,11 @@ impl<B: Backend> ExecutionService<'_, B> {
     pub fn settle_runs_for_terminated_sessions(&mut self, session_ids: &[String]) {
         for session_id in session_ids {
             if let Err(e) = self.settle_one(session_id) {
-                log::warn!(
-                    target: "monica_application::settlement",
-                    "failed to settle run for session {session_id}: {e}"
+                crate::observability::failed(
+                    SETTLEMENT,
+                    "run_settle_failed",
+                    &[("session_id", session_id)],
+                    &e.to_string(),
                 );
             }
         }
@@ -425,7 +430,7 @@ impl<B: Backend> ExecutionService<'_, B> {
             Ok(runs) => runs,
             Err(e) => {
                 log::warn!(
-                    target: "monica_application::settlement",
+                    target: SETTLEMENT,
                     "failed to list driven runs for the orphan sweep: {e}"
                 );
                 return;
@@ -436,10 +441,11 @@ impl<B: Backend> ExecutionService<'_, B> {
                 continue;
             };
             if let Err(e) = self.settle_orphaned_one(&run, &tab_id) {
-                log::warn!(
-                    target: "monica_application::settlement",
-                    "failed to settle orphaned run {}: {e}",
-                    run.id
+                crate::observability::failed(
+                    SETTLEMENT,
+                    "run_settle_orphan_failed",
+                    &[("task_run_id", &run.id), ("tab_id", &tab_id)],
+                    &e.to_string(),
                 );
             }
         }
@@ -497,11 +503,10 @@ impl<B: Backend> ExecutionService<'_, B> {
                 status: TaskRunStatus::Stopped,
             });
         } else {
-            log::debug!(
-                target: "monica_application::lifecycle",
-                "run_settle_skipped task_run_id={} task_id={} cause={cause} reason=not_live",
-                settlement.task_run_id,
-                settlement.task_id,
+            crate::observability::run_settle_skipped(
+                &settlement.task_run_id,
+                &settlement.task_id,
+                cause,
             );
         }
         Ok(())
