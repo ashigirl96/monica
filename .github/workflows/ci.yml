@@ -29,6 +29,16 @@ jobs:
       - name: Build Chrome extension
         run: just build-extension
 
+  audit:
+    name: audit dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun audit --audit-level=high
+
   build:
     name: tauri build (macos)
     needs: lint
