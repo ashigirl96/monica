@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use monica_application::LinkPreview;
@@ -38,9 +38,7 @@ pub async fn fetch_link_preview(url: &str) -> Result<LinkPreview, LinkPreviewErr
             parsed.scheme()
         )));
     }
-    let mut response = client()
-        .get(parsed)
-        .send()
+    let mut response = crate::http::send_logged("ogp_fetch", client().get(parsed))
         .await
         .map_err(|e| LinkPreviewError::Fetch(e.into()))?;
     // リダイレクトを追った後の URL を相対パス解決の基準にする
@@ -51,7 +49,14 @@ pub async fn fetch_link_preview(url: &str) -> Result<LinkPreview, LinkPreviewErr
         .and_then(|v| v.to_str().ok())
         .is_none_or(|ct| ct.contains("html"));
     let html = if is_html {
-        read_capped(&mut response).await.map_err(|e| LinkPreviewError::Fetch(e.into()))?
+        let started = Instant::now();
+        match read_capped(&mut response).await {
+            Ok(html) => html,
+            Err(e) => {
+                crate::http::log_body_failure("ogp_fetch", &final_url, started, &e.to_string());
+                return Err(LinkPreviewError::Fetch(e.into()));
+            }
+        }
     } else {
         String::new()
     };

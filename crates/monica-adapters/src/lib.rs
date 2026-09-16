@@ -11,6 +11,7 @@ pub mod github;
 pub mod ogp;
 pub mod process;
 
+mod exec;
 mod fs_util;
 mod http;
 

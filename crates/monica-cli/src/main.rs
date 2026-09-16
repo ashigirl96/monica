@@ -45,7 +45,18 @@ fn main() {
     }
 }
 
+/// Quiet by default so stderr stays usable, and silent for hooks, which write their own
+/// `hook-<agent>.log` and whose stderr belongs to the agent that invoked them. `MONICA_LOG` raises
+/// either one.
+fn log_fallback(command: &Commands) -> log::LevelFilter {
+    match command {
+        Commands::Hook(_) => log::LevelFilter::Off,
+        _ => log::LevelFilter::Warn,
+    }
+}
+
 fn run(cli: Cli) -> anyhow::Result<()> {
+    monica_runtime::stderr_log::install(log_fallback(&cli.command));
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .enable_io()

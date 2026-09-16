@@ -20,6 +20,7 @@ pub mod notification_drain;
 pub mod github_sync;
 pub mod panic;
 pub mod startup;
+pub mod stderr_log;
 mod tick_log;
 
 pub use asset_gc::{start_asset_gc, AssetGcHandle};

@@ -7,6 +7,16 @@ use monica_application::{GitGateway, WorktreeRef};
 use monica_domain::{parse_owner_repo, TaskRun};
 
 use super::trash::{bury, reap};
+use crate::exec::{stderr_message, Exec, GIT};
+
+/// `git show-ref --verify --quiet` and `git rev-parse --verify --quiet` answer "no such ref" with
+/// exit 1. That is the question being asked, not a fault.
+const REF_MISSING: &[i32] = &[1];
+
+/// The same interrogations run against a path that may not be a repo at all, or a repo with no
+/// reachable origin: git adds exit 128 to the mix. A terminal opened outside a checkout and a
+/// laptop that is offline both land here on every run, so neither may raise a warning.
+const NO_ANSWER: &[i32] = &[1, 128];
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GitCliGateway;
@@ -31,13 +41,15 @@ impl GitGateway for GitCliGateway {
     }
 
     fn detect_repo(&self) -> Result<String> {
-        let output = Command::new("git")
-            .args(["remote", "get-url", "origin"])
+        let mut command = Command::new("git");
+        command.args(["remote", "get-url", "origin"]);
+        let output = Exec::new(GIT, &mut command)
             .output()
             .context("failed to run git; install git or pass owner/repo explicitly")?;
         if !output.status.success() {
             return Err(anyhow!(
-                "could not read `git remote get-url origin`; run inside a repo or pass owner/repo explicitly"
+                "could not read `git remote get-url origin` ({}); run inside a repo or pass owner/repo explicitly",
+                stderr_message(&output.stderr)
             ));
         }
         let url = String::from_utf8(output.stdout).context("git remote url was not valid UTF-8")?;
@@ -49,10 +61,9 @@ impl GitGateway for GitCliGateway {
             return None;
         }
 
-        let output = Command::new("git")
-            .args(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
-            .output()
-            .ok()?;
+        let mut command = Command::new("git");
+        command.args(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
+        let output = Exec::new(GIT, &mut command).benign(NO_ANSWER).output().ok()?;
         if !output.status.success() {
             return None;
         }
@@ -65,17 +76,16 @@ impl GitGateway for GitCliGateway {
 /// a non-repo path. Re-exposed to drivers through `monica-runtime` so the UI can label a terminal's
 /// location without the driver naming this crate.
 pub fn worktree_info(cwd: &Path) -> Option<WorktreeRef> {
-    let output = git_command(cwd)
-        .args([
-            "rev-parse",
-            "--abbrev-ref",
-            "HEAD",
-            "--path-format=absolute",
-            "--git-dir",
-            "--git-common-dir",
-        ])
-        .output()
-        .ok()?;
+    let mut command = git_command(cwd);
+    command.args([
+        "rev-parse",
+        "--abbrev-ref",
+        "HEAD",
+        "--path-format=absolute",
+        "--git-dir",
+        "--git-common-dir",
+    ]);
+    let output = Exec::new(GIT, &mut command).benign(NO_ANSWER).output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -103,16 +113,27 @@ fn create_worktree(repo: &Path, worktree: &Path, branch: &str, base: &str) -> Re
     if branch_exists(repo, branch)? {
         command.arg(branch);
     } else {
-        let start_point = latest_remote_base(repo, base).unwrap_or_else(|| base.to_string());
+        let start_point = match latest_remote_base(repo, base) {
+            Some(remote) => remote,
+            None => {
+                // Which commit the worktree grows from changes here, so the choice has to be
+                // recoverable afterwards even though it is not an error.
+                log::debug!(
+                    target: GIT,
+                    "worktree base fallback base={base} reason=origin_base_unavailable"
+                );
+                base.to_string()
+            }
+        };
         command.args(["-b", branch]).arg(start_point);
     }
-    let output = command
+    let output = Exec::new(GIT, &mut command)
         .output()
         .context("failed to run git; install git or check the project path")?;
     if !output.status.success() {
         return Err(anyhow!(
             "git worktree add failed: {}",
-            command_stderr(&output.stderr)
+            stderr_message(&output.stderr)
         ));
     }
     Ok(())
@@ -203,8 +224,10 @@ fn ensure_worktree_unregistered(repo: &Path, run: &TaskRun, worktree: &Path) -> 
 /// that leaves the ref resolvable; otherwise `None`, so the caller falls back to the local base
 /// and a Run is never blocked by an unreachable remote (offline, or a remote-less repo).
 fn latest_remote_base(repo: &Path, base: &str) -> Option<String> {
-    let fetched = git_command(repo)
-        .args(["fetch", "origin", base])
+    let mut fetch = git_command(repo);
+    fetch.args(["fetch", "origin", base]);
+    let fetched = Exec::new(GIT, &mut fetch)
+        .benign(NO_ANSWER)
         .output()
         .ok()?
         .status
@@ -213,9 +236,12 @@ fn latest_remote_base(repo: &Path, base: &str) -> Option<String> {
         return None;
     }
     let remote = format!("origin/{base}");
-    let resolves = git_command(repo)
+    let mut resolve = git_command(repo);
+    resolve
         .args(["rev-parse", "--verify", "--quiet"])
-        .arg(format!("refs/remotes/{remote}"))
+        .arg(format!("refs/remotes/{remote}"));
+    let resolves = Exec::new(GIT, &mut resolve)
+        .benign(REF_MISSING)
         .output()
         .ok()?
         .status
@@ -224,9 +250,12 @@ fn latest_remote_base(repo: &Path, base: &str) -> Option<String> {
 }
 
 fn branch_exists(repo: &Path, branch: &str) -> Result<bool> {
-    let output = git_command(repo)
+    let mut command = git_command(repo);
+    command
         .args(["show-ref", "--verify", "--quiet"])
-        .arg(format!("refs/heads/{branch}"))
+        .arg(format!("refs/heads/{branch}"));
+    let output = Exec::new(GIT, &mut command)
+        .benign(REF_MISSING)
         .output()
         .context("failed to run git; install git or check the project path")?;
     match output.status.code() {
@@ -234,20 +263,21 @@ fn branch_exists(repo: &Path, branch: &str) -> Result<bool> {
         Some(1) => Ok(false),
         _ => Err(anyhow!(
             "git show-ref failed: {}",
-            command_stderr(&output.stderr)
+            stderr_message(&output.stderr)
         )),
     }
 }
 
 fn worktree_registered(repo: &Path, worktree: &Path) -> Result<bool> {
-    let output = git_command(repo)
-        .args(["worktree", "list", "--porcelain"])
+    let mut command = git_command(repo);
+    command.args(["worktree", "list", "--porcelain"]);
+    let output = Exec::new(GIT, &mut command)
         .output()
         .context("failed to run git; install git or check the project path")?;
     if !output.status.success() {
         return Err(anyhow!(
             "git worktree list failed: {}",
-            command_stderr(&output.stderr)
+            stderr_message(&output.stderr)
         ));
     }
 
@@ -278,14 +308,14 @@ fn git(repo: &Path, args: &[&str], path_arg: Option<&Path>) -> Result<()> {
     if let Some(path) = path_arg {
         command.arg(path);
     }
-    let output = command
+    let output = Exec::new(GIT, &mut command)
         .output()
         .context("failed to run git; install git or check the project path")?;
     if !output.status.success() {
         return Err(anyhow!(
             "git {} failed: {}",
             args.join(" "),
-            command_stderr(&output.stderr)
+            stderr_message(&output.stderr)
         ));
     }
     Ok(())
@@ -297,16 +327,6 @@ fn parse_origin_head_branch(value: &str) -> Option<String> {
         .strip_prefix("origin/")
         .filter(|branch| !branch.is_empty())
         .map(ToString::to_string)
-}
-
-fn command_stderr(stderr: &[u8]) -> String {
-    let stderr = String::from_utf8_lossy(stderr);
-    let stderr = stderr.trim();
-    if stderr.is_empty() {
-        "no error output".to_string()
-    } else {
-        stderr.to_string()
-    }
 }
 
 #[cfg(test)]
