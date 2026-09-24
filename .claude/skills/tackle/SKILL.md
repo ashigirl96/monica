@@ -20,7 +20,7 @@ scope を複数 PR に分割してよいのは **運用上の順序制約** が�
 
 **サイズ・ファイル数・レビュー負荷・「関心事が複数」では分割しない。** monica では分割理由にならない。
 
-分割が避けられないときは計画フェーズ（Step 3）で決め、`gh sub-issue create --parent <N>` で follow-up issue を先に切る。実装中に後付けで分割しない。PR 時点の差分が事前合意なしに Issue scope より小さければ、それは分割ではなく drift — 残りを終わらせてから PR を作る。
+分割が避けられないときは計画フェーズ（Step 3）で決め、`gh issue create --parent <N>` で follow-up issue を先に切る。実装中に後付けで分割しない。PR 時点の差分が事前合意なしに Issue scope より小さければ、それは分割ではなく drift — 残りを終わらせてから PR を作る。
 
 ## Workflow
 
@@ -79,15 +79,15 @@ gh issue view <issue-番号-or-URL> --json number,title,body,labels,comments
 
 Issue template（`Context / Goal / Out of Scope / Acceptance Criteria / Verification`）の各セクションを読み取る。特に **Out of Scope** は scope を勝手に広げないための制約として尊重する。
 
-**2c. 親 issue があれば取得する。**
-
-`gh issue view --json` には `parent` フィールドが無いので、GraphQL の `Issue.parent` で親を逆引きする（Sub-issues リンクが張られている場合のみ非 null。body の `Part of #N` という文言だけではリンクされていないことがある — その場合は body 中の参照を手掛かりに親番号を特定する）:
+**2c. 親 issue があれば `epic-worker start` を呼ぶ。**
 
 ```bash
-gh api graphql -f query='query { repository(owner: "ashigirl96", name: "monica") { issue(number: <issue-番号>) { parent { number title url } } } }' --jq '.data.repository.issue.parent'
+gh issue view <issue-番号> --json parent --jq .parent
 ```
 
-親が見つかったら、その親も `gh issue view <親番号> --json title,body` で取得して読む。親 issue は設計判断・データモデル・全体構成などの **設計コンテキスト**として扱う — 子 issue の body が親を参照している場合（「スキーマは親 issue 参照」等）、親を読まないと計画が成立しない。ただし scope はあくまで当該子 issue のもの。**親の他の子 issue（兄弟）のスコープには踏み込まない。**
+Sub-issues リンクが張られている場合のみ非 null で返る。body に `Part of #N` の文言だけがあるときは `gh issue edit <issue-番号> --parent <N>` でリンクを張ってから進める。
+
+親があれば `epic-worker` skill を `start` で呼ぶ。親の Epic Brief を読み、start gate・merge gate・効く Discovery・兄弟の領分を **Epic context** として返してくる。以降の計画はその制約の中で立て、親 issue は設計判断・データモデル・全体構成の **設計コンテキスト**として扱う（子 issue の body が「スキーマは親 issue 参照」等と書いていれば、親を読まないと計画が成立しない）。scope はあくまで当該子 issue のもので、**兄弟 sub-issue のスコープには踏み込まない。** 親が無ければ epic-worker は呼ばない。
 
 **2d. ブランチ処理。**
 
@@ -122,6 +122,7 @@ plan mode 中に `Plan` subagent を起動して計画を立てる場合は、�
 - [ ] `/code-review` skill でコードレビュー — 指摘を全て解消 - **monica-core 変更時:** 新規/変更した公開関数の unit test + 回帰テストを 100% 確認
 - [ ] UI 動作確認（フロント変更がある場合）— `verify` skill / Tauri MCP で
 - [ ] `/create-pr` skill で PR 作成
+- [ ] 親 issue がある場合 `epic-worker pr` — Verification 3 節・merge gate・epic への書き戻し
 ```
 
 状況に応じて項目を足し引きするが、上記の該当項目は常に入れる。実装エージェントは全項目を完了してチェックを付ける義務がある。
@@ -212,6 +213,7 @@ subagent の最終メッセージがレビュー本文としてそのまま返�
 4. **コードレビュー**（`/code-review` skill）— 指摘を全て解消
 5. **動作確認**（フロント変更があれば）— push / PR の前に必ず
 6. commit & push → `/create-pr` skill で PR 作成
+7. 親 issue がある場合 `epic-worker pr` — PR 本文に Verification の 3 節を揃え、merge gate 未達なら draft + `merge-gate` にし、Discovery と依存を epic に書き戻す
 
 動作確認の前に push / PR を作らない。`/create-pr` はブランチ名が純数値か `issue-<番号>` なら body に `close #<番号>` を自動で入れるので、ブランチ名を Issue 番号にしておけば merge 時に Issue が自動クローズされる。
 

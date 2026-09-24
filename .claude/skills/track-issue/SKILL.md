@@ -66,15 +66,15 @@ MONICA_HOME=$HOME/monica monica task track <issue url>
 同じ issue に open な Task が既にあれば新規作成せず既存の MON-ID が返る
 （closed な Task しか無ければ再挑戦として新規作成される）。
 
-### 3. sync する
+### 3. 写しが埋まったか確かめる
 
-CLI の `monica task track` は track 直後の GitHub sync を **kick しない**
-（kick するのは desktop からの track だけ）。そのままでは親子（PARENT 列）・
-issue の state・PR の紐づけが次の sync まで埋まらないので、track したら必ず
-1 回 sync する。複数 issue を track したときは最後にまとめて 1 回でよい。
+`monica task track` は track 直後にその Task を 1 回 sync し、親子（PARENT 列）・
+issue の state・PR の紐づけ・blocked-by の上流を写す。この sync は best-effort で、
+GitHub 未認証やオフラインのときは黙って飛ばす。次の手順 4 で PARENT 列が埋まって
+いないなど写しが古いと分かったときだけ、手で sync する。
 
 ```bash
-MONICA_HOME=$HOME/monica monica task sync
+MONICA_HOME=$HOME/monica monica task sync MON-<id>
 ```
 
 変化レポートに `MON-<id>  parent  -  -  ->  MON-<親>` が出れば、子 issue として
