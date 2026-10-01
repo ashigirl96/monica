@@ -570,6 +570,34 @@ fn closed_task_runspaces_never_names_the_held_session_as_detached() {
 }
 
 #[test]
+fn closed_task_runspaces_names_a_detached_session_its_tab_attached_to_the_task() {
+    let mut repos = FakeRepos::default();
+    let task_id = task_in_checkout(&mut repos);
+    let shell = RunspaceId::from_store("3f2c9a4e-0b1d-4c55-9a7e-2f1d6b8c9e01".to_string());
+    let session_id = tab_session_in_runspace(&mut repos, "tab-1", &shell);
+    attach_terminal_session_to_task(&mut repos, &task_id, Agent::Claude, "tab-1", &session_id, "/repo")
+        .unwrap();
+    detach(&mut repos, &session_id);
+    close_with(&mut repos, &FakeGit::default(), &task_id, true, &TabIdentity::default());
+
+    assert_eq!(closed_task_runspaces(&repos, &[]).unwrap().detached_session_ids, vec![session_id]);
+}
+
+#[test]
+fn closing_a_closed_task_again_keeps_the_hold_of_the_first_close() {
+    let mut repos = FakeRepos::default();
+    let task_id = task_in_checkout(&mut repos);
+    let session_id = agent_session(&mut repos, "tab-1", &bench_runspace_id(&task_id));
+    close_with(&mut repos, &FakeGit::default(), &task_id, false, &session_caller(&session_id));
+    let first = close_hold(&repos, &task_id);
+
+    close(&mut repos, &FakeGit::default(), &task_id);
+
+    assert!(first.is_some());
+    assert_eq!(close_hold(&repos, &task_id), first);
+}
+
+#[test]
 fn close_blocker_messages_name_what_would_be_lost() {
     let run_id = TaskRunId::from_store("run-3".to_string());
     let cases = [

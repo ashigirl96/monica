@@ -6,7 +6,7 @@ use super::TabIdentity;
 use crate::github::GithubPullRequestStatus;
 use crate::observability::{task_status, Line, LIFECYCLE};
 use crate::ports::{PendingLaunchStore, TaskBoardQuery, TerminalSessionRepository, WorkbenchStore};
-use crate::prelude::{CloseHold, Task, TaskId, TaskRun, TaskRunId, TaskRunStatus};
+use crate::prelude::{CloseHold, Task, TaskId, TaskRun, TaskRunId, TaskRunStatus, TaskStatus};
 use crate::usecases::query::find_task_summary;
 use crate::{ApplicationError, ApplicationResult};
 
@@ -121,9 +121,12 @@ where
     crate::usecases::runs::reap_worktree_trash(repos, git);
     // Written before the task reads as closed, or a Workbench poll in between would tear down the
     // caller's tab with the rest; replaced even with nothing so a hold left by an earlier close
-    // that failed past this point cannot spare a stranger's tab.
-    let hold = caller_hold(repos, id, options.caller)?;
-    repos.replace_close_hold(id, hold.as_ref())?;
+    // that failed past this point cannot spare a stranger's tab. A task already closed keeps the
+    // hold its own close left: that caller's agent may still be running.
+    if task.status != TaskStatus::Closed {
+        let hold = caller_hold(repos, id, options.caller)?;
+        repos.replace_close_hold(id, hold.as_ref())?;
+    }
     let closed = repos.mark_task_closed(id)?;
     repos.delete_bench_for_task(id)?;
     task_status(id, task.status, closed.status, "close_task");

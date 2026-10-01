@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
-use super::ports::TaskStore;
+use super::ports::{TaskRunStore, TaskStore};
 use crate::bench::bench_task_id;
 use crate::ports::{TerminalSessionRepository, WorkbenchStore};
-use crate::prelude::{CloseHold, RunspaceId, TaskId, TaskStatus, TerminalSessionStatus};
+use crate::prelude::{
+    CloseHold, RunspaceId, TaskId, TaskStatus, TerminalSession, TerminalSessionStatus,
+};
 use crate::ApplicationResult;
 
 /// A runspace whose task is closed, so the Workbench terminates and drops it. `held_tab_id` is the
@@ -32,7 +34,7 @@ pub fn closed_task_runspaces<R>(
     runspace_ids: &[RunspaceId],
 ) -> ApplicationResult<ClosedTaskCleanup>
 where
-    R: TaskStore + WorkbenchStore + TerminalSessionRepository,
+    R: TaskStore + TaskRunStore + WorkbenchStore + TerminalSessionRepository,
 {
     let holds = sweep_close_holds(repos)?;
     let mut closed_tasks = ClosedTasks::default();
@@ -58,7 +60,7 @@ where
         {
             continue;
         }
-        let Some(task_id) = session.runspace_id.as_ref().and_then(bench_task_id) else { continue };
+        let Some(task_id) = session_task(repos, &session)? else { continue };
         if closed_tasks.contains(repos, &task_id)? {
             detached_session_ids.push(session.id);
         }
@@ -68,6 +70,20 @@ where
         runspaces,
         detached_session_ids,
     })
+}
+
+/// The task a session works for: the bench it was spawned in, or — for a shell spawned elsewhere and
+/// attached later, whose `runspace_id` still names where it started — the run its tab stays bound
+/// to after the close.
+fn session_task<R: TaskRunStore>(
+    repos: &R,
+    session: &TerminalSession,
+) -> ApplicationResult<Option<TaskId>> {
+    if let Some(task_id) = session.runspace_id.as_ref().and_then(bench_task_id) {
+        return Ok(Some(task_id));
+    }
+    let Some(tab_id) = session.tab_id.as_deref() else { return Ok(None) };
+    Ok(repos.find_task_run_by_terminal_tab(tab_id)?.map(|run| run.task_id))
 }
 
 #[derive(Default)]
