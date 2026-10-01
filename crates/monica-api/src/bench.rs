@@ -105,19 +105,19 @@ impl From<monica_application::ClosedRunspace> for ClosedRunspace {
     }
 }
 
-/// What the Workbench tears down for closed tasks: the closed runspaces it shows, and the detached
-/// sessions spawned in a closed task's bench that no tab shows any more.
+/// What the Workbench tears down for closed tasks: the closed runspaces it shows, and every live
+/// session a closed task owns wherever it now sits.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ClosedTaskCleanup {
     pub runspaces: Vec<ClosedRunspace>,
-    pub detached_session_ids: Vec<String>,
+    pub live_session_ids: Vec<String>,
 }
 
 impl From<monica_application::ClosedTaskCleanup> for ClosedTaskCleanup {
     fn from(value: monica_application::ClosedTaskCleanup) -> Self {
         Self {
             runspaces: value.runspaces.into_iter().map(ClosedRunspace::from).collect(),
-            detached_session_ids: value.detached_session_ids,
+            live_session_ids: value.live_session_ids,
         }
     }
 }

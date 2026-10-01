@@ -11,7 +11,6 @@ import {
   primaryTabId,
   takePendingLaunches,
   taskShellEnv,
-  type ClosedRunspace,
   type ClosedTaskCleanup,
   type TabTaskBinding,
 } from "@/commands/task";
@@ -371,26 +370,52 @@ export const removeRunspaceAtom = atom(
   },
 );
 
-// A closed task's runspace goes whole, every tab terminated, except the tab the close was issued
-// from while the backend still holds it. A pinned runspace stays: a pin only leaves via unpin.
-export function retireClosedRunspaces(
+export type ClosedTaskRetirement = {
+  state: TerminalState;
+  /// Tabs taken out of the layout; their sessions are terminated.
+  doomed: TerminalTab[];
+  /// Live sessions of closed tasks no tab here shows, terminated by the main window alone: the
+  /// Detached group is its, and its pinned tabs keep their sessions bound.
+  strays: string[];
+};
+
+// A closed task's runspace goes whole, except the tab the close was issued from while the backend
+// still holds it; a tab elsewhere showing a closed task's live session (reattached after the
+// close) goes too. A pinned tab stays: a pin only leaves via unpin.
+export function retireClosedTasks(
   state: TerminalState,
-  closed: ClosedRunspace[],
-): { state: TerminalState; doomed: TerminalTab[] } {
-  const heldTabByRunspace = new Map(closed.map((c) => [c.runspace_id, c.held_tab_id]));
+  cleanup: ClosedTaskCleanup,
+  windowLabel: string,
+): ClosedTaskRetirement {
+  const heldTabByRunspace = new Map(cleanup.runspaces.map((c) => [c.runspace_id, c.held_tab_id]));
+  const live = new Set(cleanup.live_session_ids);
   const doomed: TerminalTab[] = [];
   const runspaces: TerminalRunspace[] = [];
   for (const rs of state.runspaces) {
-    if (!heldTabByRunspace.has(rs.id) || rs.pinnedTabId) {
+    const closed = heldTabByRunspace.has(rs.id) && !rs.pinnedTabId;
+    const keep = rs.tabs.filter((t) =>
+      closed
+        ? t.id === heldTabByRunspace.get(rs.id)
+        : t.id === rs.pinnedTabId || !(t.sessionId && live.has(t.sessionId)),
+    );
+    if (keep.length === rs.tabs.length) {
       runspaces.push(rs);
       continue;
     }
-    const held = rs.tabs.find((t) => t.id === heldTabByRunspace.get(rs.id));
-    doomed.push(...rs.tabs.filter((t) => t !== held));
-    if (held) runspaces.push({ ...rs, tabs: [held], activeTabId: held.id });
+    doomed.push(...rs.tabs.filter((t) => !keep.includes(t)));
+    if (keep.length === 0) continue;
+    const activeKept = keep.some((t) => t.id === rs.activeTabId);
+    runspaces.push({ ...rs, tabs: keep, activeTabId: activeKept ? rs.activeTabId : keep[0].id });
   }
-  if (doomed.length === 0) return { state, doomed };
-  if (runspaces.length === 0) return { state: initialState(), doomed };
+
+  const bound = new Set(state.runspaces.flatMap((rs) => rs.tabs.map((t) => t.sessionId)));
+  const strays =
+    windowLabel === MAIN_WINDOW_LABEL
+      ? cleanup.live_session_ids.filter((id) => !bound.has(id))
+      : [];
+
+  if (doomed.length === 0) return { state, doomed, strays };
+  if (runspaces.length === 0) return { state: initialState(), doomed, strays };
   const activeSurvived = runspaces.some((rs) => rs.id === state.activeRunspaceId);
   return {
     state: {
@@ -398,20 +423,8 @@ export function retireClosedRunspaces(
       activeRunspaceId: activeSurvived ? state.activeRunspaceId : runspaces[0].id,
     },
     doomed,
+    strays,
   };
-}
-
-// The detached sessions of closed tasks that no tab in `state` shows — pass the layout before
-// retiring, so a doomed tab's session is not terminated twice. Only the main window adopts them:
-// the Detached group is its, and a pinned tab (main-only) keeps its session out of the list.
-export function strayClosedSessions(
-  state: TerminalState,
-  cleanup: ClosedTaskCleanup,
-  windowLabel: string,
-): string[] {
-  if (windowLabel !== MAIN_WINDOW_LABEL) return [];
-  const bound = new Set(state.runspaces.flatMap((rs) => rs.tabs.map((t) => t.sessionId)));
-  return cleanup.detached_session_ids.filter((id) => !bound.has(id));
 }
 
 // Every window applies this to its own layout: a close from the CLI or the board lands in the DB
@@ -425,9 +438,11 @@ export const retireClosedRunspacesAtom = atom(null, async (get, set) => {
     warnTerminal("closed runspace retire", e);
     return;
   }
-  const current = get(resolvedStateAtom);
-  const { state, doomed } = retireClosedRunspaces(current, cleanup.runspaces);
-  const strays = strayClosedSessions(current, cleanup, get(windowLabelAtom));
+  const { state, doomed, strays } = retireClosedTasks(
+    get(resolvedStateAtom),
+    cleanup,
+    get(windowLabelAtom),
+  );
   if (doomed.length === 0 && strays.length === 0) return;
   if (doomed.length > 0) set(terminalStateAtom, state);
   await Promise.allSettled([

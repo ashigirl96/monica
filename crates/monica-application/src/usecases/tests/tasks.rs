@@ -538,27 +538,31 @@ fn detach(repos: &mut FakeRepos, session_id: &str) {
 }
 
 #[test]
-fn closed_task_runspaces_names_detached_sessions_left_in_a_closed_bench() {
+fn closed_task_runspaces_names_every_live_session_a_closed_task_owns() {
     let mut repos = FakeRepos::default();
     let task_id = task_in_checkout(&mut repos);
     let open = task_in_checkout(&mut repos);
     let shell = RunspaceId::from_store("3f2c9a4e-0b1d-4c55-9a7e-2f1d6b8c9e01".to_string());
-    let orphan = tab_session_in_runspace(&mut repos, "tab-closed", &bench_runspace_id(&task_id));
-    let attached = tab_session_in_runspace(&mut repos, "tab-attached", &bench_runspace_id(&task_id));
+    let detached = tab_session_in_runspace(&mut repos, "tab-detached", &bench_runspace_id(&task_id));
+    let running = tab_session_in_runspace(&mut repos, "tab-running", &bench_runspace_id(&task_id));
+    let exited = tab_session_in_runspace(&mut repos, "tab-exited", &bench_runspace_id(&task_id));
     let open_bench = tab_session_in_runspace(&mut repos, "tab-open", &bench_runspace_id(&open));
     let plain = tab_session_in_runspace(&mut repos, "tab-shell", &shell);
-    for session_id in [&orphan, &open_bench, &plain] {
+    for session_id in [&detached, &open_bench, &plain] {
         detach(&mut repos, session_id);
     }
+    repos
+        .update_terminal_session_status(&exited, TerminalSessionStatus::Exited, Some(0))
+        .unwrap();
     close(&mut repos, &FakeGit::default(), &task_id);
 
     let cleanup = closed_task_runspaces(&repos, &[]).unwrap();
 
-    assert_eq!(cleanup.detached_session_ids, vec![orphan], "{attached} is still on a tab");
+    assert_eq!(cleanup.live_session_ids, vec![detached, running]);
 }
 
 #[test]
-fn closed_task_runspaces_never_names_the_held_session_as_detached() {
+fn closed_task_runspaces_never_names_the_held_session() {
     let mut repos = FakeRepos::default();
     let task_id = task_in_checkout(&mut repos);
     let session_id = agent_session(&mut repos, "tab-1", &bench_runspace_id(&task_id));
@@ -566,7 +570,7 @@ fn closed_task_runspaces_never_names_the_held_session_as_detached() {
     // A desktop restart reports every surviving session as detached until a tab reattaches.
     detach(&mut repos, &session_id);
 
-    assert_eq!(closed_task_runspaces(&repos, &[]).unwrap().detached_session_ids, Vec::<String>::new());
+    assert_eq!(closed_task_runspaces(&repos, &[]).unwrap().live_session_ids, Vec::<String>::new());
 }
 
 #[test]
@@ -580,7 +584,7 @@ fn closed_task_runspaces_names_a_detached_session_its_tab_attached_to_the_task()
     detach(&mut repos, &session_id);
     close_with(&mut repos, &FakeGit::default(), &task_id, true, &TabIdentity::default());
 
-    assert_eq!(closed_task_runspaces(&repos, &[]).unwrap().detached_session_ids, vec![session_id]);
+    assert_eq!(closed_task_runspaces(&repos, &[]).unwrap().live_session_ids, vec![session_id]);
 }
 
 #[test]

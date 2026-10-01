@@ -13,8 +13,7 @@ import {
   applyHint,
   enrichRunspacesWithEnv,
   initialState,
-  retireClosedRunspaces,
-  strayClosedSessions,
+  retireClosedTasks,
   tabDisplayPath,
   terminalStateAtom,
   terminateTab,
@@ -108,17 +107,19 @@ export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
         const cleanup = await closedTaskRunspaces(state.runspaces.map((rs) => rs.id)).catch(
           (e: unknown) => {
             warnTerminal("closed runspace retire", e);
-            return { runspaces: [], detached_session_ids: [] };
+            return { runspaces: [], live_session_ids: [] };
           },
         );
-        const strays = strayClosedSessions(state, cleanup, windowLabel);
-        const retired = retireClosedRunspaces(state, cleanup.runspaces);
+        const retired = retireClosedTasks(state, cleanup, windowLabel);
         state = retired.state;
         void Promise.allSettled([
           ...retired.doomed.map(terminateTab),
-          ...strays.map((id) => terminalTerminate(id)),
+          ...retired.strays.map((id) => terminalTerminate(id)),
         ]);
-        const doomedSessionIds = new Set([...retired.doomed.map((t) => t.sessionId), ...strays]);
+        const doomedSessionIds = new Set([
+          ...retired.doomed.map((t) => t.sessionId),
+          ...retired.strays,
+        ]);
         liveSessions = sessions?.filter((s) => !doomedSessionIds.has(s.id)) ?? null;
         const runspaceToTask = new Map(benchMap.map(([rsId, taskId]) => [rsId, taskId]));
         const taskIds = [

@@ -3,14 +3,8 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type { ClosedRunspace, CloseTaskOutcome } from "@/commands/task";
 import type { TerminalRunspace, TerminalState } from "./store";
 
-const {
-  enrichRunspacesWithEnv,
-  applyHint,
-  moveTabToRunspace,
-  planTabMoves,
-  retireClosedRunspaces,
-  strayClosedSessions,
-} = await import("./store");
+const { enrichRunspacesWithEnv, applyHint, moveTabToRunspace, planTabMoves, retireClosedTasks } =
+  await import("./store");
 
 function makeRunspace(id: string, overrides?: Partial<TerminalRunspace>): TerminalRunspace {
   return {
@@ -29,12 +23,18 @@ function makeState(runspaces: TerminalRunspace[], activeRunspaceId?: string): Te
   };
 }
 
-describe("retireClosedRunspaces", () => {
+describe("retireClosedTasks", () => {
   const tab = (id: string, order = 0) => ({ id, title: "", cwd: "~", order, sessionId: `s-${id}` });
   const closed = (runspaceId: string, heldTabId: string | null = null): ClosedRunspace => ({
     runspace_id: runspaceId,
     held_tab_id: heldTabId,
   });
+  const retire = (
+    state: TerminalState,
+    runspaces: ClosedRunspace[],
+    liveSessionIds: string[] = [],
+    windowLabel = "main",
+  ) => retireClosedTasks(state, { runspaces, live_session_ids: liveSessionIds }, windowLabel);
 
   test("drops a closed runspace whole and dooms every tab in it", () => {
     const state = makeState(
@@ -45,7 +45,7 @@ describe("retireClosedRunspaces", () => {
       "bench-MON-1",
     );
 
-    const result = retireClosedRunspaces(state, [closed("bench-MON-1")]);
+    const result = retire(state, [closed("bench-MON-1")]);
 
     expect(result.state.runspaces.map((r) => r.id)).toEqual(["rs-shell"]);
     expect(result.state.activeRunspaceId).toBe("rs-shell");
@@ -57,7 +57,7 @@ describe("retireClosedRunspaces", () => {
       makeRunspace("bench-MON-1", { tabs: [tab("a"), tab("caller", 1)], activeTabId: "a" }),
     ]);
 
-    const result = retireClosedRunspaces(state, [closed("bench-MON-1", "caller")]);
+    const result = retire(state, [closed("bench-MON-1", "caller")]);
 
     expect(result.state.runspaces).toHaveLength(1);
     expect(result.state.runspaces[0].tabs.map((t) => t.id)).toEqual(["caller"]);
@@ -68,19 +68,35 @@ describe("retireClosedRunspaces", () => {
   test("a held tab that lives elsewhere spares nothing here", () => {
     const state = makeState([makeRunspace("bench-MON-1"), makeRunspace("rs-shell", { order: 1 })]);
 
-    const result = retireClosedRunspaces(state, [closed("bench-MON-1", "rs-shell-tab")]);
+    const result = retire(state, [closed("bench-MON-1", "rs-shell-tab")]);
 
     expect(result.state.runspaces.map((r) => r.id)).toEqual(["rs-shell"]);
     expect(result.doomed.map((t) => t.id)).toEqual(["bench-MON-1-tab"]);
   });
 
-  test("leaves a pinned runspace and an unrelated layout untouched", () => {
+  test("takes out a tab elsewhere that shows a closed task's live session", () => {
     const state = makeState([
-      makeRunspace("bench-MON-1", { pinnedTabId: "bench-MON-1-tab" }),
-      makeRunspace("rs-shell", { order: 1 }),
+      makeRunspace("rs-shell", {
+        tabs: [tab("reattached"), tab("own", 1)],
+        activeTabId: "reattached",
+      }),
     ]);
 
-    const result = retireClosedRunspaces(state, [closed("bench-MON-1"), closed("bench-MON-9")]);
+    const result = retire(state, [], ["s-reattached"]);
+
+    expect(result.state.runspaces[0].tabs.map((t) => t.id)).toEqual(["own"]);
+    expect(result.state.runspaces[0].activeTabId).toBe("own");
+    expect(result.doomed.map((t) => t.id)).toEqual(["reattached"]);
+    expect(result.strays).toEqual([]);
+  });
+
+  test("leaves pinned tabs and an unrelated layout untouched", () => {
+    const state = makeState([
+      makeRunspace("bench-MON-1", { pinnedTabId: "bench-MON-1-tab" }),
+      makeRunspace("rs-pinned", { tabs: [tab("p")], activeTabId: "p", pinnedTabId: "p", order: 1 }),
+    ]);
+
+    const result = retire(state, [closed("bench-MON-1"), closed("bench-MON-9")], ["s-p"]);
 
     expect(result.state).toBe(state);
     expect(result.doomed).toEqual([]);
@@ -89,31 +105,18 @@ describe("retireClosedRunspaces", () => {
   test("falls back to a fresh layout once the last runspace goes", () => {
     const state = makeState([makeRunspace("bench-MON-1")]);
 
-    const result = retireClosedRunspaces(state, [closed("bench-MON-1")]);
+    const result = retire(state, [closed("bench-MON-1")]);
 
     expect(result.state.runspaces).toHaveLength(1);
     expect(result.state.runspaces[0].id).not.toBe("bench-MON-1");
     expect(result.state.runspaces[0].taskId).toBeUndefined();
   });
-});
 
-describe("strayClosedSessions", () => {
-  const cleanup = (ids: string[]) => ({ runspaces: [], detached_session_ids: ids });
-  const state = makeState([
-    makeRunspace("rs-1", {
-      tabs: [{ id: "t1", title: "", cwd: "~", order: 0, sessionId: "ts-shown" }],
-      activeTabId: "t1",
-    }),
-  ]);
+  test("leaves sessions no tab shows to the main window", () => {
+    const state = makeState([makeRunspace("rs-1", { tabs: [tab("shown")], activeTabId: "shown" })]);
 
-  test("adopts only the sessions no tab shows", () => {
-    expect(strayClosedSessions(state, cleanup(["ts-shown", "ts-gone"]), "main")).toEqual([
-      "ts-gone",
-    ]);
-  });
-
-  test("leaves them to the main window", () => {
-    expect(strayClosedSessions(state, cleanup(["ts-gone"]), "secondary")).toEqual([]);
+    expect(retire(state, [], ["s-shown", "s-gone"], "main").strays).toEqual(["s-gone"]);
+    expect(retire(state, [], ["s-gone"], "secondary").strays).toEqual([]);
   });
 });
 
@@ -373,7 +376,7 @@ let pendingLaunchesResult: {
 }[];
 let takePendingLaunchesCalls = 0;
 let closedRunspacesResult: ClosedRunspace[];
-let detachedSessionIdsResult: string[];
+let liveSessionIdsResult: string[];
 let terminatedSessionIds: string[];
 
 // mock.module is process-global and later setups re-mock this module, so a test that reads
@@ -396,7 +399,7 @@ mock.module("@/commands/task", () => ({
   closedTaskRunspaces: () =>
     Promise.resolve({
       runspaces: closedRunspacesResult,
-      detached_session_ids: detachedSessionIdsResult,
+      live_session_ids: liveSessionIdsResult,
     }),
   listBenchRunspaceMap: () => Promise.resolve(benchMapResult),
   taskShellEnv: (tid: string) => Promise.resolve(shellEnvResult.get(tid) ?? []),
@@ -468,7 +471,7 @@ beforeEach(() => {
   pendingLaunchesResult = [];
   takePendingLaunchesCalls = 0;
   closedRunspacesResult = [];
-  detachedSessionIdsResult = [];
+  liveSessionIdsResult = [];
   terminatedSessionIds = [];
 });
 
@@ -542,7 +545,7 @@ describe("loadTerminalStateAtom", () => {
       },
     ];
     closedRunspacesResult = [{ runspace_id: "bench-MON-1", held_tab_id: null }];
-    detachedSessionIdsResult = ["ts-1", "ts-closed-earlier"];
+    liveSessionIdsResult = ["ts-1", "ts-closed-earlier"];
 
     const store = createStore();
     store.set(windowLabelAtom, "main");
@@ -1024,7 +1027,7 @@ describe("closeTaskAtom", () => {
       closedTaskRunspaces: () =>
         Promise.resolve({
           runspaces: closedRunspacesResult,
-          detached_session_ids: detachedSessionIdsResult,
+          live_session_ids: liveSessionIdsResult,
         }),
       listBenchRunspaceMap: () => Promise.resolve(benchMapResult),
       taskShellEnv: (tid: string) => Promise.resolve(shellEnvResult.get(tid) ?? []),
@@ -1130,7 +1133,7 @@ describe("retireClosedRunspacesAtom", () => {
   test("terminates a closed task's session that only sits detached", async () => {
     const state = makeState([makeRunspace("rs-shell")]);
     const store = storeWithState(state);
-    detachedSessionIdsResult = ["ts-detached"];
+    liveSessionIdsResult = ["ts-detached"];
 
     await store.set(retireClosedRunspacesAtom);
 

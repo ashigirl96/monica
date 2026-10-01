@@ -4,7 +4,7 @@ use super::ports::{TaskRunStore, TaskStore};
 use crate::bench::bench_task_id;
 use crate::ports::{TerminalSessionRepository, WorkbenchStore};
 use crate::prelude::{
-    CloseHold, RunspaceId, TaskId, TaskStatus, TerminalSession, TerminalSessionStatus,
+    CloseHold, RunspaceId, TaskId, TaskStatus, TerminalSession,
 };
 use crate::ApplicationResult;
 
@@ -17,13 +17,13 @@ pub struct ClosedRunspace {
     pub held_tab_id: Option<String>,
 }
 
-/// What the Workbench tears down for closed tasks: the runspaces it shows, and the sessions spawned
-/// in a closed task's bench that no tab shows any more (a tab closed before the task was, which
-/// only detached its process).
+/// What the Workbench tears down for closed tasks: the runspaces it shows, and every live session a
+/// closed task owns wherever it now sits — detached by a tab closed before the task was, or
+/// reattached into some other runspace.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ClosedTaskCleanup {
     pub runspaces: Vec<ClosedRunspace>,
-    pub detached_session_ids: Vec<String>,
+    pub live_session_ids: Vec<String>,
 }
 
 /// The layout is frontend-owned and rewritten wholesale on every save, so the Workbench asks with
@@ -53,22 +53,20 @@ where
 
     let held_sessions: HashSet<&str> =
         holds.values().map(|hold| hold.terminal_session_id.as_str()).collect();
-    let mut detached_session_ids = Vec::new();
+    let mut live_session_ids = Vec::new();
     for session in repos.list_terminal_sessions(None)? {
-        if session.status != TerminalSessionStatus::Detached
-            || held_sessions.contains(session.id.as_str())
-        {
+        if session.status.is_terminal() || held_sessions.contains(session.id.as_str()) {
             continue;
         }
         let Some(task_id) = session_task(repos, &session)? else { continue };
         if closed_tasks.contains(repos, &task_id)? {
-            detached_session_ids.push(session.id);
+            live_session_ids.push(session.id);
         }
     }
 
     Ok(ClosedTaskCleanup {
         runspaces,
-        detached_session_ids,
+        live_session_ids,
     })
 }
 

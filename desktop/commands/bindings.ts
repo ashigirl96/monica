@@ -227,12 +227,12 @@ export type ClosedRunspace = {
 };
 
 /**
- *  What the Workbench tears down for closed tasks: the closed runspaces it shows, and the detached
- *  sessions spawned in a closed task's bench that no tab shows any more.
+ *  What the Workbench tears down for closed tasks: the closed runspaces it shows, and every live
+ *  session a closed task owns wherever it now sits.
  */
 export type ClosedTaskCleanup = {
   runspaces: ClosedRunspace[];
-  detached_session_ids: string[];
+  live_session_ids: string[];
 };
 
 export type DisplayStatus =
