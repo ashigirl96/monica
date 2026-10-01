@@ -476,6 +476,28 @@ describe("saveTerminalStateAtom", () => {
     expect(getSaveCalls()).toBe(1);
   });
 
+  test("flush rejects when the pending save fails", async () => {
+    mock.module("@/commands/terminal", () => ({
+      terminalLoadState: () => Promise.resolve(loadStateResult),
+      terminalListSessions: () => Promise.resolve(sessionsResult ?? []),
+      terminalDetach: () => Promise.resolve(),
+      terminalSaveState: () => Promise.reject(new Error("disk full")),
+      terminalTerminate: () => Promise.resolve(),
+    }));
+    const { createStore: cs } = await import("jotai");
+    const { windowLabelAtom: wlAtom } = await import("@/stores/ui-state");
+    const { terminalStateAtom: stateAtom } = await import("./store");
+    const { saveTerminalStateAtom: saveAtom, flushTerminalStateSaveAtom } =
+      await import("./persistence");
+    const store = cs();
+    store.set(wlAtom, "main");
+    store.set(stateAtom, makeState([makeRunspace("rs")]));
+
+    store.set(saveAtom);
+
+    await expect(store.set(flushTerminalStateSaveAtom)).rejects.toThrow("disk full");
+  });
+
   test("does not persist the fallback layout after a failed load", async () => {
     let saveCalls = 0;
     mock.module("@/commands/terminal", () => ({

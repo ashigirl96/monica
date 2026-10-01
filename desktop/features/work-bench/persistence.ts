@@ -152,11 +152,16 @@ export const saveTerminalStateAtom = atom(null, (get, set) => {
   const snapshot = stateToSnapshot(current);
   const write = () => {
     set(pendingSaveAtom, null);
-    return terminalSaveState(windowLabel, snapshot).catch((e) => warnTerminal("save", e));
+    return terminalSaveState(windowLabel, snapshot);
   };
-  set(pendingSaveAtom, { timer: window.setTimeout(write, 500), write });
+  const timer = window.setTimeout(() => {
+    write().catch((e) => warnTerminal("save", e));
+  }, 500);
+  set(pendingSaveAtom, { timer, write });
 });
 
+// Rejects when the write fails: a caller flushing before acting on the saved layout must not
+// proceed on the stale one.
 export const flushTerminalStateSaveAtom = atom(null, async (get) => {
   const pending = get(pendingSaveAtom);
   if (!pending) return;
