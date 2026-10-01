@@ -507,6 +507,42 @@ describe("saveTerminalStateAtom", () => {
     expect(getSaveCalls()).toBe(1);
   });
 
+  test("a later save waits for the one already in flight", async () => {
+    const finishers: (() => void)[] = [];
+    const { store, saveAtom, getSaveCalls } = await setupSaveTest(
+      "main",
+      undefined,
+      () => new Promise<void>((resolve) => finishers.push(resolve)),
+    );
+    const { flushTerminalStateSaveAtom } = await import("./persistence");
+
+    store.set(saveAtom);
+    await waitFor(() => getSaveCalls() > 0);
+    store.set(saveAtom);
+    const flush = store.set(flushTerminalStateSaveAtom);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(getSaveCalls()).toBe(1);
+
+    finishers[0]();
+    await waitFor(() => getSaveCalls() === 2);
+    finishers[1]();
+    await flush;
+  });
+
+  test("a pin change is saved without waiting out the debounce", async () => {
+    const { store, saveAtom, getSaveCalls, getSaved } = await setupSaveTest("main");
+    const { terminalStateAtom: stateAtom } = await import("./store");
+
+    store.set(saveAtom);
+    await waitFor(() => getSaveCalls() === 1);
+    store.set(stateAtom, makeState([makeRunspace("rs", { pinnedTabId: "rs-tab" })]));
+    store.set(saveAtom);
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(getSaveCalls()).toBe(2);
+    expect(getSaved()?.runspaces[0].pinned_tab_id).toBe("rs-tab");
+  });
+
   test("flush rejects when the pending save fails", async () => {
     const { store, saveAtom } = await setupSaveTest("main", undefined, () =>
       Promise.reject(new Error("disk full")),

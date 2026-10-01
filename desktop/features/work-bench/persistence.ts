@@ -142,8 +142,17 @@ export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
 
 // Holds the write itself, not just the timer, so a flush can run it early.
 const pendingSaveAtom = atom<{ timer: number; write: () => Promise<void> } | null>(null);
-// A save already sent but not yet acknowledged; a flush has to wait for it too.
+// The last save sent; each save waits for this one first, so an older snapshot can never land
+// after a newer one, and a flush waiting on it waits for every save before it too.
 const inFlightSaveAtom = atom<Promise<void> | null>(null);
+const savedPinsAtom = atom<string | null>(null);
+
+function pinSignature(snapshot: TerminalStateSnapshot): string {
+  return snapshot.runspaces
+    .filter((rs) => rs.pinned_tab_id)
+    .map((rs) => `${rs.id}:${rs.pinned_tab_id}`)
+    .join(",");
+}
 
 export const saveTerminalStateAtom = atom(null, (get, set) => {
   const current = get(terminalStateAtom);
@@ -154,7 +163,8 @@ export const saveTerminalStateAtom = atom(null, (get, set) => {
   const snapshot = stateToSnapshot(current);
   const write = () => {
     set(pendingSaveAtom, null);
-    const saving = terminalSaveState(windowLabel, snapshot);
+    const previous = get(inFlightSaveAtom) ?? Promise.resolve();
+    const saving = previous.catch(() => {}).then(() => terminalSaveState(windowLabel, snapshot));
     set(inFlightSaveAtom, saving);
     const settle = () => {
       if (get(inFlightSaveAtom) === saving) set(inFlightSaveAtom, null);
@@ -162,10 +172,20 @@ export const saveTerminalStateAtom = atom(null, (get, set) => {
     saving.then(settle, settle);
     return saving;
   };
-  const timer = window.setTimeout(() => {
+  const writeLogged = () => {
     write().catch((e) => warnTerminal("save", e));
-  }, 500);
-  set(pendingSaveAtom, { timer, write });
+  };
+  // A close — from the board or `monica task close` — refuses a pinned bench by reading the saved
+  // layout, so a pin change cannot sit out the debounce.
+  const pins = pinSignature(snapshot);
+  const previousPins = get(savedPinsAtom);
+  const pinsChanged = previousPins !== null && pins !== previousPins;
+  set(savedPinsAtom, pins);
+  if (pinsChanged) {
+    writeLogged();
+    return;
+  }
+  set(pendingSaveAtom, { timer: window.setTimeout(writeLogged, 500), write });
 });
 
 // Rejects when the write fails: a caller flushing before acting on the saved layout must not
