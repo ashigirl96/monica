@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { cn } from "@/lib/utils";
 
 const ANCHOR_GAP = 4;
 const VIEWPORT_PADDING = 8;
@@ -9,10 +10,12 @@ export type PopoverAnchor = { top: number; bottom: number; left: number };
 export function PopoverMenu({
   anchor,
   onClose,
+  className,
   children,
 }: {
   anchor: PopoverAnchor;
   onClose: () => void;
+  className?: string;
   children: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -54,7 +57,10 @@ export function PopoverMenu({
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-50 w-44 rounded-md border border-border bg-popover p-1 shadow-lg"
+      className={cn(
+        "fixed z-50 w-44 rounded-md border border-border bg-popover p-1 shadow-lg",
+        className,
+      )}
       style={
         pos
           ? { top: pos.top, left: pos.left }

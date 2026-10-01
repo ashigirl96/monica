@@ -83,9 +83,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn task_close_replaces_delete_and_has_no_yes_bypass() {
+    fn task_close_takes_force_and_no_yes() {
         assert!(Cli::try_parse_from(["monica", "task", "close", "MON-1"]).is_ok());
-        // close confirms interactively; there is no --yes bypass flag.
+        assert!(Cli::try_parse_from(["monica", "task", "close", "MON-1", "--force"]).is_ok());
+        // close never prompts, so there is nothing for a --yes flag to answer.
         assert!(Cli::try_parse_from(["monica", "task", "close", "MON-1", "-y"]).is_err());
         assert!(Cli::try_parse_from(["monica", "task", "close", "MON-1", "--yes"]).is_err());
         // the old `delete` subcommand is gone.

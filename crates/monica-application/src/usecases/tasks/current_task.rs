@@ -91,7 +91,7 @@ where
 
 /// The tab the identity names: its own id, or the tab owning the session it names. A session
 /// without a tab (a daemon-only shell) leaves this `None`.
-fn resolve_tab_id<R>(repos: &R, identity: &TabIdentity) -> ApplicationResult<Option<String>>
+pub(super) fn resolve_tab_id<R>(repos: &R, identity: &TabIdentity) -> ApplicationResult<Option<String>>
 where
     R: TerminalSessionRepository,
 {

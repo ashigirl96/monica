@@ -1,10 +1,13 @@
 use super::*;
 use super::support::*;
 use crate::bench::bench_runspace_id;
-use crate::{PendingLaunchStore, RunTaskResult};
+use crate::ports::PullRequestSyncStore;
+use crate::prelude::{TaskRun, TaskRunId};
+use crate::{GithubPullRequest, GithubPullRequestStatus, PendingLaunchStore, RunTaskResult};
 use crate::usecases::tasks::{
-    attach_terminal_session_to_task, list_tab_task_bindings, resolve_current_task,
-    CurrentTaskSource, MakeMainOutcome, TabIdentity, TabTaskBinding,
+    attach_terminal_session_to_task, close_refusal_forceable, list_tab_task_bindings,
+    resolve_current_task, CloseBlocker, CloseTaskOptions, CloseTaskOutcome, CurrentTaskSource,
+    MakeMainOutcome, TabIdentity, TabTaskBinding,
 };
 use monica_domain::{AgentSessionId, RunspaceId};
 
@@ -49,43 +52,81 @@ fn create_raw_task_rejects_unknown_project() {
     assert!(matches!(err, ApplicationError::NotFound(_)), "{err:?}");
 }
 
-#[test]
-fn close_task_delegates_run_cleanup_to_git_gateway() {
-    let mut repos = FakeRepos::default();
+fn task_in_checkout(repos: &mut FakeRepos) -> TaskId {
     let mut project = Project::from_repo("owner/repo");
     project.path = Some("/repo".to_string());
     repos.insert_project(project);
-    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    repos.insert_task_for_run(Some("owner/repo".to_string()))
+}
+
+fn worktree_run(repos: &mut FakeRepos, task_id: &TaskId, branch: &str, worktree: &str) -> TaskRun {
     repos
         .start_task_run(NewTaskRun {
             task_id: task_id.clone(),
             agent: None,
-            branch: Some("issue-42".to_string()),
-            worktree_path: Some("/tmp/wt".to_string()),
+            branch: Some(branch.to_string()),
+            worktree_path: Some(worktree.to_string()),
         })
-        .unwrap();
+        .unwrap()
+}
+
+fn tab_run(repos: &mut FakeRepos, task_id: &TaskId, tab_id: &str) -> TaskRun {
+    repos
+        .attach_terminal_tab_to_task(
+            NewTaskRun { task_id: task_id.clone(), agent: None, branch: None, worktree_path: None },
+            tab_id,
+            None,
+        )
+        .unwrap()
+        .run
+}
+
+fn close(repos: &mut FakeRepos, git: &FakeGit, task_id: &TaskId) -> CloseTaskOutcome {
+    close_with(repos, git, task_id, false, &TabIdentity::default())
+}
+
+fn close_with(
+    repos: &mut FakeRepos,
+    git: &FakeGit,
+    task_id: &TaskId,
+    force: bool,
+    caller: &TabIdentity,
+) -> CloseTaskOutcome {
+    close_task(repos, git, task_id, CloseTaskOptions { force, caller }).unwrap()
+}
+
+fn refused(outcome: CloseTaskOutcome) -> Vec<CloseBlocker> {
+    match outcome {
+        CloseTaskOutcome::Refused { blockers } => blockers,
+        CloseTaskOutcome::Closed(report) => panic!("expected a refusal, closed {}", report.task.id),
+    }
+}
+
+fn assert_untouched(repos: &FakeRepos, git: &FakeGit, task_id: &TaskId) {
+    assert!(!git.cleaned(), "a refused close must not clean up runs");
+    assert_ne!(repos.get_task(task_id).unwrap().unwrap().status, TaskStatus::Closed);
+}
+
+#[test]
+fn close_task_delegates_run_cleanup_to_git_gateway() {
+    let mut repos = FakeRepos::default();
+    let task_id = task_in_checkout(&mut repos);
+    worktree_run(&mut repos, &task_id, "issue-42", "/tmp/wt");
     let git = FakeGit::default();
-    let report = close_task(&mut repos, &git, &task_id).unwrap();
+    let CloseTaskOutcome::Closed(report) = close(&mut repos, &git, &task_id) else {
+        panic!("a clean task closes");
+    };
     assert_eq!(report.removed_branches, vec!["issue-42"]);
     assert!(git.cleaned());
     assert_eq!(git.reaped_worktrees(), vec![std::path::PathBuf::from("/tmp/wt")]);
+    assert_eq!(repos.get_task(&task_id).unwrap().unwrap().status, TaskStatus::Closed);
 }
 
 #[test]
 fn close_task_drops_the_pending_launch_before_cleanup() {
     let mut repos = FakeRepos::default();
-    let mut project = Project::from_repo("owner/repo");
-    project.path = Some("/repo".to_string());
-    repos.insert_project(project);
-    let task_id = repos.insert_task_for_run(Some("owner/repo".to_string()));
-    let run = repos
-        .start_task_run(NewTaskRun {
-            task_id: task_id.clone(),
-            agent: None,
-            branch: Some("mon-1".to_string()),
-            worktree_path: Some("/tmp/wt".to_string()),
-        })
-        .unwrap();
+    let task_id = task_in_checkout(&mut repos);
+    let run = worktree_run(&mut repos, &task_id, "mon-1", "/tmp/wt");
     repos
         .finish_task_run(&run.id, &task_id, TaskRunStatus::Prepared)
         .unwrap();
@@ -100,11 +141,235 @@ fn close_task_drops_the_pending_launch_before_cleanup() {
         })
         .unwrap();
 
-    close_task(&mut repos, &FakeGit::default(), &task_id).unwrap();
+    close(&mut repos, &FakeGit::default(), &task_id);
 
     assert!(repos.take_pending_launches().unwrap().is_empty());
 }
 
+#[test]
+fn close_task_refuses_a_worktree_with_uncommitted_changes() {
+    let mut repos = FakeRepos::default();
+    let task_id = task_in_checkout(&mut repos);
+    let run = worktree_run(&mut repos, &task_id, "issue-42", "/tmp/wt");
+    let git = FakeGit::default().with_dirty_worktree("/tmp/wt");
+
+    let blockers = refused(close(&mut repos, &git, &task_id));
+
+    assert_eq!(
+        blockers,
+        vec![CloseBlocker::UncommittedChanges { run_id: run.id, worktree: "/tmp/wt".to_string() }]
+    );
+    assert_untouched(&repos, &git, &task_id);
+}
+
+#[test]
+fn close_task_refuses_a_branch_with_unpublished_commits() {
+    let mut repos = FakeRepos::default();
+    let task_id = task_in_checkout(&mut repos);
+    let run = worktree_run(&mut repos, &task_id, "issue-42", "/tmp/wt");
+    let git = FakeGit::default().with_unpublished_branch("issue-42");
+
+    let blockers = refused(close(&mut repos, &git, &task_id));
+
+    assert_eq!(
+        blockers,
+        vec![CloseBlocker::UnpublishedCommits { run_id: run.id, branch: "issue-42".to_string() }]
+    );
+    assert_untouched(&repos, &git, &task_id);
+}
+
+#[test]
+fn close_task_trusts_a_merged_pull_request_over_unpublished_commits() {
+    let mut repos = FakeRepos::default();
+    let task_id = task_in_checkout(&mut repos);
+    worktree_run(&mut repos, &task_id, "issue-42", "/tmp/wt");
+    repos
+        .record_linked_pull_requests(&[(
+            task_id.to_string(),
+            GithubPullRequest {
+                repo: "owner/repo".to_string(),
+                number: 7,
+                url: "https://github.com/owner/repo/pull/7".to_string(),
+                status: GithubPullRequestStatus::Merged,
+            },
+        )])
+        .unwrap();
+    let git = FakeGit::default().with_unpublished_branch("issue-42");
+
+    assert!(matches!(close(&mut repos, &git, &task_id), CloseTaskOutcome::Closed(_)));
+}
+
+#[test]
+fn close_task_still_refuses_unpublished_commits_behind_an_unmerged_pull_request() {
+    let mut repos = FakeRepos::default();
+    let task_id = task_in_checkout(&mut repos);
+    worktree_run(&mut repos, &task_id, "issue-42", "/tmp/wt");
+    repos
+        .record_linked_pull_requests(&[(
+            task_id.to_string(),
+            GithubPullRequest {
+                repo: "owner/repo".to_string(),
+                number: 7,
+                url: "https://github.com/owner/repo/pull/7".to_string(),
+                status: GithubPullRequestStatus::Open,
+            },
+        )])
+        .unwrap();
+    let git = FakeGit::default().with_unpublished_branch("issue-42");
+
+    let blockers = refused(close(&mut repos, &git, &task_id));
+    assert!(matches!(blockers.as_slice(), [CloseBlocker::UnpublishedCommits { .. }]));
+}
+
+#[test]
+fn close_task_refuses_running_and_waiting_runs_but_not_settled_ones() {
+    let mut repos = FakeRepos::default();
+    let task_id = task_in_checkout(&mut repos);
+    let running = tab_run(&mut repos, &task_id, "tab-1");
+    let waiting = tab_run(&mut repos, &task_id, "tab-2");
+    repos
+        .finish_task_run(&waiting.id, &task_id, TaskRunStatus::WaitingForUser)
+        .unwrap();
+    let stopped = tab_run(&mut repos, &task_id, "tab-3");
+    repos
+        .finish_task_run(&stopped.id, &task_id, TaskRunStatus::Stopped)
+        .unwrap();
+    let git = FakeGit::default();
+
+    let blockers = refused(close(&mut repos, &git, &task_id));
+
+    assert_eq!(blockers.len(), 2, "{blockers:?}");
+    assert!(blockers.contains(&CloseBlocker::ActiveRun {
+        run_id: running.id,
+        status: TaskRunStatus::Running
+    }));
+    assert!(blockers.contains(&CloseBlocker::ActiveRun {
+        run_id: waiting.id,
+        status: TaskRunStatus::WaitingForUser
+    }));
+    assert_untouched(&repos, &git, &task_id);
+}
+
+#[test]
+fn close_task_does_not_count_the_callers_own_run_as_active() {
+    let mut repos = FakeRepos::default();
+    let task_id = task_in_checkout(&mut repos);
+    tab_run(&mut repos, &task_id, "tab-1");
+    let caller = TabIdentity {
+        task_id: Some(task_id.to_string()),
+        terminal_tab_id: Some("tab-1".to_string()),
+        terminal_session_id: None,
+    };
+
+    let outcome = close_with(&mut repos, &FakeGit::default(), &task_id, false, &caller);
+
+    assert!(matches!(outcome, CloseTaskOutcome::Closed(_)), "{outcome:?}");
+}
+
+#[test]
+fn close_task_resolves_the_callers_tab_from_its_session() {
+    let mut repos = FakeRepos::default();
+    let task_id = task_in_checkout(&mut repos);
+    tab_run(&mut repos, &task_id, "tab-1");
+    let session_id = tab_session_in_runspace(&mut repos, "tab-1", &bench_runspace_id(&task_id));
+    let caller = TabIdentity {
+        task_id: None,
+        terminal_tab_id: None,
+        terminal_session_id: Some(session_id),
+    };
+
+    let outcome = close_with(&mut repos, &FakeGit::default(), &task_id, false, &caller);
+
+    assert!(matches!(outcome, CloseTaskOutcome::Closed(_)), "{outcome:?}");
+}
+
+#[test]
+fn close_task_lists_every_blocker_it_finds() {
+    let mut repos = FakeRepos::default();
+    let task_id = task_in_checkout(&mut repos);
+    worktree_run(&mut repos, &task_id, "issue-42", "/tmp/wt");
+    tab_run(&mut repos, &task_id, "tab-1");
+    let git = FakeGit::default()
+        .with_dirty_worktree("/tmp/wt")
+        .with_unpublished_branch("issue-42");
+
+    let blockers = refused(close(&mut repos, &git, &task_id));
+
+    assert_eq!(blockers.len(), 3, "{blockers:?}");
+    assert!(close_refusal_forceable(&blockers));
+}
+
+#[test]
+fn close_task_force_skips_every_forceable_check() {
+    let mut repos = FakeRepos::default();
+    let task_id = task_in_checkout(&mut repos);
+    worktree_run(&mut repos, &task_id, "issue-42", "/tmp/wt");
+    tab_run(&mut repos, &task_id, "tab-1");
+    let git = FakeGit::default()
+        .with_dirty_worktree("/tmp/wt")
+        .with_unpublished_branch("issue-42");
+
+    let outcome = close_with(&mut repos, &git, &task_id, true, &TabIdentity::default());
+
+    assert!(matches!(outcome, CloseTaskOutcome::Closed(_)), "{outcome:?}");
+    assert_eq!(git.inspections(), 0, "force must not inspect git at all");
+    assert_eq!(repos.get_task(&task_id).unwrap().unwrap().status, TaskStatus::Closed);
+}
+
+#[test]
+fn close_task_refuses_a_pinned_bench_even_when_forced() {
+    let mut repos = FakeRepos::default();
+    let task_id = task_in_checkout(&mut repos);
+    let runspace_id = bench_runspace_id(&task_id);
+    repos.create_bench(&task_id, &runspace_id, "/repo").unwrap();
+    repos.pin_runspace(&runspace_id);
+    let git = FakeGit::default();
+
+    for force in [false, true] {
+        let blockers = refused(close_with(&mut repos, &git, &task_id, force, &TabIdentity::default()));
+        assert_eq!(blockers, vec![CloseBlocker::PinnedTab]);
+        assert!(!close_refusal_forceable(&blockers));
+    }
+    assert_untouched(&repos, &git, &task_id);
+}
+
+#[test]
+fn close_task_ignores_a_pin_on_another_tasks_bench() {
+    let mut repos = FakeRepos::default();
+    let task_id = task_in_checkout(&mut repos);
+    let other = repos.insert_task_for_run(Some("owner/repo".to_string()));
+    let other_runspace = bench_runspace_id(&other);
+    repos.create_bench(&other, &other_runspace, "/repo").unwrap();
+    repos.pin_runspace(&other_runspace);
+
+    assert!(matches!(
+        close(&mut repos, &FakeGit::default(), &task_id),
+        CloseTaskOutcome::Closed(_)
+    ));
+}
+
+#[test]
+fn close_blocker_messages_name_what_would_be_lost() {
+    let run_id = TaskRunId::from_store("run-3".to_string());
+    let cases = [
+        (CloseBlocker::PinnedTab, "pinned"),
+        (
+            CloseBlocker::ActiveRun { run_id: run_id.clone(), status: TaskRunStatus::WaitingForUser },
+            "run-3 is still waiting for input",
+        ),
+        (
+            CloseBlocker::UncommittedChanges { run_id: run_id.clone(), worktree: "/wt".to_string() },
+            "worktree /wt (run-3) has uncommitted changes",
+        ),
+        (
+            CloseBlocker::UnpublishedCommits { run_id, branch: "issue-42".to_string() },
+            "branch issue-42 (run-3) has commits on no remote",
+        ),
+    ];
+    for (blocker, expected) in cases {
+        assert!(blocker.message().contains(expected), "{}", blocker.message());
+    }
+}
 
 #[test]
 fn make_main_by_terminal_tab_promotes_side_run_and_reports_no_ops() {

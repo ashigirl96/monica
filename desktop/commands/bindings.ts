@@ -86,8 +86,8 @@ export const commands = {
     typedError<RunTaskResult, ApiError>(__TAURI_INVOKE("launch_task", { taskId, agent, mode })),
   takePendingLaunches: () =>
     typedError<RunTaskResult[], ApiError>(__TAURI_INVOKE("take_pending_launches")),
-  closeTask: (taskId: string) =>
-    typedError<null, ApiError>(__TAURI_INVOKE("close_task", { taskId })),
+  closeTask: (taskId: string, force: boolean) =>
+    typedError<CloseTaskOutcome, ApiError>(__TAURI_INVOKE("close_task", { taskId, force })),
   /**
    *  Promote the run living in the given Workbench tab to its task's Main Run. Returns whether the
    *  primary actually changed; `false` covers "no run in this tab", "already main" and "primary is
@@ -194,6 +194,24 @@ export type BoardColumn = {
   label: string;
   statuses: DisplayStatus[];
 };
+
+/**
+ *  The board shows `message` as-is and offers Force close only when `forceable`: both decided in
+ *  Rust so the frontend holds no close rules of its own.
+ */
+export type CloseBlocker = {
+  message: string;
+  forceable: boolean;
+};
+
+export type CloseTaskOutcome =
+  | { kind: "closed" }
+  | {
+      kind: "refused";
+      blockers: CloseBlocker[];
+      /**  Every blocker is forceable, so a forced retry would close. */
+      forceable: boolean;
+    };
 
 export type DisplayStatus =
   | "ready"

@@ -140,17 +140,26 @@ export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
   return promise;
 });
 
-const saveTimerAtom = atom<number | undefined>(undefined);
+// Holds the write itself, not just the timer, so a flush can run it early.
+const pendingSaveAtom = atom<{ timer: number; write: () => Promise<void> } | null>(null);
 
 export const saveTerminalStateAtom = atom(null, (get, set) => {
   const current = get(terminalStateAtom);
   if (!current || get(persistenceSuspendedAtom)) return;
-  const prev = get(saveTimerAtom);
-  if (prev) clearTimeout(prev);
+  const prev = get(pendingSaveAtom);
+  if (prev) clearTimeout(prev.timer);
   const windowLabel = get(windowLabelAtom);
   const snapshot = stateToSnapshot(current);
-  const timer = window.setTimeout(() => {
-    terminalSaveState(windowLabel, snapshot).catch((e) => warnTerminal("save", e));
-  }, 500);
-  set(saveTimerAtom, timer);
+  const write = () => {
+    set(pendingSaveAtom, null);
+    return terminalSaveState(windowLabel, snapshot).catch((e) => warnTerminal("save", e));
+  };
+  set(pendingSaveAtom, { timer: window.setTimeout(write, 500), write });
+});
+
+export const flushTerminalStateSaveAtom = atom(null, async (get) => {
+  const pending = get(pendingSaveAtom);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  await pending.write();
 });

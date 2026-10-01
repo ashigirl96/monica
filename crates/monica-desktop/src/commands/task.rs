@@ -1,8 +1,9 @@
 use monica_api::{
-    Agent, ApiError, AttachTabResult, BoardColumn, PrepareTaskResult, ProjectOption, RunMode,
-    RunTaskResult, TabTaskBinding, TaskBench, TaskCreated, TaskRunStatus, TaskSummaryRow,
+    Agent, ApiError, AttachTabResult, BoardColumn, CloseTaskOutcome, PrepareTaskResult,
+    ProjectOption, RunMode, RunTaskResult, TabTaskBinding, TaskBench, TaskCreated, TaskRunStatus,
+    TaskSummaryRow,
 };
-use monica_application::parse_issue_input;
+use monica_application::{parse_issue_input, CloseTaskOptions, TabIdentity};
 use monica_domain::{TaskId, TaskRunId};
 use serde::Serialize;
 use tauri::{AppHandle, State};
@@ -305,15 +306,24 @@ pub async fn primary_agent_session_id(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn close_task(app: AppHandle, task_id: String) -> Result<(), ApiError> {
+pub async fn close_task(
+    app: AppHandle,
+    task_id: String,
+    force: bool,
+) -> Result<CloseTaskOutcome, ApiError> {
     let log_ids = ids![task_id];
     command_log::operation("close_task", log_ids, async move {
         event_sink::off_main(move || {
             let mut monica = event_sink::open(&app)?;
+            // The board is no terminal tab, so no run is exempt as the caller's own.
+            let caller = TabIdentity::default();
             monica
                 .tasks()
-                .close_task(&TaskId::from_store(task_id))
-                .map(|_| ())
+                .close_task(
+                    &TaskId::from_store(task_id),
+                    CloseTaskOptions { force, caller: &caller },
+                )
+                .map(CloseTaskOutcome::from)
                 .map_err(ApiError::from)
         })
         .await

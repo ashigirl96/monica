@@ -40,6 +40,19 @@ impl GitGateway for GitCliGateway {
         reap(worktrees);
     }
 
+    fn worktree_has_uncommitted_changes(&self, repo: &Path, worktree: &Path) -> Result<bool> {
+        worktree_has_uncommitted_changes(repo, worktree)
+    }
+
+    fn branch_has_unpublished_commits(
+        &self,
+        repo: &Path,
+        branch: &str,
+        default_branch: &str,
+    ) -> Result<bool> {
+        branch_has_unpublished_commits(repo, branch, default_branch)
+    }
+
     fn detect_repo(&self) -> Result<String> {
         let mut command = Command::new("git");
         command.args(["remote", "get-url", "origin"]);
@@ -200,6 +213,41 @@ fn cleanup_worktree(repo: &Path, run: &TaskRun, worktree: &Path) -> Result<()> {
     Ok(())
 }
 
+fn worktree_has_uncommitted_changes(repo: &Path, worktree: &Path) -> Result<bool> {
+    // Mirrors cleanup_worktree: the main checkout is never trashed, and a gone directory holds
+    // nothing left to lose.
+    if crate::fs_util::same_path(repo, worktree) || !worktree.exists() {
+        return Ok(false);
+    }
+    // Explicit, so a user's `status.showUntrackedFiles=no` cannot hide files cleanup would trash.
+    let status = git_stdout(
+        worktree,
+        ["status", "--porcelain", "--untracked-files=normal"].as_slice(),
+    )?;
+    Ok(!status.trim().is_empty())
+}
+
+fn branch_has_unpublished_commits(repo: &Path, branch: &str, default_branch: &str) -> Result<bool> {
+    if !branch_exists(repo, branch)? {
+        return Ok(false);
+    }
+    let tip = format!("refs/heads/{branch}");
+    let remotes = git_stdout(repo, ["remote"].as_slice())?;
+    if !remotes.trim().is_empty() {
+        let unpublished =
+            git_stdout(repo, ["rev-list", "--max-count=1", &tip, "--not", "--remotes"].as_slice())?;
+        return Ok(!unpublished.trim().is_empty());
+    }
+    // Without a default branch to compare against, nothing proves the commits survive elsewhere.
+    if !branch_exists(repo, default_branch)? {
+        return Ok(true);
+    }
+    let base = format!("refs/heads/{default_branch}");
+    let unmerged =
+        git_stdout(repo, ["rev-list", "--max-count=1", &tip, "--not", &base].as_slice())?;
+    Ok(!unmerged.trim().is_empty())
+}
+
 fn prune_worktrees(repo: &Path) -> Result<()> {
     git(
         repo,
@@ -319,6 +367,22 @@ fn git(repo: &Path, args: &[&str], path_arg: Option<&Path>) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+fn git_stdout(dir: &Path, args: &[&str]) -> Result<String> {
+    let mut command = git_command(dir);
+    command.args(args);
+    let output = Exec::new(GIT, &mut command)
+        .output()
+        .context("failed to run git; install git or check the project path")?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "git {} failed: {}",
+            args.join(" "),
+            stderr_message(&output.stderr)
+        ));
+    }
+    String::from_utf8(output.stdout).with_context(|| format!("git {} output was not UTF-8", args.join(" ")))
 }
 
 fn parse_origin_head_branch(value: &str) -> Option<String> {
@@ -517,6 +581,86 @@ mod tests {
         assert_eq!(removed, vec!["issue-42"]);
         assert!(!worktree_registered(&repo, &worktree).unwrap());
         assert!(!branch_exists(&repo, "issue-42").unwrap());
+    }
+
+    #[test]
+    fn worktree_dirty_check_counts_untracked_files() {
+        let root = Tmp::new("dirty-untracked");
+        let repo = root.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        init_repo(&repo);
+        let worktree = root.path().join("wt");
+        add_worktree(&repo, &worktree, "issue-42");
+        run_git(&worktree, &["config", "status.showUntrackedFiles", "no"]);
+
+        assert!(!worktree_has_uncommitted_changes(&repo, &worktree).unwrap());
+        fs::write(worktree.join("new.txt"), "new\n").unwrap();
+        assert!(worktree_has_uncommitted_changes(&repo, &worktree).unwrap());
+    }
+
+    #[test]
+    fn worktree_dirty_check_ignores_a_gone_worktree_and_the_main_checkout() {
+        let root = Tmp::new("dirty-skip");
+        let repo = root.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        init_repo(&repo);
+        fs::write(repo.join("dirty.txt"), "dirty\n").unwrap();
+
+        assert!(!worktree_has_uncommitted_changes(&repo, &repo).unwrap());
+        assert!(!worktree_has_uncommitted_changes(&repo, &root.path().join("gone")).unwrap());
+    }
+
+    #[test]
+    fn unpublished_check_compares_against_remote_tracking_refs() {
+        let root = Tmp::new("unpublished-remote");
+        run_git(root.path(), &["init", "--bare", "-b", "main", "remote.git"]);
+        let remote = root.path().join("remote.git");
+        let repo = root.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        init_repo(&repo);
+        run_git(&repo, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        run_git(&repo, &["push", "-u", "origin", "main"]);
+        let worktree = root.path().join("wt");
+        add_worktree(&repo, &worktree, "issue-42");
+
+        assert!(!branch_has_unpublished_commits(&repo, "issue-42", "main").unwrap());
+        commit_file(&worktree, "work.txt");
+        assert!(branch_has_unpublished_commits(&repo, "issue-42", "main").unwrap());
+        run_git(&worktree, &["push", "origin", "issue-42"]);
+        assert!(!branch_has_unpublished_commits(&repo, "issue-42", "main").unwrap());
+    }
+
+    #[test]
+    fn unpublished_check_without_remotes_compares_against_the_default_branch() {
+        let root = Tmp::new("unpublished-local");
+        let repo = root.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        init_repo(&repo);
+        let worktree = root.path().join("wt");
+        add_worktree(&repo, &worktree, "issue-42");
+
+        assert!(!branch_has_unpublished_commits(&repo, "issue-42", "main").unwrap());
+        commit_file(&worktree, "work.txt");
+        assert!(branch_has_unpublished_commits(&repo, "issue-42", "main").unwrap());
+        run_git(&repo, &["merge", "--ff-only", "issue-42"]);
+        assert!(!branch_has_unpublished_commits(&repo, "issue-42", "main").unwrap());
+        assert!(branch_has_unpublished_commits(&repo, "issue-42", "no-such-default").unwrap());
+    }
+
+    #[test]
+    fn unpublished_check_treats_a_missing_branch_as_nothing_to_lose() {
+        let root = Tmp::new("unpublished-missing");
+        let repo = root.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        init_repo(&repo);
+
+        assert!(!branch_has_unpublished_commits(&repo, "gone", "main").unwrap());
+    }
+
+    fn commit_file(dir: &Path, name: &str) {
+        fs::write(dir.join(name), "work\n").unwrap();
+        run_git(dir, &["add", name]);
+        run_git(dir, &["commit", "-m", name]);
     }
 
     #[test]

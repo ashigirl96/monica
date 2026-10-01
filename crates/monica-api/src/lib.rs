@@ -36,7 +36,7 @@ pub use settings::{
 pub use status::{
     board_columns, BoardColumn, DisplayStatus, TaskRunStatus, TaskRunWaitReason, TaskStatus,
 };
-pub use task::{ProjectOption, TaskCreated, TaskSummaryRow};
+pub use task::{CloseBlocker, CloseTaskOutcome, ProjectOption, TaskCreated, TaskSummaryRow};
 pub use task_run::{Agent, RunMode};
 pub use terminal::{
     TerminalRunspaceRow, TerminalSession, TerminalSessionKind, TerminalSessionStatus,

@@ -7,6 +7,7 @@ export type {
   TaskRunWaitReason,
   GithubPullRequestRef,
   TabTaskBinding,
+  CloseTaskOutcome,
 } from "./bindings";
 
 import { unwrap } from "./unwrap";
@@ -55,8 +56,8 @@ export function takePendingLaunches() {
   return unwrap(commands.takePendingLaunches());
 }
 
-export function closeTask(taskId: string) {
-  return unwrap(commands.closeTask(taskId));
+export function closeTask(taskId: string, force: boolean) {
+  return unwrap(commands.closeTask(taskId, force));
 }
 
 export function makeMainTaskRun(tabId: string) {

@@ -295,6 +295,10 @@ impl TerminalSessionRepository for SqliteStore {
         SqliteStore::load_terminal_state(self, window_label)
     }
 
+    fn runspace_has_pinned_tab(&self, runspace_id: &RunspaceId) -> Result<bool> {
+        SqliteStore::runspace_has_pinned_tab(self, runspace_id)
+    }
+
     fn save_terminal_state(
         &mut self,
         window_label: &str,

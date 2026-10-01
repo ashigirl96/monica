@@ -51,6 +51,9 @@ pub trait TerminalSessionRepository {
 
     fn load_terminal_state(&self, window_label: &str) -> Result<TerminalStateSnapshot>;
 
+    /// Whether `runspace_id` pins one of its tabs in any window's saved layout.
+    fn runspace_has_pinned_tab(&self, runspace_id: &RunspaceId) -> Result<bool>;
+
     fn save_terminal_state(
         &mut self,
         window_label: &str,

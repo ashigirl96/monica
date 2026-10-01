@@ -132,6 +132,7 @@ struct FakeState {
     bulk_recorded: Vec<(PullRequestBranchSyncCandidate, Vec<GithubPullRequest>)>,
     status_recorded: Vec<(UnresolvedPullRequestRef, GithubPullRequest)>,
     linked_pull_requests: Vec<(String, GithubPullRequest)>,
+    pinned_runspaces: BTreeSet<String>,
     explanations: Vec<monica_domain::Explanation>,
     next_explanation: i64,
 }
@@ -163,6 +164,13 @@ impl FakeRepos {
 
     pub(crate) fn status_recorded(&self) -> Vec<(UnresolvedPullRequestRef, GithubPullRequest)> {
         self.state.borrow().status_recorded.clone()
+    }
+
+    pub(crate) fn pin_runspace(&self, runspace_id: &RunspaceId) {
+        self.state
+            .borrow_mut()
+            .pinned_runspaces
+            .insert(runspace_id.to_string());
     }
 
     pub(crate) fn linked_pull_requests(&self) -> Vec<(String, GithubPullRequest)> {
@@ -405,6 +413,25 @@ impl TaskStore for FakeRepos {
     }
 }
 
+impl FakeRepos {
+    /// Linked pull requests as the board's read model carries them, mirroring the SQL join.
+    fn pull_request_refs(&self, task_id: &str) -> Vec<GithubPullRequestRef> {
+        self.state
+            .borrow()
+            .linked_pull_requests
+            .iter()
+            .filter(|(id, _)| id == task_id)
+            .map(|(_, pr)| GithubPullRequestRef {
+                repo: Some(pr.repo.clone()),
+                number: Some(pr.number),
+                url: Some(pr.url.clone()),
+                status: Some(pr.status.as_str().to_string()),
+                is_open_or_draft: pr.status.is_open_or_draft(),
+            })
+            .collect()
+    }
+}
+
 impl TaskBoardQuery for FakeRepos {
     fn list_task_summaries(
         &self,
@@ -428,7 +455,7 @@ impl TaskBoardQuery for FakeRepos {
                     github_issue_number: issue_ref.as_ref().and_then(|r| r.number),
                     github_issue_url: issue_ref.as_ref().and_then(|r| r.url.clone()),
                     github_issue_state: None,
-                    github_pull_requests: Vec::<GithubPullRequestRef>::new(),
+                    github_pull_requests: self.pull_request_refs(task.id.as_str()),
                     blockers: Vec::new(),
                     task_status: task.status,
                     task_run_status: None,
@@ -1653,6 +1680,9 @@ pub(crate) struct FakeGit {
     cleaned: RefCell<bool>,
     create_worktree_error: RefCell<Option<String>>,
     reaped_worktrees: RefCell<Vec<PathBuf>>,
+    dirty_worktrees: Vec<PathBuf>,
+    unpublished_branches: Vec<String>,
+    inspections: RefCell<usize>,
 }
 
 impl FakeGit {
@@ -1663,8 +1693,23 @@ impl FakeGit {
         }
     }
 
+    pub(crate) fn with_dirty_worktree(mut self, worktree: impl Into<PathBuf>) -> Self {
+        self.dirty_worktrees.push(worktree.into());
+        self
+    }
+
+    pub(crate) fn with_unpublished_branch(mut self, branch: impl Into<String>) -> Self {
+        self.unpublished_branches.push(branch.into());
+        self
+    }
+
     pub(crate) fn cleaned(&self) -> bool {
         *self.cleaned.borrow()
+    }
+
+    /// How many dirty / unpublished questions were asked.
+    pub(crate) fn inspections(&self) -> usize {
+        *self.inspections.borrow()
     }
 
     pub(crate) fn reaped_worktrees(&self) -> Vec<PathBuf> {
@@ -1693,6 +1738,21 @@ impl GitGateway for FakeGit {
 
     fn reap_worktree_trash(&self, worktrees: &[PathBuf]) {
         self.reaped_worktrees.borrow_mut().extend_from_slice(worktrees);
+    }
+
+    fn worktree_has_uncommitted_changes(&self, _repo: &Path, worktree: &Path) -> Result<bool> {
+        *self.inspections.borrow_mut() += 1;
+        Ok(self.dirty_worktrees.iter().any(|dirty| dirty == worktree))
+    }
+
+    fn branch_has_unpublished_commits(
+        &self,
+        _repo: &Path,
+        branch: &str,
+        _default_branch: &str,
+    ) -> Result<bool> {
+        *self.inspections.borrow_mut() += 1;
+        Ok(self.unpublished_branches.iter().any(|b| b == branch))
     }
 
     fn detect_repo(&self) -> Result<String> {
@@ -2156,6 +2216,10 @@ impl TerminalSessionRepository for FakeRepos {
 
     fn load_terminal_state(&self, _window_label: &str) -> Result<TerminalStateSnapshot> {
         Ok(TerminalStateSnapshot { runspaces: Vec::new() })
+    }
+
+    fn runspace_has_pinned_tab(&self, runspace_id: &RunspaceId) -> Result<bool> {
+        Ok(self.state.borrow().pinned_runspaces.contains(runspace_id.as_str()))
     }
 
     fn save_terminal_state(
