@@ -87,16 +87,32 @@ fn invoked_line(
     )
 }
 
-const PLAN_APPROVAL: &str =
-    r#"{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}"#;
-
 /// `auto_approve_plan` is only consulted for an ExitPlanMode permission request, so every other
 /// event skips reading settings.json.
-fn plan_approval(raw: &str, auto_approve_plan: impl FnOnce() -> bool) -> Option<&'static str> {
+fn plan_approval(raw: &str, auto_approve_plan: impl FnOnce() -> bool) -> Option<String> {
     let event: serde_json::Value = serde_json::from_str(raw).ok()?;
     let is_plan_request = event["hook_event_name"] == "PermissionRequest"
         && event["tool_name"] == "ExitPlanMode";
-    (is_plan_request && auto_approve_plan()).then_some(PLAN_APPROVAL)
+    if !(is_plan_request && auto_approve_plan()) {
+        return None;
+    }
+    // ExitPlanMode needs user interaction, so claude keeps its dialog open on a bare allow and
+    // only treats it as answered when the hook hands the input back. Without an explicit mode,
+    // claude leaves plan mode into acceptEdits; auto matches the dialog's first option, and
+    // bypassPermissions would be a no-op because Monica never launches claude with bypass enabled.
+    let reply = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PermissionRequest",
+            "decision": {
+                "behavior": "allow",
+                "updatedInput": event["tool_input"],
+                "updatedPermissions": [
+                    { "type": "setMode", "mode": "auto", "destination": "session" }
+                ]
+            }
+        }
+    });
+    Some(reply.to_string())
 }
 
 fn auto_approve_plan_setting(log: Option<&DailyLog>) -> bool {
@@ -195,18 +211,24 @@ fn handle_agent(agent: Agent, log: Option<&DailyLog>) -> Result<()> {
 mod tests {
     use super::{invoked_line, plan_approval};
 
-    const EXIT_PLAN_REQUEST: &str = r#"{"hook_event_name":"PermissionRequest","tool_name":"ExitPlanMode","tool_input":{"plan":"x"}}"#;
+    const EXIT_PLAN_REQUEST: &str = r#"{"hook_event_name":"PermissionRequest","tool_name":"ExitPlanMode","tool_input":{"plan":"x","planFilePath":"/p/plan.md"}}"#;
 
     #[test]
-    fn an_exit_plan_request_is_allowed_when_enabled() {
+    fn an_exit_plan_request_is_allowed_into_auto_mode_with_its_input_echoed_back() {
         let reply = plan_approval(EXIT_PLAN_REQUEST, || true).expect("approval");
-        let parsed: serde_json::Value = serde_json::from_str(reply).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&reply).unwrap();
         assert_eq!(
             parsed,
             serde_json::json!({
                 "hookSpecificOutput": {
                     "hookEventName": "PermissionRequest",
-                    "decision": { "behavior": "allow" }
+                    "decision": {
+                        "behavior": "allow",
+                        "updatedInput": { "plan": "x", "planFilePath": "/p/plan.md" },
+                        "updatedPermissions": [
+                            { "type": "setMode", "mode": "auto", "destination": "session" }
+                        ]
+                    }
                 }
             })
         );
