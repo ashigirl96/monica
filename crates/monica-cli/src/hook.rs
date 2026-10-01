@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
@@ -87,8 +87,51 @@ fn invoked_line(
     )
 }
 
+const PLAN_APPROVAL: &str =
+    r#"{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}"#;
+
+/// `auto_approve_plan` is only consulted for an ExitPlanMode permission request, so every other
+/// event skips reading settings.json.
+fn plan_approval(raw: &str, auto_approve_plan: impl FnOnce() -> bool) -> Option<&'static str> {
+    let event: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let is_plan_request = event["hook_event_name"] == "PermissionRequest"
+        && event["tool_name"] == "ExitPlanMode";
+    (is_plan_request && auto_approve_plan()).then_some(PLAN_APPROVAL)
+}
+
+fn auto_approve_plan_setting(log: Option<&DailyLog>) -> bool {
+    let loaded =
+        monica_paths::base_dir().and_then(|base| monica_settings::Settings::load_from(&base));
+    match loaded {
+        Ok(settings) => settings.claude.auto_approve_plan,
+        Err(e) => {
+            debug_log_to(
+                log,
+                &format!("plan_auto_approve_skipped error={}", field(&format!("{e:#}"))),
+            );
+            false
+        }
+    }
+}
+
+/// claude parses this process's stdout as the hook's JSON reply, so nothing else may be printed.
+fn approve_plan(raw: &str, log: Option<&DailyLog>) {
+    let Some(reply) = plan_approval(raw, || auto_approve_plan_setting(log)) else {
+        return;
+    };
+    let mut stdout = std::io::stdout().lock();
+    match writeln!(stdout, "{reply}").and_then(|()| stdout.flush()) {
+        Ok(()) => debug_log_to(log, "plan_auto_approved"),
+        Err(e) => debug_log_to(
+            log,
+            &format!("plan_auto_approve_failed error={}", field(&e.to_string())),
+        ),
+    }
+}
+
 fn handle_agent(agent: Agent, log: Option<&DailyLog>) -> Result<()> {
     let raw = read_stdin()?;
+    approve_plan(&raw, log);
     let task_id = env_opt("MONICA_TASK_ID").map(TaskId::from_store);
     let task_run_id = env_opt("MONICA_TASK_RUN_ID").map(TaskRunId::from_store);
     let terminal_tab_id = env_opt("MONICA_TERMINAL_TAB_ID");
@@ -150,7 +193,41 @@ fn handle_agent(agent: Agent, log: Option<&DailyLog>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::invoked_line;
+    use super::{invoked_line, plan_approval};
+
+    const EXIT_PLAN_REQUEST: &str = r#"{"hook_event_name":"PermissionRequest","tool_name":"ExitPlanMode","tool_input":{"plan":"x"}}"#;
+
+    #[test]
+    fn an_exit_plan_request_is_allowed_when_enabled() {
+        let reply = plan_approval(EXIT_PLAN_REQUEST, || true).expect("approval");
+        let parsed: serde_json::Value = serde_json::from_str(reply).unwrap();
+        assert_eq!(
+            parsed,
+            serde_json::json!({
+                "hookSpecificOutput": {
+                    "hookEventName": "PermissionRequest",
+                    "decision": { "behavior": "allow" }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn an_exit_plan_request_falls_through_to_the_dialog_when_disabled() {
+        assert_eq!(plan_approval(EXIT_PLAN_REQUEST, || false), None);
+    }
+
+    #[test]
+    fn other_requests_are_never_approved_and_never_read_settings() {
+        for raw in [
+            r#"{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"rm -rf /"}}"#,
+            r#"{"hook_event_name":"PreToolUse","tool_name":"ExitPlanMode","tool_input":{"plan":"x"}}"#,
+            r#"{"hook_event_name":"PermissionRequest","tool_name":"ExitPlanMode""#,
+            "",
+        ] {
+            assert_eq!(plan_approval(raw, || panic!("settings read for {raw}")), None, "{raw}");
+        }
+    }
 
     #[test]
     fn every_id_reads_back_verbatim() {

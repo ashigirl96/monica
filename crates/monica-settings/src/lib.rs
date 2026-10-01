@@ -20,6 +20,21 @@ pub const DEFAULT_EXTENSION_ORIGIN: &str = "chrome-extension://lencjjlgejlnlgmpc
 pub struct Settings {
     pub translate: TranslateSettings,
     pub notes: NotesSettings,
+    pub claude: ClaudeSettings,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClaudeSettings {
+    pub auto_approve_plan: bool,
+}
+
+impl Default for ClaudeSettings {
+    fn default() -> Self {
+        Self {
+            auto_approve_plan: true,
+        }
+    }
 }
 
 /// notes ドメイン専用の設定。アプリ全体の日付概念には影響させない。
@@ -243,6 +258,41 @@ mod tests {
         let base = temp_base("notes-roundtrip");
         let mut s = Settings::default();
         s.translate.enabled = false;
+        s.notes.day_boundary_hour = 5;
+        s.save_to(&base).unwrap();
+        assert_eq!(Settings::load_from(&base).unwrap(), s);
+    }
+
+    #[test]
+    fn claude_auto_approve_plan_defaults_on() {
+        assert!(Settings::default().claude.auto_approve_plan);
+        let base = temp_base("claude-partial");
+        std::fs::write(
+            base.join(SETTINGS_FILE),
+            r#"{ "translate": { "enabled": false } }"#,
+        )
+        .unwrap();
+        assert!(Settings::load_from(&base).unwrap().claude.auto_approve_plan);
+    }
+
+    #[test]
+    fn claude_auto_approve_plan_can_be_disabled() {
+        let base = temp_base("claude-disabled");
+        std::fs::write(
+            base.join(SETTINGS_FILE),
+            r#"{ "claude": { "auto_approve_plan": false } }"#,
+        )
+        .unwrap();
+        let s = Settings::load_from(&base).unwrap();
+        assert!(!s.claude.auto_approve_plan);
+        assert!(s.translate.enabled);
+    }
+
+    #[test]
+    fn claude_roundtrip_coexists_with_other_sections() {
+        let base = temp_base("claude-roundtrip");
+        let mut s = Settings::default();
+        s.claude.auto_approve_plan = false;
         s.notes.day_boundary_hour = 5;
         s.save_to(&base).unwrap();
         assert_eq!(Settings::load_from(&base).unwrap(), s);

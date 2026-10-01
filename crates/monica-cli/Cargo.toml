@@ -14,6 +14,7 @@ monica-domain.workspace = true
 monica-logfile.workspace = true
 monica-runtime.workspace = true
 monica-paths.workspace = true
+monica-settings.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
 anyhow.workspace = true

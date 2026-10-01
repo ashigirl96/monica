@@ -3042,6 +3042,7 @@ dependencies = [
  "monica-logfile",
  "monica-paths",
  "monica-runtime",
+ "monica-settings",
  "serde_json",
  "tokio",
 ]

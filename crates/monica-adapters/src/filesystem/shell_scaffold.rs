@@ -221,6 +221,11 @@ fn agent_hooks_value(agent: Agent, hook_command: &str) -> Value {
     map.insert("UserPromptSubmit".into(), group());
     map.insert("PreToolUse".into(), tool_wait_groups());
     map.insert("PostToolUse".into(), tool_wait_groups());
+    // A narrow matcher keeps every other approval dialog from waiting on a hook process.
+    map.insert(
+        "PermissionRequest".into(),
+        json!([hook_group(hook_command, "ExitPlanMode")]),
+    );
     map.insert("Stop".into(), group());
     map.insert("SubagentStart".into(), group());
     map.insert("SubagentStop".into(), group());
@@ -399,6 +404,18 @@ mod tests {
     }
 
     #[test]
+    fn agent_hooks_value_claude_routes_only_exit_plan_mode_permission_requests() {
+        let parsed = agent_hooks_value(Agent::Claude, "monica hook claude");
+        assert_eq!(
+            parsed.pointer("/hooks/PermissionRequest"),
+            Some(&json!([{
+                "matcher": "ExitPlanMode",
+                "hooks": [{ "type": "command", "command": "monica hook claude" }]
+            }]))
+        );
+    }
+
+    #[test]
     fn pinned_hook_command_carries_its_own_monica_home() {
         assert_eq!(
             pin_hook_command_base("'/usr/local/bin/monica' hook claude", "/Users/x/monica"),
@@ -500,6 +517,12 @@ mod tests {
                 .pointer("/hooks/SessionStart/0/hooks/0/command")
                 .and_then(Value::as_str),
             Some("monica hook claude")
+        );
+        assert_eq!(
+            parsed
+                .pointer("/hooks/PermissionRequest/0/matcher")
+                .and_then(Value::as_str),
+            Some("ExitPlanMode")
         );
         fs::remove_dir_all(&dir).ok();
     }
