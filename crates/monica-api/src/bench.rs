@@ -87,3 +87,20 @@ impl From<monica_application::TabTaskBinding> for TabTaskBinding {
         }
     }
 }
+
+/// A runspace whose task is closed. Every tab goes except `held_tab_id`, the tab the close was
+/// issued from, which stays until its agent (or shell) is done.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ClosedRunspace {
+    pub runspace_id: String,
+    pub held_tab_id: Option<String>,
+}
+
+impl From<monica_application::ClosedRunspace> for ClosedRunspace {
+    fn from(value: monica_application::ClosedRunspace) -> Self {
+        Self {
+            runspace_id: value.runspace_id.into(),
+            held_tab_id: value.held_tab_id,
+        }
+    }
+}

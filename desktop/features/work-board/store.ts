@@ -4,13 +4,9 @@ import { closeTask, launchTask, openBench, type CloseTaskOutcome } from "@/comma
 import {
   createTaskRunspaceAtom,
   materializePendingLaunchesAtom,
-  removeRunspaceAtom,
-  terminalStateAtom,
+  retireClosedRunspacesAtom,
 } from "@/features/work-bench/store";
-import {
-  flushTerminalStateSaveAtom,
-  loadTerminalStateAtom,
-} from "@/features/work-bench/persistence";
+import { flushTerminalStateSaveAtom } from "@/features/work-bench/persistence";
 import { activeSpaceAtom } from "@/stores/space";
 import { pushErrorToast } from "@/stores/toast";
 import { refreshTaskSummariesAtom } from "@/stores/workboard";
@@ -32,19 +28,14 @@ export const openBenchAtom = atom(null, async (_get, set, taskId: string) => {
 
 export const closeTaskAtom = atom(
   null,
-  async (get, set, taskId: string, force: boolean): Promise<CloseTaskOutcome> => {
-    // Loaded first (a no-op once loaded) so the closed task's runspace is found and torn down
-    // even when closing straight from the board.
-    await set(loadTerminalStateAtom);
+  async (_get, set, taskId: string, force: boolean): Promise<CloseTaskOutcome> => {
     // The backend refuses a pinned bench from the saved layout; a pin toggled moments ago may
     // still be waiting in the debounced save.
     await set(flushTerminalStateSaveAtom);
     const outcome = await closeTask(taskId, force);
     if (outcome.kind === "refused") return outcome;
-    const runspace = get(terminalStateAtom)?.runspaces.find((rs) => rs.taskId === taskId);
-    if (runspace) {
-      set(removeRunspaceAtom, runspace.id, "terminate");
-    }
+    // The poll would get there too; this only spares the wait.
+    await set(retireClosedRunspacesAtom);
     await set(refreshTaskSummariesAtom);
     return outcome;
   },

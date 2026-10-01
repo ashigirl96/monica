@@ -4,12 +4,14 @@ import { atom, type Getter, type Setter } from "jotai";
 import { terminalDetach, terminalTerminate, type TerminalSession } from "@/commands/terminal";
 import {
   attachTerminalTab,
+  closedTaskRunspaces,
   listTabTaskBindings,
   makeMainTaskRun,
   primaryAgentSessionId,
   primaryTabId,
   takePendingLaunches,
   taskShellEnv,
+  type ClosedRunspace,
   type TabTaskBinding,
 } from "@/commands/task";
 import { readRunspacePlan, type PlanPreview } from "@/commands/plan";
@@ -367,6 +369,54 @@ export const removeRunspaceAtom = atom(
     set(terminalStateAtom, { runspaces: remaining, activeRunspaceId: newActive });
   },
 );
+
+// A closed task's runspace goes whole, every tab terminated, except the tab the close was issued
+// from while the backend still holds it. A pinned runspace stays: a pin only leaves via unpin.
+export function retireClosedRunspaces(
+  state: TerminalState,
+  closed: ClosedRunspace[],
+): { state: TerminalState; doomed: TerminalTab[] } {
+  const heldTabByRunspace = new Map(closed.map((c) => [c.runspace_id, c.held_tab_id]));
+  const doomed: TerminalTab[] = [];
+  const runspaces: TerminalRunspace[] = [];
+  for (const rs of state.runspaces) {
+    if (!heldTabByRunspace.has(rs.id) || rs.pinnedTabId) {
+      runspaces.push(rs);
+      continue;
+    }
+    const held = rs.tabs.find((t) => t.id === heldTabByRunspace.get(rs.id));
+    doomed.push(...rs.tabs.filter((t) => t !== held));
+    if (held) runspaces.push({ ...rs, tabs: [held], activeTabId: held.id });
+  }
+  if (doomed.length === 0) return { state, doomed };
+  if (runspaces.length === 0) return { state: initialState(), doomed };
+  const activeSurvived = runspaces.some((rs) => rs.id === state.activeRunspaceId);
+  return {
+    state: {
+      runspaces,
+      activeRunspaceId: activeSurvived ? state.activeRunspaceId : runspaces[0].id,
+    },
+    doomed,
+  };
+}
+
+// Every window applies this to its own layout: a close from the CLI or the board lands in the DB
+// only, and the layout is this window's to rewrite.
+export const retireClosedRunspacesAtom = atom(null, async (get, set) => {
+  if (get(terminalStateAtom) === null) return;
+  let closed: ClosedRunspace[];
+  try {
+    closed = await closedTaskRunspaces(get(resolvedStateAtom).runspaces.map((rs) => rs.id));
+  } catch (e) {
+    warnTerminal("closed runspace retire", e);
+    return;
+  }
+  const { state, doomed } = retireClosedRunspaces(get(resolvedStateAtom), closed);
+  if (doomed.length === 0) return;
+  set(terminalStateAtom, state);
+  await Promise.allSettled(doomed.map(terminateTab));
+  await set(refreshSessionsAtom);
+});
 
 export const activateRunspaceAtom = atom(null, (get, set, rsId: string) => {
   const state = get(resolvedStateAtom);

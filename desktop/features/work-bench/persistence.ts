@@ -5,15 +5,17 @@ import {
   terminalSaveState,
   type TerminalStateSnapshot,
 } from "@/commands/terminal";
-import { listBenchRunspaceMap, taskShellEnv } from "@/commands/task";
+import { closedTaskRunspaces, listBenchRunspaceMap, taskShellEnv } from "@/commands/task";
 import { pushErrorToast } from "@/stores/toast";
 import { MAIN_WINDOW_LABEL, pendingWorkbenchHintAtom, windowLabelAtom } from "@/stores/ui-state";
 import {
   applyHint,
   enrichRunspacesWithEnv,
   initialState,
+  retireClosedRunspaces,
   tabDisplayPath,
   terminalStateAtom,
+  terminateTab,
   warnTerminal,
   type TerminalRunspace,
   type TerminalState,
@@ -96,7 +98,22 @@ export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
         }),
       ]);
       let state = snapshotToState(snap);
+      let liveSessions = sessions;
       if (state && state.runspaces.length > 0) {
+        // Before the layout is shown, so a task closed while the desktop was down never flashes
+        // its runspace back; its sessions leave the list so they never surface as detached while
+        // the terminate lands.
+        const closed = await closedTaskRunspaces(state.runspaces.map((rs) => rs.id)).catch(
+          (e: unknown) => {
+            warnTerminal("closed runspace retire", e);
+            return [];
+          },
+        );
+        const retired = retireClosedRunspaces(state, closed);
+        state = retired.state;
+        void Promise.allSettled(retired.doomed.map(terminateTab));
+        const doomedSessionIds = new Set(retired.doomed.map((t) => t.sessionId));
+        liveSessions = sessions?.filter((s) => !doomedSessionIds.has(s.id)) ?? null;
         const runspaceToTask = new Map(benchMap.map(([rsId, taskId]) => [rsId, taskId]));
         const taskIds = [
           ...new Set(
@@ -118,11 +135,13 @@ export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
           state = applyHint(state, hint);
         }
         set(terminalStateAtom, state);
-        if (windowLabel === MAIN_WINDOW_LABEL && sessions) applySessionList(get, set, sessions);
+        if (windowLabel === MAIN_WINDOW_LABEL && liveSessions)
+          applySessionList(get, set, liveSessions);
         void set(resolveWorktreeInfoAtom);
         return;
       }
-      if (windowLabel === MAIN_WINDOW_LABEL && sessions) applySessionList(get, set, sessions);
+      if (windowLabel === MAIN_WINDOW_LABEL && liveSessions)
+        applySessionList(get, set, liveSessions);
     } catch (e) {
       warnTerminal("load", e);
       set(persistenceSuspendedAtom, true);

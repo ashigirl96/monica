@@ -18,7 +18,7 @@ mod task_run;
 mod terminal;
 
 pub use asset::{Asset as ApiAsset, ImportAsset as ApiImportAsset};
-pub use bench::{AttachTabResult, PrepareTaskResult, RunTaskResult, TabTaskBinding, TaskBench};
+pub use bench::{AttachTabResult, ClosedRunspace, PrepareTaskResult, RunTaskResult, TabTaskBinding, TaskBench};
 pub use error::{ApiError, ApiErrorCode};
 pub use explanation::{Explanation as ApiExplanation, ExplanationMode as ApiExplanationMode};
 pub use github::{GithubIssueState, GithubPullRequestRef};

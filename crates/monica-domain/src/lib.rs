@@ -8,6 +8,7 @@
 
 mod agent_signal;
 mod branch;
+mod close_hold;
 mod error;
 mod explanation;
 mod external_reference;
@@ -30,6 +31,7 @@ pub use agent_signal::{
     SignalKind, TransitionRefusal,
 };
 pub use branch::{branch_name, monica_number, worktree_path_for};
+pub use close_hold::{CloseHold, CloseHoldRelease};
 pub use error::DomainError;
 pub use explanation::{Explanation, ExplanationMode, NewExplanation, repo_name_from_cwd};
 pub use external_reference::{ExternalIssue, ExternalReference, RefType};

@@ -3,7 +3,7 @@ use rusqlite::{params, Connection};
 
 use crate::SqliteStore;
 use monica_application::WorkbenchStore;
-use monica_domain::{RunspaceId, TaskId};
+use monica_domain::{CloseHold, CloseHoldRelease, RunspaceId, TaskId};
 
 pub(super) fn get_bench_for_task(
     conn: &Connection,
@@ -49,6 +49,58 @@ pub(super) fn update_bench_cwd(conn: &Connection, task_id: &TaskId, cwd: &str) -
     Ok(())
 }
 
+pub(super) fn delete_bench_for_task(conn: &Connection, task_id: &TaskId) -> Result<()> {
+    conn.execute(
+        "DELETE FROM \"_TaskToRunspace\" WHERE task_id = ?1",
+        params![task_id.as_str()],
+    )?;
+    Ok(())
+}
+
+pub(super) fn list_close_holds(conn: &Connection) -> Result<Vec<CloseHold>> {
+    let mut stmt = conn.prepare(
+        "SELECT task_id, terminal_tab_id, terminal_session_id, release_on
+           FROM task_close_holds ORDER BY task_id",
+    )?;
+    let mut rows = stmt.query([])?;
+    let mut holds = Vec::new();
+    while let Some(row) = rows.next()? {
+        let release: String = row.get(3)?;
+        holds.push(CloseHold {
+            task_id: TaskId::from_store(row.get(0)?),
+            terminal_tab_id: row.get(1)?,
+            terminal_session_id: row.get(2)?,
+            release: release.parse::<CloseHoldRelease>()?,
+        });
+    }
+    Ok(holds)
+}
+
+pub(super) fn replace_close_hold(
+    conn: &Connection,
+    task_id: &TaskId,
+    hold: Option<&CloseHold>,
+) -> Result<()> {
+    match hold {
+        Some(hold) => conn.execute(
+            "INSERT OR REPLACE INTO task_close_holds
+               (task_id, terminal_tab_id, terminal_session_id, release_on)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                task_id.as_str(),
+                hold.terminal_tab_id,
+                hold.terminal_session_id,
+                hold.release.as_str()
+            ],
+        )?,
+        None => conn.execute(
+            "DELETE FROM task_close_holds WHERE task_id = ?1",
+            params![task_id.as_str()],
+        )?,
+    };
+    Ok(())
+}
+
 impl WorkbenchStore for SqliteStore {
     fn get_bench_for_task(&self, task_id: &TaskId) -> Result<Option<(RunspaceId, String)>> {
         get_bench_for_task(self.conn(), task_id)
@@ -69,5 +121,17 @@ impl WorkbenchStore for SqliteStore {
 
     fn update_bench_cwd(&self, task_id: &TaskId, cwd: &str) -> Result<()> {
         update_bench_cwd(self.conn(), task_id, cwd)
+    }
+
+    fn delete_bench_for_task(&self, task_id: &TaskId) -> Result<()> {
+        delete_bench_for_task(self.conn(), task_id)
+    }
+
+    fn list_close_holds(&self) -> Result<Vec<CloseHold>> {
+        list_close_holds(self.conn())
+    }
+
+    fn replace_close_hold(&self, task_id: &TaskId, hold: Option<&CloseHold>) -> Result<()> {
+        replace_close_hold(self.conn(), task_id, hold)
     }
 }

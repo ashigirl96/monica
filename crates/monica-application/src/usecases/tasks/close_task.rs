@@ -6,7 +6,7 @@ use super::TabIdentity;
 use crate::github::GithubPullRequestStatus;
 use crate::observability::{task_status, Line, LIFECYCLE};
 use crate::ports::{PendingLaunchStore, TaskBoardQuery, TerminalSessionRepository, WorkbenchStore};
-use crate::prelude::{Task, TaskId, TaskRun, TaskRunId, TaskRunStatus};
+use crate::prelude::{CloseHold, Task, TaskId, TaskRun, TaskRunId, TaskRunStatus};
 use crate::usecases::query::find_task_summary;
 use crate::{ApplicationError, ApplicationResult};
 
@@ -119,7 +119,13 @@ where
     repos.remove_pending_launches_for_task(id)?;
     let removed_branches = cleanup_runs(repos, git, &task, &runs)?;
     crate::usecases::runs::reap_worktree_trash(repos, git);
+    // Written before the task reads as closed, or a Workbench poll in between would tear down the
+    // caller's tab with the rest; replaced even with nothing so a hold left by an earlier close
+    // that failed past this point cannot spare a stranger's tab.
+    let hold = caller_hold(repos, id, options.caller)?;
+    repos.replace_close_hold(id, hold.as_ref())?;
     let closed = repos.mark_task_closed(id)?;
+    repos.delete_bench_for_task(id)?;
     task_status(id, task.status, closed.status, "close_task");
     Ok(CloseTaskOutcome::Closed(Box::new(CloseTaskReport {
         task: closed,
@@ -194,6 +200,22 @@ where
         }
     }
     Ok(blockers)
+}
+
+fn caller_hold<R>(repos: &R, id: &TaskId, caller: &TabIdentity) -> ApplicationResult<Option<CloseHold>>
+where
+    R: TerminalSessionRepository,
+{
+    let session = match (caller.terminal_session_id.as_deref(), caller.terminal_tab_id.as_deref()) {
+        (Some(session_id), _) => repos.get_terminal_session(session_id)?,
+        (None, Some(tab_id)) => repos.latest_terminal_session_for_tab(tab_id)?,
+        (None, None) => None,
+    };
+    let Some(session) = session else { return Ok(None) };
+    let Some(tab_id) = caller.terminal_tab_id.clone().or_else(|| session.tab_id.clone()) else {
+        return Ok(None);
+    };
+    Ok(Some(CloseHold::for_session(id.clone(), tab_id, &session)))
 }
 
 fn has_merged_pull_request<R>(repos: &R, id: &TaskId) -> ApplicationResult<bool>

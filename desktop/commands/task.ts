@@ -8,6 +8,7 @@ export type {
   GithubPullRequestRef,
   TabTaskBinding,
   CloseTaskOutcome,
+  ClosedRunspace,
 } from "./bindings";
 
 import { unwrap } from "./unwrap";
@@ -34,6 +35,10 @@ export function createRawTask(title: string, projectId: string) {
 
 export function listBenchRunspaceMap() {
   return unwrap(commands.listBenchRunspaceMap());
+}
+
+export function closedTaskRunspaces(runspaceIds: string[]) {
+  return unwrap(commands.closedTaskRunspaces(runspaceIds));
 }
 
 export function taskShellEnv(taskId: string) {

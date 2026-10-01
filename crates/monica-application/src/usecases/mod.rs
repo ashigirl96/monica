@@ -16,7 +16,7 @@ pub use github::{
 pub use runs::{HookContext, HookIdentity, HookReport, HookResolveRoute, ResolveSkip};
 pub use tasks::{
     close_refusal_forceable, AttachSessionReport, CloseBlocker, CloseTaskOptions,
-    CloseTaskOutcome, CloseTaskReport, CurrentTaskReport, CurrentTaskSource, TabIdentity,
+    ClosedRunspace, CloseTaskOutcome, CloseTaskReport, CurrentTaskReport, CurrentTaskSource, TabIdentity,
     TabTaskBinding,
 };
 pub use terminal::{DaemonSessionView, TerminalSessionUpdate};

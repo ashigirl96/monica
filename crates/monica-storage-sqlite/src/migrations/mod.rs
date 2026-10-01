@@ -43,6 +43,7 @@ migrations!(
     v50,
     v51,
     v52,
+    v53,
 );
 
 /// The schema transition this connection observed. `from` is read outside the migration's own

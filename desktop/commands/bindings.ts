@@ -110,6 +110,10 @@ export const commands = {
     ),
   listTabTaskBindings: () =>
     typedError<TabTaskBinding[], ApiError>(__TAURI_INVOKE("list_tab_task_bindings")),
+  closedTaskRunspaces: (runspaceIds: string[]) =>
+    typedError<ClosedRunspace[], ApiError>(
+      __TAURI_INVOKE("closed_task_runspaces", { runspaceIds }),
+    ),
   /**
    *  Read the plan held by the run driving the given Workbench tab. `Ok(None)` covers a shell tab, a
    *  run that never planned, and a plan file since deleted — all "nothing to preview" to the caller.
@@ -212,6 +216,15 @@ export type CloseTaskOutcome =
       /**  Every blocker is forceable, so a forced retry would close. */
       forceable: boolean;
     };
+
+/**
+ *  A runspace whose task is closed. Every tab goes except `held_tab_id`, the tab the close was
+ *  issued from, which stays until its agent (or shell) is done.
+ */
+export type ClosedRunspace = {
+  runspace_id: string;
+  held_tab_id: string | null;
+};
 
 export type DisplayStatus =
   | "ready"
