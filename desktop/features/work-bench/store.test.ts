@@ -476,6 +476,45 @@ describe("saveTerminalStateAtom", () => {
     expect(getSaveCalls()).toBe(1);
   });
 
+  test("flush waits for a save the debounce already sent", async () => {
+    let finishSave = () => {};
+    let saveCalls = 0;
+    mock.module("@/commands/terminal", () => ({
+      terminalLoadState: () => Promise.resolve(loadStateResult),
+      terminalListSessions: () => Promise.resolve(sessionsResult ?? []),
+      terminalDetach: () => Promise.resolve(),
+      terminalSaveState: () => {
+        saveCalls++;
+        return new Promise<void>((resolve) => {
+          finishSave = resolve;
+        });
+      },
+      terminalTerminate: () => Promise.resolve(),
+    }));
+    const { createStore: cs } = await import("jotai");
+    const { windowLabelAtom: wlAtom } = await import("@/stores/ui-state");
+    const { terminalStateAtom: stateAtom } = await import("./store");
+    const { saveTerminalStateAtom: saveAtom, flushTerminalStateSaveAtom } =
+      await import("./persistence");
+    const store = cs();
+    store.set(wlAtom, "main");
+    store.set(stateAtom, makeState([makeRunspace("rs")]));
+
+    store.set(saveAtom);
+    await waitFor(() => saveCalls > 0);
+    let flushed = false;
+    const flush = store.set(flushTerminalStateSaveAtom).then(() => {
+      flushed = true;
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(flushed).toBe(false);
+
+    finishSave();
+    await flush;
+    expect(flushed).toBe(true);
+    expect(saveCalls).toBe(1);
+  });
+
   test("flush rejects when the pending save fails", async () => {
     mock.module("@/commands/terminal", () => ({
       terminalLoadState: () => Promise.resolve(loadStateResult),

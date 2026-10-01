@@ -142,6 +142,8 @@ export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
 
 // Holds the write itself, not just the timer, so a flush can run it early.
 const pendingSaveAtom = atom<{ timer: number; write: () => Promise<void> } | null>(null);
+// A save already sent but not yet acknowledged; a flush has to wait for it too.
+const inFlightSaveAtom = atom<Promise<void> | null>(null);
 
 export const saveTerminalStateAtom = atom(null, (get, set) => {
   const current = get(terminalStateAtom);
@@ -152,7 +154,13 @@ export const saveTerminalStateAtom = atom(null, (get, set) => {
   const snapshot = stateToSnapshot(current);
   const write = () => {
     set(pendingSaveAtom, null);
-    return terminalSaveState(windowLabel, snapshot);
+    const saving = terminalSaveState(windowLabel, snapshot);
+    set(inFlightSaveAtom, saving);
+    const settle = () => {
+      if (get(inFlightSaveAtom) === saving) set(inFlightSaveAtom, null);
+    };
+    saving.then(settle, settle);
+    return saving;
   };
   const timer = window.setTimeout(() => {
     write().catch((e) => warnTerminal("save", e));
@@ -164,7 +172,10 @@ export const saveTerminalStateAtom = atom(null, (get, set) => {
 // proceed on the stale one.
 export const flushTerminalStateSaveAtom = atom(null, async (get) => {
   const pending = get(pendingSaveAtom);
-  if (!pending) return;
-  clearTimeout(pending.timer);
-  await pending.write();
+  if (pending) {
+    clearTimeout(pending.timer);
+    await pending.write();
+    return;
+  }
+  await get(inFlightSaveAtom);
 });
