@@ -2215,6 +2215,34 @@ fn terminal_state_round_trips_pinned_tab_id_and_drops_dangling() {
     assert_eq!(loaded.runspaces[0].pinned_tab_id.as_deref(), Some("tab-1"));
     assert_eq!(loaded.runspaces[1].pinned_tab_id, None);
     assert_eq!(loaded.runspaces[2].pinned_tab_id, None);
+
+    assert!(db.runspace_has_pinned_tab(&rsid("rs-pinned")).unwrap());
+    assert!(!db.runspace_has_pinned_tab(&rsid("rs-dangling")).unwrap());
+    assert!(!db.runspace_has_pinned_tab(&rsid("rs-unpinned")).unwrap());
+    assert!(!db.runspace_has_pinned_tab(&rsid("rs-absent")).unwrap());
+}
+
+#[test]
+fn runspace_pin_is_found_in_any_window() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let snapshot = |tab_id: &str, pinned: bool| TerminalStateSnapshot {
+        runspaces: vec![TerminalRunspaceRow {
+            id: rsid("bench-MON-1"),
+            sort_order: 0,
+            pinned_tab_id: pinned.then(|| tab_id.to_string()),
+            tabs: vec![TerminalTabRow {
+                id: tab_id.into(),
+                cwd: "/tmp".into(),
+                title: "one".into(),
+                sort_order: 0,
+                terminal_session_id: None,
+            }],
+        }],
+    };
+    db.save_terminal_state("main", &snapshot("tab-main", false)).unwrap();
+    db.save_terminal_state("second", &snapshot("tab-second", true)).unwrap();
+
+    assert!(db.runspace_has_pinned_tab(&rsid("bench-MON-1")).unwrap());
 }
 
 #[test]

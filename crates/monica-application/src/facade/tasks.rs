@@ -1,7 +1,7 @@
 use super::{Backend, Monica};
 use crate::usecases::tasks::{
-    AttachSessionReport, CloseTaskReport, CurrentTaskReport, MakeMainOutcome, TabIdentity,
-    TabTaskBinding,
+    AttachSessionReport, CloseTaskOptions, CloseTaskOutcome, CurrentTaskReport, MakeMainOutcome,
+    TabIdentity, TabTaskBinding,
 };
 use crate::prelude::{Agent, DisplayStatus, Event, Task, TaskId, TaskRunStatus};
 use crate::{ApplicationEvent, ApplicationResult, TaskSummaryRow};
@@ -17,9 +17,13 @@ impl<B: Backend> TaskService<'_, B> {
         crate::usecases::tasks::create_raw_task(&mut self.m.repos, title, project_id)
     }
 
-    pub fn close_task(&mut self, id: &TaskId) -> ApplicationResult<CloseTaskReport> {
+    pub fn close_task(
+        &mut self,
+        id: &TaskId,
+        options: CloseTaskOptions<'_>,
+    ) -> ApplicationResult<CloseTaskOutcome> {
         let Monica { repos, git, .. } = &mut *self.m;
-        crate::usecases::tasks::close_task(repos, git, id)
+        crate::usecases::tasks::close_task(repos, git, id, options)
     }
 
     /// Connect the agent session running in a terminal tab to an existing task, as a run with no

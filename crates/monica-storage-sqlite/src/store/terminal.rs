@@ -63,6 +63,24 @@ impl SqliteStore {
         })
     }
 
+    /// Across every window, and only for a pin naming a tab that still exists — the same dangling
+    /// rule `load_terminal_state` applies.
+    pub fn runspace_has_pinned_tab(&self, runspace_id: &RunspaceId) -> Result<bool> {
+        let pinned = self.conn().query_row(
+            "SELECT EXISTS (
+               SELECT 1 FROM terminal_runspaces r
+                 JOIN terminal_tabs t
+                   ON t.id = r.pinned_tab_id
+                  AND t.runspace_id = r.id
+                  AND t.window_label = r.window_label
+                WHERE r.id = ?1
+             )",
+            params![runspace_id.as_str()],
+            |row| row.get::<_, bool>(0),
+        )?;
+        Ok(pinned)
+    }
+
     pub fn save_terminal_state(
         &mut self,
         window_label: &str,

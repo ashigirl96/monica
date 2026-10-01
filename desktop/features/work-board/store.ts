@@ -1,15 +1,18 @@
 import { atom } from "jotai";
 import type { Agent, RunMode } from "@/commands/bindings";
-import { closeTask, launchTask, openBench } from "@/commands/task";
+import { closeTask, launchTask, openBench, type CloseTaskOutcome } from "@/commands/task";
 import {
   createTaskRunspaceAtom,
   materializePendingLaunchesAtom,
   removeRunspaceAtom,
   terminalStateAtom,
 } from "@/features/work-bench/store";
-import { loadTerminalStateAtom } from "@/features/work-bench/persistence";
+import {
+  flushTerminalStateSaveAtom,
+  loadTerminalStateAtom,
+} from "@/features/work-bench/persistence";
 import { activeSpaceAtom } from "@/stores/space";
-import { pushErrorToast, pushInfoToast } from "@/stores/toast";
+import { pushErrorToast } from "@/stores/toast";
 import { refreshTaskSummariesAtom } from "@/stores/workboard";
 
 // These depend on the work-bench feature because acting on a task drives its terminal
@@ -27,25 +30,25 @@ export const openBenchAtom = atom(null, async (_get, set, taskId: string) => {
   set(activeSpaceAtom, "work-bench");
 });
 
-export const closeTaskAtom = atom(null, async (get, set, taskId: string) => {
-  // The pin lives in the terminal state, which may not be loaded yet when closing
-  // straight from the board — load it first (a no-op when already loaded) so a
-  // persisted pin is not overlooked.
-  await set(loadTerminalStateAtom);
-  const state = get(terminalStateAtom);
-  const runspace = state?.runspaces.find((rs) => rs.taskId === taskId);
-  // Backend close_task rips the task's worktrees/branches before the runspace guard
-  // below could ever run, so a pinned session blocks the whole close up front.
-  if (runspace?.pinnedTabId) {
-    pushInfoToast("Task has a pinned session — unpin it before closing");
-    return;
-  }
-  await closeTask(taskId);
-  if (runspace) {
-    set(removeRunspaceAtom, runspace.id, "terminate");
-  }
-  await set(refreshTaskSummariesAtom);
-});
+export const closeTaskAtom = atom(
+  null,
+  async (get, set, taskId: string, force: boolean): Promise<CloseTaskOutcome> => {
+    // Loaded first (a no-op once loaded) so the closed task's runspace is found and torn down
+    // even when closing straight from the board.
+    await set(loadTerminalStateAtom);
+    // The backend refuses a pinned bench from the saved layout; a pin toggled moments ago may
+    // still be waiting in the debounced save.
+    await set(flushTerminalStateSaveAtom);
+    const outcome = await closeTask(taskId, force);
+    if (outcome.kind === "refused") return outcome;
+    const runspace = get(terminalStateAtom)?.runspaces.find((rs) => rs.taskId === taskId);
+    if (runspace) {
+      set(removeRunspaceAtom, runspace.id, "terminate");
+    }
+    await set(refreshTaskSummariesAtom);
+    return outcome;
+  },
+);
 
 // A worktree Run blocks in launch_task until setup finishes; a second press meanwhile would only
 // surface the backend's "already has an active run" conflict, so it is swallowed here.

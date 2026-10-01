@@ -10,7 +10,10 @@ mod tab_identity;
 pub use attach_session::{
     attach_terminal_session_to_task, list_tab_task_bindings, AttachSessionReport, TabTaskBinding,
 };
-pub use close_task::{close_task, CloseTaskReport};
+pub use close_task::{
+    close_refusal_forceable, close_task, CloseBlocker, CloseTaskOptions, CloseTaskOutcome,
+    CloseTaskReport,
+};
 pub use current_task::{resolve_current_task, CurrentTaskReport, CurrentTaskSource};
 pub use tab_identity::TabIdentity;
 pub use create_raw_task::create_raw_task;

@@ -15,6 +15,7 @@ import {
   menuAtom,
   navigateSubmenuAtom,
   setMenuItemIndexAtom,
+  type CloseRefusal,
   type MenuState,
 } from "@/features/work-board/nav";
 
@@ -31,8 +32,15 @@ function MenuPopover({ menu }: { menu: MenuState }) {
   if (!task) return null;
 
   return (
-    <PopoverMenu anchor={menu.anchor} onClose={() => setMenu(null)}>
-      {menu.submenu?.kind === "run" ? (
+    <PopoverMenu
+      anchor={menu.anchor}
+      onClose={() => setMenu(null)}
+      // The reasons carry worktree paths; the narrow item width would break them every few chars.
+      className={menu.submenu?.kind === "close-refused" ? "w-72" : undefined}
+    >
+      {menu.submenu?.kind === "close-refused" ? (
+        <CloseRefusedSubmenu refusal={menu.submenu.refusal} />
+      ) : menu.submenu?.kind === "run" ? (
         <RunSubmenu runIndex={menu.submenu.index} />
       ) : menu.submenu?.kind === "open" ? (
         <OpenSubmenu openIndex={menu.submenu.index} targets={openTargets(task)} />
@@ -139,6 +147,55 @@ function RunSubmenu({ runIndex }: { runIndex: number }) {
           </button>
         );
       })}
+    </>
+  );
+}
+
+function CloseRefusedSubmenu({ refusal }: { refusal: CloseRefusal }) {
+  const navigate = useSetAtom(navigateSubmenuAtom);
+  const executeItem = useSetAtom(executeMenuItemAtom);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => navigate({ type: "exit" })}
+        className="group flex w-full items-center justify-between rounded px-2 py-1 text-left text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <span className="flex items-center gap-1">
+          <span aria-hidden className="transition-transform group-hover:-translate-x-0.5">
+            ‹
+          </span>
+          <span className="font-medium">Can&apos;t close</span>
+        </span>
+        <span className="font-mono text-[10px] opacity-60">esc</span>
+      </button>
+      <div className="my-1 h-px bg-border" />
+      <ul className="flex flex-col gap-1 px-2 py-1">
+        {refusal.blockers.map((blocker) => (
+          <li
+            key={blocker.message}
+            className="text-[11px] leading-snug break-words text-popover-foreground"
+          >
+            {blocker.message}
+          </li>
+        ))}
+      </ul>
+      <div className="my-1 h-px bg-border" />
+      {refusal.forceable ? (
+        <button
+          type="button"
+          onClick={() => executeItem()}
+          className="flex w-full items-center justify-between rounded bg-destructive/15 px-2 py-1 text-left text-[12px] text-destructive"
+        >
+          <span>Force close</span>
+          <span className="font-mono text-[10px] text-muted-foreground">enter</span>
+        </button>
+      ) : (
+        <p className="px-2 py-1 text-[11px] text-muted-foreground">
+          Unpin the tab in the bench to close.
+        </p>
+      )}
     </>
   );
 }

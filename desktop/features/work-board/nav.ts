@@ -2,7 +2,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { atom, type Getter } from "jotai";
 import { queryClientAtom } from "jotai-tanstack-query";
 import type { Agent, RunMode } from "@/commands/bindings";
-import type { TaskSummaryRow } from "@/commands/task";
+import type { CloseTaskOutcome, TaskSummaryRow } from "@/commands/task";
 import type { PopoverAnchor } from "@/components/popover-menu";
 import { openTargets } from "@/lib/github-targets";
 import { closeTaskAtom, openBenchAtom, runTaskAtom } from "@/features/work-board/store";
@@ -35,7 +35,12 @@ type MenuItemId = "prepare" | "run" | "bench" | "open" | "close";
 
 export type MenuAnchor = PopoverAnchor;
 
-export type Submenu = { kind: "open"; index: number } | { kind: "run"; index: number };
+export type CloseRefusal = Extract<CloseTaskOutcome, { kind: "refused" }>;
+
+export type Submenu =
+  | { kind: "open"; index: number }
+  | { kind: "run"; index: number }
+  | { kind: "close-refused"; refusal: CloseRefusal };
 
 export type MenuState = {
   taskId: string;
@@ -251,7 +256,7 @@ export const requestCloseAtom = atom(null, (get, set, anchor: MenuAnchor | null)
   }
   if (MENU_ITEMS[menu.itemIndex].id === "close" && menu.confirmingClose) {
     set(menuAtom, null);
-    void set(closeFocusedTaskAtom, menu.taskId);
+    void set(closeFocusedTaskAtom, { taskId: menu.taskId, anchor: menu.anchor, force: false });
   } else {
     set(menuAtom, { ...menu, itemIndex: CLOSE_INDEX, confirmingClose: true });
   }
@@ -268,6 +273,12 @@ export const executeMenuItemAtom = atom(null, (get, set) => {
   }
   if (menu.submenu?.kind === "run") {
     set(executeRunAtom);
+    return;
+  }
+  if (menu.submenu?.kind === "close-refused") {
+    if (!menu.submenu.refusal.forceable) return;
+    set(menuAtom, null);
+    void set(closeFocusedTaskAtom, { taskId: menu.taskId, anchor: menu.anchor, force: true });
     return;
   }
   const item = MENU_ITEMS[menu.itemIndex];
@@ -288,7 +299,7 @@ export const executeMenuItemAtom = atom(null, (get, set) => {
     return;
   }
   set(menuAtom, null);
-  void set(closeFocusedTaskAtom, menu.taskId);
+  void set(closeFocusedTaskAtom, { taskId: menu.taskId, anchor: menu.anchor, force: false });
 });
 
 type SubmenuKind = "open" | "run";
@@ -346,7 +357,7 @@ const exitSubmenuAtom = atom(null, (get, set) => {
 
 const moveSubmenuAtom = atom(null, (get, set, direction: "up" | "down") => {
   const menu = get(menuAtom);
-  if (menu === null || menu.submenu === null) return;
+  if (menu === null || menu.submenu === null || menu.submenu.kind === "close-refused") return;
   const next = menu.submenu.index + (direction === "up" ? -1 : 1);
   let maxCount: number;
   if (menu.submenu.kind === "open") {
@@ -362,7 +373,8 @@ const moveSubmenuAtom = atom(null, (get, set, direction: "up" | "down") => {
 
 const setSubmenuIndexAtom = atom(null, (get, set, index: number) => {
   const menu = get(menuAtom);
-  if (menu === null || menu.submenu === null || menu.submenu.index === index) return;
+  if (menu === null || menu.submenu === null || menu.submenu.kind === "close-refused") return;
+  if (menu.submenu.index === index) return;
   set(menuAtom, { ...menu, submenu: { ...menu.submenu, index } });
 });
 
@@ -429,11 +441,25 @@ const executeOpenAtom = atom(null, (get, set) => {
   void openUrl(target.url);
 });
 
-const closeFocusedTaskAtom = atom(null, async (get, set, taskId: string) => {
+type CloseRequest = { taskId: string; anchor: MenuAnchor; force: boolean };
+
+const closeFocusedTaskAtom = atom(null, async (get, set, request: CloseRequest) => {
+  const { taskId, anchor, force } = request;
   // The menu only opens on the focused card, so its position is the closed one.
   const pos = get(focusedPositionAtom);
 
-  await set(closeTaskAtom, taskId);
+  const outcome = await set(closeTaskAtom, taskId, force);
+  if (outcome.kind === "refused") {
+    // Reopened where the close was asked for, so the reasons — and Force close — sit on the card.
+    set(menuAtom, {
+      taskId,
+      anchor,
+      itemIndex: CLOSE_INDEX,
+      confirmingClose: false,
+      submenu: { kind: "close-refused", refusal: outcome },
+    });
+    return;
+  }
 
   if (pos !== null) {
     // columnTasksAtom can still include the just-closed card: invalidateQueries refetched

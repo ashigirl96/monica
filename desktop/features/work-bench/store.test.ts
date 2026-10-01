@@ -1,5 +1,6 @@
 /// <reference types="bun" />
 import { beforeEach, describe, expect, mock, test } from "bun:test";
+import type { CloseTaskOutcome } from "@/commands/task";
 import type { TerminalRunspace, TerminalState } from "./store";
 
 const { enrichRunspacesWithEnv, applyHint, moveTabToRunspace, planTabMoves } =
@@ -411,7 +412,11 @@ describe("loadTerminalStateAtom", () => {
 
 type SavedSnapshot = { runspaces: { id: string; pinned_tab_id: string | null }[] };
 
-async function setupSaveTest(label: string, state?: TerminalState) {
+async function setupSaveTest(
+  label: string,
+  state?: TerminalState,
+  save: () => Promise<void> = () => Promise.resolve(),
+) {
   let saveCalls = 0;
   let saved: SavedSnapshot | undefined;
   mock.module("@/commands/terminal", () => ({
@@ -421,7 +426,7 @@ async function setupSaveTest(label: string, state?: TerminalState) {
     terminalSaveState: (_label: string, snapshot: SavedSnapshot) => {
       saveCalls++;
       saved = snapshot;
-      return Promise.resolve();
+      return save();
     },
     terminalTerminate: () => Promise.resolve(),
   }));
@@ -461,6 +466,92 @@ describe("saveTerminalStateAtom", () => {
 
     await waitFor(() => getSaveCalls() > 0);
     expect(getSaveCalls()).toBe(1);
+  });
+
+  test("flush writes the pending save now and only once", async () => {
+    const { store, saveAtom, getSaveCalls } = await setupSaveTest("main");
+    const { flushTerminalStateSaveAtom } = await import("./persistence");
+
+    store.set(saveAtom);
+    await store.set(flushTerminalStateSaveAtom);
+    expect(getSaveCalls()).toBe(1);
+
+    await new Promise((r) => setTimeout(r, 600));
+    expect(getSaveCalls()).toBe(1);
+  });
+
+  test("flush waits for a save the debounce already sent", async () => {
+    let finishSave = () => {};
+    const { store, saveAtom, getSaveCalls } = await setupSaveTest(
+      "main",
+      undefined,
+      () =>
+        new Promise<void>((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    const { flushTerminalStateSaveAtom } = await import("./persistence");
+
+    store.set(saveAtom);
+    await waitFor(() => getSaveCalls() > 0);
+    let flushed = false;
+    const flush = store.set(flushTerminalStateSaveAtom).then(() => {
+      flushed = true;
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(flushed).toBe(false);
+
+    finishSave();
+    await flush;
+    expect(flushed).toBe(true);
+    expect(getSaveCalls()).toBe(1);
+  });
+
+  test("a later save waits for the one already in flight", async () => {
+    const finishers: (() => void)[] = [];
+    const { store, saveAtom, getSaveCalls } = await setupSaveTest(
+      "main",
+      undefined,
+      () => new Promise<void>((resolve) => finishers.push(resolve)),
+    );
+    const { flushTerminalStateSaveAtom } = await import("./persistence");
+
+    store.set(saveAtom);
+    await waitFor(() => getSaveCalls() > 0);
+    store.set(saveAtom);
+    const flush = store.set(flushTerminalStateSaveAtom);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(getSaveCalls()).toBe(1);
+
+    finishers[0]();
+    await waitFor(() => getSaveCalls() === 2);
+    finishers[1]();
+    await flush;
+  });
+
+  test("a pin change is saved without waiting out the debounce", async () => {
+    const { store, saveAtom, getSaveCalls, getSaved } = await setupSaveTest("main");
+    const { terminalStateAtom: stateAtom } = await import("./store");
+
+    store.set(saveAtom);
+    await waitFor(() => getSaveCalls() === 1);
+    store.set(stateAtom, makeState([makeRunspace("rs", { pinnedTabId: "rs-tab" })]));
+    store.set(saveAtom);
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(getSaveCalls()).toBe(2);
+    expect(getSaved()?.runspaces[0].pinned_tab_id).toBe("rs-tab");
+  });
+
+  test("flush rejects when the pending save fails", async () => {
+    const { store, saveAtom } = await setupSaveTest("main", undefined, () =>
+      Promise.reject(new Error("disk full")),
+    );
+    const { flushTerminalStateSaveAtom } = await import("./persistence");
+
+    store.set(saveAtom);
+
+    await expect(store.set(flushTerminalStateSaveAtom)).rejects.toThrow("disk full");
   });
 
   test("does not persist the fallback layout after a failed load", async () => {
@@ -763,18 +854,24 @@ describe("tabExitedAtom", () => {
   });
 });
 
-describe("closeTaskAtom pin guard", () => {
-  async function setupCloseTaskTest(pinnedTabId?: string) {
-    const closedIds: string[] = [];
+describe("closeTaskAtom", () => {
+  const REFUSED: CloseTaskOutcome = {
+    kind: "refused",
+    blockers: [{ message: "a tab in this task's bench is pinned", forceable: false }],
+    forceable: false,
+  };
+
+  async function setupCloseTaskTest(outcome: CloseTaskOutcome, pinnedTabId?: string) {
+    const calls: { id: string; force: boolean }[] = [];
     mock.module("@/commands/task", () => ({
       listBenchRunspaceMap: () => Promise.resolve(benchMapResult),
       taskShellEnv: (tid: string) => Promise.resolve(shellEnvResult.get(tid) ?? []),
       makeMainTaskRun: () => Promise.resolve(false),
       primaryTabId: () => Promise.resolve(null),
       openBench: () => Promise.resolve({ runspace_id: "", task_id: "", cwd: "", env: [] }),
-      closeTask: (id: string) => {
-        closedIds.push(id);
-        return Promise.resolve();
+      closeTask: (id: string, force: boolean) => {
+        calls.push({ id, force });
+        return Promise.resolve(outcome);
       },
       // mock.module is process-global, so this re-mock must keep serving the shared fixture or
       // the materialize tests below see an empty queue.
@@ -795,25 +892,29 @@ describe("closeTaskAtom pin guard", () => {
       stateAtom,
       makeState([makeRunspace("bench-task-a", { taskId: "task-a", pinnedTabId })]),
     );
-    return { store, stateAtom, closeTaskAtom, closedIds };
+    return { store, stateAtom, closeTaskAtom, calls };
   }
 
-  test("blocks the backend close while the task's runspace is pinned", async () => {
-    const { store, stateAtom, closeTaskAtom, closedIds } =
-      await setupCloseTaskTest("bench-task-a-tab");
+  test("leaves the pin to the backend and keeps the runspace when it refuses", async () => {
+    const { store, stateAtom, closeTaskAtom, calls } = await setupCloseTaskTest(
+      REFUSED,
+      "bench-task-a-tab",
+    );
 
-    await store.set(closeTaskAtom, "task-a");
+    const outcome = await store.set(closeTaskAtom, "task-a", false);
 
-    expect(closedIds).toEqual([]);
+    expect(calls).toEqual([{ id: "task-a", force: false }]);
+    expect(outcome).toEqual(REFUSED);
     expect(store.get(stateAtom)!.runspaces).toHaveLength(1);
   });
 
-  test("closes normally when the task's runspace is not pinned", async () => {
-    const { store, stateAtom, closeTaskAtom, closedIds } = await setupCloseTaskTest();
+  test("tears the runspace down once the backend closes the task", async () => {
+    const { store, stateAtom, closeTaskAtom, calls } = await setupCloseTaskTest({ kind: "closed" });
 
-    await store.set(closeTaskAtom, "task-a");
+    const outcome = await store.set(closeTaskAtom, "task-a", true);
 
-    expect(closedIds).toEqual(["task-a"]);
+    expect(calls).toEqual([{ id: "task-a", force: true }]);
+    expect(outcome).toEqual({ kind: "closed" });
     expect(store.get(stateAtom)!.runspaces.some((r) => r.id === "bench-task-a")).toBe(false);
   });
 });

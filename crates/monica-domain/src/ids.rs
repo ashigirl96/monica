@@ -85,16 +85,18 @@ id_newtype! {
 }
 
 impl TaskId {
+    /// Accepts `MON-<n>`, `mon-<n>` and a bare `<n>`, normalized to the stored `MON-<n>` form.
     pub fn parse(value: impl Into<String>) -> Result<Self, crate::DomainError> {
         let s = value.into();
-        if let Some(num_part) = s.strip_prefix("MON-") {
-            if let Ok(n) = num_part.parse::<u64>() {
-                if n > 0 {
-                    return Ok(Self(s));
-                }
-            }
+        let num_part = match s.get(..4) {
+            Some(prefix) if prefix.eq_ignore_ascii_case("MON-") => &s[4..],
+            _ => s.as_str(),
+        };
+        let all_digits = !num_part.is_empty() && num_part.bytes().all(|b| b.is_ascii_digit());
+        match num_part.parse::<u64>() {
+            Ok(n) if all_digits && n > 0 => Ok(Self(format!("MON-{n}"))),
+            _ => Err(crate::DomainError::InvalidTaskId(s)),
         }
-        Err(crate::DomainError::InvalidTaskId(s))
     }
 }
 
@@ -188,11 +190,23 @@ mod tests {
     }
 
     #[test]
+    fn parse_normalizes_lowercase_bare_and_padded_ids() {
+        for input in ["MON-7", "mon-7", "Mon-7", "7", "MON-007"] {
+            assert_eq!(TaskId::parse(input).unwrap().as_str(), "MON-7", "{input}");
+        }
+    }
+
+    #[test]
     fn parse_invalid_task_id() {
         assert!(TaskId::parse("not-a-task-id").is_err());
         assert!(TaskId::parse("MON-").is_err());
+        assert!(TaskId::parse("mon-").is_err());
         assert!(TaskId::parse("MON-abc").is_err());
         assert!(TaskId::parse("MON-0").is_err());
+        assert!(TaskId::parse("0").is_err());
+        assert!(TaskId::parse("-1").is_err());
+        assert!(TaskId::parse("MON-+5").is_err());
+        assert!(TaskId::parse("").is_err());
     }
 
     #[test]

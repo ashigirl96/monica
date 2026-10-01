@@ -21,6 +21,43 @@ impl From<monica_domain::Project> for ProjectOption {
     }
 }
 
+/// The board shows `message` as-is and offers Force close only when `forceable`: both decided in
+/// Rust so the frontend holds no close rules of its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct CloseBlocker {
+    pub message: String,
+    pub forceable: bool,
+}
+
+impl From<&monica_application::CloseBlocker> for CloseBlocker {
+    fn from(value: &monica_application::CloseBlocker) -> Self {
+        Self { message: value.message(), forceable: value.forceable() }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CloseTaskOutcome {
+    Closed,
+    Refused {
+        blockers: Vec<CloseBlocker>,
+        /// Every blocker is forceable, so a forced retry would close.
+        forceable: bool,
+    },
+}
+
+impl From<monica_application::CloseTaskOutcome> for CloseTaskOutcome {
+    fn from(value: monica_application::CloseTaskOutcome) -> Self {
+        match value {
+            monica_application::CloseTaskOutcome::Closed(_) => Self::Closed,
+            monica_application::CloseTaskOutcome::Refused { blockers } => Self::Refused {
+                forceable: monica_application::close_refusal_forceable(&blockers),
+                blockers: blockers.iter().map(CloseBlocker::from).collect(),
+            },
+        }
+    }
+}
+
 // jscpd:ignore-start — this DTO intentionally mirrors `monica_application::TaskSummaryRow`
 // field-for-field; the From impl below keeps them in lockstep. The duplication is the contract
 // boundary, not copy-paste drift.

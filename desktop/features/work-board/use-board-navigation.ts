@@ -64,6 +64,15 @@ export function useBoardNavigation() {
           e.preventDefault();
           return;
         }
+        if (menu.submenu?.kind === "close-refused") {
+          if (e.key === "Enter") store.set(executeMenuItemAtom);
+          else if (e.key === "Escape" || e.key === "h" || e.key === "Backspace")
+            store.set(navigateSubmenuAtom, { type: "exit" });
+          else if (e.key === " ") store.set(menuAtom, null);
+          else return;
+          e.preventDefault();
+          return;
+        }
         if (menu.submenu?.kind === "open") {
           if (e.key === "j" || e.key === "ArrowDown")
             store.set(navigateSubmenuAtom, { type: "move", direction: "down" });

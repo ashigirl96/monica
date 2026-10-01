@@ -3,9 +3,10 @@ use std::io::{self, Write};
 use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use monica_application::{
-    parse_issue_input, parse_pull_request_input, AttachSessionReport, CurrentTaskReport,
-    GithubIssueState, GithubPullRequestStatus, GithubSyncReport, IssueBlocker, RunTaskResult,
-    TabIdentity, TaskSummaryRow, TaskSyncChange, TrackOutcome,
+    close_refusal_forceable, parse_issue_input, parse_pull_request_input, AttachSessionReport,
+    CloseBlocker, CloseTaskOptions, CloseTaskOutcome, CurrentTaskReport, GithubIssueState,
+    GithubPullRequestStatus, GithubSyncReport, IssueBlocker, RunTaskResult, TabIdentity,
+    TaskSummaryRow, TaskSyncChange, TrackOutcome,
 };
 use monica_domain::{parse_owner_repo, Agent, DisplayStatus, RunMode, TaskId};
 
@@ -55,10 +56,13 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Close a tracked Monica task (MON-<id>)
+    /// Close a tracked Monica task (MON-<id>); refuses while it would lose work
     Close {
         /// MON-<id>
         id: String,
+        /// Close despite uncommitted changes, unpublished commits or live runs (not a pinned tab)
+        #[arg(long)]
+        force: bool,
     },
     /// Refresh tracked tasks from GitHub and report what changed
     Sync {
@@ -78,7 +82,7 @@ pub async fn run(cmd: TaskCommand) -> Result<()> {
         }
         TaskCommand::Attach { id } => attach_command(&mut monica, &id),
         TaskCommand::Current { json } => current_command(&mut monica, json),
-        TaskCommand::Close { id } => close_command(&mut monica, &id),
+        TaskCommand::Close { id, force } => close_command(&mut monica, &id, force),
         TaskCommand::Sync { id } => sync_command(&mut monica, id.as_deref()).await,
     }
 }
@@ -390,21 +394,18 @@ fn render_attach_report(report: &AttachSessionReport) -> String {
     out
 }
 
-fn close_command(monica: &mut CliFacade, id: &str) -> Result<()> {
-    let task = monica
+fn close_command(monica: &mut CliFacade, id: &str, force: bool) -> Result<()> {
+    let task_id = TaskId::parse(id)?;
+    let caller = tab_identity();
+    let outcome = monica
         .tasks()
-        .list_all_task_summaries(None)?
-        .into_iter()
-        .find(|row| row.id == id)
-        .ok_or_else(|| anyhow!("Task not found: {id}"))?;
-
-    print_close_summary(&task);
-    if !confirm_close()? {
-        println!("Canceled.");
-        return Ok(());
-    }
-
-    let report = monica.tasks().close_task(&TaskId::from_store(id.to_string()))?;
+        .close_task(&task_id, CloseTaskOptions { force, caller: &caller })?;
+    let report = match outcome {
+        CloseTaskOutcome::Closed(report) => report,
+        CloseTaskOutcome::Refused { blockers } => {
+            return Err(anyhow!("{}", render_close_refusal(&task_id, &blockers)));
+        }
+    };
     println!("Closed task {}.", report.task.id);
     if !report.task_runs.is_empty() {
         println!("Preserved task runs: {}.", report.task_runs.join(", "));
@@ -415,27 +416,22 @@ fn close_command(monica: &mut CliFacade, id: &str) -> Result<()> {
     Ok(())
 }
 
-fn print_close_summary(task: &TaskSummaryRow) {
-    println!("Close task?");
-    println!();
-    println!("  ID:      {}", task.id);
-    println!("  Title:   {}", task.title);
-    println!("  Status:  {}", task.task_status.as_str());
-    println!("  Project: {}", task.project.as_deref().unwrap_or("-"));
-    println!();
-    println!("This cannot be undone.");
-}
-
-fn confirm_close() -> Result<bool> {
-    print!("Continue? [y/N] ");
-    io::stdout().flush()?;
-    let mut answer = String::new();
-    io::stdin().read_line(&mut answer)?;
-    Ok(is_yes(answer.trim()))
-}
-
-fn is_yes(answer: &str) -> bool {
-    answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes")
+fn render_close_refusal(task_id: &TaskId, blockers: &[CloseBlocker]) -> String {
+    let mut out = format!("refusing to close {task_id}:\n");
+    for blocker in blockers {
+        out.push_str(&format!("  - {}\n", blocker.message()));
+    }
+    if blockers.iter().any(|b| matches!(b, CloseBlocker::UnpublishedCommits { .. })) {
+        out.push_str(&format!(
+            "If the pull request is already merged, run `monica task sync {task_id}` and retry.\n"
+        ));
+    }
+    if close_refusal_forceable(blockers) {
+        out.push_str("Pass --force to close anyway.");
+    } else {
+        out.push_str("Unpin the tab in Monica; --force does not override a pinned tab.");
+    }
+    out
 }
 
 fn parse_status_filter(status: Option<&str>) -> Result<Option<DisplayStatus>> {
@@ -495,7 +491,53 @@ fn render_blockers(blockers: &[IssueBlocker]) -> Option<String> {
 mod tests {
     use super::*;
     use monica_application::{CurrentTaskSource, TaskSyncChanges};
-    use monica_domain::TaskStatus;
+    use monica_domain::{TaskRunId, TaskStatus};
+
+    fn run_id() -> TaskRunId {
+        TaskRunId::from_store("run-3".to_string())
+    }
+
+    #[test]
+    fn close_refusal_lists_every_blocker_and_offers_sync_then_force() {
+        let task_id = TaskId::parse("MON-5").unwrap();
+        let rendered = render_close_refusal(
+            &task_id,
+            &[
+                CloseBlocker::UncommittedChanges { run_id: run_id(), worktree: "/wt".to_string() },
+                CloseBlocker::UnpublishedCommits { run_id: run_id(), branch: "mon-5".to_string() },
+            ],
+        );
+        assert_eq!(
+            rendered,
+            "refusing to close MON-5:\n\
+             \x20 - worktree /wt (run-3) has uncommitted changes\n\
+             \x20 - branch mon-5 (run-3) has commits on no remote and no merged pull request\n\
+             If the pull request is already merged, run `monica task sync MON-5` and retry.\n\
+             Pass --force to close anyway."
+        );
+    }
+
+    #[test]
+    fn close_refusal_for_a_pinned_tab_does_not_offer_force() {
+        let task_id = TaskId::parse("MON-5").unwrap();
+        let rendered = render_close_refusal(
+            &task_id,
+            &[
+                CloseBlocker::PinnedTab,
+                CloseBlocker::ActiveRun {
+                    run_id: run_id(),
+                    status: monica_domain::TaskRunStatus::Running,
+                },
+            ],
+        );
+        assert!(rendered.contains("run-3 is still running"), "{rendered}");
+        assert!(!rendered.contains("Pass --force"), "{rendered}");
+        assert!(!rendered.contains("monica task sync"), "{rendered}");
+        assert!(
+            rendered.ends_with("Unpin the tab in Monica; --force does not override a pinned tab."),
+            "{rendered}"
+        );
+    }
 
     #[test]
     fn render_current_report_lays_out_the_fields_a_skill_reads() {
