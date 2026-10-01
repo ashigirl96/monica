@@ -3,6 +3,7 @@ import {
   terminalListSessions,
   terminalLoadState,
   terminalSaveState,
+  terminalTerminate,
   type TerminalStateSnapshot,
 } from "@/commands/terminal";
 import { closedTaskRunspaces, listBenchRunspaceMap, taskShellEnv } from "@/commands/task";
@@ -13,6 +14,7 @@ import {
   enrichRunspacesWithEnv,
   initialState,
   retireClosedRunspaces,
+  strayClosedSessions,
   tabDisplayPath,
   terminalStateAtom,
   terminateTab,
@@ -103,16 +105,20 @@ export const loadTerminalStateAtom = atom(null, (get, set): Promise<void> => {
         // Before the layout is shown, so a task closed while the desktop was down never flashes
         // its runspace back; its sessions leave the list so they never surface as detached while
         // the terminate lands.
-        const closed = await closedTaskRunspaces(state.runspaces.map((rs) => rs.id)).catch(
+        const cleanup = await closedTaskRunspaces(state.runspaces.map((rs) => rs.id)).catch(
           (e: unknown) => {
             warnTerminal("closed runspace retire", e);
-            return [];
+            return { runspaces: [], detached_session_ids: [] };
           },
         );
-        const retired = retireClosedRunspaces(state, closed);
+        const strays = strayClosedSessions(state, cleanup, windowLabel);
+        const retired = retireClosedRunspaces(state, cleanup.runspaces);
         state = retired.state;
-        void Promise.allSettled(retired.doomed.map(terminateTab));
-        const doomedSessionIds = new Set(retired.doomed.map((t) => t.sessionId));
+        void Promise.allSettled([
+          ...retired.doomed.map(terminateTab),
+          ...strays.map((id) => terminalTerminate(id)),
+        ]);
+        const doomedSessionIds = new Set([...retired.doomed.map((t) => t.sessionId), ...strays]);
         liveSessions = sessions?.filter((s) => !doomedSessionIds.has(s.id)) ?? null;
         const runspaceToTask = new Map(benchMap.map(([rsId, taskId]) => [rsId, taskId]));
         const taskIds = [

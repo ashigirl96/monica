@@ -1,5 +1,5 @@
 use monica_api::{
-    Agent, ApiError, AttachTabResult, BoardColumn, CloseTaskOutcome, ClosedRunspace,
+    Agent, ApiError, AttachTabResult, BoardColumn, CloseTaskOutcome, ClosedTaskCleanup,
     PrepareTaskResult,
     ProjectOption, RunMode, RunTaskResult, TabTaskBinding, TaskBench, TaskCreated, TaskRunStatus,
     TaskSummaryRow,
@@ -274,18 +274,13 @@ pub async fn list_tab_task_bindings(app: AppHandle) -> Result<Vec<TabTaskBinding
 pub async fn closed_task_runspaces(
     app: AppHandle,
     runspace_ids: Vec<String>,
-) -> Result<Vec<ClosedRunspace>, ApiError> {
+) -> Result<ClosedTaskCleanup, ApiError> {
     command_log::routine("closed_task_runspaces", ids![], async move {
         event_sink::off_main(move || {
             let runspace_ids: Vec<RunspaceId> =
                 runspace_ids.into_iter().map(RunspaceId::from_store).collect();
             let mut monica = event_sink::open(&app)?;
-            Ok(monica
-                .tasks()
-                .closed_task_runspaces(&runspace_ids)?
-                .into_iter()
-                .map(ClosedRunspace::from)
-                .collect())
+            Ok(monica.tasks().closed_task_runspaces(&runspace_ids)?.into())
         })
         .await
     })

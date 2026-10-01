@@ -111,7 +111,7 @@ export const commands = {
   listTabTaskBindings: () =>
     typedError<TabTaskBinding[], ApiError>(__TAURI_INVOKE("list_tab_task_bindings")),
   closedTaskRunspaces: (runspaceIds: string[]) =>
-    typedError<ClosedRunspace[], ApiError>(
+    typedError<ClosedTaskCleanup, ApiError>(
       __TAURI_INVOKE("closed_task_runspaces", { runspaceIds }),
     ),
   /**
@@ -224,6 +224,15 @@ export type CloseTaskOutcome =
 export type ClosedRunspace = {
   runspace_id: string;
   held_tab_id: string | null;
+};
+
+/**
+ *  What the Workbench tears down for closed tasks: the closed runspaces it shows, and the detached
+ *  sessions spawned in a closed task's bench that no tab shows any more.
+ */
+export type ClosedTaskCleanup = {
+  runspaces: ClosedRunspace[];
+  detached_session_ids: string[];
 };
 
 export type DisplayStatus =

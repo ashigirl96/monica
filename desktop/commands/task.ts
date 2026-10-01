@@ -9,6 +9,7 @@ export type {
   TabTaskBinding,
   CloseTaskOutcome,
   ClosedRunspace,
+  ClosedTaskCleanup,
 } from "./bindings";
 
 import { unwrap } from "./unwrap";

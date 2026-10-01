@@ -1,6 +1,6 @@
 use super::{Backend, Monica};
 use crate::usecases::tasks::{
-    AttachSessionReport, CloseTaskOptions, CloseTaskOutcome, ClosedRunspace, CurrentTaskReport,
+    AttachSessionReport, CloseTaskOptions, CloseTaskOutcome, ClosedTaskCleanup, CurrentTaskReport,
     MakeMainOutcome, TabIdentity, TabTaskBinding,
 };
 use crate::prelude::{Agent, DisplayStatus, Event, RunspaceId, Task, TaskId, TaskRunStatus};
@@ -94,11 +94,11 @@ impl<B: Backend> TaskService<'_, B> {
         crate::usecases::tasks::list_tab_task_bindings(&self.m.repos)
     }
 
-    /// The runspaces among `runspace_ids` whose task is closed, for the Workbench to tear down.
+    /// What the Workbench tears down for closed tasks, given the runspaces it shows.
     pub fn closed_task_runspaces(
         &self,
         runspace_ids: &[RunspaceId],
-    ) -> ApplicationResult<Vec<ClosedRunspace>> {
+    ) -> ApplicationResult<ClosedTaskCleanup> {
         crate::usecases::tasks::closed_task_runspaces(&self.m.repos, runspace_ids)
     }
 

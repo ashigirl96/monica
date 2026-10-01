@@ -12,6 +12,7 @@ import {
   takePendingLaunches,
   taskShellEnv,
   type ClosedRunspace,
+  type ClosedTaskCleanup,
   type TabTaskBinding,
 } from "@/commands/task";
 import { readRunspacePlan, type PlanPreview } from "@/commands/plan";
@@ -400,21 +401,39 @@ export function retireClosedRunspaces(
   };
 }
 
+// The detached sessions of closed tasks that no tab in `state` shows — pass the layout before
+// retiring, so a doomed tab's session is not terminated twice. Only the main window adopts them:
+// the Detached group is its, and a pinned tab (main-only) keeps its session out of the list.
+export function strayClosedSessions(
+  state: TerminalState,
+  cleanup: ClosedTaskCleanup,
+  windowLabel: string,
+): string[] {
+  if (windowLabel !== MAIN_WINDOW_LABEL) return [];
+  const bound = new Set(state.runspaces.flatMap((rs) => rs.tabs.map((t) => t.sessionId)));
+  return cleanup.detached_session_ids.filter((id) => !bound.has(id));
+}
+
 // Every window applies this to its own layout: a close from the CLI or the board lands in the DB
 // only, and the layout is this window's to rewrite.
 export const retireClosedRunspacesAtom = atom(null, async (get, set) => {
   if (get(terminalStateAtom) === null) return;
-  let closed: ClosedRunspace[];
+  let cleanup: ClosedTaskCleanup;
   try {
-    closed = await closedTaskRunspaces(get(resolvedStateAtom).runspaces.map((rs) => rs.id));
+    cleanup = await closedTaskRunspaces(get(resolvedStateAtom).runspaces.map((rs) => rs.id));
   } catch (e) {
     warnTerminal("closed runspace retire", e);
     return;
   }
-  const { state, doomed } = retireClosedRunspaces(get(resolvedStateAtom), closed);
-  if (doomed.length === 0) return;
-  set(terminalStateAtom, state);
-  await Promise.allSettled(doomed.map(terminateTab));
+  const current = get(resolvedStateAtom);
+  const { state, doomed } = retireClosedRunspaces(current, cleanup.runspaces);
+  const strays = strayClosedSessions(current, cleanup, get(windowLabelAtom));
+  if (doomed.length === 0 && strays.length === 0) return;
+  if (doomed.length > 0) set(terminalStateAtom, state);
+  await Promise.allSettled([
+    ...doomed.map(terminateTab),
+    ...strays.map((id) => endTabSession(id, "terminate")),
+  ]);
   await set(refreshSessionsAtom);
 });
 

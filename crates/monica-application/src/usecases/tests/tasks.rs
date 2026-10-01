@@ -7,7 +7,7 @@ use crate::{GithubPullRequest, GithubPullRequestStatus, PendingLaunchStore, RunT
 use crate::usecases::tasks::{
     attach_terminal_session_to_task, close_refusal_forceable, closed_task_runspaces,
     list_tab_task_bindings, resolve_current_task, CloseBlocker, CloseTaskOptions,
-    CloseTaskOutcome, ClosedRunspace, CurrentTaskSource, MakeMainOutcome, TabIdentity,
+    CloseTaskOutcome, ClosedRunspace, ClosedTaskCleanup, CurrentTaskSource, MakeMainOutcome, TabIdentity,
     TabTaskBinding,
 };
 use monica_domain::{AgentSessionId, CloseHold, CloseHoldRelease, RunspaceId};
@@ -476,7 +476,7 @@ fn closed_task_runspaces_names_only_the_benches_of_closed_tasks() {
     let ids = [bench_runspace_id(&closed), bench_runspace_id(&open), shell, missing];
 
     assert_eq!(
-        closed_task_runspaces(&repos, &ids).unwrap(),
+        closed_task_runspaces(&repos, &ids).unwrap().runspaces,
         vec![ClosedRunspace { runspace_id: bench_runspace_id(&closed), held_tab_id: None }]
     );
 }
@@ -489,11 +489,11 @@ fn closed_task_runspaces_spares_the_held_tab_while_its_agent_runs() {
     let session_id = agent_session(&mut repos, "tab-1", &runspace_id);
     close_with(&mut repos, &FakeGit::default(), &task_id, false, &session_caller(&session_id));
 
-    let spared = closed_task_runspaces(&repos, std::slice::from_ref(&runspace_id)).unwrap();
+    let spared = closed_task_runspaces(&repos, std::slice::from_ref(&runspace_id)).unwrap().runspaces;
     assert_eq!(spared[0].held_tab_id.as_deref(), Some("tab-1"));
 
     repos.set_terminal_session_agent_status(&session_id, None, None, None).unwrap();
-    let released = closed_task_runspaces(&repos, std::slice::from_ref(&runspace_id)).unwrap();
+    let released = closed_task_runspaces(&repos, std::slice::from_ref(&runspace_id)).unwrap().runspaces;
     assert_eq!(released, vec![ClosedRunspace { runspace_id, held_tab_id: None }]);
     assert_eq!(close_hold(&repos, &task_id), None, "a released hold is dropped");
 }
@@ -506,13 +506,13 @@ fn closed_task_runspaces_releases_a_shell_hold_once_the_shell_exits() {
     let session_id = tab_session_in_runspace(&mut repos, "tab-1", &runspace_id);
     close_with(&mut repos, &FakeGit::default(), &task_id, false, &session_caller(&session_id));
 
-    let held = closed_task_runspaces(&repos, std::slice::from_ref(&runspace_id)).unwrap();
+    let held = closed_task_runspaces(&repos, std::slice::from_ref(&runspace_id)).unwrap().runspaces;
     assert_eq!(held[0].held_tab_id.as_deref(), Some("tab-1"));
 
     repos
         .update_terminal_session_status(&session_id, TerminalSessionStatus::Exited, Some(0))
         .unwrap();
-    let released = closed_task_runspaces(&repos, std::slice::from_ref(&runspace_id)).unwrap();
+    let released = closed_task_runspaces(&repos, std::slice::from_ref(&runspace_id)).unwrap().runspaces;
     assert_eq!(released[0].held_tab_id, None);
 }
 
@@ -526,9 +526,47 @@ fn closed_task_runspaces_sweeps_a_released_hold_whose_runspace_is_already_gone()
         .update_terminal_session_status(&session_id, TerminalSessionStatus::Exited, Some(0))
         .unwrap();
 
-    assert_eq!(closed_task_runspaces(&repos, &[]).unwrap(), vec![]);
+    assert_eq!(closed_task_runspaces(&repos, &[]).unwrap(), ClosedTaskCleanup::default());
 
     assert_eq!(close_hold(&repos, &task_id), None);
+}
+
+fn detach(repos: &mut FakeRepos, session_id: &str) {
+    repos
+        .update_terminal_session_status(session_id, TerminalSessionStatus::Detached, None)
+        .unwrap();
+}
+
+#[test]
+fn closed_task_runspaces_names_detached_sessions_left_in_a_closed_bench() {
+    let mut repos = FakeRepos::default();
+    let task_id = task_in_checkout(&mut repos);
+    let open = task_in_checkout(&mut repos);
+    let shell = RunspaceId::from_store("3f2c9a4e-0b1d-4c55-9a7e-2f1d6b8c9e01".to_string());
+    let orphan = tab_session_in_runspace(&mut repos, "tab-closed", &bench_runspace_id(&task_id));
+    let attached = tab_session_in_runspace(&mut repos, "tab-attached", &bench_runspace_id(&task_id));
+    let open_bench = tab_session_in_runspace(&mut repos, "tab-open", &bench_runspace_id(&open));
+    let plain = tab_session_in_runspace(&mut repos, "tab-shell", &shell);
+    for session_id in [&orphan, &open_bench, &plain] {
+        detach(&mut repos, session_id);
+    }
+    close(&mut repos, &FakeGit::default(), &task_id);
+
+    let cleanup = closed_task_runspaces(&repos, &[]).unwrap();
+
+    assert_eq!(cleanup.detached_session_ids, vec![orphan], "{attached} is still on a tab");
+}
+
+#[test]
+fn closed_task_runspaces_never_names_the_held_session_as_detached() {
+    let mut repos = FakeRepos::default();
+    let task_id = task_in_checkout(&mut repos);
+    let session_id = agent_session(&mut repos, "tab-1", &bench_runspace_id(&task_id));
+    close_with(&mut repos, &FakeGit::default(), &task_id, false, &session_caller(&session_id));
+    // A desktop restart reports every surviving session as detached until a tab reattaches.
+    detach(&mut repos, &session_id);
+
+    assert_eq!(closed_task_runspaces(&repos, &[]).unwrap().detached_session_ids, Vec::<String>::new());
 }
 
 #[test]

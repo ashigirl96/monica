@@ -15,7 +15,7 @@ pub use close_task::{
     close_refusal_forceable, close_task, CloseBlocker, CloseTaskOptions, CloseTaskOutcome,
     CloseTaskReport,
 };
-pub use closed_runspaces::{closed_task_runspaces, ClosedRunspace};
+pub use closed_runspaces::{closed_task_runspaces, ClosedRunspace, ClosedTaskCleanup};
 pub use current_task::{resolve_current_task, CurrentTaskReport, CurrentTaskSource};
 pub use tab_identity::TabIdentity;
 pub use create_raw_task::create_raw_task;

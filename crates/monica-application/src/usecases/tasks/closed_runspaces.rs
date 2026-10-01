@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::ports::TaskStore;
 use crate::bench::bench_task_id;
 use crate::ports::{TerminalSessionRepository, WorkbenchStore};
-use crate::prelude::{RunspaceId, TaskId, TaskStatus};
+use crate::prelude::{CloseHold, RunspaceId, TaskId, TaskStatus, TerminalSessionStatus};
 use crate::ApplicationResult;
 
 /// A runspace whose task is closed, so the Workbench terminates and drops it. `held_tab_id` is the
@@ -15,47 +15,90 @@ pub struct ClosedRunspace {
     pub held_tab_id: Option<String>,
 }
 
-/// Which of `runspace_ids` belong to a closed task. The layout is frontend-owned and rewritten
-/// wholesale on every save, so the Workbench asks with what it shows and applies the answer itself
-/// — a close from the CLI, the board, or while the desktop was down all converge here.
+/// What the Workbench tears down for closed tasks: the runspaces it shows, and the sessions spawned
+/// in a closed task's bench that no tab shows any more (a tab closed before the task was, which
+/// only detached its process).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ClosedTaskCleanup {
+    pub runspaces: Vec<ClosedRunspace>,
+    pub detached_session_ids: Vec<String>,
+}
+
+/// The layout is frontend-owned and rewritten wholesale on every save, so the Workbench asks with
+/// the runspaces it shows and applies the answer itself — a close from the CLI, the board, or while
+/// the desktop was down all converge here.
 pub fn closed_task_runspaces<R>(
     repos: &R,
     runspace_ids: &[RunspaceId],
-) -> ApplicationResult<Vec<ClosedRunspace>>
+) -> ApplicationResult<ClosedTaskCleanup>
 where
     R: TaskStore + WorkbenchStore + TerminalSessionRepository,
 {
-    let held_tabs = sweep_close_holds(repos)?;
-    let mut closed = Vec::new();
+    let holds = sweep_close_holds(repos)?;
+    let mut closed_tasks = ClosedTasks::default();
+
+    let mut runspaces = Vec::new();
     for runspace_id in runspace_ids {
         let Some(task_id) = bench_task_id(runspace_id) else { continue };
-        let Some(task) = repos.get_task(&task_id)? else { continue };
-        if task.status != TaskStatus::Closed {
+        if !closed_tasks.contains(repos, &task_id)? {
             continue;
         }
-        closed.push(ClosedRunspace {
+        runspaces.push(ClosedRunspace {
             runspace_id: runspace_id.clone(),
-            held_tab_id: held_tabs.get(&task_id).cloned(),
+            held_tab_id: holds.get(&task_id).map(|hold| hold.terminal_tab_id.clone()),
         });
     }
-    Ok(closed)
+
+    let held_sessions: HashSet<&str> =
+        holds.values().map(|hold| hold.terminal_session_id.as_str()).collect();
+    let mut detached_session_ids = Vec::new();
+    for session in repos.list_terminal_sessions(None)? {
+        if session.status != TerminalSessionStatus::Detached
+            || held_sessions.contains(session.id.as_str())
+        {
+            continue;
+        }
+        let Some(task_id) = session.runspace_id.as_ref().and_then(bench_task_id) else { continue };
+        if closed_tasks.contains(repos, &task_id)? {
+            detached_session_ids.push(session.id);
+        }
+    }
+
+    Ok(ClosedTaskCleanup {
+        runspaces,
+        detached_session_ids,
+    })
 }
 
-/// Drops every released hold and returns the tab each live one spares. Swept whole rather than per
-/// asked runspace: a held tab whose shell exits is closed by the Workbench on the spot, so its
-/// runspace is never asked about again.
-fn sweep_close_holds<R>(repos: &R) -> ApplicationResult<HashMap<TaskId, String>>
+#[derive(Default)]
+struct ClosedTasks(HashMap<TaskId, bool>);
+
+impl ClosedTasks {
+    fn contains<R: TaskStore>(&mut self, repos: &R, task_id: &TaskId) -> ApplicationResult<bool> {
+        if let Some(&closed) = self.0.get(task_id) {
+            return Ok(closed);
+        }
+        let closed = repos.get_task(task_id)?.is_some_and(|task| task.status == TaskStatus::Closed);
+        self.0.insert(task_id.clone(), closed);
+        Ok(closed)
+    }
+}
+
+/// Drops every released hold and returns the live ones by task. Swept whole rather than per asked
+/// runspace: a held tab whose shell exits is closed by the Workbench on the spot, so its runspace
+/// is never asked about again.
+fn sweep_close_holds<R>(repos: &R) -> ApplicationResult<HashMap<TaskId, CloseHold>>
 where
     R: WorkbenchStore + TerminalSessionRepository,
 {
-    let mut held_tabs = HashMap::new();
+    let mut live = HashMap::new();
     for hold in repos.list_close_holds()? {
         let session = repos.get_terminal_session(&hold.terminal_session_id)?;
         if hold.is_released(session.as_ref()) {
             repos.replace_close_hold(&hold.task_id, None)?;
         } else {
-            held_tabs.insert(hold.task_id, hold.terminal_tab_id);
+            live.insert(hold.task_id.clone(), hold);
         }
     }
-    Ok(held_tabs)
+    Ok(live)
 }
