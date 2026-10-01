@@ -28,30 +28,27 @@ gh issue create --repo <owner/repo> --title "<title>" --body "<body>"
 
 **子 issue（親 issue が決まっている・親子構成が前提の場合）:**
 
-`gh issue create` ではなく **`gh sub-issue create --parent <親番号|URL>`**
-（`yahsan2/gh-sub-issue` 拡張）を使う。作成と同時に GitHub の Sub-issues
-リンクが張られ、子 issue から GraphQL の `Issue.parent` で親を逆引きできる
+`--parent <親番号|URL>` を付ける。作成と同時に GitHub の Sub-issues リンクが
+張られ、子 issue から `gh issue view <N> --json parent` で親を逆引きできる
 ようになる（body に `Part of #N` と書くだけではリンクされない）。Monica は
 この親リンクを sync で読んで `parent_task_id` を張る。
 
 ```bash
-gh sub-issue create --parent <親番号> --repo <owner/repo> --title "<title>" --body "<body>"
+gh issue create --repo <owner/repo> --parent <親番号> --title "<title>" --body "<body>"
 ```
 
-フラグの罠（`gh issue create` と完全互換ではない）:
+`--parent` と `--blocked-by` は `gh` 2.94 以降のネイティブ機能。古い `gh` では
+フラグごと無いので、`gh --version` を見て古ければ更新を案内する
+（`yahsan2/gh-sub-issue` 拡張はもう使わない）。
 
-- `--body-file <path>` → **未サポート**。長文は
-  `BODY=$(cat file.md) && gh sub-issue create ... --body "$BODY"` で渡す
-- `--assignee @me` → 無視される。ユーザー名直指定か、作成後に
-  `gh issue edit <N> --add-assignee <user>` で補完
+既存 issue の事後リンクは `gh issue edit <子> --parent <親>`、一覧は
+`gh issue view <親> --json subIssues`。親子とも作る場合は親 → 子の順で作成し、
+親の本文のチェックリストに子の番号を反映する。sub-issue 間の依存は
+`gh issue create --blocked-by <上流番号>` か `gh issue edit <子> --add-blocked-by <上流番号>`
+で張る — Monica の start gate はこの辺を読む。
 
-既存 issue の事後リンクは `gh sub-issue add <親> <子>`、一覧は
-`gh sub-issue list <親>`。親子とも作る場合は親 → 子の順で作成し、
-親の本文のチェックリストに子の番号を反映する。
-
-どちらのコマンドも作成した issue の URL を標準出力に返すので、それを次の
-ステップにそのまま渡す。URL を取りこぼさないよう出力を控えておく。
-子 issue も 1 本ずつ通常どおり track する。
+作成した issue の URL は標準出力に返るので、それを次のステップにそのまま渡す。
+URL を取りこぼさないよう出力を控えておく。子 issue も 1 本ずつ通常どおり track する。
 
 ### 2. Monica で track する
 
@@ -66,15 +63,15 @@ MONICA_HOME=$HOME/monica monica task track <issue url>
 同じ issue に open な Task が既にあれば新規作成せず既存の MON-ID が返る
 （closed な Task しか無ければ再挑戦として新規作成される）。
 
-### 3. sync する
+### 3. 写しが埋まったか確かめる
 
-CLI の `monica task track` は track 直後の GitHub sync を **kick しない**
-（kick するのは desktop からの track だけ）。そのままでは親子（PARENT 列）・
-issue の state・PR の紐づけが次の sync まで埋まらないので、track したら必ず
-1 回 sync する。複数 issue を track したときは最後にまとめて 1 回でよい。
+`monica task track` は track 直後にその Task を 1 回 sync し、親子（PARENT 列）・
+issue の state・PR の紐づけ・blocked-by の上流を写す。この sync は best-effort で、
+GitHub 未認証やオフラインのときは黙って飛ばす。次の手順 4 で PARENT 列が埋まって
+いないなど写しが古いと分かったときだけ、手で sync する。
 
 ```bash
-MONICA_HOME=$HOME/monica monica task sync
+MONICA_HOME=$HOME/monica monica task sync MON-<id>
 ```
 
 変化レポートに `MON-<id>  parent  -  -  ->  MON-<親>` が出れば、子 issue として
