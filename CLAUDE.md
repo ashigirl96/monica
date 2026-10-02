@@ -10,4 +10,4 @@ issue は GitHub Issues（`ashigirl96/tania`）で管理し、`gh` CLI で操作
 
 ### Domain docs
 
-single-context。リポジトリ直下に `CONTEXT.md` 1 つと `docs/adr/`。詳細は `docs/agents/domain.md`。
+single-context。リポジトリ直下に `GLOSSARY.md` 1 つと `docs/adr/`。詳細は `docs/agents/domain.md`。

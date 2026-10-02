@@ -31,7 +31,7 @@ GitHub issue を作成する。
 
 ## スキルが「該当するチケットを取得する」と言ったら
 
-`gh issue view <number> --comments` を実行する。
+`gh issue view <number> --json title,body,comments,labels --jq '...'` を実行する。「issue を読む」と同じく、comments は `--json` の field に含める。
 
 ## Wayfinding の操作
 
