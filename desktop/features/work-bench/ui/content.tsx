@@ -12,6 +12,7 @@ import {
   updateTabCwdAtom,
   consumeTerminalLaunchAtom,
   materializePendingLaunchesAtom,
+  retireClosedRunspacesAtom,
   type TerminalLaunchIntent,
 } from "@/features/work-bench/store";
 import { useLiveRefresh } from "@/hooks/use-live-refresh";
@@ -222,6 +223,14 @@ export default function WorkBenchContent() {
     void materializeLaunches();
   }, [materializeLaunches]);
   useLiveRefresh(pollLaunches);
+
+  // Not useLiveRefresh: that idles while the window is hidden, and a closed task's sessions must
+  // not keep running just because Monica sits behind the terminal the close was typed in.
+  const retireClosed = useSetAtom(retireClosedRunspacesAtom);
+  useEffect(() => {
+    const timer = setInterval(() => void retireClosed(), 3000);
+    return () => clearInterval(timer);
+  }, [retireClosed]);
 
   const prevStateRef = useRef(state);
   useEffect(() => {

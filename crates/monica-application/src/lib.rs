@@ -59,7 +59,9 @@ pub use terminal_state::{TerminalRunspaceRow, TerminalStateSnapshot, TerminalTab
 
 // Usecase result types (returned by facade methods)
 pub use usecases::{
-    close_refusal_forceable, AttachSessionReport, CloseBlocker, CloseTaskOptions, CloseTaskOutcome,
+    close_refusal_forceable, AttachSessionReport, CloseBlocker, CloseTaskOptions, ClosedRunspace,
+    ClosedTaskCleanup,
+    CloseTaskOutcome,
     CloseTaskReport, CurrentTaskReport, CurrentTaskSource, DaemonSessionView,
     GithubSyncReport, HookContext, HookIdentity, HookReport, HookResolveRoute,
     LinkPullRequestReport, ResolveSkip, SyncChangeCounts,

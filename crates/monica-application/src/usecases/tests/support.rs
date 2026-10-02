@@ -16,7 +16,7 @@ use crate::ports::{
 };
 use crate::usecases::runs::record_hook;
 use crate::prelude::{
-    Agent, AgentSessionId, AgentSignal, Continuation, DisplayStatus, Event, ExternalReference,
+    Agent, AgentSessionId, AgentSignal, CloseHold, Continuation, DisplayStatus, Event, ExternalReference,
     NewNotificationIntent, NewTask, NewTaskRun, NewTerminalSession,
     NotificationIntent, Project, Provider, RefType, RunspaceId, SignalKind, Task, TaskId, TaskKind, TaskRun,
     TaskRunId, TaskRunStatus, TaskRunWaitReason, TaskStatus, TerminalSession,
@@ -110,6 +110,7 @@ struct FakeState {
     runs: HashMap<String, TaskRun>,
     events: Vec<Event>,
     benches: BTreeMap<String, (String, String)>,
+    close_holds: BTreeMap<String, CloseHold>,
     pending_launches: BTreeMap<String, RunTaskResult>,
     /// Runs a test declares old enough for the stale-setup reap. The fake clock is a constant, so
     /// age cannot be derived from timestamps.
@@ -1127,6 +1128,24 @@ impl WorkbenchStore for FakeRepos {
         }
         Ok(())
     }
+
+    fn delete_bench_for_task(&self, task_id: &TaskId) -> Result<()> {
+        self.state.borrow_mut().benches.remove(task_id.as_str());
+        Ok(())
+    }
+
+    fn list_close_holds(&self) -> Result<Vec<CloseHold>> {
+        Ok(self.state.borrow().close_holds.values().cloned().collect())
+    }
+
+    fn replace_close_hold(&self, task_id: &TaskId, hold: Option<&CloseHold>) -> Result<()> {
+        let mut state = self.state.borrow_mut();
+        match hold {
+            Some(hold) => state.close_holds.insert(task_id.to_string(), hold.clone()),
+            None => state.close_holds.remove(task_id.as_str()),
+        };
+        Ok(())
+    }
 }
 
 impl FakeRepos {
@@ -1369,6 +1388,18 @@ impl WorkbenchStore for FakeUow<'_> {
 
     fn update_bench_cwd(&self, task_id: &TaskId, cwd: &str) -> Result<()> {
         self.inner.update_bench_cwd(task_id, cwd)
+    }
+
+    fn delete_bench_for_task(&self, task_id: &TaskId) -> Result<()> {
+        self.inner.delete_bench_for_task(task_id)
+    }
+
+    fn list_close_holds(&self) -> Result<Vec<CloseHold>> {
+        self.inner.list_close_holds()
+    }
+
+    fn replace_close_hold(&self, task_id: &TaskId, hold: Option<&CloseHold>) -> Result<()> {
+        self.inner.replace_close_hold(task_id, hold)
     }
 }
 

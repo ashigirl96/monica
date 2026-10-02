@@ -1,9 +1,9 @@
 use super::{Backend, Monica};
 use crate::usecases::tasks::{
-    AttachSessionReport, CloseTaskOptions, CloseTaskOutcome, CurrentTaskReport, MakeMainOutcome,
-    TabIdentity, TabTaskBinding,
+    AttachSessionReport, CloseTaskOptions, CloseTaskOutcome, ClosedTaskCleanup, CurrentTaskReport,
+    MakeMainOutcome, TabIdentity, TabTaskBinding,
 };
-use crate::prelude::{Agent, DisplayStatus, Event, Task, TaskId, TaskRunStatus};
+use crate::prelude::{Agent, DisplayStatus, Event, RunspaceId, Task, TaskId, TaskRunStatus};
 use crate::{ApplicationEvent, ApplicationResult, TaskSummaryRow};
 use crate::ports::{TaskRunStore, TaskSummaryFilter};
 
@@ -92,6 +92,14 @@ impl<B: Backend> TaskService<'_, B> {
     /// each tab into the runspace it belongs to.
     pub fn list_tab_task_bindings(&self) -> ApplicationResult<Vec<TabTaskBinding>> {
         crate::usecases::tasks::list_tab_task_bindings(&self.m.repos)
+    }
+
+    /// What the Workbench tears down for closed tasks, given the runspaces it shows.
+    pub fn closed_task_runspaces(
+        &self,
+        runspace_ids: &[RunspaceId],
+    ) -> ApplicationResult<ClosedTaskCleanup> {
+        crate::usecases::tasks::closed_task_runspaces(&self.m.repos, runspace_ids)
     }
 
     /// Promote the run hosted in a Workbench tab to its task's Main Run, emitting the run's new

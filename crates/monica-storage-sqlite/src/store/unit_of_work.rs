@@ -10,7 +10,7 @@ use monica_application::{
     WorkTransaction, WorkbenchStore,
 };
 use monica_domain::{
-    AgentSessionId, Event, ExternalReference, NewTask, NewTaskRun, Provider, RefType, RunspaceId,
+    AgentSessionId, CloseHold, Event, ExternalReference, NewTask, NewTaskRun, Provider, RefType, RunspaceId,
     Task, TaskId, TaskRun, TaskRunId, TaskRunStatus, TaskStatus,
 };
 
@@ -277,6 +277,18 @@ impl WorkbenchStore for SqliteUow<'_> {
 
     fn update_bench_cwd(&self, task_id: &TaskId, cwd: &str) -> Result<()> {
         bench::update_bench_cwd(&self.tx, task_id, cwd)
+    }
+
+    fn delete_bench_for_task(&self, task_id: &TaskId) -> Result<()> {
+        bench::delete_bench_for_task(&self.tx, task_id)
+    }
+
+    fn list_close_holds(&self) -> Result<Vec<CloseHold>> {
+        bench::list_close_holds(&self.tx)
+    }
+
+    fn replace_close_hold(&self, task_id: &TaskId, hold: Option<&CloseHold>) -> Result<()> {
+        bench::replace_close_hold(&self.tx, task_id, hold)
     }
 }
 

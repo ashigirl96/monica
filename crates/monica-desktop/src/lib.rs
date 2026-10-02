@@ -49,6 +49,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::task::primary_agent_session_id,
             commands::task::attach_terminal_tab,
             commands::task::list_tab_task_bindings,
+            commands::task::closed_task_runspaces,
             commands::plan::read_runspace_plan,
             commands::github_sync::force_sync_github,
             commands::settings::translate_settings_get,

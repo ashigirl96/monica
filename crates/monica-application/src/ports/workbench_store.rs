@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use monica_domain::{RunspaceId, TaskId};
+use monica_domain::{CloseHold, RunspaceId, TaskId};
 
 /// The per-task workbench (a runspace + its working directory). Composed into
 /// [`WorkTransaction`](super::WorkTransaction) so run preparation can create the bench atomically
@@ -15,4 +15,8 @@ pub trait WorkbenchStore {
         cwd: &str,
     ) -> Result<()>;
     fn update_bench_cwd(&self, task_id: &TaskId, cwd: &str) -> Result<()>;
+    fn delete_bench_for_task(&self, task_id: &TaskId) -> Result<()>;
+    fn list_close_holds(&self) -> Result<Vec<CloseHold>>;
+    /// `None` drops whatever hold the task had.
+    fn replace_close_hold(&self, task_id: &TaskId, hold: Option<&CloseHold>) -> Result<()>;
 }

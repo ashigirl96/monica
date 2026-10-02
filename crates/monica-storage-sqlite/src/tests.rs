@@ -7,7 +7,7 @@ use monica_application::{
     TerminalSessionUpdate, TerminalStateSnapshot, TerminalTabRow, UnitOfWork, WorkbenchStore,
 };
 use monica_domain::{
-    Agent, AgentSessionId, DisplayStatus, ExternalReference, NewTask, NewTaskRun,
+    Agent, AgentSessionId, CloseHold, CloseHoldRelease, DisplayStatus, ExternalReference, NewTask, NewTaskRun,
     NewTerminalSession, Project, Provider, RawJson, RefType, RunspaceId, TaskId, TaskKind,
     TaskRun, TaskRunId, TaskRunStatus, TaskRunWaitReason, TaskStatus, TerminalSessionKind,
     TerminalSessionStatus,
@@ -2641,6 +2641,31 @@ fn workbench_contract<S: WorkbenchStore + ?Sized>(store: &mut S, task_id: &TaskI
         store.list_bench_runspace_map().unwrap(),
         vec![(rsid("runspace-x"), task_id.clone())]
     );
+}
+
+#[test]
+fn a_closed_tasks_bench_link_goes_and_its_hold_is_replaced_whole() {
+    let mut db = SqliteStore::open_in_memory().unwrap();
+    let task_id = db.insert_task(dev_task("closing")).unwrap().id;
+    db.create_bench(&task_id, &rsid("bench-x"), "/a").unwrap();
+    db.delete_bench_for_task(&task_id).unwrap();
+    assert_eq!(db.get_bench_for_task(&task_id).unwrap(), None);
+
+    let hold = |tab: &str, release| CloseHold {
+        task_id: task_id.clone(),
+        terminal_tab_id: tab.to_string(),
+        terminal_session_id: format!("ts-{tab}"),
+        release,
+    };
+    db.replace_close_hold(&task_id, Some(&hold("tab-1", CloseHoldRelease::AgentExit))).unwrap();
+    db.replace_close_hold(&task_id, Some(&hold("tab-2", CloseHoldRelease::ShellExit))).unwrap();
+    assert_eq!(
+        db.list_close_holds().unwrap(),
+        vec![hold("tab-2", CloseHoldRelease::ShellExit)],
+        "a later close replaces the earlier hold"
+    );
+    db.replace_close_hold(&task_id, None).unwrap();
+    assert_eq!(db.list_close_holds().unwrap(), vec![]);
 }
 
 /// `list_bench_runspace_map` returns `(runspace_id, task_id)` — the pair the workbench uses to map
