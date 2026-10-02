@@ -7,7 +7,7 @@
 ### Task
 
 **Task**:
-1 つの Issue に対する私の作業。自分の状態は open / closed だけで、それ以外（着手済みか、ユーザー待ちか）は Run と Bench と Issue から導く。Issue と 1:1 で独自の番号を持たず、Issue の参照（`owner/repo#n`）で名指す。同じ Issue への再挑戦は Task の reopen で表す。
+1 つの Issue に対する私の作業。自分の状態は open / closed だけで、それ以外（着手済みか、ユーザー待ちか）は表示状態として Run と Bench と Issue から導く。Issue と 1:1 で独自の番号を持たず、Issue の参照（`owner/repo#n`）で名指す。同じ Issue への再挑戦は Task の reopen で表す。
 _Avoid_: work item, ticket
 
 **Issue**:
@@ -35,6 +35,10 @@ _Avoid_: task runspace, bench runspace
 
 **Attach**:
 既にある Tab を Bench に移すこと。その Tab の Agent Session はその時点で Task の Run になる。
+
+**表示状態**:
+Task で次に手を動かすのが誰か（私か、agent か、setup script か、誰でもないか）を、Run の Agent Session と Bench と Issue から導いた 1 語。保存しない。closed、ユーザー待ち・未観測・動作中（live な Run の Agent Session から）、片付け待ち（Issue は閉じたが Task は開いている）、未着手（Bench が無い）、準備中・準備失敗（Bench の準備）、終了（Bench はあるが live な Run が無い）のどれか。
+_Avoid_: DisplayStatus, status, Task の状態（Task 自身の状態は open / closed だけ）
 
 ### Workbench
 
