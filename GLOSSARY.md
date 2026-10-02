@@ -21,6 +21,10 @@ Task の Issue を block している Issue。open な Blocker が 1 つでも�
 GitHub の Pull Request のローカルの写し（title、state、draft、head branch）。Task との対応は保存した事実ではなく、branch 名の一致か GitHub 上の closing reference から sync のたびに導いて記録したもの。手で繋ぐ操作は無い。
 _Avoid_: PR ref, external ref
 
+**Sync**:
+GitHub から Issue と Pull Request の写しを引き直すこと。対象は open な Task の Issue と、その parent・Blocker・Pull Request まで。Pull Request と Task の対応もこのときに導き直す。closed な Task の写しは close した時点のまま残り、reopen で引き直す。
+_Avoid_: refresh, fetch, 取り込み（track と紛れる）
+
 **Repo**:
 `owner/repo` で識別する GitHub のリポジトリ。ローカルの checkout は ghq のレイアウトから一意に決まるので、登録や設定の実体を持たない。
 _Avoid_: Project, repository
