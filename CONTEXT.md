@@ -4,6 +4,34 @@
 
 ## Language
 
+### Task
+
+**Task**:
+1 つの Issue に対する私の作業。自分の状態は open / closed だけで、それ以外（着手済みか、ユーザー待ちか）は Run と Bench と Issue から導く。Issue と 1:1 で独自の番号を持たず、Issue の参照（`owner/repo#n`）で名指す。同じ Issue への再挑戦は Task の reopen で表す。
+_Avoid_: work item, ticket
+
+**Issue**:
+GitHub Issue のローカルの写し（title、state、labels、parent、blocker）。body は写さない。Task が無くても存在できる（parent や Blocker として写しただけの issue）。open / closed は GitHub 側の事実で、Task の close とは独立。
+_Avoid_: ExternalReference, external ref
+
+**Blocker**:
+Task の Issue を block している Issue。open な Blocker が 1 つでもあると、その Task では新しい Run を始められない。
+
+**Repo**:
+`owner/repo` で識別する GitHub のリポジトリ。ローカルの checkout は ghq のレイアウトから一意に決まるので、登録や設定の実体を持たない。
+_Avoid_: Project, repository
+
+**Run**:
+Task の上で動いた Agent Session 1 回分の対応。Bench の Tab で Agent Session が始まった時か Attach した時に生まれ、その Agent Session が終わるまで、Tab がどこに移っても Task に属し続ける。状態は持たず、agent の状態は Agent Session から導く。Run どうしに主従は無い。
+_Avoid_: TaskRun, Main Run, primary run, side run
+
+**Bench**:
+Task が 1 つ所有する Runspace。最初に開いた時に作られ、cwd（worktree か Repo の checkout か）はその後変えない。Task を close すると壊れ、reopen すると作り直す。Workbench（画面）とは別物。
+_Avoid_: task runspace, bench runspace
+
+**Attach**:
+既にある Tab を Bench に移すこと。その Tab の Agent Session はその時点で Task の Run になる。
+
 ### Workbench
 
 **Workbench**:
@@ -22,7 +50,8 @@ ptyd が持つ 1 つの PTY。app より長生きし、再 attach すると tran
 _Avoid_: session（Agent Session と紛れる）
 
 **Agent Session**:
-Tab の中で動く agent が自分で名乗るセッション。Terminal Session とは別物で、同じ Tab に両方が存在する。
+Tab の中で動く agent が自分で名乗るセッション。同一性は agent の session_id で、resume と compact は同じ Agent Session の再開、fork は別の Agent Session。Terminal Session とは別物で、同じ Tab に両方が存在する。agent の状態（動作中 / ユーザー待ちとその理由 / 終了）の唯一の正本で、Task に紐づかない Tab でも観測する。
+_Avoid_: session, agent status on Terminal Session
 
 **ptyd**:
 Terminal Session を管理する常駐 daemon。desktop からは socket 越しに使う。
