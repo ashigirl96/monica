@@ -17,6 +17,10 @@ _Avoid_: ExternalReference, external ref
 **Blocker**:
 Task の Issue を block している Issue。open な Blocker が 1 つでもあると、その Task では新しい Run を始められない。
 
+**Pull Request**:
+GitHub の Pull Request のローカルの写し（title、state、draft、head branch）。Task との対応は保存した事実ではなく、branch 名の一致か GitHub 上の closing reference から sync のたびに導いて記録したもの。手で繋ぐ操作は無い。
+_Avoid_: PR ref, external ref
+
 **Repo**:
 `owner/repo` で識別する GitHub のリポジトリ。ローカルの checkout は ghq のレイアウトから一意に決まるので、登録や設定の実体を持たない。
 _Avoid_: Project, repository

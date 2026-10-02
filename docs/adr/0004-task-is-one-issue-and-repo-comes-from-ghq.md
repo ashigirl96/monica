@@ -20,3 +20,5 @@ monica の Task は Issue を 0..1 で持ち、Issue は `external_refs` と tit
 - clone していない Repo の issue も track でき、Bench を開く時点で無ければ `ghq get` する。
 - worktree は repo の外（`$TANIA_HOME` 配下）に置く。正確な置き場所と per-repo の agent 設定は settings で決める。
 - ghq 以外の場所にある checkout は v1 では扱わない。fork を clone している repo は、issue の repo と ghq の path が食い違うので同じく v1 の外。
+- Pull Request は Task に多対多で紐づき、対応は保存した事実ではなく sync 時の導出にする。経路は Bench の branch（`issue-<n>`）と PR の head branch の一致、GitHub 上の closing reference（手動リンクを含む）の 2 つで、和集合を経路つきで記録する。手動で繋ぐ command は持たない。close の UnpublishedCommits guard を免除する根拠は branch 一致の merged PR だけで、closing reference だけの merged PR は別 branch の仕事とみなす。
+- Blocker の gate は Issue の写しの open / closed だけで判定する。monica の「open でも merged PR があれば解けた扱い」（default branch 以外へ merge された stack の救済）は持ち込まず、`--force` で越える。
