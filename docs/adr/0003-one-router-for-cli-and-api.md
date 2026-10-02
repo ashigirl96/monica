@@ -14,9 +14,9 @@ monica では CLI（clap）と desktop（Tauri command）と web（axum）が別
 
 ## Consequences
 
-- DB を開くのは backend の 1 プロセスだけ。migrate は backend の起動時に drizzle 標準の `migrate()` で行う。bun:sqlite は同期 API なので 1 接続で書き込みが直列化され、busy handling は要らない。
+- DB を開くのは backend の 1 プロセスだけ（ADR-0007 で `locking_mode=EXCLUSIVE` により DB 自身に守らせる）。migrate は backend の起動時に drizzle 標準の `migrate()` で行う。bun:sqlite は同期 API なので 1 接続で書き込みが直列化され、busy handling は要らない。
 - backend は自分の書き込みを知っているので、変更は in-process の event として webview に SSE で push する。polling も `PRAGMA data_version` も使わない。
-- CLI は `$TANIA_HOME/backend.port`（port と token）を読んで backend を見つける。Workbench の tab 内では env で直接渡す。backend が居なければ「desktop を起動してください」で終了し、desktop 起動直後は短く retry する。
+- CLI は `$TANIA_HOME/backend.json`（port と token と pid）を procedure を呼ぶたびに読んで backend を見つける。Workbench の tab にも `TANIA_HOME` だけを渡し、port と token は env に入れない。backend が居なければ「desktop を起動してください」で終了する。retry の条件は ADR-0007。
 - CLI のテストは remote link を `createRouterClient`（in-process）に差し替える。差し替え点はこの 1 箇所だけ。
 - skill は CLI の command を呼ぶので、router の procedure が skill の語彙になる。
 - 賭けるのは oRPC、保険をかけるのは trpc-cli。router の定義は oRPC に依存するが、trpc-cli は「router を走査して command にする」変換器にすぎず、同じ要領で自前の CLI adapter や MCP adapter を書ける。trpc-cli は router を in-process で `call()` するので、CLI 側には contract を走査して各 procedure を remote client に転送する router を機械的に組んで渡す。これが動かないとき、trpc-cli が oRPC の新 major に追従しなくなったとき、または CLI の UX を細かく作り込みたくなったときは、`apps/cli` だけを自前 adapter に書き換える。そのために次を守る。
@@ -25,4 +25,4 @@ monica では CLI（clap）と desktop（Tauri command）と web（axum）が別
   - event iterator（streaming）の procedure は trpc-cli では動かない。流し続けたい command（`--follow` など）は trpc-cli の外で remote client の event iterator を iterate して書く。
   - personal agent に着手する時点で、同じ contract から MCP adapter を生やす research を行う。
 - oRPC は trpc-cli が対応する major（現時点では 1.x）に固定する。
-- backend の寿命（app 同寿命か、ptyd のように app より長生きさせるか）と孤児・respawn・port の再取得は CLI の可用性に直結するので、別途決める。
+- backend の寿命（app 同寿命か、ptyd のように app より長生きさせるか）と孤児・respawn・port の再取得は CLI の可用性に直結する。ADR-0007 で app 同寿命に決めた。

@@ -53,8 +53,18 @@ _Avoid_: session（Agent Session と紛れる）
 Tab の中で動く agent が自分で名乗るセッション。同一性は agent の session_id で、resume と compact は同じ Agent Session の再開、fork は別の Agent Session。Terminal Session とは別物で、同じ Tab に両方が存在する。agent の状態（動作中 / ユーザー待ちとその理由 / 終了）の唯一の正本で、Task に紐づかない Tab でも観測する。
 _Avoid_: session, agent status on Terminal Session
 
+### Process
+
+**Shell**:
+Tauri の殻。窓と端末の中継と Backend の起動・監督だけを持ち、Task も Backend の中身も知らない。
+_Avoid_: Rust 側, Tauri 側
+
+**Backend**:
+Shell が起動し、desktop と同寿命の process。Task と Workbench の帳簿と DB を唯一所有し、webview と CLI は HTTP で呼ぶ。desktop が閉じている間は存在しない。
+_Avoid_: server, sidecar, tania-backend
+
 **ptyd**:
-Terminal Session を管理する常駐 daemon。desktop からは socket 越しに使う。
+Terminal Session を管理する常駐 daemon。desktop より長生きし、socket 越しに使う。
 
 ### Skill
 
