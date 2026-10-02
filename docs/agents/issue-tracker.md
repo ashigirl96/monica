@@ -5,7 +5,7 @@
 ## 規約
 
 - **issue を作る**: `gh issue create --title "..." --body "..."`。複数行の本文は heredoc を使う。
-- **issue を読む**: `gh issue view <number> --comments`。コメントは `jq` で絞り込み、ラベルも併せて取得する。
+- **issue を読む**: `gh issue view <number> --json body,comments,labels,assignees --jq '...'`。`--comments` は人間向けの整形出力用で `--json` と排他なので、`jq` で絞るときは `--json` の field に `comments` を含める。
 - **issue を一覧する**: `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`。必要に応じて `--label` と `--state` で絞る。
 - **issue にコメントする**: `gh issue comment <number> --body "..."`
 - **ラベルを付ける / 外す**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
