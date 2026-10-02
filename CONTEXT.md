@@ -55,3 +55,9 @@ _Avoid_: session, agent status on Terminal Session
 
 **ptyd**:
 Terminal Session を管理する常駐 daemon。desktop からは socket 越しに使う。
+
+### Skill
+
+**Skill**:
+agent に渡す手順書。`tania` の command を呼ぶことでだけ tania に触り、どの repo で動く agent にも配る。tania repo 自身を開発するための手順書は Skill に含めない。
+_Avoid_: 製品 skill、plugin skill
