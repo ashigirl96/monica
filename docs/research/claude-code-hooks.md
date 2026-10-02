@@ -187,3 +187,19 @@ Agent-related:
 
 4. **SubagentStart と SubagentStop の payload 詳細**:
    - どのフィールドで subagent 識別情報が渡されるかは、実際の webhook 実行で確認が必要
+
+## 追記（2026-10-03、#16 の状態機械を決めるときに docs を再確認）
+
+Source: https://code.claude.com/docs/en/hooks.md、https://code.claude.com/docs/en/hooks-guide.md
+
+- **実行モデル**: command hook は既定で同期（Claude が hook の終了を待つ）。既定 `timeout` は **600 秒**（UserPromptSubmit は 30 秒）。同じ event の複数 hook は並列。`"async": true` にすると Claude は待たず、出力は捨てられ、timeout も無い。
+- **PermissionRequest**: default / plan / acceptEdits で、許可ダイアログを出す直前に発火する（auto / dontAsk / bypassPermissions では発火しない）。payload は `tool_name` / `tool_input` / `tool_use_id` / `permission_mode`。**ExitPlanMode でも発火する**（docs のプラン自動承認の例がこれ）。出力は `hookSpecificOutput.decision.{behavior, updatedInput, updatedPermissions}` で、`updatedPermissions: [{type: "setMode", mode, destination: "session"}]` は公式。exit code 2 は効かない。
+- **許可ダイアログの解消を知らせる hook は無い**。allow なら tool 実行後に PostToolUse、tool が失敗すれば **PostToolUseFailure**（存在する。matcher は tool 名）。ユーザーが deny した場合は何も発火しない（`PermissionDenied` は auto mode か hook が deny したときだけ）。
+- **順序**: PreToolUse → PermissionRequest → tool 実行 → PostToolUse / PostToolUseFailure。
+- **StopFailure**: API エラーで turn が終わったときに Stop の代わりに発火する（両方は来ない）。`error_type`（rate_limit / overloaded / authentication_failed / oauth_org_not_allowed / account_on_hold / billing_error / invalid_request / model_not_found / server_error / max_output_tokens / cloud_credential_error / unknown）と `error_message`。出力と exit code は無視される観測専用。
+- **SessionStart** の `source` は startup / resume / clear / compact / fork。**SessionEnd** の `reason` は clear / resume / logout / prompt_input_exit / other。`/clear` は旧 session_id に SessionEnd(clear)、新 session_id に SessionStart(clear)。`--resume` は同じ session_id、`--fork-session` は新しい session_id で SessionStart(fork)。
+- **SubagentStart / SubagentStop** は `agent_id` / `agent_type`（Stop は `last_assistant_message` も）を持ち、session_id は親と同じ。
+- **Stop の payload に subagent の生存を示す field は公式には無い**。monica が読んでいる `background_tasks[]`（`{id, status}`）と `stop_hook_active` は docs に載っていない。
+- **Notification** の matcher は permission_prompt / idle_prompt（約 60 秒放置で発火）/ auth_success / elicitation_* / agent_needs_input / agent_completed / quota_auto_resume_*。
+- hook payload に Claude Code の **pid は無い**。
+- AskUserQuestion を Esc で捨てたときに何か発火するかは **未記載**。

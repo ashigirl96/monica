@@ -54,8 +54,15 @@ ptyd が持つ 1 つの PTY。app より長生きし、再 attach すると tran
 _Avoid_: session（Agent Session と紛れる）
 
 **Agent Session**:
-Tab の中で動く agent が自分で名乗るセッション。同一性は agent の session_id で、resume と compact は同じ Agent Session の再開、fork は別の Agent Session。Terminal Session とは別物で、同じ Tab に両方が存在する。agent の状態（動作中 / ユーザー待ちとその理由 / 終了）の唯一の正本で、Task に紐づかない Tab でも観測する。
-_Avoid_: session, agent status on Terminal Session
+Tab の中で動く agent が自分で名乗るセッション。同一性は agent の session_id で、resume と compact は同じ Agent Session の再開、fork は別の Agent Session。Terminal Session とは別物で、同じ Tab に両方が存在する。agent の状態の唯一の正本で、Task に紐づかない Tab でも観測する。状態は次の 4 つで、agent 自身の報告だけで遷移する。
+
+- **動作中**: agent が turn を進めている。
+- **ユーザー待ち**: agent がユーザーの行動を待っている。理由は 4 つ。**手空き**（次の指示を待っている。起動直後と turn 完了後）、**質問**（agent が訊いている）、**許可**（tool の実行許可を求めている。プラン承認もこれ）、**エラー**（API エラーで turn が終わった）。
+- **終了**: agent のプロセスが居ない。同じ Agent Session を resume すれば動作を再開できるので、終わりではなく「今は動いていない」。
+- **未観測**: Backend が居ない間に動作中だった Agent Session の、次の報告が届くまでの状態。Terminal Session は生きているが、動作中か手空きかが分からない。
+
+1 つの Terminal Session で live な（終了でない）Agent Session は 1 つだけ。
+_Avoid_: session, agent status on Terminal Session, stopped（手空きと終了が紛れる）, plan 待ち（許可の一種）
 
 ### Process
 
