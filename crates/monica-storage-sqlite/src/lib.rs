@@ -47,6 +47,16 @@ impl SqliteStore {
         // Replaces the handler `busy_timeout` would install, so the lock waits it already performs
         // become observable. `observe::on_busy` reproduces the same schedule.
         conn.busy_handler(Some(observe::on_busy))?;
+        // A rollback journal makes every open reader stall each commit, and a stalled commit then
+        // locks out new readers; WAL lets them proceed side by side. The mode persists in the file.
+        // Two connections switching at once deadlock and one gets SQLITE_BUSY without the busy
+        // handler; it keeps working in the old mode and a later open completes the switch.
+        if let Err(e) =
+            conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0))
+        {
+            log::warn!(target: observe::TARGET_BUSY, "switch to WAL deferred: {e}");
+        }
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.trace_v2(TraceEventCodes::SQLITE_TRACE_PROFILE, Some(observe::on_trace));
         self::migrations::migrate(&mut conn)?;
         // v41 で入る notes_fts を既存 note で初回だけ埋める（ゲート済み・冪等）。

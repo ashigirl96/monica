@@ -125,7 +125,10 @@ pub(crate) mod test_support {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("test.db");
-        let _ = std::fs::remove_file(&path);
+        // A leftover `-wal` would be replayed onto the fresh file, so the sidecars go too.
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+        }
         path
     }
 

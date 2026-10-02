@@ -3450,3 +3450,25 @@ fn unresolved_pull_request_refs_narrow_to_the_requested_task() {
     assert_eq!(scoped[0].number, 11);
     assert_ne!(scoped[0].task_id, second.as_str());
 }
+
+/// Every store operation opens its own connection, so a reader still inside a transaction must not
+/// stall another connection's commit past the busy timeout.
+#[test]
+fn an_open_reader_does_not_block_a_commit() {
+    let path = crate::migrations::test_support::temp_db_path("reader-vs-commit");
+    let reader = SqliteStore::open_at(&path).unwrap();
+    let writer = SqliteStore::open_at(&path).unwrap();
+
+    reader.conn().execute_batch("BEGIN").unwrap();
+    let _: i64 = reader
+        .conn()
+        .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))
+        .unwrap();
+
+    writer
+        .conn()
+        .execute_batch("CREATE TABLE commit_probe(x); INSERT INTO commit_probe VALUES (1)")
+        .expect("the commit must not wait on the open reader");
+
+    reader.conn().execute_batch("COMMIT").unwrap();
+}
