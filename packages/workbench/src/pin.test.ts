@@ -2,7 +2,7 @@ import { afterEach, expect, setSystemTime, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { startFakePtyd } from "./fake-ptyd.ts";
 import { shouldRespawn } from "./pin.ts";
-import { tab } from "./schema.ts";
+import { runspace, tab, terminalSession } from "./schema.ts";
 import { cleanUp, onCleanup, setup } from "./testing.ts";
 
 afterEach(cleanUp);
@@ -182,6 +182,45 @@ test("a pinned Tab whose shell ptyd lost is bound to a new shell after the recon
   expect(created).toMatchObject({
     session_id: respawned?.terminalSessionId,
     cwd: "/work",
+    rows: 24,
+    cols: 80,
+  });
+});
+
+test("a pinned Tab the Backend left on an ended Terminal Session before it stopped is respawned on start", async () => {
+  const { ptyd, db, workbench, client } = setup();
+  const createdAt = new Date(Date.now() - 60_000);
+  db.insert(terminalSession)
+    .values({
+      id: "ts-ended",
+      cwd: "/work",
+      shell: "/bin/zsh",
+      status: "exited",
+      exitCode: 0,
+      createdAt,
+      endedAt: new Date(createdAt.getTime() + 10_000),
+    })
+    .run();
+  db.insert(runspace).values({ id: "rs-pinned", cwd: "/work", sortOrder: 0 }).run();
+  db.insert(tab)
+    .values({
+      id: "tab-pinned",
+      runspaceId: "rs-pinned",
+      cwd: "/work/sub",
+      sortOrder: 0,
+      terminalSessionId: "ts-ended",
+      pinned: true,
+    })
+    .run();
+
+  await workbench.start();
+
+  const created = await ptyd.received((op) => op.op === "create");
+  const respawned = (await client.layout.get()).runspaces[0]?.tabs[0];
+  expect(respawned).toMatchObject({ id: "tab-pinned", pinned: true });
+  expect(created).toMatchObject({
+    session_id: respawned?.terminalSessionId,
+    cwd: "/work/sub",
     rows: 24,
     cols: 80,
   });

@@ -72,14 +72,15 @@ export function createWorkbench(deps: {
   }
 
   // 張り直すかは待った後の transaction の中で決めるので、間に Tab が閉じられたり手で張り直されたりしても二重に起こさない。
-  async function respawnPinnedTabs(endedIds: string[]) {
+  // id を省くと pin された Tab をすべて見る。Exit の記録と張り直しの間で Backend が止まった分も拾うため。
+  async function respawnPinnedTabs(endedIds?: string[]) {
     await ready();
     const respawned = db.transaction((tx) =>
       tx
         .select()
         .from(terminalSession)
         .leftJoin(tab, eq(tab.terminalSessionId, terminalSession.id))
-        .where(inArray(terminalSession.id, endedIds))
+        .where(endedIds ? inArray(terminalSession.id, endedIds) : eq(tab.pinned, true))
         .all()
         .flatMap((row) =>
           row.tab && shouldRespawn(row.terminal_session, row.tab)
@@ -92,8 +93,7 @@ export function createWorkbench(deps: {
     await Promise.all(respawned.map((id) => startTerminalSession(workbench, id, RESPAWN_SIZE)));
   }
 
-  function respawnInBackground(endedIds: string[]) {
-    if (endedIds.length === 0) return;
+  function respawnInBackground(endedIds?: string[]) {
     respawnPinnedTabs(endedIds).catch((error: unknown) => {
       if (!stopping) console.error(`[workbench] respawning pinned Tabs failed: ${error}`);
     });
@@ -120,7 +120,7 @@ export function createWorkbench(deps: {
         opened.close();
         throw new Error("the Workbench has stopped");
       }
-      const { reap, terminate, ended } = reconcile(db, await opened.list());
+      const { reap, terminate } = reconcile(db, await opened.list());
       for (const id of reap) opened.notify({ op: "reap", session_id: id });
       for (const id of terminate) opened.notify({ op: "terminate", session_id: id });
       client = opened;
@@ -128,7 +128,7 @@ export function createWorkbench(deps: {
       exitsDuringReconcile = null;
       for (const [id, exitCode] of exits) onExit(id, exitCode);
       publish({ type: "reconciled" });
-      respawnInBackground(ended);
+      respawnInBackground();
       console.error(
         `[workbench] connected to tania-ptyd; reaped ${reap.length}, terminated ${terminate.length}`,
       );
@@ -234,7 +234,6 @@ function reconcile(db: Db, ptydSessions: SessionInfo[]) {
   const unmatched = new Map(ptydSessions.map((s) => [s.session_id, s]));
   const reap: string[] = [];
   const terminate: string[] = [];
-  const ended: string[] = [];
   db.transaction((tx) => {
     for (const row of tx.select().from(terminalSession).all()) {
       const held = unmatched.get(row.id);
@@ -250,7 +249,6 @@ function reconcile(db: Db, ptydSessions: SessionInfo[]) {
           .set({ status: "lost", endedAt: now })
           .where(eq(terminalSession.id, row.id))
           .run();
-        ended.push(row.id);
         continue;
       }
       if (!held.running) {
@@ -259,7 +257,6 @@ function reconcile(db: Db, ptydSessions: SessionInfo[]) {
           .where(eq(terminalSession.id, row.id))
           .run();
         reap.push(row.id);
-        ended.push(row.id);
         continue;
       }
       tx.update(terminalSession)
@@ -285,7 +282,7 @@ function reconcile(db: Db, ptydSessions: SessionInfo[]) {
         .run();
     }
   });
-  return { reap, terminate, ended };
+  return { reap, terminate };
 }
 
 export function isLive(status: TerminalSession["status"]): boolean {
