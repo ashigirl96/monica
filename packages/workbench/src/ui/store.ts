@@ -348,8 +348,8 @@ export const tabMenuTabAtom = atom((get) => {
 export const terminateTabTerminalSessionAtom = action(async (get, set, tabId: string) => {
   const found = findTab(get, tabId);
   if (!found) return;
-  releaseTabConnection(tabId);
   await clientOf(get).terminalSession.terminate({ id: found.tab.terminalSessionId });
+  releaseTabConnection(tabId);
   set(markEndedAtom, found.tab.terminalSessionId);
   await closeTab(get, set, found);
 });

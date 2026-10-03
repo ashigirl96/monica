@@ -18,22 +18,26 @@ export function terminalDetach(sessionId: string): Promise<void> {
   return shell("terminal_detach", { sessionId });
 }
 
-// Shell は command を別々の thread で走らせ順番を保たないので、書き込みは前の 1 つが届いてから送る。
-const lastWrites = new Map<string, Promise<void>>();
+// Shell は command を別々の thread で走らせ順番を保たないので、書き込みと resize は前の 1 つが届いてから送る。
+const lastSends = new Map<string, Promise<void>>();
+
+function inOrder(sessionId: string, command: string, args: Record<string, unknown>) {
+  const previous = lastSends.get(sessionId) ?? Promise.resolve();
+  const sent = previous.then(() => shell<void>(command, { sessionId, ...args }));
+  const settled = sent.catch(() => {});
+  lastSends.set(sessionId, settled);
+  void settled.then(() => {
+    if (lastSends.get(sessionId) === settled) lastSends.delete(sessionId);
+  });
+  return sent;
+}
 
 export function terminalWrite(sessionId: string, data: string): Promise<void> {
-  const previous = lastWrites.get(sessionId) ?? Promise.resolve();
-  const written = previous.then(() => shell<void>("terminal_write", { sessionId, data }));
-  const settled = written.catch(() => {});
-  lastWrites.set(sessionId, settled);
-  void settled.then(() => {
-    if (lastWrites.get(sessionId) === settled) lastWrites.delete(sessionId);
-  });
-  return written;
+  return inOrder(sessionId, "terminal_write", { data });
 }
 
 export function terminalResize(sessionId: string, rows: number, cols: number): Promise<void> {
-  return shell("terminal_resize", { sessionId, rows, cols });
+  return inOrder(sessionId, "terminal_resize", { rows, cols });
 }
 
 export function onTerminalOutput(

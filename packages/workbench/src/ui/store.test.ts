@@ -38,6 +38,7 @@ const {
 } = await import("./store.ts");
 const { detachedTerminalSessionsAtom, terminalSessionStatusAtom } =
   await import("./terminal-sessions.ts");
+const { getTabConnection, openTabConnection } = await import("./terminal-connections.ts");
 
 const size = { rows: 24, cols: 80 };
 
@@ -206,6 +207,18 @@ test("Terminate kills the Tab's Terminal Session and closes the Tab, without pas
   expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([a.id]);
   // ptyd がまだ exit を報告していないので、行は live のまま Tab を失っている。
   expect(store.get(detachedTerminalSessionsAtom)).toEqual([]);
+});
+
+test("a Terminate that does not reach the Backend leaves the Tab connected to its shell", async () => {
+  const { client, store } = bench();
+  const { tab } = await client.runspace.create(size);
+  await store.set(reloadAtom);
+  openTabConnection(tab.id);
+  store.set(workbenchClientAtom, null);
+
+  await store.set(terminateTabTerminalSessionAtom, tab.id);
+
+  expect(getTabConnection(tab.id)).toBeDefined();
 });
 
 test("New shell binds a Tab whose shell exited to a new running Terminal Session", async () => {
