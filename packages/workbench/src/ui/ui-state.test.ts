@@ -93,6 +93,20 @@ test("the active Runspace and Tab, the sidebar, and the UI zoom come back after 
   });
 });
 
+test("a change made just before the page goes away is saved without waiting for the debounce", async () => {
+  const { client } = setup();
+  await client.runspace.create(size);
+  const store = workbenchStore(client);
+  const stop = persistUiState(store);
+  await store.set(reloadAtom);
+
+  store.set(sidebarWidthAtom, 300);
+  dispatchEvent(new Event("pagehide"));
+
+  expect(await restart(client)).toMatchObject({ sidebarWidth: 300 });
+  stop();
+});
+
 test("a saved Runspace that is gone falls back to the first Runspace and its first Tab", async () => {
   const { client } = setup();
   const first = await client.runspace.create(size);

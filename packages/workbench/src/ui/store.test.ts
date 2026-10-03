@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterEach, expect, mock, setSystemTime, test } from "bun:test";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { Atom, Store } from "jotai";
@@ -24,7 +24,7 @@ mock.module("@tania/ui", () => ({
 }));
 
 const { createStore } = await import("jotai");
-const { cleanUp, linkedWorktree, setup } = await import("../testing.ts");
+const { cleanUp, git, linkedWorktree, setup } = await import("../testing.ts");
 const {
   activateRunspaceAtom,
   activateTerminalTabAtom,
@@ -61,6 +61,7 @@ afterEach(() => {
   cleanUp();
   shellCalls.length = 0;
   toasts.length = 0;
+  setSystemTime();
 });
 
 function bench() {
@@ -451,6 +452,22 @@ test("a Runspace is titled repo:branch while its active Tab is in a linked workt
     { title: "acme:feature/title" },
     { title: `${basename(root)}/acme` },
   ]);
+});
+
+test("a branch switched in a terminal that reports nothing reaches the title on a layout reload 5 seconds later", async () => {
+  const { client, store } = bench();
+  const { worktree } = linkedWorktree({ repo: "acme", branch: "feature/title" });
+  await client.runspace.create({ cwd: worktree, ...size });
+  await store.set(reloadAtom);
+  await until(store, runspaceSummariesAtom, (r) => r[0]?.title === "acme:feature/title");
+
+  git(worktree, "switch", "--quiet", "-c", "feature/renamed");
+  setSystemTime(new Date(Date.now() + 5000));
+  await store.set(reloadAtom);
+
+  expect(
+    await until(store, runspaceSummariesAtom, (r) => r[0]?.title !== "acme:feature/title"),
+  ).toMatchObject([{ title: "acme:feature/renamed" }]);
 });
 
 test("a title in a ~ form the Backend cannot make absolute does not move the cwd", async () => {

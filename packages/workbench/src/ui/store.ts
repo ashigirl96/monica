@@ -196,31 +196,31 @@ const sidebarRunspacesAtom = atom((get): Runspace[] => {
   return [...runspaces.filter(holdsPin), ...runspaces.filter((r) => !holdsPin(r))];
 });
 
-// `git switch` は cwd を変えずに branch を変えるので shell の知らせのたびに引き直し、title を書き換え続ける app に備えて 5 秒で間引く。
+// `git switch` は cwd を変えずに branch を変えるので layout の読み直しと shell の知らせのたびに引き直し、
+// title を書き換え続ける app に備えて cwd ごとに 5 秒で間引く。
 const worktreesAtom = atom<Record<string, Worktree | null>>({});
 const worktreesCheckedAtAtom = atom<Record<string, number>>({});
 const WORKTREE_RECHECK_MS = 5000;
 
-const resolveWorktreesAtom = atom(null, async (get, set, recheck: string[] = []) => {
-  const known = get(worktreesAtom);
+// cwds を省けば、layout のすべての Tab の cwd を引き直す。
+const resolveWorktreesAtom = atom(null, async (get, set, cwds?: string[]) => {
   const checkedAt = get(worktreesCheckedAtAtom);
   const now = Date.now();
-  const unknown = (get(layoutAtom)?.runspaces.flatMap((r) => r.tabs) ?? [])
-    .map((tab) => tab.cwd)
-    .filter((cwd) => !(cwd in known));
-  const cwds = [...new Set([...recheck, ...unknown])].filter(
+  const candidates =
+    cwds ?? (get(layoutAtom)?.runspaces ?? []).flatMap((r) => r.tabs.map((t) => t.cwd));
+  const due = [...new Set(candidates)].filter(
     (cwd) => now - (checkedAt[cwd] ?? 0) >= WORKTREE_RECHECK_MS,
   );
   const client = get(workbenchClientAtom);
-  if (cwds.length === 0 || !client) return;
+  if (due.length === 0 || !client) return;
   set(worktreesCheckedAtAtom, (prev) => ({
     ...prev,
-    ...Object.fromEntries(cwds.map((cwd) => [cwd, now])),
+    ...Object.fromEntries(due.map((cwd) => [cwd, now])),
   }));
-  // 引けなかった cwd は覚えず、5 秒後の次の合図で引き直す。
+  // 引けなかった cwd は前の値のまま残し、5 秒後の次の合図で引き直す。
   const found: Record<string, Worktree | null> = {};
   await Promise.all(
-    cwds.map(async (cwd) => {
+    due.map(async (cwd) => {
       try {
         found[cwd] = await client.worktree.info({ cwd });
       } catch (e) {

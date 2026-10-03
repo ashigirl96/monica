@@ -27,16 +27,25 @@ const uiStateAtom = atom((get): UiState => {
 export function persistUiState(store: Store): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let latest = JSON.stringify(store.get(uiStateAtom));
+  const flush = () => {
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    timer = undefined;
+    saveUiState(store.get(uiStateAtom));
+  };
   // layout を読み直すたびに通知が来るので、保存する値が変わったときだけ予約し直す。
   const unsubscribe = store.sub(uiStateAtom, () => {
     const next = JSON.stringify(store.get(uiStateAtom));
     if (next === latest) return;
     latest = next;
     clearTimeout(timer);
-    timer = setTimeout(() => saveUiState(store.get(uiStateAtom)), SAVE_DEBOUNCE_MS);
+    timer = setTimeout(flush, SAVE_DEBOUNCE_MS);
   });
+  // 窓を閉じると予約した timer ごと消えるので、待っている値をその前に書く。
+  addEventListener("pagehide", flush);
   return () => {
-    clearTimeout(timer);
+    removeEventListener("pagehide", flush);
     unsubscribe();
+    flush();
   };
 }

@@ -51,7 +51,7 @@ export function setup() {
   return { home, ptyd, db, ...booted, restartBackend };
 }
 
-function git(cwd: string, ...args: string[]) {
+export function git(cwd: string, ...args: string[]) {
   const result = Bun.spawnSync(["git", "-C", cwd, ...args]);
   if (!result.success) throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
 }
