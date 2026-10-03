@@ -39,6 +39,9 @@ dev の desktop は `TANIA_HOME` ごとに identifier と vite の port が分�
     window.__taniaTerminals.get(tabId).textarea.dispatchEvent(ev);
     ```
 
+  - xterm が Tab に送ったバイト列は、`window.__taniaTerminals.get(tabId).onData` を購読して読む。合成のキーでは paste や copy のようなブラウザの既定の動作は起きないので、起きるかどうかは dispatch した event の `defaultPrevented` で見る（xterm が encode したキーは cancel される）。key の encode を変えたときは、⌘C・⌘V・⌘A でもこの 2 つを見る。
+  - shell の Tab に Ctrl+V（`\x16`）を送ると、zsh は次の 1 文字を quoted-insert でそのまま入れる。続けて command を送る前に、別のキーを 1 つ送って抜ける。
+
 - **画面の文字**は、dev の webview が晒す `window.__taniaTerminals`（tabId → xterm の `Terminal`）の buffer から読む。cursor の行までの末尾 10 行:
 
   ```js
@@ -92,6 +95,13 @@ dev の desktop は `TANIA_HOME` ごとに identifier と vite の port が分�
   ```
 
 - **Shell の起こし直し**は、`kill -TERM <DESKTOP の pid>` の後に、起こすの手順 3 をやり直す。background の job を TaskStop すると、子孫の ptyd まで止まる。ptyd が生き残れば、再 attach と replay まで確かめられる。
+  - replay の末尾 256 KB から落ちたモードを確かめるときは、起こし直す前に、Tab の pty へ外から書いて transcript を押し出す。shell の pid は `terminal-session list` の `pid` にある。
+
+    ```bash
+    yes 'filler' | head -c 300000 > /dev/$(ps -o tty= -p <shell の pid> | tr -d ' ')
+    ```
+
+  - 末尾に何が残ったかは `$TANIA_HOME/terminal-sessions/<Terminal Session の id>.log` の末尾 256 KB で見る。claude は繋ぎ直した後に自分でも kitty の flag を push し直すので、ptyd が足した分と見分けるには、transcript の末尾に無い CSI が replay の先頭に流れたかを見る。
 - **app の終了**（localStorage の UI 状態のように、終了の手順を通った後に残るものを確かめるとき）は、pid 宛てに AppKit の正規の quit を送る。dev の binary は bundle として登録されていないので、identifier 宛ての `tell application id … to quit` は届かない。
 
   ```bash
