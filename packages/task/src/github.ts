@@ -38,7 +38,10 @@ export async function ghAuthToken(signal: AbortSignal): Promise<string> {
   return token;
 }
 
-export type LinkedIssue = IssueRef & Pick<typeof issue.$inferSelect, "title" | "state">;
+export type LinkedIssue = IssueRef & { nodeId: string } & Pick<
+    typeof issue.$inferSelect,
+    "title" | "state"
+  >;
 
 export type GitHubIssue = LinkedIssue & {
   labels: string[];
@@ -56,6 +59,7 @@ export const BATCH = 50;
 const State = z.enum(["OPEN", "CLOSED"]).transform((s) => (s === "OPEN" ? "open" : "closed"));
 
 const LinkedNode = z.object({
+  id: z.string(),
   number: z.number(),
   title: z.string(),
   state: State,
@@ -63,6 +67,7 @@ const LinkedNode = z.object({
 });
 
 const IssueNode = z.object({
+  id: z.string(),
   number: z.number(),
   title: z.string(),
   state: State,
@@ -101,9 +106,6 @@ export async function queryIssues(
   // repo ごと返らないのは多くが権限の喪失（gh のアカウント違い・SSO）で、写しが黙って古くなるので失敗にする。
   const repository = body.data.repository;
   if (!repository) throw new RepositoryNotFound(reason() || `GitHub could not resolve ${repo}`);
-  // 改名した repo は旧名でも引けるので、照合に使う綴りは呼び手の repo のままにする。
-  const spelling =
-    repository.nameWithOwner.toLowerCase() === repo.toLowerCase() ? repository.nameWithOwner : repo;
   const issues: GitHubIssue[] = [];
   const missing: IssueRef[] = [];
   for (const number of numbers) {
@@ -114,7 +116,8 @@ export async function queryIssues(
     }
     const parsed = IssueNode.parse(node);
     issues.push({
-      repo: spelling,
+      nodeId: parsed.id,
+      repo: repository.nameWithOwner,
       number: parsed.number,
       title: parsed.title,
       state: parsed.state,
@@ -128,6 +131,7 @@ export async function queryIssues(
 
 function linked(node: z.infer<typeof LinkedNode>): LinkedIssue {
   return {
+    nodeId: node.id,
     repo: node.repository.nameWithOwner,
     number: node.number,
     title: node.title,
@@ -145,12 +149,12 @@ ${aliases}
   }
 }
 fragment Copied on Issue {
-  number title state
+  id number title state
   labels(first: 100) { nodes { name } }
   parent { ...Linked }
   blockedBy(first: 50) { nodes { ...Linked } }
 }
-fragment Linked on Issue { number title state repository { nameWithOwner } }
+fragment Linked on Issue { id number title state repository { nameWithOwner } }
 `;
 }
 

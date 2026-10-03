@@ -12,7 +12,7 @@ type FakeIssue = {
 const TOKEN = "fake-token";
 
 export function startFakeGitHub() {
-  const issues = new Map<string, FakeIssue & { ref: string }>();
+  const issues = new Map<string, FakeIssue & { ref: string; id: string }>();
   const repos = new Map<string, string>();
   const failing = new Set<string>();
   const requests: { repo: string; numbers: number[] }[] = [];
@@ -21,11 +21,18 @@ export function startFakeGitHub() {
 
   const key = (ref: string) => ref.toLowerCase();
 
+  // 改名した repo は旧名でも引ける。
+  function find(ref: string) {
+    const { repo, number } = parseRef(ref);
+    return issues.get(key(`${repos.get(key(repo)) ?? repo}#${number}`));
+  }
+
   function node(ref: string) {
-    const found = issues.get(key(ref));
+    const found = find(ref);
     if (!found) throw new Error(`the fake GitHub has no ${ref}`);
     const { repo, number } = parseRef(found.ref);
     return {
+      id: found.id,
       number,
       title: found.title,
       state: found.state === "closed" ? "CLOSED" : "OPEN",
@@ -64,7 +71,7 @@ export function startFakeGitHub() {
       const repository: Record<string, unknown> = { nameWithOwner };
       const errors: object[] = [];
       for (const number of numbers) {
-        const found = issues.get(key(`${nameWithOwner}#${number}`));
+        const found = find(`${nameWithOwner}#${number}`);
         if (!found) {
           repository[`i${number}`] = null;
           errors.push({
@@ -102,7 +109,8 @@ export function startFakeGitHub() {
     requests,
     issue(ref: string, issue: FakeIssue) {
       repos.set(key(parseRef(ref).repo), parseRef(ref).repo);
-      issues.set(key(ref), { ...issue, ref });
+      const id = issues.get(key(ref))?.id ?? `I_${issues.size + 1}`;
+      issues.set(key(ref), { ...issue, ref, id });
     },
     remove(ref: string) {
       issues.delete(key(ref));

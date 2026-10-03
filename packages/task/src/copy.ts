@@ -8,10 +8,6 @@ export function isIssue({ repo, number }: IssueRef) {
   return and(eq(sql`lower(${issue.repo})`, repo.toLowerCase()), eq(issue.number, number));
 }
 
-function findIssue(tx: Tx, ref: IssueRef) {
-  return tx.select().from(issue).where(isIssue(ref)).get();
-}
-
 export function writeIssue(tx: Tx, copied: GitHubIssue, syncedAt: Date): number {
   const parentId = copied.parent && writeLinkedIssue(tx, copied.parent, syncedAt);
   const copy = {
@@ -43,21 +39,26 @@ function writeLinkedIssue(tx: Tx, linked: LinkedIssue, syncedAt: Date): number {
   );
 }
 
-// repo の綴りは最初に書いたときのまま残す。rename で別の綴りになると UNIQUE(repo, number) の既存の行とぶつかりうる。
 function upsert(
   tx: Tx,
-  ref: IssueRef,
+  { nodeId, repo, number }: LinkedIssue,
   update: Partial<typeof issue.$inferInsert>,
-  insert: Omit<typeof issue.$inferInsert, "repo" | "number">,
+  insert: Omit<typeof issue.$inferInsert, "nodeId" | "repo" | "number">,
 ): number {
-  const existing = findIssue(tx, ref);
+  const identity = { nodeId, repo, number };
+  const existing =
+    tx.select({ id: issue.id }).from(issue).where(eq(issue.nodeId, nodeId)).get() ??
+    tx.select({ id: issue.id }).from(issue).where(isIssue({ repo, number })).get();
   if (existing) {
-    tx.update(issue).set(update).where(eq(issue.id, existing.id)).run();
+    tx.update(issue)
+      .set({ ...identity, ...update })
+      .where(eq(issue.id, existing.id))
+      .run();
     return existing.id;
   }
   return tx
     .insert(issue)
-    .values({ repo: ref.repo, number: ref.number, ...insert })
+    .values({ ...identity, ...insert })
     .returning({ id: issue.id })
     .get().id;
 }

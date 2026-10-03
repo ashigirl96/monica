@@ -184,15 +184,17 @@ test("a parent that is itself a Task keeps the labels and parent its own sync wr
   expect(epic.parentId).not.toBeNull();
 });
 
-test("a Task in a renamed repo keeps its row and the spelling it was tracked with", async () => {
+test("a Task in a renamed repo follows the new name, tracked again by either name", async () => {
   const { db, github, client } = setup();
   github.issue("acme/old#1", { title: "One" });
   await client.track({ ref: "acme/old#1" });
   github.renameRepo("acme/old", "acme/new");
-  github.issue("acme/new#1", { title: "One, renamed" });
 
-  const output = await client.track({ ref: "acme/old#1" });
+  const byNewName = await client.track({ ref: "https://github.com/acme/new/issues/1" });
+  const byOldName = await client.track({ ref: "acme/old#1" });
 
-  expect(output).toMatchObject({ ref: "acme/old#1", title: "One, renamed", alreadyTracked: true });
-  expect(copies(db).map((r) => `${r.repo}#${r.number}`)).toEqual(["acme/old#1"]);
+  expect(byNewName).toMatchObject({ ref: "acme/new#1", alreadyTracked: true });
+  expect(byOldName).toMatchObject({ ref: "acme/new#1", alreadyTracked: true });
+  expect(copies(db).map((r) => `${r.repo}#${r.number}`)).toEqual(["acme/new#1"]);
+  expect(db.select().from(task).all()).toHaveLength(1);
 });

@@ -9,11 +9,12 @@ import {
 
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
-// repo は GitHub の nameWithOwner の綴りのまま持ち、照合は小文字で行う（GitHub の repo 名は大文字小文字を区別しない）。
+// 同じ issue かは GitHub の node ID で決め、repo は改名に追従する。node ID で見つからなければ小文字の repo と番号で照らす。
 export const issue = sqliteTable(
   "issue",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
+    nodeId: text("node_id").unique(),
     repo: text("repo").notNull(),
     number: integer("number").notNull(),
     title: text("title").notNull(),
