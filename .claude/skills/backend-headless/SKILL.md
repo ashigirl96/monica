@@ -60,6 +60,13 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
   socket.end();'
   ```
 
+- Agent Session の状態（dot、通知）を claude 無しで動かすには、hook の payload を CLI の hook に流す。claude と同じ経路で `recordHook` に届き、待ちの状態や理由を狙って作れる。payload の field と場面ごとの順は `docs/research/hook-payloads.md`。Terminal Session は帳簿で live なもの（`runspace.create` で開いた Tab の `terminalSessionId`）を使う。それ以外は記録されない。通知は Backend の stdout（`out.jsonl`）に `{"type":"notify",…}` の行で出る。
+
+  ```bash
+  printf '%s' '{"session_id":"s-1","transcript_path":"/tmp/t.jsonl","cwd":"/Users/me/src/tania","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion"}' |
+    TANIA_HOME=${TMPDIR%/}/tania-s2 TANIA_TERMINAL_SESSION_ID=ts-… scripts/tania-dev workbench hook claude
+  ```
+
 - HTTP: `/health` は token 無しで返る。port と token は `backend.json` にある。
 - ptyd にだけある session を作るには、socket に直接 `hello` と `create` を送る。Backend を起こし直すと reconcile が取り込む。protocol は `crates/terminal-protocol/src/lib.rs`。
 

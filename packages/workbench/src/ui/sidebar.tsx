@@ -2,12 +2,15 @@ import { cn, PinIcon, useDragReorder } from "@tania/ui";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useState } from "react";
 import type { TerminalSession } from "../contract.ts";
+import { shortPath } from "../paths.ts";
+import type { AgentDot } from "./agent-dot.ts";
+import { AgentDotMark } from "./agent-dot-mark.tsx";
 import { JumpHint } from "./jump-hint.tsx";
 import { jumpHintTargetsAtom } from "./jump-hints.ts";
-import { shortPath } from "./paths.ts";
 import { detachedTerminalSessionsAtom } from "./terminal-sessions.ts";
 import {
   activateRunspaceAtom,
+  agentDotOfTerminalSessionAtom,
   draggedTabIdAtom,
   terminateTerminalSessionAtom,
   moveTabToRunspaceAtom,
@@ -19,15 +22,18 @@ import {
 
 function DetachedTerminalSessionItem({
   terminalSession,
+  agentDot,
   onReattach,
   onTerminate,
 }: {
   terminalSession: TerminalSession;
+  agentDot: AgentDot | null;
   onReattach: () => void;
   onTerminate: () => void;
 }) {
   return (
     <div className="group flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-muted-foreground">
+      <AgentDotMark dot={agentDot} />
       <div className="min-w-0 flex-1">
         <span className="block truncate text-xs font-medium">{shortPath(terminalSession.cwd)}</span>
         <span className="block truncate font-mono text-[10px] text-muted-foreground/60">
@@ -104,6 +110,7 @@ function RunspaceItem({
           <span className="truncate text-[10px] text-muted-foreground">{runspace.description}</span>
         )}
       </div>
+      <AgentDotMark dot={runspace.agentDot} />
     </button>
   );
 }
@@ -143,6 +150,7 @@ export function WorkbenchSidebar() {
   const terminate = useSetAtom(terminateTerminalSessionAtom);
   const reorder = useSetAtom(reorderRunspacesAtom);
   const jumpHints = useAtomValue(jumpHintTargetsAtom);
+  const agentDotOfTerminalSession = useAtomValue(agentDotOfTerminalSessionAtom);
   const { dragOverId, handlersFor } = useDragReorder(reorder);
 
   const renderItem = (runspace: RunspaceSummary) => (
@@ -178,6 +186,7 @@ export function WorkbenchSidebar() {
                 <DetachedTerminalSessionItem
                   key={terminalSession.id}
                   terminalSession={terminalSession}
+                  agentDot={agentDotOfTerminalSession(terminalSession.id)}
                   onReattach={() => void reattach(terminalSession.id)}
                   onTerminate={() => void terminate(terminalSession.id)}
                 />

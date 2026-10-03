@@ -1,7 +1,7 @@
 import { useCallback, useRef } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
+import { baseName } from "../paths.ts";
 import { jumpHintsActiveAtom } from "./jump-hints.ts";
-import { baseName } from "./paths.ts";
 import {
   type TerminalSessionStatus,
   type TerminalSessionStatusEntry,

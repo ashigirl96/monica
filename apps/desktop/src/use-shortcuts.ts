@@ -1,4 +1,5 @@
 import {
+  copyActiveAgentSessionIdAtom,
   createRunspaceAtom,
   createTerminalTabAtom,
   cycleRunspaceAtom,
@@ -63,6 +64,7 @@ export function useShortcuts() {
   const moveActiveRunspace = useSetAtom(moveActiveRunspaceAtom);
   const setUiZoom = useSetAtom(setUiZoomAtom);
   const toggleTabPin = useSetAtom(toggleTabPinAtom);
+  const copyActiveAgentSessionId = useSetAtom(copyActiveAgentSessionIdAtom);
 
   useEffect(() => {
     if (!jumpActive) return;
@@ -75,6 +77,12 @@ export function useShortcuts() {
     const bindings: KeyBinding[] = [
       { alt: true, code: "KeyP", editable: true, action: () => void createRunspace() },
       { alt: true, code: "KeyJ", editable: true, action: () => cycleRunspace("down") },
+      {
+        alt: true,
+        code: "KeyC",
+        editable: true,
+        action: () => (copyActiveAgentSessionId() ? undefined : false),
+      },
       { alt: true, code: "KeyK", editable: true, action: () => cycleRunspace("up") },
       {
         ctrl: true,
@@ -139,5 +147,6 @@ export function useShortcuts() {
     moveActiveRunspace,
     setUiZoom,
     toggleTabPin,
+    copyActiveAgentSessionId,
   ]);
 }

@@ -124,7 +124,7 @@ export const router = os.router({
   },
   agentSession: {
     recordHook: os.agentSession.recordHook.handler(({ context, input }) => {
-      for (const sessionId of recordHook(context.db, input)) {
+      for (const sessionId of recordHook(context, input)) {
         context.workbench.events.publish("change", { type: "agentSession", sessionId });
       }
     }),

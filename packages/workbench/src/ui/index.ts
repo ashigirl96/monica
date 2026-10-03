@@ -1,6 +1,7 @@
 export { handleJumpMode, type JumpModeActions } from "./jump-mode.ts";
 export { jumpHintsActiveAtom, jumpToHintAtom } from "./jump-hints.ts";
 export {
+  copyActiveAgentSessionIdAtom,
   createRunspaceAtom,
   createTerminalTabAtom,
   cycleRunspaceAtom,
