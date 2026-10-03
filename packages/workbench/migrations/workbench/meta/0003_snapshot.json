@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7d0a5e9b-951b-4cce-8b9f-fb894a0027d0",
+  "id": "cc1d0d30-252b-4950-b11f-f66cbb47a55e",
   "prevId": "605a953e-f5e9-45a0-81a8-46181a3d044c",
   "tables": {
     "agent_session": {
@@ -128,12 +128,13 @@
         }
       },
       "indexes": {
-        "agent_session_terminal_session_idx": {
-          "name": "agent_session_terminal_session_idx",
+        "agent_session_live_per_terminal_session_idx": {
+          "name": "agent_session_live_per_terminal_session_idx",
           "columns": [
             "terminal_session_id"
           ],
-          "isUnique": false
+          "isUnique": true,
+          "where": "state <> 'ended'"
         }
       },
       "foreignKeys": {
@@ -153,7 +154,36 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "agent_session_wait_reason": {
+          "name": "agent_session_wait_reason",
+          "value": "(state = 'waiting') = (wait_reason IS NOT NULL)"
+        },
+        "agent_session_wait_tool": {
+          "name": "agent_session_wait_tool",
+          "value": "wait_tool IS NULL OR wait_reason = 'permission'"
+        },
+        "agent_session_error_type": {
+          "name": "agent_session_error_type",
+          "value": "error_type IS NULL OR wait_reason = 'error'"
+        },
+        "agent_session_end_reason": {
+          "name": "agent_session_end_reason",
+          "value": "(state = 'ended') = (end_reason IS NOT NULL)"
+        },
+        "agent_session_ended_at": {
+          "name": "agent_session_ended_at",
+          "value": "(state = 'ended') = (ended_at IS NOT NULL)"
+        },
+        "agent_session_session_end_reason": {
+          "name": "agent_session_session_end_reason",
+          "value": "session_end_reason IS NULL OR end_reason = 'session_end'"
+        },
+        "agent_session_unobserved_since": {
+          "name": "agent_session_unobserved_since",
+          "value": "(state = 'unobserved') = (unobserved_since IS NOT NULL)"
+        }
+      }
     },
     "runspace": {
       "name": "runspace",

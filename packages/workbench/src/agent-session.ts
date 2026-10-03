@@ -53,7 +53,7 @@ export function recordHook(
     const displaced = takesOverTerminal(own, next, event)
       ? beside.map((row) => supersede(row, now))
       : [];
-    return saveChanged(tx, [next, ...displaced]);
+    return saveChanged(tx, [...displaced, next]);
   });
 }
 

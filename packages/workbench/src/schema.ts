@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const terminalSession = sqliteTable("terminal_session", {
   id: text("id").primaryKey(),
@@ -66,5 +66,22 @@ export const agentSession = sqliteTable(
     endedAt: integer("ended_at", { mode: "timestamp_ms" }),
     unobservedSince: integer("unobserved_since", { mode: "timestamp_ms" }),
   },
-  (t) => [index("agent_session_terminal_session_idx").on(t.terminalSessionId)],
+  (t) => [
+    uniqueIndex("agent_session_live_per_terminal_session_idx")
+      .on(t.terminalSessionId)
+      .where(sql`state <> 'ended'`),
+    check("agent_session_wait_reason", sql`(state = 'waiting') = (wait_reason IS NOT NULL)`),
+    check("agent_session_wait_tool", sql`wait_tool IS NULL OR wait_reason = 'permission'`),
+    check("agent_session_error_type", sql`error_type IS NULL OR wait_reason = 'error'`),
+    check("agent_session_end_reason", sql`(state = 'ended') = (end_reason IS NOT NULL)`),
+    check("agent_session_ended_at", sql`(state = 'ended') = (ended_at IS NOT NULL)`),
+    check(
+      "agent_session_session_end_reason",
+      sql`session_end_reason IS NULL OR end_reason = 'session_end'`,
+    ),
+    check(
+      "agent_session_unobserved_since",
+      sql`(state = 'unobserved') = (unobserved_since IS NOT NULL)`,
+    ),
+  ],
 );

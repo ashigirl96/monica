@@ -161,6 +161,25 @@ test("a session resumed in another Terminal Session whose SessionStart was misse
   expect(rowOf(db, "s-resident")).toMatchObject({ state: "ended", endReason: "superseded" });
 });
 
+test("the books refuse a second live Agent Session in one Terminal Session", () => {
+  const { db } = setup();
+  seedTerminalSession(db, "ts-a", "running");
+  const at = new Date(0);
+  const live = (sessionId: string) => ({
+    sessionId,
+    terminalSessionId: "ts-a",
+    state: "running" as const,
+    cwd: "/work",
+    lastEventName: "UserPromptSubmit",
+    lastEventAt: at,
+    stateChangedAt: at,
+    firstSeenAt: at,
+  });
+  db.insert(agentSession).values(live("s-1")).run();
+
+  expect(() => db.insert(agentSession).values(live("s-2")).run()).toThrow(/UNIQUE/);
+});
+
 test("changes signals every Agent Session a hook changed", async () => {
   const { db, workbench, client } = setup();
   seedTerminalSession(db, "ts-a", "running");
