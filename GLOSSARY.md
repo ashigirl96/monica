@@ -57,6 +57,10 @@ _Avoid_: workspace
 **Tab**:
 Runspace 内の 1 枚の端末画面。閉じても Terminal Session は止まらず detach されるだけ。
 
+**Pin**:
+Tab を常駐させる印。pin された Tab は閉じられず、その Terminal Session も終了させられず、shell が終わると新しい Terminal Session で張り直される（起動してすぐ終わった時は張り直さない）。pin された Tab は 1 つの Runspace に 1 つまでで、同じ Runspace の別の Tab を pin すると付け替わる。pin された Tab の無い Runspace（Bench を除く）にほかの Tab があれば、pin した Tab を新しい Runspace に切り出す。pin を外しても元の Runspace には戻らない。別の Runspace へ移すと外れる。Bench の Tab も pin できるが、Task を close すると他の Tab と同じく消える。
+_Avoid_: 固定, pinned runspace（印は Tab に付く）
+
 **Terminal Session**:
 ptyd が持つ 1 つの PTY。app より長生きし、再 attach すると transcript を replay する。どの Tab も表示していない生きている Terminal Session を detached と呼び、Tab で開き直す（reattach）か終了させるまで残る。
 _Avoid_: session（Agent Session と紛れる）

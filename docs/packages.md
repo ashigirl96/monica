@@ -201,20 +201,72 @@ contract を走査するテストを 1 本置き、description と output が全
 - `runspace.create { cwd?, rows, cols } → { runspaceId, tab }` は、Runspace・Tab・`starting` の Terminal Session を 1 transaction で作り、commit 後に Create する（`tab.open` と同じ形）。cwd を省けば `$HOME`。空の Runspace を作ってから `tab.open` を呼ぶ 2 段にすると、間で webview の reload や Backend の再起動が起きたときに空の Runspace が残り、消す規則が無いため。
 - `tab.close` と `tab.move` は、Tab が抜けて 0 になった所有されていない Runspace を同じ transaction で消す。CLI の Attach のように webview の無い経路でも、空の Runspace が残らない。所有された Runspace（Bench）を残す例外は、Task v1 の slice 2 が所有の印と一緒に足す（ADR-0012）。
 - layout が空になったら、webview が `runspace.create` で 1 つ作る（monica の `initialState()`）。
-- shell が終わった Tab は webview が閉じる。接続中の Tab で Shell の Exit を受けたら、webview が `tab.close` を呼ぶ（monica どおり。pin の Tab の扱いは「Workbench の UI 状態と Tab の pin」#38）。Backend は行を exited にするだけで、Tab を閉じない。exit の時点で接続していなかった Tab と、lost / failed の Tab は、overlay を出したまま `tab.respawn` か `tab.close` を待つ。
+- shell が終わった Tab は webview が閉じる。接続中の Tab で Shell の Exit を受けたら、webview が `tab.close` を呼ぶ（monica どおり）。Backend は行を exited にするだけで、Tab を閉じない。exit の時点で接続していなかった Tab と、lost / failed の Tab は、overlay を出したまま `tab.respawn` か `tab.close` を待つ。pin された Tab は例外で、webview は閉じず、Backend が張り直す（「pin」の節）。
+
+### pin
+
+`GLOSSARY.md` の Pin を帳簿で守る。帳簿に置く理由は ADR-0014。
+
+- `tab.pinned`（既定 false）に `(runspace_id) WHERE pinned` の部分 unique index を張り、`layout.get` の Tab に載せる。
+- `tab.pin { id }`: Runspace に pin された別の Tab があれば、pin をこの Tab に付け替える。無ければ、所有されていない Runspace にほかの Tab があるとき、新しい Runspace（cwd は Tab の cwd、並びは末尾）を作って Tab を移してから立てる。それ以外はその場で立てる。所有された Runspace（Bench）でその場で立てる分岐は、Task v1 の slice 2 が所有の印と一緒に足す。
+- `tab.unpin { id }`: 印を外すだけで、元の Runspace には戻さない。
+- `tab.close`、`terminalSession.terminate`、`runspace.remove` は、pin された Tab が対象か中にあれば `CONFLICT` で断る。
+- `tab.move` と `moveTab`（Attach）は、Tab を別の Runspace へ移したら同じ transaction で pin を外す。同じ Runspace の中の並べ替えでは外さない。
+- `removeRunspace`（Task の close）は pin を見ない。Bench の pin された Tab も他の Tab と同じく消える。
+- webview は ⌘P で pin を切り替える（monica どおり）。sidebar は pin された Tab を持つ Runspace を先頭の Pinned グループにまとめ、グループの中は `sort_order` 順に並べる。drag でグループはまたげない。
+
+張り直し:
+
+- Backend は Exit を受けて行を exited にし、Reap した後で、その Terminal Session を指す Tab が pin されていれば、新しい `starting` の session を作って Tab に結び直し、commit 後に Create する（`tab.respawn` と同じ形）。size は 24×80 で始め、attach の resize で追いつく。
+- reconcile で exited か lost にした行も、pin された Tab が指していれば、reconcile の後に同じく張り直す。
+- 張り直さないのは、failed の行と、`ended_at - created_at` が 2 秒未満の行。その Tab は overlay を出したまま `tab.respawn` を待つ。`.zshrc` が壊れていて即死を繰り返す shell を、起こし続けないため。
+- Exit の時点で Tab が無いか pin されていなければ、何もしない。Task の close で消えた Bench の Tab は張り直さない。
+- webview は、`changes` で Tab の `terminalSessionId` が替わったら、新しい session に attach し直す。
 
 ### 終わった行
 
 - exited / lost / failed の `terminal_session` と、終了の `agent_session` の行は消さない。Run の行は履歴として消さず（Task v1）、`run.agent_session_id` → `agent_session.terminal_session_id` の FK が残るため。1 行は 200 byte 程度で、GC の読み手もいない。
 - 一覧は画面が使う行に絞る。
   - `terminalSession.list` は、live か Tab に指されている行だけを返す。Detached グループと Tab の overlay の材料。CLI の `tania workbench terminal-session list` も同じものを出す。
-  - `agentSession.list` は、終了でない行だけを返す。Tab の status dot の材料。
+  - `agentSession.list` は、終了でない行だけを返す。status dot の材料（「Workbench の UI 状態と status dot」の節）。
 
 ### Tab の外から来た hook
 
 - `recordHook` は、input の Terminal Session が帳簿に無いか終わっている（exited / lost / failed）なら、何も書かず通知も出さずに、stderr に 1 行出して正常に返す。Agent Session は Tab の中で動く agent なので、どの Tab にも無い Terminal Session の agent は観測しない。
 - 起きるのは、env の `TANIA_TERMINAL_SESSION_ID` が Tab の外（Tab で起こした tmux server、Tab から `code .` で開いたエディタの端末、`nohup`）へ漏れたときと、DB を消した後で reconcile が ptyd の session を取り込む前に hook が届いたとき。
 - 生きている Terminal Session の id が漏れた場合は、Backend には見分けられない。payload に pid が無いため。その agent は Tab の agent として観測され、SessionStart で Tab の agent を superseded にする（ADR-0008 の既知のずれ）。
+
+## Workbench の UI 状態と status dot
+
+帳簿に載せない Workbench の画面の状態と、Agent Session の状態の見せ方。どちらも `packages/workbench/src/ui` に置く。
+
+### UI 状態
+
+- webview の localStorage に置く（ADR-0014）。中身は active な Runspace とその active Tab、sidebar の開閉と幅（160〜360、既定 200）、UI zoom（0.8〜1.6、既定 1）。monica の `ui-state.json` から、Space、Work Board、window ごとの入れ子を除いた形。
+- 端末の font size と、active でない Runspace の active Tab は保存しない（monica どおり）。
+- 書き込みは 500ms の debounce。localStorage は同期で読めるので、monica の render 前の hydrate は要らない。
+- 保存した id が `layout.get` に無ければ、先頭の Runspace と、その先頭の Tab に戻す（monica の `resolveWorkbenchActive`）。読めないか壊れていれば既定値で始める。
+
+### status dot
+
+Tab の dot（label の左）は、その Tab の Terminal Session の live な Agent Session の状態を写す。材料は `agentSession.list`。
+
+| Agent Session | dot |
+|---|---|
+| 動作中 | 緑の点滅 |
+| 質問・許可 | 琥珀の点滅 |
+| エラー | 赤 |
+| 手空き | 薄い琥珀 |
+| 未観測 | 灰の輪（中抜き） |
+| 終了、または Agent Session が無い | 出さない |
+
+- hover の title は状態の語にし、質問と許可はそこで見分ける。
+- plan 承認の色は持たない。plan の承認は許可の一種で、ExitPlanMode は自動承認されて待ちにならない（#16）。
+- 見たかどうか（既読）は持たない。
+- Terminal Session の dot（label の右。exited / lost / failed）は monica のまま残す。
+- sidebar の Runspace の行には、その Runspace の Tab の Agent Session から 1 つを選んで出す。優先順は 質問・許可 > エラー > 手空き > 未観測 > 動作中。Bench も同じ規則で、Task の表示状態は使わない（Bench のラベルの語は task の slot が出す）。Detached グループの行にも Tab と同じ dot を出す。
+- 状態と色の対応は Task の型を借りない。monica の `lib/status-config` は Task の `DisplayStatus` を借りていたが、workbench は task を import しない（ADR-0005）。
+- tania が前面にある間は通知のバナーが出ないので、この dot が代わりになる（ADR-0013）。active でない Runspace の待ちは、Runspace の行の dot で気づく。
 
 ## tab の env と shim
 
