@@ -15,8 +15,8 @@ monica は hook を受けるたびに agent の状態を TaskRun と TerminalSes
 ## Consequences
 
 - Agent Session の同一性は agent の session_id。resume と compact は同じ Agent Session の再開で Run は増えず、fork は別の Agent Session なので新しい Run になる。
-- Run は Bench の Tab で Agent Session が始まった時か Attach した時に生まれ、その Agent Session が終わるまで、Tab がどこに移っても Task に属し続ける。Bench への所属が決めるのは「これから始まる Agent Session を Run にするか」だけ。
+- Run は「Bench の Runspace にある Tab の live な Agent Session で、どの Run でもないものは、その Bench の Task の Run になる」という不変条件から生まれる。task はこれを workbench の event（Agent Session の作成と居場所の移動、Tab の移動）を購読して保ち、Backend の起動時に 1 回全件に当てる。Bench の Tab で始まった Agent Session も、Attach で Bench に入った Agent Session も同じ規則で Run になり、Attach は CLI でも picker でも GUI の drag でもよい。一度 Run になった Agent Session は、終わるまで Tab がどこに移っても Task に属し続ける。CLI と picker の Attach は、Tab の Agent Session が既に別の Task の Run なら断る（#13）。
 - Main Run / side run の区別は無い。Task の表示状態は所属する Run の Agent Session を集約して導き、resume の対象は最新の Run。
 - worktree の準備状態（準備中 / 準備済み / 失敗）は Bench が持つ。Bench は最初に開いた時に作られ、cwd は変えず、Task の close で壊れ、reopen で作り直す。
-- hook の受け口は env の terminal session id と payload の session_id だけで Agent Session を特定し、Task は Tab → Runspace → Bench で辿る。Task の解決に env の task id は要らない。Attach は「Tab を Bench の Runspace に移す」1 操作になる。
+- hook の受け口は env の terminal session id と payload の session_id だけで Agent Session を特定する。tab の CLI が Task を引くときは、env の terminal session id から、その Terminal Session の live な Agent Session の Run の Task を引き、無ければ Tab → Runspace → Bench の Task を引く。Task の解決に env の task id は要らない。Attach は「Tab を Bench の Runspace に移す」1 操作になる。
 - Task 自身が保存する状態は open / closed だけ。着手済みか、ユーザー待ちか、片付け待ちかは Run / Agent Session / Bench / Issue からの導出で、Work Board の列もすべて導出で作る。

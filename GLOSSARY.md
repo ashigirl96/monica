@@ -30,15 +30,15 @@ _Avoid_: refresh, fetch, 取り込み（track と紛れる）
 _Avoid_: Project, repository
 
 **Run**:
-Task の上で動いた Agent Session 1 回分の対応。Bench の Tab で Agent Session が始まった時か Attach した時に生まれ、その Agent Session が終わるまで、Tab がどこに移っても Task に属し続ける。状態は持たず、agent の状態は Agent Session から導く。Run どうしに主従は無い。
+Task の上で動いた Agent Session 1 回分の対応。Bench の Tab にいる live な Agent Session は、どの Run でもなければその Bench の Task の Run になる（Bench の Tab で始まった時も、Tab を Bench に移した時も）。その Agent Session が終わるまで、Tab がどこに移っても Task に属し続ける。状態は持たず、agent の状態は Agent Session から導く。Run どうしに主従は無い。
 _Avoid_: TaskRun, Main Run, primary run, side run
 
 **Bench**:
-Task が 1 つ所有する Runspace。最初に開いた時に作られ、cwd（worktree か Repo の checkout か）はその後変えない。Task を close すると壊れ、reopen すると作り直す。Workbench（画面）とは別物。
+Task が 1 つ所有する Runspace。最初に開いた時か、Bench の無い Task に Attach した時に作られ、cwd（worktree か Repo の checkout か）はその後変えない。Tab が 1 つも無くなっても残り、Workbench の操作では消えない。Task を close すると壊れ（close を呼んだ Tab だけは普通の Runspace に残る）、reopen すると作り直す。Workbench（画面）とは別物。
 _Avoid_: task runspace, bench runspace
 
 **Attach**:
-既にある Tab を Bench に移すこと。その Tab の Agent Session はその時点で Task の Run になる。
+既にある Tab を Bench に移すこと。CLI でも picker でも、Tab を Bench へ drag しても同じ。その Tab の live な Agent Session がどの Run でもなければ、その時点で Task の Run になる。既に別の Task の Run なら、CLI と picker の Attach は断る。
 
 **表示状態**:
 Task で次に手を動かすのが誰か（私か、agent か、setup script か、誰でもないか）を、Run の Agent Session と Bench と Issue から導いた 1 語。保存しない。closed、ユーザー待ち・未観測・動作中（live な Run の Agent Session から）、片付け待ち（Issue は閉じたが Task は開いている）、未着手（Bench が無い）、準備中・準備失敗（Bench の準備）、終了（Bench はあるが live な Run が無い）のどれか。
@@ -51,7 +51,7 @@ _Avoid_: DisplayStatus, status, Task の状態（Task 自身の状態は open / 
 _Avoid_: Work Bench, terminal view
 
 **Runspace**:
-Workbench のサイドバーの 1 項目。cwd と環境変数を共有する Tab の束。
+Workbench のサイドバーの 1 項目。新しい Tab が開く cwd を共有する Tab の束。環境変数は持たない。最後の Tab を閉じると消える（Bench を除く）。
 _Avoid_: workspace
 
 **Tab**:

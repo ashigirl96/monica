@@ -87,7 +87,7 @@ export function createTask(deps: { db: Db; workbench: Workbench }): Task;
 
 - `events`: その domain の変更を知らせる in-process の publisher。
 - `start()` / `stop()`: 起動時と終了時の処理。workbench は ptyd への接続（無ければ spawn、版違いは入れ替え）と reconcile（ADR-0011）、task は 5 分おきの背景 sync（#18）。
-- 他の domain から呼ばれる書き込み: 第 1 引数に transaction（`db` でもよい）を取る**同期**の method。task は `db.transaction((tx) => { workbench.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。ptyd や fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。workbench の同期 method は `createRunspace` / `removeRunspace` / `moveTab` / `openTab`、commit 後の async は `startTerminalSession` / `terminateTerminalSessions`（#22）。
+- 他の domain から呼ばれる書き込み: 第 1 引数に transaction（`db` でもよい）を取る**同期**の method。task は `db.transaction((tx) => { workbench.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。ptyd や fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。workbench の同期 method は `createRunspace` / `removeRunspace` / `moveTab` / `openTab`、commit 後の async は `startTerminalSession` / `terminateTerminalSessions`（#22）。`createRunspace` が作るのは所有された Runspace で、`removeRunspace(tx, id, { spare? })` は `spare` の Tab だけを残して所有を解ける（ADR-0012）。
 
 他の domain から呼ばれない処理は router の handler の中に書いてよい。
 
@@ -158,7 +158,7 @@ contract を走査するテストを 1 本置き、description と output が全
 - exit code は 0 = 成功、1 = それ以外の失敗、2 = Backend 不在。trpc-cli は usage エラーも handler の throw も 1 で `process.exit` を自分で呼ぶので、`run({ process: { exit } })` で差し替え、投げ返される `FailedToExitError` を catch して写像する。
 - `prompts: false` を固定する。
 - completions は trpc-cli の生成に任せる（#12）。
-- hook の受け口は `tania workbench hook claude`（`@tania/workbench/cli` の手書き command）。Backend 不在なら retry せず exit 0（ADR-0007）、ExitPlanMode の即 allow は Backend を待たない（#16）。
+- hook の受け口は `tania workbench hook claude`（`@tania/workbench/cli` の手書き command）。仕様は「tab の env と shim」の節。
 - SKILL.md と CLI を突き合わせる検査テストは apps/cli に置く（ADR-0006）。
 - oRPC 2.0 で `RPCLink` の引数が変わったときに直すのは `apps/cli/src/backend.ts` と `apps/desktop/src/backend.ts` の 2 箇所だけ（#21）。
 
@@ -167,8 +167,65 @@ contract を走査するテストを 1 本置き、description と output が全
 - `src/` は app の枠だけを持つ。layout、shortcut、Backend client の provider、Shell からの `backend-endpoint` event による再接続。domain の画面は `@tania/<d>/ui` から読む。
 - domain の ui には自分の contract の client だけを渡す（workbench の ui は `client.workbench`）。oRPC の client は callable な Proxy なので、React の state に入れるときは `setState(() => client)`（#8 の詰まった点 5）。
 - Shell の terminal command を呼ぶ wrapper（monica の `commands/terminal.ts`）は `packages/workbench/src/ui` に置く。
+- workbench の ui は Task の要素を出す場所を 2 つの slot として props で受け、apps/desktop が `@tania/task/ui` の component をはめる。`renderRunspaceLabel(runspaceId)`（Bench のラベル `<repo>#<n> <title>`、準備中・準備失敗のときだけその語を添える）と `tabMenuItems(tab)`（「Attach to Task…」の picker）。task の ui は `task.bench.list`（`{ runspaceId, ref, title, setupState }[]`）と `task.changes` で描き直す。workbench の ui は Task を import しない（ADR-0005）。
 - Tailwind の `@source` に `packages/*/src/ui` を足す。
 - `src-tauri/` は Shell。Backend の監督（ADR-0007）と terminal の中継だけを持つ。terminal command は attach / detach / write / resize の 4 本で、ptyd は spawn しない（ADR-0011）。
+
+## tab の env と shim
+
+Terminal Session を作るときに Backend が ptyd の Create に渡す env と、Backend が `start()` で書く 3 つのファイル（shim、claude wrapper、hook の settings）の仕様。3 つのファイルは内容に差分があるときだけ書き直す。ここと ADR-0008 の Agent Session の観測は、Workbench を持ち込む骨格の実装に含める。Task が無い Tab でも観測するため（ADR-0005）。
+
+### env
+
+| 名前 | 値 |
+|---|---|
+| `TANIA_HOME` | Backend の home |
+| `TANIA_TERMINAL_SESSION_ID` | `ts-<uuidv7>` |
+| `ZDOTDIR` | `$TANIA_HOME/shell/zdotdir`（shim） |
+| `TANIA_USER_ZDOTDIR` | Backend の env の `ZDOTDIR`。無ければ空で、shim は `$HOME` を使う |
+| `PATH` | 先頭に `$TANIA_HOME/bin`。zsh 以外の shell 向けの保険で、zsh では shim が最後に置き直す |
+
+- Tab id、task id と ref、run id、Backend の port と token は渡さない（ADR-0005 / 0007 / 0011）。Runspace は env を持たない。`.tania/setup.sh` にも `TANIA_*` を足さない。
+- ptyd を spawn するときは、Backend の env から `TANIA_*`（`TANIA_HOME` は付け直す）、`CLAUDECODE`、`CLAUDE_CODE_*` を落とす。ptyd は自分の env を全 tab に渡すので、Claude Code の中から `bun run desktop` を起こすとこれらが全 tab に漏れ、wrapper の入れ子の判定が壊れる。
+- tab で動く CLI は env の `TANIA_TERMINAL_SESSION_ID` を呼び手として procedure の input に入れる（`current`、`attach`、`close`）。Backend はその Terminal Session の live な Agent Session の Run の Task を引き、無ければ Tab → Runspace → Bench の Task を引く。`current` の解決元は `run` か `bench`。Claude Code が Bash tool に渡す `CLAUDE_CODE_SESSION_ID` は非公開なので使わない。
+
+### shim（`$TANIA_HOME/shell/zdotdir/`）
+
+ptyd は shell を常に `--login` で起こすので、zsh は `.zshenv` → `.zprofile` → `.zshrc` → `.zlogin` の順に shim を読む。
+
+- 4 枚とも、ZDOTDIR を一時的にユーザーの値（`TANIA_USER_ZDOTDIR`、空なら `$HOME`）にして同名のファイルを source するだけ。ユーザーの `.zshenv` が ZDOTDIR を変えたら、以降はその値から読む。
+- `.zshrc` の最後で `$TANIA_HOME/bin` を PATH の先頭に置き直す。ユーザーの rc が PATH の前に何を足しても、dev の tab の `tania` と `claude` は `$TANIA_HOME/bin` のものを指す。
+- `.zlogin` の最後で ZDOTDIR をユーザーの値に戻して export する（元が未設定なら unset）。tab から起こした子（dev の desktop、tmux、Claude Code の Bash tool）は shim を通らない。
+- `claude` の shell 関数は定義しない。Claude Code の Bash tool は shell 関数を snapshot に取り込むので、関数にすると agent の中から起こした `claude` にも効いてしまう。
+
+### claude wrapper（`$TANIA_HOME/bin/claude`）
+
+- PATH から自分の directory 以外の `claude` を探して exec する。
+- `TANIA_TERMINAL_SESSION_ID` があり、`CLAUDECODE` が無いときだけ `--settings $TANIA_HOME/shell/claude/settings.json` を足す。`CLAUDECODE` があるのは agent の Bash tool から起こした入れ子の claude で、hook を付けると同じ Terminal Session の SessionStart が親の Agent Session を superseded にする（ADR-0008）。
+- `--session-id` は足さない。Run は Bench の Tab に居る Agent Session から生まれる（ADR-0005）。
+- `claude` を絶対パスで呼ぶと wrapper を通らず、その Agent Session は観測されない。
+
+### hook の settings（`$TANIA_HOME/shell/claude/settings.json`）
+
+- 張る hook は #16 の 10 本で、timeout はすべて 5 秒（既定の 600 秒を必ず上書きする）。SessionStart、UserPromptSubmit、PreToolUse（matcher `AskUserQuestion`）、PostToolUse、PostToolUseFailure、PermissionRequest、Stop、StopFailure、SubagentStop、SessionEnd。
+- command は `'<home>/bin/tania' workbench hook claude`（絶対パス。agent が PATH を変えても届く）。
+- wrapper は file の path を渡すので、Backend が書き直せば既存の tab でも次の `claude` から効く。
+
+### hook CLI（`tania workbench hook claude`）
+
+- `TANIA_TERMINAL_SESSION_ID` が無ければ即 exit 0。
+- PermissionRequest で `tool_name == "ExitPlanMode"` なら、Backend を待たずに stdout へ allow を書く（`updatedInput` に `tool_input` を返し、`updatedPermissions` に `setMode: auto` を付ける。#16）。
+- stdin の payload と env の Terminal Session id を `agentSession.recordHook` に渡す。呼び出しは 2 秒で打ち切り、不在・失敗・timeout のどれでも exit 0。retry しない（ADR-0007）。
+
+### 実機で確かめること
+
+状態機械（ADR-0008）を実装するときに確かめる。
+
+1. Stop と SubagentStop の payload に `background_tasks` があるか
+2. 質問待ちの間に Stop が来るか
+3. PostToolUse を全 tool に張ったときの、tool 1 回あたりの遅延
+4. StopFailure の payload
+5. claude が SIGKILL などで SessionEnd を出さずに落ちたとき、Agent Session が最後の状態のまま残るか
 
 ## dev loop
 
@@ -179,7 +236,7 @@ contract を走査するテストを 1 本置き、description と output が全
 - debug build の Shell は Backend として `bun --watch apps/backend/src/main.ts` を起動し、ptyd の場所 `target/debug/tania-ptyd`（`TANIA_PTYD_PATH` で差し替え可）を env `TANIA_PTYD_PATH` で Backend に渡す。ptyd を spawn するのは Backend で、release の Backend は自分の隣の `tania-ptyd` を使う（ADR-0011）。Backend は package や apps/backend の編集と `bun run generate` で同じ pid のまま再起動し、webview は `backend-endpoint` event で再接続する。byte は Shell の ptyd 接続を通るので、この再起動で端末は切れない。
 - webview は vite の HMR。package の `ui` も source のまま読む。
 - `bun run tania <args>` は `scripts/tania-dev`（`bun apps/cli/src/main.ts "$@"`）を呼ぶ。`TANIA_HOME` が無ければ `~/.tania-dev`。
-- desktop は起動時に `$TANIA_HOME/bin/tania` → `TANIA_BIN` の symlink を張る。release の desktop だけが `~/.local/bin/tania` にも張る（ADR-0006）。dev の desktop が張ると release の CLI を上書きするため。Workbench の tab の PATH に `$TANIA_HOME/bin` を前置するのは #13 の担当。
+- desktop は起動時に `$TANIA_HOME/bin/tania` → `TANIA_BIN` の symlink を張る。release の desktop だけが `~/.local/bin/tania` にも張る（ADR-0006）。dev の desktop が張ると release の CLI を上書きするため。Workbench の tab の PATH に `$TANIA_HOME/bin` を前置するのは shim（「tab の env と shim」の節）。
 - `TANIA_HOME` は direnv に書かない（ADR-0006）。
 - `.claude/skills` は生成しない。Skill は plugin として repo から in-place で読まれる（ADR-0006）。
 - cargo の初回 build は約 36 秒（#8）。
@@ -211,6 +268,5 @@ contract を走査するテストを 1 本置き、description と output が全
 
 ## ここで決めていないこと
 
-- tab に渡す env、ZDOTDIR の shim、PATH への `$TANIA_HOME/bin` の前置（#13）。
 - 設定、`$TANIA_HOME` のレイアウト、ログ（map の fog）。
 - 署名と notarization（map の fog）。
