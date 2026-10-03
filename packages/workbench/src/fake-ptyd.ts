@@ -69,6 +69,10 @@ export function startFakePtyd(home: string) {
     if (id !== undefined && typeof id !== "number") {
       throw new Error(`a frame to tania-ptyd carries a non-numeric id: ${JSON.stringify(id)}`);
     }
+    if (op.op === "terminate" && fake.dropNextTerminate) {
+      fake.dropNextTerminate = false;
+      return socket.end();
+    }
     record(op);
     if (op.op === "reap") {
       const index = sessions.findIndex((s) => s.session_id === op.session_id);
@@ -104,12 +108,6 @@ export function startFakePtyd(home: string) {
         });
         return send(socket, { type: "ok", id, body: "created", pid });
       }
-      case "terminate":
-        if (fake.dropNextTerminate) {
-          fake.dropNextTerminate = false;
-          return socket.end();
-        }
-        return send(socket, { type: "ok", id, body: "empty" });
       default:
         return send(socket, { type: "ok", id, body: "empty" });
     }
@@ -140,5 +138,3 @@ export function startFakePtyd(home: string) {
 
   return fake;
 }
-
-export type FakePtyd = ReturnType<typeof startFakePtyd>;

@@ -223,7 +223,11 @@ test("runspace.remove sends the terminate again to the reconnected ptyd when the
   const removed = await client.runspace.create(size);
   ptyd.dropNextTerminate = true;
 
-  await expect(client.runspace.remove({ id: removed.runspaceId })).resolves.toBeUndefined();
+  await client.runspace.remove({ id: removed.runspaceId });
+
+  await ptyd.received(
+    (op) => op.op === "terminate" && op.session_id === removed.tab.terminalSessionId,
+  );
 });
 
 test("tab.respawn binds the Tab to a new Terminal Session started in its last known cwd", async () => {
