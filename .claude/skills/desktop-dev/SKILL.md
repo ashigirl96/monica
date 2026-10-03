@@ -28,7 +28,7 @@ dev の desktop（identifier `com.ashigirl96.tania.dev`）は single-instance �
 
   - `webview_keyboard` の `type` は、最初に一致した要素に打つ。隠れた pane の textarea にも当たるので、使うなら先に、見えている pane（祖先に `display: none` が無いもの）の textarea に固有の id を付け、その id を狙う。
   - 合成のキーイベントは keydown だけを送る。keypress も送ると、xterm が両方を拾って文字が二重になる。
-  - 修飾キーの打鍵（Ctrl+V、Shift+Enter など）は、`window.__taniaTerminals.get(tabId).textarea` に keydown を dispatch する。xterm がその時点のモード（kitty keyboard の flag など）で encode するので、Tab の app に本物の打鍵と同じバイト列が届く。`keyCode` は `Object.defineProperty` で足す（xterm は Ctrl+文字を `keyCode` から作る）。
+  - 修飾キーの打鍵（Ctrl+V、Shift+Enter など）は、`window.__taniaTerminals.get(tabId).textarea` に keydown を dispatch する。tania の key handler と xterm の encode を本物の打鍵と同じ順に通るので、Tab の app に同じバイト列が届く。`keyCode` は `Object.defineProperty` で足す（xterm は Ctrl+文字を `keyCode` から作る）。
 
     ```js
     const ev = new KeyboardEvent("keydown", { key: "v", code: "KeyV", ctrlKey: true, bubbles: true, cancelable: true });
@@ -43,7 +43,32 @@ dev の desktop（identifier `com.ashigirl96.tania.dev`）は single-instance �
   ```
 - **Tab の切り替え**は、`[data-tab-id]` の button に `pointerdown` と `pointerup` を `dispatchEvent` する。Tab は pointerdown で切り替わるが、tauri-mcp の click は pointerdown を出さない。
 - **端末の link**: 端末は WebGL で描くので、行の DOM は無い。座標を screenshot で読み、`document.elementFromPoint(x, y)` に `metaKey: true` の `mousemove` を送る。xterm は同じ cell への mousemove を無視するので、先に別の cell へ動かしてから狙う。link が付いたかは、見えている `.xterm-screen` の class に `xterm-cursor-pointer` があるかで分かる。⌘-click は、hover の後に `metaKey: true, buttons: 0` の `pointerdown` を送る。
-- **画像の drop**: OS の drag は起こせないので、`window.__TAURI__.event.emitTo({ kind: "Webview", label: "main" }, "tauri://drag-drop", { paths, position: { x, y } })` で Tauri の drop と同じ handler を動かす。キーボードの Ctrl+V で貼るのを確かめるときは、`osascript -e 'set the clipboard to (read (POSIX file "<png>") as «class PNGf»)'` で画像を clipboard に置く。clipboard を上書きする確かめ方は、先に `pbpaste` で退避し、最後に `pbcopy` で戻す。
+- **画像の drop**: OS の drag は起こせないので、`window.__TAURI__.event.emitTo({ kind: "Webview", label: "main" }, "tauri://drag-drop", { paths, position: { x, y } })` で Tauri の drop と同じ handler を動かす。キーボードの Ctrl+V で貼るのを確かめるときは、`osascript -e 'set the clipboard to (read (POSIX file "<png>") as «class PNGf»)'` で画像を clipboard に置く。
+  - clipboard を上書きする前に、全形式を退避して、最後に戻す。`pbpaste` と `pbcopy` は文字しか運ばないので、ユーザーの画像や file が消える。
+
+    ```bash
+    cat > $SCRATCH/clipboard.swift <<'EOF'
+    import AppKit
+    let (mode, path) = (CommandLine.arguments[1], URL(fileURLWithPath: CommandLine.arguments[2]))
+    let pasteboard = NSPasteboard.general
+    if mode == "save" {
+      let items = (pasteboard.pasteboardItems ?? []).map { item in
+        Dictionary(uniqueKeysWithValues: item.types.compactMap { type in item.data(forType: type).map { (type.rawValue, $0) } })
+      }
+      try PropertyListSerialization.data(fromPropertyList: items, format: .binary, options: 0).write(to: path)
+    } else {
+      let items = try PropertyListSerialization.propertyList(from: Data(contentsOf: path), format: nil) as! [[String: Data]]
+      pasteboard.clearContents()
+      pasteboard.writeObjects(items.map { types in
+        let item = NSPasteboardItem()
+        for (type, data) in types { item.setData(data, forType: NSPasteboard.PasteboardType(type)) }
+        return item
+      })
+    }
+    EOF
+    swift $SCRATCH/clipboard.swift save $SCRATCH/clipboard.plist     # 上書きの前
+    swift $SCRATCH/clipboard.swift restore $SCRATCH/clipboard.plist  # 確かめ終えたら
+    ```
 - **一瞬だけ出る表示**（overlay、Detached の行）は、webview の中で `requestAnimationFrame` ごとに DOM を見て、変わった時刻だけを配列に残す。操作も同じ script の中で起こし、frame の時刻とずれないようにする。
 - **長い script**: `webview_execute_js` は約 5 秒で timeout し、`timeout` を大きく渡しても延びない。async の処理は裏で走り続ける。数秒を超えるものは await せずに走らせ、結果は `window.__…` に貯めて、後の呼び出しで読む。timeout した後に同じ script を走らせると、2 本が重なる。
 - **窓の枠**: `webview_screenshot` には信号機も vibrancy も写らない。CGWindowID を取って `screencapture` で撮る。
