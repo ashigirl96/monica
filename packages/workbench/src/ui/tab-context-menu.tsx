@@ -8,6 +8,7 @@ import {
   type TabMenuState,
   tabMenuTabAtom,
   terminateTabTerminalSessionAtom,
+  toggleTabPinAtom,
 } from "./store.ts";
 
 export function TabContextMenu() {
@@ -21,6 +22,7 @@ function MenuPopover({ menu }: { menu: TabMenuState }) {
   const closeTab = useSetAtom(closeTerminalTabAtom);
   const terminate = useSetAtom(terminateTabTerminalSessionAtom);
   const startNewShell = useSetAtom(startNewShellForTabAtom);
+  const togglePin = useSetAtom(toggleTabPinAtom);
   const tab = useAtomValue(tabMenuTabAtom);
   const statuses = useAtomValue(terminalSessionStatusAtom);
 
@@ -41,12 +43,24 @@ function MenuPopover({ menu }: { menu: TabMenuState }) {
         type="button"
         onClick={() => {
           setMenu(null);
-          void closeTab(menu.tabId);
+          void togglePin(menu.tabId);
         }}
         className={itemClass("hover:bg-accent hover:text-accent-foreground")}
       >
-        Close (keep shell)
+        {tab.pinned ? "Unpin" : "Pin"}
       </button>
+      {!tab.pinned && (
+        <button
+          type="button"
+          onClick={() => {
+            setMenu(null);
+            void closeTab(menu.tabId);
+          }}
+          className={itemClass("hover:bg-accent hover:text-accent-foreground")}
+        >
+          Close (keep shell)
+        </button>
+      )}
       <button
         type="button"
         disabled={!dead}
@@ -58,26 +72,30 @@ function MenuPopover({ menu }: { menu: TabMenuState }) {
       >
         New shell here
       </button>
-      <div className="my-1 h-px bg-border" />
-      <button
-        type="button"
-        disabled={dead}
-        onClick={() => {
-          if (!menu.confirmingTerminate) {
-            setMenu({ ...menu, confirmingTerminate: true });
-            return;
-          }
-          setMenu(null);
-          void terminate(menu.tabId);
-        }}
-        className={cn(
-          itemClass("hover:bg-destructive/15", dead),
-          "text-destructive",
-          menu.confirmingTerminate && "bg-destructive/15",
-        )}
-      >
-        {menu.confirmingTerminate ? "Click again to confirm" : "Terminate"}
-      </button>
+      {!tab.pinned && (
+        <>
+          <div className="my-1 h-px bg-border" />
+          <button
+            type="button"
+            disabled={dead}
+            onClick={() => {
+              if (!menu.confirmingTerminate) {
+                setMenu({ ...menu, confirmingTerminate: true });
+                return;
+              }
+              setMenu(null);
+              void terminate(menu.tabId);
+            }}
+            className={cn(
+              itemClass("hover:bg-destructive/15", dead),
+              "text-destructive",
+              menu.confirmingTerminate && "bg-destructive/15",
+            )}
+          >
+            {menu.confirmingTerminate ? "Click again to confirm" : "Terminate"}
+          </button>
+        </>
+      )}
     </PopoverMenu>
   );
 }

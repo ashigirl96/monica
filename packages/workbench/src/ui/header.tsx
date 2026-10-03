@@ -1,4 +1,4 @@
-import { cn, PlusIcon, useDragReorder, XIcon } from "@tania/ui";
+import { cn, PinIcon, PlusIcon, useDragReorder, XIcon } from "@tania/ui";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useEffect, useRef } from "react";
 import { JumpHint } from "./jump-hint.tsx";
@@ -82,6 +82,7 @@ export function WorkbenchHeader() {
             )}
           >
             {hint && <JumpHint hint={hint} className="mr-1.5" />}
+            {tab.pinned && <PinIcon size={14} className="mr-1.5 shrink-0 text-rose-400" />}
             <span className="flex-1 truncate">{label}</span>
             {terminalDot && (
               <span
@@ -89,20 +90,22 @@ export function WorkbenchHeader() {
                 className={cn("ml-1.5 size-1.5 shrink-0 rounded-full", terminalDot)}
               />
             )}
-            <span
-              role="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                void closeTab(tab.id);
-              }}
-              className={cn(
-                "flex h-4 w-4 items-center justify-center rounded",
-                "opacity-0 transition-opacity duration-100 group-hover:opacity-100",
-                "hover:bg-white/[0.1]",
-              )}
-            >
-              <XIcon size={10} />
-            </span>
+            {!tab.pinned && (
+              <span
+                role="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void closeTab(tab.id);
+                }}
+                className={cn(
+                  "flex h-4 w-4 items-center justify-center rounded",
+                  "opacity-0 transition-opacity duration-100 group-hover:opacity-100",
+                  "hover:bg-white/[0.1]",
+                )}
+              >
+                <XIcon size={10} />
+              </span>
+            )}
           </button>
         );
       })}

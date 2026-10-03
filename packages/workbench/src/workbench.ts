@@ -3,14 +3,18 @@ import { EventPublisher } from "@orpc/server";
 import { and, eq, inArray } from "drizzle-orm";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type { TerminalSession, WorkbenchChange } from "./contract.ts";
+import { shouldRespawn } from "./pin.ts";
 import { openDaemon, type PtydClient, type SessionInfo } from "./ptyd.ts";
-import { terminalSession } from "./schema.ts";
+import { tab, terminalSession } from "./schema.ts";
 
 export type Db = BunSQLiteDatabase;
 export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 export type Size = { rows: number; cols: number };
 
 export const LIVE = ["starting", "running"] as const;
+
+// 張り直す Tab は画面に出ていないこともあるので、決まった大きさで起こし、attach の resize で追いつかせる。
+const RESPAWN_SIZE: Size = { rows: 24, cols: 80 };
 
 export type Workbench = {
   events: EventPublisher<{ change: WorkbenchChange }>;
@@ -64,6 +68,35 @@ export function createWorkbench(deps: {
       .run();
     publish({ type: "terminalSession", id });
     client?.notify({ op: "reap", session_id: id });
+    respawnInBackground([id]);
+  }
+
+  // 張り直すかは待った後の transaction の中で決めるので、間に Tab が閉じられたり手で張り直されたりしても二重に起こさない。
+  // id を省くと pin された Tab をすべて見る。Exit の記録と張り直しの間で Backend が止まった分も拾うため。
+  async function respawnPinnedTabs(endedIds?: string[]) {
+    await ready();
+    const respawned = db.transaction((tx) =>
+      tx
+        .select()
+        .from(terminalSession)
+        .leftJoin(tab, eq(tab.terminalSessionId, terminalSession.id))
+        .where(endedIds ? inArray(terminalSession.id, endedIds) : eq(tab.pinned, true))
+        .all()
+        .flatMap((row) =>
+          row.tab && shouldRespawn(row.terminal_session, row.tab)
+            ? [bindNewTerminalSession(tx, row.tab, shell).terminalSessionId]
+            : [],
+        ),
+    );
+    if (respawned.length === 0) return;
+    publish({ type: "layout" });
+    await Promise.all(respawned.map((id) => startTerminalSession(workbench, id, RESPAWN_SIZE)));
+  }
+
+  function respawnInBackground(endedIds?: string[]) {
+    respawnPinnedTabs(endedIds).catch((error: unknown) => {
+      if (!stopping) console.error(`[workbench] respawning pinned Tabs failed: ${error}`);
+    });
   }
 
   // 繋ぎ直すのは reconcile まで済んだ接続が切れたときだけ。hello や List の途中で切れたら、
@@ -95,6 +128,7 @@ export function createWorkbench(deps: {
       exitsDuringReconcile = null;
       for (const [id, exitCode] of exits) onExit(id, exitCode);
       publish({ type: "reconciled" });
+      respawnInBackground();
       console.error(
         `[workbench] connected to tania-ptyd; reaped ${reap.length}, terminated ${terminate.length}`,
       );
@@ -150,6 +184,15 @@ export function insertTerminalSession(tx: Tx, { cwd, shell }: { cwd: string; she
   return id;
 }
 
+export function bindNewTerminalSession(tx: Tx, target: { id: string; cwd: string }, shell: string) {
+  return tx
+    .update(tab)
+    .set({ terminalSessionId: insertTerminalSession(tx, { cwd: target.cwd, shell }) })
+    .where(eq(tab.id, target.id))
+    .returning()
+    .get()!;
+}
+
 export async function startTerminalSession(workbench: Workbench, id: string, { rows, cols }: Size) {
   const { db, publish, ready } = internals(workbench);
   const ptyd = await ready();
@@ -160,6 +203,8 @@ export async function startTerminalSession(workbench: Workbench, id: string, { r
     const pid = await ptyd.create({ session_id: id, cwd, shell, rows, cols, env: null });
     db.update(terminalSession).set({ status: "running", pid }).where(stillStarting).run();
   } catch (error) {
+    // 接続が切れただけなら ptyd が作ったかは分からないので、starting のまま繋ぎ直した後の reconcile に決めさせる。
+    if (ptyd.isClosed()) return;
     db.update(terminalSession)
       .set({ status: "failed", error: String(error), endedAt: new Date() })
       .where(stillStarting)

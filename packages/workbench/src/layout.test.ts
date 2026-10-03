@@ -306,6 +306,8 @@ test("every write to the layout streams a layout signal on changes", async () =>
   await write("tab.move", () => client.tab.move({ id: reopened.id, runspaceId, index: 0 }));
   await write("tab.setCwd", () => client.tab.setCwd({ id: reopened.id, cwd: "/elsewhere" }));
   await write("runspace.move", () => client.runspace.move({ id: runspaceId, index: 0 }));
+  await write("tab.pin", () => client.tab.pin({ id: reopened.id }));
+  await write("tab.unpin", () => client.tab.unpin({ id: reopened.id }));
   ptyd.exit(tab.terminalSessionId, 0);
   await ptyd.received((op) => op.op === "reap" && op.session_id === tab.terminalSessionId);
   await write("tab.respawn", () => client.tab.respawn({ id: tab.id, ...size }));

@@ -1,4 +1,5 @@
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const terminalSession = sqliteTable("terminal_session", {
   id: text("id").primaryKey(),
@@ -32,6 +33,12 @@ export const tab = sqliteTable(
       .notNull()
       .unique()
       .references(() => terminalSession.id),
+    pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
   },
-  (t) => [index("tab_runspace_idx").on(t.runspaceId)],
+  (t) => [
+    index("tab_runspace_idx").on(t.runspaceId),
+    uniqueIndex("tab_pinned_per_runspace_idx")
+      .on(t.runspaceId)
+      .where(sql`pinned = 1`),
+  ],
 );

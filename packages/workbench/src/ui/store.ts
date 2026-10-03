@@ -177,18 +177,28 @@ function writeCwd(get: Getter, set: Setter, tabId: string, cwd: string): Promise
   return done;
 }
 
+function holdsPin(runspace: Runspace): boolean {
+  return runspace.tabs.some((t) => t.pinned);
+}
+
+const sidebarRunspacesAtom = atom((get): Runspace[] => {
+  const runspaces = get(layoutAtom)?.runspaces ?? [];
+  return [...runspaces.filter(holdsPin), ...runspaces.filter((r) => !holdsPin(r))];
+});
+
 export type RunspaceSummary = {
   id: string;
   title: string;
   description: string;
   tabCount: number;
   isActive: boolean;
+  holdsPin: boolean;
 };
 
 export const runspaceSummariesAtom = atom((get): RunspaceSummary[] => {
   const active = get(activeRunspaceAtom);
   const titles = get(tabTitlesAtom);
-  return (get(layoutAtom)?.runspaces ?? []).map((runspace) => {
+  return get(sidebarRunspacesAtom).map((runspace) => {
     const tab = activeTabOf(get, runspace);
     return {
       id: runspace.id,
@@ -196,6 +206,7 @@ export const runspaceSummariesAtom = atom((get): RunspaceSummary[] => {
       description: (tab && titles[tab.id]) ?? "",
       tabCount: runspace.tabs.length,
       isActive: runspace.id === active?.id,
+      holdsPin: holdsPin(runspace),
     };
   });
 });
@@ -292,19 +303,36 @@ export const deadTabsAtom = atom((get) => {
 });
 
 // Exit の後は止める出力が無いので、detach を送らずに閉じる。
-export const tabExitedAtom = action(async (get, set, tabId: string, exitCode: number | null) => {
-  const found = findTab(get, tabId);
+export const tabExitedAtom = action(
+  async (get, set, tabId: string, terminalSessionId: string, exitCode: number | null) => {
+    const found = findTab(get, tabId);
+    // Backend の張り直しが先に届いた Tab は、もう新しい shell を指している。
+    if (found?.tab.terminalSessionId !== terminalSessionId) return;
+    releaseTabConnection(tabId);
+    set(markEndedAtom, terminalSessionId);
+    set(setTerminalSessionStatusAtom, terminalSessionId, { status: "exited", exitCode });
+    // pin された Tab は Backend が張り直す。
+    if (found.tab.pinned) return;
+    set(closingTabIdsAtom, (prev) => new Set(prev).add(tabId));
+    try {
+      await closeTab(get, set, found);
+    } finally {
+      set(closingTabIdsAtom, (prev) => new Set([...prev].filter((id) => id !== tabId)));
+    }
+  },
+);
+
+// 切り出しと付け替えは Backend が決めるので、書いた後の layout から Tab の居場所を読み直す。
+export const toggleTabPinAtom = action(async (get, set, tabId?: string) => {
+  const found = tabId ? findTab(get, tabId) : frontTab(get);
   if (!found) return;
-  const { terminalSessionId } = found.tab;
-  releaseTabConnection(tabId);
-  set(markEndedAtom, terminalSessionId);
-  set(setTerminalSessionStatusAtom, terminalSessionId, { status: "exited", exitCode });
-  set(closingTabIdsAtom, (prev) => new Set(prev).add(tabId));
-  try {
-    await closeTab(get, set, found);
-  } finally {
-    set(closingTabIdsAtom, (prev) => new Set([...prev].filter((id) => id !== tabId)));
-  }
+  const { id, pinned } = found.tab;
+  const inFront = get(activeTerminalTabAtom)?.id === id;
+  const client = clientOf(get);
+  await (pinned ? client.tab.unpin({ id }) : client.tab.pin({ id }));
+  await set(reloadAtom);
+  const moved = findTab(get, id);
+  if (inFront && moved) set(setActiveAtom, { runspaceId: moved.runspace.id, tabId: id });
 });
 
 export const startNewShellForTabAtom = action(async (get, set, tabId: string) => {
@@ -361,7 +389,7 @@ function cycle<T>(items: T[], current: T | null | undefined, step: 1 | -1): T | 
 }
 
 export const cycleRunspaceAtom = atom(null, (get, set, direction: "up" | "down") => {
-  const runspaces = get(layoutAtom)?.runspaces ?? [];
+  const runspaces = get(sidebarRunspacesAtom);
   if (runspaces.length <= 1) return;
   const next = cycle(runspaces, get(activeRunspaceAtom), direction === "up" ? -1 : 1);
   if (next) set(setActiveAtom, { runspaceId: next.id });
@@ -374,7 +402,13 @@ export const cycleTerminalTabAtom = atom(null, (get, set, direction: "left" | "r
   if (next) set(setActiveAtom, { runspaceId: runspace.id, tabId: next.id });
 });
 
-async function moveRunspace(get: Getter, set: Setter, id: string, index: number) {
+// sidebar のグループは帳簿の並びより先に効くので、グループをまたいで動かしても見た目の位置にならない。
+async function moveRunspaceTo(get: Getter, set: Setter, id: string, toId: string) {
+  const runspaces = get(layoutAtom)?.runspaces ?? [];
+  const from = runspaces.find((r) => r.id === id);
+  const index = runspaces.findIndex((r) => r.id === toId);
+  const to = runspaces[index];
+  if (!from || !to || holdsPin(from) !== holdsPin(to)) return;
   await clientOf(get).runspace.move({ id, index });
   await set(reloadAtom);
 }
@@ -384,10 +418,7 @@ async function moveTab(get: Getter, set: Setter, id: string, runspaceId: string,
   await set(reloadAtom);
 }
 
-export const reorderRunspacesAtom = action(async (get, set, fromId: string, toId: string) => {
-  const index = (get(layoutAtom)?.runspaces ?? []).findIndex((r) => r.id === toId);
-  if (index >= 0) await moveRunspace(get, set, fromId, index);
-});
+export const reorderRunspacesAtom = action(moveRunspaceTo);
 
 export const reorderTabsAtom = action(async (get, set, fromId: string, toId: string) => {
   const runspace = get(activeRunspaceAtom);
@@ -396,12 +427,10 @@ export const reorderTabsAtom = action(async (get, set, fromId: string, toId: str
 });
 
 export const moveActiveRunspaceAtom = action(async (get, set, direction: "up" | "down") => {
-  const runspaces = get(layoutAtom)?.runspaces ?? [];
+  const runspaces = get(sidebarRunspacesAtom);
   const active = get(activeRunspaceAtom);
-  const index = active ? runspaces.indexOf(active) + (direction === "up" ? -1 : 1) : -1;
-  if (active && index >= 0 && index < runspaces.length) {
-    await moveRunspace(get, set, active.id, index);
-  }
+  const neighbor = active && runspaces[runspaces.indexOf(active) + (direction === "up" ? -1 : 1)];
+  if (active && neighbor) await moveRunspaceTo(get, set, active.id, neighbor.id);
 });
 
 export const moveActiveTabAtom = action(async (get, set, direction: "left" | "right") => {
