@@ -13,7 +13,7 @@ import {
   type TerminalSessionStatus,
   setTerminalSessionStatusAtom,
 } from "./terminal-sessions.ts";
-import { terminalFocusRequestAtom } from "./store.ts";
+import { openInEditorAtom, resolveEditorPathsAtom, terminalFocusRequestAtom } from "./store.ts";
 import { attachTapSelection } from "./tap-selection.ts";
 import {
   onTerminalExit,
@@ -256,7 +256,13 @@ export function useTerminal(
       cleanup.addEventListener(container, "pointerdown", blockPhantom, true);
       cleanup.addEventListener(container, "wheel", onWheel, { capture: true });
       cleanup.add(attachTapSelection(term, container));
-      cleanup.add(attachTerminalLinks(term, container));
+      cleanup.add(
+        attachTerminalLinks(term, container, {
+          resolve: (candidates) =>
+            store.set(resolveEditorPathsAtom, optionsRef.current.cwd, candidates),
+          open: (path) => store.set(openInEditorAtom, path),
+        }),
+      );
     }
 
     const unsubFontSize = store.sub(terminalFontSizeAtom, () => {

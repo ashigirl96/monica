@@ -50,3 +50,30 @@ export function setup() {
   }
   return { home, ptyd, db, ...booted, restartBackend };
 }
+
+function git(cwd: string, ...args: string[]) {
+  const result = Bun.spawnSync(["git", "-C", cwd, ...args]);
+  if (!result.success) throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
+}
+
+// CI には git の user が無いので、commit に author を渡す。
+export function linkedWorktree({ repo: name, branch }: { repo: string; branch: string }) {
+  const root = mkdtempSync(join(tmpdir(), "tania-git-"));
+  onCleanup(() => rmSync(root, { recursive: true, force: true }));
+  const repo = join(root, name);
+  const worktree = join(root, "worktree");
+  git(root, "init", "--initial-branch=main", repo);
+  git(
+    repo,
+    "-c",
+    "user.name=tania",
+    "-c",
+    "user.email=tania@example.com",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "init",
+  );
+  git(repo, "worktree", "add", "-b", branch, worktree);
+  return { root, repo, worktree };
+}

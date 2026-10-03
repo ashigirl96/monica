@@ -26,11 +26,14 @@ export const WorkbenchChangeSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("reconciled") }),
 ]);
 
+export const WorktreeSchema = z.object({ repo: z.string(), branch: z.string() });
+
 export type TerminalSession = z.infer<typeof TerminalSessionSchema>;
 export type Tab = z.infer<typeof TabSchema>;
 export type Layout = z.infer<typeof LayoutSchema>;
 export type AgentSession = z.infer<typeof AgentSessionSchema>;
 export type WorkbenchChange = z.infer<typeof WorkbenchChangeSchema>;
+export type Worktree = z.infer<typeof WorktreeSchema>;
 
 const size = { rows: z.number().int().positive(), cols: z.number().int().positive() };
 const index = z.number().int().nonnegative();
@@ -124,6 +127,27 @@ export const contract = {
     list: meta
       .meta({ description: "List Agent Sessions that have not ended", cli: true })
       .output(z.array(AgentSessionSchema)),
+  },
+  worktree: {
+    info: meta
+      .meta({
+        description: "Name the repo and branch of the linked worktree a directory is in, if any",
+      })
+      .input(z.object({ cwd: z.string() }))
+      .output(WorktreeSchema.nullable()),
+  },
+  editor: {
+    resolve: meta
+      .meta({
+        description:
+          "Resolve paths printed in a terminal to existing files, or null where none exists",
+      })
+      .input(z.object({ cwd: z.string(), candidates: z.array(z.string()) }))
+      .output(z.array(z.string().nullable())),
+    open: meta
+      .meta({ description: "Open a file in Zed" })
+      .input(z.object({ path: z.string() }))
+      .output(z.void()),
   },
   changes: meta
     .meta({ description: "Stream signals that the Workbench books changed" })
