@@ -31,6 +31,11 @@ export function openTabConnection(tabId: string): TabConnection {
 // disposed — xterm throws renderer TypeErrors when written to after dispose.
 const tabTerminals = new Map<string, Terminal>();
 
+// WebGL で描いた Tab の文字は DOM に無いので、tauri-mcp で画面を確かめる dev のときだけ晒す。
+if (import.meta.env.DEV) {
+  (globalThis as { __taniaTerminals?: Map<string, Terminal> }).__taniaTerminals = tabTerminals;
+}
+
 export function setTabTerminal(tabId: string, term: Terminal) {
   tabTerminals.set(tabId, term);
 }
