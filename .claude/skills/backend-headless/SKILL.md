@@ -8,11 +8,11 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 ## 起こす
 
 1. `cargo build -p tania-ptyd`
-2. home は `~/.tania-s2` のように短くする。ptyd の socket（`$TANIA_HOME/ptyd.sock`）の path が 104 byte を超えると bind できず、client には ENOENT にしか見えない。
+2. home は `${TMPDIR%/}/tania-s2` のように、`$TMPDIR` の下に短い名前で作る。ptyd の socket（`$TANIA_HOME/ptyd.sock`）の path が 104 byte を超えると bind できず、client には ENOENT にしか見えない。
 3. Bash の `run_in_background` で、stdin を無名 pipe で握って起こす。出力は scratchpad の file に向ける。
 
    ```bash
-   sleep 100000 | TANIA_HOME=$HOME/.tania-s2 TANIA_PTYD_PATH=target/debug/tania-ptyd \
+   sleep 100000 | TANIA_HOME=${TMPDIR%/}/tania-s2 TANIA_PTYD_PATH=target/debug/tania-ptyd \
      bun apps/backend/src/main.ts > $SCRATCH/out.jsonl 2> $SCRATCH/err.log
    ```
 
@@ -23,12 +23,12 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 
 ## 確かめる
 
-- CLI: `TANIA_HOME=$HOME/.tania-s2 bun run tania <command> [--format json]`。exit code は 0 = 成功、1 = それ以外の失敗、2 = Backend 不在。
+- CLI: `TANIA_HOME=${TMPDIR%/}/tania-s2 bun run tania <command> [--format json]`。exit code は 0 = 成功、1 = それ以外の失敗、2 = Backend 不在。
 - HTTP: `/health` は token 無しで返る。port と token は `backend.json` にある。
 - ptyd にだけある session を作るには、socket に直接 `hello` と `create` を送る。Backend を起こし直すと reconcile が取り込む。protocol は `crates/terminal-protocol/src/lib.rs`。
 
   ```bash
-  TANIA_HOME=$HOME/.tania-s2 bun -e '
+  TANIA_HOME=${TMPDIR%/}/tania-s2 bun -e '
   const socket = await Bun.connect({
     unix: `${process.env.TANIA_HOME}/ptyd.sock`,
     socket: { data: (_, chunk) => console.log(chunk.toString().trim()) },
@@ -44,7 +44,7 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 ## 止めて片付ける
 
 - stdin の EOF で止める: sleep の pid を `pgrep -f "^sleep 100000$"` で取り、その pid に `kill` を送る。harness は command を zsh で包むので、`pkill -f` はその zsh の command 行にも当たり、親ごと殺す。
-- SIGTERM で止める: `kill -TERM $(jq .pid $HOME/.tania-s2/backend.json)`
-- ptyd は Backend より長生きする。最後に `kill -TERM $(cat $HOME/.tania-s2/ptyd.pid)` を送り、home を消す。
+- SIGTERM で止める: `kill -TERM $(jq .pid ${TMPDIR%/}/tania-s2/backend.json)`。pipe の左の sleep は残り、background の job が終わらないので、続けて上の手順で sleep も止める。
+- Backend が止まったら `rm -rf ${TMPDIR%/}/tania-s2` で home を消す。ptyd は socket が消えたのを 2 秒おきの確認で見つけ、shell ごと終わるので、下の判定は数秒待ってからする。
 
-片付いたのは、`pgrep -f apps/backend/src/main.ts` と `pgrep -f "tania-ptyd --tania-home"` が何も返さず、home が消えたとき。
+片付いたのは、`pgrep -f apps/backend/src/main.ts` と `pgrep -f "tania-ptyd --tania-home ${TMPDIR%/}/tania-s2"` が何も返さず、home が消えたとき。消し忘れた dev は `bun run dev:list` で見つけ、`bun run dev:kill <NAME>` で片付ける。

@@ -425,6 +425,8 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 - debug build の Shell は Backend として `bun --watch apps/backend/src/main.ts` を起動し、ptyd の場所 `target/debug/tania-ptyd`（`TANIA_PTYD_PATH` で差し替え可）を env `TANIA_PTYD_PATH` で Backend に渡す。ptyd を spawn するのは Backend で、場所は debug でも release でも Shell が env `TANIA_PTYD_PATH` で渡す（release は Shell の隣の `tania-ptyd`。ADR-0011）。Backend は package や apps/backend の編集と `bun run generate` で同じ pid のまま再起動し、webview は `backend-endpoint` event で再接続する。byte は Shell の ptyd 接続を通るので、この再起動で端末は切れない。
 - webview は vite の HMR。package の `ui` も source のまま読む。
 - `bun run tania <args>` は `scripts/tania-dev`（`bun apps/cli/src/main.ts "$@"`）を呼ぶ。`TANIA_HOME` が無ければ `~/.tania-dev`。
+- `bun run dev:list` は、動いている dev と残った home を `TANIA_HOME` ごとに並べる（desktop か headless か、desktop・Backend・ptyd の pid、worktree）。Backend の env は `ps` で読めないので、home は ptyd の `--tania-home` と `~/.tania-*`・`$TMPDIR/tania-*` から集め、Backend は `backend.json` の pid から、desktop はその親から引く。release の `~/.tania` は出さない。
+- `bun run dev:kill <NAME>` は desktop → Backend → ptyd の順に止める。逆にすると、Shell が Backend を、Backend が ptyd を起こし直す。`$TMPDIR` の下の home は消し、`~/.tania-dev` は layout の帳簿があるので残す。
 - Shell は起動時に `$TANIA_HOME/bin/tania` → `TANIA_BIN` の symlink を張る。release の desktop だけが `~/.local/bin/tania` にも張る（ADR-0006）。dev の desktop が張ると release の CLI を上書きするため。Workbench の tab の PATH に `$TANIA_HOME/bin` を前置するのは shim（「tab の env と shim」の節）。
 - `TANIA_HOME` は direnv に書かない（ADR-0006）。
 - `.claude/skills` は生成しない。Skill は plugin として repo から in-place で読まれる（ADR-0006）。
