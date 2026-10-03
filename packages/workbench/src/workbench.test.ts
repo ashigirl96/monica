@@ -265,6 +265,28 @@ test("changes streams a signal naming the Terminal Session that changed", async 
   await changes.return?.();
 });
 
+test("an Exit that arrives while the reconcile waits for List still ends the adopted row", async () => {
+  const { ptyd, db, workbench, client } = setup();
+  ptyd.sessions.push(heldByPtyd("ts-orphan"));
+  ptyd.beforeList = () => [{ type: "exit", session_id: "ts-orphan", exit_code: 0 }];
+
+  await workbench.start();
+  await ptyd.received((op) => op.op === "reap" && op.session_id === "ts-orphan");
+
+  expect(rowOf(db, "ts-orphan")).toMatchObject({ status: "exited", exitCode: 0 });
+  expect(await client.terminalSession.list()).toEqual([]);
+});
+
+test("a ptyd that drops the connection mid-handshake leaves a single connection after the retry", async () => {
+  const { ptyd, workbench } = setup();
+  ptyd.dropNextList = true;
+
+  await workbench.start();
+  await Bun.sleep(100);
+
+  expect(ptyd.connections).toBe(1);
+});
+
 test("a live session only ptyd knows is adopted without a shell and listed", async () => {
   const { ptyd, workbench, client } = setup();
   ptyd.sessions.push(heldByPtyd("ts-orphan", { pid: 777, cwd: "/work/repo" }));

@@ -14,8 +14,14 @@ export function startFakePtyd(home: string) {
 
   const fake = {
     sessions,
+    beforeList: (): ServerMessage[] => [],
+    dropNextList: false,
     beforeCreated: (_op: Extract<RequestOp, { op: "create" }>): ServerMessage[] => [],
     createError: null as string | null,
+
+    get connections(): number {
+      return sockets.size;
+    },
 
     received(match: (op: RequestOp) => boolean): Promise<RequestOp> {
       const done = received.find(match);
@@ -58,6 +64,11 @@ export function startFakePtyd(home: string) {
       case "hello":
         return send(socket, { type: "ok", id, body: "hello", version: PROTOCOL_VERSION });
       case "list":
+        if (fake.dropNextList) {
+          fake.dropNextList = false;
+          return socket.end();
+        }
+        for (const message of fake.beforeList()) send(socket, message);
         return send(socket, { type: "ok", id, body: "sessions", sessions });
       case "create": {
         for (const message of fake.beforeCreated(op)) send(socket, message);

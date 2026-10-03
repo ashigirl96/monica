@@ -46,10 +46,16 @@ export function createWorkbench(deps: {
 
   let client: PtydClient | null = null;
   let connection: Promise<PtydClient> | null = null;
+  // List を待つ間に届いた Exit は、まだ取り込んでいない行に当たらず Reap する接続も無いので、reconcile の後で当てる。
+  let exitsDuringReconcile: [string, number | null][] | null = null;
   let stopping = false;
 
   // Reap は commit の後にする。間で Backend が死んでも tombstone が残り、次の reconcile が拾う。
   function onExit(id: string, exitCode: number | null) {
+    if (exitsDuringReconcile) {
+      exitsDuringReconcile.push([id, exitCode]);
+      return;
+    }
     db.update(terminalSession)
       .set({ status: "exited", exitCode, endedAt: new Date() })
       .where(and(eq(terminalSession.id, id), inArray(terminalSession.status, LIVE)))
@@ -58,9 +64,12 @@ export function createWorkbench(deps: {
     client?.notify({ op: "reap", session_id: id });
   }
 
+  // 繋ぎ直すのは reconcile まで済んだ接続が切れたときだけ。hello や List の途中で切れたら、
+  // その connect を回している reconnect が retry するので、ここで 2 本目のループを始めない。
   function onClose() {
+    const wasConnected = client !== null;
     client = null;
-    if (stopping) return;
+    if (stopping || !wasConnected) return;
     console.error("[workbench] lost tania-ptyd; reconnecting");
     connection = reconnect();
     // 待つ呼び手が居ないまま stop() で reject しても unhandled にしない。
@@ -69,20 +78,28 @@ export function createWorkbench(deps: {
 
   async function connect(): Promise<PtydClient> {
     if (stopping) throw new Error("the Workbench has stopped");
-    const opened = await openDaemon({ home, ptydPath }, { onExit, onClose });
-    if (stopping) {
-      opened.close();
-      throw new Error("the Workbench has stopped");
+    exitsDuringReconcile = [];
+    try {
+      const opened = await openDaemon({ home, ptydPath }, { onExit, onClose });
+      if (stopping) {
+        opened.close();
+        throw new Error("the Workbench has stopped");
+      }
+      const { reap, terminate } = reconcile(db, await opened.list());
+      for (const id of reap) opened.notify({ op: "reap", session_id: id });
+      for (const id of terminate) opened.notify({ op: "terminate", session_id: id });
+      client = opened;
+      const exits = exitsDuringReconcile;
+      exitsDuringReconcile = null;
+      for (const [id, exitCode] of exits) onExit(id, exitCode);
+      publish({ type: "reconciled" });
+      console.error(
+        `[workbench] connected to tania-ptyd; reaped ${reap.length}, terminated ${terminate.length}`,
+      );
+      return opened;
+    } finally {
+      exitsDuringReconcile = null;
     }
-    const { reap, terminate } = reconcile(db, await opened.list());
-    for (const id of reap) opened.notify({ op: "reap", session_id: id });
-    for (const id of terminate) opened.notify({ op: "terminate", session_id: id });
-    client = opened;
-    publish({ type: "reconciled" });
-    console.error(
-      `[workbench] connected to tania-ptyd; reaped ${reap.length}, terminated ${terminate.length}`,
-    );
-    return opened;
   }
 
   async function reconnect(): Promise<PtydClient> {
