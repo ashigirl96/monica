@@ -287,6 +287,16 @@ test("a ptyd that drops the connection mid-handshake leaves a single connection 
   expect(ptyd.connections).toBe(1);
 });
 
+test("a cwd whose multibyte character straddles two socket chunks is read intact", async () => {
+  const { ptyd, db, workbench } = setup();
+  ptyd.sessions.push(heldByPtyd("ts-a", { cwd: "/work/日本語" }));
+  ptyd.splitListMidCharacter = true;
+
+  await workbench.start();
+
+  expect(rowOf(db, "ts-a")?.cwd).toBe("/work/日本語");
+});
+
 test("a live session only ptyd knows is adopted without a shell and listed", async () => {
   const { ptyd, workbench, client } = setup();
   ptyd.sessions.push(heldByPtyd("ts-orphan", { pid: 777, cwd: "/work/repo" }));

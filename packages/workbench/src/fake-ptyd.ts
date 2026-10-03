@@ -3,19 +3,21 @@ import { join } from "node:path";
 import { PROTOCOL_VERSION, type RequestOp, type ServerMessage, type SessionInfo } from "./ptyd.ts";
 
 type Frame = RequestOp & { id?: number };
+type Connection = { decoder: TextDecoder; buffered: string };
 type Waiter = { match: (op: RequestOp) => boolean; resolve: (op: RequestOp) => void };
 
 export function startFakePtyd(home: string) {
   const sessions: SessionInfo[] = [];
   const received: RequestOp[] = [];
   const waiters: Waiter[] = [];
-  const sockets = new Set<Socket<{ buffered: string }>>();
+  const sockets = new Set<Socket<Connection>>();
   let nextPid = 1000;
 
   const fake = {
     sessions,
     beforeList: (): ServerMessage[] => [],
     dropNextList: false,
+    splitListMidCharacter: false,
     beforeCreated: (_op: Extract<RequestOp, { op: "create" }>): ServerMessage[] => [],
     createError: null as string | null,
 
@@ -41,8 +43,16 @@ export function startFakePtyd(home: string) {
     },
   };
 
-  function send(socket: Socket<{ buffered: string }>, message: ServerMessage) {
+  function send(socket: Socket<Connection>, message: ServerMessage) {
     socket.write(`${JSON.stringify(message)}\n`);
+  }
+
+  // 間を空けて書くと、client は最初の多 byte 文字の途中で切れた 2 つの chunk として受け取る。
+  function sendSplitMidCharacter(socket: Socket<Connection>, message: ServerMessage) {
+    const bytes = new TextEncoder().encode(`${JSON.stringify(message)}\n`);
+    const cut = bytes.findIndex((byte) => byte >= 0x80) + 1;
+    socket.write(bytes.subarray(0, cut));
+    setTimeout(() => socket.write(bytes.subarray(cut)), 20);
   }
 
   function record(op: RequestOp) {
@@ -53,7 +63,7 @@ export function startFakePtyd(home: string) {
     }
   }
 
-  function handle(socket: Socket<{ buffered: string }>, { id, ...op }: Frame) {
+  function handle(socket: Socket<Connection>, { id, ...op }: Frame) {
     record(op);
     if (op.op === "reap") {
       const index = sessions.findIndex((s) => s.session_id === op.session_id);
@@ -69,6 +79,9 @@ export function startFakePtyd(home: string) {
           return socket.end();
         }
         for (const message of fake.beforeList()) send(socket, message);
+        if (fake.splitListMidCharacter) {
+          return sendSplitMidCharacter(socket, { type: "ok", id, body: "sessions", sessions });
+        }
         return send(socket, { type: "ok", id, body: "sessions", sessions });
       case "create": {
         for (const message of fake.beforeCreated(op)) send(socket, message);
@@ -91,15 +104,15 @@ export function startFakePtyd(home: string) {
     }
   }
 
-  const server = Bun.listen<{ buffered: string }>({
+  const server = Bun.listen<Connection>({
     unix: join(home, "ptyd.sock"),
     socket: {
       open(socket) {
-        socket.data = { buffered: "" };
+        socket.data = { decoder: new TextDecoder(), buffered: "" };
         sockets.add(socket);
       },
       data(socket, chunk) {
-        socket.data.buffered += chunk.toString("utf8");
+        socket.data.buffered += socket.data.decoder.decode(chunk, { stream: true });
         let newline = socket.data.buffered.indexOf("\n");
         while (newline >= 0) {
           const line = socket.data.buffered.slice(0, newline).trim();

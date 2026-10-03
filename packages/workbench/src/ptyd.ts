@@ -54,6 +54,8 @@ export class PtydClient {
     number,
     { resolve: (b: ResponseBody) => void; reject: (e: Error) => void }
   >();
+  // chunk の境目で多 byte 文字が割れても、続きの chunk まで持ち越して decode する。
+  private decoder = new TextDecoder();
   private buffered = "";
   private outbox: Uint8Array[] = [];
   private closed = false;
@@ -145,7 +147,7 @@ export class PtydClient {
   }
 
   private receive(chunk: Buffer) {
-    this.buffered += chunk.toString("utf8");
+    this.buffered += this.decoder.decode(chunk, { stream: true });
     let newline = this.buffered.indexOf("\n");
     while (newline >= 0) {
       const line = this.buffered.slice(0, newline).trim();
