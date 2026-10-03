@@ -43,6 +43,8 @@
   "scripts": {
     "tania": "scripts/tania-dev",
     "desktop": "bun scripts/desktop.ts",
+    "dev:list": "bun scripts/dev.ts list",
+    "dev:kill": "bun scripts/dev.ts kill",
     "build": "bun scripts/build.ts",
     "install-app": "bun scripts/install-app.ts",
     "generate": "bun run --filter './packages/*' generate",
