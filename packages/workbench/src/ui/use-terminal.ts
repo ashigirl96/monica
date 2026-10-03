@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { type IDisposable, Terminal } from "@xterm/xterm";
+import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import "@xterm/xterm/css/xterm.css";
@@ -36,6 +36,7 @@ import { attachTerminalLinks } from "./terminal-links.ts";
 import {
   buildKeyEventHandler,
   createWheelHandler,
+  onTerminalData,
   registerParsers,
   TERMINAL_THEME,
 } from "./terminal-setup.ts";
@@ -54,12 +55,6 @@ function fitAndResize(fit: FitAddon, term: Terminal, sessionId: string): void {
   if (term.rows !== rows || term.cols !== cols) {
     void terminalResize(sessionId, term.rows, term.cols);
   }
-}
-
-// xterm は利用者の入力（キー・IME・paste・マウス）の onData の直前にだけ onUserInput を出すが、公開 API には無い。
-function onUserInput(term: Terminal, listener: () => void): void {
-  type Core = { coreService?: { onUserInput?: (listener: () => void) => IDisposable } };
-  (term as unknown as { _core?: Core })._core?.coreService?.onUserInput?.(listener);
 }
 
 type UseTerminalOptions = {
@@ -222,15 +217,7 @@ export function useTerminal(
       if (!getTabConnection(options.tabId)?.replaying) writeText(text);
     };
 
-    let fromUser = false;
-    onUserInput(term, () => {
-      fromUser = true;
-    });
-    term.onData((data) => {
-      if (fromUser) writeText(data);
-      else writeReply(data);
-      fromUser = false;
-    });
+    onTerminalData(term, { input: writeText, reply: writeReply });
 
     term.onBinary((data) => {
       const bytes = new Uint8Array(data.length);

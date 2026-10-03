@@ -1,4 +1,4 @@
-import type { Terminal, ITheme } from "@xterm/xterm";
+import type { IDisposable, ITheme, Terminal } from "@xterm/xterm";
 
 const PIXELS_PER_LINE = 20;
 const DOM_DELTA_LINE = 1;
@@ -56,6 +56,26 @@ export function registerParsers(
     } catch {
       return false;
     }
+  });
+}
+
+type CoreWithUserInput = {
+  _core?: { coreService?: { onUserInput?: (listener: () => void) => IDisposable } };
+};
+
+// xterm は利用者の入力（キー・IME・paste・マウス）の onData の直前にだけ内部の onUserInput を出すので、それで自分の応答と見分ける。
+export function onTerminalData(
+  term: Terminal,
+  handlers: { input: (data: string) => void; reply: (data: string) => void },
+): void {
+  let fromUser = false;
+  (term as unknown as CoreWithUserInput)._core?.coreService?.onUserInput?.(() => {
+    fromUser = true;
+  });
+  term.onData((data) => {
+    if (fromUser) handlers.input(data);
+    else handlers.reply(data);
+    fromUser = false;
   });
 }
 

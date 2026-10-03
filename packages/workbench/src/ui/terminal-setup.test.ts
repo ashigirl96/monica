@@ -1,7 +1,7 @@
 /// <reference types="bun" />
 import { describe, expect, test } from "bun:test";
 import type { Terminal } from "@xterm/xterm";
-import { createWheelHandler } from "./terminal-setup";
+import { createWheelHandler, onTerminalData } from "./terminal-setup";
 
 type CsiHandler = (params: (number | number[])[]) => boolean;
 
@@ -164,5 +164,25 @@ describe("createWheelHandler", () => {
     onWheel(wheelEvent({ deltaY: 40 }).event);
 
     expect(writes).toEqual(["\x1b[<64;40;12M", "\x1b[<65;40;12M".repeat(2)]);
+  });
+});
+
+// 本物の xterm を使い、更新で内部の onUserInput が変わったらここで落ちるようにする。
+describe("onTerminalData", () => {
+  test("tells the user's input apart from xterm's own replies", async () => {
+    const { Terminal } = await import("@xterm/xterm");
+    const term = new Terminal();
+    const got: string[] = [];
+    onTerminalData(term, {
+      input: (data) => got.push(`input:${data}`),
+      reply: (data) => got.push(`reply:${data}`),
+    });
+
+    term.input("ls", true);
+    term.input("\x1b[?1;2c", false);
+    term.input("x", true);
+
+    expect(got).toEqual(["input:ls", "reply:\x1b[?1;2c", "input:x"]);
+    term.dispose();
   });
 });
