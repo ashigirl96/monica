@@ -139,7 +139,8 @@ const tabsReportingCwdAtom = atom<ReadonlySet<string>>(new Set<string>());
 // OSC 7 を出さない shell でも、title を path にする設定なら cwd を追える。
 export const updateTabTitleAtom = atom(null, (get, set, tabId: string, title: string) => {
   set(tabTitlesAtom, (prev) => ({ ...prev, [tabId]: title }));
-  const isPath = title.startsWith("/") || title.startsWith("~");
+  // `~user` や zsh の named directory は Backend が絶対 path にできないので、`~` と `~/` の形だけを取る。
+  const isPath = title.startsWith("/") || title === "~" || title.startsWith("~/");
   if (!isPath || get(tabsReportingCwdAtom).has(tabId)) return Promise.resolve();
   return writeCwd(get, set, tabId, title);
 });

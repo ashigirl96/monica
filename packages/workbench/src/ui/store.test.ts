@@ -310,3 +310,14 @@ test("a path in the title moves the cwd until the shell reports its cwd itself",
   await store.set(updateTabTitleAtom, tab.id, "~/c");
   expect(await cwd()).toBe("/b");
 });
+
+test("a title in a ~ form the Backend cannot make absolute does not move the cwd", async () => {
+  const { client, store } = bench();
+  const { tab } = await client.runspace.create({ cwd: "/a", ...size });
+  await store.set(reloadAtom);
+
+  await store.set(updateTabTitleAtom, tab.id, "~work/repo");
+  await store.set(updateTabTitleAtom, tab.id, "~other");
+
+  expect((await client.layout.get()).runspaces[0]!.tabs[0]!.cwd).toBe("/a");
+});
