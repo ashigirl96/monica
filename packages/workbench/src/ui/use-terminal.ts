@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { Terminal } from "@xterm/xterm";
+import { type IDisposable, Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import "@xterm/xterm/css/xterm.css";
@@ -54,6 +54,12 @@ function fitAndResize(fit: FitAddon, term: Terminal, sessionId: string): void {
   if (term.rows !== rows || term.cols !== cols) {
     void terminalResize(sessionId, term.rows, term.cols);
   }
+}
+
+// xterm は利用者の入力（キー・IME・paste・マウス）の onData の直前にだけ onUserInput を出すが、公開 API には無い。
+function onUserInput(term: Terminal, listener: () => void): void {
+  type Core = { coreService?: { onUserInput?: (listener: () => void) => IDisposable } };
+  (term as unknown as { _core?: Core })._core?.coreService?.onUserInput?.(listener);
 }
 
 type UseTerminalOptions = {
@@ -212,12 +218,23 @@ export function useTerminal(
     const cleanup = new EventCleanupManager();
 
     const sendBytes = (bytes: Uint8Array) => {
-      if (getTabConnection(options.tabId)?.replaying) return;
       void terminalWrite(optionsRef.current.sessionId, toBase64(bytes));
     };
     const writeText = (text: string) => sendBytes(encoder.encode(text));
+    // replay の中の問い合わせには出された時に答え済みなので、xterm がもう一度答えた分は shell に送らない。
+    const writeReply = (text: string) => {
+      if (!getTabConnection(options.tabId)?.replaying) writeText(text);
+    };
 
-    term.onData(writeText);
+    let fromUser = false;
+    onUserInput(term, () => {
+      fromUser = true;
+    });
+    term.onData((data) => {
+      if (fromUser) writeText(data);
+      else writeReply(data);
+      fromUser = false;
+    });
 
     term.onBinary((data) => {
       const bytes = new Uint8Array(data.length);
@@ -231,7 +248,7 @@ export function useTerminal(
       optionsRef.current.onTitleChange?.(title);
     });
 
-    registerParsers(term, writeText, () => optionsRef.current.onCwdChange);
+    registerParsers(term, writeReply, () => optionsRef.current.onCwdChange);
 
     term.attachCustomKeyEventHandler(
       buildKeyEventHandler(

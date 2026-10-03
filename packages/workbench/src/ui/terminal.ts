@@ -18,8 +18,18 @@ export function terminalDetach(sessionId: string): Promise<void> {
   return shell("terminal_detach", { sessionId });
 }
 
+// Shell は command を別々の thread で走らせ順番を保たないので、書き込みは前の 1 つが届いてから送る。
+const lastWrites = new Map<string, Promise<void>>();
+
 export function terminalWrite(sessionId: string, data: string): Promise<void> {
-  return shell("terminal_write", { sessionId, data });
+  const previous = lastWrites.get(sessionId) ?? Promise.resolve();
+  const written = previous.then(() => shell<void>("terminal_write", { sessionId, data }));
+  const settled = written.catch(() => {});
+  lastWrites.set(sessionId, settled);
+  void settled.then(() => {
+    if (lastWrites.get(sessionId) === settled) lastWrites.delete(sessionId);
+  });
+  return written;
 }
 
 export function terminalResize(sessionId: string, rows: number, cols: number): Promise<void> {
