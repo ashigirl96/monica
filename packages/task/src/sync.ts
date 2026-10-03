@@ -1,8 +1,8 @@
 import { ORPCError } from "@orpc/server";
-import type { Db } from "@tania/workbench/server";
-import { eq, isNull } from "drizzle-orm";
+import type { Db, Tx } from "@tania/workbench/server";
+import { eq, isNull, type SQL } from "drizzle-orm";
 import type { SyncOutput, TaskChange, TrackOutput } from "./contract.ts";
-import { isIssue, writeIssue } from "./copy.ts";
+import { isIssue, writeIssues } from "./copy.ts";
 import { BATCH, type GitHub, oneLine, queryIssues, RepositoryNotFound } from "./github.ts";
 import { formatRef, type IssueRef, parseRef } from "./ref.ts";
 import { issue, task } from "./schema.ts";
@@ -20,27 +20,36 @@ export type SyncDeps = {
 /** `failures` は `owner/repo: 理由` の並び。token が取れなければ理由だけの 1 つになる。 */
 export type SyncOutcome = { synced: number; missing: string[]; failures: string[] };
 
+// 改名した repo の issue は旧名でも新しい名前でも引けるので、track 済みかは名前でなく Task の行の insert で決める。
 export async function trackIssue(deps: SyncDeps, input: string): Promise<TrackOutput> {
   const ref = parseRef(input);
-  const tracked = findTask(deps.db, ref);
+  const tracked = findTask(deps.db, isIssue(ref));
+  let issueId = tracked?.issueId;
+  let alreadyTracked = tracked !== undefined;
   const outcome = tracked
     ? await syncTask(deps, tracked, SYNC_TIMEOUT_MS)
-    : await syncRefs(deps, [ref], SYNC_TIMEOUT_MS, { track: true });
+    : await syncRefs(deps, [ref], SYNC_TIMEOUT_MS, {
+        track(tx, copiedId) {
+          issueId = copiedId;
+          const inserted = tx
+            .insert(task)
+            .values({ issueId: copiedId, trackedAt: new Date() })
+            .onConflictDoNothing()
+            .returning()
+            .get();
+          alreadyTracked = inserted === undefined;
+        },
+      });
   outputOrThrow(outcome, { missingIsNotFound: true });
-  const row = findTask(deps.db, ref)!;
-  if (!tracked) deps.publish({ type: "task", ref: formatRef(row) });
-  return {
-    ref: formatRef(row),
-    title: row.title,
-    alreadyTracked: tracked !== undefined,
-    closed: row.closedAt !== null,
-  };
+  const row = findTask(deps.db, eq(issue.id, issueId!))!;
+  if (!alreadyTracked) deps.publish({ type: "task", ref: formatRef(row) });
+  return { ref: formatRef(row), title: row.title, alreadyTracked, closed: row.closedAt !== null };
 }
 
 export async function syncCommand(deps: SyncDeps, input: string | undefined): Promise<SyncOutput> {
   if (input === undefined) return outputOrThrow(await syncOpenTasks(deps, SYNC_TIMEOUT_MS));
   const ref = parseRef(input);
-  const tracked = findTask(deps.db, ref);
+  const tracked = findTask(deps.db, isIssue(ref));
   if (!tracked) throw new ORPCError("NOT_FOUND", { message: `${formatRef(ref)} is not tracked` });
   return outputOrThrow(await syncTask(deps, tracked, SYNC_TIMEOUT_MS));
 }
@@ -91,9 +100,10 @@ function joinRunning(
   return started;
 }
 
-function findTask(db: Db, ref: IssueRef) {
+function findTask(db: Db, where: SQL | undefined) {
   return db
     .select({
+      issueId: issue.id,
       repo: issue.repo,
       number: issue.number,
       title: issue.title,
@@ -101,7 +111,7 @@ function findTask(db: Db, ref: IssueRef) {
     })
     .from(task)
     .innerJoin(issue, eq(issue.id, task.issueId))
-    .where(isIssue(ref))
+    .where(where)
     .get();
 }
 
@@ -113,7 +123,7 @@ async function syncRefs(
   deps: SyncDeps,
   refs: IssueRef[],
   timeoutMs: number,
-  { track = false } = {},
+  { track }: { track?: (tx: Tx, issueId: number) => void } = {},
 ): Promise<SyncOutcome> {
   const outcome: SyncOutcome = { synced: 0, missing: [], failures: [] };
   if (refs.length === 0) return outcome;
@@ -141,14 +151,8 @@ async function syncRefs(
           );
           const syncedAt = new Date();
           deps.db.transaction((tx) => {
-            for (const copied of answer.issues) {
-              const issueId = writeIssue(tx, copied, syncedAt);
-              if (track) {
-                tx.insert(task)
-                  .values({ issueId, trackedAt: syncedAt })
-                  .onConflictDoNothing()
-                  .run();
-              }
+            for (const issueId of writeIssues(tx, answer.issues, repo, syncedAt)) {
+              track?.(tx, issueId);
             }
           });
           outcome.synced += answer.issues.length;
