@@ -433,9 +433,9 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 
 ## 検査と CI
 
-- `bun run check` が lint（oxlint）、format の検査（oxfmt）、`tsc --noEmit`、`bun test`、`vite build`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace` を流す。
-- CI は 2 job。TS の job（ubuntu）が lint・format・型・test・`vite build` を、Rust の job（macOS。Tauri の crate が macOS の system library を要るため）が clippy と test を流す。
-- Rust の job は `crates/**`・`apps/desktop/src-tauri/**`・`Cargo.toml`・`Cargo.lock` が変わったときだけ走らせる（paths filter）。private repo では macOS の runner の 1 分が 10 分に数えられ、crate は monica から rename しただけで骨格の後はほとんど変わらないため。
+- `bun run check` が lint（oxlint）、format の検査（oxfmt）、`tsc --noEmit`、`bun test`、`vite build`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace` を流す。中身は `check:ts`（clippy と cargo test の手前まで）と `check:rust` に分け、CI の各 job も同じ script を呼ぶ。
+- CI の検査は 2 job。TS の job（ubuntu）が `check:ts` を、Rust の job（macOS。Tauri の crate が macOS の system library を要るため）が `check:rust` を流す。
+- Rust の job は `crates/**`・`apps/desktop/src-tauri/**`・`Cargo.toml`・`Cargo.lock` が変わったときだけ走らせる（paths filter）。private repo では macOS の runner の 1 分が 10 分に数えられ、crate は monica から rename しただけで骨格の後はほとんど変わらないため。GitHub Actions には job 単位の paths filter が無いので、変更の判定は検査とは別の ubuntu の小さな job（`dorny/paths-filter`）で行い、Rust の job はその出力で起動を決める。
 - tauri の bundle build、knip、jscpd、lefthook は入れない。
 
 ## 版

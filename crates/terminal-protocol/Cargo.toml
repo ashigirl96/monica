@@ -1,0 +1,10 @@
+[package]
+name = "tania-terminal-protocol"
+version.workspace = true
+description = "Wire protocol for the tania terminal daemon (serde DTOs, version handshake)"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json.workspace = true

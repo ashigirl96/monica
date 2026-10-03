@@ -1,0 +1,11 @@
+[package]
+name = "tania-terminal-client"
+version.workspace = true
+description = "Client transport for the tania terminal daemon"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+log.workspace = true
+tania-terminal-protocol.workspace = true

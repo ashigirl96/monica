@@ -1,0 +1,18 @@
+[package]
+name = "tania-ptyd"
+version.workspace = true
+description = "tania PTY daemon: owns terminal sessions independently of the app lifecycle"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+libc.workspace = true
+log = { workspace = true, features = ["std"] }
+tania-logfile.workspace = true
+tania-terminal-daemon.workspace = true
+
+[dev-dependencies]
+base64.workspace = true
+tania-terminal-client.workspace = true
+tania-terminal-protocol.workspace = true

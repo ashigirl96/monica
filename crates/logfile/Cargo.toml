@@ -1,0 +1,10 @@
+[package]
+name = "tania-logfile"
+version.workspace = true
+description = "Daily-rotated, retention-bounded append-only log files"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
