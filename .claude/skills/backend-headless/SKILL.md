@@ -1,6 +1,6 @@
 ---
 name: backend-headless
-description: "desktop 無しで Backend と tania-ptyd を起こし、CLI と RPC で振る舞いを確かめる。受け入れ条件を手で確かめるとき、Backend の起動・終了・ptyd との再接続を実機で見るときに使う。"
+description: "desktop 無しで Backend と tania-ptyd を起こし、CLI と RPC で振る舞いを確かめる。受け入れ条件を手で確かめるとき、Backend の起動・終了・ptyd との再接続を実機で見るとき、Tab で claude を動かして Agent Session を見るときに使う。"
 ---
 
 Backend を本物の ptyd に繋いで起こす。Shell の役（親として生き続け、stdin の pipe の書き側を握る）は Bash の background job が演じる。
@@ -18,6 +18,9 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 
    - 親は background job のまま生かす。`( … &)` で切り離すと親がすぐ死に、Backend は ppid=1 の見張りで約 1 秒後に黙って抜ける。
    - stdin は無名 pipe にする。Bun は fifo の EOF を拾わないので、fifo では stdin の EOF で抜ける振る舞いを確かめられない。
+   - Monica の tab の中（`env | grep MONICA` が出る）から起こすときは、`env -i HOME=$HOME USER=$USER SHELL=/bin/zsh TERM=xterm-256color LANG=$LANG TMPDIR=$TMPDIR PATH=<monica を含む dir を除いた PATH>` を前に付ける。ptyd は Backend の env を tab に渡すので、`MONICA_*` が残ると tab の claude に Monica の hook が付き、Monica 側に記録される。
+
+4. tab の claude の hook を確かめるなら、起動した後に `ln -s $PWD/scripts/tania-dev ${TMPDIR%/}/tania-s2/bin/tania` を張る。hook の settings の command はこの path を指し、desktop では Shell が張る。
 
 起動できたのは、`out.jsonl` に `{"type":"endpoint",…}` の行が出て、`$TANIA_HOME/backend.json` ができたとき。待つのは、Bash の `run_in_background` で `until [ -f ${TMPDIR%/}/tania-s2/backend.json ] || ! pgrep -qf apps/backend/src/main.ts; do sleep 0.5; done` を走らせる（前景の `sleep` は harness が止める）。抜けた後に `backend.json` が無ければ Backend は落ちているので、`err.log` を読む。
 
@@ -31,6 +34,30 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
   const { connect } = await import(`${process.cwd()}/apps/cli/src/backend.ts`);
   const client = connect(process.env.TANIA_HOME);
   console.log(JSON.stringify(await client.workbench.layout.get()));'
+  ```
+
+- Tab への打ち込みと画面: Tab は RPC の `workbench.runspace.create` で開き、`tab.terminalSessionId` に ptyd の socket で `write`（data は base64）を送る。画面は `attach`（`replay_bytes` で末尾を指定）の応答の `replay` を base64 で解き、escape sequence を除いて読み、`detach` する。Enter は `\r`、Shift+Tab は `\x1b[Z`。claude の状態の移り変わりは、`agentSession.list` を 200ms ごとに読んで、変わったときだけ出すと取りこぼさない。
+
+  ```bash
+  TANIA_HOME=${TMPDIR%/}/tania-s2 bun -e '
+  const [id, text] = ["ts-…", "claude --model haiku\r"];
+  const socket = await Bun.connect({
+    unix: `${process.env.TANIA_HOME}/ptyd.sock`,
+    socket: { data: (_, chunk) => {
+      for (const line of chunk.toString().trim().split("\n")) {
+        const m = JSON.parse(line);
+        if (m.body === "attached") console.log(Buffer.from(m.replay, "base64").toString().replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, "").slice(-2000));
+      }
+    } },
+  });
+  const send = (op) => socket.write(`${JSON.stringify(op)}\n`);
+  send({ id: 1, op: "hello", version: 1 });
+  send({ op: "write", session_id: id, data: Buffer.from(text).toString("base64") });
+  await Bun.sleep(5000);
+  send({ id: 2, op: "attach", session_id: id, replay_bytes: 4000 });
+  await Bun.sleep(300);
+  send({ op: "detach", session_id: id });
+  socket.end();'
   ```
 
 - HTTP: `/health` は token 無しで返る。port と token は `backend.json` にある。

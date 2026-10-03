@@ -130,6 +130,7 @@ package ごとに in-memory の SQLite に自分の migration を当てる（tas
 - workbench の ptyd は `packages/workbench/src/fake-ptyd.ts` に差し替える。fake は `$home/ptyd.sock` で NDJSON を話し、List の中身を台本にし、Exit を押し込み、届いた Reap と Terminate を記録する。本物の ptyd は CI の ts job に無く、Exit と Created の競合も決まった順で起こせないため。home は `mkdtemp(tmpdir())` で短くする（socket の path の上限は 104 byte）。
 - 終わった行のように procedure に出ない行は、`@tania/workbench/schema` の table を SELECT して確かめてよい。他の domain が読むのと同じ面だから。
 - CLI は remote client を `createRouterClient` に差し替えて回す（ADR-0003。fixture は `apps/cli/src/testing.ts`）。Backend 側のエラーの形と接続拒否の retry だけは、router を `Bun.serve` に載せて確かめる。in-process の client は handler の生の Error を投げ、HTTP のように `ORPCError`（`INTERNAL_SERVER_ERROR`）に包まないため。
+- hook の CLI（`tania workbench hook claude`）は例外で、`apps/cli/src/main.ts` を subprocess で起こし、router を `Bun.serve` に載せて確かめる。claude から見た約束（stdin の payload、stdout の allow、exit code）と 2 秒の打ち切り、trpc-cli より前の振り分けは、process の外からしか見えないため。
 
 ## contract の規約
 
@@ -171,7 +172,7 @@ contract を走査するテストを 1 本置き、description と output が全
 
 - CLI は Backend と別の compiled binary（ADR-0003）。
 - `src/main.ts` は argv を見て、各 package の `cli` entry が export する手書き command（`{ path, description, run }`）に当たればそれを実行する。当たらなければ trpc-cli を dynamic import し、contract の `cli: true` の葉から CLI を組む。hook は tool 1 回ごとに起動するので、trpc-cli と contract の実体を import する前に振り分ける（compiled で約 46ms → 約 18ms）。
-- `src/backend.ts` が Backend の探索（`backend.json` の読み出し、不在時の即 exit 2、接続拒否時の 200ms × 3 秒 retry。ADR-0007）と `RPCLink` の生成を 1 箇所で持つ。手書き command には `connect(): Client | null` として渡す。
+- `src/backend.ts` が Backend の探索（`backend.json` の読み出し、不在時の即 exit 2、接続拒否時の 200ms × 3 秒 retry。ADR-0007）と `RPCLink` の生成を 1 箇所で持つ。手書き command には `connect({ retry? }): Client | null` として渡す。hook は `retry: false` で呼び、接続拒否でもすぐ諦める。
 - 転送 router（`src/forward.ts`）は contract を走査し、`cli: true` の葉を「remote を呼ぶ → 整形して出力する → `undefined` を返す」handler に置き換える。`undefined` を返すので、trpc-cli の YAML / 表の logger は何も出さない。
 - input に `terminalSessionId` を持つ procedure（`current`、`attach`、`close`）には、転送 router が env の `TANIA_TERMINAL_SESSION_ID` を埋める。flag には出さない。
 - `--format text|json` は `buildProgram` で global option として足す（既定は text）。json は procedure の output をそのまま出す。text は `@tania/<d>/cli` の整形関数を procedure の path で引く。整形の識別子は英語（#17）。
@@ -285,6 +286,14 @@ changes                    → { type: "layout" } | { type: "terminalSession", i
   - `terminalSession.list` は、live か Tab に指されている行だけを返す。Detached グループと Tab の overlay の材料。webview は Shell から Exit を受けた Terminal Session と自分が終了を頼んだ Terminal Session を、一覧が live と言っていても exited として扱い、Detached に出さない（Backend が exit を記録するまで行は live のままなので）。接続中の Tab が Exit で閉じる間は、overlay も dot も出さない。CLI の `tania workbench terminal-session list` も同じものを出す。
   - `agentSession.list` は、終了でない行だけを返す。status dot の材料（「Workbench の UI 状態と status dot」の節）。
 
+### Agent Session の終了と未観測
+
+ADR-0008 の「Backend 起動時」と ADR-0011 の reconcile の規則のうち、Agent Session の分。どちらも `transition` に Terminal Session の終了と Backend の再起動の event として渡す。
+
+- Agent Session の居場所（`terminal_session_id`）は、受け付けた hook の Terminal Session に合わせる。resume の SessionStart を取りこぼした agent が前の Tab に結ばれたままだと、前の Tab が閉じたときに生きている agent を終了にしてしまうため。 つの Terminal Session に live な Agent Session が 1 つであることは、`agent_session` の部分 unique index（`state <> 'ended'`）が守る。cwd も受け付けた hook の値に合わせる。
+- Terminal Session の行が終わるとき（ptyd の Exit、reconcile の lost / exited）、同じ transaction で、その Terminal Session の終了でない Agent Session を終了（terminal_exited）にする。
+- 生きている Terminal Session の動作中の Agent Session を未観測にするのは、Backend の起動直後の reconcile だけ。ptyd に繋ぎ直したときの reconcile では動作中のままにする。その間も Backend は居て hook を受けていたため。
+
 ### Tab の外から来た hook
 
 - `recordHook` は、input の Terminal Session が帳簿に無いか終わっている（exited / lost / failed）なら、何も書かず通知も出さずに、stderr に 1 行出して正常に返す。Agent Session は Tab の中で動く agent なので、どの Tab にも無い Terminal Session の agent は観測しない。
@@ -346,14 +355,16 @@ Terminal Session を作るときに Backend が ptyd の Create に渡す env �
 ptyd は shell を常に `--login` で起こすので、zsh は `.zshenv` → `.zprofile` → `.zshrc` → `.zlogin` の順に shim を読む。
 
 - 4 枚とも、ZDOTDIR を一時的にユーザーの値（`TANIA_USER_ZDOTDIR`、空なら `$HOME`）にして同名のファイルを source するだけ。ユーザーの `.zshenv` が ZDOTDIR を変えたら、以降はその値から読む。
-- `.zshrc` の最後で `$TANIA_HOME/bin` を PATH の先頭に置き直す。ユーザーの rc が PATH の前に何を足しても、dev の tab の `tania` と `claude` は `$TANIA_HOME/bin` のものを指す。
+- `.zshrc` の最後で `$TANIA_HOME/bin` を PATH の先頭に置き直す。ユーザーの rc が PATH の前に何を足しても、dev の tab の `tania` と `claude` は `$TANIA_HOME/bin` のものを指す。zinit の turbo mode のように `.zshrc` の後で PATH の前に足す plugin の dir はその前に来るが、`tania` と `claude` を持たなければ害は無い。
 - `.zlogin` の最後で ZDOTDIR をユーザーの値に戻して export する（元が未設定なら unset）。tab から起こした子（dev の desktop、tmux、Claude Code の Bash tool）は shim を通らない。
 - `claude` の shell 関数は定義しない。Claude Code の Bash tool は shell 関数を snapshot に取り込むので、関数にすると agent の中から起こした `claude` にも効いてしまう。
 
 ### claude wrapper（`$TANIA_HOME/bin/claude`）
 
 - PATH から自分の directory 以外の `claude` を探して exec する。
+- PATH に別の wrapper（他の home の tania、monica）があると、どちらも PATH の先頭の `claude` へ戻すので exec が巡回する。wrapper は exec した `claude` を env の `TANIA_CLAUDE_TRAIL`（pid と path の列）に残し、同じ pid で戻ってきたら、それを飛ばして次を探し、`--settings` も足し直さない。exec は pid を変えないので、claude の子に漏れた値とは見分けられる。
 - `TANIA_TERMINAL_SESSION_ID` があり、`CLAUDECODE` が無いときだけ `--settings $TANIA_HOME/shell/claude/settings.json` を足す。`CLAUDECODE` があるのは agent の Bash tool から起こした入れ子の claude で、hook を付けると同じ Terminal Session の SessionStart が親の Agent Session を superseded にする（ADR-0008）。
+- 最初の引数が claude の subcommand（`mcp`、`doctor`、`update` など。claude 2.1.288 の `--help` の Commands）なら `--settings` を足さない。claude は `--settings` の後ろの subcommand を prompt として読み、後ろに置くと `unknown option` で落ちる。最初の引数が prompt（`claude "fix the bug"`）なら足す。
 - `--session-id` は足さない。Run は Bench の Tab に居る Agent Session から生まれる（ADR-0005）。
 - `claude` を絶対パスで呼ぶと wrapper を通らず、その Agent Session は観測されない。
 

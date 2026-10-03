@@ -1,7 +1,7 @@
 import { eventIterator, oc } from "@orpc/contract";
 import { createSchemaFactory } from "drizzle-zod";
 import { z } from "zod";
-import { runspace, tab, terminalSession } from "./schema.ts";
+import { agentSession, runspace, tab, terminalSession } from "./schema.ts";
 
 const meta = oc.$meta<{ description?: string; cli?: boolean }>({});
 const { createSelectSchema } = createSchemaFactory({ coerce: { date: true } });
@@ -16,16 +16,20 @@ export const LayoutSchema = z.object({
   runspaces: z.array(createSelectSchema(runspace).extend({ tabs: z.array(TabSchema) })),
 });
 
+export const AgentSessionSchema = createSelectSchema(agentSession);
+
 // 合図だけを流す。購読側は payload を信じず読み直す。
 export const WorkbenchChangeSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("layout") }),
   z.object({ type: z.literal("terminalSession"), id: z.string() }),
+  z.object({ type: z.literal("agentSession"), sessionId: z.string() }),
   z.object({ type: z.literal("reconciled") }),
 ]);
 
 export type TerminalSession = z.infer<typeof TerminalSessionSchema>;
 export type Tab = z.infer<typeof TabSchema>;
 export type Layout = z.infer<typeof LayoutSchema>;
+export type AgentSession = z.infer<typeof AgentSessionSchema>;
 export type WorkbenchChange = z.infer<typeof WorkbenchChangeSchema>;
 
 const size = { rows: z.number().int().positive(), cols: z.number().int().positive() };
@@ -109,6 +113,17 @@ export const contract = {
       .meta({ description: "Unpin a Tab, leaving it in its Runspace" })
       .input(z.object({ id: z.string() }))
       .output(z.void()),
+  },
+  agentSession: {
+    recordHook: meta
+      .meta({ description: "Apply a Claude Code hook from a Tab to its Agent Session" })
+      .input(
+        z.object({ terminalSessionId: z.string(), payload: z.record(z.string(), z.unknown()) }),
+      )
+      .output(z.void()),
+    list: meta
+      .meta({ description: "List Agent Sessions that have not ended", cli: true })
+      .output(z.array(AgentSessionSchema)),
   },
   changes: meta
     .meta({ description: "Stream signals that the Workbench books changed" })

@@ -20,6 +20,29 @@ test("terminal-session list prints the live sessions as text", async () => {
   });
 });
 
+test("agent-session list prints each live Agent Session with its state and reason as text", async () => {
+  const client = inProcessClient();
+  await client.workbench.agentSession.recordHook({
+    terminalSessionId: "ts-a",
+    payload: {
+      session_id: "6253bdb0-26c3-4dd3-bc04-34af7ebcc00e",
+      cwd: "/work/repo",
+      hook_event_name: "PermissionRequest",
+      tool_name: "Bash",
+    },
+  });
+
+  const result = await tania(["workbench", "agent-session", "list"], () => client);
+
+  expect(result).toEqual({
+    code: 0,
+    stdout:
+      "ID        TERMINAL SESSION  STATE                       CWD\n" +
+      "6253bdb0  ts-a              waiting (permission: Bash)  /work/repo\n",
+    stderr: "",
+  });
+});
+
 test("--format json prints the procedure output as it is", async () => {
   const client = inProcessClient();
 
