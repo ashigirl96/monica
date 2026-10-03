@@ -134,6 +134,7 @@ mod tests {
         });
 
         stop(&home);
+        std::fs::remove_dir_all(&home).unwrap();
 
         assert_eq!(waiter.join().unwrap().signal(), Some(libc::SIGTERM));
     }
@@ -146,6 +147,7 @@ mod tests {
         publish(&home, serve_health(pid + 1), pid);
 
         stop(&home);
+        std::fs::remove_dir_all(&home).unwrap();
 
         let still_running = child.try_wait().unwrap().is_none();
         child.kill().unwrap();

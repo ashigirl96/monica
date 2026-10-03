@@ -51,4 +51,4 @@ dev の desktop（identifier `com.ashigirl96.tania.dev`）は single-instance �
 1. 自分で開いた Tab は、`exit` を送って閉じる。
 2. ユーザーが使っていなければ、background の job を TaskStop で止め、`rm -rf ${TMPDIR%/}/tania-<name>` で home を消す。ptyd は socket が消えたのを 2 秒おきの確認で見つけ、shell ごと終わるので、下の判定は数秒待ってからする。
 
-片付いたのは、`pgrep -f target/debug/tania-desktop` と `pgrep -f "tania-ptyd --tania-home ${TMPDIR%/}/tania-<name>"` が何も返さず、home が消えたとき。ユーザーが使っている dev app は止めず、起こしたままだと伝える。
+片付いたのは、`pgrep -f target/debug/tania-desktop` と `pgrep -f "tania-ptyd --tania-home ${TMPDIR%/}/tania-<name>"` が何も返さず、home が消えたとき。ユーザーが使っている dev app は止めず、起こしたままだと伝える。消し忘れた dev は `bun run dev:list` で見つけ、`bun run dev:kill <NAME>` で片付ける。
