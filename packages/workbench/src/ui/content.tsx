@@ -30,7 +30,7 @@ function TerminalSessionOverlay({
   entry: TerminalSessionStatusEntry;
   cwd: string;
   onNewShell: () => void;
-  onCloseTab: () => void;
+  onCloseTab?: () => void;
 }) {
   const message =
     entry.status === "lost"
@@ -52,13 +52,15 @@ function TerminalSessionOverlay({
         >
           {entry.status === "failed" ? "Retry" : `New shell in ${baseName(cwd)}`}
         </button>
-        <button
-          type="button"
-          onClick={onCloseTab}
-          className="rounded-md px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
-        >
-          Close tab
-        </button>
+        {onCloseTab && (
+          <button
+            type="button"
+            onClick={onCloseTab}
+            className="rounded-md px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+          >
+            Close tab
+          </button>
+        )}
       </div>
     </div>
   );
@@ -89,6 +91,7 @@ function TerminalPane({
   status,
   dead,
   cwd,
+  pinned,
   active,
 }: {
   tabId: string;
@@ -96,6 +99,7 @@ function TerminalPane({
   status?: TerminalSessionStatus;
   dead?: TerminalSessionStatusEntry;
   cwd: string;
+  pinned: boolean;
   active: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -111,7 +115,7 @@ function TerminalPane({
   );
   const onCwdChange = useCallback((cwd: string) => void updateCwd(tabId, cwd), [tabId, updateCwd]);
   const onExit = useCallback(
-    (exitCode: number | null) => void tabExited(tabId, exitCode),
+    (sessionId: string, exitCode: number | null) => void tabExited(tabId, sessionId, exitCode),
     [tabId, tabExited],
   );
 
@@ -143,7 +147,7 @@ function TerminalPane({
           entry={dead}
           cwd={cwd}
           onNewShell={() => void startNewShell(tabId)}
-          onCloseTab={() => void closeTab(tabId)}
+          onCloseTab={pinned ? undefined : () => void closeTab(tabId)}
         />
       )}
     </div>
@@ -176,6 +180,7 @@ export default function WorkbenchContent() {
             status={statuses[tab.terminalSessionId]?.status}
             dead={deadTabs[tab.id]}
             cwd={tab.cwd}
+            pinned={tab.pinned}
             active={tab.id === activeTabId}
           />
         ))}

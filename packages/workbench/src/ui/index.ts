@@ -7,6 +7,7 @@ export {
   cycleTerminalTabAtom,
   moveActiveRunspaceAtom,
   moveActiveTabAtom,
+  toggleTabPinAtom,
 } from "./store.ts";
 export { setUiZoomAtom, sidebarOpenAtom } from "./ui-state.ts";
 export { Workbench } from "./workbench.tsx";

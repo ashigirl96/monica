@@ -1,4 +1,4 @@
-import { cn, useDragReorder } from "@tania/ui";
+import { cn, PinIcon, useDragReorder } from "@tania/ui";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useState } from "react";
 import type { TerminalSession } from "../contract.ts";
@@ -95,6 +95,7 @@ function RunspaceItem({
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex items-start gap-1.5">
           {hint && <JumpHint hint={hint} ctrl />}
+          {runspace.holdsPin && <PinIcon size={14} className="shrink-0 text-rose-400" />}
           <span className="flex-1 truncate text-xs font-medium leading-snug">
             {runspace.title || "Terminal"}
           </span>
@@ -154,10 +155,20 @@ export function WorkbenchSidebar() {
     />
   );
 
+  const holdingPin = summaries.filter((s) => s.holdsPin);
+  const rest = summaries.filter((s) => !s.holdsPin);
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto">
-        <RunspaceGroup label="" items={summaries} renderItem={renderItem} />
+        {holdingPin.length > 0 && (
+          <RunspaceGroup label="Pinned" items={holdingPin} renderItem={renderItem} />
+        )}
+        <RunspaceGroup
+          label={holdingPin.length > 0 ? "Runspaces" : ""}
+          items={rest}
+          renderItem={renderItem}
+        />
 
         {detached.length > 0 && (
           <>
