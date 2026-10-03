@@ -29,23 +29,23 @@ export function watchBackend(handlers: {
   onFailed: () => void;
 }): () => void {
   let active = true;
-  let heard = false;
+  let heardEndpoint = false;
   const unlisten = [
     listen<Endpoint | null>("backend-endpoint", (event) => {
-      heard = true;
+      heardEndpoint = true;
       if (active) handlers.onEndpoint(event.payload);
     }),
     listen("backend-failed", () => {
-      heard = true;
       if (active) handlers.onFailed();
     }),
   ];
-  // listen を張ってから今の様子を訊く。張る前に出た event を取りこぼさず、答えより新しい event を答えで上書きしない。
+  // listen を張ってから今の様子を訊く。張る前に出た event を取りこぼさず、答えより新しい endpoint の event を答えで上書きしない。
+  // failed は再試行まで下りないので、2 本の listen の片方だけが間に合って backend-failed を聞き逃しても、答えから拾う。
   void Promise.all(unlisten)
     .then(() => invoke<{ endpoint: Endpoint | null; failed: boolean }>("backend_endpoint"))
     .then(({ endpoint, failed }) => {
-      if (!active || heard) return;
-      handlers.onEndpoint(endpoint);
+      if (!active) return;
+      if (!heardEndpoint) handlers.onEndpoint(endpoint);
       if (failed) handlers.onFailed();
     });
   return () => {
