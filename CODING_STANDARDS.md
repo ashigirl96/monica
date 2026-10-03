@@ -13,7 +13,7 @@ review で差分に当てる規則。どれも判断が要るもので、決定�
 
 ## テスト
 
-- DB は fake にせず、in-memory の SQLite に migration を当てる。外から見える振る舞いは `createRouterClient` を通して確かめる（`docs/packages.md` の「テスト」）。
+- DB は fake にせず、in-memory の SQLite に migration を当てる。外から見える振る舞いは `createRouterClient` を通して確かめる。ptyd と CLI の seam、procedure に出ない行の確かめ方も同じ節にある（`docs/packages.md` の「テスト」）。
 
 ## 語
 

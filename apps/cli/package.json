@@ -1,0 +1,21 @@
+{
+  "name": "@tania/cli",
+  "private": true,
+  "bin": {
+    "tania": "./src/main.ts"
+  },
+  "type": "module",
+  "dependencies": {
+    "@orpc/client": "catalog:",
+    "@orpc/contract": "catalog:",
+    "@orpc/server": "catalog:",
+    "@tania/task": "workspace:*",
+    "@tania/workbench": "workspace:*",
+    "commander": "catalog:",
+    "trpc-cli": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "drizzle-orm": "catalog:"
+  }
+}
