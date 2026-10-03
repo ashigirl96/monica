@@ -185,7 +185,7 @@ contract を走査するテストを 1 本置き、description と output が全
 
 - `src/` は app の枠だけを持つ。layout、shortcut、Backend client の provider、Shell からの `backend-endpoint` event による再接続、Backend 不在の表示。domain の画面は `@tania/<d>/ui` から読む。
 - Backend の endpoint の受け取りと不在の表示:
-  - 起動時は Shell の `backend_endpoint` command で今の endpoint（無ければ null）を取り、以降は `backend-endpoint` event で受ける。listen する前に出た event を取りこぼさないため。
+  - 起動時は Shell の `backend_endpoint` command で今の endpoint（無ければ null）と再起動を諦めたかどうか（`{ endpoint, failed }`）を取り、以降は `backend-endpoint` と `backend-failed` の event で受ける。listen する前に出た event を取りこぼさないため。諦めたかどうかも取るのは、諦めた後に reload した webview が「再試行」を出せるようにするため。
   - Shell は Backend の予期しない終了で endpoint を捨てたら、`backend-endpoint` に null を載せて出す。再起動を諦めたら `backend-failed` を出す（ADR-0007）。
   - webview は endpoint が 1 秒以上 null のままなら、Workbench の上端に 1 行「Backend に再接続中…」を出す。`bun --watch` の再起動（約 100ms）でちらつかないよう 1 秒待つ。`backend-failed` では「Backend を起動できません」と「再試行」を出し、再試行は Shell の `backend_restart` command（失敗回数を戻して spawn する）を呼ぶ。
   - 端末の byte は Shell を通るので、Backend が居ない間も打鍵と出力は続く。画面を塞がず、layout を変える操作だけが toast で失敗する。

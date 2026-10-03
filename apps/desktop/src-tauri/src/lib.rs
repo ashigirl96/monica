@@ -7,16 +7,15 @@ mod respawn;
 
 use std::time::Duration;
 
-use announcement::Endpoint;
-use backend::Supervisor;
+use backend::{Status, Supervisor};
 use tauri::{AppHandle, Manager, RunEvent, State};
 
 /// Backend は通常 50ms 以内に抜けるので、これは固まった Backend のための上限（ADR-0007）。
 const STOP_GRACE: Duration = Duration::from_secs(2);
 
 #[tauri::command]
-fn backend_endpoint(supervisor: State<'_, Supervisor>) -> Option<Endpoint> {
-    supervisor.endpoint()
+fn backend_endpoint(supervisor: State<'_, Supervisor>) -> Status {
+    supervisor.status()
 }
 
 #[tauri::command]

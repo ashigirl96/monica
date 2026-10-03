@@ -36,14 +36,17 @@ export function watchBackend(handlers: {
       if (active) handlers.onEndpoint(event.payload);
     }),
     listen("backend-failed", () => {
+      heard = true;
       if (active) handlers.onFailed();
     }),
   ];
-  // listen を張ってから今の endpoint を訊く。張る前に出た event を取りこぼさず、答えより新しい event を答えで上書きしない。
+  // listen を張ってから今の様子を訊く。張る前に出た event を取りこぼさず、答えより新しい event を答えで上書きしない。
   void Promise.all(unlisten)
-    .then(() => invoke<Endpoint | null>("backend_endpoint"))
-    .then((endpoint) => {
-      if (active && !heard) handlers.onEndpoint(endpoint);
+    .then(() => invoke<{ endpoint: Endpoint | null; failed: boolean }>("backend_endpoint"))
+    .then(({ endpoint, failed }) => {
+      if (!active || heard) return;
+      handlers.onEndpoint(endpoint);
+      if (failed) handlers.onFailed();
     });
   return () => {
     active = false;

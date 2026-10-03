@@ -7,6 +7,7 @@ use std::thread;
 use std::time::Instant;
 
 use shared_child::unix::SharedChildExt;
+use serde::Serialize;
 use shared_child::SharedChild;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -19,11 +20,19 @@ pub struct Supervisor {
     state: Mutex<State>,
 }
 
+/// webview が訊き直せる今の様子。諦めたことも持つのは、`backend-failed` を聞き逃した webview（reload した後など）が再試行を出せるようにするため。
+#[derive(Serialize)]
+pub struct Status {
+    endpoint: Option<Endpoint>,
+    failed: bool,
+}
+
 struct State {
     running: Option<Running>,
     endpoint: Option<Endpoint>,
     respawn: Respawn,
     supervising: bool,
+    failed: bool,
     stopping: bool,
 }
 
@@ -42,13 +51,15 @@ impl Supervisor {
                 endpoint: None,
                 respawn: Respawn::new(),
                 supervising: false,
+                failed: false,
                 stopping: false,
             }),
         }
     }
 
-    pub fn endpoint(&self) -> Option<Endpoint> {
-        self.lock().endpoint.clone()
+    pub fn status(&self) -> Status {
+        let state = self.lock();
+        Status { endpoint: state.endpoint.clone(), failed: state.failed }
     }
 
     pub fn start(&self, app: &AppHandle) {
@@ -58,6 +69,7 @@ impl Supervisor {
                 return;
             }
             state.supervising = true;
+            state.failed = false;
         }
         let app = app.clone();
         thread::spawn(move || app.state::<Supervisor>().supervise(&app));
@@ -105,6 +117,7 @@ impl Supervisor {
             let _ = app.emit("backend-endpoint", None::<Endpoint>);
             let Some(delay) = state.respawn.after_failure(Instant::now()) else {
                 state.supervising = false;
+                state.failed = true;
                 eprintln!("[shell] giving up on the Backend after repeated failures");
                 let _ = app.emit("backend-failed", ());
                 return;
