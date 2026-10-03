@@ -64,6 +64,19 @@ fn wait_until(deadline: Duration, mut condition: impl FnMut() -> bool) {
     }
 }
 
+fn wait_for_daemon_exit(daemon: &mut DaemonGuard) {
+    let mut status = None;
+    wait_until(Duration::from_secs(5), || {
+        status = daemon.child.try_wait().unwrap();
+        status.is_some()
+    });
+    assert!(status.unwrap().success(), "daemon should exit cleanly");
+}
+
+fn process_alive(pid: u32) -> bool {
+    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+}
+
 fn connect(guard: &DaemonGuard) -> (PtydClient, mpsc::Receiver<ClientEvent>) {
     let (tx, rx) = mpsc::channel();
     let client = PtydClient::connect(&guard.socket, move |event| {
@@ -149,10 +162,10 @@ fn session_survives_client_reconnect_and_replays_output() {
     wait_for_output(&rx, "marker-before-detach", Duration::from_secs(10));
 
     // The app going away entirely: EOF on the connection = implicit detach. The shell
-    // must keep running under the daemon.
+    // must keep running under the daemon, past at least one of its 2s socket checks.
     drop(client);
     drop(rx);
-    std::thread::sleep(Duration::from_millis(100));
+    std::thread::sleep(Duration::from_millis(2500));
 
     let (client2, rx2) = connect(&daemon);
     let replay = match client2
@@ -220,6 +233,33 @@ fn session_survives_client_reconnect_and_replays_output() {
         ResponseBody::Sessions { sessions } => assert!(sessions.is_empty()),
         other => panic!("unexpected list response: {other:?}"),
     }
+}
+
+#[test]
+fn removing_the_home_ends_the_daemon_and_its_shells() {
+    let mut daemon = start_daemon("home-removed");
+    let (client, rx) = connect(&daemon);
+    let shell = create_zsh_session(&client, "ts-1").expect("unix spawns should expose a pid");
+    drop(client);
+    drop(rx);
+
+    std::fs::remove_dir_all(&daemon.dir).unwrap();
+
+    wait_for_daemon_exit(&mut daemon);
+    wait_until(Duration::from_secs(5), || !process_alive(shell));
+}
+
+#[test]
+fn replacing_the_socket_ends_the_daemon() {
+    let mut daemon = start_daemon("socket-replaced");
+
+    // rename() swaps the file in one step, so the path never goes missing and only its
+    // identity tells the daemon the socket is no longer its own.
+    let stand_in = daemon.dir.join("stand-in");
+    std::fs::write(&stand_in, b"").unwrap();
+    std::fs::rename(&stand_in, &daemon.socket).unwrap();
+
+    wait_for_daemon_exit(&mut daemon);
 }
 
 #[test]

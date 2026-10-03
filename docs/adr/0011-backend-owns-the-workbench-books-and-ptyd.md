@@ -18,7 +18,7 @@ Runspace と Tab（layout）も Backend だけが書く。webview は layout 全
 ## Consequences
 
 - Shell の terminal command は attach / detach / write / resize の 4 本になる。Shell は ptyd を spawn せず（Backend が起こすまで最大 2 秒待つ）、protocol が違っても入れ替えず、Reap もしない。Backend に知らせるのは spawn 時の env `TANIA_PTYD_PATH`（ptyd の場所）だけ。Exit は pane に stream の終わりを知らせるためにだけ webview へ流し、終了の正本は Backend の行にする。
-- ptyd は `setsid` と SIGHUP の無視で自分を切り離すので、Backend が spawn しても Backend の再起動や ⌘Q では死なない。ptyd は spawn した process の env を継いで全 tab に渡すので、Backend は自分専用の env を落としてから spawn する。
+- ptyd は `setsid` と SIGHUP の無視で自分を切り離すので、Backend が spawn しても Backend の再起動や ⌘Q では死なない。ただし、自分の socket が消えるか別のファイルに替わったら終了する（bind した socket の `(dev, ino)` を 2 秒おきに確かめる）。socket を失った ptyd には誰も繋げないので、home を消した後に shell を抱えたまま残さないため。ptyd は spawn した process の env を継いで全 tab に渡すので、Backend は自分専用の env を落としてから spawn する。
 - Backend は `start()` で ptyd に繋ぎ（無ければ spawn、版違いは Shutdown → pid file で kill → spawn）、List で reconcile してから endpoint を公開する（ADR-0007）。ptyd を使う procedure は reconcile の完了を待つ。接続が切れたら backoff 付きで繋ぎ直し、もう一度 reconcile する。
 - reconcile の規則: live な行が ptyd に無ければ lost にする。tombstone は exit code 付きで exited にしてから Reap する。終わった行と同じ id で ptyd に live な session があれば terminate する。ptyd にだけある live な session は Tab の無い行として取り込み、detached に出す。ptyd にだけある tombstone は Reap する。行が終わるときは、その Terminal Session の Agent Session も終了（terminal_exited）にする。生きている Terminal Session で動作中だった Agent Session は未観測にする（ADR-0008）。
 - Exit を受けた Backend は、行を exited にして commit してから Reap する。間で Backend が死んでも tombstone が残り、次の reconcile が拾う。create は `starting` で INSERT し、`WHERE status = 'starting'` で running / failed に更新する。即死した shell の Exit が Created の応答より先に届いても、running に戻さない。

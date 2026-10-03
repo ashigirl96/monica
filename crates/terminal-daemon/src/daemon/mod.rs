@@ -9,11 +9,15 @@ pub use state::SessionTable;
 
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::UnixListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
+
+const SOCKET_CHECK_INTERVAL: Duration = Duration::from_secs(2);
 
 pub struct DaemonConfig {
     pub socket_path: PathBuf,
@@ -51,6 +55,13 @@ pub fn run_daemon(config: DaemonConfig) -> Result<()> {
         config.socket_path.display(),
         std::process::id()
     );
+    let bound = file_identity(&config.socket_path)
+        .with_context(|| format!("failed to stat {}", config.socket_path.display()))?;
+    let socket_path = config.socket_path.clone();
+    std::thread::Builder::new()
+        .name("ptyd-socket-watch".into())
+        .spawn(move || exit_when_socket_goes_away(&socket_path, bound))
+        .context("failed to spawn socket watch thread")?;
 
     let table = Arc::new(SessionTable::new(config.sessions_dir));
     let mut next_conn_id: u64 = 0;
@@ -72,4 +83,21 @@ pub fn run_daemon(config: DaemonConfig) -> Result<()> {
     }
     drop(pid_file);
     Ok(())
+}
+
+fn exit_when_socket_goes_away(socket_path: &Path, bound: (u64, u64)) {
+    loop {
+        std::thread::sleep(SOCKET_CHECK_INTERVAL);
+        if file_identity(socket_path).ok() != Some(bound) {
+            log::info!(
+                "{} is gone or no longer ours; exiting",
+                socket_path.display()
+            );
+            std::process::exit(0);
+        }
+    }
+}
+
+fn file_identity(path: &Path) -> std::io::Result<(u64, u64)> {
+    std::fs::metadata(path).map(|m| (m.dev(), m.ino()))
 }

@@ -8,10 +8,10 @@ dev の desktop（identifier `com.ashigirl96.tania.dev`）は single-instance �
 ## 起こす
 
 1. `pgrep -f target/debug/tania-desktop` で、もう起きていないか確かめる。起きていれば、それに繋ぐ。
-2. Bash の `run_in_background` で起こし、出力は scratchpad の file に向ける。home は短くする（ptyd の socket の path の上限は 104 byte）。
+2. Bash の `run_in_background` で起こし、出力は scratchpad の file に向ける。home は `$TMPDIR` の下に短い名前で作る（ptyd の socket の path の上限は 104 byte）。
 
    ```bash
-   TANIA_HOME=$HOME/.tania-<name> bun run desktop > $SCRATCH/desktop.log 2>&1
+   TANIA_HOME=${TMPDIR%/}/tania-<name> bun run desktop > $SCRATCH/desktop.log 2>&1
    ```
 
 3. tauri-mcp の `driver_session` を `start`（port 9223）で繋ぐ。
@@ -49,6 +49,6 @@ dev の desktop（identifier `com.ashigirl96.tania.dev`）は single-instance �
 ## 止めて片付ける
 
 1. 自分で開いた Tab は、`exit` を送って閉じる。
-2. ユーザーが使っていなければ、background の job を TaskStop で止める。ptyd は Backend より長生きするので、`kill -TERM $(cat $TANIA_HOME/ptyd.pid)` を送り、home を消す。
+2. ユーザーが使っていなければ、background の job を TaskStop で止め、`rm -rf ${TMPDIR%/}/tania-<name>` で home を消す。ptyd は socket が消えたのを 2 秒おきの確認で見つけ、shell ごと終わるので、下の判定は数秒待ってからする。
 
-片付いたのは、`pgrep -f target/debug/tania-desktop` と `pgrep -f "tania-ptyd --tania-home $TANIA_HOME"` が何も返さず、home が消えたとき。ユーザーが使っている dev app は止めず、起こしたままだと伝える。
+片付いたのは、`pgrep -f target/debug/tania-desktop` と `pgrep -f "tania-ptyd --tania-home ${TMPDIR%/}/tania-<name>"` が何も返さず、home が消えたとき。ユーザーが使っている dev app は止めず、起こしたままだと伝える。
