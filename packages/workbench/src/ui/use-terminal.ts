@@ -196,7 +196,19 @@ export function useTerminal(
         },
       },
       theme: TERMINAL_THEME,
+      // PROTOTYPE(kitty-keyboard): xterm 6.1 beta の kitty keyboard protocol を有効にする。
+      vtExtensions: { kittyKeyboard: true },
     });
+
+    // PROTOTYPE(kitty-keyboard): Tab の Terminal と、送ったバイト列・受けた kitty の CSI を観測する。
+    const proto = ((window as any).__proto ??= { terms: {}, sent: [], csi: [] });
+    proto.terms[options.tabId] = term;
+    for (const prefix of ["?", ">", "<", "="]) {
+      term.parser.registerCsiHandler({ final: "u", prefix }, (params) => {
+        proto.csi.push({ t: Date.now(), tab: options.tabId, seq: `CSI ${prefix}${params.join(";")} u` });
+        return false;
+      });
+    }
 
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
@@ -209,6 +221,7 @@ export function useTerminal(
     const cleanup = new EventCleanupManager();
 
     const sendBytes = (bytes: Uint8Array) => {
+      proto.sent.push({ t: Date.now(), tab: options.tabId, data: JSON.stringify(new TextDecoder().decode(bytes)) });
       void terminalWrite(optionsRef.current.sessionId, toBase64(bytes));
     };
     const writeText = (text: string) => sendBytes(encoder.encode(text));

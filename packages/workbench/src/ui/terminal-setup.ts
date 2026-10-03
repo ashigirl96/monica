@@ -39,12 +39,8 @@ export function registerParsers(
   writeText: (text: string) => void,
   getCwdChangeHandler: () => ((cwd: string) => void) | undefined,
 ): void {
-  term.parser.registerCsiHandler({ final: "u", prefix: "?" }, () => {
-    writeText("\x1b[?1u");
-    return true;
-  });
-  term.parser.registerCsiHandler({ final: "u", prefix: ">" }, () => true);
-  term.parser.registerCsiHandler({ final: "u", prefix: "<" }, () => true);
+  // PROTOTYPE(kitty-keyboard): kitty の CSI u は xterm 6.1 beta に任せるので、握りつぶしと偽の返答を外した。
+  void writeText;
 
   term.parser.registerOscHandler(7, (data: string) => {
     try {
@@ -85,12 +81,8 @@ export function buildKeyEventHandler(
   onZoom: (delta: 1 | -1) => void,
 ): (e: KeyboardEvent) => boolean {
   return (e: KeyboardEvent) => {
-    if (e.shiftKey && e.key === "Enter") {
-      if (e.type === "keydown") {
-        writeText("\x1b[13;2u");
-      }
-      return false;
-    }
+    // PROTOTYPE(kitty-keyboard): Shift+Enter の特別扱いを外し、xterm の encode に任せる。
+    void writeText;
     if (isJumpHintsActive()) return false;
     if (e.altKey) return false;
     if (e.ctrlKey && e.key === "t") return false;
