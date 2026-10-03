@@ -36,16 +36,8 @@ export const TERMINAL_THEME: ITheme = {
 
 export function registerParsers(
   term: Terminal,
-  writeText: (text: string) => void,
   getCwdChangeHandler: () => ((cwd: string) => void) | undefined,
 ): void {
-  term.parser.registerCsiHandler({ final: "u", prefix: "?" }, () => {
-    writeText("\x1b[?1u");
-    return true;
-  });
-  term.parser.registerCsiHandler({ final: "u", prefix: ">" }, () => true);
-  term.parser.registerCsiHandler({ final: "u", prefix: "<" }, () => true);
-
   term.parser.registerOscHandler(7, (data: string) => {
     try {
       const url = new URL(data);
@@ -81,21 +73,14 @@ export function onTerminalData(
 
 export function buildKeyEventHandler(
   isJumpHintsActive: () => boolean,
-  writeText: (text: string) => void,
   onZoom: (delta: 1 | -1) => void,
+  onSelectAll: () => void,
 ): (e: KeyboardEvent) => boolean {
   return (e: KeyboardEvent) => {
-    if (e.shiftKey && e.key === "Enter") {
-      if (e.type === "keydown") {
-        writeText("\x1b[13;2u");
-      }
-      return false;
-    }
     if (isJumpHintsActive()) return false;
     if (e.altKey) return false;
     if (e.ctrlKey && e.key === "t") return false;
     if (e.ctrlKey && e.key === "Tab") return false;
-    if (e.metaKey && /^[0-4]$/.test(e.key)) return false;
     if (e.metaKey && e.type === "keydown") {
       if (e.key === "=" || e.key === "+") {
         e.preventDefault();
@@ -107,7 +92,13 @@ export function buildKeyEventHandler(
         onZoom(-1);
         return false;
       }
+      if (e.key === "a") {
+        onSelectAll();
+        return false;
+      }
     }
+    // kitty の flag を立てた app には、xterm が ⌘ を super として送り、イベントを cancel して copy と paste を止める。
+    if (e.metaKey && e.key.length === 1) return false;
     return true;
   };
 }

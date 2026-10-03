@@ -1,6 +1,7 @@
 mod announcement;
 mod backend;
 mod cli_link;
+mod clipboard;
 mod locations;
 mod orphan;
 mod ptyd;
@@ -50,6 +51,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             backend_endpoint,
             backend_restart,
+            clipboard::clipboard_write_image,
             terminal::terminal_attach,
             terminal::terminal_detach,
             terminal::terminal_write,
