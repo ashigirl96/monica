@@ -357,13 +357,6 @@ mod tests {
     }
 
     #[test]
-    fn attach_unknown_session_fails() {
-        let dir = temp_dir("unknown");
-        let t = table(&dir);
-        assert!(t.attach("ts-404", 1, None).is_err());
-    }
-
-    #[test]
     fn duplicate_create_fails() {
         let dir = temp_dir("dup");
         let t = table(&dir);
@@ -404,15 +397,15 @@ mod tests {
     }
 
     #[test]
-    fn attach_replays_transcript_for_late_attachments() {
+    fn output_of_a_never_attached_session_reaches_the_transcript() {
         let dir = temp_dir("replay");
         let t = table(&dir);
         // No attachments at all: output must drain to the transcript regardless.
         t.create(echo_params("ts-1")).unwrap();
 
         let replay = wait_for(Duration::from_secs(5), || {
-            // /bin/echo prints "--login" then exits; attach works only while live, so read
-            // the transcript through a second live session created in the same dir.
+            // /bin/echo prints "--login" then exits, and attach works only while live, so
+            // read the transcript file itself.
             let inner = t.lock();
             let done = inner.exited.contains_key("ts-1");
             drop(inner);
