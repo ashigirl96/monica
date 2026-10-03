@@ -400,12 +400,13 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 
 | 次の状態 | 出す条件 |
 |---|---|
-| 質問・許可・エラーの待ち | 新しい待ちに入った（`state_changed_at` が変わった） |
+| 質問・許可・エラーの待ち | 新しい待ちに入った |
 | 手空き | 前の行が動作中か未観測で、event が Stop |
 | それ以外 | 出さない |
 
 - 質問とエラーは、前の行が同じ理由の待ちでないときに新しい待ちになる。PreToolUse(AskUserQuestion) と PermissionRequest(AskUserQuestion) は同じ質問なので 1 回しか出ない。
 - 許可は、PermissionRequest（ExitPlanMode と AskUserQuestion を除く）が来るたびに新しい待ちになる。前の行が許可待ちでも、`transition` は `state_changed_at` を更新する。許可した tool が動いている間は許可待ちに見えたままなので、その間に background の subagent が次の許可を求めたときに取りこぼさないため。PermissionRequest に `tool_use_id` は無く、同じダイアログかどうかは見分けられない。
+- `notificationFor` は `state_changed_at` を比べず、前の行の待ちの理由と event から新しい待ちかを決める。`state_changed_at` は ms 単位なので、同じ ms に続いた hook では新しい待ちに入っても前の行と同じ値になる。
 - SessionStart による手空き（起動・resume の直後）と、待ちから手空きへの変化では出さない。
 - agent の仕事が残っている Stop は遷移しないので出ない。agent の仕事が終わった後に Claude Code が自分で起こす turn の Stop で出る。
 - 未知の session_id は動作中の行を作ってから遷移を当てる（ADR-0008）ので、最初の event が Stop なら出る。

@@ -3,7 +3,8 @@ import { EventPublisher } from "@orpc/server";
 import { and, eq, inArray } from "drizzle-orm";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { endAgentSessionsIn, reconcileAgentSessions } from "./agent-session.ts";
-import type { TerminalSession, WorkbenchChange } from "./contract.ts";
+import type { AgentSession, TerminalSession, WorkbenchChange } from "./contract.ts";
+import { shortPath } from "./paths.ts";
 import { shouldRespawn } from "./pin.ts";
 import { openDaemon, type PtydClient, type SessionInfo } from "./ptyd.ts";
 import { tab, terminalSession } from "./schema.ts";
@@ -11,6 +12,7 @@ import { tabEnv, writeTabFiles } from "./tab-env.ts";
 
 export type Db = BunSQLiteDatabase;
 export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+export type Books = { db: Db; workbench: Workbench };
 export type Size = { rows: number; cols: number };
 
 export const LIVE = ["starting", "running"] as const;
@@ -24,7 +26,12 @@ export type Workbench = {
   stop(): void;
 };
 
-type Internals = {
+export type NotificationDeps = {
+  notify: (n: { title: string; body: string }) => void;
+  nameAgentSession: (db: Db, agentSessionId: string) => string | null;
+};
+
+type Internals = NotificationDeps & {
   db: Db;
   home: string;
   shell: string;
@@ -41,14 +48,10 @@ function internals(workbench: Workbench): Internals {
   return found;
 }
 
-export function createWorkbench(deps: {
-  db: Db;
-  home: string;
-  ptydPath: string;
-  notify: (n: { title: string; body: string }) => void;
-  nameAgentSession: (db: Db, agentSessionId: string) => string | null;
-}): Workbench {
-  const { db, home, ptydPath } = deps;
+export function createWorkbench(
+  deps: NotificationDeps & { db: Db; home: string; ptydPath: string },
+): Workbench {
+  const { db, home, ptydPath, notify, nameAgentSession } = deps;
   const events = new EventPublisher<{ change: WorkbenchChange }>();
   const publish = (change: WorkbenchChange) => events.publish("change", change);
   const shell = process.env.SHELL || userInfo().shell || "/bin/zsh";
@@ -183,8 +186,19 @@ export function createWorkbench(deps: {
       client?.close();
     },
   };
-  internalsOf.set(workbench, { db, home, shell, publish, ready });
+  internalsOf.set(workbench, { db, home, shell, publish, ready, notify, nameAgentSession });
   return workbench;
+}
+
+// 通知は commit した後の副作用なので、出せなくても hook の記録と変更の合図は止めない。
+export function notifyWaiting(workbench: Workbench, agentSession: AgentSession, body: string) {
+  const { db, notify, nameAgentSession } = internals(workbench);
+  try {
+    const title = nameAgentSession(db, agentSession.sessionId) ?? shortPath(agentSession.cwd);
+    notify({ title, body });
+  } catch (error) {
+    console.error(`[workbench] could not notify for ${agentSession.sessionId}: ${error}`);
+  }
 }
 
 // reconcile より先に書いた starting の行は lost にされるので、行に書く shell は reconcile を待ってから渡す。

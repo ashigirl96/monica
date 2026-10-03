@@ -4,7 +4,13 @@ import { lazy, Suspense, useEffect } from "react";
 import { WorkbenchHeader } from "./header.tsx";
 import { ResizeHandle } from "./resize-handle.tsx";
 import { WorkbenchSidebar } from "./sidebar.tsx";
-import { reloadAtom, warnFailed, type WorkbenchClient, workbenchClientAtom } from "./store.ts";
+import {
+  reloadAgentSessionsAtom,
+  reloadAtom,
+  warnFailed,
+  type WorkbenchClient,
+  workbenchClientAtom,
+} from "./store.ts";
 import { sidebarOpenAtom, sidebarResizingAtom, sidebarWidthAtom, uiZoomAtom } from "./ui-state.ts";
 import { persistUiState } from "./ui-state-persistence.ts";
 
@@ -14,24 +20,32 @@ const WorkbenchContent = lazy(() => import("./content.tsx"));
 function useBooks(client: WorkbenchClient | null) {
   const setClient = useSetAtom(workbenchClientAtom);
   const reload = useSetAtom(reloadAtom);
+  const reloadAgentSessions = useSetAtom(reloadAgentSessionsAtom);
 
   useEffect(() => {
     setClient(() => client);
     if (!client) return;
     const controller = new AbortController();
     const reloadLogged = () => reload().catch((e: unknown) => warnFailed("layout reload", e));
+    const reloadAgentSessionsLogged = () =>
+      reloadAgentSessions().catch((e: unknown) => warnFailed("agent session reload", e));
     void (async () => {
       try {
         // 先に購読してから読むので、読んだ後の変更を取りこぼさない。
         const changes = await client.changes(undefined, { signal: controller.signal });
         void reloadLogged();
-        for await (const _ of changes) void reloadLogged();
+        void reloadAgentSessionsLogged();
+        // reconcile は Agent Session の合図を出さずに未観測や終了にするので、どの合図でも読み直す。
+        for await (const change of changes) {
+          if (change.type !== "agentSession") void reloadLogged();
+          void reloadAgentSessionsLogged();
+        }
       } catch (error) {
         if (!controller.signal.aborted) console.error("workbench.changes ended", error);
       }
     })();
     return () => controller.abort();
-  }, [client, setClient, reload]);
+  }, [client, setClient, reload, reloadAgentSessions]);
 }
 
 export function Workbench({ client }: { client: WorkbenchClient | null }) {

@@ -1,7 +1,13 @@
 import { useEffect } from "react";
 import { useAtomValue } from "jotai";
+import { cn } from "./cn.ts";
 import { XIcon } from "./icons.tsx";
-import { dismissToast, pushErrorToast, toastsAtom } from "./toast.ts";
+import { dismissToast, pushErrorToast, type Toast, toastsAtom } from "./toast.ts";
+
+const TONE: Record<Toast["type"], { border: string; dot: string }> = {
+  error: { border: "border-destructive/40", dot: "bg-destructive" },
+  info: { border: "border-border", dot: "bg-muted-foreground/60" },
+};
 
 function errorMessage(reason: unknown): string {
   if (reason instanceof Error) return reason.message;
@@ -32,9 +38,12 @@ export function Toaster() {
       {toasts.map((t) => (
         <div
           key={t.id}
-          className="animate-in fade-in slide-in-from-bottom-2 pointer-events-auto flex items-start gap-2 rounded-lg border border-destructive/40 bg-card px-3 py-2.5 shadow-lg"
+          className={cn(
+            "animate-in fade-in slide-in-from-bottom-2 pointer-events-auto flex items-start gap-2 rounded-lg border bg-card px-3 py-2.5 shadow-lg",
+            TONE[t.type].border,
+          )}
         >
-          <span className="mt-1 size-1.5 shrink-0 rounded-full bg-destructive" />
+          <span className={cn("mt-1 size-1.5 shrink-0 rounded-full", TONE[t.type].dot)} />
           <p className="min-w-0 flex-1 text-[12px] leading-snug break-words text-foreground select-text">
             {t.message}
           </p>

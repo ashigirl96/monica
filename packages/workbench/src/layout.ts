@@ -5,6 +5,7 @@ import type { Layout, Tab } from "./contract.ts";
 import { runspace, tab, terminalSession } from "./schema.ts";
 import {
   bindNewTerminalSession,
+  type Books,
   type Db,
   insertTerminalSession,
   isLive,
@@ -12,10 +13,7 @@ import {
   type Size,
   startTerminalSession,
   type Tx,
-  type Workbench,
 } from "./workbench.ts";
-
-type Books = { db: Db; workbench: Workbench };
 
 export function readLayout(db: Db): Layout {
   const tabs = db.select().from(tab).orderBy(tab.sortOrder).all();
