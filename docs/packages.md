@@ -63,7 +63,7 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
 | `@tania/<d>/ui` | React の component と atom | browser | apps/desktop、他 package の ui |
 | `@tania/<d>/cli` | 出力の整形関数と手で書く command | Bun | apps/cli |
 
-- 依存の向きは task → workbench だけ。workbench は task を import しない（ADR-0005）。bun の isolated linker では package.json に書いていない依存を解決できないので、向きは package.json が守る。package の中の entry の境界（schema が import してよいもの、ui が server の entry と `bun:sqlite` を import しないこと、cli entry を import するのが apps/cli だけであること）と apps どうしの向きは、`.oxlintrc.json` の overrides が lint で守る。CLI と webview で動くコード（apps/cli、apps/desktop、各 package の cli entry）が DB を開くもの（`bun:sqlite`、`drizzle-orm/bun-sqlite`、server entry の値）を import しないことも同じく守る（ADR-0003）。apps/cli のテストと `testing.ts` は in-memory の Backend を組むので、この制限から外す。
+- 依存の向きは task → workbench だけ。workbench は task を import しない（ADR-0005）。bun の isolated linker では package.json に書いていない依存を解決できないので、向きは package.json が守る。package の中の entry の境界（schema が import してよいもの、ui が server の entry と `bun:sqlite` を import しないこと、cli entry を import するのが apps/cli だけであること）と apps どうしの向きは、`.oxlintrc.json` の overrides が lint で守る。CLI と webview で動くコード（apps/cli、apps/desktop、各 package の cli entry と ui entry）が DB に触るもの（`bun:sqlite`、`drizzle-orm`、schema entry と server entry の値）を import しないことも同じく守る（ADR-0003）。cli entry で見るのは `cli.ts` の import だけで、`cli.ts` が import する内側のファイルは見ない。apps/cli のテストと `testing.ts` は in-memory の Backend を組むので、この制限から外す。
 - task の schema は workbench の table を FK のために import するが、re-export しない（ADR-0010）。
 - webview の bundle に `bun:sqlite` や `@orpc/server` が混ざっていないかは `vite build` で確かめる。混ざれば解決に失敗して落ちる。型だけの import は消えるので対象外。
 
