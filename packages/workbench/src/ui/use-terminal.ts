@@ -196,6 +196,8 @@ export function useTerminal(
         },
       },
       theme: TERMINAL_THEME,
+      // claude は TERM_PROGRAM=WezTerm を見て kitty の flag を push し、Ctrl+V と Shift+Enter を kitty の形でしか読まない。
+      vtExtensions: { kittyKeyboard: true },
     });
 
     const fitAddon = new FitAddon();
@@ -231,13 +233,13 @@ export function useTerminal(
       optionsRef.current.onTitleChange?.(title);
     });
 
-    registerParsers(term, writeReply, () => optionsRef.current.onCwdChange);
+    registerParsers(term, () => optionsRef.current.onCwdChange);
 
     term.attachCustomKeyEventHandler(
       buildKeyEventHandler(
         () => store.get(jumpHintsActiveAtom),
-        writeText,
         (delta: 1 | -1) => store.set(zoomTerminalAtom, delta),
+        () => term.selectAll(),
       ),
     );
 

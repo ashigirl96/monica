@@ -188,6 +188,10 @@ contract を走査するテストを 1 本置き、description と output が全
 
 - `src/` は app の枠だけを持つ。shortcut、Backend client の provider、Shell からの `backend-endpoint` event による再接続、Backend 不在の表示、toast。domain の画面は `@tania/<d>/ui` から読む。Workbench の画面（sidebar・Tab の帯・端末の並び）は `@tania/workbench/ui` の `Workbench` が持ち、`client.workbench` を props で受けて、endpoint が替わるたびに `workbench.changes` を購読し直す。
 - ⌥ のキーは xterm に渡さず（`buildKeyEventHandler`）、shortcut だけが拾う。shortcut の binding が `false` を返して素通しした ⌥ のキーも、端末には届かない。
+- ⌘ と 1 文字のキーの組み合わせも xterm に渡さず、ブラウザの copy と paste に任せる。kitty の flag を立てた app には、xterm が ⌘ を super として送り（⌘V なら `CSI 118;9u`）、イベントを cancel するので、copy と paste が起きなくなるため。xterm が legacy の encode で持っていた ⌘A の全選択は、webview が `selectAll` を呼ぶ。⌘Enter や ⌘Backspace のように legacy でもバイト列を送っていたキーは、xterm に任せる。
+- kitty keyboard protocol は xterm に任せる（`vtExtensions.kittyKeyboard`）。flag の stack、`CSI ?u` への返答、キーの encode はどれも xterm が行い、webview の parser は kitty の CSI に触らない。
+  - ptyd は Tab に `TERM_PROGRAM=WezTerm` を渡す。claude はこれを見て起動時に kitty の flag を push し、Shift+Enter を改行として受け取る。flag が立っている間、claude は Ctrl+V を `CSI 118;5u` の形でしか受け取らない。flag は app ごとに立つので、shell の Tab と claude を抜けた後では、Shift+Enter は `\r`、Ctrl+V は `\x16` のまま送られる。
+  - kitty keyboard protocol は xterm 6.1 にしかないので、`@xterm/xterm` と addon 3 つを 6.1 の beta に完全に固定している（`^` を付けない）。版は #60 の prototype で確かめたもの。6.1 の stable が出たら移る。
 - Backend の endpoint の受け取りと不在の表示:
   - 起動時は Shell の `backend_endpoint` command で今の endpoint（無ければ null）と再起動を諦めたかどうか（`{ endpoint, failed }`）を取り、以降は `backend-endpoint` と `backend-failed` の event で受ける。listen する前に出た event を取りこぼさないため。諦めたかどうかも取るのは、諦めた後に reload した webview が「再試行」を出せるようにするため。
   - Shell は Backend の予期しない終了で endpoint を捨てたら、`backend-endpoint` に null を載せて出す。再起動を諦めたら `backend-failed` を出す（ADR-0007）。
@@ -195,8 +199,8 @@ contract を走査するテストを 1 本置き、description と output が全
   - 端末の byte は Shell を通るので、Backend が居ない間も打鍵と出力は続く。画面を塞がず、layout を変える操作だけが toast で失敗する。
 - domain の ui には自分の contract の client だけを渡す（workbench の ui は `client.workbench`）。oRPC の client は callable な Proxy なので、React の state に入れるときは `setState(() => client)`（#8 の詰まった点 5）。
 - Shell の terminal command と `clipboard_write_image` を呼ぶ wrapper（monica の `commands/terminal.ts`）は `packages/workbench/src/ui` に置く。
-- 画像の drop は monica のとおり、Tauri の drag-drop event の path を `clipboard_write_image` に渡し、成功したら active な Tab に `terminal_write` で Ctrl-V を送る。Ctrl-V で clipboard の画像を読むのは agent の振る舞いなので、Shell の command にまとめない。失敗したら `packages/ui` の toast で 1 行出す（monica は黙っていた）。
-  - Ctrl-V の形は決まっていない（#60）。ptyd は Tab に `TERM_PROGRAM=WezTerm` を渡すので、claude は kitty keyboard protocol の flag を push し、Ctrl+V を `CSI 118;5u` でしか受け取らない。monica の `\x16` では貼られない。
+- 画像の drop は、Tauri の drag-drop event の paths から画像の拡張子を持つ最初の 1 つを `clipboard_write_image` に渡し（monica どおり。画像が無ければ何もしない）、成功したら active な Tab の xterm の入力欄に Ctrl+V の `keydown` を渡す。Ctrl+V で clipboard の画像を読むのは agent の振る舞いなので、Shell の command にまとめない。失敗したら `packages/ui` の toast で 1 行出す（monica は黙っていた）。
+  - Ctrl+V は `terminal_write` で決まったバイト列にせず、xterm に encode させる。monica の `\x16` は kitty の flag を立てた claude に無視される。xterm に任せれば、drop は flag の状態を知らなくて済む。
 - Workbench の画面が使う、Shell に置かない monica の command は `workbench` の procedure にする（`cli: true` は付けない）。
   - `worktree.info({ cwd })` → `{ repo, branch } | null`: `git -C <cwd> rev-parse --abbrev-ref HEAD --path-format=absolute --git-dir --git-common-dir`。linked worktree のときだけ値を返し、`repo` は common dir の親の名前。Runspace の title（`repo:branch`）に使い、webview は path ごとに cache して 5 秒で間引く。
   - `editor.resolve({ cwd, candidates })` → `(string | null)[]`: `~` を展開し、相対なら cwd に join して `realpath` する。失敗したら末尾の `:<数字>` を最大 2 つ外して再試行する。terminal の link 検出が hover のたびに 1 行分をまとめて呼び、null の候補は link にしない。
@@ -251,7 +255,7 @@ changes                    → { type: "layout" } | { type: "terminalSession", i
 
 - `sort_order` は、Runspace と Tab を足す・移す・消すたびに、同じ transaction の中で兄弟を 0..n-1 に振り直す。`runspace.create` と `tab.open` の `index` を省けば末尾に足す。webview は active の次を渡し（monica どおり）、CLI と Task は省く。
 - Tab の title は帳簿に持たない。OSC 0/2 の title は webview の memory にだけ持ち、再 attach のときは transcript の replay に含まれる OSC で戻る。表示は monica どおり title、無ければ cwd の末尾、それも無ければ `Terminal`。title はよくある zsh の theme なら command のたびに変わり、帳簿に書くとそのたびに `changes` と `layout.get` が往復するため。
-- 再 attach の replay は transcript の末尾 256 KB だけを流す。そこから落ちたモード（alt screen、マウス、bracketed paste、kitty keyboard の stack など）は、ptyd が replay の前に流し直す。追うモードと理由は `crates/terminal-daemon` の `TerminalModes` の module doc にある。webview の parser がそのモードの CSI を握りつぶすと、この流し直しも効かない（今の kitty の `CSI >u`・`CSI <u`。#60）。
+- 再 attach の replay は transcript の末尾 256 KB だけを流す。そこから落ちたモード（alt screen、マウス、bracketed paste、kitty keyboard の stack など）は、ptyd が replay の前に流し直す。追うモードと理由は `crates/terminal-daemon` の `TerminalModes` の module doc にある。webview の parser がそのモードの CSI を握りつぶすと、この流し直しも効かない。
 - `tab.respawn` は exited / lost / failed の Tab に新しい session を結び直す。overlay の「New shell in …」と「Retry」が呼ぶ（monica どおり）。
 - `tab.cwd` は最後に分かった cwd。webview は OSC 7 の cwd が前の値と変わったときだけ `tab.setCwd` を呼ぶ（OSC 7 は prompt のたびに来る）。OSC 7 を出さない shell のため、OSC 0/2 の title が `/` で始まるか `~`・`~/…` なら、それも cwd の知らせとして扱う（monica どおり。`~user` や zsh の named directory は Backend が絶対 path にできないので取らない）。ただし一度でも OSC 7 を出した Tab では title を cwd に使わない（title の `~/repo` と OSC 7 の `/Users/…/repo` が交互に「変わった」ことになるため）。`tab.setCwd` は `~` を home に展開して絶対 path で持つ。Backend の張り直し（「pin」の節）と `tab.respawn` はこの cwd で始め、Runspace の title（`worktree.info`）も再起動の直後はこれを使う。
 
