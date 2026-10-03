@@ -23,6 +23,7 @@ jobs:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
       - run: bun run check:ts
+      - run: docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color
 
   # job 単位の paths filter は GitHub Actions に無く、macOS の runner は 1 分が 10 分に数えられるので、変更の判定は ubuntu で行う。
   changes:

@@ -433,16 +433,16 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 
 ## 検査と CI
 
-- `bun run check` が lint（oxlint）、format の検査（oxfmt）、`tsc --noEmit`、`bun test`、`vite build`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace` を流す。中身は TS の検査（`check:ts`）と Rust の検査（`check:rust`）に分け、CI の各 job も同じ script を呼ぶ。
-- CI の検査は 2 job。TS の job（ubuntu）が `check:ts` を、Rust の job（macOS。Tauri の crate が macOS の system library を要るため）が `check:rust` を流す。
-- Rust の job は `crates/**`・`apps/desktop/src-tauri/**`・`Cargo.toml`・`Cargo.lock`・`rust-toolchain.toml` が変わったときだけ走らせる（paths filter）。private repo では macOS の runner の 1 分が 10 分に数えられ、crate は monica から rename しただけで骨格の後はほとんど変わらないため。GitHub Actions には job 単位の paths filter が無いので、変更の判定は検査とは別の ubuntu の小さな job（`dorny/paths-filter`）で行い、Rust の job はその出力で起動を決める。
+- 検査は `bun run check` に集める。何を流すかの正本は `package.json` の `check:ts` と `check:rust` で、CI の job も同じ script を呼ぶ。apps/desktop ができたら、`vite build` を `check:ts` に足す（「entry」の節の bundle の検査）。
+- Rust の検査は macOS の runner で流す。Tauri の crate が macOS の system library を要るため。
+- Rust の検査は、Rust に関わる file が変わったときだけ走らせる（対象は `ci.yml` の `changes` job の filter）。private repo では macOS の runner の 1 分が 10 分に数えられ、crate は monica から rename しただけで骨格の後はほとんど変わらないため。GitHub Actions には job 単位の paths filter が無いので、判定は ubuntu の小さな job で行う。
 - tauri の bundle build、knip、jscpd、lefthook は入れない。
 
 ## 版
 
-- Bun は root の `package.json` の `packageManager: "bun@1.4.2"` で固定し、CI は `bun-version-file` で同じ版を使う。1.4 未満には `--asset` が無い。
-- Rust は root の `rust-toolchain.toml` で `Cargo.toml` の `rust-version` と同じ版に固定し、CI も `rustup toolchain install` で同じ版を入れる。stable を追うと、clippy に足された lint で、crate に触れた PR が変更と関係なく落ちるため。
-- 依存の版は root の `workspaces.catalog` に集め、member は `catalog:` で参照する。対象は `@orpc/*`（1.x に固定。ADR-0003）、`trpc-cli`、`drizzle-orm`、`drizzle-kit`、`drizzle-zod`、`zod`、`hono`、`react`、`react-dom`。
+- Bun は `package.json` の `packageManager` で固定し、CI も同じ版を使う。1.4 未満には `--asset` が無い。
+- Rust は `rust-toolchain.toml` で `Cargo.toml` の `rust-version` と同じ版に固定し、CI も同じ file から入れる。stable を追うと、clippy に足された lint で、crate に触れた PR が変更と関係なく落ちるため。
+- 依存の版は root の `workspaces.catalog` に集め、member は `catalog:` で参照する。`@orpc/*` は trpc-cli が対応する major に固定する（ADR-0003）。
 - tsconfig は root の 1 つで、`types: ["bun"]` と DOM の lib を同居させる。browser 側の安全性は `vite build` に任せる。
 - scripts は root の `package.json` に並べ、1 行に収まらないものは `scripts/*.ts` に書く。just は使わない。
 

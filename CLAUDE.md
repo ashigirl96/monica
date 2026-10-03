@@ -1,3 +1,7 @@
+## 構成
+
+repo の配置、package の entry の規則、dev loop、検査は `docs/packages.md`。
+
 ## Agent skills
 
 ### Issue tracker
