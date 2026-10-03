@@ -10,4 +10,4 @@ monica ではフィールドを 1 つ足すたびに migration、storage の行�
 
 - v1 のドメインは `task` と `workbench` の 2 つ。GitHub client は `task` の内部に置き、2 つ目の利用者が出たら切り出す。
 - テストで DB を fake に差し替えることはせず、in-memory SQLite で本物を使う。
-- apps（desktop / cli / server）は packages を組み立てるだけで、ロジックを持たない。
+- apps（desktop / cli / backend）は packages を組み立てるだけで、ロジックを持たない。package の entry の切り方は ADR-0009。

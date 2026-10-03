@@ -25,4 +25,8 @@ monica では CLI（clap）と desktop（Tauri command）と web（axum）が別
   - event iterator（streaming）の procedure は trpc-cli では動かない。流し続けたい command（`--follow` など）は trpc-cli の外で remote client の event iterator を iterate して書く。
   - personal agent に着手する時点で、同じ contract から MCP adapter を生やす research を行う。
 - oRPC は trpc-cli が対応する major（現時点では 1.x）に固定する。
+- CLI に出すのは、contract で `.meta({ cli: true })` を付けた procedure だけ（opt-in）。CLI は Skill の語彙なので、意図して選んだものに限る。opt-out にすると、隠し忘れた webview 専用の procedure（layout の保存、Terminal Session の作成など）が、Skill から呼べる語彙として黙って増える。`cli` は tania 独自の meta key で、trpc-cli 固有の機能ではない。
+- exit code は 0 = 成功、1 = それ以外の失敗（usage・domain・想定外）、2 = Backend 不在。Skill が分けて扱う必要があるのは「desktop を起動してと言うべきか」だけで、guard の理由は stderr の 1 行目 `CODE: message` で読める。trpc-cli は usage エラーも handler の throw も 1 で `process.exit` を自分で呼ぶので、`run({ process: { exit } })` で差し替えて写像する。
+- 手で書く command（hook、`--follow`）は各 package の `cli` entry に置き、`apps/cli` の main は argv を見て trpc-cli を import する前に振り分ける。hook は tool 1 回ごとに起動するため。compiled で比べると、trpc-cli と contract の実体を import すると約 46ms、その前に振り分けると約 18ms だった。
+- CLI は Backend と別の compiled binary にする（externalBin が 2 つ）。1 つの binary に同居させれば Bun の runtime 分の約 60MB が減るが、どちらかの entry が両方の apps を import することになり、hook も約 30ms に遅くなる。どちらも同じ .app に入るので、CLI と Backend の版はずれない。
 - backend の寿命（app 同寿命か、ptyd のように app より長生きさせるか）と孤児・respawn・port の再取得は CLI の可用性に直結する。ADR-0007 で app 同寿命に決めた。
