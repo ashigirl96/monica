@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { baseName } from "../paths.ts";
+import { useImageDrop } from "./image-drop.ts";
 import { jumpHintsActiveAtom } from "./jump-hints.ts";
 import {
   type TerminalSessionStatus,
@@ -155,6 +156,7 @@ function TerminalPane({
 }
 
 export default function WorkbenchContent() {
+  useImageDrop();
   const layout = useAtomValue(layoutAtom);
   const activeTabId = useAtomValue(activeTerminalTabAtom)?.id;
   const statuses = useAtomValue(terminalSessionStatusAtom);
