@@ -29,7 +29,7 @@ tania/
 
 - apps は packages を組み立てるだけでロジックを持たない（ADR-0002）。apps どうしは互いを import しない。
 - Rust の `target/` と `Cargo.lock` は root に 1 つ。crate 名は `tania-<dir>`（`tania-ptyd` など）。terminal 5 crate は monica から rename だけで持ち込む（#11）。
-- `packages/ui` は popover・icon・toast・fuzzy picker・drag reorder のような、domain の語を持たない部品を置く。domain の UI は各 domain package の `ui` entry に置く。
+- `packages/ui` は popover・icon・toast・fuzzy picker・drag reorder のような、domain の語を持たない部品を置く。CLI の整形関数が使う表（`@tania/ui/table`）もここに置く。cli entry は apps/cli だけが import するので、domain の cli entry どうしでは共有できないため。domain の UI は各 domain package の `ui` entry に置く。
 
 ### ドメイン package の中
 
@@ -63,7 +63,7 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
 | `@tania/<d>/ui` | React の component と atom | browser | apps/desktop、他 package の ui |
 | `@tania/<d>/cli` | 出力の整形関数と手で書く command | Bun | apps/cli |
 
-- 依存の向きは task → workbench だけ。workbench は task を import しない（ADR-0005）。bun の isolated linker では package.json に書いていない依存を解決できないので、向きは package.json が守る。package の中の entry の境界（schema が import してよいもの、ui が server の entry と `bun:sqlite` を import しないこと）と apps どうしの向きは、`.oxlintrc.json` の overrides が lint で守る。
+- 依存の向きは task → workbench だけ。workbench は task を import しない（ADR-0005）。bun の isolated linker では package.json に書いていない依存を解決できないので、向きは package.json が守る。package の中の entry の境界（schema が import してよいもの、ui が server の entry と `bun:sqlite` を import しないこと、cli entry を import するのが apps/cli だけであること）と apps どうしの向きは、`.oxlintrc.json` の overrides が lint で守る。
 - task の schema は workbench の table を FK のために import するが、re-export しない（ADR-0010）。
 - webview の bundle に `bun:sqlite` や `@orpc/server` が混ざっていないかは `vite build` で確かめる。混ざれば解決に失敗して落ちる。型だけの import は消えるので対象外。
 
@@ -86,16 +86,16 @@ export function createWorkbench(deps: {
 // @tania/task/server
 export { migrations } from "../migrations";
 export const router = os.router({ ... });          // context は { db, task }
-export function createTask(deps: { db: Db; workbench: Workbench }): Task;
+export function createTask(deps: { db: Db; workbench: Workbench; github?: GitHub }): Task;
 export function nameAgentSession(db: Db, agentSessionId: string): string | null;
 ```
 
-`ptydPath` は spawn する ptyd の場所（ADR-0011）。`notify` と `nameAgentSession` は通知のための口（「通知」の節）。
+`ptydPath` は spawn する ptyd の場所（ADR-0011）。`notify` と `nameAgentSession` は通知のための口（「通知」の節）。`github` は GraphQL の URL と token の取り方で、省けば `https://api.github.com/graphql` と `gh auth token --hostname github.com` になる。テストは偽の GitHub を渡す。
 
 `Workbench` と `Task` は次を持つ。
 
 - `events`: その domain の変更を知らせる in-process の publisher。
-- `start()` / `stop()`: 起動時と終了時の処理。workbench は ptyd への接続（無ければ spawn、版違いは入れ替え）と reconcile（ADR-0011）、task は 5 分おきの背景 sync（#18）。
+- `start()` / `stop()`: 起動時と終了時の処理。workbench は ptyd への接続（無ければ spawn、版違いは入れ替え）と reconcile（ADR-0011）、task は起動時と 5 分おきの背景 sync（#18）。
 - 他の domain から呼ばれる書き込み: 第 1 引数に transaction（`db` でもよい）を取る**同期**の method。task は `db.transaction((tx) => { workbench.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。ptyd や fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。workbench の同期 method は `createRunspace` / `removeRunspace` / `moveTab` / `openTab`、commit 後の async は `startTerminalSession` / `terminateTerminalSessions`（#22）。どれも Task v1 の slice が使うときに `Workbench` へ足す。骨格では同じ形（第 1 引数が tx）の module 内の関数として procedure の handler から呼び、`Workbench` には出さない。`createRunspace` が作るのは所有された Runspace で、`removeRunspace(tx, id, { spare? })` は `spare` の Tab だけを残して所有を解ける（ADR-0012）。
 
 `openTab` が書く `starting` の Terminal Session の行は、workbench の reconcile が終わってから書く。reconcile の途中で書くと、ptyd の List に無い行として lost にされる。骨格では行に書く shell を `shellWhenReady(workbench)` が reconcile を待ってから返し、handler は transaction の前にこれを await する。
@@ -111,7 +111,9 @@ export function nameAgentSession(db: Db, agentSessionId: string): string | null;
 
 ### Backend の組み立て（`apps/backend/src/main.ts`）
 
-最初に login shell から PATH を 1 回取り（`$SHELL -ilc` で区切り文字に挟んだ `$PATH` を出させる。cwd は `$HOME`、`DISABLE_AUTO_UPDATE=true`）、`process.env.PATH` に入れる。`.app` から起動した Backend は launchd の最小の PATH しか持たず、`gh`・`git`・`ghq`・setup script の中の bun や mise が見つからないため。失敗したら元の PATH のまま stderr に 1 行出す。
+最初に login shell から PATH を 1 回取り（`$SHELL -ilc` で区切り文字に挟んだ `$PATH` を出させる。cwd は `$HOME`、`DISABLE_AUTO_UPDATE=true`）、`process.env.PATH` に入れる。`.app` から起動した Backend は launchd の最小の PATH しか持たず、`gh`・`git`・`ghq`・setup script の中の bun や mise が見つからないため。失敗したら元の PATH のまま stderr に 1 行出す。login shell は stdin を渡さずに起こし（Backend の stdin は Shell の死を知らせる pipe）、5 秒で打ち切る。
+
+Bun.spawn は `env` を渡さないと、子に起動時の environ を渡し、実行ファイルも起動時の PATH で探す。そのため Backend で動くコードの spawn は `env: process.env` を渡す（絶対 path の実行ファイルは除く）。lint の `tania/spawn-env`（`scripts/oxlint/tania.js`）がこれを守る。ptyd は `process.env` から組んだ env を渡すので、Tab にも届く。
 
 1. `$TANIA_HOME/tania.db` を開き、`locking_mode=EXCLUSIVE` → `journal_mode=WAL` → `foreign_keys=ON` の順に設定する（ADR-0007）。
 2. `migrate()` を workbench → task の順に呼ぶ。`migrationsTable` は各 package の `migrations.table` を渡す。
@@ -128,6 +130,8 @@ domain は 2 つしかないので、汎用の「domain の登録」機構は作
 package ごとに in-memory の SQLite に自分の migration を当てる（task は workbench → task の順）。外から見える振る舞いは `createRouterClient(router, { context })` を通して確かめ、他の domain から呼ばれる method と module 内の関数（`openTab` など）はそのまま呼ぶ。DB を fake に差し替えない（ADR-0002）。`bun test` を root で打つと全 package のテストが走る。
 
 - workbench の ptyd は `packages/workbench/src/fake-ptyd.ts` に差し替える。fake は `$home/ptyd.sock` で NDJSON を話し、List の中身を台本にし、Exit を押し込み、届いた Reap と Terminate を記録する。本物の ptyd は CI の ts job に無く、Exit と Created の競合も決まった順で起こせないため。home は `mkdtemp(tmpdir())` で短くする（socket の path の上限は 104 byte）。
+- task の GitHub は `packages/task/src/fake-github.ts` に差し替える。fake は GraphQL の `repository { issue(number:) }` の alias だけを話し、届いた request を記録し、repo ごとの失敗、未認証、応答の保留を起こせる。CLI のテストの Task は `gh auth token` が失敗する GitHub を持ち、本物の GitHub に届かない。
+- 一定の間隔で走る処理は、`setInterval` を `spyOn` で捕まえ、間隔を確かめてから callback を手で呼ぶ。Bun の `jest.useFakeTimers()` は `Bun.sleep` と `setTimeout` も止め、一部の timer だけを偽にできないので、HTTP の応答を待つテストが進まなくなる。
 - 終わった行のように procedure に出ない行は、`@tania/workbench/schema` の table を SELECT して確かめてよい。他の domain が読むのと同じ面だから。
 - CLI は remote client を `createRouterClient` に差し替えて回す（ADR-0003。fixture は `apps/cli/src/testing.ts`）。Backend 側のエラーの形と接続拒否の retry だけは、router を `Bun.serve` に載せて確かめる。in-process の client は handler の生の Error を投げ、HTTP のように `ORPCError`（`INTERNAL_SERVER_ERROR`）に包まないため。
 - hook の CLI（`tania workbench hook claude`）は例外で、`apps/cli/src/main.ts` を subprocess で起こし、router を `Bun.serve` に載せて確かめる。claude から見た約束（stdin の payload、stdout の allow、exit code）と 2 秒の打ち切り、trpc-cli より前の振り分けは、process の外からしか見えないため。
@@ -435,6 +439,33 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 - Shell は stdout の行を `type` で振り分ける。`endpoint` は `backend-endpoint` event に、`notify` は tauri-plugin-notification の `app.notification().builder().title(..).body(..).show()` に渡す。解釈できない行は Shell の log に流して捨てる。
 - plugin の macOS 実装は NSUserNotificationCenter なので、取り下げ、クリックの受け取り、最前面でのバナーは無い。クリックすると tania が前面に出るだけ。
 - dev の通知は plugin が Terminal.app の名義で出す（`tauri::is_dev()` で切り替わる）。Terminal.app に通知の許可が要る。見た目は `bun run install-app` で入れた release で確かめる。
+
+## Task の帳簿
+
+`packages/task` の contract と写しの規則。table は #15、sync の契機は #18、表示状態は #17 の resolution にある。
+
+### contract（root は `task`）
+
+```
+track    { ref } → { ref, title, alreadyTracked, closed }                                cli
+sync     { ref? } → { synced, missing }                                                  cli
+list     { closed? } → { tasks: ListItem[], backgroundSyncError: { at, message } | null }  cli
+changes  → { type: "task", ref } | { type: "synced" }
+```
+
+- ref は `owner/repo#n` と `https://github.com/owner/repo/issues/n`（後ろの `?…` と `#…` は捨てる）だけを受ける。CLI では位置引数にする（zod の `.meta({ positional: true })`）。
+- `ListItem` の `displayState` は純関数 `displayState(task, issue)` が TS で導く。今は `closed` / `issue_closed` / `not_started` の 3 段で、Bench と Run を足す slice が引数と段を足す。
+
+### sync
+
+- GitHub client（`github.ts`）は repo ごとに 1 本の GraphQL で最大 50 件を alias（`i<number>`）で引く。null の alias（削除・transfer・PR の番号）は写しを消さずに `missing` に回し、`errors` があっても返った alias は書く。`repository` ごと null なら（削除・権限の喪失）その repo の失敗にする。新しい Issue の `track` だけは、打ち間違いを GitHub の障害に見せないよう `NOT_FOUND` にする。多くは gh のアカウント違いや SSO による権限の喪失で、`missing` にすると背景 sync の警告に出ず、写しが黙って古くなるため。
+- token は sync のたびに取り直す。`gh auth token` の失敗は 0 件成功にせず、sync の失敗にする。
+- timeout は sync 1 回の全体（token と全 query）にかかる。`track` / `sync` / 背景は 30 秒。`stop()` は走っている request を切る。
+- 範囲（open な Task すべて、または 1 つの Task）ごとに走る sync を 1 つにし、後から来た要求はその完了を自分の timeout まで待つ。5 秒の直前の sync が 30 秒の sync に合流しても 5 秒で返すため。
+- repo ごとに引けた分をその都度 1 transaction で書く。失敗した repo は `owner/repo: 理由` で並べ、`sync` は `BAD_GATEWAY` を投げ、背景は log と `list` の `backgroundSyncError` に出す。背景の次の回が成功すれば消える。
+- 写しの行の repo の綴りは最初に書いたときのまま残し、照合は `lower(repo)` で行う。改名した repo は旧名の query でも新しい名前で答えるので、Task の Issue の照合には query に渡した綴りを使う。改名後の綴りで書くと、Task の行が指さない別の行ができる。
+- 新しい Issue の `track` は写しと Task の行を同じ transaction で書くので、失敗か `missing` なら何も書かない。
+- `syncTask` は 1 つの Task を sync し、成否を投げずに `{ synced, missing, failures }` で返す。`run` / `close` / `reopen` の直前の 5 秒の sync はこれを呼ぶ。
 
 ## dev loop
 

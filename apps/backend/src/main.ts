@@ -20,9 +20,16 @@ import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { Hono } from "hono";
 import { bearerAuth } from "hono/bearer-auth";
 import { cors } from "hono/cors";
+import { loginShellPath } from "./login-shell-path.ts";
 
 // stdout は Shell 宛ての JSON 行だけを書く channel なので、log は stderr に出す。
 const announce = (line: object) => console.log(JSON.stringify(line));
+
+try {
+  process.env.PATH = loginShellPath();
+} catch (error) {
+  console.error(`[backend] keeping the PATH it started with: ${(error as Error).message}`);
+}
 
 const ptydPath = process.env.TANIA_PTYD_PATH;
 if (!ptydPath) {

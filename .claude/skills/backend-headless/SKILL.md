@@ -18,6 +18,7 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 
    - 親は background job のまま生かす。`( … &)` で切り離すと親がすぐ死に、Backend は ppid=1 の見張りで約 1 秒後に黙って抜ける。
    - stdin は無名 pipe にする。Bun は fifo の EOF を拾わないので、fifo では stdin の EOF で抜ける振る舞いを確かめられない。
+   - `.app` でだけ起きること（gh や ghq が見つからないなど）を確かめるときは、`env -i HOME=$HOME USER=$USER SHELL=/bin/zsh LANG=$LANG TMPDIR=$TMPDIR PATH=/usr/bin:/bin:/usr/sbin:/sbin` を前に付け、bun を絶対 path（`~/.bun/bin/bun`）で起こす。PATH が launchd の渡すものと同じになり、Backend が login shell から取った PATH が効いているかを見られる。
    - Monica の tab の中（`env | grep MONICA` が出る）から起こすときは、`env -i HOME=$HOME USER=$USER SHELL=/bin/zsh TERM=xterm-256color LANG=$LANG TMPDIR=$TMPDIR PATH=<monica を含む dir を除いた PATH>` を前に付ける。ptyd は Backend の env を tab に渡すので、`MONICA_*` が残ると tab の claude に Monica の hook が付き、Monica 側に記録される。
 
 4. tab の claude の hook を確かめるなら、起動した後に `ln -s $PWD/scripts/tania-dev ${TMPDIR%/}/tania-s2/bin/tania` を張る。hook の settings の command はこの path を指し、desktop では Shell が張る。

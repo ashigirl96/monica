@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { os } from "@orpc/server";
 import { createTask, migrations as taskMigrations, router as taskRouter } from "@tania/task/server";
 import { terminalSession } from "@tania/workbench/schema";
 import {
@@ -25,7 +26,15 @@ export function inMemoryBackend() {
     notify() {},
     nameAgentSession: () => null,
   });
-  const task = createTask({ db, workbench });
+  // CLI のテストは GitHub に届かせない。
+  const task = createTask({
+    db,
+    workbench,
+    github: {
+      url: "http://127.0.0.1:9/graphql",
+      token: () => Promise.reject(new Error("`gh auth token` failed: not logged in")),
+    },
+  });
   db.insert(terminalSession)
     .values({
       id: "ts-a",
@@ -36,10 +45,12 @@ export function inMemoryBackend() {
       createdAt: new Date(0),
     })
     .run();
+  const context = { db, workbench, task };
   return {
     sqlite,
-    router: { workbench: workbenchRouter, task: taskRouter },
-    context: { db, workbench, task },
+    db,
+    router: os.$context<typeof context>().router({ workbench: workbenchRouter, task: taskRouter }),
+    context,
   };
 }
 
