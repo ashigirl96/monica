@@ -75,13 +75,21 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
 // @tania/workbench/server
 export { migrations } from "../migrations";
 export const router = os.router({ ... });          // context は { db, workbench }
-export function createWorkbench(deps: { db: Db; home: string }): Workbench;
+export function createWorkbench(deps: {
+  db: Db;
+  home: string;
+  notify: (n: { title: string; body: string }) => void;
+  nameAgentSession: (db: Db, agentSessionId: string) => string | null;
+}): Workbench;
 
 // @tania/task/server
 export { migrations } from "../migrations";
 export const router = os.router({ ... });          // context は { db, task }
 export function createTask(deps: { db: Db; workbench: Workbench }): Task;
+export function nameAgentSession(db: Db, agentSessionId: string): string | null;
 ```
+
+`notify` と `nameAgentSession` は通知のための口（「通知」の節）。
 
 `Workbench` と `Task` は次を持つ。
 
@@ -102,10 +110,10 @@ export function createTask(deps: { db: Db; workbench: Workbench }): Task;
 
 1. `$TANIA_HOME/tania.db` を開き、`locking_mode=EXCLUSIVE` → `journal_mode=WAL` → `foreign_keys=ON` の順に設定する（ADR-0007）。
 2. `migrate()` を workbench → task の順に呼ぶ。`migrationsTable` は各 package の `migrations.table` を渡す。
-3. `createWorkbench` → `createTask` の順に作る。
+3. `createWorkbench` → `createTask` の順に作る。`createWorkbench` には、stdout に通知の行を書く `notify` と、`@tania/task/server` の `nameAgentSession` を渡す。
 4. router を `{ workbench: workbenchRouter, task: taskRouter }` で mount し、context は `{ db, workbench, task }`。
 5. hono に CORS（`tauri://localhost`・`http://tauri.localhost`・`http://localhost:1420`）、`/health`（token 無し）、`/rpc/*` の bearer を載せ、`Bun.serve({ hostname: "127.0.0.1", port: 0, idleTimeout: 0 })` で立てる。
-6. `start()` を workbench → task の順に呼ぶ。workbench の `start()`（ptyd への接続と reconcile）を最大 3 秒待ってから、`backend.json` と stdout の 1 行を書く（ADR-0007 / 0011）。
+6. `start()` を workbench → task の順に呼ぶ。workbench の `start()`（ptyd への接続と reconcile）を最大 3 秒待ってから、`backend.json` と stdout の endpoint 行を書く（ADR-0007 / 0011）。
 7. 終了時は `stop()` を逆順に呼んでから ADR-0007 の手順で抜ける。
 
 domain は 2 つしかないので、汎用の「domain の登録」機構は作らずに直接並べる。
@@ -169,7 +177,7 @@ contract を走査するテストを 1 本置き、description と output が全
 - Shell の terminal command を呼ぶ wrapper（monica の `commands/terminal.ts`）は `packages/workbench/src/ui` に置く。
 - workbench の ui は Task の要素を出す場所を 2 つの slot として props で受け、apps/desktop が `@tania/task/ui` の component をはめる。`renderRunspaceLabel(runspaceId)`（Bench のラベル `<repo>#<n> <title>`、準備中・準備失敗のときだけその語を添える）と `tabMenuItems(tab)`（「Attach to Task…」の picker）。task の ui は `task.bench.list`（`{ runspaceId, ref, title, setupState }[]`）と `task.changes` で描き直す。workbench の ui は Task を import しない（ADR-0005）。
 - Tailwind の `@source` に `packages/*/src/ui` を足す。
-- `src-tauri/` は Shell。Backend の監督（ADR-0007）と terminal の中継だけを持つ。terminal command は attach / detach / write / resize の 4 本で、ptyd は spawn しない（ADR-0011）。
+- `src-tauri/` は Shell。Backend の監督（ADR-0007）、terminal の中継、通知の中継（ADR-0013）だけを持つ。terminal command は attach / detach / write / resize の 4 本で、ptyd は spawn しない（ADR-0011）。
 
 ## tab の env と shim
 
@@ -226,6 +234,41 @@ ptyd は shell を常に `--login` で起こすので、zsh は `.zshenv` → `.
 3. PostToolUse を全 tool に張ったときの、tool 1 回あたりの遅延
 4. StopFailure の payload
 5. claude が SIGKILL などで SessionEnd を出さずに落ちたとき、Agent Session が最後の状態のまま残るか
+
+## 通知
+
+Agent Session がユーザー待ちに入ったときに macOS の通知を出す（ADR-0013、語は `GLOSSARY.md` の通知）。判定と本文は workbench が持ち、OS に渡すのは Shell が持つ。Task の無い Tab でも出すので、観測と同じく Workbench を持ち込む骨格の実装に含める。task が足すのは `nameAgentSession` だけで、Task v1 の Run の slice に入る。
+
+### 出す遷移
+
+`recordHook` が遷移を書いて commit した後、`notificationFor(前の行 | null, event, 次の行)` が通知の理由を返す。`transition` の隣に置く純関数。
+
+| 次の状態 | 出す条件 |
+|---|---|
+| 質問・許可・エラーの待ち | 前の行が同じ理由の待ちでない（`state_changed_at` が変わった） |
+| 手空き | 前の行が動作中か未観測で、event が Stop か SubagentStop |
+| それ以外 | 出さない |
+
+- SessionStart による手空き（起動・resume の直後）と、待ちから手空きへの変化（許可の deny や Esc の後の Stop）では出さない。
+- 未知の session_id は動作中の行を作ってから遷移を当てる（ADR-0008）ので、最初の event が Stop なら出る。
+- PermissionRequest(ExitPlanMode) は遷移しないので、プランの自動承認では出ない。
+- edge 1 つに通知 1 つ。dedupe key、outbox、Backend の再起動時のまとめ出しは持たない。
+- test は遷移表と同じく表駆動で書く。
+
+### title と body
+
+- title は呼び名。`nameAgentSession(db, agentSessionId)` が文字列を返せばそれを使う。null なら Agent Session の cwd の末尾 2 つ（monica の `shortPath`）を使う。長さは切らない（macOS が切る）。
+- `nameAgentSession` は table を読むだけの関数。その Agent Session の Run の Task を引き、無ければ Tab → Runspace → Bench の Task を引いて（CLI の `current` と同じ順）、Bench のラベルと同じ `<repo>#<n> <title>` を返す。後ろの経路は、SessionStart を取りこぼして Run がまだ無い Agent Session のためにある。
+- body は理由。`手空き`、`質問`、`許可: <tool>`、`エラー: <error_type>`（error_type が無ければ `エラー`）。
+- 音は鳴らさない。
+
+### Backend と Shell
+
+- apps/backend が `createWorkbench` に渡す `notify({ title, body })` は、stdout に `{"type":"notify","title","body"}` を 1 行書く。test では `notify` と `nameAgentSession` を差し替える。
+- Backend の stdout は Shell 宛ての JSON 行専用（ADR-0007）。Backend の log は stderr に出す。
+- Shell は stdout の行を `type` で振り分ける。`endpoint` は `backend-endpoint` event に、`notify` は tauri-plugin-notification の `app.notification().builder().title(..).body(..).show()` に渡す。解釈できない行は Shell の log に流して捨てる。
+- plugin の macOS 実装は NSUserNotificationCenter なので、取り下げ、クリックの受け取り、最前面でのバナーは無い。クリックすると tania が前面に出るだけ。
+- dev の通知は plugin が Terminal.app の名義で出す（`tauri::is_dev()` で切り替わる）。Terminal.app に通知の許可が要る。見た目は `bun run install-app` で入れた release で確かめる。
 
 ## dev loop
 

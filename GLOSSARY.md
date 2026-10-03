@@ -72,6 +72,10 @@ Tab の中で動く agent が自分で名乗るセッション。同一性は ag
 1 つの Terminal Session で live な（終了でない）Agent Session は 1 つだけ。
 _Avoid_: session, agent status on Terminal Session, stopped（手空きと終了が紛れる）, plan 待ち（許可の一種）
 
+**通知**:
+Agent Session がユーザー待ちに入ったことを知らせる macOS の通知。質問・許可・エラーはその理由の待ちに入るたびに出し、手空きは turn が終わった時だけ出す。claude の起動や resume の直後の手空きと、ユーザー自身の操作（許可の deny や中断）で入った手空きでは出さない。Task に属する Agent Session は Task の Issue の参照と title で、それ以外は agent の cwd で呼ぶ。desktop が動いている間だけ出し、待ちが解けても取り下げない。
+_Avoid_: 待ち通知, alert
+
 ### Process
 
 **Shell**:
