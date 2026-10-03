@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { cleanUp, setup } from "./testing.ts";
 
 afterEach(cleanUp);
@@ -252,6 +253,20 @@ test("tab.respawn binds the Tab to a new Terminal Session started in its last kn
   expect(await client.terminalSession.list()).toEqual([
     expect.objectContaining({ id: respawned.terminalSessionId, status: "running", tabId: tab.id }),
   ]);
+});
+
+test("tab.setCwd records a cwd under ~ as an absolute path", async () => {
+  const { client } = setup();
+  const { tab } = await client.runspace.create(size);
+
+  const cwdAfter = async (cwd: string) => {
+    await client.tab.setCwd({ id: tab.id, cwd });
+    return (await client.layout.get()).runspaces[0]?.tabs[0]?.cwd;
+  };
+
+  expect(await cwdAfter("~/repo")).toBe(join(homedir(), "repo"));
+  expect(await cwdAfter("~")).toBe(homedir());
+  expect(await cwdAfter("/work/~x")).toBe("/work/~x");
 });
 
 test("tab.respawn refuses a Tab whose Terminal Session is still live", async () => {

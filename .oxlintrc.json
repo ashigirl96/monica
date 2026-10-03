@@ -65,6 +65,23 @@
       }
     },
     {
+      "files": ["packages/ui/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [{ "name": "bun:sqlite", "message": "ui は browser で動く（ADR-0009）" }],
+            "patterns": [
+              {
+                "group": ["@tania/*"],
+                "message": "packages/ui は domain を持たない部品なので、domain の package を import しない"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "files": ["packages/workbench/src/schema.ts"],
       "rules": {
         "no-restricted-imports": [

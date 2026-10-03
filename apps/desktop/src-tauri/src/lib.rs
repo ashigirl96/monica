@@ -3,7 +3,9 @@ mod backend;
 mod cli_link;
 mod locations;
 mod orphan;
+mod ptyd;
 mod respawn;
+mod terminal;
 
 use std::time::Duration;
 
@@ -26,13 +28,15 @@ fn backend_restart(app: AppHandle, supervisor: State<'_, Supervisor>) {
 pub fn run() {
     let home = locations::tania_home();
     // 2 つ目の起動は build の中（setup より前）で抜けるので、孤児の掃除が 1 つ目の Backend を止めることはない。
-    let builder = tauri::Builder::default().plugin(tauri_plugin_single_instance::init(|app, _, _| {
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.unminimize();
-            let _ = window.show();
-            let _ = window.set_focus();
-        }
-    }));
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_opener::init());
     #[cfg(debug_assertions)]
     let builder = builder.plugin(
         tauri_plugin_mcp_bridge::Builder::new()
@@ -41,7 +45,15 @@ pub fn run() {
     );
     builder
         .manage(Supervisor::new(home.clone()))
-        .invoke_handler(tauri::generate_handler![backend_endpoint, backend_restart])
+        .manage(ptyd::PtydHandle::new())
+        .invoke_handler(tauri::generate_handler![
+            backend_endpoint,
+            backend_restart,
+            terminal::terminal_attach,
+            terminal::terminal_detach,
+            terminal::terminal_write,
+            terminal::terminal_resize,
+        ])
         .setup(move |app| {
             #[cfg(debug_assertions)]
             app.add_capability(include_str!("../capabilities-debug/mcp-bridge.json"))?;
