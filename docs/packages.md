@@ -98,6 +98,8 @@ export function nameAgentSession(db: Db, agentSessionId: string): string | null;
 - `start()` / `stop()`: 起動時と終了時の処理。workbench は ptyd への接続（無ければ spawn、版違いは入れ替え）と reconcile（ADR-0011）、task は 5 分おきの背景 sync（#18）。
 - 他の domain から呼ばれる書き込み: 第 1 引数に transaction（`db` でもよい）を取る**同期**の method。task は `db.transaction((tx) => { workbench.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。ptyd や fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。workbench の同期 method は `createRunspace` / `removeRunspace` / `moveTab` / `openTab`、commit 後の async は `startTerminalSession` / `terminateTerminalSessions`（#22）。どれも Task v1 の slice が使うときに `Workbench` へ足す。骨格では同じ形（第 1 引数が tx）の module 内の関数として procedure の handler から呼び、`Workbench` には出さない。`createRunspace` が作るのは所有された Runspace で、`removeRunspace(tx, id, { spare? })` は `spare` の Tab だけを残して所有を解ける（ADR-0012）。
 
+`openTab` が書く `starting` の Terminal Session の行は、workbench の reconcile が終わってから書く。reconcile の途中で書くと、ptyd の List に無い行として lost にされる。骨格では行に書く shell を `shellWhenReady(workbench)` が reconcile を待ってから返し、handler は transaction の前にこれを await する。
+
 他の domain から呼ばれない処理は router の handler の中に書いてよい。
 
 ### domain をまたぐ規則

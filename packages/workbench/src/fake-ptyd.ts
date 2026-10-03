@@ -64,6 +64,10 @@ export function startFakePtyd(home: string) {
   }
 
   function handle(socket: Socket<Connection>, { id, ...op }: Frame) {
+    // 数でない id の応答は client の待ち手に届かず test が timeout でしか落ちないので、受けた時点で落とす。
+    if (id !== undefined && typeof id !== "number") {
+      throw new Error(`a frame to tania-ptyd carries a non-numeric id: ${JSON.stringify(id)}`);
+    }
     record(op);
     if (op.op === "reap") {
       const index = sessions.findIndex((s) => s.session_id === op.session_id);
