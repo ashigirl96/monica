@@ -18,6 +18,7 @@ export function startFakePtyd(home: string) {
     beforeList: (): ServerMessage[] => [],
     dropNextList: false,
     dropNextTerminate: false,
+    dropNextCreatedReply: false,
     splitListMidCharacter: false,
     beforeCreated: (_op: Extract<RequestOp, { op: "create" }>): ServerMessage[] => [],
     createError: null as string | null,
@@ -110,6 +111,10 @@ export function startFakePtyd(home: string) {
           rows: op.rows,
           cols: op.cols,
         });
+        if (fake.dropNextCreatedReply) {
+          fake.dropNextCreatedReply = false;
+          return socket.end();
+        }
         return send(socket, { type: "ok", id, body: "created", pid });
       }
       default:

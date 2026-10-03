@@ -203,6 +203,8 @@ export async function startTerminalSession(workbench: Workbench, id: string, { r
     const pid = await ptyd.create({ session_id: id, cwd, shell, rows, cols, env: null });
     db.update(terminalSession).set({ status: "running", pid }).where(stillStarting).run();
   } catch (error) {
+    // 接続が切れただけなら ptyd が作ったかは分からないので、starting のまま繋ぎ直した後の reconcile に決めさせる。
+    if (ptyd.isClosed()) return;
     db.update(terminalSession)
       .set({ status: "failed", error: String(error), endedAt: new Date() })
       .where(stillStarting)

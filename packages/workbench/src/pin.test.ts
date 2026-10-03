@@ -187,6 +187,31 @@ test("a pinned Tab whose shell ptyd lost is bound to a new shell after the recon
   });
 });
 
+test("a respawned shell whose Created reply is lost to a dropped connection is adopted by the reconcile, not failed", async () => {
+  const { ptyd, workbench, client } = setup();
+  const { tab } = await client.runspace.create(size);
+  await client.tab.pin({ id: tab.id });
+  letShellsLive();
+  ptyd.dropNextCreatedReply = true;
+  const reconciled = new Promise<void>((resolve) => {
+    const unsubscribe = workbench.events.subscribe("change", (change) => {
+      if (change.type !== "reconciled") return;
+      unsubscribe();
+      resolve();
+    });
+  });
+
+  ptyd.exit(tab.terminalSessionId, 0);
+  await reconciled;
+
+  const respawned = (await client.layout.get()).runspaces[0]?.tabs[0];
+  expect(respawned?.terminalSessionId).not.toBe(tab.terminalSessionId);
+  expect(await client.terminalSession.list()).toEqual([
+    expect.objectContaining({ id: respawned?.terminalSessionId, status: "running" }),
+  ]);
+  expect(ptyd.receivedAll((op) => op.op === "terminate")).toEqual([]);
+});
+
 test("a pinned Tab the Backend left on an ended Terminal Session before it stopped is respawned on start", async () => {
   const { ptyd, db, workbench, client } = setup();
   const createdAt = new Date(Date.now() - 60_000);
