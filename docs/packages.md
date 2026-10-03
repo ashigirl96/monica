@@ -251,6 +251,7 @@ changes                    → { type: "layout" } | { type: "terminalSession", i
 
 - `sort_order` は、Runspace と Tab を足す・移す・消すたびに、同じ transaction の中で兄弟を 0..n-1 に振り直す。`runspace.create` と `tab.open` の `index` を省けば末尾に足す。webview は active の次を渡し（monica どおり）、CLI と Task は省く。
 - Tab の title は帳簿に持たない。OSC 0/2 の title は webview の memory にだけ持ち、再 attach のときは transcript の replay に含まれる OSC で戻る。表示は monica どおり title、無ければ cwd の末尾、それも無ければ `Terminal`。title はよくある zsh の theme なら command のたびに変わり、帳簿に書くとそのたびに `changes` と `layout.get` が往復するため。
+- 再 attach の replay は transcript の末尾 256 KB だけを流す。そこから落ちたモード（alt screen、マウス、bracketed paste、kitty keyboard の stack など）は、ptyd が replay の前に流し直す。追うモードと理由は `crates/terminal-daemon` の `TerminalModes` の module doc にある。webview の parser がそのモードの CSI を握りつぶすと、この流し直しも効かない（今の kitty の `CSI >u`・`CSI <u`。#60）。
 - `tab.respawn` は exited / lost / failed の Tab に新しい session を結び直す。overlay の「New shell in …」と「Retry」が呼ぶ（monica どおり）。
 - `tab.cwd` は最後に分かった cwd。webview は OSC 7 の cwd が前の値と変わったときだけ `tab.setCwd` を呼ぶ（OSC 7 は prompt のたびに来る）。OSC 7 を出さない shell のため、OSC 0/2 の title が `/` で始まるか `~`・`~/…` なら、それも cwd の知らせとして扱う（monica どおり。`~user` や zsh の named directory は Backend が絶対 path にできないので取らない）。ただし一度でも OSC 7 を出した Tab では title を cwd に使わない（title の `~/repo` と OSC 7 の `/Users/…/repo` が交互に「変わった」ことになるため）。`tab.setCwd` は `~` を home に展開して絶対 path で持つ。Backend の張り直し（「pin」の節）と `tab.respawn` はこの cwd で始め、Runspace の title（`worktree.info`）も再起動の直後はこれを使う。
 
