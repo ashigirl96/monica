@@ -1,47 +1,13 @@
-import { afterEach, expect, test } from "bun:test";
-import { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { createRouterClient } from "@orpc/server";
+import { afterEach, expect, expectTypeOf, test } from "bun:test";
 import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/bun-sqlite";
-import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import type { WorkbenchChange } from "./contract.ts";
 import { startFakePtyd } from "./fake-ptyd.ts";
 import type { SessionInfo } from "./ptyd.ts";
 import { terminalSession } from "./schema.ts";
-import { createWorkbench, type Db, migrations, router, type Workbench } from "./server.ts";
-import { createTerminalSession } from "./workbench.ts";
+import type { Db, Workbench } from "./server.ts";
+import { cleanUp, onCleanup, setup } from "./testing.ts";
 
-const cleanups: (() => void)[] = [];
-afterEach(() => {
-  for (const cleanup of cleanups.splice(0).reverse()) cleanup();
-});
-
-function setup() {
-  // ptyd の socket の path は macOS で 104 byte を超えると bind できないので、home は短くする。
-  const home = mkdtempSync(join(tmpdir(), "tania-"));
-  cleanups.push(() => rmSync(home, { recursive: true, force: true }));
-  const ptyd = startFakePtyd(home);
-  cleanups.push(() => ptyd.stop());
-
-  const sqlite = new Database(":memory:");
-  sqlite.run("PRAGMA foreign_keys = ON");
-  const db = drizzle(sqlite);
-  migrate(db, { migrationsFolder: migrations.folder, migrationsTable: migrations.table });
-
-  const workbench = createWorkbench({
-    db,
-    home,
-    ptydPath: join(home, "no-ptyd"),
-    notify() {},
-    nameAgentSession: () => null,
-  });
-  cleanups.push(() => workbench.stop());
-  const client = createRouterClient(router, { context: { db, workbench } });
-  return { home, ptyd, db, workbench, client };
-}
+afterEach(cleanUp);
 
 function heldByPtyd(id: string, overrides: Partial<SessionInfo> = {}): SessionInfo {
   return {
@@ -57,6 +23,10 @@ function heldByPtyd(id: string, overrides: Partial<SessionInfo> = {}): SessionIn
   };
 }
 
+function rowOf(db: Db, id: string) {
+  return db.select().from(terminalSession).where(eq(terminalSession.id, id)).get();
+}
+
 type Status = (typeof terminalSession.$inferSelect)["status"];
 
 function seedRow(db: Db, id: string, status: Status) {
@@ -70,10 +40,6 @@ function seedRow(db: Db, id: string, status: Status) {
       createdAt: new Date(0),
     })
     .run();
-}
-
-function rowOf(db: Db, id: string) {
-  return db.select().from(terminalSession).where(eq(terminalSession.id, id)).get();
 }
 
 test("a live row ptyd no longer holds turns lost", async () => {
@@ -152,27 +118,25 @@ test("an Exit from ptyd turns the row exited with the code and reaps the tombsto
 
 test("a new Terminal Session runs in ptyd under a ts-<uuidv7> id with the shell fixed at startup", async () => {
   const shell = process.env.SHELL;
-  cleanups.push(() => {
+  onCleanup(() => {
     process.env.SHELL = shell;
   });
   process.env.SHELL = "/bin/startup-shell";
-  const { ptyd, workbench, client } = setup();
+  const { ptyd, client } = setup();
   process.env.SHELL = "/bin/later-shell";
-  await workbench.start();
 
-  const created = await createTerminalSession(workbench, { cwd: "/work", rows: 30, cols: 100 });
+  const { tab } = await client.runspace.create({ cwd: "/work", rows: 24, cols: 80 });
 
-  expect(created.id).toMatch(/^ts-[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  expect(tab.terminalSessionId).toMatch(
+    /^ts-[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+  );
   expect(await ptyd.received((op) => op.op === "create")).toMatchObject({
-    session_id: created.id,
-    cwd: "/work",
+    session_id: tab.terminalSessionId,
     shell: "/bin/startup-shell",
-    rows: 30,
-    cols: 100,
   });
   expect(await client.terminalSession.list()).toEqual([
     expect.objectContaining({
-      id: created.id,
+      id: tab.terminalSessionId,
       status: "running",
       pid: 1000,
       shell: "/bin/startup-shell",
@@ -181,26 +145,14 @@ test("a new Terminal Session runs in ptyd under a ts-<uuidv7> id with the shell 
 });
 
 test("a shell that dies before ptyd answers Created stays exited", async () => {
-  const { ptyd, db, workbench } = setup();
+  const { ptyd, client } = setup();
   ptyd.beforeCreated = (op) => [{ type: "exit", session_id: op.session_id, exit_code: 127 }];
-  await workbench.start();
 
-  const created = await createTerminalSession(workbench, { cwd: "/work", rows: 24, cols: 80 });
+  const { tab } = await client.runspace.create({ cwd: "/work", rows: 24, cols: 80 });
 
-  expect(created).toMatchObject({ status: "exited", exitCode: 127 });
-  expect(rowOf(db, created.id)?.status).toBe("exited");
-});
-
-test("a Terminal Session ptyd refuses to create turns failed with the reason", async () => {
-  const { ptyd, workbench, client } = setup();
-  ptyd.createError = "no such directory: /nope";
-  await workbench.start();
-
-  const created = await createTerminalSession(workbench, { cwd: "/nope", rows: 24, cols: 80 });
-
-  expect(created).toMatchObject({ status: "failed", endedAt: expect.any(Date) });
-  expect(created.error).toContain("no such directory: /nope");
-  expect(await client.terminalSession.list()).toEqual([]);
+  expect(await client.terminalSession.list()).toEqual([
+    expect.objectContaining({ id: tab.terminalSessionId, status: "exited", exitCode: 127 }),
+  ]);
 });
 
 function nextChange(workbench: Workbench, type: WorkbenchChange["type"]): Promise<void> {
@@ -222,7 +174,7 @@ test("while ptyd is gone the Backend keeps retrying, then reconciles against the
   ptyd.stop();
   await Bun.sleep(50);
   const revived = startFakePtyd(home);
-  cleanups.push(() => revived.stop());
+  onCleanup(() => revived.stop());
   await reconciled;
 
   expect(rowOf(db, "ts-a")?.status).toBe("lost");
@@ -312,4 +264,8 @@ test("a live session only ptyd knows is adopted without a shell and listed", asy
       pid: 777,
     }),
   ]);
+});
+
+test("the Workbench exposes only events, start and stop", () => {
+  expectTypeOf<keyof Workbench>().toEqualTypeOf<"events" | "start" | "stop">();
 });

@@ -7,6 +7,8 @@ import { openDaemon, type PtydClient, type SessionInfo } from "./ptyd.ts";
 import { terminalSession } from "./schema.ts";
 
 export type Db = BunSQLiteDatabase;
+export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+export type Size = { rows: number; cols: number };
 
 export const LIVE = ["starting", "running"] as const;
 
@@ -133,27 +135,29 @@ export function createWorkbench(deps: {
   return workbench;
 }
 
-export async function createTerminalSession(
-  workbench: Workbench,
-  input: { cwd: string; rows: number; cols: number },
-): Promise<TerminalSession> {
-  const { db, shell, publish, ready } = internals(workbench);
-  const ptyd = await ready();
+// reconcile より先に書いた starting の行は lost にされるので、行に書く shell は reconcile を待ってから渡す。
+export async function shellWhenReady(workbench: Workbench): Promise<string> {
+  const { shell, ready } = internals(workbench);
+  await ready();
+  return shell;
+}
+
+export function insertTerminalSession(tx: Tx, { cwd, shell }: { cwd: string; shell: string }) {
   const id = `ts-${Bun.randomUUIDv7()}`;
-  db.insert(terminalSession)
-    .values({ id, cwd: input.cwd, shell, status: "starting", createdAt: new Date() })
+  tx.insert(terminalSession)
+    .values({ id, cwd, shell, status: "starting", createdAt: new Date() })
     .run();
+  return id;
+}
+
+export async function startTerminalSession(workbench: Workbench, id: string, { rows, cols }: Size) {
+  const { db, publish, ready } = internals(workbench);
+  const ptyd = await ready();
+  const { cwd, shell } = db.select().from(terminalSession).where(eq(terminalSession.id, id)).get()!;
   // 即死した shell の Exit は Created の応答より先に届くことがあるので、starting の行だけを進める。
   const stillStarting = and(eq(terminalSession.id, id), eq(terminalSession.status, "starting"));
   try {
-    const pid = await ptyd.create({
-      session_id: id,
-      cwd: input.cwd,
-      shell,
-      rows: input.rows,
-      cols: input.cols,
-      env: null,
-    });
+    const pid = await ptyd.create({ session_id: id, cwd, shell, rows, cols, env: null });
     db.update(terminalSession).set({ status: "running", pid }).where(stillStarting).run();
   } catch (error) {
     db.update(terminalSession)
@@ -162,12 +166,24 @@ export async function createTerminalSession(
       .run();
   }
   publish({ type: "terminalSession", id });
-  return db.select().from(terminalSession).where(eq(terminalSession.id, id)).get()!;
 }
 
-export async function terminateTerminalSession(workbench: Workbench, id: string) {
-  const ptyd = await internals(workbench).ready();
-  await ptyd.request({ op: "terminate", session_id: id });
+// 呼び手は Tab を消して commit した後なので、送る途中で接続が切れても繋ぎ直した ptyd に送り直す（Terminate は冪等）。
+export async function terminateTerminalSessions(workbench: Workbench, ids: string[]) {
+  const { ready } = internals(workbench);
+  await Promise.all(
+    ids.map(async (id) => {
+      for (;;) {
+        const ptyd = await ready();
+        try {
+          await ptyd.request({ op: "terminate", session_id: id });
+          return;
+        } catch (error) {
+          if (!ptyd.isClosed()) throw error;
+        }
+      }
+    }),
+  );
 }
 
 function reconcile(db: Db, ptydSessions: SessionInfo[]) {
@@ -226,6 +242,6 @@ function reconcile(db: Db, ptydSessions: SessionInfo[]) {
   return { reap, terminate };
 }
 
-function isLive(status: TerminalSession["status"]): boolean {
+export function isLive(status: TerminalSession["status"]): boolean {
   return (LIVE as readonly string[]).includes(status);
 }
