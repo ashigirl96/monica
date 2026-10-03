@@ -187,6 +187,7 @@ contract を走査するテストを 1 本置き、description と output が全
 ## desktop（apps/desktop）
 
 - `src/` は app の枠だけを持つ。shortcut、Backend client の provider、Shell からの `backend-endpoint` event による再接続、Backend 不在の表示、toast。domain の画面は `@tania/<d>/ui` から読む。Workbench の画面（sidebar・Tab の帯・端末の並び）は `@tania/workbench/ui` の `Workbench` が持ち、`client.workbench` を props で受けて、endpoint が替わるたびに `workbench.changes` を購読し直す。
+- ⌥ のキーは xterm に渡さず（`buildKeyEventHandler`）、shortcut だけが拾う。shortcut の binding が `false` を返して素通しした ⌥ のキーも、端末には届かない。
 - Backend の endpoint の受け取りと不在の表示:
   - 起動時は Shell の `backend_endpoint` command で今の endpoint（無ければ null）と再起動を諦めたかどうか（`{ endpoint, failed }`）を取り、以降は `backend-endpoint` と `backend-failed` の event で受ける。listen する前に出た event を取りこぼさないため。諦めたかどうかも取るのは、諦めた後に reload した webview が「再試行」を出せるようにするため。
   - Shell は Backend の予期しない終了で endpoint を捨てたら、`backend-endpoint` に null を載せて出す。再起動を諦めたら `backend-failed` を出す（ADR-0007）。
@@ -424,6 +425,7 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 ### Backend と Shell
 
 - apps/backend が `createWorkbench` に渡す `notify({ title, body })` は、stdout に `{"type":"notify","title","body"}` を 1 行書く。test では `notify` と `nameAgentSession` を差し替える。
+- `nameAgentSession` か `notify` が throw したら、stderr に 1 行出して捨てる。`recordHook` の記録と `changes` の合図は続ける。
 - Backend の stdout は Shell 宛ての JSON 行専用（ADR-0007）。Backend の log は stderr に出す。
 - Shell は stdout の行を `type` で振り分ける。`endpoint` は `backend-endpoint` event に、`notify` は tauri-plugin-notification の `app.notification().builder().title(..).body(..).show()` に渡す。解釈できない行は Shell の log に流して捨てる。
 - plugin の macOS 実装は NSUserNotificationCenter なので、取り下げ、クリックの受け取り、最前面でのバナーは無い。クリックすると tania が前面に出るだけ。
