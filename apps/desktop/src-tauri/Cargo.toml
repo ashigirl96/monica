@@ -20,7 +20,7 @@ serde_json.workspace = true
 shared_child = "1"
 tania-terminal-client.workspace = true
 tania-terminal-protocol.workspace = true
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 # 登録するのは debug build だけ。Cargo は profile で依存を切り替えられないので release にも入る。

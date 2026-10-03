@@ -117,6 +117,23 @@ function GroupHeader({ label }: { label: string }) {
   );
 }
 
+function RunspaceGroup({
+  label,
+  items,
+  renderItem,
+}: {
+  label: string;
+  items: RunspaceSummary[];
+  renderItem: (runspace: RunspaceSummary) => React.ReactNode;
+}) {
+  return (
+    <>
+      <GroupHeader label={label} />
+      <div className="flex flex-col gap-0.5 px-0.5">{items.map(renderItem)}</div>
+    </>
+  );
+}
+
 export function WorkbenchSidebar() {
   const summaries = useAtomValue(runspaceSummariesAtom);
   const detached = useAtomValue(detachedTerminalSessionsAtom);
@@ -127,20 +144,20 @@ export function WorkbenchSidebar() {
   const jumpHints = useAtomValue(jumpHintTargetsAtom);
   const { dragOverId, handlersFor } = useDragReorder(reorder);
 
+  const renderItem = (runspace: RunspaceSummary) => (
+    <RunspaceItem
+      key={runspace.id}
+      runspace={runspace}
+      dragHandlers={handlersFor(runspace.id, () => activate(runspace.id))}
+      isDragOver={dragOverId === runspace.id}
+      hint={jumpHints.byRunspaceId[runspace.id]}
+    />
+  );
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto">
-        <div className="flex flex-col gap-0.5 px-0.5 pt-2">
-          {summaries.map((runspace) => (
-            <RunspaceItem
-              key={runspace.id}
-              runspace={runspace}
-              dragHandlers={handlersFor(runspace.id, () => activate(runspace.id))}
-              isDragOver={dragOverId === runspace.id}
-              hint={jumpHints.byRunspaceId[runspace.id]}
-            />
-          ))}
-        </div>
+        <RunspaceGroup label="" items={summaries} renderItem={renderItem} />
 
         {detached.length > 0 && (
           <>

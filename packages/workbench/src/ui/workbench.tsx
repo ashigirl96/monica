@@ -1,16 +1,10 @@
-import { cn, PromptIcon } from "@tania/ui";
+import { cn, PromptIcon, TRAFFIC_LIGHT_ZONE_HEIGHT, TRAFFIC_LIGHT_ZONE_WIDTH } from "@tania/ui";
 import { useAtomValue, useSetAtom } from "jotai";
 import { lazy, Suspense, useEffect } from "react";
 import { WorkbenchHeader } from "./header.tsx";
 import { ResizeHandle } from "./resize-handle.tsx";
 import { WorkbenchSidebar } from "./sidebar.tsx";
-import {
-  createRunspaceAtom,
-  reloadAtom,
-  warnFailed,
-  type WorkbenchClient,
-  workbenchClientAtom,
-} from "./store.ts";
+import { reloadAtom, warnFailed, type WorkbenchClient, workbenchClientAtom } from "./store.ts";
 import { sidebarOpenAtom, sidebarResizingAtom, sidebarWidthAtom, uiZoomAtom } from "./ui-state.ts";
 
 const WorkbenchContent = lazy(() => import("./content.tsx"));
@@ -46,7 +40,7 @@ export function Workbench({ client }: { client: WorkbenchClient | null }) {
   const sidebarWidth = useAtomValue(sidebarWidthAtom);
   const resizing = useAtomValue(sidebarResizingAtom);
   const uiZoom = useAtomValue(uiZoomAtom);
-  const createRunspace = useSetAtom(createRunspaceAtom);
+  const leftPanelWidth = sidebarOpen ? sidebarWidth : 0;
 
   return (
     <div className="flex min-h-0 flex-1 select-none overflow-hidden">
@@ -55,24 +49,23 @@ export function Workbench({ client }: { client: WorkbenchClient | null }) {
           "flex-shrink-0 overflow-hidden",
           !resizing && "transition-[width] duration-200 ease-out",
         )}
-        style={{ width: sidebarOpen ? sidebarWidth : 0 }}
+        style={{ width: leftPanelWidth }}
       >
         <div className="flex h-full flex-col" style={{ minWidth: sidebarWidth }}>
-          <div className="flex h-10 flex-shrink-0 items-center justify-between px-3">
+          <div
+            className="flex flex-shrink-0 items-center"
+            style={{
+              height: TRAFFIC_LIGHT_ZONE_HEIGHT,
+              paddingLeft: TRAFFIC_LIGHT_ZONE_WIDTH - 8,
+            }}
+            data-tauri-drag-region
+          >
             <div className="flex items-center gap-1.5 rounded-md bg-white/[0.08] px-2 py-0.5">
               <PromptIcon size={12} strokeWidth={2} />
               <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                 Workbench
               </span>
             </div>
-            <button
-              type="button"
-              className="whitespace-nowrap rounded px-1.5 text-xs text-muted-foreground hover:bg-white/[0.08] hover:text-foreground"
-              title="New runspace (⌥P)"
-              onClick={() => void createRunspace()}
-            >
-              + runspace
-            </button>
           </div>
           <div className="flex-1 overflow-y-auto px-2">
             <WorkbenchSidebar />
@@ -83,7 +76,14 @@ export function Workbench({ client }: { client: WorkbenchClient | null }) {
       {sidebarOpen && <ResizeHandle />}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex h-10 flex-shrink-0 items-center px-2">
+        <div
+          className="flex h-10 flex-shrink-0 items-center transition-[padding] duration-200 ease-out"
+          style={{
+            paddingLeft: Math.max(8, TRAFFIC_LIGHT_ZONE_WIDTH - leftPanelWidth),
+            paddingRight: 8,
+          }}
+          data-tauri-drag-region
+        >
           <WorkbenchHeader />
         </div>
         <div className="relative min-h-0 flex-1 p-2 pt-0" style={{ zoom: uiZoom }}>
