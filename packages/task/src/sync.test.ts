@@ -164,6 +164,31 @@ test("a copy written without a node ID in a repo renamed since is found by the n
   ).toEqual([{ id, repo: "acme/new", title: "One, renamed" }]);
 });
 
+test("two copies of one issue written without node IDs fail the sync instead of leaving the Task stale", async () => {
+  const books = setup();
+  const { db, github, client } = books;
+  const syncedAt = new Date(0);
+  const [old] = db
+    .insert(issue)
+    .values([
+      { repo: "acme/old", number: 1, title: "One", state: "open", syncedAt },
+      { repo: "acme/new", number: 1, title: "One", state: "open", syncedAt },
+    ])
+    .returning()
+    .all();
+  db.insert(task).values({ issueId: old!.id, trackedAt: syncedAt }).run();
+  github.issue("acme/old#1", { title: "One, renamed" });
+  github.renameRepo("acme/old", "acme/new");
+
+  const error = await failure(client.sync({}));
+
+  expect(error.message).toContain("acme/old#1 and acme/new#1 are copies of the same issue");
+  expect(db.select({ nodeId: issue.nodeId }).from(issue).all()).toEqual([
+    { nodeId: null },
+    { nodeId: null },
+  ]);
+});
+
 test("an issue number GitHub now gives to another issue fails the sync instead of moving the copy", async () => {
   const books = setup();
   const { db, github, client } = books;

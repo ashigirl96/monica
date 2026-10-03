@@ -1,5 +1,5 @@
 import type { Tx } from "@tania/workbench/server";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import type { GitHubIssue, LinkedIssue } from "./github.ts";
 import { formatRef, type IssueRef } from "./ref.ts";
 import { issue, issueBlocker } from "./schema.ts";
@@ -40,6 +40,8 @@ function writeLinkedIssue(tx: Tx, linked: LinkedIssue, syncedAt: Date): number {
   );
 }
 
+const rowRef = { id: issue.id, repo: issue.repo, number: issue.number };
+
 function upsert(
   tx: Tx,
   { nodeId, repo, number }: LinkedIssue,
@@ -48,11 +50,22 @@ function upsert(
   asked?: IssueRef,
 ): number {
   const identity = { nodeId, repo, number };
+  // Task の Issue は改名前の名前の行を先に見る。Task が指すのはその行だから。
   const existing =
-    tx.select({ id: issue.id }).from(issue).where(eq(issue.nodeId, nodeId)).get() ??
-    rowWithoutNodeId(tx, { repo, number }) ??
-    (asked && rowWithoutNodeId(tx, asked));
+    tx.select(rowRef).from(issue).where(eq(issue.nodeId, nodeId)).get() ??
+    (asked && rowWithoutNodeId(tx, asked)) ??
+    rowWithoutNodeId(tx, { repo, number });
   if (existing) {
+    const other = tx
+      .select({ id: issue.id })
+      .from(issue)
+      .where(and(isIssue({ repo, number }), ne(issue.id, existing.id)))
+      .get();
+    if (other) {
+      throw new Error(
+        `${formatRef(existing)} and ${formatRef({ repo, number })} are copies of the same issue`,
+      );
+    }
     tx.update(issue)
       .set({ ...identity, ...update })
       .where(eq(issue.id, existing.id))
@@ -69,7 +82,7 @@ function upsert(
 // node ID の無い行は node ID を足す前に書いた行。node ID が別なら、その番号は GitHub で別の issue に使われている。
 function rowWithoutNodeId(tx: Tx, ref: IssueRef) {
   const row = tx
-    .select({ id: issue.id, nodeId: issue.nodeId })
+    .select({ ...rowRef, nodeId: issue.nodeId })
     .from(issue)
     .where(isIssue(ref))
     .get();
