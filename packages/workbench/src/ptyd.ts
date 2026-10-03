@@ -120,6 +120,10 @@ export class PtydClient {
     if (!this.closed) this.send(op);
   }
 
+  isClosed(): boolean {
+    return this.closed;
+  }
+
   close() {
     this.socket.end();
   }

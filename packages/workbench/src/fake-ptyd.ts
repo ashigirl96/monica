@@ -17,6 +17,7 @@ export function startFakePtyd(home: string) {
     sessions,
     beforeList: (): ServerMessage[] => [],
     dropNextList: false,
+    dropNextTerminate: false,
     splitListMidCharacter: false,
     beforeCreated: (_op: Extract<RequestOp, { op: "create" }>): ServerMessage[] => [],
     createError: null as string | null,
@@ -103,6 +104,12 @@ export function startFakePtyd(home: string) {
         });
         return send(socket, { type: "ok", id, body: "created", pid });
       }
+      case "terminate":
+        if (fake.dropNextTerminate) {
+          fake.dropNextTerminate = false;
+          return socket.end();
+        }
+        return send(socket, { type: "ok", id, body: "empty" });
       default:
         return send(socket, { type: "ok", id, body: "empty" });
     }

@@ -168,9 +168,22 @@ export async function startTerminalSession(workbench: Workbench, id: string, { r
   publish({ type: "terminalSession", id });
 }
 
+// 呼び手は Tab を消して commit した後なので、送る途中で接続が切れても繋ぎ直した ptyd に送り直す（Terminate は冪等）。
 export async function terminateTerminalSessions(workbench: Workbench, ids: string[]) {
-  const ptyd = await internals(workbench).ready();
-  await Promise.all(ids.map((id) => ptyd.request({ op: "terminate", session_id: id })));
+  const { ready } = internals(workbench);
+  await Promise.all(
+    ids.map(async (id) => {
+      for (;;) {
+        const ptyd = await ready();
+        try {
+          await ptyd.request({ op: "terminate", session_id: id });
+          return;
+        } catch (error) {
+          if (!ptyd.isClosed()) throw error;
+        }
+      }
+    }),
+  );
 }
 
 function reconcile(db: Db, ptydSessions: SessionInfo[]) {

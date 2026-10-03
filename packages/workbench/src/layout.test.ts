@@ -218,6 +218,14 @@ test("runspace.remove drops its Tabs and terminates their Terminal Sessions", as
   }
 });
 
+test("runspace.remove sends the terminate again to the reconnected ptyd when the connection drops after the commit", async () => {
+  const { ptyd, client } = setup();
+  const removed = await client.runspace.create(size);
+  ptyd.dropNextTerminate = true;
+
+  await expect(client.runspace.remove({ id: removed.runspaceId })).resolves.toBeUndefined();
+});
+
 test("tab.respawn binds the Tab to a new Terminal Session started in its last known cwd", async () => {
   const { ptyd, client } = setup();
   const { runspaceId, tab } = await client.runspace.create({ cwd: "/work", ...size });
