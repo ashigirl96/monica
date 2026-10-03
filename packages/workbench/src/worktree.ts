@@ -14,7 +14,7 @@ export async function worktreeInfo(cwd: string): Promise<Worktree | null> {
       "--git-dir",
       "--git-common-dir",
     ],
-    { stdout: "pipe", stderr: "ignore" },
+    { env: process.env, stdout: "pipe", stderr: "ignore" },
   );
   const [stdout, exitCode] = await Promise.all([new Response(git.stdout).text(), git.exited]);
   if (exitCode !== 0) return null;
