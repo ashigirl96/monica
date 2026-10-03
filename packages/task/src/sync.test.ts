@@ -109,6 +109,142 @@ test("a repo GitHub cannot resolve fails the sync and keeps its copies", async (
   expect(titles(books)).toEqual({ "acme/app#1": "One, renamed", "acme/lib#7": "Issue acme/lib#7" });
 });
 
+test("a Blocker in a renamed repo stays one row and follows the new name", async () => {
+  const books = setup();
+  const { github, client } = books;
+  github.issue("acme/lib#5", { title: "Five" });
+  github.issue("acme/app#1", { title: "One", blockedBy: ["acme/lib#5"] });
+  await client.track({ ref: "acme/app#1" });
+  github.renameRepo("acme/lib", "acme/core");
+
+  await client.sync({});
+
+  expect(titles(books)).toEqual({ "acme/app#1": "One", "acme/core#5": "Five" });
+  expect(blockersOf(books, 1)).toEqual(["acme/core#5"]);
+});
+
+test("a copy written without a node ID gets one on the next sync instead of a second row", async () => {
+  const books = setup();
+  const { db, github, client } = books;
+  const { id } = db
+    .insert(issue)
+    .values({ repo: "acme/app", number: 1, title: "One", state: "open", syncedAt: new Date(0) })
+    .returning()
+    .get();
+  db.insert(task)
+    .values({ issueId: id, trackedAt: new Date(0) })
+    .run();
+  github.issue("acme/app#1", { title: "One, renamed" });
+
+  await client.sync({});
+
+  expect(
+    db.select({ id: issue.id, nodeId: issue.nodeId, title: issue.title }).from(issue).all(),
+  ).toEqual([{ id, nodeId: "I_1", title: "One, renamed" }]);
+});
+
+test("a copy written without a node ID in a repo renamed since is found by the name it was asked by", async () => {
+  const books = setup();
+  const { db, github, client } = books;
+  const { id } = db
+    .insert(issue)
+    .values({ repo: "acme/old", number: 1, title: "One", state: "open", syncedAt: new Date(0) })
+    .returning()
+    .get();
+  db.insert(task)
+    .values({ issueId: id, trackedAt: new Date(0) })
+    .run();
+  github.issue("acme/old#1", { title: "One, renamed" });
+  github.renameRepo("acme/old", "acme/new");
+
+  await client.sync({});
+
+  expect(
+    db.select({ id: issue.id, repo: issue.repo, title: issue.title }).from(issue).all(),
+  ).toEqual([{ id, repo: "acme/new", title: "One, renamed" }]);
+});
+
+test("Tasks written without node IDs in a renamed repo stay their own rows when one blocks the other", async () => {
+  const books = setup();
+  const { db, github, client } = books;
+  const syncedAt = new Date(0);
+  const rows = db
+    .insert(issue)
+    .values([
+      { repo: "acme/old", number: 1, title: "One", state: "open", syncedAt },
+      { repo: "acme/old", number: 2, title: "Two", state: "open", syncedAt },
+    ])
+    .returning()
+    .all();
+  db.insert(task)
+    .values(rows.map((row) => ({ issueId: row.id, trackedAt: syncedAt })))
+    .run();
+  github.issue("acme/old#2", { title: "Two" });
+  github.issue("acme/old#1", { title: "One", blockedBy: ["acme/old#2"] });
+  github.renameRepo("acme/old", "acme/new");
+
+  await client.sync({});
+
+  expect(
+    db.select({ id: issue.id, repo: issue.repo, number: issue.number }).from(issue).all(),
+  ).toEqual(rows.map((row) => ({ id: row.id, repo: "acme/new", number: row.number })));
+  expect(blockersOf(books, 1)).toEqual(["acme/new#2"]);
+});
+
+test("two copies of one issue written without node IDs fail the sync instead of leaving the Task stale", async () => {
+  const books = setup();
+  const { db, github, client } = books;
+  const syncedAt = new Date(0);
+  const [old] = db
+    .insert(issue)
+    .values([
+      { repo: "acme/old", number: 1, title: "One", state: "open", syncedAt },
+      { repo: "acme/new", number: 1, title: "One", state: "open", syncedAt },
+    ])
+    .returning()
+    .all();
+  db.insert(task).values({ issueId: old!.id, trackedAt: syncedAt }).run();
+  github.issue("acme/old#1", { title: "One, renamed" });
+  github.renameRepo("acme/old", "acme/new");
+
+  const error = await failure(client.sync({}));
+
+  expect(error.message).toContain("acme/old#1 and acme/new#1 are copies of the same issue");
+  expect(db.select({ nodeId: issue.nodeId }).from(issue).all()).toEqual([
+    { nodeId: null },
+    { nodeId: null },
+  ]);
+});
+
+test("an issue number GitHub now gives to another issue fails the sync instead of moving the copy", async () => {
+  const books = setup();
+  const { db, github, client } = books;
+  const { id } = db
+    .insert(issue)
+    .values({
+      nodeId: "I_deleted",
+      repo: "acme/app",
+      number: 1,
+      title: "One",
+      state: "open",
+      syncedAt: new Date(0),
+    })
+    .returning()
+    .get();
+  db.insert(task)
+    .values({ issueId: id, trackedAt: new Date(0) })
+    .run();
+  github.issue("acme/app#1", { title: "Someone else's issue" });
+
+  const error = await failure(client.sync({}));
+
+  expect(error.code).toBe("BAD_GATEWAY");
+  expect(error.message).toContain("acme/app: acme/app#1 is now another issue on GitHub");
+  expect(db.select({ nodeId: issue.nodeId, title: issue.title }).from(issue).all()).toEqual([
+    { nodeId: "I_deleted", title: "One" },
+  ]);
+});
+
 test("an alias GitHub returns null for keeps its copy and shows up as missing", async () => {
   const books = setup();
   const { github, client } = books;
