@@ -111,12 +111,17 @@ export class PtydClient {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.send({ id, ...op });
+      // op に紛れた id が要求の id を上書きすると応答が待ち手に届かないので、id を最後に置く。
+      this.send({ ...op, id });
     });
   }
 
   notify(op: RequestOp) {
     if (!this.closed) this.send(op);
+  }
+
+  isClosed(): boolean {
+    return this.closed;
   }
 
   close() {

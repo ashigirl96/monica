@@ -98,6 +98,8 @@ export function nameAgentSession(db: Db, agentSessionId: string): string | null;
 - `start()` / `stop()`: 起動時と終了時の処理。workbench は ptyd への接続（無ければ spawn、版違いは入れ替え）と reconcile（ADR-0011）、task は 5 分おきの背景 sync（#18）。
 - 他の domain から呼ばれる書き込み: 第 1 引数に transaction（`db` でもよい）を取る**同期**の method。task は `db.transaction((tx) => { workbench.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。ptyd や fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。workbench の同期 method は `createRunspace` / `removeRunspace` / `moveTab` / `openTab`、commit 後の async は `startTerminalSession` / `terminateTerminalSessions`（#22）。どれも Task v1 の slice が使うときに `Workbench` へ足す。骨格では同じ形（第 1 引数が tx）の module 内の関数として procedure の handler から呼び、`Workbench` には出さない。`createRunspace` が作るのは所有された Runspace で、`removeRunspace(tx, id, { spare? })` は `spare` の Tab だけを残して所有を解ける（ADR-0012）。
 
+`openTab` が書く `starting` の Terminal Session の行は、workbench の reconcile が終わってから書く。reconcile の途中で書くと、ptyd の List に無い行として lost にされる。骨格では行に書く shell を `shellWhenReady(workbench)` が reconcile を待ってから返し、handler は transaction の前にこれを await する。
+
 他の domain から呼ばれない処理は router の handler の中に書いてよい。
 
 ### domain をまたぐ規則
@@ -123,7 +125,7 @@ domain は 2 つしかないので、汎用の「domain の登録」機構は作
 
 ### テスト
 
-package ごとに in-memory の SQLite に自分の migration を当てる（task は workbench → task の順）。外から見える振る舞いは `createRouterClient(router, { context })` を通して確かめ、他の domain から呼ばれる method と module 内の関数（`createTerminalSession` など）はそのまま呼ぶ。DB を fake に差し替えない（ADR-0002）。`bun test` を root で打つと全 package のテストが走る。
+package ごとに in-memory の SQLite に自分の migration を当てる（task は workbench → task の順）。外から見える振る舞いは `createRouterClient(router, { context })` を通して確かめ、他の domain から呼ばれる method と module 内の関数（`openTab` など）はそのまま呼ぶ。DB を fake に差し替えない（ADR-0002）。`bun test` を root で打つと全 package のテストが走る。
 
 - workbench の ptyd は `packages/workbench/src/fake-ptyd.ts` に差し替える。fake は `$home/ptyd.sock` で NDJSON を話し、List の中身を台本にし、Exit を押し込み、届いた Reap と Terminate を記録する。本物の ptyd は CI の ts job に無く、Exit と Created の競合も決まった順で起こせないため。home は `mkdtemp(tmpdir())` で短くする（socket の path の上限は 104 byte）。
 - 終わった行のように procedure に出ない行は、`@tania/workbench/schema` の table を SELECT して確かめてよい。他の domain が読むのと同じ面だから。
@@ -247,6 +249,7 @@ changes                    → { type: "layout" } | { type: "terminalSession", i
 - `tab.cwd` は最後に分かった cwd。webview は OSC 7 の cwd が前の値と変わったときだけ `tab.setCwd` を呼ぶ（OSC 7 は prompt のたびに来る）。Backend の張り直し（「pin」の節）と `tab.respawn` はこの cwd で始め、Runspace の title（`worktree.info`）も再起動の直後はこれを使う。
 
 - `runspace.create { cwd?, rows, cols } → { runspaceId, tab }` は、Runspace・Tab・`starting` の Terminal Session を 1 transaction で作り、commit 後に Create する（`tab.open` と同じ形）。cwd を省けば `$HOME`。空の Runspace を作ってから `tab.open` を呼ぶ 2 段にすると、間で webview の reload や Backend の再起動が起きたときに空の Runspace が残り、消す規則が無いため。
+- `tab.open` の cwd を省けば、新しい Terminal Session は Runspace の cwd で始める。reattach の Tab は Terminal Session の cwd を持ち、OSC 7 の `tab.setCwd` で追いつく。
 - `tab.close` と `tab.move` は、Tab が抜けて 0 になった所有されていない Runspace を同じ transaction で消す。CLI の Attach のように webview の無い経路でも、空の Runspace が残らない。所有された Runspace（Bench）を残す例外は、Task v1 の slice 2 が所有の印と一緒に足す（ADR-0012）。
 - layout が空になったら、webview が `runspace.create` で 1 つ作る（monica の `initialState()`）。
 - shell が終わった Tab は webview が閉じる。接続中の Tab で Shell の Exit を受けたら、webview が `tab.close` を呼ぶ（monica どおり）。Backend は行を exited にするだけで、Tab を閉じない。exit の時点で接続していなかった Tab と、lost / failed の Tab は、overlay を出したまま `tab.respawn` か `tab.close` を待つ。pin された Tab は例外で、webview は閉じず、Backend が張り直す（「pin」の節）。

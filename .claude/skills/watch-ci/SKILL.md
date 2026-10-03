@@ -25,7 +25,7 @@ gh pr comment <PR> --body "@codex review"
 
 ## 3. 返却を確かめる（wakeup 後）
 
-codex（author は `chatgpt-codex-connector`）の出力のうち、requested_at より新しいものを 2 箇所とも見る。
+codex の出力のうち、requested_at より新しいものを 2 箇所とも見る。author の login は `gh pr view` では `chatgpt-codex-connector`、`gh api`（REST）では `chatgpt-codex-connector[bot]` になる。
 
 ```bash
 gh pr view <PR> --json comments,reviews          # 指摘ゼロは issue comment で返る
