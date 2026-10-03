@@ -3,6 +3,7 @@ import { implement, ORPCError } from "@orpc/server";
 import { eq, getTableColumns, inArray, isNotNull, or } from "drizzle-orm";
 import { listAgentSessions, recordHook } from "./agent-session.ts";
 import { contract } from "./contract.ts";
+import { openInEditor, resolveEditorPaths } from "./editor.ts";
 import {
   asTab,
   closeTab,
@@ -29,6 +30,7 @@ import {
   terminateTerminalSessions,
   type Workbench,
 } from "./workbench.ts";
+import { worktreeInfo } from "./worktree.ts";
 
 export { migrations } from "../migrations/index.ts";
 export { createWorkbench, type Db, type Workbench } from "./workbench.ts";
@@ -127,6 +129,15 @@ export const router = os.router({
       }
     }),
     list: os.agentSession.list.handler(({ context }) => listAgentSessions(context.db)),
+  },
+  worktree: {
+    info: os.worktree.info.handler(({ input }) => worktreeInfo(input.cwd)),
+  },
+  editor: {
+    resolve: os.editor.resolve.handler(({ input }) =>
+      resolveEditorPaths(input.cwd, input.candidates),
+    ),
+    open: os.editor.open.handler(({ input }) => openInEditor(input.path)),
   },
   changes: os.changes.handler(async function* ({ context, signal }) {
     for await (const change of context.workbench.events.subscribe("change", { signal })) {

@@ -1,6 +1,7 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterEach, expect, mock, setSystemTime, test } from "bun:test";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import type { Atom, Store } from "jotai";
 
 // Shell の command は Tauri の外では呼べないので、呼ばれた command だけを記録する。
 const shellCalls: { command: string; args: Record<string, unknown> }[] = [];
@@ -23,7 +24,7 @@ mock.module("@tania/ui", () => ({
 }));
 
 const { createStore } = await import("jotai");
-const { cleanUp, setup } = await import("../testing.ts");
+const { cleanUp, git, linkedWorktree, setup } = await import("../testing.ts");
 const {
   activateRunspaceAtom,
   activateTerminalTabAtom,
@@ -60,6 +61,7 @@ afterEach(() => {
   cleanUp();
   shellCalls.length = 0;
   toasts.length = 0;
+  setSystemTime();
 });
 
 function bench() {
@@ -67,6 +69,19 @@ function bench() {
   const store = createStore();
   store.set(workbenchClientAtom, () => backend.client);
   return { ...backend, store };
+}
+
+function until<T>(store: Store, atom: Atom<T>, done: (value: T) => boolean): Promise<T> {
+  return new Promise((resolve) => {
+    const check = () => {
+      const value = store.get(atom);
+      if (!done(value)) return;
+      unsubscribe();
+      resolve(value);
+    };
+    const unsubscribe = store.sub(atom, check);
+    check();
+  });
 }
 
 test("an empty layout gets one Runspace, even when two reloads race", async () => {
@@ -417,6 +432,42 @@ test("a path in the title moves the cwd until the shell reports its cwd itself",
   await store.set(updateTabCwdAtom, tab.id, "/b");
   await store.set(updateTabTitleAtom, tab.id, "~/c");
   expect(await cwd()).toBe("/b");
+});
+
+test("a Runspace is titled repo:branch while its active Tab is in a linked worktree, and by the end of its cwd otherwise", async () => {
+  const { client, store } = bench();
+  const { root, repo, worktree } = linkedWorktree({ repo: "acme", branch: "feature/title" });
+  await client.runspace.create({ cwd: worktree, ...size });
+  await client.runspace.create({ cwd: repo, ...size });
+
+  await store.set(reloadAtom);
+
+  // worktree の判定は Backend への問い合わせを待つので、cwd の末尾の title から変わるまで待つ。
+  const resolved = until(
+    store,
+    runspaceSummariesAtom,
+    (runspaces) => runspaces[0]?.title !== `${basename(root)}/worktree`,
+  );
+  expect(await resolved).toMatchObject([
+    { title: "acme:feature/title" },
+    { title: `${basename(root)}/acme` },
+  ]);
+});
+
+test("a branch switched in a terminal that reports nothing reaches the title on a layout reload 5 seconds later", async () => {
+  const { client, store } = bench();
+  const { worktree } = linkedWorktree({ repo: "acme", branch: "feature/title" });
+  await client.runspace.create({ cwd: worktree, ...size });
+  await store.set(reloadAtom);
+  await until(store, runspaceSummariesAtom, (r) => r[0]?.title === "acme:feature/title");
+
+  git(worktree, "switch", "--quiet", "-c", "feature/renamed");
+  setSystemTime(new Date(Date.now() + 5000));
+  await store.set(reloadAtom);
+
+  expect(
+    await until(store, runspaceSummariesAtom, (r) => r[0]?.title !== "acme:feature/title"),
+  ).toMatchObject([{ title: "acme:feature/renamed" }]);
 });
 
 test("a title in a ~ form the Backend cannot make absolute does not move the cwd", async () => {

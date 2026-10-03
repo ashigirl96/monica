@@ -29,6 +29,8 @@ dev の desktop（identifier `com.ashigirl96.tania.dev`）は single-instance �
   - `webview_keyboard` の `type` は、最初に一致した要素に打つ。隠れた pane の textarea にも当たるので、使うなら先に、見えている pane（祖先に `display: none` が無いもの）の textarea に固有の id を付け、その id を狙う。
   - 合成のキーイベントは keydown だけを送る。keypress も送ると、xterm が両方を拾って文字が二重になる。
 - **Tab の切り替え**は、`[data-tab-id]` の button に `pointerdown` と `pointerup` を `dispatchEvent` する。Tab は pointerdown で切り替わるが、tauri-mcp の click は pointerdown を出さない。
+- **端末の link**: 端末は WebGL で描くので、行の DOM は無い。座標を screenshot で読み、`document.elementFromPoint(x, y)` に `metaKey: true` の `mousemove` を送る。xterm は同じ cell への mousemove を無視するので、先に別の cell へ動かしてから狙う。link が付いたかは、見えている `.xterm-screen` の class に `xterm-cursor-pointer` があるかで分かる。⌘-click は、hover の後に `metaKey: true, buttons: 0` の `pointerdown` を送る。
+- **画像の drop**: OS の drag は起こせないので、`window.__TAURI__.event.emitTo({ kind: "Webview", label: "main" }, "tauri://drag-drop", { paths, position: { x, y } })` で Tauri の drop と同じ handler を動かす。clipboard を上書きする確かめ方は、先に `pbpaste` で退避し、最後に `pbcopy` で戻す。
 - **一瞬だけ出る表示**（overlay、Detached の行）は、webview の中で `requestAnimationFrame` ごとに DOM を見て、変わった時刻だけを配列に残す。操作も同じ script の中で起こし、frame の時刻とずれないようにする。
 - **長い script**: `webview_execute_js` は約 5 秒で timeout し、`timeout` を大きく渡しても延びない。async の処理は裏で走り続ける。数秒を超えるものは await せずに走らせ、結果は `window.__…` に貯めて、後の呼び出しで読む。timeout した後に同じ script を走らせると、2 本が重なる。
 - **窓の枠**: `webview_screenshot` には信号機も vibrancy も写らない。CGWindowID を取って `screencapture` で撮る。
@@ -45,6 +47,12 @@ dev の desktop（identifier `com.ashigirl96.tania.dev`）は single-instance �
   ```
 
 - **Shell の起こし直し**は、`kill -TERM $(pgrep -f target/debug/tania-desktop)` の後に、起こすの手順 2 をやり直す。background の job を TaskStop すると、子孫の ptyd まで止まる。ptyd が生き残れば、再 attach と replay まで確かめられる。
+- **app の終了**（localStorage の UI 状態のように、終了の手順を通った後に残るものを確かめるとき）は、pid 宛てに AppKit の正規の quit を送る。dev の binary は bundle として登録されていないので、`tell application id "com.ashigirl96.tania.dev" to quit` は届かない。
+
+  ```bash
+  echo "import AppKit; print(NSRunningApplication(processIdentifier: $(pgrep -f target/debug/tania-desktop))?.terminate() ?? false)" > $SCRATCH/quit.swift
+  swift $SCRATCH/quit.swift
+  ```
 
 ## 止めて片付ける
 
