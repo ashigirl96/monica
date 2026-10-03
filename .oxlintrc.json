@@ -6,6 +6,7 @@
   },
   // 1 つの file に複数の override が当たると、後の override が no-restricted-imports の設定を丸ごと置き換える。
   // そのため file の集合ごとに、そこで守る制限をすべて並べる。
+  // 「これ以外を禁じる」は group の否定（["*", "!drizzle-orm/sqlite-core"]）で書く。regex の先読みは黙って効かない。
   "overrides": [
     {
       "files": ["packages/workbench/**"],
