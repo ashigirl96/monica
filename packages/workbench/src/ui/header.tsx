@@ -4,13 +4,13 @@ import { useEffect, useRef } from "react";
 import { JumpHint } from "./jump-hint.tsx";
 import { jumpHintTargetsAtom } from "./jump-hints.ts";
 import { baseName } from "./paths.ts";
-import { terminalSessionStatusAtom } from "./terminal-sessions.ts";
 import {
   activateTerminalTabAtom,
   activeRunspaceAtom,
   activeTerminalTabAtom,
   closeTerminalTabAtom,
   createTerminalTabAtom,
+  deadTabsAtom,
   draggedTabIdAtom,
   reorderTabsAtom,
   tabMenuAtom,
@@ -27,7 +27,7 @@ export function WorkbenchHeader() {
   const runspace = useAtomValue(activeRunspaceAtom);
   const activeTab = useAtomValue(activeTerminalTabAtom);
   const titles = useAtomValue(tabTitlesAtom);
-  const statuses = useAtomValue(terminalSessionStatusAtom);
+  const deadTabs = useAtomValue(deadTabsAtom);
   const setTabMenu = useSetAtom(tabMenuAtom);
   const activateTab = useSetAtom(activateTerminalTabAtom);
   const closeTab = useSetAtom(closeTerminalTabAtom);
@@ -53,7 +53,7 @@ export function WorkbenchHeader() {
       {runspace.tabs.map((tab) => {
         const isActive = tab.id === activeTab?.id;
         const label = titles[tab.id] || baseName(tab.cwd);
-        const status = statuses[tab.terminalSessionId]?.status;
+        const status = deadTabs[tab.id]?.status;
         const terminalDot = status ? TERMINAL_SESSION_STATUS_DOT[status] : undefined;
         const hint = jumpHints.byTabId[tab.id];
         return (

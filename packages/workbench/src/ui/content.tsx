@@ -3,13 +3,14 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { jumpHintsActiveAtom } from "./jump-hints.ts";
 import { baseName } from "./paths.ts";
 import {
-  isDeadStatus,
+  type TerminalSessionStatus,
   type TerminalSessionStatusEntry,
   terminalSessionStatusAtom,
 } from "./terminal-sessions.ts";
 import {
   activeTerminalTabAtom,
   closeTerminalTabAtom,
+  deadTabsAtom,
   layoutAtom,
   startNewShellForTabAtom,
   tabExitedAtom,
@@ -85,13 +86,15 @@ function JumpOverlay() {
 function TerminalPane({
   tabId,
   terminalSessionId,
-  statusEntry,
+  status,
+  dead,
   cwd,
   active,
 }: {
   tabId: string;
   terminalSessionId: string;
-  statusEntry?: TerminalSessionStatusEntry;
+  status?: TerminalSessionStatus;
+  dead?: TerminalSessionStatusEntry;
   cwd: string;
   active: boolean;
 }) {
@@ -107,12 +110,15 @@ function TerminalPane({
     [tabId, updateTitle],
   );
   const onCwdChange = useCallback((cwd: string) => void updateCwd(tabId, cwd), [tabId, updateCwd]);
-  const onExit = useCallback(() => void tabExited(tabId), [tabId, tabExited]);
+  const onExit = useCallback(
+    (exitCode: number | null) => void tabExited(tabId, exitCode),
+    [tabId, tabExited],
+  );
 
   useTerminal(containerRef, {
     tabId,
     sessionId: terminalSessionId,
-    sessionStatus: statusEntry?.status,
+    sessionStatus: status,
     cwd,
     active,
     onTitleChange,
@@ -132,9 +138,9 @@ function TerminalPane({
       }}
     >
       <div ref={containerRef} className="absolute inset-0" />
-      {statusEntry && isDeadStatus(statusEntry.status) && (
+      {dead && (
         <TerminalSessionOverlay
-          entry={statusEntry}
+          entry={dead}
           cwd={cwd}
           onNewShell={() => void startNewShell(tabId)}
           onCloseTab={() => void closeTab(tabId)}
@@ -148,6 +154,7 @@ export default function WorkbenchContent() {
   const layout = useAtomValue(layoutAtom);
   const activeTabId = useAtomValue(activeTerminalTabAtom)?.id;
   const statuses = useAtomValue(terminalSessionStatusAtom);
+  const deadTabs = useAtomValue(deadTabsAtom);
   const uiZoom = useAtomValue(uiZoomAtom);
 
   if (!layout) return null;
@@ -166,7 +173,8 @@ export default function WorkbenchContent() {
             key={tab.id}
             tabId={tab.id}
             terminalSessionId={tab.terminalSessionId}
-            statusEntry={statuses[tab.terminalSessionId]}
+            status={statuses[tab.terminalSessionId]?.status}
+            dead={deadTabs[tab.id]}
             cwd={tab.cwd}
             active={tab.id === activeTabId}
           />

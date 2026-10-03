@@ -22,6 +22,7 @@ const {
   closeTerminalTabAtom,
   createRunspaceAtom,
   createTerminalTabAtom,
+  deadTabsAtom,
   terminateTerminalSessionAtom,
   moveTabToRunspaceAtom,
   reattachTerminalSessionAtom,
@@ -175,16 +176,21 @@ test("dropping the active Tab on another Runspace moves it to the end there, and
   expect(store.get(activeTerminalTabAtom)?.id).toBe(from.tab.id);
 });
 
-test("a Tab whose shell exits while it is connected closes", async () => {
-  const { ptyd, client, store } = bench();
+test("a Tab whose shell exits while it is connected closes without ever showing the exit", async () => {
+  const { client, store } = bench();
   const { runspaceId, tab: a } = await client.runspace.create(size);
   const b = await client.tab.open({ runspaceId, ...size });
   await store.set(reloadAtom);
 
-  ptyd.exit(b.terminalSessionId, 0);
-  await store.set(tabExitedAtom, b.id);
+  // Shell が Exit を受けた時点では、Backend はまだ exit を記録していない。
+  const closing = store.set(tabExitedAtom, b.id, 0);
+  expect(store.get(terminalSessionStatusAtom)[b.terminalSessionId]?.status).toBe("exited");
+  expect(store.get(deadTabsAtom)).toEqual({});
+  await closing;
 
   expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([a.id]);
+  expect(store.get(terminalSessionStatusAtom)[b.terminalSessionId]?.status).toBe("exited");
+  expect(store.get(detachedTerminalSessionsAtom)).toEqual([]);
   expect(shellCalls.map((c) => c.command)).not.toContain("terminal_detach");
 });
 
@@ -213,12 +219,15 @@ test("New shell binds a Tab whose shell exited to a new running Terminal Session
     exitCode: 1,
   });
 
+  expect(store.get(deadTabsAtom)[tab.id]).toEqual({ status: "exited", exitCode: 1 });
+
   await store.set(startNewShellForTabAtom, tab.id);
 
   const now = (await client.layout.get()).runspaces[0]!.tabs[0]!;
   expect(now.id).toBe(tab.id);
   expect(now.terminalSessionId).not.toBe(tab.terminalSessionId);
   expect(store.get(terminalSessionStatusAtom)[now.terminalSessionId]?.status).toBe("running");
+  expect(store.get(deadTabsAtom)).toEqual({});
 });
 
 test("a detached Terminal Session sits in the Detached group until it is reattached into the active Runspace", async () => {

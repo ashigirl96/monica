@@ -24,34 +24,40 @@ export const setTerminalSessionStatusAtom = atom(
   },
 );
 
-// 終了を頼んでから ptyd が exit を報告するまで、行は live のまま Tab を失うので Detached に出さない。
-const terminatingAtom = atom<ReadonlySet<string>>(new Set<string>());
+// Exit を受けたか終了を頼んだ Terminal Session は、Backend が exit を記録するまで一覧では live のままなので、exited として扱い Detached にも出さない。
+const endedAtom = atom<ReadonlySet<string>>(new Set<string>());
 
-export const markTerminatingAtom = atom(null, (_get, set, terminalSessionId: string) => {
-  set(terminatingAtom, (prev) => new Set(prev).add(terminalSessionId));
+export const markEndedAtom = atom(null, (_get, set, terminalSessionId: string) => {
+  set(endedAtom, (prev) => new Set(prev).add(terminalSessionId));
 });
 
 export const detachedTerminalSessionsAtom = atom((get) => {
-  const terminating = get(terminatingAtom);
+  const ended = get(endedAtom);
   return get(terminalSessionsAtom).filter(
-    (s) => !isDeadStatus(s.status) && s.tabId === null && !terminating.has(s.id),
+    (s) => !isDeadStatus(s.status) && s.tabId === null && !ended.has(s.id),
   );
 });
 
 export const applyTerminalSessionListAtom = atom(
   null,
   (get, set, terminalSessions: TerminalSession[]) => {
+    const ended = get(endedAtom);
+    const previous = get(terminalSessionStatusAtom);
+    const live = new Set(terminalSessions.filter((s) => !isDeadStatus(s.status)).map((s) => s.id));
     set(terminalSessionsAtom, terminalSessions);
     set(
       terminalSessionStatusAtom,
       Object.fromEntries(
-        terminalSessions.map((s) => [s.id, { status: s.status, exitCode: s.exitCode }]),
+        terminalSessions.map((s): [string, TerminalSessionStatusEntry] => [
+          s.id,
+          live.has(s.id) && ended.has(s.id)
+            ? { status: "exited", exitCode: previous[s.id]?.exitCode ?? null }
+            : { status: s.status, exitCode: s.exitCode },
+        ]),
       ),
     );
-    const live = new Set(terminalSessions.filter((s) => !isDeadStatus(s.status)).map((s) => s.id));
-    const terminating = get(terminatingAtom);
-    if ([...terminating].some((id) => !live.has(id))) {
-      set(terminatingAtom, new Set([...terminating].filter((id) => live.has(id))));
+    if ([...ended].some((id) => !live.has(id))) {
+      set(endedAtom, new Set([...ended].filter((id) => live.has(id))));
     }
   },
 );

@@ -282,7 +282,7 @@ changes                    → { type: "layout" } | { type: "terminalSession", i
 
 - exited / lost / failed の `terminal_session` と、終了の `agent_session` の行は消さない。Run の行は履歴として消さず（Task v1）、`run.agent_session_id` → `agent_session.terminal_session_id` の FK が残るため。1 行は 200 byte 程度で、GC の読み手もいない。
 - 一覧は画面が使う行に絞る。
-  - `terminalSession.list` は、live か Tab に指されている行だけを返す。Detached グループと Tab の overlay の材料。webview は自分が終了を頼んだ Terminal Session を Detached に出さない（`terminate` の後、ptyd が exit を報告するまで行は live のまま Tab を失うため）。CLI の `tania workbench terminal-session list` も同じものを出す。
+  - `terminalSession.list` は、live か Tab に指されている行だけを返す。Detached グループと Tab の overlay の材料。webview は Shell から Exit を受けた Terminal Session と自分が終了を頼んだ Terminal Session を、一覧が live と言っていても exited として扱い、Detached に出さない（Backend が exit を記録するまで行は live のままなので）。接続中の Tab が Exit で閉じる間は、overlay も dot も出さない。CLI の `tania workbench terminal-session list` も同じものを出す。
   - `agentSession.list` は、終了でない行だけを返す。status dot の材料（「Workbench の UI 状態と status dot」の節）。
 
 ### Tab の外から来た hook

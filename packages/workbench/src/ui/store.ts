@@ -4,7 +4,14 @@ import { atom, type Getter, type Setter } from "jotai";
 import type { contract, Layout, Tab } from "../contract.ts";
 import { jumpHintsActiveAtom } from "./jump-hints.ts";
 import { shortPath } from "./paths.ts";
-import { applyTerminalSessionListAtom, markTerminatingAtom } from "./terminal-sessions.ts";
+import {
+  applyTerminalSessionListAtom,
+  isDeadStatus,
+  markEndedAtom,
+  setTerminalSessionStatusAtom,
+  type TerminalSessionStatusEntry,
+  terminalSessionStatusAtom,
+} from "./terminal-sessions.ts";
 import { terminalDetach } from "./terminal.ts";
 import { getTabTerminal, releaseTabConnection } from "./terminal-connections.ts";
 
@@ -269,12 +276,34 @@ export const closeTerminalTabAtom = action(async (get, set, tabId?: string) => {
   if (found) await closeTab(get, set, found, () => detachTab(found.tab));
 });
 
+// 接続中の Tab は Exit で閉じるので、閉じ終わるまでの間も終わった印を出さない。
+const closingTabIdsAtom = atom<ReadonlySet<string>>(new Set<string>());
+
+export const deadTabsAtom = atom((get) => {
+  const statuses = get(terminalSessionStatusAtom);
+  const closing = get(closingTabIdsAtom);
+  const dead: Record<string, TerminalSessionStatusEntry> = {};
+  for (const tab of get(layoutAtom)?.runspaces.flatMap((r) => r.tabs) ?? []) {
+    const entry = statuses[tab.terminalSessionId];
+    if (entry && isDeadStatus(entry.status) && !closing.has(tab.id)) dead[tab.id] = entry;
+  }
+  return dead;
+});
+
 // Exit の後は止める出力が無いので、detach を送らずに閉じる。
-export const tabExitedAtom = action(async (get, set, tabId: string) => {
+export const tabExitedAtom = action(async (get, set, tabId: string, exitCode: number | null) => {
   const found = findTab(get, tabId);
   if (!found) return;
+  const { terminalSessionId } = found.tab;
   releaseTabConnection(tabId);
-  await closeTab(get, set, found);
+  set(markEndedAtom, terminalSessionId);
+  set(setTerminalSessionStatusAtom, terminalSessionId, { status: "exited", exitCode });
+  set(closingTabIdsAtom, (prev) => new Set(prev).add(tabId));
+  try {
+    await closeTab(get, set, found);
+  } finally {
+    set(closingTabIdsAtom, (prev) => new Set([...prev].filter((id) => id !== tabId)));
+  }
 });
 
 export const startNewShellForTabAtom = action(async (get, set, tabId: string) => {
@@ -299,7 +328,7 @@ export const reattachTerminalSessionAtom = action(async (get, set, terminalSessi
 
 export const terminateTerminalSessionAtom = action(async (get, set, terminalSessionId: string) => {
   await clientOf(get).terminalSession.terminate({ id: terminalSessionId });
-  set(markTerminatingAtom, terminalSessionId);
+  set(markEndedAtom, terminalSessionId);
   await set(reloadAtom);
 });
 
@@ -321,7 +350,7 @@ export const terminateTabTerminalSessionAtom = action(async (get, set, tabId: st
   if (!found) return;
   releaseTabConnection(tabId);
   await clientOf(get).terminalSession.terminate({ id: found.tab.terminalSessionId });
-  set(markTerminatingAtom, found.tab.terminalSessionId);
+  set(markEndedAtom, found.tab.terminalSessionId);
   await closeTab(get, set, found);
 });
 
