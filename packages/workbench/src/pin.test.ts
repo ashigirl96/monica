@@ -244,19 +244,22 @@ test("a pinned Tab whose shell dies right after starting stays on the ended Term
 const pinned = { pinned: true };
 
 test.each([
-  { status: "exited", lived: 2000, tab: pinned, respawn: true },
-  { status: "lost", lived: 60_000, tab: pinned, respawn: true },
-  { status: "exited", lived: 1999, tab: pinned, respawn: false },
-  { status: "lost", lived: 500, tab: pinned, respawn: false },
-  { status: "failed", lived: 60_000, tab: pinned, respawn: false },
-  { status: "exited", lived: 60_000, tab: { pinned: false }, respawn: false },
-  { status: "exited", lived: 60_000, tab: null, respawn: false },
+  { status: "exited", ran: true, lived: 2000, tab: pinned, respawn: true },
+  { status: "lost", ran: true, lived: 60_000, tab: pinned, respawn: true },
+  { status: "exited", ran: true, lived: 1999, tab: pinned, respawn: false },
+  { status: "lost", ran: true, lived: 500, tab: pinned, respawn: false },
+  { status: "lost", ran: false, lived: 500, tab: pinned, respawn: true },
+  { status: "failed", ran: false, lived: 60_000, tab: pinned, respawn: false },
+  { status: "exited", ran: true, lived: 60_000, tab: { pinned: false }, respawn: false },
+  { status: "lost", ran: false, lived: 500, tab: { pinned: false }, respawn: false },
+  { status: "exited", ran: true, lived: 60_000, tab: null, respawn: false },
 ] as const)(
-  "a $status Terminal Session that lived $lived ms in Tab $tab respawns: $respawn",
-  ({ status, lived, tab, respawn }) => {
+  "a $status Terminal Session (ran: $ran) that lived $lived ms in Tab $tab respawns: $respawn",
+  ({ status, ran, lived, tab, respawn }) => {
     const createdAt = new Date(1_000_000);
     const endedAt = new Date(createdAt.getTime() + lived);
+    const pid = ran ? 4242 : null;
 
-    expect(shouldRespawn({ status, createdAt, endedAt }, tab)).toBe(respawn);
+    expect(shouldRespawn({ status, pid, createdAt, endedAt }, tab)).toBe(respawn);
   },
 );
