@@ -190,6 +190,32 @@ contract を走査するテストを 1 本置き、description と output が全
 - Shell に置くのは、Tauri プロセスにしか無いもの（窓と webview の event、app の名義、AppKit）に触る処理と、Backend の再起動で途切れてはいけない terminal の byte だけ（ADR-0001）。fs と process の spawn で済む処理（worktree の判定、エディタ）は Backend の procedure にする。
 - `clipboard_write_image(path)` は monica の objc2 の実装（`NSImage::initWithContentsOfFile` を general pasteboard に `writeObjects`）を持ち込む。NSPasteboard は main thread で呼ぶので、sync command のままにする。
 
+## Workbench の帳簿
+
+`packages/workbench` の行の規則のうち、contract の骨格と table（#22）、Agent Session の遷移表（#36）が決めていないもの。
+
+### Runspace と Tab
+
+所有されていない Runspace は常に Tab を 1 つ以上持ち、Backend がそれを守る（`GLOSSARY.md` の Runspace）。
+
+- `runspace.create { cwd?, rows, cols } → { runspaceId, tab }` は、Runspace・Tab・`starting` の Terminal Session を 1 transaction で作り、commit 後に Create する（`tab.open` と同じ形）。cwd を省けば `$HOME`。空の Runspace を作ってから `tab.open` を呼ぶ 2 段にすると、間で webview の reload や Backend の再起動が起きたときに空の Runspace が残り、消す規則が無いため。
+- `tab.close` と `tab.move` は、Tab が抜けて 0 になった所有されていない Runspace を同じ transaction で消す。CLI の Attach のように webview の無い経路でも、空の Runspace が残らない。所有された Runspace（Bench）を残す例外は、Task v1 の slice 2 が所有の印と一緒に足す（ADR-0012）。
+- layout が空になったら、webview が `runspace.create` で 1 つ作る（monica の `initialState()`）。
+- shell が終わった Tab は webview が閉じる。接続中の Tab で Shell の Exit を受けたら、webview が `tab.close` を呼ぶ（monica どおり。pin の Tab の扱いは「Workbench の UI 状態と Tab の pin」#38）。Backend は行を exited にするだけで、Tab を閉じない。exit の時点で接続していなかった Tab と、lost / failed の Tab は、overlay を出したまま `tab.respawn` か `tab.close` を待つ。
+
+### 終わった行
+
+- exited / lost / failed の `terminal_session` と、終了の `agent_session` の行は消さない。Run の行は履歴として消さず（Task v1）、`run.agent_session_id` → `agent_session.terminal_session_id` の FK が残るため。1 行は 200 byte 程度で、GC の読み手もいない。
+- 一覧は画面が使う行に絞る。
+  - `terminalSession.list` は、live か Tab に指されている行だけを返す。Detached グループと Tab の overlay の材料。CLI の `tania workbench terminal-session list` も同じものを出す。
+  - `agentSession.list` は、終了でない行だけを返す。Tab の status dot の材料。
+
+### Tab の外から来た hook
+
+- `recordHook` は、input の Terminal Session が帳簿に無いか終わっている（exited / lost / failed）なら、何も書かず通知も出さずに、stderr に 1 行出して正常に返す。Agent Session は Tab の中で動く agent なので、どの Tab にも無い Terminal Session の agent は観測しない。
+- 起きるのは、env の `TANIA_TERMINAL_SESSION_ID` が Tab の外（Tab で起こした tmux server、Tab から `code .` で開いたエディタの端末、`nohup`）へ漏れたときと、DB を消した後で reconcile が ptyd の session を取り込む前に hook が届いたとき。
+- 生きている Terminal Session の id が漏れた場合は、Backend には見分けられない。payload に pid が無いため。その agent は Tab の agent として観測され、SessionStart で Tab の agent を superseded にする（ADR-0008 の既知のずれ）。
+
 ## tab の env と shim
 
 Terminal Session を作るときに Backend が ptyd の Create に渡す env と、Backend が `start()` で書く 3 つのファイル（shim、claude wrapper、hook の settings）の仕様。3 つのファイルは内容に差分があるときだけ書き直す。ここと ADR-0008 の Agent Session の観測は、Workbench を持ち込む骨格の実装に含める。Task が無い Tab でも観測するため（ADR-0005）。
@@ -255,10 +281,12 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 
 | 次の状態 | 出す条件 |
 |---|---|
-| 質問・許可・エラーの待ち | 前の行が同じ理由の待ちでない（`state_changed_at` が変わった） |
+| 質問・許可・エラーの待ち | 新しい待ちに入った（`state_changed_at` が変わった） |
 | 手空き | 前の行が動作中か未観測で、event が Stop |
 | それ以外 | 出さない |
 
+- 質問とエラーは、前の行が同じ理由の待ちでないときに新しい待ちになる。PreToolUse(AskUserQuestion) と PermissionRequest(AskUserQuestion) は同じ質問なので 1 回しか出ない。
+- 許可は、PermissionRequest（ExitPlanMode と AskUserQuestion を除く）が来るたびに新しい待ちになる。前の行が許可待ちでも、`transition` は `state_changed_at` を更新する。許可した tool が動いている間は許可待ちに見えたままなので、その間に background の subagent が次の許可を求めたときに取りこぼさないため。PermissionRequest に `tool_use_id` は無く、同じダイアログかどうかは見分けられない。
 - SessionStart による手空き（起動・resume の直後）と、待ちから手空きへの変化では出さない。
 - agent の仕事が残っている Stop は遷移しないので出ない。agent の仕事が終わった後に Claude Code が自分で起こす turn の Stop で出る。
 - 未知の session_id は動作中の行を作ってから遷移を当てる（ADR-0008）ので、最初の event が Stop なら出る。
