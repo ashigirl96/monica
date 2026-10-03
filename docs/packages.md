@@ -303,6 +303,7 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 
 - `bun run check` が lint（oxlint）、format の検査（oxfmt）、`tsc --noEmit`、`bun test`、`vite build`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace` を流す。
 - CI は 2 job。TS の job（ubuntu）が lint・format・型・test・`vite build` を、Rust の job（macOS。Tauri の crate が macOS の system library を要るため）が clippy と test を流す。
+- Rust の job は `crates/**`・`apps/desktop/src-tauri/**`・`Cargo.toml`・`Cargo.lock` が変わったときだけ走らせる（paths filter）。private repo では macOS の runner の 1 分が 10 分に数えられ、crate は monica から rename しただけで骨格の後はほとんど変わらないため。
 - tauri の bundle build、knip、jscpd、lefthook は入れない。
 
 ## 版
