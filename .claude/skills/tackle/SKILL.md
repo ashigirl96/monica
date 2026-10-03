@@ -14,8 +14,8 @@ spec または ticket でユーザーが記述した作業を実装する。
 
 作業を /create-pr でコミットし、PR を出す。
 
-/watch-ci で codex review の指摘に対応する。
+/watch-ai で codex review の指摘に対応する。
 
-/watch-ci が終わったら、/retro で今後に活かすものがあるか確かめ、直したものはコミットして push する。ここから merge までの判断は自分で下し、ユーザーに尋ねるのは次の merge の確認だけにする。
+/watch-ai が終わったら、/retro で今後に活かすものがあるか確かめ、直したものはコミットして push する。ここから merge までの判断は自分で下し、ユーザーに尋ねるのは次の merge の確認だけにする。
 
 最後に、`gh pr checks --watch` で CI が通ったのを確かめてから、merge してよいかをユーザーに尋ね、了承を得たら merge する。

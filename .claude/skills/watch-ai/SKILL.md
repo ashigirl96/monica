@@ -1,5 +1,5 @@
 ---
-name: watch-ci
+name: watch-ai
 description: "PR の codex review を依頼し、指摘への対応と再依頼を往復で回す。PR の codex review を頼まれたとき、PR を出した後のレビュー対応まで任されたときに使う。"
 ---
 
@@ -8,7 +8,7 @@ PR の codex review を往復で回す。1 往復は「依頼 → 返却を待�
 往復の状態（PR・round・依頼時刻）は wakeup の prompt にだけ載せる。次の wakeup はその prompt から再開するので、prompt は次の形を verbatim で書く。
 
 ```
-/watch-ci PR=<url> round=<N> requested_at=<依頼コメントの created_at>
+/watch-ai PR=<url> round=<N> requested_at=<依頼コメントの created_at>
 ```
 
 ## 1. PR を決める
@@ -25,7 +25,7 @@ gh pr comment <PR> --body "@codex review"
 
 ## 3. 返却を確かめる（wakeup 後）
 
-codex の出力のうち、requested_at より新しいものを 2 箇所とも見る。author の login は `gh pr view` では `chatgpt-codex-connector`、`gh api`（REST）では `chatgpt-codex-connector[bot]` になる。
+codex の出力のうち、requested_at より新しいものを 2 箇所とも見る。author の login は `gh pr view` では `chatgpt-codex-connector`、`gh api`（REST）では `chatgpt-codex-connector[bot]` になる。`<!-- codex-pull-request-review-summary -->` で始まる issue comment は依頼の直後に作られる進み具合の表で、返却には数えない。
 
 ```bash
 gh pr view <PR> --json comments,reviews          # 指摘ゼロは issue comment で返る
@@ -46,7 +46,7 @@ gh api repos/<owner>/<repo>/pulls/<PR>/comments  # 指摘は inline の review c
    gh api repos/<owner>/<repo>/issues/comments/<id>/reactions -f content='+1'  # issue comment
    ```
 
-3. round が 3 未満なら round+1 で手順 2 へ戻る。push した commit が次のレビューの対象になる。round 3 なら手順 5 へ。
+3. push して round が 3 未満なら、round+1 で手順 2 へ戻る。push した commit が次のレビューの対象になる。round 3 のとき、または返信だけで push しなかったときは手順 5 へ。
 
 ## 5. 終える
 
