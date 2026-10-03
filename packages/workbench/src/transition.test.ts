@@ -82,7 +82,9 @@ const to = (fields: StateFields): Cell => ({ moved: true, fields });
 const stay = (fields: StateFields = {}): Cell => ({ moved: false, fields });
 const ignored: Cell = null;
 
-const idleInB: StateFields = { ...idle, terminalSessionId: "ts-b" };
+const inB: StateFields = { terminalSessionId: "ts-b" };
+const idleInB: StateFields = { ...idle, ...inB };
+const runningInB: StateFields = { ...running, ...inB };
 const permissionForBash: StateFields = {
   state: "waiting",
   waitReason: "permission",
@@ -118,6 +120,8 @@ const table: [string, AgentEvent, Cell[]][] = [
                                                                                     [stay(),               to(running),          stay(),               stay(),               stay(),               stay(),               ignored,              stay()]],
   ["UserPromptSubmit", hook("UserPromptSubmit", { type: "promptSubmitted" }),
                                                                                     [stay(),               to(running),          to(running),          to(running),          to(running),          to(running),          to(running),          stay()]],
+  ["UserPromptSubmit from another Terminal Session whose SessionStart was missed", hook("UserPromptSubmit", { type: "promptSubmitted" }, { terminalSessionId: "ts-b" }),
+                                                                                    [stay(inB),            to(runningInB),       to(runningInB),       to(runningInB),       to(runningInB),       to(runningInB),       to(runningInB),       stay()]],
   ["PreToolUse(AskUserQuestion) or PermissionRequest(AskUserQuestion)", hook("PreToolUse", { type: "questionAsked" }),
                                                                                     [to(question),         to(question),         to(question),         stay(),               to(question),         to(question),         to(question),         to(question)]],
   ["PermissionRequest(ExitPlanMode)", hook("PermissionRequest", { type: "planSubmitted" }),

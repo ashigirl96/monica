@@ -290,6 +290,7 @@ changes                    → { type: "layout" } | { type: "terminalSession", i
 
 ADR-0008 の「Backend 起動時」と ADR-0011 の reconcile の規則のうち、Agent Session の分。どちらも `transition` に Terminal Session の終了と Backend の再起動の event として渡す。
 
+- Agent Session の居場所（`terminal_session_id`）は、受け付けた hook の Terminal Session に合わせる。resume の SessionStart を取りこぼした agent が前の Tab に結ばれたままだと、前の Tab が閉じたときに生きている agent を終了にしてしまうため。
 - Terminal Session の行が終わるとき（ptyd の Exit、reconcile の lost / exited）、同じ transaction で、その Terminal Session の終了でない Agent Session を終了（terminal_exited）にする。
 - 生きている Terminal Session の動作中の Agent Session を未観測にするのは、Backend の起動直後の reconcile だけ。ptyd に繋ぎ直したときの reconcile では動作中のままにする。その間も Backend は居て hook を受けていたため。
 

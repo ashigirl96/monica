@@ -53,8 +53,10 @@ export function transition(
   const current = row ?? firstSeen(event, now);
   const verdict = verdictFor(current, event, now);
   if (verdict === "ignored") return null;
+  // resume の SessionStart を取りこぼしても、別の Tab へ移った agent を今の Tab に結び直す。
   const recorded: AgentSession = {
     ...current,
+    terminalSessionId: event.terminalSessionId,
     lastEventName: event.hookEventName,
     lastEventAt: now,
     permissionMode: event.permissionMode ?? current.permissionMode,
@@ -76,13 +78,7 @@ function verdictFor(current: AgentSession, event: HookEvent, now: Date): Verdict
   switch (event.type) {
     case "sessionStarted":
       if (event.compacted) return "unchanged";
-      return {
-        fields: {
-          state: "waiting",
-          waitReason: "idle",
-          terminalSessionId: event.terminalSessionId,
-        },
-      };
+      return { fields: { state: "waiting", waitReason: "idle" } };
     case "promptSubmitted":
       return { fields: { state: "running" } };
     case "questionAsked":
