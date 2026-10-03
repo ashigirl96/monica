@@ -40,6 +40,7 @@ test("--format json prints the procedure output as it is", async () => {
       error: null,
       createdAt: "1970-01-01T00:00:00.000Z",
       endedAt: null,
+      tabId: null,
     },
   ]);
 });

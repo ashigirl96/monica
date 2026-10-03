@@ -1,32 +1,102 @@
 import { eventIterator, oc } from "@orpc/contract";
 import { createSchemaFactory } from "drizzle-zod";
 import { z } from "zod";
-import { terminalSession } from "./schema.ts";
+import { runspace, tab, terminalSession } from "./schema.ts";
 
 const meta = oc.$meta<{ description?: string; cli?: boolean }>({});
 const { createSelectSchema } = createSchemaFactory({ coerce: { date: true } });
 
-export const TerminalSessionSchema = createSelectSchema(terminalSession);
+export const TerminalSessionSchema = createSelectSchema(terminalSession).extend({
+  tabId: z.string().nullable(),
+});
+
+export const TabSchema = createSelectSchema(tab).omit({ runspaceId: true });
+
+export const LayoutSchema = z.object({
+  runspaces: z.array(createSelectSchema(runspace).extend({ tabs: z.array(TabSchema) })),
+});
 
 // 合図だけを流す。購読側は payload を信じず読み直す。
 export const WorkbenchChangeSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("layout") }),
   z.object({ type: z.literal("terminalSession"), id: z.string() }),
   z.object({ type: z.literal("reconciled") }),
 ]);
 
 export type TerminalSession = z.infer<typeof TerminalSessionSchema>;
+export type Tab = z.infer<typeof TabSchema>;
+export type Layout = z.infer<typeof LayoutSchema>;
 export type WorkbenchChange = z.infer<typeof WorkbenchChangeSchema>;
+
+const size = { rows: z.number().int().positive(), cols: z.number().int().positive() };
+const index = z.number().int().nonnegative();
 
 export const contract = {
   terminalSession: {
     list: meta
-      .meta({ description: "List live Terminal Sessions", cli: true })
+      .meta({ description: "List Terminal Sessions that are live or shown in a Tab", cli: true })
       .output(z.array(TerminalSessionSchema)),
     terminate: meta
       .meta({
         description: "Kill a Terminal Session; its row turns exited when ptyd reports the exit",
       })
       .input(z.object({ id: z.string() }))
+      .output(z.void()),
+  },
+  layout: {
+    get: meta
+      .meta({ description: "Read the Runspaces and their Tabs in order" })
+      .output(LayoutSchema),
+  },
+  runspace: {
+    create: meta
+      .meta({ description: "Open a Runspace with one Tab on a new Terminal Session" })
+      .input(z.object({ cwd: z.string().optional(), index: index.optional(), ...size }))
+      .output(z.object({ runspaceId: z.string(), tab: TabSchema })),
+    remove: meta
+      .meta({
+        description: "Remove a Runspace with its Tabs and terminate their Terminal Sessions",
+      })
+      .input(z.object({ id: z.string() }))
+      .output(z.void()),
+    move: meta
+      .meta({ description: "Move a Runspace to a position in the sidebar" })
+      .input(z.object({ id: z.string(), index }))
+      .output(z.void()),
+  },
+  tab: {
+    open: meta
+      .meta({
+        description:
+          "Open a Tab on a new Terminal Session, or on a detached one given its id to reattach it",
+      })
+      .input(
+        z.object({
+          runspaceId: z.string(),
+          cwd: z.string().optional(),
+          index: index.optional(),
+          ...size,
+          terminalSessionId: z.string().optional(),
+        }),
+      )
+      .output(TabSchema),
+    respawn: meta
+      .meta({
+        description: "Bind a Tab whose Terminal Session has ended to a new one in the Tab's cwd",
+      })
+      .input(z.object({ id: z.string(), ...size }))
+      .output(TabSchema),
+    close: meta
+      .meta({ description: "Close a Tab, leaving its Terminal Session detached" })
+      .input(z.object({ id: z.string() }))
+      .output(z.void()),
+    move: meta
+      .meta({ description: "Move a Tab to a position in a Runspace" })
+      .input(z.object({ id: z.string(), runspaceId: z.string(), index }))
+      .output(z.void()),
+    setCwd: meta
+      .meta({ description: "Record the last known cwd of a Tab" })
+      .input(z.object({ id: z.string(), cwd: z.string() }))
       .output(z.void()),
   },
   changes: meta
