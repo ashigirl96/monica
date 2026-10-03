@@ -2,7 +2,7 @@ import { ORPCError } from "@orpc/server";
 import type { Db, Tx } from "@tania/workbench/server";
 import { eq, isNull, type SQL } from "drizzle-orm";
 import type { SyncOutput, TaskChange, TrackOutput } from "./contract.ts";
-import { isIssue, writeIssue } from "./copy.ts";
+import { isIssue, writeIssues } from "./copy.ts";
 import { BATCH, type GitHub, oneLine, queryIssues, RepositoryNotFound } from "./github.ts";
 import { formatRef, type IssueRef, parseRef } from "./ref.ts";
 import { issue, task } from "./schema.ts";
@@ -151,8 +151,7 @@ async function syncRefs(
           );
           const syncedAt = new Date();
           deps.db.transaction((tx) => {
-            for (const copied of answer.issues) {
-              const issueId = writeIssue(tx, copied, { repo, number: copied.number }, syncedAt);
+            for (const issueId of writeIssues(tx, answer.issues, repo, syncedAt)) {
               track?.(tx, issueId);
             }
           });

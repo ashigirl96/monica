@@ -164,6 +164,33 @@ test("a copy written without a node ID in a repo renamed since is found by the n
   ).toEqual([{ id, repo: "acme/new", title: "One, renamed" }]);
 });
 
+test("Tasks written without node IDs in a renamed repo stay their own rows when one blocks the other", async () => {
+  const books = setup();
+  const { db, github, client } = books;
+  const syncedAt = new Date(0);
+  const rows = db
+    .insert(issue)
+    .values([
+      { repo: "acme/old", number: 1, title: "One", state: "open", syncedAt },
+      { repo: "acme/old", number: 2, title: "Two", state: "open", syncedAt },
+    ])
+    .returning()
+    .all();
+  db.insert(task)
+    .values(rows.map((row) => ({ issueId: row.id, trackedAt: syncedAt })))
+    .run();
+  github.issue("acme/old#2", { title: "Two" });
+  github.issue("acme/old#1", { title: "One", blockedBy: ["acme/old#2"] });
+  github.renameRepo("acme/old", "acme/new");
+
+  await client.sync({});
+
+  expect(
+    db.select({ id: issue.id, repo: issue.repo, number: issue.number }).from(issue).all(),
+  ).toEqual(rows.map((row) => ({ id: row.id, repo: "acme/new", number: row.number })));
+  expect(blockersOf(books, 1)).toEqual(["acme/new#2"]);
+});
+
 test("two copies of one issue written without node IDs fail the sync instead of leaving the Task stale", async () => {
   const books = setup();
   const { db, github, client } = books;

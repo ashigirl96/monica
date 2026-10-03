@@ -55,7 +55,6 @@ test("track copies the Issue with its parent and Blockers and makes it a Task", 
   const idOf = (repo: string, number: number) =>
     rows.findIndex((r) => r.repo === repo && r.number === number) + 1;
   expect(rows).toEqual([
-    { repo: "acme/app", number: 10, title: "Epic", state: "open", labels: [], parentId: null },
     {
       repo: "acme/app",
       number: 12,
@@ -64,6 +63,7 @@ test("track copies the Issue with its parent and Blockers and makes it a Task", 
       labels: ["bug", "p1"],
       parentId: idOf("acme/app", 10),
     },
+    { repo: "acme/app", number: 10, title: "Epic", state: "open", labels: [], parentId: null },
     {
       repo: "acme/lib",
       number: 3,

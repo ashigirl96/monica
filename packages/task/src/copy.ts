@@ -1,5 +1,5 @@
 import type { Tx } from "@tania/workbench/server";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, ne, or, sql } from "drizzle-orm";
 import type { GitHubIssue, LinkedIssue } from "./github.ts";
 import { formatRef, type IssueRef } from "./ref.ts";
 import { issue, issueBlocker } from "./schema.ts";
@@ -8,17 +8,33 @@ export function isIssue({ repo, number }: IssueRef) {
   return and(eq(sql`lower(${issue.repo})`, repo.toLowerCase()), eq(issue.number, number));
 }
 
-/** `asked` は query に渡した ref。改名した repo でも旧名で引けるので、node ID の無い古い行をそれでも探す。 */
-export function writeIssue(tx: Tx, copied: GitHubIssue, asked: IssueRef, syncedAt: Date): number {
+/**
+ * repo の issue の写しを書く。`askedRepo` は query に渡した repo で、改名前の名前のこともある。
+ * Task の Issue の行に先に node ID と今の名前を付け、parent や Blocker として先に出てきても Task の行に当たるようにする。
+ */
+export function writeIssues(
+  tx: Tx,
+  copied: GitHubIssue[],
+  askedRepo: string,
+  syncedAt: Date,
+): number[] {
+  const ids = copied.map((one) =>
+    upsert(
+      tx,
+      one,
+      {},
+      { title: one.title, state: one.state, labels: one.labels, parentId: null, syncedAt },
+      { repo: askedRepo, number: one.number },
+    ),
+  );
+  copied.forEach((one, i) => writeCopy(tx, ids[i]!, one, syncedAt));
+  return ids;
+}
+
+function writeCopy(tx: Tx, id: number, copied: GitHubIssue, syncedAt: Date) {
   const parentId = copied.parent && writeLinkedIssue(tx, copied.parent, syncedAt);
-  const copy = {
-    title: copied.title,
-    state: copied.state,
-    labels: copied.labels,
-    parentId,
-    syncedAt,
-  };
-  const id = upsert(tx, copied, copy, copy, asked);
+  const { title, state, labels } = copied;
+  tx.update(issue).set({ title, state, labels, parentId, syncedAt }).where(eq(issue.id, id)).run();
   tx.delete(issueBlocker).where(eq(issueBlocker.issueId, id)).run();
   const blockerIds = copied.blockers.map((blocker) => writeLinkedIssue(tx, blocker, syncedAt));
   if (blockerIds.length > 0) {
@@ -26,7 +42,6 @@ export function writeIssue(tx: Tx, copied: GitHubIssue, asked: IssueRef, syncedA
       .values(blockerIds.map((blockerId) => ({ issueId: id, blockerId })))
       .run();
   }
-  return id;
 }
 
 // その issue 自身が Task なら labels と parent はその Task の sync が書くので、ここでは触らない。
@@ -50,20 +65,22 @@ function upsert(
   asked?: IssueRef,
 ): number {
   const identity = { nodeId, repo, number };
-  // Task の Issue は改名前の名前の行を先に見る。Task が指すのはその行だから。
+  // Task の Issue は query に渡した ref の行を先に見る。Task が指すのはその行だから。
   const existing =
+    (asked && copyAt(tx, asked, nodeId)) ??
     tx.select(rowRef).from(issue).where(eq(issue.nodeId, nodeId)).get() ??
-    (asked && rowWithoutNodeId(tx, asked)) ??
-    rowWithoutNodeId(tx, { repo, number });
+    copyAt(tx, { repo, number }, nodeId);
   if (existing) {
     const other = tx
-      .select({ id: issue.id })
+      .select(rowRef)
       .from(issue)
-      .where(and(isIssue({ repo, number }), ne(issue.id, existing.id)))
+      .where(
+        and(or(eq(issue.nodeId, nodeId), isIssue({ repo, number })), ne(issue.id, existing.id)),
+      )
       .get();
     if (other) {
       throw new Error(
-        `${formatRef(existing)} and ${formatRef({ repo, number })} are copies of the same issue`,
+        `${formatRef(existing)} and ${formatRef(other)} are copies of the same issue`,
       );
     }
     tx.update(issue)
@@ -80,12 +97,14 @@ function upsert(
 }
 
 // node ID の無い行は node ID を足す前に書いた行。node ID が別なら、その番号は GitHub で別の issue に使われている。
-function rowWithoutNodeId(tx: Tx, ref: IssueRef) {
+function copyAt(tx: Tx, ref: IssueRef, nodeId: string) {
   const row = tx
     .select({ ...rowRef, nodeId: issue.nodeId })
     .from(issue)
     .where(isIssue(ref))
     .get();
-  if (row?.nodeId) throw new Error(`${formatRef(ref)} is now another issue on GitHub`);
+  if (row?.nodeId && row.nodeId !== nodeId) {
+    throw new Error(`${formatRef(ref)} is now another issue on GitHub`);
+  }
   return row;
 }
