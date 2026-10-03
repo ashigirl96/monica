@@ -4,5 +4,8 @@
   "identifier": "com.ashigirl96.tania.dev",
   "build": {
     "beforeDevCommand": "bun run dev"
+  },
+  "app": {
+    "withGlobalTauri": true
   }
 }

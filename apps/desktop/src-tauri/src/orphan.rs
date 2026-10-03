@@ -6,10 +6,10 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
-const GRACE: Duration = Duration::from_secs(2);
+use crate::STOP_GRACE;
 
 #[derive(Deserialize)]
-struct Published {
+struct BackendJson {
     port: u16,
     pid: i32,
 }
@@ -21,10 +21,10 @@ struct Health {
 
 /// app が `RunEvent::Exit` を踏まずに死んだときに残った Backend を止める。
 /// pid だけで決めないのは、死んだ Backend の pid が別の process に再利用されていることがあるため。
-pub fn reap(home: &Path) {
+pub fn stop(home: &Path) {
     let Some(published) = std::fs::read_to_string(home.join("backend.json"))
         .ok()
-        .and_then(|text| serde_json::from_str::<Published>(&text).ok())
+        .and_then(|text| serde_json::from_str::<BackendJson>(&text).ok())
     else {
         return;
     };
@@ -34,9 +34,9 @@ pub fn reap(home: &Path) {
     eprintln!("[shell] stopping the orphaned Backend (pid {})", published.pid);
     // SAFETY: kill(2) は pid と signal の値を渡すだけで、メモリには触らない。
     unsafe { libc::kill(published.pid, libc::SIGTERM) };
-    if !exits_within(published.pid, GRACE) {
+    if !exits_within(published.pid, STOP_GRACE) {
         unsafe { libc::kill(published.pid, libc::SIGKILL) };
-        exits_within(published.pid, GRACE);
+        exits_within(published.pid, STOP_GRACE);
     }
 }
 
@@ -89,7 +89,6 @@ mod tests {
         Command::new("sleep").arg("30").spawn().unwrap()
     }
 
-    /// `/health` に 1 回だけ答える。返す pid は呼び手が決める。
     fn serve_health(pid: u32) -> u16 {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -134,7 +133,7 @@ mod tests {
             child.wait().unwrap()
         });
 
-        reap(&home);
+        stop(&home);
 
         assert_eq!(waiter.join().unwrap().signal(), Some(libc::SIGTERM));
     }
@@ -146,7 +145,7 @@ mod tests {
         let pid = child.id();
         publish(&home, serve_health(pid + 1), pid);
 
-        reap(&home);
+        stop(&home);
 
         let still_running = child.try_wait().unwrap().is_none();
         child.kill().unwrap();

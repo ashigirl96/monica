@@ -1,27 +1,17 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use crate::sibling;
+use crate::locations;
 
-/// `tania` を PATH に載せる（ADR-0006）。
 pub fn link(home: &Path) {
-    let Some(cli) = cli_binary() else {
+    let Some(cli) = locations::cli() else {
         eprintln!("[shell] TANIA_BIN is not set; leaving $TANIA_HOME/bin/tania as it is");
         return;
     };
     place(&home.join("bin/tania"), &cli);
-    // dev の desktop が張ると、release の CLI を dev のもので上書きしてしまう。
-    if !cfg!(debug_assertions) {
-        if let Some(user_home) = std::env::var_os("HOME") {
-            place(&PathBuf::from(user_home).join(".local/bin/tania"), &cli);
-        }
+    if let Some(link) = locations::user_cli_link() {
+        place(&link, &cli);
     }
-}
-
-fn cli_binary() -> Option<PathBuf> {
-    std::env::var_os("TANIA_BIN")
-        .map(PathBuf::from)
-        .or_else(|| (!cfg!(debug_assertions)).then(|| sibling("tania")))
 }
 
 fn place(link: &Path, target: &Path) {

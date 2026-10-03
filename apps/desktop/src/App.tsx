@@ -2,15 +2,14 @@ import type { TerminalSession } from "@tania/workbench/contract";
 import { useEffect, useState } from "react";
 import { useBackend } from "./backend-provider.tsx";
 
-// 仮の画面。骨格 (4b) が Workbench の画面に置き換える。
 export function App() {
   const client = useBackend();
-  const [sessions, setSessions] = useState<TerminalSession[]>([]);
+  const [terminalSessions, setTerminalSessions] = useState<TerminalSession[]>([]);
 
   useEffect(() => {
     if (!client) return;
     const controller = new AbortController();
-    const reload = async () => setSessions(await client.workbench.terminalSession.list());
+    const reload = async () => setTerminalSessions(await client.workbench.terminalSession.list());
     void (async () => {
       try {
         // 先に購読してから読むので、読んだ後の変更を取りこぼさない。
@@ -38,13 +37,13 @@ export function App() {
           </tr>
         </thead>
         <tbody>
-          {sessions.map((session) => (
-            <tr key={session.id}>
-              <td>{session.id}</td>
-              <td>{session.status}</td>
-              <td>{session.pid ?? ""}</td>
-              <td>{session.cwd}</td>
-              <td>{session.createdAt.toLocaleTimeString()}</td>
+          {terminalSessions.map((terminalSession) => (
+            <tr key={terminalSession.id}>
+              <td>{terminalSession.id}</td>
+              <td>{terminalSession.status}</td>
+              <td>{terminalSession.pid ?? ""}</td>
+              <td>{terminalSession.cwd}</td>
+              <td>{terminalSession.createdAt.toLocaleTimeString()}</td>
             </tr>
           ))}
         </tbody>

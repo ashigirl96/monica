@@ -6,7 +6,6 @@ rust-version.workspace = true
 
 [lib]
 name = "tania_desktop_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
 
 # tauri と tauri-build は workspace.dependencies に上げない。Tauri CLI は tauri.conf.json から
 # tauri の features を書き戻すが、workspace 継承にするとその同期を諦めるため。
