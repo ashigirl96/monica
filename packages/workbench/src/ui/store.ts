@@ -1,7 +1,8 @@
 import type { ContractRouterClient } from "@orpc/contract";
 import { type PopoverAnchor, pushErrorToast } from "@tania/ui";
 import { atom, type Getter, type Setter } from "jotai";
-import type { contract, Layout, Tab } from "../contract.ts";
+import { atomWithDefault } from "jotai/utils";
+import type { contract, Layout, Tab, Worktree } from "../contract.ts";
 import { jumpHintsActiveAtom } from "./jump-hints.ts";
 import { shortPath } from "./paths.ts";
 import {
@@ -14,6 +15,7 @@ import {
 } from "./terminal-sessions.ts";
 import { terminalDetach } from "./terminal.ts";
 import { getTabTerminal, releaseTabConnection } from "./terminal-connections.ts";
+import { savedUiStateAtom } from "./ui-state.ts";
 
 export type WorkbenchClient = ContractRouterClient<typeof contract>;
 export type Runspace = Layout["runspaces"][number];
@@ -67,6 +69,7 @@ async function load(get: Getter, set: Setter) {
   const sessions = await client.terminalSession.list();
   set(layoutAtom, layout);
   set(applyTerminalSessionListAtom, sessions);
+  void set(resolveWorktreesAtom);
 }
 
 // promise は jotai が値として追跡するので、object に包んで持つ。
@@ -89,8 +92,11 @@ export const reloadAtom = atom(null, (get, set): Promise<void> => {
 });
 
 // active な Runspace と Tab は帳簿に持たないので、id が layout から消えたら先頭を見せる。
-const activeRunspaceIdAtom = atom<string | null>(null);
-const activeTabIdsAtom = atom<Record<string, string>>({});
+const activeRunspaceIdAtom = atomWithDefault((get) => get(savedUiStateAtom).activeRunspaceId);
+const activeTabIdsAtom = atomWithDefault((get): Record<string, string> => {
+  const { activeRunspaceId, activeTabId } = get(savedUiStateAtom);
+  return activeRunspaceId && activeTabId ? { [activeRunspaceId]: activeTabId } : {};
+});
 
 export const activeRunspaceAtom = atom((get): Runspace | null => {
   const runspaces = get(layoutAtom)?.runspaces ?? [];
@@ -139,6 +145,9 @@ const tabsReportingCwdAtom = atom<ReadonlySet<string>>(new Set<string>());
 // OSC 7 を出さない shell でも、title を path にする設定なら cwd を追える。
 export const updateTabTitleAtom = atom(null, (get, set, tabId: string, title: string) => {
   set(tabTitlesAtom, (prev) => ({ ...prev, [tabId]: title }));
+  // shell は prompt のたびに title を書くので、command の後で branch が変わったかもしれない合図になる。
+  const tab = findTab(get, tabId)?.tab;
+  if (tab) void set(resolveWorktreesAtom, [tab.cwd]);
   // `~user` や zsh の named directory は Backend が絶対 path にできないので、`~` と `~/` の形だけを取る。
   const isPath = title.startsWith("/") || title === "~" || title.startsWith("~/");
   if (!isPath || get(tabsReportingCwdAtom).has(tabId)) return Promise.resolve();
@@ -149,6 +158,7 @@ export const updateTabCwdAtom = atom(null, (get, set, tabId: string, cwd: string
   if (!get(tabsReportingCwdAtom).has(tabId)) {
     set(tabsReportingCwdAtom, (prev) => new Set(prev).add(tabId));
   }
+  void set(resolveWorktreesAtom, [cwd]);
   return writeCwd(get, set, tabId, cwd);
 });
 
@@ -186,6 +196,52 @@ const sidebarRunspacesAtom = atom((get): Runspace[] => {
   return [...runspaces.filter(holdsPin), ...runspaces.filter((r) => !holdsPin(r))];
 });
 
+// `git switch` は cwd を変えずに branch を変えるので layout の読み直しと shell の知らせのたびに引き直し、
+// title を書き換え続ける app に備えて cwd ごとに 5 秒で間引く。
+const worktreesAtom = atom<Record<string, Worktree | null>>({});
+const worktreesCheckedAtAtom = atom<Record<string, number>>({});
+const WORKTREE_RECHECK_MS = 5000;
+
+// cwds を省けば、layout のすべての Tab の cwd を引き直す。
+const resolveWorktreesAtom = atom(null, async (get, set, cwds?: string[]) => {
+  const checkedAt = get(worktreesCheckedAtAtom);
+  const now = Date.now();
+  const candidates =
+    cwds ?? (get(layoutAtom)?.runspaces ?? []).flatMap((r) => r.tabs.map((t) => t.cwd));
+  const due = [...new Set(candidates)].filter(
+    (cwd) => now - (checkedAt[cwd] ?? 0) >= WORKTREE_RECHECK_MS,
+  );
+  const client = get(workbenchClientAtom);
+  if (due.length === 0 || !client) return;
+  set(worktreesCheckedAtAtom, (prev) => ({
+    ...prev,
+    ...Object.fromEntries(due.map((cwd) => [cwd, now])),
+  }));
+  // 引けなかった cwd は前の値のまま残し、5 秒後の次の合図で引き直す。
+  const found: Record<string, Worktree | null> = {};
+  await Promise.all(
+    due.map(async (cwd) => {
+      try {
+        found[cwd] = await client.worktree.info({ cwd });
+      } catch (e) {
+        warnFailed("worktree info", e);
+      }
+    }),
+  );
+  set(worktreesAtom, (prev) => ({ ...prev, ...found }));
+});
+
+export const resolveEditorPathsAtom = atom(null, (get, _set, cwd: string, candidates: string[]) =>
+  clientOf(get).editor.resolve({ cwd, candidates }),
+);
+
+// エディタが開けなくても端末の操作は続けられるので、知らせない。
+export const openInEditorAtom = atom(null, (get, _set, path: string) => {
+  get(workbenchClientAtom)
+    ?.editor.open({ path })
+    .catch((e: unknown) => warnFailed("editor open", e));
+});
+
 export type RunspaceSummary = {
   id: string;
   title: string;
@@ -198,11 +254,14 @@ export type RunspaceSummary = {
 export const runspaceSummariesAtom = atom((get): RunspaceSummary[] => {
   const active = get(activeRunspaceAtom);
   const titles = get(tabTitlesAtom);
+  const worktrees = get(worktreesAtom);
   return get(sidebarRunspacesAtom).map((runspace) => {
     const tab = activeTabOf(get, runspace);
+    const cwd = tab?.cwd ?? runspace.cwd;
+    const worktree = worktrees[cwd];
     return {
       id: runspace.id,
-      title: shortPath(tab?.cwd ?? runspace.cwd),
+      title: worktree ? `${worktree.repo}:${worktree.branch}` : shortPath(cwd),
       description: (tab && titles[tab.id]) ?? "",
       tabCount: runspace.tabs.length,
       isActive: runspace.id === active?.id,

@@ -1,11 +1,12 @@
 import { cn, PromptIcon, TRAFFIC_LIGHT_ZONE_HEIGHT, TRAFFIC_LIGHT_ZONE_WIDTH } from "@tania/ui";
-import { useAtomValue, useSetAtom } from "jotai";
+import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { lazy, Suspense, useEffect } from "react";
 import { WorkbenchHeader } from "./header.tsx";
 import { ResizeHandle } from "./resize-handle.tsx";
 import { WorkbenchSidebar } from "./sidebar.tsx";
 import { reloadAtom, warnFailed, type WorkbenchClient, workbenchClientAtom } from "./store.ts";
 import { sidebarOpenAtom, sidebarResizingAtom, sidebarWidthAtom, uiZoomAtom } from "./ui-state.ts";
+import { persistUiState } from "./ui-state-persistence.ts";
 
 const WorkbenchContent = lazy(() => import("./content.tsx"));
 
@@ -35,6 +36,8 @@ function useBooks(client: WorkbenchClient | null) {
 
 export function Workbench({ client }: { client: WorkbenchClient | null }) {
   useBooks(client);
+  const store = useStore();
+  useEffect(() => persistUiState(store), [store]);
 
   const sidebarOpen = useAtomValue(sidebarOpenAtom);
   const sidebarWidth = useAtomValue(sidebarWidthAtom);

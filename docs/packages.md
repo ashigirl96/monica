@@ -194,7 +194,8 @@ contract を走査するテストを 1 本置き、description と output が全
   - 端末の byte は Shell を通るので、Backend が居ない間も打鍵と出力は続く。画面を塞がず、layout を変える操作だけが toast で失敗する。
 - domain の ui には自分の contract の client だけを渡す（workbench の ui は `client.workbench`）。oRPC の client は callable な Proxy なので、React の state に入れるときは `setState(() => client)`（#8 の詰まった点 5）。
 - Shell の terminal command と `clipboard_write_image` を呼ぶ wrapper（monica の `commands/terminal.ts`）は `packages/workbench/src/ui` に置く。
-- 画像の drop は monica のとおり、Tauri の drag-drop event の path を `clipboard_write_image` に渡し、成功したら active な Tab に `terminal_write` で Ctrl-V（`\x16`）を送る。Ctrl-V で clipboard の画像を読むのは agent の振る舞いなので、Shell の command にまとめない。失敗したら `packages/ui` の toast で 1 行出す（monica は黙っていた）。
+- 画像の drop は monica のとおり、Tauri の drag-drop event の path を `clipboard_write_image` に渡し、成功したら active な Tab に `terminal_write` で Ctrl-V を送る。Ctrl-V で clipboard の画像を読むのは agent の振る舞いなので、Shell の command にまとめない。失敗したら `packages/ui` の toast で 1 行出す（monica は黙っていた）。
+  - Ctrl-V の形は決まっていない（#60）。ptyd は Tab に `TERM_PROGRAM=WezTerm` を渡すので、claude は kitty keyboard protocol の flag を push し、Ctrl+V を `CSI 118;5u` でしか受け取らない。monica の `\x16` では貼られない。
 - Workbench の画面が使う、Shell に置かない monica の command は `workbench` の procedure にする（`cli: true` は付けない）。
   - `worktree.info({ cwd })` → `{ repo, branch } | null`: `git -C <cwd> rev-parse --abbrev-ref HEAD --path-format=absolute --git-dir --git-common-dir`。linked worktree のときだけ値を返し、`repo` は common dir の親の名前。Runspace の title（`repo:branch`）に使い、webview は path ごとに cache して 5 秒で間引く。
   - `editor.resolve({ cwd, candidates })` → `(string | null)[]`: `~` を展開し、相対なら cwd に join して `realpath` する。失敗したら末尾の `:<数字>` を最大 2 つ外して再試行する。terminal の link 検出が hover のたびに 1 行分をまとめて呼び、null の候補は link にしない。
