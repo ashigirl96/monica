@@ -184,7 +184,11 @@ impl TerminalModes {
                         alt_switch = Some(on);
                         continue;
                     }
-                    let slot = if on { Exclusive::On(mode) } else { Exclusive::Off };
+                    let slot = if on {
+                        Exclusive::On(mode)
+                    } else {
+                        Exclusive::Off
+                    };
                     match classify(mode) {
                         Some(Slot::Flag(index)) => self.flags[index] = Some(on),
                         Some(Slot::MouseProtocol) => self.mouse_protocol = slot,
@@ -248,7 +252,11 @@ impl TerminalModes {
             push_mode(&mut out, ALT_SCREEN, true);
         }
         for (index, mode) in TRACKED_FLAGS.iter().enumerate() {
-            let restored = if in_tail.flags[index].is_some() { None } else { self.flags[index] };
+            let restored = if in_tail.flags[index].is_some() {
+                None
+            } else {
+                self.flags[index]
+            };
             if let Some(on) = restored {
                 push_mode(&mut out, *mode, on);
             }
@@ -358,7 +366,10 @@ mod tests {
 \x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?25l";
         // What a resize puts back into the tail, and nothing else.
         let tail = b"\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?25l\x1b[>1u";
-        assert_eq!(restore_with_tail(startup, tail), b"\x1b[?1049h\x1b[?2004h\x1b[?1004h");
+        assert_eq!(
+            restore_with_tail(startup, tail),
+            b"\x1b[?1049h\x1b[?2004h\x1b[?1004h"
+        );
     }
 
     /// A boundary older than the retained history still resolves, at the precision of the
@@ -392,7 +403,10 @@ mod tests {
 
     #[test]
     fn combined_parameters_are_split() {
-        assert_eq!(restore(&[b"\x1b[?1049;2004;25h"]), b"\x1b[?1049h\x1b[?2004h\x1b[?25h");
+        assert_eq!(
+            restore(&[b"\x1b[?1049;2004;25h"]),
+            b"\x1b[?1049h\x1b[?2004h\x1b[?25h"
+        );
     }
 
     #[test]
@@ -456,7 +470,10 @@ mod tests {
     fn only_modes_missing_from_the_tail_are_prepended() {
         // The tail begins after the startup handshake and carries only the cursor change.
         assert_eq!(
-            restore_with_tail(b"\x1b[?1049h\x1b[?1003h\x1b[?1006h\x1b[?2004h", b"later\x1b[?25l"),
+            restore_with_tail(
+                b"\x1b[?1049h\x1b[?1003h\x1b[?1006h\x1b[?2004h",
+                b"later\x1b[?25l"
+            ),
             b"\x1b[?1049h\x1b[?2004h\x1b[?1003h\x1b[?1006h"
         );
     }
@@ -464,7 +481,10 @@ mod tests {
     #[test]
     fn a_kitty_stack_the_tail_touches_is_left_alone() {
         assert_eq!(restore_with_tail(b"\x1b[>1u", b"\x1b[>5u"), b"");
-        assert_eq!(restore_with_tail(b"\x1b[>1u\x1b[>5u", b"nothing"), b"\x1b[>1u\x1b[>5u");
+        assert_eq!(
+            restore_with_tail(b"\x1b[>1u\x1b[>5u", b"nothing"),
+            b"\x1b[>1u\x1b[>5u"
+        );
     }
 
     // --- mutually exclusive groups ---
@@ -551,7 +571,10 @@ mod tests {
     /// direction would restore modes the client is not in.
     #[test]
     fn esc_inside_a_string_aborts_it_the_way_xterm_does() {
-        assert_eq!(restore(&[b"\x1bPtmux;\x1b\x1b[?1049h\x1b\\"]), b"\x1b[?1049h");
+        assert_eq!(
+            restore(&[b"\x1bPtmux;\x1b\x1b[?1049h\x1b\\"]),
+            b"\x1b[?1049h"
+        );
     }
 
     #[test]

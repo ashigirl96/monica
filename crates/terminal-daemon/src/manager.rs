@@ -134,8 +134,7 @@ impl PtyManager {
                 // (e.g. a transcript) doesn't lose the process's last words. Bounded, not
                 // a join: a grandchild holding the pty open stalls reader EOF forever.
                 let drain_deadline = std::time::Instant::now() + EXIT_DRAIN_TIMEOUT;
-                while !emitter_handle.is_finished() && std::time::Instant::now() < drain_deadline
-                {
+                while !emitter_handle.is_finished() && std::time::Instant::now() < drain_deadline {
                     std::thread::sleep(std::time::Duration::from_millis(10));
                 }
                 {

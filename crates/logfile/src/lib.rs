@@ -314,8 +314,7 @@ mod tests {
     fn append_writes_to_todays_file_creating_the_dir() {
         let dir = temp_dir("append");
         let today = day(2026, 9, 9);
-        let log =
-            DailyLog::open_with_policy(&dir, STEM, today, RETENTION_DAYS, NO_CAP).unwrap();
+        let log = DailyLog::open_with_policy(&dir, STEM, today, RETENTION_DAYS, NO_CAP).unwrap();
         log.append_on(today, "first");
         log.append_on(today, "second");
 
@@ -518,7 +517,10 @@ mod tests {
 
         migrate_legacy(&dir, STEM, day(2026, 9, 9));
 
-        assert_eq!(std::fs::read(dir.join("hook-claude.log")).unwrap(), b"legacy");
+        assert_eq!(
+            std::fs::read(dir.join("hook-claude.log")).unwrap(),
+            b"legacy"
+        );
         assert_eq!(
             std::fs::read(dir.join("hook-claude_2026-09-09.log")).unwrap(),
             b"dated"

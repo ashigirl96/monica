@@ -130,7 +130,10 @@ mod tests {
 
         // A second rotation overwrites the previous .log.1: total disk stays ≤ 2 files.
         t.append(b"KLMNOPQRSTUVWXYZ").unwrap();
-        assert_eq!(std::fs::read(dir.join("ts-1.log.1")).unwrap(), b"GHIJKLMNOPQRSTUVWXYZ");
+        assert_eq!(
+            std::fs::read(dir.join("ts-1.log.1")).unwrap(),
+            b"GHIJKLMNOPQRSTUVWXYZ"
+        );
         assert_eq!(t.tail(100).unwrap(), b"GHIJKLMNOPQRSTUVWXYZ");
         std::fs::remove_dir_all(&dir).ok();
     }

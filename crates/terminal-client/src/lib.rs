@@ -44,7 +44,9 @@ pub struct PtydClient {
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 impl PtydClient {
@@ -54,7 +56,9 @@ impl PtydClient {
     ) -> Result<Self> {
         let stream = UnixStream::connect(socket_path)
             .with_context(|| format!("failed to connect to {}", socket_path.display()))?;
-        let read_stream = stream.try_clone().context("failed to clone daemon stream")?;
+        let read_stream = stream
+            .try_clone()
+            .context("failed to clone daemon stream")?;
         let inner = Arc::new(ClientInner {
             writer: Mutex::new(BufWriter::new(stream)),
             pending: Mutex::new(HashMap::new()),
