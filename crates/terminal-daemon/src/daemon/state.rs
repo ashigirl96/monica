@@ -82,7 +82,12 @@ impl TableInner {
         }
         let lagged: Vec<u64> = conns
             .iter()
-            .filter(|conn_id| !self.connections.get(conn_id).is_some_and(|out| out.send(msg)))
+            .filter(|conn_id| {
+                !self
+                    .connections
+                    .get(conn_id)
+                    .is_some_and(|out| out.send(msg))
+            })
             .copied()
             .collect();
         for conn_id in lagged {
@@ -112,7 +117,9 @@ impl SessionTable {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, TableInner> {
-        self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     pub fn register_connection(&self, conn_id: u64, outbox: Outbox) {
@@ -174,7 +181,11 @@ impl SessionTable {
             log::warn!("transcript append failed for {session_id}: {e}");
         }
         entry.modes.feed(bytes);
-        if inner.attachments.get(session_id).is_none_or(|c| c.is_empty()) {
+        if inner
+            .attachments
+            .get(session_id)
+            .is_none_or(|c| c.is_empty())
+        {
             return;
         }
         let msg = ServerMessage::Output {
@@ -225,7 +236,10 @@ impl SessionTable {
             bail!("no such session: {session_id}");
         };
         let max = replay_bytes.unwrap_or(DEFAULT_REPLAY_BYTES) as usize;
-        let tail = entry.transcript.tail(max).context("failed to read transcript tail")?;
+        let tail = entry
+            .transcript
+            .tail(max)
+            .context("failed to read transcript tail")?;
         // The tail is a suffix of the output, so mode transitions older than it are lost.
         // Leading with the ones it cannot convey keeps the client's modes honest -- notably the
         // alt screen, which apps enter exactly once at startup.
@@ -339,7 +353,10 @@ mod tests {
         }
     }
 
-    fn registered_outbox(table: &Arc<SessionTable>, conn_id: u64) -> std::sync::mpsc::Receiver<String> {
+    fn registered_outbox(
+        table: &Arc<SessionTable>,
+        conn_id: u64,
+    ) -> std::sync::mpsc::Receiver<String> {
         let (tx, rx) = std::sync::mpsc::sync_channel(64);
         table.register_connection(conn_id, Outbox::new(tx));
         rx
@@ -378,7 +395,10 @@ mod tests {
         });
         let msg: ServerMessage = serde_json::from_str(&exit_line).unwrap();
         match msg {
-            ServerMessage::Exit { session_id, exit_code } => {
+            ServerMessage::Exit {
+                session_id,
+                exit_code,
+            } => {
                 assert_eq!(session_id, "ts-1");
                 assert_eq!(exit_code, Some(0));
             }
@@ -412,7 +432,10 @@ mod tests {
             done.then(|| std::fs::read(dir.join("ts-1.log")).unwrap_or_default())
         });
         let text = String::from_utf8_lossy(&replay);
-        assert!(text.contains("--login"), "transcript should hold the echoed arg, got: {text:?}");
+        assert!(
+            text.contains("--login"),
+            "transcript should hold the echoed arg, got: {text:?}"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -432,14 +455,19 @@ mod tests {
         // A window this small cannot reach back to the handshake, so only the prefix can carry
         // it -- which is the situation a pane reconnected after an app restart is in.
         let (replay, _, _) = t.attach("ts-1", 1, Some(32)).unwrap();
-        let bytes = base64::engine::general_purpose::STANDARD.decode(replay).unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(replay)
+            .unwrap();
 
         // The invariant that matters: a client consuming this replay lands on the tracked
         // state, so it has nothing left to assert of its own.
         let mut client = TerminalModes::default();
         client.feed(&bytes);
         let client_state = client.restore_prefix(b"");
-        assert_eq!(client_state, t.lock().live["ts-1"].modes.restore_prefix(b""));
+        assert_eq!(
+            client_state,
+            t.lock().live["ts-1"].modes.restore_prefix(b"")
+        );
         assert!(
             client_state.starts_with(b"\x1b[?1049h"),
             "the alt screen must survive a replay window that excludes it, got: {:?}",
@@ -480,7 +508,8 @@ mod tests {
         params.shell = Some("/nonexistent/shell".to_string());
         assert!(t.create(params).is_err());
 
-        t.create(echo_params("ts-1")).expect("retry with the same id should succeed");
+        t.create(echo_params("ts-1"))
+            .expect("retry with the same id should succeed");
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -502,12 +531,19 @@ mod tests {
             wait_for(Duration::from_secs(5), || {
                 rx.try_recv().ok().filter(|l| {
                     l.contains("\"output\"")
-                        && String::from_utf8_lossy(&base64::engine::general_purpose::STANDARD
-                            .decode(serde_json::from_str::<ServerMessage>(l).ok().and_then(|m| match m {
-                                ServerMessage::Output { data, .. } => Some(data),
-                                _ => None,
-                            }).unwrap_or_default())
-                            .unwrap_or_default())
+                        && String::from_utf8_lossy(
+                            &base64::engine::general_purpose::STANDARD
+                                .decode(
+                                    serde_json::from_str::<ServerMessage>(l)
+                                        .ok()
+                                        .and_then(|m| match m {
+                                            ServerMessage::Output { data, .. } => Some(data),
+                                            _ => None,
+                                        })
+                                        .unwrap_or_default(),
+                                )
+                                .unwrap_or_default(),
+                        )
                         .contains("monica-multi")
                 })
             });
@@ -567,7 +603,9 @@ mod tests {
                 let msg: ServerMessage = serde_json::from_str(l).unwrap();
                 match msg {
                     ServerMessage::Output { data, .. } => {
-                        let bytes = base64::engine::general_purpose::STANDARD.decode(data).unwrap();
+                        let bytes = base64::engine::general_purpose::STANDARD
+                            .decode(data)
+                            .unwrap();
                         String::from_utf8_lossy(&bytes).contains("monica-fanout")
                     }
                     _ => false,
@@ -577,7 +615,11 @@ mod tests {
         let _ = line;
 
         t.detach("ts-1", 1);
-        assert!(t.lock().attachments.get("ts-1").is_none_or(|c| c.is_empty()));
+        assert!(t
+            .lock()
+            .attachments
+            .get("ts-1")
+            .is_none_or(|c| c.is_empty()));
 
         t.terminate("ts-1").unwrap();
         wait_for(Duration::from_secs(5), || {

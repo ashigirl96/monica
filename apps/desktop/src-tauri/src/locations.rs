@@ -4,16 +4,24 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub fn tania_home() -> PathBuf {
-    std::env::var_os("TANIA_HOME").map(PathBuf::from).unwrap_or_else(|| {
-        user_home().join(if cfg!(debug_assertions) { ".tania-dev" } else { ".tania" })
-    })
+    std::env::var_os("TANIA_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            user_home().join(if cfg!(debug_assertions) {
+                ".tania-dev"
+            } else {
+                ".tania"
+            })
+        })
 }
 
 /// dev は source を `bun --watch` で動かし、package の編集で同じ pid のまま再起動させる。
 pub fn backend() -> Command {
     if cfg!(debug_assertions) {
         let mut command = Command::new("bun");
-        command.arg("--watch").arg(repo().join("apps/backend/src/main.ts"));
+        command
+            .arg("--watch")
+            .arg(repo().join("apps/backend/src/main.ts"));
         command
     } else {
         Command::new(bundled_binary("tania-backend"))

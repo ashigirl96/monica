@@ -27,8 +27,8 @@ impl Drop for DaemonGuard {
 }
 
 fn fresh_dir(name: &str) -> PathBuf {
-    // Plain /tmp with a short name: socket paths must stay under the (macOS 104-byte)
-    // sun_path limit, which temp_dir()'s /var/folders/... prefix easily blows past.
+    // Plain /tmp keeps socket paths well under the (macOS 104-byte) sun_path limit;
+    // temp_dir()'s /var/folders/... prefix alone spends about half of it.
     let dir = PathBuf::from("/tmp").join(format!("ptyd-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -219,7 +219,10 @@ fn session_survives_client_reconnect_and_replays_output() {
     match client2.request(RequestOp::List).unwrap() {
         ResponseBody::Sessions { sessions } => {
             assert_eq!(sessions.len(), 1);
-            assert!(!sessions[0].running, "terminated session should be a tombstone");
+            assert!(
+                !sessions[0].running,
+                "terminated session should be a tombstone"
+            );
         }
         other => panic!("unexpected list response: {other:?}"),
     }

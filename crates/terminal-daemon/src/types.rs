@@ -17,4 +17,3 @@ pub struct SpawnRequest {
     #[serde(default)]
     pub env: Option<Vec<(String, String)>>,
 }
-

@@ -27,6 +27,10 @@ fn place(link: &Path, target: &Path) {
         .and_then(|()| std::os::unix::fs::symlink(target, &staged))
         .and_then(|()| fs::rename(&staged, link));
     if let Err(error) = result {
-        eprintln!("[shell] could not link {} to {}: {error}", link.display(), target.display());
+        eprintln!(
+            "[shell] could not link {} to {}: {error}",
+            link.display(),
+            target.display()
+        );
     }
 }

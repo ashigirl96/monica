@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Instant;
 
-use shared_child::unix::SharedChildExt;
 use serde::Serialize;
+use shared_child::unix::SharedChildExt;
 use shared_child::SharedChild;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -59,7 +59,10 @@ impl Supervisor {
 
     pub fn status(&self) -> Status {
         let state = self.lock();
-        Status { endpoint: state.endpoint.clone(), failed: state.failed }
+        Status {
+            endpoint: state.endpoint.clone(),
+            failed: state.failed,
+        }
     }
 
     pub fn start(&self, app: &AppHandle) {
@@ -136,7 +139,10 @@ impl Supervisor {
         let child = Arc::new(SharedChild::spawn(&mut command(&self.home))?);
         let stdin = child.take_stdin().expect("stdin is piped");
         let stdout = child.take_stdout().expect("stdout is piped");
-        state.running = Some(Running { child: child.clone(), _stdin: stdin });
+        state.running = Some(Running {
+            child: child.clone(),
+            _stdin: stdin,
+        });
         relay(app.clone(), stdout, child.clone());
         Ok(Some(child))
     }
@@ -144,7 +150,11 @@ impl Supervisor {
     fn announce(&self, app: &AppHandle, from: &Arc<SharedChild>, endpoint: Endpoint) {
         let mut state = self.lock();
         // 終わった Backend の書き残しで、次の Backend の endpoint を上書きしない。
-        if !state.running.as_ref().is_some_and(|running| Arc::ptr_eq(&running.child, from)) {
+        if !state
+            .running
+            .as_ref()
+            .is_some_and(|running| Arc::ptr_eq(&running.child, from))
+        {
             return;
         }
         state.endpoint = Some(endpoint.clone());
