@@ -10,14 +10,16 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 const URL_SCHEMES = String.raw`https?://|mailto:|tel:`;
 const IPV6 = String.raw`(?:\[[:0-9a-fA-F]+(?:[:0-9a-fA-F]*)+\](?::[0-9]+)?)`;
 const SCHEME_URL_CHARS = String.raw`[\w\-.~:/?#@!$&*+,;=%]`;
-const PATH_CHARS = String.raw`[\w\-.~:\/?#@!$&*+;=%]`;
+// `\w` は ASCII だけなので、path では `/tmp/日本語.ts` が `/tmp/` で切れて親の directory が link になる。
+const WORD = String.raw`\p{L}\p{M}\p{N}_`;
+const PATH_CHARS = String.raw`[${WORD}\-.~:\/?#@!$&*+;=%]`;
 const OPT_BRACKETED = String.raw`(?:[\(\[]\w*[\)\]])?`;
 const NO_TRAILING_PUNCT = String.raw`(?<![,.])`;
 const NO_TRAILING_COLON = String.raw`(?<!:)`;
 const TRAILING_SPACES_EOL = String.raw`(?: +(?= *$))?`;
-const DOTTED_LOOKAHEAD = String.raw`(?=[\w\-.~:\/?#@!$&*+;=%]*\.)`;
-const ROOTED_PREFIX = String.raw`(?:\.\.\/|\.\/|(?<!\w)~\/|(?:[\w][\w\-.]*\/)*(?<!\w)\$[A-Za-z_]\w*\/|\.[\w][\w\-.]*\/|(?<![\w~\/])\/(?!\/))`;
-const BARE_PREFIX = String.raw`(?<!\$\d*)(?<!\w)[\w][\w\-.]*\/`;
+const DOTTED_LOOKAHEAD = String.raw`(?=${PATH_CHARS}*\.)`;
+const ROOTED_PREFIX = String.raw`(?:\.\.\/|\.\/|(?<![${WORD}])~\/|(?:[${WORD}][${WORD}\-.]*\/)*(?<![${WORD}])\$[A-Za-z_]\w*\/|\.[${WORD}][${WORD}\-.]*\/|(?<![${WORD}~\/])\/(?!\/))`;
+const BARE_PREFIX = String.raw`(?<!\$\d*)(?<![${WORD}])[${WORD}][${WORD}\-.]*\/`;
 
 const SCHEME_URL_BRANCH = `(?:${URL_SCHEMES})(?:${IPV6}|${SCHEME_URL_CHARS}+${OPT_BRACKETED})+${NO_TRAILING_PUNCT}`;
 const ROOTED_BRANCH = `${ROOTED_PREFIX}${PATH_CHARS}+${NO_TRAILING_COLON}${TRAILING_SPACES_EOL}`;
@@ -28,7 +30,7 @@ const SCHEME_HEAD = new RegExp(`^(?:${URL_SCHEMES})`, "i");
 // buildLinks は行レンダリングごとに走るホットパス。パターンを毎回
 // コンパイルし直さないよう一度だけ生成し、各呼び出しで lastIndex を巻き戻す。
 // exec ループは await より前に同期で走り切るので instance 共有でも競合しない。
-const LINK_PATTERN = new RegExp(LINK_REGEX, "g");
+const LINK_PATTERN = new RegExp(LINK_REGEX, "gu");
 
 type Target = { kind: "url"; uri: string } | { kind: "path"; path: string };
 
