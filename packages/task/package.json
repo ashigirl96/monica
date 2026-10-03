@@ -15,6 +15,7 @@
   "dependencies": {
     "@orpc/contract": "catalog:",
     "@orpc/server": "catalog:",
+    "@tania/ui": "workspace:*",
     "@tania/workbench": "workspace:*",
     "drizzle-orm": "catalog:",
     "drizzle-zod": "catalog:",

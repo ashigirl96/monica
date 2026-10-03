@@ -33,7 +33,7 @@ import {
 import { worktreeInfo } from "./worktree.ts";
 
 export { migrations } from "../migrations/index.ts";
-export { createWorkbench, type Db, type Workbench } from "./workbench.ts";
+export { createWorkbench, type Db, type Tx, type Workbench } from "./workbench.ts";
 
 const os = implement(contract).$context<{ db: Db; workbench: Workbench }>();
 
