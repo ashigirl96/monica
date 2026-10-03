@@ -177,10 +177,18 @@ contract を走査するテストを 1 本置き、description と output が全
 
 - `src/` は app の枠だけを持つ。layout、shortcut、Backend client の provider、Shell からの `backend-endpoint` event による再接続。domain の画面は `@tania/<d>/ui` から読む。
 - domain の ui には自分の contract の client だけを渡す（workbench の ui は `client.workbench`）。oRPC の client は callable な Proxy なので、React の state に入れるときは `setState(() => client)`（#8 の詰まった点 5）。
-- Shell の terminal command を呼ぶ wrapper（monica の `commands/terminal.ts`）は `packages/workbench/src/ui` に置く。
+- Shell の terminal command と `clipboard_write_image` を呼ぶ wrapper（monica の `commands/terminal.ts`）は `packages/workbench/src/ui` に置く。
+- 画像の drop は monica のとおり、Tauri の drag-drop event の path を `clipboard_write_image` に渡し、成功したら active な Tab に `terminal_write` で Ctrl-V（`\x16`）を送る。Ctrl-V で clipboard の画像を読むのは agent の振る舞いなので、Shell の command にまとめない。失敗したら `packages/ui` の toast で 1 行出す（monica は黙っていた）。
+- Workbench の画面が使う、Shell に置かない monica の command は `workbench` の procedure にする（`cli: true` は付けない）。
+  - `worktree.info({ cwd })` → `{ repo, branch } | null`: `git -C <cwd> rev-parse --abbrev-ref HEAD --path-format=absolute --git-dir --git-common-dir`。linked worktree のときだけ値を返し、`repo` は common dir の親の名前。Runspace の title（`repo:branch`）に使い、webview は path ごとに cache して 5 秒で間引く。
+  - `editor.resolve({ cwd, candidates })` → `(string | null)[]`: `~` を展開し、相対なら cwd に join して `realpath` する。失敗したら末尾の `:<数字>` を最大 2 つ外して再試行する。terminal の link 検出が hover のたびに 1 行分をまとめて呼び、null の候補は link にしない。
+  - `editor.open({ path })` → `void`: `/usr/bin/open -a Zed <path>`。Zed は固定で、line:col は渡さない。webview は失敗を握りつぶす。
+- URL を開くのは webview から plugin-opener の `openUrl` で行う（http(s)・mailto・tel）。
 - workbench の ui は Task の要素を出す場所を 2 つの slot として props で受け、apps/desktop が `@tania/task/ui` の component をはめる。`renderRunspaceLabel(runspaceId)`（Bench のラベル `<repo>#<n> <title>`、準備中・準備失敗のときだけその語を添える）と `tabMenuItems(tab)`（「Attach to Task…」の picker）。task の ui は `task.bench.list`（`{ runspaceId, ref, title, setupState }[]`）と `task.changes` で描き直す。workbench の ui は Task を import しない（ADR-0005）。
 - Tailwind の `@source` に `packages/*/src/ui` を足す。
-- `src-tauri/` は Shell。Backend の監督（ADR-0007）、terminal の中継、通知の中継（ADR-0013）だけを持つ。terminal command は attach / detach / write / resize の 4 本で、ptyd は spawn しない（ADR-0011）。
+- `src-tauri/` は Shell。Backend の監督（ADR-0007）、terminal の中継、OS への窓口だけを持つ。窓口は通知（ADR-0013）、画像の clipboard、plugin-opener、drag-drop の event。custom command は terminal の attach / detach / write / resize の 4 本（ptyd は spawn しない。ADR-0011）と `clipboard_write_image` の 5 本。
+- Shell に置くのは、Tauri プロセスにしか無いもの（窓と webview の event、app の名義、AppKit）に触る処理と、Backend の再起動で途切れてはいけない terminal の byte だけ（ADR-0001）。fs と process の spawn で済む処理（worktree の判定、エディタ）は Backend の procedure にする。
+- `clipboard_write_image(path)` は monica の objc2 の実装（`NSImage::initWithContentsOfFile` を general pasteboard に `writeObjects`）を持ち込む。NSPasteboard は main thread で呼ぶので、sync command のままにする。
 
 ## tab の env と shim
 

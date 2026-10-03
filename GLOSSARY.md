@@ -79,7 +79,7 @@ _Avoid_: 待ち通知, alert
 ### Process
 
 **Shell**:
-Tauri の殻。窓と端末の中継と Backend の起動・監督だけを持ち、Task も Backend の中身も知らない。
+Tauri の殻。窓、端末の中継、Backend の起動・監督と、OS への窓口（通知を出す、画像をクリップボードに置く、URL を開く）だけを持ち、Task も Backend の中身も知らない。
 _Avoid_: Rust 側, Tauri 側
 
 **Backend**:
