@@ -10,6 +10,7 @@ type Dev = {
   desktop?: number;
   backend?: number;
   ptyd?: number;
+  bridgePort?: string;
   repo?: string;
 };
 
@@ -27,9 +28,19 @@ function processes(): Map<number, Process> {
   return table;
 }
 
+function lsofNames(pid: number, ...filters: string[]): string[] {
+  const lsof = Bun.spawnSync(["lsof", "-a", "-p", String(pid), ...filters, "-Fn"]);
+  return [...lsof.stdout.toString().matchAll(/^n(.+)$/gm)].map((m) => m[1]);
+}
+
 function cwdOf(pid: number): string | undefined {
-  const lsof = Bun.spawnSync(["lsof", "-a", "-p", String(pid), "-d", "cwd", "-Fn"]);
-  return lsof.stdout.toString().match(/^n(.+)$/m)?.[1];
+  return lsofNames(pid, "-d", "cwd")[0];
+}
+
+// debug の desktop が listen するのは tauri-plugin-mcp-bridge だけ。
+function bridgePortOf(desktop: number): string | undefined {
+  const addresses = lsofNames(desktop, "-iTCP", "-sTCP:LISTEN", "-P", "-n");
+  return addresses.length > 0 ? addresses.map((a) => a.split(":").at(-1)).join(",") : undefined;
 }
 
 // ptyd は <repo>/target/debug/tania-ptyd。headless の Backend は相対 path で起こすので cwd から解く。
@@ -79,7 +90,10 @@ function devs(): Dev[] {
   for (const dev of byHome.values()) {
     dev.backend = backendOf(dev.home, procs);
     const parent = procs.get(procs.get(dev.backend ?? -1)?.ppid ?? -1);
-    if (parent?.command.includes("target/debug/tania-desktop")) dev.desktop = parent.pid;
+    if (parent?.command.includes("target/debug/tania-desktop")) {
+      dev.desktop = parent.pid;
+      dev.bridgePort = bridgePortOf(parent.pid);
+    }
   }
   return [...byHome.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -101,13 +115,14 @@ function list(all: Dev[]) {
     return;
   }
   const rows = [
-    ["NAME", "KIND", "DESKTOP", "BACKEND", "PTYD", "WORKTREE"],
+    ["NAME", "KIND", "DESKTOP", "BACKEND", "PTYD", "BRIDGE", "WORKTREE"],
     ...all.map((dev) => [
       dev.name,
       kind(dev),
       String(dev.desktop ?? "-"),
       String(dev.backend ?? "-"),
       String(dev.ptyd ?? "-"),
+      dev.bridgePort ?? "-",
       worktree(dev.repo),
     ]),
   ];
