@@ -5,6 +5,9 @@
   "categories": {
     "correctness": "error"
   },
+  "rules": {
+    "tania/sync-transaction": "error"
+  },
   // 1 つの file に複数の override が当たると、後の override が no-restricted-imports の設定を丸ごと置き換える。
   // そのため file の集合ごとに、そこで守る制限をすべて並べる。
   // 「これ以外を禁じる」は group の否定（["*", "!drizzle-orm/sqlite-core"]）で書く。regex の先読みは黙って効かない。
@@ -56,6 +59,43 @@
       }
     },
     {
+      "files": ["packages/workbench/src/cli.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "bun:sqlite",
+                "message": "DB を開いて書くのは Backend だけで、CLI は procedure を呼ぶ（ADR-0003）"
+              }
+            ],
+            "patterns": [
+              {
+                "group": ["@tania/*/cli"],
+                "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
+              },
+              {
+                "group": ["@tania/task", "@tania/task/*"],
+                "message": "workbench は task を import しない（ADR-0005）"
+              },
+              {
+                "group": [
+                  "@tania/*/server",
+                  "./server",
+                  "./server.ts",
+                  "drizzle-orm/bun-sqlite",
+                  "drizzle-orm/bun-sqlite/*"
+                ],
+                "allowTypeImports": true,
+                "message": "DB を開いて書くのは Backend だけで、CLI は procedure を呼ぶ（ADR-0003）"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "files": ["packages/task/**"],
       "rules": {
         "no-restricted-imports": [
@@ -87,6 +127,39 @@
                 "group": ["@tania/*/server", "../server", "../server.ts"],
                 "allowTypeImports": true,
                 "message": "ui は browser で動くので server entry を import しない（ADR-0009）"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/task/src/cli.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "bun:sqlite",
+                "message": "DB を開いて書くのは Backend だけで、CLI は procedure を呼ぶ（ADR-0003）"
+              }
+            ],
+            "patterns": [
+              {
+                "group": ["@tania/*/cli"],
+                "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
+              },
+              {
+                "group": [
+                  "@tania/*/server",
+                  "./server",
+                  "./server.ts",
+                  "drizzle-orm/bun-sqlite",
+                  "drizzle-orm/bun-sqlite/*"
+                ],
+                "allowTypeImports": true,
+                "message": "DB を開いて書くのは Backend だけで、CLI は procedure を呼ぶ（ADR-0003）"
               }
             ]
           }
@@ -184,11 +257,50 @@
       }
     },
     {
+      "files": ["apps/cli/**"],
+      "excludeFiles": ["**/*.test.ts", "**/testing.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "bun:sqlite",
+                "message": "DB を開いて書くのは Backend だけで、CLI は procedure を呼ぶ（ADR-0003）"
+              }
+            ],
+            "patterns": [
+              {
+                "group": [
+                  "@tania/backend",
+                  "@tania/backend/*",
+                  "@tania/desktop",
+                  "@tania/desktop/*"
+                ],
+                "message": "apps どうしは import しない（ADR-0002）"
+              },
+              {
+                "group": ["@tania/*/server", "drizzle-orm/bun-sqlite", "drizzle-orm/bun-sqlite/*"],
+                "allowTypeImports": true,
+                "message": "DB を開いて書くのは Backend だけで、CLI は procedure を呼ぶ（ADR-0003）"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "files": ["apps/desktop/**"],
       "rules": {
         "no-restricted-imports": [
           "error",
           {
+            "paths": [
+              {
+                "name": "bun:sqlite",
+                "message": "DB を開いて書くのは Backend だけで、webview は procedure を呼ぶ（ADR-0003）"
+              }
+            ],
             "patterns": [
               {
                 "group": ["@tania/*/cli"],
@@ -197,6 +309,11 @@
               {
                 "group": ["@tania/backend", "@tania/backend/*", "@tania/cli", "@tania/cli/*"],
                 "message": "apps どうしは import しない（ADR-0002）"
+              },
+              {
+                "group": ["@tania/*/server", "drizzle-orm/bun-sqlite", "drizzle-orm/bun-sqlite/*"],
+                "allowTypeImports": true,
+                "message": "DB を開いて書くのは Backend だけで、webview は procedure を呼ぶ（ADR-0003）"
               }
             ]
           }
@@ -206,7 +323,7 @@
     {
       "files": ["packages/*/src/**", "apps/backend/src/**"],
       "excludeFiles": ["**/*.test.ts", "**/testing.ts", "**/fake-*.ts"],
-      "rules": { "tania/spawn-env": "error" }
+      "rules": { "tania/spawn-env": "error", "tania/cross-domain-write": "error" }
     }
   ]
 }
