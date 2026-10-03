@@ -66,7 +66,7 @@ ptyd が持つ 1 つの PTY。app より長生きし、再 attach すると tran
 _Avoid_: session（Agent Session と紛れる）
 
 **Agent Session**:
-Tab の中で動く agent が自分で名乗るセッション。同一性は agent の session_id で、resume と compact は同じ Agent Session の再開、fork は別の Agent Session。Terminal Session とは別物で、同じ Tab に両方が存在する。agent の状態の唯一の正本で、Task に紐づかない Tab でも観測する。状態は次の 4 つで、agent 自身の報告だけで遷移する。
+Tab の中で動く agent が自分で名乗るセッション。同一性は agent の session_id で、resume と compact は同じ Agent Session の再開、fork は別の Agent Session。Terminal Session とは別物で、同じ Tab に両方が存在する。agent の状態の唯一の正本で、Task に紐づかない Tab でも観測する。状態は次の 4 つ。動作中とユーザー待ちには agent 自身の報告でだけ入る。終了には Terminal Session の終わりでも入り、未観測には Backend の不在でだけ入る。
 
 - **動作中**: agent が turn を進めているか、自分で起こした background の agent の仕事が終わるのを待っている（終われば agent が自分で次の turn を始める）。
 - **ユーザー待ち**: agent がユーザーの行動を待っている。理由は 4 つ。**手空き**（次の指示を待っている。起動直後と、turn が終わって background の agent の仕事も残っていない時）、**質問**（agent が訊いている）、**許可**（tool の実行許可を求めている。subagent の分とプラン承認も含む）、**エラー**（API エラーで turn が終わった）。

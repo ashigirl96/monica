@@ -4,7 +4,7 @@ status: accepted
 
 # Skill は Claude Code plugin で配り、PATH 上の `tania` command を呼ぶことでだけ tania に触る
 
-monica では agent に渡す手順書が `.claude/skills` に 18 個あり、`~/.claude/skills` への手張りの symlink で配っていた。そのうち `monica` CLI を呼ぶ 2 つ（attach-task / track-issue）は `MONICA_HOME=$HOME/monica` を直書きしていたが、原因は `.monica/setup.sh` が direnv で dev home を shell に export していたことで、skill が上書きし返す構図だった。tania では手順書を **Skill**（`tania` を呼ぶ、`packages/<domain>/skills/<name>/SKILL.md`、plugin `tania` で配る）と **開発 skill**（tania repo を開発するための手順、`.claude/skills/`、配らない）に分ける。Skill は PATH 上の `tania` command を呼ぶだけで、env も hook も持たない。home は CLI が `$TANIA_HOME` から解決し、Workbench の tab には app が渡す。hook は Workbench の shim が `--settings` で注入する。
+monica では agent に渡す手順書が `.claude/skills` に 18 個あり、`~/.claude/skills` への手張りの symlink で配っていた。そのうち `monica` CLI を呼ぶ 2 つ（attach-task / track-issue）は `MONICA_HOME=$HOME/monica` を直書きしていたが、原因は `.monica/setup.sh` が direnv で dev home を shell に export していたことで、skill が上書きし返す構図だった。tania では手順書を **Skill**（`tania` を呼ぶ、`packages/<domain>/skills/<name>/SKILL.md`、plugin `tania` で配る）と **開発 skill**（tania repo を開発するための手順、`.claude/skills/`、配らない）に分ける。Skill は PATH 上の `tania` command を呼ぶだけで、env も hook も持たない。home は CLI が `$TANIA_HOME` から解決し、Workbench の tab には app が渡す。hook は Workbench の claude wrapper（`$TANIA_HOME/bin/claude`）が `--settings` で注入する。
 
 ## Considered Options
 

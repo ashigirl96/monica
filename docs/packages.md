@@ -1,6 +1,6 @@
 # パッケージ構成と dev loop
 
-tania の repo の形、package の entry、domain 間の呼び出し、CLI の組み立て、dev と release の手順を決める。骨格を実装するときに最初に読む文書で、実装が進んだらここを今の形に合わせて直す。決定の理由は ADR-0002 / 0003 / 0006 / 0009 / 0010 にある。出発点は stack prototype（branch `prototype/stack`）と workbench prototype（branch `prototype/workbench`）。
+tania の repo の形、package の entry、domain 間の呼び出し、CLI の組み立て、dev と release の手順を決める。骨格を実装するときに最初に読む文書で、実装が進んだらここを今の形に合わせて直す。決定の理由は `docs/adr/` にある（とくに ADR-0002 / 0003 / 0006 / 0009 / 0010 / 0011）。出発点は branch `prototype/stack`・`prototype/workbench`・`prototype/terminal-session` で、骨格の実装 issue は #25 の sub-issue。
 
 ## 配置
 
@@ -78,6 +78,7 @@ export const router = os.router({ ... });          // context は { db, workbenc
 export function createWorkbench(deps: {
   db: Db;
   home: string;
+  ptydPath: string;
   notify: (n: { title: string; body: string }) => void;
   nameAgentSession: (db: Db, agentSessionId: string) => string | null;
 }): Workbench;
@@ -89,13 +90,13 @@ export function createTask(deps: { db: Db; workbench: Workbench }): Task;
 export function nameAgentSession(db: Db, agentSessionId: string): string | null;
 ```
 
-`notify` と `nameAgentSession` は通知のための口（「通知」の節）。
+`ptydPath` は spawn する ptyd の場所（ADR-0011）。`notify` と `nameAgentSession` は通知のための口（「通知」の節）。
 
 `Workbench` と `Task` は次を持つ。
 
 - `events`: その domain の変更を知らせる in-process の publisher。
 - `start()` / `stop()`: 起動時と終了時の処理。workbench は ptyd への接続（無ければ spawn、版違いは入れ替え）と reconcile（ADR-0011）、task は 5 分おきの背景 sync（#18）。
-- 他の domain から呼ばれる書き込み: 第 1 引数に transaction（`db` でもよい）を取る**同期**の method。task は `db.transaction((tx) => { workbench.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。ptyd や fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。workbench の同期 method は `createRunspace` / `removeRunspace` / `moveTab` / `openTab`、commit 後の async は `startTerminalSession` / `terminateTerminalSessions`（#22）。`createRunspace` が作るのは所有された Runspace で、`removeRunspace(tx, id, { spare? })` は `spare` の Tab だけを残して所有を解ける（ADR-0012）。
+- 他の domain から呼ばれる書き込み: 第 1 引数に transaction（`db` でもよい）を取る**同期**の method。task は `db.transaction((tx) => { workbench.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。ptyd や fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。workbench の同期 method は `createRunspace` / `removeRunspace` / `moveTab` / `openTab`、commit 後の async は `startTerminalSession` / `terminateTerminalSessions`（#22）。どれも Task v1 の slice が使うときに `Workbench` へ足す。骨格では同じ形（第 1 引数が tx）の module 内の関数として procedure の handler から呼び、`Workbench` には出さない。`createRunspace` が作るのは所有された Runspace で、`removeRunspace(tx, id, { spare? })` は `spare` の Tab だけを残して所有を解ける（ADR-0012）。
 
 他の domain から呼ばれない処理は router の handler の中に書いてよい。
 
@@ -112,7 +113,7 @@ export function nameAgentSession(db: Db, agentSessionId: string): string | null;
 
 1. `$TANIA_HOME/tania.db` を開き、`locking_mode=EXCLUSIVE` → `journal_mode=WAL` → `foreign_keys=ON` の順に設定する（ADR-0007）。
 2. `migrate()` を workbench → task の順に呼ぶ。`migrationsTable` は各 package の `migrations.table` を渡す。
-3. `createWorkbench` → `createTask` の順に作る。`createWorkbench` には、stdout に通知の行を書く `notify` と、`@tania/task/server` の `nameAgentSession` を渡す。
+3. `createWorkbench` → `createTask` の順に作る。`createWorkbench` には、env の `TANIA_PTYD_PATH`（`ptydPath`）、stdout に通知の行を書く `notify`、`@tania/task/server` の `nameAgentSession` を渡す。`TANIA_PTYD_PATH` が無ければ stderr に 1 行出して exit 1 する。
 4. router を `{ workbench: workbenchRouter, task: taskRouter }` で mount し、context は `{ db, workbench, task }`。
 5. hono に CORS（`tauri://localhost`・`http://tauri.localhost`・`http://localhost:1420`）、`/health`（token 無し）、`/rpc/*` の bearer を載せ、`Bun.serve({ hostname: "127.0.0.1", port: 0, idleTimeout: 0 })` で立てる。
 6. `start()` を workbench → task の順に呼ぶ。workbench の `start()`（ptyd への接続と reconcile）を最大 3 秒待ってから、`backend.json` と stdout の endpoint 行を書く（ADR-0007 / 0011）。
@@ -144,14 +145,17 @@ contract を走査するテストを 1 本置き、description と output が全
   import { join } from "node:path";
   import journal from "./workbench/meta/_journal.json";
 
+  const entries: { tag: string }[] = journal.entries;
+
   export const migrations = {
     folder: join(import.meta.dir, "workbench"),
     table: "__drizzle_migrations_workbench",
-    latest: journal.entries.at(-1)?.tag,
+    latest: entries.at(-1)?.tag,
   };
   ```
 
-  journal の import は、generate の出力を `bun --watch` の import 木に入れるためにある（#8 の詰まった点 3）。
+  journal の import は、generate の出力を `bun --watch` の import 木に入れるためにある（#8 の詰まった点 3）。`entries` に型を付けるのは、table が 0 本の package の journal（`entries: []`）を tsc が `never[]` と推論するため。
+- table が 0 本の package（骨格の task）は、0 本のまま `drizzle-kit generate` を 1 回走らせ、出てきた `meta/_journal.json`（`entries: []`）を commit する。`migrate()` はこれで何もせずに通り、後で table を足せば普通に `0000_*.sql` ができる。custom migration は作らない。bun:sqlite はコメントだけの SQL を `Invalid SQL statement` で落とす。
 - 履歴 table は package ごとに分ける。既定の `__drizzle_migrations` を共有すると、drizzle は `created_at` の大小しか比べないので、片方の migration が黙って飛ばされる。runtime の `migrate()` には `migrationsTable` を必ず渡す（drizzle.config の `migrations.table` は `drizzle-kit migrate` にしか効かない）。
 - folder の basename は domain 名にする。`--asset` は basename の位置に mount するので、2 つの `drizzle/` を同梱すると `meta/_journal.json` が衝突して build が落ちる。
 - compiled binary ではどの module の `import.meta` も entry のものになるので、package の中で `new URL("../drizzle", import.meta.url)` と書くと壊れる。folder の親に置いた `migrations/index.ts` の `import.meta.dir` を使えば、`bun run` でも compiled でも同じ source で動く。
@@ -175,7 +179,12 @@ contract を走査するテストを 1 本置き、description と output が全
 
 ## desktop（apps/desktop）
 
-- `src/` は app の枠だけを持つ。layout、shortcut、Backend client の provider、Shell からの `backend-endpoint` event による再接続。domain の画面は `@tania/<d>/ui` から読む。
+- `src/` は app の枠だけを持つ。layout、shortcut、Backend client の provider、Shell からの `backend-endpoint` event による再接続、Backend 不在の表示。domain の画面は `@tania/<d>/ui` から読む。
+- Backend の endpoint の受け取りと不在の表示:
+  - 起動時は Shell の `backend_endpoint` command で今の endpoint（無ければ null）を取り、以降は `backend-endpoint` event で受ける。listen する前に出た event を取りこぼさないため。
+  - Shell は Backend の予期しない終了で endpoint を捨てたら、`backend-endpoint` に null を載せて出す。再起動を諦めたら `backend-failed` を出す（ADR-0007）。
+  - webview は endpoint が 1 秒以上 null のままなら、Workbench の上端に 1 行「Backend に再接続中…」を出す。`bun --watch` の再起動（約 100ms）でちらつかないよう 1 秒待つ。`backend-failed` では「Backend を起動できません」と「再試行」を出し、再試行は Shell の `backend_restart` command（失敗回数を戻して spawn する）を呼ぶ。
+  - 端末の byte は Shell を通るので、Backend が居ない間も打鍵と出力は続く。画面を塞がず、layout を変える操作だけが toast で失敗する。
 - domain の ui には自分の contract の client だけを渡す（workbench の ui は `client.workbench`）。oRPC の client は callable な Proxy なので、React の state に入れるときは `setState(() => client)`（#8 の詰まった点 5）。
 - Shell の terminal command と `clipboard_write_image` を呼ぶ wrapper（monica の `commands/terminal.ts`）は `packages/workbench/src/ui` に置く。
 - 画像の drop は monica のとおり、Tauri の drag-drop event の path を `clipboard_write_image` に渡し、成功したら active な Tab に `terminal_write` で Ctrl-V（`\x16`）を送る。Ctrl-V で clipboard の画像を読むのは agent の振る舞いなので、Shell の command にまとめない。失敗したら `packages/ui` の toast で 1 行出す（monica は黙っていた）。
@@ -184,19 +193,53 @@ contract を走査するテストを 1 本置き、description と output が全
   - `editor.resolve({ cwd, candidates })` → `(string | null)[]`: `~` を展開し、相対なら cwd に join して `realpath` する。失敗したら末尾の `:<数字>` を最大 2 つ外して再試行する。terminal の link 検出が hover のたびに 1 行分をまとめて呼び、null の候補は link にしない。
   - `editor.open({ path })` → `void`: `/usr/bin/open -a Zed <path>`。Zed は固定で、line:col は渡さない。webview は失敗を握りつぶす。
 - URL を開くのは webview から plugin-opener の `openUrl` で行う（http(s)・mailto・tel）。
-- workbench の ui は Task の要素を出す場所を 2 つの slot として props で受け、apps/desktop が `@tania/task/ui` の component をはめる。`renderRunspaceLabel(runspaceId)`（Bench のラベル `<repo>#<n> <title>`、準備中・準備失敗のときだけその語を添える）と `tabMenuItems(tab)`（「Attach to Task…」の picker）。task の ui は `task.bench.list`（`{ runspaceId, ref, title, setupState }[]`）と `task.changes` で描き直す。workbench の ui は Task を import しない（ADR-0005）。
+- workbench の ui は Task の要素を出す場所を 2 つの slot として props で受け、apps/desktop が `@tania/task/ui` の component をはめる（slot は Task v1 の slice 2 と 4 が足す）。`renderRunspaceLabel(runspaceId)`（Bench のラベル `<repo>#<n> <title>`、準備中・準備失敗のときだけその語を添える）と `tabMenuItems(tab)`（「Attach to Task…」の picker）。task の ui は `task.bench.list`（`{ runspaceId, ref, title, setupState }[]`）と `task.changes` で描き直す。workbench の ui は Task を import しない（ADR-0005）。
 - Tailwind の `@source` に `packages/*/src/ui` を足す。
-- `src-tauri/` は Shell。Backend の監督（ADR-0007）、terminal の中継、OS への窓口だけを持つ。窓口は通知（ADR-0013）、画像の clipboard、plugin-opener、drag-drop の event。custom command は terminal の attach / detach / write / resize の 4 本（ptyd は spawn しない。ADR-0011）と `clipboard_write_image` の 5 本。
+- `src-tauri/` は Shell。Backend の監督（ADR-0007）、terminal の中継、OS への窓口だけを持つ。窓口は通知（ADR-0013）、画像の clipboard、plugin-opener、drag-drop の event。custom command は terminal の attach / detach / write / resize の 4 本（ptyd は spawn しない。ADR-0011）、`clipboard_write_image`、`backend_endpoint`、`backend_restart` の 7 本。
 - Shell に置くのは、Tauri プロセスにしか無いもの（窓と webview の event、app の名義、AppKit）に触る処理と、Backend の再起動で途切れてはいけない terminal の byte だけ（ADR-0001）。fs と process の spawn で済む処理（worktree の判定、エディタ）は Backend の procedure にする。
 - `clipboard_write_image(path)` は monica の objc2 の実装（`NSImage::initWithContentsOfFile` を general pasteboard に `writeObjects`）を持ち込む。NSPasteboard は main thread で呼ぶので、sync command のままにする。
 
 ## Workbench の帳簿
 
-`packages/workbench` の行の規則のうち、contract の骨格と table（#22）、Agent Session の遷移表（#36）が決めていないもの。
+`packages/workbench` の contract と行の規則。table の下書きは #22 の resolution、Agent Session の遷移表は #36 の resolution にある。
+
+### contract（root は `workbench`）
+
+```
+terminalSession.list       → TerminalSession[]（tabId を join）                               cli
+terminalSession.terminate  { id }
+layout.get                 → { runspaces: [{ id, cwd, sortOrder,
+                                 tabs: [{ id, cwd, sortOrder, terminalSessionId, pinned }] }] }
+runspace.create            { cwd?, index?, rows, cols } → { runspaceId, tab }
+runspace.remove            { id }                      中の Tab の session を terminate
+runspace.move              { id, index }
+tab.open                   { runspaceId, cwd?, index?, rows, cols, terminalSessionId? } → Tab
+tab.respawn                { id, rows, cols } → Tab
+tab.close                  { id }                      session は detached になる
+tab.move                   { id, runspaceId, index }
+tab.setCwd                 { id, cwd }
+tab.pin / tab.unpin        { id }
+agentSession.recordHook    { terminalSessionId, payload } → void
+agentSession.list          → AgentSession[]                                                    cli
+worktree.info              { cwd } → { repo, branch } | null
+editor.resolve             { cwd, candidates } → (string | null)[]
+editor.open                { path } → void
+changes                    → { type: "layout" } | { type: "terminalSession", id }
+                             | { type: "agentSession", sessionId } | { type: "reconciled" }
+```
+
+- 各 procedure の規則は下の節と、`tab.open` / `tab.respawn` / `terminalSession.*` は #22 の resolution、`recordHook` は「tab の env と shim」の節、`worktree.*` / `editor.*` は「desktop」の節にある。
+- `recordHook` の CLI は手書きの `tania workbench hook claude`。`agentSession.list` の CLI（`tania workbench agent-session list`）は、画面無しで観測を確かめるためにある。
+- Task v1 が足すもの: `layout.get` の Runspace の所有の印（slice 2）と、所有された Runspace を断る規則。
+- `terminal_session.shell` は Backend の起動時に 1 回決める。`$SHELL`、無ければ `os.userInfo().shell`、それも無ければ `/bin/zsh`。reconcile で ptyd から取り込んだ行は `""`。
 
 ### Runspace と Tab
 
 所有されていない Runspace は常に Tab を 1 つ以上持ち、Backend がそれを守る（`GLOSSARY.md` の Runspace）。
+
+- `sort_order` は、Runspace と Tab を足す・移す・消すたびに、同じ transaction の中で兄弟を 0..n-1 に振り直す。`runspace.create` と `tab.open` の `index` を省けば末尾に足す。webview は active の次を渡し（monica どおり）、CLI と Task は省く。
+- Tab の title は帳簿に持たない。OSC 0/2 の title は webview の memory にだけ持ち、再 attach のときは transcript の replay に含まれる OSC で戻る。表示は monica どおり title、無ければ cwd の末尾、それも無ければ `Terminal`。title はよくある zsh の theme なら command のたびに変わり、帳簿に書くとそのたびに `changes` と `layout.get` が往復するため。
+- `tab.cwd` は最後に分かった cwd。webview は OSC 7 の cwd が前の値と変わったときだけ `tab.setCwd` を呼ぶ（OSC 7 は prompt のたびに来る）。Backend の張り直し（「pin」の節）と `tab.respawn` はこの cwd で始め、Runspace の title（`worktree.info`）も再起動の直後はこれを使う。
 
 - `runspace.create { cwd?, rows, cols } → { runspaceId, tab }` は、Runspace・Tab・`starting` の Terminal Session を 1 transaction で作り、commit 後に Create する（`tab.open` と同じ形）。cwd を省けば `$HOME`。空の Runspace を作ってから `tab.open` を呼ぶ 2 段にすると、間で webview の reload や Backend の再起動が起きたときに空の Runspace が残り、消す規則が無いため。
 - `tab.close` と `tab.move` は、Tab が抜けて 0 になった所有されていない Runspace を同じ transaction で消す。CLI の Attach のように webview の無い経路でも、空の Runspace が残らない。所有された Runspace（Bench）を残す例外は、Task v1 の slice 2 が所有の印と一緒に足す（ADR-0012）。
@@ -367,7 +410,7 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
   1. `TANIA_HOME` が無ければ `~/.tania-dev` を設定し、`TANIA_BIN=<repo>/scripts/tania-dev` を設定する。
   2. `cargo build -p tania-ptyd` を行い、externalBin の位置に `tania-ptyd`・`tania-backend`・`tania` を置く（tauri-build がファイルの存在を要求するため。debug の Shell は使わないので placeholder でよい）。
   3. `tauri dev --config src-tauri/tauri.dev.conf.json` を起動する。dev の config は identifier に `.dev` を付けて release と別 instance にし（ADR-0007）、`beforeDevCommand` は vite だけ。
-- debug build の Shell は Backend として `bun --watch apps/backend/src/main.ts` を起動し、ptyd の場所 `target/debug/tania-ptyd`（`TANIA_PTYD_PATH` で差し替え可）を env `TANIA_PTYD_PATH` で Backend に渡す。ptyd を spawn するのは Backend で、release の Backend は自分の隣の `tania-ptyd` を使う（ADR-0011）。Backend は package や apps/backend の編集と `bun run generate` で同じ pid のまま再起動し、webview は `backend-endpoint` event で再接続する。byte は Shell の ptyd 接続を通るので、この再起動で端末は切れない。
+- debug build の Shell は Backend として `bun --watch apps/backend/src/main.ts` を起動し、ptyd の場所 `target/debug/tania-ptyd`（`TANIA_PTYD_PATH` で差し替え可）を env `TANIA_PTYD_PATH` で Backend に渡す。ptyd を spawn するのは Backend で、場所は debug でも release でも Shell が env `TANIA_PTYD_PATH` で渡す（release は Shell の隣の `tania-ptyd`。ADR-0011）。Backend は package や apps/backend の編集と `bun run generate` で同じ pid のまま再起動し、webview は `backend-endpoint` event で再接続する。byte は Shell の ptyd 接続を通るので、この再起動で端末は切れない。
 - webview は vite の HMR。package の `ui` も source のまま読む。
 - `bun run tania <args>` は `scripts/tania-dev`（`bun apps/cli/src/main.ts "$@"`）を呼ぶ。`TANIA_HOME` が無ければ `~/.tania-dev`。
 - desktop は起動時に `$TANIA_HOME/bin/tania` → `TANIA_BIN` の symlink を張る。release の desktop だけが `~/.local/bin/tania` にも張る（ADR-0006）。dev の desktop が張ると release の CLI を上書きするため。Workbench の tab の PATH に `$TANIA_HOME/bin` を前置するのは shim（「tab の env と shim」の節）。
