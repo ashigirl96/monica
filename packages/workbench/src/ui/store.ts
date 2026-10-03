@@ -1,10 +1,11 @@
 import type { ContractRouterClient } from "@orpc/contract";
-import { type PopoverAnchor, pushErrorToast } from "@tania/ui";
+import { type PopoverAnchor, pushErrorToast, pushInfoToast } from "@tania/ui";
 import { atom, type Getter, type Setter } from "jotai";
 import { atomWithDefault } from "jotai/utils";
-import type { contract, Layout, Tab, Worktree } from "../contract.ts";
+import type { AgentSession, contract, Layout, Tab, Worktree } from "../contract.ts";
+import { shortPath } from "../paths.ts";
+import { type AgentDot, agentDotOf, runspaceAgentDot } from "./agent-dot.ts";
 import { jumpHintsActiveAtom } from "./jump-hints.ts";
-import { shortPath } from "./paths.ts";
 import {
   applyTerminalSessionListAtom,
   isDeadStatus,
@@ -72,24 +73,43 @@ async function load(get: Getter, set: Setter) {
   void set(resolveWorktreesAtom);
 }
 
-// promise は jotai が値として追跡するので、object に包んで持つ。
-const lastReloadAtom = atom<{ done: Promise<void> }>({ done: Promise.resolve() });
-const waitingReloadAtom = atom<{ done: Promise<void> } | null>(null);
+// 応答が前後して古い一覧で上書きしないよう読み直しは 1 本ずつ流し、待つ間に来た要求は 1 回にまとめる。
+function serialReload(load: (get: Getter, set: Setter) => Promise<void>) {
+  // promise は jotai が値として追跡するので、object に包んで持つ。
+  const lastAtom = atom<{ done: Promise<void> }>({ done: Promise.resolve() });
+  const waitingAtom = atom<{ done: Promise<void> } | null>(null);
+  return atom(null, (get, set): Promise<void> => {
+    const waiting = get(waitingAtom);
+    if (waiting) return waiting.done;
+    const reload = {
+      done: get(lastAtom).done.then(() => {
+        set(waitingAtom, null);
+        return load(get, set);
+      }),
+    };
+    set(waitingAtom, reload);
+    set(lastAtom, { done: reload.done.catch(() => {}) });
+    return reload.done;
+  });
+}
 
-// 応答が前後して古い layout で上書きしないよう読み直しは 1 本ずつ流し、待つ間に来た要求は 1 回にまとめる。
-export const reloadAtom = atom(null, (get, set): Promise<void> => {
-  const waiting = get(waitingReloadAtom);
-  if (waiting) return waiting.done;
-  const reload = {
-    done: get(lastReloadAtom).done.then(() => {
-      set(waitingReloadAtom, null);
-      return load(get, set);
-    }),
-  };
-  set(waitingReloadAtom, reload);
-  set(lastReloadAtom, { done: reload.done.catch(() => {}) });
-  return reload.done;
+export const reloadAtom = serialReload(load);
+
+const agentSessionsAtom = atom<AgentSession[]>([]);
+
+// hook は tool のたびに届くので、Agent Session は layout と別に読み直す。
+export const reloadAgentSessionsAtom = serialReload(async (get, set) => {
+  set(agentSessionsAtom, await clientOf(get).agentSession.list());
 });
+
+const agentSessionByTerminalSessionAtom = atom(
+  (get) => new Map(get(agentSessionsAtom).map((a) => [a.terminalSessionId, a])),
+);
+
+export const agentDotOfTerminalSessionAtom = atom(
+  (get) => (terminalSessionId: string) =>
+    agentDotOf(get(agentSessionByTerminalSessionAtom).get(terminalSessionId)),
+);
 
 // active な Runspace と Tab は帳簿に持たないので、id が layout から消えたら先頭を見せる。
 const activeRunspaceIdAtom = atomWithDefault((get) => get(savedUiStateAtom).activeRunspaceId);
@@ -112,6 +132,17 @@ function activeTabOf(get: Getter, runspace: Runspace): Tab | null {
 export const activeTerminalTabAtom = atom((get) => {
   const runspace = get(activeRunspaceAtom);
   return runspace ? activeTabOf(get, runspace) : null;
+});
+
+export const copyActiveAgentSessionIdAtom = atom(null, (get): boolean => {
+  const tab = get(activeTerminalTabAtom);
+  const id = tab && get(agentSessionByTerminalSessionAtom).get(tab.terminalSessionId)?.sessionId;
+  if (!id) return false;
+  navigator.clipboard.writeText(id).then(
+    () => pushInfoToast(`Session ID copied: ${id.slice(0, 8)}…`),
+    (e: unknown) => pushErrorToast(`Session ID copy failed: ${e}`),
+  );
+  return true;
 });
 
 // 切り替えはすべてここを通るので、jump hint を閉じるのもここで行う。
@@ -249,12 +280,14 @@ export type RunspaceSummary = {
   tabCount: number;
   isActive: boolean;
   holdsPin: boolean;
+  agentDot: AgentDot | null;
 };
 
 export const runspaceSummariesAtom = atom((get): RunspaceSummary[] => {
   const active = get(activeRunspaceAtom);
   const titles = get(tabTitlesAtom);
   const worktrees = get(worktreesAtom);
+  const agentDotOfTerminalSession = get(agentDotOfTerminalSessionAtom);
   return get(sidebarRunspacesAtom).map((runspace) => {
     const tab = activeTabOf(get, runspace);
     const cwd = tab?.cwd ?? runspace.cwd;
@@ -266,6 +299,9 @@ export const runspaceSummariesAtom = atom((get): RunspaceSummary[] => {
       tabCount: runspace.tabs.length,
       isActive: runspace.id === active?.id,
       holdsPin: holdsPin(runspace),
+      agentDot: runspaceAgentDot(
+        runspace.tabs.map((t) => agentDotOfTerminalSession(t.terminalSessionId)),
+      ),
     };
   });
 });

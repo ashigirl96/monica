@@ -204,6 +204,64 @@ test("changes signals every Agent Session a hook changed", async () => {
   );
 });
 
+test("a question asked through both of its hooks notifies once, after the commit, titled by the last two parts of the agent's cwd", async () => {
+  const sent: { title: string; body: string; committed: boolean }[] = [];
+  const { db, client } = setup({
+    notify: (n) => sent.push({ ...n, committed: !db.$client.inTransaction }),
+  });
+  seedTerminalSession(db, "ts-a", "running");
+  const record = (hookEventName: string, fields?: object) =>
+    client.agentSession.recordHook({
+      terminalSessionId: "ts-a",
+      payload: payload("s-1", hookEventName, { cwd: "/Users/me/src/tania", ...fields }),
+    });
+
+  await record("SessionStart", { source: "startup" });
+  await record("UserPromptSubmit", { prompt: "hi" });
+  await record("PreToolUse", { tool_name: "AskUserQuestion" });
+  await record("PermissionRequest", { tool_name: "AskUserQuestion" });
+
+  expect(sent).toEqual([{ title: "src/tania", body: "質問", committed: true }]);
+});
+
+test("the name the Task gives an Agent Session titles its notification", async () => {
+  const sent: object[] = [];
+  const { db, client } = setup({
+    notify: (n) => sent.push(n),
+    nameAgentSession: (_db, agentSessionId) =>
+      agentSessionId === "s-1" ? "tania#43 骨格 (8)" : null,
+  });
+  seedTerminalSession(db, "ts-a", "running");
+
+  await client.agentSession.recordHook({
+    terminalSessionId: "ts-a",
+    payload: payload("s-1", "Stop"),
+  });
+
+  expect(sent).toEqual([{ title: "tania#43 骨格 (8)", body: "手空き" }]);
+});
+
+test("a notification that cannot be named still leaves the hook recorded and signalled, with one line on stderr", async () => {
+  const { db, workbench, client } = setup({
+    nameAgentSession: () => {
+      throw new Error("no such table: run");
+    },
+  });
+  seedTerminalSession(db, "ts-a", "running");
+  const signals: unknown[] = [];
+  onCleanup(workbench.events.subscribe("change", (change) => signals.push(change)));
+  const lines = stderrLines();
+
+  await client.agentSession.recordHook({
+    terminalSessionId: "ts-a",
+    payload: payload("s-1", "Stop"),
+  });
+
+  expect(rowOf(db, "s-1")).toMatchObject({ state: "waiting", waitReason: "idle" });
+  expect(signals).toEqual([{ type: "agentSession", sessionId: "s-1" }]);
+  expect(lines()).toEqual([expect.stringContaining("no such table: run")]);
+});
+
 test("an Exit from ptyd ends the Agent Session in that Terminal Session", async () => {
   const { ptyd, db, client } = setup();
   const { tab } = await client.runspace.create(size);

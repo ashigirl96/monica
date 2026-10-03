@@ -2,8 +2,8 @@ import { and, eq, getTableColumns, ne } from "drizzle-orm";
 import type { AgentSession } from "./contract.ts";
 import { decodeHook } from "./hook-decoder.ts";
 import { agentSession, terminalSession } from "./schema.ts";
-import { supersede, takesOverTerminal, transition } from "./transition.ts";
-import { type Db, isLive, type Tx } from "./workbench.ts";
+import { notificationFor, supersede, takesOverTerminal, transition } from "./transition.ts";
+import { type Books, type Db, isLive, notifyWaiting, type Tx } from "./workbench.ts";
 
 const notEnded = ne(agentSession.state, "ended");
 
@@ -12,7 +12,7 @@ export function listAgentSessions(db: Db): AgentSession[] {
 }
 
 export function recordHook(
-  db: Db,
+  { db, workbench }: Books,
   input: { terminalSessionId: string; payload: Record<string, unknown> },
 ): string[] {
   const { terminalSessionId, payload } = input;
@@ -22,7 +22,7 @@ export function recordHook(
     return [];
   }
   const now = new Date();
-  return db.transaction((tx) => {
+  const recorded = db.transaction((tx) => {
     const host = tx
       .select({ status: terminalSession.status })
       .from(terminalSession)
@@ -33,7 +33,7 @@ export function recordHook(
       console.error(
         `[workbench] dropped a ${event.hookEventName} hook from Terminal Session ${terminalSessionId} (${host?.status ?? "not in the books"})`,
       );
-      return [];
+      return null;
     }
     const own =
       tx.select().from(agentSession).where(eq(agentSession.sessionId, event.sessionId)).get() ??
@@ -53,8 +53,13 @@ export function recordHook(
     const displaced = takesOverTerminal(own, next, event)
       ? beside.map((row) => supersede(row, now))
       : [];
-    return saveChanged(tx, [...displaced, next]);
+    return { changed: saveChanged(tx, [...displaced, next]), before: own, after: next };
   });
+  if (!recorded) return [];
+  const { changed, before, after } = recorded;
+  const body = after && notificationFor(before, event, after);
+  if (after && body) notifyWaiting(workbench, after, body);
+  return changed;
 }
 
 export function endAgentSessionsIn(tx: Tx, terminalSessionId: string, now: Date): string[] {

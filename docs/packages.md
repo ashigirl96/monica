@@ -10,7 +10,7 @@ tania/
 ├── tsconfig.json       1 つだけ
 ├── Cargo.toml          Rust の workspace（crates/* と apps/desktop/src-tauri）
 ├── .claude-plugin/     plugin.json・marketplace.json（ADR-0006）
-├── scripts/            desktop.ts・build.ts・install-app.ts・tania-dev
+├── scripts/            desktop.ts・dev-instance.ts・dev.ts・build.ts・install-app.ts・tania-dev
 ├── apps/
 │   ├── backend/        @tania/backend   Backend の組み立て
 │   ├── cli/            @tania/cli       bin は tania
@@ -117,7 +117,7 @@ export function nameAgentSession(db: Db, agentSessionId: string): string | null;
 2. `migrate()` を workbench → task の順に呼ぶ。`migrationsTable` は各 package の `migrations.table` を渡す。
 3. `createWorkbench` → `createTask` の順に作る。`createWorkbench` には、env の `TANIA_PTYD_PATH`（`ptydPath`）、stdout に通知の行を書く `notify`、`@tania/task/server` の `nameAgentSession` を渡す。`TANIA_PTYD_PATH` が無ければ stderr に 1 行出して exit 1 する。
 4. router を `{ workbench: workbenchRouter, task: taskRouter }` で mount し、context は `{ db, workbench, task }`。
-5. hono に CORS（`tauri://localhost`・`http://tauri.localhost`・`http://localhost:1420`）、`/health`（token 無し）、`/rpc/*` の bearer を載せ、`Bun.serve({ hostname: "127.0.0.1", port: 0, idleTimeout: 0 })` で立てる。
+5. hono に CORS（`tauri://localhost`・`http://tauri.localhost`。env の `TANIA_DEV_URL` があればその origin も。「dev loop」の節）、`/health`（token 無し）、`/rpc/*` の bearer を載せ、`Bun.serve({ hostname: "127.0.0.1", port: 0, idleTimeout: 0 })` で立てる。
 6. `start()` を workbench → task の順に呼ぶ。workbench の `start()`（ptyd への接続と reconcile）を最大 3 秒待ってから、`backend.json` と stdout の endpoint 行を書く（ADR-0007 / 0011）。
 7. 終了時は `stop()` を逆順に呼んでから ADR-0007 の手順で抜ける。
 
@@ -187,6 +187,7 @@ contract を走査するテストを 1 本置き、description と output が全
 ## desktop（apps/desktop）
 
 - `src/` は app の枠だけを持つ。shortcut、Backend client の provider、Shell からの `backend-endpoint` event による再接続、Backend 不在の表示、toast。domain の画面は `@tania/<d>/ui` から読む。Workbench の画面（sidebar・Tab の帯・端末の並び）は `@tania/workbench/ui` の `Workbench` が持ち、`client.workbench` を props で受けて、endpoint が替わるたびに `workbench.changes` を購読し直す。
+- ⌥ のキーは xterm に渡さず（`buildKeyEventHandler`）、shortcut だけが拾う。shortcut の binding が `false` を返して素通しした ⌥ のキーも、端末には届かない。
 - Backend の endpoint の受け取りと不在の表示:
   - 起動時は Shell の `backend_endpoint` command で今の endpoint（無ければ null）と再起動を諦めたかどうか（`{ endpoint, failed }`）を取り、以降は `backend-endpoint` と `backend-failed` の event で受ける。listen する前に出た event を取りこぼさないため。諦めたかどうかも取るのは、諦めた後に reload した webview が「再試行」を出せるようにするため。
   - Shell は Backend の予期しない終了で endpoint を捨てたら、`backend-endpoint` に null を載せて出す。再起動を諦めたら `backend-failed` を出す（ADR-0007）。
@@ -401,12 +402,13 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 
 | 次の状態 | 出す条件 |
 |---|---|
-| 質問・許可・エラーの待ち | 新しい待ちに入った（`state_changed_at` が変わった） |
+| 質問・許可・エラーの待ち | 新しい待ちに入った |
 | 手空き | 前の行が動作中か未観測で、event が Stop |
 | それ以外 | 出さない |
 
 - 質問とエラーは、前の行が同じ理由の待ちでないときに新しい待ちになる。PreToolUse(AskUserQuestion) と PermissionRequest(AskUserQuestion) は同じ質問なので 1 回しか出ない。
 - 許可は、PermissionRequest（ExitPlanMode と AskUserQuestion を除く）が来るたびに新しい待ちになる。前の行が許可待ちでも、`transition` は `state_changed_at` を更新する。許可した tool が動いている間は許可待ちに見えたままなので、その間に background の subagent が次の許可を求めたときに取りこぼさないため。PermissionRequest に `tool_use_id` は無く、同じダイアログかどうかは見分けられない。
+- `notificationFor` は `state_changed_at` を比べず、前の行の待ちの理由と event から新しい待ちかを決める。`state_changed_at` は ms 単位なので、同じ ms に続いた hook では新しい待ちに入っても前の行と同じ値になる。
 - SessionStart による手空き（起動・resume の直後）と、待ちから手空きへの変化では出さない。
 - agent の仕事が残っている Stop は遷移しないので出ない。agent の仕事が終わった後に Claude Code が自分で起こす turn の Stop で出る。
 - 未知の session_id は動作中の行を作ってから遷移を当てる（ADR-0008）ので、最初の event が Stop なら出る。
@@ -424,6 +426,7 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 ### Backend と Shell
 
 - apps/backend が `createWorkbench` に渡す `notify({ title, body })` は、stdout に `{"type":"notify","title","body"}` を 1 行書く。test では `notify` と `nameAgentSession` を差し替える。
+- `nameAgentSession` か `notify` が throw したら、stderr に 1 行出して捨てる。`recordHook` の記録と `changes` の合図は続ける。
 - Backend の stdout は Shell 宛ての JSON 行専用（ADR-0007）。Backend の log は stderr に出す。
 - Shell は stdout の行を `type` で振り分ける。`endpoint` は `backend-endpoint` event に、`notify` は tauri-plugin-notification の `app.notification().builder().title(..).body(..).show()` に渡す。解釈できない行は Shell の log に流して捨てる。
 - plugin の macOS 実装は NSUserNotificationCenter なので、取り下げ、クリックの受け取り、最前面でのバナーは無い。クリックすると tania が前面に出るだけ。
@@ -432,13 +435,19 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 ## dev loop
 
 - `bun run desktop` が `scripts/desktop.ts` を走らせる。
-  1. `TANIA_HOME` が無ければ `~/.tania-dev` を設定し、`TANIA_BIN=<repo>/scripts/tania-dev` を設定する。
+  1. `TANIA_HOME` が無ければ `~/.tania-dev` を設定し、`TANIA_BIN=<repo>/scripts/tania-dev` を設定する。home を `mkdir -p` し、`scripts/dev-instance.ts` の `devInstance` で home から identifier と vite の port の第一候補を引く（ADR-0007）。
+     - 既定の home は `com.ashigirl96.tania.dev` と 1420 のまま。ほかの home は `com.ashigirl96.tania.dev.<home の basename>-<hash>` と、1421 からの範囲に hash で散らした port で、1420 は使わない。
+     - hash は home の realpath から取る。basename だけだと `~/.tania-s2` と `$TMPDIR/tania-s2` が同じ identifier になり、後から起こした方が先の窓に回される。realpath にそろえないと、`$TMPDIR` の下の同じ home が `/var/…` と `/private/var/…` の 2 通りに書けて別の identifier になり、single-instance をすり抜ける。
   2. `cargo build -p tania-ptyd` を行う。externalBin は release の build だけが渡す（「release build と install」の節）ので、`binaries/` には何も置かない。
-  3. `tauri dev --config src-tauri/tauri.dev.conf.json` を起動する。dev の config は identifier に `.dev` を付けて release と別 instance にし（ADR-0007）、`beforeDevCommand` は vite だけ。
+  3. 第一候補から上へ、127.0.0.1 と ::1 の両方で bind できる最初の port を選ぶ。vite は `localhost` で listen し、どちらの loopback に bind するかは名前解決の順で決まるため。選んだ port は env `TANIA_DEV_URL`（`http://localhost:<port>`）に入れる。Shell は Backend の env を消さずに起こすので、Backend の CORS まで届く。
+     - 空きを確かめてから vite が bind するまでの間は port を押さえない。vite は自分で socket を開くので、確かめた socket を渡せないため。ほぼ同時に起こした 2 つの home が同じ port を選ぶと、後の vite は `strictPort` で落ちる。起こし直せば次の空きを選ぶ。
+  4. `tauri dev --config src-tauri/tauri.dev.conf.json --config '<JSON>'` を起動する。dev の config は productName と identifier（既定の home の値）を release から分ける。後ろの JSON は home ごとの `identifier` と `build.devUrl` で上書きし、`build.beforeDevCommand`（`bun run dev --port <port>`。vite の `strictPort` は残す）で vite を起こす。
+     - identifier か `devUrl` が前回と違うと `TAURI_CONFIG` が変わり、desktop の crate を build し直す。agent は worktree ごとに決まった名前の home を使う（`desktop-dev` skill）ので、build し直すのは worktree ごとに最初の 1 回だけ。
+     - mcp-bridge の port は plugin が 9223 から空きを選び、log の `MCP Bridge plugin initialized … on 127.0.0.1:<port>` に出す。
 - debug build の Shell は Backend として `bun --watch apps/backend/src/main.ts` を起動し、ptyd の場所 `target/debug/tania-ptyd`（`TANIA_PTYD_PATH` で差し替え可）を env `TANIA_PTYD_PATH` で Backend に渡す。ptyd を spawn するのは Backend で、場所は debug でも release でも Shell が env `TANIA_PTYD_PATH` で渡す（release は Shell の隣の `tania-ptyd`。ADR-0011）。Backend は package や apps/backend の編集と `bun run generate` で同じ pid のまま再起動し、webview は `backend-endpoint` event で再接続する。byte は Shell の ptyd 接続を通るので、この再起動で端末は切れない。
 - webview は vite の HMR。package の `ui` も source のまま読む。
 - `bun run tania <args>` は `scripts/tania-dev`（`bun apps/cli/src/main.ts "$@"`）を呼ぶ。`TANIA_HOME` が無ければ `~/.tania-dev`。
-- `bun run dev:list` は、動いている dev と残った home を `TANIA_HOME` ごとに並べる（desktop か headless か、desktop・Backend・ptyd の pid、worktree）。Backend の env は `ps` で読めないので、home は ptyd の `--tania-home` と `~/.tania-*`・`$TMPDIR/tania-*` から集め、Backend は `backend.json` の pid から、desktop はその親から引く。release の `~/.tania` は出さない。
+- `bun run dev:list` は、動いている dev と残った home を `TANIA_HOME` ごとに並べる（desktop か headless か、desktop・Backend・ptyd の pid、mcp-bridge の port、worktree）。Backend の env は `ps` で読めないので、home は ptyd の `--tania-home` と `~/.tania-*`・`$TMPDIR/tania-*` から集め、Backend は `backend.json` の pid から、desktop はその親から引く。bridge の port は desktop の pid が LISTEN している TCP の port（`lsof`）。release の `~/.tania` は出さない。
 - `bun run dev:kill <NAME>` は desktop → Backend → ptyd の順に止める。逆にすると、Shell が Backend を、Backend が ptyd を起こし直す。`$TMPDIR` の下の home は消し、`~/.tania-dev` は layout の帳簿があるので残す。
 - Shell は起動時に `$TANIA_HOME/bin/tania` → `TANIA_BIN` の symlink を張る。release の desktop だけが `~/.local/bin/tania` にも張る（ADR-0006）。dev の desktop が張ると release の CLI を上書きするため。Workbench の tab の PATH に `$TANIA_HOME/bin` を前置するのは shim（「tab の env と shim」の節）。
 - `TANIA_HOME` は direnv に書かない（ADR-0006）。

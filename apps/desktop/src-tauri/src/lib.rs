@@ -36,7 +36,8 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init());
     #[cfg(debug_assertions)]
     let builder = builder.plugin(
         tauri_plugin_mcp_bridge::Builder::new()

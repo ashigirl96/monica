@@ -30,6 +30,6 @@ monica は Claude Code の hook を受けるたびに TaskRun と TerminalSessio
 - **StopFailure は理由エラー**の待ちにし、payload の `error` を `error_type` に保存する。auto-resume で再開すれば次の hook で動作中に戻る。
 - **未知の session_id** の event は行を動作中で作ってから適用する。
 - **Terminal Session が帳簿に無いか終わっている** event は捨てる。Agent Session は Tab の中で動く agent で、env が Tab の外へ漏れた agent（Tab で起こした tmux server、Tab から開いたエディタの端末）や、Tab より長生きした agent は観測しない。
-- **許可は PermissionRequest ごとに新しい待ち**にし、前の行が許可待ちでも `state_changed_at` を更新する。許可した tool が終わるまでは許可待ちに見えたままなので、その間に subagent が次の許可を求めても `state_changed_at` が動かず、通知（ADR-0013）が出ないため。
+- **許可は PermissionRequest ごとに新しい待ち**にし、前の行が許可待ちでも `state_changed_at` を更新する。許可した tool が終わるまでは許可待ちに見えたままなので、その間に subagent が求めた次の許可も、新しい待ちとして通知（ADR-0013）するため。
 - **Backend 起動時**: 終了でない行について、Terminal Session が死んでいれば終了（terminal_exited）、生きていて動作中なら未観測、ユーザー待ちはそのまま。
 - 既知のずれ: 許可が下りてから tool が終わるまでは待ちのまま見える（長い Bash なら数分）。中断（Esc）、許可の deny、質問の Esc では hook が 1 つも来ないので、次の UserPromptSubmit まで動作中・許可待ち・質問待ちのまま見える。claude が SIGKILL などで落ちると SessionEnd が来ず、Terminal Session が生きている間は最後の状態のまま残る。生きている Tab の env が外へ漏れた agent（その Tab で起こした tmux の pane など）は、payload に pid が無いので見分けられず、その Tab の agent として観測され、SessionStart で Tab の agent を superseded にする。background の shell の終了や session の cron（`/loop` など）で起きる自動の turn は、ユーザーの入力無しに手空きから動作中に戻すので、Backend の不在中に始まった自動の turn は、戻った後もその turn の Stop まで手空きに見える。

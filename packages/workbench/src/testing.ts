@@ -7,6 +7,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { startFakePtyd } from "./fake-ptyd.ts";
 import { createWorkbench, migrations, router } from "./server.ts";
+import type { NotificationDeps } from "./workbench.ts";
 
 const cleanups: (() => void)[] = [];
 
@@ -18,7 +19,10 @@ export function cleanUp() {
   for (const cleanup of cleanups.splice(0).reverse()) cleanup();
 }
 
-export function setup() {
+export function setup({
+  notify = () => {},
+  nameAgentSession = () => null,
+}: Partial<NotificationDeps> = {}) {
   // ptyd の socket の path は macOS で 104 byte を超えると bind できないので、home は短くする。
   const home = mkdtempSync(join(tmpdir(), "tania-"));
   onCleanup(() => rmSync(home, { recursive: true, force: true }));
@@ -35,8 +39,8 @@ export function setup() {
       db,
       home,
       ptydPath: join(home, "no-ptyd"),
-      notify() {},
-      nameAgentSession: () => null,
+      notify,
+      nameAgentSession,
     });
     onCleanup(() => workbench.stop());
     const client = createRouterClient(router, { context: { db, workbench } });

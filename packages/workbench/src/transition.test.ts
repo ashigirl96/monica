@@ -4,6 +4,7 @@ import {
   type AgentEvent,
   type HookEvent,
   type HookSignal,
+  notificationFor,
   supersede,
   takesOverTerminal,
   transition,
@@ -253,4 +254,48 @@ test("a hook refreshes the cwd, and keeps the last known permission mode when it
   expect(
     transition(rowIn("running", { permissionMode: "plan" }), modeless, NOW)?.permissionMode,
   ).toBe("plan");
+});
+
+// 列は transition の表と同じ今の行の状態。値は通知の本文で、null は出さない。
+// prettier-ignore
+const notifications: [string, HookEvent, (string | null)[]][] = [
+  //                                                                                 running               unobserved            idle                  question              permission            error                 ended                 unknown
+  ["SessionStart(startup or resume)", hook("SessionStart", { type: "sessionStarted", compacted: false }),
+                                                                                    [null,                 null,                 null,                 null,                 null,                 null,                 null,                 null]],
+  ["SessionStart(compact)", hook("SessionStart", { type: "sessionStarted", compacted: true }),
+                                                                                    [null,                 null,                 null,                 null,                 null,                 null,                 null,                 null]],
+  ["UserPromptSubmit", hook("UserPromptSubmit", { type: "promptSubmitted" }),
+                                                                                    [null,                 null,                 null,                 null,                 null,                 null,                 null,                 null]],
+  ["PreToolUse(AskUserQuestion) or PermissionRequest(AskUserQuestion)", hook("PreToolUse", { type: "questionAsked" }),
+                                                                                    ["質問",               "質問",               "質問",               null,                 "質問",               "質問",               "質問",               "質問"]],
+  ["PermissionRequest(ExitPlanMode)", hook("PermissionRequest", { type: "planSubmitted" }),
+                                                                                    [null,                 null,                 null,                 null,                 null,                 null,                 null,                 null]],
+  ["PermissionRequest(Bash)", hook("PermissionRequest", { type: "permissionRequested", tool: "Bash" }),
+                                                                                    ["許可: Bash",         "許可: Bash",         "許可: Bash",         "許可: Bash",         "許可: Bash",         "許可: Bash",         "許可: Bash",         "許可: Bash"]],
+  ["PostToolUse(AskUserQuestion)", hook("PostToolUse", { type: "questionAnswered" }),
+                                                                                    [null,                 null,                 null,                 null,                 null,                 null,                 null,                 null]],
+  ["PostToolUse(Bash) or PostToolUseFailure(Bash)", hook("PostToolUse", { type: "toolFinished" }),
+                                                                                    [null,                 null,                 null,                 null,                 null,                 null,                 null,                 null]],
+  ["Stop without agent work", hook("Stop", { type: "turnStopped", agentWorkRunning: false }),
+                                                                                    ["手空き",             "手空き",             null,                 null,                 null,                 null,                 null,                 "手空き"]],
+  ["Stop with agent work running", hook("Stop", { type: "turnStopped", agentWorkRunning: true }),
+                                                                                    [null,                 null,                 null,                 null,                 null,                 null,                 null,                 null]],
+  ["StopFailure(server_error)", hook("StopFailure", { type: "turnFailed", error: "server_error" }),
+                                                                                    ["エラー: server_error", "エラー: server_error", "エラー: server_error", "エラー: server_error", "エラー: server_error", null,          null,                 "エラー: server_error"]],
+  ["StopFailure without an error type", hook("StopFailure", { type: "turnFailed", error: null }),
+                                                                                    ["エラー",             "エラー",             "エラー",             "エラー",             "エラー",             null,                 null,                 "エラー"]],
+  ["SessionEnd(other)", hook("SessionEnd", { type: "sessionEnded", reason: "other" }),
+                                                                                    [null,                 null,                 null,                 null,                 null,                 null,                 null,                 null]],
+];
+
+describe.each(notifications)("notifying on %s", (_name, event, bodies) => {
+  test.each(columns.map((column, i) => [column, bodies[i]!] as const))(
+    "from %s",
+    (column, body) => {
+      const prev = column === "unknown" ? null : rowIn(column);
+      const next = transition(prev, event, NOW);
+
+      expect(next && notificationFor(prev, event, next)).toBe(body);
+    },
+  );
 });
