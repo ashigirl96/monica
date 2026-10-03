@@ -15,7 +15,7 @@ monica は hook を受ける CLI プロセスで「待ちに入った edge」を
 
 ## Consequences
 
-- 出す遷移は workbench の純関数 `notificationFor(前の行, event, 次の行)` が決める。質問・許可・エラーはその理由の待ちに入った時（`state_changed_at` が変わった時）に出し、手空きは動作中・未観測からの Stop / SubagentStop の時だけ出す。SessionStart による手空き（起動・resume）と、待ちから手空きへの変化（deny・Esc）では出さない。edge 1 つに通知 1 つで、dedupe key は持たない。
+- 出す遷移は workbench の純関数 `notificationFor(前の行, event, 次の行)` が決める。質問・許可・エラーはその理由の待ちに入った時（`state_changed_at` が変わった時）に出し、手空きは動作中・未観測からの Stop の時だけ出す。SessionStart による手空き（起動・resume）と、待ちから手空きへの変化（deny・Esc）では出さない。edge 1 つに通知 1 つで、dedupe key は持たない。
 - title は呼び名、body は理由（`手空き`、`質問`、`許可: Bash`、`エラー: rate_limit`）。呼び名は task が `nameAgentSession(db, agentSessionId)` で差し込み、Run の Task、無ければ Tab の Bench の Task を `<repo>#<n> <title>` で返す。引けなければ Agent Session の cwd の末尾 2 つ。workbench は task を import しない（ADR-0005）ので、apps/backend が `createWorkbench` に渡す。音は鳴らさない。
 - Backend の stdout は Shell 宛ての JSON 行専用の channel になる。行は `{"type":"endpoint",…}`（ADR-0007）と `{"type":"notify","title","body"}` の 2 種で、Shell は解釈できない行を自分の log に流して捨てる。Backend の log は stderr に出す。Shell は Task も Agent Session も知らず、title と body を渡すだけ。
 - 出した通知は取り下げない。クリックは OS の既定どおり tania を前面に出すだけで、Tab には移らない。tania が最前面の間はバナーが出ず、通知センターに入るだけになる（NSUserNotificationCenter の既定で、plugin の delegate は上書きできない）。前面で使っている間は sidebar の status dot が代わりになる。

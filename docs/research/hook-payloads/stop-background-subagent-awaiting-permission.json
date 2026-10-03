@@ -1,0 +1,21 @@
+{
+  "session_id": "3b570518-e0b1-4ac9-9f06-6c3a4c196b1a",
+  "transcript_path": "/Users/me/.claude/projects/-Users-me-src-hooklab/3b570518-e0b1-4ac9-9f06-6c3a4c196b1a.jsonl",
+  "cwd": "/Users/me/src/hooklab",
+  "scratchpad_dir": "/private/tmp/claude-501/-Users-me-src-hooklab/3b570518-e0b1-4ac9-9f06-6c3a4c196b1a/scratchpad",
+  "prompt_id": "339c1a84-a916-4393-809f-2e0d155b0938",
+  "permission_mode": "default",
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "エージェントを起動しました。完了を待っています。",
+  "background_tasks": [
+    {
+      "id": "ac5714e43ee100af8",
+      "type": "subagent",
+      "status": "running",
+      "description": "Create test file and report",
+      "agent_type": "general-purpose"
+    }
+  ],
+  "session_crons": []
+}

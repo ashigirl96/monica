@@ -1,0 +1,27 @@
+{
+  "session_id": "6253bdb0-26c3-4dd3-bc04-34af7ebcc00e",
+  "transcript_path": "/Users/me/.claude/projects/-Users-me-src-hooklab/6253bdb0-26c3-4dd3-bc04-34af7ebcc00e.jsonl",
+  "cwd": "/Users/me/src/hooklab",
+  "scratchpad_dir": "/private/tmp/claude-501/-Users-me-src-hooklab/6253bdb0-26c3-4dd3-bc04-34af7ebcc00e/scratchpad",
+  "prompt_id": "05828306-2a81-4477-8cb7-48d98bc0ed0a",
+  "permission_mode": "default",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Agent",
+  "tool_input": {
+    "description": "Run sleep 15 then reply done",
+    "prompt": "Run the Bash command sleep 15, then reply with the word done.",
+    "subagent_type": "general-purpose"
+  },
+  "tool_response": {
+    "isAsync": true,
+    "status": "async_launched",
+    "agentId": "a6b796186335154f4",
+    "description": "Run sleep 15 then reply done",
+    "resolvedModel": "claude-haiku-4-5-20251001",
+    "prompt": "Run the Bash command sleep 15, then reply with the word done.",
+    "outputFile": "/private/tmp/claude-501/-Users-me-src-hooklab/6253bdb0-26c3-4dd3-bc04-34af7ebcc00e/tasks/a6b796186335154f4.output",
+    "canReadOutputFile": true
+  },
+  "tool_use_id": "toolu_0167avUSqXHXVxc8Jn9wU8aj",
+  "duration_ms": 8
+}

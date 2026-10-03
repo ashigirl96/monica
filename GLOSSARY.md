@@ -64,8 +64,8 @@ _Avoid_: session（Agent Session と紛れる）
 **Agent Session**:
 Tab の中で動く agent が自分で名乗るセッション。同一性は agent の session_id で、resume と compact は同じ Agent Session の再開、fork は別の Agent Session。Terminal Session とは別物で、同じ Tab に両方が存在する。agent の状態の唯一の正本で、Task に紐づかない Tab でも観測する。状態は次の 4 つで、agent 自身の報告だけで遷移する。
 
-- **動作中**: agent が turn を進めている。
-- **ユーザー待ち**: agent がユーザーの行動を待っている。理由は 4 つ。**手空き**（次の指示を待っている。起動直後と turn 完了後）、**質問**（agent が訊いている）、**許可**（tool の実行許可を求めている。プラン承認もこれ）、**エラー**（API エラーで turn が終わった）。
+- **動作中**: agent が turn を進めているか、自分で起こした background の agent の仕事が終わるのを待っている（終われば agent が自分で次の turn を始める）。
+- **ユーザー待ち**: agent がユーザーの行動を待っている。理由は 4 つ。**手空き**（次の指示を待っている。起動直後と、turn が終わって background の agent の仕事も残っていない時）、**質問**（agent が訊いている）、**許可**（tool の実行許可を求めている。subagent の分とプラン承認も含む）、**エラー**（API エラーで turn が終わった）。
 - **終了**: agent のプロセスが居ない。同じ Agent Session を resume すれば動作を再開できるので、終わりではなく「今は動いていない」。
 - **未観測**: Backend が居ない間に動作中だった Agent Session の、次の報告が届くまでの状態。Terminal Session は生きているが、動作中か手空きかが分からない。
 
@@ -73,7 +73,7 @@ Tab の中で動く agent が自分で名乗るセッション。同一性は ag
 _Avoid_: session, agent status on Terminal Session, stopped（手空きと終了が紛れる）, plan 待ち（許可の一種）
 
 **通知**:
-Agent Session がユーザー待ちに入ったことを知らせる macOS の通知。質問・許可・エラーはその理由の待ちに入るたびに出し、手空きは turn が終わった時だけ出す。claude の起動や resume の直後の手空きと、ユーザー自身の操作（許可の deny や中断）で入った手空きでは出さない。Task に属する Agent Session は Task の Issue の参照と title で、それ以外は agent の cwd で呼ぶ。desktop が動いている間だけ出し、待ちが解けても取り下げない。
+Agent Session がユーザー待ちに入ったことを知らせる macOS の通知。質問・許可・エラーはその理由の待ちに入るたびに出し、手空きは turn が終わった時だけ出す。claude の起動や resume の直後の手空きでは出さない。Task に属する Agent Session は Task の Issue の参照と title で、それ以外は agent の cwd で呼ぶ。desktop が動いている間だけ出し、待ちが解けても取り下げない。
 _Avoid_: 待ち通知, alert
 
 ### Process

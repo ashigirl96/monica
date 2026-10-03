@@ -203,3 +203,7 @@ Source: https://code.claude.com/docs/en/hooks.md、https://code.claude.com/docs/
 - **Notification** の matcher は permission_prompt / idle_prompt（約 60 秒放置で発火）/ auth_success / elicitation_* / agent_needs_input / agent_completed / quota_auto_resume_*。
 - hook payload に Claude Code の **pid は無い**。
 - AskUserQuestion を Esc で捨てたときに何か発火するかは **未記載**。
+
+## 訂正（2026-10-03、#36 の実機確認）
+
+上の追記のうち 3 つは実機と docs の更新で変わった。詳細は `hook-payloads.md`。StopFailure の field は `error_type` ではなく `error`。`background_tasks` と `session_crons` は公式 docs に載った。AskUserQuestion を Esc で捨てても何も発火しない。

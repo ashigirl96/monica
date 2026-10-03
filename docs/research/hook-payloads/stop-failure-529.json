@@ -1,0 +1,9 @@
+{
+  "session_id": "decd80a6-5e61-49fa-9436-e92a23196cb2",
+  "transcript_path": "/Users/me/.claude/projects/-Users-me-src-hooklab/decd80a6-5e61-49fa-9436-e92a23196cb2.jsonl",
+  "cwd": "/Users/me/src/hooklab",
+  "prompt_id": "485709a9-a2b0-4772-88d6-10694db0d8c9",
+  "hook_event_name": "StopFailure",
+  "error": "server_error",
+  "last_assistant_message": "API Error: 529 fake overloaded. This is a server-side issue, usually temporary — try again in a moment. If it persists, check your inference gateway (127.0.0.1:18765)."
+}

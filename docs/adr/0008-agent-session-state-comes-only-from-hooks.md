@@ -9,23 +9,25 @@ monica は Claude Code の hook を受けるたびに TaskRun と TerminalSessio
 ## Considered Options
 
 - **PermissionRequest を張らない**（monica 踏襲）: hook のコストは最小だが、v1 の基準「ユーザー待ちに気づく」（#12）が default mode の許可待ちで成り立たない。許可が下りたことを知らせる hook は無く、解消は tool 完了後の PostToolUse / PostToolUseFailure でしか見えないので、全 tool に張るしかない。
-- **PostToolUse を `async: true` にする**: Claude を待たせないが、遅れて届いた PostToolUse が後続の PreToolUse(AskUserQuestion) を追い越しうるので「PostToolUse は許可待ちだけを解消し、質問待ちは AskUserQuestion の PostToolUse だけが解消する」ガードが要る。同期で始め、実測して痛ければこの形に切り替える。
+- **PostToolUse を `async: true` にする**: Claude を待たせないが、遅れて届いた PostToolUse が後続の PreToolUse(AskUserQuestion) を追い越しうるので「PostToolUse は許可待ちだけを解消し、質問待ちは AskUserQuestion の PostToolUse だけが解消する」ガードが要る。実測では同期でも 1 tool あたり十数 ms しか増えない（`docs/research/hook-payloads.md`）ので、同期のまま張る。
 - **プラン承認を専用の理由にする**（monica の ExitPlanMode 理由）: 自動承認が常時 on の v1 では数 ms で解消する flap になる。自動承認は hook CLI の PermissionRequest(ExitPlanMode) handler の方針として状態機械の外に置き、将来 off にしたら decision 無しで通過して普通の許可待ち（tool = ExitPlanMode）になる。
 - **再起動後も最後の既知状態を信じる**: 動作中だったものが止まっていても次の hook まで動作中と出る。未観測を置けば #17 が「要確認」を出せる。
 - **pid で生死を探る**: hook payload に pid は無く、hook は sh 経由で起動されるので ppid を遡る必要があり、分かるのは生死だけで動作中か手空きかは分からない。
 - **transcript を読んで復元する**: 正確だが非公開フォーマットへの依存。
-- **SubagentStart / SubagentStop を数える**: monica が実際に drift させて捨てた方式。Stop / SubagentStop の payload の `background_tasks` をその場で読む。この field は公式 docs に無いので、無ければ subagent 無しとみなして Stop をそのまま適用する。
-- **終了を不変にして SessionStart だけで復帰させる**: dev の `bun --watch` 再起動中に SessionStart を取りこぼすと、生きている agent をずっと終了と出し続ける。生存の証拠になる event（SessionStart / UserPromptSubmit / PreToolUse(AskUserQuestion) / PermissionRequest）だけ終了から復帰させ、Stop / PostToolUse / SubagentStop / SessionEnd の straggler は無視する。
-- **Notification(idle_prompt) で手空きを見る**: 60 秒遅れで理由も無い。Stop で足りる。
+- **SubagentStart / SubagentStop を数える**: monica が実際に drift させて捨てた方式で、SubagentStop は prompt suggestion などの内部の agent でも来る。Stop の payload の `background_tasks`（公式の field）をその場で読み、無ければ background の仕事は無いとみなす。
+- **`background_tasks` の type を問わず Stop を保留する**: `run_in_background` の Bash も載るので、dev server を起こしたまま turn を終えた agent がずっと動作中に見える。
+- **SubagentStop で保留を解く**: 終わった subagent の SubagentStop の直後に Claude Code が自分で turn を起こすので、手空き → 動作中 → 手空きと揺れ、手空きの通知が 2 回出る。
+- **終了を不変にして SessionStart だけで復帰させる**: dev の `bun --watch` 再起動中に SessionStart を取りこぼすと、生きている agent をずっと終了と出し続ける。生存の証拠になる event（SessionStart / UserPromptSubmit / PreToolUse(AskUserQuestion) / PermissionRequest）だけ終了から復帰させ、Stop / PostToolUse / SessionEnd の straggler は無視する。
+- **Notification(idle_prompt) で手空きを見る**: 60 秒遅れで理由も無い。Stop で足りる。中断や deny の後の古い状態を直す用途にも、terminal から離れているように見える時だけ出る仕様なので当てにできない。
 
 ## Consequences
 
-- 状態と理由は `GLOSSARY.md` の Agent Session 節。遷移表と `agent_session` table は #16 の resolution。
-- **張る hook**: SessionStart、UserPromptSubmit、PreToolUse(`AskUserQuestion`)、PostToolUse（全 tool）、PostToolUseFailure（全 tool）、PermissionRequest（全 tool）、Stop、StopFailure、SubagentStop、SessionEnd。張らない: SubagentStart、Notification、PreCompact / PostCompact、AskUserQuestion 以外の PreToolUse。`timeout` はすべて 5 秒（既定は 600 秒で、Backend が固まると Claude が 10 分止まる）。
+- 状態と理由は `GLOSSARY.md` の Agent Session 節。遷移表と `agent_session` table は #16 の resolution を #36 の resolution で直したもの。実機の payload は `docs/research/hook-payloads.md`。
+- **張る hook**（9 本）: SessionStart、UserPromptSubmit、PreToolUse(`AskUserQuestion`)、PostToolUse（全 tool）、PostToolUseFailure（全 tool）、PermissionRequest（全 tool）、Stop、StopFailure、SessionEnd。張らない: SubagentStart、SubagentStop、Notification、PreCompact / PostCompact、AskUserQuestion 以外の PreToolUse。`timeout` はすべて 5 秒（既定は 600 秒で、Backend が固まると Claude が 10 分止まる）。
 - **1 Terminal Session に live な Agent Session は 1 つ**。SessionStart が Terminal Session T に届いたら、T 上の他の live な Agent Session を終了（superseded）にする。resume が記録と違う T で届いたら Agent Session の居場所を T に移す。Run は agent_session_id で繋がっているので Task との対応は動かない（ADR-0005）。
-- **Stop の保留**: payload の `background_tasks` に running があれば Stop を無視して動作中のまま `stop_held` を立て、SubagentStop で残りが無くなったときだけ手空きにする。保留無しの SubagentStop は遷移しない（foreground の subagent）。
-- **質問待ち中の Stop は無視**し、解消は PostToolUse(AskUserQuestion) / UserPromptSubmit / SessionStart / SessionEnd / Terminal Session の終了だけ。許可待ち中の Stop は手空きにする（ダイアログは tool 呼び出しの途中なので、Stop が来たなら deny の後）。
-- **StopFailure は理由エラー**の待ちにし `error_type` を保存する。auto-resume で再開すれば次の hook で動作中に戻る。
+- **Stop の保留**: payload の `background_tasks` に agent の仕事（type が `subagent` / `workflow` / `teammate`）が running なら、Stop は遷移しない。動作中なら動作中のまま、subagent の許可待ちなら許可待ちのまま。agent の仕事が終わると Claude Code が UserPromptSubmit 付きの turn を自分で起こすので、保留はその turn の Stop で解ける。`shell` / `monitor` / `MCP task` / `cloud session` と未知の type は数えない（数え違えても早めの手空きで済む）。
+- **質問待ちは PreToolUse(AskUserQuestion) と PermissionRequest(AskUserQuestion) のどちらでも入る**（AskUserQuestion では mode によらず両方が来る）。質問待ち中の Stop は無視し、解消は PostToolUse(AskUserQuestion) / UserPromptSubmit / SessionStart / SessionEnd / Terminal Session の終了だけ。許可待ち中に agent の仕事の無い Stop が来たら手空きにする（許可の解消を見落とした後の Stop。deny では Stop は来ない）。
+- **StopFailure は理由エラー**の待ちにし、payload の `error` を `error_type` に保存する。auto-resume で再開すれば次の hook で動作中に戻る。
 - **未知の session_id** の event は行を動作中で作ってから適用する。
 - **Backend 起動時**: 終了でない行について、Terminal Session が死んでいれば終了（terminal_exited）、生きていて動作中なら未観測、ユーザー待ちはそのまま。
-- 既知のずれ: 許可が下りてから tool が終わるまでは待ちのまま見える（長い Bash なら数分）。deny の解消は次の Stop / UserPromptSubmit / 別 tool の PostToolUse。質問を Esc で捨てると次の UserPromptSubmit まで質問待ちに見える。`background_tasks` の有無と質問中に Stop が本当に来るかは Run の実装 issue で実機確認する。
+- 既知のずれ: 許可が下りてから tool が終わるまでは待ちのまま見える（長い Bash なら数分）。中断（Esc）、許可の deny、質問の Esc では hook が 1 つも来ないので、次の UserPromptSubmit まで動作中・許可待ち・質問待ちのまま見える。claude が SIGKILL などで落ちると SessionEnd が来ず、Terminal Session が生きている間は最後の状態のまま残る。background の shell の終了や session の cron（`/loop` など）で起きる自動の turn は、ユーザーの入力無しに手空きから動作中に戻すので、Backend の不在中に始まった自動の turn は、戻った後もその turn の Stop まで手空きに見える。

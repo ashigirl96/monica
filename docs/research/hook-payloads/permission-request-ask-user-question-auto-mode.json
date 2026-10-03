@@ -1,0 +1,32 @@
+{
+  "session_id": "03b0c100-ef73-451b-aed2-4fab3d785c0a",
+  "transcript_path": "/Users/me/.claude/projects/-Users-me-src-hooklab/03b0c100-ef73-451b-aed2-4fab3d785c0a.jsonl",
+  "cwd": "/Users/me/src/hooklab",
+  "scratchpad_dir": "/private/tmp/claude-501/-Users-me-src-hooklab/03b0c100-ef73-451b-aed2-4fab3d785c0a/scratchpad",
+  "prompt_id": "7bbc266b-1385-44a9-9fdf-af5066a0bc19",
+  "permission_mode": "auto",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PermissionRequest",
+  "tool_name": "AskUserQuestion",
+  "tool_input": {
+    "questions": [
+      {
+        "question": "紅茶とコーヒー、どちらがお好みですか？",
+        "header": "飲み物",
+        "options": [
+          {
+            "label": "紅茶",
+            "description": "お茶（tea）を選びます"
+          },
+          {
+            "label": "コーヒー",
+            "description": "コーヒー（coffee）を選びます"
+          }
+        ],
+        "multiSelect": false
+      }
+    ]
+  }
+}

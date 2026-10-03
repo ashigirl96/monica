@@ -1,0 +1,25 @@
+{
+  "session_id": "3b570518-e0b1-4ac9-9f06-6c3a4c196b1a",
+  "transcript_path": "/Users/me/.claude/projects/-Users-me-src-hooklab/3b570518-e0b1-4ac9-9f06-6c3a4c196b1a.jsonl",
+  "cwd": "/Users/me/src/hooklab",
+  "scratchpad_dir": "/private/tmp/claude-501/-Users-me-src-hooklab/3b570518-e0b1-4ac9-9f06-6c3a4c196b1a/scratchpad",
+  "prompt_id": "339c1a84-a916-4393-809f-2e0d155b0938",
+  "permission_mode": "default",
+  "agent_id": "ac5714e43ee100af8",
+  "agent_type": "general-purpose",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "touch sub-perm.txt",
+    "description": "Create an empty file named sub-perm.txt"
+  },
+  "tool_response": {
+    "stdout": "",
+    "stderr": "",
+    "interrupted": false,
+    "isImage": false,
+    "noOutputExpected": true
+  },
+  "tool_use_id": "toolu_01LDhhZut5ujAa5JRoqY8xwx",
+  "duration_ms": 51
+}

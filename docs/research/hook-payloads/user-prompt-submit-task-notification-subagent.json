@@ -1,0 +1,10 @@
+{
+  "session_id": "6253bdb0-26c3-4dd3-bc04-34af7ebcc00e",
+  "transcript_path": "/Users/me/.claude/projects/-Users-me-src-hooklab/6253bdb0-26c3-4dd3-bc04-34af7ebcc00e.jsonl",
+  "cwd": "/Users/me/src/hooklab",
+  "scratchpad_dir": "/private/tmp/claude-501/-Users-me-src-hooklab/6253bdb0-26c3-4dd3-bc04-34af7ebcc00e/scratchpad",
+  "prompt_id": "b1815b6d-2e6c-494b-8670-2786fe2b03a9",
+  "permission_mode": "default",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "<task-notification>\n<task-id>a6b796186335154f4</task-id>\n<tool-use-id>toolu_0167avUSqXHXVxc8Jn9wU8aj</tool-use-id>\n<output-file>/private/tmp/claude-501/-Users-me-src-hooklab/6253bdb0-26c3-4dd3-bc04-34af7ebcc00e/tasks/a6b796186335154f4.output</output-file>\n<status>completed</status>\n<summary>Agent \"Run sleep 15 then reply done\" finished</summary>\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>\n<result>done</result>\n<usage><subagent_tokens>32472</subagent_tokens><tool_uses>1</tool_uses><duration_ms>17787</duration_ms></usage>\n</task-notification>"
+}

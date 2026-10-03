@@ -218,7 +218,7 @@ ptyd は shell を常に `--login` で起こすので、zsh は `.zshenv` → `.
 
 ### hook の settings（`$TANIA_HOME/shell/claude/settings.json`）
 
-- 張る hook は #16 の 10 本で、timeout はすべて 5 秒（既定の 600 秒を必ず上書きする）。SessionStart、UserPromptSubmit、PreToolUse（matcher `AskUserQuestion`）、PostToolUse、PostToolUseFailure、PermissionRequest、Stop、StopFailure、SubagentStop、SessionEnd。
+- 張る hook は 9 本（ADR-0008）で、timeout はすべて 5 秒（既定の 600 秒を必ず上書きする）。SessionStart、UserPromptSubmit、PreToolUse（matcher `AskUserQuestion`）、PostToolUse、PostToolUseFailure、PermissionRequest、Stop、StopFailure、SessionEnd。
 - command は `'<home>/bin/tania' workbench hook claude`（絶対パス。agent が PATH を変えても届く）。
 - wrapper は file の path を渡すので、Backend が書き直せば既存の tab でも次の `claude` から効く。
 
@@ -228,15 +228,14 @@ ptyd は shell を常に `--login` で起こすので、zsh は `.zshenv` → `.
 - PermissionRequest で `tool_name == "ExitPlanMode"` なら、Backend を待たずに stdout へ allow を書く（`updatedInput` に `tool_input` を返し、`updatedPermissions` に `setMode: auto` を付ける。#16）。
 - stdin の payload と env の Terminal Session id を `agentSession.recordHook` に渡す。呼び出しは 2 秒で打ち切り、不在・失敗・timeout のどれでも exit 0。retry しない（ADR-0007）。
 
-### 実機で確かめること
+### payload と decoder
 
-状態機械（ADR-0008）を実装するときに確かめる。
+実機の payload は `docs/research/hook-payloads/` にあり、decoder の test の fixture にする。field と、場面ごとにどの hook がどの順で届くかは `docs/research/hook-payloads.md`。遷移表は #36 の resolution。
 
-1. Stop と SubagentStop の payload に `background_tasks` があるか
-2. 質問待ちの間に Stop が来るか
-3. PostToolUse を全 tool に張ったときの、tool 1 回あたりの遅延
-4. StopFailure の payload
-5. claude が SIGKILL などで SessionEnd を出さずに落ちたとき、Agent Session が最後の状態のまま残るか
+- Stop は、`background_tasks` に type が `subagent` / `workflow` / `teammate` で status が `running` のものがあるかだけを読む。field が無ければ無いとみなす。
+- PreToolUse(AskUserQuestion) と PermissionRequest(AskUserQuestion) は、同じ質問の event にする。
+- StopFailure のエラーの種類は `error` から読む（`error_type` ではない）。
+- `permission_mode` は SessionStart / SessionEnd / StopFailure に無い。PermissionRequest に `tool_use_id` は無い。
 
 ## 通知
 
@@ -249,10 +248,11 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 | 次の状態 | 出す条件 |
 |---|---|
 | 質問・許可・エラーの待ち | 前の行が同じ理由の待ちでない（`state_changed_at` が変わった） |
-| 手空き | 前の行が動作中か未観測で、event が Stop か SubagentStop |
+| 手空き | 前の行が動作中か未観測で、event が Stop |
 | それ以外 | 出さない |
 
-- SessionStart による手空き（起動・resume の直後）と、待ちから手空きへの変化（許可の deny や Esc の後の Stop）では出さない。
+- SessionStart による手空き（起動・resume の直後）と、待ちから手空きへの変化では出さない。
+- agent の仕事が残っている Stop は遷移しないので出ない。agent の仕事が終わった後に Claude Code が自分で起こす turn の Stop で出る。
 - 未知の session_id は動作中の行を作ってから遷移を当てる（ADR-0008）ので、最初の event が Stop なら出る。
 - PermissionRequest(ExitPlanMode) は遷移しないので、プランの自動承認では出ない。
 - edge 1 つに通知 1 つ。dedupe key、outbox、Backend の再起動時のまとめ出しは持たない。

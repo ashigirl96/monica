@@ -1,0 +1,14 @@
+{
+  "session_id": "80a98bd2-30bd-46c3-93b5-d370df79ded6",
+  "transcript_path": "/Users/me/.claude/projects/-Users-me-src-hooklab/80a98bd2-30bd-46c3-93b5-d370df79ded6.jsonl",
+  "cwd": "/Users/me/src/hooklab",
+  "scratchpad_dir": "/private/tmp/claude-501/-Users-me-src-hooklab/80a98bd2-30bd-46c3-93b5-d370df79ded6/scratchpad",
+  "prompt_id": "850a6aa3-f17e-489b-a22f-4fa697c5b919",
+  "permission_mode": "plan",
+  "hook_event_name": "PermissionRequest",
+  "tool_name": "ExitPlanMode",
+  "tool_input": {
+    "plan": "作業ディレクトリに `hello.txt` を作成し、内容を `hi` にする。\n",
+    "planFilePath": "/Users/me/.claude/plans/swirling-fluttering-hare.md"
+  }
+}

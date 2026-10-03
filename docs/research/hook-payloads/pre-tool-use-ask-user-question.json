@@ -1,0 +1,30 @@
+{
+  "session_id": "6253bdb0-26c3-4dd3-bc04-34af7ebcc00e",
+  "transcript_path": "/Users/me/.claude/projects/-Users-me-src-hooklab/6253bdb0-26c3-4dd3-bc04-34af7ebcc00e.jsonl",
+  "cwd": "/Users/me/src/hooklab",
+  "scratchpad_dir": "/private/tmp/claude-501/-Users-me-src-hooklab/6253bdb0-26c3-4dd3-bc04-34af7ebcc00e/scratchpad",
+  "prompt_id": "38f07a09-98c6-4d04-b230-095be0d8118a",
+  "permission_mode": "default",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "AskUserQuestion",
+  "tool_input": {
+    "questions": [
+      {
+        "question": "Do you prefer tea or coffee?",
+        "header": "Beverage",
+        "options": [
+          {
+            "label": "Tea",
+            "description": "A warm or cold beverage made from steeped leaves"
+          },
+          {
+            "label": "Coffee",
+            "description": "A warm beverage made from roasted and ground coffee beans"
+          }
+        ],
+        "multiSelect": false
+      }
+    ]
+  },
+  "tool_use_id": "toolu_013mrKw2y4nZPmgqFQof5uz1"
+}

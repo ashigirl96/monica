@@ -1,0 +1,9 @@
+{
+  "session_id": "decd80a6-5e61-49fa-9436-e92a23196cb2",
+  "transcript_path": "/Users/me/.claude/projects/-Users-me-src-hooklab/decd80a6-5e61-49fa-9436-e92a23196cb2.jsonl",
+  "cwd": "/Users/me/src/hooklab",
+  "prompt_id": "f433360c-a25a-4467-9699-44ff3d888f91",
+  "hook_event_name": "StopFailure",
+  "error": "unknown",
+  "last_assistant_message": "API Error: 400 fake invalid_request"
+}

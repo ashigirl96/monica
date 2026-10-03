@@ -1,0 +1,10 @@
+{
+  "session_id": "6253bdb0-26c3-4dd3-bc04-34af7ebcc00e",
+  "transcript_path": "/Users/me/.claude/projects/-Users-me-src-hooklab/6253bdb0-26c3-4dd3-bc04-34af7ebcc00e.jsonl",
+  "cwd": "/Users/me/src/hooklab",
+  "scratchpad_dir": "/private/tmp/claude-501/-Users-me-src-hooklab/6253bdb0-26c3-4dd3-bc04-34af7ebcc00e/scratchpad",
+  "prompt_id": "ef97b84d-aa81-4444-825c-a5ba622f21dc",
+  "permission_mode": "default",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "Reply with exactly the word: pong"
+}

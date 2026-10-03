@@ -1,0 +1,17 @@
+{
+  "session_id": "6253bdb0-26c3-4dd3-bc04-34af7ebcc00e",
+  "transcript_path": "/Users/me/.claude/projects/-Users-me-src-hooklab/6253bdb0-26c3-4dd3-bc04-34af7ebcc00e.jsonl",
+  "cwd": "/Users/me/src/hooklab",
+  "scratchpad_dir": "/private/tmp/claude-501/-Users-me-src-hooklab/6253bdb0-26c3-4dd3-bc04-34af7ebcc00e/scratchpad",
+  "prompt_id": "0a2873c3-da5a-4850-8e1c-511ae0f61df8",
+  "permission_mode": "default",
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "ls /definitely-not-here-xyz"
+  },
+  "tool_use_id": "toolu_01R6pkqorJxt9vpQ8wQUBFtw",
+  "error": "Exit code 1\nls: /definitely-not-here-xyz: No such file or directory",
+  "is_interrupt": false,
+  "duration_ms": 27
+}

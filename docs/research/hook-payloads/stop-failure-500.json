@@ -1,0 +1,9 @@
+{
+  "session_id": "decd80a6-5e61-49fa-9436-e92a23196cb2",
+  "transcript_path": "/Users/me/.claude/projects/-Users-me-src-hooklab/decd80a6-5e61-49fa-9436-e92a23196cb2.jsonl",
+  "cwd": "/Users/me/src/hooklab",
+  "prompt_id": "d6484d0e-a52b-45ee-973a-6611ee686025",
+  "hook_event_name": "StopFailure",
+  "error": "server_error",
+  "last_assistant_message": "API Error: 500 fake server. This is a server-side issue, usually temporary — try again in a moment. If it persists, check your inference gateway (127.0.0.1:18765)."
+}
