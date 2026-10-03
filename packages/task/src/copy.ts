@@ -1,14 +1,15 @@
 import type { Tx } from "@tania/workbench/server";
 import { and, eq, sql } from "drizzle-orm";
 import type { GitHubIssue, LinkedIssue } from "./github.ts";
-import type { IssueRef } from "./ref.ts";
+import { formatRef, type IssueRef } from "./ref.ts";
 import { issue, issueBlocker } from "./schema.ts";
 
 export function isIssue({ repo, number }: IssueRef) {
   return and(eq(sql`lower(${issue.repo})`, repo.toLowerCase()), eq(issue.number, number));
 }
 
-export function writeIssue(tx: Tx, copied: GitHubIssue, syncedAt: Date): number {
+/** `asked` は query に渡した ref。改名した repo でも旧名で引けるので、node ID の無い古い行をそれでも探す。 */
+export function writeIssue(tx: Tx, copied: GitHubIssue, asked: IssueRef, syncedAt: Date): number {
   const parentId = copied.parent && writeLinkedIssue(tx, copied.parent, syncedAt);
   const copy = {
     title: copied.title,
@@ -17,7 +18,7 @@ export function writeIssue(tx: Tx, copied: GitHubIssue, syncedAt: Date): number 
     parentId,
     syncedAt,
   };
-  const id = upsert(tx, copied, copy, copy);
+  const id = upsert(tx, copied, copy, copy, asked);
   tx.delete(issueBlocker).where(eq(issueBlocker.issueId, id)).run();
   const blockerIds = copied.blockers.map((blocker) => writeLinkedIssue(tx, blocker, syncedAt));
   if (blockerIds.length > 0) {
@@ -44,11 +45,13 @@ function upsert(
   { nodeId, repo, number }: LinkedIssue,
   update: Partial<typeof issue.$inferInsert>,
   insert: Omit<typeof issue.$inferInsert, "nodeId" | "repo" | "number">,
+  asked?: IssueRef,
 ): number {
   const identity = { nodeId, repo, number };
   const existing =
     tx.select({ id: issue.id }).from(issue).where(eq(issue.nodeId, nodeId)).get() ??
-    tx.select({ id: issue.id }).from(issue).where(isIssue({ repo, number })).get();
+    rowWithoutNodeId(tx, { repo, number }) ??
+    (asked && rowWithoutNodeId(tx, asked));
   if (existing) {
     tx.update(issue)
       .set({ ...identity, ...update })
@@ -61,4 +64,15 @@ function upsert(
     .values({ ...identity, ...insert })
     .returning({ id: issue.id })
     .get().id;
+}
+
+// node ID の無い行は node ID を足す前に書いた行。node ID が別なら、その番号は GitHub で別の issue に使われている。
+function rowWithoutNodeId(tx: Tx, ref: IssueRef) {
+  const row = tx
+    .select({ id: issue.id, nodeId: issue.nodeId })
+    .from(issue)
+    .where(isIssue(ref))
+    .get();
+  if (row?.nodeId) throw new Error(`${formatRef(ref)} is now another issue on GitHub`);
+  return row;
 }

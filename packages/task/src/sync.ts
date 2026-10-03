@@ -152,7 +152,7 @@ async function syncRefs(
           const syncedAt = new Date();
           deps.db.transaction((tx) => {
             for (const copied of answer.issues) {
-              const issueId = writeIssue(tx, copied, syncedAt);
+              const issueId = writeIssue(tx, copied, { repo, number: copied.number }, syncedAt);
               track?.(tx, issueId);
             }
           });

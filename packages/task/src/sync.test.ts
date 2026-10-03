@@ -143,6 +143,56 @@ test("a copy written without a node ID gets one on the next sync instead of a se
   ).toEqual([{ id, nodeId: "I_1", title: "One, renamed" }]);
 });
 
+test("a copy written without a node ID in a repo renamed since is found by the name it was asked by", async () => {
+  const books = setup();
+  const { db, github, client } = books;
+  const { id } = db
+    .insert(issue)
+    .values({ repo: "acme/old", number: 1, title: "One", state: "open", syncedAt: new Date(0) })
+    .returning()
+    .get();
+  db.insert(task)
+    .values({ issueId: id, trackedAt: new Date(0) })
+    .run();
+  github.issue("acme/old#1", { title: "One, renamed" });
+  github.renameRepo("acme/old", "acme/new");
+
+  await client.sync({});
+
+  expect(
+    db.select({ id: issue.id, repo: issue.repo, title: issue.title }).from(issue).all(),
+  ).toEqual([{ id, repo: "acme/new", title: "One, renamed" }]);
+});
+
+test("an issue number GitHub now gives to another issue fails the sync instead of moving the copy", async () => {
+  const books = setup();
+  const { db, github, client } = books;
+  const { id } = db
+    .insert(issue)
+    .values({
+      nodeId: "I_deleted",
+      repo: "acme/app",
+      number: 1,
+      title: "One",
+      state: "open",
+      syncedAt: new Date(0),
+    })
+    .returning()
+    .get();
+  db.insert(task)
+    .values({ issueId: id, trackedAt: new Date(0) })
+    .run();
+  github.issue("acme/app#1", { title: "Someone else's issue" });
+
+  const error = await failure(client.sync({}));
+
+  expect(error.code).toBe("BAD_GATEWAY");
+  expect(error.message).toContain("acme/app: acme/app#1 is now another issue on GitHub");
+  expect(db.select({ nodeId: issue.nodeId, title: issue.title }).from(issue).all()).toEqual([
+    { nodeId: "I_deleted", title: "One" },
+  ]);
+});
+
 test("an alias GitHub returns null for keeps its copy and shows up as missing", async () => {
   const books = setup();
   const { github, client } = books;
