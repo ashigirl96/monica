@@ -44,6 +44,7 @@ jobs:
               - "apps/desktop/src-tauri/**"
               - "Cargo.toml"
               - "Cargo.lock"
+              - "rust-toolchain.toml"
 
   rust:
     name: rust
@@ -55,8 +56,6 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+      - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - run: bun run check:rust
