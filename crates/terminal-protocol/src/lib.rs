@@ -74,7 +74,9 @@ where
         if line.trim().is_empty() {
             continue;
         }
-        return Some(serde_json::from_str::<T>(&line).map_err(|source| FrameError { line, source }));
+        return Some(
+            serde_json::from_str::<T>(&line).map_err(|source| FrameError { line, source }),
+        );
     })
 }
 
@@ -338,6 +340,12 @@ mod tests {
             .collect();
         assert_eq!(back.len(), 2);
         assert!(matches!(back[0], ServerMessage::Output { .. }));
-        assert!(matches!(back[1], ServerMessage::Exit { exit_code: Some(0), .. }));
+        assert!(matches!(
+            back[1],
+            ServerMessage::Exit {
+                exit_code: Some(0),
+                ..
+            }
+        ));
     }
 }

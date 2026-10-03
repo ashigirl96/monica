@@ -31,7 +31,10 @@ pub fn stop(home: &Path) {
     if !is_alive(published.pid) || health_pid(published.port) != Some(published.pid) {
         return;
     }
-    eprintln!("[shell] stopping the orphaned Backend (pid {})", published.pid);
+    eprintln!(
+        "[shell] stopping the orphaned Backend (pid {})",
+        published.pid
+    );
     // SAFETY: kill(2) は pid と signal の値を渡すだけで、メモリには触らない。
     unsafe { libc::kill(published.pid, libc::SIGTERM) };
     if !exits_within(published.pid, STOP_GRACE) {
@@ -61,12 +64,15 @@ fn health_pid(port: u16) -> Option<i32> {
     let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(500)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(1))).ok()?;
-    let request = format!("GET /health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    let request =
+        format!("GET /health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
     stream.write_all(request.as_bytes()).ok()?;
     let mut response = String::new();
     stream.read_to_string(&mut response).ok()?;
     let (_, body) = response.split_once("\r\n\r\n")?;
-    serde_json::from_str::<Health>(body).ok().map(|health| health.pid)
+    serde_json::from_str::<Health>(body)
+        .ok()
+        .map(|health| health.pid)
 }
 
 #[cfg(test)]
@@ -104,7 +110,9 @@ mod tests {
                 }
                 request.extend_from_slice(&chunk[..n]);
             }
-            let body = format!(r#"{{"name":"tania-backend","pid":{pid},"startedAt":"2026-10-03T00:00:00.000Z"}}"#);
+            let body = format!(
+                r#"{{"name":"tania-backend","pid":{pid},"startedAt":"2026-10-03T00:00:00.000Z"}}"#
+            );
             let _ = write!(
                 stream,
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",

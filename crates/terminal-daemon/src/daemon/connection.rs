@@ -77,9 +77,9 @@ fn dispatch(table: &Arc<SessionTable>, conn_id: u64, request: Request) -> Option
         RequestOp::Create(params) => table
             .create(params)
             .map(|pid| ResponseBody::Created { pid }),
-        RequestOp::Write { session_id, data } => table
-            .write(&session_id, &data)
-            .map(|_| ResponseBody::Empty),
+        RequestOp::Write { session_id, data } => {
+            table.write(&session_id, &data).map(|_| ResponseBody::Empty)
+        }
         RequestOp::Resize {
             session_id,
             rows,

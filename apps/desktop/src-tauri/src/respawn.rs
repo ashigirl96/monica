@@ -12,16 +12,24 @@ pub struct Respawn {
 
 impl Respawn {
     pub fn new() -> Self {
-        Self { failures: VecDeque::new() }
+        Self {
+            failures: VecDeque::new(),
+        }
     }
 
     /// 失敗を数え、次の spawn までの待ちを返す。諦めるときは None。
     pub fn after_failure(&mut self, now: Instant) -> Option<Duration> {
-        while self.failures.front().is_some_and(|at| now.duration_since(*at) > WINDOW) {
+        while self
+            .failures
+            .front()
+            .is_some_and(|at| now.duration_since(*at) > WINDOW)
+        {
             self.failures.pop_front();
         }
         self.failures.push_back(now);
-        BACKOFF_SECS.get(self.failures.len() - 1).map(|s| Duration::from_secs(*s))
+        BACKOFF_SECS
+            .get(self.failures.len() - 1)
+            .map(|s| Duration::from_secs(*s))
     }
 
     pub fn reset(&mut self) {

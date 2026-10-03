@@ -50,7 +50,7 @@
     "generate": "bun run --filter './packages/*' generate",
     "check": "bun run check:ts && bun run check:rust",
     "check:ts": "oxlint --no-error-on-unmatched-pattern && oxfmt --check && tsc --noEmit && bun test --pass-with-no-tests && bun run --cwd apps/desktop build",
-    "check:rust": "cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace"
+    "check:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",
