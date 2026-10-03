@@ -2,9 +2,11 @@ import { userInfo } from "node:os";
 import { EventPublisher } from "@orpc/server";
 import { and, eq, inArray } from "drizzle-orm";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
+import { endAgentSessionsIn, reconcileAgentSessions } from "./agent-session.ts";
 import type { TerminalSession, WorkbenchChange } from "./contract.ts";
 import { openDaemon, type PtydClient, type SessionInfo } from "./ptyd.ts";
 import { terminalSession } from "./schema.ts";
+import { tabEnv, writeTabFiles } from "./tab-env.ts";
 
 export type Db = BunSQLiteDatabase;
 export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
@@ -20,6 +22,7 @@ export type Workbench = {
 
 type Internals = {
   db: Db;
+  home: string;
   shell: string;
   publish: (change: WorkbenchChange) => void;
   ready: () => Promise<PtydClient>;
@@ -50,6 +53,8 @@ export function createWorkbench(deps: {
   let connection: Promise<PtydClient> | null = null;
   // List を待つ間に届いた Exit は、まだ取り込んでいない行に当たらず Reap する接続も無いので、reconcile の後で当てる。
   let exitsDuringReconcile: [string, number | null][] | null = null;
+  // ptyd へ繋ぎ直す間も hook は届いているので、未観測にするのは Backend の起動直後の reconcile だけ。
+  let backendRestarted = true;
   let stopping = false;
 
   // Reap は commit の後にする。間で Backend が死んでも tombstone が残り、次の reconcile が拾う。
@@ -58,11 +63,16 @@ export function createWorkbench(deps: {
       exitsDuringReconcile.push([id, exitCode]);
       return;
     }
-    db.update(terminalSession)
-      .set({ status: "exited", exitCode, endedAt: new Date() })
-      .where(and(eq(terminalSession.id, id), inArray(terminalSession.status, LIVE)))
-      .run();
+    const endedAt = new Date();
+    const agentSessionIds = db.transaction((tx) => {
+      tx.update(terminalSession)
+        .set({ status: "exited", exitCode, endedAt })
+        .where(and(eq(terminalSession.id, id), inArray(terminalSession.status, LIVE)))
+        .run();
+      return endAgentSessionsIn(tx, id, endedAt);
+    });
     publish({ type: "terminalSession", id });
+    for (const sessionId of agentSessionIds) publish({ type: "agentSession", sessionId });
     client?.notify({ op: "reap", session_id: id });
   }
 
@@ -87,7 +97,8 @@ export function createWorkbench(deps: {
         opened.close();
         throw new Error("the Workbench has stopped");
       }
-      const { reap, terminate } = reconcile(db, await opened.list());
+      const { reap, terminate } = reconcile(db, await opened.list(), { backendRestarted });
+      backendRestarted = false;
       for (const id of reap) opened.notify({ op: "reap", session_id: id });
       for (const id of terminate) opened.notify({ op: "terminate", session_id: id });
       client = opened;
@@ -125,13 +136,20 @@ export function createWorkbench(deps: {
 
   const workbench: Workbench = {
     events,
-    start: () => ready().then(() => {}),
+    async start() {
+      try {
+        writeTabFiles(home);
+      } catch (error) {
+        console.error(`[workbench] could not write the Tab's shell files: ${error}`);
+      }
+      await ready();
+    },
     stop() {
       stopping = true;
       client?.close();
     },
   };
-  internalsOf.set(workbench, { db, shell, publish, ready });
+  internalsOf.set(workbench, { db, home, shell, publish, ready });
   return workbench;
 }
 
@@ -151,13 +169,14 @@ export function insertTerminalSession(tx: Tx, { cwd, shell }: { cwd: string; she
 }
 
 export async function startTerminalSession(workbench: Workbench, id: string, { rows, cols }: Size) {
-  const { db, publish, ready } = internals(workbench);
+  const { db, home, publish, ready } = internals(workbench);
   const ptyd = await ready();
   const { cwd, shell } = db.select().from(terminalSession).where(eq(terminalSession.id, id)).get()!;
   // 即死した shell の Exit は Created の応答より先に届くことがあるので、starting の行だけを進める。
   const stillStarting = and(eq(terminalSession.id, id), eq(terminalSession.status, "starting"));
   try {
-    const pid = await ptyd.create({ session_id: id, cwd, shell, rows, cols, env: null });
+    const env = tabEnv(home, id);
+    const pid = await ptyd.create({ session_id: id, cwd, shell, rows, cols, env });
     db.update(terminalSession).set({ status: "running", pid }).where(stillStarting).run();
   } catch (error) {
     db.update(terminalSession)
@@ -186,7 +205,11 @@ export async function terminateTerminalSessions(workbench: Workbench, ids: strin
   );
 }
 
-function reconcile(db: Db, ptydSessions: SessionInfo[]) {
+function reconcile(
+  db: Db,
+  ptydSessions: SessionInfo[],
+  { backendRestarted }: { backendRestarted: boolean },
+) {
   const now = new Date();
   const unmatched = new Map(ptydSessions.map((s) => [s.session_id, s]));
   const reap: string[] = [];
@@ -238,6 +261,7 @@ function reconcile(db: Db, ptydSessions: SessionInfo[]) {
         })
         .run();
     }
+    reconcileAgentSessions(tx, { backendRestarted });
   });
   return { reap, terminate };
 }

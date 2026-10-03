@@ -15,6 +15,13 @@
       "when": 1791033216234,
       "tag": "0001_perfect_prowler",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791060622470,
+      "tag": "0002_absurd_excalibur",
+      "breakpoints": true
     }
   ]
 }

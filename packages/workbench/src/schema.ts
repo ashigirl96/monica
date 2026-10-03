@@ -35,3 +35,29 @@ export const tab = sqliteTable(
   },
   (t) => [index("tab_runspace_idx").on(t.runspaceId)],
 );
+
+export const agentSession = sqliteTable(
+  "agent_session",
+  {
+    sessionId: text("session_id").primaryKey(),
+    terminalSessionId: text("terminal_session_id")
+      .notNull()
+      .references(() => terminalSession.id),
+    state: text("state", { enum: ["running", "waiting", "ended", "unobserved"] }).notNull(),
+    waitReason: text("wait_reason", { enum: ["idle", "question", "permission", "error"] }),
+    waitTool: text("wait_tool"),
+    errorType: text("error_type"),
+    endReason: text("end_reason", { enum: ["session_end", "terminal_exited", "superseded"] }),
+    sessionEndReason: text("session_end_reason"),
+    cwd: text("cwd").notNull(),
+    transcriptPath: text("transcript_path"),
+    permissionMode: text("permission_mode"),
+    lastEventName: text("last_event_name").notNull(),
+    lastEventAt: integer("last_event_at", { mode: "timestamp_ms" }).notNull(),
+    stateChangedAt: integer("state_changed_at", { mode: "timestamp_ms" }).notNull(),
+    firstSeenAt: integer("first_seen_at", { mode: "timestamp_ms" }).notNull(),
+    endedAt: integer("ended_at", { mode: "timestamp_ms" }),
+    unobservedSince: integer("unobserved_since", { mode: "timestamp_ms" }),
+  },
+  (t) => [index("agent_session_terminal_session_idx").on(t.terminalSessionId)],
+);

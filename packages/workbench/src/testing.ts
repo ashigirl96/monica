@@ -30,14 +30,23 @@ export function setup() {
   const db = drizzle(sqlite);
   migrate(db, { migrationsFolder: migrations.folder, migrationsTable: migrations.table });
 
-  const workbench = createWorkbench({
-    db,
-    home,
-    ptydPath: join(home, "no-ptyd"),
-    notify() {},
-    nameAgentSession: () => null,
-  });
-  onCleanup(() => workbench.stop());
-  const client = createRouterClient(router, { context: { db, workbench } });
-  return { home, ptyd, db, workbench, client };
+  function boot() {
+    const workbench = createWorkbench({
+      db,
+      home,
+      ptydPath: join(home, "no-ptyd"),
+      notify() {},
+      nameAgentSession: () => null,
+    });
+    onCleanup(() => workbench.stop());
+    const client = createRouterClient(router, { context: { db, workbench } });
+    return { workbench, client };
+  }
+
+  const booted = boot();
+  function restartBackend() {
+    booted.workbench.stop();
+    return boot();
+  }
+  return { home, ptyd, db, ...booted, restartBackend };
 }

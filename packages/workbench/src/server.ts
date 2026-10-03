@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { implement, ORPCError } from "@orpc/server";
 import { eq, getTableColumns, inArray, isNotNull, or } from "drizzle-orm";
+import { listAgentSessions, recordHook } from "./agent-session.ts";
 import { contract } from "./contract.ts";
 import {
   asTab,
@@ -100,6 +101,14 @@ export const router = os.router({
     setCwd: os.tab.setCwd.handler(({ context, input }) => {
       writeLayout(context, (tx) => setTabCwd(tx, input));
     }),
+  },
+  agentSession: {
+    recordHook: os.agentSession.recordHook.handler(({ context, input }) => {
+      for (const sessionId of recordHook(context.db, input)) {
+        context.workbench.events.publish("change", { type: "agentSession", sessionId });
+      }
+    }),
+    list: os.agentSession.list.handler(({ context }) => listAgentSessions(context.db)),
   },
   changes: os.changes.handler(async function* ({ context, signal }) {
     for await (const change of context.workbench.events.subscribe("change", { signal })) {
