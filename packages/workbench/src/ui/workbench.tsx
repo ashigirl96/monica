@@ -1,0 +1,99 @@
+import { cn, PromptIcon } from "@tania/ui";
+import { useAtomValue, useSetAtom } from "jotai";
+import { lazy, Suspense, useEffect } from "react";
+import { WorkbenchHeader } from "./header.tsx";
+import { ResizeHandle } from "./resize-handle.tsx";
+import { WorkbenchSidebar } from "./sidebar.tsx";
+import {
+  createRunspaceAtom,
+  reloadAtom,
+  warnFailed,
+  type WorkbenchClient,
+  workbenchClientAtom,
+} from "./store.ts";
+import { sidebarOpenAtom, sidebarResizingAtom, sidebarWidthAtom, uiZoomAtom } from "./ui-state.ts";
+
+const WorkbenchContent = lazy(() => import("./content.tsx"));
+
+// Backend が立ち直ると endpoint ごと替わり、前の購読は届かなくなるので、client ごとに張り直す。
+function useBooks(client: WorkbenchClient | null) {
+  const setClient = useSetAtom(workbenchClientAtom);
+  const reload = useSetAtom(reloadAtom);
+
+  useEffect(() => {
+    setClient(() => client);
+    if (!client) return;
+    const controller = new AbortController();
+    const reloadLogged = () => reload().catch((e: unknown) => warnFailed("layout reload", e));
+    void (async () => {
+      try {
+        // 先に購読してから読むので、読んだ後の変更を取りこぼさない。
+        const changes = await client.changes(undefined, { signal: controller.signal });
+        void reloadLogged();
+        for await (const _ of changes) void reloadLogged();
+      } catch (error) {
+        if (!controller.signal.aborted) console.error("workbench.changes ended", error);
+      }
+    })();
+    return () => controller.abort();
+  }, [client, setClient, reload]);
+}
+
+export function Workbench({ client }: { client: WorkbenchClient | null }) {
+  useBooks(client);
+
+  const sidebarOpen = useAtomValue(sidebarOpenAtom);
+  const sidebarWidth = useAtomValue(sidebarWidthAtom);
+  const resizing = useAtomValue(sidebarResizingAtom);
+  const uiZoom = useAtomValue(uiZoomAtom);
+  const createRunspace = useSetAtom(createRunspaceAtom);
+
+  return (
+    <div className="flex min-h-0 flex-1 select-none overflow-hidden">
+      <div
+        className={cn(
+          "flex-shrink-0 overflow-hidden",
+          !resizing && "transition-[width] duration-200 ease-out",
+        )}
+        style={{ width: sidebarOpen ? sidebarWidth : 0 }}
+      >
+        <div className="flex h-full flex-col" style={{ minWidth: sidebarWidth }}>
+          <div className="flex h-10 flex-shrink-0 items-center justify-between px-3">
+            <div className="flex items-center gap-1.5 rounded-md bg-white/[0.08] px-2 py-0.5">
+              <PromptIcon size={12} strokeWidth={2} />
+              <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                Workbench
+              </span>
+            </div>
+            <button
+              type="button"
+              className="whitespace-nowrap rounded px-1.5 text-xs text-muted-foreground hover:bg-white/[0.08] hover:text-foreground"
+              title="New runspace (⌥P)"
+              onClick={() => void createRunspace()}
+            >
+              + runspace
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto px-2">
+            <WorkbenchSidebar />
+          </div>
+        </div>
+      </div>
+
+      {sidebarOpen && <ResizeHandle />}
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex h-10 flex-shrink-0 items-center px-2">
+          <WorkbenchHeader />
+        </div>
+        <div className="relative min-h-0 flex-1 p-2 pt-0" style={{ zoom: uiZoom }}>
+          <div className="content-panel h-full overflow-hidden">
+            <Suspense>
+              <WorkbenchContent />
+            </Suspense>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

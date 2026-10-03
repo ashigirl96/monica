@@ -185,7 +185,7 @@ contract を走査するテストを 1 本置き、description と output が全
 
 ## desktop（apps/desktop）
 
-- `src/` は app の枠だけを持つ。layout、shortcut、Backend client の provider、Shell からの `backend-endpoint` event による再接続、Backend 不在の表示。domain の画面は `@tania/<d>/ui` から読む。
+- `src/` は app の枠だけを持つ。shortcut、Backend client の provider、Shell からの `backend-endpoint` event による再接続、Backend 不在の表示、toast。domain の画面は `@tania/<d>/ui` から読む。Workbench の画面（sidebar・Tab の帯・端末の並び）は `@tania/workbench/ui` の `Workbench` が持ち、`client.workbench` を props で受けて、endpoint が替わるたびに `workbench.changes` を購読し直す。
 - Backend の endpoint の受け取りと不在の表示:
   - 起動時は Shell の `backend_endpoint` command で今の endpoint（無ければ null）と再起動を諦めたかどうか（`{ endpoint, failed }`）を取り、以降は `backend-endpoint` と `backend-failed` の event で受ける。listen する前に出た event を取りこぼさないため。諦めたかどうかも取るのは、諦めた後に reload した webview が「再試行」を出せるようにするため。
   - Shell は Backend の予期しない終了で endpoint を捨てたら、`backend-endpoint` に null を載せて出す。再起動を諦めたら `backend-failed` を出す（ADR-0007）。
@@ -200,7 +200,7 @@ contract を走査するテストを 1 本置き、description と output が全
   - `editor.open({ path })` → `void`: `/usr/bin/open -a Zed <path>`。Zed は固定で、line:col は渡さない。webview は失敗を握りつぶす。
 - URL を開くのは webview から plugin-opener の `openUrl` で行う（http(s)・mailto・tel）。
 - workbench の ui は Task の要素を出す場所を 2 つの slot として props で受け、apps/desktop が `@tania/task/ui` の component をはめる（slot は Task v1 の slice 2 と 4 が足す）。`renderRunspaceLabel(runspaceId)`（Bench のラベル `<repo>#<n> <title>`、準備中・準備失敗のときだけその語を添える）と `tabMenuItems(tab)`（「Attach to Task…」の picker）。task の ui は `task.bench.list`（`{ runspaceId, ref, title, setupState }[]`）と `task.changes` で描き直す。workbench の ui は Task を import しない（ADR-0005）。
-- Tailwind の `@source` に `packages/*/src/ui` を足す。
+- Tailwind の `@source` に `packages/*/src/ui/**/*.{ts,tsx}` と `packages/ui/src` を足す。glob を含む path は file の pattern として読まれるので、directory で止めると何も拾わない。
 - `src-tauri/` は Shell。Backend の監督（ADR-0007）、terminal の中継、OS への窓口だけを持つ。窓口は通知（ADR-0013）、画像の clipboard、plugin-opener、drag-drop の event。custom command は terminal の attach / detach / write / resize の 4 本（ptyd は spawn しない。ADR-0011）、`clipboard_write_image`、`backend_endpoint`、`backend_restart` の 7 本。
 - Shell に置くのは、Tauri プロセスにしか無いもの（窓と webview の event、app の名義、AppKit）に触る処理と、Backend の再起動で途切れてはいけない terminal の byte だけ（ADR-0001）。fs と process の spawn で済む処理（worktree の判定、エディタ）は Backend の procedure にする。
 - 例外は `tania` の symlink（「dev loop」の節）で、Shell が起動時に張る。CLI の実体の場所（release は `.app` の中、dev は `TANIA_BIN`）と、release だけが `~/.local/bin` に張るという区別が、どちらも Shell の build で決まる事実だから。
@@ -248,12 +248,13 @@ changes                    → { type: "layout" } | { type: "terminalSession", i
 - `sort_order` は、Runspace と Tab を足す・移す・消すたびに、同じ transaction の中で兄弟を 0..n-1 に振り直す。`runspace.create` と `tab.open` の `index` を省けば末尾に足す。webview は active の次を渡し（monica どおり）、CLI と Task は省く。
 - Tab の title は帳簿に持たない。OSC 0/2 の title は webview の memory にだけ持ち、再 attach のときは transcript の replay に含まれる OSC で戻る。表示は monica どおり title、無ければ cwd の末尾、それも無ければ `Terminal`。title はよくある zsh の theme なら command のたびに変わり、帳簿に書くとそのたびに `changes` と `layout.get` が往復するため。
 - `tab.respawn` は exited / lost / failed の Tab に新しい session を結び直す。overlay の「New shell in …」と「Retry」が呼ぶ（monica どおり）。
-- `tab.cwd` は最後に分かった cwd。webview は OSC 7 の cwd が前の値と変わったときだけ `tab.setCwd` を呼ぶ（OSC 7 は prompt のたびに来る）。Backend の張り直し（「pin」の節）と `tab.respawn` はこの cwd で始め、Runspace の title（`worktree.info`）も再起動の直後はこれを使う。
+- `tab.cwd` は最後に分かった cwd。webview は OSC 7 の cwd が前の値と変わったときだけ `tab.setCwd` を呼ぶ（OSC 7 は prompt のたびに来る）。OSC 7 を出さない shell のため、OSC 0/2 の title が `/` か `~` で始まれば、それも cwd の知らせとして扱う（monica どおり）。ただし一度でも OSC 7 を出した Tab では title を cwd に使わない（title の `~/repo` と OSC 7 の `/Users/…/repo` が交互に「変わった」ことになるため）。`tab.setCwd` は `~` を home に展開して絶対 path で持つ。Backend の張り直し（「pin」の節）と `tab.respawn` はこの cwd で始め、Runspace の title（`worktree.info`）も再起動の直後はこれを使う。
 
 - `runspace.create { cwd?, rows, cols } → { runspaceId, tab }` は、Runspace・Tab・`starting` の Terminal Session を 1 transaction で作り、commit 後に Create する（`tab.open` と同じ形）。cwd を省けば `$HOME`。空の Runspace を作ってから `tab.open` を呼ぶ 2 段にすると、間で webview の reload や Backend の再起動が起きたときに空の Runspace が残り、消す規則が無いため。
 - `tab.open` の cwd を省けば、新しい Terminal Session は Runspace の cwd で始める。reattach の Tab は Terminal Session の cwd を持ち、OSC 7 の `tab.setCwd` で追いつく。
 - `tab.close` と `tab.move` は、Tab が抜けて 0 になった所有されていない Runspace を同じ transaction で消す。CLI の Attach のように webview の無い経路でも、空の Runspace が残らない。所有された Runspace（Bench）を残す例外は、Task v1 の slice 2 が所有の印と一緒に足す（ADR-0012）。
 - layout が空になったら、webview が `runspace.create` で 1 つ作る（monica の `initialState()`）。
+- webview は header の Tab を sidebar の Runspace の行に drop すると、`tab.move` でその Runspace の末尾へ移す（monica に無い操作）。手前に見えていた Tab なら、画面も移った先へついていく。
 - shell が終わった Tab は webview が閉じる。接続中の Tab で Shell の Exit を受けたら、webview が `tab.close` を呼ぶ（monica どおり）。Backend は行を exited にするだけで、Tab を閉じない。exit の時点で接続していなかった Tab と、lost / failed の Tab は、overlay を出したまま `tab.respawn` か `tab.close` を待つ。pin された Tab は例外で、webview は閉じず、Backend が張り直す（「pin」の節）。
 
 ### pin
@@ -280,7 +281,7 @@ changes                    → { type: "layout" } | { type: "terminalSession", i
 
 - exited / lost / failed の `terminal_session` と、終了の `agent_session` の行は消さない。Run の行は履歴として消さず（Task v1）、`run.agent_session_id` → `agent_session.terminal_session_id` の FK が残るため。1 行は 200 byte 程度で、GC の読み手もいない。
 - 一覧は画面が使う行に絞る。
-  - `terminalSession.list` は、live か Tab に指されている行だけを返す。Detached グループと Tab の overlay の材料。CLI の `tania workbench terminal-session list` も同じものを出す。
+  - `terminalSession.list` は、live か Tab に指されている行だけを返す。Detached グループと Tab の overlay の材料。webview は自分が終了を頼んだ Terminal Session を Detached に出さない（`terminate` の後、ptyd が exit を報告するまで行は live のまま Tab を失うため）。CLI の `tania workbench terminal-session list` も同じものを出す。
   - `agentSession.list` は、終了でない行だけを返す。status dot の材料（「Workbench の UI 状態と status dot」の節）。
 
 ### Tab の外から来た hook
