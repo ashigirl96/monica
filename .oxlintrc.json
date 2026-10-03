@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["typescript", "unicorn", "oxc", "import", "react"],
+  "jsPlugins": ["./scripts/oxlint/tania.js"],
   "categories": {
     "correctness": "error"
   },
@@ -15,6 +16,10 @@
           "error",
           {
             "patterns": [
+              {
+                "group": ["@tania/*/cli"],
+                "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
+              },
               {
                 "group": ["@tania/task", "@tania/task/*"],
                 "message": "workbench は task を import しない（ADR-0005）"
@@ -33,6 +38,10 @@
             "paths": [{ "name": "bun:sqlite", "message": "ui は browser で動く（ADR-0009）" }],
             "patterns": [
               {
+                "group": ["@tania/*/cli"],
+                "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
+              },
+              {
                 "group": ["@tania/task", "@tania/task/*"],
                 "message": "workbench は task を import しない（ADR-0005）"
               },
@@ -47,6 +56,22 @@
       }
     },
     {
+      "files": ["packages/task/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["@tania/*/cli"],
+                "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "files": ["packages/task/src/ui/**"],
       "rules": {
         "no-restricted-imports": [
@@ -54,6 +79,10 @@
           {
             "paths": [{ "name": "bun:sqlite", "message": "ui は browser で動く（ADR-0009）" }],
             "patterns": [
+              {
+                "group": ["@tania/*/cli"],
+                "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
+              },
               {
                 "group": ["@tania/*/server", "../server", "../server.ts"],
                 "allowTypeImports": true,
@@ -121,6 +150,10 @@
           {
             "patterns": [
               {
+                "group": ["@tania/*/cli"],
+                "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
+              },
+              {
                 "group": ["@tania/cli", "@tania/cli/*", "@tania/desktop", "@tania/desktop/*"],
                 "message": "apps どうしは import しない（ADR-0002）"
               }
@@ -158,6 +191,10 @@
           {
             "patterns": [
               {
+                "group": ["@tania/*/cli"],
+                "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
+              },
+              {
                 "group": ["@tania/backend", "@tania/backend/*", "@tania/cli", "@tania/cli/*"],
                 "message": "apps どうしは import しない（ADR-0002）"
               }
@@ -165,6 +202,11 @@
           }
         ]
       }
+    },
+    {
+      "files": ["packages/*/src/**", "apps/backend/src/**"],
+      "excludeFiles": ["**/*.test.ts", "**/testing.ts", "**/fake-*.ts"],
+      "rules": { "tania/spawn-env": "error" }
     }
   ]
 }

@@ -1,4 +1,5 @@
 import type { ContractRouterClient } from "@orpc/contract";
+import { table } from "@tania/ui/table";
 import type { AgentSession, contract, TerminalSession } from "./contract.ts";
 
 type Connect = (options: {
@@ -74,16 +75,4 @@ function stateOf(session: AgentSession): string {
   if (session.state !== "waiting") return session.state;
   const detail = session.waitReason === "permission" ? session.waitTool : session.errorType;
   return detail ? `waiting (${session.waitReason}: ${detail})` : `waiting (${session.waitReason})`;
-}
-
-function table(rows: string[][]): string {
-  const widths = rows[0]!.map((_, column) => Math.max(...rows.map((row) => row[column]!.length)));
-  return rows
-    .map((row) =>
-      row
-        .map((cell, column) => cell.padEnd(widths[column]!))
-        .join("  ")
-        .trimEnd(),
-    )
-    .join("\n");
 }
