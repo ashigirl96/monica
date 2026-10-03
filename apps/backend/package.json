@@ -1,0 +1,12 @@
+{
+  "name": "@tania/backend",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@orpc/server": "catalog:",
+    "@tania/task": "workspace:*",
+    "@tania/workbench": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "hono": "catalog:"
+  }
+}

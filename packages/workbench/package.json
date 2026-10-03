@@ -1,0 +1,25 @@
+{
+  "name": "@tania/workbench",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./schema": "./src/schema.ts",
+    "./contract": "./src/contract.ts",
+    "./server": "./src/server.ts",
+    "./ui": "./src/ui/index.ts",
+    "./cli": "./src/cli.ts"
+  },
+  "scripts": {
+    "generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "@orpc/contract": "catalog:",
+    "@orpc/server": "catalog:",
+    "drizzle-orm": "catalog:",
+    "drizzle-zod": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "drizzle-kit": "catalog:"
+  }
+}

@@ -19,7 +19,5 @@
     "packages/*/migrations",
     "packages/*/drizzle.config.ts",
     "scripts"
-  ],
-  // TS のファイルが 1 本も無い間も tsc が「入力が無い」で落ちないようにする。
-  "references": []
+  ]
 }
