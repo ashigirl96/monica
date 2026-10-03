@@ -180,14 +180,6 @@ impl PtyManager {
             None => Ok(()),
         }
     }
-
-    #[cfg(test)]
-    pub fn is_alive(&self, id: &str) -> bool {
-        self.sessions
-            .lock()
-            .map(|s| s.contains_key(id))
-            .unwrap_or(false)
-    }
 }
 
 impl Default for PtyManager {
@@ -246,8 +238,6 @@ mod tests {
     use std::sync::mpsc as std_mpsc;
     use std::time::Duration;
 
-    use base64::Engine;
-
     #[test]
     fn spawn_echo_and_read_output() {
         let manager = PtyManager::new();
@@ -275,12 +265,9 @@ mod tests {
             )
             .expect("spawn should succeed");
 
-        assert!(manager.is_alive(&id));
-
-        let engine = base64::engine::general_purpose::STANDARD;
-        let input = engine.encode(b"echo hello-monica\r\nexit\r\n");
-        let decoded = engine.decode(&input).unwrap();
-        manager.write(&id, &decoded).expect("write should succeed");
+        manager
+            .write(&id, b"echo hello-monica\r\nexit\r\n")
+            .expect("write should succeed");
 
         let mut combined = String::new();
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -306,7 +293,10 @@ mod tests {
         assert_eq!(exit_id, id);
         assert_eq!(exit_code, Some(0));
 
-        assert!(!manager.is_alive(&id));
+        assert!(
+            manager.write(&id, b"").is_err(),
+            "an exited session must leave the manager"
+        );
     }
 
     /// Regression: wait() can return while the final output burst is still in the

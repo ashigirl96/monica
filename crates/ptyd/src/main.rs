@@ -120,6 +120,7 @@ fn main() -> Result<()> {
 mod tests {
     use super::*;
 
+    /// Both sinks add their own line terminator, so one here would double it in the file.
     #[test]
     fn format_line_keeps_the_established_shape() {
         assert_eq!(
@@ -130,12 +131,5 @@ mod tests {
             ),
             "[12.007] INFO listening on /tmp/ptyd.sock",
         );
-    }
-
-    /// Both sinks add their own line terminator, so one here would double it in the file.
-    #[test]
-    fn format_line_carries_no_trailing_newline() {
-        let line = format_line(Duration::ZERO, log::Level::Warn, &format_args!("busy"));
-        assert_eq!(line, "[0.000] WARN busy");
     }
 }
