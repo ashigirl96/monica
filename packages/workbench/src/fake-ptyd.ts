@@ -18,6 +18,7 @@ export function startFakePtyd(home: string) {
     beforeList: (): ServerMessage[] => [],
     dropNextList: false,
     dropNextTerminate: false,
+    dropNextCreatedReply: false,
     splitListMidCharacter: false,
     beforeCreated: (_op: Extract<RequestOp, { op: "create" }>): ServerMessage[] => [],
     createError: null as string | null,
@@ -30,6 +31,10 @@ export function startFakePtyd(home: string) {
       const done = received.find(match);
       if (done) return Promise.resolve(done);
       return new Promise((resolve) => waiters.push({ match, resolve }));
+    },
+
+    receivedAll(match: (op: RequestOp) => boolean): RequestOp[] {
+      return received.filter(match);
     },
 
     exit(sessionId: string, exitCode: number | null) {
@@ -106,6 +111,10 @@ export function startFakePtyd(home: string) {
           rows: op.rows,
           cols: op.cols,
         });
+        if (fake.dropNextCreatedReply) {
+          fake.dropNextCreatedReply = false;
+          return socket.end();
+        }
         return send(socket, { type: "ok", id, body: "created", pid });
       }
       default:

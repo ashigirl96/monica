@@ -1,6 +1,6 @@
 ---
 name: backend-headless
-description: "desktop 無しで Backend と tania-ptyd を起こし、CLI で振る舞いを確かめる。受け入れ条件を手で確かめるとき、Backend の起動・終了・ptyd との再接続を実機で見るときに使う。"
+description: "desktop 無しで Backend と tania-ptyd を起こし、CLI と RPC で振る舞いを確かめる。受け入れ条件を手で確かめるとき、Backend の起動・終了・ptyd との再接続を実機で見るときに使う。"
 ---
 
 Backend を本物の ptyd に繋いで起こす。Shell の役（親として生き続け、stdin の pipe の書き側を握る）は Bash の background job が演じる。
@@ -24,6 +24,15 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 ## 確かめる
 
 - CLI: `TANIA_HOME=${TMPDIR%/}/tania-s2 bun run tania <command> [--format json]`。exit code は 0 = 成功、1 = それ以外の失敗、2 = Backend 不在。
+- RPC: CLI に出さない procedure は、CLI の `connect()` で作った client から呼ぶ。path は package 名から始まる。
+
+  ```bash
+  TANIA_HOME=${TMPDIR%/}/tania-s2 bun -e '
+  const { connect } = await import(`${process.cwd()}/apps/cli/src/backend.ts`);
+  const client = connect(process.env.TANIA_HOME);
+  console.log(JSON.stringify(await client.workbench.layout.get()));'
+  ```
+
 - HTTP: `/health` は token 無しで返る。port と token は `backend.json` にある。
 - ptyd にだけある session を作るには、socket に直接 `hello` と `create` を送る。Backend を起こし直すと reconcile が取り込む。protocol は `crates/terminal-protocol/src/lib.rs`。
 

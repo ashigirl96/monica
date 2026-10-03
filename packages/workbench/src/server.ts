@@ -10,11 +10,14 @@ import {
   moveRunspace,
   moveTab,
   openTab,
+  pinTab,
   readLayout,
   reattachTab,
+  refuseRemovingPinned,
   removeRunspace,
   respawnTab,
   setTabCwd,
+  unpinTab,
   writeLayout,
 } from "./layout.ts";
 import { tab, terminalSession } from "./schema.ts";
@@ -45,11 +48,17 @@ export const router = os.router({
     ),
     terminate: os.terminalSession.terminate.handler(async ({ context, input }) => {
       const row = context.db
-        .select({ id: terminalSession.id })
+        .select({ pinned: tab.pinned })
         .from(terminalSession)
+        .leftJoin(tab, eq(tab.terminalSessionId, terminalSession.id))
         .where(eq(terminalSession.id, input.id))
         .get();
       if (!row) throw new ORPCError("NOT_FOUND", { message: `no Terminal Session ${input.id}` });
+      if (row.pinned) {
+        throw new ORPCError("CONFLICT", {
+          message: `Terminal Session ${input.id} is in a pinned Tab`,
+        });
+      }
       await terminateTerminalSessions(context.workbench, [input.id]);
     }),
   },
@@ -67,7 +76,10 @@ export const router = os.router({
       return { runspaceId: opened.runspaceId, tab: asTab(opened) };
     }),
     remove: os.runspace.remove.handler(async ({ context, input }) => {
-      const terminalSessionIds = writeLayout(context, (tx) => removeRunspace(tx, input.id));
+      const terminalSessionIds = writeLayout(context, (tx) => {
+        refuseRemovingPinned(tx, input.id);
+        return removeRunspace(tx, input.id);
+      });
       await terminateTerminalSessions(context.workbench, terminalSessionIds);
     }),
     move: os.runspace.move.handler(({ context, input }) => {
@@ -100,6 +112,12 @@ export const router = os.router({
     }),
     setCwd: os.tab.setCwd.handler(({ context, input }) => {
       writeLayout(context, (tx) => setTabCwd(tx, input));
+    }),
+    pin: os.tab.pin.handler(({ context, input }) => {
+      writeLayout(context, (tx) => pinTab(tx, input.id));
+    }),
+    unpin: os.tab.unpin.handler(({ context, input }) => {
+      writeLayout(context, (tx) => unpinTab(tx, input.id));
     }),
   },
   agentSession: {

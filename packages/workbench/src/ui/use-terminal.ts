@@ -65,7 +65,7 @@ type UseTerminalOptions = {
   active: boolean;
   onTitleChange?: (title: string) => void;
   onCwdChange?: (cwd: string) => void;
-  onExit: (exitCode: number | null) => void;
+  onExit: (sessionId: string, exitCode: number | null) => void;
 };
 
 // A release racing this connect empties conn.unlisteners; anything subscribed after that
@@ -101,7 +101,7 @@ async function runConnect(optionsRef: React.RefObject<UseTerminalOptions>, conn:
       }),
     );
     conn.unlisteners.push(
-      await onTerminalExit(sessionId, (code) => optionsRef.current.onExit(code)),
+      await onTerminalExit(sessionId, (code) => optionsRef.current.onExit(sessionId, code)),
     );
 
     // Released while subscribing: the closer already ended the session by id; attaching

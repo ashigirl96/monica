@@ -1,9 +1,10 @@
 import { homedir } from "node:os";
 import { ORPCError } from "@orpc/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Layout, Tab } from "./contract.ts";
 import { runspace, tab, terminalSession } from "./schema.ts";
 import {
+  bindNewTerminalSession,
   type Db,
   insertTerminalSession,
   isLive,
@@ -47,6 +48,12 @@ export function createRunspace(tx: Tx, input: { cwd: string; index?: number }): 
     .run();
   restack(tx, runspace, order);
   return id;
+}
+
+export function refuseRemovingPinned(tx: Tx, runspaceId: string) {
+  if (pinnedTabOf(tx, runspaceId)) {
+    throw new ORPCError("CONFLICT", { message: `Runspace ${runspaceId} holds a pinned Tab` });
+  }
 }
 
 export function removeRunspace(tx: Tx, id: string): string[] {
@@ -108,15 +115,34 @@ export function reattachTab(
 export function moveTab(tx: Tx, input: { id: string; runspaceId: string; index?: number }) {
   const moved = tabOf(tx, input.id);
   runspaceOf(tx, input.runspaceId);
-  tx.update(tab).set({ runspaceId: input.runspaceId }).where(eq(tab.id, input.id)).run();
+  const pinned = moved.pinned && moved.runspaceId === input.runspaceId;
+  // 移る先に pin された Tab があっても部分 unique index に当たらないよう、pin は同じ UPDATE で外す。
+  tx.update(tab).set({ runspaceId: input.runspaceId, pinned }).where(eq(tab.id, input.id)).run();
   restack(tx, tab, insertAt(tabIds(tx, input.runspaceId), input.id, input.index));
   if (moved.runspaceId !== input.runspaceId) afterTabLeft(tx, moved.runspaceId);
 }
 
 export function closeTab(tx: Tx, id: string) {
   const closed = tabOf(tx, id);
+  if (closed.pinned) throw new ORPCError("CONFLICT", { message: `Tab ${id} is pinned` });
   tx.delete(tab).where(eq(tab.id, id)).run();
   afterTabLeft(tx, closed.runspaceId);
+}
+
+export function pinTab(tx: Tx, id: string) {
+  const target = tabOf(tx, id);
+  const holder = pinnedTabOf(tx, target.runspaceId);
+  if (holder) {
+    tx.update(tab).set({ pinned: false }).where(eq(tab.id, holder.id)).run();
+  } else if (tabIds(tx, target.runspaceId).length > 1) {
+    moveTab(tx, { id, runspaceId: createRunspace(tx, { cwd: target.cwd }) });
+  }
+  tx.update(tab).set({ pinned: true }).where(eq(tab.id, id)).run();
+}
+
+export function unpinTab(tx: Tx, id: string) {
+  tabOf(tx, id);
+  tx.update(tab).set({ pinned: false }).where(eq(tab.id, id)).run();
 }
 
 // title から取った cwd は `~` で始まるが、帳簿の cwd は git や fs にそのまま渡すので絶対 path にする。
@@ -139,12 +165,7 @@ export async function respawnTab(books: Books, id: string, size: Size) {
     if (isLive(status)) {
       throw new ORPCError("CONFLICT", { message: `Tab ${id} still shows a live Terminal Session` });
     }
-    return tx
-      .update(tab)
-      .set({ terminalSessionId: insertTerminalSession(tx, { cwd, shell }) })
-      .where(eq(tab.id, id))
-      .returning()
-      .get()!;
+    return bindNewTerminalSession(tx, { id, cwd }, shell);
   });
   await startTerminalSession(books.workbench, respawned.terminalSessionId, size);
   return respawned;
@@ -177,6 +198,14 @@ function tabOf(tx: Tx, id: string) {
   const found = tx.select().from(tab).where(eq(tab.id, id)).get();
   if (!found) throw new ORPCError("NOT_FOUND", { message: `no Tab ${id}` });
   return found;
+}
+
+function pinnedTabOf(tx: Tx, runspaceId: string) {
+  return tx
+    .select({ id: tab.id })
+    .from(tab)
+    .where(and(eq(tab.runspaceId, runspaceId), eq(tab.pinned, true)))
+    .get();
 }
 
 // 所有されていない Runspace は Tab を 1 つ以上持つので、最後の Tab が抜けたら Runspace ごと消す。

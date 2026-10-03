@@ -57,7 +57,7 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
 
 | entry | 中身 | 実行環境 | import する側 |
 |---|---|---|---|
-| `@tania/<d>/schema` | drizzle の table。`drizzle-orm/sqlite-core` だけを import する | どこでも | 自分の contract と server、他 package の schema（FK）と server（SELECT） |
+| `@tania/<d>/schema` | drizzle の table。`drizzle-orm/sqlite-core` と `drizzle-orm` 本体（部分 index の条件を書く `sql`）だけを import する | どこでも | 自分の contract と server、他 package の schema（FK）と server（SELECT） |
 | `@tania/<d>/contract` | oRPC の contract、zod schema、型 | どこでも | apps/desktop（型だけ）、apps/cli、自分と他 package の server と ui と cli |
 | `@tania/<d>/server` | router、`create<D>()`、migrations の re-export | Bun | apps/backend、他 package の server、テスト |
 | `@tania/<d>/ui` | React の component と atom | browser | apps/desktop、他 package の ui |
@@ -274,8 +274,8 @@ changes                    → { type: "layout" } | { type: "terminalSession", i
 張り直し:
 
 - Backend は Exit を受けて行を exited にし、Reap した後で、その Terminal Session を指す Tab が pin されていれば、新しい `starting` の session を作って Tab に結び直し、commit 後に Create する（`tab.respawn` と同じ形）。size は 24×80 で始め、attach の resize で追いつく。
-- reconcile で exited か lost にした行も、pin された Tab が指していれば、reconcile の後に同じく張り直す。
-- 張り直さないのは、failed の行と、`ended_at - created_at` が 2 秒未満の行。その Tab は overlay を出したまま `tab.respawn` を待つ。`.zshrc` が壊れていて即死を繰り返す shell を、起こし続けないため。
+- reconcile の後は、pin された Tab が終わった行を指していれば、同じく張り直す。reconcile で exited か lost にした行のほかに、Exit を記録してから張り直す前に Backend が止まった行も拾う。
+- 張り直さないのは、failed の行と、`ended_at - created_at` が 2 秒未満の行。その Tab は overlay を出したまま `tab.respawn` を待つ。`.zshrc` が壊れていて即死を繰り返す shell を、起こし続けないため。ただし pid の無い lost の行（Create が届く前に Backend が止まり、shell が一度も動かなかった行）は、2 秒未満でも張り直す。
 - Exit の時点で Tab が無いか pin されていなければ、何もしない。Task の close で消えた Bench の Tab は張り直さない。
 - webview は、`changes` で Tab の `terminalSessionId` が替わったら、新しい session に attach し直す。
 
