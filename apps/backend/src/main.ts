@@ -59,13 +59,14 @@ const router = os
   .router({ workbench: workbenchRouter, task: taskRouter });
 const handler = new RPCHandler(router);
 
+const origins = ["tauri://localhost", "http://tauri.localhost"];
+// dev の webview は vite から読まれ、vite の port は home ごとに変わる。
+if (process.env.TANIA_DEV_URL) origins.push(new URL(process.env.TANIA_DEV_URL).origin);
+
 const token = crypto.randomUUID();
 const startedAt = new Date().toISOString();
 const app = new Hono();
-app.use(
-  "*",
-  cors({ origin: ["tauri://localhost", "http://tauri.localhost", "http://localhost:1420"] }),
-);
+app.use("*", cors({ origin: origins }));
 app.get("/health", (c) => c.json({ name: "tania-backend", pid: process.pid, startedAt }));
 app.use("/rpc/*", bearerAuth({ token }));
 app.use("/rpc/*", async (c, next) => {
