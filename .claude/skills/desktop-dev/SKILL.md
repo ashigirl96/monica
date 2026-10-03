@@ -16,7 +16,7 @@ dev の desktop（identifier `com.ashigirl96.tania.dev`）は single-instance �
 
 3. tauri-mcp の `driver_session` を `start`（port 9223）で繋ぐ。
 
-起動できたのは、log に `MCP Bridge plugin initialized` と `[backend] listening on` が出たとき。
+起動できたのは、log に `MCP Bridge plugin initialized` と `[backend] listening on` が出たとき。待つのは、Bash の `run_in_background` で `until grep -q '^\[backend\] listening on' $SCRATCH/desktop.log || ! pgrep -qf 'bun scripts/desktop.ts'; do sleep 0.5; done` を走らせる（前景の `sleep` は harness が止める）。MCP の WebSocket の行も `listening on` を含むので、`[backend]` まで含めて探す。
 
 ## 確かめる
 

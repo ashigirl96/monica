@@ -4,13 +4,13 @@ description: "spec または ticket 群に基づいて作業を実装し、PR �
 disable-model-invocation: true
 ---
 
-spec または ticket でユーザーが記述した作業を実装する。
+spec または ticket でユーザーが記述した作業を実装する。ticket は `docs/agents/issue-tracker.md` の「issue を読む」の形で取る。
 
 可能な限り、事前に合意した seam（振る舞いを差し替えられる場所）で `mattpocock-skills:tdd` を使う。
 
 型チェックと単一テストファイルの実行は定期的に、テストスイート全体の実行は最後に 1 回行う。
 
-完了したら `mattpocock-skills:code-review` で、Standards と Spec の 2 軸のレビューを受ける。
+完了したら `mattpocock-skills:code-review` で、Standards と Spec の 2 軸のレビューを受ける。この時点の変更はまだコミットしていないので、diff は `git diff $(git merge-base main HEAD)` で渡す。
 
 作業を /create-pr でコミットし、PR を出す。
 
