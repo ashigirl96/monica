@@ -19,7 +19,7 @@ export class BackendNotRunning extends Error {
 const RETRY_INTERVAL_MS = 200;
 const RETRY_WINDOW_MS = 3000;
 
-export function connect(home: string): Client | null {
+export function connect(home: string, { retry = true }: { retry?: boolean } = {}): Client | null {
   if (!liveEndpoint(home)) return null;
   const link: ClientLink<Record<never, never>> = {
     async call(path, input, options) {
@@ -36,7 +36,7 @@ export function connect(home: string): Client | null {
         } catch (error) {
           // bind 前と再起動中の Backend は接続を拒む。再起動すると port が変わるので file から読み直す。
           if (!isRefused(error)) throw error;
-          if (Date.now() >= deadline) throw new BackendNotRunning();
+          if (!retry || Date.now() >= deadline) throw new BackendNotRunning();
           await Bun.sleep(RETRY_INTERVAL_MS);
         }
       }

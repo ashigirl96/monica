@@ -5,15 +5,17 @@ import { commands as taskCommands } from "@tania/task/cli";
 import { commands as workbenchCommands } from "@tania/workbench/cli";
 import { type Client, connect } from "./backend.ts";
 
+type Connect = (options?: { retry?: boolean }) => Client | null;
+
 type Command = {
   path: readonly string[];
   description: string;
-  run: (argv: string[], deps: { connect: () => Client | null }) => Promise<number>;
+  run: (argv: string[], deps: { connect: Connect }) => Promise<number>;
 };
 
 const home = process.env.TANIA_HOME || join(homedir(), ".tania");
 const argv = process.argv.slice(2);
-const deps = { connect: () => connect(home) };
+const deps: { connect: Connect } = { connect: (options) => connect(home, options) };
 
 // trpc-cli と contract の実体の import だけで compiled の起動が約 30ms 延びるので、手書き command はその前に振り分ける。
 const commands: readonly Command[] = [...workbenchCommands, ...taskCommands];
