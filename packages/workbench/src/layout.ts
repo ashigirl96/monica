@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { ORPCError } from "@orpc/server";
 import { eq } from "drizzle-orm";
 import type { Layout, Tab } from "./contract.ts";
@@ -118,9 +119,12 @@ export function closeTab(tx: Tx, id: string) {
   afterTabLeft(tx, closed.runspaceId);
 }
 
+// title から取った cwd は `~` で始まるが、帳簿の cwd は git や fs にそのまま渡すので絶対 path にする。
 export function setTabCwd(tx: Tx, input: { id: string; cwd: string }) {
   tabOf(tx, input.id);
-  tx.update(tab).set({ cwd: input.cwd }).where(eq(tab.id, input.id)).run();
+  const cwd =
+    input.cwd === "~" || input.cwd.startsWith("~/") ? homedir() + input.cwd.slice(1) : input.cwd;
+  tx.update(tab).set({ cwd }).where(eq(tab.id, input.id)).run();
 }
 
 export async function respawnTab(books: Books, id: string, size: Size) {

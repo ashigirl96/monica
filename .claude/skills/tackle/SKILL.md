@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 spec または ticket でユーザーが記述した作業を実装する。
 
-可能な限り、事前に合意した seam（振る舞いを差し替えられる場所）で /tdd を使う。
+可能な限り、事前に合意した seam（振る舞いを差し替えられる場所）で `mattpocock-skills:tdd` を使う。
 
 型チェックと単一テストファイルの実行は定期的に、テストスイート全体の実行は最後に 1 回行う。
 
@@ -16,6 +16,6 @@ spec または ticket でユーザーが記述した作業を実装する。
 
 /watch-ai で codex review の指摘に対応する。
 
-/watch-ai が終わったら、/retro で今後に活かすものがあるか確かめ、直したものはコミットして push する。ここから merge までの判断は自分で下し、ユーザーに尋ねるのは次の merge の確認だけにする。
+/watch-ai が終わったら、/retro で今後に活かすものがあるか確かめ、直したものはコミットして push する。
 
 最後に、`gh pr checks --watch` で CI が通ったのを確かめてから、merge してよいかをユーザーに尋ね、了承を得たら merge する。

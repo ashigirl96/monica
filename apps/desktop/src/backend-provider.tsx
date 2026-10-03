@@ -1,3 +1,4 @@
+import { TRAFFIC_LIGHT_ZONE_WIDTH } from "@tania/ui";
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import {
   type Client,
@@ -67,4 +68,9 @@ export function BackendProvider({ children }: { children: ReactNode }) {
   );
 }
 
-const bannerStyle = { padding: "4px 12px", background: "#fdf3d8", fontSize: 13 };
+const bannerStyle = {
+  padding: `4px 12px 4px ${TRAFFIC_LIGHT_ZONE_WIDTH}px`,
+  background: "#fdf3d8",
+  color: "#3d2f00",
+  fontSize: 13,
+};

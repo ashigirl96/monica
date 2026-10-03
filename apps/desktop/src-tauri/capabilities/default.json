@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "main window: the Backend endpoint and its events",
+  "description": "main window: the Backend endpoint, the terminal relay events, opening links, and dragging the window by its title bar area",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "core:window:allow-start-dragging", "opener:default"]
 }
