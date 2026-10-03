@@ -1,4 +1,4 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  "ignorePatterns": ["**/*.md", "docs/research/hook-payloads/**"]
+  "ignorePatterns": ["**/*.md", "docs/research/hook-payloads/**", "packages/*/migrations/*/**"]
 }
