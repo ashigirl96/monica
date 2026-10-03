@@ -1,13 +1,15 @@
 import { cn, PinIcon, PlusIcon, useDragReorder, XIcon } from "@tania/ui";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useEffect, useRef } from "react";
+import { baseName } from "../paths.ts";
+import { AgentDotMark } from "./agent-dot-mark.tsx";
 import { JumpHint } from "./jump-hint.tsx";
 import { jumpHintTargetsAtom } from "./jump-hints.ts";
-import { baseName } from "./paths.ts";
 import {
   activateTerminalTabAtom,
   activeRunspaceAtom,
   activeTerminalTabAtom,
+  agentDotOfTerminalSessionAtom,
   closeTerminalTabAtom,
   createTerminalTabAtom,
   deadTabsAtom,
@@ -28,6 +30,7 @@ export function WorkbenchHeader() {
   const activeTab = useAtomValue(activeTerminalTabAtom);
   const titles = useAtomValue(tabTitlesAtom);
   const deadTabs = useAtomValue(deadTabsAtom);
+  const agentDotOfTerminalSession = useAtomValue(agentDotOfTerminalSessionAtom);
   const setTabMenu = useSetAtom(tabMenuAtom);
   const activateTab = useSetAtom(activateTerminalTabAtom);
   const closeTab = useSetAtom(closeTerminalTabAtom);
@@ -83,6 +86,10 @@ export function WorkbenchHeader() {
           >
             {hint && <JumpHint hint={hint} className="mr-1.5" />}
             {tab.pinned && <PinIcon size={14} className="mr-1.5 shrink-0 text-rose-400" />}
+            <AgentDotMark
+              dot={agentDotOfTerminalSession(tab.terminalSessionId)}
+              className="mr-1.5"
+            />
             <span className="flex-1 truncate">{label}</span>
             {terminalDot && (
               <span

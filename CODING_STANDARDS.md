@@ -9,6 +9,7 @@ review で差分に当てる規則。どれも判断が要るもので、決定�
 - domain をまたぐ書き込みは、相手の domain の method を通す。読み出しは相手の schema を直接 SELECT してよい（`docs/packages.md` の「domain をまたぐ規則」）。
 - 他の domain から呼ばれる書き込みは、第 1 引数に transaction を取る同期の method にする。ptyd や fs への副作用は別の async method にし、呼び手が commit の後に呼ぶ（`docs/packages.md` の「server entry の形」）。
 - DB の行と ptyd（や fs）の両方を進める処理は、commit の前後や ptyd への要求の途中のどこで Backend が止まっても、ptyd との接続が切れても、次の reconcile が正しい状態に戻せる形にする（ADR-0011）。
+- commit の後の副作用（通知など）が失敗しても、commit 済みの変更の合図（`events`）と記録は止めない（`docs/packages.md` の「通知」）。
 - DB を開いて書くのは Backend だけ。CLI・Shell・webview は procedure を呼ぶ（ADR-0003、ADR-0011）。
 - Shell（`apps/desktop/src-tauri`）に置くのは、Tauri プロセスにしか無いもの（窓と webview の event、app の名義、AppKit）に触る処理と、端末の byte だけ。fs と process の spawn で済む処理は Backend の procedure にする（ADR-0001）。
 

@@ -129,6 +129,31 @@ function provesAlive(event: HookEvent): boolean {
   }
 }
 
+export function notificationFor(
+  before: AgentSession | null,
+  event: HookEvent,
+  after: AgentSession,
+): string | null {
+  if (after.state !== "waiting") return null;
+  // state_changed_at は ms 単位なので、同じ ms に続いた hook では新しい待ちでも前の行と同じ値になる。
+  const stillWaiting = before?.state === "waiting" && before.waitReason === after.waitReason;
+  switch (after.waitReason) {
+    case "idle": {
+      const wasWorking = !before || before.state === "running" || before.state === "unobserved";
+      return event.type === "turnStopped" && wasWorking ? "手空き" : null;
+    }
+    case "question":
+      return stillWaiting ? null : "質問";
+    case "permission":
+      return event.type === "permissionRequested" ? `許可: ${after.waitTool}` : null;
+    case "error":
+      if (stillWaiting) return null;
+      return after.errorType ? `エラー: ${after.errorType}` : "エラー";
+    default:
+      return null;
+  }
+}
+
 // 1 つの Terminal Session で live な Agent Session は 1 つなので、そこで始まった session と、
 // SessionStart を取りこぼしたまま live として入ってきた session は、先にいた live な行を終える。
 export function takesOverTerminal(
