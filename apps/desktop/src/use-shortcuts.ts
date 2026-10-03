@@ -11,6 +11,7 @@ import {
   moveActiveTabAtom,
   setUiZoomAtom,
   sidebarOpenAtom,
+  toggleTabPinAtom,
 } from "@tania/workbench/ui";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useEffect } from "react";
@@ -61,6 +62,7 @@ export function useShortcuts() {
   const moveActiveTab = useSetAtom(moveActiveTabAtom);
   const moveActiveRunspace = useSetAtom(moveActiveRunspaceAtom);
   const setUiZoom = useSetAtom(setUiZoomAtom);
+  const toggleTabPin = useSetAtom(toggleTabPinAtom);
 
   useEffect(() => {
     if (!jumpActive) return;
@@ -87,6 +89,8 @@ export function useShortcuts() {
         action: () => setJumpActive(true),
       },
       { meta: true, key: "b", editable: true, action: () => setSidebarOpen((v) => !v) },
+      // macOS の印刷ダイアログは preventDefault で抑えられる。
+      { meta: true, shift: false, key: "p", editable: true, action: () => void toggleTabPin() },
       { meta: true, keys: ["=", "+"], action: () => setUiZoom("in") },
       { meta: true, key: "-", action: () => setUiZoom("out") },
       { alt: true, code: "KeyH", action: () => cycleTerminalTab("left") },
@@ -134,5 +138,6 @@ export function useShortcuts() {
     moveActiveTab,
     moveActiveRunspace,
     setUiZoom,
+    toggleTabPin,
   ]);
 }

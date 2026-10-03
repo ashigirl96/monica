@@ -57,7 +57,7 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
 
 | entry | 中身 | 実行環境 | import する側 |
 |---|---|---|---|
-| `@tania/<d>/schema` | drizzle の table。`drizzle-orm/sqlite-core` だけを import する | どこでも | 自分の contract と server、他 package の schema（FK）と server（SELECT） |
+| `@tania/<d>/schema` | drizzle の table。`drizzle-orm/sqlite-core` と `drizzle-orm` 本体（部分 index の条件を書く `sql`）だけを import する | どこでも | 自分の contract と server、他 package の schema（FK）と server（SELECT） |
 | `@tania/<d>/contract` | oRPC の contract、zod schema、型 | どこでも | apps/desktop（型だけ）、apps/cli、自分と他 package の server と ui と cli |
 | `@tania/<d>/server` | router、`create<D>()`、migrations の re-export | Bun | apps/backend、他 package の server、テスト |
 | `@tania/<d>/ui` | React の component と atom | browser | apps/desktop、他 package の ui |

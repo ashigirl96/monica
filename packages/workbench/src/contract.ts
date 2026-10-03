@@ -98,6 +98,17 @@ export const contract = {
       .meta({ description: "Record the last known cwd of a Tab" })
       .input(z.object({ id: z.string(), cwd: z.string() }))
       .output(z.void()),
+    pin: meta
+      .meta({
+        description:
+          "Pin a Tab, moving the pin from another Tab of its Runspace or splitting it into a new Runspace",
+      })
+      .input(z.object({ id: z.string() }))
+      .output(z.void()),
+    unpin: meta
+      .meta({ description: "Unpin a Tab, leaving it in its Runspace" })
+      .input(z.object({ id: z.string() }))
+      .output(z.void()),
   },
   changes: meta
     .meta({ description: "Stream signals that the Workbench books changed" })

@@ -3,14 +3,18 @@ import { EventPublisher } from "@orpc/server";
 import { and, eq, inArray } from "drizzle-orm";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type { TerminalSession, WorkbenchChange } from "./contract.ts";
+import { shouldRespawn } from "./pin.ts";
 import { openDaemon, type PtydClient, type SessionInfo } from "./ptyd.ts";
-import { terminalSession } from "./schema.ts";
+import { tab, terminalSession } from "./schema.ts";
 
 export type Db = BunSQLiteDatabase;
 export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 export type Size = { rows: number; cols: number };
 
 export const LIVE = ["starting", "running"] as const;
+
+// 張り直す Tab は画面に出ていないこともあるので、決まった大きさで起こし、attach の resize で追いつかせる。
+const RESPAWN_SIZE: Size = { rows: 24, cols: 80 };
 
 export type Workbench = {
   events: EventPublisher<{ change: WorkbenchChange }>;
@@ -64,6 +68,35 @@ export function createWorkbench(deps: {
       .run();
     publish({ type: "terminalSession", id });
     client?.notify({ op: "reap", session_id: id });
+    respawnInBackground([id]);
+  }
+
+  // 張り直すかは待った後の transaction の中で決めるので、間に Tab が閉じられたり手で張り直されたりしても二重に起こさない。
+  async function respawnPinnedTabs(endedIds: string[]) {
+    await ready();
+    const respawned = db.transaction((tx) =>
+      tx
+        .select()
+        .from(terminalSession)
+        .leftJoin(tab, eq(tab.terminalSessionId, terminalSession.id))
+        .where(inArray(terminalSession.id, endedIds))
+        .all()
+        .flatMap((row) =>
+          row.tab && shouldRespawn(row.terminal_session, row.tab)
+            ? [bindNewTerminalSession(tx, row.tab, shell).terminalSessionId]
+            : [],
+        ),
+    );
+    if (respawned.length === 0) return;
+    publish({ type: "layout" });
+    await Promise.all(respawned.map((id) => startTerminalSession(workbench, id, RESPAWN_SIZE)));
+  }
+
+  function respawnInBackground(endedIds: string[]) {
+    if (endedIds.length === 0) return;
+    respawnPinnedTabs(endedIds).catch((error: unknown) => {
+      if (!stopping) console.error(`[workbench] respawning pinned Tabs failed: ${error}`);
+    });
   }
 
   // 繋ぎ直すのは reconcile まで済んだ接続が切れたときだけ。hello や List の途中で切れたら、
@@ -87,7 +120,7 @@ export function createWorkbench(deps: {
         opened.close();
         throw new Error("the Workbench has stopped");
       }
-      const { reap, terminate } = reconcile(db, await opened.list());
+      const { reap, terminate, ended } = reconcile(db, await opened.list());
       for (const id of reap) opened.notify({ op: "reap", session_id: id });
       for (const id of terminate) opened.notify({ op: "terminate", session_id: id });
       client = opened;
@@ -95,6 +128,7 @@ export function createWorkbench(deps: {
       exitsDuringReconcile = null;
       for (const [id, exitCode] of exits) onExit(id, exitCode);
       publish({ type: "reconciled" });
+      respawnInBackground(ended);
       console.error(
         `[workbench] connected to tania-ptyd; reaped ${reap.length}, terminated ${terminate.length}`,
       );
@@ -150,6 +184,15 @@ export function insertTerminalSession(tx: Tx, { cwd, shell }: { cwd: string; she
   return id;
 }
 
+export function bindNewTerminalSession(tx: Tx, target: { id: string; cwd: string }, shell: string) {
+  return tx
+    .update(tab)
+    .set({ terminalSessionId: insertTerminalSession(tx, { cwd: target.cwd, shell }) })
+    .where(eq(tab.id, target.id))
+    .returning()
+    .get()!;
+}
+
 export async function startTerminalSession(workbench: Workbench, id: string, { rows, cols }: Size) {
   const { db, publish, ready } = internals(workbench);
   const ptyd = await ready();
@@ -191,6 +234,7 @@ function reconcile(db: Db, ptydSessions: SessionInfo[]) {
   const unmatched = new Map(ptydSessions.map((s) => [s.session_id, s]));
   const reap: string[] = [];
   const terminate: string[] = [];
+  const ended: string[] = [];
   db.transaction((tx) => {
     for (const row of tx.select().from(terminalSession).all()) {
       const held = unmatched.get(row.id);
@@ -206,6 +250,7 @@ function reconcile(db: Db, ptydSessions: SessionInfo[]) {
           .set({ status: "lost", endedAt: now })
           .where(eq(terminalSession.id, row.id))
           .run();
+        ended.push(row.id);
         continue;
       }
       if (!held.running) {
@@ -214,6 +259,7 @@ function reconcile(db: Db, ptydSessions: SessionInfo[]) {
           .where(eq(terminalSession.id, row.id))
           .run();
         reap.push(row.id);
+        ended.push(row.id);
         continue;
       }
       tx.update(terminalSession)
@@ -239,7 +285,7 @@ function reconcile(db: Db, ptydSessions: SessionInfo[]) {
         .run();
     }
   });
-  return { reap, terminate };
+  return { reap, terminate, ended };
 }
 
 export function isLive(status: TerminalSession["status"]): boolean {

@@ -32,6 +32,10 @@ export function startFakePtyd(home: string) {
       return new Promise((resolve) => waiters.push({ match, resolve }));
     },
 
+    receivedAll(match: (op: RequestOp) => boolean): RequestOp[] {
+      return received.filter(match);
+    },
+
     exit(sessionId: string, exitCode: number | null) {
       const session = sessions.find((s) => s.session_id === sessionId);
       if (session) Object.assign(session, { running: false, pid: null, exit_code: exitCode });

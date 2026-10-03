@@ -12,6 +12,16 @@ mock.module("@tauri-apps/api/core", () => ({
   },
 }));
 
+// toast は画面の外にあるので、出した文言だけを記録する。
+const toasts: string[] = [];
+const ui = await import("@tania/ui");
+mock.module("@tania/ui", () => ({
+  ...ui,
+  pushErrorToast: (message: string) => {
+    toasts.push(message);
+  },
+}));
+
 const { createStore } = await import("jotai");
 const { cleanUp, setup } = await import("../testing.ts");
 const {
@@ -22,16 +32,20 @@ const {
   closeTerminalTabAtom,
   createRunspaceAtom,
   createTerminalTabAtom,
+  cycleRunspaceAtom,
   deadTabsAtom,
   terminateTerminalSessionAtom,
+  moveActiveRunspaceAtom,
   moveTabToRunspaceAtom,
   reattachTerminalSessionAtom,
   reloadAtom,
   reorderRunspacesAtom,
   reorderTabsAtom,
+  runspaceSummariesAtom,
   startNewShellForTabAtom,
   tabExitedAtom,
   terminateTabTerminalSessionAtom,
+  toggleTabPinAtom,
   updateTabCwdAtom,
   updateTabTitleAtom,
   workbenchClientAtom,
@@ -45,6 +59,7 @@ const size = { rows: 24, cols: 80 };
 afterEach(() => {
   cleanUp();
   shellCalls.length = 0;
+  toasts.length = 0;
 });
 
 function bench() {
@@ -177,6 +192,72 @@ test("dropping the active Tab on another Runspace moves it to the end there, and
   expect(store.get(activeTerminalTabAtom)?.id).toBe(from.tab.id);
 });
 
+test("pinning the front Tab of a Runspace with siblings follows it into its own Runspace atop the sidebar, and pinning again unpins it", async () => {
+  const { client, store } = bench();
+  const shells = await client.runspace.create(size);
+  const pinned = await client.tab.open({ runspaceId: shells.runspaceId, ...size });
+  await store.set(reloadAtom);
+  store.set(activateTerminalTabAtom, pinned.id);
+
+  await store.set(toggleTabPinAtom);
+
+  const split = store.get(activeRunspaceAtom)!;
+  expect(split.id).not.toBe(shells.runspaceId);
+  expect(store.get(activeTerminalTabAtom)?.id).toBe(pinned.id);
+  expect(store.get(runspaceSummariesAtom).map((s) => [s.id, s.holdsPin])).toEqual([
+    [split.id, true],
+    [shells.runspaceId, false],
+  ]);
+
+  await store.set(toggleTabPinAtom);
+
+  expect(store.get(runspaceSummariesAtom).map((s) => [s.id, s.holdsPin])).toEqual([
+    [shells.runspaceId, false],
+    [split.id, false],
+  ]);
+});
+
+test("cycling Runspaces follows the sidebar, where the Runspaces holding a pin come first", async () => {
+  const { client, store } = bench();
+  const [a, p, b] = [
+    await client.runspace.create(size),
+    await client.runspace.create(size),
+    await client.runspace.create(size),
+  ];
+  await client.tab.pin({ id: p!.tab.id });
+  await store.set(reloadAtom);
+  store.set(activateRunspaceAtom, a!.runspaceId);
+  const visited = () => {
+    store.set(cycleRunspaceAtom, "down");
+    return store.get(activeRunspaceAtom)?.id;
+  };
+
+  expect([visited(), visited(), visited()]).toEqual([b!.runspaceId, p!.runspaceId, a!.runspaceId]);
+});
+
+test("a Runspace moves only within its sidebar group, by drag or by key", async () => {
+  const { client, store } = bench();
+  const [a, p, b] = [
+    await client.runspace.create(size),
+    await client.runspace.create(size),
+    await client.runspace.create(size),
+  ].map((r) => r.runspaceId);
+  await client.tab.pin({ id: (await client.layout.get()).runspaces[1]!.tabs[0]!.id });
+  await store.set(reloadAtom);
+  const books = async () => (await client.layout.get()).runspaces.map((r) => r.id);
+  const sidebar = () => store.get(runspaceSummariesAtom).map((s) => s.id);
+
+  await store.set(reorderRunspacesAtom, a!, p!);
+  expect(await books()).toEqual([a, p, b]);
+
+  store.set(activateRunspaceAtom, b!);
+  await store.set(moveActiveRunspaceAtom, "up");
+  expect(sidebar()).toEqual([p, b, a]);
+
+  await store.set(moveActiveRunspaceAtom, "up");
+  expect(sidebar()).toEqual([p, b, a]);
+});
+
 test("a Tab whose shell exits while it is connected closes without ever showing the exit", async () => {
   const { client, store } = bench();
   const { runspaceId, tab: a } = await client.runspace.create(size);
@@ -184,7 +265,7 @@ test("a Tab whose shell exits while it is connected closes without ever showing 
   await store.set(reloadAtom);
 
   // Shell が Exit を受けた時点では、Backend はまだ exit を記録していない。
-  const closing = store.set(tabExitedAtom, b.id, 0);
+  const closing = store.set(tabExitedAtom, b.id, b.terminalSessionId, 0);
   expect(store.get(terminalSessionStatusAtom)[b.terminalSessionId]?.status).toBe("exited");
   expect(store.get(deadTabsAtom)).toEqual({});
   await closing;
@@ -193,6 +274,33 @@ test("a Tab whose shell exits while it is connected closes without ever showing 
   expect(store.get(terminalSessionStatusAtom)[b.terminalSessionId]?.status).toBe("exited");
   expect(store.get(detachedTerminalSessionsAtom)).toEqual([]);
   expect(shellCalls.map((c) => c.command)).not.toContain("terminal_detach");
+});
+
+test("a pinned Tab whose shell exits while it is connected stays open, without an error, for the Backend to respawn", async () => {
+  const { client, store } = bench();
+  const { tab } = await client.runspace.create(size);
+  await client.tab.pin({ id: tab.id });
+  await store.set(reloadAtom);
+
+  await store.set(tabExitedAtom, tab.id, tab.terminalSessionId, 0);
+
+  expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([tab.id]);
+  expect(toasts).toEqual([]);
+});
+
+test("an Exit that arrives after the Tab was bound to a new shell leaves the new shell alone", async () => {
+  const { ptyd, client, store } = bench();
+  const { tab } = await client.runspace.create(size);
+  await client.tab.pin({ id: tab.id });
+  ptyd.exit(tab.terminalSessionId, 0);
+  await ptyd.received((op) => op.op === "reap" && op.session_id === tab.terminalSessionId);
+  const respawned = await client.tab.respawn({ id: tab.id, ...size });
+  await store.set(reloadAtom);
+
+  await store.set(tabExitedAtom, tab.id, tab.terminalSessionId, 0);
+
+  expect(store.get(deadTabsAtom)).toEqual({});
+  expect(store.get(terminalSessionStatusAtom)[respawned.terminalSessionId]?.status).toBe("running");
 });
 
 test("Terminate kills the Tab's Terminal Session and closes the Tab, without passing through Detached", async () => {
