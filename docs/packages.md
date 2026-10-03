@@ -86,8 +86,8 @@ export function createTask(deps: { db: Db; workbench: Workbench }): Task;
 `Workbench` と `Task` は次を持つ。
 
 - `events`: その domain の変更を知らせる in-process の publisher。
-- `start()` / `stop()`: 起動時と終了時の処理。workbench は ptyd への接続と reconcile、task は 5 分おきの背景 sync（#18）。
-- 他の domain から呼ばれる書き込み: 第 1 引数に transaction（`db` でもよい）を取る**同期**の method。task は `db.transaction((tx) => { workbench.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。ptyd や fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。
+- `start()` / `stop()`: 起動時と終了時の処理。workbench は ptyd への接続（無ければ spawn、版違いは入れ替え）と reconcile（ADR-0011）、task は 5 分おきの背景 sync（#18）。
+- 他の domain から呼ばれる書き込み: 第 1 引数に transaction（`db` でもよい）を取る**同期**の method。task は `db.transaction((tx) => { workbench.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。ptyd や fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。workbench の同期 method は `createRunspace` / `removeRunspace` / `moveTab` / `openTab`、commit 後の async は `startTerminalSession` / `terminateTerminalSessions`（#22）。
 
 他の domain から呼ばれない処理は router の handler の中に書いてよい。
 
@@ -105,7 +105,7 @@ export function createTask(deps: { db: Db; workbench: Workbench }): Task;
 3. `createWorkbench` → `createTask` の順に作る。
 4. router を `{ workbench: workbenchRouter, task: taskRouter }` で mount し、context は `{ db, workbench, task }`。
 5. hono に CORS（`tauri://localhost`・`http://tauri.localhost`・`http://localhost:1420`）、`/health`（token 無し）、`/rpc/*` の bearer を載せ、`Bun.serve({ hostname: "127.0.0.1", port: 0, idleTimeout: 0 })` で立てる。
-6. `backend.json` と stdout の 1 行を書き（ADR-0007）、`start()` を同じ順に呼ぶ。
+6. `start()` を workbench → task の順に呼ぶ。workbench の `start()`（ptyd への接続と reconcile）を最大 3 秒待ってから、`backend.json` と stdout の 1 行を書く（ADR-0007 / 0011）。
 7. 終了時は `stop()` を逆順に呼んでから ADR-0007 の手順で抜ける。
 
 domain は 2 つしかないので、汎用の「domain の登録」機構は作らずに直接並べる。
@@ -168,7 +168,7 @@ contract を走査するテストを 1 本置き、description と output が全
 - domain の ui には自分の contract の client だけを渡す（workbench の ui は `client.workbench`）。oRPC の client は callable な Proxy なので、React の state に入れるときは `setState(() => client)`（#8 の詰まった点 5）。
 - Shell の terminal command を呼ぶ wrapper（monica の `commands/terminal.ts`）は `packages/workbench/src/ui` に置く。
 - Tailwind の `@source` に `packages/*/src/ui` を足す。
-- `src-tauri/` は Shell。Backend の監督（ADR-0007）と terminal の中継だけを持つ。
+- `src-tauri/` は Shell。Backend の監督（ADR-0007）と terminal の中継だけを持つ。terminal command は attach / detach / write / resize の 4 本で、ptyd は spawn しない（ADR-0011）。
 
 ## dev loop
 
@@ -176,7 +176,7 @@ contract を走査するテストを 1 本置き、description と output が全
   1. `TANIA_HOME` が無ければ `~/.tania-dev` を設定し、`TANIA_BIN=<repo>/scripts/tania-dev` を設定する。
   2. `cargo build -p tania-ptyd` を行い、externalBin の位置に `tania-ptyd`・`tania-backend`・`tania` を置く（tauri-build がファイルの存在を要求するため。debug の Shell は使わないので placeholder でよい）。
   3. `tauri dev --config src-tauri/tauri.dev.conf.json` を起動する。dev の config は identifier に `.dev` を付けて release と別 instance にし（ADR-0007）、`beforeDevCommand` は vite だけ。
-- debug build の Shell は Backend として `bun --watch apps/backend/src/main.ts` を、ptyd として `target/debug/tania-ptyd`（`TANIA_PTYD_PATH` で差し替え可）を使う。Backend は package や apps/backend の編集と `bun run generate` で同じ pid のまま再起動し、webview は `backend-endpoint` event で再接続する。
+- debug build の Shell は Backend として `bun --watch apps/backend/src/main.ts` を起動し、ptyd の場所 `target/debug/tania-ptyd`（`TANIA_PTYD_PATH` で差し替え可）を env `TANIA_PTYD_PATH` で Backend に渡す。ptyd を spawn するのは Backend で、release の Backend は自分の隣の `tania-ptyd` を使う（ADR-0011）。Backend は package や apps/backend の編集と `bun run generate` で同じ pid のまま再起動し、webview は `backend-endpoint` event で再接続する。byte は Shell の ptyd 接続を通るので、この再起動で端末は切れない。
 - webview は vite の HMR。package の `ui` も source のまま読む。
 - `bun run tania <args>` は `scripts/tania-dev`（`bun apps/cli/src/main.ts "$@"`）を呼ぶ。`TANIA_HOME` が無ければ `~/.tania-dev`。
 - desktop は起動時に `$TANIA_HOME/bin/tania` → `TANIA_BIN` の symlink を張る。release の desktop だけが `~/.local/bin/tania` にも張る（ADR-0006）。dev の desktop が張ると release の CLI を上書きするため。Workbench の tab の PATH に `$TANIA_HOME/bin` を前置するのは #13 の担当。
@@ -211,7 +211,6 @@ contract を走査するテストを 1 本置き、description と output が全
 
 ## ここで決めていないこと
 
-- Terminal Session の帳簿を Backend に置く形と、Backend ↔ ptyd の接続（#22）。`packages/workbench` の contract の骨格もそこで出る。
 - tab に渡す env、ZDOTDIR の shim、PATH への `$TANIA_HOME/bin` の前置（#13）。
 - 設定、`$TANIA_HOME` のレイアウト、ログ（map の fog）。
 - 署名と notarization（map の fog）。

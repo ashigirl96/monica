@@ -26,4 +26,4 @@ ADR-0003 の反転で CLI は Backend が立っていないと動かなくなり
   2. Shell の起動時掃除: spawn の前に `backend.json` を読み、pid が生きていて `/health` の pid が一致したら SIGTERM → 2 秒 → SIGKILL してから spawn する。同定に `ps -o comm=` を使わないのは dev では comm が `bun` だから。
   3. DB の排他: Backend は SQLite を `PRAGMA locking_mode=EXCLUSIVE` にしてから WAL にする（WAL-index が heap に載り `-shm` も要らない）。2 つ目の Backend は最初のクエリで `SQLITE_BUSY` になり exit 非 0 で落ちる。ADR-0003 の「書き手は 1 プロセス」は前提ではなく DB が守る不変条件になる。
 - **respawn**: Shell は Backend の予期しない終了を検知したら、即 → 1 秒 → 2 秒 → 4 秒の間隔で再 spawn し、60 秒以内に 5 回失敗したら諦めて webview に error と再試行を出す（migrate 失敗のような決定的エラーで無限に回さないため）。自分が SIGTERM した終了では respawn しない。終了を検知したら保持している endpoint を捨て、webview は新しい endpoint が来るまで「再接続中」を出す。新しい port と token は stdout の 1 行 → `backend-endpoint` event → webview の再接続・再購読で伝わり、CLI は毎回 file を読むので追従する。dev の `bun --watch` の再起動（同じ pid で port だけ変わる）も同じ経路に乗る。
-- Backend は起動のたびに ptyd に繋ぎ直す。接続形は別途決める。
+- Backend は起動のたびに ptyd に繋ぎ直して reconcile し、それを終えてから `backend.json` と stdout の 1 行を書く。webview と CLI が reconcile 前の Terminal Session を読まないため。ptyd が 3 秒で起きなければ待たずに公開する。接続形は ADR-0011。

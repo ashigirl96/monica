@@ -58,7 +58,7 @@ _Avoid_: workspace
 Runspace 内の 1 枚の端末画面。閉じても Terminal Session は止まらず detach されるだけ。
 
 **Terminal Session**:
-ptyd が持つ 1 つの PTY。app より長生きし、再 attach すると transcript を replay する。
+ptyd が持つ 1 つの PTY。app より長生きし、再 attach すると transcript を replay する。どの Tab も表示していない生きている Terminal Session を detached と呼び、Tab で開き直す（reattach）か終了させるまで残る。
 _Avoid_: session（Agent Session と紛れる）
 
 **Agent Session**:
@@ -83,7 +83,7 @@ Shell が起動し、desktop と同寿命の process。Task と Workbench の帳
 _Avoid_: server, sidecar, tania-backend
 
 **ptyd**:
-Terminal Session を管理する常駐 daemon。desktop より長生きし、socket 越しに使う。
+Terminal Session を管理する常駐 daemon。Backend が起動し、desktop より長生きする。socket 越しに使う。
 
 ### Skill
 
