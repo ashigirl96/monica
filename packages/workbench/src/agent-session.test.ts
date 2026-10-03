@@ -141,6 +141,26 @@ test("a session starting in a Terminal Session ends the other live Agent Session
   expect(rowOf(db, "s-old")).toMatchObject({ state: "ended", endReason: "superseded" });
 });
 
+test("a session resumed in another Terminal Session whose SessionStart was missed moves there with its next hook and ends the Agent Session it finds", async () => {
+  const { db, client } = setup();
+  seedTerminalSession(db, "ts-a", "running");
+  seedTerminalSession(db, "ts-b", "running");
+  const record = (terminalSessionId: string, sessionId: string, hookEventName: string) =>
+    client.agentSession.recordHook({
+      terminalSessionId,
+      payload: payload(sessionId, hookEventName),
+    });
+  await record("ts-a", "s-moving", "Stop");
+  await record("ts-b", "s-resident", "Stop");
+
+  await record("ts-b", "s-moving", "UserPromptSubmit");
+
+  expect(await client.agentSession.list()).toEqual([
+    expect.objectContaining({ sessionId: "s-moving", terminalSessionId: "ts-b", state: "running" }),
+  ]);
+  expect(rowOf(db, "s-resident")).toMatchObject({ state: "ended", endReason: "superseded" });
+});
+
 test("changes signals every Agent Session a hook changed", async () => {
   const { db, workbench, client } = setup();
   seedTerminalSession(db, "ts-a", "running");

@@ -5,6 +5,7 @@ import {
   type HookEvent,
   type HookSignal,
   supersede,
+  takesOverTerminal,
   transition,
 } from "./transition.ts";
 
@@ -181,55 +182,75 @@ describe.each(table)("%s", (_name, event, cells) => {
   });
 });
 
-describe("another live Agent Session on the same Terminal Session", () => {
-  const superseded: StateFields = { state: "ended", endReason: "superseded", endedAt: NOW };
-  const startup = hook(
-    "SessionStart",
-    { type: "sessionStarted", compacted: false },
-    { sessionId: "s-2" },
-  );
+describe("a session that takes over its Terminal Session", () => {
+  const prompt = hook("UserPromptSubmit", { type: "promptSubmitted" });
+
+  test.each([
+    [
+      "any SessionStart",
+      rowIn("running"),
+      hook("SessionStart", { type: "sessionStarted", compacted: true }),
+      true,
+    ],
+    ["the first hook of a session the books do not know", null, prompt, true],
+    ["a hook reviving a session that had ended there", rowIn("ended"), prompt, true],
+    [
+      "a hook of a session that comes from another Terminal Session",
+      rowIn("idle", { terminalSessionId: "ts-b" }),
+      prompt,
+      true,
+    ],
+    ["a hook of a session already live there", rowIn("idle"), prompt, false],
+    [
+      "a late Stop to a session that had ended",
+      rowIn("ended"),
+      hook("Stop", { type: "turnStopped", agentWorkRunning: false }),
+      false,
+    ],
+    [
+      "a SessionEnd of a session that comes from another Terminal Session",
+      rowIn("idle", { terminalSessionId: "ts-b" }),
+      hook("SessionEnd", { type: "sessionEnded", reason: "other" }),
+      false,
+    ],
+  ] as const)("is %s: %p", (_name, before, event, expected) => {
+    expect(takesOverTerminal(before, transition(before, event, NOW), event)).toBe(expected);
+  });
 
   test.each(["running", "unobserved", "idle", "question", "permission", "error"] as const)(
-    "ends as superseded from %s when a new session starts there",
+    "ends the other live Agent Session there as superseded from %s",
     (state) => {
-      const prev = rowIn(state);
+      const prev = rowIn(state, { sessionId: "s-2" });
 
-      expect(supersede(prev, startup, NOW)).toEqual({
+      expect(supersede(prev, NOW)).toEqual({
         ...prev,
         ...blank,
-        ...superseded,
+        state: "ended",
+        endReason: "superseded",
+        endedAt: NOW,
         stateChangedAt: NOW,
       });
     },
   );
-
-  test("stays ended when it had already ended", () => {
-    expect(supersede(rowIn("ended"), startup, NOW)).toBeNull();
-  });
-
-  test("is left alone by events of the other session that are not a start", () => {
-    const prompt = hook("UserPromptSubmit", { type: "promptSubmitted" }, { sessionId: "s-2" });
-
-    expect(supersede(rowIn("running"), prompt, NOW)).toBeNull();
-  });
-
-  test("is left alone by a session starting on another Terminal Session", () => {
-    const elsewhere = { ...startup, terminalSessionId: "ts-b" };
-
-    expect(supersede(rowIn("running"), elsewhere, NOW)).toBeNull();
-  });
 });
 
-test("a hook carrying a permission mode records it, and one without keeps the last known mode", () => {
-  const plan = hook("UserPromptSubmit", { type: "promptSubmitted" }, { permissionMode: "plan" });
-  const unknown = hook(
+test("a hook refreshes the cwd, and keeps the last known permission mode when it carries none", () => {
+  const moved = hook(
+    "UserPromptSubmit",
+    { type: "promptSubmitted" },
+    { cwd: "/elsewhere", permissionMode: "plan" },
+  );
+  const modeless = hook(
     "SessionEnd",
     { type: "sessionEnded", reason: "other" },
     { permissionMode: null },
   );
 
-  expect(transition(rowIn("idle"), plan, NOW)?.permissionMode).toBe("plan");
+  expect(transition(rowIn("idle"), moved, NOW)).toMatchObject({
+    cwd: "/elsewhere",
+    permissionMode: "plan",
+  });
   expect(
-    transition(rowIn("running", { permissionMode: "plan" }), unknown, NOW)?.permissionMode,
+    transition(rowIn("running", { permissionMode: "plan" }), modeless, NOW)?.permissionMode,
   ).toBe("plan");
 });

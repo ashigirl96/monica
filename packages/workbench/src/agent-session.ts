@@ -2,7 +2,7 @@ import { and, eq, getTableColumns, ne } from "drizzle-orm";
 import type { AgentSession } from "./contract.ts";
 import { decodeHook } from "./hook-decoder.ts";
 import { agentSession, terminalSession } from "./schema.ts";
-import { supersede, transition } from "./transition.ts";
+import { supersede, takesOverTerminal, transition } from "./transition.ts";
 import { type Db, isLive, type Tx } from "./workbench.ts";
 
 const notEnded = ne(agentSession.state, "ended");
@@ -49,10 +49,11 @@ export function recordHook(
         ),
       )
       .all();
-    return saveChanged(tx, [
-      transition(own, event, now),
-      ...beside.map((row) => supersede(row, event, now)),
-    ]);
+    const next = transition(own, event, now);
+    const displaced = takesOverTerminal(own, next, event)
+      ? beside.map((row) => supersede(row, now))
+      : [];
+    return saveChanged(tx, [next, ...displaced]);
   });
 }
 

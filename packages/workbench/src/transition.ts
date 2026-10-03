@@ -57,6 +57,7 @@ export function transition(
   const recorded: AgentSession = {
     ...current,
     terminalSessionId: event.terminalSessionId,
+    cwd: event.cwd,
     lastEventName: event.hookEventName,
     lastEventAt: now,
     permissionMode: event.permissionMode ?? current.permissionMode,
@@ -128,15 +129,20 @@ function provesAlive(event: HookEvent): boolean {
   }
 }
 
-// 1 つの Terminal Session で live な Agent Session は 1 つなので、そこで別の session が始まったら前の行を終える。
-export function supersede(row: AgentSession, event: HookEvent, now: Date): AgentSession | null {
-  const startedBeside =
-    event.type === "sessionStarted" &&
-    row.terminalSessionId === event.terminalSessionId &&
-    row.state !== "ended";
-  return startedBeside
-    ? enter(row, { state: "ended", endReason: "superseded", endedAt: now }, now)
-    : null;
+// 1 つの Terminal Session で live な Agent Session は 1 つなので、そこで始まった session と、
+// SessionStart を取りこぼしたまま live として入ってきた session は、先にいた live な行を終える。
+export function takesOverTerminal(
+  before: AgentSession | null,
+  after: AgentSession | null,
+  event: HookEvent,
+): boolean {
+  const liveThere = (row: AgentSession | null) =>
+    row !== null && row.state !== "ended" && row.terminalSessionId === event.terminalSessionId;
+  return event.type === "sessionStarted" || (!liveThere(before) && liveThere(after));
+}
+
+export function supersede(row: AgentSession, now: Date): AgentSession {
+  return enter(row, { state: "ended", endReason: "superseded", endedAt: now }, now);
 }
 
 function firstSeen(event: HookEvent, now: Date): AgentSession {
