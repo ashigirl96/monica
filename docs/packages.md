@@ -413,9 +413,10 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 
 - `bun run desktop` が `scripts/desktop.ts` を走らせる。
   1. `TANIA_HOME` が無ければ `~/.tania-dev` を設定し、`TANIA_BIN=<repo>/scripts/tania-dev` を設定する。
-  2. `cargo build -p tania-ptyd` を行い、externalBin の位置に `tania-ptyd`・`tania-backend`・`tania` を置く（tauri-build がファイルの存在を要求するため。debug の Shell は使わないので placeholder でよい）。
+  2. `cargo build -p tania-ptyd` を行う。externalBin は release の build だけが渡す（「release build と install」の節）ので、`binaries/` には何も置かない。
   3. `tauri dev --config src-tauri/tauri.dev.conf.json` を起動する。dev の config は identifier に `.dev` を付けて release と別 instance にし（ADR-0007）、`beforeDevCommand` は vite だけ。
 - debug build の Shell は Backend として `bun --watch apps/backend/src/main.ts` を起動し、ptyd の場所 `target/debug/tania-ptyd`（`TANIA_PTYD_PATH` で差し替え可）を env `TANIA_PTYD_PATH` で Backend に渡す。ptyd を spawn するのは Backend で、場所は debug でも release でも Shell が env `TANIA_PTYD_PATH` で渡す（release は Shell の隣の `tania-ptyd`。ADR-0011）。Backend は package や apps/backend の編集と `bun run generate` で同じ pid のまま再起動し、webview は `backend-endpoint` event で再接続する。byte は Shell の ptyd 接続を通るので、この再起動で端末は切れない。
+- Shell は Backend を自分と別の process group で起こす。端末の Ctrl-C を Backend が直接受けると `backend.json` を残したまま死ぬので、Shell の死は stdin の EOF で知らせる。
 - webview は vite の HMR。package の `ui` も source のまま読む。
 - `bun run tania <args>` は `scripts/tania-dev`（`bun apps/cli/src/main.ts "$@"`）を呼ぶ。`TANIA_HOME` が無ければ `~/.tania-dev`。
 - desktop は起動時に `$TANIA_HOME/bin/tania` → `TANIA_BIN` の symlink を張る。release の desktop だけが `~/.local/bin/tania` にも張る（ADR-0006）。dev の desktop が張ると release の CLI を上書きするため。Workbench の tab の PATH に `$TANIA_HOME/bin` を前置するのは shim（「tab の env と shim」の節）。
@@ -429,15 +430,16 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
   1. `cargo build --release -p tania-ptyd`
   2. Backend: `bun build --compile --minify-whitespace --minify-syntax --bytecode --format=esm --asset packages/workbench/migrations/workbench --asset packages/task/migrations/task apps/backend/src/main.ts`
   3. CLI: `bun build --compile --minify-whitespace --minify-syntax --bytecode --format=esm apps/cli/src/main.ts`
-  4. 3 つの binary を `apps/desktop/src-tauri/binaries/<name>-<rust triple>` に置き、`tauri build --bundles app`
+  4. 3 つの binary を `apps/desktop/src-tauri/binaries/<name>-<rust triple>` に置き、`tauri build --bundles app --config '{"bundle":{"externalBin":[…]}}'`
+- externalBin を base の `tauri.conf.json` に書かないのは、tauri-build が cargo の build のたびに `binaries/` の存在を求め、`binaries/tania-ptyd-<triple>` で `target/<profile>/tania-ptyd` を上書きするため。base に書くと dev と CI の clippy にも `binaries/` が要り、空の placeholder は cargo が作った ptyd を潰す。
 - `--minify` は使わない。trpc-cli が class 名で instanceof を判定しており、名前が潰れると起動しない。`--bytecode` は top-level await があるので `--format=esm` が要る。
 - compiled binary は Bun の runtime だけで約 60MB あり、Backend と CLI で約 120MB になる。
-- `bun run install-app` は `.app` を `/Applications` にコピーし、codesign と quarantine の解除を行う（monica の `just install-app` と同じ）。
+- `bun run install-app` は `.app` を `/Applications` にコピーし、codesign と quarantine の解除を行う（monica の `just install-app` と同じ）。codesign の identity は Keychain Access で作った自己署名の `tania`。ad-hoc と違い、build をまたいで署名の同一性が保たれる。
 - 署名と notarization（hardenedRuntime 下の Bun の JIT entitlements。Bun の binary は Backend と CLI の 2 つ）は配布を始めるときに決める。
 
 ## 検査と CI
 
-- 検査は `bun run check` に集める。何を流すかの正本は `package.json` の `check:ts` と `check:rust` で、CI の job も同じ script を呼ぶ。apps/desktop ができたら、`vite build` を `check:ts` に足す（「entry」の節の bundle の検査）。
+- 検査は `bun run check` に集める。何を流すかの正本は `package.json` の `check:ts` と `check:rust` で、CI の job も同じ script を呼ぶ。`check:ts` は最後に apps/desktop の `vite build` を流す（「entry」の節の bundle の検査）。
 - Rust の検査は macOS の runner で流す。Tauri の crate が macOS の system library を要るため。
 - Rust の検査は、Rust に関わる file が変わったときだけ走らせる（対象は `ci.yml` の `changes` job の filter）。private repo では macOS の runner の 1 分が 10 分に数えられ、crate は monica から rename しただけで骨格の後はほとんど変わらないため。GitHub Actions には job 単位の paths filter が無いので、判定は ubuntu の小さな job で行う。
 - tauri の bundle build、knip、jscpd、lefthook は入れない。

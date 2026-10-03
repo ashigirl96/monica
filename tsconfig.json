@@ -15,6 +15,7 @@
   },
   "include": [
     "apps/*/src",
+    "apps/desktop/vite.config.ts",
     "packages/*/src",
     "packages/*/migrations",
     "packages/*/drizzle.config.ts",

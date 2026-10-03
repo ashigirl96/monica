@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "mcp-bridge",
+  "description": "debug build only: lets the tauri-mcp-server drive the webview",
+  "windows": ["main"],
+  "permissions": ["mcp-bridge:default"]
+}
