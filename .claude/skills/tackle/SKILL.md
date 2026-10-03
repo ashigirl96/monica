@@ -1,6 +1,6 @@
 ---
 name: tackle
-description: "spec または ticket 群に基づいて作業を実装する。"
+description: "spec または ticket 群に基づいて作業を実装し、PR を merge まで運ぶ。"
 disable-model-invocation: true
 ---
 
@@ -12,4 +12,10 @@ spec または ticket でユーザーが記述した作業を実装する。
 
 完了したら `mattpocock-skills:code-review` で、Standards と Spec の 2 軸のレビューを受ける。
 
-作業を現在のブランチにコミットする。
+作業を /create-pr でコミットし、PR を出す。
+
+/watch-ai で codex review の指摘に対応する。
+
+/watch-ai が終わったら、/retro で今後に活かすものがあるか確かめ、直したものはコミットして push する。ここから merge までの判断は自分で下し、ユーザーに尋ねるのは次の merge の確認だけにする。
+
+最後に、`gh pr checks --watch` で CI が通ったのを確かめてから、merge してよいかをユーザーに尋ね、了承を得たら merge する。
