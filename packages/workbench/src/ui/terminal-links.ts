@@ -204,6 +204,9 @@ export function attachTerminalLinks(
       } catch {
         resolved = candidates.map(() => null);
       }
+      // 問い合わせの間に出力が行を書き換えていれば、先に取った位置は別の文字を指す。
+      const [linesNow, startNow] = windowedLineStrings(y - 1, term);
+      if (startNow !== startLineIndex || linesNow.join("") !== text) return callback(undefined);
     }
 
     const links: ILink[] = [];
