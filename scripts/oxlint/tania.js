@@ -17,6 +17,14 @@ function looksUpPath(command) {
   );
 }
 
+function isAsyncFunction(node) {
+  return (
+    (node?.type === "ArrowFunctionExpression" || node?.type === "FunctionExpression") && node.async
+  );
+}
+
+const SCHEMA_ENTRY = /^@tania\/([^/]+)\/schema$/;
+
 export default {
   meta: { name: "tania" },
   rules: {
@@ -40,6 +48,73 @@ export default {
               node,
               message:
                 "Bun.spawn に env: process.env を渡す。渡さないと login shell の PATH が効かず、.app でだけコマンドが見つからない",
+            });
+          },
+        };
+      },
+    },
+    // bun:sqlite の transaction は同期で、async 関数を渡すと await の後の throw で rollback されない。
+    "sync-transaction": {
+      create(context) {
+        const asyncNames = new Set();
+        const passedByName = [];
+        const report = (node) =>
+          context.report({
+            node,
+            message:
+              "transaction に async 関数を渡さない。throw しても rollback されない（ADR-0009）。ptyd や fs への副作用は commit の後に呼ぶ",
+          });
+        return {
+          FunctionDeclaration(node) {
+            if (node.async && node.id) asyncNames.add(node.id.name);
+          },
+          VariableDeclarator(node) {
+            if (node.id.type === "Identifier" && isAsyncFunction(node.init)) {
+              asyncNames.add(node.id.name);
+            }
+          },
+          CallExpression(node) {
+            const { callee } = node;
+            if (callee.type !== "MemberExpression" || callee.property.name !== "transaction")
+              return;
+            const [callback] = node.arguments;
+            if (isAsyncFunction(callback)) report(node);
+            else if (callback?.type === "Identifier")
+              passedByName.push({ node, name: callback.name });
+          },
+          "Program:exit"() {
+            for (const { node, name } of passedByName) if (asyncNames.has(name)) report(node);
+          },
+        };
+      },
+    },
+    "cross-domain-write": {
+      create(context) {
+        const own = /\/packages\/([^/]+)\/src\//.exec(context.filename)?.[1];
+        const tables = new Set();
+        const namespaces = new Set();
+        const isForeignTable = (node) =>
+          node?.type === "Identifier"
+            ? tables.has(node.name)
+            : node?.type === "MemberExpression" && namespaces.has(node.object.name);
+        return {
+          ImportDeclaration(node) {
+            const domain = SCHEMA_ENTRY.exec(node.source.value)?.[1];
+            if (!domain || domain === own || node.importKind === "type") return;
+            for (const specifier of node.specifiers) {
+              const names = specifier.type === "ImportNamespaceSpecifier" ? namespaces : tables;
+              names.add(specifier.local.name);
+            }
+          },
+          CallExpression(node) {
+            const { callee } = node;
+            if (callee.type !== "MemberExpression") return;
+            if (!["insert", "update", "delete"].includes(callee.property.name)) return;
+            if (!isForeignTable(node.arguments[0])) return;
+            context.report({
+              node,
+              message:
+                "他の domain の table に直接書かない。書き込みは相手の domain の method を通す（docs/packages.md の「domain をまたぐ規則」）",
             });
           },
         };
