@@ -77,7 +77,7 @@ export function endAgentSessionsIn(tx: Tx, terminalSessionId: string, now: Date)
 export function reconcileAgentSessions(
   tx: Tx,
   { backendRestarted }: { backendRestarted: boolean },
-) {
+): string[] {
   const now = new Date();
   const rows = tx
     .select({ ...getTableColumns(agentSession), hostStatus: terminalSession.status })
@@ -85,7 +85,7 @@ export function reconcileAgentSessions(
     .innerJoin(terminalSession, eq(terminalSession.id, agentSession.terminalSessionId))
     .where(notEnded)
     .all();
-  saveChanged(
+  return saveChanged(
     tx,
     rows.map(({ hostStatus, ...row }) => {
       if (!isLive(hostStatus)) return transition(row, { type: "terminalEnded" }, now);

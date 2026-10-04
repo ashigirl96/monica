@@ -1,6 +1,7 @@
-import { runspace } from "@tania/workbench/schema";
+import { agentSession, runspace } from "@tania/workbench/schema";
 import {
   type AnySQLiteColumn,
+  index,
   integer,
   primaryKey,
   sqliteTable,
@@ -47,6 +48,24 @@ export const task = sqliteTable("task", {
   trackedAt: timestamp("tracked_at").notNull(),
   closedAt: timestamp("closed_at"),
 });
+
+// 行は履歴として消さない。終わりは Agent Session の終了から導くので持たない。
+export const run = sqliteTable(
+  "run",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    taskIssueId: integer("task_issue_id")
+      .notNull()
+      .references(() => task.issueId),
+    agentSessionId: text("agent_session_id")
+      .notNull()
+      .unique()
+      .references(() => agentSession.sessionId),
+    origin: text("origin", { enum: ["started", "attached"] }).notNull(),
+    startedAt: timestamp("started_at").notNull(),
+  },
+  (t) => [index("run_task").on(t.taskIssueId)],
+);
 
 // close で行を消し、reopen で作り直す。cwd は作った時に決め、その後は変えない。
 export const bench = sqliteTable("bench", {

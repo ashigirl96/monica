@@ -4,6 +4,7 @@ import { type BenchDeps, failInterruptedPreparations } from "./bench.ts";
 import type { BackgroundSyncError, TaskChange } from "./contract.ts";
 import { defaultGitHub, type GitHub } from "./github.ts";
 import { defaultGhq, type Ghq, killSetups } from "./prepare.ts";
+import { applyRunInvariant, refOfRunTask } from "./run.ts";
 import { SYNC_TIMEOUT_MS, type SyncDeps, syncOpenTasks } from "./sync.ts";
 
 export type Task = {
@@ -54,6 +55,27 @@ export function createTask(deps: {
   };
   let backgroundSyncError: BackgroundSyncError | null = null;
   let timer: ReturnType<typeof setInterval> | undefined;
+  let unsubscribe: (() => void) | undefined;
+
+  // 表示状態は Run の Agent Session から導くので、Run の Agent Session が変わるたびに Task の変化として知らせる。
+  function onAgentSessionChanged(agentSessionId: string) {
+    if (stopped.signal.aborted) return;
+    try {
+      applyRunInvariant(db, agentSessionId);
+      const ref = refOfRunTask(db, agentSessionId);
+      if (ref) syncDeps.publish({ type: "task", ref });
+    } catch (error) {
+      console.error(`[task] could not make a Run of ${agentSessionId}: ${error}`);
+    }
+  }
+
+  function applyRunInvariantToAll() {
+    try {
+      for (const ref of applyRunInvariant(db)) syncDeps.publish({ type: "task", ref });
+    } catch (error) {
+      console.error(`[task] could not make Runs of the Agent Sessions in the Benches: ${error}`);
+    }
+  }
 
   // retry と backoff は持たず、次の回がやり直す。
   async function syncInBackground() {
@@ -74,10 +96,20 @@ export function createTask(deps: {
     events,
     start() {
       failInterruptedPreparations(db);
+      // async iterator の購読は溜まった合図を 100 件で捨てるので、listener で受ける。
+      // workbench は transaction の中でも publish するので、読み直しは commit 後の microtask に回す。
+      unsubscribe = workbench.events.subscribe("change", (change) => {
+        if (change.type === "agentSession") {
+          queueMicrotask(() => onAgentSessionChanged(change.sessionId));
+        }
+      });
+      // commit の後、購読の microtask が走る前に止まった Backend の分は、合図が二度と来ない。
+      applyRunInvariantToAll();
       void syncInBackground();
       timer = setInterval(() => void syncInBackground(), BACKGROUND_SYNC_INTERVAL_MS);
     },
     stop() {
+      unsubscribe?.();
       clearInterval(timer);
       stopped.abort(new Error("the Task has stopped"));
       killSetups(benchDeps.setups);

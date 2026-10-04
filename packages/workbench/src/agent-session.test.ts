@@ -311,6 +311,33 @@ test("after a Backend restart a running Agent Session is unobserved until its ne
   expect(rowOf(db, "s-busy")).toMatchObject({ state: "running", unobservedSince: null });
 });
 
+test("reconnecting to ptyd signals each Agent Session the reconcile ends", async () => {
+  const { home, ptyd, workbench, client } = setup();
+  const { tab } = await client.runspace.create(size);
+  await client.agentSession.recordHook({
+    terminalSessionId: tab.terminalSessionId,
+    payload: payload("s-1", "UserPromptSubmit", { prompt: "hi" }),
+  });
+  const signals: unknown[] = [];
+  const reconciled = new Promise<void>((resolve) => {
+    const unsubscribe = workbench.events.subscribe("change", (change) => {
+      signals.push(change);
+      if (change.type !== "reconciled") return;
+      unsubscribe();
+      resolve();
+    });
+  });
+
+  ptyd.stop();
+  await Bun.sleep(50);
+  const revived = startFakePtyd(home);
+  onCleanup(() => revived.stop());
+  await reconciled;
+
+  expect(await client.agentSession.list()).toEqual([]);
+  expect(signals).toContainEqual({ type: "agentSession", sessionId: "s-1" });
+});
+
 test("reconnecting to ptyd while the Backend keeps running leaves a running Agent Session running", async () => {
   const { home, ptyd, workbench, client } = setup();
   const { tab } = await client.runspace.create(size);

@@ -135,7 +135,9 @@ export function createWorkbench(
         opened.close();
         throw new Error("the Workbench has stopped");
       }
-      const { reap, terminate } = reconcile(db, await opened.list(), { backendRestarted });
+      const { reap, terminate, agentSessionIds } = reconcile(db, await opened.list(), {
+        backendRestarted,
+      });
       backendRestarted = false;
       for (const id of reap) opened.notify({ op: "reap", session_id: id });
       for (const id of terminate) opened.notify({ op: "terminate", session_id: id });
@@ -143,6 +145,7 @@ export function createWorkbench(
       const exits = exitsDuringReconcile;
       exitsDuringReconcile = null;
       for (const [id, exitCode] of exits) onExit(id, exitCode);
+      for (const sessionId of agentSessionIds) publish({ type: "agentSession", sessionId });
       publish({ type: "reconciled" });
       respawnInBackground();
       console.error(
@@ -280,7 +283,7 @@ function reconcile(
   const unmatched = new Map(ptydSessions.map((s) => [s.session_id, s]));
   const reap: string[] = [];
   const terminate: string[] = [];
-  db.transaction((tx) => {
+  const agentSessionIds = db.transaction((tx) => {
     for (const row of tx.select().from(terminalSession).all()) {
       const held = unmatched.get(row.id);
       unmatched.delete(row.id);
@@ -327,9 +330,9 @@ function reconcile(
         })
         .run();
     }
-    reconcileAgentSessions(tx, { backendRestarted });
+    return reconcileAgentSessions(tx, { backendRestarted });
   });
-  return { reap, terminate };
+  return { reap, terminate, agentSessionIds };
 }
 
 export function isLive(status: TerminalSession["status"]): boolean {

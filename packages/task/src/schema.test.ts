@@ -11,5 +11,11 @@ test("the latest task snapshot holds only the task tables", async () => {
     .at(-1)!;
   const snapshot = await Bun.file(join(meta, latest)).json();
 
-  expect(Object.keys(snapshot.tables).sort()).toEqual(["bench", "issue", "issue_blocker", "task"]);
+  expect(Object.keys(snapshot.tables).sort()).toEqual([
+    "bench",
+    "issue",
+    "issue_blocker",
+    "run",
+    "task",
+  ]);
 });
