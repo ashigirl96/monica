@@ -195,9 +195,11 @@ export type DaemonPaths = { home: string; ptydPath: string };
 const socketPath = (home: string) => join(home, "ptyd.sock");
 const pidPath = (home: string) => join(home, "ptyd.pid");
 
-// ptyd は自分の env を全 tab に渡すので、Backend だけの env を落とす。Claude Code の中から
-// 起こした Backend の CLAUDECODE が tab に漏れると、claude wrapper が入れ子と誤認する。
-function daemonEnv(home: string): Record<string, string> {
+/**
+ * Backend だけの env を落とした env。Claude Code の中から起こした Backend の CLAUDECODE が
+ * Tab に漏れると、claude wrapper が入れ子と誤認する。
+ */
+export function inheritableEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue;
@@ -205,8 +207,12 @@ function daemonEnv(home: string): Record<string, string> {
       continue;
     env[key] = value;
   }
-  env.TANIA_HOME = home;
   return env;
+}
+
+// ptyd は自分の env を全 tab に渡すので、Backend だけの env を落とす。
+function daemonEnv(home: string): Record<string, string> {
+  return { ...inheritableEnv(), TANIA_HOME: home };
 }
 
 function spawnDaemon({ home, ptydPath }: DaemonPaths) {

@@ -1,6 +1,11 @@
 import { Database } from "bun:sqlite";
 import { os } from "@orpc/server";
-import { createTask, migrations as taskMigrations, router as taskRouter } from "@tania/task/server";
+import {
+  createTask,
+  type Ghq,
+  migrations as taskMigrations,
+  router as taskRouter,
+} from "@tania/task/server";
 import { terminalSession } from "@tania/workbench/schema";
 import {
   createWorkbench,
@@ -12,7 +17,13 @@ import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import type { Client } from "./backend.ts";
 import { runCli } from "./program.ts";
 
-export function inMemoryBackend() {
+// CI に ghq は無く、手元では本物の repo を clone してしまう。
+const noGhq: Ghq = {
+  root: () => Promise.reject(new Error("ghq root failed: no ghq in the CLI tests")),
+  get: () => Promise.reject(new Error("ghq get failed: no ghq in the CLI tests")),
+};
+
+export function inMemoryBackend({ home = "/nonexistent", ghq = noGhq } = {}) {
   const sqlite = new Database(":memory:");
   sqlite.run("PRAGMA foreign_keys = ON");
   const db = drizzle(sqlite);
@@ -30,6 +41,8 @@ export function inMemoryBackend() {
   const task = createTask({
     db,
     workbench,
+    home,
+    ghq,
     github: {
       url: "http://127.0.0.1:9/graphql",
       token: () => Promise.reject(new Error("`gh auth token` failed: not logged in")),
@@ -54,11 +67,16 @@ export function inMemoryBackend() {
   };
 }
 
-export async function tania(argv: string[], connect: () => Client | null) {
+export async function tania(
+  argv: string[],
+  connect: () => Client | null,
+  { terminalSessionId }: { terminalSessionId?: string } = {},
+) {
   let stdout = "";
   let stderr = "";
   const code = await runCli(argv, {
     connect,
+    terminalSessionId,
     stdout: (text) => (stdout += text),
     stderr: (text) => (stderr += text),
   });

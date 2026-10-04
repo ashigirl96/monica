@@ -26,6 +26,7 @@ const { runCli } = await import("./program.ts");
 process.exit(
   await runCli(argv, {
     ...deps,
+    terminalSessionId: process.env.TANIA_TERMINAL_SESSION_ID || undefined,
     stdout: (text) => process.stdout.write(text),
     stderr: (text) => process.stderr.write(text),
   }),

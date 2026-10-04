@@ -58,7 +58,7 @@ const workbench = createWorkbench({
   notify: ({ title, body }) => announce({ type: "notify", title, body }),
   nameAgentSession,
 });
-const task = createTask({ db, workbench });
+const task = createTask({ db, workbench, home });
 
 const context = { db, workbench, task };
 const router = os

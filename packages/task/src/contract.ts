@@ -1,15 +1,16 @@
 import { eventIterator, oc } from "@orpc/contract";
 import { createSchemaFactory } from "drizzle-zod";
 import { z } from "zod";
-import { issue } from "./schema.ts";
+import { bench, issue } from "./schema.ts";
 
 const meta = oc.$meta<{ description?: string; cli?: boolean }>({});
 const { createSelectSchema } = createSchemaFactory({ coerce: { date: true } });
 
 const IssueStateSchema = createSelectSchema(issue).shape.state;
+const BenchSchema = createSelectSchema(bench);
 
 export const DisplayStateSchema = z.object({
-  state: z.enum(["closed", "issue_closed", "not_started"]),
+  state: z.enum(["closed", "issue_closed", "not_started", "preparing", "setup_failed", "ended"]),
 });
 
 export const ListItemSchema = z.object({
@@ -56,9 +57,35 @@ export const ListOutputSchema = z.object({
   backgroundSyncError: BackgroundSyncErrorSchema.nullable(),
 });
 
+export const RunOutputSchema = z.object({
+  ref: z.string(),
+  cwd: z.string(),
+  mode: BenchSchema.shape.mode,
+  benchCreated: z.boolean(),
+  warnings: z.array(z.string()),
+});
+
+export const CurrentOutputSchema = z.object({
+  ref: z.string(),
+  title: z.string(),
+  displayState: DisplayStateSchema,
+  agentSessionId: z.string().nullable(),
+  source: z.enum(["run", "bench"]),
+});
+
+export const BenchItemSchema = z.object({
+  runspaceId: z.string(),
+  ref: z.string(),
+  title: z.string(),
+  setupState: BenchSchema.shape.setupState,
+});
+
 export type TrackOutput = z.infer<typeof TrackOutputSchema>;
 export type SyncOutput = z.infer<typeof SyncOutputSchema>;
 export type ListOutput = z.infer<typeof ListOutputSchema>;
+export type RunOutput = z.infer<typeof RunOutputSchema>;
+export type CurrentOutput = z.infer<typeof CurrentOutputSchema>;
+export type BenchItem = z.infer<typeof BenchItemSchema>;
 
 export const contract = {
   track: meta
@@ -80,7 +107,32 @@ export const contract = {
     .meta({ description: "List open Tasks in the order they were tracked", cli: true })
     .input(z.object({ closed: z.boolean().optional().describe("list closed Tasks instead") }))
     .output(ListOutputSchema),
+  run: meta
+    .meta({
+      description:
+        "Open the Bench of an open Task, preparing its worktree and setup, and print its cwd once it is ready",
+      cli: true,
+    })
+    .input(
+      z.object({
+        ref,
+        inPlace: z
+          .boolean()
+          .optional()
+          .describe("use the Repo's checkout as the cwd, with no worktree and no setup"),
+      }),
+    )
+    .output(RunOutputSchema),
+  current: meta
+    .meta({ description: "Show the Task of the Tab this runs in", cli: true })
+    .input(z.object({ terminalSessionId: z.string().optional() }))
+    .output(CurrentOutputSchema),
+  bench: {
+    list: meta
+      .meta({ description: "List the Benches with the labels of their Tasks" })
+      .output(z.array(BenchItemSchema)),
+  },
   changes: meta
-    .meta({ description: "Stream signals that Tasks or their Issue copies changed" })
+    .meta({ description: "Stream signals that Tasks, their Issue copies or their Benches changed" })
     .output(eventIterator(TaskChangeSchema)),
 };

@@ -275,6 +275,7 @@ export const openInEditorAtom = atom(null, (get, _set, path: string) => {
 
 export type RunspaceSummary = {
   id: string;
+  owned: boolean;
   title: string;
   description: string;
   tabCount: number;
@@ -294,6 +295,7 @@ export const runspaceSummariesAtom = atom((get): RunspaceSummary[] => {
     const worktree = worktrees[cwd];
     return {
       id: runspace.id,
+      owned: runspace.owned,
       title: worktree ? `${worktree.repo}:${worktree.branch}` : shortPath(cwd),
       description: (tab && titles[tab.id]) ?? "",
       tabCount: runspace.tabs.length,

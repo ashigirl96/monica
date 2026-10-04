@@ -19,9 +19,11 @@
     "@tania/workbench": "workspace:*",
     "drizzle-orm": "catalog:",
     "drizzle-zod": "catalog:",
+    "react": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@types/react": "catalog:",
     "drizzle-kit": "catalog:"
   }
 }

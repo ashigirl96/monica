@@ -1,5 +1,12 @@
 import { table } from "@tania/ui/table";
-import type { ListItem, ListOutput, SyncOutput, TrackOutput } from "./contract.ts";
+import type {
+  CurrentOutput,
+  ListItem,
+  ListOutput,
+  RunOutput,
+  SyncOutput,
+  TrackOutput,
+} from "./contract.ts";
 
 export const commands = [] as const;
 
@@ -15,6 +22,18 @@ export const formatters = {
       lines.push(`GitHub did not return ${missing.join(", ")}; their copies are kept`);
     }
     return lines.join("\n");
+  },
+  run({ ref, cwd, benchCreated, warnings }: RunOutput): string {
+    return [
+      benchCreated ? `opened the Bench of ${ref} at ${cwd}` : `the Bench of ${ref} is at ${cwd}`,
+      ...warnings.map((warning) => `warning: ${warning}`),
+    ].join("\n");
+  },
+  current({ ref, title, displayState }: CurrentOutput): string {
+    return table([
+      ["REF", "TITLE", "STATE"],
+      [ref, title, displayState.state],
+    ]);
   },
   list({ tasks, backgroundSyncError }: ListOutput): string {
     const lines =

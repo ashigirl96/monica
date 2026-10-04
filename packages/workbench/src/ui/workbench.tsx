@@ -3,7 +3,7 @@ import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { lazy, Suspense, useEffect } from "react";
 import { WorkbenchHeader } from "./header.tsx";
 import { ResizeHandle } from "./resize-handle.tsx";
-import { WorkbenchSidebar } from "./sidebar.tsx";
+import { type RenderRunspaceLabel, WorkbenchSidebar } from "./sidebar.tsx";
 import {
   reloadAgentSessionsAtom,
   reloadAtom,
@@ -48,7 +48,14 @@ function useBooks(client: WorkbenchClient | null) {
   }, [client, setClient, reload, reloadAgentSessions]);
 }
 
-export function Workbench({ client }: { client: WorkbenchClient | null }) {
+// workbench は Task を import しないので、Bench のラベルは slot で受ける（ADR-0005）。
+export function Workbench({
+  client,
+  renderRunspaceLabel,
+}: {
+  client: WorkbenchClient | null;
+  renderRunspaceLabel?: RenderRunspaceLabel;
+}) {
   useBooks(client);
   const store = useStore();
   useEffect(() => persistUiState(store), [store]);
@@ -85,7 +92,7 @@ export function Workbench({ client }: { client: WorkbenchClient | null }) {
             </div>
           </div>
           <div className="flex-1 overflow-y-auto px-2">
-            <WorkbenchSidebar />
+            <WorkbenchSidebar renderRunspaceLabel={renderRunspaceLabel} />
           </div>
         </div>
       </div>
