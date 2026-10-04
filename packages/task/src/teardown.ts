@@ -42,26 +42,30 @@ export async function inspectWorktree(
   return { path, branch, checkout, present, branchExists, refusals };
 }
 
-/** force でなければ、調べた後に書かれた変更と commit を git と見直しで断る。 */
+/** force でなければ、調べた後に worktree に書かれた変更は git が断り、積まれた commit の branch は残す。 */
 export async function removeWorktree(
   { path, branch, checkout, present, branchExists }: InspectedWorktree,
   { force }: { force: boolean },
 ) {
-  if (!checkout) return { removedWorktree: null, deletedBranch: null };
+  if (!checkout) return { removedWorktree: null, deletedBranch: null, warnings: [] };
   if (present) {
     await git(checkout, "worktree", "remove", ...(force ? ["--force"] : []), path);
   } else {
     // 登録が残るとその branch を消せないので、関係の無い登録まで外す prune ではなく、この path の登録だけを外す。
     await succeeds(git(checkout, "worktree", "remove", "--force", path));
   }
-  if (branchExists) {
-    // worktree を外した後は、この branch に commit が積まれない。
-    if (!force && (await hasUnpublishedCommits(checkout, branch))) {
-      throw new Error(`branch ${branch} has commits on no remote`);
-    }
-    await git(checkout, "branch", "-D", branch);
+  const removedWorktree = present ? path : null;
+  if (!branchExists) return { removedWorktree, deletedBranch: null, warnings: [] };
+  // worktree を外した後は、この branch に commit が積まれない。
+  if (!force && (await hasUnpublishedCommits(checkout, branch))) {
+    return {
+      removedWorktree,
+      deletedBranch: null,
+      warnings: [`branch ${branch} got commits on no remote while closing, so it stays`],
+    };
   }
-  return { removedWorktree: present ? path : null, deletedBranch: branchExists ? branch : null };
+  await git(checkout, "branch", "-D", branch);
+  return { removedWorktree, deletedBranch: branch, warnings: [] };
 }
 
 // fetch しないので、push した commit は merge されていなくても数えない。

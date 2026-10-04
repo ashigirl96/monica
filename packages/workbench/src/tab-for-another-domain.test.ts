@@ -118,7 +118,7 @@ test("removeRunspace keeps the spared Tab, pinned or not, in the Runspace it no 
   await client.tab.pin({ id: spared.id });
 
   const removed = db.transaction((tx) =>
-    workbench.removeRunspace(tx, owned, { spare: spared.terminalSessionId }),
+    workbench.removeRunspace(tx, owned, { spare: [spared.terminalSessionId] }),
   );
 
   expect(removed).toEqual([other.terminalSessionId]);
@@ -133,10 +133,37 @@ test("removeRunspace keeps the spared Tab, pinned or not, in the Runspace it no 
   ]);
 });
 
+test("removeRunspace keeps every spared Tab in their order", async () => {
+  const { db, workbench, client, owned } = setupWithOwned();
+  const first = await client.tab.open({ runspaceId: owned, ...size });
+  const other = await client.tab.open({ runspaceId: owned, ...size });
+  const last = await client.tab.open({ runspaceId: owned, ...size });
+
+  const removed = db.transaction((tx) =>
+    workbench.removeRunspace(tx, owned, {
+      spare: [last.terminalSessionId, first.terminalSessionId],
+    }),
+  );
+
+  expect(removed).toEqual([other.terminalSessionId]);
+  expect((await client.layout.get()).runspaces).toMatchObject([
+    {
+      id: owned,
+      owned: false,
+      tabs: [
+        { id: first.id, sortOrder: 0 },
+        { id: last.id, sortOrder: 1 },
+      ],
+    },
+  ]);
+});
+
 test("the Runspace a spared Tab stays in goes away with its last Tab, like any other", async () => {
   const { db, workbench, client, owned } = setupWithOwned();
   const spared = await client.tab.open({ runspaceId: owned, ...size });
-  db.transaction((tx) => workbench.removeRunspace(tx, owned, { spare: spared.terminalSessionId }));
+  db.transaction((tx) =>
+    workbench.removeRunspace(tx, owned, { spare: [spared.terminalSessionId] }),
+  );
 
   await client.tab.close({ id: spared.id });
 
@@ -149,7 +176,7 @@ test("removeRunspace removes the whole Runspace when the spared Terminal Session
   const elsewhere = await client.runspace.create(size);
 
   const removed = db.transaction((tx) =>
-    workbench.removeRunspace(tx, owned, { spare: elsewhere.tab.terminalSessionId }),
+    workbench.removeRunspace(tx, owned, { spare: [elsewhere.tab.terminalSessionId] }),
   );
 
   expect(removed).toEqual([inBench.terminalSessionId]);

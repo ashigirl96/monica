@@ -34,7 +34,7 @@ export type Workbench = {
   ): { tabId: string; terminalSessionId: string };
   moveTab(tx: Tx, tabId: string, runspaceId: string): void;
   /** 返した Terminal Session は、commit の後に terminateTerminalSessions で終わらせる。 */
-  removeRunspace(tx: Tx, id: string, options?: { spare?: string }): string[];
+  removeRunspace(tx: Tx, id: string, options?: { spare?: string[] }): string[];
   startTerminalSession(id: string, size: Size): Promise<void>;
   writeTerminalSession(id: string, data: string): Promise<void>;
   terminateTerminalSessions(ids: string[]): Promise<void>;

@@ -427,24 +427,29 @@ function pauseBranchDeletion(books: Books) {
   return { started, release };
 }
 
-test("a claude that becomes a Run of the Task while close removes the worktree stops close, and its Tab is left alone", async () => {
+test("a claude that becomes a Run while close removes the worktree keeps its Tab, like the caller's, and close completes", async () => {
   const books = await withWorktreeBench();
+  const { db, client, claudeTab, runspaceId } = books;
+  const other = books.openTab(runspaceId);
   const pause = pauseBranchDeletion(books);
-  const closing = failure(books.client.close({ ref }));
+  const closing = client.close({ ref });
   await until(() => existsSync(pause.started));
 
-  await books.hook(books.claudeTab, "s-1", "SessionStart", { source: "startup" });
+  await books.hook(claudeTab, "s-1", "SessionStart", { source: "startup" });
   writeFileSync(pause.release, "");
-  const error = await closing;
+  const output = await closing;
 
-  expect(error.code).toBe("CLOSE_REFUSED");
-  expect(error.data).toEqual({
-    reasons: [{ kind: "active_run", agentSessionId: "s-1", state: "waiting" }],
+  expect(output).toEqual({
+    ref,
+    removedWorktree: books.cwd,
+    deletedBranch: "issue-12",
+    spared: false,
+    warnings: ["claude s-1 started in the Bench while closing, so its Tab stays"],
   });
-  expect(benchOf(books)).toBeDefined();
-  expect(tabsOf(books)).toEqual([{ terminalSessionId: books.claudeTab }]);
-  expect(terminated(books)).toEqual([]);
-  expect((await books.client.list({})).tasks).toMatchObject([{ ref }]);
+  expect(db.select().from(runspace).all()).toMatchObject([{ id: runspaceId, owned: false }]);
+  expect(tabsOf(books)).toEqual([{ terminalSessionId: claudeTab }]);
+  expect(terminated(books)).toEqual([other]);
+  expect((await client.list({ closed: true })).tasks).toMatchObject([{ ref }]);
 });
 
 test("reopen is refused while close is still terminating the Terminal Sessions of the Bench", async () => {

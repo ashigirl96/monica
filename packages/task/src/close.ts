@@ -1,5 +1,5 @@
 import { ORPCError, type ORPCErrorConstructorMap } from "@orpc/server";
-import { agentSession, runspace } from "@tania/workbench/schema";
+import { agentSession, tab } from "@tania/workbench/schema";
 import type { Db } from "@tania/workbench/server";
 import { and, eq, ne, type SQL } from "drizzle-orm";
 import { type Bench, type BenchDeps, type Issue, refuseClosing } from "./bench.ts";
@@ -45,42 +45,64 @@ async function closeReserved(
       ? await stopOnGitFailure(ref, () => inspectWorktree(deps.ghq, benchRow, found.issue))
       : null;
   const force = input.force ?? false;
-  const refuse = (reasons: CloseRefusal[]) =>
-    errors.CLOSE_REFUSED({
-      message: refusalMessage(ref, reasons, benchRow?.cwd),
-      data: { reasons },
-    });
+  const caller = input.terminalSessionId;
   if (!force) {
     const reasons = [
-      ...liveRunsBesides(deps.db, found.issue.id, input.terminalSessionId),
+      ...liveRunsBesides(deps.db, found.issue.id, caller).map(asRefusal),
       ...(worktree?.refusals ?? []),
     ];
-    if (reasons.length > 0) throw refuse(reasons);
+    if (reasons.length > 0) {
+      throw errors.CLOSE_REFUSED({
+        message: refusalMessage(ref, reasons, benchRow?.cwd),
+        data: { reasons },
+      });
+    }
   }
   const removed = worktree
     ? await stopOnGitFailure(ref, () => removeWorktree(worktree, { force }))
-    : { removedWorktree: null, deletedBranch: null };
+    : { removedWorktree: null, deletedBranch: null, warnings: [] };
   const closed = deps.db.transaction((tx) => {
     const now = openTaskToClose(tx, eq(issue.id, found.issue.id), ref);
-    const closedRef = formatRef(now.issue);
-    // git を待つ間に Bench の Tab で起こした claude も、hook から Run になっている。
-    const lateRuns = force ? [] : liveRunsBesides(tx, found.issue.id, input.terminalSessionId);
-    if (lateRuns.length > 0) throw refuse(lateRuns);
+    // git を待つ間に Bench の Tab で起こした claude は hook から Run になっているので、呼び手と同じく Tab を残す。
+    const lateRuns = force ? [] : liveRunsBesides(tx, found.issue.id, caller);
     tx.update(task).set({ closedAt: new Date() }).where(eq(task.issueId, found.issue.id)).run();
-    if (!now.bench) return { ref: closedRef, spared: false, terminalSessionIds: [] };
-    tx.delete(bench).where(eq(bench.taskIssueId, found.issue.id)).run();
-    const { runspaceId } = now.bench;
-    const terminalSessionIds = deps.workbench.removeRunspace(tx, runspaceId, {
-      spare: input.terminalSessionId,
-    });
-    const spared =
-      tx.select({ id: runspace.id }).from(runspace).where(eq(runspace.id, runspaceId)).get() !==
-      undefined;
-    return { ref: closedRef, spared, terminalSessionIds };
+    let terminalSessionIds: string[] = [];
+    let spared = false;
+    if (now.bench) {
+      const { runspaceId } = now.bench;
+      tx.delete(bench).where(eq(bench.taskIssueId, found.issue.id)).run();
+      terminalSessionIds = deps.workbench.removeRunspace(tx, runspaceId, {
+        spare: [...(caller ? [caller] : []), ...lateRuns.map((r) => r.terminalSessionId)],
+      });
+      spared = caller !== undefined && tabIn(tx, runspaceId, caller);
+    }
+    return { ref: formatRef(now.issue), spared, lateRuns, terminalSessionIds };
   });
   deps.publish({ type: "task", ref: closed.ref });
   await deps.workbench.terminateTerminalSessions(closed.terminalSessionIds);
-  return { ref: closed.ref, ...removed, spared: closed.spared, warnings };
+  return {
+    ref: closed.ref,
+    removedWorktree: removed.removedWorktree,
+    deletedBranch: removed.deletedBranch,
+    spared: closed.spared,
+    warnings: [
+      ...warnings,
+      ...removed.warnings,
+      ...closed.lateRuns.map(
+        (r) => `claude ${r.agentSessionId} started in the Bench while closing, so its Tab stays`,
+      ),
+    ],
+  };
+}
+
+function tabIn(db: Pick<Db, "select">, runspaceId: string, terminalSessionId: string): boolean {
+  return (
+    db
+      .select({ id: tab.id })
+      .from(tab)
+      .where(and(eq(tab.runspaceId, runspaceId), eq(tab.terminalSessionId, terminalSessionId)))
+      .get() !== undefined
+  );
 }
 
 export async function reopenTask(
@@ -145,13 +167,13 @@ function closedTask(db: Pick<Db, "select">, where: SQL | undefined, asked: strin
 }
 
 // close を頼んだ agent の Run は、close の後も呼び手の Tab に残るので止めない。
-function liveRunsBesides(
-  db: Pick<Db, "select">,
-  taskIssueId: number,
-  caller: string | undefined,
-): CloseRefusal[] {
+function liveRunsBesides(db: Pick<Db, "select">, taskIssueId: number, caller: string | undefined) {
   return db
-    .select({ agentSessionId: agentSession.sessionId, state: agentSession.state })
+    .select({
+      agentSessionId: agentSession.sessionId,
+      state: agentSession.state,
+      terminalSessionId: agentSession.terminalSessionId,
+    })
     .from(run)
     .innerJoin(agentSession, eq(agentSession.sessionId, run.agentSessionId))
     .where(
@@ -163,9 +185,14 @@ function liveRunsBesides(
     )
     .orderBy(run.id)
     .all()
-    .flatMap(({ agentSessionId, state }) =>
-      state === "ended" ? [] : [{ kind: "active_run" as const, agentSessionId, state }],
-    );
+    .flatMap((row) => (row.state === "ended" ? [] : [{ ...row, state: row.state }]));
+}
+
+function asRefusal({
+  agentSessionId,
+  state,
+}: ReturnType<typeof liveRunsBesides>[number]): CloseRefusal {
+  return { kind: "active_run", agentSessionId, state };
 }
 
 async function stopOnGitFailure<T>(ref: string, step: () => Promise<T>): Promise<T> {
