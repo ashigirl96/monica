@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { spyOn } from "bun:test";
 import { os } from "@orpc/server";
 import {
   createTask,
@@ -37,6 +38,10 @@ export function inMemoryBackend({ home = "/nonexistent", ghq = noGhq } = {}) {
     notify() {},
     nameAgentSession: () => null,
   });
+  // ptyd が無いので、Workbench が ptyd に送る口は何もせずに返す。
+  spyOn(workbench, "ready").mockResolvedValue();
+  spyOn(workbench, "startTerminalSession").mockResolvedValue();
+  spyOn(workbench, "writeTerminalSession").mockResolvedValue();
   // CLI のテストは GitHub に届かせない。
   const task = createTask({
     db,

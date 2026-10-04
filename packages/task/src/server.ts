@@ -1,9 +1,10 @@
 import { implement } from "@orpc/server";
 import type { Db } from "@tania/workbench/server";
-import { listBenches, runTask } from "./bench.ts";
+import { listBenches } from "./bench.ts";
 import { contract } from "./contract.ts";
 import { currentTask } from "./current.ts";
 import { listTasks } from "./list.ts";
+import { runTask } from "./run-claude.ts";
 import { syncCommand, trackIssue } from "./sync.ts";
 import { internals, type Task } from "./task.ts";
 
@@ -22,7 +23,9 @@ export const router = os.router({
     tasks: listTasks(context.db, { closed: input.closed ?? false }),
     backgroundSyncError: internals(context.task).backgroundSyncError(),
   })),
-  run: os.run.handler(({ context, input }) => runTask(internals(context.task), input)),
+  run: os.run.handler(({ context, input, errors }) =>
+    runTask(internals(context.task), input, errors),
+  ),
   current: os.current.handler(({ context, input }) =>
     currentTask(context.db, input.terminalSessionId),
   ),

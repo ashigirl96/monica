@@ -4,8 +4,7 @@ import { ORPCError } from "@orpc/server";
 import type { Db, Workbench } from "@tania/workbench/server";
 import type { Subprocess } from "bun";
 import { asc, eq } from "drizzle-orm";
-import type { BenchItem, RunOutput, TaskChange } from "./contract.ts";
-import { isIssue } from "./copy.ts";
+import type { BenchItem, TaskChange } from "./contract.ts";
 import {
   branchOf,
   checkoutOf,
@@ -15,8 +14,8 @@ import {
   setupLogOf,
   worktreeOf,
 } from "./prepare.ts";
-import { formatRef, parseRef } from "./ref.ts";
-import { bench, issue, task } from "./schema.ts";
+import { formatRef } from "./ref.ts";
+import { bench, issue } from "./schema.ts";
 
 export type BenchDeps = {
   db: Db;
@@ -30,31 +29,18 @@ export type BenchDeps = {
 };
 
 type Prepared = { warnings: string[] } | { error: string };
-type Bench = typeof bench.$inferSelect;
-type Issue = typeof issue.$inferSelect;
+export type Bench = typeof bench.$inferSelect;
+export type Issue = typeof issue.$inferSelect;
 
 const INTERRUPTED = "the Backend stopped while preparing";
 
-export async function runTask(
+export async function prepareBench(
   deps: BenchDeps,
-  input: { ref: string; inPlace?: boolean },
-): Promise<RunOutput> {
-  const asked = parseRef(input.ref);
-  const found = deps.db
-    .select({ task, issue, bench })
-    .from(task)
-    .innerJoin(issue, eq(issue.id, task.issueId))
-    .leftJoin(bench, eq(bench.taskIssueId, task.issueId))
-    .where(isIssue(asked))
-    .get();
-  if (!found) throw new ORPCError("NOT_FOUND", { message: `${formatRef(asked)} is not tracked` });
+  found: { issue: Issue; bench: Bench | null },
+  inPlace: boolean | undefined,
+): Promise<{ bench: Bench; created: boolean; warnings: string[] }> {
   const ref = formatRef(found.issue);
-  if (found.task.closedAt) {
-    throw new ORPCError("BAD_REQUEST", {
-      message: `${ref} is closed, so run \`tania task reopen ${ref}\``,
-    });
-  }
-  const mode = input.inPlace ? "in_place" : "worktree";
+  const mode = inPlace ? "in_place" : "worktree";
   const cwd =
     found.bench?.cwd ??
     (mode === "in_place"
@@ -66,24 +52,22 @@ export async function runTask(
       : worktreeOf(deps.home, found.issue));
   // 待つ間に別の run が Bench を作っていれば、そちらを使う。
   const opened = openBench(deps, found.issue, { cwd, mode });
-  if (input.inPlace && opened.bench.mode !== "in_place") {
-    throw new ORPCError("BAD_REQUEST", {
-      message: `the Bench of ${ref} is a worktree; close and reopen ${ref} to open it in place`,
-    });
-  }
+  refuseInPlace(opened.bench, inPlace, ref);
   const prepared = await preparation(deps, opened.bench, found.issue);
   if ("error" in prepared) {
     throw new ORPCError("PRECONDITION_FAILED", {
       message: `could not prepare the Bench of ${ref}: ${prepared.error}; see ${setupLogOf(deps.home, found.issue)}`,
     });
   }
-  return {
-    ref,
-    cwd: opened.bench.cwd,
-    mode: opened.bench.mode,
-    benchCreated: opened.created,
-    warnings: prepared.warnings,
-  };
+  return { bench: opened.bench, created: opened.created, warnings: prepared.warnings };
+}
+
+export function refuseInPlace(row: Bench, inPlace: boolean | undefined, ref: string) {
+  if (inPlace && row.mode !== "in_place") {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `the Bench of ${ref} is a worktree; close and reopen ${ref} to open it in place`,
+    });
+  }
 }
 
 export function listBenches(db: Db): BenchItem[] {

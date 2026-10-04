@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { spyOn } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,10 +30,14 @@ export async function failure(promise: Promise<unknown>) {
   try {
     await promise;
   } catch (error) {
-    return error as { code: string; message: string };
+    return error as { code: string; message: string; data?: unknown };
   }
   throw new Error("expected the call to fail");
 }
+
+export type PtydCall =
+  | { op: "start"; terminalSessionId: string; rows: number; cols: number }
+  | { op: "write"; terminalSessionId: string; data: string };
 
 export function setup() {
   const sqlite = new Database(":memory:");
@@ -41,7 +46,6 @@ export function setup() {
   for (const m of [workbenchMigrations, migrations]) {
     migrate(db, { migrationsFolder: m.folder, migrationsTable: m.table });
   }
-  // Task は ptyd を使わないので、Workbench は start() せずに渡す。
   const notifications: { title: string; body: string }[] = [];
   const workbench = createWorkbench({
     db,
@@ -49,6 +53,15 @@ export function setup() {
     ptydPath: "/nonexistent",
     notify: (notification) => notifications.push(notification),
     nameAgentSession,
+  });
+  // ptyd が無いので、Workbench が ptyd に送る口は呼ばれた順に記録するだけにする。
+  const ptyd: PtydCall[] = [];
+  spyOn(workbench, "ready").mockResolvedValue();
+  spyOn(workbench, "startTerminalSession").mockImplementation(async (terminalSessionId, size) => {
+    ptyd.push({ op: "start", terminalSessionId, ...size });
+  });
+  spyOn(workbench, "writeTerminalSession").mockImplementation(async (terminalSessionId, data) => {
+    ptyd.push({ op: "write", terminalSessionId, data });
   });
   const workbenchClient = createRouterClient(workbenchRouter, { context: { db, workbench } });
   const github = startFakeGitHub();
@@ -130,6 +143,8 @@ export function setup() {
   return {
     db,
     workbench,
+    workbenchClient,
+    ptyd,
     github,
     ghq,
     home,

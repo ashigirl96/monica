@@ -22,6 +22,7 @@ export function startFakePtyd(home: string) {
     splitListMidCharacter: false,
     beforeCreated: (_op: Extract<RequestOp, { op: "create" }>): ServerMessage[] => [],
     createError: null as string | null,
+    writeError: null as string | null,
 
     get connections(): number {
       return sockets.size;
@@ -117,6 +118,9 @@ export function startFakePtyd(home: string) {
         }
         return send(socket, { type: "ok", id, body: "created", pid });
       }
+      case "write":
+        if (fake.writeError) return send(socket, { type: "err", id, error: fake.writeError });
+        return send(socket, { type: "ok", id, body: "empty" });
       default:
         return send(socket, { type: "ok", id, body: "empty" });
     }

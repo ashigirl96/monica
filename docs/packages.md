@@ -102,9 +102,9 @@ export function nameAgentSession(db: Db, agentSessionId: string): string | null;
 
 - `events`: その domain の変更を知らせる in-process の publisher。
 - `start()` / `stop()`: 起動時と終了時の処理。workbench は ptyd への接続（無ければ spawn、版違いは入れ替え）と reconcile（ADR-0011）、task は起動時と 5 分おきの背景 sync（#18）、起動時に preparing のまま残った Bench を失敗にすることと、終了時に走っている setup の process group を kill すること。
-- 他の domain から呼ばれる書き込み: 第 1 引数に transaction（`db` でもよい）を取る**同期**の method。task は `db.transaction((tx) => { workbench.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。ptyd や fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。workbench の同期 method は `createRunspace` / `removeRunspace` / `moveTab` / `openTab`、commit 後の async は `startTerminalSession` / `terminateTerminalSessions`（#22）。`Workbench` に出ているのは `createRunspace` だけで、ほかは Task v1 の slice が使うときに足す。足すまでは同じ形（第 1 引数が tx）の module 内の関数として procedure の handler から呼び、`Workbench` には出さない。`createRunspace(tx, { cwd })` が作るのは Tab の無い所有された Runspace で、`removeRunspace(tx, id, { spare? })` は `spare` の Tab だけを残して所有を解ける（ADR-0012）。
+- 他の domain から呼ばれる書き込み: 第 1 引数に transaction（`db` でもよい）を取る**同期**の method。task は `db.transaction((tx) => { workbench.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。ptyd や fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。workbench の同期 method は `createRunspace` / `removeRunspace` / `moveTab` / `openTab`、commit 後の async は `startTerminalSession` / `writeTerminalSession` / `terminateTerminalSessions`（#22）。`Workbench` に出ているのは `createRunspace`・`openTab`・`startTerminalSession`・`writeTerminalSession` と、reconcile を待つ `ready()` で、ほかは Task v1 の slice が使うときに足す。足すまでは同じ形（第 1 引数が tx）の module 内の関数として procedure の handler から呼び、`Workbench` には出さない。`createRunspace(tx, { cwd })` が作るのは Tab の無い所有された Runspace で、`removeRunspace(tx, id, { spare? })` は `spare` の Tab だけを残して所有を解ける（ADR-0012）。
 
-`openTab` が書く `starting` の Terminal Session の行は、workbench の reconcile が終わってから書く。reconcile の途中で書くと、ptyd の List に無い行として lost にされる。骨格では行に書く shell を `shellWhenReady(workbench)` が reconcile を待ってから返し、handler は transaction の前にこれを await する。
+`openTab` が書く `starting` の Terminal Session の行は、workbench の reconcile が終わってから書く。reconcile の途中で書くと、ptyd の List に無い行として lost にされる。workbench の handler は、行に書く shell を reconcile を待ってから返す `shellWhenReady(workbench)` を transaction の前に await する。他の domain は transaction の前に `workbench.ready()` を await してから、`openTab(tx, { runspaceId, cwd? }) → { tabId, terminalSessionId }` を呼ぶ。`openTab` は shell を自分で埋め、`{ type: "layout" }` を publish する。`writeTerminalSession(id, data)` は ptyd に Write を送る。ptyd は attach していない接続からの Write も通すので、webview が Tab を表示していなくても打てる。
 
 他の domain から呼ばれない処理は router の handler の中に書いてよい。
 
@@ -138,6 +138,7 @@ package ごとに in-memory の SQLite に自分の migration を当てる（tas
 
 - workbench の ptyd は `packages/workbench/src/fake-ptyd.ts` に差し替える。fake は `$home/ptyd.sock` で NDJSON を話し、List の中身を台本にし、Exit を押し込み、届いた Reap と Terminate を記録する。本物の ptyd は CI の ts job に無く、Exit と Created の競合も決まった順で起こせないため。home は `mkdtemp(tmpdir())` で短くする（socket の path の上限は 104 byte）。
 - task の GitHub は `packages/task/src/fake-github.ts` に差し替える。fake は GraphQL の `repository { issue(number:) }` の alias だけを話し、届いた request を記録し、repo ごとの失敗、未認証、応答の保留を起こせる。CLI のテストの Task は `gh auth token` が失敗する GitHub を持ち、本物の GitHub に届かない。
+- task と CLI のテストの Workbench は、ptyd に送る口（`ready`・`startTerminalSession`・`writeTerminalSession`）を `spyOn` で記録だけに差し替える。fake の ptyd は workbench の entry の外にあり、他の package から import できないため。DB と `openTab` は本物を通す。
 - task の ghq は `packages/task/src/fake-ghq.ts` に差し替える。CI の ts job に ghq は無い。fake は一時 directory の `origins/<owner>/<repo>` を origin（default branch は main）にし、`get` でそれを clone して記録する。Bench の準備は本物の git で確かめる。CLI のテストの Task は失敗する ghq を持つ。
 - setup の 600 秒の timeout は、`setTimeout` を `spyOn` してその callback を捕まえ、手で呼ぶ。
 - 一定の間隔で走る処理は、`setInterval` を `spyOn` で捕まえ、間隔を確かめてから callback を手で呼ぶ。Bun の `jest.useFakeTimers()` は `Bun.sleep` と `setTimeout` も止め、一部の timer だけを偽にできないので、HTTP の応答を待つテストが進まなくなる。
@@ -460,7 +461,8 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 track       { ref } → { ref, title, alreadyTracked, closed }                                cli
 sync        { ref? } → { synced, missing }                                                  cli
 list        { closed? } → { tasks: ListItem[], backgroundSyncError: { at, message } | null }  cli
-run         { ref, inPlace? } → { ref, cwd, mode, benchCreated, warnings }                  cli
+run         { ref, inPlace?, force? } → { ref, cwd, mode, benchCreated, warnings,               cli
+              tabId, terminalSessionId, resumed }  errors: BLOCKED { blockers }
 current     { terminalSessionId? } → { ref, title, displayState, agentSessionId, source }   cli
 bench.list  → { runspaceId, ref, title, setupState }[]
 changes     → { type: "task", ref } | { type: "synced" }
@@ -484,7 +486,7 @@ changes     → { type: "task", ref } | { type: "synced" }
 
 ### Bench
 
-`run` の前半。Bench を確保し、準備が終わるのを待って cwd を返す。
+`run` の前半。Bench を確保し、準備が終わるのを待つ。後半は「Run の起動」の節。
 
 - `run` は open な Task だけを受ける（closed は `BAD_REQUEST`、未 track は `NOT_FOUND`）。Bench が無ければ、tx で `bench` の行（`preparing`）と `workbench.createRunspace(tx, { cwd })` を作って commit し、準備を Backend の中で始める。準備中の Bench は sidebar にすぐ出る。
 - cwd は作る前に決め、その後は変えない。worktree は `$TANIA_HOME/worktrees/<owner>/<repo>/issue-<n>`、`--in-place` は `$(ghq root)/github.com/<owner>/<repo>`。`--in-place` で ghq root が引けなければ、Bench を作らずに `PRECONDITION_FAILED`。worktree の Bench に `--in-place` を打つと `BAD_REQUEST`、flag の無い `run` は今の Bench の mode に従う。
@@ -494,6 +496,19 @@ changes     → { type: "task", ref } | { type: "synced" }
 - 成功したら `ready` と `prepared_at`、失敗したら `failed` と `setup_error`（`exit 1`、`timed out after 600s`、`spawn failed: <message>`、git の失敗の最後の行）を書く。`run` は `PRECONDITION_FAILED` で `setup_error` と log の path を出す。
 - `failed` の Bench への `run` は同じ手順をやり直す。worktree が残っていれば setup だけが走る。準備中の Bench への `run` は同じ準備の完了を待つ。CLI を Ctrl-C しても準備は続く。
 - `start()` は `preparing` のまま残った行を `failed`（`the Backend stopped while preparing`）にする。`stop()` は setup の group に SIGKILL を送り、その後の準備の結果は書かない。
+
+### Run の起動
+
+`run` の後半。Bench の新しい Tab で素の `claude` を起こすか、終わった claude を resume する。Run の行は「Run」の節の不変条件が作る。
+
+- Bench があり live な Run があれば、`CONFLICT` で断る。message には live な Run の Agent Session と状態（`s-1 waiting:idle`）を並べ、並行して agent を足すなら Bench に Tab を開いて `claude` を打てば Run になる、と案内する。
+- resume の候補は、今の Bench を作った後に始まった Run（`run.started_at >= bench.created_at`）のうち、Agent Session が最後に動いた（`last_event_at` が新しい）もの。live な Run が無いので、その Agent Session は終わっている。候補があれば sync も Blocker gate もせずに resume する。resume は新しい Run ではないため（#18）。
+  - Bench より前の Run は reopen の前の挑戦なので、resume せず新しい会話から始める。
+  - `transcript_path` の file が無い Agent Session は候補から外す。claude は最初の prompt まで transcript を書かず、prompt を送らずに抜けた Agent Session の `--resume` は `No conversation found` で終わるため。外さないと、その Run がいつまでも候補に残り、`run` で新しい claude を起こせなくなる。path を持たない Agent Session は候補に残す。
+- 新しい Run は、Task を sync（5 秒）してから Blocker gate を確かめる。`--force` でも sync する。GitHub に届かないか Issue が返らなければ手元の写しで判定し、`warnings` に理由と写しの古さ（分）を載せて続ける。sync は repo の改名を写すので、Task は名前でなく行の id で引き直す。
+- open な Blocker があれば、`.errors()` で宣言した `BLOCKED`（`data.blockers` に ref の一覧）で断る。`--force` なら越える。gate を通ったら Bench を確保して準備する（「Bench」の節。CLI は準備を待つ）。
+- `workbench.ready()` を待ってから、tx で `openTab` → commit → `startTerminalSession`（24×80。表示されていない Tab の shell は attach の resize で追いつく）→ すぐに `claude\r`（resume なら `claude --resume '<id>'\r`）を write して返る。shell の起動は待たない。起動前に書いた入力が捨てられないことは #13 で確かめた。Tab は前面に出さない。
+- cwd は、新しい Run なら Bench の cwd、resume ならその Agent Session の cwd（その directory が無ければ Bench の cwd）。Agent Session の id は hook の payload から来るので、single quote で囲んで打つ。
 
 ### sync
 
