@@ -541,7 +541,7 @@ changes     → { type: "task", ref } | { type: "synced" }
 
 `GLOSSARY.md` の Bench と、ADR-0012 の close の順序。
 
-- `close` は Task を引き（未 track は `NOT_FOUND`、closed は `BAD_REQUEST`）、終わるまでその Task を Backend の memory で予約する。予約の間は、同じ Task への `close`、`run`（Bench を開く・準備をやり直す・Tab を開く直前）、`attach`（transaction の中）を `CONFLICT` で断る。git を待つ間に、準備や Tab が片付ける Bench に入らないようにするため。Bench の準備が走っていれば、close も `--force` でも `CONFLICT` で断る。準備は worktree と Bench の行を書き続け、走っている準備は reopen の後の `run` にも待たれるため。
+- `close` は Task を引き（未 track は `NOT_FOUND`、closed は `BAD_REQUEST`）、返るまで（commit の後の terminate を含む）その Task を Backend の memory で予約する。予約の間は、同じ Task への `close`、`run`（Bench を開く・準備をやり直す・Tab を開く直前）、`attach` と `reopen`（transaction の中）を `CONFLICT` で断る。git を待つ間に準備や Tab が片付ける Bench に入らないように、また close の呼び手が閉じた結果を受け取るようにするため。Bench の準備が走っていれば、close も `--force` でも `CONFLICT` で断る。準備は worktree と Bench の行を書き続け、走っている準備は reopen の後の `run` にも待たれるため。
 - Task を sync（5 秒。`--force` でも sync）してから、行の id で引き直す。GitHub に届かなければ手元の写しで続け、`warnings` に載せる（`run` と同じ `syncOrUseCopy`）。
 - guard は当たったものをすべて集め、`.errors()` で宣言した `CLOSE_REFUSED`（`data.reasons`）で返す。`--force` なら見ない。
   - ActiveRun: Task の live な Run。呼び手の Terminal Session の Agent Session の Run は除く。Bench が無くても見る。reopen の前に close を頼んだ claude が残っていることがあるため。

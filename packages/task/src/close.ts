@@ -79,12 +79,17 @@ async function closeReserved(
   return { ref: closed.ref, ...removed, spared: closed.spared, warnings };
 }
 
-export async function reopenTask(deps: SyncDeps, input: { ref: string }): Promise<ReopenOutput> {
+export async function reopenTask(
+  deps: SyncDeps & Pick<BenchDeps, "closing">,
+  input: { ref: string },
+): Promise<ReopenOutput> {
   const asked = parseRef(input.ref);
   const tracked = closedTask(deps.db, isIssue(asked), formatRef(asked));
   const warnings = await syncOrUseCopy(deps, tracked.issue);
   const reopened = deps.db.transaction((tx) => {
     const found = closedTask(tx, eq(issue.id, tracked.issue.id), formatRef(tracked.issue));
+    // close は commit の後も Terminal Session を終わらせ終えるまで予約を持ち、閉じた結果を返す。
+    refuseClosing(deps, found.issue.id, formatRef(found.issue));
     tx.update(task).set({ closedAt: null }).where(eq(task.issueId, found.issue.id)).run();
     return found.issue;
   });

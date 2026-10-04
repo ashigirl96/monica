@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runspace, tab } from "@tania/workbench/schema";
@@ -384,6 +384,23 @@ test("a second close while the first is under way is refused", async () => {
 
   expect(error.code).toBe("CONFLICT");
   expect(await closing).toMatchObject({ removedWorktree: books.cwd });
+});
+
+test("reopen is refused while close is still terminating the Terminal Sessions of the Bench", async () => {
+  const books = await withWorktreeBench();
+  let finish: (() => void) | undefined;
+  spyOn(books.workbench, "terminateTerminalSessions").mockImplementation(
+    () => new Promise<void>((resolve) => (finish = resolve)),
+  );
+  const closing = books.client.close({ ref });
+  await until(() => finish !== undefined);
+
+  const error = await failure(books.client.reopen({ ref }));
+  finish!();
+
+  expect(error.code).toBe("CONFLICT");
+  expect(await closing).toMatchObject({ ref });
+  expect((await books.client.list({ closed: true })).tasks).toMatchObject([{ ref }]);
 });
 
 test("reopen opens a closed Task with no Bench, and the next run makes the worktree and the Bench anew on a new branch issue-n", async () => {
