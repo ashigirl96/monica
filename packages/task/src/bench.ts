@@ -26,6 +26,8 @@ export type BenchDeps = {
   stopped: AbortSignal;
   preparations: Map<number, Promise<Prepared>>;
   setups: Set<Subprocess>;
+  /** close の途中の Task。git を待つ間に、準備や Tab が片付ける Bench に入らないようにする。 */
+  closing: Set<number>;
 };
 
 type Prepared = { warnings: string[] } | { error: string };
@@ -50,6 +52,7 @@ export async function prepareBench(
           });
         })
       : worktreeOf(deps.home, found.issue));
+  refuseClosing(deps, found.issue.id, ref);
   // 待つ間に別の run が Bench を作っていれば、そちらを使う。
   const opened = openBench(deps, found.issue, { cwd, mode });
   refuseInPlace(opened.bench, inPlace, ref);
@@ -60,6 +63,12 @@ export async function prepareBench(
     });
   }
   return { bench: opened.bench, created: opened.created, warnings: prepared.warnings };
+}
+
+export function refuseClosing(deps: Pick<BenchDeps, "closing">, taskIssueId: number, ref: string) {
+  if (deps.closing.has(taskIssueId)) {
+    throw new ORPCError("CONFLICT", { message: `${ref} is being closed` });
+  }
 }
 
 export function refuseInPlace(row: Bench, inPlace: boolean | undefined, ref: string) {

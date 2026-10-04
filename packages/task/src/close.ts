@@ -2,7 +2,7 @@ import { ORPCError, type ORPCErrorConstructorMap } from "@orpc/server";
 import { agentSession, runspace } from "@tania/workbench/schema";
 import type { Db } from "@tania/workbench/server";
 import { and, eq, ne, type SQL } from "drizzle-orm";
-import type { BenchDeps } from "./bench.ts";
+import { type BenchDeps, type Issue, refuseClosing } from "./bench.ts";
 import type { CloseOutput, CloseRefusal, closeErrors, ReopenOutput } from "./contract.ts";
 import { isIssue } from "./copy.ts";
 import { findTrackedTask } from "./open-task.ts";
@@ -20,9 +20,24 @@ export async function closeTask(
 ): Promise<CloseOutput> {
   const asked = parseRef(input.ref);
   const tracked = openTaskToClose(deps.db, isIssue(asked), formatRef(asked));
-  const warnings = await syncOrUseCopy(deps, tracked.issue);
+  reserveForClose(deps, tracked.issue.id, formatRef(tracked.issue));
+  try {
+    return await closeReserved(deps, tracked.issue, input, errors);
+  } finally {
+    deps.closing.delete(tracked.issue.id);
+  }
+}
+
+// 予約の間は準備も Tab も Bench に入らないので、Bench の行は git を待つ間も変わらない。
+async function closeReserved(
+  deps: SyncDeps & BenchDeps,
+  tracked: Issue,
+  input: { force?: boolean; terminalSessionId?: string },
+  errors: ORPCErrorConstructorMap<typeof closeErrors>,
+): Promise<CloseOutput> {
+  const warnings = await syncOrUseCopy(deps, tracked);
   // sync は repo の改名を写すので、名前でなく行の id で引き直す。
-  const found = openTaskToClose(deps.db, eq(issue.id, tracked.issue.id), formatRef(tracked.issue));
+  const found = openTaskToClose(deps.db, eq(issue.id, tracked.id), formatRef(tracked));
   const ref = formatRef(found.issue);
   const benchRow = found.bench;
   const worktree =
@@ -47,11 +62,6 @@ export async function closeTask(
   const closed = deps.db.transaction((tx) => {
     const now = openTaskToClose(tx, eq(issue.id, found.issue.id), ref);
     const closedRef = formatRef(now.issue);
-    if (now.bench?.runspaceId !== benchRow?.runspaceId) {
-      throw new ORPCError("CONFLICT", {
-        message: `the Bench of ${closedRef} changed while closing; close it again`,
-      });
-    }
     tx.update(task).set({ closedAt: new Date() }).where(eq(task.issueId, found.issue.id)).run();
     if (!now.bench) return { ref: closedRef, spared: false, terminalSessionIds: [] };
     tx.delete(bench).where(eq(bench.taskIssueId, found.issue.id)).run();
@@ -89,13 +99,18 @@ function openTaskToClose(db: Pick<Db, "select">, where: SQL | undefined, asked: 
   if (found.task.closedAt) {
     throw new ORPCError("BAD_REQUEST", { message: `${ref} is already closed` });
   }
-  // 準備は worktree と Bench の行を書き続けるので、終わるまで片付けない。
-  if (found.bench?.setupState === "preparing") {
+  return found;
+}
+
+// 準備は worktree と Bench の行を書き続けるので、走っている間は片付けない。
+function reserveForClose(deps: BenchDeps, taskIssueId: number, ref: string) {
+  refuseClosing(deps, taskIssueId, ref);
+  if (deps.preparations.has(taskIssueId)) {
     throw new ORPCError("CONFLICT", {
       message: `the Bench of ${ref} is being prepared; close it once the setup ends, or times out after 600s`,
     });
   }
-  return found;
+  deps.closing.add(taskIssueId);
 }
 
 function closedTask(db: Pick<Db, "select">, where: SQL | undefined, asked: string) {

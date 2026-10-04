@@ -541,7 +541,7 @@ changes     → { type: "task", ref } | { type: "synced" }
 
 `GLOSSARY.md` の Bench と、ADR-0012 の close の順序。
 
-- `close` は Task を引く（未 track は `NOT_FOUND`、closed は `BAD_REQUEST`）。Bench が準備中なら、`--force` でも `CONFLICT` で断る。準備は worktree と Bench の行を書き続け、走っている準備は reopen の後の `run` にも待たれるため。
+- `close` は Task を引き（未 track は `NOT_FOUND`、closed は `BAD_REQUEST`）、終わるまでその Task を Backend の memory で予約する。予約の間は、同じ Task への `close`、`run`（Bench を開く・準備をやり直す・Tab を開く直前）、`attach`（transaction の中）を `CONFLICT` で断る。git を待つ間に、準備や Tab が片付ける Bench に入らないようにするため。Bench の準備が走っていれば、close も `--force` でも `CONFLICT` で断る。準備は worktree と Bench の行を書き続け、走っている準備は reopen の後の `run` にも待たれるため。
 - Task を sync（5 秒。`--force` でも sync）してから、行の id で引き直す。GitHub に届かなければ手元の写しで続け、`warnings` に載せる（`run` と同じ `syncOrUseCopy`）。
 - guard は当たったものをすべて集め、`.errors()` で宣言した `CLOSE_REFUSED`（`data.reasons`）で返す。`--force` なら見ない。
   - ActiveRun: Task の live な Run。呼び手の Terminal Session の Agent Session の Run は除く。Bench が無くても見る。reopen の前に close を頼んだ claude が残っていることがあるため。
@@ -549,7 +549,7 @@ changes     → { type: "task", ref } | { type: "synced" }
   - UnpublishedCommits（worktree の Bench だけ）: `git -C <checkout> rev-list --max-count=1 refs/heads/<branch> --not --remotes` が commit を返す。fetch しないので、push 済みなら merge されていなくても止めない。branch が無ければ当たらない。
 - checkout は、worktree があればその `--git-common-dir` の親を使う。repo の改名の後も、作った時の checkout に当たる。worktree が無ければ今の名前の ghq の checkout を使い、それも無ければ git は何もしない。
 - worktree の Bench は `git -C <checkout> worktree remove --force <path>` → `git -C <checkout> branch -D <branch>` を実行する。path が消えていれば、その登録だけを `worktree remove --force` で外す（失敗は無視する）。消えた worktree の登録が残っていると、その branch を消せないため。`prune` は関係の無い登録まで外すので使わない（「Bench」の節）。git か ghq が失敗したら `PRECONDITION_FAILED` で、DB を何も変えずに止まる。in_place の Bench は checkout も branch も触らない。
-- tx で Task を引き直し（閉じられていれば `BAD_REQUEST`、Bench が替わっているか準備中なら `CONFLICT`）、`closed_at` を入れ、`bench` の行を消し、`removeRunspace(tx, runspaceId, { spare: 呼び手の terminalSessionId })` を呼ぶ。output の `spared` は Runspace が残ったかどうか。commit の後に `{ type: "task", ref }` で知らせ、返った Terminal Session を `terminateTerminalSessions` で終わらせる。
+- tx で Task を引き直して ref を作り直し、`closed_at` を入れ、`bench` の行を消し、`removeRunspace(tx, runspaceId, { spare: 呼び手の terminalSessionId })` を呼ぶ。output の `spared` は Runspace が残ったかどうか。commit の後に `{ type: "task", ref }` で知らせ、返った Terminal Session を `terminateTerminalSessions` で終わらせる。
 - Run の行は残す。close を頼んだ claude は、終わるまで closed な Task の Run のままで、`current` もその Task を返す。
 - CLI は拒否を、1 行目の `CLOSE_REFUSED: <ref> stays open:`、理由を 1 行ずつ、最後の `pass --force to close anyway` で出し、exit 1 にする。Skill は stderr の 1 行目で失敗を読むので、1 行目は `CODE: message` の形を保つ。
 - `reopen` は closed な Task だけを受ける（open は `BAD_REQUEST`）。sync（5 秒。届かなければ警告）してから `closed_at` を NULL に戻し、`{ type: "task", ref }` で知らせる。Bench は作らないので、表示状態は `not_started`（Issue が closed なら `issue_closed`）。次の `run` か `attach` が Bench を作り直す。`run` は close で消えた branch `issue-<n>` を origin の default branch から作り直し、Bench より前の Run は resume しない（「Run の起動」の節）。

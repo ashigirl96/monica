@@ -52,6 +52,7 @@ export function createTask(deps: {
     stopped: stopped.signal,
     preparations: new Map(),
     setups: new Set(),
+    closing: new Set(),
   };
   let backgroundSyncError: BackgroundSyncError | null = null;
   let timer: ReturnType<typeof setInterval> | undefined;

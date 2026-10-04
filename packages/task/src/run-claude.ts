@@ -3,7 +3,14 @@ import { ORPCError, type ORPCErrorConstructorMap } from "@orpc/server";
 import { agentSession } from "@tania/workbench/schema";
 import type { Db } from "@tania/workbench/server";
 import { and, desc, eq, gte } from "drizzle-orm";
-import { type Bench, type BenchDeps, type Issue, prepareBench, refuseInPlace } from "./bench.ts";
+import {
+  type Bench,
+  type BenchDeps,
+  type Issue,
+  prepareBench,
+  refuseClosing,
+  refuseInPlace,
+} from "./bench.ts";
 import type { RunOutput, runErrors } from "./contract.ts";
 import { isIssue, openBlockersOf } from "./copy.ts";
 import { findOpenTask } from "./open-task.ts";
@@ -116,11 +123,13 @@ async function newRun(
   };
 }
 
-async function openClaudeTab({ db, workbench }: BenchDeps, launch: Launch) {
+async function openClaudeTab(deps: BenchDeps, launch: Launch) {
+  const { db, workbench } = deps;
   await workbench.ready();
-  const opened = db.transaction((tx) =>
-    workbench.openTab(tx, { runspaceId: launch.bench.runspaceId, cwd: launch.tabCwd }),
-  );
+  const opened = db.transaction((tx) => {
+    refuseClosing(deps, launch.bench.taskIssueId, launch.ref);
+    return workbench.openTab(tx, { runspaceId: launch.bench.runspaceId, cwd: launch.tabCwd });
+  });
   await workbench.startTerminalSession(opened.terminalSessionId, TAB_SIZE);
   // 起動前の shell に書いた入力も捨てられずに評価されるので、起動を待たない。
   await workbench.writeTerminalSession(opened.terminalSessionId, `${claudeCommand(launch)}\r`);

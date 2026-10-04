@@ -334,6 +334,58 @@ test("close refuses a Bench that is still being prepared, even with --force", as
   expect((await client.list({})).tasks).toMatchObject([{ ref }]);
 });
 
+// close は GitHub を待つ間も Task を押さえているので、hold した sync の間に呼べば競合を決まった順で起こせる。
+async function closeHeldAtSync(books: Books) {
+  const sent = books.github.requests.length;
+  const release = books.github.hold();
+  const closing = books.client.close({ ref });
+  await until(() => books.github.requests.length > sent);
+  return { closing, release };
+}
+
+test("while close is under way, a new run and attach on its Task are refused, so nothing enters the Bench it takes down", async () => {
+  const books = await withWorktreeBench();
+  const { client } = books;
+  const plain = books.plainRunspace();
+  const outside = books.openTab(plain);
+  const { closing, release } = await closeHeldAtSync(books);
+
+  const attached = await failure(client.attach({ ref, terminalSessionId: outside }));
+  const running = failure(client.run({ ref }));
+  release();
+
+  expect(attached.code).toBe("CONFLICT");
+  expect((await running).code).toBe("CONFLICT");
+  expect(await closing).toMatchObject({ removedWorktree: books.cwd });
+  expect(books.db.select({ id: runspace.id }).from(runspace).all()).toEqual([{ id: plain }]);
+  expect(tabsOf(books)).toEqual([{ terminalSessionId: outside }]);
+});
+
+test("while close is under way, a run that would resume the last claude is refused", async () => {
+  const books = await withWorktreeBench();
+  await books.hook(books.claudeTab, "s-1", "SessionStart", { source: "startup" });
+  await books.hook(books.claudeTab, "s-1", "SessionEnd", { reason: "exit" });
+  const { closing, release } = await closeHeldAtSync(books);
+
+  const error = await failure(books.client.run({ ref }));
+  release();
+
+  expect(error.code).toBe("CONFLICT");
+  expect(await closing).toMatchObject({ removedWorktree: books.cwd });
+  expect(books.ptyd.filter((call) => call.op === "start")).toHaveLength(1);
+});
+
+test("a second close while the first is under way is refused", async () => {
+  const books = await withWorktreeBench();
+  const { closing, release } = await closeHeldAtSync(books);
+
+  const error = await failure(books.client.close({ ref }));
+  release();
+
+  expect(error.code).toBe("CONFLICT");
+  expect(await closing).toMatchObject({ removedWorktree: books.cwd });
+});
+
 test("reopen opens a closed Task with no Bench, and the next run makes the worktree and the Bench anew on a new branch issue-n", async () => {
   const books = await withWorktreeBench();
   const { client, cwd, ghq, task } = books;
