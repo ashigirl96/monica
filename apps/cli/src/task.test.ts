@@ -1,6 +1,11 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createRouterClient } from "@orpc/server";
-import { issue, issueBlocker, task } from "@tania/task/schema";
+import { bench, issue, issueBlocker, task } from "@tania/task/schema";
+import type { Ghq } from "@tania/task/server";
+import { runspace, tab } from "@tania/workbench/schema";
 import { inMemoryBackend, tania } from "./testing.ts";
 
 function backendWithTasks() {
@@ -88,4 +93,126 @@ test("task sync takes an optional ref and exits 1 for one that is not tracked", 
     stdout: "",
     stderr: "NOT_FOUND: acme/app#99 is not tracked\n",
   });
+});
+
+function backendWithBench({ home = "/nonexistent", ghq }: { home?: string; ghq?: Ghq } = {}) {
+  const backend = inMemoryBackend({ home, ghq });
+  const { db } = backend;
+  const tracked = db
+    .insert(issue)
+    .values({
+      repo: "acme/app",
+      number: 12,
+      title: "Ship it",
+      state: "open",
+      syncedAt: new Date(0),
+    })
+    .returning()
+    .get();
+  db.insert(task)
+    .values({ issueId: tracked.id, trackedAt: new Date(1) })
+    .run();
+  const client = createRouterClient(backend.router, { context: backend.context });
+  return { ...backend, issueId: tracked.id, connect: () => client };
+}
+
+function inScratch() {
+  const scratch = mkdtempSync(join(tmpdir(), "tania-cli-"));
+  cleanups.push(() => rmSync(scratch, { recursive: true, force: true }));
+  return scratch;
+}
+
+const cleanups: (() => void)[] = [];
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup();
+});
+
+test("task run prints where the Bench is once it is ready", async () => {
+  const scratch = inScratch();
+  const checkout = join(scratch, "github.com/acme/app");
+  mkdirSync(checkout, { recursive: true });
+  const { connect } = backendWithBench({
+    home: scratch,
+    ghq: { root: () => Promise.resolve(scratch), get: () => Promise.resolve() },
+  });
+
+  const result = await tania(["task", "run", "acme/app#12", "--in-place"], connect);
+
+  expect(result).toEqual({
+    code: 0,
+    stdout: `opened the Bench of acme/app#12 at ${checkout}\n`,
+    stderr: "",
+  });
+});
+
+test("task run exits 1 with the reason and the log path when the Bench cannot be prepared", async () => {
+  const home = inScratch();
+  const { connect } = backendWithBench({ home });
+
+  const result = await tania(["task", "run", "acme/app#12"], connect);
+
+  expect(result).toEqual({
+    code: 1,
+    stdout: "",
+    stderr:
+      "PRECONDITION_FAILED: could not prepare the Bench of acme/app#12: ghq root failed: no ghq in the CLI tests; " +
+      `see ${home}/logs/setup/acme/app/issue-12.log\n`,
+  });
+});
+
+test("task run --in-place exits 1 when it cannot find the Repo's checkout", async () => {
+  const { connect } = backendWithBench();
+
+  const result = await tania(["task", "run", "acme/app#12", "--in-place"], connect);
+
+  expect(result).toEqual({
+    code: 1,
+    stdout: "",
+    stderr:
+      "PRECONDITION_FAILED: could not find the checkout of acme/app#12: ghq root failed: no ghq in the CLI tests\n",
+  });
+});
+
+test("task current names the Task of the Bench the Tab is in, given by TANIA_TERMINAL_SESSION_ID", async () => {
+  const { db, issueId, connect } = backendWithBench();
+  db.insert(runspace).values({ id: "rs-bench", cwd: "/work", sortOrder: 0, owned: true }).run();
+  db.insert(bench)
+    .values({
+      taskIssueId: issueId,
+      runspaceId: "rs-bench",
+      cwd: "/work",
+      mode: "in_place",
+      setupState: "ready",
+      createdAt: new Date(0),
+    })
+    .run();
+  db.insert(tab)
+    .values({
+      id: "tab-a",
+      runspaceId: "rs-bench",
+      cwd: "/work",
+      sortOrder: 0,
+      terminalSessionId: "ts-a",
+    })
+    .run();
+
+  const result = await tania(["task", "current"], connect, { terminalSessionId: "ts-a" });
+
+  expect(result).toEqual({
+    code: 0,
+    stdout: "REF          TITLE    STATE\nacme/app#12  Ship it  ended\n",
+    stderr: "",
+  });
+});
+
+test("task current exits 1 outside a Tab, and takes no flag for the Terminal Session", async () => {
+  const { connect } = backendWithBench();
+
+  const outside = await tania(["task", "current"], connect);
+  const flagged = await tania(["task", "current", "--terminal-session-id", "ts-a"], connect);
+
+  expect(outside.code).toBe(1);
+  expect(outside.stderr).toStartWith("BAD_REQUEST: not in a Tab of the Workbench");
+  expect(flagged.code).toBe(1);
+  expect(flagged.stderr).toMatch(/^BAD_REQUEST: unknown option '--terminal-session-id'/);
 });

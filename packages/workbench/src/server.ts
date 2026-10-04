@@ -14,7 +14,7 @@ import {
   pinTab,
   readLayout,
   reattachTab,
-  refuseRemovingPinned,
+  refuseRemoving,
   removeRunspace,
   respawnTab,
   setTabCwd,
@@ -33,6 +33,7 @@ import {
 import { worktreeInfo } from "./worktree.ts";
 
 export { migrations } from "../migrations/index.ts";
+export { inheritableEnv } from "./ptyd.ts";
 export { createWorkbench, type Db, type Tx, type Workbench } from "./workbench.ts";
 
 const os = implement(contract).$context<{ db: Db; workbench: Workbench }>();
@@ -79,7 +80,7 @@ export const router = os.router({
     }),
     remove: os.runspace.remove.handler(async ({ context, input }) => {
       const terminalSessionIds = writeLayout(context, (tx) => {
-        refuseRemovingPinned(tx, input.id);
+        refuseRemoving(tx, input.id);
         return removeRunspace(tx, input.id);
       });
       await terminateTerminalSessions(context.workbench, terminalSessionIds);

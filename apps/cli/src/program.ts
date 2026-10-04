@@ -6,6 +6,7 @@ import { type Format, forwardingRouter } from "./forward.ts";
 
 export type Deps = {
   connect: () => Client | null;
+  terminalSessionId?: string;
   stdout: (text: string) => void;
   stderr: (text: string) => void;
 };
@@ -19,6 +20,7 @@ export async function runCli(argv: string[], deps: Deps): Promise<number> {
       return client;
     },
     format: () => program!.opts<{ format: Format }>().format,
+    terminalSessionId: deps.terminalSessionId,
     write: deps.stdout,
   });
   const cli = createCli({ router, name: "tania" });

@@ -13,6 +13,7 @@ export type Format = "text" | "json";
 type Forwarding = {
   connect: () => Client;
   format: () => Format;
+  terminalSessionId: string | undefined;
   write: (text: string) => void;
 };
 
@@ -40,11 +41,22 @@ function forward(
     if (getEventIteratorSchemaDetails(outputSchema)) return undefined;
     const format = lookup(formatters, path) as ((output: unknown) => string) | undefined;
     if (!format) throw new Error(`no text formatter for ${path.join(".")}`);
+    // 呼び手は CLI が動いている Tab で決まるので、flag では受けずに env から埋める。
+    const takesCaller =
+      inputSchema instanceof z.ZodObject && "terminalSessionId" in inputSchema.shape;
     // output は Backend が検証済みで、この handler は undefined を返すので output schema を持たせない。
     // input の無い procedure も空の object に見せないと、trpc-cli は変換できない input として --json を生やす。
-    const base = os.$meta(meta).input(inputSchema ?? z.object({}));
+    const cliInput = takesCaller
+      ? inputSchema.omit({ terminalSessionId: true })
+      : (inputSchema ?? z.object({}));
+    const base = os.$meta(meta).input(cliInput);
     return base.handler(async ({ input }) => {
-      const output = await callRemote(forwarding.connect(), path, inputSchema ? input : undefined);
+      const remoteInput = takesCaller
+        ? { ...(input as object), terminalSessionId: forwarding.terminalSessionId }
+        : inputSchema
+          ? input
+          : undefined;
+      const output = await callRemote(forwarding.connect(), path, remoteInput);
       const text =
         forwarding.format() === "json" ? JSON.stringify(output, null, 2) : format(output);
       forwarding.write(`${text}\n`);

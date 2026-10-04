@@ -1,6 +1,6 @@
 ---
 name: backend-headless
-description: "desktop 無しで Backend と tania-ptyd を起こし、CLI と RPC で振る舞いを確かめる。受け入れ条件を手で確かめるとき、Backend の起動・終了・ptyd との再接続を実機で見るとき、Tab で claude を動かして Agent Session を見るときに使う。"
+description: "desktop 無しで Backend と tania-ptyd を起こし、CLI と RPC で振る舞いを確かめる。受け入れ条件を手で確かめるとき、Backend の起動・終了・ptyd との再接続を実機で見るとき、Tab で claude を動かして Agent Session を見るとき、Task の Bench（run・close）を確かめるときに使う。"
 ---
 
 Backend を本物の ptyd に繋いで起こす。Shell の役（親として生き続け、stdin の pipe の書き側を握る）は Bash の background job が演じる。
@@ -84,10 +84,30 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
   ```
 
 - DB は Backend が `locking_mode=EXCLUSIVE` で握っている。`sqlite3` で読むのは Backend を止めた後。
+- process を `pgrep -f` / `pkill -f` で探すときは、pattern を `^` で始め、探す process の command 行の先頭に当てる。harness は command を zsh で包み、その中で `( … ) &` で起こした subshell も command の全文を command 行に持つので、pattern が command の文字列に含まれると自分に当たる。
+
+## Task の Bench を確かめる
+
+`run` と `close` は、checkout に branch と worktree を作り、消す。ユーザーの checkout に触れないよう、ghq と origin を一時 directory に閉じ込める。
+
+1. 起こすときに `GHQ_ROOT=${TMPDIR%/}/tania-s2-ghq` を Backend の env に足す（`env -i` で起こすときも）。ghq は `GHQ_ROOT` を `ghq root` の答えにする。渡し忘れると、ユーザーの本物の checkout で worktree を作る。
+2. Task を 1 つ `run --in-place` する。`ghq get` が GitHub から `tania-s2-ghq` の下に checkout を clone する。
+3. その checkout から一時の origin を作る。`.tania/setup.sh` を commit した main を push し、checkout の `origin` をそこへ向ける。以後の worktree の Bench は、この main から作られる。setup の振る舞いは script が読む mode file で切り替えるので、commit し直さずに成功・失敗・長い setup を作れる。
+
+   ```bash
+   T=${TMPDIR%/}; C=$T/tania-s2-ghq/github.com/<owner>/<repo>; O=$T/tania-s2-origin/repo.git; W=$T/tania-s2-origin/work
+   git clone --bare --quiet $C $O && git clone --quiet $O $W && mkdir -p $W/.tania
+   printf '#!/bin/sh\ncase "$(cat %s)" in fail) exit 1 ;; slow) sleep 30 ;; *) sleep 3 ;; esac\n' $T/tania-s2-mode > $W/.tania/setup.sh
+   chmod +x $W/.tania/setup.sh && echo ok > $T/tania-s2-mode
+   git -C $W add .tania && git -C $W -c user.name=t -c user.email=t@e commit -qm setup && git -C $W push -q origin HEAD:main
+   git -C $C remote set-url origin $O
+   ```
+
+4. 片付けでは、home と一緒に `tania-s2-ghq`・`tania-s2-origin`・`tania-s2-mode` も消す。
 
 ## 止めて片付ける
 
-- stdin の EOF で止める: sleep の pid を `pgrep -f "^sleep 100000$"` で取り、その pid に `kill` を送る。harness は command を zsh で包むので、`pkill -f` はその zsh の command 行にも当たり、親ごと殺す。
+- stdin の EOF で止める: sleep の pid を `pgrep -f "^sleep 100000$"` で取り、その pid に `kill` を送る。`pkill -f` は harness の zsh にも当たり、親ごと殺す。
 - SIGTERM で止める: `kill -TERM $(jq .pid ${TMPDIR%/}/tania-s2/backend.json)`。pipe の左の sleep は残り、background の job が終わらないので、続けて上の手順で sleep も止める。
 - Backend が止まったら `rm -rf ${TMPDIR%/}/tania-s2` で home を消す。ptyd は socket が消えたのを 2 秒おきの確認で見つけ、shell ごと終わるので、下の判定は数秒待ってからする。
 

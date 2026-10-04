@@ -1,6 +1,6 @@
 import { cn, PinIcon, useDragReorder } from "@tania/ui";
 import { useAtomValue, useSetAtom } from "jotai";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import type { TerminalSession } from "../contract.ts";
 import { shortPath } from "../paths.ts";
 import type { AgentDot } from "./agent-dot.ts";
@@ -58,16 +58,20 @@ function DetachedTerminalSessionItem({
   );
 }
 
+export type RenderRunspaceLabel = (runspaceId: string) => ReactNode;
+
 function RunspaceItem({
   runspace,
   dragHandlers,
   isDragOver,
   hint,
+  renderLabel,
 }: {
   runspace: RunspaceSummary;
   dragHandlers: ReturnType<ReturnType<typeof useDragReorder>["handlersFor"]>;
   isDragOver: boolean;
   hint?: string;
+  renderLabel?: RenderRunspaceLabel;
 }) {
   const draggedTabId = useAtomValue(draggedTabIdAtom);
   const moveTab = useSetAtom(moveTabToRunspaceAtom);
@@ -103,7 +107,7 @@ function RunspaceItem({
           {hint && <JumpHint hint={hint} ctrl />}
           {runspace.holdsPin && <PinIcon size={14} className="shrink-0 text-rose-400" />}
           <span className="flex-1 truncate text-xs font-medium leading-snug">
-            {runspace.title || "Terminal"}
+            {(runspace.owned && renderLabel?.(runspace.id)) || runspace.title || "Terminal"}
           </span>
         </div>
         {runspace.description && (
@@ -142,7 +146,11 @@ function RunspaceGroup({
   );
 }
 
-export function WorkbenchSidebar() {
+export function WorkbenchSidebar({
+  renderRunspaceLabel,
+}: {
+  renderRunspaceLabel?: RenderRunspaceLabel;
+}) {
   const summaries = useAtomValue(runspaceSummariesAtom);
   const detached = useAtomValue(detachedTerminalSessionsAtom);
   const activate = useSetAtom(activateRunspaceAtom);
@@ -160,6 +168,7 @@ export function WorkbenchSidebar() {
       dragHandlers={handlersFor(runspace.id, () => activate(runspace.id))}
       isDragOver={dragOverId === runspace.id}
       hint={jumpHints.byRunspaceId[runspace.id]}
+      renderLabel={renderRunspaceLabel}
     />
   );
 

@@ -1,3 +1,4 @@
+import { runspace } from "@tania/workbench/schema";
 import {
   type AnySQLiteColumn,
   integer,
@@ -45,4 +46,22 @@ export const task = sqliteTable("task", {
     .references(() => issue.id),
   trackedAt: timestamp("tracked_at").notNull(),
   closedAt: timestamp("closed_at"),
+});
+
+// close で行を消し、reopen で作り直す。cwd は作った時に決め、その後は変えない。
+export const bench = sqliteTable("bench", {
+  taskIssueId: integer("task_issue_id")
+    .primaryKey()
+    .references(() => task.issueId),
+  runspaceId: text("runspace_id")
+    .notNull()
+    .unique()
+    .references(() => runspace.id),
+  cwd: text("cwd").notNull(),
+  mode: text("mode", { enum: ["worktree", "in_place"] }).notNull(),
+  branch: text("branch"),
+  setupState: text("setup_state", { enum: ["preparing", "ready", "failed"] }).notNull(),
+  setupError: text("setup_error"),
+  createdAt: timestamp("created_at").notNull(),
+  preparedAt: timestamp("prepared_at"),
 });

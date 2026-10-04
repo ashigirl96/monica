@@ -38,17 +38,25 @@ export function writeLayout<T>({ db, workbench }: Books, write: (tx: Tx) => T): 
   return written;
 }
 
-export function createRunspace(tx: Tx, input: { cwd: string; index?: number }): string {
+export function createRunspace(
+  tx: Tx,
+  input: { cwd: string; index?: number; owned?: boolean },
+): string {
   const id = `rs-${Bun.randomUUIDv7()}`;
   const order = insertAt(runspaceIds(tx), id, input.index);
   tx.insert(runspace)
-    .values({ id, cwd: input.cwd, sortOrder: order.indexOf(id) })
+    .values({ id, cwd: input.cwd, sortOrder: order.indexOf(id), owned: input.owned })
     .run();
   restack(tx, runspace, order);
   return id;
 }
 
-export function refuseRemovingPinned(tx: Tx, runspaceId: string) {
+export function refuseRemoving(tx: Tx, runspaceId: string) {
+  if (runspaceOf(tx, runspaceId).owned) {
+    throw new ORPCError("CONFLICT", {
+      message: `Runspace ${runspaceId} is owned by another domain`,
+    });
+  }
   if (pinnedTabOf(tx, runspaceId)) {
     throw new ORPCError("CONFLICT", { message: `Runspace ${runspaceId} holds a pinned Tab` });
   }
@@ -132,7 +140,7 @@ export function pinTab(tx: Tx, id: string) {
   const holder = pinnedTabOf(tx, target.runspaceId);
   if (holder) {
     tx.update(tab).set({ pinned: false }).where(eq(tab.id, holder.id)).run();
-  } else if (tabIds(tx, target.runspaceId).length > 1) {
+  } else if (!runspaceOf(tx, target.runspaceId).owned && tabIds(tx, target.runspaceId).length > 1) {
     moveTab(tx, { id, runspaceId: createRunspace(tx, { cwd: target.cwd }) });
   }
   tx.update(tab).set({ pinned: true }).where(eq(tab.id, id)).run();
@@ -210,7 +218,7 @@ function pinnedTabOf(tx: Tx, runspaceId: string) {
 function afterTabLeft(tx: Tx, runspaceId: string) {
   const rest = tabIds(tx, runspaceId);
   if (rest.length > 0) restack(tx, tab, rest);
-  else deleteRunspace(tx, runspaceId);
+  else if (!runspaceOf(tx, runspaceId).owned) deleteRunspace(tx, runspaceId);
 }
 
 function deleteRunspace(tx: Tx, id: string) {
