@@ -185,7 +185,7 @@ function signalGroup(pid: number, signal: NodeJS.Signals | 0): boolean {
   }
 }
 
-function git(cwd: string, ...args: string[]): Promise<string> {
+export function git(cwd: string, ...args: string[]): Promise<string> {
   return command(["git", "-C", cwd, ...args], `git ${args.slice(0, 2).join(" ")}`);
 }
 
@@ -208,7 +208,7 @@ async function command(argv: string[], name: string): Promise<string> {
   return stdout.trim();
 }
 
-async function succeeds(running: Promise<unknown>): Promise<boolean> {
+export async function succeeds(running: Promise<unknown>): Promise<boolean> {
   return running.then(
     () => true,
     () => false,

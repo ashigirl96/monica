@@ -102,7 +102,7 @@ export function nameAgentSession(db: Db, agentSessionId: string): string | null;
 
 - `events`: その domain の変更を知らせる in-process の publisher。
 - `start()` / `stop()`: 起動時と終了時の処理。workbench は ptyd への接続（無ければ spawn、版違いは入れ替え）と reconcile（ADR-0011）、task は起動時と 5 分おきの背景 sync（#18）、起動時に preparing のまま残った Bench を失敗にすることと、終了時に走っている setup の process group を kill すること。
-- 他の domain から呼ばれる書き込み: 第 1 引数に transaction（`db` でもよい）を取る**同期**の method。task は `db.transaction((tx) => { workbench.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。ptyd や fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。workbench の同期 method は `createRunspace` / `removeRunspace` / `moveTab` / `openTab`、commit 後の async は `startTerminalSession` / `writeTerminalSession` / `terminateTerminalSessions`（#22）。`Workbench` に出ているのは `createRunspace`・`openTab`・`moveTab`・`startTerminalSession`・`writeTerminalSession` と、reconcile を待つ `ready()` で、ほかは Task v1 の slice が使うときに足す。足すまでは同じ形（第 1 引数が tx）の module 内の関数として procedure の handler から呼び、`Workbench` には出さない。`createRunspace(tx, { cwd })` が作るのは Tab の無い所有された Runspace で、`removeRunspace(tx, id, { spare? })` は `spare` の Tab だけを残して所有を解ける（ADR-0012）。
+- 他の domain から呼ばれる書き込み: 第 1 引数に transaction（`db` でもよい）を取る**同期**の method。task は `db.transaction((tx) => { workbench.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。ptyd や fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。workbench の同期 method は `createRunspace` / `removeRunspace` / `moveTab` / `openTab`、commit 後の async は `startTerminalSession` / `writeTerminalSession` / `terminateTerminalSessions`（#22）。`Workbench` に出ているのはこの 7 つと、reconcile を待つ `ready()`。他の domain が呼ばない書き込みは、同じ形（第 1 引数が tx）の module 内の関数として procedure の handler から呼び、`Workbench` には出さない。`createRunspace(tx, { cwd })` が作るのは Tab の無い所有された Runspace で、`removeRunspace(tx, id, { spare? }) → terminalSessionId[]` はそれを消し、中の Tab の Terminal Session を返す。`spare` の Terminal Session の Tab が中にあれば、Runspace を消さずに所有を解いてその Tab だけを残し（pin されていれば pin のまま）、ほかの Tab の Terminal Session を返す（ADR-0012）。返した Terminal Session は、呼び手が commit の後に `terminateTerminalSessions(ids)` で終わらせる。ptyd の Terminate は冪等で、終わった session に送っても失敗しない。
 
 `openTab` が書く `starting` の Terminal Session の行は、workbench の reconcile が終わってから書く。reconcile の途中で書くと、ptyd の List に無い行として lost にされる。workbench の handler は、行に書く shell を reconcile を待ってから返す `shellWhenReady(workbench)` を transaction の前に await する。他の domain は transaction の前に `workbench.ready()` を await してから、`openTab(tx, { runspaceId, cwd? }) → { tabId, terminalSessionId }` を呼ぶ。`openTab` は shell を自分で埋め、`{ type: "layout" }` を publish する。`moveTab(tx, tabId, runspaceId)` は Tab を Runspace の末尾へ移し（`tab.move` と同じ規則）、`{ type: "layout" }` を publish する。`writeTerminalSession(id, data)` は ptyd に Write を送る。ptyd は attach していない接続からの Write も通すので、webview が Tab を表示していなくても打てる。
 
@@ -138,7 +138,7 @@ package ごとに in-memory の SQLite に自分の migration を当てる（tas
 
 - workbench の ptyd は `packages/workbench/src/fake-ptyd.ts` に差し替える。fake は `$home/ptyd.sock` で NDJSON を話し、List の中身を台本にし、Exit を押し込み、届いた Reap と Terminate を記録する。本物の ptyd は CI の ts job に無く、Exit と Created の競合も決まった順で起こせないため。home は `mkdtemp(tmpdir())` で短くする（socket の path の上限は 104 byte）。
 - task の GitHub は `packages/task/src/fake-github.ts` に差し替える。fake は GraphQL の `repository { issue(number:) }` の alias だけを話し、届いた request を記録し、repo ごとの失敗、未認証、応答の保留を起こせる。CLI のテストの Task は `gh auth token` が失敗する GitHub を持ち、本物の GitHub に届かない。
-- task と CLI のテストの Workbench は、ptyd に送る口（`ready`・`startTerminalSession`・`writeTerminalSession`）を `spyOn` で記録だけに差し替える。fake の ptyd は workbench の entry の外にあり、他の package から import できないため。DB と `openTab` は本物を通す。
+- task と CLI のテストの Workbench は、ptyd に送る口（`ready`・`startTerminalSession`・`writeTerminalSession`・`terminateTerminalSessions`）を `spyOn` で記録だけに差し替える。fake の ptyd は workbench の entry の外にあり、他の package から import できないため。DB と `openTab` は本物を通す。
 - task の ghq は `packages/task/src/fake-ghq.ts` に差し替える。CI の ts job に ghq は無い。fake は一時 directory の `origins/<owner>/<repo>` を origin（default branch は main）にし、`get` でそれを clone して記録する。Bench の準備は本物の git で確かめる。CLI のテストの Task は失敗する ghq を持つ。
 - setup の 600 秒の timeout は、`setTimeout` を `spyOn` してその callback を捕まえ、手で呼ぶ。
 - 一定の間隔で走る処理は、`setInterval` を `spyOn` で捕まえ、間隔を確かめてから callback を手で呼ぶ。Bun の `jest.useFakeTimers()` は `Bun.sleep` と `setTimeout` も止め、一部の timer だけを偽にできないので、HTTP の応答を待つテストが進まなくなる。
@@ -222,7 +222,7 @@ contract を走査するテストを 1 本置き、description と output が全
 - URL を開くのは webview から plugin-opener の `openUrl` で行う（http(s)・mailto・tel）。
 - workbench の ui は Task の要素を出す場所を 2 つの slot として props で受け、apps/desktop が `@tania/task/ui` の component をはめる。workbench の ui は Task を import しない（ADR-0005）。
   - `renderRunspaceLabel(runspaceId)`: Bench のラベル `<repo>#<n> <title>`。準備中・準備失敗のときだけその語を添える。workbench は所有された Runspace にだけ呼び、null なら普段の title を出す。task の ui は `task.bench.list`（`{ runspaceId, ref, title, setupState }[]`）と `task.changes` で描き直す。
-  - `tabMenuItems(tab, close)`: Tab のメニューの「New shell here」と「Terminate」の間に出す項目。`tab` は `{ id, terminalSessionId, liveAgentSessionId }` で、`liveAgentSessionId` は Terminal Session の live な Agent Session（無ければ null）。task の ui は workbench の client を持たないので、Agent Session は workbench の ui が引いて渡す。`close` はメニューを閉じる。task の ui はメニューを開くたびに `task.list` を読み、`tab` の Agent Session がどこかの Task の `liveRuns` にあれば何も出さない。無ければ区切り線と「Attach to Task…」を出し、選ぶと picker を開く。picker は open な Task を `tracked_at` の新しい順に並べ、`<repo>#<n> <title>` と表示状態（CLI の STATE の 1 マスと同じ形）を出し、選ぶと `task.attach` を呼ぶ。失敗は toast で 1 行出す。
+  - `tabMenuItems(tab, close)`: Tab のメニューの「New shell here」と「Terminate」の間に出す項目。`tab` は `{ id, terminalSessionId }`。`close` はメニューを閉じる。task の ui はメニューを開くたびに `task.list` と `task.current({ terminalSessionId })` を読み、current の `source` が `run`（Tab の claude がどこかの Task の Run）なら何も出さない。current は closed な Task の Run も引くので、close を頼んだ claude が残った Tab にも出さない。NOT_FOUND は Run でも Bench でもない Tab なので出す。それ以外なら区切り線と「Attach to Task…」を出し、選ぶと picker を開く。picker は open な Task を `tracked_at` の新しい順に並べ、`<repo>#<n> <title>` と表示状態（CLI の STATE の 1 マスと同じ形）を出し、選ぶと `task.attach` を呼ぶ。失敗は toast で 1 行出す。
   - picker はメニューの外へ portal で出るので、`@tania/ui` の `PopoverMenu` は、どのメニューの中での押下と scroll も外側として扱わない。開いているメニューは、そのメニューとそこから開いたメニューだけだから。
 - Tailwind の `@source` に `packages/*/src/ui/**/*.{ts,tsx}` と `packages/ui/src` を足す。glob を含む path は file の pattern として読まれるので、directory で止めると何も拾わない。
 - `src-tauri/` は Shell。Backend の監督（ADR-0007）、terminal の中継、OS への窓口だけを持つ。窓口は通知（ADR-0013）、画像の clipboard、plugin-opener、drag-drop の event。custom command は terminal の attach / detach / write / resize の 4 本（ptyd は spawn しない。ADR-0011）、`clipboard_write_image`、`backend_endpoint`、`backend_restart` の 7 本。
@@ -278,6 +278,7 @@ changes                    → { type: "layout" } | { type: "terminalSession", i
 
 - `runspace.create { cwd?, rows, cols } → { runspaceId, tab }` は、Runspace・Tab・`starting` の Terminal Session を 1 transaction で作り、commit 後に Create する（`tab.open` と同じ形）。cwd を省けば `$HOME`。空の Runspace を作ってから `tab.open` を呼ぶ 2 段にすると、間で webview の reload や Backend の再起動が起きたときに空の Runspace が残り、消す規則が無いため。
 - `tab.open` の cwd を省けば、新しい Terminal Session は Runspace の cwd で始める。reattach の Tab は Terminal Session の cwd を持ち、OSC 7 の `tab.setCwd` で追いつく。
+- Task の close の後に残った Runspace と Tab の cwd は、消えた worktree を指すことがある。ptyd は cwd が directory でなければ shell を `$HOME` で起こす（portable-pty の `CommandBuilder` がそうする）ので、Backend は cwd を確かめずに渡す。Tab の cwd は OSC 7 で追いつく。
 - `tab.close` と `tab.move` は、Tab が抜けて 0 になった所有されていない Runspace を同じ transaction で消す。CLI の Attach のように webview の無い経路でも、空の Runspace が残らない。所有された Runspace は 0 になっても残す。
 - layout が空になったら、webview が `runspace.create` で 1 つ作る（monica の `initialState()`）。
 - webview は header の Tab を sidebar の Runspace の行に drop すると、`tab.move` でその Runspace の末尾へ移す（monica に無い操作）。
@@ -470,6 +471,9 @@ run         { ref, inPlace?, force? } → { ref, cwd, mode, benchCreated, warnin
 current     { terminalSessionId? } → { ref, title, displayState, agentSessionId, source }   cli
 attach      { ref, terminalSessionId? } → { ref, title, benchCreated, runCreated,               cli
               agentSessionId }
+close       { ref, force?, terminalSessionId? } → { ref, removedWorktree, deletedBranch,        cli
+              spared, warnings }  errors: CLOSE_REFUSED { reasons }
+reopen      { ref } → { ref, title, warnings }                                               cli
 bench.list  → { runspaceId, ref, title, setupState }[]
 changes     → { type: "task", ref } | { type: "synced" }
 ```
@@ -532,6 +536,23 @@ changes     → { type: "task", ref } | { type: "synced" }
 - open な Blocker があれば、`.errors()` で宣言した `BLOCKED`（`data.blockers` に ref の一覧）で断る。`--force` なら越える。gate を通ったら Bench を確保して準備する（「Bench」の節。CLI は準備を待つ）。
 - `workbench.ready()` を待ってから、tx で `openTab` → commit → `startTerminalSession`（24×80。表示されていない Tab の shell は attach の resize で追いつく）→ すぐに `claude\r`（resume なら `claude --resume '<id>'\r`）を write して返る。shell の起動は待たない。起動前に書いた入力が捨てられないことは #13 で確かめた。Tab は前面に出さない。
 - cwd は、新しい Run なら Bench の cwd、resume ならその Agent Session の cwd（その directory が無ければ Bench の cwd）。Agent Session の id は hook の payload から来るので、single quote で囲んで打つ。
+
+### close と reopen
+
+`GLOSSARY.md` の Bench と、ADR-0012 の close の順序。
+
+- `close` は Task を引く（未 track は `NOT_FOUND`、closed は `BAD_REQUEST`）。Bench が準備中なら、`--force` でも `CONFLICT` で断る。準備は worktree と Bench の行を書き続け、走っている準備は reopen の後の `run` にも待たれるため。
+- Task を sync（5 秒。`--force` でも sync）してから、行の id で引き直す。GitHub に届かなければ手元の写しで続け、`warnings` に載せる（`run` と同じ `syncOrUseCopy`）。
+- guard は当たったものをすべて集め、`.errors()` で宣言した `CLOSE_REFUSED`（`data.reasons`）で返す。`--force` なら見ない。
+  - ActiveRun: Task の live な Run。呼び手の Terminal Session の Agent Session の Run は除く。Bench が無くても見る。reopen の前に close を頼んだ claude が残っていることがあるため。
+  - UncommittedChanges（worktree の Bench だけ）: `git -C <worktree> status --porcelain --untracked-files=normal` が空でない。untracked を含め、ignored は含めない。worktree が無ければ当たらない。
+  - UnpublishedCommits（worktree の Bench だけ）: `git -C <checkout> rev-list --max-count=1 refs/heads/<branch> --not --remotes` が commit を返す。fetch しないので、push 済みなら merge されていなくても止めない。branch が無ければ当たらない。
+- checkout は、worktree があればその `--git-common-dir` の親を使う。repo の改名の後も、作った時の checkout に当たる。worktree が無ければ今の名前の ghq の checkout を使い、それも無ければ git は何もしない。
+- worktree の Bench は `git -C <checkout> worktree remove --force <path>` → `git -C <checkout> branch -D <branch>` を実行する。path が消えていれば、その登録だけを `worktree remove --force` で外す（失敗は無視する）。消えた worktree の登録が残っていると、その branch を消せないため。`prune` は関係の無い登録まで外すので使わない（「Bench」の節）。git か ghq が失敗したら `PRECONDITION_FAILED` で、DB を何も変えずに止まる。in_place の Bench は checkout も branch も触らない。
+- tx で Task を引き直し（閉じられていれば `BAD_REQUEST`、Bench が替わっているか準備中なら `CONFLICT`）、`closed_at` を入れ、`bench` の行を消し、`removeRunspace(tx, runspaceId, { spare: 呼び手の terminalSessionId })` を呼ぶ。output の `spared` は Runspace が残ったかどうか。commit の後に `{ type: "task", ref }` で知らせ、返った Terminal Session を `terminateTerminalSessions` で終わらせる。
+- Run の行は残す。close を頼んだ claude は、終わるまで closed な Task の Run のままで、`current` もその Task を返す。
+- CLI は拒否を、1 行目の `CLOSE_REFUSED: <ref> stays open:`、理由を 1 行ずつ、最後の `pass --force to close anyway` で出し、exit 1 にする。Skill は stderr の 1 行目で失敗を読むので、1 行目は `CODE: message` の形を保つ。
+- `reopen` は closed な Task だけを受ける（open は `BAD_REQUEST`）。sync（5 秒。届かなければ警告）してから `closed_at` を NULL に戻し、`{ type: "task", ref }` で知らせる。Bench は作らないので、表示状態は `not_started`（Issue が closed なら `issue_closed`）。次の `run` か `attach` が Bench を作り直す。`run` は close で消えた branch `issue-<n>` を origin の default branch から作り直し、Bench より前の Run は resume しない（「Run の起動」の節）。
 
 ### sync
 

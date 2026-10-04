@@ -10,9 +10,7 @@ import { findOpenTask } from "./open-task.ts";
 import { formatRef, parseRef } from "./ref.ts";
 import { runAgentSessionsByTask } from "./run.ts";
 import { issue, run } from "./schema.ts";
-import { type SyncDeps, syncTask } from "./sync.ts";
-
-const SYNC_BEFORE_RUN_TIMEOUT_MS = 5_000;
+import { type SyncDeps, syncOrUseCopy } from "./sync.ts";
 
 // 表示されていない Tab の shell は決まった大きさで起こし、attach の resize で追いつかせる。
 const TAB_SIZE = { rows: 24, cols: 80 };
@@ -94,7 +92,7 @@ async function newRun(
   { inPlace, force }: { inPlace?: boolean; force?: boolean },
   errors: ORPCErrorConstructorMap<typeof runErrors>,
 ): Promise<Launch> {
-  const syncWarnings = await syncBeforeRun(deps, forIssue);
+  const syncWarnings = await syncOrUseCopy(deps, forIssue);
   // sync は repo の改名を写すので、名前でなく行の id で引き直す。
   const synced = findOpenTask(deps.db, eq(issue.id, forIssue.id), formatRef(forIssue));
   const ref = formatRef(synced.issue);
@@ -116,17 +114,6 @@ async function newRun(
     tabCwd: prepared.bench.cwd,
     resumed: null,
   };
-}
-
-// GitHub に届かなくても run は止めず、手元の写しで続けたことを警告に残す。
-async function syncBeforeRun(deps: SyncDeps, copy: Issue): Promise<string[]> {
-  const { missing, failures } = await syncTask(deps, copy, SYNC_BEFORE_RUN_TIMEOUT_MS);
-  const reasons = [...failures, ...missing.map((ref) => `GitHub did not return ${ref}`)];
-  if (reasons.length === 0) return [];
-  const minutes = Math.floor((Date.now() - copy.syncedAt.getTime()) / 60_000);
-  return [
-    `could not sync ${formatRef(copy)} from GitHub (${reasons.join("; ")}); using the copy from ${minutes} ${minutes === 1 ? "minute" : "minutes"} ago`,
-  ];
 }
 
 async function openClaudeTab({ db, workbench }: BenchDeps, launch: Launch) {

@@ -275,7 +275,9 @@ test("the Workbench exposes events, start, stop and only the methods other domai
     | "createRunspace"
     | "openTab"
     | "moveTab"
+    | "removeRunspace"
     | "startTerminalSession"
     | "writeTerminalSession"
+    | "terminateTerminalSessions"
   >();
 });

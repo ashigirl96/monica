@@ -93,6 +93,80 @@ test("moveTab moves a Tab to the end of another Runspace, drops its pin, removes
   expect(changes).toEqual([{ type: "layout" }]);
 });
 
+test("removeRunspace removes the owned Runspace with all its Tabs, pinned ones too, returns their Terminal Sessions, and signals the layout", async () => {
+  const { db, workbench, client, owned } = setupWithOwned();
+  const plain = await client.runspace.create(size);
+  const first = await client.tab.open({ runspaceId: owned, ...size });
+  const pinned = await client.tab.open({ runspaceId: owned, ...size });
+  await client.tab.pin({ id: pinned.id });
+  const changes: WorkbenchChange[] = [];
+  workbench.events.subscribe("change", (change) => changes.push(change));
+
+  const removed = db.transaction((tx) => workbench.removeRunspace(tx, owned));
+
+  expect(removed).toEqual([first.terminalSessionId, pinned.terminalSessionId]);
+  expect((await client.layout.get()).runspaces).toMatchObject([
+    { id: plain.runspaceId, sortOrder: 0 },
+  ]);
+  expect(changes).toEqual([{ type: "layout" }]);
+});
+
+test("removeRunspace keeps the spared Tab, pinned or not, in the Runspace it no longer owns, and returns the other Tabs' Terminal Sessions", async () => {
+  const { db, workbench, client, owned } = setupWithOwned();
+  const other = await client.tab.open({ runspaceId: owned, ...size });
+  const spared = await client.tab.open({ runspaceId: owned, ...size });
+  await client.tab.pin({ id: spared.id });
+
+  const removed = db.transaction((tx) =>
+    workbench.removeRunspace(tx, owned, { spare: spared.terminalSessionId }),
+  );
+
+  expect(removed).toEqual([other.terminalSessionId]);
+  expect((await client.layout.get()).runspaces).toEqual([
+    {
+      id: owned,
+      cwd: "/work/bench",
+      sortOrder: 0,
+      owned: false,
+      tabs: [{ ...spared, sortOrder: 0, pinned: true }],
+    },
+  ]);
+});
+
+test("the Runspace a spared Tab stays in goes away with its last Tab, like any other", async () => {
+  const { db, workbench, client, owned } = setupWithOwned();
+  const spared = await client.tab.open({ runspaceId: owned, ...size });
+  db.transaction((tx) => workbench.removeRunspace(tx, owned, { spare: spared.terminalSessionId }));
+
+  await client.tab.close({ id: spared.id });
+
+  expect((await client.layout.get()).runspaces).toEqual([]);
+});
+
+test("removeRunspace removes the whole Runspace when the spared Terminal Session is in none of its Tabs", async () => {
+  const { db, workbench, client, owned } = setupWithOwned();
+  const inBench = await client.tab.open({ runspaceId: owned, ...size });
+  const elsewhere = await client.runspace.create(size);
+
+  const removed = db.transaction((tx) =>
+    workbench.removeRunspace(tx, owned, { spare: elsewhere.tab.terminalSessionId }),
+  );
+
+  expect(removed).toEqual([inBench.terminalSessionId]);
+  expect((await client.layout.get()).runspaces.map((r) => r.id)).toEqual([elsewhere.runspaceId]);
+});
+
+test("terminateTerminalSessions asks ptyd to terminate each Terminal Session", async () => {
+  const { ptyd, workbench } = setup();
+
+  await workbench.terminateTerminalSessions(["ts-a", "ts-b"]);
+
+  expect(ptyd.receivedAll((op) => op.op === "terminate")).toEqual([
+    { op: "terminate", session_id: "ts-a" },
+    { op: "terminate", session_id: "ts-b" },
+  ]);
+});
+
 test("writeTerminalSession fails when ptyd refuses the write", async () => {
   const { ptyd, workbench } = setup();
   ptyd.writeError = "no session ts-gone";

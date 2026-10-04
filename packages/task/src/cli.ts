@@ -1,9 +1,11 @@
 import { table } from "@tania/ui/table";
 import type {
   AttachOutput,
+  CloseOutput,
   CurrentOutput,
   ListItem,
   ListOutput,
+  ReopenOutput,
   RunOutput,
   SyncOutput,
   TrackOutput,
@@ -29,7 +31,7 @@ export const formatters = {
     return [
       benchCreated ? `opened the Bench of ${ref} at ${cwd}` : `the Bench of ${ref} is at ${cwd}`,
       resumed ? `resumed claude ${resumed} in a new Tab` : "started claude in a new Tab",
-      ...warnings.map((warning) => `warning: ${warning}`),
+      ...warningLines(warnings),
     ].join("\n");
   },
   attach({ ref, title, benchCreated, runCreated, agentSessionId }: AttachOutput): string {
@@ -40,6 +42,18 @@ export const formatters = {
         ? `no claude runs in this Tab; the one you start here becomes a Run of ${ref}`
         : `claude ${agentSessionId} ${runCreated ? "is now" : "is"} a Run of ${ref}`,
     ].join("\n");
+  },
+  close({ ref, removedWorktree, deletedBranch, spared, warnings }: CloseOutput): string {
+    return [
+      `closed ${ref}`,
+      ...(removedWorktree ? [`removed the worktree ${removedWorktree}`] : []),
+      ...(deletedBranch ? [`deleted the branch ${deletedBranch}`] : []),
+      ...(spared ? ["this Tab stays, in a Runspace that is no longer a Bench"] : []),
+      ...warningLines(warnings),
+    ].join("\n");
+  },
+  reopen({ ref, title, warnings }: ReopenOutput): string {
+    return [`reopened ${ref} ${title}`, ...warningLines(warnings)].join("\n");
   },
   current({ ref, title, displayState }: CurrentOutput): string {
     return table([
@@ -82,4 +96,8 @@ function blockedBy({ ref, blockers }: ListItem): string {
 
 function repoOf(ref: string): string {
   return ref.slice(0, ref.indexOf("#"));
+}
+
+function warningLines(warnings: string[]): string[] {
+  return warnings.map((warning) => `warning: ${warning}`);
 }
