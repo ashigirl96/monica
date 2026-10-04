@@ -240,6 +240,33 @@ test("task current names the Task of the Bench the Tab is in, given by TANIA_TER
   });
 });
 
+test("task attach moves the Tab given by TANIA_TERMINAL_SESSION_ID into the Bench, opening it in place", async () => {
+  const { db, connect } = inPlaceBench();
+  db.insert(runspace).values({ id: "rs-plain", cwd: "/work", sortOrder: 0 }).run();
+  db.insert(tab)
+    .values({
+      id: "tab-a",
+      runspaceId: "rs-plain",
+      cwd: "/work",
+      sortOrder: 0,
+      terminalSessionId: "ts-a",
+    })
+    .run();
+
+  const result = await tania(["task", "attach", "acme/app#12"], connect, {
+    terminalSessionId: "ts-a",
+  });
+
+  expect(result).toEqual({
+    code: 0,
+    stdout:
+      "opened the Bench of acme/app#12 in place\n" +
+      "this Tab is in the Bench of acme/app#12 Ship it\n" +
+      "no claude runs in this Tab; the one you start here becomes a Run of acme/app#12\n",
+    stderr: "",
+  });
+});
+
 test("task current exits 1 outside a Tab, and takes no flag for the Terminal Session", async () => {
   const { connect } = backendWithBench();
 

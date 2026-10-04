@@ -137,6 +137,23 @@ test("list writes the state of a Task with live Runs with its reason, tool, age 
   ]);
 });
 
+test("attach names the claude of the Tab and whether attach made it a Run", () => {
+  const output = {
+    ref: "acme/app#12",
+    title: "Ship it",
+    benchCreated: false,
+    runCreated: true,
+    agentSessionId: "s-1",
+  };
+
+  expect(formatters.attach(output)).toBe(
+    "this Tab is in the Bench of acme/app#12 Ship it\nclaude s-1 is now a Run of acme/app#12",
+  );
+  expect(formatters.attach({ ...output, runCreated: false })).toBe(
+    "this Tab is in the Bench of acme/app#12 Ship it\nclaude s-1 is a Run of acme/app#12",
+  );
+});
+
 test("current writes the state the same way as list", () => {
   const text = formatters.current({
     ref: "acme/app#12",
