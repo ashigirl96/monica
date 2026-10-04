@@ -7,12 +7,12 @@ import type { AttachOutput } from "./contract.ts";
 import { isIssue } from "./copy.ts";
 import { callerTerminalSession } from "./current.ts";
 import { findOpenTask } from "./open-task.ts";
-import { checkoutOf, messageOf } from "./prepare.ts";
-import { formatRef, parseRef } from "./ref.ts";
+import { checkoutUnder, type Ghq, messageOf } from "./prepare.ts";
+import { formatRef, type IssueRef, parseRef } from "./ref.ts";
 import { insertRuns, liveAgentSession } from "./run.ts";
 import { issue, run } from "./schema.ts";
 
-type Checkout = { path: string } | { missing: string };
+type GhqRoot = { path: string } | { error: string };
 
 export async function attachTab(
   deps: BenchDeps,
@@ -22,8 +22,8 @@ export async function attachTab(
   const terminalSessionId = callerTerminalSession(input.terminalSessionId);
   const asked = parseRef(input.ref);
   const requested = findOpenTask(db, isIssue(asked), formatRef(asked));
-  // ghq root は async なので transaction の前に引き、その間に run が Bench を作っていればそちらを使う。
-  const checkout = requested.bench ? null : await checkoutOnDisk(deps, requested.issue);
+  // ghq root は async なので transaction の前に引く。待つ間に run が Bench を作ることも、sync が repo の改名を写すこともある。
+  const ghqRoot = requested.bench ? null : await lookUpGhqRoot(deps.ghq);
   const attached = db.transaction((tx): AttachOutput & { moved: boolean } => {
     const callerTab = tx
       .select({ id: tab.id, runspaceId: tab.runspaceId })
@@ -56,11 +56,8 @@ export async function attachTab(
     const title = found.issue.title;
     let target = found.bench;
     if (!target) {
-      if (!checkout || "missing" in checkout) {
-        throw new ORPCError("BAD_REQUEST", { message: checkout?.missing });
-      }
       target = insertBench(tx, workbench, found.issue, {
-        cwd: checkout.path,
+        cwd: checkoutOnDisk(ghqRoot, found.issue),
         mode: "in_place",
         setupState: "ready",
       });
@@ -91,19 +88,26 @@ export async function attachTab(
   return output;
 }
 
+function lookUpGhqRoot(ghq: Ghq): Promise<GhqRoot> {
+  return ghq.root().then(
+    (path) => ({ path }),
+    (error: unknown) => ({ error: messageOf(error) }),
+  );
+}
+
 // attach は network を使わないので、checkout が無くても clone しない。
-async function checkoutOnDisk(
-  { ghq }: BenchDeps,
-  forIssue: { repo: string; number: number },
-): Promise<Checkout> {
+function checkoutOnDisk(ghqRoot: GhqRoot | null, forIssue: IssueRef): string {
   const ref = formatRef(forIssue);
-  try {
-    const path = await checkoutOf(ghq, forIssue.repo);
-    if (existsSync(path)) return { path };
-    return {
-      missing: `${ref} has no Bench and its Repo is not cloned at ${path}; attach opens the Bench in place without cloning, so run \`ghq get ${forIssue.repo}\` first`,
-    };
-  } catch (error) {
-    return { missing: `could not find the checkout of ${ref}: ${messageOf(error)}` };
+  if (!ghqRoot || "error" in ghqRoot) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `could not find the checkout of ${ref}: ${ghqRoot?.error ?? "ghq root was not looked up"}`,
+    });
   }
+  const path = checkoutUnder(ghqRoot.path, forIssue.repo);
+  if (!existsSync(path)) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `${ref} has no Bench and its Repo is not cloned at ${path}; attach opens the Bench in place without cloning, so run \`ghq get ${forIssue.repo}\` first`,
+    });
+  }
+  return path;
 }

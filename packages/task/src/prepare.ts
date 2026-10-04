@@ -31,8 +31,10 @@ export const worktreeOf = (home: string, ref: IssueRef) =>
 export const setupLogOf = (home: string, ref: IssueRef) =>
   join(home, "logs/setup", ref.repo, `${branchOf(ref)}.log`);
 
+export const checkoutUnder = (ghqRoot: string, repo: string) => join(ghqRoot, "github.com", repo);
+
 export async function checkoutOf(ghq: Ghq, repo: string): Promise<string> {
-  return join(await ghq.root(), "github.com", repo);
+  return checkoutUnder(await ghq.root(), repo);
 }
 
 /** 失敗は 1 行の理由を message に持つ Error で投げる。返すのは output の `warnings`。 */

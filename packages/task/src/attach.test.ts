@@ -189,6 +189,26 @@ test("attach opens the Bench of a Task that has none in place on the Repo's chec
   expect((await books.client.list({})).tasks[0]!.displayState).toEqual({ state: "ended" });
 });
 
+test("attach opens the Bench on the checkout of the Repo's new name when the Repo is renamed while it looks up ghq root", async () => {
+  const books = await trackedWithoutBench();
+  const renamed = books.ghq.checkout("acme/renamed");
+  mkdirSync(renamed, { recursive: true });
+  const root = await books.ghq.client.root();
+  let release: (() => void) | undefined;
+  spyOn(books.ghq.client, "root").mockImplementation(
+    () => new Promise((resolve) => (release = () => resolve(root))),
+  );
+  const outside = books.openTab(books.plainRunspace());
+
+  const attaching = books.client.attach({ ref, terminalSessionId: outside });
+  while (!release) await Bun.sleep(1);
+  books.db.update(issue).set({ repo: "acme/renamed" }).run();
+  release();
+
+  expect(await attaching).toMatchObject({ ref: "acme/renamed#12", benchCreated: true });
+  expect(books.db.select().from(bench).get()).toMatchObject({ cwd: renamed });
+});
+
 test("attach refuses a Task that has no Bench and whose Repo is not cloned, changing nothing", async () => {
   const books = await trackedWithoutBench();
   const plain = books.plainRunspace();
