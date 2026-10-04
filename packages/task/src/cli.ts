@@ -24,9 +24,10 @@ export const formatters = {
     }
     return lines.join("\n");
   },
-  run({ ref, cwd, benchCreated, warnings }: RunOutput): string {
+  run({ ref, cwd, benchCreated, resumed, warnings }: RunOutput): string {
     return [
       benchCreated ? `opened the Bench of ${ref} at ${cwd}` : `the Bench of ${ref} is at ${cwd}`,
+      resumed ? `resumed claude ${resumed} in a new Tab` : "started claude in a new Tab",
       ...warnings.map((warning) => `warning: ${warning}`),
     ].join("\n");
   },

@@ -4,7 +4,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { endAgentSessionsIn, reconcileAgentSessions } from "./agent-session.ts";
 import type { AgentSession, TerminalSession, WorkbenchChange } from "./contract.ts";
-import { createRunspace } from "./layout.ts";
+import { createRunspace, openTab } from "./layout.ts";
 import { shortPath } from "./paths.ts";
 import { shouldRespawn } from "./pin.ts";
 import { openDaemon, type PtydClient, type SessionInfo } from "./ptyd.ts";
@@ -25,7 +25,15 @@ export type Workbench = {
   events: EventPublisher<{ change: WorkbenchChange }>;
   start(): Promise<void>;
   stop(): void;
+  /** reconcile より先に書いた starting の行は lost にされるので、openTab の transaction の前に待つ。 */
+  ready(): Promise<void>;
   createRunspace(tx: Tx, input: { cwd: string }): string;
+  openTab(
+    tx: Tx,
+    input: { runspaceId: string; cwd?: string },
+  ): { tabId: string; terminalSessionId: string };
+  startTerminalSession(id: string, size: Size): Promise<void>;
+  writeTerminalSession(id: string, data: string): Promise<void>;
 };
 
 export type NotificationDeps = {
@@ -41,7 +49,7 @@ type Internals = NotificationDeps & {
   ready: () => Promise<PtydClient>;
 };
 
-// Workbench の型は events / start / stop だけに保ち、ptyd の接続などの中身は Workbench を key にここへ置く。
+// Workbench の型は他の domain が呼ぶものだけに保ち、ptyd の接続などの中身は Workbench を key にここへ置く。
 const internalsOf = new WeakMap<Workbench, Internals>();
 
 function internals(workbench: Workbench): Internals {
@@ -190,10 +198,28 @@ export function createWorkbench(
       stopping = true;
       client?.close();
     },
+    async ready() {
+      await ready();
+    },
     createRunspace(tx, { cwd }) {
       const id = createRunspace(tx, { cwd, owned: true });
       publish({ type: "layout" });
       return id;
+    },
+    openTab(tx, input) {
+      const opened = openTab(tx, { ...input, shell });
+      publish({ type: "layout" });
+      return { tabId: opened.id, terminalSessionId: opened.terminalSessionId };
+    },
+    startTerminalSession: (id, size) => startTerminalSession(workbench, id, size),
+    // ptyd は attach していない接続からの Write も通すので、webview が Tab を表示していなくても打てる。
+    async writeTerminalSession(id, data) {
+      const ptyd = await ready();
+      await ptyd.request({
+        op: "write",
+        session_id: id,
+        data: Buffer.from(data).toString("base64"),
+      });
     },
   };
   internalsOf.set(workbench, { db, home, shell, publish, ready, notify, nameAgentSession });

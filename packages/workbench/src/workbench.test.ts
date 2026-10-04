@@ -267,5 +267,14 @@ test("a live session only ptyd knows is adopted without a shell and listed", asy
 });
 
 test("the Workbench exposes events, start, stop and only the methods other domains call", () => {
-  expectTypeOf<keyof Workbench>().toEqualTypeOf<"events" | "start" | "stop" | "createRunspace">();
+  expectTypeOf<keyof Workbench>().toEqualTypeOf<
+    | "events"
+    | "start"
+    | "stop"
+    | "ready"
+    | "createRunspace"
+    | "openTab"
+    | "startTerminalSession"
+    | "writeTerminalSession"
+  >();
 });
