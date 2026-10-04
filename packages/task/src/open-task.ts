@@ -1,0 +1,23 @@
+import { ORPCError } from "@orpc/server";
+import type { Db } from "@tania/workbench/server";
+import { eq, type SQL } from "drizzle-orm";
+import { formatRef } from "./ref.ts";
+import { bench, issue, task } from "./schema.ts";
+
+export function findOpenTask(db: Pick<Db, "select">, where: SQL | undefined, asked: string) {
+  const found = db
+    .select({ task, issue, bench })
+    .from(task)
+    .innerJoin(issue, eq(issue.id, task.issueId))
+    .leftJoin(bench, eq(bench.taskIssueId, task.issueId))
+    .where(where)
+    .get();
+  if (!found) throw new ORPCError("NOT_FOUND", { message: `${asked} is not tracked` });
+  const ref = formatRef(found.issue);
+  if (found.task.closedAt) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `${ref} is closed, so run \`tania task reopen ${ref}\``,
+    });
+  }
+  return found;
+}

@@ -2,13 +2,14 @@ import { existsSync } from "node:fs";
 import { ORPCError, type ORPCErrorConstructorMap } from "@orpc/server";
 import { agentSession } from "@tania/workbench/schema";
 import type { Db } from "@tania/workbench/server";
-import { and, desc, eq, gte, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte } from "drizzle-orm";
 import { type Bench, type BenchDeps, type Issue, prepareBench, refuseInPlace } from "./bench.ts";
 import type { RunOutput, runErrors } from "./contract.ts";
 import { isIssue, openBlockersOf } from "./copy.ts";
+import { findOpenTask } from "./open-task.ts";
 import { formatRef, parseRef } from "./ref.ts";
 import { runAgentSessionsByTask } from "./run.ts";
-import { bench, issue, run, task } from "./schema.ts";
+import { issue, run } from "./schema.ts";
 import { type SyncDeps, syncTask } from "./sync.ts";
 
 const SYNC_BEFORE_RUN_TIMEOUT_MS = 5_000;
@@ -49,24 +50,6 @@ export async function runTask(
     ...opened,
     resumed: launch.resumed,
   };
-}
-
-function findOpenTask(db: Db, where: SQL | undefined, asked: string) {
-  const found = db
-    .select({ task, issue, bench })
-    .from(task)
-    .innerJoin(issue, eq(issue.id, task.issueId))
-    .leftJoin(bench, eq(bench.taskIssueId, task.issueId))
-    .where(where)
-    .get();
-  if (!found) throw new ORPCError("NOT_FOUND", { message: `${asked} is not tracked` });
-  const ref = formatRef(found.issue);
-  if (found.task.closedAt) {
-    throw new ORPCError("BAD_REQUEST", {
-      message: `${ref} is closed, so run \`tania task reopen ${ref}\``,
-    });
-  }
-  return found;
 }
 
 function refuseLiveRuns(db: Db, forIssue: Issue) {

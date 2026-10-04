@@ -4,6 +4,7 @@ import { lazy, Suspense, useEffect } from "react";
 import { WorkbenchHeader } from "./header.tsx";
 import { ResizeHandle } from "./resize-handle.tsx";
 import { type RenderRunspaceLabel, WorkbenchSidebar } from "./sidebar.tsx";
+import { TabContextMenu, type TabMenuItems } from "./tab-context-menu.tsx";
 import {
   reloadAgentSessionsAtom,
   reloadAtom,
@@ -48,13 +49,15 @@ function useBooks(client: WorkbenchClient | null) {
   }, [client, setClient, reload, reloadAgentSessions]);
 }
 
-// workbench は Task を import しないので、Bench のラベルは slot で受ける（ADR-0005）。
+// workbench は Task を import しないので、Bench のラベルと Tab のメニューの Task の項目は slot で受ける（ADR-0005）。
 export function Workbench({
   client,
   renderRunspaceLabel,
+  tabMenuItems,
 }: {
   client: WorkbenchClient | null;
   renderRunspaceLabel?: RenderRunspaceLabel;
+  tabMenuItems?: TabMenuItems;
 }) {
   useBooks(client);
   const store = useStore();
@@ -109,6 +112,7 @@ export function Workbench({
           data-tauri-drag-region
         >
           <WorkbenchHeader />
+          <TabContextMenu tabMenuItems={tabMenuItems} />
         </div>
         <div className="relative min-h-0 flex-1 p-2 pt-0" style={{ zoom: uiZoom }}>
           <div className="content-panel h-full overflow-hidden">

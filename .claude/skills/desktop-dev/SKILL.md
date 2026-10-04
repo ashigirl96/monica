@@ -48,6 +48,8 @@ dev の desktop は `TANIA_HOME` ごとに identifier と vite の port が分�
   (() => { const b = window.__taniaTerminals.get(tabId).buffer.active; const end = b.baseY + b.cursorY; return Array.from({ length: 10 }, (_, i) => b.getLine(end - 9 + i)?.translateToString(true)); })()
   ```
 - **Tab の切り替え**は、`[data-tab-id]` の button に `pointerdown` と `pointerup` を `dispatchEvent` する。Tab は pointerdown で切り替わるが、tauri-mcp の click は pointerdown を出さない。
+- **メニューの項目**（Tab のメニュー、そこから開く picker）は、項目に `pointerdown` を dispatch してから `click()` する。メニューは window の pointerdown で外側の押下を判定するので、pointerdown を出さない tauri-mcp の click ではその判定を通らない。
+- **Tab の drag**（header の Tab を sidebar の Runspace へ）は、Tab の button に `pointerdown`（`button: 0, buttons: 1`）、`document` に 5px を超えて動く `pointermove`（`buttons: 1`）、`[data-runspace-id]` の行に `pointerenter` と `pointerup` を、この順に dispatch する。drag は閾値を越えた pointermove で始まり、行の pointerup で `tab.move` を呼ぶ。
 - **端末の link**: 端末は WebGL で描くので、行の DOM は無い。座標を screenshot で読み、`document.elementFromPoint(x, y)` に `metaKey: true` の `mousemove` を送る。xterm は同じ cell への mousemove を無視するので、先に別の cell へ動かしてから狙う。link が付いたかは、見えている `.xterm-screen` の class に `xterm-cursor-pointer` があるかで分かる。⌘-click は、hover の後に `metaKey: true, buttons: 0` の `pointerdown` を送る。
 - **画像の drop**: OS の drag は起こせないので、`window.__TAURI__.event.emitTo({ kind: "Webview", label: "main" }, "tauri://drag-drop", { paths, position: { x, y } })` で Tauri の drop と同じ handler を動かす。キーボードの Ctrl+V で貼るのを確かめるときは、`osascript -e 'set the clipboard to (read (POSIX file "<png>") as «class PNGf»)'` で画像を clipboard に置く。
   - clipboard を上書きする前に、全形式を退避して、最後に戻す。`pbpaste` と `pbcopy` は文字しか運ばないので、ユーザーの画像や file が消える。

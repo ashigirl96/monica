@@ -102,9 +102,9 @@ export function nameAgentSession(db: Db, agentSessionId: string): string | null;
 
 - `events`: その domain の変更を知らせる in-process の publisher。
 - `start()` / `stop()`: 起動時と終了時の処理。workbench は ptyd への接続（無ければ spawn、版違いは入れ替え）と reconcile（ADR-0011）、task は起動時と 5 分おきの背景 sync（#18）、起動時に preparing のまま残った Bench を失敗にすることと、終了時に走っている setup の process group を kill すること。
-- 他の domain から呼ばれる書き込み: 第 1 引数に transaction（`db` でもよい）を取る**同期**の method。task は `db.transaction((tx) => { workbench.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。ptyd や fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。workbench の同期 method は `createRunspace` / `removeRunspace` / `moveTab` / `openTab`、commit 後の async は `startTerminalSession` / `writeTerminalSession` / `terminateTerminalSessions`（#22）。`Workbench` に出ているのは `createRunspace`・`openTab`・`startTerminalSession`・`writeTerminalSession` と、reconcile を待つ `ready()` で、ほかは Task v1 の slice が使うときに足す。足すまでは同じ形（第 1 引数が tx）の module 内の関数として procedure の handler から呼び、`Workbench` には出さない。`createRunspace(tx, { cwd })` が作るのは Tab の無い所有された Runspace で、`removeRunspace(tx, id, { spare? })` は `spare` の Tab だけを残して所有を解ける（ADR-0012）。
+- 他の domain から呼ばれる書き込み: 第 1 引数に transaction（`db` でもよい）を取る**同期**の method。task は `db.transaction((tx) => { workbench.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。ptyd や fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。workbench の同期 method は `createRunspace` / `removeRunspace` / `moveTab` / `openTab`、commit 後の async は `startTerminalSession` / `writeTerminalSession` / `terminateTerminalSessions`（#22）。`Workbench` に出ているのは `createRunspace`・`openTab`・`moveTab`・`startTerminalSession`・`writeTerminalSession` と、reconcile を待つ `ready()` で、ほかは Task v1 の slice が使うときに足す。足すまでは同じ形（第 1 引数が tx）の module 内の関数として procedure の handler から呼び、`Workbench` には出さない。`createRunspace(tx, { cwd })` が作るのは Tab の無い所有された Runspace で、`removeRunspace(tx, id, { spare? })` は `spare` の Tab だけを残して所有を解ける（ADR-0012）。
 
-`openTab` が書く `starting` の Terminal Session の行は、workbench の reconcile が終わってから書く。reconcile の途中で書くと、ptyd の List に無い行として lost にされる。workbench の handler は、行に書く shell を reconcile を待ってから返す `shellWhenReady(workbench)` を transaction の前に await する。他の domain は transaction の前に `workbench.ready()` を await してから、`openTab(tx, { runspaceId, cwd? }) → { tabId, terminalSessionId }` を呼ぶ。`openTab` は shell を自分で埋め、`{ type: "layout" }` を publish する。`writeTerminalSession(id, data)` は ptyd に Write を送る。ptyd は attach していない接続からの Write も通すので、webview が Tab を表示していなくても打てる。
+`openTab` が書く `starting` の Terminal Session の行は、workbench の reconcile が終わってから書く。reconcile の途中で書くと、ptyd の List に無い行として lost にされる。workbench の handler は、行に書く shell を reconcile を待ってから返す `shellWhenReady(workbench)` を transaction の前に await する。他の domain は transaction の前に `workbench.ready()` を await してから、`openTab(tx, { runspaceId, cwd? }) → { tabId, terminalSessionId }` を呼ぶ。`openTab` は shell を自分で埋め、`{ type: "layout" }` を publish する。`moveTab(tx, tabId, runspaceId)` は Tab を Runspace の末尾へ移し（`tab.move` と同じ規則）、`{ type: "layout" }` を publish する。`writeTerminalSession(id, data)` は ptyd に Write を送る。ptyd は attach していない接続からの Write も通すので、webview が Tab を表示していなくても打てる。
 
 他の domain から呼ばれない処理は router の handler の中に書いてよい。
 
@@ -220,7 +220,10 @@ contract を走査するテストを 1 本置き、description と output が全
   - `editor.resolve({ cwd, candidates })` → `(string | null)[]`: `~` を展開し、相対なら cwd に join して `realpath` する。失敗したら末尾の `:<数字>` を最大 2 つ外して再試行する。terminal の link 検出が hover のたびに 1 行分をまとめて呼び、null の候補は link にしない。
   - `editor.open({ path })` → `void`: `/usr/bin/open -a Zed <path>`。Zed は固定で、line:col は渡さない。webview は失敗を握りつぶす。
 - URL を開くのは webview から plugin-opener の `openUrl` で行う（http(s)・mailto・tel）。
-- workbench の ui は Task の要素を出す場所を 2 つの slot として props で受け、apps/desktop が `@tania/task/ui` の component をはめる（`tabMenuItems` は slice 4 が足す）。`renderRunspaceLabel(runspaceId)`（Bench のラベル `<repo>#<n> <title>`、準備中・準備失敗のときだけその語を添える。workbench は所有された Runspace にだけ呼び、null なら普段の title を出す）と `tabMenuItems(tab)`（「Attach to Task…」の picker）。task の ui は `task.bench.list`（`{ runspaceId, ref, title, setupState }[]`）と `task.changes` で描き直す。workbench の ui は Task を import しない（ADR-0005）。
+- workbench の ui は Task の要素を出す場所を 2 つの slot として props で受け、apps/desktop が `@tania/task/ui` の component をはめる。workbench の ui は Task を import しない（ADR-0005）。
+  - `renderRunspaceLabel(runspaceId)`: Bench のラベル `<repo>#<n> <title>`。準備中・準備失敗のときだけその語を添える。workbench は所有された Runspace にだけ呼び、null なら普段の title を出す。task の ui は `task.bench.list`（`{ runspaceId, ref, title, setupState }[]`）と `task.changes` で描き直す。
+  - `tabMenuItems(tab, close)`: Tab のメニューの「New shell here」と「Terminate」の間に出す項目。`tab` は `{ id, terminalSessionId, liveAgentSessionId }` で、`liveAgentSessionId` は Terminal Session の live な Agent Session（無ければ null）。task の ui は workbench の client を持たないので、Agent Session は workbench の ui が引いて渡す。`close` はメニューを閉じる。task の ui はメニューを開くたびに `task.list` を読み、`tab` の Agent Session がどこかの Task の `liveRuns` にあれば何も出さない。無ければ区切り線と「Attach to Task…」を出し、選ぶと picker を開く。picker は open な Task を `tracked_at` の新しい順に並べ、`<repo>#<n> <title>` と表示状態（CLI の STATE の 1 マスと同じ形）を出し、選ぶと `task.attach` を呼ぶ。失敗は toast で 1 行出す。
+  - picker はメニューの外へ portal で出るので、`@tania/ui` の `PopoverMenu` は、どのメニューの中での押下と scroll も外側として扱わない。開いているメニューは、そのメニューとそこから開いたメニューだけだから。
 - Tailwind の `@source` に `packages/*/src/ui/**/*.{ts,tsx}` と `packages/ui/src` を足す。glob を含む path は file の pattern として読まれるので、directory で止めると何も拾わない。
 - `src-tauri/` は Shell。Backend の監督（ADR-0007）、terminal の中継、OS への窓口だけを持つ。窓口は通知（ADR-0013）、画像の clipboard、plugin-opener、drag-drop の event。custom command は terminal の attach / detach / write / resize の 4 本（ptyd は spawn しない。ADR-0011）、`clipboard_write_image`、`backend_endpoint`、`backend_restart` の 7 本。
 - 窓は monica どおり title bar を webview に重ね（`titleBarStyle: "Overlay"`、`hiddenTitle`、`trafficLightPosition { x: 16, y: 22 }`）、`transparent` と `windowEffects: sidebar` で背後を透かす（`transparent` には `macOSPrivateApi` と tauri の `macos-private-api` feature が要る）。webview は信号機の分を `@tania/ui` の `TRAFFIC_LIGHT_ZONE_*` で空け、sidebar の見出しと Tab の帯を `data-tauri-drag-region`（`core:window:allow-start-dragging`）にする。
@@ -277,7 +280,8 @@ changes                    → { type: "layout" } | { type: "terminalSession", i
 - `tab.open` の cwd を省けば、新しい Terminal Session は Runspace の cwd で始める。reattach の Tab は Terminal Session の cwd を持ち、OSC 7 の `tab.setCwd` で追いつく。
 - `tab.close` と `tab.move` は、Tab が抜けて 0 になった所有されていない Runspace を同じ transaction で消す。CLI の Attach のように webview の無い経路でも、空の Runspace が残らない。所有された Runspace は 0 になっても残す。
 - layout が空になったら、webview が `runspace.create` で 1 つ作る（monica の `initialState()`）。
-- webview は header の Tab を sidebar の Runspace の行に drop すると、`tab.move` でその Runspace の末尾へ移す（monica に無い操作）。手前に見えていた Tab なら、画面も移った先へついていく。
+- webview は header の Tab を sidebar の Runspace の行に drop すると、`tab.move` でその Runspace の末尾へ移す（monica に無い操作）。
+- 手前に見えていた Tab が、layout を読み直したら別の Runspace に居れば、画面も移った先へついていく。drop、pin の切り出し、Attach（CLI と picker）のどれで移っても同じ。CLI の `tania task attach` は手前の Tab で打つことが多く、ついていかないと打った端末が画面から消えるため。
 - shell が終わった Tab は webview が閉じる。接続中の Tab で Shell の Exit を受けたら、webview が `tab.close` を呼ぶ（monica どおり）。Backend は行を exited にするだけで、Tab を閉じない。exit の時点で接続していなかった Tab と、lost / failed の Tab は、overlay を出したまま `tab.respawn` か `tab.close` を待つ。pin された Tab は例外で、webview は閉じず、Backend が張り直す（「pin」の節）。
 
 ### pin
@@ -464,6 +468,8 @@ list        { closed? } → { tasks: ListItem[], backgroundSyncError: { at, mess
 run         { ref, inPlace?, force? } → { ref, cwd, mode, benchCreated, warnings,               cli
               tabId, terminalSessionId, resumed }  errors: BLOCKED { blockers }
 current     { terminalSessionId? } → { ref, title, displayState, agentSessionId, source }   cli
+attach      { ref, terminalSessionId? } → { ref, title, benchCreated, runCreated,               cli
+              agentSessionId }
 bench.list  → { runspaceId, ref, title, setupState }[]
 changes     → { type: "task", ref } | { type: "synced" }
 ```
@@ -481,8 +487,25 @@ changes     → { type: "task", ref } | { type: "synced" }
 - task は `start()` で `workbench.events` を listener で購読し、`agentSession` の合図が来たらその Agent Session に不変条件を当てる。async iterator の購読は溜まった合図を 100 件で捨てるので使わない。workbench は transaction の中でも publish するので、読み直しは `queueMicrotask` で commit の後に回す。`stop()` で購読を外す。
 - `start()` は購読を張った後に、全件に 1 回当てる。Backend の更新より前から Bench の Tab に居た Agent Session と、commit から購読の microtask までの間に Backend が止まった分を拾う。Backend が居ない間の hook は CLI が捨てるので、不在中に始まった claude の行は起動後の最初の hook で生まれ、購読の経路で Run になる。
 - 全件は workbench の reconcile を待たずに当てるので、不在中に Terminal Session が終わった Agent Session も、終了になる前に Run になることがある。Backend が止まる前に Bench の Tab で動いていた agent なので、Task の Run にして差し支えない。
-- どちらの経路も `origin = started` で insert する。一度 Run になった Agent Session は、Tab がどこに移っても、終わるまでその Task の Run のまま（`run.agent_session_id` の UNIQUE が守る）。closed な Task には Bench が無いので、Run は生まれない。layout の合図（Tab の移動）で当てるのは slice 4。
+- どちらの経路も `origin = started` で insert する。一度 Run になった Agent Session は、Tab がどこに移っても、終わるまでその Task の Run のまま（`run.agent_session_id` の UNIQUE が守る）。closed な Task には Bench が無いので、Run は生まれない。
+- `layout` の合図（Tab の移動）でも、同じく commit の後に当てる。合図はどの Tab が動いたかを持たないので、Bench の Tab すべてに当てる。この経路で生まれる Run は Tab ごと Bench に入った Agent Session なので `origin = attached` にする（GUI の drag）。Bench の Tab で始まった claude の Run は、hook の commit と同じ同期の区間で積まれた `agentSession` の合図の microtask が先に作るので、この経路に横取りされない。
 - task のテストは、Tab と live な Terminal Session の行を fixture で書き、hook は workbench の `agentSession.recordHook` に渡す（`testing.ts` の `openTab` と `hook`）。Agent Session の行と合図を Backend と同じ経路で作るため。
+
+### Attach
+
+`GLOSSARY.md` の Attach。CLI の `tania task attach <ref>` は呼び手の Tab を、Tab のメニューの picker は選んだ Tab を、同じ `attach` で移す。GUI の drag は `tab.move` で移し、Run は「Run」の節の `layout` の経路が作る。
+
+- `terminalSessionId` が無ければ `BAD_REQUEST`、未 track は `NOT_FOUND`、closed な Task は `BAD_REQUEST`（`run` と同じ）。
+- 1 つの transaction で次の順に進める。
+  1. その Terminal Session を表示している Tab を引く。無ければ（detached、または帳簿に無い）`BAD_REQUEST`。
+  2. その Terminal Session の live な Agent Session が別の Task の Run なら `CONFLICT`。message にはその Task の ref を出す。GUI の drag はこれを断らず、Tab だけが移る。
+  3. Tab が既にその Bench に居れば、何も変えずに返す（`moveTab` は同じ Runspace でも末尾へ並べ替えるので呼ばない）。
+  4. Bench が無ければ、in_place の Bench を作る（`createRunspace` を含む）。cwd は Repo の checkout（`$(ghq root)/github.com/<owner>/<repo>`）で、setup は走らせず、`setup_state` は最初から `ready`（`prepared_at` は作った時刻）。checkout が無いか ghq root が引けなければ `BAD_REQUEST`。attach は network を使わないので clone しない。ghq root は async なので transaction の前に引き、transaction の中で Bench がまだ無いときだけ使う。待つ間に `run` が Bench を作っていれば、そちらに移す。checkout の path は transaction の中で引き直した repo の名前から作る。待つ間に sync が repo の改名を写すと、前に引いた名前の path は古い checkout を指すか、clone されていないことになるため。
+  5. `moveTab(tx, tabId, bench.runspaceId)`。pin は外れる。
+  6. live な Agent Session がどの Run でもなければ、Run を `origin = attached` で insert する。agent の居ない Tab も移せて、その後その Tab で起こした claude は「Run」の節の不変条件で Run になる。
+- commit の後の `layout` の合図では、Agent Session が既に Run なので何も起きない。
+- Tab を移したら `{ type: "task", ref }` で知らせる。Run を作らない移動でも `current` の output は変わるため。
+- CLI の text は、Bench を作ったこと、Tab がどの Task の Bench に居るか、Tab の claude がその Task の Run になったか（agent が居なければ、次に起こした claude が Run になること）を 1 行ずつ出す。
 
 ### Bench
 

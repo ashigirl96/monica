@@ -9,12 +9,17 @@ import { formatRef } from "./ref.ts";
 import { liveAgentSession, runAgentSessionsByTask } from "./run.ts";
 import { bench, issue, run, task } from "./schema.ts";
 
-export function currentTask(db: Db, terminalSessionId: string | undefined): CurrentOutput {
+export function callerTerminalSession(terminalSessionId: string | undefined): string {
   if (!terminalSessionId) {
     throw new ORPCError("BAD_REQUEST", {
       message: "not in a Tab of the Workbench: TANIA_TERMINAL_SESSION_ID is not set",
     });
   }
+  return terminalSessionId;
+}
+
+export function currentTask(db: Db, caller: string | undefined): CurrentOutput {
+  const terminalSessionId = callerTerminalSession(caller);
   const byRun = taskOfRun(
     db,
     and(eq(agentSession.terminalSessionId, terminalSessionId), liveAgentSession),

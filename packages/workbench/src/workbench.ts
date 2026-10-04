@@ -4,7 +4,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { endAgentSessionsIn, reconcileAgentSessions } from "./agent-session.ts";
 import type { AgentSession, TerminalSession, WorkbenchChange } from "./contract.ts";
-import { createRunspace, openTab } from "./layout.ts";
+import { createRunspace, moveTab, openTab } from "./layout.ts";
 import { shortPath } from "./paths.ts";
 import { shouldRespawn } from "./pin.ts";
 import { openDaemon, type PtydClient, type SessionInfo } from "./ptyd.ts";
@@ -32,6 +32,7 @@ export type Workbench = {
     tx: Tx,
     input: { runspaceId: string; cwd?: string },
   ): { tabId: string; terminalSessionId: string };
+  moveTab(tx: Tx, tabId: string, runspaceId: string): void;
   startTerminalSession(id: string, size: Size): Promise<void>;
   writeTerminalSession(id: string, data: string): Promise<void>;
 };
@@ -210,6 +211,10 @@ export function createWorkbench(
       const opened = openTab(tx, { ...input, shell });
       publish({ type: "layout" });
       return { tabId: opened.id, terminalSessionId: opened.terminalSessionId };
+    },
+    moveTab(tx, tabId, runspaceId) {
+      moveTab(tx, { id: tabId, runspaceId });
+      publish({ type: "layout" });
     },
     startTerminalSession: (id, size) => startTerminalSession(workbench, id, size),
     // ptyd は attach していない接続からの Write も通すので、webview が Tab を表示していなくても打てる。

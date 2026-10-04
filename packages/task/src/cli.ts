@@ -1,13 +1,14 @@
 import { table } from "@tania/ui/table";
 import type {
+  AttachOutput,
   CurrentOutput,
-  DisplayState,
   ListItem,
   ListOutput,
   RunOutput,
   SyncOutput,
   TrackOutput,
 } from "./contract.ts";
+import { stateText } from "./state-text.ts";
 
 export const commands = [] as const;
 
@@ -31,10 +32,19 @@ export const formatters = {
       ...warnings.map((warning) => `warning: ${warning}`),
     ].join("\n");
   },
+  attach({ ref, title, benchCreated, runCreated, agentSessionId }: AttachOutput): string {
+    return [
+      ...(benchCreated ? [`opened the Bench of ${ref} in place`] : []),
+      `this Tab is in the Bench of ${ref} ${title}`,
+      agentSessionId === null
+        ? `no claude runs in this Tab; the one you start here becomes a Run of ${ref}`
+        : `claude ${agentSessionId} ${runCreated ? "is now" : "is"} a Run of ${ref}`,
+    ].join("\n");
+  },
   current({ ref, title, displayState }: CurrentOutput): string {
     return table([
       ["REF", "TITLE", "STATE"],
-      [ref, title, stateCell(displayState)],
+      [ref, title, stateText(displayState)],
     ]);
   },
   list({ tasks, backgroundSyncError }: ListOutput): string {
@@ -47,7 +57,7 @@ export const formatters = {
               ...tasks.map((t) => [
                 t.ref,
                 t.title,
-                stateCell(t.displayState),
+                stateText(t.displayState),
                 blockedBy(t) || "-",
                 t.cwd ?? "-",
               ]),
@@ -60,24 +70,6 @@ export const formatters = {
     return lines.join("\n");
   },
 };
-
-function stateCell(displayState: DisplayState): string {
-  if (!("liveRuns" in displayState)) return displayState.state;
-  const head =
-    displayState.state === "waiting"
-      ? `waiting:${displayState.reason}${displayState.tool ? `(${displayState.tool})` : ""}`
-      : displayState.state;
-  const others = displayState.liveRuns.length - 1;
-  return `${head} ${age(displayState.since)}${others > 0 ? ` +${others}` : ""}`;
-}
-
-function age(since: Date): string {
-  const seconds = Math.max(0, Math.floor((Date.now() - since.getTime()) / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h`;
-  return `${Math.floor(seconds / 86_400)}d`;
-}
 
 function blockedBy({ ref, blockers }: ListItem): string {
   const repo = repoOf(ref).toLowerCase();

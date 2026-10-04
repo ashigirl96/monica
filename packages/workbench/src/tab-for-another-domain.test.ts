@@ -71,6 +71,28 @@ test("a Tab opened after ready starts its shell and is typed into without being 
   ]);
 });
 
+test("moveTab moves a Tab to the end of another Runspace, drops its pin, removes the Runspace it emptied, and signals the layout", async () => {
+  const { db, workbench, client, owned } = setupWithOwned();
+  const inBench = await client.tab.open({ runspaceId: owned, ...size });
+  const elsewhere = await client.runspace.create({ cwd: "/work", ...size });
+  await client.tab.pin({ id: elsewhere.tab.id });
+  const changes: WorkbenchChange[] = [];
+  workbench.events.subscribe("change", (change) => changes.push(change));
+
+  db.transaction((tx) => workbench.moveTab(tx, elsewhere.tab.id, owned));
+
+  expect((await client.layout.get()).runspaces).toMatchObject([
+    {
+      id: owned,
+      tabs: [
+        { id: inBench.id, sortOrder: 0 },
+        { id: elsewhere.tab.id, sortOrder: 1, pinned: false },
+      ],
+    },
+  ]);
+  expect(changes).toEqual([{ type: "layout" }]);
+});
+
 test("writeTerminalSession fails when ptyd refuses the write", async () => {
   const { ptyd, workbench } = setup();
   ptyd.writeError = "no session ts-gone";

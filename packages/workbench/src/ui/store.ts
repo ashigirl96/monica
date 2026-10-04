@@ -68,7 +68,13 @@ async function load(get: Getter, set: Setter) {
     layout = await client.layout.get();
   }
   const sessions = await client.terminalSession.list();
+  const front = frontTab(get);
   set(layoutAtom, layout);
+  // 見ていた端末が画面から消えないよう、手前の Tab はどの経路で移っても移った先までついていく。
+  const moved = front && findTab(get, front.tab.id);
+  if (moved && moved.runspace.id !== front.runspace.id) {
+    set(setActiveAtom, { runspaceId: moved.runspace.id, tabId: moved.tab.id });
+  }
   set(applyTerminalSessionListAtom, sessions);
   void set(resolveWorktreesAtom);
 }
@@ -102,7 +108,7 @@ export const reloadAgentSessionsAtom = serialReload(async (get, set) => {
   set(agentSessionsAtom, await clientOf(get).agentSession.list());
 });
 
-const agentSessionByTerminalSessionAtom = atom(
+export const agentSessionByTerminalSessionAtom = atom(
   (get) => new Map(get(agentSessionsAtom).map((a) => [a.terminalSessionId, a])),
 );
 
@@ -419,17 +425,13 @@ export const tabExitedAtom = action(
   },
 );
 
-// 切り出しと付け替えは Backend が決めるので、書いた後の layout から Tab の居場所を読み直す。
 export const toggleTabPinAtom = action(async (get, set, tabId?: string) => {
   const found = tabId ? findTab(get, tabId) : frontTab(get);
   if (!found) return;
   const { id, pinned } = found.tab;
-  const inFront = get(activeTerminalTabAtom)?.id === id;
   const client = clientOf(get);
   await (pinned ? client.tab.unpin({ id }) : client.tab.pin({ id }));
   await set(reloadAtom);
-  const moved = findTab(get, id);
-  if (inFront && moved) set(setActiveAtom, { runspaceId: moved.runspace.id, tabId: id });
 });
 
 export const startNewShellForTabAtom = action(async (get, set, tabId: string) => {
@@ -546,7 +548,5 @@ export const moveTabToRunspaceAtom = action(async (get, set, tabId: string, runs
   const found = findTab(get, tabId);
   const target = get(layoutAtom)?.runspaces.find((r) => r.id === runspaceId);
   if (!found || !target || found.runspace.id === runspaceId) return;
-  const inFront = get(activeTerminalTabAtom)?.id === tabId;
   await moveTab(get, set, tabId, runspaceId, target.tabs.length);
-  if (inFront) set(setActiveAtom, { runspaceId, tabId });
 });

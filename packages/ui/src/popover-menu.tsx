@@ -4,6 +4,7 @@ import { cn } from "./cn.ts";
 
 const ANCHOR_GAP = 4;
 const VIEWPORT_PADDING = 8;
+const MENU_SELECTOR = "[data-popover-menu]";
 
 export type PopoverAnchor = { top: number; bottom: number; left: number };
 
@@ -38,25 +39,27 @@ export function PopoverMenu({
     setPos({ top: Math.max(top, VIEWPORT_PADDING), left });
   }, [anchor]);
 
-  // The menu does not track its anchor; any scroll or resize just closes it.
+  // The menu does not track its anchor, so a scroll or resize closes it; a menu opened from
+  // this one is portaled outside it, so a press or scroll in any open menu counts as inside.
   useEffect(() => {
-    const onPointerDown = (e: PointerEvent) => {
-      if (e.target instanceof Node && ref.current?.contains(e.target)) return;
-      onClose();
+    const outside = (e: Event) => !(e.target instanceof Element && e.target.closest(MENU_SELECTOR));
+    const onEvent = (e: Event) => {
+      if (outside(e)) onClose();
     };
-    window.addEventListener("scroll", onClose, { capture: true });
+    window.addEventListener("scroll", onEvent, { capture: true });
     window.addEventListener("resize", onClose);
-    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointerdown", onEvent);
     return () => {
-      window.removeEventListener("scroll", onClose, { capture: true });
+      window.removeEventListener("scroll", onEvent, { capture: true });
       window.removeEventListener("resize", onClose);
-      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointerdown", onEvent);
     };
   }, [onClose]);
 
   return createPortal(
     <div
       ref={ref}
+      data-popover-menu=""
       className={cn(
         "fixed z-50 w-44 rounded-md border border-border bg-popover p-1 shadow-lg",
         className,
@@ -71,4 +74,25 @@ export function PopoverMenu({
     </div>,
     document.body,
   );
+}
+
+export function PopoverMenuItem({
+  className,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "flex w-full items-center rounded px-2 py-1 text-left text-[12px] text-popover-foreground",
+        "hover:bg-accent hover:text-accent-foreground disabled:opacity-40",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+export function PopoverMenuSeparator() {
+  return <div className="my-1 h-px bg-border" />;
 }
