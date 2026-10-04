@@ -206,6 +206,20 @@ test("run after a failure redoes the setup in the worktree it made even when the
   expect(await client.bench.list()).toMatchObject([{ setupState: "ready" }]);
 });
 
+test("run refuses to make again a worktree that is gone when the repo was renamed since", async () => {
+  const { db, ghq, client, cwd } = await tracked("#!/bin/sh\nexit 1\n");
+  await failure(client.run({ ref }));
+  rmSync(cwd, { recursive: true, force: true });
+  db.update(issue).set({ repo: "acme/renamed" }).run();
+
+  const error = await failure(client.run({ ref: "acme/renamed#12" }));
+
+  expect(error.code).toBe("PRECONDITION_FAILED");
+  expect(error.message).toContain("renamed");
+  expect(ghq.gets).toEqual(["acme/app"]);
+  expect(existsSync(cwd)).toBe(false);
+});
+
 test("run after a failure makes the worktree again when it is gone", async () => {
   const { ghq, client, cwd } = await tracked(
     '#!/bin/sh\ntest -e "$(git rev-parse --git-common-dir)/setup-ok"\n',

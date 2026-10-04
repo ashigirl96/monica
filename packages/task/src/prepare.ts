@@ -37,7 +37,7 @@ export async function checkoutOf(ghq: Ghq, repo: string): Promise<string> {
 
 /** 失敗は 1 行の理由を message に持つ Error で投げる。返すのは output の `warnings`。 */
 export async function prepare(
-  deps: { ghq: Ghq; setups: Set<Subprocess> },
+  deps: { home: string; ghq: Ghq; setups: Set<Subprocess> },
   ref: IssueRef,
   { mode, cwd }: Pick<typeof bench.$inferSelect, "mode" | "cwd">,
   log: string,
@@ -49,6 +49,12 @@ export async function prepare(
   let warnings: string[] = [];
   // repo が改名されても、作った worktree は作った時の checkout に登録されているので、checkout を引き直さない。
   if (!(await isLinkedWorktree(cwd))) {
+    // cwd は作った時の名前から決めたので、今の名前と食い違えば、元の branch は改名前の checkout にしか無い。
+    if (cwd !== worktreeOf(deps.home, ref)) {
+      throw new Error(
+        `the worktree ${cwd} is gone and the repo has been renamed to ${ref.repo} since, so close and reopen the Task to make the Bench again`,
+      );
+    }
     const checkout = await checkoutOf(deps.ghq, ref.repo);
     await clone(deps.ghq, ref.repo, checkout);
     warnings = await addWorktree(checkout, cwd, branchOf(ref));
