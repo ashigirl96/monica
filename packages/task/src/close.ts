@@ -2,7 +2,7 @@ import { ORPCError, type ORPCErrorConstructorMap } from "@orpc/server";
 import { agentSession, runspace } from "@tania/workbench/schema";
 import type { Db } from "@tania/workbench/server";
 import { and, eq, ne, type SQL } from "drizzle-orm";
-import { type BenchDeps, type Issue, refuseClosing } from "./bench.ts";
+import { type Bench, type BenchDeps, type Issue, refuseClosing } from "./bench.ts";
 import type { CloseOutput, CloseRefusal, closeErrors, ReopenOutput } from "./contract.ts";
 import { isIssue } from "./copy.ts";
 import { findTrackedTask } from "./open-task.ts";
@@ -41,7 +41,7 @@ async function closeReserved(
   const ref = formatRef(found.issue);
   const benchRow = found.bench;
   const worktree =
-    benchRow?.mode === "worktree"
+    benchRow?.mode === "worktree" && !sharesCwdWithAnotherBench(deps.db, benchRow)
       ? await stopOnGitFailure(ref, () => inspectWorktree(deps.ghq, benchRow, found.issue))
       : null;
   const force = input.force ?? false;
@@ -109,6 +109,20 @@ function openTaskToClose(db: Pick<Db, "select">, where: SQL | undefined, asked: 
     throw new ORPCError("BAD_REQUEST", { message: `${ref} is already closed` });
   }
   return found;
+}
+
+// repo の改名の後に旧名を別の repo が使うと、その Task の Bench が同じ path に worktree を作る。
+function sharesCwdWithAnotherBench(
+  db: Pick<Db, "select">,
+  row: Pick<Bench, "cwd" | "taskIssueId">,
+) {
+  return (
+    db
+      .select({ taskIssueId: bench.taskIssueId })
+      .from(bench)
+      .where(and(eq(bench.cwd, row.cwd), ne(bench.taskIssueId, row.taskIssueId)))
+      .get() !== undefined
+  );
 }
 
 // 準備は worktree と Bench の行を書き続けるので、走っている間は片付けない。

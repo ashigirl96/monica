@@ -5,6 +5,7 @@ import { runspace, tab } from "@tania/workbench/schema";
 import { eq } from "drizzle-orm";
 import type { TaskChange } from "./contract.ts";
 import { commit, type Files, git } from "./fake-ghq.ts";
+import { insertBench } from "./bench.ts";
 import { bench, issue } from "./schema.ts";
 import { cleanUp, failure, setup } from "./testing.ts";
 
@@ -288,6 +289,25 @@ test("a worktree Bench whose worktree and branch issue-n are both gone has nothi
 
   expect(output).toMatchObject({ removedWorktree: null, deletedBranch: null });
   expect(benchOf(books)).toBeUndefined();
+});
+
+test("close leaves the worktree and the branch alone when another Task's Bench has the same path", async () => {
+  const books = await withWorktreeBench();
+  const { db, workbench, client, github, ghq, cwd } = books;
+  // 改名した repo の旧名を別の repo が使い、その Task が同じ path に Bench を開いた形を、行で作る。
+  github.issue("acme/app#13", { title: "Next" });
+  await client.track({ ref: "acme/app#13" });
+  const other = db.select().from(issue).where(eq(issue.number, 13)).get()!;
+  db.transaction((tx) =>
+    insertBench(tx, workbench, other, { cwd, mode: "worktree", setupState: "ready" }),
+  );
+
+  const output = await client.close({ ref });
+
+  expect(output).toMatchObject({ removedWorktree: null, deletedBranch: null });
+  expect(existsSync(cwd)).toBe(true);
+  expect(hasBranch(ghq.checkout("acme/app"), "issue-12")).toBe(true);
+  expect(await client.bench.list()).toMatchObject([{ ref: "acme/app#13" }]);
 });
 
 test("close removes the worktree through the checkout it was made in, even after the repo is renamed", async () => {
