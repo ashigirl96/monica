@@ -26,6 +26,7 @@ export type RequestOp =
       cols: number;
       env: [string, string][] | null;
     }
+  | { op: "write"; session_id: string; data: string }
   | { op: "terminate"; session_id: string }
   | { op: "list" }
   | { op: "reap"; session_id: string }

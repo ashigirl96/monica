@@ -105,7 +105,7 @@ function backendWithBench({ home = "/nonexistent", ghq }: { home?: string; ghq?:
       number: 12,
       title: "Ship it",
       state: "open",
-      syncedAt: new Date(0),
+      syncedAt: new Date(),
     })
     .returning()
     .get();
@@ -127,22 +127,57 @@ afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup();
 });
 
-test("task run prints where the Bench is once it is ready", async () => {
+function inPlaceBench() {
   const scratch = inScratch();
   const checkout = join(scratch, "github.com/acme/app");
   mkdirSync(checkout, { recursive: true });
-  const { connect } = backendWithBench({
+  const backend = backendWithBench({
     home: scratch,
     ghq: { root: () => Promise.resolve(scratch), get: () => Promise.resolve() },
   });
+  return { ...backend, checkout };
+}
+
+test("task run prints where the Bench is, that claude started, and that GitHub could not be reached", async () => {
+  const { connect, checkout } = inPlaceBench();
 
   const result = await tania(["task", "run", "acme/app#12", "--in-place"], connect);
 
   expect(result).toEqual({
     code: 0,
-    stdout: `opened the Bench of acme/app#12 at ${checkout}\n`,
+    stdout:
+      `opened the Bench of acme/app#12 at ${checkout}\n` +
+      "started claude in a new Tab\n" +
+      "warning: could not sync acme/app#12 from GitHub (`gh auth token` failed: not logged in); using the copy from 0 minutes ago\n",
     stderr: "",
   });
+});
+
+test("task run exits 1 naming the open Blockers, and --force starts claude past them", async () => {
+  const { db, issueId, connect } = inPlaceBench();
+  const upstream = db
+    .insert(issue)
+    .values({
+      repo: "acme/lib",
+      number: 3,
+      title: "Upstream fix",
+      state: "open",
+      syncedAt: new Date(),
+    })
+    .returning()
+    .get();
+  db.insert(issueBlocker).values({ issueId, blockerId: upstream.id }).run();
+
+  const blocked = await tania(["task", "run", "acme/app#12", "--in-place"], connect);
+  const forced = await tania(["task", "run", "acme/app#12", "--in-place", "--force"], connect);
+
+  expect(blocked).toEqual({
+    code: 1,
+    stdout: "",
+    stderr: "BLOCKED: acme/app#12 is blocked by acme/lib#3; pass --force to start a Run anyway\n",
+  });
+  expect(forced.code).toBe(0);
+  expect(forced.stdout).toContain("started claude in a new Tab\n");
 });
 
 test("task run exits 1 with the reason and the log path when the Bench cannot be prepared", async () => {

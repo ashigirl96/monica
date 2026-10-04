@@ -48,7 +48,7 @@ test("run makes a worktree on a new branch issue-n from origin's default branch,
 
   const output = await client.run({ ref });
 
-  expect(output).toEqual({ ref, cwd, mode: "worktree", benchCreated: true, warnings: [] });
+  expect(output).toMatchObject({ ref, cwd, mode: "worktree", benchCreated: true, warnings: [] });
   expect(ghq.gets).toEqual(["acme/app"]);
   expect(git(cwd, "rev-parse", "--abbrev-ref", "HEAD")).toBe("issue-12");
   expect(git(cwd, "rev-parse", "HEAD")).toBe(
@@ -231,7 +231,7 @@ test("run --in-place opens the Bench on the Repo's checkout, cloning it, and run
 
   const output = await client.run({ ref, inPlace: true });
 
-  expect(output).toEqual({
+  expect(output).toMatchObject({
     ref,
     cwd: checkout,
     mode: "in_place",

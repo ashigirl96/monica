@@ -61,6 +61,9 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
   socket.end();'
   ```
 
+- Tab で本物の claude を起こすとき:
+  - 初めての directory（`GHQ_ROOT` の下の clone や worktree）では、claude が「Yes, I trust this folder」の確認で止まり、SessionStart の hook が届かない。既定の選択は「No, exit」なので、`\x1b[B` を送ってから `\r` を送って Yes を選ぶ。
+  - resume を確かめるときは、prompt を 1 つ送って答えを待ってから抜ける。claude は最初の prompt まで transcript を書かないので、prompt を送らずに抜けた Agent Session の `--resume` は `No conversation found` で終わる。
 - Agent Session の状態（dot、通知）を claude 無しで動かすには、hook の payload を CLI の hook に流す。claude と同じ経路で `recordHook` に届き、待ちの状態や理由を狙って作れる。payload の field と場面ごとの順は `docs/research/hook-payloads.md`。Terminal Session は帳簿で live なもの（`runspace.create` で開いた Tab の `terminalSessionId`）を使う。それ以外は記録されない。通知は Backend の stdout（`out.jsonl`）に `{"type":"notify",…}` の行で出る。
 
   ```bash
@@ -110,5 +113,6 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 - stdin の EOF で止める: sleep の pid を `pgrep -f "^sleep 100000$"` で取り、その pid に `kill` を送る。`pkill -f` は harness の zsh にも当たり、親ごと殺す。
 - SIGTERM で止める: `kill -TERM $(jq .pid ${TMPDIR%/}/tania-s2/backend.json)`。pipe の左の sleep は残り、background の job が終わらないので、続けて上の手順で sleep も止める。
 - Backend が止まったら `rm -rf ${TMPDIR%/}/tania-s2` で home を消す。ptyd は socket が消えたのを 2 秒おきの確認で見つけ、shell ごと終わるので、下の判定は数秒待ってからする。
+- Tab で claude を起こしたなら、claude が cwd ごとに作る `~/.claude/projects/-private-var-folders-…-tania-s2…` も消す（cwd の `/` と `.` が `-` になった名前）。`ls ~/.claude/projects | grep tania-s2` で見つかる。
 
 片付いたのは、`pgrep -f apps/backend/src/main.ts` と `pgrep -f "tania-ptyd --tania-home ${TMPDIR%/}/tania-s2"` が何も返さず、home が消えたとき。消し忘れた dev は `bun run dev:list` で見つけ、`bun run dev:kill <NAME>` で片付ける。

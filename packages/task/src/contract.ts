@@ -85,11 +85,22 @@ export const ListOutputSchema = z.object({
 
 export const RunOutputSchema = z.object({
   ref: z.string(),
-  cwd: z.string(),
+  cwd: z.string().describe("the cwd of the Bench"),
   mode: BenchSchema.shape.mode,
   benchCreated: z.boolean(),
   warnings: z.array(z.string()),
+  tabId: z.string(),
+  terminalSessionId: z.string(),
+  resumed: z.string().nullable().describe("the Agent Session resumed, or null for a new claude"),
 });
+
+export const runErrors = {
+  BLOCKED: {
+    status: 409,
+    message: "the Issue of the Task has open Blockers",
+    data: z.object({ blockers: z.array(z.string()).describe("refs of the open Blockers") }),
+  },
+};
 
 export const CurrentOutputSchema = z.object({
   ref: z.string(),
@@ -136,9 +147,10 @@ export const contract = {
   run: meta
     .meta({
       description:
-        "Open the Bench of an open Task, preparing its worktree and setup, and print its cwd once it is ready",
+        "Start claude in a new Tab of the Bench of an open Task, opening and preparing the Bench first, or resume the last claude of the Bench once it has ended",
       cli: true,
     })
+    .errors(runErrors)
     .input(
       z.object({
         ref,
@@ -146,6 +158,10 @@ export const contract = {
           .boolean()
           .optional()
           .describe("use the Repo's checkout as the cwd, with no worktree and no setup"),
+        force: z
+          .boolean()
+          .optional()
+          .describe("start a new Run even when the Issue has open Blockers"),
       }),
     )
     .output(RunOutputSchema),

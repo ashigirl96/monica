@@ -1,11 +1,23 @@
-import type { Tx } from "@tania/workbench/server";
-import { and, eq, ne, or, sql } from "drizzle-orm";
+import type { Db, Tx } from "@tania/workbench/server";
+import { and, asc, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { GitHubIssue, LinkedIssue } from "./github.ts";
 import { formatRef, type IssueRef } from "./ref.ts";
 import { issue, issueBlocker } from "./schema.ts";
 
 export function isIssue({ repo, number }: IssueRef) {
   return and(eq(sql`lower(${issue.repo})`, repo.toLowerCase()), eq(issue.number, number));
+}
+
+export function openBlockersOf(db: Db, issueIds: number[]) {
+  const blocker = alias(issue, "blocker");
+  return db
+    .select({ issueId: issueBlocker.issueId, repo: blocker.repo, number: blocker.number })
+    .from(issueBlocker)
+    .innerJoin(blocker, eq(blocker.id, issueBlocker.blockerId))
+    .where(and(inArray(issueBlocker.issueId, issueIds), eq(blocker.state, "open")))
+    .orderBy(asc(blocker.repo), asc(blocker.number))
+    .all();
 }
 
 /**

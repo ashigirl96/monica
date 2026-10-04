@@ -1,11 +1,11 @@
 import type { Db } from "@tania/workbench/server";
-import { and, asc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
-import { alias } from "drizzle-orm/sqlite-core";
+import { asc, eq, isNotNull, isNull } from "drizzle-orm";
 import type { ListItem } from "./contract.ts";
+import { openBlockersOf } from "./copy.ts";
 import { displayState } from "./display-state.ts";
 import { formatRef } from "./ref.ts";
 import { runAgentSessionsByTask } from "./run.ts";
-import { bench, issue, issueBlocker, task } from "./schema.ts";
+import { bench, issue, task } from "./schema.ts";
 
 export function listTasks(db: Db, { closed }: { closed: boolean }): ListItem[] {
   const rows = db
@@ -16,22 +16,10 @@ export function listTasks(db: Db, { closed }: { closed: boolean }): ListItem[] {
     .where(closed ? isNotNull(task.closedAt) : isNull(task.closedAt))
     .orderBy(asc(task.trackedAt), asc(task.issueId))
     .all();
-  const blocker = alias(issue, "blocker");
-  const openBlockers = db
-    .select({ issueId: issueBlocker.issueId, repo: blocker.repo, number: blocker.number })
-    .from(issueBlocker)
-    .innerJoin(blocker, eq(blocker.id, issueBlocker.blockerId))
-    .where(
-      and(
-        inArray(
-          issueBlocker.issueId,
-          rows.map((row) => row.issue.id),
-        ),
-        eq(blocker.state, "open"),
-      ),
-    )
-    .orderBy(asc(blocker.repo), asc(blocker.number))
-    .all();
+  const openBlockers = openBlockersOf(
+    db,
+    rows.map((row) => row.issue.id),
+  );
   const runsOf = runAgentSessionsByTask(
     db,
     rows.map((row) => row.issue.id),
