@@ -1,4 +1,5 @@
 import { eventIterator, oc } from "@orpc/contract";
+import { AgentSessionSchema } from "@tania/workbench/contract";
 import { createSchemaFactory } from "drizzle-zod";
 import { z } from "zod";
 import { bench, issue } from "./schema.ts";
@@ -8,10 +9,34 @@ const { createSelectSchema } = createSchemaFactory({ coerce: { date: true } });
 
 const IssueStateSchema = createSelectSchema(issue).shape.state;
 const BenchSchema = createSelectSchema(bench);
+const WaitReasonSchema = AgentSessionSchema.shape.waitReason.unwrap();
+const LiveStateSchema = AgentSessionSchema.shape.state.exclude(["ended"]);
 
-export const DisplayStateSchema = z.object({
-  state: z.enum(["closed", "issue_closed", "not_started", "preparing", "setup_failed", "ended"]),
+export const LiveRunSchema = z.object({
+  agentSessionId: z.string(),
+  state: LiveStateSchema,
+  reason: WaitReasonSchema.optional(),
+  since: z.date(),
 });
+
+const liveRuns = z
+  .array(LiveRunSchema)
+  .describe("the live Runs, the one the state comes from first");
+
+export const DisplayStateSchema = z.discriminatedUnion("state", [
+  z.object({
+    state: z.enum(["closed", "issue_closed", "not_started", "preparing", "setup_failed", "ended"]),
+  }),
+  z.object({
+    state: z.literal("waiting"),
+    reason: WaitReasonSchema,
+    tool: z.string().optional(),
+    errorType: z.string().optional(),
+    since: z.date(),
+    liveRuns,
+  }),
+  z.object({ state: LiveStateSchema.exclude(["waiting"]), since: z.date(), liveRuns }),
+]);
 
 export const ListItemSchema = z.object({
   ref: z.string(),
@@ -31,6 +56,7 @@ export const TaskChangeSchema = z.discriminatedUnion("type", [
 ]);
 
 export type DisplayState = z.infer<typeof DisplayStateSchema>;
+export type LiveRun = z.infer<typeof LiveRunSchema>;
 export type ListItem = z.infer<typeof ListItemSchema>;
 export type TaskChange = z.infer<typeof TaskChangeSchema>;
 export type BackgroundSyncError = z.infer<typeof BackgroundSyncErrorSchema>;

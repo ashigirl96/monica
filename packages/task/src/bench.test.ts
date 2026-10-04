@@ -1,10 +1,10 @@
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { runspace, tab, terminalSession } from "@tania/workbench/schema";
+import { runspace } from "@tania/workbench/schema";
 import { commit, git } from "./fake-ghq.ts";
 import { bench, issue, task } from "./schema.ts";
-import { cleanUp, setup } from "./testing.ts";
+import { cleanUp, failure, setup } from "./testing.ts";
 
 afterEach(() => {
   mock.restore();
@@ -33,15 +33,6 @@ async function until(done: () => boolean | Promise<boolean>) {
     await Bun.sleep(25);
   }
   throw new Error("timed out waiting");
-}
-
-async function failure(promise: Promise<unknown>) {
-  try {
-    await promise;
-  } catch (error) {
-    return error as { code: string; message: string };
-  }
-  throw new Error("expected the call to fail");
 }
 
 function setupLog({ home }: Books) {
@@ -310,46 +301,6 @@ test("a Bench the Backend stopped preparing fails on the next start, and its set
   expect((await restarted.client.list({})).tasks).toMatchObject([
     { displayState: { state: "setup_failed" } },
   ]);
-});
-
-test("current names the Task of the Bench the calling Tab is in, and fails for any other Tab", async () => {
-  const { db, client } = await tracked();
-  await client.run({ ref });
-  const { id: benchRunspace } = db.select().from(runspace).get()!;
-  db.insert(runspace).values({ id: "rs-plain", cwd: "/work", sortOrder: 1 }).run();
-  for (const [terminalSessionId, runspaceId] of [
-    ["ts-bench", benchRunspace],
-    ["ts-plain", "rs-plain"],
-  ] as const) {
-    db.insert(terminalSession)
-      .values({
-        id: terminalSessionId,
-        cwd: "/work",
-        shell: "/bin/zsh",
-        status: "running",
-        createdAt: new Date(),
-      })
-      .run();
-    db.insert(tab)
-      .values({
-        id: `tab-${terminalSessionId}`,
-        runspaceId,
-        cwd: "/work",
-        sortOrder: 0,
-        terminalSessionId,
-      })
-      .run();
-  }
-
-  expect(await client.current({ terminalSessionId: "ts-bench" })).toEqual({
-    ref,
-    title: "Ship it",
-    displayState: { state: "ended" },
-    agentSessionId: null,
-    source: "bench",
-  });
-  expect((await failure(client.current({ terminalSessionId: "ts-plain" }))).code).toBe("NOT_FOUND");
-  expect((await failure(client.current({}))).code).toBe("BAD_REQUEST");
 });
 
 function isAlive(pid: number): boolean {

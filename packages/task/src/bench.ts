@@ -1,13 +1,11 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { ORPCError } from "@orpc/server";
-import { tab } from "@tania/workbench/schema";
 import type { Db, Workbench } from "@tania/workbench/server";
 import type { Subprocess } from "bun";
 import { asc, eq } from "drizzle-orm";
-import type { BenchItem, CurrentOutput, RunOutput, TaskChange } from "./contract.ts";
+import type { BenchItem, RunOutput, TaskChange } from "./contract.ts";
 import { isIssue } from "./copy.ts";
-import { displayState } from "./display-state.ts";
 import {
   branchOf,
   checkoutOf,
@@ -85,34 +83,6 @@ export async function runTask(
     mode: opened.bench.mode,
     benchCreated: opened.created,
     warnings: prepared.warnings,
-  };
-}
-
-export function currentTask(db: Db, terminalSessionId: string | undefined): CurrentOutput {
-  if (!terminalSessionId) {
-    throw new ORPCError("BAD_REQUEST", {
-      message: "not in a Tab of the Workbench: TANIA_TERMINAL_SESSION_ID is not set",
-    });
-  }
-  const found = db
-    .select({ task, issue, bench })
-    .from(tab)
-    .innerJoin(bench, eq(bench.runspaceId, tab.runspaceId))
-    .innerJoin(task, eq(task.issueId, bench.taskIssueId))
-    .innerJoin(issue, eq(issue.id, task.issueId))
-    .where(eq(tab.terminalSessionId, terminalSessionId))
-    .get();
-  if (!found) {
-    throw new ORPCError("NOT_FOUND", {
-      message: `the Tab of Terminal Session ${terminalSessionId} is not in a Bench`,
-    });
-  }
-  return {
-    ref: formatRef(found.issue),
-    title: found.issue.title,
-    displayState: displayState(found.task, found.issue, found.bench),
-    agentSessionId: null,
-    source: "bench",
   };
 }
 

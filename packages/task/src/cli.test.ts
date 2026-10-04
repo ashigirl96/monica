@@ -72,3 +72,86 @@ test("list counts a wide character as two columns", () => {
     ].join("\n"),
   );
 });
+
+const ago = (ms: number) => new Date(Date.now() - ms);
+const liveRun = (agentSessionId: string) => ({
+  agentSessionId,
+  state: "running" as const,
+  since: ago(0),
+});
+
+test("list writes the state of a Task with live Runs with its reason, tool, age and other live Runs", () => {
+  const text = formatters.list({
+    tasks: [
+      item({
+        displayState: {
+          state: "waiting",
+          reason: "permission",
+          tool: "Bash",
+          since: ago(12 * 60_000),
+          liveRuns: [liveRun("s-1"), liveRun("s-2")],
+        },
+      }),
+      item({
+        ref: "acme/app#3",
+        displayState: {
+          state: "waiting",
+          reason: "error",
+          errorType: "rate_limit",
+          since: ago(3 * 60_000),
+          liveRuns: [liveRun("s-3")],
+        },
+      }),
+      item({
+        ref: "acme/app#4",
+        displayState: { state: "running", since: ago(30_000), liveRuns: [liveRun("s-4")] },
+      }),
+      item({
+        ref: "acme/app#5",
+        displayState: {
+          state: "unobserved",
+          since: ago(5 * 3_600_000),
+          liveRuns: [liveRun("s-5"), liveRun("s-6"), liveRun("s-7")],
+        },
+      }),
+      item({
+        ref: "acme/app#6",
+        displayState: {
+          state: "waiting",
+          reason: "idle",
+          since: ago(2 * 86_400_000),
+          liveRuns: [],
+        },
+      }),
+    ],
+    backgroundSyncError: null,
+  });
+
+  expect(text.split("\n").map((line) => line.split(/ {2,}/)[2])).toEqual([
+    "STATE",
+    "waiting:permission(Bash) 12m +1",
+    "waiting:error 3m",
+    "running 30s",
+    "unobserved 5h +2",
+    "waiting:idle 2d",
+  ]);
+});
+
+test("current writes the state the same way as list", () => {
+  const text = formatters.current({
+    ref: "acme/app#12",
+    title: "Ship it",
+    displayState: {
+      state: "waiting",
+      reason: "question",
+      since: ago(60_000),
+      liveRuns: [liveRun("s-1")],
+    },
+    agentSessionId: "s-1",
+    source: "run",
+  });
+
+  expect(text).toBe(
+    ["REF          TITLE    STATE", "acme/app#12  Ship it  waiting:question 1m"].join("\n"),
+  );
+});

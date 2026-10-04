@@ -4,6 +4,7 @@ import { alias } from "drizzle-orm/sqlite-core";
 import type { ListItem } from "./contract.ts";
 import { displayState } from "./display-state.ts";
 import { formatRef } from "./ref.ts";
+import { runAgentSessionsByTask } from "./run.ts";
 import { bench, issue, issueBlocker, task } from "./schema.ts";
 
 export function listTasks(db: Db, { closed }: { closed: boolean }): ListItem[] {
@@ -31,12 +32,16 @@ export function listTasks(db: Db, { closed }: { closed: boolean }): ListItem[] {
     )
     .orderBy(asc(blocker.repo), asc(blocker.number))
     .all();
+  const runsOf = runAgentSessionsByTask(
+    db,
+    rows.map((row) => row.issue.id),
+  );
   return rows.map((row) => ({
     ref: formatRef(row.issue),
     title: row.issue.title,
     issueState: row.issue.state,
     blockers: openBlockers.filter((b) => b.issueId === row.issue.id).map(formatRef),
     cwd: row.bench?.cwd ?? null,
-    displayState: displayState(row.task, row.issue, row.bench),
+    displayState: displayState(row.task, row.issue, row.bench, runsOf(row.issue.id)),
   }));
 }

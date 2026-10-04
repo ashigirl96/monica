@@ -4,6 +4,7 @@ import { type BenchDeps, failInterruptedPreparations } from "./bench.ts";
 import type { BackgroundSyncError, TaskChange } from "./contract.ts";
 import { defaultGitHub, type GitHub } from "./github.ts";
 import { defaultGhq, type Ghq, killSetups } from "./prepare.ts";
+import { applyRunInvariant } from "./run.ts";
 import { SYNC_TIMEOUT_MS, type SyncDeps, syncOpenTasks } from "./sync.ts";
 
 export type Task = {
@@ -54,6 +55,18 @@ export function createTask(deps: {
   };
   let backgroundSyncError: BackgroundSyncError | null = null;
   let timer: ReturnType<typeof setInterval> | undefined;
+  let unsubscribe: (() => void) | undefined;
+
+  function applyRunInvariantSafely(agentSessionId?: string) {
+    if (stopped.signal.aborted) return;
+    try {
+      applyRunInvariant(db, agentSessionId);
+    } catch (error) {
+      console.error(
+        `[task] could not make Runs of ${agentSessionId ?? "the Agent Sessions in the Benches"}: ${error}`,
+      );
+    }
+  }
 
   // retry と backoff は持たず、次の回がやり直す。
   async function syncInBackground() {
@@ -74,10 +87,20 @@ export function createTask(deps: {
     events,
     start() {
       failInterruptedPreparations(db);
+      // async iterator の購読は溜まった合図を 100 件で捨てるので、listener で受ける。
+      // workbench は transaction の中でも publish するので、読み直しは commit 後の microtask に回す。
+      unsubscribe = workbench.events.subscribe("change", (change) => {
+        if (change.type === "agentSession") {
+          queueMicrotask(() => applyRunInvariantSafely(change.sessionId));
+        }
+      });
+      // commit の後、購読の microtask が走る前に止まった Backend の分は、合図が二度と来ない。
+      applyRunInvariantSafely();
       void syncInBackground();
       timer = setInterval(() => void syncInBackground(), BACKGROUND_SYNC_INTERVAL_MS);
     },
     stop() {
+      unsubscribe?.();
       clearInterval(timer);
       stopped.abort(new Error("the Task has stopped"));
       killSetups(benchDeps.setups);
