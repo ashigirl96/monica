@@ -42,12 +42,17 @@ export async function prepare(
   { mode, cwd }: Pick<typeof bench.$inferSelect, "mode" | "cwd">,
   log: string,
 ): Promise<string[]> {
-  const checkout = mode === "in_place" ? cwd : await checkoutOf(deps.ghq, ref.repo);
-  if (!existsSync(checkout)) await deps.ghq.get(ref.repo);
-  if (mode === "in_place") return [];
-  const warnings = (await isWorktreeOf(checkout, cwd))
-    ? []
-    : await addWorktree(checkout, cwd, branchOf(ref));
+  if (mode === "in_place") {
+    await clone(deps.ghq, ref.repo, cwd);
+    return [];
+  }
+  let warnings: string[] = [];
+  // repo が改名されても、作った worktree は作った時の checkout に登録されているので、checkout を引き直さない。
+  if (!(await isLinkedWorktree(cwd))) {
+    const checkout = await checkoutOf(deps.ghq, ref.repo);
+    await clone(deps.ghq, ref.repo, checkout);
+    warnings = await addWorktree(checkout, cwd, branchOf(ref));
+  }
   await runSetup(cwd, log, deps.setups);
   return warnings;
 }
@@ -56,11 +61,26 @@ export function killSetups(setups: Set<Subprocess>) {
   for (const setup of setups) signalGroup(setup.pid, "SIGKILL");
 }
 
-async function isWorktreeOf(checkout: string, path: string): Promise<boolean> {
+async function clone(ghq: Ghq, repo: string, checkout: string) {
+  if (existsSync(checkout)) return;
+  await ghq.get(repo);
+  // ghq は repo の今の名前の場所に clone するので、改名の前に決めた path には来ない。
+  if (!existsSync(checkout)) throw new Error(`ghq get ${repo} did not clone it to ${checkout}`);
+}
+
+async function isLinkedWorktree(path: string): Promise<boolean> {
   if (!existsSync(path)) return false;
-  // git は worktree の path を realpath で持つ。
-  const listed = await git(checkout, "worktree", "list", "--porcelain");
-  return listed.split("\n").includes(`worktree ${realpathSync(path)}`);
+  const answer = await git(
+    path,
+    "rev-parse",
+    "--path-format=absolute",
+    "--show-toplevel",
+    "--git-dir",
+    "--git-common-dir",
+  ).catch(() => null);
+  const [toplevel, gitDir, commonDir] = answer?.split("\n") ?? [];
+  // git は path を realpath で答える。main の checkout では git dir と common dir が同じになる。
+  return toplevel === realpathSync(path) && gitDir !== commonDir;
 }
 
 async function addWorktree(checkout: string, path: string, branch: string): Promise<string[]> {

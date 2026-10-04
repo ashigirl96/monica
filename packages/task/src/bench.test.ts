@@ -3,7 +3,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runspace, tab, terminalSession } from "@tania/workbench/schema";
 import { commit, git } from "./fake-ghq.ts";
-import { bench, task } from "./schema.ts";
+import { bench, issue, task } from "./schema.ts";
 import { cleanUp, setup } from "./testing.ts";
 
 afterEach(() => {
@@ -188,6 +188,21 @@ test("run after a failure redoes only the setup in the worktree it made", async 
 
   expect(output).toMatchObject({ cwd, benchCreated: false, warnings: [] });
   expect(attempts(cwd)).toBe(2);
+  expect(await client.bench.list()).toMatchObject([{ setupState: "ready" }]);
+});
+
+test("run after a failure redoes the setup in the worktree it made even when the repo was renamed since", async () => {
+  const { db, ghq, client, cwd } = await tracked(
+    '#!/bin/sh\ntest -e "$(git rev-parse --git-common-dir)/setup-ok"\n',
+  );
+  await failure(client.run({ ref }));
+  writeFileSync(join(ghq.checkout("acme/app"), ".git/setup-ok"), "");
+  db.update(issue).set({ repo: "acme/renamed" }).run();
+
+  const output = await client.run({ ref: "acme/renamed#12" });
+
+  expect(output).toMatchObject({ ref: "acme/renamed#12", cwd, benchCreated: false });
+  expect(ghq.gets).toEqual(["acme/app"]);
   expect(await client.bench.list()).toMatchObject([{ setupState: "ready" }]);
 });
 
