@@ -1,7 +1,9 @@
 import { EventPublisher } from "@orpc/server";
 import type { Db, Workbench } from "@tania/workbench/server";
+import { type BenchDeps, failInterruptedPreparations } from "./bench.ts";
 import type { BackgroundSyncError, TaskChange } from "./contract.ts";
 import { defaultGitHub, type GitHub } from "./github.ts";
+import { defaultGhq, type Ghq, killSetups } from "./prepare.ts";
 import { SYNC_TIMEOUT_MS, type SyncDeps, syncOpenTasks } from "./sync.ts";
 
 export type Task = {
@@ -10,7 +12,7 @@ export type Task = {
   stop(): void;
 };
 
-type Internals = SyncDeps & { backgroundSyncError: () => BackgroundSyncError | null };
+type Internals = SyncDeps & BenchDeps & { backgroundSyncError: () => BackgroundSyncError | null };
 
 const BACKGROUND_SYNC_INTERVAL_MS = 5 * 60_000;
 
@@ -23,8 +25,14 @@ export function internals(task: Task): Internals {
   return found;
 }
 
-export function createTask(deps: { db: Db; workbench: Workbench; github?: GitHub }): Task {
-  const { db, github = defaultGitHub } = deps;
+export function createTask(deps: {
+  db: Db;
+  workbench: Workbench;
+  home: string;
+  github?: GitHub;
+  ghq?: Ghq;
+}): Task {
+  const { db, workbench, home, github = defaultGitHub, ghq = defaultGhq } = deps;
   const events = new EventPublisher<{ change: TaskChange }>();
   const stopped = new AbortController();
   const syncDeps: SyncDeps = {
@@ -33,6 +41,16 @@ export function createTask(deps: { db: Db; workbench: Workbench; github?: GitHub
     publish: (change) => events.publish("change", change),
     signal: (timeoutMs) => AbortSignal.any([AbortSignal.timeout(timeoutMs), stopped.signal]),
     running: new Map(),
+  };
+  const benchDeps: BenchDeps = {
+    db,
+    workbench,
+    home,
+    ghq,
+    publish: syncDeps.publish,
+    stopped: stopped.signal,
+    preparations: new Map(),
+    setups: new Set(),
   };
   let backgroundSyncError: BackgroundSyncError | null = null;
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -55,14 +73,20 @@ export function createTask(deps: { db: Db; workbench: Workbench; github?: GitHub
   const task: Task = {
     events,
     start() {
+      failInterruptedPreparations(db);
       void syncInBackground();
       timer = setInterval(() => void syncInBackground(), BACKGROUND_SYNC_INTERVAL_MS);
     },
     stop() {
       clearInterval(timer);
       stopped.abort(new Error("the Task has stopped"));
+      killSetups(benchDeps.setups);
     },
   };
-  internalsOf.set(task, { ...syncDeps, backgroundSyncError: () => backgroundSyncError });
+  internalsOf.set(task, {
+    ...syncDeps,
+    ...benchDeps,
+    backgroundSyncError: () => backgroundSyncError,
+  });
   return task;
 }

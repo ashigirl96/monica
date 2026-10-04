@@ -1,0 +1,362 @@
+import { afterEach, expect, mock, spyOn, test } from "bun:test";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { runspace, tab, terminalSession } from "@tania/workbench/schema";
+import { commit, git } from "./fake-ghq.ts";
+import { bench, issue, task } from "./schema.ts";
+import { cleanUp, setup } from "./testing.ts";
+
+afterEach(() => {
+  mock.restore();
+  cleanUp();
+});
+
+const ref = "acme/app#12";
+const executable = 0o755;
+
+type Books = ReturnType<typeof setup>;
+
+async function tracked(script: string | null = "#!/bin/sh\npwd > .setup-ran\n", mode = executable) {
+  const books = setup();
+  books.ghq.origin(
+    "acme/app",
+    script === null ? {} : { ".tania/setup.sh": { content: script, mode } },
+  );
+  books.github.issue(ref, { title: "Ship it" });
+  await books.client.track({ ref });
+  return { ...books, cwd: join(books.home, "worktrees/acme/app/issue-12") };
+}
+
+async function until(done: () => boolean | Promise<boolean>) {
+  for (let i = 0; i < 200; i++) {
+    if (await done()) return;
+    await Bun.sleep(25);
+  }
+  throw new Error("timed out waiting");
+}
+
+async function failure(promise: Promise<unknown>) {
+  try {
+    await promise;
+  } catch (error) {
+    return error as { code: string; message: string };
+  }
+  throw new Error("expected the call to fail");
+}
+
+function setupLog({ home }: Books) {
+  return join(home, "logs/setup/acme/app/issue-12.log");
+}
+
+function attempts(cwd: string) {
+  return readFileSync(join(cwd, ".attempts"), "utf8").split("\n").filter(Boolean).length;
+}
+
+test("run makes a worktree on a new branch issue-n from origin's default branch, runs its setup, and then returns the cwd", async () => {
+  const { ghq, db, client, cwd } = await tracked();
+
+  const output = await client.run({ ref });
+
+  expect(output).toEqual({ ref, cwd, mode: "worktree", benchCreated: true, warnings: [] });
+  expect(ghq.gets).toEqual(["acme/app"]);
+  expect(git(cwd, "rev-parse", "--abbrev-ref", "HEAD")).toBe("issue-12");
+  expect(git(cwd, "rev-parse", "HEAD")).toBe(
+    git(ghq.checkout("acme/app"), "rev-parse", "origin/main"),
+  );
+  expect(readFileSync(join(cwd, ".setup-ran"), "utf8").trim()).toBe(
+    git(cwd, "rev-parse", "--show-toplevel"),
+  );
+  const { id: runspaceId } = db.select().from(runspace).get()!;
+  expect(await client.bench.list()).toEqual([
+    { runspaceId, ref, title: "Ship it", setupState: "ready" },
+  ]);
+  expect((await client.list({})).tasks).toMatchObject([
+    { ref, cwd, displayState: { state: "ended" } },
+  ]);
+});
+
+test("the Bench is listed while it prepares, and a second run waits for the same preparation", async () => {
+  const { db, client, cwd } = await tracked(
+    "#!/bin/sh\necho attempt >> .attempts\nwhile [ ! -e .release ]; do sleep 0.02; done\n",
+  );
+
+  const first = client.run({ ref });
+  await until(() => existsSync(join(cwd, ".attempts")));
+
+  expect(await client.bench.list()).toMatchObject([{ ref, setupState: "preparing" }]);
+  expect(db.select().from(runspace).all()).toMatchObject([{ cwd, owned: true }]);
+  expect((await client.list({})).tasks).toMatchObject([{ displayState: { state: "preparing" } }]);
+
+  const second = client.run({ ref });
+  writeFileSync(join(cwd, ".release"), "");
+
+  expect(await first).toMatchObject({ benchCreated: true });
+  expect(await second).toMatchObject({ cwd, benchCreated: false });
+  expect(attempts(cwd)).toBe(1);
+  expect(await client.bench.list()).toMatchObject([{ setupState: "ready" }]);
+});
+
+test("run checks out a branch issue-n that already exists, without cloning a Repo that is cloned", async () => {
+  const { ghq, client, cwd } = await tracked();
+  ghq.clone("acme/app");
+  const checkout = ghq.checkout("acme/app");
+  git(checkout, "switch", "--quiet", "-c", "issue-12");
+  const started = commit(checkout, { "started.txt": { content: "wip\n" } }, "start");
+  git(checkout, "switch", "--quiet", "main");
+
+  await client.run({ ref });
+
+  expect(ghq.gets).toEqual([]);
+  expect(git(cwd, "rev-parse", "--abbrev-ref", "HEAD")).toBe("issue-12");
+  expect(git(cwd, "rev-parse", "HEAD")).toBe(started);
+});
+
+test("a Repo without a setup script gets a ready Bench", async () => {
+  const { client, cwd } = await tracked(null);
+
+  expect(await client.run({ ref })).toMatchObject({ cwd, benchCreated: true });
+  expect(await client.bench.list()).toMatchObject([{ setupState: "ready" }]);
+});
+
+test.each([
+  ["exits non-zero", "#!/bin/sh\necho broken >&2\nexit 3\n", executable, "exit 3"],
+  ["is not executable", "#!/bin/sh\necho broken\n", 0o644, "spawn failed: EACCES"],
+])(
+  "a setup that %s fails the run with the reason and the log path",
+  async (_, script, mode, reason) => {
+    const books = await tracked(script, mode);
+    const { client } = books;
+
+    const error = await failure(client.run({ ref }));
+
+    expect(error.code).toBe("PRECONDITION_FAILED");
+    expect(error.message).toContain(reason);
+    expect(error.message).toContain(setupLog(books));
+    expect(readFileSync(setupLog(books), "utf8")).toContain(reason);
+    expect(await client.bench.list()).toMatchObject([{ setupState: "failed" }]);
+    expect((await client.list({})).tasks).toMatchObject([
+      { displayState: { state: "setup_failed" } },
+    ]);
+  },
+);
+
+test("a setup still running after 600 seconds fails, its process group getting SIGTERM and 2 seconds before SIGKILL", async () => {
+  const books = await tracked(
+    [
+      "#!/bin/sh",
+      `sh -c 'trap "sleep 0.3; touch .cleaned; exit 0" TERM; touch .trapping; while :; do sleep 0.05; done' &`,
+      `sh -c 'trap "" TERM; exec sleep 30' &`,
+      "echo $! > .stubborn",
+      "sleep 30",
+    ].join("\n"),
+  );
+  const { client, cwd } = books;
+  const realSetTimeout = globalThis.setTimeout;
+  let fireTimeout: (() => void) | undefined;
+  spyOn(globalThis, "setTimeout").mockImplementation(((callback: () => void, ms?: number) => {
+    if (ms !== 600_000) return realSetTimeout(callback, ms);
+    fireTimeout = callback;
+    return realSetTimeout(() => {}, 0);
+  }) as typeof setTimeout);
+
+  const running = failure(client.run({ ref }));
+  await until(
+    () =>
+      existsSync(join(cwd, ".stubborn")) &&
+      existsSync(join(cwd, ".trapping")) &&
+      fireTimeout !== undefined,
+  );
+  const stubborn = Number(readFileSync(join(cwd, ".stubborn"), "utf8"));
+  fireTimeout!();
+  const error = await running;
+
+  expect(error.code).toBe("PRECONDITION_FAILED");
+  expect(error.message).toContain("timed out after 600s");
+  expect(existsSync(join(cwd, ".cleaned"))).toBe(true);
+  await until(() => !isAlive(stubborn));
+  expect(await client.bench.list()).toMatchObject([{ setupState: "failed" }]);
+});
+
+test("run after a failure redoes only the setup in the worktree it made", async () => {
+  const { ghq, client, cwd } = await tracked(
+    '#!/bin/sh\necho attempt >> .attempts\ntest -e "$(git rev-parse --git-common-dir)/setup-ok"\n',
+  );
+  await failure(client.run({ ref }));
+  writeFileSync(join(ghq.checkout("acme/app"), ".git/setup-ok"), "");
+
+  const output = await client.run({ ref });
+
+  expect(output).toMatchObject({ cwd, benchCreated: false, warnings: [] });
+  expect(attempts(cwd)).toBe(2);
+  expect(await client.bench.list()).toMatchObject([{ setupState: "ready" }]);
+});
+
+test("run after a failure redoes the setup in the worktree it made even when the repo was renamed since", async () => {
+  const { db, ghq, client, cwd } = await tracked(
+    '#!/bin/sh\ntest -e "$(git rev-parse --git-common-dir)/setup-ok"\n',
+  );
+  await failure(client.run({ ref }));
+  writeFileSync(join(ghq.checkout("acme/app"), ".git/setup-ok"), "");
+  db.update(issue).set({ repo: "acme/renamed" }).run();
+
+  const output = await client.run({ ref: "acme/renamed#12" });
+
+  expect(output).toMatchObject({ ref: "acme/renamed#12", cwd, benchCreated: false });
+  expect(ghq.gets).toEqual(["acme/app"]);
+  expect(await client.bench.list()).toMatchObject([{ setupState: "ready" }]);
+});
+
+test("run refuses to make again a worktree that is gone when the repo was renamed since", async () => {
+  const { db, ghq, client, cwd } = await tracked("#!/bin/sh\nexit 1\n");
+  await failure(client.run({ ref }));
+  rmSync(cwd, { recursive: true, force: true });
+  db.update(issue).set({ repo: "acme/renamed" }).run();
+
+  const error = await failure(client.run({ ref: "acme/renamed#12" }));
+
+  expect(error.code).toBe("PRECONDITION_FAILED");
+  expect(error.message).toContain("renamed");
+  expect(ghq.gets).toEqual(["acme/app"]);
+  expect(existsSync(cwd)).toBe(false);
+});
+
+test("run after a failure makes the worktree again when it is gone", async () => {
+  const { ghq, client, cwd } = await tracked(
+    '#!/bin/sh\ntest -e "$(git rev-parse --git-common-dir)/setup-ok"\n',
+  );
+  await failure(client.run({ ref }));
+  rmSync(cwd, { recursive: true, force: true });
+  writeFileSync(join(ghq.checkout("acme/app"), ".git/setup-ok"), "");
+
+  await client.run({ ref });
+
+  expect(git(cwd, "rev-parse", "--abbrev-ref", "HEAD")).toBe("issue-12");
+  expect(await client.bench.list()).toMatchObject([{ setupState: "ready" }]);
+});
+
+test("run --in-place opens the Bench on the Repo's checkout, cloning it, and runs no setup", async () => {
+  const { home, ghq, client } = await tracked("#!/bin/sh\nexit 1\n");
+  const checkout = ghq.checkout("acme/app");
+
+  const output = await client.run({ ref, inPlace: true });
+
+  expect(output).toEqual({
+    ref,
+    cwd: checkout,
+    mode: "in_place",
+    benchCreated: true,
+    warnings: [],
+  });
+  expect(ghq.gets).toEqual(["acme/app"]);
+  expect(existsSync(join(home, "worktrees"))).toBe(false);
+  expect(await client.bench.list()).toMatchObject([{ setupState: "ready" }]);
+  expect(await client.run({ ref })).toMatchObject({ cwd: checkout, benchCreated: false });
+});
+
+test("run --in-place refuses a Bench that is a worktree", async () => {
+  const { client } = await tracked();
+  await client.run({ ref });
+
+  const error = await failure(client.run({ ref, inPlace: true }));
+
+  expect(error.code).toBe("BAD_REQUEST");
+});
+
+test("run warns and starts from the local origin's default branch when it cannot fetch", async () => {
+  const { ghq, client, cwd } = await tracked();
+  ghq.clone("acme/app");
+  const checkout = ghq.checkout("acme/app");
+  git(checkout, "remote", "set-url", "origin", join(checkout, "gone"));
+
+  const output = await client.run({ ref });
+
+  expect(output.warnings).toEqual([expect.stringContaining("could not fetch origin/main")]);
+  expect(git(cwd, "rev-parse", "HEAD")).toBe(git(checkout, "rev-parse", "origin/main"));
+});
+
+test("run asks origin for its default branch when the checkout does not know it", async () => {
+  const { ghq, client, cwd } = await tracked();
+  ghq.clone("acme/app");
+  git(ghq.checkout("acme/app"), "symbolic-ref", "--delete", "refs/remotes/origin/HEAD");
+
+  await client.run({ ref });
+
+  expect(git(cwd, "rev-parse", "--abbrev-ref", "HEAD")).toBe("issue-12");
+});
+
+test("run refuses a Task that is closed or not tracked", async () => {
+  const { db, client } = await tracked();
+  db.update(task).set({ closedAt: new Date() }).run();
+
+  expect((await failure(client.run({ ref }))).code).toBe("BAD_REQUEST");
+  expect((await failure(client.run({ ref: "acme/app#99" }))).code).toBe("NOT_FOUND");
+});
+
+test("a Bench the Backend stopped preparing fails on the next start, and its setup is killed", async () => {
+  const { db, client, restartTask, cwd } = await tracked("#!/bin/sh\necho $$ > .pid\nsleep 30\n");
+  const running = failure(client.run({ ref }));
+  await until(() => existsSync(join(cwd, ".pid")));
+  const setupPid = Number(readFileSync(join(cwd, ".pid"), "utf8"));
+
+  const restarted = restartTask();
+  restarted.task.start();
+
+  expect((await running).code).toBe("PRECONDITION_FAILED");
+  await until(() => !isAlive(setupPid));
+  expect(db.select().from(bench).get()).toMatchObject({
+    setupState: "failed",
+    setupError: "the Backend stopped while preparing",
+  });
+  expect((await restarted.client.list({})).tasks).toMatchObject([
+    { displayState: { state: "setup_failed" } },
+  ]);
+});
+
+test("current names the Task of the Bench the calling Tab is in, and fails for any other Tab", async () => {
+  const { db, client } = await tracked();
+  await client.run({ ref });
+  const { id: benchRunspace } = db.select().from(runspace).get()!;
+  db.insert(runspace).values({ id: "rs-plain", cwd: "/work", sortOrder: 1 }).run();
+  for (const [terminalSessionId, runspaceId] of [
+    ["ts-bench", benchRunspace],
+    ["ts-plain", "rs-plain"],
+  ] as const) {
+    db.insert(terminalSession)
+      .values({
+        id: terminalSessionId,
+        cwd: "/work",
+        shell: "/bin/zsh",
+        status: "running",
+        createdAt: new Date(),
+      })
+      .run();
+    db.insert(tab)
+      .values({
+        id: `tab-${terminalSessionId}`,
+        runspaceId,
+        cwd: "/work",
+        sortOrder: 0,
+        terminalSessionId,
+      })
+      .run();
+  }
+
+  expect(await client.current({ terminalSessionId: "ts-bench" })).toEqual({
+    ref,
+    title: "Ship it",
+    displayState: { state: "ended" },
+    agentSessionId: null,
+    source: "bench",
+  });
+  expect((await failure(client.current({ terminalSessionId: "ts-plain" }))).code).toBe("NOT_FOUND");
+  expect((await failure(client.current({}))).code).toBe("BAD_REQUEST");
+});
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}

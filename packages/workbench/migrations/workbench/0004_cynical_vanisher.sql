@@ -1,0 +1,1 @@
+ALTER TABLE `runspace` ADD `owned` integer DEFAULT false NOT NULL;

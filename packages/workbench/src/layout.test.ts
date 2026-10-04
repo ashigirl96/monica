@@ -23,7 +23,7 @@ test("runspace.create opens a Runspace whose one Tab shows a new running Termina
   const { runspaceId, tab } = await client.runspace.create({ cwd: "/work", rows: 30, cols: 100 });
 
   expect(await client.layout.get()).toEqual({
-    runspaces: [{ id: runspaceId, cwd: "/work", sortOrder: 0, tabs: [tab] }],
+    runspaces: [{ id: runspaceId, cwd: "/work", sortOrder: 0, owned: false, tabs: [tab] }],
   });
   expect(tab).toMatchObject({ cwd: "/work", sortOrder: 0 });
   expect(await ptyd.received((op) => op.op === "create")).toMatchObject({
@@ -44,7 +44,7 @@ test("a Runspace whose Terminal Session ptyd refuses to create keeps its Tab on 
   const { runspaceId, tab } = await client.runspace.create({ cwd: "/nope", rows: 24, cols: 80 });
 
   expect(await client.layout.get()).toEqual({
-    runspaces: [{ id: runspaceId, cwd: "/nope", sortOrder: 0, tabs: [tab] }],
+    runspaces: [{ id: runspaceId, cwd: "/nope", sortOrder: 0, owned: false, tabs: [tab] }],
   });
   expect(await client.terminalSession.list()).toEqual([
     expect.objectContaining({
@@ -248,7 +248,7 @@ test("tab.respawn binds the Tab to a new Terminal Session started in its last kn
     ),
   ).toMatchObject({ cwd: "/work/sub", rows: 30, cols: 100 });
   expect(await client.layout.get()).toEqual({
-    runspaces: [{ id: runspaceId, cwd: "/work", sortOrder: 0, tabs: [respawned] }],
+    runspaces: [{ id: runspaceId, cwd: "/work", sortOrder: 0, owned: false, tabs: [respawned] }],
   });
   expect(await client.terminalSession.list()).toEqual([
     expect.objectContaining({ id: respawned.terminalSessionId, status: "running", tabId: tab.id }),

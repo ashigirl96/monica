@@ -4,13 +4,14 @@ import { alias } from "drizzle-orm/sqlite-core";
 import type { ListItem } from "./contract.ts";
 import { displayState } from "./display-state.ts";
 import { formatRef } from "./ref.ts";
-import { issue, issueBlocker, task } from "./schema.ts";
+import { bench, issue, issueBlocker, task } from "./schema.ts";
 
 export function listTasks(db: Db, { closed }: { closed: boolean }): ListItem[] {
   const rows = db
-    .select({ task, issue })
+    .select({ task, issue, bench })
     .from(task)
     .innerJoin(issue, eq(issue.id, task.issueId))
+    .leftJoin(bench, eq(bench.taskIssueId, task.issueId))
     .where(closed ? isNotNull(task.closedAt) : isNull(task.closedAt))
     .orderBy(asc(task.trackedAt), asc(task.issueId))
     .all();
@@ -35,7 +36,7 @@ export function listTasks(db: Db, { closed }: { closed: boolean }): ListItem[] {
     title: row.issue.title,
     issueState: row.issue.state,
     blockers: openBlockers.filter((b) => b.issueId === row.issue.id).map(formatRef),
-    cwd: null,
-    displayState: displayState(row.task, row.issue),
+    cwd: row.bench?.cwd ?? null,
+    displayState: displayState(row.task, row.issue, row.bench),
   }));
 }

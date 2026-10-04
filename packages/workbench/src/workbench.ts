@@ -4,6 +4,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { endAgentSessionsIn, reconcileAgentSessions } from "./agent-session.ts";
 import type { AgentSession, TerminalSession, WorkbenchChange } from "./contract.ts";
+import { createRunspace } from "./layout.ts";
 import { shortPath } from "./paths.ts";
 import { shouldRespawn } from "./pin.ts";
 import { openDaemon, type PtydClient, type SessionInfo } from "./ptyd.ts";
@@ -24,6 +25,7 @@ export type Workbench = {
   events: EventPublisher<{ change: WorkbenchChange }>;
   start(): Promise<void>;
   stop(): void;
+  createRunspace(tx: Tx, input: { cwd: string }): string;
 };
 
 export type NotificationDeps = {
@@ -184,6 +186,11 @@ export function createWorkbench(
     stop() {
       stopping = true;
       client?.close();
+    },
+    createRunspace(tx, { cwd }) {
+      const id = createRunspace(tx, { cwd, owned: true });
+      publish({ type: "layout" });
+      return id;
     },
   };
   internalsOf.set(workbench, { db, home, shell, publish, ready, notify, nameAgentSession });

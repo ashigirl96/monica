@@ -10,5 +10,6 @@ export {
   moveActiveTabAtom,
   toggleTabPinAtom,
 } from "./store.ts";
+export type { RenderRunspaceLabel } from "./sidebar.tsx";
 export { setUiZoomAtom, sidebarOpenAtom } from "./ui-state.ts";
 export { Workbench } from "./workbench.tsx";
