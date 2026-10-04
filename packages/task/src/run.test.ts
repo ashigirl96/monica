@@ -142,3 +142,33 @@ test("a Task with two live Runs shows the one that waits first and lists both", 
     ],
   });
 });
+
+test("task.changes signals the Task when its Run is made and whenever the Run's claude changes", async () => {
+  const books = started();
+  const inBench = books.openTab(await books.openBench(ref));
+  const outside = books.openTab(books.plainRunspace());
+  const changes: unknown[] = [];
+  books.task.events.subscribe("change", (change) => changes.push(change));
+
+  await books.hook(inBench, "s-1", "SessionStart", { source: "startup" });
+  await books.hook(inBench, "s-1", "UserPromptSubmit", { prompt: "go" });
+  await books.hook(outside, "s-2", "SessionStart", { source: "startup" });
+
+  expect(changes).toEqual([
+    { type: "task", ref },
+    { type: "task", ref },
+  ]);
+});
+
+test("start signals the Tasks whose Runs it makes", async () => {
+  const books = setup();
+  books.ghq.origin("acme/app", {});
+  const inBench = books.openTab(await books.openBench(ref));
+  await books.hook(inBench, "s-1", "SessionStart", { source: "startup" });
+  const changes: unknown[] = [];
+  books.task.events.subscribe("change", (change) => changes.push(change));
+
+  books.task.start();
+
+  expect(changes).toContainEqual({ type: "task", ref });
+});

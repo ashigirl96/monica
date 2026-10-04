@@ -2,18 +2,20 @@ import { agentSession, tab } from "@tania/workbench/schema";
 import type { Db } from "@tania/workbench/server";
 import { and, eq, inArray, isNull, ne } from "drizzle-orm";
 import type { RunAgentSession } from "./display-state.ts";
-import { bench, run } from "./schema.ts";
+import { formatRef } from "./ref.ts";
+import { bench, issue, run } from "./schema.ts";
 
 export const liveAgentSession = ne(agentSession.state, "ended");
 
 // Run になっている Agent Session は当て直さないので、Tab がどこへ移っても終わるまで元の Task の Run のまま。
-export function applyRunInvariant(db: Db, agentSessionId?: string) {
-  db.transaction((tx) => {
+export function applyRunInvariant(db: Db, agentSessionId?: string): string[] {
+  return db.transaction((tx) => {
     const orphans = tx
-      .select({ agentSessionId: agentSession.sessionId, taskIssueId: bench.taskIssueId })
+      .select({ agentSessionId: agentSession.sessionId, issue })
       .from(agentSession)
       .innerJoin(tab, eq(tab.terminalSessionId, agentSession.terminalSessionId))
       .innerJoin(bench, eq(bench.runspaceId, tab.runspaceId))
+      .innerJoin(issue, eq(issue.id, bench.taskIssueId))
       .leftJoin(run, eq(run.agentSessionId, agentSession.sessionId))
       .where(
         and(
@@ -23,12 +25,30 @@ export function applyRunInvariant(db: Db, agentSessionId?: string) {
         ),
       )
       .all();
-    if (orphans.length === 0) return;
+    if (orphans.length === 0) return [];
     const startedAt = new Date();
     tx.insert(run)
-      .values(orphans.map((orphan) => ({ ...orphan, origin: "started" as const, startedAt })))
+      .values(
+        orphans.map((orphan) => ({
+          taskIssueId: orphan.issue.id,
+          agentSessionId: orphan.agentSessionId,
+          origin: "started" as const,
+          startedAt,
+        })),
+      )
       .run();
+    return [...new Set(orphans.map((orphan) => formatRef(orphan.issue)))];
   });
+}
+
+export function refOfRunTask(db: Db, agentSessionId: string): string | null {
+  const found = db
+    .select({ repo: issue.repo, number: issue.number })
+    .from(run)
+    .innerJoin(issue, eq(issue.id, run.taskIssueId))
+    .where(eq(run.agentSessionId, agentSessionId))
+    .get();
+  return found ? formatRef(found) : null;
 }
 
 export function runAgentSessionsByTask(db: Db, taskIssueIds: number[]) {

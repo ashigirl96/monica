@@ -159,6 +159,9 @@ export const contract = {
       .output(z.array(BenchItemSchema)),
   },
   changes: meta
-    .meta({ description: "Stream signals that Tasks, their Issue copies or their Benches changed" })
+    .meta({
+      description:
+        "Stream signals that Tasks, their Issue copies, their Benches or the Agent Sessions of their Runs changed",
+    })
     .output(eventIterator(TaskChangeSchema)),
 };
