@@ -207,6 +207,22 @@ test("dropping the active Tab on another Runspace moves it to the end there, and
   expect(store.get(activeTerminalTabAtom)?.id).toBe(from.tab.id);
 });
 
+test("the view follows the front Tab when the Backend moves it to another Runspace on its own, as an Attach does", async () => {
+  const { db, workbench, client, store } = bench();
+  const from = await client.runspace.create(size);
+  // 移った後に先頭に残る Runspace。ついていかなければ画面はここに落ちる。
+  await client.runspace.create(size);
+  const owned = db.transaction((tx) => workbench.createRunspace(tx, { cwd: "/work/bench" }));
+  await store.set(reloadAtom);
+  store.set(activateTerminalTabAtom, from.tab.id);
+
+  db.transaction((tx) => workbench.moveTab(tx, from.tab.id, owned));
+  await store.set(reloadAtom);
+
+  expect(store.get(activeRunspaceAtom)?.id).toBe(owned);
+  expect(store.get(activeTerminalTabAtom)?.id).toBe(from.tab.id);
+});
+
 test("pinning the front Tab of a Runspace with siblings follows it into its own Runspace atop the sidebar, and pinning again unpins it", async () => {
   const { client, store } = bench();
   const shells = await client.runspace.create(size);

@@ -110,6 +110,17 @@ export const CurrentOutputSchema = z.object({
   source: z.enum(["run", "bench"]),
 });
 
+export const AttachOutputSchema = z.object({
+  ref: z.string(),
+  title: z.string(),
+  benchCreated: z.boolean().describe("whether the Bench was opened in place to take the Tab"),
+  runCreated: z.boolean(),
+  agentSessionId: z
+    .string()
+    .nullable()
+    .describe("the live Agent Session of the Tab, or null when no agent runs in it"),
+});
+
 export const BenchItemSchema = z.object({
   runspaceId: z.string(),
   ref: z.string(),
@@ -122,6 +133,7 @@ export type SyncOutput = z.infer<typeof SyncOutputSchema>;
 export type ListOutput = z.infer<typeof ListOutputSchema>;
 export type RunOutput = z.infer<typeof RunOutputSchema>;
 export type CurrentOutput = z.infer<typeof CurrentOutputSchema>;
+export type AttachOutput = z.infer<typeof AttachOutputSchema>;
 export type BenchItem = z.infer<typeof BenchItemSchema>;
 
 export const contract = {
@@ -169,6 +181,14 @@ export const contract = {
     .meta({ description: "Show the Task of the Tab this runs in", cli: true })
     .input(z.object({ terminalSessionId: z.string().optional() }))
     .output(CurrentOutputSchema),
+  attach: meta
+    .meta({
+      description:
+        "Move the Tab this runs in into the Bench of an open Task, opening the Bench in place when it has none, and make the Tab's claude a Run of the Task",
+      cli: true,
+    })
+    .input(z.object({ ref, terminalSessionId: z.string().optional() }))
+    .output(AttachOutputSchema),
   bench: {
     list: meta
       .meta({ description: "List the Benches with the labels of their Tasks" })

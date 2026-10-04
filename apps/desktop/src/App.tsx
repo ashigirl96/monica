@@ -1,4 +1,4 @@
-import { useRunspaceLabels } from "@tania/task/ui";
+import { useRunspaceLabels, useTabMenuItems } from "@tania/task/ui";
 import { Toaster } from "@tania/ui";
 import { Workbench } from "@tania/workbench/ui";
 import { useMemo } from "react";
@@ -12,10 +12,15 @@ export function App() {
   const workbench = useMemo(() => client?.workbench ?? null, [client]);
   const task = useMemo(() => client?.task ?? null, [client]);
   const renderRunspaceLabel = useRunspaceLabels(task);
+  const tabMenuItems = useTabMenuItems(task);
 
   return (
     <>
-      <Workbench client={workbench} renderRunspaceLabel={renderRunspaceLabel} />
+      <Workbench
+        client={workbench}
+        renderRunspaceLabel={renderRunspaceLabel}
+        tabMenuItems={tabMenuItems}
+      />
       <Toaster />
     </>
   );

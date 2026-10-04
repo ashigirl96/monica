@@ -18,7 +18,6 @@ import {
   updateTabCwdAtom,
   updateTabTitleAtom,
 } from "./store.ts";
-import { TabContextMenu } from "./tab-context-menu.tsx";
 import { uiZoomAtom } from "./ui-state.ts";
 import { useTerminal } from "./use-terminal.ts";
 
@@ -187,7 +186,6 @@ export default function WorkbenchContent() {
           />
         ))}
       <JumpOverlay />
-      <TabContextMenu />
     </div>
   );
 }

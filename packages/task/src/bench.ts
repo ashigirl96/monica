@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { ORPCError } from "@orpc/server";
-import type { Db, Workbench } from "@tania/workbench/server";
+import type { Db, Tx, Workbench } from "@tania/workbench/server";
 import type { Subprocess } from "bun";
 import { asc, eq } from "drizzle-orm";
 import type { BenchItem, TaskChange } from "./contract.ts";
@@ -101,24 +101,36 @@ function openBench(
   const opened = deps.db.transaction((tx) => {
     const existing = tx.select().from(bench).where(eq(bench.taskIssueId, forIssue.id)).get();
     if (existing) return { bench: existing, created: false };
-    const runspaceId = deps.workbench.createRunspace(tx, { cwd });
-    const created = tx
-      .insert(bench)
-      .values({
-        taskIssueId: forIssue.id,
-        runspaceId,
-        cwd,
-        mode,
-        branch: mode === "worktree" ? branchOf(forIssue) : null,
-        setupState: "preparing",
-        createdAt: new Date(),
-      })
-      .returning()
-      .get();
-    return { bench: created, created: true };
+    return {
+      bench: insertBench(tx, deps.workbench, forIssue, { cwd, mode, setupState: "preparing" }),
+      created: true,
+    };
   });
   if (opened.created) deps.publish({ type: "task", ref: formatRef(forIssue) });
   return opened;
+}
+
+export function insertBench(
+  tx: Tx,
+  workbench: Workbench,
+  forIssue: Issue,
+  { cwd, mode, setupState }: Pick<Bench, "cwd" | "mode" | "setupState">,
+): Bench {
+  const createdAt = new Date();
+  return tx
+    .insert(bench)
+    .values({
+      taskIssueId: forIssue.id,
+      runspaceId: workbench.createRunspace(tx, { cwd }),
+      cwd,
+      mode,
+      branch: mode === "worktree" ? branchOf(forIssue) : null,
+      setupState,
+      createdAt,
+      preparedAt: setupState === "ready" ? createdAt : null,
+    })
+    .returning()
+    .get();
 }
 
 // 準備中の Bench に来た run は同じ準備を待つ。呼び手が切れても準備は Backend の中で続く。

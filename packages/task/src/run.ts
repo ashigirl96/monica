@@ -1,5 +1,5 @@
 import { agentSession, tab } from "@tania/workbench/schema";
-import type { Db } from "@tania/workbench/server";
+import type { Db, Tx } from "@tania/workbench/server";
 import { and, eq, inArray, isNull, ne } from "drizzle-orm";
 import type { RunAgentSession } from "./display-state.ts";
 import { formatRef } from "./ref.ts";
@@ -7,8 +7,21 @@ import { bench, issue, run } from "./schema.ts";
 
 export const liveAgentSession = ne(agentSession.state, "ended");
 
+export type RunOrigin = (typeof run.$inferInsert)["origin"];
+
+export function insertRuns(
+  tx: Tx,
+  origin: RunOrigin,
+  runs: { taskIssueId: number; agentSessionId: string }[],
+) {
+  const startedAt = new Date();
+  tx.insert(run)
+    .values(runs.map((r) => ({ ...r, origin, startedAt })))
+    .run();
+}
+
 // Run になっている Agent Session は当て直さないので、Tab がどこへ移っても終わるまで元の Task の Run のまま。
-export function applyRunInvariant(db: Db, agentSessionId?: string): string[] {
+export function applyRunInvariant(db: Db, origin: RunOrigin, agentSessionId?: string): string[] {
   return db.transaction((tx) => {
     const orphans = tx
       .select({ agentSessionId: agentSession.sessionId, issue })
@@ -26,17 +39,14 @@ export function applyRunInvariant(db: Db, agentSessionId?: string): string[] {
       )
       .all();
     if (orphans.length === 0) return [];
-    const startedAt = new Date();
-    tx.insert(run)
-      .values(
-        orphans.map((orphan) => ({
-          taskIssueId: orphan.issue.id,
-          agentSessionId: orphan.agentSessionId,
-          origin: "started" as const,
-          startedAt,
-        })),
-      )
-      .run();
+    insertRuns(
+      tx,
+      origin,
+      orphans.map((orphan) => ({
+        taskIssueId: orphan.issue.id,
+        agentSessionId: orphan.agentSessionId,
+      })),
+    );
     return [...new Set(orphans.map((orphan) => formatRef(orphan.issue)))];
   });
 }

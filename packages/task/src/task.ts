@@ -4,7 +4,7 @@ import { type BenchDeps, failInterruptedPreparations } from "./bench.ts";
 import type { BackgroundSyncError, TaskChange } from "./contract.ts";
 import { defaultGitHub, type GitHub } from "./github.ts";
 import { defaultGhq, type Ghq, killSetups } from "./prepare.ts";
-import { applyRunInvariant, refOfRunTask } from "./run.ts";
+import { applyRunInvariant, type RunOrigin, refOfRunTask } from "./run.ts";
 import { SYNC_TIMEOUT_MS, type SyncDeps, syncOpenTasks } from "./sync.ts";
 
 export type Task = {
@@ -61,7 +61,7 @@ export function createTask(deps: {
   function onAgentSessionChanged(agentSessionId: string) {
     if (stopped.signal.aborted) return;
     try {
-      applyRunInvariant(db, agentSessionId);
+      applyRunInvariant(db, "started", agentSessionId);
       const ref = refOfRunTask(db, agentSessionId);
       if (ref) syncDeps.publish({ type: "task", ref });
     } catch (error) {
@@ -69,9 +69,10 @@ export function createTask(deps: {
     }
   }
 
-  function applyRunInvariantToAll() {
+  function applyRunInvariantToAll(origin: RunOrigin) {
+    if (stopped.signal.aborted) return;
     try {
-      for (const ref of applyRunInvariant(db)) syncDeps.publish({ type: "task", ref });
+      for (const ref of applyRunInvariant(db, origin)) syncDeps.publish({ type: "task", ref });
     } catch (error) {
       console.error(`[task] could not make Runs of the Agent Sessions in the Benches: ${error}`);
     }
@@ -101,10 +102,13 @@ export function createTask(deps: {
       unsubscribe = workbench.events.subscribe("change", (change) => {
         if (change.type === "agentSession") {
           queueMicrotask(() => onAgentSessionChanged(change.sessionId));
+        } else if (change.type === "layout") {
+          // 合図はどの Tab が動いたかを持たず、Tab ごと Bench に入った Agent Session は Attach なので、全件に attached で当てる。
+          queueMicrotask(() => applyRunInvariantToAll("attached"));
         }
       });
       // commit の後、購読の microtask が走る前に止まった Backend の分は、合図が二度と来ない。
-      applyRunInvariantToAll();
+      applyRunInvariantToAll("started");
       void syncInBackground();
       timer = setInterval(() => void syncInBackground(), BACKGROUND_SYNC_INTERVAL_MS);
     },
