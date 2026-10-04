@@ -395,6 +395,25 @@ test("while close is under way, a run that would resume the last claude is refus
   expect(books.ptyd.filter((call) => call.op === "start")).toHaveLength(1);
 });
 
+test("a run --in-place that waited on ghq while the Task was closed opens no Bench", async () => {
+  const books = await tracked();
+  const { client, db, ghq } = books;
+  let answer: ((root: string) => void) | undefined;
+  const root = await ghq.client.root();
+  spyOn(ghq.client, "root").mockImplementation(
+    () => new Promise<string>((resolve) => (answer = resolve)),
+  );
+  const running = failure(client.run({ ref, inPlace: true }));
+  await until(() => answer !== undefined);
+
+  await client.close({ ref });
+  answer!(root);
+
+  expect((await running).code).toBe("BAD_REQUEST");
+  expect(benchOf(books)).toBeUndefined();
+  expect(db.select().from(runspace).all()).toEqual([]);
+});
+
 test("a second close while the first is under way is refused", async () => {
   const books = await withWorktreeBench();
   const { closing, release } = await closeHeldAtSync(books);

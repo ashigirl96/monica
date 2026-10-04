@@ -14,6 +14,7 @@ import {
   setupLogOf,
   worktreeOf,
 } from "./prepare.ts";
+import { findOpenTask } from "./open-task.ts";
 import { formatRef } from "./ref.ts";
 import { bench, issue } from "./schema.ts";
 
@@ -52,7 +53,6 @@ export async function prepareBench(
           });
         })
       : worktreeOf(deps.home, found.issue));
-  refuseClosing(deps, found.issue.id, ref);
   // 待つ間に別の run が Bench を作っていれば、そちらを使う。
   const opened = openBench(deps, found.issue, { cwd, mode });
   refuseInPlace(opened.bench, inPlace, ref);
@@ -108,6 +108,9 @@ function openBench(
   { cwd, mode }: Pick<Bench, "cwd" | "mode">,
 ): { bench: Bench; created: boolean } {
   const opened = deps.db.transaction((tx) => {
+    // ghq root を待つ間に close が走り終えていれば、Task はもう閉じている。
+    findOpenTask(tx, eq(issue.id, forIssue.id), formatRef(forIssue));
+    refuseClosing(deps, forIssue.id, formatRef(forIssue));
     const existing = tx.select().from(bench).where(eq(bench.taskIssueId, forIssue.id)).get();
     if (existing) return { bench: existing, created: false };
     return {

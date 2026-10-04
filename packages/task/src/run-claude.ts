@@ -127,6 +127,7 @@ async function openClaudeTab(deps: BenchDeps, launch: Launch) {
   const { db, workbench } = deps;
   await workbench.ready();
   const opened = db.transaction((tx) => {
+    findOpenTask(tx, eq(issue.id, launch.bench.taskIssueId), launch.ref);
     refuseClosing(deps, launch.bench.taskIssueId, launch.ref);
     return workbench.openTab(tx, { runspaceId: launch.bench.runspaceId, cwd: launch.tabCwd });
   });
