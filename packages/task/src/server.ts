@@ -1,12 +1,14 @@
 import { implement } from "@orpc/server";
 import type { Db } from "@tania/workbench/server";
-import { currentTask, listBenches, runTask } from "./bench.ts";
+import { listBenches, runTask } from "./bench.ts";
 import { contract } from "./contract.ts";
+import { currentTask } from "./current.ts";
 import { listTasks } from "./list.ts";
 import { syncCommand, trackIssue } from "./sync.ts";
 import { internals, type Task } from "./task.ts";
 
 export { migrations } from "../migrations/index.ts";
+export { nameAgentSession } from "./current.ts";
 export type { GitHub } from "./github.ts";
 export type { Ghq } from "./prepare.ts";
 export { createTask, type Task } from "./task.ts";
@@ -33,7 +35,3 @@ export const router = os.router({
     }
   }),
 });
-
-export function nameAgentSession(_db: Db, _agentSessionId: string): string | null {
-  return null;
-}

@@ -10,7 +10,7 @@ spec または ticket でユーザーが記述した作業を実装する。tick
 
 型チェックと単一テストファイルの実行は定期的に、テストスイート全体の実行は最後に 1 回行う。
 
-完了したら `mattpocock-skills:code-review` で、Standards と Spec の 2 軸のレビューを受ける。この時点の変更はまだコミットしていないので、diff は `git diff $(git merge-base main HEAD)` で渡す。新しいファイルはこの diff に出ないので、先に `git add -N` で載せる。
+完了したら `mattpocock-skills:code-review` で、Standards と Spec の 2 軸のレビューを受ける。この時点の変更はまだコミットしていないので、diff は `git diff $(git merge-base origin/main HEAD)` で渡す。worktree のローカルの `main` は古いことがあり、他の PR の変更が diff に混ざるため。新しいファイルはこの diff に出ないので、先に `git add -N` で載せる。
 
 作業を /create-pr でコミットし、PR を出す。
 

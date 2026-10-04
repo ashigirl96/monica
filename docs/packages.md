@@ -151,7 +151,7 @@ package ごとに in-memory の SQLite に自分の migration を当てる（tas
 2. 全 procedure に `.meta({ description })` と `.output()` を付ける。description は CLI の help の正本、output は `--format json` の形の正本になる（#17 の JSON の形もここに書く）。
 3. CLI に出すのは `.meta({ cli: true })` を付けた procedure だけ（ADR-0003）。event iterator の procedure は付けても出ない。
 4. 呼び手が分岐する domain エラー（close の guard のように `data` に理由の一覧を持つもの）だけを `.errors()` で宣言する。それ以外は oRPC の標準 code（`NOT_FOUND`、`BAD_REQUEST`）を投げる。
-5. 変更の stream は domain ごとに 1 本（`workbench.changes`、`task.changes`）で、判別 union の event を流す。中身は `events` と同じ合図。
+5. 変更の stream は domain ごとに 1 本（`workbench.changes`、`task.changes`）で、判別 union の event を流す。中身は `events` と同じ合図。合図は、その domain の procedure の output が変わる経路すべてで出す。stream だけを購読して読み直す client が、古い output を持ったまま残らないようにするため。他の domain の行から導く output（task の表示状態は workbench の Agent Session から導く）は、相手の合図を受けて自分の合図を出す。
 6. `oc.meta(...)` と `createSchemaFactory({ coerce: { date: true } })` は各 package の `contract.ts` の中にだけ書く。oRPC 2.0 で `.meta` が plugin 制になったときに直す場所を 1 つにするため（#21）。例外は `apps/cli/src/forward.ts` で、output を持たない procedure を組み直すために contract の meta を `os.$meta` で引き継ぐ（「CLI（apps/cli）」の節）。
 
 contract を走査するテストを 1 本置き、description と output が全 procedure にあること、`cli: true` の procedure に整形関数があることを確かめる。
@@ -313,6 +313,7 @@ ADR-0008 の「Backend 起動時」と ADR-0011 の reconcile の規則のうち
 - Agent Session の居場所（`terminal_session_id`）は、受け付けた hook の Terminal Session に合わせる。resume の SessionStart を取りこぼした agent が前の Tab に結ばれたままだと、前の Tab が閉じたときに生きている agent を終了にしてしまうため。 つの Terminal Session に live な Agent Session が 1 つであることは、`agent_session` の部分 unique index（`state <> 'ended'`）が守る。cwd も受け付けた hook の値に合わせる。
 - Terminal Session の行が終わるとき（ptyd の Exit、reconcile の lost / exited）、同じ transaction で、その Terminal Session の終了でない Agent Session を終了（terminal_exited）にする。
 - 生きている Terminal Session の動作中の Agent Session を未観測にするのは、Backend の起動直後の reconcile だけ。ptyd に繋ぎ直したときの reconcile では動作中のままにする。その間も Backend は居て hook を受けていたため。
+- reconcile が終了や未観測にした Agent Session も、`reconciled` の前に 1 つずつ `{ type: "agentSession", sessionId }` で知らせる。`agentSession` の合図だけを読む購読側（task の Run）にも、ptyd に繋ぎ直したときの終了が届くようにするため。
 
 ### Tab の外から来た hook
 
@@ -411,7 +412,7 @@ ptyd は shell を常に `--login` で起こすので、zsh は `.zshenv` → `.
 
 ## 通知
 
-Agent Session がユーザー待ちに入ったときに macOS の通知を出す（ADR-0013、語は `GLOSSARY.md` の通知）。判定と本文は workbench が持ち、OS に渡すのは Shell が持つ。Task の無い Tab でも出すので、観測と同じく Workbench を持ち込む骨格の実装に含める。task が足すのは `nameAgentSession` だけで、Task v1 の Run の slice に入る。
+Agent Session がユーザー待ちに入ったときに macOS の通知を出す（ADR-0013、語は `GLOSSARY.md` の通知）。判定と本文は workbench が持ち、OS に渡すのは Shell が持つ。Task の無い Tab でも出すので、観測と同じく Workbench を持ち込む骨格の実装に含める。task が足すのは `nameAgentSession` だけ（「Task の帳簿」の Run の節）。
 
 ### 出す遷移
 
@@ -436,7 +437,7 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 ### title と body
 
 - title は呼び名。`nameAgentSession(db, agentSessionId)` が文字列を返せばそれを使う。null なら Agent Session の cwd の末尾 2 つ（monica の `shortPath`）を使う。長さは切らない（macOS が切る）。
-- `nameAgentSession` は table を読むだけの関数。その Agent Session の Run の Task を引き、無ければ Tab → Runspace → Bench の Task を引いて（CLI の `current` と同じ順）、Bench のラベルと同じ `<repo>#<n> <title>` を返す。後ろの経路は、SessionStart を取りこぼして Run がまだ無い Agent Session のためにある。
+- `nameAgentSession` は table を読むだけの関数。その Agent Session の Run の Task を引き、無ければ Tab → Runspace → Bench の Task を引いて（CLI の `current` と同じ順）、Bench のラベルと同じ `<repo>#<n> <title>` を返す。後ろの経路は、通知の判定（`recordHook` の commit 直後）が task の購読より先に走り、Bench の Tab で始まったばかりの Agent Session にまだ Run が無い場合のためにある。
 - body は理由。`手空き`、`質問`、`許可: <tool>`、`エラー: <error_type>`（error_type が無ければ `エラー`）。
 - 音は鳴らさない。
 
@@ -466,9 +467,20 @@ changes     → { type: "task", ref } | { type: "synced" }
 ```
 
 - ref は `owner/repo#n` と `https://github.com/owner/repo/issues/n`（後ろの `?…` と `#…` は捨てる）だけを受ける。CLI では位置引数にする（zod の `.meta({ positional: true })`）。
-- `ListItem` の `displayState` は純関数 `displayState(task, issue, bench)` が TS で導く。今は `closed` / `issue_closed` / `not_started` / `preparing` / `setup_failed` / `ended` の 6 段で、Run を足す slice が引数と段を足す。`ListItem` の `cwd` は Bench の cwd。
-- `current` は呼び手の Terminal Session から Tab → Runspace → Bench の Task を引く（Run を先に見る経路は slice 3a が足す）。`terminalSessionId` が無ければ `BAD_REQUEST`、Tab が Bench に無ければ `NOT_FOUND`。今は `agentSessionId` が常に null、`source` が常に `bench`。
-- Bench の行の変化（作成、準備の終わり）は `{ type: "task", ref }` で知らせる。
+- `ListItem` の `displayState` は純関数 `displayState(task, issue, bench, runs)` が TS で導く（#17 の表）。`runs` はその Task の Run の Agent Session。live な Run があれば `waiting`（`reason`、許可なら `tool`、エラーなら `errorType`）/ `unobserved` / `running` に `since`（`state_changed_at`）と `liveRuns` を付け、無ければ `closed` / `issue_closed` / `not_started` / `preparing` / `setup_failed` / `ended` の 1 語にする。`liveRuns` は代表を先頭に集約の順で並べる。`ListItem` の `cwd` は Bench の cwd。
+- 人間向けの STATE の 1 マスは `waiting:permission(Bash) 12m +1`（理由、許可なら tool 名、`since` からの経過、他の live な Run の件数）。経過は 60 秒未満が `s`、60 分未満が `m`、24 時間未満が `h`、それ以上が `d` で、切り捨てる。
+- `current` は呼び手の Terminal Session の live な Agent Session が Run ならその Task を返し（`source: run`、`agentSessionId` はその Agent Session）、そうでなければ Tab → Runspace → Bench の Task を引く（`source: bench`、`agentSessionId` は null）。`terminalSessionId` が無ければ `BAD_REQUEST`、どちらでも引けなければ `NOT_FOUND`。
+- Bench の行の変化（作成、準備の終わり）と、Run の Agent Session の変化（Run になったときを含む）は `{ type: "task", ref }` で知らせる。表示状態は Run の Agent Session から導くので、`task.changes` だけで `list` を描き直せるようにする。
+
+### Run
+
+`GLOSSARY.md` の Run を不変条件で保つ。「Bench の Runspace にある Tab の live な（`agent_session.state != 'ended'`）Agent Session で、どの Run でもないものは、その Bench の Task の Run になる」（ADR-0005）。
+
+- task は `start()` で `workbench.events` を listener で購読し、`agentSession` の合図が来たらその Agent Session に不変条件を当てる。async iterator の購読は溜まった合図を 100 件で捨てるので使わない。workbench は transaction の中でも publish するので、読み直しは `queueMicrotask` で commit の後に回す。`stop()` で購読を外す。
+- `start()` は購読を張った後に、全件に 1 回当てる。Backend の更新より前から Bench の Tab に居た Agent Session と、commit から購読の microtask までの間に Backend が止まった分を拾う。Backend が居ない間の hook は CLI が捨てるので、不在中に始まった claude の行は起動後の最初の hook で生まれ、購読の経路で Run になる。
+- 全件は workbench の reconcile を待たずに当てるので、不在中に Terminal Session が終わった Agent Session も、終了になる前に Run になることがある。Backend が止まる前に Bench の Tab で動いていた agent なので、Task の Run にして差し支えない。
+- どちらの経路も `origin = started` で insert する。一度 Run になった Agent Session は、Tab がどこに移っても、終わるまでその Task の Run のまま（`run.agent_session_id` の UNIQUE が守る）。closed な Task には Bench が無いので、Run は生まれない。layout の合図（Tab の移動）で当てるのは slice 4。
+- task のテストは、Tab と live な Terminal Session の行を fixture で書き、hook は workbench の `agentSession.recordHook` に渡す（`testing.ts` の `openTab` と `hook`）。Agent Session の行と合図を Backend と同じ経路で作るため。
 
 ### Bench
 
