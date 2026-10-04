@@ -36,39 +36,45 @@ export async function inspectWorktree(
   if (present && (await git(path, "status", "--porcelain", "--untracked-files=normal")) !== "") {
     refusals.push({ kind: "uncommitted_changes" });
   }
-  // fetch しないので、push した commit は merge されていなくても止めない。
-  if (
-    branchExists &&
-    (await git(
-      checkout,
-      "rev-list",
-      "--max-count=1",
-      `refs/heads/${branch}`,
-      "--not",
-      "--remotes",
-    )) !== ""
-  ) {
+  if (branchExists && (await hasUnpublishedCommits(checkout, branch))) {
     refusals.push({ kind: "unpublished_commits", branch });
   }
   return { path, branch, checkout, present, branchExists, refusals };
 }
 
-export async function removeWorktree({
-  path,
-  branch,
-  checkout,
-  present,
-  branchExists,
-}: InspectedWorktree) {
+/** force でなければ、調べた後に書かれた変更と commit を git と見直しで断る。 */
+export async function removeWorktree(
+  { path, branch, checkout, present, branchExists }: InspectedWorktree,
+  { force }: { force: boolean },
+) {
   if (!checkout) return { removedWorktree: null, deletedBranch: null };
   if (present) {
-    await git(checkout, "worktree", "remove", "--force", path);
+    await git(checkout, "worktree", "remove", ...(force ? ["--force"] : []), path);
   } else {
     // 登録が残るとその branch を消せないので、関係の無い登録まで外す prune ではなく、この path の登録だけを外す。
     await succeeds(git(checkout, "worktree", "remove", "--force", path));
   }
-  if (branchExists) await git(checkout, "branch", "-D", branch);
+  if (branchExists) {
+    // worktree を外した後は、この branch に commit が積まれない。
+    if (!force && (await hasUnpublishedCommits(checkout, branch))) {
+      throw new Error(`branch ${branch} has commits on no remote`);
+    }
+    await git(checkout, "branch", "-D", branch);
+  }
   return { removedWorktree: present ? path : null, deletedBranch: branchExists ? branch : null };
+}
+
+// fetch しないので、push した commit は merge されていなくても数えない。
+async function hasUnpublishedCommits(checkout: string, branch: string): Promise<boolean> {
+  const commits = await git(
+    checkout,
+    "rev-list",
+    "--max-count=1",
+    `refs/heads/${branch}`,
+    "--not",
+    "--remotes",
+  );
+  return commits !== "";
 }
 
 async function checkoutOnDisk(ghq: Ghq, repo: string): Promise<string | null> {

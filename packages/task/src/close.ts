@@ -44,24 +44,28 @@ async function closeReserved(
     benchRow?.mode === "worktree"
       ? await stopOnGitFailure(ref, () => inspectWorktree(deps.ghq, benchRow, found.issue))
       : null;
-  if (!input.force) {
+  const force = input.force ?? false;
+  const refuse = (reasons: CloseRefusal[]) =>
+    errors.CLOSE_REFUSED({
+      message: refusalMessage(ref, reasons, benchRow?.cwd),
+      data: { reasons },
+    });
+  if (!force) {
     const reasons = [
       ...liveRunsBesides(deps.db, found.issue.id, input.terminalSessionId),
       ...(worktree?.refusals ?? []),
     ];
-    if (reasons.length > 0) {
-      throw errors.CLOSE_REFUSED({
-        message: refusalMessage(ref, reasons, benchRow?.cwd),
-        data: { reasons },
-      });
-    }
+    if (reasons.length > 0) throw refuse(reasons);
   }
   const removed = worktree
-    ? await stopOnGitFailure(ref, () => removeWorktree(worktree))
+    ? await stopOnGitFailure(ref, () => removeWorktree(worktree, { force }))
     : { removedWorktree: null, deletedBranch: null };
   const closed = deps.db.transaction((tx) => {
     const now = openTaskToClose(tx, eq(issue.id, found.issue.id), ref);
     const closedRef = formatRef(now.issue);
+    // git を待つ間に Bench の Tab で起こした claude も、hook から Run になっている。
+    const lateRuns = force ? [] : liveRunsBesides(tx, found.issue.id, input.terminalSessionId);
+    if (lateRuns.length > 0) throw refuse(lateRuns);
     tx.update(task).set({ closedAt: new Date() }).where(eq(task.issueId, found.issue.id)).run();
     if (!now.bench) return { ref: closedRef, spared: false, terminalSessionIds: [] };
     tx.delete(bench).where(eq(bench.taskIssueId, found.issue.id)).run();
@@ -127,7 +131,11 @@ function closedTask(db: Pick<Db, "select">, where: SQL | undefined, asked: strin
 }
 
 // close を頼んだ agent の Run は、close の後も呼び手の Tab に残るので止めない。
-function liveRunsBesides(db: Db, taskIssueId: number, caller: string | undefined): CloseRefusal[] {
+function liveRunsBesides(
+  db: Pick<Db, "select">,
+  taskIssueId: number,
+  caller: string | undefined,
+): CloseRefusal[] {
   return db
     .select({ agentSessionId: agentSession.sessionId, state: agentSession.state })
     .from(run)

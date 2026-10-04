@@ -1,5 +1,5 @@
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runspace, tab } from "@tania/workbench/schema";
 import { eq } from "drizzle-orm";
@@ -384,6 +384,47 @@ test("a second close while the first is under way is refused", async () => {
 
   expect(error.code).toBe("CONFLICT");
   expect(await closing).toMatchObject({ removedWorktree: books.cwd });
+});
+
+// git の reference-transaction hook で、close の `branch -D issue-12` を release の file ができるまで止める。
+function pauseBranchDeletion(books: Books) {
+  const marks = join(books.home, "pause");
+  mkdirSync(marks);
+  const started = join(marks, "started");
+  const release = join(marks, "release");
+  const hook = join(books.ghq.checkout("acme/app"), ".git/hooks/reference-transaction");
+  writeFileSync(
+    hook,
+    [
+      "#!/bin/sh",
+      '[ "$1" = prepared ] || exit 0',
+      "grep -q refs/heads/issue-12 || exit 0",
+      `touch '${started}'`,
+      `while [ ! -e '${release}' ]; do sleep 0.02; done`,
+    ].join("\n"),
+  );
+  chmodSync(hook, 0o755);
+  return { started, release };
+}
+
+test("a claude that becomes a Run of the Task while close removes the worktree stops close, and its Tab is left alone", async () => {
+  const books = await withWorktreeBench();
+  const pause = pauseBranchDeletion(books);
+  const closing = failure(books.client.close({ ref }));
+  await until(() => existsSync(pause.started));
+
+  await books.hook(books.claudeTab, "s-1", "SessionStart", { source: "startup" });
+  writeFileSync(pause.release, "");
+  const error = await closing;
+
+  expect(error.code).toBe("CLOSE_REFUSED");
+  expect(error.data).toEqual({
+    reasons: [{ kind: "active_run", agentSessionId: "s-1", state: "waiting" }],
+  });
+  expect(benchOf(books)).toBeDefined();
+  expect(tabsOf(books)).toEqual([{ terminalSessionId: books.claudeTab }]);
+  expect(terminated(books)).toEqual([]);
+  expect((await books.client.list({})).tasks).toMatchObject([{ ref }]);
 });
 
 test("reopen is refused while close is still terminating the Terminal Sessions of the Bench", async () => {
