@@ -1,0 +1,6 @@
+{
+  "name": "tania",
+  "owner": { "name": "ashigirl96" },
+  "metadata": { "description": "The tania plugin, read in place from this checkout" },
+  "plugins": [{ "name": "tania", "source": "./" }]
+}

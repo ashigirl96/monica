@@ -12,6 +12,17 @@ export type Deps = {
 };
 
 export async function runCli(argv: string[], deps: Deps): Promise<number> {
+  const { cli, params, program } = createProgram(argv, deps);
+  try {
+    await cli.run(params, program);
+    return 0;
+  } catch (error) {
+    if (!(error instanceof FailedToExitError)) throw error;
+    return error.cause instanceof BackendNotRunning ? 2 : error.exitCode;
+  }
+}
+
+export function createProgram(argv: string[], deps: Deps) {
   let program: Command | undefined;
   const router = forwardingRouter(contract, formatters, {
     connect() {
@@ -58,13 +69,7 @@ export async function runCli(argv: string[], deps: Deps): Promise<number> {
         outputError: (text, write) => write(`${usageError(text)}\n`),
       }),
   );
-  try {
-    await cli.run(params, program);
-    return 0;
-  } catch (error) {
-    if (!(error instanceof FailedToExitError)) throw error;
-    return error.cause instanceof BackendNotRunning ? 2 : error.exitCode;
-  }
+  return { cli, params, program };
 }
 
 function forEachCommand(command: Command, visit: (command: Command) => void) {
