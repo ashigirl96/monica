@@ -1,13 +1,18 @@
 import type { Db, Tx } from '@tania/workbench/server'
 import { and, asc, eq, inArray, ne, or, sql } from 'drizzle-orm'
-import { alias } from 'drizzle-orm/sqlite-core'
+import { alias, type SQLiteColumn } from 'drizzle-orm/sqlite-core'
 
-import type { GitHubIssue, LinkedIssue } from './github.ts'
+import type { GitHubIssue, GitHubPullRequest, LinkedIssue } from './github.ts'
 import { formatRef, type IssueRef } from './ref.ts'
-import { issue, issueBlocker } from './schema.ts'
+import { issue, issueBlocker, pullRequest, taskPullRequest } from './schema.ts'
+
+// GitHub の repo 名は大文字と小文字を区別しない。
+export function isRepo(column: SQLiteColumn, repo: string) {
+  return eq(sql`lower(${column})`, repo.toLowerCase())
+}
 
 export function isIssue({ repo, number }: IssueRef) {
-  return and(eq(sql`lower(${issue.repo})`, repo.toLowerCase()), eq(issue.number, number))
+  return and(isRepo(issue.repo, repo), eq(issue.number, number))
 }
 
 export function openBlockersOf(db: Db, issueIds: number[]) {
@@ -30,18 +35,19 @@ export function writeIssues(
   copied: GitHubIssue[],
   askedRepo: string,
   syncedAt: Date,
-): number[] {
-  const ids = copied.map((one) =>
-    upsert(
+): { id: number; copied: GitHubIssue }[] {
+  const written = copied.map((one) => ({
+    id: upsert(
       tx,
       one,
       {},
       { title: one.title, state: one.state, labels: one.labels, parentId: null, syncedAt },
       { repo: askedRepo, number: one.number },
     ),
-  )
-  copied.forEach((one, i) => writeCopy(tx, ids[i]!, one, syncedAt))
-  return ids
+    copied: one,
+  }))
+  for (const { id, copied: one } of written) writeCopy(tx, id, one, syncedAt)
+  return written
 }
 
 function writeCopy(tx: Tx, id: number, copied: GitHubIssue, syncedAt: Date) {
@@ -104,6 +110,55 @@ function upsert(
     .insert(issue)
     .values({ ...identity, ...insert })
     .returning({ id: issue.id })
+    .get().id
+}
+
+/** GitHub が答えなかった経路は、前の対応の行を残す。 */
+export function writePullRequests(
+  tx: Tx,
+  taskIssueId: number,
+  copied: GitHubIssue,
+  syncedAt: Date,
+) {
+  const sources = [
+    ['closing_reference', copied.closingPullRequests],
+    ['branch', copied.branchPullRequests],
+  ] as const
+  for (const [source, pullRequests] of sources) {
+    if (pullRequests === null) continue
+    const ids = new Set(pullRequests.map((one) => upsertPullRequest(tx, one, syncedAt)))
+    tx.delete(taskPullRequest)
+      .where(and(eq(taskPullRequest.taskIssueId, taskIssueId), eq(taskPullRequest.source, source)))
+      .run()
+    if (ids.size > 0) {
+      tx.insert(taskPullRequest)
+        .values([...ids].map((pullRequestId) => ({ taskIssueId, pullRequestId, source })))
+        .run()
+    }
+  }
+}
+
+function upsertPullRequest(
+  tx: Tx,
+  { repo, number, ...copied }: GitHubPullRequest,
+  syncedAt: Date,
+): number {
+  const existing = tx
+    .select({ id: pullRequest.id })
+    .from(pullRequest)
+    .where(and(isRepo(pullRequest.repo, repo), eq(pullRequest.number, number)))
+    .get()
+  if (existing) {
+    tx.update(pullRequest)
+      .set({ repo, ...copied, syncedAt })
+      .where(eq(pullRequest.id, existing.id))
+      .run()
+    return existing.id
+  }
+  return tx
+    .insert(pullRequest)
+    .values({ repo, number, ...copied, syncedAt })
+    .returning({ id: pullRequest.id })
     .get().id
 }
 

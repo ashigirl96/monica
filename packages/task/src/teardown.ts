@@ -13,6 +13,7 @@ export type InspectedWorktree = {
   checkout: string | null
   present: boolean
   branchExists: boolean
+  mergedHeads: string[]
   refusals: CloseRefusal[]
 }
 
@@ -21,6 +22,7 @@ export async function inspectWorktree(
   ghq: Ghq,
   row: Pick<Bench, 'cwd' | 'branch'>,
   forIssue: IssueRef,
+  mergedHeads: string[],
 ): Promise<InspectedWorktree> {
   const path = row.cwd
   const branch = row.branch ?? branchOf(forIssue)
@@ -29,7 +31,9 @@ export async function inspectWorktree(
   const checkout = present
     ? dirname(await git(path, 'rev-parse', '--path-format=absolute', '--git-common-dir'))
     : await checkoutOnDisk(ghq, forIssue.repo)
-  if (!checkout) return { path, branch, checkout, present, branchExists: false, refusals: [] }
+  if (!checkout) {
+    return { path, branch, checkout, present, branchExists: false, mergedHeads, refusals: [] }
+  }
   const branchExists = await succeeds(
     git(checkout, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`),
   )
@@ -37,15 +41,15 @@ export async function inspectWorktree(
   if (present && (await git(path, 'status', '--porcelain', '--untracked-files=normal')) !== '') {
     refusals.push({ kind: 'uncommitted_changes' })
   }
-  if (branchExists && (await hasUnpublishedCommits(checkout, branch))) {
+  if (branchExists && (await hasUnpublishedCommits(checkout, branch, mergedHeads))) {
     refusals.push({ kind: 'unpublished_commits', branch })
   }
-  return { path, branch, checkout, present, branchExists, refusals }
+  return { path, branch, checkout, present, branchExists, mergedHeads, refusals }
 }
 
 /** force でなければ、調べた後に worktree に書かれた変更は git が断り、積まれた commit の branch は残す。 */
 export async function removeWorktree(
-  { path, branch, checkout, present, branchExists }: InspectedWorktree,
+  { path, branch, checkout, present, branchExists, mergedHeads }: InspectedWorktree,
   { force }: { force: boolean },
 ) {
   if (!checkout) return { removedWorktree: null, deletedBranch: null, warnings: [] }
@@ -58,7 +62,7 @@ export async function removeWorktree(
   const removedWorktree = present ? path : null
   if (!branchExists) return { removedWorktree, deletedBranch: null, warnings: [] }
   // worktree を外した後は、この branch に commit が積まれない。
-  if (!force && (await hasUnpublishedCommits(checkout, branch))) {
+  if (!force && (await hasUnpublishedCommits(checkout, branch, mergedHeads))) {
     return {
       removedWorktree,
       deletedBranch: null,
@@ -69,15 +73,21 @@ export async function removeWorktree(
   return { removedWorktree, deletedBranch: branch, warnings: [] }
 }
 
-// fetch しないので、push した commit は merge されていなくても数えない。
-async function hasUnpublishedCommits(checkout: string, branch: string): Promise<boolean> {
+// fetch しないので push した commit は merge されていなくても数えず、squash merge で remote から消えた commit も手元にある merged PR の head から辿れれば数えない。
+async function hasUnpublishedCommits(
+  checkout: string,
+  branch: string,
+  mergedHeads: string[],
+): Promise<boolean> {
   const commits = await git(
     checkout,
     'rev-list',
     '--max-count=1',
+    '--ignore-missing',
     `refs/heads/${branch}`,
     '--not',
     '--remotes',
+    ...mergedHeads,
   )
   return commits !== ''
 }

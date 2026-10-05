@@ -175,6 +175,80 @@ test('ignored files and commits pushed to a remote, merged or not, do not stop c
   })
 })
 
+test('commits on no remote stop close while the pull request of issue-n is open, and once it is squash merged close passes without --force and deletes the branch', async () => {
+  const fixture = await withWorktreeBench()
+  const { client, cwd, ghq, github } = fixture
+  const head = commit(cwd, { 'done.txt': { content: 'done\n' } }, 'done')
+  git(cwd, 'push', '--quiet', 'origin', 'issue-12')
+  // squash merge は branch の commit を default branch に入れず、remote の branch も消す。
+  git(cwd, 'push', '--quiet', 'origin', '--delete', 'issue-12')
+  github.pullRequest('acme/app#30', { title: 'Ship it', headRef: 'issue-12', headOid: head })
+
+  const refused = await failure(client.close({ ref }))
+  github.pullRequest('acme/app#30', {
+    title: 'Ship it',
+    headRef: 'issue-12',
+    headOid: head,
+    state: 'merged',
+  })
+  const output = await client.close({ ref })
+
+  expect(refused.data).toEqual({ reasons: [{ kind: 'unpublished_commits', branch: 'issue-12' }] })
+  expect(output).toEqual({
+    ref,
+    removedWorktree: cwd,
+    deletedBranch: 'issue-12',
+    spared: false,
+    warnings: [],
+  })
+  expect(hasBranch(ghq.checkout('acme/app'), 'issue-12')).toBe(false)
+})
+
+test('a merged pull request that only closes the Issue does not let close drop commits on no remote', async () => {
+  const fixture = await withWorktreeBench()
+  const { client, cwd, github } = fixture
+  const head = commit(cwd, { 'done.txt': { content: 'done\n' } }, 'done')
+  github.pullRequest('acme/app#30', {
+    title: 'Ship it from elsewhere',
+    headRef: 'elsewhere',
+    headOid: head,
+    state: 'merged',
+  })
+  github.issue(ref, { title: 'Ship it', closingPullRequests: ['acme/app#30'] })
+
+  const error = await failure(client.close({ ref }))
+
+  expect(error.data).toEqual({ reasons: [{ kind: 'unpublished_commits', branch: 'issue-12' }] })
+})
+
+test('commits put on issue-n after its pull request was merged still stop close', async () => {
+  const fixture = await withWorktreeBench()
+  const { client, cwd, github } = fixture
+  const merged = commit(cwd, { 'done.txt': { content: 'done\n' } }, 'done')
+  github.pullRequest('acme/app#30', {
+    title: 'Ship it',
+    headRef: 'issue-12',
+    headOid: merged,
+    state: 'merged',
+  })
+  commit(cwd, { 'more.txt': { content: 'more\n' } }, 'more')
+
+  const error = await failure(client.close({ ref }))
+
+  expect(error.data).toEqual({ reasons: [{ kind: 'unpublished_commits', branch: 'issue-12' }] })
+})
+
+test('a merged pull request whose head commit the checkout does not have does not let close drop commits on no remote', async () => {
+  const fixture = await withWorktreeBench()
+  const { client, cwd, github } = fixture
+  commit(cwd, { 'done.txt': { content: 'done\n' } }, 'done')
+  github.pullRequest('acme/app#30', { title: 'Ship it', headRef: 'issue-12', state: 'merged' })
+
+  const error = await failure(client.close({ ref }))
+
+  expect(error.data).toEqual({ reasons: [{ kind: 'unpublished_commits', branch: 'issue-12' }] })
+})
+
 test('close of an in-place Bench looks only at live Runs, and leaves the checkout and its branches alone', async () => {
   const fixture = await tracked()
   const { client, ghq, db } = fixture

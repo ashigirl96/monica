@@ -4,7 +4,7 @@ import { ORPCError } from '@orpc/server'
 import { asc, eq } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/sqlite-core'
 
-import { issue, issueBlocker, task } from './schema.ts'
+import { issue, issueBlocker, pullRequest, task, taskPullRequest } from './schema.ts'
 import { syncTask } from './sync.ts'
 import { internals } from './task.ts'
 import { cleanUp, setup } from './testing.ts'
@@ -29,6 +29,23 @@ function blockersOf({ db }: Fixture, number: number): string[] {
     .orderBy(asc(issue.number))
     .all()
     .map((r) => `${r.repo}#${r.number}`)
+}
+
+function links({ db }: Fixture): string[] {
+  return db
+    .select({
+      repo: issue.repo,
+      number: issue.number,
+      source: taskPullRequest.source,
+      pullRequestRepo: pullRequest.repo,
+      pullRequestNumber: pullRequest.number,
+    })
+    .from(taskPullRequest)
+    .innerJoin(issue, eq(issue.id, taskPullRequest.taskIssueId))
+    .innerJoin(pullRequest, eq(pullRequest.id, taskPullRequest.pullRequestId))
+    .all()
+    .map((r) => `${r.repo}#${r.number} ${r.source} ${r.pullRequestRepo}#${r.pullRequestNumber}`)
+    .toSorted()
 }
 
 async function failure(promise: Promise<unknown>): Promise<ORPCError<string, unknown>> {
@@ -61,11 +78,102 @@ test('sync copies every open Task with one query per repo and replaces the Block
 
   expect(output).toEqual({ synced: 3, missing: [] })
   expect(github.requests.toSorted((a, b) => a.repo.localeCompare(b.repo))).toEqual([
-    { repo: 'acme/app', numbers: [1, 2] },
-    { repo: 'acme/lib', numbers: [7] },
+    { repo: 'acme/app', numbers: [1, 2], branches: [] },
+    { repo: 'acme/lib', numbers: [7], branches: [] },
   ])
   expect(blockersOf(fixture, 1)).toEqual(['acme/app#5'])
   expect(titles(fixture)).toMatchObject({ 'acme/app#2': 'Two', 'acme/app#4': 'Schema first' })
+})
+
+test('sync links a Task to the pull requests headed by the branch issue-n of its Bench and to the ones that close its Issue, as two rows when one does both', async () => {
+  const fixture = setup()
+  const { github, client } = fixture
+  fixture.ghq.origin('acme/app')
+  await fixture.openBench('acme/app#1')
+  github.pullRequest('acme/app#20', { title: 'Fix it', headRef: 'issue-1' })
+  github.pullRequest('acme/app#21', { title: 'First try', headRef: 'issue-1', state: 'closed' })
+  github.pullRequest('acme/lib#3', { title: 'Fix it in lib', headRef: 'fix-app' })
+  github.issue('acme/app#1', { title: 'One', closingPullRequests: ['acme/app#20', 'acme/lib#3'] })
+  github.requests.length = 0
+
+  await client.sync({})
+
+  expect(github.requests).toEqual([{ repo: 'acme/app', numbers: [1], branches: ['issue-1'] }])
+  expect(links(fixture)).toEqual([
+    'acme/app#1 branch acme/app#20',
+    'acme/app#1 branch acme/app#21',
+    'acme/app#1 closing_reference acme/app#20',
+    'acme/app#1 closing_reference acme/lib#3',
+  ])
+})
+
+test('each sync rewrites the copies of the pull requests it gets and drops the links GitHub no longer has', async () => {
+  const fixture = setup()
+  const { db, github, client } = fixture
+  github.pullRequest('acme/app#20', { title: 'Fix it', headRef: 'fix', isDraft: true })
+  github.pullRequest('acme/app#21', { title: 'Docs', headRef: 'docs' })
+  github.issue('acme/app#1', { title: 'One', closingPullRequests: ['acme/app#20', 'acme/app#21'] })
+  await client.track({ ref: 'acme/app#1' })
+  github.pullRequest('acme/app#20', { title: 'Fix it for good', headRef: 'fix-2', state: 'merged' })
+  github.issue('acme/app#1', { title: 'One', closingPullRequests: ['acme/app#20'] })
+
+  await client.sync({})
+
+  expect(links(fixture)).toEqual(['acme/app#1 closing_reference acme/app#20'])
+  expect(
+    db
+      .select({
+        title: pullRequest.title,
+        state: pullRequest.state,
+        isDraft: pullRequest.isDraft,
+        headRef: pullRequest.headRef,
+      })
+      .from(pullRequest)
+      .where(eq(pullRequest.number, 20))
+      .all(),
+  ).toEqual([{ title: 'Fix it for good', state: 'merged', isDraft: false, headRef: 'fix-2' }])
+})
+
+test('a Task with no worktree Bench has no pull request linked by branch, so the sync of a reopened Task drops the links of its old Bench', async () => {
+  const fixture = setup()
+  const { github, client } = fixture
+  fixture.ghq.origin('acme/app')
+  await fixture.openBench('acme/app#1')
+  github.pullRequest('acme/app#20', { title: 'Fix it', headRef: 'issue-1', state: 'merged' })
+  await client.sync({})
+  await client.close({ ref: 'acme/app#1', force: true })
+
+  await client.reopen({ ref: 'acme/app#1' })
+
+  expect(links(fixture)).toEqual([])
+})
+
+test('a branch GitHub answers null for keeps its links, while the closing references are replaced', async () => {
+  const fixture = setup()
+  const { github, client } = fixture
+  fixture.ghq.origin('acme/app')
+  await fixture.openBench('acme/app#1')
+  github.pullRequest('acme/app#20', { title: 'Fix it', headRef: 'issue-1' })
+  github.issue('acme/app#1', { title: 'One', closingPullRequests: ['acme/app#20'] })
+  await client.sync({})
+  github.failBranch('issue-1')
+  github.issue('acme/app#1', { title: 'One' })
+
+  await client.sync({})
+
+  expect(links(fixture)).toEqual(['acme/app#1 branch acme/app#20'])
+})
+
+test('an Issue GitHub answers null for keeps the links of its Task', async () => {
+  const fixture = setup()
+  const { github, client } = fixture
+  github.pullRequest('acme/app#20', { title: 'Fix it', headRef: 'fix' })
+  github.issue('acme/app#1', { title: 'One', closingPullRequests: ['acme/app#20'] })
+  await client.track({ ref: 'acme/app#1' })
+  github.remove('acme/app#1')
+
+  expect(await client.sync({})).toEqual({ synced: 0, missing: ['acme/app#1'] })
+  expect(links(fixture)).toEqual(['acme/app#1 closing_reference acme/app#20'])
 })
 
 test('sync splits a repo with more than 50 open Tasks into queries of 50', async () => {
@@ -291,7 +399,7 @@ test('sync with a ref copies that Task only, even a closed one', async () => {
   const output = await client.sync({ ref: 'acme/app#2' })
 
   expect(output).toEqual({ synced: 1, missing: [] })
-  expect(github.requests).toEqual([{ repo: 'acme/app', numbers: [2] }])
+  expect(github.requests).toEqual([{ repo: 'acme/app', numbers: [2], branches: [] }])
   expect(titles(fixture)['acme/app#2']).toBe('Two, renamed')
 })
 
@@ -321,7 +429,7 @@ test('a closed Task is left as it was unless an open Task names it as a Blocker'
 
   await client.sync({})
 
-  expect(github.requests).toEqual([{ repo: 'acme/app', numbers: [3] }])
+  expect(github.requests).toEqual([{ repo: 'acme/app', numbers: [3], branches: [] }])
   expect(titles(fixture)).toMatchObject({
     'acme/app#1': 'Issue acme/app#1',
     'acme/app#2': 'Two, renamed',

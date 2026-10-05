@@ -10,7 +10,7 @@ import { findTrackedTask } from './open-task.ts'
 import { messageOf } from './prepare.ts'
 import { formatRef, parseRef } from './ref.ts'
 import { liveAgentSession } from './run.ts'
-import { bench, issue, run, task } from './schema.ts'
+import { bench, issue, pullRequest, run, task, taskPullRequest } from './schema.ts'
 import { type SyncDeps, syncOrUseCopy } from './sync.ts'
 import { inspectWorktree, removeWorktree } from './teardown.ts'
 
@@ -43,7 +43,14 @@ async function closeReserved(
   const benchRow = found.bench
   const worktree =
     benchRow?.mode === 'worktree' && !sharesCwdWithAnotherBench(deps.db, benchRow)
-      ? await stopOnGitFailure(ref, () => inspectWorktree(deps.ghq, benchRow, found.issue))
+      ? await stopOnGitFailure(ref, () =>
+          inspectWorktree(
+            deps.ghq,
+            benchRow,
+            found.issue,
+            mergedBranchHeads(deps.db, found.issue.id),
+          ),
+        )
       : null
   const force = input.force ?? false
   const caller = input.terminalSessionId
@@ -144,6 +151,23 @@ function sharesCwdWithAnotherBench(
       .where(and(eq(bench.cwd, row.cwd), ne(bench.taskIssueId, row.taskIssueId)))
       .get() !== undefined
   )
+}
+
+// closing reference だけの merged PR は別の branch の仕事なので、その head は Bench の branch の commit を守らない。
+function mergedBranchHeads(db: Db, taskIssueId: number): string[] {
+  return db
+    .selectDistinct({ headOid: pullRequest.headOid })
+    .from(taskPullRequest)
+    .innerJoin(pullRequest, eq(pullRequest.id, taskPullRequest.pullRequestId))
+    .where(
+      and(
+        eq(taskPullRequest.taskIssueId, taskIssueId),
+        eq(taskPullRequest.source, 'branch'),
+        eq(pullRequest.state, 'merged'),
+      ),
+    )
+    .all()
+    .map((row) => row.headOid)
 }
 
 // 準備は worktree と Bench の行を書き続けるので、走っている間は片付けない。

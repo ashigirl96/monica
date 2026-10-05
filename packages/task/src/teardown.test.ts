@@ -13,7 +13,7 @@ afterEach(() => {
 
 const forIssue = { repo: 'acme/app', number: 12 }
 
-async function inspectedClean() {
+async function inspectedClean({ squashMerged = false } = {}) {
   const scratch = mkdtempSync(join(tmpdir(), 'tania-teardown-'))
   cleanups.push(() => rmSync(scratch, { recursive: true, force: true }))
   const ghq = fakeGhq(scratch)
@@ -22,7 +22,16 @@ async function inspectedClean() {
   const checkout = ghq.checkout('acme/app')
   const path = join(scratch, 'worktree')
   git(checkout, 'worktree', 'add', '--quiet', '-b', 'issue-12', path, 'origin/main')
-  const inspected = await inspectWorktree(ghq.client, { cwd: path, branch: 'issue-12' }, forIssue)
+  // squash merge した PR の head は、remote のどこからも辿れない commit になる。
+  const mergedHeads = squashMerged
+    ? [commit(path, { 'done.txt': { content: 'done\n' } }, 'done')]
+    : []
+  const inspected = await inspectWorktree(
+    ghq.client,
+    { cwd: path, branch: 'issue-12' },
+    forIssue,
+    mergedHeads,
+  )
   expect(inspected.refusals).toEqual([])
   return { checkout, path, inspected }
 }
@@ -56,6 +65,17 @@ test('without force, commits on no remote made after the inspection keep the bra
     warnings: ['branch issue-12 got commits on no remote while closing, so it stays'],
   })
   expect(existsSync(path)).toBe(false)
+  expect(hasBranch(checkout, 'issue-12')).toBe(true)
+})
+
+test('without force, commits made after the inspection on top of the head of a merged pull request keep the branch', async () => {
+  const { checkout, inspected, path } = await inspectedClean({ squashMerged: true })
+  commit(path, { 'late.txt': { content: 'late\n' } }, 'late')
+
+  expect(await removeWorktree(inspected, { force: false })).toMatchObject({
+    deletedBranch: null,
+    warnings: ['branch issue-12 got commits on no remote while closing, so it stays'],
+  })
   expect(hasBranch(checkout, 'issue-12')).toBe(true)
 })
 

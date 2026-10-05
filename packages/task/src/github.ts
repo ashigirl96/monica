@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 import type { IssueRef } from './ref.ts'
-import type { issue } from './schema.ts'
+import type { issue, pullRequest } from './schema.ts'
 
 export type GitHub = {
   url: string
@@ -45,11 +45,19 @@ export type LinkedIssue = IssueRef & { nodeId: string } & Pick<
     'title' | 'state'
   >
 
+export type GitHubPullRequest = IssueRef &
+  Pick<typeof pullRequest.$inferSelect, 'title' | 'state' | 'isDraft' | 'headRef' | 'headOid'>
+
+/** PR の並びが null なら GitHub が答えなかったので、前の対応を残す。 */
 export type GitHubIssue = LinkedIssue & {
   labels: string[]
   parent: LinkedIssue | null
   blockers: LinkedIssue[]
+  closingPullRequests: GitHubPullRequest[] | null
+  branchPullRequests: GitHubPullRequest[] | null
 }
+
+export type AskedIssue = { number: number; benchBranch: string | null }
 
 export type IssuesAnswer = { issues: GitHubIssue[]; missing: IssueRef[] }
 
@@ -68,6 +76,21 @@ const LinkedNode = z.object({
   repository: z.object({ nameWithOwner: z.string() }),
 })
 
+const PullRequestNode = z.object({
+  number: z.number(),
+  title: z.string(),
+  state: z
+    .enum(['OPEN', 'CLOSED', 'MERGED'])
+    .transform((s) => s.toLowerCase() as Lowercase<typeof s>),
+  isDraft: z.boolean(),
+  headRefName: z.string(),
+  // git の引数に渡すので、object の名前の形だけを通す。
+  headRefOid: z.string().regex(/^[0-9a-f]{40,64}$/),
+  repository: z.object({ nameWithOwner: z.string() }),
+})
+
+const PullRequests = z.object({ nodes: z.array(PullRequestNode.nullable()) }).nullish()
+
 const IssueNode = z.object({
   id: z.string(),
   number: z.number(),
@@ -76,6 +99,7 @@ const IssueNode = z.object({
   labels: z.object({ nodes: z.array(z.object({ name: z.string() }).nullable()) }),
   parent: LinkedNode.nullable(),
   blockedBy: z.object({ nodes: z.array(LinkedNode.nullable()) }),
+  closedByPullRequestsReferences: PullRequests,
 })
 
 const GraphQLResponse = z.object({
@@ -86,7 +110,7 @@ const GraphQLResponse = z.object({
 export async function queryIssues(
   { url, token }: { url: string; token: string },
   repo: string,
-  numbers: number[],
+  asked: AskedIssue[],
   signal: AbortSignal,
 ): Promise<IssuesAnswer> {
   const [owner, name] = repo.split('/')
@@ -97,7 +121,7 @@ export async function queryIssues(
       'content-type': 'application/json',
       'user-agent': 'tania',
     },
-    body: JSON.stringify({ query: issuesQuery(numbers), variables: { owner, name } }),
+    body: JSON.stringify({ query: issuesQuery(asked), variables: { owner, name } }),
     signal,
   })
   const text = await response.text()
@@ -110,7 +134,7 @@ export async function queryIssues(
   if (!repository) throw new RepositoryNotFound(reason() || `GitHub could not resolve ${repo}`)
   const issues: GitHubIssue[] = []
   const missing: IssueRef[] = []
-  for (const number of numbers) {
+  for (const { number, benchBranch } of asked) {
     const node = repository[`i${number}`]
     if (!node) {
       missing.push({ repo, number })
@@ -126,9 +150,32 @@ export async function queryIssues(
       labels: parsed.labels.nodes.flatMap((label) => (label ? [label.name] : [])),
       parent: parsed.parent && linked(parsed.parent),
       blockers: parsed.blockedBy.nodes.flatMap((blocker) => (blocker ? [linked(blocker)] : [])),
+      closingPullRequests: pullRequestsOf(parsed.closedByPullRequestsReferences),
+      // worktree の Bench が無ければ、head が一致する branch も無い。
+      branchPullRequests:
+        benchBranch === null ? [] : pullRequestsOf(PullRequests.parse(repository[`pr${number}`])),
     })
   }
   return { issues, missing }
+}
+
+function pullRequestsOf(connection: z.infer<typeof PullRequests>): GitHubPullRequest[] | null {
+  if (!connection) return null
+  return connection.nodes.flatMap((node) =>
+    node
+      ? [
+          {
+            repo: node.repository.nameWithOwner,
+            number: node.number,
+            title: node.title,
+            state: node.state,
+            isDraft: node.isDraft,
+            headRef: node.headRefName,
+            headOid: node.headRefOid,
+          },
+        ]
+      : [],
+  )
 }
 
 function linked(node: z.infer<typeof LinkedNode>): LinkedIssue {
@@ -142,12 +189,19 @@ function linked(node: z.infer<typeof LinkedNode>): LinkedIssue {
 }
 
 // GitHub は blockedBy を 50 件までしか張らせないので、1 ページで全部が返る。
-function issuesQuery(numbers: number[]): string {
-  const aliases = numbers.map((n) => `    i${n}: issue(number: ${n}) { ...Copied }`).join('\n')
+function issuesQuery(asked: AskedIssue[]): string {
+  const aliases = asked.flatMap(({ number: n, benchBranch }) => [
+    `    i${n}: issue(number: ${n}) { ...Copied }`,
+    ...(benchBranch === null
+      ? []
+      : [
+          `    pr${n}: pullRequests(headRefName: ${JSON.stringify(benchBranch)}, states: [OPEN, CLOSED, MERGED], first: 10) { nodes { ...CopiedPullRequest } }`,
+        ]),
+  ])
   return `query TaniaIssues($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
     nameWithOwner
-${aliases}
+${aliases.join('\n')}
   }
 }
 fragment Copied on Issue {
@@ -155,8 +209,12 @@ fragment Copied on Issue {
   labels(first: 100) { nodes { name } }
   parent { ...Linked }
   blockedBy(first: 50) { nodes { ...Linked } }
+  closedByPullRequestsReferences(first: 10, includeClosedPrs: true) { nodes { ...CopiedPullRequest } }
 }
 fragment Linked on Issue { id number title state repository { nameWithOwner } }
+fragment CopiedPullRequest on PullRequest {
+  number title state isDraft headRefName headRefOid repository { nameWithOwner }
+}
 `
 }
 

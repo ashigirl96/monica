@@ -16,7 +16,9 @@ test('the latest task snapshot holds only the task tables', async () => {
     'bench',
     'issue',
     'issue_blocker',
+    'pull_request',
     'run',
     'task',
+    'task_pull_request',
   ])
 })

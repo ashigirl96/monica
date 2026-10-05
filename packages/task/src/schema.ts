@@ -49,6 +49,37 @@ export const task = sqliteTable('task', {
   closedAt: timestamp('closed_at'),
 })
 
+// issue と違って node ID で照らさないのは、Task との対応を sync のたびに置き換え、repo の改名で残った旧名の行がどこからも指されないため。
+export const pullRequest = sqliteTable(
+  'pull_request',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    repo: text('repo').notNull(),
+    number: integer('number').notNull(),
+    title: text('title').notNull(),
+    state: text('state', { enum: ['open', 'closed', 'merged'] }).notNull(),
+    isDraft: integer('is_draft', { mode: 'boolean' }).notNull().default(false),
+    headRef: text('head_ref').notNull(),
+    headOid: text('head_oid').notNull(),
+    syncedAt: timestamp('synced_at').notNull(),
+  },
+  (t) => [uniqueIndex('pull_request_repo_number').on(t.repo, t.number)],
+)
+
+export const taskPullRequest = sqliteTable(
+  'task_pull_request',
+  {
+    taskIssueId: integer('task_issue_id')
+      .notNull()
+      .references(() => task.issueId),
+    pullRequestId: integer('pull_request_id')
+      .notNull()
+      .references(() => pullRequest.id),
+    source: text('source', { enum: ['branch', 'closing_reference'] }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.taskIssueId, t.pullRequestId, t.source] })],
+)
+
 // 行は履歴として消さない。終わりは Agent Session の終了から導くので持たない。
 export const run = sqliteTable(
   'run',
