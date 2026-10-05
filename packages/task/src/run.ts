@@ -1,23 +1,24 @@
-import { agentSession, tab } from "@tania/workbench/schema";
-import type { Db, Tx } from "@tania/workbench/server";
-import { and, eq, inArray, isNull, ne } from "drizzle-orm";
-import type { RunAgentSession } from "./display-state.ts";
-import { formatRef } from "./ref.ts";
-import { bench, issue, run } from "./schema.ts";
+import { agentSession, tab } from '@tania/workbench/schema'
+import type { Db, Tx } from '@tania/workbench/server'
+import { and, eq, inArray, isNull, ne } from 'drizzle-orm'
 
-export const liveAgentSession = ne(agentSession.state, "ended");
+import type { RunAgentSession } from './display-state.ts'
+import { formatRef } from './ref.ts'
+import { bench, issue, run } from './schema.ts'
 
-export type RunOrigin = (typeof run.$inferInsert)["origin"];
+export const liveAgentSession = ne(agentSession.state, 'ended')
+
+export type RunOrigin = (typeof run.$inferInsert)['origin']
 
 export function insertRuns(
   tx: Tx,
   origin: RunOrigin,
   runs: { taskIssueId: number; agentSessionId: string }[],
 ) {
-  const startedAt = new Date();
+  const startedAt = new Date()
   tx.insert(run)
     .values(runs.map((r) => ({ ...r, origin, startedAt })))
-    .run();
+    .run()
 }
 
 // Run になっている Agent Session は当て直さないので、Tab がどこへ移っても終わるまで元の Task の Run のまま。
@@ -37,8 +38,8 @@ export function applyRunInvariant(db: Db, origin: RunOrigin, agentSessionId?: st
           agentSessionId === undefined ? undefined : eq(agentSession.sessionId, agentSessionId),
         ),
       )
-      .all();
-    if (orphans.length === 0) return [];
+      .all()
+    if (orphans.length === 0) return []
     insertRuns(
       tx,
       origin,
@@ -46,9 +47,9 @@ export function applyRunInvariant(db: Db, origin: RunOrigin, agentSessionId?: st
         taskIssueId: orphan.issue.id,
         agentSessionId: orphan.agentSessionId,
       })),
-    );
-    return [...new Set(orphans.map((orphan) => formatRef(orphan.issue)))];
-  });
+    )
+    return [...new Set(orphans.map((orphan) => formatRef(orphan.issue)))]
+  })
 }
 
 export function refOfRunTask(db: Db, agentSessionId: string): string | null {
@@ -57,8 +58,8 @@ export function refOfRunTask(db: Db, agentSessionId: string): string | null {
     .from(run)
     .innerJoin(issue, eq(issue.id, run.taskIssueId))
     .where(eq(run.agentSessionId, agentSessionId))
-    .get();
-  return found ? formatRef(found) : null;
+    .get()
+  return found ? formatRef(found) : null
 }
 
 export function runAgentSessionsByTask(db: Db, taskIssueIds: number[]) {
@@ -75,10 +76,10 @@ export function runAgentSessionsByTask(db: Db, taskIssueIds: number[]) {
     .from(run)
     .innerJoin(agentSession, eq(agentSession.sessionId, run.agentSessionId))
     .where(and(inArray(run.taskIssueId, taskIssueIds), liveAgentSession))
-    .all();
-  const byTask = new Map<number, RunAgentSession[]>();
+    .all()
+  const byTask = new Map<number, RunAgentSession[]>()
   for (const { taskIssueId, ...row } of rows) {
-    byTask.set(taskIssueId, [...(byTask.get(taskIssueId) ?? []), row]);
+    byTask.set(taskIssueId, [...(byTask.get(taskIssueId) ?? []), row])
   }
-  return (taskIssueId: number) => byTask.get(taskIssueId) ?? [];
+  return (taskIssueId: number) => byTask.get(taskIssueId) ?? []
 }
