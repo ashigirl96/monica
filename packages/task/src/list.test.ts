@@ -109,8 +109,8 @@ test('the background sync runs at start and every 5 minutes', async () => {
 
   expect(interval.ms).toBe(5 * 60_000)
   expect(github.requests).toEqual([
-    { repo: 'acme/app', numbers: [1] },
-    { repo: 'acme/app', numbers: [1] },
+    { repo: 'acme/app', numbers: [1], branches: [] },
+    { repo: 'acme/app', numbers: [1], branches: [] },
   ])
   expect(renamed.backgroundSyncError).toBeNull()
 })

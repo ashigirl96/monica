@@ -7,6 +7,16 @@ type FakeIssue = {
   labels?: string[]
   parent?: string
   blockedBy?: string[]
+  closingPullRequests?: string[]
+}
+
+type FakePullRequest = {
+  title: string
+  headRef: string
+  /** 省けば、どの repo にも無い commit を指す。 */
+  headOid?: string
+  state?: 'open' | 'closed' | 'merged'
+  isDraft?: boolean
 }
 
 const TOKEN = 'fake-token'
@@ -15,9 +25,11 @@ const caseless = (ref: string) => ref.toLowerCase()
 
 export function startFakeGitHub() {
   const issues = new Map<string, FakeIssue & { ref: string; id: string }>()
+  const pullRequests = new Map<string, FakePullRequest & { ref: string }>()
   const repos = new Map<string, string>()
   const failing = new Set<string>()
-  const requests: { repo: string; numbers: number[] }[] = []
+  const failingBranches = new Set<string>()
+  const requests: { repo: string; numbers: number[]; branches: string[] }[] = []
   let held: Promise<void> | null = null
   let loggedIn = true
 
@@ -40,6 +52,40 @@ export function startFakeGitHub() {
     }
   }
 
+  function pullRequestNode({
+    ref,
+    title,
+    headRef,
+    headOid,
+    state,
+    isDraft,
+  }: FakePullRequest & { ref: string }) {
+    const { repo, number } = parseRef(ref)
+    return {
+      number,
+      title,
+      state: (state ?? 'open').toUpperCase(),
+      isDraft: isDraft ?? false,
+      headRefName: headRef,
+      headRefOid: headOid ?? new Bun.CryptoHasher('sha1').update(ref).digest('hex'),
+      repository: { nameWithOwner: repo },
+    }
+  }
+
+  function closing(ref: string) {
+    const found = pullRequests.get(caseless(ref))
+    if (!found) throw new Error(`the fake GitHub has no pull request ${ref}`)
+    return pullRequestNode(found)
+  }
+
+  function headedBy(repo: string, branch: string, states: string[] | null) {
+    return [...pullRequests.values()]
+      .filter((pr) => caseless(parseRef(pr.ref).repo) === caseless(repo) && pr.headRef === branch)
+      .toSorted((a, b) => parseRef(a.ref).number - parseRef(b.ref).number)
+      .map(pullRequestNode)
+      .filter((pr) => states === null || states.includes(pr.state))
+  }
+
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -53,7 +99,15 @@ export function startFakeGitHub() {
       }
       const repo = `${variables.owner}/${variables.name}`
       const numbers = [...query.matchAll(/i\d+: issue\(number: (\d+)\)/g)].map((m) => Number(m[1]))
-      requests.push({ repo, numbers })
+      const branchAliases = [
+        ...query.matchAll(
+          /(pr\d+): pullRequests\(headRefName: "([^"]+)"(?:, states: \[([A-Z, ]+)\])?/g,
+        ),
+      ].map((m) => ({ alias: m[1]!, branch: m[2]!, states: m[3]?.split(', ') ?? null }))
+      const includeClosedPrs = /closedByPullRequestsReferences\([^)]*includeClosedPrs: true/.test(
+        query,
+      )
+      requests.push({ repo, numbers, branches: branchAliases.map((a) => a.branch) })
       await held
       if (failing.has(caseless(repo))) return new Response('Server Error', { status: 502 })
       const nameWithOwner = repos.get(caseless(repo))
@@ -86,7 +140,20 @@ export function startFakeGitHub() {
           labels: { nodes: (found.labels ?? []).map((name) => ({ name })) },
           parent: found.parent ? node(found.parent) : null,
           blockedBy: { nodes: (found.blockedBy ?? []).map(node) },
+          closedByPullRequestsReferences: {
+            nodes: (found.closingPullRequests ?? [])
+              .map(closing)
+              .filter((pr) => includeClosedPrs || pr.state === 'OPEN'),
+          },
         }
+      }
+      for (const { alias, branch, states } of branchAliases) {
+        if (failingBranches.has(branch)) {
+          repository[alias] = null
+          errors.push({ path: ['repository', alias], message: 'Something went wrong' })
+          continue
+        }
+        repository[alias] = { nodes: headedBy(nameWithOwner, branch, states) }
       }
       return Response.json(
         errors.length > 0 ? { data: { repository }, errors } : { data: { repository } },
@@ -111,6 +178,13 @@ export function startFakeGitHub() {
       repos.set(caseless(parseRef(ref).repo), parseRef(ref).repo)
       const id = issues.get(caseless(ref))?.id ?? `I_${issues.size + 1}`
       issues.set(caseless(ref), { ...issue, ref, id })
+    },
+    pullRequest(ref: string, pullRequest: FakePullRequest) {
+      pullRequests.set(caseless(ref), { ...pullRequest, ref })
+    },
+    /** その branch を head に持つ PR の query に、null と error で答える。 */
+    failBranch(branch: string) {
+      failingBranches.add(branch)
     },
     remove(ref: string) {
       issues.delete(caseless(ref))
