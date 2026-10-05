@@ -14,6 +14,7 @@ import {
   setupLogOf,
   worktreeOf,
 } from "./prepare.ts";
+import { findOpenTask } from "./open-task.ts";
 import { formatRef } from "./ref.ts";
 import { bench, issue } from "./schema.ts";
 
@@ -26,6 +27,8 @@ export type BenchDeps = {
   stopped: AbortSignal;
   preparations: Map<number, Promise<Prepared>>;
   setups: Set<Subprocess>;
+  /** close の途中の Task。git を待つ間に、準備や Tab が片付ける Bench に入らないようにする。 */
+  closing: Set<number>;
 };
 
 type Prepared = { warnings: string[] } | { error: string };
@@ -60,6 +63,12 @@ export async function prepareBench(
     });
   }
   return { bench: opened.bench, created: opened.created, warnings: prepared.warnings };
+}
+
+export function refuseClosing(deps: Pick<BenchDeps, "closing">, taskIssueId: number, ref: string) {
+  if (deps.closing.has(taskIssueId)) {
+    throw new ORPCError("CONFLICT", { message: `${ref} is being closed` });
+  }
 }
 
 export function refuseInPlace(row: Bench, inPlace: boolean | undefined, ref: string) {
@@ -99,6 +108,9 @@ function openBench(
   { cwd, mode }: Pick<Bench, "cwd" | "mode">,
 ): { bench: Bench; created: boolean } {
   const opened = deps.db.transaction((tx) => {
+    // ghq root を待つ間に close が走り終えていれば、Task はもう閉じている。
+    findOpenTask(tx, eq(issue.id, forIssue.id), formatRef(forIssue));
+    refuseClosing(deps, forIssue.id, formatRef(forIssue));
     const existing = tx.select().from(bench).where(eq(bench.taskIssueId, forIssue.id)).get();
     if (existing) return { bench: existing, created: false };
     return {

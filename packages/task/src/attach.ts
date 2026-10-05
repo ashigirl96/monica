@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { ORPCError } from "@orpc/server";
 import { agentSession, tab } from "@tania/workbench/schema";
 import { and, eq } from "drizzle-orm";
-import { type BenchDeps, insertBench } from "./bench.ts";
+import { type BenchDeps, insertBench, refuseClosing } from "./bench.ts";
 import type { AttachOutput } from "./contract.ts";
 import { isIssue } from "./copy.ts";
 import { callerTerminalSession } from "./current.ts";
@@ -37,6 +37,7 @@ export async function attachTab(
     }
     const found = findOpenTask(tx, eq(issue.id, requested.issue.id), formatRef(requested.issue));
     const ref = formatRef(found.issue);
+    refuseClosing(deps, found.issue.id, ref);
     const agent = tx
       .select({
         sessionId: agentSession.sessionId,

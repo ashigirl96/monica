@@ -4,7 +4,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { endAgentSessionsIn, reconcileAgentSessions } from "./agent-session.ts";
 import type { AgentSession, TerminalSession, WorkbenchChange } from "./contract.ts";
-import { createRunspace, moveTab, openTab } from "./layout.ts";
+import { createRunspace, moveTab, openTab, removeRunspace } from "./layout.ts";
 import { shortPath } from "./paths.ts";
 import { shouldRespawn } from "./pin.ts";
 import { openDaemon, type PtydClient, type SessionInfo } from "./ptyd.ts";
@@ -33,8 +33,11 @@ export type Workbench = {
     input: { runspaceId: string; cwd?: string },
   ): { tabId: string; terminalSessionId: string };
   moveTab(tx: Tx, tabId: string, runspaceId: string): void;
+  /** 返した Terminal Session は、commit の後に terminateTerminalSessions で終わらせる。 */
+  removeRunspace(tx: Tx, id: string, options?: { spare?: string[] }): string[];
   startTerminalSession(id: string, size: Size): Promise<void>;
   writeTerminalSession(id: string, data: string): Promise<void>;
+  terminateTerminalSessions(ids: string[]): Promise<void>;
 };
 
 export type NotificationDeps = {
@@ -216,6 +219,11 @@ export function createWorkbench(
       moveTab(tx, { id: tabId, runspaceId });
       publish({ type: "layout" });
     },
+    removeRunspace(tx, id, options) {
+      const removed = removeRunspace(tx, id, options);
+      publish({ type: "layout" });
+      return removed;
+    },
     startTerminalSession: (id, size) => startTerminalSession(workbench, id, size),
     // ptyd は attach していない接続からの Write も通すので、webview が Tab を表示していなくても打てる。
     async writeTerminalSession(id, data) {
@@ -226,6 +234,7 @@ export function createWorkbench(
         data: Buffer.from(data).toString("base64"),
       });
     },
+    terminateTerminalSessions: (ids) => terminateTerminalSessions(workbench, ids),
   };
   internalsOf.set(workbench, { db, home, shell, publish, ready, notify, nameAgentSession });
   return workbench;

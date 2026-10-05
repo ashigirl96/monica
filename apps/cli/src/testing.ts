@@ -42,6 +42,7 @@ export function inMemoryBackend({ home = "/nonexistent", ghq = noGhq } = {}) {
   spyOn(workbench, "ready").mockResolvedValue();
   spyOn(workbench, "startTerminalSession").mockResolvedValue();
   spyOn(workbench, "writeTerminalSession").mockResolvedValue();
+  spyOn(workbench, "terminateTerminalSessions").mockResolvedValue();
   // CLI のテストは GitHub に届かせない。
   const task = createTask({
     db,

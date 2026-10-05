@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { ORPCError } from "@orpc/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, notInArray } from "drizzle-orm";
 import type { Layout, Tab } from "./contract.ts";
 import { runspace, tab, terminalSession } from "./schema.ts";
 import {
@@ -62,16 +62,28 @@ export function refuseRemoving(tx: Tx, runspaceId: string) {
   }
 }
 
-export function removeRunspace(tx: Tx, id: string): string[] {
+/** `spare` の Terminal Session の Tab が中にあれば、Runspace を消さずに所有を解いてその Tab だけを残す。 */
+export function removeRunspace(tx: Tx, id: string, { spare = [] }: { spare?: string[] } = {}) {
   runspaceOf(tx, id);
-  const terminalSessionIds = tx
-    .select({ id: tab.terminalSessionId })
+  const tabs = tx
+    .select({ id: tab.id, terminalSessionId: tab.terminalSessionId })
     .from(tab)
     .where(eq(tab.runspaceId, id))
-    .all()
-    .map((t) => t.id);
-  deleteRunspace(tx, id);
-  return terminalSessionIds;
+    .orderBy(tab.sortOrder)
+    .all();
+  const kept = tabs.filter((t) => spare.includes(t.terminalSessionId));
+  const removed = tabs.filter((t) => !kept.includes(t));
+  if (kept.length === 0) {
+    deleteRunspace(tx, id);
+    return removed.map((t) => t.terminalSessionId);
+  }
+  const keptIds = kept.map((t) => t.id);
+  tx.delete(tab)
+    .where(and(eq(tab.runspaceId, id), notInArray(tab.id, keptIds)))
+    .run();
+  tx.update(runspace).set({ owned: false }).where(eq(runspace.id, id)).run();
+  restack(tx, tab, keptIds);
+  return removed.map((t) => t.terminalSessionId);
 }
 
 export function moveRunspace(tx: Tx, input: { id: string; index: number }) {

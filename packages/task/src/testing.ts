@@ -37,7 +37,8 @@ export async function failure(promise: Promise<unknown>) {
 
 export type PtydCall =
   | { op: "start"; terminalSessionId: string; rows: number; cols: number }
-  | { op: "write"; terminalSessionId: string; data: string };
+  | { op: "write"; terminalSessionId: string; data: string }
+  | { op: "terminate"; terminalSessionId: string };
 
 export function setup() {
   const sqlite = new Database(":memory:");
@@ -62,6 +63,9 @@ export function setup() {
   });
   spyOn(workbench, "writeTerminalSession").mockImplementation(async (terminalSessionId, data) => {
     ptyd.push({ op: "write", terminalSessionId, data });
+  });
+  spyOn(workbench, "terminateTerminalSessions").mockImplementation(async (ids) => {
+    for (const terminalSessionId of ids) ptyd.push({ op: "terminate", terminalSessionId });
   });
   const workbenchClient = createRouterClient(workbenchRouter, { context: { db, workbench } });
   const github = startFakeGitHub();

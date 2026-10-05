@@ -3,9 +3,9 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRouterClient } from "@orpc/server";
-import { bench, issue, issueBlocker, task } from "@tania/task/schema";
+import { bench, issue, issueBlocker, run, task } from "@tania/task/schema";
 import type { Ghq } from "@tania/task/server";
-import { runspace, tab } from "@tania/workbench/schema";
+import { agentSession, runspace, tab } from "@tania/workbench/schema";
 import { inMemoryBackend, tania } from "./testing.ts";
 
 function backendWithTasks() {
@@ -265,6 +265,63 @@ test("task attach moves the Tab given by TANIA_TERMINAL_SESSION_ID into the Benc
       "no claude runs in this Tab; the one you start here becomes a Run of acme/app#12\n",
     stderr: "",
   });
+});
+
+function withLiveRun({ db, issueId }: ReturnType<typeof backendWithBench>) {
+  const at = new Date(0);
+  db.insert(agentSession)
+    .values({
+      sessionId: "s-1",
+      terminalSessionId: "ts-a",
+      state: "running",
+      cwd: "/work",
+      lastEventName: "UserPromptSubmit",
+      lastEventAt: at,
+      stateChangedAt: at,
+      firstSeenAt: at,
+    })
+    .run();
+  db.insert(run)
+    .values({ taskIssueId: issueId, agentSessionId: "s-1", origin: "started", startedAt: at })
+    .run();
+}
+
+test("task close exits 1 with each reason on its own line after the code, and --force closes past them", async () => {
+  const backend = backendWithBench();
+  withLiveRun(backend);
+
+  const refused = await tania(["task", "close", "acme/app#12"], backend.connect);
+  const forced = await tania(["task", "close", "acme/app#12", "--force"], backend.connect);
+
+  expect(refused).toEqual({
+    code: 1,
+    stdout: "",
+    stderr:
+      "CLOSE_REFUSED: acme/app#12 stays open:\n" +
+      "claude s-1 is a live Run (running)\n" +
+      "pass --force to close anyway\n",
+  });
+  expect(forced).toEqual({
+    code: 0,
+    stdout:
+      "closed acme/app#12\n" +
+      "warning: could not sync acme/app#12 from GitHub (`gh auth token` failed: not logged in); using the copy from 0 minutes ago\n",
+    stderr: "",
+  });
+});
+
+test("task close in the Tab of a live Run is not stopped by that Run, and task reopen opens the Task again", async () => {
+  const backend = backendWithBench();
+  withLiveRun(backend);
+
+  const closed = await tania(["task", "close", "acme/app#12"], backend.connect, {
+    terminalSessionId: "ts-a",
+  });
+  const reopened = await tania(["task", "reopen", "acme/app#12"], backend.connect);
+
+  expect(closed.code).toBe(0);
+  expect(reopened.code).toBe(0);
+  expect(reopened.stdout).toStartWith("reopened acme/app#12 Ship it\n");
 });
 
 test("task current exits 1 outside a Tab, and takes no flag for the Terminal Session", async () => {

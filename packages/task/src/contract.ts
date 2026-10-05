@@ -121,6 +121,36 @@ export const AttachOutputSchema = z.object({
     .describe("the live Agent Session of the Tab, or null when no agent runs in it"),
 });
 
+export const CloseRefusalSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("active_run"), agentSessionId: z.string(), state: LiveStateSchema }),
+  z.object({ kind: z.literal("uncommitted_changes") }),
+  z.object({ kind: z.literal("unpublished_commits"), branch: z.string() }),
+]);
+
+export const closeErrors = {
+  CLOSE_REFUSED: {
+    status: 409,
+    message: "the Task has live Runs or work closing would lose",
+    data: z.object({ reasons: z.array(CloseRefusalSchema) }),
+  },
+};
+
+export const CloseOutputSchema = z.object({
+  ref: z.string(),
+  removedWorktree: z.string().nullable().describe("the worktree removed, or null for none"),
+  deletedBranch: z.string().nullable().describe("the branch deleted, or null for none"),
+  spared: z
+    .boolean()
+    .describe("whether the Tab this runs in stayed, in a Runspace no longer the Bench"),
+  warnings: z.array(z.string()),
+});
+
+export const ReopenOutputSchema = z.object({
+  ref: z.string(),
+  title: z.string(),
+  warnings: z.array(z.string()),
+});
+
 export const BenchItemSchema = z.object({
   runspaceId: z.string(),
   ref: z.string(),
@@ -134,6 +164,9 @@ export type ListOutput = z.infer<typeof ListOutputSchema>;
 export type RunOutput = z.infer<typeof RunOutputSchema>;
 export type CurrentOutput = z.infer<typeof CurrentOutputSchema>;
 export type AttachOutput = z.infer<typeof AttachOutputSchema>;
+export type CloseRefusal = z.infer<typeof CloseRefusalSchema>;
+export type CloseOutput = z.infer<typeof CloseOutputSchema>;
+export type ReopenOutput = z.infer<typeof ReopenOutputSchema>;
 export type BenchItem = z.infer<typeof BenchItemSchema>;
 
 export const contract = {
@@ -189,6 +222,31 @@ export const contract = {
     })
     .input(z.object({ ref, terminalSessionId: z.string().optional() }))
     .output(AttachOutputSchema),
+  close: meta
+    .meta({
+      description:
+        "Close a Task and take down its Bench: the worktree, the branch issue-n, the Runspace and its Tabs, all but the Tab this runs in",
+      cli: true,
+    })
+    .errors(closeErrors)
+    .input(
+      z.object({
+        ref,
+        force: z
+          .boolean()
+          .optional()
+          .describe("close even with live Runs, uncommitted changes or commits on no remote"),
+        terminalSessionId: z.string().optional(),
+      }),
+    )
+    .output(CloseOutputSchema),
+  reopen: meta
+    .meta({
+      description: "Reopen a closed Task; the next run or attach opens its Bench anew",
+      cli: true,
+    })
+    .input(z.object({ ref }))
+    .output(ReopenOutputSchema),
   bench: {
     list: meta
       .meta({ description: "List the Benches with the labels of their Tasks" })

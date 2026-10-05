@@ -2,6 +2,7 @@ import { implement } from "@orpc/server";
 import type { Db } from "@tania/workbench/server";
 import { attachTab } from "./attach.ts";
 import { listBenches } from "./bench.ts";
+import { closeTask, reopenTask } from "./close.ts";
 import { contract } from "./contract.ts";
 import { currentTask } from "./current.ts";
 import { listTasks } from "./list.ts";
@@ -31,6 +32,10 @@ export const router = os.router({
     currentTask(context.db, input.terminalSessionId),
   ),
   attach: os.attach.handler(({ context, input }) => attachTab(internals(context.task), input)),
+  close: os.close.handler(({ context, input, errors }) =>
+    closeTask(internals(context.task), input, errors),
+  ),
+  reopen: os.reopen.handler(({ context, input }) => reopenTask(internals(context.task), input)),
   bench: {
     list: os.bench.list.handler(({ context }) => listBenches(context.db)),
   },
