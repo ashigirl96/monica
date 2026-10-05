@@ -4,13 +4,19 @@
   "jsPlugins": ["./scripts/oxlint/tania.js"],
   "options": { "typeAware": true },
   "categories": {
-    "correctness": "error"
+    "correctness": "error",
+    "suspicious": "error"
   },
   "rules": {
     "tania/sync-transaction": "error",
+    "tania/disable-reason": "error",
+    // jsx: react-jsx では JSX を書く file が React を import しなくてよい。
+    "react/react-in-jsx-scope": "off",
+    // 名前の _ だけで判断するので、xterm の _core のような外が決めた名前にも当たる。
+    "eslint/no-underscore-dangle": "off",
+    "import/no-unassigned-import": ["error", { "allow": ["**/*.css", "@fontsource-variable/*"] }],
     // unknown や Buffer を `${…}` に入れる形を咎める。`[object Object]` になる値は no-base-to-string が見る。
     "typescript/restrict-template-expressions": "off",
-    // 以下の 3 つは suspicious の rule で、category を on にしても off のままにする。
     // 害の無い不要な `!` と `as` を咎める。
     "typescript/no-unnecessary-type-assertion": "off",
     // `JSON.parse(…) as { pid: number }` のように、検査せずに型を付ける `as` をすべて咎める。

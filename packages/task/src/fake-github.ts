@@ -11,6 +11,8 @@ type FakeIssue = {
 
 const TOKEN = 'fake-token'
 
+const caseless = (ref: string) => ref.toLowerCase()
+
 export function startFakeGitHub() {
   const issues = new Map<string, FakeIssue & { ref: string; id: string }>()
   const repos = new Map<string, string>()
@@ -19,12 +21,10 @@ export function startFakeGitHub() {
   let held: Promise<void> | null = null
   let loggedIn = true
 
-  const key = (ref: string) => ref.toLowerCase()
-
   // 改名した repo は旧名でも引ける。
   function find(ref: string) {
     const { repo, number } = parseRef(ref)
-    return issues.get(key(`${repos.get(key(repo)) ?? repo}#${number}`))
+    return issues.get(caseless(`${repos.get(caseless(repo)) ?? repo}#${number}`))
   }
 
   function node(ref: string) {
@@ -55,8 +55,8 @@ export function startFakeGitHub() {
       const numbers = [...query.matchAll(/i\d+: issue\(number: (\d+)\)/g)].map((m) => Number(m[1]))
       requests.push({ repo, numbers })
       await held
-      if (failing.has(key(repo))) return new Response('Server Error', { status: 502 })
-      const nameWithOwner = repos.get(key(repo))
+      if (failing.has(caseless(repo))) return new Response('Server Error', { status: 502 })
+      const nameWithOwner = repos.get(caseless(repo))
       if (!nameWithOwner) {
         return Response.json({
           data: { repository: null },
@@ -108,29 +108,29 @@ export function startFakeGitHub() {
     client,
     requests,
     issue(ref: string, issue: FakeIssue) {
-      repos.set(key(parseRef(ref).repo), parseRef(ref).repo)
-      const id = issues.get(key(ref))?.id ?? `I_${issues.size + 1}`
-      issues.set(key(ref), { ...issue, ref, id })
+      repos.set(caseless(parseRef(ref).repo), parseRef(ref).repo)
+      const id = issues.get(caseless(ref))?.id ?? `I_${issues.size + 1}`
+      issues.set(caseless(ref), { ...issue, ref, id })
     },
     remove(ref: string) {
-      issues.delete(key(ref))
+      issues.delete(caseless(ref))
     },
     removeRepo(repo: string) {
-      repos.delete(key(repo))
+      repos.delete(caseless(repo))
     },
     // 旧名の query も新しい repo に解決する。
     renameRepo(from: string, to: string) {
       for (const [k, found] of issues) {
         const { repo, number } = parseRef(found.ref)
-        if (key(repo) !== key(from)) continue
+        if (caseless(repo) !== caseless(from)) continue
         issues.delete(k)
-        issues.set(key(`${to}#${number}`), { ...found, ref: `${to}#${number}` })
+        issues.set(caseless(`${to}#${number}`), { ...found, ref: `${to}#${number}` })
       }
-      repos.set(key(from), to)
-      repos.set(key(to), to)
+      repos.set(caseless(from), to)
+      repos.set(caseless(to), to)
     },
     fail(repo: string) {
-      failing.add(key(repo))
+      failing.add(caseless(repo))
     },
     logOut() {
       loggedIn = false

@@ -18,7 +18,7 @@ export function onCleanup(cleanup: () => void) {
 }
 
 export function cleanUp() {
-  for (const cleanup of cleanups.splice(0).reverse()) cleanup()
+  for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
 }
 
 export function setup({

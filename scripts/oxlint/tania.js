@@ -119,5 +119,22 @@ export default {
         }
       },
     },
+    // 理由の無い disable は、後から外してよいかを誰も判断できない。
+    'disable-reason': {
+      create(context) {
+        return {
+          Program() {
+            for (const comment of context.sourceCode.getAllComments()) {
+              if (!/^\s*(oxlint|eslint)-disable/.test(comment.value)) continue
+              if (/\s--\s+\S/.test(comment.value)) continue
+              context.report({
+                node: comment,
+                message: 'lint を黙らせるときは、rule の後に `-- 理由` を 1 文書く',
+              })
+            }
+          },
+        }
+      },
+    },
   },
 }

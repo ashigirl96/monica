@@ -80,8 +80,9 @@ function dropListeners(conn: TabConnection) {
 /// Attach the tab's session: subscribe → attach → replay → flush. Output arriving between
 /// subscribe and replay-write is buffered, and the daemon only emits post-attach output, so
 /// the stream is gapless without sequence numbers.
-/// Synchronous wrapper: inFlight must be set before the first await, or a re-render
-/// mid-connect (e.g. the shell's first OSC7 cwd report) starts a second connect.
+/// Synchronous wrapper: inFlight must be set before the first await, or an effect re-run
+/// mid-connect (e.g. StrictMode's double run, or the session status arriving) starts a
+/// second connect.
 function connectTab(optionsRef: React.RefObject<UseTerminalOptions>) {
   const { tabId } = optionsRef.current
   const conn = openTabConnection(tabId)
@@ -343,14 +344,7 @@ export function useTerminal(
       observer.disconnect()
       if (fitDebounce) clearTimeout(fitDebounce)
     }
-  }, [
-    options.active,
-    options.tabId,
-    options.sessionId,
-    options.sessionStatus,
-    options.cwd,
-    containerRef,
-  ])
+  }, [options.active, options.tabId, options.sessionId, options.sessionStatus, containerRef])
 
   // Activation only acquires; the pane keeps its WebGL renderer after deactivation
   // until the pool LRU-evicts it, so hopping between recent tabs skips the expensive
@@ -362,6 +356,7 @@ export function useTerminal(
     const term = termRef.current
     if (!term || !openedRef.current) return
     webglRendererPool.acquire(term)
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- the term is rebuilt per tabId, and the rebuilt one needs a renderer too.
   }, [options.active, options.tabId, containerRef])
 
   useEffect(() => {
@@ -369,7 +364,7 @@ export function useTerminal(
     return getDefaultStore().sub(terminalFocusRequestAtom, () => {
       termRef.current?.focus()
     })
-  }, [options.active, options.tabId])
+  }, [options.active])
 
   return termRef
 }
