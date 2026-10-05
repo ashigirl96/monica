@@ -70,73 +70,53 @@ test('list with closed shows only the closed Tasks', async () => {
   expect(output.tasks.map((t) => [t.ref, t.displayState.state])).toEqual([['acme/app#1', 'closed']])
 })
 
-function captureInterval() {
-  const captured: { tick?: () => void; ms?: number } = {}
-  spyOn(globalThis, 'setInterval').mockImplementation(((tick: () => void, ms: number) => {
-    Object.assign(captured, { tick, ms })
-    return 0
-  }) as unknown as typeof setInterval)
-  return captured
-}
+test('syncInBackground copies the Issues of the open Tasks from GitHub', async () => {
+  const { github, client, taskLedger } = setup()
+  github.issue('acme/app#1', { title: 'One' })
+  await client.track({ ref: 'acme/app#1' })
+  github.issue('acme/app#1', { title: 'One, renamed' })
+  github.requests.length = 0
 
-async function waitFor<T>(read: () => Promise<T> | T, done: (value: T) => boolean): Promise<T> {
-  for (let tries = 0; ; tries++) {
-    const value = await read()
-    if (done(value)) return value
-    if (tries > 200) throw new Error(`gave up waiting; last value ${JSON.stringify(value)}`)
-    await Bun.sleep(5)
-  }
-}
+  await taskLedger.syncInBackground()
+  const output = await client.list({})
 
-test('the background sync runs at start and every 5 minutes', async () => {
-  const interval = captureInterval()
+  expect(github.requests).toEqual([{ repo: 'acme/app', numbers: [1], branches: [] }])
+  expect(output.tasks[0]?.title).toBe('One, renamed')
+  expect(output.backgroundSyncError).toBeNull()
+})
+
+test('a failed background sync rejects and shows in list until one succeeds', async () => {
+  const { github, client, taskLedger } = setup()
+  github.issue('acme/app#1', { title: 'One' })
+  await client.track({ ref: 'acme/app#1' })
+  github.logOut()
+
+  const rejected = await taskLedger.syncInBackground().catch((error: unknown) => error)
+  const failed = await client.list({})
+  github.logIn()
+  await taskLedger.syncInBackground()
+  const recovered = await client.list({})
+
+  expect(rejected).toBeInstanceOf(Error)
+  expect((rejected as Error).message).toContain('gh auth token')
+  expect(failed.backgroundSyncError).toEqual({
+    at: expect.any(Date),
+    message: expect.stringContaining('gh auth token'),
+  })
+  expect(recovered.backgroundSyncError).toBeNull()
+  expect(recovered.tasks).toHaveLength(1)
+})
+
+test('start neither syncs nor sets a timer; the Job Ledger runs the background sync', async () => {
+  const setInterval = spyOn(globalThis, 'setInterval')
   const { github, client, taskLedger } = setup()
   github.issue('acme/app#1', { title: 'One' })
   await client.track({ ref: 'acme/app#1' })
   github.requests.length = 0
 
   taskLedger.start()
-  await waitFor(
-    () => github.requests.length,
-    (n) => n === 1,
-  )
-  github.issue('acme/app#1', { title: 'One, renamed' })
-  interval.tick!()
-  const renamed = await waitFor(
-    () => client.list({}),
-    (output) => output.tasks[0]?.title === 'One, renamed',
-  )
+  await Bun.sleep(20)
 
-  expect(interval.ms).toBe(5 * 60_000)
-  expect(github.requests).toEqual([
-    { repo: 'acme/app', numbers: [1], branches: [] },
-    { repo: 'acme/app', numbers: [1], branches: [] },
-  ])
-  expect(renamed.backgroundSyncError).toBeNull()
-})
-
-test('a failed background sync shows in list until one succeeds', async () => {
-  const interval = captureInterval()
-  const { github, client, taskLedger } = setup()
-  github.issue('acme/app#1', { title: 'One' })
-  await client.track({ ref: 'acme/app#1' })
-  github.logOut()
-
-  taskLedger.start()
-  const failed = await waitFor(
-    () => client.list({}),
-    (output) => output.backgroundSyncError !== null,
-  )
-  github.logIn()
-  interval.tick!()
-  const recovered = await waitFor(
-    () => client.list({}),
-    (output) => output.backgroundSyncError === null,
-  )
-
-  expect(failed.backgroundSyncError).toEqual({
-    at: expect.any(Date),
-    message: expect.stringContaining('gh auth token'),
-  })
-  expect(recovered.tasks).toHaveLength(1)
+  expect(github.requests).toEqual([])
+  expect(setInterval).not.toHaveBeenCalled()
 })

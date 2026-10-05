@@ -2,6 +2,11 @@ import { Database } from 'bun:sqlite'
 import { join } from 'node:path'
 
 import { createRouterClient, os } from '@orpc/server'
+import {
+  createJobLedger,
+  migrations as jobMigrations,
+  router as jobRouter,
+} from '@tania/job/server'
 import { issue, issueBlocker, task as taskTable } from '@tania/task/schema'
 import {
   createTaskLedger,
@@ -38,7 +43,7 @@ export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Gh
   const sqlite = new Database(':memory:')
   sqlite.run('PRAGMA foreign_keys = ON')
   const db = drizzle(sqlite)
-  for (const m of [workbenchMigrations, taskMigrations]) {
+  for (const m of [workbenchMigrations, taskMigrations, jobMigrations]) {
     migrate(db, { migrationsFolder: m.folder, migrationsTable: m.table })
   }
   const ptydHome = tempHome(onCleanup)
@@ -63,11 +68,20 @@ export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Gh
       token: () => Promise.reject(new Error('`gh auth token` failed: not logged in')),
     },
   })
-  const context = { db, workbenchLedger, taskLedger }
+  const jobLedger = createJobLedger({
+    db,
+    systemJobs: [
+      { name: 'task.sync', every: 5 * 60_000, run: () => taskLedger.syncInBackground() },
+    ],
+  })
+  onCleanup(() => jobLedger.stop())
+  const context = { db, workbenchLedger, taskLedger, jobLedger }
   return {
     sqlite,
     db,
-    router: os.$context<typeof context>().router({ workbench: workbenchRouter, task: taskRouter }),
+    router: os
+      .$context<typeof context>()
+      .router({ workbench: workbenchRouter, task: taskRouter, job: jobRouter }),
     context,
   }
 }

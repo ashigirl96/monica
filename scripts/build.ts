@@ -16,7 +16,11 @@ const compile = [
   '--bytecode',
   '--format=esm',
 ]
-const migrations = ['packages/workbench/migrations/workbench', 'packages/task/migrations/task']
+const migrations = [
+  'packages/workbench/migrations/workbench',
+  'packages/task/migrations/task',
+  'packages/job/migrations/job',
+]
 
 mkdirSync(binaries, { recursive: true })
 await $`cargo build --release -p tania-ptyd`.cwd(repo)

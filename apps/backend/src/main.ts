@@ -6,6 +6,11 @@ import { join } from 'node:path'
 import { os } from '@orpc/server'
 import { RPCHandler } from '@orpc/server/fetch'
 import {
+  createJobLedger,
+  migrations as jobMigrations,
+  router as jobRouter,
+} from '@tania/job/server'
+import {
   createTaskLedger,
   migrations as taskMigrations,
   nameAgentSession,
@@ -49,7 +54,7 @@ sqlite.run('PRAGMA journal_mode = WAL')
 sqlite.run('PRAGMA foreign_keys = ON')
 const db = drizzle(sqlite)
 
-for (const m of [workbenchMigrations, taskMigrations]) {
+for (const m of [workbenchMigrations, taskMigrations, jobMigrations]) {
   migrate(db, { migrationsFolder: m.folder, migrationsTable: m.table })
 }
 
@@ -61,11 +66,15 @@ const workbenchLedger = createWorkbenchLedger({
   nameAgentSession,
 })
 const taskLedger = createTaskLedger({ db, workbenchLedger, home })
+const jobLedger = createJobLedger({
+  db,
+  systemJobs: [{ name: 'task.sync', every: 5 * 60_000, run: () => taskLedger.syncInBackground() }],
+})
 
-const context = { db, workbenchLedger, taskLedger }
+const context = { db, workbenchLedger, taskLedger, jobLedger }
 const router = os
   .$context<typeof context>()
-  .router({ workbench: workbenchRouter, task: taskRouter })
+  .router({ workbench: workbenchRouter, task: taskRouter, job: jobRouter })
 const handler = new RPCHandler(router)
 
 const origins = ['tauri://localhost', 'http://tauri.localhost']
@@ -89,6 +98,7 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, idleTimeout: 0, fetch
 // ptyd が起きないときに Backend ごと届かなくならないよう、待つのは 3 秒まで。
 const workbenchStarted = workbenchLedger.start().then(() => true)
 taskLedger.start()
+jobLedger.start()
 if (!(await Promise.race([workbenchStarted, Bun.sleep(3000).then(() => false)]))) {
   console.error('[backend] tania-ptyd is not ready after 3s; announcing the endpoint anyway')
 }
@@ -108,6 +118,7 @@ let exiting = false
 function exit() {
   if (exiting) return
   exiting = true
+  jobLedger.stop()
   taskLedger.stop()
   workbenchLedger.stop()
   try {
