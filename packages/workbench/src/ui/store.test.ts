@@ -166,10 +166,10 @@ test("dragging a Runspace onto another puts it in that one's place", async () =>
   const order = async () => (await client.layout.get()).runspaces.map((r) => r.id)
 
   await store.set(reorderRunspacesAtom, a!, c!)
-  expect(await order()).toEqual([b, c, a])
+  expect(await order()).toEqual([b!, c!, a!])
 
   await store.set(reorderRunspacesAtom, a!, b!)
-  expect(await order()).toEqual([a, b, c])
+  expect(await order()).toEqual([a!, b!, c!])
 })
 
 test("dragging a Tab onto another in the header puts it in that one's place", async () => {
@@ -280,14 +280,14 @@ test('a Runspace moves only within its sidebar group, by drag or by key', async 
   const sidebar = () => store.get(runspaceSummariesAtom).map((s) => s.id)
 
   await store.set(reorderRunspacesAtom, a!, p!)
-  expect(await books()).toEqual([a, p, b])
+  expect(await books()).toEqual([a!, p!, b!])
 
   store.set(activateRunspaceAtom, b!)
   await store.set(moveActiveRunspaceAtom, 'up')
-  expect(sidebar()).toEqual([p, b, a])
+  expect(sidebar()).toEqual([p!, b!, a!])
 
   await store.set(moveActiveRunspaceAtom, 'up')
-  expect(sidebar()).toEqual([p, b, a])
+  expect(sidebar()).toEqual([p!, b!, a!])
 })
 
 test('a Tab whose shell exits while it is connected closes without ever showing the exit', async () => {
