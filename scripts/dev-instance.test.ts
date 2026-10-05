@@ -1,41 +1,42 @@
-import { afterAll, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
-import { devInstance } from "./dev-instance";
+import { afterAll, expect, test } from 'bun:test'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { join } from 'node:path'
 
-const scratch = mkdtempSync(join(tmpdir(), "dev-instance-"));
-afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+import { devInstance } from './dev-instance'
+
+const scratch = mkdtempSync(join(tmpdir(), 'dev-instance-'))
+afterAll(() => rmSync(scratch, { recursive: true, force: true }))
 
 function homeAt(...segments: string[]): string {
-  const home = join(scratch, ...segments);
-  mkdirSync(home, { recursive: true });
-  return home;
+  const home = join(scratch, ...segments)
+  mkdirSync(home, { recursive: true })
+  return home
 }
 
-test("既定の home は release と分けた identifier と port 1420 のまま", () => {
-  expect(devInstance(join(homedir(), ".tania-dev"))).toEqual({
-    identifier: "com.ashigirl96.tania.dev",
+test('既定の home は release と分けた identifier と port 1420 のまま', () => {
+  expect(devInstance(join(homedir(), '.tania-dev'))).toEqual({
+    identifier: 'com.ashigirl96.tania.dev',
     preferredPort: 1420,
-  });
-});
+  })
+})
 
-test("ほかの home は basename の先頭の . を外し、使えない文字を - にして hash を付ける", () => {
-  const { identifier, preferredPort } = devInstance(homeAt(".tania_s46"));
-  expect(identifier).toMatch(/^com\.ashigirl96\.tania\.dev\.tania-s46-[0-9a-f]{6}$/);
-  expect(preferredPort).toBeGreaterThan(1420);
-});
+test('ほかの home は basename の先頭の . を外し、使えない文字を - にして hash を付ける', () => {
+  const { identifier, preferredPort } = devInstance(homeAt('.tania_s46'))
+  expect(identifier).toMatch(/^com\.ashigirl96\.tania\.dev\.tania-s46-[0-9a-f]{6}$/)
+  expect(preferredPort).toBeGreaterThan(1420)
+})
 
 // macOS の $TMPDIR の下は /var と /private/var の 2 通りに書ける。
-test("同じ home を symlink 経由で書いても同じ instance になる", () => {
-  const home = homeAt("real", "tania-s2");
-  const link = join(scratch, "link");
-  symlinkSync(home, link);
-  expect(devInstance(link)).toEqual(devInstance(home));
-});
+test('同じ home を symlink 経由で書いても同じ instance になる', () => {
+  const home = homeAt('real', 'tania-s2')
+  const link = join(scratch, 'link')
+  symlinkSync(home, link)
+  expect(devInstance(link)).toEqual(devInstance(home))
+})
 
-test("basename が同じでも場所が違う home は別の identifier になる", () => {
-  const a = devInstance(homeAt("a", "tania-s3"));
-  const b = devInstance(homeAt("b", "tania-s3"));
-  expect(a.identifier).not.toBe(b.identifier);
-});
+test('basename が同じでも場所が違う home は別の identifier になる', () => {
+  const a = devInstance(homeAt('a', 'tania-s3'))
+  const b = devInstance(homeAt('b', 'tania-s3'))
+  expect(a.identifier).not.toBe(b.identifier)
+})

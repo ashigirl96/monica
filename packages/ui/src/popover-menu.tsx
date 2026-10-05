@@ -1,12 +1,13 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { cn } from "./cn.ts";
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
-const ANCHOR_GAP = 4;
-const VIEWPORT_PADDING = 8;
-const MENU_SELECTOR = "[data-popover-menu]";
+import { cn } from './cn.ts'
 
-export type PopoverAnchor = { top: number; bottom: number; left: number };
+const ANCHOR_GAP = 4
+const VIEWPORT_PADDING = 8
+const MENU_SELECTOR = '[data-popover-menu]'
+
+export type PopoverAnchor = { top: number; bottom: number; left: number }
 
 export function PopoverMenu({
   anchor,
@@ -14,66 +15,66 @@ export function PopoverMenu({
   className,
   children,
 }: {
-  anchor: PopoverAnchor;
-  onClose: () => void;
-  className?: string;
-  children: React.ReactNode;
+  anchor: PopoverAnchor
+  onClose: () => void
+  className?: string
+  children: React.ReactNode
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
 
   // The anchor rect is captured at open time; measure the menu itself before
   // showing it so it can flip above the anchor near the bottom edge.
   useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const { width, height } = el.getBoundingClientRect();
+    const el = ref.current
+    if (!el) return
+    const { width, height } = el.getBoundingClientRect()
     const left = Math.min(
       Math.max(anchor.left, VIEWPORT_PADDING),
       window.innerWidth - width - VIEWPORT_PADDING,
-    );
-    let top = anchor.bottom + ANCHOR_GAP;
+    )
+    let top = anchor.bottom + ANCHOR_GAP
     if (top + height > window.innerHeight - VIEWPORT_PADDING) {
-      top = anchor.top - height - ANCHOR_GAP;
+      top = anchor.top - height - ANCHOR_GAP
     }
-    setPos({ top: Math.max(top, VIEWPORT_PADDING), left });
-  }, [anchor]);
+    setPos({ top: Math.max(top, VIEWPORT_PADDING), left })
+  }, [anchor])
 
   // The menu does not track its anchor, so a scroll or resize closes it; a menu opened from
   // this one is portaled outside it, so a press or scroll in any open menu counts as inside.
   useEffect(() => {
-    const outside = (e: Event) => !(e.target instanceof Element && e.target.closest(MENU_SELECTOR));
+    const outside = (e: Event) => !(e.target instanceof Element && e.target.closest(MENU_SELECTOR))
     const onEvent = (e: Event) => {
-      if (outside(e)) onClose();
-    };
-    window.addEventListener("scroll", onEvent, { capture: true });
-    window.addEventListener("resize", onClose);
-    window.addEventListener("pointerdown", onEvent);
+      if (outside(e)) onClose()
+    }
+    window.addEventListener('scroll', onEvent, { capture: true })
+    window.addEventListener('resize', onClose)
+    window.addEventListener('pointerdown', onEvent)
     return () => {
-      window.removeEventListener("scroll", onEvent, { capture: true });
-      window.removeEventListener("resize", onClose);
-      window.removeEventListener("pointerdown", onEvent);
-    };
-  }, [onClose]);
+      window.removeEventListener('scroll', onEvent, { capture: true })
+      window.removeEventListener('resize', onClose)
+      window.removeEventListener('pointerdown', onEvent)
+    }
+  }, [onClose])
 
   return createPortal(
     <div
       ref={ref}
       data-popover-menu=""
       className={cn(
-        "fixed z-50 w-44 rounded-md border border-border bg-popover p-1 shadow-lg",
+        'fixed z-50 w-44 rounded-md border border-border bg-popover p-1 shadow-lg',
         className,
       )}
       style={
         pos
           ? { top: pos.top, left: pos.left }
-          : { top: anchor.bottom + ANCHOR_GAP, left: anchor.left, visibility: "hidden" }
+          : { top: anchor.bottom + ANCHOR_GAP, left: anchor.left, visibility: 'hidden' }
       }
     >
       {children}
     </div>,
     document.body,
-  );
+  )
 }
 
 export function PopoverMenuItem({
@@ -84,15 +85,15 @@ export function PopoverMenuItem({
     <button
       type="button"
       className={cn(
-        "flex w-full items-center rounded px-2 py-1 text-left text-[12px] text-popover-foreground",
-        "hover:bg-accent hover:text-accent-foreground disabled:opacity-40",
+        'flex w-full items-center rounded px-2 py-1 text-left text-[12px] text-popover-foreground',
+        'hover:bg-accent hover:text-accent-foreground disabled:opacity-40',
         className,
       )}
       {...props}
     />
-  );
+  )
 }
 
 export function PopoverMenuSeparator() {
-  return <div className="my-1 h-px bg-border" />;
+  return <div className="my-1 h-px bg-border" />
 }

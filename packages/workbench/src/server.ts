@@ -1,9 +1,11 @@
-import { homedir } from "node:os";
-import { implement, ORPCError } from "@orpc/server";
-import { eq, getTableColumns, inArray, isNotNull, or } from "drizzle-orm";
-import { listAgentSessions, recordHook } from "./agent-session.ts";
-import { contract } from "./contract.ts";
-import { openInEditor, resolveEditorPaths } from "./editor.ts";
+import { homedir } from 'node:os'
+
+import { implement, ORPCError } from '@orpc/server'
+import { eq, getTableColumns, inArray, isNotNull, or } from 'drizzle-orm'
+
+import { listAgentSessions, recordHook } from './agent-session.ts'
+import { contract } from './contract.ts'
+import { openInEditor, resolveEditorPaths } from './editor.ts'
 import {
   asTab,
   closeTab,
@@ -20,8 +22,8 @@ import {
   setTabCwd,
   unpinTab,
   writeLayout,
-} from "./layout.ts";
-import { tab, terminalSession } from "./schema.ts";
+} from './layout.ts'
+import { tab, terminalSession } from './schema.ts'
 import {
   type Db,
   LIVE,
@@ -29,14 +31,14 @@ import {
   startTerminalSession,
   terminateTerminalSessions,
   type Workbench,
-} from "./workbench.ts";
-import { worktreeInfo } from "./worktree.ts";
+} from './workbench.ts'
+import { worktreeInfo } from './worktree.ts'
 
-export { migrations } from "../migrations/index.ts";
-export { inheritableEnv } from "./ptyd.ts";
-export { createWorkbench, type Db, type Tx, type Workbench } from "./workbench.ts";
+export { migrations } from '../migrations/index.ts'
+export { inheritableEnv } from './ptyd.ts'
+export { createWorkbench, type Db, type Tx, type Workbench } from './workbench.ts'
 
-const os = implement(contract).$context<{ db: Db; workbench: Workbench }>();
+const os = implement(contract).$context<{ db: Db; workbench: Workbench }>()
 
 export const router = os.router({
   terminalSession: {
@@ -55,14 +57,14 @@ export const router = os.router({
         .from(terminalSession)
         .leftJoin(tab, eq(tab.terminalSessionId, terminalSession.id))
         .where(eq(terminalSession.id, input.id))
-        .get();
-      if (!row) throw new ORPCError("NOT_FOUND", { message: `no Terminal Session ${input.id}` });
+        .get()
+      if (!row) throw new ORPCError('NOT_FOUND', { message: `no Terminal Session ${input.id}` })
       if (row.pinned) {
-        throw new ORPCError("CONFLICT", {
+        throw new ORPCError('CONFLICT', {
           message: `Terminal Session ${input.id} is in a pinned Tab`,
-        });
+        })
       }
-      await terminateTerminalSessions(context.workbench, [input.id]);
+      await terminateTerminalSessions(context.workbench, [input.id])
     }),
   },
   layout: {
@@ -70,63 +72,63 @@ export const router = os.router({
   },
   runspace: {
     create: os.runspace.create.handler(async ({ context, input }) => {
-      const cwd = input.cwd ?? homedir();
-      const shell = await shellWhenReady(context.workbench);
+      const cwd = input.cwd ?? homedir()
+      const shell = await shellWhenReady(context.workbench)
       const opened = writeLayout(context, (tx) =>
         openTab(tx, { runspaceId: createRunspace(tx, { cwd, index: input.index }), cwd, shell }),
-      );
-      await startTerminalSession(context.workbench, opened.terminalSessionId, input);
-      return { runspaceId: opened.runspaceId, tab: asTab(opened) };
+      )
+      await startTerminalSession(context.workbench, opened.terminalSessionId, input)
+      return { runspaceId: opened.runspaceId, tab: asTab(opened) }
     }),
     remove: os.runspace.remove.handler(async ({ context, input }) => {
       const terminalSessionIds = writeLayout(context, (tx) => {
-        refuseRemoving(tx, input.id);
-        return removeRunspace(tx, input.id);
-      });
-      await terminateTerminalSessions(context.workbench, terminalSessionIds);
+        refuseRemoving(tx, input.id)
+        return removeRunspace(tx, input.id)
+      })
+      await terminateTerminalSessions(context.workbench, terminalSessionIds)
     }),
     move: os.runspace.move.handler(({ context, input }) => {
-      writeLayout(context, (tx) => moveRunspace(tx, input));
+      writeLayout(context, (tx) => moveRunspace(tx, input))
     }),
   },
   tab: {
     open: os.tab.open.handler(async ({ context, input }) => {
-      const { runspaceId, cwd, index, terminalSessionId } = input;
+      const { runspaceId, cwd, index, terminalSessionId } = input
       if (terminalSessionId) {
         return asTab(
           writeLayout(context, (tx) =>
             reattachTab(tx, { runspaceId, cwd, index, terminalSessionId }),
           ),
-        );
+        )
       }
-      const shell = await shellWhenReady(context.workbench);
-      const opened = writeLayout(context, (tx) => openTab(tx, { runspaceId, cwd, index, shell }));
-      await startTerminalSession(context.workbench, opened.terminalSessionId, input);
-      return asTab(opened);
+      const shell = await shellWhenReady(context.workbench)
+      const opened = writeLayout(context, (tx) => openTab(tx, { runspaceId, cwd, index, shell }))
+      await startTerminalSession(context.workbench, opened.terminalSessionId, input)
+      return asTab(opened)
     }),
     respawn: os.tab.respawn.handler(async ({ context, input }) =>
       asTab(await respawnTab(context, input.id, input)),
     ),
     close: os.tab.close.handler(({ context, input }) => {
-      writeLayout(context, (tx) => closeTab(tx, input.id));
+      writeLayout(context, (tx) => closeTab(tx, input.id))
     }),
     move: os.tab.move.handler(({ context, input }) => {
-      writeLayout(context, (tx) => moveTab(tx, input));
+      writeLayout(context, (tx) => moveTab(tx, input))
     }),
     setCwd: os.tab.setCwd.handler(({ context, input }) => {
-      writeLayout(context, (tx) => setTabCwd(tx, input));
+      writeLayout(context, (tx) => setTabCwd(tx, input))
     }),
     pin: os.tab.pin.handler(({ context, input }) => {
-      writeLayout(context, (tx) => pinTab(tx, input.id));
+      writeLayout(context, (tx) => pinTab(tx, input.id))
     }),
     unpin: os.tab.unpin.handler(({ context, input }) => {
-      writeLayout(context, (tx) => unpinTab(tx, input.id));
+      writeLayout(context, (tx) => unpinTab(tx, input.id))
     }),
   },
   agentSession: {
     recordHook: os.agentSession.recordHook.handler(({ context, input }) => {
       for (const sessionId of recordHook(context, input)) {
-        context.workbench.events.publish("change", { type: "agentSession", sessionId });
+        context.workbench.events.publish('change', { type: 'agentSession', sessionId })
       }
     }),
     list: os.agentSession.list.handler(({ context }) => listAgentSessions(context.db)),
@@ -141,8 +143,8 @@ export const router = os.router({
     open: os.editor.open.handler(({ input }) => openInEditor(input.path)),
   },
   changes: os.changes.handler(async function* ({ context, signal }) {
-    for await (const change of context.workbench.events.subscribe("change", { signal })) {
-      yield change;
+    for await (const change of context.workbench.events.subscribe('change', { signal })) {
+      yield change
     }
   }),
-});
+})

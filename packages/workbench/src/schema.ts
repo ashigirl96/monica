@@ -1,89 +1,89 @@
-import { sql } from "drizzle-orm";
-import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sql } from 'drizzle-orm'
+import { check, index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
-export const terminalSession = sqliteTable("terminal_session", {
-  id: text("id").primaryKey(),
-  cwd: text("cwd").notNull(),
-  shell: text("shell").notNull(),
-  status: text("status", { enum: ["starting", "running", "exited", "lost", "failed"] }).notNull(),
-  pid: integer("pid"),
-  exitCode: integer("exit_code"),
-  error: text("error"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-  endedAt: integer("ended_at", { mode: "timestamp_ms" }),
-});
+export const terminalSession = sqliteTable('terminal_session', {
+  id: text('id').primaryKey(),
+  cwd: text('cwd').notNull(),
+  shell: text('shell').notNull(),
+  status: text('status', { enum: ['starting', 'running', 'exited', 'lost', 'failed'] }).notNull(),
+  pid: integer('pid'),
+  exitCode: integer('exit_code'),
+  error: text('error'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  endedAt: integer('ended_at', { mode: 'timestamp_ms' }),
+})
 
 // sort_order は兄弟を 1 行ずつ UPDATE して振り直すので、途中で同値ができる。unique にしない。
 // owned は他の domain が作った Runspace の印で、Workbench の操作では消さない（ADR-0012）。
-export const runspace = sqliteTable("runspace", {
-  id: text("id").primaryKey(),
-  cwd: text("cwd").notNull(),
-  sortOrder: integer("sort_order").notNull(),
-  owned: integer("owned", { mode: "boolean" }).notNull().default(false),
-});
+export const runspace = sqliteTable('runspace', {
+  id: text('id').primaryKey(),
+  cwd: text('cwd').notNull(),
+  sortOrder: integer('sort_order').notNull(),
+  owned: integer('owned', { mode: 'boolean' }).notNull().default(false),
+})
 
 export const tab = sqliteTable(
-  "tab",
+  'tab',
   {
-    id: text("id").primaryKey(),
-    runspaceId: text("runspace_id")
+    id: text('id').primaryKey(),
+    runspaceId: text('runspace_id')
       .notNull()
-      .references(() => runspace.id, { onDelete: "cascade" }),
-    cwd: text("cwd").notNull(),
-    sortOrder: integer("sort_order").notNull(),
-    terminalSessionId: text("terminal_session_id")
+      .references(() => runspace.id, { onDelete: 'cascade' }),
+    cwd: text('cwd').notNull(),
+    sortOrder: integer('sort_order').notNull(),
+    terminalSessionId: text('terminal_session_id')
       .notNull()
       .unique()
       .references(() => terminalSession.id),
-    pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
+    pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
   },
   (t) => [
-    index("tab_runspace_idx").on(t.runspaceId),
-    uniqueIndex("tab_pinned_per_runspace_idx")
+    index('tab_runspace_idx').on(t.runspaceId),
+    uniqueIndex('tab_pinned_per_runspace_idx')
       .on(t.runspaceId)
       .where(sql`pinned = 1`),
   ],
-);
+)
 
 export const agentSession = sqliteTable(
-  "agent_session",
+  'agent_session',
   {
-    sessionId: text("session_id").primaryKey(),
-    terminalSessionId: text("terminal_session_id")
+    sessionId: text('session_id').primaryKey(),
+    terminalSessionId: text('terminal_session_id')
       .notNull()
       .references(() => terminalSession.id),
-    state: text("state", { enum: ["running", "waiting", "ended", "unobserved"] }).notNull(),
-    waitReason: text("wait_reason", { enum: ["idle", "question", "permission", "error"] }),
-    waitTool: text("wait_tool"),
-    errorType: text("error_type"),
-    endReason: text("end_reason", { enum: ["session_end", "terminal_exited", "superseded"] }),
-    sessionEndReason: text("session_end_reason"),
-    cwd: text("cwd").notNull(),
-    transcriptPath: text("transcript_path"),
-    permissionMode: text("permission_mode"),
-    lastEventName: text("last_event_name").notNull(),
-    lastEventAt: integer("last_event_at", { mode: "timestamp_ms" }).notNull(),
-    stateChangedAt: integer("state_changed_at", { mode: "timestamp_ms" }).notNull(),
-    firstSeenAt: integer("first_seen_at", { mode: "timestamp_ms" }).notNull(),
-    endedAt: integer("ended_at", { mode: "timestamp_ms" }),
-    unobservedSince: integer("unobserved_since", { mode: "timestamp_ms" }),
+    state: text('state', { enum: ['running', 'waiting', 'ended', 'unobserved'] }).notNull(),
+    waitReason: text('wait_reason', { enum: ['idle', 'question', 'permission', 'error'] }),
+    waitTool: text('wait_tool'),
+    errorType: text('error_type'),
+    endReason: text('end_reason', { enum: ['session_end', 'terminal_exited', 'superseded'] }),
+    sessionEndReason: text('session_end_reason'),
+    cwd: text('cwd').notNull(),
+    transcriptPath: text('transcript_path'),
+    permissionMode: text('permission_mode'),
+    lastEventName: text('last_event_name').notNull(),
+    lastEventAt: integer('last_event_at', { mode: 'timestamp_ms' }).notNull(),
+    stateChangedAt: integer('state_changed_at', { mode: 'timestamp_ms' }).notNull(),
+    firstSeenAt: integer('first_seen_at', { mode: 'timestamp_ms' }).notNull(),
+    endedAt: integer('ended_at', { mode: 'timestamp_ms' }),
+    unobservedSince: integer('unobserved_since', { mode: 'timestamp_ms' }),
   },
   (t) => [
-    uniqueIndex("agent_session_live_per_terminal_session_idx")
+    uniqueIndex('agent_session_live_per_terminal_session_idx')
       .on(t.terminalSessionId)
       .where(sql`state <> 'ended'`),
-    check("agent_session_wait_reason", sql`(state = 'waiting') = (wait_reason IS NOT NULL)`),
-    check("agent_session_wait_tool", sql`wait_tool IS NULL OR wait_reason = 'permission'`),
-    check("agent_session_error_type", sql`error_type IS NULL OR wait_reason = 'error'`),
-    check("agent_session_end_reason", sql`(state = 'ended') = (end_reason IS NOT NULL)`),
-    check("agent_session_ended_at", sql`(state = 'ended') = (ended_at IS NOT NULL)`),
+    check('agent_session_wait_reason', sql`(state = 'waiting') = (wait_reason IS NOT NULL)`),
+    check('agent_session_wait_tool', sql`wait_tool IS NULL OR wait_reason = 'permission'`),
+    check('agent_session_error_type', sql`error_type IS NULL OR wait_reason = 'error'`),
+    check('agent_session_end_reason', sql`(state = 'ended') = (end_reason IS NOT NULL)`),
+    check('agent_session_ended_at', sql`(state = 'ended') = (ended_at IS NOT NULL)`),
     check(
-      "agent_session_session_end_reason",
+      'agent_session_session_end_reason',
       sql`session_end_reason IS NULL OR end_reason = 'session_end'`,
     ),
     check(
-      "agent_session_unobserved_since",
+      'agent_session_unobserved_since',
       sql`(state = 'unobserved') = (unobserved_since IS NOT NULL)`,
     ),
   ],
-);
+)

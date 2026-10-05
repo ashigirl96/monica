@@ -1,7 +1,7 @@
-import { cn, PopoverMenu, PopoverMenuItem, PopoverMenuSeparator } from "@tania/ui";
-import { useAtomValue, useSetAtom } from "jotai";
-import type { ReactNode } from "react";
-import { isDeadStatus, terminalSessionStatusAtom } from "./terminal-sessions.ts";
+import { cn, PopoverMenu, PopoverMenuItem, PopoverMenuSeparator } from '@tania/ui'
+import { useAtomValue, useSetAtom } from 'jotai'
+import type { ReactNode } from 'react'
+
 import {
   closeTerminalTabAtom,
   startNewShellForTabAtom,
@@ -10,50 +10,51 @@ import {
   tabMenuTabAtom,
   terminateTabTerminalSessionAtom,
   toggleTabPinAtom,
-} from "./store.ts";
+} from './store.ts'
+import { isDeadStatus, terminalSessionStatusAtom } from './terminal-sessions.ts'
 
 export type MenuTab = {
-  id: string;
-  terminalSessionId: string;
-};
+  id: string
+  terminalSessionId: string
+}
 
-export type TabMenuItems = (tab: MenuTab, close: () => void) => ReactNode;
+export type TabMenuItems = (tab: MenuTab, close: () => void) => ReactNode
 
 export function TabContextMenu({ tabMenuItems }: { tabMenuItems?: TabMenuItems }) {
-  const menu = useAtomValue(tabMenuAtom);
-  if (menu === null) return null;
-  return <MenuPopover menu={menu} tabMenuItems={tabMenuItems} />;
+  const menu = useAtomValue(tabMenuAtom)
+  if (menu === null) return null
+  return <MenuPopover menu={menu} tabMenuItems={tabMenuItems} />
 }
 
 function MenuPopover({ menu, tabMenuItems }: { menu: TabMenuState; tabMenuItems?: TabMenuItems }) {
-  const setMenu = useSetAtom(tabMenuAtom);
-  const closeTab = useSetAtom(closeTerminalTabAtom);
-  const terminate = useSetAtom(terminateTabTerminalSessionAtom);
-  const startNewShell = useSetAtom(startNewShellForTabAtom);
-  const togglePin = useSetAtom(toggleTabPinAtom);
-  const tab = useAtomValue(tabMenuTabAtom);
-  const statuses = useAtomValue(terminalSessionStatusAtom);
+  const setMenu = useSetAtom(tabMenuAtom)
+  const closeTab = useSetAtom(closeTerminalTabAtom)
+  const terminate = useSetAtom(terminateTabTerminalSessionAtom)
+  const startNewShell = useSetAtom(startNewShellForTabAtom)
+  const togglePin = useSetAtom(toggleTabPinAtom)
+  const tab = useAtomValue(tabMenuTabAtom)
+  const statuses = useAtomValue(terminalSessionStatusAtom)
 
-  if (!tab) return null;
+  if (!tab) return null
 
-  const dead = isDeadStatus(statuses[tab.terminalSessionId]?.status);
-  const close = () => setMenu(null);
+  const dead = isDeadStatus(statuses[tab.terminalSessionId]?.status)
+  const close = () => setMenu(null)
 
   return (
     <PopoverMenu anchor={menu.anchor} onClose={close}>
       <PopoverMenuItem
         onClick={() => {
-          close();
-          void togglePin(menu.tabId);
+          close()
+          void togglePin(menu.tabId)
         }}
       >
-        {tab.pinned ? "Unpin" : "Pin"}
+        {tab.pinned ? 'Unpin' : 'Pin'}
       </PopoverMenuItem>
       {!tab.pinned && (
         <PopoverMenuItem
           onClick={() => {
-            close();
-            void closeTab(menu.tabId);
+            close()
+            void closeTab(menu.tabId)
           }}
         >
           Close (keep shell)
@@ -62,8 +63,8 @@ function MenuPopover({ menu, tabMenuItems }: { menu: TabMenuState; tabMenuItems?
       <PopoverMenuItem
         disabled={!dead}
         onClick={() => {
-          close();
-          void startNewShell(menu.tabId);
+          close()
+          void startNewShell(menu.tabId)
         }}
       >
         New shell here
@@ -76,21 +77,21 @@ function MenuPopover({ menu, tabMenuItems }: { menu: TabMenuState; tabMenuItems?
             disabled={dead}
             onClick={() => {
               if (!menu.confirmingTerminate) {
-                setMenu({ ...menu, confirmingTerminate: true });
-                return;
+                setMenu({ ...menu, confirmingTerminate: true })
+                return
               }
-              close();
-              void terminate(menu.tabId);
+              close()
+              void terminate(menu.tabId)
             }}
             className={cn(
-              "text-destructive hover:bg-destructive/15 hover:text-destructive",
-              menu.confirmingTerminate && "bg-destructive/15",
+              'text-destructive hover:bg-destructive/15 hover:text-destructive',
+              menu.confirmingTerminate && 'bg-destructive/15',
             )}
           >
-            {menu.confirmingTerminate ? "Click again to confirm" : "Terminate"}
+            {menu.confirmingTerminate ? 'Click again to confirm' : 'Terminate'}
           </PopoverMenuItem>
         </>
       )}
     </PopoverMenu>
-  );
+  )
 }

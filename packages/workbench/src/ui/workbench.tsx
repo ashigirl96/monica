@@ -1,52 +1,53 @@
-import { cn, PromptIcon, TRAFFIC_LIGHT_ZONE_HEIGHT, TRAFFIC_LIGHT_ZONE_WIDTH } from "@tania/ui";
-import { useAtomValue, useSetAtom, useStore } from "jotai";
-import { lazy, Suspense, useEffect } from "react";
-import { WorkbenchHeader } from "./header.tsx";
-import { ResizeHandle } from "./resize-handle.tsx";
-import { type RenderRunspaceLabel, WorkbenchSidebar } from "./sidebar.tsx";
-import { TabContextMenu, type TabMenuItems } from "./tab-context-menu.tsx";
+import { cn, PromptIcon, TRAFFIC_LIGHT_ZONE_HEIGHT, TRAFFIC_LIGHT_ZONE_WIDTH } from '@tania/ui'
+import { useAtomValue, useSetAtom, useStore } from 'jotai'
+import { lazy, Suspense, useEffect } from 'react'
+
+import { WorkbenchHeader } from './header.tsx'
+import { ResizeHandle } from './resize-handle.tsx'
+import { type RenderRunspaceLabel, WorkbenchSidebar } from './sidebar.tsx'
 import {
   reloadAgentSessionsAtom,
   reloadAtom,
   warnFailed,
   type WorkbenchClient,
   workbenchClientAtom,
-} from "./store.ts";
-import { sidebarOpenAtom, sidebarResizingAtom, sidebarWidthAtom, uiZoomAtom } from "./ui-state.ts";
-import { persistUiState } from "./ui-state-persistence.ts";
+} from './store.ts'
+import { TabContextMenu, type TabMenuItems } from './tab-context-menu.tsx'
+import { persistUiState } from './ui-state-persistence.ts'
+import { sidebarOpenAtom, sidebarResizingAtom, sidebarWidthAtom, uiZoomAtom } from './ui-state.ts'
 
-const WorkbenchContent = lazy(() => import("./content.tsx"));
+const WorkbenchContent = lazy(() => import('./content.tsx'))
 
 // Backend が立ち直ると endpoint ごと替わり、前の購読は届かなくなるので、client ごとに張り直す。
 function useBooks(client: WorkbenchClient | null) {
-  const setClient = useSetAtom(workbenchClientAtom);
-  const reload = useSetAtom(reloadAtom);
-  const reloadAgentSessions = useSetAtom(reloadAgentSessionsAtom);
+  const setClient = useSetAtom(workbenchClientAtom)
+  const reload = useSetAtom(reloadAtom)
+  const reloadAgentSessions = useSetAtom(reloadAgentSessionsAtom)
 
   useEffect(() => {
-    setClient(() => client);
-    if (!client) return;
-    const controller = new AbortController();
-    const reloadLogged = () => reload().catch((e: unknown) => warnFailed("layout reload", e));
+    setClient(() => client)
+    if (!client) return
+    const controller = new AbortController()
+    const reloadLogged = () => reload().catch((e: unknown) => warnFailed('layout reload', e))
     const reloadAgentSessionsLogged = () =>
-      reloadAgentSessions().catch((e: unknown) => warnFailed("agent session reload", e));
+      reloadAgentSessions().catch((e: unknown) => warnFailed('agent session reload', e))
     void (async () => {
       try {
         // 先に購読してから読むので、読んだ後の変更を取りこぼさない。
-        const changes = await client.changes(undefined, { signal: controller.signal });
-        void reloadLogged();
-        void reloadAgentSessionsLogged();
+        const changes = await client.changes(undefined, { signal: controller.signal })
+        void reloadLogged()
+        void reloadAgentSessionsLogged()
         // reconcile は Agent Session の合図を出さずに未観測や終了にするので、どの合図でも読み直す。
         for await (const change of changes) {
-          if (change.type !== "agentSession") void reloadLogged();
-          void reloadAgentSessionsLogged();
+          if (change.type !== 'agentSession') void reloadLogged()
+          void reloadAgentSessionsLogged()
         }
       } catch (error) {
-        if (!controller.signal.aborted) console.error("workbench.changes ended", error);
+        if (!controller.signal.aborted) console.error('workbench.changes ended', error)
       }
-    })();
-    return () => controller.abort();
-  }, [client, setClient, reload, reloadAgentSessions]);
+    })()
+    return () => controller.abort()
+  }, [client, setClient, reload, reloadAgentSessions])
 }
 
 // workbench は Task を import しないので、Bench のラベルと Tab のメニューの Task の項目は slot で受ける（ADR-0005）。
@@ -55,26 +56,26 @@ export function Workbench({
   renderRunspaceLabel,
   tabMenuItems,
 }: {
-  client: WorkbenchClient | null;
-  renderRunspaceLabel?: RenderRunspaceLabel;
-  tabMenuItems?: TabMenuItems;
+  client: WorkbenchClient | null
+  renderRunspaceLabel?: RenderRunspaceLabel
+  tabMenuItems?: TabMenuItems
 }) {
-  useBooks(client);
-  const store = useStore();
-  useEffect(() => persistUiState(store), [store]);
+  useBooks(client)
+  const store = useStore()
+  useEffect(() => persistUiState(store), [store])
 
-  const sidebarOpen = useAtomValue(sidebarOpenAtom);
-  const sidebarWidth = useAtomValue(sidebarWidthAtom);
-  const resizing = useAtomValue(sidebarResizingAtom);
-  const uiZoom = useAtomValue(uiZoomAtom);
-  const leftPanelWidth = sidebarOpen ? sidebarWidth : 0;
+  const sidebarOpen = useAtomValue(sidebarOpenAtom)
+  const sidebarWidth = useAtomValue(sidebarWidthAtom)
+  const resizing = useAtomValue(sidebarResizingAtom)
+  const uiZoom = useAtomValue(uiZoomAtom)
+  const leftPanelWidth = sidebarOpen ? sidebarWidth : 0
 
   return (
-    <div className="flex min-h-0 flex-1 select-none overflow-hidden">
+    <div className="flex min-h-0 flex-1 overflow-hidden select-none">
       <div
         className={cn(
-          "flex-shrink-0 overflow-hidden",
-          !resizing && "transition-[width] duration-200 ease-out",
+          'flex-shrink-0 overflow-hidden',
+          !resizing && 'transition-[width] duration-200 ease-out',
         )}
         style={{ width: leftPanelWidth }}
       >
@@ -89,7 +90,7 @@ export function Workbench({
           >
             <div className="flex items-center gap-1.5 rounded-md bg-white/[0.08] px-2 py-0.5">
               <PromptIcon size={12} strokeWidth={2} />
-              <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              <span className="text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
                 Workbench
               </span>
             </div>
@@ -123,5 +124,5 @@ export function Workbench({
         </div>
       </div>
     </div>
-  );
+  )
 }
