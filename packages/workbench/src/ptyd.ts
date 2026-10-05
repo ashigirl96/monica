@@ -51,7 +51,7 @@ export type PtydHandlers = {
 }
 
 export class PtydClient {
-  private socket: Socket<undefined>
+  private socket: Socket
   private handlers: PtydHandlers
   private nextId = 1
   private pending = new Map<
@@ -64,7 +64,7 @@ export class PtydClient {
   private outbox: Uint8Array[] = []
   private closed = false
 
-  private constructor(socket: Socket<undefined>, handlers: PtydHandlers) {
+  private constructor(socket: Socket, handlers: PtydHandlers) {
     this.socket = socket
     this.handlers = handlers
   }

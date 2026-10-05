@@ -10,7 +10,7 @@ import {
 export const jumpHintsActiveAtom = atom(false)
 
 // Both use digits in visual order; Ctrl disambiguates runspace (⌃1) from tab (1).
-const HINT_KEYS = [...'123456789']
+const HINT_KEYS = '123456789'.split('')
 
 type JumpHintTargets = {
   byRunspaceId: Record<string, string>

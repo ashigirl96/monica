@@ -3,7 +3,7 @@ import { expect, mock, test } from 'bun:test'
 // Shell は command を別々の thread で走らせるので、先に呼ばれた command が後から届くことがある。
 const delivered: string[] = []
 const tauriCore = await import('@tauri-apps/api/core')
-mock.module('@tauri-apps/api/core', () => ({
+await mock.module('@tauri-apps/api/core', () => ({
   ...tauriCore,
   invoke: async (command: string, args: { data?: string; rows?: number }) => {
     const label = command === 'terminal_write' ? args.data! : `${command}:${args.rows}`
