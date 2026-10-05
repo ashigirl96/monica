@@ -48,7 +48,7 @@ function hasBranch(checkout: string, branch: string): boolean {
 }
 
 function terminated({ ptyd }: Pick<Books, 'ptyd'>) {
-  return ptyd.flatMap((call) => (call.op === 'terminate' ? [call.terminalSessionId] : []))
+  return ptyd.receivedAll((op) => op.op === 'terminate').map((op) => op.session_id)
 }
 
 function tabsOf({ db }: Pick<Books, 'db'>) {
@@ -66,7 +66,7 @@ async function until(done: () => boolean) {
 test('close takes down the Bench of a Task no guard stops: the worktree, the branch issue-n, the Runspace and its Tabs, whose Terminal Sessions it terminates', async () => {
   const books = await withWorktreeBench()
   const { db, client, ghq, cwd, task } = books
-  const shell = books.openTab(books.runspaceId)
+  const shell = await books.openTab(books.runspaceId)
   const changes: TaskChange[] = []
   task.events.subscribe('change', (change) => changes.push(change))
 
@@ -97,7 +97,7 @@ test('close takes down the Bench of a Task no guard stops: the worktree, the bra
 test('close called by the agent in a Tab of the Bench keeps that Tab and its claude in a Runspace it no longer owns, and the claude stays a Run of the closed Task', async () => {
   const books = await withWorktreeBench()
   const { db, client, claudeTab, runspaceId } = books
-  const other = books.openTab(runspaceId)
+  const other = await books.openTab(runspaceId)
   await books.hook(claudeTab, 's-1', 'SessionStart', { source: 'startup' })
 
   const output = await client.close({ ref, terminalSessionId: claudeTab })
@@ -368,8 +368,7 @@ async function closeHeldAtSync(books: Books) {
 test('while close is under way, a new run and attach on its Task are refused, so nothing enters the Bench it takes down', async () => {
   const books = await withWorktreeBench()
   const { client } = books
-  const plain = books.plainRunspace()
-  const outside = books.openTab(plain)
+  const outside = await books.openTabOutsideBench()
   const { closing, release } = await closeHeldAtSync(books)
 
   const attached = await failure(client.attach({ ref, terminalSessionId: outside }))
@@ -379,7 +378,9 @@ test('while close is under way, a new run and attach on its Task are refused, so
   expect(attached.code).toBe('CONFLICT')
   expect((await running).code).toBe('CONFLICT')
   expect(await closing).toMatchObject({ removedWorktree: books.cwd })
-  expect(books.db.select({ id: runspace.id }).from(runspace).all()).toEqual([{ id: plain }])
+  expect(books.db.select({ owned: runspace.owned }).from(runspace).all()).toEqual([
+    { owned: false },
+  ])
   expect(tabsOf(books)).toEqual([{ terminalSessionId: outside }])
 })
 
@@ -394,7 +395,7 @@ test('while close is under way, a run that would resume the last claude is refus
 
   expect(error.code).toBe('CONFLICT')
   expect(await closing).toMatchObject({ removedWorktree: books.cwd })
-  expect(books.ptyd.filter((call) => call.op === 'start')).toHaveLength(1)
+  expect(books.ptyd.receivedAll((op) => op.op === 'create')).toHaveLength(1)
 })
 
 test('a run --in-place that waited on ghq while the Task was closed opens no Bench', async () => {
@@ -451,7 +452,7 @@ function pauseBranchDeletion(books: Books) {
 test("a claude that becomes a Run while close removes the worktree keeps its Tab, like the caller's, and close completes", async () => {
   const books = await withWorktreeBench()
   const { db, client, claudeTab, runspaceId } = books
-  const other = books.openTab(runspaceId)
+  const other = await books.openTab(runspaceId)
   const pause = pauseBranchDeletion(books)
   const closing = client.close({ ref })
   await until(() => existsSync(pause.started))
@@ -475,15 +476,12 @@ test("a claude that becomes a Run while close removes the worktree keeps its Tab
 
 test('reopen is refused while close is still terminating the Terminal Sessions of the Bench', async () => {
   const books = await withWorktreeBench()
-  let finish: (() => void) | undefined
-  spyOn(books.workbench, 'terminateTerminalSessions').mockImplementation(
-    () => new Promise<void>((resolve) => (finish = resolve)),
-  )
+  const finish = books.ptyd.holdNext('terminate')
   const closing = books.client.close({ ref })
-  await until(() => finish !== undefined)
+  await books.ptyd.received((op) => op.op === 'terminate')
 
   const error = await failure(books.client.reopen({ ref }))
-  finish!()
+  finish()
 
   expect(error.code).toBe('CONFLICT')
   expect(await closing).toMatchObject({ ref })

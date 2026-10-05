@@ -1,16 +1,15 @@
 import { Database } from 'bun:sqlite'
-import { spyOn } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { createRouterClient } from '@orpc/server'
-import { runspace, tab, terminalSession } from '@tania/workbench/schema'
 import {
   createWorkbench,
   router as workbenchRouter,
   migrations as workbenchMigrations,
 } from '@tania/workbench/server'
+import { startFakePtyd, tempHome } from '@tania/workbench/testing'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
@@ -23,6 +22,7 @@ import { bench, issue } from './schema.ts'
 import { createTask, migrations, nameAgentSession, router } from './server.ts'
 
 const cleanups: (() => void)[] = []
+const onCleanup = (cleanup: () => void) => cleanups.push(cleanup)
 
 export function cleanUp() {
   for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
@@ -37,10 +37,7 @@ export async function failure(promise: Promise<unknown>) {
   throw new Error('expected the call to fail')
 }
 
-export type PtydCall =
-  | { op: 'start'; terminalSessionId: string; rows: number; cols: number }
-  | { op: 'write'; terminalSessionId: string; data: string }
-  | { op: 'terminate'; terminalSessionId: string }
+const TAB_SIZE = { rows: 24, cols: 80 }
 
 export function setup() {
   const sqlite = new Database(':memory:')
@@ -49,38 +46,28 @@ export function setup() {
   for (const m of [workbenchMigrations, migrations]) {
     migrate(db, { migrationsFolder: m.folder, migrationsTable: m.table })
   }
+  const home = tempHome(onCleanup)
+  const ptyd = startFakePtyd(home)
+  onCleanup(() => ptyd.stop())
   const notifications: { title: string; body: string }[] = []
   const workbench = createWorkbench({
     db,
-    home: '/nonexistent',
-    ptydPath: '/nonexistent',
+    home,
+    ptydPath: join(home, 'no-ptyd'),
     notify: (notification) => notifications.push(notification),
     nameAgentSession,
   })
-  // ptyd が無いので、Workbench が ptyd に送る口は呼ばれた順に記録するだけにする。
-  const ptyd: PtydCall[] = []
-  spyOn(workbench, 'ready').mockResolvedValue()
-  spyOn(workbench, 'startTerminalSession').mockImplementation(async (terminalSessionId, size) => {
-    ptyd.push({ op: 'start', terminalSessionId, ...size })
-  })
-  spyOn(workbench, 'writeTerminalSession').mockImplementation(async (terminalSessionId, data) => {
-    ptyd.push({ op: 'write', terminalSessionId, data })
-  })
-  spyOn(workbench, 'terminateTerminalSessions').mockImplementation(async (ids) => {
-    for (const terminalSessionId of ids) ptyd.push({ op: 'terminate', terminalSessionId })
-  })
+  onCleanup(() => workbench.stop())
   const workbenchClient = createRouterClient(workbenchRouter, { context: { db, workbench } })
   const github = startFakeGitHub()
-  cleanups.push(() => github.stop())
+  onCleanup(() => github.stop())
   const scratch = mkdtempSync(join(tmpdir(), 'tania-task-'))
-  cleanups.push(() => rmSync(scratch, { recursive: true, force: true }))
-  const home = join(scratch, 'home')
-  mkdirSync(home)
+  onCleanup(() => rmSync(scratch, { recursive: true, force: true }))
   const ghq = fakeGhq(scratch)
 
   function boot() {
     const task = createTask({ db, workbench, github: github.client, home, ghq: ghq.client })
-    cleanups.push(() => task.stop())
+    onCleanup(() => task.stop())
     const client = createRouterClient(router, { context: { db, task } })
     return { task, client }
   }
@@ -103,29 +90,14 @@ export function setup() {
       .get()!.runspaceId
   }
 
-  let opened = 0
-  // ptyd が無いので、Tab と live な Terminal Session の行は fixture として書く。
-  function openTab(runspaceId: string): string {
-    const terminalSessionId = `ts-${++opened}`
-    db.insert(terminalSession)
-      .values({
-        id: terminalSessionId,
-        cwd: '/work',
-        shell: '/bin/zsh',
-        status: 'running',
-        createdAt: new Date(),
-      })
-      .run()
-    db.insert(tab)
-      .values({ id: `tab-${opened}`, runspaceId, cwd: '/work', sortOrder: 0, terminalSessionId })
-      .run()
-    return terminalSessionId
+  async function openTab(runspaceId: string): Promise<string> {
+    return (await workbenchClient.tab.open({ runspaceId, ...TAB_SIZE })).terminalSessionId
   }
 
-  function plainRunspace(): string {
-    const id = `rs-plain-${++opened}`
-    db.insert(runspace).values({ id, cwd: '/work', sortOrder: opened }).run()
-    return id
+  // procedure で開く Runspace は Tab を 1 つ持って生まれるので、Bench の外の Tab は Runspace ごと開く。
+  async function openTabOutsideBench(): Promise<string> {
+    const { tab } = await workbenchClient.runspace.create({ cwd: '/work', ...TAB_SIZE })
+    return tab.terminalSessionId
   }
 
   // agent の報告は workbench の procedure に渡し、Backend と同じ経路で Agent Session を作る。
@@ -159,7 +131,7 @@ export function setup() {
     restartTask,
     openBench,
     openTab,
-    plainRunspace,
+    openTabOutsideBench,
     hook,
   }
 }

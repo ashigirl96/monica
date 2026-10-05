@@ -35,7 +35,7 @@ changes     → { type: "task", ref } | { type: "synced" }
 - 全件は workbench の reconcile を待たずに当てるので、不在中に Terminal Session が終わった Agent Session も、終了になる前に Run になることがある。Backend が止まる前に Bench の Tab で動いていた agent なので、Task の Run にして差し支えない。
 - どちらの経路も `origin = started` で insert する。一度 Run になった Agent Session は、Tab がどこに移っても、終わるまでその Task の Run のまま（`run.agent_session_id` の UNIQUE が守る）。closed な Task には Bench が無いので、Run は生まれない。
 - `layout` の合図（Tab の移動）でも、同じく commit の後に当てる。合図はどの Tab が動いたかを持たないので、Bench の Tab すべてに当てる。この経路で生まれる Run は Tab ごと Bench に入った Agent Session なので `origin = attached` にする（GUI の drag）。Bench の Tab で始まった claude の Run は、hook の commit と同じ同期の区間で積まれた `agentSession` の合図の microtask が先に作るので、この経路に横取りされない。
-- task のテストは、Tab と live な Terminal Session の行を fixture で書き、hook は workbench の `agentSession.recordHook` に渡す（`testing.ts` の `openTab` と `hook`）。Agent Session の行と合図を Backend と同じ経路で作るため。
+- task のテストは、Tab を workbench の router で開き（shell の起動は fake の ptyd が受ける）、hook は workbench の `agentSession.recordHook` に渡す（`testing.ts` の `openTab`・`openTabOutsideBench`・`hook`）。Tab・Terminal Session・Agent Session の行と合図を Backend と同じ経路で作るため。
 
 ## Attach
 

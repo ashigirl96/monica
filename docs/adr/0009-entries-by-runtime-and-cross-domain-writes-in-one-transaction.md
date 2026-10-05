@@ -20,3 +20,4 @@ ADR-0002 で `packages/<domain>` が schema・router・CLI・skill・UI を縦�
 - event は「変わった」の合図で、購読側は DB を読み直す。transaction は同期なので、tx の中で publish しても購読側が動くのは commit 後になる。rollback されても読み直すだけなので、commit 後に publish する仕組みは作らない。
 - domain を持たない UI 部品は `packages/ui` に置く。package は apps を import できないので、apps/desktop の汎用部品を domain の UI から使えないため。
 - browser 側の安全性は CI の `vite build` で確かめる。型だけの import は消えるので対象外。
+- 5 つの entry とは別に、テストだけが import する `testing`（Bun）を置く。workbench はここから fake の ptyd を出し、他の package のテストは Workbench の method を spy で差し替えずに、本物の手順を fake の ptyd に通す。テストと `testing.ts` 以外からの import は lint が止める。

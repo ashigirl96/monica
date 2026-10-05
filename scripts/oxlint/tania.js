@@ -24,6 +24,7 @@ function isAsyncFunction(node) {
 }
 
 const SCHEMA_ENTRY = /^@tania\/([^/]+)\/schema$/
+const TESTING_ENTRY = /^@tania\/[^/]+\/testing$/
 
 export default {
   meta: { name: 'tania' },
@@ -116,6 +117,24 @@ export default {
                 '他の domain の table に直接書かない。書き込みは相手の domain の method を通す（docs/packages.md の「domain をまたぐ規則」）',
             })
           },
+        }
+      },
+    },
+    // no-restricted-imports は override をまたいで重ならないので、file の集合ごとの制限と別の rule にする。
+    'testing-entry': {
+      create(context) {
+        const check = (node) => {
+          if (!TESTING_ENTRY.test(node.source?.value)) return
+          context.report({
+            node,
+            message:
+              'testing entry を import するのはテストと testing.ts だけ（docs/packages.md の entry）',
+          })
+        }
+        return {
+          ImportDeclaration: check,
+          ExportNamedDeclaration: check,
+          ExportAllDeclaration: check,
         }
       },
     },

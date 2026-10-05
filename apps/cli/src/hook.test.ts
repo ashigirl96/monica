@@ -6,11 +6,12 @@ import { join } from 'node:path'
 import { createRouterClient } from '@orpc/server'
 import { RPCHandler } from '@orpc/server/fetch'
 
-import { inMemoryBackend } from './testing.ts'
+import { cleanUp, inMemoryBackend, openTabOutsideBench } from './testing.ts'
 
 const cleanups: (() => void)[] = []
 afterEach(() => {
   for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
+  cleanUp()
 })
 
 function taniaHome(): string {
@@ -42,13 +43,7 @@ function serveBackend(home: string) {
   })
   cleanups.push(() => server.stop(true))
   writeEndpoint(home, server.port!)
-  return {
-    ...backend,
-    listAgentSessions: () =>
-      createRouterClient(backend.router, {
-        context: backend.context,
-      }).workbench.agentSession.list(),
-  }
+  return { ...backend, client: createRouterClient(backend.router, { context: backend.context }) }
 }
 
 const exitPlanMode = JSON.parse(
@@ -88,24 +83,25 @@ const inTab = { TANIA_TERMINAL_SESSION_ID: 'ts-a' }
 
 test("a hook from a Tab is recorded by the Backend under the Tab's Terminal Session", async () => {
   const home = taniaHome()
-  const backend = serveBackend(home)
+  const { client } = serveBackend(home)
+  const terminalSessionId = await openTabOutsideBench(client)
 
-  const result = await hook(home, prompt, inTab)
+  const result = await hook(home, prompt, { TANIA_TERMINAL_SESSION_ID: terminalSessionId })
 
   expect(result).toMatchObject({ code: 0, stdout: '' })
-  expect(await backend.listAgentSessions()).toEqual([
-    expect.objectContaining({ sessionId: 's-1', terminalSessionId: 'ts-a', state: 'running' }),
+  expect(await client.workbench.agentSession.list()).toEqual([
+    expect.objectContaining({ sessionId: 's-1', terminalSessionId, state: 'running' }),
   ])
 })
 
 test('a hook outside any Tab is not sent to the Backend', async () => {
   const home = taniaHome()
-  const backend = serveBackend(home)
+  const { client } = serveBackend(home)
 
   const result = await hook(home, prompt)
 
   expect(result).toMatchObject({ code: 0, stdout: '' })
-  expect(await backend.listAgentSessions()).toEqual([])
+  expect(await client.workbench.agentSession.list()).toEqual([])
 })
 
 test('ExitPlanMode is allowed into auto mode with its input handed back, without waiting for a Backend', async () => {

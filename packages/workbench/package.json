@@ -7,7 +7,8 @@
     "./contract": "./src/contract.ts",
     "./server": "./src/server.ts",
     "./ui": "./src/ui/index.ts",
-    "./cli": "./src/cli.ts"
+    "./cli": "./src/cli.ts",
+    "./testing": "./src/fake-ptyd.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate"

@@ -6,11 +6,12 @@ import { join } from 'node:path'
 import { RPCHandler } from '@orpc/server/fetch'
 
 import { connect } from './backend.ts'
-import { inMemoryBackend, tania } from './testing.ts'
+import { cleanUp, inMemoryBackend, tania } from './testing.ts'
 
 const cleanups: (() => void)[] = []
 afterEach(() => {
   for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
+  cleanUp()
 })
 
 function taniaHome(): string {
@@ -75,8 +76,7 @@ test('while the Backend refuses connections the CLI rereads backend.json and rea
 
   const result = await tania(list, () => connect(home))
 
-  expect(result.code).toBe(0)
-  expect(result.stdout).toContain('ts-a')
+  expect(result).toEqual({ code: 0, stdout: 'No live Terminal Sessions\n', stderr: '' })
 })
 
 test('no backend.json, or one whose pid is dead, means no Backend', async () => {
