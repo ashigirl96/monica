@@ -56,42 +56,38 @@ function coordsFromEvent(term: Terminal, screen: HTMLElement, e: PointerEvent) {
   return { col, row: term.buffer.active.viewportY + viewportRow }
 }
 
-function rangeOf(cells: Cell[], from: number, to: number): Range {
-  let length = 0
-  for (let i = from; i <= to; i++) length += cells[i].width
-  return { col: cells[from].col, row: cells[from].row, length }
+function rangeOf(cells: Cell[]): Range | null {
+  const [first] = cells
+  if (!first) return null
+  const length = cells.reduce((sum, c) => sum + c.width, 0)
+  return { col: first.col, row: first.row, length }
 }
 
 function selectWord(term: Terminal, cells: Cell[], col: number, row: number): Range | null {
   const idx = cells.findIndex((c) => c.row === row && c.col <= col && col < c.col + c.width)
-  if (idx < 0 || cells[idx].chars === '') return null
+  const hit = cells[idx]
+  if (!hit || hit.chars === '') return null
 
   const separators = term.options.wordSeparator ?? ''
   const isSep = (c: Cell) => c.chars !== '' && separators.includes(c.chars)
-  const expectSep = isSep(cells[idx])
+  const expectSep = isSep(hit)
+  const extendsRun = (c: Cell | undefined) =>
+    c !== undefined && c.chars !== '' && isSep(c) === expectSep
 
   let from = idx
   let to = idx
-  while (from - 1 >= 0 && cells[from - 1].chars !== '' && isSep(cells[from - 1]) === expectSep)
-    from--
-  while (to + 1 < cells.length && cells[to + 1].chars !== '' && isSep(cells[to + 1]) === expectSep)
-    to++
-  return rangeOf(cells, from, to)
+  while (extendsRun(cells[from - 1])) from--
+  while (extendsRun(cells[to + 1])) to++
+  return rangeOf(cells.slice(from, to + 1))
 }
 
 function selectLine(cells: Cell[]): Range | null {
-  if (cells.length === 0) return null
   const isWhitespace = (c: Cell) => c.chars === '' || c.chars === ' ' || c.chars === '\t'
 
-  let from = 0
-  let to = cells.length - 1
-  while (from <= to && isWhitespace(cells[from])) from++
-  while (to >= from && isWhitespace(cells[to])) to--
-  if (from > to) {
-    from = 0
-    to = cells.length - 1
-  }
-  return rangeOf(cells, from, to)
+  const from = cells.findIndex((c) => !isWhitespace(c))
+  if (from < 0) return rangeOf(cells)
+  const to = cells.findLastIndex((c) => !isWhitespace(c))
+  return rangeOf(cells.slice(from, to + 1))
 }
 
 export function attachTapSelection(term: Terminal, container: HTMLElement): () => void {

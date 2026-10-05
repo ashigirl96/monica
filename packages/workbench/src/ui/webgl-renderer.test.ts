@@ -128,8 +128,8 @@ describe('attachWebglRenderer', () => {
 
   test('recovers from context loss by disposing and reloading', () => {
     const h = makeHarness()
-    h.addons[0].fireLoss()
-    expect(h.addons[0].disposeCalls).toBe(1)
+    h.addons[0]!.fireLoss()
+    expect(h.addons[0]!.disposeCalls).toBe(1)
     expect(h.loaded.length).toBe(1)
     expect(h.scheduled.length).toBe(1)
     expect(h.isAttached()).toBe(true)
@@ -145,7 +145,7 @@ describe('attachWebglRenderer', () => {
 
   test('detach during a pending reload cancels it', () => {
     const h = makeHarness()
-    h.addons[0].fireLoss()
+    h.addons[0]!.fireLoss()
     h.detach()
     expect(h.cancelled.length).toBe(1)
 
@@ -157,18 +157,18 @@ describe('attachWebglRenderer', () => {
   test('detach is idempotent and tolerates the addon dispose throwing', () => {
     const h = makeHarness({ throwOnDispose: true })
     expect(() => h.detach()).not.toThrow()
-    expect(h.addons[0].disposeCalls).toBe(1)
+    expect(h.addons[0]!.disposeCalls).toBe(1)
 
     h.detach()
-    expect(h.addons[0].disposeCalls).toBe(1)
+    expect(h.addons[0]!.disposeCalls).toBe(1)
   })
 
   test('context loss after detach does not reload', () => {
     const h = makeHarness()
     h.detach()
-    expect(h.addons[0].disposeCalls).toBe(1)
+    expect(h.addons[0]!.disposeCalls).toBe(1)
 
-    h.addons[0].fireLoss()
+    h.addons[0]!.fireLoss()
     expect(h.scheduled.length).toBe(0)
     h.runScheduled()
     expect(h.addons.length).toBe(1)
@@ -188,7 +188,7 @@ describe('attachWebglRenderer', () => {
     const fake = makeFakeElement()
     const h = makeHarness({ element: fake.element })
     fake.setVisible(false)
-    h.addons[0].fireLoss()
+    h.addons[0]!.fireLoss()
 
     expect(h.scheduled.length).toBe(0)
     expect(h.isAttached()).toBe(false)
@@ -197,7 +197,7 @@ describe('attachWebglRenderer', () => {
   test('a reload scheduled while visible is skipped if the pane hides before it runs', () => {
     const fake = makeFakeElement()
     const h = makeHarness({ element: fake.element })
-    h.addons[0].fireLoss()
+    h.addons[0]!.fireLoss()
     expect(h.scheduled.length).toBe(1)
 
     fake.setVisible(false)

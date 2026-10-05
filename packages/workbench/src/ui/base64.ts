@@ -2,8 +2,8 @@ export const encoder = new TextEncoder()
 
 export function toBase64(input: Uint8Array): string {
   let binary = ''
-  for (let i = 0; i < input.length; i++) {
-    binary += String.fromCharCode(input[i])
+  for (const byte of input) {
+    binary += String.fromCharCode(byte)
   }
   return btoa(binary)
 }
