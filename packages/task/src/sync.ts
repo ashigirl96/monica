@@ -1,12 +1,12 @@
 import { ORPCError } from '@orpc/server'
 import type { Db, Tx } from '@tania/workbench/server'
-import { eq, isNull, type SQL } from 'drizzle-orm'
+import { and, eq, inArray, isNull, type SQL } from 'drizzle-orm'
 
 import type { SyncOutput, TaskChange, TrackOutput } from './contract.ts'
-import { isIssue, writeIssues } from './copy.ts'
+import { isIssue, isRepo, writeIssues, writePullRequests } from './copy.ts'
 import { BATCH, type GitHub, oneLine, queryIssues, RepositoryNotFound } from './github.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
-import { issue, task } from './schema.ts'
+import { bench, issue, task } from './schema.ts'
 
 export const SYNC_TIMEOUT_MS = 30_000
 
@@ -160,17 +160,20 @@ async function syncRefs(
     byRepo(refs).map(async ([repo, numbers]) => {
       try {
         for (let i = 0; i < numbers.length; i += BATCH) {
+          const batch = numbers.slice(i, i + BATCH)
+          const branches = benchBranches(deps.db, repo, batch)
           const answer = await queryIssues(
             { url: deps.github.url, token },
             repo,
-            numbers.slice(i, i + BATCH),
+            batch.map((number) => ({ number, benchBranch: branches.get(number) ?? null })),
             signal,
           )
           const syncedAt = new Date()
           deps.db.transaction((tx) => {
-            for (const issueId of writeIssues(tx, answer.issues, repo, syncedAt)) {
-              track?.(tx, issueId)
-            }
+            const written = writeIssues(tx, answer.issues, repo, syncedAt)
+            for (const { id } of written) track?.(tx, id)
+            // track の Task の行ができてから、Task と PR の対応を書く。
+            for (const { id, copied } of written) writePullRequests(tx, id, copied, syncedAt)
           })
           outcome.synced += answer.issues.length
           outcome.missing.push(...answer.missing.map(formatRef))
@@ -188,6 +191,17 @@ async function syncRefs(
   outcome.missing.sort()
   outcome.failures.sort()
   return outcome
+}
+
+// in_place の Bench は branch を持たないので、branch 一致の PR を引かない。
+function benchBranches(db: Db, repo: string, numbers: number[]): Map<number, string> {
+  const rows = db
+    .select({ number: issue.number, branch: bench.branch })
+    .from(bench)
+    .innerJoin(issue, eq(issue.id, bench.taskIssueId))
+    .where(and(isRepo(issue.repo, repo), inArray(issue.number, numbers)))
+    .all()
+  return new Map(rows.flatMap(({ number, branch }) => (branch === null ? [] : [[number, branch]])))
 }
 
 function byRepo(refs: IssueRef[]): [string, number[]][] {

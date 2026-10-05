@@ -18,7 +18,7 @@ _Avoid_: ExternalReference, external ref
 Task の Issue を block している Issue。open な Blocker が 1 つでもあると、その Task では新しい Run を始められない。
 
 **Pull Request**:
-GitHub の Pull Request のローカルの写し（title、state、draft、head branch）。Task との対応は保存した事実ではなく、branch 名の一致か GitHub 上の closing reference から sync のたびに導いて記録したもの。手で繋ぐ操作は無い。
+GitHub の Pull Request のローカルの写し（title、state、draft、head の branch と commit）。Task との対応は保存した事実ではなく、branch 名の一致か GitHub 上の closing reference から sync のたびに導いて記録したもの。手で繋ぐ操作は無い。
 _Avoid_: PR ref, external ref
 
 **Sync**:

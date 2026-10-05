@@ -25,16 +25,11 @@ gh pr comment <PR> --body "@codex review"
 
 ## 3. 返却を確かめる（wakeup 後）
 
-codex の出力のうち、requested_at より新しいものを 2 箇所とも見る。author の login は `gh pr view` では `chatgpt-codex-connector`、`gh api`（REST）では `chatgpt-codex-connector[bot]` になる。`<!-- codex-pull-request-review-summary -->` で始まる issue comment は依頼の直後に作られる進み具合の表で、返却には数えない。
+codex の出力のうち、requested_at より新しいものを 2 箇所とも見る。指摘ゼロは issue comment で、指摘は inline の review comment で返る。`<!-- codex-pull-request-review-summary -->` で始まる issue comment は依頼の直後に作られる進み具合の表で、返却には数えないので式で外す。`gh` の `--jq` は `--arg` を受けないので、requested_at は式に直接書いて絞る。
 
 ```bash
-gh pr view <PR> --json comments,reviews          # 指摘ゼロは issue comment で返る
-gh api repos/<owner>/<repo>/pulls/<PR>/comments  # 指摘は inline の review comment で返る
-```
-
-`gh` の `--jq` は `--arg` を受けないので、requested_at は式に直接書いて絞る。
-
-```bash
+gh api repos/<owner>/<repo>/issues/<PR>/comments \
+  --jq '[.[] | select(.user.login=="chatgpt-codex-connector[bot]" and .created_at > "<requested_at>" and (.body | startswith("<!-- codex-pull-request-review-summary -->") | not)) | {id, body: .body[0:300]}]'
 gh api repos/<owner>/<repo>/pulls/<PR>/comments \
   --jq '[.[] | select(.user.login=="chatgpt-codex-connector[bot]" and .created_at > "<requested_at>") | {id, path, line, body}]'
 ```
