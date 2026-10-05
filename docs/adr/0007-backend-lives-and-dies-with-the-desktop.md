@@ -16,7 +16,7 @@ ADR-0003 の反転で CLI は Backend が立っていないと動かなくなり
 
 - **不在は正常系**。desktop が閉じている間も Terminal Session の agent は動き続けるが、その hook は届かず捨てられ、Agent Session の状態はその間更新されない。再起動時に生きている Terminal Session の Agent Session をどう扱うか（未観測の状態を置くか）は Agent Session の状態機械で決める。hook の CLI は Backend 不在で retry せず即座に exit 0 で捨てる。通知も desktop 稼働中だけ出る。
 - **探索**: Backend は `127.0.0.1` の port 0 で bind し、`$TANIA_HOME/backend.json` に `{port, token, pid, startedAt}` を 1 行で書く（mode 0600、`$TANIA_HOME` は 0700、tmp に書いて rename）。書き手は Backend だけで、Shell と CLI は消しも書きもしない。CLI は procedure を呼ぶ瞬間に毎回読み、キャッシュしない。
-- **tab の env**: Workbench の tab の env に port と token は入れない（tab の env は `docs/packages.md` の「tab の env と shim」）。Backend が再起動すると port と token が変わるので、何日も生きる tab に焼くと tab 内の CLI が古い値を掴むため。
+- **tab の env**: Workbench の tab の env に port と token は入れない（tab の env は `docs/packages/tab-env-and-shim.md` の「env」）。Backend が再起動すると port と token が変わるので、何日も生きる tab に焼くと tab 内の CLI が古い値を掴むため。
 - **token**: Backend が起動ごとに `crypto.randomUUID()` で発行し、`backend.json` と stdout の endpoint 行に書く。守る相手は同一ユーザーの他プロセスではなく（file も読める）、ブラウザ経由の DNS rebinding と他ユーザー。`/health` だけ token 無しで `{name, pid, startedAt}` を返し、Shell の孤児掃除がこれで同定する。
 - **stdout**: Backend の stdout は Shell 宛ての JSON 行だけを書く channel で、endpoint 行は `{"type":"endpoint","port","token"}`。通知の行（ADR-0013）も同じ channel に載る。Shell は解釈できない行を自分の log に流して捨てる。Backend の log は stderr に出す。
 - **CLI の不在時**: `backend.json` が無い、または pid が死んでいるなら即 exit 2「desktop を起動してください」。file があり pid が生きていて接続拒否のときだけ（bind 前か再起動中）200ms 間隔で最大 3 秒 retry する。stale な file は CLI は消さない。

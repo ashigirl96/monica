@@ -1,0 +1,33 @@
+# desktop（apps/desktop）
+
+- `src/` は app の枠だけを持つ。shortcut、Backend client の provider、Shell からの `backend-endpoint` event による再接続、Backend 不在の表示、toast。domain の画面は `@tania/<d>/ui` から読む。Workbench の画面（sidebar・Tab の帯・端末の並び）は `@tania/workbench/ui` の `Workbench` が持ち、`client.workbench` を props で受けて、endpoint が替わるたびに `workbench.changes` を購読し直す。
+- ⌥ のキーは xterm に渡さず（`buildKeyEventHandler`）、shortcut だけが拾う。shortcut の binding が `false` を返して素通しした ⌥ のキーも、端末には届かない。
+- ⌘ と 1 文字のキーの組み合わせも xterm に渡さず、ブラウザの copy と paste に任せる。kitty の flag を立てた app には、xterm が ⌘ を super として送り（⌘V なら `CSI 118;9u`）、イベントを cancel するので、copy と paste が起きなくなるため。xterm が legacy の encode で持っていた ⌘A の全選択は、webview が `selectAll` を呼ぶ。⌘Enter や ⌘Backspace のように legacy でもバイト列を送っていたキーは、xterm に任せる。
+- kitty keyboard protocol は xterm に任せる（`vtExtensions.kittyKeyboard`）。flag の stack、`CSI ?u` への返答、キーの encode はどれも xterm が行い、webview の parser は kitty の CSI に触らない。
+  - ptyd は Tab に `TERM_PROGRAM=WezTerm` を渡す。claude はこれを見て起動時に kitty の flag を push し、Shift+Enter を改行として受け取る。flag が立っている間、claude は Ctrl+V を `CSI 118;5u` の形でしか受け取らない。flag は app ごとに立つので、shell の Tab と claude を抜けた後では、Shift+Enter は `\r`、Ctrl+V は `\x16` のまま送られる。
+  - kitty keyboard protocol は xterm 6.1 にしかないので、`@xterm/xterm` と addon 3 つを 6.1 の beta に完全に固定している（`^` を付けない）。版は #60 の prototype で確かめたもの。6.1 の stable が出たら移る。
+- Backend の endpoint の受け取りと不在の表示:
+  - 起動時は Shell の `backend_endpoint` command で今の endpoint（無ければ null）と再起動を諦めたかどうか（`{ endpoint, failed }`）を取り、以降は `backend-endpoint` と `backend-failed` の event で受ける。listen する前に出た event を取りこぼさないため。諦めたかどうかも取るのは、諦めた後に reload した webview が「再試行」を出せるようにするため。
+  - Shell は Backend の予期しない終了で endpoint を捨てたら、`backend-endpoint` に null を載せて出す。再起動を諦めたら `backend-failed` を出す（ADR-0007）。
+  - webview は endpoint が 1 秒以上 null のままなら、Workbench の上端に 1 行「Backend に再接続中…」を出す。`bun --watch` の再起動（約 100ms）でちらつかないよう 1 秒待つ。`backend-failed` では「Backend を起動できません」と「再試行」を出し、再試行は Shell の `backend_restart` command（失敗回数を戻して spawn する）を呼ぶ。
+  - 端末の byte は Shell を通るので、Backend が居ない間も打鍵と出力は続く。画面を塞がず、layout を変える操作だけが toast で失敗する。
+- domain の ui には自分の contract の client だけを渡す（workbench の ui は `client.workbench`）。oRPC の client は callable な Proxy なので、React の state に入れるときは `setState(() => client)`（#8 の詰まった点 5）。
+- Shell の terminal command と `clipboard_write_image` を呼ぶ wrapper（monica の `commands/terminal.ts`）は `packages/workbench/src/ui` に置く。
+- 画像の drop は、Tauri の drag-drop event の paths から画像の拡張子を持つ最初の 1 つを `clipboard_write_image` に渡し（monica どおり。画像が無ければ何もしない）、成功したら active な Tab の xterm の入力欄に Ctrl+V の `keydown` を渡す。Ctrl+V で clipboard の画像を読むのは agent の振る舞いなので、Shell の command にまとめない。失敗したら `packages/ui` の toast で 1 行出す（monica は黙っていた）。
+  - Ctrl+V は `terminal_write` で決まったバイト列にせず、xterm に encode させる。monica の `\x16` は kitty の flag を立てた claude に無視される。xterm に任せれば、drop は flag の状態を知らなくて済む。
+- Workbench の画面が使う、Shell に置かない monica の command は `workbench` の procedure にする（`cli: true` は付けない）。
+  - `worktree.info({ cwd })` → `{ repo, branch } | null`: `git -C <cwd> rev-parse --abbrev-ref HEAD --path-format=absolute --git-dir --git-common-dir`。linked worktree のときだけ値を返し、`repo` は common dir の親の名前。Runspace の title（`repo:branch`）に使い、webview は path ごとに cache して 5 秒で間引く。
+  - `editor.resolve({ cwd, candidates })` → `(string | null)[]`: `~` を展開し、相対なら cwd に join して `realpath` する。失敗したら末尾の `:<数字>` を最大 2 つ外して再試行する。terminal の link 検出が hover のたびに 1 行分をまとめて呼び、null の候補は link にしない。
+  - `editor.open({ path })` → `void`: `/usr/bin/open -a Zed <path>`。Zed は固定で、line:col は渡さない。webview は失敗を握りつぶす。
+- URL を開くのは webview から plugin-opener の `openUrl` で行う（http(s)・mailto・tel）。
+- workbench の ui は Task の要素を出す場所を 2 つの slot として props で受け、apps/desktop が `@tania/task/ui` の component をはめる。workbench の ui は Task を import しない（ADR-0005）。
+  - `renderRunspaceLabel(runspaceId)`: Bench のラベル `<repo>#<n> <title>`。準備中・準備失敗のときだけその語を添える。workbench は所有された Runspace にだけ呼び、null なら普段の title を出す。task の ui は `task.bench.list`（`{ runspaceId, ref, title, setupState }[]`）と `task.changes` で描き直す。
+  - `tabMenuItems(tab, close)`: Tab のメニューの「New shell here」と「Terminate」の間に出す項目。`tab` は `{ id, terminalSessionId }`。`close` はメニューを閉じる。task の ui はメニューを開くたびに `task.list` と `task.current({ terminalSessionId })` を読み、current の `source` が `run`（Tab の claude がどこかの Task の Run）なら何も出さない。current は closed な Task の Run も引くので、close を頼んだ claude が残った Tab にも出さない。NOT_FOUND は Run でも Bench でもない Tab なので出す。それ以外なら区切り線と「Attach to Task…」を出し、選ぶと picker を開く。picker は open な Task を `tracked_at` の新しい順に並べ、`<repo>#<n> <title>` と表示状態（CLI の STATE の 1 マスと同じ形）を出し、選ぶと `task.attach` を呼ぶ。失敗は toast で 1 行出す。
+  - picker はメニューの外へ portal で出るので、`@tania/ui` の `PopoverMenu` は、どのメニューの中での押下と scroll も外側として扱わない。開いているメニューは、そのメニューとそこから開いたメニューだけだから。
+- Tailwind の `@source` に `packages/*/src/ui/**/*.{ts,tsx}` と `packages/ui/src` を足す。glob を含む path は file の pattern として読まれるので、directory で止めると何も拾わない。
+- `src-tauri/` は Shell。Backend の監督（ADR-0007）、terminal の中継、OS への窓口だけを持つ。窓口は通知（ADR-0013）、画像の clipboard、plugin-opener、drag-drop の event。custom command は terminal の attach / detach / write / resize の 4 本（ptyd は spawn しない。ADR-0011）、`clipboard_write_image`、`backend_endpoint`、`backend_restart` の 7 本。
+- 窓は monica どおり title bar を webview に重ね（`titleBarStyle: "Overlay"`、`hiddenTitle`、`trafficLightPosition { x: 16, y: 22 }`）、`transparent` と `windowEffects: sidebar` で背後を透かす（`transparent` には `macOSPrivateApi` と tauri の `macos-private-api` feature が要る）。webview は信号機の分を `@tania/ui` の `TRAFFIC_LIGHT_ZONE_*` で空け、sidebar の見出しと Tab の帯を `data-tauri-drag-region`（`core:window:allow-start-dragging`）にする。
+- Shell に置くのは、Tauri プロセスにしか無いもの（窓と webview の event、app の名義、AppKit）に触る処理と、Backend の再起動で途切れてはいけない terminal の byte だけ（ADR-0001）。fs と process の spawn で済む処理（worktree の判定、エディタ）は Backend の procedure にする。
+- 例外は `tania` の symlink（`docs/packages/dev-loop.md` の「dev loop」）で、Shell が起動時に張る。CLI の実体の場所（release は `.app` の中、dev は `TANIA_BIN`）と、release だけが `~/.local/bin` に張るという区別が、どちらも Shell の build で決まる事実だから。
+- Shell は Backend を自分と別の process group で起こす。端末の Ctrl-C を Backend が直接受けると `backend.json` を残したまま死ぬので、Shell の死は stdin の EOF で知らせる。
+- `clipboard_write_image(path)` は monica の objc2 の実装（`NSImage::initWithContentsOfFile` を general pasteboard に `writeObjects`）を持ち込む。NSPasteboard は main thread で呼ぶので、sync command のままにする。
