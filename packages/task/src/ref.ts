@@ -9,15 +9,16 @@ const URL_FORM = new RegExp(`^https://github\\.com/(${REPO})/issues/(${NUMBER})$
 
 export function parseRef(input: string): IssueRef {
   const trimmed = input.trim()
-  const match =
+  const [, repo, digits] =
     SHORT.exec(trimmed) ??
-    (trimmed.startsWith('https://') ? URL_FORM.exec(trimmed.replace(/[?#].*$/, '')) : null)
-  if (!match) {
+    (trimmed.startsWith('https://') ? URL_FORM.exec(trimmed.replace(/[?#].*$/, '')) : null) ??
+    []
+  if (!repo || !digits) {
     throw new ORPCError('BAD_REQUEST', {
       message: `${JSON.stringify(input)} is not owner/repo#n or https://github.com/owner/repo/issues/n`,
     })
   }
-  return { repo: match[1]!, number: Number(match[2]) }
+  return { repo, number: Number(digits) }
 }
 
 export function formatRef({ repo, number }: IssueRef): string {
