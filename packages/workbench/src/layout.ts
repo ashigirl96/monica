@@ -5,17 +5,8 @@ import { and, eq, notInArray } from 'drizzle-orm'
 
 import type { Layout, Tab } from './contract.ts'
 import { runspace, tab, terminalSession } from './schema.ts'
-import {
-  bindNewTerminalSession,
-  type Books,
-  type Db,
-  insertTerminalSession,
-  isLive,
-  shellWhenReady,
-  type Size,
-  startTerminalSession,
-  type Tx,
-} from './workbench.ts'
+import { isLive, type Size, type TerminalSessions } from './terminal-session.ts'
+import type { Books, Db, Tx } from './workbench.ts'
 
 export function readLayout(db: Db): Layout {
   const tabs = db.select().from(tab).orderBy(tab.sortOrder).all()
@@ -64,28 +55,35 @@ export function refuseRemoving(tx: Tx, runspaceId: string) {
   }
 }
 
-/** `spare` の Terminal Session の Tab が中にあれば、Runspace を消さずに所有を解いてその Tab だけを残す。 */
-export function removeRunspace(tx: Tx, id: string, { spare = [] }: { spare?: string[] } = {}) {
+/**
+ * `spare` の Terminal Session の Tab が中にあれば、Runspace を消さずに所有を解いてその Tab だけを残す。
+ * 消した Tab の Terminal Session は transaction の後に終わらせる。
+ */
+export function removeRunspace(
+  tx: Tx,
+  terminalSessions: TerminalSessions,
+  id: string,
+  { spare = [] }: { spare?: string[] } = {},
+) {
   runspaceOf(tx, id)
   const tabs = tx
-    .select({ id: tab.id, terminalSessionId: tab.terminalSessionId })
+    .select({ tabId: tab.id, terminalSessionId: tab.terminalSessionId })
     .from(tab)
     .where(eq(tab.runspaceId, id))
     .orderBy(tab.sortOrder)
     .all()
   const kept = tabs.filter((t) => spare.includes(t.terminalSessionId))
-  const removed = tabs.filter((t) => !kept.includes(t))
+  terminalSessions.terminateRemoved(tabs.filter((t) => !kept.includes(t)))
   if (kept.length === 0) {
     deleteRunspace(tx, id)
-    return removed.map((t) => t.terminalSessionId)
+    return
   }
-  const keptIds = kept.map((t) => t.id)
+  const keptIds = kept.map((t) => t.tabId)
   tx.delete(tab)
     .where(and(eq(tab.runspaceId, id), notInArray(tab.id, keptIds)))
     .run()
   tx.update(runspace).set({ owned: false }).where(eq(runspace.id, id)).run()
   restack(tx, tab, keptIds)
-  return removed.map((t) => t.terminalSessionId)
 }
 
 export function moveRunspace(tx: Tx, input: { id: string; index: number }) {
@@ -95,14 +93,15 @@ export function moveRunspace(tx: Tx, input: { id: string; index: number }) {
 
 export function openTab(
   tx: Tx,
-  input: { runspaceId: string; cwd?: string; index?: number; shell: string },
+  terminalSessions: TerminalSessions,
+  input: { runspaceId: string; cwd?: string; index?: number; size?: Size; input?: string },
 ) {
   const cwd = input.cwd ?? runspaceOf(tx, input.runspaceId).cwd
   return attachTab(tx, {
     runspaceId: input.runspaceId,
     cwd,
     index: input.index,
-    terminalSessionId: insertTerminalSession(tx, { cwd, shell: input.shell }),
+    terminalSessionId: terminalSessions.start(tx, { cwd, size: input.size, input: input.input }),
   })
 }
 
@@ -173,9 +172,13 @@ export function setTabCwd(tx: Tx, input: { id: string; cwd: string }) {
   tx.update(tab).set({ cwd }).where(eq(tab.id, input.id)).run()
 }
 
-export async function respawnTab(books: Books, id: string, size: Size) {
-  const shell = await shellWhenReady(books.workbench)
-  const respawned = writeLayout(books, (tx) => {
+export function respawnTab(
+  books: Books,
+  terminalSessions: TerminalSessions,
+  id: string,
+  size: Size,
+) {
+  return writeLayout(books, (tx) => {
     const { cwd, terminalSessionId } = tabOf(tx, id)
     const { status } = tx
       .select({ status: terminalSession.status })
@@ -185,10 +188,8 @@ export async function respawnTab(books: Books, id: string, size: Size) {
     if (isLive(status)) {
       throw new ORPCError('CONFLICT', { message: `Tab ${id} still shows a live Terminal Session` })
     }
-    return bindNewTerminalSession(tx, { id, cwd }, shell)
+    return terminalSessions.rebind(tx, { id, cwd }, size)
   })
-  await startTerminalSession(books.workbench, respawned.terminalSessionId, size)
-  return respawned
 }
 
 function attachTab(

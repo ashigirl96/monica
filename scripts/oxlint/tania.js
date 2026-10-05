@@ -63,7 +63,7 @@ export default {
           context.report({
             node,
             message:
-              'transaction に async 関数を渡さない。throw しても rollback されない（ADR-0009）。ptyd や fs への副作用は commit の後に呼ぶ',
+              'transaction に async 関数を渡さない。throw しても rollback されない（ADR-0009）。fs への副作用は commit の後に呼ぶ。ptyd には workbench が送る',
           })
         return {
           FunctionDeclaration(node) {

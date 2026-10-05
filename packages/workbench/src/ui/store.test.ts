@@ -123,10 +123,11 @@ test('a new Tab goes right after the active one, in its cwd, and becomes active'
 })
 
 test('closing the active Tab leaves its Terminal Session detached and activates the Tab that took its place', async () => {
-  const { client, store } = bench()
+  const { client, store, settled } = bench()
   const { runspaceId, tab: a } = await client.runspace.create(size)
   const b = await client.tab.open({ runspaceId, ...size })
   const c = await client.tab.open({ runspaceId, ...size })
+  await settled(b.terminalSessionId)
   await store.set(reloadAtom)
   store.set(activateTerminalTabAtom, b.id)
 
@@ -321,12 +322,14 @@ test('a pinned Tab whose shell exits while it is connected stays open, without a
 })
 
 test('an Exit that arrives after the Tab was bound to a new shell leaves the new shell alone', async () => {
-  const { ptyd, client, store } = bench()
+  const { ptyd, client, store, settled } = bench()
   const { tab } = await client.runspace.create(size)
   await client.tab.pin({ id: tab.id })
+  await settled(tab.terminalSessionId)
   ptyd.exit(tab.terminalSessionId, 0)
   await ptyd.received((op) => op.op === 'reap' && op.session_id === tab.terminalSessionId)
   const respawned = await client.tab.respawn({ id: tab.id, ...size })
+  await settled(respawned.terminalSessionId)
   await store.set(reloadAtom)
 
   await store.set(tabExitedAtom, tab.id, tab.terminalSessionId, 0)
@@ -362,8 +365,9 @@ test('a Terminate that does not reach the Backend leaves the Tab connected to it
 })
 
 test('New shell binds a Tab whose shell exited to a new running Terminal Session', async () => {
-  const { ptyd, client, store } = bench()
+  const { ptyd, client, store, settled } = bench()
   const { tab } = await client.runspace.create(size)
+  await settled(tab.terminalSessionId)
   ptyd.exit(tab.terminalSessionId, 1)
   await ptyd.received((op) => op.op === 'reap' && op.session_id === tab.terminalSessionId)
   await store.set(reloadAtom)
@@ -379,8 +383,10 @@ test('New shell binds a Tab whose shell exited to a new running Terminal Session
   const now = (await client.layout.get()).runspaces[0]!.tabs[0]!
   expect(now.id).toBe(tab.id)
   expect(now.terminalSessionId).not.toBe(tab.terminalSessionId)
-  expect(store.get(terminalSessionStatusAtom)[now.terminalSessionId]?.status).toBe('running')
   expect(store.get(deadTabsAtom)).toEqual({})
+  await settled(now.terminalSessionId)
+  await store.set(reloadAtom)
+  expect(store.get(terminalSessionStatusAtom)[now.terminalSessionId]?.status).toBe('running')
 })
 
 test('a detached Terminal Session sits in the Detached group until it is reattached into the active Runspace', async () => {

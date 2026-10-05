@@ -15,7 +15,7 @@ Workbench は最後の Tab を閉じたときや外へ移したときに Runspac
 ## Consequences
 
 - `runspace` に所有の印を持たせ、`layout.get` に載せる。webview の `runspace.create` が作るのは普通の Runspace で、`createRunspace(tx, { cwd })` は常に所有された Runspace を作る。所有された Runspace には remove のメニューを出さず、procedure も `CONFLICT` で断る。空になっても sidebar に残り、新しい Tab を開ける。
-- 消し方は `removeRunspace(tx, id, { spare? }) → terminalSessionId[]` の 1 つだけ。`spare` の Terminal Session の Tab が中にあれば、Runspace を消さずに所有を解いてその Tab だけを残し、ほかの Tab の session id を返す。所有を解く専用の method は作らない。
+- 消し方は `removeRunspace(tx, id, { spare? })` の 1 つだけ。`spare` の Terminal Session の Tab が中にあれば、Runspace を消さずに所有を解いてその Tab だけを残す。ほかの Tab の Terminal Session は workbench が transaction の後に終わらせる（ADR-0015）。所有を解く専用の method は作らない。
 - Task の close は呼び手の Terminal Session を `spare` に渡す。close を頼んだ agent 自身に SIGHUP を送らないため。monica の close hold（table に書き、agent か shell が終わるまで呼び手の Tab を残す）は持たない。呼び手の Tab は所有を解かれた普通の Runspace に残り、最後の Tab を閉じれば普通に消える。ActiveRun guard は呼び手自身の Run を除く。
-- close の順序は guard → worktree と branch の削除 → transaction（Task を closed、Bench の行を削除、`removeRunspace`）→ commit → 返った session の terminate。git が失敗したら何も変えずに止まる。
+- close の順序は guard → worktree と branch の削除 → transaction（Task を closed、Bench の行を削除、`removeRunspace`）→ commit。Terminate は close を待たせずに workbench が送る（ADR-0015）。git が失敗したら何も変えずに止まる。
 - close の後に残った Runspace の cwd は消えた worktree を指すことがある。`tab.open` は cwd が無ければ `$HOME` で開く。

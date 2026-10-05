@@ -9,7 +9,7 @@ import {
   router as workbenchRouter,
   migrations as workbenchMigrations,
 } from '@tania/workbench/server'
-import { startFakePtyd, tempHome } from '@tania/workbench/testing'
+import { startFakePtyd, tempHome, untilSettled } from '@tania/workbench/testing'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
@@ -22,7 +22,7 @@ import { bench, issue } from './schema.ts'
 import { createTask, migrations, nameAgentSession, router } from './server.ts'
 
 const cleanups: (() => void)[] = []
-const onCleanup = (cleanup: () => void) => cleanups.push(cleanup)
+export const onCleanup = (cleanup: () => void) => cleanups.push(cleanup)
 
 export function cleanUp() {
   for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
@@ -36,8 +36,6 @@ export async function failure(promise: Promise<unknown>) {
   }
   throw new Error('expected the call to fail')
 }
-
-const TAB_SIZE = { rows: 24, cols: 80 }
 
 export function setup() {
   const sqlite = new Database(':memory:')
@@ -90,15 +88,18 @@ export function setup() {
       .get()!.runspaceId
   }
 
-  async function openTab(runspaceId: string): Promise<string> {
-    return (await workbenchClient.tab.open({ runspaceId, ...TAB_SIZE })).terminalSessionId
+  function openTab(runspaceId: string): string {
+    return db.transaction((tx) => workbench.openTab(tx, { runspaceId })).terminalSessionId
   }
 
   // procedure で開く Runspace は Tab を 1 つ持って生まれるので、Bench の外の Tab は Runspace ごと開く。
   async function openTabOutsideBench(): Promise<string> {
-    const { tab } = await workbenchClient.runspace.create({ cwd: '/work', ...TAB_SIZE })
+    const { tab } = await workbenchClient.runspace.create({ cwd: '/work', rows: 24, cols: 80 })
     return tab.terminalSessionId
   }
+
+  const settled = (terminalSessionId: string) =>
+    untilSettled(() => workbenchClient.terminalSession.list(), terminalSessionId)
 
   // agent の報告は workbench の procedure に渡し、Backend と同じ経路で Agent Session を作る。
   function hook(
@@ -132,6 +133,7 @@ export function setup() {
     openBench,
     openTab,
     openTabOutsideBench,
+    settled,
     hook,
   }
 }

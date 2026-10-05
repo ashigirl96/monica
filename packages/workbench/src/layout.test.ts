@@ -19,7 +19,7 @@ async function checkedOrder(client: Client) {
 }
 
 test('runspace.create opens a Runspace whose one Tab shows a new running Terminal Session', async () => {
-  const { ptyd, client } = setup()
+  const { ptyd, client, settled } = setup()
 
   const { runspaceId, tab } = await client.runspace.create({ cwd: '/work', rows: 30, cols: 100 })
 
@@ -33,13 +33,11 @@ test('runspace.create opens a Runspace whose one Tab shows a new running Termina
     rows: 30,
     cols: 100,
   })
-  expect(await client.terminalSession.list()).toEqual([
-    expect.objectContaining({ id: tab.terminalSessionId, status: 'running', tabId: tab.id }),
-  ])
+  expect(await settled(tab.terminalSessionId)).toMatchObject({ status: 'running', tabId: tab.id })
 })
 
 test('a Runspace whose Terminal Session ptyd refuses to create keeps its Tab on the failed session', async () => {
-  const { ptyd, client } = setup()
+  const { ptyd, client, settled } = setup()
   ptyd.createError = 'no such directory: /nope'
 
   const { runspaceId, tab } = await client.runspace.create({ cwd: '/nope', rows: 24, cols: 80 })
@@ -47,15 +45,12 @@ test('a Runspace whose Terminal Session ptyd refuses to create keeps its Tab on 
   expect(await client.layout.get()).toEqual({
     runspaces: [{ id: runspaceId, cwd: '/nope', sortOrder: 0, owned: false, tabs: [tab] }],
   })
-  expect(await client.terminalSession.list()).toEqual([
-    expect.objectContaining({
-      id: tab.terminalSessionId,
-      status: 'failed',
-      error: expect.stringContaining('no such directory: /nope'),
-      endedAt: expect.any(Date),
-      tabId: tab.id,
-    }),
-  ])
+  expect(await settled(tab.terminalSessionId)).toMatchObject({
+    status: 'failed',
+    error: expect.stringContaining('no such directory: /nope'),
+    endedAt: expect.any(Date),
+    tabId: tab.id,
+  })
 })
 
 test('runspace.create without a cwd opens in $HOME', async () => {
@@ -99,9 +94,10 @@ test("tab.open appends without an index, inserts at the index given, and opens i
 })
 
 test('tab.close leaves the Terminal Session running and detached, and tab.open reattaches it', async () => {
-  const { client } = setup()
+  const { client, settled } = setup()
   const { runspaceId, tab: kept } = await client.runspace.create(size)
   const closed = await client.tab.open({ runspaceId, ...size })
+  await settled(closed.terminalSessionId)
 
   await client.tab.close({ id: closed.id })
 
@@ -125,9 +121,10 @@ test('tab.close leaves the Terminal Session running and detached, and tab.open r
 })
 
 test('tab.open reattaches only a detached Terminal Session', async () => {
-  const { ptyd, client } = setup()
+  const { ptyd, client, settled } = setup()
   const { runspaceId, tab: shown } = await client.runspace.create(size)
   const ended = await client.tab.open({ runspaceId, ...size })
+  await settled(ended.terminalSessionId)
   await client.tab.close({ id: ended.id })
   ptyd.exit(ended.terminalSessionId, 0)
   await ptyd.received((op) => op.op === 'reap' && op.session_id === ended.terminalSessionId)
@@ -233,9 +230,10 @@ test('runspace.remove sends the terminate again to the reconnected ptyd when the
 })
 
 test('tab.respawn binds the Tab to a new Terminal Session started in its last known cwd', async () => {
-  const { ptyd, client } = setup()
+  const { ptyd, client, settled } = setup()
   const { runspaceId, tab } = await client.runspace.create({ cwd: '/work', ...size })
   await client.tab.setCwd({ id: tab.id, cwd: '/work/sub' })
+  await settled(tab.terminalSessionId)
   ptyd.exit(tab.terminalSessionId, 0)
   await ptyd.received((op) => op.op === 'reap' && op.session_id === tab.terminalSessionId)
 
@@ -251,6 +249,7 @@ test('tab.respawn binds the Tab to a new Terminal Session started in its last kn
   expect(await client.layout.get()).toEqual({
     runspaces: [{ id: runspaceId, cwd: '/work', sortOrder: 0, owned: false, tabs: [respawned] }],
   })
+  await settled(respawned.terminalSessionId)
   expect(await client.terminalSession.list()).toEqual([
     expect.objectContaining({ id: respawned.terminalSessionId, status: 'running', tabId: tab.id }),
   ])

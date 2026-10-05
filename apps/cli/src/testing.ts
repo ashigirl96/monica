@@ -14,7 +14,7 @@ import {
   migrations as workbenchMigrations,
   router as workbenchRouter,
 } from '@tania/workbench/server'
-import { startFakePtyd, tempHome } from '@tania/workbench/testing'
+import { startFakePtyd, tempHome, untilSettled } from '@tania/workbench/testing'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 
@@ -75,6 +75,7 @@ export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Gh
 // procedure で開く Runspace は Tab を 1 つ持って生まれるので、Bench の外の Tab は Runspace ごと開く。
 export async function openTabOutsideBench(client: Client): Promise<string> {
   const { tab } = await client.workbench.runspace.create({ cwd: '/work', rows: 24, cols: 80 })
+  await untilSettled(() => client.workbench.terminalSession.list(), tab.terminalSessionId)
   return tab.terminalSessionId
 }
 

@@ -23,7 +23,7 @@ import {
 } from './terminal-connections.ts'
 import { attachTerminalLinks } from './terminal-links.ts'
 import {
-  isDeadStatus,
+  canAttach,
   type TerminalSessionStatus,
   setTerminalSessionStatusAtom,
 } from './terminal-sessions.ts'
@@ -320,8 +320,9 @@ export function useTerminal(
       releaseTabConnection(options.tabId)
       conn = undefined
     }
-    // A dead session never reconnects; the pane overlay offers a fresh shell instead.
-    if (!conn?.inFlight && conn?.state !== 'attached' && !isDeadStatus(options.sessionStatus)) {
+    // A dead session never reconnects; the pane overlay offers a fresh shell instead. A
+    // starting one is attached when the status turns running and reruns this effect.
+    if (!conn?.inFlight && conn?.state !== 'attached' && canAttach(options.sessionStatus)) {
       connectTab(optionsRef)
     }
 

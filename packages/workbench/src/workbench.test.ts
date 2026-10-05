@@ -124,7 +124,7 @@ test('a new Terminal Session runs in ptyd under a ts-<uuidv7> id with the shell 
     process.env.SHELL = shell
   })
   process.env.SHELL = '/bin/startup-shell'
-  const { ptyd, client } = setup()
+  const { ptyd, client, settled } = setup()
   process.env.SHELL = '/bin/later-shell'
 
   const { tab } = await client.runspace.create({ cwd: '/work', rows: 24, cols: 80 })
@@ -132,29 +132,24 @@ test('a new Terminal Session runs in ptyd under a ts-<uuidv7> id with the shell 
   expect(tab.terminalSessionId).toMatch(
     /^ts-[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/,
   )
-  expect(await ptyd.received((op) => op.op === 'create')).toMatchObject({
-    session_id: tab.terminalSessionId,
+  expect(await settled(tab.terminalSessionId)).toMatchObject({
+    status: 'running',
+    pid: 1000,
     shell: '/bin/startup-shell',
   })
-  expect(await client.terminalSession.list()).toEqual([
-    expect.objectContaining({
-      id: tab.terminalSessionId,
-      status: 'running',
-      pid: 1000,
-      shell: '/bin/startup-shell',
-    }),
+  expect(ptyd.receivedAll((op) => op.op === 'create')).toMatchObject([
+    { session_id: tab.terminalSessionId, shell: '/bin/startup-shell' },
   ])
 })
 
 test('a shell that dies before ptyd answers Created stays exited', async () => {
-  const { ptyd, client } = setup()
+  const { ptyd, client, settled } = setup()
   ptyd.beforeCreated = (op) => [{ type: 'exit', session_id: op.session_id, exit_code: 127 }]
 
   const { tab } = await client.runspace.create({ cwd: '/work', rows: 24, cols: 80 })
+  await ptyd.received((op) => op.op === 'reap')
 
-  expect(await client.terminalSession.list()).toEqual([
-    expect.objectContaining({ id: tab.terminalSessionId, status: 'exited', exitCode: 127 }),
-  ])
+  expect(await settled(tab.terminalSessionId)).toMatchObject({ status: 'exited', exitCode: 127 })
 })
 
 function nextChange(workbench: Workbench, type: WorkbenchChange['type']): Promise<void> {
@@ -270,16 +265,6 @@ test('a live session only ptyd knows is adopted without a shell and listed', asy
 
 test('the Workbench exposes events, start, stop and only the methods other domains call', () => {
   expectTypeOf<keyof Workbench>().toEqualTypeOf<
-    | 'events'
-    | 'start'
-    | 'stop'
-    | 'ready'
-    | 'createRunspace'
-    | 'openTab'
-    | 'moveTab'
-    | 'removeRunspace'
-    | 'startTerminalSession'
-    | 'writeTerminalSession'
-    | 'terminateTerminalSessions'
+    'events' | 'start' | 'stop' | 'createRunspace' | 'openTab' | 'moveTab' | 'removeRunspace'
   >()
 })

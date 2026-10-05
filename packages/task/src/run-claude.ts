@@ -21,9 +21,6 @@ import { runAgentSessionsByTask } from './run.ts'
 import { issue, run } from './schema.ts'
 import { type SyncDeps, syncOrUseCopy } from './sync.ts'
 
-// 表示されていない Tab の shell は決まった大きさで起こし、attach の resize で追いつかせる。
-const TAB_SIZE = { rows: 24, cols: 80 }
-
 type Launch = {
   ref: string
   bench: Bench
@@ -47,7 +44,7 @@ export async function runTask(
   const launch =
     (found.bench && resumeOf(deps.db, found.issue, found.bench)) ??
     (await newRun(deps, found.issue, input, errors))
-  const opened = await openClaudeTab(deps, launch)
+  const opened = openClaudeTab(deps, launch)
   return {
     ref: launch.ref,
     cwd: launch.bench.cwd,
@@ -125,18 +122,17 @@ async function newRun(
   }
 }
 
-async function openClaudeTab(deps: BenchDeps, launch: Launch) {
+function openClaudeTab(deps: BenchDeps, launch: Launch) {
   const { db, workbench } = deps
-  await workbench.ready()
-  const opened = db.transaction((tx) => {
+  return db.transaction((tx) => {
     findOpenTask(tx, eq(issue.id, launch.bench.taskIssueId), launch.ref)
     refuseClosing(deps, launch.bench.taskIssueId, launch.ref)
-    return workbench.openTab(tx, { runspaceId: launch.bench.runspaceId, cwd: launch.tabCwd })
+    return workbench.openTab(tx, {
+      runspaceId: launch.bench.runspaceId,
+      cwd: launch.tabCwd,
+      input: `${claudeCommand(launch)}\r`,
+    })
   })
-  await workbench.startTerminalSession(opened.terminalSessionId, TAB_SIZE)
-  // 起動前の shell に書いた入力も捨てられずに評価されるので、起動を待たない。
-  await workbench.writeTerminalSession(opened.terminalSessionId, `${claudeCommand(launch)}\r`)
-  return opened
 }
 
 // Agent Session の id は hook の payload から来るので、shell に解釈させない。

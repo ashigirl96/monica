@@ -50,6 +50,14 @@ export type PtydHandlers = {
   onClose: () => void
 }
 
+// 接続が切れた要求は ptyd が受け取ったかが分からないので、断られたのと分けて返す。
+export type Outcome<T> =
+  | { kind: 'done'; value: T }
+  | { kind: 'refused'; error: string }
+  | { kind: 'unknown' }
+
+class Disconnected extends Error {}
+
 export class PtydClient {
   private socket: Socket
   private handlers: PtydHandlers
@@ -81,10 +89,10 @@ export class PtydClient {
           client.flush()
         },
         close() {
-          client.shutdown(new Error('tania-ptyd connection closed'))
+          client.shutdown('tania-ptyd connection closed')
         },
         error(_s, error) {
-          client.shutdown(error)
+          client.shutdown(error.message)
         },
       },
     })
@@ -104,14 +112,42 @@ export class PtydClient {
     return body.sessions
   }
 
-  async create(op: Omit<Extract<RequestOp, { op: 'create' }>, 'op'>): Promise<number | null> {
-    const body = await this.request({ op: 'create', ...op })
-    if (body.body !== 'created') throw new Error(`unexpected create response: ${body.body}`)
-    return body.pid
+  create(op: Omit<Extract<RequestOp, { op: 'create' }>, 'op'>): Promise<Outcome<number | null>> {
+    return this.outcome({ op: 'create', ...op }, (body) => {
+      if (body.body !== 'created') throw new Error(`unexpected create response: ${body.body}`)
+      return body.pid
+    })
   }
 
-  request(op: RequestOp): Promise<ResponseBody> {
-    if (this.closed) return Promise.reject(new Error('tania-ptyd connection closed'))
+  // ptyd は attach していない接続からの Write も通すので、webview が Tab を表示していなくても打てる。
+  write(sessionId: string, data: string): Promise<Outcome<void>> {
+    const encoded = Buffer.from(data).toString('base64')
+    return this.outcome({ op: 'write', session_id: sessionId, data: encoded }, () => {})
+  }
+
+  terminate(sessionId: string): Promise<Outcome<void>> {
+    return this.outcome({ op: 'terminate', session_id: sessionId }, () => {})
+  }
+
+  reap(sessionId: string) {
+    this.notify({ op: 'reap', session_id: sessionId })
+  }
+
+  shutdownDaemon() {
+    this.notify({ op: 'shutdown' })
+  }
+
+  private async outcome<T>(op: RequestOp, read: (body: ResponseBody) => T): Promise<Outcome<T>> {
+    try {
+      return { kind: 'done', value: read(await this.request(op)) }
+    } catch (error) {
+      if (error instanceof Disconnected) return { kind: 'unknown' }
+      return { kind: 'refused', error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  private request(op: RequestOp): Promise<ResponseBody> {
+    if (this.closed) return Promise.reject(new Disconnected('tania-ptyd connection closed'))
     const id = this.nextId++
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject })
@@ -120,7 +156,7 @@ export class PtydClient {
     })
   }
 
-  notify(op: RequestOp) {
+  private notify(op: RequestOp) {
     if (!this.closed) this.send(op)
   }
 
@@ -185,9 +221,10 @@ export class PtydClient {
     }
   }
 
-  private shutdown(error: Error) {
+  private shutdown(reason: string) {
     if (this.closed) return
     this.closed = true
+    const error = new Disconnected(reason)
     for (const waiter of this.pending.values()) waiter.reject(error)
     this.pending.clear()
     this.handlers.onClose()
@@ -267,7 +304,7 @@ export async function openDaemon(paths: DaemonPaths, handlers: PtydHandlers): Pr
     console.error(
       `[workbench] tania-ptyd speaks protocol ${version} (want ${PROTOCOL_VERSION}); replacing it`,
     )
-    client.notify({ op: 'shutdown' })
+    client.shutdownDaemon()
     await Bun.sleep(300)
     killDaemonFromPidFile(paths.home)
     spawnDaemon(paths)
