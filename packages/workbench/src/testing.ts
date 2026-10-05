@@ -7,7 +7,7 @@ import { createRouterClient } from '@orpc/server'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 
-import { startFakePtyd } from './fake-ptyd.ts'
+import { startFakePtyd, tempHome } from './fake-ptyd.ts'
 import { createWorkbench, migrations, router } from './server.ts'
 import type { NotificationDeps } from './workbench.ts'
 
@@ -25,9 +25,7 @@ export function setup({
   notify = () => {},
   nameAgentSession = () => null,
 }: Partial<NotificationDeps> = {}) {
-  // ptyd の socket の path は macOS で 104 byte を超えると bind できないので、home は短くする。
-  const home = mkdtempSync(join(tmpdir(), 'tania-'))
-  onCleanup(() => rmSync(home, { recursive: true, force: true }))
+  const home = tempHome(onCleanup)
   const ptyd = startFakePtyd(home)
   onCleanup(() => ptyd.stop())
 

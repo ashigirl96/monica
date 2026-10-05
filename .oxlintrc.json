@@ -370,6 +370,11 @@
       "rules": { "tania/spawn-env": "error", "tania/cross-domain-write": "error" }
     },
     {
+      "files": ["**/*.ts", "**/*.tsx"],
+      "excludeFiles": ["**/*.test.ts", "**/testing.ts"],
+      "rules": { "tania/testing-entry": "error" }
+    },
+    {
       // bun-types が `expect(…).rejects` の matcher を void を返す型にしているための誤検知。rule に従って await を外すと、test が reject を待たなくなる。
       "files": ["**/*.test.ts"],
       "rules": { "typescript/await-thenable": "off" }

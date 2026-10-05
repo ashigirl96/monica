@@ -6,9 +6,14 @@ import { join } from 'node:path'
 import { createRouterClient } from '@orpc/server'
 import { bench, issue, issueBlocker, run, task } from '@tania/task/schema'
 import type { Ghq } from '@tania/task/server'
-import { agentSession, runspace, tab } from '@tania/workbench/schema'
 
-import { backendWithTasks, inMemoryBackend, tania } from './testing.ts'
+import {
+  backendWithTasks,
+  cleanUp,
+  inMemoryBackend,
+  openTabOutsideBench,
+  tania,
+} from './testing.ts'
 
 test('task list prints the open Tasks as text', async () => {
   const result = await tania(['task', 'list'], backendWithTasks())
@@ -73,7 +78,7 @@ test('task sync takes an optional ref and exits 1 for one that is not tracked', 
   })
 })
 
-function backendWithBench({ home = '/nonexistent', ghq }: { home?: string; ghq?: Ghq } = {}) {
+function backendWithBench({ home, ghq }: { home?: string; ghq?: Ghq } = {}) {
   const backend = inMemoryBackend({ home, ghq })
   const { db } = backend
   const tracked = db
@@ -103,6 +108,7 @@ function inScratch() {
 const cleanups: (() => void)[] = []
 afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup()
+  cleanUp()
 })
 
 function inPlaceBench() {
@@ -187,29 +193,28 @@ test("task run --in-place exits 1 when it cannot find the Repo's checkout", asyn
 })
 
 test('task current names the Task of the Bench the Tab is in, given by TANIA_TERMINAL_SESSION_ID', async () => {
-  const { db, issueId, connect } = backendWithBench()
-  db.insert(runspace).values({ id: 'rs-bench', cwd: '/work', sortOrder: 0, owned: true }).run()
-  db.insert(bench)
-    .values({
-      taskIssueId: issueId,
-      runspaceId: 'rs-bench',
-      cwd: '/work',
-      mode: 'in_place',
-      setupState: 'ready',
-      createdAt: new Date(0),
-    })
-    .run()
-  db.insert(tab)
-    .values({
-      id: 'tab-a',
-      runspaceId: 'rs-bench',
-      cwd: '/work',
-      sortOrder: 0,
-      terminalSessionId: 'ts-a',
-    })
-    .run()
+  const { db, issueId, context, connect } = backendWithBench()
+  const runspaceId = db.transaction((tx) => {
+    const id = context.workbench.createRunspace(tx, { cwd: '/work' })
+    tx.insert(bench)
+      .values({
+        taskIssueId: issueId,
+        runspaceId: id,
+        cwd: '/work',
+        mode: 'in_place',
+        setupState: 'ready',
+        createdAt: new Date(0),
+      })
+      .run()
+    return id
+  })
+  const { terminalSessionId } = await connect().workbench.tab.open({
+    runspaceId,
+    rows: 24,
+    cols: 80,
+  })
 
-  const result = await tania(['task', 'current'], connect, { terminalSessionId: 'ts-a' })
+  const result = await tania(['task', 'current'], connect, { terminalSessionId })
 
   expect(result).toEqual({
     code: 0,
@@ -219,21 +224,10 @@ test('task current names the Task of the Bench the Tab is in, given by TANIA_TER
 })
 
 test('task attach moves the Tab given by TANIA_TERMINAL_SESSION_ID into the Bench, opening it in place', async () => {
-  const { db, connect } = inPlaceBench()
-  db.insert(runspace).values({ id: 'rs-plain', cwd: '/work', sortOrder: 0 }).run()
-  db.insert(tab)
-    .values({
-      id: 'tab-a',
-      runspaceId: 'rs-plain',
-      cwd: '/work',
-      sortOrder: 0,
-      terminalSessionId: 'ts-a',
-    })
-    .run()
+  const { connect } = inPlaceBench()
+  const terminalSessionId = await openTabOutsideBench(connect())
 
-  const result = await tania(['task', 'attach', 'acme/app#12'], connect, {
-    terminalSessionId: 'ts-a',
-  })
+  const result = await tania(['task', 'attach', 'acme/app#12'], connect, { terminalSessionId })
 
   expect(result).toEqual({
     code: 0,
@@ -245,28 +239,26 @@ test('task attach moves the Tab given by TANIA_TERMINAL_SESSION_ID into the Benc
   })
 })
 
-function withLiveRun({ db, issueId }: ReturnType<typeof backendWithBench>) {
-  const at = new Date(0)
-  db.insert(agentSession)
+async function withLiveRun({ db, issueId, connect }: ReturnType<typeof backendWithBench>) {
+  const terminalSessionId = await openTabOutsideBench(connect())
+  await connect().workbench.agentSession.recordHook({
+    terminalSessionId,
+    payload: { session_id: 's-1', cwd: '/work', hook_event_name: 'UserPromptSubmit', prompt: 'go' },
+  })
+  db.insert(run)
     .values({
-      sessionId: 's-1',
-      terminalSessionId: 'ts-a',
-      state: 'running',
-      cwd: '/work',
-      lastEventName: 'UserPromptSubmit',
-      lastEventAt: at,
-      stateChangedAt: at,
-      firstSeenAt: at,
+      taskIssueId: issueId,
+      agentSessionId: 's-1',
+      origin: 'started',
+      startedAt: new Date(0),
     })
     .run()
-  db.insert(run)
-    .values({ taskIssueId: issueId, agentSessionId: 's-1', origin: 'started', startedAt: at })
-    .run()
+  return terminalSessionId
 }
 
 test('task close exits 1 with each reason on its own line after the code, and --force closes past them', async () => {
   const backend = backendWithBench()
-  withLiveRun(backend)
+  await withLiveRun(backend)
 
   const refused = await tania(['task', 'close', 'acme/app#12'], backend.connect)
   const forced = await tania(['task', 'close', 'acme/app#12', '--force'], backend.connect)
@@ -290,10 +282,10 @@ test('task close exits 1 with each reason on its own line after the code, and --
 
 test('task close in the Tab of a live Run is not stopped by that Run, and task reopen opens the Task again', async () => {
   const backend = backendWithBench()
-  withLiveRun(backend)
+  const terminalSessionId = await withLiveRun(backend)
 
   const closed = await tania(['task', 'close', 'acme/app#12'], backend.connect, {
-    terminalSessionId: 'ts-a',
+    terminalSessionId,
   })
   const reopened = await tania(['task', 'reopen', 'acme/app#12'], backend.connect)
 

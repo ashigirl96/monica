@@ -19,8 +19,8 @@ async function withBench({ start }: { start: boolean }) {
 
 test("current names the Task of the Run of the calling Tab's claude, even outside the Bench", async () => {
   const books = await withBench({ start: true })
-  const inBench = books.openTab(books.benchRunspace)
-  const outside = books.openTab(books.plainRunspace())
+  const inBench = await books.openTab(books.benchRunspace)
+  const outside = await books.openTabOutsideBench()
   await books.hook(inBench, 's-1', 'SessionStart', { source: 'startup' })
   await books.hook(outside, 's-1', 'UserPromptSubmit', { prompt: 'go on' })
 
@@ -35,7 +35,7 @@ test("current names the Task of the Run of the calling Tab's claude, even outsid
 
 test('current names the Task of the Bench the calling Tab is in when its claude is no Run', async () => {
   const books = await withBench({ start: true })
-  const inBench = books.openTab(books.benchRunspace)
+  const inBench = await books.openTab(books.benchRunspace)
 
   expect(await books.client.current({ terminalSessionId: inBench })).toEqual({
     ref,
@@ -48,7 +48,7 @@ test('current names the Task of the Bench the calling Tab is in when its claude 
 
 test('current fails for a Tab with no Run outside a Bench, and outside a Tab', async () => {
   const books = await withBench({ start: true })
-  const outside = books.openTab(books.plainRunspace())
+  const outside = await books.openTabOutsideBench()
   await books.hook(outside, 's-1', 'SessionStart', { source: 'startup' })
 
   expect((await failure(books.client.current({ terminalSessionId: outside }))).code).toBe(
@@ -59,8 +59,8 @@ test('current fails for a Tab with no Run outside a Bench, and outside a Tab', a
 
 test('nameAgentSession names the Task of the Run, even after its claude moves out of the Bench', async () => {
   const books = await withBench({ start: true })
-  const inBench = books.openTab(books.benchRunspace)
-  const outside = books.openTab(books.plainRunspace())
+  const inBench = await books.openTab(books.benchRunspace)
+  const outside = await books.openTabOutsideBench()
   await books.hook(inBench, 's-1', 'SessionStart', { source: 'startup' })
   await books.hook(outside, 's-1', 'UserPromptSubmit', { prompt: 'go on' })
 
@@ -69,7 +69,7 @@ test('nameAgentSession names the Task of the Run, even after its claude moves ou
 
 test('nameAgentSession names the Task of the Bench for a claude in it that is no Run yet', async () => {
   const books = await withBench({ start: false })
-  const inBench = books.openTab(books.benchRunspace)
+  const inBench = await books.openTab(books.benchRunspace)
   await books.hook(inBench, 's-1', 'SessionStart', { source: 'startup' })
 
   expect(nameAgentSession(books.db, 's-1')).toBe('app#12 Ship it')
@@ -77,7 +77,7 @@ test('nameAgentSession names the Task of the Bench for a claude in it that is no
 
 test('nameAgentSession has no name for a claude that has nothing to do with a Task', async () => {
   const books = await withBench({ start: true })
-  const outside = books.openTab(books.plainRunspace())
+  const outside = await books.openTabOutsideBench()
   await books.hook(outside, 's-1', 'SessionStart', { source: 'startup' })
 
   expect(nameAgentSession(books.db, 's-1')).toBeNull()
@@ -85,7 +85,7 @@ test('nameAgentSession has no name for a claude that has nothing to do with a Ta
 
 test('the notification for a Run waiting on the user is titled with its Task', async () => {
   const books = await withBench({ start: true })
-  const inBench = books.openTab(books.benchRunspace)
+  const inBench = await books.openTab(books.benchRunspace)
   await books.hook(inBench, 's-1', 'SessionStart', { source: 'startup' })
   await books.hook(inBench, 's-1', 'UserPromptSubmit', { prompt: 'ship it' })
 

@@ -1,3 +1,5 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { Socket } from 'bun'
@@ -8,12 +10,26 @@ type Frame = RequestOp & { id?: number }
 type Connection = { decoder: TextDecoder; buffered: string }
 type Waiter = { match: (op: RequestOp) => boolean; resolve: (op: RequestOp) => void }
 
+// ptyd の socket の path は macOS で 104 byte を超えると bind できないので、home は短くする。
+export function tempHome(register: (cleanup: () => void) => void): string {
+  const home = mkdtempSync(join(tmpdir(), 'tania-'))
+  register(() => rmSync(home, { recursive: true, force: true }))
+  return home
+}
+
 export function startFakePtyd(home: string) {
   const sessions: SessionInfo[] = []
   const received: RequestOp[] = []
   const waiters: Waiter[] = []
+  const holds = new Map<RequestOp['op'], Promise<void>>()
   const sockets = new Set<Socket<Connection>>()
   let nextPid = 1000
+
+  function receivedAll<T extends RequestOp>(match: (op: RequestOp) => op is T): T[]
+  function receivedAll(match: (op: RequestOp) => boolean): RequestOp[]
+  function receivedAll(match: (op: RequestOp) => boolean): RequestOp[] {
+    return received.filter(match)
+  }
 
   const fake = {
     sessions,
@@ -36,8 +52,13 @@ export function startFakePtyd(home: string) {
       return new Promise((resolve) => waiters.push({ match, resolve }))
     },
 
-    receivedAll(match: (op: RequestOp) => boolean): RequestOp[] {
-      return received.filter(match)
+    receivedAll,
+
+    // 記録はするので、応答を止めている間も received は解決する。
+    holdNext(op: RequestOp['op']): () => void {
+      const { promise, resolve } = Promise.withResolvers<void>()
+      holds.set(op, promise)
+      return resolve
     },
 
     exit(sessionId: string, exitCode: number | null) {
@@ -87,6 +108,13 @@ export function startFakePtyd(home: string) {
       if (index >= 0) sessions.splice(index, 1)
     }
     if (id === undefined) return
+    const hold = holds.get(op.op)
+    if (!hold) return reply(socket, id, op)
+    holds.delete(op.op)
+    void hold.then(() => reply(socket, id, op))
+  }
+
+  function reply(socket: Socket<Connection>, id: number, op: RequestOp) {
     switch (op.op) {
       case 'hello':
         return send(socket, { type: 'ok', id, body: 'hello', version: PROTOCOL_VERSION })

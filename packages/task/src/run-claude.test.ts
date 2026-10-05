@@ -54,8 +54,17 @@ async function benchTabs({ workbenchClient }: Books) {
   return runspaces.find((runspace) => runspace.owned)!.tabs
 }
 
-function callsTo({ ptyd }: Books, terminalSessionId: string) {
-  return ptyd.filter((call) => call.terminalSessionId === terminalSessionId)
+// Write の data は base64 なので、打った文字列に戻して比べる。
+function sent({ ptyd }: Books) {
+  return ptyd
+    .receivedAll((op) => 'session_id' in op)
+    .map((op) =>
+      op.op === 'write' ? { ...op, data: Buffer.from(op.data, 'base64').toString() } : op,
+    )
+}
+
+function sentTo(books: Books, terminalSessionId: string) {
+  return sent(books).filter((op) => op.session_id === terminalSessionId)
 }
 
 function runsOf({ db }: Books) {
@@ -84,9 +93,9 @@ test('run opens a new Tab at the end of the Bench, starts its shell at 24x80 and
   expect(await benchTabs(books)).toMatchObject([
     { id: output.tabId, cwd: books.cwd, terminalSessionId: output.terminalSessionId },
   ])
-  expect(books.ptyd).toEqual([
-    { op: 'start', terminalSessionId: output.terminalSessionId, rows: 24, cols: 80 },
-    { op: 'write', terminalSessionId: output.terminalSessionId, data: 'claude\r' },
+  expect(sent(books)).toMatchObject([
+    { op: 'create', session_id: output.terminalSessionId, cwd: books.cwd, rows: 24, cols: 80 },
+    { op: 'write', session_id: output.terminalSessionId, data: 'claude\r' },
   ])
 })
 
@@ -115,9 +124,9 @@ test("run resumes the claude of the last Run once it has ended, in a new Tab in 
     { id: first.tabId },
     { id: second.tabId, cwd: where },
   ])
-  expect(callsTo(books, second.terminalSessionId)).toEqual([
-    { op: 'start', terminalSessionId: second.terminalSessionId, rows: 24, cols: 80 },
-    { op: 'write', terminalSessionId: second.terminalSessionId, data: "claude --resume 's-1'\r" },
+  expect(sentTo(books, second.terminalSessionId)).toMatchObject([
+    { op: 'create', cwd: where, rows: 24, cols: 80 },
+    { op: 'write', data: "claude --resume 's-1'\r" },
   ])
   expect(runsOf(books)).toEqual([{ agentSessionId: 's-1' }])
   expect(await stateOf(books)).toMatchObject({ state: 'waiting', reason: 'idle' })
@@ -157,7 +166,7 @@ test("run starts a new claude when the Task's Runs all began before its Bench, a
   const output = await books.client.run({ ref })
 
   expect(output.resumed).toBeNull()
-  expect(callsTo(books, output.terminalSessionId).at(-1)).toMatchObject({ data: 'claude\r' })
+  expect(sentTo(books, output.terminalSessionId).at(-1)).toMatchObject({ data: 'claude\r' })
 })
 
 test('run starts a new claude rather than resume one that left no transcript, as when it exited before any prompt', async () => {
@@ -167,14 +176,14 @@ test('run starts a new claude rather than resume one that left no transcript, as
   const output = await books.client.run({ ref })
 
   expect(output.resumed).toBeNull()
-  expect(callsTo(books, output.terminalSessionId).at(-1)).toMatchObject({ data: 'claude\r' })
+  expect(sentTo(books, output.terminalSessionId).at(-1)).toMatchObject({ data: 'claude\r' })
 })
 
 test('run resumes the Run whose claude was active last, even when another began later', async () => {
   const books = await tracked()
   books.task.start()
   const first = await books.client.run({ ref })
-  const second = books.openTab(books.db.select().from(bench).get()!.runspaceId)
+  const second = await books.openTab(books.db.select().from(bench).get()!.runspaceId)
   const fields = (sessionId: string) => ({ transcript_path: transcriptOf(books, sessionId) })
   await books.hook(first.terminalSessionId, 's-1', 'SessionStart', fields('s-1'))
   await Bun.sleep(5)
@@ -211,7 +220,7 @@ test('run refuses a Task whose Issue has an open Blocker, naming it, before it o
   expect(error.data).toEqual({ blockers: [blocker] })
   expect(error.message).toContain(blocker)
   expect(await books.client.bench.list()).toEqual([])
-  expect(books.ptyd).toEqual([])
+  expect(sent(books)).toEqual([])
 })
 
 test('run --force starts a new Run past the open Blockers', async () => {
@@ -219,7 +228,7 @@ test('run --force starts a new Run past the open Blockers', async () => {
 
   const output = await books.client.run({ ref, force: true })
 
-  expect(callsTo(books, output.terminalSessionId).at(-1)).toMatchObject({ data: 'claude\r' })
+  expect(sentTo(books, output.terminalSessionId).at(-1)).toMatchObject({ data: 'claude\r' })
 })
 
 test('run syncs the Task before the gate, so a Blocker closed on GitHub since no longer holds it', async () => {
@@ -259,7 +268,7 @@ test('when GitHub cannot be reached, run judges the gate on the copy and warns h
       /^could not sync acme\/app#12 from GitHub \(`gh auth token` failed: .+\); using the copy from 12 minutes ago$/,
     ),
   ])
-  expect(callsTo(books, output.terminalSessionId).at(-1)).toMatchObject({ data: 'claude\r' })
+  expect(sentTo(books, output.terminalSessionId).at(-1)).toMatchObject({ data: 'claude\r' })
 })
 
 test('when GitHub cannot be reached, an open Blocker in the copy still holds the Task', async () => {

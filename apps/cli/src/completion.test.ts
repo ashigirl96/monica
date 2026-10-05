@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { afterEach, expect, test } from 'bun:test'
 
 import type { Command } from 'commander'
 import { kebabCase } from 'trpc-cli'
@@ -6,7 +6,9 @@ import { kebabCase } from 'trpc-cli'
 import type { Client } from './backend.ts'
 import { completers } from './contract.ts'
 import { createProgram } from './program.ts'
-import { backendWithTasks, tania } from './testing.ts'
+import { backendWithTasks, cleanUp, tania } from './testing.ts'
+
+afterEach(cleanUp)
 
 test('__complete lists the subcommands with their descriptions for zsh', async () => {
   const result = await tania(['__complete', '--', 'task', ''], () => null)

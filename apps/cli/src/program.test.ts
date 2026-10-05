@@ -1,9 +1,11 @@
-import { expect, test } from 'bun:test'
+import { afterEach, expect, test } from 'bun:test'
 
 import { createRouterClient } from '@orpc/server'
 
 import type { Client } from './backend.ts'
-import { inMemoryBackend, tania } from './testing.ts'
+import { cleanUp, inMemoryBackend, openTabOutsideBench, tania } from './testing.ts'
+
+afterEach(cleanUp)
 
 function inProcessClient(): Client {
   const { router, context } = inMemoryBackend()
@@ -12,20 +14,22 @@ function inProcessClient(): Client {
 
 test('terminal-session list prints the live sessions as text', async () => {
   const client = inProcessClient()
+  const id = await openTabOutsideBench(client)
 
   const result = await tania(['workbench', 'terminal-session', 'list'], () => client)
 
   expect(result).toEqual({
     code: 0,
-    stdout: 'ID    STATUS   PID  CWD\nts-a  running  42   /work\n',
+    stdout: `${'ID'.padEnd(id.length)}  STATUS   PID   CWD\n${id}  running  1000  /work\n`,
     stderr: '',
   })
 })
 
 test('agent-session list prints each live Agent Session with its state and reason as text', async () => {
   const client = inProcessClient()
+  const id = await openTabOutsideBench(client)
   await client.workbench.agentSession.recordHook({
-    terminalSessionId: 'ts-a',
+    terminalSessionId: id,
     payload: {
       session_id: '6253bdb0-26c3-4dd3-bc04-34af7ebcc00e',
       cwd: '/work/repo',
@@ -39,14 +43,15 @@ test('agent-session list prints each live Agent Session with its state and reaso
   expect(result).toEqual({
     code: 0,
     stdout:
-      'ID        TERMINAL SESSION  STATE                       CWD\n' +
-      '6253bdb0  ts-a              waiting (permission: Bash)  /work/repo\n',
+      `ID        ${'TERMINAL SESSION'.padEnd(id.length)}  STATE                       CWD\n` +
+      `6253bdb0  ${id}  waiting (permission: Bash)  /work/repo\n`,
     stderr: '',
   })
 })
 
 test('--format json prints the procedure output as it is', async () => {
   const client = inProcessClient()
+  const id = await openTabOutsideBench(client)
 
   const result = await tania(
     ['workbench', 'terminal-session', 'list', '--format', 'json'],
@@ -56,16 +61,16 @@ test('--format json prints the procedure output as it is', async () => {
   expect(result.code).toBe(0)
   expect(JSON.parse(result.stdout)).toEqual([
     {
-      id: 'ts-a',
+      id,
       cwd: '/work',
-      shell: '/bin/zsh',
+      shell: expect.any(String),
       status: 'running',
-      pid: 42,
+      pid: 1000,
       exitCode: null,
       error: null,
-      createdAt: '1970-01-01T00:00:00.000Z',
+      createdAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/),
       endedAt: null,
-      tabId: null,
+      tabId: expect.any(String),
     },
   ])
 })
