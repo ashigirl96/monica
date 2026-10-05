@@ -367,7 +367,12 @@
     {
       "files": ["packages/*/src/**", "apps/backend/src/**"],
       "excludeFiles": ["**/*.test.ts", "**/testing.ts", "**/fake-*.ts"],
-      "rules": { "tania/spawn-env": "error", "tania/cross-domain-write": "error" }
+      "rules": { "tania/spawn-env": "error" }
+    },
+    {
+      // apps/cli は自分の domain を持たず、テストが task の table に fixture を書くので入れない。
+      "files": ["packages/*/src/**", "apps/backend/src/**"],
+      "rules": { "tania/cross-domain-write": "error" }
     },
     {
       "files": ["**/*.ts", "**/*.tsx"],
