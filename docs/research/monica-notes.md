@@ -46,11 +46,11 @@ projects 表は `id, name, provider, repo, path, default_branch, worktree_root, 
 | kind | 総数 | 削除済み | 生存 | title | status |
 |---|---|---|---|---|---|
 | daily | 72 | 4 | 68 | 全件なし | 全件 NULL |
-| essay | 26 | 4 | 22 | 全件あり | finished 11・writing 12・NULL 3 |
+| essay | 26 | 4 | 22 | 全件あり | finished 11・writing 12・NULL 3（うち生存 2） |
 | project | 61 | 13 | 48 | 13 件なし（8 件は削除済み） | 全件 NULL |
 
 - id は `note-N`（note-1〜note-160、note-100 だけ欠番）。番号は `note_counter` の rowid で、削除しても再利用しない。
-- `date` は作成時に固定した論理日付で、JST の 5 時を境目にした日付とほぼ一致する（daily の 6 件だけ、カレンダーから別の日を開いて作ったもの）。生存する daily で同じ日付が 2 件あるのは 2026-07-20 の 1 組だけ。
+- `date` は作成時に固定した論理日付で、JST の 5 時を境目にした日付とほぼ一致する（daily の 6 件だけ、カレンダーから別の日を開いて作ったもの）。生存する daily で同じ日付が 2 件あるのは 2026-07-20 の 1 組だけで、get-or-create が最古を返すので、遅く作った note-13 は画面から開けない（daily を作るたびに新しい note を作っていた 2026-07-24 より前の名残）。
 - 既定の空本文のまま残った note は 10 件（daily 9、project 1）。
 
 ### project ごとの note
@@ -77,18 +77,18 @@ node の type の出現回数（括弧は含む note 数）: paragraph 1512 (135
 ### 参照
 
 - noteMention: 参照元は daily 9・essay 3、参照先は essay 7 種・project 1 種。すべて存在し、削除済みは無い。
-- syncedBlock: note-28（daily）から note-30（daily）の blockIds 10 個。すべて存在する。
+- syncedBlock: note-28（project、ashigirl96/me）から note-30（daily）の blockIds 10 個。すべて存在する。
 - アプリ内 URL の link mark: `http://monica.localhost:19280/projects/<owner>/<repo>/notes/note-N` が 3、`/essays/note-N` が 1、`/explanations/expl-N` が 5（explanations は notes 以外の機能）、相対の `/notes/note-3` が 1。
 - text に書かれた `#数字` 26 個は GitHub の issue と PR の番号で、Task への参照は無い。
 - 外部の画像 URL（bookmark の thumbnail、favicon）は assets に置かれていない。
 
 ## ドメインモデル（サーバー）
 
-- `NoteKind`（`crates/monica-domain/src/note.rs:52-70`）は `project { project_id, title }`・`daily`・`essay { title, status }`。essay の status は `writing` / `finished`。kind を変える遷移は無い。
+- `NoteKind`（`crates/monica-domain/src/note.rs:52-70`）は `project { project_id, title }`・`daily`・`essay { title, status }`。コメントは kind を「note の『取り出し方』による分類」と定義する（:48-51）。essay の status は `writing` / `finished` で、NULL は writing と読む（status の列を後から足したときに backfill していない）。kind を変える遷移は無い。kind を変える API は 2026-07-18〜07-25 にだけあり、その後も essay から project note へ本文を写して元を消した跡が 2 組ある。
 - title は専用の列。daily は title を持たず、essay と project が同じ列を使う。表示名は essay なら title（空なら `Untitled`）、daily なら date、project なら title（空なら project_id）。
 - daily は日付ごとに get-or-create する（`PUT /api/notes/daily/{date}`）。同じ日に複数あれば最古を返す。
 - 作成と更新は UTC の ISO 文字列。`updated_at` を進めるのは本文の更新と essay の status だけで、削除と復元は進めない。
-- 削除は soft delete（`deleted_at`）で、物理削除するコードは無い。復元できる。
+- 削除は soft delete（`deleted_at`）で、物理削除するコードは無い。復元を呼ぶのは project と essay の画面の ⌥Z（画面のメモリにある stack で、reload で消える）と primary note の get-or-create だけで、削除済みを一覧する画面も API も無い。daily と primary note は画面から削除できない（primary を断るのは画面だけで、サーバーは拒まない）。削除済み 21 件のうち 6 件は作成から 1 日以上経ってから消されている。
 - 並び順の列は無い。daily と project は `date DESC, rowid DESC`、essay は `created_at DESC`、検索は `updated_at DESC`。
 - 全文検索は fts5 の trigram で、本文の plain text を同じ transaction で書く。3 文字未満は LIKE。最大 50 件。
 - markdown は保存形式ではなく派生物。`note_markdown.rs`（doc → markdown、noteMention は `[[note-7|表示名]]`、syncedBlock は `![[note-7#^blk]]`）と `note_markdown_import.rs`（markdown → doc、block id は振らない）。synced block の展開は深さ 8 まで、循環は打ち切る。
@@ -98,7 +98,9 @@ node の type の出現回数（括弧は含む note 数）: paragraph 1512 (135
 - `notes.project_id → projects.id`（`ON DELETE SET NULL`）と、逆向きの `projects.primary_note_id → notes.id`。
 - project を消して `project_id` が NULL になった `kind=project` の行は daily として読まれる。
 - project の id は `owner/repo` で、notes が project から使うのはこの id だけ（保存、表示名の代わり、検索の LIKE）。name・path・repo は使わない。
-- primary note は `/projects/<owner>/<repo>` を初めて開いたときに get-or-create する。title は編集できず、削除もできない。soft delete されていれば作り直さず復元する。
+- primary note は `/projects/<owner>/<repo>` を初めて開いたときに get-or-create する。title は編集できず（DB には空文字 `''` が入る）、削除もできない。soft delete されていれば作り直さず復元する。
+- primary note 5 件は、5 件とも作成から 1 日以上更新が続き（2 件は 30 日以上）、アイデアや TODO を追記する置き場として使われている。title のある project note 43 件は話題ごとの文書で、24 件は作成から 1 日未満で最後の更新になる。
+- projects 表の 8 行は、`id` と `repo` が同じ `owner/repo`、`provider` が `github`、`path` が ghq のレイアウトと一致する。8 つとも GitHub に実在し、ghq の checkout もある。
 
 ## 画像（asset）
 

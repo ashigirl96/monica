@@ -1,6 +1,6 @@
 # tania
 
-私と AI エージェントが一緒に仕事を進めるための個人用 Agentic Workspace。monica の後継で、端末（Workbench・Terminal Session・ptyd）を引き継ぎ、Task を作り直す。
+私と AI エージェントが一緒に仕事を進めるための個人用 Agentic Workspace。monica の後継で、端末（Workbench・Terminal Session・ptyd）と Note を引き継ぎ、Task を作り直す。
 
 ## Language
 
@@ -89,6 +89,31 @@ _Avoid_: cron（claude の session cron と紛れる）, routine, schedule
 **Job Execution**:
 Job の 1 回分。起こしてから終わるまでと、その結果（成功・失敗・timeout・中断）を指す。
 _Avoid_: Execution（単独で使わない）, Job Run, Run（Task の語）, tick, 発火
+
+### Note
+
+**Note**:
+本文を持つ 1 枚の文書。Daily・Essay・Repo Note・Scratch のどれか 1 つの種類に属し、種類も作った時点の論理日付も後から変えない。削除すると一覧・検索・参照から消えるが、削除した画面にいる間は取り消せる。
+_Avoid_: memo, journal, page, document, ノート
+
+**Daily**:
+論理日付ごとに 1 つある Note。title を持たず、日付で名指す。開いた時に作られ、削除できない。未来の日付の Daily も作れる。
+_Avoid_: 日記, journal
+
+**Essay**:
+title を持ち、どの Repo にも属さない Note。状態は、書いている間の `writing` と書き終えた `finished` の 2 つ。
+
+**Repo Note**:
+Repo に属し、title を持つ Note。1 つの話題について書く。
+_Avoid_: project note
+
+**Scratch**:
+Repo ごとに 1 つある、長く追記していく書き殴りの Note。title を持たず、Repo で名指す。開いた時に作られ、削除できない。
+_Avoid_: primary note, pinned note（Pin は Tab の語）
+
+**論理日付**:
+5 時を境目にした日付。0 時から 5 時までは前の日に数える。
+_Avoid_: 日付（単独で使うと暦の日付と紛れる）, logical date
 
 ### Process
 
