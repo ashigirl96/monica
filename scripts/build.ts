@@ -1,5 +1,5 @@
 import { copyFileSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { $ } from 'bun'
 
@@ -16,7 +16,10 @@ const compile = [
   '--bytecode',
   '--format=esm',
 ]
-const migrations = ['packages/workbench/migrations/workbench', 'packages/task/migrations/task']
+// domain の package を足しても並べ直さずに済むよう、journal のある migrations folder をすべて同梱する。
+const migrations = [
+  ...new Bun.Glob('packages/*/migrations/*/meta/_journal.json').scanSync({ cwd: repo }),
+].map((journal) => dirname(dirname(journal)))
 
 mkdirSync(binaries, { recursive: true })
 await $`cargo build --release -p tania-ptyd`.cwd(repo)

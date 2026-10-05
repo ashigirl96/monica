@@ -12,13 +12,13 @@ export type TaskLedger = {
   events: EventPublisher<{ change: TaskChange }>
   start(): void
   stop(): void
+  /** open な Task すべての Sync。失敗した repo があるか throw したら reject する。 */
+  syncInBackground(): Promise<void>
 }
 
 type Internals = SyncDeps & BenchDeps & { backgroundSyncError: () => BackgroundSyncError | null }
 
-const BACKGROUND_SYNC_INTERVAL_MS = 5 * 60_000
-
-// TaskLedger の型は events / start / stop だけに保ち、GitHub への接続などの中身は TaskLedger を key にここへ置く。
+// TaskLedger の型は events / start / stop / syncInBackground だけに保ち、GitHub への接続などの中身は TaskLedger を key にここへ置く。
 const internalsOf = new WeakMap<TaskLedger, Internals>()
 
 export function internals(taskLedger: TaskLedger): Internals {
@@ -56,7 +56,6 @@ export function createTaskLedger(deps: {
     closing: new Set(),
   }
   let backgroundSyncError: BackgroundSyncError | null = null
-  let timer: ReturnType<typeof setInterval> | undefined
   let unsubscribe: (() => void) | undefined
 
   // 表示状態は Run の Agent Session から導くので、Run の Agent Session が変わるたびに Task の変化として知らせる。
@@ -90,9 +89,11 @@ export function createTaskLedger(deps: {
     } catch (error) {
       failure = String(error)
     }
-    if (stopped.signal.aborted) return
-    backgroundSyncError = failure === null ? null : { at: new Date(), message: failure }
-    if (failure !== null) console.error(`[task] background sync failed: ${failure}`)
+    if (!stopped.signal.aborted) {
+      backgroundSyncError = failure === null ? null : { at: new Date(), message: failure }
+      if (failure !== null) console.error(`[task] background sync failed: ${failure}`)
+    }
+    if (failure !== null) throw new Error(failure)
   }
 
   const taskLedger: TaskLedger = {
@@ -111,15 +112,13 @@ export function createTaskLedger(deps: {
       })
       // commit の後、購読の microtask が走る前に止まった Backend の分は、合図が二度と来ない。
       applyRunInvariantToAll('started')
-      void syncInBackground()
-      timer = setInterval(() => void syncInBackground(), BACKGROUND_SYNC_INTERVAL_MS)
     },
     stop() {
       unsubscribe?.()
-      clearInterval(timer)
       stopped.abort(new Error('the Task Ledger has stopped'))
       killSetups(benchDeps.setups)
     },
+    syncInBackground,
   }
   internalsOf.set(taskLedger, {
     ...syncDeps,
