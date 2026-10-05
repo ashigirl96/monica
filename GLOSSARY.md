@@ -80,6 +80,16 @@ _Avoid_: session, agent status on Terminal Session, stopped（手空きと終了
 Agent Session がユーザー待ちに入ったことを知らせる macOS の通知。質問とエラーはその理由の待ちに入るたびに出し、許可は許可を求められるたびに出し（許可待ちの間に次の許可を求められても出す）、手空きは turn が終わった時だけ出す。claude の起動や resume の直後の手空きでは出さない。Task に属する Agent Session は Task の Issue の参照と title で、それ以外は agent の cwd で呼ぶ。desktop が動いている間だけ出し、待ちが解けても取り下げない。
 _Avoid_: 待ち通知, alert
 
+### Job
+
+**Job**:
+予定で繰り返し走る処理。tania が持つ system の Job（Sync など）と、ユーザーが登録して shell command を走らせる Job がある。Backend が動いている間だけ走り、予定の時刻に Backend が居なければその回は飛ばす。一度きりの裏の処理（Bench の準備など）は Job ではない。
+_Avoid_: cron（claude の session cron と紛れる）, routine, schedule
+
+**Job Execution**:
+Job の 1 回分。起こしてから終わるまでと、その結果（成功・失敗・timeout・中断）を指す。
+_Avoid_: Execution（単独で使わない）, Job Run, Run（Task の語）, tick, 発火
+
 ### Process
 
 **Shell**:
