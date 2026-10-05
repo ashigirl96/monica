@@ -376,12 +376,12 @@ async function closeTab(
   { runspace, tab }: TabInRunspace,
   afterClose?: () => void,
 ) {
-  let closedHere = true
+  // 空になったかは close の transaction で決まる。読み直した layout では、間に Tab を外へ移した分と区別できない。
+  let emptiedRunspaceId: string | null = null
   try {
-    await clientOf(get).tab.close({ id: tab.id })
+    emptiedRunspaceId = (await clientOf(get).tab.close({ id: tab.id })).emptiedRunspaceId
   } catch (e) {
     if (!isGone(e)) throw e
-    closedHere = false
   }
   afterClose?.()
   if (activeTabOf(get, runspace)?.id === tab.id) {
@@ -390,10 +390,7 @@ async function closeTab(
     if (next) set(activeTabIdsAtom, (prev) => ({ ...prev, [runspace.id]: next.id }))
   }
   await set(reloadAtom)
-  const reloaded = get(layoutAtom)?.runspaces.find((r) => r.id === runspace.id)
-  if (closedHere && reloaded?.owned && reloaded.tabs.length === 0) {
-    get(lastTabClosedAtom)?.(runspace.id)
-  }
+  if (emptiedRunspaceId) get(lastTabClosedAtom)?.(emptiedRunspaceId)
 }
 
 export const closeTerminalTabAtom = action(async (get, set, tabId?: string) => {

@@ -217,6 +217,40 @@ test('a Tab closed while others stay, the last Tab moved out, and the last Tab o
   ])
 })
 
+test('the last Tab moved out of an owned Runspace while a Tab closed there reloads hands nothing to the slot', async () => {
+  const backend = bench()
+  const { db, workbenchLedger, client, store } = backend
+  const owned = ownedRunspace(backend)
+  const closed = await client.tab.open({ runspaceId: owned, ...size })
+  const moved = await client.tab.open({ runspaceId: owned, ...size })
+  const other = await client.runspace.create(size)
+  await store.set(reloadAtom)
+  const calls = lastTabClosedCalls(store)
+  // tab.close が返ってから読み直すまでの間に、CLI の Attach が残りの Tab を外へ移す。
+  const tabMovingAfterClose = new Proxy(client.tab, {
+    get: (target, key) =>
+      key === 'close'
+        ? async (input: { id: string }) => {
+            const output = await target.close(input)
+            db.transaction((tx) => workbenchLedger.moveTab(tx, moved.id, other.runspaceId))
+            return output
+          }
+        : Reflect.get(target, key),
+  })
+  store.set(
+    workbenchClientAtom,
+    () =>
+      new Proxy(client, {
+        get: (target, key) => (key === 'tab' ? tabMovingAfterClose : Reflect.get(target, key)),
+      }),
+  )
+
+  await store.set(closeTerminalTabAtom, closed.id)
+
+  expect(calls).toEqual([])
+  expect((await client.layout.get()).runspaces).toMatchObject([{ id: owned, tabs: [] }, {}])
+})
+
 test('a new Tab in an owned Runspace with no Tabs starts in its cwd and becomes active', async () => {
   const backend = bench()
   const { client, store } = backend

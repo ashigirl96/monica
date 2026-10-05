@@ -25,15 +25,25 @@ test('createRunspace makes an owned Runspace with no Tab at the end, and runspac
   ])
 })
 
-test('an owned Runspace stays when its last Tab closes', async () => {
+test('an owned Runspace stays when its last Tab closes, and tab.close names it as left with no Tabs', async () => {
   const { client, owned } = setupWithOwned()
   const tab = await client.tab.open({ runspaceId: owned, ...size })
 
-  await client.tab.close({ id: tab.id })
+  expect(await client.tab.close({ id: tab.id })).toEqual({ emptiedRunspaceId: owned })
 
   expect((await client.layout.get()).runspaces).toEqual([
     { id: owned, cwd: '/work/bench', sortOrder: 0, owned: true, tabs: [] },
   ])
+})
+
+test('tab.close names no Runspace when Tabs stay there, or when the Runspace is not owned and goes away', async () => {
+  const { client, owned } = setupWithOwned()
+  const a = await client.tab.open({ runspaceId: owned, ...size })
+  await client.tab.open({ runspaceId: owned, ...size })
+  const lone = await client.runspace.create(size)
+
+  expect(await client.tab.close({ id: a.id })).toEqual({ emptiedRunspaceId: null })
+  expect(await client.tab.close({ id: lone.tab.id })).toEqual({ emptiedRunspaceId: null })
 })
 
 test('an owned Runspace stays when its last Tab moves out', async () => {

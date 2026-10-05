@@ -141,11 +141,11 @@ export function moveTab(tx: Tx, input: { id: string; runspaceId: string; index?:
   if (moved.runspaceId !== input.runspaceId) afterTabLeft(tx, moved.runspaceId)
 }
 
-export function closeTab(tx: Tx, id: string) {
+export function closeTab(tx: Tx, id: string): { emptiedRunspaceId: string | null } {
   const closed = tabOf(tx, id)
   if (closed.pinned) throw new ORPCError('CONFLICT', { message: `Tab ${id} is pinned` })
   tx.delete(tab).where(eq(tab.id, id)).run()
-  afterTabLeft(tx, closed.runspaceId)
+  return { emptiedRunspaceId: afterTabLeft(tx, closed.runspaceId) ? closed.runspaceId : null }
 }
 
 export function pinTab(tx: Tx, id: string) {
@@ -230,10 +230,16 @@ function pinnedTabOf(tx: Tx, runspaceId: string) {
 }
 
 // 所有されていない Runspace は Tab を 1 つ以上持つので、最後の Tab が抜けたら Runspace ごと消す。
-function afterTabLeft(tx: Tx, runspaceId: string) {
+/** 所有された Runspace が Tab の無いまま残ったら true。 */
+function afterTabLeft(tx: Tx, runspaceId: string): boolean {
   const rest = tabIds(tx, runspaceId)
-  if (rest.length > 0) restack(tx, tab, rest)
-  else if (!runspaceOf(tx, runspaceId).owned) deleteRunspace(tx, runspaceId)
+  if (rest.length > 0) {
+    restack(tx, tab, rest)
+    return false
+  }
+  if (runspaceOf(tx, runspaceId).owned) return true
+  deleteRunspace(tx, runspaceId)
+  return false
 }
 
 function deleteRunspace(tx: Tx, id: string) {

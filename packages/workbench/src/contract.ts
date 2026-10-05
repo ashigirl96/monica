@@ -97,7 +97,14 @@ export const contract = {
     close: meta
       .meta({ description: 'Close a Tab, leaving its Terminal Session detached' })
       .input(z.object({ id: z.string() }))
-      .output(z.void()),
+      .output(
+        z.object({
+          emptiedRunspaceId: z
+            .string()
+            .nullable()
+            .describe('the owned Runspace this close left with no Tabs, or null'),
+        }),
+      ),
     move: meta
       .meta({ description: 'Move a Tab to a position in a Runspace' })
       .input(z.object({ id: z.string(), runspaceId: z.string(), index }))
