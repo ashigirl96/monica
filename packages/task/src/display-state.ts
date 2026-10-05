@@ -21,7 +21,7 @@ export function displayState(
   if (closedAt) return { state: 'closed' }
   const live = runs
     .filter(isLive)
-    .sort(
+    .toSorted(
       (a, b) => orderOf(a) - orderOf(b) || a.stateChangedAt.getTime() - b.stateChangedAt.getTime(),
     )
   const first = live[0]

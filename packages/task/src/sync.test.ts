@@ -60,7 +60,7 @@ test('sync copies every open Task with one query per repo and replaces the Block
   const output = await client.sync({})
 
   expect(output).toEqual({ synced: 3, missing: [] })
-  expect(github.requests.sort((a, b) => a.repo.localeCompare(b.repo))).toEqual([
+  expect(github.requests.toSorted((a, b) => a.repo.localeCompare(b.repo))).toEqual([
     { repo: 'acme/app', numbers: [1, 2] },
     { repo: 'acme/lib', numbers: [7] },
   ])

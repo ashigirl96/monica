@@ -114,7 +114,10 @@ function TerminalPane({
     (title: string) => void updateTitle(tabId, title),
     [tabId, updateTitle],
   )
-  const onCwdChange = useCallback((cwd: string) => void updateCwd(tabId, cwd), [tabId, updateCwd])
+  const onCwdChange = useCallback(
+    (nextCwd: string) => void updateCwd(tabId, nextCwd),
+    [tabId, updateCwd],
+  )
   const onExit = useCallback(
     (sessionId: string, exitCode: number | null) => void tabExited(tabId, sessionId, exitCode),
     [tabId, tabExited],
@@ -173,7 +176,7 @@ export default function WorkbenchContent() {
     <div className="relative h-full" style={{ zoom: 1 / uiZoom }}>
       {layout.runspaces
         .flatMap((runspace) => runspace.tabs)
-        .sort((a, b) => a.id.localeCompare(b.id))
+        .toSorted((a, b) => a.id.localeCompare(b.id))
         .map((tab) => (
           <TerminalPane
             key={tab.id}
