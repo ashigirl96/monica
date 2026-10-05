@@ -1,0 +1,5 @@
+{
+  "name": "tania",
+  "description": "Skills that let an agent work on tania Tasks through the tania CLI",
+  "skills": ["./packages/task/skills"]
+}

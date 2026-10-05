@@ -196,7 +196,11 @@ contract を走査するテストを 1 本置き、description と output が全
 - `prompts: false` を固定する。
 - completions は trpc-cli の生成に任せる（#12）。
 - hook の受け口は `tania workbench hook claude`（`@tania/workbench/cli` の手書き command）。仕様は「tab の env と shim」の節。
-- SKILL.md と CLI を突き合わせる検査テストは apps/cli に置く（ADR-0006）。
+- SKILL.md と CLI を突き合わせる検査テストは apps/cli に置く（ADR-0006。`skill-check.test.ts`）。`createProgram` が組む commander の木を辿って command path と flag 名を引くので、procedure を呼ばず、Backend も要らない。
+  - 検査する command は、`bash` か `sh` の fence の中で `tania` から始まる行と、本文のインラインの `tania …`。長い fence の中の fence は例なので見ない。行の `#` から後ろは shell と同じく comment として外す。
+  - 親の option（`--format`）と `--help` は、commander と同じく子の後ろでも受ける。
+  - 手書き command（`tania workbench hook claude`）は contract から生えず、Skill も呼ばないので、木に無く、書けば落ちる。
+  - plugin.json の `skills` は、Skill を持つ `packages/*/skills` とちょうど一致させる。Skill の無い directory を載せても落ちる。workbench の `skills` は Skill ができたときに足す。
 - oRPC 2.0 で `RPCLink` の引数が変わったときに直すのは `apps/cli/src/backend.ts` と `apps/desktop/src/backend.ts` の 2 箇所だけ（#21）。
 
 ## desktop（apps/desktop）
@@ -589,6 +593,20 @@ changes     → { type: "task", ref } | { type: "synced" }
 - Shell は起動時に `$TANIA_HOME/bin/tania` → `TANIA_BIN` の symlink を張る。release の desktop だけが `~/.local/bin/tania` にも張る（ADR-0006）。dev の desktop が張ると release の CLI を上書きするため。Workbench の tab の PATH に `$TANIA_HOME/bin` を前置するのは shim（「tab の env と shim」の節）。
 - `TANIA_HOME` は direnv に書かない（ADR-0006）。
 - `.claude/skills` は生成しない。Skill は plugin として repo から in-place で読まれる（ADR-0006）。
+- Skill を使うには、user scope の `~/.claude/settings.json` に tania の checkout を directory marketplace として登録し、`tania@tania` を enable する。登録はユーザーが行う。project scope には書かない。Skill はどの repo で動く agent にも配るため。
+
+  ```json
+  {
+    "extraKnownMarketplaces": {
+      "tania": { "source": { "source": "directory", "path": "<ghq root>/github.com/ashigirl96/tania" } }
+    },
+    "enabledPlugins": { "tania@tania": true }
+  }
+  ```
+
+  - `path` は worktree ではなく main の checkout を指す。worktree は消すと plugin ごと読めなくなる。
+  - checkout はその場で読まれ、SKILL.md の編集は `/reload-plugins` で効く。呼び名は `/tania:<name>`。
+  - manifest は `claude plugin validate .` で確かめる。`version` が無いという warning は意図どおり（ADR-0006）。
 - cargo の初回 build は約 36 秒（#8）。
 
 ## release build と install
