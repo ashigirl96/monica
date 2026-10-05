@@ -195,7 +195,7 @@ test("task run --in-place exits 1 when it cannot find the Repo's checkout", asyn
 test('task current names the Task of the Bench the Tab is in, given by TANIA_TERMINAL_SESSION_ID', async () => {
   const { db, issueId, context, connect } = backendWithBench()
   const runspaceId = db.transaction((tx) => {
-    const id = context.workbench.createRunspace(tx, { cwd: '/work' })
+    const id = context.workbenchLedger.createRunspace(tx, { cwd: '/work' })
     tx.insert(bench)
       .values({
         taskIssueId: issueId,

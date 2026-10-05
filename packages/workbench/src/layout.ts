@@ -6,7 +6,7 @@ import { and, eq, notInArray } from 'drizzle-orm'
 import type { Layout, Tab } from './contract.ts'
 import { runspace, tab, terminalSession } from './schema.ts'
 import { isLive, type Size, type TerminalSessions } from './terminal-session.ts'
-import type { Books, Db, Tx } from './workbench.ts'
+import type { Db, Tx, WorkbenchContext } from './workbench.ts'
 
 export function readLayout(db: Db): Layout {
   const tabs = db.select().from(tab).orderBy(tab.sortOrder).all()
@@ -25,9 +25,9 @@ export function asTab(row: typeof tab.$inferSelect): Tab {
   return rest
 }
 
-export function writeLayout<T>({ db, workbench }: Books, write: (tx: Tx) => T): T {
+export function writeLayout<T>({ db, workbenchLedger }: WorkbenchContext, write: (tx: Tx) => T): T {
   const written = db.transaction(write)
-  workbench.events.publish('change', { type: 'layout' })
+  workbenchLedger.events.publish('change', { type: 'layout' })
   return written
 }
 
@@ -164,7 +164,7 @@ export function unpinTab(tx: Tx, id: string) {
   tx.update(tab).set({ pinned: false }).where(eq(tab.id, id)).run()
 }
 
-// title から取った cwd は `~` で始まるが、帳簿の cwd は git や fs にそのまま渡すので絶対 path にする。
+// title から取った cwd は `~` で始まるが、Workbench Ledger の cwd は git や fs にそのまま渡すので絶対 path にする。
 export function setTabCwd(tx: Tx, input: { id: string; cwd: string }) {
   tabOf(tx, input.id)
   const cwd =
@@ -173,12 +173,12 @@ export function setTabCwd(tx: Tx, input: { id: string; cwd: string }) {
 }
 
 export function respawnTab(
-  books: Books,
+  context: WorkbenchContext,
   terminalSessions: TerminalSessions,
   id: string,
   size: Size,
 ) {
-  return writeLayout(books, (tx) => {
+  return writeLayout(context, (tx) => {
     const { cwd, terminalSessionId } = tabOf(tx, id)
     const { status } = tx
       .select({ status: terminalSession.status })

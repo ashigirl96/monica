@@ -5,7 +5,7 @@ import { decodeHook } from './hook-decoder.ts'
 import { agentSession, terminalSession } from './schema.ts'
 import { isLive } from './terminal-session.ts'
 import { notificationFor, supersede, takesOverTerminal, transition } from './transition.ts'
-import { type Books, type Db, notifyWaiting, type Tx } from './workbench.ts'
+import { type Db, notifyWaiting, type Tx, type WorkbenchContext } from './workbench.ts'
 
 const notEnded = ne(agentSession.state, 'ended')
 
@@ -14,7 +14,7 @@ export function listAgentSessions(db: Db): AgentSession[] {
 }
 
 export function recordHook(
-  { db, workbench }: Books,
+  { db, workbenchLedger }: WorkbenchContext,
   input: { terminalSessionId: string; payload: Record<string, unknown> },
 ): string[] {
   const { terminalSessionId, payload } = input
@@ -33,7 +33,7 @@ export function recordHook(
     // Tab の外へ漏れた env の agent は観測しない。
     if (!host || !isLive(host.status)) {
       console.error(
-        `[workbench] dropped a ${event.hookEventName} hook from Terminal Session ${terminalSessionId} (${host?.status ?? 'not in the books'})`,
+        `[workbench] dropped a ${event.hookEventName} hook from Terminal Session ${terminalSessionId} (${host?.status ?? 'not in the Workbench Ledger'})`,
       )
       return null
     }
@@ -60,7 +60,7 @@ export function recordHook(
   if (!recorded) return []
   const { changed, before, after } = recorded
   const body = after && notificationFor(before, event, after)
-  if (after && body) notifyWaiting(workbench, after, body)
+  if (after && body) notifyWaiting(workbenchLedger, after, body)
   return changed
 }
 

@@ -118,7 +118,7 @@ export const agentDotOfTerminalSessionAtom = atom(
     agentDotOf(get(agentSessionByTerminalSessionAtom).get(terminalSessionId)),
 )
 
-// active な Runspace と Tab は帳簿に持たないので、id が layout から消えたら先頭を見せる。
+// active な Runspace と Tab は Workbench Ledger に持たないので、id が layout から消えたら先頭を見せる。
 const activeRunspaceIdAtom = atomWithDefault((get) => get(savedUiStateAtom).activeRunspaceId)
 const activeTabIdsAtom = atomWithDefault((get): Record<string, string> => {
   const { activeRunspaceId, activeTabId } = get(savedUiStateAtom)
@@ -174,7 +174,7 @@ export const activateTerminalTabAtom = atom(null, (get, set, tabId: string) => {
   set(terminalFocusRequestAtom, (c) => c + 1)
 })
 
-// OSC 0/2 の title は shell が prompt のたびに書き換えるので、帳簿に書かず memory にだけ持つ。
+// OSC 0/2 の title は shell が prompt のたびに書き換えるので、Workbench Ledger に書かず memory にだけ持つ。
 export const tabTitlesAtom = atom<Record<string, string>>({})
 
 // OSC 7 を出す shell の title は同じ cwd の `~` 付きの別表記なので、そういう Tab の cwd は OSC 7 だけから取る。
@@ -502,7 +502,7 @@ export const cycleTerminalTabAtom = atom(null, (get, set, direction: 'left' | 'r
   if (next) set(setActiveAtom, { runspaceId: runspace.id, tabId: next.id })
 })
 
-// sidebar のグループは帳簿の並びより先に効くので、グループをまたいで動かしても見た目の位置にならない。
+// sidebar のグループは Workbench Ledger の並びより先に効くので、グループをまたいで動かしても見た目の位置にならない。
 async function moveRunspaceTo(get: Getter, set: Setter, id: string, toId: string) {
   const runspaces = get(layoutAtom)?.runspaces ?? []
   const from = runspaces.find((r) => r.id === id)

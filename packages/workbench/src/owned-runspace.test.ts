@@ -8,16 +8,16 @@ const size = { rows: 24, cols: 80 }
 
 function setupWithOwned() {
   const booted = setup()
-  const { db, workbench } = booted
-  const owned = db.transaction((tx) => workbench.createRunspace(tx, { cwd: '/work/bench' }))
+  const { db, workbenchLedger } = booted
+  const owned = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work/bench' }))
   return { ...booted, owned }
 }
 
 test('createRunspace makes an owned Runspace with no Tab at the end, and runspace.create one that is not owned', async () => {
-  const { db, workbench, client } = setup()
+  const { db, workbenchLedger, client } = setup()
   const plain = await client.runspace.create({ cwd: '/work', ...size })
 
-  const owned = db.transaction((tx) => workbench.createRunspace(tx, { cwd: '/work/bench' }))
+  const owned = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work/bench' }))
 
   expect((await client.layout.get()).runspaces).toEqual([
     { id: plain.runspaceId, cwd: '/work', sortOrder: 0, owned: false, tabs: [plain.tab] },

@@ -20,7 +20,7 @@
   - `editor.resolve({ cwd, candidates })` → `(string | null)[]`: `~` を展開し、相対なら cwd に join して `realpath` する。失敗したら末尾の `:<数字>` を最大 2 つ外して再試行する。terminal の link 検出が hover のたびに 1 行分をまとめて呼び、null の候補は link にしない。
   - `editor.open({ path })` → `void`: `/usr/bin/open -a Zed <path>`。Zed は固定で、line:col は渡さない。webview は失敗を握りつぶす。
 - URL を開くのは webview から plugin-opener の `openUrl` で行う（http(s)・mailto・tel）。
-- workbench の ui は Task の要素を出す場所を 2 つの slot として props で受け、apps/desktop が `@tania/task/ui` の component をはめる。workbench の ui は Task を import しない（ADR-0005）。
+- workbench の ui は Task の要素を出す場所を 2 つの slot として props で受け、apps/desktop が `@tania/task/ui` の component をはめる。workbench の ui は task を import しない（ADR-0005）。
   - `renderRunspaceLabel(runspaceId)`: Bench のラベル `<repo>#<n> <title>`。準備中・準備失敗のときだけその語を添える。workbench は所有された Runspace にだけ呼び、null なら普段の title を出す。task の ui は `task.bench.list`（`{ runspaceId, ref, title, setupState }[]`）と `task.changes` で描き直す。
   - `tabMenuItems(tab, close)`: Tab のメニューの「New shell here」と「Terminate」の間に出す項目。`tab` は `{ id, terminalSessionId }`。`close` はメニューを閉じる。task の ui はメニューを開くたびに `task.list` と `task.current({ terminalSessionId })` を読み、current の `source` が `run`（Tab の claude がどこかの Task の Run）なら何も出さない。current は closed な Task の Run も引くので、close を頼んだ claude が残った Tab にも出さない。NOT_FOUND は Run でも Bench でもない Tab なので出す。それ以外なら区切り線と「Attach to Task…」を出し、選ぶと picker を開く。picker は open な Task を `tracked_at` の新しい順に並べ、`<repo>#<n> <title>` と表示状態（CLI の STATE の 1 マスと同じ形）を出し、選ぶと `task.attach` を呼ぶ。失敗は toast で 1 行出す。
   - picker はメニューの外へ portal で出るので、`@tania/ui` の `PopoverMenu` は、どのメニューの中での押下と scroll も外側として扱わない。開いているメニューは、そのメニューとそこから開いたメニューだけだから。

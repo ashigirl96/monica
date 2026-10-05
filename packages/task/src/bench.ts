@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 import { ORPCError } from '@orpc/server'
-import type { Db, Tx, Workbench } from '@tania/workbench/server'
+import type { Db, Tx, WorkbenchLedger } from '@tania/workbench/server'
 import type { Subprocess } from 'bun'
 import { asc, eq } from 'drizzle-orm'
 
@@ -22,7 +22,7 @@ import { bench, issue } from './schema.ts'
 
 export type BenchDeps = {
   db: Db
-  workbench: Workbench
+  workbenchLedger: WorkbenchLedger
   home: string
   ghq: Ghq
   publish: (change: TaskChange) => void
@@ -116,7 +116,11 @@ function openBench(
     const existing = tx.select().from(bench).where(eq(bench.taskIssueId, forIssue.id)).get()
     if (existing) return { bench: existing, created: false }
     return {
-      bench: insertBench(tx, deps.workbench, forIssue, { cwd, mode, setupState: 'preparing' }),
+      bench: insertBench(tx, deps.workbenchLedger, forIssue, {
+        cwd,
+        mode,
+        setupState: 'preparing',
+      }),
       created: true,
     }
   })
@@ -126,7 +130,7 @@ function openBench(
 
 export function insertBench(
   tx: Tx,
-  workbench: Workbench,
+  workbenchLedger: WorkbenchLedger,
   forIssue: Issue,
   { cwd, mode, setupState }: Pick<Bench, 'cwd' | 'mode' | 'setupState'>,
 ): Bench {
@@ -135,7 +139,7 @@ export function insertBench(
     .insert(bench)
     .values({
       taskIssueId: forIssue.id,
-      runspaceId: workbench.createRunspace(tx, { cwd }),
+      runspaceId: workbenchLedger.createRunspace(tx, { cwd }),
       cwd,
       mode,
       branch: mode === 'worktree' ? branchOf(forIssue) : null,

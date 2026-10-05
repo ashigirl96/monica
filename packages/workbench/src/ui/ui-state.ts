@@ -12,7 +12,7 @@ const UI_ZOOM_MAX = 1.6
 const UI_ZOOM_DEFAULT = 1
 const UI_ZOOM_STEP = 0.1
 
-// 帳簿に載せない画面の状態（ADR-0014）。active でない Runspace の active Tab と端末の font size は持たない。
+// Workbench Ledger に載せない画面の状態（ADR-0014）。active でない Runspace の active Tab と端末の font size は持たない。
 export type UiState = {
   activeRunspaceId: string | null
   activeTabId: string | null

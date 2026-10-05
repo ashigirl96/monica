@@ -13,25 +13,25 @@ afterEach(() => {
   cleanUp()
 })
 
-type Books = ReturnType<typeof setup>
+type Fixture = ReturnType<typeof setup>
 
 const ref = 'acme/app#12'
 
 function started() {
-  const books = setup()
-  books.ghq.origin('acme/app', {})
-  books.task.start()
-  return books
+  const fixture = setup()
+  fixture.ghq.origin('acme/app', {})
+  fixture.taskLedger.start()
+  return fixture
 }
 
 async function trackedWithoutBench() {
-  const books = started()
-  books.github.issue(ref, { title: 'Ship it' })
-  await books.client.track({ ref })
-  return books
+  const fixture = started()
+  fixture.github.issue(ref, { title: 'Ship it' })
+  await fixture.client.track({ ref })
+  return fixture
 }
 
-function runsOf({ db }: Books) {
+function runsOf({ db }: Fixture) {
   return db
     .select({ number: issue.number, agentSessionId: run.agentSessionId, origin: run.origin })
     .from(run)
@@ -40,7 +40,7 @@ function runsOf({ db }: Books) {
     .all()
 }
 
-function runspaceOfTab({ db }: Books, terminalSessionId: string) {
+function runspaceOfTab({ db }: Fixture, terminalSessionId: string) {
   return db
     .select({ runspaceId: tab.runspaceId })
     .from(tab)
@@ -48,7 +48,7 @@ function runspaceOfTab({ db }: Books, terminalSessionId: string) {
     .get()?.runspaceId
 }
 
-function tabIdOf({ db }: Books, terminalSessionId: string) {
+function tabIdOf({ db }: Fixture, terminalSessionId: string) {
   return db
     .select({ id: tab.id })
     .from(tab)
@@ -57,58 +57,61 @@ function tabIdOf({ db }: Books, terminalSessionId: string) {
 }
 
 // webview の drag は tab.move を呼ぶ。
-function drag(books: Books, terminalSessionId: string, runspaceId: string) {
-  return books.workbenchClient.tab.move({
-    id: tabIdOf(books, terminalSessionId),
+function drag(fixture: Fixture, terminalSessionId: string, runspaceId: string) {
+  return fixture.workbenchClient.tab.move({
+    id: tabIdOf(fixture, terminalSessionId),
     runspaceId,
     index: 0,
   })
 }
 
 test('a claude in a Tab dragged into the Bench becomes a Run of the Task, attached', async () => {
-  const books = started()
-  const benchRunspace = await books.openBench(ref)
-  const outside = await books.openTabOutsideBench()
-  await books.hook(outside, 's-1', 'SessionStart', { source: 'startup' })
+  const fixture = started()
+  const benchRunspace = await fixture.openBench(ref)
+  const outside = await fixture.openTabOutsideBench()
+  await fixture.hook(outside, 's-1', 'SessionStart', { source: 'startup' })
 
-  await drag(books, outside, benchRunspace)
+  await drag(fixture, outside, benchRunspace)
 
-  expect(runsOf(books)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'attached' }])
+  expect(runsOf(fixture)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'attached' }])
 })
 
 test('a Tab dragged into the Bench moves even when its claude is a Run of another Task, which stays its only Run', async () => {
-  const books = started()
-  const other = await books.openTab(await books.openBench('acme/app#13', 'Next'))
-  const benchRunspace = await books.openBench(ref)
-  await books.hook(other, 's-1', 'SessionStart', { source: 'startup' })
+  const fixture = started()
+  const other = await fixture.openTab(await fixture.openBench('acme/app#13', 'Next'))
+  const benchRunspace = await fixture.openBench(ref)
+  await fixture.hook(other, 's-1', 'SessionStart', { source: 'startup' })
 
-  await drag(books, other, benchRunspace)
+  await drag(fixture, other, benchRunspace)
 
-  expect(runspaceOfTab(books, other)).toBe(benchRunspace)
-  expect(runsOf(books)).toEqual([{ number: 13, agentSessionId: 's-1', origin: 'started' }])
+  expect(runspaceOfTab(fixture, other)).toBe(benchRunspace)
+  expect(runsOf(fixture)).toEqual([{ number: 13, agentSessionId: 's-1', origin: 'started' }])
 })
 
 test('a layout signal after attach leaves the Run attach made alone, without a failed second insert', async () => {
-  const books = started()
-  await books.openBench(ref)
-  const outside = await books.openTabOutsideBench()
-  await books.hook(outside, 's-1', 'SessionStart', { source: 'startup' })
-  await books.client.attach({ ref, terminalSessionId: outside })
+  const fixture = started()
+  await fixture.openBench(ref)
+  const outside = await fixture.openTabOutsideBench()
+  await fixture.hook(outside, 's-1', 'SessionStart', { source: 'startup' })
+  await fixture.client.attach({ ref, terminalSessionId: outside })
   const errors = spyOn(console, 'error')
 
-  await books.workbenchClient.tab.setCwd({ id: tabIdOf(books, outside), cwd: '/work/elsewhere' })
+  await fixture.workbenchClient.tab.setCwd({
+    id: tabIdOf(fixture, outside),
+    cwd: '/work/elsewhere',
+  })
 
-  expect(runsOf(books)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'attached' }])
+  expect(runsOf(fixture)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'attached' }])
   expect(errors).not.toHaveBeenCalled()
 })
 
 test('attach moves the calling Tab into the Bench and makes its claude a Run that list shows', async () => {
-  const books = started()
-  const benchRunspace = await books.openBench(ref)
-  const outside = await books.openTabOutsideBench()
-  await books.hook(outside, 's-1', 'SessionStart', { source: 'startup' })
+  const fixture = started()
+  const benchRunspace = await fixture.openBench(ref)
+  const outside = await fixture.openTabOutsideBench()
+  await fixture.hook(outside, 's-1', 'SessionStart', { source: 'startup' })
 
-  const output = await books.client.attach({ ref, terminalSessionId: outside })
+  const output = await fixture.client.attach({ ref, terminalSessionId: outside })
 
   expect(output).toEqual({
     ref,
@@ -117,9 +120,9 @@ test('attach moves the calling Tab into the Bench and makes its claude a Run tha
     runCreated: true,
     agentSessionId: 's-1',
   })
-  expect(runspaceOfTab(books, outside)).toBe(benchRunspace)
-  expect(runsOf(books)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'attached' }])
-  expect((await books.client.list({})).tasks[0]!.displayState).toMatchObject({
+  expect(runspaceOfTab(fixture, outside)).toBe(benchRunspace)
+  expect(runsOf(fixture)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'attached' }])
+  expect((await fixture.client.list({})).tasks[0]!.displayState).toMatchObject({
     state: 'waiting',
     reason: 'idle',
     liveRuns: [{ agentSessionId: 's-1' }],
@@ -127,138 +130,138 @@ test('attach moves the calling Tab into the Bench and makes its claude a Run tha
 })
 
 test('task.changes signals the Task when attach moves a Tab into its Bench, even one with no claude', async () => {
-  const books = started()
-  await books.openBench(ref)
-  const outside = await books.openTabOutsideBench()
+  const fixture = started()
+  await fixture.openBench(ref)
+  const outside = await fixture.openTabOutsideBench()
   const changes: unknown[] = []
-  books.task.events.subscribe('change', (change) => changes.push(change))
+  fixture.taskLedger.events.subscribe('change', (change) => changes.push(change))
 
-  await books.client.attach({ ref, terminalSessionId: outside })
+  await fixture.client.attach({ ref, terminalSessionId: outside })
 
   expect(changes).toEqual([{ type: 'task', ref }])
 })
 
 test('attach succeeds without changing anything for a Tab already in the Bench', async () => {
-  const books = started()
-  const benchRunspace = await books.openBench(ref)
-  const first = await books.openTab(benchRunspace)
-  await books.openTab(benchRunspace)
-  await books.hook(first, 's-1', 'SessionStart', { source: 'startup' })
-  const layoutBefore = await books.workbenchClient.layout.get()
+  const fixture = started()
+  const benchRunspace = await fixture.openBench(ref)
+  const first = await fixture.openTab(benchRunspace)
+  await fixture.openTab(benchRunspace)
+  await fixture.hook(first, 's-1', 'SessionStart', { source: 'startup' })
+  const layoutBefore = await fixture.workbenchClient.layout.get()
   const changes: unknown[] = []
-  books.workbench.events.subscribe('change', (change) => changes.push(change))
+  fixture.workbenchLedger.events.subscribe('change', (change) => changes.push(change))
 
-  const output = await books.client.attach({ ref, terminalSessionId: first })
+  const output = await fixture.client.attach({ ref, terminalSessionId: first })
 
   expect(output).toMatchObject({ benchCreated: false, runCreated: false, agentSessionId: 's-1' })
-  expect(await books.workbenchClient.layout.get()).toEqual(layoutBefore)
+  expect(await fixture.workbenchClient.layout.get()).toEqual(layoutBefore)
   expect(changes).toEqual([])
 })
 
 test('attach brings back a Tab whose claude is already a Run of the Task without a second Run', async () => {
-  const books = started()
-  const benchRunspace = await books.openBench(ref)
-  const tabbed = await books.openTab(benchRunspace)
-  await books.hook(tabbed, 's-1', 'SessionStart', { source: 'startup' })
-  await drag(books, tabbed, runspaceOfTab(books, await books.openTabOutsideBench())!)
+  const fixture = started()
+  const benchRunspace = await fixture.openBench(ref)
+  const tabbed = await fixture.openTab(benchRunspace)
+  await fixture.hook(tabbed, 's-1', 'SessionStart', { source: 'startup' })
+  await drag(fixture, tabbed, runspaceOfTab(fixture, await fixture.openTabOutsideBench())!)
 
-  const output = await books.client.attach({ ref, terminalSessionId: tabbed })
+  const output = await fixture.client.attach({ ref, terminalSessionId: tabbed })
 
   expect(output).toMatchObject({ runCreated: false, agentSessionId: 's-1' })
-  expect(runspaceOfTab(books, tabbed)).toBe(benchRunspace)
-  expect(runsOf(books)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'started' }])
+  expect(runspaceOfTab(fixture, tabbed)).toBe(benchRunspace)
+  expect(runsOf(fixture)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'started' }])
 })
 
 test("attach opens the Bench of a Task that has none in place on the Repo's checkout, ready and without a setup or a clone", async () => {
-  const books = await trackedWithoutBench()
-  books.ghq.clone('acme/app')
-  const setupScript = join(books.ghq.checkout('acme/app'), '.tania/setup.sh')
+  const fixture = await trackedWithoutBench()
+  fixture.ghq.clone('acme/app')
+  const setupScript = join(fixture.ghq.checkout('acme/app'), '.tania/setup.sh')
   mkdirSync(join(setupScript, '..'))
   writeFileSync(setupScript, '#!/bin/sh\ntouch .setup-ran\n', { mode: 0o755 })
-  const outside = await books.openTabOutsideBench()
+  const outside = await fixture.openTabOutsideBench()
 
-  const output = await books.client.attach({ ref, terminalSessionId: outside })
+  const output = await fixture.client.attach({ ref, terminalSessionId: outside })
 
   expect(output).toMatchObject({ benchCreated: true, runCreated: false, agentSessionId: null })
-  expect(books.db.select().from(bench).get()).toMatchObject({
-    runspaceId: runspaceOfTab(books, outside),
-    cwd: books.ghq.checkout('acme/app'),
+  expect(fixture.db.select().from(bench).get()).toMatchObject({
+    runspaceId: runspaceOfTab(fixture, outside),
+    cwd: fixture.ghq.checkout('acme/app'),
     mode: 'in_place',
     setupState: 'ready',
   })
-  expect(books.ghq.gets).toEqual([])
-  expect(existsSync(join(books.ghq.checkout('acme/app'), '.setup-ran'))).toBe(false)
-  expect((await books.client.list({})).tasks[0]!.displayState).toEqual({ state: 'ended' })
+  expect(fixture.ghq.gets).toEqual([])
+  expect(existsSync(join(fixture.ghq.checkout('acme/app'), '.setup-ran'))).toBe(false)
+  expect((await fixture.client.list({})).tasks[0]!.displayState).toEqual({ state: 'ended' })
 })
 
 test("attach opens the Bench on the checkout of the Repo's new name when the Repo is renamed while it looks up ghq root", async () => {
-  const books = await trackedWithoutBench()
-  const renamed = books.ghq.checkout('acme/renamed')
+  const fixture = await trackedWithoutBench()
+  const renamed = fixture.ghq.checkout('acme/renamed')
   mkdirSync(renamed, { recursive: true })
-  const root = await books.ghq.client.root()
+  const root = await fixture.ghq.client.root()
   const asked = Promise.withResolvers<void>()
   const answer = Promise.withResolvers<string>()
-  spyOn(books.ghq.client, 'root').mockImplementation(() => {
+  spyOn(fixture.ghq.client, 'root').mockImplementation(() => {
     asked.resolve()
     return answer.promise
   })
-  const outside = await books.openTabOutsideBench()
+  const outside = await fixture.openTabOutsideBench()
 
-  const attaching = books.client.attach({ ref, terminalSessionId: outside })
+  const attaching = fixture.client.attach({ ref, terminalSessionId: outside })
   await asked.promise
-  books.db.update(issue).set({ repo: 'acme/renamed' }).run()
+  fixture.db.update(issue).set({ repo: 'acme/renamed' }).run()
   answer.resolve(root)
 
   expect(await attaching).toMatchObject({ ref: 'acme/renamed#12', benchCreated: true })
-  expect(books.db.select().from(bench).get()).toMatchObject({ cwd: renamed })
+  expect(fixture.db.select().from(bench).get()).toMatchObject({ cwd: renamed })
 })
 
 test('attach refuses a Task that has no Bench and whose Repo is not cloned, changing nothing', async () => {
-  const books = await trackedWithoutBench()
-  const outside = await books.openTabOutsideBench()
-  const before = runspaceOfTab(books, outside)
+  const fixture = await trackedWithoutBench()
+  const outside = await fixture.openTabOutsideBench()
+  const before = runspaceOfTab(fixture, outside)
 
-  const error = await failure(books.client.attach({ ref, terminalSessionId: outside }))
+  const error = await failure(fixture.client.attach({ ref, terminalSessionId: outside }))
 
   expect(error.code).toBe('BAD_REQUEST')
   expect(error.message).toContain('ghq get acme/app')
-  expect(books.db.select().from(bench).all()).toEqual([])
-  expect(runspaceOfTab(books, outside)).toBe(before)
+  expect(fixture.db.select().from(bench).all()).toEqual([])
+  expect(runspaceOfTab(fixture, outside)).toBe(before)
 })
 
 test('attach refuses a Tab whose claude is a Run of another Task, changing nothing', async () => {
-  const books = started()
-  const other = await books.openTab(await books.openBench('acme/app#13', 'Next'))
-  await books.openBench(ref)
-  await books.hook(other, 's-1', 'SessionStart', { source: 'startup' })
-  const before = runspaceOfTab(books, other)
+  const fixture = started()
+  const other = await fixture.openTab(await fixture.openBench('acme/app#13', 'Next'))
+  await fixture.openBench(ref)
+  await fixture.hook(other, 's-1', 'SessionStart', { source: 'startup' })
+  const before = runspaceOfTab(fixture, other)
 
-  const error = await failure(books.client.attach({ ref, terminalSessionId: other }))
+  const error = await failure(fixture.client.attach({ ref, terminalSessionId: other }))
 
   expect(error).toMatchObject({
     code: 'CONFLICT',
     message: expect.stringContaining('acme/app#13'),
   })
-  expect(runspaceOfTab(books, other)).toBe(before)
-  expect(runsOf(books)).toEqual([{ number: 13, agentSessionId: 's-1', origin: 'started' }])
+  expect(runspaceOfTab(fixture, other)).toBe(before)
+  expect(runsOf(fixture)).toEqual([{ number: 13, agentSessionId: 's-1', origin: 'started' }])
 })
 
 test('attach refuses a detached Terminal Session, a call from outside a Tab, a closed Task, and an untracked one', async () => {
-  const books = started()
-  await books.openBench(ref)
-  const detached = await books.openTabOutsideBench()
-  await books.workbenchClient.tab.close({ id: tabIdOf(books, detached) })
-  const outside = await books.openTabOutsideBench()
+  const fixture = started()
+  await fixture.openBench(ref)
+  const detached = await fixture.openTabOutsideBench()
+  await fixture.workbenchClient.tab.close({ id: tabIdOf(fixture, detached) })
+  const outside = await fixture.openTabOutsideBench()
 
-  expect((await failure(books.client.attach({ ref, terminalSessionId: detached }))).code).toBe(
+  expect((await failure(fixture.client.attach({ ref, terminalSessionId: detached }))).code).toBe(
     'BAD_REQUEST',
   )
-  expect((await failure(books.client.attach({ ref }))).code).toBe('BAD_REQUEST')
+  expect((await failure(fixture.client.attach({ ref }))).code).toBe('BAD_REQUEST')
   expect(
-    (await failure(books.client.attach({ ref: 'acme/app#99', terminalSessionId: outside }))).code,
+    (await failure(fixture.client.attach({ ref: 'acme/app#99', terminalSessionId: outside }))).code,
   ).toBe('NOT_FOUND')
-  books.db.update(task).set({ closedAt: new Date() }).run()
-  expect((await failure(books.client.attach({ ref, terminalSessionId: outside }))).code).toBe(
+  fixture.db.update(task).set({ closedAt: new Date() }).run()
+  expect((await failure(fixture.client.attach({ ref, terminalSessionId: outside }))).code).toBe(
     'BAD_REQUEST',
   )
 })

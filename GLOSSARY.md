@@ -1,6 +1,6 @@
 # tania
 
-私と AI エージェントが一緒に仕事を進めるための個人用 Agentic Workspace。monica の後継で、Workbench（端末）を引き継ぎ、Task を作り直す。
+私と AI エージェントが一緒に仕事を進めるための個人用 Agentic Workspace。monica の後継で、端末（Workbench・Terminal Session・ptyd）を引き継ぎ、Task を作り直す。
 
 ## Language
 
@@ -87,8 +87,16 @@ Tauri の殻。窓、端末の中継、Backend の起動・監督と、OS への
 _Avoid_: Rust 側, Tauri 側
 
 **Backend**:
-Shell が起動し、desktop と同寿命の process。Task と Workbench の帳簿と DB を唯一所有し、webview と CLI は HTTP で呼ぶ。desktop が閉じている間は存在しない。
+Shell が起動し、desktop と同寿命の process。Task Ledger と Workbench Ledger と DB を唯一所有し、webview と CLI は HTTP で呼ぶ。desktop が閉じている間は存在しない。
 _Avoid_: server, sidecar, tania-backend
+
+**Task Ledger**:
+Backend に 1 つだけある、Task・Issue・Pull Request・Run・Bench の記録の全体。1 件の Task ではない。
+_Avoid_: 帳簿, books
+
+**Workbench Ledger**:
+Backend に 1 つだけある、Runspace・Tab・Pin・Terminal Session・Agent Session の記録の全体。Workbench（画面）ではない。
+_Avoid_: 帳簿, books
 
 **ptyd**:
 Terminal Session を管理する常駐 daemon。Backend が起動し、desktop より長生きする。socket 越しに使う。

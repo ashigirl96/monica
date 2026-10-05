@@ -20,7 +20,7 @@ export async function attachTab(
   deps: BenchDeps,
   input: { ref: string; terminalSessionId?: string },
 ): Promise<AttachOutput> {
-  const { db, workbench } = deps
+  const { db, workbenchLedger } = deps
   const terminalSessionId = callerTerminalSession(input.terminalSessionId)
   const asked = parseRef(input.ref)
   const requested = findOpenTask(db, isIssue(asked), formatRef(asked))
@@ -59,7 +59,7 @@ export async function attachTab(
     const title = found.issue.title
     let target = found.bench
     if (!target) {
-      target = insertBench(tx, workbench, found.issue, {
+      target = insertBench(tx, workbenchLedger, found.issue, {
         cwd: checkoutOnDisk(ghqRoot, found.issue),
         mode: 'in_place',
         setupState: 'ready',
@@ -69,7 +69,7 @@ export async function attachTab(
     if (callerTab.runspaceId === target.runspaceId) {
       return { ref, title, benchCreated: false, runCreated: false, agentSessionId, moved: false }
     }
-    workbench.moveTab(tx, callerTab.id, target.runspaceId)
+    workbenchLedger.moveTab(tx, callerTab.id, target.runspaceId)
     const orphan = agent && !agent.runTask ? agent : null
     if (orphan) {
       insertRuns(tx, 'attached', [

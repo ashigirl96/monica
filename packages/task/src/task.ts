@@ -1,5 +1,5 @@
 import { EventPublisher } from '@orpc/server'
-import type { Db, Workbench } from '@tania/workbench/server'
+import type { Db, WorkbenchLedger } from '@tania/workbench/server'
 
 import { type BenchDeps, failInterruptedPreparations } from './bench.ts'
 import type { BackgroundSyncError, TaskChange } from './contract.ts'
@@ -8,7 +8,7 @@ import { defaultGhq, type Ghq, killSetups } from './prepare.ts'
 import { applyRunInvariant, type RunOrigin, refOfRunTask } from './run.ts'
 import { SYNC_TIMEOUT_MS, type SyncDeps, syncOpenTasks } from './sync.ts'
 
-export type Task = {
+export type TaskLedger = {
   events: EventPublisher<{ change: TaskChange }>
   start(): void
   stop(): void
@@ -18,23 +18,23 @@ type Internals = SyncDeps & BenchDeps & { backgroundSyncError: () => BackgroundS
 
 const BACKGROUND_SYNC_INTERVAL_MS = 5 * 60_000
 
-// Task の型は events / start / stop だけに保ち、GitHub への接続などの中身は Task を key にここへ置く。
-const internalsOf = new WeakMap<Task, Internals>()
+// TaskLedger の型は events / start / stop だけに保ち、GitHub への接続などの中身は TaskLedger を key にここへ置く。
+const internalsOf = new WeakMap<TaskLedger, Internals>()
 
-export function internals(task: Task): Internals {
-  const found = internalsOf.get(task)
-  if (!found) throw new Error('this Task was not made by createTask')
+export function internals(taskLedger: TaskLedger): Internals {
+  const found = internalsOf.get(taskLedger)
+  if (!found) throw new Error('this TaskLedger was not made by createTaskLedger')
   return found
 }
 
-export function createTask(deps: {
+export function createTaskLedger(deps: {
   db: Db
-  workbench: Workbench
+  workbenchLedger: WorkbenchLedger
   home: string
   github?: GitHub
   ghq?: Ghq
-}): Task {
-  const { db, workbench, home, github = defaultGitHub, ghq = defaultGhq } = deps
+}): TaskLedger {
+  const { db, workbenchLedger, home, github = defaultGitHub, ghq = defaultGhq } = deps
   const events = new EventPublisher<{ change: TaskChange }>()
   const stopped = new AbortController()
   const syncDeps: SyncDeps = {
@@ -46,7 +46,7 @@ export function createTask(deps: {
   }
   const benchDeps: BenchDeps = {
     db,
-    workbench,
+    workbenchLedger,
     home,
     ghq,
     publish: syncDeps.publish,
@@ -95,13 +95,13 @@ export function createTask(deps: {
     if (failure !== null) console.error(`[task] background sync failed: ${failure}`)
   }
 
-  const task: Task = {
+  const taskLedger: TaskLedger = {
     events,
     start() {
       failInterruptedPreparations(db)
       // async iterator の購読は溜まった合図を 100 件で捨てるので、listener で受ける。
-      // workbench は transaction の中でも publish するので、読み直しは commit 後の microtask に回す。
-      unsubscribe = workbench.events.subscribe('change', (change) => {
+      // Workbench Ledger は transaction の中でも publish するので、読み直しは commit 後の microtask に回す。
+      unsubscribe = workbenchLedger.events.subscribe('change', (change) => {
         if (change.type === 'agentSession') {
           queueMicrotask(() => onAgentSessionChanged(change.sessionId))
         } else if (change.type === 'layout') {
@@ -117,14 +117,14 @@ export function createTask(deps: {
     stop() {
       unsubscribe?.()
       clearInterval(timer)
-      stopped.abort(new Error('the Task has stopped'))
+      stopped.abort(new Error('the Task Ledger has stopped'))
       killSetups(benchDeps.setups)
     },
   }
-  internalsOf.set(task, {
+  internalsOf.set(taskLedger, {
     ...syncDeps,
     ...benchDeps,
     backgroundSyncError: () => backgroundSyncError,
   })
-  return task
+  return taskLedger
 }
