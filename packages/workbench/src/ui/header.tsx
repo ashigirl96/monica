@@ -48,6 +48,7 @@ export function WorkbenchHeader() {
       block: 'nearest',
       inline: 'nearest',
     })
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- 手前の Tab の button は ref でしか取れないので、手前の Tab が替わったときと並びが動いたときに走らせ直す。
   }, [activeTab?.id, activeTab?.sortOrder])
 
   if (!runspace) return null

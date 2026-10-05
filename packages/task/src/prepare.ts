@@ -146,7 +146,7 @@ async function runSetup(worktree: string, log: string, setups: Set<Subprocess>) 
       detached: true,
     })
   } catch (error) {
-    throw new Error(`spawn failed: ${messageOf(error)}`)
+    throw new Error(`spawn failed: ${messageOf(error)}`, { cause: error })
   } finally {
     closeSync(output)
   }

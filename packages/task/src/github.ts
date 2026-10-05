@@ -10,10 +10,11 @@ export type GitHub = {
 
 export const defaultGitHub: GitHub = { url: 'https://api.github.com/graphql', token: ghAuthToken }
 
+const ghAuthTokenFailed = (reason: string) =>
+  new Error(`\`gh auth token\` failed: ${reason}; run \`gh auth login\``)
+
 // gh の token は gh auth login / refresh で変わるので、process の寿命の間 cache しない。
 export async function ghAuthToken(signal: AbortSignal): Promise<string> {
-  const failed = (reason: string) =>
-    new Error(`\`gh auth token\` failed: ${reason}; run \`gh auth login\``)
   let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>
   try {
     // env を渡さないと Bun は起動時の PATH で gh を探すので、Backend が login shell から入れた PATH が効かない。
@@ -25,7 +26,7 @@ export async function ghAuthToken(signal: AbortSignal): Promise<string> {
       signal,
     })
   } catch (error) {
-    throw failed(error instanceof Error ? error.message : String(error))
+    throw ghAuthTokenFailed(error instanceof Error ? error.message : String(error))
   }
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(child.stdout).text(),
@@ -34,8 +35,8 @@ export async function ghAuthToken(signal: AbortSignal): Promise<string> {
   ])
   signal.throwIfAborted()
   const token = stdout.trim()
-  if (exitCode !== 0) throw failed(oneLine(stderr) || `exit ${exitCode}`)
-  if (!token) throw failed('it printed no token')
+  if (exitCode !== 0) throw ghAuthTokenFailed(oneLine(stderr) || `exit ${exitCode}`)
+  if (!token) throw ghAuthTokenFailed('it printed no token')
   return token
 }
 

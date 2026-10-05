@@ -8,11 +8,11 @@ test('the latest task snapshot holds only the task tables', async () => {
   const meta = join(migrations.folder, 'meta')
   const latest = readdirSync(meta)
     .filter((name) => name.endsWith('_snapshot.json'))
-    .sort()
+    .toSorted()
     .at(-1)!
   const snapshot = await Bun.file(join(meta, latest)).json()
 
-  expect(Object.keys(snapshot.tables).sort()).toEqual([
+  expect(Object.keys(snapshot.tables).toSorted()).toEqual([
     'bench',
     'issue',
     'issue_blocker',

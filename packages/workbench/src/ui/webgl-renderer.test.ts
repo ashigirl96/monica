@@ -209,6 +209,15 @@ describe('attachWebglRenderer', () => {
 
 type FakeTerm = Parameters<typeof attachWebglRenderer>[0]
 
+function makeTerm(): FakeTerm {
+  return {
+    loadAddon: () => {},
+    refresh: () => {},
+    rows: 24,
+    element: undefined,
+  }
+}
+
 function makePoolHarness(limit: number) {
   const attached: FakeTerm[] = []
   const detachedTerms: FakeTerm[] = []
@@ -224,19 +233,13 @@ function makePoolHarness(limit: number) {
       isAttached: () => alive.get(term) === true,
     }
   })
-  const makeTerm = (): FakeTerm => ({
-    loadAddon: () => {},
-    refresh: () => {},
-    rows: 24,
-    element: undefined,
-  })
-  return { pool, attached, detachedTerms, alive, makeTerm }
+  return { pool, attached, detachedTerms, alive }
 }
 
 describe('createWebglRendererPool', () => {
   test('acquire attaches once per terminal', () => {
     const h = makePoolHarness(2)
-    const term = h.makeTerm()
+    const term = makeTerm()
     h.pool.acquire(term)
     h.pool.acquire(term)
     expect(h.attached).toEqual([term])
@@ -245,7 +248,7 @@ describe('createWebglRendererPool', () => {
 
   test('evicts the least recently acquired terminal past the limit', () => {
     const h = makePoolHarness(2)
-    const [a, b, c] = [h.makeTerm(), h.makeTerm(), h.makeTerm()]
+    const [a, b, c] = [makeTerm(), makeTerm(), makeTerm()]
     h.pool.acquire(a)
     h.pool.acquire(b)
     h.pool.acquire(c)
@@ -254,7 +257,7 @@ describe('createWebglRendererPool', () => {
 
   test('re-acquiring refreshes recency', () => {
     const h = makePoolHarness(2)
-    const [a, b, c] = [h.makeTerm(), h.makeTerm(), h.makeTerm()]
+    const [a, b, c] = [makeTerm(), makeTerm(), makeTerm()]
     h.pool.acquire(a)
     h.pool.acquire(b)
     h.pool.acquire(a)
@@ -264,7 +267,7 @@ describe('createWebglRendererPool', () => {
 
   test('release detaches and allows a later re-attach', () => {
     const h = makePoolHarness(2)
-    const term = h.makeTerm()
+    const term = makeTerm()
     h.pool.acquire(term)
     h.pool.release(term)
     expect(h.detachedTerms).toEqual([term])
@@ -278,7 +281,7 @@ describe('createWebglRendererPool', () => {
 
   test('an evicted terminal re-attaches on the next acquire', () => {
     const h = makePoolHarness(1)
-    const [a, b] = [h.makeTerm(), h.makeTerm()]
+    const [a, b] = [makeTerm(), makeTerm()]
     h.pool.acquire(a)
     h.pool.acquire(b)
     expect(h.detachedTerms).toEqual([a])
@@ -290,7 +293,7 @@ describe('createWebglRendererPool', () => {
 
   test('acquiring a dead entry retries the attach', () => {
     const h = makePoolHarness(2)
-    const term = h.makeTerm()
+    const term = makeTerm()
     h.pool.acquire(term)
     h.alive.set(term, false)
 

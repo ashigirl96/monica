@@ -49,16 +49,19 @@ function repoOf(ptydBinary: string, pid: number): string | undefined {
   return cwd && dirname(dirname(dirname(resolve(cwd, ptydBinary))))
 }
 
+function entriesWithPrefix(dir: string, prefix: string): string[] {
+  return existsSync(dir)
+    ? readdirSync(dir)
+        .filter((name) => name.startsWith(prefix))
+        .map((name) => join(dir, name))
+    : []
+}
+
 function homesOnDisk(): string[] {
-  const under = (dir: string, prefix: string) =>
-    existsSync(dir)
-      ? readdirSync(dir)
-          .filter((name) => name.startsWith(prefix))
-          .map((name) => join(dir, name))
-      : []
-  return [...under(userHome, '.tania-'), ...under(scratch, 'tania-')].filter((home) =>
-    ['tania.db', 'ptyd.pid'].some((file) => existsSync(join(home, file))),
-  )
+  return [
+    ...entriesWithPrefix(userHome, '.tania-'),
+    ...entriesWithPrefix(scratch, 'tania-'),
+  ].filter((home) => ['tania.db', 'ptyd.pid'].some((file) => existsSync(join(home, file))))
 }
 
 // 落ちた Backend の backend.json は残り、その pid が別の process に使い回されていることがある。
@@ -95,7 +98,7 @@ function devs(): Dev[] {
       dev.bridgePort = bridgePortOf(parent.pid)
     }
   }
-  return [...byHome.values()].sort((a, b) => a.name.localeCompare(b.name))
+  return [...byHome.values()].toSorted((a, b) => a.name.localeCompare(b.name))
 }
 
 function kind(dev: Dev): string {

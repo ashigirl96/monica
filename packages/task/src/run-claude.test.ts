@@ -18,7 +18,7 @@ type Books = Awaited<ReturnType<typeof tracked>>
 async function tracked({ blockedBy = [] as string[] } = {}) {
   const books = setup()
   books.ghq.origin('acme/app', {})
-  for (const ref of blockedBy) books.github.issue(ref, { title: 'Upstream fix' })
+  for (const upstream of blockedBy) books.github.issue(upstream, { title: 'Upstream fix' })
   books.github.issue(ref, { title: 'Ship it', blockedBy })
   await books.client.track({ ref })
   return { ...books, cwd: join(books.home, 'worktrees/acme/app/issue-12') }

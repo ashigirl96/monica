@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm'
 
 import { startFakePtyd } from './fake-ptyd.ts'
 import { shouldRespawn } from './pin.ts'
-import { runspace, tab, terminalSession } from './schema.ts'
+import { runspace, tab as tabTable, terminalSession } from './schema.ts'
 import { cleanUp, onCleanup, setup } from './testing.ts'
 
 afterEach(cleanUp)
@@ -116,7 +116,7 @@ test('the books refuse a second pinned Tab in one Runspace', async () => {
   const second = await client.tab.open({ runspaceId, ...size })
   const elsewhere = await client.runspace.create(size)
   const markPinned = (id: string) =>
-    db.update(tab).set({ pinned: true }).where(eq(tab.id, id)).run()
+    db.update(tabTable).set({ pinned: true }).where(eq(tabTable.id, id)).run()
 
   markPinned(first.id)
   markPinned(elsewhere.tab.id)
@@ -229,7 +229,7 @@ test('a pinned Tab the Backend left on an ended Terminal Session before it stopp
     })
     .run()
   db.insert(runspace).values({ id: 'rs-pinned', cwd: '/work', sortOrder: 0 }).run()
-  db.insert(tab)
+  db.insert(tabTable)
     .values({
       id: 'tab-pinned',
       runspaceId: 'rs-pinned',

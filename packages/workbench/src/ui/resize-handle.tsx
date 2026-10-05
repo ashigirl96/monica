@@ -41,11 +41,11 @@ export function ResizeHandle() {
       document.body.style.cursor = 'col-resize'
       document.body.style.userSelect = 'none'
 
-      function onMouseMove(e: MouseEvent) {
+      function onMouseMove(event: MouseEvent) {
         if (!rafRef.current) {
           rafRef.current = requestAnimationFrame(() => {
             rafRef.current = 0
-            const width = Math.round(clamp(e.clientX, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH))
+            const width = Math.round(clamp(event.clientX, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH))
             setSidebarWidth(width)
           })
         }
