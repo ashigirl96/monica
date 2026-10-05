@@ -1,13 +1,6 @@
 ## 構成
 
-repo の形と規則の正本は `docs/packages.md`。Read 1 回には収まらないので、`^## ` を Grep して、作業に当たる節だけを開く。
-
-- package・entry・import の向き: 「配置」「entry」
-- domain をまたぐ呼び出し、Backend の組み立て、テストの seam: 「domain 間の呼び出しと Backend の組み立て」
-- procedure と table: 「contract の規約」「migration」
-- CLI と desktop: 「CLI（apps/cli）」「desktop（apps/desktop）」
-- Workbench と Task の規則: 「Workbench の帳簿」から「Task の帳簿」まで
-- dev の起動、release、検査: 「dev loop」「release build と install」「検査と CI」
+repo の形と規則は `docs/packages.md` から読む。全文を読み、冒頭の「索引」から作業が触る範囲の文書を開く。
 
 ## Agent skills
 
