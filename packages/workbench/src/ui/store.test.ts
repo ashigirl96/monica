@@ -4,7 +4,7 @@ import { basename, join } from 'node:path'
 
 import type { Atom, Store } from 'jotai'
 
-import type { Tab } from '../contract.ts'
+import type { Tab, TerminalSession } from '../contract.ts'
 
 // Shell の command は Tauri の外では呼べないので、呼ばれた command だけを記録する。
 const shellCalls: { command: string; args: Record<string, unknown> }[] = []
@@ -39,6 +39,7 @@ const {
   cycleRunspaceAtom,
   deadTabsAtom,
   lastTabClosedAtom,
+  layoutAtom,
   terminateTerminalSessionAtom,
   moveActiveRunspaceAtom,
   moveTabToRunspaceAtom,
@@ -75,7 +76,9 @@ function bench() {
   return { ...backend, store }
 }
 
-function ownedRunspace({ db, workbenchLedger }: ReturnType<typeof bench>) {
+type Backend = ReturnType<typeof bench>
+
+function ownedRunspace({ db, workbenchLedger }: Backend) {
   return db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work/bench' }))
 }
 
@@ -169,24 +172,37 @@ test('closing the last Tab of the last Runspace leaves a fresh Runspace', async 
   expect(store.get(activeRunspaceAtom)?.id).toBe(runspaces[0]!.id)
 })
 
+// Exit は ptyd から Shell と Backend の両方に届く。
 test.each([
-  ['closed', (store: Store, tab: Tab) => store.set(closeTerminalTabAtom, tab.id)],
+  ['closed', ({ store }: Backend, tab: Tab) => store.set(closeTerminalTabAtom, tab.id)],
   [
     'exited',
-    (store: Store, tab: Tab) => store.set(tabExitedAtom, tab.id, tab.terminalSessionId, 0),
+    ({ ptyd, store }: Backend, tab: Tab) => {
+      ptyd.exit(tab.terminalSessionId, 0)
+      return store.set(tabExitedAtom, tab.id, tab.terminalSessionId, 0)
+    },
   ],
-  ['terminated', (store: Store, tab: Tab) => store.set(terminateTabTerminalSessionAtom, tab.id)],
+  [
+    'terminated',
+    async ({ ptyd, store }: Backend, tab: Tab) => {
+      const terminating = store.set(terminateTabTerminalSessionAtom, tab.id)
+      await ptyd.received((op) => op.op === 'terminate' && op.session_id === tab.terminalSessionId)
+      ptyd.exit(tab.terminalSessionId, null)
+      await terminating
+    },
+  ],
 ])(
   'the last Tab of an owned Runspace, %s, hands the Runspace to the slot and leaves it with no Tabs',
   async (_, close) => {
     const backend = bench()
-    const { client, store } = backend
+    const { client, store, settled } = backend
     const runspaceId = ownedRunspace(backend)
     const tab = await client.tab.open({ runspaceId, ...size })
+    await settled(tab.terminalSessionId)
     await store.set(reloadAtom)
     const calls = lastTabClosedCalls(store)
 
-    await close(store, tab)
+    await close(backend, tab)
 
     expect(calls).toEqual([runspaceId])
     expect((await client.layout.get()).runspaces).toMatchObject([
@@ -194,6 +210,28 @@ test.each([
     ])
   },
 )
+
+test('the last Tab of an owned Runspace, terminated, reaches the slot only once the Backend records the exit, so the claude stopped there is no longer live', async () => {
+  const backend = bench()
+  const { client, store, ptyd, settled } = backend
+  const runspaceId = ownedRunspace(backend)
+  const tab = await client.tab.open({ runspaceId, ...size })
+  await settled(tab.terminalSessionId)
+  await store.set(reloadAtom)
+  const listedWhenCalled: Promise<TerminalSession[]>[] = []
+  store.set(
+    lastTabClosedAtom,
+    () => () => void listedWhenCalled.push(client.terminalSession.list()),
+  )
+
+  const terminating = store.set(terminateTabTerminalSessionAtom, tab.id)
+  await until(store, layoutAtom, (layout) => layout?.runspaces[0]?.tabs.length === 0)
+  ptyd.exit(tab.terminalSessionId, null)
+  await terminating
+
+  expect(listedWhenCalled).toHaveLength(1)
+  expect((await listedWhenCalled[0])!.map((s) => s.id)).not.toContain(tab.terminalSessionId)
+})
 
 test('a Tab closed while others stay, the last Tab moved out, and the last Tab of a Runspace no one owns hand nothing to the slot', async () => {
   const backend = bench()
