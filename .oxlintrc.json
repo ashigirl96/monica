@@ -15,7 +15,7 @@
     "typescript/no-unnecessary-type-assertion": "off",
     // `JSON.parse(…) as { pid: number }` のように、検査せずに型を付ける `as` をすべて咎める。
     "typescript/no-unsafe-type-assertion": "off",
-    // React の effect の cleanup、hono の middleware、網羅した switch のように、値を返さない分岐が意図どおりの関数に出る。
+    // React の effect の cleanup や網羅した switch のように、値を返さない分岐が意図どおりの関数に出る。返り値の抜けは tsc の noImplicitReturns が見る。
     "typescript/consistent-return": "off"
   },
   // 1 つの file に複数の override が当たると、後の override が no-restricted-imports の設定を丸ごと置き換える。

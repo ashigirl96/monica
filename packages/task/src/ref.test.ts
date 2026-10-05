@@ -27,13 +27,12 @@ test.each([
   'https://example.com/owner/repo/issues/12',
   '',
 ])('refuses %p as BAD_REQUEST', (input) => {
-  const error = (() => {
-    try {
-      parseRef(input)
-    } catch (thrown) {
-      return thrown
-    }
-  })()
+  let error: unknown
+  try {
+    parseRef(input)
+  } catch (thrown) {
+    error = thrown
+  }
 
   expect(error).toBeInstanceOf(ORPCError)
   expect((error as ORPCError<string, unknown>).code).toBe('BAD_REQUEST')

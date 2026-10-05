@@ -51,6 +51,8 @@ export type PtydHandlers = {
 }
 
 export class PtydClient {
+  private socket: Socket
+  private handlers: PtydHandlers
   private nextId = 1
   private pending = new Map<
     number,
@@ -62,10 +64,10 @@ export class PtydClient {
   private outbox: Uint8Array[] = []
   private closed = false
 
-  private constructor(
-    private socket: Socket,
-    private handlers: PtydHandlers,
-  ) {}
+  private constructor(socket: Socket, handlers: PtydHandlers) {
+    this.socket = socket
+    this.handlers = handlers
+  }
 
   static async connect(socketPath: string, handlers: PtydHandlers): Promise<PtydClient> {
     let client!: PtydClient

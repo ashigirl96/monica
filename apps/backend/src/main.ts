@@ -81,7 +81,7 @@ app.use('/rpc/*', bearerAuth({ token }))
 app.use('/rpc/*', async (c, next) => {
   const { matched, response } = await handler.handle(c.req.raw, { prefix: '/rpc', context })
   if (matched) return c.newResponse(response.body, response)
-  await next()
+  return next()
 })
 const server = Bun.serve({ hostname: '127.0.0.1', port: 0, idleTimeout: 0, fetch: app.fetch })
 
