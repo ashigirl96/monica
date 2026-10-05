@@ -81,7 +81,7 @@ async function load(get: Getter, set: Setter) {
 }
 
 // 応答が前後して古い一覧で上書きしないよう読み直しは 1 本ずつ流し、待つ間に来た要求は 1 回にまとめる。
-function serialReload(load: (get: Getter, set: Setter) => Promise<void>) {
+function serialReload(read: (get: Getter, set: Setter) => Promise<void>) {
   // promise は jotai が値として追跡するので、object に包んで持つ。
   const lastAtom = atom<{ done: Promise<void> }>({ done: Promise.resolve() })
   const waitingAtom = atom<{ done: Promise<void> } | null>(null)
@@ -91,7 +91,7 @@ function serialReload(load: (get: Getter, set: Setter) => Promise<void>) {
     const reload = {
       done: get(lastAtom).done.then(() => {
         set(waitingAtom, null)
-        return load(get, set)
+        return read(get, set)
       }),
     }
     set(waitingAtom, reload)

@@ -10,7 +10,7 @@ import { inMemoryBackend, tania } from './testing.ts'
 
 const cleanups: (() => void)[] = []
 afterEach(() => {
-  for (const cleanup of cleanups.splice(0).reverse()) cleanup()
+  for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
 })
 
 function taniaHome(): string {
