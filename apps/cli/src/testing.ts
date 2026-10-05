@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite'
-import { spyOn } from 'bun:test'
+import { join } from 'node:path'
 
 import { createRouterClient, os } from '@orpc/server'
 import { issue, issueBlocker, task as taskTable } from '@tania/task/schema'
@@ -9,12 +9,12 @@ import {
   migrations as taskMigrations,
   router as taskRouter,
 } from '@tania/task/server'
-import { terminalSession } from '@tania/workbench/schema'
 import {
   createWorkbench,
   migrations as workbenchMigrations,
   router as workbenchRouter,
 } from '@tania/workbench/server'
+import { startFakePtyd, tempHome } from '@tania/workbench/testing'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 
@@ -27,46 +27,42 @@ const noGhq: Ghq = {
   get: () => Promise.reject(new Error('ghq get failed: no ghq in the CLI tests')),
 }
 
-export function inMemoryBackend({ home = '/nonexistent', ghq = noGhq } = {}) {
+const cleanups: (() => void)[] = []
+const onCleanup = (cleanup: () => void) => cleanups.push(cleanup)
+
+export function cleanUp() {
+  for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
+}
+
+export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Ghq } = {}) {
   const sqlite = new Database(':memory:')
   sqlite.run('PRAGMA foreign_keys = ON')
   const db = drizzle(sqlite)
   for (const m of [workbenchMigrations, taskMigrations]) {
     migrate(db, { migrationsFolder: m.folder, migrationsTable: m.table })
   }
+  const ptydHome = tempHome(onCleanup)
+  const ptyd = startFakePtyd(ptydHome)
+  onCleanup(() => ptyd.stop())
   const workbench = createWorkbench({
     db,
-    home: '/nonexistent',
-    ptydPath: '/nonexistent',
+    home: ptydHome,
+    ptydPath: join(ptydHome, 'no-ptyd'),
     notify() {},
     nameAgentSession: () => null,
   })
-  // ptyd が無いので、Workbench が ptyd に送る口は何もせずに返す。
-  spyOn(workbench, 'ready').mockResolvedValue()
-  spyOn(workbench, 'startTerminalSession').mockResolvedValue()
-  spyOn(workbench, 'writeTerminalSession').mockResolvedValue()
-  spyOn(workbench, 'terminateTerminalSessions').mockResolvedValue()
+  onCleanup(() => workbench.stop())
   // CLI のテストは GitHub に届かせない。
   const task = createTask({
     db,
     workbench,
-    home,
+    home: home ?? ptydHome,
     ghq,
     github: {
       url: 'http://127.0.0.1:9/graphql',
       token: () => Promise.reject(new Error('`gh auth token` failed: not logged in')),
     },
   })
-  db.insert(terminalSession)
-    .values({
-      id: 'ts-a',
-      cwd: '/work',
-      shell: '/bin/zsh',
-      status: 'running',
-      pid: 42,
-      createdAt: new Date(0),
-    })
-    .run()
   const context = { db, workbench, task }
   return {
     sqlite,
@@ -74,6 +70,12 @@ export function inMemoryBackend({ home = '/nonexistent', ghq = noGhq } = {}) {
     router: os.$context<typeof context>().router({ workbench: workbenchRouter, task: taskRouter }),
     context,
   }
+}
+
+// procedure で開く Runspace は Tab を 1 つ持って生まれるので、Bench の外の Tab は Runspace ごと開く。
+export async function openTabOutsideBench(client: Client): Promise<string> {
+  const { tab } = await client.workbench.runspace.create({ cwd: '/work', rows: 24, cols: 80 })
+  return tab.terminalSessionId
 }
 
 export function backendWithTasks() {

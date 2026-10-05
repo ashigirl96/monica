@@ -68,7 +68,7 @@ function drag(books: Books, terminalSessionId: string, runspaceId: string) {
 test('a claude in a Tab dragged into the Bench becomes a Run of the Task, attached', async () => {
   const books = started()
   const benchRunspace = await books.openBench(ref)
-  const outside = books.openTab(books.plainRunspace())
+  const outside = await books.openTabOutsideBench()
   await books.hook(outside, 's-1', 'SessionStart', { source: 'startup' })
 
   await drag(books, outside, benchRunspace)
@@ -78,7 +78,7 @@ test('a claude in a Tab dragged into the Bench becomes a Run of the Task, attach
 
 test('a Tab dragged into the Bench moves even when its claude is a Run of another Task, which stays its only Run', async () => {
   const books = started()
-  const other = books.openTab(await books.openBench('acme/app#13', 'Next'))
+  const other = await books.openTab(await books.openBench('acme/app#13', 'Next'))
   const benchRunspace = await books.openBench(ref)
   await books.hook(other, 's-1', 'SessionStart', { source: 'startup' })
 
@@ -91,7 +91,7 @@ test('a Tab dragged into the Bench moves even when its claude is a Run of anothe
 test('a layout signal after attach leaves the Run attach made alone, without a failed second insert', async () => {
   const books = started()
   await books.openBench(ref)
-  const outside = books.openTab(books.plainRunspace())
+  const outside = await books.openTabOutsideBench()
   await books.hook(outside, 's-1', 'SessionStart', { source: 'startup' })
   await books.client.attach({ ref, terminalSessionId: outside })
   const errors = spyOn(console, 'error')
@@ -105,7 +105,7 @@ test('a layout signal after attach leaves the Run attach made alone, without a f
 test('attach moves the calling Tab into the Bench and makes its claude a Run that list shows', async () => {
   const books = started()
   const benchRunspace = await books.openBench(ref)
-  const outside = books.openTab(books.plainRunspace())
+  const outside = await books.openTabOutsideBench()
   await books.hook(outside, 's-1', 'SessionStart', { source: 'startup' })
 
   const output = await books.client.attach({ ref, terminalSessionId: outside })
@@ -129,7 +129,7 @@ test('attach moves the calling Tab into the Bench and makes its claude a Run tha
 test('task.changes signals the Task when attach moves a Tab into its Bench, even one with no claude', async () => {
   const books = started()
   await books.openBench(ref)
-  const outside = books.openTab(books.plainRunspace())
+  const outside = await books.openTabOutsideBench()
   const changes: unknown[] = []
   books.task.events.subscribe('change', (change) => changes.push(change))
 
@@ -141,8 +141,8 @@ test('task.changes signals the Task when attach moves a Tab into its Bench, even
 test('attach succeeds without changing anything for a Tab already in the Bench', async () => {
   const books = started()
   const benchRunspace = await books.openBench(ref)
-  const first = books.openTab(benchRunspace)
-  books.openTab(benchRunspace)
+  const first = await books.openTab(benchRunspace)
+  await books.openTab(benchRunspace)
   await books.hook(first, 's-1', 'SessionStart', { source: 'startup' })
   const layoutBefore = await books.workbenchClient.layout.get()
   const changes: unknown[] = []
@@ -158,9 +158,9 @@ test('attach succeeds without changing anything for a Tab already in the Bench',
 test('attach brings back a Tab whose claude is already a Run of the Task without a second Run', async () => {
   const books = started()
   const benchRunspace = await books.openBench(ref)
-  const tabbed = books.openTab(benchRunspace)
+  const tabbed = await books.openTab(benchRunspace)
   await books.hook(tabbed, 's-1', 'SessionStart', { source: 'startup' })
-  await drag(books, tabbed, books.plainRunspace())
+  await drag(books, tabbed, runspaceOfTab(books, await books.openTabOutsideBench())!)
 
   const output = await books.client.attach({ ref, terminalSessionId: tabbed })
 
@@ -175,7 +175,7 @@ test("attach opens the Bench of a Task that has none in place on the Repo's chec
   const setupScript = join(books.ghq.checkout('acme/app'), '.tania/setup.sh')
   mkdirSync(join(setupScript, '..'))
   writeFileSync(setupScript, '#!/bin/sh\ntouch .setup-ran\n', { mode: 0o755 })
-  const outside = books.openTab(books.plainRunspace())
+  const outside = await books.openTabOutsideBench()
 
   const output = await books.client.attach({ ref, terminalSessionId: outside })
 
@@ -202,7 +202,7 @@ test("attach opens the Bench on the checkout of the Repo's new name when the Rep
     asked.resolve()
     return answer.promise
   })
-  const outside = books.openTab(books.plainRunspace())
+  const outside = await books.openTabOutsideBench()
 
   const attaching = books.client.attach({ ref, terminalSessionId: outside })
   await asked.promise
@@ -215,20 +215,20 @@ test("attach opens the Bench on the checkout of the Repo's new name when the Rep
 
 test('attach refuses a Task that has no Bench and whose Repo is not cloned, changing nothing', async () => {
   const books = await trackedWithoutBench()
-  const plain = books.plainRunspace()
-  const outside = books.openTab(plain)
+  const outside = await books.openTabOutsideBench()
+  const before = runspaceOfTab(books, outside)
 
   const error = await failure(books.client.attach({ ref, terminalSessionId: outside }))
 
   expect(error.code).toBe('BAD_REQUEST')
   expect(error.message).toContain('ghq get acme/app')
   expect(books.db.select().from(bench).all()).toEqual([])
-  expect(runspaceOfTab(books, outside)).toBe(plain)
+  expect(runspaceOfTab(books, outside)).toBe(before)
 })
 
 test('attach refuses a Tab whose claude is a Run of another Task, changing nothing', async () => {
   const books = started()
-  const other = books.openTab(await books.openBench('acme/app#13', 'Next'))
+  const other = await books.openTab(await books.openBench('acme/app#13', 'Next'))
   await books.openBench(ref)
   await books.hook(other, 's-1', 'SessionStart', { source: 'startup' })
   const before = runspaceOfTab(books, other)
@@ -246,9 +246,9 @@ test('attach refuses a Tab whose claude is a Run of another Task, changing nothi
 test('attach refuses a detached Terminal Session, a call from outside a Tab, a closed Task, and an untracked one', async () => {
   const books = started()
   await books.openBench(ref)
-  const detached = books.openTab(books.plainRunspace())
+  const detached = await books.openTabOutsideBench()
   await books.workbenchClient.tab.close({ id: tabIdOf(books, detached) })
-  const outside = books.openTab(books.plainRunspace())
+  const outside = await books.openTabOutsideBench()
 
   expect((await failure(books.client.attach({ ref, terminalSessionId: detached }))).code).toBe(
     'BAD_REQUEST',

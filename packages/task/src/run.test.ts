@@ -36,7 +36,7 @@ async function stateOf({ client }: Books, taskRef = ref) {
 
 test('a claude started in a Tab of the Bench becomes a Run of the Task, waiting idle', async () => {
   const books = started()
-  const terminalSessionId = books.openTab(await books.openBench(ref))
+  const terminalSessionId = await books.openTab(await books.openBench(ref))
 
   await books.hook(terminalSessionId, 's-1', 'SessionStart', { source: 'startup' })
 
@@ -53,8 +53,8 @@ test('a claude started in a Tab of the Bench becomes a Run of the Task, waiting 
 
 test('a Run stays with its Task while its claude moves out of the Bench, until it ends', async () => {
   const books = started()
-  const inBench = books.openTab(await books.openBench(ref))
-  const outside = books.openTab(books.plainRunspace())
+  const inBench = await books.openTab(await books.openBench(ref))
+  const outside = await books.openTabOutsideBench()
   await books.hook(inBench, 's-1', 'SessionStart', { source: 'startup' })
 
   await books.hook(outside, 's-1', 'UserPromptSubmit', { prompt: 'go on' })
@@ -69,8 +69,8 @@ test('a Run stays with its Task while its claude moves out of the Bench, until i
 
 test('a claude that moves into a Tab of the Bench becomes a Run of the Task then', async () => {
   const books = started()
-  const outside = books.openTab(books.plainRunspace())
-  const inBench = books.openTab(await books.openBench(ref))
+  const outside = await books.openTabOutsideBench()
+  const inBench = await books.openTab(await books.openBench(ref))
   await books.hook(outside, 's-1', 'SessionStart', { source: 'startup' })
 
   expect(runsOf(books)).toEqual([])
@@ -82,8 +82,8 @@ test('a claude that moves into a Tab of the Bench becomes a Run of the Task then
 
 test('a Run of one Task stays with it when its claude moves into the Bench of another', async () => {
   const books = started()
-  const first = books.openTab(await books.openBench(ref))
-  const second = books.openTab(await books.openBench('acme/app#13', 'Next'))
+  const first = await books.openTab(await books.openBench(ref))
+  const second = await books.openTab(await books.openBench('acme/app#13', 'Next'))
   await books.hook(first, 's-1', 'SessionStart', { source: 'startup' })
 
   await books.hook(second, 's-1', 'UserPromptSubmit', { prompt: 'go on' })
@@ -96,8 +96,8 @@ test('start makes Runs of the live Agent Sessions already in a Bench, but not of
   const books = setup()
   books.ghq.origin('acme/app', {})
   const runspaceId = await books.openBench(ref)
-  const live = books.openTab(runspaceId)
-  const gone = books.openTab(runspaceId)
+  const live = await books.openTab(runspaceId)
+  const gone = await books.openTab(runspaceId)
   await books.hook(live, 's-live', 'SessionStart', { source: 'startup' })
   await books.hook(gone, 's-gone', 'SessionStart', { source: 'startup' })
   await books.hook(gone, 's-gone', 'SessionEnd', { reason: 'prompt_input_exit' })
@@ -111,7 +111,7 @@ test('start makes Runs of the live Agent Sessions already in a Bench, but not of
 
 test('a claude begun in the Bench while the Backend was away becomes a Run on its first hook after start', async () => {
   const books = started()
-  const inBench = books.openTab(await books.openBench(ref))
+  const inBench = await books.openTab(await books.openBench(ref))
   books.restartTask().task.start()
 
   await books.hook(inBench, 's-1', 'UserPromptSubmit', { prompt: 'after the restart' })
@@ -122,8 +122,8 @@ test('a claude begun in the Bench while the Backend was away becomes a Run on it
 test('a Task with two live Runs shows the one that waits first and lists both', async () => {
   const books = started()
   const runspaceId = await books.openBench(ref)
-  const first = books.openTab(runspaceId)
-  const second = books.openTab(runspaceId)
+  const first = await books.openTab(runspaceId)
+  const second = await books.openTab(runspaceId)
   await books.hook(first, 's-1', 'SessionStart', { source: 'startup' })
   await books.hook(first, 's-1', 'UserPromptSubmit', { prompt: 'build it' })
   await books.hook(second, 's-2', 'SessionStart', { source: 'startup' })
@@ -147,8 +147,8 @@ test('a Task with two live Runs shows the one that waits first and lists both', 
 
 test("task.changes signals the Task when its Run is made and whenever the Run's claude changes", async () => {
   const books = started()
-  const inBench = books.openTab(await books.openBench(ref))
-  const outside = books.openTab(books.plainRunspace())
+  const inBench = await books.openTab(await books.openBench(ref))
+  const outside = await books.openTabOutsideBench()
   const changes: unknown[] = []
   books.task.events.subscribe('change', (change) => changes.push(change))
 
@@ -165,7 +165,7 @@ test("task.changes signals the Task when its Run is made and whenever the Run's 
 test('start signals the Tasks whose Runs it makes', async () => {
   const books = setup()
   books.ghq.origin('acme/app', {})
-  const inBench = books.openTab(await books.openBench(ref))
+  const inBench = await books.openTab(await books.openBench(ref))
   await books.hook(inBench, 's-1', 'SessionStart', { source: 'startup' })
   const changes: unknown[] = []
   books.task.events.subscribe('change', (change) => changes.push(change))
