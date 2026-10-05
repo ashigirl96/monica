@@ -22,15 +22,18 @@ function processes(): Map<number, Process> {
   const ps = Bun.spawnSync(['ps', '-axwwo', 'pid=,ppid=,command=']).stdout.toString()
   const table = new Map<number, Process>()
   for (const line of ps.split('\n')) {
-    const m = line.match(/^\s*(\d+)\s+(\d+)\s+(.+)$/)
-    if (m) table.set(Number(m[1]), { pid: Number(m[1]), ppid: Number(m[2]), command: m[3] })
+    const [, pid, ppid, command] = line.match(/^\s*(\d+)\s+(\d+)\s+(.+)$/) ?? []
+    if (pid && ppid && command)
+      table.set(Number(pid), { pid: Number(pid), ppid: Number(ppid), command })
   }
   return table
 }
 
 function lsofNames(pid: number, ...filters: string[]): string[] {
   const lsof = Bun.spawnSync(['lsof', '-a', '-p', String(pid), ...filters, '-Fn'])
-  return [...lsof.stdout.toString().matchAll(/^n(.+)$/gm)].map((m) => m[1])
+  return [...lsof.stdout.toString().matchAll(/^n(.+)$/gm)]
+    .map(([, name]) => name)
+    .filter((name) => name !== undefined)
 }
 
 function cwdOf(pid: number): string | undefined {
@@ -80,11 +83,11 @@ function devs(): Dev[] {
     return dev
   }
   for (const proc of procs.values()) {
-    const m = proc.command.match(/^(\S*tania-ptyd) --tania-home (.+)$/)
-    if (!m || m[2] === releaseHome) continue
-    const dev = devAt(m[2])
+    const [, binary, home] = proc.command.match(/^(\S*tania-ptyd) --tania-home (.+)$/) ?? []
+    if (!binary || !home || home === releaseHome) continue
+    const dev = devAt(home)
     dev.ptyd = proc.pid
-    dev.repo = repoOf(m[1], proc.pid)
+    dev.repo = repoOf(binary, proc.pid)
   }
   for (const home of homesOnDisk()) devAt(home)
   for (const dev of byHome.values()) {
@@ -114,8 +117,9 @@ function list(all: Dev[]) {
     console.log('dev はありません')
     return
   }
+  const header = ['NAME', 'KIND', 'DESKTOP', 'BACKEND', 'PTYD', 'BRIDGE', 'WORKTREE']
   const rows = [
-    ['NAME', 'KIND', 'DESKTOP', 'BACKEND', 'PTYD', 'BRIDGE', 'WORKTREE'],
+    header,
     ...all.map((dev) => [
       dev.name,
       kind(dev),
@@ -126,11 +130,11 @@ function list(all: Dev[]) {
       worktree(dev.repo),
     ]),
   ]
-  const widths = rows[0].map((_, i) => Math.max(...rows.map((row) => row[i].length)))
+  const widths = header.map((_, i) => Math.max(...rows.map((row) => row[i]?.length ?? 0)))
   for (const row of rows) {
     console.log(
       row
-        .map((cell, i) => cell.padEnd(widths[i]))
+        .map((cell, i) => cell.padEnd(widths[i] ?? 0))
         .join('  ')
         .trimEnd(),
     )
