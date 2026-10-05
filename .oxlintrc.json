@@ -8,6 +8,7 @@
   },
   "rules": {
     "tania/sync-transaction": "error",
+    "tania/disable-reason": "error",
     // jsx: react-jsx では JSX を書く file が React を import しなくてよい。
     "react/react-in-jsx-scope": "off",
     // 名前の _ だけで判断するので、xterm の _core のような外が決めた名前にも当たる。
