@@ -1,22 +1,23 @@
-import { implement } from "@orpc/server";
-import type { Db } from "@tania/workbench/server";
-import { attachTab } from "./attach.ts";
-import { listBenches } from "./bench.ts";
-import { closeTask, reopenTask } from "./close.ts";
-import { contract } from "./contract.ts";
-import { currentTask } from "./current.ts";
-import { listTasks } from "./list.ts";
-import { runTask } from "./run-claude.ts";
-import { syncCommand, trackIssue } from "./sync.ts";
-import { internals, type Task } from "./task.ts";
+import { implement } from '@orpc/server'
+import type { Db } from '@tania/workbench/server'
 
-export { migrations } from "../migrations/index.ts";
-export { nameAgentSession } from "./current.ts";
-export type { GitHub } from "./github.ts";
-export type { Ghq } from "./prepare.ts";
-export { createTask, type Task } from "./task.ts";
+import { attachTab } from './attach.ts'
+import { listBenches } from './bench.ts'
+import { closeTask, reopenTask } from './close.ts'
+import { contract } from './contract.ts'
+import { currentTask } from './current.ts'
+import { listTasks } from './list.ts'
+import { runTask } from './run-claude.ts'
+import { syncCommand, trackIssue } from './sync.ts'
+import { internals, type Task } from './task.ts'
 
-const os = implement(contract).$context<{ db: Db; task: Task }>();
+export { migrations } from '../migrations/index.ts'
+export { nameAgentSession } from './current.ts'
+export type { GitHub } from './github.ts'
+export type { Ghq } from './prepare.ts'
+export { createTask, type Task } from './task.ts'
+
+const os = implement(contract).$context<{ db: Db; task: Task }>()
 
 export const router = os.router({
   track: os.track.handler(({ context, input }) => trackIssue(internals(context.task), input.ref)),
@@ -40,8 +41,8 @@ export const router = os.router({
     list: os.bench.list.handler(({ context }) => listBenches(context.db)),
   },
   changes: os.changes.handler(async function* ({ context, signal }) {
-    for await (const change of context.task.events.subscribe("change", { signal })) {
-      yield change;
+    for await (const change of context.task.events.subscribe('change', { signal })) {
+      yield change
     }
   }),
-});
+})

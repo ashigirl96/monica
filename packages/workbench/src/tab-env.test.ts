@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, test } from 'bun:test'
 import {
   chmodSync,
   mkdirSync,
@@ -8,222 +8,223 @@ import {
   statSync,
   utimesSync,
   writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { cleanUp, onCleanup, setup } from "./testing.ts";
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
-afterEach(cleanUp);
+import { cleanUp, onCleanup, setup } from './testing.ts'
+
+afterEach(cleanUp)
 
 function scratchDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "tania-user-"));
-  onCleanup(() => rmSync(dir, { recursive: true, force: true }));
-  return dir;
+  const dir = mkdtempSync(join(tmpdir(), 'tania-user-'))
+  onCleanup(() => rmSync(dir, { recursive: true, force: true }))
+  return dir
 }
 
 function writeExecutable(path: string, body: string) {
-  writeFileSync(path, body);
-  chmodSync(path, 0o755);
+  writeFileSync(path, body)
+  chmodSync(path, 0o755)
 }
 
 async function run(argv: string[], env: Record<string, string>) {
-  const child = Bun.spawn(argv, { env, stdout: "pipe", stderr: "pipe", timeout: 5000 });
+  const child = Bun.spawn(argv, { env, stdout: 'pipe', stderr: 'pipe', timeout: 5000 })
   const [stdout, stderr] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
-  ]);
-  return { code: await child.exited, stdout, stderr };
+  ])
+  return { code: await child.exited, stdout, stderr }
 }
 
 async function startedHome() {
-  const { home, workbench } = setup();
-  await workbench.start();
-  return home;
+  const { home, workbench } = setup()
+  await workbench.start()
+  return home
 }
 
 function recordingStartupFiles(dir: string, label: string, extra: Record<string, string> = {}) {
-  mkdirSync(dir, { recursive: true });
-  for (const file of [".zshenv", ".zprofile", ".zshrc", ".zlogin"]) {
+  mkdirSync(dir, { recursive: true })
+  for (const file of ['.zshenv', '.zprofile', '.zshrc', '.zlogin']) {
     writeFileSync(
       join(dir, file),
-      `print -r -- ${label}${file} >> "$HOME/order"\n${extra[file] ?? ""}`,
-    );
+      `print -r -- ${label}${file} >> "$HOME/order"\n${extra[file] ?? ''}`,
+    )
   }
 }
 
-test.skipIf(!Bun.which("zsh"))(
+test.skipIf(!Bun.which('zsh'))(
   "a login zsh in a Tab reads the user's startup files in order, then puts the home's bin first and leaves ZDOTDIR unset",
   async () => {
-    const home = await startedHome();
-    const user = scratchDir();
-    recordingStartupFiles(user, "", { ".zshrc": 'PATH="/from/user/zshrc:$PATH"\n' });
+    const home = await startedHome()
+    const user = scratchDir()
+    recordingStartupFiles(user, '', { '.zshrc': 'PATH="/from/user/zshrc:$PATH"\n' })
 
     const result = await run(
-      ["zsh", "--login", "-i", "-c", 'print -r -- "$PATH"; print -r -- "${ZDOTDIR-unset}"'],
+      ['zsh', '--login', '-i', '-c', 'print -r -- "$PATH"; print -r -- "${ZDOTDIR-unset}"'],
       {
         HOME: user,
         TANIA_HOME: home,
-        ZDOTDIR: join(home, "shell/zdotdir"),
-        TANIA_USER_ZDOTDIR: "",
-        PATH: `${join(home, "bin")}:/usr/bin:/bin`,
+        ZDOTDIR: join(home, 'shell/zdotdir'),
+        TANIA_USER_ZDOTDIR: '',
+        PATH: `${join(home, 'bin')}:/usr/bin:/bin`,
       },
-    );
+    )
 
-    const [path = "", zdotdir] = result.stdout.trimEnd().split("\n").slice(-2);
-    expect(readFileSync(join(user, "order"), "utf8")).toBe(".zshenv\n.zprofile\n.zshrc\n.zlogin\n");
-    expect(path.split(":")[0]).toBe(join(home, "bin"));
-    expect(path.split(":").filter((dir) => dir === join(home, "bin"))).toHaveLength(1);
-    expect(path).toContain("/from/user/zshrc");
-    expect(zdotdir).toBe("unset");
+    const [path = '', zdotdir] = result.stdout.trimEnd().split('\n').slice(-2)
+    expect(readFileSync(join(user, 'order'), 'utf8')).toBe('.zshenv\n.zprofile\n.zshrc\n.zlogin\n')
+    expect(path.split(':')[0]).toBe(join(home, 'bin'))
+    expect(path.split(':').filter((dir) => dir === join(home, 'bin'))).toHaveLength(1)
+    expect(path).toContain('/from/user/zshrc')
+    expect(zdotdir).toBe('unset')
   },
-);
+)
 
-test.skipIf(!Bun.which("zsh"))(
-  "a user whose .zshenv moves ZDOTDIR gets the rest of the startup files from the new place and keeps it exported",
+test.skipIf(!Bun.which('zsh'))(
+  'a user whose .zshenv moves ZDOTDIR gets the rest of the startup files from the new place and keeps it exported',
   async () => {
-    const home = await startedHome();
-    const user = scratchDir();
-    recordingStartupFiles(join(user, "dots"), "dots", {
-      ".zshenv": 'ZDOTDIR="$HOME/moved"\n',
-    });
-    recordingStartupFiles(join(user, "moved"), "moved");
+    const home = await startedHome()
+    const user = scratchDir()
+    recordingStartupFiles(join(user, 'dots'), 'dots', {
+      '.zshenv': 'ZDOTDIR="$HOME/moved"\n',
+    })
+    recordingStartupFiles(join(user, 'moved'), 'moved')
 
-    const result = await run(["zsh", "--login", "-i", "-c", "printenv ZDOTDIR"], {
+    const result = await run(['zsh', '--login', '-i', '-c', 'printenv ZDOTDIR'], {
       HOME: user,
       TANIA_HOME: home,
-      ZDOTDIR: join(home, "shell/zdotdir"),
-      TANIA_USER_ZDOTDIR: join(user, "dots"),
-      PATH: `${join(home, "bin")}:/usr/bin:/bin`,
-    });
+      ZDOTDIR: join(home, 'shell/zdotdir'),
+      TANIA_USER_ZDOTDIR: join(user, 'dots'),
+      PATH: `${join(home, 'bin')}:/usr/bin:/bin`,
+    })
 
-    expect(readFileSync(join(user, "order"), "utf8")).toBe(
-      "dots.zshenv\nmoved.zprofile\nmoved.zshrc\nmoved.zlogin\n",
-    );
-    expect(result.stdout.trimEnd().split("\n").at(-1)).toBe(join(user, "moved"));
+    expect(readFileSync(join(user, 'order'), 'utf8')).toBe(
+      'dots.zshenv\nmoved.zprofile\nmoved.zshrc\nmoved.zlogin\n',
+    )
+    expect(result.stdout.trimEnd().split('\n').at(-1)).toBe(join(user, 'moved'))
   },
-);
+)
 
 async function claudeThroughWrapper(
   home: string,
   path: string,
   env: Record<string, string>,
-  args = ["--print", "hi"],
+  args = ['--print', 'hi'],
 ) {
-  return run([join(home, "bin/claude"), ...args], { PATH: path, ...env });
+  return run([join(home, 'bin/claude'), ...args], { PATH: path, ...env })
 }
 
 function realClaude(): string {
-  const dir = scratchDir();
-  writeExecutable(join(dir, "claude"), '#!/bin/sh\nprintf "%s\\n" "$@"\n');
-  return dir;
+  const dir = scratchDir()
+  writeExecutable(join(dir, 'claude'), '#!/bin/sh\nprintf "%s\\n" "$@"\n')
+  return dir
 }
 
-const inTab = { TANIA_TERMINAL_SESSION_ID: "ts-a" };
+const inTab = { TANIA_TERMINAL_SESSION_ID: 'ts-a' }
 
 test.each([
-  ["a Tab's claude gets the hook settings", inTab, ["--print", "hi"], true],
-  ["a Tab's claude started with a prompt gets them too", inTab, ["fix the bug"], true],
+  ["a Tab's claude gets the hook settings", inTab, ['--print', 'hi'], true],
+  ["a Tab's claude started with a prompt gets them too", inTab, ['fix the bug'], true],
   [
-    "a claude subcommand gets none, since claude reads a subcommand after --settings as a prompt",
+    'a claude subcommand gets none, since claude reads a subcommand after --settings as a prompt',
     inTab,
-    ["mcp", "list"],
+    ['mcp', 'list'],
     false,
   ],
   [
     "a claude started from an agent's Bash tool gets none",
-    { ...inTab, CLAUDECODE: "1" },
-    ["--print", "hi"],
+    { ...inTab, CLAUDECODE: '1' },
+    ['--print', 'hi'],
     false,
   ],
-  ["a claude outside any Tab gets none", {}, ["--print", "hi"], false],
-])("the claude wrapper runs the next claude on PATH: %s", async (_name, env, args, hooked) => {
-  const home = await startedHome();
-  const real = realClaude();
+  ['a claude outside any Tab gets none', {}, ['--print', 'hi'], false],
+])('the claude wrapper runs the next claude on PATH: %s', async (_name, env, args, hooked) => {
+  const home = await startedHome()
+  const real = realClaude()
 
   const result = await claudeThroughWrapper(
     home,
-    `${join(home, "bin")}:${real}:/usr/bin:/bin`,
+    `${join(home, 'bin')}:${real}:/usr/bin:/bin`,
     env,
     args,
-  );
+  )
 
-  const settings = ["--settings", join(home, "shell/claude/settings.json")];
-  expect(result.stdout.trimEnd().split("\n")).toEqual([...(hooked ? settings : []), ...args]);
-});
+  const settings = ['--settings', join(home, 'shell/claude/settings.json')]
+  expect(result.stdout.trimEnd().split('\n')).toEqual([...(hooked ? settings : []), ...args])
+})
 
-test("the claude wrapper reaches the real claude past another wrapper that hands back to the first claude on PATH", async () => {
-  const home = await startedHome();
-  const real = realClaude();
-  const other = scratchDir();
+test('the claude wrapper reaches the real claude past another wrapper that hands back to the first claude on PATH', async () => {
+  const home = await startedHome()
+  const real = realClaude()
+  const other = scratchDir()
   writeExecutable(
-    join(other, "claude"),
+    join(other, 'claude'),
     [
-      "#!/bin/bash",
+      '#!/bin/bash',
       'self="$(cd "$(dirname "$0")" && pwd)"',
-      "IFS=:",
+      'IFS=:',
       'for dir in $PATH; do [[ "$dir" == "$self" ]] && continue; [[ -x "$dir/claude" ]] && exec "$dir/claude" "$@"; done',
-      "exit 127",
-      "",
-    ].join("\n"),
-  );
+      'exit 127',
+      '',
+    ].join('\n'),
+  )
 
   const result = await claudeThroughWrapper(
     home,
-    `${join(home, "bin")}:${other}:${real}:/usr/bin:/bin`,
-    { TANIA_TERMINAL_SESSION_ID: "ts-a" },
-  );
+    `${join(home, 'bin')}:${other}:${real}:/usr/bin:/bin`,
+    { TANIA_TERMINAL_SESSION_ID: 'ts-a' },
+  )
 
-  expect(result.code).toBe(0);
-  expect(result.stdout.trimEnd().split("\n")).toEqual([
-    "--settings",
-    join(home, "shell/claude/settings.json"),
-    "--print",
-    "hi",
-  ]);
-});
+  expect(result.code).toBe(0)
+  expect(result.stdout.trimEnd().split('\n')).toEqual([
+    '--settings',
+    join(home, 'shell/claude/settings.json'),
+    '--print',
+    'hi',
+  ])
+})
 
-test("start rewrites only the shell files whose content drifted", async () => {
-  const { home, workbench, restartBackend } = setup();
-  await workbench.start();
-  const zshrc = join(home, "shell/zdotdir/.zshrc");
+test('start rewrites only the shell files whose content drifted', async () => {
+  const { home, workbench, restartBackend } = setup()
+  await workbench.start()
+  const zshrc = join(home, 'shell/zdotdir/.zshrc')
   const untouched = [
-    "shell/zdotdir/.zshenv",
-    "shell/zdotdir/.zprofile",
-    "shell/zdotdir/.zlogin",
-    "bin/claude",
-    "shell/claude/settings.json",
-  ].map((file) => join(home, file));
-  const written = readFileSync(zshrc, "utf8");
-  writeFileSync(zshrc, "# drifted\n");
-  const past = new Date(0);
-  for (const file of [zshrc, ...untouched]) utimesSync(file, past, past);
+    'shell/zdotdir/.zshenv',
+    'shell/zdotdir/.zprofile',
+    'shell/zdotdir/.zlogin',
+    'bin/claude',
+    'shell/claude/settings.json',
+  ].map((file) => join(home, file))
+  const written = readFileSync(zshrc, 'utf8')
+  writeFileSync(zshrc, '# drifted\n')
+  const past = new Date(0)
+  for (const file of [zshrc, ...untouched]) utimesSync(file, past, past)
 
-  await restartBackend().workbench.start();
+  await restartBackend().workbench.start()
 
-  expect(readFileSync(zshrc, "utf8")).toBe(written);
-  expect(statSync(zshrc).mtimeMs).not.toBe(0);
-  expect(untouched.map((file) => statSync(file).mtimeMs)).toEqual(untouched.map(() => 0));
-});
+  expect(readFileSync(zshrc, 'utf8')).toBe(written)
+  expect(statSync(zshrc).mtimeMs).not.toBe(0)
+  expect(untouched.map((file) => statSync(file).mtimeMs)).toEqual(untouched.map(() => 0))
+})
 
 test("a new Terminal Session is created with the Tab's env", async () => {
-  const zdotdir = process.env.ZDOTDIR;
+  const zdotdir = process.env.ZDOTDIR
   onCleanup(() => {
-    if (zdotdir === undefined) delete process.env.ZDOTDIR;
-    else process.env.ZDOTDIR = zdotdir;
-  });
-  process.env.ZDOTDIR = "/users/own/zdotdir";
-  const { home, ptyd, client } = setup();
+    if (zdotdir === undefined) delete process.env.ZDOTDIR
+    else process.env.ZDOTDIR = zdotdir
+  })
+  process.env.ZDOTDIR = '/users/own/zdotdir'
+  const { home, ptyd, client } = setup()
 
-  const { tab } = await client.runspace.create({ rows: 24, cols: 80 });
+  const { tab } = await client.runspace.create({ rows: 24, cols: 80 })
 
-  const created = await ptyd.received((op) => op.op === "create");
+  const created = await ptyd.received((op) => op.op === 'create')
   expect(created).toMatchObject({
     env: expect.arrayContaining([
-      ["TANIA_HOME", home],
-      ["TANIA_TERMINAL_SESSION_ID", tab.terminalSessionId],
-      ["ZDOTDIR", join(home, "shell/zdotdir")],
-      ["TANIA_USER_ZDOTDIR", "/users/own/zdotdir"],
-      ["PATH", `${join(home, "bin")}:${process.env.PATH}`],
+      ['TANIA_HOME', home],
+      ['TANIA_TERMINAL_SESSION_ID', tab.terminalSessionId],
+      ['ZDOTDIR', join(home, 'shell/zdotdir')],
+      ['TANIA_USER_ZDOTDIR', '/users/own/zdotdir'],
+      ['PATH', `${join(home, 'bin')}:${process.env.PATH}`],
     ]),
-  });
-});
+  })
+})

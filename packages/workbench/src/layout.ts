@@ -1,8 +1,10 @@
-import { homedir } from "node:os";
-import { ORPCError } from "@orpc/server";
-import { and, eq, notInArray } from "drizzle-orm";
-import type { Layout, Tab } from "./contract.ts";
-import { runspace, tab, terminalSession } from "./schema.ts";
+import { homedir } from 'node:os'
+
+import { ORPCError } from '@orpc/server'
+import { and, eq, notInArray } from 'drizzle-orm'
+
+import type { Layout, Tab } from './contract.ts'
+import { runspace, tab, terminalSession } from './schema.ts'
 import {
   bindNewTerminalSession,
   type Books,
@@ -13,10 +15,10 @@ import {
   type Size,
   startTerminalSession,
   type Tx,
-} from "./workbench.ts";
+} from './workbench.ts'
 
 export function readLayout(db: Db): Layout {
-  const tabs = db.select().from(tab).orderBy(tab.sortOrder).all();
+  const tabs = db.select().from(tab).orderBy(tab.sortOrder).all()
   return {
     runspaces: db
       .select()
@@ -24,84 +26,84 @@ export function readLayout(db: Db): Layout {
       .orderBy(runspace.sortOrder)
       .all()
       .map((r) => ({ ...r, tabs: tabs.filter((t) => t.runspaceId === r.id).map(asTab) })),
-  };
+  }
 }
 
 export function asTab(row: typeof tab.$inferSelect): Tab {
-  const { runspaceId: _, ...rest } = row;
-  return rest;
+  const { runspaceId: _, ...rest } = row
+  return rest
 }
 
 export function writeLayout<T>({ db, workbench }: Books, write: (tx: Tx) => T): T {
-  const written = db.transaction(write);
-  workbench.events.publish("change", { type: "layout" });
-  return written;
+  const written = db.transaction(write)
+  workbench.events.publish('change', { type: 'layout' })
+  return written
 }
 
 export function createRunspace(
   tx: Tx,
   input: { cwd: string; index?: number; owned?: boolean },
 ): string {
-  const id = `rs-${Bun.randomUUIDv7()}`;
-  const order = insertAt(runspaceIds(tx), id, input.index);
+  const id = `rs-${Bun.randomUUIDv7()}`
+  const order = insertAt(runspaceIds(tx), id, input.index)
   tx.insert(runspace)
     .values({ id, cwd: input.cwd, sortOrder: order.indexOf(id), owned: input.owned })
-    .run();
-  restack(tx, runspace, order);
-  return id;
+    .run()
+  restack(tx, runspace, order)
+  return id
 }
 
 export function refuseRemoving(tx: Tx, runspaceId: string) {
   if (runspaceOf(tx, runspaceId).owned) {
-    throw new ORPCError("CONFLICT", {
+    throw new ORPCError('CONFLICT', {
       message: `Runspace ${runspaceId} is owned by another domain`,
-    });
+    })
   }
   if (pinnedTabOf(tx, runspaceId)) {
-    throw new ORPCError("CONFLICT", { message: `Runspace ${runspaceId} holds a pinned Tab` });
+    throw new ORPCError('CONFLICT', { message: `Runspace ${runspaceId} holds a pinned Tab` })
   }
 }
 
 /** `spare` の Terminal Session の Tab が中にあれば、Runspace を消さずに所有を解いてその Tab だけを残す。 */
 export function removeRunspace(tx: Tx, id: string, { spare = [] }: { spare?: string[] } = {}) {
-  runspaceOf(tx, id);
+  runspaceOf(tx, id)
   const tabs = tx
     .select({ id: tab.id, terminalSessionId: tab.terminalSessionId })
     .from(tab)
     .where(eq(tab.runspaceId, id))
     .orderBy(tab.sortOrder)
-    .all();
-  const kept = tabs.filter((t) => spare.includes(t.terminalSessionId));
-  const removed = tabs.filter((t) => !kept.includes(t));
+    .all()
+  const kept = tabs.filter((t) => spare.includes(t.terminalSessionId))
+  const removed = tabs.filter((t) => !kept.includes(t))
   if (kept.length === 0) {
-    deleteRunspace(tx, id);
-    return removed.map((t) => t.terminalSessionId);
+    deleteRunspace(tx, id)
+    return removed.map((t) => t.terminalSessionId)
   }
-  const keptIds = kept.map((t) => t.id);
+  const keptIds = kept.map((t) => t.id)
   tx.delete(tab)
     .where(and(eq(tab.runspaceId, id), notInArray(tab.id, keptIds)))
-    .run();
-  tx.update(runspace).set({ owned: false }).where(eq(runspace.id, id)).run();
-  restack(tx, tab, keptIds);
-  return removed.map((t) => t.terminalSessionId);
+    .run()
+  tx.update(runspace).set({ owned: false }).where(eq(runspace.id, id)).run()
+  restack(tx, tab, keptIds)
+  return removed.map((t) => t.terminalSessionId)
 }
 
 export function moveRunspace(tx: Tx, input: { id: string; index: number }) {
-  runspaceOf(tx, input.id);
-  restack(tx, runspace, insertAt(runspaceIds(tx), input.id, input.index));
+  runspaceOf(tx, input.id)
+  restack(tx, runspace, insertAt(runspaceIds(tx), input.id, input.index))
 }
 
 export function openTab(
   tx: Tx,
   input: { runspaceId: string; cwd?: string; index?: number; shell: string },
 ) {
-  const cwd = input.cwd ?? runspaceOf(tx, input.runspaceId).cwd;
+  const cwd = input.cwd ?? runspaceOf(tx, input.runspaceId).cwd
   return attachTab(tx, {
     runspaceId: input.runspaceId,
     cwd,
     index: input.index,
     terminalSessionId: insertTerminalSession(tx, { cwd, shell: input.shell }),
-  });
+  })
 }
 
 export function reattachTab(
@@ -113,109 +115,109 @@ export function reattachTab(
     .from(terminalSession)
     .leftJoin(tab, eq(tab.terminalSessionId, terminalSession.id))
     .where(eq(terminalSession.id, input.terminalSessionId))
-    .get();
+    .get()
   if (!row) {
-    throw new ORPCError("NOT_FOUND", { message: `no Terminal Session ${input.terminalSessionId}` });
+    throw new ORPCError('NOT_FOUND', { message: `no Terminal Session ${input.terminalSessionId}` })
   }
   if (row.tabId !== null || !isLive(row.status)) {
-    throw new ORPCError("CONFLICT", {
+    throw new ORPCError('CONFLICT', {
       message: `Terminal Session ${input.terminalSessionId} is not detached`,
-    });
+    })
   }
   return attachTab(tx, {
     runspaceId: input.runspaceId,
     cwd: input.cwd ?? row.cwd,
     index: input.index,
     terminalSessionId: input.terminalSessionId,
-  });
+  })
 }
 
 export function moveTab(tx: Tx, input: { id: string; runspaceId: string; index?: number }) {
-  const moved = tabOf(tx, input.id);
-  runspaceOf(tx, input.runspaceId);
-  const pinned = moved.pinned && moved.runspaceId === input.runspaceId;
+  const moved = tabOf(tx, input.id)
+  runspaceOf(tx, input.runspaceId)
+  const pinned = moved.pinned && moved.runspaceId === input.runspaceId
   // 移る先に pin された Tab があっても部分 unique index に当たらないよう、pin は同じ UPDATE で外す。
-  tx.update(tab).set({ runspaceId: input.runspaceId, pinned }).where(eq(tab.id, input.id)).run();
-  restack(tx, tab, insertAt(tabIds(tx, input.runspaceId), input.id, input.index));
-  if (moved.runspaceId !== input.runspaceId) afterTabLeft(tx, moved.runspaceId);
+  tx.update(tab).set({ runspaceId: input.runspaceId, pinned }).where(eq(tab.id, input.id)).run()
+  restack(tx, tab, insertAt(tabIds(tx, input.runspaceId), input.id, input.index))
+  if (moved.runspaceId !== input.runspaceId) afterTabLeft(tx, moved.runspaceId)
 }
 
 export function closeTab(tx: Tx, id: string) {
-  const closed = tabOf(tx, id);
-  if (closed.pinned) throw new ORPCError("CONFLICT", { message: `Tab ${id} is pinned` });
-  tx.delete(tab).where(eq(tab.id, id)).run();
-  afterTabLeft(tx, closed.runspaceId);
+  const closed = tabOf(tx, id)
+  if (closed.pinned) throw new ORPCError('CONFLICT', { message: `Tab ${id} is pinned` })
+  tx.delete(tab).where(eq(tab.id, id)).run()
+  afterTabLeft(tx, closed.runspaceId)
 }
 
 export function pinTab(tx: Tx, id: string) {
-  const target = tabOf(tx, id);
-  const holder = pinnedTabOf(tx, target.runspaceId);
+  const target = tabOf(tx, id)
+  const holder = pinnedTabOf(tx, target.runspaceId)
   if (holder) {
-    tx.update(tab).set({ pinned: false }).where(eq(tab.id, holder.id)).run();
+    tx.update(tab).set({ pinned: false }).where(eq(tab.id, holder.id)).run()
   } else if (!runspaceOf(tx, target.runspaceId).owned && tabIds(tx, target.runspaceId).length > 1) {
-    moveTab(tx, { id, runspaceId: createRunspace(tx, { cwd: target.cwd }) });
+    moveTab(tx, { id, runspaceId: createRunspace(tx, { cwd: target.cwd }) })
   }
-  tx.update(tab).set({ pinned: true }).where(eq(tab.id, id)).run();
+  tx.update(tab).set({ pinned: true }).where(eq(tab.id, id)).run()
 }
 
 export function unpinTab(tx: Tx, id: string) {
-  tabOf(tx, id);
-  tx.update(tab).set({ pinned: false }).where(eq(tab.id, id)).run();
+  tabOf(tx, id)
+  tx.update(tab).set({ pinned: false }).where(eq(tab.id, id)).run()
 }
 
 // title から取った cwd は `~` で始まるが、帳簿の cwd は git や fs にそのまま渡すので絶対 path にする。
 export function setTabCwd(tx: Tx, input: { id: string; cwd: string }) {
-  tabOf(tx, input.id);
+  tabOf(tx, input.id)
   const cwd =
-    input.cwd === "~" || input.cwd.startsWith("~/") ? homedir() + input.cwd.slice(1) : input.cwd;
-  tx.update(tab).set({ cwd }).where(eq(tab.id, input.id)).run();
+    input.cwd === '~' || input.cwd.startsWith('~/') ? homedir() + input.cwd.slice(1) : input.cwd
+  tx.update(tab).set({ cwd }).where(eq(tab.id, input.id)).run()
 }
 
 export async function respawnTab(books: Books, id: string, size: Size) {
-  const shell = await shellWhenReady(books.workbench);
+  const shell = await shellWhenReady(books.workbench)
   const respawned = writeLayout(books, (tx) => {
-    const { cwd, terminalSessionId } = tabOf(tx, id);
+    const { cwd, terminalSessionId } = tabOf(tx, id)
     const { status } = tx
       .select({ status: terminalSession.status })
       .from(terminalSession)
       .where(eq(terminalSession.id, terminalSessionId))
-      .get()!;
+      .get()!
     if (isLive(status)) {
-      throw new ORPCError("CONFLICT", { message: `Tab ${id} still shows a live Terminal Session` });
+      throw new ORPCError('CONFLICT', { message: `Tab ${id} still shows a live Terminal Session` })
     }
-    return bindNewTerminalSession(tx, { id, cwd }, shell);
-  });
-  await startTerminalSession(books.workbench, respawned.terminalSessionId, size);
-  return respawned;
+    return bindNewTerminalSession(tx, { id, cwd }, shell)
+  })
+  await startTerminalSession(books.workbench, respawned.terminalSessionId, size)
+  return respawned
 }
 
 function attachTab(
   tx: Tx,
   input: { runspaceId: string; cwd: string; index?: number; terminalSessionId: string },
 ) {
-  const { runspaceId, cwd, terminalSessionId } = input;
-  runspaceOf(tx, runspaceId);
-  const id = `tab-${Bun.randomUUIDv7()}`;
-  const order = insertAt(tabIds(tx, runspaceId), id, input.index);
+  const { runspaceId, cwd, terminalSessionId } = input
+  runspaceOf(tx, runspaceId)
+  const id = `tab-${Bun.randomUUIDv7()}`
+  const order = insertAt(tabIds(tx, runspaceId), id, input.index)
   const attached = tx
     .insert(tab)
     .values({ id, runspaceId, cwd, sortOrder: order.indexOf(id), terminalSessionId })
     .returning()
-    .get();
-  restack(tx, tab, order);
-  return attached;
+    .get()
+  restack(tx, tab, order)
+  return attached
 }
 
 function runspaceOf(tx: Tx, id: string) {
-  const found = tx.select().from(runspace).where(eq(runspace.id, id)).get();
-  if (!found) throw new ORPCError("NOT_FOUND", { message: `no Runspace ${id}` });
-  return found;
+  const found = tx.select().from(runspace).where(eq(runspace.id, id)).get()
+  if (!found) throw new ORPCError('NOT_FOUND', { message: `no Runspace ${id}` })
+  return found
 }
 
 function tabOf(tx: Tx, id: string) {
-  const found = tx.select().from(tab).where(eq(tab.id, id)).get();
-  if (!found) throw new ORPCError("NOT_FOUND", { message: `no Tab ${id}` });
-  return found;
+  const found = tx.select().from(tab).where(eq(tab.id, id)).get()
+  if (!found) throw new ORPCError('NOT_FOUND', { message: `no Tab ${id}` })
+  return found
 }
 
 function pinnedTabOf(tx: Tx, runspaceId: string) {
@@ -223,19 +225,19 @@ function pinnedTabOf(tx: Tx, runspaceId: string) {
     .select({ id: tab.id })
     .from(tab)
     .where(and(eq(tab.runspaceId, runspaceId), eq(tab.pinned, true)))
-    .get();
+    .get()
 }
 
 // 所有されていない Runspace は Tab を 1 つ以上持つので、最後の Tab が抜けたら Runspace ごと消す。
 function afterTabLeft(tx: Tx, runspaceId: string) {
-  const rest = tabIds(tx, runspaceId);
-  if (rest.length > 0) restack(tx, tab, rest);
-  else if (!runspaceOf(tx, runspaceId).owned) deleteRunspace(tx, runspaceId);
+  const rest = tabIds(tx, runspaceId)
+  if (rest.length > 0) restack(tx, tab, rest)
+  else if (!runspaceOf(tx, runspaceId).owned) deleteRunspace(tx, runspaceId)
 }
 
 function deleteRunspace(tx: Tx, id: string) {
-  tx.delete(runspace).where(eq(runspace.id, id)).run();
-  restack(tx, runspace, runspaceIds(tx));
+  tx.delete(runspace).where(eq(runspace.id, id)).run()
+  restack(tx, runspace, runspaceIds(tx))
 }
 
 function runspaceIds(tx: Tx): string[] {
@@ -244,7 +246,7 @@ function runspaceIds(tx: Tx): string[] {
     .from(runspace)
     .orderBy(runspace.sortOrder)
     .all()
-    .map((r) => r.id);
+    .map((r) => r.id)
 }
 
 function tabIds(tx: Tx, runspaceId: string): string[] {
@@ -254,17 +256,17 @@ function tabIds(tx: Tx, runspaceId: string): string[] {
     .where(eq(tab.runspaceId, runspaceId))
     .orderBy(tab.sortOrder)
     .all()
-    .map((t) => t.id);
+    .map((t) => t.id)
 }
 
 function insertAt(siblings: string[], id: string, index: number | undefined): string[] {
-  const order = siblings.filter((sibling) => sibling !== id);
-  order.splice(index ?? order.length, 0, id);
-  return order;
+  const order = siblings.filter((sibling) => sibling !== id)
+  order.splice(index ?? order.length, 0, id)
+  return order
 }
 
 function restack(tx: Tx, table: typeof runspace | typeof tab, order: string[]) {
   order.forEach((id, sortOrder) => {
-    tx.update(table).set({ sortOrder }).where(eq(table.id, id)).run();
-  });
+    tx.update(table).set({ sortOrder }).where(eq(table.id, id)).run()
+  })
 }

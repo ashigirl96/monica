@@ -2,13 +2,13 @@
 export function table(rows: string[][]): string {
   const widths = rows[0]!.map((_, column) =>
     Math.max(...rows.map((row) => Bun.stringWidth(row[column]!))),
-  );
+  )
   return rows
     .map((row) =>
       row
-        .map((cell, column) => cell + " ".repeat(widths[column]! - Bun.stringWidth(cell)))
-        .join("  ")
+        .map((cell, column) => cell + ' '.repeat(widths[column]! - Bun.stringWidth(cell)))
+        .join('  ')
         .trimEnd(),
     )
-    .join("\n");
+    .join('\n')
 }

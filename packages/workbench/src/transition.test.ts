@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test";
-import type { AgentSession } from "./contract.ts";
+import { describe, expect, test } from 'bun:test'
+
+import type { AgentSession } from './contract.ts'
 import {
   type AgentEvent,
   type HookEvent,
@@ -8,10 +9,10 @@ import {
   supersede,
   takesOverTerminal,
   transition,
-} from "./transition.ts";
+} from './transition.ts'
 
-const BEFORE = new Date(1_000);
-const NOW = new Date(2_000);
+const BEFORE = new Date(1_000)
+const NOW = new Date(2_000)
 
 const blank = {
   waitReason: null,
@@ -21,44 +22,44 @@ const blank = {
   sessionEndReason: null,
   endedAt: null,
   unobservedSince: null,
-} satisfies Partial<AgentSession>;
+} satisfies Partial<AgentSession>
 
-type StateFields = Partial<AgentSession>;
+type StateFields = Partial<AgentSession>
 
-const running: StateFields = { state: "running" };
-const idle: StateFields = { state: "waiting", waitReason: "idle" };
-const question: StateFields = { state: "waiting", waitReason: "question" };
+const running: StateFields = { state: 'running' }
+const idle: StateFields = { state: 'waiting', waitReason: 'idle' }
+const question: StateFields = { state: 'waiting', waitReason: 'question' }
 
 const prior = {
   running,
-  unobserved: { state: "unobserved", unobservedSince: BEFORE },
+  unobserved: { state: 'unobserved', unobservedSince: BEFORE },
   idle,
   question,
-  permission: { state: "waiting", waitReason: "permission", waitTool: "Edit" },
-  error: { state: "waiting", waitReason: "error", errorType: "rate_limit" },
+  permission: { state: 'waiting', waitReason: 'permission', waitTool: 'Edit' },
+  error: { state: 'waiting', waitReason: 'error', errorType: 'rate_limit' },
   ended: {
-    state: "ended",
-    endReason: "session_end",
-    sessionEndReason: "prompt_input_exit",
+    state: 'ended',
+    endReason: 'session_end',
+    sessionEndReason: 'prompt_input_exit',
     endedAt: BEFORE,
   },
-} satisfies Record<string, StateFields>;
+} satisfies Record<string, StateFields>
 
 function rowIn(state: keyof typeof prior, overrides: Partial<AgentSession> = {}): AgentSession {
   return {
-    sessionId: "s-1",
-    terminalSessionId: "ts-a",
+    sessionId: 's-1',
+    terminalSessionId: 'ts-a',
     ...blank,
     ...prior[state],
-    cwd: "/work",
-    transcriptPath: "/transcripts/s-1.jsonl",
-    permissionMode: "default",
-    lastEventName: "Earlier",
+    cwd: '/work',
+    transcriptPath: '/transcripts/s-1.jsonl',
+    permissionMode: 'default',
+    lastEventName: 'Earlier',
     lastEventAt: BEFORE,
     stateChangedAt: BEFORE,
     firstSeenAt: BEFORE,
     ...overrides,
-  } as AgentSession;
+  } as AgentSession
 }
 
 function hook(
@@ -67,50 +68,50 @@ function hook(
   overrides: Partial<HookEvent> = {},
 ): HookEvent {
   return {
-    sessionId: "s-1",
-    terminalSessionId: "ts-a",
+    sessionId: 's-1',
+    terminalSessionId: 'ts-a',
     hookEventName,
-    cwd: "/work",
-    transcriptPath: "/transcripts/s-1.jsonl",
-    permissionMode: "default",
+    cwd: '/work',
+    transcriptPath: '/transcripts/s-1.jsonl',
+    permissionMode: 'default',
     ...signal,
     ...overrides,
-  } as HookEvent;
+  } as HookEvent
 }
 
 // to: 新しい状態か理由に入り、state_changed_at が今になる。stay: state_changed_at は動かず、fields だけを上書きする。
-type Cell = { moved: boolean; fields: StateFields } | null;
-const to = (fields: StateFields): Cell => ({ moved: true, fields });
-const stay = (fields: StateFields = {}): Cell => ({ moved: false, fields });
-const ignored: Cell = null;
+type Cell = { moved: boolean; fields: StateFields } | null
+const to = (fields: StateFields): Cell => ({ moved: true, fields })
+const stay = (fields: StateFields = {}): Cell => ({ moved: false, fields })
+const ignored: Cell = null
 
-const inB: StateFields = { terminalSessionId: "ts-b" };
-const idleInB: StateFields = { ...idle, ...inB };
-const runningInB: StateFields = { ...running, ...inB };
+const inB: StateFields = { terminalSessionId: 'ts-b' }
+const idleInB: StateFields = { ...idle, ...inB }
+const runningInB: StateFields = { ...running, ...inB }
 const permissionForBash: StateFields = {
-  state: "waiting",
-  waitReason: "permission",
-  waitTool: "Bash",
-};
+  state: 'waiting',
+  waitReason: 'permission',
+  waitTool: 'Bash',
+}
 const serverError: StateFields = {
-  state: "waiting",
-  waitReason: "error",
-  errorType: "server_error",
-};
+  state: 'waiting',
+  waitReason: 'error',
+  errorType: 'server_error',
+}
 const endedBySessionEnd: StateFields = {
-  state: "ended",
-  endReason: "session_end",
-  sessionEndReason: "other",
+  state: 'ended',
+  endReason: 'session_end',
+  sessionEndReason: 'other',
   endedAt: NOW,
-};
+}
 const endedWithTerminal: StateFields = {
-  state: "ended",
-  endReason: "terminal_exited",
+  state: 'ended',
+  endReason: 'terminal_exited',
   endedAt: NOW,
-};
-const unobserved: StateFields = { state: "unobserved", unobservedSince: NOW };
+}
+const unobserved: StateFields = { state: 'unobserved', unobservedSince: NOW }
 
-const columns = [...(Object.keys(prior) as (keyof typeof prior)[]), "unknown"] as const;
+const columns = [...(Object.keys(prior) as (keyof typeof prior)[]), 'unknown'] as const
 
 // 列は今の行の状態。unknown は session_id が帳簿に無い（行を動作中で作ってから当てる）。
 // prettier-ignore
@@ -146,14 +147,14 @@ const table: [string, AgentEvent, Cell[]][] = [
                                                                                     [to(endedWithTerminal), to(endedWithTerminal), to(endedWithTerminal), to(endedWithTerminal), to(endedWithTerminal), to(endedWithTerminal), ignored, ignored]],
   ["the Backend restarted while the Terminal Session lived", { type: "backendRestarted" },
                                                                                     [to(unobserved),       ignored,              ignored,              ignored,              ignored,              ignored,              ignored,              ignored]],
-];
+]
 
 function firstSeen(event: HookEvent): AgentSession {
   return {
     sessionId: event.sessionId,
     terminalSessionId: event.terminalSessionId,
     ...blank,
-    state: "running",
+    state: 'running',
     cwd: event.cwd,
     transcriptPath: event.transcriptPath,
     permissionMode: event.permissionMode,
@@ -161,100 +162,100 @@ function firstSeen(event: HookEvent): AgentSession {
     lastEventAt: NOW,
     stateChangedAt: NOW,
     firstSeenAt: NOW,
-  };
+  }
 }
 
 function expectedRow(prev: AgentSession | null, event: AgentEvent, cell: Cell) {
-  if (!cell) return null;
-  const observed = "sessionId" in event ? event : null;
+  if (!cell) return null
+  const observed = 'sessionId' in event ? event : null
   return {
     ...(prev ?? firstSeen(observed!)),
     ...(observed && { lastEventName: observed.hookEventName, lastEventAt: NOW }),
     ...(cell.moved && { ...blank, stateChangedAt: NOW }),
     ...cell.fields,
-  };
+  }
 }
 
-describe.each(table)("%s", (_name, event, cells) => {
-  test.each(columns.map((column, i) => [column, cells[i]!] as const))("from %s", (column, cell) => {
-    const prev = column === "unknown" ? null : rowIn(column);
+describe.each(table)('%s', (_name, event, cells) => {
+  test.each(columns.map((column, i) => [column, cells[i]!] as const))('from %s', (column, cell) => {
+    const prev = column === 'unknown' ? null : rowIn(column)
 
-    expect(transition(prev, event, NOW)).toEqual(expectedRow(prev, event, cell));
-  });
-});
+    expect(transition(prev, event, NOW)).toEqual(expectedRow(prev, event, cell))
+  })
+})
 
-describe("a session that takes over its Terminal Session", () => {
-  const prompt = hook("UserPromptSubmit", { type: "promptSubmitted" });
+describe('a session that takes over its Terminal Session', () => {
+  const prompt = hook('UserPromptSubmit', { type: 'promptSubmitted' })
 
   test.each([
     [
-      "any SessionStart",
-      rowIn("running"),
-      hook("SessionStart", { type: "sessionStarted", compacted: true }),
+      'any SessionStart',
+      rowIn('running'),
+      hook('SessionStart', { type: 'sessionStarted', compacted: true }),
       true,
     ],
-    ["the first hook of a session the books do not know", null, prompt, true],
-    ["a hook reviving a session that had ended there", rowIn("ended"), prompt, true],
+    ['the first hook of a session the books do not know', null, prompt, true],
+    ['a hook reviving a session that had ended there', rowIn('ended'), prompt, true],
     [
-      "a hook of a session that comes from another Terminal Session",
-      rowIn("idle", { terminalSessionId: "ts-b" }),
+      'a hook of a session that comes from another Terminal Session',
+      rowIn('idle', { terminalSessionId: 'ts-b' }),
       prompt,
       true,
     ],
-    ["a hook of a session already live there", rowIn("idle"), prompt, false],
+    ['a hook of a session already live there', rowIn('idle'), prompt, false],
     [
-      "a late Stop to a session that had ended",
-      rowIn("ended"),
-      hook("Stop", { type: "turnStopped", agentWorkRunning: false }),
+      'a late Stop to a session that had ended',
+      rowIn('ended'),
+      hook('Stop', { type: 'turnStopped', agentWorkRunning: false }),
       false,
     ],
     [
-      "a SessionEnd of a session that comes from another Terminal Session",
-      rowIn("idle", { terminalSessionId: "ts-b" }),
-      hook("SessionEnd", { type: "sessionEnded", reason: "other" }),
+      'a SessionEnd of a session that comes from another Terminal Session',
+      rowIn('idle', { terminalSessionId: 'ts-b' }),
+      hook('SessionEnd', { type: 'sessionEnded', reason: 'other' }),
       false,
     ],
-  ] as const)("is %s: %p", (_name, before, event, expected) => {
-    expect(takesOverTerminal(before, transition(before, event, NOW), event)).toBe(expected);
-  });
+  ] as const)('is %s: %p', (_name, before, event, expected) => {
+    expect(takesOverTerminal(before, transition(before, event, NOW), event)).toBe(expected)
+  })
 
-  test.each(["running", "unobserved", "idle", "question", "permission", "error"] as const)(
-    "ends the other live Agent Session there as superseded from %s",
+  test.each(['running', 'unobserved', 'idle', 'question', 'permission', 'error'] as const)(
+    'ends the other live Agent Session there as superseded from %s',
     (state) => {
-      const prev = rowIn(state, { sessionId: "s-2" });
+      const prev = rowIn(state, { sessionId: 's-2' })
 
       expect(supersede(prev, NOW)).toEqual({
         ...prev,
         ...blank,
-        state: "ended",
-        endReason: "superseded",
+        state: 'ended',
+        endReason: 'superseded',
         endedAt: NOW,
         stateChangedAt: NOW,
-      });
+      })
     },
-  );
-});
+  )
+})
 
-test("a hook refreshes the cwd, and keeps the last known permission mode when it carries none", () => {
+test('a hook refreshes the cwd, and keeps the last known permission mode when it carries none', () => {
   const moved = hook(
-    "UserPromptSubmit",
-    { type: "promptSubmitted" },
-    { cwd: "/elsewhere", permissionMode: "plan" },
-  );
+    'UserPromptSubmit',
+    { type: 'promptSubmitted' },
+    { cwd: '/elsewhere', permissionMode: 'plan' },
+  )
   const modeless = hook(
-    "SessionEnd",
-    { type: "sessionEnded", reason: "other" },
+    'SessionEnd',
+    { type: 'sessionEnded', reason: 'other' },
     { permissionMode: null },
-  );
+  )
 
-  expect(transition(rowIn("idle"), moved, NOW)).toMatchObject({
-    cwd: "/elsewhere",
-    permissionMode: "plan",
-  });
+  expect(transition(rowIn('idle'), moved, NOW)).toMatchObject({
+    cwd: '/elsewhere',
+    permissionMode: 'plan',
+  })
   expect(
-    transition(rowIn("running", { permissionMode: "plan" }), modeless, NOW)?.permissionMode,
-  ).toBe("plan");
-});
+    transition(rowIn('running', { permissionMode: 'plan' }), modeless, NOW)?.permissionMode,
+  ).toBe('plan')
+})
 
 // 列は transition の表と同じ今の行の状態。値は通知の本文で、null は出さない。
 // prettier-ignore
@@ -286,16 +287,16 @@ const notifications: [string, HookEvent, (string | null)[]][] = [
                                                                                     ["エラー",             "エラー",             "エラー",             "エラー",             "エラー",             null,                 null,                 "エラー"]],
   ["SessionEnd(other)", hook("SessionEnd", { type: "sessionEnded", reason: "other" }),
                                                                                     [null,                 null,                 null,                 null,                 null,                 null,                 null,                 null]],
-];
+]
 
-describe.each(notifications)("notifying on %s", (_name, event, bodies) => {
+describe.each(notifications)('notifying on %s', (_name, event, bodies) => {
   test.each(columns.map((column, i) => [column, bodies[i]!] as const))(
-    "from %s",
+    'from %s',
     (column, body) => {
-      const prev = column === "unknown" ? null : rowIn(column);
-      const next = transition(prev, event, NOW);
+      const prev = column === 'unknown' ? null : rowIn(column)
+      const next = transition(prev, event, NOW)
 
-      expect(next && notificationFor(prev, event, next)).toBe(body);
+      expect(next && notificationFor(prev, event, next)).toBe(body)
     },
-  );
-});
+  )
+})

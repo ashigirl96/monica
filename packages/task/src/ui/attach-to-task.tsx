@@ -4,20 +4,21 @@ import {
   PopoverMenuItem,
   PopoverMenuSeparator,
   pushErrorToast,
-} from "@tania/ui";
-import type { MenuTab, TabMenuItems } from "@tania/workbench/ui";
-import { useCallback, useEffect, useState } from "react";
-import type { CurrentOutput, ListItem } from "../contract.ts";
-import { taskLabel } from "../label.ts";
-import { stateText } from "../state-text.ts";
-import { attachChoices } from "./attach-choices.ts";
-import type { TaskClient } from "./runspace-labels.tsx";
+} from '@tania/ui'
+import type { MenuTab, TabMenuItems } from '@tania/workbench/ui'
+import { useCallback, useEffect, useState } from 'react'
+
+import type { CurrentOutput, ListItem } from '../contract.ts'
+import { taskLabel } from '../label.ts'
+import { stateText } from '../state-text.ts'
+import { attachChoices } from './attach-choices.ts'
+import type { TaskClient } from './runspace-labels.tsx'
 
 export function useTabMenuItems(client: TaskClient | null): TabMenuItems {
   return useCallback(
     (tab, close) => client && <AttachToTask client={client} tab={tab} close={close} />,
     [client],
-  );
+  )
 }
 
 // 項目を出すかは Tab の claude がどの Task の Run かで決まるので、メニューを開くたびに読む。
@@ -26,36 +27,36 @@ function AttachToTask({
   tab,
   close,
 }: {
-  client: TaskClient;
-  tab: MenuTab;
-  close: () => void;
+  client: TaskClient
+  tab: MenuTab
+  close: () => void
 }) {
-  const [choices, setChoices] = useState<ListItem[] | null>(null);
-  const [picker, setPicker] = useState<PopoverAnchor | null>(null);
+  const [choices, setChoices] = useState<ListItem[] | null>(null)
+  const [picker, setPicker] = useState<PopoverAnchor | null>(null)
 
   useEffect(() => {
-    const controller = new AbortController();
-    const { signal } = controller;
+    const controller = new AbortController()
+    const { signal } = controller
     Promise.all([
       client.list({}, { signal }),
       taskOfTab(client, tab.terminalSessionId, signal),
     ]).then(
       ([listed, tabTask]) => setChoices(attachChoices(listed.tasks, tabTask)),
       (error: unknown) => {
-        if (!signal.aborted) console.warn("task list failed:", error);
+        if (!signal.aborted) console.warn('task list failed:', error)
       },
-    );
-    return () => controller.abort();
-  }, [client, tab.terminalSessionId]);
+    )
+    return () => controller.abort()
+  }, [client, tab.terminalSessionId])
 
-  if (!choices) return null;
+  if (!choices) return null
 
   async function attach(ref: string) {
-    close();
+    close()
     try {
-      await client.attach({ ref, terminalSessionId: tab.terminalSessionId });
+      await client.attach({ ref, terminalSessionId: tab.terminalSessionId })
     } catch (error) {
-      pushErrorToast(error instanceof Error ? error.message : String(error));
+      pushErrorToast(error instanceof Error ? error.message : String(error))
     }
   }
 
@@ -64,8 +65,8 @@ function AttachToTask({
       <PopoverMenuSeparator />
       <PopoverMenuItem
         onClick={(e) => {
-          const { top, bottom, left } = e.currentTarget.getBoundingClientRect();
-          setPicker({ top, bottom, left });
+          const { top, bottom, left } = e.currentTarget.getBoundingClientRect()
+          setPicker({ top, bottom, left })
         }}
       >
         Attach to Task…
@@ -97,7 +98,7 @@ function AttachToTask({
         </PopoverMenu>
       )}
     </>
-  );
+  )
 }
 
 // Tab の claude がどの Run でもなく、Tab が Bench にも無ければ、current は NOT_FOUND で答える。
@@ -108,13 +109,13 @@ function taskOfTab(
 ): Promise<CurrentOutput | null> {
   return client.current({ terminalSessionId }, { signal }).catch((error: unknown) => {
     if (
-      typeof error === "object" &&
+      typeof error === 'object' &&
       error !== null &&
-      "code" in error &&
-      error.code === "NOT_FOUND"
+      'code' in error &&
+      error.code === 'NOT_FOUND'
     ) {
-      return null;
+      return null
     }
-    throw error;
-  });
+    throw error
+  })
 }

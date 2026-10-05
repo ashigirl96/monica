@@ -1,13 +1,13 @@
-import { cn, PinIcon, useDragReorder } from "@tania/ui";
-import { useAtomValue, useSetAtom } from "jotai";
-import { type ReactNode, useState } from "react";
-import type { TerminalSession } from "../contract.ts";
-import { shortPath } from "../paths.ts";
-import type { AgentDot } from "./agent-dot.ts";
-import { AgentDotMark } from "./agent-dot-mark.tsx";
-import { JumpHint } from "./jump-hint.tsx";
-import { jumpHintTargetsAtom } from "./jump-hints.ts";
-import { detachedTerminalSessionsAtom } from "./terminal-sessions.ts";
+import { cn, PinIcon, useDragReorder } from '@tania/ui'
+import { useAtomValue, useSetAtom } from 'jotai'
+import { type ReactNode, useState } from 'react'
+
+import type { TerminalSession } from '../contract.ts'
+import { shortPath } from '../paths.ts'
+import { AgentDotMark } from './agent-dot-mark.tsx'
+import type { AgentDot } from './agent-dot.ts'
+import { JumpHint } from './jump-hint.tsx'
+import { jumpHintTargetsAtom } from './jump-hints.ts'
 import {
   activateRunspaceAtom,
   agentDotOfTerminalSessionAtom,
@@ -18,7 +18,8 @@ import {
   reorderRunspacesAtom,
   runspaceSummariesAtom,
   type RunspaceSummary,
-} from "./store.ts";
+} from './store.ts'
+import { detachedTerminalSessionsAtom } from './terminal-sessions.ts'
 
 function DetachedTerminalSessionItem({
   terminalSession,
@@ -26,10 +27,10 @@ function DetachedTerminalSessionItem({
   onReattach,
   onTerminate,
 }: {
-  terminalSession: TerminalSession;
-  agentDot: AgentDot | null;
-  onReattach: () => void;
-  onTerminate: () => void;
+  terminalSession: TerminalSession
+  agentDot: AgentDot | null
+  onReattach: () => void
+  onTerminate: () => void
 }) {
   return (
     <div className="group flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-muted-foreground">
@@ -55,10 +56,10 @@ function DetachedTerminalSessionItem({
         Kill
       </button>
     </div>
-  );
+  )
 }
 
-export type RenderRunspaceLabel = (runspaceId: string) => ReactNode;
+export type RenderRunspaceLabel = (runspaceId: string) => ReactNode
 
 function RunspaceItem({
   runspace,
@@ -67,47 +68,47 @@ function RunspaceItem({
   hint,
   renderLabel,
 }: {
-  runspace: RunspaceSummary;
-  dragHandlers: ReturnType<ReturnType<typeof useDragReorder>["handlersFor"]>;
-  isDragOver: boolean;
-  hint?: string;
-  renderLabel?: RenderRunspaceLabel;
+  runspace: RunspaceSummary
+  dragHandlers: ReturnType<ReturnType<typeof useDragReorder>['handlersFor']>
+  isDragOver: boolean
+  hint?: string
+  renderLabel?: RenderRunspaceLabel
 }) {
-  const draggedTabId = useAtomValue(draggedTabIdAtom);
-  const moveTab = useSetAtom(moveTabToRunspaceAtom);
-  const [tabOver, setTabOver] = useState(false);
+  const draggedTabId = useAtomValue(draggedTabIdAtom)
+  const moveTab = useSetAtom(moveTabToRunspaceAtom)
+  const [tabOver, setTabOver] = useState(false)
 
   return (
     <button
       {...dragHandlers}
       onPointerEnter={() => {
-        dragHandlers.onPointerEnter();
-        setTabOver(true);
+        dragHandlers.onPointerEnter()
+        setTabOver(true)
       }}
       onPointerLeave={() => {
-        dragHandlers.onPointerLeave();
-        setTabOver(false);
+        dragHandlers.onPointerLeave()
+        setTabOver(false)
       }}
       onPointerUp={() => {
-        if (draggedTabId) void moveTab(draggedTabId, runspace.id);
+        if (draggedTabId) void moveTab(draggedTabId, runspace.id)
       }}
       data-runspace-id={runspace.id}
       className={cn(
-        "flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left",
-        "transition-colors duration-100",
-        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/30",
+        'flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left',
+        'transition-colors duration-100',
+        'focus-visible:ring-1 focus-visible:ring-white/30 focus-visible:outline-none',
         runspace.isActive
-          ? "bg-white/[0.1] text-foreground focus-visible:ring-white/50"
-          : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground",
-        (isDragOver || (tabOver && draggedTabId)) && "ring-1 ring-sky-400/60",
+          ? 'bg-white/[0.1] text-foreground focus-visible:ring-white/50'
+          : 'text-muted-foreground hover:bg-white/[0.06] hover:text-foreground',
+        (isDragOver || (tabOver && draggedTabId)) && 'ring-1 ring-sky-400/60',
       )}
     >
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex items-start gap-1.5">
           {hint && <JumpHint hint={hint} ctrl />}
           {runspace.holdsPin && <PinIcon size={14} className="shrink-0 text-rose-400" />}
-          <span className="flex-1 truncate text-xs font-medium leading-snug">
-            {(runspace.owned && renderLabel?.(runspace.id)) || runspace.title || "Terminal"}
+          <span className="flex-1 truncate text-xs leading-snug font-medium">
+            {(runspace.owned && renderLabel?.(runspace.id)) || runspace.title || 'Terminal'}
           </span>
         </div>
         {runspace.description && (
@@ -116,7 +117,7 @@ function RunspaceItem({
       </div>
       <AgentDotMark dot={runspace.agentDot} />
     </button>
-  );
+  )
 }
 
 function GroupHeader({ label }: { label: string }) {
@@ -126,7 +127,7 @@ function GroupHeader({ label }: { label: string }) {
         {label}
       </span>
     </div>
-  );
+  )
 }
 
 function RunspaceGroup({
@@ -134,32 +135,32 @@ function RunspaceGroup({
   items,
   renderItem,
 }: {
-  label: string;
-  items: RunspaceSummary[];
-  renderItem: (runspace: RunspaceSummary) => React.ReactNode;
+  label: string
+  items: RunspaceSummary[]
+  renderItem: (runspace: RunspaceSummary) => React.ReactNode
 }) {
   return (
     <>
       <GroupHeader label={label} />
       <div className="flex flex-col gap-0.5 px-0.5">{items.map(renderItem)}</div>
     </>
-  );
+  )
 }
 
 export function WorkbenchSidebar({
   renderRunspaceLabel,
 }: {
-  renderRunspaceLabel?: RenderRunspaceLabel;
+  renderRunspaceLabel?: RenderRunspaceLabel
 }) {
-  const summaries = useAtomValue(runspaceSummariesAtom);
-  const detached = useAtomValue(detachedTerminalSessionsAtom);
-  const activate = useSetAtom(activateRunspaceAtom);
-  const reattach = useSetAtom(reattachTerminalSessionAtom);
-  const terminate = useSetAtom(terminateTerminalSessionAtom);
-  const reorder = useSetAtom(reorderRunspacesAtom);
-  const jumpHints = useAtomValue(jumpHintTargetsAtom);
-  const agentDotOfTerminalSession = useAtomValue(agentDotOfTerminalSessionAtom);
-  const { dragOverId, handlersFor } = useDragReorder(reorder);
+  const summaries = useAtomValue(runspaceSummariesAtom)
+  const detached = useAtomValue(detachedTerminalSessionsAtom)
+  const activate = useSetAtom(activateRunspaceAtom)
+  const reattach = useSetAtom(reattachTerminalSessionAtom)
+  const terminate = useSetAtom(terminateTerminalSessionAtom)
+  const reorder = useSetAtom(reorderRunspacesAtom)
+  const jumpHints = useAtomValue(jumpHintTargetsAtom)
+  const agentDotOfTerminalSession = useAtomValue(agentDotOfTerminalSessionAtom)
+  const { dragOverId, handlersFor } = useDragReorder(reorder)
 
   const renderItem = (runspace: RunspaceSummary) => (
     <RunspaceItem
@@ -170,10 +171,10 @@ export function WorkbenchSidebar({
       hint={jumpHints.byRunspaceId[runspace.id]}
       renderLabel={renderRunspaceLabel}
     />
-  );
+  )
 
-  const holdingPin = summaries.filter((s) => s.holdsPin);
-  const rest = summaries.filter((s) => !s.holdsPin);
+  const holdingPin = summaries.filter((s) => s.holdsPin)
+  const rest = summaries.filter((s) => !s.holdsPin)
 
   return (
     <div className="flex h-full flex-col">
@@ -182,7 +183,7 @@ export function WorkbenchSidebar({
           <RunspaceGroup label="Pinned" items={holdingPin} renderItem={renderItem} />
         )}
         <RunspaceGroup
-          label={holdingPin.length > 0 ? "Runspaces" : ""}
+          label={holdingPin.length > 0 ? 'Runspaces' : ''}
           items={rest}
           renderItem={renderItem}
         />
@@ -205,5 +206,5 @@ export function WorkbenchSidebar({
         )}
       </div>
     </div>
-  );
+  )
 }

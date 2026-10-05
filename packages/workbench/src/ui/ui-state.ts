@@ -1,26 +1,27 @@
-import { atom } from "jotai";
-import { atomWithDefault } from "jotai/utils";
-import { clamp } from "./clamp.ts";
+import { atom } from 'jotai'
+import { atomWithDefault } from 'jotai/utils'
 
-export const SIDEBAR_DEFAULT_WIDTH = 200;
-export const SIDEBAR_MIN_WIDTH = 160;
-export const SIDEBAR_MAX_WIDTH = 360;
+import { clamp } from './clamp.ts'
 
-const UI_ZOOM_MIN = 0.8;
-const UI_ZOOM_MAX = 1.6;
-const UI_ZOOM_DEFAULT = 1;
-const UI_ZOOM_STEP = 0.1;
+export const SIDEBAR_DEFAULT_WIDTH = 200
+export const SIDEBAR_MIN_WIDTH = 160
+export const SIDEBAR_MAX_WIDTH = 360
+
+const UI_ZOOM_MIN = 0.8
+const UI_ZOOM_MAX = 1.6
+const UI_ZOOM_DEFAULT = 1
+const UI_ZOOM_STEP = 0.1
 
 // 帳簿に載せない画面の状態（ADR-0014）。active でない Runspace の active Tab と端末の font size は持たない。
 export type UiState = {
-  activeRunspaceId: string | null;
-  activeTabId: string | null;
-  sidebarOpen: boolean;
-  sidebarWidth: number;
-  uiZoom: number;
-};
+  activeRunspaceId: string | null
+  activeTabId: string | null
+  sidebarOpen: boolean
+  sidebarWidth: number
+  uiZoom: number
+}
 
-const UI_STATE_KEY = "tania.workbench.ui-state";
+const UI_STATE_KEY = 'tania.workbench.ui-state'
 
 const DEFAULT_UI_STATE: UiState = {
   activeRunspaceId: null,
@@ -28,20 +29,20 @@ const DEFAULT_UI_STATE: UiState = {
   sidebarOpen: true,
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
   uiZoom: UI_ZOOM_DEFAULT,
-};
+}
 
 function numberIn(value: unknown, min: number, max: number, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value) ? clamp(value, min, max) : fallback;
+  return typeof value === 'number' && Number.isFinite(value) ? clamp(value, min, max) : fallback
 }
 
 function parseUiState(text: string | null): UiState {
-  const raw: unknown = text === null ? null : JSON.parse(text);
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return DEFAULT_UI_STATE;
-  const r = raw as Record<string, unknown>;
+  const raw: unknown = text === null ? null : JSON.parse(text)
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return DEFAULT_UI_STATE
+  const r = raw as Record<string, unknown>
   return {
-    activeRunspaceId: typeof r.activeRunspaceId === "string" ? r.activeRunspaceId : null,
-    activeTabId: typeof r.activeTabId === "string" ? r.activeTabId : null,
-    sidebarOpen: typeof r.sidebarOpen === "boolean" ? r.sidebarOpen : DEFAULT_UI_STATE.sidebarOpen,
+    activeRunspaceId: typeof r.activeRunspaceId === 'string' ? r.activeRunspaceId : null,
+    activeTabId: typeof r.activeTabId === 'string' ? r.activeTabId : null,
+    sidebarOpen: typeof r.sidebarOpen === 'boolean' ? r.sidebarOpen : DEFAULT_UI_STATE.sidebarOpen,
     sidebarWidth: numberIn(
       r.sidebarWidth,
       SIDEBAR_MIN_WIDTH,
@@ -49,40 +50,40 @@ function parseUiState(text: string | null): UiState {
       SIDEBAR_DEFAULT_WIDTH,
     ),
     uiZoom: numberIn(r.uiZoom, UI_ZOOM_MIN, UI_ZOOM_MAX, UI_ZOOM_DEFAULT),
-  };
+  }
 }
 
 // localStorage は private window や site data の遮断で投げることがある。
 export const savedUiStateAtom = atom((): UiState => {
   try {
-    return parseUiState(localStorage.getItem(UI_STATE_KEY));
+    return parseUiState(localStorage.getItem(UI_STATE_KEY))
   } catch {
-    return DEFAULT_UI_STATE;
+    return DEFAULT_UI_STATE
   }
-});
+})
 
 export function saveUiState(state: UiState): void {
   try {
-    localStorage.setItem(UI_STATE_KEY, JSON.stringify(state));
+    localStorage.setItem(UI_STATE_KEY, JSON.stringify(state))
   } catch (e) {
-    console.warn("ui-state save failed:", e);
+    console.warn('ui-state save failed:', e)
   }
 }
 
-export const sidebarOpenAtom = atomWithDefault((get) => get(savedUiStateAtom).sidebarOpen);
-export const sidebarWidthAtom = atomWithDefault((get) => get(savedUiStateAtom).sidebarWidth);
-export const sidebarResizingAtom = atom(false);
+export const sidebarOpenAtom = atomWithDefault((get) => get(savedUiStateAtom).sidebarOpen)
+export const sidebarWidthAtom = atomWithDefault((get) => get(savedUiStateAtom).sidebarWidth)
+export const sidebarResizingAtom = atom(false)
 
 // メインコンテンツ領域だけに CSS zoom として適用する係数。chrome (sidebar/header)
 // はこの atom を読まないので固定のまま。ターミナルは content 側で 1/zoom の逆 zoom を
 // 当てて net 1.0 に戻し、独立した px フォント管理 (terminalFontSizeAtom) を保つ。
-export const uiZoomAtom = atomWithDefault((get) => get(savedUiStateAtom).uiZoom);
+export const uiZoomAtom = atomWithDefault((get) => get(savedUiStateAtom).uiZoom)
 
-export const setUiZoomAtom = atom(null, (get, set, action: "in" | "out" | "reset") => {
-  const current = get(uiZoomAtom);
+export const setUiZoomAtom = atom(null, (get, set, action: 'in' | 'out' | 'reset') => {
+  const current = get(uiZoomAtom)
   const raw =
-    action === "reset"
+    action === 'reset'
       ? UI_ZOOM_DEFAULT
-      : current + (action === "in" ? UI_ZOOM_STEP : -UI_ZOOM_STEP);
-  set(uiZoomAtom, clamp(Math.round(raw * 10) / 10, UI_ZOOM_MIN, UI_ZOOM_MAX));
-});
+      : current + (action === 'in' ? UI_ZOOM_STEP : -UI_ZOOM_STEP)
+  set(uiZoomAtom, clamp(Math.round(raw * 10) / 10, UI_ZOOM_MIN, UI_ZOOM_MAX))
+})
