@@ -13,10 +13,12 @@
   - 引数の値は、各 package の cli entry の `completers`（procedure の path と input の field 名で引く関数）が Backend に聞いて返す。task は ref の位置に、開いている Task（`reopen` では閉じた Task）の ref と題を出す。Backend には retry せず 1 秒で打ち切り、不在でも失敗でも候補を出さないだけにする。`completers` の key が CLI の command の引数を指すことは、`completion.test.ts` が commander の木で確かめる。
   - commander は `[value]` の option（trpc-cli の boolean）の後ろの語も、`-` で始まらなければ値として食う。`close --force acme/app#1` は ref を失うので、その位置には ref を出さない。
   - 置き方は、fpath にある directory への `tania completions zsh > ~/.zsh/completions/_tania` か、`.zshrc` の `eval "$(tania completions zsh)"`。script は版に依らないので、install-app は dotfiles に書かない。
+  - zsh の script は CI で走らせず、手元で zpty から TAB を押して確かめる。起こす zsh の `ZDOTDIR` の `.zshrc` に、`bindkey -e`（`EDITOR` が vi 系だと vi の keymap で起きる）と `stty rows 50 cols 200`（pty の大きさが 0 のままだと候補の一覧を出さない）を置く。
 - hook の受け口は `tania workbench hook claude`（`@tania/workbench/cli` の手書き command）。仕様は `docs/packages/tab-env-and-shim.md`。
 - SKILL.md と CLI を突き合わせる検査テストは apps/cli に置く（ADR-0006。`skill-check.test.ts`）。`createProgram` が組む commander の木を辿って command path と flag 名を引くので、procedure を呼ばず、Backend も要らない。
   - 検査する command は、`bash` か `sh` の fence の中で `tania` から始まる行と、本文のインラインの `tania …`。長い fence の中の fence は例なので見ない。行の `#` から後ろは shell と同じく comment として外す。
   - 親の option（`--format`）と `--help` は、commander と同じく子の後ろでも受ける。
+  - fence の中で `[value]` の option の直後に `-` で始まらない語を置いた行は落とす。commander がその語を値として食う（補完の節）ので、`close --force acme/app#1` は ref を失う。
   - 手書き command（`tania workbench hook claude`）は contract から生えず、Skill も呼ばないので、木に無く、書けば落ちる。
   - plugin.json の `skills` は、Skill を持つ `packages/*/skills` とちょうど一致させる。Skill の無い directory を載せても落ちる。workbench の `skills` は Skill ができたときに足す。
 - oRPC 2.0 で `RPCLink` の引数が変わったときに直すのは `apps/cli/src/backend.ts` と `apps/desktop/src/backend.ts` の 2 箇所だけ（#21）。

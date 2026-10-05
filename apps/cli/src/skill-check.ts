@@ -114,7 +114,16 @@ function checkCommand(program: Command, { text, inShell }: TaniaCommand): string
         if (inShell) return `unknown option '${flag}'`
         continue
       }
-      if (option.required && !arg.includes('=')) i++
+      if (arg.includes('=')) continue
+      if (option.required) {
+        i++
+        continue
+      }
+      // commander は `[value]` の option の後ろの語も、`-` で始まらなければ値として食う。
+      const next = args[i + 1]
+      if (option.optional && inShell && next !== undefined && !next.startsWith('-')) {
+        return `option '${flag}' takes '${next}' as its value`
+      }
       continue
     }
     if (command.commands.length === 0) continue
