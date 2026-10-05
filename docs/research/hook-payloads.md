@@ -5,7 +5,7 @@
 ## やり方
 
 - tmux（専用 socket）の中で `env -i` の bash を起こし、`CLAUDECODE` や monica の変数が無い状態で `claude --settings <file>` を動かした。ユーザー設定（plugin と `defaultMode: auto`）は読んだまま、`--permission-mode` で mode を選んだ。
-- settings は `docs/packages.md` の「hook の settings」の 10 本（timeout 5 秒）。command は stdin を `<時刻>-<event>.json` に書くだけの zsh script。
+- settings は `docs/packages/tab-env-and-shim.md` の「hook の settings」の 10 本（timeout 5 秒）。command は stdin を `<時刻>-<event>.json` に書くだけの zsh script。
 
 ```sh
 #!/bin/zsh -f
@@ -80,7 +80,7 @@ auto mode の event には `effort`（`{ "level": … }`）も付く。
 
 - `sleep 0.5` の分がほぼそのまま増えるので、tool_result は PostToolUse の hook が終わってから書かれる。つまり Claude は同期で待っている。
 - 代役は `bun build --compile --minify-whitespace --minify-syntax --bytecode --format=esm` した binary。stdin を読み、127.0.0.1 の Bun server（SQLite の in-memory に 1 行 insert）に `fetch` で POST する。打ち切りは 2 秒。単体で測ると中央値 9.2ms、p90 11ms。比較として `sh -c true` は 3.6ms だった。
-- 本物の `tania workbench hook claude` は compiled で dispatch に約 18ms かかる（`docs/packages.md`）ので、1 tool あたり 25〜30ms 程度と見込む。
+- 本物の `tania workbench hook claude` は compiled で dispatch に約 18ms かかる（`docs/packages/cli.md`）ので、1 tool あたり 25〜30ms 程度と見込む。
 
 ## fixture
 
