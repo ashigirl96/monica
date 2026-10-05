@@ -9,6 +9,7 @@ import { isIssue } from './copy.ts'
 import { findTrackedTask } from './open-task.ts'
 import { messageOf } from './prepare.ts'
 import { formatRef, parseRef } from './ref.ts'
+import { describeRefusal } from './refusal.ts'
 import { liveAgentSession } from './run.ts'
 import { bench, issue, pullRequest, run, task, taskPullRequest } from './schema.ts'
 import { type SyncDeps, syncOrUseCopy } from './sync.ts'
@@ -61,7 +62,7 @@ async function closeReserved(
     ]
     if (reasons.length > 0) {
       throw errors.CLOSE_REFUSED({
-        message: refusalMessage(ref, reasons, benchRow?.cwd),
+        message: refusalMessage(ref, reasons),
         data: { reasons },
       })
     }
@@ -228,16 +229,7 @@ async function stopOnGitFailure<T>(ref: string, step: () => Promise<T>): Promise
   }
 }
 
-function refusalMessage(ref: string, reasons: CloseRefusal[], worktree: string | undefined) {
-  const lines = reasons.map((reason) => {
-    switch (reason.kind) {
-      case 'active_run':
-        return `claude ${reason.agentSessionId} is a live Run (${reason.state})`
-      case 'uncommitted_changes':
-        return `the worktree ${worktree} has uncommitted changes`
-      case 'unpublished_commits':
-        return `branch ${reason.branch} has commits on no remote`
-    }
-  })
-  return [`${ref} stays open:`, ...lines, 'pass --force to close anyway'].join('\n')
+function refusalMessage(ref: string, reasons: CloseRefusal[]) {
+  const refusal = describeRefusal(ref, reasons)
+  return [refusal.headline, ...refusal.reasons, 'pass --force to close anyway'].join('\n')
 }

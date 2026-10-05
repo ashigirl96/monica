@@ -135,7 +135,7 @@ test('close refuses with every reason it finds, a live Run, uncommitted changes 
   expect(error.data).toEqual({
     reasons: [
       { kind: 'active_run', agentSessionId: 's-1', state: 'waiting' },
-      { kind: 'uncommitted_changes' },
+      { kind: 'uncommitted_changes', worktree: cwd },
       { kind: 'unpublished_commits', branch: 'issue-12' },
     ],
   })

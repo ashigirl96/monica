@@ -27,6 +27,9 @@ export const workbenchClientAtom = atom<WorkbenchClient | null>(null)
 
 export const layoutAtom = atom<Layout | null>(null)
 
+// workbench は誰が Runspace を所有するかを知らないので、閉じて空になった所有された Runspace は slot に渡す（ADR-0005）。
+export const lastTabClosedAtom = atom<((runspaceId: string) => void) | null>(null)
+
 export const terminalFocusRequestAtom = atom(0)
 
 function clientOf(get: Getter): WorkbenchClient {
@@ -373,10 +376,12 @@ async function closeTab(
   { runspace, tab }: TabInRunspace,
   afterClose?: () => void,
 ) {
+  let closedHere = true
   try {
     await clientOf(get).tab.close({ id: tab.id })
   } catch (e) {
     if (!isGone(e)) throw e
+    closedHere = false
   }
   afterClose?.()
   if (activeTabOf(get, runspace)?.id === tab.id) {
@@ -385,6 +390,10 @@ async function closeTab(
     if (next) set(activeTabIdsAtom, (prev) => ({ ...prev, [runspace.id]: next.id }))
   }
   await set(reloadAtom)
+  const reloaded = get(layoutAtom)?.runspaces.find((r) => r.id === runspace.id)
+  if (closedHere && reloaded?.owned && reloaded.tabs.length === 0) {
+    get(lastTabClosedAtom)?.(runspace.id)
+  }
 }
 
 export const closeTerminalTabAtom = action(async (get, set, tabId?: string) => {

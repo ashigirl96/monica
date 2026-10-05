@@ -124,7 +124,7 @@ export const AttachOutputSchema = z.object({
 
 export const CloseRefusalSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('active_run'), agentSessionId: z.string(), state: LiveStateSchema }),
-  z.object({ kind: z.literal('uncommitted_changes') }),
+  z.object({ kind: z.literal('uncommitted_changes'), worktree: z.string() }),
   z.object({ kind: z.literal('unpublished_commits'), branch: z.string() }),
 ])
 
