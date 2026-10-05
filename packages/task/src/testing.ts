@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { createRouterClient } from '@orpc/server'
 import {
-  createWorkbench,
+  createWorkbenchLedger,
   router as workbenchRouter,
   migrations as workbenchMigrations,
 } from '@tania/workbench/server'
@@ -19,7 +19,7 @@ import { fakeGhq } from './fake-ghq.ts'
 import { startFakeGitHub } from './fake-github.ts'
 import { parseRef } from './ref.ts'
 import { bench, issue } from './schema.ts'
-import { createTask, migrations, nameAgentSession, router } from './server.ts'
+import { createTaskLedger, migrations, nameAgentSession, router } from './server.ts'
 
 const cleanups: (() => void)[] = []
 export const onCleanup = (cleanup: () => void) => cleanups.push(cleanup)
@@ -48,15 +48,17 @@ export function setup() {
   const ptyd = startFakePtyd(home)
   onCleanup(() => ptyd.stop())
   const notifications: { title: string; body: string }[] = []
-  const workbench = createWorkbench({
+  const workbenchLedger = createWorkbenchLedger({
     db,
     home,
     ptydPath: join(home, 'no-ptyd'),
     notify: (notification) => notifications.push(notification),
     nameAgentSession,
   })
-  onCleanup(() => workbench.stop())
-  const workbenchClient = createRouterClient(workbenchRouter, { context: { db, workbench } })
+  onCleanup(() => workbenchLedger.stop())
+  const workbenchClient = createRouterClient(workbenchRouter, {
+    context: { db, workbenchLedger },
+  })
   const github = startFakeGitHub()
   onCleanup(() => github.stop())
   const scratch = mkdtempSync(join(tmpdir(), 'tania-task-'))
@@ -64,15 +66,21 @@ export function setup() {
   const ghq = fakeGhq(scratch)
 
   function boot() {
-    const task = createTask({ db, workbench, github: github.client, home, ghq: ghq.client })
-    onCleanup(() => task.stop())
-    const client = createRouterClient(router, { context: { db, task } })
-    return { task, client }
+    const taskLedger = createTaskLedger({
+      db,
+      workbenchLedger,
+      github: github.client,
+      home,
+      ghq: ghq.client,
+    })
+    onCleanup(() => taskLedger.stop())
+    const client = createRouterClient(router, { context: { db, taskLedger } })
+    return { taskLedger, client }
   }
 
   const booted = boot()
-  function restartTask() {
-    booted.task.stop()
+  function restartTaskLedger() {
+    booted.taskLedger.stop()
     return boot()
   }
 
@@ -89,7 +97,7 @@ export function setup() {
   }
 
   function openTab(runspaceId: string): string {
-    return db.transaction((tx) => workbench.openTab(tx, { runspaceId })).terminalSessionId
+    return db.transaction((tx) => workbenchLedger.openTab(tx, { runspaceId })).terminalSessionId
   }
 
   // procedure で開く Runspace は Tab を 1 つ持って生まれるので、Bench の外の Tab は Runspace ごと開く。
@@ -121,7 +129,7 @@ export function setup() {
 
   return {
     db,
-    workbench,
+    workbenchLedger,
     workbenchClient,
     ptyd,
     github,
@@ -129,7 +137,7 @@ export function setup() {
     home,
     notifications,
     ...booted,
-    restartTask,
+    restartTaskLedger,
     openBench,
     openTab,
     openTabOutsideBench,

@@ -151,6 +151,6 @@ export const contract = {
       .output(z.void()),
   },
   changes: meta
-    .meta({ description: 'Stream signals that the Workbench books changed' })
+    .meta({ description: 'Stream signals that the Workbench Ledger changed' })
     .output(eventIterator(WorkbenchChangeSchema)),
 }

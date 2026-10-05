@@ -37,8 +37,8 @@ async function run(argv: string[], env: Record<string, string>) {
 }
 
 async function startedHome() {
-  const { home, workbench } = setup()
-  await workbench.start()
+  const { home, workbenchLedger } = setup()
+  await workbenchLedger.start()
   return home
 }
 
@@ -184,8 +184,8 @@ test('the claude wrapper reaches the real claude past another wrapper that hands
 })
 
 test('start rewrites only the shell files whose content drifted', async () => {
-  const { home, workbench, restartBackend } = setup()
-  await workbench.start()
+  const { home, workbenchLedger, restartBackend } = setup()
+  await workbenchLedger.start()
   const zshrc = join(home, 'shell/zdotdir/.zshrc')
   const untouched = [
     'shell/zdotdir/.zshenv',
@@ -199,7 +199,7 @@ test('start rewrites only the shell files whose content drifted', async () => {
   const past = new Date(0)
   for (const file of [zshrc, ...untouched]) utimesSync(file, past, past)
 
-  await restartBackend().workbench.start()
+  await restartBackend().workbenchLedger.start()
 
   expect(readFileSync(zshrc, 'utf8')).toBe(written)
   expect(statSync(zshrc).mtimeMs).not.toBe(0)

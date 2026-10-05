@@ -75,7 +75,7 @@ test('a claude started in a Tab is listed idle, then follows its hooks until it 
   expect(await client.agentSession.list()).toEqual([])
 })
 
-test('the first hook of a session the books do not know starts it running before applying', async () => {
+test('the first hook of a session the Workbench Ledger does not know starts it running before applying', async () => {
   const { db, client } = setup()
   seedTerminalSession(db, 'ts-a', 'running')
 
@@ -112,7 +112,7 @@ test.each(['exited', 'lost', 'failed'] as const)(
   },
 )
 
-test('a hook from a Terminal Session the books do not know writes nothing and leaves one line on stderr', async () => {
+test('a hook from a Terminal Session the Workbench Ledger does not know writes nothing and leaves one line on stderr', async () => {
   const { db, client } = setup()
   const lines = stderrLines()
 
@@ -163,7 +163,7 @@ test('a session resumed in another Terminal Session whose SessionStart was misse
   expect(rowOf(db, 's-resident')).toMatchObject({ state: 'ended', endReason: 'superseded' })
 })
 
-test('the books refuse a second live Agent Session in one Terminal Session', () => {
+test('the Workbench Ledger refuses a second live Agent Session in one Terminal Session', () => {
   const { db } = setup()
   seedTerminalSession(db, 'ts-a', 'running')
   const at = new Date(0)
@@ -183,14 +183,14 @@ test('the books refuse a second live Agent Session in one Terminal Session', () 
 })
 
 test('changes signals every Agent Session a hook changed', async () => {
-  const { db, workbench, client } = setup()
+  const { db, workbenchLedger, client } = setup()
   seedTerminalSession(db, 'ts-a', 'running')
   await client.agentSession.recordHook({
     terminalSessionId: 'ts-a',
     payload: payload('s-old', 'SessionStart', { source: 'startup' }),
   })
   const signals: unknown[] = []
-  onCleanup(workbench.events.subscribe('change', (change) => signals.push(change)))
+  onCleanup(workbenchLedger.events.subscribe('change', (change) => signals.push(change)))
 
   await client.agentSession.recordHook({
     terminalSessionId: 'ts-a',
@@ -244,14 +244,14 @@ test('the name the Task gives an Agent Session titles its notification', async (
 })
 
 test('a notification that cannot be named still leaves the hook recorded and signalled, with one line on stderr', async () => {
-  const { db, workbench, client } = setup({
+  const { db, workbenchLedger, client } = setup({
     nameAgentSession: () => {
       throw new Error('no such table: run')
     },
   })
   seedTerminalSession(db, 'ts-a', 'running')
   const signals: unknown[] = []
-  onCleanup(workbench.events.subscribe('change', (change) => signals.push(change)))
+  onCleanup(workbenchLedger.events.subscribe('change', (change) => signals.push(change)))
   const lines = stderrLines()
 
   await client.agentSession.recordHook({
@@ -300,7 +300,7 @@ test('after a Backend restart a running Agent Session is unobserved until its ne
   )
 
   const after = restartBackend()
-  await after.workbench.start()
+  await after.workbenchLedger.start()
 
   expect(await after.client.agentSession.list()).toEqual([
     expect.objectContaining({ sessionId: 's-busy', state: 'unobserved' }),
@@ -316,7 +316,7 @@ test('after a Backend restart a running Agent Session is unobserved until its ne
 })
 
 test('reconnecting to ptyd signals each Agent Session the reconcile ends', async () => {
-  const { home, ptyd, workbench, client, settled } = setup()
+  const { home, ptyd, workbenchLedger, client, settled } = setup()
   const { tab } = await client.runspace.create(size)
   await settled(tab.terminalSessionId)
   await client.agentSession.recordHook({
@@ -325,7 +325,7 @@ test('reconnecting to ptyd signals each Agent Session the reconcile ends', async
   })
   const signals: unknown[] = []
   const reconciled = new Promise<void>((resolve) => {
-    const unsubscribe = workbench.events.subscribe('change', (change) => {
+    const unsubscribe = workbenchLedger.events.subscribe('change', (change) => {
       signals.push(change)
       if (change.type !== 'reconciled') return
       unsubscribe()
@@ -344,7 +344,7 @@ test('reconnecting to ptyd signals each Agent Session the reconcile ends', async
 })
 
 test('reconnecting to ptyd while the Backend keeps running leaves a running Agent Session running', async () => {
-  const { home, ptyd, workbench, client, settled } = setup()
+  const { home, ptyd, workbenchLedger, client, settled } = setup()
   const { tab } = await client.runspace.create(size)
   await settled(tab.terminalSessionId)
   await client.agentSession.recordHook({
@@ -352,7 +352,7 @@ test('reconnecting to ptyd while the Backend keeps running leaves a running Agen
     payload: payload('s-1', 'UserPromptSubmit', { prompt: 'hi' }),
   })
   const reconciled = new Promise<void>((resolve) => {
-    const unsubscribe = workbench.events.subscribe('change', (change) => {
+    const unsubscribe = workbenchLedger.events.subscribe('change', (change) => {
       if (change.type !== 'reconciled') return
       unsubscribe()
       resolve()

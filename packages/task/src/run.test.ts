@@ -10,18 +10,18 @@ afterEach(() => {
   cleanUp()
 })
 
-type Books = ReturnType<typeof setup>
+type Fixture = ReturnType<typeof setup>
 
 const ref = 'acme/app#12'
 
 function started() {
-  const books = setup()
-  books.ghq.origin('acme/app', {})
-  books.task.start()
-  return books
+  const fixture = setup()
+  fixture.ghq.origin('acme/app', {})
+  fixture.taskLedger.start()
+  return fixture
 }
 
-function runsOf({ db }: Books) {
+function runsOf({ db }: Fixture) {
   return db
     .select({ number: issue.number, agentSessionId: run.agentSessionId, origin: run.origin })
     .from(run)
@@ -30,18 +30,18 @@ function runsOf({ db }: Books) {
     .all()
 }
 
-async function stateOf({ client }: Books, taskRef = ref) {
+async function stateOf({ client }: Fixture, taskRef = ref) {
   return (await client.list({})).tasks.find((t) => t.ref === taskRef)!.displayState
 }
 
 test('a claude started in a Tab of the Bench becomes a Run of the Task, waiting idle', async () => {
-  const books = started()
-  const terminalSessionId = await books.openTab(await books.openBench(ref))
+  const fixture = started()
+  const terminalSessionId = await fixture.openTab(await fixture.openBench(ref))
 
-  await books.hook(terminalSessionId, 's-1', 'SessionStart', { source: 'startup' })
+  await fixture.hook(terminalSessionId, 's-1', 'SessionStart', { source: 'startup' })
 
-  expect(runsOf(books)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'started' }])
-  expect(await stateOf(books)).toEqual({
+  expect(runsOf(fixture)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'started' }])
+  expect(await stateOf(fixture)).toEqual({
     state: 'waiting',
     reason: 'idle',
     since: expect.any(Date),
@@ -52,89 +52,89 @@ test('a claude started in a Tab of the Bench becomes a Run of the Task, waiting 
 })
 
 test('a Run stays with its Task while its claude moves out of the Bench, until it ends', async () => {
-  const books = started()
-  const inBench = await books.openTab(await books.openBench(ref))
-  const outside = await books.openTabOutsideBench()
-  await books.hook(inBench, 's-1', 'SessionStart', { source: 'startup' })
+  const fixture = started()
+  const inBench = await fixture.openTab(await fixture.openBench(ref))
+  const outside = await fixture.openTabOutsideBench()
+  await fixture.hook(inBench, 's-1', 'SessionStart', { source: 'startup' })
 
-  await books.hook(outside, 's-1', 'UserPromptSubmit', { prompt: 'go on' })
+  await fixture.hook(outside, 's-1', 'UserPromptSubmit', { prompt: 'go on' })
 
-  expect(runsOf(books)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'started' }])
-  expect(await stateOf(books)).toMatchObject({ state: 'running' })
+  expect(runsOf(fixture)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'started' }])
+  expect(await stateOf(fixture)).toMatchObject({ state: 'running' })
 
-  await books.hook(outside, 's-1', 'SessionEnd', { reason: 'prompt_input_exit' })
+  await fixture.hook(outside, 's-1', 'SessionEnd', { reason: 'prompt_input_exit' })
 
-  expect(await stateOf(books)).toEqual({ state: 'ended' })
+  expect(await stateOf(fixture)).toEqual({ state: 'ended' })
 })
 
 test('a claude that moves into a Tab of the Bench becomes a Run of the Task then', async () => {
-  const books = started()
-  const outside = await books.openTabOutsideBench()
-  const inBench = await books.openTab(await books.openBench(ref))
-  await books.hook(outside, 's-1', 'SessionStart', { source: 'startup' })
+  const fixture = started()
+  const outside = await fixture.openTabOutsideBench()
+  const inBench = await fixture.openTab(await fixture.openBench(ref))
+  await fixture.hook(outside, 's-1', 'SessionStart', { source: 'startup' })
 
-  expect(runsOf(books)).toEqual([])
+  expect(runsOf(fixture)).toEqual([])
 
-  await books.hook(inBench, 's-1', 'SessionStart', { source: 'resume' })
+  await fixture.hook(inBench, 's-1', 'SessionStart', { source: 'resume' })
 
-  expect(runsOf(books)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'started' }])
+  expect(runsOf(fixture)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'started' }])
 })
 
 test('a Run of one Task stays with it when its claude moves into the Bench of another', async () => {
-  const books = started()
-  const first = await books.openTab(await books.openBench(ref))
-  const second = await books.openTab(await books.openBench('acme/app#13', 'Next'))
-  await books.hook(first, 's-1', 'SessionStart', { source: 'startup' })
+  const fixture = started()
+  const first = await fixture.openTab(await fixture.openBench(ref))
+  const second = await fixture.openTab(await fixture.openBench('acme/app#13', 'Next'))
+  await fixture.hook(first, 's-1', 'SessionStart', { source: 'startup' })
 
-  await books.hook(second, 's-1', 'UserPromptSubmit', { prompt: 'go on' })
+  await fixture.hook(second, 's-1', 'UserPromptSubmit', { prompt: 'go on' })
 
-  expect(runsOf(books)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'started' }])
-  expect(await stateOf(books, 'acme/app#13')).toEqual({ state: 'ended' })
+  expect(runsOf(fixture)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'started' }])
+  expect(await stateOf(fixture, 'acme/app#13')).toEqual({ state: 'ended' })
 })
 
 test('start makes Runs of the live Agent Sessions already in a Bench, but not of the ended ones', async () => {
-  const books = setup()
-  books.ghq.origin('acme/app', {})
-  const runspaceId = await books.openBench(ref)
-  const live = await books.openTab(runspaceId)
-  const gone = await books.openTab(runspaceId)
-  await books.hook(live, 's-live', 'SessionStart', { source: 'startup' })
-  await books.hook(gone, 's-gone', 'SessionStart', { source: 'startup' })
-  await books.hook(gone, 's-gone', 'SessionEnd', { reason: 'prompt_input_exit' })
+  const fixture = setup()
+  fixture.ghq.origin('acme/app', {})
+  const runspaceId = await fixture.openBench(ref)
+  const live = await fixture.openTab(runspaceId)
+  const gone = await fixture.openTab(runspaceId)
+  await fixture.hook(live, 's-live', 'SessionStart', { source: 'startup' })
+  await fixture.hook(gone, 's-gone', 'SessionStart', { source: 'startup' })
+  await fixture.hook(gone, 's-gone', 'SessionEnd', { reason: 'prompt_input_exit' })
 
-  expect(runsOf(books)).toEqual([])
+  expect(runsOf(fixture)).toEqual([])
 
-  books.task.start()
+  fixture.taskLedger.start()
 
-  expect(runsOf(books)).toEqual([{ number: 12, agentSessionId: 's-live', origin: 'started' }])
+  expect(runsOf(fixture)).toEqual([{ number: 12, agentSessionId: 's-live', origin: 'started' }])
 })
 
 test('a claude begun in the Bench while the Backend was away becomes a Run on its first hook after start', async () => {
-  const books = started()
-  const inBench = await books.openTab(await books.openBench(ref))
-  books.restartTask().task.start()
+  const fixture = started()
+  const inBench = await fixture.openTab(await fixture.openBench(ref))
+  fixture.restartTaskLedger().taskLedger.start()
 
-  await books.hook(inBench, 's-1', 'UserPromptSubmit', { prompt: 'after the restart' })
+  await fixture.hook(inBench, 's-1', 'UserPromptSubmit', { prompt: 'after the restart' })
 
-  expect(runsOf(books)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'started' }])
+  expect(runsOf(fixture)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'started' }])
 })
 
 test('a Task with two live Runs shows the one that waits first and lists both', async () => {
-  const books = started()
-  const runspaceId = await books.openBench(ref)
-  const first = await books.openTab(runspaceId)
-  const second = await books.openTab(runspaceId)
-  await books.hook(first, 's-1', 'SessionStart', { source: 'startup' })
-  await books.hook(first, 's-1', 'UserPromptSubmit', { prompt: 'build it' })
-  await books.hook(second, 's-2', 'SessionStart', { source: 'startup' })
-  await books.hook(second, 's-2', 'UserPromptSubmit', { prompt: 'test it' })
+  const fixture = started()
+  const runspaceId = await fixture.openBench(ref)
+  const first = await fixture.openTab(runspaceId)
+  const second = await fixture.openTab(runspaceId)
+  await fixture.hook(first, 's-1', 'SessionStart', { source: 'startup' })
+  await fixture.hook(first, 's-1', 'UserPromptSubmit', { prompt: 'build it' })
+  await fixture.hook(second, 's-2', 'SessionStart', { source: 'startup' })
+  await fixture.hook(second, 's-2', 'UserPromptSubmit', { prompt: 'test it' })
 
-  await books.hook(second, 's-2', 'PermissionRequest', {
+  await fixture.hook(second, 's-2', 'PermissionRequest', {
     tool_name: 'Bash',
     tool_input: { command: 'bun test' },
   })
 
-  expect(await stateOf(books)).toMatchObject({
+  expect(await stateOf(fixture)).toMatchObject({
     state: 'waiting',
     reason: 'permission',
     tool: 'Bash',
@@ -146,15 +146,15 @@ test('a Task with two live Runs shows the one that waits first and lists both', 
 })
 
 test("task.changes signals the Task when its Run is made and whenever the Run's claude changes", async () => {
-  const books = started()
-  const inBench = await books.openTab(await books.openBench(ref))
-  const outside = await books.openTabOutsideBench()
+  const fixture = started()
+  const inBench = await fixture.openTab(await fixture.openBench(ref))
+  const outside = await fixture.openTabOutsideBench()
   const changes: unknown[] = []
-  books.task.events.subscribe('change', (change) => changes.push(change))
+  fixture.taskLedger.events.subscribe('change', (change) => changes.push(change))
 
-  await books.hook(inBench, 's-1', 'SessionStart', { source: 'startup' })
-  await books.hook(inBench, 's-1', 'UserPromptSubmit', { prompt: 'go' })
-  await books.hook(outside, 's-2', 'SessionStart', { source: 'startup' })
+  await fixture.hook(inBench, 's-1', 'SessionStart', { source: 'startup' })
+  await fixture.hook(inBench, 's-1', 'UserPromptSubmit', { prompt: 'go' })
+  await fixture.hook(outside, 's-2', 'SessionStart', { source: 'startup' })
 
   expect(changes).toEqual([
     { type: 'task', ref },
@@ -163,14 +163,14 @@ test("task.changes signals the Task when its Run is made and whenever the Run's 
 })
 
 test('start signals the Tasks whose Runs it makes', async () => {
-  const books = setup()
-  books.ghq.origin('acme/app', {})
-  const inBench = await books.openTab(await books.openBench(ref))
-  await books.hook(inBench, 's-1', 'SessionStart', { source: 'startup' })
+  const fixture = setup()
+  fixture.ghq.origin('acme/app', {})
+  const inBench = await fixture.openTab(await fixture.openBench(ref))
+  await fixture.hook(inBench, 's-1', 'SessionStart', { source: 'startup' })
   const changes: unknown[] = []
-  books.task.events.subscribe('change', (change) => changes.push(change))
+  fixture.taskLedger.events.subscribe('change', (change) => changes.push(change))
 
-  books.task.start()
+  fixture.taskLedger.start()
 
   expect(changes).toContainEqual({ type: 'task', ref })
 })

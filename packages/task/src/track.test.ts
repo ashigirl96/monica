@@ -160,10 +160,10 @@ test('track fails without writing when gh auth token fails', async () => {
 })
 
 test('track tells the change to subscribers', async () => {
-  const { github, client, task: domain } = setup()
+  const { github, client, taskLedger } = setup()
   github.issue('acme/app#12', { title: 'Ship it' })
   const controller = new AbortController()
-  const changes = domain.events.subscribe('change', { signal: controller.signal })
+  const changes = taskLedger.events.subscribe('change', { signal: controller.signal })
 
   await client.track({ ref: 'acme/app#12' })
 

@@ -19,7 +19,7 @@ import { sidebarOpenAtom, sidebarResizingAtom, sidebarWidthAtom, uiZoomAtom } fr
 const WorkbenchContent = lazy(() => import('./content.tsx'))
 
 // Backend が立ち直ると endpoint ごと替わり、前の購読は届かなくなるので、client ごとに張り直す。
-function useBooks(client: WorkbenchClient | null) {
+function useWorkbenchChanges(client: WorkbenchClient | null) {
   const setClient = useSetAtom(workbenchClientAtom)
   const reload = useSetAtom(reloadAtom)
   const reloadAgentSessions = useSetAtom(reloadAgentSessionsAtom)
@@ -50,7 +50,7 @@ function useBooks(client: WorkbenchClient | null) {
   }, [client, setClient, reload, reloadAgentSessions])
 }
 
-// workbench は Task を import しないので、Bench のラベルと Tab のメニューの Task の項目は slot で受ける（ADR-0005）。
+// workbench は task を import しないので、Bench のラベルと Tab のメニューの Task の項目は slot で受ける（ADR-0005）。
 export function Workbench({
   client,
   renderRunspaceLabel,
@@ -60,7 +60,7 @@ export function Workbench({
   renderRunspaceLabel?: RenderRunspaceLabel
   tabMenuItems?: TabMenuItems
 }) {
-  useBooks(client)
+  useWorkbenchChanges(client)
   const store = useStore()
   useEffect(() => persistUiState(store), [store])
 

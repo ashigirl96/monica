@@ -17,18 +17,18 @@ async function terminated(ptyd: Ptyd, count: number) {
 
 function setupWithOwned() {
   const booted = setup()
-  const { db, workbench } = booted
-  const owned = db.transaction((tx) => workbench.createRunspace(tx, { cwd: '/work/bench' }))
+  const { db, workbenchLedger } = booted
+  const owned = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work/bench' }))
   return { ...booted, owned }
 }
 
 test("openTab opens a Tab at the end of the Runspace on a starting Terminal Session, in the Runspace's cwd unless given one", async () => {
-  const { db, workbench, client, owned } = setupWithOwned()
+  const { db, workbenchLedger, client, owned } = setupWithOwned()
   const first = await client.tab.open({ runspaceId: owned, ...size })
 
-  const inBench = db.transaction((tx) => workbench.openTab(tx, { runspaceId: owned }))
+  const inBench = db.transaction((tx) => workbenchLedger.openTab(tx, { runspaceId: owned }))
   const elsewhere = db.transaction((tx) =>
-    workbench.openTab(tx, { runspaceId: owned, cwd: '/work/bench/app' }),
+    workbenchLedger.openTab(tx, { runspaceId: owned, cwd: '/work/bench/app' }),
   )
 
   expect((await client.layout.get()).runspaces).toMatchObject([
@@ -47,21 +47,21 @@ test("openTab opens a Tab at the end of the Runspace on a starting Terminal Sess
 })
 
 test('openTab signals the layout, so the webview reads a Tab another domain opened', () => {
-  const { db, workbench, owned } = setupWithOwned()
+  const { db, workbenchLedger, owned } = setupWithOwned()
   const changes: WorkbenchChange[] = []
-  workbench.events.subscribe('change', (change) => changes.push(change))
+  workbenchLedger.events.subscribe('change', (change) => changes.push(change))
 
-  db.transaction((tx) => workbench.openTab(tx, { runspaceId: owned }))
+  db.transaction((tx) => workbenchLedger.openTab(tx, { runspaceId: owned }))
 
   expect(changes).toEqual([{ type: 'layout' }])
 })
 
 test('openTab starts the shell at 24×80 once the transaction commits, then types the input into it without being attached', async () => {
-  const { ptyd, db, workbench, client, owned } = setupWithOwned()
-  await workbench.start()
+  const { ptyd, db, workbenchLedger, client, owned } = setupWithOwned()
+  await workbenchLedger.start()
 
   const { terminalSessionId } = db.transaction((tx) =>
-    workbench.openTab(tx, { runspaceId: owned, input: 'claude\r' }),
+    workbenchLedger.openTab(tx, { runspaceId: owned, input: 'claude\r' }),
   )
 
   await ptyd.received((op) => op.op === 'write')
@@ -81,24 +81,24 @@ test('openTab starts the shell at 24×80 once the transaction commits, then type
 })
 
 test('openTab starts the shell at the size given', async () => {
-  const { ptyd, db, workbench, owned } = setupWithOwned()
+  const { ptyd, db, workbenchLedger, owned } = setupWithOwned()
 
   db.transaction((tx) =>
-    workbench.openTab(tx, { runspaceId: owned, size: { rows: 50, cols: 120 } }),
+    workbenchLedger.openTab(tx, { runspaceId: owned, size: { rows: 50, cols: 120 } }),
   )
 
   expect(await ptyd.received((op) => op.op === 'create')).toMatchObject({ rows: 50, cols: 120 })
 })
 
 test('moveTab moves a Tab to the end of another Runspace, drops its pin, removes the Runspace it emptied, and signals the layout', async () => {
-  const { db, workbench, client, owned } = setupWithOwned()
+  const { db, workbenchLedger, client, owned } = setupWithOwned()
   const inBench = await client.tab.open({ runspaceId: owned, ...size })
   const elsewhere = await client.runspace.create({ cwd: '/work', ...size })
   await client.tab.pin({ id: elsewhere.tab.id })
   const changes: WorkbenchChange[] = []
-  workbench.events.subscribe('change', (change) => changes.push(change))
+  workbenchLedger.events.subscribe('change', (change) => changes.push(change))
 
-  db.transaction((tx) => workbench.moveTab(tx, elsewhere.tab.id, owned))
+  db.transaction((tx) => workbenchLedger.moveTab(tx, elsewhere.tab.id, owned))
 
   expect((await client.layout.get()).runspaces).toMatchObject([
     {
@@ -113,16 +113,16 @@ test('moveTab moves a Tab to the end of another Runspace, drops its pin, removes
 })
 
 test('removeRunspace removes the owned Runspace with all its Tabs, pinned ones too, terminates their Terminal Sessions once the transaction commits, and signals the layout', async () => {
-  const { ptyd, db, workbench, client, owned, settled } = setupWithOwned()
+  const { ptyd, db, workbenchLedger, client, owned, settled } = setupWithOwned()
   const plain = await client.runspace.create(size)
   const first = await client.tab.open({ runspaceId: owned, ...size })
   const pinned = await client.tab.open({ runspaceId: owned, ...size })
   await client.tab.pin({ id: pinned.id })
   for (const tab of [plain.tab, first, pinned]) await settled(tab.terminalSessionId)
   const changes: WorkbenchChange[] = []
-  workbench.events.subscribe('change', (change) => changes.push(change))
+  workbenchLedger.events.subscribe('change', (change) => changes.push(change))
 
-  db.transaction((tx) => workbench.removeRunspace(tx, owned))
+  db.transaction((tx) => workbenchLedger.removeRunspace(tx, owned))
 
   expect(await terminated(ptyd, 2)).toEqual([first.terminalSessionId, pinned.terminalSessionId])
   expect((await client.layout.get()).runspaces).toMatchObject([
@@ -132,12 +132,14 @@ test('removeRunspace removes the owned Runspace with all its Tabs, pinned ones t
 })
 
 test("removeRunspace keeps the spared Tab, pinned or not, in the Runspace it no longer owns, and terminates only the other Tabs' Terminal Sessions", async () => {
-  const { ptyd, db, workbench, client, owned } = setupWithOwned()
+  const { ptyd, db, workbenchLedger, client, owned } = setupWithOwned()
   const other = await client.tab.open({ runspaceId: owned, ...size })
   const spared = await client.tab.open({ runspaceId: owned, ...size })
   await client.tab.pin({ id: spared.id })
 
-  db.transaction((tx) => workbench.removeRunspace(tx, owned, { spare: [spared.terminalSessionId] }))
+  db.transaction((tx) =>
+    workbenchLedger.removeRunspace(tx, owned, { spare: [spared.terminalSessionId] }),
+  )
 
   expect(await terminated(ptyd, 1)).toEqual([other.terminalSessionId])
   expect((await client.layout.get()).runspaces).toEqual([
@@ -152,13 +154,13 @@ test("removeRunspace keeps the spared Tab, pinned or not, in the Runspace it no 
 })
 
 test('removeRunspace keeps every spared Tab in their order', async () => {
-  const { ptyd, db, workbench, client, owned } = setupWithOwned()
+  const { ptyd, db, workbenchLedger, client, owned } = setupWithOwned()
   const first = await client.tab.open({ runspaceId: owned, ...size })
   const other = await client.tab.open({ runspaceId: owned, ...size })
   const last = await client.tab.open({ runspaceId: owned, ...size })
 
   db.transaction((tx) =>
-    workbench.removeRunspace(tx, owned, {
+    workbenchLedger.removeRunspace(tx, owned, {
       spare: [last.terminalSessionId, first.terminalSessionId],
     }),
   )
@@ -177,9 +179,11 @@ test('removeRunspace keeps every spared Tab in their order', async () => {
 })
 
 test('the Runspace a spared Tab stays in goes away with its last Tab, like any other', async () => {
-  const { db, workbench, client, owned } = setupWithOwned()
+  const { db, workbenchLedger, client, owned } = setupWithOwned()
   const spared = await client.tab.open({ runspaceId: owned, ...size })
-  db.transaction((tx) => workbench.removeRunspace(tx, owned, { spare: [spared.terminalSessionId] }))
+  db.transaction((tx) =>
+    workbenchLedger.removeRunspace(tx, owned, { spare: [spared.terminalSessionId] }),
+  )
 
   await client.tab.close({ id: spared.id })
 
@@ -187,12 +191,12 @@ test('the Runspace a spared Tab stays in goes away with its last Tab, like any o
 })
 
 test('removeRunspace removes the whole Runspace when the spared Terminal Session is in none of its Tabs', async () => {
-  const { ptyd, db, workbench, client, owned } = setupWithOwned()
+  const { ptyd, db, workbenchLedger, client, owned } = setupWithOwned()
   const inBench = await client.tab.open({ runspaceId: owned, ...size })
   const elsewhere = await client.runspace.create(size)
 
   db.transaction((tx) =>
-    workbench.removeRunspace(tx, owned, { spare: [elsewhere.tab.terminalSessionId] }),
+    workbenchLedger.removeRunspace(tx, owned, { spare: [elsewhere.tab.terminalSessionId] }),
   )
 
   expect(await terminated(ptyd, 1)).toEqual([inBench.terminalSessionId])

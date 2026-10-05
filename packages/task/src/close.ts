@@ -71,7 +71,7 @@ async function closeReserved(
     if (now.bench) {
       const { runspaceId } = now.bench
       tx.delete(bench).where(eq(bench.taskIssueId, found.issue.id)).run()
-      deps.workbench.removeRunspace(tx, runspaceId, {
+      deps.workbenchLedger.removeRunspace(tx, runspaceId, {
         spare: [...(caller ? [caller] : []), ...lateRuns.map((r) => r.terminalSessionId)],
       })
       spared = caller !== undefined && tabIn(tx, runspaceId, caller)

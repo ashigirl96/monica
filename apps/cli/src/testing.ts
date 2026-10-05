@@ -4,13 +4,13 @@ import { join } from 'node:path'
 import { createRouterClient, os } from '@orpc/server'
 import { issue, issueBlocker, task as taskTable } from '@tania/task/schema'
 import {
-  createTask,
+  createTaskLedger,
   type Ghq,
   migrations as taskMigrations,
   router as taskRouter,
 } from '@tania/task/server'
 import {
-  createWorkbench,
+  createWorkbenchLedger,
   migrations as workbenchMigrations,
   router as workbenchRouter,
 } from '@tania/workbench/server'
@@ -44,18 +44,18 @@ export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Gh
   const ptydHome = tempHome(onCleanup)
   const ptyd = startFakePtyd(ptydHome)
   onCleanup(() => ptyd.stop())
-  const workbench = createWorkbench({
+  const workbenchLedger = createWorkbenchLedger({
     db,
     home: ptydHome,
     ptydPath: join(ptydHome, 'no-ptyd'),
     notify() {},
     nameAgentSession: () => null,
   })
-  onCleanup(() => workbench.stop())
+  onCleanup(() => workbenchLedger.stop())
   // CLI のテストは GitHub に届かせない。
-  const task = createTask({
+  const taskLedger = createTaskLedger({
     db,
-    workbench,
+    workbenchLedger,
     home: home ?? ptydHome,
     ghq,
     github: {
@@ -63,7 +63,7 @@ export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Gh
       token: () => Promise.reject(new Error('`gh auth token` failed: not logged in')),
     },
   })
-  const context = { db, workbench, task }
+  const context = { db, workbenchLedger, taskLedger }
   return {
     sqlite,
     db,

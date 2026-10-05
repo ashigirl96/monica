@@ -123,11 +123,11 @@ async function newRun(
 }
 
 function openClaudeTab(deps: BenchDeps, launch: Launch) {
-  const { db, workbench } = deps
+  const { db, workbenchLedger } = deps
   return db.transaction((tx) => {
     findOpenTask(tx, eq(issue.id, launch.bench.taskIssueId), launch.ref)
     refuseClosing(deps, launch.bench.taskIssueId, launch.ref)
-    return workbench.openTab(tx, {
+    return workbenchLedger.openTab(tx, {
       runspaceId: launch.bench.runspaceId,
       cwd: launch.tabCwd,
       input: `${claudeCommand(launch)}\r`,

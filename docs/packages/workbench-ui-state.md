@@ -1,6 +1,6 @@
 # Workbench の UI 状態と status dot
 
-帳簿に載せない Workbench の画面の状態と、Agent Session の状態の見せ方。どちらも `packages/workbench/src/ui` に置く。
+Workbench Ledger に載せない Workbench の画面の状態と、Agent Session の状態の見せ方。どちらも `packages/workbench/src/ui` に置く。
 
 ## UI 状態
 
