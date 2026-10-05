@@ -13,6 +13,11 @@ export function isDeadStatus(status: TerminalSessionStatus | undefined): boolean
   return status === 'exited' || status === 'lost' || status === 'failed'
 }
 
+// starting の Terminal Session は ptyd にまだ無いことがあり、attach すると失敗して lost に見えるので、running を待つ。
+export function canAttach(status: TerminalSessionStatus | undefined): boolean {
+  return status !== 'starting' && !isDeadStatus(status)
+}
+
 const terminalSessionsAtom = atom<TerminalSession[]>([])
 
 // 読み直しの合間は pane が attach と Exit で知った状態を書き込み、map に無い Terminal Session は不明として pane が attach を試みる。

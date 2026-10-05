@@ -51,6 +51,15 @@ changes                    → { type: "layout" } | { type: "terminalSession", i
 - 手前に見えていた Tab が、layout を読み直したら別の Runspace に居れば、画面も移った先へついていく。drop、pin の切り出し、Attach（CLI と picker）のどれで移っても同じ。CLI の `tania task attach` は手前の Tab で打つことが多く、ついていかないと打った端末が画面から消えるため。
 - shell が終わった Tab は webview が閉じる。接続中の Tab で Shell の Exit を受けたら、webview が `tab.close` を呼ぶ（monica どおり）。Backend は行を exited にするだけで、Tab を閉じない。exit の時点で接続していなかった Tab と、lost / failed の Tab は、overlay を出したまま `tab.respawn` か `tab.close` を待つ。pin された Tab は例外で、webview は閉じず、Backend が張り直す（「pin」の節）。
 
+## Terminal Session の起動と終了
+
+ptyd への Create・Write・Terminate は、行を書いた transaction の後に workbench が送る（ADR-0015）。
+
+- `runspace.create`・`tab.open`・`tab.respawn`、pin の張り直し、他の domain の `openTab` は、`starting` の行を commit したら返り、ptyd を待たない。shell の失敗は Tab の failed / lost で見える。
+- `runspace.remove`、`terminalSession.terminate`、他の domain の `removeRunspace` も、Terminate を後ろで送って返る。Terminate は接続が切れても繋ぎ直した ptyd に送り直し、失敗は stderr に出す。
+- reconcile は、Create をまだ送っていない行を、ptyd の List に無くても lost にしない（ADR-0011 の規則の例外）。Create を送った後で応答の前に接続が切れた行は、ADR-0011 どおり reconcile が決める。
+- webview は Terminal Session が `starting` の間は attach せず、`running` になった合図（`{ type: "terminalSession", id }`）で attach する。ptyd に session が無いうちに attach すると失敗し、lost と表示して繋ぎ直さないため。
+
 ## pin
 
 `GLOSSARY.md` の Pin を帳簿で守る。帳簿に置く理由は ADR-0014。

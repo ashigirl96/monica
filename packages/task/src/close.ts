@@ -67,20 +67,18 @@ async function closeReserved(
     // git を待つ間に Bench の Tab で起こした claude は hook から Run になっているので、呼び手と同じく Tab を残す。
     const lateRuns = force ? [] : liveRunsBesides(tx, found.issue.id, caller)
     tx.update(task).set({ closedAt: new Date() }).where(eq(task.issueId, found.issue.id)).run()
-    let terminalSessionIds: string[] = []
     let spared = false
     if (now.bench) {
       const { runspaceId } = now.bench
       tx.delete(bench).where(eq(bench.taskIssueId, found.issue.id)).run()
-      terminalSessionIds = deps.workbench.removeRunspace(tx, runspaceId, {
+      deps.workbench.removeRunspace(tx, runspaceId, {
         spare: [...(caller ? [caller] : []), ...lateRuns.map((r) => r.terminalSessionId)],
       })
       spared = caller !== undefined && tabIn(tx, runspaceId, caller)
     }
-    return { ref: formatRef(now.issue), spared, lateRuns, terminalSessionIds }
+    return { ref: formatRef(now.issue), spared, lateRuns }
   })
   deps.publish({ type: 'task', ref: closed.ref })
-  await deps.workbench.terminateTerminalSessions(closed.terminalSessionIds)
   return {
     ref: closed.ref,
     removedWorktree: removed.removedWorktree,
@@ -115,7 +113,7 @@ export async function reopenTask(
   const warnings = await syncOrUseCopy(deps, tracked.issue)
   const reopened = deps.db.transaction((tx) => {
     const found = closedTask(tx, eq(issue.id, tracked.issue.id), formatRef(tracked.issue))
-    // close は commit の後も Terminal Session を終わらせ終えるまで予約を持ち、閉じた結果を返す。
+    // close は閉じた結果を返すまで予約を持つ。
     refuseClosing(deps, found.issue.id, formatRef(found.issue))
     tx.update(task).set({ closedAt: null }).where(eq(task.issueId, found.issue.id)).run()
     return found.issue

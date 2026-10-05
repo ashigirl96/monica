@@ -139,10 +139,11 @@ test('unpinning a split Tab leaves it in its own Runspace', async () => {
 })
 
 test("when a pinned Tab's shell exits, the Backend binds the Tab to a new shell in its last cwd at 24×80", async () => {
-  const { ptyd, client } = setup()
+  const { ptyd, client, settled } = setup()
   const { runspaceId, tab } = await client.runspace.create({ cwd: '/work', rows: 50, cols: 200 })
   await client.tab.setCwd({ id: tab.id, cwd: '/work/sub' })
   await client.tab.pin({ id: tab.id })
+  await settled(tab.terminalSessionId)
   letShellsLive()
 
   ptyd.exit(tab.terminalSessionId, 0)
@@ -190,9 +191,10 @@ test('a pinned Tab whose shell ptyd lost is bound to a new shell after the recon
 })
 
 test('a respawned shell whose Created reply is lost to a dropped connection is adopted by the reconcile, not failed', async () => {
-  const { ptyd, workbench, client } = setup()
+  const { ptyd, workbench, client, settled } = setup()
   const { tab } = await client.runspace.create(size)
   await client.tab.pin({ id: tab.id })
+  await settled(tab.terminalSessionId)
   letShellsLive()
   ptyd.dropNextCreatedReply = true
   const reconciled = new Promise<void>((resolve) => {
@@ -254,9 +256,10 @@ test('a pinned Tab the Backend left on an ended Terminal Session before it stopp
 })
 
 test('a pinned Tab whose shell dies right after starting stays on the ended Terminal Session', async () => {
-  const { ptyd, client } = setup()
+  const { ptyd, client, settled } = setup()
   const { tab } = await client.runspace.create(size)
   await client.tab.pin({ id: tab.id })
+  await settled(tab.terminalSessionId)
 
   ptyd.exit(tab.terminalSessionId, 1)
   // 張り直すかは Exit を受けた直後に決まり、Reap はその後で ptyd に届く。

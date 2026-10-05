@@ -1,11 +1,19 @@
 import { afterEach, expect, test } from 'bun:test'
 
 import type { WorkbenchChange } from './contract.ts'
+import type { startFakePtyd } from './fake-ptyd.ts'
 import { cleanUp, setup } from './testing.ts'
 
 afterEach(cleanUp)
 
 const size = { rows: 24, cols: 80 }
+
+type Ptyd = ReturnType<typeof startFakePtyd>
+
+async function terminated(ptyd: Ptyd, count: number) {
+  const ops = await ptyd.receivedAtLeast(count, (op) => op.op === 'terminate')
+  return ops.map((op) => op.session_id)
+}
 
 function setupWithOwned() {
   const booted = setup()
@@ -17,7 +25,6 @@ function setupWithOwned() {
 test("openTab opens a Tab at the end of the Runspace on a starting Terminal Session, in the Runspace's cwd unless given one", async () => {
   const { db, workbench, client, owned } = setupWithOwned()
   const first = await client.tab.open({ runspaceId: owned, ...size })
-  await workbench.ready()
 
   const inBench = db.transaction((tx) => workbench.openTab(tx, { runspaceId: owned }))
   const elsewhere = db.transaction((tx) =>
@@ -49,25 +56,38 @@ test('openTab signals the layout, so the webview reads a Tab another domain open
   expect(changes).toEqual([{ type: 'layout' }])
 })
 
-test('a Tab opened after ready starts its shell and is typed into without being attached', async () => {
+test('openTab starts the shell at 24×80 once the transaction commits, then types the input into it without being attached', async () => {
   const { ptyd, db, workbench, client, owned } = setupWithOwned()
-  await workbench.ready()
-  const { terminalSessionId } = db.transaction((tx) => workbench.openTab(tx, { runspaceId: owned }))
+  await workbench.start()
 
-  await workbench.startTerminalSession(terminalSessionId, size)
-  await workbench.writeTerminalSession(terminalSessionId, 'claude\r')
+  const { terminalSessionId } = db.transaction((tx) =>
+    workbench.openTab(tx, { runspaceId: owned, input: 'claude\r' }),
+  )
 
-  expect(await ptyd.received((op) => op.op === 'create')).toMatchObject({
-    session_id: terminalSessionId,
-    cwd: '/work/bench',
-    ...size,
-  })
-  const written = await ptyd.received((op) => op.op === 'write')
-  expect(written).toMatchObject({ session_id: terminalSessionId })
-  expect(Buffer.from((written as { data: string }).data, 'base64').toString()).toBe('claude\r')
+  await ptyd.received((op) => op.op === 'write')
+  expect(ptyd.sessionRequests()).toEqual([
+    expect.objectContaining({
+      op: 'create',
+      session_id: terminalSessionId,
+      cwd: '/work/bench',
+      rows: 24,
+      cols: 80,
+    }),
+    { op: 'write', session_id: terminalSessionId, data: 'claude\r' },
+  ])
   expect(await client.terminalSession.list()).toMatchObject([
     { id: terminalSessionId, status: 'running' },
   ])
+})
+
+test('openTab starts the shell at the size given', async () => {
+  const { ptyd, db, workbench, owned } = setupWithOwned()
+
+  db.transaction((tx) =>
+    workbench.openTab(tx, { runspaceId: owned, size: { rows: 50, cols: 120 } }),
+  )
+
+  expect(await ptyd.received((op) => op.op === 'create')).toMatchObject({ rows: 50, cols: 120 })
 })
 
 test('moveTab moves a Tab to the end of another Runspace, drops its pin, removes the Runspace it emptied, and signals the layout', async () => {
@@ -92,35 +112,34 @@ test('moveTab moves a Tab to the end of another Runspace, drops its pin, removes
   expect(changes).toEqual([{ type: 'layout' }])
 })
 
-test('removeRunspace removes the owned Runspace with all its Tabs, pinned ones too, returns their Terminal Sessions, and signals the layout', async () => {
-  const { db, workbench, client, owned } = setupWithOwned()
+test('removeRunspace removes the owned Runspace with all its Tabs, pinned ones too, terminates their Terminal Sessions once the transaction commits, and signals the layout', async () => {
+  const { ptyd, db, workbench, client, owned, settled } = setupWithOwned()
   const plain = await client.runspace.create(size)
   const first = await client.tab.open({ runspaceId: owned, ...size })
   const pinned = await client.tab.open({ runspaceId: owned, ...size })
   await client.tab.pin({ id: pinned.id })
+  for (const tab of [plain.tab, first, pinned]) await settled(tab.terminalSessionId)
   const changes: WorkbenchChange[] = []
   workbench.events.subscribe('change', (change) => changes.push(change))
 
-  const removed = db.transaction((tx) => workbench.removeRunspace(tx, owned))
+  db.transaction((tx) => workbench.removeRunspace(tx, owned))
 
-  expect(removed).toEqual([first.terminalSessionId, pinned.terminalSessionId])
+  expect(await terminated(ptyd, 2)).toEqual([first.terminalSessionId, pinned.terminalSessionId])
   expect((await client.layout.get()).runspaces).toMatchObject([
     { id: plain.runspaceId, sortOrder: 0 },
   ])
   expect(changes).toEqual([{ type: 'layout' }])
 })
 
-test("removeRunspace keeps the spared Tab, pinned or not, in the Runspace it no longer owns, and returns the other Tabs' Terminal Sessions", async () => {
-  const { db, workbench, client, owned } = setupWithOwned()
+test("removeRunspace keeps the spared Tab, pinned or not, in the Runspace it no longer owns, and terminates only the other Tabs' Terminal Sessions", async () => {
+  const { ptyd, db, workbench, client, owned } = setupWithOwned()
   const other = await client.tab.open({ runspaceId: owned, ...size })
   const spared = await client.tab.open({ runspaceId: owned, ...size })
   await client.tab.pin({ id: spared.id })
 
-  const removed = db.transaction((tx) =>
-    workbench.removeRunspace(tx, owned, { spare: [spared.terminalSessionId] }),
-  )
+  db.transaction((tx) => workbench.removeRunspace(tx, owned, { spare: [spared.terminalSessionId] }))
 
-  expect(removed).toEqual([other.terminalSessionId])
+  expect(await terminated(ptyd, 1)).toEqual([other.terminalSessionId])
   expect((await client.layout.get()).runspaces).toEqual([
     {
       id: owned,
@@ -133,18 +152,18 @@ test("removeRunspace keeps the spared Tab, pinned or not, in the Runspace it no 
 })
 
 test('removeRunspace keeps every spared Tab in their order', async () => {
-  const { db, workbench, client, owned } = setupWithOwned()
+  const { ptyd, db, workbench, client, owned } = setupWithOwned()
   const first = await client.tab.open({ runspaceId: owned, ...size })
   const other = await client.tab.open({ runspaceId: owned, ...size })
   const last = await client.tab.open({ runspaceId: owned, ...size })
 
-  const removed = db.transaction((tx) =>
+  db.transaction((tx) =>
     workbench.removeRunspace(tx, owned, {
       spare: [last.terminalSessionId, first.terminalSessionId],
     }),
   )
 
-  expect(removed).toEqual([other.terminalSessionId])
+  expect(await terminated(ptyd, 1)).toEqual([other.terminalSessionId])
   expect((await client.layout.get()).runspaces).toMatchObject([
     {
       id: owned,
@@ -168,34 +187,14 @@ test('the Runspace a spared Tab stays in goes away with its last Tab, like any o
 })
 
 test('removeRunspace removes the whole Runspace when the spared Terminal Session is in none of its Tabs', async () => {
-  const { db, workbench, client, owned } = setupWithOwned()
+  const { ptyd, db, workbench, client, owned } = setupWithOwned()
   const inBench = await client.tab.open({ runspaceId: owned, ...size })
   const elsewhere = await client.runspace.create(size)
 
-  const removed = db.transaction((tx) =>
+  db.transaction((tx) =>
     workbench.removeRunspace(tx, owned, { spare: [elsewhere.tab.terminalSessionId] }),
   )
 
-  expect(removed).toEqual([inBench.terminalSessionId])
+  expect(await terminated(ptyd, 1)).toEqual([inBench.terminalSessionId])
   expect((await client.layout.get()).runspaces.map((r) => r.id)).toEqual([elsewhere.runspaceId])
-})
-
-test('terminateTerminalSessions asks ptyd to terminate each Terminal Session', async () => {
-  const { ptyd, workbench } = setup()
-
-  await workbench.terminateTerminalSessions(['ts-a', 'ts-b'])
-
-  expect(ptyd.receivedAll((op) => op.op === 'terminate')).toEqual([
-    { op: 'terminate', session_id: 'ts-a' },
-    { op: 'terminate', session_id: 'ts-b' },
-  ])
-})
-
-test('writeTerminalSession fails when ptyd refuses the write', async () => {
-  const { ptyd, workbench } = setup()
-  ptyd.writeError = 'no session ts-gone'
-
-  await expect(workbench.writeTerminalSession('ts-gone', 'claude\r')).rejects.toThrow(
-    'no session ts-gone',
-  )
 })

@@ -51,6 +51,12 @@ function terminated({ ptyd }: Pick<Books, 'ptyd'>) {
   return ptyd.receivedAll((op) => op.op === 'terminate').map((op) => op.session_id)
 }
 
+// close は commit したら返り、Terminate はその後で ptyd に届く。
+async function terminatedAfterClose({ ptyd }: Pick<Books, 'ptyd'>, count: number) {
+  const ops = await ptyd.receivedAtLeast(count, (op) => op.op === 'terminate')
+  return ops.map((op) => op.session_id)
+}
+
 function tabsOf({ db }: Pick<Books, 'db'>) {
   return db.select({ terminalSessionId: tab.terminalSessionId }).from(tab).all()
 }
@@ -85,7 +91,9 @@ test('close takes down the Bench of a Task no guard stops: the worktree, the bra
   expect(git(checkout, 'worktree', 'list', '--porcelain')).not.toContain('issue-12')
   expect(db.select().from(runspace).all()).toEqual([])
   expect(tabsOf(books)).toEqual([])
-  expect(terminated(books).toSorted()).toEqual([books.claudeTab, shell].toSorted())
+  expect((await terminatedAfterClose(books, 2)).toSorted()).toEqual(
+    [books.claudeTab, shell].toSorted(),
+  )
   expect(await client.bench.list()).toEqual([])
   expect((await client.list({})).tasks).toEqual([])
   expect((await client.list({ closed: true })).tasks).toMatchObject([
@@ -105,7 +113,7 @@ test('close called by the agent in a Tab of the Bench keeps that Tab and its cla
   expect(output).toMatchObject({ removedWorktree: books.cwd, spared: true })
   expect(db.select().from(runspace).all()).toMatchObject([{ id: runspaceId, owned: false }])
   expect(tabsOf(books)).toEqual([{ terminalSessionId: claudeTab }])
-  expect(terminated(books)).toEqual([other])
+  expect(await terminatedAfterClose(books, 1)).toEqual([other])
   expect(await client.current({ terminalSessionId: claudeTab })).toMatchObject({
     ref,
     source: 'run',
@@ -470,22 +478,20 @@ test("a claude that becomes a Run while close removes the worktree keeps its Tab
   })
   expect(db.select().from(runspace).all()).toMatchObject([{ id: runspaceId, owned: false }])
   expect(tabsOf(books)).toEqual([{ terminalSessionId: claudeTab }])
-  expect(terminated(books)).toEqual([other])
+  expect(await terminatedAfterClose(books, 1)).toEqual([other])
   expect((await client.list({ closed: true })).tasks).toMatchObject([{ ref }])
 })
 
-test('reopen is refused while close is still terminating the Terminal Sessions of the Bench', async () => {
+test('close returns before ptyd answers the Terminate of the Bench, and the Task reopens right after', async () => {
   const books = await withWorktreeBench()
   const finish = books.ptyd.holdNext('terminate')
-  const closing = books.client.close({ ref })
-  await books.ptyd.received((op) => op.op === 'terminate')
 
-  const error = await failure(books.client.reopen({ ref }))
+  await books.client.close({ ref })
+  const output = await books.client.reopen({ ref })
   finish()
 
-  expect(error.code).toBe('CONFLICT')
-  expect(await closing).toMatchObject({ ref })
-  expect((await books.client.list({ closed: true })).tasks).toMatchObject([{ ref }])
+  expect(output).toMatchObject({ ref })
+  expect(await terminatedAfterClose(books, 1)).toEqual([books.claudeTab])
 })
 
 test('reopen opens a closed Task with no Bench, and the next run makes the worktree and the Bench anew on a new branch issue-n', async () => {
