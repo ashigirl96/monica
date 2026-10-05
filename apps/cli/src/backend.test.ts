@@ -45,7 +45,7 @@ function serveBackend(home: string) {
 function refusedPort(): number {
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response() })
   const port = server.port!
-  server.stop(true)
+  void server.stop(true)
   return port
 }
 

@@ -46,9 +46,7 @@ function inspectSkill(path: string, markdown: string, program: Command): string[
   const dir = skillNameOf(path)
   const name = nameOf(markdown)
   if (name !== dir) {
-    problems.push(
-      `${path}: name is ${name === undefined ? 'missing' : `'${name}'`}, not the directory name '${dir}'`,
-    )
+    problems.push(`${path}: name is ${describeName(name)}, not the directory name '${dir}'`)
   }
   for (const command of taniaCommands(markdown)) {
     const problem = checkCommand(program, command)
@@ -61,6 +59,11 @@ function nameOf(markdown: string): unknown {
   const frontmatter = /^---\n([\s\S]*?)\n---\n/.exec(markdown)?.[1]
   if (frontmatter === undefined) return undefined
   return (Bun.YAML.parse(frontmatter) as { name?: unknown } | null)?.name
+}
+
+function describeName(name: unknown): string {
+  if (name === undefined) return 'missing'
+  return typeof name === 'string' ? `'${name}'` : JSON.stringify(name)
 }
 
 // procedure は呼ばないので、Backend にも出力にも届かなくてよい。

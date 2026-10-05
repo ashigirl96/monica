@@ -23,6 +23,7 @@ const RETRY_WINDOW_MS = 3000
 
 export function connect(home: string, { retry = true }: { retry?: boolean } = {}): Client | null {
   if (!liveEndpoint(home)) return null
+  // oxlint-disable-next-line typescript/no-generated-empty-object-type -- oRPC の client context が空であることを表す型なので、`{}` に解決されるのが意図どおり。
   const link: ClientLink<Record<never, never>> = {
     async call(path, input, options) {
       const deadline = Date.now() + RETRY_WINDOW_MS
