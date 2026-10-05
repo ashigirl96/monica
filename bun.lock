@@ -16,6 +16,7 @@
       "name": "@tania/backend",
       "dependencies": {
         "@orpc/server": "catalog:",
+        "@tania/job": "workspace:*",
         "@tania/task": "workspace:*",
         "@tania/workbench": "workspace:*",
         "drizzle-orm": "catalog:",
@@ -31,6 +32,7 @@
         "@orpc/client": "catalog:",
         "@orpc/contract": "catalog:",
         "@orpc/server": "catalog:",
+        "@tania/job": "workspace:*",
         "@tania/task": "workspace:*",
         "@tania/workbench": "workspace:*",
         "commander": "catalog:",
@@ -64,6 +66,20 @@
         "tailwindcss": "catalog:",
         "tw-animate-css": "catalog:",
         "vite": "catalog:",
+      },
+    },
+    "packages/job": {
+      "name": "@tania/job",
+      "dependencies": {
+        "@orpc/contract": "catalog:",
+        "@orpc/server": "catalog:",
+        "@tania/ui": "workspace:*",
+        "drizzle-orm": "catalog:",
+        "drizzle-zod": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "drizzle-kit": "catalog:",
       },
     },
     "packages/task": {
@@ -405,6 +421,8 @@
     "@tania/cli": ["@tania/cli@workspace:apps/cli"],
 
     "@tania/desktop": ["@tania/desktop@workspace:apps/desktop"],
+
+    "@tania/job": ["@tania/job@workspace:packages/job"],
 
     "@tania/task": ["@tania/task@workspace:packages/task"],
 

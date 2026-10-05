@@ -97,7 +97,7 @@ Tauri の殻。窓、端末の中継、Backend の起動・監督と、OS への
 _Avoid_: Rust 側, Tauri 側
 
 **Backend**:
-Shell が起動し、desktop と同寿命の process。Task Ledger と Workbench Ledger と DB を唯一所有し、webview と CLI は HTTP で呼ぶ。desktop が閉じている間は存在しない。
+Shell が起動し、desktop と同寿命の process。Task Ledger と Workbench Ledger と Job Ledger と DB を唯一所有し、webview と CLI は HTTP で呼ぶ。desktop が閉じている間は存在しない。
 _Avoid_: server, sidecar, tania-backend
 
 **Task Ledger**:
@@ -107,6 +107,10 @@ _Avoid_: 帳簿, books
 **Workbench Ledger**:
 Backend に 1 つだけある、Runspace・Tab・Pin・Terminal Session・Agent Session の記録の全体。Workbench（画面）ではない。
 _Avoid_: 帳簿, books
+
+**Job Ledger**:
+Backend に 1 つだけある、Job と Job Execution の記録の全体。1 つの Job ではない。
+_Avoid_: scheduler, 帳簿
 
 **ptyd**:
 Terminal Session を管理する常駐 daemon。Backend が起動し、desktop より長生きする。socket 越しに使う。

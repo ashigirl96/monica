@@ -9,6 +9,7 @@
     "@orpc/client": "catalog:",
     "@orpc/contract": "catalog:",
     "@orpc/server": "catalog:",
+    "@tania/job": "workspace:*",
     "@tania/task": "workspace:*",
     "@tania/workbench": "workspace:*",
     "commander": "catalog:",
