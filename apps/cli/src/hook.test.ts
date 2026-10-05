@@ -133,7 +133,7 @@ test('without a Backend, or with one that fails or refuses, the hook exits 0 at 
   const refusing = taniaHome()
   const closed = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response() })
   writeEndpoint(refusing, closed.port!)
-  closed.stop(true)
+  void closed.stop(true)
 
   for (const home of [absent, failing, refusing]) {
     const result = await hook(home, prompt, inTab)

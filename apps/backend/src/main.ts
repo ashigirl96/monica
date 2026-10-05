@@ -115,7 +115,7 @@ function exit() {
   } catch {
     // 既に無い。
   }
-  server.stop(true)
+  void server.stop(true)
   sqlite.close()
   process.exit(0)
 }

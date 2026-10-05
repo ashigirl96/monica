@@ -2,11 +2,21 @@
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["typescript", "unicorn", "oxc", "import", "react"],
   "jsPlugins": ["./scripts/oxlint/tania.js"],
+  "options": { "typeAware": true },
   "categories": {
     "correctness": "error"
   },
   "rules": {
-    "tania/sync-transaction": "error"
+    "tania/sync-transaction": "error",
+    // unknown や Buffer を `${…}` に入れる形を咎める。`[object Object]` になる値は no-base-to-string が見る。
+    "typescript/restrict-template-expressions": "off",
+    // 以下の 3 つは suspicious の rule で、category を on にしても off のままにする。
+    // 害の無い不要な `!` と `as` を咎める。
+    "typescript/no-unnecessary-type-assertion": "off",
+    // `JSON.parse(…) as { pid: number }` のように、検査せずに型を付ける `as` をすべて咎める。
+    "typescript/no-unsafe-type-assertion": "off",
+    // React の effect の cleanup、hono の middleware、網羅した switch のように、値を返さない分岐が意図どおりの関数に出る。
+    "typescript/consistent-return": "off"
   },
   // 1 つの file に複数の override が当たると、後の override が no-restricted-imports の設定を丸ごと置き換える。
   // そのため file の集合ごとに、そこで守る制限をすべて並べる。
@@ -352,6 +362,11 @@
       "files": ["packages/*/src/**", "apps/backend/src/**"],
       "excludeFiles": ["**/*.test.ts", "**/testing.ts", "**/fake-*.ts"],
       "rules": { "tania/spawn-env": "error", "tania/cross-domain-write": "error" }
+    },
+    {
+      // bun-types が `expect(…).rejects` の matcher を void を返す型にしているための誤検知。rule に従って await を外すと、test が reject を待たなくなる。
+      "files": ["**/*.test.ts"],
+      "rules": { "typescript/await-thenable": "off" }
     }
   ]
 }

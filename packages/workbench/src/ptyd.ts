@@ -63,7 +63,7 @@ export class PtydClient {
   private closed = false
 
   private constructor(
-    private socket: Socket<undefined>,
+    private socket: Socket,
     private handlers: PtydHandlers,
   ) {}
 

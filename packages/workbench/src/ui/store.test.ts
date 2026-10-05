@@ -7,7 +7,7 @@ import type { Atom, Store } from 'jotai'
 // Shell の command は Tauri の外では呼べないので、呼ばれた command だけを記録する。
 const shellCalls: { command: string; args: Record<string, unknown> }[] = []
 const tauriCore = await import('@tauri-apps/api/core')
-mock.module('@tauri-apps/api/core', () => ({
+await mock.module('@tauri-apps/api/core', () => ({
   ...tauriCore,
   invoke: async (command: string, args: Record<string, unknown>) => {
     shellCalls.push({ command, args })
@@ -17,7 +17,7 @@ mock.module('@tauri-apps/api/core', () => ({
 // toast は画面の外にあるので、出した文言だけを記録する。
 const toasts: string[] = []
 const ui = await import('@tania/ui')
-mock.module('@tania/ui', () => ({
+await mock.module('@tania/ui', () => ({
   ...ui,
   pushErrorToast: (message: string) => {
     toasts.push(message)
