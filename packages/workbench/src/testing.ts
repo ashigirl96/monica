@@ -7,7 +7,7 @@ import { createRouterClient } from '@orpc/server'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 
-import { startFakePtyd, tempHome } from './fake-ptyd.ts'
+import { startFakePtyd, tempHome, untilSettled } from './fake-ptyd.ts'
 import { createWorkbench, migrations, router } from './server.ts'
 import type { NotificationDeps } from './workbench.ts'
 
@@ -52,7 +52,11 @@ export function setup({
     booted.workbench.stop()
     return boot()
   }
-  return { home, ptyd, db, ...booted, restartBackend }
+
+  const settled = (terminalSessionId: string) =>
+    untilSettled(() => booted.client.terminalSession.list(), terminalSessionId)
+
+  return { home, ptyd, db, ...booted, restartBackend, settled }
 }
 
 export function git(cwd: string, ...args: string[]) {

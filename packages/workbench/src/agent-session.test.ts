@@ -265,8 +265,9 @@ test('a notification that cannot be named still leaves the hook recorded and sig
 })
 
 test('an Exit from ptyd ends the Agent Session in that Terminal Session', async () => {
-  const { ptyd, db, client } = setup()
+  const { ptyd, db, client, settled } = setup()
   const { tab } = await client.runspace.create(size)
+  await settled(tab.terminalSessionId)
   await client.agentSession.recordHook({
     terminalSessionId: tab.terminalSessionId,
     payload: payload('s-1', 'UserPromptSubmit', { prompt: 'hi' }),
@@ -280,7 +281,7 @@ test('an Exit from ptyd ends the Agent Session in that Terminal Session', async 
 })
 
 test('after a Backend restart a running Agent Session is unobserved until its next hook, a waiting one stays, and one whose Terminal Session is gone has ended', async () => {
-  const { ptyd, db, client, restartBackend } = setup()
+  const { ptyd, db, client, restartBackend, settled } = setup()
   const record = (terminalSessionId: string, sessionId: string, hookEventName: string) =>
     client.agentSession.recordHook({
       terminalSessionId,
@@ -289,6 +290,7 @@ test('after a Backend restart a running Agent Session is unobserved until its ne
   const busy = (await client.runspace.create(size)).tab.terminalSessionId
   const waiting = (await client.runspace.create(size)).tab.terminalSessionId
   const gone = (await client.runspace.create(size)).tab.terminalSessionId
+  for (const id of [busy, waiting, gone]) await settled(id)
   await record(busy, 's-busy', 'UserPromptSubmit')
   await record(waiting, 's-waiting', 'Stop')
   await record(gone, 's-gone', 'UserPromptSubmit')
@@ -314,8 +316,9 @@ test('after a Backend restart a running Agent Session is unobserved until its ne
 })
 
 test('reconnecting to ptyd signals each Agent Session the reconcile ends', async () => {
-  const { home, ptyd, workbench, client } = setup()
+  const { home, ptyd, workbench, client, settled } = setup()
   const { tab } = await client.runspace.create(size)
+  await settled(tab.terminalSessionId)
   await client.agentSession.recordHook({
     terminalSessionId: tab.terminalSessionId,
     payload: payload('s-1', 'UserPromptSubmit', { prompt: 'hi' }),
@@ -341,8 +344,9 @@ test('reconnecting to ptyd signals each Agent Session the reconcile ends', async
 })
 
 test('reconnecting to ptyd while the Backend keeps running leaves a running Agent Session running', async () => {
-  const { home, ptyd, workbench, client } = setup()
+  const { home, ptyd, workbench, client, settled } = setup()
   const { tab } = await client.runspace.create(size)
+  await settled(tab.terminalSessionId)
   await client.agentSession.recordHook({
     terminalSessionId: tab.terminalSessionId,
     payload: payload('s-1', 'UserPromptSubmit', { prompt: 'hi' }),

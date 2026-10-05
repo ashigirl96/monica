@@ -24,14 +24,8 @@ import {
   writeLayout,
 } from './layout.ts'
 import { tab, terminalSession } from './schema.ts'
-import {
-  type Db,
-  LIVE,
-  shellWhenReady,
-  startTerminalSession,
-  terminateTerminalSessions,
-  type Workbench,
-} from './workbench.ts'
+import { LIVE } from './terminal-session.ts'
+import { type Db, terminalSessionsOf, type Workbench } from './workbench.ts'
 import { worktreeInfo } from './worktree.ts'
 
 export { migrations } from '../migrations/index.ts'
@@ -51,7 +45,7 @@ export const router = os.router({
         .orderBy(terminalSession.createdAt)
         .all(),
     ),
-    terminate: os.terminalSession.terminate.handler(async ({ context, input }) => {
+    terminate: os.terminalSession.terminate.handler(({ context, input }) => {
       const row = context.db
         .select({ pinned: tab.pinned })
         .from(terminalSession)
@@ -64,50 +58,57 @@ export const router = os.router({
           message: `Terminal Session ${input.id} is in a pinned Tab`,
         })
       }
-      await terminateTerminalSessions(context.workbench, [input.id])
+      terminalSessionsOf(context.workbench).terminate([input.id])
     }),
   },
   layout: {
     get: os.layout.get.handler(({ context }) => readLayout(context.db)),
   },
   runspace: {
-    create: os.runspace.create.handler(async ({ context, input }) => {
+    create: os.runspace.create.handler(({ context, input }) => {
       const cwd = input.cwd ?? homedir()
-      const shell = await shellWhenReady(context.workbench)
       const opened = writeLayout(context, (tx) =>
-        openTab(tx, { runspaceId: createRunspace(tx, { cwd, index: input.index }), cwd, shell }),
+        openTab(tx, terminalSessionsOf(context.workbench), {
+          runspaceId: createRunspace(tx, { cwd, index: input.index }),
+          cwd,
+          size: { rows: input.rows, cols: input.cols },
+        }),
       )
-      await startTerminalSession(context.workbench, opened.terminalSessionId, input)
       return { runspaceId: opened.runspaceId, tab: asTab(opened) }
     }),
-    remove: os.runspace.remove.handler(async ({ context, input }) => {
-      const terminalSessionIds = writeLayout(context, (tx) => {
+    remove: os.runspace.remove.handler(({ context, input }) => {
+      writeLayout(context, (tx) => {
         refuseRemoving(tx, input.id)
-        return removeRunspace(tx, input.id)
+        removeRunspace(tx, terminalSessionsOf(context.workbench), input.id)
       })
-      await terminateTerminalSessions(context.workbench, terminalSessionIds)
     }),
     move: os.runspace.move.handler(({ context, input }) => {
       writeLayout(context, (tx) => moveRunspace(tx, input))
     }),
   },
   tab: {
-    open: os.tab.open.handler(async ({ context, input }) => {
-      const { runspaceId, cwd, index, terminalSessionId } = input
-      if (terminalSessionId) {
-        return asTab(
-          writeLayout(context, (tx) =>
-            reattachTab(tx, { runspaceId, cwd, index, terminalSessionId }),
-          ),
-        )
-      }
-      const shell = await shellWhenReady(context.workbench)
-      const opened = writeLayout(context, (tx) => openTab(tx, { runspaceId, cwd, index, shell }))
-      await startTerminalSession(context.workbench, opened.terminalSessionId, input)
-      return asTab(opened)
+    open: os.tab.open.handler(({ context, input }) => {
+      const { runspaceId, cwd, index, terminalSessionId, rows, cols } = input
+      return asTab(
+        writeLayout(context, (tx) =>
+          terminalSessionId
+            ? reattachTab(tx, { runspaceId, cwd, index, terminalSessionId })
+            : openTab(tx, terminalSessionsOf(context.workbench), {
+                runspaceId,
+                cwd,
+                index,
+                size: { rows, cols },
+              }),
+        ),
+      )
     }),
-    respawn: os.tab.respawn.handler(async ({ context, input }) =>
-      asTab(await respawnTab(context, input.id, input)),
+    respawn: os.tab.respawn.handler(({ context, input }) =>
+      asTab(
+        respawnTab(context, terminalSessionsOf(context.workbench), input.id, {
+          rows: input.rows,
+          cols: input.cols,
+        }),
+      ),
     ),
     close: os.tab.close.handler(({ context, input }) => {
       writeLayout(context, (tx) => closeTab(tx, input.id))

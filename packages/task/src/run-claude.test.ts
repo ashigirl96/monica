@@ -2,8 +2,10 @@ import { afterEach, expect, mock, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
+import { startFakePtyd } from '@tania/workbench/testing'
+
 import { bench, issue, run } from './schema.ts'
-import { cleanUp, failure, setup } from './testing.ts'
+import { cleanUp, failure, onCleanup, setup } from './testing.ts'
 
 afterEach(() => {
   mock.restore()
@@ -54,17 +56,10 @@ async function benchTabs({ workbenchClient }: Books) {
   return runspaces.find((runspace) => runspace.owned)!.tabs
 }
 
-// Write の data は base64 なので、打った文字列に戻して比べる。
-function sent({ ptyd }: Books) {
-  return ptyd
-    .receivedAll((op) => 'session_id' in op)
-    .map((op) =>
-      op.op === 'write' ? { ...op, data: Buffer.from(op.data, 'base64').toString() } : op,
-    )
-}
-
-function sentTo(books: Books, terminalSessionId: string) {
-  return sent(books).filter((op) => op.session_id === terminalSessionId)
+// run は Tab を書いて commit したら返り、Create と Write はその後で ptyd に届く。
+async function typedInto(books: Books, terminalSessionId: string) {
+  await books.ptyd.received((op) => op.op === 'write' && op.session_id === terminalSessionId)
+  return books.ptyd.sessionRequests().filter((op) => op.session_id === terminalSessionId)
 }
 
 function runsOf({ db }: Books) {
@@ -93,8 +88,28 @@ test('run opens a new Tab at the end of the Bench, starts its shell at 24x80 and
   expect(await benchTabs(books)).toMatchObject([
     { id: output.tabId, cwd: books.cwd, terminalSessionId: output.terminalSessionId },
   ])
-  expect(sent(books)).toMatchObject([
+  await typedInto(books, output.terminalSessionId)
+  expect(books.ptyd.sessionRequests()).toMatchObject([
     { op: 'create', session_id: output.terminalSessionId, cwd: books.cwd, rows: 24, cols: 80 },
+    { op: 'write', session_id: output.terminalSessionId, data: 'claude\r' },
+  ])
+})
+
+test('run returns while ptyd cannot be reached, leaving its Tab starting; once ptyd is back, the shell starts and claude is typed into it', async () => {
+  const books = await tracked()
+  books.ptyd.stop()
+
+  const output = await books.client.run({ ref })
+
+  expect(await books.workbenchClient.terminalSession.list()).toMatchObject([
+    { id: output.terminalSessionId, status: 'starting' },
+  ])
+  const revived = startFakePtyd(books.home)
+  onCleanup(() => revived.stop())
+  await revived.received((op) => op.op === 'write')
+  expect(await books.settled(output.terminalSessionId)).toMatchObject({ status: 'running' })
+  expect(revived.sessionRequests()).toMatchObject([
+    { op: 'create', session_id: output.terminalSessionId },
     { op: 'write', session_id: output.terminalSessionId, data: 'claude\r' },
   ])
 })
@@ -124,7 +139,7 @@ test("run resumes the claude of the last Run once it has ended, in a new Tab in 
     { id: first.tabId },
     { id: second.tabId, cwd: where },
   ])
-  expect(sentTo(books, second.terminalSessionId)).toMatchObject([
+  expect(await typedInto(books, second.terminalSessionId)).toMatchObject([
     { op: 'create', cwd: where, rows: 24, cols: 80 },
     { op: 'write', data: "claude --resume 's-1'\r" },
   ])
@@ -166,7 +181,9 @@ test("run starts a new claude when the Task's Runs all began before its Bench, a
   const output = await books.client.run({ ref })
 
   expect(output.resumed).toBeNull()
-  expect(sentTo(books, output.terminalSessionId).at(-1)).toMatchObject({ data: 'claude\r' })
+  expect((await typedInto(books, output.terminalSessionId)).at(-1)).toMatchObject({
+    data: 'claude\r',
+  })
 })
 
 test('run starts a new claude rather than resume one that left no transcript, as when it exited before any prompt', async () => {
@@ -176,7 +193,9 @@ test('run starts a new claude rather than resume one that left no transcript, as
   const output = await books.client.run({ ref })
 
   expect(output.resumed).toBeNull()
-  expect(sentTo(books, output.terminalSessionId).at(-1)).toMatchObject({ data: 'claude\r' })
+  expect((await typedInto(books, output.terminalSessionId)).at(-1)).toMatchObject({
+    data: 'claude\r',
+  })
 })
 
 test('run resumes the Run whose claude was active last, even when another began later', async () => {
@@ -220,7 +239,7 @@ test('run refuses a Task whose Issue has an open Blocker, naming it, before it o
   expect(error.data).toEqual({ blockers: [blocker] })
   expect(error.message).toContain(blocker)
   expect(await books.client.bench.list()).toEqual([])
-  expect(sent(books)).toEqual([])
+  expect(books.ptyd.sessionRequests()).toEqual([])
 })
 
 test('run --force starts a new Run past the open Blockers', async () => {
@@ -228,7 +247,9 @@ test('run --force starts a new Run past the open Blockers', async () => {
 
   const output = await books.client.run({ ref, force: true })
 
-  expect(sentTo(books, output.terminalSessionId).at(-1)).toMatchObject({ data: 'claude\r' })
+  expect((await typedInto(books, output.terminalSessionId)).at(-1)).toMatchObject({
+    data: 'claude\r',
+  })
 })
 
 test('run syncs the Task before the gate, so a Blocker closed on GitHub since no longer holds it', async () => {
@@ -268,7 +289,9 @@ test('when GitHub cannot be reached, run judges the gate on the copy and warns h
       /^could not sync acme\/app#12 from GitHub \(`gh auth token` failed: .+\); using the copy from 12 minutes ago$/,
     ),
   ])
-  expect(sentTo(books, output.terminalSessionId).at(-1)).toMatchObject({ data: 'claude\r' })
+  expect((await typedInto(books, output.terminalSessionId)).at(-1)).toMatchObject({
+    data: 'claude\r',
+  })
 })
 
 test('when GitHub cannot be reached, an open Blocker in the copy still holds the Task', async () => {

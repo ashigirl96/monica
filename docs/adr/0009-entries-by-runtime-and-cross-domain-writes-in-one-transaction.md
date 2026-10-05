@@ -16,7 +16,7 @@ ADR-0002 で `packages/<domain>` が schema・router・CLI・skill・UI を縦�
 
 - 依存の向きは task → workbench だけ。bun の isolated linker では package.json に書いていない依存を解決できないので、向きは package.json が守る。
 - 書き込みは相手の domain の method を通す。読み出しは相手の table を `schema` entry で直接 SELECT してよい。Agent Session と Run の join を procedure 経由にすると N+1 になるため。
-- ptyd や fs への副作用は transaction に入らないので、別の async method にし、呼び手が commit の後に呼ぶ。
+- fs への副作用は transaction に入らないので、別の async method にし、呼び手が commit の後に呼ぶ。ptyd への副作用は workbench が transaction の後に自分で送る（ADR-0015）。
 - event は「変わった」の合図で、購読側は DB を読み直す。transaction は同期なので、tx の中で publish しても購読側が動くのは commit 後になる。rollback されても読み直すだけなので、commit 後に publish する仕組みは作らない。
 - domain を持たない UI 部品は `packages/ui` に置く。package は apps を import できないので、apps/desktop の汎用部品を domain の UI から使えないため。
 - browser 側の安全性は CI の `vite build` で確かめる。型だけの import は消えるので対象外。

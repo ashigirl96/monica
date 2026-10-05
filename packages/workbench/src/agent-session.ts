@@ -3,8 +3,9 @@ import { and, eq, getTableColumns, ne } from 'drizzle-orm'
 import type { AgentSession } from './contract.ts'
 import { decodeHook } from './hook-decoder.ts'
 import { agentSession, terminalSession } from './schema.ts'
+import { isLive } from './terminal-session.ts'
 import { notificationFor, supersede, takesOverTerminal, transition } from './transition.ts'
-import { type Books, type Db, isLive, notifyWaiting, type Tx } from './workbench.ts'
+import { type Books, type Db, notifyWaiting, type Tx } from './workbench.ts'
 
 const notEnded = ne(agentSession.state, 'ended')
 

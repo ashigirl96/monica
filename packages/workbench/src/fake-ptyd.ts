@@ -17,6 +17,18 @@ export function tempHome(register: (cleanup: () => void) => void): string {
   return home
 }
 
+// workbench は Create を transaction の後に送るので、Terminal Session は Create の結果が届くまで starting に留まる。
+export async function untilSettled<T extends { id: string; status: string }>(
+  list: () => Promise<T[]>,
+  terminalSessionId: string,
+): Promise<T | undefined> {
+  for (;;) {
+    const found = (await list()).find((s) => s.id === terminalSessionId)
+    if (found?.status !== 'starting') return found
+    await Bun.sleep(5)
+  }
+}
+
 export function startFakePtyd(home: string) {
   const sessions: SessionInfo[] = []
   const received: RequestOp[] = []
@@ -28,6 +40,22 @@ export function startFakePtyd(home: string) {
   function receivedAll<T extends RequestOp>(match: (op: RequestOp) => op is T): T[]
   function receivedAll(match: (op: RequestOp) => boolean): RequestOp[]
   function receivedAll(match: (op: RequestOp) => boolean): RequestOp[] {
+    return received.filter(match)
+  }
+
+  // workbench は transaction の後に ptyd へ送るので、要求は後から届く。
+  async function receivedAtLeast<T extends RequestOp>(
+    count: number,
+    match: (op: RequestOp) => op is T,
+  ): Promise<T[]>
+  async function receivedAtLeast(
+    count: number,
+    match: (op: RequestOp) => boolean,
+  ): Promise<RequestOp[]>
+  async function receivedAtLeast(count: number, match: (op: RequestOp) => boolean) {
+    while (received.filter(match).length < count) {
+      await new Promise((resolve) => waiters.push({ match, resolve }))
+    }
     return received.filter(match)
   }
 
@@ -53,6 +81,16 @@ export function startFakePtyd(home: string) {
     },
 
     receivedAll,
+    receivedAtLeast,
+
+    // Write の data は base64 なので、打った文字列に戻して返す。
+    sessionRequests() {
+      return received
+        .filter((op): op is Extract<RequestOp, { session_id: string }> => 'session_id' in op)
+        .map((op) =>
+          op.op === 'write' ? { ...op, data: Buffer.from(op.data, 'base64').toString() } : op,
+        )
+    },
 
     // 記録はするので、応答を止めている間も received は解決する。
     holdNext(op: RequestOp['op']): () => void {
@@ -66,6 +104,11 @@ export function startFakePtyd(home: string) {
       if (session) Object.assign(session, { running: false, pid: null, exit_code: exitCode })
       for (const socket of sockets)
         send(socket, { type: 'exit', session_id: sessionId, exit_code: exitCode })
+    },
+
+    // listen は続けるので、Backend はすぐに繋ぎ直す。
+    dropConnections() {
+      for (const socket of sockets) socket.end()
     },
 
     stop() {
