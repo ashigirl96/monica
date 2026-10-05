@@ -1,7 +1,8 @@
 import { Database } from 'bun:sqlite'
 import { spyOn } from 'bun:test'
 
-import { os } from '@orpc/server'
+import { createRouterClient, os } from '@orpc/server'
+import { issue, issueBlocker, task as taskTable } from '@tania/task/schema'
 import {
   createTask,
   type Ghq,
@@ -73,6 +74,30 @@ export function inMemoryBackend({ home = '/nonexistent', ghq = noGhq } = {}) {
     router: os.$context<typeof context>().router({ workbench: workbenchRouter, task: taskRouter }),
     context,
   }
+}
+
+export function backendWithTasks() {
+  const backend = inMemoryBackend()
+  const { db } = backend
+  const syncedAt = new Date(0)
+  const [blocker, open, closed] = db
+    .insert(issue)
+    .values([
+      { repo: 'acme/lib', number: 3, title: 'Upstream fix', state: 'open', syncedAt },
+      { repo: 'acme/app', number: 12, title: 'Ship it', state: 'open', syncedAt },
+      { repo: 'acme/app', number: 1, title: 'Shipped', state: 'closed', syncedAt },
+    ])
+    .returning()
+    .all()
+  db.insert(issueBlocker).values({ issueId: open!.id, blockerId: blocker!.id }).run()
+  db.insert(taskTable)
+    .values([
+      { issueId: open!.id, trackedAt: new Date(1) },
+      { issueId: closed!.id, trackedAt: new Date(2), closedAt: new Date(3) },
+    ])
+    .run()
+  const client = createRouterClient(backend.router, { context: backend.context })
+  return () => client
 }
 
 export async function tania(

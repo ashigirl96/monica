@@ -61,6 +61,26 @@ test('a flag the command does not take fails the check, while its own flags, --f
   ])
 })
 
+test('a boolean flag before an argument fails the check, since commander takes the argument as its value', () => {
+  const root = plugin({
+    '.claude-plugin/plugin.json': manifest('./packages/task/skills'),
+    'packages/task/skills/look/SKILL.md': skill(
+      'look',
+      [
+        '```bash',
+        'tania task close acme/app#1 --force',
+        'tania task close --force acme/app#1',
+        '```',
+        '',
+      ].join('\n'),
+    ),
+  })
+
+  expect(inspectSkills(root)).toEqual([
+    "packages/task/skills/look/SKILL.md: `tania task close --force acme/app#1`: option '--force' takes 'acme/app#1' as its value",
+  ])
+})
+
 test('a line in a shell block names a command to run, not a group, and its comment is not checked', () => {
   const root = plugin({
     '.claude-plugin/plugin.json': manifest('./packages/task/skills'),

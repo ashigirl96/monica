@@ -8,31 +8,7 @@ import { bench, issue, issueBlocker, run, task } from '@tania/task/schema'
 import type { Ghq } from '@tania/task/server'
 import { agentSession, runspace, tab } from '@tania/workbench/schema'
 
-import { inMemoryBackend, tania } from './testing.ts'
-
-function backendWithTasks() {
-  const backend = inMemoryBackend()
-  const { db } = backend
-  const syncedAt = new Date(0)
-  const [blocker, open, closed] = db
-    .insert(issue)
-    .values([
-      { repo: 'acme/lib', number: 3, title: 'Upstream fix', state: 'open', syncedAt },
-      { repo: 'acme/app', number: 12, title: 'Ship it', state: 'open', syncedAt },
-      { repo: 'acme/app', number: 1, title: 'Shipped', state: 'closed', syncedAt },
-    ])
-    .returning()
-    .all()
-  db.insert(issueBlocker).values({ issueId: open!.id, blockerId: blocker!.id }).run()
-  db.insert(task)
-    .values([
-      { issueId: open!.id, trackedAt: new Date(1) },
-      { issueId: closed!.id, trackedAt: new Date(2), closedAt: new Date(3) },
-    ])
-    .run()
-  const client = createRouterClient(backend.router, { context: backend.context })
-  return () => client
-}
+import { backendWithTasks, inMemoryBackend, tania } from './testing.ts'
 
 test('task list prints the open Tasks as text', async () => {
   const result = await tania(['task', 'list'], backendWithTasks())

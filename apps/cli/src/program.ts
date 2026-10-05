@@ -1,12 +1,13 @@
-import { type Command, Option } from 'commander'
+import { Argument, type Command, Option } from 'commander'
 import { CliValidationError, createCli, FailedToExitError, type TrpcCliRunParams } from 'trpc-cli'
 
 import { BackendNotRunning, type Client } from './backend.ts'
-import { contract, formatters } from './contract.ts'
+import { complete, describeLines, zshScript } from './completion.ts'
+import { completers, contract, formatters } from './contract.ts'
 import { type Format, forwardingRouter } from './forward.ts'
 
 export type Deps = {
-  connect: () => Client | null
+  connect: (options?: { retry?: boolean }) => Client | null
   terminalSessionId?: string
   stdout: (text: string) => void
   stderr: (text: string) => void
@@ -53,9 +54,26 @@ export function createProgram(argv: string[], deps: Deps) {
     process: { exit: () => undefined as never },
   }
   program = cli.buildProgram(params) as Command
+  const root = program
   program.addOption(
     new Option('--format <format>', 'output format').choices(['text', 'json']).default('text'),
   )
+  program
+    .command('completions')
+    .description('Print the zsh script that completes the commands, options and Task refs of tania')
+    .addArgument(new Argument('<shell>', 'the shell to complete in').choices(['zsh']))
+    .action(() => deps.stdout(zshScript))
+  program
+    .command('__complete', { hidden: true })
+    .argument('[words...]')
+    .action(async (words: string[]) => {
+      const candidates = await complete(root, words, {
+        completers,
+        // TAB を押した手を止めないよう、再起動中の Backend も待たない。
+        connect: () => deps.connect({ retry: false }),
+      })
+      deps.stdout(describeLines(candidates))
+    })
   // trpc-cli は途中の command（workbench など）の出力先と exit を差し替えないので、全 command に揃える。
   // Skill は stderr の 1 行目で失敗の理由を読むので、usage エラーにも help を続けない。
   forEachCommand(program, (command) =>
