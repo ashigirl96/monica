@@ -40,7 +40,7 @@
 
 - `bun run build` が `scripts/build.ts` を走らせる。
   1. `cargo build --release -p tania-ptyd`
-  2. Backend: `bun build --compile --minify-whitespace --minify-syntax --bytecode --format=esm --asset packages/workbench/migrations/workbench --asset packages/task/migrations/task --asset packages/job/migrations/job apps/backend/src/main.ts`
+  2. Backend: `bun build --compile --minify-whitespace --minify-syntax --bytecode --format=esm --asset packages/<d>/migrations/<d> … apps/backend/src/main.ts`。`--asset` には `meta/_journal.json` のある migrations folder をすべて渡す。build.ts が glob で集めるので、domain の package を足しても build.ts は直さない。並べ忘れても検査は通り、release の Backend だけが migrate で落ちるため。
   3. CLI: `bun build --compile --minify-whitespace --minify-syntax --bytecode --format=esm apps/cli/src/main.ts`
   4. 3 つの binary を `apps/desktop/src-tauri/binaries/<name>-<rust triple>` に置き、`tauri build --bundles app --config '{"bundle":{"externalBin":[…]}}'`
 - externalBin を base の `tauri.conf.json` に書かないのは、tauri-build が cargo の build のたびに `binaries/` の存在を求め、`binaries/tania-ptyd-<triple>` で `target/<profile>/tania-ptyd` を上書きするため。base に書くと dev と CI の clippy にも `binaries/` が要り、空の placeholder は cargo が作った ptyd を潰す。
