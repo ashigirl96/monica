@@ -72,6 +72,11 @@ export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Gh
     db,
     systemJobs: [
       { name: 'task.sync', every: 5 * 60_000, run: () => taskLedger.syncInBackground() },
+      {
+        name: 'task.setup-log-cleanup',
+        every: 24 * 60 * 60_000,
+        run: () => taskLedger.cleanSetupLogs(),
+      },
     ],
   })
   onCleanup(() => jobLedger.stop())
