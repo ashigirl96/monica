@@ -1,8 +1,10 @@
+import type { ContractRouterClient } from '@orpc/contract'
 import { table } from '@tania/ui/table'
 
 import type {
   AttachOutput,
   CloseOutput,
+  contract,
   CurrentOutput,
   ListItem,
   ListOutput,
@@ -13,7 +15,25 @@ import type {
 } from './contract.ts'
 import { stateText } from './state-text.ts'
 
+type Client = { task: ContractRouterClient<typeof contract> }
+
 export const commands = [] as const
+
+const taskRefs =
+  ({ closed }: { closed: boolean }) =>
+  async (client: Client, signal: AbortSignal): Promise<{ value: string; description: string }[]> =>
+    (await client.task.list({ closed }, { signal })).tasks.map((t) => ({
+      value: t.ref,
+      description: t.title,
+    }))
+
+export const completers = {
+  sync: { ref: taskRefs({ closed: false }) },
+  run: { ref: taskRefs({ closed: false }) },
+  attach: { ref: taskRefs({ closed: false }) },
+  close: { ref: taskRefs({ closed: false }) },
+  reopen: { ref: taskRefs({ closed: true }) },
+}
 
 export const formatters = {
   track({ ref, title, alreadyTracked, closed }: TrackOutput): string {
