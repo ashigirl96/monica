@@ -3,16 +3,21 @@ import { ORPCError, type ORPCErrorConstructorMap } from "@orpc/server";
 import { agentSession } from "@tania/workbench/schema";
 import type { Db } from "@tania/workbench/server";
 import { and, desc, eq, gte } from "drizzle-orm";
-import { type Bench, type BenchDeps, type Issue, prepareBench, refuseInPlace } from "./bench.ts";
+import {
+  type Bench,
+  type BenchDeps,
+  type Issue,
+  prepareBench,
+  refuseClosing,
+  refuseInPlace,
+} from "./bench.ts";
 import type { RunOutput, runErrors } from "./contract.ts";
 import { isIssue, openBlockersOf } from "./copy.ts";
 import { findOpenTask } from "./open-task.ts";
 import { formatRef, parseRef } from "./ref.ts";
 import { runAgentSessionsByTask } from "./run.ts";
 import { issue, run } from "./schema.ts";
-import { type SyncDeps, syncTask } from "./sync.ts";
-
-const SYNC_BEFORE_RUN_TIMEOUT_MS = 5_000;
+import { type SyncDeps, syncOrUseCopy } from "./sync.ts";
 
 // 表示されていない Tab の shell は決まった大きさで起こし、attach の resize で追いつかせる。
 const TAB_SIZE = { rows: 24, cols: 80 };
@@ -94,7 +99,7 @@ async function newRun(
   { inPlace, force }: { inPlace?: boolean; force?: boolean },
   errors: ORPCErrorConstructorMap<typeof runErrors>,
 ): Promise<Launch> {
-  const syncWarnings = await syncBeforeRun(deps, forIssue);
+  const syncWarnings = await syncOrUseCopy(deps, forIssue);
   // sync は repo の改名を写すので、名前でなく行の id で引き直す。
   const synced = findOpenTask(deps.db, eq(issue.id, forIssue.id), formatRef(forIssue));
   const ref = formatRef(synced.issue);
@@ -118,22 +123,14 @@ async function newRun(
   };
 }
 
-// GitHub に届かなくても run は止めず、手元の写しで続けたことを警告に残す。
-async function syncBeforeRun(deps: SyncDeps, copy: Issue): Promise<string[]> {
-  const { missing, failures } = await syncTask(deps, copy, SYNC_BEFORE_RUN_TIMEOUT_MS);
-  const reasons = [...failures, ...missing.map((ref) => `GitHub did not return ${ref}`)];
-  if (reasons.length === 0) return [];
-  const minutes = Math.floor((Date.now() - copy.syncedAt.getTime()) / 60_000);
-  return [
-    `could not sync ${formatRef(copy)} from GitHub (${reasons.join("; ")}); using the copy from ${minutes} ${minutes === 1 ? "minute" : "minutes"} ago`,
-  ];
-}
-
-async function openClaudeTab({ db, workbench }: BenchDeps, launch: Launch) {
+async function openClaudeTab(deps: BenchDeps, launch: Launch) {
+  const { db, workbench } = deps;
   await workbench.ready();
-  const opened = db.transaction((tx) =>
-    workbench.openTab(tx, { runspaceId: launch.bench.runspaceId, cwd: launch.tabCwd }),
-  );
+  const opened = db.transaction((tx) => {
+    findOpenTask(tx, eq(issue.id, launch.bench.taskIssueId), launch.ref);
+    refuseClosing(deps, launch.bench.taskIssueId, launch.ref);
+    return workbench.openTab(tx, { runspaceId: launch.bench.runspaceId, cwd: launch.tabCwd });
+  });
   await workbench.startTerminalSession(opened.terminalSessionId, TAB_SIZE);
   // 起動前の shell に書いた入力も捨てられずに評価されるので、起動を待たない。
   await workbench.writeTerminalSession(opened.terminalSessionId, `${claudeCommand(launch)}\r`);

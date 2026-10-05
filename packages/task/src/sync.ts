@@ -77,6 +77,22 @@ export function syncTask(deps: SyncDeps, ref: IssueRef, timeoutMs: number): Prom
   });
 }
 
+const SYNC_BEFORE_COMMAND_TIMEOUT_MS = 5_000;
+
+// GitHub に届かなくても止めず、手元の写しで続けたことを警告に残す。
+export async function syncOrUseCopy(
+  deps: SyncDeps,
+  copy: IssueRef & { syncedAt: Date },
+): Promise<string[]> {
+  const { missing, failures } = await syncTask(deps, copy, SYNC_BEFORE_COMMAND_TIMEOUT_MS);
+  const reasons = [...failures, ...missing.map((ref) => `GitHub did not return ${ref}`)];
+  if (reasons.length === 0) return [];
+  const minutes = Math.floor((Date.now() - copy.syncedAt.getTime()) / 60_000);
+  return [
+    `could not sync ${formatRef(copy)} from GitHub (${reasons.join("; ")}); using the copy from ${minutes} ${minutes === 1 ? "minute" : "minutes"} ago`,
+  ];
+}
+
 // 後から来た呼び手は、走っている sync の timeout ではなく自分の timeout まで待つ。
 function joinRunning(
   deps: SyncDeps,

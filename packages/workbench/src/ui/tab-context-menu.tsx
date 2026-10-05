@@ -3,7 +3,6 @@ import { useAtomValue, useSetAtom } from "jotai";
 import type { ReactNode } from "react";
 import { isDeadStatus, terminalSessionStatusAtom } from "./terminal-sessions.ts";
 import {
-  agentSessionByTerminalSessionAtom,
   closeTerminalTabAtom,
   startNewShellForTabAtom,
   tabMenuAtom,
@@ -16,7 +15,6 @@ import {
 export type MenuTab = {
   id: string;
   terminalSessionId: string;
-  liveAgentSessionId: string | null;
 };
 
 export type TabMenuItems = (tab: MenuTab, close: () => void) => ReactNode;
@@ -35,13 +33,11 @@ function MenuPopover({ menu, tabMenuItems }: { menu: TabMenuState; tabMenuItems?
   const togglePin = useSetAtom(toggleTabPinAtom);
   const tab = useAtomValue(tabMenuTabAtom);
   const statuses = useAtomValue(terminalSessionStatusAtom);
-  const agentSessions = useAtomValue(agentSessionByTerminalSessionAtom);
 
   if (!tab) return null;
 
   const dead = isDeadStatus(statuses[tab.terminalSessionId]?.status);
   const close = () => setMenu(null);
-  const liveAgentSessionId = agentSessions.get(tab.terminalSessionId)?.sessionId ?? null;
 
   return (
     <PopoverMenu anchor={menu.anchor} onClose={close}>
@@ -72,10 +68,7 @@ function MenuPopover({ menu, tabMenuItems }: { menu: TabMenuState; tabMenuItems?
       >
         New shell here
       </PopoverMenuItem>
-      {tabMenuItems?.(
-        { id: tab.id, terminalSessionId: tab.terminalSessionId, liveAgentSessionId },
-        close,
-      )}
+      {tabMenuItems?.({ id: tab.id, terminalSessionId: tab.terminalSessionId }, close)}
       {!tab.pinned && (
         <>
           <PopoverMenuSeparator />

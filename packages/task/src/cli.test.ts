@@ -154,6 +154,44 @@ test("attach names the claude of the Tab and whether attach made it a Run", () =
   );
 });
 
+test("close names what it took down, whether the Tab stayed, and the warnings", () => {
+  const output = {
+    ref: "acme/app#12",
+    removedWorktree: "/home/worktrees/acme/app/issue-12",
+    deletedBranch: "issue-12",
+    spared: true,
+    warnings: ["could not sync acme/app#12 from GitHub"],
+  };
+
+  expect(formatters.close(output)).toBe(
+    [
+      "closed acme/app#12",
+      "removed the worktree /home/worktrees/acme/app/issue-12",
+      "deleted the branch issue-12",
+      "this Tab stays, in a Runspace that is no longer a Bench",
+      "warning: could not sync acme/app#12 from GitHub",
+    ].join("\n"),
+  );
+  expect(
+    formatters.close({
+      ...output,
+      removedWorktree: null,
+      deletedBranch: null,
+      spared: false,
+      warnings: [],
+    }),
+  ).toBe("closed acme/app#12");
+});
+
+test("reopen names the Task and the warnings", () => {
+  expect(formatters.reopen({ ref: "acme/app#12", title: "Ship it", warnings: [] })).toBe(
+    "reopened acme/app#12 Ship it",
+  );
+  expect(formatters.reopen({ ref: "acme/app#12", title: "Ship it", warnings: ["offline"] })).toBe(
+    "reopened acme/app#12 Ship it\nwarning: offline",
+  );
+});
+
 test("current writes the state the same way as list", () => {
   const text = formatters.current({
     ref: "acme/app#12",

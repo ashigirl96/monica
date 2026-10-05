@@ -7,7 +7,7 @@ import {
 } from "@tania/ui";
 import type { MenuTab, TabMenuItems } from "@tania/workbench/ui";
 import { useCallback, useEffect, useState } from "react";
-import type { ListItem } from "../contract.ts";
+import type { CurrentOutput, ListItem } from "../contract.ts";
 import { taskLabel } from "../label.ts";
 import { stateText } from "../state-text.ts";
 import { attachChoices } from "./attach-choices.ts";
@@ -20,7 +20,7 @@ export function useTabMenuItems(client: TaskClient | null): TabMenuItems {
   );
 }
 
-// 項目を出すかは task.list の liveRuns で決まるので、メニューを開くたびに読む。
+// 項目を出すかは Tab の claude がどの Task の Run かで決まるので、メニューを開くたびに読む。
 function AttachToTask({
   client,
   tab,
@@ -30,21 +30,24 @@ function AttachToTask({
   tab: MenuTab;
   close: () => void;
 }) {
-  const [tasks, setTasks] = useState<ListItem[] | null>(null);
+  const [choices, setChoices] = useState<ListItem[] | null>(null);
   const [picker, setPicker] = useState<PopoverAnchor | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
-    client.list({}, { signal: controller.signal }).then(
-      (listed) => setTasks(listed.tasks),
+    const { signal } = controller;
+    Promise.all([
+      client.list({}, { signal }),
+      taskOfTab(client, tab.terminalSessionId, signal),
+    ]).then(
+      ([listed, tabTask]) => setChoices(attachChoices(listed.tasks, tabTask)),
       (error: unknown) => {
-        if (!controller.signal.aborted) console.warn("task list failed:", error);
+        if (!signal.aborted) console.warn("task list failed:", error);
       },
     );
     return () => controller.abort();
-  }, [client]);
+  }, [client, tab.terminalSessionId]);
 
-  const choices = tasks && attachChoices(tasks, tab.liveAgentSessionId);
   if (!choices) return null;
 
   async function attach(ref: string) {
@@ -95,4 +98,23 @@ function AttachToTask({
       )}
     </>
   );
+}
+
+// Tab の claude がどの Run でもなく、Tab が Bench にも無ければ、current は NOT_FOUND で答える。
+function taskOfTab(
+  client: TaskClient,
+  terminalSessionId: string,
+  signal: AbortSignal,
+): Promise<CurrentOutput | null> {
+  return client.current({ terminalSessionId }, { signal }).catch((error: unknown) => {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "NOT_FOUND"
+    ) {
+      return null;
+    }
+    throw error;
+  });
 }
