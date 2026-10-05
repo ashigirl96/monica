@@ -6,13 +6,13 @@ import { join } from 'node:path'
 import { os } from '@orpc/server'
 import { RPCHandler } from '@orpc/server/fetch'
 import {
-  createTask,
+  createTaskLedger,
   migrations as taskMigrations,
   nameAgentSession,
   router as taskRouter,
 } from '@tania/task/server'
 import {
-  createWorkbench,
+  createWorkbenchLedger,
   migrations as workbenchMigrations,
   router as workbenchRouter,
 } from '@tania/workbench/server'
@@ -53,16 +53,16 @@ for (const m of [workbenchMigrations, taskMigrations]) {
   migrate(db, { migrationsFolder: m.folder, migrationsTable: m.table })
 }
 
-const workbench = createWorkbench({
+const workbenchLedger = createWorkbenchLedger({
   db,
   home,
   ptydPath,
   notify: ({ title, body }) => announce({ type: 'notify', title, body }),
   nameAgentSession,
 })
-const task = createTask({ db, workbench, home })
+const taskLedger = createTaskLedger({ db, workbenchLedger, home })
 
-const context = { db, workbench, task }
+const context = { db, workbenchLedger, taskLedger }
 const router = os
   .$context<typeof context>()
   .router({ workbench: workbenchRouter, task: taskRouter })
@@ -85,10 +85,10 @@ app.use('/rpc/*', async (c, next) => {
 })
 const server = Bun.serve({ hostname: '127.0.0.1', port: 0, idleTimeout: 0, fetch: app.fetch })
 
-// reconcile の前の Terminal Session を webview と CLI に読ませないため、endpoint は workbench の start() の後に出す。
+// reconcile の前の Terminal Session を webview と CLI に読ませないため、endpoint は Workbench Ledger の start() の後に出す。
 // ptyd が起きないときに Backend ごと届かなくならないよう、待つのは 3 秒まで。
-const workbenchStarted = workbench.start().then(() => true)
-task.start()
+const workbenchStarted = workbenchLedger.start().then(() => true)
+taskLedger.start()
 if (!(await Promise.race([workbenchStarted, Bun.sleep(3000).then(() => false)]))) {
   console.error('[backend] tania-ptyd is not ready after 3s; announcing the endpoint anyway')
 }
@@ -108,8 +108,8 @@ let exiting = false
 function exit() {
   if (exiting) return
   exiting = true
-  task.stop()
-  workbench.stop()
+  taskLedger.stop()
+  workbenchLedger.stop()
   try {
     unlinkSync(endpointPath)
   } catch {

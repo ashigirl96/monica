@@ -16,17 +16,17 @@ afterEach(() => {
 const ref = 'acme/app#12'
 const executable = 0o755
 
-type Books = ReturnType<typeof setup>
+type Fixture = ReturnType<typeof setup>
 
 async function tracked(script: string | null = '#!/bin/sh\npwd > .setup-ran\n', mode = executable) {
-  const books = setup()
-  books.ghq.origin(
+  const fixture = setup()
+  fixture.ghq.origin(
     'acme/app',
     script === null ? {} : { '.tania/setup.sh': { content: script, mode } },
   )
-  books.github.issue(ref, { title: 'Ship it' })
-  await books.client.track({ ref })
-  return { ...books, cwd: join(books.home, 'worktrees/acme/app/issue-12') }
+  fixture.github.issue(ref, { title: 'Ship it' })
+  await fixture.client.track({ ref })
+  return { ...fixture, cwd: join(fixture.home, 'worktrees/acme/app/issue-12') }
 }
 
 async function until(done: () => boolean | Promise<boolean>) {
@@ -37,7 +37,7 @@ async function until(done: () => boolean | Promise<boolean>) {
   throw new Error('timed out waiting')
 }
 
-function setupLog({ home }: Books) {
+function setupLog({ home }: Fixture) {
   return join(home, 'logs/setup/acme/app/issue-12.log')
 }
 
@@ -117,15 +117,15 @@ test.each([
 ])(
   'a setup that %s fails the run with the reason and the log path',
   async (_, script, mode, reason) => {
-    const books = await tracked(script, mode)
-    const { client } = books
+    const fixture = await tracked(script, mode)
+    const { client } = fixture
 
     const error = await failure(client.run({ ref }))
 
     expect(error.code).toBe('PRECONDITION_FAILED')
     expect(error.message).toContain(reason)
-    expect(error.message).toContain(setupLog(books))
-    expect(readFileSync(setupLog(books), 'utf8')).toContain(reason)
+    expect(error.message).toContain(setupLog(fixture))
+    expect(readFileSync(setupLog(fixture), 'utf8')).toContain(reason)
     expect(await client.bench.list()).toMatchObject([{ setupState: 'failed' }])
     expect((await client.list({})).tasks).toMatchObject([
       { displayState: { state: 'setup_failed' } },
@@ -134,7 +134,7 @@ test.each([
 )
 
 test('a setup still running after 600 seconds fails, its process group getting SIGTERM and 2 seconds before SIGKILL', async () => {
-  const books = await tracked(
+  const fixture = await tracked(
     [
       '#!/bin/sh',
       `sh -c 'trap "sleep 0.3; touch .cleaned; exit 0" TERM; touch .trapping; while :; do sleep 0.05; done' &`,
@@ -143,7 +143,7 @@ test('a setup still running after 600 seconds fails, its process group getting S
       'sleep 30',
     ].join('\n'),
   )
-  const { client, cwd } = books
+  const { client, cwd } = fixture
   const realSetTimeout = globalThis.setTimeout
   let fireTimeout: (() => void) | undefined
   spyOn(globalThis, 'setTimeout').mockImplementation(((callback: () => void, ms?: number) => {
@@ -286,13 +286,15 @@ test('run refuses a Task that is closed or not tracked', async () => {
 })
 
 test('a Bench the Backend stopped preparing fails on the next start, and its setup is killed', async () => {
-  const { db, client, restartTask, cwd } = await tracked('#!/bin/sh\necho $$ > .pid\nsleep 30\n')
+  const { db, client, restartTaskLedger, cwd } = await tracked(
+    '#!/bin/sh\necho $$ > .pid\nsleep 30\n',
+  )
   const running = failure(client.run({ ref }))
   await until(() => existsSync(join(cwd, '.pid')))
   const setupPid = Number(readFileSync(join(cwd, '.pid'), 'utf8'))
 
-  const restarted = restartTask()
-  restarted.task.start()
+  const restarted = restartTaskLedger()
+  restarted.taskLedger.start()
 
   expect((await running).code).toBe('PRECONDITION_FAILED')
   await until(() => !isAlive(setupPid))

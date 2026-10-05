@@ -8,7 +8,7 @@ import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 
 import { startFakePtyd, tempHome, untilSettled } from './fake-ptyd.ts'
-import { createWorkbench, migrations, router } from './server.ts'
+import { createWorkbenchLedger, migrations, router } from './server.ts'
 import type { NotificationDeps } from './workbench.ts'
 
 const cleanups: (() => void)[] = []
@@ -35,21 +35,21 @@ export function setup({
   migrate(db, { migrationsFolder: migrations.folder, migrationsTable: migrations.table })
 
   function boot() {
-    const workbench = createWorkbench({
+    const workbenchLedger = createWorkbenchLedger({
       db,
       home,
       ptydPath: join(home, 'no-ptyd'),
       notify,
       nameAgentSession,
     })
-    onCleanup(() => workbench.stop())
-    const client = createRouterClient(router, { context: { db, workbench } })
-    return { workbench, client }
+    onCleanup(() => workbenchLedger.stop())
+    const client = createRouterClient(router, { context: { db, workbenchLedger } })
+    return { workbenchLedger, client }
   }
 
   const booted = boot()
   function restartBackend() {
-    booted.workbench.stop()
+    booted.workbenchLedger.stop()
     return boot()
   }
 

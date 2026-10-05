@@ -25,14 +25,14 @@ import {
 } from './layout.ts'
 import { tab, terminalSession } from './schema.ts'
 import { LIVE } from './terminal-session.ts'
-import { type Db, terminalSessionsOf, type Workbench } from './workbench.ts'
+import { terminalSessionsOf, type WorkbenchContext } from './workbench.ts'
 import { worktreeInfo } from './worktree.ts'
 
 export { migrations } from '../migrations/index.ts'
 export { inheritableEnv } from './ptyd.ts'
-export { createWorkbench, type Db, type Tx, type Workbench } from './workbench.ts'
+export { createWorkbenchLedger, type Db, type Tx, type WorkbenchLedger } from './workbench.ts'
 
-const os = implement(contract).$context<{ db: Db; workbench: Workbench }>()
+const os = implement(contract).$context<WorkbenchContext>()
 
 export const router = os.router({
   terminalSession: {
@@ -58,7 +58,7 @@ export const router = os.router({
           message: `Terminal Session ${input.id} is in a pinned Tab`,
         })
       }
-      terminalSessionsOf(context.workbench).terminate([input.id])
+      terminalSessionsOf(context.workbenchLedger).terminate([input.id])
     }),
   },
   layout: {
@@ -68,7 +68,7 @@ export const router = os.router({
     create: os.runspace.create.handler(({ context, input }) => {
       const cwd = input.cwd ?? homedir()
       const opened = writeLayout(context, (tx) =>
-        openTab(tx, terminalSessionsOf(context.workbench), {
+        openTab(tx, terminalSessionsOf(context.workbenchLedger), {
           runspaceId: createRunspace(tx, { cwd, index: input.index }),
           cwd,
           size: { rows: input.rows, cols: input.cols },
@@ -79,7 +79,7 @@ export const router = os.router({
     remove: os.runspace.remove.handler(({ context, input }) => {
       writeLayout(context, (tx) => {
         refuseRemoving(tx, input.id)
-        removeRunspace(tx, terminalSessionsOf(context.workbench), input.id)
+        removeRunspace(tx, terminalSessionsOf(context.workbenchLedger), input.id)
       })
     }),
     move: os.runspace.move.handler(({ context, input }) => {
@@ -93,7 +93,7 @@ export const router = os.router({
         writeLayout(context, (tx) =>
           terminalSessionId
             ? reattachTab(tx, { runspaceId, cwd, index, terminalSessionId })
-            : openTab(tx, terminalSessionsOf(context.workbench), {
+            : openTab(tx, terminalSessionsOf(context.workbenchLedger), {
                 runspaceId,
                 cwd,
                 index,
@@ -104,7 +104,7 @@ export const router = os.router({
     }),
     respawn: os.tab.respawn.handler(({ context, input }) =>
       asTab(
-        respawnTab(context, terminalSessionsOf(context.workbench), input.id, {
+        respawnTab(context, terminalSessionsOf(context.workbenchLedger), input.id, {
           rows: input.rows,
           cols: input.cols,
         }),
@@ -129,7 +129,7 @@ export const router = os.router({
   agentSession: {
     recordHook: os.agentSession.recordHook.handler(({ context, input }) => {
       for (const sessionId of recordHook(context, input)) {
-        context.workbench.events.publish('change', { type: 'agentSession', sessionId })
+        context.workbenchLedger.events.publish('change', { type: 'agentSession', sessionId })
       }
     }),
     list: os.agentSession.list.handler(({ context }) => listAgentSessions(context.db)),
@@ -144,7 +144,7 @@ export const router = os.router({
     open: os.editor.open.handler(({ input }) => openInEditor(input.path)),
   },
   changes: os.changes.handler(async function* ({ context, signal }) {
-    for await (const change of context.workbench.events.subscribe('change', { signal })) {
+    for await (const change of context.workbenchLedger.events.subscribe('change', { signal })) {
       yield change
     }
   }),

@@ -113,7 +113,7 @@ const unobserved: StateFields = { state: 'unobserved', unobservedSince: NOW }
 
 const columns = [...(Object.keys(prior) as (keyof typeof prior)[]), 'unknown'] as const
 
-// 列は今の行の状態。unknown は session_id が帳簿に無い（行を動作中で作ってから当てる）。
+// 列は今の行の状態。unknown は session_id が Workbench Ledger に無い（行を動作中で作ってから当てる）。
 // prettier-ignore
 const table: [string, AgentEvent, Cell[]][] = [
   //                                                                                 running               unobserved            idle                  question              permission            error                 ended                 unknown
@@ -194,7 +194,7 @@ describe('a session that takes over its Terminal Session', () => {
       hook('SessionStart', { type: 'sessionStarted', compacted: true }),
       true,
     ],
-    ['the first hook of a session the books do not know', null, prompt, true],
+    ['the first hook of a session the Workbench Ledger does not know', null, prompt, true],
     ['a hook reviving a session that had ended there', rowIn('ended'), prompt, true],
     [
       'a hook of a session that comes from another Terminal Session',

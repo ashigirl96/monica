@@ -110,7 +110,7 @@ test('moving a pinned Tab within its Runspace keeps the pin, and into another Ru
   ])
 })
 
-test('the books refuse a second pinned Tab in one Runspace', async () => {
+test('the Workbench Ledger refuses a second pinned Tab in one Runspace', async () => {
   const { db, client } = setup()
   const { runspaceId, tab: first } = await client.runspace.create(size)
   const second = await client.tab.open({ runspaceId, ...size })
@@ -191,14 +191,14 @@ test('a pinned Tab whose shell ptyd lost is bound to a new shell after the recon
 })
 
 test('a respawned shell whose Created reply is lost to a dropped connection is adopted by the reconcile, not failed', async () => {
-  const { ptyd, workbench, client, settled } = setup()
+  const { ptyd, workbenchLedger, client, settled } = setup()
   const { tab } = await client.runspace.create(size)
   await client.tab.pin({ id: tab.id })
   await settled(tab.terminalSessionId)
   letShellsLive()
   ptyd.dropNextCreatedReply = true
   const reconciled = new Promise<void>((resolve) => {
-    const unsubscribe = workbench.events.subscribe('change', (change) => {
+    const unsubscribe = workbenchLedger.events.subscribe('change', (change) => {
       if (change.type !== 'reconciled') return
       unsubscribe()
       resolve()
@@ -217,7 +217,7 @@ test('a respawned shell whose Created reply is lost to a dropped connection is a
 })
 
 test('a pinned Tab the Backend left on an ended Terminal Session before it stopped is respawned on start', async () => {
-  const { ptyd, db, workbench, client } = setup()
+  const { ptyd, db, workbenchLedger, client } = setup()
   const createdAt = new Date(Date.now() - 60_000)
   db.insert(terminalSession)
     .values({
@@ -242,7 +242,7 @@ test('a pinned Tab the Backend left on an ended Terminal Session before it stopp
     })
     .run()
 
-  await workbench.start()
+  await workbenchLedger.start()
 
   const created = await ptyd.received((op) => op.op === 'create')
   const respawned = (await client.layout.get()).runspaces[0]?.tabs[0]

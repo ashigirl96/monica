@@ -10,16 +10,16 @@ afterEach(() => {
   cleanUp()
 })
 
-type Books = ReturnType<typeof setup>
+type Fixture = ReturnType<typeof setup>
 
-function close({ db }: Books, number: number) {
+function close({ db }: Fixture, number: number) {
   const { id } = db.select().from(issue).where(eq(issue.number, number)).get()!
   db.update(task).set({ closedAt: new Date() }).where(eq(task.issueId, id)).run()
 }
 
 test('list shows open Tasks in tracked order with their open Blockers and display state', async () => {
-  const books = setup()
-  const { github, client } = books
+  const fixture = setup()
+  const { github, client } = fixture
   github.issue('acme/app#4', { title: 'Schema first' })
   github.issue('acme/lib#3', { title: 'Upstream fix' })
   github.issue('acme/app#5', { title: 'Done already', state: 'closed' })
@@ -30,7 +30,7 @@ test('list shows open Tasks in tracked order with their open Blockers and displa
   github.issue('acme/app#2', { title: 'Merged, not cleaned up', state: 'closed' })
   github.issue('acme/app#1', { title: 'Shipped' })
   for (const ref of ['acme/app#12', 'acme/app#2', 'acme/app#1']) await client.track({ ref })
-  close(books, 1)
+  close(fixture, 1)
 
   const output = await client.list({})
 
@@ -58,12 +58,12 @@ test('list shows open Tasks in tracked order with their open Blockers and displa
 })
 
 test('list with closed shows only the closed Tasks', async () => {
-  const books = setup()
-  const { github, client } = books
+  const fixture = setup()
+  const { github, client } = fixture
   github.issue('acme/app#1', { title: 'Shipped' })
   github.issue('acme/app#2', { title: 'Open' })
   for (const ref of ['acme/app#1', 'acme/app#2']) await client.track({ ref })
-  close(books, 1)
+  close(fixture, 1)
 
   const output = await client.list({ closed: true })
 
@@ -90,12 +90,12 @@ async function waitFor<T>(read: () => Promise<T> | T, done: (value: T) => boolea
 
 test('the background sync runs at start and every 5 minutes', async () => {
   const interval = captureInterval()
-  const { github, client, task: domain } = setup()
+  const { github, client, taskLedger } = setup()
   github.issue('acme/app#1', { title: 'One' })
   await client.track({ ref: 'acme/app#1' })
   github.requests.length = 0
 
-  domain.start()
+  taskLedger.start()
   await waitFor(
     () => github.requests.length,
     (n) => n === 1,
@@ -117,12 +117,12 @@ test('the background sync runs at start and every 5 minutes', async () => {
 
 test('a failed background sync shows in list until one succeeds', async () => {
   const interval = captureInterval()
-  const { github, client, task: domain } = setup()
+  const { github, client, taskLedger } = setup()
   github.issue('acme/app#1', { title: 'One' })
   await client.track({ ref: 'acme/app#1' })
   github.logOut()
 
-  domain.start()
+  taskLedger.start()
   const failed = await waitFor(
     () => client.list({}),
     (output) => output.backgroundSyncError !== null,

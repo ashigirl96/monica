@@ -11,14 +11,14 @@ import { cleanUp, setup } from './testing.ts'
 
 afterEach(cleanUp)
 
-type Books = ReturnType<typeof setup>
+type Fixture = ReturnType<typeof setup>
 
-function titles({ db }: Books): Record<string, string> {
+function titles({ db }: Fixture): Record<string, string> {
   const rows = db.select().from(issue).orderBy(asc(issue.id)).all()
   return Object.fromEntries(rows.map((r) => [`${r.repo}#${r.number}`, r.title]))
 }
 
-function blockersOf({ db }: Books, number: number): string[] {
+function blockersOf({ db }: Fixture, number: number): string[] {
   const blocked = alias(issue, 'blocked')
   return db
     .select({ repo: issue.repo, number: issue.number })
@@ -37,20 +37,20 @@ async function failure(promise: Promise<unknown>): Promise<ORPCError<string, unk
   return error
 }
 
-async function track(books: Books, ...refs: string[]) {
+async function track(fixture: Fixture, ...refs: string[]) {
   for (const ref of refs) {
-    books.github.issue(ref, { title: `Issue ${ref}` })
-    await books.client.track({ ref })
+    fixture.github.issue(ref, { title: `Issue ${ref}` })
+    await fixture.client.track({ ref })
   }
-  books.github.requests.length = 0
+  fixture.github.requests.length = 0
 }
 
 test('sync copies every open Task with one query per repo and replaces the Blockers', async () => {
-  const books = setup()
-  const { github, client } = books
+  const fixture = setup()
+  const { github, client } = fixture
   github.issue('acme/app#4', { title: 'Schema first' })
   github.issue('acme/app#5', { title: 'Migrate' })
-  await track(books, 'acme/app#1', 'acme/app#2', 'acme/lib#7')
+  await track(fixture, 'acme/app#1', 'acme/app#2', 'acme/lib#7')
   github.issue('acme/app#1', { title: 'One', blockedBy: ['acme/app#4'] })
   await client.sync({})
   github.issue('acme/app#1', { title: 'One', blockedBy: ['acme/app#5'] })
@@ -64,25 +64,25 @@ test('sync copies every open Task with one query per repo and replaces the Block
     { repo: 'acme/app', numbers: [1, 2] },
     { repo: 'acme/lib', numbers: [7] },
   ])
-  expect(blockersOf(books, 1)).toEqual(['acme/app#5'])
-  expect(titles(books)).toMatchObject({ 'acme/app#2': 'Two', 'acme/app#4': 'Schema first' })
+  expect(blockersOf(fixture, 1)).toEqual(['acme/app#5'])
+  expect(titles(fixture)).toMatchObject({ 'acme/app#2': 'Two', 'acme/app#4': 'Schema first' })
 })
 
 test('sync splits a repo with more than 50 open Tasks into queries of 50', async () => {
-  const books = setup()
+  const fixture = setup()
   const refs = Array.from({ length: 51 }, (_, i) => `acme/app#${i + 1}`)
-  await track(books, ...refs)
+  await track(fixture, ...refs)
 
-  const output = await books.client.sync({})
+  const output = await fixture.client.sync({})
 
   expect(output.synced).toBe(51)
-  expect(books.github.requests.map((r) => r.numbers.length)).toEqual([50, 1])
+  expect(fixture.github.requests.map((r) => r.numbers.length)).toEqual([50, 1])
 })
 
 test('sync writes the repos that answered and names the ones that failed', async () => {
-  const books = setup()
-  const { github, client } = books
-  await track(books, 'acme/app#1', 'acme/lib#7')
+  const fixture = setup()
+  const { github, client } = fixture
+  await track(fixture, 'acme/app#1', 'acme/lib#7')
   github.issue('acme/app#1', { title: 'One, renamed' })
   github.issue('acme/lib#7', { title: 'Seven, renamed' })
   github.fail('acme/lib')
@@ -92,13 +92,16 @@ test('sync writes the repos that answered and names the ones that failed', async
   expect(error.code).toBe('BAD_GATEWAY')
   expect(error.message).toContain('acme/lib: GitHub answered 502')
   expect(error.message).not.toContain('acme/app:')
-  expect(titles(books)).toEqual({ 'acme/app#1': 'One, renamed', 'acme/lib#7': 'Issue acme/lib#7' })
+  expect(titles(fixture)).toEqual({
+    'acme/app#1': 'One, renamed',
+    'acme/lib#7': 'Issue acme/lib#7',
+  })
 })
 
 test('a repo GitHub cannot resolve fails the sync and keeps its copies', async () => {
-  const books = setup()
-  const { github, client } = books
-  await track(books, 'acme/app#1', 'acme/lib#7')
+  const fixture = setup()
+  const { github, client } = fixture
+  await track(fixture, 'acme/app#1', 'acme/lib#7')
   github.issue('acme/app#1', { title: 'One, renamed' })
   github.removeRepo('acme/lib')
 
@@ -108,12 +111,15 @@ test('a repo GitHub cannot resolve fails the sync and keeps its copies', async (
   expect(error.message).toContain(
     "acme/lib: Could not resolve to a Repository with the name 'acme/lib'.",
   )
-  expect(titles(books)).toEqual({ 'acme/app#1': 'One, renamed', 'acme/lib#7': 'Issue acme/lib#7' })
+  expect(titles(fixture)).toEqual({
+    'acme/app#1': 'One, renamed',
+    'acme/lib#7': 'Issue acme/lib#7',
+  })
 })
 
 test('a Blocker in a renamed repo stays one row and follows the new name', async () => {
-  const books = setup()
-  const { github, client } = books
+  const fixture = setup()
+  const { github, client } = fixture
   github.issue('acme/lib#5', { title: 'Five' })
   github.issue('acme/app#1', { title: 'One', blockedBy: ['acme/lib#5'] })
   await client.track({ ref: 'acme/app#1' })
@@ -121,13 +127,13 @@ test('a Blocker in a renamed repo stays one row and follows the new name', async
 
   await client.sync({})
 
-  expect(titles(books)).toEqual({ 'acme/app#1': 'One', 'acme/core#5': 'Five' })
-  expect(blockersOf(books, 1)).toEqual(['acme/core#5'])
+  expect(titles(fixture)).toEqual({ 'acme/app#1': 'One', 'acme/core#5': 'Five' })
+  expect(blockersOf(fixture, 1)).toEqual(['acme/core#5'])
 })
 
 test('a copy written without a node ID gets one on the next sync instead of a second row', async () => {
-  const books = setup()
-  const { db, github, client } = books
+  const fixture = setup()
+  const { db, github, client } = fixture
   const { id } = db
     .insert(issue)
     .values({ repo: 'acme/app', number: 1, title: 'One', state: 'open', syncedAt: new Date(0) })
@@ -146,8 +152,8 @@ test('a copy written without a node ID gets one on the next sync instead of a se
 })
 
 test('a copy written without a node ID in a repo renamed since is found by the name it was asked by', async () => {
-  const books = setup()
-  const { db, github, client } = books
+  const fixture = setup()
+  const { db, github, client } = fixture
   const { id } = db
     .insert(issue)
     .values({ repo: 'acme/old', number: 1, title: 'One', state: 'open', syncedAt: new Date(0) })
@@ -167,8 +173,8 @@ test('a copy written without a node ID in a repo renamed since is found by the n
 })
 
 test('Tasks written without node IDs in a renamed repo stay their own rows when one blocks the other', async () => {
-  const books = setup()
-  const { db, github, client } = books
+  const fixture = setup()
+  const { db, github, client } = fixture
   const syncedAt = new Date(0)
   const rows = db
     .insert(issue)
@@ -190,12 +196,12 @@ test('Tasks written without node IDs in a renamed repo stay their own rows when 
   expect(
     db.select({ id: issue.id, repo: issue.repo, number: issue.number }).from(issue).all(),
   ).toEqual(rows.map((row) => ({ id: row.id, repo: 'acme/new', number: row.number })))
-  expect(blockersOf(books, 1)).toEqual(['acme/new#2'])
+  expect(blockersOf(fixture, 1)).toEqual(['acme/new#2'])
 })
 
 test('two copies of one issue written without node IDs fail the sync instead of leaving the Task stale', async () => {
-  const books = setup()
-  const { db, github, client } = books
+  const fixture = setup()
+  const { db, github, client } = fixture
   const syncedAt = new Date(0)
   const [old] = db
     .insert(issue)
@@ -219,8 +225,8 @@ test('two copies of one issue written without node IDs fail the sync instead of 
 })
 
 test('an issue number GitHub now gives to another issue fails the sync instead of moving the copy', async () => {
-  const books = setup()
-  const { db, github, client } = books
+  const fixture = setup()
+  const { db, github, client } = fixture
   const { id } = db
     .insert(issue)
     .values({
@@ -248,34 +254,37 @@ test('an issue number GitHub now gives to another issue fails the sync instead o
 })
 
 test('an alias GitHub returns null for keeps its copy and shows up as missing', async () => {
-  const books = setup()
-  const { github, client } = books
-  await track(books, 'acme/app#1', 'acme/app#2')
+  const fixture = setup()
+  const { github, client } = fixture
+  await track(fixture, 'acme/app#1', 'acme/app#2')
   github.remove('acme/app#2')
   github.issue('acme/app#1', { title: 'One, renamed' })
 
   const output = await client.sync({})
 
   expect(output).toEqual({ synced: 1, missing: ['acme/app#2'] })
-  expect(titles(books)).toEqual({ 'acme/app#1': 'One, renamed', 'acme/app#2': 'Issue acme/app#2' })
+  expect(titles(fixture)).toEqual({
+    'acme/app#1': 'One, renamed',
+    'acme/app#2': 'Issue acme/app#2',
+  })
 })
 
 test('sync fails when gh auth token fails', async () => {
-  const books = setup()
-  await track(books, 'acme/app#1')
-  books.github.logOut()
+  const fixture = setup()
+  await track(fixture, 'acme/app#1')
+  fixture.github.logOut()
 
-  const error = await failure(books.client.sync({}))
+  const error = await failure(fixture.client.sync({}))
 
   expect(error.code).toBe('BAD_GATEWAY')
   expect(error.message).toContain('gh auth token')
-  expect(books.github.requests).toEqual([])
+  expect(fixture.github.requests).toEqual([])
 })
 
 test('sync with a ref copies that Task only, even a closed one', async () => {
-  const books = setup()
-  const { db, github, client } = books
-  await track(books, 'acme/app#1', 'acme/app#2')
+  const fixture = setup()
+  const { db, github, client } = fixture
+  await track(fixture, 'acme/app#1', 'acme/app#2')
   db.update(task).set({ closedAt: new Date() }).run()
   github.issue('acme/app#2', { title: 'Two, renamed' })
 
@@ -283,21 +292,21 @@ test('sync with a ref copies that Task only, even a closed one', async () => {
 
   expect(output).toEqual({ synced: 1, missing: [] })
   expect(github.requests).toEqual([{ repo: 'acme/app', numbers: [2] }])
-  expect(titles(books)['acme/app#2']).toBe('Two, renamed')
+  expect(titles(fixture)['acme/app#2']).toBe('Two, renamed')
 })
 
 test('sync with a ref that is not tracked is NOT_FOUND', async () => {
-  const books = setup()
+  const fixture = setup()
 
-  const error = await failure(books.client.sync({ ref: 'acme/app#1' }))
+  const error = await failure(fixture.client.sync({ ref: 'acme/app#1' }))
 
   expect(error.code).toBe('NOT_FOUND')
 })
 
 test('a closed Task is left as it was unless an open Task names it as a Blocker', async () => {
-  const books = setup()
-  const { db, github, client } = books
-  await track(books, 'acme/app#1', 'acme/app#2', 'acme/app#3')
+  const fixture = setup()
+  const { db, github, client } = fixture
+  await track(fixture, 'acme/app#1', 'acme/app#2', 'acme/app#3')
   db.update(task)
     .set({ closedAt: new Date() })
     .where(eq(task.issueId, db.select().from(issue).where(eq(issue.number, 1)).get()!.id))
@@ -313,19 +322,19 @@ test('a closed Task is left as it was unless an open Task names it as a Blocker'
   await client.sync({})
 
   expect(github.requests).toEqual([{ repo: 'acme/app', numbers: [3] }])
-  expect(titles(books)).toMatchObject({
+  expect(titles(fixture)).toMatchObject({
     'acme/app#1': 'Issue acme/app#1',
     'acme/app#2': 'Two, renamed',
   })
 })
 
 test('a sync asked for while the same sync runs waits for the running one', async () => {
-  const books = setup()
-  await track(books, 'acme/app#1')
-  const release = books.github.hold()
+  const fixture = setup()
+  await track(fixture, 'acme/app#1')
+  const release = fixture.github.hold()
 
-  const first = books.client.sync({})
-  const second = books.client.sync({})
+  const first = fixture.client.sync({})
+  const second = fixture.client.sync({})
   await Bun.sleep(50)
   release()
 
@@ -333,15 +342,15 @@ test('a sync asked for while the same sync runs waits for the running one', asyn
     { synced: 1, missing: [] },
     { synced: 1, missing: [] },
   ])
-  expect(books.github.requests).toHaveLength(1)
+  expect(fixture.github.requests).toHaveLength(1)
 })
 
 test('a sync that joins a running one gives up at its own timeout', async () => {
-  const books = setup()
-  await track(books, 'acme/app#1')
-  const deps = internals(books.task)
+  const fixture = setup()
+  await track(fixture, 'acme/app#1')
+  const deps = internals(fixture.taskLedger)
   const ref = { repo: 'acme/app', number: 1 }
-  const release = books.github.hold()
+  const release = fixture.github.hold()
 
   const running = syncTask(deps, ref, 30_000)
   const startedAt = Date.now()
@@ -352,16 +361,16 @@ test('a sync that joins a running one gives up at its own timeout', async () => 
   expect(joined).toEqual({ synced: 0, missing: [], failures: ['timed out after 0.05s'] })
   expect(waited).toBeLessThan(1000)
   expect(await running).toEqual({ synced: 1, missing: [], failures: [] })
-  expect(books.github.requests).toHaveLength(1)
+  expect(fixture.github.requests).toHaveLength(1)
 })
 
 test('sync tells subscribers that the copies changed', async () => {
-  const books = setup()
-  await track(books, 'acme/app#1')
+  const fixture = setup()
+  await track(fixture, 'acme/app#1')
   const controller = new AbortController()
-  const changes = books.task.events.subscribe('change', { signal: controller.signal })
+  const changes = fixture.taskLedger.events.subscribe('change', { signal: controller.signal })
 
-  await books.client.sync({})
+  await fixture.client.sync({})
 
   expect((await changes.next()).value).toEqual({ type: 'synced' })
   controller.abort()

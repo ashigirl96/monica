@@ -210,15 +210,15 @@ test('dropping the active Tab on another Runspace moves it to the end there, and
 })
 
 test('the view follows the front Tab when the Backend moves it to another Runspace on its own, as an Attach does', async () => {
-  const { db, workbench, client, store } = bench()
+  const { db, workbenchLedger, client, store } = bench()
   const from = await client.runspace.create(size)
   // 移った後に先頭に残る Runspace。ついていかなければ画面はここに落ちる。
   await client.runspace.create(size)
-  const owned = db.transaction((tx) => workbench.createRunspace(tx, { cwd: '/work/bench' }))
+  const owned = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work/bench' }))
   await store.set(reloadAtom)
   store.set(activateTerminalTabAtom, from.tab.id)
 
-  db.transaction((tx) => workbench.moveTab(tx, from.tab.id, owned))
+  db.transaction((tx) => workbenchLedger.moveTab(tx, from.tab.id, owned))
   await store.set(reloadAtom)
 
   expect(store.get(activeRunspaceAtom)?.id).toBe(owned)
@@ -277,11 +277,11 @@ test('a Runspace moves only within its sidebar group, by drag or by key', async 
   ].map((r) => r.runspaceId)
   await client.tab.pin({ id: (await client.layout.get()).runspaces[1]!.tabs[0]!.id })
   await store.set(reloadAtom)
-  const books = async () => (await client.layout.get()).runspaces.map((r) => r.id)
+  const ledgerOrder = async () => (await client.layout.get()).runspaces.map((r) => r.id)
   const sidebar = () => store.get(runspaceSummariesAtom).map((s) => s.id)
 
   await store.set(reorderRunspacesAtom, a!, p!)
-  expect(await books()).toEqual([a!, p!, b!])
+  expect(await ledgerOrder()).toEqual([a!, p!, b!])
 
   store.set(activateRunspaceAtom, b!)
   await store.set(moveActiveRunspaceAtom, 'up')
@@ -425,13 +425,13 @@ test('Kill in the Detached group terminates the Terminal Session', async () => {
 })
 
 test("the shell's cwd reaches the Backend only when it differs from the last one", async () => {
-  const { workbench, client, store } = bench()
+  const { workbenchLedger, client, store } = bench()
   const { tab } = await client.runspace.create({ cwd: '/a', ...size })
   await store.set(reloadAtom)
   let layoutChanges = 0
   const controller = new AbortController()
   void (async () => {
-    for await (const change of workbench.events.subscribe('change', controller)) {
+    for await (const change of workbenchLedger.events.subscribe('change', controller)) {
       if (change.type === 'layout') layoutChanges++
     }
   })().catch(() => {})

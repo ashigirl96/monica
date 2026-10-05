@@ -12,9 +12,9 @@ import { createTerminalSessions, type Size, type TerminalSessions } from './term
 
 export type Db = BunSQLiteDatabase
 export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
-export type Books = { db: Db; workbench: Workbench }
+export type WorkbenchContext = { db: Db; workbenchLedger: WorkbenchLedger }
 
-export type Workbench = {
+export type WorkbenchLedger = {
   events: EventPublisher<{ change: WorkbenchChange }>
   start(): Promise<void>
   stop(): void
@@ -39,22 +39,22 @@ type Internals = NotificationDeps & {
   terminalSessions: TerminalSessions
 }
 
-// Workbench の型は他の domain が呼ぶものだけに保ち、ptyd の接続などの中身は Workbench を key にここへ置く。
-const internalsOf = new WeakMap<Workbench, Internals>()
+// WorkbenchLedger の型は他の domain が呼ぶものだけに保ち、ptyd の接続などの中身は WorkbenchLedger を key にここへ置く。
+const internalsOf = new WeakMap<WorkbenchLedger, Internals>()
 
-function internals(workbench: Workbench): Internals {
-  const found = internalsOf.get(workbench)
-  if (!found) throw new Error('this Workbench was not made by createWorkbench')
+function internals(workbenchLedger: WorkbenchLedger): Internals {
+  const found = internalsOf.get(workbenchLedger)
+  if (!found) throw new Error('this WorkbenchLedger was not made by createWorkbenchLedger')
   return found
 }
 
-export function terminalSessionsOf(workbench: Workbench): TerminalSessions {
-  return internals(workbench).terminalSessions
+export function terminalSessionsOf(workbenchLedger: WorkbenchLedger): TerminalSessions {
+  return internals(workbenchLedger).terminalSessions
 }
 
-export function createWorkbench(
+export function createWorkbenchLedger(
   deps: NotificationDeps & { db: Db; home: string; ptydPath: string },
-): Workbench {
+): WorkbenchLedger {
   const { db, home, ptydPath, notify, nameAgentSession } = deps
   const events = new EventPublisher<{ change: WorkbenchChange }>()
   const publish = (change: WorkbenchChange) => events.publish('change', change)
@@ -97,13 +97,13 @@ export function createWorkbench(
   }
 
   async function connect(): Promise<PtydClient> {
-    if (stopping) throw new Error('the Workbench has stopped')
+    if (stopping) throw new Error('the Workbench Ledger has stopped')
     exitsDuringReconcile = []
     try {
       const opened = await openDaemon({ home, ptydPath }, { onExit, onClose })
       if (stopping) {
         opened.close()
-        throw new Error('the Workbench has stopped')
+        throw new Error('the Workbench Ledger has stopped')
       }
       const { reaped, terminated, agentSessionIds } = terminalSessions.reconcile(
         opened,
@@ -142,12 +142,12 @@ export function createWorkbench(
   // ptyd に送るものはすべて reconcile の完了を待つ。起動時の List と競う Create を、
   // ptyd が失った行と取り違えないため。
   function ready(): Promise<PtydClient> {
-    if (stopping) return Promise.reject(new Error('the Workbench has stopped'))
+    if (stopping) return Promise.reject(new Error('the Workbench Ledger has stopped'))
     connection ??= reconnect()
     return connection
   }
 
-  const workbench: Workbench = {
+  const workbenchLedger: WorkbenchLedger = {
     events,
     async start() {
       try {
@@ -180,13 +180,17 @@ export function createWorkbench(
       publish({ type: 'layout' })
     },
   }
-  internalsOf.set(workbench, { db, terminalSessions, notify, nameAgentSession })
-  return workbench
+  internalsOf.set(workbenchLedger, { db, terminalSessions, notify, nameAgentSession })
+  return workbenchLedger
 }
 
 // 通知は commit した後の副作用なので、出せなくても hook の記録と変更の合図は止めない。
-export function notifyWaiting(workbench: Workbench, agentSession: AgentSession, body: string) {
-  const { db, notify, nameAgentSession } = internals(workbench)
+export function notifyWaiting(
+  workbenchLedger: WorkbenchLedger,
+  agentSession: AgentSession,
+  body: string,
+) {
+  const { db, notify, nameAgentSession } = internals(workbenchLedger)
   try {
     const title = nameAgentSession(db, agentSession.sessionId) ?? shortPath(agentSession.cwd)
     notify({ title, body })
