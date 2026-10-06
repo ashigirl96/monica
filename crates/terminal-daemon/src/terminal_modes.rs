@@ -4,7 +4,8 @@
 //! learn the alt screen from, so the client ends up with mouse reporting on while its buffer
 //! says `normal` -- a combination no real terminal can be in. tmux restores modes the same way
 //! on re-attach. A connection that fell so far behind that rotation dropped part of the output
-//! is restored the same way, from the modes it was left in.
+//! is brought back much the same way: moved into the right buffer ahead of what remains, and
+//! told every mode once it has caught up.
 //!
 //! Every grouping here mirrors what xterm actually keys off, because the client's parser is the
 //! yardstick: restoring a mode xterm ignores, or restoring two modes that xterm treats as one
@@ -72,15 +73,6 @@ impl Exclusive {
             observed => observed,
         }
     }
-}
-
-/// The terminal a restore is for.
-#[derive(Clone, Copy)]
-enum Client {
-    /// Agrees on every mode's default, which is all a mode never observed can be in.
-    Fresh,
-    /// Missed some of the stream, so it may be in any mode.
-    Stale { in_alt_screen: bool },
 }
 
 #[derive(Default)]
@@ -265,15 +257,36 @@ impl TerminalModes {
     ///
     /// `tail` must be a suffix of what has been fed, which is what `attach` hands over.
     pub fn restore_prefix(&self, tail: &[u8]) -> Vec<u8> {
-        self.prefix(tail, Client::Fresh)
-    }
+        let mut in_tail = Self::default();
+        in_tail.feed(tail);
+        let boundary = self.stream_len.saturating_sub(tail.len() as u64);
 
-    /// `restore_prefix` for a client that missed output right before `tail`, landing it where
-    /// `restore_prefix` lands a fresh one. `client` was fed what the client got since it was
-    /// made by `for_client_behind_by`.
-    pub fn restore_prefix_after_gap(&self, client: &Self, tail: &[u8]) -> Vec<u8> {
-        let in_alt_screen = client.alt_screen_at(client.stream_len) == Some(true);
-        self.prefix(tail, Client::Stale { in_alt_screen })
+        let mut out = Vec::new();
+        // The buffer switch leads so the replay body lands in the right buffer. Only the alt
+        // case needs saying: a fresh client is on the normal buffer already.
+        if self.alt_screen_at(boundary) == Some(true) {
+            push_mode(&mut out, ALT_SCREEN, true);
+        }
+        for (index, &(mode, _)) in TRACKED_FLAGS.iter().enumerate() {
+            let restored = if in_tail.flags[index].is_some() {
+                None
+            } else {
+                self.flags[index]
+            };
+            if let Some(on) = restored {
+                push_mode(&mut out, mode, on);
+            }
+        }
+        if in_tail.mouse_protocol == Exclusive::Unobserved {
+            push_exclusive(&mut out, self.mouse_protocol, MOUSE_PROTOCOLS[1]);
+        }
+        if in_tail.mouse_encoding == Exclusive::Unobserved {
+            push_exclusive(&mut out, self.mouse_encoding, MOUSE_ENCODINGS[0]);
+        }
+        if !in_tail.kitty_touched {
+            push_kitty_stack(&mut out, &self.kitty_stack);
+        }
+        out
     }
 
     /// A tracker for a client that consumed all but the last `unseen` bytes fed here. It starts
@@ -286,55 +299,39 @@ impl TerminalModes {
         }
     }
 
-    fn prefix(&self, tail: &[u8], client: Client) -> Vec<u8> {
-        let mut in_tail = Self::default();
-        in_tail.feed(tail);
-        let boundary = self.stream_len.saturating_sub(tail.len() as u64);
-
+    /// Sequences that move a client which missed the output right before the last `tail_len`
+    /// bytes fed here into the buffer those bytes start in. `client` was fed what the client
+    /// got since `for_client_behind_by` made it. Only the buffer is settled here, because it
+    /// decides where the tail lands; `restate` settles the other modes once the tail is through.
+    pub fn buffer_switch_after_gap(&self, client: &Self, tail_len: u64) -> Vec<u8> {
         let mut out = Vec::new();
-        let mut flags = self.flags;
-        let (mut mouse_protocol, mut mouse_encoding) = (self.mouse_protocol, self.mouse_encoding);
-        if let Client::Stale { in_alt_screen } = client {
-            // xterm keeps a kitty stack per buffer and pops only the one it is in, so each
-            // buffer's is emptied while the client is in it.
-            let empty_kitty_stack = format!("\x1b[<{MAX_KITTY_STACK}u");
-            out.extend_from_slice(empty_kitty_stack.as_bytes());
-            if in_alt_screen {
-                push_mode(&mut out, ALT_SCREEN, false);
-                out.extend_from_slice(empty_kitty_stack.as_bytes());
-            }
-            for (flag, &(_, default_on)) in flags.iter_mut().zip(&TRACKED_FLAGS) {
-                flag.get_or_insert(default_on);
-            }
-            mouse_protocol = mouse_protocol.or_off();
-            mouse_encoding = mouse_encoding.or_off();
+        // Leaving and entering again, rather than staying: xterm swaps the kitty flags on every
+        // `?1049h`, even one it is already in.
+        if client.alt_screen_at(client.stream_len) == Some(true) {
+            // xterm keeps a kitty stack per buffer and pops only the one it is in, so each is
+            // emptied while the client is in it.
+            push_kitty_reset(&mut out);
+            push_mode(&mut out, ALT_SCREEN, false);
+            push_kitty_reset(&mut out);
         }
-        // The buffer switch leads so the replay body lands in the right buffer. Only the alt
-        // case needs saying: the client is on the normal buffer by now.
-        if self.alt_screen_at(boundary) == Some(true) {
+        if self.alt_screen_at(self.stream_len.saturating_sub(tail_len)) == Some(true) {
             push_mode(&mut out, ALT_SCREEN, true);
         }
-        for (index, &(mode, _)) in TRACKED_FLAGS.iter().enumerate() {
-            let restored = if in_tail.flags[index].is_some() {
-                None
-            } else {
-                flags[index]
-            };
-            if let Some(on) = restored {
-                push_mode(&mut out, mode, on);
-            }
+        out
+    }
+
+    /// Sequences that bring a client in the app's buffer to every mode tracked here, whatever
+    /// modes it was left in. Unlike `restore_prefix`, this also states the modes a fresh client
+    /// would already agree on, and empties the kitty stack before pushing.
+    pub fn restate(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        push_kitty_reset(&mut out);
+        for (&(mode, default_on), flag) in TRACKED_FLAGS.iter().zip(self.flags) {
+            push_mode(&mut out, mode, flag.unwrap_or(default_on));
         }
-        if in_tail.mouse_protocol == Exclusive::Unobserved {
-            push_exclusive(&mut out, mouse_protocol, MOUSE_PROTOCOLS[1]);
-        }
-        if in_tail.mouse_encoding == Exclusive::Unobserved {
-            push_exclusive(&mut out, mouse_encoding, MOUSE_ENCODINGS[0]);
-        }
-        if !in_tail.kitty_touched {
-            for flags in &self.kitty_stack {
-                out.extend_from_slice(format!("\x1b[>{flags}u").as_bytes());
-            }
-        }
+        push_exclusive(&mut out, self.mouse_protocol.or_off(), MOUSE_PROTOCOLS[1]);
+        push_exclusive(&mut out, self.mouse_encoding.or_off(), MOUSE_ENCODINGS[0]);
+        push_kitty_stack(&mut out, &self.kitty_stack);
         out
     }
 }
@@ -368,6 +365,17 @@ fn push_exclusive(out: &mut Vec<u8>, state: Exclusive, off_mode: u16) {
         Exclusive::Unobserved => {}
         Exclusive::Off => push_mode(out, off_mode, false),
         Exclusive::On(mode) => push_mode(out, mode, true),
+    }
+}
+
+/// Pops more than the stack can hold, which empties it.
+fn push_kitty_reset(out: &mut Vec<u8>) {
+    out.extend_from_slice(format!("\x1b[<{MAX_KITTY_STACK}u").as_bytes());
+}
+
+fn push_kitty_stack(out: &mut Vec<u8>, stack: &[u32]) {
+    for flags in stack {
+        out.extend_from_slice(format!("\x1b[>{flags}u").as_bytes());
     }
 }
 
@@ -407,13 +415,13 @@ mod tests {
         modes.restore_prefix(tail)
     }
 
-    /// The restore for a client that got `seen`, then missed `gap`, ahead of `tail`.
-    fn restore_after_gap(seen: &[u8], gap: &[u8], tail: &[u8]) -> Vec<u8> {
+    /// The buffer switch for a client that got `seen`, then missed `gap`, ahead of `tail`.
+    fn switch_after_gap(seen: &[u8], gap: &[u8], tail: &[u8]) -> Vec<u8> {
         let mut modes = tracker(&[seen]);
         let client = modes.for_client_behind_by(0);
         modes.feed(gap);
         modes.feed(tail);
-        modes.restore_prefix_after_gap(&client, tail)
+        modes.buffer_switch_after_gap(&client, tail.len() as u64)
     }
 
     /// Claude Code's real startup handshake, transcribed from a production transcript. The
@@ -566,8 +574,8 @@ mod tests {
     #[test]
     fn a_client_on_the_normal_buffer_is_not_taken_out_of_the_alt_screen() {
         assert_eq!(
-            restore_after_gap(b"$ vim\r\n", b"\x1b[?1049h\x1b[?25l", b"frame"),
-            b"\x1b[<32u\x1b[?1049h\x1b[?2004l\x1b[?1004l\x1b[?25l\x1b[?1000l\x1b[?1006l"
+            switch_after_gap(b"$ vim\r\n", b"\x1b[?1049h\x1b[?25l", b"frame"),
+            b"\x1b[?1049h"
         );
     }
 
@@ -576,9 +584,18 @@ mod tests {
     #[test]
     fn a_client_taken_out_of_the_alt_screen_has_both_kitty_stacks_emptied() {
         assert_eq!(
-            restore_after_gap(b"\x1b[>5u\x1b[?1049h\x1b[>1u", b"\x1b[<u\x1b[?1049l", b"$ "),
-            b"\x1b[<32u\x1b[?1049l\x1b[<32u\
-\x1b[?2004l\x1b[?1004l\x1b[?25h\x1b[?1000l\x1b[?1006l\x1b[>5u"
+            switch_after_gap(b"\x1b[>5u\x1b[?1049h\x1b[>1u", b"\x1b[<u\x1b[?1049l", b"$ "),
+            b"\x1b[<32u\x1b[?1049l\x1b[<32u"
+        );
+    }
+
+    /// A client may hold any mode, so the defaults a fresh one would assume are said too.
+    #[test]
+    fn restating_says_every_mode_and_rebuilds_the_kitty_stack() {
+        let modes = tracker(&[b"\x1b[?2004h\x1b[?1003h\x1b[>1u\x1b[>5u"]);
+        assert_eq!(
+            modes.restate(),
+            b"\x1b[<32u\x1b[?2004h\x1b[?1004l\x1b[?25h\x1b[?1003h\x1b[?1006l\x1b[>1u\x1b[>5u"
         );
     }
 
@@ -654,8 +671,8 @@ mod tests {
     #[test]
     fn a_client_that_missed_a_ris_is_taken_out_of_the_alt_screen() {
         assert_eq!(
-            restore_after_gap(b"\x1b[?1049h", b"frame\x1bc", b"$ "),
-            b"\x1b[<32u\x1b[?1049l\x1b[<32u\x1b[?2004l\x1b[?1004l\x1b[?25h\x1b[?1000l\x1b[?1006l"
+            switch_after_gap(b"\x1b[?1049h", b"frame\x1bc", b"$ "),
+            b"\x1b[<32u\x1b[?1049l\x1b[<32u"
         );
     }
 
