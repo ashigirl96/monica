@@ -3,7 +3,7 @@ import { join } from 'node:path'
 
 import { type InferRouterInitialContext, os } from '@orpc/server'
 import { RPCHandler } from '@orpc/server/fetch'
-import { IMAGE_URL_PREFIX } from '@tania/note/contract'
+import { IMAGE_URL_PREFIX, NOTES_HOSTNAMES } from '@tania/note/contract'
 import { router as noteRouter } from '@tania/note/server'
 import { type Context, Hono } from 'hono'
 
@@ -22,9 +22,7 @@ export function listenNotes(
 ): { stop(): void } | null {
   if (!port) return null
   // DNS rebinding で別の名前から届いた request を止める。
-  const hosts = new Set(
-    ['tania.localhost', 'localhost', '127.0.0.1'].map((name) => `${name}:${port}`),
-  )
+  const hosts = new Set(NOTES_HOSTNAMES.map((name) => `${name}:${port}`))
   // openTab の input は shell に打鍵されるので、token の無い口に workbench・task・job を載せると任意のコマンドになる（ADR-0017）。
   const handler = new RPCHandler(os.$context<NoteContext>().router({ note: noteRouter }))
 

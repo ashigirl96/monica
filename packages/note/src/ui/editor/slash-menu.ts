@@ -1,0 +1,274 @@
+import type { Attrs, NodeType } from 'prosemirror-model'
+import { Plugin, TextSelection } from 'prosemirror-state'
+import type { EditorView } from 'prosemirror-view'
+
+import { appendEmptyParagraphAfter, inlineToPlainText } from './commands.ts'
+import { getBlockContext } from './context.ts'
+import { noteMentionMenuKey, slashKey } from './menu-keys.ts'
+import {
+  createMenuOverlay,
+  handleMenuNavKey,
+  menuItemButton,
+  positionMenuAt,
+  trackedMenuQuery,
+} from './menu-overlay.ts'
+import { nodes } from './schema.ts'
+import { createTableContent } from './table.ts'
+
+export type SlashState =
+  | { active: false }
+  | { active: true; pos: number; query: string; index: number }
+
+type SlashMeta = { type: 'open'; pos: number } | { type: 'close' } | { type: 'nav'; index: number }
+
+type SlashItem = {
+  id: string
+  label: string
+  /* .jb-glyph の data-kind（CSS の mask アイコンに対応） */
+  icon: string
+  /* メニュー内のセクション見出し。連続する同一 group は 1 つの見出しにまとまる */
+  group: string
+  aliases: string[]
+  nodeType: NodeType
+  attrs: Attrs | null
+}
+
+const ITEMS: SlashItem[] = [
+  {
+    id: 'callout-note',
+    label: 'Note',
+    icon: 'note',
+    group: 'Callout',
+    aliases: ['note', 'callout', 'info'],
+    nodeType: nodes.callout,
+    attrs: { kind: 'note' },
+  },
+  {
+    id: 'callout-tips',
+    label: 'Tips',
+    icon: 'tips',
+    group: 'Callout',
+    aliases: ['tips', 'tip', 'hint'],
+    nodeType: nodes.callout,
+    attrs: { kind: 'tips' },
+  },
+  {
+    id: 'callout-danger',
+    label: 'Danger',
+    icon: 'danger',
+    group: 'Callout',
+    aliases: ['danger', 'warning', 'caution'],
+    nodeType: nodes.callout,
+    attrs: { kind: 'danger' },
+  },
+  {
+    id: 'callout-question',
+    label: 'Question',
+    icon: 'question',
+    group: 'Callout',
+    aliases: ['question', 'faq', 'help'],
+    nodeType: nodes.callout,
+    attrs: { kind: 'question' },
+  },
+  {
+    id: 'callout-example',
+    label: 'Example',
+    icon: 'example',
+    group: 'Callout',
+    aliases: ['example', 'sample'],
+    nodeType: nodes.callout,
+    attrs: { kind: 'example' },
+  },
+  {
+    id: 'table',
+    label: 'Table',
+    icon: 'table',
+    group: 'Insert',
+    aliases: ['table', 'grid'],
+    nodeType: nodes.table,
+    attrs: null,
+  },
+]
+
+function filterItems(query: string): SlashItem[] {
+  const q = query.trim().toLowerCase()
+  if (q === '') return ITEMS
+  return ITEMS.filter(
+    (item) =>
+      item.label.toLowerCase().includes(q) || item.aliases.some((alias) => alias.includes(q)),
+  )
+}
+
+// slash 文字と query の削除、block 変換を 1 Transaction で行う
+function applyItem(view: EditorView, item: SlashItem): void {
+  const state = slashKey.getState(view.state)
+  if (!state?.active) return
+  // trackedMenuQuery に合わせて selection.to まで削除（後ろ向き選択中の確定対策）
+  const tr = view.state.tr.delete(state.pos, view.state.selection.to)
+  const ctx = getBlockContext(tr.doc.resolve(state.pos))
+  if (!ctx) return
+  const content = ctx.contentNode
+  const newContent =
+    item.nodeType === nodes.divider
+      ? item.nodeType.create()
+      : item.nodeType === nodes.codeBlock
+        ? // codeBlock は marks 不可・text* のみなので inline を平文化する
+          item.nodeType.create(item.attrs, inlineToPlainText(content))
+        : item.nodeType === nodes.table
+          ? // table は inline を直接持てない。元 block のテキストは先頭セルへ引き継ぐ
+            createTableContent(content.content)
+          : item.nodeType.create(item.attrs, content.content)
+  tr.replaceWith(ctx.contentPos, ctx.contentPos + content.nodeSize, newContent)
+  if (item.nodeType === nodes.divider) {
+    // divider はカーソルを持てないので直後に空 paragraph を作って移る
+    appendEmptyParagraphAfter(tr, ctx.containerPos)
+  } else if (item.nodeType === nodes.table) {
+    // inlineContent でないためカーソル復元分岐に入らない。先頭セルの末尾へ明示的に置く
+    const firstCell = newContent.child(0).child(0)
+    tr.setSelection(TextSelection.create(tr.doc, ctx.contentPos + 3 + firstCell.content.size))
+  } else if (newContent.inlineContent) {
+    // replaceWith で潰れたカーソルを変換後 content 内の同 offset へ張り直す
+    const offset = Math.min(Math.max(state.pos - (ctx.contentPos + 1), 0), newContent.content.size)
+    tr.setSelection(TextSelection.create(tr.doc, ctx.contentPos + 1 + offset))
+  }
+  tr.setMeta(slashKey, { type: 'close' } satisfies SlashMeta)
+  view.dispatch(tr.scrollIntoView())
+  view.focus()
+}
+
+class SlashMenuView {
+  private view: EditorView
+  private menu: HTMLElement
+
+  constructor(view: EditorView) {
+    this.view = view
+    this.menu = createMenuOverlay(view)
+  }
+
+  update(view: EditorView): void {
+    this.view = view
+    const state = slashKey.getState(view.state)
+    if (!state?.active) {
+      this.menu.style.display = 'none'
+      return
+    }
+    const items = filterItems(state.query)
+    this.menu.replaceChildren()
+    if (items.length === 0) {
+      const empty = document.createElement('div')
+      empty.className = 'jb-slash-empty'
+      empty.textContent = 'No results'
+      this.menu.append(empty)
+    }
+    let lastGroup: string | null = null
+    items.forEach((item, i) => {
+      if (item.group !== lastGroup) {
+        lastGroup = item.group
+        const heading = document.createElement('div')
+        heading.className = 'jb-slash-heading'
+        heading.textContent = item.group
+        this.menu.append(heading)
+      }
+      const glyph = document.createElement('span')
+      glyph.className = 'jb-glyph'
+      glyph.dataset.kind = item.icon
+      this.menu.append(
+        menuItemButton({
+          icon: glyph,
+          label: item.label,
+          active: i === state.index,
+          onPick: () => applyItem(this.view, item),
+        }),
+      )
+    })
+
+    positionMenuAt(view, this.menu, state.pos)
+  }
+
+  destroy(): void {
+    this.menu.remove()
+  }
+}
+
+export function slashMenuPlugin(): Plugin<SlashState> {
+  return new Plugin<SlashState>({
+    key: slashKey,
+    state: {
+      init: (): SlashState => ({ active: false }),
+      apply(tr, value, _oldState, newState): SlashState {
+        const meta = tr.getMeta(slashKey) as SlashMeta | undefined
+        if (meta?.type === 'open') return { active: true, pos: meta.pos, query: '', index: 0 }
+        if (meta?.type === 'close') return { active: false }
+        if (!value.active) return value
+        if (meta?.type === 'nav') return { ...value, index: meta.index }
+        const pos = tr.mapping.map(value.pos)
+        const query = trackedMenuQuery(newState, pos, '/')
+        if (query === null) return { active: false }
+        return { active: true, pos, query, index: value.index }
+      },
+    },
+    props: {
+      // composition 中は trigger しない
+      handleTextInput(view, from, to, text) {
+        if (text !== '/' || view.composing) return false
+        const state = slashKey.getState(view.state)
+        if (state?.active) return false
+        // `[[` メニュー中の `/` は検索クエリの一部（project 名は "owner/repo"）
+        if (noteMentionMenuKey.getState(view.state)?.active) return false
+        const ctx = getBlockContext(view.state.doc.resolve(from))
+        if (!ctx) return false
+        const type = ctx.contentNode.type
+        // table: applyItem の replaceWith は contentNode（= 表全体）を置換してしまう
+        if (type === nodes.codeBlock || type === nodes.divider || type === nodes.table) return false
+        const tr = view.state.tr.insertText('/', from, to)
+        tr.setMeta(slashKey, { type: 'open', pos: from } satisfies SlashMeta)
+        view.dispatch(tr)
+        return true
+      },
+      // menu が開いている間は menu 側がキーを処理する
+      handleKeyDown(view, event) {
+        const state = slashKey.getState(view.state)
+        if (!state?.active) {
+          // Cmd-J でメニューを開く（"/" を挿入して通常のトリガー経路に乗せる）
+          if (
+            event.key === 'j' &&
+            (event.metaKey || event.ctrlKey) &&
+            !event.shiftKey &&
+            !event.altKey
+          ) {
+            if (noteMentionMenuKey.getState(view.state)?.active) return false
+            const sel = view.state.selection
+            if (!sel.empty) return false
+            const ctx = getBlockContext(sel.$from)
+            if (!ctx) return false
+            const type = ctx.contentNode.type
+            if (type === nodes.codeBlock || type === nodes.divider || type === nodes.table)
+              return false
+            const tr = view.state.tr.insertText('/', sel.from)
+            tr.setMeta(slashKey, { type: 'open', pos: sel.from } satisfies SlashMeta)
+            view.dispatch(tr)
+            return true
+          }
+          return false
+        }
+        const items = filterItems(state.query)
+        const close = () =>
+          view.dispatch(view.state.tr.setMeta(slashKey, { type: 'close' } satisfies SlashMeta))
+        return handleMenuNavKey(event, state.index, {
+          itemCount: items.length,
+          onClose: close,
+          onNav: (index) =>
+            view.dispatch(
+              view.state.tr.setMeta(slashKey, { type: 'nav', index } satisfies SlashMeta),
+            ),
+          onPick: () => {
+            const item = items[Math.min(state.index, items.length - 1)]
+            if (item) applyItem(view, item)
+            else close()
+          },
+        })
+      },
+    },
+    view: (view) => new SlashMenuView(view),
+  })
+}

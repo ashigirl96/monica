@@ -13,6 +13,9 @@ const NoteRowSchema = createSelectSchema(note)
 // monica の本文が持つ src の形のまま（ADR-0019）。
 export const IMAGE_URL_PREFIX = '/api/assets/'
 
+// 保存される link は tania.localhost で書かれるが、ユーザーが同じ Backend を別の名前で開くこともある。
+export const NOTES_HOSTNAMES = ['tania.localhost', 'localhost', '127.0.0.1']
+
 export const NoteIdSchema = z
   .string()
   .regex(/^note-[1-9]\d*$/)

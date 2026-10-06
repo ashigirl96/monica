@@ -1,0 +1,88 @@
+import { chainCommands, deleteSelection, toggleMark } from 'prosemirror-commands'
+import { history, redo, undo } from 'prosemirror-history'
+import { undoInputRule } from 'prosemirror-inputrules'
+import { keymap } from 'prosemirror-keymap'
+import type { Plugin } from 'prosemirror-state'
+
+import {
+  backspaceBlock,
+  codeIndent,
+  codeNewline,
+  codeOutdent,
+  cursorToLineEnd,
+  cursorToLineStart,
+  deleteEmptyBlock,
+  deleteForwardBlock,
+  exitCallout,
+  exitCodeBlock,
+  enterInlineCode,
+  exitDocEnd,
+  exitDocStart,
+  exitInlineCode,
+  ignoreCompositionEnter,
+  indentBlock,
+  insertHardBreak,
+  outdentBlock,
+  splitBlock,
+  toggleCollapse,
+} from './commands.ts'
+import { schema } from './schema.ts'
+import {
+  tableEnter,
+  tableExit,
+  tableHardBreak,
+  tableLineEnd,
+  tableLineStart,
+  tableNextCell,
+  tablePrevCell,
+} from './table.ts'
+
+// composition・menu・block selection はここへ届く前に処理される。composition は
+// ProseMirror が keyCode 229 を keymap に流さないことで、menu と block selection は
+// plugin 配列で keymap より前に置くことで満たす。
+export function editorKeymap(): Plugin[] {
+  return [
+    keymap({
+      // table cell 内キー → code block 内キー → 通常 block の構造キー。
+      // table を先頭に置く: 後続 command は getBlockContext 経由で「table を包む container」
+      // を単位に動いてしまい、cell 内では分割・indent が表を壊す。
+      Tab: chainCommands(tableNextCell, codeIndent, indentBlock),
+      'Shift-Tab': chainCommands(tablePrevCell, codeOutdent, outdentBlock),
+      Enter: chainCommands(ignoreCompositionEnter, tableEnter, codeNewline, splitBlock),
+      // tableHardBreak は exitCallout より前: callout の子として table が nest している場合、
+      // cell 内の Shift-Enter を callout 脱出に食われない
+      'Shift-Enter': chainCommands(codeNewline, tableHardBreak, exitCallout, insertHardBreak),
+      'Mod-Enter': chainCommands(tableExit, exitCodeBlock),
+      // 複数 block をまたぐ text selection は prosemirror-view が native 削除を
+      // 抑止する（stopNativeHorizontalDelete）ため、deleteSelection で明示的に消す
+      Backspace: chainCommands(undoInputRule, deleteSelection, backspaceBlock),
+      Delete: chainCommands(deleteSelection, deleteForwardBlock),
+      // macOS 流のカーソル移動
+      'Ctrl-a': chainCommands(tableLineStart, cursorToLineStart),
+      'Ctrl-e': chainCommands(tableLineEnd, cursorToLineEnd),
+      // 空行のみ行ごと削除。非空行は false でネイティブの前方 1 文字削除に落とす
+      'Ctrl-d': deleteEmptyBlock,
+      // ↓と同義だが、最下 block から先へ進めないときだけ末尾に空行を確保する
+      'Ctrl-n': exitDocEnd,
+      // ↑と同義だが、最上 block から先へ進めないときだけ先頭に空行を確保する。
+      // onExitUp 付き editor（essays 等）は手前の keymap がタイトルへの脱出を優先する
+      'Ctrl-p': exitDocStart,
+      // heading / callout / toggle の折りたたみ。macOS の ⌥. は "≥" を生むが、
+      // prosemirror-keymap が keyCode から base key を解決するのでこの binding で届く
+      'Alt-.': toggleCollapse,
+      // 行末の inline code から抜ける。抜けたあとの → は false に落ちて native 移動に戻る
+      ArrowRight: exitInlineCode,
+      // その対称: 抜けた状態の ← はカーソルを動かさず code の右端（mark 内）へ戻る
+      ArrowLeft: enterInlineCode,
+      'Mod-b': toggleMark(schema.marks.bold),
+      'Mod-i': toggleMark(schema.marks.italic),
+      'Mod-u': toggleMark(schema.marks.underline),
+      'Mod-e': toggleMark(schema.marks.code),
+      'Mod-Shift-s': toggleMark(schema.marks.strike),
+      'Mod-z': undo,
+      'Shift-Mod-z': redo,
+      'Mod-y': redo,
+    }),
+    history(),
+  ]
+}
