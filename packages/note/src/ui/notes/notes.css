@@ -7,6 +7,9 @@
    R が沈んで petrol＝緑がかった青に見えてしまうため。 */
 .notes-screen {
   --water: #59b9c6;
+  /* --ambient / --ambient-blur / --ambient-opacity-{dark,light} は ambient.ts の
+     AMBIENTS が :root へ流し込む。どちらの opacity を採るかだけをここで決める */
+  --ambient-opacity: var(--ambient-opacity-dark);
   /* dark の文字階調だけは透明度で作らない: 紺の紙に白を alpha で載せると必ず
      paper の青が透けて青灰色に転ぶ。
      線と hover は面の一部なので従来どおり alpha 導出のまま。 */
@@ -36,6 +39,22 @@
     sans-serif;
 }
 
+/* 部屋の向こう側。fixed + 負の z-index で root の stacking context まで抜けるので、
+   .notes-screen 自身が塗る背景（essays 一覧の --desk）よりも必ず下に入る。ここで
+   stacking context を作るとペイント順が逆転して背景が面の上に乗るため、.notes-screen
+   側に z-index・isolation は足さない。
+   40px 外へ広げるのは、blur が縁から引き込む透明を画面外へ逃がすため。 */
+.notes-screen::before {
+  content: "";
+  position: fixed;
+  inset: -40px;
+  z-index: -1;
+  background: var(--ambient) center / cover no-repeat;
+  opacity: var(--ambient-opacity);
+  filter: blur(var(--ambient-blur));
+  pointer-events: none;
+}
+
 .notes-screen .jb-root {
   --jb-ink: var(--ink);
   /* エディタの操作痕（todo の塗り・選択・synced block の枠）は水色と同系の青で揃える */
@@ -54,6 +73,7 @@
    水色は白の上では沈むので、同じ系統の紺（#2980af）に置き換える。 */
 :root[data-theme="light"] .notes-screen {
   --water: #2980af;
+  --ambient-opacity: var(--ambient-opacity-light);
   --ink: color-mix(in srgb, var(--foreground) 87%, transparent);
   --ink-muted: color-mix(in srgb, var(--ink) 78%, transparent);
   --ink-faint: color-mix(in srgb, var(--ink) 58%, transparent);
@@ -90,7 +110,7 @@
   --jb-callout-under: oklch(0.345 0.045 264);
 }
 
-/* 写真なし（ambient の none）。透かす相手がいないのに alpha を残すと、机と紙が
+/* 写真なし（ambient.ts の none）。透かす相手がいないのに alpha を残すと、机と紙が
    同じ --background の上で合成されて階調差が潰れ「机の上の紙」が読めなくなる。
    dark は oklch の alpha、light は color-mix の % として同じ --paper-alpha を消費して
    いるので、1 に戻すこの 1 ブロックで両テーマに効く。

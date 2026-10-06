@@ -1,6 +1,6 @@
 # note の ui
 
-`packages/note/src/ui` に置く notes の画面とエディタ。`@tania/note/ui` から import する。決定の理由は ADR-0019 と #115・#118 の決定にある。今あるのはエディタと Daily の画面で、Essay と Repo の画面、テーマと ambient は後続の issue で足す。
+`packages/note/src/ui` に置く notes の画面とエディタ。`@tania/note/ui` から import する。決定の理由は ADR-0019 と #115・#118 の決定にある。今あるのはエディタと Daily の画面と見た目の設定で、Essay と Repo の画面は後続の issue で足す。
 
 ## monica のコードを移すとき
 
@@ -40,6 +40,7 @@ monica の `shared/block-editor` を `src/ui/editor/` に振る舞いを変え�
 | Note の path（`/notes/:id`） | `src/ui/routes.ts` の `notePath` と `noteIdOfPath`。Note Mention の href（`noteHref`）と内部リンクの判定（`internalNoteId`）が読む |
 | 内部リンクとして扱う host 名 | `@tania/note/contract` の `NOTES_HOSTNAMES`。notes の口の Host の照合も同じ定数を読む |
 | clipboard の MIME（`application/x-tania-blocks+json`） | `clipboard.ts` の `BLOCKS_MIME` |
+| テーマの localStorage の key（`tania-theme`）と、保存値から light / dark を決める規則 | `src/ui/theme.ts` と `apps/web/index.html` の描画前の script の 2 箇所。index.html の script は描画を止めて走る classic script で、module を import できないため。`theme.test.ts` が index.html の script を走らせ、`setThemePref` と同じテーマになるかを確かめる |
 
 - 内部リンクの判定は、自分の origin の URL に加えて、開いている origin と link の host 名がどちらも `NOTES_HOSTNAMES`（`tania.localhost`・`localhost`・`127.0.0.1`）にあり、scheme と port が同じ URL を内部として扱う。保存される link は `tania.localhost` で書かれるが、ユーザーが同じ Backend を別の名前で開くこともあるため。port が違えば同じ host 名でも外部のリンクになる。
 - `import.meta.env.DEV` は残す。dev でだけ IME の debug plugin を入れる。`vite/client` の型は program 全体で効いている。
@@ -119,11 +120,41 @@ monica の `web/src` の router・autosave・Daily の画面を移したもの�
 
 - `notes/notes.css` を NotesShell が import する。面の色（`--desk`・`--paper`・`--ink-*`）を持ち、既定は dark で、light は `:root[data-theme="light"]` で上書きする。
 - 机と紙は背景写真（ambient）を透かすため alpha を持ち、写真なし（`:root[data-ambient="none"]`）では不透明にする。
-- テーマと ambient の切り替えが入るまでは、`apps/web` の `index.html` が `data-theme="dark"` と `data-ambient="none"` を置く。写真を敷く規則は ambient と一緒に足す。
+- 背景写真は `.notes-screen::before` が `position: fixed` と負の `z-index` で面の下に敷く。`.notes-screen` に `z-index` や `isolation` を足すと stacking context ができ、写真が面の上に乗る。opacity は `ambient.ts` が light と dark の 2 つを `:root` に流し込み、`notes.css` がテーマで選ぶ。
+
+### 見た目の設定
+
+monica の notes の見た目の設定を、振る舞いを変えずに移したもの。どれもブラウザごとの好みで、Backend には保存しない。
+
+| 設定 | 切り替え | 保存 | 当て方 |
+|---|---|---|---|
+| テーマ（system / light / dark） | rail の一番下のボタン。押すたびに system → light → dark | `tania-theme`。system のときは key を消す | `:root` の `data-theme`。system は OS の設定を JS で light / dark に解き、OS の切り替えに追従する |
+| ambient（none・universe・sakura・village・fireworks・shrine） | 右下のピル、⌥; で次、⇧⌥; で前 | `tania-ambient`。知らない値は universe | `:root` の `data-ambient` と `--ambient`・`--ambient-blur`・`--ambient-opacity-{dark,light}` |
+| 本文の幅 | 右下のピルのスライダー。760px に 0〜520px を 8px 刻みで足す | `tania-note-extra-w`。スライダーを離したときに書く | `:root` の `--note-extra-w`。本文の column が `max-w-[calc(760px+var(--note-extra-w,0px))]` で読む |
+| 密度（relaxed / compact） | ⌥D | `tania-notes-density` | NotesShell の `data-density`。`block-editor.css` が compact で縦のリズムを詰める（`--jb-line` 32→28px など） |
+| zen | ⌥B | 保存しない。reload で解ける | AppShell の `data-zen`。rail とサイドバーを幅 0 にし、右下のピルは残す |
+
+- ⌥B は AppShell が、⌥; は AppShell の中の AmbientSwitcher が取るので全画面で効き、⌥D は NotesShell が取るので NotesShell の画面で効く。どれも `window` の capture phase の `keydown` で取り、エディタより先に横取りする。
+- ⌥; だけは変換中も効く。ambient は本文に触らないので、変換中に奪っても害が無いため。⌥B と ⌥D は変換中は効かない。
+- テーマは `apps/web` の `index.html` の描画前の script が、最初の描画の前に当てる（上の「直書きの文字列の置き場所」）。ambient と本文の幅は CSS 変数で読むので、`NotesApp` の layout effect が最初の描画の前に当てる。
+- App は `/daily` から今日への replace の間も AppShell を外さない。外すと zen が解け、⌃1 で Daily に移るたびに zen を抜ける。
+- 写真（JPG、計 1.7MB）は `src/ui/ambients/` に置き、Vite の asset として import する。build では `assets/` に hash 付きで出て、notes の口が immutable の cache で配る。
+- 右下のピルの popup は、外側の mousedown、Escape、外の要素への focus で閉じる（`components/use-popup-dismiss.ts`）。Escape は capture phase で取る。bubble では、エディタにいるときに ProseMirror がブロック選択に使って届かないため。
+
+notes の画面が localStorage に書く key は次の 5 つで、どれも `tania-` で始まる。monica の `monica-*` は読まない（origin が違うので、どちらにしても値は引き継がれない）。
+
+| key | 値 |
+|---|---|
+| `tania-theme` | `light` か `dark` |
+| `tania-ambient` | ambient の名前 |
+| `tania-note-extra-w` | 本文の幅に足す px |
+| `tania-notes-density` | `relaxed` か `compact` |
+| `tania-notes-sidebar-w` | NotesShell のサイドバーの幅の px |
 
 ### テスト
 
 - エディタと同じく DOM の環境は入れず、純関数と link を確かめる。
 - monica の save-state（14 本）・note-sync（10 本）・summary（4 本）のテストを、contract の形（平らな種類、Date の版）に直して移してある。
 - 保存は `save-queue.test.ts` が、偽の保存と `spyOn` で捕まえた timer で確かめる（debounce、基準版、CONFLICT、再試行、直列、keepalive、title を省くこと、閉じると失われる編集の数え方）。
+- 見た目の設定は、`fake-browser.ts` が置く偽の localStorage・matchMedia・document で確かめる。`theme.test.ts` はテーマを切り替えてから `apps/web/index.html` の描画前の script を走らせ、reload の最初の描画に同じテーマが当たるかを見る。`ambient.test.ts` は保存値の読み方（prototype の名前を弾く）、巡回の向き、⌥; の判定（⇧ で逆順、変換中も効く。`ambientStepOf`）を、`note-width.test.ts` は本文の幅の保存と読み戻しを見る。⌥B と ⌥D、zen、スライダー、密度、写真の見た目は DOM が要るので、ブラウザで確かめる。
 - route は `routes.test.ts`（今日の導出、`/notes/:id` の行き先）、再接続は `reach.test.ts`（1 秒の待ちと確かめの request。timer は `setTimeout` を `spyOn` で捕まえて手で進める）、link は `client.test.ts`（keepalive と届いたかの合図。fetch を `spyOn` で差し替える）。
