@@ -88,58 +88,61 @@ impl TableInner {
             };
             out.set_behind(true);
             if out.drained() {
-                catch_up_attachment(out, &mut entry.transcript, *conn_id, session_id, feed);
+                while queue_missed_chunk(out, &mut entry.transcript, *conn_id, session_id, feed) {}
             }
         }
     }
 }
 
-/// Sends what a behind attachment missed until the queue reaches the catch-up ceiling, and
-/// turns it live once nothing more is missing or can be had from the transcript.
-fn catch_up_attachment(
+/// Queues the next chunk a behind attachment missed, below the catch-up ceiling, or turns it
+/// live once nothing more is missing or can be had from the transcript. False when it queued
+/// nothing.
+fn queue_missed_chunk(
     out: &Outbox,
     transcript: &mut Transcript,
     conn_id: u64,
     session_id: &str,
     feed: &mut Feed,
-) {
+) -> bool {
     let Feed::Behind { resume_at, since } = feed else {
-        return;
+        return false;
     };
-    while out.has_room_to_catch_up() {
-        let (start, bytes) = match transcript.read_from(*resume_at, CATCH_UP_CHUNK) {
-            Ok(read) => read,
-            Err(e) => {
-                log::warn!(
-                    "connection {conn_id} lost the output of {session_id} from {resume_at}: {e:#}"
-                );
-                *feed = Feed::Live;
-                return;
-            }
-        };
-        if start > *resume_at {
+    if !out.has_room_to_catch_up() {
+        return false;
+    }
+    let (start, bytes) = match transcript.read_from(*resume_at, CATCH_UP_CHUNK) {
+        Ok(read) => read,
+        Err(e) => {
             log::warn!(
-                "connection {conn_id} lost {} bytes of {session_id} that rotated out of the transcript",
-                start - *resume_at
-            );
-        }
-        if bytes.is_empty() {
-            log::info!(
-                "connection {conn_id} caught up on {session_id} after {}ms",
-                since.elapsed().as_millis()
+                "connection {conn_id} lost the output of {session_id} from {resume_at}: {e:#}"
             );
             *feed = Feed::Live;
-            return;
+            return false;
         }
-        let msg = ServerMessage::Output {
-            session_id: session_id.to_string(),
-            data: b64(&bytes),
-        };
-        if !out.send(&msg) {
-            return;
-        }
-        *resume_at = start + bytes.len() as u64;
+    };
+    if start > *resume_at {
+        log::warn!(
+            "connection {conn_id} lost {} bytes of {session_id} that rotated out of the transcript",
+            start - *resume_at
+        );
     }
+    if bytes.is_empty() {
+        log::info!(
+            "connection {conn_id} caught up on {session_id} after {}ms",
+            since.elapsed().as_millis()
+        );
+        *feed = Feed::Live;
+        return false;
+    }
+    let msg = ServerMessage::Output {
+        session_id: session_id.to_string(),
+        data: b64(&bytes),
+    };
+    if !out.send(&msg) {
+        return false;
+    }
+    *resume_at = start + bytes.len() as u64;
+    true
 }
 
 pub struct SessionTable {
@@ -245,23 +248,36 @@ impl SessionTable {
     /// output after it meet without a gap or an overlap.
     pub fn catch_up(&self, conn_id: u64) {
         let mut guard = self.lock();
-        let inner = &mut *guard;
-        let Some(out) = inner.connections.get(&conn_id) else {
+        let TableInner {
+            live,
+            connections,
+            attachments,
+            ..
+        } = &mut *guard;
+        let Some(out) = connections.get(&conn_id) else {
             return;
         };
-        let mut still_behind = false;
-        for (session_id, conns) in &mut inner.attachments {
-            let Some(feed) = conns.get_mut(&conn_id) else {
-                continue;
-            };
-            // Exit drops a session's attachments, so an attached session is always live.
-            let Some(entry) = inner.live.get_mut(session_id) else {
-                continue;
-            };
-            catch_up_attachment(out, &mut entry.transcript, conn_id, session_id, feed);
-            still_behind |= matches!(feed, Feed::Behind { .. });
+        let is_behind =
+            |conns: &HashMap<u64, Feed>| matches!(conns.get(&conn_id), Some(Feed::Behind { .. }));
+        let mut turns: Vec<String> = attachments
+            .iter()
+            .filter(|(_, conns)| is_behind(conns))
+            .map(|(session_id, _)| session_id.clone())
+            .collect();
+        // A chunk per turn, so a session that keeps printing cannot take all the room.
+        while !turns.is_empty() {
+            turns.retain(|session_id| {
+                let feed = attachments
+                    .get_mut(session_id)
+                    .and_then(|conns| conns.get_mut(&conn_id));
+                // Exit drops a session's attachments, so an attached session is always live.
+                let (Some(feed), Some(entry)) = (feed, live.get_mut(session_id)) else {
+                    return false;
+                };
+                queue_missed_chunk(out, &mut entry.transcript, conn_id, session_id, feed)
+            });
         }
-        out.set_behind(still_behind);
+        out.set_behind(attachments.values().any(is_behind));
     }
 
     fn on_exit(&self, session_id: &str, exit_code: Option<u32>) {
@@ -783,6 +799,42 @@ mod tests {
         assert_same_bytes(&peer.output_of("ts-2", printed_2.len()), &printed_2);
         t.terminate("ts-1").unwrap();
         t.terminate("ts-2").unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn terminal_sessions_behind_on_one_connection_take_turns_catching_up() {
+        let dir = temp_dir("catch-up-turns");
+        let t = table(&dir);
+        for id in ["ts-0", "ts-1", "ts-2"] {
+            t.create(quiet_params(&dir, id)).unwrap();
+        }
+        let mut peer = Peer::connect(&t, 1);
+        for (id, session_id) in [(1, "ts-0"), (2, "ts-1"), (3, "ts-2")] {
+            peer.attach(id, session_id);
+        }
+        // ts-0 fills the queue, so ts-1 and ts-2 get nothing live and all of theirs is catch-up.
+        burst(&t, "ts-0", 300);
+        let printed_1 = burst(&t, "ts-1", 800);
+        let printed_2 = burst(&t, "ts-2", 800);
+
+        loop {
+            peer.next();
+            let got_1 = peer.output.get("ts-1").map_or(0, Vec::len);
+            let got_2 = peer.output.get("ts-2").map_or(0, Vec::len);
+            if got_1 == printed_1.len() || got_2 == printed_2.len() {
+                assert!(
+                    got_1 > 0 && got_2 > 0,
+                    "one caught up fully before the other got anything: {got_1} and {got_2} bytes"
+                );
+                break;
+            }
+        }
+        assert_same_bytes(&peer.output_of("ts-1", printed_1.len()), &printed_1);
+        assert_same_bytes(&peer.output_of("ts-2", printed_2.len()), &printed_2);
+        for id in ["ts-0", "ts-1", "ts-2"] {
+            t.terminate(id).unwrap();
+        }
         std::fs::remove_dir_all(&dir).ok();
     }
 
