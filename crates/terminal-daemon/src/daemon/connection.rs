@@ -1,6 +1,5 @@
 use std::io::{BufReader, BufWriter};
 use std::os::unix::net::UnixStream;
-use std::sync::mpsc;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -9,9 +8,8 @@ use tania_terminal_protocol::{
     read_frames, write_line, Request, RequestOp, ResponseBody, ServerMessage, PROTOCOL_VERSION,
 };
 
-use super::state::{Outbox, SessionTable};
-
-const OUTBOX_CAPACITY: usize = 256;
+use super::outbox::outbox;
+use super::state::SessionTable;
 
 pub fn serve_connection(stream: UnixStream, table: Arc<SessionTable>, conn_id: u64) {
     let write_stream = match stream.try_clone() {
@@ -21,14 +19,18 @@ pub fn serve_connection(stream: UnixStream, table: Arc<SessionTable>, conn_id: u
             return;
         }
     };
-    let (tx, rx) = mpsc::sync_channel::<String>(OUTBOX_CAPACITY);
+    let (outbox, queue) = outbox();
+    let writer_table = Arc::clone(&table);
     let writer = std::thread::Builder::new()
         .name(format!("ptyd-writer-{conn_id}"))
         .spawn(move || {
             let mut w = BufWriter::new(write_stream);
-            for line in rx {
+            while let Some(line) = queue.recv() {
                 if write_line(&mut w, &line).is_err() {
                     break;
+                }
+                if queue.catch_up_due() {
+                    writer_table.catch_up(conn_id);
                 }
             }
         });
@@ -37,7 +39,6 @@ pub fn serve_connection(stream: UnixStream, table: Arc<SessionTable>, conn_id: u
         return;
     }
 
-    let outbox = Outbox::new(tx);
     table.register_connection(conn_id, outbox.clone());
     log::debug!("connection {conn_id} established");
 

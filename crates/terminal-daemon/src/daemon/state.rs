@@ -1,45 +1,36 @@
 //! Session/connection bookkeeping for the daemon. One mutex guards everything: transcript
-//! appends, attach (tail cut + fanout registration), and exit transitions all serialize
-//! through it, which is what makes replay-then-stream gapless and duplicate-free without
-//! sequence numbers.
+//! appends, attach (tail cut + fanout registration), catch-up, and exit transitions all
+//! serialize through it, which is what makes replay-then-stream and catch-up-then-stream
+//! gapless and duplicate-free without sequence numbers.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
 use base64::Engine;
 
+use super::outbox::Outbox;
 use crate::manager::PtyManager;
 use crate::terminal_modes::TerminalModes;
 use crate::transcript::Transcript;
 use crate::types::{PtySize, SpawnRequest};
-use tania_terminal_protocol::{to_frame, CreateParams, ServerMessage, SessionInfo};
+use tania_terminal_protocol::{CreateParams, ServerMessage, SessionInfo};
 
 const DEFAULT_REPLAY_BYTES: u32 = 256 * 1024;
+/// Larger than a PTY read, so a backlog drains in fewer frames.
+const CATCH_UP_CHUNK: usize = 16 * 1024;
 
-/// Sending half of a connection's outbox. `send` is best-effort: a full queue means the
-/// peer stopped reading, and the caller decides whether that kills the connection.
-#[derive(Clone)]
-pub struct Outbox {
-    tx: std::sync::mpsc::SyncSender<String>,
-}
-
-impl Outbox {
-    pub fn new(tx: std::sync::mpsc::SyncSender<String>) -> Self {
-        Self { tx }
-    }
-
-    /// Serialize and enqueue; false when the queue is full or the writer is gone.
-    pub fn send(&self, msg: &ServerMessage) -> bool {
-        match to_frame(msg) {
-            Ok(line) => self.tx.try_send(line).is_ok(),
-            Err(e) => {
-                log::error!("failed to serialize server message: {e}");
-                false
-            }
-        }
-    }
+/// How an attached connection receives a session's output.
+enum Feed {
+    Live,
+    /// The connection's queue filled up, so the output from `resume_at` on waits in the
+    /// transcript until catch-up sends it.
+    Behind {
+        resume_at: u64,
+        since: Instant,
+    },
 }
 
 struct LiveEntry {
@@ -61,8 +52,8 @@ struct TableInner {
     live: HashMap<String, LiveEntry>,
     exited: HashMap<String, ExitedEntry>,
     connections: HashMap<u64, Outbox>,
-    /// session_id → connections currently attached (receiving Output events).
-    attachments: HashMap<String, HashSet<u64>>,
+    /// session_id → connections currently attached, and how each receives the output.
+    attachments: HashMap<String, HashMap<u64, Feed>>,
 }
 
 impl TableInner {
@@ -73,27 +64,81 @@ impl TableInner {
         }
     }
 
-    fn fanout_to_attachments(&mut self, session_id: &str, msg: &ServerMessage) {
-        let Some(conns) = self.attachments.get(session_id) else {
+    fn fanout_to_attachments(&mut self, session_id: &str, msg: &ServerMessage, chunk_start: u64) {
+        let (Some(conns), Some(entry)) = (
+            self.attachments.get_mut(session_id),
+            self.live.get_mut(session_id),
+        ) else {
             return;
         };
-        if conns.is_empty() {
+        for (conn_id, feed) in conns.iter_mut() {
+            if !matches!(feed, Feed::Live) {
+                continue;
+            }
+            let Some(out) = self.connections.get(conn_id) else {
+                continue;
+            };
+            if out.send_live(msg) {
+                continue;
+            }
+            log::info!("connection {conn_id} fell behind on {session_id}");
+            *feed = Feed::Behind {
+                resume_at: chunk_start,
+                since: Instant::now(),
+            };
+            out.set_behind(true);
+            if out.drained() {
+                catch_up_attachment(out, &mut entry.transcript, *conn_id, session_id, feed);
+            }
+        }
+    }
+}
+
+/// Sends what a behind attachment missed until the queue reaches the catch-up ceiling, and
+/// turns it live once nothing more is missing or can be had from the transcript.
+fn catch_up_attachment(
+    out: &Outbox,
+    transcript: &mut Transcript,
+    conn_id: u64,
+    session_id: &str,
+    feed: &mut Feed,
+) {
+    let Feed::Behind { resume_at, since } = feed else {
+        return;
+    };
+    while out.has_room_to_catch_up() {
+        let (start, bytes) = match transcript.read_from(*resume_at, CATCH_UP_CHUNK) {
+            Ok(read) => read,
+            Err(e) => {
+                log::warn!(
+                    "connection {conn_id} lost the output of {session_id} from {resume_at}: {e:#}"
+                );
+                *feed = Feed::Live;
+                return;
+            }
+        };
+        if start > *resume_at {
+            log::warn!(
+                "connection {conn_id} lost {} bytes of {session_id} that rotated out of the transcript",
+                start - *resume_at
+            );
+        }
+        if bytes.is_empty() {
+            log::info!(
+                "connection {conn_id} caught up on {session_id} after {}ms",
+                since.elapsed().as_millis()
+            );
+            *feed = Feed::Live;
             return;
         }
-        let lagged: Vec<u64> = conns
-            .iter()
-            .filter(|conn_id| {
-                !self
-                    .connections
-                    .get(conn_id)
-                    .is_some_and(|out| out.send(msg))
-            })
-            .copied()
-            .collect();
-        for conn_id in lagged {
-            log::warn!("dropping lagged connection {conn_id}");
-            self.drop_connection(conn_id);
+        let msg = ServerMessage::Output {
+            session_id: session_id.to_string(),
+            data: b64(&bytes),
+        };
+        if !out.send(&msg) {
+            return;
         }
+        *resume_at = start + bytes.len() as u64;
     }
 }
 
@@ -177,6 +222,7 @@ impl SessionTable {
         let Some(entry) = inner.live.get_mut(session_id) else {
             return;
         };
+        let start = entry.transcript.end();
         if let Err(e) = entry.transcript.append(bytes) {
             log::warn!("transcript append failed for {session_id}: {e}");
         }
@@ -192,7 +238,30 @@ impl SessionTable {
             session_id: session_id.to_string(),
             data: b64(bytes),
         };
-        inner.fanout_to_attachments(session_id, &msg);
+        inner.fanout_to_attachments(session_id, &msg, start);
+    }
+
+    /// Holding the lock keeps `on_output` out, so what an attachment catches up on and the live
+    /// output after it meet without a gap or an overlap.
+    pub fn catch_up(&self, conn_id: u64) {
+        let mut guard = self.lock();
+        let inner = &mut *guard;
+        let Some(out) = inner.connections.get(&conn_id) else {
+            return;
+        };
+        let mut still_behind = false;
+        for (session_id, conns) in &mut inner.attachments {
+            let Some(feed) = conns.get_mut(&conn_id) else {
+                continue;
+            };
+            // Exit drops a session's attachments, so an attached session is always live.
+            let Some(entry) = inner.live.get_mut(session_id) else {
+                continue;
+            };
+            catch_up_attachment(out, &mut entry.transcript, conn_id, session_id, feed);
+            still_behind |= matches!(feed, Feed::Behind { .. });
+        }
+        out.set_behind(still_behind);
     }
 
     fn on_exit(&self, session_id: &str, exit_code: Option<u32>) {
@@ -208,7 +277,14 @@ impl SessionTable {
                 exit_code,
             },
         );
-        inner.attachments.remove(session_id);
+        for (conn_id, feed) in inner.attachments.remove(session_id).unwrap_or_default() {
+            if let Feed::Behind { resume_at, .. } = feed {
+                log::warn!(
+                    "connection {conn_id} never got the last {} bytes of {session_id}, which exited while it was behind",
+                    entry.transcript.end() - resume_at
+                );
+            }
+        }
         // Exit broadcasts to every connection — a detached session has no attachments, but
         // the app must still record the exit and reap the tombstone.
         let msg = ServerMessage::Exit {
@@ -250,7 +326,7 @@ impl SessionTable {
             .attachments
             .entry(session_id.to_string())
             .or_default()
-            .insert(conn_id);
+            .insert(conn_id, Feed::Live);
         Ok((b64(&replay), rows, cols))
     }
 
@@ -324,7 +400,15 @@ impl SessionTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::BufReader;
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::net::UnixStream;
+    use std::path::Path;
     use std::time::{Duration, Instant};
+
+    use tania_terminal_protocol::{read_frames, write_frame, Request, RequestOp, ResponseBody};
+
+    use crate::daemon::connection::serve_connection;
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -358,8 +442,120 @@ mod tests {
         conn_id: u64,
     ) -> std::sync::mpsc::Receiver<String> {
         let (tx, rx) = std::sync::mpsc::sync_channel(64);
-        table.register_connection(conn_id, Outbox::new(tx));
+        table.register_connection(conn_id, Outbox::unmetered(tx));
         rx
+    }
+
+    /// A shell that prints nothing, so everything the session outputs comes from the test.
+    fn quiet_params(dir: &Path, session_id: &str) -> CreateParams {
+        std::fs::create_dir_all(dir).unwrap();
+        let script = dir.join("quiet.sh");
+        std::fs::write(&script, "#!/bin/sh\nexec sleep 600\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        CreateParams {
+            shell: Some(script.to_string_lossy().to_string()),
+            ..echo_params(session_id)
+        }
+    }
+
+    /// Prints `chunks` distinct 1 KB chunks, the size macOS hands out per PTY read, and returns
+    /// them concatenated.
+    fn burst(t: &SessionTable, session_id: &str, chunks: usize) -> Vec<u8> {
+        let mut printed = Vec::new();
+        for i in 0..chunks {
+            let chunk = format!("{session_id}:{i:06} ").repeat(128)[..1024].to_string();
+            t.on_output(session_id, chunk.as_bytes());
+            printed.extend_from_slice(chunk.as_bytes());
+        }
+        printed
+    }
+
+    fn assert_same_bytes(got: &[u8], want: &[u8]) {
+        let first_diff = got.iter().zip(want).position(|(a, b)| a != b);
+        assert!(
+            got == want,
+            "got {} bytes, want {}; first difference at {first_diff:?}",
+            got.len(),
+            want.len()
+        );
+    }
+
+    fn decode(data: &str) -> Vec<u8> {
+        base64::engine::general_purpose::STANDARD
+            .decode(data)
+            .unwrap()
+    }
+
+    /// The app's end of a ptyd connection, served by the real connection loop. Nothing is read
+    /// off the socket until the test asks, which is how it stands in for a stalled Shell.
+    struct Peer {
+        stream: UnixStream,
+        frames: Box<dyn Iterator<Item = ServerMessage>>,
+        output: HashMap<String, Vec<u8>>,
+    }
+
+    impl Peer {
+        fn connect(t: &Arc<SessionTable>, conn_id: u64) -> Self {
+            let (client, server) = UnixStream::pair().unwrap();
+            let table = Arc::clone(t);
+            std::thread::spawn(move || serve_connection(server, table, conn_id));
+            client
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let reader = BufReader::new(client.try_clone().unwrap());
+            Self {
+                stream: client,
+                frames: Box::new(read_frames(reader).map(Result::unwrap)),
+                output: HashMap::new(),
+            }
+        }
+
+        fn send(&mut self, id: u64, op: RequestOp) {
+            write_frame(&mut self.stream, &Request { id: Some(id), op }).unwrap();
+        }
+
+        fn next(&mut self) -> ServerMessage {
+            let msg = self
+                .frames
+                .next()
+                .expect("the connection closed or went quiet");
+            if let ServerMessage::Output { session_id, data } = &msg {
+                self.output
+                    .entry(session_id.clone())
+                    .or_default()
+                    .extend(decode(data));
+            }
+            msg
+        }
+
+        fn response(&mut self, id: u64) -> ResponseBody {
+            loop {
+                match self.next() {
+                    ServerMessage::Ok { id: got, body } if got == id => return body,
+                    ServerMessage::Err { id: got, error } if got == id => panic!("{error}"),
+                    _ => {}
+                }
+            }
+        }
+
+        fn attach(&mut self, id: u64, session_id: &str) {
+            self.send(
+                id,
+                RequestOp::Attach {
+                    session_id: session_id.to_string(),
+                    replay_bytes: None,
+                },
+            );
+            self.response(id);
+        }
+
+        /// Everything `session_id` has sent so far, once it reaches `len` bytes.
+        fn output_of(&mut self, session_id: &str, len: usize) -> Vec<u8> {
+            while self.output.get(session_id).map_or(0, Vec::len) < len {
+                self.next();
+            }
+            self.output[session_id].clone()
+        }
     }
 
     fn wait_for<T>(deadline: Duration, mut poll: impl FnMut() -> Option<T>) -> T {
@@ -553,27 +749,124 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// 800 frames are far more than the queue and the socket buffers hold together.
     #[test]
-    fn lagged_connection_is_dropped_from_fanout() {
-        let dir = temp_dir("lagged");
+    fn a_connection_that_stops_reading_catches_up_from_the_transcript() {
+        let dir = temp_dir("catch-up");
         let t = table(&dir);
-        // Rendezvous channel with no reader: the first try_send fails => lagged.
-        let (tx, _rx) = std::sync::mpsc::sync_channel(0);
-        t.register_connection(1, Outbox::new(tx));
+        t.create(quiet_params(&dir, "ts-1")).unwrap();
+        let mut peer = Peer::connect(&t, 1);
+        peer.attach(1, "ts-1");
 
-        let mut params = echo_params("ts-1");
-        params.shell = Some("/bin/zsh".to_string());
-        t.create(params).unwrap();
-        t.attach("ts-1", 1, None).unwrap();
-        t.write("ts-1", &b64(b"echo lagged\r")).unwrap();
+        let printed = burst(&t, "ts-1", 800);
 
-        wait_for(Duration::from_secs(5), || {
-            let inner = t.lock();
-            let gone = !inner.connections.contains_key(&1)
-                && inner.attachments.get("ts-1").is_none_or(|c| c.is_empty());
-            gone.then_some(())
-        });
+        assert_same_bytes(&peer.output_of("ts-1", printed.len()), &printed);
+        t.terminate("ts-1").unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
+    #[test]
+    fn terminal_sessions_on_one_connection_each_catch_up_on_their_own_output() {
+        let dir = temp_dir("catch-up-many");
+        let t = table(&dir);
+        t.create(quiet_params(&dir, "ts-1")).unwrap();
+        t.create(quiet_params(&dir, "ts-2")).unwrap();
+        let mut peer = Peer::connect(&t, 1);
+        peer.attach(1, "ts-1");
+        peer.attach(2, "ts-2");
+
+        let mut printed_1 = burst(&t, "ts-1", 500);
+        let printed_2 = burst(&t, "ts-2", 300);
+        printed_1.extend(burst(&t, "ts-1", 100));
+
+        assert_same_bytes(&peer.output_of("ts-1", printed_1.len()), &printed_1);
+        assert_same_bytes(&peer.output_of("ts-2", printed_2.len()), &printed_2);
+        t.terminate("ts-1").unwrap();
+        t.terminate("ts-2").unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_terminal_session_stays_live_while_another_on_its_connection_is_behind() {
+        let dir = temp_dir("live-beside-behind");
+        let t = table(&dir);
+        t.create(quiet_params(&dir, "ts-1")).unwrap();
+        t.create(quiet_params(&dir, "ts-2")).unwrap();
+        let mut peer = Peer::connect(&t, 1);
+        peer.attach(1, "ts-1");
+        peer.attach(2, "ts-2");
+        let printed_1 = burst(&t, "ts-1", 800);
+        // Makes room for live output while leaving far more queued than catch-up waits for.
+        for _ in 0..100 {
+            peer.next();
+        }
+
+        let printed_2 = burst(&t, "ts-2", 3);
+
+        assert_same_bytes(&peer.output_of("ts-2", printed_2.len()), &printed_2);
+        assert!(
+            peer.output["ts-1"].len() < printed_1.len(),
+            "ts-2 must not wait for ts-1 to catch up"
+        );
+        assert_same_bytes(&peer.output_of("ts-1", printed_1.len()), &printed_1);
+        t.terminate("ts-1").unwrap();
+        t.terminate("ts-2").unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_connection_that_is_behind_still_gets_responses() {
+        let dir = temp_dir("behind-responses");
+        let t = table(&dir);
+        t.create(quiet_params(&dir, "ts-1")).unwrap();
+        let mut peer = Peer::connect(&t, 1);
+        peer.attach(1, "ts-1");
+        burst(&t, "ts-1", 800);
+
+        peer.send(2, RequestOp::List);
+
+        let ResponseBody::Sessions { sessions } = peer.response(2) else {
+            panic!("list should answer with the sessions");
+        };
+        assert!(sessions[0].attached, "the connection must stay attached");
+        t.terminate("ts-1").unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn reattaching_while_behind_starts_over_from_the_replay() {
+        let dir = temp_dir("behind-reattach");
+        let t = table(&dir);
+        t.create(quiet_params(&dir, "ts-1")).unwrap();
+        let mut peer = Peer::connect(&t, 1);
+        peer.attach(1, "ts-1");
+        let printed = burst(&t, "ts-1", 800);
+
+        peer.send(
+            2,
+            RequestOp::Detach {
+                session_id: "ts-1".to_string(),
+            },
+        );
+        peer.send(
+            3,
+            RequestOp::Attach {
+                session_id: "ts-1".to_string(),
+                replay_bytes: Some(4096),
+            },
+        );
+        let ResponseBody::Attached { replay, .. } = peer.response(3) else {
+            panic!("attach should answer with the replay");
+        };
+        let before = peer.output.remove("ts-1").unwrap_or_default();
+        t.on_output("ts-1", b"after");
+
+        assert!(
+            printed.starts_with(&before),
+            "what arrived before the detach must be the start of the output"
+        );
+        assert_same_bytes(&decode(&replay), &printed[printed.len() - 4096..]);
+        assert_same_bytes(&peer.output_of("ts-1", 5), b"after");
         t.terminate("ts-1").unwrap();
         std::fs::remove_dir_all(&dir).ok();
     }
