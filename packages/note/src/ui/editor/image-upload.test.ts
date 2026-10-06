@@ -208,6 +208,58 @@ describe('エディタが破棄された後の完了', () => {
   })
 })
 
+describe('外部画像の取り込み', () => {
+  const external = 'https://example.com/a.png'
+
+  function importingView(importExternal: (url: string) => Promise<{ url: string } | null>) {
+    const plugin = imageUploadPlugin({ upload: async () => null, importExternal })
+    const view = destroyableView(
+      EditorState.create({ doc: docOf(imageBlock(null, external)), plugins: [plugin] }),
+    )
+    const pluginView = plugin.spec.view!(view as unknown as EditorView)
+    const pasteAgain = () => {
+      const prev = view.state
+      const end = view.state.doc.child(0).content.size + 1
+      view.state = view.state.apply(view.state.tr.insert(end, imageBlock(null, external)))
+      pluginView.update!(view as unknown as EditorView, prev)
+    }
+    return { view, pasteAgain }
+  }
+
+  test('取り込めた外部画像をもう一度貼ると、それも取り込む', async () => {
+    const calls: string[] = []
+    const { view, pasteAgain } = importingView(async (url) => {
+      calls.push(url)
+      return { url: `/api/assets/${calls.length}.png` }
+    })
+    await Bun.sleep(0)
+
+    pasteAgain()
+    await Bun.sleep(0)
+
+    expect(calls).toEqual([external, external])
+    expect(imageNodes(view.state.doc).map((n) => n.attrs.src)).toEqual([
+      '/api/assets/1.png',
+      '/api/assets/2.png',
+    ])
+  })
+
+  // scan は doc が変わるたびに走るので、失敗した URL を外すと打鍵のたびに取り込み直す。
+  test('取り込めなかった外部画像は、もう一度貼っても取り込み直さない', async () => {
+    const calls: string[] = []
+    const { pasteAgain } = importingView(async (url) => {
+      calls.push(url)
+      return null
+    })
+    await Bun.sleep(0)
+
+    pasteAgain()
+    await Bun.sleep(0)
+
+    expect(calls).toEqual([external])
+  })
+})
+
 describe('外部 img 検出', () => {
   test('外部 http(s) のみ import 対象、/api/assets/ は除外', () => {
     expect(isExternalImageSrc('https://example.com/a.png')).toBe(true)

@@ -252,6 +252,8 @@ export function imageUploadPlugin(callbacks: ImageUploadCallbacks): Plugin<Image
         if (!importExternal) return
         const result = await importExternal(src)
         if (!result || editorView.isDestroyed) return // 失敗時は外部 URL のまま残す
+        // 差し替えた後に同じ画像がまた貼られたら、それも取り込む。
+        attempted.delete(src)
         const tr = editorView.state.tr
         let changed = false
         editorView.state.doc.descendants((node, pos) => {

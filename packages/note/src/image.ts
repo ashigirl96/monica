@@ -45,6 +45,12 @@ export async function placeImage(dir: string, bytes: Uint8Array): Promise<{ url:
   return { url: `${IMAGE_URL_PREFIX}${name}` }
 }
 
+export async function uploadImage(dir: string, file: File): Promise<{ url: string }> {
+  // bytes() は File の全体を写すので、大きさは写す前に見る。
+  if (file.size > MAX_IMAGE_BYTES) throw tooLarge()
+  return placeImage(dir, await file.bytes())
+}
+
 export const IMPORT_TIMEOUT_MS = 10_000
 
 export type ImageDeps = { dir: string; stopped: AbortSignal }

@@ -1,7 +1,7 @@
 import { implement } from '@orpc/server'
 
 import { contract } from './contract.ts'
-import { IMPORT_TIMEOUT_MS, importImage, placeImage } from './image.ts'
+import { IMPORT_TIMEOUT_MS, importImage, uploadImage } from './image.ts'
 import { type Db, internals, type NoteLedger } from './note.ts'
 import { createEssay, createRepoNote, dailyDates, openDaily, openScratch } from './open.ts'
 import { removeNote, restoreNote } from './remove.ts'
@@ -37,8 +37,8 @@ export const router = os.router({
     ),
   },
   image: {
-    upload: os.image.upload.handler(async ({ context, input }) =>
-      placeImage(internals(context.noteLedger).dir, await input.file.bytes()),
+    upload: os.image.upload.handler(({ context, input }) =>
+      uploadImage(internals(context.noteLedger).dir, input.file),
     ),
     import: os.image.import.handler(({ context, input }) =>
       importImage(internals(context.noteLedger), input.url, IMPORT_TIMEOUT_MS),

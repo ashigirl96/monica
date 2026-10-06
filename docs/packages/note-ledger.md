@@ -82,7 +82,7 @@ Note は `note` table に 1 件 1 行で持つ。種類と列の対応を CHECK 
 - `image.upload` は `z.file()` を受ける。RPCLink は File を含む input を multipart で送る。
 - `image.import` は外部の URL を受け、Backend が fetch して upload と同じく置く。http と https だけを受け（ほかは input の検証で `BAD_REQUEST`）、行き先の host は制限しない。外の site からの呼び出しは notes の口の same-origin の照合で止まる。
 - どちらも置いた画像の URL を返す。
-- 上限は 20MB。超えれば `PAYLOAD_TOO_LARGE`。取り込みは Content-Length を信じず、読みながら数えて、超えた所で読むのをやめて接続を切る。
+- 上限は 20MB。超えれば `PAYLOAD_TOO_LARGE`。upload は File の中身を写す前に大きさを見る。取り込みは Content-Length を信じず、読みながら数えて、超えた所で読むのをやめて接続を切る。
 - 形式は先頭のバイト列（magic bytes）だけで決め、Content-Type と file 名は見ない。png・jpg・gif・webp 以外は `UNSUPPORTED_MEDIA_TYPE`。SVG は本文の中で script を動かせるので断る。
 - バイト列は再 encode せずに書く。動く GIF も動いたまま残る。
 - 取り込みは 10 秒で打ち切る（`GATEWAY_TIMEOUT`）。応答が始まらないときも、body の途中で止まったときも同じ。2xx 以外の応答と、届かない相手は `BAD_GATEWAY`。monica は status を見ず、404 の応答の画像も置いていた。
