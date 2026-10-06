@@ -2,6 +2,8 @@ import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 
+import { RELEASE_HOME } from './dev-instance'
+
 type Process = { pid: number; ppid: number; command: string }
 
 type Dev = {
@@ -15,7 +17,6 @@ type Dev = {
 }
 
 const userHome = homedir()
-const releaseHome = join(userHome, '.tania')
 const scratch = tmpdir()
 
 function processes(): Map<number, Process> {
@@ -87,7 +88,7 @@ function devs(): Dev[] {
   }
   for (const proc of procs.values()) {
     const [, binary, home] = proc.command.match(/^(\S*tania-ptyd) --tania-home (.+)$/) ?? []
-    if (!binary || !home || home === releaseHome) continue
+    if (!binary || !home || home === RELEASE_HOME) continue
     const dev = devAt(home)
     dev.ptyd = proc.pid
     dev.repo = repoOf(binary, proc.pid)

@@ -78,6 +78,19 @@ dev の desktop は `TANIA_HOME` ごとに identifier と vite の port が分�
     swift $SCRATCH/clipboard.swift restore $SCRATCH/clipboard.plist  # 確かめ終えたら
     ```
 
+- **ファイルの paste**: 合成の paste event は OS の clipboard を運ばない。ただ、text の無い paste を受けた Tab は Shell の `clipboard_read_file_paths` で本物の clipboard を読むので、clipboard に file URL を置き（退避と復元は上の「画像の drop」の手順）、`window.__taniaTerminals.get(tabId).textarea` に `new ClipboardEvent("paste", { clipboardData: new DataTransfer(), bubbles: true, cancelable: true })` を dispatch すれば Shell から先を確かめられる。Finder のコピーは file reference URL（`file:///.file/id=…`）で来るので、同じ形で置く。
+
+  ```bash
+  cat > $SCRATCH/put-files.swift <<'EOF'
+  import AppKit
+  let urls = CommandLine.arguments.dropFirst().map { NSURL(fileURLWithPath: $0).fileReferenceURL()! as NSURL }
+  NSPasteboard.general.clearContents()
+  print(NSPasteboard.general.writeObjects(urls))
+  EOF
+  swift $SCRATCH/put-files.swift <file>...
+  ```
+
+  - Tab の claude が受け取ったものは、transcript（`~/.claude/projects/<cwd の / と . を - にした名前>/<session id>.jsonl`）の `[Image: source: …]` で分かる。ファイルの中身ならその path、clipboard の画像なら claude の `images/<n>.png` になる。claude は prompt を送るまで transcript を書かないので、貼った後に短い prompt を送る。transcript が他の session と混ざらないよう、一時 directory に cd してから claude を起こす。
 - **clipboard への書き込み**（`navigator.clipboard.writeText`）は、合成のキーイベントでは user activation が無いので `NotAllowedError` で断られる。確かめるのは binding が拾って書きにいくところまでにし、実キーでの確認はユーザーに頼む。
 - **Agent Session の状態**（status dot）は、backend-headless の「Agent Session の状態を claude 無しで動かす」の手順で作る。`TANIA_HOME` は desktop の home にする。
 - **Task の Bench**（sidebar のラベル、Bench の Tab）は、backend-headless の「Task の Bench を確かめる」の手順で ghq と origin を一時 directory に閉じ込めて作る。`GHQ_ROOT` は `bun run desktop` の env に渡す。
@@ -118,5 +131,7 @@ dev の desktop は `TANIA_HOME` ごとに identifier と vite の port が分�
 止めるのは、手順 3 で自分が起こした desktop だけ。手順 2 で別の session の desktop に繋いだときは、そのまま残してその session に任せる。`dev:kill` は desktop・Backend・端末をまとめて止め、home も消すため。
 
 自分で起こした desktop は、`bun run dev:kill tania-<名前>` で desktop → Backend → ptyd の順に止め、home を消す。desktop が止まると background の job も終わる。
+
+Tab で claude を起こしたなら、claude が cwd ごとに作る `~/.claude/projects/<cwd の / と . を - にした名前>` と、clipboard の画像を保存した directory（transcript の `[Image: source: …]` にある `images/` の 2 つ上）も消す。
 
 片付いたのは、`bun run dev:list` に `tania-<名前>` の行が無いとき。

@@ -74,6 +74,7 @@ fn wait_for_daemon_exit(daemon: &mut DaemonGuard) {
 }
 
 fn process_alive(pid: u32) -> bool {
+    // SAFETY: signal 0 only checks that the process exists; nothing is delivered.
     unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
 }
 

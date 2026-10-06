@@ -2,6 +2,17 @@ import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 const timestamp = (name: string) => integer(name, { mode: 'timestamp_ms' })
 
+// ユーザーの Job だけを持つ。system の Job は Backend が createJobLedger に渡す。
+export const job = sqliteTable('job', {
+  name: text('name').primaryKey(),
+  schedule: text('schedule').notNull(),
+  command: text('command').notNull(),
+  cwd: text('cwd').notNull(),
+  timeoutMs: integer('timeout_ms').notNull(),
+  paused: integer('paused', { mode: 'boolean' }).notNull().default(false),
+  addedAt: timestamp('added_at').notNull(),
+})
+
 // result が無い行は走っている回。
 export const jobExecution = sqliteTable(
   'job_execution',

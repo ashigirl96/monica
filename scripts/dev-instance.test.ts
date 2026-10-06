@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { devInstance } from './dev-instance'
+import { devInstance, isReleaseHome } from './dev-instance'
 
 const scratch = mkdtempSync(join(tmpdir(), 'dev-instance-'))
 afterAll(() => rmSync(scratch, { recursive: true, force: true }))
@@ -39,4 +39,9 @@ test('basename が同じでも場所が違う home は別の identifier にな�
   const a = devInstance(homeAt('a', 'tania-s3'))
   const b = devInstance(homeAt('b', 'tania-s3'))
   expect(a.identifier).not.toBe(b.identifier)
+})
+
+test('release の ~/.tania だけを release の home とし、名前が前方一致する dev の home は含めない', () => {
+  expect(isReleaseHome(join(homedir(), '.tania'))).toBe(true)
+  expect(isReleaseHome(join(homedir(), '.tania-dev'))).toBe(false)
 })

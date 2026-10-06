@@ -4,13 +4,20 @@ import { join, resolve } from 'node:path'
 
 import { $ } from 'bun'
 
-import { DEFAULT_HOME, devInstance } from './dev-instance'
+import { DEFAULT_HOME, RELEASE_HOME, devInstance, isReleaseHome } from './dev-instance'
 
 const repo = join(import.meta.dir, '..')
 
 // direnv に書かず process の中で決める（ADR-0006）。Shell → Backend → tab の env → CLI と継がれる。
 // Shell は別の cwd で起きるので、相対 path は絶対 path にしてから渡す。
 process.env.TANIA_HOME = resolve(process.env.TANIA_HOME || DEFAULT_HOME)
+// release の Tab は TANIA_HOME=~/.tania を継ぐので、そこで起こすと dev の Shell が release の home を乗っ取る。
+if (isReleaseHome(process.env.TANIA_HOME)) {
+  console.error(
+    `TANIA_HOME が release の home（${RELEASE_HOME}）です。dev の home を渡してください（例: TANIA_HOME=~/.tania-dev bun desktop）`,
+  )
+  process.exit(1)
+}
 process.env.TANIA_BIN = join(repo, 'scripts/tania-dev')
 mkdirSync(process.env.TANIA_HOME, { recursive: true, mode: 0o700 })
 const { identifier, preferredPort } = devInstance(process.env.TANIA_HOME)

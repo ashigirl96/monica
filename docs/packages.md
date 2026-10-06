@@ -119,6 +119,7 @@ export { migrations } from "../migrations";
 export const router = os.router({ ... });          // context は { db, jobLedger }
 export function createJobLedger(deps: {
   db: Db;
+  home: string;
   systemJobs: { name: string; every: number; run: () => Promise<void> }[];
   now?: () => Date;
 }): JobLedger;
@@ -134,7 +135,7 @@ export function createNoteLedger(deps: {
 
 `ptydPath` は spawn する ptyd の場所（ADR-0011）。`notify` と `nameAgentSession` は通知のための口（`docs/packages/notifications.md`）。`github` は GraphQL の URL と token の取り方で、省けば `https://api.github.com/graphql` と `gh auth token --hostname github.com` になる。task の `home` は Bench の worktree と setup の log を置く場所（`docs/packages/task-ledger.md` の「Bench」）。`ghq` は `root()` と `get(repo)` で、省けば `ghq` の command を呼ぶ。テストは偽の GitHub と ghq を渡す。
 
-`systemJobs` は system の Job の並びで、`run` は失敗なら reject する。`now` はテストが時計を進めるための口（`docs/packages/job-ledger.md`）。
+job の `home` はユーザーの Job の log を置く場所。`systemJobs` は system の Job の並びで、名前は `<domain>.<name>`、`run` は失敗なら reject する。`now` はテストが時計を進めるための口（`docs/packages/job-ledger.md`）。
 
 note の `home` は画像の置き場所に使う（後続の issue）。
 
@@ -170,7 +171,7 @@ Bun.spawn は `env` を渡さないと、子に起動時の environ を渡し、
 
 1. `$TANIA_HOME/tania.db` を開き、`locking_mode=EXCLUSIVE` → `journal_mode=WAL` → `foreign_keys=ON` の順に設定する（ADR-0007）。
 2. `migrate()` を workbench → task → job → note の順に呼ぶ。`migrationsTable` は各 package の `migrations.table` を渡す。
-3. `createWorkbenchLedger` → `createTaskLedger` → `createJobLedger` → `createNoteLedger` の順に作る。`createWorkbenchLedger` には、env の `TANIA_PTYD_PATH`（`ptydPath`）、stdout に通知の行を書く `notify`、`@tania/task/server` の `nameAgentSession` を渡す。`createTaskLedger` には同じ `home` を渡す。`createJobLedger` の `systemJobs` には `{ name: "task.sync", every: 5 * 60_000, run: () => taskLedger.syncInBackground() }` と `{ name: "task.setup-log-cleanup", every: 24 * 60 * 60_000, run: () => taskLedger.cleanSetupLogs() }` を渡す。`createNoteLedger` には同じ `home` を渡す。`TANIA_PTYD_PATH` が無ければ stderr に 1 行出して exit 1 する。
+3. `createWorkbenchLedger` → `createTaskLedger` → `createJobLedger` → `createNoteLedger` の順に作る。`createWorkbenchLedger` には、env の `TANIA_PTYD_PATH`（`ptydPath`）、stdout に通知の行を書く `notify`、`@tania/task/server` の `nameAgentSession` を渡す。`createTaskLedger` と `createJobLedger` と `createNoteLedger` には同じ `home` を渡す。`createJobLedger` の `systemJobs` には `{ name: "task.sync", every: 5 * 60_000, run: () => taskLedger.syncInBackground() }` と `{ name: "task.setup-log-cleanup", every: 24 * 60 * 60_000, run: () => taskLedger.cleanSetupLogs() }` を渡す。`TANIA_PTYD_PATH` が無ければ stderr に 1 行出して exit 1 する。
 4. router を `{ workbench: workbenchRouter, task: taskRouter, job: jobRouter }` で mount し、context は `{ db, workbenchLedger, taskLedger, jobLedger }`。note の router はまだどの口にも載せない。
 5. hono に CORS（`tauri://localhost`・`http://tauri.localhost`。env の `TANIA_DEV_URL` があればその origin も。`docs/packages/dev-loop.md` の「dev loop」）、`/health`（token 無し）、`/rpc/*` の bearer を載せ、`Bun.serve({ hostname: "127.0.0.1", port: 0, idleTimeout: 0 })` で立てる。
 6. `start()` を Workbench Ledger → Task Ledger → Job Ledger → Note Ledger の順に呼ぶ。Workbench Ledger の `start()`（ptyd への接続と reconcile）を最大 3 秒待ってから、`backend.json` と stdout の endpoint 行を書く（ADR-0007 / 0011）。

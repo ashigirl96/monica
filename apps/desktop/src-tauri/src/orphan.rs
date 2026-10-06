@@ -38,6 +38,7 @@ pub fn stop(home: &Path) {
     // SAFETY: kill(2) は pid と signal の値を渡すだけで、メモリには触らない。
     unsafe { libc::kill(published.pid, libc::SIGTERM) };
     if !exits_within(published.pid, STOP_GRACE) {
+        // SAFETY: 上の SIGTERM と同じく、値を渡すだけでメモリには触らない。
         unsafe { libc::kill(published.pid, libc::SIGKILL) };
         exits_within(published.pid, STOP_GRACE);
     }
