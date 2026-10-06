@@ -6,15 +6,18 @@
 //! - A connection that stops reading is never dropped. Once its queue fills, the daemon holds
 //!   back that session's live output and later sends what the connection missed from the
 //!   transcript, in order and without a gap or a duplicate, before it goes live again. The
-//!   connection only sees the output arrive late. The exceptions are output the transcript no
-//!   longer holds (rotated out, or never written) and output of a session that exited
-//!   meanwhile, which are lost and logged. When rotated-out output is lost, what the
-//!   transcript still holds arrives in the buffer the session was in there, and the connection
-//!   is told all of the session's terminal modes before it goes live again, so its terminal is
-//!   not left in a mode the lost output switched.
+//!   connection only sees the output arrive late. The exception is output the transcript no
+//!   longer holds (rotated out, or never written), which is lost and logged. When rotated-out
+//!   output is lost, what the transcript still holds arrives in the buffer the session was in
+//!   there, and the connection is told all of the session's terminal modes before it goes live
+//!   again or gets the Exit, so its terminal is not left in a mode the lost output switched.
 //! - `Exit` events broadcast to every connection regardless of attachments, so a detached
 //!   session's exit still reaches the app for DB recording + reap. Receivers ignore exits
 //!   for sessions they don't know.
+//! - A session's `Exit` reaches a connection after all of that session's output for it, and no
+//!   output of that session follows. A connection behind when the session exits still gets the
+//!   rest first, even if another connection reaps the session meanwhile, and an `Exit` that
+//!   finds the queue full follows once it drains.
 
 use std::io::{self, BufRead, Write};
 

@@ -52,11 +52,71 @@ struct ExitedEntry {
     exit_code: Option<i32>,
 }
 
+/// An Exit a connection has yet to get, and the output of its session that must reach the
+/// connection first.
+struct PendingExit {
+    exit: ServerMessage,
+    /// Copied out of the transcript at exit, since a Reap may delete the transcript before the
+    /// connection reads again.
+    missed: Vec<u8>,
+    queued: usize,
+    since: Instant,
+}
+
+struct Connection {
+    outbox: Outbox,
+    /// session_id → the Exit this connection has yet to get.
+    exits: HashMap<String, PendingExit>,
+}
+
+impl Connection {
+    fn owe_exit(&mut self, session_id: &str, exit: PendingExit) {
+        self.exits.insert(session_id.to_string(), exit);
+        self.outbox.set_behind(true);
+    }
+
+    /// Queues the next chunk of the output the connection missed from `session_id`, below the
+    /// catch-up ceiling, and the Exit only once all of it is queued. False once this turn has
+    /// nothing more to queue.
+    fn queue_pending_exit(&mut self, conn_id: u64, session_id: &str) -> bool {
+        let Some(pending) = self.exits.get_mut(session_id) else {
+            return false;
+        };
+        // The Exit stays below the ceiling too, or a pile of them takes the room responses need.
+        if !self.outbox.has_room_to_catch_up() {
+            return false;
+        }
+        let missed = &pending.missed[pending.queued..];
+        if missed.is_empty() {
+            if self.outbox.send(&pending.exit) {
+                log::info!(
+                    "connection {conn_id} caught up on {session_id} after {}ms",
+                    pending.since.elapsed().as_millis()
+                );
+                self.exits.remove(session_id);
+            }
+            return false;
+        }
+        let chunk = &missed[..missed.len().min(CATCH_UP_CHUNK)];
+        if !self.outbox.send(&output_message(session_id, chunk)) {
+            return false;
+        }
+        pending.queued += chunk.len();
+        true
+    }
+}
+
+/// One session's share of a connection's catch-up.
+enum Turn {
+    Behind(String),
+    Exited(String),
+}
+
 #[derive(Default)]
 struct TableInner {
     live: HashMap<String, LiveEntry>,
     exited: HashMap<String, ExitedEntry>,
-    connections: HashMap<u64, Outbox>,
+    connections: HashMap<u64, Connection>,
     /// session_id → connections currently attached, and how each receives the output.
     attachments: HashMap<String, HashMap<u64, Feed>>,
 }
@@ -80,7 +140,7 @@ impl TableInner {
             if !matches!(feed, Feed::Live) {
                 continue;
             }
-            let Some(out) = self.connections.get(conn_id) else {
+            let Some(Connection { outbox: out, .. }) = self.connections.get(conn_id) else {
                 continue;
             };
             if out.send_live(msg) {
@@ -101,6 +161,69 @@ impl TableInner {
             }
         }
     }
+
+    fn catch_up(&mut self, conn_id: u64) {
+        let Self {
+            live,
+            connections,
+            attachments,
+            ..
+        } = self;
+        let Some(conn) = connections.get_mut(&conn_id) else {
+            return;
+        };
+        let is_behind =
+            |conns: &HashMap<u64, Feed>| matches!(conns.get(&conn_id), Some(Feed::Behind { .. }));
+        let mut turns: Vec<Turn> = attachments
+            .iter()
+            .filter(|(_, conns)| is_behind(conns))
+            .map(|(session_id, _)| Turn::Behind(session_id.clone()))
+            .chain(conn.exits.keys().cloned().map(Turn::Exited))
+            .collect();
+        // A chunk per turn, so a session that keeps printing cannot take all the room.
+        while !turns.is_empty() {
+            turns.retain(|turn| match turn {
+                Turn::Exited(session_id) => conn.queue_pending_exit(conn_id, session_id),
+                Turn::Behind(session_id) => {
+                    let feed = attachments
+                        .get_mut(session_id)
+                        .and_then(|conns| conns.get_mut(&conn_id));
+                    let (Some(feed), Some(entry)) = (feed, live.get_mut(session_id)) else {
+                        return false;
+                    };
+                    queue_missed_chunk(&conn.outbox, entry, conn_id, session_id, feed)
+                }
+            });
+        }
+        conn.outbox
+            .set_behind(attachments.values().any(is_behind) || !conn.exits.is_empty());
+    }
+}
+
+/// Also returns where the bytes start: later than `resume_at` when rotation already dropped some.
+fn read_missed(
+    transcript: &mut Transcript,
+    resume_at: u64,
+    max_bytes: usize,
+    conn_id: u64,
+    session_id: &str,
+) -> Option<(u64, Vec<u8>)> {
+    let (start, bytes) = match transcript.read_from(resume_at, max_bytes) {
+        Ok(read) => read,
+        Err(e) => {
+            log::warn!(
+                "connection {conn_id} lost the output of {session_id} from {resume_at}: {e:#}"
+            );
+            return None;
+        }
+    };
+    if start > resume_at {
+        log::warn!(
+            "connection {conn_id} lost {} bytes of {session_id} that rotated out of the transcript",
+            start - resume_at
+        );
+    }
+    Some((start, bytes))
 }
 
 /// Queues the next chunk a behind attachment missed, below the catch-up ceiling, or turns it
@@ -125,18 +248,18 @@ fn queue_missed_chunk(
     if !out.has_room_to_catch_up() {
         return false;
     }
-    let (start, output) = match entry.transcript.read_from(*resume_at, CATCH_UP_CHUNK) {
-        Ok(read) => read,
-        Err(e) => {
-            log::warn!(
-                "connection {conn_id} lost the output of {session_id} from {resume_at}: {e:#}"
-            );
-            *feed = Feed::Live;
-            return false;
-        }
+    let Some((start, output)) = read_missed(
+        &mut entry.transcript,
+        *resume_at,
+        CATCH_UP_CHUNK,
+        conn_id,
+        session_id,
+    ) else {
+        *feed = Feed::Live;
+        return false;
     };
-    let lost = start - *resume_at;
-    if output.is_empty() && lost == 0 {
+    let lost = start > *resume_at;
+    if output.is_empty() && !lost {
         if *lost_output && !out.send(&output_message(session_id, &entry.modes.restate())) {
             return false;
         }
@@ -147,7 +270,7 @@ fn queue_missed_chunk(
         *feed = Feed::Live;
         return false;
     }
-    let mut data = if lost > 0 {
+    let mut data = if lost {
         let tail_len = entry.transcript.end() - start;
         entry.modes.buffer_switch_after_gap(sent, tail_len)
     } else {
@@ -158,21 +281,9 @@ fn queue_missed_chunk(
         return false;
     }
     sent.feed(&data);
-    if lost > 0 {
-        *lost_output = true;
-        log::warn!(
-            "connection {conn_id} lost {lost} bytes of {session_id} that rotated out of the transcript, so its terminal modes will be restated"
-        );
-    }
+    *lost_output |= lost;
     *resume_at = start + output.len() as u64;
     true
-}
-
-fn output_message(session_id: &str, bytes: &[u8]) -> ServerMessage {
-    ServerMessage::Output {
-        session_id: session_id.to_string(),
-        data: b64(bytes),
-    }
 }
 
 pub struct SessionTable {
@@ -184,6 +295,13 @@ pub struct SessionTable {
 
 fn b64(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+fn output_message(session_id: &str, bytes: &[u8]) -> ServerMessage {
+    ServerMessage::Output {
+        session_id: session_id.to_string(),
+        data: b64(bytes),
+    }
 }
 
 impl SessionTable {
@@ -203,7 +321,13 @@ impl SessionTable {
     }
 
     pub fn register_connection(&self, conn_id: u64, outbox: Outbox) {
-        self.lock().connections.insert(conn_id, outbox);
+        self.lock().connections.insert(
+            conn_id,
+            Connection {
+                outbox,
+                exits: HashMap::new(),
+            },
+        );
     }
 
     pub fn drop_connection(&self, conn_id: u64) {
@@ -273,52 +397,19 @@ impl SessionTable {
         {
             return;
         }
-        let msg = ServerMessage::Output {
-            session_id: session_id.to_string(),
-            data: b64(bytes),
-        };
-        inner.fanout_to_attachments(session_id, &msg, start);
+        inner.fanout_to_attachments(session_id, &output_message(session_id, bytes), start);
     }
 
-    /// Holding the lock keeps `on_output` out, so what an attachment catches up on and the live
-    /// output after it meet without a gap or an overlap.
+    /// Holding the lock keeps `on_output` and `on_exit` out, so what an attachment catches up on,
+    /// the live output after it, and the Exit after both meet without a gap or an overlap.
     pub fn catch_up(&self, conn_id: u64) {
-        let mut guard = self.lock();
-        let TableInner {
-            live,
-            connections,
-            attachments,
-            ..
-        } = &mut *guard;
-        let Some(out) = connections.get(&conn_id) else {
-            return;
-        };
-        let is_behind =
-            |conns: &HashMap<u64, Feed>| matches!(conns.get(&conn_id), Some(Feed::Behind { .. }));
-        let mut turns: Vec<String> = attachments
-            .iter()
-            .filter(|(_, conns)| is_behind(conns))
-            .map(|(session_id, _)| session_id.clone())
-            .collect();
-        // A chunk per turn, so a session that keeps printing cannot take all the room.
-        while !turns.is_empty() {
-            turns.retain(|session_id| {
-                let feed = attachments
-                    .get_mut(session_id)
-                    .and_then(|conns| conns.get_mut(&conn_id));
-                // Exit drops a session's attachments, so an attached session is always live.
-                let (Some(feed), Some(entry)) = (feed, live.get_mut(session_id)) else {
-                    return false;
-                };
-                queue_missed_chunk(out, entry, conn_id, session_id, feed)
-            });
-        }
-        out.set_behind(attachments.values().any(is_behind));
+        self.lock().catch_up(conn_id);
     }
 
     fn on_exit(&self, session_id: &str, exit_code: Option<u32>) {
-        let mut inner = self.lock();
-        let Some(entry) = inner.live.remove(session_id) else {
+        let mut guard = self.lock();
+        let inner = &mut *guard;
+        let Some(mut entry) = inner.live.remove(session_id) else {
             return;
         };
         let exit_code = exit_code.map(|c| c as i32);
@@ -329,22 +420,69 @@ impl SessionTable {
                 exit_code,
             },
         );
-        for (conn_id, feed) in inner.attachments.remove(session_id).unwrap_or_default() {
-            if let Feed::Behind { resume_at, .. } = feed {
-                log::warn!(
-                    "connection {conn_id} never got the last {} bytes of {session_id}, which exited while it was behind",
-                    entry.transcript.end() - resume_at
-                );
-            }
-        }
-        // Exit broadcasts to every connection — a detached session has no attachments, but
-        // the app must still record the exit and reap the tombstone.
-        let msg = ServerMessage::Exit {
+        let feeds = inner.attachments.remove(session_id).unwrap_or_default();
+        let exit = ServerMessage::Exit {
             session_id: session_id.to_string(),
             exit_code,
         };
-        for outbox in inner.connections.values() {
-            outbox.send(&msg);
+        let mut owed = Vec::new();
+        // Exit broadcasts to every connection — a detached session has no attachments, but
+        // the app must still record the exit and reap the tombstone.
+        for (conn_id, conn) in inner.connections.iter_mut() {
+            let (missed, since) = match feeds.get(conn_id) {
+                Some(Feed::Behind {
+                    resume_at,
+                    since,
+                    sent,
+                    lost_output,
+                }) => {
+                    let missed_len = (entry.transcript.end() - resume_at) as usize;
+                    let missed = read_missed(
+                        &mut entry.transcript,
+                        *resume_at,
+                        missed_len,
+                        *conn_id,
+                        session_id,
+                    )
+                    .map_or_else(Vec::new, |(start, bytes)| {
+                        let lost = start > *resume_at;
+                        let mut missed = if lost {
+                            let tail_len = entry.transcript.end() - start;
+                            entry.modes.buffer_switch_after_gap(sent, tail_len)
+                        } else {
+                            Vec::new()
+                        };
+                        missed.extend(bytes);
+                        if lost || *lost_output {
+                            missed.extend(entry.modes.restate());
+                        }
+                        missed
+                    });
+                    (missed, *since)
+                }
+                _ => {
+                    if conn.outbox.send(&exit) {
+                        continue;
+                    }
+                    log::info!("connection {conn_id} had no room for the exit of {session_id}");
+                    (Vec::new(), Instant::now())
+                }
+            };
+            conn.owe_exit(
+                session_id,
+                PendingExit {
+                    exit: exit.clone(),
+                    missed,
+                    queued: 0,
+                    since,
+                },
+            );
+            owed.push(*conn_id);
+        }
+        for conn_id in owed {
+            if inner.connections[&conn_id].outbox.drained() {
+                inner.catch_up(conn_id);
+            }
         }
     }
 
@@ -543,11 +681,18 @@ mod tests {
         );
     }
 
-    /// Reads `ts-1` until `restated` arrives, then checks the connection got the start of
-    /// `printed`, `switch`, and the end of `printed`, with output lost in between, before it.
+    /// Reads `ts-1` until `restated` arrives, then checks it as `assert_restored_after_loss` does.
     fn assert_caught_up_after_loss(peer: &mut Peer, printed: &[u8], switch: &str, restated: &str) {
         let got = peer.output_ending_with("ts-1", restated.as_bytes());
-        let got = &got[..got.len() - restated.len()];
+        assert_restored_after_loss(&got, printed, switch, restated);
+    }
+
+    /// Checks that `got` is the start of `printed`, `switch`, and the end of `printed` with
+    /// output lost in between, then `restated`.
+    fn assert_restored_after_loss(got: &[u8], printed: &[u8], switch: &str, restated: &str) {
+        let got = got
+            .strip_suffix(restated.as_bytes())
+            .expect("the modes must be restated last");
         let Some(at) = got
             .windows(switch.len())
             .position(|w| w == switch.as_bytes())
@@ -586,6 +731,9 @@ mod tests {
         stream: UnixStream,
         frames: Box<dyn Iterator<Item = ServerMessage>>,
         output: HashMap<String, Vec<u8>>,
+        /// session_id → the output that arrived before its Exit; `output` then holds only what
+        /// arrived after.
+        before_exit: HashMap<String, Vec<u8>>,
     }
 
     impl Peer {
@@ -601,6 +749,7 @@ mod tests {
                 stream: client,
                 frames: Box::new(read_frames(reader).map(Result::unwrap)),
                 output: HashMap::new(),
+                before_exit: HashMap::new(),
             }
         }
 
@@ -613,11 +762,18 @@ mod tests {
                 .frames
                 .next()
                 .expect("the connection closed or went quiet");
-            if let ServerMessage::Output { session_id, data } = &msg {
-                self.output
+            match &msg {
+                ServerMessage::Output { session_id, data } => self
+                    .output
                     .entry(session_id.clone())
                     .or_default()
-                    .extend(decode(data));
+                    .extend(decode(data)),
+                ServerMessage::Exit { session_id, .. } => {
+                    let before = self.output.remove(session_id).unwrap_or_default();
+                    let again = self.before_exit.insert(session_id.clone(), before);
+                    assert!(again.is_none(), "{session_id} exited twice");
+                }
+                _ => {}
             }
             msg
         }
@@ -658,6 +814,14 @@ mod tests {
                 self.next();
             }
             self.output[session_id].clone()
+        }
+
+        /// Everything `session_id` sent before its Exit.
+        fn output_before_exit(&mut self, session_id: &str) -> Vec<u8> {
+            while !self.before_exit.contains_key(session_id) {
+                self.next();
+            }
+            self.before_exit[session_id].clone()
         }
     }
 
@@ -1134,6 +1298,122 @@ mod tests {
         assert_same_bytes(&decode(&replay), &printed[printed.len() - 4096..]);
         assert_same_bytes(&peer.output_of("ts-1", 5), b"after");
         t.terminate("ts-1").unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_connection_that_lost_output_gets_its_modes_back_before_the_exit() {
+        let dir = temp_dir("lost-then-exit");
+        let t = small_transcript_table(&dir);
+        t.create(quiet_params(&dir, "ts-1")).unwrap();
+        let mut peer = Peer::connect(&t, 1);
+        peer.attach(1, "ts-1");
+        t.on_output("ts-1", TUI_START);
+        peer.output_of("ts-1", TUI_START.len());
+        let printed = [TUI_START, &burst(&t, "ts-1", 800)].concat();
+
+        t.terminate("ts-1").unwrap();
+
+        assert_restored_after_loss(
+            &peer.output_before_exit("ts-1"),
+            &printed,
+            "\x1b[<32u\x1b[?1049l\x1b[<32u\x1b[?1049h",
+            TUI_RESTATED,
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The Backend reaps as soon as its own connection gets the Exit, which deletes the
+    /// transcript the behind connection would catch up from.
+    #[test]
+    fn a_connection_behind_when_its_terminal_session_exits_gets_the_rest_before_the_exit() {
+        let dir = temp_dir("behind-exit");
+        let t = table(&dir);
+        t.create(quiet_params(&dir, "ts-1")).unwrap();
+        let mut behind = Peer::connect(&t, 1);
+        behind.attach(1, "ts-1");
+        let mut backend = Peer::connect(&t, 2);
+        backend.send(1, RequestOp::List);
+        backend.response(1);
+        let printed = burst(&t, "ts-1", 800);
+
+        t.terminate("ts-1").unwrap();
+        backend.output_before_exit("ts-1");
+        backend.send(
+            2,
+            RequestOp::Reap {
+                session_id: "ts-1".to_string(),
+            },
+        );
+        backend.response(2);
+
+        assert_same_bytes(&behind.output_before_exit("ts-1"), &printed);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Two sessions owe more than one catch-up fills the queue with, so each one's Exit becomes
+    /// due while the other still holds room.
+    #[test]
+    fn no_output_of_a_terminal_session_reaches_a_connection_after_its_exit() {
+        let dir = temp_dir("after-exit");
+        let t = table(&dir);
+        let ids = ["ts-1", "ts-2"];
+        let mut behind = Peer::connect(&t, 1);
+        for (id, session_id) in (1..).zip(ids) {
+            t.create(quiet_params(&dir, session_id)).unwrap();
+            behind.attach(id, session_id);
+        }
+        for session_id in ids {
+            burst(&t, session_id, 1500);
+        }
+        let mut live = Peer::connect(&t, 2);
+        for (id, session_id) in (1..).zip(ids) {
+            live.attach(id, session_id);
+            t.on_output(session_id, b"last words");
+        }
+
+        for session_id in ids {
+            t.terminate(session_id).unwrap();
+        }
+        // Reading earlier lets catch-up from the transcript finish before the sessions exit.
+        wait_for(Duration::from_secs(5), || {
+            t.list().iter().all(|s| !s.running).then_some(())
+        });
+
+        for peer in [&mut behind, &mut live] {
+            for session_id in ids {
+                assert!(peer.output_before_exit(session_id).ends_with(b"last words"));
+            }
+            peer.send(3, RequestOp::List);
+            peer.response(3);
+            assert!(peer.output.is_empty(), "output arrived after the exit");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The burst fills the queue up to where live output stops, so the Exits of the echo sessions
+    /// take the rest of it and the last few find it full.
+    #[test]
+    fn an_exit_that_finds_the_queue_full_arrives_once_the_queue_drains() {
+        let dir = temp_dir("exit-queue-full");
+        let t = table(&dir);
+        t.create(quiet_params(&dir, "ts-0")).unwrap();
+        let mut peer = Peer::connect(&t, 1);
+        peer.attach(1, "ts-0");
+        burst(&t, "ts-0", 800);
+
+        let echoes: Vec<String> = (1..=40).map(|i| format!("ts-{i}")).collect();
+        for id in &echoes {
+            t.create(echo_params(id)).unwrap();
+        }
+        wait_for(Duration::from_secs(10), || {
+            (t.list().iter().filter(|s| !s.running).count() == echoes.len()).then_some(())
+        });
+
+        for id in &echoes {
+            peer.output_before_exit(id);
+        }
+        t.terminate("ts-0").unwrap();
         std::fs::remove_dir_all(&dir).ok();
     }
 
