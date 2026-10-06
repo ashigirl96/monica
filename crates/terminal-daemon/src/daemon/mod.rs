@@ -3,6 +3,7 @@
 //! keep serving sessions across app/schema upgrades without running migrations.
 
 mod connection;
+mod outbox;
 mod state;
 
 pub use state::SessionTable;
