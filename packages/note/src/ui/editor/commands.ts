@@ -1,0 +1,873 @@
+import type { Node as PMNode, NodeType, Attrs, Mark, ResolvedPos } from 'prosemirror-model'
+import { TextSelection } from 'prosemirror-state'
+import type { Command, EditorState, Transaction } from 'prosemirror-state'
+
+import {
+  childStartPos,
+  containerById,
+  getBlockContext,
+  rangeFromContext,
+  rangePositions,
+  visibleContainers,
+  type BlockContext,
+  type SiblingRange,
+} from './context.ts'
+import {
+  expandedContent,
+  expandedHeading,
+  foldedIndexes,
+  isFoldedContent,
+  isPosHidden,
+  resolveFoldTarget,
+  setFolded,
+  type FoldTarget,
+} from './folding.ts'
+import {
+  createContainer,
+  emptyParagraphContainer,
+  isAtomBlock,
+  isListLike,
+  isTextBlock,
+  nodes,
+  reissueIds,
+  schema,
+} from './schema.ts'
+import { blockSelectionKey, clearBlockSelection, selectBlocks } from './selection-state.ts'
+
+function containerChildren(container: PMNode): readonly PMNode[] {
+  return container.childCount > 1 ? container.child(1).content.content : []
+}
+
+function withChildren(container: PMNode, content: PMNode, children: readonly PMNode[]): PMNode {
+  return nodes.blockContainer.create(
+    container.attrs,
+    children.length > 0 ? [content, nodes.blockGroup.create(null, [...children])] : [content],
+  )
+}
+
+// カーソルを ID + container 内 offset で復元する。
+function restoreCursor(tr: Transaction, id: string, offset: number): void {
+  const entry = containerById(tr.doc, id)
+  if (!entry) return
+  const pos = Math.min(entry.pos + offset, tr.doc.content.size)
+  tr.setSelection(TextSelection.near(tr.doc.resolve(pos), 1))
+}
+
+export function indentRange(state: EditorState, range: SiblingRange): Transaction | null {
+  if (range.fromIndex === 0) return null
+  const group = range.groupNode
+  const prev = group.child(range.fromIndex - 1)
+  // atom は operable でないため、table は配下に子ツリーを持たせない方針のため、どちらも受け側にしない
+  if (isAtomBlock(prev.child(0).type) || prev.child(0).type === nodes.table) return null
+  const selected: PMNode[] = []
+  for (let i = range.fromIndex; i <= range.toIndex; i++) selected.push(group.child(i))
+  // 折りたたまれた block の下へ入れると不可視になるため開く
+  const newPrev = withChildren(prev, expandedContent(prev.child(0)), [
+    ...containerChildren(prev),
+    ...selected,
+  ])
+  const start = childStartPos(range.groupPos, group, range.fromIndex - 1)
+  const { end } = rangePositions(range)
+  return state.tr.replaceWith(start, end, newPrev).setMeta('blockOperation', { type: 'indent' })
+}
+
+export function outdentRange(state: EditorState, range: SiblingRange): Transaction | null {
+  if (range.parentContainerPos === null) return null
+  const parentPos = range.parentContainerPos
+  const parent = state.doc.nodeAt(parentPos)
+  if (!parent) return null
+  const group = range.groupNode
+  const preceding: PMNode[] = []
+  const selected: PMNode[] = []
+  const following: PMNode[] = []
+  group.forEach((child, _offset, i) => {
+    if (i < range.fromIndex) preceding.push(child)
+    else if (i <= range.toIndex) selected.push(child)
+    else following.push(child)
+  })
+  // 見た目の pre-order を保つため、後続兄弟は最後に lift した block の子へ
+  if (following.length > 0) {
+    const last = selected.at(-1)
+    if (!last) return null
+    selected[selected.length - 1] = withChildren(last, last.child(0), [
+      ...containerChildren(last),
+      ...following,
+    ])
+  }
+  const newParent = withChildren(parent, parent.child(0), preceding)
+  return state.tr
+    .replaceWith(parentPos, parentPos + parent.nodeSize, [newParent, ...selected])
+    .setMeta('blockOperation', { type: 'outdent' })
+}
+
+function structureCommand(
+  build: (state: EditorState, range: SiblingRange) => Transaction | null,
+): Command {
+  return (state, dispatch) => {
+    const ctx = getBlockContext(state.selection.$from)
+    if (!ctx) return false
+    const cursorId = ctx.containerNode.attrs.id as string | null
+    const offset = state.selection.head - ctx.containerPos
+    const tr = build(state, rangeFromContext(ctx))
+    if (tr && dispatch) {
+      if (cursorId) restoreCursor(tr, cursorId, offset)
+      dispatch(tr.scrollIntoView())
+    }
+    // 変更できない場合も true: Tab によるブラウザ focus 移動を起こさない（KEY-003）
+    return true
+  }
+}
+
+export const indentBlock: Command = structureCommand(indentRange)
+export const outdentBlock: Command = structureCommand(outdentRange)
+
+export function inlineToPlainText(content: PMNode): PMNode | undefined {
+  const text = content.content.textBetween(0, content.content.size, undefined, '\n')
+  return text.length > 0 ? schema.text(text) : undefined
+}
+
+export function setContentType(
+  state: EditorState,
+  ctx: BlockContext,
+  type: NodeType,
+  attrs: Attrs | null,
+): Transaction {
+  const content = ctx.contentNode
+  let newContent: PMNode
+  if (type === nodes.divider) newContent = type.create()
+  else if (type === nodes.codeBlock) newContent = type.create(attrs, inlineToPlainText(content))
+  else if (content.type === nodes.codeBlock || content.type === nodes.divider)
+    newContent = type.create(attrs, content.type === nodes.divider ? undefined : content.content)
+  else newContent = type.create(attrs, content.content)
+  const tr = state.tr
+    .replaceWith(ctx.contentPos, ctx.contentPos + content.nodeSize, newContent)
+    .setMeta('blockOperation', { type: 'setBlockType' })
+  // replaceWith は範囲内 position を潰す（カーソルが後続 block へ飛ぶ）ので、
+  // content 内にいたカーソルは同じ offset へ張り直す
+  const head = state.selection.head
+  if (
+    newContent.inlineContent &&
+    head >= ctx.contentPos &&
+    head <= ctx.contentPos + content.nodeSize
+  ) {
+    const offset = Math.min(Math.max(head - (ctx.contentPos + 1), 0), newContent.content.size)
+    tr.setSelection(TextSelection.create(tr.doc, ctx.contentPos + 1 + offset))
+  }
+  return tr
+}
+
+function splitRightContent(content: PMNode, offset: number): PMNode {
+  const atEnd = offset === content.content.size
+  const right = content.cut(offset).content
+  const t = content.type
+  // 折りたたみは分割前の heading に残す（右は必ず開いた状態で生まれる）
+  if (t === nodes.heading)
+    return atEnd ? nodes.paragraph.create() : expandedContent(content.copy(right))
+  if (t === nodes.todo) return t.create({ checked: false }, right)
+  // 展開中の callout は splitBlock 側の専用分岐（内部に子を作る）で処理される。
+  // 折りたたみ中は内部が隠れるのでここへ来て、兄弟の段落に割る。
+  if (t === nodes.callout) return nodes.paragraph.create(null, right)
+  if (t === nodes.quote) return atEnd ? nodes.paragraph.create() : t.create(null, right)
+  // toggle 末尾 Enter は「同型の新 toggle」に固定（product 設定）
+  if (t === nodes.toggle) return t.create({ open: true }, right)
+  return t.create(content.attrs, right)
+}
+
+// WebKit の IME 確定 (deleteCompositionText) は、composition が block の全内容の
+// とき block DOM ごと除去して <br> に置き換える（prosemirror-view 1.41.5 の
+// table-cell kludge と同族の Safari regression の div 版。upstream 未修正）。
+// prosemirror-view はこの DOM 差分を Enter と誤認して synthetic keydown を投げ、
+// さらに flush 後に DOM を state から復元するため、放置すると直後の
+// insertFromComposition が確定文字を二重挿入する。Enter を消費しつつ、WebKit が
+// 行った削除を doc へ反映して doc / DOM / WebKit の三者の認識を揃える。
+// 本物の確定 Enter は keyCode 229 と compositionEndedAt のガードで keymap に届かない。
+export const ignoreCompositionEnter: Command = (state, dispatch, view) => {
+  if (view?.composing !== true) return false
+  const ctx = getBlockContext(state.selection.$from)
+  // 入れ子 textblock（tableCell）内では parent ≠ contentNode。ここでの delete は
+  // 表全体を消してしまうので、DOM 修復は行わず Enter の消費だけに留める。
+  if (ctx && state.selection.$from.parent !== ctx.contentNode) return true
+  if (ctx && dispatch && ctx.contentNode.content.size > 0) {
+    const dom = view.nodeDOM(ctx.contentPos)
+    const domEmptied =
+      !(dom instanceof HTMLElement) || !dom.isConnected || !/\S/.test(dom.textContent ?? '')
+    if (domEmptied) {
+      dispatch(
+        state.tr.delete(ctx.contentPos + 1, ctx.contentPos + 1 + ctx.contentNode.content.size),
+      )
+    }
+  }
+  return true
+}
+
+export const splitBlock: Command = (state, dispatch) => {
+  const sel = state.selection
+  if (!(sel instanceof TextSelection)) return false
+  const preCtx = getBlockContext(sel.$from)
+  if (!preCtx) return false
+  if (preCtx.contentNode.type === nodes.codeBlock || preCtx.contentNode.type === nodes.divider)
+    return false
+  // cell 内の Enter は keymap の tableEnter が先取りする。ここに来た場合も
+  // content.cut(offset) が表を壊すので何もしない（防衛的ガード）。
+  if (preCtx.contentNode.type === nodes.table) return false
+
+  // 空 list-like は Enter で outdent（nested）/ paragraph 化（root）
+  if (sel.empty && isListLike(preCtx.contentNode.type) && preCtx.contentNode.content.size === 0) {
+    const cursorId = preCtx.containerNode.attrs.id as string | null
+    if (preCtx.parentContainerPos !== null) {
+      const tr = outdentRange(state, rangeFromContext(preCtx))
+      if (tr && dispatch) {
+        if (cursorId) restoreCursor(tr, cursorId, 2)
+        dispatch(tr.scrollIntoView())
+      }
+      return true
+    }
+    dispatch?.(setContentType(state, preCtx, nodes.paragraph, null).scrollIntoView())
+    return true
+  }
+
+  const tr = state.tr
+  if (!sel.empty) tr.deleteSelection()
+  const $from = tr.selection.$from
+  const ctx = getBlockContext($from)
+  if (!ctx) return false
+  const content = ctx.contentNode
+  const offset = $from.pos - (ctx.contentPos + 1)
+  // callout 行の Enter は兄弟に割らず、内部（先頭の子）に新しい行を作る。
+  // カーソル以降のテキストはその子 paragraph へ移す。
+  // 折りたたみ中は内部が隠れるので、この分岐は使わず兄弟の段落に割る。
+  if (content.type === nodes.callout && !isFoldedContent(content)) {
+    const leftContent = content.cut(0, offset)
+    const child = createContainer(nodes.paragraph.create(null, content.cut(offset).content))
+    const newContainer = withChildren(ctx.containerNode, leftContent, [
+      child,
+      ...containerChildren(ctx.containerNode),
+    ])
+    tr.replaceWith(ctx.containerPos, ctx.containerPos + ctx.containerNode.nodeSize, newContainer)
+    tr.setSelection(TextSelection.create(tr.doc, ctx.containerPos + leftContent.nodeSize + 4))
+    tr.setMeta('blockOperation', { type: 'split' })
+    dispatch?.(tr.scrollIntoView())
+    return true
+  }
+  // 折りたたみ中の heading の行末 Enter は畳みを解き、新しい行はセクションの末尾に置く。
+  // 直後に置くと、開いて現れた既存の内容の手前に入ってしまうため。
+  if (
+    content.type === nodes.heading &&
+    isFoldedContent(content) &&
+    offset === content.content.size
+  ) {
+    const hidden = foldedIndexes(ctx.groupNode)
+    let last = ctx.siblingIndex
+    while (hidden.has(last + 1)) last++
+    const at = childStartPos(ctx.groupPos, ctx.groupNode, last + 1)
+    // setNodeAttribute は nodeSize を変えないので、at は展開後もそのまま使える
+    setFolded(tr, content, ctx.contentPos, false)
+    tr.insert(at, emptyParagraphContainer())
+    tr.setSelection(TextSelection.create(tr.doc, at + 2))
+    tr.setMeta('blockOperation', { type: 'split' })
+    dispatch?.(tr.scrollIntoView())
+    return true
+  }
+  // 行頭 Enter は分割ではなく空 block の上挿入。元 block は container ごと動かさず、
+  // ID・attrs・fold・children をそのまま保つ（カーソルも元テキストの先頭に留まる）
+  if (offset === 0 && content.content.size > 0) {
+    const above = createContainer(
+      content.type === nodes.todo
+        ? nodes.todo.create({ checked: false })
+        : expandedContent(content.cut(0, 0)),
+    )
+    tr.insert(ctx.containerPos, above)
+    tr.setSelection(TextSelection.create(tr.doc, ctx.containerPos + above.nodeSize + 2))
+    tr.setMeta('blockOperation', { type: 'split' })
+    dispatch?.(tr.scrollIntoView())
+    return true
+  }
+  // 左 block が元 ID・children を保持し、右 block は新 ID で subtree の直後に入る
+  const left = expandedHeading(content.cut(0, offset))
+  const leftContainer = withChildren(ctx.containerNode, left, containerChildren(ctx.containerNode))
+  const rightContainer = createContainer(splitRightContent(content, offset))
+  tr.replaceWith(ctx.containerPos, ctx.containerPos + ctx.containerNode.nodeSize, [
+    leftContainer,
+    rightContainer,
+  ])
+  tr.setSelection(TextSelection.create(tr.doc, ctx.containerPos + leftContainer.nodeSize + 2))
+  tr.setMeta('blockOperation', { type: 'split' })
+  dispatch?.(tr.scrollIntoView())
+  return true
+}
+
+export const insertHardBreak: Command = (state, dispatch) => {
+  const ctx = getBlockContext(state.selection.$from)
+  if (!ctx || !isTextBlock(ctx.contentNode.type)) return false
+  dispatch?.(state.tr.replaceSelectionWith(nodes.hardBreak.create()).scrollIntoView())
+  return true
+}
+
+// カーソルを含む最も内側の callout container を祖先から探す。
+function calloutAncestor($pos: ResolvedPos): { pos: number; node: PMNode } | null {
+  for (let depth = $pos.depth; depth >= 2; depth--) {
+    const node = $pos.node(depth)
+    if (node.type === nodes.blockContainer && node.child(0).type === nodes.callout) {
+      return { pos: $pos.before(depth), node }
+    }
+  }
+  return null
+}
+
+/** 折りたたみを切り替える transaction。畳む向きで選択が隠れ範囲にかかる場合は
+    対象の行末へ畳んで退避する。片端でも隠れていると、見えない内容を巻き込んだまま
+    打鍵で置換できてしまうため、両端を見る。
+    scrollIntoView は付けない — スクロール先は選択位置なので、遠くのカーソルを
+    残したまま ▾ をクリックすると画面がそこへ飛ぶ。 */
+export function foldTransaction(state: EditorState, target: FoldTarget): Transaction {
+  const collapsing = !isFoldedContent(target.content)
+  const tr = state.tr
+  setFolded(tr, target.content, target.contentPos, collapsing)
+  if (
+    collapsing &&
+    (isPosHidden(tr.doc, tr.selection.from) || isPosHidden(tr.doc, tr.selection.to))
+  )
+    tr.setSelection(
+      TextSelection.create(tr.doc, target.contentPos + 1 + target.content.content.size),
+    )
+  return tr
+}
+
+// ⌥.: カーソル位置の折りたたみ対象（自分・最寄りの折りたためる祖先・支配 heading）を開閉する。
+// キーボード経由は対象がカーソル由来なので、退避先まで追従してよい。
+export const toggleCollapse: Command = (state, dispatch) => {
+  const target = resolveFoldTarget(state.selection.$from)
+  if (!target) return false
+  dispatch?.(foldTransaction(state, target).scrollIntoView())
+  return true
+}
+
+// callout 内での Shift-Enter: callout を抜けて直後に空 paragraph を足す。
+export const exitCallout: Command = (state, dispatch) => {
+  const found = calloutAncestor(state.selection.$from)
+  if (!found) return false
+  const at = found.pos + found.node.nodeSize
+  const tr = state.tr.insert(at, emptyParagraphContainer())
+  tr.setSelection(TextSelection.create(tr.doc, at + 2))
+  tr.setMeta('blockOperation', { type: 'insert' })
+  dispatch?.(tr.scrollIntoView())
+  return true
+}
+
+function selectSingleBlock(
+  state: EditorState,
+  dispatch: ((tr: Transaction) => void) | undefined,
+  id: string,
+): boolean {
+  if (dispatch) dispatch(selectBlocks(state.tr, id, id))
+  return true
+}
+
+function mergeInto(
+  state: EditorState,
+  targetPos: number,
+  target: PMNode,
+  source: PMNode,
+  sourceEnd: number,
+): Transaction {
+  // source の inline を target の content 末尾へ、source の children を target の children 末尾へ
+  const targetContent = target.child(0)
+  const merged = targetContent.type.create(
+    targetContent.attrs,
+    targetContent.content.append(source.child(0).content),
+  )
+  const children = [...containerChildren(target), ...containerChildren(source)]
+  const newTarget = withChildren(target, merged, children)
+  const tr = state.tr.replaceWith(targetPos, sourceEnd, newTarget)
+  tr.setSelection(TextSelection.create(tr.doc, targetPos + 2 + targetContent.content.size))
+  return tr.setMeta('blockOperation', { type: 'merge' })
+}
+
+export const backspaceBlock: Command = (state, dispatch) => {
+  const sel = state.selection
+  if (!sel.empty || !(sel instanceof TextSelection)) return false
+  const ctx = getBlockContext(sel.$from)
+  if (!ctx) return false
+  if (sel.$from.parentOffset > 0) return false
+  const content = ctx.contentNode
+  if (sel.$from.parent !== content) return false
+  const isEmpty = content.content.size === 0
+  const nested = ctx.parentContainerPos !== null
+
+  // 特殊型は先頭 Backspace でまず paragraph へ戻す（Notion 実機挙動。nest は維持）
+  if (content.type !== nodes.paragraph && content.type !== nodes.codeBlock) {
+    dispatch?.(setContentType(state, ctx, nodes.paragraph, null).scrollIntoView())
+    return true
+  }
+  if (content.type === nodes.codeBlock) {
+    if (!isEmpty) return false
+    dispatch?.(setContentType(state, ctx, nodes.paragraph, null).scrollIntoView())
+    return true
+  }
+
+  const group = ctx.groupNode
+  const index = ctx.siblingIndex
+  if (index > 0) {
+    const prev = group.child(index - 1)
+    const prevContent = prev.child(0)
+    const prevId = prev.attrs.id as string | null
+    // 空 paragraph（子なし）は削除して前の可視 block 末尾へ
+    if (isEmpty && ctx.containerNode.childCount === 1) {
+      const tr = state.tr.delete(ctx.containerPos, ctx.containerPos + ctx.containerNode.nodeSize)
+      tr.setSelection(TextSelection.near(tr.doc.resolve(ctx.containerPos), -1))
+      dispatch?.(tr.scrollIntoView())
+      return true
+    }
+    // atom・code・子持ちへの merge は順序が壊れるので block-select に移行
+    if (
+      prevContent.type === nodes.divider ||
+      prevContent.type === nodes.codeBlock ||
+      prev.childCount > 1 ||
+      !isTextBlock(prevContent.type)
+    ) {
+      return prevId ? selectSingleBlock(state, dispatch, prevId) : true
+    }
+    const prevStart = childStartPos(ctx.groupPos, group, index - 1)
+    const tr = mergeInto(
+      state,
+      prevStart,
+      prev,
+      ctx.containerNode,
+      ctx.containerPos + ctx.containerNode.nodeSize,
+    )
+    dispatch?.(tr.scrollIntoView())
+    return true
+  }
+
+  // group 先頭 child: 親へ merge（cur は先頭 child なので視覚順序を保てる）
+  if (nested && ctx.parentContainerPos !== null) {
+    const parentPos = ctx.parentContainerPos
+    const parent = state.doc.nodeAt(parentPos)
+    if (!parent) return false
+    const parentContent = parent.child(0)
+    const parentId = parent.attrs.id as string | null
+    if (parentContent.type === nodes.codeBlock || !isTextBlock(parentContent.type)) {
+      return parentId ? selectSingleBlock(state, dispatch, parentId) : true
+    }
+    const merged = parentContent.type.create(
+      parentContent.attrs,
+      parentContent.content.append(content.content),
+    )
+    const rest: PMNode[] = [...containerChildren(ctx.containerNode)]
+    group.forEach((child, _offset, i) => {
+      if (i > 0) rest.push(child)
+    })
+    const newParent = withChildren(parent, merged, rest)
+    const tr = state.tr.replaceWith(parentPos, parentPos + parent.nodeSize, newParent)
+    tr.setSelection(TextSelection.create(tr.doc, parentPos + 2 + parentContent.content.size))
+    tr.setMeta('blockOperation', { type: 'merge' })
+    dispatch?.(tr.scrollIntoView())
+    return true
+  }
+
+  // root 先頭 block: 何もしないが Backspace は消費する
+  return true
+}
+
+export const deleteForwardBlock: Command = (state, dispatch) => {
+  const sel = state.selection
+  if (!sel.empty || !(sel instanceof TextSelection)) return false
+  const ctx = getBlockContext(sel.$from)
+  if (!ctx) return false
+  const content = ctx.contentNode
+  if (sel.$from.parent !== content) return false
+  if (sel.$from.parentOffset < content.content.size) return false
+
+  // 行末 Delete が吸い込む先が折りたたみで隠れているなら、merge せずまず開いて見せる。
+  // 隠しているのは（構造上の子・後続兄弟のどちらでも）この container 自身。
+  const nextPos =
+    ctx.containerNode.childCount > 1
+      ? ctx.contentPos + content.nodeSize + 1
+      : ctx.containerPos + ctx.containerNode.nodeSize
+  if (isPosHidden(state.doc, nextPos)) {
+    const tr = state.tr
+    setFolded(tr, content, ctx.contentPos, false)
+    dispatch?.(tr.scrollIntoView())
+    return true
+  }
+
+  // 子を持つなら次の可視 block は先頭 child: それを親へ merge
+  if (ctx.containerNode.childCount > 1) {
+    const childGroup = ctx.containerNode.child(1)
+    const first = childGroup.child(0)
+    const firstContent = first.child(0)
+    const firstId = first.attrs.id as string | null
+    if (
+      content.type === nodes.codeBlock ||
+      firstContent.type === nodes.codeBlock ||
+      !isTextBlock(firstContent.type)
+    ) {
+      return firstId ? selectSingleBlock(state, dispatch, firstId) : true
+    }
+    const merged = content.type.create(content.attrs, content.content.append(firstContent.content))
+    const rest: PMNode[] = [...containerChildren(first)]
+    childGroup.forEach((child, _offset, i) => {
+      if (i > 0) rest.push(child)
+    })
+    const newContainer = withChildren(ctx.containerNode, merged, rest)
+    const tr = state.tr.replaceWith(
+      ctx.containerPos,
+      ctx.containerPos + ctx.containerNode.nodeSize,
+      newContainer,
+    )
+    tr.setSelection(TextSelection.create(tr.doc, ctx.containerPos + 2 + content.content.size))
+    tr.setMeta('blockOperation', { type: 'merge' })
+    dispatch?.(tr.scrollIntoView())
+    return true
+  }
+
+  const group = ctx.groupNode
+  const index = ctx.siblingIndex
+  if (index >= group.childCount - 1) return true
+  const next = group.child(index + 1)
+  const nextContent = next.child(0)
+  const nextId = next.attrs.id as string | null
+  if (
+    content.type === nodes.codeBlock ||
+    nextContent.type === nodes.divider ||
+    nextContent.type === nodes.codeBlock ||
+    !isTextBlock(nextContent.type)
+  ) {
+    return nextId ? selectSingleBlock(state, dispatch, nextId) : true
+  }
+  const nextEnd = ctx.containerPos + ctx.containerNode.nodeSize + next.nodeSize
+  const tr = mergeInto(state, ctx.containerPos, ctx.containerNode, next, nextEnd)
+  dispatch?.(tr.scrollIntoView())
+  return true
+}
+
+// カーソルを置ける空テキスト行。子 block を持つ container は見た目が空行でも
+// subtree を抱えているため含めない。
+function isEmptyTextLine(container: PMNode): boolean {
+  const content = container.child(0)
+  return (
+    isTextBlock(content.type) &&
+    content.type !== nodes.codeBlock &&
+    content.content.size === 0 &&
+    container.childCount === 1
+  )
+}
+
+// Ctrl-d: 空 block なら行ごと削除して次行の先頭へ（Ctrl-k の kill line と同じ着地）。
+// 非空行では false を返し、ネイティブの前方 1 文字削除にフォールスルーさせる。
+export const deleteEmptyBlock: Command = (state, dispatch) => {
+  const sel = state.selection
+  if (!sel.empty || !(sel instanceof TextSelection)) return false
+  const ctx = getBlockContext(sel.$from)
+  if (!ctx) return false
+  if (sel.$from.parent !== ctx.contentNode) return false
+  if (!isEmptyTextLine(ctx.containerNode)) return false
+  const tr = deleteRange(state, rangeFromContext(ctx))
+  tr.setSelection(
+    TextSelection.near(tr.doc.resolve(Math.min(ctx.containerPos, tr.doc.content.size)), 1),
+  )
+  dispatch?.(tr.scrollIntoView())
+  return true
+}
+
+export function deleteRange(state: EditorState, range: SiblingRange): Transaction {
+  const group = range.groupNode
+  const { start, end } = rangePositions(range)
+  const wholeGroup = range.fromIndex === 0 && range.toIndex === group.childCount - 1
+  const tr = state.tr
+  if (wholeGroup && range.parentContainerPos === null) {
+    tr.replaceWith(
+      range.groupPos + 1,
+      range.groupPos + 1 + group.content.size,
+      emptyParagraphContainer(),
+    )
+  } else if (wholeGroup) {
+    // 空の blockGroup を残さない
+    tr.delete(range.groupPos, range.groupPos + group.nodeSize)
+  } else {
+    tr.delete(start, end)
+  }
+  const at = Math.min(start, tr.doc.content.size)
+  tr.setSelection(TextSelection.near(tr.doc.resolve(at), -1))
+  clearBlockSelection(tr)
+  return tr.setMeta('blockOperation', { type: 'delete' })
+}
+
+export function duplicateRange(state: EditorState, range: SiblingRange): Transaction {
+  const copies: PMNode[] = []
+  for (let i = range.fromIndex; i <= range.toIndex; i++)
+    copies.push(reissueIds(range.groupNode.child(i)))
+  const { end } = rangePositions(range)
+  const tr = state.tr.insert(end, copies)
+  const first = copies[0]
+  const last = copies.at(-1)
+  if (first && last) selectBlocks(tr, first.attrs.id as string, last.attrs.id as string)
+  return tr.setMeta('blockOperation', { type: 'duplicate' })
+}
+
+// 折りたたんだ heading の section は後続兄弟から導出されるので、移動しても付いてこない。
+// 並べ替えに巻き込まれた heading は畳みを解き、移動先で無関係な兄弟を隠さないようにする。
+function unfoldHeadings(containers: readonly PMNode[]): PMNode[] {
+  return containers.map((container) => {
+    const content = expandedHeading(container.child(0))
+    return content === container.child(0)
+      ? container
+      : withChildren(container, content, containerChildren(container))
+  })
+}
+
+export function moveRange(
+  state: EditorState,
+  range: SiblingRange,
+  direction: 'up' | 'down',
+): Transaction | null {
+  const group = range.groupNode
+  const selected: PMNode[] = []
+  for (let i = range.fromIndex; i <= range.toIndex; i++) selected.push(group.child(i))
+  if (direction === 'up') {
+    if (range.fromIndex === 0) return null
+    const prev = group.child(range.fromIndex - 1)
+    const start = childStartPos(range.groupPos, group, range.fromIndex - 1)
+    const { end } = rangePositions(range)
+    return state.tr
+      .replaceWith(start, end, unfoldHeadings([...selected, prev]))
+      .setMeta('blockOperation', { type: 'move' })
+  }
+  if (range.toIndex >= group.childCount - 1) return null
+  const next = group.child(range.toIndex + 1)
+  const { start, end } = rangePositions(range)
+  return state.tr
+    .replaceWith(start, end + next.nodeSize, unfoldHeadings([next, ...selected]))
+    .setMeta('blockOperation', { type: 'move' })
+}
+
+/** container の直後に空 paragraph を作り、カーソルをその中へ移す
+    （divider / bookmark などカーソルを置けない block への変換・挿入後の共通処理） */
+export function appendEmptyParagraphAfter(tr: Transaction, containerPos: number): void {
+  const container = tr.doc.nodeAt(containerPos)
+  if (!container) return
+  const at = containerPos + container.nodeSize
+  tr.insert(at, emptyParagraphContainer())
+  tr.setSelection(TextSelection.create(tr.doc, at + 2))
+}
+
+export function insertParagraphAfter(state: EditorState, containerPos: number): Transaction | null {
+  const container = state.doc.nodeAt(containerPos)
+  if (!container || container.type !== nodes.blockContainer) return null
+  const tr = state.tr
+  appendEmptyParagraphAfter(tr, containerPos)
+  clearBlockSelection(tr)
+  return tr.setMeta('blockOperation', { type: 'insert' })
+}
+
+// tableCell は blockContainer 内の入れ子 textblock なので endOfTextblock はセル単位で
+// 真になる。表の途中の行から exitDoc* が発火すると、残りの行を飛ばして表外へ抜けて
+// しまう。進める行が残っているセル内では false を返してネイティブの移動に任せる。
+export function hasAdjacentTableRow($pos: ResolvedPos, dir: 1 | -1): boolean {
+  for (let depth = $pos.depth; depth >= 5; depth--) {
+    if ($pos.node(depth).type !== nodes.tableCell) continue
+    const rowIndex = $pos.index(depth - 2)
+    return dir === 1 ? rowIndex < $pos.node(depth - 2).childCount - 1 : rowIndex > 0
+  }
+  return false
+}
+
+// Ctrl-n（↓と同義）で文書の下端からさらに下へ進もうとしたときの脱出ハッチ。
+// bookmark / divider などの atom block が末尾にあるとその後ろに行を作る手段が
+// ないため、文書末尾（root level）に空 paragraph を足してカーソルを移す。
+// 末尾が既に空の text 行ならそこへカーソルを移すだけで何も足さない。
+// カーソルの下にまだ入れる block が残っている間は false を返し、
+// 通常のカーソル下移動（native）に任せる。
+export const exitDocEnd: Command = (state, dispatch, view) => {
+  const visible = visibleContainers(state.doc)
+  const last = visible[visible.length - 1]
+  if (!last) return false
+
+  const blockSel = blockSelectionKey.getState(state)
+  const currentId =
+    blockSel && blockSel.selectedIds.length > 0
+      ? blockSel.headId
+      : (getBlockContext(state.selection.$from)?.containerNode.attrs.id as string | null)
+  if (!currentId) return false
+  const idx = visible.findIndex((v) => v.id === currentId)
+  if (idx === -1) return false
+  // 下方向にカーソルを置ける block が残っているなら通常の下移動に任せる
+  for (let i = idx + 1; i < visible.length; i++) {
+    if (!isAtomBlock(visible[i]!.node.child(0).type)) return false
+  }
+  if (
+    !(blockSel && blockSel.selectedIds.length > 0) &&
+    state.selection instanceof TextSelection &&
+    (hasAdjacentTableRow(state.selection.$from, 1) || (view && !view.endOfTextblock('down')))
+  ) {
+    return false
+  }
+
+  const tr = state.tr
+  if (isEmptyTextLine(last.node)) {
+    tr.setSelection(TextSelection.create(tr.doc, last.pos + 2))
+  } else {
+    // root blockGroup の閉じトークン直前 = 文書末尾
+    const at = tr.doc.content.size - 1
+    tr.insert(at, emptyParagraphContainer())
+    tr.setSelection(TextSelection.create(tr.doc, at + 2))
+    tr.setMeta('blockOperation', { type: 'insert' })
+  }
+  clearBlockSelection(tr)
+  dispatch?.(tr.scrollIntoView())
+  return true
+}
+
+export const exitCodeBlock: Command = (state, dispatch) => {
+  const ctx = getBlockContext(state.selection.$from)
+  if (!ctx || ctx.contentNode.type !== nodes.codeBlock) return false
+  const tr = insertParagraphAfter(state, ctx.containerPos)
+  if (tr) dispatch?.(tr.scrollIntoView())
+  return true
+}
+
+// exitDocEnd の上端版。Ctrl-p（↑と同義）で文書の上端からさらに上へ進もうとしたとき、
+// 文書先頭（root level）に空 paragraph を足してカーソルを移す。
+// 先頭が既に空の text 行ならそこへカーソルを移すだけで何も足さない。
+// カーソルの上にまだ置ける block が残っている間は false を返し、
+// 通常のカーソル上移動（native）に任せる。
+export const exitDocStart: Command = (state, dispatch, view) => {
+  const visible = visibleContainers(state.doc)
+  const first = visible[0]
+  if (!first) return false
+
+  const blockSel = blockSelectionKey.getState(state)
+  const currentId =
+    blockSel && blockSel.selectedIds.length > 0
+      ? blockSel.headId
+      : (getBlockContext(state.selection.$from)?.containerNode.attrs.id as string | null)
+  if (!currentId) return false
+  const idx = visible.findIndex((v) => v.id === currentId)
+  if (idx === -1) return false
+  // 上方向にカーソルを置ける block が残っているなら通常の上移動に任せる
+  for (let i = 0; i < idx; i++) {
+    if (!isAtomBlock(visible[i]!.node.child(0).type)) return false
+  }
+  if (
+    !(blockSel && blockSel.selectedIds.length > 0) &&
+    state.selection instanceof TextSelection &&
+    (hasAdjacentTableRow(state.selection.$from, -1) || (view && !view.endOfTextblock('up')))
+  ) {
+    return false
+  }
+
+  const tr = state.tr
+  if (isEmptyTextLine(first.node)) {
+    tr.setSelection(TextSelection.create(tr.doc, first.pos + 2))
+  } else {
+    // root blockGroup の開きトークン直後 = 文書先頭
+    const at = 1
+    tr.insert(at, emptyParagraphContainer())
+    tr.setSelection(TextSelection.create(tr.doc, at + 2))
+    tr.setMeta('blockOperation', { type: 'insert' })
+  }
+  clearBlockSelection(tr)
+  dispatch?.(tr.scrollIntoView())
+  return true
+}
+
+export const codeNewline: Command = (state, dispatch) => {
+  const ctx = getBlockContext(state.selection.$from)
+  if (!ctx || ctx.contentNode.type !== nodes.codeBlock) return false
+  dispatch?.(state.tr.insertText('\n').scrollIntoView())
+  return true
+}
+
+// Ctrl-a / Ctrl-e（macOS 流の行頭・行末移動）。code block は現在行、text block は content 端。
+export const cursorToLineStart: Command = (state, dispatch) => {
+  const ctx = getBlockContext(state.selection.$from)
+  if (!ctx) return false
+  const content = ctx.contentNode
+  if (content.type === nodes.divider) return false
+  let target = ctx.contentPos + 1
+  if (content.type === nodes.codeBlock) {
+    const offset = state.selection.head - (ctx.contentPos + 1)
+    target = ctx.contentPos + 1 + content.textContent.lastIndexOf('\n', offset - 1) + 1
+  }
+  dispatch?.(state.tr.setSelection(TextSelection.create(state.doc, target)).scrollIntoView())
+  return true
+}
+
+export const cursorToLineEnd: Command = (state, dispatch) => {
+  const ctx = getBlockContext(state.selection.$from)
+  if (!ctx) return false
+  const content = ctx.contentNode
+  if (content.type === nodes.divider) return false
+  let target = ctx.contentPos + 1 + content.content.size
+  if (content.type === nodes.codeBlock) {
+    const offset = state.selection.head - (ctx.contentPos + 1)
+    const nl = content.textContent.indexOf('\n', offset)
+    if (nl !== -1) target = ctx.contentPos + 1 + nl
+  }
+  dispatch?.(state.tr.setSelection(TextSelection.create(state.doc, target)).scrollIntoView())
+  return true
+}
+
+// 行末で inline code の右境界に立っているカーソルと、そこでの実効 mark（storedMarks
+// 優先）。exitInlineCode / enterInlineCode / codeExitPos が同じ境界判定を共有する。
+function codeBoundary(state: EditorState): { $cursor: ResolvedPos; marks: readonly Mark[] } | null {
+  const { $cursor } = state.selection as TextSelection
+  if (!$cursor || $cursor.nodeAfter) return null
+  const before = $cursor.nodeBefore
+  if (!before || !schema.marks.code.isInSet(before.marks)) return null
+  return { $cursor, marks: state.storedMarks ?? $cursor.marks() }
+}
+
+// inline code の右端で → を押したら、カーソルを動かさず code mark だけ降りる。
+// code mark は inclusive なので末尾でも追記が続く（`hoge` に足せるのはこの性質）が、
+// text block の末尾だと → に行き先がなく、mark から抜ける手段がなくなる。
+// 右に文字が残っているときは native の 1 文字移動でそのまま抜けられるので手を出さない。
+export const exitInlineCode: Command = (state, dispatch) => {
+  const boundary = codeBoundary(state)
+  if (!boundary || !schema.marks.code.isInSet(boundary.marks)) return false
+  dispatch?.(state.tr.setStoredMarks(schema.marks.code.removeFromSet(boundary.marks)))
+  return true
+}
+
+// exitInlineCode で降りた直後の「code の外にいる」状態の位置。storedMarks は doc にも
+// DOM にも出ないため、native キャレットは <code> 内の同じ DOM 位置に描かれ続ける。
+// decorations.ts がこの位置に fake caret を widget で立てて「抜けた」ことを見せる。
+export function codeExitPos(state: EditorState): number | null {
+  const boundary = codeBoundary(state)
+  if (!boundary || schema.marks.code.isInSet(boundary.marks)) return null
+  return boundary.$cursor.pos
+}
+
+// exitInlineCode の逆。降りた状態で ← を押したら、カーソルを動かさず code mark に戻る
+// （`abc`| → `abc|`）。native に落とすと 1 文字左（`ab|c`）へ動いてしまい対称にならない。
+export const enterInlineCode: Command = (state, dispatch) => {
+  const boundary = codeBoundary(state)
+  if (!boundary || schema.marks.code.isInSet(boundary.marks)) return false
+  dispatch?.(state.tr.setStoredMarks(schema.marks.code.create().addToSet(boundary.marks)))
+  return true
+}
+
+const CODE_INDENT = '  '
+
+export const codeIndent: Command = (state, dispatch) => {
+  const ctx = getBlockContext(state.selection.$from)
+  if (!ctx || ctx.contentNode.type !== nodes.codeBlock) return false
+  dispatch?.(state.tr.insertText(CODE_INDENT).scrollIntoView())
+  return true
+}
+
+// code の indent を減らす。行頭で減らせなくても block outdent にはしない。
+export const codeOutdent: Command = (state, dispatch) => {
+  const ctx = getBlockContext(state.selection.$from)
+  if (!ctx || ctx.contentNode.type !== nodes.codeBlock) return false
+  const textStart = ctx.contentPos + 1
+  const text = ctx.contentNode.textContent
+  const cursorOffset = state.selection.from - textStart
+  const lineStart = text.lastIndexOf('\n', cursorOffset - 1) + 1
+  let removable = 0
+  while (removable < CODE_INDENT.length && text[lineStart + removable] === ' ') removable++
+  if (removable > 0 && dispatch) {
+    dispatch(state.tr.delete(textStart + lineStart, textStart + lineStart + removable))
+  }
+  return true
+}
