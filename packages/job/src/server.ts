@@ -12,4 +12,12 @@ export const router = os.router({
   list: os.list.handler(({ context }) => ({ jobs: internals(context.jobLedger).list() })),
   show: os.show.handler(({ context, input }) => internals(context.jobLedger).show(input.name)),
   run: os.run.handler(({ context, input }) => internals(context.jobLedger).run(input.name)),
+  add: os.add.handler(({ context, input }) => internals(context.jobLedger).add(input)),
+  remove: os.remove.handler(({ context, input }) =>
+    internals(context.jobLedger).remove(input.name),
+  ),
+  pause: os.pause.handler(({ context, input }) => internals(context.jobLedger).pause(input.name)),
+  resume: os.resume.handler(({ context, input }) =>
+    internals(context.jobLedger).resume(input.name),
+  ),
 })
