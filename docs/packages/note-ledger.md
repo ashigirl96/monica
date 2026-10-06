@@ -74,7 +74,7 @@ note は他の domain を import せず、他の domain からも import され�
 
 ## body
 
-`@tania/note/body` は本文の JSON を読む module で、server と ui の両方が import する。そのため `bun:sqlite`・`drizzle-orm`・schema と server の entry を import しない（`.oxlintrc.json` の override が守る）。node は JSON のまま辿り、prosemirror-model に依らない。今あるのは `preview`・`EMPTY_DOC` と、本文と markdown の変換（`toMarkdown`・`fromMarkdown`）で、画像の参照の列挙は後続の issue で足す。
+`@tania/note/body` は本文の JSON を読む module で、server と ui の両方が import する。そのため `bun:sqlite`・`drizzle-orm`・schema と server の entry を import しない（直接の import は `.oxlintrc.json` の override が、contract などを経た import は `src/body/entry.test.ts` が守る）。node は JSON のまま辿り、prosemirror-model に依らない。今あるのは `preview`・`EMPTY_DOC` と、本文と markdown の変換（`toMarkdown`・`fromMarkdown`）で、画像の参照の列挙は後続の issue で足す。
 
 ### markdown の変換
 
@@ -96,3 +96,4 @@ monica の Rust（`note_markdown.rs`・`note_markdown_import.rs`）を TypeScrip
 - 種類と列の対応と、1 つだけある Note は、table に直に insert して確かめる。
 - preview と markdown の変換は monica の fixture（`src/body/fixtures/` の `full-doc.json`・`unknown-nodes.json`）で確かめる。
 - markdown の変換のテストは、monica の import の 33 本と export の 11 本から、展開・循環・plain text のものを除いて写してある。`full-doc.json` の書き出しは monica の golden（`FULL_DOC_MD`）と一字ずつ比べる。
+- monica の Rust を写した関数は、monica の `crates/monica-domain` を path 依存で読む scratch の crate に、テストの入力と部品を乱択で組み合わせた入力を流し、TS の出力と突き合わせる。空白の判定（Rust の `trim` は Unicode の White_Space）や `str::lines` の `\r` のような境界の振る舞いは、golden と写したテストだけでは写し漏れを拾えないため。

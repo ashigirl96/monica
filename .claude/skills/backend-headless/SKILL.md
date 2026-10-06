@@ -8,13 +8,15 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 ## 起こす
 
 1. `cargo build -p tania-ptyd`
-2. home は `${TMPDIR%/}/tania-s2` のように、`$TMPDIR` の下に短い名前で作る。ptyd の socket（`$TANIA_HOME/ptyd.sock`）の path が 104 byte を超えると bind できず、client には ENOENT にしか見えない。
+2. home は `${TMPDIR%/}/tania-s2` のように、`$TMPDIR` の下に短い名前で作る。ptyd の socket（`$TANIA_HOME/ptyd.sock`）の path が 104 byte を超えると bind できず、client には ENOENT にしか見えない。名前は worktree の issue 番号などで、並行する他のセッションと分ける（以下の `tania-s2` はその名前に読み替える）。home・port・agent-browser の session がぶつからないようにするため。
 3. Bash の `run_in_background` で、stdin を無名 pipe で握って起こす。出力は scratchpad の file に向ける。
 
    ```bash
-   sleep 100000 | TANIA_HOME=${TMPDIR%/}/tania-s2 TANIA_PTYD_PATH=target/debug/tania-ptyd \
+   (exec -a "tania-hold ${TMPDIR%/}/tania-s2" sleep 100000) | TANIA_HOME=${TMPDIR%/}/tania-s2 TANIA_PTYD_PATH=target/debug/tania-ptyd \
      bun apps/backend/src/main.ts > $SCRATCH/out.jsonl 2> $SCRATCH/err.log
    ```
+
+   - stdin を握る sleep には、`exec -a` で home を含む名前を付ける。止めるときにその名前で探し、並行する他のセッションの sleep に当てないため。`sleep 100000` の名前のまま探すと、他のセッションの Backend も stdin の EOF で黙って抜ける。
 
    - 親は background job のまま生かす。`( … &)` で切り離すと親がすぐ死に、Backend は ppid=1 の見張りで約 1 秒後に黙って抜ける。
    - stdin は無名 pipe にする。Bun は fifo の EOF を拾わないので、fifo では stdin の EOF で抜ける振る舞いを確かめられない。
@@ -24,7 +26,7 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 
 4. tab の claude の hook を確かめるなら、起動した後に `ln -s $PWD/scripts/tania-dev ${TMPDIR%/}/tania-s2/bin/tania` を張る。hook の settings の command はこの path を指し、desktop では Shell が張る。
 
-起動できたのは、`out.jsonl` に `{"type":"endpoint",…}` の行が出て、`$TANIA_HOME/backend.json` ができたとき。待つのは、Bash の `run_in_background` で `until [ -f ${TMPDIR%/}/tania-s2/backend.json ] || ! pgrep -qf apps/backend/src/main.ts; do sleep 0.5; done` を走らせる（前景の `sleep` は harness が止める）。抜けた後に `backend.json` が無ければ Backend は落ちているので、`err.log` を読む。
+起動できたのは、`out.jsonl` に `{"type":"endpoint",…}` の行が出て、`$TANIA_HOME/backend.json` ができたとき。待つのは、Bash の `run_in_background` で `for i in $(seq 1 60); do [ -f ${TMPDIR%/}/tania-s2/backend.json ] && break; sleep 0.5; done` を走らせる（前景の `sleep` は harness が止める）。抜けた後に `backend.json` が無ければ Backend は落ちているので、`err.log` を読む。`pgrep -f apps/backend/src/main.ts` は並行する他のセッションの Backend にも当たるので、この判定に使わない。
 
 ## 確かめる
 
@@ -148,9 +150,9 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 
 ## 止めて片付ける
 
-- stdin の EOF で止める: sleep の pid を `pgrep -f "^sleep 100000$"` で取り、その pid に `kill` を送る。`pkill -f` は harness の zsh にも当たり、親ごと殺す。
+- stdin の EOF で止める: sleep の pid を `pgrep -f "^tania-hold ${TMPDIR%/}/tania-s2 "` で取り、その pid に `kill` を送る。`pkill -f` は harness の zsh にも当たり、親ごと殺す。
 - SIGTERM で止める: `kill -TERM $(jq .pid ${TMPDIR%/}/tania-s2/backend.json)`。pipe の左の sleep は残り、background の job が終わらないので、続けて上の手順で sleep も止める。
-- Backend が止まったら `rm -rf ${TMPDIR%/}/tania-s2` で home を消す。ptyd は socket が消えたのを 2 秒おきの確認で見つけ、shell ごと終わるので、下の判定は数秒待ってからする。
+- Backend は抜けるときに `backend.json` を消す。それが消えたら `rm -rf ${TMPDIR%/}/tania-s2` で home を消す。ptyd は socket が消えたのを 2 秒おきの確認で見つけ、shell ごと終わるので、下の判定は数秒待ってからする。
 - Tab で claude を起こしたなら、claude が cwd ごとに作る `~/.claude/projects/-private-var-folders-…-tania-s2…` も消す（cwd の `/` と `.` が `-` になった名前）。`ls ~/.claude/projects | grep tania-s2` で見つかる。
 
-片付いたのは、`pgrep -f apps/backend/src/main.ts` と `pgrep -f "tania-ptyd --tania-home ${TMPDIR%/}/tania-s2"` が何も返さず、home が消えたとき。消し忘れた dev は `bun run dev:list` で見つけ、`bun run dev:kill <NAME>` で片付ける。
+片付いたのは、`pgrep -f "^tania-hold ${TMPDIR%/}/tania-s2 "` と `pgrep -f "tania-ptyd --tania-home ${TMPDIR%/}/tania-s2"` が何も返さず、home が消えたとき。消し忘れた dev は `bun run dev:list` で見つけ、`bun run dev:kill <NAME>` で片付ける。
