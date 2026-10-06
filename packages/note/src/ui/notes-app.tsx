@@ -11,6 +11,19 @@ export function NotesApp({ client }: { client: NoteClient }) {
 
   useEffect(() => reach.watch(() => client.daily.dates()), [client])
 
+  // retry しないので、届かない間に失敗した取得は、取り直さないとエラーのまま残る。
+  useEffect(
+    () =>
+      reach.onRecover(
+        () =>
+          void queryClient.refetchQueries({
+            type: 'active',
+            predicate: (query) => query.state.status === 'error',
+          }),
+      ),
+    [queryClient],
+  )
+
   return (
     <QueryClientProvider client={queryClient}>
       <ClientContext value={client}>

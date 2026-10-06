@@ -9,6 +9,7 @@ export class Reach {
   #timer: ReturnType<typeof setTimeout> | null = null
   #probe: (() => Promise<unknown>) | null = null
   #listeners = new Set<() => void>()
+  #recoverListeners = new Set<() => void>()
 
   subscribe = (listener: () => void): (() => void) => {
     this.#listeners.add(listener)
@@ -16,6 +17,12 @@ export class Reach {
   }
 
   isUnreachable = (): boolean => this.#unreachable
+
+  /** 失敗の後に届いたときに呼ぶ。帯を出す前の短い停止で失敗した取得も、これで取り直せる。 */
+  onRecover(listener: () => void): () => void {
+    this.#recoverListeners.add(listener)
+    return () => this.#recoverListeners.delete(listener)
+  }
 
   // 届かない間は画面の操作が request を出すとは限らないので、戻ったことを自分で確かめに行く。
   watch(probe: () => Promise<unknown>): () => void {
@@ -26,10 +33,12 @@ export class Reach {
   }
 
   reached(): void {
+    const recovered = this.#failingSince !== null
     this.#failingSince = null
     if (this.#timer !== null) clearTimeout(this.#timer)
     this.#timer = null
     this.#set(false)
+    if (recovered) for (const listener of this.#recoverListeners) listener()
   }
 
   failed(): void {

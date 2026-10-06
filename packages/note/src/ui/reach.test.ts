@@ -96,3 +96,21 @@ test('a failure after the Backend came back counts its second from that failure'
 
   expect(reach.isUnreachable()).toBe(false)
 })
+
+test('an answer after failures is told as a recovery, even one before the notice, and an answer with no failure before is not', () => {
+  const { reach } = setup()
+  const recovered = mock(() => {})
+  reach.onRecover(recovered)
+
+  at(0)
+  reach.reached()
+  expect(recovered).not.toHaveBeenCalled()
+
+  reach.failed()
+  at(500)
+  reach.reached()
+  expect(recovered).toHaveBeenCalledTimes(1)
+
+  reach.reached()
+  expect(recovered).toHaveBeenCalledTimes(1)
+})
