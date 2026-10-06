@@ -112,12 +112,15 @@ node の type の出現回数（括弧は含む note 数）: paragraph 1512 (135
 ## エディタ（`shared/block-editor`）
 
 - ProseMirror を直接組む（`new Schema`・`EditorState.create`・`new EditorView`）。依存は root の `@milkdown/kit ^7.22.1` だけで、Milkdown の Editor や preset は使わない。表は自前で、prosemirror-tables は使わない。コードの構文ハイライトは無い。
+- 11,678 行（本体の TS と TSX 6,995、`block-editor.css` 1,241、テストと fixture 3,442）。package.json も barrel も無く、web は alias `@shared/*` で import する。web が値として import するのは `BlockEditor` と `stripPendingImages` の 2 つで、残りは型。props は mount 時に固定され、差し替えは `key` を変えた再 mount で行う（`web/src/notes/note-block-editor.tsx:39`）。
+- 使う subpath は `@milkdown/kit/prose/` の state・model・view・keymap・inputrules・history・commands の 7 つ。どれも `@milkdown/prose` を経て `prosemirror-*` を `export *` するだけ。入っている版は prosemirror-state 1.4.4、model 1.25.11、view 1.42.3、keymap 1.2.3、inputrules 1.5.1、history 1.5.0、commands 1.7.2（推移的に transform 1.12.1）。
+- テストは `bun test` で、DOM の環境は無い。EditorState だけで回し、EditorView は型キャストした最小のモックで代える。block-editor に 11 本（最大は commands の 1,189 行）、`web/src/notes` に 3 本（note-ledger・note-sync・summary）、ほかに `pages/essays/support.test.ts`。hook と component のテストは無い。
 - ブロック: paragraph、heading（1〜3、collapsed）、todo、bullet、numbered（decimal / lower-alpha / lower-roman）、toggle、quote、callout（note / tips / danger / question / example）、codeBlock（language、wrap）、table、divider、bookmark、syncedBlock、image。inline: text、linkMention、noteMention、hardBreak。mark: bold、italic、underline、strike、code、link。
 - NodeView は React ではなく `document.createElement` で組む。
 - import しているのは web だけ（desktop の journal space は削除済み）。外への import は `react` と `@milkdown/kit/prose/*` だけ。
 - monica 固有の口は props で注入する: `fetchLinkMetadata`、`searchNoteMentions`、`resolveNoteMention`、`onNoteMentionClick`、`resolveBlock`、`onOpenBlock`、`uploadImage`、`importExternalImage`、`renderMarkdown`、`parseMarkdown`。渡さなければその機能が無効になる。
-- 直書きされているもの: `noteHref = /notes/${id}` と `window.location.origin` による内部リンクの判定、`ASSET_URL_PREFIX = "/api/assets/"`（Rust 側と文字列を合わせている）、clipboard の MIME `application/x-monica-blocks+json`、`import.meta.env.DEV`、ホストの CSS 変数（`--background` など）と Tailwind の `relative`。
-- CSS は `shared/block-editor/block-editor.css`（1241 行、`.jb-*`）と `web/src/notes/notes.css`（`--ink`・`--paper`・`--desk`）。
+- 直書きされているもの: `noteHref = /notes/${id}`（`schema.ts:9-11`）と、`window.location.origin` で自分の note の URL かを見る `internalNoteId`（`note-mention-menu.ts:47-62, 94, 218, 287`）、`ASSET_URL_PREFIX = "/api/assets/"`（`schema.ts:21`、Rust 側と文字列を合わせている）、clipboard の MIME `application/x-monica-blocks+json`（`clipboard.ts:18`）、dev でだけ IME の debug plugin を入れる `import.meta.env.DEV`（`create-editor.ts:123`）、ホストの CSS 変数と Tailwind の `relative`。
+- CSS は `shared/block-editor/block-editor.css`（1241 行、`.jb-*`）と `web/src/notes/notes.css`（122 行、`--ink`・`--paper`・`--desk`）。block-editor.css がホストから読むのは `--foreground`・`--background`・`--popover`・`--popover-foreground`（後ろ 2 つは fallback 付き）で、祖先の `[data-density="compact"]` で詰める。menu は `relative` を付けた host（`view.dom.parentElement`）に append するので、`relative` は機能に要る。
 - 操作: `/` か Cmd-J のスラッシュメニュー（callout 5 種と Table）、ほかは markdown 風の input rule。`[[` で note のリンク、URL の貼り付けで「Paste as」（URL / Mention / Bookmark、OGP は `GET /api/ogp`）、ブロックの貼り付けで「Paste / Paste and sync」。copy は選択範囲を `POST /api/notes/markdown` で markdown にし、text/plain だけの paste は `POST /api/notes/from-markdown` で doc にする。ブロック選択（Esc / Cmd-A）と移動・複製・削除。
 
 ## 保存と競合
@@ -128,6 +131,7 @@ node の type の出現回数（括弧は含む note 数）: paragraph 1512 (135
 - SSE や WebSocket は無い。
 - 楽観ロック: `expected_updated_at` が違えば 409。開いている note ならヘッダに「別の場所でこのノートが更新されました」と「最新を読み込む」（ローカルの編集を捨てる）を出し、開いていない note は左下に常駐の通知を出す。マージはしない。
 - 外の更新は focus のたびに取り直し、未保存が無いときだけ採用してエディタを再 mount する。
+- `use-autosave.ts` と `note-sync.ts` は TanStack Query を import しない。debounce の timer はアプリ全体で 1 つで、1 回の flush の中では複数の note を並列に送る。PUT の応答は doc を返さないので query の cache は 1 世代古くなり、それを `usableServerDoc` が弾く。
 - 削除と essay の status の切り替えは、先に flush して未保存が残れば中止する。
 
 ## 画面と routing
@@ -138,7 +142,12 @@ node の type の出現回数（括弧は含む note 数）: paragraph 1512 (135
 - projects: 前回の project を localStorage から開き、無ければ fuzzy picker。primary を上に固定し、その下に時系列を無限スクロールで並べる。
 - 共通の枠はサイドバーの幅（260〜720px）と表示密度を localStorage に持つ。本文の幅は 760px。
 - ページのキー: ⌥J / ⌥K でサイドバーを巡回、⌥N で作成、⌥Backspace で削除、⌥Z で取り消し、⌥H / ⌥L で essay のタブ、⌃W で status か project の切り替え、⌥D で密度、⌥B で zen、⌃1 / ⌃2 / ⌃3 で daily / essays / projects。
-- React 19、TanStack Query 5（staleTime 0、retry なし）、素の fetch、Tailwind v4、Vite 8。jotai は notes では使っていない。
+- router は `web/src/app.tsx`（101 行）の自作。`useSyncExternalStore` で `popstate` を購読し、`navigate` は pushState の後に合成の `PopStateEvent` を投げる。Link の component は無く、`<a onClick>` 用の `spaLinkClick` がある。
+- query key は 8 種（`web/src/query.ts:3-12`）。`refetchOnWindowFocus: true` で、`focusManager` を自前の focus・blur・visibilitychange の監視に替えている。project の note の一覧は offset の `useInfiniteQuery`。`useMutation` は無く、作成・削除・status・復元は fetch を直に呼んでから cache を書き換えるか invalidate する。fetch は `web/src/api.ts` に関数ごとの素の `fetch` で、型は specta が Rust から生成した `types.gen.ts`。
+- notes の画面が notes と pages の外から import するのは `api`・`query`・`app`（navigate）・`keys`・`types.gen`・`components/fuzzy-picker-modal`（`shared/fuzzy-picker` を使う）・`components/context-menu`。toast や popover の library は無い。
+- テーマは system / light / dark（`web/src/theme.ts`、`index.html` の描画前の script）。notes の面は既定が dark（hue 264）で、light を `:root[data-theme="light"]` で上書きする。ambient は面の下に敷く背景写真で、none・universe（既定）・sakura・village・fireworks・shrine の 6 種（`web/src/ambient.ts`、JPG で 1.7MB、写真ごとに blur と opacity を持つ）。どちらも app-shell の switcher で切り替える。
+- キーは library を使わず、画面ごとに `window` の capture phase の `keydown` で取り、`e.code` で判定する。
+- React 19.2.8、TanStack Query 5.102.8（staleTime 0、retry なし）、素の fetch、Tailwind 4.3.3、Vite 8.2.2。jotai・clsx・tailwind-merge・date-fns・lucide-react は notes では使っていない（日付は自作の `notes/dates.ts`、icon は inline の SVG）。
 
 ## ブラウザへの配り方
 
