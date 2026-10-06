@@ -123,6 +123,9 @@ node の type の出現回数（括弧は含む note 数）: paragraph 1512 (135
 ## 保存と競合
 
 - エディタは doc が変わったときだけ immutable な node を渡し、ページが 1 秒の debounce で `PUT /api/notes/{id}` に全文を送る（`web/src/notes/use-autosave.ts`）。送信は直列にし、失敗は 5 秒後に再試行する。pagehide では `keepalive` で flush する。
+- 409 以外の失敗（接続できない、404、500）はどれも同じ経路で、成功するまで 5 秒おきに再試行し続ける。上限も間隔の伸長も無い。ヘッダには「Failed to save — changes retry on next edit」を出す（`web/src/notes/use-autosave.ts:114-129`、`save-status.tsx:22-28`）。接続が切れたことを示す表示は無い。
+- 未保存の編集はメモリにしか無い。localStorage や IndexedDB に退避せず、`beforeunload` の確認も無い。server が居ない間にタブを閉じると、pagehide の flush が失敗して編集が失われる。
+- SSE や WebSocket は無い。
 - 楽観ロック: `expected_updated_at` が違えば 409。開いている note ならヘッダに「別の場所でこのノートが更新されました」と「最新を読み込む」（ローカルの編集を捨てる）を出し、開いていない note は左下に常駐の通知を出す。マージはしない。
 - 外の更新は focus のたびに取り直し、未保存が無いときだけ採用してエディタを再 mount する。
 - 削除と essay の status の切り替えは、先に flush して未保存が残れば中止する。
@@ -139,10 +142,14 @@ node の type の出現回数（括弧は含む note 数）: paragraph 1512 (135
 
 ## ブラウザへの配り方
 
-- monica desktop が起動時に thread で `monica_web::serve` を立てる（`crates/monica-desktop/src/lib.rs:170-202`）。release は `127.0.0.1:19280` 固定、dev は port を scan する。desktop が閉じている間は notes を開けない。
-- 認証は無い。`Host` が `127.0.0.1:<port>`・`localhost:<port>`・`monica.localhost:<port>`（と Tailscale の IP）のどれかでなければ 403 にする。コメントは「認証ではなく DNS rebinding 対策で、到達の制御は bind する interface で行う」（`crates/monica-web/src/lib.rs:82-120`）。
+- monica desktop が起動時に thread で `monica_web::serve` を立てる（`crates/monica-desktop/src/lib.rs:170-202`）。release は `127.0.0.1:19280` 固定、dev は 19281〜19299 を順に試し、埋まっていれば port 0 にする（`crates/monica-web/src/lib.rs:18-20, 782-793`）。desktop が閉じている間は notes を開けない。
+- bind に失敗すると error の log を出し、web server 無しで desktop を動かし続ける。retry も画面への通知も無い（`crates/monica-desktop/src/lib.rs:181-199`）。
+- 認証は無い。`Host` が `127.0.0.1:<port>`・`localhost:<port>`・`monica.localhost:<port>`（と Tailscale の IP）のどれかと完全一致しなければ、本文無しの 403 にする。静的ファイルを含む全 route に掛かる。コメントは「認証ではなく DNS rebinding 対策で、到達の制御は bind する interface で行う」（`crates/monica-web/src/lib.rs:82-120, 778`）。
+- Origin・`Sec-Fetch-Site`・CSRF token の照合も、CORS の層も無い。content-type を見ない状態変更の route がある（`POST /api/notes/essays`、`POST /api/notes/{id}/restore`、`PUT /api/notes/daily/{date}`、`DELETE /api/notes/{id}`、`POST /api/assets` など）。
 - Tailscale の IP が取れればそこにも bind して、tailnet のスマホから開けるようにしている（同 823-845）。tania には持ち込まない（map の決定）。
-- SPA は binary に埋め込み、dev では差し替えられる。dev の Vite は `/api` を backend に proxy する（`web/vite.config.ts`）。
+- SPA は rust-embed で binary に埋め込み、`$MONICA_HOME/web-dist` が directory として在れば request ごとにそちらを優先する（`crates/monica-web/src/lib.rs:28-30, 214-242`）。SPA の route は列挙で、未知の path は 404 になる。`/settings/` は client だけが受け付ける（同 759-775、`web/src/app.tsx:63`）。`index.html` と `/assets/*` に cache の header は無い。
+- dev の Vite（5174）は `/api` を backend に proxy する。backend の port は `target/monica-web-port` から読み、dev の backend が居なければ release の `http://monica.localhost:19280` に倒す。そのため Vite だけを動かすと release のデータに読み書きする（`web/vite.config.ts:7, 14-74`）。
+- 画面に notes の URL を開く menu や shortcut は無い。Tab の env に `MONICA_WEB_URL` を入れるだけ（`crates/monica-desktop/src/commands/terminal.rs:51-55`）。
 
 ## API と CLI
 
