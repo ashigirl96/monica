@@ -1,5 +1,5 @@
 import { ORPCError } from '@orpc/server'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 
 import type { Note } from './contract.ts'
 import type { Db } from './note.ts'
@@ -21,6 +21,15 @@ export function idNumber(id: string): number {
   return Number(id.slice(ID_PREFIX.length))
 }
 
+export function noteId(n: number): string {
+  return `${ID_PREFIX}${n}`
+}
+
+// GitHub の repo 名は大文字と小文字を区別しない。
+export function isRepo(repo: string) {
+  return eq(sql`lower(${note.repo})`, repo.toLowerCase())
+}
+
 export function undeletedNote(db: Db, id: string): NoteRow {
   const row = db
     .select()
@@ -34,7 +43,7 @@ export function undeletedNote(db: Db, id: string): NoteRow {
 // 種類ごとに NOT NULL の列は note の CHECK が守る。
 export function toNote(row: NoteRow): Note {
   const common = {
-    id: `${ID_PREFIX}${row.id}`,
+    id: noteId(row.id),
     date: row.date,
     content: JSON.parse(row.content),
     createdAt: row.createdAt,
