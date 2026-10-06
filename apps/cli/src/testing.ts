@@ -70,6 +70,7 @@ export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Gh
   })
   const jobLedger = createJobLedger({
     db,
+    home: home ?? ptydHome,
     systemJobs: [
       { name: 'task.sync', every: 5 * 60_000, run: () => taskLedger.syncInBackground() },
       {

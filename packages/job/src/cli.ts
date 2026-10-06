@@ -2,10 +2,14 @@ import type { ContractRouterClient } from '@orpc/contract'
 import { table } from '@tania/ui/table'
 
 import type {
+  AddOutput,
   contract,
   JobExecution,
   JobItem,
   ListOutput,
+  PauseOutput,
+  RemoveOutput,
+  ResumeOutput,
   RunOutput,
   Schedule,
   ShowOutput,
@@ -23,9 +27,22 @@ async function jobNames(
   }))
 }
 
+// cron 式で走るのはユーザーの Job だけ。
+async function userJobNames(
+  client: Client,
+  signal: AbortSignal,
+): Promise<{ value: string; description: string }[]> {
+  return (await client.job.list(undefined, { signal })).jobs
+    .filter((job) => job.schedule.type === 'cron')
+    .map((job) => ({ value: job.name, description: scheduleText(job.schedule) }))
+}
+
 export const completers = {
   show: { name: jobNames },
   run: { name: jobNames },
+  remove: { name: userJobNames },
+  pause: { name: userJobNames },
+  resume: { name: userJobNames },
 }
 
 export const formatters = {
@@ -43,19 +60,28 @@ export const formatters = {
     ])
   },
   show(job: ShowOutput): string {
+    // system の Job は shell を持たず、その Job Execution も exit code と log を持たない。
+    const { shell } = job
     const head = table([
-      ['NAME', 'SCHEDULE', 'STATE', 'NEXT'],
-      [job.name, scheduleText(job.schedule), job.state, nextText(job)],
+      ['NAME', 'SCHEDULE', 'STATE', 'NEXT', ...(shell ? ['TIMEOUT', 'CWD', 'COMMAND'] : [])],
+      [
+        job.name,
+        scheduleText(job.schedule),
+        job.state,
+        nextText(job),
+        ...(shell ? [msText(shell.timeoutMs), shell.cwd, shell.command] : []),
+      ],
     ])
     const executions =
       job.executions.length === 0
         ? 'No Job Executions'
         : table([
-            ['STARTED', 'DURATION', 'RESULT', 'ERROR'],
+            ['STARTED', 'DURATION', 'RESULT', ...(shell ? ['EXIT', 'LOG'] : []), 'ERROR'],
             ...job.executions.map((execution) => [
               localTime(execution.startedAt),
               durationText(execution),
               execution.result ?? 'running',
+              ...(shell ? [String(execution.exitCode ?? '-'), execution.logPath ?? '-'] : []),
               execution.error ?? '-',
             ]),
           ])
@@ -64,13 +90,32 @@ export const formatters = {
   run({ name, startedAt }: RunOutput): string {
     return `started ${name} at ${localTime(startedAt)}`
   },
+  add({ name, nextAt }: AddOutput): string {
+    return `added ${name}; ${nextRunText(nextAt)}`
+  },
+  remove({ name }: RemoveOutput): string {
+    return `removed ${name} with its Job Executions and logs`
+  },
+  pause({ name }: PauseOutput): string {
+    return `paused ${name}`
+  },
+  resume({ name, nextAt }: ResumeOutput): string {
+    return `resumed ${name}; ${nextRunText(nextAt)}`
+  },
 }
 
 function scheduleText(schedule: Schedule): string {
-  const { ms } = schedule
-  if (ms % 3_600_000 === 0) return `every ${ms / 3_600_000}h`
-  if (ms % 60_000 === 0) return `every ${ms / 60_000}m`
-  return `every ${ms / 1000}s`
+  return schedule.type === 'cron' ? schedule.expression : `every ${msText(schedule.ms)}`
+}
+
+function msText(ms: number): string {
+  if (ms % 3_600_000 === 0) return `${ms / 3_600_000}h`
+  if (ms % 60_000 === 0) return `${ms / 60_000}m`
+  return `${ms / 1000}s`
+}
+
+function nextRunText(nextAt: Date | null): string {
+  return nextAt ? `it runs next at ${localTime(nextAt)}` : 'it never runs'
 }
 
 function nextText({ nextAt }: Pick<JobItem, 'nextAt'>): string {

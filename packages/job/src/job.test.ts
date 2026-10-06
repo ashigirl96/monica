@@ -1,29 +1,19 @@
-import { Database } from 'bun:sqlite'
-import { afterEach, expect, mock, spyOn, test } from 'bun:test'
+import { afterEach, expect, mock, test } from 'bun:test'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { createRouterClient } from '@orpc/server'
 import { eq } from 'drizzle-orm'
-import { drizzle } from 'drizzle-orm/bun-sqlite'
-import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 
 import { jobExecution } from './schema.ts'
-import { createJobLedger, migrations, router, type SystemJob } from './server.ts'
+import { createJobLedger, router, type SystemJob } from './server.ts'
+import { captureInterval, inMemoryDb } from './testing.ts'
 
 afterEach(() => {
   mock.restore()
 })
 
 const MINUTE = 60_000
-
-function captureInterval() {
-  const captured: { tick?: () => void; ms?: number } = {}
-  spyOn(globalThis, 'setInterval').mockImplementation(((tick: () => void, ms: number) => {
-    Object.assign(captured, { tick, ms })
-    return 0
-  }) as unknown as typeof setInterval)
-  spyOn(globalThis, 'clearInterval').mockImplementation(() => undefined)
-  return captured
-}
 
 function controlledJob(name: string, every: number) {
   const executions: PromiseWithResolvers<void>[] = []
@@ -39,13 +29,6 @@ function controlledJob(name: string, every: number) {
   return { job, executions }
 }
 
-function inMemoryDb() {
-  const sqlite = new Database(':memory:')
-  const db = drizzle(sqlite)
-  migrate(db, { migrationsFolder: migrations.folder, migrationsTable: migrations.table })
-  return db
-}
-
 function setup({
   db = inMemoryDb(),
   jobs,
@@ -55,7 +38,13 @@ function setup({
 }) {
   const interval = captureInterval()
   const clock = { at: new Date(2026, 9, 6, 12, 0, 0).getTime() }
-  const jobLedger = createJobLedger({ db, systemJobs: jobs, now: () => new Date(clock.at) })
+  // system の Job は log を書かないので、home は作らない。
+  const jobLedger = createJobLedger({
+    db,
+    home: join(tmpdir(), 'tania-job-unused'),
+    systemJobs: jobs,
+    now: () => new Date(clock.at),
+  })
   const client = createRouterClient(router, { context: { db, jobLedger } })
   return {
     db,
@@ -112,6 +101,7 @@ test('a Job Execution that rejects is failed, and show gives the first line of i
     schedule: { type: 'every', ms: 5 * MINUTE },
     state: 'active',
     nextAt: new Date(2026, 9, 6, 12, 5, 0),
+    shell: null,
     executions: [
       {
         scheduledAt: new Date(2026, 9, 6, 12, 0, 0),
@@ -257,7 +247,7 @@ test('a Job Execution the Backend stopped in the middle of is left without a res
 
 test('each Job keeps only its latest 100 Job Executions, the running one among them', async () => {
   const sync = controlledJob('task.sync', 5 * MINUTE)
-  const other = controlledJob('other', 5 * MINUTE)
+  const other = controlledJob('task.other', 5 * MINUTE)
   const { db, jobLedger, client, advance } = setup({ jobs: [sync.job, other.job] })
   jobLedger.start()
   other.executions[0]!.resolve()
@@ -280,7 +270,7 @@ test('each Job keeps only its latest 100 Job Executions, the running one among t
 
   expect(startedAt('task.sync')).toHaveLength(100)
   expect(startedAt('task.sync')[0]).toEqual(new Date(2026, 9, 6, 12, 0, 5))
-  expect(startedAt('other')).toHaveLength(1)
+  expect(startedAt('task.other')).toHaveLength(1)
 })
 
 test('show and run refuse a name no Job has with NOT_FOUND', async () => {
@@ -288,4 +278,10 @@ test('show and run refuse a name no Job has with NOT_FOUND', async () => {
 
   await expect(client.show({ name: 'task.synk' })).rejects.toMatchObject({ code: 'NOT_FOUND' })
   await expect(client.run({ name: 'task.synk' })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+})
+
+test('createJobLedger refuses a system Job whose name has no ., which is kept apart from the names of user Jobs', () => {
+  expect(() => setup({ jobs: [controlledJob('sync', 5 * MINUTE).job] })).toThrow(
+    'the system Job sync needs a . in its name',
+  )
 })

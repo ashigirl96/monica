@@ -12,5 +12,5 @@ test('the latest job snapshot holds only the job tables', async () => {
     .at(-1)!
   const snapshot = await Bun.file(join(meta, latest)).json()
 
-  expect(Object.keys(snapshot.tables)).toEqual(['job_execution'])
+  expect(Object.keys(snapshot.tables)).toEqual(['job', 'job_execution'])
 })

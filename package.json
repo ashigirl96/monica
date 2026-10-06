@@ -24,6 +24,7 @@
       "@xterm/xterm": "6.1.0-beta.304",
       "clsx": "^2.1.1",
       "commander": "^14.0.3",
+      "croner": "^10.0.1",
       "drizzle-kit": "^0.31.11",
       "drizzle-orm": "^0.45.3",
       "drizzle-zod": "^0.8.3",

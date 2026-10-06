@@ -15,6 +15,7 @@
     "@orpc/contract": "catalog:",
     "@orpc/server": "catalog:",
     "@tania/ui": "workspace:*",
+    "croner": "catalog:",
     "drizzle-orm": "catalog:",
     "drizzle-zod": "catalog:",
     "zod": "catalog:"
