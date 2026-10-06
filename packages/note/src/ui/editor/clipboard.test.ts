@@ -2,17 +2,22 @@
 import { describe, expect, test } from 'bun:test'
 
 import { Slice } from 'prosemirror-model'
-import { EditorState, TextSelection } from 'prosemirror-state'
+import { AllSelection, EditorState, TextSelection } from 'prosemirror-state'
 import type { Transaction } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
 
+import fullDoc from '../../body/fixtures/full-doc.json'
+import { fromMarkdown, toMarkdown } from '../../body/index.ts'
 import { blockSelectionPlugin } from './block-selection.ts'
 import {
   BLOCKS_MIME,
   clipboardPlugin,
   containersFromDocJson,
+  type ParseMarkdown,
+  type RenderMarkdown,
   serializeBlocksPayload,
 } from './clipboard.ts'
+import { docFromJSON } from './create-editor.ts'
 import { selectBlocks } from './selection-state.ts'
 import { block, contentPos, docOf, heading, para } from './test-fixtures.ts'
 
@@ -71,7 +76,7 @@ describe('handlePaste と折りたたみ', () => {
   })
 })
 
-/** from_markdown が返す形の doc JSON を組む（blockContainer は attrs なし） */
+/** fromMarkdown が返す形の doc JSON を組む（blockContainer は attrs なし） */
 function mdDocJson(...contents: unknown[]): unknown {
   return {
     type: 'doc',
@@ -84,19 +89,15 @@ function mdDocJson(...contents: unknown[]): unknown {
   }
 }
 
-/**
- * markdown paste 用の stub view。同じ view / plugin へ複数回 paste できるようにして、
- * 応答順が入れ替わる連続 paste も再現できるようにしている。
- */
-function markdownPasteView(
+/** text/plain だけの paste を stub view で handlePaste に通し、dispatch を適用した state を返す。 */
+function pasteMarkdown(
   state: EditorState,
-  parseMarkdown: (markdown: string) => Promise<unknown>,
-) {
+  text: string,
+  parseMarkdown: ParseMarkdown,
+): EditorState {
   const plugin = clipboardPlugin({ parseMarkdown })
-  // paste 位置の保持は plugin state 側なので、state に登録した上で通す
-  const holder = { state: state.reconfigure({ plugins: [...state.plugins, plugin] }) }
+  const holder = { state }
   const view = {
-    isDestroyed: false,
     get state() {
       return holder.state
     },
@@ -104,17 +105,12 @@ function markdownPasteView(
       holder.state = holder.state.apply(tr)
     },
   } as unknown as EditorView
-  const pasteText = (text: string) => {
-    const event = {
-      clipboardData: { getData: (type: string) => (type === 'text/plain' ? text : '') },
-    } as unknown as ClipboardEvent
-    expect(plugin.props.handlePaste!.call(plugin, view, event, Slice.empty)).toBe(true)
-  }
-  return { view, paste: pasteText, current: () => holder.state }
+  const event = {
+    clipboardData: { getData: (type: string) => (type === 'text/plain' ? text : '') },
+  } as unknown as ClipboardEvent
+  expect(plugin.props.handlePaste!.call(plugin, view, event, Slice.empty)).toBe(true)
+  return holder.state
 }
-
-/** 保留中の promise すべてを決着させる（micro task を全部流す） */
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 /** blockGroup 直下の block の textContent 列 */
 function blockTexts(state: EditorState): string[] {
@@ -122,52 +118,8 @@ function blockTexts(state: EditorState): string[] {
   return [...Array(group.childCount).keys()].map((i) => group.child(i).textContent)
 }
 
-/**
- * para("1") の末尾へ "A" → "B" の順で paste し、変換の応答を逆順（B → A）で返してから
- * 決着後の block 並びを返す。応答順に依らず貼った順で着地することの検証用。
- */
-async function pasteOutOfOrder(makeDocJson: (text: string) => unknown): Promise<string[]> {
-  const doc = docOf(block('P', para('1')))
-  const state = EditorState.create({
-    doc,
-    selection: TextSelection.create(doc, contentPos(doc, 'P', 'end')),
-  })
-  const gates: Array<() => void> = []
-  const harness = markdownPasteView(
-    state,
-    (text) =>
-      // 応答を任意の順で返せるよう、resolve を溜めておく
-      new Promise((resolve) => {
-        gates.push(() => resolve(makeDocJson(text)))
-      }),
-  )
-  harness.paste('A')
-  harness.paste('B')
-  gates[1]?.()
-  gates[0]?.()
-  await settle()
-  return blockTexts(harness.current())
-}
-
-/**
- * markdown paste（text/plain のみ）を stub view で通し、async 変換の完了後の state を返す。
- * `meanwhile` は変換の応答前（＝ paste を握っている間）に呼ばれる。
- */
-async function pasteMarkdown(
-  state: EditorState,
-  text: string,
-  parseMarkdown: (markdown: string) => Promise<unknown>,
-  meanwhile?: (view: EditorView) => void,
-): Promise<EditorState> {
-  const harness = markdownPasteView(state, parseMarkdown)
-  harness.paste(text)
-  meanwhile?.(harness.view)
-  await settle()
-  return harness.current()
-}
-
 describe('markdown paste', () => {
-  test('空 paragraph 上の `### hoge` は heading block に置き換わる', async () => {
+  test('空 paragraph 上の `### hoge` は heading block に置き換わる', () => {
     const doc = docOf(block('P', para()))
     const state = EditorState.create({
       doc,
@@ -178,7 +130,7 @@ describe('markdown paste', () => {
       attrs: { level: 3 },
       content: [{ type: 'text', text: 'hoge' }],
     })
-    const after = await pasteMarkdown(state, '### hoge', () => Promise.resolve(parsed))
+    const after = pasteMarkdown(state, '### hoge', () => parsed)
     const group = after.doc.child(0)
     expect(group.childCount).toBe(1)
     const content = group.child(0).child(0)
@@ -188,7 +140,7 @@ describe('markdown paste', () => {
     expect(group.child(0).attrs.id).not.toBeNull()
   })
 
-  test('単一 paragraph は block を割らずカーソル位置へ inline 挿入する', async () => {
+  test('単一 paragraph は block を割らずカーソル位置へ inline 挿入する', () => {
     const doc = docOf(block('P', para('ab')))
     const state = EditorState.create({
       doc,
@@ -198,7 +150,7 @@ describe('markdown paste', () => {
       type: 'paragraph',
       content: [{ type: 'text', text: 'bold', marks: [{ type: 'bold' }] }],
     })
-    const after = await pasteMarkdown(state, '**bold**', () => Promise.resolve(parsed))
+    const after = pasteMarkdown(state, '**bold**', () => parsed)
     const group = after.doc.child(0)
     expect(group.childCount).toBe(1)
     expect(group.child(0).child(0).textContent).toBe('aboldb')
@@ -211,7 +163,7 @@ describe('markdown paste', () => {
     ).toEqual(['bold'])
   })
 
-  test('複数 block はカーソル block の直後に挿入される', async () => {
+  test('複数 block はカーソル block の直後に挿入される', () => {
     const doc = docOf(block('P', para('1')))
     const state = EditorState.create({
       doc,
@@ -221,31 +173,31 @@ describe('markdown paste', () => {
       { type: 'bullet', content: [{ type: 'text', text: 'a' }] },
       { type: 'bullet', content: [{ type: 'text', text: 'b' }] },
     )
-    const after = await pasteMarkdown(state, '- a\n- b', () => Promise.resolve(parsed))
+    const after = pasteMarkdown(state, '- a\n- b', () => parsed)
     expect(blockTexts(after)).toEqual(['1', 'a', 'b'])
   })
 
-  test('変換に失敗したら素のテキスト挿入に縮退する', async () => {
+  test('schema に合わない doc が返ったら素のテキストで入れる', () => {
     const doc = docOf(block('P', para('x')))
     const state = EditorState.create({
       doc,
       selection: TextSelection.create(doc, contentPos(doc, 'P', 'end')),
     })
-    const after = await pasteMarkdown(state, '## raw', () => Promise.reject(new Error('down')))
+    const after = pasteMarkdown(state, '## raw', () => mdDocJson({ type: 'heading', content: 'x' }))
     expect(after.doc.child(0).child(0).textContent).toBe('x## raw')
   })
 
-  test('markdown として空になる paste は素のテキストで入れる', async () => {
+  test('markdown として空になる paste は素のテキストで入れる', () => {
     const doc = docOf(block('P', para('ab')))
     const state = EditorState.create({
       doc,
       selection: TextSelection.create(doc, contentPos(doc, 'P', 1)),
     })
-    const after = await pasteMarkdown(state, '  ', () => Promise.resolve(mdDocJson()))
+    const after = pasteMarkdown(state, '  ', () => mdDocJson())
     expect(after.doc.child(0).child(0).textContent).toBe('a  b')
   })
 
-  test('非空の text 選択は block 挿入でも置換される', async () => {
+  test('非空の text 選択は block 挿入でも置換される', () => {
     const doc = docOf(block('P', para('aaa BBB ccc')))
     const start = contentPos(doc, 'P', 'start')
     const state = EditorState.create({
@@ -256,55 +208,135 @@ describe('markdown paste', () => {
       { type: 'bullet', content: [{ type: 'text', text: 'a' }] },
       { type: 'bullet', content: [{ type: 'text', text: 'b' }] },
     )
-    const after = await pasteMarkdown(state, '- a\n- b', () => Promise.resolve(parsed))
+    const after = pasteMarkdown(state, '- a\n- b', () => parsed)
     expect(blockTexts(after)).toEqual(['aaa  ccc', 'a', 'b'])
-  })
-
-  test('変換を待つ間に編集・カーソル移動しても貼り先がずれない', async () => {
-    const doc = docOf(block('A', para('one')), block('B', para('two')))
-    const state = EditorState.create({
-      doc,
-      selection: TextSelection.create(doc, contentPos(doc, 'A', 'end')),
-    })
-    const parsed = mdDocJson({
-      type: 'heading',
-      attrs: { level: 3 },
-      content: [{ type: 'text', text: 'hoge' }],
-    })
-    const after = await pasteMarkdown(
-      state,
-      '### hoge',
-      () => Promise.resolve(parsed),
-      (view) => {
-        // 前方に文字を入れて位置をずらし、さらにカーソルを別 block へ移す
-        view.dispatch(view.state.tr.insertText('X', contentPos(view.state.doc, 'A', 'start')))
-        const bStart = contentPos(view.state.doc, 'B', 'start')
-        view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, bStart)))
-      },
-    )
-    expect(blockTexts(after)).toEqual(['Xone', 'hoge', 'two'])
-  })
-
-  test('応答が前後しても inline paste は貼った順に並ぶ', async () => {
-    const texts = await pasteOutOfOrder((text) =>
-      mdDocJson({ type: 'paragraph', content: [{ type: 'text', text }] }),
-    )
-    expect(texts).toEqual(['1AB'])
-  })
-
-  test('応答が前後しても block paste は貼った順に積まれる', async () => {
-    const texts = await pasteOutOfOrder((text) =>
-      mdDocJson(
-        { type: 'bullet', content: [{ type: 'text', text }] },
-        { type: 'bullet', content: [{ type: 'text', text: `${text}2` }] },
-      ),
-    )
-    expect(texts).toEqual(['1', 'A', 'A2', 'B', 'B2'])
   })
 
   test('containersFromDocJson は doc 形でない JSON を弾く', () => {
     expect(containersFromDocJson({ type: 'paragraph' })).toBeNull()
     expect(containersFromDocJson(null)).toBeNull()
     expect(containersFromDocJson(mdDocJson())).toEqual([])
+  })
+})
+
+const noteName = (noteId: string) => (noteId === 'note-42' ? 'Target Note' : null)
+
+const fakeElement = () => ({
+  nodeType: 1,
+  innerHTML: '',
+  appendChild: (child: unknown) => child,
+  append: () => {},
+  setAttribute: () => {},
+})
+
+// copy の handler は text/html を document で組むが、bun test には DOM が無いので、組めるだけの偽物を置く。
+function withFakeDocument(run: () => void): void {
+  const fake = {
+    createElement: fakeElement,
+    createElementNS: fakeElement,
+    createDocumentFragment: fakeElement,
+    createTextNode: () => ({ nodeType: 3 }),
+  }
+  Object.defineProperty(globalThis, 'document', { value: fake, configurable: true })
+  try {
+    run()
+  } finally {
+    Reflect.deleteProperty(globalThis, 'document')
+  }
+}
+
+/** 文字選択の copy と drag が text/plain に載せる文字列。 */
+function copiedText(state: EditorState, renderMarkdown: RenderMarkdown, slice: Slice): string {
+  const plugin = clipboardPlugin({ renderMarkdown })
+  const view = { state } as unknown as EditorView
+  return plugin.props.clipboardTextSerializer!.call(plugin, slice, view)
+}
+
+describe('markdown の copy と paste', () => {
+  test('block を選んで copy すると、選んだ block の markdown が text/plain に載る', () => {
+    const plugin = clipboardPlugin({ renderMarkdown: (json) => toMarkdown(json, noteName) })
+    const base = EditorState.create({
+      doc: docFromJSON(fullDoc),
+      plugins: [blockSelectionPlugin()],
+    })
+    const view = { state: base.apply(selectBlocks(base.tr, 'b1', 'b13')) } as unknown as EditorView
+    const data = new Map<string, string>()
+    const event = {
+      clipboardData: { setData: (type: string, value: string) => data.set(type, value) },
+      preventDefault: () => {},
+    } as unknown as ClipboardEvent
+
+    withFakeDocument(() => plugin.props.handleDOMEvents!.copy!.call(plugin, view, event))
+
+    expect(data.get('text/plain')).toBe(toMarkdown(fullDoc, noteName))
+    expect(data.has(BLOCKS_MIME)).toBe(true)
+  })
+
+  test('全種類の block を含む本文を選んで copy すると、markdown が text/plain に載る', () => {
+    const state = EditorState.create({ doc: docFromJSON(fullDoc) })
+
+    const text = copiedText(
+      state,
+      (json) => toMarkdown(json, noteName),
+      new AllSelection(state.doc).content(),
+    )
+
+    expect(text).toBe(toMarkdown(fullDoc, noteName))
+  })
+
+  test('文字を選んで copy すると、選んだ範囲だけが markdown で載る', () => {
+    const doc = docOf(block('H', heading('Title', 2)), block('P', para('body text')))
+    const selection = TextSelection.create(
+      doc,
+      contentPos(doc, 'H', 'start'),
+      contentPos(doc, 'P', 4),
+    )
+
+    const text = copiedText(EditorState.create({ doc, selection }), toMarkdown, selection.content())
+
+    expect(text).toBe('## Title\n\nbody')
+  })
+
+  test('他の app の markdown を貼ると block になり、copy すると同じ markdown に戻る', () => {
+    const markdown = [
+      '## Plan',
+      '- [ ] open\n- [x] done\n- bullet\n    1. nested',
+      '> [!tip]\n> careful',
+      '```ts\nconst a = 1\n```',
+      '| a | b |\n| --- | --- |\n| **c** | `d` [[note-42]] |',
+      '---',
+      '![](/api/assets/x.png)',
+      '![[note-7#^blk-a]]',
+      '![[note-9]]',
+    ].join('\n\n')
+    const doc = docOf(block('P', para()))
+    const state = EditorState.create({
+      doc,
+      selection: TextSelection.create(doc, contentPos(doc, 'P', 'start')),
+    })
+
+    const pasted = pasteMarkdown(state, markdown, fromMarkdown)
+    const types: string[] = []
+    pasted.doc.child(0).forEach((container) => types.push(container.child(0).type.name))
+
+    expect(types).toEqual([
+      'heading',
+      'todo',
+      'todo',
+      'bullet',
+      'callout',
+      'codeBlock',
+      'table',
+      'divider',
+      'image',
+      'syncedBlock',
+      'syncedBlock',
+    ])
+    expect(pasted.doc.child(0).child(9).child(0).attrs).toEqual({
+      noteId: 'note-7',
+      blockIds: ['blk-a'],
+    })
+    expect(pasted.doc.child(0).child(10).child(0).attrs).toEqual({ noteId: 'note-9', blockIds: [] })
+    expect(copiedText(pasted, toMarkdown, new AllSelection(pasted.doc).content())).toBe(markdown)
   })
 })

@@ -1,5 +1,6 @@
 import type { RefObject } from 'react'
 
+import { fromMarkdown, toMarkdown } from '../../body/index.ts'
 import type { Note } from '../../contract.ts'
 import { BlockEditor, type BlockEditorHandle } from '../editor/block-editor.tsx'
 
@@ -25,6 +26,8 @@ export function NoteBlockEditor({
       autoFocus={autoFocus}
       onDocChange={onDocChange}
       handleRef={handleRef}
+      renderMarkdown={toMarkdown}
+      parseMarkdown={fromMarkdown}
       className="min-h-[70dvh] pt-4 pb-[40dvh]"
     />
   )

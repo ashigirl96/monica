@@ -24,7 +24,15 @@ monica の `shared/block-editor` を `src/ui/editor/` に振る舞いを変え�
 ### 依存
 
 - `prosemirror-*` の 7 つ（state・model・view・keymap・inputrules・history・commands）を catalog から直に入れる。Milkdown は入れない。monica が使っていた `@milkdown/kit/prose/*` は `prosemirror-*` を `export *` するだけだった。
-- 外への import は `react`・`prosemirror-*`・note の `contract.ts` と `ui/routes.ts` だけ。
+- 外への import は `react`・`prosemirror-*`・note の `contract.ts`・`body`・`ui/routes.ts` だけ。テストは body の fixture と markdown の変換も import する。
+
+### markdown の copy と paste
+
+- `NoteBlockEditor` は `renderMarkdown` に `@tania/note/body` の `toMarkdown` を、`parseMarkdown` に `fromMarkdown` を渡す。どちらも手元で同期に呼ぶ。
+- copy は text/plain に markdown を載せる。block 選択の copy は選んだ block を、文字選択の copy と drag は選んだ範囲の slice を書き出す。block 選択の copy は、ほかに `BLOCKS_MIME` と text/html も載せる。
+- paste は、text/html を持たない text/plain だけを markdown として読む。code block の中では読まない。読んだ doc が schema に合わなければ素のテキストで入れ、paragraph 1 つだけなら block を割らずにカーソル位置へ入れる。
+- monica は変換を Backend に頼んでいたので、copy に備えて選択が変わるたびに 150ms 後に変換を先読みして cache し、paste は変換を待つ間の貼り先を plugin state で追っていた。手元で同期に呼べるので、どちらも持ち込まない。
+- ui は Note Mention の表示名をまだ引かない（`resolveNoteMention` を渡していない）ので、`toMarkdown` に表示名を渡さず、`[[note-N]]` で書き出す。
 
 ### node 型と plugin を減らせない理由
 
@@ -57,6 +65,7 @@ monica の `shared/block-editor` を `src/ui/editor/` に振る舞いを変え�
 - `bun test` のままで、DOM の環境は入れない。`EditorState` だけで回し、`EditorView` は型キャストした最小のモックで代える。
 - monica のテスト 11 本と `test-fixtures.ts` を移してあり、回帰の網にする。
 - 保存済みの本文を開けることは、`src/body/fixtures/full-doc.json`（全 node 型を持つ）を `docFromJSON` に通し、block がすべて残ることで確かめる。
+- markdown の copy と paste は、copy の handler・`clipboardTextSerializer`・`handlePaste` を最小のモックの view で呼んで確かめる。block 選択の copy は text/html を `document` で組むので、そのテストの間だけ組めるだけの偽の `document` を置く。
 - `src/body/fixtures/unknown-nodes.json` はエディタのテストに使わない。server が知らない node を読み飛ばすことを確かめる fixture で、schema に無い node（`aiHint`・`chart`）と mark（`highlight`）を持つので、エディタでは monica と同じく空の doc になる。monica の本文に出てくる node と mark は、どれも schema にある。
 
 ## 画面

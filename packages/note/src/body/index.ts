@@ -1,4 +1,6 @@
+export { fromMarkdown } from './from-markdown.ts'
 export { preview } from './preview.ts'
+export { toMarkdown } from './to-markdown.ts'
 
 /** エディタの schema を満たす最小の doc。 */
 export const EMPTY_DOC = {
