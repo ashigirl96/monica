@@ -27,6 +27,9 @@ export const workbenchClientAtom = atom<WorkbenchClient | null>(null)
 
 export const layoutAtom = atom<Layout | null>(null)
 
+// workbench は誰が Runspace を所有するかを知らないので、閉じて空になった所有された Runspace は slot に渡す（ADR-0005）。
+export const lastTabClosedAtom = atom<((runspaceId: string) => void) | null>(null)
+
 export const terminalFocusRequestAtom = atom(0)
 
 function clientOf(get: Getter): WorkbenchClient {
@@ -367,29 +370,47 @@ function detachTab(tab: Tab) {
   terminalDetach(terminalSessionId).catch((e: unknown) => warnFailed('terminal detach', e))
 }
 
+const EXIT_POLL_MS = 50
+const EXIT_WAIT_MS = 3000
+
+// Agent Session は Backend が ptyd の Exit を記録したときに終わるので、その前に Task の close を頼むと、
+// 終わらせた claude が live な Run に見えて guard に止められる。
+async function untilExitRecorded(get: Getter, terminalSessionId: string) {
+  for (let waited = 0; waited < EXIT_WAIT_MS; waited += EXIT_POLL_MS) {
+    const listed = await clientOf(get).terminalSession.list()
+    if (!listed.some((s) => s.id === terminalSessionId && !isDeadStatus(s.status))) return
+    await new Promise((resolve) => setTimeout(resolve, EXIT_POLL_MS))
+  }
+}
+
 async function closeTab(
   get: Getter,
   set: Setter,
   { runspace, tab }: TabInRunspace,
-  afterClose?: () => void,
+  shell: 'kept' | 'ending',
 ) {
+  // 空になったかは close の transaction で決まる。読み直した layout では、間に Tab を外へ移した分と区別できない。
+  let emptiedRunspaceId: string | null = null
   try {
-    await clientOf(get).tab.close({ id: tab.id })
+    emptiedRunspaceId = (await clientOf(get).tab.close({ id: tab.id })).emptiedRunspaceId
   } catch (e) {
     if (!isGone(e)) throw e
   }
-  afterClose?.()
+  if (shell === 'kept') detachTab(tab)
   if (activeTabOf(get, runspace)?.id === tab.id) {
     const rest = runspace.tabs.filter((t) => t.id !== tab.id)
     const next = rest[Math.min(runspace.tabs.indexOf(tab), rest.length - 1)]
     if (next) set(activeTabIdsAtom, (prev) => ({ ...prev, [runspace.id]: next.id }))
   }
   await set(reloadAtom)
+  if (!emptiedRunspaceId) return
+  if (shell === 'ending') await untilExitRecorded(get, tab.terminalSessionId)
+  get(lastTabClosedAtom)?.(emptiedRunspaceId)
 }
 
 export const closeTerminalTabAtom = action(async (get, set, tabId?: string) => {
   const found = tabId ? findTab(get, tabId) : frontTab(get)
-  if (found) await closeTab(get, set, found, () => detachTab(found.tab))
+  if (found) await closeTab(get, set, found, 'kept')
 })
 
 // 接続中の Tab は Exit で閉じるので、閉じ終わるまでの間も終わった印を出さない。
@@ -419,7 +440,7 @@ export const tabExitedAtom = action(
     if (found.tab.pinned) return
     set(closingTabIdsAtom, (prev) => new Set(prev).add(tabId))
     try {
-      await closeTab(get, set, found)
+      await closeTab(get, set, found, 'ending')
     } finally {
       set(closingTabIdsAtom, (prev) => new Set([...prev].filter((id) => id !== tabId)))
     }
@@ -480,7 +501,7 @@ export const terminateTabTerminalSessionAtom = action(async (get, set, tabId: st
   await clientOf(get).terminalSession.terminate({ id: found.tab.terminalSessionId })
   releaseTabConnection(tabId)
   set(markEndedAtom, found.tab.terminalSessionId)
-  await closeTab(get, set, found)
+  await closeTab(get, set, found, 'ending')
 })
 
 function cycle<T>(items: T[], current: T | null | undefined, step: 1 | -1): T | undefined {

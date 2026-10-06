@@ -39,7 +39,7 @@ export async function inspectWorktree(
   )
   const refusals: CloseRefusal[] = []
   if (present && (await git(path, 'status', '--porcelain', '--untracked-files=normal')) !== '') {
-    refusals.push({ kind: 'uncommitted_changes' })
+    refusals.push({ kind: 'uncommitted_changes', worktree: path })
   }
   if (branchExists && (await hasUnpublishedCommits(checkout, branch, mergedHeads))) {
     refusals.push({ kind: 'unpublished_commits', branch })

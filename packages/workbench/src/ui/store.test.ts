@@ -4,6 +4,8 @@ import { basename, join } from 'node:path'
 
 import type { Atom, Store } from 'jotai'
 
+import type { Tab, TerminalSession } from '../contract.ts'
+
 // Shell の command は Tauri の外では呼べないので、呼ばれた command だけを記録する。
 const shellCalls: { command: string; args: Record<string, unknown> }[] = []
 const tauriCore = await import('@tauri-apps/api/core')
@@ -36,6 +38,8 @@ const {
   createTerminalTabAtom,
   cycleRunspaceAtom,
   deadTabsAtom,
+  lastTabClosedAtom,
+  layoutAtom,
   terminateTerminalSessionAtom,
   moveActiveRunspaceAtom,
   moveTabToRunspaceAtom,
@@ -70,6 +74,18 @@ function bench() {
   const store = createStore()
   store.set(workbenchClientAtom, () => backend.client)
   return { ...backend, store }
+}
+
+type Backend = ReturnType<typeof bench>
+
+function ownedRunspace({ db, workbenchLedger }: Backend) {
+  return db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work/bench' }))
+}
+
+function lastTabClosedCalls(store: Store): string[] {
+  const calls: string[] = []
+  store.set(lastTabClosedAtom, () => (runspaceId: string) => void calls.push(runspaceId))
+  return calls
 }
 
 function until<T>(store: Store, atom: Atom<T>, done: (value: T) => boolean): Promise<T> {
@@ -154,6 +170,138 @@ test('closing the last Tab of the last Runspace leaves a fresh Runspace', async 
   const { runspaces } = await client.layout.get()
   expect(runspaces.map((r) => r.id)).toEqual([expect.not.stringMatching(before.id)])
   expect(store.get(activeRunspaceAtom)?.id).toBe(runspaces[0]!.id)
+})
+
+// Exit は ptyd から Shell と Backend の両方に届く。
+test.each([
+  ['closed', ({ store }: Backend, tab: Tab) => store.set(closeTerminalTabAtom, tab.id)],
+  [
+    'exited',
+    ({ ptyd, store }: Backend, tab: Tab) => {
+      ptyd.exit(tab.terminalSessionId, 0)
+      return store.set(tabExitedAtom, tab.id, tab.terminalSessionId, 0)
+    },
+  ],
+  [
+    'terminated',
+    async ({ ptyd, store }: Backend, tab: Tab) => {
+      const terminating = store.set(terminateTabTerminalSessionAtom, tab.id)
+      await ptyd.received((op) => op.op === 'terminate' && op.session_id === tab.terminalSessionId)
+      ptyd.exit(tab.terminalSessionId, null)
+      await terminating
+    },
+  ],
+])(
+  'the last Tab of an owned Runspace, %s, hands the Runspace to the slot and leaves it with no Tabs',
+  async (_, close) => {
+    const backend = bench()
+    const { client, store, settled } = backend
+    const runspaceId = ownedRunspace(backend)
+    const tab = await client.tab.open({ runspaceId, ...size })
+    await settled(tab.terminalSessionId)
+    await store.set(reloadAtom)
+    const calls = lastTabClosedCalls(store)
+
+    await close(backend, tab)
+
+    expect(calls).toEqual([runspaceId])
+    expect((await client.layout.get()).runspaces).toMatchObject([
+      { id: runspaceId, owned: true, tabs: [] },
+    ])
+  },
+)
+
+test('the last Tab of an owned Runspace, terminated, reaches the slot only once the Backend records the exit, so the claude stopped there is no longer live', async () => {
+  const backend = bench()
+  const { client, store, ptyd, settled } = backend
+  const runspaceId = ownedRunspace(backend)
+  const tab = await client.tab.open({ runspaceId, ...size })
+  await settled(tab.terminalSessionId)
+  await store.set(reloadAtom)
+  const listedWhenCalled: Promise<TerminalSession[]>[] = []
+  store.set(
+    lastTabClosedAtom,
+    () => () => void listedWhenCalled.push(client.terminalSession.list()),
+  )
+
+  const terminating = store.set(terminateTabTerminalSessionAtom, tab.id)
+  await until(store, layoutAtom, (layout) => layout?.runspaces[0]?.tabs.length === 0)
+  ptyd.exit(tab.terminalSessionId, null)
+  await terminating
+
+  expect(listedWhenCalled).toHaveLength(1)
+  expect((await listedWhenCalled[0])!.map((s) => s.id)).not.toContain(tab.terminalSessionId)
+})
+
+test('a Tab closed while others stay, the last Tab moved out, and the last Tab of a Runspace no one owns hand nothing to the slot', async () => {
+  const backend = bench()
+  const { client, store } = backend
+  const owned = ownedRunspace(backend)
+  const a = await client.tab.open({ runspaceId: owned, ...size })
+  const b = await client.tab.open({ runspaceId: owned, ...size })
+  const other = await client.runspace.create(size)
+  const lone = await client.runspace.create(size)
+  await store.set(reloadAtom)
+  const calls = lastTabClosedCalls(store)
+
+  await store.set(closeTerminalTabAtom, a.id)
+  await store.set(moveTabToRunspaceAtom, b.id, other.runspaceId)
+  await store.set(closeTerminalTabAtom, lone.tab.id)
+
+  expect(calls).toEqual([])
+  expect((await client.layout.get()).runspaces).toMatchObject([
+    { id: owned, tabs: [] },
+    { id: other.runspaceId, tabs: [{ id: other.tab.id }, { id: b.id }] },
+  ])
+})
+
+test('the last Tab moved out of an owned Runspace while a Tab closed there reloads hands nothing to the slot', async () => {
+  const backend = bench()
+  const { db, workbenchLedger, client, store } = backend
+  const owned = ownedRunspace(backend)
+  const closed = await client.tab.open({ runspaceId: owned, ...size })
+  const moved = await client.tab.open({ runspaceId: owned, ...size })
+  const other = await client.runspace.create(size)
+  await store.set(reloadAtom)
+  const calls = lastTabClosedCalls(store)
+  // tab.close が返ってから読み直すまでの間に、CLI の Attach が残りの Tab を外へ移す。
+  const tabMovingAfterClose = new Proxy(client.tab, {
+    get: (target, key) =>
+      key === 'close'
+        ? async (input: { id: string }) => {
+            const output = await target.close(input)
+            db.transaction((tx) => workbenchLedger.moveTab(tx, moved.id, other.runspaceId))
+            return output
+          }
+        : Reflect.get(target, key),
+  })
+  store.set(
+    workbenchClientAtom,
+    () =>
+      new Proxy(client, {
+        get: (target, key) => (key === 'tab' ? tabMovingAfterClose : Reflect.get(target, key)),
+      }),
+  )
+
+  await store.set(closeTerminalTabAtom, closed.id)
+
+  expect(calls).toEqual([])
+  expect((await client.layout.get()).runspaces).toMatchObject([{ id: owned, tabs: [] }, {}])
+})
+
+test('a new Tab in an owned Runspace with no Tabs starts in its cwd and becomes active', async () => {
+  const backend = bench()
+  const { client, store } = backend
+  const runspaceId = ownedRunspace(backend)
+  await store.set(reloadAtom)
+  store.set(activateRunspaceAtom, runspaceId)
+  expect(store.get(activeTerminalTabAtom)).toBeNull()
+
+  await store.set(createTerminalTabAtom)
+
+  const { tabs } = (await client.layout.get()).runspaces.find((r) => r.id === runspaceId)!
+  expect(tabs).toMatchObject([{ cwd: '/work/bench' }])
+  expect(store.get(activeTerminalTabAtom)?.id).toBe(tabs[0]!.id)
 })
 
 test("dragging a Runspace onto another puts it in that one's place", async () => {

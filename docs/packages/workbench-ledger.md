@@ -14,7 +14,7 @@ runspace.remove            { id }                      中の Tab の session �
 runspace.move              { id, index }
 tab.open                   { runspaceId, cwd?, index?, rows, cols, terminalSessionId? } → Tab
 tab.respawn                { id, rows, cols } → Tab
-tab.close                  { id }                      session は detached になる
+tab.close                  { id } → { emptiedRunspaceId }  session は detached になる
 tab.move                   { id, runspaceId, index }
 tab.setCwd                 { id, cwd }
 tab.pin / tab.unpin        { id }
@@ -34,7 +34,7 @@ changes                    → { type: "layout" } | { type: "terminalSession", i
 
 ## Runspace と Tab
 
-所有されていない Runspace は常に Tab を 1 つ以上持ち、Backend がそれを守る（`GLOSSARY.md` の Runspace）。所有された Runspace（Bench）は Tab が 0 でも残り、Workbench の操作では消えない。`runspace.remove` は `CONFLICT` で断り、GUI に remove は無い。消すのは作った側の `removeRunspace`（Task の close、slice 5）だけ（ADR-0012）。
+所有されていない Runspace は常に Tab を 1 つ以上持ち、Backend がそれを守る（`GLOSSARY.md` の Runspace）。所有された Runspace（Bench）は Tab が 0 でも残り、Workbench の操作では消えない。`runspace.remove` は `CONFLICT` で断り、GUI に remove は無い。消すのは作った側の `removeRunspace`（Task の close、slice 5）だけ（ADR-0012）。webview で Bench の最後の Tab を閉じたときも、workbench は消さず、slot で task に Task の close を頼むだけ（下の項目）。
 
 - `sort_order` は、Runspace と Tab を足す・移す・消すたびに、同じ transaction の中で兄弟を 0..n-1 に振り直す。`runspace.create` と `tab.open` の `index` を省けば末尾に足す。webview は active の次を渡し（monica どおり）、CLI と Task は省く。
 - Tab の title は Workbench Ledger に持たない。OSC 0/2 の title は webview の memory にだけ持ち、再 attach のときは transcript の replay に含まれる OSC で戻る。表示は monica どおり title、無ければ cwd の末尾、それも無ければ `Terminal`。title はよくある zsh の theme なら command のたびに変わり、Workbench Ledger に書くとそのたびに `changes` と `layout.get` が往復するため。
@@ -50,6 +50,8 @@ changes                    → { type: "layout" } | { type: "terminalSession", i
 - webview は header の Tab を sidebar の Runspace の行に drop すると、`tab.move` でその Runspace の末尾へ移す（monica に無い操作）。
 - 手前に見えていた Tab が、layout を読み直したら別の Runspace に居れば、画面も移った先へついていく。drop、pin の切り出し、Attach（CLI と picker）のどれで移っても同じ。CLI の `tania task attach` は手前の Tab で打つことが多く、ついていかないと打った端末が画面から消えるため。
 - shell が終わった Tab は webview が閉じる。接続中の Tab で Shell の Exit を受けたら、webview が `tab.close` を呼ぶ（monica どおり）。Backend は行を exited にするだけで、Tab を閉じない。exit の時点で接続していなかった Tab と、lost / failed の Tab は、overlay を出したまま `tab.respawn` か `tab.close` を待つ。pin された Tab は例外で、webview は閉じず、Backend が張り直す（「pin」の節）。
+- `tab.close` の `emptiedRunspaceId` は、その close で Tab が 0 になって残った所有された Runspace の id で、それ以外は null。webview は Tab を閉じ（×、接続中の Tab の Exit、Tab のメニューの Terminate）、`emptiedRunspaceId` があれば、layout を読み直した後でその id を `Workbench` の slot `onLastTabClosed` に渡す。0 になったかを close の transaction で決めるのは、読み直した layout では、close の後で読み直す前に Tab を外へ移した分（CLI の Attach など）と区別できないため。Exit と Terminate で閉じたときは、Backend がその Terminal Session の Exit を記録して一覧から消すのを待ってから（`terminalSession.list` を 50ms おきに、最大 3 秒）渡す。Agent Session は Exit の記録で終わるので、その前に Task の close を頼むと、終わらせた claude が live な Run に見えて guard に止められるため。task の ui がそれを Task の close にする（`docs/packages/task-ledger.md` の「close と reopen」）。Tab を別の Runspace へ移して 0 になったとき（header の drag、CLI と picker の Attach）は呼ばない。閉じたのではないため。Backend の `changes` からは判定しない。`layout` の合図は Tab がどの経路で減ったかを持たず、`run` と `attach` は Bench を作ってから Tab を開く・移すので、Tab の 0 は普段の操作でも起きるため。
+- active な Runspace に Tab が無ければ、webview は content に「New shell in <cwd の末尾>」のボタンを Tab の overlay と同じ見た目で出し、押すと Runspace の cwd で `tab.open` する。所有されていない Runspace は常に Tab を持つので、この画面は Bench にだけ出る。close の guard で残った Bench と、close が終わるまでの間に見える。
 
 ## Terminal Session の起動と終了
 
