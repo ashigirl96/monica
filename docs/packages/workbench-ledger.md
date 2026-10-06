@@ -32,6 +32,10 @@ changes                    → { type: "layout" } | { type: "terminalSession", i
 - `owned` は他の domain が `createRunspace(tx, { cwd })` で作った Runspace の印（ADR-0012）。規則は「Runspace と Tab」と「pin」の節にある。
 - `terminal_session.shell` は Backend の起動時に 1 回決める。`$SHELL`、無ければ `os.userInfo().shell`、それも無ければ `/bin/zsh`。reconcile で ptyd から取り込んだ行は `""`。
 
+## createWorkbenchLedger
+
+`createWorkbenchLedger({ db, home, ptydPath, notify, nameAgentSession })`。`ptydPath` は spawn する ptyd の場所（ADR-0011）。`notify` と `nameAgentSession` は通知のための口（`docs/packages/notifications.md`）。`start()` は ptyd に繋ぎ（無ければ spawn、版違いは入れ替え）、reconcile する（ADR-0011）。
+
 ## Runspace と Tab
 
 所有されていない Runspace は常に Tab を 1 つ以上持ち、Backend がそれを守る（`GLOSSARY.md` の Runspace）。所有された Runspace（Bench）は Tab が 0 でも残り、Workbench の操作では消えない。`runspace.remove` は `CONFLICT` で断り、GUI に remove は無い。消すのは作った側の `removeRunspace`（Task の close、slice 5）だけ（ADR-0012）。webview で Bench の最後の Tab を閉じたときも、workbench は消さず、slot で task に Task の close を頼むだけ（下の項目）。
@@ -61,6 +65,16 @@ ptyd への Create・Write・Terminate は、行を書いた transaction の後�
 - `runspace.remove`、`terminalSession.terminate`、他の domain の `removeRunspace` も、Terminate を後ろで送って返る。Terminate は接続が切れても繋ぎ直した ptyd に送り直し、失敗は stderr に出す。
 - reconcile は、Create をまだ送っていない行を、ptyd の List に無くても lost にしない（ADR-0011 の規則の例外）。Create を送った後で応答の前に接続が切れた行は、ADR-0011 どおり reconcile が決める。
 - webview は Terminal Session が `starting` の間は attach せず、`running` になった合図（`{ type: "terminalSession", id }`）で attach する。ptyd に session が無いうちに attach すると失敗し、lost と表示して繋ぎ直さないため。
+- Terminal Session の行の状態機械、Create をまだ送っていない集合、transaction の後の Create・Write・Terminate、張り直し（`tab.respawn` と pin）は `packages/workbench/src/terminal-session.ts` に集め、router の handler も他の domain から呼ばれる書き込みも同じ経路を通す。
+
+## 他の domain から呼ばれる書き込み
+
+形は `docs/packages.md` の「server entry の形」。`WorkbenchLedger` に出ているのは次の 4 つで、ptyd への副作用は上の節のとおり transaction の後に workbench が送る。
+
+- `createRunspace(tx, { cwd })` は Tab の無い所有された Runspace を作る。
+- `removeRunspace(tx, id, { spare? })` はそれを消し、中の Tab の Terminal Session を transaction の後に終わらせる。`spare`（Terminal Session の配列）の Tab が中にあれば、Runspace を消さずに所有を解いてそれらの Tab だけを残し（pin されていれば pin のまま）、ほかの Tab の Terminal Session を終わらせる（ADR-0012）。ptyd の Terminate は冪等で、終わった session に送っても失敗しない。
+- `openTab(tx, { runspaceId, cwd?, size?, input? }) → { tabId, terminalSessionId }` は、`starting` の Terminal Session の行と Tab を書き、shell を自分で埋め、`{ type: "layout" }` を publish する。Create は transaction の後に workbench が送り、通ったら `input` を Write する。`size` を省けば 24×80 で起こし、表示されていない Tab の shell は attach の resize で追いつく。ptyd は attach していない接続からの Write も通すので、webview が Tab を表示していなくても打てる。Create をまだ送っていない行は reconcile で lost にならないので、呼び手は reconcile を待たない（ADR-0015）。
+- `moveTab(tx, tabId, runspaceId)` は Tab を Runspace の末尾へ移し（`tab.move` と同じ規則）、`{ type: "layout" }` を publish する。
 
 ## pin
 
@@ -103,3 +117,9 @@ ADR-0008 の「Backend 起動時」と ADR-0011 の reconcile の規則のうち
 - `recordHook` は、input の Terminal Session が Workbench Ledger に無いか終わっている（exited / lost / failed）なら、何も書かず通知も出さずに、stderr に 1 行出して正常に返す。Agent Session は Tab の中で動く agent なので、どの Tab にも無い Terminal Session の agent は観測しない。
 - 起きるのは、env の `TANIA_TERMINAL_SESSION_ID` が Tab の外（Tab で起こした tmux server、Tab から `code .` で開いたエディタの端末、`nohup`）へ漏れたときと、DB を消した後で reconcile が ptyd の session を取り込む前に hook が届いたとき。
 - 生きている Terminal Session の id が漏れた場合は、Backend には見分けられない。payload に pid が無いため。その agent は Tab の agent として観測され、SessionStart で Tab の agent を superseded にする（ADR-0008 の既知のずれ）。
+
+## テスト
+
+- ptyd は `packages/workbench/src/fake-ptyd.ts` に差し替える。fake は `$home/ptyd.sock` で NDJSON を話し、List の中身を台本にし、Exit を押し込み、届いた Reap と Terminate を記録する。本物の ptyd は CI の ts job に無く、Exit と Created の競合も決まった順で起こせないため。home は `mkdtemp(tmpdir())` で短くする（socket の path の上限は 104 byte）。
+- `@tania/workbench/testing` は、fake の ptyd（`startFakePtyd`）、短い home を作る `tempHome`、Terminal Session が starting を抜けるのを待つ `untilSettled` を他の package のテストに出す。
+- task と CLI のテストの Workbench Ledger も、fake の ptyd の home で `createWorkbenchLedger` を組む（`ptydPath` は存在しない path）。Workbench Ledger の method は差し替えず、transaction で `openTab` → commit の後に workbench が送る Create と Write を、本物の protocol で通す。procedure と Workbench Ledger の method は ptyd を待たずに返るので、ptyd に届いた Create・Write・Terminate は fake の `received` か `receivedAtLeast` で待ってから確かめ、Terminal Session が starting を抜けるのは `untilSettled` で待つ。Tab と Runspace は Workbench Ledger の method か workbench の router で開き、Agent Session は hook で作る。workbench の table に直に書かない。

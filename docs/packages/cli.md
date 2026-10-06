@@ -22,3 +22,8 @@
   - 手書き command（`tania workbench hook claude`）は contract から生えず、Skill も呼ばないので、木に無く、書けば落ちる。
   - plugin.json の `skills` は、Skill を持つ `packages/*/skills` とちょうど一致させる。Skill の無い directory を載せても落ちる。workbench の `skills` は Skill ができたときに足す。
 - oRPC 2.0 で `RPCLink` の引数が変わったときに直すのは `apps/cli/src/backend.ts` と `apps/desktop/src/backend.ts` の 2 箇所だけ（#21）。
+
+## テスト
+
+- CLI は remote client を `createRouterClient` に差し替えて回す（ADR-0003。fixture は `apps/cli/src/testing.ts`）。Backend 側のエラーの形と接続拒否の retry だけは、router を `Bun.serve` に載せて確かめる。in-process の client は handler の生の Error を投げ、HTTP のように `ORPCError`（`INTERNAL_SERVER_ERROR`）に包まないため。
+- hook の CLI（`tania workbench hook claude`）は例外で、`apps/cli/src/main.ts` を subprocess で起こし、router を `Bun.serve` に載せて確かめる。claude から見た約束（stdin の payload、stdout の allow、exit code）と 2 秒の打ち切り、trpc-cli より前の振り分けは、process の外からしか見えないため。

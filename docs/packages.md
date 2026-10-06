@@ -6,17 +6,19 @@ tania の repo の形、package の entry、domain 間の呼び出し、CLI の�
 
 この文書には、どの作業も読む規則を置く。ほかの規則は `docs/packages/` に分けてあり、作業がその範囲に触るときに読む。
 
-- `docs/packages/workbench-ledger.md`: Workbench Ledger。workbench の contract と、Runspace・Tab・Terminal Session の起動と終了・pin・終わった行・Agent Session の終了の規則。workbench の procedure、ptyd に送るもの、reconcile、Agent Session の行に触るとき。
+- `docs/packages/workbench-ledger.md`: Workbench Ledger。workbench の contract と、Runspace・Tab・Terminal Session の起動と終了・他の domain から呼ばれる書き込み・pin・終わった行・Agent Session の終了の規則、fake の ptyd。workbench の procedure、ptyd に送るもの、reconcile、Agent Session の行に触るとき、他の domain から Tab を開くか移すとき、テストで ptyd を使うとき。
 - `docs/packages/workbench-ui-state.md`: Workbench の UI 状態と status dot。webview に置く画面の状態と、Agent Session の状態の dot。Workbench の画面の状態か dot に触るとき。
 - `docs/packages/tab-env-and-shim.md`: tab の env と shim。Tab に渡す env、shim、claude wrapper、hook の settings、hook CLI、payload の decoder。Tab の env、claude の起動、hook の受け口に触るとき。
 - `docs/packages/notifications.md`: 通知。出す遷移、title と body、Backend から Shell への渡し方。通知の判定と本文、Agent Session の遷移に触るとき。
-- `docs/packages/task-ledger.md`: Task Ledger。task の contract と、Run・Attach・Bench・Run の起動・close と reopen・sync の規則。task の procedure に触るとき。
+- `docs/packages/task-ledger.md`: Task Ledger。task の contract と、Run・Attach・Bench・Run の起動・close と reopen・sync の規則、system の Job の並び、fake の GitHub と ghq。task の procedure に触るとき、テストで GitHub か ghq を使うとき。
 - `docs/packages/job-ledger.md`: Job Ledger。job の contract と、Job Execution の記録・tick・飛ばす回・中断・保持の規則。job の procedure か、裏で定期的に走る処理に触るとき。
 - `docs/packages/note-ledger.md`: Note Ledger。note の contract と、種類ごとの不変条件・保存の楽観ロック・削除と取り消し・`body` entry の規則。note の procedure か本文の扱いに触るとき。
 - `docs/packages/note-ui.md`: note の ui。monica のコードを移すときの規則と、エディタの置き場所、依存、node 型を減らせない理由、直書きの文字列の置き場所。`packages/note/src/ui` に触るとき、monica のコードを移すとき。
-- `docs/packages/cli.md`: CLI（apps/cli）。argv の振り分け、Backend の探索、転送 router、`--format`、エラーと exit code、SKILL.md の検査。`cli: true` の procedure か SKILL.md を足すとき、apps/cli に触るとき。
+- `docs/packages/backend.md`: Backend（apps/backend）。起動時の PATH、spawn の env、Ledger を作って start する順、notes の口（Host と CSRF の照合、載せるもの、SPA の配り方）。apps/backend に触るとき、Ledger を足すか deps を変えるとき、Backend で process を spawn するとき、notes の口に載せるものを変えるとき。
+- `docs/packages/cli.md`: CLI（apps/cli）。argv の振り分け、Backend の探索、転送 router、`--format`、エラーと exit code、SKILL.md の検査、CLI と hook CLI のテスト。`cli: true` の procedure か SKILL.md を足すとき、apps/cli に触るとき。
 - `docs/packages/desktop.md`: desktop（apps/desktop）。webview の枠、キーの扱い、Backend の endpoint、Task の slot、Shell の責務と command、窓。apps/desktop と domain の ui の載せ方に触るとき。
 - `docs/packages/dev-loop.md`: dev loop、release、検査、版。dev の起動、scripts、release の build、CI、依存と tsconfig に触るとき。
+- `docs/packages/migration.md`: migration。generate、`migrations/index.ts`、package ごとの履歴 table、compiled binary での読み方。table を足すか変えるとき、domain の package を足すとき。
 
 ## 配置
 
@@ -82,83 +84,22 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
 | `@tania/<d>/ui` | React の component と atom。画面を持たない job には無い | browser | apps/desktop、他 package の ui |
 | `@tania/<d>/cli` | 出力の整形関数、補完の候補を返す関数、手で書く command | Bun | apps/cli |
 | `@tania/<d>/body` | Note の本文の JSON を読む関数（`docs/packages/note-ledger.md`）。今は note だけが持つ | どこでも | 自分の server と ui |
-| `@tania/<d>/testing` | 他の package のテストに出す fake。今は workbench だけが持ち、`src/fake-ptyd.ts` の fake の ptyd（`startFakePtyd`）、短い home を作る `tempHome`、Terminal Session が starting を抜けるのを待つ `untilSettled` を出す | Bun | 他 package のテストと `testing.ts` |
+| `@tania/<d>/testing` | 他の package のテストに出す fake。今は workbench だけが持つ（`docs/packages/workbench-ledger.md` の「テスト」） | Bun | 他 package のテストと `testing.ts` |
 
 - 依存の向きは task → workbench だけ。workbench は task を import しない（ADR-0005）。job は task も workbench も import しない（ADR-0016）。note は他の domain を import せず、他の domain からも import されない。bun の isolated linker では package.json に書いていない依存を解決できないので、向きは package.json が守る。package の中の entry の境界（schema が import してよいもの、ui が server の entry と `bun:sqlite` を import しないこと、body が `bun:sqlite`・`drizzle-orm`・schema と server の entry を import しないこと、cli entry を import するのが apps/cli だけであること）と apps どうしの向きは、`.oxlintrc.json` の overrides が lint で守る。testing entry を import するのがテストと `testing.ts` だけであることは、lint の `tania/testing-entry` が守る。no-restricted-imports の設定は override をまたいで重ならないので、file の集合ごとの制限とは別の rule にしている。CLI と webview とブラウザで動くコード（apps/cli、apps/desktop、apps/web、各 package の cli entry と ui entry）が DB に触るもの（`bun:sqlite`、`drizzle-orm`、schema entry と server entry の値）を import しないことも同じく守る（ADR-0003）。cli entry で見るのは `cli.ts` の import だけで、`cli.ts` が import する内側のファイルは見ない。apps/cli のテストと `testing.ts` は in-memory の Backend を組むので、この制限から外す。package を足して entry の override を書き忘れると、`scripts/oxlint/entry-boundaries.test.ts` が落ちる。このテストは、各 package の `exports` にある cli・ui・body・schema の entry と同じ path に禁じた import を並べた file を一時 directory に置き、oxlint を当てて全部が止まるかを見る。
 - task の schema は workbench の table を FK のために import するが、re-export しない（ADR-0010）。
 - webview の bundle に `bun:sqlite` や `@orpc/server` が混ざっていないかは `vite build` で確かめる。混ざれば解決に失敗して落ちる。型だけの import は消えるので対象外。
 
-## domain 間の呼び出しと Backend の組み立て
+## domain 間の呼び出し
 
 ### server entry の形
 
-```ts
-// @tania/workbench/server
-export { migrations } from "../migrations";
-export const router = os.router({ ... });          // context は { db, workbenchLedger }
-export function createWorkbenchLedger(deps: {
-  db: Db;
-  home: string;
-  ptydPath: string;
-  notify: (n: { title: string; body: string }) => void;
-  nameAgentSession: (db: Db, agentSessionId: string) => string | null;
-}): WorkbenchLedger;
+各 domain の server entry は、`migrations`（`docs/packages/migration.md`）、`router`（context は `{ db, <d>Ledger }`）、`create<D>Ledger(deps)` を出す。`<D>Ledger` は Backend が 1 つずつ作り（`docs/packages/backend.md` の「組み立て」）、`GLOSSARY.md` の <D> Ledger を扱う部品で、どれも `start()` / `stop()` を持つ。deps と `start()` / `stop()` の中身は各 Ledger の文書にある。
 
-// @tania/task/server
-export { migrations } from "../migrations";
-export const router = os.router({ ... });          // context は { db, taskLedger }
-export function createTaskLedger(deps: {
-  db: Db;
-  workbenchLedger: WorkbenchLedger;
-  home: string;
-  github?: GitHub;
-  ghq?: Ghq;
-}): TaskLedger;
-export function nameAgentSession(db: Db, agentSessionId: string): string | null;
-export function systemJobs(
-  taskLedger: TaskLedger,
-): { name: string; every: number; run: () => Promise<void> }[];
-
-// @tania/job/server
-export { migrations } from "../migrations";
-export const router = os.router({ ... });          // context は { db, jobLedger }
-export function createJobLedger(deps: {
-  db: Db;
-  home: string;
-  systemJobs: { name: string; every: number; run: () => Promise<void> }[];
-  now?: () => Date;
-}): JobLedger;
-
-// @tania/note/server
-export { migrations } from "../migrations";
-export const router = os.router({ ... });          // context は { db, noteLedger }
-export function createNoteLedger(deps: {
-  db: Db;
-  home: string;
-}): NoteLedger;
-```
-
-`ptydPath` は spawn する ptyd の場所（ADR-0011）。`notify` と `nameAgentSession` は通知のための口（`docs/packages/notifications.md`）。`github` は GraphQL の URL と token の取り方で、省けば `https://api.github.com/graphql` と `gh auth token --hostname github.com` になる。task の `home` は Bench の worktree と setup の log を置く場所（`docs/packages/task-ledger.md` の「Bench」）。`ghq` は `root()` と `get(repo)` で、省けば `ghq` の command を呼ぶ。テストは偽の GitHub と ghq を渡す。
-
-job の `home` はユーザーの Job の log を置く場所。`systemJobs` は system の Job の並びで、名前は `<domain>.<name>`、`run` は失敗なら reject する。`now` はテストが時計を進めるための口（`docs/packages/job-ledger.md`）。
-
-note の `home` は画像の置き場所に使う（後続の issue）。
-
-`WorkbenchLedger` と `TaskLedger` と `JobLedger` と `NoteLedger` は、Backend が 1 つずつ作り、`GLOSSARY.md` の Workbench Ledger と Task Ledger と Job Ledger と Note Ledger を扱う部品で、どれも `start()` / `stop()` を持つ。`WorkbenchLedger` と `TaskLedger` は `events` も持つ。
-
-- `events`: その domain の変更を知らせる in-process の publisher。job と note は change stream を持たないので無い（ADR-0016・0018）。
-- `start()` / `stop()`: 起動時と終了時の処理。`WorkbenchLedger` は ptyd への接続（無ければ spawn、版違いは入れ替え）と reconcile（ADR-0011）、`TaskLedger` は起動時に preparing のまま残った Bench を失敗にすることと、終了時に走っている setup の process group を kill すること、`JobLedger` は起動時に途中で止まった Job Execution を中断にして system の Job を 1 回走らせ、tick の timer を張ることと、終了時にそれを止めること。`NoteLedger` は今は何もしない。
-
-`TaskLedger` はほかに `syncInBackground()` と `cleanSetupLogs()` だけを持ち、どちらも task の system の Job が呼ぶ。task は timer を持たず、system の Job の並び（名前・間隔・`run`）を `@tania/task/server` の `systemJobs(taskLedger)` で出し、Backend の組み立てがそれを `createJobLedger` に渡す。task は job を import しないので、戻り値は `createJobLedger` の `systemJobs` と同じ構造の素のオブジェクトにし、job の型を注記しない（#18、ADR-0016）。
-
-- `syncInBackground()`: open な Task すべての Sync で、失敗した repo があるか throw したら reject する。`systemJobs()` が `task.sync` の `run` にし、5 分おきに走る。
-- `cleanSetupLogs()`: setup の log を消し（`docs/packages/task-ledger.md` の「Bench」）、消せなかった log か directory があれば残りを消してから reject する。`systemJobs()` が `task.setup-log-cleanup` の `run` にし、24 時間おきに走る。
-
-`WorkbenchLedger` は、他の domain から呼ばれる書き込みも持つ。第 1 引数に transaction（`db` でもよい）を取る**同期**の method で、task は `db.transaction((tx) => { workbenchLedger.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。ptyd への副作用は workbench が transaction の後に自分で送る（ADR-0015）。`WorkbenchLedger` に出ている書き込みは `createRunspace` / `removeRunspace` / `moveTab` / `openTab` の 4 つ。他の domain が呼ばない書き込みは、同じ形（第 1 引数が tx）の module 内の関数として procedure の handler から呼び、`WorkbenchLedger` には出さない。`createRunspace(tx, { cwd })` が作るのは Tab の無い所有された Runspace で、`removeRunspace(tx, id, { spare? })` はそれを消し、中の Tab の Terminal Session を transaction の後に終わらせる。`spare`（Terminal Session の配列）の Tab が中にあれば、Runspace を消さずに所有を解いてそれらの Tab だけを残し（pin されていれば pin のまま）、ほかの Tab の Terminal Session を終わらせる（ADR-0012）。ptyd の Terminate は冪等で、終わった session に送っても失敗しない。
-
-`openTab(tx, { runspaceId, cwd?, size?, input? }) → { tabId, terminalSessionId }` は、`starting` の Terminal Session の行と Tab を書き、shell を自分で埋め、`{ type: "layout" }` を publish する。Create は transaction の後に workbench が送り、通ったら `input` を Write する。`size` を省けば 24×80 で起こし、表示されていない Tab の shell は attach の resize で追いつく。ptyd は attach していない接続からの Write も通すので、webview が Tab を表示していなくても打てる。Create をまだ送っていない行は reconcile で lost にならないので、呼び手は reconcile を待たない（ADR-0015）。`moveTab(tx, tabId, runspaceId)` は Tab を Runspace の末尾へ移し（`tab.move` と同じ規則）、`{ type: "layout" }` を publish する。Terminal Session の行の状態機械、Create をまだ送っていない集合、transaction の後の Create・Write・Terminate、張り直し（`tab.respawn` と pin）は `packages/workbench/src/terminal-session.ts` に集め、workbench の router の handler も同じ経路を通す。
-
-他の domain から呼ばれない処理は router の handler の中に書いてよい。
+- `events`: その domain の変更を知らせる in-process の publisher。workbench と task だけが持つ。job と note は change stream を持たないので無い（ADR-0016・0018）。
+- 他の domain から呼ばれる書き込みは Ledger の method にする。第 1 引数に transaction（`db` でもよい）を取る**同期**の method で、task は `db.transaction((tx) => { workbenchLedger.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。今あるのは `WorkbenchLedger` の 4 つ（`docs/packages/workbench-ledger.md` の「他の domain から呼ばれる書き込み」）。
+- 他の domain が呼ばない書き込みは、同じ形（第 1 引数が tx）の module 内の関数として procedure の handler から呼び、Ledger には出さない。他の domain から呼ばれない処理は router の handler の中に書いてよい。
+- import の向きに逆らう呼び出し（workbench → task、job → task）は、呼ばれる側の server entry が関数を出し、Backend の組み立てが呼ぶ側の deps に渡す（task の `nameAgentSession` と `systemJobs`）。
 
 ### domain をまたぐ規則
 
@@ -168,51 +109,14 @@ note の `home` は画像の置き場所に使う（後続の issue）。
 - workbench の router を in-process client（`createRouterClient`）で呼ぶ形は採らない。oRPC の呼び出しは async で、drizzle の bun:sqlite の transaction に async 関数を渡すと throw しても rollback されないため（ADR-0009）。
 - transaction に async 関数を渡さない。lint の `tania/sync-transaction` が、関数式と、同じ file で定義した async 関数を名前で渡す形を止める。
 
-### Backend の組み立て（`apps/backend/src/main.ts`）
-
-最初に login shell から PATH を 1 回取り（`$SHELL -ilc` で区切り文字に挟んだ `$PATH` を出させる。cwd は `$HOME`、`DISABLE_AUTO_UPDATE=true`）、`process.env.PATH` に入れる。`.app` から起動した Backend は launchd の最小の PATH しか持たず、`gh`・`git`・`ghq`・setup script の中の bun や mise が見つからないため。失敗したら元の PATH のまま stderr に 1 行出す。login shell は stdin を渡さずに起こし（Backend の stdin は Shell の死を知らせる pipe）、5 秒で打ち切る。
-
-Bun.spawn は `env` を渡さないと、子に起動時の environ を渡し、実行ファイルも起動時の PATH で探す。そのため Backend で動くコードの spawn は `env: process.env` を渡す（絶対 path の実行ファイルは除く）。lint の `tania/spawn-env`（`scripts/oxlint/tania.js`）がこれを守る。ptyd は `process.env` から組んだ env を渡すので、Tab にも届く。
-
-1. `$TANIA_HOME/tania.db` を開き、`locking_mode=EXCLUSIVE` → `journal_mode=WAL` → `foreign_keys=ON` の順に設定する（ADR-0007）。
-2. `migrate()` を workbench → task → job → note の順に呼ぶ。`migrationsTable` は各 package の `migrations.table` を渡す。
-3. `createWorkbenchLedger` → `createTaskLedger` → `createJobLedger` → `createNoteLedger` の順に作る。`createWorkbenchLedger` には、env の `TANIA_PTYD_PATH`（`ptydPath`）、stdout に通知の行を書く `notify`、`@tania/task/server` の `nameAgentSession` を渡す。`createTaskLedger` と `createJobLedger` と `createNoteLedger` には同じ `home` を渡す。`createJobLedger` の `systemJobs` には、`@tania/task/server` の `systemJobs(taskLedger)` の戻り値を渡す。`TANIA_PTYD_PATH` が無ければ stderr に 1 行出して exit 1 する。
-4. router を `{ workbench: workbenchRouter, task: taskRouter, job: jobRouter }` で mount し、context は `{ db, workbenchLedger, taskLedger, jobLedger }`。note の router はこの口に載せず、notes の口だけに載せる（下の「notes の口」）。
-5. hono に CORS（`tauri://localhost`・`http://tauri.localhost`。env の `TANIA_DEV_URL` があればその origin も。`docs/packages/dev-loop.md` の「dev loop」）、`/health`（token 無し）、`/rpc/*` の bearer を載せ、`Bun.serve({ hostname: "127.0.0.1", port: 0, idleTimeout: 0 })` で立てる。
-6. `start()` を Workbench Ledger → Task Ledger → Job Ledger → Note Ledger の順に呼び、notes の口を立てる。Workbench Ledger の `start()`（ptyd への接続と reconcile）を最大 3 秒待ってから、`backend.json` と stdout の endpoint 行を書く（ADR-0007 / 0011）。
-7. 終了時は notes の口を止め、`stop()` を逆順に呼んでから ADR-0007 の手順で抜ける。
-
-domain は 4 つしかないので、汎用の「domain の登録」機構は作らずに直接並べる。
-
-### notes の口
-
-ブラウザに notes を配る、固定 port の 2 つ目の口（ADR-0017）。組み立ては `apps/backend/src/notes-listener.ts` の `listenNotes`。
-
-- port は Shell が env `TANIA_NOTES_PORT` で渡す（`docs/packages/desktop.md`）。env が無ければ口を立てない。headless で起こした dev の Backend が release の 19380 を取らないようにするため。
-- `127.0.0.1` と `::1` の両方で bind する。Chromium と macOS は `tania.localhost` を `::1` から先に引くので、他の process が `::1` 側だけを握っていても EADDRINUSE で見つける。どちらかで失敗したら、立てた方も止め、stderr に 1 行出して口なしで起動を続ける。
-- Host は `tania.localhost:<port>`・`localhost:<port>`・`127.0.0.1:<port>`（host 名は `@tania/note/contract` の `NOTES_HOSTNAMES`）の完全一致だけを通し、ほかは 403 で断る（DNS rebinding）。
-- GET 以外の request は `Sec-Fetch-Site: same-origin` を求め、ほかは 403 で断る（CSRF）。`same-site` は site が port を見ないので、`localhost` の別の port の app からの request も含む。
-- 載せるもの:
-  - `/rpc` の `{ note }` の router。context は `{ db, noteLedger }`。workbench・task・job は載せない。`openTab` の `input` は shell に打鍵されるので、token の無い口では任意のコマンドになる。
-  - 画像の素の GET（`/api/assets/<file>`、`@tania/note/contract` の `IMAGE_URL_PREFIX`）。今は 404 を返す。
-  - SPA の静的ファイル。`/rpc` と画像以外の GET は、build の出力に在る file ならそれを、無ければ `index.html` を返す。path は file system の path として解かず、起動時に集めた file の一覧から引く。`assets/` の下（Vite が hash を付けた file）は `public, max-age=31536000, immutable`、ほかは `no-cache`。
-- SPA は compiled binary に `--asset` で同梱した `apps/web/dist` を、entry の隣（`/$bunfs/root/dist`）から読む（`docs/packages/dev-loop.md` の「release build と install」）。`bun run` の Backend には無いので、dev の Backend は SPA の GET に 404 を返し、画面は `apps/web` の Vite が配る。
-
 ### テスト
 
 package ごとに in-memory の SQLite に自分の migration を当てる（task は workbench → task の順）。外から見える振る舞いは `createRouterClient(router, { context })` を通して確かめ、他の domain から呼ばれる method と module 内の関数（`openTab` など）はそのまま呼ぶ。DB を fake に差し替えない（ADR-0002）。`bun test` を root で打つと全 package のテストが走る。
 
-- workbench の ptyd は `packages/workbench/src/fake-ptyd.ts` に差し替える。fake は `$home/ptyd.sock` で NDJSON を話し、List の中身を台本にし、Exit を押し込み、届いた Reap と Terminate を記録する。本物の ptyd は CI の ts job に無く、Exit と Created の競合も決まった順で起こせないため。home は `mkdtemp(tmpdir())` で短くする（socket の path の上限は 104 byte）。fake と home の helper は `@tania/workbench/testing` から他の package にも出す。
-- task の GitHub は `packages/task/src/fake-github.ts` に差し替える。fake は GraphQL の `repository { issue(number:) }` と `pullRequests(headRefName:)` の alias だけを話し、届いた request を記録し、repo ごとの失敗、branch ごとの null の応答、未認証、応答の保留を起こせる。CLI のテストの Task Ledger は `gh auth token` が失敗する GitHub を持ち、本物の GitHub に届かない。
-- task と CLI のテストの Workbench Ledger も、fake の ptyd の home で `createWorkbenchLedger` を組む（`ptydPath` は存在しない path）。Workbench Ledger の method は差し替えず、transaction で `openTab` → commit の後に workbench が送る Create と Write を、本物の protocol で通す。procedure と Workbench Ledger の method は ptyd を待たずに返るので、ptyd に届いた Create・Write・Terminate は fake の `received` か `receivedAtLeast` で待ってから確かめ、Terminal Session が starting を抜けるのは `untilSettled` で待つ。Tab と Runspace は Workbench Ledger の method か workbench の router で開き、Agent Session は hook で作る。workbench の table に直に書かない。
-- task の ghq は `packages/task/src/fake-ghq.ts` に差し替える。CI の ts job に ghq は無い。fake は一時 directory の `origins/<owner>/<repo>` を origin（default branch は main）にし、`get` でそれを clone して記録する。Bench の準備は本物の git で確かめる。CLI のテストの Task Ledger は失敗する ghq を持つ。
-- setup の 600 秒の timeout は、`setTimeout` を `spyOn` してその callback を捕まえ、手で呼ぶ。
+- 外の process と service は fake に差し替える。ptyd は workbench の fake（`docs/packages/workbench-ledger.md` の「テスト」）、GitHub と ghq は task の fake（`docs/packages/task-ledger.md` の「テスト」）。CLI と hook の CLI の確かめ方は `docs/packages/cli.md` の「テスト」、Backend の組み立ては `docs/packages/backend.md` の「テスト」。
 - await の間の競合は、await の途中で止めて決まった順で起こす。sync の途中は fake GitHub の `hold()`、git の ref の更新（`branch -D` など）の途中は checkout の `.git/hooks/reference-transaction` が file を待つ script、ptyd の応答の途中は fake の ptyd の `holdNext(op)` で止める（`close.test.ts`）。
 - 一定の間隔で走る処理は、`setInterval` を `spyOn` で捕まえ、間隔を確かめてから callback を手で呼ぶ。Bun の `jest.useFakeTimers()` は `Bun.sleep` と `setTimeout` も止め、一部の timer だけを偽にできないので、HTTP の応答を待つテストが進まなくなる。
-- 終わった行のように procedure に出ない行は、`@tania/workbench/schema` の table を SELECT して確かめてよい。他の domain が読むのと同じ面だから。
-- CLI は remote client を `createRouterClient` に差し替えて回す（ADR-0003。fixture は `apps/cli/src/testing.ts`）。Backend 側のエラーの形と接続拒否の retry だけは、router を `Bun.serve` に載せて確かめる。in-process の client は handler の生の Error を投げ、HTTP のように `ORPCError`（`INTERNAL_SERVER_ERROR`）に包まないため。
-- Backend の組み立て（`apps/backend/src/main.ts`）は、Shell と同じく process として起こし、fake の ptyd の home を渡して確かめる。token の口と notes の口に同じ path を投げ、口ごとに載る procedure を見る。notes の口の照合と SPA は `listenNotes` を直に呼んで確かめる。
-- hook の CLI（`tania workbench hook claude`）は例外で、`apps/cli/src/main.ts` を subprocess で起こし、router を `Bun.serve` に載せて確かめる。claude から見た約束（stdin の payload、stdout の allow、exit code）と 2 秒の打ち切り、trpc-cli より前の振り分けは、process の外からしか見えないため。
+- 終わった行のように procedure に出ない行は、`@tania/<d>/schema` の table を SELECT して確かめてよい。他の domain が読むのと同じ面だから。
 
 ## contract の規約
 
@@ -224,31 +128,6 @@ package ごとに in-memory の SQLite に自分の migration を当てる（tas
 6. `oc.meta(...)` と `createSchemaFactory({ coerce: { date: true } })` は各 package の `contract.ts` の中にだけ書く。oRPC 2.0 で `.meta` が plugin 制になったときに直す場所を 1 つにするため（#21）。例外は `apps/cli/src/forward.ts` で、output を持たない procedure を組み直すために contract の meta を `os.$meta` で引き継ぐ（`docs/packages/cli.md`）。
 
 contract を走査するテストを 1 本置き、description と output が全 procedure にあること、`cli: true` の procedure に整形関数があることを確かめる。
-
-## migration
-
-- 各 package が `drizzle.config.ts` を持ち、`out: "./migrations/<d>"` に生成する。`bun run generate` が全 package の `drizzle-kit generate` を走らせる。
-- `migrations/index.ts`:
-
-  ```ts
-  import { join } from "node:path";
-  import journal from "./workbench/meta/_journal.json";
-
-  const entries: { tag: string }[] = journal.entries;
-
-  export const migrations = {
-    folder: join(import.meta.dir, "workbench"),
-    table: "__drizzle_migrations_workbench",
-    latest: entries.at(-1)?.tag,
-  };
-  ```
-
-  journal の import は、generate の出力を `bun --watch` の import 木に入れるためにある（#8 の詰まった点 3）。`entries` に型を付けるのは、table が 0 本の package の journal（`entries: []`）を tsc が `never[]` と推論するため。
-- table が 0 本の package（骨格の task）は、0 本のまま `drizzle-kit generate` を 1 回走らせ、出てきた `meta/_journal.json`（`entries: []`）を commit する。`migrate()` はこれで何もせずに通り、後で table を足せば普通に `0000_*.sql` ができる。custom migration は作らない。bun:sqlite はコメントだけの SQL を `Invalid SQL statement` で落とす。
-- 履歴 table は package ごとに分ける。既定の `__drizzle_migrations` を共有すると、drizzle は `created_at` の大小しか比べないので、片方の migration が黙って飛ばされる。runtime の `migrate()` には `migrationsTable` を必ず渡す（drizzle.config の `migrations.table` は `drizzle-kit migrate` にしか効かない）。
-- folder の basename は domain 名にする。`--asset` は basename の位置に mount するので、2 つの `drizzle/` を同梱すると `meta/_journal.json` が衝突して build が落ちる。
-- compiled binary ではどの module の `import.meta` も entry のものになるので、package の中で `new URL("../drizzle", import.meta.url)` と書くと壊れる。folder の親に置いた `migrations/index.ts` の `import.meta.dir` を使えば、`bun run` でも compiled でも同じ source で動く。
-- task の snapshot に task の table しか無いことをテストで確かめる（workbench の table を re-export すると二重に CREATE される）。
 
 ## ここで決めていないこと
 

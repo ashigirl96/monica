@@ -25,7 +25,7 @@ resume  { name } → { name, nextAt }                                           
 
 ## createJobLedger
 
-`createJobLedger({ db, home, systemJobs, now? })`。`home` はユーザーの Job の log を置く `$TANIA_HOME`。`systemJobs` は `{ name, every, run }` の配列で、`run` は失敗なら reject する。名前に `.` が無いか、名前が重なれば throw する。`.` はユーザーの Job の名前に使えないので、system の Job と名前が重ならない。`now` はテストが時計を進めるための口。
+`createJobLedger({ db, home, systemJobs, now? })`。`home` はユーザーの Job の log を置く `$TANIA_HOME`。`systemJobs` は `{ name, every, run }` の配列で、名前は `<domain>.<name>`、`run` は失敗なら reject する。名前に `.` が無いか、名前が重なれば throw する。`.` はユーザーの Job の名前に使えないので、system の Job と名前が重ならない。`now` はテストが時計を進めるための口。
 
 job は task も workbench も import しない（ADR-0016）。system の Job は task が `@tania/task/server` の `systemJobs(taskLedger)` で並びを出し、Backend の組み立てがそれを渡す。`task.sync` の `run` は `taskLedger.syncInBackground()` を、`task.setup-log-cleanup` の `run` は `taskLedger.cleanSetupLogs()` を呼ぶ。`Db` の型も drizzle の `BunSQLiteDatabase` を直に使う。
 
@@ -53,7 +53,7 @@ job は task も workbench も import しない（ADR-0016）。system の Job �
 ### process
 
 - `/bin/sh -c <command>` を、cwd、`env: process.env`、stdin なしで、自分の process group（`detached: true`）として起こす。stdout と stderr は `$TANIA_HOME/logs/jobs/<name>/<開始時刻>.log` に書く。開始時刻は local time の `2026-10-07T030020.000` の形。
-- PATH は Backend が login shell から取った PATH（`docs/packages.md` の「Backend の組み立て」）なので、`claude` は Tab の wrapper ではなく本物の claude になり、hook は付かない。
+- PATH は Backend が login shell から取った PATH（`docs/packages/backend.md` の「組み立て」）なので、`claude` は Tab の wrapper ではなく本物の claude になり、hook は付かない。
 - 結果:
   - exit 0 なら `succeeded`。
   - それ以外は `failed` で、エラーの 1 行を `exit <code>: <出力の最後の 1 行>` にする。最後の 1 行は log の末尾 4 KiB の、空でない最後の行で、200 文字で切る。出力が無ければ `exit <code>` だけ。signal で終わったら `killed by <signal>` で始め、exit code は null。
