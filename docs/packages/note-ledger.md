@@ -10,6 +10,7 @@ save             { id, content, title?, expectedUpdatedAt } → { updatedAt }   
 remove           { id } → void
 restore          { id } → Note
 daily.open       { date } → Note
+daily.dates      → string[]
 scratch.open     { repo } → Note
 essay.create     → Note
 essay.setStatus  { id, status } → Note
@@ -22,7 +23,7 @@ repoNote.create  { repo } → Note
 - `date` は Logical Date の `YYYY-MM-DD`。Daily はその Daily の日付、ほかは作った時点の Logical Date で、後から変えない。
 - `repo` は `owner/repo` の形だけを確かめ、ghq も GitHub も引かない。書いた時点の綴りで持ち、比べるときは大文字と小文字を区別しない（task の `copy.ts` と同じ）。
 - 時刻は他の domain と同じく `z.date()` で出す。
-- router は CLI に出さない。meta の型が `cli` を持たないので、`cli: true` を付けると型で落ちる。router を notes の口（ADR-0017）に載せるのは後続の issue で、今はどの口にも載せない。
+- router は CLI に出さない。meta の型が `cli` を持たないので、`cli: true` を付けると型で落ちる。router は notes の口（ADR-0017）にだけ載せる。
 - change stream は持たない。notes の画面は focus のたびに取り直す（ADR-0018）。タブごとに stream を張ると、Chromium の host ごとの接続数の上限（6 本）に当たる。
 - `.errors()` で宣言するのは、画面が分岐する保存の `CONFLICT` だけ。ほかは `NOT_FOUND`（無い id と削除した Note）と `BAD_REQUEST`（形の違う入力と、種類に合わない操作）。
 
@@ -46,6 +47,7 @@ Note は `note` table に 1 件 1 行で持つ。種類と列の対応を CHECK 
 
 - 種類は後から変えない。変える procedure は無い。
 - `daily.open` と `scratch.open` は get-or-create で、無ければ作る。Daily は未来の日付も作れる。Scratch は最初に作った時の綴りを持ち続ける。
+- `daily.dates` は Daily のある Logical Date を新しい順に返す。Daily は Logical Date ごとに 1 つなので、monica の `daily-counts` の件数は持たない。Daily の画面のサイドバーとカレンダーが読む。
 - `essay.create` は title が空で `writing` の Essay を、`repoNote.create` は title が空の Repo Note を作る。どちらも呼ぶたびに新しい Note になる。
 - 作った Note の本文は、エディタの schema を満たす最小の doc（`@tania/note/body` の `EMPTY_DOC`）。
 - `essay.setStatus` は toggle ではなく値を受ける。次に送る値は画面が導く。今と同じ値なら何も書かず、`updatedAt` も進めない。Essay 以外は `BAD_REQUEST`。

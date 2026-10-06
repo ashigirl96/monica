@@ -131,6 +131,9 @@ export const contract = {
       .meta({ description: 'Get the Daily of a Logical Date, making it when there is none' })
       .input(z.object({ date: z.iso.date().describe('YYYY-MM-DD') }))
       .output(NoteSchema),
+    dates: meta
+      .meta({ description: 'List the Logical Dates that have a Daily, newest first' })
+      .output(z.array(z.iso.date().describe('YYYY-MM-DD'))),
   },
   scratch: {
     open: meta

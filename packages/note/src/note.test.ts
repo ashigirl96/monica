@@ -60,6 +60,21 @@ test('opening the Daily of a date twice gives the same Note, and another date, e
   expect(future.id).not.toBe(first.id)
 })
 
+test('the dates with a Daily come newest first, and the date of a Note of another kind is not among them', async () => {
+  const { client } = setup()
+  setSystemTime(new Date(2026, 9, 7, 12))
+
+  expect(await client.daily.dates()).toEqual([])
+
+  await client.daily.open({ date: '2026-10-06' })
+  await client.daily.open({ date: '2099-01-01' })
+  await client.daily.open({ date: '2025-12-31' })
+  await client.daily.open({ date: '2026-10-06' })
+  await client.essay.create()
+
+  expect(await client.daily.dates()).toEqual(['2099-01-01', '2026-10-06', '2025-12-31'])
+})
+
 test('opening the Scratch of a Repo gives the same Note whatever the case of the Repo, which keeps its first spelling', async () => {
   const { client } = setup()
 

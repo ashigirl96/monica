@@ -13,8 +13,10 @@
     "generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@orpc/client": "catalog:",
     "@orpc/contract": "catalog:",
     "@orpc/server": "catalog:",
+    "@tanstack/react-query": "catalog:",
     "drizzle-orm": "catalog:",
     "drizzle-zod": "catalog:",
     "prosemirror-commands": "catalog:",

@@ -142,7 +142,7 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
    agent-browser --session tania-s2 snapshot
    ```
 
-   Backend に届かないときは、Vite が proxy の失敗を Bad Gateway で返し、`web.log` に `http proxy error` が出る。
+   Backend に届かないときは、Vite が proxy の接続を応答なしで切り（release の口と同じく、画面には network error に見える）、`web.log` に `http proxy error` が出る。
 
 片付けでは `agent-browser --session tania-s2 close` で browser を閉じ、Vite の pid（`lsof -ti tcp:<Vite の port> -sTCP:LISTEN`）に `kill` を送ってから、下の手順で Backend を止める。
 
