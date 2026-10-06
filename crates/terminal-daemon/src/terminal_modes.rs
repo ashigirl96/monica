@@ -151,12 +151,16 @@ impl TerminalModes {
                 }
                 // RIS returns the terminal to power-on defaults, so nothing observed before it
                 // still holds -- keeping it would re-enter the alt screen on a later attach.
-                // The stream offset is not terminal state and must survive, or every later
-                // boundary would be measured against the wrong origin.
+                // The stream offset and the alt-screen log record the stream rather than the
+                // terminal, and must survive, or a boundary would be measured against the
+                // wrong origin or placed in the wrong buffer.
                 b'c' => {
-                    let stream_len = self.stream_len;
-                    *self = Self::default();
-                    self.stream_len = stream_len;
+                    *self = Self {
+                        stream_len: self.stream_len,
+                        alt_history: std::mem::take(&mut self.alt_history),
+                        alt_at_history_start: self.alt_at_history_start,
+                        ..Self::default()
+                    };
                     self.record_alt_switch(false);
                 }
                 _ => self.scan = Scan::Ground,
@@ -626,6 +630,28 @@ mod tests {
         assert_eq!(
             restore(&[b"\x1b[?1049h\x1b[?1003h\x1b[?1006h\x1b[!p"]),
             b"\x1b[?1049h\x1b[?1003h\x1b[?1006h"
+        );
+    }
+
+    /// RIS leaves the alt screen, so a tail that crosses it still starts where the app was.
+    #[test]
+    fn a_tail_that_crosses_a_ris_starts_in_the_alt_buffer() {
+        assert_eq!(
+            restore_with_tail(b"\x1b[?1049h", b"frame\x1bc$ "),
+            b"\x1b[?1049h"
+        );
+    }
+
+    #[test]
+    fn a_client_that_missed_a_ris_is_taken_out_of_the_alt_screen() {
+        let mut modes = tracker(&[b"\x1b[?1049h"]);
+        let gap = b"frame\x1bc";
+        let tail = b"$ ";
+        modes.feed(gap);
+        modes.feed(tail);
+        assert_eq!(
+            modes.restore_prefix_after_gap(gap.len() as u64, tail),
+            b"\x1b[<32u\x1b[?1049l\x1b[<32u\x1b[?2004l\x1b[?1004l\x1b[?25h\x1b[?1000l\x1b[?1006l"
         );
     }
 
