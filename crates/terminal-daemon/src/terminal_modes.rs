@@ -13,7 +13,7 @@
 //!
 //! That includes the kitty keyboard state, which xterm keeps per buffer: each buffer has its own
 //! stack, and the flags in force are swapped with the ones saved for each buffer on every
-//! `?1049h` / `?1049l`. A restore rebuilds it only for the buffer the client is in -- the app's
+//! buffer switch. A restore rebuilds it only for the buffer the client is in -- the app's
 //! current one for `restate`, the one the tail starts in for `restore_prefix`. Reaching the other
 //! buffer would mean switching to it, and `?1049h` clears the alt screen. Leaving it alone errs on
 //! the cheap side: a missing push only puts keys back on the legacy encoding, which a shell still
@@ -29,6 +29,10 @@ const TRACKED_FLAGS: [(u16, bool); 3] = [(2004, false), (1004, false), (25, true
 /// is reported, which means `restore_prefix` needs its value at the replay boundary, not its
 /// latest value.
 const ALT_SCREEN: u16 = 1049;
+
+/// xterm switches buffers on all of these alike. Restores say `ALT_SCREEN` whichever the app
+/// used, since only the buffer it lands in matters there.
+const ALT_SCREEN_MODES: [u16; 3] = [47, 1047, ALT_SCREEN];
 
 /// xterm keeps a single active mouse protocol, so these override each other and resetting any
 /// one of them disables reporting outright.
@@ -95,8 +99,8 @@ struct KittyBuffer {
 }
 
 /// xterm's kitty keyboard state. A push saves the flags in force onto the stack of the buffer
-/// the app is in, while the flags in force are a single slot that every `?1049h` / `?1049l`
-/// swaps with the ones saved for each buffer.
+/// the app is in, while the flags in force are a single slot that every buffer switch swaps
+/// with the ones saved for each buffer.
 #[derive(Default)]
 struct KittyKeyboard {
     flags: u32,
@@ -277,7 +281,7 @@ impl TerminalModes {
                     let Some(mode) = parse_u16(param) else {
                         continue;
                     };
-                    if mode == ALT_SCREEN {
+                    if ALT_SCREEN_MODES.contains(&mode) {
                         self.kitty.switch_buffer(on);
                         alt_switch = Some(on);
                         continue;
@@ -768,6 +772,18 @@ mod tests {
             restore_with_tail(b"\x1b[>5u", b"$ \x1b[?1049h\x1b[=3u frame"),
             b"\x1b[>5u"
         );
+    }
+
+    /// xterm switches buffers on `?47h` and `?1047h` just as on `?1049h`, so what an app sets
+    /// there stays in the alt buffer too.
+    #[test]
+    fn the_older_alt_screen_modes_switch_buffers_too() {
+        assert_eq!(
+            tracker(&[b"\x1b[?47h\x1b[=1u\x1b[?47l$ "]).restate(),
+            b"\x1b[<32u\x1b[?2004l\x1b[?1004l\x1b[?25h\x1b[?1000l\x1b[?1006l"
+        );
+        assert_eq!(restore(&[b"\x1b[?1047h\x1b[>1u\x1b[?1047l$ "]), b"");
+        assert_eq!(restore(&[b"\x1b[?47h\x1b[>1u"]), b"\x1b[?1049h\x1b[>1u");
     }
 
     #[test]
