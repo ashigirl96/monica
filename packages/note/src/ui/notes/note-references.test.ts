@@ -46,7 +46,7 @@ function setup(flush: () => Promise<void> = () => Promise.resolve()) {
   const open = () => noteReferences({ client, reach, flush })
   const paths = () =>
     fetch.mock.calls.map(([request]) => new URL((request as Request).url).pathname)
-  return { answers, client, open, paths }
+  return { answers, client, open, paths, reach }
 }
 
 function settledYet(promise: Promise<unknown>): Promise<boolean> {
@@ -99,6 +99,24 @@ test('a Note Mention that cannot reach the Backend stays unresolved without aski
   answers.set('/rpc/daily/dates', answer(200, []))
   await client.daily.dates()
 
+  expect(await name).toEqual({ displayName: 'On ledgers' })
+})
+
+test('a Note Mention asks again at once when another request gets through between its failure and its waiting', async () => {
+  const { answers, open, reach } = setup()
+  let asked = 0
+  answers.set('/rpc/noteMention/resolve', () =>
+    asked++ === 0 ? unreachable() : answer(200, { displayName: 'On ledgers' })(),
+  )
+  const failed = reach.failed.bind(reach)
+  reach.failed = () => {
+    failed()
+    reach.reached()
+  }
+
+  const name = open().resolveNoteMention('note-3')
+
+  expect(await settledYet(name)).toBe(true)
   expect(await name).toEqual({ displayName: 'On ledgers' })
 })
 

@@ -19,7 +19,7 @@ export function noteReferences({
   flush,
 }: {
   client: NoteClient
-  reach: Pick<Reach, 'onRecover'>
+  reach: Pick<Reach, 'onRecover' | 'recoveries'>
   flush: () => Promise<void>
 }): NoteReferences {
   const names = new Map<string, Promise<NoteMentionInfo | null>>()
@@ -44,10 +44,11 @@ export function noteReferences({
 
 // Backend の答えは ORPCError で届くので、それ以外の失敗は届かなかったとみなし、届くようになってから送り直す。
 async function untilReached<T>(
-  reach: Pick<Reach, 'onRecover'>,
+  reach: Pick<Reach, 'onRecover' | 'recoveries'>,
   call: () => Promise<T>,
 ): Promise<T> {
   for (;;) {
+    const recoveries = reach.recoveries()
     try {
       return await call()
     } catch (error) {
@@ -57,6 +58,10 @@ async function untilReached<T>(
           stop()
           resolve()
         })
+        if (reach.recoveries() !== recoveries) {
+          stop()
+          resolve()
+        }
       })
     }
   }
