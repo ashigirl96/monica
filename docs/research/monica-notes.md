@@ -50,7 +50,7 @@ projects 表は `id, name, provider, repo, path, default_branch, worktree_root, 
 | project | 61 | 13 | 48 | 13 件なし（8 件は削除済み） | 全件 NULL |
 
 - id は `note-N`（note-1〜note-160、note-100 だけ欠番）。番号は `note_counter` の rowid で、削除しても再利用しない。
-- `date` は作成時に固定した論理日付で、JST の 5 時を境目にした日付とほぼ一致する（daily の 6 件だけ、カレンダーから別の日を開いて作ったもの）。生存する daily で同じ日付が 2 件あるのは 2026-07-20 の 1 組だけで、get-or-create が最古を返すので、遅く作った note-13 は画面から開けない（daily を作るたびに新しい note を作っていた 2026-07-24 より前の名残）。
+- `date` は作成時に固定した Logical Date で、JST の 5 時を境目にした日付とほぼ一致する（daily の 6 件だけ、カレンダーから別の日を開いて作ったもの）。生存する daily で同じ日付が 2 件あるのは 2026-07-20 の 1 組だけで、get-or-create が最古を返すので、遅く作った note-13 は画面から開けない（daily を作るたびに新しい note を作っていた 2026-07-24 より前の名残）。
 - 既定の空本文のまま残った note は 10 件（daily 9、project 1）。
 
 ### project ごとの note

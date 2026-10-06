@@ -271,6 +271,124 @@
       }
     },
     {
+      "files": ["packages/note/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["@tania/*/cli"],
+                "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
+              },
+              {
+                "group": [
+                  "@tania/task",
+                  "@tania/task/*",
+                  "@tania/workbench",
+                  "@tania/workbench/*",
+                  "@tania/job",
+                  "@tania/job/*"
+                ],
+                "message": "note は他の domain を import しない（docs/packages/note-ledger.md）"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/note/src/ui/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [{ "name": "bun:sqlite", "message": "ui は browser で動く（ADR-0009）" }],
+            "patterns": [
+              {
+                "group": ["@tania/*/cli"],
+                "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
+              },
+              {
+                "group": [
+                  "@tania/task",
+                  "@tania/task/*",
+                  "@tania/workbench",
+                  "@tania/workbench/*",
+                  "@tania/job",
+                  "@tania/job/*"
+                ],
+                "message": "note は他の domain を import しない（docs/packages/note-ledger.md）"
+              },
+              {
+                "group": ["@tania/*/server", "../server", "../server.ts"],
+                "allowTypeImports": true,
+                "message": "ui は browser で動くので server entry を import しない（ADR-0009）"
+              },
+              {
+                "group": [
+                  "@tania/*/schema",
+                  "../schema",
+                  "../schema.ts",
+                  "drizzle-orm",
+                  "drizzle-orm/**"
+                ],
+                "allowTypeImports": true,
+                "message": "DB に触るのは Backend だけで、webview は procedure を呼ぶ（ADR-0003）"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/note/src/body/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "bun:sqlite",
+                "message": "body は server と ui の両方が import するので、どこでも動くものだけを import する"
+              }
+            ],
+            "patterns": [
+              {
+                "group": ["@tania/*/cli"],
+                "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
+              },
+              {
+                "group": [
+                  "@tania/task",
+                  "@tania/task/*",
+                  "@tania/workbench",
+                  "@tania/workbench/*",
+                  "@tania/job",
+                  "@tania/job/*"
+                ],
+                "message": "note は他の domain を import しない（docs/packages/note-ledger.md）"
+              },
+              {
+                "group": [
+                  "@tania/*/server",
+                  "@tania/*/schema",
+                  "../server",
+                  "../server.ts",
+                  "../schema",
+                  "../schema.ts",
+                  "drizzle-orm",
+                  "drizzle-orm/**"
+                ],
+                "allowTypeImports": true,
+                "message": "body は server と ui の両方が import するので、どこでも動くものだけを import する"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "files": ["packages/ui/**"],
       "rules": {
         "no-restricted-imports": [
@@ -329,6 +447,22 @@
               {
                 "group": ["*", "!drizzle-orm/sqlite-core"],
                 "message": "schema entry はどこでも import されるので drizzle-orm/sqlite-core だけを import する"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/note/src/schema.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["*", "!drizzle-orm", "!drizzle-orm/sqlite-core"],
+                "message": "schema entry はどこでも import されるので drizzle-orm（CHECK と部分 index の sql）と drizzle-orm/sqlite-core だけを import する"
               }
             ]
           }
