@@ -481,7 +481,14 @@
                 "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
               },
               {
-                "group": ["@tania/cli", "@tania/cli/*", "@tania/desktop", "@tania/desktop/*"],
+                "group": [
+                  "@tania/cli",
+                  "@tania/cli/*",
+                  "@tania/desktop",
+                  "@tania/desktop/*",
+                  "@tania/web",
+                  "@tania/web/*"
+                ],
                 "message": "apps どうしは import しない（ADR-0002）"
               }
             ]
@@ -501,7 +508,9 @@
                   "@tania/backend",
                   "@tania/backend/*",
                   "@tania/desktop",
-                  "@tania/desktop/*"
+                  "@tania/desktop/*",
+                  "@tania/web",
+                  "@tania/web/*"
                 ],
                 "message": "apps どうしは import しない（ADR-0002）"
               }
@@ -529,7 +538,9 @@
                   "@tania/backend",
                   "@tania/backend/*",
                   "@tania/desktop",
-                  "@tania/desktop/*"
+                  "@tania/desktop/*",
+                  "@tania/web",
+                  "@tania/web/*"
                 ],
                 "message": "apps どうしは import しない（ADR-0002）"
               },
@@ -561,13 +572,58 @@
                 "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
               },
               {
-                "group": ["@tania/backend", "@tania/backend/*", "@tania/cli", "@tania/cli/*"],
+                "group": [
+                  "@tania/backend",
+                  "@tania/backend/*",
+                  "@tania/cli",
+                  "@tania/cli/*",
+                  "@tania/web",
+                  "@tania/web/*"
+                ],
                 "message": "apps どうしは import しない（ADR-0002）"
               },
               {
                 "group": ["@tania/*/server", "@tania/*/schema", "drizzle-orm", "drizzle-orm/**"],
                 "allowTypeImports": true,
                 "message": "DB に触るのは Backend だけで、webview は procedure を呼ぶ（ADR-0003）"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["apps/web/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "bun:sqlite",
+                "message": "DB に触るのは Backend だけで、ブラウザは procedure を呼ぶ（ADR-0003）"
+              }
+            ],
+            "patterns": [
+              {
+                "group": ["@tania/*/cli"],
+                "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
+              },
+              {
+                "group": [
+                  "@tania/backend",
+                  "@tania/backend/*",
+                  "@tania/cli",
+                  "@tania/cli/*",
+                  "@tania/desktop",
+                  "@tania/desktop/*"
+                ],
+                "message": "apps どうしは import しない（ADR-0002）"
+              },
+              {
+                "group": ["@tania/*/server", "@tania/*/schema", "drizzle-orm", "drizzle-orm/**"],
+                "allowTypeImports": true,
+                "message": "DB に触るのは Backend だけで、ブラウザは procedure を呼ぶ（ADR-0003）"
               }
             ]
           }

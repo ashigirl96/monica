@@ -1,6 +1,6 @@
 ---
 name: backend-headless
-description: "desktop 無しで Backend と tania-ptyd を起こし、CLI と RPC で振る舞いを確かめる。受け入れ条件を手で確かめるとき、Backend の起動・終了・ptyd との再接続を実機で見るとき、Tab で claude を動かして Agent Session を見るとき、Task の Bench（run・close）を確かめるとき、Job が予定の時刻に走るのを確かめるときに使う。"
+description: "desktop 無しで Backend と tania-ptyd を起こし、CLI と RPC で振る舞いを確かめる。受け入れ条件を手で確かめるとき、Backend の起動・終了・ptyd との再接続を実機で見るとき、Tab で claude を動かして Agent Session を見るとき、Task の Bench（run・close）を確かめるとき、Job が予定の時刻に走るのを確かめるとき、notes の画面をブラウザで確かめるときに使う。"
 ---
 
 Backend を本物の ptyd に繋いで起こす。Shell の役（親として生き続け、stdin の pipe の書き側を握る）は Bash の background job が演じる。
@@ -19,6 +19,7 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
    - 親は background job のまま生かす。`( … &)` で切り離すと親がすぐ死に、Backend は ppid=1 の見張りで約 1 秒後に黙って抜ける。
    - stdin は無名 pipe にする。Bun は fifo の EOF を拾わないので、fifo では stdin の EOF で抜ける振る舞いを確かめられない。
    - `.app` でだけ起きること（gh や ghq が見つからないなど）を確かめるときは、`env -i HOME=$HOME USER=$USER SHELL=/bin/zsh LANG=$LANG TMPDIR=$TMPDIR PATH=/usr/bin:/bin:/usr/sbin:/sbin` を前に付け、bun を絶対 path（`~/.bun/bin/bun`）で起こす。PATH が launchd の渡すものと同じになり、Backend が login shell から取った PATH が効いているかを見られる。
+   - release の build の Backend（同梱した SPA や migrations）を確かめるときは、`bun run build` の後に `target/release/bundle/macos/tania.app/Contents/MacOS/` の `tania-backend` を bun の代わりに起こし、同じ directory の `tania-ptyd` を `TANIA_PTYD_PATH` に渡す。`.app` そのものは起こさない。identifier が release と同じなので、single-instance が手元の release の窓に回すか、release が居なければ `~/.tania` で Backend を起こす。
    - Monica の tab・tania の Tab・Claude Code の中（`env | grep -E '^(MONICA_|TANIA_|CLAUDECODE)'` が出る）から起こすときは、`env -i HOME=$HOME USER=$USER SHELL=/bin/zsh TERM=xterm-256color LANG=$LANG TMPDIR=$TMPDIR PATH=<monica を含む dir を除いた PATH>` を前に付ける。ptyd は Backend の env から `TANIA_*` と Claude Code の env を落として tab に渡すが、`MONICA_*` は残すので、tab の claude に Monica の hook が付き、Monica 側に記録される。ユーザーの Job は Backend の env をそのまま受けるので、外側の `TANIA_TERMINAL_SESSION_ID` や `CLAUDECODE` も Job に届く。
 
 4. tab の claude の hook を確かめるなら、起動した後に `ln -s $PWD/scripts/tania-dev ${TMPDIR%/}/tania-s2/bin/tania` を張る。hook の settings の command はこの path を指し、desktop では Shell が張る。
@@ -112,6 +113,38 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 
 - cron 式は分の単位で、tick は 30 秒おきなので、2 分先の式で登録する。`T=$(date -v+2M '+%M %H')` から `"$((10#${T% *})) $((10#${T#* })) * * *"` を作り、`tania job add <name> --schedule … --command … --cwd <絶対 path>` に渡す。予定の分から 30 秒以内に走る。
 - 走ったのは `$TANIA_HOME/logs/jobs/<name>/` ができたとき。待つのは、Bash の `run_in_background` で `until [ -d ${TMPDIR%/}/tania-s2/logs/jobs/<name> ]; do sleep 1; done` を走らせる。結果は `tania job show <name>` の RESULT・EXIT・LOG で見る。
+
+## notes の画面をブラウザで確かめる
+
+画面は `apps/web` の Vite が配り、`/rpc` と `/api/assets` を同じ home の Backend の notes の口へ proxy する。`bun run` の Backend の notes の口は SPA を配らないので、開くのは Vite の URL。
+
+1. home を作ってから、notes の口と Vite の port を引く。`devInstance` は home の realpath から port を決めるので、home が無いうちに引くと `$TMPDIR` の `/var` と `/private/var` の違いで Vite と別の port になる。
+
+   ```bash
+   mkdir -p ${TMPDIR%/}/tania-s2
+   TANIA_HOME=${TMPDIR%/}/tania-s2 bun -e '
+   const { devInstance } = await import(`${process.cwd()}/scripts/dev-instance.ts`);
+   const { notesPort, webPort } = devInstance(process.env.TANIA_HOME);
+   console.log(notesPort, webPort);'
+   ```
+
+2. 「起こす」の 3 の command に `TANIA_NOTES_PORT=<notes の port>` を足して Backend を起こす。port が埋まっていると、`err.log` に `[backend] not serving notes on port …` が出て、口なしで起きる。
+3. Bash の `run_in_background` で Vite を起こす。`web.log` に `Local:   http://localhost:<Vite の port>/` が出たら開ける。
+
+   ```bash
+   TANIA_HOME=${TMPDIR%/}/tania-s2 bun run web > $SCRATCH/web.log 2>&1
+   ```
+
+4. agent-browser で開く。並行する他の agent と競合しないよう、すべてのコマンドに同じ `--session <固有の名前>` を付ける。
+
+   ```bash
+   agent-browser --session tania-s2 open http://localhost:<Vite の port>/
+   agent-browser --session tania-s2 snapshot
+   ```
+
+   Backend に届かないときは、Vite が proxy の失敗を Bad Gateway で返し、`web.log` に `http proxy error` が出る。
+
+片付けでは `agent-browser --session tania-s2 close` で browser を閉じ、Vite の pid（`lsof -ti tcp:<Vite の port> -sTCP:LISTEN`）に `kill` を送ってから、下の手順で Backend を止める。
 
 ## 止めて片付ける
 

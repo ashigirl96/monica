@@ -20,7 +20,9 @@ if (isReleaseHome(process.env.TANIA_HOME)) {
 }
 process.env.TANIA_BIN = join(repo, 'scripts/tania-dev')
 mkdirSync(process.env.TANIA_HOME, { recursive: true, mode: 0o700 })
-const { identifier, preferredPort } = devInstance(process.env.TANIA_HOME)
+const { identifier, preferredPort, notesPort } = devInstance(process.env.TANIA_HOME)
+// apps/web の Vite も同じ home から port を引いて proxy するので、空きを探して動かさない。
+process.env.TANIA_NOTES_PORT = String(notesPort)
 
 function bindable(port: number, host: string): Promise<boolean> {
   return new Promise((settle) => {
