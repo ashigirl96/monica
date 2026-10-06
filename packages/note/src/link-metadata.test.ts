@@ -144,15 +144,22 @@ test('a Shift_JIS page is decoded by the charset in its Content-Type, or else in
   }
 })
 
-test('a page with no charset, or one TextDecoder does not know, is read as UTF-8', async () => {
+test('a page with no charset, one TextDecoder does not know, or charset= only in a meta not declaring one, is read as UTF-8', async () => {
   const { client, site } = setup()
   site.page('/none', { body: '<title>日本語</title>' })
   site.page('/unknown', {
     headers: { 'content-type': 'text/html; charset=x-no-such-charset' },
     body: '<title>日本語</title>',
   })
+  site.page('/unrelated-meta', {
+    body: `<html><head>
+      <meta name="description" content="Pages in charset=Shift_JIS">
+      <meta http-equiv="refresh" content="0; url=/next?charset=shift_jis">
+      <title>日本語</title>
+    </head></html>`,
+  })
 
-  for (const path of ['/none', '/unknown']) {
+  for (const path of ['/none', '/unknown', '/unrelated-meta']) {
     expect(await client.linkMetadata({ url: site.url(path) })).toMatchObject({ title: '日本語' })
   }
 })

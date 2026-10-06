@@ -56,18 +56,35 @@ async function readCapped(body: ReadableStream<Uint8Array>): Promise<Uint8Array>
 }
 
 const CHARSET = /charset\s*=\s*["']?\s*([^\s"';>/]+)/i
-const META_CHARSET = new RegExp(`<meta\\b[^>]*?${CHARSET.source}`, 'i')
 // HTML の仕様が meta の charset を探す範囲。
 const PRESCAN_BYTES = 1024
 
 function decode(body: Uint8Array, contentType: string | null): string {
-  const head = new TextDecoder('latin1').decode(body.subarray(0, PRESCAN_BYTES))
-  const label = contentType?.match(CHARSET)?.[1] ?? head.match(META_CHARSET)?.[1] ?? 'utf-8'
+  const label = contentType?.match(CHARSET)?.[1] ?? metaCharset(body) ?? 'utf-8'
   try {
     return new TextDecoder(label).decode(body)
   } catch {
     return new TextDecoder().decode(body)
   }
+}
+
+function metaCharset(body: Uint8Array): string | null {
+  // charset の宣言は ASCII で書かれるので、どの byte も 1 文字に写す latin1 で読めば足りる。
+  const head = new TextDecoder('latin1').decode(body.subarray(0, PRESCAN_BYTES))
+  let label: string | null = null
+  new HTMLRewriter()
+    .on('meta[charset]', {
+      element(el) {
+        label ??= el.getAttribute('charset')
+      },
+    })
+    .on('meta[http-equiv="content-type" i][content]', {
+      element(el) {
+        label ??= el.getAttribute('content')?.match(CHARSET)?.[1] ?? null
+      },
+    })
+    .transform(head)
+  return label
 }
 
 function parseLinkMetadata(html: string, base: string): LinkMetadata {
