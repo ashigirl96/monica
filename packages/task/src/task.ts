@@ -6,6 +6,7 @@ import type { BackgroundSyncError, TaskChange } from './contract.ts'
 import { defaultGitHub, type GitHub } from './github.ts'
 import { defaultGhq, type Ghq, killSetups } from './prepare.ts'
 import { applyRunInvariant, type RunOrigin, refOfRunTask } from './run.ts'
+import { sweepSetupLogs } from './setup-log.ts'
 import { SYNC_TIMEOUT_MS, type SyncDeps, syncOpenTasks } from './sync.ts'
 
 export type TaskLedger = {
@@ -14,11 +15,13 @@ export type TaskLedger = {
   stop(): void
   /** open な Task すべての Sync。失敗した repo があるか throw したら reject する。 */
   syncInBackground(): Promise<void>
+  /** 消せなかった setup の log か directory があれば、残りを消してから reject する。 */
+  cleanSetupLogs(): Promise<void>
 }
 
 type Internals = SyncDeps & BenchDeps & { backgroundSyncError: () => BackgroundSyncError | null }
 
-// TaskLedger の型は events / start / stop / syncInBackground だけに保ち、GitHub への接続などの中身は TaskLedger を key にここへ置く。
+// TaskLedger の型は events / start / stop / syncInBackground / cleanSetupLogs だけに保ち、GitHub への接続などの中身は TaskLedger を key にここへ置く。
 const internalsOf = new WeakMap<TaskLedger, Internals>()
 
 export function internals(taskLedger: TaskLedger): Internals {
@@ -119,6 +122,9 @@ export function createTaskLedger(deps: {
       killSetups(benchDeps.setups)
     },
     syncInBackground,
+    async cleanSetupLogs() {
+      sweepSetupLogs({ db, home })
+    },
   }
   internalsOf.set(taskLedger, {
     ...syncDeps,

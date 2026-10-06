@@ -194,7 +194,8 @@ export function startFakeGitHub() {
     },
     // 旧名の query も新しい repo に解決する。
     renameRepo(from: string, to: string) {
-      for (const [k, found] of issues) {
+      // 大小だけの改名は同じ key に入れ直すので、写しを回さないと入れ直した entry をまた訪れる。
+      for (const [k, found] of Array.from(issues)) {
         const { repo, number } = parseRef(found.ref)
         if (caseless(repo) !== caseless(from)) continue
         issues.delete(k)
