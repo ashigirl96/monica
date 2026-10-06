@@ -32,7 +32,16 @@ function setup() {
 }
 
 function editorOn(note: Note | null) {
-  return { noteRef: { current: note }, reschedule: mock((_note: Note) => {}) }
+  let openId = note?.id ?? null
+  return {
+    noteRef: { current: note },
+    reschedule: mock((_note: Note) => {}),
+    openId: () => openId,
+    open(id: string | null) {
+      openId = id
+    },
+    leave: mock(() => {}),
+  }
 }
 
 test('removing saves the edits first, drops the saves still waiting, and undo brings the Notes back last first', async () => {
@@ -112,7 +121,7 @@ test('a Note opened while the removal fails keeps the edits typed into it', asyn
   expect(editor.reschedule).not.toHaveBeenCalled()
 })
 
-test('a removed Note that was open is not saved to again', async () => {
+test('a removed Note that was open is not saved to again, and the screen leaves it', async () => {
   const { removals } = setup()
   const editor = editorOn(repoNote('note-1'))
 
@@ -120,4 +129,37 @@ test('a removed Note that was open is not saved to again', async () => {
 
   expect(editor.noteRef.current).toBeNull()
   expect(editor.reschedule).not.toHaveBeenCalled()
+  expect(editor.leave).toHaveBeenCalledTimes(1)
+})
+
+test('a Note opened while it is being removed is left once it is gone', async () => {
+  const { removals, deps } = setup()
+  const editor = editorOn(repoNote('note-9'))
+  deps.remove.mockImplementationOnce(() => {
+    editor.open('note-1')
+    return Promise.resolve()
+  })
+
+  expect(await removals.remove('note-1', editor)).toBe(true)
+
+  expect(editor.leave).toHaveBeenCalledTimes(1)
+})
+
+test('removing a Note that is not open stays on the open one', async () => {
+  const { removals } = setup()
+  const editor = editorOn(repoNote('note-9'))
+
+  expect(await removals.remove('note-1', editor)).toBe(true)
+
+  expect(editor.leave).not.toHaveBeenCalled()
+})
+
+test('a removal that fails does not leave the Note', async () => {
+  const { removals, deps } = setup()
+  const editor = editorOn(repoNote('note-1'))
+  deps.remove.mockImplementationOnce(() => Promise.reject(new Error('unreachable')))
+
+  expect(await removals.remove('note-1', editor)).toBe(false)
+
+  expect(editor.leave).not.toHaveBeenCalled()
 })

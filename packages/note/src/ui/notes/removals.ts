@@ -13,6 +13,9 @@ type RemovalDeps = {
 type Editor = {
   noteRef: { current: Note | null }
   reschedule: (note: Note) => void
+  /** 今開いている Note の id。待つ間に移ることがあるので、待った後に読む。 */
+  openId: () => string | null
+  leave: () => void
 }
 
 /**
@@ -38,6 +41,7 @@ export class Removals {
       // 締めている間に打った分はエディタが持っているので、保存し直す。
       editor.reschedule(open)
     }
+    if (removed && editor.openId() === id) editor.leave()
     return removed
   }
 

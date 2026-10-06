@@ -1,3 +1,4 @@
+import { ORPCError } from '@orpc/client'
 import { FuzzyPickerModal } from '@tania/ui'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
@@ -101,6 +102,19 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
   // 再フェッチ失敗でエディタを unmount すると、保存済みの編集が巻き戻る）。
   const loadError = note === null ? openQuery.error : null
 
+  // 別のタブで消された Repo Note は、このタブで消したときと同じく、保存の予約を捨てて Scratch へ移る。
+  const goneId = note !== null && isNotFound(noteQuery.error) ? noteId : null
+  useEffect(() => {
+    if (goneId === null) return
+    discard(goneId)
+    navigate(repoPath(repo), { replace: true })
+  }, [goneId, discard, repo])
+
+  const openIdRef = useRef(noteId)
+  useEffect(() => {
+    openIdRef.current = noteId
+  }, [noteId])
+
   const isScratch = note?.kind === 'scratch'
 
   // ⌥K/J の巡回対象: Scratch（先頭）＋時系列
@@ -151,11 +165,15 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
 
   const deleteById = useCallback(
     async (targetId: string) => {
-      if (!(await removals.remove(targetId, { noteRef, reschedule: scheduleSave }))) return
-      patchRepoNotes((notes) => notes.filter((s) => s.id !== targetId))
-      if (noteId === targetId) navigate(repoPath(repo), { replace: true })
+      const removed = await removals.remove(targetId, {
+        noteRef,
+        reschedule: scheduleSave,
+        openId: () => openIdRef.current,
+        leave: () => navigate(repoPath(repo), { replace: true }),
+      })
+      if (removed) patchRepoNotes((notes) => notes.filter((s) => s.id !== targetId))
     },
-    [removals, scheduleSave, noteId, repo, patchRepoNotes],
+    [removals, scheduleSave, repo, patchRepoNotes],
   )
 
   const undoDelete = useCallback(async () => {
@@ -318,4 +336,8 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
       )}
     </NotesShell>
   )
+}
+
+function isNotFound(error: Error | null): boolean {
+  return error instanceof ORPCError && error.code === 'NOT_FOUND'
 }

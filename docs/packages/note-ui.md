@@ -111,6 +111,8 @@ monica の `web/src` の router・autosave・Daily と project の画面を移�
   - ⌥J / ⌥K: Scratch と Repo Note を巡回する。
 - 削除と取り消しの判断は `notes/removals.ts` の `Removals` が持つ。保存を出し切ってから消し、その Note の未保存の編集が残れば消さない（⌥Z で戻せるのが server に届いた本文までになるため）。取り消しの stack は画面の寿命の間だけ持ち、Repo を切り替えると画面ごと作り直すので空になる（monica と同じ）。
 - 開いている Repo Note を消す間は、`noteRef` を外して保存の予約を締め、消せなかったら開き直して締めている間の打鍵を保存し直す。待つ間に別の Note を開いていたら開き直さない。開き直すと、今開いている Note の打鍵が消せなかった Note へ保存される（monica にあった不具合）。
+- 消せたら、その時に開いている Note が消した Note なら Scratch へ移る。開いているかは待った後の route で見る。サイドバーの × で消している間に、その Note を開いて書くことがあるため。
+- 別のタブで消された Repo Note は、取り直しの `NOT_FOUND` で、このタブで消したときと同じく保存の予約を捨てて Scratch へ移る。開いた本文を出し続けると、書いた分の保存が `NOT_FOUND` で再試行され続ける。開いた本文の無い（URL から直に開いた）消えた Note は、エラーを出す。
 - Scratch の保存は title を省く。server は title の付いた Scratch の保存を本文ごと断る。
 
 ### 保存と競合
