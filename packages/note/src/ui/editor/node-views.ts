@@ -351,13 +351,25 @@ class DividerView implements NodeView {
   }
 }
 
+// link は貼った HTML の href をそのまま持つので、javascript: のようなスクリプトを動かす URL も入りうる。
+const OPENABLE_PROTOCOLS = new Set(['http:', 'https:', 'mailto:'])
+
+export function isOpenableHref(href: string, base: string): boolean {
+  try {
+    return OPENABLE_PROTOCOLS.has(new URL(href, base).protocol)
+  } catch {
+    return false
+  }
+}
+
 // contenteditable 内の <a> はブラウザがナビゲーションを握り潰すため明示的に開く
 export function openExternal(href: string): void {
+  if (!isOpenableHref(href, window.location.href)) return
   window.open(href, '_blank', 'noopener')
 }
 
 function openHref(anchor: HTMLAnchorElement, href: string): void {
-  anchor.href = href
+  if (isOpenableHref(href, window.location.href)) anchor.href = href
   anchor.target = '_blank'
   anchor.rel = 'noopener noreferrer'
   anchor.addEventListener('click', (e) => {

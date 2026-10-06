@@ -5,5 +5,10 @@ export function notePath(id: string): string {
 
 export function noteIdOfPath(pathname: string): string | null {
   const match = /^\/notes\/([^/]+)\/?$/.exec(pathname)
-  return match ? decodeURIComponent(match[1]!) : null
+  if (!match) return null
+  try {
+    return decodeURIComponent(match[1]!)
+  } catch {
+    return null
+  }
 }

@@ -34,6 +34,7 @@ monica の `shared/block-editor` を `src/ui/editor/` に振る舞いを変え�
 - 内部リンクの判定は、自分の origin の URL に加えて、開いている origin と link の host 名がどちらも `NOTES_HOSTNAMES`（`tania.localhost`・`localhost`・`127.0.0.1`）にあり、scheme と port が同じ URL を内部として扱う。保存される link は `tania.localhost` で書かれるが、ユーザーが同じ Backend を別の名前で開くこともあるため。port が違えば同じ host 名でも外部のリンクになる。
 - `import.meta.env.DEV` は残す。dev でだけ IME の debug plugin を入れる。`vite/client` の型は program 全体で効いている。
 - エディタは localStorage を使わない。
+- link・Link Mention・Bookmark のクリックで開くのは、scheme が `http:`・`https:`・`mailto:` の URL だけ（相対の URL は今の頁を基準に解く。`node-views.ts` の `isOpenableHref`）。本文の link は貼った HTML の href をそのまま持つので、`javascript:` のようなスクリプトを動かす URL も入りうる。
 
 ### CSS
 

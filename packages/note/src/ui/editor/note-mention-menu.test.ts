@@ -71,6 +71,11 @@ describe('internalNoteId の host 名と port', () => {
     expect(internalNoteId('http://127.0.0.1:19381/notes/note-5', TANIA)).toBeNull()
   })
 
+  test('percent encoding が壊れた path は内部のリンクにならない', () => {
+    expect(internalNoteId('/notes/%', TANIA)).toBeNull()
+    expect(internalNoteId('/notes/%E0%A4%A', TANIA)).toBeNull()
+  })
+
   test('同じ port でも、3 つ以外の host 名は外部のリンクになる', () => {
     expect(internalNoteId('http://example.com:19380/notes/note-5', TANIA)).toBeNull()
   })
