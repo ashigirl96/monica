@@ -9,6 +9,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react'
 
 import { fromBase64, encoder, toBase64 } from './base64.ts'
 import { EventCleanupManager } from './event-cleanup.ts'
+import { pasteFilePaths } from './file-paste.ts'
 import { jumpHintsActiveAtom } from './jump-hints.ts'
 import { openInEditorAtom, resolveEditorPathsAtom, terminalFocusRequestAtom } from './store.ts'
 import { attachTapSelection } from './tap-selection.ts'
@@ -260,6 +261,13 @@ export function useTerminal(
       cleanup.addEventListener(container, 'mousedown', blockPhantom, true)
       cleanup.addEventListener(container, 'pointerdown', blockPhantom, true)
       cleanup.addEventListener(container, 'wheel', onWheel, { capture: true })
+      // xterm は paste を textarea と element で受けるので、その手前の capture で横取りする。
+      cleanup.addEventListener(
+        container,
+        'paste',
+        (e) => void pasteFilePaths(e, (text) => term.paste(text)),
+        true,
+      )
       cleanup.add(attachTapSelection(term, container))
       cleanup.add(
         attachTerminalLinks(term, container, {

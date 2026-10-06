@@ -7,6 +7,9 @@ version = "0.0.0"
 edition = "2021"
 rust-version = "1.95"
 
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "warn"
+
 [workspace.dependencies]
 tania-logfile = { path = "crates/logfile" }
 tania-terminal-client = { path = "crates/terminal-client" }
