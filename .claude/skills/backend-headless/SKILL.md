@@ -12,10 +12,11 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 3. Bash の `run_in_background` で、stdin を無名 pipe で握って起こす。出力は scratchpad の file に向ける。
 
    ```bash
-   sleep 100000 | TANIA_HOME=${TMPDIR%/}/tania-s2 TANIA_PTYD_PATH=target/debug/tania-ptyd \
+   sleep 100002 | TANIA_HOME=${TMPDIR%/}/tania-s2 TANIA_PTYD_PATH=target/debug/tania-ptyd \
      bun apps/backend/src/main.ts > $SCRATCH/out.jsonl 2> $SCRATCH/err.log
    ```
 
+   - sleep の秒数は home ごとに変える（`tania-s2` なら `100002`）。並行する他の session も同じ command 行で Backend と sleep を起こしているので、止めるときに自分の sleep だけを pattern で当てるため。
    - 親は background job のまま生かす。`( … &)` で切り離すと親がすぐ死に、Backend は ppid=1 の見張りで約 1 秒後に黙って抜ける。
    - stdin は無名 pipe にする。Bun は fifo の EOF を拾わないので、fifo では stdin の EOF で抜ける振る舞いを確かめられない。
    - `.app` でだけ起きること（gh や ghq が見つからないなど）を確かめるときは、`env -i HOME=$HOME USER=$USER SHELL=/bin/zsh LANG=$LANG TMPDIR=$TMPDIR PATH=/usr/bin:/bin:/usr/sbin:/sbin` を前に付け、bun を絶対 path（`~/.bun/bin/bun`）で起こす。PATH が launchd の渡すものと同じになり、Backend が login shell から取った PATH が効いているかを見られる。
@@ -24,7 +25,7 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 
 4. tab の claude の hook を確かめるなら、起動した後に `ln -s $PWD/scripts/tania-dev ${TMPDIR%/}/tania-s2/bin/tania` を張る。hook の settings の command はこの path を指し、desktop では Shell が張る。
 
-起動できたのは、`out.jsonl` に `{"type":"endpoint",…}` の行が出て、`$TANIA_HOME/backend.json` ができたとき。待つのは、Bash の `run_in_background` で `until [ -f ${TMPDIR%/}/tania-s2/backend.json ] || ! pgrep -qf apps/backend/src/main.ts; do sleep 0.5; done` を走らせる（前景の `sleep` は harness が止める）。抜けた後に `backend.json` が無ければ Backend は落ちているので、`err.log` を読む。
+起動できたのは、`out.jsonl` に `{"type":"endpoint",…}` の行が出て、`$TANIA_HOME/backend.json` ができたとき。待つのは、Bash の `run_in_background` で `for _ in {1..60}; do [ -f ${TMPDIR%/}/tania-s2/backend.json ] && break; sleep 0.5; done` を走らせる（前景の `sleep` は harness が止める）。抜けた後に `backend.json` が無ければ Backend は落ちているので、`err.log` を読む。Backend が落ちれば、起こした background job も終わって通知が来る。Backend の process は `pgrep -f apps/backend/src/main.ts` で探さない。並行する session の Backend にも当たる。
 
 ## 確かめる
 
@@ -144,13 +145,22 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 
    Backend に届かないときは、Vite が proxy の接続を応答なしで切り（release の口と同じく、画面には network error に見える）、`web.log` に `http proxy error` が出る。
 
+5. エディタへの貼り付けは、`.ProseMirror` に `paste` の `ClipboardEvent` を dispatch して起こす。キーは `press`（`End`・`Enter`・`ArrowDown` など）で送る。
+
+   ```bash
+   agent-browser --session tania-s2 eval "(() => { const e = document.querySelector('.ProseMirror'); e.focus(); const d = new DataTransfer(); d.setData('text/plain', 'http://127.0.0.1:<port>/page'); e.dispatchEvent(new ClipboardEvent('paste', { clipboardData: d, bubbles: true, cancelable: true })) })()"
+   ```
+
+   block の id がまだ無い段落（新しい Daily の最初の段落など）に URL を貼ると、block に id を振る transaction が続き、link-menu はそれをメニューの外の変更とみなして「Paste as」を描く前に閉じる。メニューを確かめるときは、先に `press End` と `press Enter` で次の段落を作ってから貼る。
+
 片付けでは `agent-browser --session tania-s2 close` で browser を閉じ、Vite の pid（`lsof -ti tcp:<Vite の port> -sTCP:LISTEN`）に `kill` を送ってから、下の手順で Backend を止める。
 
 ## 止めて片付ける
 
-- stdin の EOF で止める: sleep の pid を `pgrep -f "^sleep 100000$"` で取り、その pid に `kill` を送る。`pkill -f` は harness の zsh にも当たり、親ごと殺す。
+- 止める前に、Backend の pid を `jq .pid ${TMPDIR%/}/tania-s2/backend.json` で控える。止まったかは、その pid への `kill -0` が失敗することで見る。
+- stdin の EOF で止める: sleep の pid を `pgrep -f "^sleep 100002$"` で取り、その pid に `kill` を送る。`pkill -f` は harness の zsh にも当たり、親ごと殺す。
 - SIGTERM で止める: `kill -TERM $(jq .pid ${TMPDIR%/}/tania-s2/backend.json)`。pipe の左の sleep は残り、background の job が終わらないので、続けて上の手順で sleep も止める。
 - Backend が止まったら `rm -rf ${TMPDIR%/}/tania-s2` で home を消す。ptyd は socket が消えたのを 2 秒おきの確認で見つけ、shell ごと終わるので、下の判定は数秒待ってからする。
 - Tab で claude を起こしたなら、claude が cwd ごとに作る `~/.claude/projects/-private-var-folders-…-tania-s2…` も消す（cwd の `/` と `.` が `-` になった名前）。`ls ~/.claude/projects | grep tania-s2` で見つかる。
 
-片付いたのは、`pgrep -f apps/backend/src/main.ts` と `pgrep -f "tania-ptyd --tania-home ${TMPDIR%/}/tania-s2"` が何も返さず、home が消えたとき。消し忘れた dev は `bun run dev:list` で見つけ、`bun run dev:kill <NAME>` で片付ける。
+片付いたのは、控えた Backend の pid への `kill -0` が失敗し、`pgrep -f "tania-ptyd --tania-home ${TMPDIR%/}/tania-s2"` が何も返さず、home が消えたとき。消し忘れた dev は `bun run dev:list` で見つけ、`bun run dev:kill <NAME>` で片付ける。
