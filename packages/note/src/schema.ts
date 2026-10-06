@@ -29,7 +29,10 @@ export const note = sqliteTable(
       .where(sql`kind = 'scratch'`),
     check('note_kind', sql`kind IN ('daily', 'essay', 'repo_note', 'scratch')`),
     check('note_title', sql`(kind IN ('essay', 'repo_note')) = (title IS NOT NULL)`),
-    check('note_status', sql`(kind = 'essay') = (status IS NOT NULL)`),
+    check(
+      'note_status',
+      sql`(kind = 'essay') = (status IS NOT NULL) AND (status IS NULL OR status IN ('writing', 'finished'))`,
+    ),
     check('note_repo', sql`(kind IN ('repo_note', 'scratch')) = (repo IS NOT NULL)`),
     check('note_deleted_at', sql`deleted_at IS NULL OR kind IN ('essay', 'repo_note')`),
   ],

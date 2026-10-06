@@ -43,6 +43,11 @@ test.each<[string, Partial<Row>, string]>([
   ['an Essay with no title', { kind: 'essay', status: 'writing' }, 'note_title'],
   ['an Essay with no status', { kind: 'essay', title: '' }, 'note_status'],
   [
+    'an Essay with a status no Essay has',
+    { kind: 'essay', title: '', status: 'drafting' as 'writing' },
+    'note_status',
+  ],
+  [
     'an Essay with a Repo',
     { kind: 'essay', title: '', status: 'writing', repo: 'owner/repo' },
     'note_repo',

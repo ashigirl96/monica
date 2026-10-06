@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "1b1fbf50-401f-4e59-807f-278ed71de06f",
+  "id": "7c31cf60-208d-42b0-bb28-061796b4ece7",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "note": {
@@ -117,7 +117,7 @@
         },
         "note_status": {
           "name": "note_status",
-          "value": "(kind = 'essay') = (status IS NOT NULL)"
+          "value": "(kind = 'essay') = (status IS NOT NULL) AND (status IS NULL OR status IN ('writing', 'finished'))"
         },
         "note_repo": {
           "name": "note_repo",

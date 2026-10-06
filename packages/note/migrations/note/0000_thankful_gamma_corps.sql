@@ -12,7 +12,7 @@ CREATE TABLE `note` (
 	`deleted_at` integer,
 	CONSTRAINT "note_kind" CHECK(kind IN ('daily', 'essay', 'repo_note', 'scratch')),
 	CONSTRAINT "note_title" CHECK((kind IN ('essay', 'repo_note')) = (title IS NOT NULL)),
-	CONSTRAINT "note_status" CHECK((kind = 'essay') = (status IS NOT NULL)),
+	CONSTRAINT "note_status" CHECK((kind = 'essay') = (status IS NOT NULL) AND (status IS NULL OR status IN ('writing', 'finished'))),
 	CONSTRAINT "note_repo" CHECK((kind IN ('repo_note', 'scratch')) = (repo IS NOT NULL)),
 	CONSTRAINT "note_deleted_at" CHECK(deleted_at IS NULL OR kind IN ('essay', 'repo_note'))
 );
