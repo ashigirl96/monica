@@ -1,6 +1,6 @@
 ---
 name: backend-headless
-description: "desktop 無しで Backend と tania-ptyd を起こし、CLI と RPC で振る舞いを確かめる。受け入れ条件を手で確かめるとき、Backend の起動・終了・ptyd との再接続を実機で見るとき、Tab で claude を動かして Agent Session を見るとき、Task の Bench（run・close）を確かめるときに使う。"
+description: "desktop 無しで Backend と tania-ptyd を起こし、CLI と RPC で振る舞いを確かめる。受け入れ条件を手で確かめるとき、Backend の起動・終了・ptyd との再接続を実機で見るとき、Tab で claude を動かして Agent Session を見るとき、Task の Bench（run・close）を確かめるとき、Job が予定の時刻に走るのを確かめるときに使う。"
 ---
 
 Backend を本物の ptyd に繋いで起こす。Shell の役（親として生き続け、stdin の pipe の書き側を握る）は Bash の background job が演じる。
@@ -19,7 +19,7 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
    - 親は background job のまま生かす。`( … &)` で切り離すと親がすぐ死に、Backend は ppid=1 の見張りで約 1 秒後に黙って抜ける。
    - stdin は無名 pipe にする。Bun は fifo の EOF を拾わないので、fifo では stdin の EOF で抜ける振る舞いを確かめられない。
    - `.app` でだけ起きること（gh や ghq が見つからないなど）を確かめるときは、`env -i HOME=$HOME USER=$USER SHELL=/bin/zsh LANG=$LANG TMPDIR=$TMPDIR PATH=/usr/bin:/bin:/usr/sbin:/sbin` を前に付け、bun を絶対 path（`~/.bun/bin/bun`）で起こす。PATH が launchd の渡すものと同じになり、Backend が login shell から取った PATH が効いているかを見られる。
-   - Monica の tab の中（`env | grep MONICA` が出る）から起こすときは、`env -i HOME=$HOME USER=$USER SHELL=/bin/zsh TERM=xterm-256color LANG=$LANG TMPDIR=$TMPDIR PATH=<monica を含む dir を除いた PATH>` を前に付ける。ptyd は Backend の env を tab に渡すので、`MONICA_*` が残ると tab の claude に Monica の hook が付き、Monica 側に記録される。
+   - Monica の tab・tania の Tab・Claude Code の中（`env | grep -E '^(MONICA_|TANIA_|CLAUDECODE)'` が出る）から起こすときは、`env -i HOME=$HOME USER=$USER SHELL=/bin/zsh TERM=xterm-256color LANG=$LANG TMPDIR=$TMPDIR PATH=<monica を含む dir を除いた PATH>` を前に付ける。ptyd は Backend の env から `TANIA_*` と Claude Code の env を落として tab に渡すが、`MONICA_*` は残すので、tab の claude に Monica の hook が付き、Monica 側に記録される。ユーザーの Job は Backend の env をそのまま受けるので、外側の `TANIA_TERMINAL_SESSION_ID` や `CLAUDECODE` も Job に届く。
 
 4. tab の claude の hook を確かめるなら、起動した後に `ln -s $PWD/scripts/tania-dev ${TMPDIR%/}/tania-s2/bin/tania` を張る。hook の settings の command はこの path を指し、desktop では Shell が張る。
 
@@ -107,6 +107,11 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
    ```
 
 4. 片付けでは、home と一緒に `tania-s2-ghq`・`tania-s2-origin`・`tania-s2-mode` も消す。
+
+## Job を確かめる
+
+- cron 式は分の単位で、tick は 30 秒おきなので、2 分先の式で登録する。`T=$(date -v+2M '+%M %H')` から `"$((10#${T% *})) $((10#${T#* })) * * *"` を作り、`tania job add <name> --schedule … --command … --cwd <絶対 path>` に渡す。予定の分から 30 秒以内に走る。
+- 走ったのは `$TANIA_HOME/logs/jobs/<name>/` ができたとき。待つのは、Bash の `run_in_background` で `until [ -d ${TMPDIR%/}/tania-s2/logs/jobs/<name> ]; do sleep 1; done` を走らせる。結果は `tania job show <name>` の RESULT・EXIT・LOG で見る。
 
 ## 止めて片付ける
 

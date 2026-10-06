@@ -68,6 +68,7 @@ const workbenchLedger = createWorkbenchLedger({
 const taskLedger = createTaskLedger({ db, workbenchLedger, home })
 const jobLedger = createJobLedger({
   db,
+  home,
   systemJobs: [
     { name: 'task.sync', every: 5 * 60_000, run: () => taskLedger.syncInBackground() },
     {
