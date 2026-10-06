@@ -78,19 +78,25 @@ describe('usableServerDoc', () => {
   })
 })
 
-function reloadSetup(result: { data?: Note; isError: boolean }, editWhileFetching = false) {
+function reloadSetup(
+  result: { data?: Note; isError: boolean },
+  whileFetching: 'edit' | 'move' | null = null,
+) {
   const steps: string[] = []
   let mark = 0
+  let open = true
   const dropPending = mock((id: string) => void steps.push(`drop ${id}`))
   const adopt = mock((next: Note) => void steps.push(`adopt ${next.updatedAt.getTime()}`))
   const refetch = () => {
-    if (editWhileFetching) mark += 1
+    if (whileFetching === 'edit') mark += 1
+    if (whileFetching === 'move') open = false
     return Promise.resolve(result)
   }
   const editMark = () => mark
+  const isOpen = () => open
   return {
     steps,
-    run: () => reloadLatest({ id: 'note-1', refetch, dropPending, adopt, editMark }),
+    run: () => reloadLatest({ id: 'note-1', refetch, dropPending, adopt, editMark, isOpen }),
   }
 }
 
@@ -107,8 +113,14 @@ describe('reloadLatest', () => {
     expect(steps).toEqual(['drop note-1', `adopt ${V3.getTime()}`])
   })
 
+  test('取り直しの間に別の note へ移ったら、取り直した doc を今の画面に採用しない', async () => {
+    const { steps, run } = reloadSetup({ data: note(V3), isError: false }, 'move')
+    await run()
+    expect(steps).toEqual([])
+  })
+
   test('取り直しの間に書いた編集があれば、捨てずに競合のまま残す', async () => {
-    const { steps, run } = reloadSetup({ data: note(V3), isError: false }, true)
+    const { steps, run } = reloadSetup({ data: note(V3), isError: false }, 'edit')
     await run()
     expect(steps).toEqual([])
   })

@@ -51,7 +51,8 @@ type RefetchNote = () => Promise<{ data?: Note; isError: boolean }>
 /**
  * 「最新を読み込む」の実体。取り直しが失敗しても TanStack Query は古い cache を data に
  * 残して返すので、成功を確かめてから未送信の編集を捨て、取り直した doc を採用する。
- * 取り直しの間に書いた編集は捨てずに、競合のまま残す。
+ * 取り直しの間に書いた編集は捨てずに、競合のまま残す。画面は取り直しの間も別の note へ
+ * 移れるので、返った時にその note がまだ開いていなければ採用しない。
  */
 export async function reloadLatest({
   id,
@@ -59,16 +60,18 @@ export async function reloadLatest({
   dropPending,
   adopt,
   editMark,
+  isOpen,
 }: {
   id: string | undefined
   refetch: RefetchNote
   dropPending: (id: string) => void
   adopt: (next: Note) => void
   editMark: (id: string) => number
+  isOpen: () => boolean
 }): Promise<void> {
   const mark = id === undefined ? null : editMark(id)
   const fresh = await refetch()
-  if (fresh.isError || fresh.data === undefined) return
+  if (fresh.isError || fresh.data === undefined || !isOpen()) return
   if (id !== undefined && editMark(id) !== mark) return
   // 基準版ごと落とすので、取り直した doc は無条件に採用できる
   if (id !== undefined) dropPending(id)
@@ -160,17 +163,17 @@ export function useServerDoc({
     return () => setOpenNote(null)
   }, [openId, setOpenNote])
 
-  const reload = useCallback(
-    () =>
-      reloadLatest({
-        id: current?.id,
-        refetch,
-        dropPending,
-        adopt: (next) => adopt(next, true),
-        editMark,
-      }),
-    [current, dropPending, refetch, adopt, editMark],
-  )
+  const reload = useCallback(() => {
+    const id = current?.id
+    return reloadLatest({
+      id,
+      refetch,
+      dropPending,
+      adopt: (next) => adopt(next, true),
+      editMark,
+      isOpen: () => noteRef.current?.id === id,
+    })
+  }, [current, dropPending, refetch, adopt, editMark, noteRef])
 
   return { note: current, generation, reload, adopt }
 }
