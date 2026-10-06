@@ -16,6 +16,7 @@ import {
   migrations as taskMigrations,
   nameAgentSession,
   router as taskRouter,
+  systemJobs as taskSystemJobs,
 } from '@tania/task/server'
 import {
   createWorkbenchLedger,
@@ -68,18 +69,7 @@ const workbenchLedger = createWorkbenchLedger({
   nameAgentSession,
 })
 const taskLedger = createTaskLedger({ db, workbenchLedger, home })
-const jobLedger = createJobLedger({
-  db,
-  home,
-  systemJobs: [
-    { name: 'task.sync', every: 5 * 60_000, run: () => taskLedger.syncInBackground() },
-    {
-      name: 'task.setup-log-cleanup',
-      every: 24 * 60 * 60_000,
-      run: () => taskLedger.cleanSetupLogs(),
-    },
-  ],
-})
+const jobLedger = createJobLedger({ db, home, systemJobs: taskSystemJobs(taskLedger) })
 const noteLedger = createNoteLedger({ db, home })
 
 const context = { db, workbenchLedger, taskLedger, jobLedger }

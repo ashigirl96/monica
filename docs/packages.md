@@ -114,6 +114,9 @@ export function createTaskLedger(deps: {
   ghq?: Ghq;
 }): TaskLedger;
 export function nameAgentSession(db: Db, agentSessionId: string): string | null;
+export function systemJobs(
+  taskLedger: TaskLedger,
+): { name: string; every: number; run: () => Promise<void> }[];
 
 // @tania/job/server
 export { migrations } from "../migrations";
@@ -145,10 +148,10 @@ note の `home` は画像の置き場所に使う（後続の issue）。
 - `events`: その domain の変更を知らせる in-process の publisher。job と note は change stream を持たないので無い（ADR-0016・0018）。
 - `start()` / `stop()`: 起動時と終了時の処理。`WorkbenchLedger` は ptyd への接続（無ければ spawn、版違いは入れ替え）と reconcile（ADR-0011）、`TaskLedger` は起動時に preparing のまま残った Bench を失敗にすることと、終了時に走っている setup の process group を kill すること、`JobLedger` は起動時に途中で止まった Job Execution を中断にして system の Job を 1 回走らせ、tick の timer を張ることと、終了時にそれを止めること。`NoteLedger` は今は何もしない。
 
-`TaskLedger` はほかに `syncInBackground()` と `cleanSetupLogs()` だけを持ち、どちらも system の Job が呼ぶ。task は timer を持たない（#18、ADR-0016）。
+`TaskLedger` はほかに `syncInBackground()` と `cleanSetupLogs()` だけを持ち、どちらも task の system の Job が呼ぶ。task は timer を持たず、system の Job の並び（名前・間隔・`run`）を `@tania/task/server` の `systemJobs(taskLedger)` で出し、Backend の組み立てがそれを `createJobLedger` に渡す。task は job を import しないので、戻り値は `createJobLedger` の `systemJobs` と同じ構造の素のオブジェクトにし、job の型を注記しない（#18、ADR-0016）。
 
-- `syncInBackground()`: open な Task すべての Sync で、失敗した repo があるか throw したら reject する。5 分おきに呼ぶのは `task.sync`。
-- `cleanSetupLogs()`: setup の log を消し（`docs/packages/task-ledger.md` の「Bench」）、消せなかった log か directory があれば残りを消してから reject する。24 時間おきに呼ぶのは `task.setup-log-cleanup`。
+- `syncInBackground()`: open な Task すべての Sync で、失敗した repo があるか throw したら reject する。`systemJobs()` が `task.sync` の `run` にし、5 分おきに走る。
+- `cleanSetupLogs()`: setup の log を消し（`docs/packages/task-ledger.md` の「Bench」）、消せなかった log か directory があれば残りを消してから reject する。`systemJobs()` が `task.setup-log-cleanup` の `run` にし、24 時間おきに走る。
 
 `WorkbenchLedger` は、他の domain から呼ばれる書き込みも持つ。第 1 引数に transaction（`db` でもよい）を取る**同期**の method で、task は `db.transaction((tx) => { workbenchLedger.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。ptyd への副作用は workbench が transaction の後に自分で送る（ADR-0015）。`WorkbenchLedger` に出ている書き込みは `createRunspace` / `removeRunspace` / `moveTab` / `openTab` の 4 つ。他の domain が呼ばない書き込みは、同じ形（第 1 引数が tx）の module 内の関数として procedure の handler から呼び、`WorkbenchLedger` には出さない。`createRunspace(tx, { cwd })` が作るのは Tab の無い所有された Runspace で、`removeRunspace(tx, id, { spare? })` はそれを消し、中の Tab の Terminal Session を transaction の後に終わらせる。`spare`（Terminal Session の配列）の Tab が中にあれば、Runspace を消さずに所有を解いてそれらの Tab だけを残し（pin されていれば pin のまま）、ほかの Tab の Terminal Session を終わらせる（ADR-0012）。ptyd の Terminate は冪等で、終わった session に送っても失敗しない。
 
@@ -172,7 +175,7 @@ Bun.spawn は `env` を渡さないと、子に起動時の environ を渡し、
 
 1. `$TANIA_HOME/tania.db` を開き、`locking_mode=EXCLUSIVE` → `journal_mode=WAL` → `foreign_keys=ON` の順に設定する（ADR-0007）。
 2. `migrate()` を workbench → task → job → note の順に呼ぶ。`migrationsTable` は各 package の `migrations.table` を渡す。
-3. `createWorkbenchLedger` → `createTaskLedger` → `createJobLedger` → `createNoteLedger` の順に作る。`createWorkbenchLedger` には、env の `TANIA_PTYD_PATH`（`ptydPath`）、stdout に通知の行を書く `notify`、`@tania/task/server` の `nameAgentSession` を渡す。`createTaskLedger` と `createJobLedger` と `createNoteLedger` には同じ `home` を渡す。`createJobLedger` の `systemJobs` には `{ name: "task.sync", every: 5 * 60_000, run: () => taskLedger.syncInBackground() }` と `{ name: "task.setup-log-cleanup", every: 24 * 60 * 60_000, run: () => taskLedger.cleanSetupLogs() }` を渡す。`TANIA_PTYD_PATH` が無ければ stderr に 1 行出して exit 1 する。
+3. `createWorkbenchLedger` → `createTaskLedger` → `createJobLedger` → `createNoteLedger` の順に作る。`createWorkbenchLedger` には、env の `TANIA_PTYD_PATH`（`ptydPath`）、stdout に通知の行を書く `notify`、`@tania/task/server` の `nameAgentSession` を渡す。`createTaskLedger` と `createJobLedger` と `createNoteLedger` には同じ `home` を渡す。`createJobLedger` の `systemJobs` には、`@tania/task/server` の `systemJobs(taskLedger)` の戻り値を渡す。`TANIA_PTYD_PATH` が無ければ stderr に 1 行出して exit 1 する。
 4. router を `{ workbench: workbenchRouter, task: taskRouter, job: jobRouter }` で mount し、context は `{ db, workbenchLedger, taskLedger, jobLedger }`。note の router はこの口に載せず、notes の口だけに載せる（下の「notes の口」）。
 5. hono に CORS（`tauri://localhost`・`http://tauri.localhost`。env の `TANIA_DEV_URL` があればその origin も。`docs/packages/dev-loop.md` の「dev loop」）、`/health`（token 無し）、`/rpc/*` の bearer を載せ、`Bun.serve({ hostname: "127.0.0.1", port: 0, idleTimeout: 0 })` で立てる。
 6. `start()` を Workbench Ledger → Task Ledger → Job Ledger → Note Ledger の順に呼び、notes の口を立てる。Workbench Ledger の `start()`（ptyd への接続と reconcile）を最大 3 秒待ってから、`backend.json` と stdout の endpoint 行を書く（ADR-0007 / 0011）。
