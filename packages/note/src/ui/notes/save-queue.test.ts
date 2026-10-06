@@ -209,6 +209,28 @@ test('an edit on its way counts as lost on leaving once the Backend is unreachab
   await sending
 })
 
+test('an edit waiting behind a save on its way counts as lost on leaving, since the pagehide flush queues behind that save', async () => {
+  const { queue, answers } = setup()
+  let release = noop
+  answers.push(
+    () =>
+      new Promise((resolve) => {
+        release = () => resolve({ updatedAt: V2 })
+      }),
+  )
+
+  queue.schedule('note-1', draft('a'), 'TUE 10.6')
+  const sending = queue.flush()
+  await Promise.resolve()
+  queue.schedule('note-1', draft('ab'), 'TUE 10.6')
+
+  expect(queue.wouldLoseOnLeave(false)).toBe(true)
+  release()
+  await sending
+  await queue.flush()
+  expect(queue.wouldLoseOnLeave(false)).toBe(false)
+})
+
 test('leaving would lose an edit while the Backend is unreachable, one waiting to retry, and one left by a CONFLICT until the latest is read', async () => {
   const { queue, answers } = setup()
   answers.push(() => Promise.reject(new TypeError('Failed to fetch')))

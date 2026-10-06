@@ -83,6 +83,8 @@ export class SaveQueue {
   /** 閉じると失われる編集があるか。届く Backend への未保存は pagehide の flush が送るので数えない。 */
   wouldLoseOnLeave = (unreachable: boolean): boolean => {
     if (this.#conflicted.size > 0) return true
+    // pagehide の flush は送信中の保存の後ろに並ぶので、その保存が返る前にページごと消える。
+    if (this.#pending.size > 0 && this.#inflight.size > 0) return true
     const unsent = [...this.#pending.keys(), ...this.#inflight]
     return unsent.length > 0 && (unreachable || unsent.some((id) => id in this.#errors))
   }

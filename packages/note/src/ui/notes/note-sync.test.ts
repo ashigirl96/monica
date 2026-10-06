@@ -1,8 +1,8 @@
 /// <reference types="bun" />
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, mock, test } from 'bun:test'
 
 import type { Note } from '../../contract.ts'
-import { shouldAdoptServerDoc, usableServerDoc } from './note-sync.ts'
+import { reloadLatest, shouldAdoptServerDoc, usableServerDoc } from './note-sync.ts'
 
 const V1 = new Date('2026-08-29T10:00:00.000Z')
 const V2 = new Date('2026-08-29T10:00:00.001Z')
@@ -75,5 +75,27 @@ describe('usableServerDoc', () => {
 
   test('未取得（undefined）は採用しない', () => {
     expect(usableServerDoc(undefined, null)).toBeNull()
+  })
+})
+
+function reloadSetup(result: { data?: Note; isError: boolean }) {
+  const steps: string[] = []
+  const dropPending = mock((id: string) => void steps.push(`drop ${id}`))
+  const adopt = mock((next: Note) => void steps.push(`adopt ${next.updatedAt.getTime()}`))
+  const refetch = () => Promise.resolve(result)
+  return { steps, run: () => reloadLatest({ id: 'note-1', refetch, dropPending, adopt }) }
+}
+
+describe('reloadLatest', () => {
+  test('取り直しが失敗したら、古い cache が返っても手元の編集と競合を捨てず、採用もしない', async () => {
+    const { steps, run } = reloadSetup({ data: note(V1), isError: true })
+    await run()
+    expect(steps).toEqual([])
+  })
+
+  test('取り直しが通ったら、手元の編集を捨ててから取り直した doc を採用する', async () => {
+    const { steps, run } = reloadSetup({ data: note(V3), isError: false })
+    await run()
+    expect(steps).toEqual(['drop note-1', `adopt ${V3.getTime()}`])
   })
 })

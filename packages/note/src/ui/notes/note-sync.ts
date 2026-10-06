@@ -33,7 +33,29 @@ export function usableServerDoc(note: Note | undefined, baseUpdatedAt: Date | nu
 }
 
 /** useQuery の refetch のうち、この hook が使う部分だけの形。 */
-type RefetchNote = () => Promise<{ data?: Note }>
+type RefetchNote = () => Promise<{ data?: Note; isError: boolean }>
+
+/**
+ * 「最新を読み込む」の実体。取り直しが失敗しても TanStack Query は古い cache を data に
+ * 残して返すので、成功を確かめてから未送信の編集を捨て、取り直した doc を採用する。
+ */
+export async function reloadLatest({
+  id,
+  refetch,
+  dropPending,
+  adopt,
+}: {
+  id: string | undefined
+  refetch: RefetchNote
+  dropPending: (id: string) => void
+  adopt: (next: Note) => void
+}): Promise<void> {
+  const fresh = await refetch()
+  if (fresh.isError || fresh.data === undefined) return
+  // 基準版ごと落とすので、取り直した doc は無条件に採用できる
+  if (id !== undefined) dropPending(id)
+  adopt(fresh.data)
+}
 
 /**
  * query の結果を editor に載せる doc へ変換する。一度採用した doc は latch して保持し、
@@ -118,15 +140,16 @@ export function useServerDoc({
     return () => setOpenNote(null)
   }, [openId, setOpenNote])
 
-  /** 「最新を読み込む」の実体。未送信の編集を捨ててサーバの現在値を採用し直す。 */
-  const reload = useCallback(async () => {
-    const id = current?.id
-    // 基準版ごと落とすので、取り直した doc は無条件に採用できる
-    if (id !== undefined) dropPending(id)
-    const fresh = await refetch()
-    if (fresh.data === undefined) return
-    adopt(fresh.data, true)
-  }, [current, dropPending, refetch, adopt])
+  const reload = useCallback(
+    () =>
+      reloadLatest({
+        id: current?.id,
+        refetch,
+        dropPending,
+        adopt: (next) => adopt(next, true),
+      }),
+    [current, dropPending, refetch, adopt],
+  )
 
   return { note: current, generation, reload, adopt }
 }
