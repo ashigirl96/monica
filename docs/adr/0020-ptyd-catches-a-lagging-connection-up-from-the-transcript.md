@@ -29,6 +29,7 @@ Terminal Session の出力の正本は transcript にする。接続ごとの送
 - 遅れている間も、その接続の request には応答が返る。live の出力がキューの 224 で止まり、応答と Exit の席が残るため。
 - 遅れたまま detach して attach し直すと、replay から始まり、古い範囲は送り直さない。attach は (Terminal Session, 接続) を live に戻す。
 - ptyd の log に、接続が Terminal Session で遅れ始めたことと、追いついたこと（遅れていた時間）が出る。同じことが起きたときに時刻を追えるようにするため。
-- transcript の保持（1〜2MB）を超えて遅れると、保持から落ちた分は届かない。ptyd は失ったバイト数を log に出し、残っている最古の位置から続ける。
+- transcript の保持（1〜2MB）を超えて遅れると、保持から落ちた分は届かない。ptyd は失ったバイト数を log に出し、残っている最古の位置から続ける。続きの前には、端末のモードの戻しを送る。落ちた分に alt screen への出入り、マウスの報告、bracketed paste、kitty keyboard の push などがあっても、webview の xterm のモードが ptyd の追うモードからずれないようにするため。範囲を失っていない追いつきには送らない。
+- その戻しは、まず相手を開いたばかりの端末のモードに戻し（kitty keyboard の stack を空にし、alt screen にいれば抜けて main の stack も空にし、各モードを既定値にする）、次に attach の replay と同じ戻しを流す。相手は、同じ末尾で attach した開いたばかりの端末と同じモードになる。attach の戻しだけを流さないのは、それが開いたばかりの端末を前提に、既定値と違うモードしか言わないため。落ちた分で app が alt screen を抜けていても xterm は抜けず、kitty keyboard の push は二重に積まれる。xterm 6.1 は kitty keyboard の stack を buffer ごとに持ち、今いる buffer の stack しか pop しない。alt screen にいる xterm に `?1049h` を送り直すと、flags を buffer の間で入れ替えてしまう。そのため alt screen にいたままでも、一度抜けてから入り直す。
 - 遅れている間にその Terminal Session の shell が終わると、まだ送っていない分は捨て、捨てたバイト数を log に出す。Exit は他の接続と同じくすぐに送る。Exit を受けた Backend が Reap で transcript を消すので、後から読み直せないため。
 - ptyd が接続を外すのは、socket の EOF と、応答をキューに積めなかったときだけになる。後者は、相手が読まずに 30 を超える request を送り続けたときにしか起きない。
