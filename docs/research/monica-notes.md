@@ -232,3 +232,36 @@ contract の正は Rust の DTO（`crates/monica-api/src/note.rs`）で、`web/s
 ## 設定
 
 `settings.json` の `notes.day_boundary_hour`（0〜23、既定 0、実値 5）だけ。効くのは「論理上の今日」の計算（essay と project note の作成時の date、`GET /api/notes/today`）で、過去の note の date は書き換えない。
+
+## 移行に効く事実
+
+2026-10-06 02:58 UTC にコピーした `monica.db` で確かめた（`-wal` と `-shm` は無かった）。前回のコピーからの差は note-160 の本文の更新 1 件だけで、作成と削除は無い。
+
+- 採番: 最大の id は note-160 で、`note_counter` の最大 rowid と `sqlite_sequence` も 160。note-100 は counter に在るが notes に無い。
+- 削除済みの 21 件（daily 4・essay 4・project 13）は、生存する note から参照されていない（noteMention・syncedBlock・link の href・text の中の `note-N` を見た）。画像も持たない。削除済みの daily 4 件（note-4・5・18・20）は、どれも生存する daily と date が重なる。削除済みを指す `primary_note_id` は無い。
+- 2026-07-20 の daily は note-12（作成 07-19T20:18:06.957Z、442 字、block 13）と note-13（作成 07-20T11:23:54.405Z、更新 12:44:04.269Z、1,897 字、block 32）。block id も 6 字以上の行も重ならず、どちらも参照されていない。
+- 時刻: created_at・updated_at・deleted_at はすべて `YYYY-MM-DDTHH:MM:SS.sssZ`、date はすべて `YYYY-MM-DD`。updated_at と created_at が等しい 10 件は、既定の空本文の 10 件と一致する。
+- title と status: primary の 5 件はすべて `''`。生存する非 primary の project note 43 件はすべて title を持つ。essay の title は 26 件すべて空でない。essay の status が NULL のものは 3 件（生存は note-7・note-22）。
+- project_id は 5 種ですべて小文字。`~/.ghq/src/github.com/<owner>/<repo>` の directory 名と大文字小文字まで一致する。kind=project で project_id が NULL の行は無い。
+- 本文: 159 件すべてで `JSON.stringify(JSON.parse(content)) === content` が成り立つ。blockContainer 3,788 個のうち `attrs.id` を持たないのは 11 個で、既定の空本文 10 件と note-1 に 1 個ずつある。
+- attrs の形: noteMention は `{noteId}`、syncedBlock は `{blockIds, noteId}`、image は `{src, uploadId, width}`、link mark は `{href}` だけ。
+
+アプリ内 URL の link mark は 10 個で、参照元はすべて生存する note。
+
+| 参照元 | href | 行き先 |
+|---|---|---|
+| note-17（daily） | `/notes/note-3` | note-3（essay） |
+| note-66（daily） | `http://monica.localhost:19280/projects/ashigirl96/monica/notes/note-73` | note-73（project） |
+| note-81（daily） | `http://monica.localhost:19280/essays/note-82` | note-82（essay） |
+| note-98（project） | `http://monica.localhost:19280/projects/hello-ai/hello_pay/notes/note-97` | note-97（project） |
+| note-98（project） | `http://monica.localhost:19280/projects/hello-ai/hello_pay/notes/note-96` | note-96（project） |
+| note-75（project） | `http://monica.localhost:19280/explanations/expl-35` | monica の explanations |
+| note-79（daily） | `http://monica.localhost:19280/explanations/expl-37` | 同上 |
+| note-80（project） | `http://monica.localhost:19280/explanations/expl-38` | 同上 |
+| note-116（daily） | `http://monica.localhost:19280/explanations/expl-48` | 同上 |
+| note-117（project） | `http://monica.localhost:19280/explanations/expl-47` | 同上 |
+
+- explanations の 5 件は monica.db の explanations 表に実在する。link の文字列は、note-75 と note-117 が URL そのもので、ほかの 3 つは解説の題。
+- linkMention と bookmark の href・thumbnail・favicon にアプリ内 URL は無い。`localhost:1928x`・`127.0.0.1`・Tailscale の IP も本文に無い。
+
+画像の 15 枚はすべて png で、名前は小文字の UUID v4。すべて生存する note から相対の `/api/assets/` で参照されている。削除済みの note からだけ参照される画像、参照の無いファイル、ファイルの無い参照は 0。upload の途中の node（`src: null`）も無い。
