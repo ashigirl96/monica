@@ -1,0 +1,1241 @@
+/* Journal block editor — しずかなインターネット (sizu.me) のエディタと同じ紙面。
+   本文 16px / 行高 2 / 字間 0.03em、見出しは本文と同じ太さ (400) で
+   border-bottom だけで区別する。--jb-ink を基準に text/muted/faint/border を
+   透明度導出（light/dark 両対応）。accent は静かなくすみ青、
+   inline code は落ち着いたテラコッタ。 */
+
+.jb-root {
+  --jb-ink: color-mix(in srgb, var(--foreground) 88%, #9c7b4f);
+  --jb-text: color-mix(in srgb, var(--jb-ink) 94%, transparent);
+  --jb-muted: color-mix(in srgb, var(--jb-ink) 48%, transparent);
+  --jb-faint: color-mix(in srgb, var(--jb-ink) 30%, transparent);
+  --jb-hover: color-mix(in srgb, var(--jb-ink) 6%, transparent);
+  --jb-border: color-mix(in srgb, var(--jb-ink) 14%, transparent);
+  --jb-code-bg: color-mix(in srgb, var(--jb-ink) 5%, transparent);
+  --jb-inline-code-bg: color-mix(in srgb, var(--jb-ink) 10%, transparent);
+  /* callout パネルの下地。パネルを不透明にしたいテーマは transparent の代わりに
+     solid 色を差す（合成式は .jb-callout > .jb-container-body が 1 箇所で持つ） */
+  --jb-callout-under: transparent;
+  --jb-paper: color-mix(in srgb, var(--background) 97%, #c9a35f);
+  --jb-blue: #5e81ac;
+  --jb-code-red: #bd6a52;
+  --jb-callout-note: #5e81ac;
+  --jb-callout-tips: #6f9a67;
+  --jb-callout-danger: #c05b4c;
+  --jb-callout-question: #c9a227;
+  /* callout アイコン（stroke SVG）。mask で使い、色は background で流す */
+  --jb-icon-note: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 20l1.2-4.4L16.6 4.2a2.1 2.1 0 013 3L8.2 18.6 4 20z'/%3E%3Cpath d='M14.5 6.3l3 3'/%3E%3C/svg%3E");
+  --jb-icon-tips: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21v-8'/%3E%3Cpath d='M12 13C12 8.5 8.5 6 4.5 6c0 4.5 3.5 7 7.5 7z'/%3E%3Cpath d='M12 10.5c0-3.4 2.6-5.5 6.5-5.5 0 3.9-2.6 5.5-6.5 5.5z'/%3E%3C/svg%3E");
+  --jb-icon-danger: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10.3 4.6L2.9 17.4a2 2 0 001.7 3h14.8a2 2 0 001.7-3L13.7 4.6a2 2 0 00-3.4 0z'/%3E%3Cpath d='M12 9.5v4'/%3E%3Cpath d='M12 17h.01'/%3E%3C/svg%3E");
+  --jb-icon-question: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M9.4 9.4a2.7 2.7 0 115.1 1.2c-.5 1-1.5 1.4-2 2.2-.3.4-.4.8-.4 1.4'/%3E%3Cpath d='M12 17.5h.01'/%3E%3C/svg%3E");
+  --jb-icon-example: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3a6 6 0 00-3.6 10.8c.9.7 1.4 1.5 1.5 2.4h4.2c.1-.9.6-1.7 1.5-2.4A6 6 0 0012 3z'/%3E%3Cpath d='M9.8 19.5h4.4'/%3E%3Cpath d='M10.8 22h2.4'/%3E%3C/svg%3E");
+  --jb-icon-table: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M3 10h18'/%3E%3Cpath d='M9 10v10'/%3E%3Cpath d='M15 10v10'/%3E%3C/svg%3E");
+  /* link-menu（Paste as）アイコン */
+  --jb-icon-url: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 17H7A5 5 0 017 7h2'/%3E%3Cpath d='M15 7h2a5 5 0 010 10h-2'/%3E%3Cpath d='M8 12h8'/%3E%3C/svg%3E");
+  --jb-icon-mention: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cpath d='M16 8v5a3 3 0 006 0v-1a10 10 0 10-4 8'/%3E%3C/svg%3E");
+  --jb-icon-bookmark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M19 21l-7-4-7 4V5a2 2 0 012-2h10a2 2 0 012 2v16z'/%3E%3C/svg%3E");
+  /* paste-menu（Paste / Paste and sync）アイコン */
+  --jb-icon-paste: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='8' y='4' width='12' height='16' rx='2'/%3E%3Cpath d='M4 8v10a2 2 0 002 2h8'/%3E%3C/svg%3E");
+  --jb-icon-sync: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12a9 9 0 01-9 9 9 9 0 01-7-3.3'/%3E%3Cpath d='M3 12a9 9 0 019-9 9 9 0 017 3.3'/%3E%3Cpath d='M17 3.5V7h-3.5'/%3E%3Cpath d='M7 20.5V17h3.5'/%3E%3C/svg%3E");
+  /* table-menu（行・列の挿入 / 削除）アイコン */
+  --jb-icon-row: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M3 9.5h18'/%3E%3Cpath d='M3 14.5h18'/%3E%3C/svg%3E");
+  --jb-icon-column: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M9 4v16'/%3E%3Cpath d='M15 4v16'/%3E%3C/svg%3E");
+  --jb-icon-trash: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 7h16'/%3E%3Cpath d='M9 7V4h6v3'/%3E%3Cpath d='M6 7l1 13h10l1-13'/%3E%3Cpath d='M10 11v6'/%3E%3Cpath d='M14 11v6'/%3E%3C/svg%3E");
+  /* 折りたたみ三角。文字 (▸) だと ink が送り幅の中で左寄りに置かれ、rotate(90deg) で
+     その横ズレが縦ズレに変わるため、ink の bbox を viewBox 中心に対称に置いた mask で描く */
+  --jb-icon-disclosure: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black' stroke='black' stroke-width='1.6' stroke-linejoin='round'%3E%3Cpath d='M7.5 5L16.5 12 7.5 19z'/%3E%3C/svg%3E");
+  /* 1 行の行箱の高さ。marker 類の縦位置はすべてここから導出する。
+     compact 密度（後述）は 28px に詰める */
+  --jb-line: 32px;
+  /* 折りたたみ ▸ の当たり判定（縦位置の計算に効く）と、その中に描く三角の大きさ */
+  --jb-disclosure-box: 22px;
+  --jb-disclosure-glyph: 14px;
+  /* 幅・高さは親に従う。余白やスクロールは使う側が決める */
+  background: var(--jb-paper);
+  cursor: text;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic Pro", "Noto Sans JP", "BIZ UDPGothic",
+    sans-serif;
+}
+
+/* ---- editor base ---- */
+
+.jb-editor {
+  outline: none;
+  font-size: 16px;
+  line-height: var(--jb-line);
+  letter-spacing: 0.03em;
+  color: var(--jb-text);
+  caret-color: var(--jb-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.jb-editor ::selection {
+  background: color-mix(in srgb, var(--jb-blue) 30%, transparent);
+}
+
+/* ---- block tree layout ---- */
+
+/* 縦の余白（pad/margin）はブロック種別ごとに container の変数で決める。
+   content の padding・placeholder の位置・fold ボタンの縦位置が同じ値を参照する。
+   継承で子ブロックへ漏れないよう、全 container で毎回リセットする */
+[data-block-container] {
+  position: relative;
+  padding: 1px 0;
+  --jb-block-pad-y: 3px;
+  --jb-block-pad-x: 2px;
+  --jb-block-margin-top: 0px;
+}
+
+/* 段落は前後合算で 16px（sizu の p margin 1em 相当）、list 系は 8px（li 0.5em 相当） */
+[data-block-container]:has(> .jb-container-body > [data-block-content="paragraph"]) {
+  --jb-block-pad-y: 7px;
+}
+
+[data-block-content] {
+  padding: var(--jb-block-pad-y) var(--jb-block-pad-x);
+  margin-top: var(--jb-block-margin-top);
+  border-radius: 4px;
+}
+
+.jb-container-body > [data-block-group] {
+  padding-left: 24px;
+}
+
+/* ---- fold toggle (heading / callout) ---- */
+
+/* ボタンは全 container に生えるが、折りたためる block だけが data-folded を持つ */
+.jb-fold-btn {
+  --jb-fold-btn-size: var(--jb-disclosure-box);
+  position: absolute;
+  left: -28px;
+  /* 1 行目のセンター合わせ: container pad 1px + (行高 − ボタン) / 2 */
+  top: calc(
+    var(--jb-block-margin-top) + var(--jb-block-pad-y) + 1px +
+      (var(--jb-line) - var(--jb-fold-btn-size)) / 2
+  );
+  display: none;
+  place-items: center;
+  width: var(--jb-fold-btn-size);
+  height: var(--jb-fold-btn-size);
+  border-radius: 4px;
+  color: var(--jb-faint);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    transform 200ms ease-out,
+    opacity 100ms ease-out,
+    background 60ms ease-out;
+}
+
+/* 三角は擬似要素で描く（ボタンの background は hover の座布団が使う） */
+.jb-fold-btn::before,
+.jb-toggle-btn::before {
+  content: "";
+  width: var(--jb-disclosure-glyph);
+  height: var(--jb-disclosure-glyph);
+  background: currentColor;
+  mask: var(--jb-icon-disclosure) center / contain no-repeat;
+}
+
+[data-folded] > .jb-fold-btn {
+  display: grid;
+}
+
+/* 行高 32px 前提の式が合わないブロックは実測で個別合わせ（余白ぶんの下げは共通） */
+.jb-callout > .jb-fold-btn {
+  top: calc(var(--jb-block-margin-top) + 24px);
+}
+
+/* :hover は祖先にも立つため、子孫 container がホバー中の間は自分の ▾ を出さない */
+.jb-container:hover:not(:has(.jb-container:hover)) > .jb-fold-btn {
+  opacity: 1;
+}
+
+/* ▸ を回して ▾ に見せる。折りたたみ中は ▸ のまま常時表示して所在を示す */
+[data-folded="false"] > .jb-fold-btn {
+  transform: rotate(90deg);
+}
+
+[data-folded="true"] > .jb-fold-btn {
+  opacity: 1;
+  color: var(--jb-muted);
+}
+
+.jb-fold-btn:hover {
+  color: var(--jb-muted);
+  background: var(--jb-hover);
+}
+
+/* collapsed heading が支配する後続兄弟（Decoration で付与） */
+.jb-fold-hidden {
+  display: none;
+}
+
+/* ---- block selection ---- */
+
+.jb-block-selected {
+  background: color-mix(in srgb, var(--jb-blue) 16%, transparent);
+  border-radius: 4px;
+}
+
+/* ---- placeholder ---- */
+
+.jb-placeholder {
+  position: relative;
+}
+
+.jb-placeholder::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  left: var(--jb-block-pad-x, 2px);
+  top: var(--jb-block-pad-y, 3px);
+  color: var(--jb-faint);
+  pointer-events: none;
+}
+
+/* ---- block content ---- */
+
+/* sizu 流: 見出しは本文と同じ太さ (400) のまま控えめに拡大し、
+   h2 相当は border-bottom だけで区別する */
+[data-block-content="heading"] {
+  font-size: 1.15em;
+  font-weight: 400;
+  line-height: 1.7;
+}
+
+[data-block-container]:has(> .jb-container-body > [data-block-content="heading"]) {
+  --jb-block-margin-top: 18px;
+}
+
+/* sizu の h2 + * / h3 + * 相当: 見出しの直後のブロックにも余白を足す */
+[data-block-container]:has(
+    > .jb-container-body > [data-block-content="heading"]:is([data-level="1"], [data-level="2"])
+  )
+  + [data-block-container] {
+  --jb-block-margin-top: 15px;
+}
+
+[data-block-container]:has(> .jb-container-body > [data-block-content="heading"][data-level="3"])
+  + [data-block-container] {
+  --jb-block-margin-top: 4px;
+}
+
+/* H1 は廃止（既存 doc の level=1 は大見出しとして描画） */
+[data-block-container]:has(
+  > .jb-container-body > [data-block-content="heading"]:is([data-level="1"], [data-level="2"])
+) {
+  --jb-block-pad-y: 8px;
+  --jb-block-margin-top: 26px;
+}
+
+[data-block-content="heading"][data-level="1"],
+[data-block-content="heading"][data-level="2"] {
+  font-size: 1.25em;
+  border-bottom: 1px solid var(--jb-border);
+  border-radius: 0;
+}
+
+/* h3 は border ではなく淡い座布団で区別する。padding を広げた分を
+   負マージンで相殺し、テキストの左端は本文と揃えたまま背景だけ張り出す */
+[data-block-content="heading"][data-level="3"] {
+  --jb-block-pad-x: 8px;
+  margin-left: -6px;
+  margin-right: -6px;
+  background: color-mix(in srgb, var(--jb-ink) 8%, transparent);
+}
+
+[data-block-container]:first-child:has(> .jb-container-body > [data-block-content="heading"]) {
+  --jb-block-margin-top: 0px;
+}
+
+/* flex にすると WebKit が空 block の caret をコンテナ左端に描くため、
+   list 系はすべて padding + absolute マーカーで組む */
+.jb-todo {
+  position: relative;
+  padding-left: 28px;
+}
+
+.jb-todo-checkbox {
+  position: absolute;
+  left: 4px;
+  top: calc(3px + (var(--jb-line) - 16px) / 2);
+  width: 16px;
+  height: 16px;
+  border: 1.3px solid var(--jb-muted);
+  border-radius: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background 100ms ease-out,
+    border-color 100ms ease-out;
+}
+
+.jb-todo[data-checked="true"] .jb-todo-checkbox {
+  background: var(--jb-blue);
+  border-color: var(--jb-blue);
+  color: white;
+}
+
+.jb-todo[data-checked="true"] .jb-todo-text {
+  color: var(--jb-muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--jb-faint);
+}
+
+[data-block-content="bullet"],
+[data-block-content="numbered"] {
+  position: relative;
+  padding-left: 26px;
+}
+
+/* インラインに置くと空 block の caret がマーカーの左に描かれる（WebKit）。
+   マーカーはフロー外の absolute にし、テキスト領域は padding だけで始める */
+[data-block-content="bullet"]::before,
+[data-block-content="numbered"]::before {
+  content: "";
+  position: absolute;
+}
+
+/* 中黒 (•) は ink が em 箱の 1/5 ほどしか乗らず font-size で追うと行送りまで動くので、
+   マーカー列（left 2px 起点・幅 24px）の中央に円として描く */
+[data-block-content="bullet"]::before {
+  --jb-bullet-size: 6px;
+  left: calc(2px + (24px - var(--jb-bullet-size)) / 2);
+  top: calc(var(--jb-block-pad-y) + (var(--jb-line) - var(--jb-bullet-size)) / 2);
+  width: var(--jb-bullet-size);
+  height: var(--jb-bullet-size);
+  border-radius: 50%;
+  background: currentColor;
+}
+
+[data-block-content="numbered"]::before {
+  content: attr(data-marker);
+  left: 2px;
+  top: var(--jb-block-pad-y);
+  width: 24px;
+  padding-right: 6px;
+  text-align: center;
+  line-height: var(--jb-line);
+  font-variant-numeric: tabular-nums;
+}
+
+.jb-toggle {
+  position: relative;
+  padding-left: 28px;
+}
+
+.jb-toggle-btn {
+  position: absolute;
+  left: 2px;
+  top: calc(3px + (var(--jb-line) - var(--jb-disclosure-box)) / 2);
+  width: var(--jb-disclosure-box);
+  height: var(--jb-disclosure-box);
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--jb-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    transform 200ms ease-out,
+    background 60ms ease-out;
+}
+
+.jb-toggle[data-open="true"] .jb-toggle-btn {
+  transform: rotate(90deg);
+}
+
+.jb-toggle-btn:hover {
+  background: var(--jb-hover);
+}
+
+.jb-collapsed > .jb-container-body > [data-block-group] {
+  display: none;
+}
+
+/* sizu 流の引用カード: 薄い紙 + 1px 枠 + 大きめの角丸で本文よりわずかに沈める */
+[data-block-container]:has(> .jb-container-body > [data-block-content="quote"]) {
+  --jb-block-pad-y: 17px;
+  --jb-block-pad-x: 18px;
+  --jb-block-margin-top: 4px;
+}
+
+[data-block-content="quote"] {
+  border: 1px solid var(--jb-border);
+  border-radius: 1.2em;
+  background: color-mix(in srgb, var(--jb-ink) 5%, transparent);
+  color: color-mix(in srgb, var(--jb-ink) 85%, transparent);
+  font-size: 0.95em;
+  line-height: 1.9;
+  margin-bottom: 4px;
+}
+
+/* ---- callout（container 全体を包むパネル。子ブロックを内包する） ---- */
+
+/* callout だけはパネルが container-body（= content の親）なので、ブロック間の余白を
+   content の margin-top で受けるとパネル内のテキストだけが下がり、パネル上端基準で
+   置いた ::before のアイコンと縦位置がズレる。余白はパネル側の margin で受ける */
+.jb-callout > .jb-container-body {
+  position: relative;
+  /* パネルの合成式はここ 1 箇所が持ち、kind ごとの rule は accent と濃度の token だけを
+     差す。token をこの要素で毎回リセットするのは、nest した callout が外側の kind の
+     accent を継承しないため */
+  --jb-callout-accent: var(--jb-ink);
+  --jb-callout-mix: 7%;
+  background: color-mix(
+    in srgb,
+    var(--jb-callout-accent) var(--jb-callout-mix),
+    var(--jb-callout-under)
+  );
+  border-radius: 10px;
+  margin: calc(4px + var(--jb-block-margin-top)) 0 4px;
+  padding: 14px 16px 14px 46px;
+}
+
+.jb-callout > .jb-container-body > [data-block-content="callout"] {
+  margin-top: 0;
+}
+
+.jb-callout > .jb-container-body::before {
+  content: "";
+  position: absolute;
+  left: 16px;
+  /* padding-top 14px + (行高 − アイコン 18px) / 2 */
+  top: calc(14px + (var(--jb-line) - 18px) / 2);
+  width: 18px;
+  height: 18px;
+  background: var(--jb-muted);
+  mask: var(--jb-icon-example) center / contain no-repeat;
+  pointer-events: none;
+}
+
+/* callout の子はアイコン幅ぶんの追加インデントを付けず 1 行目と揃える */
+.jb-callout > .jb-container-body > [data-block-group] {
+  padding-left: 0;
+}
+
+/* kind ごとの色とアイコン。example は base（暖色パネル + 電球）をそのまま使う */
+.jb-callout[data-callout-kind="note"] > .jb-container-body {
+  --jb-callout-accent: var(--jb-callout-note);
+  --jb-callout-mix: 13%;
+}
+
+.jb-callout[data-callout-kind="note"] > .jb-container-body::before {
+  background: var(--jb-callout-note);
+  mask-image: var(--jb-icon-note);
+}
+
+.jb-callout[data-callout-kind="tips"] > .jb-container-body {
+  --jb-callout-accent: var(--jb-callout-tips);
+  --jb-callout-mix: 14%;
+}
+
+.jb-callout[data-callout-kind="tips"] > .jb-container-body::before {
+  background: var(--jb-callout-tips);
+  mask-image: var(--jb-icon-tips);
+}
+
+.jb-callout[data-callout-kind="danger"] > .jb-container-body {
+  --jb-callout-accent: var(--jb-callout-danger);
+  --jb-callout-mix: 13%;
+}
+
+.jb-callout[data-callout-kind="danger"] > .jb-container-body::before {
+  background: var(--jb-callout-danger);
+  mask-image: var(--jb-icon-danger);
+}
+
+.jb-callout[data-callout-kind="question"] > .jb-container-body {
+  --jb-callout-accent: var(--jb-callout-question);
+  --jb-callout-mix: 15%;
+}
+
+.jb-callout[data-callout-kind="question"] > .jb-container-body::before {
+  background: var(--jb-callout-question);
+  mask-image: var(--jb-icon-question);
+}
+
+/* ---- code block ---- */
+
+.jb-code {
+  position: relative;
+  background: var(--jb-code-bg);
+  border: 1px solid var(--jb-border);
+  border-radius: 6px;
+  margin: 4px 0;
+  padding: 0;
+}
+
+.jb-code-toolbar {
+  position: absolute;
+  inset: 6px 8px auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+  pointer-events: none;
+}
+
+.jb-code-active .jb-code-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.jb-code-language {
+  background: transparent;
+  border: none;
+  color: var(--jb-muted);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.jb-code-language:hover {
+  background: var(--jb-hover);
+}
+
+.jb-code-btn {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--jb-muted);
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.jb-code-btn + .jb-code-btn {
+  margin-left: 0;
+}
+
+.jb-code-btn:hover {
+  background: var(--jb-hover);
+}
+
+.jb-code-btn-active {
+  color: var(--jb-text);
+}
+
+.jb-code-pre {
+  margin: 0;
+  padding: 16px;
+  transition: padding-top 100ms ease-out;
+  overflow-x: auto;
+  font-family: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85em;
+  line-height: 1.6;
+  letter-spacing: normal;
+  white-space: pre;
+  border-radius: 6px;
+}
+
+.jb-code-active .jb-code-pre {
+  padding-top: 34px;
+}
+
+.jb-code-wrap .jb-code-pre {
+  white-space: pre-wrap;
+  overflow-x: visible;
+}
+
+/* ---- divider ---- */
+
+.jb-divider {
+  padding: 16px 2px 24px;
+  cursor: default;
+}
+
+/* sizu の手書き風 hr に寄せた波線。mask で描き、色は --jb-faint を流す */
+.jb-divider hr {
+  border: none;
+  height: 10px;
+  background: var(--jb-faint);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 10' fill='none' stroke='black' stroke-width='1.2' stroke-linecap='round'%3E%3Cpath d='M0 5 Q 5 1.5 10 5 T 20 5 T 30 5 T 40 5'/%3E%3C/svg%3E")
+    left center / auto 100% repeat-x;
+}
+
+/* ---- table ---- */
+
+[data-block-container]:has(> .jb-container-body > [data-block-content="table"]) {
+  --jb-block-pad-y: 8px;
+  --jb-block-margin-top: 4px;
+}
+
+[data-block-content="table"] {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.95em;
+  line-height: 1.7;
+}
+
+[data-block-content="table"] td,
+[data-block-content="table"] th {
+  border: 1px solid var(--jb-border);
+  padding: 6px 10px;
+  vertical-align: top;
+  text-align: left;
+  min-width: 48px;
+}
+
+[data-block-content="table"] th {
+  font-weight: 600;
+  background: color-mix(in srgb, var(--jb-ink) 5%, transparent);
+}
+
+/* ---- inline marks ---- */
+
+.jb-editor code {
+  background: var(--jb-inline-code-bg);
+  border-radius: 3px;
+  padding: 0.1em 0.4em;
+  font-family: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85em;
+  color: var(--jb-code-red);
+}
+
+.jb-code-pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+/* 行末の → で inline code から降りた状態の fake caret（decorations.ts の
+   codeExitCaretPlugin）。storedMarks は DOM に出ず native キャレットは <code> 内に
+   描かれたままなので、chip の外に自前で立てて native 側を隠す。widget が消えれば
+   :has が外れて native に戻る */
+.jb-editor:has(.jb-code-exit-caret) {
+  caret-color: transparent;
+}
+
+.jb-code-exit-caret {
+  border-left: 1.5px solid var(--jb-text);
+  margin-left: 2px;
+  pointer-events: none;
+  animation: jb-caret-blink 1.1s steps(2, start) infinite;
+}
+
+@keyframes jb-caret-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+.jb-editor strong {
+  font-weight: 600;
+}
+
+/* 下線は行高の底ではなく文字の直下に置く（日本語のディセンダに被らない位置） */
+.jb-editor u {
+  text-decoration-color: var(--jb-muted);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+/* sizu 流: リンクは本文よりわずかに沈めた色 + 点線下線。hover で本文色に浮かせる */
+.jb-editor a {
+  color: color-mix(in srgb, var(--jb-ink) 85%, transparent);
+  text-decoration: underline dotted;
+  text-decoration-color: var(--jb-faint);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.jb-editor a:hover {
+  color: var(--jb-text);
+  text-decoration-color: var(--jb-muted);
+}
+
+/* ---- overlays ---- */
+
+.jb-slash-menu {
+  position: absolute;
+  z-index: 50;
+  min-width: 240px;
+  max-height: 300px;
+  overflow-y: auto;
+  /* host が popover token を持たない場合も透過しないよう base token に落とす */
+  background: var(--popover, var(--background));
+  color: var(--popover-foreground, var(--foreground));
+  border: 1px solid var(--jb-border);
+  border-radius: 10px;
+  box-shadow:
+    0 12px 32px rgb(0 0 0 / 0.24),
+    0 2px 8px rgb(0 0 0 / 0.16);
+  padding: 6px;
+}
+
+.jb-slash-heading {
+  padding: 4px 8px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--jb-faint);
+  user-select: none;
+}
+
+.jb-slash-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--jb-text);
+  cursor: pointer;
+}
+
+.jb-slash-item:hover,
+.jb-slash-item-active {
+  background: var(--jb-hover);
+}
+
+.jb-slash-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--jb-border);
+  border-radius: 4px;
+  background: var(--jb-code-bg);
+}
+
+/* mask アイコン。data-kind で形（--jb-icon-*）と色を切り替える */
+.jb-glyph {
+  display: block;
+  width: 15px;
+  height: 15px;
+  background: var(--jb-muted);
+  mask: var(--jb-icon-example) center / contain no-repeat;
+}
+
+.jb-glyph[data-kind="note"] {
+  background: var(--jb-callout-note);
+  mask-image: var(--jb-icon-note);
+}
+
+.jb-glyph[data-kind="tips"] {
+  background: var(--jb-callout-tips);
+  mask-image: var(--jb-icon-tips);
+}
+
+.jb-glyph[data-kind="danger"] {
+  background: var(--jb-callout-danger);
+  mask-image: var(--jb-icon-danger);
+}
+
+.jb-glyph[data-kind="question"] {
+  background: var(--jb-callout-question);
+  mask-image: var(--jb-icon-question);
+}
+
+.jb-glyph[data-kind="url"] {
+  mask-image: var(--jb-icon-url);
+}
+
+.jb-glyph[data-kind="mention"] {
+  mask-image: var(--jb-icon-mention);
+}
+
+.jb-glyph[data-kind="bookmark"] {
+  mask-image: var(--jb-icon-bookmark);
+}
+
+.jb-glyph[data-kind="paste"] {
+  mask-image: var(--jb-icon-paste);
+}
+
+.jb-glyph[data-kind="sync"] {
+  mask-image: var(--jb-icon-sync);
+}
+
+.jb-glyph[data-kind="table"] {
+  mask-image: var(--jb-icon-table);
+}
+
+.jb-glyph[data-kind="row"] {
+  mask-image: var(--jb-icon-row);
+}
+
+.jb-glyph[data-kind="column"] {
+  mask-image: var(--jb-icon-column);
+}
+
+.jb-glyph[data-kind="trash"] {
+  background: var(--jb-callout-danger);
+  mask-image: var(--jb-icon-trash);
+}
+
+.jb-slash-item-destructive {
+  color: var(--jb-callout-danger);
+}
+
+.jb-slash-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--jb-border);
+}
+
+.jb-slash-empty {
+  padding: 6px 8px;
+  font-size: 13px;
+  color: var(--jb-muted);
+}
+
+.jb-slash-hint {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--jb-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ProseMirror が inline atom 直後の caret 描画用に挿す separator <img>。
+   Tailwind preflight の img { display: block } に食われると trailingBreak が
+   次行へ押し出され、atom 末尾のカーソルが 1 行下に見える。
+   prosemirror-view 標準スタイル（未 import）と同じ宣言で inline に戻す。 */
+.jb-editor img.ProseMirror-separator {
+  display: inline !important;
+  border: none !important;
+  margin: 0 !important;
+}
+
+/* ---- link mention / bookmark ---- */
+
+.jb-favicon {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.jb-editor a.jb-mention {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: baseline;
+  max-width: 100%;
+  padding: 0 2px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.jb-editor a.jb-mention:hover {
+  background: var(--jb-hover);
+}
+
+.jb-mention .jb-favicon {
+  /* inline-flex 内で baseline を崩さないよう少し下げる */
+  transform: translateY(1px);
+}
+
+.jb-mention-title {
+  font-weight: 500;
+  /* Notion 同様、長いタイトルは切り詰めて前後にテキストを置ける inline 幅を保つ */
+  max-width: 60ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jb-mention.ProseMirror-selectednode {
+  background: color-mix(in srgb, var(--jb-blue) 16%, transparent);
+}
+
+/* リンク先ノートが削除済み・不存在の note mention */
+.jb-editor a.jb-note-mention-dangling {
+  color: var(--jb-muted);
+}
+
+.jb-note-mention-dangling .jb-mention-title {
+  text-decoration: line-through;
+}
+
+.jb-bookmark {
+  margin: 2px 0;
+}
+
+.jb-editor a.jb-bookmark-card {
+  display: flex;
+  border: 1px solid var(--jb-border);
+  border-radius: 8px;
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.jb-editor a.jb-bookmark-card:hover {
+  background: var(--jb-hover);
+}
+
+.jb-bookmark.ProseMirror-selectednode .jb-bookmark-card {
+  border-color: var(--jb-blue);
+  box-shadow: 0 0 0 1px var(--jb-blue);
+}
+
+.jb-bookmark-thumb {
+  flex-shrink: 0;
+  width: 160px;
+}
+
+.jb-bookmark-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.jb-bookmark-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  min-width: 0;
+}
+
+.jb-bookmark-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.jb-bookmark-title .jb-favicon {
+  width: 16px;
+  height: 16px;
+}
+
+.jb-bookmark-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jb-bookmark-desc {
+  font-size: 12px;
+  color: var(--jb-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.jb-bookmark-url {
+  font-size: 12px;
+  color: var(--jb-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- synced block (transclusion) ---- */
+
+.jb-synced {
+  position: relative;
+  margin: 4px 0;
+  padding: 6px 12px 6px 14px;
+  border-left: 2px solid var(--jb-border);
+  border-radius: 0 6px 6px 0;
+  background: var(--jb-hover);
+}
+
+.jb-synced.ProseMirror-selectednode {
+  border-left-color: var(--jb-blue);
+  box-shadow: 0 0 0 1px var(--jb-blue);
+}
+
+.jb-synced-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--jb-muted);
+}
+
+.jb-synced-label {
+  font-weight: 500;
+}
+
+.jb-synced-jump {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--jb-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.jb-synced:hover .jb-synced-jump {
+  opacity: 1;
+}
+
+.jb-synced-jump:hover {
+  background: var(--jb-hover);
+  color: var(--jb-text);
+}
+
+/* 解決済みミラー本体は元ブロックと同じ見た目で描画するが、編集はできない */
+.jb-synced-body {
+  margin-top: 2px;
+}
+
+.jb-synced-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--jb-faint);
+  font-size: 13px;
+}
+
+.jb-synced-dangling,
+.jb-synced-error {
+  color: var(--jb-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.jb-synced-error-retry {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border: 1px solid var(--jb-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--jb-text);
+  cursor: pointer;
+  font-style: normal;
+}
+
+.jb-synced-error-retry:hover {
+  background: var(--jb-hover);
+}
+
+/* ネストした synced block はプレースホルダ表示（1 段で解決を止める） */
+.jb-synced-nested {
+  padding: 4px 10px;
+  border: 1px dashed var(--jb-border);
+  border-radius: 6px;
+  color: var(--jb-faint);
+  font-size: 12px;
+}
+
+.jb-synced-spinner,
+.jb-linkmenu-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--jb-faint);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: jb-spin 0.6s linear infinite;
+}
+
+/* 元ブロックへのジャンプ時の一時ハイライト */
+.jb-block-highlight {
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--jb-callout-question) 22%, transparent);
+  transition: background 0.8s ease;
+}
+
+.jb-linkmenu-spinner {
+  margin-left: auto;
+}
+
+@keyframes jb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jb-root * {
+    transition: none !important;
+  }
+}
+
+/* image block */
+.jb-image {
+  margin: 4px 0;
+}
+
+.jb-image-frame {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+}
+
+.jb-image-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  cursor: zoom-in;
+}
+
+.jb-image.ProseMirror-selectednode .jb-image-img {
+  box-shadow: 0 0 0 2px var(--jb-blue);
+}
+
+.jb-image-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 12px;
+  height: 100%;
+  cursor: ew-resize;
+  opacity: 0;
+}
+
+.jb-image-frame:hover .jb-image-resize {
+  opacity: 1;
+  background: linear-gradient(
+    to right,
+    transparent,
+    color-mix(in srgb, var(--jb-blue) 30%, transparent)
+  );
+}
+
+.jb-image-uploading .jb-image-img {
+  opacity: 0.6;
+}
+
+.jb-image-failed .jb-image-img {
+  opacity: 0.4;
+  filter: grayscale(1);
+}
+
+.jb-image-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 96px;
+  padding: 16px;
+  border: 1px dashed var(--jb-border);
+  border-radius: 6px;
+  color: var(--jb-text-muted, var(--jb-border));
+  font-size: 13px;
+}
+
+.jb-image-retry {
+  margin-top: 6px;
+  padding: 4px 12px;
+  border: 1px solid var(--jb-border);
+  border-radius: 6px;
+  background: var(--jb-hover);
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.jb-image-retry:hover {
+  border-color: var(--jb-blue);
+}
+
+.jb-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: rgba(0, 0, 0, 0.8);
+  cursor: zoom-out;
+}
+
+.jb-lightbox-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* ---- compact density ----
+   host が祖先に data-density="compact" を立てると、幅・文字サイズはそのままに
+   縦のリズム（行高・padding・margin）だけを詰める（プロジェクトメモ向け）。
+   relaxed（既定）側の :has 規則と specificity が並ぶものがあるため、上書きは
+   必ずこのセクションの順序（first-child リセットが最後）を保つこと */
+
+[data-density="compact"] .jb-root {
+  --jb-line: 28px;
+}
+
+[data-density="compact"]
+  [data-block-container]:has(> .jb-container-body > [data-block-content="paragraph"]) {
+  --jb-block-pad-y: 3px;
+}
+
+[data-density="compact"]
+  [data-block-container]:has(> .jb-container-body > [data-block-content="heading"]) {
+  --jb-block-margin-top: 12px;
+}
+
+[data-density="compact"]
+  [data-block-container]:has(
+    > .jb-container-body > [data-block-content="heading"]:is([data-level="1"], [data-level="2"])
+  ) {
+  --jb-block-pad-y: 4px;
+  --jb-block-margin-top: 18px;
+}
+
+[data-density="compact"]
+  [data-block-container]:has(
+    > .jb-container-body > [data-block-content="heading"]:is([data-level="1"], [data-level="2"])
+  )
+  + [data-block-container] {
+  --jb-block-margin-top: 8px;
+}
+
+[data-density="compact"]
+  [data-block-container]:has(> .jb-container-body > [data-block-content="heading"][data-level="3"])
+  + [data-block-container] {
+  --jb-block-margin-top: 2px;
+}
+
+[data-density="compact"]
+  [data-block-container]:first-child:has(> .jb-container-body > [data-block-content="heading"]) {
+  --jb-block-margin-top: 0px;
+}
+
+[data-density="compact"]
+  [data-block-container]:has(> .jb-container-body > [data-block-content="quote"]) {
+  --jb-block-pad-y: 12px;
+  --jb-block-pad-x: 14px;
+  --jb-block-margin-top: 2px;
+}
+
+[data-density="compact"]
+  [data-block-container]:has(> .jb-container-body > [data-block-content="table"]) {
+  --jb-block-pad-y: 4px;
+  --jb-block-margin-top: 2px;
+}
+
+[data-density="compact"] .jb-divider {
+  padding: 8px 2px 12px;
+}
+
+[data-density="compact"] .jb-callout > .jb-fold-btn {
+  top: calc(var(--jb-block-margin-top) + 22px);
+}
