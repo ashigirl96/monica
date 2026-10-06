@@ -115,6 +115,10 @@ _Avoid_: primary note, pinned note（Pin は Tab の語）
 5 時を境目にした日付。0 時から 5 時までは前の日に数える。
 _Avoid_: 日付（単独で使うと暦の日付と紛れる）, logical date
 
+**画像**:
+Note の本文に貼る画像。Note とは別に置き、本文から参照する。どの Note の本文からも参照されていない画像は、置いてから 2 日を過ぎると消える。削除した Note の本文からの参照も数える。
+_Avoid_: asset, attachment
+
 ### Process
 
 **Shell**:
@@ -122,7 +126,7 @@ Tauri の殻。窓、端末の中継、Backend の起動・監督と、OS への
 _Avoid_: Rust 側, Tauri 側
 
 **Backend**:
-Shell が起動し、desktop と同寿命の process。Task Ledger と Workbench Ledger と Job Ledger と DB を唯一所有し、webview と CLI は HTTP で呼ぶ。desktop が閉じている間は存在しない。
+Shell が起動し、desktop と同寿命の process。Task Ledger と Workbench Ledger と Job Ledger と Note Ledger と DB を唯一所有し、webview と CLI とブラウザは HTTP で呼ぶ。desktop が閉じている間は存在しない。
 _Avoid_: server, sidecar, tania-backend
 
 **Task Ledger**:
@@ -136,6 +140,10 @@ _Avoid_: 帳簿, books
 **Job Ledger**:
 Backend に 1 つだけある、Job と Job Execution の記録の全体。1 つの Job ではない。
 _Avoid_: scheduler, 帳簿
+
+**Note Ledger**:
+Backend に 1 つだけある、Note と画像の記録の全体。1 件の Note ではない。
+_Avoid_: 帳簿
 
 **ptyd**:
 Terminal Session を管理する常駐 daemon。Backend が起動し、desktop より長生きする。socket 越しに使う。
