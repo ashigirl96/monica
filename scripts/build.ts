@@ -21,10 +21,14 @@ const migrations = [
   ...new Bun.Glob('packages/*/migrations/*/meta/_journal.json').scanSync({ cwd: repo }),
 ].map((journal) => dirname(dirname(journal)))
 
+// Backend は --asset の folder を basename で引く（apps/web/dist は dist）。
+const assets = [...migrations, 'apps/web/dist']
+
 mkdirSync(binaries, { recursive: true })
 await $`cargo build --release -p tania-ptyd`.cwd(repo)
 copyFileSync(join(repo, 'target/release/tania-ptyd'), binary('tania-ptyd'))
-await $`bun build ${compile} ${migrations.flatMap((dir) => ['--asset', dir])} apps/backend/src/main.ts --outfile ${binary('tania-backend')}`.cwd(
+await $`bun run --cwd apps/web build`.cwd(repo)
+await $`bun build ${compile} ${assets.flatMap((dir) => ['--asset', dir])} apps/backend/src/main.ts --outfile ${binary('tania-backend')}`.cwd(
   repo,
 )
 await $`bun build ${compile} apps/cli/src/main.ts --outfile ${binary('tania')}`.cwd(repo)

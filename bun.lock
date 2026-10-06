@@ -69,6 +69,25 @@
         "vite": "catalog:",
       },
     },
+    "apps/web": {
+      "name": "@tania/web",
+      "dependencies": {
+        "@orpc/client": "catalog:",
+        "@orpc/contract": "catalog:",
+        "@tania/note": "workspace:*",
+        "react": "catalog:",
+        "react-dom": "catalog:",
+      },
+      "devDependencies": {
+        "@tailwindcss/vite": "catalog:",
+        "@types/react": "catalog:",
+        "@types/react-dom": "catalog:",
+        "@vitejs/plugin-react": "catalog:",
+        "tailwindcss": "catalog:",
+        "tw-animate-css": "catalog:",
+        "vite": "catalog:",
+      },
+    },
     "packages/job": {
       "name": "@tania/job",
       "dependencies": {
@@ -445,6 +464,8 @@
     "@tania/task": ["@tania/task@workspace:packages/task"],
 
     "@tania/ui": ["@tania/ui@workspace:packages/ui"],
+
+    "@tania/web": ["@tania/web@workspace:apps/web"],
 
     "@tania/workbench": ["@tania/workbench@workspace:packages/workbench"],
 
