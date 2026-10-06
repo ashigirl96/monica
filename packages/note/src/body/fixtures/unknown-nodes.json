@@ -1,0 +1,54 @@
+{
+  "type": "doc",
+  "content": [
+    {
+      "type": "blockGroup",
+      "content": [
+        {
+          "type": "blockContainer",
+          "attrs": { "id": "u1" },
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                { "type": "text", "text": "known " },
+                {
+                  "type": "aiHint",
+                  "attrs": { "model": "fable" },
+                  "content": [{ "type": "text", "text": "inline-unknown" }]
+                },
+                {
+                  "type": "text",
+                  "marks": [{ "type": "highlight", "attrs": { "color": "yellow" } }],
+                  "text": " marked"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "blockContainer",
+          "attrs": { "id": "u2" },
+          "content": [
+            {
+              "type": "chart",
+              "attrs": { "spec": { "kind": "bar", "series": [1, 2, 3] } },
+              "content": []
+            }
+          ]
+        },
+        {
+          "type": "blockContainer",
+          "attrs": { "id": "u3", "collapsed": true },
+          "content": [
+            {
+              "type": "heading",
+              "attrs": { "level": 1, "anchor": "intro" },
+              "content": [{ "type": "text", "text": "extra attrs survive" }]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

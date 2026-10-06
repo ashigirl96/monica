@@ -50,7 +50,7 @@ projects 表は `id, name, provider, repo, path, default_branch, worktree_root, 
 | project | 61 | 13 | 48 | 13 件なし（8 件は削除済み） | 全件 NULL |
 
 - id は `note-N`（note-1〜note-160、note-100 だけ欠番）。番号は `note_counter` の rowid で、削除しても再利用しない。
-- `date` は作成時に固定した論理日付で、JST の 5 時を境目にした日付とほぼ一致する（daily の 6 件だけ、カレンダーから別の日を開いて作ったもの）。生存する daily で同じ日付が 2 件あるのは 2026-07-20 の 1 組だけで、get-or-create が最古を返すので、遅く作った note-13 は画面から開けない（daily を作るたびに新しい note を作っていた 2026-07-24 より前の名残）。
+- `date` は作成時に固定した Logical Date で、JST の 5 時を境目にした日付とほぼ一致する（daily の 6 件だけ、カレンダーから別の日を開いて作ったもの）。生存する daily で同じ日付が 2 件あるのは 2026-07-20 の 1 組だけで、get-or-create が最古を返すので、遅く作った note-13 は画面から開けない（daily を作るたびに新しい note を作っていた 2026-07-24 より前の名残）。
 - 既定の空本文のまま残った note は 10 件（daily 9、project 1）。
 
 ### project ごとの note
@@ -162,6 +162,7 @@ node の type の出現回数（括弧は含む note 数）: paragraph 1512 (135
 ## 保存と競合
 
 - エディタは doc が変わったときだけ immutable な node を渡し、ページが 1 秒の debounce で `PUT /api/notes/{id}` に全文を送る（`web/src/notes/use-autosave.ts`）。送信は直列にし、失敗は 5 秒後に再試行する。pagehide では `keepalive` で flush する。
+- 送る `title` は、essay と primary でない project note では文字列、daily と primary では `null`（触らない）（`web/src/pages/daily/index.tsx`、`web/src/pages/projects/editor.tsx` の `scheduleSave`）。
 - 409 以外の失敗（接続できない、404、500）はどれも同じ経路で、成功するまで 5 秒おきに再試行し続ける。上限も間隔の伸長も無い。ヘッダには「Failed to save — changes retry on next edit」を出す（`web/src/notes/use-autosave.ts:114-129`、`save-status.tsx:22-28`）。接続が切れたことを示す表示は無い。
 - 未保存の編集はメモリにしか無い。localStorage や IndexedDB に退避せず、`beforeunload` の確認も無い。server が居ない間にタブを閉じると、pagehide の flush が失敗して編集が失われる。
 - SSE や WebSocket は無い。
