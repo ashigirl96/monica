@@ -19,6 +19,17 @@ export type TaskLedger = {
   cleanSetupLogs(): Promise<void>
 }
 
+export function systemJobs(taskLedger: TaskLedger) {
+  return [
+    { name: 'task.sync', every: 5 * 60_000, run: () => taskLedger.syncInBackground() },
+    {
+      name: 'task.setup-log-cleanup',
+      every: 24 * 60 * 60_000,
+      run: () => taskLedger.cleanSetupLogs(),
+    },
+  ]
+}
+
 type Internals = SyncDeps & BenchDeps & { backgroundSyncError: () => BackgroundSyncError | null }
 
 // TaskLedger の型は events / start / stop / syncInBackground / cleanSetupLogs だけに保ち、GitHub への接続などの中身は TaskLedger を key にここへ置く。

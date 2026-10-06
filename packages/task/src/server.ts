@@ -15,7 +15,7 @@ export { migrations } from '../migrations/index.ts'
 export { nameAgentSession } from './current.ts'
 export type { GitHub } from './github.ts'
 export type { Ghq } from './prepare.ts'
-export { createTaskLedger, type TaskLedger } from './task.ts'
+export { createTaskLedger, systemJobs, type TaskLedger } from './task.ts'
 
 const os = implement(contract).$context<{ db: Db; taskLedger: TaskLedger }>()
 
