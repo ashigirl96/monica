@@ -2,6 +2,14 @@
 
 `packages/note/src/ui` に置く notes の画面とエディタ。`@tania/note/ui` から import する。決定の理由は ADR-0019 と #115・#118 の決定にある。今あるのはエディタだけで、画面・router・autosave は後続の issue で足す。
 
+## monica のコードを移すとき
+
+notes の ui は monica の `web/` と `shared/` を移して作る。
+
+- tania の tsconfig（`noUncheckedIndexedAccess`・`erasableSyntaxOnly`）と oxlint（`consistent-function-scoping`・`no-shadow` など）は monica より厳しく、import を書き換えただけでは通らない。parameter property は明示的なフィールドと constructor の先頭での代入に展開する。配列の読み出しは CODING_STANDARDS の「型」に従い、同じ関数の条件から範囲内と読める箇所は `!`、そうでなければ分岐にする。テストも同じ検査を通す。
+- 手で入れた変更だけをレビューに見せるには、import の書き換えと oxfmt だけを当てた状態を repo の外に控え、`git diff --no-index <控え> <移した先>` で比べる。
+- 振る舞いを変えずに移す slice でも、セキュリティ（スクリプトの実行など）と本文の消失につながる不具合は直し、PR に書く。それ以外の monica の振る舞いはそのまま移し、直すなら別の issue にする。
+
 ## エディタ
 
 monica の `shared/block-editor` を `src/ui/editor/` に振る舞いを変えずに移したもの。ProseMirror を直に組み（`new Schema`・`EditorState.create`・`new EditorView`）、NodeView は React ではなく `document.createElement` で組む。entry が出すのは `BlockEditor`（と `BlockEditorHandle`）と、保存の前にアップロード中の画像を外す `stripPendingImages` だけ。

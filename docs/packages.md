@@ -13,7 +13,7 @@ tania の repo の形、package の entry、domain 間の呼び出し、CLI の�
 - `docs/packages/task-ledger.md`: Task Ledger。task の contract と、Run・Attach・Bench・Run の起動・close と reopen・sync の規則。task の procedure に触るとき。
 - `docs/packages/job-ledger.md`: Job Ledger。job の contract と、Job Execution の記録・tick・飛ばす回・中断・保持の規則。job の procedure か、裏で定期的に走る処理に触るとき。
 - `docs/packages/note-ledger.md`: Note Ledger。note の contract と、種類ごとの不変条件・保存の楽観ロック・削除と取り消し・`body` entry の規則。note の procedure か本文の扱いに触るとき。
-- `docs/packages/note-ui.md`: note の ui。エディタの置き場所、依存、node 型を減らせない理由、直書きの文字列の置き場所。`packages/note/src/ui` に触るとき。
+- `docs/packages/note-ui.md`: note の ui。monica のコードを移すときの規則と、エディタの置き場所、依存、node 型を減らせない理由、直書きの文字列の置き場所。`packages/note/src/ui` に触るとき、monica のコードを移すとき。
 - `docs/packages/cli.md`: CLI（apps/cli）。argv の振り分け、Backend の探索、転送 router、`--format`、エラーと exit code、SKILL.md の検査。`cli: true` の procedure か SKILL.md を足すとき、apps/cli に触るとき。
 - `docs/packages/desktop.md`: desktop（apps/desktop）。webview の枠、キーの扱い、Backend の endpoint、Task の slot、Shell の責務と command、窓。apps/desktop と domain の ui の載せ方に触るとき。
 - `docs/packages/dev-loop.md`: dev loop、release、検査、版。dev の起動、scripts、release の build、CI、依存と tsconfig に触るとき。
