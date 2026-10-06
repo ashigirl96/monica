@@ -16,3 +16,6 @@ tania-terminal-daemon.workspace = true
 base64.workspace = true
 tania-terminal-client.workspace = true
 tania-terminal-protocol.workspace = true
+
+[lints]
+workspace = true
