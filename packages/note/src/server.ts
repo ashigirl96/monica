@@ -1,14 +1,15 @@
 import { implement } from '@orpc/server'
 
 import { contract } from './contract.ts'
-import type { Db, NoteLedger } from './note.ts'
+import { IMPORT_TIMEOUT_MS, importImage, placeImage } from './image.ts'
+import { type Db, internals, type NoteLedger } from './note.ts'
 import { createEssay, createRepoNote, dailyDates, openDaily, openScratch } from './open.ts'
 import { removeNote, restoreNote } from './remove.ts'
 import { toNote, undeletedNote } from './row.ts'
 import { saveNote, setEssayStatus } from './save.ts'
 
 export { migrations } from '../migrations/index.ts'
-export { createNoteLedger, type NoteLedger } from './note.ts'
+export { createNoteLedger, type NoteLedger, systemJobs } from './note.ts'
 
 const os = implement(contract).$context<{ db: Db; noteLedger: NoteLedger }>()
 
@@ -33,6 +34,14 @@ export const router = os.router({
   repoNote: {
     create: os.repoNote.create.handler(({ context, input }) =>
       createRepoNote(context.db, input.repo),
+    ),
+  },
+  image: {
+    upload: os.image.upload.handler(async ({ context, input }) =>
+      placeImage(internals(context.noteLedger).dir, await input.file.bytes()),
+    ),
+    import: os.image.import.handler(({ context, input }) =>
+      importImage(internals(context.noteLedger), input.url, IMPORT_TIMEOUT_MS),
     ),
   },
 })

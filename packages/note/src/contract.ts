@@ -49,6 +49,8 @@ export const NoteSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('scratch'), repo: z.string(), ...common }),
 ])
 
+const ImageUrlSchema = z.string().describe(`${IMAGE_URL_PREFIX}<uuid>.<ext> on the notes listener`)
+
 export const saveErrors = {
   CONFLICT: {
     status: 409,
@@ -153,5 +155,21 @@ export const contract = {
       .meta({ description: 'Make a Repo Note with no title' })
       .input(z.object({ repo: RepoSchema }))
       .output(NoteSchema),
+  },
+  image: {
+    upload: meta
+      .meta({
+        description:
+          'Place a png, jpg, gif or webp image of up to 20MB for a body to show, and give its URL',
+      })
+      .input(z.object({ file: z.file() }))
+      .output(z.object({ url: ImageUrlSchema })),
+    import: meta
+      .meta({
+        description:
+          'Fetch the image at an http or https URL within 10s and place it like an uploaded one, giving its URL',
+      })
+      .input(z.object({ url: z.url({ protocol: /^https?$/ }) }))
+      .output(z.object({ url: ImageUrlSchema })),
   },
 }

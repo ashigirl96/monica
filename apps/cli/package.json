@@ -17,6 +17,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@tania/note": "workspace:*",
     "drizzle-orm": "catalog:"
   }
 }
