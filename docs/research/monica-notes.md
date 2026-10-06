@@ -149,6 +149,42 @@ node の type の出現回数（括弧は含む note 数）: paragraph 1512 (135
 - キーは library を使わず、画面ごとに `window` の capture phase の `keydown` で取り、`e.code` で判定する。
 - React 19.2.8、TanStack Query 5.102.8（staleTime 0、retry なし）、素の fetch、Tailwind 4.3.3、Vite 8.2.2。jotai・clsx・tailwind-merge・date-fns・lucide-react は notes では使っていない（日付は自作の `notes/dates.ts`、icon は inline の SVG）。
 
+### route の細部
+
+- `/notes` は `/daily` に、`/notes/:id` は `GET /api/notes/{id}` の kind で `/essays/{id}`・`/projects/{project_id}/notes/{id}`・`/daily/{date}` に replace する。削除済みは 404 で「Note not found」（`web/src/pages/note-redirect.tsx:14-38`）。`project_id` が NULL になった project note は daily として読まれるので、その日の別の daily が開く。
+- `/projects/:owner/:repo/notes/<primary の id>` は、読み込み後に `/projects/:owner/:repo` へ replace する（`web/src/pages/projects/editor.tsx:105-110`）。primary の正の path は `/projects/:owner/:repo`。
+- `/` は server が `/explanations` にリダイレクトする（`crates/monica-web/src/lib.rs:210-212`）。client の未知の path は explanations の一覧になる（`web/src/app.tsx:64`）。
+- noteMention の素のクリックは flush してから `/notes/{id}` へ push し、⌘ / ⌃ 付きは `window.open` で新しいタブに開く（`shared/block-editor/node-views.ts:427-432`）。synced block へのジャンプと競合の通知の「開く」も `/notes/{id}` を使う。
+- link mark のクリックは origin を見ずに `window.open(href, '_blank', 'noopener')` で開くので、保存された `http://monica.localhost:19280/...` も SPA の中では遷移しない（`shared/block-editor/link-click.ts:16-27`）。URL の paste を mention に変えるのは、同じ origin の `/notes/<id>` だけ（`note-mention-menu.ts:47-60`）。
+
+### 画面の細部
+
+- rail は幅 48px の縦の列で、上から favicon、Daily / Essay / Project / Library / Settings のアイコン（tooltip に ⌃1 など）、一番下にテーマの切り替え（押すたびに system → light → dark）（`web/src/components/app-shell.tsx:149-224`）。
+- NotesShell（daily・essay の編集・project の編集）のサイドバーは既定 400px で、境界のドラッグで 260〜720px、ダブルクリックで 400px に戻る。3 画面で同じ幅を共有する（`web/src/notes/notes-shell.tsx:13-58, 137-146`）。
+- 密度は relaxed と compact の 2 段で、compact は縦のリズムだけを詰める（`--jb-line` 32→28px など）。zen は rail とサイドバーを幅 0 にし、右下の ambient と本文の幅のピルは残す。zen は保存しない（`app-shell.tsx:126-135`）。
+- 本文の幅は 760px に、右下のスライダーで 0〜520px を 8px 刻みで足せる（`web/src/note-width.ts`）。
+- daily のサイドバーの行は日付だけ（件数も要約も出さない）。カレンダーは日曜始まりで、月の label のクリックで今日に戻り、未来を含むどの日もクリックで開ける（開くと作られる）（`web/src/pages/daily/{sidebar,calendar}.tsx`）。今日の日付は `GET /api/notes/today` を staleTime 無限で一度だけ取るので、開いたまま 5 時を越えても「TODAY」は進まない（`web/src/notes/queries.ts:44-53`）。
+- essay の一覧はサイドバーの無いカードの grid で、カードは writing のバッジ・title と本文の先頭の preview・日付（`2026/7/21`）。filter は無い。並びは `created_at DESC`（`web/src/api.ts:144` のコメントは updated_at 降順と書いていて食い違う）。右クリックで status の切り替えと削除。
+- essay の編集画面のサイドバーは `writing N` と `finished N` のタブと、その中の一覧。status は StatusChip のクリックか ⌃W で切り替える。
+- project の候補は `GET /api/projects`（projects 表を `ORDER BY id`）で、label は name、空なら id。サイドバーは「Project」の label、primary の行、区切り、時系列の一覧（日付は出さず、hover で削除の ×）。1 ページ 100 件。project note を作るのは ⌥N だけで、ボタンは無い。
+- settings の画面で設定できるのは Day boundary だけ（`web/src/pages/settings/index.tsx:103-148`）。
+- notes の画面に検索の欄は無い。note を探す API は `[[` の mention menu が使う `GET /api/notes/mentions?q=`（最大 20 件）だけ。
+- localStorage の key は `monica-theme`・`monica-ambient`・`monica-note-extra-w`・`monica-notes-sidebar-w`・`monica-notes-density`・`monica-projects-last` の 6 つ。
+
+### キーの細部
+
+- ⌃1〜3、⌥B、⌥;（ambient の巡回。⇧ で逆順、変換中も効く）は全画面。⌥D は NotesShell の 3 画面。⌥N・⌥Z は essay の一覧と編集と project の編集で、daily には無い。⌥Backspace（と ⌥Delete）は essay と project の編集で、primary の上では素通しする。
+- ⌥Backspace は確認を出さずに開いている note を削除する（`web/src/pages/essays/editor.tsx:304-310`）。capture phase で preventDefault するので、本文の中で macOS の単語の削除は使えない。
+- ⌥Z の取り消しの stack は、essay では module の変数で一覧と編集が共有し、project では component の ref で project を切り替えると空になる。
+- block-editor のキー（⌘J / ⌃J の slash menu、Esc と ⌘A のブロック選択、⌥. の折りたたみ、⌃A / ⌃E / ⌃D / ⌃N / ⌃P、Mod-b / i / u / e など）とは、修飾キーの組み合わせが重ならないようにしているだけで、衝突を避ける仕組みは無い（`web/src/keys.ts:1-2`）。
+
+### 表示名
+
+- daily: サイドバーは今日が `TODAY · TUE 10.6`、ほかは `TUE 10.6`、今年以外は `TUE 2025.10.6`。見出しと競合の通知は `dayLabelWithYear`。mention は ISO の `2026-07-18`（`web/src/notes/dates.ts:42-52`）。
+- primary: 見出し・サイドバー・競合の通知は project の name（空なら id）。meta の行に `primary` と出す。mention は title が空なので project_id。
+- title の無い essay と project note: 入力欄の placeholder・カード・競合の通知は `Untitled`、サイドバーは preview、それも無ければ `Untitled`。mention は essay が `Untitled`、project note が project_id（primary と同じ表示になる）。
+- `document.title` を設定するコードは無く、全画面で `index.html` の `Monica Library` のまま。
+
 ## ブラウザへの配り方
 
 - monica desktop が起動時に thread で `monica_web::serve` を立てる（`crates/monica-desktop/src/lib.rs:170-202`）。release は `127.0.0.1:19280` 固定、dev は 19281〜19299 を順に試し、埋まっていれば port 0 にする（`crates/monica-web/src/lib.rs:18-20, 782-793`）。desktop が閉じている間は notes を開けない。
