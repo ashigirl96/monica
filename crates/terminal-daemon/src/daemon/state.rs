@@ -77,6 +77,10 @@ impl Connection {
         let Some(pending) = self.exits.get_mut(session_id) else {
             return false;
         };
+        // The Exit stays below the ceiling too, or a pile of them takes the room responses need.
+        if !self.outbox.has_room_to_catch_up() {
+            return false;
+        }
         let missed = &pending.missed[pending.queued..];
         if missed.is_empty() {
             if self.outbox.send(&pending.exit) {
@@ -86,9 +90,6 @@ impl Connection {
                 );
                 self.exits.remove(session_id);
             }
-            return false;
-        }
-        if !self.outbox.has_room_to_catch_up() {
             return false;
         }
         let chunk = &missed[..missed.len().min(CATCH_UP_CHUNK)];
