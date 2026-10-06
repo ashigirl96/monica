@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 
 import { EMPTY_DOC } from './body/index.ts'
 import { logicalDate, type Note } from './contract.ts'
@@ -14,6 +14,16 @@ export function openDaily(db: Db, date: string): Note {
     .where(and(eq(note.kind, 'daily'), eq(note.date, date)))
     .get()
   return toNote(found ?? insertNote(db, { kind: 'daily', date }))
+}
+
+export function dailyDates(db: Db): string[] {
+  return db
+    .select({ date: note.date })
+    .from(note)
+    .where(eq(note.kind, 'daily'))
+    .orderBy(desc(note.date))
+    .all()
+    .map((row) => row.date)
 }
 
 export function openScratch(db: Db, repo: string): Note {

@@ -106,8 +106,10 @@
     "packages/note": {
       "name": "@tania/note",
       "dependencies": {
+        "@orpc/client": "catalog:",
         "@orpc/contract": "catalog:",
         "@orpc/server": "catalog:",
+        "@tanstack/react-query": "catalog:",
         "drizzle-orm": "catalog:",
         "drizzle-zod": "catalog:",
         "prosemirror-commands": "catalog:",
@@ -186,6 +188,7 @@
     "@orpc/contract": "^1.15.4",
     "@orpc/server": "^1.15.4",
     "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/react-query": "^5.104.1",
     "@tauri-apps/api": "^2.12.1",
     "@tauri-apps/cli": "^2.12.1",
     "@tauri-apps/plugin-opener": "^2.5.5",
@@ -484,6 +487,10 @@
     "@tania/web": ["@tania/web@workspace:apps/web"],
 
     "@tania/workbench": ["@tania/workbench@workspace:packages/workbench"],
+
+    "@tanstack/query-core": ["@tanstack/query-core@5.104.1", "", {}, "sha512-TiRghcrGkUTE+M4JBxvpPSpBhxvIzQairw+cksrHYGr+2uwC77yW1SY9nYxnYRYOppvucf8rEg6b5byoz4rTpw=="],
+
+    "@tanstack/react-query": ["@tanstack/react-query@5.104.1", "", { "dependencies": { "@tanstack/query-core": "5.104.1" }, "peerDependencies": { "react": "^18 || ^19" } }, "sha512-Zz70EgjahNI7aCz8BZxM3vUGU44ycxEAzMuCUjLeA7SVhhOkg3ZgPjPJPvHjs6Rmky/dtmnu1WzjGHNHmhCoZQ=="],
 
     "@tauri-apps/api": ["@tauri-apps/api@2.12.1", "", {}, "sha512-DeyFHa3wynpyoqTDikDEDGTJIq4LQ5USfolQGRmGIWT6JMADyxZBTDa5cAdT3tDg73rUXufPaCwN7aXBos4OnQ=="],
 

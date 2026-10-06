@@ -1,6 +1,6 @@
 # note の ui
 
-`packages/note/src/ui` に置く notes の画面とエディタ。`@tania/note/ui` から import する。決定の理由は ADR-0019 と #115・#118 の決定にある。今あるのはエディタだけで、画面・router・autosave は後続の issue で足す。
+`packages/note/src/ui` に置く notes の画面とエディタ。`@tania/note/ui` から import する。決定の理由は ADR-0019 と #115・#118 の決定にある。今あるのはエディタと Daily の画面で、Essay と Repo の画面、テーマと ambient は後続の issue で足す。
 
 ## monica のコードを移すとき
 
@@ -56,3 +56,69 @@ monica の `shared/block-editor` を `src/ui/editor/` に振る舞いを変え�
 - monica のテスト 11 本と `test-fixtures.ts` を移してあり、回帰の網にする。
 - 保存済みの本文を開けることは、`src/body/fixtures/full-doc.json`（全 node 型を持つ）を `docFromJSON` に通し、block がすべて残ることで確かめる。
 - `src/body/fixtures/unknown-nodes.json` はエディタのテストに使わない。server が知らない node を読み飛ばすことを確かめる fixture で、schema に無い node（`aiHint`・`chart`）と mark（`highlight`）を持つので、エディタでは monica と同じく空の doc になる。monica の本文に出てくる node と mark は、どれも schema にある。
+
+## 画面
+
+monica の `web/src` の router・autosave・Daily の画面を移したもの。monica と同じ構成で、`notes/` に画面が共有する部品、`pages/` に画面、`components/` に rail を置く。
+
+### root と apps/web の分担
+
+- root は `NotesApp`（`notes-app.tsx`）。QueryClient を作り、client を React の context に置き、autosave・router・rail・競合の通知・再接続の帯を持つ。
+- `apps/web` の main.tsx は、notes の口への RPCLink を作って `client.note` を `NotesApp` に渡すだけで、TanStack Query を知らない。desktop と同じく、domain の ui には自分の client だけを渡す。
+- RPCLink には `@tania/note/ui` の `noteLinkOptions` を展開する。keepalive と再接続の合図は link でしか扱えないので、その設定は ui が持つ。client の型は `NoteClient`（note の contract に、`keepalive` を持つ `CallContext` を付けたもの）。
+
+### データ取得
+
+- TanStack Query だけを入れ、`@orpc/tanstack-query` は入れない。queryFn が oRPC の client を呼ぶ。query key は monica のまま（`query.ts` の `queryKeys`）。
+- staleTime は 0 で、retry はしない。外の更新は focus のたびに取り直す（ADR-0018）。`focusManager` は visibilitychange に加えて focus と blur を見る。desktop やエディタからブラウザに戻っても窓は見えたままなので、visibilitychange だけでは取り直さないため。
+- Daily の画面は focus のたびに `daily.open`（get-or-create）を呼び直す。
+- repo の中にデータ取得のやり方が 2 つある。desktop の webview は jotai か useState と domain ごとの変更の stream、notes の画面は TanStack Query と focus での取り直し。
+
+### route
+
+| path | 開くもの |
+|---|---|
+| `/daily/:date` | その Logical Date の Daily（開くと作られる） |
+| `/daily`、`/notes`、`/` | 今日の `/daily/:date` に replace |
+| `/notes/:id` | id から種類ごとの path に replace。削除済みと不在は「Note not found」 |
+| それ以外 | 「Not found」 |
+
+- path の文字列と route の解釈は `routes.ts` に集める。router は monica の自作を移したもの（`router.ts`、History API）。
+- 今日は `/daily` を開くたびに `logicalDate(new Date())` で導く（`todayPath`）。開いたまま 5 時を越えても、次に `/daily` を開けば次の日になる。今日を返す procedure は無い。Daily の画面の TODAY は画面を作った時に導き、`/daily` を開き直すと作り直される。
+- `/notes/:id` は `get` で引いた Note の種類から行き先を決める（`notePagePath`）。今は Daily だけが画面を持ち、Essay・Repo Note・Scratch は後続の issue が行き先を足すまで「Not found」。
+- rail は Daily / Essays / Repo で、⌃1 / ⌃2 / ⌃3 で移る。Library と Settings は持ち込まない。
+- NotesShell のサイドバーは既定 400px で、境界のドラッグで 260〜720px、ダブルクリックで 400px に戻る。幅は画面の間で共有し、localStorage の `tania-notes-sidebar-w` に持つ。
+- Daily の表示名の書式は `notes/dates.ts` が持つ。サイドバーは今日が `TODAY · TUE 10.6`、ほかは `TUE 10.6`、今年以外は `TUE 2025.10.6`。見出しと競合の通知は年付きの `dayLabelWithYear`（今年なら年を省く）。
+- `document.title` は表示名に ` · tania` を付ける（`TUE 10.6 · tania`）。表示名の無い画面は `tania`。
+
+### 保存と競合
+
+- autosave は router より上で 1 つだけ mount し、画面を移っても pending・基準版・競合を持ち続ける。1 秒の debounce で保存し、送信は直列にし、CONFLICT 以外の失敗は 5 秒ごとに再試行する。判断は React に依らない `notes/save-queue.ts` の `SaveQueue` が持ち、`notes/use-autosave.ts` はそれを React の状態と pagehide・beforeunload につなぐ。
+- 保存の `expectedUpdatedAt` には、その Note を最後に読んだか書いた `updatedAt`（基準版）を渡す。版は ms で比べる。Daily と Scratch の保存は title を省く。
+- CONFLICT は再試行しない。開いている Note はヘッダのバナー（「最新を読み込む」で手元の編集を捨てる）、開いていない Note は左下の常駐の通知に出す。通知の「開く」は `/notes/:id` に移る。
+- 保存は query の cache を通らない。保存の応答は doc を返さないので、cache は 1 世代古くなる。`notes/note-sync.ts` は、基準版より古い cache を採用しない。外の更新は、未保存が無く、基準版より新しいときだけ採用してエディタを作り直す。
+- pagehide で未保存を送る。`CallContext` の `keepalive` を link の `fetch` が init に渡す。keepalive の body の上限（64KB）を超える本文は送れない（monica と同じ）。
+- `notes/save-state.ts` は monica の `note-ledger.ts` を改名したもの。tania では Ledger を Backend の部品にだけ使う。
+
+### 再接続の表示と beforeunload
+
+- 合図は link の fetch の結果（`client.ts` の `linkOptions`）。応答を受け取れば、エラーの応答でも届いたと数え、受け取れなければ届かなかったと数える。abort は数えない。
+- 届かなかったら、1 秒ごとに `daily.dates` を呼んで戻ったかを確かめる。最初の失敗から 1 秒たっても届かなければ上端に「tania に再接続中…」を出し、届いたら消す（`reach.ts`）。Backend の再起動（bun --watch で約 100ms）で帯がちらつかないよう、1 秒待つ。
+- 届いている間は定期的に呼ばない。そのため、何も操作していない間に Backend が止まっても、次に保存か取り直しが走るまで帯は出ない。
+- dev の Vite の proxy は、Backend に届かないとき 502 を返さずに接続を切る。release の口では接続が拒まれるので、どちらでも画面に同じ network error を見せるため。
+- 閉じると失われる編集がある間だけ、`beforeunload` でタブを閉じる前に確かめる。数えるのは、競合で残った編集、保存に失敗して再試行を待つ編集、届かない間の未保存（debounce 中と送信中）。届く Backend への未保存は pagehide の保存が送るので、書いた直後に閉じても確かめない（`SaveQueue` の `wouldLoseOnLeave`）。
+- そのため、書いてから最初の保存が失敗するまでの間に Backend が止まった場合と、keepalive の上限を超える本文を書いた直後に閉じた場合は、確かめずに最後の編集を失う（monica と同じ）。
+- IndexedDB への退避と Service Worker は使わない（ADR-0017）。
+
+### CSS
+
+- `notes/notes.css` を NotesShell が import する。面の色（`--desk`・`--paper`・`--ink-*`）を持ち、既定は dark で、light は `:root[data-theme="light"]` で上書きする。
+- 机と紙は背景写真（ambient）を透かすため alpha を持ち、写真なし（`:root[data-ambient="none"]`）では不透明にする。
+- テーマと ambient の切り替えが入るまでは、`apps/web` の `index.html` が `data-theme="dark"` と `data-ambient="none"` を置く。写真を敷く規則は ambient と一緒に足す。
+
+### テスト
+
+- エディタと同じく DOM の環境は入れず、純関数と link を確かめる。
+- monica の save-state（14 本）・note-sync（10 本）・summary（4 本）のテストを、contract の形（平らな種類、Date の版）に直して移してある。
+- 保存は `save-queue.test.ts` が、偽の保存と `spyOn` で捕まえた timer で確かめる（debounce、基準版、CONFLICT、再試行、直列、keepalive、title を省くこと、閉じると失われる編集の数え方）。
+- route は `routes.test.ts`（今日の導出、`/notes/:id` の行き先）、再接続は `reach.test.ts`（1 秒の待ちと確かめの request。timer は `setTimeout` を `spyOn` で捕まえて手で進める）、link は `client.test.ts`（keepalive と届いたかの合図。fetch を `spyOn` で差し替える）。

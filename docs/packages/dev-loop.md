@@ -19,6 +19,7 @@
 - ブラウザに配る notes の画面は、`bun run web`（`apps/web` の Vite）で起こす。`bun run desktop` は起こさない。Workbench だけを見る dev と agent に Vite を 1 つ余計に持たせないため。
   - `TANIA_HOME` が無ければ `~/.tania-dev`。`devInstance` の Vite の port で `strictPort` で listen し、`/rpc` と `/api/assets` を同じ home の Backend の notes の口（`http://127.0.0.1:<notes の port>`）へ proxy する。Host を書き換える（`changeOrigin`）ので、notes の口の Host の照合を通る。`Sec-Fetch-Site` はブラウザが Vite に付けた `same-origin` がそのまま届く。
   - その Backend が居なくても、他の口には倒さない。monica の Vite は dev の Backend が居ないと release の口に倒れ、release の note に書いていた。`TANIA_HOME` が release の home なら、`scripts/desktop.ts` と同じく起こさずに落ちる。
+  - Backend に届かない request には 502 を返さず、接続を切る。release の口では接続が拒まれるので、画面がどちらでも同じ network error を見て再接続の帯を出すため（`docs/packages/note-ui.md` の「再接続の表示と beforeunload」）。
   - dev の Backend の notes の口は SPA を配らない（`bun run` の Backend には `--asset` の `dist` が無い）。開くのは Vite の URL（既定の home は `http://localhost:19581`）。
 - `bun run tania <args>` は `scripts/tania-dev`（`bun apps/cli/src/main.ts "$@"`）を呼ぶ。`TANIA_HOME` が無ければ `~/.tania-dev`。
 - `bun run dev:list` は、動いている dev と残った home を `TANIA_HOME` ごとに並べる（desktop か headless か、desktop・Backend・ptyd の pid、mcp-bridge の port、worktree）。Backend の env は `ps` で読めないので、home は ptyd の `--tania-home` と `~/.tania-*`・`$TMPDIR/tania-*` から集め、Backend は `backend.json` の pid から、desktop はその親から引く。bridge の port は desktop の pid が LISTEN している TCP の port（`lsof`）。release の `~/.tania` は出さない。
