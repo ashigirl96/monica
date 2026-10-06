@@ -1118,6 +1118,7 @@ mod tests {
         for session_id in ids {
             t.terminate(session_id).unwrap();
         }
+        // Reading earlier lets catch-up from the transcript finish before the sessions exit.
         wait_for(Duration::from_secs(5), || {
             t.list().iter().all(|s| !s.running).then_some(())
         });
