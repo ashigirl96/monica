@@ -6,6 +6,7 @@ import { WorkbenchHeader } from './header.tsx'
 import { ResizeHandle } from './resize-handle.tsx'
 import { type RenderRunspaceLabel, WorkbenchSidebar } from './sidebar.tsx'
 import {
+  lastTabClosedAtom,
   reloadAgentSessionsAtom,
   reloadAtom,
   warnFailed,
@@ -50,19 +51,26 @@ function useWorkbenchChanges(client: WorkbenchClient | null) {
   }, [client, setClient, reload, reloadAgentSessions])
 }
 
-// workbench は task を import しないので、Bench のラベルと Tab のメニューの Task の項目は slot で受ける（ADR-0005）。
+// workbench は task を import しないので、Task に関わる表示と出来事は slot で受け渡す（ADR-0005）。
 export function Workbench({
   client,
   renderRunspaceLabel,
   tabMenuItems,
+  onLastTabClosed,
 }: {
   client: WorkbenchClient | null
   renderRunspaceLabel?: RenderRunspaceLabel
   tabMenuItems?: TabMenuItems
+  onLastTabClosed?: (runspaceId: string) => void
 }) {
   useWorkbenchChanges(client)
   const store = useStore()
   useEffect(() => persistUiState(store), [store])
+  const setLastTabClosed = useSetAtom(lastTabClosedAtom)
+  useEffect(
+    () => setLastTabClosed(() => onLastTabClosed ?? null),
+    [onLastTabClosed, setLastTabClosed],
+  )
 
   const sidebarOpen = useAtomValue(sidebarOpenAtom)
   const sidebarWidth = useAtomValue(sidebarWidthAtom)

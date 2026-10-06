@@ -110,9 +110,9 @@ export const router = os.router({
         }),
       ),
     ),
-    close: os.tab.close.handler(({ context, input }) => {
-      writeLayout(context, (tx) => closeTab(tx, input.id))
-    }),
+    close: os.tab.close.handler(({ context, input }) =>
+      writeLayout(context, (tx) => closeTab(tx, input.id)),
+    ),
     move: os.tab.move.handler(({ context, input }) => {
       writeLayout(context, (tx) => moveTab(tx, input))
     }),

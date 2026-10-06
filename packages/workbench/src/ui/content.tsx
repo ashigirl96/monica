@@ -1,12 +1,14 @@
 import { useAtomValue, useSetAtom } from 'jotai'
-import { useCallback, useRef } from 'react'
+import { type ReactNode, useCallback, useRef } from 'react'
 
 import { baseName } from '../paths.ts'
 import { useImageDrop } from './image-drop.ts'
 import { jumpHintsActiveAtom } from './jump-hints.ts'
 import {
+  activeRunspaceAtom,
   activeTerminalTabAtom,
   closeTerminalTabAtom,
+  createTerminalTabAtom,
   deadTabsAtom,
   layoutAtom,
   startNewShellForTabAtom,
@@ -43,16 +45,12 @@ function TerminalSessionOverlay({
           : 'Shell exited.'
 
   return (
-    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-black/60">
+    <Overlay>
       <span className="text-sm text-foreground/80">{message}</span>
       <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={onNewShell}
-          className="rounded-md bg-white/10 px-3 py-1.5 text-xs text-foreground transition-colors hover:bg-white/20"
-        >
+        <NewShellButton onClick={onNewShell}>
           {entry.status === 'failed' ? 'Retry' : `New shell in ${baseName(cwd)}`}
-        </button>
+        </NewShellButton>
         {onCloseTab && (
           <button
             type="button"
@@ -63,7 +61,37 @@ function TerminalSessionOverlay({
           </button>
         )}
       </div>
+    </Overlay>
+  )
+}
+
+function Overlay({ children }: { children: ReactNode }) {
+  return (
+    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-black/60">
+      {children}
     </div>
+  )
+}
+
+function NewShellButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-md bg-white/10 px-3 py-1.5 text-xs text-foreground transition-colors hover:bg-white/20"
+    >
+      {children}
+    </button>
+  )
+}
+
+// 所有されていない Runspace は常に Tab を持つので、ここに来るのは Tab の無い Bench だけ。
+function EmptyRunspaceOverlay({ cwd }: { cwd: string }) {
+  const createTab = useSetAtom(createTerminalTabAtom)
+  return (
+    <Overlay>
+      <NewShellButton onClick={() => void createTab()}>New shell in {baseName(cwd)}</NewShellButton>
+    </Overlay>
   )
 }
 
@@ -161,6 +189,7 @@ function TerminalPane({
 export default function WorkbenchContent() {
   useImageDrop()
   const layout = useAtomValue(layoutAtom)
+  const activeRunspace = useAtomValue(activeRunspaceAtom)
   const activeTabId = useAtomValue(activeTerminalTabAtom)?.id
   const statuses = useAtomValue(terminalSessionStatusAtom)
   const deadTabs = useAtomValue(deadTabsAtom)
@@ -189,6 +218,7 @@ export default function WorkbenchContent() {
             active={tab.id === activeTabId}
           />
         ))}
+      {activeRunspace?.tabs.length === 0 && <EmptyRunspaceOverlay cwd={activeRunspace.cwd} />}
       <JumpOverlay />
     </div>
   )

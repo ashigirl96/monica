@@ -1,4 +1,4 @@
-import { useRunspaceLabels, useTabMenuItems } from '@tania/task/ui'
+import { useCloseTaskOfBench, useRunspaceLabels, useTabMenuItems } from '@tania/task/ui'
 import { Toaster } from '@tania/ui'
 import { Workbench } from '@tania/workbench/ui'
 import { useMemo } from 'react'
@@ -14,6 +14,7 @@ export function App() {
   const task = useMemo(() => client?.task ?? null, [client])
   const renderRunspaceLabel = useRunspaceLabels(task)
   const tabMenuItems = useTabMenuItems(task)
+  const closeTaskOfBench = useCloseTaskOfBench(task)
 
   return (
     <>
@@ -21,6 +22,7 @@ export function App() {
         client={workbench}
         renderRunspaceLabel={renderRunspaceLabel}
         tabMenuItems={tabMenuItems}
+        onLastTabClosed={closeTaskOfBench}
       />
       <Toaster />
     </>
