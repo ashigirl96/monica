@@ -70,37 +70,59 @@ impl PtydClient {
             .name("ptyd-client-reader".to_string())
             .spawn(move || {
                 let reader = BufReader::new(read_stream);
-                for frame in read_frames::<_, ServerMessage>(reader) {
-                    let msg = match frame {
-                        Ok(msg) => msg,
-                        Err(e) => {
-                            log::warn!("unparseable daemon message {e}");
-                            continue;
-                        }
-                    };
-                    match msg {
-                        ServerMessage::Ok { id, body } => {
-                            if let Some(tx) = lock(&reader_inner.pending).remove(&id) {
-                                let _ = tx.try_send(Ok(body));
+                // [DEBUG-lag] per-window stats of the reader: frames, time inside on_event, time
+                // spent parsing (frame in hand → dispatched), and wall time.
+                let mut win_start = std::time::Instant::now();
+                let (mut frames, mut event_ns, mut max_event_ns, mut bytes) = (0u64, 0u128, 0u128, 0usize);
+                let mut waited_ns = 0u128;
+                let mut last_done = std::time::Instant::now();
+                let mut frames_iter = read_frames::<_, ServerMessage>(reader);
+                loop {
+                    let Some(frame) = frames_iter.next() else { break };
+                    let got = std::time::Instant::now();
+                    waited_ns += (got - last_done).as_nanos();
+                    if let Ok(ServerMessage::Output { data, .. }) = &frame {
+                        bytes += data.len();
+                    }
+                    frames += 1;
+                    // PROTOTYPE: `$TANIA_HOME/prototype-stall-ms` stalls this reader once, standing in
+                    // for the OS hiccup that the incident's Shell had mid-burst.
+                    if matches!(&frame, Ok(ServerMessage::Output { .. })) {
+                        if let Some(home) = std::env::var_os("TANIA_HOME") {
+                            let flag = std::path::Path::new(&home).join("prototype-stall-ms");
+                            if let Ok(ms) = std::fs::read_to_string(&flag) {
+                                let _ = std::fs::remove_file(&flag);
+                                let ms: u64 = ms.trim().parse().unwrap_or(1000);
+                                eprintln!("[DEBUG-lag] reader: injected stall {ms}ms");
+                                std::thread::sleep(Duration::from_millis(ms));
                             }
                         }
-                        ServerMessage::Err { id, error } => {
-                            if let Some(tx) = lock(&reader_inner.pending).remove(&id) {
-                                let _ = tx.try_send(Err(error));
-                            }
-                        }
-                        ServerMessage::Output { session_id, data } => {
-                            on_event(ClientEvent::Output { session_id, data });
-                        }
-                        ServerMessage::Exit {
-                            session_id,
-                            exit_code,
-                        } => {
-                            on_event(ClientEvent::Exit {
-                                session_id,
-                                exit_code,
-                            });
-                        }
+                    }
+                    let ev_start = std::time::Instant::now();
+                    let is_output = matches!(&frame, Ok(ServerMessage::Output { .. }));
+                    dispatch_frame(&reader_inner, &on_event, frame);
+                    let ev = ev_start.elapsed().as_nanos();
+                    if is_output {
+                        event_ns += ev;
+                        max_event_ns = max_event_ns.max(ev);
+                    }
+                    if ev > 20_000_000 {
+                        eprintln!("[DEBUG-lag] reader: one frame took {}ms in on_event", ev / 1_000_000);
+                    }
+                    last_done = std::time::Instant::now();
+                    let wall = win_start.elapsed();
+                    if wall >= Duration::from_millis(500) && frames > 50 {
+                        eprintln!(
+                            "[DEBUG-lag] reader: {frames} frames {bytes}B in {}ms; on_event total {}ms max {}us; waiting on socket {}ms",
+                            wall.as_millis(),
+                            event_ns / 1_000_000,
+                            max_event_ns / 1_000,
+                            waited_ns / 1_000_000
+                        );
+                    }
+                    if wall >= Duration::from_millis(500) {
+                        win_start = std::time::Instant::now();
+                        (frames, event_ns, max_event_ns, bytes, waited_ns) = (0, 0, 0, 0, 0);
                     }
                 }
                 for (_, tx) in lock(&reader_inner.pending).drain() {
@@ -112,7 +134,47 @@ impl PtydClient {
 
         Ok(Self { inner })
     }
+}
 
+fn dispatch_frame(
+    reader_inner: &Arc<ClientInner>,
+    on_event: &impl Fn(ClientEvent),
+    frame: Result<ServerMessage, tania_terminal_protocol::FrameError>,
+) {
+    let msg = match frame {
+        Ok(msg) => msg,
+        Err(e) => {
+            log::warn!("unparseable daemon message {e}");
+            return;
+        }
+    };
+    match msg {
+        ServerMessage::Ok { id, body } => {
+            if let Some(tx) = lock(&reader_inner.pending).remove(&id) {
+                let _ = tx.try_send(Ok(body));
+            }
+        }
+        ServerMessage::Err { id, error } => {
+            if let Some(tx) = lock(&reader_inner.pending).remove(&id) {
+                let _ = tx.try_send(Err(error));
+            }
+        }
+        ServerMessage::Output { session_id, data } => {
+            on_event(ClientEvent::Output { session_id, data });
+        }
+        ServerMessage::Exit {
+            session_id,
+            exit_code,
+        } => {
+            on_event(ClientEvent::Exit {
+                session_id,
+                exit_code,
+            });
+        }
+    }
+}
+
+impl PtydClient {
     /// Exchange protocol versions; returns the daemon's. The caller decides whether a
     /// mismatch means restarting the daemon.
     pub fn hello(&self) -> Result<u32> {

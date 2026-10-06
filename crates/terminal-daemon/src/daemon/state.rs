@@ -23,17 +23,65 @@ const DEFAULT_REPLAY_BYTES: u32 = 256 * 1024;
 #[derive(Clone)]
 pub struct Outbox {
     tx: std::sync::mpsc::SyncSender<String>,
+    // [DEBUG-lag] queued frames and the highest bucket logged so far.
+    pub depth: Arc<std::sync::atomic::AtomicUsize>,
+    high: Arc<std::sync::atomic::AtomicUsize>,
+    pub conn_id: u64,
+    /// PROTOTYPE(resume): some attachment of this connection is behind and waits for catch-up.
+    pub behind: Arc<std::sync::atomic::AtomicBool>,
 }
+
+/// PROTOTYPE(resume): live fanout stops at this depth, leaving room for responses and Exit.
+pub const BEHIND_AT_DEPTH: usize = 224;
+/// PROTOTYPE(resume): catch-up fills the queue up to here.
+const CATCH_UP_CEILING: usize = 192;
+const CATCH_UP_CHUNK: usize = 16 * 1024;
 
 impl Outbox {
     pub fn new(tx: std::sync::mpsc::SyncSender<String>) -> Self {
-        Self { tx }
+        Self::with_conn(tx, 0)
+    }
+
+    pub fn with_conn(tx: std::sync::mpsc::SyncSender<String>, conn_id: u64) -> Self {
+        Self {
+            tx,
+            depth: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            high: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            conn_id,
+            behind: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }
+    }
+
+    fn depth(&self) -> usize {
+        self.depth.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Serialize and enqueue; false when the queue is full or the writer is gone.
     pub fn send(&self, msg: &ServerMessage) -> bool {
+        use std::sync::atomic::Ordering;
         match to_frame(msg) {
-            Ok(line) => self.tx.try_send(line).is_ok(),
+            Ok(line) => {
+                // Count before enqueueing so the writer's decrement can never run first and wrap.
+                let d = self.depth.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
+                let ok = self.tx.try_send(line).is_ok();
+                if !ok {
+                    self.depth.fetch_sub(1, Ordering::Relaxed);
+                }
+                if ok {
+                    let bucket = d / 32 * 32;
+                    if bucket > self.high.load(Ordering::Relaxed) {
+                        self.high.store(bucket, Ordering::Relaxed);
+                        log::info!("[DEBUG-lag] conn {} outbox depth reached {d}", self.conn_id);
+                    }
+                } else {
+                    log::info!(
+                        "[DEBUG-lag] conn {} try_send failed at depth {}",
+                        self.conn_id,
+                        self.depth.load(Ordering::Relaxed)
+                    );
+                }
+                ok
+            }
             Err(e) => {
                 log::error!("failed to serialize server message: {e}");
                 false
@@ -49,6 +97,8 @@ struct LiveEntry {
     pid: Option<u32>,
     transcript: Transcript,
     modes: TerminalModes,
+    /// PROTOTYPE(resume): bytes appended to the transcript by this daemon, a monotonic offset.
+    written: u64,
 }
 
 struct ExitedEntry {
@@ -63,6 +113,9 @@ struct TableInner {
     connections: HashMap<u64, Outbox>,
     /// session_id → connections currently attached (receiving Output events).
     attachments: HashMap<String, HashSet<u64>>,
+    /// PROTOTYPE(resume): (session, connection) attachments that stopped receiving live output
+    /// at this `written` offset; the bytes after it are only in the transcript until catch-up.
+    behind: HashMap<(String, u64), u64>,
 }
 
 impl TableInner {
@@ -71,25 +124,44 @@ impl TableInner {
         for conns in self.attachments.values_mut() {
             conns.remove(&conn_id);
         }
+        self.behind.retain(|(_, c), _| *c != conn_id);
     }
 
-    fn fanout_to_attachments(&mut self, session_id: &str, msg: &ServerMessage) {
+    /// `since` is the session's `written` offset before this chunk.
+    fn fanout_to_attachments(&mut self, session_id: &str, msg: &ServerMessage, since: u64, resume: bool) {
         let Some(conns) = self.attachments.get(session_id) else {
             return;
         };
         if conns.is_empty() {
             return;
         }
-        let lagged: Vec<u64> = conns
-            .iter()
-            .filter(|conn_id| {
-                !self
-                    .connections
-                    .get(conn_id)
-                    .is_some_and(|out| out.send(msg))
-            })
-            .copied()
-            .collect();
+        let mut lagged = Vec::new();
+        let mut fell_behind = Vec::new();
+        for &conn_id in conns {
+            if self.behind.contains_key(&(session_id.to_string(), conn_id)) {
+                continue;
+            }
+            let Some(out) = self.connections.get(&conn_id) else {
+                lagged.push(conn_id);
+                continue;
+            };
+            let sent = (!resume || out.depth() < BEHIND_AT_DEPTH) && out.send(msg);
+            if sent {
+                continue;
+            }
+            if resume {
+                fell_behind.push(conn_id);
+            } else {
+                lagged.push(conn_id);
+            }
+        }
+        for conn_id in fell_behind {
+            log::info!("[DEBUG-lag] conn {conn_id} behind on {session_id} from offset {since}");
+            self.behind.insert((session_id.to_string(), conn_id), since);
+            if let Some(out) = self.connections.get(&conn_id) {
+                out.behind.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
         for conn_id in lagged {
             log::warn!("dropping lagged connection {conn_id}");
             self.drop_connection(conn_id);
@@ -167,12 +239,20 @@ impl SessionTable {
                 pid,
                 transcript,
                 modes: TerminalModes::default(),
+                written: 0,
             },
         );
         Ok(pid)
     }
 
+    /// PROTOTYPE: `<home>/prototype-lag-policy` holding "drop" restores the shipped policy.
+    fn resume_policy(&self) -> bool {
+        let path = self.sessions_dir.with_file_name("prototype-lag-policy");
+        std::fs::read_to_string(path).map_or(true, |s| s.trim() != "drop")
+    }
+
     fn on_output(&self, session_id: &str, bytes: &[u8]) {
+        let resume = self.resume_policy();
         let mut inner = self.lock();
         let Some(entry) = inner.live.get_mut(session_id) else {
             return;
@@ -181,6 +261,8 @@ impl SessionTable {
             log::warn!("transcript append failed for {session_id}: {e}");
         }
         entry.modes.feed(bytes);
+        let since = entry.written;
+        entry.written += bytes.len() as u64;
         if inner
             .attachments
             .get(session_id)
@@ -192,7 +274,72 @@ impl SessionTable {
             session_id: session_id.to_string(),
             data: b64(bytes),
         };
-        inner.fanout_to_attachments(session_id, &msg);
+        inner.fanout_to_attachments(session_id, &msg, since, resume);
+    }
+
+    /// PROTOTYPE(resume): called by the connection's writer once its queue has drained. Sends
+    /// what each behind attachment missed, straight from the transcript, and turns it live again
+    /// once nothing is missing. Holding the table lock keeps on_output out, so the catch-up and
+    /// the live stream that follows meet without a gap or an overlap.
+    pub fn catch_up(&self, conn_id: u64) {
+        use std::sync::atomic::Ordering;
+        let mut inner = self.lock();
+        let Some(out) = inner.connections.get(&conn_id).cloned() else {
+            return;
+        };
+        let pending: Vec<(String, u64)> = inner
+            .behind
+            .iter()
+            .filter(|((_, c), _)| *c == conn_id)
+            .map(|((s, _), since)| (s.clone(), *since))
+            .collect();
+        for (session_id, since) in pending {
+            let key = (session_id.clone(), conn_id);
+            let Some(entry) = inner.live.get_mut(&session_id) else {
+                inner.behind.remove(&key);
+                continue;
+            };
+            let missed = (entry.written - since) as usize;
+            let bytes = match entry.transcript.tail(missed) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    log::warn!("[DEBUG-lag] catch-up read failed for {session_id}: {e}");
+                    continue;
+                }
+            };
+            // Fewer bytes than missed: the transcript rotated past `since`, so the gap is lost.
+            let mut offset = entry.written - bytes.len() as u64;
+            if bytes.len() < missed {
+                log::warn!(
+                    "[DEBUG-lag] conn {conn_id} lost {} bytes of {session_id} to rotation",
+                    missed - bytes.len()
+                );
+            }
+            let mut sent = 0usize;
+            for chunk in bytes.chunks(CATCH_UP_CHUNK) {
+                if out.depth() >= CATCH_UP_CEILING {
+                    break;
+                }
+                let msg = ServerMessage::Output {
+                    session_id: session_id.clone(),
+                    data: b64(chunk),
+                };
+                if !out.send(&msg) {
+                    break;
+                }
+                sent += chunk.len();
+            }
+            offset += sent as u64;
+            if offset == entry.written {
+                log::info!("[DEBUG-lag] conn {conn_id} caught up on {session_id} at {offset}");
+                inner.behind.remove(&key);
+            } else {
+                inner.behind.insert(key, offset);
+            }
+        }
+        if !inner.behind.keys().any(|(_, c)| *c == conn_id) {
+            out.behind.store(false, Ordering::Relaxed);
+        }
     }
 
     fn on_exit(&self, session_id: &str, exit_code: Option<u32>) {
@@ -209,6 +356,14 @@ impl SessionTable {
             },
         );
         inner.attachments.remove(session_id);
+        let written = entry.written;
+        inner.behind.retain(|(s, c), since| {
+            if s != session_id {
+                return true;
+            }
+            log::warn!("[DEBUG-lag] conn {c} never got the last {} bytes of exited {s}", written - *since);
+            false
+        });
         // Exit broadcasts to every connection — a detached session has no attachments, but
         // the app must still record the exit and reap the tombstone.
         let msg = ServerMessage::Exit {
@@ -251,6 +406,7 @@ impl SessionTable {
             .entry(session_id.to_string())
             .or_default()
             .insert(conn_id);
+        inner.behind.remove(&(session_id.to_string(), conn_id));
         Ok((b64(&replay), rows, cols))
     }
 
@@ -259,6 +415,7 @@ impl SessionTable {
         if let Some(conns) = inner.attachments.get_mut(session_id) {
             conns.remove(&conn_id);
         }
+        inner.behind.remove(&(session_id.to_string(), conn_id));
     }
 
     pub fn write(&self, session_id: &str, data_b64: &str) -> Result<()> {

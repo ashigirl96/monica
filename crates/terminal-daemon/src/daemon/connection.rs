@@ -12,6 +12,7 @@ use tania_terminal_protocol::{
 use super::state::{Outbox, SessionTable};
 
 const OUTBOX_CAPACITY: usize = 256;
+const CATCH_UP_LOW_WATER: usize = 64;
 
 pub fn serve_connection(stream: UnixStream, table: Arc<SessionTable>, conn_id: u64) {
     let write_stream = match stream.try_clone() {
@@ -22,13 +23,31 @@ pub fn serve_connection(stream: UnixStream, table: Arc<SessionTable>, conn_id: u
         }
     };
     let (tx, rx) = mpsc::sync_channel::<String>(OUTBOX_CAPACITY);
+    let outbox = Outbox::with_conn(tx, conn_id);
+    let depth = std::sync::Arc::clone(&outbox.depth);
+    let behind = std::sync::Arc::clone(&outbox.behind);
+    let table_for_writer = Arc::clone(&table);
     let writer = std::thread::Builder::new()
         .name(format!("ptyd-writer-{conn_id}"))
         .spawn(move || {
             let mut w = BufWriter::new(write_stream);
             for line in rx {
+                let left = depth.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) - 1;
+                let started = std::time::Instant::now();
                 if write_line(&mut w, &line).is_err() {
                     break;
+                }
+                // PROTOTYPE(resume): drained enough to take the missed output back on.
+                if left <= CATCH_UP_LOW_WATER && behind.load(std::sync::atomic::Ordering::Relaxed) {
+                    table_for_writer.catch_up(conn_id);
+                }
+                let blocked = started.elapsed();
+                if blocked >= std::time::Duration::from_millis(20) {
+                    log::info!(
+                        "[DEBUG-lag] conn {conn_id} write blocked {}ms ({} bytes)",
+                        blocked.as_millis(),
+                        line.len()
+                    );
                 }
             }
         });
@@ -37,7 +56,6 @@ pub fn serve_connection(stream: UnixStream, table: Arc<SessionTable>, conn_id: u
         return;
     }
 
-    let outbox = Outbox::new(tx);
     table.register_connection(conn_id, outbox.clone());
     log::debug!("connection {conn_id} established");
 
