@@ -44,13 +44,14 @@
   "scripts": {
     "tania": "scripts/tania-dev",
     "desktop": "bun scripts/desktop.ts",
+    "web": "bun run --cwd apps/web dev",
     "dev:list": "bun scripts/dev.ts list",
     "dev:kill": "bun scripts/dev.ts kill",
     "build": "bun scripts/build.ts",
     "install-app": "bun scripts/install-app.ts",
     "generate": "bun run --filter './packages/*' generate",
     "check": "bun run check:ts && bun run check:rust",
-    "check:ts": "oxlint --no-error-on-unmatched-pattern --report-unused-disable-directives-severity=error && oxfmt --check && tsc --noEmit && bun test --pass-with-no-tests && bun run --cwd apps/desktop build",
+    "check:ts": "oxlint --no-error-on-unmatched-pattern --report-unused-disable-directives-severity=error && oxfmt --check && tsc --noEmit && bun test --pass-with-no-tests && bun run --cwd apps/desktop build && bun run --cwd apps/web build",
     "check:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace"
   },
   "devDependencies": {

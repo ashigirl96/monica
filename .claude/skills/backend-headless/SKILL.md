@@ -1,6 +1,6 @@
 ---
 name: backend-headless
-description: "desktop 無しで Backend と tania-ptyd を起こし、CLI と RPC で振る舞いを確かめる。受け入れ条件を手で確かめるとき、Backend の起動・終了・ptyd との再接続を実機で見るとき、Tab で claude を動かして Agent Session を見るとき、Task の Bench（run・close）を確かめるとき、Job が予定の時刻に走るのを確かめるときに使う。"
+description: "desktop 無しで Backend と tania-ptyd を起こし、CLI と RPC で振る舞いを確かめる。受け入れ条件を手で確かめるとき、Backend の起動・終了・ptyd との再接続を実機で見るとき、Tab で claude を動かして Agent Session を見るとき、Task の Bench（run・close）を確かめるとき、Job が予定の時刻に走るのを確かめるとき、notes の画面をブラウザで確かめるときに使う。"
 ---
 
 Backend を本物の ptyd に繋いで起こす。Shell の役（親として生き続け、stdin の pipe の書き側を握る）は Bash の background job が演じる。
@@ -112,6 +112,38 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 
 - cron 式は分の単位で、tick は 30 秒おきなので、2 分先の式で登録する。`T=$(date -v+2M '+%M %H')` から `"$((10#${T% *})) $((10#${T#* })) * * *"` を作り、`tania job add <name> --schedule … --command … --cwd <絶対 path>` に渡す。予定の分から 30 秒以内に走る。
 - 走ったのは `$TANIA_HOME/logs/jobs/<name>/` ができたとき。待つのは、Bash の `run_in_background` で `until [ -d ${TMPDIR%/}/tania-s2/logs/jobs/<name> ]; do sleep 1; done` を走らせる。結果は `tania job show <name>` の RESULT・EXIT・LOG で見る。
+
+## notes の画面をブラウザで確かめる
+
+画面は `apps/web` の Vite が配り、`/rpc` と `/api/assets` を同じ home の Backend の notes の口へ proxy する。`bun run` の Backend の notes の口は SPA を配らないので、開くのは Vite の URL。
+
+1. home を作ってから、notes の口と Vite の port を引く。`devInstance` は home の realpath から port を決めるので、home が無いうちに引くと `$TMPDIR` の `/var` と `/private/var` の違いで Vite と別の port になる。
+
+   ```bash
+   mkdir -p ${TMPDIR%/}/tania-s2
+   TANIA_HOME=${TMPDIR%/}/tania-s2 bun -e '
+   const { devInstance } = await import(`${process.cwd()}/scripts/dev-instance.ts`);
+   const { notesPort, webPort } = devInstance(process.env.TANIA_HOME);
+   console.log(notesPort, webPort);'
+   ```
+
+2. 「起こす」の 3 の command に `TANIA_NOTES_PORT=<notes の port>` を足して Backend を起こす。port が埋まっていると、`err.log` に `[backend] not serving notes on port …` が出て、口なしで起きる。
+3. Bash の `run_in_background` で Vite を起こす。`web.log` に `Local:   http://localhost:<Vite の port>/` が出たら開ける。
+
+   ```bash
+   TANIA_HOME=${TMPDIR%/}/tania-s2 bun run web > $SCRATCH/web.log 2>&1
+   ```
+
+4. agent-browser で開く。並行する他の agent と競合しないよう、すべてのコマンドに同じ `--session <固有の名前>` を付ける。
+
+   ```bash
+   agent-browser --session tania-s2 open http://localhost:<Vite の port>/
+   agent-browser --session tania-s2 snapshot
+   ```
+
+   Backend に届かないときは、Vite が proxy の失敗を Bad Gateway で返し、`web.log` に `http proxy error` が出る。
+
+片付けでは `agent-browser --session tania-s2 close` で browser を閉じ、Vite の pid（`lsof -ti tcp:<Vite の port> -sTCP:LISTEN`）に `kill` を送ってから、下の手順で Backend を止める。
 
 ## 止めて片付ける
 

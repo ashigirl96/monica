@@ -29,6 +29,7 @@ import { bearerAuth } from 'hono/bearer-auth'
 import { cors } from 'hono/cors'
 
 import { loginShellPath } from './login-shell-path.ts'
+import { listenNotes } from './notes-listener.ts'
 
 // stdout は Shell 宛ての JSON 行だけを書く channel なので、log は stderr に出す。
 const announce = (line: object) => console.log(JSON.stringify(line))
@@ -110,6 +111,11 @@ const workbenchStarted = workbenchLedger.start().then(() => true)
 taskLedger.start()
 jobLedger.start()
 noteLedger.start()
+// compiled binary の --asset は entry の隣に置かれ、bun run の Backend には無い。
+const notesListener = listenNotes(process.env.TANIA_NOTES_PORT, {
+  context: { db, noteLedger },
+  webDist: join(import.meta.dir, 'dist'),
+})
 if (!(await Promise.race([workbenchStarted, Bun.sleep(3000).then(() => false)]))) {
   console.error('[backend] tania-ptyd is not ready after 3s; announcing the endpoint anyway')
 }
@@ -129,6 +135,7 @@ let exiting = false
 function exit() {
   if (exiting) return
   exiting = true
+  notesListener?.stop()
   noteLedger.stop()
   jobLedger.stop()
   taskLedger.stop()
