@@ -19,8 +19,13 @@ objc2 = { version = "0.6", default-features = false }
 objc2-app-kit = { version = "0.3", default-features = false, features = [
   "NSImage",
   "NSPasteboard",
+  "NSPasteboardItem",
 ] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["NSArray", "NSString"] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+  "NSArray",
+  "NSString",
+  "NSURL",
+] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 shared_child = "1"
