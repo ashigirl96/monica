@@ -4,6 +4,7 @@
 
 - `bun run desktop` が `scripts/desktop.ts` を走らせる。
   1. `TANIA_HOME` が無ければ `~/.tania-dev` を設定し、`TANIA_BIN=<repo>/scripts/tania-dev` を設定する。home を `mkdir -p` し、`scripts/dev-instance.ts` の `devInstance` で home から identifier と vite の port の第一候補を引く（ADR-0007）。
+     - `TANIA_HOME` が release の `~/.tania`（realpath で比べる）なら、何もせずに exit 1 する。release の Tab は `TANIA_HOME=~/.tania` を継ぐので、そこで打つと dev の Shell が release の `bin/tania` を worktree に張り替え、release の DB で Backend を起こす。`dev:list` は release の home を出さないので、`dev:kill` でも止められない。
      - 既定の home は `com.ashigirl96.tania.dev` と 1420 のまま。ほかの home は `com.ashigirl96.tania.dev.<home の basename>-<hash>` と、1421 からの範囲に hash で散らした port で、1420 は使わない。
      - hash は home の realpath から取る。basename だけだと `~/.tania-s2` と `$TMPDIR/tania-s2` が同じ identifier になり、後から起こした方が先の窓に回される。realpath にそろえないと、`$TMPDIR` の下の同じ home が `/var/…` と `/private/var/…` の 2 通りに書けて別の identifier になり、single-instance をすり抜ける。
   2. `cargo build -p tania-ptyd` を行う。externalBin は release の build だけが渡す（「release build と install」の節）ので、`binaries/` には何も置かない。

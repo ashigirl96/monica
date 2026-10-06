@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 
 export const DEFAULT_HOME = join(homedir(), '.tania-dev')
+export const RELEASE_HOME = join(homedir(), '.tania')
 
 const IDENTIFIER = 'com.ashigirl96.tania.dev'
 const DEFAULT_PORT = 1420
@@ -16,6 +17,10 @@ function canonical(path: string): string {
   } catch {
     return resolve(path)
   }
+}
+
+export function isReleaseHome(home: string): boolean {
+  return canonical(home) === canonical(RELEASE_HOME)
 }
 
 // 同じ home を別の書き方で渡しても single-instance をすり抜けないよう、realpath を key にする。
