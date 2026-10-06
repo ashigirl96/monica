@@ -37,13 +37,14 @@ export class SaveQueue {
   #discarded = new Set<string>()
   // id ごとの基準版。保存が返す updatedAt で前進させる
   #versions = new Map<string, Date>()
-  // 送信中の id。差し替え判定が in-flight な書き込みを見落とさないために要る
-  #inflight = new Set<string>()
+  // 送信中の draft。差し替え判定が in-flight な書き込みを見落とさないために要る
+  #inflight = new Map<string, NoteDraft>()
   // CONFLICT で行き場を失った draft。再送しても永久に CONFLICT なので pending には戻さないが、
   // 「未保存」ではあるので削除や content 採用の前で止められるよう別に持つ
   #conflicted = new Map<string, NoteDraft>()
   // 競合通知に出す見出し。kind ごとの決め方はページの知識なので schedule で受け取る
   #labels = new Map<string, string>()
+  #editMarks = new Map<string, number>()
   #timer: ReturnType<typeof setTimeout> | null = null
   // flush を直列化し、古い payload の保存が新しい保存を追い越して上書きするのを防ぐ
   #chain: Promise<void> = Promise.resolve()
@@ -80,12 +81,21 @@ export class SaveQueue {
   hasUnsaved = (id: string): boolean =>
     this.#pending.has(id) || this.#inflight.has(id) || this.#conflicted.has(id)
 
+  /** 未保存の編集のうち一番新しい本文。開き直した画面が、cache の古い本文の代わりに出す。 */
+  unsavedContent = (id: string): Doc | null => {
+    const draft = this.#pending.get(id) ?? this.#inflight.get(id) ?? this.#conflicted.get(id)
+    return draft === undefined ? null : draft.content.toJSON()
+  }
+
+  /** 編集のたびに変わる印。待っている間に編集があったかを見るのに使う。 */
+  editMark = (id: string): number => this.#editMarks.get(id) ?? 0
+
   /** 閉じると失われる編集があるか。届く Backend への未保存は pagehide の flush が送るので数えない。 */
   wouldLoseOnLeave = (unreachable: boolean): boolean => {
     if (this.#conflicted.size > 0) return true
     // pagehide の flush は送信中の保存の後ろに並ぶので、その保存が返る前にページごと消える。
     if (this.#pending.size > 0 && this.#inflight.size > 0) return true
-    const unsent = [...this.#pending.keys(), ...this.#inflight]
+    const unsent = [...this.#pending.keys(), ...this.#inflight.keys()]
     return unsent.length > 0 && (unreachable || unsent.some((id) => id in this.#errors))
   }
 
@@ -99,6 +109,7 @@ export class SaveQueue {
 
   schedule = (id: string, draft: NoteDraft, label: string): void => {
     this.#pending.set(id, draft)
+    this.#editMarks.set(id, this.editMark(id) + 1)
     this.#labels.set(id, label)
     this.#clearTimer()
     this.#timer = setTimeout(() => void this.flush(), DEBOUNCE_MS)
@@ -142,7 +153,7 @@ export class SaveQueue {
     const failures: Record<string, string> = {}
     await Promise.all(
       [...batch].map(([id, draft]) => {
-        this.#inflight.add(id)
+        this.#inflight.set(id, draft)
         return this.#send(id, draft, keepalive)
           .then((version) => this.setBase(id, version.updatedAt))
           .catch((e: unknown) => {

@@ -54,6 +54,8 @@ export function useAutosave() {
     baseVersion: queue.baseVersion,
     setBase: queue.setBase,
     hasUnsaved: queue.hasUnsaved,
+    unsavedContent: queue.unsavedContent,
+    editMark: queue.editMark,
     hasConflict,
     saveError,
     setOpenNote,

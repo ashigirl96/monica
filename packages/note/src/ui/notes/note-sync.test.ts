@@ -2,7 +2,7 @@
 import { describe, expect, mock, test } from 'bun:test'
 
 import type { Note } from '../../contract.ts'
-import { reloadLatest, shouldAdoptServerDoc, usableServerDoc } from './note-sync.ts'
+import { noteToOpen, reloadLatest, shouldAdoptServerDoc, usableServerDoc } from './note-sync.ts'
 
 const V1 = new Date('2026-08-29T10:00:00.000Z')
 const V2 = new Date('2026-08-29T10:00:00.001Z')
@@ -78,12 +78,20 @@ describe('usableServerDoc', () => {
   })
 })
 
-function reloadSetup(result: { data?: Note; isError: boolean }) {
+function reloadSetup(result: { data?: Note; isError: boolean }, editWhileFetching = false) {
   const steps: string[] = []
+  let mark = 0
   const dropPending = mock((id: string) => void steps.push(`drop ${id}`))
   const adopt = mock((next: Note) => void steps.push(`adopt ${next.updatedAt.getTime()}`))
-  const refetch = () => Promise.resolve(result)
-  return { steps, run: () => reloadLatest({ id: 'note-1', refetch, dropPending, adopt }) }
+  const refetch = () => {
+    if (editWhileFetching) mark += 1
+    return Promise.resolve(result)
+  }
+  const editMark = () => mark
+  return {
+    steps,
+    run: () => reloadLatest({ id: 'note-1', refetch, dropPending, adopt, editMark }),
+  }
 }
 
 describe('reloadLatest', () => {
@@ -97,5 +105,28 @@ describe('reloadLatest', () => {
     const { steps, run } = reloadSetup({ data: note(V3), isError: false })
     await run()
     expect(steps).toEqual(['drop note-1', `adopt ${V3.getTime()}`])
+  })
+
+  test('取り直しの間に書いた編集があれば、捨てずに競合のまま残す', async () => {
+    const { steps, run } = reloadSetup({ data: note(V3), isError: false }, true)
+    await run()
+    expect(steps).toEqual([])
+  })
+})
+
+describe('noteToOpen', () => {
+  const edited = { type: 'doc' as const, content: [{ type: 'text', text: 'unsaved' }] }
+
+  test('未保存の編集がある note を開き直したら、cache の本文ではなくその編集を出す', () => {
+    expect(noteToOpen(note(V2), V2, edited)).toEqual({ ...note(V2), content: edited })
+  })
+
+  test('cache が基準版より古くても、未保存の編集があればそれで開く', () => {
+    expect(noteToOpen(note(V1), V2, edited)).toEqual({ ...note(V1), content: edited })
+  })
+
+  test('未保存の編集が無ければ、使える cache をそのまま開き、1 世代古い cache では開かない', () => {
+    expect(noteToOpen(note(V2), V2, null)).toEqual(note(V2))
+    expect(noteToOpen(note(V1), V2, null)).toBeNull()
   })
 })

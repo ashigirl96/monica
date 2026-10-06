@@ -270,3 +270,45 @@ test('a change to the errors or the conflicts is told to the subscribers', async
   expect(queue.conflicts()).toHaveLength(1)
   expect(queue.errors()).not.toBe(errors)
 })
+
+test('the unsaved body of a Note is its newest edit, whether it waits, is on its way or is left by a CONFLICT, and there is none once saved', async () => {
+  const { queue, answers } = setup()
+  let release = noop
+  answers.push(
+    () =>
+      new Promise((resolve) => {
+        release = () => resolve({ updatedAt: V2 })
+      }),
+  )
+  answers.push(() => Promise.reject(new ORPCError('CONFLICT', { message: 'stale' })))
+
+  expect(queue.unsavedContent('note-1')).toBeNull()
+  queue.schedule('note-1', draft('a'), 'TUE 10.6')
+  expect(queue.unsavedContent('note-1')).toEqual(doc('a'))
+
+  const sending = queue.flush()
+  await Promise.resolve()
+  expect(queue.unsavedContent('note-1')).toEqual(doc('a'))
+  queue.schedule('note-1', draft('ab'), 'TUE 10.6')
+  expect(queue.unsavedContent('note-1')).toEqual(doc('ab'))
+  release()
+  await sending
+  expect(queue.unsavedContent('note-1')).toEqual(doc('ab'))
+
+  await queue.flush()
+  expect(queue.conflicts()).toHaveLength(1)
+  expect(queue.unsavedContent('note-1')).toEqual(doc('ab'))
+
+  queue.dropPending('note-1')
+  expect(queue.unsavedContent('note-1')).toBeNull()
+})
+
+test('each edit of a Note moves its edit mark, and an edit of another Note does not', () => {
+  const { queue } = setup()
+
+  const before = queue.editMark('note-1')
+  queue.schedule('note-2', draft('a'), 'WED 10.7')
+  expect(queue.editMark('note-1')).toBe(before)
+  queue.schedule('note-1', draft('a'), 'TUE 10.6')
+  expect(queue.editMark('note-1')).not.toBe(before)
+})

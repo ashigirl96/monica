@@ -1,6 +1,6 @@
 import { type RefObject, useCallback, useEffect, useState } from 'react'
 
-import type { Note } from '../../contract.ts'
+import type { Doc, Note } from '../../contract.ts'
 import type { Autosave } from './use-autosave.ts'
 
 /**
@@ -32,26 +32,44 @@ export function usableServerDoc(note: Note | undefined, baseUpdatedAt: Date | nu
   return note
 }
 
+/**
+ * 開いた画面に出す note。未保存の編集は autosave にしか無いので、cache の本文より優先する。
+ * そのときは cache の本文を使わないので、cache が基準版より古くても開ける。
+ */
+export function noteToOpen(
+  data: Note,
+  baseUpdatedAt: Date | null,
+  unsaved: Doc | null,
+): Note | null {
+  if (unsaved !== null) return { ...data, content: unsaved }
+  return usableServerDoc(data, baseUpdatedAt)
+}
+
 /** useQuery の refetch のうち、この hook が使う部分だけの形。 */
 type RefetchNote = () => Promise<{ data?: Note; isError: boolean }>
 
 /**
  * 「最新を読み込む」の実体。取り直しが失敗しても TanStack Query は古い cache を data に
  * 残して返すので、成功を確かめてから未送信の編集を捨て、取り直した doc を採用する。
+ * 取り直しの間に書いた編集は捨てずに、競合のまま残す。
  */
 export async function reloadLatest({
   id,
   refetch,
   dropPending,
   adopt,
+  editMark,
 }: {
   id: string | undefined
   refetch: RefetchNote
   dropPending: (id: string) => void
   adopt: (next: Note) => void
+  editMark: (id: string) => number
 }): Promise<void> {
+  const mark = id === undefined ? null : editMark(id)
   const fresh = await refetch()
   if (fresh.isError || fresh.data === undefined) return
+  if (id !== undefined && editMark(id) !== mark) return
   // 基準版ごと落とすので、取り直した doc は無条件に採用できる
   if (id !== undefined) dropPending(id)
   adopt(fresh.data)
@@ -89,7 +107,8 @@ export function useServerDoc({
   // 再マウントの世代。自分の保存では進まないので打鍵中にカーソルと undo が飛ばない
   const [generation, setGeneration] = useState(0)
   const [lastKey, setLastKey] = useState(docKey)
-  const { baseVersion, setBase, hasUnsaved, dropPending, setOpenNote } = autosave
+  const { baseVersion, setBase, hasUnsaved, dropPending, setOpenNote, unsavedContent, editMark } =
+    autosave
 
   if (lastKey !== docKey) {
     // doc が変わったら latch を破棄する。派生値でマスクするだけだと、採用が終わる前に
@@ -117,20 +136,21 @@ export function useServerDoc({
     // 基準版は届いた note の id で引く。latch を捨てた直後（往復で戻ってきた直後）でも
     // 台帳は生きているので、1 世代古い cache をここで確実に弾ける。
     const base = baseVersion(data.id)
-    const usable = usableServerDoc(data, base)
-    if (usable === null) return
     if (current === null) {
+      const opened = noteToOpen(data, base, unsavedContent(data.id))
       // oxlint-disable-next-line react/set-state-in-effect -- 採用は render の外の autosave の基準版も進めるので、render ではなく effect で行う。
-      adopt(usable, false)
+      if (opened !== null) adopt(opened, false)
       return
     }
+    const usable = usableServerDoc(data, base)
+    if (usable === null) return
     const adoptable = shouldAdoptServerDoc({
       fetchedUpdatedAt: usable.updatedAt,
       baseUpdatedAt: base,
       hasUnsaved: hasUnsaved(usable.id),
     })
     if (adoptable) adopt(usable, true)
-  }, [data, current, adopt, baseVersion, hasUnsaved])
+  }, [data, current, adopt, baseVersion, hasUnsaved, unsavedContent])
 
   const openId = current?.id ?? null
   useEffect(() => {
@@ -147,8 +167,9 @@ export function useServerDoc({
         refetch,
         dropPending,
         adopt: (next) => adopt(next, true),
+        editMark,
       }),
-    [current, dropPending, refetch, adopt],
+    [current, dropPending, refetch, adopt, editMark],
   )
 
   return { note: current, generation, reload, adopt }

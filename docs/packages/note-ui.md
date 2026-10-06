@@ -96,7 +96,8 @@ monica の `web/src` の router・autosave・Daily の画面を移したもの�
 - autosave は router より上で 1 つだけ mount し、画面を移っても pending・基準版・競合を持ち続ける。1 秒の debounce で保存し、送信は直列にし、CONFLICT 以外の失敗は 5 秒ごとに再試行する。判断は React に依らない `notes/save-queue.ts` の `SaveQueue` が持ち、`notes/use-autosave.ts` はそれを React の状態と pagehide・beforeunload につなぐ。
 - 保存の `expectedUpdatedAt` には、その Note を最後に読んだか書いた `updatedAt`（基準版）を渡す。版は ms で比べる。Daily と Scratch の保存は title を省く。
 - CONFLICT は再試行しない。開いている Note はヘッダのバナー（「最新を読み込む」で手元の編集を捨てる）、開いていない Note は左下の常駐の通知に出す。通知の「開く」は `/notes/:id` に移る。
-- 「最新を読み込む」は、取り直しが通ってから手元の編集を捨てて採用する（`reloadLatest`）。取り直しが失敗しても TanStack Query は古い cache を data に残して返すので、先に捨てると編集を失って古い版を出す（monica にあった不具合）。
+- 「最新を読み込む」は、取り直しが通ってから手元の編集を捨てて採用する（`reloadLatest`）。取り直しが失敗しても TanStack Query は古い cache を data に残して返すので、先に捨てると編集を失って古い版を出す（monica にあった不具合）。取り直しの間に書いた編集があれば、捨てずに競合のまま残す。
+- 未保存の編集がある Note を開き直したら（保存中・再試行待ち・競合中に別の日へ移って戻るなど）、cache の本文ではなく一番新しい未保存の編集を出す（`noteToOpen` と `SaveQueue.unsavedContent`）。cache の本文を使わないので、cache が基準版より古くても開く。未保存の本文は autosave にしか無いので、cache で開くと次の打鍵が保存済みの編集を上書きする（monica にあった不具合）。
 - 保存は query の cache を通らない。保存の応答は doc を返さないので、cache は 1 世代古くなる。`notes/note-sync.ts` は、基準版より古い cache を採用しない。外の更新は、未保存が無く、基準版より新しいときだけ採用してエディタを作り直す。
 - pagehide で未保存を送る。`CallContext` の `keepalive` を link の `fetch` が init に渡す。keepalive の body の上限（64KB）を超える本文は送れない（monica と同じ）。
 - `notes/save-state.ts` は monica の `note-ledger.ts` を改名したもの。tania では Ledger を Backend の部品にだけ使う。
