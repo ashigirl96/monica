@@ -5,6 +5,7 @@
   "dependencies": {
     "@orpc/server": "catalog:",
     "@tania/job": "workspace:*",
+    "@tania/note": "workspace:*",
     "@tania/task": "workspace:*",
     "@tania/workbench": "workspace:*",
     "drizzle-orm": "catalog:",

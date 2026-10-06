@@ -10,6 +10,7 @@ import {
   migrations as jobMigrations,
   router as jobRouter,
 } from '@tania/job/server'
+import { createNoteLedger, migrations as noteMigrations } from '@tania/note/server'
 import {
   createTaskLedger,
   migrations as taskMigrations,
@@ -54,7 +55,7 @@ sqlite.run('PRAGMA journal_mode = WAL')
 sqlite.run('PRAGMA foreign_keys = ON')
 const db = drizzle(sqlite)
 
-for (const m of [workbenchMigrations, taskMigrations, jobMigrations]) {
+for (const m of [workbenchMigrations, taskMigrations, jobMigrations, noteMigrations]) {
   migrate(db, { migrationsFolder: m.folder, migrationsTable: m.table })
 }
 
@@ -78,6 +79,7 @@ const jobLedger = createJobLedger({
     },
   ],
 })
+const noteLedger = createNoteLedger({ db, home })
 
 const context = { db, workbenchLedger, taskLedger, jobLedger }
 const router = os
@@ -107,6 +109,7 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, idleTimeout: 0, fetch
 const workbenchStarted = workbenchLedger.start().then(() => true)
 taskLedger.start()
 jobLedger.start()
+noteLedger.start()
 if (!(await Promise.race([workbenchStarted, Bun.sleep(3000).then(() => false)]))) {
   console.error('[backend] tania-ptyd is not ready after 3s; announcing the endpoint anyway')
 }
@@ -126,6 +129,7 @@ let exiting = false
 function exit() {
   if (exiting) return
   exiting = true
+  noteLedger.stop()
   jobLedger.stop()
   taskLedger.stop()
   workbenchLedger.stop()

@@ -93,11 +93,11 @@ _Avoid_: Execution（単独で使わない）, Job Run, Run（Task の語）, ti
 ### Note
 
 **Note**:
-本文を持つ 1 枚の文書。Daily・Essay・Repo Note・Scratch のどれか 1 つの種類に属し、種類も作った時点の論理日付も後から変えない。削除すると一覧と Note Mention の候補から消え、その Note を指す Note Mention と Synced Block には削除されたと出る。削除した画面にいる間は取り消せる。
+本文を持つ 1 枚の文書。Daily・Essay・Repo Note・Scratch のどれか 1 つの種類に属し、種類も作った時点の Logical Date も後から変えない。削除すると一覧と Note Mention の候補から消え、その Note を指す Note Mention と Synced Block には削除されたと出る。削除した画面にいる間は取り消せる。
 _Avoid_: memo, journal, page, document, ノート
 
 **Daily**:
-論理日付ごとに 1 つある Note。title を持たず、日付で名指す。開いた時に作られ、削除できない。未来の日付の Daily も作れる。
+Logical Date ごとに 1 つある Note。title を持たず、日付で名指す。開いた時に作られ、削除できない。未来の日付の Daily も作れる。
 _Avoid_: 日記, journal
 
 **Essay**:
@@ -111,16 +111,16 @@ _Avoid_: project note
 Repo ごとに 1 つある、長く追記していく書き殴りの Note。title を持たず、Repo で名指す。開いた時に作られ、削除できない。
 _Avoid_: primary note, pinned note（Pin は Tab の語）
 
-**論理日付**:
+**Logical Date**:
 5 時を境目にした日付。0 時から 5 時までは前の日に数える。
-_Avoid_: 日付（単独で使うと暦の日付と紛れる）, logical date
+_Avoid_: 論理日付, 日付（単独で使うと暦の日付と紛れる）
 
 **画像**:
 Note の本文に貼る画像。Note とは別に置き、本文から参照する。どの Note の本文からも参照されていない画像は、置いてから 2 日を過ぎると消える。削除した Note の本文からの参照も数える。
 _Avoid_: asset, attachment
 
 **Note Mention**:
-本文の文中に置き、Note を名指す印。参照先の今の名前（title・論理日付・Repo）で表示する。
+本文の文中に置き、Note を名指す印。参照先の今の名前（title・Logical Date・Repo）で表示する。
 _Avoid_: Mention（単独で使わない）, wiki link, Note Link, backlink
 
 **Synced Block**:
