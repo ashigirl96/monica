@@ -3,6 +3,7 @@ import type { EditorState, Transaction } from 'prosemirror-state'
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import type { EditorView } from 'prosemirror-view'
 
+import { EMPTY_DOC } from '../../body/index.ts'
 import { IMAGE_URL_PREFIX } from '../../contract.ts'
 import { getBlockContext } from './context.ts'
 import { createContainer, isEmptyParagraphContainer, isHttpUrl, nodes } from './schema.ts'
@@ -63,13 +64,30 @@ function isPendingImageContainer(node: unknown): boolean {
     保存すると再読込で復元不能な placeholder になり、bytes も孤児化する。確定 src を持つ image
     だけを残せば、アップロード完了時の swap 後に改めて保存される（結果整合）。 */
 export function stripPendingImages(docJson: unknown): unknown {
-  if (!docJson || typeof docJson !== 'object') return docJson
-  const node = docJson as { content?: unknown }
-  if (!Array.isArray(node.content)) return docJson
+  const stripped = stripPendingImagesIn(docJson) as { type?: unknown; content?: unknown }
+  // doc は blockGroup をちょうど 1 つ持つので、本文が pending image だけなら空の doc にする。
+  if (stripped?.type === 'doc' && Array.isArray(stripped.content) && stripped.content.length === 0)
+    return structuredClone(EMPTY_DOC)
+  return stripped
+}
+
+function stripPendingImagesIn(json: unknown): unknown {
+  if (!json || typeof json !== 'object') return json
+  const node = json as { content?: unknown }
+  if (!Array.isArray(node.content)) return json
   return {
     ...node,
-    content: node.content.filter((c) => !isPendingImageContainer(c)).map(stripPendingImages),
+    content: node.content
+      .filter((c) => !isPendingImageContainer(c))
+      .map(stripPendingImagesIn)
+      // blockGroup は blockContainer+ なので、空の group を残すと開き直しで doc 全体が空になる。
+      .filter((c) => !isEmptyBlockGroup(c)),
   }
+}
+
+function isEmptyBlockGroup(json: unknown): boolean {
+  const node = json as { type?: unknown; content?: unknown } | null
+  return node?.type === 'blockGroup' && (!Array.isArray(node.content) || node.content.length === 0)
 }
 
 /** uploadId 群の image block を挿入する Transaction を組む（純関数）。dropPos 指定時はその位置の

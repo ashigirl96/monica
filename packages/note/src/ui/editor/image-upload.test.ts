@@ -5,6 +5,8 @@ import { history, undoDepth } from 'prosemirror-history'
 import type { Node as PMNode } from 'prosemirror-model'
 import { EditorState } from 'prosemirror-state'
 
+import { EMPTY_DOC } from '../../body/index.ts'
+import { docFromJSON } from './create-editor.ts'
 import {
   buildInsertImagesTr,
   imageUploadKey,
@@ -193,6 +195,29 @@ describe('stripPendingImages（永続化用）', () => {
       ],
     }
     expect(JSON.stringify(stripPendingImages(nested))).not.toContain('"deep"')
+  })
+
+  test('pending image だけを持つ子の blockGroup は group ごと外し、開き直しても block が残る', () => {
+    const input = docJson([
+      {
+        type: 'blockContainer',
+        attrs: { id: 'parent' },
+        content: [
+          { type: 'paragraph', content: [{ type: 'text', text: 'parent' }] },
+          { type: 'blockGroup', content: [imageBlockJson(null, 'deep')] },
+        ],
+      },
+      { type: 'blockContainer', attrs: { id: 'next' }, content: [{ type: 'paragraph' }] },
+    ])
+    const reopened = docFromJSON(stripPendingImages(input))
+    const ids: unknown[] = []
+    reopened.child(0).forEach((block) => ids.push(block.attrs.id))
+    expect(ids).toEqual(['parent', 'next'])
+    expect(reopened.child(0).child(0).textContent).toBe('parent')
+  })
+
+  test('本文が pending image だけなら、空の段落を 1 つ持つ doc を保存する', () => {
+    expect(stripPendingImages(docJson([imageBlockJson(null, 'only')]))).toEqual(EMPTY_DOC)
   })
 
   test('pending image が無ければ doc はそのまま（確定 src は保持）', () => {
