@@ -29,7 +29,7 @@ async function readPage(url: string, signal: AbortSignal): Promise<LinkMetadata>
   }
   const contentType = response.headers.get('content-type')
   let html = ''
-  if (response.body && (contentType === null || contentType.includes('html'))) {
+  if (response.body && (contentType === null || contentType.toLowerCase().includes('html'))) {
     html = decode(await readCapped(response.body), contentType)
   } else {
     void response.body?.cancel()
@@ -75,7 +75,7 @@ function parseLinkMetadata(html: string, base: string): LinkMetadata {
   let title = ''
   // svg の中の title も一致するので、最初の title だけを読む。
   let titleState: 'before' | 'inside' | 'after' = 'before'
-  let iconHref: string | null = null
+  let favicon: string | null = null
   new HTMLRewriter()
     .on('meta[content]', {
       element(el) {
@@ -101,11 +101,12 @@ function parseLinkMetadata(html: string, base: string): LinkMetadata {
     })
     .on('link[rel][href]', {
       element(el) {
-        if (iconHref !== null) return
+        if (favicon !== null) return
         const rel = attribute(el, 'rel') ?? ''
-        if (rel.split(/\s+/).some((token) => token.toLowerCase() === 'icon')) {
-          iconHref = attribute(el, 'href')
-        }
+        if (!rel.split(/\s+/).some((token) => token.toLowerCase() === 'icon')) return
+        // 空の href は頁そのものに解けるので、次の icon を探す。
+        const href = attribute(el, 'href')?.trim()
+        if (href) favicon = absolute(href, base)
       },
     })
     .transform(html)
@@ -114,8 +115,7 @@ function parseLinkMetadata(html: string, base: string): LinkMetadata {
     title: meta.get('og:title') ?? (decodeHTML(title).trim() || null),
     description: meta.get('og:description') ?? meta.get('description') ?? null,
     image: image === undefined ? null : absolute(image, base),
-    favicon:
-      (iconHref === null ? null : absolute(iconHref, base)) ?? absolute('/favicon.ico', base),
+    favicon: favicon ?? absolute('/favicon.ico', base),
     siteName: meta.get('og:site_name') ?? null,
   }
 }

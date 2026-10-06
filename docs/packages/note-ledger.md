@@ -75,7 +75,7 @@ Note は `note` table に 1 件 1 行で持つ。種類と列の対応を CHECK 
 - 10 秒で打ち切り、`GATEWAY_TIMEOUT` で失敗する。時間は header を待つ間と body を読む間の両方に掛かる。
 - HTML は 1MB まで読み、そこで読みやめて残りの転送を止め、読んだ分を解析する。OGP は head にあるので、読みやめても取りこぼさない。
 - 2xx 以外の応答と、届かなかった request は `BAD_GATEWAY` で失敗する。redirect は fetch の既定のまま追う。
-- `Content-Type` が無いか `html` を含むときだけ body を読む。ほかは body を読まず、項目はどれも無いものとして favicon だけを `/favicon.ico` にする。
+- `Content-Type` が無いか、大文字小文字を区別せずに `html` を含むときだけ body を読む。ほかは body を読まず、項目はどれも無いものとして favicon だけを `/favicon.ico` にする。
 - 行き先の host は制限しない。localhost の URL を貼るのは正当な使い方で、外の site からの呼び出しは notes の口の same-origin の照合で止まるため。
 - cache は持たない。取った値は、貼った時点で本文の attrs に入る。
 - 画面は失敗の種類で分岐しないので、`.errors()` で宣言しない。
@@ -88,7 +88,7 @@ Note は `note` table に 1 件 1 行で持つ。種類と列の対応を CHECK 
 | `description` | `og:description`、無ければ `meta name=description` |
 | `image` | `og:image` を頁の URL で絶対 URL にしたもの |
 | `siteName` | `og:site_name` |
-| `favicon` | `rel` の token に `icon`（大文字小文字を区別しない）を含む最初の `link` の `href` を絶対 URL にしたもの、無ければ `/favicon.ico` |
+| `favicon` | `rel` の token に `icon`（大文字小文字を区別しない）を含み、`href` が空でなく絶対 URL に解ける最初の `link` の `href`、無ければ `/favicon.ico` |
 
 - meta は `property` と `name` の両方を見て、同じ key は最初のものを使う。key は大文字小文字を区別する（monica と同じ）。
 - 相対 URL は redirect を追った後の URL を基準に解く。
@@ -99,6 +99,8 @@ monica から変えたのは次の 4 つ。
 - charset に従って TextDecoder で decode してから解析する。charset は `Content-Type` の `charset`、無ければ先頭 1024 byte の `<meta charset>` か `<meta http-equiv="Content-Type">` の `charset`、どちらも無ければ UTF-8 で決める。TextDecoder が知らない名前も UTF-8 で読む。HTMLRewriter は byte 列を UTF-8 として読むので、先に decode しないと Shift_JIS の頁が化ける。
 - entity を decode する。HTMLRewriter は属性値と text の entity を decode せずに渡すので、`entities` の `decodeHTMLAttribute`（属性値）と `decodeHTML`（`<title>` の text）を当てる。属性値の規則（`&copy=` のように `=` や英数字が続く `;` の無い参照は decode しない）は text と違う。
 - User-Agent に `tania` を送る。monica は送っていなかった。
+
+このほか、`Content-Type` の大文字小文字を区別しないことと、空か絶対 URL に解けない `href` の icon を飛ばすことも monica と違う。
 
 ## createNoteLedger
 

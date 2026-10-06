@@ -180,11 +180,12 @@ test('a page answered with a status other than 2xx fails, even with a title in i
   }
 })
 
-test('the body of a page whose Content-Type is not HTML is not read, and one with no Content-Type is', async () => {
+test('the body of a page whose Content-Type is not HTML is not read, and one with no Content-Type or HTML in any case is', async () => {
   const { client, site } = setup()
   const body = '<html><head><title>Read</title></head></html>'
   site.page('/image.png', { headers: { 'content-type': 'image/png' }, body })
   site.page('/untyped', { headers: {}, body })
+  site.page('/upper-case', { headers: { 'content-type': 'Text/HTML; Charset=UTF-8' }, body })
 
   expect(await client.linkMetadata({ url: site.url('/image.png') })).toEqual({
     title: null,
@@ -193,9 +194,9 @@ test('the body of a page whose Content-Type is not HTML is not read, and one wit
     favicon: site.url('/favicon.ico'),
     siteName: null,
   })
-  expect(await client.linkMetadata({ url: site.url('/untyped') })).toMatchObject({
-    title: 'Read',
-  })
+  for (const path of ['/untyped', '/upper-case']) {
+    expect(await client.linkMetadata({ url: site.url(path) })).toMatchObject({ title: 'Read' })
+  }
 })
 
 test('a page is read up to 1MB, and the rest of an endless body is not asked for', async () => {
@@ -307,11 +308,14 @@ test('stopping the Note Ledger stops a fetch in the middle of the body', async (
   expect((await failed).code).toBe('BAD_GATEWAY')
 })
 
-test('the first link whose rel has icon in any case gives the favicon', async () => {
+test('the first link whose rel has icon in any case and whose href resolves gives the favicon', async () => {
   const { client, site } = setup()
   site.page('/icons', {
     body: `<html><head>
       <link rel="stylesheet" href="/style.css">
+      <link rel="icon" href="">
+      <link rel="icon" href="   ">
+      <link rel="icon" href="http://[not-a-host">
       <link rel="ICON" href="/first.ico">
       <link rel="icon" href="/second.ico">
     </head></html>`,
