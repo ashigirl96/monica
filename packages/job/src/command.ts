@@ -76,11 +76,13 @@ export async function runCommand(
   }
 }
 
+// Backend が SIGKILL で落ちるとここを通らず、process group は孤児で残る（task の setup と同じ既知の穴）。
 export function killGroups(children: Set<Subprocess>) {
   for (const child of children) signalGroup(child.pid, 'SIGKILL')
 }
 
 // sh が先に抜けても、SIGTERM を受けて後始末をしている子孫には猶予を残す。
+// task の setup の止め方と同じだが、job は task を import しないので写しを持つ。
 async function stopGroup(child: Subprocess) {
   signalGroup(child.pid, 'SIGTERM')
   const deadline = Date.now() + KILL_GRACE_MS

@@ -11,7 +11,6 @@ tania の repo の形、package の entry、domain 間の呼び出し、CLI の�
 - `docs/packages/tab-env-and-shim.md`: tab の env と shim。Tab に渡す env、shim、claude wrapper、hook の settings、hook CLI、payload の decoder。Tab の env、claude の起動、hook の受け口に触るとき。
 - `docs/packages/notifications.md`: 通知。出す遷移、title と body、Backend から Shell への渡し方。通知の判定と本文、Agent Session の遷移に触るとき。
 - `docs/packages/task-ledger.md`: Task Ledger。task の contract と、Run・Attach・Bench・Run の起動・close と reopen・sync の規則、system の Job の並び、fake の GitHub と ghq。task の procedure に触るとき、テストで GitHub か ghq を使うとき。
-- `docs/packages/job-ledger.md`: Job Ledger。job の contract と、Job Execution の記録・tick・飛ばす回・中断・保持の規則。job の procedure か、裏で定期的に走る処理に触るとき。
 - `docs/packages/note-ledger.md`: Note Ledger。note の contract と、種類ごとの不変条件・保存の楽観ロック・削除と取り消し・`body` entry の規則。note の procedure か本文の扱いに触るとき。
 - `docs/packages/note-ui.md`: note の ui。monica のコードを移すときの規則と、エディタの置き場所、依存、node 型を減らせない理由、直書きの文字列の置き場所。`packages/note/src/ui` に触るとき、monica のコードを移すとき。
 - `docs/packages/backend.md`: Backend（apps/backend）。起動時の PATH、spawn の env、Ledger を作って start する順、notes の口（Host と CSRF の照合、載せるもの、SPA の配り方）。apps/backend に触るとき、Ledger を足すか deps を変えるとき、Backend で process を spawn するとき、notes の口に載せるものを変えるとき。
@@ -115,7 +114,7 @@ package ごとに in-memory の SQLite に自分の migration を当てる（tas
 
 - 外の process と service は fake に差し替える。ptyd は workbench の fake（`docs/packages/workbench-ledger.md` の「テスト」）、GitHub と ghq は task の fake（`docs/packages/task-ledger.md` の「テスト」）。CLI と hook の CLI の確かめ方は `docs/packages/cli.md` の「テスト」、Backend の組み立ては `docs/packages/backend.md` の「テスト」。
 - await の間の競合は、await の途中で止めて決まった順で起こす。sync の途中は fake GitHub の `hold()`、git の ref の更新（`branch -D` など）の途中は checkout の `.git/hooks/reference-transaction` が file を待つ script、ptyd の応答の途中は fake の ptyd の `holdNext(op)` で止める（`close.test.ts`）。
-- 一定の間隔で走る処理は、`setInterval` を `spyOn` で捕まえ、間隔を確かめてから callback を手で呼ぶ。Bun の `jest.useFakeTimers()` は `Bun.sleep` と `setTimeout` も止め、一部の timer だけを偽にできないので、HTTP の応答を待つテストが進まなくなる。
+- 一定の間隔で走る処理は、`setInterval` を `spyOn` で捕まえ、間隔を確かめてから callback を手で呼ぶ（Bun の fake timers の落とし穴は `docs/gotchas.md`）。
 - 終わった行のように procedure に出ない行は、`@tania/<d>/schema` の table を SELECT して確かめてよい。他の domain が読むのと同じ面だから。
 
 ## contract の規約

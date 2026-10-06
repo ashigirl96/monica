@@ -2,6 +2,8 @@
 
 repo の形と規則は `docs/packages.md` から読む。全文を読み、冒頭の「索引」から作業が触る範囲の文書を開く。
 
+外の道具（Bun・drizzle・oRPC・claude・macOS・git など）の振る舞いに頼るコードを書くときは、`docs/gotchas.md` で落とし穴を確かめる。
+
 ## Agent skills
 
 ### Issue tracker

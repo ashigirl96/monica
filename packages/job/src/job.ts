@@ -49,6 +49,7 @@ type JobRuntime = { nextAt: Date | null; running: boolean } & (
 
 type UserRuntime = Extract<JobRuntime, { kind: 'user' }>
 
+// 次の予定まで setTimeout で直に待たないのは、Bun が 2^31 ms を超える遅延を 1 ms に丸め、月 1 回の cron 式で壊れるため。
 const TICK_MS = 30_000
 // これより遅れて気づいた予定は、Backend が凍っていた（sleep）間に来たものとみなす。
 const LATE_MS = 2 * TICK_MS
@@ -151,6 +152,7 @@ export function createJobLedger(deps: {
     if (runtime.nextAt && runtime.nextAt <= endedAt) {
       runtime.nextAt = nextAfterSkipping(runtime, runtime.nextAt, endedAt)
     }
+    // stop の後に終わった回は Backend の終了が殺した回（task の stop が切った Sync を含む）なので書かず、次の start で interrupted にする。
     if (stopped) return
     try {
       db.update(jobExecution)
