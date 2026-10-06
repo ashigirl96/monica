@@ -51,6 +51,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             backend_endpoint,
             backend_restart,
+            clipboard::clipboard_read_file_paths,
             clipboard::clipboard_write_image,
             terminal::terminal_attach,
             terminal::terminal_detach,

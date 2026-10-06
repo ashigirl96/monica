@@ -103,6 +103,7 @@ fn main() -> Result<()> {
         // Detach from the launching app's session so quitting tania (or the shell that
         // spawned us) never HUPs the daemon. setsid fails iff we're already a group
         // leader, in which case ignoring SIGHUP is the part that matters.
+        // SAFETY: setsid(2) and signal(2) with SIG_IGN take plain values and install no handler code.
         unsafe {
             libc::setsid();
             libc::signal(libc::SIGHUP, libc::SIG_IGN);
