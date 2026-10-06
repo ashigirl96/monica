@@ -13,6 +13,7 @@ import {
   type Ghq,
   migrations as taskMigrations,
   router as taskRouter,
+  systemJobs as taskSystemJobs,
 } from '@tania/task/server'
 import {
   createWorkbenchLedger,
@@ -71,14 +72,7 @@ export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Gh
   const jobLedger = createJobLedger({
     db,
     home: home ?? ptydHome,
-    systemJobs: [
-      { name: 'task.sync', every: 5 * 60_000, run: () => taskLedger.syncInBackground() },
-      {
-        name: 'task.setup-log-cleanup',
-        every: 24 * 60 * 60_000,
-        run: () => taskLedger.cleanSetupLogs(),
-      },
-    ],
+    systemJobs: taskSystemJobs(taskLedger),
   })
   onCleanup(() => jobLedger.stop())
   const context = { db, workbenchLedger, taskLedger, jobLedger }
