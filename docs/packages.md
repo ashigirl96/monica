@@ -12,7 +12,7 @@ tania の repo の形、package の entry、domain 間の呼び出し、CLI の�
 - `docs/packages/notifications.md`: 通知。出す遷移、title と body、Backend から Shell への渡し方。通知の判定と本文、Agent Session の遷移に触るとき。
 - `docs/packages/task-ledger.md`: Task Ledger。task の contract と、Run・Attach・Bench・Run の起動・close と reopen・sync の規則。task の procedure に触るとき。
 - `docs/packages/job-ledger.md`: Job Ledger。job の contract と、Job Execution の記録・tick・飛ばす回・中断・保持の規則。job の procedure か、裏で定期的に走る処理に触るとき。
-- `docs/packages/note-ledger.md`: Note Ledger。note の contract と、種類ごとの不変条件・保存の楽観ロック・削除と取り消し・`body` entry の規則。note の procedure か本文の扱いに触るとき。
+- `docs/packages/note-ledger.md`: Note Ledger。note の contract と、種類ごとの不変条件・保存の楽観ロック・削除と取り消し・OGP・`body` entry の規則。note の procedure か本文の扱いに触るとき。
 - `docs/packages/note-ui.md`: note の ui。monica のコードを移すときの規則と、エディタの置き場所、依存、node 型を減らせない理由、直書きの文字列の置き場所。`packages/note/src/ui` に触るとき、monica のコードを移すとき。
 - `docs/packages/cli.md`: CLI（apps/cli）。argv の振り分け、Backend の探索、転送 router、`--format`、エラーと exit code、SKILL.md の検査。`cli: true` の procedure か SKILL.md を足すとき、apps/cli に触るとき。
 - `docs/packages/desktop.md`: desktop（apps/desktop）。webview の枠、キーの扱い、Backend の endpoint、Task の slot、Shell の責務と command、窓。apps/desktop と domain の ui の載せ方に触るとき。
@@ -147,7 +147,7 @@ note の `home` は画像の置き場所に使う（後続の issue）。
 `WorkbenchLedger` と `TaskLedger` と `JobLedger` と `NoteLedger` は、Backend が 1 つずつ作り、`GLOSSARY.md` の Workbench Ledger と Task Ledger と Job Ledger と Note Ledger を扱う部品で、どれも `start()` / `stop()` を持つ。`WorkbenchLedger` と `TaskLedger` は `events` も持つ。
 
 - `events`: その domain の変更を知らせる in-process の publisher。job と note は change stream を持たないので無い（ADR-0016・0018）。
-- `start()` / `stop()`: 起動時と終了時の処理。`WorkbenchLedger` は ptyd への接続（無ければ spawn、版違いは入れ替え）と reconcile（ADR-0011）、`TaskLedger` は起動時に preparing のまま残った Bench を失敗にすることと、終了時に走っている setup の process group を kill すること、`JobLedger` は起動時に途中で止まった Job Execution を中断にして system の Job を 1 回走らせ、tick の timer を張ることと、終了時にそれを止めること。`NoteLedger` は今は何もしない。
+- `start()` / `stop()`: 起動時と終了時の処理。`WorkbenchLedger` は ptyd への接続（無ければ spawn、版違いは入れ替え）と reconcile（ADR-0011）、`TaskLedger` は起動時に preparing のまま残った Bench を失敗にすることと、終了時に走っている setup の process group を kill すること、`JobLedger` は起動時に途中で止まった Job Execution を中断にして system の Job を 1 回走らせ、tick の timer を張ることと、終了時にそれを止めること。`NoteLedger` は終了時に走っている OGP の fetch を打ち切ること。
 
 `TaskLedger` はほかに `syncInBackground()` と `cleanSetupLogs()` だけを持ち、どちらも task の system の Job が呼ぶ。task は timer を持たず、system の Job の並び（名前・間隔・`run`）を `@tania/task/server` の `systemJobs(taskLedger)` で出し、Backend の組み立てがそれを `createJobLedger` に渡す。task は job を import しないので、戻り値は `createJobLedger` の `systemJobs` と同じ構造の素のオブジェクトにし、job の型を注記しない（#18、ADR-0016）。
 

@@ -1,7 +1,8 @@
 import { implement } from '@orpc/server'
 
 import { contract } from './contract.ts'
-import type { Db, NoteLedger } from './note.ts'
+import { readLinkMetadata } from './link-metadata.ts'
+import { type Db, internals, type NoteLedger } from './note.ts'
 import { createEssay, createRepoNote, dailyDates, openDaily, openScratch } from './open.ts'
 import { removeNote, restoreNote } from './remove.ts'
 import { toNote, undeletedNote } from './row.ts'
@@ -35,4 +36,7 @@ export const router = os.router({
       createRepoNote(context.db, input.repo),
     ),
   },
+  linkMetadata: os.linkMetadata.handler(({ context, input }) =>
+    readLinkMetadata(input.url, internals(context.noteLedger).stopped),
+  ),
 })

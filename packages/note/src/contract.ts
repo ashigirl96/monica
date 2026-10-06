@@ -49,6 +49,14 @@ export const NoteSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('scratch'), repo: z.string(), ...common }),
 ])
 
+export const LinkMetadataSchema = z.object({
+  title: z.string().nullable(),
+  description: z.string().nullable(),
+  image: z.string().nullable().describe('an absolute URL'),
+  favicon: z.string().nullable().describe('an absolute URL'),
+  siteName: z.string().nullable(),
+})
+
 export const saveErrors = {
   CONFLICT: {
     status: 409,
@@ -59,6 +67,7 @@ export const saveErrors = {
 export type EssayStatus = z.infer<typeof EssayStatusSchema>
 export type Doc = z.infer<typeof DocSchema>
 export type Note = z.infer<typeof NoteSchema>
+export type LinkMetadata = z.infer<typeof LinkMetadataSchema>
 
 export type Named =
   | { kind: 'daily'; date: string }
@@ -154,4 +163,12 @@ export const contract = {
       .input(z.object({ repo: RepoSchema }))
       .output(NoteSchema),
   },
+  linkMetadata: meta
+    .meta({
+      description:
+        'Read the title, description, image, site name and favicon of the web page at a URL, for a pasted link',
+    })
+    // Bun の fetch は file: も読むので、http と https に限る。
+    .input(z.object({ url: z.url({ protocol: /^https?$/ }).describe('an http or https URL') }))
+    .output(LinkMetadataSchema),
 }
