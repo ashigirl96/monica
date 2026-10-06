@@ -1217,7 +1217,8 @@ mod tests {
     }
 
     /// More switches than ptyd keeps a history of, so only what the connection was sent can
-    /// tell which buffer it was left in.
+    /// tell which buffer it was left in. The TUI's push stays on the alt buffer's stack, so the
+    /// normal buffer it ends in gets none.
     #[test]
     fn a_connection_left_in_the_alt_screen_leaves_it_however_often_the_lost_output_switched() {
         let dir = temp_dir("lost-switches");
@@ -1238,7 +1239,7 @@ mod tests {
             &mut peer,
             &printed,
             "\x1b[<32u\x1b[?1049l\x1b[<32u",
-            TUI_RESTATED,
+            "\x1b[<32u\x1b[?2004h\x1b[?1004l\x1b[?25h\x1b[?1003h\x1b[?1006h",
         );
         t.terminate("ts-1").unwrap();
         std::fs::remove_dir_all(&dir).ok();
