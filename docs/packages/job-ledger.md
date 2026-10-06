@@ -22,7 +22,7 @@ run   { name } → { name, startedAt }                                          
 
 `createJobLedger({ db, systemJobs, now? })`。`systemJobs` は `{ name, every, run }` の配列で、`run` は失敗なら reject する。名前が重なれば throw する。`now` はテストが時計を進めるための口。
 
-job は task も workbench も import しない（ADR-0016）。system の Job は apps/backend の `main.ts` が並べ、`task.sync` の `run` は `taskLedger.syncInBackground()` を呼ぶ。`Db` の型も drizzle の `BunSQLiteDatabase` を直に使う。
+job は task も workbench も import しない（ADR-0016）。system の Job は apps/backend の `main.ts` が並べ、`task.sync` の `run` は `taskLedger.syncInBackground()` を、`task.setup-log-cleanup` の `run` は `taskLedger.cleanSetupLogs()` を呼ぶ。`Db` の型も drizzle の `BunSQLiteDatabase` を直に使う。
 
 ## 記録
 

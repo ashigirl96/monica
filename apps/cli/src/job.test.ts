@@ -6,12 +6,17 @@ afterEach(cleanUp)
 
 const LOCAL_TIME = String.raw`\d{4}-\d\d-\d\d \d\d:\d\d:\d\d`
 
-test('job list prints task.sync with its schedule', async () => {
+test('job list prints the system Jobs with their schedules', async () => {
   const result = await tania(['job', 'list'], backendWithTasks())
 
   expect(result).toEqual({
     code: 0,
-    stdout: 'NAME       SCHEDULE  STATE   LAST  NEXT\ntask.sync  every 5m  active  -     -\n',
+    stdout: [
+      'NAME                    SCHEDULE   STATE   LAST  NEXT',
+      'task.sync               every 5m   active  -     -',
+      'task.setup-log-cleanup  every 24h  active  -     -',
+      '',
+    ].join('\n'),
     stderr: '',
   })
 })

@@ -16,6 +16,8 @@ jobs:
   ts:
     name: ts
     runs-on: ubuntu-latest
+    # テストの中の同期の無限ループは bun test の timeout では止まらず、既定では 360 分走り続ける。
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
@@ -52,6 +54,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: macos-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
