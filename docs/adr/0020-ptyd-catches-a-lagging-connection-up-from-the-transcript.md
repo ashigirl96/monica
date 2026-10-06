@@ -30,5 +30,6 @@ Terminal Session の出力の正本は transcript にする。接続ごとの送
 - 遅れたまま detach して attach し直すと、replay から始まり、古い範囲は送り直さない。attach は (Terminal Session, 接続) を live に戻す。
 - ptyd の log に、接続が Terminal Session で遅れ始めたことと、追いついたこと（遅れていた時間）が出る。同じことが起きたときに時刻を追えるようにするため。
 - transcript の保持（1〜2MB）を超えて遅れると、保持から落ちた分は届かない。ptyd は失ったバイト数を log に出し、残っている最古の位置から続ける。
-- 遅れている間にその Terminal Session の shell が終わると、まだ送っていない分は捨て、捨てたバイト数を log に出す。Exit は他の接続と同じくすぐに送る。Exit を受けた Backend が Reap で transcript を消すので、後から読み直せないため。
+- 遅れている間にその Terminal Session の shell が終わると、ptyd はまだ送っていない分を transcript からメモリに写し、追いつきでそれを送り切ってから Exit を送る。Exit を受けた Backend はすぐ Reap で transcript を消すので、写さなければ後から読めないため。写しは (Terminal Session, 接続) ごとに持ち、大きさは transcript の保持（1〜2MB）を超えない。Exit を積むか接続が切れるまで残る。
+- 終わったときにキューが満杯で Exit を積めなかった接続には、キューが掃けた後の追いつきで Exit を送る。どの接続でも、Exit はその Terminal Session の出力の後に届き、Exit の後にその Terminal Session の出力は届かない。
 - ptyd が接続を外すのは、socket の EOF と、応答をキューに積めなかったときだけになる。後者は、相手が読まずに 30 を超える request を送り続けたときにしか起きない。

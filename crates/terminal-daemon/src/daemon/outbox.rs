@@ -61,7 +61,9 @@ impl Outbox {
         }
     }
 
-    /// Serialize and enqueue; false when the queue is full or the writer is gone.
+    /// Serialize and enqueue; false when the queue is full or the writer is gone. Whatever queues
+    /// in bulk stops at a limit below capacity, since a response that finds the queue full makes
+    /// the connection loop drop the connection.
     pub fn send(&self, msg: &ServerMessage) -> bool {
         let line = match to_frame(msg) {
             Ok(line) => line,
