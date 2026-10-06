@@ -138,6 +138,27 @@ node の type の出現回数（括弧は含む note 数）: paragraph 1512 (135
 - CSS は `shared/block-editor/block-editor.css`（1241 行、`.jb-*`）と `web/src/notes/notes.css`（122 行、`--ink`・`--paper`・`--desk`）。block-editor.css がホストから読むのは `--foreground`・`--background`・`--popover`・`--popover-foreground`（後ろ 2 つは fallback 付き）で、祖先の `[data-density="compact"]` で詰める。menu は `relative` を付けた host（`view.dom.parentElement`）に append するので、`relative` は機能に要る。
 - 操作: `/` か Cmd-J のスラッシュメニュー（callout 5 種と Table）、ほかは markdown 風の input rule。`[[` で note のリンク、URL の貼り付けで「Paste as」（URL / Mention / Bookmark、OGP は `GET /api/ogp`）、ブロックの貼り付けで「Paste / Paste and sync」。copy は選択範囲を `POST /api/notes/markdown` で markdown にし、text/plain だけの paste は `POST /api/notes/from-markdown` で doc にする。ブロック選択（Esc / Cmd-A）と移動・複製・削除。
 
+## 本文の中の参照
+
+チケット「本文の中の参照の語」でコードを読んで確かめた（動かしてはいない）。パスは `shared/block-editor/` からの相対で、`web/` と `crates/` で始まるものは repo の root から。
+
+| node / mark | 画面の語 | 形 | 指すもの | 参照先が無いとき |
+|---|---|---|---|---|
+| noteMention | `[[` のメニューの見出しが「Link to note」 | inline の atom の chip | Note 1 つ（attrs は `noteId` だけ） | 「Deleted note」（打ち消し線） |
+| syncedBlock | ラベルが「Synced」、作るのは「Paste and sync」 | block の atom、読み取り専用 | 1 つの Note の block の並び（`noteId` と `blockIds[]`） | 「Original block was deleted」 |
+| linkMention | 「Paste as」の「Mention」 | inline の atom の chip（favicon と title） | 外部の URL | 確かめない |
+| bookmark | 「Paste as」の「Bookmark」 | block の atom のカード | 外部の URL | 確かめない |
+| link mark | 「Paste as」の「URL」（既定） | 文字に付く mark | URL | 確かめない |
+
+- 4 つの node をまとめて呼ぶ語はコードに無い。コメントは noteMention を「ノート間リンク（wiki link）」、syncedBlock を「transclusion」、linkMention と bookmark を URL の「インラインチップ表現」と「カード表現」と呼ぶ（`schema.ts:248, 291, 364, 397`）。noteMention と linkMention は `.jb-mention` の見た目を共有する（`block-editor.css:826-857`）。
+- noteMention の表示名は attrs に持たず、表示のたびに引く（改題に追従させるため、`schema.ts:397-398`）。引いた結果は開いている note ごとに cache し、note を開き直すまで更新しない（`web/src/notes/editor-support.ts:116-130`）。
+- 削除済みの note は `[[` の候補に出ず、mention の解決も 404 を返す（`crates/monica-storage-sqlite/src/store/notes.rs:292-301, 350-366`）。web の `resolveNoteMention` は通信エラーでも null を返すので、server に繋がらないときも「Deleted note」と出る（`web/src/api.ts:200-210`）。今開いている note も候補から外さない。
+- syncedBlock の中は todo や toggle も操作できない（`synced-block.ts:32, 130-131`）。「↗」（Go to original block）は先頭の block へ飛び、別の note なら `/notes/{id}` へ移ってからスクロールする（`synced-block.ts:143-148`、`web/src/notes/block-jump.ts`）。同じ note の block の編集はすぐ映し、別の note の block は NodeView を作ったときに 1 回だけ取る。一部の block だけ無ければ、残りを黙って出す（`synced-block.ts:176-208`）。
+- syncedBlock ができるのは、block を選んで copy してから「Paste and sync」を選んだときと、markdown の `![[note]]`・`![[note#^blk]]` を貼ったときだけ。cut したときと文字を選んで copy したときは「Paste and sync」が出ない（`clipboard.ts:548-603`）。
+- linkMention と bookmark の OGP の値は貼った時点のまま持ち続け、click は新しいタブで開く（`node-views.ts:358-370`）。bookmark の `siteName` は保存するが表示しない。markdown に書き出すとどちらも `[title](href)` になり、読み込むと link mark に落ちる。
+- 自分の note の URL が noteMention になるのは、何も選んでいないときの paste と、`[[` の query に URL を入れたときだけ。拾うのは自分の origin の `/notes/<id>` の形の絶対 URL だけ（`note-mention-menu.ts:44-60, 273-293`）。後から link mark や linkMention を noteMention に変える処理は無く、link mark は自分の note の URL でも新しいタブで開く（`link-click.ts:16-27`）。
+- block の id を参照として持つのは syncedBlock だけ。URL の hash で block を指す仕組みは無く、`#^` は markdown にしか出ない。backlink（逆引き）の一覧も API も無い。
+
 ## 保存と競合
 
 - エディタは doc が変わったときだけ immutable な node を渡し、ページが 1 秒の debounce で `PUT /api/notes/{id}` に全文を送る（`web/src/notes/use-autosave.ts`）。送信は直列にし、失敗は 5 秒後に再試行する。pagehide では `keepalive` で flush する。
