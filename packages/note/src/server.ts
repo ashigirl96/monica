@@ -2,7 +2,7 @@ import { implement } from '@orpc/server'
 
 import { contract } from './contract.ts'
 import type { Db, NoteLedger } from './note.ts'
-import { createEssay, createRepoNote, openDaily, openScratch } from './open.ts'
+import { createEssay, createRepoNote, dailyDates, openDaily, openScratch } from './open.ts'
 import { removeNote, restoreNote } from './remove.ts'
 import { toNote, undeletedNote } from './row.ts'
 import { saveNote, setEssayStatus } from './save.ts'
@@ -19,6 +19,7 @@ export const router = os.router({
   restore: os.restore.handler(({ context, input }) => restoreNote(context.db, input.id)),
   daily: {
     open: os.daily.open.handler(({ context, input }) => openDaily(context.db, input.date)),
+    dates: os.daily.dates.handler(({ context }) => dailyDates(context.db)),
   },
   scratch: {
     open: os.scratch.open.handler(({ context, input }) => openScratch(context.db, input.repo)),

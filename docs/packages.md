@@ -79,7 +79,7 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
 | `@tania/<d>/schema` | drizzle の table。`drizzle-orm/sqlite-core` と `drizzle-orm` 本体（部分 index の条件を書く `sql`）だけを import する | どこでも | 自分の contract と server、他 package の schema（FK）と server（SELECT） |
 | `@tania/<d>/contract` | oRPC の contract、zod schema、型 | どこでも | apps/desktop と apps/web（型だけ）、apps/cli、apps/backend、自分と他 package の server と ui と cli |
 | `@tania/<d>/server` | router、`create<D>()`、migrations の re-export | Bun | apps/backend、他 package の server、テスト |
-| `@tania/<d>/ui` | React の component と atom。画面を持たない job には無い | browser | apps/desktop、他 package の ui |
+| `@tania/<d>/ui` | React の component と atom。画面を持たない job には無い | browser | apps/desktop、apps/web（note）、他 package の ui |
 | `@tania/<d>/cli` | 出力の整形関数、補完の候補を返す関数、手で書く command | Bun | apps/cli |
 | `@tania/<d>/body` | Note の本文の JSON を読む関数（`docs/packages/note-ledger.md`）。今は note だけが持つ | どこでも | 自分の server と ui |
 | `@tania/<d>/testing` | 他の package のテストに出す fake。今は workbench だけが持ち、`src/fake-ptyd.ts` の fake の ptyd（`startFakePtyd`）、短い home を作る `tempHome`、Terminal Session が starting を抜けるのを待つ `untilSettled` を出す | Bun | 他 package のテストと `testing.ts` |

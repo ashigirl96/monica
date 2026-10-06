@@ -1,0 +1,102 @@
+/* Notes 画面 — 「暗い部屋で、机の上だけが照らされている」。左の app chrome が部屋
+   （素の --background = ほぼ黒）、サイドバーと essays 一覧が机（--desk）、
+   エディタがその上の一枚の紙（--paper）。
+   dark は sizu.me 由来の無彩色をやめ、面を紺（伝統色 #223a70・#192f60 と同じ
+   oklch hue 264）で塗り、その上に置く細い線とラベルだけを水色（--water #59b9c6）にしている。
+   面の hue を 264 に固定するのは、hue 240 前後（#2980af 系）だと暗く落としたとき
+   R が沈んで petrol＝緑がかった青に見えてしまうため。 */
+.notes-screen {
+  --water: #59b9c6;
+  /* dark の文字階調だけは透明度で作らない: 紺の紙に白を alpha で載せると必ず
+     paper の青が透けて青灰色に転ぶ。
+     線と hover は面の一部なので従来どおり alpha 導出のまま。 */
+  --ink: var(--foreground);
+  --ink-text: var(--ink);
+  --ink-muted: oklch(0.9 0 0);
+  --ink-faint: oklch(0.8 0 0);
+  --ink-hover: color-mix(in srgb, var(--ink) 10%, transparent);
+  --ink-border: color-mix(in srgb, var(--ink) 22%, transparent);
+  /* 机と紙は ambient を透かすため alpha 付き。0.8 を超えると背景はほぼ潰れる */
+  --desk-alpha: 0.74;
+  --paper-alpha: 0.58;
+  --desk: oklch(0.24 0.058 264 / var(--desk-alpha));
+  --paper: oklch(0.305 0.05 264 / var(--paper-alpha));
+  --kind-essay: #bd6a52;
+  /* essays カード: 机の上にデスクマット、その中央に紙のミニチュア。sheet を一段明るく
+     持ち上げて「照らされた原稿」の輪郭を出す。writing はマットの chroma を落として
+     静かにし、区別はバッジに任せる（light の #eff7ff / #f1f6f9 と同じ関係）。
+     ただし chroma 0.05 が紺の下限 — これを割ると青ではなく灰色に転ぶ */
+  --essay-mat: oklch(0.3 0.08 264);
+  --essay-mat-writing: oklch(0.3 0.052 264);
+  --essay-sheet: oklch(0.37 0.055 262);
+  --essay-badge-bg: color-mix(in srgb, var(--water) 22%, var(--essay-mat-writing));
+  --essay-badge-ink: color-mix(in srgb, var(--water) 78%, #fff);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic Pro", "Noto Sans JP", "BIZ UDPGothic",
+    sans-serif;
+}
+
+.notes-screen .jb-root {
+  --jb-ink: var(--ink);
+  /* エディタの操作痕（todo の塗り・選択・synced block の枠）は水色と同系の青で揃える */
+  --jb-blue: #2980af;
+  --jb-text: var(--jb-ink);
+  --jb-muted: oklch(0.86 0 0);
+  --jb-faint: oklch(0.74 0 0);
+  --jb-border: color-mix(in srgb, var(--jb-ink) 18%, transparent);
+  /* 紙は main 側の --paper が塗る。二重に塗ると微妙な色差が出る */
+  --jb-paper: transparent;
+}
+
+/* light は白い紙。透明度導出のインクが紙に沈んで淡すぎるため階調を濃くし、
+   border と hover だけは sizu 同様ほとんど見えない薄さに留める。
+   机は紙と同じ白 — light では境界を罫線だけに任せる。
+   水色は白の上では沈むので、同じ系統の紺（#2980af）に置き換える。 */
+:root[data-theme="light"] .notes-screen {
+  --water: #2980af;
+  --ink: color-mix(in srgb, var(--foreground) 87%, transparent);
+  --ink-muted: color-mix(in srgb, var(--ink) 78%, transparent);
+  --ink-faint: color-mix(in srgb, var(--ink) 58%, transparent);
+  --ink-hover: color-mix(in srgb, var(--ink) 6%, transparent);
+  --ink-border: color-mix(in srgb, var(--ink) 14%, transparent);
+  --paper-alpha: 0.7;
+  --paper: color-mix(in srgb, var(--background) calc(var(--paper-alpha) * 100%), transparent);
+  --desk: var(--paper);
+  --kind-essay: #a4543f;
+  --essay-mat: #eff7ff;
+  --essay-mat-writing: #f1f6f9;
+  --essay-sheet: var(--paper);
+  --essay-badge-bg: #e1ebf6;
+  --essay-badge-ink: #48648b;
+}
+
+/* エディタ本文（--jb-* は block-editor.css が .jb-root に定義）も light だけ濃く上書き */
+:root[data-theme="light"] .notes-screen .jb-root {
+  --jb-text: var(--jb-ink);
+  --jb-muted: color-mix(in srgb, var(--jb-ink) 78%, transparent);
+  --jb-faint: color-mix(in srgb, var(--jb-ink) 58%, transparent);
+  --jb-border: color-mix(in srgb, var(--jb-ink) 14%, transparent);
+}
+
+/* inline code と callout は dark で block-editor.css の透明度導出から降りる。紙 (--paper)
+   がすでに ambient を透かしているうえに alpha の面を重ねると写真が二重に抜けて面の輪郭が
+   消え、載せた色も紺に沈む。
+   どちらも紙より一段明るい不透明な紺を下地にし（chroma 0.05 が紺の下限）、callout は
+   その上に kind ごとのアクセントが載る。inline code の文字は同じテラコッタの明度だけを
+   上げたもの。 */
+:root[data-theme="dark"] .notes-screen .jb-root {
+  --jb-inline-code-bg: oklch(0.37 0.05 264);
+  --jb-code-red: oklch(0.82 0.12 42);
+  --jb-callout-under: oklch(0.345 0.045 264);
+}
+
+/* 写真なし（ambient の none）。透かす相手がいないのに alpha を残すと、机と紙が
+   同じ --background の上で合成されて階調差が潰れ「机の上の紙」が読めなくなる。
+   dark は oklch の alpha、light は color-mix の % として同じ --paper-alpha を消費して
+   いるので、1 に戻すこの 1 ブロックで両テーマに効く。
+   ファイル末尾に置くのは light テーマのブロックと特異性が同点 (0,3,0) で、後に書いた側
+   でないと勝てないため — 位置を上げると light だけ効かなくなる。 */
+:root[data-ambient="none"] .notes-screen {
+  --desk-alpha: 1;
+  --paper-alpha: 1;
+}

@@ -11,6 +11,7 @@ review で差分に当てる規則。どれも判断が要るもので、決定�
 - await を挟んでから transaction に入る処理は、transaction の中で行を id で引き直し、path や名前のような行から作る値はその行から作る。await の間に sync が repo の改名を写したり、別の procedure が同じ行を書いたりするため（`docs/packages/task-ledger.md` の「Run の起動」と「Attach」）。
 - await を挟む処理は、await の間に同じ Task や行を動かす経路（同じ domain の別の procedure、hook の購読、背景の sync、ユーザーの shell やエディタ）を数え上げ、経路ごとに、予約で断るか、最後の同期区間（transaction）で見直すか、git のような外の確かめに任せるかで閉じる。git や fs のように戻せない操作の後に見つけたものは、断らずに守ったまま処理を終える。断れば、壊した後の中途半端な状態が残るため（`docs/packages/task-ledger.md` の「close と reopen」）。
 - webview の action が procedure を呼んでから読み直すまでの間にも、CLI や別の画面の操作が挟まる。読み直しで分かるのは今の状態だけで、どの操作で変わったかは分からない。そのため、原因で分岐する判定（閉じて空になったか、移して空になったか）は、procedure が transaction の中で決めて output で返す（`docs/packages/workbench-ledger.md` の「Runspace と Tab」の `emptiedRunspaceId`）。
+- 画面の処理が await の後で画面の状態や保存の台帳を書き換えるときは、await の間に起きうること（画面が別の対象へ移る、同じ対象をユーザーが編集する、取り直しが失敗して古い cache が返る）を数え、完了時に見直してから書き換える。見直しに使うのは、開いている対象、編集の印、取り直しの成否（`packages/note/src/ui/notes/note-sync.ts` の `reloadLatest`）。
 - procedure が transaction の後に送る ptyd への副作用（Create、Terminate）の結果は、procedure が返った時点ではまだ DB に無い。終わらせた shell を終わったものとして他の判定（close の ActiveRun guard など）に渡すときは、Backend が Exit を記録するのを一覧か合図で待つ（ADR-0015、`docs/packages/workbench-ledger.md` の「Runspace と Tab」）。
 - DB の行と ptyd の両方を進める処理は、workbench の `terminal-session.ts` に置く（ADR-0015）。DB の行と ptyd や fs の両方を進める処理は、commit の前後や ptyd への要求の途中のどこで Backend が止まっても、ptyd との接続が切れても、次の reconcile が正しい状態に戻せる形にする（ADR-0011）。
 - commit の後の副作用（通知など）が失敗しても、commit 済みの変更の合図（`events`）と記録は止めない（`docs/packages/notifications.md`）。
