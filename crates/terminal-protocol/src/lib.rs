@@ -3,6 +3,12 @@
 //!
 //! Delivery rules the daemon must uphold:
 //! - `Output` events go only to connections attached to that session (fanout).
+//! - A connection that stops reading is never dropped. Once its queue fills, the daemon holds
+//!   back that session's live output and later sends what the connection missed from the
+//!   transcript, in order and without a gap or a duplicate, before it goes live again. The
+//!   connection only sees the output arrive late. The exceptions are output the transcript no
+//!   longer holds (rotated out, or never written) and output of a session that exited
+//!   meanwhile, which are lost and logged.
 //! - `Exit` events broadcast to every connection regardless of attachments, so a detached
 //!   session's exit still reaches the app for DB recording + reap. Receivers ignore exits
 //!   for sessions they don't know.

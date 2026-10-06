@@ -44,7 +44,10 @@ fn daemon_command() -> Command {
 fn spawn_daemon(mut command: Command, dir: PathBuf, socket: PathBuf) -> DaemonGuard {
     let child = command.spawn().expect("daemon binary should start");
     let guard = DaemonGuard { child, dir, socket };
-    wait_until(Duration::from_secs(10), || guard.socket.exists());
+    // bind(2) creates the socket file before listen(2), and a connect between them is refused.
+    wait_until(Duration::from_secs(10), || {
+        std::os::unix::net::UnixStream::connect(&guard.socket).is_ok()
+    });
     guard
 }
 

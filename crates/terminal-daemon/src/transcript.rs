@@ -15,6 +15,8 @@ pub struct Transcript {
     rotated_path: PathBuf,
     file: File,
     len: u64,
+    /// Offset just past the last byte, counted from the oldest byte retained at open.
+    end: u64,
     rotate_bytes: u64,
 }
 
@@ -34,18 +36,25 @@ impl Transcript {
             .open(&path)
             .with_context(|| format!("failed to open {}", path.display()))?;
         let len = file.metadata()?.len();
+        let rotated_len = std::fs::metadata(&rotated_path).map_or(0, |m| m.len());
         Ok(Self {
             path,
             rotated_path,
             file,
             len,
+            end: rotated_len + len,
             rotate_bytes,
         })
+    }
+
+    pub fn end(&self) -> u64 {
+        self.end
     }
 
     pub fn append(&mut self, bytes: &[u8]) -> Result<()> {
         self.file.write_all(bytes)?;
         self.len += bytes.len() as u64;
+        self.end += bytes.len() as u64;
         if self.len >= self.rotate_bytes {
             self.file.flush()?;
             std::fs::rename(&self.path, &self.rotated_path)?;
@@ -61,27 +70,38 @@ impl Transcript {
     /// The last `max_bytes` of output across the rotated and current files. May start
     /// mid-escape-sequence; replay consumers accept a possibly mangled first row.
     pub fn tail(&mut self, max_bytes: usize) -> Result<Vec<u8>> {
+        let (_, bytes) = self.read_from(self.end.saturating_sub(max_bytes as u64), max_bytes)?;
+        Ok(bytes)
+    }
+
+    /// Up to `max_bytes` of output starting at `offset`, and the offset they actually start at:
+    /// later than `offset` when rotation has already dropped the bytes there.
+    pub fn read_from(&mut self, offset: u64, max_bytes: usize) -> Result<(u64, Vec<u8>)> {
         self.file.flush()?;
-        let mut combined = Vec::new();
-        if self.len < max_bytes as u64 {
-            if let Ok(mut rotated) = File::open(&self.rotated_path) {
-                let want = max_bytes as u64 - self.len;
-                let rotated_len = rotated.metadata()?.len();
-                if rotated_len > want {
-                    rotated.seek(SeekFrom::Start(rotated_len - want))?;
-                }
-                rotated.read_to_end(&mut combined)?;
+        let rotated = File::open(&self.rotated_path).ok();
+        let rotated_len = match &rotated {
+            Some(file) => file.metadata()?.len(),
+            None => 0,
+        };
+        let retained_from = self.end.saturating_sub(rotated_len + self.len);
+        let start = offset.clamp(retained_from, self.end);
+        let mut skip = start - retained_from;
+        let mut bytes = Vec::new();
+        if let Some(mut rotated) = rotated {
+            if skip < rotated_len {
+                rotated.seek(SeekFrom::Start(skip))?;
+                rotated.take(max_bytes as u64).read_to_end(&mut bytes)?;
+                skip = 0;
+            } else {
+                skip -= rotated_len;
             }
         }
         let mut current = File::open(&self.path)?;
-        if self.len > max_bytes as u64 {
-            current.seek(SeekFrom::Start(self.len - max_bytes as u64))?;
-        }
-        current.read_to_end(&mut combined)?;
-        if combined.len() > max_bytes {
-            combined.drain(..combined.len() - max_bytes);
-        }
-        Ok(combined)
+        current.seek(SeekFrom::Start(skip))?;
+        current
+            .take((max_bytes - bytes.len()) as u64)
+            .read_to_end(&mut bytes)?;
+        Ok((start, bytes))
     }
 
     /// Delete both transcript files (used when a session is reaped).
@@ -147,6 +167,32 @@ mod tests {
 
         assert_eq!(t.tail(1).unwrap(), b"6");
         assert_eq!(t.tail(3).unwrap(), b"456");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn read_from_continues_across_a_rotation() {
+        let dir = temp_dir("read-from");
+        let mut t = Transcript::open_with_limit(&dir, "ts-1", 16).unwrap();
+        t.append(b"0123456789abcdef").unwrap(); // hits the cap → rotates
+        t.append(b"GHIJ").unwrap();
+
+        assert_eq!(t.end(), 20);
+        assert_eq!(t.read_from(12, 6).unwrap(), (12, b"cdefGH".to_vec()));
+        assert_eq!(t.read_from(18, 100).unwrap(), (18, b"IJ".to_vec()));
+        assert_eq!(t.read_from(20, 100).unwrap(), (20, Vec::new()));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn read_from_a_rotated_away_offset_starts_at_the_oldest_byte_kept() {
+        let dir = temp_dir("read-from-lost");
+        let mut t = Transcript::open_with_limit(&dir, "ts-1", 4).unwrap();
+        t.append(b"1234").unwrap(); // rotated into .log.1
+        t.append(b"5678").unwrap(); // rotated again, dropping "1234"
+        t.append(b"9").unwrap();
+
+        assert_eq!(t.read_from(2, 100).unwrap(), (4, b"56789".to_vec()));
         std::fs::remove_dir_all(&dir).ok();
     }
 
