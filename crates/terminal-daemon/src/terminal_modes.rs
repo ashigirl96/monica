@@ -36,12 +36,11 @@ const MAX_CSI_PARAMS: usize = 64;
 const MAX_KITTY_STACK: usize = 32;
 
 /// Alt-screen switches are the only history `restore_prefix` needs, and only to answer which
-/// buffer the app was in when the tail began, or when a client that missed part of the stream
-/// stopped receiving it. `?1049h` is an assignment rather than a toggle, so that answer cannot
-/// be recovered by rewinding the tail -- an app re-asserting a mode it already holds is
-/// indistinguishable from one changing it. Bounded: the oldest entry folds into
-/// `alt_at_history_start` when the log fills, so a boundary older than the log still resolves,
-/// just at the precision of the log's start.
+/// buffer the app was in when the tail began. `?1049h` is an assignment rather than a toggle,
+/// so that answer cannot be recovered by rewinding the tail -- an app re-asserting a mode it
+/// already holds is indistinguishable from one changing it. Bounded: the oldest entry folds
+/// into `alt_at_history_start` when the log fills, so a boundary older than the log still
+/// resolves, just at the precision of the log's start.
 const MAX_ALT_HISTORY: usize = 256;
 
 /// Mirrors the subset of xterm's VT500 transition table that CSI dispatch depends on. Notably
@@ -80,8 +79,8 @@ impl Exclusive {
 enum Client {
     /// Agrees on every mode's default, which is all a mode never observed can be in.
     Fresh,
-    /// Consumed the stream up to `seen` bytes and then missed some, so it may be in any mode.
-    Stale { seen: u64 },
+    /// Missed some of the stream, so it may be in any mode.
+    Stale { in_alt_screen: bool },
 }
 
 #[derive(Default)]
@@ -269,11 +268,22 @@ impl TerminalModes {
         self.prefix(tail, Client::Fresh)
     }
 
-    /// `restore_prefix` for a client that consumed the stream up to `gap` bytes before `tail`
-    /// and never got those, landing it where `restore_prefix` lands a fresh one.
-    pub fn restore_prefix_after_gap(&self, gap: u64, tail: &[u8]) -> Vec<u8> {
-        let seen = self.stream_len.saturating_sub(tail.len() as u64 + gap);
-        self.prefix(tail, Client::Stale { seen })
+    /// `restore_prefix` for a client that missed output right before `tail`, landing it where
+    /// `restore_prefix` lands a fresh one. `client` was fed what the client got since it was
+    /// made by `for_client_behind_by`.
+    pub fn restore_prefix_after_gap(&self, client: &Self, tail: &[u8]) -> Vec<u8> {
+        let in_alt_screen = client.alt_screen_at(client.stream_len) == Some(true);
+        self.prefix(tail, Client::Stale { in_alt_screen })
+    }
+
+    /// A tracker for a client that consumed all but the last `unseen` bytes fed here. It starts
+    /// knowing only which buffer the client is in, and keeps knowing it however many switches
+    /// later fall out of this tracker's bounded history.
+    pub fn for_client_behind_by(&self, unseen: u64) -> Self {
+        Self {
+            alt_at_history_start: self.alt_screen_at(self.stream_len.saturating_sub(unseen)),
+            ..Self::default()
+        }
     }
 
     fn prefix(&self, tail: &[u8], client: Client) -> Vec<u8> {
@@ -284,12 +294,12 @@ impl TerminalModes {
         let mut out = Vec::new();
         let mut flags = self.flags;
         let (mut mouse_protocol, mut mouse_encoding) = (self.mouse_protocol, self.mouse_encoding);
-        if let Client::Stale { seen } = client {
+        if let Client::Stale { in_alt_screen } = client {
             // xterm keeps a kitty stack per buffer and pops only the one it is in, so each
             // buffer's is emptied while the client is in it.
             let empty_kitty_stack = format!("\x1b[<{MAX_KITTY_STACK}u");
             out.extend_from_slice(empty_kitty_stack.as_bytes());
-            if self.alt_screen_at(seen) == Some(true) {
+            if in_alt_screen {
                 push_mode(&mut out, ALT_SCREEN, false);
                 out.extend_from_slice(empty_kitty_stack.as_bytes());
             }
@@ -395,6 +405,15 @@ mod tests {
         let mut modes = tracker(&[before]);
         modes.feed(tail);
         modes.restore_prefix(tail)
+    }
+
+    /// The restore for a client that got `seen`, then missed `gap`, ahead of `tail`.
+    fn restore_after_gap(seen: &[u8], gap: &[u8], tail: &[u8]) -> Vec<u8> {
+        let mut modes = tracker(&[seen]);
+        let client = modes.for_client_behind_by(0);
+        modes.feed(gap);
+        modes.feed(tail);
+        modes.restore_prefix_after_gap(&client, tail)
     }
 
     /// Claude Code's real startup handshake, transcribed from a production transcript. The
@@ -546,13 +565,8 @@ mod tests {
     /// never entered must not be told to leave.
     #[test]
     fn a_client_on_the_normal_buffer_is_not_taken_out_of_the_alt_screen() {
-        let mut modes = tracker(&[b"$ vim\r\n"]);
-        let gap = b"\x1b[?1049h\x1b[?25l";
-        let tail = b"frame";
-        modes.feed(gap);
-        modes.feed(tail);
         assert_eq!(
-            modes.restore_prefix_after_gap(gap.len() as u64, tail),
+            restore_after_gap(b"$ vim\r\n", b"\x1b[?1049h\x1b[?25l", b"frame"),
             b"\x1b[<32u\x1b[?1049h\x1b[?2004l\x1b[?1004l\x1b[?25l\x1b[?1000l\x1b[?1006l"
         );
     }
@@ -561,13 +575,8 @@ mod tests {
     /// buffer's, and a push left there would outlive the app's last pop.
     #[test]
     fn a_client_taken_out_of_the_alt_screen_has_both_kitty_stacks_emptied() {
-        let mut modes = tracker(&[b"\x1b[>5u\x1b[?1049h\x1b[>1u"]);
-        let gap = b"\x1b[<u\x1b[?1049l";
-        let tail = b"$ ";
-        modes.feed(gap);
-        modes.feed(tail);
         assert_eq!(
-            modes.restore_prefix_after_gap(gap.len() as u64, tail),
+            restore_after_gap(b"\x1b[>5u\x1b[?1049h\x1b[>1u", b"\x1b[<u\x1b[?1049l", b"$ "),
             b"\x1b[<32u\x1b[?1049l\x1b[<32u\
 \x1b[?2004l\x1b[?1004l\x1b[?25h\x1b[?1000l\x1b[?1006l\x1b[>5u"
         );
@@ -644,13 +653,8 @@ mod tests {
 
     #[test]
     fn a_client_that_missed_a_ris_is_taken_out_of_the_alt_screen() {
-        let mut modes = tracker(&[b"\x1b[?1049h"]);
-        let gap = b"frame\x1bc";
-        let tail = b"$ ";
-        modes.feed(gap);
-        modes.feed(tail);
         assert_eq!(
-            modes.restore_prefix_after_gap(gap.len() as u64, tail),
+            restore_after_gap(b"\x1b[?1049h", b"frame\x1bc", b"$ "),
             b"\x1b[<32u\x1b[?1049l\x1b[<32u\x1b[?2004l\x1b[?1004l\x1b[?25h\x1b[?1000l\x1b[?1006l"
         );
     }

@@ -30,6 +30,9 @@ enum Feed {
     Behind {
         resume_at: u64,
         since: Instant,
+        /// Fed what catch-up sends, so a restore after lost output knows which buffer the
+        /// connection's terminal is in.
+        sent: TerminalModes,
     },
 }
 
@@ -85,6 +88,9 @@ impl TableInner {
             *feed = Feed::Behind {
                 resume_at: chunk_start,
                 since: Instant::now(),
+                sent: entry
+                    .modes
+                    .for_client_behind_by(entry.transcript.end() - chunk_start),
             };
             out.set_behind(true);
             if out.drained() {
@@ -104,13 +110,18 @@ fn queue_missed_chunk(
     session_id: &str,
     feed: &mut Feed,
 ) -> bool {
-    let Feed::Behind { resume_at, since } = feed else {
+    let Feed::Behind {
+        resume_at,
+        since,
+        sent,
+    } = feed
+    else {
         return false;
     };
     if !out.has_room_to_catch_up() {
         return false;
     }
-    let missed = match entry.read_missed(*resume_at) {
+    let missed = match entry.read_missed(*resume_at, sent) {
         Ok(missed) => missed,
         Err(e) => {
             log::warn!(
@@ -130,13 +141,15 @@ fn queue_missed_chunk(
         return false;
     }
     let next = missed.start + missed.output.len() as u64;
+    let data = [missed.restore, missed.output].concat();
     let msg = ServerMessage::Output {
         session_id: session_id.to_string(),
-        data: b64(&[missed.restore, missed.output].concat()),
+        data: b64(&data),
     };
     if !out.send(&msg) {
         return false;
     }
+    sent.feed(&data);
     if lost > 0 {
         log::warn!(
             "connection {conn_id} lost {lost} bytes of {session_id} that rotated out of the transcript, and got its terminal modes again"
@@ -157,7 +170,8 @@ struct Missed {
 }
 
 impl LiveEntry {
-    fn read_missed(&mut self, resume_at: u64) -> Result<Missed> {
+    /// `sent` is what the attachment has been sent since it fell behind.
+    fn read_missed(&mut self, resume_at: u64, sent: &TerminalModes) -> Result<Missed> {
         let (start, output) = self.transcript.read_from(resume_at, CATCH_UP_CHUNK)?;
         let restore = if start == resume_at {
             Vec::new()
@@ -165,8 +179,7 @@ impl LiveEntry {
             // The restore leaves to the rest of the output the modes it switches itself, so it
             // has to see all of it, not just this chunk.
             let (_, rest) = self.transcript.read_from(start, usize::MAX)?;
-            self.modes
-                .restore_prefix_after_gap(start - resume_at, &rest)
+            self.modes.restore_prefix_after_gap(sent, &rest)
         };
         Ok(Missed {
             start,
@@ -1015,6 +1028,35 @@ mod tests {
             &got,
             &printed,
             "\x1b[<32u\x1b[?1049l\x1b[<32u\x1b[?2004l\x1b[?1004l\x1b[?25h\x1b[?1000l\x1b[?1006l",
+        );
+        t.terminate("ts-1").unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// More switches than ptyd keeps a history of, so only what the connection was sent can
+    /// tell which buffer it was left in.
+    #[test]
+    fn a_connection_left_in_the_alt_screen_leaves_it_however_often_the_lost_output_switched() {
+        let dir = temp_dir("lost-switches");
+        let t = small_transcript_table(&dir);
+        t.create(quiet_params(&dir, "ts-1")).unwrap();
+        let mut peer = Peer::connect(&t, 1);
+        peer.attach(1, "ts-1");
+        t.on_output("ts-1", TUI_START);
+        peer.output_of("ts-1", TUI_START.len());
+        let switches = [&b"\x1b[?1049l"[..], &b"\x1b[?1049h\x1b[?1049l".repeat(300)].concat();
+
+        let mut printed = [TUI_START, &burst(&t, "ts-1", 400)].concat();
+        t.on_output("ts-1", &switches);
+        printed.extend(&switches);
+        printed.extend(burst(&t, "ts-1", 400));
+
+        let got = peer.output_ending_with("ts-1", &printed[printed.len() - 1024..]);
+        assert_restored_after_loss(
+            &got,
+            &printed,
+            "\x1b[<32u\x1b[?1049l\x1b[<32u\
+             \x1b[?2004h\x1b[?1004l\x1b[?25h\x1b[?1003h\x1b[?1006h\x1b[>1u",
         );
         t.terminate("ts-1").unwrap();
         std::fs::remove_dir_all(&dir).ok();
