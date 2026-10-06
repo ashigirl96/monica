@@ -38,6 +38,20 @@ const doc = (text: string) => ({
   ],
 })
 
+const block = (id: string | null, text: string, nested: object[] = []) => ({
+  type: 'blockContainer' as const,
+  attrs: { id },
+  content: [
+    { type: 'paragraph', content: [{ type: 'text', text }] },
+    ...(nested.length > 0 ? [{ type: 'blockGroup', content: nested }] : []),
+  ],
+})
+
+const docOf = (...blocks: object[]) => ({
+  type: 'doc' as const,
+  content: [{ type: 'blockGroup', content: blocks }],
+})
+
 async function failure(promise: Promise<unknown>) {
   try {
     await promise
@@ -236,6 +250,165 @@ test('an Essay is set to finished and back, each change moving updatedAt on; set
   expect(unchanged).toEqual(finished)
   expect(writing).toMatchObject({ status: 'writing' })
   expect(writing.updatedAt.getTime()).toBeGreaterThan(finished.updatedAt.getTime())
+})
+
+test('the Note Mention candidates are the Notes whose title, name, preview or Repo has the query, whatever its case', async () => {
+  const { client } = setup()
+  setSystemTime(new Date(2026, 9, 6, 12))
+  const essay = await client.essay.create()
+  await client.save({
+    id: essay.id,
+    content: doc('first line'),
+    title: 'On Ledgers',
+    expectedUpdatedAt: essay.updatedAt,
+  })
+  const daily = await client.daily.open({ date: '2026-10-01' })
+  await client.save({
+    id: daily.id,
+    content: doc('Met the plumber'),
+    expectedUpdatedAt: daily.updatedAt,
+  })
+  const repoNote = await client.repoNote.create({ repo: 'ashigirl96/tania' })
+  const scratch = await client.scratch.open({ repo: 'owner/Monica' })
+  const untitled = await client.essay.create()
+
+  const ids = async (q: string) => (await client.noteMention.search({ q })).map(({ id }) => id)
+
+  expect(await client.noteMention.search({ q: 'ledger' })).toEqual([
+    { id: essay.id, displayName: 'On Ledgers', preview: 'first line' },
+  ])
+  expect(await ids('2026-10-01')).toEqual([daily.id])
+  expect(await ids('PLUMBER')).toEqual([daily.id])
+  expect(await ids('tania')).toEqual([repoNote.id])
+  expect(await ids('monica')).toEqual([scratch.id])
+  expect(await ids('untitled')).toEqual([untitled.id, repoNote.id])
+  expect(await ids('2026-10-06')).toEqual([])
+})
+
+test('at most 20 candidates come, the most recently updated first', async () => {
+  const { client } = setup()
+  const essays = []
+  for (let minute = 0; minute < 25; minute++) {
+    setSystemTime(new Date(2026, 9, 6, 12, minute))
+    essays.push(await client.essay.create())
+  }
+  setSystemTime(new Date(2026, 9, 6, 13))
+  const edited = essays[2]!
+  await client.save({ id: edited.id, content: doc('x'), expectedUpdatedAt: edited.updatedAt })
+
+  const found = await client.noteMention.search({ q: '' })
+
+  expect(found).toHaveLength(20)
+  expect(found.map(({ id }) => id)).toEqual([
+    edited.id,
+    ...essays
+      .slice(6)
+      .toReversed()
+      .map(({ id }) => id),
+  ])
+})
+
+test('a match comes even behind more than 20 more recently updated Notes that do not match', async () => {
+  const { client } = setup()
+  setSystemTime(new Date(2026, 9, 6, 11))
+  const needle = await client.essay.create()
+  await client.save({
+    id: needle.id,
+    content: doc('x'),
+    title: 'Needle',
+    expectedUpdatedAt: needle.updatedAt,
+  })
+  for (let day = 1; day <= 25; day++) {
+    setSystemTime(new Date(2026, 9, 6, 12, day))
+    await client.daily.open({ date: `2026-09-${String(day).padStart(2, '0')}` })
+  }
+
+  expect((await client.noteMention.search({ q: 'needle' })).map(({ id }) => id)).toEqual([
+    needle.id,
+  ])
+})
+
+test('a deleted Note is not a candidate until the deletion is undone', async () => {
+  const { client } = setup()
+  const essay = await client.essay.create()
+  await client.remove({ id: essay.id })
+
+  expect(await client.noteMention.search({ q: 'untitled' })).toEqual([])
+
+  await client.restore({ id: essay.id })
+
+  expect((await client.noteMention.search({ q: 'untitled' })).map(({ id }) => id)).toEqual([
+    essay.id,
+  ])
+})
+
+test('a Note Mention resolves to the name the Note has now', async () => {
+  const { client } = setup()
+  const essay = await client.essay.create()
+  const daily = await client.daily.open({ date: '2026-10-06' })
+
+  expect(await client.noteMention.resolve({ id: essay.id })).toEqual({ displayName: 'Untitled' })
+  expect(await client.noteMention.resolve({ id: daily.id })).toEqual({ displayName: '2026-10-06' })
+
+  await client.save({
+    id: essay.id,
+    content: essay.content,
+    title: 'On ledgers',
+    expectedUpdatedAt: essay.updatedAt,
+  })
+
+  expect(await client.noteMention.resolve({ id: essay.id })).toEqual({ displayName: 'On ledgers' })
+})
+
+test('a Note Mention to a deleted Note, to an id no Note has, or to something that is no Note id is not found', async () => {
+  const { client } = setup()
+  const kept = await client.essay.create()
+  const essay = await client.essay.create()
+  await client.remove({ id: essay.id })
+
+  expect(kept.id).toBe('note-1')
+  for (const id of [essay.id, 'note-999', 'abc', 'note-01']) {
+    expect((await failure(client.noteMention.resolve({ id }))).code).toBe('NOT_FOUND')
+  }
+})
+
+test('a block comes with the blocks nested in it, found at any depth', async () => {
+  const { client } = setup()
+  const daily = await client.daily.open({ date: '2026-10-06' })
+  const child = block('child', 'nested')
+  const parent = block('parent', 'outer', [child])
+  await client.save({
+    id: daily.id,
+    content: docOf(block(null, 'no id'), parent),
+    expectedUpdatedAt: daily.updatedAt,
+  })
+
+  expect(await client.block.get({ id: daily.id, blockId: 'parent' })).toEqual(parent)
+  expect(await client.block.get({ id: daily.id, blockId: 'child' })).toEqual(child)
+})
+
+test('a block is not found when the Note has no block of that id, the Note is deleted, or no Note has the id', async () => {
+  const { client } = setup()
+  const essay = await client.essay.create()
+  await client.save({
+    id: essay.id,
+    content: docOf(block('kept', 'text')),
+    expectedUpdatedAt: essay.updatedAt,
+  })
+
+  expect(essay.id).toBe('note-1')
+  for (const [id, blockId] of [
+    [essay.id, 'gone'],
+    ['note-01', 'kept'],
+  ] as const) {
+    expect((await failure(client.block.get({ id, blockId }))).code).toBe('NOT_FOUND')
+  }
+
+  await client.remove({ id: essay.id })
+
+  for (const id of [essay.id, 'note-999', 'abc']) {
+    expect((await failure(client.block.get({ id, blockId: 'kept' }))).code).toBe('NOT_FOUND')
+  }
 })
 
 test('only an Essay has a status', async () => {
