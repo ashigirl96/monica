@@ -3,16 +3,19 @@
 //! sends `?1049h` once at startup leaves nothing in a 256 KB tail for a reconnecting client to
 //! learn the alt screen from, so the client ends up with mouse reporting on while its buffer
 //! says `normal` -- a combination no real terminal can be in. tmux restores modes the same way
-//! on re-attach.
+//! on re-attach. A connection that fell so far behind that rotation dropped part of the output
+//! is brought back much the same way: moved into the right buffer ahead of what remains, and
+//! told every mode once it has caught up.
 //!
 //! Every grouping here mirrors what xterm actually keys off, because the client's parser is the
 //! yardstick: restoring a mode xterm ignores, or restoring two modes that xterm treats as one
 //! slot, would leave the daemon's idea of the session out of step with what the user sees.
 
-/// Independent flags, in the order they are restored. These are also exactly what xterm's
-/// DECSTR returns to its defaults -- the mouse protocol and encoding live in a service
-/// `softReset` never touches, and neither does the alt buffer, so those stay put.
-const TRACKED_FLAGS: [u16; 3] = [2004, 1004, 25];
+/// Independent flags and whether a fresh terminal has them set, in the order they are restored.
+/// These are also exactly what xterm's DECSTR returns to its defaults -- the mouse protocol and
+/// encoding live in a service `softReset` never touches, and neither does the alt buffer, so
+/// those stay put.
+const TRACKED_FLAGS: [(u16, bool); 3] = [(2004, false), (1004, false), (25, true)];
 
 /// Handled apart from the flags because it decides *where* output lands rather than just how it
 /// is reported, which means `restore_prefix` needs its value at the replay boundary, not its
@@ -61,6 +64,15 @@ enum Exclusive {
     Unobserved,
     Off,
     On(u16),
+}
+
+impl Exclusive {
+    fn or_off(self) -> Self {
+        match self {
+            Self::Unobserved => Self::Off,
+            observed => observed,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -130,12 +142,16 @@ impl TerminalModes {
                 }
                 // RIS returns the terminal to power-on defaults, so nothing observed before it
                 // still holds -- keeping it would re-enter the alt screen on a later attach.
-                // The stream offset is not terminal state and must survive, or every later
-                // boundary would be measured against the wrong origin.
+                // The stream offset and the alt-screen log record the stream rather than the
+                // terminal, and must survive, or a boundary would be measured against the
+                // wrong origin or placed in the wrong buffer.
                 b'c' => {
-                    let stream_len = self.stream_len;
-                    *self = Self::default();
-                    self.stream_len = stream_len;
+                    *self = Self {
+                        stream_len: self.stream_len,
+                        alt_history: std::mem::take(&mut self.alt_history),
+                        alt_at_history_start: self.alt_at_history_start,
+                        ..Self::default()
+                    };
                     self.record_alt_switch(false);
                 }
                 _ => self.scan = Scan::Ground,
@@ -251,14 +267,14 @@ impl TerminalModes {
         if self.alt_screen_at(boundary) == Some(true) {
             push_mode(&mut out, ALT_SCREEN, true);
         }
-        for (index, mode) in TRACKED_FLAGS.iter().enumerate() {
+        for (index, &(mode, _)) in TRACKED_FLAGS.iter().enumerate() {
             let restored = if in_tail.flags[index].is_some() {
                 None
             } else {
                 self.flags[index]
             };
             if let Some(on) = restored {
-                push_mode(&mut out, *mode, on);
+                push_mode(&mut out, mode, on);
             }
         }
         if in_tail.mouse_protocol == Exclusive::Unobserved {
@@ -268,10 +284,54 @@ impl TerminalModes {
             push_exclusive(&mut out, self.mouse_encoding, MOUSE_ENCODINGS[0]);
         }
         if !in_tail.kitty_touched {
-            for flags in &self.kitty_stack {
-                out.extend_from_slice(format!("\x1b[>{flags}u").as_bytes());
-            }
+            push_kitty_stack(&mut out, &self.kitty_stack);
         }
+        out
+    }
+
+    /// A tracker for a client that consumed all but the last `unseen` bytes fed here. It starts
+    /// knowing only which buffer the client is in, and keeps knowing it however many switches
+    /// later fall out of this tracker's bounded history.
+    pub fn for_client_behind_by(&self, unseen: u64) -> Self {
+        Self {
+            alt_at_history_start: self.alt_screen_at(self.stream_len.saturating_sub(unseen)),
+            ..Self::default()
+        }
+    }
+
+    /// Sequences that move a client which missed the output right before the last `tail_len`
+    /// bytes fed here into the buffer those bytes start in. `client` was fed what the client
+    /// got since `for_client_behind_by` made it. Only the buffer is settled here, because it
+    /// decides where the tail lands; `restate` settles the other modes once the tail is through.
+    pub fn buffer_switch_after_gap(&self, client: &Self, tail_len: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        // Leaving and entering again, rather than staying: xterm swaps the kitty flags on every
+        // `?1049h`, even one it is already in.
+        if client.alt_screen_at(client.stream_len) == Some(true) {
+            // xterm keeps a kitty stack per buffer and pops only the one it is in, so each is
+            // emptied while the client is in it.
+            push_kitty_reset(&mut out);
+            push_mode(&mut out, ALT_SCREEN, false);
+            push_kitty_reset(&mut out);
+        }
+        if self.alt_screen_at(self.stream_len.saturating_sub(tail_len)) == Some(true) {
+            push_mode(&mut out, ALT_SCREEN, true);
+        }
+        out
+    }
+
+    /// Sequences that bring a client in the app's buffer to every mode tracked here, whatever
+    /// modes it was left in. Unlike `restore_prefix`, this also states the modes a fresh client
+    /// would already agree on, and empties the kitty stack before pushing.
+    pub fn restate(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        push_kitty_reset(&mut out);
+        for (&(mode, default_on), flag) in TRACKED_FLAGS.iter().zip(self.flags) {
+            push_mode(&mut out, mode, flag.unwrap_or(default_on));
+        }
+        push_exclusive(&mut out, self.mouse_protocol.or_off(), MOUSE_PROTOCOLS[1]);
+        push_exclusive(&mut out, self.mouse_encoding.or_off(), MOUSE_ENCODINGS[0]);
+        push_kitty_stack(&mut out, &self.kitty_stack);
         out
     }
 }
@@ -283,7 +343,7 @@ enum Slot {
 }
 
 fn classify(mode: u16) -> Option<Slot> {
-    if let Some(index) = TRACKED_FLAGS.iter().position(|&m| m == mode) {
+    if let Some(index) = TRACKED_FLAGS.iter().position(|&(m, _)| m == mode) {
         Some(Slot::Flag(index))
     } else if MOUSE_PROTOCOLS.contains(&mode) {
         Some(Slot::MouseProtocol)
@@ -305,6 +365,17 @@ fn push_exclusive(out: &mut Vec<u8>, state: Exclusive, off_mode: u16) {
         Exclusive::Unobserved => {}
         Exclusive::Off => push_mode(out, off_mode, false),
         Exclusive::On(mode) => push_mode(out, mode, true),
+    }
+}
+
+/// Pops more than the stack can hold, which empties it.
+fn push_kitty_reset(out: &mut Vec<u8>) {
+    out.extend_from_slice(format!("\x1b[<{MAX_KITTY_STACK}u").as_bytes());
+}
+
+fn push_kitty_stack(out: &mut Vec<u8>, stack: &[u32]) {
+    for flags in stack {
+        out.extend_from_slice(format!("\x1b[>{flags}u").as_bytes());
     }
 }
 
@@ -342,6 +413,15 @@ mod tests {
         let mut modes = tracker(&[before]);
         modes.feed(tail);
         modes.restore_prefix(tail)
+    }
+
+    /// The buffer switch for a client that got `seen`, then missed `gap`, ahead of `tail`.
+    fn switch_after_gap(seen: &[u8], gap: &[u8], tail: &[u8]) -> Vec<u8> {
+        let mut modes = tracker(&[seen]);
+        let client = modes.for_client_behind_by(0);
+        modes.feed(gap);
+        modes.feed(tail);
+        modes.buffer_switch_after_gap(&client, tail.len() as u64)
     }
 
     /// Claude Code's real startup handshake, transcribed from a production transcript. The
@@ -487,6 +567,38 @@ mod tests {
         );
     }
 
+    // --- a client that missed part of the stream ---
+
+    /// Leaving the alt screen also restores the cursor saved on entering it, so a client that
+    /// never entered must not be told to leave.
+    #[test]
+    fn a_client_on_the_normal_buffer_is_not_taken_out_of_the_alt_screen() {
+        assert_eq!(
+            switch_after_gap(b"$ vim\r\n", b"\x1b[?1049h\x1b[?25l", b"frame"),
+            b"\x1b[?1049h"
+        );
+    }
+
+    /// xterm keeps a kitty stack per buffer, so leaving the alt screen uncovers the normal
+    /// buffer's, and a push left there would outlive the app's last pop.
+    #[test]
+    fn a_client_taken_out_of_the_alt_screen_has_both_kitty_stacks_emptied() {
+        assert_eq!(
+            switch_after_gap(b"\x1b[>5u\x1b[?1049h\x1b[>1u", b"\x1b[<u\x1b[?1049l", b"$ "),
+            b"\x1b[<32u\x1b[?1049l\x1b[<32u"
+        );
+    }
+
+    /// A client may hold any mode, so the defaults a fresh one would assume are said too.
+    #[test]
+    fn restating_says_every_mode_and_rebuilds_the_kitty_stack() {
+        let modes = tracker(&[b"\x1b[?2004h\x1b[?1003h\x1b[>1u\x1b[>5u"]);
+        assert_eq!(
+            modes.restate(),
+            b"\x1b[<32u\x1b[?2004h\x1b[?1004l\x1b[?25h\x1b[?1003h\x1b[?1006l\x1b[>1u\x1b[>5u"
+        );
+    }
+
     // --- mutually exclusive groups ---
 
     /// xterm holds one `activeProtocol`, so the last mode set wins. A fixed emit order would
@@ -544,6 +656,23 @@ mod tests {
         assert_eq!(
             restore(&[b"\x1b[?1049h\x1b[?1003h\x1b[?1006h\x1b[!p"]),
             b"\x1b[?1049h\x1b[?1003h\x1b[?1006h"
+        );
+    }
+
+    /// RIS leaves the alt screen, so a tail that crosses it still starts where the app was.
+    #[test]
+    fn a_tail_that_crosses_a_ris_starts_in_the_alt_buffer() {
+        assert_eq!(
+            restore_with_tail(b"\x1b[?1049h", b"frame\x1bc$ "),
+            b"\x1b[?1049h"
+        );
+    }
+
+    #[test]
+    fn a_client_that_missed_a_ris_is_taken_out_of_the_alt_screen() {
+        assert_eq!(
+            switch_after_gap(b"\x1b[?1049h", b"frame\x1bc", b"$ "),
+            b"\x1b[<32u\x1b[?1049l\x1b[<32u"
         );
     }
 

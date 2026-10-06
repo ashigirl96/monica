@@ -14,7 +14,7 @@ use base64::Engine;
 use super::outbox::Outbox;
 use crate::manager::PtyManager;
 use crate::terminal_modes::TerminalModes;
-use crate::transcript::Transcript;
+use crate::transcript::{self, Transcript};
 use crate::types::{PtySize, SpawnRequest};
 use tania_terminal_protocol::{CreateParams, ServerMessage, SessionInfo};
 
@@ -30,6 +30,11 @@ enum Feed {
     Behind {
         resume_at: u64,
         since: Instant,
+        /// Fed what catch-up sends, so that after lost output it knows which buffer the
+        /// connection's terminal is in.
+        sent: TerminalModes,
+        /// Lost output may have switched any mode, so they are all restated once caught up.
+        lost_output: bool,
     },
 }
 
@@ -145,10 +150,14 @@ impl TableInner {
             *feed = Feed::Behind {
                 resume_at: chunk_start,
                 since: Instant::now(),
+                sent: entry
+                    .modes
+                    .for_client_behind_by(entry.transcript.end() - chunk_start),
+                lost_output: false,
             };
             out.set_behind(true);
             if out.drained() {
-                while queue_missed_chunk(out, &mut entry.transcript, *conn_id, session_id, feed) {}
+                while queue_missed_chunk(out, entry, *conn_id, session_id, feed) {}
             }
         }
     }
@@ -182,13 +191,7 @@ impl TableInner {
                     let (Some(feed), Some(entry)) = (feed, live.get_mut(session_id)) else {
                         return false;
                     };
-                    queue_missed_chunk(
-                        &conn.outbox,
-                        &mut entry.transcript,
-                        conn_id,
-                        session_id,
-                        feed,
-                    )
+                    queue_missed_chunk(&conn.outbox, entry, conn_id, session_id, feed)
                 }
             });
         }
@@ -228,24 +231,38 @@ fn read_missed(
 /// nothing.
 fn queue_missed_chunk(
     out: &Outbox,
-    transcript: &mut Transcript,
+    entry: &mut LiveEntry,
     conn_id: u64,
     session_id: &str,
     feed: &mut Feed,
 ) -> bool {
-    let Feed::Behind { resume_at, since } = feed else {
+    let Feed::Behind {
+        resume_at,
+        since,
+        sent,
+        lost_output,
+    } = feed
+    else {
         return false;
     };
     if !out.has_room_to_catch_up() {
         return false;
     }
-    let Some((start, bytes)) =
-        read_missed(transcript, *resume_at, CATCH_UP_CHUNK, conn_id, session_id)
-    else {
+    let Some((start, output)) = read_missed(
+        &mut entry.transcript,
+        *resume_at,
+        CATCH_UP_CHUNK,
+        conn_id,
+        session_id,
+    ) else {
         *feed = Feed::Live;
         return false;
     };
-    if bytes.is_empty() {
+    let lost = start > *resume_at;
+    if output.is_empty() && !lost {
+        if *lost_output && !out.send(&output_message(session_id, &entry.modes.restate())) {
+            return false;
+        }
         log::info!(
             "connection {conn_id} caught up on {session_id} after {}ms",
             since.elapsed().as_millis()
@@ -253,16 +270,26 @@ fn queue_missed_chunk(
         *feed = Feed::Live;
         return false;
     }
-    if !out.send(&output_message(session_id, &bytes)) {
+    let mut data = if lost {
+        let tail_len = entry.transcript.end() - start;
+        entry.modes.buffer_switch_after_gap(sent, tail_len)
+    } else {
+        Vec::new()
+    };
+    data.extend_from_slice(&output);
+    if !out.send(&output_message(session_id, &data)) {
         return false;
     }
-    *resume_at = start + bytes.len() as u64;
+    sent.feed(&data);
+    *lost_output |= lost;
+    *resume_at = start + output.len() as u64;
     true
 }
 
 pub struct SessionTable {
     manager: PtyManager,
     sessions_dir: PathBuf,
+    transcript_rotate_bytes: u64,
     inner: Mutex<TableInner>,
 }
 
@@ -282,6 +309,7 @@ impl SessionTable {
         Self {
             manager: PtyManager::new(),
             sessions_dir,
+            transcript_rotate_bytes: transcript::ROTATE_BYTES,
             inner: Mutex::new(TableInner::default()),
         }
     }
@@ -314,8 +342,12 @@ impl SessionTable {
             bail!("session {} already exists", params.session_id);
         }
 
-        let transcript = Transcript::open(&self.sessions_dir, &params.session_id)
-            .context("failed to open transcript")?;
+        let transcript = Transcript::open(
+            &self.sessions_dir,
+            &params.session_id,
+            self.transcript_rotate_bytes,
+        )
+        .context("failed to open transcript")?;
 
         let table_for_output = Arc::clone(self);
         let table_for_exit = Arc::clone(self);
@@ -398,7 +430,12 @@ impl SessionTable {
         // the app must still record the exit and reap the tombstone.
         for (conn_id, conn) in inner.connections.iter_mut() {
             let (missed, since) = match feeds.get(conn_id) {
-                Some(Feed::Behind { resume_at, since }) => {
+                Some(Feed::Behind {
+                    resume_at,
+                    since,
+                    sent,
+                    lost_output,
+                }) => {
                     let missed_len = (entry.transcript.end() - resume_at) as usize;
                     let missed = read_missed(
                         &mut entry.transcript,
@@ -407,7 +444,20 @@ impl SessionTable {
                         *conn_id,
                         session_id,
                     )
-                    .map_or_else(Vec::new, |(_, bytes)| bytes);
+                    .map_or_else(Vec::new, |(start, bytes)| {
+                        let lost = start > *resume_at;
+                        let mut missed = if lost {
+                            let tail_len = entry.transcript.end() - start;
+                            entry.modes.buffer_switch_after_gap(sent, tail_len)
+                        } else {
+                            Vec::new()
+                        };
+                        missed.extend(bytes);
+                        if lost || *lost_output {
+                            missed.extend(entry.modes.restate());
+                        }
+                        missed
+                    });
                     (missed, *since)
                 }
                 _ => {
@@ -564,6 +614,17 @@ mod tests {
         Arc::new(SessionTable::new(dir.to_path_buf()))
     }
 
+    /// Keeps 64–128 KB, so an 800 KB burst outruns it.
+    fn small_transcript_table(dir: &Path) -> Arc<SessionTable> {
+        Arc::new(SessionTable {
+            transcript_rotate_bytes: 64 * 1024,
+            ..SessionTable::new(dir.to_path_buf())
+        })
+    }
+
+    /// Claude Code's startup, trimmed to one mode of each kind ptyd tracks.
+    const TUI_START: &[u8] = b"\x1b[?1049h\x1b[>1u\x1b[?1003h\x1b[?1006h\x1b[?2004h";
+
     /// `/bin/echo` as the "shell" prints its `--login` argument and exits immediately,
     /// giving a real child process without an interactive shell.
     fn echo_params(session_id: &str) -> CreateParams {
@@ -617,6 +678,44 @@ mod tests {
             "got {} bytes, want {}; first difference at {first_diff:?}",
             got.len(),
             want.len()
+        );
+    }
+
+    /// Reads `ts-1` until `restated` arrives, then checks it as `assert_restored_after_loss` does.
+    fn assert_caught_up_after_loss(peer: &mut Peer, printed: &[u8], switch: &str, restated: &str) {
+        let got = peer.output_ending_with("ts-1", restated.as_bytes());
+        assert_restored_after_loss(&got, printed, switch, restated);
+    }
+
+    /// Checks that `got` is the start of `printed`, `switch`, and the end of `printed` with
+    /// output lost in between, then `restated`.
+    fn assert_restored_after_loss(got: &[u8], printed: &[u8], switch: &str, restated: &str) {
+        let got = got
+            .strip_suffix(restated.as_bytes())
+            .expect("the modes must be restated last");
+        let Some(at) = got
+            .windows(switch.len())
+            .position(|w| w == switch.as_bytes())
+        else {
+            let diverged = got.iter().zip(printed).take_while(|(a, b)| a == b).count();
+            let around = &got[diverged.saturating_sub(16)..got.len().min(diverged + 96)];
+            panic!(
+                "no buffer switch where the output diverged: {:?}",
+                String::from_utf8_lossy(around)
+            );
+        };
+        let (before, after) = (&got[..at], &got[at + switch.len()..]);
+        assert!(
+            printed.starts_with(before),
+            "the output before the loss must arrive in order"
+        );
+        assert!(
+            printed.ends_with(after),
+            "the output the transcript kept must arrive in order"
+        );
+        assert!(
+            before.len() + after.len() < printed.len(),
+            "the burst must outrun the transcript"
         );
     }
 
@@ -702,7 +801,16 @@ mod tests {
 
         /// Everything `session_id` has sent so far, once it reaches `len` bytes.
         fn output_of(&mut self, session_id: &str, len: usize) -> Vec<u8> {
-            while self.output.get(session_id).map_or(0, Vec::len) < len {
+            self.output_once(session_id, |got| got.len() >= len)
+        }
+
+        /// Everything `session_id` has sent so far, once it ends with `last`.
+        fn output_ending_with(&mut self, session_id: &str, last: &[u8]) -> Vec<u8> {
+            self.output_once(session_id, |got| got.ends_with(last))
+        }
+
+        fn output_once(&mut self, session_id: &str, done: impl Fn(&[u8]) -> bool) -> Vec<u8> {
+            while !done(self.output.get(session_id).map_or(&[], Vec::as_slice)) {
                 self.next();
             }
             self.output[session_id].clone()
@@ -1009,6 +1117,133 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// The restore would only state the modes the connection's terminal is already in.
+    #[test]
+    fn a_catch_up_that_lost_nothing_sends_no_restore() {
+        let dir = temp_dir("caught-up-in-alt");
+        let t = table(&dir);
+        t.create(quiet_params(&dir, "ts-1")).unwrap();
+        let mut peer = Peer::connect(&t, 1);
+        peer.attach(1, "ts-1");
+        t.on_output("ts-1", TUI_START);
+
+        let printed = [TUI_START, &burst(&t, "ts-1", 800)].concat();
+
+        assert_same_bytes(&peer.output_of("ts-1", printed.len()), &printed);
+        t.terminate("ts-1").unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// What `restate` says for a session that ran `TUI_START` and nothing since.
+    const TUI_RESTATED: &str =
+        "\x1b[<32u\x1b[?2004h\x1b[?1004l\x1b[?25h\x1b[?1003h\x1b[?1006h\x1b[>1u";
+
+    /// Leaving and re-entering, rather than staying: xterm swaps the kitty flags on every
+    /// `?1049h`, even one it is already in.
+    #[test]
+    fn a_connection_that_lost_output_reenters_the_alt_screen_before_the_rest() {
+        let dir = temp_dir("lost-in-alt");
+        let t = small_transcript_table(&dir);
+        t.create(quiet_params(&dir, "ts-1")).unwrap();
+        let mut peer = Peer::connect(&t, 1);
+        peer.attach(1, "ts-1");
+        t.on_output("ts-1", TUI_START);
+        peer.output_of("ts-1", TUI_START.len());
+
+        let printed = [TUI_START, &burst(&t, "ts-1", 800)].concat();
+
+        assert_caught_up_after_loss(
+            &mut peer,
+            &printed,
+            "\x1b[<32u\x1b[?1049l\x1b[<32u\x1b[?1049h",
+            TUI_RESTATED,
+        );
+        t.terminate("ts-1").unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_connection_that_lost_a_tui_exiting_leaves_the_alt_screen_before_the_rest() {
+        let dir = temp_dir("lost-exit");
+        let t = small_transcript_table(&dir);
+        t.create(quiet_params(&dir, "ts-1")).unwrap();
+        let mut peer = Peer::connect(&t, 1);
+        peer.attach(1, "ts-1");
+        t.on_output("ts-1", TUI_START);
+        peer.output_of("ts-1", TUI_START.len());
+        let tui_exit = b"\x1b[?2004l\x1b[?1006l\x1b[?1003l\x1b[<u\x1b[?1049l";
+
+        let mut printed = [TUI_START, &burst(&t, "ts-1", 400)].concat();
+        t.on_output("ts-1", tui_exit);
+        printed.extend(tui_exit);
+        printed.extend(burst(&t, "ts-1", 400));
+
+        assert_caught_up_after_loss(
+            &mut peer,
+            &printed,
+            "\x1b[<32u\x1b[?1049l\x1b[<32u",
+            "\x1b[<32u\x1b[?2004l\x1b[?1004l\x1b[?25h\x1b[?1000l\x1b[?1006l",
+        );
+        t.terminate("ts-1").unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The pop in what the transcript kept cannot be replayed onto a stack the connection lost
+    /// track of, so only restating the stack once caught up leaves the outer TUI its entry.
+    #[test]
+    fn a_kitty_pop_the_transcript_kept_leaves_the_outer_entry_once_caught_up() {
+        let dir = temp_dir("lost-kitty");
+        let t = small_transcript_table(&dir);
+        t.create(quiet_params(&dir, "ts-1")).unwrap();
+        let mut peer = Peer::connect(&t, 1);
+        peer.attach(1, "ts-1");
+        let start = [TUI_START, b"\x1b[>5u"].concat();
+        t.on_output("ts-1", &start);
+        peer.output_of("ts-1", start.len());
+
+        let mut printed = [&start[..], &burst(&t, "ts-1", 800)].concat();
+        t.on_output("ts-1", b"\x1b[<1u");
+        printed.extend(b"\x1b[<1u");
+        printed.extend(burst(&t, "ts-1", 10));
+
+        assert_caught_up_after_loss(
+            &mut peer,
+            &printed,
+            "\x1b[<32u\x1b[?1049l\x1b[<32u\x1b[?1049h",
+            TUI_RESTATED,
+        );
+        t.terminate("ts-1").unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// More switches than ptyd keeps a history of, so only what the connection was sent can
+    /// tell which buffer it was left in.
+    #[test]
+    fn a_connection_left_in_the_alt_screen_leaves_it_however_often_the_lost_output_switched() {
+        let dir = temp_dir("lost-switches");
+        let t = small_transcript_table(&dir);
+        t.create(quiet_params(&dir, "ts-1")).unwrap();
+        let mut peer = Peer::connect(&t, 1);
+        peer.attach(1, "ts-1");
+        t.on_output("ts-1", TUI_START);
+        peer.output_of("ts-1", TUI_START.len());
+        let switches = [&b"\x1b[?1049l"[..], &b"\x1b[?1049h\x1b[?1049l".repeat(300)].concat();
+
+        let mut printed = [TUI_START, &burst(&t, "ts-1", 400)].concat();
+        t.on_output("ts-1", &switches);
+        printed.extend(&switches);
+        printed.extend(burst(&t, "ts-1", 400));
+
+        assert_caught_up_after_loss(
+            &mut peer,
+            &printed,
+            "\x1b[<32u\x1b[?1049l\x1b[<32u",
+            TUI_RESTATED,
+        );
+        t.terminate("ts-1").unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn a_connection_that_is_behind_still_gets_responses() {
         let dir = temp_dir("behind-responses");
@@ -1063,6 +1298,28 @@ mod tests {
         assert_same_bytes(&decode(&replay), &printed[printed.len() - 4096..]);
         assert_same_bytes(&peer.output_of("ts-1", 5), b"after");
         t.terminate("ts-1").unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_connection_that_lost_output_gets_its_modes_back_before_the_exit() {
+        let dir = temp_dir("lost-then-exit");
+        let t = small_transcript_table(&dir);
+        t.create(quiet_params(&dir, "ts-1")).unwrap();
+        let mut peer = Peer::connect(&t, 1);
+        peer.attach(1, "ts-1");
+        t.on_output("ts-1", TUI_START);
+        peer.output_of("ts-1", TUI_START.len());
+        let printed = [TUI_START, &burst(&t, "ts-1", 800)].concat();
+
+        t.terminate("ts-1").unwrap();
+
+        assert_restored_after_loss(
+            &peer.output_before_exit("ts-1"),
+            &printed,
+            "\x1b[<32u\x1b[?1049l\x1b[<32u\x1b[?1049h",
+            TUI_RESTATED,
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

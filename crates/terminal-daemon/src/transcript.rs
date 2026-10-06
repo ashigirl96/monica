@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-const ROTATE_BYTES: u64 = 1024 * 1024;
+pub const ROTATE_BYTES: u64 = 1024 * 1024;
 
 pub struct Transcript {
     path: PathBuf,
@@ -21,11 +21,7 @@ pub struct Transcript {
 }
 
 impl Transcript {
-    pub fn open(dir: &Path, session_id: &str) -> Result<Self> {
-        Self::open_with_limit(dir, session_id, ROTATE_BYTES)
-    }
-
-    fn open_with_limit(dir: &Path, session_id: &str, rotate_bytes: u64) -> Result<Self> {
+    pub fn open(dir: &Path, session_id: &str, rotate_bytes: u64) -> Result<Self> {
         std::fs::create_dir_all(dir)
             .with_context(|| format!("failed to create {}", dir.display()))?;
         let path = dir.join(format!("{session_id}.log"));
@@ -128,7 +124,7 @@ mod tests {
     #[test]
     fn append_and_tail_within_one_file() {
         let dir = temp_dir("plain");
-        let mut t = Transcript::open_with_limit(&dir, "ts-1", 1024).unwrap();
+        let mut t = Transcript::open(&dir, "ts-1", 1024).unwrap();
         t.append(b"hello ").unwrap();
         t.append(b"world").unwrap();
 
@@ -140,7 +136,7 @@ mod tests {
     #[test]
     fn rotation_keeps_disk_bounded_and_tail_spans_files() {
         let dir = temp_dir("rotate");
-        let mut t = Transcript::open_with_limit(&dir, "ts-1", 16).unwrap();
+        let mut t = Transcript::open(&dir, "ts-1", 16).unwrap();
         t.append(b"0123456789abcdef").unwrap(); // hits the cap → rotates
         t.append(b"GHIJ").unwrap();
 
@@ -161,7 +157,7 @@ mod tests {
     #[test]
     fn tiny_tail_trims_combined_read_to_max_bytes() {
         let dir = temp_dir("tiny");
-        let mut t = Transcript::open_with_limit(&dir, "ts-1", 4).unwrap();
+        let mut t = Transcript::open(&dir, "ts-1", 4).unwrap();
         t.append(b"12345").unwrap(); // rotated into .log.1
         t.append(b"6").unwrap();
 
@@ -173,7 +169,7 @@ mod tests {
     #[test]
     fn read_from_continues_across_a_rotation() {
         let dir = temp_dir("read-from");
-        let mut t = Transcript::open_with_limit(&dir, "ts-1", 16).unwrap();
+        let mut t = Transcript::open(&dir, "ts-1", 16).unwrap();
         t.append(b"0123456789abcdef").unwrap(); // hits the cap → rotates
         t.append(b"GHIJ").unwrap();
 
@@ -187,7 +183,7 @@ mod tests {
     #[test]
     fn read_from_a_rotated_away_offset_starts_at_the_oldest_byte_kept() {
         let dir = temp_dir("read-from-lost");
-        let mut t = Transcript::open_with_limit(&dir, "ts-1", 4).unwrap();
+        let mut t = Transcript::open(&dir, "ts-1", 4).unwrap();
         t.append(b"1234").unwrap(); // rotated into .log.1
         t.append(b"5678").unwrap(); // rotated again, dropping "1234"
         t.append(b"9").unwrap();
@@ -200,10 +196,10 @@ mod tests {
     fn reopen_resumes_existing_log() {
         let dir = temp_dir("reopen");
         {
-            let mut t = Transcript::open_with_limit(&dir, "ts-1", 1024).unwrap();
+            let mut t = Transcript::open(&dir, "ts-1", 1024).unwrap();
             t.append(b"before").unwrap();
         }
-        let mut t = Transcript::open_with_limit(&dir, "ts-1", 1024).unwrap();
+        let mut t = Transcript::open(&dir, "ts-1", 1024).unwrap();
         t.append(b" after").unwrap();
         assert_eq!(t.tail(1024).unwrap(), b"before after");
         std::fs::remove_dir_all(&dir).ok();
@@ -212,7 +208,7 @@ mod tests {
     #[test]
     fn remove_files_deletes_both() {
         let dir = temp_dir("remove");
-        let mut t = Transcript::open_with_limit(&dir, "ts-1", 4).unwrap();
+        let mut t = Transcript::open(&dir, "ts-1", 4).unwrap();
         t.append(b"12345").unwrap(); // rotated
         t.append(b"6").unwrap();
         drop(t);
