@@ -2,8 +2,9 @@
 import { describe, expect, test } from 'bun:test'
 
 import { history, undoDepth } from 'prosemirror-history'
-import type { Node as PMNode } from 'prosemirror-model'
-import { EditorState } from 'prosemirror-state'
+import { type Node as PMNode, Slice } from 'prosemirror-model'
+import { EditorState, type Transaction } from 'prosemirror-state'
+import type { EditorView } from 'prosemirror-view'
 
 import { EMPTY_DOC } from '../../body/index.ts'
 import { docFromJSON } from './create-editor.ts'
@@ -138,6 +139,72 @@ describe('upload state machine + appendTransaction swap', () => {
     expect(entry?.status).toBe('done')
     expect(entry?.doneUrl).toBe('/api/assets/a.png')
     expect(imageNodes(s2.doc)).toHaveLength(0)
+  })
+})
+
+// 破棄済みの EditorView への dispatch は updateState の中で throw する。
+function destroyableView(state: EditorState) {
+  const view = {
+    state,
+    isDestroyed: false,
+    dispatchedAfterDestroy: 0,
+    dispatch(tr: Transaction) {
+      if (view.isDestroyed) view.dispatchedAfterDestroy++
+      else view.state = view.state.apply(tr)
+    },
+  }
+  return view
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((r) => {
+    resolve = r
+  })
+  return { promise, resolve }
+}
+
+describe('エディタが破棄された後の完了', () => {
+  test('upload が済む前に破棄されたら、完了を dispatch しない', async () => {
+    const uploaded = deferred<{ url: string } | null>()
+    const plugin = imageUploadPlugin({ upload: () => uploaded.promise })
+    const view = destroyableView(
+      EditorState.create({ doc: docOf(createContainer(para())), plugins: [plugin] }),
+    )
+    const file = new File([new Uint8Array([1])], 'x.png', { type: 'image/png' })
+
+    plugin.props.handlePaste!.call(
+      plugin,
+      view as unknown as EditorView,
+      { clipboardData: { files: [file] } } as unknown as ClipboardEvent,
+      Slice.empty,
+    )
+    view.isDestroyed = true
+    uploaded.resolve({ url: '/api/assets/a.png' })
+    await Bun.sleep(0)
+
+    expect(view.dispatchedAfterDestroy).toBe(0)
+  })
+
+  test('外部画像の取り込みが済む前に破棄されたら、差し替えを dispatch しない', async () => {
+    const imported = deferred<{ url: string } | null>()
+    const plugin = imageUploadPlugin({
+      upload: async () => null,
+      importExternal: () => imported.promise,
+    })
+    const view = destroyableView(
+      EditorState.create({
+        doc: docOf(imageBlock(null, 'https://example.com/a.png')),
+        plugins: [plugin],
+      }),
+    )
+
+    plugin.spec.view!(view as unknown as EditorView)
+    view.isDestroyed = true
+    imported.resolve({ url: '/api/assets/a.png' })
+    await Bun.sleep(0)
+
+    expect(view.dispatchedAfterDestroy).toBe(0)
   })
 })
 

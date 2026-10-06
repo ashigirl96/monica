@@ -172,6 +172,8 @@ export function imageUploadPlugin(callbacks: ImageUploadCallbacks): Plugin<Image
 
   async function runUpload(view: EditorView, uploadId: string, file: File): Promise<void> {
     const result = await upload(file)
+    // 待つ間に別の Note へ移ると、エディタは破棄されていて dispatch が throw する。
+    if (view.isDestroyed) return
     const meta: ImageUploadMeta = result
       ? { type: 'done', uploadId, url: result.url }
       : { type: 'failed', uploadId }
@@ -249,7 +251,7 @@ export function imageUploadPlugin(callbacks: ImageUploadCallbacks): Plugin<Image
       const runImport = async (src: string): Promise<void> => {
         if (!importExternal) return
         const result = await importExternal(src)
-        if (!result) return // 失敗時は外部 URL のまま残す
+        if (!result || editorView.isDestroyed) return // 失敗時は外部 URL のまま残す
         const tr = editorView.state.tr
         let changed = false
         editorView.state.doc.descendants((node, pos) => {
