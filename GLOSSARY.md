@@ -93,7 +93,7 @@ _Avoid_: Execution（単独で使わない）, Job Run, Run（Task の語）, ti
 ### Note
 
 **Note**:
-本文を持つ 1 枚の文書。Daily・Essay・Repo Note・Scratch のどれか 1 つの種類に属し、種類も作った時点の論理日付も後から変えない。削除すると一覧・検索・参照から消えるが、削除した画面にいる間は取り消せる。
+本文を持つ 1 枚の文書。Daily・Essay・Repo Note・Scratch のどれか 1 つの種類に属し、種類も作った時点の論理日付も後から変えない。削除すると一覧と Note Mention の候補から消え、その Note を指す Note Mention と Synced Block には削除されたと出る。削除した画面にいる間は取り消せる。
 _Avoid_: memo, journal, page, document, ノート
 
 **Daily**:
@@ -118,6 +118,14 @@ _Avoid_: 日付（単独で使うと暦の日付と紛れる）, logical date
 **画像**:
 Note の本文に貼る画像。Note とは別に置き、本文から参照する。どの Note の本文からも参照されていない画像は、置いてから 2 日を過ぎると消える。削除した Note の本文からの参照も数える。
 _Avoid_: asset, attachment
+
+**Note Mention**:
+本文の文中に置き、Note を名指す印。参照先の今の名前（title・論理日付・Repo）で表示する。
+_Avoid_: Mention（単独で使わない）, wiki link, Note Link, backlink
+
+**Synced Block**:
+ある Note の block の並びを、別の場所に読み取り専用で映す block。映した側は元の今の中身を表示し、編集は元の Note でだけ行う。同じ Note の block も映せる。元の block が消えると、消えたと出る。
+_Avoid_: transclusion, mirror, embed
 
 ### Process
 
