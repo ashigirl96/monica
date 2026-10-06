@@ -29,7 +29,10 @@ Terminal Session の出力の正本は transcript にする。接続ごとの送
 - 遅れている間も、その接続の request には応答が返る。live の出力がキューの 224 で止まり、応答と Exit の席が残るため。
 - 遅れたまま detach して attach し直すと、replay から始まり、古い範囲は送り直さない。attach は (Terminal Session, 接続) を live に戻す。
 - ptyd の log に、接続が Terminal Session で遅れ始めたことと、追いついたこと（遅れていた時間）が出る。同じことが起きたときに時刻を追えるようにするため。
-- transcript の保持（1〜2MB）を超えて遅れると、保持から落ちた分は届かない。ptyd は失ったバイト数を log に出し、残っている最古の位置から続ける。
+- transcript の保持（1〜2MB）を超えて遅れると、保持から落ちた分は届かない。ptyd は失ったバイト数を log に出し、残っている最古の位置から続ける。続きの前と、追いついて live に戻るか Exit を送る前に、端末のモードを戻す。落ちた分に alt screen への出入り、マウスの報告、bracketed paste、kitty keyboard の push などがあっても、webview の xterm のモードが ptyd の追うモードからずれないようにするため。範囲を失っていない追いつきには送らない。
+- 戻しは 2 回に分ける。続きの先頭では buffer だけを合わせる。続きの出力がどちらの buffer に描かれるかは、そこで決まるため。接続の xterm が alt screen にいれば、kitty keyboard の stack を空にして抜け、main の stack も空にする。続きが alt screen で始まるなら入る。ほかのモードは、追いついて live に戻るか Exit を送る直前に、ptyd が追う今のモードをすべて言い直す。既定値のモードも言い、kitty keyboard の stack は空にしてから積み直す。続きの中のモードの切り替えを見なくても、今の状態に揃う。
+- attach の replay の戻しを使わないのは、それが開いたばかりの端末を前提に、既定値と違うモードしか言わず、kitty keyboard の stack を積み足すため。落ちた分で app が alt screen を抜けていても xterm は抜けず、push は二重に積まれ、続きにある pop は外側の entry まで消しうる。xterm 6.1 は kitty keyboard の stack を buffer ごとに持ち、今いる buffer の stack しか pop しない。alt screen にいる xterm に `?1049h` を送り直すと、flags を buffer の間で入れ替えてしまう。そのため alt screen にいたままでも、一度抜けてから入り直す。
+- 接続の xterm がどの buffer にいるかは、遅れ始めた位置の buffer を覚え、追いつきで送ったものを追って知る。ptyd の alt screen の履歴には件数の上限（256）があり、遅れている間に切り替えが多いと、遅れ始めた位置まで遡れないため。続きがどちらの buffer で始まるかはその履歴から引くので、残っている続きに上限を超える切り替えがあると、続きの最初の切り替えまでの出力は違う buffer に描かれうる。attach の replay と同じ制限で、最初の切り替えから後は正しい buffer に戻る。
 - 遅れている間にその Terminal Session の shell が終わると、ptyd はまだ送っていない分を transcript からメモリに写し、追いつきでそれを送り切ってから Exit を送る。Exit を受けた Backend はすぐ Reap で transcript を消すので、写さなければ後から読めないため。写しは (Terminal Session, 接続) ごとに持ち、大きさは transcript の保持（1〜2MB）を超えない。Exit を積むか接続が切れるまで残る。
 - 終わったときにキューが満杯で Exit を積めなかった接続には、キューが掃けた後の追いつきで Exit を送る。どの接続でも、Exit はその Terminal Session の出力の後に届き、Exit の後にその Terminal Session の出力は届かない。
 - ptyd が接続を外すのは、socket の EOF と、応答をキューに積めなかったときだけになる。後者は、相手が読まずに 30 を超える request を送り続けたときにしか起きない。

@@ -7,7 +7,10 @@
 //!   back that session's live output and later sends what the connection missed from the
 //!   transcript, in order and without a gap or a duplicate, before it goes live again. The
 //!   connection only sees the output arrive late. The exception is output the transcript no
-//!   longer holds (rotated out, or never written), which is lost and logged.
+//!   longer holds (rotated out, or never written), which is lost and logged. When rotated-out
+//!   output is lost, what the transcript still holds arrives in the buffer the session was in
+//!   there, and the connection is told all of the session's terminal modes before it goes live
+//!   again or gets the Exit, so its terminal is not left in a mode the lost output switched.
 //! - `Exit` events broadcast to every connection regardless of attachments, so a detached
 //!   session's exit still reaches the app for DB recording + reap. Receivers ignore exits
 //!   for sessions they don't know.
