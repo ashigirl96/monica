@@ -34,14 +34,17 @@ export function usableServerDoc(note: Note | undefined, baseUpdatedAt: Date | nu
 
 /**
  * 開いた画面に出す note。未保存の編集は autosave にしか無いので、cache の本文より優先する。
- * そのときは cache の本文を使わないので、cache が基準版より古くても開ける。
+ * その本文は基準版に積んだものなので版も基準版のままにし、cache に外の新しい版が入っていても
+ * 基準版を進めない（進めると、保存が外の変更を競合なしで上書きする）。
  */
 export function noteToOpen(
   data: Note,
   baseUpdatedAt: Date | null,
   unsaved: Doc | null,
 ): Note | null {
-  if (unsaved !== null) return { ...data, content: unsaved }
+  if (unsaved !== null && baseUpdatedAt !== null) {
+    return { ...data, content: unsaved, updatedAt: baseUpdatedAt }
+  }
   return usableServerDoc(data, baseUpdatedAt)
 }
 

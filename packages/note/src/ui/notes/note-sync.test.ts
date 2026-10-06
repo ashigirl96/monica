@@ -134,7 +134,15 @@ describe('noteToOpen', () => {
   })
 
   test('cache が基準版より古くても、未保存の編集があればそれで開く', () => {
-    expect(noteToOpen(note(V1), V2, edited)).toEqual({ ...note(V1), content: edited })
+    expect(noteToOpen(note(V1), V2, edited)).toEqual({
+      ...note(V1),
+      content: edited,
+      updatedAt: V2,
+    })
+  })
+
+  test('cache に外から新しい版が入っていても、未保存の編集は基準版のまま開き、競合を保存に拾わせる', () => {
+    expect(noteToOpen(note(V3), V2, edited)?.updatedAt).toEqual(V2)
   })
 
   test('未保存の編集が無ければ、使える cache をそのまま開き、1 世代古い cache では開かない', () => {
