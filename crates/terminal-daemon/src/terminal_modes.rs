@@ -90,8 +90,10 @@ struct KittyBuffer {
     /// What a switch into this buffer puts in force.
     saved_flags: u32,
     /// A stack cannot be rebuilt from a suffix, so a restore needs to know whether the replay
-    /// tail touches this buffer's state at all rather than just where it ended up.
-    touched: bool,
+    /// tail pushes or pops here at all rather than just where the stack ended up.
+    stack_touched: bool,
+    /// Whether the replay tail changes the flags in force here without touching the stack.
+    flags_touched: bool,
 }
 
 /// xterm's kitty keyboard state. A push saves the flags in force onto the stack of the buffer
@@ -116,7 +118,7 @@ impl KittyKeyboard {
     fn push(&mut self, alt: bool, flags: u32) {
         let in_force = self.flags;
         let buffer = self.buffer_mut(alt);
-        buffer.touched = true;
+        buffer.stack_touched = true;
         if buffer.stack.len() < MAX_KITTY_STACK {
             buffer.stack.push(in_force);
             self.flags = flags;
@@ -125,7 +127,7 @@ impl KittyKeyboard {
 
     fn pop(&mut self, alt: bool, count: u32) {
         let buffer = self.buffer_mut(alt);
-        buffer.touched = true;
+        buffer.stack_touched = true;
         let keep = buffer.stack.len().saturating_sub(count.max(1) as usize);
         // xterm puts the last entry popped back in force, but 0 once the stack is empty,
         // whatever that entry held.
@@ -136,17 +138,17 @@ impl KittyKeyboard {
 
     /// Modes 2 and 3 (or, and-not) are taken as mode 1.
     fn set(&mut self, alt: bool, flags: u32) {
-        self.buffer_mut(alt).touched = true;
+        self.buffer_mut(alt).flags_touched = true;
         self.flags = flags;
     }
 
     /// xterm swaps even on a switch into the buffer already in use, which hands that buffer
-    /// whatever flags were saved for it last, so such a switch counts as touching it.
+    /// whatever flags were saved for it last, so such a switch counts as changing its flags.
     fn switch_buffer(&mut self, from_alt: bool, to_alt: bool) {
         self.buffer_mut(!to_alt).saved_flags = self.flags;
         let to = self.buffer_mut(to_alt);
         if from_alt == to_alt {
-            to.touched = true;
+            to.flags_touched = true;
         }
         self.flags = to.saved_flags;
     }
@@ -343,8 +345,9 @@ impl TerminalModes {
     /// shell's scrollback, and prepending the current state would drop the tail's leading
     /// normal-buffer history into the alt buffer.
     ///
-    /// The kitty keyboard state is prepended for that starting buffer alone, and only if the
-    /// tail never changes it there; the other buffer's is left out (see the module doc).
+    /// The kitty keyboard stack is prepended for that starting buffer alone, and only if the
+    /// tail never pushes or pops there; its flags too, unless the tail changes them itself. The
+    /// other buffer's state is left out (see the module doc).
     ///
     /// `tail` must be a suffix of what has been fed, which is what `attach` hands over.
     pub fn restore_prefix(&self, tail: &[u8]) -> Vec<u8> {
@@ -377,8 +380,16 @@ impl TerminalModes {
         if in_tail.mouse_encoding == Exclusive::Unobserved {
             push_exclusive(&mut out, self.mouse_encoding, MOUSE_ENCODINGS[0]);
         }
-        if !in_tail.kitty.buffer(boundary_in_alt).touched {
+        let in_tail_kitty = in_tail.kitty.buffer(boundary_in_alt);
+        if !in_tail_kitty.stack_touched {
             let (stack, flags) = self.kitty_state_of(boundary_in_alt);
+            // The tail puts its own flags in force, and a switch in it would carry whatever
+            // was in force before into the other buffer's saved slot, so nothing is.
+            let flags = if in_tail_kitty.flags_touched {
+                0
+            } else {
+                flags
+            };
             push_kitty_state(&mut out, stack, flags);
         }
         out
@@ -791,17 +802,32 @@ mod tests {
         );
     }
 
-    /// Counted like a push, since it changes the flags the alt buffer has in force.
+    /// The switch hands the alt buffer flags saved before the boundary, which a fresh client
+    /// never saved, so only the stack below them is the prefix's to carry.
     #[test]
-    fn a_redundant_alt_screen_set_in_the_tail_leaves_the_alt_stack_to_the_tail() {
+    fn a_redundant_alt_screen_set_in_the_tail_keeps_the_alt_stack_but_not_its_flags() {
         assert_eq!(
             restore_with_tail(b"\x1b[?1049h\x1b[>1u", b"frame\x1b[?1049hredrawn"),
-            b"\x1b[?1049h"
+            b"\x1b[?1049h\x1b[>0u"
         );
         // Also when it repeats a switch made earlier in the same sequence.
         assert_eq!(
             restore_with_tail(b"\x1b[?1049h\x1b[>1u", b"\x1b[?1049l\x1b[?1049;1049h"),
-            b"\x1b[?1049h"
+            b"\x1b[?1049h\x1b[>0u"
+        );
+    }
+
+    /// Changing the flags in force leaves the stack under them, which a later pop brings back
+    /// into force.
+    #[test]
+    fn a_tail_that_only_changes_the_kitty_flags_still_gets_the_stack() {
+        assert_eq!(
+            restore_with_tail(b"\x1b[>5u\x1b[>1u", b"$ \x1b[?1049l$ "),
+            b"\x1b[>5u\x1b[>0u"
+        );
+        assert_eq!(
+            restore_with_tail(b"\x1b[>5u\x1b[>1u", b"\x1b[=3u"),
+            b"\x1b[>5u\x1b[>0u"
         );
     }
 
