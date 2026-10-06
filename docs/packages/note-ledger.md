@@ -22,7 +22,7 @@ repoNote.create  { repo } → Note
 - `date` は Logical Date の `YYYY-MM-DD`。Daily はその Daily の日付、ほかは作った時点の Logical Date で、後から変えない。
 - `repo` は `owner/repo` の形だけを確かめ、ghq も GitHub も引かない。書いた時点の綴りで持ち、比べるときは大文字と小文字を区別しない（task の `copy.ts` と同じ）。
 - 時刻は他の domain と同じく `z.date()` で出す。
-- router は CLI に出さない。meta の型が `cli` を持たないので、`cli: true` を付けると型で落ちる。router を notes の口（ADR-0017）に載せるのは後続の issue で、今はどの口にも載せない。
+- router は CLI に出さず、notes の口（ADR-0017、`docs/packages/backend.md` の「notes の口」）にだけ載せる。meta の型が `cli` を持たないので、`cli: true` を付けると型で落ちる。
 - change stream は持たない。notes の画面は focus のたびに取り直す（ADR-0018）。タブごとに stream を張ると、Chromium の host ごとの接続数の上限（6 本）に当たる。
 - `.errors()` で宣言するのは、画面が分岐する保存の `CONFLICT` だけ。ほかは `NOT_FOUND`（無い id と削除した Note）と `BAD_REQUEST`（形の違う入力と、種類に合わない操作）。
 

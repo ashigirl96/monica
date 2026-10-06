@@ -24,7 +24,7 @@ review で差分に当てる規則。どれも判断が要るもので、決定�
 
 ## テスト
 
-- DB は fake にせず、in-memory の SQLite に migration を当てる。外から見える振る舞いは `createRouterClient` を通して確かめる。ptyd と CLI の seam、procedure に出ない行の確かめ方も同じ節にある（`docs/packages.md` の「テスト」）。
+- DB は fake にせず、in-memory の SQLite に migration を当てる。外から見える振る舞いは `createRouterClient` を通して確かめる。ptyd と CLI の seam は同じ節から辿り、procedure に出ない行の確かめ方は同じ節にある（`docs/packages.md` の「テスト」）。
 - 外のサービスの fake（GitHub、ghq、ptyd）は、本物が引数で変える振る舞い（GraphQL の `states` や `includeClosedPrs` など）も再現する。引数を見ない fake では、query から引数を落としてもテストが通る。
 
 ## 語
