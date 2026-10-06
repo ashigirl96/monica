@@ -90,8 +90,13 @@ node の type の出現回数（括弧は含む note 数）: paragraph 1512 (135
 - 作成と更新は UTC の ISO 文字列。`updated_at` を進めるのは本文の更新と essay の status だけで、削除と復元は進めない。
 - 削除は soft delete（`deleted_at`）で、物理削除するコードは無い。復元を呼ぶのは project と essay の画面の ⌥Z（画面のメモリにある stack で、reload で消える）と primary note の get-or-create だけで、削除済みを一覧する画面も API も無い。daily と primary note は画面から削除できない（primary を断るのは画面だけで、サーバーは拒まない）。削除済み 21 件のうち 6 件は作成から 1 日以上経ってから消されている。
 - 並び順の列は無い。daily と project は `date DESC, rowid DESC`、essay は `created_at DESC`、検索は `updated_at DESC`。
-- 全文検索は fts5 の trigram で、本文の plain text を同じ transaction で書く。3 文字未満は LIKE。最大 50 件。
-- markdown は保存形式ではなく派生物。`note_markdown.rs`（doc → markdown、noteMention は `[[note-7|表示名]]`、syncedBlock は `![[note-7#^blk]]`）と `note_markdown_import.rs`（markdown → doc、block id は振らない）。synced block の展開は深さ 8 まで、循環は打ち切る。
+- 全文検索は fts5 の trigram で、本文の plain text を同じ transaction で書く（DELETE してから INSERT、rowid は `note-N` の N）。soft delete と restore は fts の行に触れず、検索が `deleted_at IS NULL` で外す。3 codepoint 未満は `body LIKE`。どちらも title・project_id・date の LIKE と OR でつなぎ、`updated_at DESC` で並べる。snippet は返さない（`crates/monica-storage-sqlite/src/store/notes.rs:79-97, 350-393`）。
+- **全文検索を呼ぶのは CLI の `monica note search`（50 件）だけで、HTTP の route は無い。** web の `[[` の候補検索（`GET /api/notes/mentions?q=`）は同じ検索を粗い絞り込みに使い（q が空なら 20 件、あれば 200 件）、facade が表示名か preview の部分一致で 20 件に絞る。本文の 2 行目以降だけに当たる note は候補に出ない（`crates/monica-application/src/facade/notes.rs:110-123`、テスト `crates/monica-web/src/lib.rs:1864`）。
+- plain text（`crates/monica-domain/src/note_doc.rs:396-416, 477-534`）は blockContainer ごとに 1 行で、text・codeBlock・表のセル・linkMention と bookmark の title（無ければ href）を含み、noteMention は表示名ではなく note id を入れる。syncedBlock・image・mark は含めない。preview は最初の空でない block の text を 200 文字までにしたもので、plain text の部分文字列になるように揃えてある。一覧（essays・by-project・mentions）は content を返さず preview を返すが、store は行ごとに content 全体を SELECT して parse している（`store/notes.rs:67-77`）。
+- markdown は保存形式ではなく派生物。`note_markdown.rs`（doc → markdown、532 行、noteMention は `[[note-7|表示名]]`、syncedBlock は `![[note-7#^blk]]`）と `note_markdown_import.rs`（markdown → doc、819 行、block id は振らない）。どちらも外部 crate を使わない自作で失敗しない。toggle は import すると quote になり、bookmark と linkMention は link mark になる（往復しない）。テストは `crates/monica-domain/tests/` に 47 本あり、fixture（全 node 型の `full-doc.json`、未知の node・inline・mark を 1 つずつ持つ `unknown-nodes.json`）と golden の markdown は JSON と文字列なので他の言語のテストに移せる。
+- synced block の展開は深さ 8 まで、循環は (note, block) の visited で打ち切る。これを使うのは CLI の `--expand` と、web が呼ばない `GET /api/notes/{id}?format=markdown&expand=synced` だけ。web の synced block は `GET /api/notes/{id}/blocks/{block_id}` で 1 段だけ取り、入れ子は「Nested synced block」の placeholder にする（`shared/block-editor/synced-block.ts:30-31, 76`）。
+- 不変条件はほとんど store の SQL にある。daily の get-or-create（`Immediate` の transaction で最古を返す、`store/notes.rs:189-214`）、primary note の get-or-create と復元（`:225-290`）、楽観ロック（`AND (?4 IS NULL OR updated_at = ?4)`、0 行なら同じ transaction で Stale と Missing を見分ける、`:413-458`）、`updated_at` を進める `SET_NOW`、id の採番（`note_counter`）。primary note の title の固定と削除の禁止は web にしか無い。
+- 表示名の規則が 2 か所にある。domain の `display_name`（`crates/monica-domain/src/note.rs:110-118`、mention と markdown が使う）と、web の一覧の見出しの `web/src/notes/summary.ts:5-19`（title、無ければ preview、無ければ `Untitled`）。title の無い project note は前者で project_id、後者で preview か `Untitled` になる。
 
 ## project との紐づけ
 
@@ -108,6 +113,16 @@ node の type の出現回数（括弧は含む note 数）: paragraph 1512 (135
 - `POST /api/assets`（生のバイト列 → `{ id, url }`）、`POST /api/assets/import`（外部 URL を取ってきて保存。10 秒で打ち切る）、`GET /api/assets/{id}`（`cache-control: immutable`）。
 - note と asset の対応表は無い。GC は desktop の起動 10 分後と以後 24 時間ごとに走り、全 note（削除済みを含む）の本文に `/api/assets/` で始まる文字列として現れず、mtime から 48 時間以上経ったファイルを消す（`crates/monica-runtime/src/asset_gc.rs`、`crates/monica-adapters/src/assets/gc.rs`）。
 - エディタは貼り付けとドロップで `src: null, uploadId` の node を先に入れ、upload が済むと src を差し替える（undo の履歴に入れない）。外部 HTML の `<img>` は `/api/assets/import` でローカルに取り込み、失敗すれば外部 URL のまま残す。
+- upload は Content-Type を見ず、バイト列を再 encode せずに書く。magic bytes が合わなければ 415、20MB を超えれば 413、成功は 201。import は http/https だけを受け、chunk ごとに数えて 20MB で 413、取得の失敗は 502。status は見ないが、HTML のエラー頁は magic bytes で 415 になる。どちらも行き先の host や IP は制限しない（`crates/monica-adapters/src/assets/mod.rs:92-201`）。
+- GET は id を小文字の UUID と 4 つの拡張子で厳密に照合し、合わなければファイルが無いときと同じ 404。ETag は付けず、ファイル全体をメモリに読む（`crates/monica-web/src/lib.rs:696-715`）。
+- GC は note の JSON を node の型を問わずに走査し、`/api/assets/` で始まる文字列値だけを参照として数える。`http://monica.localhost:19280/api/assets/...` のような絶対 URL は数えない。asset id の形をしたファイル名だけを消し、mtime が読めないものと未来のものは残す（`crates/monica-adapters/src/assets/gc.rs:15-91`）。
+
+## OGP（linkMention と bookmark）
+
+- `crates/monica-adapters/src/ogp/mod.rs`（本体 149 行）。reqwest と scraper で、timeout は 10 秒、HTML は 1MB で切り詰めてそのまま parse する。content-type が無いか `html` を含むときだけ本文を読む。
+- response の status を見ないので、404 の頁でもその HTML から値を取る。redirect は reqwest の既定（10 回）で追い、相対 URL の基準は最後の URL。User-Agent は送らない。cache は server にも client にも無い。行き先の制限は scheme（http/https）だけ。
+- 取る項目は title（`og:title`、無ければ `<title>`）、description（`og:description`、無ければ `meta name=description`）、image（`og:image` を絶対 URL に）、site_name、favicon（`rel` に icon を含む最初の `link`、無ければ `/favicon.ico`）。
+- 取った値は貼り付けた時点で本文の attrs に入る。linkMention は `{href, title, favicon}`、bookmark は `{href, title, description, thumbnail, favicon, siteName}`。href は貼った URL のままで、画像は外部 URL を直に参照する（`shared/block-editor/link-menu.ts:80-96, 240-250`）。失敗すると web は普通のリンクに戻す。
 
 ## エディタ（`shared/block-editor`）
 
@@ -200,7 +215,19 @@ node の type の出現回数（括弧は含む note 数）: paragraph 1512 (135
 
 HTTP（`crates/monica-web/src/lib.rs:732-758`）: `GET /api/notes/by-project`、`GET /api/notes/daily-counts`、`PUT /api/notes/daily/{date}`、`GET|POST /api/notes/essays`、`POST /api/notes/project`、`PUT /api/notes/project/primary`、`POST /api/notes/from-markdown`、`POST /api/notes/markdown`、`GET /api/notes/mentions`、`GET /api/notes/mentions/{id}`、`GET /api/notes/today`、`GET|PUT|DELETE /api/notes/{id}`、`PUT /api/notes/{id}/status`、`POST /api/notes/{id}/restore`、`GET /api/notes/{id}/blocks/{block_id}`、`GET /api/ogp`、`GET|PUT /api/settings/notes`、assets の 3 本。
 
-CLI（`crates/monica-cli/src/note.rs`）: `monica note show <id> [--format md|json] [--expand]` と `monica note search <query>`。tania では最初は持ち込まない（map の決定）。
+CLI（`crates/monica-cli/src/note.rs`）: `monica note show <id> [--format md|json] [--expand]` と `monica note search <query>`。tania では最初は持ち込まない（map の決定）。CLI は HTTP を経由せず facade を直に呼ぶ。
+
+contract の正は Rust の DTO（`crates/monica-api/src/note.rs`）で、`web/src/types.gen.ts` は specta で生成している。エラーの body は `{code, message}` で、NotFound と Validation（不正な id を含む）が 404、Conflict が 409。web の `ApiError` は status しか見ない。
+
+- `PUT /api/notes/{id}`: body は `{content, title?, expected_updated_at?}`、成功は `{updated_at}` だけ。`expected_updated_at` を省くと無条件に上書きする。title は essay と project のときだけ書き、余計な field は黙って無視する。
+- `GET /api/notes/by-project?project_id=&offset=`: offset 方式で 1 頁 100 件、101 件取って `has_more` を出す。web は読み込み済みの件数を次の offset にする。
+- `PUT /api/notes/daily/{date}` と `PUT /api/notes/project/primary`: get-or-create で、作っても 200。daily の画面は focus のたびに呼ぶ。
+- `PUT /api/notes/{id}/status`: 値を渡す set で、essay 以外は 409。返す `next_status` は DTO だけが足す導出値。
+- `POST /api/notes/{id}/restore`: 削除されていない note にも 200 を返す。
+- `GET /api/notes/today`: web は staleTime を ∞ にしていて取り直さない（`web/src/notes/queries.ts:44-53`）。
+- `GET /api/notes/daily-counts`: web は `?kind=daily` だけで呼び、from と to はテストだけが使う。
+
+エディタの props が呼ぶ route（`web/src/notes/editor-support.ts`）: `fetchLinkMetadata` → `GET /api/ogp`、`searchNoteMentions` → `GET /api/notes/mentions?q=`（debounce なし）、`resolveNoteMention` → `GET /api/notes/mentions/{id}`（開いている note の間だけ cache）、`resolveBlock` → `GET /api/notes/{id}/blocks/{block_id}`（未保存を flush してから取る）、`renderMarkdown` → `POST /api/notes/markdown`（copy に備え、選択が変わるたびに 150ms の debounce で先読みし、16 件を cache する。`expand` は送らない、`shared/block-editor/clipboard.ts:437-520`）、`parseMarkdown` → `POST /api/notes/from-markdown`（text/plain だけの paste）、`uploadImage` → `POST /api/assets`、`importExternalImage` → `POST /api/assets/import`。
 
 ## 設定
 
