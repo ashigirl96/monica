@@ -230,6 +230,20 @@ test('a backslash in code before a pipe in a table cell does not split the cell'
   expect(read?.content?.map((row) => row.content?.length)).toEqual([2, 2])
 })
 
+test('a delimiter in code does not pair with the one outside, and one in a link does', () => {
+  const code = doc(block('paragraph', [text('a*'), text('b*c', { type: 'code' })]))
+  const link = doc(
+    block('paragraph', [
+      text('*a '),
+      text('x', { type: 'link', attrs: { href: 'https://example.com/*b' } }),
+    ]),
+  )
+
+  expect(toMarkdown(code)).toBe('a*`b*c`')
+  expect(readBack(code)).toEqual(code)
+  expect(readBack(link)).toEqual(link)
+})
+
 test('ordinary sentences that read as no syntax are written without backslashes', () => {
   const sentences = [
     'snake_case',

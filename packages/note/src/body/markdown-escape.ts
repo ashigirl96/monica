@@ -1,8 +1,11 @@
 import { isDelimiterLine, opensBlockAt } from './from-markdown.ts'
 import { isAlphanumeric, isAsciiPunctuation, isSpace } from './text.ts'
 
-/** 書き出す文字列の断片。mark の記号・href・code の中身のように構文として書いた文字は `plain` でなく、escape しない。 */
-export type Piece = { text: string; plain: boolean }
+/**
+ * 書き出す文字列の断片。escape するのは `plain`（本文の素の文字）だけで、`syntax`（mark の記号や href）と
+ * `code`（backtick で包んだ code span）はそのまま書く。
+ */
+export type Piece = { text: string; kind: 'plain' | 'syntax' | 'code' }
 
 /**
  * fromMarkdown が行頭をどう読むか。
@@ -17,14 +20,14 @@ export type LineStart =
   | { kind: 'inline' }
   | { kind: 'cell' }
 
-type Glyph = { char: string; plain: boolean; escaped: boolean }
+type Glyph = { char: string; kind: Piece['kind']; escaped: boolean }
 
 const EMPHASIS = ['*', '~', '_']
 
 /** 素の文字のうち、fromMarkdown がその位置で構文として読むものだけを backslash で escape してつなぐ。 */
 export function writeEscaped(pieces: Piece[], lineStart: LineStart): string {
   const glyphs = pieces.flatMap((piece) =>
-    Array.from(piece.text, (char) => ({ char, plain: piece.plain, escaped: false })),
+    Array.from(piece.text, (char) => ({ char, kind: piece.kind, escaped: false })),
   )
   if (lineStart.kind === 'cell') return writeCell(glyphs)
   const lines = splitLines(glyphs)
@@ -49,11 +52,14 @@ function writeCell(glyphs: Glyph[]): string {
 
 function escapeInline(line: Glyph[]): void {
   // 強調は同じ行の中の同じ記号と対になるので、行に 1 つしか無い記号は開きも閉じもしない（`~/.claude`・`2*3`）。
+  // code span の中は閉じ記号を探すときに飛ばされるので数えない。
   const paired = new Set(
-    EMPHASIS.filter((char) => line.filter((glyph) => glyph.char === char).length > 1),
+    EMPHASIS.filter(
+      (char) => line.filter((glyph) => glyph.kind !== 'code' && glyph.char === char).length > 1,
+    ),
   )
   line.forEach((glyph, index) => {
-    if (glyph.plain && isInlineSyntax(line, index, paired)) glyph.escaped = true
+    if (glyph.kind === 'plain' && isInlineSyntax(line, index, paired)) glyph.escaped = true
   })
 }
 
@@ -122,7 +128,7 @@ function escapeLineStarts(lines: Glyph[][], lineStart: LineStart): void {
 // block の構文の印は、どれも行頭から続く素の文字の中にある。
 function escapeLeading(line: Glyph[]): boolean {
   for (const glyph of line) {
-    if (!glyph.plain) return false
+    if (glyph.kind !== 'plain') return false
     if (!glyph.escaped && isAsciiPunctuation(glyph.char)) {
       glyph.escaped = true
       return true

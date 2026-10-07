@@ -226,11 +226,11 @@ function syncedReference(noteId: string, blockIds: string[]): string {
 }
 
 function plain(text: string): Piece {
-  return { text, plain: true }
+  return { text, kind: 'plain' }
 }
 
 function syntax(text: string): Piece {
-  return { text, plain: false }
+  return { text, kind: 'syntax' }
 }
 
 function renderInlines(inlines: unknown[], noteName: NoteName): Piece[] {
@@ -312,7 +312,7 @@ function applyMarks(base: Piece[], marks: unknown): Piece[] {
     }
   }
   let pieces = base
-  if (code) pieces = [syntax(codeSpan(pieces.map((piece) => piece.text).join('')))]
+  if (code) pieces = [{ text: codeSpan(pieces.map((piece) => piece.text).join('')), kind: 'code' }]
   if (italic) pieces = wrap('*', pieces, '*')
   if (bold) pieces = wrap('**', pieces, '**')
   if (underline) pieces = wrap('<u>', pieces, '</u>')
