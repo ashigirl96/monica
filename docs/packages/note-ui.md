@@ -74,8 +74,8 @@ monica の `shared/block-editor` を `src/ui/editor/` に振る舞いを変え�
 - `bun test` のままで、DOM の環境は入れない。`EditorState` だけで回し、`EditorView` は型キャストした最小のモックで代える。
 - monica のテスト 11 本と `test-fixtures.ts` を移してあり、回帰の網にする。
 - 保存済みの本文を開けることは、`src/body/fixtures/full-doc.json`（全 node 型を持つ）を `docFromJSON` に通し、block がすべて残ることで確かめる。
-- markdown の copy と paste は、copy の handler・`clipboardTextSerializer`・`handlePaste` を最小のモックの view で呼んで確かめる。block 選択の copy は text/html を `document` で組むので、そのテストの間だけ組めるだけの偽の `document` を置く。
-- paste の menu が開いたままかは、`test-fixtures.ts` の `paste` で `handlePaste` を呼んで確かめる。state には menu の plugin と一緒に normalizer を登録する。登録しないと id を振る transaction が走らず、menu を閉じる経路を通らない。
+- markdown の copy と paste は、copy の handler・`clipboardTextSerializer`・`handlePaste` を最小のモックの view で呼んで確かめる。`handlePaste` は `test-fixtures.ts` の `paste` で呼ぶ。dispatch を `state.apply` で当てるので、state に登録した plugin の `appendTransaction` も同じ dispatch で走る。block 選択の copy は text/html を `document` で組むので、そのテストの間だけ組めるだけの偽の `document` を置く。
+- paste の menu が開いたままかを確かめる state には、menu の plugin と一緒に normalizer を登録する。登録しないと id を振る transaction が走らず、menu を閉じる経路を通らない。
 - `src/body/fixtures/unknown-nodes.json` はエディタのテストに使わない。server が知らない node を読み飛ばすことを確かめる fixture で、schema に無い node（`aiHint`・`chart`）と mark（`highlight`）を持つので、エディタでは monica と同じく空の doc になる。monica の本文に出てくる node と mark は、どれも schema にある。
 
 ## 画面
