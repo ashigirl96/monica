@@ -1,6 +1,6 @@
 import { homedir } from 'node:os'
 
-import { implement, ORPCError } from '@orpc/server'
+import { implement } from '@orpc/server'
 import { eq, getTableColumns, inArray, isNotNull, or } from 'drizzle-orm'
 
 import { listAgentSessions, markSeenIfUnread, recordHook } from './agent-session.ts'
@@ -15,7 +15,6 @@ import {
   openTab,
   pinTab,
   readLayout,
-  reattachTab,
   refuseRemoving,
   removeRunspace,
   respawnTab,
@@ -45,21 +44,6 @@ export const router = os.router({
         .orderBy(terminalSession.createdAt)
         .all(),
     ),
-    terminate: os.terminalSession.terminate.handler(({ context, input }) => {
-      const row = context.db
-        .select({ pinned: tab.pinned })
-        .from(terminalSession)
-        .leftJoin(tab, eq(tab.terminalSessionId, terminalSession.id))
-        .where(eq(terminalSession.id, input.id))
-        .get()
-      if (!row) throw new ORPCError('NOT_FOUND', { message: `no Terminal Session ${input.id}` })
-      if (row.pinned) {
-        throw new ORPCError('CONFLICT', {
-          message: `Terminal Session ${input.id} is in a pinned Tab`,
-        })
-      }
-      terminalSessionsOf(context.workbenchLedger).terminate([input.id])
-    }),
   },
   layout: {
     get: os.layout.get.handler(({ context }) => readLayout(context.db)),
@@ -88,17 +72,15 @@ export const router = os.router({
   },
   tab: {
     open: os.tab.open.handler(({ context, input }) => {
-      const { runspaceId, cwd, index, terminalSessionId, rows, cols } = input
+      const { runspaceId, cwd, index, rows, cols } = input
       return asTab(
         writeLayout(context, (tx) =>
-          terminalSessionId
-            ? reattachTab(tx, { runspaceId, cwd, index, terminalSessionId })
-            : openTab(tx, terminalSessionsOf(context.workbenchLedger), {
-                runspaceId,
-                cwd,
-                index,
-                size: { rows, cols },
-              }),
+          openTab(tx, terminalSessionsOf(context.workbenchLedger), {
+            runspaceId,
+            cwd,
+            index,
+            size: { rows, cols },
+          }),
         ),
       )
     }),
@@ -111,7 +93,9 @@ export const router = os.router({
       ),
     ),
     close: os.tab.close.handler(({ context, input }) =>
-      writeLayout(context, (tx) => closeTab(tx, input.id)),
+      writeLayout(context, (tx) =>
+        closeTab(tx, terminalSessionsOf(context.workbenchLedger), input.id),
+      ),
     ),
     move: os.tab.move.handler(({ context, input }) => {
       writeLayout(context, (tx) => moveTab(tx, input))

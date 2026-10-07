@@ -5,7 +5,7 @@ import { atomWithDefault } from 'jotai/utils'
 
 import type { contract, Layout, ListedAgentSession, RepoPlace, Tab } from '../contract.ts'
 import { agentDotOf } from './agent-dot.ts'
-import { jumpHintsActiveAtom } from './jump-hints.ts'
+import { jumpHintsActiveAtom, pendingCloseTabIdAtom } from './jump-hints.ts'
 import {
   type BenchLabelOf,
   buildSidebar,
@@ -19,14 +19,12 @@ import {
 import { getTabTerminal, releaseTabConnection } from './terminal-connections.ts'
 import {
   applyTerminalSessionListAtom,
-  detachedTerminalSessionsAtom,
   isDeadStatus,
   markEndedAtom,
   setTerminalSessionStatusAtom,
   type TerminalSessionStatusEntry,
   terminalSessionStatusAtom,
 } from './terminal-sessions.ts'
-import { terminalDetach } from './terminal.ts'
 import { collapsedSectionsAtom, savedUiStateAtom, tileChoiceAtom } from './ui-state.ts'
 
 export type WorkbenchClient = ContractRouterClient<typeof contract>
@@ -267,14 +265,12 @@ const placesAtom = atom<Record<string, RepoPlace>>({})
 const placesCheckedAtAtom = atom<Record<string, number>>({})
 const PLACE_RECHECK_MS = 5000
 
-// cwds を省けば、layout の Runspace と Tab の cwd と、Detached の cwd を引き直す。
+// cwds を省けば、layout の Runspace と Tab の cwd を引き直す。
 const resolvePlacesAtom = atom(null, async (get, set, cwds?: string[]) => {
   const checkedAt = get(placesCheckedAtAtom)
   const now = Date.now()
-  const candidates = cwds ?? [
-    ...(get(layoutAtom)?.runspaces ?? []).flatMap((r) => [r.cwd, ...r.tabs.map((t) => t.cwd)]),
-    ...get(detachedTerminalSessionsAtom).map((s) => s.cwd),
-  ]
+  const candidates =
+    cwds ?? (get(layoutAtom)?.runspaces ?? []).flatMap((r) => [r.cwd, ...r.tabs.map((t) => t.cwd)])
   const due = [...new Set(candidates)].filter(
     (cwd) => now - (checkedAt[cwd] ?? 0) >= PLACE_RECHECK_MS,
   )
@@ -321,7 +317,6 @@ export const sidebarAtom = atom((get): Sidebar =>
     places: get(placesAtom),
     unreadOf: get(unreadOfTerminalSessionAtom),
     benchLabelOf: get(benchLabelOfAtom) ?? (() => null),
-    detached: get(detachedTerminalSessionsAtom),
     tileChoice: get(tileChoiceAtom),
     collapsed: get(collapsedSectionsAtom),
   }),
@@ -408,11 +403,6 @@ function isGone(e: unknown): boolean {
   return typeof e === 'object' && e !== null && 'code' in e && e.code === 'NOT_FOUND'
 }
 
-function detachTab(tab: Tab) {
-  const terminalSessionId = releaseTabConnection(tab.id) ?? tab.terminalSessionId
-  terminalDetach(terminalSessionId).catch((e: unknown) => warnFailed('terminal detach', e))
-}
-
 const EXIT_POLL_MS = 50
 const EXIT_WAIT_MS = 3000
 
@@ -426,12 +416,8 @@ async function untilExitRecorded(get: Getter, terminalSessionId: string) {
   }
 }
 
-async function closeTab(
-  get: Getter,
-  set: Setter,
-  { runspace, tab }: TabInRunspace,
-  shell: 'kept' | 'ending',
-) {
+// Terminal Session の終了は Backend が tab.close の transaction の後に予約するので、webview からは頼まない（ADR-0023）。
+async function closeTab(get: Getter, set: Setter, { runspace, tab }: TabInRunspace) {
   // 空になったかは close の transaction で決まる。読み直した layout では、間に Tab を外へ移した分と区別できない。
   let emptiedRunspaceId: string | null = null
   try {
@@ -439,7 +425,7 @@ async function closeTab(
   } catch (e) {
     if (!isGone(e)) throw e
   }
-  if (shell === 'kept') detachTab(tab)
+  releaseTabConnection(tab.id)
   if (activeTabOf(get, runspace)?.id === tab.id) {
     const rest = runspace.tabs.filter((t) => t.id !== tab.id)
     const next = rest[Math.min(runspace.tabs.indexOf(tab), rest.length - 1)]
@@ -447,13 +433,29 @@ async function closeTab(
   }
   await set(reloadAtom)
   if (!emptiedRunspaceId) return
-  if (shell === 'ending') await untilExitRecorded(get, tab.terminalSessionId)
+  await untilExitRecorded(get, tab.terminalSessionId)
   get(lastTabClosedAtom)?.(emptiedRunspaceId)
 }
 
 export const closeTerminalTabAtom = action(async (get, set, tabId?: string) => {
   const found = tabId ? findTab(get, tabId) : frontTab(get)
-  if (found) await closeTab(get, set, found, 'kept')
+  if (found) await closeTab(get, set, found)
+})
+
+// d は c（新しい Tab）の隣のキーなので、claude の居る Tab は打ち損じで消さないよう 2 度目の d を待つ。
+export const closeTabFromJumpModeAtom = atom(null, (get, set): Promise<void> => {
+  const front = frontTab(get)
+  if (!front || front.tab.pinned) {
+    set(jumpHintsActiveAtom, false)
+    return Promise.resolve()
+  }
+  const asked = get(pendingCloseTabIdAtom) === front.tab.id
+  if (!asked && get(agentSessionByTerminalSessionAtom).has(front.tab.terminalSessionId)) {
+    set(pendingCloseTabIdAtom, front.tab.id)
+    return Promise.resolve()
+  }
+  set(jumpHintsActiveAtom, false)
+  return set(closeTerminalTabAtom, front.tab.id)
 })
 
 // 接続中の Tab は Exit で閉じるので、閉じ終わるまでの間も終わった印を出さない。
@@ -470,7 +472,6 @@ export const deadTabsAtom = atom((get) => {
   return dead
 })
 
-// Exit の後は止める出力が無いので、detach を送らずに閉じる。
 export const tabExitedAtom = action(
   async (get, set, tabId: string, terminalSessionId: string, exitCode: number | null) => {
     const found = findTab(get, tabId)
@@ -483,7 +484,7 @@ export const tabExitedAtom = action(
     if (found.tab.pinned) return
     set(closingTabIdsAtom, (prev) => new Set(prev).add(tabId))
     try {
-      await closeTab(get, set, found, 'ending')
+      await closeTab(get, set, found)
     } finally {
       set(closingTabIdsAtom, (prev) => new Set([...prev].filter((id) => id !== tabId)))
     }
@@ -509,28 +510,9 @@ export const startNewShellForTabAtom = action(async (get, set, tabId: string) =>
   await set(reloadAtom)
 })
 
-export const reattachTerminalSessionAtom = action(async (get, set, terminalSessionId: string) => {
-  const runspace = get(activeRunspaceAtom)
-  if (!runspace) return
-  const tab = await clientOf(get).tab.open({
-    runspaceId: runspace.id,
-    terminalSessionId,
-    ...sizeOf(activeTabOf(get, runspace)),
-  })
-  await set(reloadAtom)
-  set(activateTerminalTabAtom, tab.id)
-})
-
-export const terminateTerminalSessionAtom = action(async (get, set, terminalSessionId: string) => {
-  await clientOf(get).terminalSession.terminate({ id: terminalSessionId })
-  set(markEndedAtom, terminalSessionId)
-  await set(reloadAtom)
-})
-
 export type TabMenuState = {
   tabId: string
   anchor: PopoverAnchor
-  confirmingTerminate: boolean
 }
 
 export const tabMenuAtom = atom<TabMenuState | null>(null)
@@ -538,15 +520,6 @@ export const tabMenuAtom = atom<TabMenuState | null>(null)
 export const tabMenuTabAtom = atom((get) => {
   const menu = get(tabMenuAtom)
   return menu ? (findTab(get, menu.tabId)?.tab ?? null) : null
-})
-
-export const terminateTabTerminalSessionAtom = action(async (get, set, tabId: string) => {
-  const found = findTab(get, tabId)
-  if (!found) return
-  await clientOf(get).terminalSession.terminate({ id: found.tab.terminalSessionId })
-  releaseTabConnection(tabId)
-  set(markEndedAtom, found.tab.terminalSessionId)
-  await closeTab(get, set, found, 'ending')
 })
 
 function cycle<T>(items: T[], current: T | null | undefined, step: 1 | -1): T | undefined {

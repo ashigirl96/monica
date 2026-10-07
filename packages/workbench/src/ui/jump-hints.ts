@@ -8,7 +8,20 @@ import {
   sidebarAtom,
 } from './store.ts'
 
-export const jumpHintsActiveAtom = atom(false)
+// 2 度目の d を待つ Tab は jump モードの中にだけ置き、どの経路でモードを抜けても忘れる。
+const jumpModeAtom = atom<{ pendingCloseTabId: string | null } | null>(null)
+
+export const jumpHintsActiveAtom = atom(
+  (get) => get(jumpModeAtom) !== null,
+  (_get, set, active: boolean) => set(jumpModeAtom, active ? { pendingCloseTabId: null } : null),
+)
+
+export const pendingCloseTabIdAtom = atom(
+  (get) => get(jumpModeAtom)?.pendingCloseTabId ?? null,
+  (get, set, tabId: string) => {
+    if (get(jumpModeAtom)) set(jumpModeAtom, { pendingCloseTabId: tabId })
+  },
+)
 
 // Both use digits in visual order; Ctrl disambiguates runspace (⌃1) from tab (1).
 const HINT_KEYS = '123456789'.split('')
@@ -21,7 +34,8 @@ type JumpHintTargets = {
 const NO_HINT_TARGETS: JumpHintTargets = { byRunspaceId: {}, byTabId: {} }
 
 export const jumpHintTargetsAtom = atom((get): JumpHintTargets => {
-  if (!get(jumpHintsActiveAtom)) return NO_HINT_TARGETS
+  // 2 度目の d を待つ間は、数字を押しても移らず取り消すだけなので hint を出さない。
+  if (!get(jumpHintsActiveAtom) || get(pendingCloseTabIdAtom)) return NO_HINT_TARGETS
   const ordered = shownRunspaceIds(get(sidebarAtom))
   const tabs = get(activeRunspaceAtom)?.tabs ?? []
 

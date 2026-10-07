@@ -117,15 +117,20 @@ fn create_zsh_session(client: &PtydClient, session_id: &str) -> Option<u32> {
     }
 }
 
-fn wait_for_output(rx: &mpsc::Receiver<ClientEvent>, marker: &str, deadline: Duration) {
+fn wait_for_output_where<T>(
+    rx: &mpsc::Receiver<ClientEvent>,
+    what: &str,
+    deadline: Duration,
+    mut found: impl FnMut(&str) -> Option<T>,
+) -> T {
     let end = Instant::now() + deadline;
     let mut combined = String::new();
     while Instant::now() < end {
         match rx.recv_timeout(Duration::from_millis(200)) {
             Ok(ClientEvent::Output { data, .. }) => {
                 combined.push_str(&String::from_utf8_lossy(&from_b64(&data)));
-                if combined.contains(marker) {
-                    return;
+                if let Some(value) = found(&combined) {
+                    return value;
                 }
             }
             Ok(_) => {}
@@ -133,7 +138,27 @@ fn wait_for_output(rx: &mpsc::Receiver<ClientEvent>, marker: &str, deadline: Dur
             Err(e) => panic!("event channel closed: {e}"),
         }
     }
-    panic!("marker {marker:?} not seen in output; got: {combined:?}");
+    panic!("{what} not seen in output; got: {combined:?}");
+}
+
+fn wait_for_output(rx: &mpsc::Receiver<ClientEvent>, marker: &str, deadline: Duration) {
+    wait_for_output_where(rx, &format!("marker {marker:?}"), deadline, |output| {
+        output.contains(marker).then_some(())
+    });
+}
+
+fn wait_for_number_after(rx: &mpsc::Receiver<ClientEvent>, prefix: &str) -> u32 {
+    let what = format!("{prefix:?} and a number");
+    wait_for_output_where(rx, &what, Duration::from_secs(10), |output| {
+        // The echoed command line carries the prefix too, followed by `$$` rather than digits.
+        output.match_indices(prefix).find_map(|(at, _)| {
+            let digits: String = output[at + prefix.len()..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            digits.parse().ok()
+        })
+    })
 }
 
 #[test]
@@ -240,6 +265,40 @@ fn session_survives_client_reconnect_and_replays_output() {
         ResponseBody::Sessions { sessions } => assert!(sessions.is_empty()),
         other => panic!("unexpected list response: {other:?}"),
     }
+}
+
+#[test]
+fn terminate_ends_the_foreground_job_with_its_shell() {
+    let daemon = start_daemon("terminate-job");
+    let (client, rx) = connect(&daemon);
+    create_zsh_session(&client, "ts-1").expect("unix spawns should expose a pid");
+    client
+        .request(RequestOp::Attach {
+            session_id: "ts-1".into(),
+            replay_bytes: None,
+        })
+        .unwrap();
+
+    // The job runs in the foreground as claude would, in its own process group under the shell.
+    client
+        .notify(RequestOp::Write {
+            session_id: "ts-1".into(),
+            data: b64(b"sh -c 'echo job-pid-$$; exec sleep 600'\r"),
+        })
+        .unwrap();
+    let job = wait_for_number_after(&rx, "job-pid-");
+    assert!(
+        process_alive(job),
+        "the job should be running before the terminate"
+    );
+
+    client
+        .request(RequestOp::Terminate {
+            session_id: "ts-1".into(),
+        })
+        .unwrap();
+
+    wait_until(Duration::from_secs(5), || !process_alive(job));
 }
 
 #[test]

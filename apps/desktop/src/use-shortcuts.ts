@@ -1,4 +1,5 @@
 import {
+  closeTabFromJumpModeAtom,
   copyActiveAgentSessionIdAtom,
   createRunspaceAtom,
   createTerminalTabAtom,
@@ -10,6 +11,7 @@ import {
   type JumpModeActions,
   moveActiveRunspaceAtom,
   moveActiveTabAtom,
+  pendingCloseTabIdAtom,
   pickTileByNumberAtom,
   setUiZoomAtom,
   sidebarOpenAtom,
@@ -56,9 +58,11 @@ export function useShortcuts() {
   const setSidebarOpen = useSetAtom(sidebarOpenAtom)
   const createRunspace = useSetAtom(createRunspaceAtom)
   const createTerminalTab = useSetAtom(createTerminalTabAtom)
+  const closeTabFromJumpMode = useSetAtom(closeTabFromJumpModeAtom)
   const cycleTerminalTab = useSetAtom(cycleTerminalTabAtom)
   const cycleRunspace = useSetAtom(cycleRunspaceAtom)
   const jumpActive = useAtomValue(jumpHintsActiveAtom)
+  const pendingCloseTabId = useAtomValue(pendingCloseTabIdAtom)
   const setJumpActive = useSetAtom(jumpHintsActiveAtom)
   const jumpToHint = useSetAtom(jumpToHintAtom)
   const moveActiveTab = useSetAtom(moveActiveTabAtom)
@@ -119,11 +123,12 @@ export function useShortcuts() {
         const actions: JumpModeActions = {
           deactivate: () => setJumpActive(false),
           createTab: () => void createTerminalTab(),
+          closeTab: () => void closeTabFromJumpMode(),
           jumpToHint,
           moveActiveTab: (direction) => void moveActiveTab(direction),
           moveActiveRunspace: (direction) => void moveActiveRunspace(direction),
         }
-        handleJumpMode(e, actions)
+        handleJumpMode(e, actions, { closing: pendingCloseTabId !== null })
         return
       }
       if (e.metaKey && e.ctrlKey && e.key === '0') {
@@ -147,9 +152,11 @@ export function useShortcuts() {
     setSidebarOpen,
     createRunspace,
     createTerminalTab,
+    closeTabFromJumpMode,
     cycleTerminalTab,
     cycleRunspace,
     jumpActive,
+    pendingCloseTabId,
     setJumpActive,
     jumpToHint,
     moveActiveTab,

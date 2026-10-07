@@ -34,7 +34,7 @@ export async function attachTab(
       .get()
     if (!callerTab) {
       throw new ORPCError('BAD_REQUEST', {
-        message: `Terminal Session ${terminalSessionId} is in no Tab; reattach it to a Tab first`,
+        message: `Terminal Session ${terminalSessionId} is in no Tab`,
       })
     }
     const found = findOpenTask(tx, eq(issue.id, requested.issue.id), formatRef(requested.issue))

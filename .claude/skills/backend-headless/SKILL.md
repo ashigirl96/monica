@@ -74,7 +74,7 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
   ```
 
 - HTTP: `/health` は token 無しで返る。port と token は `backend.json` にある。
-- ptyd にだけある session を作るには、socket に直接 `hello` と `create` を送る。Backend を起こし直すと reconcile が取り込む。protocol は `crates/terminal-protocol/src/lib.rs`。
+- ptyd にだけある session を作るには、Backend を止めてから socket に直接 `hello` と `create` を送る。ptyd は Backend が止まっても残る。Backend を起こし直すと reconcile がその session を terminate し、Exit を受けて Reap するので、ptyd の `list` から消え、`create` の応答の pid の shell も終わる（ADR-0023）。protocol は `crates/terminal-protocol/src/lib.rs`。
 
   ```bash
   TANIA_HOME=${TMPDIR%/}/tania-s2 bun -e '

@@ -3,7 +3,6 @@ import { afterEach, expect, test } from 'bun:test'
 import { createStore, type Store } from 'jotai'
 
 import { cleanUp, onCleanup, setup, until } from '../testing.ts'
-import type { SidebarRow } from './sidebar-model.ts'
 import {
   activateRunspaceAtom,
   activateTerminalTabAtom,
@@ -58,7 +57,7 @@ function untilUnread(store: Store, terminalSessionId: string, unread: boolean) {
 function unreadCountsOfRows(store: Store) {
   return store
     .get(sidebarAtom)
-    .tiles.flatMap((tile) => tile.sections.flatMap((s): SidebarRow[] => s.rows))
+    .tiles.flatMap((tile) => tile.sections.flatMap((s) => s.rows))
     .map((row) => ({ id: row.id, unreadCount: row.unreadCount }))
 }
 

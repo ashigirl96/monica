@@ -49,15 +49,13 @@ export function getTabTerminal(tabId: string): Terminal | undefined {
   return tabTerminals.get(tabId)
 }
 
-/// Drop the registry entry and its event listeners; returns the session that was bound so
-/// the caller can detach it.
-export function releaseTabConnection(tabId: string): string | undefined {
+/// Drop the registry entry and its event listeners.
+export function releaseTabConnection(tabId: string): void {
   const conn = tabConnections.get(tabId)
-  if (!conn) return undefined
+  if (!conn) return
   tabConnections.delete(tabId)
   for (const unlisten of conn.unlisteners) unlisten()
   // The connect error path also unlistens whatever is left; clearing here keeps a
   // release racing that path from double-invoking the same UnlistenFns.
   conn.unlisteners = []
-  return conn.sessionId
 }

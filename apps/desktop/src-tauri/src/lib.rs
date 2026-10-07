@@ -54,7 +54,6 @@ pub fn run() {
             clipboard::clipboard_read_file_paths,
             clipboard::clipboard_write_image,
             terminal::terminal_attach,
-            terminal::terminal_detach,
             terminal::terminal_write,
             terminal::terminal_resize,
         ])

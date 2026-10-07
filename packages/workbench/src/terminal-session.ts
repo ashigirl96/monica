@@ -203,7 +203,12 @@ export function createTerminalSessions(deps: {
     const toReap: string[] = []
     const toTerminate: string[] = []
     const agentSessionIds = db.transaction((tx) => {
-      for (const row of tx.select().from(terminalSession).all()) {
+      const rows = tx
+        .select({ row: terminalSession, tabId: tab.id })
+        .from(terminalSession)
+        .leftJoin(tab, eq(tab.terminalSessionId, terminalSession.id))
+        .all()
+      for (const { row, tabId } of rows) {
         const held = unmatched.get(row.id)
         unmatched.delete(row.id)
         if (!isLive(row.status)) {
@@ -232,23 +237,13 @@ export function createTerminalSessions(deps: {
           .set({ status: 'running', pid: held.pid })
           .where(eq(terminalSession.id, row.id))
           .run()
+        // Tab を閉じた後、Terminate を送る前に Backend が止まった shell。
+        if (tabId === null) toTerminate.push(row.id)
       }
-      // DB を消した後や Create と INSERT の間の crash で、ptyd にだけ残った session。
+      // DB を消した後や Create と INSERT の間の crash で、ptyd にだけ残った session。どの Tab も表示していない。
       for (const held of unmatched.values()) {
-        if (!held.running) {
-          toReap.push(held.session_id)
-          continue
-        }
-        tx.insert(terminalSession)
-          .values({
-            id: held.session_id,
-            cwd: held.cwd,
-            shell: '',
-            status: 'running',
-            pid: held.pid,
-            createdAt: now,
-          })
-          .run()
+        if (held.running) toTerminate.push(held.session_id)
+        else toReap.push(held.session_id)
       }
       return reconcileAgentSessions(tx, { backendRestarted })
     })
@@ -261,7 +256,6 @@ export function createTerminalSessions(deps: {
     start,
     rebind,
     terminateRemoved,
-    terminate,
     recordExit,
     respawnPinnedTabs,
     reconcile,

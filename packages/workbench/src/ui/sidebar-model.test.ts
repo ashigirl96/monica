@@ -12,7 +12,6 @@ import {
   type RunspaceRow,
   type Sidebar,
   rowMetaOf,
-  type SidebarRow,
 } from './sidebar-model.ts'
 import {
   activateRunspaceAtom,
@@ -79,10 +78,8 @@ function shown(sidebar: Sidebar) {
 }
 
 function rowOf(sidebar: Sidebar, runspaceId: string): RunspaceRow | undefined {
-  const listed = sidebar.tiles.flatMap((tile) => tile.sections.flatMap((s): SidebarRow[] => s.rows))
-  return [...sidebar.pinned, ...listed]
-    .filter((row): row is RunspaceRow => row.type === 'runspace')
-    .find((row) => row.id === runspaceId)
+  const listed = sidebar.tiles.flatMap((tile) => tile.sections.flatMap((s) => s.rows))
+  return [...sidebar.pinned, ...listed].find((row) => row.id === runspaceId)
 }
 
 test("a Runspace is listed under the Tile of its leftmost Tab's Repo, and stays there whichever Tab is active", async () => {
@@ -158,31 +155,17 @@ test('Runspaces in no Repo are listed under the Tile at the bottom of the Rail, 
   expect(shown(sidebar)).toEqual([['runspaces', [home.runspaceId, downloads.runspaceId]]])
 })
 
-test('a detached Terminal Session is listed in the Detached section of the Repo its Tab was last in', async () => {
-  const { client, store } = bench()
-  const app = ghqCheckout('acme/app')
-  const { runspaceId } = await client.runspace.create({ cwd: app.root, ...size })
-  const closed = await client.tab.open({ runspaceId, ...size })
-  await client.tab.setCwd({ id: closed.id, cwd: app.checkout })
-  await client.tab.close({ id: closed.id })
-  await store.set(reloadAtom)
-  await untilListed(store, 'acme/app', [closed.terminalSessionId])
-
-  store.set(tileChoiceAtom, 'acme/app')
-
-  expect(shown(store.get(sidebarAtom))).toEqual([['detached', [closed.terminalSessionId]]])
-})
-
 test('collapsing a section hides its rows and leaves their count and unread Tabs on its header, and expanding brings them back', async () => {
-  const { client, store, leaveUnread } = bench()
+  const { db, workbenchLedger, client, store, leaveUnread } = bench()
   const app = ghqCheckout('acme/app')
+  const shipIt = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: app.worktree }))
+  const label: BenchLabel = { repo: 'acme/app', number: 1, title: 'Ship it', setup: null }
+  store.set(benchLabelOfAtom, () => (runspaceId: string) => (runspaceId === shipIt ? label : null))
   const a = await client.runspace.create({ cwd: app.checkout, ...size })
   const behind = await client.tab.open({ runspaceId: a.runspaceId, cwd: app.checkout, ...size })
   const b = await client.runspace.create({ cwd: app.checkout, ...size })
-  const closed = await client.tab.open({ runspaceId: b.runspaceId, cwd: app.checkout, ...size })
-  await client.tab.close({ id: closed.id })
   await store.set(reloadAtom)
-  await untilListed(store, 'acme/app', [a.runspaceId, b.runspaceId, closed.terminalSessionId])
+  await untilListed(store, 'acme/app', [shipIt, a.runspaceId, b.runspaceId])
   await leaveUnread(behind.terminalSessionId)
   await leaveUnread(a.tab.terminalSessionId)
   store.set(tileChoiceAtom, 'acme/app')
@@ -190,15 +173,15 @@ test('collapsing a section hides its rows and leaves their count and unread Tabs
   store.set(toggleSectionAtom, 'acme/app:runspaces')
 
   expect(store.get(sidebarAtom).selected.sections).toMatchObject([
+    { kind: 'bench', headed: true, collapsed: false, rowCount: 1, unreadCount: 0 },
     { kind: 'runspaces', headed: true, collapsed: true, rows: [], rowCount: 2, unreadCount: 2 },
-    { kind: 'detached', headed: true, collapsed: false, rowCount: 1, unreadCount: 0 },
   ])
 
   store.set(toggleSectionAtom, 'acme/app:runspaces')
 
   expect(shown(store.get(sidebarAtom))).toEqual([
+    ['bench', [shipIt]],
     ['runspaces', [a.runspaceId, b.runspaceId]],
-    ['detached', [closed.terminalSessionId]],
   ])
 })
 
@@ -224,13 +207,12 @@ test('a Tile counts the unread Tabs of the rows it brings up, leaving out the Pi
   const second = await client.tab.open({ runspaceId: a.runspaceId, cwd: app.checkout, ...size })
   const pinned = await client.runspace.create({ cwd: app.checkout, ...size })
   await client.tab.pin({ id: pinned.tab.id })
-  const closed = await client.tab.open({ runspaceId: a.runspaceId, cwd: app.checkout, ...size })
-  await client.tab.close({ id: closed.id })
+  const b = await client.runspace.create({ cwd: app.checkout, ...size })
   const home = await client.runspace.create({ cwd: app.root, ...size })
   await store.set(reloadAtom)
-  await untilListed(store, 'acme/app', [a.runspaceId, closed.terminalSessionId])
+  await untilListed(store, 'acme/app', [a.runspaceId, b.runspaceId])
 
-  for (const id of [a.tab, second, pinned.tab, closed]) await leaveUnread(id.terminalSessionId)
+  for (const id of [a.tab, second, pinned.tab, b.tab]) await leaveUnread(id.terminalSessionId)
 
   expect(store.get(sidebarAtom).tiles.map((tile) => [tile.key, tile.unreadCount])).toEqual([
     ['acme/app', 3],
@@ -631,7 +613,6 @@ test('jump hints number the Pinned rows and the rows shown under the selected Ti
 })
 
 const shell: RunspaceRow = {
-  type: 'runspace',
   id: 'rs-1',
   isActive: false,
   unreadCount: 0,

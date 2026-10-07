@@ -1,4 +1,4 @@
-import { cn, PinIcon, PlusIcon, useDragReorder, XIcon } from '@tania/ui'
+import { cn, PinIcon, PlusIcon, useDragReorder } from '@tania/ui'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { useEffect, useRef } from 'react'
 
@@ -6,13 +6,12 @@ import { baseName } from '../paths.ts'
 import { AgentDotMark } from './agent-dot-mark.tsx'
 import { UNREAD_LABEL_STYLE } from './agent-dot.ts'
 import { JumpHint } from './jump-hint.tsx'
-import { jumpHintTargetsAtom } from './jump-hints.ts'
+import { jumpHintTargetsAtom, pendingCloseTabIdAtom } from './jump-hints.ts'
 import {
   activateTerminalTabAtom,
   activeRunspaceAtom,
   activeTerminalTabAtom,
   agentDotOfTerminalSessionAtom,
-  closeTerminalTabAtom,
   createTerminalTabAtom,
   deadTabsAtom,
   draggedTabIdAtom,
@@ -37,11 +36,11 @@ export function WorkbenchHeader() {
   const unreadOfTerminalSession = useAtomValue(unreadOfTerminalSessionAtom)
   const setTabMenu = useSetAtom(tabMenuAtom)
   const activateTab = useSetAtom(activateTerminalTabAtom)
-  const closeTab = useSetAtom(closeTerminalTabAtom)
   const createTab = useSetAtom(createTerminalTabAtom)
   const reorder = useSetAtom(reorderTabsAtom)
   const setDraggedTab = useSetAtom(draggedTabIdAtom)
   const jumpHints = useAtomValue(jumpHintTargetsAtom)
+  const pendingCloseTabId = useAtomValue(pendingCloseTabIdAtom)
   const { dragOverId, handlersFor } = useDragReorder(reorder, setDraggedTab)
   const activeTabRef = useRef<HTMLButtonElement>(null)
 
@@ -77,7 +76,6 @@ export function WorkbenchHeader() {
               setTabMenu({
                 tabId: tab.id,
                 anchor: { top: rect.top, bottom: rect.bottom, left: e.clientX },
-                confirmingTerminate: false,
               })
             }}
             className={cn(
@@ -97,28 +95,18 @@ export function WorkbenchHeader() {
               unread={unread}
               className="mr-1.5"
             />
-            <span className={cn('flex-1 truncate', unread && UNREAD_LABEL_STYLE)}>{label}</span>
+            {tab.id === pendingCloseTabId ? (
+              <span className="flex-1 truncate font-semibold text-destructive">
+                d again to close tab
+              </span>
+            ) : (
+              <span className={cn('flex-1 truncate', unread && UNREAD_LABEL_STYLE)}>{label}</span>
+            )}
             {terminalDot && (
               <span
                 title={status}
                 className={cn('ml-1.5 size-1.5 shrink-0 rounded-full', terminalDot)}
               />
-            )}
-            {!tab.pinned && (
-              <span
-                role="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  void closeTab(tab.id)
-                }}
-                className={cn(
-                  'flex h-4 w-4 items-center justify-center rounded',
-                  'opacity-0 transition-opacity duration-100 group-hover:opacity-100',
-                  'hover:bg-white/[0.1]',
-                )}
-              >
-                <XIcon size={10} />
-              </span>
             )}
           </button>
         )

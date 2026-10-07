@@ -1,14 +1,12 @@
-import { cn, PopoverMenu, PopoverMenuItem, PopoverMenuSeparator } from '@tania/ui'
+import { PopoverMenu, PopoverMenuItem } from '@tania/ui'
 import { useAtomValue, useSetAtom } from 'jotai'
 import type { ReactNode } from 'react'
 
 import {
-  closeTerminalTabAtom,
   startNewShellForTabAtom,
   tabMenuAtom,
   type TabMenuState,
   tabMenuTabAtom,
-  terminateTabTerminalSessionAtom,
   toggleTabPinAtom,
 } from './store.ts'
 import { isDeadStatus, terminalSessionStatusAtom } from './terminal-sessions.ts'
@@ -28,8 +26,6 @@ export function TabContextMenu({ tabMenuItems }: { tabMenuItems?: TabMenuItems }
 
 function MenuPopover({ menu, tabMenuItems }: { menu: TabMenuState; tabMenuItems?: TabMenuItems }) {
   const setMenu = useSetAtom(tabMenuAtom)
-  const closeTab = useSetAtom(closeTerminalTabAtom)
-  const terminate = useSetAtom(terminateTabTerminalSessionAtom)
   const startNewShell = useSetAtom(startNewShellForTabAtom)
   const togglePin = useSetAtom(toggleTabPinAtom)
   const tab = useAtomValue(tabMenuTabAtom)
@@ -50,16 +46,6 @@ function MenuPopover({ menu, tabMenuItems }: { menu: TabMenuState; tabMenuItems?
       >
         {tab.pinned ? 'Unpin' : 'Pin'}
       </PopoverMenuItem>
-      {!tab.pinned && (
-        <PopoverMenuItem
-          onClick={() => {
-            close()
-            void closeTab(menu.tabId)
-          }}
-        >
-          Close (keep shell)
-        </PopoverMenuItem>
-      )}
       <PopoverMenuItem
         disabled={!dead}
         onClick={() => {
@@ -70,28 +56,6 @@ function MenuPopover({ menu, tabMenuItems }: { menu: TabMenuState; tabMenuItems?
         New shell here
       </PopoverMenuItem>
       {tabMenuItems?.({ id: tab.id, terminalSessionId: tab.terminalSessionId }, close)}
-      {!tab.pinned && (
-        <>
-          <PopoverMenuSeparator />
-          <PopoverMenuItem
-            disabled={dead}
-            onClick={() => {
-              if (!menu.confirmingTerminate) {
-                setMenu({ ...menu, confirmingTerminate: true })
-                return
-              }
-              close()
-              void terminate(menu.tabId)
-            }}
-            className={cn(
-              'text-destructive hover:bg-destructive/15 hover:text-destructive',
-              menu.confirmingTerminate && 'bg-destructive/15',
-            )}
-          >
-            {menu.confirmingTerminate ? 'Click again to confirm' : 'Terminate'}
-          </PopoverMenuItem>
-        </>
-      )}
     </PopoverMenu>
   )
 }

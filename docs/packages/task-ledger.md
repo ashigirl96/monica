@@ -43,7 +43,7 @@ changes     → { type: "task", ref } | { type: "synced" }
 
 - `terminalSessionId` が無ければ `BAD_REQUEST`、未 track は `NOT_FOUND`、closed な Task は `BAD_REQUEST`（`run` と同じ）。
 - 1 つの transaction で次の順に進める。
-  1. その Terminal Session を表示している Tab を引く。無ければ（detached、または Workbench Ledger に無い）`BAD_REQUEST`。
+  1. その Terminal Session を表示している Tab を引く。無ければ（Tab を閉じて shell が終わるのを待っている、または Workbench Ledger に無い）`BAD_REQUEST`。
   2. その Terminal Session の live な Agent Session が別の Task の Run なら `CONFLICT`。message にはその Task の ref を出す。GUI の drag はこれを断らず、Tab だけが移る。
   3. Tab が既にその Bench に居れば、何も変えずに返す（`moveTab` は同じ Runspace でも末尾へ並べ替えるので呼ばない）。
   4. Bench が無ければ、in_place の Bench を作る（`createRunspace` を含む）。cwd は Repo の checkout（`$(ghq root)/github.com/<owner>/<repo>`）で、setup は走らせず、`setup_state` は最初から `ready`（`prepared_at` は作った時刻）。checkout が無いか ghq root が引けなければ `BAD_REQUEST`。attach は network を使わないので clone しない。ghq root は async なので transaction の前に引き、transaction の中で Bench がまだ無いときだけ使う。待つ間に `run` が Bench を作っていれば、そちらに移す。checkout の path は transaction の中で引き直した repo の名前から作る。待つ間に sync が repo の改名を写すと、前に引いた名前の path は古い checkout を指すか、clone されていないことになるため。
@@ -97,7 +97,7 @@ changes     → { type: "task", ref } | { type: "synced" }
 - tx で Task を引き直して ref を作り直す。`closed_at` を入れ、`bench` の行を消し、`removeRunspace(tx, runspaceId, { spare })` を呼ぶ。`spare` は呼び手の Terminal Session と、`--force` でなければ git を待つ間に Bench の Tab で起こした claude（hook から Run になっている）の Terminal Session。後者も呼び手と同じく所有を解いた Runspace に残し、`warnings` に載せる。guard の後に見つけたものは、壊した後で断らずに守ったまま close を終えるため。output の `spared` は呼び手の Tab が残ったかどうか。commit の後に `{ type: "task", ref }` で知らせて返る。消した Tab の Terminal Session は、close を待たせずに workbench が終わらせる（ADR-0015）。
 - Run の行は残す。close を頼んだ claude は、終わるまで closed な Task の Run のままで、`current` もその Task を返す。
 - CLI は拒否を、1 行目の `CLOSE_REFUSED: <ref> stays open:`、理由を 1 行ずつ、最後の `pass --force to close anyway` で出し、exit 1 にする。Skill は stderr の 1 行目で失敗を読むので、1 行目は `CODE: message` の形を保つ。
-- Workbench で Bench の最後の Tab を閉じると、webview の task の ui が `close({ ref })` を `force` も `terminalSessionId` も無しで呼ぶ（呼び方と toast は `docs/packages/desktop.md` の slot、きっかけは `docs/packages/workbench-ledger.md` の「Runspace と Tab」）。止める条件は CLI の close と同じで、push 済みでレビュー中の PR があっても guard は当たらないので、その Task も閉じる。reopen の後の `run` は `issue-<n>` を origin の default branch から作り直す。close の間に Bench へ開いた shell の Tab は、その claude が Run になっていなければ close が消す（`spare` が守るのは Run の Tab だけ）。guard で止まった Bench は Tab の無いまま残り、Workbench が「New shell in …」のボタンを出す。準備中の Bench では close を呼ばない。
+- Workbench で Bench の最後の Tab を閉じると、webview の task の ui が `close({ ref })` を `force` も `terminalSessionId` も無しで呼ぶ（呼び方と toast は `docs/packages/desktop.md` の slot、きっかけは `docs/packages/workbench-ledger.md` の「Runspace と Tab」）。止める条件は CLI の close と同じで、push 済みでレビュー中の PR があっても guard は当たらないので、その Task も閉じる。閉じた Tab の claude は、Tab を閉じると終わり、webview は Backend がその Exit を記録してから close を呼ぶので、ActiveRun に当たらない。git の guard だけが止める（ADR-0023）。reopen の後の `run` は `issue-<n>` を origin の default branch から作り直す。close の間に Bench へ開いた shell の Tab は、その claude が Run になっていなければ close が消す（`spare` が守るのは Run の Tab だけ）。guard で止まった Bench は Tab の無いまま残り、Workbench が「New shell in …」のボタンを出す。準備中の Bench では close を呼ばない。
 - `reopen` は closed な Task だけを受ける（open は `BAD_REQUEST`）。sync（5 秒。届かなければ警告）してから `closed_at` を NULL に戻し、`{ type: "task", ref }` で知らせる。Bench は作らないので、表示状態は `not_started`（Issue が closed なら `issue_closed`）。次の `run` か `attach` が Bench を作り直す。`run` は close で消えた branch `issue-<n>` を origin の default branch から作り直し、Bench より前の Run は resume しない（「Run の起動」の節）。
 
 ## sync
