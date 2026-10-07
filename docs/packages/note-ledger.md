@@ -190,6 +190,17 @@ monica の Rust（`note_markdown.rs`・`note_markdown_import.rs`）を TypeScrip
 - 字下げは 64 段で打ち切り、それより深い行は兄弟にする。1 段ごとに再帰するため。
 - 持ち込まないもの: Synced Block の展開（`FULL_DOC_EXPANDED_MD`）、循環の打ち切り、全文検索の plain text。どれも CLI の `note show --expand` と全文検索のためのもの。
 
+#### monica と意図して変えた点
+
+monica の `to_markdown` は素の文字を escape せず、copy した markdown をプレーンテキストの app を経て貼り戻すと、素の `# Heading` が見出しに、`**literal**` が bold に、`[[note-2]]` が Note Mention になった。tania は往復で素の文字が変わらないよう、両方の向きを変えた。escape は `src/body/markdown-escape.ts` にあり、表の 2 行目の扱いだけは行をまたぐので `to-markdown.ts` の表の書き出しにある。
+
+- `toMarkdown` は、本文の素の文字（text、link と Link Mention と Bookmark の title、Note Mention の表示名）のうち、`fromMarkdown` がその位置で構文として読む文字だけを backslash で escape する。`snake_case`・`#hashtag`・`e.g.`・`1.5`・`a * b`・`~/.claude` には付けない。markdown を描かない貼り先（Slack や LLM の入力欄）では、escape した箇所にだけ backslash が見える。escape しない option は持たない。
+- inline で escape するのは、ASCII の記号の前の `\`、`` ` ``・`[`・`]`、`<u>` と `</u>` の `<`、強調の `*`・`~`・`_`。強調の記号でも、行に同じ記号がほかに無いもの（`2*3`）、両隣が空白か行の端の 1 文字（`a * b`）、英数字の後の `_` は、開きも閉じもしないので escape しない。
+- 行頭（block の本文の先頭と hardBreak の後の行）は、`fromMarkdown` の Parser にその行を読ませ、block を始めるなら行頭の素の記号を escape する（`\# Heading`・`1\. first`・`\> quote`）。表は続く行と合わせて決まるので、行を下から決める。表の delimiter の行に見える行（`--- | ---`）は先頭の記号を escape する。list の項目は空行を挟まずに並び、項目をまたいでも表になるので、印の後ろの 1 行目も見る。そのときは印も含めた行で見る（`- --- | ---` は delimiter の行ではない）。見出しと list の印の後ろ、quote と callout の行は inline として読まれるので、行頭の扱いはしない。
+- code の mark・code block・href は escape しない。code の mark は、中の最長の backtick の連なりより長い backtick で包み、中身が backtick で始まるか終わるとき、両端がどちらも空白のときは、両端に空白を 1 つずつ入れる。
+- 表のセルは 1 行に書くので、hardBreak を空白にしてから inline の escape を決め、`|` を `\|` にする。素の `\` は `|` の前なら inline の escape が済ませているので重ねない。code や href の中の `\` は、`|` の直前に続くものだけを重ね、`\|` の escape を食わせない。header の無い表の 2 行目が delimiter の行に見えるときは、先頭のセルの記号を escape する。
+- `fromMarkdown` は、閉じ記号（強調の delimiter、`</u>`、link と Note Mention の `]`）を探すとき、backslash で escape した文字と code span の中を飛ばす（`` *`a*b`* `` は italic の code `a*b`）。Note Mention の表示名は escape した `[` と `]` を含んでよい。code span の中身は、空白だけではなく両端がどちらも空白なら、両端の空白を 1 つずつ外す。どちらも CommonMark と同じ。
+
 ## テスト
 
 - in-memory の SQLite に note の migration だけを当てる。note は他の domain の table を持たない。
@@ -200,6 +211,7 @@ monica の Rust（`note_markdown.rs`・`note_markdown_import.rs`）を TypeScrip
 - preview と markdown の変換は monica の fixture（`src/body/fixtures/` の `full-doc.json`・`unknown-nodes.json`）で確かめる。
 - markdown の変換のテストは、monica の import の 33 本と export の 11 本から、展開・循環・plain text のものを除いて写してある。`full-doc.json` の書き出しは monica の golden（`FULL_DOC_MD`）と一字ずつ比べる。
 - monica の Rust を写した関数は、monica の `crates/monica-domain` を path 依存で読む scratch の crate に、テストの入力と部品を乱択で組み合わせた入力を流し、TS の出力と突き合わせる。空白の判定（Rust の `trim` は Unicode の White_Space）や `str::lines` の `\r` のような境界の振る舞いは、golden と写したテストだけでは写し漏れを拾えないため。
+- escape は、行頭と inline の構文を素の文字として持たせた doc を、block の種類ごとに `toMarkdown` → `fromMarkdown` に通し、元の doc に戻るかで確かめる。escape の規則を変えたら、記号の多い文字・mark・hardBreak・Note Mention・入れ子の list・表を乱択で組んだ doc を scratch で往復させる。記号の組み合わせは固定のテストでは数え尽くせないため。
 - 画像は `image.test.ts` が、一時 directory の home で確かめる。取り込みの相手は Bun.serve の fake で、終わらない body、始まらない応答、途中で止まる body を作る。10 秒の打ち切りは、task の sync と同じく `importImage` に短い timeout を渡して確かめる。GC の 48 時間は時計を止めず、画像の mtime を `utimesSync` で過去と未来に置く。
 - 画像の GET と multipart の輸送は、apps/backend の `notes-listener.test.ts` が RPCLink で upload してから GET して確かめる。
 - OGP の行き先は `src/fake-site.ts` の fake の site に差し替える。fake は Bun.serve で path ごとに status・header・body を返し、届いた request の path と User-Agent を記録し、header の保留（`hold()`）、body の後に送り続けるか止まったままでいること、client が body を読みやめたこと（`cancelled`）を記録する。task の `fake-github.ts` と同じ形。

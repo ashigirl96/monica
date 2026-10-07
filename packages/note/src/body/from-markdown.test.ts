@@ -198,6 +198,46 @@ test('a backslash escapes punctuation', () => {
   ])
 })
 
+test('an escaped closing delimiter does not close the mark it is inside', () => {
+  expect(blockAt('*a\\*b* ~~c\\~d~~ <u>e\\</u>f</u> *g\\\\*', 0)?.content).toEqual([
+    { type: 'text', text: 'a*b', marks: [{ type: 'italic' }] },
+    { type: 'text', text: ' ' },
+    { type: 'text', text: 'c~d', marks: [{ type: 'strike' }] },
+    { type: 'text', text: ' ' },
+    { type: 'text', text: 'e</u>f', marks: [{ type: 'underline' }] },
+    { type: 'text', text: ' ' },
+    { type: 'text', text: 'g\\', marks: [{ type: 'italic' }] },
+  ])
+})
+
+test('an escaped bracket stays inside a link label and a Note Mention', () => {
+  expect(blockAt('[see \\[1\\]](https://example.com) [[note-1|a \\[b\\]]]', 0)?.content).toEqual([
+    {
+      type: 'text',
+      text: 'see [1]',
+      marks: [{ type: 'link', attrs: { href: 'https://example.com' } }],
+    },
+    { type: 'text', text: ' ' },
+    { type: 'noteMention', attrs: { noteId: 'note-1' } },
+  ])
+})
+
+test('a closing delimiter inside a code span does not close the mark around it', () => {
+  expect(blockAt('*`a*b`* [`a]b`](https://example.com)', 0)?.content).toEqual([
+    { type: 'text', text: 'a*b', marks: [{ type: 'italic' }, { type: 'code' }] },
+    { type: 'text', text: ' ' },
+    {
+      type: 'text',
+      text: 'a]b',
+      marks: [{ type: 'code' }, { type: 'link', attrs: { href: 'https://example.com' } }],
+    },
+  ])
+})
+
+test('a bracket in the id of a Note Mention leaves it as text', () => {
+  expect(blockAt('[[note\\]1]]', 0)?.content).toEqual([{ type: 'text', text: '[[note]1]]' }])
+})
+
 test('delimiters without a pair stay as they are', () => {
   expect(blockAt('2 * 3 * 4 = 24 and a_b', 0)?.content).toEqual([
     { type: 'text', text: '2 * 3 * 4 = 24 and a_b' },
@@ -328,6 +368,18 @@ test('a code span keeps the markdown inside it as it is', () => {
   expect(blockAt('`**not bold**` after', 0)?.content).toEqual([
     { type: 'text', text: '**not bold**', marks: [{ type: 'code' }] },
     { type: 'text', text: ' after' },
+  ])
+})
+
+test('a code span padded with a space on both ends drops one space from each end', () => {
+  expect(blockAt('`` `a ``  `  b  `  `   `  ` c`', 0)?.content).toEqual([
+    { type: 'text', text: '`a', marks: [{ type: 'code' }] },
+    { type: 'text', text: '  ' },
+    { type: 'text', text: ' b ', marks: [{ type: 'code' }] },
+    { type: 'text', text: '  ' },
+    { type: 'text', text: '   ', marks: [{ type: 'code' }] },
+    { type: 'text', text: '  ' },
+    { type: 'text', text: ' c', marks: [{ type: 'code' }] },
   ])
 })
 
