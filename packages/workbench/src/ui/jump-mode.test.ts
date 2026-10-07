@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 
 import { handleJumpMode, type JumpModeActions } from './jump-mode.ts'
 
-function press(key: string, closing: boolean): string[] {
+function press(key: string, closing: boolean, { repeat = false } = {}): string[] {
   const calls: string[] = []
   const actions: JumpModeActions = {
     deactivate: () => calls.push('deactivate'),
@@ -12,7 +12,7 @@ function press(key: string, closing: boolean): string[] {
     moveActiveTab: (direction) => calls.push(`moveActiveTab:${direction}`),
     moveActiveRunspace: (direction) => calls.push(`moveActiveRunspace:${direction}`),
   }
-  const event = { key, ctrlKey: false, preventDefault: () => {} } as KeyboardEvent
+  const event = { key, ctrlKey: false, repeat, preventDefault: () => {} } as KeyboardEvent
   handleJumpMode(event, actions, { closing })
   return calls
 }
@@ -27,4 +27,8 @@ test('while a Tab waits for the second d, d closes it and any other key leaves j
   expect(press('2', true)).toEqual(['deactivate'])
   expect(press('Escape', true)).toEqual(['deactivate'])
   expect(press('Shift', true)).toEqual([])
+})
+
+test('a d held down repeats without counting as the second d', () => {
+  expect(press('d', true, { repeat: true })).toEqual([])
 })

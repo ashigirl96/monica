@@ -445,11 +445,13 @@ export const closeTerminalTabAtom = action(async (get, set, tabId?: string) => {
 // d は c（新しい Tab）の隣のキーなので、claude の居る Tab は打ち損じで消さないよう 2 度目の d を待つ。
 export const closeTabFromJumpModeAtom = atom(null, (get, set): Promise<void> => {
   const front = frontTab(get)
-  if (!front || front.tab.pinned) {
+  const pending = get(pendingCloseTabIdAtom)
+  // 尋ねた Tab が shell の終了で先に閉じたら、手前に来た別の Tab は誰も確かめていない。
+  if (!front || front.tab.pinned || (pending !== null && pending !== front.tab.id)) {
     set(jumpHintsActiveAtom, false)
     return Promise.resolve()
   }
-  const asked = get(pendingCloseTabIdAtom) === front.tab.id
+  const asked = pending === front.tab.id
   if (!asked && get(agentSessionByTerminalSessionAtom).has(front.tab.terminalSessionId)) {
     set(pendingCloseTabIdAtom, front.tab.id)
     return Promise.resolve()

@@ -19,7 +19,8 @@ export function handleJumpMode(
   e.preventDefault()
 
   if (e.key === 'd' && !e.ctrlKey) {
-    actions.closeTab()
+    // 長押しの自動の繰り返しを 2 度目の d と数えると、確認を待たずに claude の居る Tab を閉じる。
+    if (!e.repeat) actions.closeTab()
     return
   }
 

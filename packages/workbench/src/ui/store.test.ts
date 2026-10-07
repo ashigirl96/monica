@@ -215,6 +215,26 @@ test('leaving jump mode forgets the first d, so the next d asks again', async ()
   expect(store.get(pendingCloseTabIdAtom)).toBe(tab.id)
 })
 
+test('a second d after the Tab it asked about has closed on its own leaves jump mode without closing the Tab in front now', async () => {
+  const backend = bench()
+  const { ptyd, client, store, settled } = backend
+  const { runspaceId, tab: next } = await client.runspace.create(size)
+  const claude = await client.tab.open({ runspaceId, ...size })
+  await settled(claude.terminalSessionId)
+  await runAgentIn(backend, claude.terminalSessionId)
+  store.set(activateTerminalTabAtom, claude.id)
+  store.set(jumpHintsActiveAtom, true)
+  await store.set(closeTabFromJumpModeAtom)
+  ptyd.exit(claude.terminalSessionId, 0)
+  await store.set(tabExitedAtom, claude.id, claude.terminalSessionId, 0)
+  expect(store.get(activeTerminalTabAtom)?.id).toBe(next.id)
+
+  await store.set(closeTabFromJumpModeAtom)
+
+  expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([next.id])
+  expect(store.get(jumpHintsActiveAtom)).toBe(false)
+})
+
 test('d in jump mode on a pinned Tab leaves jump mode and the Tab', async () => {
   const { ptyd, client, store } = bench()
   const { tab } = await client.runspace.create(size)
