@@ -67,6 +67,9 @@ export const agentSession = sqliteTable(
     firstSeenAt: integer('first_seen_at', { mode: 'timestamp_ms' }).notNull(),
     endedAt: integer('ended_at', { mode: 'timestamp_ms' }),
     unobservedSince: integer('unobserved_since', { mode: 'timestamp_ms' }),
+    // どちらも今の待ちのもので、Agent Session が状態に入り直すたびに空にする。
+    notifiedAt: integer('notified_at', { mode: 'timestamp_ms' }),
+    seenAt: integer('seen_at', { mode: 'timestamp_ms' }),
   },
   (t) => [
     uniqueIndex('agent_session_live_per_terminal_session_idx')

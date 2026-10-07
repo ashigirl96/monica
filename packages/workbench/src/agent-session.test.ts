@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from 'bun:test'
+import { afterEach, expect, setSystemTime, spyOn, test } from 'bun:test'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -25,6 +25,13 @@ function payload(sessionId: string, hookEventName: string, fields: object = {}) 
 
 function rowOf(db: Db, sessionId: string) {
   return db.select().from(agentSession).where(eq(agentSession.sessionId, sessionId)).get()
+}
+
+type Client = ReturnType<typeof setup>['client']
+
+async function seeAsListed(client: Client, sessionId: string) {
+  const listed = (await client.agentSession.list()).find((a) => a.sessionId === sessionId)
+  await client.agentSession.markSeen({ sessionId, notifiedAt: listed!.notifiedAt! })
 }
 
 function seedTerminalSession(
@@ -376,6 +383,149 @@ test('a notification that cannot be named still leaves the hook recorded and sig
   expect(rowOf(db, 's-1')).toMatchObject({ state: 'waiting', waitReason: 'idle' })
   expect(signals).toEqual([{ type: 'agentSession', sessionId: 's-1' }])
   expect(lines()).toEqual([expect.stringContaining('no such table: run')])
+})
+
+test('a notified wait is listed unread until it is seen, and seeing it signals the change', async () => {
+  const { db, workbenchLedger, client } = setup()
+  seedTerminalSession(db, 'ts-a', 'running')
+  const record = (hookEventName: string, fields?: object) =>
+    client.agentSession.recordHook({
+      terminalSessionId: 'ts-a',
+      payload: payload('s-1', hookEventName, fields),
+    })
+  await record('UserPromptSubmit', { prompt: 'hi' })
+  await record('Stop')
+  expect(await client.agentSession.list()).toEqual([
+    expect.objectContaining({ sessionId: 's-1', unread: true }),
+  ])
+  const signals: unknown[] = []
+  onCleanup(workbenchLedger.events.subscribe('change', (change) => signals.push(change)))
+
+  await seeAsListed(client, 's-1')
+
+  expect(await client.agentSession.list()).toEqual([
+    expect.objectContaining({ sessionId: 's-1', unread: false }),
+  ])
+  expect(signals).toEqual([{ type: 'agentSession', sessionId: 's-1' }])
+})
+
+test.each([
+  ['a claude just started', [['SessionStart', { source: 'startup' }]], false],
+  ['a turn that stopped', [['UserPromptSubmit'], ['Stop']], true],
+  ['a question', [['UserPromptSubmit'], ['PreToolUse', { tool_name: 'AskUserQuestion' }]], true],
+  ['a permission', [['UserPromptSubmit'], ['PermissionRequest', { tool_name: 'Bash' }]], true],
+  ['an API error', [['UserPromptSubmit'], ['StopFailure', { error: 'rate_limit' }]], true],
+  ['a notified wait the agent left to work again', [['Stop'], ['UserPromptSubmit']], false],
+  [
+    'a claude resumed after its notified wait',
+    [
+      ['Stop'],
+      ['SessionEnd', { reason: 'prompt_input_exit' }],
+      ['SessionStart', { source: 'resume' }],
+    ],
+    false,
+  ],
+] as [string, [string, object?][], boolean][])(
+  '%s is listed unread: %p',
+  async (_name, hooks, unread) => {
+    const { db, client } = setup()
+    seedTerminalSession(db, 'ts-a', 'running')
+
+    for (const [hookEventName, fields] of hooks) {
+      await client.agentSession.recordHook({
+        terminalSessionId: 'ts-a',
+        payload: payload('s-1', hookEventName, fields),
+      })
+    }
+
+    expect(await client.agentSession.list()).toEqual([
+      expect.objectContaining({ sessionId: 's-1', unread }),
+    ])
+  },
+)
+
+test('a second permission asked after the first was seen is unread again', async () => {
+  const { db, client } = setup()
+  seedTerminalSession(db, 'ts-a', 'running')
+  const askPermission = () =>
+    client.agentSession.recordHook({
+      terminalSessionId: 'ts-a',
+      payload: payload('s-1', 'PermissionRequest', { tool_name: 'Bash' }),
+    })
+  await askPermission()
+  await seeAsListed(client, 's-1')
+
+  await askPermission()
+
+  expect(await client.agentSession.list()).toEqual([
+    expect.objectContaining({ sessionId: 's-1', unread: true }),
+  ])
+})
+
+test('seeing an Agent Session with nothing unread writes nothing and signals nothing', async () => {
+  const { db, workbenchLedger, client } = setup()
+  seedTerminalSession(db, 'ts-a', 'running')
+  await client.agentSession.recordHook({
+    terminalSessionId: 'ts-a',
+    payload: payload('s-1', 'SessionStart', { source: 'startup' }),
+  })
+  const signals: unknown[] = []
+  onCleanup(workbenchLedger.events.subscribe('change', (change) => signals.push(change)))
+
+  await client.agentSession.markSeen({ sessionId: 's-1', notifiedAt: new Date(0) })
+
+  expect(rowOf(db, 's-1')).toMatchObject({ seenAt: null })
+  expect(signals).toEqual([])
+})
+
+test('seeing an Agent Session the Workbench Ledger does not know is NOT_FOUND', async () => {
+  const { client } = setup()
+
+  await expect(
+    client.agentSession.markSeen({ sessionId: 's-gone', notifiedAt: new Date(0) }),
+  ).rejects.toMatchObject({ code: 'NOT_FOUND' })
+})
+
+test('seeing a notification after a later one came leaves the later one unread and signals nothing', async () => {
+  const { db, workbenchLedger, client } = setup()
+  seedTerminalSession(db, 'ts-a', 'running')
+  onCleanup(() => setSystemTime())
+  const askPermissionAt = async (ms: number) => {
+    setSystemTime(new Date(ms))
+    await client.agentSession.recordHook({
+      terminalSessionId: 'ts-a',
+      payload: payload('s-1', 'PermissionRequest', { tool_name: 'Bash' }),
+    })
+  }
+  await askPermissionAt(1_000)
+  const [shown] = await client.agentSession.list()
+  await askPermissionAt(2_000)
+  const signals: unknown[] = []
+  onCleanup(workbenchLedger.events.subscribe('change', (change) => signals.push(change)))
+
+  await client.agentSession.markSeen({ sessionId: 's-1', notifiedAt: shown!.notifiedAt! })
+
+  expect(await client.agentSession.list()).toEqual([
+    expect.objectContaining({ sessionId: 's-1', unread: true }),
+  ])
+  expect(signals).toEqual([])
+})
+
+test('an unread wait stays unread across a Backend restart', async () => {
+  const { client, restartBackend, settled } = setup()
+  const { tab } = await client.runspace.create(size)
+  await settled(tab.terminalSessionId)
+  await client.agentSession.recordHook({
+    terminalSessionId: tab.terminalSessionId,
+    payload: payload('s-1', 'Stop'),
+  })
+
+  const after = restartBackend()
+  await after.workbenchLedger.start()
+
+  expect(await after.client.agentSession.list()).toEqual([
+    expect.objectContaining({ sessionId: 's-1', unread: true }),
+  ])
 })
 
 test('an Exit from ptyd ends the Agent Session in that Terminal Session', async () => {

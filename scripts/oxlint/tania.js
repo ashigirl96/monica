@@ -17,9 +17,47 @@ function looksUpPath(command) {
   )
 }
 
+function isFunction(node) {
+  return node?.type === 'ArrowFunctionExpression' || node?.type === 'FunctionExpression'
+}
+
 function isAsyncFunction(node) {
-  return (
-    (node?.type === 'ArrowFunctionExpression' || node?.type === 'FunctionExpression') && node.async
+  return isFunction(node) && node.async
+}
+
+// read が返す関数。read の中で走る callback（map など）は数えない。
+function returnedFunctions(read) {
+  if (read.body.type !== 'BlockStatement') return isFunction(read.body) ? [read.body] : []
+  const found = []
+  const visit = (node) => {
+    if (!node || typeof node.type !== 'string' || isFunction(node)) return
+    if (node.type === 'ReturnStatement' && isFunction(node.argument)) found.push(node.argument)
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'parent') continue
+      for (const item of Array.isArray(child) ? child : [child]) {
+        if (item && typeof item === 'object') visit(item)
+      }
+    }
+  }
+  for (const statement of read.body.body) visit(statement)
+  return found
+}
+
+function calls(node, name) {
+  if (!node || typeof node.type !== 'string') return false
+  if (
+    node.type === 'CallExpression' &&
+    node.callee.type === 'Identifier' &&
+    node.callee.name === name
+  ) {
+    return true
+  }
+  return Object.entries(node).some(
+    ([key, child]) =>
+      key !== 'parent' &&
+      (Array.isArray(child) ? child : [child]).some(
+        (item) => item && typeof item === 'object' && calls(item, name),
+      ),
   )
 }
 
@@ -116,6 +154,27 @@ export default {
               message:
                 '他の domain の table に直接書かない。書き込みは相手の domain の method を通す（docs/packages.md の「domain をまたぐ規則」）',
             })
+          },
+        }
+      },
+    },
+    // jotai は read の間に呼んだ get だけを依存に数えるので、返した関数の中の get は依存にならず、atom は変わらない。
+    'atom-deferred-get': {
+      create(context) {
+        return {
+          CallExpression(node) {
+            if (node.callee.type !== 'Identifier' || node.callee.name !== 'atom') return
+            const [read] = node.arguments
+            const get = isFunction(read) && read.params[0]
+            if (get?.type !== 'Identifier') return
+            for (const returned of returnedFunctions(read)) {
+              if (!calls(returned.body, get.name)) continue
+              context.report({
+                node: returned,
+                message:
+                  'atom の read の中で get で読み、読んだ値を返す関数に閉じ込める。返す関数の中の get は依存にならず、読む atom が変わっても描き直されない',
+              })
+            }
           },
         }
       },

@@ -19,7 +19,8 @@ tab.move                   { id, runspaceId, index }
 tab.setCwd                 { id, cwd }
 tab.pin / tab.unpin        { id }
 agentSession.recordHook    { terminalSessionId, payload } → void
-agentSession.list          → AgentSession[]                                                    cli
+agentSession.list          → (AgentSession & { unread })[]                                     cli
+agentSession.markSeen      { sessionId, notifiedAt } → void
 worktree.info              { cwd } → { repo, branch } | null
 editor.resolve             { cwd, candidates } → (string | null)[]
 editor.open                { path } → void
@@ -88,7 +89,7 @@ ptyd への Create・Write・Terminate は、行を書いた transaction の後�
 - exited / lost / failed の `terminal_session` と、終了の `agent_session` の行は消さない。Run の行は履歴として消さず（Task v1）、`run.agent_session_id` → `agent_session.terminal_session_id` の FK が残るため。1 行は 200 byte 程度で、GC の読み手もいない。
 - 一覧は画面が使う行に絞る。
   - `terminalSession.list` は、live か Tab に指されている行だけを返す。Detached グループと Tab の overlay の材料。webview は Shell から Exit を受けた Terminal Session と自分が終了を頼んだ Terminal Session を、一覧が live と言っていても exited として扱い、Detached に出さない（Backend が exit を記録するまで行は live のままなので）。接続中の Tab が Exit で閉じる間は、overlay も dot も出さない。CLI の `tania workbench terminal-session list` も同じものを出す。
-  - `agentSession.list` は、終了でない行だけを返す。status dot の材料（`docs/packages/workbench-ui-state.md`）。
+  - `agentSession.list` は、終了でない行だけを返す。status dot と未読の材料（`docs/packages/workbench-ui-state.md`）。
 
 ## Agent Session の終了と未観測
 
@@ -98,6 +99,18 @@ ADR-0008 の「Backend 起動時」と ADR-0011 の reconcile の規則のうち
 - Terminal Session の行が終わるとき（ptyd の Exit、reconcile の lost / exited）、同じ transaction で、その Terminal Session の終了でない Agent Session を終了（terminal_exited）にする。
 - 生きている Terminal Session の動作中の Agent Session を未観測にするのは、Backend の起動直後の reconcile だけ。ptyd に繋ぎ直したときの reconcile では動作中のままにする。その間も Backend は居て hook を受けていたため。
 - reconcile が終了や未観測にした Agent Session も、`reconciled` の前に 1 つずつ `{ type: "agentSession", sessionId }` で知らせる。`agentSession` の合図だけを読む購読側（task の Run）にも、ptyd に繋ぎ直したときの終了が届くようにするため。
+
+## 未読
+
+`GLOSSARY.md` の未読を Workbench Ledger で守る。Workbench Ledger に置く理由は ADR-0021。画面の出し方は `docs/packages/workbench-ui-state.md` の「未読」にある。
+
+- `agent_session` に、今の待ちを通知した時刻 `notified_at` と見た時刻 `seen_at` を置く。どちらも Agent Session が状態に入り直すたび（`transition` の `enter`。待ちの理由が変わるときと、許可の新しい待ちを含む）に空にする。
+- `recordHook` は、`notificationFor` が理由を返した遷移の行に、同じ transaction で `notified_at` を書く。通知はどれも状態に入り直す遷移で出るので、通知した待ちの `seen_at` は空から始まる。
+- 未読は `notified_at` があり `seen_at` が空のこと。`agentSession.list` が行ごとに `unread` として導いて渡し、webview は導かない。時刻を比べず空かどうかで決めるのは、同じ ms に見たことと次の通知が重なっても取りこぼさないため。
+- 待ちが解けると（動作中・終了・未観測）、入り直しで両方が空になるので未読でなくなる。通知を出さない待ち（起動・resume の直後の手空き）は `notified_at` が空なので未読にならない。
+- 同じ待ちの間の通知は 1 つの未読と数える。許可を 2 回求めると待ちに入り直すので、1 回目を見た後でも未読に戻る。
+- `agentSession.markSeen { sessionId, notifiedAt }` は、未読の行の `notified_at` が渡された `notifiedAt`（webview が見た通知の時刻）と同じときだけ、`seen_at` に今の時刻を書き、`{ type: "agentSession", sessionId }` を publish する。webview が見てから届くまでの間に同じ Agent Session に次の通知が出ても、まだ見ていないその通知を既読にしないため。それ以外の行には何も書かず、合図も出さない。webview が同じ未読に重ねて呼んでも、読み直しが連鎖しないようにするため。無い session は `NOT_FOUND`。
+- 未読は Backend の再起動をまたいで残る。reconcile は待ちの行を動かさない（未観測にするのは動作中の行だけ）。
 
 ## Tab の外から来た hook
 

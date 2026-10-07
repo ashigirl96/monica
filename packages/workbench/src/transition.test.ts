@@ -22,6 +22,8 @@ const blank = {
   sessionEndReason: null,
   endedAt: null,
   unobservedSince: null,
+  notifiedAt: null,
+  seenAt: null,
 } satisfies Partial<AgentSession>
 
 type StateFields = Partial<AgentSession>
