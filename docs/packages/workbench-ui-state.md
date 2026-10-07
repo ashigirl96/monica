@@ -15,15 +15,15 @@ Workbench Ledger に載せない Workbench の画面の状態と、sidebar の R
 左端に Repo の札を縦に並べたレールを置き、選んだ札の Runspace を右の一覧に出す。見た目は #191 の canvas の E3。
 
 - Runspace の Repo（`GLOSSARY.md`）は、Bench なら slot `benchLabelOf` が返す Task の Repo、ほかは一番左の Tab の cwd（Tab が無ければ Runspace の cwd）を `repo.of` で引いたもの（`docs/packages/desktop.md`）。active な Tab で決めないのは、Tab を切り替えても行が別の札へ移らないようにするため。Detached の Terminal Session は、その行の cwd（Tab が閉じる前に最後に知らせた cwd。`docs/packages/workbench-ledger.md` の `tab.cwd`）で引く。
-- 札は Repo ごとに 1 つ置き、Pinned を除いた Runspace の並び、続いて Detached の並びで最初に出てきた順に並べる。drag での並べ替えは無い。Repo の外の札（「その他」、folder の icon）は区切り線の下の一番下に置き、行が無くても出す。
+- 札は Repo ごとに 1 つ置き、Pinned を除いた Runspace の並び、続いて Detached の並びで最初に出てきた順に並べる。drag での並べ替えは無い。札の key は Repo 名を小文字にしたもので、Task の Repo（GitHub の nameWithOwner）と checkout の path の大小文字が違っても同じ札にまとめる。GitHub の Repo 名は大小文字を区別しないため。Repo の外の札（「その他」、folder の icon）は区切り線の下の一番下に置き、行が無くても出す。
 - 札の字は repo 名の頭文字、色は repo 名から 8 色の 1 つを決まって選ぶ。dot の緑・琥珀・赤は使わない。
 - 選んだ札の repo 名と owner は、sidebar の上端の Workbench の札の右に出す。Repo の外の札を選んでいるときは何も出さない。
 - ⌘1〜⌘9 は上から 1〜9 番目の Repo の札を、⌘0 は Repo の外の札を選ぶ（Slack の workspace の切り替えにならう）。札を押すのと違い、その札で最後に active だった Runspace を、その Runspace で active だった Tab ごと active にし（未読の Tab へは移らない）、選んだ札を active な Runspace に従わせる。「最後に active」は、この session で active にした順と、起動したときに戻した active な Runspace から決める。その札の Runspace をどれも active にしていなければ、札の Ledger の並びで先頭の Runspace を、札に Runspace が無ければ札だけを選び、active な Runspace は変えない。番号の札が無ければ何もしない。札の title に番号を出す。⌘ だけを 0.1 秒押し続けると、Repo の各札の右上に repo 名を、9 番目までの札には番号も添えて出し（Repo の外の札には出さない）、⌘ を離すか、ほかのキー・click・窓の focus が外れると消す。⌘ を押したまま札の列を scroll しても、名前は付いていかない。
 - cd や Tab の移動で一番左の Tab の Repo が替わり、Pinned でも Bench でもない Runspace が前にいた Repo と別の Repo に入ったら、webview がその Runspace を Workbench Ledger の並びの末尾へ動かす（`runspace.move`）。Repo の外で始まった Runspace が初めて Repo に入ったときも動かす。行は入った札の一番下に出て、札の無かった Repo の札は、ほかの Runspace のある Repo の札の下に足される。抜けた札は、その Runspace が札の並びを決めていた（札の先頭の行だった）なら、下がって ⌘ の番号が変わることがある。Repo が初めて引けて札が決まるとき（起動したときや Runspace を作ったとき）、Repo の外へ出たとき、外から前と同じ Repo へ戻ったときは、drag で並べた位置を崩さないよう動かさない。
 - 一覧の上には、どの札を選んでも Pinned（pin された Tab を持つ Runspace）を出す。Pinned の行はどの札にも入らない。
 - 選んだ札の中は、上から Bench・Runspaces・Detached のセクションに分け、行の無いセクションは出さない。セクションが 2 つ以上あるときだけ見出しを出し、見出しを押すと畳む。畳むと行を全部隠し、見出しに行の数と未読の Tab の数を出す。見出しの無いセクションは、前に畳んでいても行を出す。
-- Runspace を active にする経路（行、jump hint、key で巡る、Runspace を作る、Tab が移る）が Pinned でない Runspace へ移すと、選んだ札はその Runspace の札に従う（UI 状態の札を null にする）。札の key を書き込まないのは、Repo が `repo.of` を待って後から決まるので、決まる前の「Repo の外」に札を固定しないため。Pinned の Runspace へ移すと、そのとき見えていた札に留める。札を押すとその札に固定し、active な Runspace は変えない。選んだ札が無くなっていれば active な Runspace の札を、それも無ければ先頭の札を出す。起動の直後に保存した札がまだ無くても、保存した値は消さない。
-- key で巡る（⌥J / ⌥K）のと jump hint は、画面に見えている行（Pinned と、選んだ札の開いたセクション）を上から順に扱い、畳んだセクションの行は飛ばす。別の Repo の札へは ⌘ の数字で移り、巡っても札をまたがない（Repo の札が 9 を超えると、10 番目からの Repo の札へはキーで移れない）。
+- Runspace を active にする経路（行、jump hint、key で巡る、Runspace を作る、Tab が移る）が Pinned でない Runspace へ移すと、選んだ札はその Runspace の札に従う（UI 状態の札を null にする）。札の key を書き込まないのは、Repo が `repo.of` を待って後から決まるので、決まる前の「Repo の外」に札を固定しないため。Pinned の Runspace へ移すときと、Tab を pin して active な Runspace が Pinned になるときは、そのとき見えていた札に留める。札を押すとその札に固定し、active な Runspace は変えない。選んだ札が無くなっていれば active な Runspace の札を、それも無ければ先頭の札を出す。起動の直後に保存した札がまだ無くても、保存した値は消さない。
+- key で巡る（⌥J / ⌥K）のと jump hint は、画面に見えている行（Pinned と、選んだ札の開いたセクション）を上から順に扱い、畳んだセクションの行は飛ばす。active な行が見えていないとき（畳んだセクションにあるときや、ほかの札を覗いているとき）は、下へは先頭の行から、上へは末尾の行から巡る。別の Repo の札へは ⌘ の数字で移り、巡っても札をまたがない（Repo の札が 9 を超えると、10 番目からの Repo の札へはキーで移れない）。
 - Runspace の並べ替え（drag と ⌃⇧↑↓）は同じセクションの中に限る。Workbench Ledger の並びは 1 本なので、セクションをまたいで動かしても見た目の位置にならないため。key で下へ動かすときは、自分を下の行の位置へ動かさず、下の行を自分の位置へ動かす。札の順はセクションの先頭の行の位置で決まるので、間にある別の Repo の Runspace を越えると札の順が入れ替わるため。
 
 ### 行

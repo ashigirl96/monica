@@ -52,7 +52,7 @@ const RAIL_HUES = [
 
 function hueOf(repo: string) {
   let hash = 0
-  for (const char of repo) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
+  for (const char of repo.toLowerCase()) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
   return RAIL_HUES[hash % RAIL_HUES.length]!
 }
 
