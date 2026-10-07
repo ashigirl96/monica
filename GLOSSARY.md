@@ -76,8 +76,12 @@ Tab の中で動く agent が自分で名乗るセッション。同一性は ag
 1 つの Terminal Session で live な（終了でない）Agent Session は 1 つだけ。
 _Avoid_: session, agent status on Terminal Session, stopped（手空きと終了が紛れる）, plan 待ち（許可の一種）
 
+**Agent Session の title**:
+agent が Agent Session の会話に付ける短い名前。claude は Tab の title に出し、自分の会話の記録（hook が渡す `transcript_path`）にも残す。会話が進むと付け直され、短い会話には付かない。同じ repo で開いた複数の Tab のうち、どれの待ちかを通知で見分けるのに使う。
+_Avoid_: Tab の title（shell や claude 以外の program も出す、Tab の帯の表示）, session 名
+
 **通知**:
-Agent Session がユーザー待ちに入ったことを知らせる macOS の通知。質問とエラーはその理由の待ちに入るたびに出し、許可は許可を求められるたびに出し（許可待ちの間に次の許可を求められても出す）、手空きは turn が終わった時だけ出す。claude の起動や resume の直後の手空きでは出さない。Task に属する Agent Session は Task の Issue の参照と title で、それ以外は agent の cwd で呼ぶ。desktop が動いている間だけ出し、待ちが解けても取り下げない。
+Agent Session がユーザー待ちに入ったことを知らせる macOS の通知。質問とエラーはその理由の待ちに入るたびに出し、許可は許可を求められるたびに出し（許可待ちの間に次の許可を求められても出す）、手空きは turn が終わった時だけ出す。claude の起動や resume の直後の手空きでは出さない。Task に属する Agent Session は Task の Issue の参照と title で、それ以外は agent の cwd で呼ぶ。本文は待ちの理由に Agent Session の title を添え、title が無ければ理由だけにする。desktop が動いている間だけ出し、待ちが解けても取り下げない。
 _Avoid_: 待ち通知, alert
 
 ### Job
