@@ -63,11 +63,13 @@ export type Rail = {
 }
 
 // railKeys は Pinned でない Runspace ごとの札で、畳んだセクションの行も含む。
+// cwdRailKeys はそのうち、Task が持たず、一番左の Tab の cwd の Repo が引けた Runspace の札。
 export type Sidebar = {
   pinned: RunspaceRow[]
   rails: Rail[]
   selected: Rail
   railKeys: Record<string, string>
+  cwdRailKeys: Record<string, string>
 }
 
 export type SidebarInput = {
@@ -82,9 +84,6 @@ export type SidebarInput = {
   railChoice: string | null
   collapsed: ReadonlySet<string>
 }
-
-// Claude Code が title の頭に付ける spinner は動作中の印で、Agent の状態は Tab の dot が出す。
-const SPINNER = /^[·✢✳✶✻✽]\s*/
 
 export function isPathTitle(title: string): boolean {
   return title === '~' || title.startsWith('~/') || title.startsWith('/')
@@ -107,14 +106,18 @@ function holdsPin(runspace: Runspace): boolean {
   return runspace.tabs.some((t) => t.pinned)
 }
 
+// 一番左の Tab で決めるので、Tab を切り替えても行は別の札へ移らない。
+function leftmostCwd(runspace: Runspace): string {
+  return runspace.tabs[0]?.cwd ?? runspace.cwd
+}
+
 function runspaceRow(input: SidebarInput, runspace: Runspace): RunspaceRow {
   const bench = runspace.owned ? input.benchLabelOf(runspace.id) : null
-  // 一番左の Tab で決めるので、Tab を切り替えても行は別の札へ移らない。
-  const leftmost = runspace.tabs[0]?.cwd ?? runspace.cwd
+  const leftmost = leftmostCwd(runspace)
   const tab = input.activeTabOf(runspace)
   const cwd = tab?.cwd ?? runspace.cwd
-  const plain = (tab && input.titles[tab.id]?.replace(SPINNER, '')) ?? ''
-  const terminalTitle = isPathTitle(plain) ? '' : plain
+  const raw = (tab && input.titles[tab.id]) ?? ''
+  const terminalTitle = isPathTitle(raw) ? '' : raw
   const place = input.places[cwd]
   const path = pathOf(cwd, place)
   return {
@@ -193,12 +196,34 @@ export function buildSidebar(input: SidebarInput): Sidebar {
   const railKeys = Object.fromEntries(
     listed.filter((r) => r.type === 'runspace').map((r) => [r.id, railKey(r)]),
   )
+  const cwdRailKeys = Object.fromEntries(
+    input.runspaces
+      .filter((r) => r.id in railKeys && !r.owned && input.places[leftmostCwd(r)])
+      .map((r) => [r.id, railKeys[r.id]!]),
+  )
   const active = input.activeRunspaceId && railKeys[input.activeRunspaceId]
   const selected =
     rails.find((r) => r.key === input.railChoice) ??
     rails.find((r) => r.key === active) ??
     rails[0]!
-  return { pinned: runspaces.filter((r) => r.pinned).map((r) => r.row), rails, selected, railKeys }
+  return {
+    pinned: runspaces.filter((r) => r.pinned).map((r) => r.row),
+    rails,
+    selected,
+    railKeys,
+    cwdRailKeys,
+  }
+}
+
+// Repo の外の札は常に最後にある。
+export function railNumberOf(sidebar: Sidebar, key: string): number | null {
+  if (key === OUTSIDE) return 0
+  const n = sidebar.rails.findIndex((r) => r.key === key) + 1
+  return n >= 1 && n <= 9 ? n : null
+}
+
+export function railAt(sidebar: Sidebar, n: number): Rail | undefined {
+  return sidebar.rails.find((r) => railNumberOf(sidebar, r.key) === n)
 }
 
 function runspaceRowsOf(rows: SidebarRow[]): RunspaceRow[] {
@@ -211,10 +236,6 @@ function shownRunspaceRowsOf(rail: Rail): RunspaceRow[] {
 
 export function shownRunspaceIds(sidebar: Sidebar): string[] {
   return [...sidebar.pinned, ...shownRunspaceRowsOf(sidebar.selected)].map((r) => r.id)
-}
-
-export function cycledRunspaceIds(sidebar: Sidebar): string[] {
-  return [...sidebar.pinned, ...sidebar.rails.flatMap(shownRunspaceRowsOf)].map((r) => r.id)
 }
 
 // Workbench Ledger の並びは 1 本なので、並べ替えは同じセクションの中に限る。

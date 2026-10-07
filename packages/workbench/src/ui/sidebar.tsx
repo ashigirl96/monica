@@ -1,14 +1,16 @@
 import { ChevronRightIcon, cn, FolderIcon, PinIcon, useDragReorder } from '@tania/ui'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { useState } from 'react'
+import { type RefObject, useLayoutEffect, useRef, useState } from 'react'
 
 import { UNREAD_LABEL_STYLE } from './agent-dot.ts'
 import { JumpHint } from './jump-hint.tsx'
 import { jumpHintTargetsAtom } from './jump-hints.ts'
+import { metaHeldAtom } from './meta-hold.ts'
 import {
   type DetachedRow,
   type ListedIn,
   type Rail,
+  railNumberOf,
   repoName,
   type RowMeta,
   rowMetaOf,
@@ -75,42 +77,82 @@ function UnreadCount({ count, className }: { count: number; className?: string }
 
 function RailButton({
   rail,
+  number,
   selected,
   onPick,
 }: {
   rail: Rail
+  number: number | null
   selected: boolean
   onPick: () => void
 }) {
   const label = rail.repo ?? OUTSIDE_LABEL
   const hue = rail.repo ? hueOf(rail.repo) : null
+  const metaHeld = useAtomValue(metaHeldAtom)
+  const button = useRef<HTMLButtonElement>(null)
   return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={selected}
-      aria-label={withUnread(label, rail.unreadCount)}
-      title={label}
-      onClick={onPick}
-      className={cn(
-        'relative flex size-[30px] shrink-0 items-center justify-center text-xs leading-none font-bold',
-        'transition-[border-radius,filter] duration-150 hover:brightness-125 motion-reduce:transition-none',
-        'focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-white/50',
-        selected ? 'rounded-[7px] ring-[1.5px] ring-white/55' : 'rounded-[9px]',
-        !hue && 'bg-white/[0.08] text-white/75',
+    <>
+      {metaHeld && rail.repo && (
+        <RailName anchor={button} label={repoName(rail.repo)} number={number} />
       )}
-      style={hue ? { background: hue.bg, color: hue.fg } : undefined}
+      <button
+        ref={button}
+        type="button"
+        role="tab"
+        aria-selected={selected}
+        aria-label={withUnread(label, rail.unreadCount)}
+        aria-keyshortcuts={number === null ? undefined : `Meta+${number}`}
+        title={number === null ? label : `${label} (⌘${number})`}
+        onClick={onPick}
+        className={cn(
+          'relative flex size-[30px] shrink-0 items-center justify-center text-xs leading-none font-bold',
+          'transition-[border-radius,filter] duration-150 hover:brightness-125 motion-reduce:transition-none',
+          'focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-white/50',
+          selected ? 'rounded-[7px] ring-[1.5px] ring-white/55' : 'rounded-[9px]',
+          !hue && 'bg-white/[0.08] text-white/75',
+        )}
+        style={hue ? { background: hue.bg, color: hue.fg } : undefined}
+      >
+        {rail.repo ? (
+          repoName(rail.repo).charAt(0).toUpperCase()
+        ) : (
+          <FolderIcon size={14} strokeWidth={2} />
+        )}
+        <UnreadCount
+          count={rail.unreadCount}
+          className="absolute -top-[5px] -right-[7px] ring-2 ring-zinc-900"
+        />
+      </button>
+    </>
+  )
+}
+
+// 札の列は縦に scroll する箱で横にはみ出した分が切れるので、名前は fixed で箱から出し、描く前に札の右上へ合わせる。
+function RailName({
+  anchor,
+  label,
+  number,
+}: {
+  anchor: RefObject<HTMLButtonElement | null>
+  label: string
+  number: number | null
+}) {
+  const ref = useRef<HTMLSpanElement>(null)
+  useLayoutEffect(() => {
+    const rect = anchor.current?.getBoundingClientRect()
+    if (!rect || !ref.current) return
+    ref.current.style.left = `${rect.right - 6}px`
+    ref.current.style.top = `${rect.top - 7}px`
+  })
+  return (
+    <span
+      ref={ref}
+      aria-hidden
+      className="pointer-events-none fixed z-50 flex items-center gap-1.5 rounded-md bg-zinc-800 px-1.5 py-0.5 text-[11px] leading-[15px] font-semibold whitespace-nowrap text-white/90 shadow-lg ring-1 ring-white/15"
     >
-      {rail.repo ? (
-        repoName(rail.repo).charAt(0).toUpperCase()
-      ) : (
-        <FolderIcon size={14} strokeWidth={2} />
-      )}
-      <UnreadCount
-        count={rail.unreadCount}
-        className="absolute -top-[5px] -right-[7px] ring-2 ring-zinc-900"
-      />
-    </button>
+      {label}
+      {number !== null && <span className="font-normal text-white/45">⌘{number}</span>}
+    </span>
   )
 }
 
@@ -282,20 +324,22 @@ function SectionHeader({ railKey, section }: { railKey: string; section: Sidebar
   )
 }
 
-function RailHeading({ rail }: { rail: Rail }) {
-  const owner = rail.repo?.slice(0, rail.repo.indexOf('/'))
+export function RailHeading() {
+  const { repo } = useAtomValue(sidebarAtom).selected
+  if (!repo) return null
   return (
-    <div className="flex min-w-0 items-baseline gap-1.5 px-2 pt-2.5 pb-0.5">
+    <div className="flex min-w-0 items-baseline gap-1.5">
       <span className="max-w-[75%] shrink-0 truncate text-sm font-semibold text-white/90">
-        {rail.repo ? repoName(rail.repo) : OUTSIDE_LABEL}
+        {repoName(repo)}
       </span>
-      {owner && <span className="truncate text-[10px] text-white/50">{owner}</span>}
+      <span className="truncate text-[10px] text-white/50">{repo.slice(0, repo.indexOf('/'))}</span>
     </div>
   )
 }
 
 export function WorkbenchSidebar() {
-  const { pinned, rails, selected } = useAtomValue(sidebarAtom)
+  const sidebar = useAtomValue(sidebarAtom)
+  const { pinned, rails, selected } = sidebar
   const activate = useSetAtom(activateRunspaceAtom)
   const selectRail = useSetAtom(railChoiceAtom)
   const reorder = useSetAtom(reorderRunspacesAtom)
@@ -317,6 +361,7 @@ export function WorkbenchSidebar() {
     <RailButton
       key={rail.key}
       rail={rail}
+      number={railNumberOf(sidebar, rail.key)}
       selected={rail.key === selected.key}
       onPick={() => selectRail(rail.key)}
     />
@@ -344,7 +389,6 @@ export function WorkbenchSidebar() {
             {pinned.map((row) => renderRunspace(row, 'pinned'))}
           </div>
         )}
-        <RailHeading rail={selected} />
         {selected.sections.map((section) => (
           <div key={section.kind} className="mt-2 flex flex-col gap-0.5">
             {section.headed && <SectionHeader railKey={selected.key} section={section} />}

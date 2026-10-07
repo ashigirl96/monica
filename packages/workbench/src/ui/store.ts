@@ -1,6 +1,6 @@
 import type { ContractRouterClient } from '@orpc/contract'
 import { type PopoverAnchor, pushErrorToast, pushInfoToast } from '@tania/ui'
-import { atom, type Getter, type Setter } from 'jotai'
+import { atom, type Getter, type Setter, type Store } from 'jotai'
 import { atomWithDefault } from 'jotai/utils'
 
 import type { contract, Layout, ListedAgentSession, RepoPlace, Tab } from '../contract.ts'
@@ -9,9 +9,11 @@ import { jumpHintsActiveAtom } from './jump-hints.ts'
 import {
   type BenchLabelOf,
   buildSidebar,
-  cycledRunspaceIds,
   isPathTitle,
+  OUTSIDE,
+  railAt,
   sectionPeersOf,
+  shownRunspaceIds,
   type Sidebar,
 } from './sidebar-model.ts'
 import { getTabTerminal, releaseTabConnection } from './terminal-connections.ts'
@@ -168,6 +170,9 @@ export const copyActiveAgentSessionIdAtom = atom(null, (get): boolean => {
   return true
 })
 
+// 札の Repo は repo.of を待って後から決まるので、札ごとではなく Runspace の id を新しい順に覚えておく。
+const recentRunspaceIdsAtom = atom<string[]>([])
+
 // 切り替えはすべてここを通るので、jump hint を閉じるのも、選んだ札を active な Runspace の札に合わせるのもここで行う。
 const setActiveAtom = atom(null, (get, set, next: { runspaceId: string; tabId?: string }) => {
   const before = [get(activeRunspaceAtom)?.id, get(activeTerminalTabAtom)?.id]
@@ -175,6 +180,10 @@ const setActiveAtom = atom(null, (get, set, next: { runspaceId: string; tabId?: 
   const chosenBefore = get(activeRunspaceIdAtom)
   const shownRail = get(sidebarAtom).selected.key
   set(activeRunspaceIdAtom, next.runspaceId)
+  // 起動時に戻した active な Runspace はここを通っていないので、離れるときに積む。
+  set(recentRunspaceIdsAtom, (prev) => [
+    ...new Set([next.runspaceId, ...(before[0] ? [before[0]] : []), ...prev]),
+  ])
   const { tabId } = next
   if (tabId) set(activeTabIdsAtom, (prev) => ({ ...prev, [next.runspaceId]: tabId }))
   const after = [get(activeRunspaceAtom)?.id, get(activeTerminalTabAtom)?.id]
@@ -317,6 +326,29 @@ export const sidebarAtom = atom((get): Sidebar =>
     collapsed: get(collapsedSectionsAtom),
   }),
 )
+
+// 札の click は一覧を覗くだけにしてあるので、Runspace まで移るのは数字のキーだけにする。
+export const pickRailAtom = atom(null, (get, set, n: number): boolean => {
+  const sidebar = get(sidebarAtom)
+  const rail = railAt(sidebar, n)
+  if (!rail) return false
+  const underRail = (id: string | undefined): id is string =>
+    id !== undefined && sidebar.railKeys[id] === rail.key
+  const runspaceId =
+    [get(activeRunspaceAtom)?.id, ...get(recentRunspaceIdsAtom)].find(underRail) ??
+    get(layoutAtom)
+      ?.runspaces.map((r) => r.id)
+      .find(underRail)
+  if (!runspaceId) {
+    set(railChoiceAtom, rail.key)
+    return true
+  }
+  set(setActiveAtom, { runspaceId })
+  set(terminalFocusRequestAtom, (c) => c + 1)
+  // 開いた Runspace が既に active でも、覗いていた札から戻すために従わせ直す。
+  set(railChoiceAtom, null)
+  return true
+})
 
 export const toggleSectionAtom = atom(null, (_get, set, key: string) =>
   set(collapsedSectionsAtom, (prev) => {
@@ -517,8 +549,9 @@ function cycle<T>(items: T[], current: T | null | undefined, step: 1 | -1): T | 
   return items[(index + step + items.length) % items.length]
 }
 
+// 別の Repo の札へは ⌘ の数字で移るので、巡るのは見えている行だけにする。
 export const cycleRunspaceAtom = atom(null, (get, set, direction: 'up' | 'down') => {
-  const ids = cycledRunspaceIds(get(sidebarAtom))
+  const ids = shownRunspaceIds(get(sidebarAtom))
   if (ids.length <= 1) return
   const next = cycle(ids, get(activeRunspaceAtom)?.id, direction === 'up' ? -1 : 1)
   if (next) set(setActiveAtom, { runspaceId: next })
@@ -532,11 +565,15 @@ export const cycleTerminalTabAtom = atom(null, (get, set, direction: 'left' | 'r
 })
 
 // 札とセクションは Workbench Ledger の並びより先に効くので、セクションをまたいで動かしても見た目の位置にならない。
+async function moveRunspace(get: Getter, set: Setter, id: string, index: number) {
+  await clientOf(get).runspace.move({ id, index })
+  await set(reloadAtom)
+}
+
 async function moveRunspaceTo(get: Getter, set: Setter, id: string, toId: string) {
   if (!sectionPeersOf(get(sidebarAtom), id).includes(toId)) return
   const index = (get(layoutAtom)?.runspaces ?? []).findIndex((r) => r.id === toId)
-  await clientOf(get).runspace.move({ id, index })
-  await set(reloadAtom)
+  await moveRunspace(get, set, id, index)
 }
 
 async function moveTab(get: Getter, set: Setter, id: string, runspaceId: string, index: number) {
@@ -545,6 +582,37 @@ async function moveTab(get: Getter, set: Setter, id: string, runspaceId: string,
 }
 
 export const reorderRunspacesAtom = action(moveRunspaceTo)
+
+const moveRunspaceToEndAtom = atom(null, (get, set, id: string) =>
+  moveRunspace(get, set, id, (get(layoutAtom)?.runspaces.length ?? 0) - 1),
+)
+
+// 札も札の中の行も Workbench Ledger の並びで決まるので、別の Repo に入った Runspace は末尾へ送って一番下に出す。
+export function appendRunspacesJoiningRail(store: Store): () => void {
+  // まだどの Repo にも入っていない Runspace は OUTSIDE を持つ。
+  const lastRepoRails: Record<string, string> = {}
+  const check = () => {
+    const { cwdRailKeys } = store.get(sidebarAtom)
+    const joined: string[] = []
+    for (const [id, key] of Object.entries(cwdRailKeys)) {
+      // Repo の外への出入りでも動かすと、cd ~ して戻るだけで drag で並べた位置が崩れる。
+      if (key === OUTSIDE) {
+        lastRepoRails[id] ??= OUTSIDE
+        continue
+      }
+      // Repo が初めて引けたときに動かすと、起動のたびに並びが崩れる。
+      if (id in lastRepoRails && lastRepoRails[id] !== key) joined.push(id)
+      lastRepoRails[id] = key
+    }
+    for (const id of joined) {
+      store.set(moveRunspaceToEndAtom, id).catch((e: unknown) => {
+        if (!isGone(e)) warnFailed('runspace move', e)
+      })
+    }
+  }
+  check()
+  return store.sub(sidebarAtom, check)
+}
 
 export const reorderTabsAtom = action(async (get, set, fromId: string, toId: string) => {
   const runspace = get(activeRunspaceAtom)
