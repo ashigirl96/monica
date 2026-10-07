@@ -6,6 +6,8 @@ disable-model-invocation: true
 
 spec または ticket でユーザーが記述した作業を実装する。ticket は `docs/agents/issue-tracker.md` の「issue を読む」の形で取る。
 
+作業は `issue-<番号>` の branch で行う。今の branch の名前が違えば、`git fetch origin main` してから `git switch --no-track -c issue-<番号> origin/main` で切る。worktree は前の ticket の branch のまま渡されることがあり、その branch は squash merge 済みでも origin/main に無い commit を残している。/create-pr も branch の名前から `Closes #<番号>` を書く。
+
 可能な限り、事前に合意した seam（振る舞いを差し替えられる場所）で `mattpocock-skills:tdd` を使う。
 
 型チェック、触った file の lint（`bunx oxlint <file>…`）、単一テストファイルの実行は定期的に、テストスイート全体の実行は最後に 1 回行う。lint だけが捕まえる違反（`no-shadow` など）で、全体の検査をやり直さないため。

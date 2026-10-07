@@ -270,7 +270,7 @@ test.each([
   ['StopFailure', 'エラー: rate_limit · Tania通知の問題', { error: 'rate_limit' }],
   ['StopFailure', 'エラー · Tania通知の問題', {}],
 ])(
-  'a notification on %s puts the Agent Session title from the transcript after the reason: %s',
+  'a notification on %s puts the Agent Session title from the Agent Session Transcript after the reason: %s',
   async (hookEventName, body, fields) => {
     const sent = await notificationsOn(hookEventName, fields, (home) =>
       writeTranscript(home, [
@@ -283,7 +283,7 @@ test.each([
   },
 )
 
-test('the last ai-title in the transcript is the Agent Session title when the conversation was renamed', async () => {
+test('the last ai-title in the Agent Session Transcript is the Agent Session title when the conversation was renamed', async () => {
   const sent = await notificationsOn('Stop', {}, (home) =>
     writeTranscript(home, [
       aiTitle('最初の名前'),
@@ -296,7 +296,7 @@ test('the last ai-title in the transcript is the Agent Session title when the co
   expect(sent).toEqual([{ title: 'src/tania', body: '手空き · 今の名前' }])
 })
 
-test('an ai-title near the end of a transcript longer than 64 KiB is the Agent Session title', async () => {
+test('an ai-title near the end of an Agent Session Transcript longer than 64 KiB is the Agent Session title', async () => {
   const sent = await notificationsOn('Stop', {}, (home) =>
     writeTranscript(home, [
       aiTitle('古い名前'),
@@ -310,10 +310,10 @@ test('an ai-title near the end of a transcript longer than 64 KiB is the Agent S
 })
 
 test.each([
-  ['the transcript does not exist', (home: string) => join(home, 'gone.jsonl')],
-  ['the hook gives no transcript', () => undefined],
+  ['the Agent Session Transcript does not exist', (home: string) => join(home, 'gone.jsonl')],
+  ['the hook gives no transcript_path', () => undefined],
   [
-    'the transcript has no ai-title',
+    'the Agent Session Transcript has no ai-title',
     (home: string) =>
       writeTranscript(home, [JSON.stringify({ type: 'user', message: { content: 'hi' } })]),
   ],
