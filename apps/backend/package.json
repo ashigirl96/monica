@@ -10,5 +10,9 @@
     "@tania/workbench": "workspace:*",
     "drizzle-orm": "catalog:",
     "hono": "catalog:"
+  },
+  "devDependencies": {
+    "@orpc/client": "catalog:",
+    "@orpc/contract": "catalog:"
   }
 }

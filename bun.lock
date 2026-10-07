@@ -23,6 +23,10 @@
         "drizzle-orm": "catalog:",
         "hono": "catalog:",
       },
+      "devDependencies": {
+        "@orpc/client": "catalog:",
+        "@orpc/contract": "catalog:",
+      },
     },
     "apps/cli": {
       "name": "@tania/cli",
@@ -41,6 +45,7 @@
         "zod": "catalog:",
       },
       "devDependencies": {
+        "@tania/note": "workspace:*",
         "drizzle-orm": "catalog:",
       },
     },

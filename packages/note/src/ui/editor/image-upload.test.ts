@@ -2,8 +2,9 @@
 import { describe, expect, test } from 'bun:test'
 
 import { history, undoDepth } from 'prosemirror-history'
-import type { Node as PMNode } from 'prosemirror-model'
-import { EditorState } from 'prosemirror-state'
+import { type Node as PMNode, Slice } from 'prosemirror-model'
+import { EditorState, type Transaction } from 'prosemirror-state'
+import type { EditorView } from 'prosemirror-view'
 
 import { EMPTY_DOC } from '../../body/index.ts'
 import { docFromJSON } from './create-editor.ts'
@@ -138,6 +139,124 @@ describe('upload state machine + appendTransaction swap', () => {
     expect(entry?.status).toBe('done')
     expect(entry?.doneUrl).toBe('/api/assets/a.png')
     expect(imageNodes(s2.doc)).toHaveLength(0)
+  })
+})
+
+// 破棄済みの EditorView への dispatch は updateState の中で throw する。
+function destroyableView(state: EditorState) {
+  const view = {
+    state,
+    isDestroyed: false,
+    dispatchedAfterDestroy: 0,
+    dispatch(tr: Transaction) {
+      if (view.isDestroyed) view.dispatchedAfterDestroy++
+      else view.state = view.state.apply(tr)
+    },
+  }
+  return view
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((r) => {
+    resolve = r
+  })
+  return { promise, resolve }
+}
+
+describe('エディタが破棄された後の完了', () => {
+  test('upload が済む前に破棄されたら、完了を dispatch しない', async () => {
+    const uploaded = deferred<{ url: string } | null>()
+    const plugin = imageUploadPlugin({ upload: () => uploaded.promise })
+    const view = destroyableView(
+      EditorState.create({ doc: docOf(createContainer(para())), plugins: [plugin] }),
+    )
+    const file = new File([new Uint8Array([1])], 'x.png', { type: 'image/png' })
+
+    plugin.props.handlePaste!.call(
+      plugin,
+      view as unknown as EditorView,
+      { clipboardData: { files: [file] } } as unknown as ClipboardEvent,
+      Slice.empty,
+    )
+    view.isDestroyed = true
+    uploaded.resolve({ url: '/api/assets/a.png' })
+    await Bun.sleep(0)
+
+    expect(view.dispatchedAfterDestroy).toBe(0)
+  })
+
+  test('外部画像の取り込みが済む前に破棄されたら、差し替えを dispatch しない', async () => {
+    const imported = deferred<{ url: string } | null>()
+    const plugin = imageUploadPlugin({
+      upload: async () => null,
+      importExternal: () => imported.promise,
+    })
+    const view = destroyableView(
+      EditorState.create({
+        doc: docOf(imageBlock(null, 'https://example.com/a.png')),
+        plugins: [plugin],
+      }),
+    )
+
+    plugin.spec.view!(view as unknown as EditorView)
+    view.isDestroyed = true
+    imported.resolve({ url: '/api/assets/a.png' })
+    await Bun.sleep(0)
+
+    expect(view.dispatchedAfterDestroy).toBe(0)
+  })
+})
+
+describe('外部画像の取り込み', () => {
+  const external = 'https://example.com/a.png'
+
+  function importingView(importExternal: (url: string) => Promise<{ url: string } | null>) {
+    const plugin = imageUploadPlugin({ upload: async () => null, importExternal })
+    const view = destroyableView(
+      EditorState.create({ doc: docOf(imageBlock(null, external)), plugins: [plugin] }),
+    )
+    const pluginView = plugin.spec.view!(view as unknown as EditorView)
+    const pasteAgain = () => {
+      const prev = view.state
+      const end = view.state.doc.child(0).content.size + 1
+      view.state = view.state.apply(view.state.tr.insert(end, imageBlock(null, external)))
+      pluginView.update!(view as unknown as EditorView, prev)
+    }
+    return { view, pasteAgain }
+  }
+
+  test('取り込めた外部画像をもう一度貼ると、それも取り込む', async () => {
+    const calls: string[] = []
+    const { view, pasteAgain } = importingView(async (url) => {
+      calls.push(url)
+      return { url: `/api/assets/${calls.length}.png` }
+    })
+    await Bun.sleep(0)
+
+    pasteAgain()
+    await Bun.sleep(0)
+
+    expect(calls).toEqual([external, external])
+    expect(imageNodes(view.state.doc).map((n) => n.attrs.src)).toEqual([
+      '/api/assets/1.png',
+      '/api/assets/2.png',
+    ])
+  })
+
+  // scan は doc が変わるたびに走るので、失敗した URL を外すと打鍵のたびに取り込み直す。
+  test('取り込めなかった外部画像は、もう一度貼っても取り込み直さない', async () => {
+    const calls: string[] = []
+    const { pasteAgain } = importingView(async (url) => {
+      calls.push(url)
+      return null
+    })
+    await Bun.sleep(0)
+
+    pasteAgain()
+    await Bun.sleep(0)
+
+    expect(calls).toEqual([external])
   })
 })
 

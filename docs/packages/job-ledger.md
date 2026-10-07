@@ -27,7 +27,7 @@ resume  { name } → { name, nextAt }                                           
 
 `createJobLedger({ db, home, systemJobs, now? })`。`home` はユーザーの Job の log を置く `$TANIA_HOME`。`systemJobs` は `{ name, every, run }` の配列で、`run` は失敗なら reject する。名前に `.` が無いか、名前が重なれば throw する。`.` はユーザーの Job の名前に使えないので、system の Job と名前が重ならない。`now` はテストが時計を進めるための口。
 
-job は task も workbench も import しない（ADR-0016）。system の Job は task が `@tania/task/server` の `systemJobs(taskLedger)` で並びを出し、Backend の組み立てがそれを渡す。`task.sync` の `run` は `taskLedger.syncInBackground()` を、`task.setup-log-cleanup` の `run` は `taskLedger.cleanSetupLogs()` を呼ぶ。`Db` の型も drizzle の `BunSQLiteDatabase` を直に使う。
+job は task も workbench も note も import しない（ADR-0016）。system の Job は task が `@tania/task/server` の `systemJobs(taskLedger)` で、note が `@tania/note/server` の `systemJobs(noteLedger)` で並びを出し、Backend の組み立てがその 2 つをつないで渡す。`task.sync` の `run` は `taskLedger.syncInBackground()` を、`task.setup-log-cleanup` の `run` は `taskLedger.cleanSetupLogs()` を、`note.image-cleanup` の `run` は `noteLedger.cleanImages()` を呼ぶ。`Db` の型も drizzle の `BunSQLiteDatabase` を直に使う。
 
 ## ユーザーの Job
 

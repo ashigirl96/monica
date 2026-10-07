@@ -1,6 +1,6 @@
 # Note Ledger
 
-`packages/note` の contract と、Note の種類ごとの不変条件、保存、削除と取り消し、OGP の規則。決定の理由は ADR-0017・0018・0019 にある。今あるのは Note を 1 件ずつ扱う procedure、Repo の Note の一覧と Repo の候補、本文の中の参照（Note Mention の候補と解決、block の取得）、OGP で、Essay の一覧と画像は後続の issue で足す。
+`packages/note` の contract と、Note の種類ごとの不変条件、保存、削除と取り消し、本文の中の参照、画像、OGP の規則。決定の理由は ADR-0017・0018・0019 にある。今あるのは Note を 1 件ずつ扱う procedure、Repo の Note の一覧と Repo の候補、本文の中の参照（Note Mention の候補と解決、block の取得）、画像、OGP で、Essay の一覧は後続の issue で足す。
 
 ## contract（root は `note`）
 
@@ -20,6 +20,8 @@ repoNote.list    { repo, after? } → { notes, next }
 noteMention.search   { q } → { id, displayName, preview }[]
 noteMention.resolve  { id } → { displayName }
 block.get            { id, blockId } → block
+image.upload         { file } → { url }
+image.import         { url } → { url }
 linkMetadata         { url } → { title, description, image, favicon, siteName }
 ```
 
@@ -31,7 +33,7 @@ linkMetadata         { url } → { title, description, image, favicon, siteName 
 - 時刻は他の domain と同じく `z.date()` で出す。
 - router は CLI に出さない。meta の型が `cli` を持たないので、`cli: true` を付けると型で落ちる。router は notes の口（ADR-0017）にだけ載せる。
 - change stream は持たない。notes の画面は focus のたびに取り直す（ADR-0018）。タブごとに stream を張ると、Chromium の host ごとの接続数の上限（6 本）に当たる。
-- `.errors()` で宣言するのは、画面が分岐する保存の `CONFLICT` だけ。ほかは `NOT_FOUND`（無い id と削除した Note）と `BAD_REQUEST`（形の違う入力と、種類に合わない操作）。
+- `.errors()` で宣言するのは、画面が分岐する保存の `CONFLICT` だけ。ほかは `NOT_FOUND`（無い id と削除した Note）と `BAD_REQUEST`（形の違う入力と、種類に合わない操作）。画像は oRPC の標準の code を使う（「画像」の節）。エディタは失敗の理由で分岐しない。
 
 contract に置く純関数と定数。server と ui が同じものを読む。
 
@@ -94,6 +96,41 @@ Note Mention と Synced Block が引く procedure。画面での扱いは `docs/
 - `block.get` は、`attrs.id` が blockId の blockContainer を、入れ子の block ごと保存された JSON のまま返す（`@tania/note/body` の `blockById`）。Note が無いか削除してあるとき、その block が無いときは `NOT_FOUND`。Synced Block の中の Synced Block を深さ 8 まで展開する処理は持たない。monica で使っていたのは CLI の `note show --expand` だけだった。
 - `noteMention.resolve` と `block.get` は id を形を問わずに受け、`note-N` の形でなければ `NOT_FOUND` にする。本文の attrs の id には、貼った URL から緩く抜き出したもの（ui の `internalNoteId`）もある。`BAD_REQUEST` で断ると、画面は「Deleted note」も「Original block was deleted」も出せない。
 
+## 画像
+
+`GLOSSARY.md` の画像。Note とは別に file で置き、本文の image node の `src` が相対の URL で参照する。Note と画像の対応表は持たない。処理は `src/image.ts` に置く。
+
+### 置き場所
+
+- `$TANIA_HOME/note-images/<uuid>.<ext>`。uuid は小文字の UUID v4、ext は `png`・`jpg`・`gif`・`webp`。GC が消してよい範囲と、口が配ってよい範囲が名前の形で分かる。
+- 本文に入る URL は `/api/assets/<uuid>.<ext>`（`IMAGE_URL_PREFIX` に file 名を付けたもの、相対）。
+
+### upload と取り込み
+
+- `image.upload` は `z.file()` を受ける。RPCLink は File を含む input を multipart で送る。
+- `image.import` は外部の URL を受け、Backend が fetch して upload と同じく置く。http と https だけを受け（ほかは input の検証で `BAD_REQUEST`）、行き先の host は制限しない。外の site からの呼び出しは notes の口の same-origin の照合で止まる。
+- どちらも置いた画像の URL を返す。
+- 上限は 20MB。超えれば `PAYLOAD_TOO_LARGE`。upload は File の中身を写す前に大きさを見る。取り込みは Content-Length を信じず、読みながら数えて、超えた所で読むのをやめて接続を切る。
+- 形式は先頭のバイト列（magic bytes）だけで決め、Content-Type と file 名は見ない。png・jpg・gif・webp 以外は `UNSUPPORTED_MEDIA_TYPE`。SVG は本文の中で script を動かせるので断る。
+- バイト列は再 encode せずに書く。動く GIF も動いたまま残る。
+- 取り込みは 10 秒で打ち切る（`GATEWAY_TIMEOUT`）。応答が始まらないときも、body の途中で止まったときも同じ。2xx 以外の応答と、届かない相手は `BAD_GATEWAY`。monica は status を見ず、404 の応答の画像も置いていた。
+- Note Ledger の `stop()` は、走っている取り込みの fetch を打ち切る。
+
+### 配信
+
+- `NoteLedger.serveImage(name)` が `/api/assets/<name>` の GET への応答を返す。apps/backend が notes の口の素の GET の route に載せる（`docs/packages.md` の「notes の口」）。
+- `name` は置くときの名前の形（小文字の UUID と 4 つの拡張子）で厳密に照合してから path にする。合わなければ、file が無いときと同じ 404。`..` や `/` を含む名前も、大文字の UUID も、置き場所に別の名前で在る file も配らない。
+- `cache-control: public, max-age=31536000, immutable`。同じ名前の画像は中身が変わらない。content-type は拡張子から Bun が付ける。
+
+### GC
+
+- `NoteLedger.cleanImages()` は、どの Note の本文にも参照されず、置いてから 48 時間を過ぎた画像を消す。system の Job `note.image-cleanup`（24 時間ごと）が呼ぶ。Job Ledger は start のときにすぐ 1 回走らせるが、48 時間の猶予があるので、貼ったばかりでまだ保存していない画像は消えない。
+- 参照として数えるのは、全 Note（削除したものを含む）の本文の、相対の `/api/assets/` で始まる文字列の値。node の型を問わない（`@tania/note/body` の `imageReferences`）。削除した Note は取り消せるので、その本文の参照も数える。`http://…/api/assets/…` のような絶対 URL は数えない（ADR-0019）。
+- 消すのは画像の file 名の形をしたものだけ。置いた時刻は mtime で、mtime が読めないものと未来のものは残す。
+- 外から画像を置くとき（monica からの移行、#134）は、mtime を置いた時刻にする。`cp -p` や `rsync -a` で元の mtime を残すと、参照する本文がまだ入っていない間に Backend が起きたとき、起動直後の掃除が消す。
+- 同期の fs で走らせる。参照を読んでから消すまでの間に await があると、`save` が古い画像の参照を書き戻せるため（task の setup の log の掃除と同じ）。
+- 消せなかった画像があれば、残りを消してから reject する。Job Execution が失敗になり、次の回がやり直す。本文の JSON が読めなければ、何も消さずに reject する。
+
 ## OGP
 
 `linkMetadata` は URL の頁を fetch し、Bun の HTMLRewriter で OGP を読む。エディタが URL を貼ったときの「Paste as」で、「Mention」が作る `linkMention` と「Bookmark」が作る `bookmark` に使う。ブラウザは他の origin の HTML を読めないので、server の procedure にしている。
@@ -131,13 +168,15 @@ monica から変えたのは次の 4 つ。
 
 ## createNoteLedger
 
-`createNoteLedger({ db, home, ghq? })` は `start()` / `stop()` と `repoCandidates()`・`linkMetadata(url)` を持つ。`start()` は何もしない。`stop()` は走っている OGP の fetch を打ち切る。`home` は画像の置き場所に使う。`ghq` は `list(signal)` を持ち、省けば `ghq list` を `env: process.env` で spawn する。`signal` で打ち切ると ghq を kill する。task の `Ghq`（`packages/task/src/prepare.ts`）は import しない。`repoCandidates()` は `repo.candidates` の、`linkMetadata(url)` は `linkMetadata` の中身で、router の handler が呼ぶ。後続の issue で、`cleanImages()` と画像を配る handler を足す。router の context は `{ db, noteLedger }`。
+`createNoteLedger({ db, home, ghq? })` は `start()` / `stop()`・`repoCandidates()`・`cleanImages()`・`serveImage(name)` を持つ。`start()` は何もせず、`stop()` は走っている画像の取り込みと OGP の fetch を打ち切る。`home` は画像の置き場所に使う。`ghq` は `list(signal)` を持ち、省けば `ghq list` を `env: process.env` で spawn する。`signal` で打ち切ると ghq を kill する。task の `Ghq`（`packages/task/src/prepare.ts`）は import しない。`repoCandidates()` は `repo.candidates` の中身で、router の handler が呼ぶ。router の context は `{ db, noteLedger }`。procedure が使う画像の置き場所と打ち切りの signal は、型に出さずに `internals(noteLedger)` で引く（task と job と同じ形）。
+
+`@tania/note/server` の `systemJobs(noteLedger)` が system の Job の並び（`note.image-cleanup`）を出す。note は job を import しないので、task と同じく `createJobLedger` の `systemJobs` と同じ構造の素のオブジェクトを返す。
 
 note は他の domain を import せず、他の domain からも import されない。前者は `.oxlintrc.json` の override が、後者は package.json が守る。Repo は `owner/repo` の値で持つだけ。
 
 ## body
 
-`@tania/note/body` は本文の JSON を読む module で、server と ui の両方が import する。そのため `bun:sqlite`・`drizzle-orm`・schema と server の entry を import しない（`.oxlintrc.json` の override が守る）。node は JSON のまま辿り、prosemirror-model に依らない。今あるのは `preview`・`blockById`・`EMPTY_DOC` で、markdown の変換と画像の参照の列挙は後続の issue で足す。
+`@tania/note/body` は本文の JSON を読む module で、server と ui の両方が import する。そのため `bun:sqlite`・`drizzle-orm`・schema と server の entry を import しない（`.oxlintrc.json` の override が守る）。node は JSON のまま辿り、prosemirror-model に依らない。今あるのは `preview`・`blockById`・`EMPTY_DOC` と、画像の参照を列挙する `imageReferences` で、markdown の変換は後続の issue で足す。`IMAGE_URL_PREFIX` は `@tania/note/contract` から読む。
 
 ## テスト
 
@@ -147,6 +186,8 @@ note は他の domain を import せず、他の domain からも import され�
 - ghq は `createNoteLedger` に偽の `list` を渡して差し替える。CI の ts job に ghq は無い。5 秒の打ち切りは、`setTimeout` を `spyOn` して 5000ms の callback を捕まえ、手で呼ぶ。偽の `list` は終わらない promise を返し、ghq の終わりを待たずに返ることを確かめる。
 - 種類と列の対応と、1 つだけある Note は、table に直に insert して確かめる。
 - preview は monica の fixture（`src/body/fixtures/` の `full-doc.json`・`unknown-nodes.json`）で確かめる。fixture は後続の markdown の変換のテストも使う。
+- 画像は `image.test.ts` が、一時 directory の home で確かめる。取り込みの相手は Bun.serve の fake で、終わらない body、始まらない応答、途中で止まる body を作る。10 秒の打ち切りは、task の sync と同じく `importImage` に短い timeout を渡して確かめる。GC の 48 時間は時計を止めず、画像の mtime を `utimesSync` で過去と未来に置く。
+- 画像の GET と multipart の輸送は、apps/backend の `notes-listener.test.ts` が RPCLink で upload してから GET して確かめる。
 - OGP の行き先は `src/fake-site.ts` の fake の site に差し替える。fake は Bun.serve で path ごとに status・header・body を返し、届いた request の path と User-Agent を記録し、header の保留（`hold()`）、body の後に送り続けるか止まったままでいること、client が body を読みやめたこと（`cancelled`）を記録する。task の `fake-github.ts` と同じ形。
 - 10 秒の打ち切りは、`AbortSignal.timeout` を `spyOn` で差し替え、渡された ms を確かめてから手で abort する。header を待つ間と body の途中で止まった間の両方で確かめる。`stop()` も同じ 2 つで確かめる。
 - 1MB で転送を止めたことは、fake に cancel が 200ms 以内に届くことで見る。読みやめたまま捨てた body も GC が 1 秒ほどで cancel するので、待つ時間を長くすると cancel を呼ばなくても通る。

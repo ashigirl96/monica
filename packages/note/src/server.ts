@@ -1,7 +1,9 @@
 import { implement } from '@orpc/server'
 
 import { contract } from './contract.ts'
-import type { Db, NoteLedger } from './note.ts'
+import { IMPORT_TIMEOUT_MS, importImage, uploadImage } from './image.ts'
+import { readLinkMetadata } from './link-metadata.ts'
+import { type Db, internals, type NoteLedger } from './note.ts'
 import { createEssay, createRepoNote, dailyDates, openDaily, openScratch } from './open.ts'
 import { noteBlock, resolveNoteMention, searchNoteMentions } from './reference.ts'
 import { removeNote, restoreNote } from './remove.ts'
@@ -11,7 +13,7 @@ import { saveNote, setEssayStatus } from './save.ts'
 
 export { migrations } from '../migrations/index.ts'
 export type { Ghq } from './ghq.ts'
-export { createNoteLedger, type NoteLedger } from './note.ts'
+export { createNoteLedger, type NoteLedger, systemJobs } from './note.ts'
 
 const os = implement(contract).$context<{ db: Db; noteLedger: NoteLedger }>()
 
@@ -44,6 +46,14 @@ export const router = os.router({
       listRepoNotes(context.db, input.repo, input.after),
     ),
   },
+  image: {
+    upload: os.image.upload.handler(({ context, input }) =>
+      uploadImage(internals(context.noteLedger).dir, input.file),
+    ),
+    import: os.image.import.handler(({ context, input }) =>
+      importImage(internals(context.noteLedger), input.url, IMPORT_TIMEOUT_MS),
+    ),
+  },
   noteMention: {
     search: os.noteMention.search.handler(({ context, input }) =>
       searchNoteMentions(context.db, input.q),
@@ -58,6 +68,6 @@ export const router = os.router({
     ),
   },
   linkMetadata: os.linkMetadata.handler(({ context, input }) =>
-    context.noteLedger.linkMetadata(input.url),
+    readLinkMetadata(input.url, internals(context.noteLedger).stopped),
   ),
 })
