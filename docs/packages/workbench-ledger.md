@@ -20,7 +20,7 @@ tab.setCwd                 { id, cwd }
 tab.pin / tab.unpin        { id }
 agentSession.recordHook    { terminalSessionId, payload } → void
 agentSession.list          → (AgentSession & { unread })[]                                     cli
-agentSession.markSeen      { sessionId } → void
+agentSession.markSeen      { sessionId, notifiedAt } → void
 worktree.info              { cwd } → { repo, branch } | null
 editor.resolve             { cwd, candidates } → (string | null)[]
 editor.open                { path } → void
@@ -109,7 +109,7 @@ ADR-0008 の「Backend 起動時」と ADR-0011 の reconcile の規則のうち
 - 未読は `notified_at` があり `seen_at` が空のこと。`agentSession.list` が行ごとに `unread` として導いて渡し、webview は導かない。時刻を比べず空かどうかで決めるのは、同じ ms に見たことと次の通知が重なっても取りこぼさないため。
 - 待ちが解けると（動作中・終了・未観測）、入り直しで両方が空になるので未読でなくなる。通知を出さない待ち（起動・resume の直後の手空き）は `notified_at` が空なので未読にならない。
 - 同じ待ちの間の通知は 1 つの未読と数える。許可を 2 回求めると待ちに入り直すので、1 回目を見た後でも未読に戻る。
-- `agentSession.markSeen { sessionId }` は、未読の行の `seen_at` に今の時刻を書き、`{ type: "agentSession", sessionId }` を publish する。未読でない行には何も書かず、合図も出さない。webview が同じ未読に重ねて呼んでも、読み直しが連鎖しないようにするため。無い session は `NOT_FOUND`。
+- `agentSession.markSeen { sessionId, notifiedAt }` は、未読の行の `notified_at` が渡された `notifiedAt`（webview が見た通知の時刻）と同じときだけ、`seen_at` に今の時刻を書き、`{ type: "agentSession", sessionId }` を publish する。webview が見てから届くまでの間に同じ Agent Session に次の通知が出ても、まだ見ていないその通知を既読にしないため。それ以外の行には何も書かず、合図も出さない。webview が同じ未読に重ねて呼んでも、読み直しが連鎖しないようにするため。無い session は `NOT_FOUND`。
 - 未読は Backend の再起動をまたいで残る。reconcile は待ちの行を動かさない（未観測にするのは動作中の行だけ）。
 
 ## Tab の外から来た hook

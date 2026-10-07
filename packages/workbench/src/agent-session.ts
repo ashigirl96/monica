@@ -24,7 +24,10 @@ export function listAgentSessions(db: Db): ListedAgentSession[] {
     .map((row) => ({ ...row, unread: isUnread(row) }))
 }
 
-export function markSeenIfUnread(db: Db, sessionId: string): boolean {
+export function markSeenIfUnread(
+  db: Db,
+  { sessionId, notifiedAt }: { sessionId: string; notifiedAt: Date },
+): boolean {
   const bySessionId = eq(agentSession.sessionId, sessionId)
   const row = db
     .select({ notifiedAt: agentSession.notifiedAt, seenAt: agentSession.seenAt })
@@ -32,7 +35,8 @@ export function markSeenIfUnread(db: Db, sessionId: string): boolean {
     .where(bySessionId)
     .get()
   if (!row) throw new ORPCError('NOT_FOUND', { message: `no Agent Session ${sessionId}` })
-  if (!isUnread(row)) return false
+  // 画面が見てから届くまでの間に次の通知が出ていたら、その通知はまだ見ていない。
+  if (!isUnread(row) || row.notifiedAt?.getTime() !== notifiedAt.getTime()) return false
   db.update(agentSession).set({ seenAt: new Date() }).where(bySessionId).run()
   return true
 }

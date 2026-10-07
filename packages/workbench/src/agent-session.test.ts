@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from 'bun:test'
+import { afterEach, expect, setSystemTime, spyOn, test } from 'bun:test'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -25,6 +25,13 @@ function payload(sessionId: string, hookEventName: string, fields: object = {}) 
 
 function rowOf(db: Db, sessionId: string) {
   return db.select().from(agentSession).where(eq(agentSession.sessionId, sessionId)).get()
+}
+
+type Client = ReturnType<typeof setup>['client']
+
+async function seeAsListed(client: Client, sessionId: string) {
+  const listed = (await client.agentSession.list()).find((a) => a.sessionId === sessionId)
+  await client.agentSession.markSeen({ sessionId, notifiedAt: listed!.notifiedAt! })
 }
 
 function seedTerminalSession(
@@ -394,7 +401,7 @@ test('a notified wait is listed unread until it is seen, and seeing it signals t
   const signals: unknown[] = []
   onCleanup(workbenchLedger.events.subscribe('change', (change) => signals.push(change)))
 
-  await client.agentSession.markSeen({ sessionId: 's-1' })
+  await seeAsListed(client, 's-1')
 
   expect(await client.agentSession.list()).toEqual([
     expect.objectContaining({ sessionId: 's-1', unread: false }),
@@ -446,7 +453,7 @@ test('a second permission asked after the first was seen is unread again', async
       payload: payload('s-1', 'PermissionRequest', { tool_name: 'Bash' }),
     })
   await askPermission()
-  await client.agentSession.markSeen({ sessionId: 's-1' })
+  await seeAsListed(client, 's-1')
 
   await askPermission()
 
@@ -465,7 +472,7 @@ test('seeing an Agent Session with nothing unread writes nothing and signals not
   const signals: unknown[] = []
   onCleanup(workbenchLedger.events.subscribe('change', (change) => signals.push(change)))
 
-  await client.agentSession.markSeen({ sessionId: 's-1' })
+  await client.agentSession.markSeen({ sessionId: 's-1', notifiedAt: new Date(0) })
 
   expect(rowOf(db, 's-1')).toMatchObject({ seenAt: null })
   expect(signals).toEqual([])
@@ -474,9 +481,34 @@ test('seeing an Agent Session with nothing unread writes nothing and signals not
 test('seeing an Agent Session the Workbench Ledger does not know is NOT_FOUND', async () => {
   const { client } = setup()
 
-  await expect(client.agentSession.markSeen({ sessionId: 's-gone' })).rejects.toMatchObject({
-    code: 'NOT_FOUND',
-  })
+  await expect(
+    client.agentSession.markSeen({ sessionId: 's-gone', notifiedAt: new Date(0) }),
+  ).rejects.toMatchObject({ code: 'NOT_FOUND' })
+})
+
+test('seeing a notification after a later one came leaves the later one unread and signals nothing', async () => {
+  const { db, workbenchLedger, client } = setup()
+  seedTerminalSession(db, 'ts-a', 'running')
+  onCleanup(() => setSystemTime())
+  const askPermissionAt = async (ms: number) => {
+    setSystemTime(new Date(ms))
+    await client.agentSession.recordHook({
+      terminalSessionId: 'ts-a',
+      payload: payload('s-1', 'PermissionRequest', { tool_name: 'Bash' }),
+    })
+  }
+  await askPermissionAt(1_000)
+  const [shown] = await client.agentSession.list()
+  await askPermissionAt(2_000)
+  const signals: unknown[] = []
+  onCleanup(workbenchLedger.events.subscribe('change', (change) => signals.push(change)))
+
+  await client.agentSession.markSeen({ sessionId: 's-1', notifiedAt: shown!.notifiedAt! })
+
+  expect(await client.agentSession.list()).toEqual([
+    expect.objectContaining({ sessionId: 's-1', unread: true }),
+  ])
+  expect(signals).toEqual([])
 })
 
 test('an unread wait stays unread across a Backend restart', async () => {

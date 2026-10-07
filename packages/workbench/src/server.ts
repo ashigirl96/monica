@@ -134,7 +134,7 @@ export const router = os.router({
     }),
     list: os.agentSession.list.handler(({ context }) => listAgentSessions(context.db)),
     markSeen: os.agentSession.markSeen.handler(({ context, input }) => {
-      if (markSeenIfUnread(context.db, input.sessionId)) {
+      if (markSeenIfUnread(context.db, input)) {
         context.workbenchLedger.events.publish('change', {
           type: 'agentSession',
           sessionId: input.sessionId,

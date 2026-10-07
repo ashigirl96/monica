@@ -38,7 +38,7 @@ Tab の dot（label の左）は、その Tab の Terminal Session の live な 
 - sidebar の行は、未読の Tab の数を title の右に白地に暗い字の丸で出し、title を白の太字にする。Detached の行は、その Terminal Session の Agent Session が未読なら 1 を出す。数を 2 行目に置かないのは、通知が来るたびに行が伸び縮みするため。見たうえでまだ待っている Tab は sidebar に出さない。
 - 未読の印は白にそろえる。dot の緑・琥珀・赤と重ならないため。
 - 行を押すと（jump hint の Ctrl も同じ）、その Runspace に未読の Tab があれば一番左のそれを開き、無ければ最後に見ていた Tab を開く。通知を click しても tania が前面に出るだけで Tab へは移れない（ADR-0013）ので、行から 1 手で着くようにする。key で Runspace を巡るときは、今どおり最後に見ていた Tab を開く。
-- 窓が前面にあり、表示している Tab（active な Runspace の active な Tab）の Agent Session が未読なら、webview は `agentSession.markSeen` を呼ぶ。見た瞬間に既読にし、見ていた時間は問わない。Tab を切り替えるたびには呼ばない。
+- 窓が前面にあり、表示している Tab（active な Runspace の active な Tab）の Agent Session が未読なら、webview は一覧で読んだその通知の `notifiedAt` を添えて `agentSession.markSeen` を呼ぶ。見た瞬間に既読にし、見ていた時間は問わない。Tab を切り替えるたびには呼ばない。
 - 窓が前面かどうかは、Tauri の `getCurrentWindow()` の `onFocusChanged` の購読が張れてから `isFocused()` で読む（`core:default` の権限で足りる）。読む間に event が届いたら、読んだ値は捨てる。別の app が前面にあるときも、窓を最小化したときも event が届くことを実機で確かめた。前面でない間は、表示している Tab でも見たことにしない。前面に戻ったときに、表示している Tab を見たことにする。
 - `agentSession.list` を読み直すたびに Agent Session は別の値になるので、表示している間に届いた次の通知も、読み直した時点で見たことにする。`markSeen` が重なっても、Backend は未読でない行に何も書かない。
 - tania が前面にある間は通知のバナーが出ない（ADR-0013）。active でない Runspace の通知には、行の数で気づく。

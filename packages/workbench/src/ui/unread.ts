@@ -21,9 +21,9 @@ export function markSeenWhileShown(store: Store): () => void {
   const markSeen = () => {
     const agentSession = store.get(unreadInFrontAtom)
     const client = store.get(workbenchClientAtom)
-    if (!agentSession || !client) return
+    if (!agentSession?.notifiedAt || !client) return
     client.agentSession
-      .markSeen({ sessionId: agentSession.sessionId })
+      .markSeen({ sessionId: agentSession.sessionId, notifiedAt: agentSession.notifiedAt })
       .catch((e: unknown) => warnFailed('mark seen', e))
   }
   markSeen()

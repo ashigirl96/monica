@@ -142,7 +142,12 @@ export const contract = {
       .output(z.array(ListedAgentSessionSchema)),
     markSeen: meta
       .meta({ description: "Record that an Agent Session's notified wait was seen in its Tab" })
-      .input(z.object({ sessionId: z.string() }))
+      .input(
+        z.object({
+          sessionId: z.string(),
+          notifiedAt: z.date().describe('notifiedAt of the notification that was seen'),
+        }),
+      )
       .output(z.void()),
   },
   worktree: {
