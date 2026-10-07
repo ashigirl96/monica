@@ -16,11 +16,11 @@ export function App() {
     if (toToday) navigate(todayPath(new Date()), { replace: true })
   }, [toToday])
 
-  if (route.page === 'today') return null
   return (
     <>
+      {/* 今日への replace の間も外さない。外すと zen が解ける。 */}
       <AppShell active={sectionOf(route)}>
-        {route.page === 'daily' ? (
+        {toToday ? null : route.page === 'daily' ? (
           <DailyPage date={route.date} />
         ) : route.page === 'repos' ? (
           <ReposPage repo={null} noteId={null} />
@@ -39,6 +39,7 @@ export function App() {
 
 function sectionOf(route: Route): Section | null {
   switch (route.page) {
+    case 'today':
     case 'daily':
       return 'daily'
     case 'repos':

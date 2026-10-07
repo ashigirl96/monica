@@ -1,13 +1,24 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react'
 
+import { initAmbient } from './ambient.ts'
 import { App } from './app.tsx'
 import { ClientContext, type NoteClient, reach } from './client.ts'
+import { initNoteWidth } from './note-width.ts'
 import { AutosaveProvider } from './notes/autosave-context.tsx'
 import { createQueryClient } from './query.ts'
+import { initTheme } from './theme.ts'
 
 export function NotesApp({ client }: { client: NoteClient }) {
   const [queryClient] = useState(createQueryClient)
+
+  // 背景写真と本文の幅は CSS 変数で読むので、最初の描画の前に当てる。
+  useLayoutEffect(() => {
+    initAmbient()
+    initNoteWidth()
+  }, [])
+
+  useEffect(initTheme, [])
 
   useEffect(() => reach.watch(() => client.daily.dates()), [client])
 
