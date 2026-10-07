@@ -54,6 +54,10 @@ _Avoid_: Work Bench, terminal view
 Workbench のサイドバーの 1 項目。新しい Tab が開く cwd を共有する Tab の束。環境変数は持たない。Bench 以外は常に Tab を 1 つ以上持ち、最後の Tab を閉じるか外へ移すと消える。一番左の Tab の cwd が Repo の checkout か worktree の中にあれば、その Repo を Runspace の Repo と呼ぶ（Bench は Task の Repo）。どの Repo にも属さない Runspace は Repo の外にある。
 _Avoid_: workspace
 
+**Tile**:
+Workbench の sidebar の左端の列（Rail）に並ぶ、Repo 1 つか Repo の外を表すボタン。選ぶと、その Repo の Runspace（Repo の外の Tile なら Repo の外の Runspace）を右の一覧に出す。pin された Tab を持つ Runspace はどの Tile にも入らない。
+_Avoid_: Rail（Tile を並べた列の語）, 札
+
 **Tab**:
 Runspace 内の 1 枚の端末画面。閉じても Terminal Session は止まらず detach されるだけ。
 

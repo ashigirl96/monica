@@ -9,14 +9,14 @@ import { metaHeldAtom } from './meta-hold.ts'
 import {
   type DetachedRow,
   type ListedIn,
-  type Rail,
-  railNumberOf,
   repoName,
   type RowMeta,
   rowMetaOf,
   type RunspaceRow,
   sectionKey,
   type SidebarSection,
+  type Tile,
+  tileNumberOf,
 } from './sidebar-model.ts'
 import {
   activateRunspaceAtom,
@@ -28,7 +28,7 @@ import {
   terminateTerminalSessionAtom,
   toggleSectionAtom,
 } from './store.ts'
-import { railChoiceAtom } from './ui-state.ts'
+import { tileChoiceAtom } from './ui-state.ts'
 
 const OUTSIDE_LABEL = 'その他'
 
@@ -38,8 +38,8 @@ const SECTION_LABELS: Record<SidebarSection['kind'], string> = {
   detached: 'Detached',
 }
 
-// 札の色は dot の緑・琥珀・赤と紛れない色から、repo ごとに決まった 1 つを選ぶ。
-const RAIL_HUES = [
+// Tile の色は dot の緑・琥珀・赤と紛れない色から、repo ごとに決まった 1 つを選ぶ。
+const TILE_HUES = [
   { bg: 'rgba(56,189,248,.2)', fg: '#7dd3fc' },
   { bg: 'rgba(167,139,250,.22)', fg: '#c4b5fd' },
   { bg: 'rgba(244,114,182,.2)', fg: '#f9a8d4' },
@@ -53,14 +53,14 @@ const RAIL_HUES = [
 function hueOf(repo: string) {
   let hash = 0
   for (const char of repo.toLowerCase()) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
-  return RAIL_HUES[hash % RAIL_HUES.length]!
+  return TILE_HUES[hash % TILE_HUES.length]!
 }
 
 function withUnread(label: string, count: number): string {
   return count > 0 ? `${label}、未読の Tab ${count}` : label
 }
 
-// 札と見出しは、押した後に focus を戻すと xterm が DECSET 1004 を立てた app に focus out と in を送るので、mousedown の既定の動作を止めて focus を動かさない。
+// Tile と見出しは、押した後に focus を戻すと xterm が DECSET 1004 を立てた app に focus out と in を送るので、mousedown の既定の動作を止めて focus を動かさない。
 function keepTerminalFocus(e: MouseEvent) {
   e.preventDefault()
 }
@@ -80,32 +80,32 @@ function UnreadCount({ count, className }: { count: number; className?: string }
   )
 }
 
-function RailButton({
-  rail,
+function TileButton({
+  tile,
   number,
   selected,
   onPick,
 }: {
-  rail: Rail
+  tile: Tile
   number: number | null
   selected: boolean
   onPick: () => void
 }) {
-  const label = rail.repo ?? OUTSIDE_LABEL
-  const hue = rail.repo ? hueOf(rail.repo) : null
+  const label = tile.repo ?? OUTSIDE_LABEL
+  const hue = tile.repo ? hueOf(tile.repo) : null
   const metaHeld = useAtomValue(metaHeldAtom)
   const button = useRef<HTMLButtonElement>(null)
   return (
     <>
-      {metaHeld && rail.repo && (
-        <RailName anchor={button} label={repoName(rail.repo)} number={number} />
+      {metaHeld && tile.repo && (
+        <TileName anchor={button} label={repoName(tile.repo)} number={number} />
       )}
       <button
         ref={button}
         type="button"
         role="tab"
         aria-selected={selected}
-        aria-label={withUnread(label, rail.unreadCount)}
+        aria-label={withUnread(label, tile.unreadCount)}
         aria-keyshortcuts={number === null ? undefined : `Meta+${number}`}
         title={number === null ? label : `${label} (⌘${number})`}
         onMouseDown={keepTerminalFocus}
@@ -119,13 +119,13 @@ function RailButton({
         )}
         style={hue ? { background: hue.bg, color: hue.fg } : undefined}
       >
-        {rail.repo ? (
-          repoName(rail.repo).charAt(0).toUpperCase()
+        {tile.repo ? (
+          repoName(tile.repo).charAt(0).toUpperCase()
         ) : (
           <FolderIcon size={14} strokeWidth={2} />
         )}
         <UnreadCount
-          count={rail.unreadCount}
+          count={tile.unreadCount}
           className="absolute -top-[5px] -right-[7px] ring-2 ring-zinc-900"
         />
       </button>
@@ -133,8 +133,8 @@ function RailButton({
   )
 }
 
-// 札の列は縦に scroll する箱で横にはみ出した分が切れるので、名前は fixed で箱から出し、描く前に札の右上へ合わせる。
-function RailName({
+// Rail は縦に scroll する箱で横にはみ出した分が切れるので、名前は fixed で箱から出し、描く前に Tile の右上へ合わせる。
+function TileName({
   anchor,
   label,
   number,
@@ -302,7 +302,7 @@ function DetachedItem({ row }: { row: DetachedRow }) {
   )
 }
 
-function SectionHeader({ railKey, section }: { railKey: string; section: SidebarSection }) {
+function SectionHeader({ tileKey, section }: { tileKey: string; section: SidebarSection }) {
   const toggle = useSetAtom(toggleSectionAtom)
   const label = SECTION_LABELS[section.kind]
   return (
@@ -311,7 +311,7 @@ function SectionHeader({ railKey, section }: { railKey: string; section: Sidebar
       aria-expanded={!section.collapsed}
       aria-label={section.collapsed ? withUnread(label, section.unreadCount) : label}
       onMouseDown={keepTerminalFocus}
-      onClick={() => toggle(sectionKey(railKey, section.kind))}
+      onClick={() => toggle(sectionKey(tileKey, section.kind))}
       className="flex h-6 w-full shrink-0 items-center gap-1.5 rounded-md px-2 text-[11px] font-semibold text-white/55 transition-colors hover:bg-white/[0.04] hover:text-white/85"
     >
       <span className="flex-1 text-left">{label}</span>
@@ -331,7 +331,7 @@ function SectionHeader({ railKey, section }: { railKey: string; section: Sidebar
   )
 }
 
-export function RailHeading() {
+export function TileHeading() {
   const { repo } = useAtomValue(sidebarAtom).selected
   if (!repo) return null
   return (
@@ -346,9 +346,9 @@ export function RailHeading() {
 
 export function WorkbenchSidebar() {
   const sidebar = useAtomValue(sidebarAtom)
-  const { pinned, rails, selected } = sidebar
+  const { pinned, tiles, selected } = sidebar
   const activate = useSetAtom(activateRunspaceAtom)
-  const selectRail = useSetAtom(railChoiceAtom)
+  const selectTile = useSetAtom(tileChoiceAtom)
   const reorder = useSetAtom(reorderRunspacesAtom)
   const jumpHints = useAtomValue(jumpHintTargetsAtom)
   const { dragOverId, handlersFor } = useDragReorder(reorder)
@@ -364,13 +364,13 @@ export function WorkbenchSidebar() {
       hint={jumpHints.byRunspaceId[row.id]}
     />
   )
-  const railButton = (rail: Rail) => (
-    <RailButton
-      key={rail.key}
-      rail={rail}
-      number={railNumberOf(sidebar, rail.key)}
-      selected={rail.key === selected.key}
-      onPick={() => selectRail(rail.key)}
+  const tileButton = (tile: Tile) => (
+    <TileButton
+      key={tile.key}
+      tile={tile}
+      number={tileNumberOf(sidebar, tile.key)}
+      selected={tile.key === selected.key}
+      onPick={() => selectTile(tile.key)}
     />
   )
 
@@ -382,9 +382,9 @@ export function WorkbenchSidebar() {
         aria-orientation="vertical"
         className="scrollbar-hide flex w-[46px] shrink-0 flex-col items-center gap-3 overflow-y-auto rounded-tr-[10px] bg-black/[0.14] pt-2 pb-4"
       >
-        {rails.filter((r) => r.repo).map(railButton)}
+        {tiles.filter((tile) => tile.repo).map(tileButton)}
         <span aria-hidden className="h-px w-[18px] shrink-0 bg-white/12" />
-        {rails.filter((r) => !r.repo).map(railButton)}
+        {tiles.filter((tile) => !tile.repo).map(tileButton)}
       </div>
       <nav aria-label="Runspaces" className="min-w-0 flex-1 overflow-y-auto px-1.5 pb-4">
         {pinned.length > 0 && (
@@ -398,7 +398,7 @@ export function WorkbenchSidebar() {
         )}
         {selected.sections.map((section) => (
           <div key={section.kind} className="mt-2 flex flex-col gap-0.5">
-            {section.headed && <SectionHeader railKey={selected.key} section={section} />}
+            {section.headed && <SectionHeader tileKey={selected.key} section={section} />}
             {section.rows.map((row) =>
               row.type === 'detached' ? (
                 <DetachedItem key={row.id} row={row} />

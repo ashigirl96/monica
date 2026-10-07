@@ -19,12 +19,12 @@ import {
   activateTerminalTabAtom,
   activeRunspaceAtom,
   activeTerminalTabAtom,
-  appendRunspacesJoiningRail,
+  appendRunspacesJoiningTile,
   benchLabelOfAtom,
   cycleRunspaceAtom,
   layoutAtom,
   moveActiveRunspaceAtom,
-  pickRailAtom,
+  pickTileAtom,
   reloadAgentSessionsAtom,
   reloadAtom,
   sidebarAtom,
@@ -34,7 +34,7 @@ import {
   updateTabTitleAtom,
   workbenchClientAtom,
 } from './store.ts'
-import { railChoiceAtom } from './ui-state.ts'
+import { tileChoiceAtom } from './ui-state.ts'
 
 const size = { rows: 24, cols: 80 }
 
@@ -59,11 +59,14 @@ function bench() {
 }
 
 function idsIn(sidebar: Sidebar, key: string): string[] {
-  const rail = sidebar.rails.find((r) => r.key === key)
-  return rail?.sections.flatMap((s) => s.rows.map((r) => r.id)) ?? []
+  return (
+    sidebar.tiles
+      .find((tile) => tile.key === key)
+      ?.sections.flatMap((s) => s.rows.map((r) => r.id)) ?? []
+  )
 }
 
-// Repo は Backend への問い合わせを待って決まるので、札に行が出揃うまで待つ。
+// Repo は Backend への問い合わせを待って決まるので、Tile に行が出揃うまで待つ。
 function untilListed(store: Store, key: string, ids: string[]): Promise<Sidebar> {
   return until(store, sidebarAtom, (sidebar) => {
     const listed = idsIn(sidebar, key)
@@ -76,13 +79,13 @@ function shown(sidebar: Sidebar) {
 }
 
 function rowOf(sidebar: Sidebar, runspaceId: string): RunspaceRow | undefined {
-  const listed = sidebar.rails.flatMap((r) => r.sections.flatMap((s): SidebarRow[] => s.rows))
+  const listed = sidebar.tiles.flatMap((tile) => tile.sections.flatMap((s): SidebarRow[] => s.rows))
   return [...sidebar.pinned, ...listed]
     .filter((row): row is RunspaceRow => row.type === 'runspace')
     .find((row) => row.id === runspaceId)
 }
 
-test("a Runspace is listed under the rail of its leftmost Tab's Repo, and stays there whichever Tab is active", async () => {
+test("a Runspace is listed under the Tile of its leftmost Tab's Repo, and stays there whichever Tab is active", async () => {
   const { client, store } = bench()
   const app = ghqCheckout('acme/app')
   const lib = ghqCheckout('acme/lib')
@@ -92,10 +95,10 @@ test("a Runspace is listed under the rail of its leftmost Tab's Repo, and stays 
   await untilListed(store, 'acme/app', [runspaceId])
 
   store.set(activateTerminalTabAtom, right.id)
-  store.set(railChoiceAtom, 'acme/app')
+  store.set(tileChoiceAtom, 'acme/app')
 
   const sidebar = store.get(sidebarAtom)
-  expect(sidebar.rails.map((r) => r.key)).toEqual(['acme/app', OUTSIDE])
+  expect(sidebar.tiles.map((tile) => tile.key)).toEqual(['acme/app', OUTSIDE])
   expect(shown(sidebar)).toEqual([['runspaces', [runspaceId]]])
 })
 
@@ -120,7 +123,7 @@ test("a Bench is listed in the Bench section of its Task's Repo, whichever Repo 
   await store.set(reloadAtom)
   await untilListed(store, 'acme/old-app', [elsewhere.runspaceId])
 
-  store.set(railChoiceAtom, 'acme/app')
+  store.set(tileChoiceAtom, 'acme/app')
 
   expect(shown(store.get(sidebarAtom))).toEqual([
     ['bench', [inPlace, beforeRename, unprepared]],
@@ -139,7 +142,7 @@ test('a Runspace of a worktree Tab taken out of a Bench is listed under the Repo
   expect(idsIn(sidebar, OUTSIDE)).toEqual([])
 })
 
-test('Runspaces in no Repo are listed under the rail at the bottom, below every Repo', async () => {
+test('Runspaces in no Repo are listed under the Tile at the bottom of the Rail, below the Tile of every Repo', async () => {
   const { client, store } = bench()
   const app = ghqCheckout('acme/app')
   const home = await client.runspace.create({ cwd: app.root, ...size })
@@ -148,10 +151,10 @@ test('Runspaces in no Repo are listed under the rail at the bottom, below every 
   await store.set(reloadAtom)
   await untilListed(store, 'acme/app', [inApp.runspaceId])
 
-  store.set(railChoiceAtom, OUTSIDE)
+  store.set(tileChoiceAtom, OUTSIDE)
 
   const sidebar = store.get(sidebarAtom)
-  expect(sidebar.rails.map((r) => r.key)).toEqual(['acme/app', OUTSIDE])
+  expect(sidebar.tiles.map((tile) => tile.key)).toEqual(['acme/app', OUTSIDE])
   expect(shown(sidebar)).toEqual([['runspaces', [home.runspaceId, downloads.runspaceId]]])
 })
 
@@ -165,7 +168,7 @@ test('a detached Terminal Session is listed in the Detached section of the Repo 
   await store.set(reloadAtom)
   await untilListed(store, 'acme/app', [closed.terminalSessionId])
 
-  store.set(railChoiceAtom, 'acme/app')
+  store.set(tileChoiceAtom, 'acme/app')
 
   expect(shown(store.get(sidebarAtom))).toEqual([['detached', [closed.terminalSessionId]]])
 })
@@ -182,7 +185,7 @@ test('collapsing a section hides its rows and leaves their count and unread Tabs
   await untilListed(store, 'acme/app', [a.runspaceId, b.runspaceId, closed.terminalSessionId])
   await leaveUnread(behind.terminalSessionId)
   await leaveUnread(a.tab.terminalSessionId)
-  store.set(railChoiceAtom, 'acme/app')
+  store.set(tileChoiceAtom, 'acme/app')
 
   store.set(toggleSectionAtom, 'acme/app:runspaces')
 
@@ -205,7 +208,7 @@ test('a Repo with one section has no header, and its rows stay shown even if tha
   const { runspaceId } = await client.runspace.create({ cwd: app.checkout, ...size })
   await store.set(reloadAtom)
   await untilListed(store, 'acme/app', [runspaceId])
-  store.set(railChoiceAtom, 'acme/app')
+  store.set(tileChoiceAtom, 'acme/app')
 
   store.set(toggleSectionAtom, 'acme/app:runspaces')
 
@@ -214,7 +217,7 @@ test('a Repo with one section has no header, and its rows stay shown even if tha
   ])
 })
 
-test('a rail counts the unread Tabs of the rows it brings up, leaving out the Pinned rows', async () => {
+test('a Tile counts the unread Tabs of the rows it brings up, leaving out the Pinned rows', async () => {
   const { client, store, leaveUnread } = bench()
   const app = ghqCheckout('acme/app')
   const a = await client.runspace.create({ cwd: app.checkout, ...size })
@@ -229,14 +232,14 @@ test('a rail counts the unread Tabs of the rows it brings up, leaving out the Pi
 
   for (const id of [a.tab, second, pinned.tab, closed]) await leaveUnread(id.terminalSessionId)
 
-  expect(store.get(sidebarAtom).rails.map((r) => [r.key, r.unreadCount])).toEqual([
+  expect(store.get(sidebarAtom).tiles.map((tile) => [tile.key, tile.unreadCount])).toEqual([
     ['acme/app', 3],
     [OUTSIDE, 0],
   ])
   expect(idsIn(store.get(sidebarAtom), OUTSIDE)).toEqual([home.runspaceId])
 })
 
-test('Pinned Runspaces are listed above whichever rail is selected, and under no rail', async () => {
+test('Pinned Runspaces are listed above whichever Tile is selected, and under no Tile', async () => {
   const { client, store } = bench()
   const app = ghqCheckout('acme/app')
   const pinned = await client.runspace.create({ cwd: app.checkout, ...size })
@@ -247,7 +250,7 @@ test('Pinned Runspaces are listed above whichever rail is selected, and under no
   await untilListed(store, 'acme/app', [plain.runspaceId])
 
   for (const key of ['acme/app', OUTSIDE]) {
-    store.set(railChoiceAtom, key)
+    store.set(tileChoiceAtom, key)
     const sidebar = store.get(sidebarAtom)
     expect(sidebar.pinned.map((r) => r.id)).toEqual([pinned.runspaceId])
     expect(idsIn(sidebar, key)).not.toContain(pinned.runspaceId)
@@ -281,12 +284,12 @@ test("a plain Runspace's row reads its terminal's title, or where the shell is i
   await store.set(reloadAtom)
   await untilListed(store, 'acme/app', [top.runspaceId, deep.runspaceId])
 
-  await store.set(updateTabTitleAtom, top.tab.id, '✻ Read the rail')
+  await store.set(updateTabTitleAtom, top.tab.id, '✻ Read the tile')
   await store.set(updateTabTitleAtom, deep.tab.id, '~/somewhere/packages/ui/src')
 
   const sidebar = store.get(sidebarAtom)
   expect(rowOf(sidebar, top.runspaceId)).toMatchObject({
-    title: '✻ Read the rail',
+    title: '✻ Read the tile',
     titleIsPath: false,
   })
   expect(rowOf(sidebar, deep.runspaceId)).toMatchObject({
@@ -326,7 +329,7 @@ test('a branch switched in a terminal that reports nothing reaches the row on a 
   expect(rowOf(sidebar, runspaceId)?.branch).toBe('feature/renamed')
 })
 
-test('keys cycle through the rows shown under the selected rail without going into another Repo, and picking a rail leaves the active Runspace alone until a key moves into the rows shown there', async () => {
+test('keys cycle through the rows shown under the selected Tile without going into another Repo, and picking a Tile leaves the active Runspace alone until a key moves into the rows shown there', async () => {
   const { client, store } = bench()
   const app = ghqCheckout('acme/app')
   const lib = ghqCheckout('acme/lib')
@@ -344,14 +347,14 @@ test('keys cycle through the rows shown under the selected rail without going in
   expect([visited(), visited()]).toEqual([second.runspaceId, first.runspaceId])
   expect(store.get(sidebarAtom).selected.key).toBe('acme/app')
 
-  store.set(railChoiceAtom, 'acme/lib')
+  store.set(tileChoiceAtom, 'acme/lib')
 
   expect(store.get(activeRunspaceAtom)?.id).toBe(first.runspaceId)
   expect(store.get(sidebarAtom).selected.key).toBe('acme/lib')
   expect(visited()).toBe(inLib.runspaceId)
 })
 
-test('a number brings up the Repo rail at that place from the top, with the Runspace and the Tab last active under it', async () => {
+test('a number brings up the Tile of the Repo at that place from the top, with the Runspace and the Tab last active under it', async () => {
   const { client, store, leaveUnread } = bench()
   const app = ghqCheckout('acme/app')
   const lib = ghqCheckout('acme/lib')
@@ -372,25 +375,42 @@ test('a number brings up the Repo rail at that place from the top, with the Runs
     store.get(activeTerminalTabAtom)?.id,
   ]
 
-  store.set(pickRailAtom, 2)
+  store.set(pickTileAtom, 2)
   const firstVisit = onScreen()
-  store.set(pickRailAtom, 1)
+  store.set(pickTileAtom, 1)
 
   expect(firstVisit).toEqual(['acme/lib', inLib.runspaceId, inLib.tab.id])
   expect(onScreen()).toEqual(['acme/app', last.runspaceId, back.id])
 })
 
-test('a Runspace brought up by a number takes the selected rail along when its shell moves into another Repo', async () => {
+test('a number brings back the Tile of the active Runspace while another Tile is being peeked at', async () => {
   const { client, store } = bench()
   const app = ghqCheckout('acme/app')
   const lib = ghqCheckout('acme/lib')
   const inApp = await client.runspace.create({ cwd: app.checkout, ...size })
-  // 札に行が残らないと札ごと消えて、選んだ札に関わらず active な Runspace の札が出る。
+  const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
+  await store.set(reloadAtom)
+  await untilListed(store, 'acme/lib', [inLib.runspaceId])
+  store.set(activateRunspaceAtom, inApp.runspaceId)
+  store.set(tileChoiceAtom, 'acme/lib')
+
+  store.set(pickTileAtom, 1)
+
+  expect(store.get(sidebarAtom).selected.key).toBe('acme/app')
+  expect(store.get(activeRunspaceAtom)?.id).toBe(inApp.runspaceId)
+})
+
+test('a Runspace brought up by a number takes the selected Tile along when its shell moves into another Repo', async () => {
+  const { client, store } = bench()
+  const app = ghqCheckout('acme/app')
+  const lib = ghqCheckout('acme/lib')
+  const inApp = await client.runspace.create({ cwd: app.checkout, ...size })
+  // Tile に行が残らないと Tile ごと消えて、選んだ Tile に関わらず active な Runspace の Tile が出る。
   await client.runspace.create({ cwd: app.checkout, ...size })
   const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
   await store.set(reloadAtom)
   await untilListed(store, 'acme/lib', [inLib.runspaceId])
-  store.set(pickRailAtom, 1)
+  store.set(pickTileAtom, 1)
 
   await store.set(updateTabCwdAtom, inApp.tab.id, lib.checkout)
   await store.set(reloadAtom)
@@ -399,14 +419,14 @@ test('a Runspace brought up by a number takes the selected rail along when its s
   expect(sidebar.selected.key).toBe('acme/lib')
 })
 
-test('0 picks the rail below the Repos and keeps the active Runspace while no Runspace is under it, and a number with no rail picks nothing', async () => {
+test('0 picks the Tile for outside the Repos, below their Tiles, and keeps the active Runspace while no Runspace is under it, and a number with no Tile picks nothing', async () => {
   const { client, store } = bench()
   const app = ghqCheckout('acme/app')
   const { runspaceId } = await client.runspace.create({ cwd: app.checkout, ...size })
   await store.set(reloadAtom)
   await untilListed(store, 'acme/app', [runspaceId])
 
-  const picked = [0, 2].map((n) => [n, store.set(pickRailAtom, n)])
+  const picked = [0, 2].map((n) => [n, store.set(pickTileAtom, n)])
 
   expect(picked).toEqual([
     [0, true],
@@ -416,14 +436,14 @@ test('0 picks the rail below the Repos and keeps the active Runspace while no Ru
   expect(store.get(activeRunspaceAtom)?.id).toBe(runspaceId)
 })
 
-test('a Runspace made active before its Repo is known takes the selected rail along to that Repo once it is', async () => {
+test('a Runspace made active before its Repo is known takes the selected Tile along to that Repo once it is', async () => {
   const { client, store } = bench()
   const app = ghqCheckout('acme/app')
   const lib = ghqCheckout('acme/lib')
   await client.runspace.create({ cwd: app.checkout, ...size })
   const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
   await store.set(reloadAtom)
-  expect(store.get(sidebarAtom).railKeys[inLib.runspaceId]).toBe(OUTSIDE)
+  expect(store.get(sidebarAtom).tileKeys[inLib.runspaceId]).toBe(OUTSIDE)
 
   store.set(activateRunspaceAtom, inLib.runspaceId)
 
@@ -431,7 +451,7 @@ test('a Runspace made active before its Repo is known takes the selected rail al
   expect(sidebar.selected.key).toBe('acme/lib')
 })
 
-test('the selected rail follows the front Tab when the Backend moves it into the first Runspace and its own Runspace goes away', async () => {
+test('the selected Tile follows the front Tab when the Backend moves it into the first Runspace and its own Runspace goes away', async () => {
   const { db, workbenchLedger, client, store } = bench()
   const app = ghqCheckout('acme/app')
   const lib = ghqCheckout('acme/lib')
@@ -441,7 +461,7 @@ test('the selected rail follows the front Tab when the Backend moves it into the
   await store.set(reloadAtom)
   await untilListed(store, 'acme/app', [kept.runspaceId, emptied.runspaceId])
   store.set(activateRunspaceAtom, emptied.runspaceId)
-  store.set(railChoiceAtom, 'acme/app')
+  store.set(tileChoiceAtom, 'acme/app')
 
   db.transaction((tx) => workbenchLedger.moveTab(tx, emptied.tab.id, first.runspaceId))
   await store.set(reloadAtom)
@@ -450,7 +470,7 @@ test('the selected rail follows the front Tab when the Backend moves it into the
   expect(store.get(sidebarAtom).selected.key).toBe('acme/lib')
 })
 
-test('making a Pinned Runspace active leaves the rail that was shown', async () => {
+test('making a Pinned Runspace active leaves the Tile that was shown', async () => {
   const { client, store } = bench()
   const app = ghqCheckout('acme/app')
   const lib = ghqCheckout('acme/lib')
@@ -467,7 +487,7 @@ test('making a Pinned Runspace active leaves the rail that was shown', async () 
   expect(store.get(sidebarAtom).selected.key).toBe('acme/app')
 })
 
-test('pinning the only Tab of the active Runspace keeps the rail that was shown', async () => {
+test('pinning the only Tab of the active Runspace keeps the Tile that was shown', async () => {
   const { client, store } = bench()
   const app = ghqCheckout('acme/app')
   const lib = ghqCheckout('acme/lib')
@@ -485,7 +505,7 @@ test('pinning the only Tab of the active Runspace keeps the rail that was shown'
   expect(sidebar.selected.key).toBe('acme/lib')
 })
 
-test("a Bench and a checkout of the same Repo share a rail whatever the case of the Repo's name", async () => {
+test("a Bench and a checkout of the same Repo share a Tile whatever the case of the Repo's name", async () => {
   const { db, workbenchLedger, client, store } = bench()
   const app = ghqCheckout('acme/app')
   const plain = await client.runspace.create({ cwd: app.checkout, ...size })
@@ -497,7 +517,7 @@ test("a Bench and a checkout of the same Repo share a rail whatever the case of 
 
   const sidebar = await untilListed(store, 'acme/app', [plain.runspaceId, shipIt])
 
-  expect(sidebar.rails.map((r) => r.key)).toEqual(['acme/app', OUTSIDE])
+  expect(sidebar.tiles.map((tile) => tile.key)).toEqual(['acme/app', OUTSIDE])
 })
 
 test('keys going up from an active row hidden in a collapsed section start from the last row shown', async () => {
@@ -518,7 +538,7 @@ test('keys going up from an active row hidden in a collapsed section start from 
   expect(store.get(activeRunspaceAtom)?.id).toBe(last.runspaceId)
 })
 
-test('moving a Runspace down past another of its Repo by key keeps the rails in their order', async () => {
+test('moving a Runspace down past another of its Repo by key keeps the Tiles in their order', async () => {
   const { client, store } = bench()
   const app = ghqCheckout('acme/app')
   const lib = ghqCheckout('acme/lib')
@@ -532,13 +552,13 @@ test('moving a Runspace down past another of its Repo by key keeps the rails in 
   await store.set(moveActiveRunspaceAtom, 'down')
 
   const sidebar = store.get(sidebarAtom)
-  expect(sidebar.rails.map((r) => r.key)).toEqual(['acme/app', 'acme/lib', OUTSIDE])
+  expect(sidebar.tiles.map((tile) => tile.key)).toEqual(['acme/app', 'acme/lib', OUTSIDE])
   expect(idsIn(sidebar, 'acme/app')).toEqual([second.runspaceId, first.runspaceId])
 })
 
-test('a Runspace whose shell moves into another Repo goes to the bottom of that rail, one that steps out of the Repos and back stays put, and a Repo new to the rails goes below the others', async () => {
+test("a Runspace whose shell moves into another Repo goes to the bottom of the rows under that Repo's Tile, one that steps out of the Repos and back stays put, and a Repo new to the Rail gets a Tile below the others", async () => {
   const { db, workbenchLedger, client, store } = bench()
-  onCleanup(appendRunspacesJoiningRail(store))
+  onCleanup(appendRunspacesJoiningTile(store))
   const app = ghqCheckout('acme/app')
   const lib = ghqCheckout('acme/lib')
   const zed = ghqCheckout('acme/zed')
@@ -546,7 +566,7 @@ test('a Runspace whose shell moves into another Repo goes to the bottom of that 
   const toZed = await client.runspace.create({ cwd: app.root, ...size })
   const inApp = await client.runspace.create({ cwd: app.checkout, ...size })
   const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
-  // Bench は動かないので、Repo が初めて引けたときに動かすと、Bench が前へ出て札の順が変わる。
+  // Bench は動かないので、Repo が初めて引けたときに動かすと、Bench が前へ出て Tile の順が変わる。
   const shipIt = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: lib.worktree }))
   const label: BenchLabel = { repo: 'acme/lib', number: 1, title: 'Ship it', setup: null }
   store.set(benchLabelOfAtom, () => (runspaceId: string) => (runspaceId === shipIt ? label : null))
@@ -575,13 +595,18 @@ test('a Runspace whose shell moves into another Repo goes to the bottom of that 
   const joinedApp = await untilListed(store, 'acme/app', [inLib.runspaceId])
 
   expect(idsIn(joinedLib, 'acme/lib')).toEqual([shipIt, inLib.runspaceId, toLib.runspaceId])
-  expect(joinedLib.rails.map((r) => r.key)).toEqual(['acme/app', 'acme/lib', OUTSIDE])
+  expect(joinedLib.tiles.map((tile) => tile.key)).toEqual(['acme/app', 'acme/lib', OUTSIDE])
   expect(idsIn(joinedZed, 'acme/lib')).toEqual([shipIt, inLib.runspaceId, toLib.runspaceId])
-  expect(joinedZed.rails.map((r) => r.key)).toEqual(['acme/app', 'acme/lib', 'acme/zed', OUTSIDE])
+  expect(joinedZed.tiles.map((tile) => tile.key)).toEqual([
+    'acme/app',
+    'acme/lib',
+    'acme/zed',
+    OUTSIDE,
+  ])
   expect(idsIn(joinedApp, 'acme/app')).toEqual([inApp.runspaceId, inLib.runspaceId])
 })
 
-test('jump hints number the Pinned rows and the rows shown under the selected rail, top down', async () => {
+test('jump hints number the Pinned rows and the rows shown under the selected Tile, top down', async () => {
   const { db, workbenchLedger, client, store } = bench()
   const app = ghqCheckout('acme/app')
   const lib = ghqCheckout('acme/lib')
@@ -594,7 +619,7 @@ test('jump hints number the Pinned rows and the rows shown under the selected ra
   store.set(benchLabelOfAtom, () => (id: string) => (id === benchId ? label : null))
   await store.set(reloadAtom)
   await untilListed(store, 'acme/app', [listed.runspaceId])
-  store.set(railChoiceAtom, 'acme/app')
+  store.set(tileChoiceAtom, 'acme/app')
   store.set(toggleSectionAtom, 'acme/app:bench')
 
   store.set(jumpHintsActiveAtom, true)
@@ -612,9 +637,9 @@ const shell: RunspaceRow = {
   unreadCount: 0,
   repo: 'acme/app',
   bench: null,
-  title: 'Read the rail',
+  title: 'Read the tile',
   titleIsPath: false,
-  terminalTitle: 'Read the rail',
+  terminalTitle: 'Read the tile',
   path: 'packages/ui',
   branch: null,
 }
@@ -628,11 +653,11 @@ test.each([
   ['a plain row in its Repo', shell, 'repo', null],
   [
     'a plain row in a linked worktree',
-    { ...shell, branch: 'feature/rail' },
+    { ...shell, branch: 'feature/tile' },
     'repo',
-    { info: 'feature/rail', where: '' },
+    { info: 'feature/tile', where: '' },
   ],
-  ['a Bench', benchRow, 'repo', { info: 'Read the rail', where: '#12', chip: null }],
+  ['a Bench', benchRow, 'repo', { info: 'Read the tile', where: '#12', chip: null }],
   [
     'a Bench being prepared',
     { ...benchRow, bench: { ...benchRow.bench!, setup: { text: 'preparing', error: false } } },
@@ -656,7 +681,7 @@ test.each([
     'a Pinned Bench',
     benchRow,
     'pinned',
-    { info: 'Read the rail', chip: 'acme/app', where: 'app#12' },
+    { info: 'Read the tile', chip: 'acme/app', where: 'app#12' },
   ],
 ] as const)('the second line of %s', (_, row, place, meta) => {
   if (meta === null) expect(rowMetaOf(row, place)).toBeNull()

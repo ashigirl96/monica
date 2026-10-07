@@ -19,7 +19,7 @@ export type UiState = {
   sidebarOpen: boolean
   sidebarWidth: number
   uiZoom: number
-  rail: string | null
+  tile: string | null
   collapsedSections: string[]
 }
 
@@ -31,7 +31,7 @@ const DEFAULT_UI_STATE: UiState = {
   sidebarOpen: true,
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
   uiZoom: UI_ZOOM_DEFAULT,
-  rail: null,
+  tile: null,
   collapsedSections: [],
 }
 
@@ -54,7 +54,7 @@ function parseUiState(text: string | null): UiState {
       SIDEBAR_DEFAULT_WIDTH,
     ),
     uiZoom: numberIn(r.uiZoom, UI_ZOOM_MIN, UI_ZOOM_MAX, UI_ZOOM_DEFAULT),
-    rail: typeof r.rail === 'string' ? r.rail : null,
+    tile: typeof r.tile === 'string' ? r.tile : null,
     collapsedSections: Array.isArray(r.collapsedSections)
       ? r.collapsedSections.filter((key): key is string => typeof key === 'string')
       : [],
@@ -82,8 +82,8 @@ export const sidebarOpenAtom = atomWithDefault((get) => get(savedUiStateAtom).si
 export const sidebarWidthAtom = atomWithDefault((get) => get(savedUiStateAtom).sidebarWidth)
 export const sidebarResizingAtom = atom(false)
 
-// null なら active な Runspace の札を出す。
-export const railChoiceAtom = atomWithDefault((get) => get(savedUiStateAtom).rail)
+// null なら active な Runspace の Tile を出す。
+export const tileChoiceAtom = atomWithDefault((get) => get(savedUiStateAtom).tile)
 export const collapsedSectionsAtom = atomWithDefault(
   (get): ReadonlySet<string> => new Set(get(savedUiStateAtom).collapsedSections),
 )
