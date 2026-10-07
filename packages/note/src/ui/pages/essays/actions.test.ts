@@ -180,12 +180,13 @@ function statusChange(gate: Gate, overrides: Partial<Parameters<typeof setOpenEs
   const calls = {
     sent: [] as [string, EssayStatus][],
     bases: [] as [string, Date][],
-    adopted: [] as Note[],
+    adopted: [] as [Note, boolean][],
     patched: [] as EssayStatus[],
   }
   const run = setOpenEssayStatus({
     targetId: 'note-1',
     gate,
+    shownContent: () => ({ type: 'doc' }),
     flush: async () => {},
     hasUnsaved: () => false,
     setStatus: async (id, status) => {
@@ -193,7 +194,7 @@ function statusChange(gate: Gate, overrides: Partial<Parameters<typeof setOpenEs
       return essay(id, status, after)
     },
     setBase: (id, updatedAt) => calls.bases.push([id, updatedAt]),
-    adopt: (note) => calls.adopted.push(note),
+    adopt: (note, remount) => calls.adopted.push([note, remount]),
     patchStatus: (status) => calls.patched.push(status),
     ...overrides,
   })
@@ -211,9 +212,47 @@ describe('setOpenEssayStatus', () => {
       expect(await run).toMatchObject({ status: to })
       expect(calls.sent).toEqual([['note-1', to]])
       expect(calls.bases).toEqual([['note-1', after]])
-      expect(calls.adopted).toEqual([essay('note-1', to, after)])
+      expect(calls.adopted).toEqual([[essay('note-1', to, after), false]])
       expect(calls.patched).toEqual([])
     }
+  })
+
+  test('shows the body and title it gets back when they were changed elsewhere', async () => {
+    for (const changed of [
+      { content: { type: 'doc' as const, content: [{ type: 'paragraph' }] } },
+      { title: 'Retitled' },
+    ]) {
+      const updated = { ...essay('note-1', 'finished', after), ...changed }
+      const { run, calls } = statusChange(
+        { current: essay('note-1') },
+        {
+          setStatus: async () => updated,
+        },
+      )
+
+      expect(await run).toBe(updated)
+      expect(calls.adopted).toEqual([[updated, true]])
+      expect(calls.patched).toEqual([])
+    }
+  })
+
+  test('keeps the version it had when the Essay was changed elsewhere and an edit was made while the status was being set', async () => {
+    let typed = false
+    const { run, calls } = statusChange(
+      { current: essay('note-1') },
+      {
+        hasUnsaved: () => typed,
+        setStatus: async (id, status) => {
+          typed = true
+          return { ...essay(id, status, after), title: 'Retitled' }
+        },
+      },
+    )
+
+    expect(await run).toMatchObject({ status: 'finished' })
+    expect(calls.bases).toEqual([])
+    expect(calls.adopted).toEqual([])
+    expect(calls.patched).toEqual(['finished'])
   })
 
   test('waits for the pending edit to be saved, then sets the status', async () => {

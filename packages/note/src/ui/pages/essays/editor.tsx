@@ -198,13 +198,14 @@ export function EssayEditorPage({ id }: { id: string }) {
         const updated = await setOpenEssayStatus({
           targetId,
           gate: noteRef,
+          shownContent: () => persistableContent(contentRef.current).toJSON(),
           flush,
           hasUnsaved,
           setStatus: (essayId, status) => client.essay.setStatus({ id: essayId, status }),
           setBase,
-          adopt: (next) => {
+          adopt: (next, remount) => {
             seedNote(next)
-            adopt(next, false)
+            adopt(next, remount)
           },
           patchStatus: (status) =>
             patch((current) => (current.kind === 'essay' ? { ...current, status } : current)),

@@ -1,6 +1,7 @@
 import { type RefObject, useCallback, useEffect, useState } from 'react'
 
-import type { Doc, Note } from '../../contract.ts'
+import type { Note } from '../../contract.ts'
+import type { UnsavedDraft } from './save-queue.ts'
 import type { Autosave } from './use-autosave.ts'
 
 /**
@@ -33,17 +34,20 @@ export function usableServerDoc(note: Note | undefined, baseUpdatedAt: Date | nu
 }
 
 /**
- * 開いた画面に出す note。未保存の編集は autosave にしか無いので、cache の本文より優先する。
- * その本文は基準版に積んだものなので版も基準版のままにし、cache に外の新しい版が入っていても
+ * 開いた画面に出す note。未保存の本文と title は autosave にしか無いので、cache のものより優先する。
+ * cache の title で開くと、次の打鍵の draft が未保存の title を古い title で置き換える。
+ * その編集は基準版に積んだものなので版も基準版のままにし、cache に外の新しい版が入っていても
  * 基準版を進めない（進めると、保存が外の変更を競合なしで上書きする）。
  */
 export function noteToOpen(
   data: Note,
   baseUpdatedAt: Date | null,
-  unsaved: Doc | null,
+  unsaved: UnsavedDraft | null,
 ): Note | null {
   if (unsaved !== null && baseUpdatedAt !== null) {
-    return { ...data, content: unsaved, updatedAt: baseUpdatedAt }
+    const opened = { ...data, content: unsaved.content, updatedAt: baseUpdatedAt }
+    if (unsaved.title !== undefined && 'title' in opened) return { ...opened, title: unsaved.title }
+    return opened
   }
   return usableServerDoc(data, baseUpdatedAt)
 }
@@ -113,7 +117,7 @@ export function useServerDoc({
   // 再マウントの世代。自分の保存では進まないので打鍵中にカーソルと undo が飛ばない
   const [generation, setGeneration] = useState(0)
   const [lastKey, setLastKey] = useState(docKey)
-  const { baseVersion, setBase, hasUnsaved, dropPending, setOpenNote, unsavedContent, editMark } =
+  const { baseVersion, setBase, hasUnsaved, dropPending, setOpenNote, unsavedDraft, editMark } =
     autosave
 
   if (lastKey !== docKey) {
@@ -143,7 +147,7 @@ export function useServerDoc({
     // 台帳は生きているので、1 世代古い cache をここで確実に弾ける。
     const base = baseVersion(data.id)
     if (current === null) {
-      const opened = noteToOpen(data, base, unsavedContent(data.id))
+      const opened = noteToOpen(data, base, unsavedDraft(data.id))
       // oxlint-disable-next-line react/set-state-in-effect -- 採用は render の外の autosave の基準版も進めるので、render ではなく effect で行う。
       if (opened !== null) adopt(opened, false)
       return
@@ -156,7 +160,7 @@ export function useServerDoc({
       hasUnsaved: hasUnsaved(usable.id),
     })
     if (adoptable) adopt(usable, true)
-  }, [data, current, adopt, baseVersion, hasUnsaved, unsavedContent])
+  }, [data, current, adopt, baseVersion, hasUnsaved, unsavedDraft])
 
   const openId = current?.id ?? null
   useEffect(() => {

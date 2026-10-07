@@ -106,7 +106,8 @@ monica の `pages/essays` を移したもの（`pages/essays/`）。
 - 状態は StatusChip のクリックか ⌃W で切り替える。次の status は画面が今の status から導き（`support.ts` の `nextEssayStatus`）、`essay.setStatus` に値で渡す。連打は直列にし、2 回目は 1 回目の結果から導く。
 - 削除と状態の切り替えは、先に flush して未保存が残れば中止する（`pages/essays/actions.ts`）。⌥Z で戻せるのは Backend に届いた本文までで、状態の切り替えで進んだ版を基準版にすると、競合で残った古い本文が次の保存で外の変更を上書きするため。一覧の右クリックでも、削除は同じく flush してから消す。状態の切り替えは monica どおり flush しない。
 - 消した Essay は、autosave の予約（`discard`）と本文の cache（`useForgetNote`）を捨てる。予約が残ると保存が NOT_FOUND で再試行を繰り返し、cache が残ると履歴で戻ったときに消した Essay を cache から開いて、保存だけが失敗し続ける。消す前に flush して未保存が無いのを確かめてあるので、予約を捨てても編集は失われない。
-- 状態を切り替えた版を基準版にする。status だけが変わった版なので、手元の本文はその上に積んでよい。往復の間に本文か title を書いていたら、返った Note の status だけを取り、本文と title は手元のまま残す（monica は title も返った値で上書きした）。往復の間に別の Note へ移っていたら、返った Note を画面に採用しない。
+- 状態を切り替えた版は、返った本文と title が送る前の画面と同じとき（status だけが変わった版）に基準版にする。手元の本文はその上に積んでよい。違えば外で書き換わった版で、基準版にすると画面の古い本文が次の保存でその変更を競合なしに上書きする（monica にあった不具合）。そのときは、未保存が無ければ返った Note でエディタを mount し直し、未保存があれば基準版を進めずに、保存の CONFLICT に拾わせる。
+- 往復の間に本文か title を書いていたら、返った Note の status だけを取り、本文と title は手元のまま残す（monica は title も返った値で上書きした）。往復の間に別の Note へ移っていたら、返った Note を画面に採用しない。
 - 削除は、往復を待つ間の打鍵を保存に予約しない。中止したときは、まだ同じ Essay を開いていれば予約を戻す。別の Note へ移った後に戻すと、その Note の本文を消そうとした Essay に保存してしまう（monica にあった不具合）。消せたときも、往復の間に別の Note へ移っていれば送り先へは移らない。
 - `/essays/:id` は Essay 以外の id でも開き、本文の代わりに「Not an essay」を出す。そこでは削除も状態の切り替えもしない。`remove` は Repo Note も消せる種類として受けるので、画面が種類を見ないと Essay の画面から Repo Note を消してしまう（monica にあった不具合）。
 - ⌥N と ⌥Z は、往復の間に別の画面へ移っていても、作った Essay と戻した Essay を開く（monica どおり）。開くことがその操作の目的で、画面を移っても autosave は router の上で保存を続けるので、本文は失われない。
@@ -129,7 +130,7 @@ monica の `pages/essays` を移したもの（`pages/essays/`）。
 - 保存の `expectedUpdatedAt` には、その Note を最後に読んだか書いた `updatedAt`（基準版）を渡す。版は ms で比べる。Daily と Scratch の保存は title を省く。
 - CONFLICT は再試行しない。開いている Note はヘッダのバナー（「最新を読み込む」で手元の編集を捨てる）、開いていない Note は左下の常駐の通知に出す。通知の「開く」は `/notes/:id` に移る。
 - 「最新を読み込む」は、取り直しが通ってから手元の編集を捨てて採用する（`reloadLatest`）。取り直しが失敗しても TanStack Query は古い cache を data に残して返すので、先に捨てると編集を失って古い版を出す（monica にあった不具合）。取り直しの間に書いた編集があれば、捨てずに競合のまま残す。取り直しの間に別の Note へ移ったら、返った doc を採用しない（Daily の画面は日を移っても同じ hook を使い続けるため）。
-- 未保存の編集がある Note を開き直したら（保存中・再試行待ち・競合中に別の日へ移って戻るなど）、cache の本文ではなく一番新しい未保存の編集を出す（`noteToOpen` と `SaveQueue.unsavedContent`）。cache の本文を使わないので、cache が基準版より古くても開く。版は基準版のままにする。cache に外の新しい版が入っていても基準版を進めないので、保存は CONFLICT になり、外の変更を上書きしない。未保存の本文は autosave にしか無いので、cache で開くと次の打鍵が保存済みの編集を上書きする（monica にあった不具合）。
+- 未保存の編集がある Note を開き直したら（保存中・再試行待ち・競合中に別の日へ移って戻るなど）、cache の本文と title ではなく一番新しい未保存の編集を出す（`noteToOpen` と `SaveQueue.unsavedDraft`）。title も重ねるのは、cache の title で開くと次の打鍵の draft が未保存の title を古い title で置き換えるため。cache の本文を使わないので、cache が基準版より古くても開く。版は基準版のままにする。cache に外の新しい版が入っていても基準版を進めないので、保存は CONFLICT になり、外の変更を上書きしない。未保存の本文は autosave にしか無いので、cache で開くと次の打鍵が保存済みの編集を上書きする（monica にあった不具合）。
 - 保存は query の cache を通らない。保存の応答は doc を返さないので、cache は 1 世代古くなる。`notes/note-sync.ts` は、基準版より古い cache を採用しない。外の更新は、未保存が無く、基準版より新しいときだけ採用してエディタを作り直す。
 - pagehide で未保存を送る。`CallContext` の `keepalive` を link の `fetch` が init に渡す。keepalive の body の上限（64KB）を超える本文は送れない（monica と同じ）。
 - `notes/save-state.ts` は monica の `note-ledger.ts` を改名したもの。tania では Ledger を Backend の部品にだけ使う。
@@ -156,5 +157,5 @@ monica の `pages/essays` を移したもの（`pages/essays/`）。
 - エディタと同じく DOM の環境は入れず、純関数と link を確かめる。
 - monica の save-state（14 本）・note-sync（10 本）・summary（4 本）のテストを、contract の形（平らな種類、Date の版）に直して移してある。summary には `summaryTitle` の 2 本を足してある。
 - 保存は `save-queue.test.ts` が、偽の保存と `spyOn` で捕まえた timer で確かめる（debounce、基準版、CONFLICT、再試行、直列、keepalive、title を省くこと、閉じると失われる編集の数え方）。
-- Essay の画面は `support.test.ts` と `actions.test.ts` で確かめる。`support.test.ts` は、monica の `pages/essays/support.test.ts`（7 本）を contract の形に直して移したものに、取り消しの stack の 1 本を足してある。`actions.test.ts` は、削除と状態の切り替えの判断を偽の保存の口で確かめる。確かめるのは、flush が返るまで待ってから未保存を見ること、残れば中止すること、往復の間の編集と移動。
+- Essay の画面は `support.test.ts` と `actions.test.ts` で確かめる。`support.test.ts` は、monica の `pages/essays/support.test.ts`（7 本）を contract の形に直して移したものに、取り消しの stack の 1 本を足してある。`actions.test.ts` は、削除と状態の切り替えの判断を偽の保存の口で確かめる。確かめるのは、flush が返るまで待ってから未保存を見ること、残れば中止すること、往復の間の編集と移動、外で書き換わった版を基準版にしないこと、Essay 以外を消さないこと。
 - route は `routes.test.ts`（今日の導出、`/notes/:id` の行き先）、再接続は `reach.test.ts`（1 秒の待ちと確かめの request。timer は `setTimeout` を `spyOn` で捕まえて手で進める）、link は `client.test.ts`（keepalive と届いたかの合図。fetch を `spyOn` で差し替える）。
