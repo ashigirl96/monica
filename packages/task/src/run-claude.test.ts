@@ -26,7 +26,7 @@ async function tracked({ blockedBy = [] as string[] } = {}) {
   return { ...fixture, cwd: join(fixture.home, 'worktrees/acme/app/issue-12') }
 }
 
-// claude は最初の prompt まで transcript を書かないので、会話の無かった Agent Session は resume できない。
+// claude は最初の prompt まで Agent Session Transcript を書かないので、会話の無かった Agent Session は resume できない。
 function transcriptOf({ home }: Fixture, sessionId: string, { written = true } = {}) {
   const path = join(home, 'transcripts', `${sessionId}.jsonl`)
   if (written) {
