@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { Note } from '../../contract.ts'
-import { noteLabel } from './summary.ts'
+import { noteLabel, summaryTitle } from './summary.ts'
 
 type Kind =
   | { kind: 'daily' }
@@ -41,5 +41,13 @@ describe('noteLabel', () => {
 
   test('daily は title を持たないので常に fallback', () => {
     expect(noteLabel(note({ kind: 'daily' }), 'Sat 8.29')).toBe('Sat 8.29')
+  })
+})
+
+describe('summaryTitle', () => {
+  test('一覧の行は title を使い、無題なら本文の 1 行目、本文も空なら Untitled', () => {
+    expect(summaryTitle({ title: 'Spec', preview: 'first line' })).toBe('Spec')
+    expect(summaryTitle({ title: '', preview: 'first line' })).toBe('first line')
+    expect(summaryTitle({ title: '', preview: null })).toBe('Untitled')
   })
 })

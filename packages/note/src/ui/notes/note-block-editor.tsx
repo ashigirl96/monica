@@ -16,6 +16,7 @@ type NoteBlockEditorProps = {
   generation: number
   autoFocus: boolean
   onDocChange: (doc: unknown) => void
+  onExitUp?: () => void
   handleRef: RefObject<BlockEditorHandle | null>
 }
 
@@ -29,6 +30,7 @@ function OpenNoteEditor({
   generation,
   autoFocus,
   onDocChange,
+  onExitUp,
   handleRef,
 }: NoteBlockEditorProps) {
   const client = useNoteClient()
@@ -66,6 +68,7 @@ function OpenNoteEditor({
       initialDoc={note.content}
       autoFocus={autoFocus}
       onDocChange={onDocChange}
+      onExitUp={onExitUp}
       noteId={noteId}
       searchNoteMentions={references.searchNoteMentions}
       resolveNoteMention={references.resolveNoteMention}
