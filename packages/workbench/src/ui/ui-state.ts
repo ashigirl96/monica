@@ -19,6 +19,8 @@ export type UiState = {
   sidebarOpen: boolean
   sidebarWidth: number
   uiZoom: number
+  rail: string | null
+  collapsedSections: string[]
 }
 
 const UI_STATE_KEY = 'tania.workbench.ui-state'
@@ -29,6 +31,8 @@ const DEFAULT_UI_STATE: UiState = {
   sidebarOpen: true,
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
   uiZoom: UI_ZOOM_DEFAULT,
+  rail: null,
+  collapsedSections: [],
 }
 
 function numberIn(value: unknown, min: number, max: number, fallback: number): number {
@@ -50,6 +54,10 @@ function parseUiState(text: string | null): UiState {
       SIDEBAR_DEFAULT_WIDTH,
     ),
     uiZoom: numberIn(r.uiZoom, UI_ZOOM_MIN, UI_ZOOM_MAX, UI_ZOOM_DEFAULT),
+    rail: typeof r.rail === 'string' ? r.rail : null,
+    collapsedSections: Array.isArray(r.collapsedSections)
+      ? r.collapsedSections.filter((key): key is string => typeof key === 'string')
+      : [],
   }
 }
 
@@ -73,6 +81,12 @@ export function saveUiState(state: UiState): void {
 export const sidebarOpenAtom = atomWithDefault((get) => get(savedUiStateAtom).sidebarOpen)
 export const sidebarWidthAtom = atomWithDefault((get) => get(savedUiStateAtom).sidebarWidth)
 export const sidebarResizingAtom = atom(false)
+
+// null なら active な Runspace の札を出す。
+export const railChoiceAtom = atomWithDefault((get) => get(savedUiStateAtom).rail)
+export const collapsedSectionsAtom = atomWithDefault(
+  (get): ReadonlySet<string> => new Set(get(savedUiStateAtom).collapsedSections),
+)
 
 // メインコンテンツ領域だけに CSS zoom として適用する係数。chrome (sidebar/header)
 // はこの atom を読まないので固定のまま。ターミナルは content 側で 1/zoom の逆 zoom を

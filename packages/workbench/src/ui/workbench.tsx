@@ -4,8 +4,10 @@ import { lazy, Suspense, useEffect } from 'react'
 
 import { WorkbenchHeader } from './header.tsx'
 import { ResizeHandle } from './resize-handle.tsx'
-import { type RenderRunspaceLabel, WorkbenchSidebar } from './sidebar.tsx'
+import type { BenchLabelOf } from './sidebar-model.ts'
+import { WorkbenchSidebar } from './sidebar.tsx'
 import {
+  benchLabelOfAtom,
   lastTabClosedAtom,
   reloadAgentSessionsAtom,
   reloadAtom,
@@ -55,12 +57,12 @@ function useWorkbenchChanges(client: WorkbenchClient | null) {
 // workbench は task を import しないので、Task に関わる表示と出来事は slot で受け渡す（ADR-0005）。
 export function Workbench({
   client,
-  renderRunspaceLabel,
+  benchLabelOf,
   tabMenuItems,
   onLastTabClosed,
 }: {
   client: WorkbenchClient | null
-  renderRunspaceLabel?: RenderRunspaceLabel
+  benchLabelOf?: BenchLabelOf
   tabMenuItems?: TabMenuItems
   onLastTabClosed?: (runspaceId: string) => void
 }) {
@@ -74,6 +76,8 @@ export function Workbench({
     () => setLastTabClosed(() => onLastTabClosed ?? null),
     [onLastTabClosed, setLastTabClosed],
   )
+  const setBenchLabelOf = useSetAtom(benchLabelOfAtom)
+  useEffect(() => setBenchLabelOf(() => benchLabelOf ?? null), [benchLabelOf, setBenchLabelOf])
 
   const sidebarOpen = useAtomValue(sidebarOpenAtom)
   const sidebarWidth = useAtomValue(sidebarWidthAtom)
@@ -106,9 +110,7 @@ export function Workbench({
               </span>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto px-2">
-            <WorkbenchSidebar renderRunspaceLabel={renderRunspaceLabel} />
-          </div>
+          <WorkbenchSidebar />
         </div>
       </div>
 

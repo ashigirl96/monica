@@ -1,6 +1,5 @@
 import type { ContractRouterClient } from '@orpc/contract'
-import { cn } from '@tania/ui'
-import type { RenderRunspaceLabel } from '@tania/workbench/ui'
+import type { BenchLabelOf } from '@tania/workbench/ui'
 import { useCallback, useEffect, useState } from 'react'
 
 import type { BenchItem, contract } from '../contract.ts'
@@ -8,26 +7,7 @@ import { benchLabel } from './bench-label.ts'
 
 export type TaskClient = ContractRouterClient<typeof contract>
 
-function BenchLabel({ bench }: { bench: BenchItem }) {
-  const { name, note } = benchLabel(bench)
-  return (
-    <span className="flex min-w-0 items-baseline gap-1.5">
-      <span className="truncate">{name}</span>
-      {note && (
-        <span
-          className={cn(
-            'shrink-0 text-[10px] font-normal',
-            bench.setupState === 'failed' ? 'text-destructive' : 'text-muted-foreground',
-          )}
-        >
-          {note}
-        </span>
-      )}
-    </span>
-  )
-}
-
-export function useRunspaceLabels(client: TaskClient | null): RenderRunspaceLabel {
+export function useBenchLabels(client: TaskClient | null): BenchLabelOf {
   const [benches, setBenches] = useState<ReadonlyMap<string, BenchItem>>(new Map())
 
   // Backend が立ち直ると endpoint ごと替わり、前の購読は届かなくなるので、client ごとに張り直す。
@@ -63,7 +43,7 @@ export function useRunspaceLabels(client: TaskClient | null): RenderRunspaceLabe
   return useCallback(
     (runspaceId: string) => {
       const bench = benches.get(runspaceId)
-      return bench ? <BenchLabel bench={bench} /> : null
+      return bench ? benchLabel(bench) : null
     },
     [benches],
   )

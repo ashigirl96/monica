@@ -31,7 +31,15 @@ export const WorkbenchChangeSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('reconciled') }),
 ])
 
-export const WorktreeSchema = z.object({ repo: z.string(), branch: z.string() })
+export const RepoPlaceSchema = z.object({
+  repo: z.string().nullable().describe('owner/repo, or null outside every Repo'),
+  path: z
+    .string()
+    .describe(
+      "the directory as the sidebar shows it: in a Repo, relative to the top of its checkout or worktree (the top's own name at the top); outside, with the home folded into ~",
+    ),
+  branch: z.string().nullable().describe('the branch checked out, only in a linked worktree'),
+})
 
 export type TerminalSession = z.infer<typeof TerminalSessionSchema>
 export type Tab = z.infer<typeof TabSchema>
@@ -39,7 +47,7 @@ export type Layout = z.infer<typeof LayoutSchema>
 export type AgentSession = z.infer<typeof AgentSessionSchema>
 export type ListedAgentSession = z.infer<typeof ListedAgentSessionSchema>
 export type WorkbenchChange = z.infer<typeof WorkbenchChangeSchema>
-export type Worktree = z.infer<typeof WorktreeSchema>
+export type RepoPlace = z.infer<typeof RepoPlaceSchema>
 
 const size = { rows: z.number().int().positive(), cols: z.number().int().positive() }
 const index = z.number().int().nonnegative()
@@ -150,13 +158,13 @@ export const contract = {
       )
       .output(z.void()),
   },
-  worktree: {
-    info: meta
+  repo: {
+    of: meta
       .meta({
-        description: 'Name the repo and branch of the linked worktree a directory is in, if any',
+        description: 'Name the Repo whose checkout or worktree a directory is in, if any',
       })
       .input(z.object({ cwd: z.string() }))
-      .output(WorktreeSchema.nullable()),
+      .output(RepoPlaceSchema),
   },
   editor: {
     resolve: meta

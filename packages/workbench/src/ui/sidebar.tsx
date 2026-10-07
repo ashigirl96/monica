@@ -1,99 +1,173 @@
-import { cn, PinIcon, useDragReorder } from '@tania/ui'
+import { ChevronRightIcon, cn, FolderIcon, PinIcon, useDragReorder } from '@tania/ui'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { type ReactNode, useState } from 'react'
+import { useState } from 'react'
 
-import type { TerminalSession } from '../contract.ts'
-import { shortPath } from '../paths.ts'
 import { UNREAD_LABEL_STYLE } from './agent-dot.ts'
 import { JumpHint } from './jump-hint.tsx'
 import { jumpHintTargetsAtom } from './jump-hints.ts'
 import {
+  type DetachedRow,
+  type ListedIn,
+  type Rail,
+  repoName,
+  type RowMeta,
+  rowMetaOf,
+  type RunspaceRow,
+  sectionKey,
+  type SidebarSection,
+} from './sidebar-model.ts'
+import {
   activateRunspaceAtom,
   draggedTabIdAtom,
-  terminateTerminalSessionAtom,
   moveTabToRunspaceAtom,
   reattachTerminalSessionAtom,
   reorderRunspacesAtom,
-  runspaceSummariesAtom,
-  type RunspaceSummary,
-  unreadOfTerminalSessionAtom,
+  sidebarAtom,
+  terminateTerminalSessionAtom,
+  toggleSectionAtom,
 } from './store.ts'
-import { detachedTerminalSessionsAtom } from './terminal-sessions.ts'
+import { railChoiceAtom } from './ui-state.ts'
 
-function UnreadCount({ count }: { count: number }) {
+const OUTSIDE_LABEL = 'その他'
+
+const SECTION_LABELS: Record<SidebarSection['kind'], string> = {
+  bench: 'Bench',
+  runspaces: 'Runspaces',
+  detached: 'Detached',
+}
+
+// 札の色は dot の緑・琥珀・赤と紛れない色から、repo ごとに決まった 1 つを選ぶ。
+const RAIL_HUES = [
+  { bg: 'rgba(56,189,248,.2)', fg: '#7dd3fc' },
+  { bg: 'rgba(167,139,250,.22)', fg: '#c4b5fd' },
+  { bg: 'rgba(244,114,182,.2)', fg: '#f9a8d4' },
+  { bg: 'rgba(148,163,184,.22)', fg: '#cbd5e1' },
+  { bg: 'rgba(99,102,241,.28)', fg: '#a5b4fc' },
+  { bg: 'rgba(34,211,238,.18)', fg: '#67e8f9' },
+  { bg: 'rgba(232,121,249,.2)', fg: '#f0abfc' },
+  { bg: 'rgba(96,165,250,.2)', fg: '#93c5fd' },
+]
+
+function hueOf(repo: string) {
+  let hash = 0
+  for (const char of repo.toLowerCase()) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
+  return RAIL_HUES[hash % RAIL_HUES.length]!
+}
+
+function withUnread(label: string, count: number): string {
+  return count > 0 ? `${label}、未読の Tab ${count}` : label
+}
+
+function UnreadCount({ count, className }: { count: number; className?: string }) {
   if (count === 0) return null
   return (
-    <span className="mt-px inline-flex h-[15px] min-w-[15px] shrink-0 items-center justify-center rounded-full bg-zinc-100 px-1 text-[9.5px] leading-none font-bold text-zinc-900">
+    <span
+      aria-hidden
+      className={cn(
+        'inline-flex h-[15px] min-w-[15px] shrink-0 items-center justify-center rounded-full bg-zinc-100 px-1 text-[9.5px] leading-none font-bold text-zinc-900',
+        className,
+      )}
+    >
       {count}
     </span>
   )
 }
 
-function DetachedTerminalSessionItem({
-  terminalSession,
-  unread,
-  onReattach,
-  onTerminate,
+function RailButton({
+  rail,
+  selected,
+  onPick,
 }: {
-  terminalSession: TerminalSession
-  unread: boolean
-  onReattach: () => void
-  onTerminate: () => void
+  rail: Rail
+  selected: boolean
+  onPick: () => void
 }) {
+  const label = rail.repo ?? OUTSIDE_LABEL
+  const hue = rail.repo ? hueOf(rail.repo) : null
   return (
-    <div className="group flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-muted-foreground">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-start gap-2">
-          <span
-            className={cn(
-              'block flex-1 truncate text-xs font-medium',
-              unread && UNREAD_LABEL_STYLE,
-            )}
-          >
-            {shortPath(terminalSession.cwd)}
-          </span>
-          <UnreadCount count={unread ? 1 : 0} />
-        </div>
-        <span className="block truncate font-mono text-[10px] text-muted-foreground/60">
-          {terminalSession.id}
-        </span>
-      </div>
-      <button
-        type="button"
-        onClick={onReattach}
-        className="rounded px-1.5 py-0.5 text-[10px] opacity-0 transition-opacity group-hover:opacity-100 hover:bg-white/[0.1] hover:text-foreground"
-      >
-        Reattach
-      </button>
-      <button
-        type="button"
-        onClick={onTerminate}
-        className="rounded px-1.5 py-0.5 text-[10px] text-destructive opacity-0 transition-opacity group-hover:opacity-100 hover:bg-destructive/15"
-      >
-        Kill
-      </button>
-    </div>
+    <button
+      type="button"
+      role="tab"
+      aria-selected={selected}
+      aria-label={withUnread(label, rail.unreadCount)}
+      title={label}
+      onClick={onPick}
+      className={cn(
+        'relative flex size-[30px] shrink-0 items-center justify-center text-xs leading-none font-bold',
+        'transition-[border-radius,filter] duration-150 hover:brightness-125 motion-reduce:transition-none',
+        'focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-white/50',
+        selected ? 'rounded-[7px] ring-[1.5px] ring-white/55' : 'rounded-[9px]',
+        !hue && 'bg-white/[0.08] text-white/75',
+      )}
+      style={hue ? { background: hue.bg, color: hue.fg } : undefined}
+    >
+      {rail.repo ? (
+        repoName(rail.repo).charAt(0).toUpperCase()
+      ) : (
+        <FolderIcon size={14} strokeWidth={2} />
+      )}
+      <UnreadCount
+        count={rail.unreadCount}
+        className="absolute -top-[5px] -right-[7px] ring-2 ring-zinc-900"
+      />
+    </button>
   )
 }
 
-export type RenderRunspaceLabel = (runspaceId: string) => ReactNode
+function RowMetaLine({ meta }: { meta: RowMeta }) {
+  return (
+    <span className="flex h-[15px] min-w-0 items-center gap-1.5 text-[11px] text-white/50">
+      {meta.note && (
+        <span
+          className={cn(
+            'shrink-0 rounded px-[5px] text-[10px] leading-[14px] ring-1 ring-white/16 ring-inset',
+            meta.note.error ? 'text-destructive' : 'text-muted-foreground',
+          )}
+        >
+          {meta.note.text}
+        </span>
+      )}
+      <span className={cn('min-w-0 flex-1 truncate', meta.infoMono && 'font-mono text-[10.5px]')}>
+        {meta.info}
+      </span>
+      {meta.chip && (
+        <span
+          aria-hidden
+          className="size-[7px] shrink-0 rounded-[2px]"
+          style={{ background: hueOf(meta.chip).fg }}
+        />
+      )}
+      {meta.where && (
+        <span
+          className={cn(
+            'max-w-[60%] shrink-0 truncate text-white/45',
+            meta.whereMono && 'font-mono text-[10.5px]',
+          )}
+        >
+          {meta.where}
+        </span>
+      )}
+    </span>
+  )
+}
 
 function RunspaceItem({
-  runspace,
+  row,
+  listedIn,
   dragHandlers,
   isDragOver,
   hint,
-  renderLabel,
 }: {
-  runspace: RunspaceSummary
+  row: RunspaceRow
+  listedIn: ListedIn
   dragHandlers: ReturnType<ReturnType<typeof useDragReorder>['handlersFor']>
   isDragOver: boolean
   hint?: string
-  renderLabel?: RenderRunspaceLabel
 }) {
   const draggedTabId = useAtomValue(draggedTabIdAtom)
   const moveTab = useSetAtom(moveTabToRunspaceAtom)
   const [tabOver, setTabOver] = useState(false)
+  const meta = rowMetaOf(row, listedIn)
 
   return (
     <button
@@ -107,126 +181,183 @@ function RunspaceItem({
         setTabOver(false)
       }}
       onPointerUp={() => {
-        if (draggedTabId) void moveTab(draggedTabId, runspace.id)
+        if (draggedTabId) void moveTab(draggedTabId, row.id)
       }}
-      data-runspace-id={runspace.id}
+      data-runspace-id={row.id}
+      aria-label={withUnread(row.title, row.unreadCount)}
       className={cn(
-        'flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left',
+        'flex w-full cursor-pointer flex-col items-stretch gap-[5px] rounded-lg px-2 py-[7px] text-left',
         'transition-colors duration-100',
         'focus-visible:ring-1 focus-visible:ring-white/30 focus-visible:outline-none',
-        runspace.isActive
+        row.isActive
           ? 'bg-white/[0.1] text-foreground focus-visible:ring-white/50'
           : 'text-muted-foreground hover:bg-white/[0.06] hover:text-foreground',
         (isDragOver || (tabOver && draggedTabId)) && 'ring-1 ring-sky-400/60',
       )}
     >
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="flex items-start gap-1.5">
-          {hint && <JumpHint hint={hint} ctrl />}
-          {runspace.holdsPin && <PinIcon size={14} className="shrink-0 text-rose-400" />}
-          <span
-            className={cn(
-              'flex-1 truncate text-xs leading-snug font-medium',
-              runspace.unreadCount > 0 && UNREAD_LABEL_STYLE,
-            )}
-          >
-            {(runspace.owned && renderLabel?.(runspace.id)) || runspace.title || 'Terminal'}
-          </span>
-          <UnreadCount count={runspace.unreadCount} />
-        </div>
-        {runspace.description && (
-          <span className="truncate text-[10px] text-muted-foreground">{runspace.description}</span>
-        )}
-      </div>
+      <span className="flex min-w-0 items-start gap-2">
+        {hint && <JumpHint hint={hint} ctrl />}
+        <span
+          className={cn(
+            'min-w-0 flex-1 text-xs leading-[17px] font-medium text-pretty wrap-anywhere',
+            row.titleIsPath && 'font-mono text-[11px] font-normal',
+            row.unreadCount > 0 && UNREAD_LABEL_STYLE,
+          )}
+        >
+          {row.title}
+        </span>
+        <UnreadCount count={row.unreadCount} className="mt-px" />
+      </span>
+      {meta && <RowMetaLine meta={meta} />}
     </button>
   )
 }
 
-function GroupHeader({ label }: { label: string }) {
+function DetachedItem({ row }: { row: DetachedRow }) {
+  const reattach = useSetAtom(reattachTerminalSessionAtom)
+  const terminate = useSetAtom(terminateTerminalSessionAtom)
+  const unread = row.unreadCount > 0
+  // sidebar は狭いので、hover で出す button は path の幅を取らないよう行の上に重ねる。
   return (
-    <div className="px-2.5 pt-2 pb-1">
-      <span className="text-[10px] font-semibold tracking-wider text-muted-foreground/50 uppercase">
-        {label}
+    <div className="group relative w-full rounded-lg px-2 py-[7px] text-muted-foreground">
+      <div className="flex items-start gap-2">
+        <span
+          className={cn(
+            'min-w-0 flex-1 font-mono text-[11px] leading-[17px] wrap-anywhere',
+            unread && UNREAD_LABEL_STYLE,
+          )}
+        >
+          {row.path}
+        </span>
+        <UnreadCount count={row.unreadCount} className="mt-px" />
+      </div>
+      <span className="block truncate font-mono text-[10px] text-muted-foreground/60">
+        {row.id}
       </span>
+      <div className="absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+        <button
+          type="button"
+          onClick={() => void reattach(row.id)}
+          className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] hover:bg-zinc-700 hover:text-foreground"
+        >
+          Reattach
+        </button>
+        <button
+          type="button"
+          onClick={() => void terminate(row.id)}
+          className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-destructive hover:bg-destructive/25"
+        >
+          Kill
+        </button>
+      </div>
     </div>
   )
 }
 
-function RunspaceGroup({
-  label,
-  items,
-  renderItem,
-}: {
-  label: string
-  items: RunspaceSummary[]
-  renderItem: (runspace: RunspaceSummary) => React.ReactNode
-}) {
+function SectionHeader({ railKey, section }: { railKey: string; section: SidebarSection }) {
+  const toggle = useSetAtom(toggleSectionAtom)
+  const label = SECTION_LABELS[section.kind]
   return (
-    <>
-      <GroupHeader label={label} />
-      <div className="flex flex-col gap-0.5 px-0.5">{items.map(renderItem)}</div>
-    </>
+    <button
+      type="button"
+      aria-expanded={!section.collapsed}
+      aria-label={section.collapsed ? withUnread(label, section.unreadCount) : label}
+      onClick={() => toggle(sectionKey(railKey, section.kind))}
+      className="flex h-6 w-full shrink-0 items-center gap-1.5 rounded-md px-2 text-[11px] font-semibold text-white/55 transition-colors hover:bg-white/[0.04] hover:text-white/85"
+    >
+      <span className="flex-1 text-left">{label}</span>
+      {section.collapsed && (
+        <span className="text-[10px] font-normal text-white/50">{section.rowCount}</span>
+      )}
+      {section.collapsed && <UnreadCount count={section.unreadCount} />}
+      <ChevronRightIcon
+        size={9}
+        strokeWidth={3}
+        className={cn(
+          'shrink-0 transition-transform duration-150 motion-reduce:transition-none',
+          !section.collapsed && 'rotate-90',
+        )}
+      />
+    </button>
   )
 }
 
-export function WorkbenchSidebar({
-  renderRunspaceLabel,
-}: {
-  renderRunspaceLabel?: RenderRunspaceLabel
-}) {
-  const summaries = useAtomValue(runspaceSummariesAtom)
-  const detached = useAtomValue(detachedTerminalSessionsAtom)
+function RailHeading({ rail }: { rail: Rail }) {
+  const owner = rail.repo?.slice(0, rail.repo.indexOf('/'))
+  return (
+    <div className="flex min-w-0 items-baseline gap-1.5 px-2 pt-2.5 pb-0.5">
+      <span className="max-w-[75%] shrink-0 truncate text-sm font-semibold text-white/90">
+        {rail.repo ? repoName(rail.repo) : OUTSIDE_LABEL}
+      </span>
+      {owner && <span className="truncate text-[10px] text-white/50">{owner}</span>}
+    </div>
+  )
+}
+
+export function WorkbenchSidebar() {
+  const { pinned, rails, selected } = useAtomValue(sidebarAtom)
   const activate = useSetAtom(activateRunspaceAtom)
-  const reattach = useSetAtom(reattachTerminalSessionAtom)
-  const terminate = useSetAtom(terminateTerminalSessionAtom)
+  const selectRail = useSetAtom(railChoiceAtom)
   const reorder = useSetAtom(reorderRunspacesAtom)
   const jumpHints = useAtomValue(jumpHintTargetsAtom)
-  const unreadOfTerminalSession = useAtomValue(unreadOfTerminalSessionAtom)
   const { dragOverId, handlersFor } = useDragReorder(reorder)
+  const listedIn: ListedIn = selected.repo ? 'repo' : 'outside'
 
-  const renderItem = (runspace: RunspaceSummary) => (
+  const renderRunspace = (row: RunspaceRow, at: ListedIn) => (
     <RunspaceItem
-      key={runspace.id}
-      runspace={runspace}
-      dragHandlers={handlersFor(runspace.id, () => activate(runspace.id))}
-      isDragOver={dragOverId === runspace.id}
-      hint={jumpHints.byRunspaceId[runspace.id]}
-      renderLabel={renderRunspaceLabel}
+      key={row.id}
+      row={row}
+      listedIn={at}
+      dragHandlers={handlersFor(row.id, () => activate(row.id))}
+      isDragOver={dragOverId === row.id}
+      hint={jumpHints.byRunspaceId[row.id]}
+    />
+  )
+  const railButton = (rail: Rail) => (
+    <RailButton
+      key={rail.key}
+      rail={rail}
+      selected={rail.key === selected.key}
+      onPick={() => selectRail(rail.key)}
     />
   )
 
-  const holdingPin = summaries.filter((s) => s.holdsPin)
-  const rest = summaries.filter((s) => !s.holdsPin)
-
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex-1 overflow-y-auto">
-        {holdingPin.length > 0 && (
-          <RunspaceGroup label="Pinned" items={holdingPin} renderItem={renderItem} />
-        )}
-        <RunspaceGroup
-          label={holdingPin.length > 0 ? 'Runspaces' : ''}
-          items={rest}
-          renderItem={renderItem}
-        />
-
-        {detached.length > 0 && (
-          <>
-            <GroupHeader label="Detached" />
-            <div className="flex flex-col gap-0.5 px-0.5">
-              {detached.map((terminalSession) => (
-                <DetachedTerminalSessionItem
-                  key={terminalSession.id}
-                  terminalSession={terminalSession}
-                  unread={unreadOfTerminalSession(terminalSession.id)}
-                  onReattach={() => void reattach(terminalSession.id)}
-                  onTerminate={() => void terminate(terminalSession.id)}
-                />
-              ))}
-            </div>
-          </>
-        )}
+    <div className="flex min-h-0 flex-1">
+      <div
+        role="tablist"
+        aria-label="Repos"
+        aria-orientation="vertical"
+        className="scrollbar-hide flex w-[46px] shrink-0 flex-col items-center gap-3 overflow-y-auto rounded-tr-[10px] bg-black/[0.14] pt-2 pb-4"
+      >
+        {rails.filter((r) => r.repo).map(railButton)}
+        <span aria-hidden className="h-px w-[18px] shrink-0 bg-white/12" />
+        {rails.filter((r) => !r.repo).map(railButton)}
       </div>
+      <nav aria-label="Runspaces" className="min-w-0 flex-1 overflow-y-auto px-1.5 pb-4">
+        {pinned.length > 0 && (
+          <div className="mb-0.5 flex flex-col gap-0.5 border-b border-white/[0.07] pt-1 pb-2">
+            <div className="flex h-6 items-center gap-1.5 px-1.5 text-[11px] font-semibold text-white/55">
+              <PinIcon size={10} strokeWidth={2.6} className="text-rose-400" />
+              Pinned
+            </div>
+            {pinned.map((row) => renderRunspace(row, 'pinned'))}
+          </div>
+        )}
+        <RailHeading rail={selected} />
+        {selected.sections.map((section) => (
+          <div key={section.kind} className="mt-2 flex flex-col gap-0.5">
+            {section.headed && <SectionHeader railKey={selected.key} section={section} />}
+            {section.rows.map((row) =>
+              row.type === 'detached' ? (
+                <DetachedItem key={row.id} row={row} />
+              ) : (
+                renderRunspace(row, listedIn)
+              ),
+            )}
+          </div>
+        ))}
+      </nav>
     </div>
   )
 }

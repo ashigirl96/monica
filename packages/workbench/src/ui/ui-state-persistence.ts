@@ -2,6 +2,8 @@ import { atom, type Store } from 'jotai'
 
 import { activeRunspaceAtom, activeTerminalTabAtom, layoutAtom } from './store.ts'
 import {
+  collapsedSectionsAtom,
+  railChoiceAtom,
   savedUiStateAtom,
   saveUiState,
   sidebarOpenAtom,
@@ -22,6 +24,8 @@ const uiStateAtom = atom((get): UiState => {
     sidebarOpen: get(sidebarOpenAtom),
     sidebarWidth: get(sidebarWidthAtom),
     uiZoom: get(uiZoomAtom),
+    rail: get(railChoiceAtom),
+    collapsedSections: [...get(collapsedSectionsAtom)],
   }
 })
 
