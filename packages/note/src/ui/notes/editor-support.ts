@@ -1,3 +1,5 @@
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+
 import type { Doc } from '../../contract.ts'
 import { stripPendingImages } from '../editor/image-upload.ts'
 
@@ -11,6 +13,19 @@ export function persistableContent(content: unknown): { toJSON: () => Doc } {
       const json = hasToJson ? (content as { toJSON: () => unknown }).toJSON() : content
       return stripPendingImages(json) as Doc
     },
+  }
+}
+
+/** title 入力欄のキー。Enter / ↓ / Tab / ⌃N で本文の先頭へ移る。 */
+export function titleFieldKeyDown(
+  e: ReactKeyboardEvent<HTMLInputElement>,
+  focusBody: () => void,
+): void {
+  if (e.nativeEvent.isComposing) return
+  const ctrlN = e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'n'
+  if (e.key === 'Enter' || e.key === 'ArrowDown' || (e.key === 'Tab' && !e.shiftKey) || ctrlN) {
+    e.preventDefault()
+    focusBody()
   }
 }
 

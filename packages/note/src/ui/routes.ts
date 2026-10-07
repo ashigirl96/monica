@@ -8,13 +8,21 @@ export function dailyPath(date: string): string {
   return `${DAILY_PATH}/${date}`
 }
 
+export function essayPath(id: string): string {
+  return `${ESSAYS_PATH}/${id}`
+}
+
 // 保存済みの本文の link がこの形を持つ。
 export function notePath(id: string): string {
   return `/notes/${id}`
 }
 
 export function noteIdOfPath(pathname: string): string | null {
-  const match = /^\/notes\/([^/]+)\/?$/.exec(pathname)
+  return idOfPath(/^\/notes\/([^/]+)\/?$/, pathname)
+}
+
+function idOfPath(pattern: RegExp, pathname: string): string | null {
+  const match = pattern.exec(pathname)
   if (!match) return null
   try {
     return decodeURIComponent(match[1]!)
@@ -26,6 +34,8 @@ export function noteIdOfPath(pathname: string): string | null {
 export type Route =
   | { page: 'today' }
   | { page: 'daily'; date: string }
+  | { page: 'essays' }
+  | { page: 'essay'; id: string }
   | { page: 'note'; id: string }
   | { page: 'not-found' }
 
@@ -33,6 +43,9 @@ export function routeOf(pathname: string): Route {
   if (/^\/(notes\/?|daily\/?)?$/.test(pathname)) return { page: 'today' }
   const daily = /^\/daily\/([^/]+)\/?$/.exec(pathname)
   if (daily) return { page: 'daily', date: daily[1]! }
+  if (/^\/essays\/?$/.test(pathname)) return { page: 'essays' }
+  const essayId = idOfPath(/^\/essays\/([^/]+)\/?$/, pathname)
+  if (essayId !== null) return { page: 'essay', id: essayId }
   const id = noteIdOfPath(pathname)
   if (id !== null) return { page: 'note', id }
   return { page: 'not-found' }
@@ -48,6 +61,7 @@ export function notePagePath(note: Note): string | null {
     case 'daily':
       return dailyPath(note.date)
     case 'essay':
+      return essayPath(note.id)
     case 'repo_note':
     case 'scratch':
       return null

@@ -1,6 +1,6 @@
 # note の ui
 
-`packages/note/src/ui` に置く notes の画面とエディタ。`@tania/note/ui` から import する。決定の理由は ADR-0019 と #115・#118 の決定にある。今あるのはエディタと Daily の画面で、Essay と Repo の画面、テーマと ambient は後続の issue で足す。
+`packages/note/src/ui` に置く notes の画面とエディタ。`@tania/note/ui` から import する。決定の理由は ADR-0019 と #115・#118 の決定にある。今あるのはエディタと Daily と Essay の画面で、Repo の画面、テーマと ambient は後続の issue で足す。
 
 ## monica のコードを移すとき
 
@@ -61,7 +61,7 @@ monica の `shared/block-editor` を `src/ui/editor/` に振る舞いを変え�
 
 ## 画面
 
-monica の `web/src` の router・autosave・Daily の画面を移したもの。monica と同じ構成で、`notes/` に画面が共有する部品、`pages/` に画面、`components/` に rail を置く。
+monica の `web/src` の router・autosave・Daily と Essay の画面を移したもの。monica と同じ構成で、`notes/` に画面が共有する部品、`pages/` に画面、`components/` に rail を置く。
 
 ### root と apps/web の分担
 
@@ -82,16 +82,44 @@ monica の `web/src` の router・autosave・Daily の画面を移したもの�
 |---|---|
 | `/daily/:date` | その Logical Date の Daily（開くと作られる） |
 | `/daily`、`/notes`、`/` | 今日の `/daily/:date` に replace |
+| `/essays` | Essay の一覧 |
+| `/essays/:id` | Essay の編集 |
 | `/notes/:id` | id から種類ごとの path に replace。削除済みと不在は「Note not found」 |
 | それ以外 | 「Not found」 |
 
 - path の文字列と route の解釈は `routes.ts` に集める。router は monica の自作を移したもの（`router.ts`、History API）。
 - 今日は `/daily` を開くたびに `logicalDate(new Date())` で導く（`todayPath`）。開いたまま 5 時を越えても、次に `/daily` を開けば次の日になる。今日を返す procedure は無い。Daily の画面の TODAY は画面を作った時に導き、`/daily` を開き直すと作り直される。
-- `/notes/:id` は `get` で引いた Note の種類から行き先を決める（`notePagePath`）。今は Daily だけが画面を持ち、Essay・Repo Note・Scratch は後続の issue が行き先を足すまで「Not found」。
+- `/notes/:id` は `get` で引いた Note の種類から行き先を決める（`notePagePath`）。Daily は `/daily/:date`、Essay は `/essays/:id` に移る。Repo Note と Scratch は後続の issue が行き先を足すまで「Not found」。
 - rail は Daily / Essays / Repo で、⌃1 / ⌃2 / ⌃3 で移る。Library と Settings は持ち込まない。
 - NotesShell のサイドバーは既定 400px で、境界のドラッグで 260〜720px、ダブルクリックで 400px に戻る。幅は画面の間で共有し、localStorage の `tania-notes-sidebar-w` に持つ。
 - Daily の表示名の書式は `notes/dates.ts` が持つ。サイドバーは今日が `TODAY · TUE 10.6`、ほかは `TUE 10.6`、今年以外は `TUE 2025.10.6`。見出しと競合の通知は年付きの `dayLabelWithYear`（今年なら年を省く）。
-- `document.title` は表示名に ` · tania` を付ける（`TUE 10.6 · tania`）。表示名の無い画面は `tania`。
+- `document.title` は表示名に ` · tania` を付ける（`TUE 10.6 · tania`、`On ledgers · tania`）。Essay の表示名は title で、空なら `Untitled`（`displayName`）。表示名の無い画面（Essay の一覧など）は `tania`。
+
+### Essay の画面
+
+monica の `pages/essays` を移したもの（`pages/essays/`）。
+
+- 一覧（`list.tsx`）はサイドバーの無いカードの grid。カードは writing のバッジ、title と preview の紙のミニチュア、日付（Logical Date を `2026/7/21` で。`notes/dates.ts` の `slashDate`）。並びは `essay.list` のまま（`createdAt` の降順）。
+- 一覧の右クリックの menu は `@tania/ui` の `PopoverMenu` で、状態の切り替え（「Mark as finished」か「Move to writing」）と削除を出す。`PopoverMenu` は Escape を見ないので、menu を開いている間だけ一覧の画面が Escape で閉じる。
+- 編集（`editor.tsx`）は NotesShell に載せる。サイドバー（`sidebar.tsx`）は `writing N` と `finished N` のタブと、そのタブの Essay の一覧（title、無題なら preview、それも無ければ `Untitled`。`notes/summary.ts` の `summaryTitle`）。タブは開いた Essay の status に合わせ、⌥H / ⌥L で移す。合わせるのは開いた時と status が変わった時だけで、⌥H / ⌥L で移したタブは引き戻さない。
+- 本文の上に title の入力欄（空なら placeholder の `Untitled`）、status の StatusChip、日付、保存の状態を置く。title は本文と同じ autosave で保存する。title で Enter・↓・Tab・⌃N を押すと本文の先頭へ、本文の先頭で ↑ を押すと title へ移る。
+- 状態は StatusChip のクリックか ⌃W で切り替える。次の status は画面が今の status から導き（`support.ts` の `nextEssayStatus`）、`essay.setStatus` に値で渡す。連打は直列にし、2 回目は 1 回目の結果から導く。
+- 削除と状態の切り替えは、先に flush して未保存が残れば中止する（`pages/essays/actions.ts`）。⌥Z で戻せるのは Backend に届いた本文までで、状態の切り替えで進んだ版を基準版にすると、競合で残った古い本文が次の保存で外の変更を上書きするため。一覧の右クリックは monica どおり flush しない。
+- 状態を切り替えた版を基準版にする。status だけが変わった版なので、手元の本文はその上に積んでよい。往復の間に本文か title を書いていたら、返った Note の status だけを取り、本文と title は手元のまま残す（monica は title も返った値で上書きした）。往復の間に別の Note へ移っていたら、返った Note を画面に採用しない。
+- 削除は、往復を待つ間の打鍵を保存に予約しない。中止したときは、まだ同じ Essay を開いていれば予約を戻す。別の Note へ移った後に戻すと、その Note の本文を消そうとした Essay に保存してしまう（monica にあった不具合）。消せたときも、往復の間に別の Note へ移っていれば送り先へは移らない。
+- ⌥N と ⌥Z は、往復の間に別の画面へ移っていても、作った Essay と戻した Essay を開く（monica どおり）。開くことがその操作の目的で、画面を移っても autosave は router の上で保存を続けるので、本文は失われない。
+
+| キー | 画面 | すること |
+|---|---|---|
+| ⌥N | 一覧と編集 | Essay を作って開く。編集から作ると title の入力欄から書き始める |
+| ⌥Backspace、⌥Delete | 編集 | 開いている Essay を確認なしで削除する。表示中のタブにあれば次の Essay、無ければ一覧へ replace する |
+| ⌥Z | 一覧と編集 | 最後に削除した Essay を戻す。編集では戻した Essay を開く |
+| ⌃W | 編集 | status を切り替える |
+| ⌥H、⌥L | 編集 | サイドバーのタブを移す。開いている Essay と URL は動かさない |
+| ⌥J、⌥K | 編集 | 表示中のタブの中で次と前の Essay を開く |
+
+- キーは window の capture phase の keydown で取るので、⌥Backspace は本文の中でも削除になり、macOS の単語の削除は使えない（monica どおり）。
+- 取り消しの stack は `support.ts` の module の変数で、一覧と編集が共有する。そのため一覧の右クリックで消したものも編集の ⌥Z で、編集で消したものも一覧の ⌥Z で戻る。stack は頁を読み込み直すまで残り、Essay の画面を離れている間は ⌥Z が無いので戻せない。戻すときは autosave の `resume` で、削除で止めた保存の再試行を戻す（monica の一覧の ⌥Z は戻さなかった）。
 
 ### 保存と競合
 
@@ -124,6 +152,7 @@ monica の `web/src` の router・autosave・Daily の画面を移したもの�
 ### テスト
 
 - エディタと同じく DOM の環境は入れず、純関数と link を確かめる。
-- monica の save-state（14 本）・note-sync（10 本）・summary（4 本）のテストを、contract の形（平らな種類、Date の版）に直して移してある。
+- monica の save-state（14 本）・note-sync（10 本）・summary（4 本）のテストを、contract の形（平らな種類、Date の版）に直して移してある。summary には `summaryTitle` の 2 本を足してある。
 - 保存は `save-queue.test.ts` が、偽の保存と `spyOn` で捕まえた timer で確かめる（debounce、基準版、CONFLICT、再試行、直列、keepalive、title を省くこと、閉じると失われる編集の数え方）。
+- Essay の画面は `support.test.ts` と `actions.test.ts` で確かめる。`support.test.ts` は、monica の `pages/essays/support.test.ts`（7 本）を contract の形に直して移したものに、取り消しの stack の 1 本を足してある。`actions.test.ts` は、削除と状態の切り替えの判断を偽の保存の口で確かめる。確かめるのは、flush が返るまで待ってから未保存を見ること、残れば中止すること、往復の間の編集と移動。
 - route は `routes.test.ts`（今日の導出、`/notes/:id` の行き先）、再接続は `reach.test.ts`（1 秒の待ちと確かめの request。timer は `setTimeout` を `spyOn` で捕まえて手で進める）、link は `client.test.ts`（keepalive と届いたかの合図。fetch を `spyOn` で差し替える）。

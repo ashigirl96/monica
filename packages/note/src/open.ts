@@ -1,9 +1,9 @@
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 
 import { EMPTY_DOC } from './body/index.ts'
-import { logicalDate, type Note } from './contract.ts'
+import { type EssaySummary, logicalDate, type Note } from './contract.ts'
 import type { Db } from './note.ts'
-import { type NoteRow, toNote } from './row.ts'
+import { type NoteRow, toEssaySummary, toNote } from './row.ts'
 import { note } from './schema.ts'
 
 // bun:sqlite は同期なので、SELECT と INSERT の間に他の request は割り込まない。
@@ -37,6 +37,25 @@ export function openScratch(db: Db, repo: string): Note {
 
 export function createEssay(db: Db): Note {
   return toNote(insertNote(db, { kind: 'essay', title: '', status: 'writing' }))
+}
+
+// 保存しても一覧の中で動かないよう、作った順に並べる。
+export function listEssays(db: Db): EssaySummary[] {
+  return db
+    .select({
+      id: note.id,
+      title: note.title,
+      status: note.status,
+      date: note.date,
+      preview: note.preview,
+      createdAt: note.createdAt,
+      updatedAt: note.updatedAt,
+    })
+    .from(note)
+    .where(and(eq(note.kind, 'essay'), isNull(note.deletedAt)))
+    .orderBy(desc(note.createdAt), desc(note.id))
+    .all()
+    .map(toEssaySummary)
 }
 
 export function createRepoNote(db: Db, repo: string): Note {

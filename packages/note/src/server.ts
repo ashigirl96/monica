@@ -2,7 +2,14 @@ import { implement } from '@orpc/server'
 
 import { contract } from './contract.ts'
 import type { Db, NoteLedger } from './note.ts'
-import { createEssay, createRepoNote, dailyDates, openDaily, openScratch } from './open.ts'
+import {
+  createEssay,
+  createRepoNote,
+  dailyDates,
+  listEssays,
+  openDaily,
+  openScratch,
+} from './open.ts'
 import { removeNote, restoreNote } from './remove.ts'
 import { toNote, undeletedNote } from './row.ts'
 import { saveNote, setEssayStatus } from './save.ts'
@@ -26,6 +33,7 @@ export const router = os.router({
   },
   essay: {
     create: os.essay.create.handler(({ context }) => createEssay(context.db)),
+    list: os.essay.list.handler(({ context }) => listEssays(context.db)),
     setStatus: os.essay.setStatus.handler(({ context, input }) =>
       setEssayStatus(context.db, input.id, input.status),
     ),

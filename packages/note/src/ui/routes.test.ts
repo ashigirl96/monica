@@ -17,8 +17,13 @@ describe('routeOf', () => {
     expect(routeOf('/notes/note-7')).toEqual({ page: 'note', id: 'note-7' })
   })
 
+  test('/essays opens the list of Essays, and /essays/:id the Essay', () => {
+    for (const path of ['/essays', '/essays/']) expect(routeOf(path)).toEqual({ page: 'essays' })
+    expect(routeOf('/essays/note-7')).toEqual({ page: 'essay', id: 'note-7' })
+  })
+
   test('any other path is not found', () => {
-    for (const path of ['/essays', '/repos/a/b', '/daily/2026-10-06/x', '/settings']) {
+    for (const path of ['/essays/note-7/x', '/repos/a/b', '/daily/2026-10-06/x', '/settings']) {
       expect(routeOf(path)).toEqual({ page: 'not-found' })
     }
   })
@@ -42,9 +47,14 @@ describe('notePagePath', () => {
     expect(notePagePath({ kind: 'daily', ...common, date: '2099-01-01' })).toBe('/daily/2099-01-01')
   })
 
+  test('an Essay opens at the path of its id', () => {
+    expect(notePagePath({ kind: 'essay', title: 'On Rust', status: 'writing', ...common })).toBe(
+      '/essays/note-7',
+    )
+  })
+
   test('a Note of a kind with no screen yet has no path', () => {
     const others: Note[] = [
-      { kind: 'essay', title: 'On Rust', status: 'writing', ...common },
       { kind: 'repo_note', repo: 'a/b', title: 'Spec', ...common },
       { kind: 'scratch', repo: 'a/b', ...common },
     ]

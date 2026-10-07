@@ -238,6 +238,65 @@ test('an Essay is set to finished and back, each change moving updatedAt on; set
   expect(writing.updatedAt.getTime()).toBeGreaterThan(finished.updatedAt.getTime())
 })
 
+test('the Essays are listed newest made first, one saved later keeps its place, and a deleted Essay and a Note of another kind are left out', async () => {
+  const { client } = setup()
+  setSystemTime(new Date(2026, 9, 6, 10, 0))
+  const oldest = await client.essay.create()
+  setSystemTime(new Date(2026, 9, 6, 11, 0))
+  const deleted = await client.essay.create()
+  setSystemTime(new Date(2026, 9, 6, 12, 0))
+  const sameMoment = [await client.essay.create(), await client.essay.create()]
+  setSystemTime(new Date(2026, 9, 6, 13, 0))
+  await client.save({
+    id: oldest.id,
+    content: doc('written last'),
+    expectedUpdatedAt: oldest.updatedAt,
+  })
+  await client.remove({ id: deleted.id })
+  await client.daily.open({ date: '2026-10-06' })
+  await client.repoNote.create({ repo: 'owner/repo' })
+
+  const listed = await client.essay.list()
+
+  expect(listed.map((essay) => essay.id)).toEqual([sameMoment[1]!.id, sameMoment[0]!.id, oldest.id])
+})
+
+test('the list of Essays gives the preview of the body instead of the body', async () => {
+  const { client } = setup()
+  setSystemTime(new Date(2026, 9, 6, 12, 0))
+  const saved = await client.essay.create()
+  const { updatedAt } = await client.save({
+    id: saved.id,
+    content: doc('first line'),
+    title: 'On ledgers',
+    expectedUpdatedAt: saved.updatedAt,
+  })
+  const untouched = await client.essay.create()
+
+  expect(await client.essay.list()).toEqual([
+    {
+      kind: 'essay',
+      id: untouched.id,
+      title: '',
+      status: 'writing',
+      date: '2026-10-06',
+      preview: null,
+      createdAt: untouched.createdAt,
+      updatedAt: untouched.updatedAt,
+    },
+    {
+      kind: 'essay',
+      id: saved.id,
+      title: 'On ledgers',
+      status: 'writing',
+      date: '2026-10-06',
+      preview: 'first line',
+      createdAt: saved.createdAt,
+      updatedAt,
+    },
+  ])
+})
+
 test('only an Essay has a status', async () => {
   const { client } = setup()
   const others = [

@@ -8,6 +8,7 @@ export function NoteBlockEditor({
   generation,
   autoFocus,
   onDocChange,
+  onExitUp,
   handleRef,
 }: {
   note: Note
@@ -16,6 +17,8 @@ export function NoteBlockEditor({
   generation: number
   autoFocus: boolean
   onDocChange: (doc: unknown) => void
+  /** 本文の先頭の行で ↑ を押したとき */
+  onExitUp?: () => void
   handleRef: RefObject<BlockEditorHandle | null>
 }) {
   return (
@@ -24,6 +27,7 @@ export function NoteBlockEditor({
       initialDoc={note.content}
       autoFocus={autoFocus}
       onDocChange={onDocChange}
+      onExitUp={onExitUp}
       handleRef={handleRef}
       className="min-h-[70dvh] pt-4 pb-[40dvh]"
     />
