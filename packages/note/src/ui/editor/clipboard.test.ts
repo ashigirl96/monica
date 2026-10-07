@@ -3,7 +3,6 @@ import { describe, expect, test } from 'bun:test'
 
 import { Slice } from 'prosemirror-model'
 import { AllSelection, EditorState, TextSelection } from 'prosemirror-state'
-import type { Transaction } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
 
 import fullDoc from '../../body/fixtures/full-doc.json'
@@ -19,25 +18,12 @@ import {
 } from './clipboard.ts'
 import { docFromJSON } from './create-editor.ts'
 import { selectBlocks } from './selection-state.ts'
-import { block, contentPos, docOf, heading, para } from './test-fixtures.ts'
+import { block, contentPos, docOf, heading, para, paste } from './test-fixtures.ts'
 
-/** handlePaste を stub view で直接呼び、dispatch された transaction を適用した state を返す */
-function paste(state: EditorState, payload: string): EditorState {
-  const plugin = clipboardPlugin()
-  let dispatched: Transaction | undefined
-  const view = {
-    state,
-    dispatch: (tr: Transaction) => {
-      dispatched = tr
-    },
-  } as unknown as EditorView
-  const event = {
-    clipboardData: { getData: (type: string) => (type === BLOCKS_MIME ? payload : '') },
-  } as unknown as ClipboardEvent
-  const handled = plugin.props.handlePaste!.call(plugin, view, event, Slice.empty)
-  expect(handled).toBe(true)
-  expect(dispatched).toBeDefined()
-  return state.apply(dispatched!)
+function pasteBlocks(state: EditorState, payload: string): EditorState {
+  const pasted = paste(clipboardPlugin(), state, { [BLOCKS_MIME]: payload })
+  expect(pasted.handled).toBe(true)
+  return pasted.state
 }
 
 describe('handlePaste と折りたたみ', () => {
@@ -49,7 +35,7 @@ describe('handlePaste と折りたたみ', () => {
       doc,
       selection: TextSelection.create(doc, contentPos(doc, 'H', 'end')),
     })
-    const after = paste(state, payload)
+    const after = pasteBlocks(state, payload)
     expect(after.doc.child(0).child(0).child(0).attrs.collapsed).toBe(false)
     expect(blockTexts(after)).toEqual(['A', 'x', '1'])
   })
@@ -58,7 +44,7 @@ describe('handlePaste と折りたたみ', () => {
     const doc = docOf(block('H', heading('A', 2, true)), block('P', para('1')))
     const base = EditorState.create({ doc, plugins: [blockSelectionPlugin()] })
     const state = base.apply(selectBlocks(base.tr, 'H', 'H'))
-    const after = paste(state, payload)
+    const after = pasteBlocks(state, payload)
     const group = after.doc.child(0)
     expect(group.child(0).child(0).attrs.collapsed).toBe(false)
     expect(group.child(1).textContent).toBe('x')
@@ -70,7 +56,7 @@ describe('handlePaste と折りたたみ', () => {
       doc,
       selection: TextSelection.create(doc, contentPos(doc, 'H', 'end')),
     })
-    const after = paste(state, payload)
+    const after = pasteBlocks(state, payload)
     expect(after.doc.child(0).child(0).child(0).attrs.collapsed).toBe(false)
     expect(after.doc.child(0).childCount).toBe(3)
   })
@@ -89,27 +75,14 @@ function mdDocJson(...contents: unknown[]): unknown {
   }
 }
 
-/** text/plain だけの paste を stub view で handlePaste に通し、dispatch を適用した state を返す。 */
 function pasteMarkdown(
   state: EditorState,
   text: string,
   parseMarkdown: ParseMarkdown,
 ): EditorState {
-  const plugin = clipboardPlugin({ parseMarkdown })
-  const holder = { state }
-  const view = {
-    get state() {
-      return holder.state
-    },
-    dispatch: (tr: Transaction) => {
-      holder.state = holder.state.apply(tr)
-    },
-  } as unknown as EditorView
-  const event = {
-    clipboardData: { getData: (type: string) => (type === 'text/plain' ? text : '') },
-  } as unknown as ClipboardEvent
-  expect(plugin.props.handlePaste!.call(plugin, view, event, Slice.empty)).toBe(true)
-  return holder.state
+  const pasted = paste(clipboardPlugin({ parseMarkdown }), state, { 'text/plain': text })
+  expect(pasted.handled).toBe(true)
+  return pasted.state
 }
 
 /** blockGroup 直下の block の textContent 列 */
