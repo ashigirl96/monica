@@ -10,7 +10,7 @@ export {
   moveActiveTabAtom,
   toggleTabPinAtom,
 } from './store.ts'
-export type { RenderRunspaceLabel } from './sidebar.tsx'
+export type { BenchLabel, BenchLabelOf, BenchNote } from './sidebar-model.ts'
 export type { MenuTab, TabMenuItems } from './tab-context-menu.tsx'
 export { setUiZoomAtom, sidebarOpenAtom } from './ui-state.ts'
 export { Workbench } from './workbench.tsx'

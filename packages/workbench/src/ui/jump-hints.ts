@@ -1,10 +1,11 @@
 import { atom } from 'jotai'
 
+import { shownRunspaceIds } from './sidebar-model.ts'
 import {
   activateRunspaceAtom,
   activateTerminalTabAtom,
   activeRunspaceAtom,
-  runspaceSummariesAtom,
+  sidebarAtom,
 } from './store.ts'
 
 export const jumpHintsActiveAtom = atom(false)
@@ -21,13 +22,13 @@ const NO_HINT_TARGETS: JumpHintTargets = { byRunspaceId: {}, byTabId: {} }
 
 export const jumpHintTargetsAtom = atom((get): JumpHintTargets => {
   if (!get(jumpHintsActiveAtom)) return NO_HINT_TARGETS
-  const ordered = get(runspaceSummariesAtom)
+  const ordered = shownRunspaceIds(get(sidebarAtom))
   const tabs = get(activeRunspaceAtom)?.tabs ?? []
 
   const byRunspaceId: Record<string, string> = {}
   const byTabId: Record<string, string> = {}
-  ordered.slice(0, HINT_KEYS.length).forEach((s, i) => {
-    byRunspaceId[s.id] = HINT_KEYS[i]!
+  ordered.slice(0, HINT_KEYS.length).forEach((id, i) => {
+    byRunspaceId[id] = HINT_KEYS[i]!
   })
   tabs.slice(0, HINT_KEYS.length).forEach((t, i) => {
     byTabId[t.id] = HINT_KEYS[i]!

@@ -21,14 +21,14 @@ tab.pin / tab.unpin        { id }
 agentSession.recordHook    { terminalSessionId, payload } → void
 agentSession.list          → (AgentSession & { unread })[]                                     cli
 agentSession.markSeen      { sessionId, notifiedAt } → void
-worktree.info              { cwd } → { repo, branch } | null
+repo.of                    { cwd } → { repo, path, branch }
 editor.resolve             { cwd, candidates } → (string | null)[]
 editor.open                { path } → void
 changes                    → { type: "layout" } | { type: "terminalSession", id }
                              | { type: "agentSession", sessionId } | { type: "reconciled" }
 ```
 
-- 各 procedure の規則は下の節と、`tab.open` / `tab.respawn` / `terminalSession.*` は #22 の resolution、`recordHook` は `docs/packages/tab-env-and-shim.md`、`worktree.*` / `editor.*` は `docs/packages/desktop.md` にある。
+- 各 procedure の規則は下の節と、`tab.open` / `tab.respawn` / `terminalSession.*` は #22 の resolution、`recordHook` は `docs/packages/tab-env-and-shim.md`、`repo.*` / `editor.*` は `docs/packages/desktop.md` にある。
 - `recordHook` の CLI は手書きの `tania workbench hook claude`。`agentSession.list` の CLI（`tania workbench agent-session list`）は、画面無しで観測を確かめるためにある。
 - `owned` は他の domain が `createRunspace(tx, { cwd })` で作った Runspace の印（ADR-0012）。規則は「Runspace と Tab」と「pin」の節にある。
 - `terminal_session.shell` は Backend の起動時に 1 回決める。`$SHELL`、無ければ `os.userInfo().shell`、それも無ければ `/bin/zsh`。reconcile で ptyd から取り込んだ行は `""`。
@@ -42,10 +42,10 @@ changes                    → { type: "layout" } | { type: "terminalSession", i
 - 再 attach の replay は Terminal Session Transcript の末尾 256 KB だけを流す。そこから落ちたモード（alt screen、マウス、bracketed paste、kitty keyboard の stack など）は、ptyd が replay の前に流し直す。追うモードと理由は `crates/terminal-daemon` の `TerminalModes` の module doc にある。webview の parser がそのモードの CSI を握りつぶすと、この流し直しも効かない。webview の xterm が CSI をどう扱うか（同じモードを送り直したときや、kitty keyboard の stack が buffer ごとにあること）は、webview が動かす版の source の `packages/workbench/node_modules/@xterm/xterm/src/common/InputHandler.ts` で確かめる。RIS と DECSTR が既定に戻す状態（kitty keyboard を含む）は、同じ directory の `services/CoreService.ts` の `reset` にある。
 - Shell が出力を読み遅れても、ptyd は接続を切らず、送り損ねた分を後から Terminal Session Transcript から送る（ADR-0020）。Shell と webview は何もせず、出力が遅れて届くだけになる。Terminal Session Transcript の保持を超えて遅れた分は届かず、ptyd は続きの先頭で xterm の buffer を合わせ、追いついて live に戻る前に今のモードをすべて言い直す。
 - `tab.respawn` は exited / lost / failed の Tab に新しい session を結び直す。overlay の「New shell in …」と「Retry」が呼ぶ（monica どおり）。
-- `tab.cwd` は最後に分かった cwd。webview は OSC 7 の cwd が前の値と変わったときだけ `tab.setCwd` を呼ぶ（OSC 7 は prompt のたびに来る）。OSC 7 を出さない shell のため、OSC 0/2 の title が `/` で始まるか `~`・`~/…` なら、それも cwd の知らせとして扱う（monica どおり。`~user` や zsh の named directory は Backend が絶対 path にできないので取らない）。ただし一度でも OSC 7 を出した Tab では title を cwd に使わない（title の `~/repo` と OSC 7 の `/Users/…/repo` が交互に「変わった」ことになるため）。`tab.setCwd` は `~` を home に展開して絶対 path で持つ。Backend の張り直し（「pin」の節）と `tab.respawn` はこの cwd で始め、Runspace の title（`worktree.info`）も再起動の直後はこれを使う。
+- `tab.cwd` は最後に分かった cwd。webview は OSC 7 の cwd が前の値と変わったときだけ `tab.setCwd` を呼ぶ（OSC 7 は prompt のたびに来る）。OSC 7 を出さない shell のため、OSC 0/2 の title が `/` で始まるか `~`・`~/…` なら、それも cwd の知らせとして扱う（monica どおり。`~user` や zsh の named directory は Backend が絶対 path にできないので取らない）。ただし一度でも OSC 7 を出した Tab では title を cwd に使わない（title の `~/repo` と OSC 7 の `/Users/…/repo` が交互に「変わった」ことになるため）。`tab.setCwd` は `~` を home に展開して絶対 path で持ち、その Tab の Terminal Session の行の cwd も同じ値にする。Tab を閉じると Tab の cwd は消えるので、Detached の shell が最後にいた directory（sidebar の札と reattach の cwd）を残すため。Backend の張り直し（「pin」の節）と `tab.respawn` はこの cwd で始め、sidebar の Runspace の Repo と行（`repo.of`）も再起動の直後はこれを使う。
 
 - `runspace.create { cwd?, rows, cols } → { runspaceId, tab }` は、Runspace・Tab・`starting` の Terminal Session を 1 transaction で作り、commit 後に Create する（`tab.open` と同じ形）。cwd を省けば `$HOME`。空の Runspace を作ってから `tab.open` を呼ぶ 2 段にすると、間で webview の reload や Backend の再起動が起きたときに空の Runspace が残り、消す規則が無いため。
-- `tab.open` の cwd を省けば、新しい Terminal Session は Runspace の cwd で始める。reattach の Tab は Terminal Session の cwd を持ち、OSC 7 の `tab.setCwd` で追いつく。
+- `tab.open` の cwd を省けば、新しい Terminal Session は Runspace の cwd で始める。reattach の Tab は Terminal Session の cwd（detach する前に Tab が最後に知らせた cwd）を持ち、OSC 7 の `tab.setCwd` で追いつく。
 - Task の close の後に残った Runspace と Tab の cwd は、消えた worktree を指すことがある。ptyd は cwd が directory でなければ shell を `$HOME` で起こす（portable-pty の `CommandBuilder` がそうする）ので、Backend は cwd を確かめずに渡す。Tab の cwd は OSC 7 で追いつく。
 - `tab.close` と `tab.move` は、Tab が抜けて 0 になった所有されていない Runspace を同じ transaction で消す。CLI の Attach のように webview の無い経路でも、空の Runspace が残らない。所有された Runspace は 0 になっても残す。
 - layout が空になったら、webview が `runspace.create` で 1 つ作る（monica の `initialState()`）。

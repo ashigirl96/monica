@@ -7,7 +7,7 @@ tania の repo の形、package の entry、domain 間の呼び出し、CLI の�
 この文書には、どの作業も読む規則を置く。ほかの規則は `docs/packages/` に分けてあり、作業がその範囲に触るときに読む。
 
 - `docs/packages/workbench-ledger.md`: Workbench Ledger。workbench の contract と、Runspace・Tab・Terminal Session の起動と終了・pin・終わった行・Agent Session の終了・未読の規則。workbench の procedure、ptyd に送るもの、reconcile、Agent Session の行に触るとき。
-- `docs/packages/workbench-ui-state.md`: Workbench の UI 状態と status dot。webview に置く画面の状態と、Agent Session の状態の dot と未読の出し方。Workbench の画面の状態か dot か未読に触るとき。
+- `docs/packages/workbench-ui-state.md`: Workbench の UI 状態と sidebar と status dot。webview に置く画面の状態、sidebar の Repo のレール・セクション・行・数、Agent Session の状態の dot と未読の出し方。Workbench の画面の状態か sidebar か dot か未読に触るとき。
 - `docs/packages/tab-env-and-shim.md`: tab の env と shim。Tab に渡す env、shim、claude wrapper、hook の settings、hook CLI、payload の decoder。Tab の env、claude の起動、hook の受け口に触るとき。
 - `docs/packages/notifications.md`: 通知。出す遷移、title と body、Backend から Shell への渡し方。通知の判定と本文、Agent Session の遷移に触るとき。
 - `docs/packages/task-ledger.md`: Task Ledger。task の contract と、Run・Attach・Bench・Run の起動・close と reopen・sync の規則。task の procedure に触るとき。

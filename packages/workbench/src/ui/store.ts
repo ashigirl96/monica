@@ -3,13 +3,21 @@ import { type PopoverAnchor, pushErrorToast, pushInfoToast } from '@tania/ui'
 import { atom, type Getter, type Setter } from 'jotai'
 import { atomWithDefault } from 'jotai/utils'
 
-import type { contract, Layout, ListedAgentSession, Tab, Worktree } from '../contract.ts'
-import { shortPath } from '../paths.ts'
+import type { contract, Layout, ListedAgentSession, RepoPlace, Tab } from '../contract.ts'
 import { agentDotOf } from './agent-dot.ts'
 import { jumpHintsActiveAtom } from './jump-hints.ts'
+import {
+  type BenchLabelOf,
+  buildSidebar,
+  cycledRunspaceIds,
+  isPathTitle,
+  sectionPeersOf,
+  type Sidebar,
+} from './sidebar-model.ts'
 import { getTabTerminal, releaseTabConnection } from './terminal-connections.ts'
 import {
   applyTerminalSessionListAtom,
+  detachedTerminalSessionsAtom,
   isDeadStatus,
   markEndedAtom,
   setTerminalSessionStatusAtom,
@@ -17,7 +25,7 @@ import {
   terminalSessionStatusAtom,
 } from './terminal-sessions.ts'
 import { terminalDetach } from './terminal.ts'
-import { savedUiStateAtom } from './ui-state.ts'
+import { collapsedSectionsAtom, railChoiceAtom, savedUiStateAtom } from './ui-state.ts'
 
 export type WorkbenchClient = ContractRouterClient<typeof contract>
 export type Runspace = Layout['runspaces'][number]
@@ -80,7 +88,7 @@ async function load(get: Getter, set: Setter) {
     set(setActiveAtom, { runspaceId: moved.runspace.id, tabId: moved.tab.id })
   }
   set(applyTerminalSessionListAtom, sessions)
-  void set(resolveWorktreesAtom)
+  void set(resolvePlacesAtom)
 }
 
 // 応答が前後して古い一覧で上書きしないよう読み直しは 1 本ずつ流し、待つ間に来た要求は 1 回にまとめる。
@@ -160,7 +168,7 @@ export const copyActiveAgentSessionIdAtom = atom(null, (get): boolean => {
   return true
 })
 
-// 切り替えはすべてここを通るので、jump hint を閉じるのもここで行う。
+// 切り替えはすべてここを通るので、jump hint を閉じるのも、選んだ札を active な Runspace の札に合わせるのもここで行う。
 const setActiveAtom = atom(null, (get, set, next: { runspaceId: string; tabId?: string }) => {
   const before = [get(activeRunspaceAtom)?.id, get(activeTerminalTabAtom)?.id]
   set(activeRunspaceIdAtom, next.runspaceId)
@@ -168,6 +176,9 @@ const setActiveAtom = atom(null, (get, set, next: { runspaceId: string; tabId?: 
   if (tabId) set(activeTabIdsAtom, (prev) => ({ ...prev, [next.runspaceId]: tabId }))
   const after = [get(activeRunspaceAtom)?.id, get(activeTerminalTabAtom)?.id]
   if (before[0] !== after[0] || before[1] !== after[1]) set(jumpHintsActiveAtom, false)
+  // Pinned はどの札でも見えているので、札を替えない。
+  const rail = after[0] && get(sidebarAtom).railKeys[after[0]]
+  if (before[0] !== after[0] && rail) set(railChoiceAtom, rail)
 })
 
 // 通知を click しても Tab へは移れないので、Runspace を選ぶと未読の Tab へ 1 手で着くようにする。
@@ -198,10 +209,9 @@ export const updateTabTitleAtom = atom(null, (get, set, tabId: string, title: st
   set(tabTitlesAtom, (prev) => ({ ...prev, [tabId]: title }))
   // shell は prompt のたびに title を書くので、command の後で branch が変わったかもしれない合図になる。
   const tab = findTab(get, tabId)?.tab
-  if (tab) void set(resolveWorktreesAtom, [tab.cwd])
+  if (tab) void set(resolvePlacesAtom, [tab.cwd])
   // `~user` や zsh の named directory は Backend が絶対 path にできないので、`~` と `~/` の形だけを取る。
-  const isPath = title.startsWith('/') || title === '~' || title.startsWith('~/')
-  if (!isPath || get(tabsReportingCwdAtom).has(tabId)) return Promise.resolve()
+  if (!isPathTitle(title) || get(tabsReportingCwdAtom).has(tabId)) return Promise.resolve()
   return writeCwd(get, set, tabId, title)
 })
 
@@ -209,7 +219,7 @@ export const updateTabCwdAtom = atom(null, (get, set, tabId: string, cwd: string
   if (!get(tabsReportingCwdAtom).has(tabId)) {
     set(tabsReportingCwdAtom, (prev) => new Set(prev).add(tabId))
   }
-  void set(resolveWorktreesAtom, [cwd])
+  void set(resolvePlacesAtom, [cwd])
   return writeCwd(get, set, tabId, cwd)
 })
 
@@ -238,48 +248,41 @@ function writeCwd(get: Getter, set: Setter, tabId: string, cwd: string): Promise
   return done
 }
 
-function holdsPin(runspace: Runspace): boolean {
-  return runspace.tabs.some((t) => t.pinned)
-}
-
-const sidebarRunspacesAtom = atom((get): Runspace[] => {
-  const runspaces = get(layoutAtom)?.runspaces ?? []
-  return [...runspaces.filter(holdsPin), ...runspaces.filter((r) => !holdsPin(r))]
-})
-
-// `git switch` は cwd を変えずに branch を変えるので layout の読み直しと shell の知らせのたびに引き直し、
+// checkout は clone や削除で後から現れたり消えたりするので layout の読み直しと shell の知らせのたびに引き直し、
 // title を書き換え続ける app に備えて cwd ごとに 5 秒で間引く。
-const worktreesAtom = atom<Record<string, Worktree | null>>({})
-const worktreesCheckedAtAtom = atom<Record<string, number>>({})
-const WORKTREE_RECHECK_MS = 5000
+const placesAtom = atom<Record<string, RepoPlace>>({})
+const placesCheckedAtAtom = atom<Record<string, number>>({})
+const PLACE_RECHECK_MS = 5000
 
-// cwds を省けば、layout のすべての Tab の cwd を引き直す。
-const resolveWorktreesAtom = atom(null, async (get, set, cwds?: string[]) => {
-  const checkedAt = get(worktreesCheckedAtAtom)
+// cwds を省けば、layout の Runspace と Tab の cwd と、Detached の cwd を引き直す。
+const resolvePlacesAtom = atom(null, async (get, set, cwds?: string[]) => {
+  const checkedAt = get(placesCheckedAtAtom)
   const now = Date.now()
-  const candidates =
-    cwds ?? (get(layoutAtom)?.runspaces ?? []).flatMap((r) => r.tabs.map((t) => t.cwd))
+  const candidates = cwds ?? [
+    ...(get(layoutAtom)?.runspaces ?? []).flatMap((r) => [r.cwd, ...r.tabs.map((t) => t.cwd)]),
+    ...get(detachedTerminalSessionsAtom).map((s) => s.cwd),
+  ]
   const due = [...new Set(candidates)].filter(
-    (cwd) => now - (checkedAt[cwd] ?? 0) >= WORKTREE_RECHECK_MS,
+    (cwd) => now - (checkedAt[cwd] ?? 0) >= PLACE_RECHECK_MS,
   )
   const client = get(workbenchClientAtom)
   if (due.length === 0 || !client) return
-  set(worktreesCheckedAtAtom, (prev) => ({
+  set(placesCheckedAtAtom, (prev) => ({
     ...prev,
     ...Object.fromEntries(due.map((cwd) => [cwd, now])),
   }))
   // 引けなかった cwd は前の値のまま残し、5 秒後の次の合図で引き直す。
-  const found: Record<string, Worktree | null> = {}
+  const found: Record<string, RepoPlace> = {}
   await Promise.all(
     due.map(async (cwd) => {
       try {
-        found[cwd] = await client.worktree.info({ cwd })
+        found[cwd] = await client.repo.of({ cwd })
       } catch (e) {
-        warnFailed('worktree info', e)
+        warnFailed('repo of', e)
       }
     }),
   )
-  set(worktreesAtom, (prev) => ({ ...prev, ...found }))
+  set(placesAtom, (prev) => ({ ...prev, ...found }))
 })
 
 export const resolveEditorPathsAtom = atom(null, (get, _set, cwd: string, candidates: string[]) =>
@@ -293,38 +296,31 @@ export const openInEditorAtom = atom(null, (get, _set, path: string) => {
     .catch((e: unknown) => warnFailed('editor open', e))
 })
 
-export type RunspaceSummary = {
-  id: string
-  owned: boolean
-  title: string
-  description: string
-  tabCount: number
-  isActive: boolean
-  holdsPin: boolean
-  unreadCount: number
-}
+// workbench は誰が Runspace を所有するかを知らないので、Bench の Task の Repo と Issue は slot から受ける（ADR-0005）。
+export const benchLabelOfAtom = atom<BenchLabelOf | null>(null)
 
-export const runspaceSummariesAtom = atom((get): RunspaceSummary[] => {
-  const active = get(activeRunspaceAtom)
-  const titles = get(tabTitlesAtom)
-  const worktrees = get(worktreesAtom)
-  const unreadOf = get(unreadOfTerminalSessionAtom)
-  return get(sidebarRunspacesAtom).map((runspace) => {
-    const tab = activeTabOf(get, runspace)
-    const cwd = tab?.cwd ?? runspace.cwd
-    const worktree = worktrees[cwd]
-    return {
-      id: runspace.id,
-      owned: runspace.owned,
-      title: worktree ? `${worktree.repo}:${worktree.branch}` : shortPath(cwd),
-      description: (tab && titles[tab.id]) ?? '',
-      tabCount: runspace.tabs.length,
-      isActive: runspace.id === active?.id,
-      holdsPin: holdsPin(runspace),
-      unreadCount: runspace.tabs.filter((t) => unreadOf(t.terminalSessionId)).length,
-    }
-  })
-})
+export const sidebarAtom = atom((get): Sidebar =>
+  buildSidebar({
+    runspaces: get(layoutAtom)?.runspaces ?? [],
+    activeRunspaceId: get(activeRunspaceAtom)?.id ?? null,
+    activeTabOf: (runspace) => activeTabOf(get, runspace),
+    titles: get(tabTitlesAtom),
+    places: get(placesAtom),
+    unreadOf: get(unreadOfTerminalSessionAtom),
+    benchLabelOf: get(benchLabelOfAtom) ?? (() => null),
+    detached: get(detachedTerminalSessionsAtom),
+    railChoice: get(railChoiceAtom),
+    collapsed: get(collapsedSectionsAtom),
+  }),
+)
+
+export const toggleSectionAtom = atom(null, (_get, set, key: string) =>
+  set(collapsedSectionsAtom, (prev) => {
+    const next = new Set(prev)
+    if (!next.delete(key)) next.add(key)
+    return next
+  }),
+)
 
 export const createRunspaceAtom = action(async (get, set) => {
   const active = get(activeRunspaceAtom)
@@ -518,10 +514,10 @@ function cycle<T>(items: T[], current: T | null | undefined, step: 1 | -1): T | 
 }
 
 export const cycleRunspaceAtom = atom(null, (get, set, direction: 'up' | 'down') => {
-  const runspaces = get(sidebarRunspacesAtom)
-  if (runspaces.length <= 1) return
-  const next = cycle(runspaces, get(activeRunspaceAtom), direction === 'up' ? -1 : 1)
-  if (next) set(setActiveAtom, { runspaceId: next.id })
+  const ids = cycledRunspaceIds(get(sidebarAtom))
+  if (ids.length <= 1) return
+  const next = cycle(ids, get(activeRunspaceAtom)?.id, direction === 'up' ? -1 : 1)
+  if (next) set(setActiveAtom, { runspaceId: next })
 })
 
 export const cycleTerminalTabAtom = atom(null, (get, set, direction: 'left' | 'right') => {
@@ -531,13 +527,10 @@ export const cycleTerminalTabAtom = atom(null, (get, set, direction: 'left' | 'r
   if (next) set(setActiveAtom, { runspaceId: runspace.id, tabId: next.id })
 })
 
-// sidebar のグループは Workbench Ledger の並びより先に効くので、グループをまたいで動かしても見た目の位置にならない。
+// 札とセクションは Workbench Ledger の並びより先に効くので、セクションをまたいで動かしても見た目の位置にならない。
 async function moveRunspaceTo(get: Getter, set: Setter, id: string, toId: string) {
-  const runspaces = get(layoutAtom)?.runspaces ?? []
-  const from = runspaces.find((r) => r.id === id)
-  const index = runspaces.findIndex((r) => r.id === toId)
-  const to = runspaces[index]
-  if (!from || !to || holdsPin(from) !== holdsPin(to)) return
+  if (!sectionPeersOf(get(sidebarAtom), id).includes(toId)) return
+  const index = (get(layoutAtom)?.runspaces ?? []).findIndex((r) => r.id === toId)
   await clientOf(get).runspace.move({ id, index })
   await set(reloadAtom)
 }
@@ -556,10 +549,14 @@ export const reorderTabsAtom = action(async (get, set, fromId: string, toId: str
 })
 
 export const moveActiveRunspaceAtom = action(async (get, set, direction: 'up' | 'down') => {
-  const runspaces = get(sidebarRunspacesAtom)
   const active = get(activeRunspaceAtom)
-  const neighbor = active && runspaces[runspaces.indexOf(active) + (direction === 'up' ? -1 : 1)]
-  if (active && neighbor) await moveRunspaceTo(get, set, active.id, neighbor.id)
+  if (!active) return
+  const peers = sectionPeersOf(get(sidebarAtom), active.id)
+  const neighbor = peers[peers.indexOf(active.id) + (direction === 'up' ? -1 : 1)]
+  if (!neighbor) return
+  // 札の順はセクションの先頭の行の位置で決まるので、後ろの行を前の行の位置へ動かし、前の位置を保つ。
+  if (direction === 'up') await moveRunspaceTo(get, set, active.id, neighbor)
+  else await moveRunspaceTo(get, set, neighbor, active.id)
 })
 
 export const moveActiveTabAtom = action(async (get, set, direction: 'left' | 'right') => {

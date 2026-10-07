@@ -1,10 +1,11 @@
-import { afterEach, expect, mock, setSystemTime, test } from 'bun:test'
+import { afterEach, expect, mock, test } from 'bun:test'
 import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
+import { join } from 'node:path'
 
 import type { Store } from 'jotai'
 
 import type { Tab, TerminalSession } from '../contract.ts'
+import { OUTSIDE, shownRunspaceIds } from './sidebar-model.ts'
 
 // Shell の command は Tauri の外では呼べないので、呼ばれた command だけを記録する。
 const shellCalls: { command: string; args: Record<string, unknown> }[] = []
@@ -27,7 +28,7 @@ await mock.module('@tania/ui', () => ({
 }))
 
 const { createStore } = await import('jotai')
-const { cleanUp, git, linkedWorktree, onCleanup, setup, until } = await import('../testing.ts')
+const { cleanUp, onCleanup, setup, until } = await import('../testing.ts')
 const {
   activateRunspaceAtom,
   activateTerminalTabAtom,
@@ -49,7 +50,7 @@ const {
   reloadAtom,
   reorderRunspacesAtom,
   reorderTabsAtom,
-  runspaceSummariesAtom,
+  sidebarAtom,
   startNewShellForTabAtom,
   tabExitedAtom,
   terminateTabTerminalSessionAtom,
@@ -68,7 +69,6 @@ afterEach(() => {
   cleanUp()
   shellCalls.length = 0
   toasts.length = 0
-  setSystemTime()
 })
 
 function bench() {
@@ -82,6 +82,16 @@ type Backend = ReturnType<typeof bench>
 
 function ownedRunspace({ db, workbenchLedger }: Backend) {
   return db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work/bench' }))
+}
+
+// Repo を指定しない Runspace は Repo の外の札に並ぶ。
+function pinnedAndListed(store: Store) {
+  const sidebar = store.get(sidebarAtom)
+  const outside = sidebar.rails.find((r) => r.key === OUTSIDE)
+  return {
+    pinned: sidebar.pinned.map((r) => r.id),
+    listed: outside?.sections.flatMap((s) => s.rows.map((r) => r.id)) ?? [],
+  }
 }
 
 function lastTabClosedCalls(store: Store): string[] {
@@ -374,17 +384,11 @@ test('pinning the front Tab of a Runspace with siblings follows it into its own 
   const split = store.get(activeRunspaceAtom)!
   expect(split.id).not.toBe(shells.runspaceId)
   expect(store.get(activeTerminalTabAtom)?.id).toBe(pinned.id)
-  expect(store.get(runspaceSummariesAtom).map((s) => [s.id, s.holdsPin])).toEqual([
-    [split.id, true],
-    [shells.runspaceId, false],
-  ])
+  expect(pinnedAndListed(store)).toEqual({ pinned: [split.id], listed: [shells.runspaceId] })
 
   await store.set(toggleTabPinAtom)
 
-  expect(store.get(runspaceSummariesAtom).map((s) => [s.id, s.holdsPin])).toEqual([
-    [shells.runspaceId, false],
-    [split.id, false],
-  ])
+  expect(pinnedAndListed(store)).toEqual({ pinned: [], listed: [shells.runspaceId, split.id] })
 })
 
 test('cycling Runspaces follows the sidebar, where the Runspaces holding a pin come first', async () => {
@@ -415,7 +419,7 @@ test('a Runspace moves only within its sidebar group, by drag or by key', async 
   await client.tab.pin({ id: (await client.layout.get()).runspaces[1]!.tabs[0]!.id })
   await store.set(reloadAtom)
   const ledgerOrder = async () => (await client.layout.get()).runspaces.map((r) => r.id)
-  const sidebar = () => store.get(runspaceSummariesAtom).map((s) => s.id)
+  const sidebar = () => shownRunspaceIds(store.get(sidebarAtom))
 
   await store.set(reorderRunspacesAtom, a!, p!)
   expect(await ledgerOrder()).toEqual([a!, p!, b!])
@@ -592,42 +596,6 @@ test('a path in the title moves the cwd until the shell reports its cwd itself',
   await store.set(updateTabCwdAtom, tab.id, '/b')
   await store.set(updateTabTitleAtom, tab.id, '~/c')
   expect(await cwd()).toBe('/b')
-})
-
-test('a Runspace is titled repo:branch while its active Tab is in a linked worktree, and by the end of its cwd otherwise', async () => {
-  const { client, store } = bench()
-  const { root, repo, worktree } = linkedWorktree({ repo: 'acme', branch: 'feature/title' })
-  await client.runspace.create({ cwd: worktree, ...size })
-  await client.runspace.create({ cwd: repo, ...size })
-
-  await store.set(reloadAtom)
-
-  // worktree の判定は Backend への問い合わせを待つので、cwd の末尾の title から変わるまで待つ。
-  const resolved = until(
-    store,
-    runspaceSummariesAtom,
-    (runspaces) => runspaces[0]?.title !== `${basename(root)}/worktree`,
-  )
-  expect(await resolved).toMatchObject([
-    { title: 'acme:feature/title' },
-    { title: `${basename(root)}/acme` },
-  ])
-})
-
-test('a branch switched in a terminal that reports nothing reaches the title on a layout reload 5 seconds later', async () => {
-  const { client, store } = bench()
-  const { worktree } = linkedWorktree({ repo: 'acme', branch: 'feature/title' })
-  await client.runspace.create({ cwd: worktree, ...size })
-  await store.set(reloadAtom)
-  await until(store, runspaceSummariesAtom, (r) => r[0]?.title === 'acme:feature/title')
-
-  git(worktree, 'switch', '--quiet', '-c', 'feature/renamed')
-  setSystemTime(new Date(Date.now() + 5000))
-  await store.set(reloadAtom)
-
-  expect(
-    await until(store, runspaceSummariesAtom, (r) => r[0]?.title !== 'acme:feature/title'),
-  ).toMatchObject([{ title: 'acme:feature/renamed' }])
 })
 
 test("a Tab's dot follows its Agent Session each time the Agent Sessions are read again", async () => {

@@ -3,7 +3,7 @@ import { useCallback } from 'react'
 
 import { closeErrors } from '../contract.ts'
 import { describeRefusal } from '../refusal.ts'
-import type { TaskClient } from './runspace-labels.tsx'
+import type { TaskClient } from './bench-labels.ts'
 
 export function useCloseTaskOfBench(client: TaskClient | null): (runspaceId: string) => void {
   return useCallback(

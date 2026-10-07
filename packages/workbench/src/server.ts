@@ -23,10 +23,10 @@ import {
   unpinTab,
   writeLayout,
 } from './layout.ts'
+import { repoOf } from './repo.ts'
 import { tab, terminalSession } from './schema.ts'
 import { LIVE } from './terminal-session.ts'
 import { terminalSessionsOf, type WorkbenchContext } from './workbench.ts'
-import { worktreeInfo } from './worktree.ts'
 
 export { migrations } from '../migrations/index.ts'
 export { inheritableEnv } from './ptyd.ts'
@@ -142,8 +142,8 @@ export const router = os.router({
       }
     }),
   },
-  worktree: {
-    info: os.worktree.info.handler(({ input }) => worktreeInfo(input.cwd)),
+  repo: {
+    of: os.repo.of.handler(({ input }) => repoOf(input.cwd)),
   },
   editor: {
     resolve: os.editor.resolve.handler(({ input }) =>

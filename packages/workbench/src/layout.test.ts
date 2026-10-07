@@ -269,6 +269,25 @@ test('tab.setCwd records a cwd under ~ as an absolute path', async () => {
   expect(await cwdAfter('/work/~x')).toBe('/work/~x')
 })
 
+test('a shell left detached by closing its Tab keeps the cwd the Tab last reported, and brings it back on reattach', async () => {
+  const { client } = setup()
+  const { runspaceId, tab } = await client.runspace.create({ cwd: '/work', ...size })
+  await client.tab.open({ runspaceId, ...size })
+  await client.tab.setCwd({ id: tab.id, cwd: '/work/sub' })
+
+  await client.tab.close({ id: tab.id })
+
+  expect(await client.terminalSession.list()).toContainEqual(
+    expect.objectContaining({ id: tab.terminalSessionId, cwd: '/work/sub', tabId: null }),
+  )
+  const reattached = await client.tab.open({
+    runspaceId,
+    terminalSessionId: tab.terminalSessionId,
+    ...size,
+  })
+  expect(reattached.cwd).toBe('/work/sub')
+})
+
 test('tab.respawn refuses a Tab whose Terminal Session is still live', async () => {
   const { client } = setup()
   const { tab } = await client.runspace.create(size)

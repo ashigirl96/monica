@@ -1,7 +1,7 @@
 import { Database } from 'bun:sqlite'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { createRouterClient } from '@orpc/server'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
@@ -79,14 +79,10 @@ export function git(cwd: string, ...args: string[]) {
 }
 
 // CI には git の user が無いので、commit に author を渡す。
-export function linkedWorktree({ repo: name, branch }: { repo: string; branch: string }) {
-  const root = mkdtempSync(join(tmpdir(), 'tania-git-'))
-  onCleanup(() => rmSync(root, { recursive: true, force: true }))
-  const repo = join(root, name)
-  const worktree = join(root, 'worktree')
-  git(root, 'init', '--initial-branch=main', repo)
+function initRepo(root: string, dir: string) {
+  git(root, 'init', '--initial-branch=main', dir)
   git(
-    repo,
+    dir,
     '-c',
     'user.name=tania',
     '-c',
@@ -96,6 +92,18 @@ export function linkedWorktree({ repo: name, branch }: { repo: string; branch: s
     '-m',
     'init',
   )
-  git(repo, 'worktree', 'add', '-b', branch, worktree)
-  return { root, repo, worktree }
+}
+
+// worktree は Bench と同じく ghq の外に置く。
+export function ghqCheckout(repo: string) {
+  const root = mkdtempSync(join(tmpdir(), 'tania-git-'))
+  onCleanup(() => rmSync(root, { recursive: true, force: true }))
+  const checkout = join(root, 'ghq', 'github.com', repo)
+  const worktree = join(root, 'worktrees', repo, 'issue-1')
+  mkdirSync(dirname(checkout), { recursive: true })
+  initRepo(root, checkout)
+  git(checkout, 'worktree', 'add', '-b', 'issue-1', worktree)
+  const elsewhere = join(root, 'elsewhere')
+  initRepo(root, elsewhere)
+  return { root, checkout, worktree, elsewhere }
 }
