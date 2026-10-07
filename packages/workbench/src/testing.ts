@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { createRouterClient } from '@orpc/server'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
+import type { Atom, Store } from 'jotai'
 
 import { startFakePtyd, tempHome, untilSettled } from './fake-ptyd.ts'
 import { createWorkbenchLedger, migrations, router } from './server.ts'
@@ -57,6 +58,19 @@ export function setup({
     untilSettled(() => booted.client.terminalSession.list(), terminalSessionId)
 
   return { home, ptyd, db, ...booted, restartBackend, settled }
+}
+
+export function until<T>(store: Store, atom: Atom<T>, done: (value: T) => boolean): Promise<T> {
+  return new Promise((resolve) => {
+    const check = () => {
+      const value = store.get(atom)
+      if (!done(value)) return
+      unsubscribe()
+      resolve(value)
+    }
+    const unsubscribe = store.sub(atom, check)
+    check()
+  })
 }
 
 export function git(cwd: string, ...args: string[]) {

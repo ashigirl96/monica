@@ -1,6 +1,7 @@
+import { ORPCError } from '@orpc/server'
 import { and, eq, getTableColumns, ne } from 'drizzle-orm'
 
-import type { AgentSession } from './contract.ts'
+import type { AgentSession, ListedAgentSession } from './contract.ts'
 import { decodeHook } from './hook-decoder.ts'
 import { agentSession, terminalSession } from './schema.ts'
 import { isLive } from './terminal-session.ts'
@@ -9,8 +10,31 @@ import { type Db, notifyWaiting, type Tx, type WorkbenchContext } from './workbe
 
 const notEnded = ne(agentSession.state, 'ended')
 
-export function listAgentSessions(db: Db): AgentSession[] {
-  return db.select().from(agentSession).where(notEnded).orderBy(agentSession.firstSeenAt).all()
+function isUnread(row: Pick<AgentSession, 'notifiedAt' | 'seenAt'>): boolean {
+  return row.notifiedAt !== null && row.seenAt === null
+}
+
+export function listAgentSessions(db: Db): ListedAgentSession[] {
+  return db
+    .select()
+    .from(agentSession)
+    .where(notEnded)
+    .orderBy(agentSession.firstSeenAt)
+    .all()
+    .map((row) => ({ ...row, unread: isUnread(row) }))
+}
+
+export function markSeenIfUnread(db: Db, sessionId: string): boolean {
+  const bySessionId = eq(agentSession.sessionId, sessionId)
+  const row = db
+    .select({ notifiedAt: agentSession.notifiedAt, seenAt: agentSession.seenAt })
+    .from(agentSession)
+    .where(bySessionId)
+    .get()
+  if (!row) throw new ORPCError('NOT_FOUND', { message: `no Agent Session ${sessionId}` })
+  if (!isUnread(row)) return false
+  db.update(agentSession).set({ seenAt: new Date() }).where(bySessionId).run()
+  return true
 }
 
 export function recordHook(
@@ -52,14 +76,15 @@ export function recordHook(
       )
       .all()
     const next = transition(own, event, now)
-    const displaced = takesOverTerminal(own, next, event)
+    const reason = next && notificationFor(own, event, next)
+    const after = next && reason ? { ...next, notifiedAt: now } : next
+    const displaced = takesOverTerminal(own, after, event)
       ? beside.map((row) => supersede(row, now))
       : []
-    return { changed: saveChanged(tx, [...displaced, next]), before: own, after: next }
+    return { changed: saveChanged(tx, [...displaced, after]), after, reason }
   })
   if (!recorded) return []
-  const { changed, before, after } = recorded
-  const reason = after && notificationFor(before, event, after)
+  const { changed, after, reason } = recorded
   if (after && reason) notifyWaiting(workbenchLedger, after, reason)
   return changed
 }

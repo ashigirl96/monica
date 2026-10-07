@@ -4,13 +4,11 @@ import { type ReactNode, useState } from 'react'
 
 import type { TerminalSession } from '../contract.ts'
 import { shortPath } from '../paths.ts'
-import { AgentDotMark } from './agent-dot-mark.tsx'
-import type { AgentDot } from './agent-dot.ts'
+import { UNREAD_LABEL_STYLE } from './agent-dot.ts'
 import { JumpHint } from './jump-hint.tsx'
 import { jumpHintTargetsAtom } from './jump-hints.ts'
 import {
   activateRunspaceAtom,
-  agentDotOfTerminalSessionAtom,
   draggedTabIdAtom,
   terminateTerminalSessionAtom,
   moveTabToRunspaceAtom,
@@ -18,25 +16,44 @@ import {
   reorderRunspacesAtom,
   runspaceSummariesAtom,
   type RunspaceSummary,
+  unreadOfTerminalSessionAtom,
 } from './store.ts'
 import { detachedTerminalSessionsAtom } from './terminal-sessions.ts'
 
+function UnreadCount({ count }: { count: number }) {
+  if (count === 0) return null
+  return (
+    <span className="mt-px inline-flex h-[15px] min-w-[15px] shrink-0 items-center justify-center rounded-full bg-zinc-100 px-1 text-[9.5px] leading-none font-bold text-zinc-900">
+      {count}
+    </span>
+  )
+}
+
 function DetachedTerminalSessionItem({
   terminalSession,
-  agentDot,
+  unread,
   onReattach,
   onTerminate,
 }: {
   terminalSession: TerminalSession
-  agentDot: AgentDot | null
+  unread: boolean
   onReattach: () => void
   onTerminate: () => void
 }) {
   return (
     <div className="group flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-muted-foreground">
-      <AgentDotMark dot={agentDot} />
       <div className="min-w-0 flex-1">
-        <span className="block truncate text-xs font-medium">{shortPath(terminalSession.cwd)}</span>
+        <div className="flex items-start gap-2">
+          <span
+            className={cn(
+              'block flex-1 truncate text-xs font-medium',
+              unread && UNREAD_LABEL_STYLE,
+            )}
+          >
+            {shortPath(terminalSession.cwd)}
+          </span>
+          <UnreadCount count={unread ? 1 : 0} />
+        </div>
         <span className="block truncate font-mono text-[10px] text-muted-foreground/60">
           {terminalSession.id}
         </span>
@@ -107,15 +124,20 @@ function RunspaceItem({
         <div className="flex items-start gap-1.5">
           {hint && <JumpHint hint={hint} ctrl />}
           {runspace.holdsPin && <PinIcon size={14} className="shrink-0 text-rose-400" />}
-          <span className="flex-1 truncate text-xs leading-snug font-medium">
+          <span
+            className={cn(
+              'flex-1 truncate text-xs leading-snug font-medium',
+              runspace.unreadCount > 0 && UNREAD_LABEL_STYLE,
+            )}
+          >
             {(runspace.owned && renderLabel?.(runspace.id)) || runspace.title || 'Terminal'}
           </span>
+          <UnreadCount count={runspace.unreadCount} />
         </div>
         {runspace.description && (
           <span className="truncate text-[10px] text-muted-foreground">{runspace.description}</span>
         )}
       </div>
-      <AgentDotMark dot={runspace.agentDot} />
     </button>
   )
 }
@@ -159,7 +181,7 @@ export function WorkbenchSidebar({
   const terminate = useSetAtom(terminateTerminalSessionAtom)
   const reorder = useSetAtom(reorderRunspacesAtom)
   const jumpHints = useAtomValue(jumpHintTargetsAtom)
-  const agentDotOfTerminalSession = useAtomValue(agentDotOfTerminalSessionAtom)
+  const unreadOfTerminalSession = useAtomValue(unreadOfTerminalSessionAtom)
   const { dragOverId, handlersFor } = useDragReorder(reorder)
 
   const renderItem = (runspace: RunspaceSummary) => (
@@ -196,7 +218,7 @@ export function WorkbenchSidebar({
                 <DetachedTerminalSessionItem
                   key={terminalSession.id}
                   terminalSession={terminalSession}
-                  agentDot={agentDotOfTerminalSession(terminalSession.id)}
+                  unread={unreadOfTerminalSession(terminalSession.id)}
                   onReattach={() => void reattach(terminalSession.id)}
                   onTerminate={() => void terminate(terminalSession.id)}
                 />

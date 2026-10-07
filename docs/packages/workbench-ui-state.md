@@ -1,6 +1,6 @@
 # Workbench の UI 状態と status dot
 
-Workbench Ledger に載せない Workbench の画面の状態と、Agent Session の状態の見せ方。どちらも `packages/workbench/src/ui` に置く。
+Workbench Ledger に載せない Workbench の画面の状態と、Agent Session の状態と未読の見せ方。どれも `packages/workbench/src/ui` に置く。
 
 ## UI 状態
 
@@ -8,6 +8,7 @@ Workbench Ledger に載せない Workbench の画面の状態と、Agent Session
 - 端末の font size と、active でない Runspace の active Tab は保存しない（monica どおり）。
 - 書き込みは 500ms の debounce。localStorage は同期で読めるので、monica の render 前の hydrate は要らない。
 - 保存した id が `layout.get` に無ければ、先頭の Runspace と、その先頭の Tab に戻す（monica の `resolveWorkbenchActive`）。読めないか壊れていれば既定値で始める。
+- 見たこと（未読）は UI 状態に置かず、Workbench Ledger に置く（ADR-0021、下の「未読」）。
 
 ## status dot
 
@@ -24,8 +25,20 @@ Tab の dot（label の左）は、その Tab の Terminal Session の live な 
 
 - hover の title は状態の語にし、質問と許可はそこで見分ける。
 - plan 承認の色は持たない。plan の承認は許可の一種で、ExitPlanMode は自動承認されて待ちにならない（#16）。
-- 見たかどうか（既読）は持たない。
 - Terminal Session の dot（label の右。exited / lost / failed）は monica のまま残す。
-- sidebar の Runspace の行には、その Runspace の Tab の Agent Session から 1 つを選んで出す。優先順は 質問・許可 > エラー > 手空き > 未観測 > 動作中。Bench も同じ規則で、Task の表示状態は使わない（Bench のラベルの語は task の slot が出す）。Detached グループの行にも Tab と同じ dot を出す。
+- sidebar の行（Pinned・Runspaces・Detached）には Agent の状態の dot を出さない。Agent の状態は Tab の帯の dot で見る。1 つの Runspace に Tab と claude が複数あると、行の dot を 1 つに畳んでも何が起きているか読めないため。行には未読を出す（下の「未読」）。
 - 状態と色の対応は Task の型を借りない。monica の `lib/status-config` は Task の `DisplayStatus` を借りていたが、workbench は task を import しない（ADR-0005）。
-- tania が前面にある間は通知のバナーが出ないので、この dot が代わりになる（ADR-0013）。active でない Runspace の待ちは、Runspace の行の dot で気づく。
+- dot の atom（`agentDotOfTerminalSessionAtom` など、Terminal Session の id から引く関数を返す atom）は、Agent Session の map を read の中で読み、関数はそれを閉じ込める。返す関数の中で `get` を呼ぶと jotai は依存を記録せず、Agent Session を読み直しても atom が変わらないので、Tab の帯が描き直されない。
+
+## 未読
+
+`GLOSSARY.md` の未読を Tab の帯と sidebar に出す。未読かどうかは Backend が `agentSession.list` の `unread` で渡し（ADR-0021、`docs/packages/workbench-ledger.md` の「未読」）、webview は導かない。見た目は #190 の canvas の E3 の行と Tab の帯。
+
+- Tab の帯は、未読の Tab の dot を白い輪で囲んで点滅を止め、label を白の太字にする。
+- sidebar の行は、未読の Tab の数を title の右に白地に暗い字の丸で出し、title を白の太字にする。Detached の行は、その Terminal Session の Agent Session が未読なら 1 を出す。数を 2 行目に置かないのは、通知が来るたびに行が伸び縮みするため。見たうえでまだ待っている Tab は sidebar に出さない。
+- 未読の印は白にそろえる。dot の緑・琥珀・赤と重ならないため。
+- 行を押すと（jump hint の Ctrl も同じ）、その Runspace に未読の Tab があれば一番左のそれを開き、無ければ最後に見ていた Tab を開く。通知を click しても tania が前面に出るだけで Tab へは移れない（ADR-0013）ので、行から 1 手で着くようにする。key で Runspace を巡るときは、今どおり最後に見ていた Tab を開く。
+- 窓が前面にあり、表示している Tab（active な Runspace の active な Tab）の Agent Session が未読なら、webview は `agentSession.markSeen` を呼ぶ。見た瞬間に既読にし、見ていた時間は問わない。Tab を切り替えるたびには呼ばない。
+- 窓が前面かどうかは、Tauri の `getCurrentWindow()` の `onFocusChanged` の購読が張れてから `isFocused()` で読む（`core:default` の権限で足りる）。読む間に event が届いたら、読んだ値は捨てる。別の app が前面にあるときも、窓を最小化したときも event が届くことを実機で確かめた。前面でない間は、表示している Tab でも見たことにしない。前面に戻ったときに、表示している Tab を見たことにする。
+- `agentSession.list` を読み直すたびに Agent Session は別の値になるので、表示している間に届いた次の通知も、読み直した時点で見たことにする。`markSeen` が重なっても、Backend は未読でない行に何も書かない。
+- tania が前面にある間は通知のバナーが出ない（ADR-0013）。active でない Runspace の通知には、行の数で気づく。

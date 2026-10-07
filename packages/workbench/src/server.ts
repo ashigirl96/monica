@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { implement, ORPCError } from '@orpc/server'
 import { eq, getTableColumns, inArray, isNotNull, or } from 'drizzle-orm'
 
-import { listAgentSessions, recordHook } from './agent-session.ts'
+import { listAgentSessions, markSeenIfUnread, recordHook } from './agent-session.ts'
 import { contract } from './contract.ts'
 import { openInEditor, resolveEditorPaths } from './editor.ts'
 import {
@@ -133,6 +133,14 @@ export const router = os.router({
       }
     }),
     list: os.agentSession.list.handler(({ context }) => listAgentSessions(context.db)),
+    markSeen: os.agentSession.markSeen.handler(({ context, input }) => {
+      if (markSeenIfUnread(context.db, input.sessionId)) {
+        context.workbenchLedger.events.publish('change', {
+          type: 'agentSession',
+          sessionId: input.sessionId,
+        })
+      }
+    }),
   },
   worktree: {
     info: os.worktree.info.handler(({ input }) => worktreeInfo(input.cwd)),

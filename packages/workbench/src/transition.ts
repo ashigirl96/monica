@@ -33,6 +33,8 @@ const CLEARED = {
   sessionEndReason: null,
   endedAt: null,
   unobservedSince: null,
+  notifiedAt: null,
+  seenAt: null,
 } satisfies Partial<AgentSession>
 
 export function transition(

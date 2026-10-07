@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 
 import type { AgentSession } from '../contract.ts'
-import { type AgentDot, agentDotOf, runspaceAgentDot } from './agent-dot.ts'
+import { agentDotOf } from './agent-dot.ts'
 
 const at = new Date(0)
 
@@ -24,6 +24,8 @@ function agentSessionIn(fields: Partial<AgentSession>): AgentSession {
     firstSeenAt: at,
     endedAt: null,
     unobservedSince: null,
+    notifiedAt: null,
+    seenAt: null,
     ...fields,
   }
 }
@@ -47,23 +49,3 @@ test.each([
 test('a Tab without an Agent Session shows no dot', () => {
   expect(agentDotOf(undefined)).toBeNull()
 })
-
-test.each([
-  ['no Tab shows a dot', [null, null], null],
-  ['a question beats a running agent', ['running', 'question'], 'question'],
-  ['a permission beats a running agent', ['running', 'permission'], 'permission'],
-  [
-    'a question and a permission rank alike, so the first Tab wins',
-    ['permission', 'question'],
-    'permission',
-  ],
-  ['an error beats an idle agent', ['idle', 'error'], 'error'],
-  ['an idle agent beats an unobserved one', ['unobserved', 'idle'], 'idle'],
-  ['an unobserved agent beats a running one', ['running', 'unobserved'], 'unobserved'],
-  ['a running agent shows over Tabs without one', [null, 'running'], 'running'],
-] as [string, (AgentDot | null)[], AgentDot | null][])(
-  "a Runspace's dot: %s",
-  (_name, tabDots, dot) => {
-    expect(runspaceAgentDot(tabDots)).toBe(dot)
-  },
-)

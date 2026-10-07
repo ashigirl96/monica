@@ -3,9 +3,9 @@ import { type PopoverAnchor, pushErrorToast, pushInfoToast } from '@tania/ui'
 import { atom, type Getter, type Setter } from 'jotai'
 import { atomWithDefault } from 'jotai/utils'
 
-import type { AgentSession, contract, Layout, Tab, Worktree } from '../contract.ts'
+import type { contract, Layout, ListedAgentSession, Tab, Worktree } from '../contract.ts'
 import { shortPath } from '../paths.ts'
-import { type AgentDot, agentDotOf, runspaceAgentDot } from './agent-dot.ts'
+import { agentDotOf } from './agent-dot.ts'
 import { jumpHintsActiveAtom } from './jump-hints.ts'
 import { getTabTerminal, releaseTabConnection } from './terminal-connections.ts'
 import {
@@ -105,7 +105,7 @@ function serialReload(read: (get: Getter, set: Setter) => Promise<void>) {
 
 export const reloadAtom = serialReload(load)
 
-const agentSessionsAtom = atom<AgentSession[]>([])
+const agentSessionsAtom = atom<ListedAgentSession[]>([])
 
 // hook は tool のたびに届くので、Agent Session は layout と別に読み直す。
 export const reloadAgentSessionsAtom = serialReload(async (get, set) => {
@@ -116,10 +116,16 @@ export const agentSessionByTerminalSessionAtom = atom(
   (get) => new Map(get(agentSessionsAtom).map((a) => [a.terminalSessionId, a])),
 )
 
-export const agentDotOfTerminalSessionAtom = atom(
-  (get) => (terminalSessionId: string) =>
-    agentDotOf(get(agentSessionByTerminalSessionAtom).get(terminalSessionId)),
-)
+// 返す関数の中で get を呼ぶと依存にならず、読み直しても描き直されないので、map は read の中で読む。
+export const agentDotOfTerminalSessionAtom = atom((get) => {
+  const byTerminalSession = get(agentSessionByTerminalSessionAtom)
+  return (terminalSessionId: string) => agentDotOf(byTerminalSession.get(terminalSessionId))
+})
+
+export const unreadOfTerminalSessionAtom = atom((get) => {
+  const byTerminalSession = get(agentSessionByTerminalSessionAtom)
+  return (terminalSessionId: string) => byTerminalSession.get(terminalSessionId)?.unread ?? false
+})
 
 // active な Runspace と Tab は Workbench Ledger に持たないので、id が layout から消えたら先頭を見せる。
 const activeRunspaceIdAtom = atomWithDefault((get) => get(savedUiStateAtom).activeRunspaceId)
@@ -165,8 +171,13 @@ const setActiveAtom = atom(null, (get, set, next: { runspaceId: string; tabId?: 
   if (before[0] !== after[0] || before[1] !== after[1]) set(jumpHintsActiveAtom, false)
 })
 
-export const activateRunspaceAtom = atom(null, (_get, set, runspaceId: string) => {
-  set(setActiveAtom, { runspaceId })
+// 通知を click しても Tab へは移れないので、Runspace を選ぶと未読の Tab へ 1 手で着くようにする。
+export const activateRunspaceAtom = atom(null, (get, set, runspaceId: string) => {
+  const unreadOf = get(unreadOfTerminalSessionAtom)
+  const unread = get(layoutAtom)
+    ?.runspaces.find((r) => r.id === runspaceId)
+    ?.tabs.find((t) => unreadOf(t.terminalSessionId))
+  set(setActiveAtom, { runspaceId, tabId: unread?.id })
   set(terminalFocusRequestAtom, (c) => c + 1)
 })
 
@@ -291,14 +302,14 @@ export type RunspaceSummary = {
   tabCount: number
   isActive: boolean
   holdsPin: boolean
-  agentDot: AgentDot | null
+  unreadCount: number
 }
 
 export const runspaceSummariesAtom = atom((get): RunspaceSummary[] => {
   const active = get(activeRunspaceAtom)
   const titles = get(tabTitlesAtom)
   const worktrees = get(worktreesAtom)
-  const agentDotOfTerminalSession = get(agentDotOfTerminalSessionAtom)
+  const unreadOf = get(unreadOfTerminalSessionAtom)
   return get(sidebarRunspacesAtom).map((runspace) => {
     const tab = activeTabOf(get, runspace)
     const cwd = tab?.cwd ?? runspace.cwd
@@ -311,9 +322,7 @@ export const runspaceSummariesAtom = atom((get): RunspaceSummary[] => {
       tabCount: runspace.tabs.length,
       isActive: runspace.id === active?.id,
       holdsPin: holdsPin(runspace),
-      agentDot: runspaceAgentDot(
-        runspace.tabs.map((t) => agentDotOfTerminalSession(t.terminalSessionId)),
-      ),
+      unreadCount: runspace.tabs.filter((t) => unreadOf(t.terminalSessionId)).length,
     }
   })
 })

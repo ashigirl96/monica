@@ -19,6 +19,10 @@ export const LayoutSchema = z.object({
 
 export const AgentSessionSchema = createSelectSchema(agentSession)
 
+export const ListedAgentSessionSchema = AgentSessionSchema.extend({
+  unread: z.boolean().describe('a notified wait no one has seen in its Tab yet'),
+})
+
 // 合図だけを流す。購読側は payload を信じず読み直す。
 export const WorkbenchChangeSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('layout') }),
@@ -33,6 +37,7 @@ export type TerminalSession = z.infer<typeof TerminalSessionSchema>
 export type Tab = z.infer<typeof TabSchema>
 export type Layout = z.infer<typeof LayoutSchema>
 export type AgentSession = z.infer<typeof AgentSessionSchema>
+export type ListedAgentSession = z.infer<typeof ListedAgentSessionSchema>
 export type WorkbenchChange = z.infer<typeof WorkbenchChangeSchema>
 export type Worktree = z.infer<typeof WorktreeSchema>
 
@@ -134,7 +139,11 @@ export const contract = {
       .output(z.void()),
     list: meta
       .meta({ description: 'List Agent Sessions that have not ended', cli: true })
-      .output(z.array(AgentSessionSchema)),
+      .output(z.array(ListedAgentSessionSchema)),
+    markSeen: meta
+      .meta({ description: "Record that an Agent Session's notified wait was seen in its Tab" })
+      .input(z.object({ sessionId: z.string() }))
+      .output(z.void()),
   },
   worktree: {
     info: meta
