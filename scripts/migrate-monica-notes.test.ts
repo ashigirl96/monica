@@ -438,6 +438,43 @@ test('monica の画像を同じ名前で note-images に写し、mtime は写し
   expect(statSync(copied).mtimeMs).toBeGreaterThanOrEqual(Math.floor(startedAt / 1000) * 1000)
 })
 
+// 写してから commit するまでの間に process が殺されると、画像だけが残る。
+test('中断した実行が残した同じ中身の画像は、写し直して commit する', () => {
+  const home = makeHome()
+  mkdirSync(join(home, 'note-images'))
+  const leftover = join(home, 'note-images', IMAGE)
+  writeFileSync(leftover, PNG)
+  utimesSync(leftover, new Date('2026-07-18'), new Date('2026-07-18'))
+  const monica = makeMonica({
+    notes: [{ id: 'note-1', kind: 'essay', title: '画像', content: docOf(imaged('b-1', IMAGE)) }],
+    assets: { [IMAGE]: PNG },
+  })
+  const startedAt = Date.now()
+
+  migrateMonicaNotes({ home, ...monica })
+
+  expect(notesOf(home).map((row) => row.id)).toEqual([1])
+  expect(new Uint8Array(readFileSync(leftover))).toEqual(PNG)
+  expect(statSync(leftover).mtimeMs).toBeGreaterThanOrEqual(Math.floor(startedAt / 1000) * 1000)
+})
+
+test('同じ名前で中身の違う画像が置き場所に在れば、触らずに止まる', () => {
+  const home = makeHome()
+  mkdirSync(join(home, 'note-images'))
+  const other = new Uint8Array([...PNG, 9])
+  writeFileSync(join(home, 'note-images', IMAGE), other)
+  const monica = makeMonica({
+    notes: [{ id: 'note-1', kind: 'essay', title: '画像', content: docOf(imaged('b-1', IMAGE)) }],
+    assets: { [IMAGE]: PNG },
+  })
+
+  expect(() => migrateMonicaNotes({ home, ...monica })).toThrow(
+    new RegExp(`${IMAGE} .*different bytes`),
+  )
+  expect(notesOf(home)).toEqual([])
+  expect(new Uint8Array(readFileSync(join(home, 'note-images', IMAGE)))).toEqual(other)
+})
+
 test('image の src のファイルが monica の assets に無ければ rollback し、写した画像も消す', () => {
   const home = makeHome()
   const missing = '7c9e6679-7425-40de-944b-e07fc1f90ae7.png'
