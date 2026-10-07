@@ -160,7 +160,7 @@ function ensureLatestNoteSchema(sqlite: Database): void {
 const IMAGE_NAME =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg|gif|webp)$/
 
-// 写した時刻を mtime にするため、cp -p のように属性を写さず、新しい file として書く。
+// 写した時刻を mtime にするため、cp -p のように属性を写さず、中身だけを書く。
 function copyImages(from: string, to: string): string[] {
   mkdirSync(to, { recursive: true })
   const copied: string[] = []
@@ -168,8 +168,12 @@ function copyImages(from: string, to: string): string[] {
     for (const name of readdirSync(from)) {
       if (!IMAGE_NAME.test(name)) continue
       const path = join(to, name)
-      // 置き場所に在った file を、失敗したときに消さないよう上書きしない。
-      writeFileSync(path, readFileSync(join(from, name)), { flag: 'wx' })
+      const bytes = readFileSync(join(from, name))
+      // note の表が空の間はどの本文も置き場所の画像を参照しないので、同じ中身なら中断した実行の残りとして書き直す。
+      if (existsSync(path) && !readFileSync(path).equals(bytes)) {
+        throw new Error(`${path} already exists with different bytes from ${join(from, name)}`)
+      }
+      writeFileSync(path, bytes)
       copied.push(path)
     }
   } catch (error) {
