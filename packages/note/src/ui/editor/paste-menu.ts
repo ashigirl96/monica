@@ -10,11 +10,13 @@ import {
   menuItemButton,
   positionMenuAt,
 } from './menu-overlay.ts'
+import { onlyWritesBlockIds } from './normalizer.ts'
 import { createContainer, nodes } from './schema.ts'
 
 // Notion の paste メニュー同様、↑↓で選んだ表現を doc に即時反映（ライブプレビュー）し、
 // Enter は「表示中の状態をそのまま確定」する。メニュー表示中の doc 変更は preview
-// 経由（set meta 同梱）で行い、それ以外の doc 変更は「そのまま確定」として閉じる。
+// 経由（set meta 同梱）で行い、それ以外の doc 変更は id を振るだけのものを除いて
+// 「そのまま確定」として閉じる。
 export type PasteMenuActiveState = {
   active: true
   /** 挿入 range の先頭。start より前は触らないので全遷移を通じて安定アンカー。 */
@@ -186,8 +188,9 @@ export function pasteMenuPlugin(): Plugin<PasteMenuState> {
         if (meta?.type === 'close') return { active: false }
         if (!value.active) return value
         if (meta?.type === 'set') return meta.state
-        // メニュー由来でない doc 変更（タイピング等）は「そのまま確定」として閉じる
-        if (tr.docChanged) return { active: false }
+        // メニュー由来でない doc 変更（タイピング等）は「そのまま確定」として閉じる。
+        // id を振るだけの変更は位置を動かさないので、start を mapping せずに開いたままにする
+        if (tr.docChanged && !onlyWritesBlockIds(tr)) return { active: false }
         return value
       },
     },

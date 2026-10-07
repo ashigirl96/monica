@@ -34,6 +34,12 @@ monica の `shared/block-editor` を `src/ui/editor/` に振る舞いを変え�
 - monica は変換を Backend に頼んでいたので、copy に備えて選択が変わるたびに 150ms 後に変換を先読みして cache し、paste は変換を待つ間の貼り先を plugin state で追っていた。手元で同期に呼べるので、どちらも持ち込まない。
 - Note Mention の表示名は、開いている Note の cache から解決し終えたものを `toMarkdown` に渡す（`notes/note-references.ts` の `noteName`）。copy の handler は同期で、解決を待てないため。まだ解決していない Note Mention と、削除した Note を指す Note Mention は `[[note-N]]` で書く。
 
+### paste の menu
+
+- URL の paste で出る link-menu（URL / Mention / Bookmark）と、block の paste で出る paste-menu（Paste / Paste and sync）は、menu の外の doc 変更を「今の表現のまま確定」とみなして閉じる。
+- normalizer が block に id を振るだけの transaction（step がすべて attr `id` の `AttrStep`）は、この doc 変更に数えない（`normalizer.ts` の `onlyWritesBlockIds`）。`EMPTY_DOC` から作った Note の最初の段落は id を持たず、貼ったのと同じ dispatch で normalizer が id を振る。数えると menu が出ず、OGP の fetch も始まらない（monica にあった不具合）。`AttrStep` は位置を動かさないので、menu が持つ位置は mapping せずに使える。
+- normalizer が同じ transaction で空の blockGroup を消したり折りたたみを開いたりしたときは、位置が動くので今どおり閉じる。
+
 ### node 型と plugin を減らせない理由
 
 - `create-editor.ts` の `docFromJSON` は、`Node.fromJSON` か `check()` に失敗した本文を空の doc にして開く。開いたまま 1 打鍵すると、autosave がその空の doc を保存する。node 型か mark が 1 つでも欠けたエディタは、それを含む保存済みの本文を消す。
@@ -68,7 +74,8 @@ monica の `shared/block-editor` を `src/ui/editor/` に振る舞いを変え�
 - `bun test` のままで、DOM の環境は入れない。`EditorState` だけで回し、`EditorView` は型キャストした最小のモックで代える。
 - monica のテスト 11 本と `test-fixtures.ts` を移してあり、回帰の網にする。
 - 保存済みの本文を開けることは、`src/body/fixtures/full-doc.json`（全 node 型を持つ）を `docFromJSON` に通し、block がすべて残ることで確かめる。
-- markdown の copy と paste は、copy の handler・`clipboardTextSerializer`・`handlePaste` を最小のモックの view で呼んで確かめる。block 選択の copy は text/html を `document` で組むので、そのテストの間だけ組めるだけの偽の `document` を置く。
+- markdown の copy と paste は、copy の handler・`clipboardTextSerializer`・`handlePaste` を最小のモックの view で呼んで確かめる。`handlePaste` は `test-fixtures.ts` の `paste` で呼ぶ。dispatch を `state.apply` で当てるので、state に登録した plugin の `appendTransaction` も同じ dispatch で走る。block 選択の copy は text/html を `document` で組むので、そのテストの間だけ組めるだけの偽の `document` を置く。
+- paste の menu が開いたままかを確かめる state には、menu の plugin と一緒に normalizer を登録する。登録しないと id を振る transaction が走らず、menu を閉じる経路を通らない。
 - `src/body/fixtures/unknown-nodes.json` はエディタのテストに使わない。server が知らない node を読み飛ばすことを確かめる fixture で、schema に無い node（`aiHint`・`chart`）と mark（`highlight`）を持つので、エディタでは monica と同じく空の doc になる。monica の本文に出てくる node と mark は、どれも schema にある。
 
 ## 画面
