@@ -47,7 +47,7 @@ export function setup() {
   const home = tempHome(onCleanup)
   const ptyd = startFakePtyd(home)
   onCleanup(() => ptyd.stop())
-  const notifications: { title: string; body: string }[] = []
+  const notifications: { title: string; body: string; terminalSessionId: string }[] = []
   const workbenchLedger = createWorkbenchLedger({
     db,
     home,
