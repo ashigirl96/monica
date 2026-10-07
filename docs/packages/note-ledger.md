@@ -194,7 +194,7 @@ monica の Rust（`note_markdown.rs`・`note_markdown_import.rs`）を TypeScrip
 
 monica の `to_markdown` は素の文字を escape せず、copy した markdown をプレーンテキストの app を経て貼り戻すと、素の `# Heading` が見出しに、`**literal**` が bold に、`[[note-2]]` が Note Mention になった。tania は往復で素の文字が変わらないよう、両方の向きを変えた。escape は `src/body/markdown-escape.ts` にあり、表の 2 行目の扱いだけは行をまたぐので `to-markdown.ts` の表の書き出しにある。
 
-- `toMarkdown` は、本文の素の文字（text、link と Link Mention と Bookmark の title、Note Mention の表示名）のうち、`fromMarkdown` がその位置で構文として読む文字だけを backslash で escape する。`snake_case`・`#hashtag`・`e.g.`・`1.5`・`a * b`・`~/.claude` には付けない。markdown を描かない貼り先（Slack や LLM の入力欄）では、escape した箇所にだけ backslash が見える。escape しない option は持たない。
+- `toMarkdown` は、本文の素の文字（text、link と Link Mention と Bookmark の title、Note Mention の表示名、知らない node と doc でない値の text）のうち、`fromMarkdown` がその位置で構文として読む文字だけを backslash で escape する。`snake_case`・`#hashtag`・`e.g.`・`1.5`・`a * b`・`~/.claude` には付けない。markdown を描かない貼り先（Slack や LLM の入力欄）では、escape した箇所にだけ backslash が見える。escape しない option は持たない。
 - inline で escape するのは、ASCII の記号の前の `\`、`` ` ``・`[`・`]`、`<u>` と `</u>` の `<`、強調の `*`・`~`・`_`。強調の記号でも、行に同じ記号がほかに無いもの（`2*3`）、両隣が空白か行の端の 1 文字（`a * b`）、英数字の後の `_` は、開きも閉じもしないので escape しない。
 - 行頭（block の本文の先頭と hardBreak の後の行）は、`fromMarkdown` の Parser にその行を読ませ、block を始めるなら行頭の素の記号を escape する（`\# Heading`・`1\. first`・`\> quote`）。表は続く行と合わせて決まるので、行を下から決める。表の delimiter の行に見える行（`--- | ---`）は先頭の記号を escape する。list の項目は空行を挟まずに並び、項目をまたいでも表になるので、印の後ろの 1 行目も見る。そのときは印も含めた行で見る（`- --- | ---` は delimiter の行ではない）。見出しと list の印の後ろ、quote と callout の行は inline として読まれるので、行頭の扱いはしない。
 - code の mark・code block・href は escape しない。code の mark は、中の最長の backtick の連なりより長い backtick で包み、中身が backtick で始まるか終わるとき、両端がどちらも空白のときは、両端に空白を 1 つずつ入れる。

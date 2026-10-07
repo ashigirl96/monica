@@ -18,7 +18,7 @@ const CELL: LineStart = { kind: 'cell' }
  */
 export function toMarkdown(doc: unknown, noteName: NoteName = () => null): string {
   if (!isNode(doc)) return ''
-  if (doc.type !== 'doc') return trim(allText(doc))
+  if (doc.type !== 'doc') return writeEscaped([plain(trim(allText(doc)))], BLOCK)
   const blocks: Block[] = []
   renderGroup(childrenOf(doc), blocks, noteName)
   return joinBlocks(blocks)

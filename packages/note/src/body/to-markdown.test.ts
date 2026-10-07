@@ -294,6 +294,7 @@ test('a value that is not a doc is written as its text', () => {
   expect(toMarkdown({ type: 'paragraph', content: [{ type: 'text', text: '  loose  ' }] })).toBe(
     'loose',
   )
+  expect(toMarkdown(block('paragraph', '# *not* a heading'))).toBe('\\# \\*not\\* a heading')
   expect(toMarkdown('not json at all')).toBe('')
   expect(toMarkdown(null)).toBe('')
 })
