@@ -10,6 +10,7 @@ import {
   type JumpModeActions,
   moveActiveRunspaceAtom,
   moveActiveTabAtom,
+  pickRailAtom,
   setUiZoomAtom,
   sidebarOpenAtom,
   toggleTabPinAtom,
@@ -65,6 +66,7 @@ export function useShortcuts() {
   const setUiZoom = useSetAtom(setUiZoomAtom)
   const toggleTabPin = useSetAtom(toggleTabPinAtom)
   const copyActiveAgentSessionId = useSetAtom(copyActiveAgentSessionIdAtom)
+  const pickRail = useSetAtom(pickRailAtom)
 
   useEffect(() => {
     if (!jumpActive) return
@@ -99,6 +101,13 @@ export function useShortcuts() {
       { meta: true, key: 'b', editable: true, action: () => setSidebarOpen((v) => !v) },
       // macOS の印刷ダイアログは preventDefault で抑えられる。
       { meta: true, shift: false, key: 'p', editable: true, action: () => void toggleTabPin() },
+      {
+        meta: true,
+        shift: false,
+        keys: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'],
+        editable: true,
+        action: (e) => (pickRail(Number(e.key)) ? undefined : false),
+      },
       { meta: true, keys: ['=', '+'], action: () => setUiZoom('in') },
       { meta: true, key: '-', action: () => setUiZoom('out') },
       { alt: true, code: 'KeyH', action: () => cycleTerminalTab('left') },
@@ -148,5 +157,6 @@ export function useShortcuts() {
     setUiZoom,
     toggleTabPin,
     copyActiveAgentSessionId,
+    pickRail,
   ])
 }
