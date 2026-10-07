@@ -326,7 +326,7 @@ test('a branch switched in a terminal that reports nothing reaches the row on a 
   expect(rowOf(sidebar, runspaceId)?.branch).toBe('feature/renamed')
 })
 
-test('keys cycle through the rows shown under the selected rail without going into another Repo, and picking a rail leaves the active Runspace alone', async () => {
+test('keys cycle through the rows shown under the selected rail without going into another Repo, and picking a rail leaves the active Runspace alone until a key moves into the rows shown there', async () => {
   const { client, store } = bench()
   const app = ghqCheckout('acme/app')
   const lib = ghqCheckout('acme/lib')
@@ -348,6 +348,7 @@ test('keys cycle through the rows shown under the selected rail without going in
 
   expect(store.get(activeRunspaceAtom)?.id).toBe(first.runspaceId)
   expect(store.get(sidebarAtom).selected.key).toBe('acme/lib')
+  expect(visited()).toBe(inLib.runspaceId)
 })
 
 test('a number brings up the Repo rail at that place from the top, with the Runspace and the Tab last active under it', async () => {

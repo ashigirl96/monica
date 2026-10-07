@@ -555,10 +555,9 @@ function cycle<T>(items: T[], current: T | null | undefined, step: 1 | -1): T | 
 
 // 別の Repo の札へは ⌘ の数字で移るので、巡るのは見えている行だけにする。
 export const cycleRunspaceAtom = atom(null, (get, set, direction: 'up' | 'down') => {
-  const ids = shownRunspaceIds(get(sidebarAtom))
-  if (ids.length <= 1) return
-  const next = cycle(ids, get(activeRunspaceAtom)?.id, direction === 'up' ? -1 : 1)
-  if (next) set(setActiveAtom, { runspaceId: next })
+  const active = get(activeRunspaceAtom)?.id
+  const next = cycle(shownRunspaceIds(get(sidebarAtom)), active, direction === 'up' ? -1 : 1)
+  if (next && next !== active) set(setActiveAtom, { runspaceId: next })
 })
 
 export const cycleTerminalTabAtom = atom(null, (get, set, direction: 'left' | 'right') => {
