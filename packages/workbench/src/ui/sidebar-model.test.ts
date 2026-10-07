@@ -342,6 +342,38 @@ test('the selected rail follows the active Runspace when keys cycle into another
   expect(store.get(sidebarAtom).selected.key).toBe('acme/app')
 })
 
+test('a Runspace made active before its Repo is known takes the selected rail along to that Repo once it is', async () => {
+  const { client, store } = bench()
+  const app = ghqCheckout('acme/app')
+  const lib = ghqCheckout('acme/lib')
+  await client.runspace.create({ cwd: app.checkout, ...size })
+  const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
+  await store.set(reloadAtom)
+  expect(store.get(sidebarAtom).railKeys[inLib.runspaceId]).toBe(OUTSIDE)
+
+  store.set(activateRunspaceAtom, inLib.runspaceId)
+
+  const sidebar = await untilListed(store, 'acme/lib', [inLib.runspaceId])
+  expect(sidebar.selected.key).toBe('acme/lib')
+})
+
+test('making a Pinned Runspace active leaves the rail that was shown', async () => {
+  const { client, store } = bench()
+  const app = ghqCheckout('acme/app')
+  const lib = ghqCheckout('acme/lib')
+  const pinned = await client.runspace.create({ cwd: lib.checkout, ...size })
+  await client.tab.pin({ id: pinned.tab.id })
+  await client.runspace.create({ cwd: lib.checkout, ...size })
+  const inApp = await client.runspace.create({ cwd: app.checkout, ...size })
+  await store.set(reloadAtom)
+  await untilListed(store, 'acme/app', [inApp.runspaceId])
+  store.set(activateRunspaceAtom, inApp.runspaceId)
+
+  store.set(activateRunspaceAtom, pinned.runspaceId)
+
+  expect(store.get(sidebarAtom).selected.key).toBe('acme/app')
+})
+
 test('moving a Runspace down past another of its Repo by key keeps the rails in their order', async () => {
   const { client, store } = bench()
   const app = ghqCheckout('acme/app')

@@ -82,6 +82,7 @@ export const sidebarOpenAtom = atomWithDefault((get) => get(savedUiStateAtom).si
 export const sidebarWidthAtom = atomWithDefault((get) => get(savedUiStateAtom).sidebarWidth)
 export const sidebarResizingAtom = atom(false)
 
+// null なら active な Runspace の札を出す。
 export const railChoiceAtom = atomWithDefault((get) => get(savedUiStateAtom).rail)
 export const collapsedSectionsAtom = atomWithDefault(
   (get): ReadonlySet<string> => new Set(get(savedUiStateAtom).collapsedSections),
