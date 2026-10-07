@@ -12,12 +12,25 @@ pub struct Notification {
     pub body: String,
 }
 
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct UnreadCount {
+    pub count: u32,
+}
+
+impl UnreadCount {
+    pub fn dock_count(&self) -> Option<i64> {
+        // tauri の macOS 実装は Some(0) を "0" の label にして出すので、None で消す。
+        (self.count > 0).then_some(i64::from(self.count))
+    }
+}
+
 /// Backend が stdout に書く Shell 宛ての JSON 行のうち、Shell が解釈するもの。
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Announcement {
     Endpoint(Endpoint),
     Notify(Notification),
+    Badge(UnreadCount),
 }
 
 pub fn parse(line: &str) -> Option<Announcement> {
@@ -51,9 +64,24 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_badge_line() {
+        assert_eq!(
+            parse(r#"{"type":"badge","count":3}"#),
+            Some(Announcement::Badge(UnreadCount { count: 3 })),
+        );
+    }
+
+    #[test]
+    fn a_badge_of_zero_clears_the_dock() {
+        assert_eq!(UnreadCount { count: 0 }.dock_count(), None);
+        assert_eq!(UnreadCount { count: 3 }.dock_count(), Some(3));
+    }
+
+    #[test]
     fn leaves_lines_it_does_not_relay_to_the_log() {
         assert_eq!(parse(r#"{"type":"notify","title":"tania#43"}"#), None);
         assert_eq!(parse(r#"{"type":"endpoint","port":"x"}"#), None);
+        assert_eq!(parse(r#"{"type":"badge","count":-1}"#), None);
         assert_eq!(parse("[backend] stray print"), None);
     }
 }

@@ -10,18 +10,28 @@ afterEach(() => {
   for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
 })
 
-async function endpointLine(stdout: ReadableStream<Uint8Array>) {
+type Announcement =
+  | { type: 'endpoint'; port: number; token: string }
+  | { type: 'notify'; title: string; body: string }
+  | { type: 'badge'; count: number }
+
+function announcements(stdout: ReadableStream<Uint8Array>) {
+  const reader = stdout.getReader()
   const decoder = new TextDecoder()
   let text = ''
-  for await (const chunk of stdout) {
-    text += decoder.decode(chunk, { stream: true })
-    const line = text
-      .split('\n')
-      .slice(0, -1)
-      .find((complete) => complete.includes('"endpoint"'))
-    if (line) return JSON.parse(line) as { port: number; token: string }
+  return async function next(): Promise<Announcement> {
+    for (;;) {
+      const newline = text.indexOf('\n')
+      if (newline >= 0) {
+        const line = text.slice(0, newline)
+        text = text.slice(newline + 1)
+        return JSON.parse(line) as Announcement
+      }
+      const { value, done } = await reader.read()
+      if (done) throw new Error('the Backend exited')
+      text += decoder.decode(value, { stream: true })
+    }
   }
-  throw new Error('the Backend exited without announcing its endpoint')
 }
 
 // main.ts は Backend の組み立てそのものなので、Shell と同じく process として起こす。
@@ -44,14 +54,25 @@ async function startBackend(notesPort: number) {
     stderr: 'inherit',
   })
   cleanups.push(() => backend.kill())
-  return endpointLine(backend.stdout)
+  const next = announcements(backend.stdout)
+  const beforeEndpoint: Announcement[] = []
+  for (;;) {
+    const line = await next()
+    if (line.type === 'endpoint')
+      return { port: line.port, token: line.token, beforeEndpoint, next }
+    beforeEndpoint.push(line)
+  }
 }
 
-function viaToken({ port, token }: { port: number; token: string }, path: string) {
+function viaToken(
+  { port, token }: { port: number; token: string },
+  path: string,
+  input: object = {},
+) {
   return fetch(`http://127.0.0.1:${port}/rpc/${path}`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ json: {} }),
+    body: JSON.stringify({ json: input }),
   })
 }
 
@@ -76,6 +97,27 @@ test('the token listener carries workbench, task and job but not note, and the n
   }
   expect((await viaNotes('note/essay/create')).status).toBe(200)
   expect((await viaToken(backend, 'note/essay/create')).status).toBe(404)
+}, 20_000)
+
+test('the Backend tells the Shell the unread count before its endpoint and again when a notified wait adds one', async () => {
+  const backend = await startBackend(freePort())
+  const created = await viaToken(backend, 'workbench/runspace/create', { rows: 24, cols: 80 })
+  const { json } = (await created.json()) as { json: { tab: { terminalSessionId: string } } }
+
+  await viaToken(backend, 'workbench/agentSession/recordHook', {
+    terminalSessionId: json.tab.terminalSessionId,
+    payload: {
+      session_id: 's-1',
+      transcript_path: '/t.jsonl',
+      cwd: '/work',
+      hook_event_name: 'Stop',
+    },
+  })
+
+  expect(backend.beforeEndpoint).toEqual([{ type: 'badge', count: 0 }])
+  let line = await backend.next()
+  while (line.type !== 'badge') line = await backend.next()
+  expect(line).toEqual({ type: 'badge', count: 1 })
 }, 20_000)
 
 test('the Backend hands the Job Ledger the system Jobs of task and note', async () => {

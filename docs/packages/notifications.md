@@ -1,6 +1,6 @@
-# 通知
+# 通知と Dock の数
 
-Agent Session がユーザー待ちに入ったときに macOS の通知を出す（ADR-0013、語は `GLOSSARY.md` の通知）。判定と本文は workbench が持ち、OS に渡すのは Shell が持つ。Task の無い Tab でも出すので、観測と同じく Workbench を持ち込む骨格の実装に含める。task が足すのは `nameAgentSession` だけ（`docs/packages/task-ledger.md` の「Run」）。
+Agent Session がユーザー待ちに入ったときに macOS の通知を出す（ADR-0013、語は `GLOSSARY.md` の通知）。判定と本文は workbench が持ち、OS に渡すのは Shell が持つ。Task の無い Tab でも出すので、観測と同じく Workbench を持ち込む骨格の実装に含める。task が足すのは `nameAgentSession` だけ（`docs/packages/task-ledger.md` の「Run」）。未読の数を Dock の icon に出すのも同じ経路で行う（下の「Dock の数」）。
 
 ## 出す遷移
 
@@ -36,6 +36,18 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 - apps/backend が `createWorkbenchLedger` に渡す `notify({ title, body })` は、stdout に `{"type":"notify","title","body"}` を 1 行書く。test では `notify` と `nameAgentSession` を差し替える。
 - `nameAgentSession` か `notify` が throw したら、stderr に 1 行出して捨てる。`recordHook` の記録と `changes` の合図は続ける。
 - Backend の stdout は Shell 宛ての JSON 行専用（ADR-0007）。Backend の log は stderr に出す。
-- Shell は stdout の行を `type` で振り分ける。`endpoint` は `backend-endpoint` event に、`notify` は tauri-plugin-notification の `app.notification().builder().title(..).body(..).show()` に渡す。解釈できない行は Shell の log に流して捨てる。
+- Shell は stdout の行を `type` で振り分ける。`endpoint` は `backend-endpoint` event に、`notify` は tauri-plugin-notification の `app.notification().builder().title(..).body(..).show()` に、`badge` は Dock の数（下の「Dock の数」）に渡す。解釈できない行は Shell の log に流して捨てる。
 - plugin の macOS 実装は NSUserNotificationCenter なので、取り下げ、クリックの受け取り、最前面でのバナーは無い。クリックすると tania が前面に出るだけ。
 - dev の通知は plugin が Terminal.app の名義で出す（`tauri::is_dev()` で切り替わる）。Terminal.app に通知の許可が要る。見た目は `bun run install-app` で入れた release で確かめる。
+
+## Dock の数
+
+Dock の tania の icon に未読の数を出し、0 なら何も出さない（未読は `docs/packages/workbench-ledger.md` の「未読」）。通知のバナーは数秒で消え、窓が隠れている間は webview の JS が止まる（ADR-0013）ので、通知と同じく Backend が数えて Shell が出す。
+
+- 数えるのは未読の Agent Session で、Tab にあるもの（Pinned の Tab も）も Detached の Terminal Session にあるものも数える。終了でない Agent Session は生きている Terminal Session に 1 つずつしか居ないので、Dock の数は sidebar の行の数の合計と同じになる。Tab を閉じた後も動き続ける claude の待ちにも、他の app から気づけるようにするため。Detached の Agent Session は表示できず見たことにならないので、Tab を閉じても数は減らず、開き直して表示するか、待ちが解けるか、Terminal Session が終わるまで残る。
+- Workbench Ledger は `start()` で、ptyd への接続を待たずに今の数を `badge(count)` に渡す。ptyd が起きない起動でも数を出すため。以降は自分の `changes` を購読して数え直し、前に渡した数と違うときだけ渡す。合図は procedure の output が変わる経路すべてで出る（`docs/packages.md` の contract の規約 5）ので、hook、`markSeen`、Tab の close と reattach、shell の終了、reconcile のどれで数が変わっても拾う。`stop()` で購読をやめる。
+- 数え直しは合図の後の microtask で行う。合図は他の domain の transaction の中（`removeRunspace` など）からも出るので、commit か rollback の後の行を数えるため。同じ transaction で出た合図は 1 回の数え直しにまとまる。
+- `badge` か数え直しが throw したら、stderr に 1 行出して捨てる。前に渡した数は変えないので、次の合図で渡し直す。
+- apps/backend が渡す `badge(count)` は、stdout に `{"type":"badge","count":<n>}` を 1 行書く。`start()` は endpoint の行より前に呼ぶので、起動時の数の行は endpoint の行より先に出る。
+- Shell は今の Backend の行だけを Dock に出し（`set_badge_count`）、終わった Backend の書き残しは捨てる。Rust から呼ぶので capability は要らない。0 は `None` で消す。tauri 2.12 の macOS 実装は `Some(0)` を `"0"` の label にして出すため。
+- Shell は Backend が終わったら数を消す。Backend の居ない間に古い数を残さないため。未読は Backend の再起動をまたいで残り、respawn で起き直した Backend が `start()` で今の数を書くので、数は戻る。
