@@ -6,7 +6,7 @@
 
 - **issue を作る**: `gh issue create --title "..." --body "..."`。複数行の本文は heredoc を使う。作るのは tackle が止まらずに merge の手前まで進められる issue で、`ready-for-agent` を付ける。本文が次の 3 つを満たしてから作る。別の issue に切り出した分も同じ。
   - 実装の分かれ道がすべて決まっている。残っていれば grilling で決める。PR の中で戻せる細部は「推奨で決めたこと」に書く。
-  - 実装の前提になる API や挙動を、コードか実機で確かめてある。
+  - 実装の前提になる API や挙動を、コードか実機で確かめてある。ライブラリの API は doc comment で止めず、使う platform の分岐まで実装を読む（tauri の `set_badge_count` は doc comment では `0` で消えるが、macOS の実装は「0」を出す）。
   - issue が使う語と ADR が main に入っている。
 - **issue を読む**: `gh issue view <number> --json body,comments,labels,assignees --jq '...'`。`--comments` は人間向けの整形出力用で `--json` と排他なので、`jq` で絞るときは `--json` の field に `comments` を含める。実装するために読むときは、`gh issue list --state open --search '"#<number>" in:body' --json number,title` で、本文がその issue を挙げる issue（Blocked by に挙げる後続など）も一覧する。範囲の外に出した作業は、すでに別の issue になっていることがある。open な PR がその issue を扱っていないかも `gh pr list --state open --search '"#<number>" in:body' --json number,title` で確かめる。
 - **issue を一覧する**: `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`。必要に応じて `--label` と `--state` で絞る。
